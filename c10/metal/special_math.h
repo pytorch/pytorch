@@ -305,8 +305,8 @@ float log_gamma(const T x) {
   }
 
   // Reflection formula
-  // Compute arg first to workaround Metal compiler bag of sorts on M4
-  // See https://github.com/pytorch/pytorch/pull/145740
+  // Compute arg first to workaround Metal compiler bgg of sorts on M4
+  // See https://github.com/pytorch/pytorch/pull/145740 for more details
   auto log_arg = abs_x * ::metal::abs(::metal::sinpi(abs_x));
   return LOG_PI - rc - ::metal::log(log_arg);
 }
