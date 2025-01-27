@@ -9,7 +9,11 @@ from torch._dynamo.utils import same
 from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import run_and_get_code
 from torch.testing import FileCheck
-from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
+from torch.testing._internal.inductor_utils import (
+    GPU_TYPE,
+    HAS_GPU,
+    requires_cuda_with_enough_memory,
+)
 
 
 # Make the helper files in test/ importable
@@ -118,10 +122,39 @@ class InplacePaddingTest(TestCase):
         x = torch.randn(2048, 2047, device=GPU_TYPE)
 
         ref = f(x)
-        act, (code,) = run_and_get_code(torch.compile(f), x)
+        from torch._inductor.codegen.cpp_wrapper_gpu import CppWrapperGpu
+
+        orig_generate_and_run_autotune_block = (
+            CppWrapperGpu.generate_and_run_autotune_block
+        )
+        compile_time_autotune_called = False
+
+        def mock_generate_and_run_autotune_block(wrapper):
+            nonlocal compile_time_autotune_called
+            compile_time_autotune_called = True
+            out = orig_generate_and_run_autotune_block(wrapper)
+            call_code = wrapper.kernel_autotune_calls.getvalue()
+            FileCheck().check(
+                "buf0 = generate_example_value((2048, 2047), (2048, 1), 'cuda:0', torch.float32, 0, (2048, 2048))"
+            ).run(call_code)
+            return out
+
+        with unittest.mock.patch.object(
+            CppWrapperGpu,
+            "generate_and_run_autotune_block",
+            mock_generate_and_run_autotune_block,
+        ):
+            act, (code,) = run_and_get_code(torch.compile(f), x)
+
+        # Buf0 should be over-allocated and then strided.
+        FileCheck().check_regex(
+            r"aoti_torch_as_strided\(buf0_handle, .*, &buf0_handle_restrided\)"
+        ).run(code)
 
         self.assertTrue(torch.allclose(ref, act, atol=1e-2, rtol=1e-2))
-        self.assertEqual(num_inplace_padding(), 0)
+
+        self.assertEqual(num_inplace_padding(), 1)
+        self.assertTrue(compile_time_autotune_called)
 
     def test_pad_too_large(self):
         def f(x, y):
@@ -176,11 +209,7 @@ class InplacePaddingTest(TestCase):
 
         self.assertEqual(num_inplace_padding(), 0)
 
-    @unittest.skipIf(
-        not torch.cuda.is_available()
-        or torch.cuda.get_device_properties().total_memory < 2e10,
-        "Only if the GPU has at least 20GB memory to be safe",
-    )
+    @requires_cuda_with_enough_memory(2e10)
     @inductor_config.patch(force_shape_pad=True)
     def test_linear_and_cel(self):
         # Use nan for torch.empty
