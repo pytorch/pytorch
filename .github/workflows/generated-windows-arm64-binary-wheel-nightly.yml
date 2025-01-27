@@ -79,50 +79,50 @@ jobs:
       - name: Bootstrap Git
         shell: cmd
         run: |
-          "${PYTORCH_ROOT}/.ci/pytorch/windows/arm64/bootstrap_git.bat"
+          "pytorch/.ci/pytorch/windows/arm64/bootstrap_git.bat"
       - name: Remove Pytorch folder
         shell: cmd
         run: |
-          rmdir /s /q "%PYTORCH_ROOT%"
+          rmdir /s /q "pytorch"
       - name: Git checkout PyTorch
         uses: actions/checkout@v4
         with:
           repository:  "iremyux/pytorch"
           ref: "nightly-for-win-arm64"
-          path: "%PYTORCH_ROOT%"
+          path: "pytorch"
           submodules: recursive      
       - name: Bootstrap Python
         shell: cmd
         run: |
-          "${PYTORCH_ROOT}/.ci/pytorch/windows/arm64/bootstrap_python.bat"
+          "pytorch/.ci/pytorch/windows/arm64/bootstrap_python.bat"
       - name: Bootstrap Build Tools
         shell: cmd
         run: |
-          "${PYTORCH_ROOT}/.ci/pytorch/windows/arm64/bootstrap_buildtools.bat"
+          "pytorch/.ci/pytorch/windows/arm64/bootstrap_buildtools.bat"
       - name: Bootstrap APL
         shell: cmd
         run: |
-          "${PYTORCH_ROOT}/.ci/pytorch/windows/arm64/bootstrap_apl.bat"
+          "pytorch/.ci/pytorch/windows/arm64/bootstrap_apl.bat"
       - name: Bootstrap Rust
         shell: cmd
         run: |
-          "${PYTORCH_ROOT}/.ci/pytorch/windows/arm64/bootstrap_rust.bat"
+          "pytorch/.ci/pytorch/windows/arm64/bootstrap_rust.bat"
       - name: Bootstrap sccache
         shell: cmd
         run: |
-          "${PYTORCH_ROOT}/.ci/pytorch/windows/arm64/bootstrap_sccache.bat"
+          "pytorch/.ci/pytorch/windows/arm64/bootstrap_sccache.bat"
       - name: Bootstrap Libuv
         shell: cmd
         run: |
-          "${PYTORCH_ROOT}/.ci/pytorch/windows/arm64/bootstrap_libuv.bat"
+          "pytorch/.ci/pytorch/windows/arm64/bootstrap_libuv.bat"
       - name: Populate binary env
         shell: bash
         run: |
-          "${PYTORCH_ROOT}/.circleci/scripts/binary_populate_env.sh"
+          "pytorch/.circleci/scripts/binary_populate_env.sh"
       - name: Build PyTorch binary
         shell: bash
         run: |
-          "${PYTORCH_ROOT}/.circleci/scripts/binary_windows_arm64_build.sh"
+          "pytorch/.circleci/scripts/binary_windows_arm64_build.sh"
       - uses: actions/upload-artifact@v4.4.0
         if: always()
         with:
@@ -166,46 +166,46 @@ jobs:
         with:
           repository:  "iremyux/pytorch"
           ref: "nightly-for-win-arm64"
-          path: "%PYTORCH_ROOT%"   
+          path: "pytorch"   
       - name: Bootstrap Git
         shell: cmd
         run: |
-          "${PYTORCH_ROOT}/.ci/pytorch/windows/arm64/bootstrap_git.bat"
+          "pytorch/.ci/pytorch/windows/arm64/bootstrap_git.bat"
       - name: Remove Pytorch folder
         shell: cmd
         run: |
-          rmdir /s /q "%PYTORCH_ROOT%"
+          rmdir /s /q "pytorch"
       - name: Git checkout PyTorch
         uses: actions/checkout@v4
         with:
           repository:  "iremyux/pytorch"
           ref: "nightly-for-win-arm64"
-          path: "%PYTORCH_ROOT%"
+          path: "pytorch"
           submodules: recursive      
       - name: Bootstrap APL
         shell: cmd
         run: |
-          "${PYTORCH_ROOT}/.ci/pytorch/windows/arm64/bootstrap_apl.bat"
+          "pytorch/.ci/pytorch/windows/arm64/bootstrap_apl.bat"
       - name: Bootstrap Python
         shell: cmd
         run: |
-          "${PYTORCH_ROOT}/.ci/pytorch/windows/arm64/bootstrap_python.bat"
+          "pytorch/.ci/pytorch/windows/arm64/bootstrap_python.bat"
       - name: Bootstrap Build Tools
         shell: cmd
         run: |
-          "${PYTORCH_ROOT}/.ci/pytorch/windows/arm64/bootstrap_buildtools.bat"
+          "pytorch/.ci/pytorch/windows/arm64/bootstrap_buildtools.bat"
       - name: Populate binary env
         shell: bash
         run: |
-          "${PYTORCH_ROOT}/.circleci/scripts/binary_populate_env.sh"
+          "pytorch/.circleci/scripts/binary_populate_env.sh"
       - name: Prepare environment - Bootstrap tests
         shell: bash
         run: |
-          "${PYTORCH_ROOT}/.circleci/scripts/bootstrat_tests.bat"
+          "pytorch/.circleci/scripts/bootstrat_tests.bat"
       - name: Test PyTorch binary
         shell: bash
         run: |
-          "${PYTORCH_ROOT}/.circleci/scripts/binary_windows_arm64_test.sh"
+          "pytorch/.circleci/scripts/binary_windows_arm64_test.sh"
   wheel-py3_12-cpu-upload:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
     permissions:
