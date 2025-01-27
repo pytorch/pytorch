@@ -276,4 +276,24 @@ TORCH_API void pack(
 // Whether pack is supported in the platform.
 TORCH_API bool could_pack(ScalarType dt_in);
 
+struct GemmHelper;
+
+TORCH_API GemmHelper* brgemm_create(
+    int64_t M,
+    int64_t N,
+    int64_t K,
+    int64_t ld_a,
+    int64_t ld_b,
+    int64_t ld_c,
+    const bool add_C,
+    ScalarType dt_a,
+    ScalarType dt_b,
+    ScalarType dt_c);
+
+TORCH_API void brgemm_execute(
+  GemmHelper* ghelper,
+  const at::Half* A,
+  const at::Half* B,
+  float* C);
+
 } // namespace at::native::cpublas

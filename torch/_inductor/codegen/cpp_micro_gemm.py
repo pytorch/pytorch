@@ -22,7 +22,7 @@ from ..utils import IndentedBuffer, parallel_num_threads
 from ..virtualized import V
 from .common import KernelTemplate
 from .cpp_template_kernel import CppTemplateKernel
-from .cpp_utils import DTYPE_TO_CPP, GemmBlocking, value_to_cpp
+from .cpp_utils import DTYPE_TO_ATEN, DTYPE_TO_CPP, GemmBlocking, value_to_cpp
 
 
 class LayoutType(Enum):
@@ -817,8 +817,13 @@ inline void {{kernel_name}}_amx_kernel_{{num_rows}}_{{num_columns}}(
 def check_brgemm_extra(config, m, n, k, alpha, num_threads):
     assert config.input_dtype == torch.half and config.output_dtype == torch.float
     vnni_size = 2
-    # use brgemm for Half when amx_fp16 is supported
-    return torch.cpu._is_amx_fp16_supported() and k % vnni_size == 0 and alpha == 1
+    # use brgemm for Half when amx_fp16 and oneDNN are supported
+    return (
+        torch.backends.mkldnn.is_available()
+        and torch.cpu._is_amx_fp16_supported()
+        and k % vnni_size == 0
+        and alpha == 1
+    )
 
 
 @register_micro_gemm(
@@ -839,10 +844,78 @@ class CppMicroBrgemm(CppMicroGemm):
     TEMPLATE_ENTRY = r"""
 #include <ATen/native/CPUBlas.h>
 {{declare_kernel}} {
-    at::native::cpublas::brgemm(
-      M, N, K,
-      lda, ldb, ldc,
-      accum,
+    // create brgemms in a list to avoid brgemm fetching
+    static struct brgemm_list {
+        brgemm_list () {
+            index = 0;
+            for (int i = 0; i < {{brgemm_len}}; i++) {
+                gemmhelpers[i] = nullptr;
+                Ms[i] = -1;
+                Ns[i] = -1;
+                Ks[i] = -1;
+                ldas[i] = -1;
+                ldbs[i] = -1;
+                ldcs[i] = -1;
+            }
+        }
+        at::native::cpublas::GemmHelper* gemmhelpers[{{brgemm_len}}];
+        int64_t Ms[{{brgemm_len}}];
+        int64_t Ns[{{brgemm_len}}];
+        int64_t Ks[{{brgemm_len}}];
+        int64_t ldas[{{brgemm_len}}];
+        int64_t ldbs[{{brgemm_len}}];
+        int64_t ldcs[{{brgemm_len}}];
+        int64_t index;
+    } accum_brgemms, brgemms;
+
+    at::native::cpublas::GemmHelper* brgemm = nullptr;
+    for (int i = 0; i < {{brgemm_len}}; i++) {
+        if constexpr (accum) {
+            if (accum_brgemms.Ms[i] == M && accum_brgemms.Ns[i] == N && accum_brgemms.Ks[i] == K) {
+                if (accum_brgemms.ldas[i] == lda && accum_brgemms.ldbs[i] == ldb && accum_brgemms.ldcs[i] == ldc) {
+                    brgemm = accum_brgemms.gemmhelpers[i];
+                    break;
+                }
+            }
+        } else {
+            if (brgemms.Ms[i] == M && brgemms.Ns[i] == N && brgemms.Ks[i] == K) {
+                if (brgemms.ldas[i] == lda && brgemms.ldbs[i] == ldb && brgemms.ldcs[i] == ldc) {
+                    brgemm = brgemms.gemmhelpers[i];
+                    break;
+                }
+            }
+        }
+    }
+    if (brgemm == nullptr) {
+        brgemm = at::native::cpublas::brgemm_create(M, N, K,
+                                                    lda, ldb, ldc,
+                                                    accum,
+                                                    {{aten_input_t}},
+                                                    {{aten_input2_t}},
+                                                    {{aten_output_t}});
+        if (accum && accum_brgemms.index < {{brgemm_len}}) {
+            accum_brgemms.gemmhelpers[accum_brgemms.index] = brgemm;
+            accum_brgemms.Ms[accum_brgemms.index] = M;
+            accum_brgemms.Ns[accum_brgemms.index] = N;
+            accum_brgemms.Ks[accum_brgemms.index] = K;
+            accum_brgemms.ldas[accum_brgemms.index] = lda;
+            accum_brgemms.ldbs[accum_brgemms.index] = ldb;
+            accum_brgemms.ldcs[accum_brgemms.index] = ldc;
+            accum_brgemms.index +=1;
+        } else if (brgemms.index < {{brgemm_len}}) {
+            brgemms.gemmhelpers[brgemms.index] = brgemm;
+            brgemms.Ms[brgemms.index] = M;
+            brgemms.Ns[brgemms.index] = N;
+            brgemms.Ks[brgemms.index] = K;
+            brgemms.ldas[brgemms.index] = lda;
+            brgemms.ldbs[brgemms.index] = ldb;
+            brgemms.ldcs[brgemms.index] = ldc;
+            brgemms.index +=1;
+        }
+    }
+
+    at::native::cpublas::brgemm_execute(
+      brgemm,
       A,
       B,
       C);
@@ -859,6 +932,15 @@ class CppMicroBrgemm(CppMicroGemm):
             "restrict_keyword": get_restrict_keyword(),
             **self.get_common_options(),
         }
+        # TODO: allow adjustment of brgemm_len 
+        options.update(
+            {
+                "aten_input_t": DTYPE_TO_ATEN[self.input_dtype],
+                "aten_input2_t": DTYPE_TO_ATEN[self.input2_dtype],
+                "aten_output_t": DTYPE_TO_ATEN[self.output_dtype],
+                "brgemm_len": 8,
+            }
+        )
         result = ""
         result += KernelTemplate._template_from_string(self.TEMPLATE_ENTRY).render(
             options

@@ -1005,7 +1005,28 @@ struct KernelCache  {
     return cache_kernels;
   }
 };
+#endif
 
+#if !defined(ONEDNN_UKERNEL_ENABLED)
+// Helper struct for brgemm_create
+struct GemmHelper {
+  GemmHelper(
+      int64_t M,
+      int64_t N,
+      int64_t K,
+      int64_t bs,
+      int64_t ld_a,
+      int64_t ld_b,
+      int64_t ld_c,
+      ScalarType dt_a,
+      ScalarType dt_b,
+      ScalarType dt_c,
+      const bool add_C) {
+    TORCH_CHECK(false,
+      "Brgemm is only supported on X64 when oneDNN ukernel is enabled");
+  }
+};
+#else
 // Helper struct for convenient brgemm configuration
 struct GemmHelper {
   GemmHelper(
@@ -1115,9 +1136,78 @@ struct Brgemm : public KernelCache <BrgemmKey, GemmHelper> {
         .execute(A, B, (*value).A_B_offsets, C, (*value).scratchpad.data());
   }
 
+  // Fetch/create GemmHelper object with batch size = 1
+  // Note: Separating Fetch/create from execution can save hash and fetching overhead
+  // and improve performance on small shapes.
+  static inline GemmHelper* create(
+      int64_t M,
+      int64_t N,
+      int64_t K,
+      int64_t ld_a,
+      int64_t ld_b,
+      int64_t ld_c,
+      const bool add_C,
+      ScalarType dt_a,
+      ScalarType dt_b,
+      ScalarType dt_c) {
+    auto&& key = BrgemmKey(
+        M,
+        N,
+        K,
+        int64_t(1),
+        ld_a,
+        ld_b,
+        ld_c,
+        dt_a,
+        dt_b,
+        dt_c,
+        add_C);
+    // Fetch/create GemmHelper object
+    auto&& value = fetch_or_create(key, [&]() {
+      auto&& v = std::make_shared<GemmHelper>(
+          M,
+          N,
+          K,
+          int64_t(1),
+          ld_a,
+          ld_b,
+          ld_c,
+          dt_a,
+          dt_b,
+          dt_c,
+          add_C);
+      (*v).brg.generate();
+      return std::move(v);
+    });
+    return value.get();
+  }
+
+  // Execute brgemm
+  template <typename scalar_t_a, typename scalar_t_b, typename scalar_t_c>
+  static inline void execute(
+    GemmHelper* ghelper,
+    const scalar_t_a* A,
+    const scalar_t_b* B,
+    scalar_t_c* C) {
+    if (get_current_ptr() != ghelper) {
+#if defined(ONEDNN_UKERNEL_1)
+      dnnl::ukernel::brgemm::release_hw_context();
+#endif
+      ((*ghelper).brg).set_hw_context();
+      get_current_ptr() = ghelper;
+    }
+    ((*ghelper).brg)
+        .execute(A, B, (*ghelper).A_B_offsets, C, (*ghelper).scratchpad.data());
+  }
+
   static inline std::shared_ptr<GemmHelper>& get_current() {
     static thread_local std::shared_ptr<GemmHelper> current;
     return current;
+  }
+
+  static inline GemmHelper* & get_current_ptr() {
+    static thread_local GemmHelper * current_ptr=nullptr;
+    return current_ptr;
   }
 
   static inline bool device_check(ScalarType dtype) {
@@ -1346,6 +1436,7 @@ void brgemm_release(bool is_vnni) {
   if (is_vnni) {
     dnnl::ukernel::brgemm::release_hw_context();
     Brgemm::get_current() = nullptr;
+    Brgemm::get_current_ptr() = nullptr;
   }
 #endif
 }
@@ -1372,6 +1463,43 @@ bool could_pack(ScalarType dt_in) {
 #else
   return false;
 #endif
+}
+
+GemmHelper* brgemm_create(
+    int64_t M,
+    int64_t N,
+    int64_t K,
+    int64_t ld_a,
+    int64_t ld_b,
+    int64_t ld_c,
+    const bool add_C,
+    ScalarType dt_a,
+    ScalarType dt_b,
+    ScalarType dt_c) {
+#if defined(ONEDNN_UKERNEL_ENABLED)
+  return Brgemm::create(
+    M, N, K, ld_a, ld_b, ld_c, add_C, dt_a, dt_b, dt_c);
+#endif
+  TORCH_CHECK(false,
+    "Brgemm is only supported on X64 when oneDNN ukernel is enabled");
+  GemmHelper* ghelper = nullptr;
+  return ghelper;
+}
+
+void brgemm_execute(
+  GemmHelper* ghelper,
+  const at::Half* A,
+  const at::Half* B,
+  float* C) {
+#if defined(ONEDNN_UKERNEL_ENABLED)
+  if (Brgemm::device_check(ScalarType::Half)) {
+    Brgemm::execute<at::Half, at::Half, float>(
+      ghelper, A, B, C);
+    return;
+  }
+#endif
+  TORCH_CHECK(false,
+    "Half Brgemm VNNI format is only supported on X64 when oneDNN ukernel is enabled and `amx_fp16` is supported");
 }
 
 } // namespace at::native::cpublas
