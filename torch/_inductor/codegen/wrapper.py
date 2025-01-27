@@ -42,6 +42,7 @@ from ..utils import (
     LineContext,
     sympy_product,
     sympy_str,
+    triton_version_uses_attrs_dict,
 )
 from ..virtualized import V
 from .common import (
@@ -1077,7 +1078,7 @@ class PythonWrapperCodegen(CodeGen):
             arg.get_dtype() if isinstance(arg, IRNode) else type(arg)
             for arg in raw_args
         ]
-        # Because generate_kernel_call can be overriden by a subclass, explictly call
+        # Because generate_kernel_call can be overriden by a subclass, explicitly call
         # PythonWrapperCodegen.generate_kernel_call here
         PythonWrapperCodegen.generate_kernel_call(
             self,
@@ -1577,63 +1578,85 @@ class PythonWrapperCodegen(CodeGen):
 
         original_name = kernel.__name__
 
-        from .common import KernelArgType, SizeArg, TensorArg, TMADescriptorArg
+        from .common import (
+            ConstexprArg,
+            KernelArgType,
+            SizeArg,
+            TensorArg,
+            TMADescriptorArg,
+        )
 
         signature: list[KernelArgType] = []
         constants: dict[str, Any] = {}
         non_constant_indices = []
         equal_to_1_args: list[str] = []
+
+        def add_to_signature(idx, arg):
+            signature.append(arg)
+            non_constant_indices.append(idx)
+
         for idx, key in enumerate(kernel.arg_names):
+            if idx in kernel.constexprs:
+                if key in kwargs:
+                    constants[key] = kwargs[key]
+                if triton_version_uses_attrs_dict():
+                    add_to_signature(idx, ConstexprArg(name=key))
+                continue
+
             if key not in kwargs:
                 continue
+
             arg = kwargs[key]
-            if idx in kernel.constexprs:
-                constants[key] = arg
-            elif kwargs[key] is None:
+
+            if kwargs[key] is None:
                 constants[key] = None
             else:
-                non_constant_indices.append(idx)
                 if isinstance(arg, ir.TMADescriptor):
-                    signature.append(
+                    add_to_signature(
+                        idx,
                         TMADescriptorArg(
                             name=key,
-                        )
+                        ),
                     )
                 elif isinstance(arg, ir.Buffer):
-                    signature.append(
+                    add_to_signature(
+                        idx,
                         TensorArg(
                             name=key,
                             buffer=arg.get_name(),
                             dtype=arg.get_dtype(),
-                        )
+                        ),
                     )
                 elif isinstance(arg, ir.ReinterpretView):
                     # for ReinterpretView we use the underlying
                     # buffer name and note the (possibly non-zero)
                     # offset relative to the underlying buffer
-                    signature.append(
+                    add_to_signature(
+                        idx,
                         TensorArg(
                             name=key,
                             buffer=arg.data.get_name(),
                             dtype=arg.get_dtype(),
                             offset=arg.layout.offset,
-                        )
+                        ),
                     )
                 else:
-                    signature.append(SizeArg(key, arg))
+                    add_to_signature(idx, SizeArg(key, arg))
                     if isinstance(
                         arg, (int, sympy.Integer)
                     ) and V.graph.sizevars.statically_known_equals(
                         arg, 1  # type: ignore[arg-type]
                     ):
                         equal_to_1_args.append(key)
+
+        triton_signature = signature_to_meta(
+            signature,
+            size_dtype=None,  # try to infer based on symints
+            indices=non_constant_indices,
+            argdefs=kernel.arg_names,
+        )
         triton_meta: dict[str, Any] = {
-            "signature": signature_to_meta(
-                signature,
-                size_dtype=None,  # try to infer based on symints
-                indices=non_constant_indices,
-                argdefs=kernel.arg_names,
-            ),
+            "signature": triton_signature,
             "device": DeviceProperties.create(V.graph.get_current_device_or_throw()),
             # Triton compiler includes equal_to_1 args into constants even
             # when they are not constexpr. otherwise there may be a segfault
@@ -1886,6 +1909,13 @@ class PythonWrapperCodegen(CodeGen):
                 )
                 for e in buf.get_size()
             )
+            allocation_size = tuple(
+                V.graph.sizevars.atomically_apply_size_hint(
+                    e,
+                    fallback=config.unbacked_symint_fallback,
+                )
+                for e in V.graph.get_allocation_size(buf)
+            )
             stride = tuple(
                 V.graph.sizevars.atomically_apply_size_hint(
                     e,
@@ -1899,7 +1929,7 @@ class PythonWrapperCodegen(CodeGen):
                 buf.get_layout().offset,
                 fallback=config.unbacked_symint_fallback,
             )
-            value = f"generate_example_value({size}, {stride}, '{device}', {dtype}, {offset})"
+            value = f"generate_example_value({size}, {stride}, '{device}', {dtype}, {offset}, {allocation_size})"
             self.kernel_autotune_calls.writeline(f"{buf_name} = {value}")
 
             if isinstance(raw_arg, ir.TMADescriptor):
@@ -2346,7 +2376,7 @@ class PythonWrapperCodegen(CodeGen):
 
     def codegen_subgraph_prefix(self, subgraph, outer_inputs, outer_outputs):
         # All inputs of hops must be explicitly passed in.
-        # Free tensors and basic symbols should have been explictily lifted as inputs in dynamo.
+        # Free tensors and basic symbols should have been explicitly lifted as inputs in dynamo.
         assert len(outer_inputs) == len(
             subgraph.graph.graph_input_names
         ), f"graph_input_names:{subgraph.graph.graph_input_names}, outer_inputs: {outer_inputs}"
