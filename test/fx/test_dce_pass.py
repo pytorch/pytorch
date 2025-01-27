@@ -217,7 +217,7 @@ class TestDCE(TestCase):
         with torch.inference_mode():
             eager_out = model(x)
             out = dce_mod(dce_x)
-        torch.testing.assert_close(eager_out, out, atol=1e-5, rtol=1e-5)
+        self.assertEqual(eager_out, out, atol=1e-5, rtol=1e-5)
 
     def test_impure_nodes_args(self):
         """
