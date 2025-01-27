@@ -1143,10 +1143,11 @@ class InplacedBuffer(NamedTuple):
 @dataclasses.dataclass
 class ArgName:
     name: str
-    suffix: str = ""  # used to attach a " : tl.constexpr" in the argument list
+    # is_constexpr=True is used to attach a " : tl.constexpr" into the argument list
+    is_constexpr: bool = False
 
     def full_name(self):
-        return f"{self.name}{self.suffix}"
+        return f"{self.name}{' : tl.constexpr' if self.is_constexpr else ''}"
 
 
 class KernelArgs:
@@ -1355,7 +1356,7 @@ class KernelArgs:
 
     def python_argdefs(
         self,
-    ) -> tuple[list[ArgName], list[str], list[KernelArgType], list[torch.dtype],]:
+    ) -> tuple[list[ArgName], list[str], list[KernelArgType], list[torch.dtype]]:
         arg_defs: list[ArgName] = []
         call_args: list[str] = []
         arg_types: list[torch.dtype] = []

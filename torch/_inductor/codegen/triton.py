@@ -3368,7 +3368,7 @@ class TritonKernel(SIMDKernel):
             # new versions (but not old versions) of Triton need constexprs included in the signature
             if triton_version_uses_attrs_dict():
                 signature.append(ConstexprArg(arg_name))
-            argdefs.append(ArgName(arg_name, suffix=" : tl.constexpr"))
+            argdefs.append(ArgName(arg_name, is_constexpr=True))
 
         for tree in self.range_trees:
             if tree.is_reduction and self.persistent_reduction:
