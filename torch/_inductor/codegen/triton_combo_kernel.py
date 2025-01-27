@@ -837,9 +837,7 @@ class ComboKernel(Kernel):
         argdefs = self.add_numel_to_args(argdefs, signature)
         block_args = self.get_block_args()
         if self.enable_autotune:
-            argdefs.extend(
-                [ArgName(x.name, suffix=" : tl.constexpr") for x in block_args]
-            )
+            argdefs.extend([ArgName(x.name, is_constexpr=True) for x in block_args])
             if triton_version_uses_attrs_dict():
                 signature.extend(block_args)
 
