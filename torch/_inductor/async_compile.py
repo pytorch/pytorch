@@ -11,7 +11,7 @@ from concurrent.futures import Future, ProcessPoolExecutor, ThreadPoolExecutor
 from concurrent.futures.process import BrokenProcessPool
 from functools import partial
 from time import time
-from typing import Any, Callable, Dict, List, Optional, TYPE_CHECKING
+from typing import Any, Callable, Optional, TYPE_CHECKING
 
 import torch
 from torch._dynamo.device_interface import get_registered_device_interfaces
@@ -250,7 +250,7 @@ class AsyncCompile:
             get_result = CppCodeCache.load_async(source_code, submit_fn=self.submit)
             return LambdaFuture(lambda: get_result().kernel)
 
-    def cpp_pybinding(self, argtypes: List[str], source_code: str):
+    def cpp_pybinding(self, argtypes: list[str], source_code: str):
         kernel_code_log.info("CPP+Bindings Kernel:\n%s", source_code)
         if get_compile_threads() <= 1:
             return CppPythonBindingsCodeCache.load_pybinding(argtypes, source_code)
@@ -299,7 +299,7 @@ class AsyncCompile:
             )
             return LambdaFuture(get_result)
 
-    def wait(self, scope: Dict[str, Any]) -> None:
+    def wait(self, scope: dict[str, Any]) -> None:
         with dynamo_timed(
             "async_compile.wait",
             log_pt2_compile_event=True,

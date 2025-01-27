@@ -28,8 +28,8 @@ log = logging.getLogger(__name__)
 
 def compile(
     gm: torch.fx.GraphModule,
-    example_inputs: List[InputType],
-    options: Optional[Dict[str, Any]] = None,
+    example_inputs: list[InputType],
+    options: Optional[dict[str, Any]] = None,
 ):
     """
     Compile a given FX graph with TorchInductor.  This allows compiling
@@ -54,7 +54,7 @@ def aoti_compile_and_package(
     _deprecated_unused_kwargs=None,
     *,
     package_path: Optional[Union[str, io.BytesIO]] = None,
-    inductor_configs: Optional[Dict[str, Any]] = None,
+    inductor_configs: Optional[dict[str, Any]] = None,
 ) -> str:
     """
     Compiles the exported program with AOTInductor, and packages it into a .pt2
@@ -131,18 +131,31 @@ def _aoti_compile_and_package_inner(
     gm: torch.nn.Module,
     # flat_example_inputs: List[Any],
     args: tuple[Any],
-    kwargs: Optional[Dict[str, Any]] = None,
+    kwargs: Optional[dict[str, Any]] = None,
     *,
     load_and_run: bool = False,
+    check_accuracy: Optional[str] = None,
     package_path: Optional[Union[str, io.BytesIO]] = None,
-    inductor_configs: Optional[Dict[str, Any]] = None,
+    inductor_configs: Optional[dict[str, Any]] = None,
 ):
     """
     See docstring for aoti_compile_and_package.
 
     If `load_and_run` is True, this function will load the compiled model and run it.
     This is for the minifier to check the correctness of the compiled model.
+
+    If `check_accuracy` is set, this function will check the accuracy of the compiled
+    model against gm. kwargs must be None if check_accuracy is set.
+    "strict_accuracy" means "we will minify any time we see anything that
+     diverges", whereas "accuracy" is more conservative, and will only minify if there
+     is a meaningful fp64 divergence
     """
+
+    if check_accuracy:
+        assert (
+            kwargs is None or len(kwargs) == 0
+        ), "when checking for accuracy, the inputs must have been flattened and kwargs is None"
+
     from .package import package_aoti
 
     assert isinstance(gm, torch.fx.GraphModule)
@@ -169,9 +182,28 @@ def _aoti_compile_and_package_inner(
     res = package_aoti(package_path, aoti_files)
     assert res == package_path
 
-    if load_and_run:
+    if load_and_run or check_accuracy:
         compiled_model = aoti_load_package(package_path)
-        compiled_model(*args, **kwargs)
+        if check_accuracy:
+            from torch._dynamo.debug_utils import AccuracyError, same_two_models
+
+            # This might look inverted but it's not.  strict_accuracy means "we will
+            # minify any time we see anything that diverges", whereas accuracy is more
+            # conservative, and will only minify if there is a meaningful fp64
+            # divergence
+            not_strict_accuracy = check_accuracy == "accuracy"
+            if not same_two_models(
+                gm,
+                compiled_model,
+                args,
+                only_fwd=True,
+                require_fp64=not_strict_accuracy,
+                ignore_non_fp=not_strict_accuracy,
+            ):
+                raise AccuracyError("Bad accuracy detected")
+        else:
+            compiled_model(*args, **kwargs)
+
     return package_path
 
 
@@ -199,10 +231,10 @@ def aoti_load_package(path: Union[str, io.BytesIO]) -> Any:  # type: ignore[type
 def aot_compile(
     gm: torch.fx.GraphModule,
     args: tuple[Any],
-    kwargs: Optional[Dict[str, Any]] = None,
+    kwargs: Optional[dict[str, Any]] = None,
     *,
-    options: Optional[Dict[str, Any]] = None,
-) -> Union[str, List[str]]:
+    options: Optional[dict[str, Any]] = None,
+) -> Union[str, list[str]]:
     """
     Ahead-of-time compile a given FX graph with TorchInductor into a shared library.
 
@@ -232,7 +264,7 @@ def aot_compile(
 
 def list_mode_options(
     mode: Optional[str] = None, dynamic: Optional[bool] = None
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     r"""Returns a dictionary describing the optimizations that each of the available
     modes passed to `torch.compile()` performs.
 
@@ -245,7 +277,7 @@ def list_mode_options(
         >>> torch._inductor.list_mode_options()
     """
 
-    mode_options: Dict[str, Dict[str, bool]] = {
+    mode_options: dict[str, dict[str, bool]] = {
         "default": {},
         # enable cudagraphs
         "reduce-overhead": {
@@ -264,10 +296,15 @@ def list_mode_options(
             "coordinate_descent_tuning": True,
         },
     }
-    return mode_options[mode] if mode else mode_options  # type: ignore[return-value]
+    try:
+        return mode_options[mode] if mode else mode_options
+    except KeyError as e:
+        raise RuntimeError(
+            f"Unrecognized mode={mode}, should be one of: {', '.join(mode_options.keys())}"
+        ) from e
 
 
-def list_options() -> List[str]:
+def list_options() -> list[str]:
     r"""Returns a dictionary describing the optimizations and debug configurations
     that are available to `torch.compile()`.
 
@@ -280,7 +317,7 @@ def list_options() -> List[str]:
 
     from torch._inductor import config
 
-    current_config: Dict[str, Any] = config.get_config_copy()
+    current_config: dict[str, Any] = config.get_config_copy()
 
     return list(current_config.keys())
 

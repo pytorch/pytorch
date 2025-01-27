@@ -223,6 +223,10 @@ AOTI_TORCH_SCALAR_TO_TENSOR_IMPL(int32, int32_t, Int)
 AOTI_TORCH_SCALAR_TO_TENSOR_IMPL(int64, int64_t, Long)
 AOTI_TORCH_SCALAR_TO_TENSOR_IMPL(bool, bool, Bool)
 AOTI_TORCH_SCALAR_TO_TENSOR_IMPL(complex64, c10::complex<float>, ComplexFloat)
+AOTI_TORCH_SCALAR_TO_TENSOR_IMPL(
+    complex128,
+    c10::complex<double>,
+    ComplexDouble)
 #undef AOTI_TORCH_SCALAR_TO_TENSOR_IMPL
 
 bool aoti_torch_grad_mode_is_enabled() {
@@ -792,6 +796,21 @@ AOTITorchError aoti_torch_clone(AtenTensorHandle self, AtenTensorHandle* ret) {
   AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
     at::Tensor* self_tensor = tensor_handle_to_tensor_pointer(self);
     *ret = new_tensor_handle(self_tensor->clone());
+  });
+}
+
+AOTITorchError aoti_torch_as_strided(
+    AtenTensorHandle self,
+    const int64_t* sizes_ptr,
+    const int64_t* strides_ptr,
+    AtenTensorHandle* ret) {
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+    at::Tensor* self_tensor = tensor_handle_to_tensor_pointer(self);
+    int64_t ndim = self_tensor->dim();
+    c10::IntArrayRef sizes(sizes_ptr, ndim);
+    c10::IntArrayRef strides(strides_ptr, ndim);
+    at::Tensor ret_tensor = self_tensor->as_strided(sizes, strides);
+    *ret = new_tensor_handle(std::move(ret_tensor));
   });
 }
 

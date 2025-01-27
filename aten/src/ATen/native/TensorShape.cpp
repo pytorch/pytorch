@@ -24,6 +24,7 @@
 #include <ATen/native/cpu/SerialStackImpl.h>
 #include <ATen/native/cpu/StackKernel.h>
 #include <ATen/quantized/QTensorImpl.h>
+#include <c10/core/GradMode.h>
 #include <c10/util/Exception.h>
 #include <c10/util/SmallVector.h>
 #include <c10/util/accumulate.h>
@@ -4891,56 +4892,67 @@ void split_copy_Tensor_out(
   }
 }
 
+namespace {
+
+void copy_tensor_array_to_out(
+    const char* name,
+    const std::vector<Tensor>& array,
+    at::TensorList out) {
+  TORCH_CHECK(
+      out.size() == array.size(),
+      name,
+      " expected an out= argument of size ",
+      array.size(),
+      ", got size ",
+      out.size());
+  for (const auto i : c10::irange(out.size())) {
+    if (resize_output_check(out[i], array[i].sizes())) {
+      out[i].resize_(array[i].sizes());
+    }
+    TORCH_CHECK(
+        out[i].dtype() == array[i].dtype(),
+        "Expected out tensor to have dtype ",
+        array[i].dtype(),
+        ", but got ",
+        out[i].dtype(),
+        " instead");
+    TORCH_CHECK(
+        out[i].device() == array[i].device(),
+        "Expected out tensor to have device ",
+        array[i].device(),
+        ", but got ",
+        out[i].device(),
+        " instead");
+    out[i].copy_(array[i]);
+  }
+}
+
+} // namespace
+
 void split_with_sizes_copy_out(
     const at::Tensor& self,
     at::IntArrayRef split_sizes,
     int64_t dim,
     at::TensorList out) {
-  auto tmp = self.split_with_sizes(split_sizes, dim);
-
-  TORCH_CHECK(
-      out.size() == tmp.size(),
-      "split_with_sizes_copy_out() expected an out= argument of size ",
-      tmp.size(),
-      ", got size ",
-      out.size());
-  for (const auto i : c10::irange(out.size())) {
-    if (resize_output_check(out[i], tmp[i].sizes())) {
-      out[i].resize_(tmp[i].sizes());
-    }
-    TORCH_CHECK(
-        out[i].dtype() == tmp[i].dtype(),
-        "Expected out tensor to have dtype ",
-        tmp[i].dtype(),
-        ", but got ",
-        out[i].dtype(),
-        " instead");
-    TORCH_CHECK(
-        out[i].device() == tmp[i].device(),
-        "Expected out tensor to have device ",
-        tmp[i].device(),
-        ", but got ",
-        out[i].device(),
-        " instead");
-    out[i].copy_(tmp[i]);
-  }
+  auto array = self.split_with_sizes(split_sizes, dim);
+  copy_tensor_array_to_out("split_with_sizes_copy_out", array, out);
 }
 
 void unbind_copy_int_out(
     const at::Tensor& self,
     int64_t dim,
     at::TensorList out) {
-  auto tmp = self.unbind(dim);
-
-  TORCH_CHECK(
-      out.size() == tmp.size(),
-      "unbind_copy_int_out() expected an out= argument of size ",
-      tmp.size(),
-      ", got size ",
-      out.size());
-  for (const auto i : c10::irange(out.size())) {
-    out[i].copy_(tmp[i]);
+  if (at::GradMode::is_enabled()) {
+    for (const auto i : c10::irange(out.size())) {
+      TORCH_CHECK(
+          !out[i].requires_grad(),
+          "unbind_copy(): functions with out=... arguments don't support automatic differentiation, "
+          "but one of the arguments requires grad.");
+    }
   }
+
+  auto array = self.unbind(dim);
+  copy_tensor_array_to_out("unbind_copy_int_out", array, out);
 }
 
 int64_t sparse_dim_default(const Tensor& self) {

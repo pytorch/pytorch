@@ -5,7 +5,7 @@ import inspect
 import logging
 import math
 import re
-from typing import Dict, List, TYPE_CHECKING
+from typing import TYPE_CHECKING
 
 import torch._C
 import torch._refs
@@ -242,8 +242,8 @@ class TorchCtxManagerClassVariable(BaseTorchVariable):
     def call_function(
         self,
         tx: "InstructionTranslator",
-        args: "List[VariableTracker]",
-        kwargs: "Dict[str, VariableTracker]",
+        args: "list[VariableTracker]",
+        kwargs: "dict[str, VariableTracker]",
     ) -> "VariableTracker":
         from . import (
             DisabledSavedTensorsHooksVariable,
@@ -654,7 +654,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
 
         @register(torch._foreach_lerp_)
         def handle_inplace_foreach_lerp_scalar(
-            self, tx: "InstructionTranslator", *args, **kwargs
+            _, tx: "InstructionTranslator", *args, **kwargs
         ):
             if len(args) == 3 and not isinstance(args[2], ListVariable) and not kwargs:
                 return tx.inline_user_function_return(
@@ -664,9 +664,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                 )
 
         @register(torch._foreach_pow)
-        def handle_foreach_pow_scalar(
-            self, tx: "InstructionTranslator", *args, **kwargs
-        ):
+        def handle_foreach_pow_scalar(_, tx: "InstructionTranslator", *args, **kwargs):
             # In eager it's more performant to call item() from within the C op implementation
             # in compile, it's more performant to not graph break.
             if len(args) == 2 and isinstance(args[0], TensorVariable) and not kwargs:
@@ -931,8 +929,8 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
     def call_function(
         self,
         tx: "InstructionTranslator",
-        args: "List[VariableTracker]",
-        kwargs: "Dict[str, VariableTracker]",
+        args: "list[VariableTracker]",
+        kwargs: "dict[str, VariableTracker]",
     ) -> "VariableTracker":
         from . import ConstantVariable, SymNodeVariable, TensorVariable
         from .builder import wrap_fx_proxy
@@ -1263,8 +1261,8 @@ class DispatchKeySetVariable(BaseTorchVariable):
         self,
         tx,
         name,
-        args: "List[VariableTracker]",
-        kwargs: "Dict[str, VariableTracker]",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
     ) -> "VariableTracker":
         if self.is_constant_fold_method(name) and check_unspec_or_constant_args(
             args, kwargs
@@ -1293,8 +1291,8 @@ class FuncTorchInterpreterVariable(BaseTorchVariable):
         self,
         tx,
         name,
-        args: "List[VariableTracker]",
-        kwargs: "Dict[str, VariableTracker]",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
     ) -> "VariableTracker":
         if name == "key":
             return variables.EnumVariable(self.value.key())
