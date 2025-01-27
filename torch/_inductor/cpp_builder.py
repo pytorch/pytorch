@@ -733,6 +733,7 @@ def _setup_standard_sys_libs(
         include_dirs.append(build_paths.sleef_include)
         include_dirs.append(build_paths.openmp_include)
         include_dirs.append(build_paths.python_include)
+        include_dirs.append(build_paths.pybind_include)
         include_dirs.append(build_paths.cc_include)
         include_dirs.append(build_paths.libgcc_include)
         include_dirs.append(build_paths.libgcc_arch_include)
@@ -779,16 +780,9 @@ def _get_build_args_of_chosen_isa(vec_isa: VecISA) -> tuple[list[str], list[str]
 def _get_torch_related_args(
     include_pytorch: bool, aot_mode: bool
 ) -> tuple[list[str], list[str], list[str]]:
-    from torch.utils.cpp_extension import _TORCH_PATH, TORCH_LIB_PATH
+    from torch.utils.cpp_extension import include_paths, TORCH_LIB_PATH
 
-    include_dirs = [
-        os.path.join(_TORCH_PATH, "include"),
-        os.path.join(_TORCH_PATH, "include", "torch", "csrc", "api", "include"),
-        # Some internal (old) Torch headers don't properly prefix their includes,
-        # so we need to pass -Itorch/lib/include/TH as well.
-        os.path.join(_TORCH_PATH, "include", "TH"),
-        os.path.join(_TORCH_PATH, "include", "THC"),
-    ]
+    include_dirs = include_paths()
     libraries_dirs = [TORCH_LIB_PATH]
     libraries = []
     if sys.platform != "darwin" and not config.is_fbcode():
@@ -796,7 +790,7 @@ def _get_torch_related_args(
         if not aot_mode:
             libraries.append("torch_python")
 
-    if _IS_WINDOWS and platform.machine().lower() != "arm64":
+    if _IS_WINDOWS:
         libraries.append("sleef")
 
     return include_dirs, libraries_dirs, libraries

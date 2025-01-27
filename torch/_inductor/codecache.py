@@ -38,6 +38,7 @@ from typing import (
     cast,
     NoReturn,
     Optional,
+    Tuple,
     TYPE_CHECKING,
     TypeVar,
     Union,
@@ -482,7 +483,6 @@ class FxGraphCachePickler(pickle.Pickler):
     def __init__(
         self,
         gm: torch.fx.GraphModule,
-        include_non_inlined: bool = True,
         has_user_defined_triton_kernels: bool = False,
     ) -> None:
         """
@@ -494,13 +494,20 @@ class FxGraphCachePickler(pickle.Pickler):
         self._stream = io.BytesIO()
         super().__init__(self._stream)
 
-        self.include_non_inlined = include_non_inlined
+        # To support caching when the graph has frozen params, we ignore the tensor values of
+        # the _non-inlined_ frozen constants.
+        self._frozen_params = OrderedSet(
+            [getattr(gm, attr) for attr in dir(gm) if attr.startswith("_frozen_param")]
+            if has_frozen_params(gm)
+            else []
+        )
 
         self.dispatch_table = copyreg.dispatch_table.copy()
         self.dispatch_table.update(
             {
                 FakeTensor: functools.partial(self._reduce_fake_tensor),
                 torch.Tensor: functools.partial(self._reduce_tensor),
+                torch.nn.parameter.Parameter: functools.partial(self._reduce_parameter),
                 torch.SymInt: functools.partial(self._reduce_symint),
                 torch.fx.experimental._backward_state.BackwardState: functools.partial(
                     self._reduce_unsupported
@@ -527,40 +534,43 @@ class FxGraphCachePickler(pickle.Pickler):
         return (_ident, (metadata,))
 
     def _reduce_tensor(
-        self,
-        t: Tensor,
-    ) -> tuple[Callable[[T], T], tuple[Union[TensorMetadata, TensorMetadataAndValues]]]:
+        self, t: Tensor
+    ) -> Tuple[Callable[[T], T], Tuple[TensorMetadataAndValues]]:
         """
         Custom reducer to pickle Tensors.  If we see tensors, we know they're constants
         stored as attributes on the GraphModule.
         """
-        from .graph import GraphLowering
-
         if t.is_mkldnn:
             # TODO: These tensors don't currently pickle, so we can't cache a compiled
             # graph containing them. Just fail now. If mkldnn tensors get pickling
             # support, we can remove this.
             raise BypassFxGraphCache("mkldnn tensors unpickleable")
 
-        # If this is an inlined constant or include_non_inlined=True, then we include
-        # the metadata and the values.
+        # Very large tensors will be expensive to copy to cpu and hash. Let's at least
+        # report any slowness.
+        start = time()
+        values = t.tolist()
+        elapsed = time() - start
+        if elapsed > 1.0:
+            warnings.warn(
+                f"FX graph cache copying of a large constant took {elapsed:.1}s. "
+                "Please file an issue."
+            )
+
         metadata = extract_tensor_metadata_for_cache_key(t)
-        if GraphLowering.can_inline_constant(t) or self.include_non_inlined:
-            # Very large tensors will be expensive to copy to cpu and hash. Let's at
-            # least report any slowness.
-            start = time()
-            values = t.tolist()
-            elapsed = time() - start
-            if elapsed > 1.0:
-                warnings.warn(
-                    f"FX graph cache copying of a large constant took {elapsed:.1}s. "
-                    "Please file an issue."
-                )
+        return (_ident, (TensorMetadataAndValues(metadata, values),))
 
-            return (_ident, (TensorMetadataAndValues(metadata, values),))
+    def _reduce_parameter(
+        self, p: torch.nn.parameter.Parameter
+    ) -> Tuple[Callable[[T], T], Tuple[Union[TensorMetadata, TensorMetadataAndValues]]]:
+        from .graph import GraphLowering
 
-        # Otherwise, we just include the metadata.
-        return (_ident, (metadata,))
+        # If this is a non-inlined frozen parameter, we consider the metadata only.
+        if p in self._frozen_params and not GraphLowering.can_inline_constant(p):
+            metadata = extract_tensor_metadata_for_cache_key(p)
+            return (_ident, (metadata,))
+        else:
+            return self._reduce_tensor(p)
 
     def _reduce_symint(self, s: SymInt) -> tuple[Callable[[T], T], tuple[str]]:
         """
@@ -854,16 +864,10 @@ def compiled_fx_graph_hash(
     """
     Generate a unique hash of the FX graph for caching.
     """
-    # To support caching when the graph has frozen params, we ignore the tensor values
-    # of non-inlined constants since they won't be included in the cache entry. Without
-    # freezing, we want to include the values of any constant attribute.
-    include_non_inlined = not has_frozen_params(gm)
-
     details = FxGraphHashDetails(gm, example_inputs, fx_kwargs, inputs_to_check)
     has_user_defined_triton_kernels = len(details.user_defined_triton_source) != 0
-    pickler = FxGraphCachePickler(
-        gm, include_non_inlined, has_user_defined_triton_kernels
-    )
+    pickler = FxGraphCachePickler(gm, has_user_defined_triton_kernels)
+
     # The prefix distinguishes among the other kinds of objects we
     # cache in this module.
     key = "f" + pickler.get_hash(details)
