@@ -43,9 +43,11 @@ from torch.testing._internal.common_utils import (
 
 _IS_SM8X = False
 _IS_SM9X = False
+_IS_SM10X = False
 if TEST_CUDA:
     _IS_SM8X = torch.cuda.get_device_capability(0)[0] == 8
     _IS_SM9X = torch.cuda.get_device_capability(0)[0] == 9
+    _IS_SM10X = torch.cuda.get_device_capability(0)[0] == 10
 
 # Protects against includes accidentally setting the default dtype
 assert torch.get_default_dtype() is torch.float32
@@ -659,18 +661,32 @@ class TestFP8MatmulCuda(TestCase):
                 out_dtype=torch.bfloat16,
             )
 
-        # Note re.compile is used, not re.escape. This is to accomodate fn vs fnuz type message.
-        with self.assertRaisesRegex(
-            RuntimeError,
-            r"Expected b\.dtype\(\) == at::kFloat8_e4m3fnu?z? to be true, but got false\.",
-        ):
-            torch._scaled_mm(
-                x_fp8,
-                y_fp8.to(e5m2_type),
-                scale_a=torch.ones((M, 1), device="cuda"),
-                scale_b=torch.ones((1, N), device="cuda"),
-                out_dtype=torch.bfloat16,
-            )
+        if _IS_SM10X:
+            # Note re.compile is used, not re.escape. This is to accomodate fn vs fnuz type message.
+            with self.assertRaisesRegex(
+                RuntimeError,
+                r"f8f8bf16_rowwise is not implemented on sm_100 or later.",
+            ):
+                torch._scaled_mm(
+                    x_fp8,
+                    y_fp8.to(e5m2_type),
+                    scale_a=torch.ones((M, 1), device="cuda"),
+                    scale_b=torch.ones((1, N), device="cuda"),
+                    out_dtype=torch.bfloat16,
+                )
+        else:
+            # Note re.compile is used, not re.escape. This is to accomodate fn vs fnuz type message.
+            with self.assertRaisesRegex(
+                RuntimeError,
+                r"Expected b\.dtype\(\) == at::kFloat8_e4m3fnu?z? to be true, but got false\.",
+            ):
+                torch._scaled_mm(
+                    x_fp8,
+                    y_fp8.to(e5m2_type),
+                    scale_a=torch.ones((M, 1), device="cuda"),
+                    scale_b=torch.ones((1, N), device="cuda"),
+                    out_dtype=torch.bfloat16,
+                )
 
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8 or IS_WINDOWS, f8_msg)
     @unittest.skipIf(not _IS_SM9X, "rowwise implementation is currently sm90 specific")
