@@ -96,8 +96,16 @@ static std::string bind_function(
         args.reserve(py_args.size());
         auto tuple_args = jit::tuple_slice(py_args);
         for (uint64_t idx = 0; idx < packed_args_schema.size(); idx++) {
-          args.emplace_back(jit::toIValue(
-              tuple_args[idx], packed_args_schema[idx], std::nullopt));
+          if (packed_args_schema[idx]->isSubtypeOf(
+                  *at::ListType::ofTensors())) {
+            // List[Tensor] might have Nones, not handled in jit::toIValue
+            auto tmp = py::cast<std::vector<std::optional<at::Tensor>>>(
+                tuple_args[idx]);
+            args.emplace_back(toTensorList(tmp));
+          } else {
+            args.emplace_back(jit::toIValue(
+                tuple_args[idx], packed_args_schema[idx], std::nullopt));
+          }
         }
         // None in Python corresponds to undefined Tensor in C++
         auto inputs_ = toTensorList(inputs);
@@ -1086,9 +1094,11 @@ static PyObject* set_autograd_compiler(PyObject* dummy, PyObject* args) {
   }
 
   if (prior_compiler == nullptr) {
+    Py_INCREF(Py_None);
     prior_compiler = Py_None;
   }
   PyObject* prior = PyTuple_New(2);
+  Py_INCREF(prior_dynamic);
   PyTuple_SET_ITEM(prior, 0, prior_compiler);
   PyTuple_SET_ITEM(prior, 1, prior_dynamic);
   return prior;
