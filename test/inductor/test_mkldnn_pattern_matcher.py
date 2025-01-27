@@ -3343,12 +3343,6 @@ class TestPatternMatcher(TestPatternMatcherBase):
                     counters["inductor"]["woq_matcher_count"], 0 if TEST_ACL else 1
                 )
 
-            # self._test_common(
-            #     m,
-            #     (x,),
-            #     matcher_check_fn,
-            #     check_quantization=False,
-            # )
             include_ops = [
                 "aoti_torch_cpu__weight_int4pack_mm_cpu_tensor"
                 if torch._inductor.config.cpp_wrapper
