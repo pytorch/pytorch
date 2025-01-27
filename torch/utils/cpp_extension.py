@@ -282,7 +282,7 @@ COMMON_HIPCC_FLAGS = [
     '-D__HIP_NO_HALF_CONVERSIONS__=1',
 ]
 
-COMMON_SYCL_FLAGS = [
+_COMMON_SYCL_FLAGS = [
     '-fsycl',
     '-fsycl-targets=spir64_gen,spir64',
 ]
@@ -291,14 +291,14 @@ COMMON_SYCL_FLAGS = [
 # minus dg2-* since it lacks hardware support for fp64 and requires
 # special consideration from the user. If needed this platform can
 # be requested thru TORCH_XPU_ARCH_LIST environment variable.
-SYCL_ARCH_LIST = os.environ.get('TORCH_XPU_ARCH_LIST',
-                                'mtl-u,mtl-h,xe2-lpg,xe2-hpg' if IS_WINDOWS else 'pvc,xe-lpg')
+_SYCL_ARCH_LIST = os.environ.get('TORCH_XPU_ARCH_LIST',
+                                 'mtl-u,mtl-h,xe2-lpg,xe2-hpg' if IS_WINDOWS else 'pvc,xe-lpg')
 
-SYCL_DLINK_FLAGS = [
-    *COMMON_SYCL_FLAGS,
+_SYCL_DLINK_FLAGS = [
+    *_COMMON_SYCL_FLAGS,
     '-fsycl-link',
     '--offload-compress',
-    f'-Xs "-device {SYCL_ARCH_LIST}"',
+    f'-Xs "-device {_SYCL_ARCH_LIST}"',
 ]
 
 JIT_EXTENSION_VERSIONER = ExtensionVersioner()
@@ -786,7 +786,7 @@ class BuildExtension(build_ext):
             sycl_cflags = None
             sycl_dlink_post_cflags = None
             if with_sycl:
-                sycl_cflags = extra_cc_cflags + common_cflags + COMMON_SYCL_FLAGS
+                sycl_cflags = extra_cc_cflags + common_cflags + _COMMON_SYCL_FLAGS
                 if isinstance(extra_postargs, dict):
                     sycl_post_cflags = extra_postargs['sycl']
                 else:
@@ -803,7 +803,7 @@ class BuildExtension(build_ext):
                 # strings passed to SYCL compiler.
                 sycl_cflags = [shlex.quote(f) for f in sycl_cflags]
                 sycl_cflags += _wrap_sycl_host_flags(host_cflags)
-                sycl_dlink_post_cflags = SYCL_DLINK_FLAGS
+                sycl_dlink_post_cflags = _SYCL_DLINK_FLAGS
                 sycl_post_cflags = [shlex.quote(f) for f in sycl_post_cflags]
 
             _write_ninja_file_and_compile_objects(
@@ -2582,7 +2582,7 @@ def _write_ninja_file_to_build_library(path,
         cuda_flags = None
 
     if with_sycl:
-        sycl_cflags = cflags + COMMON_SYCL_FLAGS
+        sycl_cflags = cflags + _COMMON_SYCL_FLAGS
         sycl_cflags += extra_sycl_cflags
         _append_sycl_std_if_no_std_present(sycl_cflags)
         host_cflags = cflags
@@ -2590,7 +2590,7 @@ def _write_ninja_file_to_build_library(path,
         host_cflags = [item.replace('\\"', '\\\\"') for item in host_cflags]
         host_cflags = ' '.join(host_cflags)
         sycl_cflags += _wrap_sycl_host_flags(host_cflags)
-        sycl_dlink_post_cflags = SYCL_DLINK_FLAGS
+        sycl_dlink_post_cflags = _SYCL_DLINK_FLAGS
     else:
         sycl_cflags = None
         sycl_dlink_post_cflags = None
