@@ -1,4 +1,4 @@
-# mypy: allow-untyped-defs
+# mypy: disallow-untyped-defs
 from __future__ import annotations
 
 import dataclasses
@@ -156,7 +156,7 @@ def check_for_mutation(
     )
 
 
-def _get_use_stack_trace(node) -> Optional[str]:
+def _get_use_stack_trace(node: torch.fx.Node) -> Optional[str]:
     for use in node.users:
         if stack_trace := use.meta.get("stack_trace", None):
             return stack_trace
@@ -185,11 +185,11 @@ def check_multiple_devices_or_any_cpu_nodes(
 
 def check_lowering_disable_cudagraph(
     device_node_mapping: dict[torch.device, torch.fx.Node]
-):
+) -> Optional[str]:
     return check_multiple_devices_or_any_cpu_nodes(device_node_mapping)
 
 
-def log_cudagraph_skip_and_bump_counter(msg):
+def log_cudagraph_skip_and_bump_counter(msg: str) -> None:
     perf_hint_log.warning(msg)
     counters["inductor"]["cudagraph_skips"] += 1
 
@@ -198,13 +198,16 @@ def log_cudagraph_skip_and_bump_counter(msg):
 class BoxedDeviceIndex:
     value: Optional[int]
 
-    def set(self, device_idx: Optional[int]):
+    def set(self, device_idx: Optional[int]) -> None:
         assert device_idx is None or isinstance(device_idx, int)
         self.value = device_idx
 
 
 def check_for_mutation_ignore_cuda_graph_managed_tensor(
-    gm: torch.fx.GraphModule, compiled_graph, static_input_idxs: Sequence[int]
+    gm: torch.fx.GraphModule,
+    mutated_inputs: OrderedSet[str],
+    mutated_input_idxs: OrderedSet[int],
+    static_input_idxs: Sequence[int],
 ) -> Optional[str]:
     default_msg = format_default_skip_message("mutated inputs")
 
@@ -212,9 +215,7 @@ def check_for_mutation_ignore_cuda_graph_managed_tensor(
     if torch._inductor.config.triton.cudagraph_trees:
         unique_idxs = OrderedSet(static_input_idxs)
         # checking if mutation is only on parameters/static inputs
-        mutation_indices = [
-            idx for idx in compiled_graph.mutated_input_idxs if idx not in unique_idxs
-        ]
+        mutation_indices = [idx for idx in mutated_input_idxs if idx not in unique_idxs]
         has_mutation = len(mutation_indices) != 0
         if not has_mutation:
             return None
@@ -222,7 +223,7 @@ def check_for_mutation_ignore_cuda_graph_managed_tensor(
         return get_mutation_stack_trace(placeholders, mutation_indices)
 
     else:
-        has_mutation = len(compiled_graph.mutated_inputs) != 0
+        has_mutation = len(mutated_inputs) != 0
         return None if not has_mutation else default_msg
 
 
@@ -301,7 +302,7 @@ def maybe_warning_due_to_dynamic_shape(
 ) -> bool:
     num_cudagraphs = len(fn_cache.keys()) + 1
 
-    def warn_msg():
+    def warn_msg() -> str:
         return (
             "CUDAGraph supports dynamic shapes by recording a new graph for each "
             "distinct input size. Recording too many CUDAGraphs may lead to "
