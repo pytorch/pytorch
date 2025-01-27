@@ -4251,8 +4251,7 @@ class CppScheduling(BaseScheduling):
         return cls.backend_features
 
     def __init__(self, scheduler):
-        super().__init__()
-        self.scheduler = scheduler
+        super().__init__(scheduler)
         if scheduler:
             self.reset_kernel_group()
         self._ready_to_flush = False
@@ -4955,7 +4954,7 @@ class CppScheduling(BaseScheduling):
 
         kernel.call_kernel(kernel_name, ctb)
         V.graph.removed_buffers |= kernel.removed_buffers
-        self.scheduler.free_buffers()
+        self.free_buffers_in_scheduler()
 
     def _get_scheduled_num_args(self):
         return self.kernel_group.get_num_args()

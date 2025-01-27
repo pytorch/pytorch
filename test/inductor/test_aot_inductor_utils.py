@@ -106,38 +106,34 @@ class AOTIRunnerUtil:
         example_inputs,
         inductor_configs=None,
         dynamic_shapes=None,
-        disable_constraint_solver=False,
     ):
-        ep = torch.export.export(
-            model, example_inputs, dynamic_shapes=dynamic_shapes, strict=False
-        )
-        package_path = torch._inductor.aoti_compile_and_package(
-            ep, inductor_configs=inductor_configs
-        )
+        with torch.no_grad():
+            ep = torch.export.export(
+                model, example_inputs, dynamic_shapes=dynamic_shapes, strict=True
+            )
+            package_path = torch._inductor.aoti_compile_and_package(
+                ep, inductor_configs=inductor_configs
+            )
         return package_path
 
     @staticmethod
     def run(
-        device,
         model,
         example_inputs,
         inductor_configs=None,
         dynamic_shapes=None,
-        disable_constraint_solver=False,
     ):
         package_path = AOTIRunnerUtil.compile(
             model,
             example_inputs,
             inductor_configs=inductor_configs,
             dynamic_shapes=dynamic_shapes,
-            disable_constraint_solver=disable_constraint_solver,
         )
         optimized = torch._inductor.aoti_load_package(package_path)
         return optimized(*example_inputs)
 
     @staticmethod
     def run_multiple(
-        device,
         model,
         list_example_inputs,
         inductor_configs=None,
@@ -162,7 +158,6 @@ def check_model(
     example_inputs,
     options=None,
     dynamic_shapes=None,
-    disable_constraint_solver=False,
     atol=None,
     rtol=None,
 ):
@@ -181,12 +176,10 @@ def check_model(
 
         torch.manual_seed(0)
         actual = AOTIRunnerUtil.run(
-            self.device,
             model,
             example_inputs,
             options,
             dynamic_shapes,
-            disable_constraint_solver,
         )
 
     self.assertEqual(actual, expected, atol=atol, rtol=rtol)
@@ -213,7 +206,7 @@ def check_model_with_multiple_inputs(
 
         torch.manual_seed(0)
         list_actual = AOTIRunnerUtil.run_multiple(
-            self.device, model, list_example_inputs, options, dynamic_shapes
+            model, list_example_inputs, options, dynamic_shapes
         )
 
     self.assertTrue(same(list_actual, list_expected))
