@@ -2795,3 +2795,17 @@ def _as_tensor_fullprec(t):
         return torch.as_tensor(t, dtype=torch.int64)
     else:
         return torch.as_tensor(t)
+
+
+# It is possible that user can load up pre-dispatch
+# export graph and run it in eager. Therefore, the implementation
+# of this aten op should be ready at startup time.
+lib = torch.library.Library("aten", "FRAGMENT")
+lib.define("_access_subclass_inner_tensor(Tensor src, str attr) -> Tensor")
+
+
+def impl(x, y):
+    return getattr(x, y)
+
+
+lib.impl("_access_subclass_inner_tensor", impl, "Autograd")

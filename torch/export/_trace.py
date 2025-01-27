@@ -1,6 +1,5 @@
 # mypy: allow-untyped-decorators
 # mypy: allow-untyped-defs
-import builtins
 import dataclasses
 import functools
 import inspect
@@ -1528,7 +1527,7 @@ def _export_to_aten_ir_make_fx(
                                     proxy = get_proxy_slot(self, tracer).proxy
                                     inner_proxy = tracer.create_proxy(
                                         "call_function",
-                                        builtins.getattr,
+                                        torch.ops.aten._access_subclass_inner_tensor.default,
                                         (proxy, attr),
                                         {},
                                     )
@@ -1623,7 +1622,7 @@ def _export_to_aten_ir_make_fx(
                     # from subclass tensors if we carefully rewrite track_tensor_tree
                     # in a way that it doesn't do any tensor methods.
                     torch.ops.aten.detach.default,
-                    builtins.getattr,
+                    torch.ops.aten._access_subclass_inner_tensor.default,
                 ):
                     return False
                 return True

@@ -123,6 +123,15 @@ Tensor contiguous(const Tensor& self, MemoryFormat memory_format) {
   return self.clone(memory_format);
 }
 
+Tensor _access_subclass_inner_tensor(
+    const Tensor& self,
+    const std::string& attr) {
+  TORCH_CHECK(
+      false,
+      "This method is for only python tensor subclasses, should never get here!");
+  return self;
+}
+
 bool is_set_to(const Tensor& self, const Tensor& src) {
   if (self.storage().unsafeGetStorageImpl() ==
           src.storage().unsafeGetStorageImpl() &&

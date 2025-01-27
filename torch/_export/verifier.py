@@ -1,5 +1,4 @@
 # mypy: allow-untyped-defs
-import builtins
 import inspect
 import math
 import operator
@@ -138,7 +137,6 @@ class Verifier(metaclass=_VerifierMeta):
             math.floor,
             math.trunc,
             round,
-            builtins.getattr,
         ]
 
     def allowed_op_types(self) -> tuple[type[Any], ...]:
