@@ -42,7 +42,7 @@ auto constexpr MAX_PAYLOAD_LEN = 8 * 1024 * 1024;
 // This controls the preferred size for buffers.
 // Too small and we'll need multiple buffers for one request
 // Too big and we might taxing malloc
-auto constexpr ALLOC_BUFFER_SIZE = size_t(4000);
+auto constexpr ALLOC_BUFFER_SIZE = size_t(4096);
 class UvHandle : public c10::intrusive_ptr_target {
  public:
   ~UvHandle() override = default;
