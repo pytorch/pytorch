@@ -22,7 +22,7 @@ GEMM_SINGLE_THREAD_MM_STUB = r"""
     inputs={"X": X, "W": W},
     outputs={"Y": Y_2d},
     aliases=aliases,
-    function_name="single_thread_mm",
+    function_name=kernel_name+"_single_thread_mm",
     extra_sizevars=BY_sizevars + [b_index],
     placeholder="<SINGLE_THREAD_MM_DEF_FOR_BMM>")}}"""
 
@@ -31,7 +31,7 @@ GEMM_THREADED_MM_STUB = r"""
     inputs={"X": X, "W": W},
     outputs={"Y": Y_2d},
     aliases=aliases,
-    function_name="threaded_mm",
+    function_name=kernel_name+"_threaded_mm",
     extra_sizevars=BY_sizevars + [b_index],
     placeholder="<THREADED_MM_DEF_FOR_BMM>")}}"""
 
@@ -55,7 +55,7 @@ extern "C"
     for (int64_t b_start = 0; b_start < B_single_thread_block; ++b_start) {
         {{template.get_gemm_function_call(
             kernel,
-            "single_thread_mm",
+            kernel_name+"_single_thread_mm",
             "<SINGLE_THREAD_CALL_FOR_BMM>",
             b_index="b_start",
         )}}
@@ -63,7 +63,7 @@ extern "C"
     for (int64_t b_start = B_single_thread_block; b_start < B; ++b_start) {
         {{template.get_gemm_function_call(
             kernel,
-            "threaded_mm",
+            kernel_name+"_threaded_mm",
             "<THREADED_MM_CALL_FOR_BMM>",
             b_index="b_start",
         )}}
@@ -196,6 +196,7 @@ class CppBmmTemplate(CppGemmTemplate):
             if isinstance(sym, sympy.Expr)
             for s in sym.free_symbols
         ]
+        options["kernel_name"] = kernel.kernel_name
 
         return options
 
