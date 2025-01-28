@@ -1,7 +1,8 @@
-from collections.abc import Sequence
-from typing import Any, Dict, List, Optional, Tuple, Union
+# mypy: allow-untyped-defs
+from __future__ import annotations
 
-import torch
+from typing import Any, Dict, List, Optional, Tuple, TYPE_CHECKING, Union
+
 
 from ..scheduler import (
     BaseSchedulerNode,
@@ -16,6 +17,15 @@ from .rocm.rocm_cpp_scheduling import ROCmCPPScheduling
 from .triton import TritonScheduling
 
 
+if TYPE_CHECKING:
+    from collections.abc import Sequence
+
+    import torch
+    from torch.utils._ordered_set import OrderedSet
+
+    from .common import BackendFeature
+
+
 class CUDACombinedScheduling(BaseScheduling):
     """
     Scheduler for CUDA Kernels, which delegates calls as appropriate
@@ -26,16 +36,13 @@ class CUDACombinedScheduling(BaseScheduling):
     this would also be the place to do it.
     """
 
-    def __init__(self, scheduler: Scheduler) -> None:
-        super().__init__()
-        self._scheduler = scheduler
+    def __init__(self, scheduler: Optional[Scheduler]) -> None:
+        super().__init__(scheduler)
         self._triton_scheduling = TritonScheduling(scheduler)
         self._cuda_cpp_scheduling = CUDACPPScheduling(scheduler)
         self._rocm_cpp_scheduling = ROCmCPPScheduling(scheduler)
 
-    def get_backend_features(  # type:ignore[override]
-        self, device: torch.device
-    ) -> Dict[BackendFeature, Any]:
+    def get_backend_features(self, device: torch.device) -> OrderedSet[BackendFeature]:
         return self._triton_scheduling.get_backend_features(device)
 
     def choose_node_backend(self, node: BaseSchedulerNode) -> BaseScheduling:
