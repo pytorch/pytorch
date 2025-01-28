@@ -2,6 +2,7 @@
 import _collections_abc
 import _weakrefset
 import builtins
+import collections
 import copy
 import dataclasses
 import functools
@@ -3144,7 +3145,7 @@ def is_numpy_type_info(obj) -> bool:
 
 
 BUILTIN_SKIPLIST = (
-    importlib,
+    collections,
     inspect,
     multiprocessing,
     operator,
