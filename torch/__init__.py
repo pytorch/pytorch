@@ -282,15 +282,8 @@ def _preload_pypi_cuda_deps() -> None:
 
     assert platform.system() == "Linux"
 
-    # Workaround slim-wheel CUDA dependency bugs in cusparse and cudnn by preloading nvjitlink
-    # and nvrtc. In CUDA-12.4+ cusparse depends on nvjitlink, but does not have rpath when
-    # shipped as wheel, which results in OS picking wrong/older version of nvjitlink library
-    # if `LD_LIBRARY_PATH` is defined, see https://github.com/pytorch/pytorch/issues/138460
-    # Similar issue exist in cudnn that dynamically loads nvrtc, unaware of its relative path.
-    # See https://github.com/pytorch/pytorch/issues/145580
-
-    # Preloading nvrtc before cudnn, preload nvjitlink if CUDA version >= 12.4
     cuda_libs: _List[_Tuple[str, str]] = [
+        # Preloading nvrtc before cudnn: https://github.com/pytorch/pytorch/issues/138460
         ("cuda_nvrtc", "libnvrtc.so.*[0-9]"),
         ("cublas", "libcublas.so.*[0-9]"),
         ("cudnn", "libcudnn.so.*[0-9]"),
@@ -305,6 +298,7 @@ def _preload_pypi_cuda_deps() -> None:
         ("nvtx", "libnvToolsExt.so.*[0-9]"),
     ]
 
+    # Preload nvjitlink if CUDA version >= 12.4: https://github.com/pytorch/pytorch/issues/145580
     if cuda_version >= "12.4":
         cuda_libs.insert(0, ("nvjitlink", "libnvjitlink.so.*[0-9]"))
 
