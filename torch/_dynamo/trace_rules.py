@@ -3152,6 +3152,7 @@ BUILTIN_SKIPLIST = (
     copyreg,
     enum,
     importlib,
+    inspect,
     multiprocessing,
     operator,
     threading,
