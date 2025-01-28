@@ -6,13 +6,11 @@ import dataclasses
 import functools
 import importlib
 import inspect
-import multiprocessing
 import operator
 import os
 import random
 import re
 import sys
-import threading
 import types
 import typing
 import unittest
@@ -3145,9 +3143,7 @@ def is_numpy_type_info(obj) -> bool:
 BUILTIN_SKIPLIST = (
     collections,
     inspect,
-    multiprocessing,
     random,
-    threading,
     types,
     unittest,
 )
