@@ -19,7 +19,6 @@ import os
 import posixpath
 import re
 import selectors
-import signal
 import sys
 import tempfile
 import threading
@@ -3167,9 +3166,7 @@ BUILTIN_SKIPLIST = (
     multiprocessing,
     operator,
     posixpath,
-    re,
     selectors,
-    signal,
     tempfile,
     threading,
     tokenize,
