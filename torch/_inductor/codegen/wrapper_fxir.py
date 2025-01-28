@@ -19,6 +19,7 @@ from .wrapper import (
     PythonWrapperCodegen,
     Line,
     BufferLike,
+    CommentLine,
     MemoryPlanningLine,
     MemoryPlanningState,
     EnterDeviceContextManagerLine,
@@ -146,6 +147,7 @@ class WrapperFxCodegen(PythonWrapperCodegen):
             line_type = type(line)
             conversion_func = {
                 AllocateLine: self._generate_allocate,
+                CommentLine: self._generate_comment,
                 EnterDeviceContextManagerLine: self._generate_enter_device_context_manager,
                 ExitDeviceContextManagerLine: self._generate_exit_device_context_manager,
                 EnterSubgraphLine: self._generate_enter_subgraph,
@@ -189,6 +191,10 @@ class WrapperFxCodegen(PythonWrapperCodegen):
         node.name = name
         self._create_meta_from_buffer(node, buffer)
         self._record_allocation(buffer, node)
+
+    def _generate_comment(self, line: Line) -> None:
+        assert isintance(line, CommentLine)
+        # We ignore comments in FX IR.
 
     def _generate_enter_device_context_manager(self, line: Line) -> None:
         assert isinstance(line, EnterDeviceContextManagerLine)

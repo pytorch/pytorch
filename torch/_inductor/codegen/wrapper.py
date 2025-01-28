@@ -400,6 +400,12 @@ class EnterSubgraphLine(WrapperLine):
         self.wrapper.push_codegened_graph(self.graph)
         code.do_indent()
 
+@dataclasses.dataclass
+class CommentLine(WrapperLine):
+    line: Line
+
+    def codegen(self, code: IndentedBuffer) -> None:
+        code.writeline(self.line)
 
 @dataclasses.dataclass
 class ExitSubgraphLine(WrapperLine):
@@ -2202,6 +2208,9 @@ class PythonWrapperCodegen(CodeGen):
             # need an extra as_strided call
             out = out + f".as_strided({codegen_shape_tuple}, {codegen_stride_tuple})"
         return out
+
+    def make_comment(self, line):
+        self.writeline(CommentLine(line))
 
     def make_tensor_alias(self, new_name, old_name, comment=""):
         return f"{self.declare}{new_name} = {old_name}{self.ending}  {self.comment} {comment}"
