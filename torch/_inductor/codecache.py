@@ -506,7 +506,7 @@ class FxGraphCachePickler(pickle.Pickler):
             {
                 FakeTensor: functools.partial(self._reduce_fake_tensor),
                 torch.Tensor: functools.partial(self._reduce_tensor),
-                torch.nn.parameter.Parameter: functools.partial(self._reduce_parameter),
+                torch.nn.parameter.Parameter: functools.partial(self._reduce_tensor),
                 torch.SymInt: functools.partial(self._reduce_symint),
                 torch.fx.experimental._backward_state.BackwardState: functools.partial(
                     self._reduce_unsupported
@@ -564,11 +564,6 @@ class FxGraphCachePickler(pickle.Pickler):
             )
 
         return (_ident, (TensorMetadataAndValues(metadata, values),))
-
-    def _reduce_parameter(
-        self, p: torch.nn.parameter.Parameter
-    ) -> Tuple[Callable[[T], T], Tuple[Union[TensorMetadata, TensorMetadataAndValues]]]:
-        return self._reduce_tensor(p)
 
     def _reduce_symint(self, s: SymInt) -> tuple[Callable[[T], T], tuple[str]]:
         """
