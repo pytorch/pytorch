@@ -659,7 +659,7 @@ test_inductor_halide() {
 }
 
 test_inductor_triton_cpu() {
-  python test/run_test.py --include inductor/test_triton_cpu_backend.py inductor/test_torchinductor_strided_blocks.py --verbose
+  python test/run_test.py --include inductor/test_triton_cpu_backend.py inductor/test_torchinductor_strided_blocks.py inductor/test_torchinductor_opinfo.py --verbose
   assert_git_not_dirty
 }
 
