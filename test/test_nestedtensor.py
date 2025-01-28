@@ -71,7 +71,7 @@ from torch.testing._internal.opinfo.core import (
     SkipRule,
     XFailRule,
 )
-from torch.testing._internal.opinfo.definitions.nested import njt_op_db
+from torch.testing._internal.opinfo.definitions.nested import _sample_njts, njt_op_db
 from torch.utils._pytree import tree_flatten, tree_map_only
 from torch.utils.checkpoint import checkpoint, create_selective_checkpoint_contexts
 
@@ -4188,17 +4188,13 @@ class TestNestedTensorSubclass(NestedTensorTestCase):
             self.assertEqual(chunks[i]._offsets[1:], offsets_expected)
         self.assertEqual(nt._values, torch.cat([x._values for x in chunks], dim=0))
 
-        with self.assertRaisesRegex(
-            RuntimeError,
-            "dim != 0 INTERNAL ASSERT FAILED .* Nested Tensor doesn't support chunk backward on dim=0 yet.",
-        ):
-            # doesn't support backward for chunk (dim=0) yet
-            loss = (
-                chunks[0].values().sum()
-                + chunks[1].values().sum()
-                + chunks[2].values().sum()
-            )
-            loss.backward()
+        # doesn't support backward for chunk (dim=0) yet
+        loss = (
+            chunks[0].values().sum()
+            + chunks[1].values().sum()
+            + chunks[2].values().sum()
+        )
+        loss.backward()
 
         # chunk on ragged dim not supported
         with self.assertRaisesRegex(
@@ -5262,7 +5258,7 @@ class TestNestedTensorSubclass(NestedTensorTestCase):
         nt_contiguous, nt_noncontiguous = random_nt_noncontiguous_pair((2, 3, 6, 7))
         for nt in [nt_contiguous, nt_noncontiguous]:
             self.assertFalse(nt.is_pinned())
-            pinned = nt.pin_memory(device)
+            pinned = nt.pin_memory()
             self.assertTrue(pinned.is_pinned())
             self.assertEqual(nt, pinned)
             self.assertNotEqual(nt.data_ptr(), pinned.data_ptr())
@@ -6113,17 +6109,72 @@ class TestNestedTensorSubclass(NestedTensorTestCase):
 
     @skipIfTorchDynamo("Not a suitable test for TorchDynamo")
     @parametrize(
-        "func", [torch.ones_like, torch.zeros_like], name_fn=lambda f: f.__name__
+        "func",
+        [
+            torch.empty_like,
+            torch.full_like,
+            torch.ones_like,
+            torch.rand_like,
+            torch.randint_like,
+            torch.randn_like,
+            torch.zeros_like,
+        ],
+        name_fn=lambda f: f.__name__,
     )
-    def test_like_value(self, func):
-        nt = random_nt_from_dims(
-            [2, None, 3], torch.device("cpu"), torch.float32, layout=torch.jagged
-        )
-        nt_like = func(nt)
+    def test_like_value(self, func, device):
+        dtype = torch.float32 if func is not torch.randint_like else torch.int32
+        for nt in _sample_njts(device=device, dtype=dtype):
+            extra_kwarg_sets = [{}]
+            if func is torch.full_like:
+                extra_kwarg_sets = [{"fill_value": 4.2}]
+            elif func is torch.randint_like:
+                extra_kwarg_sets = [{"high": 5}, {"low": 4, "high": 9}]
 
-        for nt_ub in nt_like.unbind():
-            t_like = func(nt_ub)
-            self.assertEqual(nt_ub, t_like)
+            # only test changing dtype / device from CUDA -> CPU because CUDA might not be
+            # available when running this test for CPU
+            change_dtype_device_settings = (
+                [False, True] if "cuda" in device else [False]
+            )
+            for change_dtype_device in change_dtype_device_settings:
+                if change_dtype_device:
+                    new_dtype = (
+                        torch.float64 if func is not torch.randint_like else torch.int64
+                    )
+                    new_device = "cpu" if "cuda" in device else device
+                    new_layout = torch.strided
+                    for extra_kwargs in extra_kwarg_sets:
+                        extra_kwargs.update(
+                            {
+                                "dtype": new_dtype,
+                                "device": new_device,
+                                "layout": new_layout,
+                            }
+                        )
+
+                for extra_kwargs in extra_kwarg_sets:
+                    nt_like = func(nt, **extra_kwargs)
+                    self.assertEqual(nt.shape, nt_like.shape)
+                    if change_dtype_device:
+                        self.assertNotEqual(nt.device, nt_like.device)
+                        self.assertNotEqual(nt.device, nt_like.dtype)
+                        # layout should be ignored since only torch.jagged is supported
+                        self.assertEqual(torch.jagged, nt_like.layout)
+                    else:
+                        self.assertEqual(nt.device, nt_like.device)
+                        self.assertEqual(nt.dtype, nt_like.dtype)
+                        self.assertEqual(nt.layout, nt_like.layout)
+                        self.assertEqual(nt.layout, torch.jagged)
+
+                    # don't bother trying to compare random or empty values
+                    if func not in [
+                        torch.empty_like,
+                        torch.rand_like,
+                        torch.randn_like,
+                        torch.randint_like,
+                    ]:
+                        for nt_ub in nt_like.unbind():
+                            t_like = func(nt_ub, **extra_kwargs)
+                            self.assertEqual(nt_ub, t_like)
 
     def test_noncontiguous_pointwise(self, device):
         a = torch.randn(2, 3, 4, requires_grad=True, dtype=torch.float64, device=device)
@@ -6232,18 +6283,14 @@ class TestNestedTensorSubclass(NestedTensorTestCase):
         c = torch.nested.nested_tensor_from_jagged(
             torch.ones(4, 3, device=device), offsets_2
         )
-        # fail when tensors have the same size but not the exact same offset tensor.
-        with self.assertRaisesRegex(
-            RuntimeError,
-            "copy_ only supports Nested Tensors that have same size and the exact same offset tensor.",
-        ):
-            a.copy_(c)
+        # should work even though the nested ints are different due to unbound-based copy
+        a.copy_(c)
 
         # fail when tensors have different sizes
         a = a.transpose(1, 2)
         with self.assertRaisesRegex(
             RuntimeError,
-            "copy_ only supports Nested Tensors that have same size and the exact same offset tensor.",
+            "expected compatible input and src shapes, but got",
         ):
             a.copy_(b)
 
@@ -7909,6 +7956,7 @@ FORWARD_SKIPS_AND_XFAILS = [
             # unary
             # needs log_sigmoid_forward, which returns a tuple
             "nn.functional.logsigmoid",
+            "nn.functional.prelu",
             # needs rrelu_with_noise
             "nn.functional.rrelu",
             # binary
@@ -7971,13 +8019,6 @@ FORWARD_SKIPS_AND_XFAILS = [
             "masked.var",
         },
         name="no_masked_jagged_support",
-    ),
-    # Need to adjust sample input func to pass the right thing
-    XFailRule(
-        error_type=TypeError,
-        error_msg="missing 1 required positional arguments",
-        op_match_fn=lambda device, op: (op.full_name == "nn.functional.prelu"),
-        name="invalid_prelu_sample_input_func",
     ),
     # Op doesn't support lengths being present
     XFailRule(
@@ -8164,21 +8205,6 @@ FORWARD_SKIPS_AND_XFAILS = [
         ),
         name="binary_noncontig_holes_broadcasting_1_over_ragged",
     ),
-    # Bug: this op returns a tuple of Tensors so it doesn't work with NJT's unary
-    # pointwise logic
-    XFailRule(
-        error_type=AttributeError,
-        error_msg="'tuple' object has no attribute 'device'",
-        op_match_fn=lambda device, op: op.full_name == "frexp",
-        name="frexp_tuple_return",
-    ),
-    # Bug: fill doesn't work with NJTs at all for some reason
-    XFailRule(
-        error_type=TypeError,
-        error_msg="received an invalid combination of arguments",
-        op_match_fn=lambda device, op: op.full_name == "fill",
-        name="fill_bug",
-    ),
 ]
 
 BACKWARD_SKIPS_AND_XFAILS = [
@@ -8323,22 +8349,16 @@ BACKWARD_SKIPS_AND_XFAILS = [
         op_match_fn=lambda device, op: (op.full_name == "narrow"),
         name="broken_narrow_backward",
     ),
-    # min / max: need to examine backwards formula for non-full reduction
+    # min / max: need factory function support for ragged dim reductions
+    # where the output is dense but sizes still contain a nested int
     XFailRule(
         error_type=RuntimeError,
         error_msg="SymIntArrayRef expected to contain only concrete integers",
         op_match_fn=lambda device, op: (
             op.full_name in {"max.reduction_with_dim", "min.reduction_with_dim"}
         ),
-        sample_match_fn=lambda device, sample: ("full reduction" not in sample.name),
-        name="broken_min_max_reduction_with_dim_backward",
-    ),
-    # matmul(): unimplemented backward
-    XFailRule(
-        error_type=NotImplementedError,
-        error_msg="aten.matmul_backward.default",
-        op_match_fn=lambda device, op: (op.full_name == "matmul"),
-        name="broken_matmul_backward",
+        sample_match_fn=lambda device, sample: ("ragged dim" in sample.name),
+        name="broken_min_max_reduction_with_dim_backward_on_ragged_dim",
     ),
     # copysign(): formula is broken for (T, NT) broadcasting
     XFailRule(
@@ -8347,14 +8367,6 @@ BACKWARD_SKIPS_AND_XFAILS = [
         op_match_fn=lambda device, op: (op.full_name == "copysign"),
         sample_match_fn=lambda device, sample: ("(T, NT)" in sample.name),
         name="broken_copysign_backward",
-    ),
-    # chunk(): backward doesn't work for the batch dim yet
-    XFailRule(
-        error_type=RuntimeError,
-        error_msg="Nested Tensor doesn't support chunk backward on dim=0 yet",
-        op_match_fn=lambda device, op: (op.full_name == "chunk"),
-        sample_match_fn=lambda device, sample: ("batch_dim" in sample.name),
-        name="broken_chunk_backward",
     ),
     # amin() / amax(): broken in a host of ways I don't think it's a good use of time
     # to try to sift through
@@ -8418,6 +8430,14 @@ BACKWARD_SKIPS_AND_XFAILS = [
 
 COMPILE_FORWARD_SKIPS_AND_XFAILS = [
     *FORWARD_SKIPS_AND_XFAILS,
+    # Needs investigation in AOTAutograd: len(unwrapped_args) == num_args_tallied assertion fails
+    # e.g. Expected 5 == 4
+    XFailRule(
+        error_type=AssertionError,
+        op_match_fn=lambda device, op: (op.full_name == "fill"),
+        sample_match_fn=lambda device, sample: ("noncontig_transposed" in sample.name),
+        name="fill_aot_autograd_bug_with_transposed_input",
+    ),
     # Bug: cross-device conversions with to() result in new nested ints within compile only
     XFailRule(
         error_type=AssertionError,
@@ -8426,11 +8446,12 @@ COMPILE_FORWARD_SKIPS_AND_XFAILS = [
         sample_match_fn=lambda device, sample: ("-> cpu" in sample.name),
         name="cross_device_transfer_wrong_nested_int_in_compile",
     ),
-    # clone() -> contiguous format on an non-contiguous NJT with holes currently uses
-    # unbind(), leading to data-dependent error in torch.compile
+    # clone() -> preserve format on an non-contiguous NJT with holes currently uses
+    # unbind(), leading to data-dependent expression. Should be fixed via torch._check()
     XFailRule(
         error_type=torch._dynamo.exc.Unsupported,
-        error_msg="data dependent operator: aten._local_scalar_dense.default",
+        # Ne(u1, u0) (unhinted: Ne(u1, u0)).  (Size-like symbols: u1, u0)
+        error_msg="Could not guard on data-dependent expression",
         op_match_fn=lambda device, op: (op.full_name == "clone"),
         sample_match_fn=lambda device, sample: (
             "noncontig_holes" in sample.name
@@ -8438,22 +8459,21 @@ COMPILE_FORWARD_SKIPS_AND_XFAILS = [
         ),
         name="clone_unbind_data_dependency",
     ),
-    # chunk() on the batch dim reads the values of offsets to determine shape, leading to
-    # data-dependent error in torch.compile
-    XFailRule(
-        error_type=torch._dynamo.exc.Unsupported,
-        error_msg="data dependent operator: aten._local_scalar_dense.default",
+    # chunk(): broken in several ways on the batch dim; revisit after similar
+    # data-dependency issues are handled for narrow()
+    SkipRule(
         op_match_fn=lambda device, op: (op.full_name == "chunk"),
         sample_match_fn=lambda device, sample: ("batch_dim" in sample.name),
-        name="chunk_batch_dim_data_dependency",
+        name="broken_chunk_compile_backward_on_batch_dim",
     ),
-    # select on dim=0 currently uses unbind(), leading to data-dependent error in torch.compile
+    # select on batch dim currently uses unbind(), leading to data-dependent error in
+    # torch.compile that needs to be addressed via torch._check()
     XFailRule(
-        error_type=torch._dynamo.exc.Unsupported,
-        error_msg="data dependent operator: aten._local_scalar_dense.default",
+        error_type=torch._dynamo.exc.InternalTorchDynamoError,
+        error_msg="Pending unbacked symbols",
         op_match_fn=lambda device, op: (op.full_name == "select"),
-        sample_match_fn=lambda device, sample: (sample.kwargs["dim"] == 0),
-        name="select_unbind_data_dependency",
+        sample_match_fn=lambda device, sample: ("batch_dim" in sample.name),
+        name="broken_select_backward_unbacked",
     ),
     # Bug: no idea what's going on here; needs investigation within AOTAutograd
     XFailRule(
@@ -8477,13 +8497,6 @@ COMPILE_BACKWARD_SKIPS_AND_XFAILS = [
         sample_match_fn=lambda device, sample: ("noncontig_holes" in sample.name),
         name="noncontig_holes_data_dependency",
     ),
-    # chunk(): broken in several ways on the batch dim; revisit after similar
-    # data-dependency issues are handled for narrow()
-    SkipRule(
-        op_match_fn=lambda device, op: (op.full_name == "chunk"),
-        sample_match_fn=lambda device, sample: ("batch_dim" in sample.name),
-        name="broken_chunk_compile_backward_on_batch_dim",
-    ),
     # mean(): weird bug
     XFailRule(
         error_type=torch._dynamo.exc.BackendCompilerFailed,
@@ -8502,7 +8515,7 @@ COMPILE_BACKWARD_SKIPS_AND_XFAILS = [
         op_match_fn=lambda device, op: (
             op.full_name in {"max.reduction_with_dim", "min.reduction_with_dim"}
         ),
-        sample_match_fn=lambda device, sample: ("full reduction" not in sample.name),
+        sample_match_fn=lambda device, sample: ("ragged dim" in sample.name),
         name="broken_min_max_compile_backward",
     ),
     # to() fails with data-dependent guards OR Unknown layout in record_stream_any_impl;
@@ -8526,69 +8539,6 @@ COMPILE_BACKWARD_SKIPS_AND_XFAILS = [
         error_msg="aten.view_as_real.default",
         op_match_fn=lambda device, op: (op.full_name in {"cdouble", "cfloat", "chalf"}),
         name="unimplemented_view_as_real",
-    ),
-    # torch._subclasses.fake_tensor.DataDependentOutputException: aten._local_scalar_dense.default
-    # from item call in clone() -> unbind()
-    XFailRule(
-        error_type=torch._dynamo.exc.Unsupported,
-        error_msg="Backend compiler failed with a fake tensor exception",
-        op_match_fn=lambda device, op: (
-            op.full_name
-            in {
-                "__rpow__",
-                "clamp_max",
-                "clamp_min",
-                "float_power",
-                "pow",
-                "sinc",
-            }
-            or (
-                isinstance(op, BinaryUfuncInfo)
-                and
-                # don't include unimplemented ops
-                op.full_name
-                not in {
-                    "__rsub__",
-                    "complex",
-                    "floor_divide",
-                    "polar",
-                    "rsub",
-                }
-            )
-        ),
-        sample_match_fn=lambda device, sample: (
-            "(NT, T) broadcasting all 1s" in sample.name
-            and "noncontig_holes" in sample.name
-        ),
-        name="backward_unbind_data_dependency",
-    ),
-    # ditto
-    XFailRule(
-        error_type=torch._dynamo.exc.Unsupported,
-        error_msg="Backend compiler failed with a fake tensor exception",
-        op_match_fn=lambda device, op: (op.full_name == "nn.functional.rms_norm"),
-        sample_match_fn=lambda device, sample: (sample.input._lengths is not None),
-        name="rms_norm_backward_unbind_data_dependency",
-    ),
-    # clone() -> preserve format on an non-contiguous NJT with holes currently uses
-    # unbind(), leading to data-dependent error in torch.compile
-    XFailRule(
-        error_type=torch._dynamo.exc.Unsupported,
-        error_msg="Backend compiler failed with a fake tensor exception",
-        op_match_fn=lambda device, op: (op.full_name == "clone"),
-        sample_match_fn=lambda device, sample: (
-            "noncontig_holes" in sample.name
-            and sample.kwargs.get("memory_format", None) == torch.preserve_format
-        ),
-        name="clone_unbind_data_dependency_backward",
-    ),
-    # select(): pending unbacked symints not in returned output (needs fix)
-    XFailRule(
-        error_type=torch._dynamo.exc.InternalTorchDynamoError,
-        error_msg="Pending unbacked symbols",
-        op_match_fn=lambda device, op: (op.full_name == "select"),
-        sample_match_fn=lambda device, sample: ("batch_dim" in sample.name),
-        name="broken_select_backward_unbacked",
     ),
     *COMPILE_FORWARD_SKIPS_AND_XFAILS,
     *BACKWARD_SKIPS_AND_XFAILS,
@@ -8681,11 +8631,13 @@ class TestNestedTensorOpInfo(NestedTensorTestCase):
 
                     self.assertEqualNoncontigAware(grads, grads_ref)
 
-    @torch._dynamo.config.patch(capture_dynamic_output_shape_ops=True)
     @ops(
         [op for op in njt_op_db if op.supports_njt],
         allowed_dtypes=(torch.float32,),
     )
+    @torch._dynamo.config.patch(capture_dynamic_output_shape_ops=True)
+    # needed to avoid "data dependent operator: aten._local_scalar_dense.default"
+    @torch._dynamo.config.patch(capture_scalar_outputs=True)
     @sample_skips_and_xfails(COMPILE_FORWARD_SKIPS_AND_XFAILS)
     def test_compile_forward(self, device, dtype, op):
         for sample, subtest_ctx, skip_xfail_ctx in op.sample_inputs(
@@ -8738,6 +8690,8 @@ class TestNestedTensorOpInfo(NestedTensorTestCase):
         allowed_dtypes=(torch.float32,),
     )
     @torch._dynamo.config.patch(capture_dynamic_output_shape_ops=True)
+    # needed to avoid "data dependent operator: aten._local_scalar_dense.default"
+    @torch._dynamo.config.patch(capture_scalar_outputs=True)
     @sample_skips_and_xfails(COMPILE_BACKWARD_SKIPS_AND_XFAILS)
     def test_compile_backward(self, device, dtype, op):
         for sample, subtest_ctx, skip_xfail_ctx in op.sample_inputs(
@@ -8745,9 +8699,6 @@ class TestNestedTensorOpInfo(NestedTensorTestCase):
         ):
             with subtest_ctx(self), skip_xfail_ctx(self):
                 torch.compiler.reset()
-                # must be set to avoid:
-                # DataDependentOutputException: aten._local_scalar_dense.default
-                torch._dynamo.config.capture_scalar_outputs = True
 
                 op_fn = op.op
 
@@ -8794,6 +8745,7 @@ class TestNestedTensorOpInfo(NestedTensorTestCase):
                     self.assertEqualNoncontigAware(grads_compile, grads_ref)
 
     @torch._dynamo.config.patch(capture_dynamic_output_shape_ops=True)
+    # needed to avoid "data dependent operator: aten._local_scalar_dense.default"
     @torch._dynamo.config.patch(capture_scalar_outputs=True)
     @skipIfTorchDynamo(
         "Dynamo fails on pending unbacked symints at assertEqual(ref_y[0][0][0].item(), 2)"

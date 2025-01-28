@@ -78,7 +78,6 @@ from torch.testing._internal.common_utils import (
     skipIfWindows,
     slowTest,
     TestCase,
-    xfailIfS390X,
     xfailIfTorchDynamo,
 )
 from torch.utils._mode_utils import no_dispatch
@@ -1152,7 +1151,6 @@ class TestAutograd(TestCase):
 
         # Incorrect case: grad_outputs wrong size
         out, tmp_edge = fn(x)
-        (tmp_grad,) = torch.autograd.grad(out, (tmp_edge,))
         with self.assertRaisesRegex(RuntimeError, "Mismatch in shape"):
             torch.autograd.grad(
                 tmp_edge, (x,), grad_outputs=torch.tensor([1.0, 2.0, 3.0, 4.0])
@@ -1166,6 +1164,32 @@ class TestAutograd(TestCase):
                 tmp_edge,
                 (x,),
                 grad_outputs=torch.rand_like(tmp_grad, dtype=torch.complex64),
+            )
+
+        # Run with .backward() and compare with .grad()
+        out, tmp_edge = fn(x)
+        torch.autograd.backward(tmp_edge, retain_graph=True)
+        (x_grad_ref,) = torch.autograd.grad(tmp_edge, (x,), retain_graph=True)
+        self.assertEqual(x.grad, x_grad_ref)
+
+        # Pass a tuple of GradientEdges
+        x.grad = None
+        torch.autograd.backward((tmp_edge,), retain_graph=True)
+        self.assertEqual(x.grad, x_grad_ref)
+
+        # Mixing GradientEdge and Tensors
+        out1, tmp_edge1 = fn(x)
+        out2, tmp_edge2 = fn(x)
+        (x_grad_ref,) = torch.autograd.grad((tmp_edge1, out2), (x,), retain_graph=True)
+        x.grad = None
+        torch.autograd.backward((tmp_edge1, out2), retain_graph=True)
+        self.assertEqual(x.grad, x_grad_ref)
+
+        # .backward(): wrong shape
+        out, tmp_edge = fn(x)
+        with self.assertRaisesRegex(RuntimeError, "Mismatch in shape"):
+            torch.autograd.backward(
+                tmp_edge, inputs=(x,), grad_tensors=torch.tensor([1.0, 2.0, 3.0, 4.0])
             )
 
     def test_grad_nonleaf(self):
@@ -3212,7 +3236,6 @@ class TestAutograd(TestCase):
         with self.assertRaises(RuntimeError):
             b.add_(5)
 
-    @xfailIfS390X
     def test_attribute_deletion(self):
         x = torch.randn((5, 5), requires_grad=True)
         del x.grad
@@ -6810,7 +6833,6 @@ for shape in [(1,), ()]:
         IS_MACOS,
         "Fails with SIGBUS on macOS; https://github.com/pytorch/pytorch/issues/25941",
     )
-    @xfailIfS390X
     def test_deep_reentrant(self):
         class DeepReentrant(Function):
             @staticmethod
@@ -7213,7 +7235,6 @@ for shape in [(1,), ()]:
                 out = checkpoint(fn, a, use_reentrant=False, debug=True)
                 out.backward()
 
-    @xfailIfS390X
     def test_access_saved_tensor_twice_without_recomputation_works(self):
         count = [0]
 
@@ -8336,7 +8357,6 @@ for shape in [(1,), ()]:
         c = Func.apply(a)
         self.assertEqual(repr(c), "tensor([2.], grad_fn=<FuncBackward>)")
 
-    @xfailIfS390X
     def test_autograd_inplace_view_of_view(self):
         x = torch.zeros(2)
         with torch.no_grad():
@@ -12468,6 +12488,18 @@ class TestAllowMutationOnSaved(TestCase):
             with self.assertRaisesRegex(RuntimeError, msg):
                 with torch.autograd.graph.allow_mutation_on_saved_tensors() as ctx:
                     pass
+
+    def test_inplace_foreach(self):
+        with torch.autograd.graph.allow_mutation_on_saved_tensors():
+            a = [
+                torch.tensor(1.0, requires_grad=True),
+                torch.tensor(1.0, requires_grad=True),
+            ]
+            b = torch._foreach_exp(a)
+            torch._foreach_add_(b, 1)
+            (b[0] + b[1]).backward()
+
+        self.assertEqual([a[0].grad, a[1].grad], torch._foreach_exp(a))
 
 
 class TestAutogradInferenceMode(TestCase):
