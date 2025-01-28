@@ -9,7 +9,7 @@ import operator
 import os
 from collections import defaultdict
 from dataclasses import dataclass, replace
-from typing import Callable, Dict, List, Optional, Set, Tuple, TYPE_CHECKING, Union
+from typing import Callable, Optional, TYPE_CHECKING, Union
 
 import torch
 import torch._inductor.inductor_prims
@@ -55,11 +55,11 @@ prims = torch.ops.prims
 class OpTypes:
     """Class for keeping track of different operator categories"""
 
-    fusible_ops: Set[Callable]
-    compute_intensive_ops: Set[Callable]
-    random_ops: Set[Callable]
-    view_ops: Set[Callable]
-    recomputable_ops: Set[Callable]
+    fusible_ops: set[Callable]
+    compute_intensive_ops: set[Callable]
+    random_ops: set[Callable]
+    view_ops: set[Callable]
+    recomputable_ops: set[Callable]
 
     def is_fusible(self, node: fx.Node):
         return get_aten_target(node) in self.fusible_ops
@@ -81,14 +81,14 @@ class OpTypes:
 class NodeInfo:
     # Be careful about iterating over these explicitly, as their order may not
     # be deterministic
-    inputs: List[fx.Node]
-    _required_fw_nodes: Set[fx.Node]
-    required_bw_nodes: Set[fx.Node]
-    unclaimed_nodes: Set[fx.Node]
-    fw_order: Dict[fx.Node, int]
+    inputs: list[fx.Node]
+    _required_fw_nodes: set[fx.Node]
+    required_bw_nodes: set[fx.Node]
+    unclaimed_nodes: set[fx.Node]
+    fw_order: dict[fx.Node, int]
 
     @functools.cached_property
-    def required_fw_nodes(self) -> List[fx.Node]:
+    def required_fw_nodes(self) -> list[fx.Node]:
         return sorted(
             (n for n in self._required_fw_nodes), key=lambda n: self.fw_order[n]
         )
@@ -158,8 +158,8 @@ InvalidNode = InvalidNodeBase()
 
 def _extract_graph_with_inputs_outputs(
     joint_graph: fx.Graph,
-    inputs: List[fx.Node],
-    outputs: List[fx.Node],
+    inputs: list[fx.Node],
+    outputs: list[fx.Node],
     subgraph: Optional[str] = None,
 ) -> fx.Graph:
     """
@@ -272,7 +272,7 @@ def _must_be_in_backward(node: fx.Node) -> bool:
 
 def _extract_fwd_bwd_outputs(
     joint_module: fx.GraphModule, *, num_fwd_outputs
-) -> Tuple[List[fx.Node], List[fx.Node]]:
+) -> tuple[list[fx.Node], list[fx.Node]]:
     outputs = pytree.arg_tree_leaves(
         *(node.args for node in joint_module.graph.find_nodes(op="output"))
     )
@@ -281,7 +281,7 @@ def _extract_fwd_bwd_outputs(
     return fwd_outputs, bwd_outputs
 
 
-def _remove_by_name(saved_values: List[fx.Node], name: str):
+def _remove_by_name(saved_values: list[fx.Node], name: str):
     for saved_value in saved_values:
         if saved_value.name == name:
             saved_values.remove(saved_value)
@@ -290,11 +290,11 @@ def _remove_by_name(saved_values: List[fx.Node], name: str):
 
 def _extract_fwd_bwd_modules(
     joint_module: fx.GraphModule,
-    saved_values: List[fx.Node],
-    saved_sym_nodes: List[fx.Node],
+    saved_values: list[fx.Node],
+    saved_sym_nodes: list[fx.Node],
     *,
     num_fwd_outputs: int,
-) -> Tuple[fx.GraphModule, fx.GraphModule]:
+) -> tuple[fx.GraphModule, fx.GraphModule]:
     fwd_outputs, bwd_outputs = _extract_fwd_bwd_outputs(
         joint_module, num_fwd_outputs=num_fwd_outputs
     )
@@ -326,7 +326,7 @@ def _extract_fwd_bwd_modules(
     # we propagate all symbols which are referenced by backwards inputs.
     # These are not directly used in the graph but are required for downstream
     # sizevar assignment
-    saved_symbols: Set[sympy.Symbol] = set()
+    saved_symbols: set[sympy.Symbol] = set()
     saved_sym_nodes_binding = []
     saved_sym_nodes_derived = []
 
@@ -389,7 +389,7 @@ def _extract_fwd_bwd_modules(
 
 def default_partition(
     joint_module: fx.GraphModule, _joint_inputs, *, num_fwd_outputs
-) -> Tuple[fx.GraphModule, fx.GraphModule]:
+) -> tuple[fx.GraphModule, fx.GraphModule]:
     """
     Partitions the :attr:`joint_module` in a manner that closely resembles the
     behavior observed in the original ``.forward()`` and ``.backward()`` of the
@@ -501,7 +501,7 @@ def _size_of(node: fx.Node) -> int:
             return object_nbytes(val)
 
         raise RuntimeError(f"Unknown metadata type {type(val)} on node {node}")
-    if node.op == "get_attr":
+    if node.op == "get_attr" or node.target is torch.ops.aten._assert_scalar.default:
         return 0
     raise RuntimeError(
         f"Node {node} didn't have `val` metadata; we should always have `val` metadata on the nodes."
@@ -512,7 +512,7 @@ def _size_of(node: fx.Node) -> int:
 def _count_ops(graph: fx.Graph):
     from collections import defaultdict
 
-    cnt: Dict[str, int] = defaultdict(int)
+    cnt: dict[str, int] = defaultdict(int)
     for node in graph.nodes:
         if node.op == "call_function":
             cnt[node.target.__name__] += 1
@@ -537,7 +537,7 @@ def pointwise_ops():
     return ops
 
 
-def sort_depths(args, depth_map: Dict[fx.Node, int]) -> List[Tuple[fx.Node, int]]:
+def sort_depths(args, depth_map: dict[fx.Node, int]) -> list[tuple[fx.Node, int]]:
     arg_depths = {
         arg: depth_map[arg] for arg in args if isinstance(arg, torch.fx.node.Node)
     }
@@ -568,7 +568,7 @@ def reordering_to_mimic_autograd_engine(gm: fx.GraphModule) -> fx.GraphModule:
     """
 
     new_graph = fx.Graph()
-    env: Dict[fx.Node, fx.Node] = {}
+    env: dict[fx.Node, fx.Node] = {}
 
     # Add new placeholder nodes in the order specified by the inputs
     for node in gm.graph.find_nodes(op="placeholder"):
@@ -623,7 +623,7 @@ def functionalize_rng_ops(
     fw_module: fx.GraphModule,
     bw_module: fx.GraphModule,
     num_sym_nodes: int,
-) -> Tuple[fx.GraphModule, fx.GraphModule]:
+) -> tuple[fx.GraphModule, fx.GraphModule]:
     # During user-driven activation checkpointing, we have to ensure that a rng
     # op in fwd yields the same output as the recomputed rng op in the bwd.  To
     # do this, we use functionalize wrappers to wrap the random ops and share
@@ -1074,12 +1074,12 @@ def solve_min_cut(
     # backwards pass instead of only relying on whether it's unfusible in the
     # forwards.
 
-    def find_first_unfusible(start_nodes: List[fx.Node], max_range: int) -> int:
+    def find_first_unfusible(start_nodes: list[fx.Node], max_range: int) -> int:
         """
         Finds the first unfusible node in the chain of nodes starting from
         `start_nodes` and returns its position.
         """
-        sorted_nodes: List[Tuple[int, fx.Node, bool]] = []
+        sorted_nodes: list[tuple[int, fx.Node, bool]] = []
         for n in start_nodes:
             heapq.heappush(sorted_nodes, (node_info.get_fw_order(n), n, True))
 
@@ -1182,7 +1182,7 @@ def solve_min_cut(
         raise
 
     reachable, non_reachable = partition
-    cutset: Set[Tuple[str, str]] = set()
+    cutset: set[tuple[str, str]] = set()
     for u, nbrs in ((n, nx_graph[n]) for n in reachable):
         cutset.update((u, v) for v in nbrs if v in non_reachable)
 
@@ -1219,7 +1219,7 @@ def visualize_min_cut_graph(nx_graph):
 
 
 def get_default_op_list() -> OpTypes:
-    default_recomputable_ops: List[Callable] = [
+    default_recomputable_ops: list[Callable] = [
         aten.add,
         aten.sub,
         aten.div,
@@ -1392,12 +1392,12 @@ def get_name_to_node(graph: fx.Graph):
 
 def _optimize_runtime_with_given_memory(
     joint_graph: fx.Graph,
-    memory: List[float],
-    runtimes: List[float],
+    memory: list[float],
+    runtimes: list[float],
     max_memory: float,
     node_info: NodeInfo,
-    all_recomputable_banned_nodes: List[fx.Node],
-) -> Tuple[float, List[int], List[int]]:
+    all_recomputable_banned_nodes: list[fx.Node],
+) -> tuple[float, list[int], list[int]]:
     SOLVER = config.activation_memory_budget_solver
     if SOLVER == "greedy":
         return greedy_knapsack(memory, runtimes, max_memory)
@@ -1490,7 +1490,7 @@ def choose_saved_values_set(
     joint_graph: fx.Graph,
     node_info: NodeInfo,
     memory_budget=1,
-) -> List[fx.Node]:
+) -> list[fx.Node]:
     if memory_budget > 1 or memory_budget < 0:
         raise RuntimeError(
             f"The valid ranges for memory budget are 0 <= m <= 1. The provided value is {memory_budget}"
@@ -1523,7 +1523,7 @@ def choose_saved_values_set(
     if memory_budget == 1:
         return runtime_optimized_saved_values
 
-    def estimate_activations_size(saved_values: List[fx.Node]) -> float:
+    def estimate_activations_size(saved_values: list[fx.Node]) -> float:
         return sum(map(_size_of, saved_values)) / 1e9
 
     min_act_size = estimate_activations_size(node_info.inputs)
@@ -1535,7 +1535,7 @@ def choose_saved_values_set(
     def get_normalized_size(sz):
         return (sz / 1e9) / (max_act_size - min_act_size)
 
-    def get_mem_ratio(activations: List[fx.Node]):
+    def get_mem_ratio(activations: list[fx.Node]):
         return (estimate_activations_size(activations) - min_act_size) / (
             max_act_size - min_act_size
         )
@@ -1567,7 +1567,7 @@ def choose_saved_values_set(
 
     input_storages = {get_node_storage(node) for node in node_info.inputs}
 
-    def get_recomputable_banned_nodes(banned_nodes: Set[fx.Node]) -> List[fx.Node]:
+    def get_recomputable_banned_nodes(banned_nodes: set[fx.Node]) -> list[fx.Node]:
         return [
             i
             for i in banned_nodes
@@ -1729,7 +1729,7 @@ def min_cut_rematerialization_partition(
     compiler="inductor",
     *,
     num_fwd_outputs,
-) -> Tuple[fx.GraphModule, fx.GraphModule]:
+) -> tuple[fx.GraphModule, fx.GraphModule]:
     """
     Partitions the joint graph such that the backward recomputes the forward.
     Recomputing helps in trading off memory bandwidth with computation.
@@ -1782,8 +1782,7 @@ def min_cut_rematerialization_partition(
                 required_bw_nodes.add(node)
 
             if node in required_bw_nodes:
-                for user in node.users:
-                    required_bw_nodes.add(user)
+                required_bw_nodes.update(node.users)
 
         primal_inputs = list(filter(_is_primal, joint_module.graph.nodes))
         fwd_seed_offset_inputs = list(
@@ -1799,7 +1798,7 @@ def min_cut_rematerialization_partition(
         forward_only_graph = _extract_graph_with_inputs_outputs(
             joint_module.graph, inputs, fwd_outputs, "forward"
         )
-        required_fw_nodes: Set[fx.Node] = {
+        required_fw_nodes: set[fx.Node] = {
             name_to_node[node.name]
             for node in forward_only_graph.nodes
             if node.op != "output"
@@ -1874,10 +1873,10 @@ def min_cut_rematerialization_partition(
 
         # Log total theoretical activations stored
         total_activations_size_gb = sum(_size_of(i) for i in saved_values) / 1e9
-        log.debug("Theoretical Activations Stored: %.2f GB", total_activations_size_gb)
+        log.info("Theoretical Activations Stored: %.2f GB", total_activations_size_gb)
 
         # Log theoretical per activation storage sizes
-        log.debug("Theoretical Per Activation Storage Sizes: %s", sorted_sizes)
+        log.info("Theoretical Per Activation Storage Sizes: %s", sorted_sizes)
         fw_module_nodes = {
             node.name for node in fw_module.graph.nodes if node.op == "call_function"
         }
@@ -1886,18 +1885,18 @@ def min_cut_rematerialization_partition(
         }
         remat_nodes = fw_module_nodes & bw_module_nodes
 
-        counts: Dict[str, int] = defaultdict(int)
+        counts: dict[str, int] = defaultdict(int)
         for node in fw_module.graph.nodes:
             if node.name in remat_nodes and hasattr(node.target, "_overloadpacket"):
                 counts[str(node.target._overloadpacket)] += 1
-        log.debug(
+        log.info(
             "# remat/fw/bw: %d/%d/%d",
             len(remat_nodes),
             len(fw_module_nodes),
             len(bw_module_nodes),
         )
         rematerialized_ops = sorted(counts.items(), key=lambda x: x[1], reverse=True)
-        log.debug("Count of Ops Rematerialized: %s", rematerialized_ops)
+        log.info("Count of Ops Rematerialized: %s", rematerialized_ops)
     return fw_module, bw_module
 
 
@@ -1906,7 +1905,7 @@ def draw_graph(
     fname: str,
     figname: str = "fx_graph",
     clear_meta: bool = True,
-    prog: Optional[Union[str, List[str]]] = None,
+    prog: Optional[Union[str, list[str]]] = None,
     parse_stack_trace: bool = False,
     dot_graph_shape: Optional[str] = None,
 ) -> None:

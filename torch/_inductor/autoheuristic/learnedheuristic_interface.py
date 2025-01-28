@@ -1,4 +1,4 @@
-from typing import List, Optional
+from typing import Optional
 
 from torch._inductor.autoheuristic.autoheuristic_utils import (
     AHContext,
@@ -23,7 +23,7 @@ class LearnedHeuristic:
         return True
 
     def get_decision(
-        self, context: AHContext, choices: List[Choice]
+        self, context: AHContext, choices: list[Choice]
     ) -> Optional[Choice]:
         return None
 
@@ -33,7 +33,7 @@ class LearnedHeuristic:
     def get_name(self) -> str:
         return ""
 
-    def get_decisions_ranked(self, context: AHContext) -> Optional[List[str]]:
+    def get_decisions_ranked(self, context: AHContext) -> Optional[list[str]]:
         return None
 
 
@@ -45,7 +45,7 @@ class LearnedHeuristicRegression(LearnedHeuristic):
         return 1.0
 
     def get_decision(
-        self, context: AHContext, choices: List[Choice]
+        self, context: AHContext, choices: list[Choice]
     ) -> Optional[Choice]:
         choice2feedback = {}
         for choice in choices:
@@ -68,7 +68,7 @@ class LearnedHeuristicDecision(LearnedHeuristic):
         return None
 
     def get_decision(
-        self, context: AHContext, choices: List[Choice]
+        self, context: AHContext, choices: list[Choice]
     ) -> Optional[Choice]:
         best_choices = self.get_best_choices(context)
         if not best_choices:
@@ -78,7 +78,7 @@ class LearnedHeuristicDecision(LearnedHeuristic):
             return None
         return self.get_choice(best_choice_idx)
 
-    def get_decisions_ranked(self, context: AHContext) -> Optional[List[str]]:
+    def get_decisions_ranked(self, context: AHContext) -> Optional[list[str]]:
         feedback_idx_list = self.get_best_choices(context)
         if feedback_idx_list is None:
             return None
@@ -88,5 +88,5 @@ class LearnedHeuristicDecision(LearnedHeuristic):
         choices = [choice for choice in choices if choice is not None]
         return choices
 
-    def get_best_choices(self, context: AHContext) -> Optional[List[tuple[float, int]]]:
+    def get_best_choices(self, context: AHContext) -> Optional[list[tuple[float, int]]]:
         return []
