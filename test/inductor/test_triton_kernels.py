@@ -9,12 +9,18 @@ from unittest.mock import patch
 import torch
 import torch._dynamo.testing
 import torch._inductor.test_case
+import torch.utils._pytree as pytree
 from torch._higher_order_ops.triton_kernel_wrap import (
     generate_ttir,
     triton_kernel_wrapper_functional,
     triton_kernel_wrapper_mutation,
 )
 from torch._inductor import metrics
+from torch._inductor.pattern_matcher import (
+    CallFunctionVarArgs,
+    PatternMatcherPass,
+    register_graph_pattern,
+)
 from torch._inductor.utils import run_and_get_code
 from torch._library import capture_triton
 from torch.testing import FileCheck
@@ -550,7 +556,6 @@ def forward(self, x_1, output_1):
         call_triton(output)
 
     @requires_gpu
-    @skipIfRocm
     def test_triton_kernel_dependancies(self):
         def call_triton(
             x: torch.Tensor,
@@ -669,7 +674,6 @@ def forward(self, x_1, output_1):
 
     @requires_gpu
     @skipIfXpu
-    @skipIfRocm
     def test_triton_kernel_constants(self):
         @triton.jit
         def mulC_kernel(
@@ -754,7 +758,6 @@ def forward(self, x_1, output_1):
         self.assertEqual(compiled_func(t1, t2, output2), torch_add)
 
     @requires_gpu
-    @skipIfRocm  # https://github.com/pytorch/pytorch/actions/runs/10051552819/job/27782048305?pr=131431
     @common_utils.parametrize("backend", ["eager", "aot_eager", "inductor"])
     @patch.object(
         torch._inductor.config, "unsafe_ignore_unsupported_triton_autotune_args", True
@@ -1234,6 +1237,8 @@ def forward(self, x_1, output_1):
     @requires_gpu
     @common_utils.parametrize("dynamic", [False, True])
     def test_triton_kernel_equal_to_1_arg(self, dynamic):
+        from torch._inductor.utils import triton_version_uses_attrs_dict
+
         @triton.jit
         def add_kernel_half_n_elements(
             in_ptr0,
@@ -1266,17 +1271,25 @@ def forward(self, x_1, output_1):
             torch.compile(f, dynamic=dynamic), x, y
         )
 
-        if dynamic:
-            # when half_n_elements passed to the Triton kernel is
-            # dynamic, equal_to_1 specializaiton can't be enforced
-            self.assertTrue(_triton_get_ast_equal_to_str(()) in sources[0])
+        if triton_version_uses_attrs_dict():
+            self.assertFalse("equal_to" in sources[0])
         else:
-            self.assertTrue(_triton_get_ast_equal_to_str((3,)) in sources[0])
+            if dynamic:
+                # when half_n_elements passed to the Triton kernel is
+                # dynamic, equal_to_1 specializaiton can't be enforced
+
+                # also, equal_to_1 specialization doesn't occur (or appear in the signature)
+                # for newer versions ofo triton (i.e. the ones where triton_version_uses_attrs_dict() == True)
+                self.assertTrue(_triton_get_ast_equal_to_str(()) in sources[0])
+            else:
+                self.assertTrue(_triton_get_ast_equal_to_str((3,)) in sources[0])
         self.assertEqual(compiled_out, eager_out)
 
     @requires_gpu
     @common_utils.parametrize("dynamic", [False, True])
     def test_triton_kernel_equal_to_1_float_arg(self, dynamic):
+        from torch._inductor.utils import triton_version_uses_attrs_dict
+
         def f(x, y):
             out = torch.empty_like(x)
             n_elements = x.numel()
@@ -1300,7 +1313,8 @@ def forward(self, x_1, output_1):
 
         # float 1.0 (both literal or symbolic)
         # should not be added to equal_to_1
-        self.assertTrue(_triton_get_ast_equal_to_str(()) in sources[0])
+        if not triton_version_uses_attrs_dict():
+            self.assertTrue(_triton_get_ast_equal_to_str(()) in sources[0])
         self.assertEqual(compiled_out, eager_out)
 
     @requires_gpu
@@ -1727,19 +1741,17 @@ def forward(self, arg0_1, arg1_1):
             out = torch.zeros_like(a)
             n_elements = out.numel()
 
-            ptrs = [t.data_ptr() for t in (a, b, out)]
-
             if after_data_ptr:
                 torch._dynamo.graph_break()
 
             descs = [
                 triton.tools.experimental_descriptor.create_1d_tma_descriptor(
-                    ptr,
+                    t.data_ptr(),
                     n_elements,
                     BLOCK_SIZE,
                     t.element_size(),
                 )
-                for ptr in ptrs
+                for t in (a, b, out)
             ]
 
             if after_create_desc:
@@ -2434,7 +2446,6 @@ class MutationTests(torch._inductor.test_case.TestCase):
         )
 
     @requires_gpu
-    @skipIfRocm
     def test_triton_kernel_inference_mode(self):
         def f(x, y, out):
             n_elements = x.numel()
@@ -3251,6 +3262,75 @@ class CustomOpTests(torch._inductor.test_case.TestCase):
         z = add(x, y)
         self.assertEqual(status[-1], False)
         self.assertEqual(z, (x + y) * 2)
+
+    @requires_gpu
+    def test_preserves_strides(self):
+        import triton
+        import triton.language as tl
+
+        @triton.jit
+        def add_kernel(
+            in_ptr0,
+            in_ptr1,
+            out_ptr,
+            n_elements,
+            BLOCK_SIZE: "tl.constexpr",
+        ):
+            pid = tl.program_id(axis=0)
+            block_start = pid * BLOCK_SIZE
+            offsets = block_start + tl.arange(0, BLOCK_SIZE)
+            mask = offsets < n_elements
+            x = tl.load(in_ptr0 + offsets, mask=mask)
+            y = tl.load(in_ptr1 + offsets, mask=mask)
+            output = x + y
+            tl.store(out_ptr + offsets, output, mask=mask)
+
+        x = torch.randn(4, 4, 2, 2, device="cuda")
+        other = torch.randn(4, 4, 2, 2, device="cuda")
+
+        def f(x, other):
+            y = x.transpose(2, 3).contiguous().transpose(2, 3)
+            z = y.sin().transpose(2, 3)
+            grid = (z.numel(),)
+            out = torch.empty_like(other)
+            add_kernel[grid](z, other, out, z.numel(), BLOCK_SIZE=16)
+            return out
+
+        class _CustomPass(PatternMatcherPass):
+            def __init__(self) -> None:
+                super().__init__()
+
+            def __call__(self, g: torch.fx.Graph):
+                self.apply(g)
+
+        g = _CustomPass()
+        called = False
+
+        @register_graph_pattern(
+            CallFunctionVarArgs(torch.ops.aten.permute),
+            pass_dict=g,
+        )
+        def _(match, *args, **kwargs):
+            flat_args, spec = pytree.tree_flatten((args, kwargs))
+
+            def decomp(*flat_args):
+                args, kwargs = pytree.tree_unflatten(flat_args, spec)
+                return torch.ops.aten.permute(*args, **kwargs).clone(
+                    memory_format=torch.channels_last
+                )
+
+            nonlocal called
+            called = True
+            match.replace_by_example(decomp, flat_args)
+
+        from torch._inductor import config
+
+        with config.patch(
+            post_grad_custom_post_pass=g,
+        ):
+            f_compile = torch.compile(f)
+            self.assertEqual(f(x, other), f_compile(x, other))
+            self.assertTrue(called)
 
     @requires_gpu
     @common_utils.parametrize("dynamic", [False, True])
