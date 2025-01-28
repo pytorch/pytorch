@@ -8793,6 +8793,13 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
         with self.assertRaises(TypeError):
             torch.empty((1, 2, 3, 4)).dim_order(ambiguity_check="ILLEGAL_STR")
 
+        # sparse tensor does not support dim order
+        with self.assertRaises(AttributeError):
+            indices = torch.tensor([[0, 1, 2], [0, 1, 2]])  # (row, column) indices
+            values = torch.tensor([1.0, 2.0, 3.0])  # values at those indices
+            sparse_tensor = torch.sparse_coo_tensor(indices, values, size=(3, 3))
+            sparse_tensor.dim_order()
+
     def test_subclass_tensors(self):
         # raise an error when trying to subclass FloatTensor
         with self.assertRaisesRegex(TypeError, "type 'torch.FloatTensor' is not an acceptable base type"):
