@@ -8,8 +8,8 @@ import operator
 import os
 import warnings
 from collections import defaultdict
-from collections.abc import Iterable
-from typing import Any, Callable, Dict, List, Optional, Sequence, TypeVar, Union
+from collections.abc import Iterable, Sequence
+from typing import Any, Callable, Optional, TypeVar, Union
 from typing_extensions import ParamSpec
 from unittest.mock import patch
 
@@ -19,6 +19,7 @@ import torch
 import torch.ao.quantization.fx._decomposed
 import torch.fx
 import torch.utils._pytree as pytree
+from torch._dynamo.utils import counters
 from torch._higher_order_ops.associative_scan import associative_scan_op
 from torch._higher_order_ops.triton_kernel_wrap import triton_kernel_wrapper_mutation
 from torch._prims_common import (
@@ -90,9 +91,9 @@ FALLBACK_ALLOW_LIST = OrderedSet(
 )
 
 log = logging.getLogger(__name__)
-lowerings: Dict[Union[Callable[..., Any], str], Callable[..., Any]] = {}
+lowerings: dict[Union[Callable[..., Any], str], Callable[..., Any]] = {}
 # Use maybe_layout_constraints to access this dict, we lazily register tag-based layout constraints
-_maybe_layout_constraints: Dict[
+_maybe_layout_constraints: dict[
     torch._ops.OpOverload, Optional[Callable[..., Any]]
 ] = {}
 fallbacks = OrderedSet[torch._ops.OpOverload]()
@@ -106,7 +107,7 @@ foreach_ops = OrderedSet[torch._ops.OpOverload](
 # TODO(rec): torch._higher_order_ops._foreach_map is not an OpOverload
 # so why is it in foreach_ops?
 inplace_foreach_ops = OrderedSet[torch._ops.OpOverload]()
-inplaceable_foreach_ops: Dict[torch._ops.OpOverload, torch._ops.OpOverload] = {}
+inplaceable_foreach_ops: dict[torch._ops.OpOverload, torch._ops.OpOverload] = {}
 quantized_decomposed = torch.ops.quantized_decomposed
 
 
@@ -313,12 +314,12 @@ def in_namespace(op, namespace):
 
 
 def transform_args(
-    args: List[Any],
-    kwargs: Dict[str, Any],
+    args: list[Any],
+    kwargs: dict[str, Any],
     broadcast: bool,
     type_promotion_kind: Optional[ELEMENTWISE_TYPE_PROMOTION_KIND],
     convert_input_to_bool: bool,
-) -> tuple[List[Any], Dict[str, Any]]:
+) -> tuple[list[Any], dict[str, Any]]:
     args_indices = [i for i, x in enumerate(args) if isinstance(x, TensorBox)]
     kwargs_indices = [k for k, v in kwargs.items() if isinstance(v, TensorBox)]
     # check that there's something to transform
@@ -428,8 +429,8 @@ def _register_lowering(
 
     @functools.wraps(decomp_fn)
     def wrapped(*args, **kwargs):
-        args: List[Any] = list(args)
-        kwargs: Dict[str, Any] = dict(kwargs)
+        args: list[Any] = list(args)
+        kwargs: dict[str, Any] = dict(kwargs)
         unpacked = False
         # TODO maybe we need to use pytrees here
         if len(args) == 1 and isinstance(args[0], (list, tuple)):
@@ -654,7 +655,7 @@ def make_pointwise(
 
 
 def make_foreach_pointwise(pw_fn, allow_alpha=False):
-    def inner(*inputs: List[List[TensorBox]], alpha=1):
+    def inner(*inputs: list[list[TensorBox]], alpha=1):
         realize_outputs = (
             len(V.graph.current_node.users) == 0
             or V.graph.current_node.target in inplace_foreach_ops
@@ -682,7 +683,7 @@ def make_foreach_pointwise(pw_fn, allow_alpha=False):
 
         outputs = [None] * len(a_list_input)
         for (device, use_foreach), group in groups.items():
-            operation_list: List[str] = []
+            operation_list: list[str] = []
             for (
                 output_ind,
                 args,
@@ -749,7 +750,7 @@ def _foreach_map(subgraph, *args, **kwargs):
 
     outputs = [None] * len(sub_outputs)
     for (device, use_foreach), group in groups.items():
-        operation_list: List[str] = []
+        operation_list: list[str] = []
         for (
             output_ind,
             output,
@@ -949,7 +950,7 @@ def where(cond, a, b):
 def broadcast_tensors(*inputs):
     if len(inputs) == 1 and isinstance(inputs[0], (list, tuple)):
         return broadcast_tensors(*inputs[0])
-    target: List[sympy.Expr] = functools.reduce(
+    target: list[sympy.Expr] = functools.reduce(
         broadcast_symbolic_shapes, [x.get_size() for x in inputs], []
     )
     outputs = []
@@ -1008,7 +1009,7 @@ def squeeze(x, dim=None):
     for d, s in enumerate(x.get_size()):
         if not (
             d in dims
-            and V.graph.sizevars.evaluate_expr(sympy.Eq(s, 1, size_oblivious=True))
+            and V.graph.sizevars.evaluate_expr(sympy.Eq(s, 1), size_oblivious=True)
         ):
             new_shape.append(s)
 
@@ -1231,7 +1232,7 @@ def as_strided_copy(x, size, stride, storage_offset=None):
 
 def pointwise_cat(inputs, dim=0):
     # (inclusive, exclusive)
-    inputs_ranges: List[tuple[sympy.Expr, sympy.Expr]] = []
+    inputs_ranges: list[tuple[sympy.Expr, sympy.Expr]] = []
     prev_end = 0
     for inp in inputs:
         inputs_ranges.append((prev_end, prev_end + inp.get_size()[dim]))  # type: ignore[arg-type]
@@ -2173,7 +2174,7 @@ def inductor_lookup_seed(seeds, index):
 
 
 @register_lowering(inductor_prims.random, type_promotion_kind=None)
-def inductor_random(size: List[int], seed: TensorBox, mode: str, *, offset: int = 0):
+def inductor_random(size: list[int], seed: TensorBox, mode: str, *, offset: int = 0):
     assert not config.fallback_random
     assert mode in ("rand", "randn")
     size = [*size]
@@ -2202,7 +2203,7 @@ def inductor_random(size: List[int], seed: TensorBox, mode: str, *, offset: int 
 
 @register_lowering(inductor_prims.randint, type_promotion_kind=None)
 def inductor_randint(
-    low: int, high: int, size: List[int], seed: TensorBox, *, offset: int = 0
+    low: int, high: int, size: list[int], seed: TensorBox, *, offset: int = 0
 ):
     assert not config.fallback_random
     size = [*size]
@@ -2402,6 +2403,31 @@ def require_channels_last(_, *args, **kwargs):
     args, kwargs = pytree.tree_map_only(
         ir.IRNode, ir.ExternKernel.require_channels_last, (args, kwargs)
     )
+    return args, kwargs
+
+
+def constrain_to_fake_tensors(args, kwargs, fake_args, fake_kwargs):
+    def apply_constraint(arg, fake_arg):
+        if isinstance(arg, ir.IRNode):
+            meta_stride_expr = [
+                s.node.expr if isinstance(s, torch.SymInt) else s
+                for s in fake_arg.stride()
+            ]
+            return ir.ExternKernel.require_exact_strides(arg, meta_stride_expr)
+        if isinstance(arg, dict):
+            return {
+                key: apply_constraint(arg[key], fake_arg[key]) for key in arg.keys()
+            }
+        elif isinstance(arg, (tuple, list)):
+            return type(arg)(
+                apply_constraint(a, f_a) for (a, f_a) in zip(arg, fake_arg)
+            )
+        return arg
+
+    args = tuple(
+        apply_constraint(arg, fake_arg) for arg, fake_arg in zip(args, fake_args)
+    )
+    kwargs = {k: apply_constraint(v, fake_kwargs[k]) for k, v in kwargs.items()}
     return args, kwargs
 
 
@@ -2916,7 +2942,7 @@ def tensor(data, *, dtype=None, device=None, layout=None, pin_memory=False):
     else:
         dtype = dtype or torch.get_default_dtype()
 
-    ranges: List[sympy.Expr] = []
+    ranges: list[sympy.Expr] = []
 
     if isinstance(data, sympy.Basic):
 
@@ -4029,11 +4055,112 @@ def rev(x, dims):
     )
 
 
+def inplace_constant_pad_nd(
+    x: TensorBox, padding: Sequence[int], fill_value: float
+) -> Optional[TensorBox]:
+    """
+    This optimization changes the semantics of padding from 'clone'
+    style to 'view' style.
+
+    Thanks to functionalization, this change can still maintain numerical
+    correctness.
+    """
+
+    def _padding_can_be_fused():
+        """
+        Conservatively check if padding can be fused with downstream op.
+        1. if the downstream op is a sum, then there is little benefit to
+           do inplace padding
+        2. if the downstream op is a matmul, doing inplace padding can
+           save membw.
+        """
+        current_node = V.graph.current_node
+        if current_node is None:
+            return True  # be conservative
+        users = tuple(current_node.users)
+        if len(users) == 1 and users[0].target in (
+            aten.mm.default,
+            aten.addmm.default,
+        ):
+            return False
+
+        return True  # be conservative
+
+    if _padding_can_be_fused():
+        return None
+
+    # Only handle 2D case for now
+    if len(padding) != 4 or len(x.get_size()) != 2:
+        return None
+
+    # No harm to realize since we already know that
+    # the op can not be fused into the single user.
+    # It need to be realized later anyways.
+    x.realize()
+
+    # If x is a view (e.g. a SliceView), realizing it just realizing the
+    # underlying storage. x itself is still a view.
+    if (
+        not isinstance(x, ir.TensorBox)
+        or not isinstance(x.data, ir.StorageBox)
+        or not (
+            isinstance(x.data.data, ir.ComputedBuffer)
+            or (
+                config.can_inplace_pad_graph_input
+                and isinstance(x.data.data, ir.InputBuffer)
+            )
+        )
+        or not x.data.data.name
+    ):
+        return None
+    x.freeze_layout()
+
+    _, layout = ir.as_storage_and_layout(x)
+    strides = layout.stride
+    if strides[1] != 1:
+        return None
+
+    if padding[0] != 0 or padding[2] != 0 or padding[3] != 0:
+        return None
+
+    npad = padding[1]
+    if npad == 0:
+        return None
+
+    stride0 = strides[0]
+    rowsize = layout.size[1]
+
+    if stride0 < rowsize + npad:
+        return None
+
+    bufname = x.data.data.name
+    padded_size = [layout.size[0], layout.size[1] + npad]
+    V.graph.buffer_to_padded_size[bufname] = padded_size
+    resized_x = as_strided(
+        x,
+        padded_size,
+        layout.stride,
+        layout.offset,
+    )
+
+    sliced_x = slice_(resized_x, dim=1, start=rowsize, end=rowsize + npad)
+    fill_(sliced_x, fill_value)
+
+    counters["inductor"]["inplace_padding"] += 1
+    return resized_x
+
+
 @register_lowering(aten.constant_pad_nd, type_promotion_kind=None)
 def constant_pad_nd(x, padding, fill_value=0):
     assert (len(padding) % 2) == 0
     if all(p == 0 for p in padding):
         return clone(x)
+
+    if config.inplace_padding:
+        out = inplace_constant_pad_nd(x, padding, fill_value)
+        if out:
+            return out
+            # fall through if can not inplace the padding
 
     sizes = x.get_size()
 
@@ -4041,7 +4168,7 @@ def constant_pad_nd(x, padding, fill_value=0):
     n = len(sizes) - len(bounds)
 
     # if padding is a complicated expression, hoist it
-    bounds_precomp: List[tuple[sympy.Symbol, Any]] = []
+    bounds_precomp: list[tuple[sympy.Symbol, Any]] = []
     for l, h in bounds:
         bounds_precomp.append((V.graph.sizevars.lookup_precomputed_size(l), h))  # type: ignore[arg-type]
 

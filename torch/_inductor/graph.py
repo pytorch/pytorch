@@ -23,7 +23,10 @@ from torch import device, Tensor
 from torch._decomp import get_decompositions
 from torch._dynamo.utils import defake, dynamo_timed
 from torch._logging import LazyString, trace_structured
-from torch._prims_common import make_channels_last_strides_for
+from torch._prims_common import (
+    compute_required_storage_length,
+    make_channels_last_strides_for,
+)
 from torch._subclasses.fake_tensor import FakeTensor
 from torch.fx import GraphModule
 from torch.fx.experimental._backward_state import BackwardState
@@ -51,6 +54,7 @@ from .codegen.common import (
     get_device_op_overrides,
     get_wrapper_codegen_for_device,
     init_backend_registration,
+    WorkspaceArg,
 )
 from .codegen.wrapper import PythonWrapperCodegen
 from .exc import (
@@ -72,6 +76,7 @@ from .ir import (
     TorchBindObject,
 )
 from .lowering import (
+    constrain_to_fake_tensors,
     constrain_to_fx_strides,
     FALLBACK_ALLOW_LIST,
     fallback_handler,
@@ -250,6 +255,13 @@ def mark_nodes_dislike_padding(
         )
 
     for cur in reversed(g.nodes):
+        if isinstance(
+            cur.target,
+            torch._higher_order_ops.triton_kernel_wrap.TritonKernelWrapperMutation,
+        ):
+            cur.meta["dislike_padding"] = True
+            continue
+
         op = _get_overload_packet(cur)
         if not op:
             continue
@@ -383,6 +395,11 @@ class GraphLowering(torch.fx.Interpreter):
             const_module.device_idxs if const_module else OrderedSet()
         )
         self.device_type = "cpu"
+
+        # Inplace padding may require Inductor to allocate slightly larger
+        # tensor for padding.
+        self.buffer_to_padded_size: dict[str, list[int]] = {}
+
         self.buffers: list[ir.Buffer] = []
         self.operations: list[ir.Operation] = []
         self.const_output_index: dict[str, int] = (
@@ -486,6 +503,28 @@ class GraphLowering(torch.fx.Interpreter):
         self.placeholder_idx = -1
 
         self.bw_donated_idxs = get_donated_idxs()
+
+    def get_allocation_size(
+        self, node: Union[ir.TensorBox, ir.StorageBox, ir.Buffer, WorkspaceArg]
+    ) -> Sequence[Expr]:
+        if isinstance(node, ir.TensorBox):
+            node = node.data  # type: ignore[assignment]
+        if isinstance(node, ir.StorageBox):
+            node = node.data  # type: ignore[assignment]
+        if (
+            isinstance(node, ir.ComputedBuffer)
+            and node.name in self.buffer_to_padded_size
+        ):
+            return self.buffer_to_padded_size[node.name]
+        else:
+            return node.get_size()
+
+    def get_allocation_storage_size(self, node: Union[ir.Buffer, WorkspaceArg]) -> Expr:
+        layout = node.get_layout()
+        size = self.get_allocation_size(node)  # consider inplace padding
+        stride = layout.stride
+        offset = layout.offset
+        return compute_required_storage_length(size, stride, offset)  # type: ignore[arg-type]
 
     def has_feature(
         self,
@@ -1323,8 +1362,9 @@ class GraphLowering(torch.fx.Interpreter):
             for name in mutated:
                 old_arg = old_kwargs["kwargs"][name]
                 new_arg = new_kwargs["kwargs"][name]
-                if old_arg is new_args:
+                if old_arg is new_arg:
                     continue
+
                 self.call_function(torch.ops.aten.copy_.default, (old_arg, new_arg), {})
             return
 
@@ -1408,7 +1448,15 @@ class GraphLowering(torch.fx.Interpreter):
                 ):
                     old_args = args  # type: ignore[possibly-undefined]
                     old_kwargs = kwargs  # type: ignore[possibly-undefined]
-                    args, kwargs = constrain_to_fx_strides(n, *args, **kwargs)  # type: ignore[index]
+
+                    if arg_kwarg_vals := n.meta.get("arg_kwarg_vals"):
+                        inp_args = arg_kwarg_vals[0]
+                        inp_kwargs = arg_kwarg_vals[1]
+                        args, kwargs = constrain_to_fake_tensors(
+                            args, kwargs, inp_args, inp_kwargs
+                        )
+                    else:
+                        args, kwargs = constrain_to_fx_strides(n, *args, **kwargs)  # type: ignore[index]
                     result = self.call_function(n.target, args, kwargs)  # type: ignore[arg-type]
                     self.propagate_mutation(n, old_args, old_kwargs, args, kwargs)  # type: ignore[possibly-undefined]
                 else:

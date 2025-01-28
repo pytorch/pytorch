@@ -72,6 +72,8 @@ def radians(x):
 
 
 def accumulate_grad(x, new_grad):
+    if new_grad is None:
+        return
     new_grad = torch.clone(new_grad)
     if x.grad is None:
         x.grad = new_grad
@@ -145,6 +147,30 @@ def instantiate_user_defined_class_object(cls, /, *args, **kwargs):
     if isinstance(obj, cls):
         obj.__init__(*args, **kwargs)
     return obj
+
+
+# Used with something like dict(obj)
+def construct_dict(cls, /, *args, **kwargs):
+    dst = cls.__new__(cls)
+
+    if args:
+        src = args[0]
+
+        # Ensure that the overridden __iter__ method is invoked
+        if isinstance(src, (dict, MutableMapping)):
+            for key in src:
+                # This will inline the __getitem__ of the src object
+                dst[key] = src[key]
+        else:
+            # likely a sequence like tuple of pairs
+            for key, value in src:
+                dst[key] = value
+
+    if kwargs:
+        for key in kwargs:
+            dst[key] = kwargs[key]
+
+    return dst
 
 
 def foreach_map_fn(*args):

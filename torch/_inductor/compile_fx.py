@@ -537,7 +537,6 @@ def compile_fx_inner(
     kwargs.setdefault("is_backward", False)
     kwargs.setdefault("graph_id", None)
     kwargs.setdefault("cpp_wrapper", False)
-    kwargs.setdefault("aot_mode", False)
     kwargs.setdefault("is_inference", False)
     kwargs.setdefault("boxed_forward_device_index", None)
     kwargs.setdefault("layout_opt", None)
@@ -564,6 +563,10 @@ def compile_fx_inner(
         # the counter here because we may dropped into compile_fx directly
         # from lazy backwards compilation.
         stack.enter_context(_WaitCounter("pytorch.wait_counter.dynamo_compile").guard())
+
+        if torch._dynamo.callback_handler.prevent_duplicate_callbacks:
+            stack.enter_context(torch._dynamo.callback_handler.install_callbacks())
+
         stack.enter_context(with_fresh_cache_if_config())
         stack.enter_context(DebugContext())
         CompileEventLogger.pt2_compile(
@@ -1384,7 +1387,6 @@ def compile_fx_aot(
             example_inputs_,
             inner_compile=functools.partial(
                 inner_compile,
-                aot_mode=True,
                 extern_node_serializer=extern_node_serializer,
             ),
             config_patches=config_patches,
