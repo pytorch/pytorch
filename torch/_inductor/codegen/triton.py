@@ -3811,7 +3811,7 @@ class TritonKernel(SIMDKernel):
 
 class TritonScheduling(SIMDScheduling):
     kernel_type: type[Any] = TritonKernel
-    backend_features = dict.fromkeys(  # dict for deterministic order
+    backend_features = OrderedSet(
         [
             BackendFeature.FOREACH,
             BackendFeature.BUCKETIZE,
@@ -3823,13 +3823,11 @@ class TritonScheduling(SIMDScheduling):
     )
     if torch.version.hip is None:
         backend_features.update(
-            dict.fromkeys(
-                [
-                    # TODO: Move this above when ROCm triton adds support for multiple inputs
-                    BackendFeature.TUPLE_REDUCTION,
-                    BackendFeature.SORT,
-                ]
-            )
+            [
+                # TODO: Move this above when ROCm triton adds support for multiple inputs
+                BackendFeature.TUPLE_REDUCTION,
+                BackendFeature.SORT,
+            ]
         )
 
     def __init__(self, scheduler: Optional[Scheduler]) -> None:
@@ -3846,10 +3844,9 @@ class TritonScheduling(SIMDScheduling):
             config.triton.cooperative_reductions
             or config.triton.force_cooperative_reductions
         ):
-            return {
-                **cls.backend_features,
-                BackendFeature.REDUCE_TO_SINGLE_ELEMENT: None,
-            }
+            return OrderedSet(
+                [*cls.backend_features, BackendFeature.REDUCE_TO_SINGLE_ELEMENT]
+            )
         return cls.backend_features
 
     def codegen_comment(self, node_schedule):
