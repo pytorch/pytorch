@@ -1593,10 +1593,12 @@ class PythonWrapperCodegen(CodeGen):
 
         signature: list[KernelArgType] = []
         constants: dict[str, Any] = {}
+        arg_indices: list[int] = []
         equal_to_1_args: list[str] = []
 
         def add_to_signature(idx, arg):
             signature.append(arg)
+            arg_indices.append(idx)
 
         def add_arg(idx, arg, is_constexpr=False, equals_1=False, equals_none=False):
             if is_constexpr:
@@ -1628,9 +1630,9 @@ class PythonWrapperCodegen(CodeGen):
                 elif equals_none:
                     if triton_version_uses_attrs_dict():
                         # new versions of triton: add the none arg in the signature (as a constexpr arg) and as a constant
-                        # old versions of triton: don't include the none arg in the signature or in the constants.
+                        # old versions of triton: include the none arg as a constant (but not in the signature)
                         add_to_signature(idx, ConstexprArg(name=arg.name))
-                        constants[arg.name] = None
+                    constants[arg.name] = None
                 else:
                     add_to_signature(idx, arg)
 
@@ -1687,6 +1689,7 @@ class PythonWrapperCodegen(CodeGen):
         triton_signature = signature_to_meta(
             signature,
             size_dtype=None,  # try to infer based on symints
+            indices=arg_indices,
             argdefs=[ArgName(x) for x in kernel.arg_names],
         )
         triton_meta: dict[str, Any] = {
@@ -1706,6 +1709,7 @@ class PythonWrapperCodegen(CodeGen):
             "configs": [
                 config_of(
                     signature,
+                    indices=arg_indices,
                 )
             ],
         }
