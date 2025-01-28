@@ -114,10 +114,6 @@ hf_Reformer,pass,23
 
 
 
-hf_Roberta_base,fail_accuracy,6
-
-
-
 hf_T5_base,eager_2nd_run_OOM,0
 
 
