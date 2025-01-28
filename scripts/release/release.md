@@ -180,8 +180,7 @@ PyTorch will stop publishing Anaconda packages that depend on Anaconda’s defau
 
 * **Added Manylinux 2.28 prototype support and CXX11_ABI=1 for following binaries: Linux CUDA 12.6, Linux aarch64 CPU, Linux aarch64 GPU CUDA 12.6, ROCm 6.2.4, Linux XPU  ([#139894](https://github.com/pytorch/pytorch/pull/139894)) ([#139631](https://github.com/pytorch/pytorch/pull/139631)) ([#139636](https://github.com/pytorch/pytorch/pull/139636)) ([#140743](https://github.com/pytorch/pytorch/pull/140743)) ([#137696](https://github.com/pytorch/pytorch/pull/137696)) ([#141565](https://github.com/pytorch/pytorch/pull/141565)) ([#140681](https://github.com/pytorch/pytorch/pull/140681)) ([#141609](https://github.com/pytorch/pytorch/pull/141609)) ([#141704](https://github.com/pytorch/pytorch/pull/141704)) ([#141423](https://github.com/pytorch/pytorch/pull/141423)) ([#141609](https://github.com/pytorch/pytorch/pull/141609))**
 
-TODO: This is nvidia statement, we should have a better one
-The PyTorch binaries shipped with CUDA 12.6.3 are built with CXX11_ABI=1 and are using the Manylinux 2.28 build platform. If you are building PyTorch extensions with custom C++ or CUDA extensions, please update these builds to use CXX_ABI=1 as well and report any issues you are seeing.
+The PyTorch binaries shipped with CUDA 12.6.3 are built with CXX11_ABI=1 and are using the Manylinux 2.28 build platform. If you are building PyTorch extensions with custom C++ or CUDA extensions, please update these builds to use CXX_ABI=1 as well and report any issues you are seeing. For the next PyTorch 2.7 release we plan to switch all Linux builds to Manylinux 2.28 and CXX11_ABI=1, please see [[RFC] PyTorch next wheel build platform: manylinux-2.28](https://github.com/pytorch/pytorch/issues/123649) for the details and discussion.
 
 
 ## **Deprecations**
