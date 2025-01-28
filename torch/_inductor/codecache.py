@@ -534,16 +534,23 @@ class FxGraphCachePickler(pickle.Pickler):
 
     def _reduce_tensor(
         self, t: Tensor
-    ) -> Tuple[Callable[[T], T], Tuple[TensorMetadataAndValues]]:
+    ) -> Tuple[Callable[[T], T], Tuple[Union[TensorMetadata, TensorMetadataAndValues]]]:
         """
         Custom reducer to pickle Tensors.  If we see tensors, we know they're constants
         stored as attributes on the GraphModule.
         """
+        from .graph import GraphLowering
+
         if t.is_mkldnn:
             # TODO: These tensors don't currently pickle, so we can't cache a compiled
             # graph containing them. Just fail now. If mkldnn tensors get pickling
             # support, we can remove this.
             raise BypassFxGraphCache("mkldnn tensors unpickleable")
+
+        # If this is a non-inlined frozen parameter, we consider the metadata only.
+        metadata = extract_tensor_metadata_for_cache_key(t)
+        if t in self._frozen_params and not GraphLowering.can_inline_constant(t):
+            return (_ident, (metadata,))
 
         # Very large tensors will be expensive to copy to cpu and hash. Let's at least
         # report any slowness.
@@ -556,20 +563,12 @@ class FxGraphCachePickler(pickle.Pickler):
                 "Please file an issue."
             )
 
-        metadata = extract_tensor_metadata_for_cache_key(t)
         return (_ident, (TensorMetadataAndValues(metadata, values),))
 
     def _reduce_parameter(
         self, p: torch.nn.parameter.Parameter
     ) -> Tuple[Callable[[T], T], Tuple[Union[TensorMetadata, TensorMetadataAndValues]]]:
-        from .graph import GraphLowering
-
-        # If this is a non-inlined frozen parameter, we consider the metadata only.
-        if p in self._frozen_params and not GraphLowering.can_inline_constant(p):
-            metadata = extract_tensor_metadata_for_cache_key(p)
-            return (_ident, (metadata,))
-        else:
-            return self._reduce_tensor(p)
+        return self._reduce_tensor(p)
 
     def _reduce_symint(self, s: SymInt) -> tuple[Callable[[T], T], tuple[str]]:
         """
