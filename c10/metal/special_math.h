@@ -30,6 +30,36 @@ T erf(T x) {
   return sign * y;
 }
 
+template <typename T>
+float erfinv(T y) {
+  /* coefficients in rational expansion */
+  constexpr float a[4] = {0.886226899, -1.645349621, 0.914624893, -0.140543331};
+  constexpr float b[4] = {-2.118377725, 1.442710462, -0.329097515, 0.012229801};
+  constexpr float c[4] = {-1.970840454, -1.624906493, 3.429567803, 1.641345311};
+  constexpr float d[2] = {3.543889200, 1.637067800};
+
+  float x, z, num, dem; /*working variables */
+
+  float y_abs = ::metal::abs(static_cast<float>(y));
+  if (y_abs >= 1.0f) {
+    return y_abs > 1.0f ? NAN
+                        : ::metal::copysign(INFINITY, static_cast<float>(y));
+  }
+  if (y_abs <= 0.7f) {
+    z = y * y;
+    num = ((a[3] * z + a[2]) * z + a[1]) * z + a[0];
+    dem = (((b[3] * z + b[2]) * z + b[1]) * z + b[0]) * z + 1.0f;
+    x = y * num / dem;
+  } else {
+    z = ::metal::sqrt(-1.0f * ::metal::log((1.0 - y_abs) / 2.0));
+    num = ((c[3] * z + c[2]) * z + c[1]) * z + c[0];
+    dem = (d[1] * z + d[0]) * z + 1.0f;
+    x = ::metal::copysign(num, static_cast<float>(y)) / dem;
+  }
+
+  return x;
+}
+
 /*
  * For licensing information and documentation, please refer to the cpu
  * implementation located in "ATen/native/Math.h".
@@ -159,6 +189,126 @@ T i1(T _x) {
   const auto out = (::metal::exp(x) * chbevl(32. / x - 2., coefficients, 25)) /
       ::metal::sqrt(x);
   return static_cast<T>(_x < T(0.) ? -out : out);
+}
+
+// gamma, lgamma
+template <typename T>
+float log_gamma(const T);
+
+template <typename T>
+float gamma(const T x) {
+  if (x < 0.001) {
+    constexpr float EULER_MASCHERONI = 0.577215664901532860606512090;
+    // For small x, 1/gamma(x) has power series x + gamma x^2  - ...
+    // So in this range, 1/gamma(x) = x + gamma x^2 with error on the order of
+    // x^3. The relative error over this interval is less than 6e-7.
+
+    return 1.0 / (x * (1.0 + EULER_MASCHERONI * x));
+  }
+  if (x >= 12.0) {
+    return ::metal::exp(log_gamma(x));
+  }
+  // The algorithm directly approximates gamma over (1,2) and uses
+  // reduction identities to reduce other arguments to this interval.
+  // numerator coefficients for gamma approximation over the interval (1,2)
+  constexpr float GAMMA_NUMERATOR_COEF[8] = {
+      -1.71618513886549492533811E+0,
+      2.47656508055759199108314E+1,
+      -3.79804256470945635097577E+2,
+      6.29331155312818442661052E+2,
+      8.66966202790413211295064E+2,
+      -3.14512729688483675254357E+4,
+      -3.61444134186911729807069E+4,
+      6.64561438202405440627855E+4};
+
+  // denominator coefficients for gamma approximation over the interval (1,2)
+  constexpr float GAMMA_DENOMINATOR_COEF[8] = {
+      -3.08402300119738975254353E+1,
+      3.15350626979604161529144E+2,
+      -1.01515636749021914166146E+3,
+      -3.10777167157231109440444E+3,
+      2.25381184209801510330112E+4,
+      4.75584627752788110767815E+3,
+      -1.34659959864969306392456E+5,
+      -1.15132259675553483497211E+5};
+
+  // Add or subtract integers as necessary to bring y into (1,2)
+  float y = 1.0 + ::metal::fract(x);
+
+  float num = 0.0;
+  float den = 1.0;
+
+  float z = y - 1;
+  for (int i = 0; i < 8; i++) {
+    num = (num + GAMMA_NUMERATOR_COEF[i]) * z;
+    den = den * z + GAMMA_DENOMINATOR_COEF[i];
+  }
+  float result = num / den + 1.0;
+
+  // Apply correction if argument was not initially in (1,2)
+  if (x < 1.0) {
+    // identity gamma(z) = gamma(z+1)/z
+    result /= (y - 1.0);
+  } else {
+    // identity gamma(z+n) = z*(z+1)* ... *(z+n-1)*gamma(z)
+    auto n = static_cast<int>(::metal::floor(x));
+    for (int i = 1; i < n; i++) {
+      result *= y++;
+    }
+  }
+
+  return result;
+}
+
+template <typename T>
+float log_gamma(const T x) {
+  constexpr float LOG_PI = 1.14472988584940017414342735135305;
+  constexpr float HALF_LOG_TWO_PI = 0.91893853320467274178032973640562;
+  constexpr float LGAMMA_EXPANSION_COEF[8] = {
+      1.0 / 12.0,
+      -1.0 / 360.0,
+      1.0 / 1260.0,
+      -1.0 / 1680.0,
+      1.0 / 1188.0,
+      -691.0 / 360360.0,
+      1.0 / 156.0,
+      -3617.0 / 122400.0};
+
+  float rc;
+
+  const auto abs_x = ::metal::abs(static_cast<float>(x));
+  if (abs_x == 0) {
+    return INFINITY;
+  }
+  if (abs_x < 12.0) {
+    rc = ::metal::log(::metal::abs(gamma(abs_x)));
+  } else {
+    // Abramowitz and Stegun 6.1.41
+    // Asymptotic series should be good to at least 11 or 12 figures
+    // For error analysis, see Whittiker and Watson
+    // A Course in Modern Analysis (1927), page 252
+
+    float z = 1.0 / (abs_x * abs_x);
+    float sum = LGAMMA_EXPANSION_COEF[7];
+
+    for (int i = 6; i >= 0; i--) {
+      sum *= z;
+      sum += LGAMMA_EXPANSION_COEF[i];
+    }
+    float series = sum / abs_x;
+
+    rc = (abs_x - 0.5) * ::metal::log(abs_x) - abs_x + HALF_LOG_TWO_PI + series;
+  }
+
+  if (x >= 0) {
+    return rc;
+  }
+
+  // Reflection formula
+  // Compute arg first to workaround Metal compiler bgg of sorts on M4
+  // See https://github.com/pytorch/pytorch/pull/145740 for more details
+  auto log_arg = abs_x * ::metal::abs(::metal::sinpi(abs_x));
+  return LOG_PI - rc - ::metal::log(log_arg);
 }
 
 } // namespace metal
