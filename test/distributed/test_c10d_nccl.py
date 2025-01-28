@@ -3147,6 +3147,8 @@ class NcclUserBufferRegistrationTest(MultiProcessTestCase):
         os.environ["NCCL_ALGO"] = "NVLS"
         os.environ["NCCL_DEBUG"] = "INFO"
         os.environ["NCCL_DEBUG_SUBSYS"] = "NVLS"
+        if torch.cuda.nccl.version() >= (2, 24, 3):
+            os.environ["NCCL_DEBUG_SUBSYS"] = "REG"
         os.environ["NCCL_DEBUG_FILE"] = nccl_debug_file.name
         self._spawn_processes()
 
@@ -3198,8 +3200,13 @@ class NcclUserBufferRegistrationTest(MultiProcessTestCase):
         with open(os.environ["NCCL_DEBUG_FILE"]) as f:
             nccl_debug_file_content = f.read()
             # if buffers were registered and NVLS reduction ran, NCCL_DEBUG
-            # should show "local-registered" in stdout
-            self.assertRegex(nccl_debug_file_content, "local-registered")
+            # should show successful registration in debug output
+            if torch.cuda.nccl.version() >= (2, 24, 3):
+                self.assertRegex(
+                    nccl_debug_file_content, "successfully registered NVLS"
+                )
+            else:
+                self.assertRegex(nccl_debug_file_content, "local-registered")
 
 
 class CommTest(test_c10d_common.AbstractCommTest, MultiProcessTestCase):

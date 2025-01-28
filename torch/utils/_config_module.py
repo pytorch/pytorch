@@ -470,18 +470,11 @@ class ConfigModule(ModuleType):
             ignored_prefixes are prefixes that if a key matches should
                 not be exported
             skip_default does two things. One if a key has not been modified
-                it skips it. The other is it modified the logging behaviour
-                to match what codegen already did for modified skipped keys
+                it skips it.
         """
         config: dict[str, Any] = {}
         for key in self._config:
             if ignored_keys and key in ignored_keys:
-                if skip_default and not self._is_default(key):
-                    from torch._dynamo.utils import warn_once
-
-                    warn_once(
-                        f"Skipping serialization of {key} value {getattr(self, key)}"
-                    )
                 continue
             if ignored_prefixes:
                 if any(key.startswith(prefix) for prefix in ignored_prefixes):

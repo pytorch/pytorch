@@ -33,6 +33,7 @@ from ..utils import (
     is_tensor_base_attr_getter,
     proxy_args_kwargs,
     set_example_value,
+    tuple_methods,
 )
 from .base import VariableTracker
 from .functions import (
@@ -213,6 +214,11 @@ class SuperVariable(VariableTracker):
             and inner_fn in self.objvar._dict_methods
         ):
             return self.objvar._dict_vt.call_method(tx, name, args, kwargs)
+        elif (
+            isinstance(self.objvar, variables.UserDefinedTupleVariable)
+            and inner_fn in tuple_methods
+        ):
+            return self.objvar._tuple_vt.call_method(tx, name, args, kwargs)
         elif inner_fn is object.__getattribute__:
             # object.__getattribute__ has no side-effects. We can directly call
             # __getattribute__ to access the attribute.
@@ -1205,10 +1211,6 @@ class TypingVariable(VariableTracker):
 
 @functools.lru_cache(maxsize=1)
 def get_np_to_tnp_map():
-    """
-    This generates a mapping from numpy modules to their torch._numpy
-    modules equivalents.
-    """
     from ..utils import NP_TO_TNP_MODULE
 
     np_fn_to_tnp_fn = {}
@@ -1222,16 +1224,6 @@ def get_np_to_tnp_map():
                     np_fn_to_tnp_fn[np_fn] = tnp_fn
 
     return np_fn_to_tnp_fn
-
-
-@functools.lru_cache(maxsize=1)
-def get_tnp_to_np_map():
-    """
-    This is just the reverse mapping of get_np_to_tnp_map() - mapping from
-    torch._numpy modules to numpy equivalents.
-    """
-    m = get_np_to_tnp_map()
-    return {v: k for k, v in m.items()}
 
 
 class NumpyVariable(VariableTracker):
@@ -1721,6 +1713,7 @@ class RandomVariable(VariableTracker):
             tx.output.side_effects.mutation(self)
             state = self.random.getstate()
 
+            # Generate new random object with the same state and call the method
             def call_random_meth(*args, **kwargs):
                 r = random.Random()
                 r.setstate(state)
