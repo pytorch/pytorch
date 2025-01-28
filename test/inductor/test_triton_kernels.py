@@ -1231,8 +1231,6 @@ def forward(self, x_1, output_1):
     @requires_gpu
     @common_utils.parametrize("dynamic", [False, True])
     def test_triton_kernel_equal_to_1_arg(self, dynamic):
-        from torch._inductor.utils import triton_version_uses_attrs_dict
-
         @triton.jit
         def add_kernel_half_n_elements(
             in_ptr0,
@@ -1282,8 +1280,6 @@ def forward(self, x_1, output_1):
     @requires_gpu
     @common_utils.parametrize("dynamic", [False, True])
     def test_triton_kernel_equal_to_1_float_arg(self, dynamic):
-        from torch._inductor.utils import triton_version_uses_attrs_dict
-
         def f(x, y):
             out = torch.empty_like(x)
             n_elements = x.numel()
