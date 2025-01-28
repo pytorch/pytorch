@@ -4,7 +4,7 @@ import logging
 import os
 import struct
 
-from typing import Any, List, Optional
+from typing import Any, Optional
 
 import torch
 import numpy as np
@@ -74,13 +74,13 @@ def int_to_half(i: int) -> float:
     buf = struct.pack("i", i)
     return struct.unpack("f", buf)[0]
 
-def _tensor_to_half_val(t: torch.Tensor) -> List[int]:
+def _tensor_to_half_val(t: torch.Tensor) -> list[int]:
     return [half_to_int(x) for x in t.flatten().tolist()]
 
-def _tensor_to_complex_val(t: torch.Tensor) -> List[float]:
+def _tensor_to_complex_val(t: torch.Tensor) -> list[float]:
     return torch.view_as_real(t).flatten().tolist()
 
-def _tensor_to_list(t: torch.Tensor) -> List[Any]:
+def _tensor_to_list(t: torch.Tensor) -> list[Any]:
     return t.flatten().tolist()
 
 # type maps: torch.Tensor type -> (protobuf type, protobuf val field)

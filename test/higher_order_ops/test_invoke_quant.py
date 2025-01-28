@@ -204,7 +204,8 @@ class TestInvokeQuantInductor(TestInvokeQuant):
         x_clone = x.clone().detach().requires_grad_(False)
         y_clone = y.clone().detach().requires_grad_(False)
         z_clone = z.clone().detach().requires_grad_(False)
-        with config.patch(max_autotune_gemm_backends="TRITON"):
+        torch._dynamo.reset()
+        with torch.no_grad(), config.patch(max_autotune_gemm_backends="TRITON"):
             fn_c = torch.compile(fn, mode="max-autotune-no-cudagraphs")
             res, code = run_and_get_code(fn_c, x_clone, y_clone, z_clone)
 

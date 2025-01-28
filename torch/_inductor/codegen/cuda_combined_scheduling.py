@@ -1,5 +1,6 @@
 # mypy: allow-untyped-defs
-from typing import Sequence, Union
+from collections.abc import Sequence
+from typing import Optional, Union
 
 from ..scheduler import (
     BaseSchedulerNode,
@@ -23,9 +24,8 @@ class CUDACombinedScheduling(BaseScheduling):
     this would also be the place to do it.
     """
 
-    def __init__(self, scheduler: Scheduler) -> None:
-        super().__init__()
-        self._scheduler = scheduler
+    def __init__(self, scheduler: Optional[Scheduler]) -> None:
+        super().__init__(scheduler)
         self._triton_scheduling = TritonScheduling(scheduler)
         self._cuda_cpp_scheduling = CUDACPPScheduling(scheduler)
         self._rocm_cpp_scheduling = ROCmCPPScheduling(scheduler)

@@ -5,7 +5,7 @@ import logging
 import operator
 import typing
 from collections import Counter
-from typing import Any, Dict, List, Union
+from typing import Any, Union
 
 import torch
 import torch._guards
@@ -159,7 +159,7 @@ def remove_redundant_views(gm: torch.fx.GraphModule):
     """
     with torch.utils._python_dispatch._disable_current_modes():
         # A dictionary mapping a tensor to all aliased views.
-        views: Dict[torch.fx.Node, Dict[torch.dtype, torch.fx.Node]] = {}
+        views: dict[torch.fx.Node, dict[torch.dtype, torch.fx.Node]] = {}
         graph = gm.graph
 
         for node in graph.find_nodes(
@@ -206,11 +206,11 @@ class UniformValueConstantFolder(ConstantFolder):
 
     def __init__(self, gm, skip_constructors=False) -> None:
         super().__init__(gm, skip_constructors)
-        self.node_storages_ptrs: Dict[torch.fx.Node, int] = {}
-        self.constant_data_ptrs: Dict[torch.fx.Node, StorageWeakRef] = {}
+        self.node_storages_ptrs: dict[torch.fx.Node, int] = {}
+        self.constant_data_ptrs: dict[torch.fx.Node, StorageWeakRef] = {}
         # we may constant fold a tensor which in the graph has a sym size
         # see: [constant folding refining of symints]
-        self.node_replacements_shapes: Dict[torch.fx.Node, List[int]] = {}
+        self.node_replacements_shapes: dict[torch.fx.Node, list[int]] = {}
 
         # initialize symint -> node mapping so that we can
         # use symint nodes in full constructors
@@ -250,7 +250,7 @@ class UniformValueConstantFolder(ConstantFolder):
         self.node_replacements_shapes[node] = node.meta["val"].shape
         self.constant_data_ptrs[node] = StorageWeakRef(tensor.untyped_storage())
 
-    def insert_placerholder_values(self, env: Dict[torch.fx.Node, Any]) -> None:
+    def insert_placerholder_values(self, env: dict[torch.fx.Node, Any]) -> None:
         for n in self.module.graph.find_nodes(op="placeholder"):  # type: ignore[operator, union-attr]
             if "val" in n.meta and isinstance(n.meta["val"], torch.SymInt):
                 env[n] = n.meta["val"]
