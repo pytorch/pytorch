@@ -1186,6 +1186,7 @@ class CompilationMetrics:
     tensorify_float_attempt: Optional[bool] = None
     tensorify_float_success: Optional[bool] = None
     tensorify_float_failure: Optional[set[str]] = None
+    guard_latency_us: Optional[float] = None
 
     @classmethod
     def create(cls, metrics: dict[str, Any]):
@@ -2296,6 +2297,9 @@ dict_methods = {
     for method in itertools.chain(dict.__dict__.values(), OrderedDict.__dict__.values())
     if callable(method)
 }
+
+tuple_new = tuple.__new__
+tuple_methods = {method for method in tuple.__dict__.values() if callable(method)}
 
 
 def builtin_dict_keys(d):

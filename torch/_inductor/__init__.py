@@ -4,7 +4,7 @@ from __future__ import annotations
 import io
 import logging
 import os
-from typing import Any, Dict, List, Optional, Tuple, TYPE_CHECKING, Union
+from typing import Any, Dict, IO, List, Optional, Tuple, TYPE_CHECKING, Union
 
 import torch._inductor.config
 import torch.fx
@@ -13,7 +13,7 @@ import torch.fx
 if TYPE_CHECKING:
     from torch._inductor.utils import InputType
     from torch.export import ExportedProgram
-
+    from torch.types import FileLike
 
 __all__ = [
     "compile",
@@ -53,7 +53,7 @@ def aoti_compile_and_package(
     _deprecated_unused_args=None,
     _deprecated_unused_kwargs=None,
     *,
-    package_path: Optional[Union[str, io.BytesIO]] = None,
+    package_path: Optional[FileLike] = None,
     inductor_configs: Optional[dict[str, Any]] = None,
 ) -> str:
     """
@@ -105,8 +105,15 @@ def aoti_compile_and_package(
 
     assert (
         package_path is None
-        or isinstance(package_path, io.BytesIO)
-        or (isinstance(package_path, str) and package_path.endswith(".pt2"))
+        or (
+            isinstance(package_path, (io.IOBase, IO))
+            and package_path.writable()
+            and package_path.seekable()
+        )
+        or (
+            isinstance(package_path, (str, os.PathLike))
+            and os.fspath(package_path).endswith(".pt2")
+        )
     ), f"Expect package path to be a file ending in .pt2, is None, or is a buffer. Instead got {package_path}"
 
     inductor_configs = inductor_configs or {}
@@ -134,6 +141,7 @@ def _aoti_compile_and_package_inner(
     kwargs: Optional[dict[str, Any]] = None,
     *,
     load_and_run: bool = False,
+    check_accuracy: Optional[str] = None,
     package_path: Optional[Union[str, io.BytesIO]] = None,
     inductor_configs: Optional[dict[str, Any]] = None,
 ):
@@ -142,7 +150,19 @@ def _aoti_compile_and_package_inner(
 
     If `load_and_run` is True, this function will load the compiled model and run it.
     This is for the minifier to check the correctness of the compiled model.
+
+    If `check_accuracy` is set, this function will check the accuracy of the compiled
+    model against gm. kwargs must be None if check_accuracy is set.
+    "strict_accuracy" means "we will minify any time we see anything that
+     diverges", whereas "accuracy" is more conservative, and will only minify if there
+     is a meaningful fp64 divergence
     """
+
+    if check_accuracy:
+        assert (
+            kwargs is None or len(kwargs) == 0
+        ), "when checking for accuracy, the inputs must have been flattened and kwargs is None"
+
     from .package import package_aoti
 
     assert isinstance(gm, torch.fx.GraphModule)
@@ -169,13 +189,32 @@ def _aoti_compile_and_package_inner(
     res = package_aoti(package_path, aoti_files)
     assert res == package_path
 
-    if load_and_run:
+    if load_and_run or check_accuracy:
         compiled_model = aoti_load_package(package_path)
-        compiled_model(*args, **kwargs)
+        if check_accuracy:
+            from torch._dynamo.debug_utils import AccuracyError, same_two_models
+
+            # This might look inverted but it's not.  strict_accuracy means "we will
+            # minify any time we see anything that diverges", whereas accuracy is more
+            # conservative, and will only minify if there is a meaningful fp64
+            # divergence
+            not_strict_accuracy = check_accuracy == "accuracy"
+            if not same_two_models(
+                gm,
+                compiled_model,
+                args,
+                only_fwd=True,
+                require_fp64=not_strict_accuracy,
+                ignore_non_fp=not_strict_accuracy,
+            ):
+                raise AccuracyError("Bad accuracy detected")
+        else:
+            compiled_model(*args, **kwargs)
+
     return package_path
 
 
-def aoti_load_package(path: Union[str, io.BytesIO]) -> Any:  # type: ignore[type-arg]
+def aoti_load_package(path: FileLike) -> Any:  # type: ignore[type-arg]
     """
     Loads the model from the PT2 package.
 

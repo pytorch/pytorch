@@ -7,7 +7,6 @@ import torch
 import torch.nn.functional as F
 from torch import Tensor
 from torch.nn.init import xavier_uniform_
-from torch.utils._typing_utils import not_none
 
 from .activation import MultiheadAttention
 from .container import ModuleList
@@ -64,10 +63,7 @@ class Transformer(Module):
         transformer layers.
 
     User is able to modify the attributes as needed. The architecture
-    is based on the paper "Attention Is All You Need". Ashish Vaswani, Noam Shazeer,
-    Niki Parmar, Jakob Uszkoreit, Llion Jones, Aidan N Gomez, Lukasz Kaiser, and
-    Illia Polosukhin. 2017. Attention is all you need. In Advances in Neural Information
-    Processing Systems, pages 6000-6010.
+    is based on the paper `Attention Is All You Need <https://arxiv.org/abs/1706.03762>`_.
 
     Args:
         d_model: the number of expected features in the encoder/decoder inputs (default=512).
@@ -636,11 +632,8 @@ class TransformerEncoderLayer(Module):
         for an in depth discussion of the performant building blocks PyTorch offers for building your own
         transformer layers.
 
-    This standard encoder layer is based on the paper "Attention Is All You Need".
-    Ashish Vaswani, Noam Shazeer, Niki Parmar, Jakob Uszkoreit, Llion Jones, Aidan N Gomez,
-    Lukasz Kaiser, and Illia Polosukhin. 2017. Attention is all you need. In Advances in
-    Neural Information Processing Systems, pages 6000-6010. Users may modify or implement
-    in a different way during application.
+    This standard encoder layer is based on the paper `Attention Is All You Need <https://arxiv.org/abs/1706.03762>`_.
+    Users may modify or implement in a different way during application.
 
     TransformerEncoderLayer can handle either traditional torch.tensor inputs,
     or Nested Tensor inputs.  Derived classes are expected to similarly accept
@@ -848,15 +841,15 @@ class TransformerEncoderLayer(Module):
                 self.self_attn.in_proj_weight,
                 self.self_attn.in_proj_bias,
                 self.self_attn.out_proj.weight,
-                not_none(self.self_attn.out_proj.bias),
+                self.self_attn.out_proj.bias,
                 self.norm1.weight,
                 self.norm1.bias,
                 self.norm2.weight,
                 self.norm2.bias,
                 self.linear1.weight,
-                not_none(self.linear1.bias),
+                self.linear1.bias,
                 self.linear2.weight,
-                not_none(self.linear2.bias),
+                self.linear2.bias,
             )
 
             # We have to use list comprehensions below because TorchScript does not support
@@ -892,7 +885,7 @@ class TransformerEncoderLayer(Module):
                     self.self_attn.in_proj_weight,
                     self.self_attn.in_proj_bias,
                     self.self_attn.out_proj.weight,
-                    not_none(self.self_attn.out_proj.bias),
+                    self.self_attn.out_proj.bias,
                     self.activation_relu_or_gelu == 2,
                     self.norm_first,
                     self.norm1.eps,
@@ -901,9 +894,9 @@ class TransformerEncoderLayer(Module):
                     self.norm2.weight,
                     self.norm2.bias,
                     self.linear1.weight,
-                    not_none(self.linear1.bias),
+                    self.linear1.bias,
                     self.linear2.weight,
-                    not_none(self.linear2.bias),
+                    self.linear2.bias,
                     merged_mask,
                     mask_type,
                 )
@@ -957,11 +950,8 @@ class TransformerDecoderLayer(Module):
         for an in depth discussion of the performant building blocks PyTorch offers for building your own
         transformer layers.
 
-    This standard decoder layer is based on the paper "Attention Is All You Need".
-    Ashish Vaswani, Noam Shazeer, Niki Parmar, Jakob Uszkoreit, Llion Jones, Aidan N Gomez,
-    Lukasz Kaiser, and Illia Polosukhin. 2017. Attention is all you need. In Advances in
-    Neural Information Processing Systems, pages 6000-6010. Users may modify or implement
-    in a different way during application.
+    This standard decoder layer is based on the paper `Attention Is All You Need <https://arxiv.org/abs/1706.03762>`_.
+    Users may modify or implement in a different way during application.
 
     Args:
         d_model: the number of expected features in the input (required).
