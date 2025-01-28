@@ -877,6 +877,77 @@ cunn_SoftMaxBackward(scalar_t *gradInput, const outscalar_t *output, const outsc
   }
 }
 
+template <int ILP, typename scalar_t, typename accscalar_t, typename outscalar_t, template<typename, typename, typename> class Epilogue>
+__global__ void
+cunn_SoftMaxBackwardSmem(scalar_t *gradInput, const outscalar_t *output, const outscalar_t *gradOutput, int64_t classes)
+{
+  using LoadT = at::native::memory::aligned_vector<scalar_t, ILP>;
+  using StoreT = at::native::memory::aligned_vector<outscalar_t, ILP>;
+
+  // The first smem segment is used to cache input values and the last
+  // segment is used for thread block reductions
+  extern __shared__ unsigned char smem[];
+  auto smem_input_cache = reinterpret_cast<outscalar_t*>(smem);
+  auto smem_reduction_cache = reinterpret_cast<accscalar_t*>(smem +
+    classes * sizeof(outscalar_t));
+
+  gradInput += static_cast<int64_t>(blockIdx.x) * classes;
+  output += static_cast<int64_t>(blockIdx.x) * classes;
+  gradOutput += static_cast<int64_t>(blockIdx.x) * classes;
+
+  const int64_t shift = ((uint64_t)gradInput) % ALIGN_BYTES / sizeof(scalar_t);
+  const int64_t output_shift = ((uint64_t)output) % ALIGN_BYTES / sizeof(outscalar_t);
+  const int64_t grad_output_shift = ((uint64_t)gradOutput) % ALIGN_BYTES / sizeof(outscalar_t);
+
+  const bool can_use_32bit_indexing = is_32bit_representable(shift) && is_32bit_representable(output_shift) && is_32bit_representable(grad_output_shift) && is_32bit_representable(classes);
+  accscalar_t threadSum = 0;
+  assert(can_use_32bit_indexing);
+  assert(shift == 0);
+  assert(output_shift == 0);
+  assert(grad_output_shift == 0);
+
+  using LoadT = at::native::memory::aligned_vector<scalar_t, ILP>;
+  const LoadT* const gradOutput_vec_ptr = reinterpret_cast<const LoadT*>(gradOutput);
+  LoadT* const smem_gradOutput_cache_vec_ptr = reinterpret_cast<LoadT*>(smem_input_cache);
+
+  // Download inputs to shared memory while doing the first step
+  // in sum calculation
+  for (int32_t offset = threadIdx.x; offset * ILP < classes; offset += blockDim.x) {
+    LoadT crnt_vec = gradOutput_vec_ptr[offset];
+    smem_gradOutput_cache_vec_ptr[offset] = crnt_vec;
+
+    #pragma unroll
+    for (int i = 0; i < ILP; ++i) {
+      // printf("AHMAD2: offset=%d i=%d val=%.15lf threadSum=%e\n", offset, i, crnt_vec.val[i], threadSum);
+      threadSum = threadSum + crnt_vec.val[i];
+    }
+  }
+
+  // We need a __syncthreads() here to be safe. However, blockReduceWarp's code
+  // calls a __syncthreads() before reading shared memory so we are safe.
+
+  accscalar_t sum_k = blockReduceWarp<Add, accscalar_t>(smem_reduction_cache, threadSum, Add<accscalar_t>(), accscalar_t(0));
+
+  Epilogue<scalar_t, accscalar_t, outscalar_t> epilogue(sum_k);
+
+  // Use vectorized stores to save the output
+  using StoreT = at::native::memory::aligned_vector<outscalar_t, ILP>;
+  StoreT* gradInput_vec_ptr = reinterpret_cast<StoreT*>(gradInput);
+  const LoadT* const output_vec_ptr = reinterpret_cast<const LoadT*>(output);
+  for (int32_t offset = threadIdx.x; offset * ILP < classes; offset += blockDim.x) {
+    LoadT crnt_vec = smem_gradOutput_cache_vec_ptr[offset];
+    LoadT crnt_out = output_vec_ptr[offset];
+    StoreT out_vec;
+
+    #pragma unroll
+    for (int i = 0; i < ILP; ++i) {
+      out_vec.val[i] = epilogue(crnt_vec.val[i], crnt_out.val[i]);
+    }
+
+    gradInput_vec_ptr[offset] = out_vec;
+  }
+}
+
 template<template<typename, typename, typename> class Epilogue, bool is_log_softmax>
 Tensor host_softmax(const Tensor & input_, const int64_t dim_, const bool half_to_float, const Tensor& output){
   if (half_to_float) {
@@ -1101,10 +1172,26 @@ void host_softmax_backward(const Tensor &grad_, const Tensor &output_, int64_t d
       } else {
         constexpr int ILP = sizeof(float4) / sizeof(scalar_t);
         dim3 block = SoftMax_getBlockSize(ILP, dim_size);
-        cunn_SoftMaxBackward<ILP, scalar_t, accscalar_t, scalar_t, Epilogue>
-         <<<grid, block, block.x * sizeof(accscalar_t), stream>>>(
-            gI.mutable_data_ptr<scalar_t>(), output.const_data_ptr<scalar_t>(), grad.const_data_ptr<scalar_t>(), dim_size
-        );
+
+        size_t smem_reduction_sz = block.x / C10_WARP_SIZE * sizeof(accscalar_t);
+        auto max_elements_per_smem = (at::cuda::getCurrentDeviceProperties()->sharedMemPerBlock -
+          smem_reduction_sz) / sizeof(scalar_t);
+        bool can_use_smem = dim_size < max_elements_per_smem;
+        can_use_smem &= !(reinterpret_cast<const uintptr_t>(grad.const_data_ptr<scalar_t>()) % ALIGN_BYTES);
+        can_use_smem &= (!(reinterpret_cast<uintptr_t>(gI.const_data_ptr<scalar_t>()) % ALIGN_BYTES));
+        can_use_smem &= !(dim_size % ILP);
+
+        if (can_use_smem) {
+          size_t smem_sz = dim_size * sizeof(scalar_t) + smem_reduction_sz;
+          cunn_SoftMaxBackwardSmem<ILP, scalar_t, accscalar_t, scalar_t, Epilogue>
+          <<<grid, block, smem_sz, stream>>>(
+            gI.mutable_data_ptr<scalar_t>(), output.const_data_ptr<scalar_t>(), grad.const_data_ptr<scalar_t>(), dim_size);
+        } else {
+          cunn_SoftMaxBackward<ILP, scalar_t, accscalar_t, scalar_t, Epilogue>
+          <<<grid, block, block.x * sizeof(accscalar_t), stream>>>(
+              gI.mutable_data_ptr<scalar_t>(), output.const_data_ptr<scalar_t>(), grad.const_data_ptr<scalar_t>(), dim_size
+          );
+        }
         C10_CUDA_KERNEL_LAUNCH_CHECK();
       }
     } else {
@@ -1125,10 +1212,26 @@ void host_softmax_backward(const Tensor &grad_, const Tensor &output_, int64_t d
       } else {
         constexpr int ILP = sizeof(float4) / sizeof(accscalar_t);
         dim3 block = SoftMax_getBlockSize(ILP, dim_size);
-        cunn_SoftMaxBackward<ILP, scalar_t, accscalar_t, accscalar_t, Epilogue>
-         <<<grid, block, block.x * sizeof(accscalar_t), stream>>>(
-            gI.mutable_data_ptr<scalar_t>(), output.const_data_ptr<accscalar_t>(), grad.const_data_ptr<accscalar_t>(), dim_size
-        );
+
+        size_t smem_reduction_sz = block.x / C10_WARP_SIZE * sizeof(accscalar_t);
+        auto max_elements_per_smem = (at::cuda::getCurrentDeviceProperties()->sharedMemPerBlock -
+          smem_reduction_sz) / sizeof(scalar_t);
+        bool can_use_smem = dim_size < max_elements_per_smem;
+        can_use_smem &= !(reinterpret_cast<const uintptr_t>(grad.const_data_ptr<scalar_t>()) % ALIGN_BYTES);
+        can_use_smem &= (!(reinterpret_cast<uintptr_t>(gI.const_data_ptr<scalar_t>()) % ALIGN_BYTES));
+        can_use_smem &= !(dim_size % ILP);
+
+        if (can_use_smem) {
+          size_t smem_sz = dim_size * sizeof(scalar_t) + smem_reduction_sz;
+          cunn_SoftMaxBackwardSmem<ILP, scalar_t, accscalar_t, scalar_t, Epilogue>
+          <<<grid, block, smem_sz, stream>>>(
+            gI.mutable_data_ptr<scalar_t>(), output.const_data_ptr<scalar_t>(), grad.const_data_ptr<scalar_t>(), dim_size);
+        } else {
+          cunn_SoftMaxBackward<ILP, scalar_t, accscalar_t, accscalar_t, Epilogue>
+          <<<grid, block, block.x * sizeof(accscalar_t), stream>>>(
+              gI.mutable_data_ptr<scalar_t>(), output.const_data_ptr<accscalar_t>(), grad.const_data_ptr<accscalar_t>(), dim_size
+            );
+        }
         C10_CUDA_KERNEL_LAUNCH_CHECK();
       }
     }
