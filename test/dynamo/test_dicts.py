@@ -563,7 +563,7 @@ class DictTests(torch._dynamo.test_case.TestCase):
         res = opt_fn(x)
         self.assertEqual(ref, res)
 
-    def test_module_dunder_dict(self):
+    def test_contains_module_dunder_dict(self):
         class MyModule(torch.nn.Module):
             def __init__(self) -> None:
                 super().__init__()
@@ -575,6 +575,40 @@ class DictTests(torch._dynamo.test_case.TestCase):
                 if "foo" in self.__dict__:
                     return x * self.bar
                 return x * self.baz
+
+        mod = MyModule()
+        x = torch.randn(10)
+        opt_mod = torch.compile(mod, backend="eager", fullgraph=True)
+        self.assertEqual(mod(x), opt_mod(x))
+
+    def test_update_dunder_dict(self):
+        class UserDefined:
+            def run(self, x):
+                self.__dict__["a"] = 10
+                return x * self.a + self.__dict__["a"]
+
+        obj1 = UserDefined()
+        obj2 = UserDefined()
+
+        def fn(x, obj):
+            return obj.run(x)
+
+        x = torch.randn(4)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        ref = fn(x, obj1)
+        res = opt_fn(x, obj2)
+        self.assertEqual(ref, res)
+        # Make sure only `a` is updated.
+        self.assertEqual(obj1.__dict__, obj2.__dict__)
+
+    def test_update_module_dunder_dict(self):
+        class MyModule(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+
+            def forward(self, x):
+                self.__dict__["a"] = 10
+                return x * self.a + self.__dict__["a"]
 
         mod = MyModule()
         x = torch.randn(10)
@@ -690,6 +724,42 @@ class DictTests(torch._dynamo.test_case.TestCase):
         # Check that recompilation happens
         foo.scalar = 12
         self.assertEqual(fn(d, inp), opt_fn(d, inp))
+
+    def test_empty_dict_recompilation(self):
+        def fn(d, x):
+            if d:
+                return torch.cos(x)
+            return torch.sin(x)
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        x = torch.randn(4)
+        self.assertEqual(fn({}, x), opt_fn({}, x))
+        self.assertEqual(fn({"a": 1}, x), opt_fn({"a": 1}, x))
+
+    def test_udf_dict_reconstruction(self):
+        class MyDict(dict):
+            pass
+
+        def fn(x, klass):
+            x = x * 2
+            sc_dict = dict.__new__(klass)
+            sc_dict["x"] = x
+            if isinstance(sc_dict, MyDict):
+                sc_dict.attr = 3
+            return sc_dict
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        x = torch.randn(4)
+        ref = fn(x, MyDict)
+        res = opt_fn(x, MyDict)
+        self.assertEqual(ref, res)
+        self.assertTrue(isinstance(res, MyDict))
+        self.assertEqual(ref.attr, res.attr)
+
+        ref = fn(x, dict)
+        res = opt_fn(x, dict)
+        self.assertEqual(ref, res)
+        self.assertTrue(isinstance(res, dict))
 
 
 if __name__ == "__main__":
