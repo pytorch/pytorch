@@ -13,11 +13,16 @@
 ## **Highlights**
 
 
-We are excited to announce the release of PyTorch® 2.6 (release notes)! This release features multiple improvements for PT2: torch.compile can now be used with Python 3.13; new performance-related knob `torch.compiler.set_stance`; several AOTInductor enhancements. Besides the PT2 improvements, another highlight is FP16 support on X86 CPUs.
-NOTE: Starting with this release we are not going to publish on Conda, please see [Announcement] Deprecating PyTorch’s official Anaconda channel for the details.
-For this release the experimental Linux binaries shipped with CUDA 12.6.3 (as well as Linux Aarch64,  Linux ROCm 6.2.4, and Linux XPU binaries) are built with CXX11_ABI=1 and are using the Manylinux 2.28 build platform. If you build PyTorch extensions with custom C++ or CUDA extensions, please update these builds to use CXX_ABI=1 as well and report any issues you are seeing. For the next PyTorch 2.7 release we plan to switch all Linux builds to Manylinux 2.28 and CXX11_ABI=1, please see [RFC] PyTorch next wheel build platform: manylinux-2.28 for the details and discussion.
-Also in this release as an important security improvement measure we have changed the default value for weights_only parameter of torch.load. This is a backward compatibility-breaking change, please see this forum post for more details.
-This release is composed of 3892 commits from 520 contributors since PyTorch 2.5. We want to sincerely thank our dedicated community for your contributions. As always, we encourage you to try these out and report any issues as we improve PyTorch. More information about how to get started with the PyTorch 2-series can be found at our Getting Started page.
+We are excited to announce the release of PyTorch® 2.6 ([release notes](https://github.com/pytorch/pytorch/releases/tag/v2.6.0))! This release features multiple improvements for PT2: `torch.compile` can now be used with Python 3.13; new performance-related knob `torch.compiler.set_stance`; several AOTInductor enhancements. Besides the PT2 improvements, another highlight is FP16 support on X86 CPUs.
+
+NOTE: Starting with this release we are not going to publish on Conda, please see [[Announcement] Deprecating PyTorch’s official Anaconda channel](https://github.com/pytorch/pytorch/issues/138506) for the details.
+
+For this release the experimental Linux binaries shipped with CUDA 12.6.3 (as well as Linux Aarch64,  Linux ROCm 6.2.4, and Linux XPU binaries) are built with CXX11_ABI=1 and are [using the Manylinux 2.28 build platform](https://dev-discuss.pytorch.org/t/pytorch-linux-wheels-switching-to-new-wheel-build-platform-manylinux-2-28-on-november-12-2024/2581). If you build PyTorch extensions with custom C++ or CUDA extensions, please update these builds to use CXX_ABI=1 as well and report any issues you are seeing. For the next PyTorch 2.7 release we plan to switch all Linux builds to Manylinux 2.28 and CXX11_ABI=1, please see [[RFC] PyTorch next wheel build platform: manylinux-2.28](https://github.com/pytorch/pytorch/issues/123649) for the details and discussion.
+
+Also in this release as an important security improvement measure we have changed the default value for `weights_only` parameter of `torch.load`. This is a backward compatibility-breaking change, please see [this forum post](https://dev-discuss.pytorch.org/t/bc-breaking-change-torch-load-is-being-flipped-to-use-weights-only-true-by-default-in-the-nightlies-after-137602/2573) for more details.
+
+This release is composed of 3892 commits from 520 contributors since PyTorch 2.5. We want to sincerely thank our dedicated community for your contributions. As always, we encourage you to try these out and report any issues as we improve PyTorch. More information about how to get started with the PyTorch 2-series can be found at our [Getting Started](https://pytorch.org/get-started/pytorch-2.0/) page.
+
 
 <table>
   <tr>
@@ -71,62 +76,85 @@ This release is composed of 3892 commits from 520 contributors since PyTorch 2.5
 </table>
 
 
+*To see a full list of public feature submissions click [here](https://docs.google.com/spreadsheets/d/1TzGkWuUMF1yTe88adz1dt2mzbIsZLd3PBasy588VWgk/edit?usp=sharing).
 
-*To see a full list of public feature submissions click here.
-BETA FEATURES
-[Beta] torch.compiler.set_stance
-This feature enables the user to specify different behaviors (“stances”) that torch.compile can take between different invocations of compiled functions. One of the stances, for example, is 
+
+### BETA FEATURES
+
+
+#### **[Beta] torch.compiler.set_stance**
+
+This feature enables the user to specify different behaviors (“stances”) that `torch.compile` can take between different invocations of compiled functions. One of the stances, for example, is 
+
 “eager_on_recompile”, that instructs PyTorch to code eagerly when a recompile is necessary, reusing cached compiled code when possible.
 
-For more information please refer to the set_stance documentation and the Dynamic Compilation Control with torch.compiler.set_stance tutorial.
+For more information please refer to the [set_stance documentation](https://pytorch.org/docs/2.6/generated/torch.compiler.set_stance.html#torch.compiler.set_stance) and the [Dynamic Compilation Control with torch.compiler.set_stance](https://pytorch.org/tutorials/recipes/torch_compiler_set_stance_tutorial.html) tutorial.
 
-[Beta] torch.library.triton_op
-torch.library.triton_op offers a standard way of creating custom operators that are backed by user-defined triton kernels. 
+**[Beta] torch.library.triton_op**
 
-When users turn user-defined triton kernels into custom operators, torch.library.triton_op allows torch.compile to peek into the implementation, enabling torch.compile to optimize the triton kernel inside it.
+`torch.library.triton_op` offers a standard way of creating custom operators that are backed by user-defined triton kernels. 
 
-For more information please refer to the triton_op documentation and the Using User-Defined Triton Kernels with torch.compile tutorial.
+When users turn user-defined triton kernels into custom operators, `torch.library.triton_op` allows `torch.compile` to peek into the implementation, enabling `torch.compile` to optimize the triton kernel inside it.
 
-[Beta] torch.compile support for Python 3.13
-torch.compile previously only supported Python up to version 3.12. Users can now optimize models with torch.compile in Python 3.13. 
+For more information please refer to the [triton_op documentation](https://pytorch.org/docs/2.6/library.html#torch.library.triton_op) and the[ Using User-Defined Triton Kernels with torch.compile](https://pytorch.org/tutorials/recipes/torch_compile_user_defined_triton_kernel_tutorial.html) tutorial.
 
-[Beta] New packaging APIs for AOTInductor
-A new package format, “PT2 archive”, has been introduced. This essentially contains a zipfile of all the files that need to be used by AOTInductor, and allows users to send everything needed to other environments. There is also functionality to package multiple models into one artifact, and to store additional metadata inside of the package.
+**[Beta] torch.compile support for Python 3.13**
 
-For more details please see the updated torch.export AOTInductor Tutorial for Python runtime.
+`torch.compile` previously only supported Python up to version 3.12. Users can now optimize models with `torch.compile` in Python 3.13. 
 
-[Beta] AOTInductor: minifier
+**[Beta] New packaging APIs for AOTInductor**
+
+A new package format, “[PT2 archive](https://docs.google.com/document/d/1RQ4cmywilnFUT1VE-4oTGxwXdc8vowCSZsrRgo3wFA8/edit?usp=sharing)”, has been introduced. This essentially contains a zipfile of all the files that need to be used by AOTInductor, and allows users to send everything needed to other environments. There is also functionality to package multiple models into one artifact, and to store additional metadata inside of the package.
+
+For more details please see the updated [torch.export AOTInductor Tutorial for Python runtime](https://pytorch.org/tutorials/recipes/torch_export_aoti_python.html).
+
+**[Beta] AOTInductor: minifier**
+
 If a user encounters an error while using AOTInductor APIs, AOTInductor Minifier allows creation of a minimal nn.Module that reproduces the error.
 
-For more information please see the AOTInductor Minifier documentation.
+For more information please see the [AOTInductor Minifier documentation](https://pytorch.org/docs/2.6/torch.compiler_aot_inductor_minifier.html).
 
-[Beta] AOTInductor: ABI-compatible mode code generation
+**[Beta] AOTInductor: ABI-compatible mode code generation**
+
 AOTInductor-generated model code has dependency on Pytorch cpp libraries. As Pytorch evolves quickly, it’s important to make sure previously AOTInductor compiled models can continue to run on newer Pytorch versions, i.e. AOTInductor is backward compatible. 
 
 In order to guarantee application binary interface (ABI) backward compatibility, we have carefully defined a set of stable C interfaces in libtorch and make sure AOTInductor generates code that only refers to the specific set of APIs and nothing else in libtorch. We will keep the set of C APIs stable across Pytorch versions and thus provide backward compatibility guarantees for AOTInductor-compiled models.
 
-[Beta] FP16 support for X86 CPUs (both eager and Inductor modes)
-Float16 datatype is commonly used for reduced memory usage and faster computation in AI inference and training. CPUs like the recently launched Intel® Xeon® 6 with P-Cores support Float16 datatype with native accelerator AMX. Float16 support on X86 CPUs was introduced in PyTorch 2.5 as a prototype feature, and now it has been further improved for both eager mode and Torch.compile + Inductor mode, making it Beta level feature with both functionality and performance verified with a broad scope of workloads.
-PROTOTYPE FEATURES
-[Prototype] Improved PyTorch user experience on Intel GPUs
-PyTorch user experience on Intel GPUs is further improved with simplified installation steps, Windows release binary distribution and expanded coverage of supported GPU models including the latest Intel® Arc™ B-Series discrete graphics. Application developers and researchers seeking to fine-tune, inference and develop with PyTorch models on Intel® Core™ Ultra AI PCs and Intel® Arc™ discrete graphics will now be able to directly install PyTorch with binary releases for Windows, Linux and Windows Subsystem for Linux 2.
-Simplified Intel GPU software stack setup to enable one-click installation of the torch-xpu PIP wheels to run deep learning workloads in an out of the box fashion, eliminating the complexity of installing and activating Intel GPU development software bundles.
-Windows binary releases for torch core, torchvision and torchaudio have been made available for Intel GPUs, and the supported GPU models have been expanded from Intel® Core™ Ultra Processors with Intel® Arc™ Graphics, Intel® Core™ Ultra Series 2 with Intel® Arc™ Graphics and Intel® Arc™ A-Series Graphics to the latest GPU hardware Intel® Arc™ B-Series graphics.
-Further enhanced coverage of Aten operators on Intel GPUs with SYCL* kernels for smooth eager mode execution, as well as bug fixes and performance optimizations for torch.compile on Intel GPUs.
-For more information regarding Intel GPU support, please refer to Getting Started Guide.
+**[Beta] FP16 support for X86 CPUs (both eager and Inductor modes)**
 
-[Prototype] FlexAttention support on X86 CPU for LLMs
+Float16 datatype is commonly used for reduced memory usage and faster computation in AI inference and training. CPUs like the recently launched [Intel® Xeon® 6 with P-Cores](https://www.intel.com/content/www/us/en/products/details/processors/xeon/xeon6-p-cores.html) support Float16 datatype with native accelerator [AMX](https://www.intel.com/content/www/us/en/products/docs/accelerator-engines/advanced-matrix-extensions/overview.html). Float16 support on X86 CPUs was introduced in PyTorch 2.5 as a prototype feature, and now it has been further improved for both eager mode and Torch.compile + Inductor mode, making it Beta level feature with both functionality and performance verified with a broad scope of workloads.
+
+
+### PROTOTYPE FEATURES
+
+**[Prototype] Improved PyTorch user experience on Intel GPUs**
+
+PyTorch user experience on Intel GPUs is further improved with simplified installation steps, Windows release binary distribution and expanded coverage of supported GPU models including the latest Intel® Arc™ B-Series discrete graphics. Application developers and researchers seeking to fine-tune, inference and develop with PyTorch models on [Intel® Core™ Ultra AI PCs ](https://www.intel.com/content/www/us/en/products/docs/processors/core-ultra/ai-pc.html)and [Intel® Arc™ discrete graphics](https://www.intel.com/content/www/us/en/products/details/discrete-gpus/arc.html) will now be able to directly install PyTorch with binary releases for Windows, Linux and Windows Subsystem for Linux 2.
+
+
+
+* Simplified Intel GPU software stack setup to enable one-click installation of the torch-xpu PIP wheels to run deep learning workloads in an out of the box fashion, eliminating the complexity of installing and activating Intel GPU development software bundles.
+* Windows binary releases for torch core, torchvision and torchaudio have been made available for Intel GPUs, and the supported GPU models have been expanded from Intel® Core™ Ultra Processors with Intel® Arc™ Graphics, [Intel® Core™ Ultra Series 2 with Intel® Arc™ Graphics](https://www.intel.com/content/www/us/en/products/details/processors/core-ultra.html) and [Intel® Arc™ A-Series Graphics](https://www.intel.com/content/www/us/en/products/docs/discrete-gpus/arc/desktop/a-series/overview.html) to the latest GPU hardware [Intel® Arc™ B-Series graphics](https://www.intel.com/content/www/us/en/products/docs/discrete-gpus/arc/desktop/b-series/overview.html).
+* Further enhanced coverage of Aten operators on Intel GPUs with SYCL* kernels for smooth eager mode execution, as well as bug fixes and performance optimizations for torch.compile on Intel GPUs.
+
+For more information regarding Intel GPU support, please refer to [Getting Started Guide](https://pytorch.org/docs/main/notes/get_start_xpu.html).
+
+**[Prototype] FlexAttention support on X86 CPU for LLMs**
+
 FlexAttention was initially introduced in PyTorch 2.5 to provide optimized implementations for Attention variants with a flexible API. In PyTorch 2.6, X86 CPU support for FlexAttention was added through TorchInductor CPP backend. This new feature leverages and extends current CPP template abilities to support broad attention variants (e.x.: PageAttention, which is critical for LLMs inference) based on the existing FlexAttention API, and brings optimized performance on x86 CPUs. With this feature, it’s easy to use FlexAttention API to compose Attention solutions on CPU platforms and achieve good performance.
 
-[Prototype] Dim.AUTO
-Dim.AUTO allows usage of automatic dynamic shapes with torch.export. Users can export with Dim.AUTO and “discover” the dynamic behavior of their models, with min/max ranges, relations between dimensions, and static/dynamic behavior being automatically inferred.
+**[Prototype] Dim.AUTO**
 
-This is a more user-friendly experience compared to the existing named-Dims approach for specifying dynamic shapes, which requires the user to fully understand the dynamic behavior of their models at export time. Dim.AUTO allows users to write generic code that isn’t model-dependent, increasing ease-of-use for exporting with dynamic shapes.
+`Dim.AUTO` allows usage of automatic dynamic shapes with `torch.export`. Users can export with `Dim.AUTO `and “discover” the dynamic behavior of their models, with min/max ranges, relations between dimensions, and static/dynamic behavior being automatically inferred.
 
-Please see torch.export tutorial for more information.
+This is a more user-friendly experience compared to the existing named-Dims approach for specifying dynamic shapes, which requires the user to fully understand the dynamic behavior of their models at export time. `Dim.AUTO` allows users to write generic code that isn’t model-dependent, increasing ease-of-use for exporting with dynamic shapes.
 
-[Prototype] CUTLASS and CK GEMM/CONV Backends for AOTInductor
+Please see [torch.export tutorial](https://pytorch.org/tutorials/intermediate/torch_export_tutorial.html#constraints-dynamic-shapes) for more information.
+
+**[Prototype] CUTLASS and CK GEMM/CONV Backends for AOTInductor**
+
 The CUTLASS and CK backend adds kernel choices for GEMM autotuning in Inductor. This is now also available in AOTInductor which can run in C++ runtime environments. A major improvement to the two backends is improved compile-time speed by eliminating redundant kernel binary compilations and dynamic shapes support.
+
 
 
 
