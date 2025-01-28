@@ -691,7 +691,7 @@ inline IValue toTypeInferredIValue(py::handle input) {
     if (auto mod = as_module(object)) {
       // if obj is already a ScriptModule, just return its ivalue
       auto ptr = mod.value()._ivalue();
-      // explict copy semantics for strong ownership of the resource.
+      // explicit copy semantics for strong ownership of the resource.
       return c10::intrusive_ptr<c10::ivalue::Object>::reclaim_copy(
           ptr.release());
     }

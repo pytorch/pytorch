@@ -377,7 +377,7 @@ std::string NCCLComm::repr() const {
   return c10::str((void*)ncclComm_);
 }
 
-#if defined(IS_NCCLX) && defined(NCCL_COMM_DUMP)
+#if (defined(IS_NCCLX) || defined(USE_ROCM)) && defined(NCCL_COMM_DUMP)
 std::unordered_map<std::string, std::string> NCCLComm::ncclCommDump() {
   std::unordered_map<std::string, std::string> dump;
   if (isAborted()) {
@@ -390,11 +390,9 @@ std::unordered_map<std::string, std::string> NCCLComm::ncclCommDump() {
 #endif
 
 std::string getNcclVersion() {
-  static c10::once_flag ncclGetVersionFlag;
-  static std::string versionString;
-
-  c10::call_once(ncclGetVersionFlag, []() {
+  static std::string versionString = []() {
     int version = 0;
+    std::string versionString;
     ncclResult_t status = ncclGetVersion(&version);
     // can't compute the version if call did not return successfully or version
     // code < 100 (corresponding to 0.1.0)
@@ -417,7 +415,8 @@ std::string getNcclVersion() {
       }
 #endif
     }
-  });
+    return versionString;
+  }();
 
   return versionString;
 }
@@ -519,6 +518,17 @@ std::string getNcclErrorDetailStr(
       interpret = "Unknown NCCL error!";
   }
   return interpret + err;
+}
+
+// Dump proxyTrace log to stdout
+void printNcclCommProxyTrace(
+    std::string dumpReason,
+    const std::unordered_map<std::string, std::string>& dumpMap) {
+  LOG(INFO) << "Dumping nccl comm trace, reason: " << dumpReason;
+  for (auto& [key, value] : dumpMap) {
+    LOG(INFO) << "key: " << key << ", value: " << value;
+  }
+  LOG(INFO) << "----------------------";
 }
 
 } // namespace c10d

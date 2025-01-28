@@ -962,7 +962,7 @@ class WhileLoopTests(TestCase):
     def test_while_loop_with_data_dependent_in_out_mismatch(self, dynamic):
         with self.assertRaisesRegex(
             torch._dynamo.exc.UncapturedHigherOrderOpError,
-            r"while_loop doesn't work unless it is captured completely with torch.compile",
+            "Expected body_fn_output and carried_inputs to have same metadata but found",
         ):
             with torch._dynamo.config.patch(
                 {

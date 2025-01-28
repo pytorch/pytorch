@@ -2,7 +2,7 @@
 import copy
 import operator
 import unittest
-from typing import Any, Optional, Tuple, Type
+from typing import Any, Optional
 
 import torch
 from torch.ao.quantization import (
@@ -53,8 +53,8 @@ class PT2EQATTestCase(QuantizationTestCase):
     class _BaseConvBnModel(torch.nn.Module):
         def __init__(
             self,
-            conv_class: Type[torch.nn.Module],
-            bn_class: Type[torch.nn.Module],
+            conv_class: type[torch.nn.Module],
+            bn_class: type[torch.nn.Module],
             has_conv_bias: bool,
             has_bn: bool,
             has_relu: bool,
@@ -102,7 +102,7 @@ class PT2EQATTestCase(QuantizationTestCase):
     def _verify_symmetric_xnnpack_qat_numerics(
         self,
         model: torch.nn.Module,
-        example_inputs: Tuple[Any, ...],
+        example_inputs: tuple[Any, ...],
     ):
         self._verify_symmetric_xnnpack_qat_numerics_helper(
             model,
@@ -118,7 +118,7 @@ class PT2EQATTestCase(QuantizationTestCase):
     def _verify_symmetric_xnnpack_qat_numerics_helper(
         self,
         model: torch.nn.Module,
-        example_inputs: Tuple[Any, ...],
+        example_inputs: tuple[Any, ...],
         is_per_channel: bool,
         verify_convert: bool = True,
     ):
@@ -179,11 +179,11 @@ class PT2EQATTestCase(QuantizationTestCase):
     def _verify_symmetric_xnnpack_qat_graph(
         self,
         m: torch.fx.GraphModule,
-        example_inputs: Tuple[Any, ...],
+        example_inputs: tuple[Any, ...],
         has_relu: bool,
         has_bias: bool = True,
         is_cuda: bool = False,
-        expected_conv_literal_args: Optional[Tuple[Any, ...]] = None,
+        expected_conv_literal_args: Optional[tuple[Any, ...]] = None,
         # TODO: set this to true by default
         verify_convert: bool = False,
     ):
@@ -211,12 +211,12 @@ class PT2EQATTestCase(QuantizationTestCase):
     def _verify_symmetric_xnnpack_qat_graph_helper(
         self,
         m: torch.fx.GraphModule,
-        example_inputs: Tuple[Any, ...],
+        example_inputs: tuple[Any, ...],
         is_per_channel: bool,
         has_relu: bool,
         has_bias: bool = True,
         is_cuda: bool = False,
-        expected_conv_literal_args: Optional[Tuple[Any, ...]] = None,
+        expected_conv_literal_args: Optional[tuple[Any, ...]] = None,
         verify_convert: bool = False,
     ):
         """
@@ -648,8 +648,8 @@ class TestQuantizePT2EQAT_ConvBn_Base(PT2EQATTestCase):
             assert isinstance(bias_node, torch.fx.Node)
             return (qweight_node, bias_node)
 
-        first_conv_qweight, first_conv_bias = get_conv_weight_and_bias(first_conv)
-        second_conv_qweight, second_conv_bias = get_conv_weight_and_bias(second_conv)
+        _, first_conv_bias = get_conv_weight_and_bias(first_conv)
+        _, second_conv_bias = get_conv_weight_and_bias(second_conv)
 
         # Assert that each set of conv, conv weight, and conv bias are in the same partition
         def get_source_fn(node: torch.fx.Node):
@@ -1111,10 +1111,10 @@ class TestQuantizeMixQATAndPTQ(QuantizationTestCase):
 
         self._prepare_qat_linears(model)
 
-        after_prepare_result_pt2e = model(*example_inputs)
+        model(*example_inputs)
         # must be fixed model.eval()
         self._convert_qat_linears(model)
-        quant_result_pt2e = model(*example_inputs)
+        model(*example_inputs)
 
         model_pt2e = export_for_training(
             model,
@@ -1126,11 +1126,11 @@ class TestQuantizeMixQATAndPTQ(QuantizationTestCase):
         quantization_config = get_symmetric_quantization_config()
         quantizer.set_global(quantization_config)
         model_pt2e = prepare_pt2e(model_pt2e, quantizer)
-        after_prepare_result_pt2e = model_pt2e(*example_inputs)
+        after_prepare_result_pt2e = model_pt2e(*example_inputs)  # noqa: F841
         model_pt2e = convert_pt2e(model_pt2e)
-        quant_result_pt2e = model_pt2e(*example_inputs)
+        quant_result_pt2e = model_pt2e(*example_inputs)  # noqa: F841
 
-        exported_model = torch.export.export(model_pt2e, example_inputs)
+        exported_model = torch.export.export(model_pt2e, example_inputs, strict=True)
 
         node_occurrence = {
             # conv2d: 1 for act, 1 for weight, 1 for output

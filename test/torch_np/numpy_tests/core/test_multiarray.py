@@ -1,4 +1,5 @@
 # Owner(s): ["module: dynamo"]
+# ruff: noqa: F841
 
 import builtins
 import collections.abc
@@ -319,29 +320,29 @@ class TestHash(TestCase):
         ]:
             for i in range(1, s):
                 assert_equal(
-                    hash(st(-(2**i))), hash(-(2**i)), err_msg="%r: -2**%d" % (st, i)
+                    hash(st(-(2**i))), hash(-(2**i)), err_msg=f"{st!r}: -2**{i:d}"
                 )
                 assert_equal(
                     hash(st(2 ** (i - 1))),
                     hash(2 ** (i - 1)),
-                    err_msg="%r: 2**%d" % (st, i - 1),
+                    err_msg=f"{st!r}: 2**{i - 1:d}",
                 )
                 assert_equal(
                     hash(st(2**i - 1)),
                     hash(2**i - 1),
-                    err_msg="%r: 2**%d - 1" % (st, i),
+                    err_msg=f"{st!r}: 2**{i:d} - 1",
                 )
 
                 i = max(i - 1, 1)
                 assert_equal(
                     hash(ut(2 ** (i - 1))),
                     hash(2 ** (i - 1)),
-                    err_msg="%r: 2**%d" % (ut, i - 1),
+                    err_msg=f"{ut!r}: 2**{i - 1:d}",
                 )
                 assert_equal(
                     hash(ut(2**i - 1)),
                     hash(2**i - 1),
-                    err_msg="%r: 2**%d - 1" % (ut, i),
+                    err_msg=f"{ut!r}: 2**{i:d} - 1",
                 )
 
 
@@ -2339,11 +2340,11 @@ class TestMethods(TestCase):
                     # array_less does not seem to work right
                     at(
                         (p[:, :i].T <= p[:, i]).all(),
-                        msg="%d: %r <= %r" % (i, p[:, i], p[:, :i].T),
+                        msg=f"{i:d}: {p[:, i]!r} <= {p[:, :i].T!r}",
                     )
                     at(
                         (p[:, i + 1 :].T > p[:, i]).all(),
-                        msg="%d: %r < %r" % (i, p[:, i], p[:, i + 1 :].T),
+                        msg=f"{i:d}: {p[:, i]!r} < {p[:, i + 1 :].T!r}",
                     )
                     aae(
                         p,
@@ -2358,11 +2359,11 @@ class TestMethods(TestCase):
                     # array_less does not seem to work right
                     at(
                         (p[:i, :] <= p[i, :]).all(),
-                        msg="%d: %r <= %r" % (i, p[i, :], p[:i, :]),
+                        msg=f"{i:d}: {p[i, :]!r} <= {p[:i, :]!r}",
                     )
                     at(
                         (p[i + 1 :, :] > p[i, :]).all(),
-                        msg="%d: %r < %r" % (i, p[i, :], p[:, i + 1 :]),
+                        msg=f"{i:d}: {p[i, :]!r} < {p[:, i + 1 :]!r}",
                     )
                     aae(
                         p,
@@ -2386,10 +2387,10 @@ class TestMethods(TestCase):
     def assert_partitioned(self, d, kth):
         prev = 0
         for k in np.sort(kth):
-            assert_array_less(d[prev:k], d[k], err_msg="kth %d" % k)
+            assert_array_less(d[prev:k], d[k], err_msg=f"kth {k:d}")
             assert_(
                 (d[k:] >= d[k]).all(),
-                msg="kth %d, %r not greater equal %d" % (k, d[k:], d[k]),
+                msg=f"kth {k:d}, {d[k:]!r} not greater equal {d[k]:d}",
             )
             prev = k + 1
 
@@ -3970,7 +3971,7 @@ class TestIO(TestCase):
                 f.write(b"\0")
 
             for mode in ["rb", "r+b"]:
-                err_msg = "%d %s" % (size, mode)
+                err_msg = f"{size:d} {mode}"
 
                 with open(tmp_filename, mode) as f:
                     f.read(2)
@@ -3987,7 +3988,7 @@ class TestIO(TestCase):
         ]
 
         for size in sizes:
-            err_msg = "%d" % (size,)
+            err_msg = f"{size:d}"
 
             with open(tmp_filename, "wb") as f:
                 f.seek(size - 1)
@@ -5904,7 +5905,7 @@ class TestPEP3118Dtype(TestCase):
             if j == 0:
                 s = "bi"
             else:
-                s = "b%dxi" % j
+                s = f"b{j:d}xi"
             self._check(
                 "@" + s, {"f0": ("i1", 0), "f1": ("i", align * (1 + j // align))}
             )

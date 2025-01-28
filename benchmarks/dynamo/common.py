@@ -23,19 +23,7 @@ import time
 import weakref
 from contextlib import contextmanager
 from pathlib import Path
-from typing import (
-    Any,
-    Callable,
-    Generator,
-    List,
-    Mapping,
-    NamedTuple,
-    Optional,
-    Sequence,
-    Tuple,
-    Type,
-    TYPE_CHECKING,
-)
+from typing import Any, Callable, NamedTuple, Optional, TYPE_CHECKING
 from typing_extensions import Self
 from unittest.mock import MagicMock
 
@@ -98,6 +86,8 @@ except ImportError:
 
 
 if TYPE_CHECKING:
+    from collections.abc import Generator, Mapping, Sequence
+
     from torch.onnx._internal.fx import diagnostics
 
 
@@ -146,6 +136,12 @@ try:
     from .fb.common import INTERNAL_CI_SKIP_DYNAMIC_BATCH_ONLY
 except ImportError:
     INTERNAL_CI_SKIP_DYNAMIC_BATCH_ONLY = set()
+
+try:
+    from pytorch.benchmark.fb.run_utils import trace_handler
+except ImportError:
+    trace_handler = None
+
 
 CI_SKIP_DYNAMIC_BATCH_ONLY = {
     "sam",
@@ -437,11 +433,24 @@ def output_json(filename, headers, row):
                     "backend": current_backend,
                     "origins": [origin],
                 },
-                "metric": {
+            }
+
+            # NB: When the metric is accuracy, its value is actually a string, i.e. pass, and
+            # not a number. ClickHouse doesn't support mix types atm. It has a Variant type
+            # https://clickhouse.com/docs/en/sql-reference/data-types/variant, but this isn't
+            # recommended by CH team themselves. The workaround here is to store that value
+            # in the extra_info field instead.
+            if isinstance(value, str):
+                record["metric"] = {
+                    "name": header,
+                    "extra_info": {"benchmark_values": [value]},
+                }
+            else:
+                record["metric"] = {
                     "name": header,
                     "benchmark_values": [value],
-                },
-            }
+                }
+
             print(json.dumps(record), file=f)
 
 
@@ -529,6 +538,8 @@ def output_signpost(data, args, suite, error=None):
 
     from torch._dynamo.utils import calculate_time_spent, compilation_time_metrics
 
+    wall_time_by_phase = calculate_time_spent()
+
     open_source_signpost(
         subsystem="dynamo_benchmark",
         name=event_name,
@@ -541,7 +552,7 @@ def output_signpost(data, args, suite, error=None):
                 # NB: Externally, compilation_metrics colloquially refers to
                 # the coarse-grained phase timings, even though internally
                 # they are called something else
-                "compilation_metrics": calculate_time_spent(),
+                "compilation_metrics": wall_time_by_phase,
                 "agg_compilation_metrics": {
                     k: sum(v) for k, v in compilation_time_metrics.items()
                 },
@@ -553,6 +564,8 @@ def output_signpost(data, args, suite, error=None):
             }
         ),
     )
+
+    return wall_time_by_phase["total_wall_time"]
 
 
 def nothing(f):
@@ -664,7 +677,7 @@ def print_summary_table(data, print_dataframe=False):
                 print(col.ljust(width), f"mean={data[col].mean():.3f}x")
             elif col in ("accuracy"):
                 pass_rate = (data[col] == "pass").mean()
-                print(col.ljust(width), f"pass_rate={100*pass_rate:.2f}%")
+                print(col.ljust(width), f"pass_rate={100 * pass_rate:.2f}%")
             else:
                 cdata = data[col]
                 print(
@@ -733,7 +746,7 @@ def timed(
     return (time_total, result) if return_result else time_total
 
 
-def _normalize_bench_inputs(example_inputs) -> Tuple[Tuple[Any], Mapping[str, Any]]:
+def _normalize_bench_inputs(example_inputs) -> tuple[tuple[Any], Mapping[str, Any]]:
     # NOTE(bowbao): For huggingface benchmark, example_inputs are formatted as dictionary,
     # and consumed like `model(**example_inputs)`.
     # For other benchmarks, example_inputs are formatted as tuple and consumed
@@ -898,7 +911,7 @@ def latency_experiment(args, model_iter_fn, model, example_inputs, mark, **kwarg
 
     times = args.iterations_per_run
 
-    with maybe_profile(args.export_profiler_trace) as p:
+    with maybe_profile(args.export_profiler_trace, **args.profile_details) as p:
         for rep in trange(args.repeat, desc="running benchmark"):
             inputs = (
                 randomize_input(copy.deepcopy(example_inputs))
@@ -1053,7 +1066,7 @@ def speedup_experiment(args, model_iter_fn, model, example_inputs, **kwargs):
     tolerance = args.xla_tolerance if args.trace_on_xla else 1e-4
     torch._dynamo.config.repro_tolerance = tolerance
 
-    with maybe_profile(args.export_profiler_trace) as p:
+    with maybe_profile(args.export_profiler_trace, **args.profile_details) as p:
         if args.export_aot_inductor:
             frozen_model_iter_fn = export_aot_inductor(model, example_inputs)
         else:
@@ -1102,9 +1115,13 @@ def speedup_experiment(args, model_iter_fn, model, example_inputs, **kwargs):
         name = args.profiler_trace_name + "_" + model.name
         if hasattr(args, "rank"):
             name += f"_rank_{args.rank}"
-        name += ".json"
-        name = os.path.join(torch._dynamo.config.base_dir, name)
-        p.export_chrome_trace(name)
+        if args.export_perfdoctor and trace_handler:
+            trace_handler(name, p)
+        else:
+            name += ".json"
+            name = os.path.join(torch._dynamo.config.base_dir, name)
+            p.export_chrome_trace(name)
+
     median = np.median(timings, axis=0)
     speedup = median[0] / median[1]
     if args.dump_raw_metrics:
@@ -1609,7 +1626,7 @@ def export(model, example_inputs):
     )
 
     ep = torch.export.export(
-        model, example_args, example_kwargs, dynamic_shapes=dynamic_shapes
+        model, example_args, example_kwargs, dynamic_shapes=dynamic_shapes, strict=True
     )
 
     def opt_export(_, example_inputs):
@@ -1767,7 +1784,7 @@ class OnnxModel(abc.ABC):
             for ort_input, pt_input in zip(self.onnx_session.get_inputs(), pt_inputs)
         }
 
-    def adapt_onnx_outputs_to_pt(self, onnx_outputs: List[npt.NDArray]) -> Any:
+    def adapt_onnx_outputs_to_pt(self, onnx_outputs: list[npt.NDArray]) -> Any:
         pt_outputs = [
             torch.from_numpy(onnx_output).to(current_device)
             for onnx_output in onnx_outputs
@@ -2205,11 +2222,11 @@ class OnnxExportErrorRow:
         )
 
     @property
-    def headers(self) -> List[str]:
+    def headers(self) -> list[str]:
         return [field.name for field in dataclasses.fields(self)]
 
     @property
-    def row(self) -> List[str]:
+    def row(self) -> list[str]:
         return [getattr(self, field.name) for field in dataclasses.fields(self)]
 
 
@@ -2259,7 +2276,7 @@ class OnnxContext:
 
 def optimize_onnx_ctx(
     output_directory: str,
-    onnx_model_cls: Type[OnnxModel],
+    onnx_model_cls: type[OnnxModel],
     run_n_iterations: Callable,
     dynamic_shapes: bool = False,
     copy_before_export: bool = False,
@@ -2904,13 +2921,17 @@ class BenchmarkRunner:
                 headers.append(k)
                 fields.append(v)
 
-            write_outputs(output_filename, headers, fields)
-
-            output_signpost(
+            total_wall_time = output_signpost(
                 dict(zip(o_headers, o_fields)),
                 self.args,
                 self.suite_name,
             )
+            headers.append("compilation_latency")
+            fields.append(total_wall_time)
+            write_outputs(output_filename, headers, fields)
+
+            if self.args.print_compilation_time:
+                print(f"Compilation time (from dynamo_timed): {total_wall_time}")
 
             return accuracy_status
 
@@ -3907,6 +3928,14 @@ def parse_args(args=None):
         help="Overwrites exported trace name",
     )
     parser.add_argument(
+        "--profile-details", action="store_true", help="More detailed profiler trace."
+    )
+    parser.add_argument(
+        "--export-perfdoctor",
+        action="store_true",
+        help="Export Chrome trace to perf doctor. (internal only)",
+    )
+    parser.add_argument(
         "--diff-branch",
         default=diff_branch_default,
         help="delta current branch against given branch.",
@@ -4742,7 +4771,16 @@ def run(runner, args, original_dir=None):
             write_outputs(output_filename, [], [args.only, batch_size])
         return
 
+    args.profile_details = {}
     if args.export_profiler_trace:
+        if args.profile_details:
+            args.profile_details = {
+                "record_shapes": True,
+                "profile_memory": True,
+                "with_stack": True,
+                "with_modules": True,
+            }
+
         if args.profiler_trace_name is None:
             if args.backend:
                 args.profiler_trace_name = args.backend
@@ -4981,7 +5019,7 @@ def run(runner, args, original_dir=None):
         for i, name in enumerate(model_names):
             current_name = name
             if args.progress:
-                print(f"Running model {i+1}/{nmodels}", flush=True)
+                print(f"Running model {i + 1}/{nmodels}", flush=True)
 
             try:
                 timeout = args.timeout

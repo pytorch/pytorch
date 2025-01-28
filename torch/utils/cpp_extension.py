@@ -4,7 +4,6 @@ import glob
 import importlib
 import importlib.abc
 import os
-import platform
 import re
 import shlex
 import shutil
@@ -23,7 +22,7 @@ from .file_baton import FileBaton
 from ._cpp_extension_versioner import ExtensionVersioner
 from .hipify import hipify_python
 from .hipify.hipify_python import GeneratedFileCleaner
-from typing import Dict, List, Optional, Union, Tuple
+from typing import Optional, Union
 from torch.torch_version import TorchVersion, Version
 
 from setuptools.command.build_ext import build_ext
@@ -46,8 +45,8 @@ SUBPROCESS_DECODE_ARGS = ('oem',) if IS_WINDOWS else ()
 MINIMUM_GCC_VERSION = (5, 0, 0)
 MINIMUM_MSVC_VERSION = (19, 0, 24215)
 
-VersionRange = Tuple[Tuple[int, ...], Tuple[int, ...]]
-VersionMap = Dict[str, VersionRange]
+VersionRange = tuple[tuple[int, ...], tuple[int, ...]]
+VersionMap = dict[str, VersionRange]
 # The following values were taken from the following GitHub gist that
 # summarizes the minimum valid major versions of g++/clang++ for each supported
 # CUDA version: https://gist.github.com/ax3l/9489132
@@ -80,7 +79,7 @@ __all__ = ["get_default_build_root", "check_compiler_ok_for_platform", "get_comp
            "verify_ninja_availability", "remove_extension_h_precompiler_headers", "get_cxx_compiler", "check_compiler_is_gcc"]
 # Taken directly from python stdlib < 3.9
 # See https://github.com/pytorch/pytorch/issues/48617
-def _nt_quote_args(args: Optional[List[str]]) -> List[str]:
+def _nt_quote_args(args: Optional[list[str]]) -> list[str]:
     """Quote command-line arguments for DOS/Windows conventions.
 
     Just wraps every argument which contains blanks in double quotes, and
@@ -142,19 +141,26 @@ def _find_rocm_home() -> Optional[str]:
     return rocm_home
 
 def _find_sycl_home() -> Optional[str]:
-    """Find the OneAPI install path."""
-    # Guess #1
-    sycl_home = os.environ.get('ONEAPI_ROOT')
-    if sycl_home is None:
-        # Guess #2
-        icpx_path = shutil.which('icpx')
-        if icpx_path is not None:
-            sycl_home = os.path.dirname(os.path.dirname(
-                os.path.realpath(icpx_path)))
+    sycl_home = None
+    icpx_path = shutil.which('icpx')
+    # Guess 1: for source code build developer/user, we'll have icpx in PATH,
+    # which will tell us the SYCL_HOME location.
+    if icpx_path is not None:
+        sycl_home = os.path.dirname(os.path.dirname(
+            os.path.realpath(icpx_path)))
 
-    if sycl_home and not torch.xpu.is_available():
-        print(f"No XPU runtime is found, using ONEAPI_ROOT='{sycl_home}'",
-              file=sys.stderr)
+    # Guess 2: for users install Pytorch with XPU support, the sycl runtime is
+    # inside intel-sycl-rt, which is automatically installed via pip dependency.
+    else:
+        try:
+            files = importlib.metadata.files('intel-sycl-rt') or []
+            for f in files:
+                if f.name == "libsycl.so":
+                    sycl_home = os.path.dirname(Path(f.locate()).parent.resolve())
+                    break
+        except importlib.metadata.PackageNotFoundError:
+            print("Trying to find SYCL_HOME from intel-sycl-rt package, but it is not installed.",
+                  file=sys.stderr)
     return sycl_home
 
 def _join_rocm_home(*paths) -> str:
@@ -174,14 +180,16 @@ def _join_rocm_home(*paths) -> str:
 
 def _join_sycl_home(*paths) -> str:
     """
-    Join paths with SYCL_HOME, or raises an error if it SYCL_HOME is not set.
+    Join paths with SYCL_HOME, or raises an error if it SYCL_HOME is not found.
 
-    This is basically a lazy way of raising an error for missing $SYCL_HOME
+    This is basically a lazy way of raising an error for missing SYCL_HOME
     only once we need to get any SYCL-specific path.
     """
     if SYCL_HOME is None:
-        raise OSError('SYCL_HOME environment variable is not set. '
-                      'Please set it to your OneAPI install root.')
+        raise OSError('SYCL runtime is not dected. Please setup the pytorch '
+                      'prerequisites for Intel GPU following the instruction in '
+                      'https://github.com/pytorch/pytorch?tab=readme-ov-file#intel-gpu-support '
+                      'or install intel-sycl-rt via pip.')
 
     return os.path.join(SYCL_HOME, *paths)
 
@@ -292,7 +300,7 @@ def _is_binary_build() -> bool:
     return not BUILT_FROM_SOURCE_VERSION_PATTERN.match(torch.version.__version__)
 
 
-def _accepted_compilers_for_platform() -> List[str]:
+def _accepted_compilers_for_platform() -> list[str]:
     # gnu-c++ and gnu-cc are the conda gcc compilers
     return ['clang++', 'clang'] if IS_MACOS else ['g++', 'gcc', 'gnu-c++', 'gnu-cc', 'clang++', 'clang']
 
@@ -371,7 +379,7 @@ def check_compiler_ok_for_platform(compiler: str) -> bool:
     return False
 
 
-def get_compiler_abi_compatibility_and_version(compiler) -> Tuple[bool, TorchVersion]:
+def get_compiler_abi_compatibility_and_version(compiler) -> tuple[bool, TorchVersion]:
     """
     Determine if the given compiler is ABI-compatible with PyTorch alongside its version.
 
@@ -915,7 +923,7 @@ class BuildExtension(build_ext):
             ext_filename = '.'.join(without_abi)
         return ext_filename
 
-    def _check_abi(self) -> Tuple[str, TorchVersion]:
+    def _check_abi(self) -> tuple[str, TorchVersion]:
         # On some platforms, like Windows, compiler_cxx is not available.
         if hasattr(self.compiler, 'compiler_cxx'):
             compiler = self.compiler.compiler_cxx[0]
@@ -1006,7 +1014,7 @@ def CppExtension(name, sources, *args, **kwargs):
     if not kwargs.get('py_limited_api', False):
         # torch_python uses more than the python limited api
         libraries.append('torch_python')
-    if IS_WINDOWS and platform.machine().lower() != "arm64":
+    if IS_WINDOWS:
         libraries.append("sleef")
 
     kwargs['libraries'] = libraries
@@ -1198,7 +1206,7 @@ def CUDAExtension(name, sources, *args, **kwargs):
     return setuptools.Extension(name, sources, *args, **kwargs)
 
 
-def include_paths(device_type: str = "cpu") -> List[str]:
+def include_paths(device_type: str = "cpu") -> list[str]:
     """
     Get the include paths required to build a C++ or CUDA or SYCL extension.
 
@@ -1212,10 +1220,6 @@ def include_paths(device_type: str = "cpu") -> List[str]:
         lib_include,
         # Remove this once torch/torch.h is officially no longer supported for C++ extensions.
         os.path.join(lib_include, 'torch', 'csrc', 'api', 'include'),
-        # Some internal (old) Torch headers don't properly prefix their includes,
-        # so we need to pass -Itorch/lib/include/TH as well.
-        os.path.join(lib_include, 'TH'),
-        os.path.join(lib_include, 'THC')
     ]
     if device_type == "cuda" and IS_HIP_EXTENSION:
         paths.append(os.path.join(lib_include, 'THH'))
@@ -1235,10 +1239,11 @@ def include_paths(device_type: str = "cpu") -> List[str]:
             paths.append(os.path.join(CUDNN_HOME, 'include'))
     elif device_type == "xpu":
         paths.append(_join_sycl_home('include'))
+        paths.append(_join_sycl_home('include', 'sycl'))
     return paths
 
 
-def library_paths(device_type: str = "cpu") -> List[str]:
+def library_paths(device_type: str = "cpu") -> list[str]:
     """
     Get the library paths required to build a C++ or CUDA extension.
 
@@ -1286,7 +1291,7 @@ def library_paths(device_type: str = "cpu") -> List[str]:
 
 
 def load(name,
-         sources: Union[str, List[str]],
+         sources: Union[str, list[str]],
          extra_cflags=None,
          extra_cuda_cflags=None,
          extra_ldflags=None,
@@ -1824,7 +1829,7 @@ def _jit_compile(name,
 
 
 def _write_ninja_file_and_compile_objects(
-        sources: List[str],
+        sources: list[str],
         objects,
         cflags,
         post_cflags,
@@ -1876,7 +1881,7 @@ def _write_ninja_file_and_compile_objects(
 
 def _write_ninja_file_and_build_library(
         name,
-        sources: List[str],
+        sources: list[str],
         extra_cflags,
         extra_cuda_cflags,
         extra_ldflags,
@@ -2004,7 +2009,7 @@ def _prepare_ldflags(extra_ldflags, with_cuda, verbose, is_standalone):
     return extra_ldflags
 
 
-def _get_cuda_arch_flags(cflags: Optional[List[str]] = None) -> List[str]:
+def _get_cuda_arch_flags(cflags: Optional[list[str]] = None) -> list[str]:
     """
     Determine CUDA arch flags to use.
 
@@ -2040,12 +2045,13 @@ def _get_cuda_arch_flags(cflags: Optional[List[str]] = None) -> List[str]:
         ('Ampere', '8.0;8.6+PTX'),
         ('Ada', '8.9+PTX'),
         ('Hopper', '9.0+PTX'),
-        ('Blackwell', '10.0+PTX'),
+        ('Blackwell+Tegra', '10.1'),
+        ('Blackwell', '10.0;12.0+PTX'),
     ])
 
     supported_arches = ['3.5', '3.7', '5.0', '5.2', '5.3', '6.0', '6.1', '6.2',
                         '7.0', '7.2', '7.5', '8.0', '8.6', '8.7', '8.9', '9.0', '9.0a',
-                        '10.0']
+                        '10.0', '10.0a', '10.1', '10.1a', '12.0', '12.0a']
     valid_arch_strings = supported_arches + [s + "+PTX" for s in supported_arches]
 
     # The default is sm_30 for CUDA 9.x and 10.x
@@ -2064,7 +2070,7 @@ def _get_cuda_arch_flags(cflags: Optional[List[str]] = None) -> List[str]:
         # which could be of different types - therefore all archs for visible cards should be included
         for i in range(torch.cuda.device_count()):
             capability = torch.cuda.get_device_capability(i)
-            supported_sm = [int(arch.split('_')[1])
+            supported_sm = [int("".join(re.findall(r"\d+", arch.split('_')[1])))
                             for arch in torch.cuda.get_arch_list() if 'sm_' in arch]
             max_supported_sm = max((sm // 10, sm % 10) for sm in supported_sm)
             # Capability of the device may be higher than what's supported by the user's
@@ -2102,7 +2108,7 @@ def _get_cuda_arch_flags(cflags: Optional[List[str]] = None) -> List[str]:
     return sorted(set(flags))
 
 
-def _get_rocm_arch_flags(cflags: Optional[List[str]] = None) -> List[str]:
+def _get_rocm_arch_flags(cflags: Optional[list[str]] = None) -> list[str]:
     # If cflags is given, there may already be user-provided arch flags in it
     # (from `extra_compile_args`)
     if cflags is not None:

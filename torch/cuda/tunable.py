@@ -118,7 +118,7 @@ import multiprocessing as mp
 import os
 import shutil
 import warnings
-from typing import Optional, Tuple
+from typing import Optional
 
 import torch
 
@@ -228,12 +228,12 @@ def get_filename() -> str:
     return torch._C._cuda_tunableop_get_filename()  # type: ignore[attr-defined]
 
 
-def get_results() -> Tuple[str, str, str, float]:
+def get_results() -> tuple[str, str, str, float]:
     r"""Return all TunableOp results."""
     return torch._C._cuda_tunableop_get_results()  # type: ignore[attr-defined]
 
 
-def get_validators() -> Tuple[str, str]:
+def get_validators() -> tuple[str, str]:
     r"""Return the TunableOp validators."""
     return torch._C._cuda_tunableop_get_validators()  # type: ignore[attr-defined]
 
@@ -487,8 +487,13 @@ def _check_tuning_assertions() -> None:
     r"""Helper function for multi-GPU tuning case. Need to check that TunableOp feature
     is enabled and that tuning is enabled.
     """
-    assert is_enabled()
-    assert tuning_is_enabled()
+
+    if is_enabled() is False:
+        warnings.warn("TunableOp was disabled. Trying to enable now.")
+        enable(True)
+    assert is_enabled() is True
+    assert tuning_is_enabled() is True
+    assert record_untuned_is_enabled() is False
 
 
 def mgpu_tune_gemm_in_file(filename_pattern: str, num_gpus: int) -> None:
@@ -501,27 +506,20 @@ def mgpu_tune_gemm_in_file(filename_pattern: str, num_gpus: int) -> None:
 
     mp_context = mp.get_context("spawn")
 
-    checks = []  # empty list to hold futures
     futures = []  # empty list to hold futures
     flush_results = []  # empty list to hold futures
 
     # GEMM are assigned to GPUs in a round robin manner
     h = 0
     with concurrent.futures.ProcessPoolExecutor(
-        max_workers=num_gpus, mp_context=mp_context
+        max_workers=num_gpus,
+        mp_context=mp_context,
+        initializer=_check_tuning_assertions,
     ) as executor:
         # The workers are a separate process. TunableOp will be
-        # enabled in the child processes if the environment variable
-        # is set. However, if we enable TunableOp via the API
-        # the workers do not inherit this state. As a precaution,
-        # we need to check that TuningOp feature and tuning is
-        # enabled in the pool of processes.
-        for g in range(num_gpus):
-            check = executor.submit(_check_tuning_assertions)
-            checks.append(check)
-
-        for check in concurrent.futures.as_completed(checks):
-            check.result()
+        # enabled in the child processes if PYTORCH_TUNABLEOP_ENABLED=1
+        # In the initializer, we also try to enable TunableOP if th
+        # environment variable was NOT set.
 
         for line in unique_gemm_entries:
             future = executor.submit(_process_single_offline_gemm, line, h)

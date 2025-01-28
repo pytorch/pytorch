@@ -24,7 +24,7 @@ class TestPassInfra(TestCase):
         class NullPass(_ExportPassBaseDeprecatedDoNotUse):
             pass
 
-        ep = export(f, (torch.ones(3, 2),))
+        ep = export(f, (torch.ones(3, 2),), strict=True)
         old_nodes = ep.graph.nodes
 
         ep = ep._transform_do_not_use(NullPass())
@@ -66,7 +66,7 @@ class TestPassInfra(TestCase):
         x = torch.tensor([2])
         y = torch.tensor([5])
         mod = M()
-        _ = export(mod, (torch.tensor(True), x, y))._transform_do_not_use(
+        _ = export(mod, (torch.tensor(True), x, y), strict=True)._transform_do_not_use(
             _ExportPassBaseDeprecatedDoNotUse()
         )
 
@@ -98,7 +98,7 @@ class TestPassInfra(TestCase):
         inps = (torch.rand(1), torch.rand(1))
         m = CustomModule()
 
-        ep_before = export(m, inps)
+        ep_before = export(m, inps, strict=True)
 
         # No op transformation that doesn't perform any meaningful changes to node
         ep_after = ep_before._transform_do_not_use(_ExportPassBaseDeprecatedDoNotUse())
@@ -131,7 +131,9 @@ class TestPassInfra(TestCase):
         input_tensor1 = torch.tensor(5.0)
         input_tensor2 = torch.tensor(6.0)
 
-        ep_before = torch.export.export(my_module, (input_tensor1, input_tensor2))
+        ep_before = torch.export.export(
+            my_module, (input_tensor1, input_tensor2), strict=True
+        )
         from torch.fx.passes.infra.pass_base import PassResult
 
         def modify_input_output_pass(gm):
@@ -169,7 +171,7 @@ class TestPassInfra(TestCase):
 
         my_module = CustomModule()
         inputs = (torch.tensor(6.0), torch.tensor(7.0))
-        ep_before = export(my_module, inputs)
+        ep_before = export(my_module, inputs, strict=True)
 
         def replace_pass(gm):
             for node in gm.graph.nodes:
