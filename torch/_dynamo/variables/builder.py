@@ -140,6 +140,7 @@ from .distributed import (
     WorldMetaClassVariable,
 )
 from .functions import (
+    BuiltinMethodVariable,
     CollectionsNamedTupleFunction,
     CollectiveFunctionRewriteVariable,
     CreateTMADescriptorVariable,
@@ -226,6 +227,7 @@ from .user_defined import (
     UserDefinedClassVariable,
     UserDefinedDictVariable,
     UserDefinedObjectVariable,
+    UserDefinedTupleVariable,
 )
 
 
@@ -1028,6 +1030,12 @@ class VariableBuilder:
         elif value is collections.namedtuple:
             self.install_guards(GuardBuilder.ID_MATCH)
             return CollectionsNamedTupleFunction(value, source=self.source)
+        elif (
+            isinstance(value, types.BuiltinMethodType)
+            and value in BuiltinMethodVariable.supported_methods()
+        ):
+            self.install_guards(GuardBuilder.ID_MATCH)
+            return BuiltinMethodVariable(value, source=self.source)
         elif is_function_or_wrapper(value):
             value, attr_name = unwrap_with_attr_name_if_wrapper(value)
             # For these wrappers, Dynamo points to the wrapped function,
@@ -1250,6 +1258,25 @@ class VariableBuilder:
             )
 
             result = UserDefinedDictVariable(value, dict_vt=dict_vt, source=self.source)
+            return self.tx.output.side_effects.track_object_existing(value, result)
+        elif isinstance(value, tuple) and type(value).__new__ is tuple.__new__:
+            self.install_guards(GuardBuilder.TYPE_MATCH)
+            self.install_guards(GuardBuilder.SEQUENCE_LENGTH)
+
+            # NB - Be careful in not triggering user code. Guards also work on
+            # the underlying tuple data structure.
+            output = [
+                LazyVariableTracker.create(
+                    tuple.__getitem__(value, i),
+                    source=GetItemSource(self.get_source(), i),
+                )
+                for i in range(tuple.__len__(value))
+            ]
+
+            tuple_vt = TupleVariable(output, mutation_type=ValueMutationNew())
+            result = UserDefinedTupleVariable.create(
+                value, tuple_vt=tuple_vt, source=self.source
+            )
             return self.tx.output.side_effects.track_object_existing(value, result)
         elif issubclass(type(value), MutableMapping):
             self.install_guards(GuardBuilder.TYPE_MATCH)

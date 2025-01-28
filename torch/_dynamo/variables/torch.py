@@ -39,7 +39,7 @@ from ..utils import (
 from .base import VariableTracker
 from .ctx_manager import (
     AutocastModeVariable,
-    NullContextVariable,
+    ProfilerContextVariable,
     TorchFunctionDisableVariable,
 )
 from .distributed import DistributedVariable, ProcessGroupVariable
@@ -304,13 +304,15 @@ class TorchCtxManagerClassVariable(BaseTorchVariable):
         ):
             return AutocastModeVariable.create(self.value, args, kwargs)
         elif self.value in (
+            # NOTE any class added here must align with the semantic
+            # requirements of `ProfilerContextVariable`.
             torch.profiler.profile,
             torch.profiler.record_function,
             torch.autograd.profiler.profile,
             torch.autograd.profiler.record_function,
         ):
             warning_once(log, "Profiler function %s will be ignored", self.value)
-            return NullContextVariable()
+            return ProfilerContextVariable()
         elif self.value is torch._C.DisableTorchFunctionSubclass:
             assert not (args or kwargs)
             return TorchFunctionDisableVariable.create(tx)
