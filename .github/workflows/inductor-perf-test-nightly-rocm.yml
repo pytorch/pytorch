@@ -77,8 +77,6 @@ jobs:
       curr_ref_type: ${{ github.ref_type }}
 
   linux-focal-rocm6_3-py3_10-inductor-benchmark-build:
-    # TODO (huydhn): Remove this once https://github.com/pytorch/pytorch/pull/144594 lands
-    if: false
     name: rocm6_3-py3_10-inductor-benchmark-build
     uses: ./.github/workflows/_linux-build.yml
     with:
