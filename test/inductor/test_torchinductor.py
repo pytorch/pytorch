@@ -53,6 +53,7 @@ from torch._inductor.test_case import TestCase as InductorTestCase
 from torch._inductor.utils import (
     add_scheduler_init_hook,
     run_and_get_code,
+    run_and_get_code_before_compile,
     run_and_get_cpp_code,
     run_and_get_kernels,
     run_and_get_triton_code,
@@ -1337,7 +1338,7 @@ class CommonTemplate:
                 dtype=dtype,
                 device=self.device,
             )
-            _, code = run_and_get_code(fn, x, y)
+            _, code = run_and_get_code_before_compile(fn, x, y)
             # cpp_wrapper falls back to Python function calls with complex inputs, so
             # there are still two calls to aten.view when it's enabled.
             code = " ".join(code)
