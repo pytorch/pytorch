@@ -455,9 +455,15 @@ class SizeVarAllocator:
     # as this will ensure that you actually have a sympy'ified expression,
     # and will prevent you from incorrectly writing evaluate_expr(a == b)
     # which does the wrong thing if a or b is a sympy expression
-    def evaluate_expr(self, left: Union[Expr, sympy.logic.boolalg.Boolean]) -> bool:
+    def evaluate_expr(
+        self,
+        left: Union[Expr, sympy.logic.boolalg.Boolean],
+        size_oblivious: bool = False,
+    ) -> bool:
         assert isinstance(left, (Expr, sympy.logic.boolalg.Boolean)), type(left)
-        return self.shape_env.evaluate_expr(sympy.sympify(left))
+        return self.shape_env.evaluate_expr(
+            sympy.sympify(left), size_oblivious=size_oblivious
+        )
 
     def evaluate_min(self, left: Expr, right: Expr) -> Expr:
         """return the smaller of left and right, and guard on that choice"""
