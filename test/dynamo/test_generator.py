@@ -7,7 +7,7 @@ from collections import OrderedDict
 import torch
 import torch._dynamo.test_case
 import torch._dynamo.testing
-from torch._dynamo.exc import Unsupported
+from torch._dynamo.exc import InternalTorchDynamoError, Unsupported
 from torch._dynamo.testing import EagerAndRecordGraphs, normalize_gm
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
@@ -1125,6 +1125,24 @@ class TestGeneratorThrow(GeneratorTestsBase):
         y = fn(t)
         self.assertEqual(y, t.sin() + t.cos())
         self.assertEqual(z, 101)
+
+    def test_throw_three_arguments(self):
+        def whoo(t):
+            try:
+                yield t.sin()
+            except ValueError:
+                yield t.cos()
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(t):
+            gen = whoo(t)
+            a = next(gen)
+            b = gen.throw(ValueError, "Error", None)
+            return a + b
+
+        t = torch.randn(2)
+        with self.assertRaises(InternalTorchDynamoError):
+            fn(t)
 
     def test_throw_no_yield_after_throw(self):
         z = 0
