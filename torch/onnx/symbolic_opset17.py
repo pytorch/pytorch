@@ -141,7 +141,7 @@ def stft(
 
     if center or pad_mode != "reflect":
         raise errors.SymbolicValueError(
-            msg="STFT does not currentlyt support center = True",
+            msg='STFT does not currently support center = True or pad_mode != "reflect"',
             value=input,
         )  # TODO(#insert-issue-id): add center functionality and tests.
 
