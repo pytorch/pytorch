@@ -284,7 +284,7 @@ class DirectoryReaderTest(PackageTestCase):
             with TemporaryDirectory() as temp_dir:
                 zip_file.extractall(path=temp_dir)
                 dir_importer = PackageImporter(Path(temp_dir) / Path(filename).name)
-                dir_mod = dir_importer.load_pickle("res", "mod.pkl")
+                dir_importer.load_pickle("res", "mod.pkl")
 
 
 if __name__ == "__main__":

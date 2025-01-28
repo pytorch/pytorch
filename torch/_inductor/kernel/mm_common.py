@@ -2,7 +2,8 @@
 import functools
 import itertools
 import logging
-from typing import Any, cast, Dict, Sequence, Tuple
+from collections.abc import Sequence
+from typing import Any, cast
 
 import sympy
 
@@ -41,7 +42,7 @@ def filtered_configs(
     m: int,
     n: int,
     k: int,
-    configs: Sequence[Tuple[int, int, int, int, int]],
+    configs: Sequence[tuple[int, int, int, int, int]],
     has_int8_tensor=False,
     scale=1,
     exclude=lambda m, n, k: False,
@@ -352,43 +353,43 @@ scaled_persistent_mm_kernel_configs = [
 
 # Create filtered list of configs based on cond evaluation
 mm_platform_configs = tuple(
-    cast(Tuple[int, int, int, int, int], config["config"])
+    cast(tuple[int, int, int, int, int], config["config"])
     for config in mm_kernel_configs
     if config["cond"]
 )
 extra_mm_platform_configs = tuple(
-    cast(Tuple[int, int, int, int, int], config["config"])
+    cast(tuple[int, int, int, int, int], config["config"])
     for config in extra_mm_kernel_configs
     if config["cond"]
 )
 int8_platform_configs = tuple(
-    cast(Tuple[int, int, int, int, int], config["config"])
+    cast(tuple[int, int, int, int, int], config["config"])
     for config in int8_mm_kernel_configs
     if config["cond"]
 )
 mixed_mm_platform_configs = tuple(
-    cast(Tuple[int, int, int, int, int], config["config"])
+    cast(tuple[int, int, int, int, int], config["config"])
     for config in mixed_mm_kernel_configs
     if config["cond"]
 )
 persistent_mm_platform_configs = tuple(
-    cast(Tuple[int, int, int, int, int], config["config"])
+    cast(tuple[int, int, int, int, int], config["config"])
     for config in persistent_mm_kernel_configs
     if config["cond"]
 )
 scaled_mm_platform_configs = tuple(
-    cast(Tuple[int, int, int, int, int], config["config"])
+    cast(tuple[int, int, int, int, int], config["config"])
     for config in scaled_mm_kernel_configs
     if config["cond"]
 )
 scaled_persistent_mm_platform_configs = tuple(
-    cast(Tuple[int, int, int, int, int], config["config"])
+    cast(tuple[int, int, int, int, int], config["config"])
     for config in scaled_persistent_mm_kernel_configs
     if config["cond"]
 )
 
 # On ROCm convert num_stages to improve performance
-if torch.version.hip:
+if torch.version.hip and torch.cuda.is_available():
     mm_platform_configs = build_rocm_gemm_configs(mm_platform_configs)
     extra_mm_platform_configs = build_rocm_gemm_configs(extra_mm_platform_configs)
     int8_platform_configs = build_rocm_gemm_configs(int8_platform_configs)
@@ -438,7 +439,7 @@ def mm_grid(m, n, meta):
     return (cdiv(m, meta["BLOCK_M"]) * cdiv(n, meta["BLOCK_N"]), 1, 1)
 
 
-def persistent_mm_grid(M: int, N: int, meta: Dict[str, Any]):
+def persistent_mm_grid(M: int, N: int, meta: dict[str, Any]):
     """Defines the grid for persistent kernels."""
     return (
         min(meta["NUM_SMS"], cdiv(M, meta["BLOCK_M"]) * cdiv(N, meta["BLOCK_N"])),
@@ -540,7 +541,7 @@ def addmm_epilogue(dtype, alpha, beta):
     return epilogue
 
 
-def _is_static_problem(layout: Layout) -> Tuple[bool, bool]:
+def _is_static_problem(layout: Layout) -> tuple[bool, bool]:
     """
     Check if input tensors and output layout have static shapes and non-zero sizes.
 

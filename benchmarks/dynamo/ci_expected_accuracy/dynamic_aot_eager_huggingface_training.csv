@@ -82,7 +82,7 @@ ElectraForQuestionAnswering,pass,5
 
 
 
-GPT2ForSequenceClassification,pass,7
+GPT2ForSequenceClassification,pass,5
 
 
 
@@ -94,7 +94,7 @@ LayoutLMForMaskedLM,pass,5
 
 
 
-LayoutLMForSequenceClassification,pass,7
+LayoutLMForSequenceClassification,pass,5
 
 
 

@@ -110,8 +110,8 @@ def print_seen():
         return "{" + r + "}"
 
     def sort_key(kv):
-        k, v = kv
-        device_type, op = k
+        k, _ = kv
+        _, op = k
         if isinstance(op, tuple):
             return op
         else:
@@ -223,10 +223,6 @@ inductor_expected_failures_single_sample["cpu"] = {
     "resize_as_": {b8, f16, f32, f64, i32, i64},
     "histc": {f16},
     "multinomial": {f16, f32, f64},
-    "nn.functional.avg_pool1d": {i64},
-    "nn.functional.avg_pool2d": {i64},
-    "nn.functional.avg_pool3d": {i64},
-    "nn.functional.local_response_norm": {i64},
     "nonzero_static": {b8, f16, f32, f64, i32, i64},
     ("normal", "in_place"): {f16, f32, f64},
     ("normal", "number_mean"): {f16, f32, f64},
@@ -286,7 +282,6 @@ inductor_expected_failures_single_sample["xpu"] = {
     "inner": {f64},
     "linalg.cholesky_ex": {f64},
     "linalg.cholesky": {f64},
-    ("linalg.det", "singular"): {f64},
     "linalg.ldl_factor_ex": {f64},
     "linalg.ldl_factor": {f64},
     "linalg.ldl_solve": {f64},
@@ -1015,7 +1010,7 @@ class TestInductorOpInfo(TestCase):
         #     print(f"CONSIDERING OP {op_name} on {device_type} with {dtype} |
         # {inductor_skips[device_type].get(op_name, set())}", flush=True)
         if dtype in inductor_skips[device_type].get(op_name, set()):
-            test_expect = ExpectedTestResult.SKIP
+            test_expect = ExpectedTestResult.SKIP  # noqa: F841
             # with open("test_output.txt", "a") as f:
             #     print(f"SKIPPING OP {op_name} on {device_type}", flush=True, file=f)
             #     print(f"SKIPPING OP {op_name} on {device_type}", flush=True)
@@ -1026,9 +1021,9 @@ class TestInductorOpInfo(TestCase):
         ].get(
             op_name, set()
         ):
-            test_expect = ExpectedTestResult.XFAILURE
+            test_expect = ExpectedTestResult.XFAILURE  # noqa: F841
         else:
-            test_expect = ExpectedTestResult.SUCCESS
+            test_expect = ExpectedTestResult.SUCCESS  # noqa: F841
 
         overridden_kwargs = {}
         overridden_kwargs.update(

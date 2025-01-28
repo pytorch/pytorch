@@ -3,13 +3,13 @@ import functools
 import logging
 import os
 import pathlib
-from typing import Any, List
+from typing import Any
 
 from torch._inductor.metrics import get_metric_table, is_metric_table_enabled
 from torch.utils._ordered_set import OrderedSet
 
 from .. import config
-from ..codecache import code_hash, get_path, TritonFuture
+from ..codecache import code_hash, CodeCacheFuture, get_path
 from ..runtime.benchmarking import benchmarker
 from ..runtime.triton_heuristics import (
     cooperative_reduction_grid,
@@ -168,7 +168,7 @@ class MultiKernel:
         self.args = object()
 
     @staticmethod
-    def _merge_workspace_args(left: List[WorkspaceArg], right: List[WorkspaceArg]):
+    def _merge_workspace_args(left: list[WorkspaceArg], right: list[WorkspaceArg]):
         if left == right:
             return left
         result = {x.inner_name: x for x in left}
@@ -220,7 +220,7 @@ class MultiKernel:
             assert call_args == other_call_args, (call_args, other_call_args)
             assert arg_types == other_arg_types
 
-        grid: List[Any] = []
+        grid: list[Any] = []
 
         if V.graph.cpp_wrapper and not config.triton.autotune_at_compile_time:
             # for the second pass of cpp-wrapper codegen, we should call
@@ -313,7 +313,14 @@ class MultiKernelCall:
         self._recorded = False
 
     def cache_file_path(self):
-        key = code_hash(",".join([k.fn.cache_key for k in self.kernels]))
+        key = code_hash(
+            ",".join(
+                [
+                    f"{k.fn.cache_key}{k.size_hints!r}{k.triton_meta!r}"
+                    for k in self.kernels
+                ]
+            )
+        )
         _, _, path = get_path(key, "picked_kernel")
         return pathlib.Path(path)
 
@@ -349,7 +356,7 @@ class MultiKernelCall:
         it may slow down the parallel compilation.
         """
         for i, kernel in enumerate(self._kernels):
-            if isinstance(kernel, TritonFuture):
+            if isinstance(kernel, CodeCacheFuture):
                 self._kernels[i] = kernel.result()
 
         return self._kernels

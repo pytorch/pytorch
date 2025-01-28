@@ -1,4 +1,3 @@
-# mypy: allow-untyped-decorators
 # mypy: allow-untyped-defs
 r"""Implementation for the RAdam algorithm."""
 from typing import cast, List, Optional, Tuple, Union
@@ -233,8 +232,9 @@ RAdam.__doc__ = (
         eps (float, optional): term added to the denominator to improve
             numerical stability (default: 1e-8)
         weight_decay (float, optional): weight decay (L2 penalty) (default: 0)
-        decoupled_weight_decay (bool, optional): whether to use decoupled weight
-            decay as in AdamW to obtain RAdamW (default: False)
+        decoupled_weight_decay (bool, optional): whether to decouple the weight
+            decay as in AdamW to obtain RAdamW. If True, the algorithm does not
+            accumulate weight decay in the momentum nor variance. (default: False)
         {_foreach_doc}
         {_maximize_doc}
         {_capturable_doc}

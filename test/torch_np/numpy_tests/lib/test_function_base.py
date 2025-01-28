@@ -1,4 +1,5 @@
 # Owner(s): ["module: dynamo"]
+# ruff: noqa: F841
 
 import functools
 import math
@@ -15,6 +16,7 @@ import pytest
 from hypothesis.extra.numpy import arrays
 from pytest import raises as assert_raises
 
+import torch
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
@@ -1012,6 +1014,7 @@ class TestGradient(TestCase):
         assert_raises(TypeError, gradient, f_2d, x, x, axis=1)
         assert_raises(TypeError, gradient, f_2d, 1, 1, axis=1)
 
+    @torch._dynamo.config.patch(use_numpy_random_stream=True)
     def test_second_order_accurate(self):
         # Testing that the relative numerical error is less that 3% for
         # this example problem. This corresponds to second order

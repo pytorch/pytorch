@@ -3,10 +3,6 @@
 namespace at::mps {
 
 static const char* SCATTER_OPS_TEMPLATE = R"METAL_SCATTER(
-struct __attribute__ ((packed)) packed_uint5{{
-  uint32_t x; uint32_t y; uint32_t z; uint32_t w; uint32_t u;
-}};
-
 template<typename Y, typename X>
 Y cast(const X x);
 
@@ -15,32 +11,26 @@ template<>
  return {2};
 }}
 
-kernel void scatter_kernel_5(uint linear_index              [[thread_position_in_grid]],
-                             constant void * src_           [[buffer(0)]],
-                             device void * dst_             [[buffer(1)]],
-                             constant packed_uint5 & size   [[buffer(2)]],
-                             constant packed_uint5 & stride [[buffer(3)]],
-                             constant uint32_t & numel      [[buffer(4)]]) {{
+kernel void scatter_kernel_n(uint linear_index          [[thread_position_in_grid]],
+                             constant void * src_       [[buffer(0)]],
+                             device void * dst_         [[buffer(1)]],
+                             constant uint32_t * size   [[buffer(2)]],
+                             constant uint32_t * stride [[buffer(3)]],
+                            constant uint32_t & numel   [[buffer(4)]],
+                            constant int32_t & ndim     [[buffer(5)]]) {{
     if (linear_index >= numel) return;
 
     constant {0} * src = (constant {0} *)src_;
     device {1} * dst = (device {1} *)dst_;
 
-    packed_uint5 local_index;
-    local_index.x = linear_index / (size.u * size.w * size.z * size.y) % size.x;
-    local_index.y = linear_index / (size.u * size.w * size.z) % size.y;
-    local_index.z = linear_index / (size.u * size.w) % size.z;
-    local_index.w = linear_index / size.u % size.w;
-    local_index.u = linear_index % size.u;
+    uint64_t dst_offs = 0;
+    auto dst_idx = linear_index;
+    for(int dim = ndim - 1; dim >= 0; --dim) {{
+      dst_offs += stride[dim] * (dst_idx % size[dim]);
+      dst_idx /= size[dim];
+    }}
 
-    packed_uint5 strided_index;
-    strided_index.x = local_index.x * stride.x;
-    strided_index.y = local_index.y * stride.y;
-    strided_index.z = local_index.z * stride.z;
-    strided_index.w = local_index.w * stride.w;
-    strided_index.u = local_index.u * stride.u;
-
-    dst[strided_index.x + strided_index.y + strided_index.z + strided_index.w + strided_index.u] = cast<{1}>(src[linear_index]);
+    dst[dst_offs] = cast<{1}>(src[linear_index]);
 }}
 
 kernel void scatter_kernel_4(uint linear_index              [[thread_position_in_grid]],
@@ -121,10 +111,6 @@ kernel void scatter_kernel_1(uint linear_index              [[thread_position_in
 )METAL_SCATTER";
 
 static const char* GATHER_OPS_TEMPLATE = R"METAL_GATHER(
-struct __attribute__ ((packed)) packed_uint5{{
-  uint32_t x; uint32_t y; uint32_t z; uint32_t w; uint32_t u;
-}};
-
 template<typename Y, typename X>
 Y cast(const X x);
 
@@ -133,33 +119,26 @@ template<>
  return {2};
 }}
 
-kernel void gather_kernel_5(uint linear_index               [[thread_position_in_grid]],
-                            constant void * src_            [[buffer(0)]],
-                            device void * dst_              [[buffer(1)]],
-                            constant packed_uint5 & size    [[buffer(2)]],
-                            constant packed_uint5 & stride  [[buffer(3)]],
-                            constant uint32_t & numel       [[buffer(4)]]) {{
+kernel void gather_kernel_n(uint linear_index           [[thread_position_in_grid]],
+                            constant void * src_        [[buffer(0)]],
+                            device void * dst_          [[buffer(1)]],
+                            constant uint32_t * size    [[buffer(2)]],
+                            constant uint32_t * stride  [[buffer(3)]],
+                            constant uint32_t & numel   [[buffer(4)]],
+                            constant int32_t & ndim     [[buffer(5)]]) {{
     if (linear_index >= numel) return;
 
     constant {0} * src = (constant {0} *)src_;
     device {1} * dst = (device {1} *)dst_;
 
+    uint64_t src_offs = 0;
+    auto src_idx = linear_index;
+    for(int dim = ndim - 1; dim >= 0; --dim) {{
+      src_offs += stride[dim] * (src_idx % size[dim]);
+      src_idx /= size[dim];
+    }}
 
-    packed_uint5 local_index;
-    local_index.x = linear_index / (size.u * size.w * size.z * size.y) % size.x;
-    local_index.y = linear_index / (size.u * size.w * size.z) % size.y;
-    local_index.z = linear_index / (size.u * size.w) % size.z;
-    local_index.w = linear_index / size.u % size.w;
-    local_index.u = linear_index % size.u;
-
-    packed_uint5 strided_index;
-    strided_index.x = local_index.x * stride.x;
-    strided_index.y = local_index.y * stride.y;
-    strided_index.z = local_index.z * stride.z;
-    strided_index.w = local_index.w * stride.w;
-    strided_index.u = local_index.u * stride.u;
-
-    dst[linear_index] = cast<{1}>(src[strided_index.x + strided_index.y + strided_index.z + strided_index.w + strided_index.u]);
+    dst[linear_index] = cast<{1}>(src[src_offs]);
 }}
 
 kernel void gather_kernel_4(uint linear_index               [[thread_position_in_grid]],

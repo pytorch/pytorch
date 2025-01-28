@@ -35,11 +35,25 @@ struct OpenRegAllocator final : at::Allocator {
     if (!ptr || !Py_IsInitialized()) {
       return;
     }
+
     py::gil_scoped_acquire acquire;
+
+    PyObject *type = nullptr, *value = nullptr, *traceback = nullptr;
+    // Always stash, this will be a no-op if there is no error
+    PyErr_Fetch(&type, &value, &traceback);
+
     TORCH_CHECK(
         get_method("free")(reinterpret_cast<openreg_ptr_t>(ptr)).cast<bool>(),
-        "Failed to free memory pointer at ", ptr
-    );
+        "Failed to free memory pointer at ",
+        ptr);
+
+    // If that user code raised an error, just print it without raising it
+    if (PyErr_Occurred()) {
+      PyErr_Print();
+    }
+
+    // Restore the original error
+    PyErr_Restore(type, value, traceback);
   }
 
   at::DeleterFnPtr raw_deleter() const override {

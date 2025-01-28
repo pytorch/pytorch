@@ -4,15 +4,16 @@
 import argparse
 import os
 import sys
+from pathlib import Path
 
 
-sys.path.append(
-    os.path.realpath(
-        os.path.join(
-            __file__, os.path.pardir, os.path.pardir, os.path.pardir, "torch", "utils"
-        )
-    )
-)
+# NOTE: `tools/amd_build/build_amd.py` could be a symlink.
+# The behavior of `symlink / '..'` is different from `symlink.parent`.
+# Use `pardir` three times rather than using `path.parents[2]`.
+REPO_ROOT = (
+    Path(__file__).absolute() / os.path.pardir / os.path.pardir / os.path.pardir
+).resolve()
+sys.path.append(str(REPO_ROOT / "torch" / "utils"))
 
 from hipify import hipify_python  # type: ignore[import]
 
@@ -53,8 +54,9 @@ parser.add_argument(
 
 args = parser.parse_args()
 
+# NOTE: `tools/amd_build/build_amd.py` could be a symlink.
 amd_build_dir = os.path.dirname(os.path.realpath(__file__))
-proj_dir = os.path.join(os.path.dirname(os.path.dirname(amd_build_dir)))
+proj_dir = os.path.dirname(os.path.dirname(amd_build_dir))
 
 if args.project_directory:
     proj_dir = args.project_directory
@@ -99,7 +101,6 @@ includes = [
     "aten/src/ATen/native/transformers/cuda/mem_eff_attention/debug_utils.h",
     "aten/src/ATen/native/transformers/cuda/mem_eff_attention/gemm_kernel_utils.h",
     "aten/src/ATen/native/transformers/cuda/mem_eff_attention/pytorch_utils.h",
-    "aten/src/ATen/native/transformers/cuda/flash_attn/flash_api.h",
     "aten/src/THC/*",
     "aten/src/ATen/test/*",
     # CMakeLists.txt isn't processed by default, but there are a few
@@ -138,8 +139,6 @@ ignores = [
     # generated files we shouldn't frob
     "torch/lib/tmp_install/*",
     "torch/include/*",
-    # ROCm has multiple flash attention backends requiring deviation
-    "aten/src/ATen/native/transformers/cuda/flash_attn/flash_api.h",
 ]
 
 ignores = [os.path.join(proj_dir, ignore) for ignore in ignores]
@@ -201,6 +200,7 @@ for hip_platform_file in hip_platform_files:
                 for line in newlines:
                     sources.write(line)
             print(f"{hip_platform_file} updated")
+
 
 hipify_python.hipify(
     project_directory=proj_dir,

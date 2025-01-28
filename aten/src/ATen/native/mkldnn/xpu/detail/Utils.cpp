@@ -114,7 +114,7 @@ dnnl::memory::dims get_onednn_strides(const at::Tensor& tensor) {
 }
 
 dnnl::memory::desc get_onednn_md(const at::Tensor& tensor) {
-  Tensor t = tensor.sizes().size() == 0 ? tensor.unsqueeze(0) : tensor;
+  Tensor t = tensor.sizes().empty() ? tensor.unsqueeze(0) : tensor;
   return {get_onednn_dims(t), get_onednn_dtype(t), get_onednn_strides(t)};
 }
 
@@ -130,8 +130,8 @@ bool onednn_strides_check(const Tensor& src) {
   dnnl_memory_desc_t md;
   dnnl_memory_desc_create_with_strides(&md, ndims, dims, data_type, strides);
   dnnl_format_kind_t md_fmt_kind;
-  int md_ndims;
-  int md_inner_nblks;
+  int md_ndims = 0;
+  int md_inner_nblks = 0;
   dnnl_dims_t* md_padded_dims = nullptr;
 
   dnnl_memory_desc_query(md, dnnl_query_inner_nblks_s32, &md_inner_nblks);
@@ -154,7 +154,7 @@ bool onednn_strides_check(const Tensor& src) {
   int perm[DNNL_MAX_NDIMS] = {0};
   for (int d = 0; d < md_ndims; ++d) {
     // no strides check needed for empty tensor
-    if (md_padded_dims[d] == 0)
+    if (md_padded_dims[d] == nullptr)
       return true;
 
     // no strides verification for runtime dims

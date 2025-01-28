@@ -81,7 +81,7 @@ class LazyGeneratorTest(TestCase):
                 uncached_compile == 2
             ), f"Expected 2 uncached compiles, got {uncached_compile}"
 
-            t = generate_tensor(1)
+            t = generate_tensor(1)  # noqa: F841
             torch._lazy.mark_step()
 
             uncached_compile = metrics.counter_value("UncachedCompile")

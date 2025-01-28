@@ -1065,6 +1065,7 @@ Read More
    :caption: Additional Links for Export Users
    :maxdepth: 1
 
+   export.programming_model
    export.ir_spec
    torch.compiler_transformations
    torch.compiler_ir

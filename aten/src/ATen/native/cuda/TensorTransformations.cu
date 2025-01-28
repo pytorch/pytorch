@@ -57,7 +57,7 @@ __global__ void flip_cuda_kernel(
     int64_t* strides_contiguous,
     int64_t* shape,
     int64_t total_dims) {
-  int64_t linear_index = blockIdx.x * blockDim.x + threadIdx.x;
+  int64_t linear_index = ((int64_t) blockIdx.x) * blockDim.x + threadIdx.x;
   if (linear_index >= N) {
     return;
   }
@@ -90,7 +90,7 @@ __global__ void roll_cuda_kernel(
     int64_t size,
     int64_t stride,
     int64_t total_dims) {
-  int64_t linear_index = blockIdx.x * blockDim.x + threadIdx.x;
+  int64_t linear_index = ((int64_t) blockIdx.x) * blockDim.x + threadIdx.x;
   if (linear_index >= N) {
     return;
   }
