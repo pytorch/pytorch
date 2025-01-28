@@ -2,7 +2,6 @@
 
 import collections
 import functools
-import operator
 from typing import Optional, TYPE_CHECKING
 
 from torch._subclasses.fake_tensor import is_fake
@@ -12,7 +11,7 @@ from ..bytecode_transformation import create_call_function, create_instruction
 from ..exc import raise_observed_exception, unimplemented
 from ..guards import GuardBuilder, install_guard
 from ..source import is_from_local_source
-from ..utils import dict_keys, dict_values, specialize_symnode
+from ..utils import cmp_name_to_op_mapping, dict_keys, dict_values, specialize_symnode
 from .base import ValueMutationNew, VariableTracker
 from .constant import ConstantVariable
 
@@ -838,12 +837,8 @@ class DictKeysVariable(DictViewVariable):
         if name in ("__eq__", "__lt__"):
             if not isinstance(args[0], (SetVariable, DictKeysVariable)):
                 return ConstantVariable.create(NotImplemented)
-            op_mapping = {
-                "__eq__": operator.eq,
-                "__lt__": operator.lt,
-            }
             return ConstantVariable.create(
-                op_mapping[name](self.set_items, args[0].set_items)
+                cmp_name_to_op_mapping[name](self.set_items, args[0].set_items)
             )
         return super().call_method(tx, name, args, kwargs)
 

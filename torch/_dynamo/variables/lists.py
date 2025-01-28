@@ -15,6 +15,7 @@ from ..bytecode_transformation import create_call_function, create_instruction
 from ..exc import raise_observed_exception, unimplemented
 from ..source import AttrSource
 from ..utils import (
+    cmp_name_to_op_mapping,
     get_fake_value,
     guard_if_dyn,
     istype,
@@ -143,12 +144,10 @@ class BaseListVariable(VariableTracker):
                 right, BaseListVariable
             ):
                 return variables.ConstantVariable.create(NotImplemented)
-            op_mapping = {
-                "__eq__": operator.eq,
-                "__lt__": operator.lt,
-            }
             return variables.UserFunctionVariable(polyfills.list_cmp).call_function(
-                tx, [variables.BuiltinVariable(op_mapping[name]), left, right], {}
+                tx,
+                [variables.BuiltinVariable(cmp_name_to_op_mapping[name]), left, right],
+                {},
             )
 
         return super().call_method(tx, name, args, kwargs)

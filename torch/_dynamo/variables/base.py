@@ -1,7 +1,6 @@
 # mypy: ignore-errors
 
 import collections
-import operator
 from enum import Enum
 from typing import Any, Callable, Optional, TYPE_CHECKING
 
@@ -10,7 +9,7 @@ from ..current_scope_id import current_scope_id
 from ..exc import unimplemented
 from ..guards import GuardBuilder, install_guard
 from ..source import AttrSource, Source
-from ..utils import istype
+from ..utils import cmp_name_to_op_mapping, istype
 
 
 if TYPE_CHECKING:
@@ -429,12 +428,10 @@ class VariableTracker(metaclass=VariableTrackerMeta):
             ):
                 unimplemented(f"call_method {self} {name} {args} {kwargs}")
 
-            op_mapping = {
-                "__eq__": operator.eq,
-                "__lt__": operator.lt,
-            }
             return variables.ConstantVariable.create(
-                op_mapping[name](self.as_python_constant(), other.as_python_constant())
+                cmp_name_to_op_mapping[name](
+                    self.as_python_constant(), other.as_python_constant()
+                )
             )
         unimplemented(f"call_method {self} {name} {args} {kwargs}")
 

@@ -1007,6 +1007,12 @@ def is_function(value):
     )
 
 
+cmp_name_to_op_mapping = {
+    "__eq__": operator.eq,
+    "__lt__": operator.lt,
+}
+
+
 def is_wrapper_or_member_descriptor(value):
     return isinstance(
         value,
