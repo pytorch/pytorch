@@ -152,6 +152,44 @@ class TestDraftExport(TestCase):
                 )
                 m(*bad_dtype_inps)
 
+    def test_fake_infer_dense_in_memory_check(self):
+        with torch.library._scoped_library("mylib", "FRAGMENT"):
+
+            @torch.library.custom_op("mylib::foo5", mutates_args={})
+            def foo5_impl(a: torch.Tensor) -> torch.Tensor:
+                return a * 2
+
+            @torch.library.custom_op("mylib::foo6", mutates_args={})
+            def foo6_impl(a: torch.Tensor) -> torch.Tensor:
+                return (a * 2)[:, :-1, :-1]  # not dense in memory
+
+            @torch.library.custom_op("mylib::foo7", mutates_args={})
+            def foo7_impl(a: torch.Tensor) -> torch.Tensor:
+                return (a * 2)[:, 1:-1, :]  # non-zero storage offset
+
+            class Foo(torch.nn.Module):
+                def forward(self, x, opt):
+                    if opt == 0:
+                        return torch.ops.mylib.foo5(x)
+                    elif opt == 1:
+                        return torch.ops.mylib.foo6(x)
+                    else:
+                        return torch.ops.mylib.foo7(x)
+
+            draft_export(Foo(), (torch.randn(80, 4, 4), 0))
+            draft_export(Foo(), (torch.randn(80, 1, 4), 0))
+            draft_export(Foo(), (torch.randn(1, 4, 1, 1, 4, 1, 4), 0))
+            with self.assertRaisesRegex(
+                RuntimeError,
+                "a return was not dense in memory",
+            ):
+                draft_export(Foo(), (torch.randn(4, 6, 8), 1))
+            with self.assertRaisesRegex(
+                RuntimeError,
+                "a return has a non-zero storage offset",
+            ):
+                draft_export(Foo(), (torch.randn(4, 6, 8), 2))
+
     def test_data_dependent_failure(self):
         with torch.library._scoped_library("mylib", "FRAGMENT") as lib:
             torch.library.define(
