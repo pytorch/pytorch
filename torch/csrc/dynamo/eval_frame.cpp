@@ -65,8 +65,11 @@ PyObject* dynamo__custom_eval_frame(
   // exit functions
   auto eval_default = [&]() {
     eval_frame_callback_set(recursive_callback);
+    // eval_frame_callback_set(Py_None);
     eval_result = dynamo_eval_frame_default(tstate, frame, throw_flag);
-    eval_frame_callback_set(callback);
+    if (callback != recursive_callback) {
+      eval_frame_callback_set(callback);
+    }
   };
 
   // NOTE: In 3.12+, the frame evaluation function (callee) is responsible for
@@ -78,7 +81,9 @@ PyObject* dynamo__custom_eval_frame(
     DEBUG_NULL_CHECK(cached_code);
     eval_result = dynamo_eval_custom_code(
         tstate, frame, cached_code, trace_annotation, throw_flag);
-    eval_frame_callback_set(callback);
+    if (callback != recursive_callback) {
+      eval_frame_callback_set(callback);
+    }
     clear_old_frame_if_python_312_plus(tstate, frame);
   };
 
@@ -93,16 +98,18 @@ PyObject* dynamo__custom_eval_frame(
   }
 
   // create cache
-  if (extra == NULL) {
+  if (extra == nullptr) {
     extra = init_and_set_extra_state(F_CODE(frame));
   }
 
   // Get recursive action
   Action action = extra_state_get_action(extra);
-  if (action.recursive_action == SKIP) {
-    recursive_callback = Py_None;
-  } else if (action.recursive_action == RUN_ONLY) {
-    recursive_callback = Py_False;
+  if (action.frame_action != DEFAULT) {
+    if (action.recursive_action == SKIP) {
+      recursive_callback = Py_None;
+    } else if (action.recursive_action == RUN_ONLY) {
+      recursive_callback = Py_False;
+    }
   }
 
   // Skip this frame
@@ -127,7 +134,7 @@ PyObject* dynamo__custom_eval_frame(
 
   _PytorchRecordFunctionState* rf =
       _pytorch_record_function_enter(cache_lookup_profiler_str);
-  PyObject* maybe_cached_code = NULL;
+  PyObject* maybe_cached_code = nullptr;
   lookup(
       extra,
       locals.get(),
@@ -144,7 +151,7 @@ PyObject* dynamo__custom_eval_frame(
     DEBUG_TRACE("In run only mode %s", get_frame_name(frame));
   }
 
-  if (maybe_cached_code == NULL) {
+  if (maybe_cached_code == nullptr) {
     // guard eval failed, keep propagating
     fail();
     return eval_result;
@@ -179,7 +186,7 @@ PyObject* dynamo__custom_eval_frame(
   // strong reference
   PyObject* callback_result = dynamo_call_callback(
       callback, frame, locals.get(), cache_entry, frame_state);
-  if (callback_result == NULL) {
+  if (callback_result == nullptr) {
     // internal exception, returning here will leak the exception into user
     // code this is useful for debugging -- but we dont want it to happen
     // outside of testing NB: we intentionally DO NOT re-enable custom
@@ -194,7 +201,7 @@ PyObject* dynamo__custom_eval_frame(
     DEBUG_TRACE("create skip recursive %s", get_frame_name(frame));
     extra_state_set_action(extra, (Action){SKIP, SKIP});
     if (action.recursive_action == DEFAULT) {
-      recursive_callback = Py_False;
+      recursive_callback = Py_None;
     }
     eval_default();
   } else if (callback_result == cache_limit_hit_flag) {
