@@ -199,7 +199,7 @@ def while_loop_dense(cond_fn, body_fn, carried_inputs, additional_inputs):
 
     if not isinstance(carried_inputs, (tuple, list)):
         raise RuntimeError(
-            f"carried_inputs must be a tuple but got {type(carried_inputs)}"
+            f"carried_inputs must be a tuple or list but got {type(carried_inputs)}"
         )
 
     while pred := cond_fn(*carried_vals, *additional_inputs):
