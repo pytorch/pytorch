@@ -15,32 +15,31 @@
 
 using namespace at;
 using namespace torch;
-using namespace torch::cuda::nccl;
-using namespace torch::cuda::nccl::detail;
+using namespace torch::cuda;
 
 static const char* COMM_CAPSULE_NAME = "torch.cuda.nccl.Communicator";
 
 PyObject* THCPModule_nccl_version(PyObject* self, PyObject* args) {
-  return PyLong_FromUnsignedLongLong(version());
+  return PyLong_FromUnsignedLongLong(torch::cuda::nccl::version());
 }
 
 PyObject* THCPModule_nccl_version_suffix(PyObject* self, PyObject* args) {
   HANDLE_TH_ERRORS
-  return PyBytes_FromString(version_suffix());
+  return PyBytes_FromString(torch::cuda::nccl::version_suffix());
   END_HANDLE_TH_ERRORS
 }
 
 PyObject* THCPModule_nccl_unique_id(PyObject* self, PyObject* args) {
   HANDLE_TH_ERRORS
-  ncclUniqueId id;
+  torch::cuda::nccl::ncclUniqueId id;
   get_unique_id(id);
   return PyBytes_FromStringAndSize((char*)&id, NCCL_UNIQUE_ID_BYTES);
   END_HANDLE_TH_ERRORS
 }
 
-static ncclComm_t unpack_nccl_comm(PyObject* capsule) {
-  ncclComm_t comm =
-      (ncclComm_t)PyCapsule_GetPointer(capsule, COMM_CAPSULE_NAME);
+static torch::cuda::nccl::ncclComm_t unpack_nccl_comm(PyObject* capsule) {
+  torch::cuda::nccl::ncclComm_t comm =
+      (torch::cuda::nccl::ncclComm_t)PyCapsule_GetPointer(capsule, COMM_CAPSULE_NAME);
   if (!comm)
     throw python_error();
   return comm;
@@ -48,10 +47,10 @@ static ncclComm_t unpack_nccl_comm(PyObject* capsule) {
 
 static void destroy_nccl_comm(PyObject* capsule) {
   HANDLE_TH_ERRORS
-  ncclComm_t comm = unpack_nccl_comm(capsule);
+  torch::cuda::nccl::ncclComm_t comm = unpack_nccl_comm(capsule);
   {
     pybind11::gil_scoped_release no_gil;
-    comm_destroy(comm);
+    torch::cuda::nccl::comm_destroy(comm);
   }
   END_HANDLE_TH_ERRORS_RET()
 }
@@ -73,11 +72,11 @@ static std::vector<std::optional<at::cuda::CUDAStream>> unpack_streams(
 static at::Tensor extract_tensor(PyObject* obj);
 static std::vector<at::Tensor> extract_tensors(PyObject* obj);
 
-static std::vector<ncclComm_t> unpack_comms(PyObject* obj, size_t size) {
+static std::vector<torch::cuda::nccl::ncclComm_t> unpack_comms(PyObject* obj, size_t size) {
   if (obj == Py_None) {
-    return std::vector<ncclComm_t>();
+    return std::vector<torch::cuda::nccl::ncclComm_t>();
   }
-  std::vector<ncclComm_t> comms;
+  std::vector<torch::cuda::nccl::ncclComm_t> comms;
   if (PyCapsule_CheckExact(obj)) {
     comms = {unpack_nccl_comm(obj)};
   } else {
@@ -85,7 +84,7 @@ static std::vector<ncclComm_t> unpack_comms(PyObject* obj, size_t size) {
     if (!seq)
       throw python_error();
     auto size = PySequence_Fast_GET_SIZE(seq.get());
-    comms = std::vector<ncclComm_t>(size);
+    comms = std::vector<torch::cuda::nccl::ncclComm_t>(size);
     for (const auto i : c10::irange(size)) {
       comms[i] = unpack_nccl_comm(PySequence_Fast_GET_ITEM(seq.get(), i));
     }
@@ -116,12 +115,12 @@ PyObject* THCPModule_nccl_init_rank(PyObject* self, PyObject* args) {
       id_len,
       ")");
 
-  ncclUniqueId commId;
+  torch::cuda::nccl::ncclUniqueId commId;
   memcpy(&commId, id, NCCL_UNIQUE_ID_BYTES);
-  ncclComm_t comm = nullptr;
+  torch::cuda::nccl::ncclComm_t comm = nullptr;
   {
     pybind11::gil_scoped_release no_gil;
-    comm = comm_init_rank(nranks, commId, rank);
+    comm = torch::cuda::nccl::comm_init_rank(nranks, commId, rank);
   }
   return PyCapsule_New(comm, COMM_CAPSULE_NAME, &destroy_nccl_comm);
   END_HANDLE_TH_ERRORS
@@ -186,7 +185,7 @@ PyObject* THCPModule_nccl_all_reduce(PyObject* self, PyObject* args) {
 
   {
     pybind11::gil_scoped_release no_gil;
-    all_reduce(inputs, outputs, op, streams, user_comms);
+    torch::cuda::nccl::all_reduce(inputs, outputs, op, streams, user_comms);
   }
 
   Py_RETURN_NONE;
@@ -249,7 +248,7 @@ PyObject* THCPModule_nccl_all_gather(PyObject* self, PyObject* args) {
 
   {
     pybind11::gil_scoped_release no_gil;
-    all_gather(inputs, outputs, streams, user_comms);
+    torch::cuda::nccl::all_gather(inputs, outputs, streams, user_comms);
   }
 
   Py_RETURN_NONE;
@@ -282,7 +281,7 @@ PyObject* THCPModule_nccl_reduce_scatter(PyObject* self, PyObject* args) {
 
   {
     pybind11::gil_scoped_release no_gil;
-    reduce_scatter(inputs, outputs, op, streams, user_comms);
+    torch::cuda::nccl::reduce_scatter(inputs, outputs, op, streams, user_comms);
   }
 
   Py_RETURN_NONE;

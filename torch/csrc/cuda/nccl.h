@@ -1,5 +1,7 @@
 #pragma once
 
+#include <nccl.h>
+
 #include <ATen/ATen.h>
 #include <ATen/cuda/CUDAContext.h>
 
