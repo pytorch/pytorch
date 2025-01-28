@@ -5,7 +5,7 @@ import functools
 import itertools
 import sys
 import unittest
-from typing import List, Optional
+from typing import Optional
 
 import torch
 from torch import distributed as dist
@@ -259,7 +259,7 @@ class TestShardedGradScalerParityWithDDP(FSDPTest):
         )
         grad_scaler = ShardedGradScaler(init_scale=2.0)
         ref_grad_scaler = torch.amp.GradScaler(device="cuda", init_scale=2.0)
-        scaled_losses: List[torch.Tensor] = []
+        scaled_losses: list[torch.Tensor] = []
         device = torch.device("cuda")
         torch.manual_seed(42 + self.rank + 1)
 

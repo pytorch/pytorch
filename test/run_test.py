@@ -15,10 +15,11 @@ import sys
 import tempfile
 import time
 from collections import defaultdict
+from collections.abc import Sequence
 from contextlib import ExitStack
 from datetime import datetime
 from pathlib import Path
-from typing import Any, cast, Dict, List, NamedTuple, Optional, Sequence, Tuple, Union
+from typing import Any, cast, NamedTuple, Optional, Union
 
 import pkg_resources
 
@@ -221,6 +222,7 @@ S390X_TESTLIST = [
     "dynamo/test_backward_higher_order_ops",
     "dynamo/test_base_output",
     "dynamo/test_bytecode_utils",
+    "dynamo/test_callback",
     "dynamo/test_compile",
     "dynamo/test_comptime",
     "dynamo/test_config",
@@ -530,6 +532,7 @@ XPU_TEST = [
 
 # The tests inside these files should never be run in parallel with each other
 RUN_PARALLEL_BLOCKLIST = [
+    "test_extension_utils",
     "test_cpp_extensions_jit",
     "test_cpp_extensions_open_device_registration",
     "test_cpp_extensions_stream_and_event",
@@ -1501,21 +1504,12 @@ def parse_args():
         default=0,
         help="Print verbose information and test-by-test results",
     )
-    if sys.version_info >= (3, 9):
-        parser.add_argument(
-            "--showlocals",
-            action=argparse.BooleanOptionalAction,
-            default=strtobool(os.environ.get("TEST_SHOWLOCALS", "False")),
-            help="Show local variables in tracebacks (default: True)",
-        )
-    else:
-        parser.add_argument(
-            "--showlocals",
-            action="store_true",
-            default=strtobool(os.environ.get("TEST_SHOWLOCALS", "False")),
-            help="Show local variables in tracebacks (default: True)",
-        )
-        parser.add_argument("--no-showlocals", dest="showlocals", action="store_false")
+    parser.add_argument(
+        "--showlocals",
+        action=argparse.BooleanOptionalAction,
+        default=strtobool(os.environ.get("TEST_SHOWLOCALS", "False")),
+        help="Show local variables in tracebacks (default: True)",
+    )
     parser.add_argument("--jit", "--jit", action="store_true", help="run all jit tests")
     parser.add_argument(
         "--distributed-tests",
@@ -1762,7 +1756,7 @@ def can_run_in_pytest(test):
     return os.getenv("PYTORCH_TEST_DO_NOT_USE_PYTEST", "0") == "0"
 
 
-def get_selected_tests(options) -> List[str]:
+def get_selected_tests(options) -> list[str]:
     selected_tests = options.include
 
     # for s390x, override defaults
@@ -1911,7 +1905,7 @@ def get_selected_tests(options) -> List[str]:
     return selected_tests
 
 
-def load_test_times_from_file(file: str) -> Dict[str, Any]:
+def load_test_times_from_file(file: str) -> dict[str, Any]:
     # Load previous test times to make sharding decisions
     path = os.path.join(str(REPO_ROOT), file)
     if not os.path.exists(path):
@@ -1921,7 +1915,7 @@ def load_test_times_from_file(file: str) -> Dict[str, Any]:
         return {}
 
     with open(path) as f:
-        test_times_file = cast(Dict[str, Any], json.load(f))
+        test_times_file = cast(dict[str, Any], json.load(f))
     build_environment = os.environ.get("BUILD_ENVIRONMENT")
     test_config = os.environ.get("TEST_CONFIG")
     if test_config in test_times_file.get(build_environment, {}):
@@ -1943,17 +1937,17 @@ def load_test_times_from_file(file: str) -> Dict[str, Any]:
 
 def load_test_file_times(
     file: str = ADDITIONAL_CI_FILES_FOLDER / TEST_TIMES_FILE,
-) -> Dict[str, float]:
-    return cast(Dict[str, float], load_test_times_from_file(file))
+) -> dict[str, float]:
+    return cast(dict[str, float], load_test_times_from_file(file))
 
 
 def load_test_class_times(
     file: str = ADDITIONAL_CI_FILES_FOLDER / TEST_CLASS_TIMES_FILE,
-) -> Dict[str, Dict[str, float]]:
-    return cast(Dict[str, Dict[str, float]], load_test_times_from_file(file))
+) -> dict[str, dict[str, float]]:
+    return cast(dict[str, dict[str, float]], load_test_times_from_file(file))
 
 
-def get_sharding_opts(options) -> Tuple[int, int]:
+def get_sharding_opts(options) -> tuple[int, int]:
     which_shard, num_shards = 1, 1
     if options.shard:
         assert len(options.shard) == 2, "Unexpected shard format"
@@ -1969,10 +1963,10 @@ def get_sharding_opts(options) -> Tuple[int, int]:
 def do_sharding(
     options,
     selected_tests: Sequence[TestRun],
-    test_file_times: Dict[str, float],
-    test_class_times: Dict[str, Dict[str, float]],
+    test_file_times: dict[str, float],
+    test_class_times: dict[str, dict[str, float]],
     sort_by_time: bool = True,
-) -> Tuple[float, List[ShardedTest]]:
+) -> tuple[float, list[ShardedTest]]:
     which_shard, num_shards = get_sharding_opts(options)
 
     # Do sharding
@@ -2022,10 +2016,10 @@ def run_test_module(
 
 
 def run_tests(
-    selected_tests: List[ShardedTest],
+    selected_tests: list[ShardedTest],
     test_directory: str,
     options,
-    failures: List[TestFailure],
+    failures: list[TestFailure],
 ) -> None:
     if len(selected_tests) == 0:
         return
@@ -2182,8 +2176,8 @@ def main():
         """Defines a set of tests with similar priority that should be run together on the current shard"""
 
         name: str
-        sharded_tests: List[ShardedTest]
-        failures: List[TestFailure]
+        sharded_tests: list[ShardedTest]
+        failures: list[TestFailure]
 
         def __init__(
             self, name: str, raw_tests: Sequence[TestRun], should_sort_shard: bool

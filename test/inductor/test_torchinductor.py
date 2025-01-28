@@ -16,12 +16,10 @@ import subprocess
 import sys
 import threading
 import time
-import typing
 import unittest
 import unittest.mock
 import weakref
 from pathlib import Path
-from typing import Tuple
 from unittest.mock import patch
 
 import numpy as np
@@ -160,7 +158,7 @@ test_dtypes = [
     torch.int32,
     torch.int64,
 ]
-if SM80OrLater:
+if SM80OrLater or MACOS_VERSION >= 14.0:
     test_dtypes.append(torch.bfloat16)
 
 
@@ -202,40 +200,43 @@ def _large_cumprod_input(shape, dim, dtype, device):
     return (t * sign).to(dtype)
 
 
-def define_custom_op_for_test(id_, fn_cpu, fn_cuda, fn_xpu, fn_meta, tags=()):
+def define_custom_op_for_test(id_, fn, fn_meta, tags=()):
     global libtest
     global ids
     if id_ not in ids:
         libtest.define(f"{id_}(Tensor self) -> Tensor", tags=tags)
-        libtest.impl(id_, fn_cpu, "CPU")
-        libtest.impl(id_, fn_cuda, "CUDA")
-        libtest.impl(id_, fn_xpu, "XPU")
+        libtest.impl(id_, fn, "CPU")
+        libtest.impl(id_, fn, "CUDA")
+        libtest.impl(id_, fn, "XPU")
+        libtest.impl(id_, fn, "MPS")
         libtest.impl(id_, fn_meta, "Meta")
         ids.add(id_)
 
 
-def define_custom_op_2_for_test(id_, fn_cpu, fn_cuda, fn_xpu, fn_meta, tags=()):
+def define_custom_op_2_for_test(id_, fn, fn_meta, tags=()):
     global libtest
     global ids
     if id_ not in ids:
         libtest.define(
             f"{id_}(Tensor self, float scale) -> (Tensor, Tensor)", tags=tags
         )
-        libtest.impl(id_, fn_cpu, "CPU")
-        libtest.impl(id_, fn_cuda, "CUDA")
-        libtest.impl(id_, fn_xpu, "XPU")
+        libtest.impl(id_, fn, "CPU")
+        libtest.impl(id_, fn, "CUDA")
+        libtest.impl(id_, fn, "XPU")
+        libtest.impl(id_, fn, "MPS")
         libtest.impl(id_, fn_meta, "Meta")
         ids.add(id_)
 
 
-def define_custom_op_3_for_test(id_, fn_cpu, fn_cuda, fn_xpu, fn_meta, tags=()):
+def define_custom_op_3_for_test(id_, fn, fn_meta, tags=()):
     global libtest
     global ids
     if id_ not in ids:
         libtest.define(f"{id_}(Tensor[] x) -> Tensor", tags=tags)
-        libtest.impl(id_, fn_cpu, "CPU")
-        libtest.impl(id_, fn_cuda, "CUDA")
-        libtest.impl(id_, fn_xpu, "XPU")
+        libtest.impl(id_, fn, "CPU")
+        libtest.impl(id_, fn, "CUDA")
+        libtest.impl(id_, fn, "XPU")
+        libtest.impl(id_, fn, "MPS")
         libtest.impl(id_, fn_meta, "Meta")
         ids.add(id_)
 
@@ -335,6 +336,8 @@ class InputGen:
         return torch.randn((1,), device=self.device)
 
     def double(self):
+        if self.device == "mps":
+            raise unittest.SkipTest("MPS does not support torch.float64")
         return torch.randn((self.n, self.n), device=self.device, dtype=torch.double)
 
     def int(self):
@@ -436,7 +439,10 @@ def check_model(
             else:
                 return x
 
-        ref_inputs = list(map(upcast_fn, example_inputs))
+        # We previously call upcast_fn on example_inputs. It's incorrect
+        # if example_inputs is already fp32 and get inplace updated in the model.
+        # Call on the cloned tensors instead
+        ref_inputs = list(map(upcast_fn, ref_inputs))
         ref_kwargs = {k: upcast_fn(v) for k, v in kwargs.items()}
         if has_lowp_args and hasattr(model, "to"):
             ref_model = copy.deepcopy(model).to(torch.float)
@@ -779,6 +785,16 @@ def skip_if_halide(fn):
     return wrapper
 
 
+def skip_if_mps(fn):
+    @functools.wraps(fn)
+    def wrapper(self):
+        if is_mps_backend(self.device):
+            raise unittest.SkipTest("mps not supported")
+        return fn(self)
+
+    return wrapper
+
+
 def skip_if_triton(fn):
     @functools.wraps(fn)
     def wrapper(self):
@@ -803,6 +819,10 @@ def is_halide_backend(device):
     if getattr(device, "type", device) == "cpu":
         return config.cpu_backend == "halide"
     return config.cuda_backend == "halide"
+
+
+def is_mps_backend(device):
+    return getattr(device, "type", device) == "mps"
 
 
 def is_triton_backend(device):
@@ -870,6 +890,10 @@ class skip_if_cpp_wrapper:
 
 @instantiate_parametrized_tests
 class CommonTemplate:
+    def is_dtype_supported(self, dtype: torch.dtype) -> bool:
+        device_interface = get_interface_for_device(self.device)
+        return device_interface.is_dtype_supported(dtype)
+
     def test_bool(self):
         def fn(a, b):
             return (
@@ -1262,6 +1286,11 @@ class CommonTemplate:
         self.common(fn, (torch.randn(32),))
 
     def test_add_inplace_permuted(self):
+        if config.cpu_backend == "halide":
+            raise unittest.SkipTest(
+                "Halide cpu backend does not work for this test case: https://github.com/pytorch/pytorch/issues/140344"
+            )
+
         def fn(x, y):
             return x.add_(y)
 
@@ -2774,6 +2803,7 @@ class CommonTemplate:
 
         self.common(fn, (torch.randn(8, 8), torch.randn(8, 8)))
 
+    @skipIfXpu(msg="logaddexp_xpu not implemented for ComplexFloat")
     @skipCUDAIf(True, "Not implemented for CUDA")
     def test_logaddexp(self):
         self.common(
@@ -6054,10 +6084,8 @@ class CommonTemplate:
                 FileCheck().check_not("triton.jit").run(source_codes[0])
 
         # test dtype conversion
-        device_interface = get_interface_for_device(self.device)
-
         for lowp_dtype in [torch.float16, torch.bfloat16]:
-            if not device_interface.is_dtype_supported(lowp_dtype):
+            if not self.is_dtype_supported(lowp_dtype):
                 continue
             inps = [
                 torch.rand([256, 256], device=self.device, dtype=lowp_dtype)
@@ -6252,6 +6280,18 @@ class CommonTemplate:
             ):
                 model(x)
 
+    @torch._dynamo.config.patch(recompile_limit=12)
+    def test_avg_pool_errors_with_uint(self):
+        for dim in (1, 2, 3):
+            for dtype in (torch.uint8, torch.uint16, torch.uint32, torch.uint64):
+                x = torch.randn([2] * (dim + 2)).to(dtype)
+                op = eval(f"torch.nn.functional.avg_pool{dim}d")
+                c_op = torch.compile(op)
+                with self.assertRaisesRegex(
+                    RuntimeError, r".*(not implemented|aoti_torch_).*"
+                ):
+                    c_op(x, kernel_size=2, stride=2)
+
     def test_log1p(self):
         def fn(x):
             return torch.log1p(x), torch.log1p(x) * 2
@@ -6434,10 +6474,17 @@ class CommonTemplate:
         def fn(x):
             return torch.log(x), torch.log2(x)
 
-        self.common(
-            fn,
-            (torch.randn([1024], dtype=torch.float64) + 10,),
+        _dtype = torch.float64
+        ctx = (
+            contextlib.nullcontext()
+            if self.is_dtype_supported(_dtype)
+            else self.assertRaises(TypeError)
         )
+        with ctx:
+            self.common(
+                fn,
+                (torch.randn([1024], dtype=_dtype) + 10,),
+            )
 
     def test_bitwise(self):
         def fn(x, y):
@@ -6555,7 +6602,17 @@ class CommonTemplate:
             return a + torch.full_like(a, 7.777)
 
         for dtype in all_types():
-            self.common(fn, (make_tensor(8, dtype=dtype, device=self.device),))
+            ctx = (
+                contextlib.nullcontext()
+                if self.is_dtype_supported(dtype)
+                else self.assertRaises(TypeError)
+            )
+            with ctx:
+                self.common(
+                    fn,
+                    (make_tensor(8, dtype=dtype, device=self.device),),
+                    check_lowp=False,
+                )
 
     def test_full_boolean(self):
         def fn(n):
@@ -7413,15 +7470,14 @@ class CommonTemplate:
             return x.isinf(), x.isnan()
 
         values = [1, float("inf"), 2, float("-inf"), float("nan")]
-        device_interface = get_interface_for_device(self.device)
-        for dtype in [torch.float32, torch.float64]:
+        for dtype in [torch.float32, torch.float64, torch.half, torch.bfloat16]:
             ctx = (
                 contextlib.nullcontext()
-                if device_interface.is_dtype_supported(dtype)
+                if self.is_dtype_supported(dtype)
                 else self.assertRaises(TypeError)
             )
             with ctx:
-                self.common(fn, [torch.tensor(values, dtype=dtype)])
+                self.common(fn, [torch.tensor(values, dtype=dtype)], check_lowp=False)
 
     @skip_if_halide  # different nan behavior in ==
     def test_isinf2(self):
@@ -8504,7 +8560,7 @@ class CommonTemplate:
             compiled_f = compile_fx_inner(mod, cloned_args)
 
         @torch.library.custom_op("mylib::sin_out", mutates_args={"outs"})
-        def sin_out(x: torch.Tensor, outs: typing.List[torch.Tensor]) -> None:
+        def sin_out(x: torch.Tensor, outs: list[torch.Tensor]) -> None:
             x_np = x.numpy()
             assert len(outs) == 2
             out_np0 = out[0].numpy()
@@ -9225,13 +9281,22 @@ class CommonTemplate:
             self.assertEqual(fw_code.count("halide_helpers.rand"), 2)
             self.assertEqual(bw_code.count("halide_helpers.rand"), 0)
         elif self.device == GPU_TYPE:
-            self.assertEqual(fw_code.count("tl.rand"), 2)
+            # the load_seed_offset arg can be 1 or non-1; depending on whether
+            # the triton signature specializes on 1 vs non-1, you might get 1
+            # or 2 kernels. In newer versions of triton, there's no specialization
+            # so we get only 1 kernel.
+            from torch._inductor.utils import triton_version_uses_attrs_dict
+
+            expected_kernels = 1 if triton_version_uses_attrs_dict() else 2
+            self.assertEqual(fw_code.count("tl.rand"), expected_kernels)
             self.assertEqual(bw_code.count("tl.rand"), 0)
         self.assertEqual(torch._inductor.metrics.generated_kernel_count, 4)
 
     def test_randint_kernel_count(self):
         if self.device != GPU_TYPE:
             raise unittest.SkipTest("Only valid for GPU!")
+
+        from torch._inductor.utils import triton_version_uses_attrs_dict
 
         @torch._dynamo.optimize_assert("inductor")
         def fn1():
@@ -9243,7 +9308,15 @@ class CommonTemplate:
         _, source_codes = run_and_get_code(fn1)
         # cpp_wrapper does a 2-pass generation on GPU.
         self.assertEqual(len(source_codes), 1)
-        self.assertEqual(source_codes[0].count("async_compile.triton"), 2)
+
+        # the load_seed_offset arg can be 1 or non-1; depending on whether
+        # the triton signature specializes on 1 vs non-1, you might get 1
+        # or 2 kernels. In newer versions of triton, there's no specialization
+        # so we get only 1 kernel.
+        expected_kernels = 1 if triton_version_uses_attrs_dict() else 2
+        self.assertEqual(
+            source_codes[0].count("async_compile.triton"), expected_kernels
+        )
 
     def test_roll(self):
         def fn(a):
@@ -11176,19 +11249,13 @@ class CommonTemplate:
     def test_custom_op_1(self):
         import torch.library
 
-        def foo_cpu(x):
-            return 3 * x
-
-        def foo_cuda(x):
-            return 3 * x
-
-        def foo_xpu(x):
+        def foo(x):
             return 3 * x
 
         def foo_meta(x):
             return torch.empty_like(x)
 
-        define_custom_op_for_test("foo", foo_cpu, foo_cuda, foo_xpu, foo_meta)
+        define_custom_op_for_test("foo", foo, foo_meta)
 
         def fn(x):
             a = torch.nn.functional.relu(x)
@@ -11202,19 +11269,13 @@ class CommonTemplate:
     def test_custom_op_2(self):
         import torch.library
 
-        def foo_cpu(x, scale: float):
-            return scale * x, torch.cos(x)
-
-        def foo_cuda(x, scale: float):
-            return scale * x, torch.cos(x)
-
-        def foo_xpu(x, scale: float):
+        def foo(x, scale: float):
             return scale * x, torch.cos(x)
 
         def foo_meta(x, scale: float):
             return torch.empty_like(x), torch.empty_like(x)
 
-        define_custom_op_2_for_test("foo2", foo_cpu, foo_cuda, foo_xpu, foo_meta)
+        define_custom_op_2_for_test("foo2", foo, foo_meta)
 
         def fn(x, scale: float):
             a = torch.nn.functional.relu(x)
@@ -11224,21 +11285,7 @@ class CommonTemplate:
 
     @config.patch(implicit_fallbacks=True)
     def test_custom_op_3(self):
-        import torch.library
-
-        def foo_cpu(x):
-            result = torch.zeros_like(x[0])
-            for t in x:
-                result += t
-            return result
-
-        def foo_cuda(x):
-            result = torch.zeros_like(x[0])
-            for t in x:
-                result += t
-            return result
-
-        def foo_xpu(x):
+        def foo(x):
             result = torch.zeros_like(x[0])
             for t in x:
                 result += t
@@ -11247,7 +11294,7 @@ class CommonTemplate:
         def foo_meta(x):
             return torch.empty_like(x[0])
 
-        define_custom_op_3_for_test("foo3", foo_cpu, foo_cuda, foo_xpu, foo_meta)
+        define_custom_op_3_for_test("foo3", foo, foo_meta)
 
         def fn(x):
             return torch.ops.test.foo3(x)
@@ -11303,15 +11350,7 @@ class CommonTemplate:
         inp = torch.rand(2, 3, 128, 128, device=GPU_TYPE)
         expected_stride = mod(inp).stride()
 
-        def bar_cpu(x):
-            self.assertEqual(x.stride(), expected_stride)
-            return x.clone()
-
-        def bar_cuda(x):
-            self.assertEqual(x.stride(), expected_stride)
-            return x.clone()
-
-        def bar_xpu(x):
+        def bar(x):
             self.assertEqual(x.stride(), expected_stride)
             return x.clone()
 
@@ -11320,9 +11359,7 @@ class CommonTemplate:
 
         define_custom_op_for_test(
             "bar",
-            bar_cpu,
-            bar_cuda,
-            bar_xpu,
+            bar,
             bar_meta,
             tags=[torch._C.Tag.needs_fixed_stride_order],
         )
@@ -11459,15 +11496,7 @@ class CommonTemplate:
         input_t = input_t.to(memory_format=torch.channels_last)
         expected_strides = model.helper(input_t).stride()
 
-        def baz_cpu(x):
-            self.assertEqual(expected_strides, x.stride())
-            return x.clone()
-
-        def baz_cuda(x):
-            self.assertEqual(expected_strides, x.stride())
-            return x.clone()
-
-        def baz_xpu(x):
+        def baz(x):
             self.assertEqual(expected_strides, x.stride())
             return x.clone()
 
@@ -11476,9 +11505,7 @@ class CommonTemplate:
 
         define_custom_op_for_test(
             "baz",
-            baz_cpu,
-            baz_cuda,
-            baz_xpu,
+            baz,
             baz_meta,
             tags=[torch._C.Tag.needs_fixed_stride_order],
         )
@@ -11755,6 +11782,8 @@ class CommonTemplate:
             torch.bfloat16,
         ]
         for cpu_dtype in test_dtypes:
+            if not self.is_dtype_supported(cpu_dtype):
+                continue
             x = torch.rand([20], device=GPU_TYPE)
             y = torch.rand([4], device="cpu", dtype=cpu_dtype)
             self.common(
@@ -12313,7 +12342,7 @@ class CommonTemplate:
 
 @dataclasses.dataclass
 class TestFailure:
-    suffixes: Tuple[str, ...]
+    suffixes: tuple[str, ...]
     is_skip: bool = False
     __test__: bool = False
 
@@ -12349,6 +12378,10 @@ def copy_tests(
                 new_test = skip_func(new_test)
 
             setattr(other_cls, f"{name}_{suffix}", new_test)
+
+    # Special case convenience routine
+    if hasattr(my_cls, "is_dtype_supported"):
+        other_cls.is_dtype_supported = my_cls.is_dtype_supported
 
 
 if HAS_CPU:
@@ -12392,7 +12425,7 @@ if HAS_GPU and not TEST_WITH_ASAN:
             def noop_backend(
                 self,
                 model_: torch.fx.GraphModule,
-                example_inputs_: typing.List[torch.Tensor],
+                example_inputs_: list[torch.Tensor],
             ):
                 """
                 The Noop backend does not compile the fx graph it is given.
@@ -12418,7 +12451,7 @@ if HAS_GPU and not TEST_WITH_ASAN:
                 self.example_args = fake_flat_tensor_args
                 return lambda x: example_inputs_
 
-        def get_kernels(self, fn, args) -> typing.List[CachingAutotuner]:
+        def get_kernels(self, fn, args) -> list[CachingAutotuner]:
             from torch._inductor.debug import DebugContext
             from torch._inductor.graph import GraphLowering
             from torch._inductor.virtualized import V

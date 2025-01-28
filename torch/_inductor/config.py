@@ -1,21 +1,15 @@
 import os  # noqa: C101
 import sys
-from typing import (
-    Any,
-    Callable,
-    Dict,
-    List,
-    Literal,
-    Optional,
-    Tuple,
-    TYPE_CHECKING,
-    Union,
-)
+from typing import Any, Callable, Literal, Optional, TYPE_CHECKING, Union
 
 import torch
 import torch._inductor.custom_graph_pass
 from torch._environment import is_fbcode
-from torch.utils._config_module import get_tristate_env, install_config_module
+from torch.utils._config_module import Config, get_tristate_env, install_config_module
+
+
+inplace_padding = os.environ.get("TORCHINDUCTOR_INPLACE_PADDING", "1") == "1"
+can_inplace_pad_graph_input = False  # ease testing
 
 
 def fx_graph_remote_cache_default() -> Optional[bool]:
@@ -193,8 +187,8 @@ pre_grad_custom_pass: Optional[Callable[[torch.fx.graph.Graph], None]] = None
 # hence custom IR passes built on top of it might break in the future.
 _pre_fusion_custom_pass: Optional[
     Callable[
-        [List["torch._inductor.scheduler.BaseSchedulerNode"]],
-        List["torch._inductor.scheduler.BaseSchedulerNode"],
+        [list["torch._inductor.scheduler.BaseSchedulerNode"]],
+        list["torch._inductor.scheduler.BaseSchedulerNode"],
     ]
 ] = None
 
@@ -231,11 +225,11 @@ batch_fusion = True
 # merge_splits_pass
 # mutate_cat_pass
 # split_cat_pass
-pre_grad_fusion_options: Dict[str, Dict[str, Any]] = {}
+pre_grad_fusion_options: dict[str, dict[str, Any]] = {}
 
 # Post grad fusion and options, set to empty dict to disable fusion.
 # Call `torch._inductor.fx_passes.group_batch_fusion.list_group_batch_fusions(False)` to see available fusions.
-post_grad_fusion_options: Dict[str, Dict[str, Any]] = {}
+post_grad_fusion_options: dict[str, dict[str, Any]] = {}
 
 # enable reordering pass for improving memory locality
 reorder_for_locality = True
@@ -257,7 +251,7 @@ use_mixed_mm = True
 # floating point numbers,about 16 decimal digits for double precision floating point numbers)
 # according to PyTorch documentation.
 # https://pytorch.org/docs/stable/notes/numerical_accuracy.html#batched-computations-or-slice-computations
-fx_passes_numeric_check: Dict[str, Any] = {
+fx_passes_numeric_check: dict[str, Any] = {
     "pre_grad": False,
     "precision": 1e-4,
     "num_iterations": 1,
@@ -287,12 +281,12 @@ reorder_for_compute_comm_overlap = False
 # for built-in passes, use string name; for user-defined passes, pass in the function handle
 # WARNING: Inductor scheduler IR is at prototype stage and subject to change,
 # hence custom IR passes built on top of it might break in the future.
-reorder_for_compute_comm_overlap_passes: List[
+reorder_for_compute_comm_overlap_passes: list[
     Union[
         str,
         Callable[
-            [List["torch._inductor.scheduler.BaseSchedulerNode"]],
-            List["torch._inductor.scheduler.BaseSchedulerNode"],
+            [list["torch._inductor.scheduler.BaseSchedulerNode"]],
+            list["torch._inductor.scheduler.BaseSchedulerNode"],
         ],
     ]
 ] = [
@@ -315,6 +309,16 @@ intra_node_bw = 300
 # unit: GB/s, uni-directional P2P bandwidth per node
 # default value is InfiniBand
 inter_node_bw = 25
+
+# use Inductor's experimental benchmarker (runtime/benchmarking.py)
+# to benchmark kernels during autotuning, otherwise fall back to
+# Triton's `do_bench`. the experimental benchmarker may produce
+# results that are not consistent with `do_bench`'s results
+use_experimental_benchmarker: bool = Config(
+    default=True,
+    env_name_force="TORCHINDUCTOR_USE_EXPERIMENTAL_BENCHMARKER",
+    justknob="pytorch/inductor:use_experimental_benchmarker",
+)
 
 # enable slow autotuning passes to select algorithms
 max_autotune = os.environ.get("TORCHINDUCTOR_MAX_AUTOTUNE") == "1"
@@ -552,11 +556,14 @@ joint_graph_constant_folding = True
 # Enable indirect_indexing asserts for decompositions and lowerings
 debug_index_asserts = False
 
-# Mode to emulate pytorch eager numerics for lower precision (fp16, bf16)
-# Pytorch eager computes bf16/fp16 by upcasting inputs to fp32 and downcasting after
-# For multiple, fused pointwise nodes, inductor will elide the intermediary upcasts and downcasts
-# Typically this should be closer to fp64 ref numerics. However, it can be useful for debugging
-# to emulate the eager numerics.
+# Mode to emulate PyTorch eager numerics when doing lower precision compute
+# (fp16, bf16).  PyTorch eager computes bf16/fp16 by upcasting inputs to fp32
+# and downcasting after.  When two low precision operators are fused together,
+# Inductor will elide the downcast-upcast pairs (effectively a precision
+# truncation) that would occur between these two operators.  Typically,
+# Inductor's behavior should be closer to fp64 ref numerics.  However, with
+# this knob you can ensure the downcast-upcast are preserved so that you can
+# emulate the eager numerics.
 emulate_precision_casts = False
 
 # warnings intended for PyTorch developers, disable for point releases
@@ -608,7 +615,7 @@ _fuse_ddp_bucket_size = 25
 # overlapping. At this moment, this pass performs better than
 # reorder_for_compute_comm_overlap_passes but we will add the logic of
 # "schedule_comm_wait" in the future and remove the one here.
-_fuse_ddp_communication_passes: List[Union[Callable[..., None], str]] = [
+_fuse_ddp_communication_passes: list[Union[Callable[..., None], str]] = [
     "fuse_ddp_with_concat_op",
     "schedule_comm_wait",
 ]
@@ -842,7 +849,7 @@ class cpp:
     simdlen: Optional[int] = None
     min_chunk_size = int(os.environ.get("TORCHINDUCTOR_CPP_MIN_CHUNK_SIZE", "4096"))
 
-    cxx: Tuple[None, str] = (
+    cxx: tuple[Literal[None], str] = (
         None,  # download gcc12 from conda-forge if conda is installed
         os.environ.get("CXX", "clang++" if sys.platform == "darwin" else "g++"),
     )  # type: ignore[assignment]
@@ -867,7 +874,7 @@ class cpp:
 
     # similar to config.triton.descriptive_names
     descriptive_names: Union[
-        bool, Literal["torch", "original_aten", "inductor_node"]
+        Literal["torch", "original_aten", "inductor_node"]
     ] = "original_aten"
 
     # how many nodes to allow into a single horizontal fusion
@@ -1024,12 +1031,11 @@ class triton:
     )
 
     # should we put op names in kernel names
-    # False: No special names (just triton__1, triton__2, etc.)
     # "torch": Maps to the fx op in the Dynamo graph (module name, method name, etc.)
     # "original_aten": Maps to the highest-level aten op (i.e. pre-decompositions)
     # "inductor_node": Maps to the node name in the FX graph passed to Inductor
     descriptive_names: Union[
-        bool, Literal["torch", "original_aten", "inductor_node"]
+        Literal["torch", "original_aten", "inductor_node"]
     ] = "original_aten"
 
     # use alternate codegen for smaller reductions
@@ -1107,6 +1113,12 @@ class aot_inductor:
 
     debug_compile = os.environ.get("AOT_INDUCTOR_DEBUG_COMPILE", "0") == "1"
 
+    # Annotate generated main wrapper function, i.e. AOTInductorModel::run_impl,
+    # to skip cpp compiler optimizations for faster compilation.
+    compile_wrapper_with_O0 = (
+        os.environ.get("AOT_INDUCTOR_COMPILE_WRAPPER_WITH_O0", "0") == "1"
+    )
+
     # option for debug printing/saving for intermediate tensor values for aot inductor
     # 0: disable debug dumping
     # 1: enable saving intermediate tensor values
@@ -1141,7 +1153,7 @@ class aot_inductor:
 
     # Dictionary of metadata users might want to save to pass to the runtime.
     # TODO: Move this somewhere else, since it's no longer really a config
-    metadata: Dict[str, str] = {}
+    metadata: dict[str, str] = {}
 
     # fbcode only. Whether to raise error if C++ codegen is too big to optimize
     raise_error_on_ignored_optimization: bool = (
@@ -1151,8 +1163,15 @@ class aot_inductor:
     # dump an aoti minifier if program errors
     dump_aoti_minifier: bool = os.environ.get("DUMP_AOTI_MINIFIER", "0") == "1"
 
+    # Compiler compilation debug info
+    # 1: Dumps the original graph out to repro.py if compilation fails
+    # 2: Dumps a minifier_launcher.py if aoti fails.
+    # 3: Always dumps a minifier_launcher.py. Good for segfaults.
+    # 4: Dumps a minifier_launcher.py if the accuracy fails.
+    repro_level: int = int(os.environ.get("AOTINDUCTOR_REPRO_LEVEL", 2))
+
     # Dictionary of presets that can be passed in
-    presets: Dict[str, Any] = {}
+    presets: dict[str, Any] = {}
 
     # Kill switch for allowing temporary tensors to be allocated as stack arrays. Tests
     # should be run with this flag both on and off to make sure we have coverage.
@@ -1249,11 +1268,11 @@ class cuda:
 class rocm:
     # Offload arch list for device code compilation, e.g. ["gfx941", "gfx942"].
     # If empty, the `native` arch is used
-    arch: List[str] = []
+    arch: list[str] = []
 
     # Enable the CK backend for CDNA2 and CDNA3 only (for now)
     # Processor name reference: https://llvm.org/docs/AMDGPUUsage.html#processors
-    ck_supported_arch: List[str] = ["gfx90a", "gfx940", "gfx941", "gfx942"]
+    ck_supported_arch: list[str] = ["gfx90a", "gfx940", "gfx941", "gfx942"]
 
     # Optimization level, use to balance compilation speed and runtime performance.
     # The type will not necessarily be comprehensive and won't be enforced at runtime.
@@ -1399,15 +1418,17 @@ class trace:
     log_inductor_triton_kernel_to_post_grad_node_info: bool = True
 
 
-_save_config_ignore: List[str] = [
+_save_config_ignore: list[str] = [
     # workaround: "Can't pickle <function ...>"
     "trace.upload_tar",
     "joint_custom_pre_pass",
     "joint_custom_post_pass",
     "pre_grad_custom_pass",
+    "aot_inductor.repro_level",
+    "aot_inductor.dump_aoti_minifier",
 ]
 
-_cache_config_ignore_prefix: List[str] = [
+_cache_config_ignore_prefix: list[str] = [
     # trace functions are not relevant to config caching
     "trace",
     # uses absolute path
@@ -1423,7 +1444,7 @@ _cache_config_ignore_prefix: List[str] = [
 ]
 
 # External callable for matmul tuning candidates
-external_matmul: List[Callable[[torch.Tensor, torch.Tensor, torch.Tensor], None]] = []
+external_matmul: list[Callable[[torch.Tensor, torch.Tensor, torch.Tensor], None]] = []
 
 
 class test_configs:

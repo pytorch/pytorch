@@ -2,7 +2,7 @@
 import contextlib
 import logging
 import re
-from typing import List, Optional
+from typing import Optional
 from unittest.mock import patch
 
 import sympy
@@ -1020,7 +1020,7 @@ class CppFlexAttentionTemplate(CppTemplate):
         self,
         kernel,
         template_buffer_node: Optional[ir.CppTemplateBuffer] = None,
-        epilogue_nodes: Optional[List[ir.IRNode]] = None,
+        epilogue_nodes: Optional[list[ir.IRNode]] = None,
         **kwargs,
     ) -> str:
         if epilogue_nodes is not None and epilogue_nodes != []:
