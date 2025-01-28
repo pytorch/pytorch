@@ -605,7 +605,7 @@ class TestBypassFailures(TestCase):
         )
         self.assertTrue(
             checks[
-                "trunk / win-vs2019-cpu-py3 / test (default, 2, 3, windows.4xlarge.nonephemeral)"
+                "trunk / win-vs2022-cpu-py3 / test (default, 2, 3, windows.4xlarge.nonephemeral)"
             ].classification
             == "FLAKY"
         )
