@@ -183,7 +183,7 @@ BENCHMARK_USE_SGD = {
     "stable_diffusion_text_encoder",
     "timm_efficientdet",
     "timm_nfnet",
-    "timm_regnet",
+    "timm_resnest",
     "timm_vision_transformer",
     "timm_vovnet",
     "vgg16",
