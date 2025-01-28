@@ -64,7 +64,7 @@ uint64_t getNumBlocks(uint64_t n, uint64_t blockSize) {
 #else
   uint64_t maxBlocks = (uint64_t)(mpc * 8);
 #endif
-  numBlocks = std::max<uint64_t>(1, std::min<uint64_t>(at::ceil_div(n, blockSize), maxBlocks));                                            
+  numBlocks = std::max<uint64_t>(1, std::min<uint64_t>(at::ceil_div(n, blockSize), maxBlocks));
   return numBlocks;
 }
 
@@ -1059,7 +1059,7 @@ void index_add_cuda_impl(const Tensor& self, int64_t dim, const Tensor& index, c
   uint64_t defaultMaxBlockThreads = getDefaultMaxThreadsPerBlock();
   const dim3 smallIndexGrid(std::min(ceil_div(sliceSize, (uint64_t)128), (uint64_t)(mpc * 8)));
   const dim3 smallIndexBlock(std::min(sliceSize, (uint64_t)128));
-  
+
   //On ROCm, std::min -> ::min did not work as expected on when outTotalSize>=2147483648
   uint64_t blockSize = (sourceTotalSize < defaultMaxBlockThreads) ? sourceTotalSize : defaultMaxBlockThreads;
   dim3 largeIndexBlock(blockSize);
