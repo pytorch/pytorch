@@ -17,7 +17,6 @@ import multiprocessing
 import operator
 import os
 import posixpath
-import random
 import re
 import selectors
 import signal
@@ -3166,6 +3165,9 @@ BUILTIN_SKIPLIST = (
     linecache,
     logging,
     multiprocessing,
+    operator,
+    posixpath,
+    re,
     selectors,
     tempfile,
     threading,
