@@ -549,9 +549,11 @@ class LocalGeneratorObjectVariable(VariableTracker):
                     sys.version_info >= (3, 12)
                     and tracer.next_instruction.opname == "CALL_INTRINSIC_1"
                 ):
+                    tracer.generator_exhausted = True
                     return variables.ConstantVariable(None)
             except ObservedGeneratorExit:
                 # If it doesn't catch, we just return None, as per the text above
+                tracer.generator_exhausted = True
                 return variables.ConstantVariable(None)
 
             try:
