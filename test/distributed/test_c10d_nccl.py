@@ -254,6 +254,14 @@ class ProcessGroupNCCLInitTest(MultiProcessTestCase):
         x = torch.empty(1, device=self.device)
         c10d.all_reduce(x)
 
+    @requires_nccl()
+    @skip_if_lt_x_gpu(1)
+    def test_scalable_init(self):
+        os.environ["TORCH_NCCL_SCALABLE_INIT_RANKS_PER_ROOT"] = "1"
+        self._init_process_group(device_id=self.device)
+        x = torch.empty(1, device=self.device)
+        c10d.all_reduce(x)
+
 
 class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
     def _create_process_group_nccl(self, store, opts, device_id=None):
