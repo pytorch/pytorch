@@ -55,6 +55,19 @@ constexpr uint64_t getDefaultMaxThreadsPerBlock() {
 #endif
 }
 
+uint64_t getNumBlocks(uint64_t n, uint64_t blockSize) {
+  uint64_t numBlocks;
+  const int mpc = at::cuda::getCurrentDeviceProperties()->multiProcessorCount;
+#ifndef USE_ROCM
+  const int tpm = at::cuda::getCurrentDeviceProperties()->maxThreadsPerMultiProcessor;
+  uint64_t maxBlocks = (uint64_t)(mpc * tpm / blockSize);
+#else
+  uint64_t maxBlocks = (uint64_t)(mpc * 8);
+#endif
+  numBlocks = std::max<uint64_t>(1, std::min<uint64_t>(at::ceil_div(n, blockSize), maxBlocks));                                            
+  return numBlocks;
+}
+
 template <typename scalar_t, int SZ>
 __global__ void indexing_backward_kernel(
   const int64_t* sorted_indices, const int64_t* indices, const scalar_t* grad_output, scalar_t* grad_weight,
@@ -1046,10 +1059,12 @@ void index_add_cuda_impl(const Tensor& self, int64_t dim, const Tensor& index, c
   uint64_t defaultMaxBlockThreads = getDefaultMaxThreadsPerBlock();
   const dim3 smallIndexGrid(std::min(ceil_div(sliceSize, (uint64_t)128), (uint64_t)(mpc * 8)));
   const dim3 smallIndexBlock(std::min(sliceSize, (uint64_t)128));
-
-  const dim3 largeIndexGrid(std::min(ceil_div(sourceTotalSize, (uint64_t)128), (uint64_t)(mpc * 8)));
+  
   //On ROCm, std::min -> ::min did not work as expected on when outTotalSize>=2147483648
-  dim3 largeIndexBlock( (sourceTotalSize < defaultMaxBlockThreads) ? sourceTotalSize : defaultMaxBlockThreads );
+  uint64_t blockSize = (sourceTotalSize < defaultMaxBlockThreads) ? sourceTotalSize : defaultMaxBlockThreads;
+  dim3 largeIndexBlock(blockSize);
+  uint64_t numBlocks = getNumBlocks(sourceTotalSize, blockSize);
+  dim3 largeIndexGrid(numBlocks);
 
   if (cuda::detail::canUse32BitIndexMath(result) &&
       cuda::detail::canUse32BitIndexMath(source) &&
@@ -1222,9 +1237,10 @@ void index_reduce_func_cuda_impl(
   dim3 smallIndexGrid(std::min(ceil_div(sliceSize, (uint64_t)128), (uint64_t)(mpc * 8)));
   dim3 smallIndexBlock(std::min(sliceSize, (uint64_t)128));
 
-  dim3 largeIndexGrid(std::min(ceil_div(sourceTotalSize, (uint64_t)128), (uint64_t)(mpc * 8)));
-  //On ROCm, std::min -> ::min did not work as expected on when outTotalSize>=2147483648
-  dim3 largeIndexBlock( (sourceTotalSize < defaultMaxBlockThreads) ? sourceTotalSize : defaultMaxBlockThreads );
+  uint64_t blockSize = (sourceTotalSize < defaultMaxBlockThreads) ? sourceTotalSize : defaultMaxBlockThreads;
+  dim3 largeIndexBlock(blockSize);
+  uint64_t numBlocks = getNumBlocks(sourceTotalSize, blockSize);
+  dim3 largeIndexGrid(numBlocks);
 
   if (cuda::detail::canUse32BitIndexMath(result) &&
       cuda::detail::canUse32BitIndexMath(source) &&
@@ -1520,11 +1536,13 @@ void index_select_out_cuda_impl(
   dim3 smallIndexGrid(std::min(ceil_div(sliceSize, defaultMaxBlockThreads), (uint64_t) (mpc * 8)));
   dim3 smallIndexBlock(std::min(sliceSize, defaultMaxBlockThreads));
 
-  dim3 largeIndexGrid(std::min(ceil_div(outTotalSize, defaultMaxBlockThreads), (uint64_t) (mpc * 8)));
   // for issue https://github.com/pytorch/pytorch/issues/130806 there are two problems
   // 1: ptrdiff_t was used but it is signed int,  outTotalSize of 2147483648 can cause overflow
   // 2: On ROCm, std::min -> ::min did not work as expected on when outTotalSize>=2147483648
-  dim3 largeIndexBlock( (outTotalSize < defaultMaxBlockThreads) ? outTotalSize : defaultMaxBlockThreads );
+  uint64_t blockSize = (outTotalSize < defaultMaxBlockThreads) ? outTotalSize : defaultMaxBlockThreads;
+  dim3 largeIndexBlock(blockSize);
+  uint64_t numBlocks = getNumBlocks(outTotalSize, blockSize);
+  dim3 largeIndexGrid(numBlocks);
 
   if (cuda::detail::canUse32BitIndexMath(out) &&
       cuda::detail::canUse32BitIndexMath(self) &&
