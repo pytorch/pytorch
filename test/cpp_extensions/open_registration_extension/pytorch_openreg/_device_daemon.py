@@ -38,9 +38,16 @@ class Allocator:
             del self.allocated[ptr]
             return True
 
-    def is_allocated(self, ptr):
-        return ptr in self.allocated
 
+class HostAllocator(Allocator):
+    def is_pinned_ptr(self, ptr):
+        return ptr in self.allocated or any(
+            ptr_ <= ptr and ptr < ptr_ + size
+            for ptr_, (size, _) in self.allocated.items()
+        )
+
+
+class DeviceAllocator(Allocator):
     def tensor_from_meta(self, meta):
         def create_tensor_from_data_ptr(ptr, size):
             storage = torch._C._construct_storage_from_data_pointer(
@@ -109,7 +116,7 @@ class Driver:
 
         # Allocated memory belongs to which device
         self.memory_belong = {}
-        self.host_allocator = Allocator()
+        self.host_allocator = HostAllocator()
         self.event_belong = {}
 
         self.devices = []
@@ -197,7 +204,7 @@ class Driver:
 
     @register(registry)
     def isPinnedPtr(self, ptr):
-        return self.host_allocator.is_allocated(ptr)
+        return self.host_allocator.is_pinned_ptr(ptr)
 
     @register(registry)
     def hostMalloc(self, size):
@@ -274,7 +281,7 @@ class Driver:
 class _Executor:
     def __init__(self, id):
         self.id = id
-        self.allocator = Allocator()
+        self.allocator = DeviceAllocator()
         self.stream = 0
         self.event_incr_id = 0
         self.events = {}
