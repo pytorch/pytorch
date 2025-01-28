@@ -1944,10 +1944,11 @@ def _load(
         local_header_offset = current_offset
         current_offset = storage_offset + numel
         # add size of data descriptor after payload
-        if local_header_offset >= mz_uint32_max or numel >= mz_uint32_max:
-            current_offset += data_descripter_size64
-        else:
-            current_offset += data_descripter_size32
+        if numel > 0:
+            if local_header_offset >= mz_uint32_max or numel >= mz_uint32_max:
+                current_offset += data_descripter_size64
+            else:
+                current_offset += data_descripter_size32
 
         return storage_offset
 

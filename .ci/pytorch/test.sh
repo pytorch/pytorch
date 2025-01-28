@@ -512,6 +512,8 @@ test_perf_for_dashboard() {
     test_inductor_set_cpu_affinity
   elif [[ "${TEST_CONFIG}" == *cuda_a10g* ]]; then
     device=cuda_a10g
+  elif [[ "${TEST_CONFIG}" == *rocm* ]]; then
+    device=rocm
   fi
 
   for mode in "${modes[@]}"; do
