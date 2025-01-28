@@ -1,6 +1,4 @@
 # mypy: allow-untyped-defs
-import _collections_abc
-import _weakrefset
 import builtins
 import collections
 import copy
@@ -3155,8 +3153,6 @@ BUILTIN_SKIPLIST = (
     traceback,
     types,
     unittest,
-    _collections_abc,
-    _weakrefset,
 )
 
 # third party libraries skiplist is defined by str, because users may not use these libraries.
