@@ -1,9 +1,10 @@
 import dataclasses
+import tempfile
 import operator
 import random
 import textwrap
 import types
-from typing import Callable
+from typing import Callable, Optional
 
 from triton.runtime.jit import JITFunction
 
@@ -48,24 +49,27 @@ def call_triton_kernel(kernel: Callable, grid, args):
 """
 Extra wrapper IR nodes for FX codegen.
 """
-@dataclasses.dataclass
 class WrapperIRLine(MemoryPlanningLine):
     """
     Base class for Wrapper IR nodes that do not participate in memory planning.
     Records the call args of the underlying codegen function.
     """
-    args: tuple
-    kwargs: dict
     def plan(self, state: MemoryPlanningState) -> MemoryPlanningLine:
-        pass
+        return self
 
     def codegen(self, code: IndentedBuffer) -> None:
         raise NotImplementedError("Python codegen not supported")
 
+@dataclasses.dataclass
 class KernelCallLine(WrapperIRLine):
-    pass
+    args: tuple
+    kwargs: dict
+
+@dataclasses.dataclass
 class KernelDefinitionLine(WrapperIRLine):
-    pass
+    kernel_name: str
+    kernel_body: str
+    metadata: Optional[str] = None
 
 class WrapperFxCodegen(PythonWrapperCodegen):
     """
@@ -83,7 +87,7 @@ class WrapperFxCodegen(PythonWrapperCodegen):
     ):
         return WrapperFxCodegen()
 
-    def _import_kernel(kernel_name: str, code: str) -> types.ModuleType:
+    def _import_kernel(self, kernel_name: str, code: str) -> types.ModuleType:
         """
         Imports a kernel as a python module.
         """
@@ -97,12 +101,16 @@ class WrapperFxCodegen(PythonWrapperCodegen):
         return mod
 
     def define_kernel(
-        self, *args, **kwargs,
+        self,
+        kernel_name: str,
+        kernel_body: str,
+        metadata: Optional[str] = None,
+        gpu=True,
     ):
         """
         Generates Wrapper IR for a kernel definition.
         """
-        self.writeline(KernelDefinitionLine(self, args, kwargs))
+        self.writeline(KernelDefinitionLine(self, kernel_name, kernel_body, metadata))
 
     def _fake_tensor(self, size, stride, dtype) -> torch.Tensor:
         with V.fake_mode:
@@ -319,13 +327,11 @@ class WrapperFxCodegen(PythonWrapperCodegen):
 
         # Generate code for the kernel.
         #TODO refactor into parent class?
-        kernel_name, kernel_body = line.args
-        metadata = line.kwargs["metadata"]
-        have_metadata = metadata and not config.triton.autotune_at_compile_time
-        metadata_comment = f"{metadata}\n" if have_metadata else ""
-        kernel_code = f"\n\n{metadata_comment}{kernel_name} = {kernel_body}"
+        have_metadata = line.metadata and not config.triton.autotune_at_compile_time
+        metadata_comment = f"{line.metadata}\n" if have_metadata else ""
+        kernel_code = f"\n\n{metadata_comment}{line.kernel_name} = {line.kernel_body}"
 
         # Import the code and store the kernel.
-        mod = self._import_kernel(kernel_name, kernel_code)
-        kernel = getattr(mod, kernel_name)
-        self.kernels[kernel_name] = kernel
+        mod = self._import_kernel(line.kernel_name, kernel_code)
+        kernel = getattr(mod, line.kernel_name)
+        self.kernels[line.kernel_name] = kernel
