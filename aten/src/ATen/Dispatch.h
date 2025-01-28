@@ -96,6 +96,14 @@ TORCH_API void record_kernel_function_dtype(std::string name);
     return __VA_ARGS__();                                                   \
   }
 
+namespace detail {
+
+inline at::ScalarType scalar_type(at::ScalarType s) {
+  return s;
+}
+
+} // namespace detail
+
 // The AT_DISPATCH_* family of macros provides the ability to
 // conveniently generate specializations of a kernel over all of the
 // dtypes we care about in PyTorch.  We call it "dispatch" because
@@ -185,9 +193,10 @@ TORCH_API void record_kernel_function_dtype(std::string name);
 
 #define AT_DISPATCH_SWITCH(TYPE, NAME, ...)                                 \
   [&] {                                                                     \
-    const at::ScalarType _st = TYPE;                                        \
+    const auto& the_type = TYPE;                                            \
     constexpr const char* at_dispatch_name = NAME;                          \
     /* don't use TYPE again in case it is an expensive or side-effect op */ \
+    at::ScalarType _st = ::detail::scalar_type(the_type);                   \
     RECORD_KERNEL_FUNCTION_DTYPE(at_dispatch_name, _st);                    \
     switch (_st) {                                                          \
       __VA_ARGS__                                                           \
