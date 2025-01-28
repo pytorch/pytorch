@@ -62,6 +62,7 @@ def is_hashable(x):
                 variables.TorchInGraphFunctionVariable,
                 variables.TypingVariable,
                 variables.FunctoolsPartialVariable,
+                variables.WeakRefVariable,
             ),
         )
 
@@ -107,6 +108,10 @@ class ConstDictVariable(VariableTracker):
                 return self.vt.value
             elif isinstance(self.vt, variables.UserFunctionVariable):
                 return self.vt.get_function()
+            elif isinstance(self.vt, variables.WeakRefVariable):
+                # Access the underlying value inside the referent_vt for the key representation
+                Hashable = ConstDictVariable._HashableTracker
+                return Hashable(self.vt.referent_vt).underlying_value
             else:
                 x = self.vt.as_python_constant()
             return x

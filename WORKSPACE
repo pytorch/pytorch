@@ -309,6 +309,12 @@ local_repository(
     path = "third_party/gemmlowp/gemmlowp",
 )
 
+local_repository(
+    name = "kleidiai",
+    path = "third_party/kleidiai",
+    repo_mapping = {"@com_google_googletest": "@com_google_benchmark"},
+)
+
 ### Unused repos start
 
 # `unused` repos are defined to hide bazel files from submodules of submodules.
