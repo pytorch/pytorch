@@ -379,7 +379,7 @@ class FakeTensorConverter:
         out = self.meta_converter(
             t,
             shape_env=shape_env,
-            callback=mk_fake_tensor,
+            callback=mk_fake_tensor,  # type: ignore[arg-type]
             source=source,
             symbolic_context=symbolic_context,
             trace=trace,
@@ -2833,7 +2833,7 @@ def _infer_fake_from_real_tensor(
     # We went with the first option.
     fake_strides = [-1] * real_out.dim()
     strides = [(s, idx) for idx, s in enumerate(real_out.stride())]
-    strides.sort()
+    strides.sort(key=lambda x: (x[0], -x[1]))
     expected = 1
     fake_stride = expected
     for s, idx in strides:
