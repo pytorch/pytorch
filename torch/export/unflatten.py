@@ -634,7 +634,7 @@ class UnflattenedModule(torch.nn.Module):
         for orig_fqn, indexed_call_modules in called_modules.items():
             call_modules = [mod for _, mod in sorted(indexed_call_modules)]
             if len(call_modules) > 1:
-                for i, call_module in enumerate(call_modules):
+                for i in range(len(call_modules)):
                     fqn = _call_name(orig_fqn, i + 1)
                     if fqn not in redirected_call_indices:
                         *prefix, name = fqn.split(".")
