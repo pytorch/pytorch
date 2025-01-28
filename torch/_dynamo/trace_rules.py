@@ -16,20 +16,16 @@ import logging
 import multiprocessing
 import operator
 import os
-import posixpath
 import random
 import re
 import selectors
-import signal
 import sys
 import tempfile
 import threading
-import tokenize
 import traceback
 import types
 import typing
 import unittest
-import weakref
 from collections import defaultdict
 from pathlib import Path
 from typing import Any, Callable, cast, Optional, Union
@@ -1386,6 +1382,8 @@ torch_c_binding_in_graph_functions = dict.fromkeys(
         "torch._dim_arange",
         "torch._dirichlet_grad",
         "torch._disable_functionalization",
+        "torch._dyn_quant_matmul_4bit",
+        "torch._dyn_quant_pack_4bit_weight",
         "torch._efficientzerotensor",
         "torch._embedding_bag_forward_only",
         "torch._embedding_bag",
@@ -3161,26 +3159,20 @@ BUILTIN_SKIPLIST = (
     copy,
     copyreg,
     enum,
-    functools,
     importlib,
     inspect,
     linecache,
     logging,
     multiprocessing,
     operator,
-    posixpath,
     random,
-    re,
     selectors,
-    signal,
     tempfile,
     threading,
-    tokenize,
     traceback,
     types,
     typing,
     unittest,
-    weakref,
     _collections_abc,
     _weakrefset,
 )

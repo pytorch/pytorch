@@ -223,6 +223,10 @@ class MetalOverrides(OpOverrides):
         return f"c10::metal::erf({x})"
 
     @staticmethod
+    def erfinv(x: CSEVariable) -> str:
+        return f"c10::metal::erfinv({x})"
+
+    @staticmethod
     def lgamma(x: CSEVariable) -> str:
         return f"c10::metal::log_gamma({x})"
 
@@ -296,6 +300,20 @@ class MetalOverrides(OpOverrides):
         return f"metal::ceil({x})"
 
     @staticmethod
+    def rand(seed: CSEVariable, offset: CSEVariable) -> str:
+        return f"c10::metal::rand({seed}, {offset})"
+
+    @staticmethod
+    def randn(seed: CSEVariable, offset: CSEVariable) -> str:
+        return f"c10::metal::randn({seed}, {offset})"
+
+    @staticmethod
+    def randint64(
+        seed: CSEVariable, offset: CSEVariable, low: CSEVariable, high: CSEVariable
+    ) -> str:
+        return f"c10::metal::randint64({seed}, {offset}, {low}, {high})"
+
+    @staticmethod
     def round(x: CSEVariable) -> str:
         return f"metal::round({x})"
 
@@ -356,6 +374,7 @@ class MetalKernel(SIMDKernel):
         with code.indent():
             code.splice(
                 """
+            #include <c10/metal/random.h>
             #include <c10/metal/special_math.h>
             #include <c10/metal/utils.h>
             """,
@@ -433,7 +452,7 @@ class MetalKernel(SIMDKernel):
 class MetalScheduling(SIMDScheduling):
     kernel_type = MetalKernel  # type: ignore[assignment]
 
-    def __init__(self, scheduler: Scheduler) -> None:
+    def __init__(self, scheduler: Optional[Scheduler]) -> None:
         super().__init__(scheduler)
         wrapper = V.graph.wrapper_code
         if wrapper is not None:
