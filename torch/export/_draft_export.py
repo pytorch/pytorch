@@ -1,8 +1,9 @@
 import inspect
 import logging
 import os
+from collections import defaultdict
 from enum import IntEnum
-from typing import Any, Dict, List, Optional, Tuple, Union
+from typing import Any, Optional, Union
 
 import torch
 import torch._logging._internal
@@ -26,7 +27,7 @@ class FailureType(IntEnum):
         return self.name
 
 
-def prettify_stack(stack: List[Dict[str, str]], str_to_filename: Dict[str, str]) -> str:
+def prettify_stack(stack: list[dict[str, str]], str_to_filename: dict[str, str]) -> str:
     res = ""
     for frame in stack:
         if frame["filename"] not in str_to_filename:
@@ -38,8 +39,8 @@ def prettify_stack(stack: List[Dict[str, str]], str_to_filename: Dict[str, str])
 
 
 def filter_stack(
-    stack: List[Dict[str, str]], str_to_filename: Dict[str, str]
-) -> List[Dict[str, str]]:
+    stack: list[dict[str, str]], str_to_filename: dict[str, str]
+) -> list[dict[str, str]]:
     for i, s in enumerate(reversed(stack)):
         s["filename"] = str(s["filename"])
         if s["filename"] not in str_to_filename:
@@ -50,22 +51,22 @@ def filter_stack(
     return stack[-3:]
 
 
-def hash_stack(stack: List[Dict[str, str]]) -> str:
+def hash_stack(stack: list[dict[str, str]]) -> str:
     return ";".join(f'line: {s["line"]} filename: {s["filename"]}' for s in stack)
 
 
 class FailureReport:
     def __init__(
-        self, failure_type: FailureType, data: Dict[str, Any], xfail: bool = False
+        self, failure_type: FailureType, data: dict[str, Any], xfail: bool = False
     ) -> None:
         self.failure_type: FailureType = failure_type
-        self.data: Dict[str, Any] = data
+        self.data: dict[str, Any] = data
         self.xfail: bool = xfail
 
     def __repr__(self) -> str:
         return f"FailureReport(failure_type={self.failure_type}, xfail={self.xfail}, data={self.data})"
 
-    def print(self, str_to_filename: Dict[str, str]) -> str:
+    def print(self, str_to_filename: dict[str, str]) -> str:
         if self.failure_type == FailureType.MISSING_FAKE_KERNEL:
             op = self.data["op"]
 
@@ -91,8 +92,9 @@ class FailureReport:
         elif self.failure_type == FailureType.DATA_DEPENDENT_ERROR:
             return f"""Data dependent error.
     When exporting, we were unable to figure out if the expression `{self.data["expr"]}` always holds.
+    This was encountered {self.data["occurrences"]} times.
     This occurred at the following stacktrace: {prettify_stack(self.data["stack"], str_to_filename)}.
-    As a result, it was specialized to evaluate to `{self.data["result"]}`, and asserts were inserted into the graph.
+    As a result, it was specialized to a constant (e.g. `{self.data["result"]}` in the 1st occurrence), and asserts were inserted into the graph.
 
     Please add `torch._check(...)` to the original code to assert this data-dependent assumption.
     Please refer to https://docs.google.com/document/d/1kZ_BbB3JnoLbUZleDT6635dHs88ZVYId8jT-yTFgf3A/edit#heading=h.boi2xurpqa0o for more details.
@@ -113,8 +115,8 @@ class FailureReport:
 
 
 class DraftExportReport:
-    def __init__(self, failures: List[FailureReport], str_to_filename: Dict[str, str]):
-        self.failures: List[FailureReport] = failures
+    def __init__(self, failures: list[FailureReport], str_to_filename: dict[str, str]):
+        self.failures: list[FailureReport] = failures
         self.str_to_filename = str_to_filename
 
     def successful(self) -> bool:
@@ -156,10 +158,10 @@ Please follow the instructions to fix the errors.
 
 
 class CaptureStructuredTrace(logging.Handler):
-    def __init__(self, specific_log_keys: List[str]):
+    def __init__(self, specific_log_keys: list[str]):
         super().__init__()
         self.specific_log_keys = specific_log_keys
-        self.logs: List[Tuple[str, Dict[str, Any]]] = []
+        self.logs: list[tuple[str, dict[str, Any]]] = []
         self.logger = logging.getLogger("torch.__trace")
         self.prev_get_dtrace = False
 
@@ -185,14 +187,14 @@ class CaptureStructuredTrace(logging.Handler):
 
 def draft_export(
     mod: torch.nn.Module,
-    args: Tuple[Any, ...],
-    kwargs: Optional[Dict[str, Any]] = None,
+    args: tuple[Any, ...],
+    kwargs: Optional[dict[str, Any]] = None,
     *,
-    dynamic_shapes: Optional[Union[Dict[str, Any], Tuple[Any], List[Any]]] = None,
-    preserve_module_call_signature: Tuple[str, ...] = (),
+    dynamic_shapes: Optional[Union[dict[str, Any], tuple[Any], list[Any]]] = None,
+    preserve_module_call_signature: tuple[str, ...] = (),
     strict: bool = False,
     pre_dispatch: bool = False,
-) -> Tuple[ExportedProgram, DraftExportReport]:
+) -> tuple[ExportedProgram, DraftExportReport]:
     kwargs = kwargs or {}
     dynamic_shapes = dynamic_shapes or {}
 
@@ -234,17 +236,15 @@ def draft_export(
                 preserve_module_call_signature=preserve_module_call_signature,
             )
 
-        str_to_filename: Dict[str, str] = {
+        str_to_filename: dict[str, str] = {
             str(v): k for (k, v) in torch._logging.structured.INTERN_TABLE.items()
         }
-        failures: List[FailureReport] = []
-        custom_ops_logs: Dict[
-            Any, Tuple[Dict[str, Any], FailureType]
+        failures: list[FailureReport] = []
+        custom_ops_logs: dict[
+            Any, tuple[dict[str, Any], FailureType]
         ] = {}  # Dedup custom ops
-        data_dependent_logs: Dict[
-            str, Dict[str, Any]
-        ] = {}  # Dedup data dependent errors based on stacktrace
-
+        # Dedup data dependent errors based on stacktrace
+        data_dependent_logs: dict[str, int] = defaultdict(int)
         for log_name, log_contents in capture_structured_log.logs:
             failure_type = None
 
@@ -252,10 +252,11 @@ def draft_export(
                 log_contents["stack"] = filter_stack(
                     log_contents["stack"], str_to_filename
                 )
-                if hash_stack(log_contents["stack"]) in data_dependent_logs:
+                data_dependent_logs[hash_stack(log_contents["stack"])] += 1
+
+                if data_dependent_logs[hash_stack(log_contents["stack"])] > 1:
                     continue
 
-                data_dependent_logs[hash_stack(log_contents["stack"])] = log_contents
                 failure_type = FailureType.DATA_DEPENDENT_ERROR
 
             elif log_name == "guard_added":
@@ -296,6 +297,13 @@ def draft_export(
                     log_contents,
                 )
             )
+
+        # Count data dependent errors
+        for failure in failures:
+            if failure.failure_type == FailureType.DATA_DEPENDENT_ERROR:
+                failure.data["occurrences"] = data_dependent_logs[
+                    hash_stack(failure.data["stack"])
+                ]
 
         report = DraftExportReport(failures, str_to_filename)
 

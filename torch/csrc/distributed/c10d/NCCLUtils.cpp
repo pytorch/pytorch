@@ -87,7 +87,33 @@ std::shared_ptr<NCCLComm> NCCLComm::create(
   comm->initialized_ = !comm->nonBlocking_;
   return comm;
 }
-#endif
+#ifdef NCCL_HAS_INIT_RANK_SCALABLE
+std::shared_ptr<NCCLComm> NCCLComm::create_scalable(
+    int numRanks,
+    int rank,
+    std::vector<ncclUniqueId>& commIds,
+    ncclConfig_t& config) {
+  auto comm = std::make_shared<NCCLComm>();
+  comm->nonBlocking_ = config.blocking == 0;
+  LOG(INFO) << "Rank " << rank << ": creating NCCL communicator with mode: "
+            << (comm->nonBlocking_ ? "nonblocking" : "blocking")
+            << " with scalable init.";
+  C10D_NCCL_CHECK_NONBLOCKING(
+      ncclCommInitRankScalable(
+          &(comm->ncclComm_),
+          numRanks,
+          rank,
+          commIds.size(),
+          commIds.data(),
+          &config),
+      std::nullopt);
+  comm->ncclId_ = commIds[rank];
+  comm->rank_ = rank;
+  comm->initialized_ = !comm->nonBlocking_;
+  return comm;
+}
+#endif // NCCL_HAS_INIT_RANK_SCALABLE
+#endif // NCCL_HAS_COMM_NONBLOCKING
 
 ncclComm_t NCCLComm::getNcclComm() {
   LockType lock(mutex_);
@@ -390,11 +416,9 @@ std::unordered_map<std::string, std::string> NCCLComm::ncclCommDump() {
 #endif
 
 std::string getNcclVersion() {
-  static c10::once_flag ncclGetVersionFlag;
-  static std::string versionString;
-
-  c10::call_once(ncclGetVersionFlag, []() {
+  static std::string versionString = []() {
     int version = 0;
+    std::string versionString;
     ncclResult_t status = ncclGetVersion(&version);
     // can't compute the version if call did not return successfully or version
     // code < 100 (corresponding to 0.1.0)
@@ -417,7 +441,8 @@ std::string getNcclVersion() {
       }
 #endif
     }
-  });
+    return versionString;
+  }();
 
   return versionString;
 }

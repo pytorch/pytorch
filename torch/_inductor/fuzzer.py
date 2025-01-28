@@ -6,21 +6,17 @@ import signal
 import string
 import sys
 import traceback
+from collections.abc import KeysView
 from enum import Enum
 from functools import partial, wraps
 from types import FrameType
 from typing import (
     Any,
     Callable,
-    Dict,
     get_args,
     get_origin,
-    KeysView,
-    List,
     Literal,
     Optional,
-    Tuple,
-    Type,
     TypeVar,
     Union,
 )
@@ -92,14 +88,14 @@ class TypeExemplars:
     }
 
     @staticmethod
-    def example(t: Type[T]) -> Optional[T]:
+    def example(t: type[T]) -> Optional[T]:
         """
         Return an example of a class.
         """
         return TypeExemplars.TYPE_EXEMPLARS.get(t.__name__, None)
 
     @staticmethod
-    def contains(t: Type[T]) -> bool:
+    def contains(t: type[T]) -> bool:
         return t.__name__ in TypeExemplars.TYPE_EXEMPLARS
 
 
@@ -136,7 +132,7 @@ class Status(Enum):
 
 # Sometime the types of configs aren't expressive enough to be captured by python type system, so the options can be
 # manually specified here:
-TYPE_OVERRIDES: Dict[str, List[Any]] = {
+TYPE_OVERRIDES: dict[str, list[Any]] = {
     "post_grad_fusion_options": [
         {
             "batch_linear_post_grad": {
@@ -160,7 +156,7 @@ TYPE_OVERRIDES: Dict[str, List[Any]] = {
     "autoheuristic_collect": ["pad_mm", "mixed_mm"],
     "autoheuristic_use": ["pad_mm", "mixed_mm"],
 }
-SamplingType = Callable[[str, Type[Any], Any], Any]
+SamplingType = Callable[[str, type[Any], Any], Any]
 
 
 class SamplingMethod(Enum):
@@ -178,7 +174,7 @@ class SamplingMethod(Enum):
 
     @staticmethod
     def _generate_value_for_type(
-        random_sample: bool, field_name: str, type_hint: Type[Any], default: Any
+        random_sample: bool, field_name: str, type_hint: type[Any], default: Any
     ) -> Any:
         """
         Generates a value of a type based on the setting.
@@ -304,9 +300,11 @@ class SamplingMethod(Enum):
                 if random_sample:
                     return random.choice(type_hint.__args__)
                 else:
-                    return random.choice(
-                        [t for t in type_hint.__args__ if t != default]
-                    )
+                    choices = [t for t in type_hint.__args__ if t != default]
+                    if choices:
+                        return random.choice(choices)
+                    else:
+                        return default
             except AttributeError as err:
                 raise ValueError("Literal type with no args") from err
         elif is_optional_type(type_hint):
@@ -374,7 +372,7 @@ class Default:
 DEFAULT = Default()
 
 # The combination of config settings being set (based on their strings)
-ComboType = Tuple[str, ...]
+ComboType = tuple[str, ...]
 
 
 class ResultType:
@@ -382,10 +380,16 @@ class ResultType:
     The mapping of the combo strings to the result status after running the config fuzzer.
     """
 
-    _vals: Dict[ComboType, Status]
+    _vals: dict[ComboType, Status]
+
+    def __repr__(self) -> str:
+        return f"ResultType[{self._vals}]"
 
     def __init__(self) -> None:
         self._vals = {}
+
+    def __len__(self) -> int:
+        return len(self._vals)
 
     def num_ran(self) -> int:
         """
@@ -401,9 +405,6 @@ class ResultType:
         combo = tuple(sorted(combo))
         self._vals[combo] = status
 
-    def __len__(self) -> int:
-        return len(self._vals)
-
     def lookup(self, combo: ComboType) -> Optional[Status]:
         combo = tuple(sorted(combo))
         return self._vals.get(combo, None)
@@ -413,8 +414,8 @@ class ResultType:
 
 
 # Type that maps config strings to their default value
-ConfigType = Dict[str, Any]
-# Callable that returns a tupl
+ConfigType = dict[str, Any]
+# Callable that returns a bool
 FactoryOutputType = Callable[[], bool]
 # input function factory
 FactoryType = Callable[[], FactoryOutputType]
@@ -431,9 +432,9 @@ class ConfigFuzzer:
       every other config.
 
     The main interface is a function factory that will return Callables to be torch.compiled. This function factory
-      should return a test function when it's called. If said test function returns a boolean, then a False or True
-      determines whether the ConfigFuzzer considers it a successful run or not. Throwing an exception from within the
-      function will be considered a failure as well.
+      should return a test function when it's called. Said test function returns a boolean, which determines whether
+      the ConfigFuzzer considers it a successful run or not. Throwing an exception from within the function will be
+      considered a failure as well.
 
     # Example usage:
 
@@ -501,10 +502,10 @@ class ConfigFuzzer:
             return
         self.seed = seed
         self.test_timeout = test_timeout
-        self.detailed_results: Dict[ComboType, Dict[str, Any]] = {}
+        self.detailed_results: dict[ComboType, dict[str, Any]] = {}
         self.config_module = config_module
         self.test_model_fn_factory = test_model_fn_factory
-        self.fields: Dict[str, _ConfigEntry] = self.config_module._config
+        self.fields: dict[str, _ConfigEntry] = self.config_module._config
         self.sample = SamplingMethod.dispatch(sm)
 
         if default is None:
@@ -528,7 +529,7 @@ class ConfigFuzzer:
                     "cpp.cxx": DEFAULT,  # Out of Scope
                     "TYPE_CHECKING": DEFAULT,  # Not a config
                     "max_autotune_pointwise": DEFAULT,  # Timing
-                    "max_autotune_gemm": DEFAULT,  # Timing
+                    "max_autotune_gemm": DEFAULT,  # Timing, re-enable when autotune speed improvements merged.
                     "max_autotune_gemm_backends": DEFAULT,  # Timing
                     "max_autotune_conv_backends": DEFAULT,  # Timing
                     "max_autotune_gemm_search_space": DEFAULT,  # Timing
@@ -554,6 +555,7 @@ class ConfigFuzzer:
                     "profile_bandwidth_regex": DEFAULT,  # Known Failure
                     "disable_cpp_codegen": DEFAULT,  # Known Failure
                     "trace.save_real_tensors": DEFAULT,  # Known Failure
+                    "pre_grad_fusion_options": DEFAULT,  # Typing
                 }
             else:
                 raise ValueError("No default passed to ConfigFuzzer.")
@@ -583,7 +585,7 @@ class ConfigFuzzer:
         }
         return ret
 
-    def reproduce(self, configs: List[ConfigType]) -> ResultType:
+    def reproduce(self, configs: list[ConfigType]) -> ResultType:
         """entrypoint to reproduce any failure"""
         results = ResultType()
         for conf in configs:
@@ -671,7 +673,7 @@ class ConfigFuzzer:
             for field, value in config.items():
                 print(f"{field} = {value}")
 
-        def get_error_info(exc: Exception) -> Dict[str, Any]:
+        def get_error_info(exc: Exception) -> dict[str, Any]:
             return {
                 "exception": str(exc),
                 "traceback": traceback.format_exc(),
@@ -711,7 +713,8 @@ class ConfigFuzzer:
 
         # try compilation
         try:
-            comp = torch.compile()(self.test_model_fn_factory())
+            test_model_fn2 = self.test_model_fn_factory()
+            comp = torch.compile(test_model_fn2, backend="inductor")
         except Exception as exc:  # noqa: E722
             return handle_return(
                 "Exception compiling", Status.FAILED_COMPILE, True, exc
@@ -729,19 +732,14 @@ class ConfigFuzzer:
             )
 
         # bool return value means don't compare with eager
-        if type(compile_result) is bool:
-            if not compile_result:
-                return handle_return(
-                    "Function returned False", Status.FAILED_RUN_RETURN, False, None
-                )
-            else:
-                return handle_return("Function succeeded", Status.PASSED, False, None)
-        else:
-            raise ValueError(
-                f"Unable to process return type of test function: {type(compile_result)}"
+        if not compile_result:
+            return handle_return(
+                "Function returned False", Status.FAILED_RUN_RETURN, False, None
             )
+        else:
+            return handle_return("Function succeeded", Status.PASSED, False, None)
 
-    def bisect(self, num_attempts: int = 100, p: float = 0.5) -> List[ConfigType]:
+    def bisect(self, num_attempts: int = 100, p: float = 0.5) -> list[ConfigType]:
         """
         Test configs and bisect to minimal failing configuration.
         """
@@ -749,7 +747,7 @@ class ConfigFuzzer:
         random.seed(self.seed)
         self._reset_configs()
         results = ResultType()
-        ret: List[ConfigType] = []
+        ret: list[ConfigType] = []
 
         for attempt in range(num_attempts):
             print(f"Random attempt {attempt + 1}/{num_attempts}")
@@ -783,7 +781,7 @@ class ConfigFuzzer:
         return self._bisect_failing_config_helper(results, list(failing_config.items()))
 
     def _bisect_failing_config_helper(
-        self, results: ResultType, failing_config: List[Tuple[str, Any]]
+        self, results: ResultType, failing_config: list[tuple[str, Any]]
     ) -> Optional[ConfigType]:
         """
         Bisect a failing configuration to find minimal set of configs that cause failure.
@@ -795,7 +793,7 @@ class ConfigFuzzer:
         if not failing_config:
             return None
 
-        def test(x: List[Tuple[str, Any]]) -> Status:
+        def test(x: list[tuple[str, Any]]) -> Status:
             d = dict(x)
             result = self.test_config(results, d)
             return result
@@ -895,15 +893,15 @@ def visualize_results(
     """
 
     html_content += "<tr><th>\\</th>"
-    for i, col_name in enumerate(input_list):
+    for col_name in input_list:
         col = "<br>".join(col_name)
         html_content += f"<th>{col}</th>"
     html_content += "</tr></thead><tbody>"
 
     # Add table rows
-    for i, row_name in enumerate(input_list):
+    for row_name in input_list:
         html_content += f"<tr><th>{row_name}</th>"
-        for j, col_name in enumerate(input_list):
+        for col_name in input_list:
             # Determine the status class for the cell
             status_enum = results.lookup((row_name, col_name))
             status_class = ""
@@ -942,88 +940,3 @@ def visualize_results(
 
     with open(filename, "w") as file:
         file.write(html_content)
-
-
-if __name__ == "__main__":
-    import argparse
-
-    parser = argparse.ArgumentParser(description="Config Fuzzer CLI")
-    parser.add_argument("--seed", type=int, default=42, help="Random seed")
-    parser.add_argument(
-        "--num_attempts", type=int, default=100, help="Number of attempts for fuzzing"
-    )
-    parser.add_argument(
-        "--n", type=int, default=2, help="Number of configurations to combine"
-    )
-    parser.add_argument(
-        "--method",
-        choices=["n_tuple", "bisect"],
-        default="bisect",
-        help="Fuzzing method",
-    )
-    parser.add_argument(
-        "--timeout", type=int, default=60, help="Test timeout in seconds"
-    )
-    parser.add_argument(
-        "--sampling_method",
-        choices=["toggle", "random"],
-        default="toggle",
-        help="Method of sampling config values",
-    )
-    parser.add_argument("--save_state", type=str, help="Save state to file")
-    parser.add_argument("--load_state", type=str, help="Load state from file")
-    parser.add_argument(
-        "--gpu", type=bool, default=True, help="Whether to test the GPU or not"
-    )
-
-    def create_simple_test_model_cpu() -> FactoryOutputType:
-        def test_fn() -> bool:
-            model = torch.nn.Sequential(
-                torch.nn.Linear(10, 10), torch.nn.ReLU(), torch.nn.Linear(10, 1)
-            )
-
-            x = torch.randn(32, 10)
-            model(x)
-            return True
-
-        return test_fn
-
-    def create_simple_test_model_gpu() -> FactoryOutputType:
-        batch_size = 32
-        seq_length = 50
-        hidden_size = 768
-
-        def test_fn() -> bool:
-            inp = torch.randn(batch_size, seq_length, hidden_size, device="cuda")
-            weight = torch.randn(hidden_size, hidden_size, device="cuda")
-            matmul_output = inp @ weight
-            torch.nn.LayerNorm(hidden_size, device="cuda")(matmul_output)
-            return True
-
-        return test_fn
-
-    args = parser.parse_args()
-    if args.sampling_method == "toggle":
-        sm = SamplingMethod.TOGGLE
-    else:
-        sm = SamplingMethod.RANDOM
-
-    fuzzer = ConfigFuzzer(
-        config_module=torch._inductor.config,  # type: ignore[arg-type]
-        test_model_fn_factory=create_simple_test_model_gpu
-        if args.gpu
-        else create_simple_test_model_cpu,
-        seed=args.seed,
-        test_timeout=args.timeout,
-        sm=sm,
-    )
-
-    if args.load_state:
-        fuzzer.load_state(args.load_state)
-
-    if args.method == "n_tuple":
-        results = fuzzer.fuzz_n_tuple(n=args.n, max_combinations=args.num_attempts)
-        if args.save_state:
-            fuzzer.save_state(args.save_state)
-    else:
-        print(fuzzer.bisect(num_attempts=args.num_attempts, p=1.0))
