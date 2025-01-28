@@ -11,6 +11,7 @@ import os
 import random
 import re
 import sys
+import traceback
 import types
 import typing
 import unittest
@@ -3145,6 +3146,7 @@ BUILTIN_SKIPLIST = (
     inspect,
     random,
     types,
+    traceback,
     unittest,
 )
 
