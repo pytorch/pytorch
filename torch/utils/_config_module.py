@@ -447,7 +447,7 @@ class ConfigModule(ModuleType):
         unset = config_val.user_override is _UNSET_SENTINEL
         # Handle reference types specially to avoid spammy warnings
         if isinstance(config_val.default, (list, set, dict)):
-            unset = config_val.user_override == config_val.default
+            unset = unset or config_val.user_override == config_val.default
         return unset and not_set_env_default and not_set_env_force
 
     def _get_dict(
