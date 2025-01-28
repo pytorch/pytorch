@@ -79,11 +79,13 @@ bool use_metal_mm(const Tensor& self, const Tensor& other, const Tensor& output)
   static bool always_use_metal = std::getenv("PYTORCH_MPS_PREFER_METAL") != nullptr;
   constexpr auto max_stride_size = 32768;
   static bool is_macos_14_4_or_newer = is_macos_13_or_newer(MacOSVersion::MACOS_VER_14_4_PLUS);
-  return always_use_metal ||
-      (!is_macos_14_4_or_newer &&
-       (self.stride(0) > max_stride_size || self.stride(1) > max_stride_size || self.size(0) > max_stride_size ||
-        self.size(1) > max_stride_size || other.stride(0) > max_stride_size || other.stride(1) > max_stride_size ||
-        other.size(0) > max_stride_size || other.size(1) > max_stride_size));
+  if (always_use_metal || c10::isIntegralType(self.scalar_type(), false)) {
+    return true;
+  }
+  return !is_macos_14_4_or_newer &&
+      (self.stride(0) > max_stride_size || self.stride(1) > max_stride_size || self.size(0) > max_stride_size ||
+       self.size(1) > max_stride_size || other.stride(0) > max_stride_size || other.stride(1) > max_stride_size ||
+       other.size(0) > max_stride_size || other.size(1) > max_stride_size);
 }
 
 } // anonymous namespace
@@ -209,8 +211,6 @@ static Tensor& mm_out_mps_impl(const Tensor& self, const Tensor& other, Tensor& 
               self.dtype(),
               " != ",
               other.dtype())
-  TORCH_CHECK(supportedFloatingOrComplexType(self), "MPS device does not support mm for non-float inputs");
-
   TensorArg args[]{{output, "out", 0}, {self, "mat1", 1}, {other, "mat2", 2}};
   checkAllSameGPU("mm", args);
 

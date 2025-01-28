@@ -1,10 +1,15 @@
+#include <c10/metal/utils.h>
 #include <metal_array>
 #include <metal_stdlib>
 
 using namespace metal;
 template <typename T>
-T dot_product(constant T* v1, constant T* v2, ulong2 strides, uint32_t size) {
-  T rc = T(0.0);
+c10::metal::opmath_t<T> dot_product(
+    constant T* v1,
+    constant T* v2,
+    ulong2 strides,
+    uint32_t size) {
+  auto rc = c10::metal::opmath_t<T>(0.0);
   for (uint32_t i = 0; i < size; ++i) {
     rc += v1[i * strides.x] * v2[i * strides.y];
   }
@@ -29,7 +34,7 @@ kernel void naive_matmul(
       mat2Data + y * strides[1].y,
       ulong2(strides[0].y, strides[1].x),
       sizes.y);
-  outputData[x * strides[2].x + y * strides[2].y] = rc;
+  outputData[x * strides[2].x + y * strides[2].y] = static_cast<Tout>(rc);
 }
 
 inline float blockReduceSum(
@@ -312,3 +317,10 @@ INSTANTIATE_NAIVE_MM(half);
 #if __METAL_VERSION__ >= 310
 INSTANTIATE_NAIVE_MM(bfloat);
 #endif
+
+// Integral MM
+INSTANTIATE_NAIVE_MM(short);
+INSTANTIATE_NAIVE_MM(int);
+INSTANTIATE_NAIVE_MM(long);
+INSTANTIATE_NAIVE_MM(char);
+INSTANTIATE_NAIVE_MM(uchar);
