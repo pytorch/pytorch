@@ -694,6 +694,13 @@ class SkipFunctionVariable(VariableTracker):
     ) -> "VariableTracker":
         if inspect.getattr_static(self.value, "_torchdynamo_disable", False):
             unimplemented(f"call torch._dynamo.disable() wrapped function {self.value}")
+        elif isinstance(self.value, types.MethodDescriptorType):
+            msg = (
+                f"Graph break due to unsupported builtin {self.value}. "
+                f"Please file an issue on GitHub "
+                f"so the PyTorch team can add support for it. "
+            )
+            torch._dynamo.utils.warn_once(msg)
         else:
             try:
                 path = inspect.getfile(self.value)

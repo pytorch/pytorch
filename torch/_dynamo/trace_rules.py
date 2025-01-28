@@ -10,6 +10,7 @@ import operator
 import os
 import re
 import sys
+import traceback
 import types
 import typing
 import unittest
@@ -3143,6 +3144,7 @@ BUILTIN_SKIPLIST = (
     collections,
     inspect,
     types,
+    traceback,
     unittest,
 )
 
