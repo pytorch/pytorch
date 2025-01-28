@@ -466,7 +466,11 @@ class SerializationMixin:
         b += [a[0].storage()]
         b += [a[0].reshape(-1)[1:4].clone().storage()]
         path = download_file('https://download.pytorch.org/test_data/legacy_serialized.pt')
-        c = torch.load(path, weights_only=weights_only)
+        if weights_only:
+            with self.assertRaisesRegex(RuntimeError,
+                                        "Cannot use ``weights_only=True`` with files saved in the legacy .tar format."):
+                c = torch.load(path, weights_only=weights_only)
+        c = torch.load(path, weights_only=False)
         self.assertEqual(b, c, atol=0, rtol=0)
         self.assertTrue(isinstance(c[0], torch.FloatTensor))
         self.assertTrue(isinstance(c[1], torch.FloatTensor))
@@ -4518,6 +4522,16 @@ class TestSerialization(TestCase, SerializationMixin):
                 self.assertEqual(sd_loaded, sd)
             finally:
                 serialization_config.save.use_pinned_memory_for_d2h = pinned_before
+
+    def test_has_format_version(self):
+        sd = torch.nn.Linear(2, 3).state_dict()
+        with tempfile.NamedTemporaryFile() as f:
+            torch.save(sd, f)
+            f.seek(0)
+            with torch.serialization._open_file_like(f, "rb") as opened_file:
+                with torch.serialization._open_zipfile_reader(opened_file) as opened_zipfile:
+                    self.assertTrue(opened_zipfile.has_record(".format_version"))
+                    self.assertEqual(opened_zipfile.get_record(".format_version"), b'1')
 
 
     def run(self, *args, **kwargs):

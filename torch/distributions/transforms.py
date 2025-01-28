@@ -1,7 +1,6 @@
 # mypy: allow-untyped-defs
 import functools
 import math
-import numbers
 import operator
 import weakref
 from collections.abc import Sequence
@@ -20,6 +19,7 @@ from torch.distributions.utils import (
     vec_to_tril_matrix,
 )
 from torch.nn.functional import pad, softplus
+from torch.types import _Number
 
 
 __all__ = [
@@ -773,18 +773,14 @@ class AffineTransform(Transform):
         if not isinstance(other, AffineTransform):
             return False
 
-        if isinstance(self.loc, numbers.Number) and isinstance(
-            other.loc, numbers.Number
-        ):
+        if isinstance(self.loc, _Number) and isinstance(other.loc, _Number):
             if self.loc != other.loc:
                 return False
         else:
             if not (self.loc == other.loc).all().item():  # type: ignore[union-attr]
                 return False
 
-        if isinstance(self.scale, numbers.Number) and isinstance(
-            other.scale, numbers.Number
-        ):
+        if isinstance(self.scale, _Number) and isinstance(other.scale, _Number):
             if self.scale != other.scale:
                 return False
         else:
@@ -795,7 +791,7 @@ class AffineTransform(Transform):
 
     @property
     def sign(self) -> Union[Tensor, int]:  # type: ignore[override]
-        if isinstance(self.scale, numbers.Real):
+        if isinstance(self.scale, _Number):
             return 1 if float(self.scale) > 0 else -1 if float(self.scale) < 0 else 0
         return self.scale.sign()  # type: ignore[union-attr]
 
@@ -808,7 +804,7 @@ class AffineTransform(Transform):
     def log_abs_det_jacobian(self, x, y):
         shape = x.shape
         scale = self.scale
-        if isinstance(scale, numbers.Real):
+        if isinstance(scale, _Number):
             result = torch.full_like(x, math.log(abs(scale)))
         else:
             result = scale.abs().log()  # type: ignore[union-attr]

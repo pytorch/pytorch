@@ -14,7 +14,7 @@ class TestSchema(TestCase):
         msg = """
 Detected an invalidated change to export schema. Please run the following script to update the schema:
 Example(s):
-    python scripts/export/update_schema.py --prefix <path_to_torch_development_diretory>
+    python scripts/export/update_schema.py --prefix <path_to_torch_development_directory>
         """
 
         if IS_FBCODE:
@@ -32,7 +32,7 @@ Example(s):
         msg = """
 Detected an unexpected change to schema.thrift. Please update schema.py instead and run the following script:
 Example(s):
-    python scripts/export/update_schema.py --prefix <path_to_torch_development_diretory>
+    python scripts/export/update_schema.py --prefix <path_to_torch_development_directory>
         """
 
         if IS_FBCODE:

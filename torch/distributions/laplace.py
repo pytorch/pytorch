@@ -1,5 +1,4 @@
 # mypy: allow-untyped-defs
-from numbers import Number
 from typing import Optional, Union
 
 import torch
@@ -7,7 +6,7 @@ from torch import Tensor
 from torch.distributions import constraints
 from torch.distributions.distribution import Distribution
 from torch.distributions.utils import broadcast_all
-from torch.types import _size
+from torch.types import _Number, _size
 
 
 __all__ = ["Laplace"]
@@ -55,7 +54,7 @@ class Laplace(Distribution):
         validate_args: Optional[bool] = None,
     ) -> None:
         self.loc, self.scale = broadcast_all(loc, scale)
-        if isinstance(loc, Number) and isinstance(scale, Number):
+        if isinstance(loc, _Number) and isinstance(scale, _Number):
             batch_shape = torch.Size()
         else:
             batch_shape = self.loc.size()

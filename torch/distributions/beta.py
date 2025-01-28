@@ -1,5 +1,4 @@
 # mypy: allow-untyped-defs
-from numbers import Number, Real
 from typing import Optional, Union
 
 import torch
@@ -8,7 +7,7 @@ from torch.distributions import constraints
 from torch.distributions.dirichlet import Dirichlet
 from torch.distributions.exp_family import ExponentialFamily
 from torch.distributions.utils import broadcast_all
-from torch.types import _size
+from torch.types import _Number, _size
 
 
 __all__ = ["Beta"]
@@ -39,12 +38,12 @@ class Beta(ExponentialFamily):
     has_rsample = True
 
     def __init__(
-        self,
-        concentration1: Union[Tensor, float],
-        concentration0: Union[Tensor, float],
-        validate_args: Optional[bool] = None,
+            self,
+            concentration1: Union[Tensor, float],
+            concentration0: Union[Tensor, float],
+            validate_args: Optional[bool] = None,
     ) -> None:
-        if isinstance(concentration1, Real) and isinstance(concentration0, Real):
+        if isinstance(concentration1, _Number) and isinstance(concentration0, _Number):
             concentration1_concentration0 = torch.tensor(
                 [float(concentration1), float(concentration0)]
             )
@@ -96,7 +95,7 @@ class Beta(ExponentialFamily):
     @property
     def concentration1(self) -> Tensor:
         result = self._dirichlet.concentration[..., 0]
-        if isinstance(result, Number):
+        if isinstance(result, _Number):
             return torch.tensor([result])
         else:
             return result
@@ -104,7 +103,7 @@ class Beta(ExponentialFamily):
     @property
     def concentration0(self) -> Tensor:
         result = self._dirichlet.concentration[..., 1]
-        if isinstance(result, Number):
+        if isinstance(result, _Number):
             return torch.tensor([result])
         else:
             return result

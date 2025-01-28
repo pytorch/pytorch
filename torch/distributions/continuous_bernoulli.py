@@ -1,6 +1,5 @@
 # mypy: allow-untyped-defs
 import math
-from numbers import Number
 from typing import Optional, Union
 
 import torch
@@ -15,7 +14,7 @@ from torch.distributions.utils import (
     probs_to_logits,
 )
 from torch.nn.functional import binary_cross_entropy_with_logits
-from torch.types import _size
+from torch.types import Number, _Number, _size
 
 
 __all__ = ["ContinuousBernoulli"]
@@ -64,7 +63,7 @@ class ContinuousBernoulli(ExponentialFamily):
                 "Either `probs` or `logits` must be specified, but not both."
             )
         if probs is not None:
-            is_scalar = isinstance(probs, Number)
+            is_scalar = isinstance(probs, _Number)
             (self.probs,) = broadcast_all(probs)
             # validate 'probs' here if necessary as it is later clamped for numerical stability
             # close to 0 and 1, later on; otherwise the clamped 'probs' would always pass
@@ -73,7 +72,7 @@ class ContinuousBernoulli(ExponentialFamily):
                     raise ValueError("The parameter probs has invalid values")
             self.probs = clamp_probs(self.probs)
         else:
-            is_scalar = isinstance(logits, Number)
+            is_scalar = isinstance(logits, _Number)
             (self.logits,) = broadcast_all(logits)
         self._param = self.probs if probs is not None else self.logits
         if is_scalar:

@@ -1,5 +1,4 @@
 # mypy: allow-untyped-defs
-from numbers import Number
 from typing import Optional, Union
 
 import torch
@@ -15,7 +14,7 @@ from torch.distributions.utils import (
     logits_to_probs,
     probs_to_logits,
 )
-from torch.types import _size
+from torch.types import Number, _Number, _size
 
 
 __all__ = ["LogitRelaxedBernoulli", "RelaxedBernoulli"]
@@ -56,10 +55,10 @@ class LogitRelaxedBernoulli(Distribution):
                 "Either `probs` or `logits` must be specified, but not both."
             )
         if probs is not None:
-            is_scalar = isinstance(probs, Number)
+            is_scalar = isinstance(probs, _Number)
             (self.probs,) = broadcast_all(probs)
         else:
-            is_scalar = isinstance(logits, Number)
+            is_scalar = isinstance(logits, _Number)
             (self.logits,) = broadcast_all(logits)
         self._param = self.probs if probs is not None else self.logits
         if is_scalar:
