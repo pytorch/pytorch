@@ -21,13 +21,21 @@ from .wrapper import (
     BufferLike,
     MemoryPlanningLine,
     MemoryPlanningState,
+    EnterDeviceContextManagerLine,
+    ExitDeviceContextManagerLine,
+    EnterSubgraphLine,
+    ExitSubgraphLine,
     AllocateLine,
+    FreeLine,
     FreeIfNotReusedLine,
     ReuseLine,
     CommBufferLine,
     NullLine,
     CommBufferAllocateLine,
     CommBufferFreeLine,
+)
+from ..utils import (
+    LineContext,
 )
 
 def call_triton_kernel(kernel: Callable, grid, args):
@@ -138,7 +146,12 @@ class WrapperFxCodegen(PythonWrapperCodegen):
             line_type = type(line)
             conversion_func = {
                 AllocateLine: self._generate_allocate,
+                EnterDeviceContextManagerLine: self._generate_enter_device_context_manager,
+                ExitDeviceContextManagerLine: self._generate_exit_device_context_manager,
+                EnterSubgraphLine: self._generate_enter_subgraph,
+                ExitSubgraphLine: self._generate_exit_subgraph,
                 FreeIfNotReusedLine: self._generate_free_if_not_reused,
+                LineContext: self._generate_line_context,
                 ReuseLine: self._generate_reuse,
                 NullLine: self._generate_null,
                 CommBufferLine: self._generate_comm_buffer,
@@ -177,12 +190,32 @@ class WrapperFxCodegen(PythonWrapperCodegen):
         self._create_meta_from_buffer(node, buffer)
         self._record_allocation(buffer, node)
 
+    def _generate_enter_device_context_manager(self, line: Line) -> None:
+        assert isinstance(line, EnterDeviceContextManagerLine)
+        # We ignore the device context in FX IR.
+
+    def _generate_exit_device_context_manager(self, line: Line) -> None:
+        assert isinstance(line, ExitDeviceContextManagerLine)
+        # We ignore the device context in FX IR.
+
+    def _generate_enter_subgraph(self, line: Line) -> None:
+        assert isinstance(line, EnterSubgraphLine)
+        raise NotImplementedError("Subgraphs are not yet supported by FX conversion")
+
+    def _generate_exit_subgraph(self, line: Line) -> None:
+        assert isinstance(line, ExitSubgraphLine)
+        raise NotImplementedError("Subgraphs are not yet supported by FX conversion")
+
     def _generate_free_if_not_reused(self, line: Line) -> None:
         assert isinstance(line, FreeIfNotReusedLine)
         buf = line.node
         assert buf.get_name() not in V.graph.removed_buffers
         if not buf.is_reused:
             buf._free(self.node)
+
+    def _generate_line_context(self, line: Line) -> None:
+        assert isinstance(line, LineContext)
+        # We ignore line context in FX IR.
 
     def _generate_reuse(self, line: Line) -> None:
         assert isinstance(line, ReuseLine)

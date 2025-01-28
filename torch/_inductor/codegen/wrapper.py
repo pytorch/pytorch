@@ -509,6 +509,16 @@ class AllocateLine(MemoryPlanningLine):
         line = self.wrapper.make_buffer_allocation(self.node)
         code.writeline(line)
 
+@dataclasses.dataclass
+class FreeLine(MemoryPlanningLine):
+    node: BufferLike
+
+    def plan(self, state: MemoryPlanningState) -> MemoryPlanningLine:
+        return self
+
+    def codegen(self, code: IndentedBuffer) -> None:
+        assert self.node.get_name() not in V.graph.removed_buffers
+        code.writeline(self.wrapper.make_buffer_free(self.node))
 
 @dataclasses.dataclass
 class FreeIfNotReusedLine(MemoryPlanningLine):
@@ -2280,7 +2290,7 @@ class PythonWrapperCodegen(CodeGen):
 
         # can be freed but not reused
         if isinstance(buffer, ir.InputBuffer):
-            self.writeline(self.make_buffer_free(buffer))
+            self.writeline(FreeLine(self, buffer))
             return
 
         if isinstance(buffer.get_output_spec(), ir.CommBufferLayout):
