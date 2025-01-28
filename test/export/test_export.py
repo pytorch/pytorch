@@ -11564,6 +11564,8 @@ class GraphModule(torch.nn.Module):
             ref_res = module(*dyn_inp)
             self.assertEqual(export_res, ref_res)
 
+    @testing.expectedFailureSerDer  # T202237665
+    @testing.expectedFailureSerDerNonStrict
     def test_dynamic_lr_shift(self):
         class Module(torch.nn.Module):
             def forward(self, x):
