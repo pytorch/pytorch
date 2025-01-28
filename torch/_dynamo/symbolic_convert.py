@@ -2674,6 +2674,12 @@ class InstructionTranslatorBase(
             self.instructions[self.instruction_pointer - 1],
         )
 
+    def _has_finally_block(self):
+        exn_tab_entry = self.current_instruction.exn_tab_entry
+        return (sys.version_info >= (3, 11) and exn_tab_entry) or (
+            sys.version_info < (3, 11) and self.block_stack
+        )
+
     def __init__(
         self,
         output: OutputGraph,

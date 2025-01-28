@@ -408,6 +408,9 @@ class LocalGeneratorObjectVariable(VariableTracker):
     def next_variable(self, tx):
         tracer = self._get_inline_tracer(tx)
 
+        if self._is_generator_exhausted():
+            raise_observed_exception(StopIteration, tx)
+
         try:
             # Hierarchically, tx can be seen as the parent of the inline tracer
             # created on call_function. Any exception needs to be propagated to tx
@@ -451,12 +454,6 @@ class LocalGeneratorObjectVariable(VariableTracker):
             # if no handler is available (i.e. user code doesn't catch it), the
             # exception is raised again.
             tracer.exception_handler(e)
-
-    def _is_inside_try_finally(self, tracer):
-        exn_tab_entry = tracer.current_instruction.exn_tab_entry
-        return (sys.version_info >= (3, 11) and exn_tab_entry) or (
-            sys.version_info < (3, 11) and tracer.block_stack
-        )
 
     def _is_generator_just_started(self):
         return self.inline_tracer is None or self.inline_tracer.instruction_pointer == 0
@@ -505,14 +502,17 @@ class LocalGeneratorObjectVariable(VariableTracker):
             # Return None if close is called on a just-started generator
             # See test GeneratorCloseCpythonTests::test_close_not_started
 
-            if self._is_generator_just_started() or self._is_generator_exhausted():
-                return variables.ConstantVariable(None)
-
             tracer = self._get_inline_tracer(tx)
+            if self._is_generator_just_started() or self._is_generator_exhausted():
+                tracer.generator_exhausted = True
+                return variables.ConstantVariable(None)
 
             # Raise GeneratorExit to see if user code catches it. Any other exception
             # is propagated to the parent frame.
-            if sys.version_info >= (3, 12):
+            try:
+                self._setup_exception(
+                    tx, variables.ExceptionVariable(GeneratorExit, ())
+                )
                 # There's an extra block on Python 3.12+ to handle StopIteration
                 # see: https://github.com/python/cpython/blob/8f93dd8a8f237b277abad20d566df90c5cbd7f1e/Objects/genobject.c#L394-L397
                 #
@@ -529,19 +529,14 @@ class LocalGeneratorObjectVariable(VariableTracker):
                 #              18 RERAISE                  1
                 # ExceptionTable:
                 #   4 to 14 -> 16 [0] lasti
-                self._setup_exception(
-                    tx, variables.ExceptionVariable(GeneratorExit, ())
-                )
-                if tracer.next_instruction.opname == "CALL_INTRINSIC_1":
+                if (
+                    sys.version_info >= (3, 12)
+                    and tracer.next_instruction.opname == "CALL_INTRINSIC_1"
+                ):
                     return variables.ConstantVariable(None)
-            else:
-                try:
-                    self._setup_exception(
-                        tx, variables.ExceptionVariable(GeneratorExit, ())
-                    )
-                except ObservedGeneratorExit:
-                    # If it doesn't catch, we just return None, as per the text above
-                    return variables.ConstantVariable(None)
+            except ObservedGeneratorExit:
+                # If it doesn't catch, we just return None, as per the text above
+                return variables.ConstantVariable(None)
 
             try:
                 # Raise RuntimeError if the generator yields any other value
@@ -575,8 +570,9 @@ class LocalGeneratorObjectVariable(VariableTracker):
 
             retval = self.next_variable(tx)
 
-            if self._is_inside_try_finally(tracer):
-                # Run the finally block and expect StopIteration from it.
+            if tracer._has_finally_block():
+                # Run the finally block if exists and expect StopIteration from it.
+                # If there's no finally, next_variable will raise StopIteration
                 # If it yields or raises anything else, we need to handle it.
                 try:
                     r = self.next_variable(tx)
