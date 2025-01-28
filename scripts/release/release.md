@@ -18,23 +18,57 @@ NOTE: Starting with this release we are not going to publish on Conda, please se
 For this release the experimental Linux binaries shipped with CUDA 12.6.3 (as well as Linux Aarch64,  Linux ROCm 6.2.4, and Linux XPU binaries) are built with CXX11_ABI=1 and are using the Manylinux 2.28 build platform. If you build PyTorch extensions with custom C++ or CUDA extensions, please update these builds to use CXX_ABI=1 as well and report any issues you are seeing. For the next PyTorch 2.7 release we plan to switch all Linux builds to Manylinux 2.28 and CXX11_ABI=1, please see [RFC] PyTorch next wheel build platform: manylinux-2.28 for the details and discussion.
 Also in this release as an important security improvement measure we have changed the default value for weights_only parameter of torch.load. This is a backward compatibility-breaking change, please see this forum post for more details.
 This release is composed of 3892 commits from 520 contributors since PyTorch 2.5. We want to sincerely thank our dedicated community for your contributions. As always, we encourage you to try these out and report any issues as we improve PyTorch. More information about how to get started with the PyTorch 2-series can be found at our Getting Started page.
-Beta
-Prototype
-torch.compiler.set_stance
-Improved PyTorch user experience on Intel GPUs
-torch.library.triton_op
-FlexAttention support on X86 CPU for LLMs
-torch.compile support for Python 3.13
-Dim.AUTO
-New packaging APIs for AOTInductor
-CUTLASS and CK GEMM/CONV Backends for AOTInductor
-AOTInductor: minifier
 
-
-AOTInductor: ABI-compatible mode code generation
-
-
-FP16 support for X86 CPUs
+<table>
+  <tr>
+   <td>Beta
+   </td>
+   <td>Prototype
+   </td>
+  </tr>
+  <tr>
+   <td>torch.compiler.set_stance
+   </td>
+   <td>Improved PyTorch user experience on Intel GPUs
+   </td>
+  </tr>
+  <tr>
+   <td>torch.library.triton_op
+   </td>
+   <td>FlexAttention support on X86 CPU for LLMs
+   </td>
+  </tr>
+  <tr>
+   <td>torch.compile support for Python 3.13
+   </td>
+   <td>Dim.AUTO
+   </td>
+  </tr>
+  <tr>
+   <td>New packaging APIs for AOTInductor
+   </td>
+   <td>CUTLASS and CK GEMM/CONV Backends for AOTInductor
+   </td>
+  </tr>
+  <tr>
+   <td>AOTInductor: minifier
+   </td>
+   <td>
+   </td>
+  </tr>
+  <tr>
+   <td>AOTInductor: ABI-compatible mode code generation
+   </td>
+   <td>
+   </td>
+  </tr>
+  <tr>
+   <td>FP16 support for X86 CPUs
+   </td>
+   <td>
+   </td>
+  </tr>
+</table>
 
 
 
@@ -98,11 +132,6 @@ The CUTLASS and CK backend adds kernel choices for GEMM autotuning in Inductor. 
 
 ## **Backwards Incompatible changes**
 
-
-### Python Frontend
-
-
-
 * **Flip default torch.load to weights_only ([#137602](https://github.com/pytorch/pytorch/pull/137602), [#138225](https://github.com/pytorch/pytorch/pull/138225), [#138866](https://github.com/pytorch/pytorch/pull/138866), [#139221](https://github.com/pytorch/pytorch/pull/139221), [#140304](https://github.com/pytorch/pytorch/pull/140304), [#138936](https://github.com/pytorch/pytorch/pull/138936), [#139541](https://github.com/pytorch/pytorch/pull/139541), [#140738](https://github.com/pytorch/pytorch/pull/140738), [#142153](https://github.com/pytorch/pytorch/pull/142153), [#139433](https://github.com/pytorch/pytorch/pull/139433))**
 
     We are closing the loop on the deprecation that started in 2.4 and flipped `torch.load` to use `weights_only=True` by default.
@@ -117,97 +146,29 @@ The CUTLASS and CK backend adds kernel choices for GEMM autotuning in Inductor. 
     For full details, please refer to [this dev-discuss post](https://dev-discuss.pytorch.org/t/bc-breaking-change-torch-load-is-being-flipped-to-use-weights-only-true-by-default-in-the-nightlies-after-137602/2573).
 
 
+* **Anaconda deprecation in CD. Remove anaconda dependency in Magma builds ([#141024](https://github.com/pytorch/pytorch/pull/141024)) ([#141281](https://github.com/pytorch/pytorch/pull/141281)) ([#140157](https://github.com/pytorch/pytorch/pull/140157)) ([#139888](https://github.com/pytorch/pytorch/pull/139888)) ([#140141](https://github.com/pytorch/pytorch/pull/140141))  ([#139924](https://github.com/pytorch/pytorch/pull/139924)) ([#140158](https://github.com/pytorch/pytorch/pull/140158)) ([#142019](https://github.com/pytorch/pytorch/pull/142019))  ([#142276](https://github.com/pytorch/pytorch/pull/142276)) ([#142277](https://github.com/pytorch/pytorch/pull/142277))  ([#142282](https://github.com/pytorch/pytorch/pull/142282))**
 
-### Cuda
+TODO: Have details + link to Eli's post here
 
+* **Added Manylinux 2.28 prototype support and CXX11_ABI=1 for following binaries: Linux CUDA 12.6, Linux aarch64 CPU, Linux aarch64 GPU CUDA 12.6, ROCm 6.2.4, Linux XPU  ([#139894](https://github.com/pytorch/pytorch/pull/139894)) ([#139631](https://github.com/pytorch/pytorch/pull/139631)) ([#139636](https://github.com/pytorch/pytorch/pull/139636)) ([#140743](https://github.com/pytorch/pytorch/pull/140743)) ([#137696](https://github.com/pytorch/pytorch/pull/137696)) ([#141565](https://github.com/pytorch/pytorch/pull/141565)) ([#140681](https://github.com/pytorch/pytorch/pull/140681)) ([#141609](https://github.com/pytorch/pytorch/pull/141609)) ([#141704](https://github.com/pytorch/pytorch/pull/141704)) ([#141423](https://github.com/pytorch/pytorch/pull/141423)) ([#141609](https://github.com/pytorch/pytorch/pull/141609))**
 
-
-* The PyTorch binaries shipped with CUDA 12.6.3 are built with CXX11_ABI=1 and are using the Manylinux 2.28 build platform. If you are building PyTorch extensions with custom C++ or CUDA extensions, please update these builds to use CXX_ABI=1 as well and report any issues you are seeing.
-
-
-### Distributed
-
-
-
-* c10d
-    * Deprecated the support of onCompletionHook ([#142390](https://github.com/pytorch/pytorch/pull/142390))
-        * In PT 2.5 and before, users can do:
-        * Starting from PT 2.6, when users write the code above, they will get get a warning message “ProcessGroupNCCL OnCompletion hook will be deprecated in favor of Flight Recorder”
-
-
-### Export
-
-
-
-* `capture_pre_autograd_graph` has been deprecated for a while and is deleted now. Its behavior is incorporated into the new export IR under `export_for_training`. ([#143224](https://github.com/pytorch/pytorch/pull/143224))
-    * Old API: `gm = torch._export.capture_pre_autograd_graph(mod, args)`
-    * New API: `gm = torch.export.export_for_training(mod, args).module()`
-* `export.export` is an alias of `export_for_training` now, returning non-functional pre-dispatch IR by default. If you want to lower the inference IR with customized IR, please use `ep.run_decompositions(decomp_table=decomp_table)`. This  will return functional post-dispatch IR. When we lower to inference IR, we always functionalize. ([#139511](https://github.com/pytorch/pytorch/pull/139511))
-
-
-### Inductor
-
-
-
-### Releng
-
-
-
-* Anaconda deprecation in CD. Remove anaconda dependency in Magma builds ([#141024](https://github.com/pytorch/pytorch/pull/141024)) ([#141281](https://github.com/pytorch/pytorch/pull/141281)) ([#140157](https://github.com/pytorch/pytorch/pull/140157)) ([#139888](https://github.com/pytorch/pytorch/pull/139888)) ([#140141](https://github.com/pytorch/pytorch/pull/140141))  ([#139924](https://github.com/pytorch/pytorch/pull/139924)) ([#140158](https://github.com/pytorch/pytorch/pull/140158)) ([#142019](https://github.com/pytorch/pytorch/pull/142019))  ([#142276](https://github.com/pytorch/pytorch/pull/142276)) ([#142277](https://github.com/pytorch/pytorch/pull/142277))  ([#142282](https://github.com/pytorch/pytorch/pull/142282))
-* Added Manylinux 2.28 prototype support and CXX11_ABI=1 for following binaries: Linux CUDA 12.6, Linux aarch64 CPU, Linux aarch64 GPU CUDA 12.6, ROCm 6.2.4, Linux XPU  ([#139894](https://github.com/pytorch/pytorch/pull/139894)) ([#139631](https://github.com/pytorch/pytorch/pull/139631)) ([#139636](https://github.com/pytorch/pytorch/pull/139636)) ([#140743](https://github.com/pytorch/pytorch/pull/140743)) ([#137696](https://github.com/pytorch/pytorch/pull/137696)) ([#141565](https://github.com/pytorch/pytorch/pull/141565)) ([#140681](https://github.com/pytorch/pytorch/pull/140681)) ([#141609](https://github.com/pytorch/pytorch/pull/141609)) ([#141704](https://github.com/pytorch/pytorch/pull/141704)) ([#141423](https://github.com/pytorch/pytorch/pull/141423)) ([#141609](https://github.com/pytorch/pytorch/pull/141609))
+TODO: This is nvidia statement, we should have a better one
+The PyTorch binaries shipped with CUDA 12.6.3 are built with CXX11_ABI=1 and are using the Manylinux 2.28 build platform. If you are building PyTorch extensions with custom C++ or CUDA extensions, please update these builds to use CXX_ABI=1 as well and report any issues you are seeing.
 
 
 ## **Deprecations**
-
-
-### Inductor
-
-
-
-* Deprecate TORCHINDUCTOR_STACK_ALLOCATION ([#139147](https://github.com/pytorch/pytorch/pull/139147)). Instead of setting TORCHINDUCTOR_STACK_ALLOCATION, edit `allow_stack_allocation` in `torch/_inductor/config.py`.
-* Remove option for fork-based compile pool ([#142001](https://github.com/pytorch/pytorch/pull/142001)).
-
 ### Releng
 
-
-
 * Removed CUDA 12.1 support in CI/CD ([#141271](https://github.com/pytorch/pytorch/pull/141271)) ([#142177](https://github.com/pytorch/pytorch/pull/142177))
-* Deprecate Python 3.8 support from CI ([#137893](https://github.com/pytorch/pytorch/pull/137893)) ([#137141](https://github.com/pytorch/pytorch/pull/137141)) ([#137991](https://github.com/pytorch/pytorch/pull/137991)) ([#139145](https://github.com/pytorch/pytorch/pull/139145))
+TODO: Link to cuda version support plan in release.md
 
+* **Deprecated `c10d::onCompletionHook` ([#142390](https://github.com/pytorch/pytorch/pull/142390))**
+    * In PT 2.5 and before, users can do: (TODO: there was a code sample here?)
+    * Starting from PT 2.6, when users write the code above, they will get get a warning message “ProcessGroupNCCL OnCompletion hook will be deprecated in favor of Flight Recorder”
 
 ## **New features**
 
-
-### Autograd Frontend
-
-
-
-* Enable forward AD in `functional.affine_grid` ([#135494](https://github.com/pytorch/pytorch/pull/135494))
-
-
-### Cpu
-
-
-
-* Added SVE support for ARM CPUs ([#119571](https://github.com/pytorch/pytorch/pull/119571))
-
-
-### Cuda
-
-
-
-* User buffer registration via MemPool API ([#133603](https://github.com/pytorch/pytorch/pull/133603))
-
-
-### Dataloader Frontend
-
-
-
-* Add in_order flag for data loader, allowing out-of-order dataloading ([#141833](https://github.com/pytorch/pytorch/pull/141833))
-
-
 ### Distributed
-
 
 
 * c10d
@@ -226,7 +187,6 @@ The CUTLASS and CK backend adds kernel choices for GEMM autotuning in Inductor. 
 ### Dynamo
 
 
-
 * Add `torch.compiler.set_stance` to dynamically change `torch.compile` behavior without needing to re-apply `torch.compile`. ([#137504](https://github.com/pytorch/pytorch/pull/137504))
 * Profile guided optimization for `automatic_dynamic` - automatically save and load automatic dynamic decisions to reuse on future runs ([#139001](https://github.com/pytorch/pytorch/pull/139001))
 * `skip_guard_eval_unsafe` compiler stance option for power users - skip guard checks when it is known to be safe to do so ([#140251](https://github.com/pytorch/pytorch/pull/140251))
@@ -234,21 +194,19 @@ The CUTLASS and CK backend adds kernel choices for GEMM autotuning in Inductor. 
 
 ### Export
 
-
-
-* New packaging APIs for AOTInductor `torch._inductor.aoti_compile_and_package` ([#135374](https://github.com/pytorch/pytorch/pull/135374))
+* Add `torch.export.export_for_training()` API to perform export that can run training. Note that this replaces the non-documented `capture_pre_autograd_graph` feature ([#135374](https://github.com/pytorch/pytorch/pull/135374), [#135918](https://github.com/pytorch/pytorch/pull/135918), [#135549](https://github.com/pytorch/pytorch/pull/135549), [#143224](https://github.com/pytorch/pytorch/pull/143224))
+* New packaging APIs for AOTInductor `torch._inductor.aoti_compile_and_package` 
     * Previously, AOTInductor (through `torch._export.aot_compile`), would return a path to a .so. However, this does not have a great user experience as actually there are other files that are used along with the .so, for example .cubin files and serialized extern kernels. So, we introduce a new package format, “[PT2 archive](https://docs.google.com/document/d/1RQ4cmywilnFUT1VE-4oTGxwXdc8vowCSZsrRgo3wFA8/edit#heading=h.v2y2jgnwc56a)”, which is what we intend to have AOTInductor return. This essentially contains a zipfile of all the files that need to be used by AOTInductor, and allows users to send to other environments. There is also functionality to package multiple models into one artifact, and to store additional metadata inside of the package.
 * [AOTInductor Minifier](https://pytorch.org/docs/main/torch.compiler_aot_inductor_minifier.html). If you encounter an error while using AOT Inductor APIs such as `torch._inductor.aoti_compile_and_package`, `torch._indcutor.aoti_load_package`, or running the loaded model of aoti_load_package on some inputs, you can use the AOTInductor Minifier to create a minimal nn.Module that reproduces the error. ([#139351](https://github.com/pytorch/pytorch/pull/139351),[#140999](https://github.com/pytorch/pytorch/pull/140999), [#141159](https://github.com/pytorch/pytorch/pull/141159), [#141156](https://github.com/pytorch/pytorch/pull/141156))
 * AOTInductor: ABI-compatible mode code generation. In order to guarantee ABI backward compatibility, we have carefully defined a set of stable C interfaces in libtorch and make sure AOTInductor generates code that only refers to the specific set of APIs and nothing else in libtorch. We will keep the set of C APIs stable across Pytorch versions and thus provide BC guarantees for AOTInductor-compiled models.
 * `export.export_for_inference` and `export.exported_program.core_aten_decompositions` API. `export_for_inference` returns a functional, post-dispatch ATen IR. ([#135912](https://github.com/pytorch/pytorch/pull/135912)).
 
+### Miscellaneous
 
-### Fx
-
-
-
-* Support `all_outputs` in minimizer ([#139774](https://github.com/pytorch/pytorch/pull/139774))
-
+* Enable forward AD in `functional.affine_grid` ([#135494](https://github.com/pytorch/pytorch/pull/135494))
+* Added SVE support for ARM CPUs ([#119571](https://github.com/pytorch/pytorch/pull/119571))
+* User buffer registration via MemPool API ([#133603](https://github.com/pytorch/pytorch/pull/133603))
+* Add in_order flag for data loader, allowing out-of-order dataloading ([#141833](https://github.com/pytorch/pytorch/pull/141833))
 
 ### Inductor
 
@@ -271,22 +229,7 @@ The CUTLASS and CK backend adds kernel choices for GEMM autotuning in Inductor. 
 * Adds stats summary (mean/min/max, etc) for jit inductor tensor value printing ([#135887](https://github.com/pytorch/pytorch/pull/135887)).
 
 
-### Nested Tensor Frontend
-
-
-
-* FlexAttention support for NJT ([#136792](https://github.com/pytorch/pytorch/pull/136792), [#140723](https://github.com/pytorch/pytorch/pull/140723))
-
-
-### NN Frontend
-
-
-
-* Point to transformer building blocks tutorial in transformer documentation ([#144425](https://github.com/pytorch/pytorch/pull/144425))
-
-
 ### Optim
-
 
 
 * Add Support for Tracking Parameter Names (named_parameters) in Optimizer State Dict ([#134107](https://github.com/pytorch/pytorch/pull/134107))
@@ -294,8 +237,6 @@ The CUTLASS and CK backend adds kernel choices for GEMM autotuning in Inductor. 
 
 
 ### Profiler
-
-
 
 * Hide ProfilerStep Alignment behind Experimental Config ([#137668](https://github.com/pytorch/pytorch/pull/137668))
 * Add functionality to call dump function of NCCL profiler plugin ([#137523](https://github.com/pytorch/pytorch/pull/137523))
@@ -308,7 +249,7 @@ The CUTLASS and CK backend adds kernel choices for GEMM autotuning in Inductor. 
 * Introduce a device-agnostic runtime API design ([#132204](https://github.com/pytorch/pytorch/pull/132204))
 * Add validation for ambiguous behavior in `Tensor.dim_order()` ([#141632](https://github.com/pytorch/pytorch/pull/141632))
 * Add type check for `ord` argument for `torch.linalg.{vector,matrix}_norm()` ([#137463](https://github.com/pytorch/pytorch/pull/137463))
-
+* FlexAttention support for NJT ([#136792](https://github.com/pytorch/pytorch/pull/136792), [#140723](https://github.com/pytorch/pytorch/pull/140723))
 
 ### Releng
 
@@ -1241,8 +1182,6 @@ We improved the existing `torch.library` APIs and added new ones.
 ### Export
 
 
-
-* Add doc for export.export_for_training() API ([#135918](https://github.com/pytorch/pytorch/pull/135918), [#135549](https://github.com/pytorch/pytorch/pull/135549))
 * Fix doc for export.export() API ([#135551](https://github.com/pytorch/pytorch/pull/135551))
 
 
@@ -1284,7 +1223,7 @@ We improved the existing `torch.library` APIs and added new ones.
 * Correct reference link for triplet margin loss ([#142071](https://github.com/pytorch/pytorch/pull/142071))
 * Changed 'standard-deviation' to 'variance' in normalization documentation ([#141982](https://github.com/pytorch/pytorch/pull/141982))
 * Fix broadcasting error in example in `nn.functional.scaled_dot_product_attention` documentation ([#135427](https://github.com/pytorch/pytorch/pull/135427))
-
+* Point to transformer building blocks tutorial in transformer documentation ([#144425](https://github.com/pytorch/pytorch/pull/144425))
 
 ### Optim
 
