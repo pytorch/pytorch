@@ -20,6 +20,7 @@ from .exponential import Exponential
 from .gamma import Gamma
 from .geometric import Geometric
 from .gumbel import Gumbel
+from .StudentT import StudentT
 from .half_normal import HalfNormal
 from .independent import Independent
 from .laplace import Laplace
@@ -36,6 +37,58 @@ from .poisson import Poisson
 from .transformed_distribution import TransformedDistribution
 from .uniform import Uniform
 from .utils import _sum_rightmost, euler_constant as _euler_gamma
+
+
+def student_t_to_gamma(nu, mu=0.0, sigma=1.0):
+    """
+    Convert Student's t-distribution parameters to equivalent Gamma distribution parameters.
+    
+    The conversion is based on matching moments between the distributions.
+    For a Student's t-distribution with nu degrees of freedom:
+    - Mean = mu (for nu > 1)
+    - Variance = [sigma^2 * nu/(nu-2)] (for nu > 2)
+    
+    Args:
+        nu (torch.Tensor): Degrees of freedom (must be > 2)
+        mu (torch.Tensor, optional): Location parameter. Defaults to 0.0
+        sigma (torch.Tensor, optional): Scale parameter. Defaults to 1.0
+        
+    Returns:
+        tuple: (alpha, beta) parameters for the Gamma distribution
+    """
+    if isinstance(nu, (float, int)):
+        nu = torch.tensor(float(nu))
+    if isinstance(mu, (float, int)):
+        mu = torch.tensor(float(mu))
+    if isinstance(sigma, (float, int)):
+        sigma = torch.tensor(float(sigma))
+        
+    # Check constraints
+    if torch.any(nu <= 2):
+        raise ValueError("Degrees of freedom (nu) must be > 2 for finite variance")
+    if torch.any(sigma <= 0):
+        raise ValueError("Scale parameter (sigma) must be positive")
+        
+    # Calculate gamma parameters
+    # For Student's t, variance = [sigma^2 * nu/(nu-2)]
+    # For Gamma(alpha, beta), mean = alpha/beta, variance = alpha/beta^2
+    
+    # Match the first two moments
+    variance = sigma**2 * nu/(nu-2)
+    mean = mu
+    
+    # For Gamma distribution:
+    # mean = alpha/beta
+    # variance = alpha/beta^2
+    
+    # Solving these equations:
+    # beta = alpha/mean
+    # variance = mean^2/alpha
+    
+    alpha = mean**2 / variance
+    beta = alpha / mean
+    
+    return alpha, beta
 
 
 _KL_REGISTRY: dict[
@@ -298,6 +351,19 @@ def _kl_expfamily_expfamily(p, q):
 
 @register_kl(Gamma, Gamma)
 def _kl_gamma_gamma(p, q):
+    t1 = q.concentration * (p.rate / q.rate).log()
+    t2 = torch.lgamma(q.concentration) - torch.lgamma(p.concentration)
+    t3 = (p.concentration - q.concentration) * torch.digamma(p.concentration)
+    t4 = (q.rate - p.rate) * (p.concentration / p.rate)
+    return t1 + t2 + t3 + t4
+
+
+@register_kl(StudentT, StudentT)
+def _kl_gamma_gamma(p, q):
+    p_concentration, p_rate = student_t_to_gamma(p)
+    q_concentration, q_rate = student_t_to_gamma(q)
+    p_gamma = Gamma(p_concentration, p_rate)
+    q_gamma = Gamma(q_concentration, q_rate) 
     t1 = q.concentration * (p.rate / q.rate).log()
     t2 = torch.lgamma(q.concentration) - torch.lgamma(p.concentration)
     t3 = (p.concentration - q.concentration) * torch.digamma(p.concentration)
