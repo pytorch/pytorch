@@ -72,7 +72,6 @@ class Categorical(Distribution):
                 raise ValueError("`logits` parameter must be at least one-dimensional.")
             # Normalize
             self.logits = logits - logits.logsumexp(dim=-1, keepdim=True)
-
         self._param = self.probs if probs is not None else self.logits
         self._num_events = self._param.size()[-1]
         batch_shape = (

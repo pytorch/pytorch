@@ -807,7 +807,7 @@ class AffineTransform(Transform):
         if isinstance(scale, _Number):
             result = torch.full_like(x, math.log(abs(scale)))
         else:
-            result = scale.abs().log()
+            result = torch.abs(scale).log()
         if self.event_dim:
             result_size = result.size()[: -self.event_dim] + (-1,)
             result = result.view(result_size).sum(-1)
