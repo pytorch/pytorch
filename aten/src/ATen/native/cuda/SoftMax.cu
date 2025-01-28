@@ -900,23 +900,29 @@ cunn_SoftMaxBackwardSmem(scalar_t *gradInput, const outscalar_t *output, const o
   const int64_t grad_output_shift = ((uint64_t)gradOutput) % ALIGN_BYTES / sizeof(outscalar_t);
 
   const bool can_use_32bit_indexing = is_32bit_representable(shift) && is_32bit_representable(output_shift) && is_32bit_representable(grad_output_shift) && is_32bit_representable(classes);
-  accscalar_t threadSum = 0;
+
+  // This kernel is only safe to run on inputs that fit within shared memory.
   assert(can_use_32bit_indexing);
   assert(shift == 0);
   assert(output_shift == 0);
   assert(grad_output_shift == 0);
 
+  accscalar_t threadSum = 0;
+
   using LoadT = at::native::memory::aligned_vector<scalar_t, ILP>;
-  const LoadT* const gradOutput_vec_ptr = reinterpret_cast<const LoadT*>(gradOutput);
-  LoadT* const smem_gradOutput_cache_vec_ptr = reinterpret_cast<LoadT*>(smem_input_cache);
+  const LoadT* const gradOutput_vec_ptr =
+      reinterpret_cast<const LoadT*>(gradOutput);
+  LoadT* const smem_gradOutput_cache_vec_ptr =
+      reinterpret_cast<LoadT*>(smem_input_cache);
 
   // Download inputs to shared memory while doing the first step
   // in sum calculation
-  for (int32_t offset = threadIdx.x; offset * ILP < classes; offset += blockDim.x) {
+  for (int32_t offset = threadIdx.x; offset * ILP < classes;
+       offset += blockDim.x) {
     LoadT crnt_vec = gradOutput_vec_ptr[offset];
     smem_gradOutput_cache_vec_ptr[offset] = crnt_vec;
 
-    #pragma unroll
+#pragma unroll
     for (int i = 0; i < ILP; ++i) {
       threadSum = threadSum + crnt_vec.val[i];
     }
@@ -925,7 +931,8 @@ cunn_SoftMaxBackwardSmem(scalar_t *gradInput, const outscalar_t *output, const o
   // We need a __syncthreads() here to be safe. However, blockReduceWarp's code
   // calls a __syncthreads() before reading shared memory so we are safe.
 
-  accscalar_t sum_k = blockReduceWarp<Add, accscalar_t>(smem_reduction_cache, threadSum, Add<accscalar_t>(), accscalar_t(0));
+  accscalar_t sum_k = blockReduceWarp<Add, accscalar_t>(
+      smem_reduction_cache, threadSum, Add<accscalar_t>(), accscalar_t(0));
 
   Epilogue<scalar_t, accscalar_t, outscalar_t> epilogue(sum_k);
 
@@ -933,12 +940,13 @@ cunn_SoftMaxBackwardSmem(scalar_t *gradInput, const outscalar_t *output, const o
   using StoreT = at::native::memory::aligned_vector<outscalar_t, ILP>;
   StoreT* gradInput_vec_ptr = reinterpret_cast<StoreT*>(gradInput);
   const LoadT* const output_vec_ptr = reinterpret_cast<const LoadT*>(output);
-  for (int32_t offset = threadIdx.x; offset * ILP < classes; offset += blockDim.x) {
+  for (int32_t offset = threadIdx.x; offset * ILP < classes;
+       offset += blockDim.x) {
     LoadT crnt_vec = smem_gradOutput_cache_vec_ptr[offset];
     LoadT crnt_out = output_vec_ptr[offset];
     StoreT out_vec;
 
-    #pragma unroll
+#pragma unroll
     for (int i = 0; i < ILP; ++i) {
       out_vec.val[i] = epilogue(crnt_vec.val[i], crnt_out.val[i]);
     }
@@ -947,16 +955,30 @@ cunn_SoftMaxBackwardSmem(scalar_t *gradInput, const outscalar_t *output, const o
   }
 }
 
-template<template<typename, typename, typename> class Epilogue, bool is_log_softmax>
-Tensor host_softmax(const Tensor & input_, const int64_t dim_, const bool half_to_float, const Tensor& output){
+template <
+    template <typename, typename, typename>
+    class Epilogue,
+    bool is_log_softmax>
+Tensor host_softmax(
+    const Tensor& input_,
+    const int64_t dim_,
+    const bool half_to_float,
+    const Tensor& output) {
   if (half_to_float) {
-    TORCH_CHECK(input_.scalar_type() == ScalarType::Half, "conversion is supported for Half type only");
+    TORCH_CHECK(
+        input_.scalar_type() == ScalarType::Half,
+        "conversion is supported for Half type only");
   }
   auto input = input_.contiguous();
-  static_assert(std::is_same_v<acc_type<at::Half, true>, float>, "accscalar_t for half should be float");
-  if (input.dim() == 0) input = input.view(1);
+  static_assert(
+      std::is_same_v<acc_type<at::Half, true>, float>,
+      "accscalar_t for half should be float");
+  if (input.dim() == 0)
+    input = input.view(1);
   int64_t dim = maybe_wrap_dim(dim_, input.dim());
-  TORCH_CHECK(dim >=0 && dim < input.dim(), "dim must be non-negative and less than input dimensions");
+  TORCH_CHECK(
+      dim >= 0 && dim < input.dim(),
+      "dim must be non-negative and less than input dimensions");
   int64_t outer_size = 1;
   int64_t dim_size = input.size(dim);
 
@@ -972,174 +994,346 @@ Tensor host_softmax(const Tensor & input_, const int64_t dim_, const bool half_t
 
     if (inner_size == 1) {
       dim3 grid(outer_size);
-      AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, input.scalar_type(), "host_softmax", [&] {
-        using accscalar_t = acc_type<scalar_t, true>;
-        if (!half_to_float) {
-          auto output_ptr = output.mutable_data_ptr<scalar_t>();
-          auto input_ptr = input.const_data_ptr<scalar_t>();
-          if (dim_size <= 2048 && dim_size*sizeof(scalar_t) <= 8192) {
-            int64_t remaining = outer_size;
-            int64_t chunk_size = (1L << 30L) / dim_size;
-            while(remaining > 0) {
-              dispatch_softmax_forward<scalar_t, scalar_t, accscalar_t, is_log_softmax, false>(
-                output_ptr, input_ptr, dim_size, dim_size, std::min<int64_t>(remaining, chunk_size), nullptr/* not masked */);
-              input_ptr += chunk_size * dim_size;
-              output_ptr += chunk_size * dim_size;
-              remaining -= chunk_size;
-            }
-          } else {
-            constexpr int ILP = sizeof(float4) / sizeof(scalar_t);
-            dim3 block = SoftMaxForward_getBlockSize(dim_size);
-            size_t smem_reduction_sz = block.x / C10_WARP_SIZE * sizeof(accscalar_t);
-            auto max_elements_per_smem = (at::cuda::getCurrentDeviceProperties()->sharedMemPerBlock -
-              smem_reduction_sz) / sizeof(scalar_t);
+      AT_DISPATCH_FLOATING_TYPES_AND2(
+          at::ScalarType::Half,
+          at::ScalarType::BFloat16,
+          input.scalar_type(),
+          "host_softmax",
+          [&] {
+            using accscalar_t = acc_type<scalar_t, true>;
+            if (!half_to_float) {
+              auto output_ptr = output.mutable_data_ptr<scalar_t>();
+              auto input_ptr = input.const_data_ptr<scalar_t>();
+              if (dim_size <= 2048 && dim_size * sizeof(scalar_t) <= 8192) {
+                int64_t remaining = outer_size;
+                int64_t chunk_size = (1L << 30L) / dim_size;
+                while (remaining > 0) {
+                  dispatch_softmax_forward<
+                      scalar_t,
+                      scalar_t,
+                      accscalar_t,
+                      is_log_softmax,
+                      false>(
+                      output_ptr,
+                      input_ptr,
+                      dim_size,
+                      dim_size,
+                      std::min<int64_t>(remaining, chunk_size),
+                      nullptr /* not masked */);
+                  input_ptr += chunk_size * dim_size;
+                  output_ptr += chunk_size * dim_size;
+                  remaining -= chunk_size;
+                }
+              } else {
+                constexpr int ILP = sizeof(float4) / sizeof(scalar_t);
+                dim3 block = SoftMaxForward_getBlockSize(dim_size);
+                size_t smem_reduction_sz =
+                    block.x / C10_WARP_SIZE * sizeof(accscalar_t);
+                auto max_elements_per_smem =
+                    (at::cuda::getCurrentDeviceProperties()->sharedMemPerBlock -
+                     smem_reduction_sz) /
+                    sizeof(scalar_t);
 
-            bool can_use_smem = (size_t) dim_size < max_elements_per_smem;
-            can_use_smem &= !(reinterpret_cast<uintptr_t>(input_ptr) % ALIGN_BYTES);
-            can_use_smem &= (!(reinterpret_cast<uintptr_t>(output_ptr) % ALIGN_BYTES));
-            can_use_smem &= !(dim_size % ILP);
+                bool can_use_smem = (size_t)dim_size < max_elements_per_smem;
+                can_use_smem &=
+                    !(reinterpret_cast<uintptr_t>(input_ptr) % ALIGN_BYTES);
+                can_use_smem &=
+                    (!(reinterpret_cast<uintptr_t>(output_ptr) % ALIGN_BYTES));
+                can_use_smem &= !(dim_size % ILP);
 
-            int32_t potential_reg_cnt = potential_register_count(dim_size, block.x);
-            if(potential_reg_cnt < 10){
-              TORCH_INTERNAL_ASSERT(potential_reg_cnt > 0, "potential_reg_cnt for softmax with register should be greater than 0.");
-              switch (potential_reg_cnt) {
-                // TODO(Wenqin): try to investigate why we couldn't use macro for below code,
-                // because it seems on MSVS, it seems the macro way didn't expand correct.
-                case 1:
-                  cunn_SoftMaxForwardReg<scalar_t, accscalar_t, scalar_t, Epilogue, int64_t, 1>
-                    <<<grid, block, smem_reduction_sz, stream>>>(output_ptr, input_ptr, dim_size);
-                  break;
-                case 2:
-                  cunn_SoftMaxForwardReg<scalar_t, accscalar_t, scalar_t, Epilogue, int64_t, 2>
-                    <<<grid, block, smem_reduction_sz, stream>>>(output_ptr, input_ptr, dim_size);
-                  break;
-                case 3:
-                  cunn_SoftMaxForwardReg<scalar_t, accscalar_t, scalar_t, Epilogue, int64_t, 3>
-                    <<<grid, block, smem_reduction_sz, stream>>>(output_ptr, input_ptr, dim_size);
-                  break;
-                case 4:
-                  cunn_SoftMaxForwardReg<scalar_t, accscalar_t, scalar_t, Epilogue, int64_t, 4>
-                    <<<grid, block, smem_reduction_sz, stream>>>(output_ptr, input_ptr, dim_size);
-                  break;
-                case 5:
-                  cunn_SoftMaxForwardReg<scalar_t, accscalar_t, scalar_t, Epilogue, int64_t, 5>
-                    <<<grid, block, smem_reduction_sz, stream>>>(output_ptr, input_ptr, dim_size);
-                  break;
-                case 6:
-                  cunn_SoftMaxForwardReg<scalar_t, accscalar_t, scalar_t, Epilogue, int64_t, 6>
-                    <<<grid, block, smem_reduction_sz, stream>>>(output_ptr, input_ptr, dim_size);
-                  break;
-                case 7:
-                  cunn_SoftMaxForwardReg<scalar_t, accscalar_t, scalar_t, Epilogue, int64_t, 7>
-                    <<<grid, block, smem_reduction_sz, stream>>>(output_ptr, input_ptr, dim_size);
-                  break;
-                case 8:
-                  cunn_SoftMaxForwardReg<scalar_t, accscalar_t, scalar_t, Epilogue, int64_t, 8>
-                    <<<grid, block, smem_reduction_sz, stream>>>(output_ptr, input_ptr, dim_size);
-                  break;
-                case 9:
-                  cunn_SoftMaxForwardReg<scalar_t, accscalar_t, scalar_t, Epilogue, int64_t, 9>
-                    <<<grid, block, smem_reduction_sz, stream>>>(output_ptr, input_ptr, dim_size);
-                  break;
+                int32_t potential_reg_cnt =
+                    potential_register_count(dim_size, block.x);
+                if (potential_reg_cnt < 10) {
+                  TORCH_INTERNAL_ASSERT(
+                      potential_reg_cnt > 0,
+                      "potential_reg_cnt for softmax with register should be greater than 0.");
+                  switch (potential_reg_cnt) {
+                    // TODO(Wenqin): try to investigate why we couldn't use
+                    // macro for below code, because it seems on MSVS, it seems
+                    // the macro way didn't expand correct.
+                    case 1:
+                      cunn_SoftMaxForwardReg<
+                          scalar_t,
+                          accscalar_t,
+                          scalar_t,
+                          Epilogue,
+                          int64_t,
+                          1><<<grid, block, smem_reduction_sz, stream>>>(
+                          output_ptr, input_ptr, dim_size);
+                      break;
+                    case 2:
+                      cunn_SoftMaxForwardReg<
+                          scalar_t,
+                          accscalar_t,
+                          scalar_t,
+                          Epilogue,
+                          int64_t,
+                          2><<<grid, block, smem_reduction_sz, stream>>>(
+                          output_ptr, input_ptr, dim_size);
+                      break;
+                    case 3:
+                      cunn_SoftMaxForwardReg<
+                          scalar_t,
+                          accscalar_t,
+                          scalar_t,
+                          Epilogue,
+                          int64_t,
+                          3><<<grid, block, smem_reduction_sz, stream>>>(
+                          output_ptr, input_ptr, dim_size);
+                      break;
+                    case 4:
+                      cunn_SoftMaxForwardReg<
+                          scalar_t,
+                          accscalar_t,
+                          scalar_t,
+                          Epilogue,
+                          int64_t,
+                          4><<<grid, block, smem_reduction_sz, stream>>>(
+                          output_ptr, input_ptr, dim_size);
+                      break;
+                    case 5:
+                      cunn_SoftMaxForwardReg<
+                          scalar_t,
+                          accscalar_t,
+                          scalar_t,
+                          Epilogue,
+                          int64_t,
+                          5><<<grid, block, smem_reduction_sz, stream>>>(
+                          output_ptr, input_ptr, dim_size);
+                      break;
+                    case 6:
+                      cunn_SoftMaxForwardReg<
+                          scalar_t,
+                          accscalar_t,
+                          scalar_t,
+                          Epilogue,
+                          int64_t,
+                          6><<<grid, block, smem_reduction_sz, stream>>>(
+                          output_ptr, input_ptr, dim_size);
+                      break;
+                    case 7:
+                      cunn_SoftMaxForwardReg<
+                          scalar_t,
+                          accscalar_t,
+                          scalar_t,
+                          Epilogue,
+                          int64_t,
+                          7><<<grid, block, smem_reduction_sz, stream>>>(
+                          output_ptr, input_ptr, dim_size);
+                      break;
+                    case 8:
+                      cunn_SoftMaxForwardReg<
+                          scalar_t,
+                          accscalar_t,
+                          scalar_t,
+                          Epilogue,
+                          int64_t,
+                          8><<<grid, block, smem_reduction_sz, stream>>>(
+                          output_ptr, input_ptr, dim_size);
+                      break;
+                    case 9:
+                      cunn_SoftMaxForwardReg<
+                          scalar_t,
+                          accscalar_t,
+                          scalar_t,
+                          Epilogue,
+                          int64_t,
+                          9><<<grid, block, smem_reduction_sz, stream>>>(
+                          output_ptr, input_ptr, dim_size);
+                      break;
+                  }
+                } else if (can_use_smem) {
+                  size_t smem_sz =
+                      dim_size * sizeof(scalar_t) + smem_reduction_sz;
+                  cunn_SoftMaxForwardSmem<
+                      ILP,
+                      scalar_t,
+                      accscalar_t,
+                      scalar_t,
+                      Epilogue><<<grid, block, smem_sz, stream>>>(
+                      output_ptr, input_ptr, dim_size);
+                } else {
+                  cunn_SoftMaxForward<
+                      ILP,
+                      scalar_t,
+                      accscalar_t,
+                      scalar_t,
+                      Epilogue><<<grid, block, smem_reduction_sz, stream>>>(
+                      output_ptr, input_ptr, dim_size);
+                }
+
+                C10_CUDA_KERNEL_LAUNCH_CHECK();
               }
-            } else if (can_use_smem) {
-              size_t smem_sz = dim_size * sizeof(scalar_t) + smem_reduction_sz;
-              cunn_SoftMaxForwardSmem<ILP, scalar_t, accscalar_t, scalar_t, Epilogue>
-                <<<grid, block, smem_sz, stream>>>(output_ptr, input_ptr, dim_size);
             } else {
-              cunn_SoftMaxForward<ILP, scalar_t, accscalar_t, scalar_t, Epilogue>
-                <<<grid, block, smem_reduction_sz, stream>>>(output_ptr, input_ptr, dim_size);
+              auto output_ptr = output.mutable_data_ptr<accscalar_t>();
+              auto input_ptr = input.const_data_ptr<scalar_t>();
+              if (dim_size <= 1024 && dim_size * sizeof(scalar_t) <= 4096) {
+                int64_t remaining = outer_size;
+                int64_t chunk_size = (1 << 30) / dim_size;
+                while (remaining > 0) {
+                  dispatch_softmax_forward<
+                      scalar_t,
+                      accscalar_t,
+                      accscalar_t,
+                      is_log_softmax,
+                      false>(
+                      output_ptr,
+                      input_ptr,
+                      dim_size,
+                      dim_size,
+                      std::min<int64_t>(remaining, chunk_size),
+                      nullptr /* not masked */);
+                  input_ptr += chunk_size * dim_size;
+                  output_ptr += chunk_size * dim_size;
+                  remaining -= chunk_size;
+                }
+              } else {
+                constexpr int ILP = sizeof(float4) / sizeof(scalar_t);
+                dim3 block = SoftMaxForward_getBlockSize(dim_size);
+                size_t smem_reduction_sz =
+                    block.x / C10_WARP_SIZE * sizeof(accscalar_t);
+                auto max_elements_per_smem =
+                    (at::cuda::getCurrentDeviceProperties()->sharedMemPerBlock -
+                     smem_reduction_sz) /
+                    sizeof(scalar_t);
+
+                bool can_use_smem = (size_t)dim_size < max_elements_per_smem;
+                can_use_smem &=
+                    !(reinterpret_cast<uintptr_t>(input_ptr) % ALIGN_BYTES);
+                can_use_smem &=
+                    (!(reinterpret_cast<uintptr_t>(output_ptr) % ALIGN_BYTES));
+                can_use_smem &= !(dim_size % ILP);
+
+                if (can_use_smem) {
+                  size_t smem_sz =
+                      dim_size * sizeof(scalar_t) + smem_reduction_sz;
+                  cunn_SoftMaxForwardSmem<
+                      ILP,
+                      scalar_t,
+                      accscalar_t,
+                      accscalar_t,
+                      Epilogue><<<grid, block, smem_sz, stream>>>(
+                      output_ptr, input_ptr, dim_size);
+                } else {
+                  cunn_SoftMaxForward<
+                      ILP,
+                      scalar_t,
+                      accscalar_t,
+                      accscalar_t,
+                      Epilogue><<<grid, block, smem_reduction_sz, stream>>>(
+                      output_ptr, input_ptr, dim_size);
+                }
+
+                C10_CUDA_KERNEL_LAUNCH_CHECK();
+              }
             }
-
-            C10_CUDA_KERNEL_LAUNCH_CHECK();
-          }
-        } else {
-          auto output_ptr = output.mutable_data_ptr<accscalar_t>();
-          auto input_ptr = input.const_data_ptr<scalar_t>();
-          if (dim_size <= 1024 && dim_size*sizeof(scalar_t) <= 4096) {
-            int64_t remaining = outer_size;
-            int64_t chunk_size = (1<<30) / dim_size;
-            while(remaining > 0) {
-              dispatch_softmax_forward<scalar_t, accscalar_t, accscalar_t, is_log_softmax, false>(
-                  output_ptr, input_ptr, dim_size, dim_size, std::min<int64_t>(remaining, chunk_size), nullptr/* not masked */);
-              input_ptr += chunk_size * dim_size;
-              output_ptr += chunk_size * dim_size;
-              remaining -= chunk_size;
-            }
-          } else {
-            constexpr int ILP = sizeof(float4) / sizeof(scalar_t);
-            dim3 block = SoftMaxForward_getBlockSize(dim_size);
-            size_t smem_reduction_sz = block.x / C10_WARP_SIZE * sizeof(accscalar_t);
-            auto max_elements_per_smem = (at::cuda::getCurrentDeviceProperties()->sharedMemPerBlock -
-              smem_reduction_sz) / sizeof(scalar_t);
-
-            bool can_use_smem = (size_t) dim_size < max_elements_per_smem;
-            can_use_smem &= !(reinterpret_cast<uintptr_t>(input_ptr) % ALIGN_BYTES);
-            can_use_smem &= (!(reinterpret_cast<uintptr_t>(output_ptr) % ALIGN_BYTES));
-            can_use_smem &= !(dim_size % ILP);
-
-            if (can_use_smem) {
-              size_t smem_sz = dim_size * sizeof(scalar_t) + smem_reduction_sz;
-              cunn_SoftMaxForwardSmem<ILP, scalar_t, accscalar_t, accscalar_t, Epilogue>
-                <<<grid, block, smem_sz, stream>>>(output_ptr, input_ptr, dim_size);
-            } else {
-              cunn_SoftMaxForward<ILP, scalar_t, accscalar_t, accscalar_t, Epilogue>
-                <<<grid, block, smem_reduction_sz, stream>>>(output_ptr, input_ptr, dim_size);
-            }
-
-            C10_CUDA_KERNEL_LAUNCH_CHECK();
-          }
-        }
-      });
-    // This kernel runs in a 2D grid, where each application along y dimension has a fixed
-    // outer_size, and runs in parallel over inner_size. Dimension x is parallel over outer_size.
-    // Reductions over dim are done in a single-threaded manner.
+          });
+      // This kernel runs in a 2D grid, where each application along y dimension
+      // has a fixed outer_size, and runs in parallel over inner_size. Dimension
+      // x is parallel over outer_size. Reductions over dim are done in a
+      // single-threaded manner.
     } else {
       uint32_t smem_size;
       dim3 grid, block;
-      AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, input.scalar_type(), "host_softmax", [&] {
-        using accscalar_t = acc_type<scalar_t, true>;
-        AT_DISPATCH_INDEX_TYPES(
-            at::native::canUse32BitIndexMath(input, INT_MAX) ? ScalarType::Int : ScalarType::Long,
-        "host_softmax_launcher", [&] {
-            if (!half_to_float) {
-                SpatialSoftMax_getLaunchSizes<accscalar_t>(
-                    &cunn_SpatialSoftMaxForward<scalar_t, accscalar_t, scalar_t, index_t, Epilogue>,
-                    outer_size, dim_size, inner_size,
-                    grid, block, smem_size);
-                cunn_SpatialSoftMaxForward<scalar_t, accscalar_t, scalar_t, index_t, Epilogue>
-                  <<<grid, block, smem_size, stream>>>(
-                  output.mutable_data_ptr<scalar_t>(), input.const_data_ptr<scalar_t>(), outer_size, dim_size, inner_size);
-                C10_CUDA_KERNEL_LAUNCH_CHECK();
-            } else {
-                SpatialSoftMax_getLaunchSizes<accscalar_t>(
-                    &cunn_SpatialSoftMaxForward<scalar_t, accscalar_t, accscalar_t, index_t, Epilogue>,
-                    outer_size, dim_size, inner_size,
-                    grid, block, smem_size);
-                cunn_SpatialSoftMaxForward<scalar_t, accscalar_t, accscalar_t, index_t, Epilogue>
-                  <<<grid, block, smem_size, stream>>>(
-                  output.mutable_data_ptr<accscalar_t>(), input.const_data_ptr<scalar_t>(), outer_size, dim_size, inner_size);
-                C10_CUDA_KERNEL_LAUNCH_CHECK();
-            }
-         });
-      });
+      AT_DISPATCH_FLOATING_TYPES_AND2(
+          at::ScalarType::Half,
+          at::ScalarType::BFloat16,
+          input.scalar_type(),
+          "host_softmax",
+          [&] {
+            using accscalar_t = acc_type<scalar_t, true>;
+            AT_DISPATCH_INDEX_TYPES(
+                at::native::canUse32BitIndexMath(input, INT_MAX)
+                    ? ScalarType::Int
+                    : ScalarType::Long,
+                "host_softmax_launcher",
+                [&] {
+                  if (!half_to_float) {
+                    SpatialSoftMax_getLaunchSizes<accscalar_t>(
+                        &cunn_SpatialSoftMaxForward<
+                            scalar_t,
+                            accscalar_t,
+                            scalar_t,
+                            index_t,
+                            Epilogue>,
+                        outer_size,
+                        dim_size,
+                        inner_size,
+                        grid,
+                        block,
+                        smem_size);
+                    cunn_SpatialSoftMaxForward<
+                        scalar_t,
+                        accscalar_t,
+                        scalar_t,
+                        index_t,
+                        Epilogue><<<grid, block, smem_size, stream>>>(
+                        output.mutable_data_ptr<scalar_t>(),
+                        input.const_data_ptr<scalar_t>(),
+                        outer_size,
+                        dim_size,
+                        inner_size);
+                    C10_CUDA_KERNEL_LAUNCH_CHECK();
+                  } else {
+                    SpatialSoftMax_getLaunchSizes<accscalar_t>(
+                        &cunn_SpatialSoftMaxForward<
+                            scalar_t,
+                            accscalar_t,
+                            accscalar_t,
+                            index_t,
+                            Epilogue>,
+                        outer_size,
+                        dim_size,
+                        inner_size,
+                        grid,
+                        block,
+                        smem_size);
+                    cunn_SpatialSoftMaxForward<
+                        scalar_t,
+                        accscalar_t,
+                        accscalar_t,
+                        index_t,
+                        Epilogue><<<grid, block, smem_size, stream>>>(
+                        output.mutable_data_ptr<accscalar_t>(),
+                        input.const_data_ptr<scalar_t>(),
+                        outer_size,
+                        dim_size,
+                        inner_size);
+                    C10_CUDA_KERNEL_LAUNCH_CHECK();
+                  }
+                });
+          });
     }
   }
   return output;
 }
 
-template<template<typename, typename, typename> class Epilogue, bool is_log_softmax>
-void host_softmax_backward(const Tensor &grad_, const Tensor &output_, int64_t dim_, bool half_to_float, const Tensor &gI){
+template <
+    template <typename, typename, typename>
+    class Epilogue,
+    bool is_log_softmax>
+void host_softmax_backward(
+    const Tensor& grad_,
+    const Tensor& output_,
+    int64_t dim_,
+    bool half_to_float,
+    const Tensor& gI) {
   int64_t dim = maybe_wrap_dim(dim_, grad_.dim());
   if (grad_.numel() == 0) {
     return;
   }
   auto grad = grad_.contiguous();
-  static_assert(std::is_same_v<acc_type<at::Half, true>, float>, "accscalar_t for half should be float");
-  if (grad.dim() == 0) grad = grad.view(1);
-  TORCH_CHECK(dim >=0 && dim < grad.dim(), "dim must be non-negative and less than input dimensions");
+  static_assert(
+      std::is_same_v<acc_type<at::Half, true>, float>,
+      "accscalar_t for half should be float");
+  if (grad.dim() == 0)
+    grad = grad.view(1);
+  TORCH_CHECK(
+      dim >= 0 && dim < grad.dim(),
+      "dim must be non-negative and less than input dimensions");
   auto output = output_.contiguous();
-  if (output.dim() == 0) output = output.view(1);
+  if (output.dim() == 0)
+    output = output.view(1);
   int64_t outer_size = 1;
   int64_t dim_size = output.size(dim);
   int64_t inner_size = 1;
@@ -1147,94 +1341,173 @@ void host_softmax_backward(const Tensor &grad_, const Tensor &output_, int64_t d
     outer_size *= output.size(i);
   for (int64_t i = dim + 1; i < output.dim(); ++i)
     inner_size *= output.size(i);
-// See descriptions of kernels above.
+  // See descriptions of kernels above.
   cudaStream_t stream = at::cuda::getCurrentCUDAStream();
   if (inner_size == 1) {
     dim3 grid(outer_size);
-    AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, gI.scalar_type(), "host_softmax_backward", [&] {
-    using accscalar_t = acc_type<scalar_t, true>;
-    if (!half_to_float) {
-      if (dim_size <= 1024 && dim_size*sizeof(scalar_t) <= 4096) {
-        auto gI_ptr = gI.mutable_data_ptr<scalar_t>();
-        auto grad_ptr = grad.const_data_ptr<scalar_t>();
-        auto output_ptr = output.const_data_ptr<scalar_t>();
-        int64_t remaining = outer_size;
-        int64_t chunk_size = (1<<30) / dim_size;
-        while(remaining > 0) {
-          dispatch_softmax_backward<scalar_t, scalar_t, accscalar_t, is_log_softmax, false /* masked_softmax */>(
-            gI_ptr, grad_ptr, output_ptr, dim_size, dim_size, std::min<int64_t>(remaining, chunk_size));
-          gI_ptr += chunk_size * dim_size;
-          grad_ptr += chunk_size * dim_size;
-          output_ptr += chunk_size * dim_size;
-          remaining -= chunk_size;
-        }
-      } else {
-        constexpr int ILP = sizeof(float4) / sizeof(scalar_t);
-        dim3 block = SoftMax_getBlockSize(ILP, dim_size);
+    AT_DISPATCH_FLOATING_TYPES_AND2(
+        at::ScalarType::Half,
+        at::ScalarType::BFloat16,
+        gI.scalar_type(),
+        "host_softmax_backward",
+        [&] {
+          using accscalar_t = acc_type<scalar_t, true>;
+          if (!half_to_float) {
+            if (dim_size <= 1024 && dim_size * sizeof(scalar_t) <= 4096) {
+              auto gI_ptr = gI.mutable_data_ptr<scalar_t>();
+              auto grad_ptr = grad.const_data_ptr<scalar_t>();
+              auto output_ptr = output.const_data_ptr<scalar_t>();
+              int64_t remaining = outer_size;
+              int64_t chunk_size = (1 << 30) / dim_size;
+              while (remaining > 0) {
+                dispatch_softmax_backward<
+                    scalar_t,
+                    scalar_t,
+                    accscalar_t,
+                    is_log_softmax,
+                    false /* masked_softmax */>(
+                    gI_ptr,
+                    grad_ptr,
+                    output_ptr,
+                    dim_size,
+                    dim_size,
+                    std::min<int64_t>(remaining, chunk_size));
+                gI_ptr += chunk_size * dim_size;
+                grad_ptr += chunk_size * dim_size;
+                output_ptr += chunk_size * dim_size;
+                remaining -= chunk_size;
+              }
+            } else {
+              constexpr int ILP = sizeof(float4) / sizeof(scalar_t);
+              dim3 block = SoftMax_getBlockSize(ILP, dim_size);
 
-        size_t smem_reduction_sz = block.x / C10_WARP_SIZE * sizeof(accscalar_t);
-        auto max_elements_per_smem = (at::cuda::getCurrentDeviceProperties()->sharedMemPerBlock -
-          smem_reduction_sz) / sizeof(scalar_t);
-        bool can_use_smem = dim_size < max_elements_per_smem;
-        can_use_smem &= !(reinterpret_cast<const uintptr_t>(grad.const_data_ptr<scalar_t>()) % ALIGN_BYTES);
-        can_use_smem &= (!(reinterpret_cast<uintptr_t>(gI.const_data_ptr<scalar_t>()) % ALIGN_BYTES));
-        can_use_smem &= !(dim_size % ILP);
+              size_t smem_reduction_sz =
+                  block.x / C10_WARP_SIZE * sizeof(accscalar_t);
+              auto max_elements_per_smem =
+                  (at::cuda::getCurrentDeviceProperties()->sharedMemPerBlock -
+                   smem_reduction_sz) /
+                  sizeof(scalar_t);
+              bool can_use_smem = dim_size < max_elements_per_smem;
+              can_use_smem &=
+                  !(reinterpret_cast<const uintptr_t>(
+                        grad.const_data_ptr<scalar_t>()) %
+                    ALIGN_BYTES);
+              can_use_smem &= (!(
+                  reinterpret_cast<uintptr_t>(gI.const_data_ptr<scalar_t>()) %
+                  ALIGN_BYTES));
+              can_use_smem &=
+                  (!(reinterpret_cast<uintptr_t>(
+                         output.const_data_ptr<scalar_t>()) %
+                     ALIGN_BYTES));
+              can_use_smem &= !(dim_size % ILP);
 
-        if (can_use_smem) {
-          size_t smem_sz = dim_size * sizeof(scalar_t) + smem_reduction_sz;
-          cunn_SoftMaxBackwardSmem<ILP, scalar_t, accscalar_t, scalar_t, Epilogue>
-          <<<grid, block, smem_sz, stream>>>(
-            gI.mutable_data_ptr<scalar_t>(), output.const_data_ptr<scalar_t>(), grad.const_data_ptr<scalar_t>(), dim_size);
-        } else {
-          cunn_SoftMaxBackward<ILP, scalar_t, accscalar_t, scalar_t, Epilogue>
-          <<<grid, block, block.x * sizeof(accscalar_t), stream>>>(
-              gI.mutable_data_ptr<scalar_t>(), output.const_data_ptr<scalar_t>(), grad.const_data_ptr<scalar_t>(), dim_size
-          );
-        }
-        C10_CUDA_KERNEL_LAUNCH_CHECK();
-      }
-    } else {
-      if (dim_size <= 1024 && dim_size*sizeof(scalar_t) <= 4096) {
-        auto gI_ptr = gI.mutable_data_ptr<scalar_t>();
-        auto grad_ptr = grad.const_data_ptr<accscalar_t>();
-        auto output_ptr = output.const_data_ptr<accscalar_t>();
-        int64_t remaining = outer_size;
-        int64_t chunk_size = (1<<30) / dim_size;
-        while(remaining > 0) {
-          dispatch_softmax_backward<accscalar_t, scalar_t, accscalar_t, is_log_softmax, false /* masked_softmax */>(
-            gI_ptr, grad_ptr, output_ptr, dim_size, dim_size, std::min<int64_t>(remaining, chunk_size));
-          gI_ptr += chunk_size * dim_size;
-          grad_ptr += chunk_size * dim_size;
-          output_ptr += chunk_size * dim_size;
-          remaining -= chunk_size;
-        }
-      } else {
-        constexpr int ILP = sizeof(float4) / sizeof(accscalar_t);
-        dim3 block = SoftMax_getBlockSize(ILP, dim_size);
+              if (can_use_smem) {
+                size_t smem_sz =
+                    dim_size * sizeof(scalar_t) + smem_reduction_sz;
+                cunn_SoftMaxBackwardSmem<
+                    ILP,
+                    scalar_t,
+                    accscalar_t,
+                    scalar_t,
+                    Epilogue><<<grid, block, smem_sz, stream>>>(
+                    gI.mutable_data_ptr<scalar_t>(),
+                    output.const_data_ptr<scalar_t>(),
+                    grad.const_data_ptr<scalar_t>(),
+                    dim_size);
+              } else {
+                cunn_SoftMaxBackward<
+                    ILP,
+                    scalar_t,
+                    accscalar_t,
+                    scalar_t,
+                    Epilogue>
+                    <<<grid, block, block.x * sizeof(accscalar_t), stream>>>(
+                        gI.mutable_data_ptr<scalar_t>(),
+                        output.const_data_ptr<scalar_t>(),
+                        grad.const_data_ptr<scalar_t>(),
+                        dim_size);
+              }
+              C10_CUDA_KERNEL_LAUNCH_CHECK();
+            }
+          } else {
+            if (dim_size <= 1024 && dim_size * sizeof(scalar_t) <= 4096) {
+              auto gI_ptr = gI.mutable_data_ptr<scalar_t>();
+              auto grad_ptr = grad.const_data_ptr<accscalar_t>();
+              auto output_ptr = output.const_data_ptr<accscalar_t>();
+              int64_t remaining = outer_size;
+              int64_t chunk_size = (1 << 30) / dim_size;
+              while (remaining > 0) {
+                dispatch_softmax_backward<
+                    accscalar_t,
+                    scalar_t,
+                    accscalar_t,
+                    is_log_softmax,
+                    false /* masked_softmax */>(
+                    gI_ptr,
+                    grad_ptr,
+                    output_ptr,
+                    dim_size,
+                    dim_size,
+                    std::min<int64_t>(remaining, chunk_size));
+                gI_ptr += chunk_size * dim_size;
+                grad_ptr += chunk_size * dim_size;
+                output_ptr += chunk_size * dim_size;
+                remaining -= chunk_size;
+              }
+            } else {
+              constexpr int ILP = sizeof(float4) / sizeof(accscalar_t);
+              dim3 block = SoftMax_getBlockSize(ILP, dim_size);
 
-        size_t smem_reduction_sz = block.x / C10_WARP_SIZE * sizeof(accscalar_t);
-        auto max_elements_per_smem = (at::cuda::getCurrentDeviceProperties()->sharedMemPerBlock -
-          smem_reduction_sz) / sizeof(scalar_t);
-        bool can_use_smem = dim_size < max_elements_per_smem;
-        can_use_smem &= !(reinterpret_cast<const uintptr_t>(grad.const_data_ptr<scalar_t>()) % ALIGN_BYTES);
-        can_use_smem &= (!(reinterpret_cast<uintptr_t>(gI.const_data_ptr<scalar_t>()) % ALIGN_BYTES));
-        can_use_smem &= !(dim_size % ILP);
+              size_t smem_reduction_sz =
+                  block.x / C10_WARP_SIZE * sizeof(accscalar_t);
+              auto max_elements_per_smem =
+                  (at::cuda::getCurrentDeviceProperties()->sharedMemPerBlock -
+                   smem_reduction_sz) /
+                  sizeof(scalar_t);
+              bool can_use_smem = dim_size < max_elements_per_smem;
+              can_use_smem &=
+                  !(reinterpret_cast<const uintptr_t>(
+                        grad.const_data_ptr<scalar_t>()) %
+                    ALIGN_BYTES);
+              can_use_smem &= (!(
+                  reinterpret_cast<uintptr_t>(gI.const_data_ptr<scalar_t>()) %
+                  ALIGN_BYTES));
+              can_use_smem &=
+                  (!(reinterpret_cast<uintptr_t>(
+                         output.const_data_ptr<scalar_t>()) %
+                     ALIGN_BYTES));
+              can_use_smem &= !(dim_size % ILP);
 
-        if (can_use_smem) {
-          size_t smem_sz = dim_size * sizeof(scalar_t) + smem_reduction_sz;
-          cunn_SoftMaxBackwardSmem<ILP, scalar_t, accscalar_t, scalar_t, Epilogue>
-          <<<grid, block, smem_sz, stream>>>(
-            gI.mutable_data_ptr<scalar_t>(), output.const_data_ptr<scalar_t>(), grad.const_data_ptr<scalar_t>(), dim_size);
-        } else {
-          cunn_SoftMaxBackward<ILP, scalar_t, accscalar_t, accscalar_t, Epilogue>
-          <<<grid, block, block.x * sizeof(accscalar_t), stream>>>(
-              gI.mutable_data_ptr<scalar_t>(), output.const_data_ptr<accscalar_t>(), grad.const_data_ptr<accscalar_t>(), dim_size
-            );
-        }
-        C10_CUDA_KERNEL_LAUNCH_CHECK();
-      }
-    }
-    });
+              if (can_use_smem) {
+                size_t smem_sz =
+                    dim_size * sizeof(scalar_t) + smem_reduction_sz;
+                cunn_SoftMaxBackwardSmem<
+                    ILP,
+                    scalar_t,
+                    accscalar_t,
+                    scalar_t,
+                    Epilogue><<<grid, block, smem_sz, stream>>>(
+                    gI.mutable_data_ptr<scalar_t>(),
+                    output.const_data_ptr<scalar_t>(),
+                    grad.const_data_ptr<scalar_t>(),
+                    dim_size);
+              } else {
+                cunn_SoftMaxBackward<
+                    ILP,
+                    scalar_t,
+                    accscalar_t,
+                    accscalar_t,
+                    Epilogue>
+                    <<<grid, block, block.x * sizeof(accscalar_t), stream>>>(
+                        gI.mutable_data_ptr<scalar_t>(),
+                        output.const_data_ptr<accscalar_t>(),
+                        grad.const_data_ptr<accscalar_t>(),
+                        dim_size);
+              }
+              C10_CUDA_KERNEL_LAUNCH_CHECK();
+            }
+          }
+        });
   } else {
     uint32_t smem_size;
     dim3 grid, block;
