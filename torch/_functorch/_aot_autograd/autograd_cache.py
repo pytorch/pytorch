@@ -790,7 +790,7 @@ class AOTAutogradCache:
             torch._logging.trace_structured(
                 "artifact",
                 metadata_fn=lambda: {
-                    "name": "aotautograd_cache_hash",
+                    "name": f"aotautograd_cache_{cache_state}",
                     "encoding": "json",
                 },
                 payload_fn=lambda: json.dumps(cache_info),
