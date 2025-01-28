@@ -44,7 +44,6 @@ class once_flag {
     return init_.load(std::memory_order_acquire);
   }
 
-
  private:
   template <typename Flag, typename F, typename... Args>
   friend void call_once(Flag& flag, F&& f, Args&&... args);
@@ -58,7 +57,6 @@ class once_flag {
     std::invoke(std::forward<F>(f), std::forward<Args>(args)...);
     init_.store(true, std::memory_order_release);
   }
-
 
   void reset_once() {
     init_.store(false, std::memory_order_release);
