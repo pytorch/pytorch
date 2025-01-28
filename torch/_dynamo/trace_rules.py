@@ -1,6 +1,4 @@
 # mypy: allow-untyped-defs
-import _collections_abc
-import _weakrefset
 import builtins
 import collections
 import copy
@@ -8,13 +6,11 @@ import dataclasses
 import functools
 import importlib
 import inspect
-import multiprocessing
 import operator
 import os
 import random
 import re
 import sys
-import threading
 import traceback
 import types
 import typing
@@ -3148,15 +3144,10 @@ def is_numpy_type_info(obj) -> bool:
 BUILTIN_SKIPLIST = (
     collections,
     inspect,
-    multiprocessing,
-    operator,
     random,
-    threading,
-    traceback,
     types,
+    traceback,
     unittest,
-    _collections_abc,
-    _weakrefset,
 )
 
 # third party libraries skiplist is defined by str, because users may not use these libraries.
