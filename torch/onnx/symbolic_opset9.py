@@ -14,7 +14,7 @@ import functools
 import math
 import sys
 import warnings
-from typing import Callable, Sequence, TYPE_CHECKING
+from typing import Callable, TYPE_CHECKING
 
 import torch
 import torch._C._onnx as _C_onnx
@@ -29,6 +29,8 @@ from torch.onnx._internal import jit_utils, registration
 
 
 if TYPE_CHECKING:
+    from collections.abc import Sequence
+
     from torch.types import Number
 
 # EDITING THIS FILE? READ THIS FIRST!

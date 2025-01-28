@@ -3,10 +3,10 @@
 
 import io
 import os
-from collections.abc import Sequence
+from collections.abc import Generator, Sequence
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Generator, Optional, TYPE_CHECKING, Union
+from typing import Optional, TYPE_CHECKING, Union
 
 from fsspec.core import url_to_fs
 
