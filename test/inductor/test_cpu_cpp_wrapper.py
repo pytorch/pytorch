@@ -250,7 +250,7 @@ if RUN_CPU:
         BaseTest("test_multihead_attention", "cpu", test_cpu_repro.CPUReproTests()),
         BaseTest(
             "test_multi_threading",
-            condition=not IS_WINDOWS,
+            condition=config.cpu_backend == "cpp" and not IS_WINDOWS,
             # Two threads compile, so we expect the output code to be printed twice.
             code_string_count={"py::gil_scoped_release release;": 2},
         ),
