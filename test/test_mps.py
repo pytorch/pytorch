@@ -848,14 +848,11 @@ def mps_ops_modifier(ops):
         'addmmdecomposed': [torch.int16, torch.int32, torch.int64, torch.uint8, torch.int8],
         'addbmm': [torch.int16, torch.int32, torch.int64, torch.uint8, torch.int8],
         'addmm': [torch.int16, torch.int32, torch.int64, torch.uint8, torch.int8],
-        'addmv': [torch.int16, torch.int32, torch.int64, torch.uint8, torch.int8],
         'baddbmm': [torch.int16, torch.int32, torch.int64, torch.uint8, torch.int8],
         'bmm': [torch.int16, torch.int32, torch.int64, torch.uint8, torch.int8],
         'einsum': [torch.int16, torch.int32, torch.int64, torch.uint8, torch.int8],
         'linalg.multi_dot': [torch.int16, torch.int32, torch.int64, torch.uint8, torch.int8],
         'mat': [torch.int16, torch.int32, torch.int64, torch.uint8, torch.int8],
-        'mv': [torch.int16, torch.int32, torch.int64, torch.uint8, torch.int8],
-        'tensordot': [torch.int16, torch.int32, torch.int64, torch.uint8, torch.int8],
         'unravel_index': [torch.int32, torch.int64],
 
         # returned output on CPU is float64
