@@ -43,11 +43,9 @@ from torch.testing._internal.common_utils import (
 
 _IS_SM8X = False
 _IS_SM9X = False
-_IS_SM10X = False
 if TEST_CUDA:
     _IS_SM8X = torch.cuda.get_device_capability(0)[0] == 8
     _IS_SM9X = torch.cuda.get_device_capability(0)[0] == 9
-    _IS_SM10X = torch.cuda.get_device_capability(0)[0] == 10
 
 # Protects against includes accidentally setting the default dtype
 assert torch.get_default_dtype() is torch.float32
