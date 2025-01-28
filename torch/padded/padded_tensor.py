@@ -976,6 +976,18 @@ class PaddedTensor(torch.Tensor):
         )
 
     @classmethod
+    def __metadata_guard__(cls, orig_data, other):
+        """Avoid recompilation of the graph when the meta data changed"""
+        return True
+        # other_data = other.__tensor_flatten__()[1]
+
+        # return all(
+        #    orig_data[key] == other_data[key]
+        #    for key in orig_data.keys()
+        #    if key not in ["multipliers", "orig_shape", "neutral_element"]
+        # )
+
+    @classmethod
     def __torch_function__(cls, func, types, args=(), kwargs=None):
         if kwargs is None:
             kwargs = {}

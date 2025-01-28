@@ -189,5 +189,55 @@ class ModelTests(PaddedTensorTestCase):
                 self.assertTrue(is_out_equal)
 
 
+class FunctionalTests(PaddedTensorTestCase):
+    def setUp(self):
+        super().setUp()
+
+    def test_mem_stable(self):
+        def f(a, b):
+            return torch.mm(a, b)
+
+        f = torch.compile(f, mode="reduce-overhead")
+
+        mems = []
+
+        torch.cuda.reset_peak_memory_stats()
+        for offset in range(10):
+            N = 4080 + offset
+            a = torch.rand(N, N, device="cuda")
+            b = torch.rand(N, N, device="cuda")
+
+            # a = PaddedTensor(a, [4096, 4096])
+            # b = PaddedTensor(b, [4096, 4096])
+
+            out = f(a, b)
+
+            mem = torch.cuda.max_memory_allocated(0)
+            mem_in_gb = mem / 1024 / 1024 / 1024
+            print(mem_in_gb)
+
+            mems.append(mem_in_gb)
+
+        # Check that memory allocation is stable
+        self.assertTrue(all(mem < mems[0] * 2.5 for mem in mems))
+
+    def test_no_recompile(self):
+        def fn(a, b):
+            return torch.mm(a, b)
+
+        torch._dynamo.config.error_on_recompile = True
+        fn = torch.compile(fn, mode="reduce-overhead")
+
+        multipliers = [16, 16]
+        fn(
+            PaddedTensor(torch.randn(3, 5), multipliers),
+            PaddedTensor(torch.randn(5, 7), multipliers),
+        )
+        fn(
+            PaddedTensor(torch.randn(3, 7), multipliers),
+            PaddedTensor(torch.randn(7, 11), multipliers),
+        )
+
+
 if __name__ == "__main__":
     run_tests()
