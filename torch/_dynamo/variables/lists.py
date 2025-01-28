@@ -136,15 +136,19 @@ class BaseListVariable(VariableTracker):
                 [self] + list(args),
                 kwargs,
             )
-        elif name == "__eq__":
+        elif name in ("__eq__", "__lt__"):
             left = self
             right = args[0]
             if not isinstance(left, BaseListVariable) and not isinstance(
                 right, BaseListVariable
             ):
                 return variables.ConstantVariable.create(NotImplemented)
+            op_mapping = {
+                "__eq__": operator.eq,
+                "__lt__": operator.lt,
+            }
             return variables.UserFunctionVariable(polyfills.list_cmp).call_function(
-                tx, [variables.BuiltinVariable(operator.eq), left, right], {}
+                tx, [variables.BuiltinVariable(op_mapping[name]), left, right], {}
             )
 
         return super().call_method(tx, name, args, kwargs)

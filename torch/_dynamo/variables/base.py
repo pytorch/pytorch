@@ -1,6 +1,7 @@
 # mypy: ignore-errors
 
 import collections
+import operator
 from enum import Enum
 from typing import Any, Callable, Optional, TYPE_CHECKING
 
@@ -411,7 +412,7 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         ):
             return self.var_getattr(tx, args[0].as_python_constant())
         elif (
-            name == "__eq__"
+            name in ("__eq__", "__lt__")
             and len(args) == 1
             and self.is_python_constant()
             and not tx.output.side_effects.has_pending_mutation(self)
@@ -427,8 +428,13 @@ class VariableTracker(metaclass=VariableTrackerMeta):
                 or tx.output.side_effects.has_pending_mutation(other)
             ):
                 unimplemented(f"call_method {self} {name} {args} {kwargs}")
+
+            op_mapping = {
+                "__eq__": operator.eq,
+                "__lt__": operator.lt,
+            }
             return variables.ConstantVariable.create(
-                self.as_python_constant() == other.as_python_constant()
+                op_mapping[name](self.as_python_constant(), other.as_python_constant())
             )
         unimplemented(f"call_method {self} {name} {args} {kwargs}")
 

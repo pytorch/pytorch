@@ -162,7 +162,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
             return ConstantVariable.create(self.value.__name__)
         elif name == "__qualname__":
             return ConstantVariable.create(self.value.__qualname__)
-        elif name in ("__dict__", "__eq__"):
+        elif name in ("__dict__", "__eq__", "__lt__"):
             options = {"source": source}
             return variables.GetAttrVariable(self, name, **options)
 
@@ -793,8 +793,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
 
                 # TODO(anijain2305) - Identity checking should already be a part
                 # of the cmp_eq  polyfill function.
-                func_var = VariableTracker.build(tx, polyfills.cmp_is)
-                return func_var.call_function(tx, [self, *args], kwargs)
+                return ConstantVariable.create(self.value is other.value)
 
             # check for methods implemented in C++
             if isinstance(method, types.FunctionType):

@@ -279,7 +279,7 @@ class UserFunctionVariable(BaseUserFunctionVariable):
         return result
 
     def var_getattr(self, tx: "InstructionTranslator", name: str):
-        if name == "__eq__":
+        if name in ("__eq__", "__lt__"):
             return variables.GetAttrVariable(self, name)
         source = self.source and AttrSource(self.source, name)
         try:

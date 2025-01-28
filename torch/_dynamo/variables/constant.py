@@ -223,7 +223,7 @@ class EnumVariable(VariableTracker):
     def var_getattr(self, tx: "InstructionTranslator", name):
         if not hasattr(self.value, name):
             raise NotImplementedError
-        if name == "__eq__":
+        if name in ("__eq__", "__lt__"):
             return variables.GetAttrVariable(self, name)
         member = getattr(self.value, name)
         source = self.source and AttrSource(self.source, name)

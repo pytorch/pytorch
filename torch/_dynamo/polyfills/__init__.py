@@ -244,5 +244,30 @@ def cmp_ne(a, b):
     return not cmp_eq(a, b)
 
 
-def cmp_is(a, b):
-    return a is b
+def cmp_lt(a, b):
+    result = a.__lt__(b)
+    if result is NotImplemented:
+        raise TypeError(f"{type(a)} does not support the < operator")
+    return result
+
+
+def cmp_le(a, b):
+    # Check if __le__ is overridden
+    if isinstance(type(a).__le__, types.FunctionType):
+        return a.__le__(b)
+    return cmp_eq(a, b) or cmp_lt(a, b)
+
+
+def cmp_gt(a, b):
+    # Check if __gt__ is overridden
+    if isinstance(type(a).__gt__, types.FunctionType):
+        return a.__gt__(b)
+    # a > b is equivalent to b < a
+    return cmp_lt(b, a)
+
+
+def cmp_ge(a, b):
+    # Check if __ge__ is overridden
+    if isinstance(type(a).__ge__, types.FunctionType):
+        return a.__ge__(b)
+    return cmp_eq(a, b) or cmp_gt(a, b)

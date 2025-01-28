@@ -2,6 +2,7 @@
 
 import collections
 import functools
+import operator
 from typing import Optional, TYPE_CHECKING
 
 from torch._subclasses.fake_tensor import is_fake
@@ -834,10 +835,16 @@ class DictKeysVariable(DictViewVariable):
     ) -> "VariableTracker":
         if name == "__contains__":
             return self.dv_dict.call_method(tx, name, args, kwargs)
-        if name == "__eq__":
+        if name in ("__eq__", "__lt__"):
             if not isinstance(args[0], (SetVariable, DictKeysVariable)):
                 return ConstantVariable.create(NotImplemented)
-            return ConstantVariable.create(self.set_items == args[0].set_items)
+            op_mapping = {
+                "__eq__": operator.eq,
+                "__lt__": operator.lt,
+            }
+            return ConstantVariable.create(
+                op_mapping[name](self.set_items, args[0].set_items)
+            )
         return super().call_method(tx, name, args, kwargs)
 
 
