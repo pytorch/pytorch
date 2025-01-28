@@ -2758,6 +2758,22 @@ class TestTensorCreation(TestCase):
                                                             sparse_size, dtype=torch.float64)
                 self.assertEqual(sparse_with_dtype.device, torch.device('cpu'))
 
+    @onlyCUDA
+    @onlyNativeDeviceTypes
+    def test_new_tensor_device(self, device):
+        torch_device = torch.device(device)
+        cpu_device = torch.device('cpu')
+        tensor = torch.tensor((1, 2, 3), device=device)
+
+        # need more than one device_type to test this
+        assert self.device_type == 'cuda'
+        for left, right in product([tensor, tensor.cpu()], [tensor, tensor.cpu()]):
+            for device_arg in [torch_device, cpu_device, None]:
+                if device_arg is None:
+                    self.assertEqual(left.new_tensor(right).device, left.device)
+                else:
+                    self.assertEqual(left.new_tensor(right, device=device_arg).device, device_arg)
+
     def _test_signal_window_functions(self, name, dtype, device, **kwargs):
         import scipy.signal as signal
 
@@ -3502,6 +3518,7 @@ class TestRandomTensorCreation(TestCase):
             self.assertTrue((res1 >= 0).all().item())
 
 
+    @unittest.skipIf(IS_FBCODE or IS_SANDCASTLE, "For fb compatibility random not changed in fbcode")
     def test_randint_distribution(self, device):
         size = 1_000_000
         n_max = int(0.75 * 2 ** 32)
