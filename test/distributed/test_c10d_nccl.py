@@ -334,6 +334,8 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
         # Disable ASYNC_ERROR_HANDLING for this test to ensure we can programmatically
         # abort the process group.
         os.environ["TORCH_NCCL_ASYNC_ERROR_HANDLING"] = "0"
+        # set heartbeat timeout to low value
+        os.environ["TORCH_NCCL_HEARTBEAT_TIMEOUT_SEC"] = "5"
 
         store = c10d.FileStore(self.file_name, self.world_size)
         self._create_process_group_nccl(store, self.opts())
