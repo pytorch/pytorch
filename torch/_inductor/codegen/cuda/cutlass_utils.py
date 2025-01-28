@@ -97,12 +97,12 @@ def try_import_cutlass() -> bool:
 
             return True
         except ImportError as e:
-            log.warning(
+            log.debug(
                 "Failed to import CUTLASS packages: %s, ignoring the CUTLASS backend.",
                 str(e),
             )
     else:
-        log.warning(
+        log.debug(
             "Failed to import CUTLASS packages: CUTLASS repo does not exist: %s",
             cutlass_py_full_path,
         )
