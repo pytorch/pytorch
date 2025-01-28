@@ -2076,8 +2076,6 @@ Tensor chunk_backward_nested(
       self.layout() == c10::kJagged,
       "Nested Strided Tensor doesn't support chunk backward.")
   dim = at::maybe_wrap_dim(dim, self.dim());
-  TORCH_INTERNAL_ASSERT(
-      dim != 0, "Nested Tensor doesn't support chunk backward on dim=0 yet.")
   Tensor ret = at::zeros_like(self);
   std::vector<Tensor> rets = at::chunk(ret, chunks, dim);
   for (const auto j : c10::irange(grads.size())) {

@@ -796,6 +796,40 @@ class WhileLoopModels:
             )
             return out1 + 1, out2 + 2
 
+    class ZeroLoop2(torch.nn.Module):
+        def forward(self, c, a):
+            a_view = torch.sin(a.view(-1, 1))
+
+            def cond_fn(c, a_view):
+                return False
+
+            def body_fn(c, a_view):
+                return c - 1, a_view + 1
+
+            out1, out2 = torch._higher_order_ops.while_loop(
+                cond_fn,
+                body_fn,
+                [c, a_view],
+            )
+            return out1 + 1, out2 + 2
+
+    class ZeroLoop3(torch.nn.Module):
+        def forward(self, c, a):
+            a_view = torch.sin(a.view(-1, 1))
+
+            def cond_fn(c, a_view):
+                return 0
+
+            def body_fn(c, a_view):
+                return c - 1, a_view + 1
+
+            out1, out2 = torch._higher_order_ops.while_loop(
+                cond_fn,
+                body_fn,
+                [c, a_view],
+            )
+            return out1 + 1, out2 + 2
+
 
 class WhileLoopTests(TestCase):
     def _run_test(
@@ -1030,12 +1064,17 @@ class WhileLoopTests(TestCase):
     @parametrize("device", ["cpu", GPU_TYPE])
     @parametrize("dynamic", [True, False])
     def test_while_loop_zero_loop(self, device, dynamic):
-        self._run_test(
-            model=WhileLoopModels.ZeroLoop(),
-            inputs=(torch.tensor([1, 2, 3, 4, 5]),),
-            device=device,
-            dynamic=dynamic,
-        )
+        for model in [
+            WhileLoopModels.ZeroLoop(),
+            WhileLoopModels.ZeroLoop2(),
+            WhileLoopModels.ZeroLoop3(),
+        ]:
+            self._run_test(
+                model=model,
+                inputs=(torch.tensor([1, 2, 3, 4, 5]),),
+                device=device,
+                dynamic=dynamic,
+            )
 
 
 class AssociativeScanTests(TestCase):

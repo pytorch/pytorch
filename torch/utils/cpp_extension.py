@@ -4,7 +4,6 @@ import glob
 import importlib
 import importlib.abc
 import os
-import platform
 import re
 import shlex
 import shutil
@@ -23,7 +22,7 @@ from .file_baton import FileBaton
 from ._cpp_extension_versioner import ExtensionVersioner
 from .hipify import hipify_python
 from .hipify.hipify_python import GeneratedFileCleaner
-from typing import Dict, List, Optional, Union, Tuple
+from typing import Optional, Union
 from torch.torch_version import TorchVersion, Version
 
 from setuptools.command.build_ext import build_ext
@@ -46,8 +45,8 @@ SUBPROCESS_DECODE_ARGS = ('oem',) if IS_WINDOWS else ()
 MINIMUM_GCC_VERSION = (5, 0, 0)
 MINIMUM_MSVC_VERSION = (19, 0, 24215)
 
-VersionRange = Tuple[Tuple[int, ...], Tuple[int, ...]]
-VersionMap = Dict[str, VersionRange]
+VersionRange = tuple[tuple[int, ...], tuple[int, ...]]
+VersionMap = dict[str, VersionRange]
 # The following values were taken from the following GitHub gist that
 # summarizes the minimum valid major versions of g++/clang++ for each supported
 # CUDA version: https://gist.github.com/ax3l/9489132
@@ -80,7 +79,7 @@ __all__ = ["get_default_build_root", "check_compiler_ok_for_platform", "get_comp
            "verify_ninja_availability", "remove_extension_h_precompiler_headers", "get_cxx_compiler", "check_compiler_is_gcc"]
 # Taken directly from python stdlib < 3.9
 # See https://github.com/pytorch/pytorch/issues/48617
-def _nt_quote_args(args: Optional[List[str]]) -> List[str]:
+def _nt_quote_args(args: Optional[list[str]]) -> list[str]:
     """Quote command-line arguments for DOS/Windows conventions.
 
     Just wraps every argument which contains blanks in double quotes, and
@@ -290,6 +289,8 @@ PLAT_TO_VCVARS = {
     'win-amd64' : 'x86_amd64',
 }
 
+min_supported_cpython = "0x03090000"  # Python 3.9 hexcode
+
 def get_cxx_compiler():
     if IS_WINDOWS:
         compiler = os.environ.get('CXX', 'cl')
@@ -301,7 +302,7 @@ def _is_binary_build() -> bool:
     return not BUILT_FROM_SOURCE_VERSION_PATTERN.match(torch.version.__version__)
 
 
-def _accepted_compilers_for_platform() -> List[str]:
+def _accepted_compilers_for_platform() -> list[str]:
     # gnu-c++ and gnu-cc are the conda gcc compilers
     return ['clang++', 'clang'] if IS_MACOS else ['g++', 'gcc', 'gnu-c++', 'gnu-cc', 'clang++', 'clang']
 
@@ -380,7 +381,7 @@ def check_compiler_ok_for_platform(compiler: str) -> bool:
     return False
 
 
-def get_compiler_abi_compatibility_and_version(compiler) -> Tuple[bool, TorchVersion]:
+def get_compiler_abi_compatibility_and_version(compiler) -> tuple[bool, TorchVersion]:
     """
     Determine if the given compiler is ABI-compatible with PyTorch alongside its version.
 
@@ -574,11 +575,22 @@ class BuildExtension(build_ext):
                         extension.extra_compile_args[ext] = []
 
             self._add_compile_flag(extension, '-DTORCH_API_INCLUDE_EXTENSION_H')
-            # See note [Pybind11 ABI constants]
-            for name in ["COMPILER_TYPE", "STDLIB", "BUILD_ABI"]:
-                val = getattr(torch._C, f"_PYBIND11_{name}")
-                if val is not None and not IS_WINDOWS:
-                    self._add_compile_flag(extension, f'-DPYBIND11_{name}="{val}"')
+
+            if extension.py_limited_api:
+                # compile any extension that has passed in py_limited_api to the
+                # Extension constructor with the Py_LIMITED_API flag set to our
+                # min supported CPython version.
+                # See https://docs.python.org/3/c-api/stable.html#c.Py_LIMITED_API
+                self._add_compile_flag(extension, f'-DPy_LIMITED_API={min_supported_cpython}')
+            else:
+                # pybind11 is not CPython API stable so don't add these flags used when
+                # compiling pybind11 when pybind11 is not even used. otherwise, the build
+                # logs are confusing.
+                # See note [Pybind11 ABI constants]
+                for name in ["COMPILER_TYPE", "STDLIB", "BUILD_ABI"]:
+                    val = getattr(torch._C, f"_PYBIND11_{name}")
+                    if val is not None and not IS_WINDOWS:
+                        self._add_compile_flag(extension, f'-DPYBIND11_{name}="{val}"')
             self._define_torch_extension_name(extension)
             self._add_gnu_cpp_abi_flag(extension)
 
@@ -924,7 +936,7 @@ class BuildExtension(build_ext):
             ext_filename = '.'.join(without_abi)
         return ext_filename
 
-    def _check_abi(self) -> Tuple[str, TorchVersion]:
+    def _check_abi(self) -> tuple[str, TorchVersion]:
         # On some platforms, like Windows, compiler_cxx is not available.
         if hasattr(self.compiler, 'compiler_cxx'):
             compiler = self.compiler.compiler_cxx[0]
@@ -973,7 +985,7 @@ def CppExtension(name, sources, *args, **kwargs):
     constructor. Full list arguments can be found at
     https://setuptools.pypa.io/en/latest/userguide/ext_modules.html#extension-api-reference
 
-    .. note::
+    .. warning::
         The PyTorch python API (as provided in libtorch_python) cannot be built
         with the flag ``py_limited_api=True``.  When this flag is passed, it is
         the user's responsibility in their library to not use APIs from
@@ -981,6 +993,14 @@ def CppExtension(name, sources, *args, **kwargs):
         APIs from libtorch (aten objects, operators and the dispatcher). For
         example, to give access to custom ops from python, the library should
         register the ops through the dispatcher.
+
+        Contrary to CPython setuptools, who does not define -DPy_LIMITED_API
+        as a compile flag when py_limited_api is specified as an option for
+        the "bdist_wheel" command in ``setup``, PyTorch does! We will specify
+        -DPy_LIMITED_API=min_supported_cpython to best enforce consistency,
+        safety, and sanity in order to encourage best practices. To target a
+        different version, set min_supported_cpython to the hexcode of the
+        CPython version of choice.
 
     Example:
         >>> # xdoctest: +SKIP
@@ -1015,7 +1035,7 @@ def CppExtension(name, sources, *args, **kwargs):
     if not kwargs.get('py_limited_api', False):
         # torch_python uses more than the python limited api
         libraries.append('torch_python')
-    if IS_WINDOWS and platform.machine().lower() != "arm64":
+    if IS_WINDOWS:
         libraries.append("sleef")
 
     kwargs['libraries'] = libraries
@@ -1037,7 +1057,7 @@ def CUDAExtension(name, sources, *args, **kwargs):
     constructor. Full list arguments can be found at
     https://setuptools.pypa.io/en/latest/userguide/ext_modules.html#extension-api-reference
 
-    .. note::
+    .. warning::
         The PyTorch python API (as provided in libtorch_python) cannot be built
         with the flag ``py_limited_api=True``.  When this flag is passed, it is
         the user's responsibility in their library to not use APIs from
@@ -1045,6 +1065,14 @@ def CUDAExtension(name, sources, *args, **kwargs):
         APIs from libtorch (aten objects, operators and the dispatcher). For
         example, to give access to custom ops from python, the library should
         register the ops through the dispatcher.
+
+        Contrary to CPython setuptools, who does not define -DPy_LIMITED_API
+        as a compile flag when py_limited_api is specified as an option for
+        the "bdist_wheel" command in ``setup``, PyTorch does! We will specify
+        -DPy_LIMITED_API=min_supported_cpython to best enforce consistency,
+        safety, and sanity in order to encourage best practices. To target a
+        different version, set min_supported_cpython to the hexcode of the
+        CPython version of choice.
 
     Example:
         >>> # xdoctest: +SKIP
@@ -1207,7 +1235,7 @@ def CUDAExtension(name, sources, *args, **kwargs):
     return setuptools.Extension(name, sources, *args, **kwargs)
 
 
-def include_paths(device_type: str = "cpu") -> List[str]:
+def include_paths(device_type: str = "cpu") -> list[str]:
     """
     Get the include paths required to build a C++ or CUDA or SYCL extension.
 
@@ -1221,10 +1249,6 @@ def include_paths(device_type: str = "cpu") -> List[str]:
         lib_include,
         # Remove this once torch/torch.h is officially no longer supported for C++ extensions.
         os.path.join(lib_include, 'torch', 'csrc', 'api', 'include'),
-        # Some internal (old) Torch headers don't properly prefix their includes,
-        # so we need to pass -Itorch/lib/include/TH as well.
-        os.path.join(lib_include, 'TH'),
-        os.path.join(lib_include, 'THC')
     ]
     if device_type == "cuda" and IS_HIP_EXTENSION:
         paths.append(os.path.join(lib_include, 'THH'))
@@ -1248,7 +1272,7 @@ def include_paths(device_type: str = "cpu") -> List[str]:
     return paths
 
 
-def library_paths(device_type: str = "cpu") -> List[str]:
+def library_paths(device_type: str = "cpu") -> list[str]:
     """
     Get the library paths required to build a C++ or CUDA extension.
 
@@ -1296,7 +1320,7 @@ def library_paths(device_type: str = "cpu") -> List[str]:
 
 
 def load(name,
-         sources: Union[str, List[str]],
+         sources: Union[str, list[str]],
          extra_cflags=None,
          extra_cuda_cflags=None,
          extra_ldflags=None,
@@ -1413,10 +1437,6 @@ def _get_pybind11_abi_build_flags():
     # that can cause a hard to debug segfaults.
     # For PyTorch extensions we want to relax those restrictions and pass compiler, stdlib and abi properties
     # captured during PyTorch native library compilation in torch/csrc/Module.cpp
-    #
-    # Note that these flags don't have side effects even if the PyTorch extension does not
-    # require nor use pybind, so we do not do anything differently for them in the py_limited_api
-    # case.
 
     abi_cflags = []
     for pname in ["COMPILER_TYPE", "STDLIB", "BUILD_ABI"]:
@@ -1834,7 +1854,7 @@ def _jit_compile(name,
 
 
 def _write_ninja_file_and_compile_objects(
-        sources: List[str],
+        sources: list[str],
         objects,
         cflags,
         post_cflags,
@@ -1886,7 +1906,7 @@ def _write_ninja_file_and_compile_objects(
 
 def _write_ninja_file_and_build_library(
         name,
-        sources: List[str],
+        sources: list[str],
         extra_cflags,
         extra_cuda_cflags,
         extra_ldflags,
@@ -2014,7 +2034,7 @@ def _prepare_ldflags(extra_ldflags, with_cuda, verbose, is_standalone):
     return extra_ldflags
 
 
-def _get_cuda_arch_flags(cflags: Optional[List[str]] = None) -> List[str]:
+def _get_cuda_arch_flags(cflags: Optional[list[str]] = None) -> list[str]:
     """
     Determine CUDA arch flags to use.
 
@@ -2050,12 +2070,13 @@ def _get_cuda_arch_flags(cflags: Optional[List[str]] = None) -> List[str]:
         ('Ampere', '8.0;8.6+PTX'),
         ('Ada', '8.9+PTX'),
         ('Hopper', '9.0+PTX'),
-        ('Blackwell', '10.0+PTX'),
+        ('Blackwell+Tegra', '10.1'),
+        ('Blackwell', '10.0;12.0+PTX'),
     ])
 
     supported_arches = ['3.5', '3.7', '5.0', '5.2', '5.3', '6.0', '6.1', '6.2',
                         '7.0', '7.2', '7.5', '8.0', '8.6', '8.7', '8.9', '9.0', '9.0a',
-                        '10.0']
+                        '10.0', '10.0a', '10.1', '10.1a', '12.0', '12.0a']
     valid_arch_strings = supported_arches + [s + "+PTX" for s in supported_arches]
 
     # The default is sm_30 for CUDA 9.x and 10.x
@@ -2074,7 +2095,7 @@ def _get_cuda_arch_flags(cflags: Optional[List[str]] = None) -> List[str]:
         # which could be of different types - therefore all archs for visible cards should be included
         for i in range(torch.cuda.device_count()):
             capability = torch.cuda.get_device_capability(i)
-            supported_sm = [int(arch.split('_')[1])
+            supported_sm = [int("".join(re.findall(r"\d+", arch.split('_')[1])))
                             for arch in torch.cuda.get_arch_list() if 'sm_' in arch]
             max_supported_sm = max((sm // 10, sm % 10) for sm in supported_sm)
             # Capability of the device may be higher than what's supported by the user's
@@ -2112,7 +2133,7 @@ def _get_cuda_arch_flags(cflags: Optional[List[str]] = None) -> List[str]:
     return sorted(set(flags))
 
 
-def _get_rocm_arch_flags(cflags: Optional[List[str]] = None) -> List[str]:
+def _get_rocm_arch_flags(cflags: Optional[list[str]] = None) -> list[str]:
     # If cflags is given, there may already be user-provided arch flags in it
     # (from `extra_compile_args`)
     if cflags is not None:

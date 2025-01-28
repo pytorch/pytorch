@@ -1,7 +1,7 @@
 # mypy: allow-untyped-defs
 # Copyright (c) Meta Platforms, Inc. and affiliates
 import logging
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Optional
 
 import torch
 from torch.fx.node import map_aggregate
@@ -73,7 +73,7 @@ class TensorChunkSpec:
 
     @staticmethod
     def from_tuple(
-        chunk_dims: Tuple[int, ...],
+        chunk_dims: tuple[int, ...],
     ):
         """
         A helper for creating a tuple of `TensorChunkSpec` from a tuple of chunk
@@ -92,7 +92,7 @@ class TensorChunkSpec:
 
     @staticmethod
     def from_dict(
-        chunk_dims: Dict[str, int],
+        chunk_dims: dict[str, int],
     ):
         """
         A helper for creating a dictionary of `TensorChunkSpec` from a
@@ -242,12 +242,12 @@ def _shard_dict_of_args(
 
 
 def split_args_kwargs_into_chunks(
-    args: Tuple[Any, ...],
-    kwargs: Optional[Dict[str, Any]],
+    args: tuple[Any, ...],
+    kwargs: Optional[dict[str, Any]],
     chunks: int,
-    args_chunk_spec: Optional[Tuple[TensorChunkSpec, ...]] = None,
-    kwargs_chunk_spec: Optional[Dict[str, TensorChunkSpec]] = None,
-) -> Tuple[List[Tuple], List[Dict]]:
+    args_chunk_spec: Optional[tuple[TensorChunkSpec, ...]] = None,
+    kwargs_chunk_spec: Optional[dict[str, TensorChunkSpec]] = None,
+) -> tuple[list[tuple], list[dict]]:
     """
     Given a sequence of args and kwargs, split them into a number of chunks
     according to  their respective chunking specs.
@@ -347,7 +347,7 @@ def split_args_kwargs_into_chunks(
 
 
 def merge_chunks(
-    chunks: List[Any],
+    chunks: list[Any],
     chunk_spec,
 ):
     """

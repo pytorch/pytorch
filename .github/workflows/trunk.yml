@@ -154,23 +154,24 @@ jobs:
       test-matrix: ${{ needs.win-vs2019-cpu-py3-build.outputs.test-matrix }}
     secrets: inherit
 
-  win-vs2019-cuda12_1-py3-build:
-    name: win-vs2019-cuda12.1-py3
+  win-vs2019-cuda12_4-py3-build:
+    name: win-vs2019-cuda12.4-py3
     uses: ./.github/workflows/_win-build.yml
     needs: get-label-type
     with:
-      build-environment: win-vs2019-cuda12.1-py3
-      cuda-version: "12.1"
+      build-environment: win-vs2019-cuda12.4-py3
+      cuda-version: "12.4"
       runner: "${{ needs.get-label-type.outputs.label-type }}windows.4xlarge.nonephemeral"
     secrets: inherit
 
-  linux-focal-rocm6_2-py3_10-build:
-    name: linux-focal-rocm6.2-py3.10
+  linux-focal-rocm6_3-py3_10-build:
+    if: ${{ startsWith(github.event.ref, 'refs/tags/ciflow/trunk') }}
+    name: linux-focal-rocm6.3-py3.10
     uses: ./.github/workflows/_linux-build.yml
     needs: get-label-type
     with:
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
-      build-environment: linux-focal-rocm6.2-py3.10
+      build-environment: linux-focal-rocm6.3-py3.10
       docker-image-name: pytorch-linux-focal-rocm-n-py3
       sync-tag: rocm-build
       test-matrix: |
@@ -181,19 +182,20 @@ jobs:
         ]}
     secrets: inherit
 
-  linux-focal-rocm6_2-py3_10-test:
+  linux-focal-rocm6_3-py3_10-test:
+    if: ${{ startsWith(github.event.ref, 'refs/tags/ciflow/trunk') }}
     permissions:
       id-token: write
       contents: read
-    name: linux-focal-rocm6.2-py3.10
+    name: linux-focal-rocm6.3-py3.10
     uses: ./.github/workflows/_rocm-test.yml
     needs:
-      - linux-focal-rocm6_2-py3_10-build
+      - linux-focal-rocm6_3-py3_10-build
       - target-determination
     with:
-      build-environment: linux-focal-rocm6.2-py3.10
-      docker-image: ${{ needs.linux-focal-rocm6_2-py3_10-build.outputs.docker-image }}
-      test-matrix: ${{ needs.linux-focal-rocm6_2-py3_10-build.outputs.test-matrix }}
+      build-environment: linux-focal-rocm6.3-py3.10
+      docker-image: ${{ needs.linux-focal-rocm6_3-py3_10-build.outputs.docker-image }}
+      test-matrix: ${{ needs.linux-focal-rocm6_3-py3_10-build.outputs.test-matrix }}
       tests-to-include: "test_nn test_torch test_cuda test_ops test_unary_ufuncs test_binary_ufuncs test_autograd inductor/test_torchinductor distributed/test_c10d_common distributed/test_c10d_nccl"
     secrets: inherit
 
@@ -235,12 +237,12 @@ jobs:
     secrets: inherit
 
   # NB: Keep this in sync with inductor-perf-test-nightly.yml
-  linux-focal-cuda12_1-py3_10-gcc9-inductor-build:
-    name: cuda12.1-py3.10-gcc9-sm80
+  linux-focal-cuda12_4-py3_10-gcc9-inductor-build:
+    name: cuda12.4-py3.10-gcc9-sm80
     uses: ./.github/workflows/_linux-build.yml
     needs: get-label-type
     with:
-      build-environment: linux-focal-cuda12.1-py3.10-gcc9-sm80
-      docker-image-name: pytorch-linux-focal-cuda12.1-cudnn9-py3-gcc9-inductor-benchmarks
+      build-environment: linux-focal-cuda12.4-py3.10-gcc9-sm80
+      docker-image-name: pytorch-linux-focal-cuda12.4-cudnn9-py3-gcc9-inductor-benchmarks
       cuda-arch-list: '8.0'
     secrets: inherit

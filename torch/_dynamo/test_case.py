@@ -1,7 +1,7 @@
 import contextlib
 import importlib
 import logging
-from typing import Tuple, Union
+from typing import Union
 
 import torch
 import torch.testing
@@ -19,7 +19,7 @@ from . import config, reset, utils
 log = logging.getLogger(__name__)
 
 
-def run_tests(needs: Union[str, Tuple[str, ...]] = ()) -> None:
+def run_tests(needs: Union[str, tuple[str, ...]] = ()) -> None:
     from torch.testing._internal.common_utils import run_tests
 
     if TEST_WITH_TORCHDYNAMO or IS_WINDOWS or TEST_WITH_CROSSREF:

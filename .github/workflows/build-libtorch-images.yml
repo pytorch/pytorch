@@ -45,7 +45,7 @@ jobs:
     runs-on: "${{ needs.get-label-type.outputs.label-type }}linux.9xlarge.ephemeral"
     strategy:
       matrix:
-        cuda_version: ["12.6", "12.4", "12.1", "11.8"]
+        cuda_version: ["12.6", "12.4", "11.8"]
     env:
       GPU_ARCH_TYPE: cuda
       GPU_ARCH_VERSION: ${{ matrix.cuda_version }}
