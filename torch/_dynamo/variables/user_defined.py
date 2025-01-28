@@ -54,6 +54,7 @@ from ..utils import (
     object_has_getattribute,
     proxy_args_kwargs,
     tensortype_to_dtype,
+    tuple_methods,
     unpatched_nn_module_getattr,
 )
 from .base import AttributeMutationExisting, ValueMutationNew, VariableTracker
@@ -681,6 +682,8 @@ def call_random_fn(tx, fn, args, kwargs):
     args = [x.as_python_constant() for x in args]
     kwargs = {k: v.as_python_constant() for k, v in kwargs.items()}
     random_call_index = len(tx.output.random_calls)
+    # NB: it is probably not important for the example_value to be exactly correct,
+    # we just need the right type
     example_value = fn(*args, **kwargs)
     source = RandomValueSource(random_call_index)
     tx.output.random_calls.append((fn, args, kwargs))
@@ -877,7 +880,12 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             and all(k.is_python_constant() for k in args)
             and all(v.is_python_constant() for v in kwargs.values())
         ):
-            return call_random_fn(tx, self.value, args, kwargs)
+            return call_random_fn(
+                tx,
+                self.value,
+                args,
+                kwargs,
+            )
         elif istype(self.value, types.MethodType):
             func = self.value.__func__
             obj = self.value.__self__
@@ -1450,6 +1458,58 @@ class UserDefinedDictVariable(UserDefinedObjectVariable):
             collections.OrderedDict.__iter__,
         ):
             return self._dict_vt.unpack_var_sequence(tx)
+        raise NotImplementedError
+
+
+class UserDefinedTupleVariable(UserDefinedObjectVariable):
+    """
+    Represents user defined objects that are subclasses of tuple.
+
+    Internally, it uses a TupleVariable to represent the tuple part of the
+    variable tracker. For everything else, it falls back to
+    UserDefinedObjectVariable.
+    """
+
+    _nonvar_fields = UserDefinedObjectVariable._nonvar_fields
+
+    def __init__(self, value, **kwargs):
+        super().__init__(value, **kwargs)
+        self._tuple_vt = None
+        # tuple.__new__ (tuple being immutable) inits the tuple elements. This
+        # behavior is different from object.__new__ or dict.__new__ where
+        # reconstructing object/dict does not need to consider __new__ args.
+        # These args are stored in the new_args field.
+        self.new_args = None
+
+    def set_underlying_tuple_vt(self, tuple_vt):
+        self._tuple_vt = tuple_vt
+
+    @staticmethod
+    def create(value, tuple_vt, **kwargs):
+        result = UserDefinedTupleVariable(value, **kwargs)
+        result.set_underlying_tuple_vt(tuple_vt)
+        return result
+
+    def set_new_args(self, new_args):
+        self.new_args = new_args
+
+    def call_method(
+        self,
+        tx,
+        name,
+        args: "list[VariableTracker]",
+        kwargs: "dict[str, VariableTracker]",
+    ) -> "VariableTracker":
+        assert self._tuple_vt is not None
+        method = self._maybe_get_baseclass_method(name)
+        if method in tuple_methods:
+            return self._tuple_vt.call_method(tx, name, args, kwargs)
+        return super().call_method(tx, name, args, kwargs)
+
+    def unpack_var_sequence(self, tx):
+        assert self._tuple_vt is not None
+        if type(self.value).__iter__ is tuple.__iter__:
+            return self._tuple_vt.unpack_var_sequence(tx)
         raise NotImplementedError
 
 

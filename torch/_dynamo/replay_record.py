@@ -1,7 +1,7 @@
 import dataclasses
 from dataclasses import field
 from types import CellType, CodeType, ModuleType
-from typing import Any, BinaryIO, IO
+from typing import Any, IO
 from typing_extensions import Self
 
 from torch.utils._import_utils import import_dill
@@ -41,7 +41,7 @@ class ExecutionRecord:
         dill.dump(self, f)
 
     @classmethod
-    def load(cls, f: BinaryIO) -> Self:
+    def load(cls, f: IO[bytes]) -> Self:
         assert dill is not None, "replay_record requires `pip install dill`"
         return dill.load(f)
 
