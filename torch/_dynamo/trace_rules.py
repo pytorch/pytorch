@@ -20,7 +20,6 @@ import posixpath
 import random
 import re
 import selectors
-import signal
 import sys
 import tempfile
 import threading
@@ -3171,7 +3170,6 @@ BUILTIN_SKIPLIST = (
     random,
     re,
     selectors,
-    signal,
     tempfile,
     threading,
     tokenize,
