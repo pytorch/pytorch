@@ -3168,7 +3168,6 @@ BUILTIN_SKIPLIST = (
     operator,
     posixpath,
     random,
-    re,
     selectors,
     tempfile,
     threading,
