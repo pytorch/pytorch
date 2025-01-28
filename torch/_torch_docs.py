@@ -2,7 +2,6 @@
 """Adds docstrings to functions defined in the torch._C module."""
 
 import re
-from typing import Dict
 
 import torch._C
 from torch._C import _add_docstr as add_docstr
@@ -170,7 +169,7 @@ rocm_fp16_notes = {
 :ref:`different precision<fp16_on_mi200>` for backward."""
 }
 
-reproducibility_notes: Dict[str, str] = {
+reproducibility_notes: dict[str, str] = {
     "forward_reproducibility_note": """This operation may behave nondeterministically when given tensors on \
 a CUDA device. See :doc:`/notes/randomness` for more information.""",
     "backward_reproducibility_note": """This operation may produce nondeterministic gradients when given tensors on \
@@ -9034,8 +9033,8 @@ Constructs a tensor with no autograd history (also known as a "leaf tensor", see
     When working with tensors prefer using :func:`torch.Tensor.clone`,
     :func:`torch.Tensor.detach`, and :func:`torch.Tensor.requires_grad_` for
     readability. Letting `t` be a tensor, ``torch.tensor(t)`` is equivalent to
-    ``t.clone().detach()``, and ``torch.tensor(t, requires_grad=True)``
-    is equivalent to ``t.clone().detach().requires_grad_(True)``.
+    ``t.detach().clone()``, and ``torch.tensor(t, requires_grad=True)``
+    is equivalent to ``t.detach().clone().requires_grad_(True)``.
 
 .. seealso::
 
@@ -13215,7 +13214,8 @@ Stream(device, *, priority) -> Stream
 
 An in-order queue of executing the respective tasks asynchronously in first in first out (FIFO) order.
 It can control or synchronize the execution of other Stream or block the current host thread to ensure
-the correct task sequencing.
+the correct task sequencing. It supports with statement as a context manager to ensure the operators
+within the with block are running on the corresponding stream.
 
 See in-depth description of the CUDA behavior at :ref:`cuda-semantics` for details
 on the exact semantic that applies to all devices.
@@ -13232,7 +13232,10 @@ Returns:
 Example::
 
     >>> # xdoctest: +REQUIRES(env:TORCH_DOCTEST_CUDA)
-    >>> s_cuda = torch.Stream(device='cuda')
+    >>> with torch.Stream(device='cuda') as s_cuda:
+    >>>     a = torch.randn(10, 5, device='cuda')
+    >>>     b = torch.randn(5, 10, device='cuda')
+    >>>     c = torch.mm(a, b)
 """,
 )
 

@@ -6,10 +6,14 @@ from __future__ import annotations
 
 import itertools
 import sys
-from typing import Callable, Iterable, Iterator, overload, TypeVar
+from typing import Callable, overload, TYPE_CHECKING, TypeVar
 from typing_extensions import TypeAlias
 
 from ..decorators import substitute_in_graph
+
+
+if TYPE_CHECKING:
+    from collections.abc import Iterable, Iterator
 
 
 __all__ = [
@@ -42,7 +46,7 @@ def chain_from_iterable(iterable: Iterable[Iterable[_T]], /) -> Iterator[_T]:
     return itertools.chain(*iterable)
 
 
-chain.from_iterable = chain_from_iterable  # type: ignore[method-assign]
+chain.from_iterable = chain_from_iterable  # type: ignore[attr-defined]
 
 
 # Reference: https://docs.python.org/3/library/itertools.html#itertools.compress

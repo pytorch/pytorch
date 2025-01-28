@@ -29,7 +29,7 @@ class TORCH_API hash_t : public c10::uint128 {
   hash_t(uint64_t val) : uint128(val) {}
   hash_t(uint128 val) : uint128(val) {}
   hash_t(uint64_t top, uint64_t bottom) : uint128(top, bottom) {}
-  hash_t() {}
+  hash_t() = default;
 };
 
 // Std* functions use 64-bit hash
