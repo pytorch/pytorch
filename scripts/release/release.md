@@ -207,8 +207,6 @@ The CUTLASS and CK backend adds kernel choices for GEMM autotuning in Inductor. 
 ### Inductor
 
 
-* Turn on TORCHINDUCTOR_REORDER_FOR_PEAK_MEMORY and remove config ([#137205](https://github.com/pytorch/pytorch/pull/137205)). `reorder_for_peak_memory` is now enabled by default.  If old behavior is desired, edit `reorder_for_peak_memory` in `torch._inductor/config.py`.
-
 
 ### Releng
 
@@ -1139,6 +1137,7 @@ We improved the existing `torch.library` APIs and added new ones.
 
 
 
+* Turn on TORCHINDUCTOR_REORDER_FOR_PEAK_MEMORY by default ([#137205](https://github.com/pytorch/pytorch/pull/137205)).  If old behavior is desired, edit `reorder_for_peak_memory` in `torch._inductor/config.py`.
 * Cache weight tiles in L1D for AMX int8 WoQ GEMM ([#136688](https://github.com/pytorch/pytorch/pull/136688))
 * Add and use `borrow_arrayref_tensor_as_tensor` ([#142183](https://github.com/pytorch/pytorch/pull/142183))
 * Support for accelerated sorting with x86-simd-sort ([#127936](https://github.com/pytorch/pytorch/pull/127936))
