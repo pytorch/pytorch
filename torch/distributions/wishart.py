@@ -1,6 +1,6 @@
 import math
 import warnings
-from typing import Optional, Union, Final
+from typing import Final, Optional, Union
 from typing_extensions import Self
 
 import torch

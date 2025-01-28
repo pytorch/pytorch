@@ -13,7 +13,7 @@ from torch.distributions.utils import (
     probs_to_logits,
 )
 from torch.nn.functional import binary_cross_entropy_with_logits
-from torch.types import _Number, Number, _size
+from torch.types import _Number, _size, Number
 
 
 __all__ = ["Geometric"]
@@ -66,12 +66,14 @@ class Geometric(Distribution):
         else:
             assert logits is not None  # helps mypy
             (self.logits,) = broadcast_all(logits)
+
         probs_or_logits = probs if probs is not None else logits
         if isinstance(probs_or_logits, _Number):
             batch_shape = torch.Size()
         else:
             assert probs_or_logits is not None  # helps mypy
             batch_shape = probs_or_logits.size()
+
         super().__init__(batch_shape, validate_args=validate_args)
         if self._validate_args and probs is not None:
             # Add an extra check beyond unit_interval

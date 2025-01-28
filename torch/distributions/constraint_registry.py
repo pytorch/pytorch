@@ -65,7 +65,6 @@ You can create your own registry by creating a new :class:`ConstraintRegistry`
 object.
 """
 
-import numbers
 from typing import Callable, Optional, overload, Union
 from typing_extensions import TypeAlias, TypeVar
 
@@ -92,6 +91,7 @@ from torch.distributions.constraints import (
 from torch.distributions.transforms import Transform
 from torch.types import _Number
 
+
 __all__ = [
     "ConstraintRegistry",
     "biject_to",
@@ -117,16 +117,14 @@ class ConstraintRegistry:
         self,
         constraint: Union[Con, type[Con]],
         factory: Factory[Con],
-    ) -> Factory[Con]:
-        ...
+    ) -> Factory[Con]: ...
 
     @overload  # decorator usage
     def register(
         self,
         constraint: Union[Con, type[Con]],
         factory: None = ...,
-    ) -> Union[Callable[[Factory[Con]], Factory[Con]]]:
-        ...
+    ) -> Union[Callable[[Factory[Con]], Factory[Con]]]: ...
 
     def register(
         self,
@@ -238,7 +236,7 @@ def _transform_to_positive(constraint: Union[Positive, NonNegative]) -> Transfor
 @transform_to.register(constraints.greater_than)
 @transform_to.register(constraints.greater_than_eq)
 def _transform_to_greater_than(
-    constraint: Union[GreaterThan, GreaterThanEq]
+    constraint: Union[GreaterThan, GreaterThanEq],
 ) -> Transform:
     return transforms.ComposeTransform(
         [
@@ -300,7 +298,7 @@ def _transform_to_lower_cholesky(constraint: LowerCholesky) -> Transform:
 @transform_to.register(constraints.positive_definite)  # type: ignore[arg-type]
 @transform_to.register(constraints.positive_semidefinite)
 def _transform_to_positive_definite(
-    constraint: Union[PositiveDefinite, PositiveSemidefinite]
+    constraint: Union[PositiveDefinite, PositiveSemidefinite],
 ) -> Transform:
     return transforms.PositiveDefiniteTransform()
 

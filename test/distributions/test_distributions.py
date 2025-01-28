@@ -2617,12 +2617,12 @@ class TestDistributions(DistributionsTestCase):
         )
 
     @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
-    def test_mixture_same_family_binomial_log_prob(self):
+    def test_mixture_same_family_binomial_log_prob(self) -> None:
         max_count = 20
         probs = torch.rand(10, 5).softmax(dim=-1)
         binom_probs = torch.rand(10, 5)
 
-        def ref_log_prob(idx, x, log_prob):
+        def ref_log_prob(idx: int, x: Tensor, log_prob: Tensor) -> None:
             p = probs[idx].numpy()
             binom_p = binom_probs[idx].numpy()
             mix = scipy.stats.multinomial(1, p)
@@ -3610,7 +3610,7 @@ class TestDistributions(DistributionsTestCase):
             )
 
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
-    def test_generalized_pareto(self):
+    def test_generalized_pareto(self) -> None:
         loc = torch.randn(2, 3).requires_grad_()
         scale = torch.randn(2, 3).abs().requires_grad_()
         concentration = torch.randn(2, 3).requires_grad_()
@@ -3633,7 +3633,7 @@ class TestDistributions(DistributionsTestCase):
         self.assertEqual(GeneralizedPareto(1.0, 1.0, 1.0).sample().size(), ())
         self.assertEqual(GeneralizedPareto(1.0, 1.0, 1.0).sample((1,)).size(), (1,))
 
-        def ref_log_prob(idx, x, log_prob):
+        def ref_log_prob(idx: int, x: Tensor, log_prob: Tensor) -> None:
             l = loc.view(-1)[idx].detach()
             s = scale.view(-1)[idx].detach()
             c = concentration.view(-1)[idx].detach()
@@ -3643,7 +3643,7 @@ class TestDistributions(DistributionsTestCase):
         self._check_log_prob(GeneralizedPareto(loc, scale, concentration), ref_log_prob)
 
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
-    def test_generalized_pareto_sample(self):
+    def test_generalized_pareto_sample(self) -> None:
         set_rng_seed(1)  # see note [Randomized statistical tests]
         for loc, scale, concentration in product(
             [-1.0, 0.0, 1.0], [0.1, 1.0, 10.0], [-0.5, 0.0, 0.5]
@@ -3655,7 +3655,7 @@ class TestDistributions(DistributionsTestCase):
                 failure_rate=7e-4,
             )
 
-    def test_gumbel(self):
+    def test_gumbel(self) -> None:
         loc = torch.randn(2, 3, requires_grad=True)
         scale = torch.randn(2, 3).abs().requires_grad_()
         loc_1d = torch.randn(1, requires_grad=True)

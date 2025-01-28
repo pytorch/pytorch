@@ -216,8 +216,8 @@ class _DependentProperty(property, _Dependent, Generic[T, R]):
         self,
         fn: Optional[Callable[[T], R]] = None,
         *,
-        is_discrete: Optional[bool] = NotImplemented,
-        event_dim: Optional[int] = NotImplemented,
+        is_discrete: bool = NotImplemented,
+        event_dim: int = NotImplemented,
     ) -> None:
         property.__init__(self, fn)
         _Dependent.__init__(self, is_discrete=is_discrete, event_dim=event_dim)
@@ -293,7 +293,7 @@ class MixtureSameFamilyConstraint(Constraint):
             the :class:`~torch.distribution.MixtureSameFamily` distribution.
     """
 
-    def __init__(self, base_constraint):
+    def __init__(self, base_constraint: Constraint) -> None:
         assert isinstance(base_constraint, Constraint)
         self.base_constraint = base_constraint
         super().__init__()
@@ -306,7 +306,7 @@ class MixtureSameFamilyConstraint(Constraint):
     def event_dim(self) -> int:  # type: ignore[override]
         return self.base_constraint.event_dim
 
-    def check(self, value):
+    def check(self, value: Tensor) -> Tensor:
         """
         Check validity of ``value`` as a possible outcome of sampling
         the :class:`~torch.distribution.MixtureSameFamily` distribution.
@@ -322,7 +322,7 @@ class MixtureSameFamilyConstraint(Constraint):
         result = result.all(-1)
         return result
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         return f"{self.__class__.__name__}({repr(self.base_constraint)})"
 
 

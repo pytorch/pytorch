@@ -49,8 +49,8 @@ def _batch_mahalanobis(bL: Tensor, bx: Tensor) -> Tensor:
     # Reshape bx with the shape (..., 1, i, j, 1, n)
     bx_new_shape: Size = bx.shape[:outer_batch_dims]
     for sL, sx in zip(bL.shape[:-2], bx.shape[outer_batch_dims:-1]):
-        bx_new_shape += (sx // sL, sL)  # type: ignore[assignment]
-    bx_new_shape += (n,)  # type: ignore[assignment]
+        bx_new_shape += (sx // sL, sL)
+    bx_new_shape += (n,)
     bx = bx.reshape(bx_new_shape)
     # Permute bx to make it have shape (..., 1, j, i, 1, n)
     permute_dims = (

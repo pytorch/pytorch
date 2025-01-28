@@ -8,7 +8,6 @@ from torch.distributions.constraints import Constraint
 from torch.distributions.distribution import Distribution
 from torch.distributions.utils import _sum_rightmost
 from torch.types import _size
-from torch import Tensor
 
 
 __all__ = ["Independent"]
