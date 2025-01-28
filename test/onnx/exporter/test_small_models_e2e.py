@@ -40,9 +40,7 @@ class DynamoExporterTest(common_utils.TestCase):
         ep = torch.export.export(model, (query, key, value), strict=False)
         self.assertNotIn("call_method", str(ep.graph))
 
-        onnx_program = self.export(
-            model, (query, key, value), dynamo=True, fallback=False
-        )
+        onnx_program = self.export(model, (query, key, value))
         onnx_testing.assert_onnx_program(onnx_program, atol=1e-3, rtol=1)
 
     def test_constant_complex(self):
@@ -56,7 +54,7 @@ class DynamoExporterTest(common_utils.TestCase):
             [[1.0 + 2.0j, 3.0 + 4.0j], [5.0 + 6.0j, 7.0 + 8.0j]], dtype=torch.complex64
         )
 
-        onnx_program = self.export(MulModule(), (x,), dynamo=True)
+        onnx_program = self.export(MulModule(), (x,))
         onnx_testing.assert_onnx_program(onnx_program)
 
     def test_pow_does_not_trigger_type_promotion(self):
@@ -66,7 +64,7 @@ class DynamoExporterTest(common_utils.TestCase):
 
         x = torch.tensor([1.0, 2.0, 3.0], dtype=torch.float16)
 
-        onnx_program = self.export(Model(), (x,), dynamo=True)
+        onnx_program = self.export(Model(), (x,))
         onnx_testing.assert_onnx_program(onnx_program)
         self.assertNotIn("Cast", [node.op_type for node in onnx_program.model.graph])
 
@@ -82,12 +80,7 @@ class DynamoExporterTest(common_utils.TestCase):
                 y = torch.cond(x.sum() > 0, true_fn, false_fn, [x])
                 return y
 
-        onnx_program = self.export(
-            CondModel(),
-            (torch.tensor([1, 2]),),
-            dynamo=True,
-            fallback=False,
-        )
+        onnx_program = self.export(CondModel(), (torch.tensor([1, 2]),))
         onnx_model = onnx_program.model
         self.assertIn("If", [node.op_type for node in onnx_model.graph])
         onnx_testing.assert_onnx_program(onnx_program)
@@ -127,12 +120,7 @@ class DynamoExporterTest(common_utils.TestCase):
                 y = torch.cond(x.sum() > 0, true_fn, false_fn, [x])
                 return y
 
-        onnx_program = self.export(
-            CondModel(),
-            (torch.tensor([1, 2]),),
-            dynamo=True,
-            fallback=False,
-        )
+        onnx_program = self.export(CondModel(), (torch.tensor([1, 2]),))
         onnx_testing.assert_onnx_program(onnx_program)
         onnx_testing.assert_onnx_program(onnx_program, args=(torch.tensor([0, 0]),))
         onnx_testing.assert_onnx_program(onnx_program, args=(torch.tensor([43, 43]),))
@@ -151,7 +139,7 @@ class DynamoExporterTest(common_utils.TestCase):
             torch.tensor([0.1, 0.2]),
             0,
         )
-        onnx_program = self.export(VisionModel(), args, dynamo=True)
+        onnx_program = self.export(VisionModel(), args)
         onnx_testing.assert_onnx_program(onnx_program)
 
     # TODO(justinchuby): Test multi-output HOPs
@@ -215,7 +203,7 @@ class DynamoExporterTest(common_utils.TestCase):
         class Float8Module(torch.nn.Module):
             def forward(self, input: torch.Tensor):
                 input = input.to(float8_type)
-                return input + torch.tensor(1.0, dtype=float8_type)
+                return input
 
         _ = self.export(Float8Module(), (torch.randn(1, 2),))
 
