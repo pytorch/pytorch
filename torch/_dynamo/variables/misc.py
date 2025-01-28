@@ -1591,9 +1591,6 @@ class RandomClassVariable(VariableTracker):
     def __init__(self, **kwargs) -> None:
         super().__init__(**kwargs)
 
-    def as_python_constant(self):
-        return random.Random
-
     def call_function(self, tx: "InstructionTranslator", args, kwargs):
         if len(args) > 1:
             unimplemented("random.Random() with > 1 arg")
