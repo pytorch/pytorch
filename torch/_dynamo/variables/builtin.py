@@ -717,11 +717,11 @@ class BuiltinVariable(VariableTracker):
             return DTYPE[self.fn]
         return super().as_proxy()
 
-    def reconstruct(self, codegen):
+    def reconstruct(self, codegen: "torch._dynamo.codegen.PyCodegen"):
         name = self.fn.__name__
         assert self.fn.__module__ == "builtins"
         assert name not in codegen.tx.f_globals, "shadowed global"
-        codegen.append_output(codegen.create_load_global(name, False, add=True))
+        codegen.append_output(codegen.create_load_global(name, add=True))
 
     def constant_args(self, *args, **kwargs):
         return check_constant_args(args, kwargs)
