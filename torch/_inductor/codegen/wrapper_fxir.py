@@ -61,6 +61,12 @@ class WrapperFxCodegen(PythonWrapperCodegen):
         self.buffer_to_node: Dict[MemoryPlanningLine, torch.fx.Node] = {} # Symbol table for codegen.
         kernels = {} # Table to store Triton kernels.
 
+    @staticmethod
+    def create(
+        is_subgraph: bool, subgraph_name: str, parent_wrapper: PythonWrapperCodegen
+    ):
+        return WrapperFxCodegen()
+
     def _import_kernel(kernel_name: str, code: str) -> types.ModuleType:
         """
         Imports a kernel as a python module.
