@@ -4,7 +4,6 @@ import glob
 import importlib
 import importlib.abc
 import os
-import platform
 import re
 import shlex
 import shutil
@@ -23,7 +22,7 @@ from .file_baton import FileBaton
 from ._cpp_extension_versioner import ExtensionVersioner
 from .hipify import hipify_python
 from .hipify.hipify_python import GeneratedFileCleaner
-from typing import Dict, List, Optional, Union, Tuple
+from typing import Optional, Union
 from torch.torch_version import TorchVersion, Version
 
 from setuptools.command.build_ext import build_ext
@@ -46,8 +45,8 @@ SUBPROCESS_DECODE_ARGS = ('oem',) if IS_WINDOWS else ()
 MINIMUM_GCC_VERSION = (5, 0, 0)
 MINIMUM_MSVC_VERSION = (19, 0, 24215)
 
-VersionRange = Tuple[Tuple[int, ...], Tuple[int, ...]]
-VersionMap = Dict[str, VersionRange]
+VersionRange = tuple[tuple[int, ...], tuple[int, ...]]
+VersionMap = dict[str, VersionRange]
 # The following values were taken from the following GitHub gist that
 # summarizes the minimum valid major versions of g++/clang++ for each supported
 # CUDA version: https://gist.github.com/ax3l/9489132
@@ -80,7 +79,7 @@ __all__ = ["get_default_build_root", "check_compiler_ok_for_platform", "get_comp
            "verify_ninja_availability", "remove_extension_h_precompiler_headers", "get_cxx_compiler", "check_compiler_is_gcc"]
 # Taken directly from python stdlib < 3.9
 # See https://github.com/pytorch/pytorch/issues/48617
-def _nt_quote_args(args: Optional[List[str]]) -> List[str]:
+def _nt_quote_args(args: Optional[list[str]]) -> list[str]:
     """Quote command-line arguments for DOS/Windows conventions.
 
     Just wraps every argument which contains blanks in double quotes, and
@@ -301,7 +300,7 @@ def _is_binary_build() -> bool:
     return not BUILT_FROM_SOURCE_VERSION_PATTERN.match(torch.version.__version__)
 
 
-def _accepted_compilers_for_platform() -> List[str]:
+def _accepted_compilers_for_platform() -> list[str]:
     # gnu-c++ and gnu-cc are the conda gcc compilers
     return ['clang++', 'clang'] if IS_MACOS else ['g++', 'gcc', 'gnu-c++', 'gnu-cc', 'clang++', 'clang']
 
@@ -380,7 +379,7 @@ def check_compiler_ok_for_platform(compiler: str) -> bool:
     return False
 
 
-def get_compiler_abi_compatibility_and_version(compiler) -> Tuple[bool, TorchVersion]:
+def get_compiler_abi_compatibility_and_version(compiler) -> tuple[bool, TorchVersion]:
     """
     Determine if the given compiler is ABI-compatible with PyTorch alongside its version.
 
@@ -924,7 +923,7 @@ class BuildExtension(build_ext):
             ext_filename = '.'.join(without_abi)
         return ext_filename
 
-    def _check_abi(self) -> Tuple[str, TorchVersion]:
+    def _check_abi(self) -> tuple[str, TorchVersion]:
         # On some platforms, like Windows, compiler_cxx is not available.
         if hasattr(self.compiler, 'compiler_cxx'):
             compiler = self.compiler.compiler_cxx[0]
@@ -1015,7 +1014,7 @@ def CppExtension(name, sources, *args, **kwargs):
     if not kwargs.get('py_limited_api', False):
         # torch_python uses more than the python limited api
         libraries.append('torch_python')
-    if IS_WINDOWS and platform.machine().lower() != "arm64":
+    if IS_WINDOWS:
         libraries.append("sleef")
 
     kwargs['libraries'] = libraries
@@ -1207,7 +1206,7 @@ def CUDAExtension(name, sources, *args, **kwargs):
     return setuptools.Extension(name, sources, *args, **kwargs)
 
 
-def include_paths(device_type: str = "cpu") -> List[str]:
+def include_paths(device_type: str = "cpu") -> list[str]:
     """
     Get the include paths required to build a C++ or CUDA or SYCL extension.
 
@@ -1221,10 +1220,6 @@ def include_paths(device_type: str = "cpu") -> List[str]:
         lib_include,
         # Remove this once torch/torch.h is officially no longer supported for C++ extensions.
         os.path.join(lib_include, 'torch', 'csrc', 'api', 'include'),
-        # Some internal (old) Torch headers don't properly prefix their includes,
-        # so we need to pass -Itorch/lib/include/TH as well.
-        os.path.join(lib_include, 'TH'),
-        os.path.join(lib_include, 'THC')
     ]
     if device_type == "cuda" and IS_HIP_EXTENSION:
         paths.append(os.path.join(lib_include, 'THH'))
@@ -1248,7 +1243,7 @@ def include_paths(device_type: str = "cpu") -> List[str]:
     return paths
 
 
-def library_paths(device_type: str = "cpu") -> List[str]:
+def library_paths(device_type: str = "cpu") -> list[str]:
     """
     Get the library paths required to build a C++ or CUDA extension.
 
@@ -1296,7 +1291,7 @@ def library_paths(device_type: str = "cpu") -> List[str]:
 
 
 def load(name,
-         sources: Union[str, List[str]],
+         sources: Union[str, list[str]],
          extra_cflags=None,
          extra_cuda_cflags=None,
          extra_ldflags=None,
@@ -1834,7 +1829,7 @@ def _jit_compile(name,
 
 
 def _write_ninja_file_and_compile_objects(
-        sources: List[str],
+        sources: list[str],
         objects,
         cflags,
         post_cflags,
@@ -1886,7 +1881,7 @@ def _write_ninja_file_and_compile_objects(
 
 def _write_ninja_file_and_build_library(
         name,
-        sources: List[str],
+        sources: list[str],
         extra_cflags,
         extra_cuda_cflags,
         extra_ldflags,
@@ -2014,7 +2009,7 @@ def _prepare_ldflags(extra_ldflags, with_cuda, verbose, is_standalone):
     return extra_ldflags
 
 
-def _get_cuda_arch_flags(cflags: Optional[List[str]] = None) -> List[str]:
+def _get_cuda_arch_flags(cflags: Optional[list[str]] = None) -> list[str]:
     """
     Determine CUDA arch flags to use.
 
@@ -2050,12 +2045,13 @@ def _get_cuda_arch_flags(cflags: Optional[List[str]] = None) -> List[str]:
         ('Ampere', '8.0;8.6+PTX'),
         ('Ada', '8.9+PTX'),
         ('Hopper', '9.0+PTX'),
-        ('Blackwell', '10.0+PTX'),
+        ('Blackwell+Tegra', '10.1'),
+        ('Blackwell', '10.0;12.0+PTX'),
     ])
 
     supported_arches = ['3.5', '3.7', '5.0', '5.2', '5.3', '6.0', '6.1', '6.2',
                         '7.0', '7.2', '7.5', '8.0', '8.6', '8.7', '8.9', '9.0', '9.0a',
-                        '10.0']
+                        '10.0', '10.0a', '10.1', '10.1a', '12.0', '12.0a']
     valid_arch_strings = supported_arches + [s + "+PTX" for s in supported_arches]
 
     # The default is sm_30 for CUDA 9.x and 10.x
@@ -2112,7 +2108,7 @@ def _get_cuda_arch_flags(cflags: Optional[List[str]] = None) -> List[str]:
     return sorted(set(flags))
 
 
-def _get_rocm_arch_flags(cflags: Optional[List[str]] = None) -> List[str]:
+def _get_rocm_arch_flags(cflags: Optional[list[str]] = None) -> list[str]:
     # If cflags is given, there may already be user-provided arch flags in it
     # (from `extra_compile_args`)
     if cflags is not None:

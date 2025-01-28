@@ -58,7 +58,7 @@ class TestSetLinter(LinterTestCase):
             ),
             ("f'{a}'", {}),
         )
-        for i, (s, expected) in enumerate(TESTS):
+        for s, expected in TESTS:
             pf = SetLinter.make_file(s)
             if s:
                 actual = pf._lines_with_sets[0].bracket_pairs
@@ -78,7 +78,7 @@ class TestSetLinter(LinterTestCase):
             ("{1, 2}", 1),
             ("{One({'a': 1}), Two([{}, {2}, {1, 2}])}", 3),
         )
-        for i, (s, expected) in enumerate(TESTS):
+        for s, expected in TESTS:
             pf = SetLinter.make_file(s)
             actual = pf._lines_with_sets and pf._lines_with_sets[0].braced_sets
             self.assertEqual(len(actual), expected)
