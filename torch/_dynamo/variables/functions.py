@@ -323,6 +323,30 @@ class UserFunctionVariable(BaseUserFunctionVariable):
         return super().call_function(tx, args, kwargs)
 
 
+class BuiltinMethodVariable(BaseUserFunctionVariable):
+    def __init__(self, fn, is_constant=False, **kwargs) -> None:
+        super().__init__(**kwargs)
+        assert isinstance(fn, types.BuiltinMethodType)
+        self.fn = fn
+
+    @staticmethod
+    @functools.lru_cache(None)
+    def supported_methods():
+        return {tuple.__new__}
+
+    def call_function(
+        self,
+        tx: "InstructionTranslator",
+        args: "list[VariableTracker]",
+        kwargs: "dict[str, VariableTracker]",
+    ) -> "VariableTracker":
+        method_self = self.fn.__self__
+        name = self.fn.__name__
+        return variables.BuiltinVariable(method_self).call_method(
+            tx, name, args, kwargs
+        )
+
+
 class FunctionDecoratedByContextlibContextManagerVariable(BaseUserFunctionVariable):
     # TODO(guilherme): replace this with a generic GeneratorFunctionVariable
 
