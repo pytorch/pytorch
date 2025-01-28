@@ -1619,8 +1619,11 @@ class PythonWrapperCodegen(CodeGen):
                     if triton_version_uses_attrs_dict():
                         # new versions of triton: add the equal-to-1 arg in the signature (labeled as "constexpr"),
                         #                         and add the arg as a constant.
-                        # old versions of triton: add the equal-to-1 arg as a constant, but not in the signature.
+                        # new versions of triton: add the equal-to-1 arg in the signature (labeled as, e.g., "i32"),
+                        #                         and add the arg as a constant.
                         add_to_signature(idx, ConstexprArg(name=arg.name))
+                    else:
+                        add_to_signature(idx, arg)
                     constants[arg.name] = 1
                 elif equals_none:
                     if triton_version_uses_attrs_dict():
