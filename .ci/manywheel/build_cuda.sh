@@ -52,6 +52,10 @@ cuda_version_nodot=$(echo $CUDA_VERSION | tr -d '.')
 
 TORCH_CUDA_ARCH_LIST="5.0;6.0;7.0;7.5;8.0;8.6"
 case ${CUDA_VERSION} in
+    12.8)
+        TORCH_CUDA_ARCH_LIST="${TORCH_CUDA_ARCH_LIST};9.0;10.0;12.0+PTX"
+        EXTRA_CAFFE2_CMAKE_FLAGS+=("-DATEN_NO_TEST=ON")
+        ;;
     12.6)
         TORCH_CUDA_ARCH_LIST="${TORCH_CUDA_ARCH_LIST};9.0+PTX"
         EXTRA_CAFFE2_CMAKE_FLAGS+=("-DATEN_NO_TEST=ON")
@@ -114,7 +118,8 @@ if [[ $USE_CUSPARSELT == "1" && $CUDA_VERSION == "11.8" ]]; then
         )
 fi
 
-if [[ $CUDA_VERSION == "12.4" || $CUDA_VERSION == "12.6" ]]; then
+# CUDA_VERSION 12.4, 12.6, 12.8
+if [[ $CUDA_VERSION == 12* ]]; then
     export USE_STATIC_CUDNN=0
     # Try parallelizing nvcc as well
     export TORCH_NVCC_FLAGS="-Xfatbin -compress-all --threads 2"
