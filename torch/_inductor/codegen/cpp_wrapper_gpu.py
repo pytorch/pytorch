@@ -561,8 +561,6 @@ class CppWrapperGpu(CppWrapperCpu):
                 triton_meta is not None
                 and triton_meta.get("configs")
                 and triton_meta.get("signature")
-                # newer versions of triton just use a dict (and include equal_to_1 in signature)
-                and hasattr(triton_meta.get("configs")[0], "equal_to_1")
             ):
                 equal_to_1 = triton_meta["configs"][0].equal_to_1
                 call_args = [
