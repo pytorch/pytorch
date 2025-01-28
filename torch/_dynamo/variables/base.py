@@ -382,7 +382,9 @@ class VariableTracker(metaclass=VariableTrackerMeta):
     def inspect_parameter_names(self) -> list[str]:
         unimplemented(f"inspect_parameter_names: {self}")
 
-    def call_hasattr(self, tx: "InstructionTranslator", name: str) -> "VariableTracker":
+    def call_obj_hasattr(
+        self, tx: "InstructionTranslator", name: str
+    ) -> "VariableTracker":
         unimplemented(f"hasattr {self.__class__.__name__} {name}")
 
     def call_function(
