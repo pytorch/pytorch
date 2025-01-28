@@ -10,6 +10,7 @@ import enum
 import functools
 import importlib
 import inspect
+import logging
 import multiprocessing
 import operator
 import os
@@ -3153,6 +3154,7 @@ BUILTIN_SKIPLIST = (
     enum,
     importlib,
     inspect,
+    logging,
     multiprocessing,
     operator,
     threading,
