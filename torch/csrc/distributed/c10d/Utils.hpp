@@ -106,7 +106,7 @@ inline std::string getCvarString(
    * versions of the same variable */
   for (ssize_t i = static_cast<ssize_t>(env.size()) - 1; i >= 0; i--) {
     auto val = c10::utils::get_env(env[i].c_str());
-    if (!val) {
+    if (!val.has_value()) {
       continue;
     } else if (i) {
       WARN_ENV_VAR_ONCE(env[i], env[0]);
