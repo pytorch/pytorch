@@ -250,8 +250,11 @@ constexpr int MZ_ZIP_LDH_EXTRA_LEN_OFS = 28;
 constexpr int MZ_ZIP_DATA_DESCRIPTOR_ID = 0x08074b50;
 
 namespace detail {
-
-std::tuple<size_t, size_t> getOffset(size_t cursor, size_t filename_size, size_t size) {
+size_t getPadding(
+    size_t cursor,
+    size_t filename_size,
+    size_t size,
+    std::string& padding_buf) {
   size_t start = cursor + MZ_ZIP_LOCAL_DIR_HEADER_SIZE + filename_size +
       sizeof(mz_uint16) * 2;
   if (size >= MZ_UINT32_MAX || cursor >= MZ_UINT32_MAX) {
@@ -265,16 +268,6 @@ std::tuple<size_t, size_t> getOffset(size_t cursor, size_t filename_size, size_t
   }
   size_t mod = start % kFieldAlignment;
   size_t next_offset = (mod == 0) ? start : (start + kFieldAlignment - mod);
-  std::tuple<size_t, size_t> result(next_offset, start);
-  return result;
-}
-
-size_t getPadding(
-    size_t cursor,
-    size_t filename_size,
-    size_t size,
-    std::string& padding_buf) {
-  auto [next_offset, start] = getOffset(cursor, filename_size, size);
   size_t padding_size = next_offset - start;
   size_t padding_size_plus_fbxx = padding_size + 4;
   if (padding_buf.size() < padding_size_plus_fbxx) {
@@ -615,17 +608,6 @@ size_t PyTorchStreamReader::getRecordSize(const std::string& name) {
   mz_zip_archive_file_stat stat;
   mz_zip_reader_file_stat(ar_.get(), getRecordID(name), &stat);
   return stat.m_uncomp_size;
-}
-
-size_t PyTorchStreamReader::getRecordOffsetNoRead(
-    size_t cursor,
-    std::string filename,
-    size_t size) {
-  std::string full_name = archive_name_plus_slash_ + filename;
-  size_t full_name_size = full_name.size();
-  std::tuple<size_t, size_t> result = detail::getOffset(cursor, full_name_size, size);
-  size_t offset = std::get<0>(result);
-  return offset;
 }
 
 PyTorchStreamReader::~PyTorchStreamReader() {
