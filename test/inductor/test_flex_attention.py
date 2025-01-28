@@ -3922,7 +3922,7 @@ BlockMask(shape=(1,s1,s2048,s2048),ssparsity=46.88%,s
         def score_mod(score, b, h, q_idx, kv_idx):
             return score + torch.log(mass[0])
 
-        out = torch.compile(flex_attention)(q, k, v, score_mod=score_mod)
+        torch.compile(flex_attention)(q, k, v, score_mod=score_mod)
 
     @supported_platform
     def test_init_mismatched_full_kv(self):
