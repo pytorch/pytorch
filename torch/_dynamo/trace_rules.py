@@ -15,13 +15,11 @@ import logging
 import multiprocessing
 import operator
 import os
-import posixpath
 import re
 import selectors
 import sys
 import tempfile
 import threading
-import tokenize
 import traceback
 import types
 import typing
@@ -3163,11 +3161,9 @@ BUILTIN_SKIPLIST = (
     logging,
     multiprocessing,
     operator,
-    posixpath,
     selectors,
     tempfile,
     threading,
-    tokenize,
     traceback,
     types,
     typing,
