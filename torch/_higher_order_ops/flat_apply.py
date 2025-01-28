@@ -1,3 +1,4 @@
+from weakref import proxy
 import torch
 import torch.fx.node
 import torch.utils._pytree as pytree
@@ -47,92 +48,66 @@ def unflatten(graphable_flat_args, spec, non_graphable):
 def plop_in_graph(f):
     def inner(*args, **kwargs):
         flat_args, spec, non_graphable = flatten((args, kwargs))
-
-        f_key = side_table.add(f)
-        in_spec = side_table.add((spec, non_graphable))
+        f_key = ConstantHolder(f)
+        in_spec = ConstantHolder((spec, non_graphable))
         return flat_apply(f_key, in_spec, *flat_args)
 
     return inner
 
 
-class SideTableKey:
-    def __init__(self, idx):
-        self.idx = idx
-
-    def __repr__(self):
-        return f"torch._higher_order_ops.flat_apply.SideTableKey({self.idx})"
-
-    def __hash__(self):
-        return self.idx
-
-    def __eq__(self, other):
-        return self.idx == other.idx
-
-
-class SideTable:
-    def __init__(self):
-        self.table = {}
-        self.count = 0
-
-    def add(self, value):
-        key = SideTableKey(self.count)
-        self.count += 1
-        self.table[key] = value
-        return key
-
-    def get(self, key):
-        if key not in self.table:
-            breakpoint()
-        return self.table[key]
-
-    def maybe_get(self, key):
-        if isinstance(key, SideTableKey):
-            return self.get(key)
-        return key
-
-
-side_table = SideTable()
+class ConstantHolder:
+    def __init__(self, value):
+        self.value = value
 
 
 class FlatApply(HigherOrderOperator):
     def __init__(self) -> None:
         super().__init__("flat_apply")
 
-    def __call__(self, func_key, in_spec_key, *args):
+    def __call__(self, func_holder, in_spec_holder, *args):
         """
-        The semantics of flat_apply(func_key, in_spec_key, *args) is the following:
+        The semantics of flat_apply(func_holder, in_spec_holder, *args) is the following:
 
-        >>> func = sidetable.get(func_key)
-        >>> in_spec = sidetable.get(in_spec_key)
+        >>> func = func_holder.value
+        >>> in_spec = in_spec_holder.vallue
         >>> args, kwargs = unflatten(args, in_spec)
         >>> output = func(*args, **kwargs)
         >>> return output
 
         TODO: We're also going to need a out_spec (to handle pytree output types).
         """
-        return super().__call__(func_key, in_spec_key, *args)
+        return super().__call__(func_holder, in_spec_holder, *args)
 
 
 flat_apply = FlatApply()
 
 
 @flat_apply.py_impl(DispatchKey.CompositeExplicitAutograd)
-def decomp(func_key, in_spec_key, *args):
-    func = side_table.get(func_key)
-    in_spec = side_table.get(in_spec_key)
+def decomp(func_holder, in_spec_holder, *args):
+    func = func_holder.value
+    in_spec = in_spec_holder.value
     args, kwargs = unflatten(args, *in_spec)
     out = func(*args, **kwargs)
     return out
 
 
 @flat_apply.py_impl(ProxyTorchDispatchMode)
-def _(proxy_mode, func_key, in_spec_key, *args):
-    node_args = (func_key, in_spec_key, *args)
+def _(proxy_mode, func_holder, in_spec_holder, *args):
+
+    qualname = proxy_mode.tracer.get_fresh_qualname("func_holder")
+    setattr(proxy_mode.tracer.root, qualname, func_holder)
+    func_proxy = proxy_mode.tracer.create_proxy("get_attr", qualname, (), {})
+
+    qualname = proxy_mode.tracer.get_fresh_qualname("in_spec_holder")
+    setattr(proxy_mode.tracer.root, qualname, in_spec_holder)
+    in_spec_proxy = proxy_mode.tracer.create_proxy("get_attr", qualname, (), {})
+
+    node_args = (func_proxy, in_spec_proxy, *args)
     proxy_args = pytree.tree_map(proxy_mode.tracer.unwrap_proxy, node_args)
     out_proxy = proxy_mode.tracer.create_proxy(
         "call_function", flat_apply, proxy_args, {}
     )
-    out = decomp(func_key, in_spec_key, *args)
+    out = decomp(func_holder, in_spec_holder, *args)
     return track_tensor_tree(
         out, out_proxy, constant=None, tracer=proxy_mode.tracer  # type: ignore[arg-type]
     )
