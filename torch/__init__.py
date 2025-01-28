@@ -312,20 +312,21 @@ def _load_global_deps() -> None:
 
     try:
         ctypes.CDLL(global_deps_lib_path, mode=ctypes.RTLD_GLOBAL)
-        # Workaround slim-wheel CUDA-12.4+ dependency bug in libcusparse by preloading nvjitlink
-        # In those versions of cuda cusparse depends on nvjitlink, but does not have rpath when
+        # Workaround slim-wheel CUDA dependency bugs in cusparse and cudnn by preloading nvjitlink
+        # and nvrtc. In CUDA-12.4+ cusparse depends on nvjitlink, but does not have rpath when
         # shipped as wheel, which results in OS picking wrong/older version of nvjitlink library
-        # if `LD_LIBRARY_PATH` is defined
-        # See https://github.com/pytorch/pytorch/issues/138460
-        if version.cuda not in ["12.4", "12.6"]:  # type: ignore[name-defined]
-            return
+        # if `LD_LIBRARY_PATH` is defined, see https://github.com/pytorch/pytorch/issues/138460
+        # Similar issue exist in cudnn that dynamically loads nvrtc, unaware of its relative path.
+        # See https://github.com/pytorch/pytorch/issues/145580
         try:
             with open("/proc/self/maps") as f:
                 _maps = f.read()
             # libtorch_global_deps.so always depends in cudart, check if its installed via wheel
             if "nvidia/cuda_runtime/lib/libcudart.so" not in _maps:
                 return
-            # If all abovementioned conditions are met, preload nvjitlink
+            # If all above-mentioned conditions are met, preload nvrtc and nvjitlink
+            # Please note that order are important for CUDA-11.8 , as nvjitlink does not exist there
+            _preload_cuda_deps("cuda_nvrtc", "libnvrtc.so.*[0-9]")
             _preload_cuda_deps("nvjitlink", "libnvJitLink.so.*[0-9]")
         except Exception:
             pass
