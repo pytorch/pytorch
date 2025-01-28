@@ -645,12 +645,13 @@ class TestGeneratorSend(GeneratorTestsBase):
         y = fn(t)
         self.assertEqual(y, t * 2)
 
-    def test_send_stop_iteration(self):
+    @parametrize("fullgraph", [True, False])
+    def test_send_stop_iteration(self, fullgraph):
         def double():
             x = yield
             yield x * 2
 
-        @torch.compile(backend="eager", fullgraph=True)
+        @torch.compile(backend="eager", fullgraph=fullgraph)
         def fn(t):
             gen = double()
             next(gen)
@@ -659,8 +660,12 @@ class TestGeneratorSend(GeneratorTestsBase):
             return a + b
 
         t = torch.randn(2)
-        with self.assertRaisesRegex(Unsupported, "Observed exception"):
-            fn(t)
+        if fullgraph:
+            with self.assertRaisesRegex(Unsupported, "Observed exception"):
+                fn(t)
+        else:
+            with self.assertRaises(StopIteration):
+                fn(t)
 
 
 class GeneratorCPythonTests(GeneratorTestsBase):
@@ -710,6 +715,7 @@ class GeneratorCPythonTests(GeneratorTestsBase):
 
 
 instantiate_parametrized_tests(GeneratorTests)
+instantiate_parametrized_tests(TestGeneratorSend)
 
 
 if __name__ == "__main__":
