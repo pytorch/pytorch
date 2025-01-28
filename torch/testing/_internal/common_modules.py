@@ -222,6 +222,9 @@ class ModuleInfo:
                                                       # channels last output
                  train_and_eval_differ=False,  # whether the module has differing behavior between train and eval
                  module_error_inputs_func=None,  # Function to generate module inputs that error
+                 gradcheck_fast_mode=None,  # Whether to use the fast implmentation for gradcheck/gradgradcheck.
+                                            # When set to None, defers to the default value provided by the wrapper
+                                            # function around gradcheck (testing._internal.common_utils.gradcheck)
                  ):
         self.module_cls = module_cls
         self.module_inputs_func = module_inputs_func
@@ -234,6 +237,7 @@ class ModuleInfo:
         self.module_memformat_affects_out = module_memformat_affects_out
         self.train_and_eval_differ = train_and_eval_differ
         self.module_error_inputs_func = module_error_inputs_func
+        self.gradcheck_fast_mode = gradcheck_fast_mode
         self.is_lazy = issubclass(module_cls, torch.nn.modules.lazy.LazyModuleMixin)
 
     def get_decorators(self, test_class, test_name, device, dtype, param_kwargs):
@@ -4179,6 +4183,9 @@ module_db: list[ModuleInfo] = [
                ),
     ModuleInfo(torch.nn.Transformer,
                module_inputs_func=module_inputs_torch_nn_Transformer,
+               # Inputs are too large to run with slow gradcheck
+               # https://github.com/pytorch/pytorch/issues/117140
+               gradcheck_fast_mode=True,
                decorators=[
                    # Not implemented for SDPA backward derivative
                    DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_gradgrad',
