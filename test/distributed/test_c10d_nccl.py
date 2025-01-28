@@ -27,7 +27,6 @@ if not c10d.is_available() or not c10d.is_nccl_available():
     print("c10d NCCL not available, skipping tests", file=sys.stderr)
     sys.exit(0)
 
-from typing import Dict, List
 
 import test_c10d_common
 from test_c10d_common import ConvNet, DoubleGpuNet, gpus_for_rank, ModuleForDdpCommHook
@@ -38,7 +37,7 @@ import torch.distributed.algorithms.ddp_comm_hooks.powerSGD_hook as powerSGD
 import torch.nn.functional as F
 import torch.testing._internal.common_utils as common
 from torch import nn
-from torch._C._distributed_c10d import OpType, WorkResult
+from torch._C._distributed_c10d import ErrorType, OpType, WorkResult
 from torch.nn.parallel import DistributedDataParallel
 from torch.testing._internal.common_cuda import TEST_MULTIGPU
 from torch.testing._internal.common_distributed import (
@@ -2546,7 +2545,7 @@ class WorkHookTest(MultiProcessTestCase):
     def test_on_completion_hook_broadcast(self):
         pg = self._get_process_group()
         num_hook_fired = 0
-        durations: List[float] = []
+        durations: list[float] = []
 
         def hook(work_info: torch._C._distributed_c10d.WorkInfo):
             nonlocal num_hook_fired, durations
@@ -2574,7 +2573,7 @@ class WorkHookTest(MultiProcessTestCase):
     def test_on_completion_hook_mixed_ops(self):
         pg = self._get_process_group()
         num_hook_fired = 0
-        durations: List[float] = []
+        durations: list[float] = []
 
         def hook(work_info: torch._C._distributed_c10d.WorkInfo):
             nonlocal num_hook_fired, durations
@@ -2615,8 +2614,8 @@ class WorkHookTest(MultiProcessTestCase):
     @skip_if_lt_x_gpu(2)
     def test_on_completion_hook_with_ddp(self):
         pg = self._get_process_group()
-        num_hook_fired: Dict[int, int] = {}
-        durations: Dict[OpType, List[float]] = {}
+        num_hook_fired: dict[int, int] = {}
+        durations: dict[OpType, list[float]] = {}
 
         def hook(work_info: torch._C._distributed_c10d.WorkInfo):
             nonlocal num_hook_fired, durations
@@ -2673,8 +2672,8 @@ class WorkHookTest(MultiProcessTestCase):
         torch.cuda.set_device(self.rank)
 
         pg = self._get_process_group()
-        num_hook_fired: Dict[int, int] = {}
-        durations: Dict[OpType, List[float]] = {}
+        num_hook_fired: dict[int, int] = {}
+        durations: dict[OpType, list[float]] = {}
 
         def hook(work_info: torch._C._distributed_c10d.WorkInfo):
             nonlocal num_hook_fired, durations
@@ -2920,7 +2919,7 @@ class NcclErrorHandlingTest(MultiProcessTestCase):
     @requires_nccl()
     @requires_nccl_version((2, 4, 0), "Need NCCL 2.4+ for error checking")
     @skip_if_lt_x_gpu(3)
-    def test_get_future_result(self):
+    def test_error_detection_and_propagation(self):
         def assert_fut_success(fut):
             self.assertEqual(WorkResult(fut.value()), WorkResult.SUCCESS)
 
@@ -2930,6 +2929,7 @@ class NcclErrorHandlingTest(MultiProcessTestCase):
         )
         # avoid watchdog thread interference
         os.environ["TORCH_NCCL_ASYNC_ERROR_HANDLING"] = "0"
+        os.environ["TORCH_NCCL_PROPAGATE_ERROR"] = "1"
         # set heartbeat timeout to a small value so that we don't wait too long for things to shutdown
         os.environ["TORCH_NCCL_HEARTBEAT_TIMEOUT_SEC"] = "5"
         store = c10d.FileStore(self.file_name, self.world_size)
@@ -2939,6 +2939,7 @@ class NcclErrorHandlingTest(MultiProcessTestCase):
             self.world_size,
             timeout=timedelta(seconds=2),
         )
+        self.assertEqual(process_group.get_error(), ErrorType.SUCCESS)
         barrier_work = process_group.barrier()
         barrier_work.wait()
         barrier_result = barrier_work.get_future_result().wait()
@@ -2953,13 +2954,95 @@ class NcclErrorHandlingTest(MultiProcessTestCase):
             work.wait()
             result = work.get_future_result().wait()
             self.assertEqual(WorkResult(result), WorkResult.TIMEOUT)
+            self.assertEqual(process_group.get_error(), ErrorType.TIMEOUT)
         else:
             # other ranks not exiting before rank 0 timeout, this is to avoid
             # nccl error happening before rank 0 timeouts
             time.sleep(4)
+            self.assertEqual(process_group.get_error(), ErrorType.REMOTE_ERROR)
 
         # Mimicing all ranks sensing the timeout, abort
         process_group.abort()
+
+        if prev_nccl_async_error_handling is not None:
+            os.environ[
+                "TORCH_NCCL_ASYNC_ERROR_HANDLING"
+            ] = prev_nccl_async_error_handling
+
+    @requires_nccl()
+    @requires_nccl_version((2, 4, 0), "Need NCCL 2.4+ for error checking")
+    @skip_if_rocm_multiprocess
+    @skip_if_lt_x_gpu(3)
+    def test_restart_pg_after_error(self):
+        # test the barrier behavior in the non blocking wait setting
+        prev_nccl_async_error_handling = os.environ.get(
+            "TORCH_NCCL_ASYNC_ERROR_HANDLING", None
+        )
+        # avoid FR dumping logic during restart
+        os.environ["TORCH_NCCL_DUMP_ON_TIMEOUT"] = "0"
+        # avoid watchdog thread interference
+        os.environ["TORCH_NCCL_ASYNC_ERROR_HANDLING"] = "0"
+        os.environ["TORCH_NCCL_PROPAGATE_ERROR"] = "1"
+        store = c10d.FileStore(self.file_name, self.world_size)
+        device = torch.device(f"cuda:{self.rank % torch.cuda.device_count()}")
+        # initialize pg for the first time
+        c10d.init_process_group(
+            "nccl",
+            timeout=timedelta(seconds=2),
+            world_size=self.world_size,
+            rank=self.rank,
+            store=store,
+        )
+        pg = c10d.distributed_c10d._get_default_group()
+        nccl_backend = pg._get_backend(torch.device(device))
+        self.assertEqual(nccl_backend.get_error(), ErrorType.SUCCESS)
+        barrier_work = nccl_backend.barrier()
+        barrier_work.wait()
+        barrier_result = barrier_work.get_future_result().wait()
+        self.assertEqual(WorkResult(barrier_result), WorkResult.SUCCESS)
+        self.assertEqual(nccl_backend.get_error(), ErrorType.SUCCESS)
+        if self.rank == 0:
+            work = nccl_backend.allreduce(torch.rand(10).cuda(self.rank))
+            work.wait()
+            result = work.get_future_result().wait()
+            self.assertEqual(WorkResult(result), WorkResult.TIMEOUT)
+            self.assertEqual(nccl_backend.get_error(), ErrorType.TIMEOUT)
+            # we need a brand new fileStore for the new PG
+            # the new file name is shared through the old fileStore
+            new_file_name = tempfile.NamedTemporaryFile(delete=False).name
+            store.set("file", new_file_name)
+        else:
+            # other ranks not exiting before rank 0 timeout, this is to avoid
+            # nccl error happening before rank 0 timeouts
+            time.sleep(4)
+            self.assertEqual(nccl_backend.get_error(), ErrorType.REMOTE_ERROR)
+            new_file_name = store.get("file").decode()
+
+        # all ranks restart using a new store after detecting the timeout error
+        nccl_backend.abort()
+        dist.destroy_process_group()
+
+        new_store = c10d.FileStore(new_file_name, self.world_size)
+        # re-initialize pg
+        c10d.init_process_group(
+            "nccl",
+            world_size=self.world_size,
+            rank=self.rank,
+            store=new_store,
+        )
+
+        new_pg = c10d.distributed_c10d._get_default_group()
+        new_nccl_backend = new_pg._get_backend(torch.device(device))
+        t = torch.rand(5, 5, device=device)
+        dist.all_reduce(t)
+        self.assertEqual(new_nccl_backend.get_error(), ErrorType.SUCCESS)
+        torch.cuda.synchronize()
+        dist.destroy_process_group()
+
+        # give some time for other ranks to exit first before destroying FileStore
+        if self.rank == 0:
+            time.sleep(4)
+            os.remove(new_file_name)
 
         if prev_nccl_async_error_handling is not None:
             os.environ[

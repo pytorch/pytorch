@@ -345,6 +345,7 @@ def mps_ops_modifier(ops):
         'transpose_copy',
         'T',
         'unbind',
+        'unbind_copy',
         'unflatten',
         'unfold',
         'unfold_copy',
@@ -600,9 +601,6 @@ def mps_ops_modifier(ops):
 
         # cpu not giving nan for x/0.0
         'atan2': [torch.bool, torch.int16, torch.int32, torch.int64, torch.uint8, torch.int8],
-
-        # inconsistency errors between cpu and mps, max seen atol is 2
-        'nn.functional.interpolatebilinear': [torch.uint8],
     }
 
     MACOS_BEFORE_13_3_XFAILLIST = {
@@ -635,8 +633,6 @@ def mps_ops_modifier(ops):
     MACOS_AFTER_13_1_XFAILLIST = {
         # before macOS 13.2 it falls back to cpu and pass the forward pass
         'grid_sampler_2d': [torch.float32, torch.float16, torch.bfloat16],  # Unsupported Border padding mode
-        # inconsistency errors between cpu and mps, max seen atol is 2
-        'nn.functional.interpolatebilinear': [torch.uint8],
     }
 
     MACOS_13_3_XFAILLIST = {
@@ -677,7 +673,6 @@ def mps_ops_modifier(ops):
         '__rsub__': None,
         'cauchy_': None,
         'cauchy': None,
-        'cholesky': None,
         'cholesky_inverse': None,
         'cholesky_solve': None,
         'cummax': None,
@@ -697,10 +692,8 @@ def mps_ops_modifier(ops):
         'index_reduceamin': None,
         'kthvalue': None,
         'lcm': None,
-        'linalg.cholesky': None,
         'linalg.cholesky_ex': None,
         'linalg.cond': None,
-        'linalg.detsingular': None,
         'linalg.det': None,
         'linalg.eigh': None,
         'linalg.eigvalsh': None,
@@ -6392,6 +6385,30 @@ class TestMPS(TestCaseMPS):
                 torch.tensor((10, 20, 30, 40, 50), device=device),
                 atol=0, rtol=0
             )
+
+    def test_cholesky(self):
+        from torch.testing._internal.common_utils import random_hermitian_pd_matrix
+
+        def run_cholesky_test(size, *batch_dims, upper):
+            input_cpu = random_hermitian_pd_matrix(size, *batch_dims, dtype=torch.float32, device="cpu")
+            input_mps = input_cpu.to('mps')
+            output_cpu = torch.linalg.cholesky(input_cpu, upper=upper)
+            output_mps = torch.linalg.cholesky(input_mps, upper=upper)
+            self.assertEqual(output_cpu, output_mps, atol=2e-5, rtol=1e-6)
+
+        # test with different even/odd matrix sizes
+        matrix_sizes = [1, 2, 3, 4, 8, 17, 64, 128, 154]
+        # even/odd batch sizes
+        batch_sizes = [1, 2, 4, 8, 16, 17]
+
+        for upper in [True, False]:
+            for size in matrix_sizes:
+                for batch_size in batch_sizes:
+                    run_cholesky_test(size, batch_size, upper=upper)
+
+        # test >3D matrices
+        run_cholesky_test(128, 10, 10, upper=False)
+        run_cholesky_test(128, 2, 2, 2, 2, 10, 10, upper=True)
 
     def test_upsample_nearest2d(self):
         def helper(N, C, H, W, memory_format):
@@ -12326,7 +12343,6 @@ class TestConsistency(TestCaseMPS):
         'native_layer_norm',
         'nn.functional.layer_norm',
         'nn.functional.interpolate',
-        'nn.functional.upsample_bilinear',
         'nn.functional.upsample_nearest',
         'norm', 'masked.normalize',
         'arange', 'linspace',
@@ -12414,10 +12430,14 @@ class TestConsistency(TestCaseMPS):
             mps_out = op(*mps_args, **mps_kwargs)
 
             atol, rtol = self._compute_tolerances(op, dtype)
-            if op.name == "nn.functional.upsample_bilinear" and dtype == torch.uint8:
-                atol = 1.0
-                rtol = 0.0
-
+            if (op.name == "nn.functional.interpolate" and dtype == torch.uint8 and
+               cpu_kwargs.get("mode") == "bilinear" and
+               cpu_kwargs.get("recompute_scale_factor") is True and
+               cpu_kwargs.get("scale_factor") == 1.7):
+                # For 1/3, 2/3 scale factors results will not match CPU ones
+                # As MPS compute scales in floats, but CPU always used doubles, which results
+                # in slight numerical differences
+                atol, rtol = 1, 0
             self.assertEqual(cpu_out, mps_out, atol=atol, rtol=rtol)
 
 
@@ -12696,6 +12716,11 @@ class TestMetalLibrary(TestCaseMPS):
         self.assertRaises(RuntimeError, lambda: lib.non_existing(mps_tensor))
         # Passing no tensors asserts
         self.assertRaises(RuntimeError, lambda: lib.full(12))
+
+    def test_metal_include(self):
+        # Checks that includes embedding works
+        lib = torch.mps._compile_shader("#include <c10/metal/special_math.h>")
+        self.assertIsNotNone(lib)
 
     @unittest.skipIf(not torch.mps.profiler.is_metal_capture_enabled(), "Set MTL_CAPTURE_ENABLED and try again")
     def test_metal_capture(self):
