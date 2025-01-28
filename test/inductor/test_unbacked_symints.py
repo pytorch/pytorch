@@ -382,9 +382,12 @@ class TestUnbackedSymints(InductorTestCase):
         expected = fn(*example_inputs)
         torch.testing.assert_close(actual.t, expected.t)
 
-    @requires_gpu()
+    @skipGPUIf(not HAS_GPU, "requires gpu and triton")
     @dynamo_config.patch(capture_dynamic_output_shape_ops=True)
-    def test_issue_143498(self):
+    def test_issue_143498(self, device):
+        if device == "cpu":
+            raise unittest.SkipTest("CPU Failure")
+
         class Model(torch.nn.Module):
             def __init__(self) -> None:
                 super().__init__()
@@ -404,12 +407,12 @@ class TestUnbackedSymints(InductorTestCase):
         example_inputs = (
             torch.tensor(
                 [-1, -1, 14, -1, -1, -1, -1, -1, -1, -1, 49, -1],
-                device="cuda",
+                device=device,
                 dtype=torch.int64,
             ),
             torch.tensor(
                 [0, 0, 0, 1, 1, 1, 1, 2, 2, 2, 2, 2],
-                device="cuda",
+                device=device,
                 dtype=torch.int64,
             ),
             torch.tensor(
@@ -427,13 +430,13 @@ class TestUnbackedSymints(InductorTestCase):
                     True,
                     False,
                 ],
-                device="cuda",
+                device=device,
                 dtype=torch.bool,
             ),
-            torch.tensor([2, 10], device="cuda", dtype=torch.int64),
-            torch.tensor([34, 33], device="cuda", dtype=torch.int64),
-            torch.zeros(3, 50, device="cuda", dtype=torch.int64),
-            torch.tensor([14, 49], device="cuda", dtype=torch.int64),
+            torch.tensor([2, 10], device=device, dtype=torch.int64),
+            torch.tensor([34, 33], device=device, dtype=torch.int64),
+            torch.zeros(3, 50, device=device, dtype=torch.int64),
+            torch.tensor([14, 49], device=device, dtype=torch.int64),
         )
         model = Model()
         self.assertEqual(torch.compile(model)(*example_inputs), model(*example_inputs))
