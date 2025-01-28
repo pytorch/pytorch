@@ -370,6 +370,12 @@ torch.testing._internal.fake_config_module3.e_func = _warnings.warn""",
         with config.patch(e_aliased_bool=True):
             self.assertTrue(config2.e_aliasing_bool)
 
+    def test_reference_is_default(self):
+        t = config.e_dict
+        self.assertTrue(config._is_default("e_dict"))
+        t["a"] = "b"
+        self.assertFalse(config._is_default("e_dict"))
+
 
 if __name__ == "__main__":
     run_tests()
