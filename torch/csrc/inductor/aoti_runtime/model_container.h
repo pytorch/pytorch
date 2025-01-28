@@ -312,6 +312,7 @@ class AOTInductorModelContainer {
       AtenTensorHandle tensor_handle;
       int64_t* stride;
       int64_t offset;
+      int device_type = models_[0]->get_device_type();
       int device_idx = models_[0]->get_device_idx();
       AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_get_strides(tensor, &stride));
       AOTI_TORCH_ERROR_CODE_CHECK(
@@ -323,11 +324,7 @@ class AOTInductorModelContainer {
           stride,
           offset,
           models_[0]->constant_dtype(idx),
-#ifdef USE_XPU
-          aoti_torch_device_type_xpu(),
-#else
-          aoti_torch_device_type_cuda(),
-#endif
+          device_type,
           device_idx,
           &tensor_handle));
 #else // USE_CUDA
@@ -407,16 +404,13 @@ class AOTInductorModelContainer {
   const char* in_spec_;
   const char* out_spec_;
 
-#if defined(USE_CUDA) || defined(USE_XPU)
-  // Holds the blob storage for constants' at::Tensor for CUDA.
-  GPUPtr constant_blob_;
-  GPUPtr constant_blob_secondary_;
+  // Holds the blob storage for constants' at::Tensor within the container.
+  // This blob of memory will be managed by the container.
+  RAIIDataPtr constant_blob_;
+  RAIIDataPtr constant_blob_secondary_;
 
-  // Let's place this within USE_CUDA at the moment before we fully support
-  // update for CPU cases.
   size_t blob_size_;
   std::vector<size_t> constants_internal_offset_;
-#endif // USE_CUDA
 
   // Determine which constants is being used for the model.
   // If true,
