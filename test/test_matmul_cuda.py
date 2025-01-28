@@ -661,33 +661,18 @@ class TestFP8MatmulCuda(TestCase):
                 out_dtype=torch.bfloat16,
             )
 
-        if _IS_SM10X:
-            with self.assertRaisesRegex(
-                RuntimeError,
-                re.escape(
-                    "Rowwise scaling is not currently supported on your device",
-                ),
-            ):
-                torch._scaled_mm(
-                    x_fp8,
-                    y_fp8.to(e5m2_type),
-                    scale_a=torch.ones((M, 1), device="cuda"),
-                    scale_b=torch.ones((1, N), device="cuda"),
-                    out_dtype=torch.bfloat16,
-                )
-        else:
-            # Note re.compile is used, not re.escape. This is to accomodate fn vs fnuz type message.
-            with self.assertRaisesRegex(
-                RuntimeError,
-                r"Expected b\.dtype\(\) == at::kFloat8_e4m3fnu?z? to be true, but got false\.",
-            ):
-                torch._scaled_mm(
-                    x_fp8,
-                    y_fp8.to(e5m2_type),
-                    scale_a=torch.ones((M, 1), device="cuda"),
-                    scale_b=torch.ones((1, N), device="cuda"),
-                    out_dtype=torch.bfloat16,
-                )
+        # Note re.compile is used, not re.escape. This is to accomodate fn vs fnuz type message.
+        with self.assertRaisesRegex(
+            RuntimeError,
+            r"Expected b\.dtype\(\) == at::kFloat8_e4m3fnu?z? to be true, but got false\.",
+        ):
+            torch._scaled_mm(
+                x_fp8,
+                y_fp8.to(e5m2_type),
+                scale_a=torch.ones((M, 1), device="cuda"),
+                scale_b=torch.ones((1, N), device="cuda"),
+                out_dtype=torch.bfloat16,
+            )
 
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8 or IS_WINDOWS, f8_msg)
     @unittest.skipIf(not _IS_SM9X, "rowwise implementation is currently sm90 specific")
