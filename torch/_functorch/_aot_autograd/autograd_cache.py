@@ -37,6 +37,7 @@ from torch._inductor.utils import should_use_remote_fx_graph_cache
 from torch._logging import LazyString
 from torch._utils_internal import log_cache_bypass
 from torch.compiler._cache import CacheArtifactManager, CacheArtifactType
+from torch.utils._triton import has_triton
 from torchgen.utils import dataclass_repr
 
 from .runtime_wrappers import (
@@ -77,7 +78,6 @@ def should_use_remote_autograd_cache():
         return config.enable_remote_autograd_cache
     if not config.is_fbcode():
         return False
-
     if torch._utils_internal.is_fb_unit_test():
         return False
 
@@ -331,6 +331,30 @@ def autograd_cache_key(
     return key, debug_lines
 
 
+@functools.lru_cache  # LRU cached so we run this at most once per process
+def initialize_cuda_on_backward():
+    if torch.cuda.is_available() and has_triton():
+        from triton import __version__
+
+        if __version__ < "3.2.0":
+            # Triton before 3.2.0 has a bug where it doesn't ensure
+            # a CUDA context is initialized before running. In this case, we want
+            # to initialize the CUDA context in the backward before launching
+            # the kernel.
+            # https://github.com/triton-lang/triton/pull/3731
+            # The reason this interacts with AOTAutograd is that without caching
+            # AOTAutograd would naturally initialize CUDA in the backward thread
+            # by running the autograd engine when compiling.
+
+            # On a cache hit, however, there's a chance we never needed to initialize cuda on
+            # a backward thread! So we do that here.
+
+            # TODO This is such a hacky way to initialize CUDA on the backward pass
+            # Is there a cleaner way?
+            torch.empty(1, device="cuda", requires_grad=True).backward()
+    return True
+
+
 @dataclass
 class FXGraphCacheLoadable:
     fx_graph_cache_key: str
@@ -509,6 +533,8 @@ class AOTAutogradCacheEntry:
 
         compiled_fw_func = self.compiled_fw.load(args, fx_config)
         compiled_bw_func = None
+        initialize_cuda_on_backward()
+
         if self.compiled_bw is not None:
             compiled_bw_func = self.compiled_bw.load(args, fx_config)
             needs_autograd = True
