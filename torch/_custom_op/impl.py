@@ -108,7 +108,7 @@ def custom_op(
 # An example usage is FakeTensor: FakeTensor checks if a specific operator
 # has an implementation registered via the CustomOp API.
 # Indexed by qualname (e.g. aten::foo)
-global_registry: typing.Dict[str, "CustomOp"] = {}
+global_registry: dict[str, "CustomOp"] = {}
 
 
 class CustomOp:
@@ -136,7 +136,7 @@ class CustomOp:
         self.__name__ = None  # mypy requires this
         # NB: Some of these impls are registered as kernels to DispatchKeys.
         # Modifying the _impls dict directly won't do anything in that case.
-        self._impls: typing.Dict[str, typing.Optional[FuncAndLocation]] = {}
+        self._impls: dict[str, typing.Optional[FuncAndLocation]] = {}
         # See NOTE [CustomOp autograd kernel indirection]
         self._registered_autograd_kernel_indirection = False
 
@@ -476,7 +476,7 @@ def validate_schema(schema: FunctionSchema) -> None:
         )
 
 
-def parse_qualname(qualname: str) -> typing.Tuple[str, str]:
+def parse_qualname(qualname: str) -> tuple[str, str]:
     names = qualname.split("::", 1)
     if len(names) != 2:
         raise ValueError(f"Expected there to be a namespace in {qualname}, i.e. The "

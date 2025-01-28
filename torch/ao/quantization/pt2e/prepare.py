@@ -1,5 +1,5 @@
 # mypy: allow-untyped-defs
-from typing import Any, Dict, Optional, Tuple, Union
+from typing import Any, Optional, Union
 
 import torch
 from torch._subclasses import FakeTensor
@@ -33,7 +33,7 @@ __all__ = [
 
 
 def _find_root_edge_or_node(
-    edge_or_node: EdgeOrNode, shared_with_map: Dict[EdgeOrNode, EdgeOrNode]
+    edge_or_node: EdgeOrNode, shared_with_map: dict[EdgeOrNode, EdgeOrNode]
 ) -> EdgeOrNode:
     """Find the root node for the sharing tree
     Args:
@@ -55,7 +55,7 @@ def _find_root_edge_or_node(
 def _union(
     parent: EdgeOrNode,
     child: EdgeOrNode,
-    shared_with_map: Dict[EdgeOrNode, EdgeOrNode],
+    shared_with_map: dict[EdgeOrNode, EdgeOrNode],
 ) -> None:
     """Merge the subtree for `child` with `parent`, the order is important here"""
     root_parent = _find_root_edge_or_node(parent, shared_with_map)
@@ -67,7 +67,7 @@ def _union(
 def _update_shared_with(
     child: EdgeOrNode,
     qspec: QuantizationSpecBase,
-    shared_with_map: Dict[EdgeOrNode, EdgeOrNode],
+    shared_with_map: dict[EdgeOrNode, EdgeOrNode],
 ):
     """Update the `shared_with_map` based on the qspec, this applies the `SharedQuantizationSpec`
     configuration and established the relationship between `edge_or_node` with the edge/node that it
@@ -82,8 +82,8 @@ def _update_shared_with(
 
 def _unwrap_shared_qspec(
     qspec: QuantizationSpecBase,
-    edge_or_node_to_qspec: Dict[EdgeOrNode, QuantizationSpecBase],
-    shared_with_map: Dict[EdgeOrNode, EdgeOrNode],
+    edge_or_node_to_qspec: dict[EdgeOrNode, QuantizationSpecBase],
+    shared_with_map: dict[EdgeOrNode, EdgeOrNode],
 ) -> QuantizationSpecBase:
     """Unwraps qspec to get the final root qspec (non SharedQuantizationSpec)
     if qspec is SharedQuantizationSpec
@@ -110,9 +110,9 @@ def _has_same_attr(
 
 def _get_edge_or_node_to_qspec(
     model: torch.fx.GraphModule,
-) -> Dict[EdgeOrNode, QuantizationSpecBase]:
+) -> dict[EdgeOrNode, QuantizationSpecBase]:
     """Get a map from EdgeOrNode to quantization spec based on annotations on the nodes"""
-    edge_or_node_to_qspec: Dict[EdgeOrNode, QuantizationSpecBase] = {}
+    edge_or_node_to_qspec: dict[EdgeOrNode, QuantizationSpecBase] = {}
     for n in model.graph.nodes:
         if hasattr(n, "meta") and "quantization_annotation" in n.meta:
             qa = n.meta["quantization_annotation"]
@@ -163,8 +163,8 @@ def _union_input_edge_with(
 
 
 def _get_edge_or_node_to_group_id(
-    edge_or_node_to_qspec: Dict[EdgeOrNode, QuantizationSpecBase]
-) -> Dict[EdgeOrNode, int]:
+    edge_or_node_to_qspec: dict[EdgeOrNode, QuantizationSpecBase]
+) -> dict[EdgeOrNode, int]:
     """Map from edge/node to the group ID, generated from quantization annotations,
     edge/node with the same group ID should use the same observer/fake_quant instance
 
@@ -215,7 +215,7 @@ def _get_edge_or_node_to_group_id(
     """
     # means the observer of key should be shared with observer with value, by default it will
     # be shared with itself
-    shared_with_map: Dict[EdgeOrNode, EdgeOrNode] = {
+    shared_with_map: dict[EdgeOrNode, EdgeOrNode] = {
         k: k for k in edge_or_node_to_qspec.keys()
     }
     for edge_or_node, qspec in edge_or_node_to_qspec.items():
@@ -277,7 +277,7 @@ def _get_edge_or_node_to_group_id(
 
     # now that we get the sharing relations between all edges and nodes, we can assingn group ids
     cur_group_id = 0
-    edge_or_node_to_group_id: Dict[EdgeOrNode, int] = {}
+    edge_or_node_to_group_id: dict[EdgeOrNode, int] = {}
     for edge_or_node in shared_with_map.keys():
         root = _find_root_edge_or_node(edge_or_node, shared_with_map)
         if root not in edge_or_node_to_group_id:
@@ -289,16 +289,16 @@ def _get_edge_or_node_to_group_id(
 
 
 def _get_obs_or_fq_map(
-    edge_or_node_to_group_id: Dict[EdgeOrNode, int],
-    edge_or_node_to_qspec: Dict[EdgeOrNode, QuantizationSpecBase],
+    edge_or_node_to_group_id: dict[EdgeOrNode, int],
+    edge_or_node_to_qspec: dict[EdgeOrNode, QuantizationSpecBase],
     is_qat: bool,
-) -> Dict[EdgeOrNode, ObserverOrFakeQuantize]:
+) -> dict[EdgeOrNode, ObserverOrFakeQuantize]:
     """Generates the EdgeOrNode to observer/fake_quant instances
     Makes sure that for EdgeOrNode that has the same group_id should have the same observer or fake quant
     instances
     """
-    obs_or_fq_map: Dict[EdgeOrNode, ObserverOrFakeQuantize] = {}
-    group_id_to_obs_or_fq: Dict[int, ObserverOrFakeQuantize] = {}
+    obs_or_fq_map: dict[EdgeOrNode, ObserverOrFakeQuantize] = {}
+    group_id_to_obs_or_fq: dict[int, ObserverOrFakeQuantize] = {}
     for edge_or_node, qspec in edge_or_node_to_qspec.items():
         group_id = edge_or_node_to_group_id[edge_or_node]
         if group_id not in group_id_to_obs_or_fq:
@@ -316,8 +316,8 @@ def _maybe_insert_input_observer_for_arg_or_kwarg(
     arg: Argument,
     qconfig: QConfigAny,
     model: torch.nn.Module,
-    named_modules: Dict[str, torch.nn.Module],
-    obs_or_fq_map: Dict[EdgeOrNode, ObserverOrFakeQuantize],
+    named_modules: dict[str, torch.nn.Module],
+    obs_or_fq_map: dict[EdgeOrNode, ObserverOrFakeQuantize],
     is_qat: bool,
 ) -> Argument:
     """
@@ -399,8 +399,8 @@ def _maybe_insert_input_observers_for_node(
     node: Node,
     qconfig: QConfigAny,
     model: torch.nn.Module,
-    named_modules: Dict[str, torch.nn.Module],
-    obs_or_fq_map: Dict[EdgeOrNode, ObserverOrFakeQuantize],
+    named_modules: dict[str, torch.nn.Module],
+    obs_or_fq_map: dict[EdgeOrNode, ObserverOrFakeQuantize],
     is_qat: bool,
 ) -> None:
     """
@@ -448,9 +448,9 @@ def _maybe_insert_input_observers_for_node(
 def _maybe_insert_output_observer_for_node(
     node: Node,
     model: torch.nn.Module,
-    named_modules: Dict[str, torch.nn.Module],
+    named_modules: dict[str, torch.nn.Module],
     graph: Graph,
-    obs_or_fq_map: Dict[EdgeOrNode, ObserverOrFakeQuantize],
+    obs_or_fq_map: dict[EdgeOrNode, ObserverOrFakeQuantize],
     is_qat: bool,
 ) -> Optional[Node]:
     if node in obs_or_fq_map:
@@ -477,7 +477,7 @@ def _maybe_insert_output_observer_for_node(
 def _maybe_insert_input_and_output_observers_for_node(
     node: Node,
     model: torch.fx.GraphModule,
-    obs_or_fq_map: Dict[EdgeOrNode, ObserverOrFakeQuantize],
+    obs_or_fq_map: dict[EdgeOrNode, ObserverOrFakeQuantize],
     is_qat: bool,
 ):
     this_node_quantization_annotation = (
@@ -533,7 +533,7 @@ def _maybe_insert_input_and_output_observers_for_node(
 
 def prepare(
     model: GraphModule,
-    node_name_to_scope: Dict[str, Tuple[str, type]],
+    node_name_to_scope: dict[str, tuple[str, type]],
     is_qat: bool,
     obs_or_fq_callback=None,
 ) -> GraphModule:
