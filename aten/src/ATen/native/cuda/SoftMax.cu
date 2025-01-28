@@ -918,7 +918,6 @@ cunn_SoftMaxBackwardSmem(scalar_t *gradInput, const outscalar_t *output, const o
 
     #pragma unroll
     for (int i = 0; i < ILP; ++i) {
-      // printf("AHMAD2: offset=%d i=%d val=%.15lf threadSum=%e\n", offset, i, crnt_vec.val[i], threadSum);
       threadSum = threadSum + crnt_vec.val[i];
     }
   }
