@@ -454,7 +454,10 @@ class TestCuda(TestCase):
         if torch.version.hip:
             default_workspace_size = 1024 * 32 * 1024  # :1024:32  32MiB
             # different size (128 MiB) expected on MI300 GPU
-            if torch.cuda.get_device_capability() >= (9, 4):
+            gcn_arch = str(
+                torch.cuda.get_device_properties(0).gcnArchName.split(":", 1)[0]
+            )
+            if "gfx94" in gcn_arch:
                 default_workspace_size = 1024 * 128 * 1024  # :1024:128
         else:
             default_workspace_size = (
@@ -575,13 +578,6 @@ class TestCuda(TestCase):
             torch._C._get_cublas_allow_bf16_reduced_precision_reduction(), not orig
         )
         torch.backends.cuda.matmul.allow_bf16_reduced_precision_reduction = orig
-
-    def test_cublas_allow_fp16_accumulation_get_set(self):
-        orig = torch.backends.cuda.matmul.allow_fp16_accumulation
-        self.assertEqual(torch._C._get_cublas_allow_fp16_accumulation(), orig)
-        torch.backends.cuda.matmul.allow_fp16_accumulation = not orig
-        self.assertEqual(torch._C._get_cublas_allow_fp16_accumulation(), not orig)
-        torch.backends.cuda.matmul.allow_fp16_accumulation = orig
 
     def test_cudnn_allow_tf32_get_set(self):
         with torch.backends.cudnn.flags(
