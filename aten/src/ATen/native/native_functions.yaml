@@ -3866,6 +3866,7 @@
   device_guard: False
   dispatch:
     CompositeImplicitAutograd: value_selecting_reduction_backward_symint
+    NestedTensorCPU, NestedTensorCUDA: value_selecting_reduction_backward_nested_symint
 
 - func: amax(Tensor self, int[1] dim=[], bool keepdim=False) -> Tensor
   variants: function, method
@@ -4709,14 +4710,6 @@
     CompositeExplicitAutograd: rand_like
   autogen: rand_like.out
 
-- func: rand_like.generator(Tensor self, *, Generator? generator, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None, MemoryFormat? memory_format=None) -> Tensor
-  tags: nondeterministic_seeded
-  dispatch:
-    # NB: Although this composite mutates on the inside, it is
-    # non-differentiable so NonFunctional doesn't apply
-    CompositeExplicitAutograd: rand_like
-  autogen: rand_like.generator_out
-
 - func: randint(SymInt high, SymInt[] size, *, ScalarType? dtype=long, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
   tags: nondeterministic_seeded
   dispatch:
@@ -4765,14 +4758,6 @@
     CompositeExplicitAutograd: randint_like
   autogen: randint_like.out
 
-- func: randint_like.generator(Tensor self, SymInt high, *, Generator? generator, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None, MemoryFormat? memory_format=None) -> Tensor
-  tags: nondeterministic_seeded
-  dispatch:
-    # NB: Although this composite mutates on the inside, it is
-    # non-differentiable so NonFunctional doesn't apply
-    CompositeExplicitAutograd: randint_like
-  autogen: randint_like.generator_out
-
 - func: randint_like.low_dtype(Tensor self, SymInt low, SymInt high, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None, MemoryFormat? memory_format=None) -> Tensor
   tags: nondeterministic_seeded
   dispatch:
@@ -4780,14 +4765,6 @@
     # non-differentiable so NonFunctional doesn't apply
     CompositeExplicitAutograd: randint_like
   autogen: randint_like.low_dtype_out
-
-- func: randint_like.generator_with_low_dtype(Tensor self, SymInt low, SymInt high, *, Generator? generator, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None, MemoryFormat? memory_format=None) -> Tensor
-  tags: nondeterministic_seeded
-  dispatch:
-    # NB: Although this composite mutates on the inside, it is
-    # non-differentiable so NonFunctional doesn't apply
-    CompositeExplicitAutograd: randint_like
-  autogen: randint_like.generator_with_low_dtype_out
 
 - func: randn(SymInt[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
   tags: [core, nondeterministic_seeded]
@@ -4828,14 +4805,6 @@
     # non-differentiable so NonFunctional doesn't apply
     CompositeExplicitAutograd, CompositeImplicitAutogradNestedTensor: randn_like
   autogen: randn_like.out
-
-- func: randn_like.generator(Tensor self, *, Generator? generator, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None, MemoryFormat? memory_format=None) -> Tensor
-  tags: nondeterministic_seeded
-  dispatch:
-    # NB: Although this composite mutates on the inside, it is
-    # non-differentiable so NonFunctional doesn't apply
-    CompositeExplicitAutograd, CompositeImplicitAutogradNestedTensor: randn_like
-  autogen: randn_like.generator_out
 
 - func: randperm(SymInt n, *, ScalarType? dtype=long, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
   tags: [core, nondeterministic_seeded]
@@ -9470,11 +9439,13 @@
 - func: cholesky.out(Tensor self, bool upper=False, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
     CPU, CUDA: cholesky_out
+    MPS: cholesky_mps_out
 
 - func: cholesky(Tensor self, bool upper=False) -> Tensor
   variants: method, function
   dispatch:
     CPU, CUDA: cholesky
+    MPS: cholesky_mps
 
 - func: cholesky_solve.out(Tensor self, Tensor input2, bool upper=False, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
@@ -13100,7 +13071,6 @@
   autogen: _slow_conv2d_backward.output_mask_out
 
 - func: _conv_depthwise2d.out(Tensor self, Tensor weight, SymInt[2] kernel_size, Tensor? bias, SymInt[2] stride, SymInt[2] padding, SymInt[2] dilation, *, Tensor(a!) out) -> Tensor(a!)
-  use_const_ref_for_mutable_tensors: True
   python_module: nn
   dispatch:
     CUDA: conv_depthwise2d_cuda_out
@@ -13786,7 +13756,6 @@
     CompositeImplicitAutograd: fft_hfft2_symint
 
 - func: fft_hfft2.out(Tensor self, SymInt[1]? s=None, int[1] dim=[-2,-1], str? norm=None, *, Tensor(a!) out) -> Tensor(a!)
-  use_const_ref_for_mutable_tensors: True
   python_module: fft
   variants: function
   dispatch:
@@ -13800,7 +13769,6 @@
     CompositeImplicitAutograd: fft_ihfft2_symint
 
 - func: fft_ihfft2.out(Tensor self, SymInt[1]? s=None, int[1] dim=[-2,-1], str? norm=None, *, Tensor(a!) out) -> Tensor(a!)
-  use_const_ref_for_mutable_tensors: True
   python_module: fft
   variants: function
   dispatch:
@@ -13862,7 +13830,6 @@
     CompositeImplicitAutograd: fft_hfftn_symint
 
 - func: fft_hfftn.out(Tensor self, SymInt[1]? s=None, int[1]? dim=None, str? norm=None, *, Tensor(a!) out) -> Tensor(a!)
-  use_const_ref_for_mutable_tensors: True
   python_module: fft
   variants: function
   dispatch:
@@ -13876,7 +13843,6 @@
     CompositeImplicitAutograd: fft_ihfftn_symint
 
 - func: fft_ihfftn.out(Tensor self, SymInt[1]? s=None, int[1]? dim=None, str? norm=None, *, Tensor(a!) out) -> Tensor(a!)
-  use_const_ref_for_mutable_tensors: True
   python_module: fft
   variants: function
   dispatch:
@@ -13936,9 +13902,15 @@
 
 - func: linalg_cholesky(Tensor self, *, bool upper=False) -> Tensor
   python_module: linalg
+  dispatch:
+    CompositeImplicitAutograd: linalg_cholesky
+    MPS: linalg_cholesky_mps
 
 - func: linalg_cholesky.out(Tensor self, *, bool upper=False, Tensor(a!) out) -> Tensor(a!)
   python_module: linalg
+  dispatch:
+    CompositeImplicitAutograd: linalg_cholesky_out
+    MPS: linalg_cholesky_out_mps
 
 - func: linalg_cross(Tensor self, Tensor other, *, int dim=-1) -> Tensor
   python_module: linalg

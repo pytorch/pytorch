@@ -163,22 +163,22 @@ Inference with ``torch.compile``
    model = model.to("xpu")
    data = data.to("xpu")
 
-    for i in range(ITERS):
-        start = time.time()
-        with torch.no_grad():
-            model(data)
-            torch.xpu.synchronize()
-        end = time.time()
-        print(f"Inference time before torch.compile for iteration {i}: {(end-start)*1000} ms")
+   for i in range(ITERS):
+       start = time.time()
+       with torch.no_grad():
+           model(data)
+           torch.xpu.synchronize()
+       end = time.time()
+       print(f"Inference time before torch.compile for iteration {i}: {(end-start)*1000} ms")
 
-    model = torch.compile(model)
-    for i in range(ITERS):
-        start = time.time()
-        with torch.no_grad():
-            model(data)
-            torch.xpu.synchronize()
-        end = time.time()
-        print(f"Inference time after torch.compile for iteration {i}: {(end-start)*1000} ms")
+   model = torch.compile(model)
+   for i in range(ITERS):
+       start = time.time()
+       with torch.no_grad():
+           model(data)
+           torch.xpu.synchronize()
+       end = time.time()
+       print(f"Inference time after torch.compile for iteration {i}: {(end-start)*1000} ms")
 
    print("Execution finished")
 
