@@ -570,7 +570,7 @@ class CPUTestBase(DeviceTypeTestBase):
 
 class CUDATestBase(DeviceTypeTestBase):
     device_type = "cuda"
-    inductor_backeds = ["triton", "halide"]
+    inductor_backends = ["triton", "halide"]
     _do_cuda_memory_leak_check = True
     _do_cuda_non_default_stream = True
     primary_device: ClassVar[str]
@@ -660,7 +660,7 @@ class MPSTestBase(DeviceTypeTestBase):
 
 class XPUTestBase(DeviceTypeTestBase):
     device_type = "xpu"
-    inductor_backeds = ["triton"]
+    inductor_backends = ["triton"]
     primary_device: ClassVar[str]
 
     @classmethod
