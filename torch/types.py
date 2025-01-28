@@ -4,6 +4,7 @@
 # top-level values.  The underscore variants let us refer to these
 # types.  See https://github.com/python/mypy/issues/4146 for why these
 # workarounds is necessary
+import os
 from builtins import (  # noqa: F401
     bool as _bool,
     bytes as _bytes,
@@ -12,7 +13,8 @@ from builtins import (  # noqa: F401
     int as _int,
     str as _str,
 )
-from typing import Any, Dict, List, Sequence, Tuple, TYPE_CHECKING, Union
+from collections.abc import Sequence
+from typing import Any, IO, TYPE_CHECKING, Union
 from typing_extensions import TypeAlias
 
 # `as` imports have better static analysis support than assignment `ExposedType: TypeAlias = HiddenType`
@@ -34,7 +36,7 @@ if TYPE_CHECKING:
     from torch.autograd.graph import GradientEdge
 
 
-__all__ = ["Number", "Device", "Storage"]
+__all__ = ["Number", "Device", "FileLike", "Storage"]
 
 # Convenience aliases for common composite types that we need
 # to talk about in PyTorch
@@ -46,7 +48,7 @@ _TensorOrTensorsOrGradEdge: TypeAlias = Union[  # noqa: PYI047
     Sequence["GradientEdge"],
 ]
 
-_size: TypeAlias = Union[Size, List[int], Tuple[int, ...]]  # noqa: PYI042,PYI047
+_size: TypeAlias = Union[Size, list[int], tuple[int, ...]]  # noqa: PYI042,PYI047
 _symsize: TypeAlias = Union[Size, Sequence[Union[int, SymInt]]]  # noqa: PYI042,PYI047
 _dispatchkey: TypeAlias = Union[str, DispatchKey]  # noqa: PYI042,PYI047
 
@@ -63,6 +65,8 @@ PySymType: TypeAlias = Union[SymInt, SymFloat, SymBool]
 # Meta-type for "numeric" things; matches our docs
 Number: TypeAlias = Union[int, float, bool]
 
+FileLike: TypeAlias = Union[str, os.PathLike[str], IO[bytes]]
+
 # Meta-type for "device-like" things.  Not to be confused with 'device' (a
 # literal device object).  This nomenclature is consistent with PythonArgParser.
 # None means use the default device (typically CPU)
@@ -76,7 +80,7 @@ class Storage:
     dtype: _dtype
     _torch_load_uninitialized: bool
 
-    def __deepcopy__(self, memo: Dict[int, Any]) -> "Storage":
+    def __deepcopy__(self, memo: dict[int, Any]) -> "Storage":
         raise NotImplementedError
 
     def _new_shared(self, size: int) -> "Storage":
