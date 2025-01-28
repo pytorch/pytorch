@@ -567,7 +567,7 @@ inline std::ostream& operator<<(std::ostream& out, const Argument& arg) {
     if (arg.alias_info() && !arg.alias_info()->containedTypes().empty()){
       out << arg.alias_info()->containedTypes()[0];
     }
-    std::string N = "";
+    std::string N;
     if (arg.N()) {
         N = std::to_string(*arg.N());
     }

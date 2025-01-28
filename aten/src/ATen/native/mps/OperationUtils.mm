@@ -20,8 +20,37 @@
 #include <ATen/ops/scalar_tensor.h>
 #endif
 
+#include <c10/util/env.h>
 #include <mach-o/dyld.h>
 #include <mach-o/getsect.h>
+
+@implementation MPSGraph (PyTorchFixups)
+- (MPSGraphTensor*)minimumWithNaNPropagationAndIntFallbackWithPrimaryTensor:(MPSGraphTensor*)primaryTensor
+                                                            secondaryTensor:(MPSGraphTensor*)secondaryTensor
+                                                                       name:(NSString*)name {
+  // As of MacOS-15.1 m..imumWithNanPropagation is only defined for floating types and calling it with integral
+  // agruments results in
+  //  /AppleInternal/Library/BuildRoots/c7c74b64-74b4-11ef-aeda-9635a580fe0d/Library/Caches/com.apple.xbs/Sources/MetalPerformanceShaders/MPSCore/Utility/MPSKernelDAG.mm:805:
+  //  failed assertion `Error getting visible function: (null) Function isNaN_u8_i8 was not found in the library'
+  if (([primaryTensor dataType] & MPSDataTypeFloatBit) == 0) {
+    return [self minimumWithPrimaryTensor:primaryTensor secondaryTensor:secondaryTensor name:name];
+  }
+  return [self minimumWithNaNPropagationWithPrimaryTensor:primaryTensor secondaryTensor:secondaryTensor name:name];
+}
+
+- (MPSGraphTensor*)maximumWithNaNPropagationAndIntFallbackWithPrimaryTensor:(MPSGraphTensor*)primaryTensor
+                                                            secondaryTensor:(MPSGraphTensor*)secondaryTensor
+                                                                       name:(NSString*)name {
+  // As of MacOS-15.1 m..imumWithNanPropagation is only defined for floating types and calling it with integral
+  // agruments results in
+  //  /AppleInternal/Library/BuildRoots/c7c74b64-74b4-11ef-aeda-9635a580fe0d/Library/Caches/com.apple.xbs/Sources/MetalPerformanceShaders/MPSCore/Utility/MPSKernelDAG.mm:805:
+  //  failed assertion `Error getting visible function: (null) Function isNaN_u8_i8 was not found in the library'
+  if (([primaryTensor dataType] & MPSDataTypeFloatBit) == 0) {
+    return [self maximumWithPrimaryTensor:primaryTensor secondaryTensor:secondaryTensor name:name];
+  }
+  return [self maximumWithNaNPropagationWithPrimaryTensor:primaryTensor secondaryTensor:secondaryTensor name:name];
+}
+@end
 
 namespace at::native::mps {
 
@@ -818,8 +847,8 @@ id<MTLLibrary> MetalShaderLibrary::getLibrary(const std::initializer_list<std::s
 
 id<MTLLibrary> MetalShaderLibrary::compileLibrary(const std::string& src) {
   static auto fast_math = []() {
-    auto val = std::getenv("PYTORCH_MPS_FAST_MATH");
-    return val && std::stoi(val) != 0;
+    auto const val = c10::utils::get_env("PYTORCH_MPS_FAST_MATH");
+    return val.has_value() && val != "0";
   }();
   NSError* error = nil;
   MTLCompileOptions* options = compile_options;
@@ -842,7 +871,12 @@ id<MTLLibrary> MetalShaderLibrary::compileLibrary(const std::string& src) {
   const auto str = [NSString stringWithCString:src.c_str() encoding:NSASCIIStringEncoding];
   auto device = MPSDevice::getInstance()->device();
   library = [device newLibraryWithSource:str options:options error:&error];
-  TORCH_CHECK(library, "Failed to create metal library, error: ", [[error description] UTF8String]);
+  if (library == nil) {
+    if ([error domain] == MTLLibraryErrorDomain && [error code] == MTLLibraryErrorCompileFailure) {
+      throw c10::SyntaxError([[error localizedDescription] UTF8String]);
+    }
+    TORCH_CHECK(false, "Failed to create metal library, error: ", [[error description] UTF8String]);
+  }
   return library;
 }
 
@@ -974,7 +1008,6 @@ void MetalKernelFunction::dispatch(c10::ArrayRef<uint64_t> length, c10::Optional
 }
 
 void MetalKernelFunction::setArg(unsigned idx, const at::TensorBase& t) {
-  TORCH_CHECK(t.device().type() == kMPS, "Tensor must be on GPU");
   mtl_setBuffer(encoder, t, idx);
 }
 

@@ -14,8 +14,7 @@ import random
 import types
 import unittest
 import warnings
-from collections import namedtuple
-from typing import OrderedDict
+from collections import namedtuple, OrderedDict
 from unittest.case import skipIf
 
 from common_utils import (
@@ -682,6 +681,8 @@ class TestVmapAPI(TestCase):
         vmap(torch.mul, (0, 0))(x, y)
 
     def test_integer_in_dim_but_not_tensor_input_err_msg(self):
+        # noqa: F841
+
         def foo(xy):
             return xy[0] * xy[1]
 
@@ -1246,7 +1247,7 @@ class TestVmapAPI(TestCase):
 
     def test_data_attribute(self):
         def foo(x):
-            y = x.data
+            y = x.data  # noqa: F841
             return x
 
         with self.assertRaisesRegex(
@@ -4380,6 +4381,9 @@ class TestVmapOperatorsOpInfo(TestCase):
                 xfail("torch.ops.aten._efficient_attention_forward"),  # outputs ints
                 # TypeError: expected Tensor as element 0 in argument 0, but got float
                 xfail("item"),
+                xfail(
+                    "unbind_copy"
+                ),  # Batching rule not implemented for aten::unbind_copy.int.
                 # RuntimeError: required rank 4 tensor to use channels_last format
                 xfailIf(
                     "to",
@@ -4462,6 +4466,9 @@ class TestVmapOperatorsOpInfo(TestCase):
                 xfail("item"),
                 xfail("tril"),  # Exception not raised on error input
                 xfail("triu"),  # Exception not raised on error input
+                xfail(
+                    "unbind_copy"
+                ),  # Batching rule not implemented for aten::unbind_copy.int.
                 xfail("__getitem__", ""),
                 xfail("count_nonzero"),
                 xfail(

@@ -4,7 +4,8 @@ import dataclasses
 import re
 import sys
 import types
-from typing import Counter, Dict, List, Optional
+from collections import Counter
+from typing import Optional
 
 import torch.nn
 
@@ -21,10 +22,11 @@ from .bytecode_transformation import (
     create_rot_n,
     Instruction,
 )
-from .exc import unimplemented
+from .exc import IncorrectUsage, unimplemented
 from .source import AttrSource, Source
 from .utils import is_safe_constant, rot_n_helper
 from .variables.base import ValueMutationExisting, VariableTracker
+from .variables.functions import FunctionDecoratedByContextlibContextManagerVariable
 from .variables.nn_module import NNModuleVariable
 from .variables.tensor import (
     NumpyNdarrayVariable,
@@ -57,8 +59,8 @@ class PyCodegen:
         self.root = root
         self.top_of_stack: Optional[VariableTracker] = None
         self.uses: Counter[VariableTracker] = collections.Counter()
-        self.graph_outputs: Dict[int, GraphOutputEntry] = {}
-        self._output: List[Instruction] = []
+        self.graph_outputs: dict[int, GraphOutputEntry] = {}
+        self._output: list[Instruction] = []
         # This determines which VariableTracker should be stored as locals, and
         # maps the VariableTracker to the local variable name. Note that it
         # could map to None initially, in which case we'll overwrite it to map
@@ -73,7 +75,7 @@ class PyCodegen:
         # This serves as a way for codegen to use a different source; we need
         # this because sometimes we can't easily modify the original source
         # without affecting other components, e.g., guards.
-        self.overridden_sources: Dict[Source, Source] = overridden_sources or {}
+        self.overridden_sources: dict[Source, Source] = overridden_sources or {}
 
     def restore_stack(self, stack_values, *, value_from_source=True):
         prev = self.value_from_source
@@ -158,6 +160,13 @@ class PyCodegen:
                 output.append(self.create_load(self.tempvars[value]))
                 self.top_of_stack = value
                 return
+
+        if value.is_realized() and isinstance(
+            value, FunctionDecoratedByContextlibContextManagerVariable
+        ):
+            raise IncorrectUsage(
+                "NYI: Returning a @contextmanager object from a torch.compile function"
+            )
 
         # Dynamo normally prefers codegen from source to account for aliasing.
         if value.source is not None and allow_cache:
@@ -315,7 +324,7 @@ class PyCodegen:
         self._output.extend(insts)
         self.clear_tos()
 
-    def get_instructions(self) -> List[Instruction]:
+    def get_instructions(self) -> list[Instruction]:
         return self._output
 
     def create_load(self, name) -> Instruction:
@@ -518,7 +527,7 @@ class PyCodegen:
     def load_import_from(self, module_name, object_name) -> None:
         self(AttrSource(self.tx.import_source(module_name), object_name))
 
-    def create_call_function_kw(self, nargs, kw_names, push_null) -> List[Instruction]:
+    def create_call_function_kw(self, nargs, kw_names, push_null) -> list[Instruction]:
         if sys.version_info >= (3, 13):
             output = create_call_function(nargs, push_null)
             assert output[-1].opname == "CALL"

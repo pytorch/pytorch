@@ -1,7 +1,7 @@
 # mypy: allow-untyped-defs
 import functools
 import logging
-from typing import Any, Dict, List, Optional
+from typing import Any, Optional
 
 import torch
 from torch._inductor.autoheuristic.autoheuristic import AutoHeuristicSelectAlgorithm
@@ -250,7 +250,7 @@ aten_addmm = ExternKernelChoice(
     torch.addmm, "at::addmm_out", op_overload=aten.addmm.default
 )
 
-aten__int_mm = ExternKernelChoice(torch._int_mm, "at::_int_mm")
+aten__int_mm = ExternKernelChoice(torch._int_mm, "at::_int_mm_out")
 
 aten__sparse_semi_structured_mm = ExternKernelChoice(
     torch._sparse_semi_structured_mm,
@@ -557,6 +557,7 @@ def tuned_addmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
                 [mat1, mat2, inp_expanded],
                 alpha=alpha,
                 beta=beta,
+                input_reorder=[2, 0, 1],
             )
 
     if is_nonzero and use_ck_gemm_template(layout, m, n, k):
@@ -566,6 +567,7 @@ def tuned_addmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
             [mat1, mat2, inp_expanded],
             alpha=alpha,
             beta=beta,
+            input_reorder=[2, 0, 1],
         )
 
     if use_cpp_gemm_template(layout, mat1, mat2):
@@ -931,7 +933,7 @@ def tuned_fused_int_mm_mul(mat1, mat2, mat3, out_dtype, *, layout=None):
     def mul_epilogue(v1, v2):
         return V.ops.mul(v1, v2)
 
-    choices: List[Dict[Any, Any]] = []
+    choices: list[dict[Any, Any]] = []
     for config in int8_mm_configs(
         m, n, k, **mm_config_kwargs(ir.get_device_type(mat1))
     ):

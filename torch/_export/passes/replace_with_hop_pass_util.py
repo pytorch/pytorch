@@ -4,7 +4,7 @@ from __future__ import annotations
 import contextlib
 import copy
 import operator
-from typing import Callable, Optional, Tuple, TYPE_CHECKING
+from typing import Callable, Optional, TYPE_CHECKING
 
 import torch
 
@@ -108,7 +108,7 @@ def _sequential_split_and_maybe_inline_subgraphs_helper(
     new_gm: torch.fx.GraphModule,
     graph_signature: Optional[ExportGraphSignature],
     maybe_inline_or_replace_with_hop: Callable[[torch.fx.Node], None],
-) -> Tuple[torch.fx.GraphModule, Optional[ExportGraphSignature]]:
+) -> tuple[torch.fx.GraphModule, Optional[ExportGraphSignature]]:
     """
     Helper function for replacing graph nodse with higher order nodes.
     For each subgraph in `new_gm`, decides whether to construct a HOO subgraph, or inline the calls
@@ -159,9 +159,9 @@ def _replace_with_hop_pass_helper(
     graph_signature: Optional[ExportGraphSignature],
     sequential_split_and_maybe_inline_subgraphs: Callable[
         [torch.fx.GraphModule, Optional[ExportGraphSignature]],
-        Tuple[torch.fx.GraphModule, Optional[ExportGraphSignature]],
+        tuple[torch.fx.GraphModule, Optional[ExportGraphSignature]],
     ],
-) -> Tuple[torch.fx.GraphModule, Optional[ExportGraphSignature]]:
+) -> tuple[torch.fx.GraphModule, Optional[ExportGraphSignature]]:
     """
     Split gm into sub-graph-modules using `sequential_split_and_maybe_inline_subgraphs`, and
     then recursively call itself on each of the submodules.
