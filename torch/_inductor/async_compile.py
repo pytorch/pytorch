@@ -11,11 +11,11 @@ from concurrent.futures import Future, ProcessPoolExecutor, ThreadPoolExecutor
 from concurrent.futures.process import BrokenProcessPool
 from functools import partial
 from time import time
-from typing import Any, Callable, Dict, List, Optional, TYPE_CHECKING
+from typing import Any, Callable, Optional, TYPE_CHECKING
 
 import torch
 from torch._dynamo.device_interface import get_registered_device_interfaces
-from torch._dynamo.utils import dynamo_timed, set_feature_use
+from torch._dynamo.utils import counters, dynamo_timed, set_feature_use
 from torch._inductor import config
 from torch._inductor.codecache import (
     CodeCacheFuture,
@@ -34,6 +34,7 @@ from torch._inductor.runtime.compile_tasks import (
     _set_triton_ptxas_path,
     _worker_compile_triton,
 )
+from torch._inductor.utils import clear_on_fresh_inductor_cache
 from torch.hub import _Faketqdm, tqdm
 from torch.utils._ordered_set import OrderedSet
 from torch.utils._triton import has_triton_package
@@ -128,6 +129,12 @@ def get_compile_threads() -> int:
     return config.compile_threads
 
 
+@clear_on_fresh_inductor_cache
+@functools.lru_cache(None)
+def get_future_cache():
+    return {}
+
+
 class AsyncCompile:
     def __init__(self) -> None:
         pass
@@ -217,7 +224,15 @@ class AsyncCompile:
             # process pool is running, so pass them to the subprocess to reset.
             env_vars = ["TORCHINDUCTOR_CACHE_DIR", "TRITON_CACHE_DIR"]
             extra_env = {v: os.environ[v] for v in env_vars if v in os.environ}
-            return TritonFuture(
+
+            future_cache = get_future_cache()
+
+            if future := future_cache.get(source_code, None):
+                counters["inductor"]["async_compile_cache_hit"] += 1
+                return future
+
+            counters["inductor"]["async_compile_cache_miss"] += 1
+            future = TritonFuture(
                 kernel,
                 self.process_pool().submit(
                     _worker_compile_triton,
@@ -225,6 +240,9 @@ class AsyncCompile:
                     extra_env,
                 ),
             )
+            future_cache[source_code] = future
+            return future
+
         else:
             set_feature_use("parallel_compile_post_warmup", False)
             with dynamo_timed(
@@ -250,7 +268,7 @@ class AsyncCompile:
             get_result = CppCodeCache.load_async(source_code, submit_fn=self.submit)
             return LambdaFuture(lambda: get_result().kernel)
 
-    def cpp_pybinding(self, argtypes: List[str], source_code: str):
+    def cpp_pybinding(self, argtypes: list[str], source_code: str):
         kernel_code_log.info("CPP+Bindings Kernel:\n%s", source_code)
         if get_compile_threads() <= 1:
             return CppPythonBindingsCodeCache.load_pybinding(argtypes, source_code)
@@ -299,7 +317,7 @@ class AsyncCompile:
             )
             return LambdaFuture(get_result)
 
-    def wait(self, scope: Dict[str, Any]) -> None:
+    def wait(self, scope: dict[str, Any]) -> None:
         with dynamo_timed(
             "async_compile.wait",
             log_pt2_compile_event=True,
