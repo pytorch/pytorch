@@ -142,19 +142,20 @@ fmha_fwd_args get_ck_fmha_fwd_args(bool has_lse,
                          has_dropout_randval,
                          drop_seed_offset};
 }
+
 std::tuple<at::Tensor, at::Tensor, at::Tensor, at::Tensor, at::Tensor, at::Tensor, at::Tensor, at::Tensor>
 mha_fwd_ck(const at::Tensor &q,                      // batch_size x seqlen_q x num_heads x head_size
            const at::Tensor &k,                      // batch_size x seqlen_k x num_heads_k x head_size
            const at::Tensor &v,                      // batch_size x seqlen_k x num_heads_k x head_size
-           c10::optional<at::Tensor> &out_,          // batch_size x seqlen_q x num_heads xhead_size
-           c10::optional<at::Tensor> &alibi_slopes_, // num_heads or batch_size x num_heads
+           std::optional<at::Tensor> &out_,          // batch_size x seqlen_q x num_heads xhead_size
+           std::optional<at::Tensor> &alibi_slopes_, // num_heads or batch_size x num_heads
            const float p_dropout,
            const float softmax_scale,
            bool is_causal,
            int window_size_left,
            int window_size_right,
            const bool return_dropout_randval,
-           c10::optional<at::Generator> gen_)
+           std::optional<at::Generator> gen_)
 {
     auto q_dtype = q.dtype();
     TORCH_CHECK(q_dtype == at::kHalf || q_dtype == at::kBFloat16,
@@ -339,10 +340,8 @@ mha_fwd_ck(const at::Tensor &q,                      // batch_size x seqlen_q x 
                 softmax_scale,
                 p_dropout,
                 drop_seed_offset);
-#if (defined(__gfx90a__) || defined(__gfx942__))
         float t = fmha_fwd(traits, args, stream_config);
         TORCH_CHECK(t >= 0, "invalid argument for fmha_fwd");
-#endif
     }
     else {
         // If seqlen_k == 0, then we have an empty tensor. We need to set the output to 0.

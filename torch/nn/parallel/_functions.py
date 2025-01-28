@@ -1,5 +1,5 @@
 import warnings
-from typing import List, Optional
+from typing import Optional
 
 import torch
 from torch._utils import _get_device_index
@@ -116,7 +116,7 @@ class Scatter(Function):
 
 
 # background streams used for copying
-_streams: Optional[List[Optional[torch.Stream]]] = None
+_streams: Optional[list[Optional[torch.Stream]]] = None
 
 
 def _get_stream(device: torch.device):

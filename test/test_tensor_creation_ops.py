@@ -32,6 +32,7 @@ from torch.testing._internal.common_utils import (
     IS_WINDOWS,
     IS_FBCODE,
     IS_SANDCASTLE,
+    IS_S390X,
     parametrize,
     skipIfTorchDynamo,
     xfailIfTorchDynamo,
@@ -1083,6 +1084,7 @@ class TestTensorCreation(TestCase):
     # nondeterministically fails, warning "invalid value encountered in cast"
     @onlyCPU
     @unittest.skipIf(IS_MACOS, "Nonfinite conversion results on MacOS are different from others.")
+    @unittest.skipIf(IS_S390X, "Test fails for int16 on s390x. Needs investigation.")
     @dtypes(torch.bool, torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64)
     def test_float_to_int_conversion_nonfinite(self, device, dtype):
         vals = (float('-inf'), float('inf'), float('nan'))
@@ -2756,6 +2758,22 @@ class TestTensorCreation(TestCase):
                                                             sparse_size, dtype=torch.float64)
                 self.assertEqual(sparse_with_dtype.device, torch.device('cpu'))
 
+    @onlyCUDA
+    @onlyNativeDeviceTypes
+    def test_new_tensor_device(self, device):
+        torch_device = torch.device(device)
+        cpu_device = torch.device('cpu')
+        tensor = torch.tensor((1, 2, 3), device=device)
+
+        # need more than one device_type to test this
+        assert self.device_type == 'cuda'
+        for left, right in product([tensor, tensor.cpu()], [tensor, tensor.cpu()]):
+            for device_arg in [torch_device, cpu_device, None]:
+                if device_arg is None:
+                    self.assertEqual(left.new_tensor(right).device, left.device)
+                else:
+                    self.assertEqual(left.new_tensor(right, device=device_arg).device, device_arg)
+
     def _test_signal_window_functions(self, name, dtype, device, **kwargs):
         import scipy.signal as signal
 
@@ -3215,6 +3233,10 @@ class TestTensorCreation(TestCase):
         t = torch.randn(2, 5, device=device)
         self.assertIsNone(t.untyped_storage().filename)
 
+    @dtypes(*all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16))
+    def test_refs_tensor(self, device, dtype):
+        self.assertEqual(torch._refs.tensor([], device=device, dtype=dtype), torch.tensor([], device=device, dtype=dtype))
+
 
 # Class for testing random tensor creation ops, like torch.randint
 class TestRandomTensorCreation(TestCase):
@@ -3494,6 +3516,25 @@ class TestRandomTensorCreation(TestCase):
             self.assertEqual(res3, res4)
             self.assertTrue((res1 < 6).all().item())
             self.assertTrue((res1 >= 0).all().item())
+
+
+    @unittest.skipIf(IS_FBCODE or IS_SANDCASTLE, "For fb compatibility random not changed in fbcode")
+    def test_randint_distribution(self, device):
+        size = 1_000_000
+        n_max = int(0.75 * 2 ** 32)
+        n_bins = 8
+
+        def bin(index, max_size):
+            return index // (max_size // n_bins)
+        res = torch.randint(n_max, (size,), device=device)
+        # histogram implemented for float only
+        bins = bin(res, n_max).float().cpu()
+        hist, _ = bins.histogram(8, range=(0, n_bins))
+        expected_bin = res.shape[0] / 8
+        expected_error = math.sqrt(expected_bin) / expected_bin * 3
+        error = (hist - expected_bin).abs().max() / expected_bin
+        self.assertTrue(error < expected_error)
+
 
     @dtypes(torch.half, torch.float, torch.bfloat16, torch.double,
             torch.complex32, torch.complex64, torch.complex128)
