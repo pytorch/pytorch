@@ -50,7 +50,7 @@ aotdispatcher_inference_nosubclass_cpu,compile_time_instruction_count,2018000000
 
 
 
-aotdispatcher_inference_subclass_cpu,compile_time_instruction_count,5764000000,0.015
+aotdispatcher_inference_subclass_cpu,compile_time_instruction_count,5852000000,0.015
 
 
 
