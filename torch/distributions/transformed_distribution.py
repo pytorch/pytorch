@@ -76,7 +76,7 @@ class TransformedDistribution(Distribution):
             )
 
         # Reshape base_distribution according to transforms.
-        base_shape: Size = base_distribution.batch_shape + base_distribution.event_shape  # type: ignore[assignment]
+        base_shape: Size = base_distribution.batch_shape + base_distribution.event_shape
         base_event_dim = len(base_distribution.event_shape)
         transform = ComposeTransform(self.transforms)
         if len(base_shape) < transform.domain.event_dim:
@@ -114,7 +114,7 @@ class TransformedDistribution(Distribution):
     def expand(self, batch_shape: _size, _instance: Optional[Self] = None) -> Self:
         new = self._get_checked_instance(TransformedDistribution, _instance)
         batch_shape = torch.Size(batch_shape)
-        shape: Size = batch_shape + self.event_shape  # type: ignore[assignment]
+        shape: Size = batch_shape + self.event_shape
         for t in reversed(self.transforms):
             shape = t.inverse_shape(shape)
         base_batch_shape = shape[: len(shape) - len(self.base_dist.event_shape)]

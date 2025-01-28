@@ -1,13 +1,12 @@
 from collections.abc import Sequence
 from functools import update_wrapper
 from typing import Any, Callable, Final, Generic, Optional, overload, TypeVar, Union
-from typing_extensions import TypeVar
 
 import torch
 import torch.nn.functional as F
 from torch import SymInt, Tensor
 from torch.overrides import is_tensor_like
-from torch.types import _Number, Number, _dtype, Device
+from torch.types import _dtype, _Number, Device, Number
 
 
 euler_constant: Final[float] = 0.57721566490153286060  # Euler Mascheroni Constant
