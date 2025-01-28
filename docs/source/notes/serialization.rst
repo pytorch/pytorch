@@ -515,6 +515,3 @@ Config
     (Default : ``torch.serialization.LoadEndianness.NATIVE``)
   * ``mmap_flags``: See :class:`~torch.serialization.set_default_mmap_options`.
     (Default : ``MAP_PRIVATE``)
-  * ``calculate_storage_offsets``: If this config is set to ``True``, offsets for storages will be
-    calculated rather than read via random reads when using ``torch.load(mmap=True)``. This minimizes
-    random reads, which can be helpful when the file is being loaded over a network. (Default : ``False``)
