@@ -1,12 +1,13 @@
 import operator
 import random
 import textwrap
+import types
+from pyting import Callable
 
 from triton.runtime.jit import JITFunction
 
 import torch
 from torch._subclasses.fake_tensor import FakeTensorMode
-from torch._dynamo._higher_order_ops.triton_kernel_wrap import triton_wrapper_mutation
 
 from .. import config, ir
 from torch._inductor.runtime.triton_heuristics import grid
@@ -21,6 +22,12 @@ from .wrapper import (
     CommBufferAllocateLine,
     CommBufferFreeLine,
 )
+
+def call_triton_kernel(kernel: Callable, grid, args):
+    """
+    Call Triton kernels, for testing purposes.
+    """
+    return kernel[grid](args)
 
 """
 Extra wrapper IR nodes for FX codegen.
@@ -52,6 +59,20 @@ class WrapperFxCodegen(PythonWrapperCodegen):
         super().__init__()
         self.graph = torch.fx.Graph() # Wrapper FX IR.
         self.buffer_to_node: Dict[MemoryPlanningLine, torch.fx.Node] = {} # Symbol table for codegen.
+        kernels = {} # Table to store Triton kernels.
+
+    def _import_kernel(kernel_name: str, code: str) -> types.ModuleType:
+        """
+        Imports a kernel as a python module.
+        """
+        with tempfile.NamedTemporaryFile(suffix=".py") as f:
+            kernel.dump(path)
+            spec = importlib.util.spec_from_file_location(kernel_name, f.name)
+
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+
+        return mod
 
     def define_kernel(
         self, *args, **kwargs,
@@ -216,12 +237,14 @@ class WrapperFxCodegen(PythonWrapperCodegen):
     def _generate_triton_call(self, line: Line) -> None:
         assert isinstance(line, KernelCallLine) #TODO create this in Wrapper IR
 
-        grid = [] #TODO get a valid config from Line. Might have to import the Triton source.
-        kwargs = {} #TODO
-        triton_kernel = () #TODO figure out how Dynamo initializes this
+        if line.kwargs["grid_fn"] not in ("grid", None):
+            raise NotImplementedError(f"Unsupported grid_fn: '{grid_fn}'")
 
-        node = self.graph.call_function(triton_wrapper_mutation, args=(triton_kernel, grid, kwargs))
-        # TODO add autotuning metadata?
+
+        kernel_name, call_args = line.args
+        kernel = self.kernels[kernel_name]
+
+        node = self.graph.call_function(call_triton_kernel, args=(kernel, grid, call_args))
 
     def generate_kernel_call(
         self, *args, **kwargs,
@@ -236,12 +259,21 @@ class WrapperFxCodegen(PythonWrapperCodegen):
         if not line.kwargs["triton"]:
             raise NotImplementedError("FX conversion only supports Triton kernels.")
 
-        if line.kwargs["grid_fn"] not in ("grid", None):
-            raise NotImplementedError(f"Unsupported grid_fn: '{grid_fn}'")
+        self._generate_triton_call(line)
 
-        #TODO call self._generate_triton_kernel
 
     def _generate_kernel_definition(self, line: Line):
         assert isinstance(line, KernelDefinitionLine)
 
-        #TODO generate triton kernel representing the kernel define. Put it in a symbol table.
+        # Generate code for the kernel.
+        #TODO refactor into parent class?
+        kernel_name, kernel_body = line.args
+        metadata = line.kwargs["metadata"]
+        have_metadata = metadata and not config.triton.autotune_at_compile_time
+        metadata_comment = f"{metadata}\n" if have_metadata else ""
+        kernel_code = f"\n\n{metadata_comment}{kernel_name} = {kernel_body}"
+
+        # Import the code and store the kernel.
+        mod = self._import_kernel(kernel_name, kernel_code)
+        kernel = getattr(mod, kernel_name)
+        self.kernels[kernel_name] = kernel
