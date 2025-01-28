@@ -13,7 +13,6 @@ import random
 import re
 import sys
 import threading
-import traceback
 import types
 import typing
 import unittest
@@ -3150,7 +3149,6 @@ BUILTIN_SKIPLIST = (
     operator,
     random,
     threading,
-    traceback,
     types,
     unittest,
 )
