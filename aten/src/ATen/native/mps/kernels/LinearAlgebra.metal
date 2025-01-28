@@ -34,7 +34,7 @@ kernel void naive_matmul(
       mat2Data + y * strides[1].y,
       ulong2(strides[0].y, strides[1].x),
       sizes.y);
-  outputData[x * strides[2].x + y * strides[2].y] = static_cast<Tout>(rc);
+  outputData[x * strides[2].x + y * strides[2].y] = static_cast<T>(rc);
 }
 
 inline float blockReduceSum(
