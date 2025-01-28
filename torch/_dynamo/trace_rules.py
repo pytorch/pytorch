@@ -11,16 +11,12 @@ import enum
 import functools
 import importlib
 import inspect
-import linecache
-import logging
 import multiprocessing
 import operator
 import os
 import random
 import re
-import selectors
 import sys
-import tempfile
 import threading
 import traceback
 import types
@@ -3159,18 +3155,12 @@ BUILTIN_SKIPLIST = (
     copyreg,
     enum,
     importlib,
-    inspect,
-    linecache,
-    logging,
     multiprocessing,
     operator,
     random,
-    selectors,
-    tempfile,
     threading,
     traceback,
     types,
-    typing,
     unittest,
     _collections_abc,
     _weakrefset,
