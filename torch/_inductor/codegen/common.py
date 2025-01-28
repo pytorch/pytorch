@@ -320,9 +320,11 @@ class BackendFeature(Enum):
     REDUCE_TO_SINGLE_ELEMENT = auto()
 
 
-def get_backend_features(device: Union[torch.device, str, None]):
+def get_backend_features(
+    device: Union[torch.device, str, None]
+) -> OrderedSet[BackendFeature]:
     if device is None:
-        return {}
+        return OrderedSet()
     init_backend_registration()
     if isinstance(device, torch.device):
         device_type = device.type
@@ -2186,7 +2188,7 @@ class Kernel(CodeGen):
         if not scheduler:
             return
         fused_node_names = OrderedSet(
-            scheduler.name_to_buf[buf].defining_op.get_name()
+            scheduler.name_to_buf[buf].defining_op_name()
             for buf in self.store_buffer_names
             if buf in scheduler.name_to_buf
         )
