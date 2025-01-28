@@ -1619,15 +1619,6 @@ void initJITBindings(PyObject* module) {
           "get_record_offset",
           [](PyTorchStreamReader& self, const std::string& key) {
             return self.getRecordOffset(key);
-          })
-      .def(
-          "get_record_offset_no_read",
-          [](PyTorchStreamReader& self,
-             size_t zipfile_header_offset,
-             const std::string filename,
-             size_t size) {
-            return self.getRecordOffsetNoRead(
-                zipfile_header_offset, filename, size);
           });
 
   // Used by torch.Package to coordinate deserialization of storages across
