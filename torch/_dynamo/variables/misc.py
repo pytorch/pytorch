@@ -33,6 +33,7 @@ from ..utils import (
     is_tensor_base_attr_getter,
     proxy_args_kwargs,
     set_example_value,
+    tuple_methods,
 )
 from .base import VariableTracker
 from .functions import (
@@ -213,6 +214,11 @@ class SuperVariable(VariableTracker):
             and inner_fn in self.objvar._dict_methods
         ):
             return self.objvar._dict_vt.call_method(tx, name, args, kwargs)
+        elif (
+            isinstance(self.objvar, variables.UserDefinedTupleVariable)
+            and inner_fn in tuple_methods
+        ):
+            return self.objvar._tuple_vt.call_method(tx, name, args, kwargs)
         elif inner_fn is object.__getattribute__:
             # object.__getattribute__ has no side-effects. We can directly call
             # __getattribute__ to access the attribute.
@@ -1707,6 +1713,7 @@ class RandomVariable(VariableTracker):
             tx.output.side_effects.mutation(self)
             state = self.random.getstate()
 
+            # Generate new random object with the same state and call the method
             def call_random_meth(*args, **kwargs):
                 r = random.Random()
                 r.setstate(state)
