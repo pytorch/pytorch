@@ -81,8 +81,8 @@ class _Config(Generic[T]):
 
     default: Union[T, object]
     justknob: Optional[str] = None
-    env_name_default: Optional[List[str]] = None
-    env_name_force: Optional[List[str]] = None
+    env_name_default: Optional[list[str]] = None
+    env_name_force: Optional[list[str]] = None
     value_type: Optional[type] = None
     alias: Optional[str] = None
 
@@ -90,8 +90,8 @@ class _Config(Generic[T]):
         self,
         default: Union[T, object] = _UNSET_SENTINEL,
         justknob: Optional[str] = None,
-        env_name_default: Optional[Union[str, List[str]]] = None,
-        env_name_force: Optional[Union[str, List[str]]] = None,
+        env_name_default: Optional[Union[str, list[str]]] = None,
+        env_name_force: Optional[Union[str, list[str]]] = None,
         value_type: Optional[type] = None,
         alias: Optional[str] = None,
     ):
@@ -118,8 +118,8 @@ class _Config(Generic[T]):
 
     @staticmethod
     def string_or_list_of_string_to_list(
-        val: Optional[Union[str, List[str]]]
-    ) -> Optional[List[str]]:
+        val: Optional[Union[str, list[str]]]
+    ) -> Optional[list[str]]:
         if val is None:
             return None
         if isinstance(val, str):
@@ -137,8 +137,8 @@ if TYPE_CHECKING:
     def Config(
         default: Union[T, object] = _UNSET_SENTINEL,
         justknob: Optional[str] = None,
-        env_name_default: Optional[Union[str, List[str]]] = None,
-        env_name_force: Optional[Union[str, List[str]]] = None,
+        env_name_default: Optional[Union[str, list[str]]] = None,
+        env_name_force: Optional[Union[str, list[str]]] = None,
         value_type: Optional[type] = None,
         alias: Optional[str] = None,
     ) -> T:
@@ -149,8 +149,8 @@ else:
     def Config(
         default: Union[T, object] = _UNSET_SENTINEL,
         justknob: Optional[str] = None,
-        env_name_default: Optional[Union[str, List[str]]] = None,
-        env_name_force: Optional[Union[str, List[str]]] = None,
+        env_name_default: Optional[Union[str, list[str]]] = None,
+        env_name_force: Optional[Union[str, list[str]]] = None,
         value_type: Optional[type] = None,
         alias: Optional[str] = None,
     ) -> _Config[T]:
