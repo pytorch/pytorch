@@ -458,9 +458,9 @@ inductor_override_kwargs["cpu"] = {
     ("nn.functional.interpolate.bicubic", u8): {"atol": 1, "rtol": 0},
     # High atol due to precision loss
     ("nn.functional.interpolate.bicubic", f32): {"atol": 5e-3, "rtol": 0},
-    ("native_batch_norm", f16): {"atol": 2e-3, "rtol": 6e-3},
-    ("_native_batch_norm_legit", f16): {"atol": 2e-3, "rtol": 6e-3},
-    ("_batch_norm_with_update", f16): {"atol": 2e-3, "rtol": 6e-3},
+    # ("native_batch_norm", f16): {"atol": 2e-3, "rtol": 6e-3},
+    # ("_native_batch_norm_legit", f16): {"atol": 2e-3, "rtol": 6e-3},
+    # ("_batch_norm_with_update", f16): {"atol": 2e-3, "rtol": 6e-3},
 }
 
 inductor_override_kwargs["cuda"] = {
@@ -531,7 +531,7 @@ inductor_override_kwargs["cuda"] = {
     ("index_reduce.amax", f32): {"check_gradient": False},
     ("index_reduce.amax", f16): {"check_gradient": False},
     ("tanh", f16): {"atol": 1e-4, "rtol": 1e-2},
-    ("fft.irfft2", f16): {"atol": 1.6e-5, "rtol": 0.02},
+    # ("fft.irfft2", f16): {"atol": 1.6e-5, "rtol": 0.02},
 }
 
 inductor_override_kwargs["xpu"] = {
