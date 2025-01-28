@@ -1232,10 +1232,10 @@ class AssociativeScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
 
         args, kwargs = LazyVariableTracker.realize_all((args, kwargs))
 
-        def arg_extractor(combine_fn, xs, dim):
-            return combine_fn, xs, dim
+        def arg_extractor(combine_fn, xs):
+            return combine_fn, xs
 
-        combine_fn, xs, dim = arg_extractor(*args, **kwargs)
+        combine_fn, xs = arg_extractor(*args, **kwargs)
 
         if xs.python_type() != list:
             unimplemented(
@@ -1248,7 +1248,7 @@ class AssociativeScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
         # the sub_args shape will be (4, ).
         with discard_graph_changes(tx):
             sub_args = [
-                _make_inlined(tx, first_slice_copy)(leaf, dim)
+                _make_inlined(tx, first_slice_copy)(leaf)
                 for leaf in itertools.chain(xs.items, xs.items)
             ]
         (
@@ -1277,7 +1277,7 @@ class AssociativeScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
 
         xs_proxy = xs.as_proxy()
         check_meta_consistency_vt(
-            [_make_inlined(tx, first_slice_copy)(t, dim) for t in xs.items],
+            [_make_inlined(tx, first_slice_copy)(t) for t in xs.items],
             combine_result.unpack_var_sequence(tx),
             "initial_xs",
             "combine_fn_output",
@@ -1291,7 +1291,6 @@ class AssociativeScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
         p_args = (
             make_attr(tx, combine_fn_name),
             xs_proxy,
-            dim.as_proxy(),
         )
 
         with tx.fake_mode:
