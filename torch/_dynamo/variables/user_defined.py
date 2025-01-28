@@ -99,10 +99,12 @@ def is_forbidden_context_manager(ctx):
 
 
 class UserDefinedVariable(VariableTracker):
-    pass
+    value: object
 
 
 class UserDefinedClassVariable(UserDefinedVariable):
+    value: type[object]
+
     def __init__(self, value, **kwargs) -> None:
         super().__init__(**kwargs)
         self.value = value
