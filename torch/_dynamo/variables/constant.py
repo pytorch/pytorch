@@ -195,7 +195,9 @@ its type to `common_constant_types`.
 
         unimplemented(f"const method call {typestr(self.value)}.{name}")
 
-    def call_hasattr(self, tx: "InstructionTranslator", name: str) -> "VariableTracker":
+    def call_obj_hasattr(
+        self, tx: "InstructionTranslator", name: str
+    ) -> "VariableTracker":
         result = hasattr(self.value, name)
         return variables.ConstantVariable.create(result)
 
