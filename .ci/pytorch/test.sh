@@ -46,9 +46,6 @@ BUILD_BIN_DIR="$BUILD_DIR"/bin
 SHARD_NUMBER="${SHARD_NUMBER:=1}"
 NUM_TEST_SHARDS="${NUM_TEST_SHARDS:=1}"
 
-# enable debug asserts in serialization
-export TORCH_SERIALIZATION_DEBUG=1
-
 export VALGRIND=ON
 # export TORCH_INDUCTOR_INSTALL_GXX=ON
 if [[ "$BUILD_ENVIRONMENT" == *clang9* || "$BUILD_ENVIRONMENT" == *xpu* ]]; then
