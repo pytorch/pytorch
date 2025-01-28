@@ -1941,8 +1941,7 @@ void ProcessGroupNCCL::DesyncDebugger::init(
     c10::intrusive_ptr<Store> store) {
   rank_ = rank;
   size_ = size;
-  // NOLINTNEXTLINE(performance-unnecessary-value-param)
-  store_ = store;
+  store_ = std::move(store);
   enabled_ = true;
   traceKeyStart_ = getTraceStartKey("NCCL", rank);
   traceKeyEnd_ = getTraceEndKey("NCCL", rank);
@@ -4633,11 +4632,11 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::barrier(const BarrierOptions& opts) {
   if (!opts.device_ids.empty()) {
     // Use the first device id because PG NCCL is single-device now
     barDevIdx = static_cast<c10::DeviceIndex>(opts.device_ids[0]);
-  } else if (getBoundDeviceId()) {
+  } else if (getBoundDeviceId().has_value()) {
     // 2nd choice: Use the bound GPU device id if available.
     // Bounded device id can be passed to `init_process_group`.
     // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
-    barDevIdx = (*getBoundDeviceId()).index();
+    barDevIdx = getBoundDeviceId().value().index();
   } else if (!usedDeviceIdxs_.empty()) {
     // 3rd choice: infer the device id from the used device ids.
     barDevIdx = *usedDeviceIdxs_.begin();
