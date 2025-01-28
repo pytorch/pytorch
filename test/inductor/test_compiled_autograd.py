@@ -23,6 +23,7 @@ from torch import _inductor as inductor
 from torch._dynamo import compiled_autograd, config
 from torch._dynamo.backends.debugging import aot_eager
 from torch._dynamo.device_interface import get_interface_for_device
+from torch._dynamo.testing import normalize_gm
 from torch._dynamo.utils import counters
 from torch._inductor import config as inductor_config
 from torch._inductor.test_case import run_tests, TestCase
@@ -80,18 +81,20 @@ def hook3(gI, gO):
     return (torch.sin(gI[0]) + gO[0],)
 
 
+def reset():
+    torch._logging.set_logs(compiled_autograd_verbose=False)
+    config.compiled_autograd = False
+    compiled_autograd.reset()
+
+
 class TestCompiledAutograd(TestCase):
     def setUp(self) -> None:
         super().setUp()
-        torch._logging.set_logs(compiled_autograd_verbose=False)
-        config.compiled_autograd = False
-        compiled_autograd.reset()
+        reset()
 
     def tearDown(self) -> None:
         super().tearDown()
-        torch._logging.set_logs(compiled_autograd_verbose=False)
-        config.compiled_autograd = False
-        compiled_autograd.reset()
+        reset()
 
     def check_output_and_recompiles(
         self, fn, count=1, compiler_fn=compiler_fn, compile_fn=False
@@ -153,6 +156,28 @@ main()
         # Run it three times to catch bad dynamo state resets
         for _ in range(3):
             self.run_as_subprocess(script)
+
+    def test_reset(self):
+        compiled_autograd.compiled_autograd_enabled = True
+        torch._C._dynamo.compiled_autograd.set_autograd_compiler(lambda: None, True)
+        # TODO: return prior verbose logger
+        # torch._C._dynamo.compiled_autograd.set_verbose_logger(dummy)
+        compiled_autograd.COMPILE_COUNTER = None
+
+        # state should be clean after reset
+        compiled_autograd.reset()
+
+        assert compiled_autograd.compiled_autograd_enabled is False
+        (
+            prior_compiler,
+            prior_dynamic,
+        ) = torch._C._dynamo.compiled_autograd.set_autograd_compiler(None, False)
+        assert prior_compiler is None
+        assert prior_dynamic is False
+        assert (
+            compiled_autograd.COMPILE_COUNTER is not None
+            and next(compiled_autograd.COMPILE_COUNTER) == 0
+        )
 
     def test_basic(self):
         def fn():
@@ -2805,8 +2830,11 @@ TORCH_LIBRARY(test_cudagraphs_cpu_scalar_used_in_cpp_custom_op, m) {
             opt_bwd()
 
         self.assertEqual(counters["compiled_autograd"]["captures"], 1)
-        # always safe to move, since we trace into the autograd::function bwd and can see if it's only used by aten ops
-        self.assertEqual(counters["inductor"]["cudagraph_skips"], 0)
+        # Compiled autograd's initial capture lifts custom C++ autograd::Function bwd instead of tracing
+        # into it. We must skip since we do not know if the cpu scalar will be used only in ATen/prim ops.
+        # In the future, we can consider having a cpu scalar movement pass sometime after we trace
+        # into the custom C++ autograd::Function (like in AOTDispatcher)
+        self.assertEqual(counters["inductor"]["cudagraph_skips"], 1)
 
     def test_logs(self):
         logs, ctx = logs_to_string(
@@ -2925,12 +2953,11 @@ TORCH_LIBRARY(test_cudagraphs_cpu_scalar_used_in_cpp_custom_op, m) {
 
         expected_logs = [
             "code: CompiledFunctionBackward (NodeCall 2)",
+            "code: CompiledFunctionBackward0 (NodeCall 2)",
             "aot0_primals_3",
             "aot0_relu",
             "aot0_le",
             "aot0_permute_2",
-            "code: CompiledFunctionBackward0 (NodeCall 2)",
-            "aot0_tangents_1",
             "aot0_full_default",
             "aot0_where",
             "aot0_mm",
@@ -2980,20 +3007,17 @@ TORCH_LIBRARY(test_cudagraphs_cpu_scalar_used_in_cpp_custom_op, m) {
 
         expected_logs = [
             "CompiledFunctionBackward1",
-            "aot1_tangents_1",
             "aot1_sin_1",
-            "aot1_primals_2",
             "aot1_neg",
             "aot0_tangents_2",
             "aot1_cos_1",
-            "aot1_primals_1",
             "aot0_tangents_1",
             "CompiledFunctionBackward0",
+            "aot0_sin_1",
             "aot0_neg",
-            "aot0_sin",
             "aot0_mul",
+            "aot0_cos_1",
             "aot0_mul_1",
-            "aot0_cos",
             "aot0_add",
         ]
 
@@ -3138,6 +3162,120 @@ TORCH_LIBRARY(test_cudagraphs_cpu_scalar_used_in_cpp_custom_op, m) {
 
         self.assertEqual(sum(1 for e in unexpected_logs if e in logs.getvalue()), 0)
 
+    def test_tensor_subclass_basic(self):
+        from torch.testing._internal.two_tensor import TwoTensor, TwoTensorMode
+
+        with torch.library._scoped_library("mylib", "FRAGMENT") as lib:
+            lib.define("to_twotensor(Tensor a, Tensor b) -> Tensor")
+            lib.define("from_twotensor(Tensor c) -> (Tensor, Tensor)")
+
+            def to_twotensor_backward(ctx, grad):
+                return torch.ops.mylib.from_twotensor(grad)
+
+            def from_twotensor_backward(ctx, grad_a, grad_b):
+                raise AssertionError("shouldn't get hit")
+
+            torch.library.register_autograd(
+                "mylib::to_twotensor", to_twotensor_backward, lib=lib
+            )
+            torch.library.register_autograd(
+                "mylib::from_twotensor", from_twotensor_backward, lib=lib
+            )
+
+            @torch.library.register_torch_dispatch(
+                "mylib::to_twotensor", TwoTensorMode, lib=lib
+            )
+            def _(_0, _1, _2, args, kwargs):
+                assert not kwargs
+                a, b = args
+                return TwoTensor(a.clone(), b.clone())
+
+            @torch.library.register_torch_dispatch(
+                "mylib::from_twotensor", TwoTensor, lib=lib
+            )
+            def _(_0, _1, _2, args, kwargs):
+                assert not kwargs
+                (c,) = args
+                return c.a.clone(), c.b.clone()
+
+            @torch.compile(backend="aot_eager", fullgraph=True)
+            def fn(x):
+                return x * x + 2
+
+            param1 = torch.randn(4, 4, requires_grad=True)
+            param2 = torch.randn(4, 4, requires_grad=True)
+            with TwoTensorMode():
+                x = torch.ops.mylib.to_twotensor(param1, param2)
+
+            inner_compiler_fn = make_compiler_fn(fullgraph=True, backend="aot_eager")
+            graphs = []
+
+            def compiler_fn(gm):
+                graphs.append(gm)
+                return inner_compiler_fn(gm)
+
+            with compiled_autograd._enable(compiler_fn):
+                res = fn(x)
+                res.sum().backward()
+
+            self.assertEqual(param1.grad, 2 * param1)
+            self.assertEqual(param2.grad, 2 * param2)
+            self.assertEqual(len(graphs), 1)
+
+            graph_code = normalize_gm(graphs[0].print_readable(print_output=False))
+            # The graph should have make_subclass calls in it.
+            self.assertExpectedInline(
+                graph_code,
+                """\
+class CompiledAutograd0(torch.nn.Module):
+    def forward(self, inputs, sizes, scalars, hooks):
+        getitem = inputs[0]
+        getitem_1 = inputs[1]
+        getitem_2 = inputs[2]
+        getitem_3 = inputs[3]
+        getitem_4 = inputs[4];  inputs = None
+
+        validate_outputs = torch__dynamo_compiled_autograd_ops_validate_outputs([getitem], [((None, None, device(type='cpu'), 6, 0, None), [], True)]);  getitem = None
+        getitem_5 = validate_outputs[0];  validate_outputs = None
+
+        sum_backward0 = torch__dynamo_compiled_autograd_ops_SumBackward0([getitem_5], [True], [4, 4]);  getitem_5 = None
+        getitem_6 = sum_backward0[0];  sum_backward0 = None
+        validate_outputs_1 = torch__dynamo_compiled_autograd_ops_validate_outputs([getitem_6], [((None, None, device(type='cpu'), 6, 0, None), [4, 4], True)]);  getitem_6 = None
+        getitem_7 = validate_outputs_1[0];  validate_outputs_1 = None
+
+        getitem_8 = hooks[0];  getitem_8 = None
+        call_aot_bwd_prologue = torch__dynamo_compiled_autograd_call_aot_bwd_prologue((getitem_1, getitem_2), [], getitem_7);  getitem_1 = getitem_2 = getitem_7 = None
+        aot0_primals_1 = call_aot_bwd_prologue[0]
+        aot0_primals_2 = call_aot_bwd_prologue[1]
+        aot0_tangents_1 = call_aot_bwd_prologue[2]
+        aot0_tangents_2 = call_aot_bwd_prologue[3];  call_aot_bwd_prologue = None
+
+        aot0_mul_2 = torch.ops.aten.mul.Tensor(aot0_tangents_1, aot0_primals_1);  aot0_tangents_1 = aot0_primals_1 = None
+        aot0_mul_3 = torch.ops.aten.mul.Tensor(aot0_tangents_2, aot0_primals_2);  aot0_tangents_2 = aot0_primals_2 = None
+
+        aot0_add_2 = torch.ops.aten.add.Tensor(aot0_mul_2, aot0_mul_2);  aot0_mul_2 = None
+        aot0_add_3 = torch.ops.aten.add.Tensor(aot0_mul_3, aot0_mul_3);  aot0_mul_3 = None
+
+        make_subclass = torch__dynamo_compiled_autograd_make_subclass(aot0_add_2, aot0_add_3);  aot0_add_2 = aot0_add_3 = None
+
+        getitem_13 = hooks[1];  hooks = None
+        call_backward = torch__dynamo_external_utils_call_backward(getitem_13, (), make_subclass);  getitem_13 = make_subclass = None
+        getitem_16 = call_backward[0]
+        getitem_17 = call_backward[1];  call_backward = None
+        validate_outputs_2 = torch__dynamo_compiled_autograd_ops_validate_outputs([getitem_16, getitem_17], [((None, None, device(type='cpu'), 6, 0, None), [4, 4], False), ((None, None, device(type='cpu'), 6, 0, None), [4, 4], False)]);  getitem_16 = getitem_17 = None
+        getitem_19 = validate_outputs_2[0]
+
+        accumulate_grad__1 = torch.ops.inductor.accumulate_grad_.default(getitem_4, getitem_19);  getitem_4 = getitem_19 = accumulate_grad__1 = None
+
+        getitem_20 = validate_outputs_2[1];  validate_outputs_2 = None
+
+        accumulate_grad_ = torch.ops.inductor.accumulate_grad_.default(getitem_3, getitem_20);  getitem_3 = getitem_20 = accumulate_grad_ = None
+
+        _exec_final_callbacks_stub = torch__dynamo_external_utils__exec_final_callbacks_stub();  _exec_final_callbacks_stub = None
+        return []
+""",  # noqa: B950
+            )
+
     # https://github.com/pytorch/pytorch/issues/138920
     def test_compiled_autograd_does_not_specialize_on_bw_symints(self):
         class Mod(torch.nn.Module):
@@ -3231,7 +3369,7 @@ TORCH_LIBRARY(test_cudagraphs_cpu_scalar_used_in_cpp_custom_op, m) {
         # because we ignore all of these guards anyway in CA.
         # Once we stop using make_fx in CA, we won't have to worry about this specialization.
         view_nodes = graphs[1].graph.find_nodes(
-            op="call_function", target=torch.ops.aten.view.default
+            op="call_function", target=torch.ops.aten.reshape.default
         )
         # First 2 view nodes have a first argument that is a SymInt, not an int burned into the graph
         self.assertTrue(isinstance(view_nodes[0].args[1][0], torch.fx.Node))
@@ -3262,7 +3400,7 @@ TORCH_LIBRARY(test_cudagraphs_cpu_scalar_used_in_cpp_custom_op, m) {
                 yield v.grad
 
         self.check_output_and_recompiles(
-            fn, count=2, compiler_fn=make_compiler_fn(fullgraph=True)
+            fn, count=2, compiler_fn=make_compiler_fn(backend="aot_eager")
         )
 
     @unittest.expectedFailure
@@ -3633,6 +3771,7 @@ known_failing_tests = {
     "inductor.test_compiled_autograd.TestCompiledAutogradOpInfoCPU.test_hops_in_bwd_map_simple_cpu_float32",
     "inductor.test_compiled_autograd.TestCompiledAutogradOpInfoCPU.test_hops_in_bwd_map_triple_nested_cpu_float32",
     # Uncategorized
+    "test_not_implemented_grad",  # Dynamo changes the types of exceptions
 }
 
 if not HAS_CUDA:
@@ -3655,17 +3794,18 @@ if torch.distributed.is_available() and HAS_CUDA:
 
 
 class TestCompiledAutogradOpInfo(TestCase):
-    def reset(self) -> None:
-        torch._logging.set_logs(compiled_autograd_verbose=False)
-        config.compiled_autograd = False
-        compiled_autograd.reset()
+    def setUp(self) -> None:
+        super().setUp()
+        reset()
+
+    def tearDown(self) -> None:
+        super().tearDown()
+        reset()
 
     @ops(hop_db, allowed_dtypes=(torch.float,))
     def test_hops_in_bwd(self, device, dtype, op):
         if self.id() in known_failing_tests:
             self.skipTest("Expected to fail.")
-
-        self.reset()
 
         def create_bwd_fn_closure(op_args, op_kwargs):
             op_out_ref = []
@@ -3677,7 +3817,7 @@ class TestCompiledAutogradOpInfo(TestCase):
 
                 @staticmethod
                 def backward(ctx, grad):
-                    out = op.op(*op_args, **(op_kwargs))
+                    out = op.op(*op_args, **op_kwargs)
                     op_out_ref.append(out)
                     return grad
 
@@ -3712,8 +3852,6 @@ class TestCompiledAutogradOpInfo(TestCase):
             actual = op_out_ref[0]
 
             self.assertEqual(expected, actual)
-
-        self.reset()
 
 
 instantiate_device_type_tests(TestCompiledAutogradOpInfo, globals(), only_for=("cpu",))
