@@ -2704,12 +2704,12 @@ std::shared_ptr<NCCLComm> ProcessGroupNCCL::initNCCLComm(
                 << timerDeltaMs << " ms";
     }
 
-#ifdef NCCL_HAS_COMM_NONBLOCKING
+#ifdef NCCL_HAS_CONFIG
     ncclComm =
         NCCLComm::create(numRanks, rank, ncclID, deviceIndex, options_->config);
 #else
     ncclComm = NCCLComm::create(numRanks, rank, ncclID, deviceIndex);
-#endif // NCCL_HAS_COMM_NONBLOCKING
+#endif // NCCL_HAS_CONFIG
   }
 
   // Creates the NCCL streams
