@@ -943,6 +943,7 @@ class TestCutlassBackend(TestCase):
     def test_cutlass_backend_op_allowlist(
         self,
     ):
+        assert False, "henry expect failure here 2"
         def addmm(x, a, b, alpha, beta):
             return torch.addmm(x, a, b, alpha=alpha, beta=beta)
 
@@ -989,6 +990,7 @@ class TestCutlassBackend(TestCase):
     @unittest.mock.patch.dict(os.environ, {"PATH": _get_path_without_sccache()})
     def test_get_max_alignment(self):
         l4 = FixedLayout("cpu", torch.half, size=(1, 2, 4), stride=(0, 4, 1))
+        assert False, "henry expect failure here 1"
         m4 = get_max_alignment(l4)
         self.assertEqual(
             m4, 4, "Wrong max alignment. Should have been 4. (simple, contiguous case)"
