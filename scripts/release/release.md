@@ -207,11 +207,6 @@ The CUTLASS and CK backend adds kernel choices for GEMM autotuning in Inductor. 
 ### Inductor
 
 
-
-* Changes the padding method in matrix multiplication to use aten.constant_pad_nd, requiring users to update their code to use the new function. Example: Replace `torch.nn.functional.pad` with `torch.ops.aten.constant_pad_nd` where applicable ([#137820](https://github.com/pytorch/pytorch/pull/137820)).
-* Move `torch._utils.is_compiling` to `torch.compiler.is_compiling` ([#127690](https://github.com/pytorch/pytorch/pull/127690))
-    * Old API: `torch._utils.is_compiling()`
-    * New API:`torch.compiler.is_compiling()`
 * Turn on TORCHINDUCTOR_REORDER_FOR_PEAK_MEMORY and remove config ([#137205](https://github.com/pytorch/pytorch/pull/137205))
 
     `reorder_for_peak_memory` is now enabled by default. If old behavior is desired, edit `reorder_for_peak_memory` in `torch._inductor/config.py`.
@@ -325,7 +320,7 @@ The CUTLASS and CK backend adds kernel choices for GEMM autotuning in Inductor. 
 ### Inductor
 
 
-
+* Move `torch._utils.is_compiling` to `torch.compiler.is_compiling` ([#127690](https://github.com/pytorch/pytorch/pull/127690)) Rewrite `torch._utils.is_compiling()` to `torch.compiler.is_compiling()`.
 * Added option `​​autotune_num_choices_displayed` to control number of kernel options displayed ([#138788](https://github.com/pytorch/pytorch/pull/138788))
 * Added option `force_pointwise_cat` concat support through inductor using pointwise kernels ([#141966](https://github.com/pytorch/pytorch/pull/141966)). This forces concat to be generated as a pointwise op with masked loads.
 * New config option `annotate_training` that adds Inductor annotations to NVTX.  ([#130429](https://github.com/pytorch/pytorch/pull/130429))
