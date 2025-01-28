@@ -222,7 +222,7 @@ class TestSubclass(TestCase):
 
         m = MyLazyModule()
         self.assertTrue(m.has_uninitialized_params())
-        output = m(self._create_tensor(tensor_cls))
+        m(self._create_tensor(tensor_cls))
         self.assertFalse(m.has_uninitialized_params())
         self.assertIsInstance(m.param, tensor_cls)
 
@@ -256,7 +256,7 @@ class TestSubclass(TestCase):
                 return r
 
         with self.assertRaisesRegex(RuntimeError, r"requires that detach\(\) returns an instance of the same type"):
-            param = nn.Parameter(NonRewrappingTensor(torch.randn(3)))
+            nn.Parameter(NonRewrappingTensor(torch.randn(3)))
 
     def test_tensor_subclass_storage_data_accesses_throw(self):
         from torch.testing._internal.logging_tensor import LoggingTensor
@@ -265,7 +265,6 @@ class TestSubclass(TestCase):
         # Accessing storage on a tensor subclass is valid
         storage = x_log.untyped_storage()
         # This includes accessing metadata on the storage
-        sz = storage.size()
         # But storage methods that access data will throw
         with self.assertRaisesRegex(RuntimeError, "on an invalid python storage"):
             storage.data_ptr()

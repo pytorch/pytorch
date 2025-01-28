@@ -96,7 +96,7 @@ void LBFGSParamState::serialize(
   _TORCH_OPTIM_SERIALIZE_TORCH_ARG_DEQUE(old_stps);
   _TORCH_OPTIM_SERIALIZE_TORCH_ARG_DEQUE(ro);
   // Python version only serializes state vars if explicitly defined
-  if (al() != std::nullopt) {
+  if (al().has_value()) {
     _TORCH_OPTIM_SERIALIZE_TORCH_ARG(al);
   }
 }
@@ -196,7 +196,7 @@ static double _cubic_interpolate(
   // ported from https://github.com/torch/optim/blob/master/polyinterp.lua
   // Compute bounds of interpolation area
   auto [xmin_bound, xmax_bound] =
-      (bounds != std::nullopt) ? (*bounds) : std::minmax({x1, x2});
+      (bounds.has_value()) ? (*bounds) : std::minmax({x1, x2});
   // Code for most common case: cubic interpolation of 2 points
   //   w/ function and derivative values for both
   // Solution in this case (where x2 is the farthest point):
@@ -546,7 +546,7 @@ Tensor LBFGS::step(LossClosure closure) {
 
     // optional line search: user function
     auto ls_func_evals = 0;
-    if (line_search_fn != std::nullopt) {
+    if (line_search_fn.has_value()) {
       TORCH_CHECK(
           *line_search_fn == "strong_wolfe",
           "only 'strong_wolfe' is supported");

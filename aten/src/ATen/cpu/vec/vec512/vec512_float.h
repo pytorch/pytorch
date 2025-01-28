@@ -11,8 +11,8 @@
 #include <sleef.h>
 #endif
 
-namespace at {
-namespace vec {
+
+namespace at::vec {
 // See Note [CPU_CAPABILITY namespace]
 inline namespace CPU_CAPABILITY {
 
@@ -177,6 +177,9 @@ public:
   }
   Vectorized<float> asin() const {
     return Vectorized<float>(Sleef_asinf16_u10(values));
+  }
+  Vectorized<float> asinh() const {
+    return Vectorized<float>(Sleef_asinhf16_u10(values));
   }
   Vectorized<float> atan() const {
     return Vectorized<float>(Sleef_atanf16_u10(values));
@@ -399,6 +402,12 @@ public:
   }
   Vectorized<float> pow(const Vectorized<float> &b) const {
     return Vectorized<float>(Sleef_powf16_u10(values, b));
+  }
+  float reduce_add() const {
+    return _mm512_reduce_add_ps(values);
+  }
+  float reduce_max() const {
+    return _mm512_reduce_max_ps(values);
   }
   // Comparison using the _CMP_**_OQ predicate.
   //   `O`: get false if an operand is NaN
@@ -708,4 +717,4 @@ inline void transpose_mxn(const float* src, int64_t ld_src, float* dst, int64_t 
 
 #endif
 
-}}}
+}}

@@ -123,6 +123,8 @@ class UvTcpSocket : public UvHandle {
           uv_err_name(nread),
           uv_strerror(nread));
       uv_socket->close();
+      // NOLINTNEXTLINE(cppcoreguidelines-no-malloc)
+      free(buf->base);
       return;
     }
     if (nread > 0) {
@@ -616,6 +618,15 @@ class ChunkedStream {
 class LibUVStoreDaemon : public BackgroundThread {
  public:
   explicit LibUVStoreDaemon(int port);
+  // Disable copy constructor
+  LibUVStoreDaemon(const LibUVStoreDaemon& other) = delete;
+  // Disable move constructor
+  LibUVStoreDaemon(LibUVStoreDaemon&& other) = delete;
+  // Disable copy assignment operator
+  LibUVStoreDaemon& operator=(const LibUVStoreDaemon& other) = delete;
+  // Disable move assignment operator
+  LibUVStoreDaemon& operator=(LibUVStoreDaemon&& other) = delete;
+
   ~LibUVStoreDaemon() override;
 
   uint16_t port() const override;
@@ -1104,7 +1115,7 @@ void LibUVStoreDaemon::init(const TCPStoreOptions& opts) {
   TORCH_CHECK(
       port_ == opts.port || opts.port == 0, // zero means use any port
       "listen fd ",
-      *opts.masterListenFd,
+      opts.masterListenFd,
       " is bound to port ",
       port_,
       ", expected to be bound to port ",

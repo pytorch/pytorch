@@ -170,7 +170,7 @@ __device__ inline void parallel_reflection_pad3d(
     int64_t y_shift,
     int64_t z_shift,
     const F& f) {
-  int64_t output_id = threadIdx.x + blockIdx.x * blockDim.x;
+  int64_t output_id = threadIdx.x + ((int64_t) blockIdx.x) * blockDim.x;
 
   if (output_id >= (output.size(2) * output.size(3) * output.size(4))) {
     return;

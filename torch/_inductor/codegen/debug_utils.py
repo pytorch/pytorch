@@ -5,7 +5,7 @@ import functools
 import logging
 import os
 from enum import Enum
-from typing import List, Optional
+from typing import Optional
 
 import torch
 from torch import dtype as torch_dtype
@@ -53,10 +53,10 @@ class DebugPrinterManager:
     def __init__(
         self,
         debug_printer_level,
-        args_to_print_or_save: Optional[List[str]] = None,
+        args_to_print_or_save: Optional[list[str]] = None,
         kernel_name: str = "",
         kernel=None,
-        arg_signatures: Optional[List[type]] = None,
+        arg_signatures: Optional[list[type]] = None,
         kernel_type=None,
     ):
         self.debug_printer_level = IntermediateValueDebuggingLevel(debug_printer_level)
@@ -64,7 +64,7 @@ class DebugPrinterManager:
             args_to_print_or_save = []
         self.args_to_print_or_save = args_to_print_or_save
         self.kernel_name = kernel_name
-        self.arg_signatures: Optional[List[type]] = None
+        self.arg_signatures: Optional[list[type]] = None
         self.kernel = kernel
         self.filtered_kernel_names_to_print = self._get_debug_filtered_kernel_names()
         self.kernel_type = None
@@ -90,7 +90,7 @@ class DebugPrinterManager:
         args_to_print_or_save,
         kernel_name,
         before_launch,
-        arg_signatures: Optional[List[type]] = None,
+        arg_signatures: Optional[list[type]] = None,
     ):
         if self.debug_printer_level == IntermediateValueDebuggingLevel.OFF:
             return
@@ -122,7 +122,7 @@ class DebugPrinterManager:
             )
 
     @functools.lru_cache  # noqa: B019
-    def _get_debug_filtered_kernel_names(self) -> List[str]:
+    def _get_debug_filtered_kernel_names(self) -> list[str]:
         if config.aot_inductor.filtered_kernel_names is None:
             return []
         return [
@@ -132,9 +132,9 @@ class DebugPrinterManager:
 
     def set_printer_args(
         self,
-        args_to_print_or_save: List[str],
+        args_to_print_or_save: list[str],
         kernel_name: str,
-        arg_signatures: Optional[List[type]],
+        arg_signatures: Optional[list[type]],
         kernel,
         kernel_type=None,
     ):
@@ -156,7 +156,7 @@ class DebugPrinterManager:
             self.args_to_print_or_save = args_to_print_or_save_extern
         elif kernel_type == "cpp":
             args_to_print_or_save_cpp = [
-                f"convert_arrayref_tensor_to_tensor({arg})"
+                f"copy_arrayref_tensor_to_tensor({arg})"
                 for arg in args_to_print_or_save
                 if arg.startswith(("buf", "arg"))
             ]
@@ -167,7 +167,7 @@ class DebugPrinterManager:
         self.arg_signatures = arg_signatures
         self.kernel = kernel
 
-    def codegen_model_inputs_value_print(self, input_args_to_print: List[str]) -> None:
+    def codegen_model_inputs_value_print(self, input_args_to_print: list[str]) -> None:
         if self.debug_printer_level != IntermediateValueDebuggingLevel.PRINT_ONLY:
             return
         for arg in input_args_to_print:
@@ -181,7 +181,7 @@ class DebugPrinterManager:
         args_to_save,
         kernel_name,
         before_launch=True,
-        arg_signatures: Optional[List[type]] = None,
+        arg_signatures: Optional[list[type]] = None,
     ) -> None:
         for i, arg in enumerate(args_to_save):
             if arg_signatures is not None and not isinstance(
@@ -218,7 +218,7 @@ class DebugPrinterManager:
         args_to_print,
         kernel_name,
         before_launch=True,
-        arg_signatures: Optional[List[type]] = None,
+        arg_signatures: Optional[list[type]] = None,
     ) -> None:
         launch_prefix = "before_launch" if before_launch else "after_launch"
 

@@ -368,9 +368,9 @@ class Attr {
 };
 
 static inline void construct_attr_for_unary(
-    const c10::string_view& unary_post_op,
+    const std::string_view& unary_post_op,
     const torch::List<std::optional<at::Scalar>>& unary_post_op_args,
-    const c10::string_view& unary_post_op_algorithm,
+    const std::string_view& unary_post_op_algorithm,
     at::native::onednn::Attr& attr) {
   if (unary_post_op == "relu") {
     attr = attr.append_post_eltwise(
@@ -406,13 +406,13 @@ static inline void construct_attr_for_unary(
 }
 
 static inline void construct_attr_by_post_op(
-    const c10::string_view& binary_post_op,
+    const std::string_view& binary_post_op,
     double binary_alpha,
     double input1_scale,
     int64_t input1_zero_point,
-    const c10::string_view& unary_post_op,
+    const std::string_view& unary_post_op,
     const torch::List<std::optional<at::Scalar>>& unary_post_op_args,
-    const c10::string_view& unary_post_op_algorithm,
+    const std::string_view& unary_post_op_algorithm,
     at::native::onednn::Attr& attr) {
   bool is_none_post_op =
       (binary_post_op == "none" && unary_post_op == "none"); // not post-ops

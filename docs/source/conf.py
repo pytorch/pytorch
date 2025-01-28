@@ -305,6 +305,7 @@ coverage_ignore_functions = [
     "node_arg_is_weight",
     "return_arg_list",
     # torch.ao.quantization.pt2e.graph_utils
+    "bfs_trace_with_node_process",
     "find_sequential_partitions",
     "get_equivalent_types",
     "update_equivalent_types_dict",
@@ -3361,7 +3362,7 @@ master_doc = "index"
 
 # General information about the project.
 project = "PyTorch"
-copyright = "2024, PyTorch Contributors"
+copyright = "PyTorch Contributors"
 author = "PyTorch Contributors"
 torch_version = str(torch.__version__)
 

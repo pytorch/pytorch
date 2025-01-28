@@ -1,11 +1,13 @@
 #include <gtest/gtest.h>
 #include <stdexcept>
 #include <torch/torch.h>
+#include <ATen/mps/MPSStream.h>
+#include <ATen/mps/MPSProfiler.h>
 #include <ATen/native/mps/MetalShaderLibrary.h>
 
 using namespace at::native::mps;
 TEST(MPSTestMetalLibrary, ShaderCreation) {
-   MetalShaderLibrary lib("// Empty library");
+   DynamicMetalShaderLibrary lib("// Empty library");
    ASSERT_EQ(lib.getFunctionNames().size(), 0);
 }
 

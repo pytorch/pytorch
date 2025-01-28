@@ -4,7 +4,7 @@ import itertools
 import math
 from collections import defaultdict, namedtuple
 from operator import attrgetter
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Optional
 from typing_extensions import deprecated
 
 import torch
@@ -109,13 +109,12 @@ class EventList(list):
         #
         # Algorithm has O(N * log(N)) complexity where N is number of
         # intervals
-        for thread_id, thread_events in threads:
+        for _thread_id, thread_events in threads:
             thread_events_ = sorted(
                 thread_events,
                 key=lambda event: [event.time_range.start, -event.time_range.end],
             )
-            current_events: List[FunctionEvent] = []
-            cur_end = 0
+            current_events: list[FunctionEvent] = []
             for event in thread_events_:
                 while len(current_events) > 0:
                     parent = current_events[-1]
@@ -219,7 +218,6 @@ class EventList(list):
 
         device_name = "cuda" if not self._use_device else self._use_device
         with open(path, "w") as f:
-            chrome_events = []
             next_id = 0
             # Use file IO over using json.dump since JSON dumping is very slow and
             # this technique is proven to give a 4x speedup.
@@ -243,7 +241,7 @@ class EventList(list):
                         else f'" node_id:{evt.node_id}, thread_id:{evt.thread} "',
                     )
                 )
-                for k in evt.kernels:
+                for _ in evt.kernels:
                     # 's' and 'f' draw Flow arrows from
                     # the CPU launch to the GPU kernel
                     f.write(
@@ -312,9 +310,9 @@ class EventList(list):
             An EventList containing FunctionEventAvg objects.
         """
         assert self._tree_built
-        stats: Dict[Tuple[str, ...], FunctionEventAvg] = defaultdict(FunctionEventAvg)
+        stats: dict[tuple[str, ...], FunctionEventAvg] = defaultdict(FunctionEventAvg)
 
-        def get_key(event, group_by_input_shapes, group_by_stack_n) -> Tuple[str, ...]:
+        def get_key(event, group_by_input_shapes, group_by_stack_n) -> tuple[str, ...]:
             key = [
                 str(event.key),
                 str(event.node_id),
@@ -478,14 +476,14 @@ class FunctionEvent(FormattedTimesMixin):
         self.time_range: Interval = Interval(start_us, end_us)
         self.thread: int = thread
         self.fwd_thread: Optional[int] = fwd_thread
-        self.kernels: List[Kernel] = []
+        self.kernels: list[Kernel] = []
         self.count: int = 1
-        self.cpu_children: List[FunctionEvent] = []
+        self.cpu_children: list[FunctionEvent] = []
         self.cpu_parent: Optional[FunctionEvent] = None
-        self.input_shapes: Tuple[int, ...] = input_shapes
-        self.concrete_inputs: List[Any] = concrete_inputs
-        self.kwinputs: Dict[str, Any] = kwinputs
-        self.stack: List = stack
+        self.input_shapes: tuple[int, ...] = input_shapes
+        self.concrete_inputs: list[Any] = concrete_inputs
+        self.kwinputs: dict[str, Any] = kwinputs
+        self.stack: list = stack
         self.scope: int = scope
         self.use_device: Optional[str] = use_device
         self.cpu_memory_usage: int = cpu_memory_usage
@@ -658,14 +656,14 @@ class FunctionEventAvg(FormattedTimesMixin):
         self.device_time_total: int = 0
         self.self_cpu_time_total: int = 0
         self.self_device_time_total: int = 0
-        self.input_shapes: Optional[List[List[int]]] = None
-        self.stack: Optional[List] = None
+        self.input_shapes: Optional[list[list[int]]] = None
+        self.stack: Optional[list] = None
         self.scope: Optional[int] = None
         self.cpu_memory_usage: int = 0
         self.device_memory_usage: int = 0
         self.self_cpu_memory_usage: int = 0
         self.self_device_memory_usage: int = 0
-        self.cpu_children: Optional[List[FunctionEvent]] = None
+        self.cpu_children: Optional[list[FunctionEvent]] = None
         self.cpu_parent: Optional[FunctionEvent] = None
         self.device_type: DeviceType = DeviceType.CPU
         self.is_legacy: bool = False
@@ -736,8 +734,8 @@ class MemRecordsAcc:
 
     def __init__(self, mem_records):
         self._mem_records = mem_records
-        self._start_nses: List[int] = []
-        self._indices: List[int] = []
+        self._start_nses: list[int] = []
+        self._indices: list[int] = []
         if len(mem_records) > 0:
             tmp = sorted([(r[0].start_ns(), i) for i, r in enumerate(mem_records)])
             self._start_nses, self._indices = zip(*tmp)  # type: ignore[assignment]

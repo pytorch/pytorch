@@ -11,9 +11,10 @@ import subprocess
 import sys
 import textwrap
 import uuid
+from collections.abc import Sequence
 from importlib import import_module
 from tempfile import TemporaryFile
-from typing import Any, Callable, Dict, Sequence, TYPE_CHECKING, Union
+from typing import Any, Callable, TYPE_CHECKING, Union
 from typing_extensions import Unpack
 
 import torch
@@ -28,6 +29,7 @@ from torch._dynamo.debug_utils import (
     extra_deps,
     extra_imports,
     generate_config_string,
+    generate_env_vars_string,
     helper_for_dump_minify,
     InputReader,
     InputWriter,
@@ -100,7 +102,7 @@ def wrap_compiler_debug(
             # Call the compiler_fn - which is either aot_autograd or inductor
             # with fake inputs
             inner_compiled_fn = compiler_fn(gm, example_inputs)
-        except Exception as e:
+        except Exception:
             # TODO: Failures here are troublesome because no real inputs,
             # need a different serialization strategy
             if config.repro_after == "aot":
@@ -197,7 +199,7 @@ def wrap_compiler_debug(
                             torch.cuda.synchronize()
                             break
                     return out
-                except Exception as e:
+                except Exception:
                     if config.repro_level == 1:
                         dump_compiler_graph_state(
                             fx.GraphModule(gm, orig_graph),
@@ -264,6 +266,7 @@ def generate_compiler_repro_string(
 ):
     model_str = textwrap.dedent(
         f"""
+{generate_env_vars_string(stable_output=stable_output)}
 import torch
 from torch import tensor, device
 import torch.fx as fx
@@ -569,7 +572,7 @@ def repro_common(options, mod, load_args):
     return mod, args
 
 
-ACCURACY_FAILS: Dict[str, Callable[[nn.Module, Any], bool]] = {
+ACCURACY_FAILS: dict[str, Callable[[nn.Module, Any], bool]] = {
     "": inductor_fails,
     # This might look inverted but it's not.  strict_accuracy means "we will
     # minify any time we see anything that diverges", whereas accuracy is more

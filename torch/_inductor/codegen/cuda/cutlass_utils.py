@@ -5,7 +5,7 @@ import os
 import sys
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, List, Optional
+from typing import Any, Optional
 
 import sympy
 
@@ -21,31 +21,13 @@ from .cuda_env import get_cuda_arch, get_cuda_version
 log = logging.getLogger(__name__)
 
 
-def _rename_cutlass_import(content: str, cutlass_modules: List[str]) -> str:
+def _rename_cutlass_import(content: str, cutlass_modules: list[str]) -> str:
     for cutlass_module in cutlass_modules:
         content = content.replace(
             f"from {cutlass_module} import ",
             f"from cutlass_library.{cutlass_module} import ",
         )
     return content
-
-
-def _gen_cutlass_file(
-    file_name: str, cutlass_modules: List[str], src_dir: str, dst_dir: str
-) -> None:
-    orig_full_path = os.path.abspath(os.path.join(src_dir, file_name))
-    text = ""
-    with open(orig_full_path) as f:
-        text = f.read()
-    text = _rename_cutlass_import(text, cutlass_modules)
-    dst_full_path = os.path.abspath(
-        os.path.join(
-            dst_dir,
-            file_name,
-        )
-    )
-    with open(dst_full_path, "w") as f:
-        f.write(text)
 
 
 @functools.lru_cache(None)
@@ -126,6 +108,8 @@ class CUTLASSArgs:
     generator_target = ""
     kernels = "all"
     ignore_kernels = ""
+    exclude_kernels = ""
+    instantiation_level = ""
     # TODO: these three look dead?
     kernel_filter_file: None = None
     selected_kernel_list: None = None
@@ -142,7 +126,7 @@ class CUTLASSArgs:
 
 
 @functools.lru_cache(None)
-def _gen_ops_cached(arch, version) -> List[Any]:
+def _gen_ops_cached(arch, version) -> list[Any]:
     # Note: Cache needs to be specific for cuda architecture and version
 
     # Import cutlass python scripts.
@@ -177,7 +161,7 @@ def _gen_ops_cached(arch, version) -> List[Any]:
     return manifest.operations
 
 
-def gen_ops() -> List[Any]:
+def gen_ops() -> list[Any]:
     """
     Generates all supported CUTLASS operations.
     """
@@ -231,7 +215,7 @@ def dtype_match(
 
 
 def get_accumulator_dtype(
-    input_torch_dtypes: List[torch.dtype],
+    input_torch_dtypes: list[torch.dtype],
 ) -> Optional[torch.dtype]:
     """
     Given a pair of input torch dtypes, returns the inferred accumulator torch dtype.
@@ -261,14 +245,14 @@ def get_accumulator_dtype(
             return torch_dtype
         else:
             return torch.float
-    if torch_dtype in {torch.bfloat16, torch.float}:
+    if torch_dtype in (torch.bfloat16, torch.float):
         return torch.float
     if torch_dtype == torch.int8:
         return torch.int32
     raise NotImplementedError(f"Unsupported data types: {input_torch_dtypes=}")
 
 
-def get_alignments(torch_dtype: torch.dtype) -> List[int]:
+def get_alignments(torch_dtype: torch.dtype) -> list[int]:
     """
     Returns all possible valid CUTLASS alignments in terms of the number of elements for a given dtype.
     CUTLASS gemm / conv SM80 APIs support 16 bytes max alignment, and 2 bytes min alignment.

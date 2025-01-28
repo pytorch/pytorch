@@ -2,6 +2,9 @@
 #ifdef USE_CUDA
 #include <torch/csrc/inductor/aoti_runner/model_container_runner_cuda.h>
 #endif
+#ifdef USE_XPU
+#include <torch/csrc/inductor/aoti_runner/model_container_runner_xpu.h>
+#endif
 #include <torch/csrc/inductor/aoti_torch/tensor_converter.h>
 #include <torch/csrc/inductor/aoti_torch/utils.h>
 
@@ -15,7 +18,11 @@ void initAOTIRunnerBindings(PyObject* module) {
 
   py::class_<AOTIModelContainerRunnerCpu>(m, "AOTIModelContainerRunnerCpu")
       .def(py::init<const std::string&, int>())
-      .def("run", &AOTIModelContainerRunnerCpu::run)
+      .def(
+          "run",
+          &AOTIModelContainerRunnerCpu::run,
+          py::arg("inputs"),
+          py::arg("stream_handle") = nullptr)
       .def("get_call_spec", &AOTIModelContainerRunnerCpu::get_call_spec)
       .def(
           "get_constant_names_to_original_fqns",
@@ -38,7 +45,11 @@ void initAOTIRunnerBindings(PyObject* module) {
            int,
            const std::string&,
            const std::string&>())
-      .def("run", &AOTIModelContainerRunnerCuda::run)
+      .def(
+          "run",
+          &AOTIModelContainerRunnerCuda::run,
+          py::arg("inputs"),
+          py::arg("stream_handle") = nullptr)
       .def("get_call_spec", &AOTIModelContainerRunnerCuda::get_call_spec)
       .def(
           "get_constant_names_to_original_fqns",
@@ -51,6 +62,34 @@ void initAOTIRunnerBindings(PyObject* module) {
           static_cast<void (AOTIModelContainerRunnerCuda::*)(
               std::unordered_map<std::string, at::Tensor>&, bool, bool)>(
               &AOTIModelContainerRunnerCuda::update_constant_buffer));
+#endif
+#ifdef USE_XPU
+  py::class_<AOTIModelContainerRunnerXpu>(m, "AOTIModelContainerRunnerXpu")
+      .def(py::init<const std::string&, int>())
+      .def(py::init<const std::string&, int, const std::string&>())
+      .def(py::init<
+           const std::string&,
+           int,
+           const std::string&,
+           const std::string&>())
+      .def(
+          "run",
+          &AOTIModelContainerRunnerXpu::run,
+          py::arg("inputs"),
+          py::arg("stream_handle") = nullptr)
+      .def("get_call_spec", &AOTIModelContainerRunnerXpu::get_call_spec)
+      .def(
+          "get_constant_names_to_original_fqns",
+          &AOTIModelContainerRunnerXpu::getConstantNamesToOriginalFQNs)
+      .def(
+          "get_constant_names_to_dtypes",
+          &AOTIModelContainerRunnerXpu::getConstantNamesToDtypes)
+      .def(
+          "update_constant_buffer",
+          static_cast<void (AOTIModelContainerRunnerXpu::*)(
+              std::unordered_map<std::string, at::Tensor>&, bool, bool)>(
+              &AOTIModelContainerRunnerXpu::update_constant_buffer));
+
 #endif
 
   m.def(

@@ -1618,6 +1618,19 @@ class TestEmbeddingNNDeviceType(NNTestCase):
             test_backward=True,
         )
 
+    @parametrize_test(
+        "bag_use_grad,per_sample_weights_use_grad",
+        [(True, True), (True, False), (False, True), (False, False)],
+    )
+    def test_embedding_bag_per_sample_weights_grad(
+        self, device, bag_use_grad: bool, per_sample_weights_use_grad: bool
+    ):
+        bag = torch.nn.EmbeddingBag(256, 256, mode="sum", device=device)
+        bag.requires_grad_(bag_use_grad)
+        x = torch.arange(1, 5, device=device).expand(3, -1)
+        w = torch.rand(3, 4, device=device, requires_grad=per_sample_weights_use_grad)
+        bag(x, per_sample_weights=F.softmax(w, dim=-1))
+
 
 instantiate_device_type_tests(TestEmbeddingNNDeviceType, globals())
 instantiate_parametrized_tests(TestEmbeddingNN)

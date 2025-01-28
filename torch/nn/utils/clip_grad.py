@@ -80,7 +80,7 @@ def _get_total_norm(
     )  # type: ignore[assignment]
 
     norms: List[Tensor] = []
-    for (device, _), ([device_tensors], _) in grouped_tensors.items():  # type: ignore[assignment]
+    for (device, _), ([device_tensors], _) in grouped_tensors.items():
         if (foreach is None and _has_foreach_support(device_tensors, device)) or (
             foreach and _device_has_foreach_support(device)
         ):
@@ -157,7 +157,7 @@ def _clip_grads_with_norm_(
     # avoids a `if clip_coef < 1:` conditional which can require a CPU <=> device synchronization
     # when the gradients do not reside in CPU memory.
     clip_coef_clamped = torch.clamp(clip_coef, max=1.0)
-    for (device, _), ([device_grads], _) in grouped_grads.items():  # type: ignore[assignment]
+    for (device, _), ([device_grads], _) in grouped_grads.items():
         if (foreach is None and _has_foreach_support(device_grads, device)) or (
             foreach and _device_has_foreach_support(device)
         ):
@@ -266,7 +266,7 @@ def clip_grad_value_(
     grads = [p.grad for p in parameters if p.grad is not None]
     grouped_grads = _group_tensors_by_device_and_dtype([grads])
 
-    for (device, _), ([grads], _) in grouped_grads.items():  # type: ignore[assignment]
+    for (device, _), ([grads], _) in grouped_grads.items():
         if (
             foreach is None
             and _has_foreach_support(cast(List[Tensor], grads), device=device)

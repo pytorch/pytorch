@@ -411,7 +411,7 @@ class TestCollectivesMultiProc(DynamoDistributedMultiProcTestCase):
                 y = self.emb(x)
                 last_dim = y.dim() - 1
                 y = y.transpose_(0, last_dim).contiguous()
-                res = _functional_collectives.all_gather_tensor(y, 0, ranks, tag)
+                _functional_collectives.all_gather_tensor(y, 0, ranks, tag)
                 out = y.transpose_(0, last_dim).contiguous()
                 return out
 

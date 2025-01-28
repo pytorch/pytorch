@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 
 import argparse
+import contextlib
 import copy
 import glob
 import json
@@ -14,10 +15,11 @@ import sys
 import tempfile
 import time
 from collections import defaultdict
+from collections.abc import Sequence
 from contextlib import ExitStack
 from datetime import datetime
 from pathlib import Path
-from typing import Any, cast, Dict, List, NamedTuple, Optional, Sequence, Tuple, Union
+from typing import Any, cast, NamedTuple, Optional, Union
 
 import pkg_resources
 
@@ -182,7 +184,7 @@ ROCM_BLOCKLIST = [
     "test_jit_legacy",
     "test_cuda_nvml_based_avail",
     "test_jit_cuda_fuser",
-    "distributed/_tensor/test_attention",
+    "distributed/tensor/test_attention",
 ]
 
 # whitelist of tests for s390x
@@ -310,7 +312,6 @@ S390X_TESTLIST = [
     "inductor/test_coordinate_descent_tuner",
     "inductor/test_cpp_wrapper_hipify",
     "inductor/test_cpu_cpp_wrapper",
-    "inductor/test_cuda_cpp_wrapper",
     "inductor/test_cudagraph_trees",
     "inductor/test_cudagraph_trees_expandable_segments",
     "inductor/test_cuda_repro",
@@ -330,6 +331,7 @@ S390X_TESTLIST = [
     "inductor/test_fx_fusion",
     "inductor/test_graph_transform_observer",
     "inductor/test_group_batch_fusion",
+    "inductor/test_gpu_cpp_wrapper",
     "inductor/test_halide",
     "inductor/test_indexing",
     "inductor/test_inductor_freezing",
@@ -470,7 +472,6 @@ S390X_TESTLIST = [
     "test_type_promotion",
     "test_typing",
     "test_utils",
-    "test_utils_internal",
     "test_view_ops",
     "test_vulkan",
     "test_weak",
@@ -530,6 +531,7 @@ XPU_TEST = [
 
 # The tests inside these files should never be run in parallel with each other
 RUN_PARALLEL_BLOCKLIST = [
+    "test_extension_utils",
     "test_cpp_extensions_jit",
     "test_cpp_extensions_open_device_registration",
     "test_cpp_extensions_stream_and_event",
@@ -662,6 +664,9 @@ JIT_EXECUTOR_TESTS = [
 INDUCTOR_TESTS = [test for test in TESTS if test.startswith(INDUCTOR_TEST_PREFIX)]
 DISTRIBUTED_TESTS = [test for test in TESTS if test.startswith(DISTRIBUTED_TEST_PREFIX)]
 TORCH_EXPORT_TESTS = [test for test in TESTS if test.startswith("export")]
+AOT_DISPATCH_TESTS = [
+    test for test in TESTS if test.startswith("functorch/test_aotdispatch")
+]
 FUNCTORCH_TESTS = [test for test in TESTS if test.startswith("functorch")]
 ONNX_TESTS = [test for test in TESTS if test.startswith("onnx")]
 CPP_TESTS = [test for test in TESTS if test.startswith(CPP_TEST_PREFIX)]
@@ -903,6 +908,41 @@ def run_test(
     return ret_code
 
 
+def install_cpp_extensions(cpp_extensions_test_dir, env=os.environ):
+    # Wipe the build folder, if it exists already
+    cpp_extensions_test_build_dir = os.path.join(cpp_extensions_test_dir, "build")
+    if os.path.exists(cpp_extensions_test_build_dir):
+        shutil.rmtree(cpp_extensions_test_build_dir)
+
+    # Build the test cpp extensions modules
+    cmd = [sys.executable, "setup.py", "install", "--root", "./install"]
+    return_code = shell(cmd, cwd=cpp_extensions_test_dir, env=env)
+    if return_code != 0:
+        return None, return_code
+
+    install_directory = ""
+    # install directory is the one that is named site-packages
+    for root, directories, _ in os.walk(
+        os.path.join(cpp_extensions_test_dir, "install")
+    ):
+        for directory in directories:
+            if "-packages" in directory:
+                install_directory = os.path.join(root, directory)
+
+    assert install_directory, "install_directory must not be empty"
+    return install_directory, 0
+
+
+@contextlib.contextmanager
+def extend_python_path(install_directory):
+    python_path = os.environ.get("PYTHONPATH", "")
+    try:
+        os.environ["PYTHONPATH"] = os.pathsep.join([install_directory, python_path])
+        yield
+    finally:
+        os.environ["PYTHONPATH"] = python_path
+
+
 def try_set_cpp_stack_traces(env, command, set=True):
     # Print full c++ stack traces during retries
     env = env or {}
@@ -1031,21 +1071,24 @@ def _test_cpp_extensions_aot(test_directory, options, use_ninja):
     # Build the test cpp extensions modules
     shell_env = os.environ.copy()
     shell_env["USE_NINJA"] = str(1 if use_ninja else 0)
-    cmd = [sys.executable, "setup.py", "install", "--root", "./install"]
-    return_code = shell(cmd, cwd=cpp_extensions_test_dir, env=shell_env)
+    install_cmd = [sys.executable, "setup.py", "install", "--root", "./install"]
+    wheel_cmd = [sys.executable, "setup.py", "bdist_wheel"]
+    return_code = shell(install_cmd, cwd=cpp_extensions_test_dir, env=shell_env)
     if return_code != 0:
         return return_code
     if sys.platform != "win32":
-        return_code = shell(
-            cmd,
-            cwd=os.path.join(cpp_extensions_test_dir, "no_python_abi_suffix_test"),
-            env=shell_env,
-        )
-        if return_code != 0:
-            return return_code
+        exts_to_build = [(install_cmd, "no_python_abi_suffix_test")]
+        if TEST_CUDA:
+            exts_to_build.append((wheel_cmd, "python_agnostic_extension"))
+        for cmd, extension_dir in exts_to_build:
+            return_code = shell(
+                cmd,
+                cwd=os.path.join(cpp_extensions_test_dir, extension_dir),
+                env=shell_env,
+            )
+            if return_code != 0:
+                return return_code
 
-    # "install" the test modules and run tests
-    python_path = os.environ.get("PYTHONPATH", "")
     from shutil import copyfile
 
     os.environ["USE_NINJA"] = shell_env["USE_NINJA"]
@@ -1064,10 +1107,9 @@ def _test_cpp_extensions_aot(test_directory, options, use_ninja):
                     install_directory = os.path.join(root, directory)
 
         assert install_directory, "install_directory must not be empty"
-        os.environ["PYTHONPATH"] = os.pathsep.join([install_directory, python_path])
-        return run_test(ShardedTest(test_module, 1, 1), test_directory, options)
+        with extend_python_path(install_directory):
+            return run_test(ShardedTest(test_module, 1, 1), test_directory, options)
     finally:
-        os.environ["PYTHONPATH"] = python_path
         if os.path.exists(test_directory + "/" + test_module + ".py"):
             os.remove(test_directory + "/" + test_module + ".py")
         os.environ.pop("USE_NINJA")
@@ -1090,40 +1132,31 @@ def test_autoload_disable(test_module, test_directory, options):
 
 
 def _test_autoload(test_directory, options, enable=True):
-    # Wipe the build folder, if it exists already
     cpp_extensions_test_dir = os.path.join(test_directory, "cpp_extensions")
-    cpp_extensions_test_build_dir = os.path.join(cpp_extensions_test_dir, "build")
-    if os.path.exists(cpp_extensions_test_build_dir):
-        shutil.rmtree(cpp_extensions_test_build_dir)
-
-    # Build the test cpp extensions modules
-    cmd = [sys.executable, "setup.py", "install", "--root", "./install"]
-    return_code = shell(cmd, cwd=cpp_extensions_test_dir, env=os.environ)
+    install_directory, return_code = install_cpp_extensions(cpp_extensions_test_dir)
     if return_code != 0:
         return return_code
 
-    # "install" the test modules and run tests
-    python_path = os.environ.get("PYTHONPATH", "")
-
     try:
-        cpp_extensions = os.path.join(test_directory, "cpp_extensions")
-        install_directory = ""
-        # install directory is the one that is named site-packages
-        for root, directories, _ in os.walk(os.path.join(cpp_extensions, "install")):
-            for directory in directories:
-                if "-packages" in directory:
-                    install_directory = os.path.join(root, directory)
-
-        assert install_directory, "install_directory must not be empty"
-        os.environ["PYTHONPATH"] = os.pathsep.join([install_directory, python_path])
         os.environ["TORCH_DEVICE_BACKEND_AUTOLOAD"] = str(int(enable))
-
-        cmd = [sys.executable, "test_autoload.py"]
-        return_code = shell(cmd, cwd=test_directory, env=os.environ)
-        return return_code
+        with extend_python_path(install_directory):
+            cmd = [sys.executable, "test_autoload.py"]
+            return_code = shell(cmd, cwd=test_directory, env=os.environ)
+            return return_code
     finally:
-        os.environ["PYTHONPATH"] = python_path
         os.environ.pop("TORCH_DEVICE_BACKEND_AUTOLOAD")
+
+
+def run_test_with_openreg(test_module, test_directory, options):
+    openreg_dir = os.path.join(
+        test_directory, "cpp_extensions", "open_registration_extension"
+    )
+    install_dir, return_code = install_cpp_extensions(openreg_dir)
+    if return_code != 0:
+        return return_code
+
+    with extend_python_path(install_dir):
+        return run_test(test_module, test_directory, options)
 
 
 def test_distributed(test_module, test_directory, options):
@@ -1293,6 +1326,9 @@ def run_doctests(test_module, test_directory, options):
     if enabled["onnx"]:
         os.environ["TORCH_DOCTEST_ONNX"] = "1"
 
+    if torch.mps.is_available():
+        os.environ["TORCH_DOCTEST_MPS"] = "1"
+
     if 0:
         # TODO: could try to enable some of these
         os.environ["TORCH_DOCTEST_QUANTIZED_DYNAMIC"] = "1"
@@ -1446,6 +1482,8 @@ CUSTOM_HANDLERS = {
     "test_ci_sanity_check_fail": run_ci_sanity_check,
     "test_autoload_enable": test_autoload_enable,
     "test_autoload_disable": test_autoload_disable,
+    "test_cpp_extensions_open_device_registration": run_test_with_openreg,
+    "test_transformers": run_test_with_openreg,
 }
 
 
@@ -1465,21 +1503,12 @@ def parse_args():
         default=0,
         help="Print verbose information and test-by-test results",
     )
-    if sys.version_info >= (3, 9):
-        parser.add_argument(
-            "--showlocals",
-            action=argparse.BooleanOptionalAction,
-            default=strtobool(os.environ.get("TEST_SHOWLOCALS", "False")),
-            help="Show local variables in tracebacks (default: True)",
-        )
-    else:
-        parser.add_argument(
-            "--showlocals",
-            action="store_true",
-            default=strtobool(os.environ.get("TEST_SHOWLOCALS", "False")),
-            help="Show local variables in tracebacks (default: True)",
-        )
-        parser.add_argument("--no-showlocals", dest="showlocals", action="store_false")
+    parser.add_argument(
+        "--showlocals",
+        action=argparse.BooleanOptionalAction,
+        default=strtobool(os.environ.get("TEST_SHOWLOCALS", "False")),
+        help="Show local variables in tracebacks (default: True)",
+    )
     parser.add_argument("--jit", "--jit", action="store_true", help="run all jit tests")
     parser.add_argument(
         "--distributed-tests",
@@ -1633,6 +1662,11 @@ def parse_args():
         help="exclude torch export tests",
     )
     parser.add_argument(
+        "--exclude-aot-dispatch-tests",
+        action="store_true",
+        help="exclude aot dispatch tests",
+    )
+    parser.add_argument(
         "--exclude-distributed-tests",
         action="store_true",
         help="exclude distributed tests",
@@ -1721,7 +1755,7 @@ def can_run_in_pytest(test):
     return os.getenv("PYTORCH_TEST_DO_NOT_USE_PYTEST", "0") == "0"
 
 
-def get_selected_tests(options) -> List[str]:
+def get_selected_tests(options) -> list[str]:
     selected_tests = options.include
 
     # for s390x, override defaults
@@ -1766,6 +1800,7 @@ def get_selected_tests(options) -> List[str]:
             "nn/test_pooling",
             "test_view_ops",
             "test_nn",
+            "inductor/test_mps_basic",
         ]
     else:
         # Exclude all mps tests otherwise
@@ -1797,6 +1832,9 @@ def get_selected_tests(options) -> List[str]:
 
     if options.exclude_torch_export_tests:
         options.exclude.extend(TORCH_EXPORT_TESTS)
+
+    if options.exclude_aot_dispatch_tests:
+        options.exclude.extend(AOT_DISPATCH_TESTS)
 
     # these tests failing in CUDA 11.6 temporary disabling. issue https://github.com/pytorch/pytorch/issues/75375
     if torch.version.cuda is not None:
@@ -1866,7 +1904,7 @@ def get_selected_tests(options) -> List[str]:
     return selected_tests
 
 
-def load_test_times_from_file(file: str) -> Dict[str, Any]:
+def load_test_times_from_file(file: str) -> dict[str, Any]:
     # Load previous test times to make sharding decisions
     path = os.path.join(str(REPO_ROOT), file)
     if not os.path.exists(path):
@@ -1876,7 +1914,7 @@ def load_test_times_from_file(file: str) -> Dict[str, Any]:
         return {}
 
     with open(path) as f:
-        test_times_file = cast(Dict[str, Any], json.load(f))
+        test_times_file = cast(dict[str, Any], json.load(f))
     build_environment = os.environ.get("BUILD_ENVIRONMENT")
     test_config = os.environ.get("TEST_CONFIG")
     if test_config in test_times_file.get(build_environment, {}):
@@ -1898,17 +1936,17 @@ def load_test_times_from_file(file: str) -> Dict[str, Any]:
 
 def load_test_file_times(
     file: str = ADDITIONAL_CI_FILES_FOLDER / TEST_TIMES_FILE,
-) -> Dict[str, float]:
-    return cast(Dict[str, float], load_test_times_from_file(file))
+) -> dict[str, float]:
+    return cast(dict[str, float], load_test_times_from_file(file))
 
 
 def load_test_class_times(
     file: str = ADDITIONAL_CI_FILES_FOLDER / TEST_CLASS_TIMES_FILE,
-) -> Dict[str, Dict[str, float]]:
-    return cast(Dict[str, Dict[str, float]], load_test_times_from_file(file))
+) -> dict[str, dict[str, float]]:
+    return cast(dict[str, dict[str, float]], load_test_times_from_file(file))
 
 
-def get_sharding_opts(options) -> Tuple[int, int]:
+def get_sharding_opts(options) -> tuple[int, int]:
     which_shard, num_shards = 1, 1
     if options.shard:
         assert len(options.shard) == 2, "Unexpected shard format"
@@ -1924,10 +1962,10 @@ def get_sharding_opts(options) -> Tuple[int, int]:
 def do_sharding(
     options,
     selected_tests: Sequence[TestRun],
-    test_file_times: Dict[str, float],
-    test_class_times: Dict[str, Dict[str, float]],
+    test_file_times: dict[str, float],
+    test_class_times: dict[str, dict[str, float]],
     sort_by_time: bool = True,
-) -> Tuple[float, List[ShardedTest]]:
+) -> tuple[float, list[ShardedTest]]:
     which_shard, num_shards = get_sharding_opts(options)
 
     # Do sharding
@@ -1977,10 +2015,10 @@ def run_test_module(
 
 
 def run_tests(
-    selected_tests: List[ShardedTest],
+    selected_tests: list[ShardedTest],
     test_directory: str,
     options,
-    failures: List[TestFailure],
+    failures: list[TestFailure],
 ) -> None:
     if len(selected_tests) == 0:
         return
@@ -2137,8 +2175,8 @@ def main():
         """Defines a set of tests with similar priority that should be run together on the current shard"""
 
         name: str
-        sharded_tests: List[ShardedTest]
-        failures: List[TestFailure]
+        sharded_tests: list[ShardedTest]
+        failures: list[TestFailure]
 
         def __init__(
             self, name: str, raw_tests: Sequence[TestRun], should_sort_shard: bool

@@ -1,4 +1,3 @@
-# mypy: allow-untyped-decorators
 # mypy: allow-untyped-defs
 r"""Implementation for the NAdam algorithm."""
 from typing import cast, List, Optional, Tuple, Union
@@ -260,8 +259,9 @@ NAdam.__doc__ = (
             numerical stability (default: 1e-8)
         weight_decay (float, optional): weight decay (L2 penalty) (default: 0)
         momentum_decay (float, optional): momentum momentum_decay (default: 4e-3)
-        decoupled_weight_decay (bool, optional): whether to use decoupled weight
-            decay as in AdamW to obtain NAdamW (default: False)
+        decoupled_weight_decay (bool, optional): whether to decouple the weight
+            decay as in AdamW to obtain NAdamW. If True, the algorithm does not
+            accumulate weight decay in the momentum nor variance. (default: False)
         {_foreach_doc}
         {_maximize_doc}
         {_capturable_doc}
@@ -310,7 +310,7 @@ def _single_tensor_nadam(
             exp_avg_sq = torch.view_as_real(exp_avg_sq)
 
         # If compiling, the compiler will handle cudagraph checks, see note [torch.compile x capturable]
-        if not torch._utils.is_compiling() and capturable:
+        if not torch.compiler.is_compiling() and capturable:
             capturable_supported_devices = _get_capturable_supported_devices()
             assert (
                 param.device.type == mu_product.device.type == step_t.device.type
@@ -396,7 +396,7 @@ def _multi_tensor_nadam(
     assert not differentiable, "_foreach ops don't support autograd"
 
     # If compiling, the compiler will handle cudagraph checks, see note [torch.compile x capturable]
-    if not torch._utils.is_compiling() and capturable:
+    if not torch.compiler.is_compiling() and capturable:
         capturable_supported_devices = _get_capturable_supported_devices(
             supports_xla=False
         )
@@ -437,7 +437,7 @@ def _multi_tensor_nadam(
         # If steps are on CPU, foreach will fall back to the slow path, which is a for-loop calling t.add(1) over
         # and over. 1 will then be wrapped into a Tensor over and over again, which is slower than if we just
         # wrapped it once now. The alpha is required to assure we go to the right overload.
-        if not torch._utils.is_compiling() and grouped_state_steps[0].is_cpu:
+        if not torch.compiler.is_compiling() and grouped_state_steps[0].is_cpu:
             torch._foreach_add_(
                 grouped_state_steps, torch.tensor(1.0, device="cpu"), alpha=1.0
             )

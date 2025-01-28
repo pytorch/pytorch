@@ -222,14 +222,6 @@ def non_kwarg_to(fake_mode, func, *args, **kwargs):
 
 
 def stride_incorrect_op(op):
-    if op.namespace not in ("aten", "prims"):
-        return False
-    if op is aten._fft_c2c.default:
-        return False
-
-    op_name = op.name()
-    if "fft" in op_name:
-        return True
     return False
 
 
@@ -463,7 +455,7 @@ def nonzero(fake_mode, func, arg):
 
         arg.nonzero_memo = nnz
 
-    return arg.new_empty((nnz, arg.dim()), dtype=torch.int64)
+    return arg.new_empty_strided((nnz, arg.dim()), (1, nnz), dtype=torch.int64)
 
 
 @register_op_impl(torch.ops.aten._padded_dense_to_jagged_forward.default)
@@ -596,7 +588,7 @@ def foreach_run_and_map_input_device(fake_mode, func, *args, **kwargs):
     try:
         with in_kernel_invocation_manager(fake_mode):
             out_meta = func(*args, **kwargs)
-    except NotImplementedError as not_implemented_error:
+    except NotImplementedError:
         return NotImplemented
 
     if not out_meta:
@@ -874,15 +866,9 @@ def make_fast_binary_impl(slow_ref):
         operands = args
 
         # compute_shape
-        has_scalars = False
-        has_tensors = False
         final_shape = None
         for op in operands:
             shape = op.shape if isinstance(op, torch.Tensor) else ()
-            if len(shape) == 0:
-                has_scalars = True
-            else:
-                has_tensors = True
             if final_shape is None:
                 final_shape = shape
             # TODO: Minor optimization: track if the shapes
@@ -909,7 +895,6 @@ def make_fast_binary_impl(slow_ref):
         cpu = torch.device("cpu")
         common_device = cpu
         common_dtype = None
-        output_dtype = None
         has_different_input_dtypes = False
         for op in operands:
             if not isinstance(op, torch.Tensor):

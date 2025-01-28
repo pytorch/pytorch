@@ -15,7 +15,6 @@ from torch._inductor.utils import GPU_TYPES, get_gpu_type
 from torch.utils._triton import has_triton
 from torch.testing._internal.common_utils import (
     LazyVal,
-    IS_FBCODE,
 )
 from torch.testing._internal.common_utils import (
     TestCase,
@@ -28,7 +27,7 @@ log: logging.Logger = logging.getLogger(__name__)
 def test_cpu():
     try:
         CppCodeCache.load("")
-        return not IS_FBCODE
+        return True
     except (
         CalledProcessError,
         OSError,
@@ -40,6 +39,13 @@ def test_cpu():
 HAS_CPU = LazyVal(test_cpu)
 
 HAS_TRITON = has_triton()
+
+if HAS_TRITON:
+    import triton
+    TRITON_HAS_CPU = "cpu" in triton.backends.backends
+else:
+    TRITON_HAS_CPU = False
+
 
 HAS_CUDA = torch.cuda.is_available() and HAS_TRITON
 
@@ -106,6 +112,15 @@ def skip_windows_ci(name: str, file: str) -> None:
 requires_gpu = functools.partial(unittest.skipIf, not HAS_GPU, "requires gpu")
 requires_triton = functools.partial(unittest.skipIf, not HAS_TRITON, "requires triton")
 
+def requires_cuda_with_enough_memory(min_mem_required):
+    def inner(fn):
+        if not torch.cuda.is_available() or torch.cuda.get_device_properties().total_memory < min_mem_required:
+            return unittest.skip(f"Only if the CUDA device has at least {min_mem_required / 1e9:.3f}GB memory to be safe")(fn)
+        else:
+            return fn
+
+    return inner
+
 skipCUDAIf = functools.partial(skipDeviceIf, device="cuda")
 skipXPUIf = functools.partial(skipDeviceIf, device="xpu")
 skipCPUIf = functools.partial(skipDeviceIf, device="cpu")
@@ -120,4 +135,4 @@ IS_H100 = LazyVal(
     and get_gpu_shared_memory() == 232448
 )
 
-IS_BIG_GPU = LazyVal(lambda: HAS_CUDA and is_big_gpu(0))
+IS_BIG_GPU = LazyVal(lambda: HAS_CUDA and is_big_gpu())

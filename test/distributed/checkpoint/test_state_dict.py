@@ -4,13 +4,12 @@ import copy
 import functools
 import sys
 from itertools import chain
-from typing import Callable, Tuple, Type, Union
+from typing import Callable, Union
 
 import torch
 import torch.distributed as dist
 import torch.nn as nn
 from torch.distributed._composable import replicate
-from torch.distributed._composable.fsdp import fully_shard
 from torch.distributed._shard.sharded_tensor import ShardedTensor
 from torch.distributed._tensor import DTensor, init_device_mesh
 from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import (
@@ -28,6 +27,7 @@ from torch.distributed.checkpoint.state_dict import (
     StateDictOptions,
 )
 from torch.distributed.fsdp import (
+    fully_shard,
     FullyShardedDataParallel as FSDP,
     ShardingStrategy,
     StateDictType,
@@ -81,7 +81,7 @@ class TestStateDict(DTensorTestBase, VerifyStateDictMixin):
 
         # Train 10 steps.
         _dist_optim = [dist_optim] if not isinstance(dist_optim, list) else dist_optim
-        for i in range(10):
+        for _ in range(10):
             optim.zero_grad()
             for d_optim in _dist_optim:
                 d_optim.zero_grad()
@@ -154,9 +154,9 @@ class TestStateDict(DTensorTestBase, VerifyStateDictMixin):
         *,
         use_orig_params: bool,
         use_dtensor: bool,
-        wrapping: Tuple[nn.Module] = (),
+        wrapping: tuple[nn.Module] = (),
         compile_model: bool = False,
-        optimizer_class: Type[Optimizer],
+        optimizer_class: type[Optimizer],
     ) -> None:
         if not use_orig_params:
             return
@@ -232,7 +232,7 @@ class TestStateDict(DTensorTestBase, VerifyStateDictMixin):
         self,
         *,
         reshard_after_forward: Union[bool, int],
-        optimizer_class: Type[Optimizer],
+        optimizer_class: type[Optimizer],
         compile_model: bool,
         foreach: bool = True,
     ):
@@ -272,7 +272,7 @@ class TestStateDict(DTensorTestBase, VerifyStateDictMixin):
             self._test_fsdp2,
         )
 
-    def _test_ddp(self, use_composable: bool, optimizer_class: Type[Optimizer]) -> None:
+    def _test_ddp(self, use_composable: bool, optimizer_class: type[Optimizer]) -> None:
         def init_model_optim():
             orig_model = CompositeParamModel(device=torch.device("cuda"))
             orig_optim = optimizer_class(orig_model.parameters(), lr=1e-4)
@@ -303,7 +303,7 @@ class TestStateDict(DTensorTestBase, VerifyStateDictMixin):
 
     def _test_fsdp_ddp(
         self,
-        optimizer_class: Type[Optimizer],
+        optimizer_class: type[Optimizer],
         optim_in_backward: bool = False,
         test_frozen: bool = False,
     ) -> None:
@@ -347,7 +347,7 @@ class TestStateDict(DTensorTestBase, VerifyStateDictMixin):
             self._test_fsdp_ddp,
         )
 
-    def _test_single_gpu(self, optimizer_class: Type[Optimizer]) -> None:
+    def _test_single_gpu(self, optimizer_class: type[Optimizer]) -> None:
         def init_model_optim():
             orig_model = CompositeParamModel(device=torch.device("cuda"))
             orig_optim = optimizer_class(orig_model.parameters(), lr=1e-4)
@@ -358,24 +358,26 @@ class TestStateDict(DTensorTestBase, VerifyStateDictMixin):
 
         self._test_save_load(init_model_optim)
 
-    @with_comms
     @skip_if_lt_x_gpu(1)
     def test_single_gpu(self) -> None:
-        self.run_subtests(
-            {"optimizer_class": [torch.optim.Adam, torch.optim.AdamW]},
-            self._test_single_gpu,
-        )
+        self._test_single_gpu(torch.optim.Adam)
+        self._test_single_gpu(torch.optim.AdamW)
 
-    @with_comms
-    @skip_if_lt_x_gpu(1)
-    def test_strict(self) -> None:
+    def _test_strict(self, parallelism: str) -> None:
         model = CompositeParamModel(device=torch.device("cuda"))
+        if parallelism == "DDP":
+            model = DDP(model)
+        else:
+            model = fully_shard(model)
 
         model_state_dict = get_model_state_dict(model)
-        key = next(iter(model_state_dict.keys()))
         model_state_dict["abc"] = torch.zeros(10)
         with self.assertRaisesRegex(RuntimeError, "Unexpected key"):
             set_model_state_dict(model, model_state_dict=model_state_dict)
+        key_iter = iter(model_state_dict.keys())
+        for key in key_iter:
+            if key != "abc":
+                break
         model_state_dict.pop(key)
         incompatible_keys = set_model_state_dict(
             model,
@@ -388,8 +390,16 @@ class TestStateDict(DTensorTestBase, VerifyStateDictMixin):
         with self.assertRaisesRegex(RuntimeError, "Missing key"):
             set_model_state_dict(model, model_state_dict=model_state_dict)
 
+    @with_comms
+    @skip_if_lt_x_gpu(1)
+    def test_strict(self) -> None:
+        self.run_subtests(
+            {"parallelism": ["DDP", "fully_shard"]},
+            self._test_strict,
+        )
+
     def _test_cpu_offload_full_state_dict(
-        self, optimizer_class: Type[Optimizer]
+        self, optimizer_class: type[Optimizer]
     ) -> None:
         orig_model = CompositeParamModel(device=torch.device("cuda"))
         device_mesh = init_device_mesh("cuda", (self.world_size,))
@@ -496,7 +506,6 @@ class TestStateDict(DTensorTestBase, VerifyStateDictMixin):
 
         self.assertEqual(original_keys, new_keys)
 
-    @with_comms
     @skip_if_lt_x_gpu(1)
     def test_extra_state(self) -> None:
         model = CompositeParamModel(device=torch.device("cuda"))
@@ -510,21 +519,20 @@ class TestStateDict(DTensorTestBase, VerifyStateDictMixin):
         UnitModule.get_extra_state = get_extra_state
         UnitModule.set_extra_state = set_extra_state
 
-        ddp_model = DDP(copy.deepcopy(model))
-        set_model_state_dict(ddp_model, get_model_state_dict(ddp_model))
+        target_model = copy.deepcopy(model)
+        set_model_state_dict(target_model, get_model_state_dict(target_model))
         self.assertEqual(model.state_dict()["u1._extra_state"], "MyState")
-        self.assertEqual(model.state_dict(), get_model_state_dict(ddp_model))
+        self.assertEqual(model.state_dict(), get_model_state_dict(target_model))
 
-    @with_comms
     @skip_if_lt_x_gpu(1)
     def test_non_persistent_buffers(self) -> None:
         model = CompositeParamModel(device=torch.device("cuda"))
         model.register_buffer(
             "dont_save_me", torch.rand(100, device="cuda"), persistent=False
         )
-        ddp_model = DDP(copy.deepcopy(model))
-        set_model_state_dict(ddp_model, get_model_state_dict(ddp_model))
-        self.assertEqual(model.state_dict(), get_model_state_dict(ddp_model))
+        target_model = copy.deepcopy(model)
+        set_model_state_dict(target_model, get_model_state_dict(target_model))
+        self.assertEqual(model.state_dict(), get_model_state_dict(target_model))
 
     def _test_broadcast_from_rank0(self, wrapper) -> None:
         model = CompositeParamModel(device=torch.device("cuda"))
@@ -600,29 +608,18 @@ class TestStateDict(DTensorTestBase, VerifyStateDictMixin):
             )
 
     @with_comms
-    @skip_if_lt_x_gpu(2)
+    @skip_if_lt_x_gpu(4)
     def test_broadcast_from_rank0(self) -> None:
         device_mesh = init_device_mesh("cuda", (self.world_size,))
+        hsdp_device_mesh = init_device_mesh("cuda", (2, self.world_size // 2))
         self.run_subtests(
             {
                 "wrapper": [
                     functools.partial(fully_shard, mesh=device_mesh),
                     functools.partial(FSDP, device_mesh=device_mesh),
-                ]
-            },
-            self._test_broadcast_from_rank0,
-        )
-
-    @with_comms
-    @skip_if_lt_x_gpu(4)
-    def test_broadcast_from_rank0_hsdp(self) -> None:
-        device_mesh = init_device_mesh("cuda", (2, self.world_size // 2))
-        self.run_subtests(
-            {
-                "wrapper": [
                     functools.partial(
                         FSDP,
-                        device_mesh=device_mesh,
+                        device_mesh=hsdp_device_mesh,
                         sharding_strategy=ShardingStrategy.HYBRID_SHARD,
                     ),
                 ]
@@ -713,9 +710,7 @@ class TestStateDict(DTensorTestBase, VerifyStateDictMixin):
         )
         self.assertEqual(fsdp_optim.state_dict(), fsdp_optim2.state_dict())
 
-    @with_comms
-    @skip_if_lt_x_gpu(1)
-    def test_deprecate_partial(self) -> None:
+    def _test_deprecate_partial(self) -> None:
         model = CompositeParamModel(device=torch.device("cuda"))
 
         model_state_dict1 = get_model_state_dict(model)
@@ -768,9 +763,7 @@ class TestStateDict(DTensorTestBase, VerifyStateDictMixin):
         self.assertEqual(model.l.weight, model_state_dict1["l.weight"])
         self.assertEqual(model.l.bias, model_state_dict1["l.bias"])
 
-    @with_comms
-    @skip_if_lt_x_gpu(1)
-    def test_deprecate_fsdp_api(self) -> None:
+    def _test_deprecate_fsdp_api(self) -> None:
         device_mesh = init_device_mesh("cuda", (self.world_size,))
         model = CompositeParamModel(device=torch.device("cuda"))
         fsdp_model = FSDP(copy.deepcopy(model), device_mesh=device_mesh)
@@ -787,6 +780,12 @@ class TestStateDict(DTensorTestBase, VerifyStateDictMixin):
                 r"FSDP.state_dict_type\(\) and FSDP.set_state_dict_type\(\) are being deprecated",
             ):
                 get_model_state_dict(model)
+
+    @with_comms
+    @skip_if_lt_x_gpu(1)
+    def test_deprecate_api(self) -> None:
+        self._test_deprecate_partial()
+        self._test_deprecate_fsdp_api()
 
     @with_comms
     @skip_if_lt_x_gpu(2)
@@ -845,18 +844,22 @@ class TestStateDict(DTensorTestBase, VerifyStateDictMixin):
 
     @with_comms
     @skip_if_lt_x_gpu(2)
-    def test_setting_meta_device_model_broadcasting(self) -> None:
+    def test_setting_meta_device_model_broadcasting_and_memory(self) -> None:
         # This test verifies that we can set model state dict by a meta device model
         # With the correlated changes in state_dict, meta device model should be accepted
         # in broadcasting and get copied successfully.
         torch.manual_seed(0)
         with torch.device("meta"):
-            meta_model = nn.Sequential(*[nn.Linear(4, 4, bias=False) for _ in range(2)])
+            meta_model = nn.Sequential(
+                *[nn.Linear(10000, 10000, bias=False) for _ in range(4)]
+            )
             for layer in meta_model:
                 fully_shard(layer)
             fully_shard(meta_model)
         with torch.device("cpu"):
-            cpu_model = nn.Sequential(*[nn.Linear(4, 4, bias=False) for _ in range(2)])
+            cpu_model = nn.Sequential(
+                *[nn.Linear(10000, 10000, bias=False) for _ in range(4)]
+            )
             full_sd = cpu_model.state_dict()
         set_model_state_dict(
             meta_model,
@@ -874,6 +877,47 @@ class TestStateDict(DTensorTestBase, VerifyStateDictMixin):
                 .to(device=cpu_model_value.device)
             )
             self.assertEqual(cpu_model_value, meta_model_value)
+        # Memory allocated and reserved are lower due to the change at _distribute_tensors
+        # from view to clone. This test would fail if with view due to higher memory cost.
+        memory_allocated = torch.cuda.memory_allocated(0) / 1024 / 1024
+        memory_reserved = torch.cuda.memory_reserved(0) / 1024 / 1024
+        self.assertTrue(memory_allocated <= 384)
+        self.assertTrue(memory_reserved <= 768)
+
+    @with_comms
+    @skip_if_lt_x_gpu(2)
+    def test_multi_device_load_model_state_dict(self) -> None:
+        torch.manual_seed(0)
+        with torch.device("meta"):
+            meta_submodel = nn.Linear(4, 4, bias=False)
+        with torch.device("cpu"):
+            cpu_submodel = nn.Linear(4, 4, bias=False)
+        with torch.device("cuda"):
+            cuda_submodel = nn.Linear(4, 4, bias=False)
+
+        two_device_model_with_meta = nn.Sequential(meta_submodel, cuda_submodel)
+        two_device_model_without_meta = nn.Sequential(cpu_submodel, cuda_submodel)
+
+        with torch.device("cpu"):
+            model_to_set = nn.Sequential(
+                *[nn.Linear(4, 4, bias=False) for _ in range(2)]
+            )
+            full_sd = model_to_set.state_dict()
+        set_model_state_dict(
+            two_device_model_with_meta,
+            model_state_dict=full_sd,
+            options=StateDictOptions(
+                broadcast_from_rank0=True, full_state_dict=True, strict=False
+            ),
+        )
+        with self.assertRaisesRegex(ValueError, "Multiple devices found"):
+            set_model_state_dict(
+                two_device_model_without_meta,
+                model_state_dict=full_sd,
+                options=StateDictOptions(
+                    broadcast_from_rank0=True, full_state_dict=True, strict=False
+                ),
+            )
 
 
 class TestNoComm(MultiProcessTestCase):

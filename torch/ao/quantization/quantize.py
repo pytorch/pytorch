@@ -157,11 +157,9 @@ def _register_activation_post_process_hook(module, pre_hook=False):
         module, "activation_post_process"
     ), "Expect activation_post_process attribute already attached to the module"
     if pre_hook:
-        handle = module.register_forward_pre_hook(
-            _observer_forward_pre_hook, prepend=True
-        )
+        module.register_forward_pre_hook(_observer_forward_pre_hook, prepend=True)
     else:
-        handle = module.register_forward_hook(_observer_forward_hook, prepend=True)
+        module.register_forward_hook(_observer_forward_hook, prepend=True)
 
 
 def _add_observer_(
@@ -302,8 +300,8 @@ def _add_observer_(
 
 
 def _get_unique_devices_(module):
-    return {p.device for p in module.parameters()} | {
-        p.device for p in module.buffers()
+    return {p.device for p in module.parameters() if p.device.type != "meta"} | {
+        p.device for p in module.buffers() if p.device.type != "meta"
     }
 
 
@@ -780,8 +778,8 @@ def swap_module(
 
             # respect device affinity when swapping modules
             devices = _get_unique_devices_(mod)
-            assert (
-                len(devices) <= 1
+            assert len(devices) <= 1 or (
+                len(devices) == 2 and torch.device("meta") in devices
             ), f"swap_module only works with cpu or single-device CUDA modules, but got devices {devices}"
             device = next(iter(devices)) if len(devices) > 0 else None
             if device:

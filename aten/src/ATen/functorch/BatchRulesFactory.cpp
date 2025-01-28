@@ -19,6 +19,7 @@ struct NewBlahBatchRuleHelperSymInt<F, Func, typelist<A, B, T...>> {
       std::optional<int64_t> batch_dim,
       SymIntArrayRef shape,
       T... extra_args) {
+    // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
     const auto bdim_size = tensor.sym_size(batch_dim.value());
     c10::SmallVector<c10::SymInt> new_shape;
     new_shape.reserve(shape.size() + 1);

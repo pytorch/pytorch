@@ -1,6 +1,5 @@
-# mypy: allow-untyped-defs
 import types
-from typing import Dict, NewType, Tuple
+from typing import NewType
 
 from torch._dynamo.types import DynamoCallback, DynamoGuardHook
 
@@ -21,26 +20,28 @@ def set_guard_error_hook(hook: DynamoGuardHook) -> None: ...
 def raise_sigtrap() -> None: ...
 
 class _CacheEntry:
-    def check_fn(self, *args, **kwargs): ...
+    def check_fn(self, *args: object, **kwargs: object) -> bool: ...
     code: types.CodeType
     next: _CacheEntry | None
 
 class _ExtraState:
-    def invalidate(self, cache_entry: _CacheEntry, guard_manager: object): ...
+    def invalidate(self, cache_entry: _CacheEntry, guard_manager: object) -> None: ...
 
 # This is an object that encapsulates the Python FrameType, and exposes
 # properties Dynamo cares about for a frame.
 class _PyInterpreterFrame:
     f_code: types.CodeType
-    f_locals: Dict[str, object]
-    f_globals: Dict[str, object]
-    f_builtins: Dict[str, object]
+    f_locals: dict[str, object]
+    f_globals: dict[str, object]
+    f_builtins: dict[str, object]
     f_lasti: int
     f_lineo: int
     f_back: types.FrameType
     # A tuple containing cell objects captured by this frame.
-    closure: Tuple[types.CellType]
+    closure: tuple[types.CellType]
 
 def _debug_get_cache_entry_list(code: types.CodeType) -> list[_CacheEntry]: ...
 
 py_opcode_caches: list[int]
+
+def code_framelocals_names(code: types.CodeType) -> tuple[str]: ...

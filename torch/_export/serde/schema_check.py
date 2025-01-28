@@ -5,7 +5,7 @@ import inspect
 import re
 import typing
 from enum import IntEnum
-from typing import Annotated, Any, Dict, ForwardRef, List, Optional, Tuple, Union
+from typing import Annotated, Any, ForwardRef, Optional, Union
 
 from torch._export.serde import schema
 from torch._export.serde.union import _Union
@@ -20,39 +20,37 @@ def _check(x, msg):
         raise SchemaUpdateError(msg)
 
 
-def _staged_schema():
-    yaml_ret: Dict[str, Any] = {}
-    defs = {}
-    cpp_enum_defs: Dict[str, str] = {}
-    cpp_class_defs: Dict[str, str] = {}
-    cpp_type_decls: List[str] = []
-    cpp_json_defs: List[str] = []
-    thrift_enum_defs: List[str] = []
-    thrift_type_defs: Dict[str, str] = {}
+_CPP_TYPE_MAP = {
+    str: "std::string",
+    int: "int64_t",
+    float: "double",
+    bool: "bool",
+}
 
-    def _handle_aggregate(ty) -> Tuple[Dict[str, Any], Dict[str, Any], Dict[str, Any]]:
-        def dump_type(t) -> Tuple[str, str, str]:
-            CPP_TYPE_MAP = {
-                str: "std::string",
-                int: "int64_t",
-                float: "double",
-                bool: "bool",
-            }
-            THRIFT_TYPE_MAP = {
-                str: "string",
-                int: "i64",
-                float: "double",
-                bool: "bool",
-            }
-            if isinstance(t, type):
-                if t.__name__ in cpp_enum_defs:
-                    return t.__name__, "int64_t", t.__name__
-                else:
-                    return (
-                        t.__name__,
-                        CPP_TYPE_MAP.get(t, t.__name__),
-                        THRIFT_TYPE_MAP.get(t, t.__name__),
-                    )
+_THRIFT_TYPE_MAP = {
+    str: "string",
+    int: "i64",
+    float: "double",
+    bool: "bool",
+}
+
+
+def _staged_schema():
+    yaml_ret: dict[str, Any] = {}
+    defs = {}
+    cpp_enum_defs: dict[str, str] = {}
+    cpp_class_defs: dict[str, str] = {}
+    cpp_type_decls: list[str] = []
+    cpp_json_defs: list[str] = []
+    thrift_enum_defs: list[str] = []
+    thrift_type_defs: dict[str, str] = {}
+
+    def _handle_aggregate(ty) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any]]:
+        def dump_type(t, level: int) -> tuple[str, str, str]:
+            if getattr(t, "__name__", None) in cpp_enum_defs:
+                return t.__name__, "int64_t", t.__name__
+            elif t in _CPP_TYPE_MAP:
+                return (t.__name__, _CPP_TYPE_MAP[t], _THRIFT_TYPE_MAP[t])
             elif isinstance(t, str):
                 assert t in defs
                 assert t not in cpp_enum_defs
@@ -80,38 +78,30 @@ def _staged_schema():
                         "map<",
                         ">",
                     )
-                elif o == tuple:
-                    if typing.get_args(t) == ():
-                        return "Tuple[()]", "std::tuple<>", "bool"
-                    yaml_head, cpp_head, thrift_head, thrift_tail = (
-                        "Tuple",
-                        "std::tuple",
-                        "bool",
-                        "",
-                    )
                 elif o == Union:
+                    assert level == 0, "Optional is only supported at the top level."
                     args = typing.get_args(t)
                     assert len(args) == 2 and args[1] == type(None)
-                    yaml_type, cpp_type, thrift_type = dump_type(args[0])
+                    yaml_type, cpp_type, thrift_type = dump_type(args[0], level + 1)
                     return (
                         f"Optional[{yaml_type}]",
                         f"std::optional<{cpp_type}>",
                         f"optional {thrift_type}",
                     )
                 elif o == Annotated:
-                    return dump_type(t.__origin__)
+                    return dump_type(t.__origin__, level)
                 else:
                     raise AssertionError(f"Type {t} is not supported in export schema.")
                 yaml_arg_types, cpp_arg_types, thrift_arg_types = zip(
-                    *[dump_type(x) for x in typing.get_args(t)]
+                    *[dump_type(x, level + 1) for x in typing.get_args(t)]
                 )
                 return (
                     (f"{yaml_head}[{', '.join(yaml_arg_types)}]"),
                     (f"{cpp_head}<{', '.join(cpp_arg_types)}>"),
                     f"{thrift_head}{', '.join(thrift_arg_types)}{thrift_tail}",
                 )
-            elif t == ():
-                return "()", "", ""
+            elif isinstance(t, type):
+                return (t.__name__, t.__name__, t.__name__)
             else:
                 raise AssertionError(f"Type {t} is not supported in export schema.")
 
@@ -135,8 +125,8 @@ def _staged_schema():
                     f"Default value {v} is not supported yet in export schema."
                 )
 
-        def dump_field(f) -> Tuple[Dict[str, Any], str, Optional[str], str, int]:
-            t, cpp_type, thrift_type = dump_type(f.type)
+        def dump_field(f) -> tuple[dict[str, Any], str, Optional[str], str, int]:
+            t, cpp_type, thrift_type = dump_type(f.type, 0)
             ret = {"type": t}
             cpp_default: Optional[str] = None
             assert (
@@ -455,7 +445,7 @@ void from_json(const nlohmann::json& j, ForwardRef<T>& p) {{
 }} // namespace torch
 """
     thrift_schema = f"""
-namespace py3 torch._export.schema
+namespace py3 torch._export
 namespace cpp2 torch._export.schema
 {chr(10).join(thrift_enum_defs)}
 {chr(10).join(dict(sorted(thrift_type_defs.items(), key=lambda x: class_ordering[x[0]])).values())}
@@ -528,21 +518,24 @@ def _diff_schema(dst, src):
     return additions, subtractions
 
 
-def _hash_schema(s):
-    return hashlib.sha256(repr(s).encode("utf-8")).hexdigest()
+def _hash_content(s: str):
+    return hashlib.sha256(s.strip().encode("utf-8")).hexdigest()
 
 
 @dataclasses.dataclass
 class _Commit:
-    result: Dict[str, Any]
-    checksum_result: str
+    result: dict[str, Any]
+    checksum_next: str
     yaml_path: str
-    additions: Dict[str, Any]
-    subtractions: Dict[str, Any]
-    base: Dict[str, Any]
-    checksum_base: Optional[str]
+    additions: dict[str, Any]
+    subtractions: dict[str, Any]
+    base: dict[str, Any]
+    checksum_head: Optional[str]
     cpp_header: str
     cpp_header_path: str
+    thrift_checksum_head: Optional[str]
+    thrift_checksum_real: Optional[str]
+    thrift_checksum_next: str
     thrift_schema: str
     thrift_schema_path: str
 
@@ -555,33 +548,51 @@ def update_schema():
         match = re.search("checksum<<([A-Fa-f0-9]{64})>>", content)
         _check(match is not None, "checksum not found in schema.yaml")
         assert match is not None
-        checksum_base = match.group(1)
+        checksum_head = match.group(1)
+
+        thrift_content = importlib.resources.read_text(
+            __package__, "export_schema.thrift"
+        )
+        match = re.search("checksum<<([A-Fa-f0-9]{64})>>", thrift_content)
+        _check(match is not None, "checksum not found in export_schema.thrift")
+        assert match is not None
+        thrift_checksum_head = match.group(1)
+        thrift_content = thrift_content.splitlines()
+        assert thrift_content[0].startswith("// @" + "generated")
+        assert thrift_content[1].startswith("// checksum<<")
+        thrift_checksum_real = _hash_content("\n".join(thrift_content[2:]))
+
         from yaml import load, Loader
 
         dst = load(content, Loader=Loader)
         assert isinstance(dst, dict)
     else:
-        checksum_base = None
+        checksum_head = None
+        thrift_checksum_head = None
+        thrift_checksum_real = None
         dst = {"SCHEMA_VERSION": None, "TREESPEC_VERSION": None}
 
     src, cpp_header, thrift_schema = _staged_schema()
     additions, subtractions = _diff_schema(dst, src)
     yaml_path = __package__.replace(".", "/") + "/schema.yaml"
-    thrift_schema_path = __package__.replace(".", "/") + "/schema.thrift"
+    thrift_schema_path = __package__.replace(".", "/") + "/export_schema.thrift"
     torch_prefix = "torch/"
     assert yaml_path.startswith(torch_prefix)  # sanity check
     assert thrift_schema_path.startswith(torch_prefix)  # sanity check
 
     return _Commit(
         result=src,
-        checksum_result=_hash_schema(src),
+        checksum_next=_hash_content(repr(src)),
         yaml_path=yaml_path,
         additions=additions,
         subtractions=subtractions,
         base=dst,
-        checksum_base=checksum_base,
+        checksum_head=checksum_head,
         cpp_header=cpp_header,
         cpp_header_path=torch_prefix + "csrc/utils/generated_serialization_types.h",
+        thrift_checksum_head=thrift_checksum_head,
+        thrift_checksum_real=thrift_checksum_real,
+        thrift_checksum_next=_hash_content(thrift_schema),
         thrift_schema=thrift_schema,
         thrift_schema_path=thrift_schema_path,
     )
@@ -598,7 +609,7 @@ def check(commit: _Commit, force_unsafe: bool = False):
             kind = commit.result[k]["kind"]
             fields = v["fields"]
             for f, d in fields.items():
-                if "default" not in d and kind == "struct":
+                if kind == "struct" and "default" not in d:
                     reason += (
                         f"Field {k}.{f} is added to schema.py without a default value as an incomparible change "
                         + "which requires major version bump.\n"

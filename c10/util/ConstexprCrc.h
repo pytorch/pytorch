@@ -123,7 +123,7 @@ inline constexpr crc64_t crc64(const char* str, size_t size) {
   return crc64_t{detail::crc64impl(0, str, size)};
 }
 
-inline constexpr crc64_t crc64(c10::string_view str) {
+inline constexpr crc64_t crc64(std::string_view str) {
   return crc64(str.data(), str.size());
 }
 } // namespace c10::util

@@ -52,7 +52,7 @@
 namespace at::native {
 
 template<typename scalar_t>
-scalar_t dot_impl(int64_t n, scalar_t *x, int64_t incx, scalar_t *y, int64_t incy);
+scalar_t dot_impl(int64_t n, const scalar_t *x, int64_t incx, const scalar_t *y, int64_t incy);
 
 static void make_offset2bag(const Tensor &offsets, Tensor& offset2bag) {
   offset2bag.index_add_(
@@ -1241,7 +1241,13 @@ embedding_bag(const Tensor &weight, const Tensor &indices,
     padding_idx = maybe_wrap_dim(padding_idx, weight.size(0));
   }
   std::tuple<Tensor, Tensor, Tensor, Tensor> out;
-  if (!weight.requires_grad() && !weight._fw_grad(/*level=*/0).defined()) {
+  bool needs_grad_path = weight.requires_grad() ||
+                      weight._fw_grad(/*level=*/0).defined() ||
+                      (per_sample_weights_opt.has_value() &&
+                       per_sample_weights_opt.value().defined() &&
+                       per_sample_weights_opt.value().requires_grad());
+
+  if (!needs_grad_path) {
     out = at::_embedding_bag_forward_only(
       weight, indices.contiguous(), offsets.contiguous(), scale_grad_by_freq,
       mode, sparse, per_sample_weights, include_last_offset, padding_idx);
@@ -1712,9 +1718,8 @@ Tensor _embedding_bag_per_sample_weights_backward_cpu_template(
 
         if (embedding_idx != static_cast<index_t>(padding_idx)) {
           output_data[sample_idx] = dot_impl<scalar_t>(
-              embedding_features,
-              const_cast<scalar_t*>(grad_data + grad_stride0 * bag_idx), grad_stride1,
-              const_cast<scalar_t*>(weight_data + weight_stride0 * embedding_idx), weight_stride1);
+              embedding_features, grad_data + grad_stride0 * bag_idx, grad_stride1,
+                 weight_data + weight_stride0 * embedding_idx, weight_stride1);
         }
       }
     });
