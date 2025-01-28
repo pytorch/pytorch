@@ -190,7 +190,7 @@ def preprocess(
     # Indicates whether this is the first line inside Python
     # code block (i.e. for, while, if, elif, else)
     python_block_start = True
-    for i, input_line in enumerate(input_lines):
+    for input_line in input_lines:
         if input_line == "":
             blank_lines += 1
             continue
