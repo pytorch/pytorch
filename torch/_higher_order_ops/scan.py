@@ -403,7 +403,9 @@ def trace_scan(
 def scan_op_dense(combine_fn, init, xs, reverse, additional_inputs):
     mode = _get_current_dispatch_mode()
     assert mode is None, "Mode should never be enabled for CPU/CUDA key"
-    return generic_scan(combine_fn, init, xs, reverse, additional_inputs)
+    return generic_scan(
+        combine_fn, init, xs, reverse=reverse, additional_inputs=additional_inputs
+    )
 
 
 scan_op.py_impl(DispatchKey.Autograd)(
