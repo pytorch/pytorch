@@ -3146,7 +3146,6 @@ BUILTIN_SKIPLIST = (
     collections,
     inspect,
     multiprocessing,
-    operator,
     random,
     threading,
     types,
