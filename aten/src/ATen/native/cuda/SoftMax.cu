@@ -1179,7 +1179,7 @@ void host_softmax_backward(const Tensor &grad_, const Tensor &output_, int64_t d
         bool can_use_smem = dim_size < max_elements_per_smem;
         can_use_smem &= !(reinterpret_cast<const uintptr_t>(grad.const_data_ptr<scalar_t>()) % ALIGN_BYTES);
         can_use_smem &= (!(reinterpret_cast<uintptr_t>(gI.const_data_ptr<scalar_t>()) % ALIGN_BYTES));
-        can_use_smem &= !(dim_size % ILP);
+         can_use_smem &= !(dim_size % ILP);
 
         if (can_use_smem) {
           size_t smem_sz = dim_size * sizeof(scalar_t) + smem_reduction_sz;
