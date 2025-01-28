@@ -411,15 +411,36 @@ class SymInt:
     def __init__(self, node):
         # This field MUST be named node; C++ binding code assumes that this
         # class has a field named node that stores SymNode
+        # import inspect
+        # import traceback
+        # from torch._guards import ShapeGuard, SLoc, Source, TracingContext
+        # from torch._logging import dtrace_structured, LazyString, structured, trace_structured
+        # from torch.utils._traceback import CapturedTraceback, format_frame
+        # # import fbvscode; fbvscode.set_trace()
+
+        # floc: Optional[Union[str, traceback.FrameSummary]] = None
+        # print(TracingContext.extract_stack())
+        # user_stack = format_frame(TracingContext.extract_stack()[0], line=True)
+        # frame = inspect.currentframe()
+        # try:
+        #     # Collect full stack trace
+        #     stack = traceback.extract_stack(frame)
+        #     formatted_stack = traceback.format_list(stack)
+        #     floc = ''.join(formatted_stack)
+        # finally:
+        #     del frame
+        # print(["create_symbol", str(node)], user_stack)
         self.node = node
 
     def __bool__(self):
         return builtins.bool(self != 0)
 
     def __int__(self):
+        breakpoint()
         return self.node.int_()
 
     def __index__(self):
+        breakpoint()
         return self.node.int_()
 
     # Magic methods installed by torch.fx.experimental.sym_node
