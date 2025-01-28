@@ -71,9 +71,7 @@ assert len(
 
 # Assert that there exists auto-generated tests for `SampleModule` and `sample_functional`.
 # 4 == 2 (number of test dicts that are not skipped) * 2 (number of devices)
-assert (
-    len([name for name in TestCppApiParity.__dict__ if "SampleModule" in name]) == 4
-)
+assert len([name for name in TestCppApiParity.__dict__ if "SampleModule" in name]) == 4
 # 4 == 2 (number of test dicts that are not skipped) * 2 (number of devices)
 assert (
     len([name for name in TestCppApiParity.__dict__ if "sample_functional" in name])
