@@ -289,7 +289,7 @@ PLAT_TO_VCVARS = {
     'win-amd64' : 'x86_amd64',
 }
 
-PY3_9_HEXCODE = "0x03090000"
+min_supported_cpython = "0x03090000"  # Python 3.9 hexcode
 
 def get_cxx_compiler():
     if IS_WINDOWS:
@@ -579,9 +579,9 @@ class BuildExtension(build_ext):
             if extension.py_limited_api:
                 # compile any extension that has passed in py_limited_api to the
                 # Extension constructor with the Py_LIMITED_API flag set to our
-                # min supported CPython version, here, 3.9.
+                # min supported CPython version.
                 # See https://docs.python.org/3/c-api/stable.html#c.Py_LIMITED_API
-                self._add_compile_flag(extension, f'-DPy_LIMITED_API={PY3_9_HEXCODE}')
+                self._add_compile_flag(extension, f'-DPy_LIMITED_API={min_supported_cpython}')
             else:
                 # pybind11 is not CPython API stable so don't add these flags used when
                 # compiling pybind11 when pybind11 is not even used. otherwise, the build
@@ -997,8 +997,10 @@ def CppExtension(name, sources, *args, **kwargs):
         Contrary to CPython setuptools, who does not define -DPy_LIMITED_API
         as a compile flag when py_limited_api is specified as an option for
         the "bdist_wheel" command in ``setup``, PyTorch does! We will specify
-        -DPy_LIMITED_API=<hexcode of the minimum supported Python version> to best
-        enforce consistency, safety, and sanity in order to encourage best practices.
+        -DPy_LIMITED_API=min_supported_cpython to best enforce consistency,
+        safety, and sanity in order to encourage best practices. To target a
+        different version, set min_supported_cpython to the hexcode of the
+        CPython version of choice.
 
     Example:
         >>> # xdoctest: +SKIP
@@ -1064,11 +1066,13 @@ def CUDAExtension(name, sources, *args, **kwargs):
         example, to give access to custom ops from python, the library should
         register the ops through the dispatcher.
 
-        Contray to CPython setuptools, who does not define -DPy_LIMITED_API
+        Contrary to CPython setuptools, who does not define -DPy_LIMITED_API
         as a compile flag when py_limited_api is specified as an option for
         the "bdist_wheel" command in ``setup``, PyTorch does! We will specify
-        -DPy_LIMITED_API=<hexcode of the minimum supported Python version> to best
-        enforce consistency, safety, and sanity in order to encourage best practices.
+        -DPy_LIMITED_API=min_supported_cpython to best enforce consistency,
+        safety, and sanity in order to encourage best practices. To target a
+        different version, set min_supported_cpython to the hexcode of the
+        CPython version of choice.
 
     Example:
         >>> # xdoctest: +SKIP
