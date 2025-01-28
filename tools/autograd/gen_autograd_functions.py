@@ -68,7 +68,6 @@ struct TORCH_API ${op} : public ${superclass} {
   }
   ${will_release_variables}
   void compiled_args(CompiledNodeArgs& args) override;
-  ivalue_list get_packed_args();
   variable_list apply_with_saved(const variable_list& inputs, SwapSavedVariables& saved) override;
   ${saved_variables}
   ${saved_list_sizes}
@@ -108,12 +107,16 @@ static variable_list ${op}_apply_functional(
   ${body}
   return grad_inputs;
 }
-static variable_list ${op}_apply_functional_ivalue(const variable_list& grads, const ivalue_list& args)
+inline variable_list ${op}_apply_functional_ivalue(const variable_list& grads, const ivalue_list& args)
 {
+#ifdef C10_MOBILE
+  TORCH_INTERNAL_ASSERT(false, "compiled autograd doesn't work on mobile");
+#else
   auto packed_args = PackedArgs(args);
   auto needs_input_grad = packed_args.unpack<std::array<bool, ${num_inputs}>>();
   ${unpack_ivalues}
   return ${op}_apply_functional(variable_list(grads), needs_input_grad${,apply_functional_args});
+#endif
 }
 
 variable_list ${op}::apply(variable_list&& grads) {
@@ -128,40 +131,33 @@ void ${op}::compiled_args(CompiledNodeArgs& args) {
     ${compiled_args}
 }
 variable_list ${op}::apply_with_saved(const variable_list& grads, SwapSavedVariables& saved) {
+#ifdef C10_MOBILE
+  TORCH_INTERNAL_ASSERT(false, "compiled autograd doesn't work on mobile");
+#else
   ${apply_with_saved_before}
 
-  static std::once_flag flag;
-  std::call_once(flag, [&](){
+  static bool called = false;
+  if (!called) {
+    called = true;
     ${compute_schema}
-    const auto& interface = torch::dynamo::autograd::getPyCompilerInterface();
-    interface->bind_function(saved.get_py_compiler(), name(), ${op}_apply_functional_ivalue, schema);
-  });
+    const auto& pyinterface = torch::dynamo::autograd::getPyCompilerInterface();
+    pyinterface->bind_function(saved.get_py_compiler(), name(), ${op}_apply_functional_ivalue, schema);
+  }
 
-  variable_list result;
-  auto packed_args = get_packed_args();
-  auto output_metadata = torch::dynamo::autograd::IValuePacker<
-    std::vector<std::optional<InputMetadata>>>::pack(
-      torch::dynamo::autograd::get_input_metadata(next_edges()));
-  const auto& interface = torch::dynamo::autograd::getPyCompilerInterface();
-  result = interface->call_function(
-      saved.get_py_compiler(),
-      "apply_functional",
-      name(),
-      grads,
-      packed_args,
-      output_metadata);
+  variable_list output_result;
 
-  ${apply_with_saved_after}
-  return result;
-}
-ivalue_list ${op}::get_packed_args() {
   PackedArgs packed_args;
   ${asserts}
   ${unpacks}
   ${compute_needs_input_grad}
   packed_args.pack(needs_input_grad);
   ${get_packed_args}
-  return std::move(packed_args).vec();
+
+  output_result = compiled_autograd_apply_functional(packed_args, next_edges(), saved, grads, name());
+
+  ${apply_with_saved_after}
+  return output_result;
+#endif
 }
 
 """
