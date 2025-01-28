@@ -70,7 +70,9 @@ class CppWrapperCpu(PythonWrapperCodegen):
 
     @staticmethod
     def create(
-        is_subgraph: bool, subgraph_name: str, parent_wrapper: PythonWrapperCodegen
+        is_subgraph: bool,
+        subgraph_name: Optional[str],
+        parent_wrapper: Optional[PythonWrapperCodegen],
     ):
         # TODO - support subgraph codegen by lifting functions. Check the
         # comment at CppWrapperCpu `codegen_subgraph` function.
@@ -155,7 +157,15 @@ class CppWrapperCpu(PythonWrapperCodegen):
                 #include <Python.h>
 
                 #define PYBIND11_SIMPLE_GIL_MANAGEMENT
-                #include <pybind11/gil.h>
+                """
+            )
+            self.header.splice(
+                "#include <pybind11/pybind11.h>"
+                if config.is_fbcode()
+                else "#include <pybind11/gil.h>"
+            )
+            self.header.splice(
+                """
                 namespace py = pybind11;
 
                 class RAIIPyObject {
@@ -1346,22 +1356,41 @@ class CppWrapperCpu(PythonWrapperCodegen):
             buffer.get_dtype(),
             buffer.get_size(),
             buffer.get_stride(),
+            V.graph.get_allocation_size(buffer),
         )
 
     def make_allocation(
         self, name, device, dtype, shape, stride, allocation_shape=None
     ):
+        if allocation_shape is None:
+            allocation_shape = shape
+
         orig_stride = stride
         device_str = self.codegen_device(device)
         dtype_code = self.codegen_dtype(dtype)
         size = self.codegen_shape_tuple(shape)
+        allocation_size = self.codegen_shape_tuple(allocation_shape)
         stride = self.codegen_shape_tuple(orig_stride)
+
         size_array_var = self.codegen_int_array_var(
             size,
             self.wrapper_call.writeline,
             known_statically=self.is_statically_known_list_of_ints(shape),
             graph=self.get_codegened_graph(),
         )
+
+        if allocation_size != size:
+            allocation_size_array_var = self.codegen_int_array_var(
+                allocation_size,
+                self.wrapper_call.writeline,
+                known_statically=self.is_statically_known_list_of_ints(
+                    allocation_shape
+                ),
+                graph=self.get_codegened_graph(),
+            )
+        else:
+            allocation_size_array_var = size_array_var
+
         stride_array_var = self.codegen_int_array_var(
             stride,
             self.wrapper_call.writeline,
@@ -1371,22 +1400,36 @@ class CppWrapperCpu(PythonWrapperCodegen):
         device_type, device_id = device_str.split(",")
         device_idx = "this->device_idx_" if V.graph.aot_mode else device_id
 
+        handle_name = f"{name}_handle"
         args = [
             str(len(shape)),
-            size_array_var,
+            allocation_size_array_var,
             stride_array_var,
             dtype_code,
             device_type,
             device_idx,
-            f"&{name}_handle",
+            f"&{handle_name}",
         ]
 
-        self.wrapper_call.writeline(f"AtenTensorHandle {name}_handle;")
+        self.wrapper_call.writeline(f"AtenTensorHandle {handle_name};")
         self.wrapper_call.writeline(
             f"AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_empty_strided({', '.join(args)}));"
         )
 
-        return f"RAIIAtenTensorHandle {name}({name}_handle);"
+        if allocation_size != size:
+            old_handle_name, handle_name = handle_name, f"{name}_handle_restrided"
+            self.wrapper_call.writeline(f"AtenTensorHandle {handle_name};")
+            args = [
+                old_handle_name,
+                size_array_var,
+                stride_array_var,
+                f"&{handle_name}",
+            ]
+            self.wrapper_call.writeline(
+                f"AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_as_strided({', '.join(args)}));"
+            )
+
+        return f"RAIIAtenTensorHandle {name}({handle_name});"
 
     def codegen_alloc_from_pool(self, name, offset, dtype, shape, stride) -> str:
         size = self.codegen_shape_tuple(shape)
@@ -1937,11 +1980,37 @@ if (custom_op_wrapper.get() == NULL) {
                     # Py_NewRef is only available since Python 3.10
                     self.include_extra_header("torch/csrc/utils/pythoncapi_compat.h")
 
+            def handle_scalar(scalar):
+                if isinstance(scalar, int):
+                    return f"PyLong_FromLongLong({scalar})"
+                if isinstance(scalar, float):
+                    return f"PyFloat_FromDouble({self.generate_float_value(scalar)})"
+                if isinstance(scalar, bool):
+                    return f"PyBool_FromLong({1 if scalar else 0})"
+                if isinstance(scalar, complex):
+                    real = self.generate_float_value(scalar.real)
+                    imag = self.generate_float_value(scalar.imag)
+                    return f"PyComplex_FromDoubles({real}, {imag})"
+                if isinstance(scalar, SymTypes):
+                    scalar_var = cexpr(scalar.node.expr)
+                    if isinstance(scalar, torch.SymBool):
+                        return f"PyBool_FromLong({scalar_var})"
+                    if isinstance(scalar, torch.SymFloat):
+                        return f"PyFloat_FromDouble({scalar_var})"
+                    return f"PyLong_FromLongLong({scalar_var})"
+                raise NotImplementedError(
+                    f"scalar {scalar}, {type(scalar)} cannot be handled by handle_scalar"
+                )
+
             if raw_arg is None:
                 # Py_None is a singleton, so we have to explicitly incref it here
                 lines.append("Py_INCREF(Py_None);\n")
                 return "Py_None"
             elif isinstance(arg_type, torch.TensorType):
+                # In some cases, scalar arguments may be passed in place of tensors.
+                if not hasattr(raw_arg, "codegen_reference"):
+                    return handle_scalar(raw_arg)
+
                 # Store AtenTensorHandle as void*
                 base_handle = raw_arg.codegen_reference()
                 (
@@ -1972,23 +2041,7 @@ if (custom_op_wrapper.get() == NULL) {
             elif isinstance(arg_type, torch.NumberType):
                 # Union[bool, int, float, complex]
                 # torch/_prims_common/__init__.py
-                if isinstance(raw_arg, int):
-                    return f"PyLong_FromLongLong({raw_arg})"
-                elif isinstance(raw_arg, float):
-                    return f"PyFloat_FromDouble({self.generate_float_value(raw_arg)})"
-                elif isinstance(raw_arg, bool):
-                    return f"PyBool_FromLong({1 if raw_arg else 0})"
-                elif isinstance(raw_arg, complex):
-                    real = self.generate_float_value(raw_arg.real)
-                    imag = self.generate_float_value(raw_arg.imag)
-                    return f"PyComplex_FromDoubles({real}, {imag})"
-                elif isinstance(raw_arg, torch.SymInt):
-                    expr = raw_arg.node.expr
-                    return f"PyLong_FromLongLong({cexpr(expr)})"
-                else:
-                    raise NotImplementedError(
-                        f"arg type {arg_type} with raw_arg {raw_arg}, {type(raw_arg)} is not yet supported by custom_op_wrapper"
-                    )
+                return handle_scalar(raw_arg)
             elif isinstance(raw_arg, torch.device):
                 # device
                 self.include_extra_header("torch/csrc/Device.h")
@@ -2188,6 +2241,8 @@ reinterpret_cast<AtenTensorHandle>(PyCapsule_GetPointer(PyList_GET_ITEM(py_{buf_
         elif isinstance(val, int):
             # uint64_t is long on Linux, but long long on MacOS and Windows
             return f"{val}LL" if sys.platform in ["darwin", "win32"] else f"{val}L"
+        elif isinstance(val, complex):
+            return f"c10::complex<double>{{ {self.generate_float_value(val.real)}, {self.generate_float_value(val.imag)} }}"
         elif isinstance(val, str):
             return f'"{val}"'
         elif isinstance(
@@ -2276,7 +2331,7 @@ reinterpret_cast<AtenTensorHandle>(PyCapsule_GetPointer(PyList_GET_ITEM(py_{buf_
                 self.writeline(f"AtenTensorHandle {var_name} = {base_handle}.get();")
                 return f"&{var_name}"
 
-        elif isinstance(type_, torch.ListType):
+        if isinstance(type_, torch.ListType):
             assert isinstance(
                 val, (list, tuple)
             ), f"{val} does not match with arg type {type_}"
@@ -2295,6 +2350,11 @@ reinterpret_cast<AtenTensorHandle>(PyCapsule_GetPointer(PyList_GET_ITEM(py_{buf_
                 )
             # Need to pass the array length because we can't use std::vector
             return f"{var_name}, {len(val)}"
+
+        val_is_scalar = isinstance(val, (bool, complex, float, int, *SymTypes))
+        if isinstance(type_, torch.TensorType) and val_is_scalar:
+            val_str = self.val_to_arg_str_for_prim_type(val, None)
+            return self.codegen_scalar_to_tensor(val_str)
 
         return self.val_to_arg_str_for_prim_type(val, type_)
 

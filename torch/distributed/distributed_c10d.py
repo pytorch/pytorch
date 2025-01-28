@@ -1811,7 +1811,7 @@ def _shutdown_backend(pg):
     except RuntimeError:
         pass
     if is_nccl_available() and isinstance(backend, ProcessGroupNCCL):
-        # explictly call shutdown to ensure that NCCL resources are released
+        # explicitly call shutdown to ensure that NCCL resources are released
         backend._shutdown()
 
 

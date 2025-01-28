@@ -38,6 +38,7 @@ from ..utils import (
     check_numpy_ndarray_args,
     check_unspec_or_constant_args,
     check_unspec_python_args,
+    dict_methods,
     extract_fake_example_value,
     get_fake_value,
     guard_if_dyn,
@@ -1028,9 +1029,55 @@ class BuiltinVariable(VariableTracker):
         if self.fn is dict and name == "__new__":
             assert len(args) == 1
             assert len(kwargs) == 0
-            return ConstDictVariable({}, dict, mutation_type=ValueMutationNew())
+            dict_vt = ConstDictVariable({}, dict, mutation_type=ValueMutationNew())
+            if isinstance(args[0], BuiltinVariable) and args[0].fn is dict:
+                return dict_vt
+            # We don't have to set the underlying dict_vt in
+            # UserDefinedDictVariable because it will be set to empty
+            # ConstDictVariableTracker in the constructor.
+            return tx.output.side_effects.track_object_new_from_user_defined_class(
+                args[0]
+            )
         if self.fn is dict and name == "fromkeys":
             return BuiltinVariable.call_custom_dict_fromkeys(tx, dict, *args, **kwargs)
+
+        if self.fn is dict:
+            resolved_fn = getattr(self.fn, name)
+            if resolved_fn in dict_methods:
+                if isinstance(args[0], variables.UserDefinedDictVariable):
+                    return args[0]._dict_vt.call_method(tx, name, args[1:], kwargs)
+                elif isinstance(args[0], variables.ConstDictVariable):
+                    return args[0].call_method(tx, name, args[1:], kwargs)
+
+        if self.fn is tuple:
+            resolved_fn = getattr(self.fn, name)
+            if (
+                resolved_fn is tuple.__new__
+                and len(args) == 2
+                and args[1].has_unpack_var_sequence(tx)
+                and not kwargs
+            ):
+                init_args = args[1].unpack_var_sequence(tx)
+                tuple_vt = variables.TupleVariable(
+                    init_args, mutation_type=ValueMutationNew()
+                )
+                if isinstance(args[0], BuiltinVariable) and args[0].fn is tuple:
+                    return tuple_vt
+
+                result = (
+                    tx.output.side_effects.track_object_new_from_user_defined_class(
+                        args[0]
+                    )
+                )
+                # side_effects data structure does not support methods like
+                # tuple.__new__ that uses *args parameters for the __new__
+                # method. Therefore, we manage the *args related functionality
+                # here. For other datastructures, this is done in the __init__
+                # method.
+                result.set_new_args(args[1])
+                result.set_underlying_tuple_vt(tuple_vt)
+                return result
+
         return super().call_method(tx, name, args, kwargs)
 
     def _call_int_float(self, tx: "InstructionTranslator", arg):
@@ -1855,6 +1902,7 @@ class BuiltinVariable(VariableTracker):
 
     def call_format(self, tx: "InstructionTranslator", _format_string, *args, **kwargs):
         format_string = _format_string.as_python_constant()
+        format_string = str(format_string)
         return variables.StringFormatVariable.create(format_string, args, kwargs)
 
     def call_id(self, tx: "InstructionTranslator", *args):
