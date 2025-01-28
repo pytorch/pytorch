@@ -19,6 +19,7 @@ if TYPE_CHECKING:
 
     from torch._guards import CompileId
 
+    from .symbolic_convert import InstructionTranslatorBase
     from .types import DynamoFrameType
 
 
@@ -257,12 +258,22 @@ class ObservedUserStopIteration(ObservedException):
             self.value = None
 
 
-class ObservedGeneratorExit(ObservedException):
+class ObservedLookupError(ObservedException):
+    # A LookupError exception to be raised from inside Dynamo tracing. This can happen on __getitem__
     pass
 
 
-class ObservedKeyError(ObservedException):
+class ObservedIndexError(ObservedLookupError):
+    # An IndexError exception to be raised from inside Dynamo tracing. This can happen on list __getitem__
+    pass
+
+
+class ObservedKeyError(ObservedLookupError):
     # A KeyError exception to be raised from inside Dynamo tracing. This can happen on dict __getitem__
+    pass
+
+
+class ObservedGeneratorExit(ObservedException):
     pass
 
 
@@ -286,6 +297,8 @@ class ObservedTypeError(ObservedException):
 
 observed_exception_map = {
     StopIteration: ObservedUserStopIteration,
+    LookupError: ObservedLookupError,
+    IndexError: ObservedIndexError,
     GeneratorExit: ObservedGeneratorExit,
     KeyError: ObservedKeyError,
     AttributeError: ObservedAttributeError,
@@ -295,14 +308,20 @@ observed_exception_map = {
 }
 
 
-def raise_observed_exception(e: type[Exception], tx: Any) -> None:
+def raise_observed_exception(
+    exc_type: type[Exception],
+    tx: InstructionTranslatorBase,
+    *,
+    args: Optional[list[Any]] = None,
+    kwargs: Optional[dict[str, Any]] = None,
+) -> NoReturn:
     from .variables import BuiltinVariable
 
     # CPython here raises an exception. Since there is no python code, we have to manually setup the exception
     # stack and raise the exception.
-    exception_vt = BuiltinVariable(e).call_function(tx, [], {})
+    exception_vt = BuiltinVariable(exc_type).call_function(tx, args or [], kwargs or {})  # type: ignore[arg-type]
     tx.exn_vt_stack.append(exception_vt)
-    raise observed_exception_map[e]
+    raise observed_exception_map[exc_type]
 
 
 def handle_observed_exception(tx: Any) -> None:

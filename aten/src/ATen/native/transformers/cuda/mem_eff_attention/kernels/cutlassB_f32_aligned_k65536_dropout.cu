@@ -14,7 +14,7 @@ __global__ void __launch_bounds__(
 fmha_cutlassB_f32_aligned_128x64_k65536_dropout_sm80(typename AttentionBackwardKernel<cutlass::arch::Sm80, float, true, true, false, 128, 64, 65536>::Params p) {
 #ifdef __CUDA_ARCH__
 #if __CUDA_ARCH__ >= 800
-#if __CUDA_ARCH__ < 1000
+#if __CUDA_ARCH__ <= 1200
   if (!p.advance_to_block()) {
     return;
   }
@@ -90,7 +90,7 @@ __global__ void __launch_bounds__(
 fmha_cutlassB_f32_aligned_64x64_k65536_dropout_sm80(typename AttentionBackwardKernel<cutlass::arch::Sm80, float, true, true, false, 64, 64, 65536>::Params p) {
 #ifdef __CUDA_ARCH__
 #if __CUDA_ARCH__ >= 800
-#if __CUDA_ARCH__ < 1000
+#if __CUDA_ARCH__ <= 1200
   if (!p.advance_to_block()) {
     return;
   }
