@@ -11567,11 +11567,11 @@ class GraphModule(torch.nn.Module):
     def test_dynamic_lr_shift(self):
         class Module(torch.nn.Module):
             def forward(self, x):
-                rshift = x.shape[0] >> 2
-                lshift = x.shape[0] << 2
+                rshift = x.shape[0] >> 1
+                lshift = x.shape[0] << 1
                 return x[:rshift], x[:lshift]
 
-        dynamic_shapes = {"x": {0: Dim("N", min=4, max=10)}}
+        dynamic_shapes = {"x": {0: Dim("N", min=5, max=10)}}
         inp = (torch.randn(8),)
         ep = export(Module(), inp, dynamic_shapes=dynamic_shapes)
         for op in (operator.lshift, operator.rshift):
