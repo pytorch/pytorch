@@ -975,7 +975,7 @@ class BuiltinVariable(VariableTracker):
                 if fn is operator.truediv and isinstance(
                     args[0], variables.UnspecializedPythonVariable
                 ):
-                    args[0] = args[0].convert_to_constant(tx)
+                    args[0] = args[0].as_python_constant()
                 return wrap_fx_proxy(tx, proxy)
 
         except NotImplementedError:
@@ -1609,7 +1609,7 @@ class BuiltinVariable(VariableTracker):
             name = attr.as_python_constant()
             if isinstance(obj, variables.BuiltinVariable):
                 return variables.ConstantVariable(hasattr(obj.fn, name))
-            return obj.call_hasattr(tx, name)
+            return obj.call_obj_hasattr(tx, name)
 
     def call_map(self, tx: "InstructionTranslator", fn, *seqs):
         seqs = [
