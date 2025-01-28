@@ -292,7 +292,7 @@ class BlockPtrOptions:
         *,
         params: BlockParameters,
         constant_offset: sympy.Expr,
-        range_trees: list[IterationRangesEntry],
+        range_trees: list[IterationRangesRoot],
         mask_vars: OrderedSet[str],
         get_max_block: Callable[[str], int],
     ) -> BlockPtrOptions:
@@ -1740,7 +1740,7 @@ class TritonKernel(SIMDKernel):
         ):
 
             def match_strided_block(
-                index: sympy.Expr, range_tree: IterationRangesEntry
+                index: sympy.Expr, range_tree: IterationRangesRoot
             ) -> Optional[BlockParameters]:
                 """
                 Matches expressions of the form:
@@ -1762,7 +1762,7 @@ class TritonKernel(SIMDKernel):
                 )
 
             def match_mod_div_block(
-                index: sympy.Expr, range_tree: IterationRangesEntry
+                index: sympy.Expr, range_tree: IterationRangesRoot
             ) -> Optional[BlockParameters]:
                 """
                 Matches higher-dimensional blocks coming from FloorDiv and ModularIndexing.
@@ -1860,7 +1860,7 @@ class TritonKernel(SIMDKernel):
                 )
 
             def match_block_pointer_subexpr(
-                expr: sympy.Expr, range_tree: IterationRangesEntry
+                expr: sympy.Expr, range_tree: IterationRangesRoot
             ) -> Optional[BlockParameters]:
                 """
                 Match a block indexing subexpression involving a single range tree.
@@ -3810,7 +3810,7 @@ class TritonKernel(SIMDKernel):
 
 class TritonScheduling(SIMDScheduling):
     kernel_type: type[Any] = TritonKernel
-    backend_features = dict.fromkeys(  # dict for deterministic order
+    backend_features = OrderedSet(
         [
             BackendFeature.FOREACH,
             BackendFeature.BUCKETIZE,
@@ -3822,16 +3822,14 @@ class TritonScheduling(SIMDScheduling):
     )
     if torch.version.hip is None:
         backend_features.update(
-            dict.fromkeys(
-                [
-                    # TODO: Move this above when ROCm triton adds support for multiple inputs
-                    BackendFeature.TUPLE_REDUCTION,
-                    BackendFeature.SORT,
-                ]
-            )
+            [
+                # TODO: Move this above when ROCm triton adds support for multiple inputs
+                BackendFeature.TUPLE_REDUCTION,
+                BackendFeature.SORT,
+            ]
         )
 
-    def __init__(self, scheduler: Scheduler) -> None:
+    def __init__(self, scheduler: Optional[Scheduler]) -> None:
         super().__init__(scheduler)
         if scheduler is None or not hasattr(scheduler, "nodes"):
             return
@@ -3845,10 +3843,9 @@ class TritonScheduling(SIMDScheduling):
             config.triton.cooperative_reductions
             or config.triton.force_cooperative_reductions
         ):
-            return {
-                **cls.backend_features,
-                BackendFeature.REDUCE_TO_SINGLE_ELEMENT: None,
-            }
+            return OrderedSet(
+                [*cls.backend_features, BackendFeature.REDUCE_TO_SINGLE_ELEMENT]
+            )
         return cls.backend_features
 
     def codegen_comment(self, node_schedule):

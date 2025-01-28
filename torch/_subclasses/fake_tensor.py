@@ -379,7 +379,7 @@ class FakeTensorConverter:
         out = self.meta_converter(
             t,
             shape_env=shape_env,
-            callback=mk_fake_tensor,
+            callback=mk_fake_tensor,  # type: ignore[arg-type]
             source=source,
             symbolic_context=symbolic_context,
             trace=trace,

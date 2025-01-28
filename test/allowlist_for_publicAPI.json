@@ -1028,6 +1028,8 @@
   "torch.types": [
     "Any",
     "Device",
+    "FileLike",
+    "List",
     "Number",
     "Sequence",
     "Union"
