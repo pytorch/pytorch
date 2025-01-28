@@ -9,7 +9,7 @@ from __future__ import annotations
 import contextlib
 import functools
 import inspect
-from typing import Any, Callable, Mapping, Sequence
+from typing import Any, Callable, TYPE_CHECKING
 
 import torch._dynamo
 import torch.export as torch_export
@@ -17,6 +17,10 @@ import torch.fx
 import torch.onnx
 from torch.onnx._internal import _exporter_legacy, io_adapter
 from torch.utils import _pytree as pytree
+
+
+if TYPE_CHECKING:
+    from collections.abc import Mapping, Sequence
 
 
 class _PyTreeExtensionContext:
