@@ -353,6 +353,55 @@ class ProcessGroupUCCTest(MultiProcessTestCase):
     def test_reduce_scatter_base_basics(self):
         self._test_reduce_scatter_base_basics(lambda t: t.clone())
 
+    @requires_ucc()
+    def _test_coalesced_group_base_basics(self, fn):
+        pg = self._create_process_group_ucc()
+        pg._start_coalescing()
+        pg._end_coalescing()
+
+    def test_coalesced_group_basics(self):
+        self._test_coalesced_group_base_basics(lambda t: t.clone())
+
+    @requires_ucc()
+    def _test_coalesced_group_broadcast(self, fn):
+        pg = self._create_process_group_ucc()
+
+        pg._start_coalescing()
+        if (self.rank == 0):
+            for i in range(self.world_size):
+                send_buf = fn(torch.full((1,), float(i)))
+                pg.send([send_buf], i, 0)
+
+        recv_buf = fn(torch.zeros(1))
+        pg.recv([recv_buf], 0, 0)
+        pg._end_coalescing().wait()
+
+        expected_output = fn(torch.full((1,), float(self.rank)))
+        self.assertEqual(recv_buf, expected_output)
+
+    def test_coalesced_group_broadcast(self):
+        self._test_coalesced_group_broadcast(lambda t: t.clone())
+
+    @requires_ucc()
+    def _test_coalesced_group_ring_p2p(self, fn):
+        pg = self._create_process_group_ucc()
+        send_peer = (self.rank + 1) % self.world_size
+        recv_peer = (self.world_size + self.rank - 1) % self.world_size
+        send_buf = fn(torch.full((1,), float(self.rank)))
+        recv_buf = fn(torch.zeros(1))
+        expected_output = fn(torch.full((1,), float(recv_peer)))
+
+        pg._start_coalescing()
+        pg.send([send_buf], send_peer, 0)
+        pg.recv([recv_buf], recv_peer, 0)
+        pg._end_coalescing().wait()
+
+        # result = fut.value()
+        self.assertEqual(recv_buf, expected_output)
+
+    def test_coalesced_group_ring_p2p(self):
+        self._test_coalesced_group_ring_p2p(lambda t: t.clone())
+
 
 class DistributedDataParallelTest(
     test_c10d_common.CommonDistributedDataParallelTest, MultiProcessTestCase
