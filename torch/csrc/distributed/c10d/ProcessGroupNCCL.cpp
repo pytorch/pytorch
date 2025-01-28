@@ -2158,17 +2158,30 @@ void ProcessGroupNCCL::checkAndSetRemoteError() {
 
 // NCCL recommends to evenly distribute ncclUniqueIds accross the ranks
 // https://docs.nvidia.com/deeplearning/nccl/user-guide/docs/usage/communicators.html#init-rank-config
+// Let’s consider an example where:
+// nRanks = 10 (total ranks),
+// nIds = 3 (roots),
+// rmr = 10 % 3 = 1 (1 larger group),
+// rpr = 10 / 3 = 3 (base number of ranks per group).
+// rlim = 4
+// Output root:
+// For ranks [0, 1, 2, 3] is 0.
+// For ranks [4, 5, 6] is 1.
+// For ranks [7, 8, 9] is 2.
 int ProcessGroupNCCL::getRootRank(
     const int rank,
     const int nRanks,
     const int nIds) {
   const int rmr = nRanks % nIds;
   const int rpr = nRanks / nIds;
+  // For the first rmr roots, we assign one more rank to the root.
   const int rlim = rmr * (rpr + 1);
   if (rank < rlim) {
-    return 0;
+    // Root with `rpr + 1` ranks, 0, 1, 2, ..., rmr - 1.
+    return rank / (rpr + 1);
   } else {
-    return ((rank - rlim) / nIds) * nIds;
+    // Root with `rpr` ranks, rmr, rmr + 1, ..., nIds - 1.
+    return ((rank - rlim) / rpr) + rmr;
   }
 }
 
@@ -2751,9 +2764,7 @@ std::shared_ptr<NCCLComm> ProcessGroupNCCL::initNCCLComm(
   // accoring to
   // https://github.com/pytorch/pytorch/pull/136789#discussion_r1779171615.
   auto ranksPerRoot = getCvarInt(TORCH_NCCL_SCALABLE_INIT_RANKS_PER_ROOT, 128);
-  auto numRoots = (getSize() % ranksPerRoot == 0)
-      ? (getSize() / ranksPerRoot)
-      : (getSize() / ranksPerRoot + 1);
+  auto numRoots = (getSize() / ranksPerRoot) + (getSize() % ranksPerRoot > 0);
   std::vector<ncclUniqueId> ncclIDs(numRoots);
 
   if (!ncclComm) {
