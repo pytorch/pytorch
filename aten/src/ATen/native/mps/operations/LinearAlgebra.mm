@@ -815,21 +815,16 @@ static Tensor& linalg_cholesky_mps_impl(const Tensor& input, bool upper, Tensor&
   int64_t numBlocks = (N + NB - 1) / NB;
 
   Tensor success = at::empty({B}, input.options().dtype(kInt)).fill_(1);
-  id<MTLBuffer> successBuffer = getMTLBufferStorage(success);
 
   MTLSize threadGroupSize = MTLSizeMake(256, 1, 1);
-  id<MTLBuffer> outBuffer = getMTLBufferStorage(out);
-  id<MTLComputeCommandEncoder> computeEncoder = stream->commandEncoder();
-  [computeEncoder setBuffer:outBuffer offset:0 atIndex:0];
-  [computeEncoder setBytes:&N length:sizeof(int64_t) atIndex:2];
-  [computeEncoder setBytes:&NB length:sizeof(int64_t) atIndex:3];
 
   @autoreleasepool {
     dispatch_sync_with_rethrow(stream->queue(), ^() {
+      auto computeEncoder = stream->commandEncoder();
+      mtl_setArgs(computeEncoder, out, success, N, NB);
       for (int64_t k = 0; k < numBlocks; k++) {
         [computeEncoder setComputePipelineState:factorDiagonalPSO];
-        [computeEncoder setBuffer:successBuffer offset:0 atIndex:1];
-        [computeEncoder setBytes:&k length:sizeof(int64_t) atIndex:4];
+        mtl_setBytes(computeEncoder, k, 4);
         MTLSize gridSize = MTLSizeMake(B, 1, 1);
         [computeEncoder dispatchThreadgroups:gridSize threadsPerThreadgroup:threadGroupSize];
 
