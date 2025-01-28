@@ -2839,36 +2839,34 @@ class InstructionTranslator(InstructionTranslatorBase):
                 if name in f_locals:
                     # This models cells that are also function inputs.
                     value = f_locals[name]
-                    # NOTE: cell objects in `f_locals` are already dereferenced,
-                    # so we can't easily retrieve the original cell objects.
-                    # However, we create a new cell object for the sake of
-                    # internal consistency (variable for each existing cell has
-                    # an associated python cell object in `SideEffects`).
+                    # NOTE: root frame inputs that are captured by a nested
+                    # function become special cell objects -- they exist in
+                    # `f_locals` as contents of the cells, rather than the cells
+                    # objects themselves.
                     #
-                    # But this isn't the original cell object, why is it safe?
-                    # That's because
+                    # In Dynamo, we choose to represent such input cell objects
+                    # as newly created (rather than pre-existing) cell objects,
+                    # because
                     #
-                    # 1. Dynamo only uses these cell objects for their ids, so that
-                    # if we encounter the same cell (if it's captured by some
-                    # pre-existing function), we'll reuse the original
-                    # `CellVariable` instance we created for the cell object.
+                    # 1. The reason for representing a pre-existing cell object
+                    # is to emit guard or codegen mutations. However, local
+                    # cells should never be used for guards. Moreover, at this
+                    # point these input cell objects should've never been
+                    # accessed by anyone else, since Dynamo intercepts the frame
+                    # right after its evaluation starts, i.e., right after these
+                    # cell objects are created. So they should have no external
+                    # reference, meaning no mutation needs to be propagated.
                     #
-                    # 2. In this case the original cell object should've
-                    # never been accessed by anyone else, as Dynamo intercepts
-                    # the frame right after its evaluation starts, i.e., right
-                    # after these cell objects are created. Thus they cannot be
-                    # captured by any pre-existig function.
-                    dummy_cell = types.CellType(value)
-                    cell_source = LocalCellSource(name)
+                    # 2. This conveniently allows codegen to prune away
+                    # mutations to these cells, unless they escape the frame.
                     contents_source = LocalSource(
                         name, is_input=True, is_derefed_cell_contents=True
                     )
                     contents_var: VariableTracker = LazyVariableTracker.create(
                         value, contents_source
                     )
-                    cell_var = side_effects.track_cell_existing(
-                        cell_source, dummy_cell, contents_var
-                    )
+                    cell_var = side_effects.track_cell_new()
+                    side_effects.store_cell(cell_var, contents_var)
                 else:
                     cell_var = side_effects.track_cell_new()
                 cell_var.local_name = name
