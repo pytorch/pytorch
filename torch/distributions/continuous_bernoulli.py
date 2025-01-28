@@ -72,8 +72,10 @@ class ContinuousBernoulli(ExponentialFamily):
                     raise ValueError("The parameter probs has invalid values")
             self.probs = clamp_probs(self.probs)
         else:
+            assert logits is not None  # helps mypy
             is_scalar = isinstance(logits, _Number)
             (self.logits,) = broadcast_all(logits)
+
         self._param = self.probs if probs is not None else self.logits
         if is_scalar:
             batch_shape = torch.Size()

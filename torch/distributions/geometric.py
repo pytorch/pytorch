@@ -58,14 +58,17 @@ class Geometric(Distribution):
             )
         if probs is not None:
             (self.probs,) = broadcast_all(probs)
-        if logits is not None:  # Note: 'if is None' instead of 'else' to help mypy
+        else:
+            assert logits is not None  # helps mypy
             (self.logits,) = broadcast_all(logits)
+
         probs_or_logits = probs if probs is not None else logits
         if isinstance(probs_or_logits, _Number):
             batch_shape = torch.Size()
         else:
-            assert probs_or_logits is not None
+            assert probs_or_logits is not None  # helps mypy
             batch_shape = probs_or_logits.size()
+
         super().__init__(batch_shape, validate_args=validate_args)
         if self._validate_args and probs is not None:
             # Add an extra check beyond unit_interval

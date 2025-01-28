@@ -57,6 +57,7 @@ class NegativeBinomial(Distribution):
             ) = broadcast_all(total_count, probs)
             self.total_count = self.total_count.type_as(self.probs)
         else:
+            assert logits is not None  # helps mypy
             (
                 self.total_count,
                 self.logits,

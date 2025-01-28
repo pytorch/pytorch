@@ -66,11 +66,13 @@ class Categorical(Distribution):
             if probs.dim() < 1:
                 raise ValueError("`probs` parameter must be at least one-dimensional.")
             self.probs = probs / probs.sum(-1, keepdim=True)
-        if logits is not None:  # Note: 'if is None' instead of 'else' to help mypy
+        else:
+            assert logits is not None  # helps mypy
             if logits.dim() < 1:
                 raise ValueError("`logits` parameter must be at least one-dimensional.")
             # Normalize
             self.logits = logits - logits.logsumexp(dim=-1, keepdim=True)
+
         self._param = self.probs if probs is not None else self.logits
         self._num_events = self._param.size()[-1]
         batch_shape = (

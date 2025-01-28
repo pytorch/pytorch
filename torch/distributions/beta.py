@@ -52,7 +52,7 @@ class Beta(ExponentialFamily):
                 concentration1, concentration0
             )
             concentration1_concentration0 = torch.stack(
-                [concentration1, concentration0], -1  # type: ignore[list-item]
+                [concentration1, concentration0], -1
             )
         self._dirichlet = Dirichlet(
             concentration1_concentration0, validate_args=validate_args
