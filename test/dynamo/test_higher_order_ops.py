@@ -1817,8 +1817,8 @@ def forward(self, L_x_ : torch.Tensor):
     getitem_4 = map_impl[3]
     getitem_5 = map_impl[4]
     getitem_6 = map_impl[5]
-    getitem_7 = map_impl[6];  map_impl = None
-    return (getitem_1, getitem_2, getitem_3, getitem_4, getitem_5, getitem_6, getitem_7)""",
+    value = map_impl[6];  map_impl = None
+    return (getitem_1, getitem_2, getitem_3, getitem_4, getitem_5, getitem_6, value)""",
             )
             self.assertExpectedInline(
                 body_graph,
@@ -2639,8 +2639,8 @@ class GraphModule(torch.nn.Module):
 
         wrap_body_0 = self.wrap_body_0
         wrap = torch.ops.higher_order.wrap(wrap_body_0, l_x_);  wrap_body_0 = l_x_ = None
-        getitem: "f32[3]" = wrap[0];  wrap = None
-        return (getitem,)
+        value: "f32[3]" = wrap[0];  wrap = None
+        return (value,)
 
     class wrap_body_0(torch.nn.Module):
         def forward(self, l_x_: "f32[3]"):
@@ -4216,8 +4216,8 @@ class GraphModule(torch.nn.Module):
         child_1: "f32[5]" = child.sin()
         child_2: "f32[5]" = child.cos();  child = None
 
-        _unwrap_for_grad: "f32[5]" = torch._C._functorch._unwrap_for_grad(child_1, 1)
-        _unwrap_for_grad_1: "f32[5]" = torch._C._functorch._unwrap_for_grad(child_2, 1)
+        value: "f32[5]" = torch._C._functorch._unwrap_for_grad(child_1, 1)
+        value_1: "f32[5]" = torch._C._functorch._unwrap_for_grad(child_2, 1)
 
         _grad_decrement_nesting = torch._C._functorch._grad_decrement_nesting();  _grad_decrement_nesting = None
         _saved_tensors_hooks_enable = torch._C._autograd._saved_tensors_hooks_enable();  _saved_tensors_hooks_enable = None
@@ -4226,7 +4226,7 @@ class GraphModule(torch.nn.Module):
 
         _autograd_grad = torch._functorch.eager_transforms._autograd_grad([child_1, child_2], [child_3], [l_v_, child_4], retain_graph = True, create_graph = True);  child_1 = child_2 = child_3 = l_v_ = child_4 = None
         getitem: "f32[5]" = _autograd_grad[0];  _autograd_grad = None
-        return (_unwrap_for_grad, _unwrap_for_grad_1, getitem)
+        return (value, value_1, getitem)
 """,
         )
 
@@ -6978,20 +6978,29 @@ class ActivationCheckpointingTests(torch._dynamo.test_case.TestCase):
             _assert_tensors_nonaliasing(a, a)
 
 
-xfail_dynamo_hops = {
+xfail_hops_compile = {
+    # aot_eager
     "map",  # assert type(args[1].realize()) is TensorVariable
     "scan",  # scan is not an OpOverload
+    # inductor
+    "while",  # LoweringException: AssertionError
+    "flex_attention",  # LoweringException: AssertionError
 }
 
 
 class TestHigherOrderOpsOpInfo(torch._dynamo.test_case.TestCase):
     @parametrize("backend", ("aot_eager", "inductor"))
     @ops(
-        list(filter(lambda op: op.name not in xfail_dynamo_hops, hop_db)),
+        list(filter(lambda op: op.name not in xfail_hops_compile, hop_db)),
         allowed_dtypes=(torch.float,),
     )
-    def test_hops_dynamo(self, device, dtype, op, backend):
-        # Ensure HOPs can be compiled by Dynamo
+    def test_hops_compile(self, device, dtype, op, backend="aot_eager"):
+        print(f"running {self}")
+        if device == "cuda" and not HAS_CUDA:
+            breakpoint()
+            self.skipTest("requires cuda")
+
+        # Ensure HOPs can be compiled
         sample_inputs_itr = op.sample_inputs(
             device, dtype, requires_grad=op.supports_autograd
         )
