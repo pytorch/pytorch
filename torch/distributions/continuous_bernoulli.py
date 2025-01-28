@@ -14,7 +14,7 @@ from torch.distributions.utils import (
     probs_to_logits,
 )
 from torch.nn.functional import binary_cross_entropy_with_logits
-from torch.types import Number, _Number, _size
+from torch.types import _Number, _size, Number
 
 
 __all__ = ["ContinuousBernoulli"]

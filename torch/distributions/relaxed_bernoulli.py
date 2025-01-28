@@ -14,7 +14,7 @@ from torch.distributions.utils import (
     logits_to_probs,
     probs_to_logits,
 )
-from torch.types import Number, _Number, _size
+from torch.types import _Number, _size, Number
 
 
 __all__ = ["LogitRelaxedBernoulli", "RelaxedBernoulli"]

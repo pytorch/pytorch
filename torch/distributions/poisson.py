@@ -6,7 +6,7 @@ from torch import Tensor
 from torch.distributions import constraints
 from torch.distributions.exp_family import ExponentialFamily
 from torch.distributions.utils import broadcast_all
-from torch.types import Number, _Number
+from torch.types import _Number, Number
 
 
 __all__ = ["Poisson"]

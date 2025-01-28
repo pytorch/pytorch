@@ -793,7 +793,7 @@ class AffineTransform(Transform):
     def sign(self) -> Union[Tensor, int]:  # type: ignore[override]
         if isinstance(self.scale, _Number):
             return 1 if float(self.scale) > 0 else -1 if float(self.scale) < 0 else 0
-        return self.scale.sign()  # type: ignore[union-attr]
+        return self.scale.sign()
 
     def _call(self, x):
         return self.loc + self.scale * x
@@ -807,7 +807,7 @@ class AffineTransform(Transform):
         if isinstance(scale, _Number):
             result = torch.full_like(x, math.log(abs(scale)))
         else:
-            result = scale.abs().log()  # type: ignore[union-attr]
+            result = scale.abs().log()
         if self.event_dim:
             result_size = result.size()[: -self.event_dim] + (-1,)
             result = result.view(result_size).sum(-1)
