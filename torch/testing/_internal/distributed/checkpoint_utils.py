@@ -88,9 +88,7 @@ class Rot13Example(StreamTransformExtension):
                     # It's possible self.input is an IO[bytes] with no readinto method.
                     # In that case, we emulate with a read and copy.  In practice,
                     # all of the current concrete extensions have readinto.
-                    # 0 as a flags value is janky, but the flag values aren't available
-                    # in python until 3.12.
-                    view = b.__buffer__(0)
+                    view = memoryview(b)
                     r = self.input.read(len(view))
                     if r is None:
                         count = None

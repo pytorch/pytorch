@@ -1133,29 +1133,6 @@ static PyObject* THPModule_allowBF16ReductionCuBLAS(
   Py_RETURN_FALSE;
 }
 
-static PyObject* THPModule_setAllowFP16AccumulationCuBLAS(
-    PyObject* _unused,
-    PyObject* arg) {
-  HANDLE_TH_ERRORS
-  TORCH_CHECK(
-      PyBool_Check(arg),
-      "set_allow_fp16_accumulation_cublas expects a bool, "
-      "but got ",
-      THPUtils_typename(arg));
-  at::globalContext().setAllowFP16AccumulationCuBLAS(arg == Py_True);
-  Py_RETURN_NONE;
-  END_HANDLE_TH_ERRORS
-}
-
-static PyObject* THPModule_allowFP16AccumulationCuBLAS(
-    PyObject* _unused,
-    PyObject* noargs) {
-  if (at::globalContext().allowFP16AccumulationCuBLAS()) {
-    Py_RETURN_TRUE;
-  }
-  Py_RETURN_FALSE;
-}
-
 static PyObject* THPModule_setAllowFP16ReductionCPU(
     PyObject* _unused,
     PyObject* arg) {
@@ -1597,14 +1574,6 @@ static std::initializer_list<PyMethodDef> TorchMethods = {
      THPModule_setAllowBF16ReductionCuBLAS,
      METH_O,
      nullptr},
-    {"_get_cublas_allow_fp16_accumulation",
-     THPModule_allowFP16AccumulationCuBLAS,
-     METH_NOARGS,
-     nullptr},
-    {"_set_cublas_allow_fp16_accumulation",
-     THPModule_setAllowFP16AccumulationCuBLAS,
-     METH_O,
-     nullptr},
     {"_get_cpu_allow_fp16_reduced_precision_reduction",
      THPModule_allowFP16ReductionCPU,
      METH_NOARGS,
@@ -1984,6 +1953,8 @@ Call this whenever a new thread is created in order to propagate values from
   ASSERT_TRUE(
       set_module_attr("has_openmp", at::hasOpenMP() ? Py_True : Py_False));
   ASSERT_TRUE(set_module_attr("has_mkl", at::hasMKL() ? Py_True : Py_False));
+  ASSERT_TRUE(
+      set_module_attr("_has_kleidiai", at::hasKleidiAI() ? Py_True : Py_False));
   ASSERT_TRUE(
       set_module_attr("has_lapack", at::hasLAPACK() ? Py_True : Py_False));
 

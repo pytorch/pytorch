@@ -3974,6 +3974,21 @@ utils_device.CURRENT_DEVICE == None""".split(
         x += 1
         self.assertEqual(1, get_x())
 
+    def test_input_cell_mutation(self):
+        def fn(x):
+            x = x.cos()
+
+            def inner():
+                return x.sin()
+
+            return inner()
+
+        x = torch.ones(10)
+        opt_fn = torch.compile(fn, fullgraph=True, backend="eager")
+        ref = fn(x)
+        res = opt_fn(x)
+        self.assertEqual(res, ref)
+
     def test_top_package_import(self):
         def fn(x):
             import torch.fx
@@ -7613,6 +7628,26 @@ utils_device.CURRENT_DEVICE == None""".split(
         torch._dynamo.mark_dynamic(y, 0)
         opt = torch.compile(fn, fullgraph=True)
         opt(*inputs)
+
+    @torch._dynamo.config.patch(capture_scalar_outputs=True)
+    @torch._dynamo.config.patch(assume_static_by_default=True)
+    def test_symint_copy_into_unbacked_slice(self):
+        @torch.compile()
+        def fn(a, x):
+            u0 = torch.tensor(x[0].to(torch.int64).item()).item()
+            B, H, T, D = a.shape
+            a_padding = torch.zeros((B, H, u0, D), dtype=torch.float64)
+            b = torch.cat([a, a_padding], dim=2)
+            c = torch.randn(B, H, 152, D)
+            b[:, :, :152, :] = c
+            return b
+
+        x = torch.tensor([0])
+        torch._dynamo.decorators.mark_unbacked(x, 0)
+        a = torch.zeros((1, 16, 152, 96))
+
+        # Previously would crash with guard on data dependent error
+        fn(a, x)
 
     @torch._dynamo.config.patch(capture_scalar_outputs=True)
     def test_symint_fold_nontrivial_product_modulo(self):
