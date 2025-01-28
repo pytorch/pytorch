@@ -8,7 +8,7 @@ import token
 from enum import Enum
 from functools import cached_property, total_ordering
 from pathlib import Path
-from typing import Any, Callable, Iterator, Sequence, TYPE_CHECKING
+from typing import Any, Callable, TYPE_CHECKING
 from typing_extensions import Self
 
 
@@ -21,6 +21,7 @@ else:
     import _linter
 
 if TYPE_CHECKING:
+    from collections.abc import Iterator, Sequence
     from tokenize import TokenInfo
 
 

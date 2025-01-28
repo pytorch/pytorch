@@ -12,7 +12,6 @@ import json
 import logging
 import os
 import pstats
-import random
 import subprocess
 import sys
 import threading
@@ -22,7 +21,7 @@ import typing
 import weakref
 from pathlib import Path
 from types import CellType, CodeType, FunctionType, ModuleType
-from typing import Any, Callable, Dict, List, Optional, Set, TypeVar, Union
+from typing import Any, Callable, Optional, TypeVar, Union
 from typing_extensions import ParamSpec
 from weakref import ReferenceType
 
@@ -158,8 +157,8 @@ class TODO_UNKNOWN:
 
 class Tracker:
     def __init__(self) -> None:
-        self.seen: List[ReferenceType[CodeType]] = []
-        self.seen_ids: Set[int] = set()
+        self.seen: list[ReferenceType[CodeType]] = []
+        self.seen_ids: set[int] = set()
 
     def add(self, strong_obj: CodeType) -> None:
         idx = id(strong_obj)
@@ -184,7 +183,7 @@ initial_global_state: Optional[GlobalStateGuard] = None
 
 @functools.wraps(original_forward_from_src)
 def fx_forward_from_src_skip_result(
-    src: str, globals: Dict[str, Any], co_fields: Optional[Dict[str, str]] = None
+    src: str, globals: dict[str, Any], co_fields: Optional[dict[str, str]] = None
 ) -> FunctionType:
     # we monkey patch FX to prevent infinite loop of trying to convert
     # our generated code
@@ -193,13 +192,14 @@ def fx_forward_from_src_skip_result(
     return result
 
 
+# TODO it is possible to move more global state preservation to eval_frame.py/c.
+# See how we preserve Python random state.
 def preserve_global_state(fn: Callable[_P, _T]) -> Callable[_P, _T]:
     """
     Context manager to:
         1) Save/restore torch.is_grad_enabled() state
-        2) Save/restore python random state
-        3) Save/restore torch random state
-        4) Monkey patch torch.fx.graph_module._forward_from_src
+        2) Save/restore torch random state
+        3) Monkey patch torch.fx.graph_module._forward_from_src
     """
 
     @functools.wraps(fn)
@@ -217,7 +217,6 @@ def preserve_global_state(fn: Callable[_P, _T]) -> Callable[_P, _T]:
             prior_mobile_allocator_state = (
                 torch._C._is_default_mobile_cpu_allocator_set()
             )
-            py_rng_state = random.getstate()
             prior_dtype = torch.get_default_dtype()
             torch_rng_state = torch.random.get_rng_state()
             cuda_rng_state = None
@@ -245,7 +244,6 @@ def preserve_global_state(fn: Callable[_P, _T]) -> Callable[_P, _T]:
                 torch.use_deterministic_algorithms(
                     prior_deterministic, warn_only=prior_warn_only
                 )
-                random.setstate(py_rng_state)
                 torch.random.set_rng_state(torch_rng_state)
                 torch.set_default_dtype(prior_dtype)
                 curr_mobile_allocator_state = (
@@ -284,7 +282,7 @@ def has_tensor_in_frame(frame: DynamoFrameType) -> bool:
             if np and config.trace_numpy and (obj is np or is_numpy(obj)):
                 return True
 
-    seen_ids: Dict[int, bool] = {}
+    seen_ids: dict[int, bool] = {}
 
     def has_tensor(obj: object) -> bool:
         """Recursively check if the obj has a tensor"""
@@ -462,7 +460,7 @@ class ConvertFrameAssert:
         frame: DynamoFrameType,
         cache_entry: Optional[CacheEntry],
         hooks: Hooks,
-        frame_state: Dict[str, Union[int, FrameStateSizeEntry]],
+        frame_state: dict[str, Union[int, FrameStateSizeEntry]],
         *,
         skip: int = 0,
     ) -> Optional[GuardedCode]:
@@ -601,7 +599,7 @@ if typing.TYPE_CHECKING:
     from .output_graph import OutputGraph
 
 # we have to use `OrderedDict` to make `RemovableHandle` work.
-_bytecode_hooks: Dict[int, BytecodeHook] = OrderedDict()
+_bytecode_hooks: dict[int, BytecodeHook] = OrderedDict()
 
 
 def register_bytecode_hook(hook: BytecodeHook) -> RemovableHandle:
@@ -616,9 +614,9 @@ def register_bytecode_hook(hook: BytecodeHook) -> RemovableHandle:
 
 def _compile(
     code: CodeType,
-    globals: Dict[str, object],
-    locals: Dict[str, object],
-    builtins: Dict[str, object],
+    globals: dict[str, object],
+    locals: dict[str, object],
+    builtins: dict[str, object],
     closure: tuple[CellType],
     compiler_fn: CompilerFn,
     one_graph: bool,
@@ -628,7 +626,7 @@ def _compile(
     cache_entry: Optional[CacheEntry],
     cache_size: CacheSizeRelevantForFrame,
     frame: Optional[DynamoFrameType] = None,
-    frame_state: Optional[Dict[str, Union[int, FrameStateSizeEntry]]] = None,
+    frame_state: Optional[dict[str, Union[int, FrameStateSizeEntry]]] = None,
     *,
     compile_id: CompileId,
     skip: int = 0,
@@ -646,13 +644,13 @@ def _compile(
     output: Optional[OutputGraph] = None
     tracer: Optional[InstructionTranslator] = None
 
-    tf_mode_stack: List[
+    tf_mode_stack: list[
         torch.overrides.TorchFunctionMode
     ] = torch.overrides._get_current_function_mode_stack()
 
     @preserve_global_state
     def transform(
-        instructions: List[Instruction], code_options: Dict[str, object]
+        instructions: list[Instruction], code_options: dict[str, object]
     ) -> None:
         nonlocal output
         nonlocal tracer
@@ -703,11 +701,12 @@ def _compile(
         check_inst_exn_tab_entries_valid(instructions)
         instructions[:] = remove_pointless_jumps(remove_dead_code(instructions))
 
+    @compile_time_strobelight_meta(phase_name="compile_inner")
     def compile_inner(
         code: CodeType,
         one_graph: bool,
         hooks: Hooks,
-        transform: Callable[[List[Instruction], Dict[str, Any]], Any],
+        transform: Callable[[list[Instruction], dict[str, Any]], Any],
     ) -> Optional[GuardedCode]:
         with contextlib.ExitStack() as stack:
             stack.enter_context(
@@ -726,13 +725,12 @@ def _compile(
 
         return None  # dead, but see https://github.com/python/mypy/issues/7577
 
-    @compile_time_strobelight_meta(phase_name="compile_inner")
     @maybe_cprofile
     def _compile_inner(
         code: CodeType,
         one_graph: bool,
         hooks: Hooks,
-        transform: Callable[[List[Instruction], Dict[str, Any]], Any],
+        transform: Callable[[list[Instruction], dict[str, Any]], Any],
     ) -> Optional[GuardedCode]:
         nonlocal dynamo_time_before_restart
         last_attempt_start_time = start_time = time.time()
@@ -1088,7 +1086,7 @@ def _compile(
                 # If compilation failed, the entire time is wasted
                 dynamo_time_before_restart = (time.time_ns() - start_time_ns) / 1e9
 
-            def clean_for_json(d: Dict[str, Any]) -> Dict[str, Any]:
+            def clean_for_json(d: dict[str, Any]) -> dict[str, Any]:
                 blocklist = {
                     "TYPE_CHECKING",
                     "log_file_name",
@@ -1170,7 +1168,7 @@ class ConvertFrame:
         frame: DynamoFrameType,
         cache_entry: Optional[CacheEntry],
         hooks: Hooks,
-        frame_state: Dict[str, Union[int, FrameStateSizeEntry]],
+        frame_state: dict[str, Union[int, FrameStateSizeEntry]],
         skip: int = 0,
     ) -> Optional[
         Union[
@@ -1316,7 +1314,7 @@ class ConvertFrameProtocol(typing.Protocol):
         frame: DynamoFrameType,
         cache_entry: Optional[CacheEntry],
         hooks: Hooks,
-        frame_state: Dict[str, Union[int, FrameStateSizeEntry]],
+        frame_state: dict[str, Union[int, FrameStateSizeEntry]],
         *,
         skip: int = 0,
     ) -> Optional[GuardedCode]:
@@ -1333,7 +1331,7 @@ class CatchErrorsWrapper:
         self,
         frame: DynamoFrameType,
         cache_entry: Optional[CacheEntry],
-        frame_state: Dict[str, Union[int, FrameStateSizeEntry]],
+        frame_state: dict[str, Union[int, FrameStateSizeEntry]],
     ) -> Optional[GuardedCode]:
         assert frame_state is not None
 

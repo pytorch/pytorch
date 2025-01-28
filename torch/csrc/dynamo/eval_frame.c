@@ -9,12 +9,17 @@
 #include <torch/csrc/dynamo/debug_macros.h>
 #include <torch/csrc/dynamo/extra_state.h>
 #include <torch/csrc/dynamo/framelocals_mapping.h>
+#include <torch/csrc/dynamo/utils.h>
 #include <torch/csrc/utils/python_compat.h>
 
 PyObject* guard_error_hook = NULL;
 const char* cache_lookup_profiler_str = "TorchDynamo Cache Lookup";
 
-static int active_dynamo_threads = 0;
+typedef struct {
+  int active_dynamo_threads;
+} ModuleState;
+
+// static int active_dynamo_threads = 0;
 
 static Py_tss_t eval_frame_callback_key = Py_tss_NEEDS_INIT;
 
@@ -291,6 +296,7 @@ static PyObject* dynamo_call_callback(
   PyObject* cache_entry_pyobj = CacheEntry_to_obj(cache_entry);
   PyObject* res = PyObject_CallFunction(
       callable, "OOO", frame, cache_entry_pyobj, frame_state);
+
   Py_DECREF(frame);
   Py_DECREF(cache_entry_pyobj);
   return res;
@@ -533,6 +539,17 @@ static PyObject* dynamo_eval_custom_code(
   return result;
 }
 
+static PyObject* random_state = NULL;
+
+static void save_random_state() {
+  Py_XSETREF(random_state, random_getstate(random_module()));
+}
+
+static void restore_random_state() {
+  DEBUG_NULL_CHECK(random_state);
+  random_setstate(random_module(), random_state);
+}
+
 static PyObject* dynamo__custom_eval_frame_shim(
     PyThreadState* tstate,
     THP_EVAL_API_FRAME_OBJECT* frame,
@@ -641,6 +658,11 @@ static PyObject* dynamo__custom_eval_frame(
   // in the shim.
   eval_frame_callback_set(Py_None);
 
+  // Preserve random state - restore before calling
+  // dynamo_eval_[frame_default]/[custom_code]!
+  // lookup or call_callback may burn RNG.
+  save_random_state();
+
   // A callback of Py_False indicates "run only" mode, the cache is checked, but
   // we never compile.
   // Also, if extra is marked as "cache_limit_hit", run in "run only" mode
@@ -681,6 +703,7 @@ static PyObject* dynamo__custom_eval_frame(
         DEBUG_TRACE("skip recursive %s", get_frame_name(frame));
         eval_frame_callback_set(Py_None);
       }
+      restore_random_state();
       PyObject* ret = dynamo_eval_frame_default(tstate, frame, throw_flag);
       if (extra_state_cache_limit_hit(extra)) {
         eval_frame_callback_set(callback);
@@ -693,6 +716,7 @@ static PyObject* dynamo__custom_eval_frame(
     // Re-enable custom behavior
     eval_frame_callback_set(callback);
     *should_clear_frame = 1;
+    restore_random_state();
     return dynamo_eval_custom_code(
         tstate, frame, cached_code, trace_annotation, throw_flag);
   }
@@ -725,6 +749,7 @@ static PyObject* dynamo__custom_eval_frame(
     eval_frame_callback_set(callback);
     *should_clear_frame = 1;
     framelocals_mapping_free(locals);
+    restore_random_state();
     return dynamo_eval_custom_code(
         tstate, frame, cached_code, trace_annotation, throw_flag);
   }
@@ -758,6 +783,7 @@ static PyObject* dynamo__custom_eval_frame(
     // code.
     DEBUG_TRACE("create skip recursive %s", get_frame_name(frame));
     set_extra_state(F_CODE(frame), SKIP_CODE_RECURSIVE);
+    restore_random_state();
     PyObject* r = dynamo_eval_frame_default(tstate, frame, throw_flag);
     // Re-enable custom behavior
     eval_frame_callback_set(callback);
@@ -766,6 +792,7 @@ static PyObject* dynamo__custom_eval_frame(
     // Dynamo returned cache_limit_hit_flag, so we should recursively skip code.
     DEBUG_TRACE("create cache limit hit %s", get_frame_name(frame));
     set_extra_state_cache_limit_hit(extra, true);
+    restore_random_state();
     PyObject* r = dynamo_eval_frame_default(tstate, frame, throw_flag);
     // Re-enable custom behavior
     eval_frame_callback_set(callback);
@@ -787,6 +814,7 @@ static PyObject* dynamo__custom_eval_frame(
     // Re-enable custom behavior
     eval_frame_callback_set(callback);
     *should_clear_frame = 1;
+    restore_random_state();
     return dynamo_eval_custom_code(
         tstate,
         frame,
@@ -799,6 +827,7 @@ static PyObject* dynamo__custom_eval_frame(
     set_extra_state(F_CODE(frame), SKIP_CODE);
     // Re-enable custom behavior
     eval_frame_callback_set(callback);
+    restore_random_state();
     return dynamo_eval_frame_default(tstate, frame, throw_flag);
   }
 }
@@ -827,25 +856,42 @@ static PyTypeObject THPPyInterpreterFrameType = {
 
 #endif // !(IS_PYTHON_3_14_PLUS)
 
-static PyObject* increment_working_threads(PyThreadState* tstate) {
-  active_dynamo_threads = active_dynamo_threads + 1;
-  if (active_dynamo_threads > 0) {
-    enable_eval_frame_shim(tstate);
-  }
-  Py_RETURN_NONE;
-}
+static PyObject* increment_working_threads(
+    PyThreadState* tstate,
+    PyObject* module) {
+  ModuleState* state = PyModule_GetState(module);
 
-static PyObject* decrement_working_threads(PyThreadState* tstate) {
-  if (active_dynamo_threads > 0) {
-    active_dynamo_threads = active_dynamo_threads - 1;
-    if (active_dynamo_threads == 0) {
-      enable_eval_frame_default(tstate);
+  if (state != NULL) {
+    state->active_dynamo_threads = state->active_dynamo_threads + 1;
+    if (state->active_dynamo_threads > 0) {
+      enable_eval_frame_shim(tstate);
     }
   }
+
   Py_RETURN_NONE;
 }
 
-static PyObject* set_eval_frame(PyObject* new_callback, PyThreadState* tstate) {
+static PyObject* decrement_working_threads(
+    PyThreadState* tstate,
+    PyObject* module) {
+  ModuleState* state = PyModule_GetState(module);
+
+  if (state != NULL) {
+    if (state->active_dynamo_threads > 0) {
+      state->active_dynamo_threads = state->active_dynamo_threads - 1;
+      if (state->active_dynamo_threads == 0) {
+        enable_eval_frame_default(tstate);
+      }
+    }
+  }
+
+  Py_RETURN_NONE;
+}
+
+static PyObject* set_eval_frame(
+    PyObject* new_callback,
+    PyThreadState* tstate,
+    PyObject* module) {
   // Change the eval frame callback and return the old one
   //  - None: disables TorchDynamo
   //  - False: run-only mode (reuse existing compiles)
@@ -856,9 +902,9 @@ static PyObject* set_eval_frame(PyObject* new_callback, PyThreadState* tstate) {
   Py_INCREF(old_callback);
 
   if (old_callback != Py_None && new_callback == Py_None) {
-    decrement_working_threads(tstate);
+    decrement_working_threads(tstate, module);
   } else if (old_callback == Py_None && new_callback != Py_None) {
-    increment_working_threads(tstate);
+    increment_working_threads(tstate, module);
   }
 
   Py_INCREF(new_callback);
@@ -871,7 +917,7 @@ static PyObject* set_eval_frame(PyObject* new_callback, PyThreadState* tstate) {
   return old_callback;
 }
 
-static PyObject* set_eval_frame_py(PyObject* dummy, PyObject* callback) {
+static PyObject* set_eval_frame_py(PyObject* module, PyObject* callback) {
   if (callback != Py_None && callback != Py_False &&
       !PyCallable_Check(callback)) {
     DEBUG_TRACE0("arg error");
@@ -882,7 +928,7 @@ static PyObject* set_eval_frame_py(PyObject* dummy, PyObject* callback) {
       "python enabled=%d and is run_only=%d",
       callback != Py_None,
       callback == Py_False);
-  return set_eval_frame(callback, PyThreadState_GET());
+  return set_eval_frame(callback, PyThreadState_GET(), module);
 }
 
 static PyObject* set_skip_guard_eval_unsafe(
@@ -968,6 +1014,15 @@ static PyObject* raise_sigtrap(PyObject* dummy, PyObject* obj) {
   Py_RETURN_NONE;
 }
 
+static int clear_state(PyObject* module) {
+  ModuleState* state = PyModule_GetState(module);
+  if (state) {
+    state->active_dynamo_threads = 0;
+    return 0;
+  }
+  return -1;
+}
+
 static PyMethodDef _methods[] = {
     {"set_eval_frame", set_eval_frame_py, METH_O, NULL},
     {"set_skip_guard_eval_unsafe", set_skip_guard_eval_unsafe, METH_O, NULL},
@@ -981,10 +1036,11 @@ static PyMethodDef _methods[] = {
 
 static struct PyModuleDef _module = {
     PyModuleDef_HEAD_INIT,
-    "torch._C._dynamo.eval_frame",
-    "Module containing hooks to override eval_frame",
-    -1,
-    _methods};
+    .m_name = "torch._C._dynamo.eval_frame",
+    .m_doc = "Module containing hooks to override eval_frame",
+    .m_size = sizeof(ModuleState),
+    .m_methods = _methods,
+    .m_clear = clear_state};
 
 #if IS_PYTHON_3_12_PLUS
 #define _PyEval_RequestCodeExtraIndex PyUnstable_Eval_RequestCodeExtraIndex
