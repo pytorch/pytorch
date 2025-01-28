@@ -1093,13 +1093,13 @@ class TestTensorCreation(TestCase):
         if dtype == torch.bool:
             refs = (True, True, True)
         elif IS_ARM64:
-            refs = (torch.iinfo(dtype).min, torch.iinfo(dtype).max, 0 )
+            refs = (torch.iinfo(dtype).min, torch.iinfo(dtype).max, 0)
             if dtype in (torch.int8, torch.int16):
                 refs = (0, -1, 0)
         else:
             refs = (0, 0, 0)
             if dtype in (torch.int32, torch.int64):
-                refs = ( torch.iinfo(dtype).min, ) * 3
+                refs = (torch.iinfo(dtype).min, ) * 3
         self._float_to_int_conversion_helper(vals, device, dtype, refs)
 
     @onlyNativeDeviceTypes
