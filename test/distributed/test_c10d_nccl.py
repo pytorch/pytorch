@@ -3137,8 +3137,7 @@ class NcclUserBufferRegistrationTest(MultiProcessTestCase):
         backend = pg._get_backend(torch.device(device))
 
         # Use NCCL memory allocator
-        allocator = c10d.nccl_mem_allocator
-        pool = torch.cuda.MemPool(allocator)
+        pool = torch.cuda.MemPool(backend.mem_allocator)
 
         # allocate memory with ncclMemAlloc
         with torch.cuda.use_mem_pool(pool):

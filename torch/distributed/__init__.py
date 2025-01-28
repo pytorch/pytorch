@@ -53,7 +53,6 @@ if is_available():
         get_debug_level,
         GradBucket,
         Logger,
-        nccl_mem_allocator,
         PrefixStore,
         ProcessGroup as ProcessGroup,
         Reducer,
