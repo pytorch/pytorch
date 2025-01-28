@@ -154,13 +154,13 @@ jobs:
       test-matrix: ${{ needs.win-vs2019-cpu-py3-build.outputs.test-matrix }}
     secrets: inherit
 
-  win-vs2019-cuda12_1-py3-build:
-    name: win-vs2019-cuda12.1-py3
+  win-vs2019-cuda12_4-py3-build:
+    name: win-vs2019-cuda12.4-py3
     uses: ./.github/workflows/_win-build.yml
     needs: get-label-type
     with:
-      build-environment: win-vs2019-cuda12.1-py3
-      cuda-version: "12.1"
+      build-environment: win-vs2019-cuda12.4-py3
+      cuda-version: "12.4"
       runner: "${{ needs.get-label-type.outputs.label-type }}windows.4xlarge.nonephemeral"
     secrets: inherit
 

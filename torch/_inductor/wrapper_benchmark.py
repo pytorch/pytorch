@@ -195,6 +195,9 @@ def parse_profile_event_list(
         add_event(ev, category)
 
     def report_category(category, profile_events):
+        if not device_name:
+            return 0.0
+
         from tabulate import tabulate
 
         profile_events.sort(key=lambda ev: ev.self_device_time_ms, reverse=True)
@@ -243,9 +246,13 @@ def parse_profile_event_list(
                 total_device_ms += _time
 
         device_busy_percent = f"{total_device_ms / wall_time_ms * 100:.2f}%"
-        print(
-            f"\nPercent of time when {device_name.upper()} is busy: {device_busy_percent}"
-        )
+        if device_name:
+            print(
+                f"\nPercent of time when {device_name.upper()} is busy: {device_busy_percent}"
+            )
+        else:
+            print("No device detected")
+
         print(f"Total wall time {wall_time_ms:.3f} ms")
 
         # output such a line so we can gather such line from all compiled modules from all
