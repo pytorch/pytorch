@@ -169,8 +169,6 @@ class DynamoExporterTest(common_utils.TestCase):
         onnx_program = self.export(VisionModel(), args)
         onnx_testing.assert_onnx_program(onnx_program)
 
-    # TODO(justinchuby): Test multi-output HOPs
-
     def test_empty(self):
         def func(x):
             return torch.empty(x.size(), dtype=torch.int64)
