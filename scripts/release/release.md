@@ -207,14 +207,8 @@ The CUTLASS and CK backend adds kernel choices for GEMM autotuning in Inductor. 
 ### Inductor
 
 
-* Turn on TORCHINDUCTOR_REORDER_FOR_PEAK_MEMORY and remove config ([#137205](https://github.com/pytorch/pytorch/pull/137205))
+* Turn on TORCHINDUCTOR_REORDER_FOR_PEAK_MEMORY and remove config ([#137205](https://github.com/pytorch/pytorch/pull/137205)). `reorder_for_peak_memory` is now enabled by default.  If old behavior is desired, edit `reorder_for_peak_memory` in `torch._inductor/config.py`.
 
-    `reorder_for_peak_memory` is now enabled by default. If old behavior is desired, edit `reorder_for_peak_memory` in `torch._inductor/config.py`.
-
-* Remove option for fork-based compile pool ([#142001](https://github.com/pytorch/pytorch/pull/142001)). `worker_start_method` is no longer a valid config.
-* Move stack allocation related configs in AOTI ([#139093](https://github.com/pytorch/pytorch/pull/139093)). 
-
-    All configs now have a aot_inductor prefix, so `config.use_minimal_arrayref_interface` is now `config.aot_inductor.use_minimal_arrayref_interface` and `config.allow_stack_allocation` is now `config.aot_inductor.allow_stack_allocation`.
 
 ### Releng
 
@@ -232,7 +226,7 @@ The CUTLASS and CK backend adds kernel choices for GEMM autotuning in Inductor. 
 
 
 * Deprecate TORCHINDUCTOR_STACK_ALLOCATION ([#139147](https://github.com/pytorch/pytorch/pull/139147)). Instead of setting TORCHINDUCTOR_STACK_ALLOCATION, edit `allow_stack_allocation` in `torch/_inductor/config.py`.
-
+* Remove option for fork-based compile pool ([#142001](https://github.com/pytorch/pytorch/pull/142001)).
 
 ### Releng
 
@@ -319,7 +313,7 @@ The CUTLASS and CK backend adds kernel choices for GEMM autotuning in Inductor. 
 
 ### Inductor
 
-
+* Move stack allocation related configs in AOTI ([#139093](https://github.com/pytorch/pytorch/pull/139093)). All configs now have a aot_inductor prefix, so `config.use_minimal_arrayref_interface` is now `config.aot_inductor.use_minimal_arrayref_interface` and `config.allow_stack_allocation` is now `config.aot_inductor.allow_stack_allocation`.
 * Move `torch._utils.is_compiling` to `torch.compiler.is_compiling` ([#127690](https://github.com/pytorch/pytorch/pull/127690)) Rewrite `torch._utils.is_compiling()` to `torch.compiler.is_compiling()`.
 * Added option `​​autotune_num_choices_displayed` to control number of kernel options displayed ([#138788](https://github.com/pytorch/pytorch/pull/138788))
 * Added option `force_pointwise_cat` concat support through inductor using pointwise kernels ([#141966](https://github.com/pytorch/pytorch/pull/141966)). This forces concat to be generated as a pointwise op with masked loads.
