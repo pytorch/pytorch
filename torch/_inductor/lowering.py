@@ -4875,7 +4875,7 @@ fallback_fractional_max_pool2d = fallback_handler(
 )
 
 
-def _fractional_pooling_offsets(samples, in_sz, out_sz, kernel_sz, dim):
+def _fractional_pooling_offsets(samples, in_sz, out_sz, kernel_sz, dim, ndims):
     out_sz = out_sz[dim]
     in_sz = in_sz[dim]
     kernel_sz = kernel_sz[dim]
@@ -4883,10 +4883,10 @@ def _fractional_pooling_offsets(samples, in_sz, out_sz, kernel_sz, dim):
     samples_loader = samples.make_loader()
 
     def load(prefix, i):
-        sample = samples_loader([*prefix, dim])
+        sample = samples_loader([*prefix, ndims - 1 - dim])
         i_expr = ops.index_expr(i, samples.get_dtype())
         alpha_expr = ops.index_expr(alpha, samples.get_dtype())
-        seq_i = ops.floor((i_expr + sample) * alpha_expr) - ops.floor(
+        seq_i = ops.trunc((i_expr + sample) * alpha_expr) - ops.trunc(
             sample * alpha_expr
         )
         seq_i = ops.to_dtype(seq_i, torch.int64)
@@ -4918,6 +4918,7 @@ def fractional_max_pool2d(x, kernel_size, output_size, random_samples):
         in_sz=[inp_h, inp_w],
         out_sz=output_size,
         kernel_sz=kernel_size,
+        ndims=2,
     )
 
     h_index_fn = gen_offsets_for_dim(dim=0)
