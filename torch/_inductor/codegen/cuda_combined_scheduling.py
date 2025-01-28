@@ -1,8 +1,7 @@
 # mypy: allow-untyped-defs
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional, Tuple, TYPE_CHECKING, Union
-
+from typing import Any, List, Optional, Tuple, TYPE_CHECKING, Union
 
 from ..scheduler import (
     BaseSchedulerNode,
@@ -11,7 +10,6 @@ from ..scheduler import (
     Scheduler,
     SchedulerNode,
 )
-from .common import BackendFeature
 from .cuda.cuda_cpp_scheduling import CUDACPPScheduling
 from .rocm.rocm_cpp_scheduling import ROCmCPPScheduling
 from .triton import TritonScheduling
