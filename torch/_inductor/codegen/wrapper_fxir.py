@@ -1,8 +1,9 @@
+import dataclasses
 import operator
 import random
 import textwrap
 import types
-from pyting import Callable
+from typing import Callable
 
 from triton.runtime.jit import JITFunction
 
@@ -11,9 +12,15 @@ from torch._subclasses.fake_tensor import FakeTensorMode
 
 from .. import config, ir
 from torch._inductor.runtime.triton_heuristics import grid
+from .common import (
+    IndentedBuffer,
+)
 from .wrapper import (
     PythonWrapperCodegen,
     Line,
+    BufferLike,
+    MemoryPlanningLine,
+    MemoryPlanningState,
     AllocateLine,
     FreeIfNotReusedLine,
     ReuseLine,
@@ -38,8 +45,8 @@ class WrapperIRLine(MemoryPlanningLine):
     Base class for Wrapper IR nodes that do not participate in memory planning.
     Records the call args of the underlying codegen function.
     """
-    args: Tuple
-    kwargs: Dict
+    args: tuple
+    kwargs: dict
     def plan(self, state: MemoryPlanningState) -> MemoryPlanningLine:
         pass
 
@@ -58,7 +65,7 @@ class WrapperFxCodegen(PythonWrapperCodegen):
     def __init__(self):
         super().__init__()
         self.graph = torch.fx.Graph() # Wrapper FX IR.
-        self.buffer_to_node: Dict[MemoryPlanningLine, torch.fx.Node] = {} # Symbol table for codegen.
+        self.buffer_to_node: dict[MemoryPlanningLine, torch.fx.Node] = {} # Symbol table for codegen.
         kernels = {} # Table to store Triton kernels.
 
     @staticmethod
@@ -227,7 +234,7 @@ class WrapperFxCodegen(PythonWrapperCodegen):
             )
 
         # Distributed is not always avaliable. Only import it if used.
-        from torch._C._distributed_c10d import _SymmetricMemory import empty_strided_p2p
+        from torch._C._distributed_c10d._SymmetricMemory import empty_strided_p2p
         alloc_id = random.randint(0, 2**64 - 1)
         node = self.graph.call_function(
                 empty_strided_p2p,
@@ -260,7 +267,7 @@ class WrapperFxCodegen(PythonWrapperCodegen):
         """
         self.writeline(KernelCallLine(self, args, kwargs))
 
-    def _generate_kernel_call_line(self, line: Line):
+    def _generate_kernel_call(self, line: Line):
         assert isinstance(line, KernelCallLine)
         if not line.kwargs["triton"]:
             raise NotImplementedError("FX conversion only supports Triton kernels.")
