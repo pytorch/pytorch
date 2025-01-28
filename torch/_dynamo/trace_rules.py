@@ -29,7 +29,6 @@ import traceback
 import types
 import typing
 import unittest
-import weakref
 from collections import defaultdict
 from pathlib import Path
 from typing import Any, Callable, cast, Optional, Union
@@ -3180,7 +3179,6 @@ BUILTIN_SKIPLIST = (
     types,
     typing,
     unittest,
-    weakref,
     _collections_abc,
     _weakrefset,
 )
