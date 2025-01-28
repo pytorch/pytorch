@@ -10,12 +10,14 @@ if __name__ == "__main__":
     # commit = "0891fae132f2dd883f076a7819871e18fa3266a6"
     # commit = "876b7d711f38bf9f2efcb6a57a58ffd396e5ad57"
     # commit = "7522995460f46f2326dc65958d49cdab0229e79a"
-    commit = "e06153de75e785491eb1fe9973d68f8b719ed65d"
-    eager313, aot_eager313, subclasses313 = download_reports(
-        commit, ("eager313", "aot_eager313", "subclasses313")
+    # commit = "e06153de75e785491eb1fe9973d68f8b719ed65d"
+    # 2025
+    commit = "1d05890c3ef1d8036a833869291d5e53498049f8"
+    eager313, dw313, aot_eager313, subclasses313 = download_reports(
+        commit, ("eager313", "dynamo_wrapped313", "aot_eager313", "subclasses313")
     )
     print("compute pass rate py3.11 aot_eager vs subclasses")
-    compute_pass_rate_aot_eager_subclasses(eager313, aot_eager313, subclasses313)
+    compute_pass_rate_aot_eager_subclasses(eager313, dw313, aot_eager313, subclasses313)
 
     # aot_eager39, subclasses39 = download_reports(
     #     commit, ("aot_eager39", "subclasses39")

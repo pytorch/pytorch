@@ -21,23 +21,11 @@ jobs:
       curr_branch: ${{ github.head_ref || github.ref_name }}
       curr_ref_type: ${{ github.ref_type }}
 
-  get-a100-test-label-type:
-    if: github.repository_owner == 'pytorch'
-    name: get-a100-test-label-type
-    uses: pytorch/pytorch/.github/workflows/_runner-determinator.yml@main
-    with:
-      triggering_actor: ${{ github.triggering_actor }}
-      issue_owner: ${{ github.event.pull_request.user.login || github.event.issue.user.login }}
-      curr_branch: ${{ github.head_ref || github.ref_name }}
-      curr_ref_type: ${{ github.ref_type }}
-      check_experiments: "awsa100"
-
   linux-focal-cuda12_1-py3_10-gcc9-torchbench-build-gcp:
     name: cuda12.1-py3.10-gcc9-sm80
     uses: ./.github/workflows/_linux-build.yml
     needs:
       - get-default-label-prefix
-      - get-a100-test-label-type
     with:
       runner_prefix: "${{ needs.get-default-label-prefix.outputs.label-type }}"
       build-environment: linux-focal-cuda12.1-py3.10-gcc9-sm80
@@ -45,7 +33,7 @@ jobs:
       cuda-arch-list: '8.0'
       test-matrix: |
         { include: [
-          { config: "torchbench_gcp_smoketest", shard: 1, num_shards: 1, runner: "${{ needs.get-a100-test-label-type.outputs.label-type }}linux.gcp.a100" },
+          { config: "torchbench_gcp_smoketest", shard: 1, num_shards: 1, runner: "linux.aws.a100" },
         ]}
     secrets: inherit
 
@@ -57,5 +45,4 @@ jobs:
       build-environment: linux-focal-cuda12.1-py3.10-gcc9-sm80
       docker-image: ${{ needs.linux-focal-cuda12_1-py3_10-gcc9-torchbench-build-gcp.outputs.docker-image }}
       test-matrix: ${{ needs.linux-focal-cuda12_1-py3_10-gcc9-torchbench-build-gcp.outputs.test-matrix }}
-      use-gha: anything-non-empty-to-use-gha
     secrets: inherit

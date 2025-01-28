@@ -49,6 +49,7 @@ register_log(
         *DYNAMIC,
         "torch._export.converter",
         "torch._export.non_strict_utils",
+        "torch._export.serde.serialize",
     ],
 )
 register_log(

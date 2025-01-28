@@ -320,12 +320,16 @@ def compute_pass_rate_tcs(control_tcs, test_tcs):
 
 
 
-def compute_pass_rate_aot_eager_subclasses(e_dir, ae_dir, sc_dir):
+def compute_pass_rate_aot_eager_subclasses(e_dir, dw_dir, ae_dir, sc_dir):
     print("parsing xmls")
     print(f"-- PARSE EAGER XMLS {e_dir}")
     e_xmls = open_test_results(e_dir)
     tcs_e = parse_xmls(e_xmls)
     
+    print(f"-- PARSE DYNAMO_WRAPPED XMLS {dw_dir}")
+    dw_xmls = open_test_results(dw_dir)
+    tcs_dw = parse_xmls(dw_xmls)
+
     print(f"-- PARSE AOT_EAGER XMLS {ae_dir}")
     ae_xmls = open_test_results(ae_dir)
     tcs_ae = parse_xmls(ae_xmls)

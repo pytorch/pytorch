@@ -6,6 +6,8 @@ import subprocess
 
 import requests
 
+WITH_LF = False
+LF = "lf." if WITH_LF else ""
 
 CONFIGS = {
     "dynamo39": {
@@ -14,14 +16,14 @@ CONFIGS = {
         "linux-focal-py3.9-clang10 / test (dynamo_wrapped, 3, 3, linux.2xlarge)",
     },
     "aot_eager39": {
-        "linux-focal-py3.9-clang10 / test (aot_eager_wrapped, 1, 3, lf.linux.12xlarge)",
-        "linux-focal-py3.9-clang10 / test (aot_eager_wrapped, 2, 3, lf.linux.12xlarge)",
-        "linux-focal-py3.9-clang10 / test (aot_eager_wrapped, 3, 3, lf.linux.12xlarge)",
+        f"linux-focal-py3.9-clang10 / test (aot_eager_wrapped, 1, 3, {LF}linux.12xlarge)",
+        f"linux-focal-py3.9-clang10 / test (aot_eager_wrapped, 2, 3, {LF}linux.12xlarge)",
+        f"linux-focal-py3.9-clang10 / test (aot_eager_wrapped, 3, 3, {LF}linux.12xlarge)",
     },
     "subclasses39": {
-        "linux-focal-py3.9-clang10 / test (subclasses_wrapped, 1, 3, lf.linux.12xlarge)",
-        "linux-focal-py3.9-clang10 / test (subclasses_wrapped, 2, 3, lf.linux.12xlarge)",
-        "linux-focal-py3.9-clang10 / test (subclasses_wrapped, 3, 3, lf.linux.12xlarge)",
+        f"linux-focal-py3.9-clang10 / test (subclasses_wrapped, 1, 3, {LF}linux.12xlarge)",
+        f"linux-focal-py3.9-clang10 / test (subclasses_wrapped, 2, 3, {LF}linux.12xlarge)",
+        f"linux-focal-py3.9-clang10 / test (subclasses_wrapped, 3, 3, {LF}linux.12xlarge)",
     },
     "dynamo311": {
         "linux-focal-py3.11-clang10 / test (dynamo_wrapped, 1, 3, linux.2xlarge)",
@@ -29,21 +31,26 @@ CONFIGS = {
         "linux-focal-py3.11-clang10 / test (dynamo_wrapped, 3, 3, linux.2xlarge)",
     },
     "eager313": {
-        "linux-focal-py3.13-clang10 / test (default, 1, 5, lf.linux.4xlarge)",
-        "linux-focal-py3.13-clang10 / test (default, 2, 5, lf.linux.4xlarge)",
-        "linux-focal-py3.13-clang10 / test (default, 3, 5, lf.linux.4xlarge)",
-        "linux-focal-py3.13-clang10 / test (default, 4, 5, lf.linux.4xlarge)",
-        "linux-focal-py3.13-clang10 / test (default, 5, 5, lf.linux.4xlarge)",
+        f"linux-focal-py3.13-clang10 / test (default, 1, 5, {LF}linux.4xlarge)",
+        f"linux-focal-py3.13-clang10 / test (default, 2, 5, {LF}linux.4xlarge)",
+        f"linux-focal-py3.13-clang10 / test (default, 3, 5, {LF}linux.4xlarge)",
+        f"linux-focal-py3.13-clang10 / test (default, 4, 5, {LF}linux.4xlarge)",
+        f"linux-focal-py3.13-clang10 / test (default, 5, 5, {LF}linux.4xlarge)",
+    },
+    "dynamo_wrapped313": {
+        "linux-focal-py3.13-clang10 / test (dynamo_wrapped, 1, 3, linux.2xlarge)",
+        "linux-focal-py3.13-clang10 / test (dynamo_wrapped, 2, 3, linux.2xlarge)",
+        "linux-focal-py3.13-clang10 / test (dynamo_wrapped, 3, 3, linux.2xlarge)",
     },
     "aot_eager313": {
-        "linux-focal-py3.13-clang10 / test (aot_eager_wrapped, 1, 3, lf.linux.12xlarge)",
-        "linux-focal-py3.13-clang10 / test (aot_eager_wrapped, 2, 3, lf.linux.12xlarge)",
-        "linux-focal-py3.13-clang10 / test (aot_eager_wrapped, 3, 3, lf.linux.12xlarge)",
+        f"linux-focal-py3.13-clang10 / test (aot_eager_wrapped, 1, 3, {LF}linux.12xlarge)",
+        f"linux-focal-py3.13-clang10 / test (aot_eager_wrapped, 2, 3, {LF}linux.12xlarge)",
+        f"linux-focal-py3.13-clang10 / test (aot_eager_wrapped, 3, 3, {LF}linux.12xlarge)",
     },
     "subclasses313": {
-        "linux-focal-py3.13-clang10 / test (subclasses_wrapped, 1, 3, lf.linux.12xlarge)",
-        "linux-focal-py3.13-clang10 / test (subclasses_wrapped, 2, 3, lf.linux.12xlarge)",
-        "linux-focal-py3.13-clang10 / test (subclasses_wrapped, 3, 3, lf.linux.12xlarge)",
+        f"linux-focal-py3.13-clang10 / test (subclasses_wrapped, 1, 3, {LF}linux.12xlarge)",
+        f"linux-focal-py3.13-clang10 / test (subclasses_wrapped, 2, 3, {LF}linux.12xlarge)",
+        f"linux-focal-py3.13-clang10 / test (subclasses_wrapped, 3, 3, {LF}linux.12xlarge)",
     },
 }
 
