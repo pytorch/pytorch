@@ -10,7 +10,7 @@ import os
 import sys
 import typing
 from abc import abstractmethod
-from typing import Any, Callable, Dict, Generic, List, Optional, Type, TypeVar, Union
+from typing import Any, Callable, Generic, Optional, TypeVar, Union
 from typing_extensions import override, TypeAlias
 
 from torch._dynamo.utils import dynamo_timed
@@ -34,7 +34,7 @@ if config.is_fbcode():
 
     Sample: TypeAlias = Sample_
 else:
-    Sample: TypeAlias = Type[object]  # type: ignore[misc,no-redef]
+    Sample: TypeAlias = type[object]  # type: ignore[misc,no-redef]
 
 
 _T = TypeVar("_T")
@@ -106,7 +106,7 @@ class RemoteCacheSerde(Generic[_T, _U]):
 
 
 JsonDataTy = Optional[
-    Union[int, float, str, bool, Dict[str, "JsonDataTy"], List["JsonDataTy"]]
+    Union[int, float, str, bool, dict[str, "JsonDataTy"], list["JsonDataTy"]]
 ]
 
 
@@ -371,7 +371,7 @@ class _CacheStat:
 
 
 class _CacheStats:
-    _stats: Dict[str, _CacheStat]
+    _stats: dict[str, _CacheStat]
 
     def __init__(self) -> None:
         self._stats = collections.defaultdict(_CacheStat)

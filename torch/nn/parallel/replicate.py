@@ -1,16 +1,6 @@
 from collections import OrderedDict
-from typing import (
-    cast,
-    Dict,
-    Iterator,
-    List,
-    Optional,
-    Sequence,
-    Set,
-    TYPE_CHECKING,
-    TypeVar,
-    Union,
-)
+from collections.abc import Iterator, Sequence
+from typing import cast, Optional, TYPE_CHECKING, TypeVar, Union
 from typing_extensions import TypeIs
 
 import torch
@@ -59,7 +49,7 @@ def _is_jit_enabled() -> "EnabledProxy":
 #
 # currently a module cannot be replicated properly if the descendants of
 # any ScriptModule contains python module (type 1 above)
-def _replicatable_module(module: Module, memo: Optional[Set[Module]] = None) -> bool:
+def _replicatable_module(module: Module, memo: Optional[set[Module]] = None) -> bool:
     # module.modules() contains module itself as the first element
     def descendant_modules(module: Module) -> Iterator[Module]:
         gen = module.modules()
@@ -94,7 +84,7 @@ def _broadcast_coalesced_reshape(
     tensors: Sequence[torch.Tensor],
     devices: Sequence[Union[int, torch.device]],
     detach: bool = False,
-) -> List[List[torch.Tensor]]:
+) -> list[list[torch.Tensor]]:
     from torch.nn.parallel._functions import Broadcast
 
     if detach:
@@ -118,7 +108,7 @@ def replicate(
     network: T,
     devices: Sequence[Union[int, torch.device]],
     detach: bool = False,
-) -> List[T]:
+) -> list[T]:
     if not _replicatable_module(network):
         raise RuntimeError(
             "Cannot replicate network where python modules are "
@@ -136,8 +126,8 @@ def replicate(
     param_copies = _broadcast_coalesced_reshape(params, devices, detach)
 
     buffers = list(network.buffers())
-    buffers_rg: List[torch.Tensor] = []
-    buffers_not_rg: List[torch.Tensor] = []
+    buffers_rg: list[torch.Tensor] = []
+    buffers_not_rg: list[torch.Tensor] = []
     for buf in buffers:
         if buf.requires_grad and not detach:
             buffers_rg.append(buf)
@@ -153,8 +143,8 @@ def replicate(
     )
 
     modules = list(network.modules())
-    module_copies: List[List[Module]] = [[] for _ in devices]
-    module_indices: Dict[Module, int] = {}
+    module_copies: list[list[Module]] = [[] for _ in devices]
+    module_indices: dict[Module, int] = {}
 
     for i, module in enumerate(modules):
         module_indices[module] = i

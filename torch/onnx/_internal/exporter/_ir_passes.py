@@ -2,9 +2,13 @@
 from __future__ import annotations
 
 import logging
-from typing import Sequence
+from typing import TYPE_CHECKING
 
 from torch.onnx._internal._lazy_import import onnxscript_apis, onnxscript_ir as ir
+
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
 
 
 # The opset domain for ONNX operators
