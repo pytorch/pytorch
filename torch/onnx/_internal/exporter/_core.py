@@ -647,7 +647,7 @@ def _handle_output_node(
     """
     # node.args[0] can be a tuple with more than one elements. This happens when,
     # for example, a subgraph has multiple outputs. We flatten them all as ONNX graph outputs
-    for output in node.args[0]:
+    for output in node.args[0]:  # type: ignore[index,union-attr]
         output_value_name = output.name
         assert isinstance(
             output_value_name, str
