@@ -598,8 +598,7 @@ class Node(_NodeBase):
             return self._repr_fn(self)
         return self.name
 
-    @staticmethod
-    def _pretty_print_target(target: object) -> str:
+    def _pretty_print_target(self, target: object) -> str:
         """
         Make target printouts more user-friendly.
         1) builtins will be printed as `builtins.xyz`
