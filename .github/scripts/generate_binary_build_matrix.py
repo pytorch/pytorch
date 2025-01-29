@@ -366,7 +366,7 @@ def generate_wheels_matrix(
                 continue
 
             if use_split_build and (
-                arch_version not in CUDA_ARCHES and arch_version != "cpu" or os != "linux"
+                (arch_version not in CUDA_ARCHES and arch_version != "cpu") or os != "linux"
             ):
                 raise RuntimeError(
                     "Split build is only supported on linux with cuda 12*, 11.8, and cpu.\n"
