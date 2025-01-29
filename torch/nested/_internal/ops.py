@@ -606,34 +606,38 @@ def to_dtype(func, *args, **kwargs):
     return NestedTensor(func(inp._values, **new_kwargs), **extract_kwargs(inp))
 
 
-@register_jagged_func(torch.ops.aten._to_copy.default, "self: jt_all")
-def to_copy_default(func, *args, **kwargs):
+def new_metadata_with_device(old_metadata, old_non_contig_offsets, old_device, new_device) -> tuple[torch.Tensor, Optional[torch.Tensor]]:
     from torch.nested._internal.nested_tensor import (
         make_dict_tensor_for_nested,
         src_field_name,
     )
     from torch.nested._internal.tensor_registry import register_tensor, try_get_int
-
-    _, new_kwargs = normalize_function(  # type: ignore[misc]
-        func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
-    )
-    inp = new_kwargs.pop("input")
-    # don't change layout
-    new_kwargs.pop("layout")
-    new_values = func(inp._values, **new_kwargs)
-    new_device = new_values.device
-
+    # To preserve the invariant that the device of the values matches the
+    # device of the ragged sources.
+    #
     # NB: Device conversion for NT metadata
     # - Performs moves synchronously
     # - Only move offsets/lengths ignore {max,min}_seqlen, and inv_indices, etc.
     # - Registers new offsets/lengths to the same int in the tensor registry
-    new_raw_metadata = inp._metadata.metadata.copy()
+    new_raw_metadata = old_metadata.metadata.copy()
+
     for k in ("lengths", "offsets"):
+        if old_device != "cpu" and new_device != "cpu":
+            # Case 1: DtoD
+            source_attr = src_field_name("device", k)
+            source_tensor = new_raw_metadata.get(source_attr)
+            if source_tensor is not None:
+                target_tensor = source_tensor.to(new_device)
+                register_tensor(target_tensor, try_get_int(source_tensor))
+                new_raw_metadata[source_attr] = target_tensor
+            continue
+        # Case 2: DtoH or HtoD
         source_attr, target_attr = src_field_name("host", k), src_field_name(
             "device", k
         )
-        if new_values.is_cpu:
+        if new_device == "cpu":
             source_attr, target_attr = target_attr, source_attr
+
         source_tensor = new_raw_metadata.get(source_attr)
         target_tensor = new_raw_metadata.get(target_attr)
 
@@ -655,13 +659,30 @@ def to_copy_default(func, *args, **kwargs):
     new_metadata = make_dict_tensor_for_nested(new_raw_metadata)
 
     new_non_contig_offsets = None
-    if inp._non_contig_offsets is not None:
-        new_non_contig_offsets = inp._non_contig_offsets.to(device=new_device)
+    if old_non_contig_offsets is not None:
+        new_non_contig_offsets = old_non_contig_offsets.to(device=new_device)
 
+    return new_metadata, new_non_contig_offsets
+
+
+@register_jagged_func(torch.ops.aten._to_copy.default, "self: jt_all")
+def to_copy_default(func, *args, **kwargs):
+    _, new_kwargs = normalize_function(  # type: ignore[misc]
+        func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
+    )
+    inp = new_kwargs.pop("input")
+    # don't change layout
+    new_kwargs.pop("layout")
+    new_values = func(inp._values, **new_kwargs)
+    new_metadata, new_non_contig_offsets = new_metadata_with_device(
+        inp._metadata,
+        inp._non_contig_offsets,
+        inp._values.device,
+        new_values.device
+    )
     inp_kwargs = extract_kwargs(inp)
     inp_kwargs["metadata"] = new_metadata
     inp_kwargs["non_contig_offsets"] = new_non_contig_offsets
-
     output = NestedTensor(new_values, **inp_kwargs)
     return output
 
@@ -726,37 +747,16 @@ def like_factory_default(func, *args, **kwargs):
     new_kwargs["layout"] = torch.strided
 
     new_values = func(inp._values, **new_kwargs)
-    new_offsets = inp._offsets.to(device=new_values.device)
-    new_lengths = None
-    if inp._lengths is not None:
-        new_lengths = inp._lengths.to(device=new_values.device)
+
+    new_metadata, new_non_contig_offsets = new_metadata_with_device(
+        inp._metadata,
+        inp._non_contig_offsets,
+        inp._values.device,
+        new_values.device
+    )
     output_kwargs = extract_kwargs(inp)
-    if "offsets" in output_kwargs:
-        output_kwargs["offsets"] = new_offsets
-    if "lengths" in output_kwargs:
-        output_kwargs["lengths"] = new_lengths
-
-    if inp.device != new_values.device:
-        # Update the nested int registry to indicate that the ragged structure is the same
-        # between the two offsets / lengths on different devices.
-        from torch._subclasses.fake_tensor import FakeTensor
-        from torch._subclasses.functional_tensor import (
-            FunctionalTensor,
-            mb_unwrap_functional_tensor,
-        )
-
-        from .nested_tensor import _tensor_symint_registry
-
-        ragged_source = inp._offsets if inp._lengths is None else inp._lengths
-        new_thing = new_offsets if new_lengths is None else new_lengths
-        if isinstance(new_thing, (FakeTensor, FunctionalTensor)):
-            # Temporary hack until we have the union find
-            tgt = mb_unwrap_functional_tensor(new_thing)
-            src = mb_unwrap_functional_tensor(ragged_source)
-            tgt.nested_int_memo = src.nested_int_memo
-        else:
-            _tensor_symint_registry[new_thing] = _tensor_symint_registry[ragged_source]
-
+    output_kwargs["metadata"] = new_metadata
+    output_kwargs["non_contig_offsets"] = new_non_contig_offsets
     return NestedTensor(new_values, **output_kwargs)
 
 

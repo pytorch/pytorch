@@ -359,11 +359,11 @@ class MetaTensorDescriber:
         if is_nested:
             from torch.nested._internal.nested_int import NestedIntNode
             from torch.nested._internal.nested_tensor import NestedTensor
+
             assert isinstance(t, NestedTensor)
             nested_int = t.shape[t._ragged_idx]
-            assert (
-                isinstance(nested_int, torch.SymInt) and
-                isinstance(nested_int.node, NestedIntNode)
+            assert isinstance(nested_int, torch.SymInt) and isinstance(
+                nested_int.node, NestedIntNode
             )
             nested_int_metadata = self.describe_tensor(
                 nested_int.node.nested_int_cache(),
@@ -883,6 +883,7 @@ class MetaConverter(Generic[_TensorT]):
 
         def nested_int_metafy_fn(src: Source) -> torch.Tensor:
             t_inner = t.nested_int_metadata
+            assert t_inner is not None
             inner_callback = functools.partial(callback, device=t_inner.device)  # type: ignore[call-arg]
 
             if (

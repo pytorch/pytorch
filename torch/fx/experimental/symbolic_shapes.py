@@ -51,11 +51,7 @@ import torch.utils._pytree as pytree
 from torch import SymBool, SymFloat, SymInt
 from torch._guards import ShapeGuard, SLoc, Source, TracingContext
 from torch._logging import dtrace_structured, LazyString, structured, trace_structured
-from torch._subclasses.meta_utils import (
-    is_sparse_any,
-    MetaCustomSizeStridesDesc,
-    MetaNestedIntDesc,
-)
+from torch._subclasses.meta_utils import is_sparse_any
 from torch._utils_internal import signpost_event
 from torch.fx.experimental import _config as config
 from torch.fx.experimental.recording import (
@@ -4146,7 +4142,11 @@ class ShapeEnv:
             if hint is not None:
                 assert int(sym) == hint
             out = int(sym)
-        elif hint is not None and is_nested_int(hint) and nested_int_metafy_fn is not None:
+        elif (
+            hint is not None
+            and is_nested_int(hint)
+            and nested_int_metafy_fn is not None
+        ):
             from torch._dynamo.source import SymNodePropertySource
             from torch._subclasses.fake_tensor import maybe_get_fake_mode
             from torch.nested._internal.nested_int import NestedIntNode
