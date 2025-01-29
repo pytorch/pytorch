@@ -1,6 +1,7 @@
 import inspect
 import logging
 import os
+from collections import defaultdict
 from enum import IntEnum
 from typing import Any, Optional, Union
 
@@ -54,6 +55,17 @@ def hash_stack(stack: list[dict[str, str]]) -> str:
     return ";".join(f'line: {s["line"]} filename: {s["filename"]}' for s in stack)
 
 
+def get_loc(filename: str, lineno: int) -> Optional[str]:
+    try:
+        with open(filename) as f:
+            for i, line in enumerate(f):
+                if i == lineno - 1:
+                    return line.strip()
+    except FileNotFoundError:
+        pass
+    return None
+
+
 class FailureReport:
     def __init__(
         self, failure_type: FailureType, data: dict[str, Any], xfail: bool = False
@@ -89,10 +101,19 @@ class FailureReport:
 """
 
         elif self.failure_type == FailureType.DATA_DEPENDENT_ERROR:
+            loc = None
+            if self.data["stack"]:
+                frame = self.data["stack"][-1]
+                loc = (
+                    f"`{get_loc(str_to_filename[frame['filename']], frame['line'])}`"
+                    or ""
+                )
             return f"""Data dependent error.
-    When exporting, we were unable to figure out if the expression `{self.data["expr"]}` always holds.
-    This occurred at the following stacktrace: {prettify_stack(self.data["stack"], str_to_filename)}.
-    As a result, it was specialized to evaluate to `{self.data["result"]}`, and asserts were inserted into the graph.
+    When exporting, we were unable to evaluate the value of `{self.data["expr"]}`.
+    This was encountered {self.data["occurrences"]} times.
+    This occurred at the following stacktrace: {prettify_stack(self.data["stack"], str_to_filename)}:
+        {loc}
+    As a result, it was specialized to a constant (e.g. `{self.data["result"]}` in the 1st occurrence), and asserts were inserted into the graph.
 
     Please add `torch._check(...)` to the original code to assert this data-dependent assumption.
     Please refer to https://docs.google.com/document/d/1kZ_BbB3JnoLbUZleDT6635dHs88ZVYId8jT-yTFgf3A/edit#heading=h.boi2xurpqa0o for more details.
@@ -241,10 +262,8 @@ def draft_export(
         custom_ops_logs: dict[
             Any, tuple[dict[str, Any], FailureType]
         ] = {}  # Dedup custom ops
-        data_dependent_logs: dict[
-            str, dict[str, Any]
-        ] = {}  # Dedup data dependent errors based on stacktrace
-
+        # Dedup data dependent errors based on stacktrace
+        data_dependent_logs: dict[str, int] = defaultdict(int)
         for log_name, log_contents in capture_structured_log.logs:
             failure_type = None
 
@@ -252,10 +271,11 @@ def draft_export(
                 log_contents["stack"] = filter_stack(
                     log_contents["stack"], str_to_filename
                 )
-                if hash_stack(log_contents["stack"]) in data_dependent_logs:
+                data_dependent_logs[hash_stack(log_contents["stack"])] += 1
+
+                if data_dependent_logs[hash_stack(log_contents["stack"])] > 1:
                     continue
 
-                data_dependent_logs[hash_stack(log_contents["stack"])] = log_contents
                 failure_type = FailureType.DATA_DEPENDENT_ERROR
 
             elif log_name == "guard_added":
@@ -296,6 +316,13 @@ def draft_export(
                     log_contents,
                 )
             )
+
+        # Count data dependent errors
+        for failure in failures:
+            if failure.failure_type == FailureType.DATA_DEPENDENT_ERROR:
+                failure.data["occurrences"] = data_dependent_logs[
+                    hash_stack(failure.data["stack"])
+                ]
 
         report = DraftExportReport(failures, str_to_filename)
 
