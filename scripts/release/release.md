@@ -160,25 +160,25 @@ The CUTLASS and CK backend adds kernel choices for GEMM autotuning in Inductor. 
 
 ## **Backwards Incompatible changes**
 
-* **Flip default torch.load to weights_only ([#137602](https://github.com/pytorch/pytorch/pull/137602), [#138225](https://github.com/pytorch/pytorch/pull/138225), [#138866](https://github.com/pytorch/pytorch/pull/138866), [#139221](https://github.com/pytorch/pytorch/pull/139221), [#140304](https://github.com/pytorch/pytorch/pull/140304), [#138936](https://github.com/pytorch/pytorch/pull/138936), [#139541](https://github.com/pytorch/pytorch/pull/139541), [#140738](https://github.com/pytorch/pytorch/pull/140738), [#142153](https://github.com/pytorch/pytorch/pull/142153), [#139433](https://github.com/pytorch/pytorch/pull/139433))**
+### Flip default torch.load to weights_only ([#137602](https://github.com/pytorch/pytorch/pull/137602), [#138225](https://github.com/pytorch/pytorch/pull/138225), [#138866](https://github.com/pytorch/pytorch/pull/138866), [#139221](https://github.com/pytorch/pytorch/pull/139221), [#140304](https://github.com/pytorch/pytorch/pull/140304), [#138936](https://github.com/pytorch/pytorch/pull/138936), [#139541](https://github.com/pytorch/pytorch/pull/139541), [#140738](https://github.com/pytorch/pytorch/pull/140738), [#142153](https://github.com/pytorch/pytorch/pull/142153), [#139433](https://github.com/pytorch/pytorch/pull/139433))
 
-    We are closing the loop on the deprecation that started in 2.4 and flipped `torch.load` to use `weights_only=True` by default.
-
-
-    When this flag is set, instead of using the usual pickle module, `torch.load` uses a custom unpickler constrained to call only functions and classes needed for loading state dictionaries and basic types.
+We are closing the loop on the deprecation that started in 2.4 and flipped `torch.load` to use `weights_only=True` by default.
 
 
-    While this change is disruptive for users serializing more than basic types, we expect the increased security by default is a tradeoff that is worth it. Do note that, even though this default is safer, we still recommend only loading trusted checkpoints and rely on more constrained (and even safer) formats like [safetensors](https://github.com/huggingface/safetensors) for un-trusted checkpoints.
+When this flag is set, instead of using the usual pickle module, `torch.load` uses a custom unpickler constrained to call only functions and classes needed for loading state dictionaries and basic types.
 
 
-    For full details, please refer to [this dev-discuss post](https://dev-discuss.pytorch.org/t/bc-breaking-change-torch-load-is-being-flipped-to-use-weights-only-true-by-default-in-the-nightlies-after-137602/2573).
+While this change is disruptive for users serializing more than basic types, we expect the increased security by default is a tradeoff that is worth it. Do note that, even though this default is safer, we still recommend only loading trusted checkpoints and rely on more constrained (and even safer) formats like [safetensors](https://github.com/huggingface/safetensors) for un-trusted checkpoints.
 
 
-* **Anaconda deprecation in CD. Remove anaconda dependency in Magma builds ([#141024](https://github.com/pytorch/pytorch/pull/141024)) ([#141281](https://github.com/pytorch/pytorch/pull/141281)) ([#140157](https://github.com/pytorch/pytorch/pull/140157)) ([#139888](https://github.com/pytorch/pytorch/pull/139888)) ([#140141](https://github.com/pytorch/pytorch/pull/140141))  ([#139924](https://github.com/pytorch/pytorch/pull/139924)) ([#140158](https://github.com/pytorch/pytorch/pull/140158)) ([#142019](https://github.com/pytorch/pytorch/pull/142019))  ([#142276](https://github.com/pytorch/pytorch/pull/142276)) ([#142277](https://github.com/pytorch/pytorch/pull/142277))  ([#142282](https://github.com/pytorch/pytorch/pull/142282))**
+For full details, please refer to [this dev-discuss post](https://dev-discuss.pytorch.org/t/bc-breaking-change-torch-load-is-being-flipped-to-use-weights-only-true-by-default-in-the-nightlies-after-137602/2573).
+
+
+### Anaconda deprecation in CD. Remove anaconda dependency in Magma builds ([#141024](https://github.com/pytorch/pytorch/pull/141024)) ([#141281](https://github.com/pytorch/pytorch/pull/141281)) ([#140157](https://github.com/pytorch/pytorch/pull/140157)) ([#139888](https://github.com/pytorch/pytorch/pull/139888)) ([#140141](https://github.com/pytorch/pytorch/pull/140141))  ([#139924](https://github.com/pytorch/pytorch/pull/139924)) ([#140158](https://github.com/pytorch/pytorch/pull/140158)) ([#142019](https://github.com/pytorch/pytorch/pull/142019))  ([#142276](https://github.com/pytorch/pytorch/pull/142276)) ([#142277](https://github.com/pytorch/pytorch/pull/142277))  ([#142282](https://github.com/pytorch/pytorch/pull/142282))
 
 PyTorch will stop publishing Anaconda packages that depend on Anaconda’s default packages. We are directing users to utilize our official wheel packages from download.pytorch.org or PyPI, or switch to utilizing conda-forge (pytorch) packages if they would like to continue to use conda. For more details refer to [this announcement](https://github.com/pytorch/pytorch/issues/138506)
 
-* **Added Manylinux 2.28 prototype support and CXX11_ABI=1 for following binaries: Linux CUDA 12.6, Linux aarch64 CPU, Linux aarch64 GPU CUDA 12.6, ROCm 6.2.4, Linux XPU  ([#139894](https://github.com/pytorch/pytorch/pull/139894)) ([#139631](https://github.com/pytorch/pytorch/pull/139631)) ([#139636](https://github.com/pytorch/pytorch/pull/139636)) ([#140743](https://github.com/pytorch/pytorch/pull/140743)) ([#137696](https://github.com/pytorch/pytorch/pull/137696)) ([#141565](https://github.com/pytorch/pytorch/pull/141565)) ([#140681](https://github.com/pytorch/pytorch/pull/140681)) ([#141609](https://github.com/pytorch/pytorch/pull/141609)) ([#141704](https://github.com/pytorch/pytorch/pull/141704)) ([#141423](https://github.com/pytorch/pytorch/pull/141423)) ([#141609](https://github.com/pytorch/pytorch/pull/141609))**
+### Added Manylinux 2.28 prototype support and CXX11_ABI=1 for following binaries: Linux CUDA 12.6, Linux aarch64 CPU, Linux aarch64 GPU CUDA 12.6, ROCm 6.2.4, Linux XPU  ([#139894](https://github.com/pytorch/pytorch/pull/139894)) ([#139631](https://github.com/pytorch/pytorch/pull/139631)) ([#139636](https://github.com/pytorch/pytorch/pull/139636)) ([#140743](https://github.com/pytorch/pytorch/pull/140743)) ([#137696](https://github.com/pytorch/pytorch/pull/137696)) ([#141565](https://github.com/pytorch/pytorch/pull/141565)) ([#140681](https://github.com/pytorch/pytorch/pull/140681)) ([#141609](https://github.com/pytorch/pytorch/pull/141609)) ([#141704](https://github.com/pytorch/pytorch/pull/141704)) ([#141423](https://github.com/pytorch/pytorch/pull/141423)) ([#141609](https://github.com/pytorch/pytorch/pull/141609))
 
 The PyTorch binaries shipped with CUDA 12.6.3 are built with CXX11_ABI=1 and are using the Manylinux 2.28 build platform. If you are building PyTorch extensions with custom C++ or CUDA extensions, please update these builds to use CXX_ABI=1 as well and report any issues you are seeing. For the next PyTorch 2.7 release we plan to switch all Linux builds to Manylinux 2.28 and CXX11_ABI=1, please see [[RFC] PyTorch next wheel build platform: manylinux-2.28](https://github.com/pytorch/pytorch/issues/123649) for the details and discussion.
 
@@ -186,21 +186,22 @@ The PyTorch binaries shipped with CUDA 12.6.3 are built with CXX11_ABI=1 and are
 ## **Deprecations**
 ### Releng
 
-* Removed CUDA 12.1 support in CI/CD ([#141271](https://github.com/pytorch/pytorch/pull/141271)) ([#142177](https://github.com/pytorch/pytorch/pull/142177))
+### Removed CUDA 12.1 support in CI/CD ([#141271](https://github.com/pytorch/pytorch/pull/141271)) ([#142177](https://github.com/pytorch/pytorch/pull/142177))
 The full release compatibility matrix matrix can be found in [release.md](https://github.com/pytorch/pytorch/blob/main/RELEASE.md#release-compatibility-matrix)
 
-* **Deprecated `c10d::onCompletionHook` ([#142390](https://github.com/pytorch/pytorch/pull/142390))**
-    * In PT 2.5 and before, users can do:
-      ```py
-      pg = dist.init_process_group()
-      def hook(work_info: torch._C._distributed_c10d.WorkInfo):
-        # do something
-      pg._register_on_completion_hook(hook)
+### Deprecated `c10d::onCompletionHook` ([#142390](https://github.com/pytorch/pytorch/pull/142390))
 
-      # The hook will be triggered after the collective complete
-      pg.broadcast([tensor]).wait()
-      ```
-    * Starting from PT 2.6, when users write the code above, they will get get a warning message “ProcessGroupNCCL OnCompletion hook will be deprecated in favor of Flight Recorder”
+* In PT 2.5 and before, users can do:
+  ```py
+  pg = dist.init_process_group()
+  def hook(work_info: torch._C._distributed_c10d.WorkInfo):
+    # do something
+  pg._register_on_completion_hook(hook)
+
+  # The hook will be triggered after the collective complete
+  pg.broadcast([tensor]).wait()
+  ```
+* Starting from PT 2.6, when users write the code above, they will get get a warning message “ProcessGroupNCCL OnCompletion hook will be deprecated in favor of Flight Recorder”
 
 ## **New features**
 
