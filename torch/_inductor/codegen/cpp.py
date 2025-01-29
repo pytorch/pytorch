@@ -788,7 +788,15 @@ class CppOverrides(OpOverrides):
         # a and b are integer type
         quot = f"{a} / {b}"
         rem = f"{a} % {b}"
-        return f"(({a} < 0) != ({b} < 0) ? ({rem} != 0 ? {quot} - 1 : {quot}) : {quot})"
+        code = BracesBuffer()
+        code.writeline("[&]()")
+        with code.indent():
+            code.writeline(f'{V.kernel.assert_function}({b}!=0, "ZeroDivisionError");')
+            code.writeline(
+                f"return ({a} < 0) != ({b} < 0) ? ({rem} != 0 ? {quot} - 1 : {quot}) : {quot};"
+            )
+        code.writeline("()")
+        return code
 
     @staticmethod
     def ceil(x):
@@ -801,7 +809,13 @@ class CppOverrides(OpOverrides):
     @staticmethod
     def truncdiv(a, b):
         # a and b are integer type
-        return f"{a} / {b}"
+        code = BracesBuffer()
+        code.writeline("[&]()")
+        with code.indent():
+            code.writeline(f'{V.kernel.assert_function}({b}!=0, "ZeroDivisionError");')
+            code.writeline(f"return {a} / {b};")
+        code.writeline("()")
+        return code
 
     @staticmethod
     def fmod(a, b):
@@ -922,7 +936,17 @@ class CppOverrides(OpOverrides):
 
     @staticmethod
     def mod(a, b):
-        return f"mod({a}, {b})"
+        if isinstance(a, CppCSEVariable) and isinstance(b, CppCSEVariable) \
+            and is_integer_dtype(a.dtype) and is_integer_dtype(b.dtype):
+            code = BracesBuffer()
+            code.writeline("[&]()")
+            with code.indent():
+                code.writeline(f'{V.kernel.assert_function}({b}!=0, "ZeroDivisionError");')
+                code.writeline(f"return mod({a}, {b});")
+            code.writeline("()")
+            return code
+        else:
+            return f"mod({a}, {b})"
 
     @staticmethod
     def constant(val, dtype):
