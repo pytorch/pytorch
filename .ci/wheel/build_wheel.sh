@@ -188,9 +188,8 @@ pip install "numpy=${NUMPY_PINNED_VERSION}"  "pyyaml${PYYAML_PINNED_VERSION}" re
 retry pip install -r "${pytorch_rootdir}/requirements.txt" || true
 retry brew install libomp
 
-# For USE_DISTRIBUTED=1 on macOS, need libuv and pkg-config to find libuv.
+# For USE_DISTRIBUTED=1 on macOS, need libuv, which is build as part of tensorpipe submodule
 export USE_DISTRIBUTED=1
-retry conda install ${EXTRA_CONDA_INSTALL_FLAGS} -y libuv pkg-config
 
 if [[ -n "$CROSS_COMPILE_ARM64" ]]; then
     export CMAKE_OSX_ARCHITECTURES=arm64
