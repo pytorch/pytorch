@@ -529,11 +529,11 @@ We improved the existing `torch.library` APIs and added new ones.
 * Improve the stride preservation logic of user-visible outputs ([#136732](https://github.com/pytorch/pytorch/pull/136732))
 * Add workspace to TritonTemplates ([#138050](https://github.com/pytorch/pytorch/pull/138050))
 * Enable Cpp wraper for Intel GPU. ([#135318](https://github.com/pytorch/pytorch/pull/135318))
-* Flip `custom_op_default_layout_constraint` in Inductor to optimize tensor layout for improved computation efficiency ([#135239](https://github.com/pytorch/pytorch/pull/135239)).
-* Enables coordinate descent tuning with max-autotune in Inductor, improving the efficiency of kernel optimization ([#136867](https://github.com/pytorch/pytorch/pull/136867)).
+* Flip `custom_op_default_layout_constraint` in Inductor to optimize tensor layout ([#135239](https://github.com/pytorch/pytorch/pull/135239)).
+* Enables coordinate descent tuning with max-autotune in Inductor ([#136867](https://github.com/pytorch/pytorch/pull/136867)).
 * Adds `relu_nan_to_num` option for handling NaNs in pre-grad passes in AOTInductor ([#138545](https://github.com/pytorch/pytorch/pull/138545)).
-* Enables cooperative and persistent reductions in Inductor for enhanced computational efficiency ([#138533](https://github.com/pytorch/pytorch/pull/138533)).
-* Introduces multi-kernel support alongside cooperative reductions in Inductor to improve performance ([#138893](https://github.com/pytorch/pytorch/pull/138893)).
+* Enables cooperative and persistent reductions in Inductor ([#138533](https://github.com/pytorch/pytorch/pull/138533)).
+* Introduces multi-kernel support alongside cooperative reductions in Inductor ([#138893](https://github.com/pytorch/pytorch/pull/138893)).
 * Adds `env_name_default` and `env_name_force` to Config for better configuration management ([#138956](https://github.com/pytorch/pytorch/pull/138956)).
 * Adjusts loop split optimization heuristic ([#137550](https://github.com/pytorch/pytorch/pull/137550)).
 * Enhances numerical precision for fp32 in FlexAttention on ROCm devices using IEEE ([#135702](https://github.com/pytorch/pytorch/pull/135702)).
