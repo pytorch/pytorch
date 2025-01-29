@@ -278,6 +278,16 @@ class TunableOp {
           continue;
         }
 
+        // 2nd phase skip, more aggressive
+        approx_num_iter = 10;
+        s = ProfileStats(candidate, reusable_params, approx_num_iter, offset);
+        approx_duration = s._mean;
+        // bail if too slow
+        if (approx_duration > 1.15 * min_duration_ms) {
+          TUNABLE_LOG3("├──2nd skip slow instance id=", i, ", ", op_sig, '(', params_sig, ") ", op_names_[i]);
+          continue;
+        }
+
         // for warmup does user set max duration, max iters, or both?
         // warmup is allowed to be skipped by setting either iterations or duration to 0
         double max_warmup_duration = ctx->GetMaxWarmupDurationMs();
