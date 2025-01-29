@@ -17,8 +17,18 @@ from typing import Optional
 
 # NOTE: Also update the CUDA sources in tools/nightly.py when changing this list
 CUDA_ARCHES = ["11.8", "12.4", "12.6", "12.8"]
-CUDA_ARCHES_FULL_VERSION = {"11.8": "11.8.0", "12.4": "12.4.1", "12.6": "12.6.3", "12.8": "12.8.0"}
-CUDA_ARCHES_CUDNN_VERSION = {"11.8": "9", "12.4": "9", "12.6": "9", "12.8": "9"}
+CUDA_ARCHES_FULL_VERSION = {
+    "11.8": "11.8.0",
+    "12.4": "12.4.1",
+    "12.6": "12.6.3",
+    "12.8": "12.8.0",
+}
+CUDA_ARCHES_CUDNN_VERSION = {
+    "11.8": "9",
+    "12.4": "9",
+    "12.6": "9",
+    "12.8": "9",
+}
 
 # NOTE: Also update the ROCm sources in tools/nightly.py when changing this list
 ROCM_ARCHES = ["6.2.4", "6.3"]
@@ -356,10 +366,10 @@ def generate_wheels_matrix(
                 continue
 
             if use_split_build and (
-                arch_version not in ["12.8", "12.6", "12.4", "11.8", "cpu"] or os != "linux"
+                arch_version not in CUDA_ARCHES_FULL_VERSION and arch_version != "cpu" or os != "linux"
             ):
                 raise RuntimeError(
-                    "Split build is only supported on linux with cuda 12.8, 12.6, 12.4, 11.8, and cpu.\n"
+                    "Split build is only supported on linux with cuda 12*, 11.8, and cpu.\n"
                     f"Currently attempting to build on arch version {arch_version} and os {os}.\n"
                     "Please modify the matrix generation to exclude this combination."
                 )
@@ -367,7 +377,7 @@ def generate_wheels_matrix(
             # cuda linux wheels require PYTORCH_EXTRA_INSTALL_REQUIREMENTS to install
 
             if (
-                arch_version in ["12.8", "12.6",  "12.4", "11.8"]
+                arch_version in ["12.8", "12.6", "12.4", "11.8"]
                 and os == "linux"
                 or arch_version == "cuda-aarch64"
             ):
