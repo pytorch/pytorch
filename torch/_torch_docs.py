@@ -1412,7 +1412,7 @@ Example::
 add_docstr(
     torch.bincount,
     r"""
-bincount(input, weights=None, minlength=0) -> Tensor
+bincount(input: Tensor, weights: Optional[Tensor] = None, minlength: int = 0) -> Tensor
 
 Count the frequency of each value in an array of non-negative ints.
 
@@ -1456,7 +1456,7 @@ Example::
 add_docstr(
     torch.bitwise_not,
     r"""
-bitwise_not(input, *, out=None) -> Tensor
+bitwise_not(input: Tensor, *, out: Optional[Tensor] = None) -> Tensor
 
 Computes the bitwise NOT of the given input tensor. The input tensor must be of
 integral or Boolean types. For bool tensors, it computes the logical NOT.
@@ -1477,7 +1477,7 @@ Example::
 add_docstr(
     torch.bmm,
     r"""
-bmm(input, mat2, *, out=None) -> Tensor
+bmm(input: Tensor, mat2: Tensor, *, out: Optional[Tensor] = None) -> Tensor
 
 Performs a batch matrix-matrix product of matrices stored in :attr:`input`
 and :attr:`mat2`.
@@ -1520,7 +1520,7 @@ Example::
 add_docstr(
     torch.bitwise_and,
     r"""
-bitwise_and(input, other, *, out=None) -> Tensor
+bitwise_and(input: Tensor, other: Tensor, *, out: Optional[Tensor] = None) -> Tensor
 
 Computes the bitwise AND of :attr:`input` and :attr:`other`. The input tensor must be of
 integral or Boolean types. For bool tensors, it computes the logical AND.
@@ -1568,7 +1568,7 @@ Example::
 add_docstr(
     torch.bitwise_xor,
     r"""
-bitwise_xor(input, other, *, out=None) -> Tensor
+bitwise_xor(input: Tensor, other: Tensor, *, out: Optional[Tensor] = None) -> Tensor
 
 Computes the bitwise XOR of :attr:`input` and :attr:`other`. The input tensor must be of
 integral or Boolean types. For bool tensors, it computes the logical XOR.
@@ -1592,7 +1592,7 @@ Example::
 add_docstr(
     torch.bitwise_left_shift,
     r"""
-bitwise_left_shift(input, other, *, out=None) -> Tensor
+bitwise_left_shift(input: Tensor, other: Tensor, *, out: Optional[Tensor] = None) -> Tensor
 
 Computes the left arithmetic shift of :attr:`input` by :attr:`other` bits.
 The input tensor must be of integral type. This operator supports
@@ -1621,7 +1621,7 @@ Example::
 add_docstr(
     torch.bitwise_right_shift,
     r"""
-bitwise_right_shift(input, other, *, out=None) -> Tensor
+bitwise_right_shift(input: Tensor, other: Tensor, *, out: Optional[Tensor] = None) -> Tensor
 
 Computes the right arithmetic shift of :attr:`input` by :attr:`other` bits.
 The input tensor must be of integral type. This operator supports
@@ -1674,7 +1674,7 @@ Example::
 add_docstr(
     torch.stack,
     r"""
-stack(tensors, dim=0, *, out=None) -> Tensor
+stack(tensors: Sequence[Tensor], dim: int = 0, *, out: Optional[Tensor] = None) -> Tensor
 
 Concatenates a sequence of tensors along a new dimension.
 
@@ -1734,7 +1734,7 @@ Example::
 add_docstr(
     torch.hstack,
     r"""
-hstack(tensors, *, out=None) -> Tensor
+hstack(tensors: Sequence[Tensor], *, out: Optional[Tensor] = None) -> Tensor
 
 Stack tensors in sequence horizontally (column wise).
 
@@ -1765,7 +1765,7 @@ Example::
 add_docstr(
     torch.vstack,
     r"""
-vstack(tensors, *, out=None) -> Tensor
+vstack(tensors: Sequence[Tensor], *, out: Optional[Tensor] = None) -> Tensor
 
 Stack tensors in sequence vertically (row wise).
 
@@ -1801,7 +1801,7 @@ Example::
 add_docstr(
     torch.dstack,
     r"""
-dstack(tensors, *, out=None) -> Tensor
+dstack(tensors: Sequence[Tensor], *, out: Optional[Tensor] = None) -> Tensor
 
 Stack tensors in sequence depthwise (along third axis).
 
@@ -1835,7 +1835,7 @@ Example::
 add_docstr(
     torch.tensor_split,
     r"""
-tensor_split(input, indices_or_sections, dim=0) -> List of Tensors
+tensor_split(input: Tensor, indices_or_sections: Union[int, Sequence[int], Tensor], dim: int = 0) -> List of Tensors
 
 Splits a tensor into multiple sub-tensors, all of which are views of :attr:`input`,
 along dimension :attr:`dim` according to the indices or number of sections specified
@@ -1952,7 +1952,7 @@ Example:
 add_docstr(
     torch.unsafe_chunk,
     r"""
-unsafe_chunk(input, chunks, dim=0) -> List of Tensors
+unsafe_chunk(input: Tensor, chunks: int, dim: int = 0) -> List of Tensors
 
 Works like :func:`torch.chunk` but without enforcing the autograd restrictions
 on inplace modification of the outputs.
@@ -2129,7 +2129,7 @@ Example::
 add_docstr(
     torch.can_cast,
     r"""
-can_cast(from_, to) -> bool
+can_cast(from_: dtype, to: dtype) -> bool
 
 Determines if a type conversion is allowed under PyTorch casting rules
 described in the type promotion :ref:`documentation <type-promotion-doc>`.
@@ -2150,7 +2150,7 @@ Example::
 add_docstr(
     torch.corrcoef,
     r"""
-corrcoef(input) -> Tensor
+corrcoef(input: Tensor) -> Tensor
 
 Estimates the Pearson product-moment correlation coefficient matrix of the variables given by the :attr:`input` matrix,
 where rows are the variables and columns are the observations.
@@ -2197,7 +2197,7 @@ Example::
 add_docstr(
     torch.cov,
     r"""
-cov(input, *, correction=1, fweights=None, aweights=None) -> Tensor
+cov(input: Tensor, *, correction: int = 1, fweights: Optional[Tensor] = None, aweights: Optional[Tensor] = None) -> Tensor
 
 Estimates the covariance matrix of the variables given by the :attr:`input` matrix, where rows are
 the variables and columns are the observations.
@@ -2276,7 +2276,7 @@ Example::
 add_docstr(
     torch.cat,
     r"""
-cat(tensors, dim=0, *, out=None) -> Tensor
+cat(tensors: Sequence[Tensor], dim: int = 0, *, out: Optional[Tensor] = None) -> Tensor
 
 Concatenates the given sequence of tensors in :attr:`tensors` in the given dimension.
 All tensors must either have the same shape (except in the concatenating
@@ -2324,7 +2324,7 @@ Example::
 add_docstr(
     torch.concat,
     r"""
-concat(tensors, dim=0, *, out=None) -> Tensor
+concat(tensors: Sequence[Tensor], dim: int = 0, *, out: Optional[Tensor] = None) -> Tensor
 
 Alias of :func:`torch.cat`.
 """,
@@ -2333,7 +2333,7 @@ Alias of :func:`torch.cat`.
 add_docstr(
     torch.concatenate,
     r"""
-concatenate(tensors, axis=0, out=None) -> Tensor
+concatenate(tensors: Sequence[Tensor], dim: int = 0, *, out: Optional[Tensor] = None) -> Tensor
 
 Alias of :func:`torch.cat`.
 """,
@@ -2342,7 +2342,7 @@ Alias of :func:`torch.cat`.
 add_docstr(
     torch.ceil,
     r"""
-ceil(input, *, out=None) -> Tensor
+ceil(input: Tensor, *, out: Optional[Tensor] = None) -> Tensor
 
 Returns a new tensor with the ceil of the elements of :attr:`input`,
 the smallest integer greater than or equal to each element.
@@ -2373,7 +2373,7 @@ Example::
 add_docstr(
     torch.real,
     r"""
-real(input) -> Tensor
+real(input: Tensor) -> Tensor
 
 Returns a new tensor containing real values of the :attr:`self` tensor.
 The returned tensor and :attr:`self` share the same underlying storage.
@@ -2395,7 +2395,7 @@ Example::
 add_docstr(
     torch.imag,
     r"""
-imag(input) -> Tensor
+imag(input: Tensor) -> Tensor
 
 Returns a new tensor containing imaginary values of the :attr:`self` tensor.
 The returned tensor and :attr:`self` share the same underlying storage.
@@ -2420,7 +2420,7 @@ Example::
 add_docstr(
     torch.view_as_real,
     r"""
-view_as_real(input) -> Tensor
+view_as_real(input: Tensor) -> Tensor
 
 Returns a view of :attr:`input` as a real tensor. For an input complex tensor of
 :attr:`size` :math:`m1, m2, \dots, mi`, this function returns a new
@@ -2449,7 +2449,7 @@ Example::
 add_docstr(
     torch.view_as_complex,
     r"""
-view_as_complex(input) -> Tensor
+view_as_complex(input: Tensor) -> Tensor
 
 Returns a view of :attr:`input` as a complex tensor. For an input complex
 tensor of :attr:`size` :math:`m1, m2, \dots, mi, 2`, this function returns a
@@ -2483,7 +2483,7 @@ Example::
 add_docstr(
     torch.reciprocal,
     r"""
-reciprocal(input, *, out=None) -> Tensor
+reciprocal(input: Tensor, *, out: Optional[Tensor] = None) -> Tensor
 
 Returns a new tensor with the reciprocal of the elements of :attr:`input`
 
@@ -2515,7 +2515,7 @@ Example::
 add_docstr(
     torch.cholesky,
     r"""
-cholesky(input, upper=False, *, out=None) -> Tensor
+cholesky(input: Tensor, upper: bool = False, *, out: Optional[Tensor] = None) -> Tensor
 
 Computes the Cholesky decomposition of a symmetric positive-definite
 matrix :math:`A` or for batches of symmetric positive-definite matrices.
@@ -2597,7 +2597,7 @@ Example::
 add_docstr(
     torch.cholesky_solve,
     r"""
-cholesky_solve(B, L, upper=False, *, out=None) -> Tensor
+cholesky_solve(B: Tensor, L: Tensor, upper: bool = False, *, out: Optional[Tensor] = None) -> Tensor
 
 Computes the solution of a system of linear equations with complex Hermitian
 or real symmetric positive-definite lhs given its Cholesky decomposition.
@@ -2662,7 +2662,7 @@ Example::
 add_docstr(
     torch.cholesky_inverse,
     r"""
-cholesky_inverse(L, upper=False, *, out=None) -> Tensor
+cholesky_inverse(L: Tensor, upper: bool = False, *, out: Optional[Tensor] = None) -> Tensor
 
 Computes the inverse of a complex Hermitian or real symmetric
 positive-definite matrix given its Cholesky decomposition.
@@ -2718,7 +2718,7 @@ Example::
 add_docstr(
     torch.clone,
     r"""
-clone(input, *, memory_format=torch.preserve_format) -> Tensor
+clone(input: Tensor, *, memory_format: Optional[memory_format] = torch.preserve_format) -> Tensor
 
 Returns a copy of :attr:`input`.
 
@@ -2739,7 +2739,7 @@ Keyword args:
 add_docstr(
     torch.clamp,
     r"""
-clamp(input, min=None, max=None, *, out=None) -> Tensor
+clamp(input: Tensor, min: Optional[Union[Tensor, Number, _complex]] = None, max: Optional[Union[Tensor, Number, _complex]] = None, *, out: Optional[Tensor] = None) -> Tensor # noqa: B950
 
 Clamps all elements in :attr:`input` into the range `[` :attr:`min`, :attr:`max` `]`.
 Letting min_value and max_value be :attr:`min` and :attr:`max`, respectively, this returns:
@@ -2782,7 +2782,7 @@ Example::
 add_docstr(
     torch.clip,
     r"""
-clip(input, min=None, max=None, *, out=None) -> Tensor
+clip(input: Tensor, min: Optional[Union[Tensor, Number, _complex]] = None, max: Optional[Union[Tensor, Number, _complex]] = None, *, out: Optional[Tensor] = None) -> Tensor # noqa: B950
 
 Alias for :func:`torch.clamp`.
 """,
@@ -2791,7 +2791,7 @@ Alias for :func:`torch.clamp`.
 add_docstr(
     torch.column_stack,
     r"""
-column_stack(tensors, *, out=None) -> Tensor
+column_stack(tensors: Sequence[Tensor], *, out: Optional[Tensor] = None) -> Tensor
 
 Creates a new tensor by horizontally stacking the tensors in :attr:`tensors`.
 
@@ -2827,7 +2827,7 @@ Example::
 add_docstr(
     torch.complex,
     r"""
-complex(real, imag, *, out=None) -> Tensor
+complex(real: Tensor, imag: Tensor, *, out: Optional[Tensor] = None) -> Tensor
 
 Constructs a complex tensor with its real part equal to :attr:`real` and its
 imaginary part equal to :attr:`imag`.
@@ -2858,7 +2858,7 @@ Example::
 add_docstr(
     torch.polar,
     r"""
-polar(abs, angle, *, out=None) -> Tensor
+polar(abs: Tensor, angle: Tensor, *, out: Optional[Tensor] = None) -> Tensor
 
 Constructs a complex tensor whose elements are Cartesian coordinates
 corresponding to the polar coordinates with absolute value :attr:`abs` and angle
@@ -2901,7 +2901,7 @@ Example::
 add_docstr(
     torch.conj_physical,
     r"""
-conj_physical(input, *, out=None) -> Tensor
+conj_physical(input: Tensor, *, out: Optional[Tensor] = None) -> Tensor
 
 Computes the element-wise conjugate of the given :attr:`input` tensor.
 If :attr:`input` has a non-complex dtype, this function just returns :attr:`input`.
@@ -2933,7 +2933,7 @@ Example::
 add_docstr(
     torch.conj,
     r"""
-conj(input) -> Tensor
+conj(input: Tensor) -> Tensor
 
 Returns a view of :attr:`input` with a flipped conjugate bit. If :attr:`input` has a non-complex dtype,
 this function just returns :attr:`input`.
@@ -2963,7 +2963,7 @@ Example::
 add_docstr(
     torch.resolve_conj,
     r"""
-resolve_conj(input) -> Tensor
+resolve_conj(input: Tensor) -> Tensor
 
 Returns a new tensor with materialized conjugation if :attr:`input`'s conjugate bit is set to `True`,
 else returns :attr:`input`. The output tensor will always have its conjugate bit set to `False`.
@@ -2988,7 +2988,7 @@ Example::
 add_docstr(
     torch.resolve_neg,
     r"""
-resolve_neg(input) -> Tensor
+resolve_neg(input: Tensor) -> Tensor
 
 Returns a new tensor with materialized negation if :attr:`input`'s negative bit is set to `True`,
 else returns :attr:`input`. The output tensor will always have its negative bit set to `False`.
@@ -3014,7 +3014,7 @@ Example::
 add_docstr(
     torch.copysign,
     r"""
-copysign(input, other, *, out=None) -> Tensor
+copysign(input: Tensor, other: Tensor, *, out: Optional[Tensor] = None) -> Tensor
 
 Create a new floating-point tensor with the magnitude of :attr:`input` and the sign of :attr:`other`, elementwise.
 
@@ -3072,7 +3072,7 @@ Example::
 add_docstr(
     torch.cos,
     r"""
-cos(input, *, out=None) -> Tensor
+cos(input: Tensor, *, out: Optional[Tensor] = None) -> Tensor
 
 Returns a new tensor with the cosine  of the elements of :attr:`input`.
 
@@ -3099,7 +3099,7 @@ Example::
 add_docstr(
     torch.cosh,
     r"""
-cosh(input, *, out=None) -> Tensor
+cosh(input: Tensor, *, out: Optional[Tensor] = None) -> Tensor
 
 Returns a new tensor with the hyperbolic cosine  of the elements of
 :attr:`input`.
@@ -3132,7 +3132,7 @@ Example::
 add_docstr(
     torch.cross,
     r"""
-cross(input, other, dim=None, *, out=None) -> Tensor
+cross(input: Tensor, other: Tensor, dim: Optional[int] = None, *, out: Optional[Tensor] = None) -> Tensor
 
 
 Returns the cross product of vectors in dimension :attr:`dim` of :attr:`input`
@@ -3191,7 +3191,8 @@ Example::
 add_docstr(
     torch.logcumsumexp,
     r"""
-logcumsumexp(input, dim, *, out=None) -> Tensor
+logcumsumexp(input: Tensor, dim: int, *, out: Optional[Tensor] = None) -> Tensor
+
 Returns the logarithm of the cumulative summation of the exponentiation of
 elements of :attr:`input` in the dimension :attr:`dim`.
 
@@ -3219,7 +3220,8 @@ Example::
 add_docstr(
     torch.cummax,
     r"""
-cummax(input, dim, *, out=None) -> (Tensor, LongTensor)
+cummax(input: Tensor, dim: int, *, out: Union[Tensor, Tuple[Tensor, ...], List[Tensor]] = None) -> (Tensor, LongTensor)
+
 Returns a namedtuple ``(values, indices)`` where ``values`` is the cumulative maximum of
 elements of :attr:`input` in the dimension :attr:`dim`. And ``indices`` is the index
 location of each maximum value found in the dimension :attr:`dim`.
@@ -3251,7 +3253,8 @@ Example::
 add_docstr(
     torch.cummin,
     r"""
-cummin(input, dim, *, out=None) -> (Tensor, LongTensor)
+cummin(input: Tensor, dim: int, *, out: Union[Tensor, Tuple[Tensor, ...], List[Tensor]] = None) -> (Tensor, LongTensor)
+
 Returns a namedtuple ``(values, indices)`` where ``values`` is the cumulative minimum of
 elements of :attr:`input` in the dimension :attr:`dim`. And ``indices`` is the index
 location of each maximum value found in the dimension :attr:`dim`.
@@ -3283,7 +3286,7 @@ Example::
 add_docstr(
     torch.cumprod,
     r"""
-cumprod(input, dim, *, dtype=None, out=None) -> Tensor
+cumprod(input: Tensor, dim: int, *, dtype: Optional[dtype] = None, out: Optional[Tensor] = None) -> Tensor
 
 Returns the cumulative product of elements of :attr:`input` in the dimension
 :attr:`dim`.
@@ -3322,7 +3325,7 @@ Example::
 add_docstr(
     torch.cumsum,
     r"""
-cumsum(input, dim, *, dtype=None, out=None) -> Tensor
+cumsum(input: Tensor, dim: int, *, dtype: Optional[dtype] = None, out: Optional[Tensor] = None) -> Tensor
 
 Returns the cumulative sum of elements of :attr:`input` in the dimension
 :attr:`dim`.
@@ -3354,7 +3357,7 @@ Example::
 add_docstr(
     torch.count_nonzero,
     r"""
-count_nonzero(input, dim=None) -> Tensor
+count_nonzero(input: Tensor, dim: Optional[Union[int, Sequence[int]]] = None) -> Tensor
 
 Counts the number of non-zero values in the tensor :attr:`input` along the given :attr:`dim`.
 If no dim is specified then all non-zeros in the tensor are counted.
@@ -3381,7 +3384,7 @@ Example::
 add_docstr(
     torch.dequantize,
     r"""
-dequantize(tensor) -> Tensor
+dequantize(tensor: Tensor) -> Tensor
 
 Returns an fp32 Tensor by dequantizing a quantized Tensor
 
@@ -3401,7 +3404,7 @@ Args:
 add_docstr(
     torch.diag,
     r"""
-diag(input, diagonal=0, *, out=None) -> Tensor
+diag(input: Tensor, diagonal: int = 0, *, out: Optional[Tensor] = None) -> Tensor
 
 - If :attr:`input` is a vector (1-D tensor), then returns a 2-D square tensor
   with the elements of :attr:`input` as the diagonal.
@@ -3462,7 +3465,7 @@ Get the k-th diagonal of a given matrix::
 add_docstr(
     torch.diag_embed,
     r"""
-diag_embed(input, offset=0, dim1=-2, dim2=-1) -> Tensor
+diag_embed(input: Tensor, offset: int = 0, dim1: int = -2, dim2: int = -1) -> Tensor
 
 Creates a tensor whose diagonals of certain 2D planes (specified by
 :attr:`dim1` and :attr:`dim2`) are filled by :attr:`input`.
@@ -3526,7 +3529,7 @@ Example::
 add_docstr(
     torch.diagflat,
     r"""
-diagflat(input, offset=0) -> Tensor
+diagflat(input: Tensor, offset: int = 0) -> Tensor
 
 - If :attr:`input` is a vector (1-D tensor), then returns a 2-D square tensor
   with the elements of :attr:`input` as the diagonal.
@@ -3574,7 +3577,7 @@ Examples::
 add_docstr(
     torch.diagonal,
     r"""
-diagonal(input, offset=0, dim1=0, dim2=1) -> Tensor
+diagonal(input: Tensor, offset: int = 0, dim1: int = 0, dim2: int = 1) -> Tensor
 
 Returns a partial view of :attr:`input` with the its diagonal elements
 with respect to :attr:`dim1` and :attr:`dim2` appended as a dimension
@@ -3632,7 +3635,7 @@ Examples::
 add_docstr(
     torch.diagonal_scatter,
     r"""
-diagonal_scatter(input, src, offset=0, dim1=0, dim2=1) -> Tensor
+diagonal_scatter(input: Tensor, src: Tensor, offset: int = 0, dim1: int = 0, dim2: int = 1) -> Tensor
 
 Embeds the values of the :attr:`src` tensor into :attr:`input` along
 the diagonal elements of :attr:`input`, with respect to :attr:`dim1`
@@ -3729,7 +3732,7 @@ Example::
 add_docstr(
     torch.diff,
     r"""
-diff(input, n=1, dim=-1, prepend=None, append=None) -> Tensor
+diff(input: Tensor, n: int = 1, dim: int = -1, prepend: Optional[Tensor] = None, append: Optional[Tensor] = None, *, out: Optional[Tensor]) -> Tensor # noqa: B950
 
 Computes the n-th forward difference along the given dimension.
 
@@ -3769,7 +3772,7 @@ Example::
 add_docstr(
     torch.digamma,
     r"""
-digamma(input, *, out=None) -> Tensor
+digamma(input: Tensor, *, out: Optional[Tensor] = None) -> Tensor
 
 Alias for :func:`torch.special.digamma`.
 """,
@@ -3812,7 +3815,7 @@ Example::
 add_docstr(
     torch.div,
     r"""
-div(input, other, *, rounding_mode=None, out=None) -> Tensor
+div(input: Union[Tensor, Number], other: Union[Tensor, Number], *, rounding_mode: Optional[str] = None, out: Optional[Tensor] = None) -> Tensor # noqa: B950
 
 Divides each element of the input ``input`` by the corresponding element of
 :attr:`other`.
@@ -3829,7 +3832,7 @@ Supports :ref:`broadcasting to a common shape <broadcasting-semantics>`,
 Always promotes integer types to the default scalar type.
 
 Args:
-    input (Tensor): the dividend
+    input (Tensor or Number): the dividend
     other (Tensor or Number): the divisor
 
 Keyword args:
@@ -3889,7 +3892,7 @@ Alias for :func:`torch.div`.
 add_docstr(
     torch.dot,
     r"""
-dot(input, tensor, *, out=None) -> Tensor
+dot(input: Tensor, other: Tensor, *, out: Optional[Tensor] = None) -> Tensor
 
 Computes the dot product of two 1D tensors.
 
@@ -3919,7 +3922,7 @@ Example::
 add_docstr(
     torch.vdot,
     r"""
-vdot(input, other, *, out=None) -> Tensor
+vdot(input: Tensor, other: Tensor, *, out: Optional[Tensor] = None) -> Tensor
 
 Computes the dot product of two 1D vectors along a dimension.
 
@@ -3968,7 +3971,7 @@ Example::
 add_docstr(
     torch.eq,
     r"""
-eq(input, other, *, out=None) -> Tensor
+eq(input: Tensor, other: Tensor, *, out: Optional[Tensor] = None) -> Tensor
 
 Computes element-wise equality
 
@@ -3996,7 +3999,7 @@ Example::
 add_docstr(
     torch.equal,
     r"""
-equal(input, other) -> bool
+equal(input: Tensor, other: Tensor) -> bool
 
 ``True`` if two tensors have the same size and elements, ``False`` otherwise.
 
@@ -4014,7 +4017,7 @@ Example::
 add_docstr(
     torch.erf,
     r"""
-erf(input, *, out=None) -> Tensor
+erf(input: Tensor, *, out: Optional[Tensor] = None) -> Tensor
 
 Alias for :func:`torch.special.erf`.
 """,
@@ -4023,7 +4026,7 @@ Alias for :func:`torch.special.erf`.
 add_docstr(
     torch.erfc,
     r"""
-erfc(input, *, out=None) -> Tensor
+erfc(input: Tensor, *, out: Optional[Tensor] = None) -> Tensor
 
 Alias for :func:`torch.special.erfc`.
 """,
@@ -4032,7 +4035,7 @@ Alias for :func:`torch.special.erfc`.
 add_docstr(
     torch.erfinv,
     r"""
-erfinv(input, *, out=None) -> Tensor
+erfinv(input: Tensor, *, out: Optional[Tensor] = None) -> Tensor
 
 Alias for :func:`torch.special.erfinv`.
 """,
@@ -4041,7 +4044,7 @@ Alias for :func:`torch.special.erfinv`.
 add_docstr(
     torch.exp,
     r"""
-exp(input, *, out=None) -> Tensor
+exp(input: Tensor, *, out: Optional[Tensor] = None) -> Tensor
 
 Returns a new tensor with the exponential of the elements
 of the input tensor :attr:`input`.
@@ -4066,7 +4069,7 @@ Example::
 add_docstr(
     torch.exp2,
     r"""
-exp2(input, *, out=None) -> Tensor
+exp2(input: Tensor, *, out: Optional[Tensor] = None) -> Tensor
 
 Alias for :func:`torch.special.exp2`.
 """,
@@ -4075,7 +4078,7 @@ Alias for :func:`torch.special.exp2`.
 add_docstr(
     torch.expm1,
     r"""
-expm1(input, *, out=None) -> Tensor
+expm1(input: Tensor, *, out: Optional[Tensor] = None) -> Tensor
 
 Alias for :func:`torch.special.expm1`.
 """,
@@ -4114,7 +4117,7 @@ Example::
 add_docstr(
     torch.floor,
     r"""
-floor(input, *, out=None) -> Tensor
+floor(input: Tensor, *, out: Optional[Tensor] = None) -> Tensor
 
 Returns a new tensor with the floor of the elements of :attr:`input`,
 the largest integer less than or equal to each element.
@@ -4145,7 +4148,7 @@ Example::
 add_docstr(
     torch.floor_divide,
     r"""
-floor_divide(input, other, *, out=None) -> Tensor
+floor_divide(input: Union[Tensor, Number], other: Union[Tensor, Number], *, out: Optional[Tensor] = None) -> Tensor
 
 .. note::
 
@@ -4185,7 +4188,7 @@ Example::
 add_docstr(
     torch.fmod,
     r"""
-fmod(input, other, *, out=None) -> Tensor
+fmod(input: Tensor, other: Union[Tensor, Number, _complex], *, out: Optional[Tensor] = None) -> Tensor
 
 Applies C++'s `std::fmod <https://en.cppreference.com/w/cpp/numeric/math/fmod>`_ entrywise.
 The result has the same sign as the dividend :attr:`input` and its absolute value
@@ -4236,7 +4239,7 @@ Example::
 add_docstr(
     torch.frac,
     r"""
-frac(input, *, out=None) -> Tensor
+frac(input: Tensor, *, out: Optional[Tensor] = None) -> Tensor
 
 Computes the fractional portion of each element in :attr:`input`.
 
@@ -4253,7 +4256,7 @@ Example::
 add_docstr(
     torch.frexp,
     r"""
-frexp(input, *, out=None) -> (Tensor mantissa, Tensor exponent)
+frexp(input: Tensor, *, out: Union[Tensor, Tuple[Tensor, ...], List[Tensor]] = None) -> (Tensor mantissa, Tensor exponent)
 
 Decomposes :attr:`input` into mantissa and exponent tensors
 such that :math:`\text{input} = \text{mantissa} \times 2^{\text{exponent}}`.
@@ -4316,7 +4319,7 @@ Example::
 add_docstr(
     torch.frombuffer,
     r"""
-frombuffer(buffer, *, dtype, count=-1, offset=0, requires_grad=False) -> Tensor
+frombuffer(buffer: Any, *, dtype: dtype, count: int = -1, offset: int = 0, requires_grad: bool = False) -> Tensor
 
 Creates a 1-dimensional :class:`Tensor` from an object that implements
 the Python buffer protocol.
@@ -4429,7 +4432,7 @@ Example::
 add_docstr(
     torch.flatten,
     r"""
-flatten(input, start_dim=0, end_dim=-1) -> Tensor
+flatten(input: Tensor, start_dim: int = 0, end_dim: int = -1) -> Tensor
 
 Flattens :attr:`input` by reshaping it into a one-dimensional tensor. If :attr:`start_dim` or :attr:`end_dim`
 are passed, only dimensions starting with :attr:`start_dim` and ending with :attr:`end_dim` are flattened.
@@ -4465,7 +4468,7 @@ Example::
 add_docstr(
     torch.unflatten,
     r"""
-unflatten(input, dim, sizes) -> Tensor
+unflatten(input: Tensor, dim: int, sizes: Sequence[int]) -> Tensor
 
 Expands a dimension of the input tensor over multiple dimensions.
 
@@ -4477,7 +4480,7 @@ Args:
     {input}
     dim (int): Dimension to be unflattened, specified as an index into
          ``input.shape``.
-    sizes (Tuple[int]): New shape of the unflattened dimension.
+    sizes (Sequence[int]): New shape of the unflattened dimension.
          One of its elements can be `-1` in which case the corresponding output
          dimension is inferred. Otherwise, the product of ``sizes`` *must*
          equal ``input.shape[dim]``.
@@ -4498,7 +4501,7 @@ Examples::
 add_docstr(
     torch.gather,
     r"""
-gather(input, dim, index, *, sparse_grad=False, out=None) -> Tensor
+gather(input: Tensor, dim: int, index: Tensor, *, sparse_grad: bool = False, out: Optional[Tensor] = None) -> Tensor
 
 Gathers values along an axis specified by `dim`.
 
@@ -4516,7 +4519,7 @@ Note that ``input`` and ``index`` do not broadcast against each other.
 Args:
     input (Tensor): the source tensor
     dim (int): the axis along which to index
-    index (LongTensor): the indices of elements to gather
+    index (Tensor): the indices of elements to gather
 
 Keyword arguments:
     sparse_grad (bool, optional): If ``True``, gradient w.r.t. :attr:`input` will be a sparse tensor.
@@ -12629,7 +12632,7 @@ Example::
 add_docstr(
     torch.combinations,
     r"""
-combinations(input: Tensor, r: int = 2, with_replacement: bool = False) -> seq
+combinations(input: Tensor, r: int = 2, with_replacement: bool = False) -> Tensor
 
 Compute combinations of length :math:`r` of the given tensor. The behavior is similar to
 python's `itertools.combinations` when `with_replacement` is set to `False`, and
