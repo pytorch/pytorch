@@ -394,11 +394,7 @@ class TORCH_API Context {
   bool enabled_cudnnSDP = true;
   bool enabled_overrideable = true;
   bool allow_fp16_bf16_reduction_mathSDP = false;
-#ifdef USE_ROCM
-  bool benchmark_cudnn = true;
-#else
   bool benchmark_cudnn = false;
-#endif
   Float32MatmulPrecision float32_matmul_precision =
       c10::utils::check_env("TORCH_ALLOW_TF32_CUBLAS_OVERRIDE") == true
       ? at::Float32MatmulPrecision::HIGH
