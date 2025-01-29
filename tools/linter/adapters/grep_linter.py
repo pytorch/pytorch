@@ -226,7 +226,7 @@ def main() -> None:
     lines = []
     try:
         # Split the grep command into multiple batches to avoid hitting the
-        # command line length limit
+        # command line length limit of ~1M on my machine
         arg_length = sum(len(x) for x in args.filenames)
         batches = arg_length // 750000 + 1
         batch_size = len(args.filenames) // batches
