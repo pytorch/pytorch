@@ -393,6 +393,12 @@ def _log_traced_frames():
     log.info(msg)
 
 
+def _set_random_state_no_eval_frame(state):
+    prior = set_eval_frame(None)
+    random.setstate(state)
+    set_eval_frame(prior)
+
+
 class _TorchDynamoContext:
     def __init__(
         self,
@@ -567,10 +573,10 @@ class _TorchDynamoContext:
                     torch._C._functorch.get_dynamic_layer_stack_depth()
                 )
                 _maybe_set_eval_frame(_callback_from_stance(callback))
+                # ignore random state updates since beginning of _fn
+                _set_random_state_no_eval_frame(prev_rng_state)
 
                 try:
-                    # ignore random state updates since beginning of _fn
-                    random.setstate(prev_rng_state)
                     return fn(*args, **kwargs)
                 except ShortenTraceback as e:
                     # Failures in the backend likely don't have useful
@@ -593,7 +599,7 @@ class _TorchDynamoContext:
                 # ignore random state updates:
                 # - since beginning of _fn if fn was not called
                 # - since end of fn if fn was called (even if exn occurs)
-                random.setstate(prev_rng_state)
+                _set_random_state_no_eval_frame(prev_rng_state)
 
         # hooks to properly handle inlining
         _fn._torchdynamo_inline = fn  # type: ignore[attr-defined]
@@ -756,8 +762,8 @@ class DisableContext(_TorchDynamoContext):
                     _is_skip_guard_eval_unsafe_stance()
                 )
                 _maybe_set_eval_frame(_callback_from_stance(self.callback))
+                _set_random_state_no_eval_frame(prev_rng_state)
                 try:
-                    random.setstate(prev_rng_state)
                     return fn(*args, **kwargs)
                 finally:
                     set_eval_frame(None)
@@ -765,7 +771,7 @@ class DisableContext(_TorchDynamoContext):
                     prev_rng_state = random.getstate()
             finally:
                 _maybe_set_eval_frame(prior)
-                random.setstate(prev_rng_state)
+                _set_random_state_no_eval_frame(prev_rng_state)
 
         _fn._torchdynamo_disable = True  # type: ignore[attr-defined]
 
