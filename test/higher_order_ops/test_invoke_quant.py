@@ -20,7 +20,7 @@ from torch._inductor.pattern_matcher import (
     PatternMatcherPass,
     register_graph_pattern,
 )
-from torch._inductor.utils import run_and_get_code
+from torch._inductor.utils import is_big_gpu, run_and_get_code
 from torch.testing import FileCheck
 from torch.testing._internal.common_utils import run_tests, skipIfTorchDynamo, TestCase
 from torch.testing._internal.inductor_utils import requires_gpu
@@ -181,6 +181,7 @@ class TestInvokeQuantInductor(TestInvokeQuant):
 
     @requires_gpu()
     @config.patch(prologue_fusion=True)
+    @unittest.skipIf(not is_big_gpu(), "requires big gpu")
     def test_prologue(self):
         def gn(x, y):
             return torch.mul(x, y) + (y - 1)
