@@ -67,9 +67,9 @@ def _dequantize_tensor(tensor, qtype, quant_loss=None):
         else:
             return tensor.float() / quant_loss
     elif qtype == DQuantType.BFP16:
-        if tensor.dtype != torch.float16:
+        if tensor.dtype != torch.bfloat16:
             raise RuntimeError(
-                f"tensor dtype is {tensor.dtype} while expected to be FP16."
+                f"tensor dtype is {tensor.dtype} while expected to be BF16."
             )
         else:
             return torch.ops.quantization._Bfloat16QuantizedToFloat(tensor)
