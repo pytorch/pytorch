@@ -411,7 +411,7 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         ):
             return self.var_getattr(tx, args[0].as_python_constant())
         elif (
-            name in ("__eq__", "__lt__")
+            name in cmp_name_to_op_mapping
             and len(args) == 1
             and self.is_python_constant()
             and not tx.output.side_effects.has_pending_mutation(self)

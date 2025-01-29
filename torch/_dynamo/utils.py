@@ -1010,7 +1010,11 @@ def is_function(value):
 
 cmp_name_to_op_mapping = {
     "__eq__": operator.eq,
+    "__ne__": operator.ne,
     "__lt__": operator.lt,
+    "__le__": operator.le,
+    "__gt__": operator.gt,
+    "__ge__": operator.ge,
 }
 
 

@@ -137,7 +137,7 @@ class BaseListVariable(VariableTracker):
                 [self] + list(args),
                 kwargs,
             )
-        elif name in ("__eq__", "__lt__"):
+        elif name in cmp_name_to_op_mapping:
             left = self
             right = args[0]
             if not isinstance(left, BaseListVariable) and not isinstance(

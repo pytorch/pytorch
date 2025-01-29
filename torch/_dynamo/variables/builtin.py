@@ -38,6 +38,7 @@ from ..utils import (
     check_numpy_ndarray_args,
     check_unspec_or_constant_args,
     check_unspec_python_args,
+    cmp_name_to_op_mapping,
     dict_methods,
     extract_fake_example_value,
     get_fake_value,
@@ -97,6 +98,16 @@ IN_PLACE_DESUGARING_MAP = {
     operator.iand: operator.and_,
     operator.ior: operator.or_,
     operator.ixor: operator.xor,
+}
+
+
+polyfill_fn_mapping = {
+    operator.eq: polyfills.cmp_eq,
+    operator.ne: polyfills.cmp_ne,
+    operator.lt: polyfills.cmp_lt,
+    operator.le: polyfills.cmp_le,
+    operator.gt: polyfills.cmp_gt,
+    operator.ge: polyfills.cmp_ge,
 }
 
 
@@ -456,15 +467,6 @@ class BuiltinVariable(VariableTracker):
             ((ConstantVariable, TupleVariable), expand_list_like),
         ]
         op_handlers[operator.mul].extend(list_like_expansion_handlers)
-
-        polyfill_fn_mapping = {
-            operator.eq: polyfills.cmp_eq,
-            operator.ne: polyfills.cmp_ne,
-            operator.lt: polyfills.cmp_lt,
-            operator.le: polyfills.cmp_le,
-            operator.gt: polyfills.cmp_gt,
-            operator.ge: polyfills.cmp_ge,
-        }
 
         def create_cmp_op_handlers(op):
             def compare_by_value(tx: "InstructionTranslator", a, b):
@@ -1699,7 +1701,7 @@ class BuiltinVariable(VariableTracker):
                 member, (torch._ops.OpOverloadPacket, torch._ops.OpOverload)
             ) and torch._dynamo.trace_rules.is_aten_op_or_tensor_method(member):
                 return variables.TorchInGraphFunctionVariable(member, source=source)
-            elif name in ("__eq__", "__lt__"):
+            elif name in cmp_name_to_op_mapping:
                 return variables.GetAttrVariable(obj, name, source=source)
         elif isinstance(obj, DummyModule):
             # TODO(mlazos) - Do we need this?

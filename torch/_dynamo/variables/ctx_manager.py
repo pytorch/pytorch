@@ -1119,9 +1119,6 @@ class StreamVariable(VariableTracker):
     def python_type(self):
         return torch.Stream
 
-    def as_python_constant(self):
-        return self.value
-
     def call_method(
         self,
         tx,
@@ -1131,7 +1128,7 @@ class StreamVariable(VariableTracker):
     ) -> "VariableTracker":
         assert hasattr(self.value, name), f"no stream method found named {name}"
 
-        from ..utils import proxy_args_kwargs
+        from ..utils import cmp_name_to_op_mapping, proxy_args_kwargs
         from .builder import wrap_fx_proxy_cls
 
         if name in ("wait_stream", "synchronize", "wait_event"):
@@ -1155,6 +1152,16 @@ class StreamVariable(VariableTracker):
                     "call_method", name, *proxy_args_kwargs([self] + args, kwargs)
                 ),
             )
+        elif name in cmp_name_to_op_mapping and len(args) == 1 and not kwargs:
+            # NB : Checking for mutation is necessary because we compare
+            # constant values
+            other = args[0]
+            if not isinstance(other, StreamVariable):
+                return variables.ConstantVariable.create(NotImplemented)
+            return variables.ConstantVariable.create(
+                cmp_name_to_op_mapping[name](self.value, other.value)
+            )
+
         return super().call_method(tx, name, args, kwargs)
 
     def as_proxy(self):

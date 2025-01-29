@@ -41,6 +41,7 @@ from ..utils import (
     build_checkpoint_variable,
     build_invoke_subgraph_variable,
     check_constant_args,
+    cmp_name_to_op_mapping,
     dict_methods,
     get_custom_getattr,
     has_torch_function,
@@ -163,7 +164,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
             return ConstantVariable.create(self.value.__name__)
         elif name == "__qualname__":
             return ConstantVariable.create(self.value.__qualname__)
-        elif name in ("__dict__", "__eq__", "__lt__"):
+        elif name == "__dict__":
             options = {"source": source}
             return variables.GetAttrVariable(self, name, **options)
 
@@ -182,6 +183,9 @@ class UserDefinedClassVariable(UserDefinedVariable):
             obj = inspect.getattr_static(self.value, name)
         except AttributeError:
             obj = None
+
+        if name in cmp_name_to_op_mapping and not isinstance(obj, types.FunctionType):
+            return variables.GetAttrVariable(self, name, source=source)
 
         if isinstance(obj, staticmethod):
             return VariableTracker.build(tx, obj.__get__(self.value), source)
