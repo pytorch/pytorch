@@ -56,9 +56,21 @@ def triple_nested_map(xs, y0, y1):
     return map(f0, xs, y0, y1)
 
 
-# Please consult with torch.export team before
-# adding new entry to this list.
-hop_that_doesnt_have_opinfo_test_allowlist = [
+# PLEASE DON'T ADD ANYTHING NEW TO THIS LIST,
+# and do add an OpInfo for your HOP.
+# The OpInfo lets us do automated testing for the HOP to check that
+# your HOP will work correctly with PyTorch!
+#
+# Your new HOP may fail some automated testing. That's OK. If you don't
+# care about certain features (like torch.export), it's fine to xfail those
+# failing tests. It is less fine to xfail a more critical check (like checking
+# if torch.compile works with your HOP, or if your HOP has a docstring).
+# If you don't know if a test is fine to xfail, please ask.
+#
+# There are legitimate reasons why something cannot be added to this list
+# (e.g. it uses executorch which is not in PyTorch). If that's the case then
+# please leave a comment.
+FIXME_hop_that_doesnt_have_opinfo_test_allowlist = [
     "custom_function_call",
     "autograd_function_apply",
     "run_and_save_rng_state",
