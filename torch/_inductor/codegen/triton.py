@@ -292,7 +292,7 @@ class BlockPtrOptions:
         *,
         params: BlockParameters,
         constant_offset: sympy.Expr,
-        range_trees: list[IterationRangesEntry],
+        range_trees: list[IterationRangesRoot],
         mask_vars: OrderedSet[str],
         get_max_block: Callable[[str], int],
     ) -> BlockPtrOptions:
@@ -1351,14 +1351,10 @@ class TritonKernelOverrides(TritonOverrides):
         assert nodes, "graph for body does not contain an output"
 
         need_where = False
-        # If we have a tl.load with a masking operator and no other value
-        # we can add the mask here and the other value to the tl.load
-        # operator to save the branching cost.
         for node in nodes:
             for arg in node.args:
-                if arg.target != "load" or should_unwrap_unspec_arg(arg.args[1]):
+                if arg.target != "load" or should_unwrap_unspec_arg(arg.args[0]):
                     need_where = True
-                    break
 
         value = None if need_where else other
 
@@ -1744,7 +1740,7 @@ class TritonKernel(SIMDKernel):
         ):
 
             def match_strided_block(
-                index: sympy.Expr, range_tree: IterationRangesEntry
+                index: sympy.Expr, range_tree: IterationRangesRoot
             ) -> Optional[BlockParameters]:
                 """
                 Matches expressions of the form:
@@ -1766,7 +1762,7 @@ class TritonKernel(SIMDKernel):
                 )
 
             def match_mod_div_block(
-                index: sympy.Expr, range_tree: IterationRangesEntry
+                index: sympy.Expr, range_tree: IterationRangesRoot
             ) -> Optional[BlockParameters]:
                 """
                 Matches higher-dimensional blocks coming from FloorDiv and ModularIndexing.
@@ -1864,7 +1860,7 @@ class TritonKernel(SIMDKernel):
                 )
 
             def match_block_pointer_subexpr(
-                expr: sympy.Expr, range_tree: IterationRangesEntry
+                expr: sympy.Expr, range_tree: IterationRangesRoot
             ) -> Optional[BlockParameters]:
                 """
                 Match a block indexing subexpression involving a single range tree.
@@ -1933,12 +1929,8 @@ class TritonKernel(SIMDKernel):
         if isinstance(index, sympy.Integer):
             expand_str = f"{copy_shape}.shape" if copy_shape else self.dense_size_str()
             index_str = f"tl.full({expand_str}, {index_str}, tl.int32)"
-            mask_vars = OrderedSet()
-            if self._load_mask:
-                mask_vars.add(self._load_mask)
-            mask_str = " & ".join(sorted(map(str, mask_vars))) if mask_vars else "None"
             return IndexingOptions(
-                index_str, mask_vars, mask_str, expand_str, has_rindex, index
+                index_str, OrderedSet(), "None", expand_str, has_rindex, index
             )
 
         if need_dense and not have_dense:
@@ -2140,7 +2132,8 @@ class TritonKernel(SIMDKernel):
                 line = indexing.codegen_broadcast_and_reshape(
                     line, indexing.block_shape, indexing.final_shape, True
                 )
-            elif isinstance(original_index, sympy.Integer) and not indexing.mask_vars:
+
+            elif isinstance(original_index, sympy.Integer):
                 line = f"tl.load({var} + ({original_index}))"
                 append_broadcast = indexing.expand_str
             else:
@@ -3817,7 +3810,7 @@ class TritonKernel(SIMDKernel):
 
 class TritonScheduling(SIMDScheduling):
     kernel_type: type[Any] = TritonKernel
-    backend_features = dict.fromkeys(  # dict for deterministic order
+    backend_features = OrderedSet(
         [
             BackendFeature.FOREACH,
             BackendFeature.BUCKETIZE,
@@ -3829,16 +3822,14 @@ class TritonScheduling(SIMDScheduling):
     )
     if torch.version.hip is None:
         backend_features.update(
-            dict.fromkeys(
-                [
-                    # TODO: Move this above when ROCm triton adds support for multiple inputs
-                    BackendFeature.TUPLE_REDUCTION,
-                    BackendFeature.SORT,
-                ]
-            )
+            [
+                # TODO: Move this above when ROCm triton adds support for multiple inputs
+                BackendFeature.TUPLE_REDUCTION,
+                BackendFeature.SORT,
+            ]
         )
 
-    def __init__(self, scheduler: Scheduler) -> None:
+    def __init__(self, scheduler: Optional[Scheduler]) -> None:
         super().__init__(scheduler)
         if scheduler is None or not hasattr(scheduler, "nodes"):
             return
@@ -3852,10 +3843,9 @@ class TritonScheduling(SIMDScheduling):
             config.triton.cooperative_reductions
             or config.triton.force_cooperative_reductions
         ):
-            return {
-                **cls.backend_features,
-                BackendFeature.REDUCE_TO_SINGLE_ELEMENT: None,
-            }
+            return OrderedSet(
+                [*cls.backend_features, BackendFeature.REDUCE_TO_SINGLE_ELEMENT]
+            )
         return cls.backend_features
 
     def codegen_comment(self, node_schedule):
@@ -3935,19 +3925,35 @@ class TritonScheduling(SIMDScheduling):
 
         return kernel_name
 
-    def benchmark_fused_nodes(self, nodes, n_spills_threshold=8):
+    def benchmark_fused_nodes(self, nodes, n_spills_threshold=8) -> tuple[float, str]:
+        """
+        Benchmark fused list of nodes and return the execution time
+        in milliseconds on randomly generated inputs.
+        """
+        src_code = self.generate_kernel_code_from_nodes(nodes, benchmark_kernel=True)
+        mod = PyCodeCache.load(src_code)
+        return self.benchmark_codegened_module(
+            mod, n_spills_threshold, node_names=OrderedSet(n.get_name() for n in nodes)
+        )
+
+    def benchmark_codegened_module(
+        self, mod, n_spills_threshold=8, node_names: Optional[OrderedSet[str]] = None
+    ) -> tuple[float, str]:
+        """Benchmark an already compiled module"""
         device_interface = get_interface_for_device(V.graph.device_type)
         with preserve_rng_state(), device_interface.device(
             V.graph.get_current_device_or_throw()
         ):  # type: ignore[attr-defined]
-            src_code = self.generate_kernel_code_from_nodes(
-                nodes, benchmark_kernel=True
-            )
-            mod = PyCodeCache.load(src_code)
+            ms = None
 
             def cache_file_path():
                 assert mod.__file__ is not None
                 return os.path.splitext(mod.__file__)[0] + ".kernel_perf"
+
+            def store_cache():
+                path = cache_file_path()
+                with open(path, "w") as fd:
+                    fd.write(str(ms))  # type: ignore[has-type]
 
             def load_cache():
                 path = cache_file_path()
@@ -3956,15 +3962,13 @@ class TritonScheduling(SIMDScheduling):
                         return float(fd.read())
                 return None
 
-            def store_cache():
-                path = cache_file_path()
-                with open(path, "w") as fd:
-                    fd.write(str(ms))  # type: ignore[has-type]
-
+            node_names = (
+                node_names if node_names is not None else OrderedSet(["unknown"])
+            )
             log.debug(
                 "kernel src code for %s written to: %s",
-                OrderedSet(n.get_name() for n in nodes),
                 mod.__file__,
+                node_names,
             )
             ms = load_cache()
             if ms is not None:
@@ -3973,7 +3977,6 @@ class TritonScheduling(SIMDScheduling):
             args = mod.get_args()
             call = mod.call
             wrapped_jit_function = mod.triton_
-
             # call once to trigger the compilation
             try:
                 call(wrapped_jit_function.clone_args(*args)[0])
@@ -3981,7 +3984,7 @@ class TritonScheduling(SIMDScheduling):
                 log.debug(
                     "Exception (%s) in compiling fused nodes %s",
                     e,
-                    OrderedSet(n.get_name() for n in nodes),
+                    node_names,
                 )
                 ms = float("inf")
                 store_cache()
@@ -4000,7 +4003,6 @@ class TritonScheduling(SIMDScheduling):
                 ms = benchmarker.benchmark_gpu(
                     lambda: call(wrapped_jit_function.clone_args(*args)[0])
                 )
-
                 # overhead of cloning args gives bias for fusing the kernel
                 # in the case of mutating/in-placeable second fusion
                 # TODO - would be better as a hook in triton do_bench that reset
@@ -4012,7 +4014,7 @@ class TritonScheduling(SIMDScheduling):
 
             log.debug(
                 "The fused kernel for %s took %.3f ms to run",
-                OrderedSet(n.get_name() for n in nodes),
+                node_names,
                 ms,
             )
             store_cache()
