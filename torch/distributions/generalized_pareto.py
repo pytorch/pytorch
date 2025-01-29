@@ -16,8 +16,8 @@ class GeneralizedPareto(Distribution):
     Creates a Generalized Pareto distribution parameterized by :attr:`loc`, :attr:`scale`, and :attr:`concentration`.
 
     The Generalized Pareto distribution is a family of continuous probability distributions on the real line.
-    Special cases include Exponential (when  :attr:`loc` = 0, :attr:`concentration` = 0), Pareto (when :attr:`concentration` > 0,
-     :attr:`loc` = :attr:`scale` / :attr:`concentration`), and Uniform (when :attr:`concentration` = -1).
+    Special cases include Exponential (when :attr:`loc` = 0, :attr:`concentration` = 0), Pareto (when :attr:`concentration` > 0,
+    :attr:`loc` = :attr:`scale` / :attr:`concentration`), and Uniform (when :attr:`concentration` = -1).
 
     This distribution is often used to model the tails of other distributions. This implementation is based on the
     implementation in TensorFlow Probability.
