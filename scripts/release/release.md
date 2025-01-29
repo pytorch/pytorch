@@ -187,7 +187,7 @@ The PyTorch binaries shipped with CUDA 12.6.3 are built with CXX11_ABI=1 and are
 ### Releng
 
 * Removed CUDA 12.1 support in CI/CD ([#141271](https://github.com/pytorch/pytorch/pull/141271)) ([#142177](https://github.com/pytorch/pytorch/pull/142177))
-The full release compatibility matrix matrix can be found in (release.md)[https://github.com/pytorch/pytorch/blob/main/RELEASE.md#release-compatibility-matrix]
+The full release compatibility matrix matrix can be found in [release.md](https://github.com/pytorch/pytorch/blob/main/RELEASE.md#release-compatibility-matrix)
 
 * **Deprecated `c10d::onCompletionHook` ([#142390](https://github.com/pytorch/pytorch/pull/142390))**
     * In PT 2.5 and before, users can do:
