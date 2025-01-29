@@ -16,9 +16,9 @@ import numpy as np
 import torch
 import torch._dynamo
 import torch._dynamo.testing
-from torch.nested._internal.dict_tensor import DictTensor
 import torch.nn
 import torch.nn.functional as F
+from torch.nested._internal.dict_tensor import DictTensor
 from torch.nested._internal.nested_tensor import (
     _DO_NOT_USE_nested_tensor_ctor_compat,
     buffer_from_jagged,
@@ -3745,7 +3745,10 @@ class TestNestedTensorSubclass(NestedTensorTestCase):
             self.assertEqual(nt._lengths, nt_loaded._lengths)
 
     def test_tensor_attributes(self, device):
-        from torch.nested._internal.nested_tensor import _make_nested_meta, get_tensor_symint
+        from torch.nested._internal.nested_tensor import (
+            _make_nested_meta,
+            get_tensor_symint,
+        )
 
         a = torch.randn(2, 3, requires_grad=True, dtype=torch.float64, device=device)
         b = torch.randn(3, 3, requires_grad=True, dtype=torch.float64, device=device)
@@ -3776,9 +3779,7 @@ class TestNestedTensorSubclass(NestedTensorTestCase):
             min_seqlen=None,
         )
         assert non_contig_offsets is None
-        nested_int = get_tensor_symint(
-            metadata, coeff=1
-        )
+        nested_int = get_tensor_symint(metadata, coeff=1)
         self.assertEqual(nt.size(), (3, nested_int, 3))
         self.assertEqual(nt.shape, (3, nested_int, 3))
         self.assertEqual(nt.dim(), 3)
