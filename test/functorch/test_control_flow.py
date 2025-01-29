@@ -2880,15 +2880,16 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1, arg5_1):
             gm.code.strip(),
             """\
 def forward(self, fct_1, init_1, xs_1):
-    select = torch.ops.aten.select.int(xs_1, 0, 0)
-    add = torch.ops.aten.add.Tensor(init_1, select);  add = None
-    add_1 = torch.ops.aten.add.Tensor(init_1, select);  select = add_1 = None
+    permute = torch.ops.aten.permute.default(xs_1, [0, 1, 2])
+    select_copy = torch.ops.aten.select_copy.int(permute, 0, 0)
+    add = torch.ops.aten.add.Tensor(init_1, select_copy);  add = None
+    add_1 = torch.ops.aten.add.Tensor(init_1, select_copy);  select_copy = add_1 = None
     sym_size_int_1 = torch.ops.aten.sym_size.int(init_1, 1)
     sym_size_int_2 = torch.ops.aten.sym_size.int(init_1, 2)
     sym_size_int_3 = torch.ops.aten.sym_size.int(xs_1, 1)
-    sym_size_int_4 = torch.ops.aten.sym_size.int(xs_1, 2)
+    sym_size_int_4 = torch.ops.aten.sym_size.int(xs_1, 2);  xs_1 = None
     scan_combine_graph_0 = self.scan_combine_graph_0
-    scan = torch.ops.higher_order.scan(scan_combine_graph_0, [init_1], [xs_1], 0, True, [sym_size_int_1, sym_size_int_2, sym_size_int_3, sym_size_int_4]);  scan_combine_graph_0 = init_1 = xs_1 = sym_size_int_1 = sym_size_int_2 = sym_size_int_3 = sym_size_int_4 = None
+    scan = torch.ops.higher_order.scan(scan_combine_graph_0, [init_1], [permute], True, [sym_size_int_1, sym_size_int_2, sym_size_int_3, sym_size_int_4]);  scan_combine_graph_0 = init_1 = permute = sym_size_int_1 = sym_size_int_2 = sym_size_int_3 = sym_size_int_4 = None
     getitem = scan[0]
     getitem_1 = scan[1];  scan = None
     return (getitem, getitem_1)""",  # noqa: B950
@@ -2905,11 +2906,12 @@ def forward(self, fct_1, init_1, xs_1):
 def forward(self, L_init_ : torch.Tensor, L_xs_ : torch.Tensor):
     l_init_ = L_init_
     l_xs_ = L_xs_
-    select = l_xs_.select(0, 0)
-    new_carry = l_init_ + select;  new_carry = None
-    add_1 = l_init_ + select;  select = add_1 = None
+    elem = torch.movedim(l_xs_, 0, 0);  l_xs_ = None
+    select_copy = torch.select_copy(elem, 0, 0)
+    new_carry = l_init_ + select_copy;  new_carry = None
+    add_1 = l_init_ + select_copy;  select_copy = add_1 = None
     scan_combine_fn_0 = self.scan_combine_fn_0
-    scan = torch.ops.higher_order.scan(scan_combine_fn_0, [l_init_], [l_xs_], 0, True, []);  scan_combine_fn_0 = l_init_ = l_xs_ = None
+    scan = torch.ops.higher_order.scan(scan_combine_fn_0, [l_init_], [elem], True, []);  scan_combine_fn_0 = l_init_ = elem = None
     getitem = scan[0]
     getitem_1 = scan[1];  scan = None
     return (getitem, getitem_1)""",  # noqa: B950

@@ -113,14 +113,14 @@ def scan(
         raise RuntimeError("Reverse must be a bool, but got " + str(type(reverse)))
 
     leaves_init, spec_init = pytree.tree_flatten(init)
-    leaves_xs, spec_xs = pytree.tree_flatten(xs)
+    leaves_xs_orig, spec_xs = pytree.tree_flatten(xs)
 
     if len(leaves_init) == 0:
         raise RuntimeError("Init tensors must be provided")
     for x in leaves_init:
         if not isinstance(x, torch.Tensor):
             raise RuntimeError(f"All init leaves must be a Tensor but got {x}")
-    for x in leaves_xs:
+    for x in leaves_xs_orig:
         if not isinstance(x, torch.Tensor):
             raise RuntimeError(f"All xs leaves must be a Tensor but got {x}")
         if x.shape[dim] == 0:
@@ -128,15 +128,16 @@ def scan(
                 f"All xs leaves must have a scan dimension > 0 but got {x}"
             )
 
-    if len(leaves_xs) == 0:
+    if len(leaves_xs_orig) == 0:
         return pytree.tree_unflatten(leaves_init, spec_init), xs
 
-    shape = leaves_xs[0].shape
-    ndim = len(shape)
+    ndim = leaves_xs_orig[0].ndim
     dim = utils.canonicalize_dim(ndim, dim)
 
     # Move scan dim to 0 and always perform scan on dim 0
-    leaves_xs = [torch.movedim(elem, int(dim), 0) for elem in leaves_xs]
+    leaves_xs = []
+    for elem in leaves_xs_orig:
+        leaves_xs.append(torch.movedim(elem, dim, 0))
 
     out = combine_fn(
         pytree.tree_unflatten(leaves_init, spec_init),
