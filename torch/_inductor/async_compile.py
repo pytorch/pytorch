@@ -18,6 +18,7 @@ from torch._dynamo.device_interface import get_registered_device_interfaces
 from torch._dynamo.utils import dynamo_timed, set_feature_use
 from torch._inductor import config
 from torch._inductor.codecache import (
+    _load_triton_kernel_from_source,
     CodeCacheFuture,
     CppCodeCache,
     CppPythonBindingsCodeCache,
@@ -25,8 +26,6 @@ from torch._inductor.codecache import (
     HalideCodeCache,
     LambdaFuture,
     ROCmCodeCache,
-    TritonCodeCache,
-    TritonFuture,
 )
 from torch._inductor.compile_worker.subproc_pool import AnyPool, SubprocPool
 from torch._inductor.compile_worker.watchdog import _async_compile_initializer
@@ -41,6 +40,7 @@ from torch.utils._triton import has_triton_package
 
 if TYPE_CHECKING:
     from torch._inductor.runtime.hints import HalideMeta
+    from torch._inductor.runtime.triton_heuristics import CachingAutotuner
 
 # timing metrics for time spent in the compilation
 _cumulative_compile_time = 0.0
@@ -203,38 +203,45 @@ class AsyncCompile:
     def triton(self, kernel_name: str, source_code: str, device_str: str = "cuda"):
         kernel_code_log.info("Triton Kernel:\n%s", source_code)
         _compile_start()
-        _set_triton_ptxas_path()
 
         if os.environ.get("TRITON_INTERPRET", "0") == "1":
             return getattr(
                 torch._inductor.codecache.PyCodeCache.load(source_code), kernel_name
             )
 
-        kernel = TritonCodeCache.load(kernel_name, source_code)
-        if self.use_process_pool():
-            set_feature_use("parallel_compile_post_warmup", True)
+        load_kernel = functools.partial(
+            _load_triton_kernel_from_source, kernel_name, source_code
+        )
+        is_parallel = self.use_process_pool()
+        set_feature_use("parallel_compile_post_warmup", is_parallel)
+        if is_parallel:
             # We want to support changing these env vars after (and while) the
             # process pool is running, so pass them to the subprocess to reset.
             env_vars = ["TORCHINDUCTOR_CACHE_DIR", "TRITON_CACHE_DIR"]
             extra_env = {v: os.environ[v] for v in env_vars if v in os.environ}
-            return TritonFuture(
-                kernel,
-                self.process_pool().submit(
-                    _worker_compile_triton,
-                    kernel._reload_in_subproc,
-                    extra_env,
-                ),
+            task = self.process_pool().submit(
+                _worker_compile_triton,
+                load_kernel,
+                extra_env,
             )
+
+            def get_result() -> CachingAutotuner:
+                kernel = task.result()
+                kernel.precompile(warm_cache_only=False, reload_in_parent=load_kernel)
+                return kernel
+
+            return LambdaFuture(get_result, future=task)
         else:
-            set_feature_use("parallel_compile_post_warmup", False)
             with dynamo_timed(
                 "async_compile.precompile",
                 log_pt2_compile_event=True,
                 dynamo_compile_column_us="triton_compile_time_us",
                 log_waitcounter=True,
             ):
-                kernel.precompile()
-            return kernel
+                _set_triton_ptxas_path()
+                kernel = load_kernel()
+                kernel.precompile(warm_cache_only=False)
+                return kernel
 
     def multi_kernel(self, *args, **kwargs) -> Any:
         from torch._inductor.codegen.multi_kernel import MultiKernelCall
