@@ -1,6 +1,4 @@
 # mypy: allow-untyped-defs
-import _collections_abc
-import _weakrefset
 import abc
 import builtins
 import collections
@@ -11,13 +9,11 @@ import enum
 import functools
 import importlib
 import inspect
-import multiprocessing
 import operator
 import os
 import random
 import re
 import sys
-import threading
 import traceback
 import types
 import typing
@@ -3156,15 +3152,10 @@ BUILTIN_SKIPLIST = (
     enum,
     importlib,
     inspect,
-    multiprocessing,
-    operator,
     random,
-    threading,
-    traceback,
     types,
+    traceback,
     unittest,
-    _collections_abc,
-    _weakrefset,
 )
 
 # third party libraries skiplist is defined by str, because users may not use these libraries.
