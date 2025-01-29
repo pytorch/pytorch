@@ -1185,10 +1185,6 @@ def _save(
     pickler.dump(obj)
     data_value = data_buf.getvalue()
     zip_file.write_record("data.pkl", data_value, len(data_value))
-    # .format_version is used to track
-    #     1. version 1 represents the order of storages being changed from
-    #        lexicographical based on keys to numerically ordered based on keys
-    zip_file.write_record(".format_version", "1", len("1"))
 
     # Write byte order marker
     if not _disable_byteorder_record:
@@ -1198,7 +1194,7 @@ def _save(
         zip_file.write_record("byteorder", sys.byteorder, len(sys.byteorder))
 
     # Write each tensor to a file named tensor/the_tensor_key in the zip archive
-    for key in serialized_storages.keys():
+    for key in sorted(serialized_storages.keys()):
         name = f"data/{key}"
         storage = serialized_storages[key]
         num_bytes = storage.nbytes()
