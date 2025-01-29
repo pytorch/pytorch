@@ -143,7 +143,7 @@ def stft(
         raise errors.SymbolicValueError(
             msg='STFT does not currently support center = True or pad_mode != "reflect"',
             value=input,
-        )  # TODO(#insert-issue-id): add center functionality and tests.
+        )  # TODO(#145943): add center functionality and tests.
 
     # Get STFT sizes
     frame_step_value = hop_length if hop_length is not None else n_fft // 4
