@@ -5,9 +5,9 @@ from __future__ import annotations
 import multiprocessing
 import os
 import platform
+import re
 import sys
 import sysconfig
-from distutils.version import LooseVersion
 from pathlib import Path
 from subprocess import CalledProcessError, check_call, check_output
 from typing import Any, cast
@@ -32,6 +32,96 @@ def _mkdir_p(d: str) -> None:
 USE_NINJA = not check_negative_env_flag("USE_NINJA") and which("ninja") is not None
 if "CMAKE_GENERATOR" in os.environ:
     USE_NINJA = os.environ["CMAKE_GENERATOR"].lower() == "ninja"
+
+
+# Copied from looseversion
+class LooseVersion:
+    """Version numbering for anarchists and software realists.
+    Implements the standard interface for version number classes as
+    described above.  A version number consists of a series of numbers,
+    separated by either periods or strings of letters.  When comparing
+    version numbers, the numeric components will be compared
+    numerically, and the alphabetic components lexically.  The following
+    are all valid version numbers, in no particular order:
+
+        1.5.1
+        1.5.2b2
+        161
+        3.10a
+        8.02
+        3.4j
+        1996.07.12
+        3.2.pl0
+        3.1.1.6
+        2g6
+        11g
+        0.960923
+        2.2beta29
+        1.13++
+        5.5.kw
+        2.0b1pl0
+
+    In fact, there is no such thing as an invalid version number under
+    this scheme; the rules for comparison are simple and predictable,
+    but may not always give the results you want (for some definition
+    of "want").
+    """
+
+    component_re = re.compile(r"(\d+ | [a-z]+ | \.)", re.VERBOSE)
+
+    def __init__(self, vstring: str) -> None:
+        if vstring:
+            self.parse(vstring)
+
+    def __eq__(self, other: object) -> bool:
+        c = self._cmp(other)
+        return c == 0
+
+    def __lt__(self, other: object) -> bool:
+        c = self._cmp(other)
+        return c < 0
+
+    def __le__(self, other: object) -> bool:
+        c = self._cmp(other)
+        return c <= 0
+
+    def __gt__(self, other: object) -> bool:
+        c = self._cmp(other)
+        return c > 0
+
+    def __ge__(self, other: object) -> bool:
+        c = self._cmp(other)
+        return c >= 0
+
+    def parse(self, vstring: str) -> None:
+        # I've given up on thinking I can reconstruct the version string
+        # from the parsed tuple -- so I just store the string here for
+        # use by __str__
+        self.vstring = vstring
+        components: list[int] = []
+        for obj in (x for x in self.component_re.split(vstring) if x and x != "."):
+            try:
+                components.append(int(obj))
+            except ValueError:
+                pass
+
+        self.version = components
+
+    def __str__(self) -> str:
+        return self.vstring
+
+    def __repr__(self) -> str:
+        return f"LooseVersion ('{self}')"
+
+    def _cmp(self, other: object) -> int:
+        assert isinstance(other, LooseVersion)
+        if self.version == other.version:
+            return 0
+        if self.version < other.version:
+            return -1
+        if self.version > other.version:
+            return 1
+        raise NotImplementedError
 
 
 class CMake:
@@ -114,7 +204,7 @@ class CMake:
         Returns:
           dict: A ``dict`` containing the value of cached CMake variables.
         """
-        with open(self._cmake_cache_file) as f:
+        with open(self._cmake_cache_file, encoding="utf8") as f:
             return get_cmake_cache_variables_from_file(f)
 
     def generate(
