@@ -63,6 +63,7 @@ from ..virtualized import _ops as ops, OpsHandler, ReductionType, StoreMode, V
 from ..wrapper_benchmark import get_kernel_category_by_source_code
 from .block_analysis import BlockPatternMatcher
 from .common import (
+    ArgName,
     BackendFeature,
     ConstexprArg,
     CSE,
@@ -2127,6 +2128,11 @@ class TritonKernel(SIMDKernel):
 
         if should_unwrap_unspec_arg(name):
             line = var
+            # unwrapped bf16/fp16 0d tensors are passed in as float32 scalars
+            # see triton_utils.py:signature_of
+            if dtype in (torch.float16, torch.bfloat16):
+                dtype = torch.float32
+
         else:
             if isinstance(indexing, BlockPtrOptions):
                 block_ptr, other = self.codegen_block_ptr(name, var, indexing, other)
@@ -3354,14 +3360,14 @@ class TritonKernel(SIMDKernel):
                 isinstance(arg, WorkspaceArg)
                 and arg.zero_mode == WorkspaceZeroMode.ZERO_ON_CALL
             ):
-                mutated_args.add(argname)
+                mutated_args.add(argname.name)
 
         mutated_args = sorted(mutated_args)
 
         for tree in self.active_range_trees():
             sizearg = SizeArg(f"{tree.prefix}numel", tree.numel)
             signature.append(sizearg)
-            argdefs.append(sizearg.name)
+            argdefs.append(ArgName(sizearg.name))
             # constexpr version causes issues, see
             # https://github.com/pytorch/torchdynamo/pull/1362
             # triton_meta["constants"][len(argdefs)] = V.graph.sizevars.size_hint(
@@ -3373,7 +3379,7 @@ class TritonKernel(SIMDKernel):
             # new versions (but not old versions) of Triton need constexprs included in the signature
             if triton_version_uses_attrs_dict():
                 signature.append(ConstexprArg(arg_name))
-            argdefs.append(f"{arg_name} : tl.constexpr")
+            argdefs.append(ArgName(arg_name, is_constexpr=True))
 
         for tree in self.range_trees:
             if tree.is_reduction and self.persistent_reduction:
@@ -3429,7 +3435,7 @@ class TritonKernel(SIMDKernel):
             # https://github.com/pytorch/pytorch/issues/120478#issuecomment-1962822307
             # https://github.com/openai/triton/blob/231efe9ed2d200be0f69a07c298e4342b08efe3d/python/triton/runtime/jit.py#L384
             for arg_num in triton_meta["configs"][0].equal_to_1:  # type: ignore[index]
-                triton_meta["constants"][signature[arg_num].name] = 1  # type: ignore[index]
+                triton_meta["constants"][signature[arg_num].name] = 1  # type: ignore[index,union-attr]
 
         self.triton_meta = triton_meta
 
@@ -3482,7 +3488,7 @@ class TritonKernel(SIMDKernel):
             """
         code.splice(heuristics_line)
         code.writeline(
-            f"def {name or str(Placeholder.KERNEL_NAME)}({', '.join(argdefs)}):"
+            f"def {name or str(Placeholder.KERNEL_NAME)}({', '.join(x.full_name() for x in argdefs)}):"
         )
         with code.indent():
             self.codegen_static_numels(code)

@@ -52,13 +52,14 @@ from ..virtualized import ops, OpsHandler, OpsValue, ReductionType, StoreMode, V
 
 
 if TYPE_CHECKING:
-    from typing import Never
+    from typing import Never, TypeVar
 
     from ..ir import FixedLayout
     from ..loop_body import LoopBody
     from ..scheduler import BaseScheduling, Scheduler
     from .wrapper import PythonWrapperCodegen
 
+    _T = TypeVar("_T")
     SchedulingConstructor = Callable[[Optional[Scheduler]], BaseScheduling]
     WrapperConstructor = type[PythonWrapperCodegen]
     SymbolLike = Union[str, sympy.Symbol]
@@ -1156,6 +1157,16 @@ class InplacedBuffer(NamedTuple):
     other_names: list[str]
 
 
+@dataclasses.dataclass
+class ArgName:
+    name: str
+    # is_constexpr=True is used to attach a " : tl.constexpr" into the argument list
+    is_constexpr: bool = False
+
+    def full_name(self):
+        return f"{self.name}{' : tl.constexpr' if self.is_constexpr else ''}"
+
+
 class RemovedArg:
     def __str__(self):
         return "REMOVED"
@@ -1168,10 +1179,9 @@ class KernelArgs:
     @staticmethod
     def _lookup(
         prefix: str,
-        odict: Union[dict[str, Union[str, RemovedArg]], dict[str, str]],
-        name: str,
+        odict: Union[dict[_T, Union[str, RemovedArg]], dict[_T, str]],
+        name: _T,
     ) -> str:
-        assert isinstance(name, str)
         result: Union[str, RemovedArg] = odict.get(name, REMOVED)
         if isinstance(result, RemovedArg):
             odict[name] = new_result = f"{prefix}{len(odict)}"
@@ -1182,7 +1192,7 @@ class KernelArgs:
         self.input_buffers: dict[str, str] = {}
         self.output_buffers: dict[str, Union[str, RemovedArg]] = {}
         self.inplace_buffers: dict[str, Union[InplacedBuffer, RemovedArg]] = {}
-        self.sizevars: dict[str, str] = {}
+        self.sizevars: dict[sympy.Expr, str] = {}
         self.workspace_args: list[WorkspaceArg] = []
 
     def __repr__(self) -> str:
@@ -1304,8 +1314,10 @@ class KernelArgs:
         self.workspace_args.append(arg)
         return arg.inner_name
 
-    def seed_offset(self, name: str, value: Union[str, SymbolLike]) -> str:
-        value = str(value)
+    def seed_offset(self, name: str, value: int) -> str:
+        assert isinstance(value, int), (type(value), value)
+        # here we are lifting a constant integer into an arg to the kernel to try to get additional cache hits
+        value = sympy.Integer(value)
         if value in self.sizevars:
             return self.sizevars[value]
         if name in self.sizevars.values():
@@ -1315,10 +1327,10 @@ class KernelArgs:
         self.sizevars[value] = name
         return name
 
-    def size(self, name: SymbolLike) -> str:
-        name = str(name)
-        if name == "seed":
-            self.sizevars["seed"] = "seed"
+    def size(self, name: sympy.Symbol) -> str:
+        assert isinstance(name, sympy.Symbol), (type(name), name)
+        if name.name == "seed":
+            self.sizevars[name] = "seed"  # dont' mange the name of seeds
             return "seed"
         return self._lookup("ks", self.sizevars, name)
 
@@ -1376,15 +1388,15 @@ class KernelArgs:
 
     def python_argdefs(
         self,
-    ) -> tuple[list[str], list[str], list[KernelArgType], list[torch.dtype]]:
-        arg_defs: list[str] = []
+    ) -> tuple[list[ArgName], list[str], list[KernelArgType], list[torch.dtype]]:
+        arg_defs: list[ArgName] = []
         call_args: list[str] = []
         arg_types: list[torch.dtype] = []
         precompile_args: list[KernelArgType] = []
         for inplaced in unique(self.inplace_buffers.values()):
             if isinstance(inplaced, RemovedArg):
                 continue
-            arg_defs.append(inplaced.inner_name)
+            arg_defs.append(ArgName(inplaced.inner_name))
             call_args.append(inplaced.other_names[-1])
             arg_types.append(V.graph.get_dtype(inplaced.other_names[-1]))
             precompile_args.append(
@@ -1399,7 +1411,7 @@ class KernelArgs:
         ):
             if outer in self.inplace_buffers or isinstance(inner, RemovedArg):
                 continue
-            arg_defs.append(inner)
+            arg_defs.append(ArgName(inner))
             call_args.append(outer)
             arg_types.append(V.graph.get_dtype(outer))
             precompile_args.append(
@@ -1410,14 +1422,14 @@ class KernelArgs:
                 )
             )
         for outer, inner in self.sizevars.items():
-            arg_defs.append(inner)
+            arg_defs.append(ArgName(inner))
             call_args.append(outer)
             arg_types.append(type(outer))  # type: ignore[arg-type]
             precompile_args.append(SizeArg(inner, outer))
             if V.graph.wrapper_code:
                 V.graph.wrapper_code.ensure_size_computed(outer)
         for arg in self.workspace_args:
-            arg_defs.append(arg.inner_name)
+            arg_defs.append(ArgName(arg.inner_name))
             call_args.append(arg.outer_name)
             precompile_args.append(arg)
             arg_types.append(arg.dtype)
