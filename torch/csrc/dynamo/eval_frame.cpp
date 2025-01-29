@@ -199,7 +199,7 @@ PyObject* dynamo__custom_eval_frame(
     // Dynamo returned skip_code_recursive_flag, so we should recursively skip
     // code.
     DEBUG_TRACE("create skip recursive %s", get_frame_name(frame));
-    extra_state_set_action(extra, (Action){SKIP, SKIP});
+    extra_state_set_action(extra, Action{SKIP, SKIP});
     if (action.recursive_action == DEFAULT) {
       recursive_callback = Py_None;
     }
@@ -208,7 +208,7 @@ PyObject* dynamo__custom_eval_frame(
     // Dynamo returned cache_limit_hit_flag, so we should recursively skip
     // code.
     DEBUG_TRACE("create cache limit hit %s", get_frame_name(frame));
-    extra_state_set_action(extra, (Action){RUN_ONLY, RUN_ONLY});
+    extra_state_set_action(extra, Action{RUN_ONLY, RUN_ONLY});
     if (action.recursive_action == DEFAULT) {
       recursive_callback = Py_False;
     }
@@ -233,7 +233,7 @@ PyObject* dynamo__custom_eval_frame(
     eval_custom();
   } else {
     DEBUG_TRACE("create skip %s", get_frame_name(frame));
-    extra_state_set_action(extra, (Action){SKIP, DEFAULT});
+    extra_state_set_action(extra, Action{SKIP, DEFAULT});
     eval_default();
   }
   Py_XDECREF(callback_result);
