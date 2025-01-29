@@ -293,7 +293,7 @@ The full release compatibility matrix matrix can be found in [release.md](https:
 * Added option `force_pointwise_cat` concat support through inductor using pointwise kernels ([#141966](https://github.com/pytorch/pytorch/pull/141966)). This forces concat to be generated as a pointwise op with masked loads.
 * New config option `annotate_training` that adds Inductor annotations to NVTX.  ([#130429](https://github.com/pytorch/pytorch/pull/130429))
 * Introduces an option `triton_kernel_default_layout_constraint` to tweak stride settings for user-defined Triton kernels, enhancing customization and flexibility ([#135530](https://github.com/pytorch/pytorch/pull/135530)).
-* User can patch inductor config to enable strict custom kernel layout constraints by changing `torch.compile(options={"triton_kernel_default_layout_constraint": "needs_fixed_stride_order"})(foo)` for torch._inductor.config ([#135581](https://github.com/pytorch/pytorch/pull/135581)). 
+* User can patch inductor config to enable strict custom kernel layout constraints by changing `torch.compile(options={"triton_kernel_default_layout_constraint": "needs_fixed_stride_order"})(foo)` ([#135581](https://github.com/pytorch/pytorch/pull/135581)). 
 * External callable registration API `register_external_matmul` for Matmul tuning candidates in Inductor ([#130774](https://github.com/pytorch/pytorch/pull/130774)).
 * Adds support for Windows Arm64 to enhance platform compatibility ([#133088](https://github.com/pytorch/pytorch/pull/133088)).
 * Integrates support for AMD triton stream pipeliner in ROCm to enhance performance ([#139881](https://github.com/pytorch/pytorch/pull/139881)).
