@@ -1363,7 +1363,13 @@ def get_backend(group: Optional[ProcessGroup] = None) -> Backend:
     pg = group or _get_default_group()
     if _rank_not_in_group(pg):
         raise ValueError("Invalid process group specified")
-    pg_store = _world.pg_map[pg] if pg in _world.pg_map else None
+
+    pg_store = _world.pg_map.get(pg, None)
+    if pg_store is None:
+        raise ValueError(
+            f"Process group {pg} is not initialized in the world group map. Please initialize the group first."
+        )
+
     return Backend(not_none(pg_store)[0])
 
 
