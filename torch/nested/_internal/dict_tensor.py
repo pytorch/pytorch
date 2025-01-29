@@ -30,7 +30,7 @@ class DictTensor(torch.Tensor):
         kwargs = {}
         kwargs["strides"] = (1,)
         kwargs["storage_offset"] = 0  # type: ignore[assignment]
-        kwargs["device"] = "cpu" # type: ignore[assignment]
+        kwargs["device"] = "cpu"  # type: ignore[assignment]
         kwargs["layout"] = torch.strided  # type: ignore[assignment]
         kwargs["requires_grad"] = False  # type: ignore[assignment]
         kwargs["dtype"] = torch.int64  # type: ignore[assignment]
