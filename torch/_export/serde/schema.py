@@ -3,7 +3,7 @@
 
 from dataclasses import dataclass, field
 from enum import IntEnum
-from typing import Annotated, Optional
+from typing import Annotated, Optional, Self
 
 from torch._export.serde.union import _Union
 
@@ -365,14 +365,22 @@ class RangeConstraint:
 
 
 @dataclass
+class TreeSpec:
+    type: Annotated[Optional[str], 10]
+    context: Annotated[str, 20]
+    children_spec: Annotated[list[Self], 30]
+    metadata: Annotated[dict[str, str], 40] = field(default_factory=dict)
+
+
+@dataclass
 class ModuleCallSignature:
     inputs: Annotated[list[Argument], 10]
     outputs: Annotated[list[Argument], 20]
 
     # These are serialized by calling pytree.treespec_loads
     # And deserialized by calling pytree.treespec_dumps
-    in_spec: Annotated[str, 30]
-    out_spec: Annotated[str, 40]
+    in_spec: Annotated[TreeSpec, 30]
+    out_spec: Annotated[TreeSpec, 40]
 
     # This field is used to prettify the graph placeholders
     # after we ser/der and retrace

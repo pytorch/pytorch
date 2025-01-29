@@ -3,7 +3,6 @@ PYTEST_DONT_REWRITE (prevents pytest from rewriting assertions, which interferes
 with test_sym_bool)
 """
 
-
 # Owner(s): ["oncall: export"]
 import copy
 import io
@@ -899,6 +898,14 @@ class TestDeserialize(TestCase):
         dim0_x, dim1_x = torch.export.dims("dim0_x", "dim1_x")
         dynamic_shapes = {"x": (dim0_x, dim1_x)}
         self.check_graph(Foo(), inputs, dynamic_shapes)
+
+    def test_pytree(self):
+        class Foo(torch.nn.Module):
+            def forward(self, x):
+                return x["a"] + x["b"]
+
+        inputs = ({"a": torch.ones(2, 3), "b": torch.ones(2, 3)},)
+        self.check_graph(Foo(), inputs)
 
     def test_module(self):
         class M(torch.nn.Module):

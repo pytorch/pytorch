@@ -34,13 +34,13 @@ import sympy
 
 import torch
 import torch.export.exported_program as ep
+import torch.utils._pytree as pytree
 from torch._export.verifier import load_verifier
 from torch._export.non_strict_utils import _enable_graph_inputs_of_type_nn_module
 from torch._library.fake_class_registry import FakeScriptObject
 from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
 from torch.fx.experimental import symbolic_shapes
-from torch.utils import _pytree as pytree
-from torch.utils._pytree import treespec_dumps, treespec_loads
+from torch.utils._pytree import treespec_loads
 from torch.utils._sympy.numbers import int_oo
 from torch.utils._sympy.symbol import symbol_is_type, SymT
 from torch.utils._sympy.value_ranges import ValueRanges
@@ -94,6 +94,7 @@ from .schema import (  # type: ignore[attr-defined]
     TensorMeta,
     TokenArgument,
     TREESPEC_VERSION,
+    TreeSpec,
     UserInputMutationSpec,
     UserInputSpec,
     UserOutputSpec,
@@ -1176,6 +1177,32 @@ class GraphModuleSerializer(metaclass=Final):
         else:
             raise AssertionError("TODO")
 
+    def serialize_treespec(self, treespec: pytree.TreeSpec) -> TreeSpec:
+        # Use pytree's serialization mechanism to convert it to a python
+        # dataclass
+        serialized_pytree_old = pytree._SUPPORTED_PROTOCOLS[TREESPEC_VERSION].treespec_to_json(treespec)
+
+        # Convert the dataclass to export's pytree serialization schema. This
+        # allows us to store some additional metadata
+        def convert_treespec_schema_to_export_schema(serialized_pytree):
+            metadata = {}
+
+            if serialized_pytree.type is not None:
+                python_type = pytree.SERIALIZED_TYPE_TO_PYTHON_TYPE[serialized_pytree.type]
+                if issubclass(python_type, tuple) and hasattr(python_type, '_fields'):
+                    # Check if the type is a NamedTuple, if so, we want to store the
+                    # field names.
+                    metadata["namedtuple_fields"] = list(python_type._fields)
+
+            return TreeSpec(
+                type=serialized_pytree.type,
+                context=serialized_pytree.context,
+                children_spec=[convert_treespec_schema_to_export_schema(child) for child in serialized_pytree.children_spec],
+                metadata=metadata
+            )
+
+        return convert_treespec_schema_to_export_schema(serialized_pytree_old)
+
     def serialize_module_call_signature(
         self, module_call_signature: ep.ModuleCallSignature
     ) -> ModuleCallSignature:
@@ -1187,8 +1214,8 @@ class GraphModuleSerializer(metaclass=Final):
             outputs=[
                 self.serialize_argument_spec(x) for x in module_call_signature.outputs
             ],
-            in_spec=treespec_dumps(module_call_signature.in_spec, TREESPEC_VERSION),
-            out_spec=treespec_dumps(module_call_signature.out_spec, TREESPEC_VERSION),
+            in_spec=self.serialize_treespec(module_call_signature.in_spec),
+            out_spec=self.serialize_treespec(module_call_signature.out_spec),
             forward_arg_names=names if (names := module_call_signature.forward_arg_names) else None
         )
 
@@ -2496,10 +2523,36 @@ class GraphModuleDeserializer(metaclass=Final):
         else:
             return ep.ConstantArgument(name="", value=self.deserialize_input(x))
 
+    # def deserialize_treespec(self, serialized_treespec: TreeSpec) -> pytree.TreeSpec:
+    #     # Use pytree's serialization mechanism to convert it to a python
+    #     # dataclass
+    #     serialized_pytree_old = pytree._SUPPORTED_PROTOCOLS[protocol].json_to_treespec(serialized_treespec)
+
+    #     # Convert the dataclass to export's pytree serialization schema. This
+    #     # allows us to store some additional metadata
+    #     def convert_treespec_schema_to_export_schema(serialized_pytree):
+    #         metadata = {}
+
+    #         python_type = pytree.SERIALIZED_TYPE_TO_PYTHON_TYPE[serialized_pytree.type]
+    #         if issubclass(python_type, tuple) and hasattr(python_type, '_fields'):
+    #             # Check if the type is a NamedTuple, if so, we want to store the
+    #             # field names.
+    #             metadata["namedtuple_fields"] = list(python_type._fields)
+
+    #         return TreeSpec(
+    #             type=serialized_pytree.type,
+    #             context=serialized_pytree.context
+    #             children_spec=[convert_treespec_schema_to_export_schema(child) for child in serialized_pytree.children_spec]
+    #             metdata=metadata
+    #         )
+
+    #     return convert_treespec_schema_to_export_schema(serialized_pytree_old)
+
+
     def deserialize_module_call_signature(
         self, module_call_signature: ModuleCallSignature
     ) -> ep.ModuleCallSignature:
-        return ep.ModuleCallSignature(
+        res = ep.ModuleCallSignature(
             inputs=[
                 self.deserialize_argument_spec(x) for x in module_call_signature.inputs
             ],
@@ -2510,6 +2563,8 @@ class GraphModuleDeserializer(metaclass=Final):
             out_spec=treespec_loads(module_call_signature.out_spec),
             forward_arg_names=names if (names := module_call_signature.forward_arg_names) else None,
         )
+        breakpoint()
+        return res
 
     def deserialize_module_call_graph(
         self, module_call_graph: list[ModuleCallEntry]
