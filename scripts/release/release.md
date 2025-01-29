@@ -6,8 +6,6 @@
 * Bug fixes
 * Performance
 * Documentation
-* Developers
-* Security
 
 
 ## **Highlights**
