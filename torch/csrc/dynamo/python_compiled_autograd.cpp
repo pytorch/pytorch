@@ -96,8 +96,16 @@ static std::string bind_function(
         args.reserve(py_args.size());
         auto tuple_args = jit::tuple_slice(py_args);
         for (uint64_t idx = 0; idx < packed_args_schema.size(); idx++) {
-          args.emplace_back(jit::toIValue(
-              tuple_args[idx], packed_args_schema[idx], std::nullopt));
+          if (packed_args_schema[idx]->isSubtypeOf(
+                  *at::ListType::ofTensors())) {
+            // List[Tensor] might have Nones, not handled in jit::toIValue
+            auto tmp = py::cast<std::vector<std::optional<at::Tensor>>>(
+                tuple_args[idx]);
+            args.emplace_back(toTensorList(tmp));
+          } else {
+            args.emplace_back(jit::toIValue(
+                tuple_args[idx], packed_args_schema[idx], std::nullopt));
+          }
         }
         // None in Python corresponds to undefined Tensor in C++
         auto inputs_ = toTensorList(inputs);
