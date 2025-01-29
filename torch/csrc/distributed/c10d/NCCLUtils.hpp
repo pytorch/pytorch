@@ -18,71 +18,43 @@
 
 constexpr int64_t kCommInitBusyWaitMillis = 2;
 
-#if defined(NCCL_MAJOR) && (NCCL_MAJOR == 2) && defined(NCCL_MINOR) && \
-    (NCCL_MINOR >= 14)
+#if NCCL_VERSION_CODE >= NCCL_VERSION(2, 14, 0)
 #define NCCL_HAS_COMM_NONBLOCKING
 #endif
 
-#if defined(NCCL_MAJOR) && (NCCL_MAJOR == 2) && defined(NCCL_MINOR) && \
-    (NCCL_MINOR >= 18)
+#if NCCL_VERSION_CODE >= NCCL_VERSION(2, 18, 0)
 #define NCCL_HAS_COMM_SPLIT
 #endif
 
 // ncclGetLastError() is enabled only for NCCL versions 2.13+
 // ncclRemoteError only exists in NCCL versions 2.13+
-#if defined(NCCL_MAJOR) && (NCCL_MAJOR == 2) && defined(NCCL_MINOR) && \
-    (NCCL_MINOR >= 13)
-#define ENABLE_NCCL_GET_LAST_ERROR
-#define NCCL_REMOTE_ERROR
-#elif defined(NCCL_MAJOR) && (NCCL_MAJOR >= 3)
+#if NCCL_VERSION_CODE >= NCCL_VERSION(2, 13, 0)
 #define ENABLE_NCCL_GET_LAST_ERROR
 #define NCCL_REMOTE_ERROR
 #endif
 
 static_assert(
-    (NCCL_MAJOR == 2 && NCCL_MINOR >= 7) || (NCCL_MAJOR > 2),
-    "NCCL version must be 2.7 or later");
-
-// Error checking is enabled only for NCCL versions 2.4+ since ncclCommAbort()
-// and ncclCommGetAsyncError() are not supported in earlier versions.
-#if defined(NCCL_MAJOR) && (NCCL_MAJOR == 2) && defined(NCCL_MINOR) && \
-    (NCCL_MINOR >= 4)
+    NCCL_VERSION_CODE >= NCCL_VERSION(2, 10, 0),
+    "NCCL version must be 2.10 or later");
+// The following macros represent features supported prior to NCCL 2.10,
+// therefore we can define them unconditionally, given the static_assert above.
+// TODO: remove these macros from code.
 #define ENABLE_NCCL_ERROR_CHECKING
-#elif defined(NCCL_MAJOR) && (NCCL_MAJOR >= 3)
-#define ENABLE_NCCL_ERROR_CHECKING
-#endif
-
-// P2P is enabled only for NCCL versions 2.7+ since ncclSend()
-// and ncclRecv() are not supported in earlier versions.
-#if defined(NCCL_MAJOR) && (NCCL_MAJOR == 2) && defined(NCCL_MINOR) && \
-    (NCCL_MINOR >= 7)
 #define ENABLE_NCCL_P2P_SUPPORT
-#elif defined(NCCL_MAJOR) && (NCCL_MAJOR >= 3)
-#define ENABLE_NCCL_P2P_SUPPORT
-#endif
+// End of macros for NCCL 2.10 and below.
 
-#if defined(NCCL_MAJOR) && (NCCL_MAJOR == 2) && defined(NCCL_MINOR) && \
-    (NCCL_MINOR >= 11)
-#define ENABLE_NCCL_PREMUL_SUM_SUPPORT
-#elif defined(NCCL_MAJOR) && (NCCL_MAJOR >= 3)
+#if NCCL_VERSION_CODE >= NCCL_VERSION(2, 11, 0)
 #define ENABLE_NCCL_PREMUL_SUM_SUPPORT
 #endif
 
 // Note: the first version that supports ncclConfig_t is 2.14. Here we
 // fast-forward the version requirement to 2.17 where ncclConfig_t has CTA and
 // CGA fields because they have already been pybinded out.
-#if defined(NCCL_MAJOR) && (NCCL_MAJOR == 2) && defined(NCCL_MINOR) && \
-    (NCCL_MINOR >= 17)
-#define NCCL_HAS_CONFIG
-#elif defined(NCCL_MAJOR) && (NCCL_MAJOR >= 3)
+#if NCCL_VERSION_CODE >= NCCL_VERSION(2, 17, 0)
 #define NCCL_HAS_CONFIG
 #endif
 
-#if defined(NCCL_REGISTRATION_SUPPORTED) ||                              \
-    ((defined(NCCL_MAJOR) && (NCCL_MAJOR == 2) && defined(NCCL_MINOR) && \
-      (NCCL_MINOR >= 19)))
-#define NCCL_HAS_COMM_REGISTER
-#elif defined(NCCL_MAJOR) && (NCCL_MAJOR >= 3)
+#if NCCL_VERSION_CODE >= NCCL_VERSION(2, 19, 0)
 #define NCCL_HAS_COMM_REGISTER
 #endif
 
