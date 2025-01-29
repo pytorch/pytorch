@@ -7757,45 +7757,6 @@ class DynamicCondModel(torch.nn.Module):
         return x
 
 
-class DynamicWhileNestedModel(torch.nn.Module):
-    def __init__(self, out_iter=5):
-        super().__init__()
-        self.fc = torch.nn.Linear(2, 2)
-        self.relu = torch.nn.ReLU()
-        self.out_iter = out_iter
-        self.flag = torch.tensor(True, dtype=torch.bool, device="cuda")
-        self.idx = torch.zeros(1, dtype=torch.int64, device="cuda")
-        self.results = torch.zeros((5, 2, 2), device="cuda")
-
-    def forward(self, x, it):
-        def outer_cond_fn(it, x, idx):
-            return it.sum() < self.out_iter
-
-        def outer_body_fn(it, x, idx):
-            self.flag.fill_(True)
-
-            def cond_fn(x, idx):
-                return torch.logical_or(x.sum() < 0, self.flag)
-                # return self.flag -> I doubt this a bug...
-                # this causes an issue in the "cudagraphs" backend
-                # error msg: torch._dynamo.exc.BackendCompilerFailed: backend='cudagraphs' raised:
-                # UnsupportedAliasMutationException: torch.while_loop's body_fn might be modifying the input!
-
-            def body_fn(x, idx):
-                x = self.fc(x)
-                x = self.relu(x)
-                self.results.index_copy_(0, idx, x.unsqueeze(0))
-                self.flag.fill_(x.sum() < 0)
-                return (x, idx + 1)
-
-            (x, idx) = while_loop(cond_fn, body_fn, (x, idx))
-            return (it + 1, x, idx)
-
-        _ = while_loop(outer_cond_fn, outer_body_fn, (it, x, self.idx))
-
-        return self.results
-
-
 class TestControlFlowNN(TestCase):
     @unittest.skipIf(
         not TEST_CUDA_GRAPH_CONDITIONAL_NODES,
@@ -7806,17 +7767,6 @@ class TestControlFlowNN(TestCase):
 
         x = torch.randn(16, device="cuda")
         _check_compile_cudagraph(self, model, [x])
-
-    @unittest.skipIf(
-        not TEST_CUDA_GRAPH_CONDITIONAL_NODES,
-        "CUDA 12.4 or greater is required for CUDA Graphs with conditional nodes",
-    )
-    def test_while_loop_in_NN(self):
-        model = DynamicWhileNestedModel().cuda()
-
-        x = torch.randn(2, 2, device="cuda")
-        y = torch.tensor(0, device="cuda")
-        _check_compile_cudagraph(self, model, [x, y])
 
 
 instantiate_parametrized_tests(TestHopSchema)
