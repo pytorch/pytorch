@@ -9,7 +9,7 @@ from ..current_scope_id import current_scope_id
 from ..exc import unimplemented
 from ..guards import GuardBuilder, install_guard
 from ..source import AttrSource, Source
-from ..utils import cmp_name_to_op_mapping, istype
+from ..utils import istype
 
 
 if TYPE_CHECKING:
@@ -410,29 +410,6 @@ class VariableTracker(metaclass=VariableTrackerMeta):
             and not kwargs
         ):
             return self.var_getattr(tx, args[0].as_python_constant())
-        elif (
-            name in cmp_name_to_op_mapping
-            and len(args) == 1
-            and self.is_python_constant()
-            and not tx.output.side_effects.has_pending_mutation(self)
-            and not kwargs
-        ):
-            # NB : Checking for mutation is necessary because we compare
-            # constant values
-            other = args[0]
-            if not isinstance(self, type(other)):
-                return variables.ConstantVariable.create(NotImplemented)
-            if (
-                not other.is_python_constant()
-                or tx.output.side_effects.has_pending_mutation(other)
-            ):
-                unimplemented(f"call_method {self} {name} {args} {kwargs}")
-
-            return variables.ConstantVariable.create(
-                cmp_name_to_op_mapping[name](
-                    self.as_python_constant(), other.as_python_constant()
-                )
-            )
         unimplemented(f"call_method {self} {name} {args} {kwargs}")
 
     def set_name_hint(self, name):

@@ -6007,19 +6007,6 @@ def forward(self, s0 : torch.SymInt, s1 : torch.SymInt, L_x_ : torch.Tensor):
         self.assertEqual(fn(config, x), opt_fn(config, x))
         self.assertEqual(cloned_config.baz, 4)
 
-    @unittest.skipIf(not HAS_OMEGACONG, "missing omegaconf package")
-    def test_omegaconf_listconfig_contains(self):
-        def fn(cfg, x):
-            if 1 in cfg:
-                return torch.sin(x)
-            return torch.cos(x)
-
-        config = OmegaConf.create([1, 2, 3, {"key": "value"}])
-
-        x = torch.randn(4)
-        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
-        self.assertEqual(fn(config, x), opt_fn(config, x))
-
     # https://github.com/pytorch/pytorch/issues/136257
     def test_overwriting_params(self):
         class M(torch.nn.Module):
