@@ -208,7 +208,7 @@ jobs:
         conda activate "${CONDA_ENV}"
 
         # Test tools
-        PYTHONPATH=${pwd} pytest tools/stats
+        PYTHONPATH=$(pwd) pytest tools/stats
         PYTHONPATH=$(pwd) pytest tools/test -o "python_files=test*.py"
         PYTHONPATH=$(pwd) pytest .github/scripts -o "python_files=test*.py"
 
