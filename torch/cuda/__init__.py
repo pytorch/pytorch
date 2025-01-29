@@ -168,6 +168,18 @@ def _check_bf16_tensor_supported(device: _device_t):
         return False
 
 
+def is_tf32_supported() -> bool:
+    r"""Return a bool indicating if the current CUDA/ROCm device supports dtype tf32."""
+    # Check for ROCm.  If true, return false, since PyTorch does not currently support
+    # tf32 on ROCm.
+    if torch.version.hip:
+        return False
+
+    # Otherwise, tf32 is supported on CUDA platforms that natively (i.e. no emulation)
+    # support bfloat16.
+    return is_bf16_supported(including_emulation=False)
+
+
 def _sleep(cycles):
     torch._C._cuda_sleep(cycles)
 
@@ -1711,6 +1723,7 @@ __all__ = [
     "is_bf16_supported",
     "is_current_stream_capturing",
     "is_initialized",
+    "is_tf32_supported",
     "jiterator",
     "list_gpu_processes",
     "make_graphed_callables",
