@@ -42,17 +42,20 @@ from ..virtualized import ops, OpsHandler, OpsValue, ReductionType, StoreMode, V
 
 
 if TYPE_CHECKING:
-    from typing import Never, TypeVar
+    from typing import Never
 
     from ..ir import FixedLayout
     from ..loop_body import LoopBody
     from ..scheduler import BaseScheduling, Scheduler
     from .wrapper import PythonWrapperCodegen
 
-    _T = TypeVar("_T")
     SchedulingConstructor = Callable[[Optional[Scheduler]], BaseScheduling]
     WrapperConstructor = type[PythonWrapperCodegen]
     SymbolLike = Union[str, sympy.Symbol]
+
+    # OpVarT should really be Union[CSEVariable, str], however this
+    # causes typing errors in subclasses (defined in other files).
+    OpVarT = str
 
 schedule_log = torch._logging.getArtifactLogger(__name__, "schedule")
 log = logging.getLogger(__name__)
@@ -646,74 +649,74 @@ class OpDecompositions:
     """
 
     @staticmethod
-    def identity(value: _T) -> _T:
+    def identity(value: OpVarT) -> OpVarT:
         # used to trigger cse
         return value
 
     @staticmethod
-    def reciprocal(x):
+    def reciprocal(x: OpVarT) -> OpVarT:
         return ops.truediv(ops.constant(1, torch.int32), x)
 
     @staticmethod
-    def square(x):
+    def square(x: OpVarT) -> OpVarT:
         return ops.mul(x, x)
 
     @staticmethod
-    def erfc(x):
+    def erfc(x: OpVarT):
         return ops.sub(ops.constant(1, torch.float32), ops.erf(x))
 
     @staticmethod
-    def erfcx(x):
+    def erfcx(x: OpVarT) -> OpVarT:
         return ops.mul(ops.exp(ops.square(x)), ops.erfc(x))
 
     @staticmethod
-    def expm1(x):
+    def expm1(x: OpVarT) -> OpVarT:
         return ops.sub(ops.exp(x), ops.constant(1, torch.float32))
 
     @staticmethod
-    def log10(x):
+    def log10(x: OpVarT) -> OpVarT:
         return ops.mul(ops.log(x), ops.constant(1 / math.log(10), torch.float32))
 
     @staticmethod
-    def log2(x):
+    def log2(x: OpVarT) -> OpVarT:
         return ops.mul(ops.log(x), ops.constant(1 / math.log(2), torch.float32))
 
     @staticmethod
-    def exp2(x):
+    def exp2(x: OpVarT) -> OpVarT:
         return ops.exp(ops.mul(x, ops.constant(math.log(2), torch.float32)))
 
     @staticmethod
-    def log1p(x):
+    def log1p(x: OpVarT) -> OpVarT:
         return ops.log(ops.add(x, ops.constant(1, torch.int32)))
 
     @staticmethod
-    def sigmoid(x):
+    def sigmoid(x: OpVarT) -> OpVarT:
         one = ops.constant(1, torch.int32)
         return ops.truediv(one, ops.add(one, ops.exp(ops.neg(x))))
 
     @staticmethod
-    def relu(x):
+    def relu(x: OpVarT) -> OpVarT:
         return ops.maximum(x, ops.constant(0, torch.int32))
 
     @staticmethod
-    def fma(x, y, z):
+    def fma(x: OpVarT, y: OpVarT, z: OpVarT) -> OpVarT:
         # for backends that don't override this (halide)
         return ops.add(ops.mul(x, y), z)
 
     @staticmethod
-    def floor_to_int(a, dtype):
+    def floor_to_int(a: OpVarT, dtype: torch.dtype) -> OpVarT:
         return ops.to_dtype(ops.floor(a), dtype)
 
     @staticmethod
-    def ceil_to_int(a, dtype):
+    def ceil_to_int(a: OpVarT, dtype: torch.dtype) -> OpVarT:
         return ops.to_dtype(ops.ceil(a), dtype)
 
     @staticmethod
-    def trunc_to_int(a, dtype):
+    def trunc_to_int(a: OpVarT, dtype: torch.dtype) -> OpVarT:
         return ops.to_dtype(ops.trunc(a), dtype)
 
     @staticmethod
-    def remainder(a, b):
+    def remainder(a: OpVarT, b: OpVarT) -> OpVarT:
         r = ops.mod(a, b)
         cond = ops.and_(
             ops.ne(r, ops.constant(0, torch.int32)),
@@ -722,7 +725,7 @@ class OpDecompositions:
         return ops.where(cond, ops.add(r, b), r)
 
     @staticmethod
-    def round_to_int(a, dtype):
+    def round_to_int(a: OpVarT, dtype: torch.dtype) -> OpVarT:
         return ops.to_dtype(ops.round(a), dtype)
 
 
@@ -750,7 +753,7 @@ class OpOverrides(OpDecompositions):
         self._parent = parent
 
     @staticmethod
-    def paren(string: str) -> str:
+    def paren(string: OpVarT) -> OpVarT:
         if (
             isinstance(string, CSEVariable)
             or _RE_PAREN_NOT_NEEDED.fullmatch(string)
@@ -760,83 +763,83 @@ class OpOverrides(OpDecompositions):
             return string
         return f"({string})"
 
-    def __getattr__(self, item):
+    def __getattr__(self, item: str) -> Callable[..., Any]:
         return getattr(self._parent, item)
 
     @staticmethod
-    def constant(value, dtype):
+    def constant(value: Union[bool, float, int], dtype: torch.dtype) -> OpVarT:
         return repr(value)
 
     @staticmethod
-    def libdevice_sigmoid(x):
+    def libdevice_sigmoid(x: OpVarT) -> OpVarT:
         one = ops.constant(1, torch.int32)
         return ops.truediv(one, ops.add(one, ops.libdevice_exp(ops.neg(x))))
 
     @staticmethod
-    def libdevice_abs(x):
+    def libdevice_abs(x: OpVarT) -> OpVarT:
         return ops.abs(x)
 
     @staticmethod
-    def libdevice_sqrt(x):
+    def libdevice_sqrt(x: OpVarT) -> OpVarT:
         return ops.sqrt(x)
 
     @staticmethod
-    def libdevice_cos(x):
+    def libdevice_cos(x: OpVarT) -> OpVarT:
         return ops.cos(x)
 
     @staticmethod
-    def libdevice_sin(x):
+    def libdevice_sin(x: OpVarT) -> OpVarT:
         return ops.sin(x)
 
     @staticmethod
-    def libdevice_log(x):
+    def libdevice_log(x: OpVarT) -> OpVarT:
         return ops.log(x)
 
     @staticmethod
-    def libdevice_exp(x):
+    def libdevice_exp(x: OpVarT) -> OpVarT:
         return ops.exp(x)
 
     @staticmethod
-    def bitwise_not(x):
+    def bitwise_not(x: OpVarT) -> OpVarT:
         return f"~{OpOverrides.paren(x)}"
 
     @staticmethod
-    def logical_not(a):
+    def logical_not(a: OpVarT) -> OpVarT:
         return f"{OpOverrides.paren(a)} == 0"
 
     @staticmethod
-    def bitwise_and(x, y):
+    def bitwise_and(x: OpVarT, y: OpVarT) -> OpVarT:
         return f"{OpOverrides.paren(x)} & {OpOverrides.paren(y)}"
 
     @staticmethod
-    def bitwise_or(x, y):
+    def bitwise_or(x: OpVarT, y: OpVarT) -> OpVarT:
         return f"{OpOverrides.paren(x)} | {OpOverrides.paren(y)}"
 
     @staticmethod
-    def bitwise_xor(x, y):
+    def bitwise_xor(x: OpVarT, y: OpVarT) -> OpVarT:
         return f"{OpOverrides.paren(x)} ^ {OpOverrides.paren(y)}"
 
     @staticmethod
-    def bitwise_left_shift(x, y):
+    def bitwise_left_shift(x: OpVarT, y: OpVarT) -> OpVarT:
         return f"{OpOverrides.paren(x)} << {OpOverrides.paren(y)}"
 
     @staticmethod
-    def bitwise_right_shift(x, y):
+    def bitwise_right_shift(x: OpVarT, y: OpVarT) -> OpVarT:
         return f"{OpOverrides.paren(x)} >> {OpOverrides.paren(y)}"
 
     @staticmethod
-    def int_truediv(a, b):
+    def int_truediv(a: OpVarT, b: OpVarT) -> OpVarT:
         # TODO: this is wrong
         # TODO: an easy bandaid is to generate runtime asserts that it's
         # <= 2**53, which is when this equation is correct
         return ops.truediv(a, b)
 
     @staticmethod
-    def load_seed(name, offset):
+    def load_seed(name: str, offset: OpVarT) -> OpVarT:
         return ops.load(name, sympy.Integer(offset))
 
     @classmethod
-    def _initialize_pointwise_overrides(cls, target):
+    def _initialize_pointwise_overrides(cls, target: str) -> None:
         assert target in ("triton", "cpp", "cppvec"), target
 
         for funcname, data in pointwise_overrides_data.items():
@@ -1088,7 +1091,7 @@ pointwise_overrides_data: dict[str, OverridesData] = dict(
 
 
 # Use mypy to check protocol implemented correctly
-def _typecheck_OpOverrides(h: OpOverrides) -> OpsHandler[str]:
+def _typecheck_OpOverrides(h: OpOverrides) -> OpsHandler[OpVarT]:
     return h
 
 
