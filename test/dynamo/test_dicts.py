@@ -4,8 +4,10 @@
 # flake8: noqa
 
 import dataclasses
+import gc
 import itertools
 import unittest
+import weakref
 from collections import defaultdict, namedtuple, OrderedDict
 from dataclasses import dataclass, fields, is_dataclass
 from typing import Any, Optional, Tuple
@@ -760,6 +762,26 @@ class DictTests(torch._dynamo.test_case.TestCase):
         res = opt_fn(x, dict)
         self.assertEqual(ref, res)
         self.assertTrue(isinstance(res, dict))
+
+    def test_weakref_dict(self):
+        states = weakref.WeakKeyDictionary()
+
+        mod1 = torch.nn.Module()
+        mod2 = torch.nn.Module()
+
+        states[mod1] = 2
+        states[mod2] = 3
+
+        def fn(x):
+            if mod1 in states:
+                x = torch.sin(x)
+            if mod2 in states:
+                x = torch.cos(x)
+            return x
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        x = torch.randn(4)
+        self.assertEqual(fn(x), opt_fn(x))
 
 
 if __name__ == "__main__":
