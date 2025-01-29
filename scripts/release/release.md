@@ -393,13 +393,6 @@ We improved the existing `torch.library` APIs and added new ones.
 * Improve `torch.library.opcheck` and `register_autograd` docs ([#141883](https://github.com/pytorch/pytorch/pull/141883))
 
 
-### Cpp Frontend
-
-
-
-* Init threadpool with user defined `num_threads` before default ([#136793](https://github.com/pytorch/pytorch/pull/136793), [#137051](https://github.com/pytorch/pytorch/pull/137051))
-
-
 ### Cuda
 
 
@@ -409,11 +402,7 @@ We improved the existing `torch.library` APIs and added new ones.
 * cuDNN Attention memory layout handling improvements ([#141147](https://github.com/pytorch/pytorch/pull/141147)) ([#138354](https://github.com/pytorch/pytorch/pull/138354))
 
 
-### Dataloader Frontend
 
-
-
-* Faster BatchSampler ([#137423](https://github.com/pytorch/pytorch/pull/137423))
 
 
 ### Distributed
@@ -472,13 +461,8 @@ We improved the existing `torch.library` APIs and added new ones.
 * TorchElastic
     * Added TryExcept when decoding healthcheck port ([#136574](https://github.com/pytorch/pytorch/pull/136574))
     * Skipped store barrier and store get in host assign ([#136865](https://github.com/pytorch/pytorch/pull/136865))
-
-
-### Distributed (checkpoint)
-
-
-
-* Throw an error when state_dict and saved tensors are different sizes ([#141571](https://github.com/pytorch/pytorch/pull/141571))
+* Checkpoint
+    * Throw an error when state_dict and saved tensors are different sizes ([#141571](https://github.com/pytorch/pytorch/pull/141571))
 
 
 ### Dynamo
@@ -618,9 +602,6 @@ We improved the existing `torch.library` APIs and added new ones.
 * Allow `SequentialLR` to include `ChainedScheduler` ([#133450](https://github.com/pytorch/pytorch/pull/133450))
 
 
-### Package
-
-
 ### Profiler
 
 
@@ -676,13 +657,6 @@ We improved the existing `torch.library` APIs and added new ones.
 * enable gfx110x architecture for hipblaslt ([#137317](https://github.com/pytorch/pytorch/pull/137317))
 
 
-### Sparse Frontend
-
-
-
-* Add `torch.float8e4m3fn` dtype support to semi-structured sparse ([#136397](https://github.com/pytorch/pytorch/pull/136397))
-
-
 ### XPU
 
 
@@ -692,6 +666,14 @@ We improved the existing `torch.library` APIs and added new ones.
 * Add device guard for XPU structured operators in torchgen ([#138802](https://github.com/pytorch/pytorch/pull/138802))
 * Generalize device-bias code to align XPU unroll reduction with CUDA ([#142348](https://github.com/pytorch/pytorch/pull/142348))
 * Generalize CUDA C++ wrapper for reuse by XPU ([#135312](https://github.com/pytorch/pytorch/pull/135312))
+
+### Miscellaneous
+
+
+
+* Add `torch.float8e4m3fn` dtype support to semi-structured sparse ([#136397](https://github.com/pytorch/pytorch/pull/136397))
+* Faster BatchSampler ([#137423](https://github.com/pytorch/pytorch/pull/137423))
+* Init threadpool with user defined `num_threads` before default ([#136793](https://github.com/pytorch/pytorch/pull/136793), [#137051](https://github.com/pytorch/pytorch/pull/137051))
 
 
 ## **Bug fixes**
@@ -713,11 +695,7 @@ We improved the existing `torch.library` APIs and added new ones.
 * Fixed a correctness issue when `torch.compiling` `torch.rrelu`, in the case where it mutates any module buffers ([#136008](https://github.com/pytorch/pytorch/pull/136008))
 
 
-### Cpp Frontend
 
-
-
-* Fix PyBind 2.10.4 compatibility issue ([#141456](https://github.com/pytorch/pytorch/pull/141456))
 
 
 ### Cuda
@@ -783,13 +761,8 @@ We improved the existing `torch.library` APIs and added new ones.
     * Fixed store prefix race in `rendezvous` ([#136768](https://github.com/pytorch/pytorch/pull/136768))
     * Fixed rendezvous error due to `EtcdStore` get method not waiting in some cases ([#137056](https://github.com/pytorch/pytorch/pull/137056))
     * Fixed the bug caused by wrong host address in creating `TCPStore` server inside dynamic rendezvous ([#139702](https://github.com/pytorch/pytorch/pull/139702))
-
-
-### Distributed (checkpoint)
-
-
-
-* Fix fsspec transaction failure cleanup in multithreaded environments ([#135541](https://github.com/pytorch/pytorch/pull/135541))
+* Checkpoint
+    * Fix fsspec transaction failure cleanup in multithreaded environments ([#135541](https://github.com/pytorch/pytorch/pull/135541))
 
 
 ### Dynamo
@@ -828,13 +801,6 @@ We improved the existing `torch.library` APIs and added new ones.
 * Fix `test_lazy_module_kwargs` ([#137705](https://github.com/pytorch/pytorch/pull/137705))
 * Propagate ShapeEnv during lowering ([#138362](https://github.com/pytorch/pytorch/pull/138362))
 * Plumb `is_export` flag to `FunctionalTensorMode` in analysis pass ([#138836](https://github.com/pytorch/pytorch/pull/138836))
-
-
-### Foreach Frontend
-
-
-
-* correctly keep track of processed tensors for foreach reductions (norm, max) ([#140103](https://github.com/pytorch/pytorch/pull/140103))
 
 
 ### Fx
@@ -944,13 +910,6 @@ We improved the existing `torch.library` APIs and added new ones.
 * Fix flex_decode to build offsets off of strides ([#139516](https://github.com/pytorch/pytorch/pull/139516))
 
 
-### Package
-
-
-
-* Fixes to `torch.package` for 3.13 ([#141409](https://github.com/pytorch/pytorch/pull/141409))
-
-
 ### Profiler
 
 
@@ -1015,23 +974,19 @@ We improved the existing `torch.library` APIs and added new ones.
 * Fix an issue causing endless code regeneration in non-XPU environments. ([#140438](https://github.com/pytorch/pytorch/pull/140438))
 * Fix incorrect device check before skipping concat linear in Inductor XPU. ([#140916](https://github.com/pytorch/pytorch/pull/140916))
 
+### Miscellaneous
+
+
+
+* Fix PyBind 2.10.4 compatibility issue ([#141456](https://github.com/pytorch/pytorch/pull/141456))
+* correctly keep track of processed tensors for foreach reductions (norm, max) ([#140103](https://github.com/pytorch/pytorch/pull/140103))
+* Fixes to `torch.package` for 3.13 ([#141409](https://github.com/pytorch/pytorch/pull/141409))
+
 
 ## **Performance**
 
 
-### Cuda
 
-
-
-* Speed up fp16/bf16 AMP casts on H100+ ([#137053](https://github.com/pytorch/pytorch/pull/137053))
-
-
-### Distributed
-
-
-
-* c10d
-    * Improved efficiency of NaN checker ([#135414](https://github.com/pytorch/pytorch/pull/135414))
 
 
 ### Dynamo
@@ -1123,35 +1078,17 @@ We improved the existing `torch.library` APIs and added new ones.
 * Turn on fast path for index_put on new ROCm version ([#136136](https://github.com/pytorch/pytorch/pull/136136))
 
 
-### XPU
+### Miscellaneous
 
 
-
+* Speed up fp16/bf16 AMP casts on H100+ ([#137053](https://github.com/pytorch/pytorch/pull/137053))
+* c10d
+    * Improved efficiency of NaN checker ([#135414](https://github.com/pytorch/pytorch/pull/135414))
 * Improves performance by avoiding atomic add operations in `scatter_add` for XPU. ([#137966](https://github.com/pytorch/pytorch/pull/137966))
 
 
 ## **Documentation**
 
-
-### Composability
-
-
-
-* Small rendering fix to our `torch.compile` FakeTensor documentation ([#138281](https://github.com/pytorch/pytorch/pull/138281))
-
-
-### Cpp Frontend
-
-
-
-* Document that load_inline requires having a C++ compiler installed ([#137521](https://github.com/pytorch/pytorch/pull/137521))
-
-
-### Cuda
-
-
-
-* Fix error message in `torch._scaled_mm` ([#140343](https://github.com/pytorch/pytorch/pull/140343))
 
 
 ### Distributed
@@ -1172,8 +1109,6 @@ We improved the existing `torch.library` APIs and added new ones.
     * Added current FSDP2 path to old composable FSDP1 warning ([#139759](https://github.com/pytorch/pytorch/pull/139759))
 * Pipeline
     * Added small comments and variable renames ([#138735](https://github.com/pytorch/pytorch/pull/138735))
-* TP
-    * Updated link in 1 ([#136103](https://github.com/pytorch/pytorch/pull/136103))
 * c10d
     * Added some code documents for `TCPStore` and `TCPStoreLibUvBackend` code ([#130496](https://github.com/pytorch/pytorch/pull/130496))
     * Added more examples for c10d collectives `gather` and `scatter` ([#130427](https://github.com/pytorch/pytorch/pull/130427))
@@ -1190,33 +1125,8 @@ We improved the existing `torch.library` APIs and added new ones.
     * Added small comments and variable renames ([#138735](https://github.com/pytorch/pytorch/pull/138735))
 * TP
     * Updated link in distributed.tensor.parallel.rst ([#136103](https://github.com/pytorch/pytorch/pull/136103))
-
-
-### Distributed (checkpoint)
-
-
-
-* Add links to tutorial and TorchTitan checkpointing to DCP docs ([#139776](https://github.com/pytorch/pytorch/pull/139776))
-
-
-### Dynamo
-
-
-
-* Revamp `torch.compile` troubleshooting doc ([#138620](https://github.com/pytorch/pytorch/pull/138620))
-
-
-### Export
-
-
-* Fix doc for export.export() API ([#135551](https://github.com/pytorch/pytorch/pull/135551))
-
-
-### Fx
-
-
-
-* Fix the example in fx/interpreter ([#139368](https://github.com/pytorch/pytorch/pull/139368))
+* Checkpoints
+    * Add links to tutorial and TorchTitan checkpointing to DCP docs ([#139776](https://github.com/pytorch/pytorch/pull/139776))
 
 
 ### Inductor
@@ -1287,17 +1197,17 @@ We improved the existing `torch.library` APIs and added new ones.
 * Fix `torch.linalg.svd` V* shape ([#142037](https://github.com/pytorch/pytorch/pull/142037))
 
 
-### Releng
+### Miscellaneous
 
 
 
+* Small rendering fix to our `torch.compile` FakeTensor documentation ([#138281](https://github.com/pytorch/pytorch/pull/138281))
+* Document that load_inline requires having a C++ compiler installed ([#137521](https://github.com/pytorch/pytorch/pull/137521))
+* Fix error message in `torch._scaled_mm` ([#140343](https://github.com/pytorch/pytorch/pull/140343))
+* Revamp `torch.compile` troubleshooting doc ([#138620](https://github.com/pytorch/pytorch/pull/138620))
+* Fix doc for export.export() API ([#135551](https://github.com/pytorch/pytorch/pull/135551))
+* Fix the example in fx/interpreter ([#139368](https://github.com/pytorch/pytorch/pull/139368))
 * Add new PT2 troubleshooting doc ([#138620](https://github.com/pytorch/pytorch/pull/138620))
-
-
-### XPU
-
-
-
 * Update "Getting Started with XPU" documentation. ([#137479](https://github.com/pytorch/pytorch/pull/137479))
 
 
