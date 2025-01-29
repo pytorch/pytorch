@@ -42,31 +42,39 @@ def prettify_stack(stack: list[dict[str, str]], str_to_filename: dict[str, str])
 
 
 def filter_stack(
-    stack: list[dict[str, str]], str_to_filename: dict[str, str]
-) -> list[dict[str, str]]:
+    log_contents: dict[str, Any], str_to_filename: dict[str, str]
+) -> dict[str, Any]:
+    """
+    Filters the stack frame to only include interesting files.
+    For strict, we go with "user_stack", which is the result of TracingContext.extract_stack().
+    This actually makes the filtering redundant, but this isn't enforced, so we run it anyways.
+    For non-strict, "user_stack" is empty, and "stack", the result of CapturedTrableback.extract(),
+    is accurate.
+    """
+    stack = (
+        log_contents["user_stack"]  # strict; empty for non-strict
+        if log_contents.get("user_stack")
+        else log_contents["stack"]  # accurate only for non-strict
+    )
+    result = None
     for i, s in enumerate(reversed(stack)):
         s["filename"] = str(s["filename"])
         if s["filename"] not in str_to_filename:
             continue
         torch_filepath = os.path.dirname(inspect.getfile(torch)) + os.path.sep
         if torch_filepath not in str_to_filename[s["filename"]]:
-            return stack[len(stack) - i - 3 : len(stack) - i]
-    return stack[-3:]
+            result = stack[len(stack) - i - 3 : len(stack) - i]
+            break
+
+    # return in "stack"
+    del log_contents["user_stack"]
+    del log_contents["stack"]
+    log_contents["stack"] = result or stack[-3:]
+    return log_contents
 
 
 def hash_stack(stack: list[dict[str, str]]) -> str:
     return ";".join(f'line: {s["line"]} filename: {s["filename"]}' for s in stack)
-
-
-def get_loc(filename: str, lineno: int) -> Optional[str]:
-    try:
-        with open(filename) as f:
-            for i, line in enumerate(f):
-                if i == lineno - 1:
-                    return line.strip()
-    except FileNotFoundError:
-        pass
-    return None
 
 
 class FailureReport:
@@ -79,6 +87,20 @@ class FailureReport:
 
     def __repr__(self) -> str:
         return f"FailureReport(failure_type={self.failure_type}, xfail={self.xfail}, data={self.data})"
+
+    def get_loc(self, str_to_filename: dict[str, str]) -> str:
+        if self.data["stack"]:
+            frame = self.data["stack"][-1]
+            filename = str_to_filename[frame["filename"]]
+            lineno = frame["line"]
+            try:
+                with open(filename) as f:
+                    for i, line in enumerate(f):
+                        if i == lineno - 1:
+                            return f"`{line.strip()}`"
+            except FileNotFoundError:
+                pass
+        return ""
 
     def print(self, str_to_filename: dict[str, str]) -> str:
         if self.failure_type == FailureType.MISSING_FAKE_KERNEL:
@@ -94,7 +116,8 @@ class FailureReport:
             return f"""Constraint violation error.
     The specified input dynamic_shapes spec was found to be incorrect during tracing.
     Specifically, this guard was added: {self.data["expr"]}, where {self.data["symbol_to_sources"]}.
-    This occured at the following stacktrace: {prettify_stack(self.data["stack"], str_to_filename)}.
+    This occured at the following stacktrace: {prettify_stack(self.data["stack"], str_to_filename)}:
+            {self.get_loc(str_to_filename)}
     Because of this, we have modified the dynamic shapes structure to be the
     following. You can also use torch.export.Dim.AUTO instead to specify your
     dynamic shapes, and we will automatically infer the dynamism for you.
@@ -104,18 +127,11 @@ class FailureReport:
 """
 
         elif self.failure_type == FailureType.DATA_DEPENDENT_ERROR:
-            loc = None
-            if self.data["stack"]:
-                frame = self.data["stack"][-1]
-                loc = (
-                    f"`{get_loc(str_to_filename[frame['filename']], frame['line'])}`"
-                    or ""
-                )
             return f"""Data dependent error.
     When exporting, we were unable to evaluate the value of `{self.data["expr"]}`.
     This was encountered {self.data["occurrences"]} times.
     This occurred at the following stacktrace: {prettify_stack(self.data["stack"], str_to_filename)}:
-        {loc}
+            {self.get_loc(str_to_filename)}
     As a result, it was specialized to a constant (e.g. `{self.data["result"]}` in the 1st occurrence), and asserts were inserted into the graph.
 
     Please add `torch._check(...)` to the original code to assert this data-dependent assumption.
@@ -288,9 +304,7 @@ def draft_export(
             failure_type = None
 
             if log_name == "propagate_real_tensors":
-                log_contents["stack"] = filter_stack(
-                    log_contents["stack"], str_to_filename
-                )
+                filter_stack(log_contents, str_to_filename)
                 data_dependent_logs[hash_stack(log_contents["stack"])] += 1
 
                 if data_dependent_logs[hash_stack(log_contents["stack"])] > 1:
@@ -309,9 +323,7 @@ def draft_export(
                     # specified in the dynamic_shapes arg. These have a source.
                     continue
 
-                log_contents["stack"] = filter_stack(
-                    log_contents["stack"], str_to_filename
-                )
+                filter_stack(log_contents, str_to_filename)
                 log_contents["new_dynamic_shapes"] = new_shapes
             elif log_name == "missing_fake_kernel":
                 if log_contents["op"] in custom_ops_logs:
