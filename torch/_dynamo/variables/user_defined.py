@@ -13,7 +13,7 @@ import threading
 import types
 import warnings
 import weakref
-from typing import Dict, Generic, List, TYPE_CHECKING
+from typing import Generic, TYPE_CHECKING
 from typing_extensions import is_typeddict
 
 import torch._dynamo.config
@@ -291,8 +291,8 @@ class UserDefinedClassVariable(UserDefinedVariable):
         self,
         tx,
         name,
-        args: "List[VariableTracker]",
-        kwargs: "Dict[str, VariableTracker]",
+        args: "list[VariableTracker]",
+        kwargs: "dict[str, VariableTracker]",
     ) -> "VariableTracker":
         if (
             name == "__subclasses__"
@@ -301,7 +301,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
             and "__subclasses__" not in self.value.__dict__
         ):
             options = {"mutation_type": ValueMutationNew()}
-            subs_as_vars: List[VariableTracker] = []
+            subs_as_vars: list[VariableTracker] = []
             for sub in self.value.__subclasses__():
                 source = AttrSource(tx.import_source(sub.__module__), sub.__name__)
                 subs_as_vars.append(
@@ -334,8 +334,8 @@ class UserDefinedClassVariable(UserDefinedVariable):
     def call_function(
         self,
         tx: "InstructionTranslator",
-        args: "List[VariableTracker]",
-        kwargs: "Dict[str, VariableTracker]",
+        args: "list[VariableTracker]",
+        kwargs: "dict[str, VariableTracker]",
     ) -> "VariableTracker":
         from ..side_effects import SideEffects
         from .builder import wrap_fx_proxy
@@ -421,6 +421,18 @@ class UserDefinedClassVariable(UserDefinedVariable):
         elif self.value is torch.cuda.device and not kwargs and len(args) == 1:
             assert args[0].is_python_constant()
             return variables.CUDADeviceVariable.create(tx, args[0].as_python_constant())
+        elif (
+            self.value is torch.fx.immutable_collections.immutable_list
+            and len(args) == 1
+            and isinstance(args[0], variables.ListVariable)
+        ):
+            arg = args[0]
+            if arg.source:
+                install_guard(arg.source.make_guard(GuardBuilder.SEQUENCE_LENGTH))
+            return variables.FxImmutableListVariable(
+                list(arg.unpack_var_sequence(tx)),
+                mutation_type=ValueMutationNew(),
+            )
         elif (
             issubclass(type(self.value), type)
             and hasattr(
@@ -761,8 +773,8 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         self,
         tx,
         name,
-        args: "List[VariableTracker]",
-        kwargs: "Dict[str, VariableTracker]",
+        args: "list[VariableTracker]",
+        kwargs: "dict[str, VariableTracker]",
     ) -> "VariableTracker":
         from . import ConstantVariable, UserMethodVariable
 
@@ -851,8 +863,8 @@ class UserDefinedObjectVariable(UserDefinedVariable):
     def call_function(
         self,
         tx: "InstructionTranslator",
-        args: "List[VariableTracker]",
-        kwargs: "Dict[str, VariableTracker]",
+        args: "list[VariableTracker]",
+        kwargs: "dict[str, VariableTracker]",
     ) -> "VariableTracker":
         from .. import trace_rules
 
@@ -1311,8 +1323,8 @@ class SourcelessGraphModuleVariable(UserDefinedObjectVariable):
         self,
         tx,
         name,
-        args: "List[VariableTracker]",
-        kwargs: "Dict[str, VariableTracker]",
+        args: "list[VariableTracker]",
+        kwargs: "dict[str, VariableTracker]",
     ) -> "VariableTracker":
         fn_variable = variables.UserFunctionVariable(self.value.forward.__func__)
         args = [self] + args
@@ -1418,8 +1430,8 @@ class UserDefinedDictVariable(UserDefinedObjectVariable):
         self,
         tx,
         name,
-        args: "List[VariableTracker]",
-        kwargs: "Dict[str, VariableTracker]",
+        args: "list[VariableTracker]",
+        kwargs: "dict[str, VariableTracker]",
     ) -> "VariableTracker":
         method = self._maybe_get_baseclass_method(name)
         if method in self._dict_methods:

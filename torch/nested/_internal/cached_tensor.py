@@ -6,11 +6,8 @@ import torch
 
 class CachedTensor(torch.Tensor):
     metadata: Dict[str, Optional[torch.Tensor]]
-    source_field: str
 
-    # Tensor subclass wrapping a dict of tensors, whose shape, dtype, device, etc.
-    # is determined by a "source" tensor in the dict (specified by the user
-    # during construction).
+    # Tensor subclass wrapping a dict of tensors.
     #
     # This tensor does not support any operations on it by default.
     # To leverage the extra metadata, you must register an op to perform the special logic
@@ -28,26 +25,22 @@ class CachedTensor(torch.Tensor):
     def __new__(
         cls,
         metadata: Dict[str, Optional[torch.Tensor]],
-        source_field: str,
     ) -> "CachedTensor":
-        source = metadata.get(source_field)
-        assert source is not None
-        shape = source.shape
+        shape = (0,)
         kwargs = {}
-        kwargs["strides"] = source.stride()
-        kwargs["storage_offset"] = source.storage_offset()  # type: ignore[assignment]
-        kwargs["device"] = source.device  # type: ignore[assignment]
-        kwargs["layout"] = source.layout  # type: ignore[assignment]
-        kwargs["requires_grad"] = source.requires_grad  # type: ignore[assignment]
-        kwargs["dtype"] = source.dtype  # type: ignore[assignment]
+        kwargs["strides"] = (1,)
+        kwargs["storage_offset"] = 0  # type: ignore[assignment]
+        kwargs["device"] = "cpu" # type: ignore[assignment]
+        kwargs["layout"] = torch.strided  # type: ignore[assignment]
+        kwargs["requires_grad"] = False  # type: ignore[assignment]
+        kwargs["dtype"] = torch.int64  # type: ignore[assignment]
         out = torch.Tensor._make_wrapper_subclass(cls, shape, **kwargs)  # type: ignore[attr-defined]
 
         out.metadata = metadata
-        out.source_field = source_field
         return out
 
     def __repr__(self) -> str:  # type: ignore[override]
-        return f"CachedTensor({repr(self.metadata[self.source_field])})"
+        return f"CachedTensor(metadata={self.metadata})"
 
     def __getattr__(self, name: str) -> Optional[torch.Tensor]:
         if name not in self.metadata:
@@ -58,7 +51,6 @@ class CachedTensor(torch.Tensor):
 
     def __tensor_flatten__(self) -> Tuple[List[str], Dict[str, Any]]:
         ctx = {
-            "source_field": self.source_field,
             "all_fields": list(self.metadata.keys()),
         }
         return [k for k, v in self.metadata.items() if v is not None], ctx
@@ -68,7 +60,7 @@ class CachedTensor(torch.Tensor):
         inner_tensors: Dict, meta: Dict, outer_size: Any, outer_stride: Any
     ) -> "CachedTensor":
         inner_tensors = {k: inner_tensors.get(k) for k in meta["all_fields"]}
-        return CachedTensor(inner_tensors, source_field=meta["source_field"])
+        return CachedTensor(inner_tensors)
 
     @classmethod
     def __torch_dispatch__(

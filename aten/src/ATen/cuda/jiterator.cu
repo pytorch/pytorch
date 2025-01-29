@@ -16,10 +16,18 @@ static inline void launch_jitted_vectorized_kernel_dynamic(
   DeviceIndex dev_idx, int64_t N, const std::string& f, const void* data_ptr,
   const c10::SmallVector<at::Scalar>& extra_args, bool return_by_ref) {
   TORCH_INTERNAL_ASSERT(N > 0 && N <= std::numeric_limits<int32_t>::max());
-  // N is still int64_t for the computation, but it's always safe to cast result to int
-  const uint32_t grid = (N + block_work_size() - 1) / block_work_size();
 
-  const int vec_size = jitted_can_vectorize_up_to(iter);
+  int nInputs = iter.ninputs();
+  int nOutputs = iter.noutputs();
+  const at::ScalarType common_dtype = iter.common_dtype();
+
+  int tws = at::cuda::jit::calc_thread_work_size(nInputs, nOutputs, common_dtype, common_dtype);
+  int vec_size = jitted_can_vectorize_up_to(iter);
+
+  int bws = tws * num_threads();
+  // N is still int64_t for the computation, but it's always safe to cast result to int
+  const uint32_t grid = (N + bws - 1) / bws;
+
   bool vectorized = vec_size > 1;
 
   // Different kernels are compiled depending on what we're vectorizing up to (1, 2 or 4 elements)
@@ -27,9 +35,6 @@ static inline void launch_jitted_vectorized_kernel_dynamic(
   // TODO: Memory use can probably be optimized by re-using kernels across GPUs with
   //   the same compute capability
 
-  int nInputs = iter.ninputs();
-  int nOutputs = iter.noutputs();
-  const at::ScalarType common_dtype = iter.common_dtype();
   std::string f_inputs_type_str = at::cuda::jit::typeName(common_dtype);
   std::string compute_type_str = at::cuda::jit::typeName(toOpMathType(common_dtype));
   std::string result_type_str = at::cuda::jit::typeName(common_dtype);
@@ -59,6 +64,7 @@ static inline void launch_jitted_vectorized_kernel_dynamic(
                                                /*contiguous=*/true, /*dynamic_casting=*/false,
                                                at::cuda::jit::BinaryFuncVariant::NoScalar,
                                                extra_args_types,
+                                               tws,
                                                vectorized, vec_size,
                                                return_by_ref);
       std::string kernel_name = vectorized ? name + "_vectorized" + std::to_string(vec_size) : name;
@@ -121,12 +127,16 @@ static inline void launch_jitted_unrolled_kernel_dynamic(
   const c10::SmallVector<at::Scalar>& extra_args, bool return_by_ref) {
 
   TORCH_INTERNAL_ASSERT(N > 0 && N <= std::numeric_limits<int32_t>::max());
-  //casting result to int is always safe, intermediate is int64 and won't overflow
-  const uint32_t grid = (N + block_work_size() - 1) / block_work_size();
 
   int nInputs = iter.ninputs();
   int nOutputs = iter.noutputs();
   const at::ScalarType common_dtype = iter.common_dtype();
+
+  int tws = at::cuda::jit::calc_thread_work_size(nInputs, nOutputs, common_dtype, common_dtype);
+  int bws = tws * num_threads();
+  //casting result to int is always safe, intermediate is int64 and won't overflow
+  const uint32_t grid = (N + bws - 1) / bws;
+
   std::string f_inputs_type_str = at::cuda::jit::typeName(common_dtype);
   std::string compute_type_str = at::cuda::jit::typeName(toOpMathType(common_dtype));
   std::string result_type_str = at::cuda::jit::typeName(common_dtype);
@@ -153,7 +163,7 @@ static inline void launch_jitted_unrolled_kernel_dynamic(
                                                f_inputs_type_str, compute_type_str, result_type_str,
                                                contiguous, dynamic_casting,
                                                at::cuda::jit::BinaryFuncVariant::NoScalar,
-                                               extra_args_types, /*vectorized*/false, /*vec_size*/0, return_by_ref);
+                                               extra_args_types, tws, /*vectorized*/false, /*vec_size*/0, return_by_ref);
       *fn_ptr = at::cuda::jit::jit_pwise_function(code, name);
     }
   }
