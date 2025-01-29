@@ -41,6 +41,7 @@ from torch.testing._internal.common_methods_invocations import (
 from torch.testing._internal.common_device_type import ops, dtypes, instantiate_device_type_tests, OpDTypes
 from torch.testing._internal.common_nn import NNTestCase
 from torch.testing._internal.common_quantization import _group_quantize_tensor, _dynamically_quantize_per_channel
+from torch.testing._internal.mps_utils import mps_op_db
 import numpy as np
 import torch
 import torch.utils._pytree as pytree
@@ -12698,7 +12699,7 @@ class TestConsistency(TestCaseMPS):
     NEW_ALLOW_LIST = defaultdict(list)
     NEW_ALLOW_LIST_GRAD = defaultdict(list)
 
-    @ops(mps_ops_modifier(test_consistency_op_db), allowed_dtypes=MPS_DTYPES)
+    @ops(mps_op_db(test_consistency_op_db), allowed_dtypes=MPS_DTYPES)
     def test_output_match(self, device, dtype, op):
         self.assertEqual(device, "cpu")
         include_conjugated_inputs = dtype.is_complex and op.test_conjugated_samples
