@@ -889,6 +889,11 @@ class skip_if_cpp_wrapper:
         return wrapper
 
 
+def is_dynamic_shape_enabled():
+    # What's the best way to decide this?
+    return not torch._dynamo.config.assume_static_by_default
+
+
 @instantiate_parametrized_tests
 class CommonTemplate:
     def is_dtype_supported(self, dtype: torch.dtype) -> bool:
@@ -5787,6 +5792,8 @@ class CommonTemplate:
             (torch.randn([8, 16, 8, 8]),),
         )
 
+    # Disable size_asserts for this test due to https://github.com/pytorch/pytorch/issues/145963
+    @config.patch(size_asserts=os.environ.get("TORCHINDUCTOR_SIZE_ASSERTS") == "1")
     @torch._dynamo.config.patch(capture_dynamic_output_shape_ops=True)
     def test_nonzero_unbacked_refinement(self):
         def fn(x):
@@ -12342,20 +12349,33 @@ class CommonTemplate:
 
         torch.testing.assert_close(ref, act, atol=1e-3, rtol=1e-3)
 
-        size_assert_pattern = r"assert_size_stride.[a-z]+[0-9]+, .2, 3, 16, 32, 32., .49152, 16384, 1, 512, 16.."
+        if is_dynamic_shape_enabled():
+            size_assert_pattern = r"assert_size_stride.[a-z]+[0-9]+, .2, 3, s1, s2, s2., .3\*s1\*s2\*s2, s1\*s2\*s2, 1, s1\*s2, s1.."  # noqa: B950
+        else:
+            size_assert_pattern = r"assert_size_stride.[a-z]+[0-9]+, .2, 3, 16, 32, 32., .49152, 16384, 1, 512, 16.."
         FileCheck().check_regex(size_assert_pattern).run(code)
 
     @lowering.force_fallback(aten.sort.default)
+    @unittest.skipIf(
+        config.cpp_wrapper,
+        "Inductor does not generate size/stride asserts for cpp_wrapper",
+    )
     def test_size_asserts_for_multi_output_fallback(self):
         @torch.compile
         def f(x):
             return x.sort()
 
-        x = torch.randn(16, 32, device=GPU_TYPE)
+        x = torch.randn(16, 32, device=self.device)
         code = run_and_get_triton_code(f, x)
-        FileCheck().check("assert_size_stride(buf1, (16, 32), (32, 1))").check(
-            "assert_size_stride(buf2, (16, 32), (32, 1))"
-        ).run(code)
+
+        if is_dynamic_shape_enabled():
+            FileCheck().check("assert_size_stride(buf1, (s0, s1), (s1, 1))").check(
+                "assert_size_stride(buf2, (s0, s1), (s1, 1))"
+            ).run(code)
+        else:
+            FileCheck().check("assert_size_stride(buf1, (16, 32), (32, 1))").check(
+                "assert_size_stride(buf2, (16, 32), (32, 1))"
+            ).run(code)
 
 
 @dataclasses.dataclass

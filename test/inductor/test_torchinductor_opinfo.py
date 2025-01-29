@@ -41,7 +41,13 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_ASAN,
     TEST_WITH_ROCM,
 )
-from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_CPU, HAS_CUDA, HAS_XPU
+from torch.testing._internal.inductor_utils import (
+    GPU_TYPE,
+    HAS_CPU,
+    HAS_CUDA,
+    HAS_XPU,
+    maybe_skip_size_asserts,
+)
 from torch.utils._python_dispatch import TorchDispatchMode
 from torch.utils._pytree import tree_map
 
@@ -1103,7 +1109,9 @@ class TestInductorOpInfo(TestCase):
                         {"assert_equal": False},
                     ),
                 )
-            return ((contextlib.nullcontext, {}),)
+
+            ctx = functools.partial(maybe_skip_size_asserts, op)
+            return ((ctx, {}),)
 
         try:
 
