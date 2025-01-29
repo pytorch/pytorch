@@ -2396,11 +2396,6 @@ def as_storage_and_layout(
     raise NotImplementedError
 
 
-as_contiguous_storage_and_layout = functools.partial(
-    as_storage_and_layout, want_contiguous=True
-)
-
-
 def is_stride_order_storage_and_layout(
     x: IRNode, stride_order: Sequence[Union[int, Integer]]
 ) -> bool:
@@ -2757,9 +2752,12 @@ class View(GenericView):
             if unbacked_symbols_in_sizes and (not is_contiguous_storage_and_layout(x)):
                 # realize x; otherwise, the dynamic_reshape_indexer below will fail
                 # due to the size_hint's inability to process unbacked SymInts
-                x = ExternKernel.realize_input(x)
+                # TODO: unbacked should not diverge from backed in determining striding
+                # Need to require contiguous here instead of realize, see:
+                # https://github.com/pytorch/pytorch/issues/145561
+                x = ExternKernel.require_contiguous(x)
 
-            storage, old_layout = as_contiguous_storage_and_layout(x)
+            storage, old_layout = as_storage_and_layout(x, want_contiguous=True)
             new_layout = FixedLayout(
                 old_layout.device,
                 old_layout.dtype,
@@ -6257,13 +6255,15 @@ class AssertScalar(ExternKernel):
         # "u0 == 0" in the runtime asserts, if you subsequently try to
         # simplify(u0 == 0), you will get True (because we've already runtime assert'ed
         # that it's true).  But we're code generating the actual runtime assert here!!
+        symbol = next(iter(self.get_unbacked_symbol_uses()))
+        symbol_str = f"std::to_string({symbol})"
         if V.graph.cpp_wrapper:
             sizevar = V.graph.wrapper_code.codegen_cpp_sizevar(
                 self.scalar, simplify=False
             )
             # TODO: when we start compiling in C++20, annotate with [[unlikely]].
             wrapper.writeline(
-                f'if (!({sizevar})) {{ throw std::runtime_error("{self.msg}"); }}'
+                f'if (!({sizevar})) {{ throw std::runtime_error("Expected {self.msg} but received " + {symbol_str}); }}'
             )
         else:
             sizevar = V.graph.wrapper_code.codegen_python_sizevar(
