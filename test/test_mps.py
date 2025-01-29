@@ -851,7 +851,6 @@ def mps_ops_modifier(ops):
         'baddbmm': [torch.int16, torch.int32, torch.int64, torch.uint8, torch.int8],
         'bmm': [torch.int16, torch.int32, torch.int64, torch.uint8, torch.int8],
         'einsum': [torch.int16, torch.int32, torch.int64, torch.uint8, torch.int8],
-        'linalg.multi_dot': [torch.int16, torch.int32, torch.int64, torch.uint8, torch.int8],
         'mat': [torch.int16, torch.int32, torch.int64, torch.uint8, torch.int8],
         'unravel_index': [torch.int32, torch.int64],
 
