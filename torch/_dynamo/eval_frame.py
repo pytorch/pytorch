@@ -100,8 +100,6 @@ unset = Unset.token
 def _maybe_set_eval_frame(callback: DynamoCallback):
     # A wrapper on set_eval_frame that is guarded by a Justknob.
     # Users can disable torchDynamo by setting the JK to False.
-    from torch._C._dynamo.eval_frame import set_eval_frame
-
     if not justknobs_check("pytorch/compiler:enable_compiler_set_eval_frame"):
         torch._dynamo.utils.warn_once(
             "Dynamo disabled by Justknob: enable_compiler_set_eval_frame, skipping set_eval_frame"
@@ -445,20 +443,22 @@ class _TorchDynamoContext:
                 "Please refer to https://pytorch.org/tutorials/intermediate/torch_compile_tutorial.html "
                 "to use torch._dynamo.optimize(...) as an annotation/decorator. "
             )
+        self.prior = set_eval_frame(None)
         self.cleanup_fns = [enter() for enter in self.enter_exit_hooks]
-        self.prior = _maybe_set_eval_frame(_callback_from_stance(self.callback))
         self.prior_skip_guard_eval_unsafe = set_skip_guard_eval_unsafe(
             _is_skip_guard_eval_unsafe_stance()
         )
+        _maybe_set_eval_frame(_callback_from_stance(self.callback))
 
     def __exit__(self, exc_type, exc_val, exc_tb):
         assert self.prior is not unset
-        _maybe_set_eval_frame(self.prior)
+        set_eval_frame(None)
         set_skip_guard_eval_unsafe(self.prior_skip_guard_eval_unsafe)
-        self.prior = unset
         for cleanup in self.cleanup_fns:
             cleanup()
         self.cleanup_fns.clear()
+        _maybe_set_eval_frame(_callback_from_stance(self.prior))
+        self.prior = unset
 
     def __call__(self, fn):
         # public api for compiler config/options
