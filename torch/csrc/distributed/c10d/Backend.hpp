@@ -5,7 +5,6 @@
 #include <vector>
 
 #include <ATen/ATen.h>
-#include <c10/core/Allocator.h>
 #include <c10/macros/Macros.h>
 
 #include <torch/csrc/distributed/c10d/Types.hpp>
@@ -408,13 +407,6 @@ class TORCH_API Backend : public torch::CustomClassHolder {
     TORCH_CHECK(
         false,
         c10::str("Backend ", getBackendName(), " does not support getError"));
-  }
-
-  virtual std::shared_ptr<c10::Allocator> getMemAllocator() {
-    TORCH_CHECK(
-        false,
-        c10::str(
-            "Backend ", getBackendName(), " does not support getMemAllocator"));
   }
 
  protected:
