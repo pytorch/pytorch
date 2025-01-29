@@ -1400,7 +1400,7 @@ class GraphModuleSerializer(metaclass=Final):
 
     def serialize_graph(self, graph_module: torch.fx.GraphModule) -> Graph:
         assert isinstance(graph_module, torch.fx.GraphModule)
-        log.debug("[serialize_graph]\n\n%s", graph_module.print_readable())
+        log.debug("[serialize_graph]\n\n%s", graph_module.print_readable(print_output=False))
 
         for node in graph_module.graph.nodes:
             try:
