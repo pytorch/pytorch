@@ -1,6 +1,6 @@
 # mypy: allow-untyped-defs
 import copy
-from typing import Any, Dict
+from typing import Any
 
 import torch
 
@@ -231,8 +231,8 @@ def equalize(model, paired_modules_list, threshold=1e-4, inplace=True):
 
     paired_modules_list = expand_groups_in_paired_modules_list(paired_modules_list)
 
-    name_to_module: Dict[str, torch.nn.Module] = {}
-    previous_name_to_module: Dict[str, Any] = {}
+    name_to_module: dict[str, torch.nn.Module] = {}
+    previous_name_to_module: dict[str, Any] = {}
     name_set = {name for pair in paired_modules_list for name in pair}
 
     for name, module in model.named_modules():

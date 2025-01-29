@@ -21,7 +21,6 @@ on:
 env:
   # Needed for conda builds
   ALPINE_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/tool/alpine"
-  ANACONDA_USER: pytorch
   AWS_DEFAULT_REGION: us-east-1
   BINARY_ENV_FILE: /tmp/env
   BUILD_ENVIRONMENT: linux-binary-manywheel
@@ -108,8 +107,6 @@ jobs:
       build_name: manywheel-py3_9-cpu
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
-      conda-pytorchbot-token: ${{ secrets.CONDA_PYTORCHBOT_TOKEN }}
-      conda-pytorchbot-token-test: ${{ secrets.CONDA_PYTORCHBOT_TOKEN_TEST }}
     uses: ./.github/workflows/_binary-upload.yml
 
   manywheel-py3_9-cpu-cxx11-abi-build:
@@ -175,8 +172,6 @@ jobs:
       build_name: manywheel-py3_9-cpu-cxx11-abi
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
-      conda-pytorchbot-token: ${{ secrets.CONDA_PYTORCHBOT_TOKEN }}
-      conda-pytorchbot-token-test: ${{ secrets.CONDA_PYTORCHBOT_TOKEN_TEST }}
     uses: ./.github/workflows/_binary-upload.yml
 
   manywheel-py3_9-cuda11_8-build:
@@ -246,8 +241,6 @@ jobs:
       build_name: manywheel-py3_9-cuda11_8
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
-      conda-pytorchbot-token: ${{ secrets.CONDA_PYTORCHBOT_TOKEN }}
-      conda-pytorchbot-token-test: ${{ secrets.CONDA_PYTORCHBOT_TOKEN_TEST }}
     uses: ./.github/workflows/_binary-upload.yml
 
   manywheel-py3_9-cuda12_4-build:
@@ -317,8 +310,6 @@ jobs:
       build_name: manywheel-py3_9-cuda12_4
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
-      conda-pytorchbot-token: ${{ secrets.CONDA_PYTORCHBOT_TOKEN }}
-      conda-pytorchbot-token-test: ${{ secrets.CONDA_PYTORCHBOT_TOKEN_TEST }}
     uses: ./.github/workflows/_binary-upload.yml
 
   manywheel-py3_9-cuda12_6-build:
@@ -388,8 +379,6 @@ jobs:
       build_name: manywheel-py3_9-cuda12_6
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
-      conda-pytorchbot-token: ${{ secrets.CONDA_PYTORCHBOT_TOKEN }}
-      conda-pytorchbot-token-test: ${{ secrets.CONDA_PYTORCHBOT_TOKEN_TEST }}
     uses: ./.github/workflows/_binary-upload.yml
 
   manywheel-py3_9-rocm6_2_4-build:
@@ -485,8 +474,6 @@ jobs:
       build_name: manywheel-py3_9-rocm6_2_4
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
-      conda-pytorchbot-token: ${{ secrets.CONDA_PYTORCHBOT_TOKEN }}
-      conda-pytorchbot-token-test: ${{ secrets.CONDA_PYTORCHBOT_TOKEN_TEST }}
     uses: ./.github/workflows/_binary-upload.yml
 
   manywheel-py3_9-rocm6_3-build:
@@ -582,8 +569,6 @@ jobs:
       build_name: manywheel-py3_9-rocm6_3
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
-      conda-pytorchbot-token: ${{ secrets.CONDA_PYTORCHBOT_TOKEN }}
-      conda-pytorchbot-token-test: ${{ secrets.CONDA_PYTORCHBOT_TOKEN_TEST }}
     uses: ./.github/workflows/_binary-upload.yml
 
   manywheel-py3_9-xpu-build:
@@ -604,7 +589,7 @@ jobs:
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       build_name: manywheel-py3_9-xpu
       build_environment: linux-binary-manywheel
-      PYTORCH_EXTRA_INSTALL_REQUIREMENTS: intel-cmplr-lib-rt==2025.0.2 | intel-cmplr-lib-ur==2025.0.2 | intel-cmplr-lic-rt==2025.0.2 | intel-sycl-rt==2025.0.2 | tcmlib==1.2.0 | umf==0.9.1 | intel-pti==0.10.0; platform_system == 'Linux' and platform_machine == 'x86_64'
+      PYTORCH_EXTRA_INSTALL_REQUIREMENTS: intel-cmplr-lib-rt==2025.0.2 | intel-cmplr-lib-ur==2025.0.2 | intel-cmplr-lic-rt==2025.0.2 | intel-sycl-rt==2025.0.2 | tcmlib==1.2.0 | umf==0.9.1 | intel-pti==0.10.0
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   manywheel-py3_9-xpu-test:  # Testing
@@ -686,8 +671,6 @@ jobs:
       build_name: manywheel-py3_9-xpu
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
-      conda-pytorchbot-token: ${{ secrets.CONDA_PYTORCHBOT_TOKEN }}
-      conda-pytorchbot-token-test: ${{ secrets.CONDA_PYTORCHBOT_TOKEN_TEST }}
     uses: ./.github/workflows/_binary-upload.yml
 
   manywheel-py3_10-cpu-build:
@@ -753,8 +736,6 @@ jobs:
       build_name: manywheel-py3_10-cpu
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
-      conda-pytorchbot-token: ${{ secrets.CONDA_PYTORCHBOT_TOKEN }}
-      conda-pytorchbot-token-test: ${{ secrets.CONDA_PYTORCHBOT_TOKEN_TEST }}
     uses: ./.github/workflows/_binary-upload.yml
 
   manywheel-py3_10-cpu-cxx11-abi-build:
@@ -820,8 +801,6 @@ jobs:
       build_name: manywheel-py3_10-cpu-cxx11-abi
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
-      conda-pytorchbot-token: ${{ secrets.CONDA_PYTORCHBOT_TOKEN }}
-      conda-pytorchbot-token-test: ${{ secrets.CONDA_PYTORCHBOT_TOKEN_TEST }}
     uses: ./.github/workflows/_binary-upload.yml
 
   manywheel-py3_10-cuda11_8-build:
@@ -891,8 +870,6 @@ jobs:
       build_name: manywheel-py3_10-cuda11_8
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
-      conda-pytorchbot-token: ${{ secrets.CONDA_PYTORCHBOT_TOKEN }}
-      conda-pytorchbot-token-test: ${{ secrets.CONDA_PYTORCHBOT_TOKEN_TEST }}
     uses: ./.github/workflows/_binary-upload.yml
 
   manywheel-py3_10-cuda12_4-build:
@@ -962,8 +939,6 @@ jobs:
       build_name: manywheel-py3_10-cuda12_4
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
-      conda-pytorchbot-token: ${{ secrets.CONDA_PYTORCHBOT_TOKEN }}
-      conda-pytorchbot-token-test: ${{ secrets.CONDA_PYTORCHBOT_TOKEN_TEST }}
     uses: ./.github/workflows/_binary-upload.yml
 
   manywheel-py3_10-cuda12_6-build:
@@ -1033,8 +1008,6 @@ jobs:
       build_name: manywheel-py3_10-cuda12_6
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
-      conda-pytorchbot-token: ${{ secrets.CONDA_PYTORCHBOT_TOKEN }}
-      conda-pytorchbot-token-test: ${{ secrets.CONDA_PYTORCHBOT_TOKEN_TEST }}
     uses: ./.github/workflows/_binary-upload.yml
 
   manywheel-py3_10-rocm6_2_4-build:
@@ -1130,8 +1103,6 @@ jobs:
       build_name: manywheel-py3_10-rocm6_2_4
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
-      conda-pytorchbot-token: ${{ secrets.CONDA_PYTORCHBOT_TOKEN }}
-      conda-pytorchbot-token-test: ${{ secrets.CONDA_PYTORCHBOT_TOKEN_TEST }}
     uses: ./.github/workflows/_binary-upload.yml
 
   manywheel-py3_10-rocm6_3-build:
@@ -1227,8 +1198,6 @@ jobs:
       build_name: manywheel-py3_10-rocm6_3
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
-      conda-pytorchbot-token: ${{ secrets.CONDA_PYTORCHBOT_TOKEN }}
-      conda-pytorchbot-token-test: ${{ secrets.CONDA_PYTORCHBOT_TOKEN_TEST }}
     uses: ./.github/workflows/_binary-upload.yml
 
   manywheel-py3_10-xpu-build:
@@ -1249,7 +1218,7 @@ jobs:
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       build_name: manywheel-py3_10-xpu
       build_environment: linux-binary-manywheel
-      PYTORCH_EXTRA_INSTALL_REQUIREMENTS: intel-cmplr-lib-rt==2025.0.2 | intel-cmplr-lib-ur==2025.0.2 | intel-cmplr-lic-rt==2025.0.2 | intel-sycl-rt==2025.0.2 | tcmlib==1.2.0 | umf==0.9.1 | intel-pti==0.10.0; platform_system == 'Linux' and platform_machine == 'x86_64'
+      PYTORCH_EXTRA_INSTALL_REQUIREMENTS: intel-cmplr-lib-rt==2025.0.2 | intel-cmplr-lib-ur==2025.0.2 | intel-cmplr-lic-rt==2025.0.2 | intel-sycl-rt==2025.0.2 | tcmlib==1.2.0 | umf==0.9.1 | intel-pti==0.10.0
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   manywheel-py3_10-xpu-test:  # Testing
@@ -1331,8 +1300,6 @@ jobs:
       build_name: manywheel-py3_10-xpu
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
-      conda-pytorchbot-token: ${{ secrets.CONDA_PYTORCHBOT_TOKEN }}
-      conda-pytorchbot-token-test: ${{ secrets.CONDA_PYTORCHBOT_TOKEN_TEST }}
     uses: ./.github/workflows/_binary-upload.yml
 
   manywheel-py3_11-cpu-build:
@@ -1398,8 +1365,6 @@ jobs:
       build_name: manywheel-py3_11-cpu
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
-      conda-pytorchbot-token: ${{ secrets.CONDA_PYTORCHBOT_TOKEN }}
-      conda-pytorchbot-token-test: ${{ secrets.CONDA_PYTORCHBOT_TOKEN_TEST }}
     uses: ./.github/workflows/_binary-upload.yml
 
   manywheel-py3_11-cpu-cxx11-abi-build:
@@ -1465,8 +1430,6 @@ jobs:
       build_name: manywheel-py3_11-cpu-cxx11-abi
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
-      conda-pytorchbot-token: ${{ secrets.CONDA_PYTORCHBOT_TOKEN }}
-      conda-pytorchbot-token-test: ${{ secrets.CONDA_PYTORCHBOT_TOKEN_TEST }}
     uses: ./.github/workflows/_binary-upload.yml
 
   manywheel-py3_11-cuda11_8-build:
@@ -1536,8 +1499,6 @@ jobs:
       build_name: manywheel-py3_11-cuda11_8
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
-      conda-pytorchbot-token: ${{ secrets.CONDA_PYTORCHBOT_TOKEN }}
-      conda-pytorchbot-token-test: ${{ secrets.CONDA_PYTORCHBOT_TOKEN_TEST }}
     uses: ./.github/workflows/_binary-upload.yml
 
   manywheel-py3_11-cuda12_4-build:
@@ -1607,8 +1568,6 @@ jobs:
       build_name: manywheel-py3_11-cuda12_4
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
-      conda-pytorchbot-token: ${{ secrets.CONDA_PYTORCHBOT_TOKEN }}
-      conda-pytorchbot-token-test: ${{ secrets.CONDA_PYTORCHBOT_TOKEN_TEST }}
     uses: ./.github/workflows/_binary-upload.yml
 
   manywheel-py3_11-cuda12_4-full-build:
@@ -1674,8 +1633,6 @@ jobs:
       build_name: manywheel-py3_11-cuda12_4-full
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
-      conda-pytorchbot-token: ${{ secrets.CONDA_PYTORCHBOT_TOKEN }}
-      conda-pytorchbot-token-test: ${{ secrets.CONDA_PYTORCHBOT_TOKEN_TEST }}
     uses: ./.github/workflows/_binary-upload.yml
 
   manywheel-py3_11-cuda12_6-build:
@@ -1745,8 +1702,6 @@ jobs:
       build_name: manywheel-py3_11-cuda12_6
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
-      conda-pytorchbot-token: ${{ secrets.CONDA_PYTORCHBOT_TOKEN }}
-      conda-pytorchbot-token-test: ${{ secrets.CONDA_PYTORCHBOT_TOKEN_TEST }}
     uses: ./.github/workflows/_binary-upload.yml
 
   manywheel-py3_11-rocm6_2_4-build:
@@ -1842,8 +1797,6 @@ jobs:
       build_name: manywheel-py3_11-rocm6_2_4
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
-      conda-pytorchbot-token: ${{ secrets.CONDA_PYTORCHBOT_TOKEN }}
-      conda-pytorchbot-token-test: ${{ secrets.CONDA_PYTORCHBOT_TOKEN_TEST }}
     uses: ./.github/workflows/_binary-upload.yml
 
   manywheel-py3_11-rocm6_3-build:
@@ -1939,8 +1892,6 @@ jobs:
       build_name: manywheel-py3_11-rocm6_3
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
-      conda-pytorchbot-token: ${{ secrets.CONDA_PYTORCHBOT_TOKEN }}
-      conda-pytorchbot-token-test: ${{ secrets.CONDA_PYTORCHBOT_TOKEN_TEST }}
     uses: ./.github/workflows/_binary-upload.yml
 
   manywheel-py3_11-xpu-build:
@@ -1961,7 +1912,7 @@ jobs:
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       build_name: manywheel-py3_11-xpu
       build_environment: linux-binary-manywheel
-      PYTORCH_EXTRA_INSTALL_REQUIREMENTS: intel-cmplr-lib-rt==2025.0.2 | intel-cmplr-lib-ur==2025.0.2 | intel-cmplr-lic-rt==2025.0.2 | intel-sycl-rt==2025.0.2 | tcmlib==1.2.0 | umf==0.9.1 | intel-pti==0.10.0; platform_system == 'Linux' and platform_machine == 'x86_64'
+      PYTORCH_EXTRA_INSTALL_REQUIREMENTS: intel-cmplr-lib-rt==2025.0.2 | intel-cmplr-lib-ur==2025.0.2 | intel-cmplr-lic-rt==2025.0.2 | intel-sycl-rt==2025.0.2 | tcmlib==1.2.0 | umf==0.9.1 | intel-pti==0.10.0
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   manywheel-py3_11-xpu-test:  # Testing
@@ -2043,8 +1994,6 @@ jobs:
       build_name: manywheel-py3_11-xpu
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
-      conda-pytorchbot-token: ${{ secrets.CONDA_PYTORCHBOT_TOKEN }}
-      conda-pytorchbot-token-test: ${{ secrets.CONDA_PYTORCHBOT_TOKEN_TEST }}
     uses: ./.github/workflows/_binary-upload.yml
 
   manywheel-py3_12-cpu-build:
@@ -2110,8 +2059,6 @@ jobs:
       build_name: manywheel-py3_12-cpu
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
-      conda-pytorchbot-token: ${{ secrets.CONDA_PYTORCHBOT_TOKEN }}
-      conda-pytorchbot-token-test: ${{ secrets.CONDA_PYTORCHBOT_TOKEN_TEST }}
     uses: ./.github/workflows/_binary-upload.yml
 
   manywheel-py3_12-cpu-cxx11-abi-build:
@@ -2177,8 +2124,6 @@ jobs:
       build_name: manywheel-py3_12-cpu-cxx11-abi
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
-      conda-pytorchbot-token: ${{ secrets.CONDA_PYTORCHBOT_TOKEN }}
-      conda-pytorchbot-token-test: ${{ secrets.CONDA_PYTORCHBOT_TOKEN_TEST }}
     uses: ./.github/workflows/_binary-upload.yml
 
   manywheel-py3_12-cuda11_8-build:
@@ -2248,8 +2193,6 @@ jobs:
       build_name: manywheel-py3_12-cuda11_8
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
-      conda-pytorchbot-token: ${{ secrets.CONDA_PYTORCHBOT_TOKEN }}
-      conda-pytorchbot-token-test: ${{ secrets.CONDA_PYTORCHBOT_TOKEN_TEST }}
     uses: ./.github/workflows/_binary-upload.yml
 
   manywheel-py3_12-cuda12_4-build:
@@ -2319,8 +2262,6 @@ jobs:
       build_name: manywheel-py3_12-cuda12_4
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
-      conda-pytorchbot-token: ${{ secrets.CONDA_PYTORCHBOT_TOKEN }}
-      conda-pytorchbot-token-test: ${{ secrets.CONDA_PYTORCHBOT_TOKEN_TEST }}
     uses: ./.github/workflows/_binary-upload.yml
 
   manywheel-py3_12-cuda12_6-build:
@@ -2390,8 +2331,6 @@ jobs:
       build_name: manywheel-py3_12-cuda12_6
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
-      conda-pytorchbot-token: ${{ secrets.CONDA_PYTORCHBOT_TOKEN }}
-      conda-pytorchbot-token-test: ${{ secrets.CONDA_PYTORCHBOT_TOKEN_TEST }}
     uses: ./.github/workflows/_binary-upload.yml
 
   manywheel-py3_12-rocm6_2_4-build:
@@ -2487,8 +2426,6 @@ jobs:
       build_name: manywheel-py3_12-rocm6_2_4
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
-      conda-pytorchbot-token: ${{ secrets.CONDA_PYTORCHBOT_TOKEN }}
-      conda-pytorchbot-token-test: ${{ secrets.CONDA_PYTORCHBOT_TOKEN_TEST }}
     uses: ./.github/workflows/_binary-upload.yml
 
   manywheel-py3_12-rocm6_3-build:
@@ -2584,8 +2521,6 @@ jobs:
       build_name: manywheel-py3_12-rocm6_3
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
-      conda-pytorchbot-token: ${{ secrets.CONDA_PYTORCHBOT_TOKEN }}
-      conda-pytorchbot-token-test: ${{ secrets.CONDA_PYTORCHBOT_TOKEN_TEST }}
     uses: ./.github/workflows/_binary-upload.yml
 
   manywheel-py3_12-xpu-build:
@@ -2606,7 +2541,7 @@ jobs:
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       build_name: manywheel-py3_12-xpu
       build_environment: linux-binary-manywheel
-      PYTORCH_EXTRA_INSTALL_REQUIREMENTS: intel-cmplr-lib-rt==2025.0.2 | intel-cmplr-lib-ur==2025.0.2 | intel-cmplr-lic-rt==2025.0.2 | intel-sycl-rt==2025.0.2 | tcmlib==1.2.0 | umf==0.9.1 | intel-pti==0.10.0; platform_system == 'Linux' and platform_machine == 'x86_64'
+      PYTORCH_EXTRA_INSTALL_REQUIREMENTS: intel-cmplr-lib-rt==2025.0.2 | intel-cmplr-lib-ur==2025.0.2 | intel-cmplr-lic-rt==2025.0.2 | intel-sycl-rt==2025.0.2 | tcmlib==1.2.0 | umf==0.9.1 | intel-pti==0.10.0
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   manywheel-py3_12-xpu-test:  # Testing
@@ -2688,8 +2623,6 @@ jobs:
       build_name: manywheel-py3_12-xpu
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
-      conda-pytorchbot-token: ${{ secrets.CONDA_PYTORCHBOT_TOKEN }}
-      conda-pytorchbot-token-test: ${{ secrets.CONDA_PYTORCHBOT_TOKEN_TEST }}
     uses: ./.github/workflows/_binary-upload.yml
 
   manywheel-py3_13-cpu-build:
@@ -2755,8 +2688,6 @@ jobs:
       build_name: manywheel-py3_13-cpu
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
-      conda-pytorchbot-token: ${{ secrets.CONDA_PYTORCHBOT_TOKEN }}
-      conda-pytorchbot-token-test: ${{ secrets.CONDA_PYTORCHBOT_TOKEN_TEST }}
     uses: ./.github/workflows/_binary-upload.yml
 
   manywheel-py3_13-cpu-cxx11-abi-build:
@@ -2822,8 +2753,6 @@ jobs:
       build_name: manywheel-py3_13-cpu-cxx11-abi
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
-      conda-pytorchbot-token: ${{ secrets.CONDA_PYTORCHBOT_TOKEN }}
-      conda-pytorchbot-token-test: ${{ secrets.CONDA_PYTORCHBOT_TOKEN_TEST }}
     uses: ./.github/workflows/_binary-upload.yml
 
   manywheel-py3_13-cuda11_8-build:
@@ -2893,8 +2822,6 @@ jobs:
       build_name: manywheel-py3_13-cuda11_8
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
-      conda-pytorchbot-token: ${{ secrets.CONDA_PYTORCHBOT_TOKEN }}
-      conda-pytorchbot-token-test: ${{ secrets.CONDA_PYTORCHBOT_TOKEN_TEST }}
     uses: ./.github/workflows/_binary-upload.yml
 
   manywheel-py3_13-cuda12_4-build:
@@ -2964,8 +2891,6 @@ jobs:
       build_name: manywheel-py3_13-cuda12_4
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
-      conda-pytorchbot-token: ${{ secrets.CONDA_PYTORCHBOT_TOKEN }}
-      conda-pytorchbot-token-test: ${{ secrets.CONDA_PYTORCHBOT_TOKEN_TEST }}
     uses: ./.github/workflows/_binary-upload.yml
 
   manywheel-py3_13-cuda12_6-build:
@@ -3035,8 +2960,6 @@ jobs:
       build_name: manywheel-py3_13-cuda12_6
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
-      conda-pytorchbot-token: ${{ secrets.CONDA_PYTORCHBOT_TOKEN }}
-      conda-pytorchbot-token-test: ${{ secrets.CONDA_PYTORCHBOT_TOKEN_TEST }}
     uses: ./.github/workflows/_binary-upload.yml
 
   manywheel-py3_13-rocm6_2_4-build:
@@ -3132,8 +3055,6 @@ jobs:
       build_name: manywheel-py3_13-rocm6_2_4
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
-      conda-pytorchbot-token: ${{ secrets.CONDA_PYTORCHBOT_TOKEN }}
-      conda-pytorchbot-token-test: ${{ secrets.CONDA_PYTORCHBOT_TOKEN_TEST }}
     uses: ./.github/workflows/_binary-upload.yml
 
   manywheel-py3_13-rocm6_3-build:
@@ -3229,8 +3150,6 @@ jobs:
       build_name: manywheel-py3_13-rocm6_3
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
-      conda-pytorchbot-token: ${{ secrets.CONDA_PYTORCHBOT_TOKEN }}
-      conda-pytorchbot-token-test: ${{ secrets.CONDA_PYTORCHBOT_TOKEN_TEST }}
     uses: ./.github/workflows/_binary-upload.yml
 
   manywheel-py3_13-xpu-build:
@@ -3251,7 +3170,7 @@ jobs:
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       build_name: manywheel-py3_13-xpu
       build_environment: linux-binary-manywheel
-      PYTORCH_EXTRA_INSTALL_REQUIREMENTS: intel-cmplr-lib-rt==2025.0.2 | intel-cmplr-lib-ur==2025.0.2 | intel-cmplr-lic-rt==2025.0.2 | intel-sycl-rt==2025.0.2 | tcmlib==1.2.0 | umf==0.9.1 | intel-pti==0.10.0; platform_system == 'Linux' and platform_machine == 'x86_64'
+      PYTORCH_EXTRA_INSTALL_REQUIREMENTS: intel-cmplr-lib-rt==2025.0.2 | intel-cmplr-lib-ur==2025.0.2 | intel-cmplr-lic-rt==2025.0.2 | intel-sycl-rt==2025.0.2 | tcmlib==1.2.0 | umf==0.9.1 | intel-pti==0.10.0
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   manywheel-py3_13-xpu-test:  # Testing
@@ -3333,8 +3252,6 @@ jobs:
       build_name: manywheel-py3_13-xpu
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
-      conda-pytorchbot-token: ${{ secrets.CONDA_PYTORCHBOT_TOKEN }}
-      conda-pytorchbot-token-test: ${{ secrets.CONDA_PYTORCHBOT_TOKEN_TEST }}
     uses: ./.github/workflows/_binary-upload.yml
 
   manywheel-py3_13t-cpu-build:
@@ -3400,8 +3317,6 @@ jobs:
       build_name: manywheel-py3_13t-cpu
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
-      conda-pytorchbot-token: ${{ secrets.CONDA_PYTORCHBOT_TOKEN }}
-      conda-pytorchbot-token-test: ${{ secrets.CONDA_PYTORCHBOT_TOKEN_TEST }}
     uses: ./.github/workflows/_binary-upload.yml
 
   manywheel-py3_13t-cpu-cxx11-abi-build:
@@ -3467,8 +3382,6 @@ jobs:
       build_name: manywheel-py3_13t-cpu-cxx11-abi
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
-      conda-pytorchbot-token: ${{ secrets.CONDA_PYTORCHBOT_TOKEN }}
-      conda-pytorchbot-token-test: ${{ secrets.CONDA_PYTORCHBOT_TOKEN_TEST }}
     uses: ./.github/workflows/_binary-upload.yml
 
   manywheel-py3_13t-cuda11_8-build:
@@ -3538,8 +3451,6 @@ jobs:
       build_name: manywheel-py3_13t-cuda11_8
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
-      conda-pytorchbot-token: ${{ secrets.CONDA_PYTORCHBOT_TOKEN }}
-      conda-pytorchbot-token-test: ${{ secrets.CONDA_PYTORCHBOT_TOKEN_TEST }}
     uses: ./.github/workflows/_binary-upload.yml
 
   manywheel-py3_13t-cuda12_4-build:
@@ -3609,8 +3520,6 @@ jobs:
       build_name: manywheel-py3_13t-cuda12_4
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
-      conda-pytorchbot-token: ${{ secrets.CONDA_PYTORCHBOT_TOKEN }}
-      conda-pytorchbot-token-test: ${{ secrets.CONDA_PYTORCHBOT_TOKEN_TEST }}
     uses: ./.github/workflows/_binary-upload.yml
 
   manywheel-py3_13t-cuda12_6-build:
@@ -3680,8 +3589,6 @@ jobs:
       build_name: manywheel-py3_13t-cuda12_6
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
-      conda-pytorchbot-token: ${{ secrets.CONDA_PYTORCHBOT_TOKEN }}
-      conda-pytorchbot-token-test: ${{ secrets.CONDA_PYTORCHBOT_TOKEN_TEST }}
     uses: ./.github/workflows/_binary-upload.yml
 
   manywheel-py3_13t-rocm6_2_4-build:
@@ -3777,8 +3684,6 @@ jobs:
       build_name: manywheel-py3_13t-rocm6_2_4
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
-      conda-pytorchbot-token: ${{ secrets.CONDA_PYTORCHBOT_TOKEN }}
-      conda-pytorchbot-token-test: ${{ secrets.CONDA_PYTORCHBOT_TOKEN_TEST }}
     uses: ./.github/workflows/_binary-upload.yml
 
   manywheel-py3_13t-rocm6_3-build:
@@ -3874,6 +3779,4 @@ jobs:
       build_name: manywheel-py3_13t-rocm6_3
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
-      conda-pytorchbot-token: ${{ secrets.CONDA_PYTORCHBOT_TOKEN }}
-      conda-pytorchbot-token-test: ${{ secrets.CONDA_PYTORCHBOT_TOKEN_TEST }}
     uses: ./.github/workflows/_binary-upload.yml

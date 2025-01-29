@@ -1,9 +1,10 @@
 # mypy: allow-untyped-defs
 import inspect
 import itertools
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from enum import auto, Enum
-from typing import Any, Callable, cast, List, Optional, Sequence
+from typing import Any, Callable, cast, Optional
 
 import torch
 import torch.nn as nn
@@ -171,8 +172,8 @@ class ParamModuleInfo:
     # Parameter names are unprefixed, e.g. "weight", not "lin.weight"
     module: nn.Module
     param_name: str
-    shared_modules: List[nn.Module] = field(default_factory=list)
-    shared_param_names: List[str] = field(default_factory=list)
+    shared_modules: list[nn.Module] = field(default_factory=list)
+    shared_param_names: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -211,10 +212,10 @@ class FSDPParam:
     _sharding_spec: DTensorSpec
     # DTensor attributes (only defined for DTensor `param`):
     _tp_spec: DTensorSpec
-    all_gather_outputs: List[torch.Tensor]  # 1D
+    all_gather_outputs: list[torch.Tensor]  # 1D
     # All-gather extension attributes
     _extensions_data: ExtensionsData
-    _unsharded_inner_tensors: List[torch.Tensor]
+    _unsharded_inner_tensors: list[torch.Tensor]
 
     def __init__(
         self,
@@ -241,7 +242,7 @@ class FSDPParam:
         if self.post_forward_mesh_info:
             self._init_sharded_post_forward_param_metadata(param)
         self._init_extensions()
-        self.all_gather_outputs: List[torch.Tensor] = []
+        self.all_gather_outputs: list[torch.Tensor] = []
         self.unsharded_accumulated_grad = None
         self._param_fqn: Optional[str] = None  # prefixed from root module
         # TODO: Remove this padding logic once DTensor pads the local tensor:
@@ -439,12 +440,12 @@ class FSDPParam:
             )
         if has_fsdp_pre_all_gather:
             self._extensions_data = ExtensionsData()
-        self._unsharded_inner_tensors: List[torch.Tensor] = []
+        self._unsharded_inner_tensors: list[torch.Tensor] = []
 
     def init_all_gather_outputs(
         self,
-        all_gather_input_numels: List[int],
-        all_gather_input_dtypes: List[torch.dtype],
+        all_gather_input_numels: list[int],
+        all_gather_input_dtypes: list[torch.dtype],
         world_size: int,
         device: torch.device,
         force_recreate: bool = False,
@@ -680,7 +681,7 @@ class FSDPParam:
                 free_storage(tensor)
 
     @property
-    def all_gather_inputs(self) -> List[torch.Tensor]:  # 1D
+    def all_gather_inputs(self) -> list[torch.Tensor]:  # 1D
         self._assert_in_states(ShardedState.SHARDED, ShardedState.SHARDED_POST_FORWARD)
         if self.sharded_state == ShardedState.SHARDED:
             if not compiled_autograd_enabled() and hasattr(

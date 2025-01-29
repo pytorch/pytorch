@@ -3,6 +3,7 @@
 
 #include <c10/core/Stream.h>
 #include <c10/macros/Export.h>
+#include <torch/csrc/Export.h>
 #include <torch/csrc/python_headers.h>
 
 struct THPStream {
@@ -21,6 +22,6 @@ inline bool THPStream_Check(PyObject* obj) {
   return THPStreamClass && PyObject_IsInstance(obj, (PyObject*)THPStreamClass);
 }
 
-PyObject* THPStream_Wrap(const c10::Stream& stream);
+TORCH_PYTHON_API PyObject* THPStream_Wrap(const c10::Stream& stream);
 
 #endif // THP_STREAM_INC
