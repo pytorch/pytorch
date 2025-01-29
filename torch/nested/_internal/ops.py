@@ -584,8 +584,14 @@ def linear_backward_default(func, *args, **kwargs):
         input_2d = inp._values.reshape(-1, weight.size(1))
         dw = torch.matmul(grad_2d.t(), input_2d)
     if output_mask[2]:
-        # NB: autograd engine will sum over all but the last dim to get a 1D bias grad.
-        db = grad_output._values.detach()
+        # Sum over all but the last dim to get a 1D bias grad. We cannot
+        # rely on the autograd engine to reduce for us, because returning a
+        # tensor aliasing the input would violate the aten signature annotation
+        reduce_dims = tuple(range(grad_output._values.ndim - 1))
+        if reduce_dims == ():
+            db = grad_output._values.clone()
+        else:
+            db = torch.sum(grad_output._values, reduce_dims, keepdim=False)
     return (ds, dw, db)
 
 
@@ -603,7 +609,7 @@ def to_dtype(func, *args, **kwargs):
 @register_jagged_func(torch.ops.aten._to_copy.default, "self: jt_all")
 def to_copy_default(func, *args, **kwargs):
     from torch.nested._internal.nested_tensor import (
-        make_cached_tensor_for_nested,
+        make_dict_tensor_for_nested,
         src_field_name,
     )
     from torch.nested._internal.tensor_registry import register_tensor, try_get_int
@@ -646,7 +652,7 @@ def to_copy_default(func, *args, **kwargs):
             # to have the same symbolic context (we should fix that).
             new_raw_metadata[source_attr] = None
 
-    new_metadata = make_cached_tensor_for_nested(new_raw_metadata)
+    new_metadata = make_dict_tensor_for_nested(new_raw_metadata)
 
     new_non_contig_offsets = None
     if inp._non_contig_offsets is not None:
@@ -702,6 +708,7 @@ register_jagged_func(torch.ops.aten.detach.default, "self: jt_all")(
         torch.ops.aten.empty_like.default,
         torch.ops.aten.ones_like.default,
         torch.ops.aten.zeros_like.default,
+        torch.ops.aten.rand_like.default,
         torch.ops.aten.randn_like.default,
     ],
     "self: jt_all",
@@ -718,7 +725,52 @@ def like_factory_default(func, *args, **kwargs):
     # This should be set to strided for redispatching on values.
     new_kwargs["layout"] = torch.strided
 
-    return NestedTensor(func(inp._values, **new_kwargs), **extract_kwargs(inp))
+    new_values = func(inp._values, **new_kwargs)
+    new_offsets = inp._offsets.to(device=new_values.device)
+    new_lengths = None
+    if inp._lengths is not None:
+        new_lengths = inp._lengths.to(device=new_values.device)
+    output_kwargs = extract_kwargs(inp)
+    if "offsets" in output_kwargs:
+        output_kwargs["offsets"] = new_offsets
+    if "lengths" in output_kwargs:
+        output_kwargs["lengths"] = new_lengths
+
+    if inp.device != new_values.device:
+        # Update the nested int registry to indicate that the ragged structure is the same
+        # between the two offsets / lengths on different devices.
+        from torch._subclasses.fake_tensor import FakeTensor
+        from torch._subclasses.functional_tensor import (
+            FunctionalTensor,
+            mb_unwrap_functional_tensor,
+        )
+
+        from .nested_tensor import _tensor_symint_registry
+
+        ragged_source = inp._offsets if inp._lengths is None else inp._lengths
+        new_thing = new_offsets if new_lengths is None else new_lengths
+        if isinstance(new_thing, (FakeTensor, FunctionalTensor)):
+            # Temporary hack until we have the union find
+            tgt = mb_unwrap_functional_tensor(new_thing)
+            src = mb_unwrap_functional_tensor(ragged_source)
+            tgt.nested_int_memo = src.nested_int_memo
+        else:
+            _tensor_symint_registry[new_thing] = _tensor_symint_registry[ragged_source]
+
+    return NestedTensor(new_values, **output_kwargs)
+
+
+register_jagged_func(torch.ops.aten.full_like.default, "self: jt_all, fill_value: any")(
+    like_factory_default
+)
+
+register_jagged_func(torch.ops.aten.randint_like.default, "self: jt_all, high: any")(
+    like_factory_default
+)
+
+register_jagged_func(
+    torch.ops.aten.randint_like.low_dtype, "self: jt_all, low: any, high: any"
+)(like_factory_default)
 
 
 @register_jagged_func(torch.ops.aten.zero_.default, "self: jt_all")
@@ -2244,12 +2296,12 @@ def to_padded_tensor_default(func, *args, **kwargs):
     return padded_out
 
 
-from torch.nested._internal.cached_tensor import register_cached_tensor_func
+from torch.nested._internal.dict_tensor import register_dict_tensor_func
 
 
 # When we use [ CacheTensor open registry ], we cannot rely on NestedTensor's
 # torch function anymore to enable maybe_enable_thunkify. All functions
-# registered to register_cached_tensor_func must be first wrapped with this
+# registered to register_dict_tensor_func must be first wrapped with this
 # decorator.
 def maybe_enable_thunkify(f):
     import functools
@@ -2265,7 +2317,7 @@ def maybe_enable_thunkify(f):
 
 
 # See Note: [ CacheTensor open registry ]
-@register_cached_tensor_func(torch.ops.aten._nested_from_padded_tensor.default)
+@register_dict_tensor_func(torch.ops.aten._nested_from_padded_tensor.default)
 @maybe_enable_thunkify
 def _nested_from_padded_tensor_default(func, *args, **kwargs):
     # padded: t, metadata: t, ragged_idx: any?, sum_S: any?
@@ -2316,7 +2368,7 @@ def _nested_from_padded_tensor_default(func, *args, **kwargs):
     )
 
 
-@register_cached_tensor_func(torch.ops.aten._nested_view_from_jagged.default)
+@register_dict_tensor_func(torch.ops.aten._nested_view_from_jagged.default)
 @maybe_enable_thunkify
 def _nested_view_from_jagged_default(func, *args, **kwargs):
     # values: t, metadata: t, ragged_idx: any?

@@ -288,6 +288,7 @@ class TestPublicBindings(TestCase):
 
         # It is ok to add new entries here but please be careful that these modules
         # do not get imported by public code.
+        # DO NOT add public modules here.
         private_allowlist = {
             "torch._inductor.codegen.cuda.cuda_kernel",
             # TODO(#133647): Remove the onnx._internal entries after
@@ -404,52 +405,11 @@ class TestPublicBindings(TestCase):
             "torch.utils.tensorboard._utils",
         }
 
-        # No new entries should be added to this list.
-        # All public modules should be importable on all platforms.
-        public_allowlist = {
-            "torch.distributed.algorithms.ddp_comm_hooks",
-            "torch.distributed.algorithms.model_averaging.averagers",
-            "torch.distributed.algorithms.model_averaging.hierarchical_model_averager",
-            "torch.distributed.algorithms.model_averaging.utils",
-            "torch.distributed.checkpoint",
-            "torch.distributed.constants",
-            "torch.distributed.distributed_c10d",
-            "torch.distributed.elastic.agent.server",
-            "torch.distributed.elastic.rendezvous",
-            "torch.distributed.fsdp",
-            "torch.distributed.launch",
-            "torch.distributed.launcher",
-            "torch.distributed.nn",
-            "torch.distributed.nn.api.remote_module",
-            "torch.distributed.optim",
-            "torch.distributed.optim.optimizer",
-            "torch.distributed.rendezvous",
-            "torch.distributed.rpc.api",
-            "torch.distributed.rpc.backend_registry",
-            "torch.distributed.rpc.constants",
-            "torch.distributed.rpc.internal",
-            "torch.distributed.rpc.options",
-            "torch.distributed.rpc.rref_proxy",
-            "torch.distributed.rpc.server_process_global_profiler",
-            "torch.distributed.run",
-            "torch.distributed.tensor.parallel",
-            "torch.distributed.utils",
-            "torch.utils.tensorboard",
-            "torch.utils.tensorboard.summary",
-            "torch.utils.tensorboard.writer",
-            "torch.ao.quantization.experimental.fake_quantize",
-            "torch.ao.quantization.experimental.linear",
-            "torch.ao.quantization.experimental.observer",
-            "torch.ao.quantization.experimental.qconfig",
-        }
-
         errors = []
         for mod, exc in failures:
-            if mod in public_allowlist:
-                # TODO: Ensure this is the right error type
-
-                continue
             if mod in private_allowlist:
+                # make sure mod is actually private
+                assert any(t.startswith("_") for t in mod.split("."))
                 continue
             errors.append(
                 f"{mod} failed to import with error {type(exc).__qualname__}: {str(exc)}"

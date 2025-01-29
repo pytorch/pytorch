@@ -4,7 +4,7 @@ from typing import *  # noqa: F403
 import torch
 from torch._C import DispatchKey, DispatchKeySet
 from torch._prims_common import is_expandable_to
-from torch.nested._internal.cached_tensor import CachedTensor
+from torch.nested._internal.dict_tensor import DictTensor
 from torch.nested._internal.nested_int import get_metadata, NestedIntNode
 
 
@@ -28,7 +28,7 @@ def src_field_name(device_type, source_type):
 def get_tensor_symint(metadata_tensor, *, coeff=1):
     from torch._subclasses.fake_tensor import maybe_get_fake_mode
 
-    assert isinstance(metadata_tensor, CachedTensor)
+    assert isinstance(metadata_tensor, DictTensor)
 
     if fake_mode := maybe_get_fake_mode(metadata_tensor):
         return fake_mode.get_nested_int(cache=metadata_tensor, coeff=coeff)
@@ -565,8 +565,8 @@ def jagged_from_tensor_and_lengths(
     return (ret_nt, offsets, None if is_contiguous else length_list)
 
 
-def make_cached_tensor_for_nested(metadata):
-    # Metadata passed to CachedTensor for used with NestedTensor must satisfy:
+def make_dict_tensor_for_nested(metadata):
+    # Metadata passed to DictTensor for used with NestedTensor must satisfy:
     # 1) contains every field in SOURCE_FIELD + EXTRA_FIELD (value can be None)
     # 2) at least one of SOURCE_FIELD is non-None
     for x in SOURCE_FIELDS + EXTRA_FIELDS:
@@ -576,16 +576,16 @@ def make_cached_tensor_for_nested(metadata):
         metadata.get(k) is not None for k in SOURCE_FIELDS
     ), f"At least one of {SOURCE_FIELDS} must be non-None"
 
-    return CachedTensor(metadata)
+    return DictTensor(metadata)
 
 
-def make_nested_meta_with_offsets(offsets) -> CachedTensor:
+def make_nested_meta_with_offsets(offsets) -> DictTensor:
     prefix = "_host" if offsets.is_cpu else "_device"
     metadata: Dict[str, Optional[torch.Tensor]] = dict.fromkeys(
         SOURCE_FIELDS + EXTRA_FIELDS
     )
     metadata[f"{prefix}_offsets"] = offsets
-    return make_cached_tensor_for_nested(metadata)
+    return make_dict_tensor_for_nested(metadata)
 
 
 def _make_nested_meta(
@@ -594,8 +594,8 @@ def _make_nested_meta(
     lengths: Optional[torch.Tensor],
     min_seqlen: Optional[Union[torch.Tensor, int]],
     max_seqlen: Optional[Union[torch.Tensor, int]],
-) -> Tuple[CachedTensor, Optional[torch.Tensor]]:
-    # 1. Constructs a fresh CachedTensor from provided metadata
+) -> Tuple[DictTensor, Optional[torch.Tensor]]:
+    # 1. Constructs a fresh DictTensor from provided metadata
     # - normalizes all fields
     #   - puts lengths/offsets on correct field based on device
     #   - stuffs min/max seqlen into tensor if necessary
@@ -627,11 +627,11 @@ def _make_nested_meta(
 
     if offsets is not None and lengths is not None:
         non_contig_offsets = offsets
-        assert not isinstance(lengths, CachedTensor)
+        assert not isinstance(lengths, DictTensor)
         process_raw_source_tensor(metadata, "lengths", lengths)
     else:
         non_contig_offsets = None
-        assert not  isinstance(offsets, CachedTensor)
+        assert not  isinstance(offsets, DictTensor)
         process_raw_source_tensor(metadata, "offsets", offsets)
 
     if min_seqlen is not None:
@@ -644,7 +644,7 @@ def _make_nested_meta(
     if metadata.get("_min_seqlen_tensor") is not None:
         torch._dynamo.mark_dynamic(metadata["_min_seqlen_tensor"], 0)
 
-    metadata_tensor = make_cached_tensor_for_nested(metadata)
+    metadata_tensor = make_dict_tensor_for_nested(metadata)
     return metadata_tensor, non_contig_offsets
 
 
