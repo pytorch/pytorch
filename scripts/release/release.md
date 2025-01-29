@@ -291,7 +291,7 @@ The full release compatibility matrix matrix can be found in [release.md](https:
 
 ### Inductor
 
-* Move stack allocation related configs in AOTI ([#139093](https://github.com/pytorch/pytorch/pull/139093)). All configs now have a aot_inductor prefix, so `torch.compile(options={"use_minimal_arrayref_interface": True})(foo)` is now `torch.compile(options={"aot_inductor.use_minimal_arrayref_interface": True})(foo)` and `torch.compile(options={"allow_stack_allocation": True})(foo)` is now `torch.compile(options={"aot_inductor.allow_stack_allocation": True})(foo)`.
+* Move stack allocation related configs in AOTI ([#139093](https://github.com/pytorch/pytorch/pull/139093)). All stack allocation related configs now have a aot_inductor prefix, so `torch.compile(options={"use_minimal_arrayref_interface": True})(foo)` is now `torch.compile(options={"aot_inductor.use_minimal_arrayref_interface": True})(foo)` and `torch.compile(options={"allow_stack_allocation": True})(foo)` is now `torch.compile(options={"aot_inductor.allow_stack_allocation": True})(foo)`.
 * Move `torch._utils.is_compiling` to `torch.compiler.is_compiling` ([#127690](https://github.com/pytorch/pytorch/pull/127690)) Rewrite `torch._utils.is_compiling()` to `torch.compiler.is_compiling()`.
 * Added option `​​autotune_num_choices_displayed` to control number of kernel options displayed ([#138788](https://github.com/pytorch/pytorch/pull/138788))
 * Added option `force_pointwise_cat` concat support through inductor using pointwise kernels ([#141966](https://github.com/pytorch/pytorch/pull/141966)). This forces concat to be generated as a pointwise op with masked loads.
