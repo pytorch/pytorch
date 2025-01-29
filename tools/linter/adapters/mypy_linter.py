@@ -119,7 +119,7 @@ def check_mypy_installed(code: str) -> list[LintMessage]:
 
 
 def in_github_actions() -> bool:
-    return os.getenv("GITHUB_ACTIONS", "false").lower() != "false"
+    return bool(os.getenv("GITHUB_ACTIONS"))
 
 
 def check_files(
