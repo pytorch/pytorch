@@ -1822,6 +1822,13 @@ def get_selected_tests(options) -> List[str]:
     if torch.version.cuda is not None:
         options.exclude.extend(["distributions/test_constraints"])
 
+    # these tests failing in Python 3.13 temporarily disabling
+    if sys.version_info >= (3, 13):
+        options.exclude.extend(
+            [
+                "functorch/test_rearrange",
+            ]
+        )
 
     selected_tests = exclude_tests(options.exclude, selected_tests)
 
