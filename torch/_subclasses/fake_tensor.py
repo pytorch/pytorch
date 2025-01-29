@@ -2833,7 +2833,7 @@ def _infer_fake_from_real_tensor(
     # We went with the first option.
     fake_strides = [-1] * real_out.dim()
     strides = [(s, idx) for idx, s in enumerate(real_out.stride())]
-    strides.sort()
+    strides.sort(key=lambda x: (x[0], -x[1]))
     expected = 1
     fake_stride = expected
     for s, idx in strides:

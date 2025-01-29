@@ -16,20 +16,16 @@ import logging
 import multiprocessing
 import operator
 import os
-import posixpath
 import random
 import re
 import selectors
-import signal
 import sys
 import tempfile
 import threading
-import tokenize
 import traceback
 import types
 import typing
 import unittest
-import weakref
 from collections import defaultdict
 from pathlib import Path
 from typing import Any, Callable, cast, Optional, Union
@@ -3168,19 +3164,14 @@ BUILTIN_SKIPLIST = (
     logging,
     multiprocessing,
     operator,
-    posixpath,
     random,
-    re,
     selectors,
-    signal,
     tempfile,
     threading,
-    tokenize,
     traceback,
     types,
     typing,
     unittest,
-    weakref,
     _collections_abc,
     _weakrefset,
 )
@@ -3276,6 +3267,7 @@ if torch.distributed.is_available():
 MOD_INLINELIST = [
     "torch._decomp",
     "torch._dynamo._trace_wrapped_higher_order_op",
+    "torch._dynamo.compiled_autograd",
     "torch._dynamo.comptime",
     "torch._dynamo.polyfills",
     "torch._functorch._aot_autograd.subclass_parametrization",
