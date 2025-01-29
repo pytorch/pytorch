@@ -287,13 +287,13 @@ The full release compatibility matrix matrix can be found in [release.md](https:
 
 ### Inductor
 
-* Move stack allocation related configs in AOTI ([#139093](https://github.com/pytorch/pytorch/pull/139093)). All configs now have a aot_inductor prefix, so `config.use_minimal_arrayref_interface` is now `config.aot_inductor.use_minimal_arrayref_interface` and `config.allow_stack_allocation` is now `config.aot_inductor.allow_stack_allocation`.
+* Move stack allocation related configs in AOTI ([#139093](https://github.com/pytorch/pytorch/pull/139093)). All configs now have a aot_inductor prefix, so `torch.compile(options={"use_minimal_arrayref_interface": True})(foo)` is now `torch.compile(options={"aot_inductor.use_minimal_arrayref_interface": True})(foo)` and `torch.compile(options={"allow_stack_allocation": True})(foo)` is now `torch.compile(options={"aot_inductor.allow_stack_allocation": True})(foo)`.
 * Move `torch._utils.is_compiling` to `torch.compiler.is_compiling` ([#127690](https://github.com/pytorch/pytorch/pull/127690)) Rewrite `torch._utils.is_compiling()` to `torch.compiler.is_compiling()`.
 * Added option `​​autotune_num_choices_displayed` to control number of kernel options displayed ([#138788](https://github.com/pytorch/pytorch/pull/138788))
 * Added option `force_pointwise_cat` concat support through inductor using pointwise kernels ([#141966](https://github.com/pytorch/pytorch/pull/141966)). This forces concat to be generated as a pointwise op with masked loads.
 * New config option `annotate_training` that adds Inductor annotations to NVTX.  ([#130429](https://github.com/pytorch/pytorch/pull/130429))
 * Introduces an option `triton_kernel_default_layout_constraint` to tweak stride settings for user-defined Triton kernels, enhancing customization and flexibility ([#135530](https://github.com/pytorch/pytorch/pull/135530)).
-* User can patch inductor config to enable strict custom kernel layout constraints by changing `triton_kernel_default_layout_constraint="needs_fixed_stride_order"` for torch._inductor.config. Thus, inductor will keep the same stride with user code([#135581](https://github.com/pytorch/pytorch/pull/135581)). 
+* User can patch inductor config to enable strict custom kernel layout constraints by changing `torch.compile(options={"triton_kernel_default_layout_constraint": "needs_fixed_stride_order"})(foo)` for torch._inductor.config ([#135581](https://github.com/pytorch/pytorch/pull/135581)). 
 * External callable registration API `register_external_matmul` for Matmul tuning candidates in Inductor ([#130774](https://github.com/pytorch/pytorch/pull/130774)).
 * Adds support for Windows Arm64 to enhance platform compatibility ([#133088](https://github.com/pytorch/pytorch/pull/133088)).
 * Integrates support for AMD triton stream pipeliner in ROCm to enhance performance ([#139881](https://github.com/pytorch/pytorch/pull/139881)).
@@ -302,7 +302,7 @@ The full release compatibility matrix matrix can be found in [release.md](https:
 * Provides an option `package_constants_in_so` to exclude weights from .so files in AOTInductor ([#141997](https://github.com/pytorch/pytorch/pull/141997)).
 * Adds `load_constants` to the package API ([#142246](https://github.com/pytorch/pytorch/pull/142246)).
 * Enables auto functionalize v2 by default ([#136685](https://github.com/pytorch/pytorch/pull/136685)).
-* Adds raise_error_on_ignored_optimization to the aoti config for improved error handling ([#138035](https://github.com/pytorch/pytorch/pull/138035)).
+* Adds raise_error_on_ignored_optimization to the aoti config ([#138035](https://github.com/pytorch/pytorch/pull/138035)).
 * Adds stats summary (mean/min/max, etc) for jit inductor tensor value printing ([#135887](https://github.com/pytorch/pytorch/pull/135887)).
 
 ## **Improvements**
@@ -642,7 +642,7 @@ We improved the existing `torch.library` APIs and added new ones.
 * Adds `relu_nan_to_num` option for handling NaNs in pre-grad passes in AOTInductor ([#138545](https://github.com/pytorch/pytorch/pull/138545)).
 * Enables cooperative and persistent reductions in Inductor ([#138533](https://github.com/pytorch/pytorch/pull/138533)).
 * Introduces multi-kernel support alongside cooperative reductions in Inductor ([#138893](https://github.com/pytorch/pytorch/pull/138893)).
-* Adds `env_name_default` and `env_name_force` to Config for better configuration management ([#138956](https://github.com/pytorch/pytorch/pull/138956)).
+* Adds new configs `env_name_default` and `env_name_force` for better configuration management ([#138956](https://github.com/pytorch/pytorch/pull/138956)).
 * Adjusts loop split optimization heuristic ([#137550](https://github.com/pytorch/pytorch/pull/137550)).
 * Enhances numerical precision for fp32 in FlexAttention on ROCm devices using IEEE ([#135702](https://github.com/pytorch/pytorch/pull/135702)).
 * Enables SDPA pattern matching in Inductor for CUDA, enhancing optimization capabilities ([#137085](https://github.com/pytorch/pytorch/pull/137085)).
@@ -1015,7 +1015,7 @@ We improved the existing `torch.library` APIs and added new ones.
 
 
 
-* Turn on TORCHINDUCTOR_REORDER_FOR_PEAK_MEMORY by default ([#137205](https://github.com/pytorch/pytorch/pull/137205)).  If old behavior is desired, edit `reorder_for_peak_memory` in `torch._inductor/config.py`.
+* Turn on TORCHINDUCTOR_REORDER_FOR_PEAK_MEMORY by default ([#137205](https://github.com/pytorch/pytorch/pull/137205)).  If old behavior is desired, add `"reorder_for_peak_memory": False` to options in your `torch.compile` call.
 * Cache weight tiles in L1D for AMX int8 WoQ GEMM ([#136688](https://github.com/pytorch/pytorch/pull/136688))
 * Add and use `borrow_arrayref_tensor_as_tensor` ([#142183](https://github.com/pytorch/pytorch/pull/142183))
 * Support for accelerated sorting with x86-simd-sort ([#127936](https://github.com/pytorch/pytorch/pull/127936))
