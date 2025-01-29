@@ -1168,7 +1168,7 @@ class ArgName:
 
 
 class RemovedArg:
-    def __str__(self):
+    def __str__(self) -> str:
         return "REMOVED"
 
 
