@@ -1,1 +1,1 @@
-torchbench-pin-commit
+766a5e3a189384659fd35a68c3b17b88c761aaac
