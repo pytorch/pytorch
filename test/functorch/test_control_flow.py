@@ -9,6 +9,7 @@ import torch.utils._pytree as pytree
 from functorch.experimental import control_flow
 from functorch.experimental.control_flow import cond, UnsupportedAliasMutationException
 from torch._dynamo.testing import normalize_gm
+from torch._dynamo.utils import counters
 from torch._higher_order_ops.associative_scan import (
     _fake_associative_scan,
     associative_scan,
@@ -45,6 +46,20 @@ from torch.testing._internal.common_utils import (
 # todo: figure out if random number generation works as expected
 
 
+@contextlib.contextmanager
+def check_cudagraphs_not_skipped(test_case):
+    old_cudagraph_skips = counters["inductor"]["cudagraph_skips"]
+    try:
+        yield
+    finally:
+        # reset before the assert, because otherwise the reset is skipped
+        new_cudagraph_skips = counters["inductor"]["cudagraph_skips"]
+        counters["inductor"]["cudagraph_skips"] = old_cudagraph_skips
+        test_case.assertEqual(
+            counters["inductor"]["cudagraph_skips"], new_cudagraph_skips
+        )
+
+
 def _check_compile_cudagraph(test_case, fn, args):
     # test cudagraphs backend
     cudagraphs_compiled_fn = torch.compile(fn, backend="cudagraphs")
@@ -56,12 +71,13 @@ def _check_compile_cudagraph(test_case, fn, args):
     # So we need to get to iteration 3 to test all ways of running.
     outputs = []
     for i in range(3):
-        outputs.append(
-            pytree.tree_map(
-                lambda x: x.clone() if isinstance(x, torch.Tensor) else x,
-                cudagraphs_compiled_fn(*args),
+        with check_cudagraphs_not_skipped(test_case):
+            outputs.append(
+                pytree.tree_map(
+                    lambda x: x.clone() if isinstance(x, torch.Tensor) else x,
+                    cudagraphs_compiled_fn(*args),
+                )
             )
-        )
     eager_res = fn(*args)
     for output in outputs:
         test_case.assertEqual(eager_res, output)
@@ -4626,13 +4642,30 @@ def forward(self, arg0_1):
         fn, inp = WHILE_LOOP_TESTS[while_loop_test]
         self._check_compile(fn, inp, backend=backend)
 
-    @parametrize("while_loop_test", list(WHILE_LOOP_TESTS.keys()))
+    @parametrize(
+        "while_loop_test", set(WHILE_LOOP_TESTS.keys()) - {"const_and_symint_output"}
+    )
     @unittest.skipIf(
         not TEST_CUDA_GRAPH_CONDITIONAL_NODES,
         "CUDA 12.4 or greater is required for CUDA Graphs with conditional nodes",
     )
     def test_while_loop_cuda_stream_capture(self, while_loop_test):
         fn, inp = WHILE_LOOP_TESTS[while_loop_test]
+
+        if isinstance(fn, torch.nn.Module):
+            fn = copy.deepcopy(fn)
+            fn.cuda()
+        inp = pytree.tree_map(lambda x: x.cuda(), inp)
+
+        _check_compile_cudagraph(self, fn, inp)
+
+    @unittest.expectedFailure
+    @unittest.skipIf(
+        not TEST_CUDA_GRAPH_CONDITIONAL_NODES,
+        "CUDA 12.4 or greater is required for CUDA Graphs with conditional nodes",
+    )
+    def test_while_loop_cuda_stream_capture_const_and_symint_output(self):
+        fn, inp = WHILE_LOOP_TESTS["const_and_symint_output"]
 
         if isinstance(fn, torch.nn.Module):
             fn = copy.deepcopy(fn)
