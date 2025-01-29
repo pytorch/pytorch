@@ -819,8 +819,6 @@ class AutocastModeVariable(ContextWrappingVariable):
 class NullContextVariable(ContextWrappingVariable):
     """
     This class represents Python contextlib.nullcontext.
-    It's used as a placeholder for other context managers that Dynamo doesn't
-    support yet, e.g, torch.autograd.profiler.record_function.
     """
 
     def __init__(self, target_values=None, **kwargs) -> None:
@@ -837,6 +835,39 @@ class NullContextVariable(ContextWrappingVariable):
 
     def fn_name(self):
         return "nullcontext"
+
+
+class ProfilerContextVariable(ContextWrappingVariable):
+    """
+    This class represents a set of torch profiler context objects, where Dynamo
+    ignores all the side-effects in the __init__, __enter__ and __exit__ methods
+    by treating the object mostly as a `contextlib.nullcontext`, except for edge
+    cases like the `__enter__` method which returns the object itself rather
+    than `None`, per implementation of the torch objects.
+    """
+
+    def __init__(self, **kwargs) -> None:
+        super().__init__(target_values=None, **kwargs)
+
+    def enter(self, tx):
+        return self
+
+    def exit(self, tx: "InstructionTranslator", *args):
+        return variables.ConstantVariable.create(None)
+
+    def module_name(self):
+        return "contextlib"
+
+    def fn_name(self):
+        return "nullcontext"
+
+    def reconstruct(self, cg):
+        unimplemented(
+            """
+Dynamo doesn't support compiling a region that leaks torch profiler context
+objects which will be used outside the region
+"""
+        )
 
 
 class StreamContextVariable(ContextWrappingVariable):
@@ -1085,6 +1116,9 @@ class StreamVariable(VariableTracker):
         self.value = value
         self.device = device
 
+    def python_type(self):
+        return torch.Stream
+
     def call_method(
         self,
         tx,
@@ -1093,15 +1127,8 @@ class StreamVariable(VariableTracker):
         kwargs: "dict[str, VariableTracker]",
     ) -> "VariableTracker":
         assert hasattr(self.value, name), f"no stream method found named {name}"
-        assert name in [
-            "wait_stream",
-            "synchronize",
-            "query",
-            "record_event",
-            "wait_event",
-        ], f" unsupported stream method {name}"
 
-        from ..utils import proxy_args_kwargs
+        from ..utils import cmp_name_to_op_mapping, proxy_args_kwargs
         from .builder import wrap_fx_proxy_cls
 
         if name in ("wait_stream", "synchronize", "wait_event"):
@@ -1125,8 +1152,17 @@ class StreamVariable(VariableTracker):
                     "call_method", name, *proxy_args_kwargs([self] + args, kwargs)
                 ),
             )
-        else:
-            unimplemented(self.device + " stream method " + name + " unsupported")
+        elif name in cmp_name_to_op_mapping and len(args) == 1 and not kwargs:
+            # NB : Checking for mutation is necessary because we compare
+            # constant values
+            other = args[0]
+            if not isinstance(other, StreamVariable):
+                return variables.ConstantVariable.create(NotImplemented)
+            return variables.ConstantVariable.create(
+                cmp_name_to_op_mapping[name](self.value, other.value)
+            )
+
+        return super().call_method(tx, name, args, kwargs)
 
     def as_proxy(self):
         return self.proxy

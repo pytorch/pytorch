@@ -52,11 +52,11 @@ def flatten_nested_metadata_to_dict(
     only_source_fields: bool,
     unwrap_functional_tensor: bool,
 ) -> Dict[tuple[str, ...], torch.Tensor]:
-    from torch.nested._internal.cached_tensor import CachedTensor
+    from torch.nested._internal.dict_tensor import DictTensor
     from torch.nested._internal.nested_tensor import EXTRA_FIELDS, SOURCE_FIELDS
 
     def filter_fn(t_name: str, subclass_cls: object) -> bool:
-        if subclass_cls is CachedTensor:
+        if subclass_cls is DictTensor:
             fields = (
                 SOURCE_FIELDS if only_source_fields else SOURCE_FIELDS + EXTRA_FIELDS
             )

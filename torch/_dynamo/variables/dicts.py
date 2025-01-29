@@ -11,7 +11,7 @@ from ..bytecode_transformation import create_call_function, create_instruction
 from ..exc import raise_observed_exception, unimplemented
 from ..guards import GuardBuilder, install_guard
 from ..source import is_from_local_source
-from ..utils import dict_keys, dict_values, specialize_symnode
+from ..utils import cmp_name_to_op_mapping, dict_keys, dict_values, specialize_symnode
 from .base import ValueMutationNew, VariableTracker
 from .constant import ConstantVariable
 
@@ -62,6 +62,7 @@ def is_hashable(x):
                 variables.TorchInGraphFunctionVariable,
                 variables.TypingVariable,
                 variables.FunctoolsPartialVariable,
+                variables.WeakRefVariable,
             ),
         )
 
@@ -107,6 +108,10 @@ class ConstDictVariable(VariableTracker):
                 return self.vt.value
             elif isinstance(self.vt, variables.UserFunctionVariable):
                 return self.vt.get_function()
+            elif isinstance(self.vt, variables.WeakRefVariable):
+                # Access the underlying value inside the referent_vt for the key representation
+                Hashable = ConstDictVariable._HashableTracker
+                return Hashable(self.vt.referent_vt).underlying_value
             else:
                 x = self.vt.as_python_constant()
             return x
@@ -746,7 +751,9 @@ class DictKeySetVariable(SetVariable):
         return dict_keys
 
     def as_python_constant(self):
-        unimplemented("DictKeySetVariable.as_python_constant")
+        return dict.fromkeys(
+            {k.vt.as_python_constant() for k in self.set_items}, None
+        ).keys()
 
     def call_method(
         self,
@@ -832,6 +839,12 @@ class DictKeysVariable(DictViewVariable):
     ) -> "VariableTracker":
         if name == "__contains__":
             return self.dv_dict.call_method(tx, name, args, kwargs)
+        if name in cmp_name_to_op_mapping:
+            if not isinstance(args[0], (SetVariable, DictKeysVariable)):
+                return ConstantVariable.create(NotImplemented)
+            return ConstantVariable.create(
+                cmp_name_to_op_mapping[name](self.set_items, args[0].set_items)
+            )
         return super().call_method(tx, name, args, kwargs)
 
 

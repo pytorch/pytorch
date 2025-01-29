@@ -475,23 +475,22 @@ def masked_select(tensor: Tensor, mask: Tensor) -> Tensor:
 
     Example::
 
-    >>> tensor = torch.randn(3, 3)
-    >>> mask = torch.tensor(
-    ...     [[False, False, True], [True, False, True], [False, False, True]]
-    ... )
-    >>> nt = torch.nested.masked_select(tensor, mask)
-    >>> # Querying for nt.shape produces torch.Size([3, j0])
-    >>> # Length of each item in the batch:
-    >>> nt.offsets().diff()
-    tensor([1, 2, 1])
+        >>> tensor = torch.randn(3, 3)
+        >>> mask = torch.tensor([[False, False, True], [True, False, True], [False, False, True]])
+        >>> nt = torch.nested.masked_select(tensor, mask)
+        >>> nt.shape
+        >>> # Querying for nt.shape produces torch.Size([3, j0])
+        >>> # Length of each item in the batch:
+        >>> nt.offsets().diff()
+        tensor([1, 2, 1])
 
-    >>> tensor = torch.randn(6, 5)
-    >>> mask = torch.tensor([False])
-    >>> nt = torch.nested.masked_select(tensor, mask)
-    >>> # Querying for nt.shape produces torch.Size([6, j0])
-    >>> # Length of each item in the batch:
-    >>> nt.offsets().diff()
-    tensor([0, 0, 0, 0, 0, 0])
+        >>> tensor = torch.randn(6, 5)
+        >>> mask = torch.tensor([False])
+        >>> nt = torch.nested.masked_select(tensor, mask)
+        >>> # Querying for nt.shape produces torch.Size([6, j0])
+        >>> # Length of each item in the batch:
+        >>> nt.offsets().diff()
+        tensor([0, 0, 0, 0, 0, 0])
     """
     if tensor.layout != torch.strided:
         raise RuntimeError(
