@@ -2,6 +2,7 @@
 # ruff: noqa: F841
 # flake8: noqa: E731
 # Skip do not assign a lambda expression, use a def
+import contextlib
 import functools
 import logging
 from unittest.mock import patch
@@ -3504,9 +3505,18 @@ class CustomOpTests(torch._inductor.test_case.TestCase):
         w = torch.randn(K, N, device=GPU_TYPE)
 
         torch._dynamo.decorators.mark_unbacked(x, 0)
-        torch._logging.set_logs(output_code=True)
-        with self.assertLogs(logger="torch._inductor", level=logging.DEBUG) as log:
-            foo(x, w)
+
+        @contextlib.contextmanager
+        def output_code_logs():
+            try:
+                torch._logging.set_logs(output_code=True)
+                yield
+            finally:
+                torch._logging.set_logs(output_code=False)
+
+        with output_code_logs():
+            with self.assertLogs(logger="torch._inductor", level=logging.DEBUG) as log:
+                foo(x, w)
 
         output = "\n".join(record.getMessage() for record in log.records)
         # correct grid example values updated per block size
