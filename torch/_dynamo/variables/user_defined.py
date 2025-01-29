@@ -41,6 +41,7 @@ from ..utils import (
     build_checkpoint_variable,
     build_invoke_subgraph_variable,
     check_constant_args,
+    cmp_name_to_op_mapping,
     dict_methods,
     get_custom_getattr,
     has_torch_function,
@@ -182,6 +183,9 @@ class UserDefinedClassVariable(UserDefinedVariable):
             obj = inspect.getattr_static(self.value, name)
         except AttributeError:
             obj = None
+
+        if name in cmp_name_to_op_mapping and not isinstance(obj, types.FunctionType):
+            return variables.GetAttrVariable(self, name, source=source)
 
         if isinstance(obj, staticmethod):
             return VariableTracker.build(tx, obj.__get__(self.value), source)
@@ -678,8 +682,6 @@ def call_random_fn(tx, fn, args, kwargs):
     args = [x.as_python_constant() for x in args]
     kwargs = {k: v.as_python_constant() for k, v in kwargs.items()}
     random_call_index = len(tx.output.random_calls)
-    # NB: it is probably not important for the example_value to be exactly correct,
-    # we just need the right type
     example_value = fn(*args, **kwargs)
     source = RandomValueSource(random_call_index)
     tx.output.random_calls.append((fn, args, kwargs))
@@ -789,14 +791,14 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             if is_standard_setattr(method) or isinstance(self.value, threading.local):
                 return self.method_setattr_standard(tx, *args, **kwargs)
 
-            if len(args) == 1 and not kwargs:
-                if method is object.__eq__:
-                    func_var = VariableTracker.build(tx, polyfills.object_eq)
-                    return func_var.call_function(tx, [self, *args], kwargs)
+            if method is object.__eq__ and len(args) == 1 and not kwargs:
+                other = args[0]
+                if not isinstance(other, UserDefinedObjectVariable):
+                    return variables.ConstantVariable.create(NotImplemented)
 
-                if method is object.__ne__:
-                    func_var = VariableTracker.build(tx, polyfills.object_ne)
-                    return func_var.call_function(tx, [self, *args], kwargs)
+                # TODO(anijain2305) - Identity checking should already be a part
+                # of the cmp_eq  polyfill function.
+                return ConstantVariable.create(self.value is other.value)
 
             # check for methods implemented in C++
             if isinstance(method, types.FunctionType):
@@ -876,12 +878,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             and all(k.is_python_constant() for k in args)
             and all(v.is_python_constant() for v in kwargs.values())
         ):
-            return call_random_fn(
-                tx,
-                self.value,
-                args,
-                kwargs,
-            )
+            return call_random_fn(tx, self.value, args, kwargs)
         elif istype(self.value, types.MethodType):
             func = self.value.__func__
             obj = self.value.__self__
