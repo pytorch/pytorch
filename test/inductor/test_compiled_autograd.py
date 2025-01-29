@@ -3795,11 +3795,11 @@ if torch.distributed.is_available() and HAS_CUDA:
 
 class TestCompiledAutogradOpInfo(TestCase):
     def setUp(self) -> None:
-        super().setUp()
+        super(TestCase, self).setUp()
         reset()
 
     def tearDown(self) -> None:
-        super().tearDown()
+        super(TestCase, self).tearDown()
         reset()
 
     @ops(hop_db, allowed_dtypes=(torch.float,))
