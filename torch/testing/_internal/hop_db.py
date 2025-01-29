@@ -200,17 +200,17 @@ quant_tracer = InvokeQuant()
 
 
 def simple_invoke_quant(x):
-    def fn(x):
-        return (torch.sin(x),)
+    def fn(x, y):
+        return (torch.sin(x) * y,)
 
-    return quant_tracer(fn, (x,))[0] + torch.nn.functional.dropout(x)
+    return quant_tracer(fn, (x, x))[0] * 2.
 
 
 def simple_invoke_quant_packed(x):
     def fn(x):
         return (torch.sin(x),)
 
-    return invoke_quant_packed(fn, (x,))[0] + torch.nn.functional.dropout(x)
+    return invoke_quant_packed(fn, (x,))[0] * 2.
 
 
 
@@ -332,14 +332,6 @@ hop_db = [
         supports_autograd=True,
         # "torch.compile with aot_autograd does not currently support double backward."
         supports_gradgrad=False,
-        skips=(
-            DecorateInfo(unittest.expectedFailure, "TestHOP", "test_aot_export"),
-            DecorateInfo(
-                unittest.expectedFailure, "TestHOP", "test_pre_dispatch_export"
-            ),
-            DecorateInfo(unittest.expectedFailure, "TestHOP", "test_serialize_export"),
-            DecorateInfo(unittest.expectedFailure, "TestHOP", "test_retrace_export"),
-        ),
     ),
     OpInfo(
         name="while_loop",
