@@ -3145,7 +3145,6 @@ BUILTIN_SKIPLIST = (
     collections,
     inspect,
     random,
-    types,
     traceback,
     unittest,
 )
