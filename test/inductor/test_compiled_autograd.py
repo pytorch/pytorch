@@ -3805,7 +3805,7 @@ class TestCompiledAutogradOpInfo(TestCase):
     @ops(hop_db, allowed_dtypes=(torch.float,))
     def test_hops_in_bwd(self, device, dtype, op):
         if self.id() in known_failing_tests:
-            self.skipTest("Expected to fail.")
+            unittest.skipTest("Expected to fail.")
 
         def create_bwd_fn_closure(op_args, op_kwargs):
             op_out_ref = []
