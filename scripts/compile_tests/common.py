@@ -319,6 +319,65 @@ def compute_pass_rate_tcs(control_tcs, test_tcs):
     print(f"Pass ratio:{c_passed_t_failed / base_count}")
 
 
+def find_test_in_control_statuses(
+    control_tcs,
+    control_status: TestCaseStatus,
+    test_tcs,
+    test_status: TestCaseStatus
+):
+    for k, tv in test_tcs.items():
+        if tv.status != test_status:
+            continue
+
+        if (cv := control_tcs.get(k, None)) is None:
+            continue
+
+        if cv.status != control_status:
+            continue
+
+        print(f"XXX TEST:{k} {tv.key} {tv.testcase} (control:{control_status} vs test_status:{test_status}")
+
+
+def find_control_in_test_statuses(
+    control_tcs,
+    control_status: TestCaseStatus,
+    test_tcs,
+    test_status: TestCaseStatus
+):
+    for k, cv in control_tcs.items():
+        if cv.status != control_status:
+            continue
+
+        if (tv := test_tcs.get(k, None)) is None:
+            continue
+
+        if tv.status != test_status:
+            continue
+
+        print(f"XXX TEST:{k} {tv.key} {tv.testcase} (control:{control_status} vs test_status:{test_status}")
+
+
+def find_control_passed_missing_in_test(
+    control_tcs,
+    test_tcs,
+):
+    d = {}
+    for k, cv in control_tcs.items():
+        if not cv.is_passed():
+            continue
+
+        tv = test_tcs.get(k, None)
+
+        if not (tv is None or tv.is_skipped()):
+            continue
+
+        dk = k.split(':')[0]
+        d[dk] = d.get(dk, 0) + 1
+
+    sd = {k: v for k, v in sorted(d.items(), key=lambda item: item[1])}
+    for k, v in sd.items():
+        print(f"XXX TEST_MISSING_IN_SC: test/{k} - {v}") 
+
 
 def compute_pass_rate_aot_eager_subclasses(e_dir, dw_dir, ae_dir, sc_dir):
     print("parsing xmls")
@@ -339,11 +398,16 @@ def compute_pass_rate_aot_eager_subclasses(e_dir, dw_dir, ae_dir, sc_dir):
     tcs_sc = parse_xmls(sc_xmls)
     print("===")
 
-    print("computing pass rate EAGER vs AOT_EAGER")
-    compute_pass_rate_tcs(tcs_e, tcs_ae)
+    find_control_passed_missing_in_test(tcs_dw, tcs_sc)
 
-    print("computing pass rate AOT_EAGER vs SC")
-    compute_pass_rate_tcs(tcs_ae, tcs_sc)
+    # find_test_in_control_statuses(tcs_dw, TestCaseStatus.PASSED, tcs_sc, TestCaseStatus.SKIPPED)
+    # find_control_in_test_statuses(tcs_dw, TestCaseStatus.PASSED, tcs_sc, TestCaseStatus.SKIPPED)
+
+    # print("computing pass rate EAGER vs AOT_EAGER")
+    # compute_pass_rate_tcs(tcs_e, tcs_ae)
+
+    # print("computing pass rate AOT_EAGER vs SC")
+    # compute_pass_rate_tcs(tcs_ae, tcs_sc)
 
 
     # test_testcases = get_testcases(test_xmls)

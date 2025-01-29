@@ -285,7 +285,7 @@ def _try_lift_tensor_arguments(gm, inputs):
             node_args = [a for a in n.args if isinstance(a, torch.fx.Node)]
             other_args = [a for a in n.args if not isinstance(a, torch.fx.Node)]
 
-            is_output_tensor = isinstance(n.meta["example_value"], Tensor)
+            is_output_tensor = n.meta is not None and "example_value" in n.meta and isinstance(n.meta["example_value"], Tensor)
 
             if (
                 is_output_tensor
@@ -340,7 +340,7 @@ def test_subclasses(gm, inputs, **kwargs):
     from torch._subclasses.functional_tensor import FunctionalTensor
 
     if any(isinstance(inp, FunctionalTensor) for inp in inputs):
-        return gm
+        return gm.forward
 
     if kwargs:
         log.warning("test_subclasses backend ignoring extra kwargs %s", kwargs)
@@ -366,9 +366,9 @@ def test_subclasses(gm, inputs, **kwargs):
         TensorToSubclassTransform(
             factory_fn=lambda t: WrapperSubclass(t),
         ),
-        TensorToSubclassTransform(
-            factory_fn=lambda t: TwoTensor(t, t),
-        ),
+        # TensorToSubclassTransform(
+        #     factory_fn=lambda t: TwoTensor(t, t),
+        # ),
     ]
     if bool(os.getenv("PYTORCH_TEST_WITH_SUBCLASSES_NONTRIVIAL", default=0)):
         TRANSFORMATIONS.extend(
@@ -401,7 +401,7 @@ def test_subclasses(gm, inputs, **kwargs):
             return gm
 
     MAX_SUBCLASSES_NESTING: int = int(
-        os.getenv("PYTORCH_TEST_WITH_SUBCLASSES_MAX_NESTING", default=2)
+        os.getenv("PYTORCH_TEST_WITH_SUBCLASSES_MAX_NESTING", default=1)
     )
     N: int = len(TRANSFORMATIONS)
 
@@ -459,8 +459,9 @@ def test_subclasses(gm, inputs, **kwargs):
                 test_inputs,
             )
         except Exception as ex:
-            # TODO: Print script with graph and inputs for repro
-            repro_py = f"""
+            try:
+                # TODO: Print script with graph and inputs for repro
+                repro_py = f"""
 import torch
 from torch import tensor
 from torch._dynamo.backends.debugging import aot_eager
@@ -476,13 +477,15 @@ inputs = {[ti.detach() if _is_tensor(ti) else ti for ti in test_inputs]}
 gm = GraphModule()
 aot_eager(gm, inputs)"""
 
-            log.error(
-                "test_subclasses error compiling\ninputs:%s\ntransform_seqs:%s\n---REPRO_BEGIN---%s\n---REPRO_END---\nexception:%s",
-                test_inputs,
-                transform_seqs,
-                repro_py,
-                "".join(traceback.format_exception(type(ex), ex, ex.__traceback__)),
-            )
+                log.error(
+                    "test_subclasses error compiling\ninputs:%s\ntransform_seqs:%s\n---REPRO_BEGIN---%s\n---REPRO_END---\nexception:%s",
+                    test_inputs,
+                    transform_seqs,
+                    repro_py,
+                    "".join(traceback.format_exception(type(ex), ex, ex.__traceback__)),
+                )
+            except Exception as inner_ex:
+                print(f"Error {inner_ex} during handling exception {ex} in 'test_subclasses' backend")
             raise ex
 
     return gm

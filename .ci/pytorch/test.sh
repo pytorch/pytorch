@@ -334,6 +334,7 @@ test_aot_eager_wrapped_shard() {
     echo "NUM_TEST_SHARDS must be defined to run a Python test shard"
     exit 1
   fi
+  python tools/dynamo/verify_dynamo.py
   time python test/run_test.py --aot-eager \
     --exclude-inductor-tests \
     --exclude-jit-executor \
