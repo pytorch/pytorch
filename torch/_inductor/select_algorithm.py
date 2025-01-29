@@ -229,9 +229,18 @@ class ModificationWrapper(V.WrapperHandler):  # type: ignore[name-defined]
             index_str = self._process_indexing(index)
             var = self._add_kernel_input(name)
             var_dtype = V.graph.get_buffer(name).dtype
-            return self.kernel.cse.generate(
-                self.kernel.compute, f"tl.load({var} + {index_str})", dtype=var_dtype
-            )
+            line = f"tl.load({var} + {index_str})"
+
+            if (
+                var_dtype in (torch.float16, torch.bfloat16)
+                and config.triton.codegen_upcast_to_fp32
+            ):
+                line += ".to(tl.float32)"
+                var_dtype = torch.float32
+
+            out = self.kernel.cse.generate(self.kernel.compute, line, dtype=var_dtype)
+            return out
+
         return self.kernel.cse.generate(
             self.kernel.compute, f"({self.fixed_inputs[name]})", dtype=torch.float32
         )
