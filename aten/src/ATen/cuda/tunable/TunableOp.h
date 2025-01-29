@@ -348,6 +348,13 @@ class TunableOp {
           min_stddev_ms = s_stddev;
           id_name = op_names_[i];
         }
+        else {
+          TUNABLE_LOG3("├──found slower instance id=", i, ". " , s._mean, "ms. ", op_names_[i],
+                " min ", s._min,
+                " max ", s._max,
+                " mean ", s._mean,
+                " std ", s_stddev);
+        }
       }
 
       for (size_t i = 0; i < reusable_params.size(); i++) {
