@@ -41,6 +41,7 @@ from torch._dynamo.testing import (
 )
 from torch._dynamo.utils import ifdynstaticdefault
 from torch._guards import CompileContext, CompileId
+from torch._inductor import lowering
 from torch._inductor.aoti_eager import (
     aoti_compile_with_persistent_cache,
     aoti_eager_cache_dir,
@@ -12334,10 +12335,27 @@ class CommonTemplate:
         reset_rng_state()
         ref = f(image_latent)
         opt_f = torch.compile(f)
+
+        code = run_and_get_triton_code(opt_f, image_latent)
         reset_rng_state()
         act = opt_f(image_latent)
 
         torch.testing.assert_close(ref, act, atol=1e-3, rtol=1e-3)
+
+        size_assert_pattern = r"assert_size_stride.[a-z]+[0-9]+, .2, 3, 16, 32, 32., .49152, 16384, 1, 512, 16.."
+        FileCheck().check_regex(size_assert_pattern).run(code)
+
+    @lowering.force_fallback(aten.sort.default)
+    def test_size_asserts_for_multi_output_fallback(self):
+        @torch.compile
+        def f(x):
+            return x.sort()
+
+        x = torch.randn(16, 32, device=GPU_TYPE)
+        code = run_and_get_triton_code(f, x)
+        FileCheck().check("assert_size_stride(buf1, (16, 32), (32, 1))").check(
+            "assert_size_stride(buf2, (16, 32), (32, 1))"
+        ).run(code)
 
 
 @dataclasses.dataclass
