@@ -2169,7 +2169,7 @@ void ProcessGroupNCCL::checkAndSetRemoteError() {
 // For ranks [0, 1, 2, 3], root rank is 0 and index is 0.
 // For ranks [4, 5, 6], root rank is 4 and index is 1.
 // For ranks [7, 8, 9], root rank is 7 and index is 2.
-std::pair<int, int> getRootRankAndIndex(
+static std::pair<int, int> getRootRankAndIndex(
     const int rank,
     const int nRanks,
     const int nIds) {
@@ -2177,7 +2177,7 @@ std::pair<int, int> getRootRankAndIndex(
   const int rpr = nRanks / nIds;
   // For the first rmr roots, we assign one more rank to the root.
   const int rlim = rmr * (rpr + 1);
-  int rootIdx, rootRank;
+  int rootIdx = -1, rootRank = -1;
   if (rank < rlim) {
     // Root with `rpr + 1` ranks, (0, 1, 2, ..., rmr - 1).
     rootIdx = rank / (rpr + 1);
@@ -2801,8 +2801,17 @@ std::shared_ptr<NCCLComm> ProcessGroupNCCL::initNCCLComm(
       LOG(INFO) << logPrefix()
                 << "ProcessGroupNCCL all-gather unique IDs through store took "
                 << timerDeltaMs << " ms";
+#ifdef NCCL_HAS_INIT_RANK_SCALABLE
       ncclComm = NCCLComm::create_scalable(
           numRanks, rootRankAndIndex.second, rank, ncclIDs, options_->config);
+#else
+      C10_THROW_ERROR(
+          DistBackendError,
+          c10::str(
+              logPrefix(),
+              "create_scalable is called when useScalableInit is enabled but ",
+              " NCCL_HAS_INIT_RANK_SCALABLE not defined, this should not happen "));
+#endif // NCCL_HAS_INIT_RANK_SCALABLE
     }
   } else {
     // To simplify conditional nesting, just create the ncclComms[i]

@@ -18,7 +18,6 @@
 #include <mutex>
 #include <thread>
 #include <unordered_map>
-#include <utility>
 
 #include <torch/csrc/distributed/c10d/Backend.hpp>
 #include <torch/csrc/distributed/c10d/NCCLUtils.hpp>
@@ -181,12 +180,6 @@ static std::vector<std::string> TORCH_NCCL_AVOID_RECORD_STREAMS = {
 static std::vector<std::string> TORCH_NCCL_USE_TENSOR_REGISTER_ALLOCATOR_HOOK =
     {"TORCH_NCCL_USE_TENSOR_REGISTER_ALLOCATOR_HOOK",
      "NCCL_USE_TENSOR_REGISTER_ALLOCATOR_HOOK"};
-
-// Return the rank of root and index during NCCL scalable comm init.
-static std::pair<int, int> getRootRankAndIndex(
-    const int rank,
-    const int nRanks,
-    const int nIds);
 
 #if defined(__linux__)
 struct DumpPipe {
