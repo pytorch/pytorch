@@ -43,9 +43,11 @@ LOG_ENV_VAR = "TORCH_LOGS"
 LOG_OUT_ENV_VAR = "TORCH_LOGS_OUT"
 LOG_FORMAT_ENV_VAR = "TORCH_LOGS_FORMAT"
 TRACE_ENV_VAR = "TORCH_TRACE"
+DTRACE_ENV_VAR = "TORCH_DTRACE"
 
 LOG_TRACE_HANDLER: Optional["LazyTraceHandler"] = None
 
+GET_DTRACE_STRUCTURED = False
 
 @dataclass
 class LogRegistry:
@@ -934,6 +936,8 @@ def _set_log_state(state):
 
 
 def _init_logs(log_file_name=None):
+    global GET_DTRACE_STRUCTURED
+
     _reset_logs()
     _update_log_state_from_env()
 
@@ -980,6 +984,11 @@ def _init_logs(log_file_name=None):
     # Setup handler for the special trace_log, with different default
     # configuration
     trace_dir_name = os.environ.get(TRACE_ENV_VAR, None)
+
+
+    if os.environ.get(DTRACE_ENV_VAR, None):
+        GET_DTRACE_STRUCTURED = True
+
     # This handler may remove itself if trace_dir_name is None and we are not
     # actually in an FB environment.  This allows us to defer actually
     # initializing it until we actually need to log anything.  This is
@@ -1247,9 +1256,6 @@ def trace_structured(
             # Convert to seconds from nanoseconds, add it to the frame compile total
             structured_logging_overhead_s = (time.time_ns() - start_time) / 1e9
             add_structured_logging_overhead(structured_logging_overhead_s)
-
-
-GET_DTRACE_STRUCTURED = False
 
 
 def dtrace_structured(
