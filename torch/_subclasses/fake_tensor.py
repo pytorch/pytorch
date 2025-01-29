@@ -895,8 +895,11 @@ class FakeTensor(Tensor):
     def try_get_nested_int_id(self) -> Optional[int]:
         return self.nested_int_id
 
-    def register_nested_int_id(self, nid: int) -> int:
-        self.nested_int_id = nid
+    def register_nested_int_id(self, nid: Optional[int] = None) -> int:
+        if nid is None:
+            self.nested_int_id = self.fake_mode.get_next_nested_int_id()
+        else:
+            self.nested_int_id = nid
         return self.nested_int_id
 
     # Similar to FunctionalTensor.tolist

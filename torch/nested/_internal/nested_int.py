@@ -39,15 +39,14 @@ def _ge(lhs: Any, rhs: Any) -> bool:
 def _get_tensor_id(t: torch.Tensor) -> int:
     ret: List[Optional[int]] = []
 
-    for t in flatten_nested_metadata_to_dict(
+    for t_inner in flatten_nested_metadata_to_dict(
         t,
         only_source_fields=True,
         unwrap_functional_tensor=True,
     ).values():
-        if try_get_int(t) is None:
-            ret.append(register_tensor(t))
-        else:
-            ret.append(try_get_int(t))
+        if (t_id := try_get_int(t_inner)) is None:
+            t_id = register_tensor(t_inner)
+        ret.append(t_id)
 
     assert ret[0] is not None
     return ret[0]

@@ -18,7 +18,6 @@ import torch._dynamo
 import torch._dynamo.testing
 import torch.nn
 import torch.nn.functional as F
-from torch.nested._internal.dict_tensor import DictTensor
 from torch.nested._internal.nested_tensor import (
     _DO_NOT_USE_nested_tensor_ctor_compat,
     buffer_from_jagged,

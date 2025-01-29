@@ -95,7 +95,9 @@ class NestedTensor(torch.Tensor):
 
         device_type = "host" if values.is_cpu else "device"
         source_type = "offsets" if non_contig_offsets is None else "lengths"
-        ragged_source = getattr(metadata, src_field_name(device_type, source_type), None)
+        ragged_source = getattr(
+            metadata, src_field_name(device_type, source_type), None
+        )
 
         # Only support jagged for now.
         assert ragged_source is not None
@@ -631,7 +633,7 @@ def _make_nested_meta(
         process_raw_source_tensor(metadata, "lengths", lengths)
     else:
         non_contig_offsets = None
-        assert not  isinstance(offsets, DictTensor)
+        assert not isinstance(offsets, DictTensor)
         process_raw_source_tensor(metadata, "offsets", offsets)
 
     if min_seqlen is not None:
