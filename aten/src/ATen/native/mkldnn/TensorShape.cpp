@@ -7,6 +7,8 @@
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/NativeFunctions.h>
 #else
+
+#include <ATen/ops/_lazy_clone.h>
 #include <ATen/ops/_mkldnn_reshape_native.h>
 #include <ATen/ops/_mkldnn_transpose_native.h>
 #include <ATen/ops/clone_native.h>
@@ -55,7 +57,7 @@ Tensor mkldnn_view(const Tensor& self, IntArrayRef size) {
 Tensor mkldnn_reshape(const Tensor& self, IntArrayRef size) {
   auto inferred_size = at::infer_size(size, self.numel());
   if (self.sizes() == inferred_size) {
-    return self;
+    return self._lazy_clone();
   }
   const ideep::tensor& x = itensor_from_mkldnn(self);
   ideep::tensor y{x};
