@@ -3507,16 +3507,17 @@ class CustomOpTests(torch._inductor.test_case.TestCase):
         torch._dynamo.decorators.mark_unbacked(x, 0)
 
         @contextlib.contextmanager
-        def output_code_logs():
+        def enable_output_code_logs():
             try:
                 torch._logging.set_logs(output_code=True)
                 yield
             finally:
                 torch._logging.set_logs(output_code=False)
 
-        with output_code_logs():
-            with self.assertLogs(logger="torch._inductor", level=logging.DEBUG) as log:
-                foo(x, w)
+        with enable_output_code_logs(), self.assertLogs(
+            logger="torch._inductor", level=logging.DEBUG
+        ) as log:
+            foo(x, w)
 
         output = "\n".join(record.getMessage() for record in log.records)
         # correct grid example values updated per block size
