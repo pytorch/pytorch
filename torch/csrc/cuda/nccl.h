@@ -1,5 +1,11 @@
 #pragma once
 
+// NOTE: [pytorch nccl defines]
+
+// All NCCL interactions should route through this header.
+// Direct inclusion of <nccl.h> should be avoided.
+// Version checks/compatibility macros centralized here.
+
 #include <nccl.h>
 
 #include <ATen/ATen.h>
@@ -8,6 +14,10 @@
 #include <cstddef>
 #include <optional>
 #include <vector>
+
+static_assert(
+    (NCCL_MAJOR == 2 && NCCL_MINOR >= 7) || (NCCL_MAJOR > 2),
+    "NCCL version must be 2.7 or later");
 
 // NCCL BFloat16 is enabled only for CUDA 11+ and NCCL versions 2.10+, or for
 // HIP 3.1+

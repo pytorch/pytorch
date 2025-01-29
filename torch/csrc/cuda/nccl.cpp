@@ -9,8 +9,6 @@
 #include <c10/util/hash.h>
 #include <c10/util/irange.h>
 
-#include <nccl.h>
-
 #include <sched.h>
 #include <limits>
 #include <sstream>

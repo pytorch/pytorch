@@ -18,10 +18,6 @@
 
 constexpr int64_t kCommInitBusyWaitMillis = 2;
 
-static_assert(
-    (NCCL_MAJOR == 2 && NCCL_MINOR >= 7) || (NCCL_MAJOR > 2),
-    "NCCL version must be 2.7 or later");
-
 // Macro to throw on a non-successful NCCL return value.
 #define C10D_NCCL_CHECK(cmd, failureReason)                                   \
   do {                                                                        \
