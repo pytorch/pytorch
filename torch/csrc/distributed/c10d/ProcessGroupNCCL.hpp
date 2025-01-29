@@ -18,6 +18,7 @@
 #include <mutex>
 #include <thread>
 #include <unordered_map>
+#include <utility>
 
 #include <torch/csrc/distributed/c10d/Backend.hpp>
 #include <torch/csrc/distributed/c10d/NCCLUtils.hpp>
@@ -127,8 +128,8 @@ static std::vector<std::string> TORCH_NCCL_CUDA_EVENT_CACHE = {
     "TORCH_NCCL_CUDA_EVENT_CACHE"};
 
 // Control the number of ranks each root can cover during NCCL comm init.
-static std::vector<std::string> TORCH_NCCL_SCALABLE_INIT_RANKS_PER_ROOT = {
-    "TORCH_NCCL_SCALABLE_INIT_RANKS_PER_ROOT"};
+static std::vector<std::string> TORCH_NCCL_RANKS_PER_ROOT = {
+    "TORCH_NCCL_RANKS_PER_ROOT"};
 
 static std::vector<std::string> TORCH_NCCL_NAN_CHECK = {"TORCH_NCCL_NAN_CHECK"};
 
@@ -180,6 +181,12 @@ static std::vector<std::string> TORCH_NCCL_AVOID_RECORD_STREAMS = {
 static std::vector<std::string> TORCH_NCCL_USE_TENSOR_REGISTER_ALLOCATOR_HOOK =
     {"TORCH_NCCL_USE_TENSOR_REGISTER_ALLOCATOR_HOOK",
      "NCCL_USE_TENSOR_REGISTER_ALLOCATOR_HOOK"};
+
+// Return the rank of root and index during NCCL scalable comm init.
+static std::pair<int, int> getRootRankAndIndex(
+    const int rank,
+    const int nRanks,
+    const int nIds);
 
 #if defined(__linux__)
 struct DumpPipe {
@@ -807,8 +814,9 @@ class TORCH_API ProcessGroupNCCL : public Backend {
       int p2pRank);
 
   // Helper that allgathers nccl unique IDs to all ranks through the store
-  void allgatherUniqueNCCLID(
+  void allgatherUniqueNCCLIDs(
       int rootRank,
+      int rootIdx,
       ncclUniqueId* ncclID,
       std::vector<ncclUniqueId>& ncclIDs);
 
@@ -1001,9 +1009,6 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   int getSignalSrcRank(
       c10::intrusive_ptr<Store>& store,
       const std::string& signal);
-
-  // Return the rank of root during NCCL scalable comm init.
-  int getRootRank(const int rank, const int nRanks, const int nIds);
 
  protected:
   // Function that runs as part of a separate thread aside from watchdog

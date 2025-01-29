@@ -248,6 +248,7 @@ class NCCLComm {
 #ifdef NCCL_HAS_INIT_RANK_SCALABLE
   static std::shared_ptr<NCCLComm> create_scalable(
       int numRanks,
+      int rootIdx,
       int rank,
       std::vector<ncclUniqueId>& commIds,
       ncclConfig_t& config);

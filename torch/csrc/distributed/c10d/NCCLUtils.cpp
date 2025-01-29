@@ -90,6 +90,7 @@ std::shared_ptr<NCCLComm> NCCLComm::create(
 #ifdef NCCL_HAS_INIT_RANK_SCALABLE
 std::shared_ptr<NCCLComm> NCCLComm::create_scalable(
     int numRanks,
+    int rootIdx,
     int rank,
     std::vector<ncclUniqueId>& commIds,
     ncclConfig_t& config) {
@@ -107,7 +108,7 @@ std::shared_ptr<NCCLComm> NCCLComm::create_scalable(
           commIds.data(),
           &config),
       std::nullopt);
-  comm->ncclId_ = commIds[rank];
+  comm->ncclId_ = commIds[rootIdx];
   comm->rank_ = rank;
   comm->initialized_ = !comm->nonBlocking_;
   return comm;
@@ -447,7 +448,6 @@ std::string getNcclVersion() {
   return versionString;
 }
 
-#ifdef USE_C10D_NCCL
 size_t hashTensors(const std::vector<at::Tensor>& tensors) {
   size_t hash = 0;
   for (auto& tensor : tensors) {
@@ -468,7 +468,6 @@ size_t hashTensors(const std::vector<at::Tensor>& tensors) {
   }
   return hash;
 }
-#endif
 
 // Default value: 30 minutes
 int nccl_nonblocking_timeout() {
@@ -548,7 +547,7 @@ std::string getNcclErrorDetailStr(
 
 // Dump proxyTrace log to stdout
 void printNcclCommProxyTrace(
-    std::string dumpReason,
+    std::string& dumpReason,
     const std::unordered_map<std::string, std::string>& dumpMap) {
   LOG(INFO) << "Dumping nccl comm trace, reason: " << dumpReason;
   for (auto& [key, value] : dumpMap) {

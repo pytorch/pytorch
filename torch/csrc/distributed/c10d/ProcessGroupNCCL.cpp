@@ -418,6 +418,7 @@ static std::future<bool> launchAsyncGilCheck() {
 
     try {
       auto& gil_checker = get_gil_checker();
+      // NOLINTNEXTLINE(clang-analyzer-core*)
       promise.set_value((*gil_checker)());
     } catch (...) {
       promise.set_exception(std::current_exception());
@@ -1173,7 +1174,9 @@ void ProcessGroupNCCL::registerMemPool(c10::cuda::MemPool* pool) {
         segmentInfo.device == pool->device(),
         "Mismatch between CUDA memory segment device and pool's device");
     ncclComm->registerSegment(
-        reinterpret_cast<void*>(segmentInfo.address), segmentInfo.total_size);
+        // NOLINTNEXTLINE(performance-no-int-to-ptr)
+        reinterpret_cast<void*>(segmentInfo.address),
+        segmentInfo.total_size);
   }
 }
 
@@ -1199,6 +1202,7 @@ void ProcessGroupNCCL::deregisterMemPool(c10::cuda::MemPool* pool) {
     TORCH_INTERNAL_ASSERT(
         segmentInfo.device == pool->device(),
         "Mismatch between CUDA memory segment device and pool's device");
+    // NOLINTNEXTLINE(performance-no-int-to-ptr)
     ncclComm->deregisterSegment(reinterpret_cast<void*>(segmentInfo.address));
   }
 }
@@ -1483,42 +1487,39 @@ void ProcessGroupNCCL::shutdown() {
 ProcessGroupNCCL::~ProcessGroupNCCL() {
   LOG(INFO) << logPrefix() << "ProcessGroupNCCL destructor entered.";
 
-  if (terminateProcessGroup_.load())
-    // `shutdown()` or `abort` already called. Skip the favor of disposing
-    // communicators.
-    goto join_threads;
+  // `shutdown()` or `abort` already called. Skip the favor of disposing
+  // communicators.
+  if (!terminateProcessGroup_.load()) {
+    // If user haven't explicitly destroy/shutdown process group, destructor
+    // needs to do so
+    // First print warning on first rank of each node
+    if (rank_ % localDeviceCount_ == 0) {
+      TORCH_WARN_ONCE(
+          "WARNING: destroy_process_group() was not called before program exit, "
+          "which can leak resources. For more info, please see "
+          "https://pytorch.org/docs/stable/distributed.html#shutdown");
+    }
 
-  // If user haven't explicitly destroy/shutdown process group, destructor
-  // needs to do so
-  // First print warning on first rank of each node
-  if (rank_ % localDeviceCount_ == 0) {
-    TORCH_WARN_ONCE(
-        "WARNING: destroy_process_group() was not called before program exit, "
-        "which can leak resources. For more info, please see "
-        "https://pytorch.org/docs/stable/distributed.html#shutdown");
+    // Note 1: in distributed_c10d.py, a reference to PG is held by the global
+    // context. Therefore, we are here only when the global context is tearing
+    // down, which means the entire program is exiting.  At this point, user
+    // will no longer care about the result of any collective, thus we can use
+    // abort instead of destroy to make the destruction non-blocking.
+
+    // TODO: Note 1 is not true in case of a C++ program using libtorch, which
+    // does not have the global context mentioned. In that case, calling
+    // `abort()` here could lead to corrupted result. We should consider not
+    // doing anything and just let things leak. Adversarial example:
+    /*
+      Work routine(Tensor& t) {
+        pg = ProcessGroupNCCL(…);
+        w = pg.allReduce(t);
+        return w;
+      }
+    */
+    abort();
   }
 
-  // Note 1: in distributed_c10d.py, a reference to PG is held by the global
-  // context. Therefore, we are here only when the global context is tearing
-  // down, which means the entire program is exiting.  At this point, user will
-  // no longer care about the result of any collective, thus we can use abort
-  // instead of destroy to make the destruction non-blocking.
-
-  // TODO: Note 1 is not true in case of a C++ program using libtorch, which
-  // does not have the global context mentioned. In that case, calling `abort()`
-  // here could lead to corrupted result. We should consider not doing anything
-  // and just let things leak.
-  // Adversarial example:
-  /*
-    Work routine(Tensor& t) {
-      pg = ProcessGroupNCCL(…);
-      w = pg.allReduce(t);
-      return w;
-    }
-  */
-  abort();
-
-join_threads:
   // Make sure we've told threads to stop; doesn't hurt if we'd done so before.
   // Tell watchdog and onCompletionHook:
   terminateProcessGroup_.store(true);
@@ -1941,7 +1942,7 @@ void ProcessGroupNCCL::DesyncDebugger::init(
     c10::intrusive_ptr<Store> store) {
   rank_ = rank;
   size_ = size;
-  store_ = store;
+  store_ = std::move(store);
   enabled_ = true;
   traceKeyStart_ = getTraceStartKey("NCCL", rank);
   traceKeyEnd_ = getTraceEndKey("NCCL", rank);
@@ -2165,10 +2166,10 @@ void ProcessGroupNCCL::checkAndSetRemoteError() {
 // rpr = 10 / 3 = 3 (base number of ranks per group).
 // rlim = 4
 // Output root:
-// For ranks [0, 1, 2, 3] is 0.
-// For ranks [4, 5, 6] is 1.
-// For ranks [7, 8, 9] is 2.
-int ProcessGroupNCCL::getRootRank(
+// For ranks [0, 1, 2, 3], root rank is 0 and index is 0.
+// For ranks [4, 5, 6], root rank is 4 and index is 1.
+// For ranks [7, 8, 9], root rank is 7 and index is 2.
+std::pair<int, int> getRootRankAndIndex(
     const int rank,
     const int nRanks,
     const int nIds) {
@@ -2176,12 +2177,16 @@ int ProcessGroupNCCL::getRootRank(
   const int rpr = nRanks / nIds;
   // For the first rmr roots, we assign one more rank to the root.
   const int rlim = rmr * (rpr + 1);
+  int rootIdx, rootRank;
   if (rank < rlim) {
-    // Root with `rpr + 1` ranks, 0, 1, 2, ..., rmr - 1.
-    return rank / (rpr + 1);
+    // Root with `rpr + 1` ranks, (0, 1, 2, ..., rmr - 1).
+    rootIdx = rank / (rpr + 1);
+    return {rootIdx * (rpr + 1), rootIdx};
   } else {
-    // Root with `rpr` ranks, rmr, rmr + 1, ..., nIds - 1.
-    return ((rank - rlim) / rpr) + rmr;
+    // Root with `rpr` ranks, (rmr, rmr + 1, ..., nIds - 1).
+    rootIdx = ((rank - rlim) / rpr) + rmr;
+    rootRank = ((rank - rlim) / rpr) * rpr + rlim;
+    return {rootRank, rootIdx};
   }
 }
 
@@ -2567,11 +2572,16 @@ void ProcessGroupNCCL::broadcastUniqueNCCLID(
   }
 }
 
-void ProcessGroupNCCL::allgatherUniqueNCCLID(
+// We want to all-gather unique NCCL IDs from all roots using TCPStore.
+// This is first done by setting the ID by each root and then `multiGet` by all
+// ranks.
+void ProcessGroupNCCL::allgatherUniqueNCCLIDs(
     int rootRank,
+    int rootIdx,
     ncclUniqueId* ncclID,
     std::vector<ncclUniqueId>& ncclIDs) {
   std::vector<std::string> storeKeys;
+  std::vector<std::vector<uint8_t>> results;
   for (size_t r = 0; r < ncclIDs.size(); r++) {
     storeKeys.emplace_back("UniqueNCCLID:" + std::to_string(r));
   }
@@ -2579,17 +2589,10 @@ void ProcessGroupNCCL::allgatherUniqueNCCLID(
     auto vec = std::vector<uint8_t>(
         reinterpret_cast<uint8_t*>(ncclID),
         reinterpret_cast<uint8_t*>(ncclID) + NCCL_UNIQUE_ID_BYTES);
-    store_->set(storeKeys[rootRank], vec);
+    store_->set(storeKeys[rootIdx], vec);
   }
   try {
-    int indx = 0;
-    for (auto& value : store_->multiGet(storeKeys)) {
-      TORCH_CHECK_WITH(
-          DistBackendError,
-          value.size() == NCCL_UNIQUE_ID_BYTES,
-          "Invalid size for ncclUniqueId");
-      std::memcpy(&ncclIDs[indx++], value.data(), value.size());
-    }
+    results = store_->multiGet(storeKeys);
   } catch (const std::exception& e) {
     nlohmann::json json_vec = storeKeys;
     std::string exceptionMsg = c10::str(
@@ -2615,6 +2618,14 @@ void ProcessGroupNCCL::allgatherUniqueNCCLID(
             json_vec.dump(),
             "'",
             ". This may indicate a possible application crash on rank 0 or a network set up issue."));
+  }
+
+  for (size_t r = 0; r < ncclIDs.size(); r++) {
+    TORCH_CHECK_WITH(
+        DistBackendError,
+        results[r].size() == NCCL_UNIQUE_ID_BYTES,
+        "Invalid size for ncclUniqueId");
+    std::memcpy(&ncclIDs[r], results[r].data(), results[r].size());
   }
 }
 
@@ -2759,64 +2770,73 @@ std::shared_ptr<NCCLComm> ProcessGroupNCCL::initNCCLComm(
   }
 #endif // NCCL_HAS_COMM_SPLIT
 
-#ifdef NCCL_HAS_INIT_RANK_SCALABLE
+  bool useScalableInit = false;
   // (nranks / nroots) == 128 was the default NCCL recommended
   // accoring to
   // https://github.com/pytorch/pytorch/pull/136789#discussion_r1779171615.
-  auto ranksPerRoot = getCvarInt(TORCH_NCCL_SCALABLE_INIT_RANKS_PER_ROOT, 128);
-  auto numRoots = (getSize() / ranksPerRoot) + (getSize() % ranksPerRoot > 0);
-  std::vector<ncclUniqueId> ncclIDs(numRoots);
+  auto ranksPerRoot = getCvarInt(TORCH_NCCL_RANKS_PER_ROOT, 128);
+#ifdef NCCL_HAS_INIT_RANK_SCALABLE
+  useScalableInit = !singleP2POp && (getSize() > ranksPerRoot);
+#endif // NCCL_HAS_INIT_RANK_SCALABLE
 
-  if (!ncclComm) {
-    C10D_NCCL_CHECK(ncclGetUniqueId(&ncclID), std::nullopt);
-    // We only need to all-gather the ncclID if the rank is root.
-    auto timeStarted = std::chrono::steady_clock::now();
-    allgatherUniqueNCCLID(
-        getRootRank(rank_, getSize(), numRoots), &ncclID, ncclIDs);
-    auto timerDeltaMs =
-        std::chrono::duration_cast<std::chrono::duration<double>>(
-            std::chrono::steady_clock::now() - timeStarted)
-            .count() *
-        1000;
-    LOG(INFO) << logPrefix()
-              << "ProcessGroupNCCL broadcast unique ID through store took "
-              << timerDeltaMs << " ms";
-    ncclComm =
-        NCCLComm::create_scalable(numRanks, rank, ncclIDs, options_->config);
-  }
-#else
-  // To simplify conditional nesting, just create the ncclComms[i]
-  // entry if it hasn't been yet rather than untangling the
-  // conditions that might have resulted in a split above.
-  if (!ncclComm) {
-    if (getCvarBool(TORCH_NCCL_BCAST_UNIQUEID, true) && !isSendRecvSelf) {
-      // For point-to-point communication, lower rank of the two will get unique
-      // id.
-      if (rank_ == 0 || (singleP2POp && p2pRank == 0)) {
+  if (useScalableInit) {
+    auto numRoots = (getSize() + ranksPerRoot - 1) / ranksPerRoot;
+    std::vector<ncclUniqueId> ncclIDs(numRoots);
+
+    if (!ncclComm) {
+      auto rootRankAndIndex = getRootRankAndIndex(rank_, getSize(), numRoots);
+      // We only need to get unique IDs for roots.
+      if (rank_ == rootRankAndIndex.first) {
         C10D_NCCL_CHECK(ncclGetUniqueId(&ncclID), std::nullopt);
       }
-
-      // Broadcast so that each process can have a unique NCCL ID
+      // We only need to all-gather the ncclID if the rank is root.
       auto timeStarted = std::chrono::steady_clock::now();
-      broadcastUniqueNCCLID(&ncclID, singleP2POp, deviceKey, p2pRank);
+      allgatherUniqueNCCLIDs(
+          rootRankAndIndex.first, rootRankAndIndex.second, &ncclID, ncclIDs);
       auto timerDeltaMs =
           std::chrono::duration_cast<std::chrono::duration<double>>(
               std::chrono::steady_clock::now() - timeStarted)
               .count() *
           1000;
       LOG(INFO) << logPrefix()
-                << "ProcessGroupNCCL broadcast unique ID through store took "
+                << "ProcessGroupNCCL all-gather unique IDs through store took "
                 << timerDeltaMs << " ms";
+      ncclComm = NCCLComm::create_scalable(
+          numRanks, rootRankAndIndex.second, rank, ncclIDs, options_->config);
     }
+  } else {
+    // To simplify conditional nesting, just create the ncclComms[i]
+    // entry if it hasn't been yet rather than untangling the
+    // conditions that might have resulted in a split above.
+    if (!ncclComm) {
+      if (getCvarBool(TORCH_NCCL_BCAST_UNIQUEID, true) && !isSendRecvSelf) {
+        // For point-to-point communication, lower rank of the two will get
+        // unique id.
+        if (rank_ == 0 || (singleP2POp && p2pRank == 0)) {
+          C10D_NCCL_CHECK(ncclGetUniqueId(&ncclID), std::nullopt);
+        }
+
+        // Broadcast so that each process can have a unique NCCL ID
+        auto timeStarted = std::chrono::steady_clock::now();
+        broadcastUniqueNCCLID(&ncclID, singleP2POp, deviceKey, p2pRank);
+        auto timerDeltaMs =
+            std::chrono::duration_cast<std::chrono::duration<double>>(
+                std::chrono::steady_clock::now() - timeStarted)
+                .count() *
+            1000;
+        LOG(INFO) << logPrefix()
+                  << "ProcessGroupNCCL broadcast unique ID through store took "
+                  << timerDeltaMs << " ms";
+      }
 
 #ifdef NCCL_HAS_COMM_NONBLOCKING
-    ncclComm =
-        NCCLComm::create(numRanks, rank, ncclID, deviceIndex, options_->config);
+      ncclComm = NCCLComm::create(
+          numRanks, rank, ncclID, deviceIndex, options_->config);
 #else
-    ncclComm = NCCLComm::create(numRanks, rank, ncclID, deviceIndex);
+      ncclComm = NCCLComm::create(numRanks, rank, ncclID, deviceIndex);
 #endif // NCCL_HAS_COMM_NONBLOCKING
+    }
   }
-#endif // NCCL_HAS_INIT_RANK_SCALABLE
 
   // Creates the NCCL streams
   bool force_high = getCvarBool(TORCH_NCCL_HIGH_PRIORITY, false);
@@ -4739,10 +4759,11 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::barrier(const BarrierOptions& opts) {
   if (!opts.device_ids.empty()) {
     // Use the first device id because PG NCCL is single-device now
     barDevIdx = static_cast<c10::DeviceIndex>(opts.device_ids[0]);
-  } else if (getBoundDeviceId()) {
+  } else if (getBoundDeviceId().has_value()) {
     // 2nd choice: Use the bound GPU device id if available.
     // Bounded device id can be passed to `init_process_group`.
-    barDevIdx = (*getBoundDeviceId()).index();
+    // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
+    barDevIdx = getBoundDeviceId().value().index();
   } else if (!usedDeviceIdxs_.empty()) {
     // 3rd choice: infer the device id from the used device ids.
     barDevIdx = *usedDeviceIdxs_.begin();
