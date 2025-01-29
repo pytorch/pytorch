@@ -1285,6 +1285,20 @@ def set_default_dtype(d: "torch.dtype", /) -> None:
     _C._set_default_dtype(d)
 
 
+def set_future_lazy_clone(mode: builtins.bool) -> None:
+    r"""Enables future behavior of always copying for operators that currently
+    conditionally return a copy or view of the input.
+    """
+    return _C._set_future_lazy_clone(mode)
+
+
+def get_future_lazy_clone() -> builtins.bool:
+    r"""Check whether future behavior of always copying is enabled for operators
+    that currently conditionally return a copy or view of the input.
+    """
+    return _C._get_future_lazy_clone()
+
+
 def use_deterministic_algorithms(
     mode: builtins.bool,
     *,

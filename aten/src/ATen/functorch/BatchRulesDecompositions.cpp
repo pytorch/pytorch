@@ -228,6 +228,7 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatchedDecomposition, m) {
   m.impl("repeat_interleave.self_int", static_cast<decltype(&ATEN_FN2(repeat_interleave, self_int))>(native::repeat_interleave_symint));
   m.impl("repeat_interleave.self_Tensor", static_cast<decltype(&ATEN_FN2(repeat_interleave, self_Tensor))>(native::repeat_interleave_symint));
   m.impl("reshape", native::reshape_symint);
+  OP_DECOMPOSE(_lazy_clone);
   OP_DECOMPOSE(resolve_conj);
   OP_DECOMPOSE(resolve_neg);
   m.impl("rms_norm", native::rms_norm_symint);

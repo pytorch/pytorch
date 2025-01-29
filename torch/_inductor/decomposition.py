@@ -528,6 +528,13 @@ def view_copy_dtype(
     return self.to(dtype).clone()
 
 
+@register_decomposition([aten._lazy_clone_alias.default])
+def _lazy_clone_alias_default(
+    self: torch.Tensor,
+) -> torch.Tensor:
+    return aten.view(self, self.shape)
+
+
 def get_like_layout(
     tensor: torch.Tensor,
     memory_format: Optional[torch.memory_format] = None,

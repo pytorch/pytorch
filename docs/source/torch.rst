@@ -715,6 +715,8 @@ Utilities
     set_warn_always
     get_device_module
     is_warn_always_enabled
+    get_future_lazy_clone
+    set_future_lazy_clone
     vmap
     _assert
 

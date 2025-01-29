@@ -98,6 +98,7 @@ VIEW_FUNCTIONS = {
     # FIXME: clone indices on construction.
     "sparse_coo_tensor_with_dims_and_tensors": "values",
     "_reshape_alias": "self",
+    "_lazy_clone_alias": "self",
     "_test_autograd_multiple_dispatch_view": "self",
 }
 

@@ -444,6 +444,14 @@ Tensor FunctionalInverses::alias_inverse(const Tensor& base, const Tensor& mutat
     }
 }
 
+Tensor FunctionalInverses::_lazy_clone_alias_inverse(const Tensor& base, const Tensor& mutated_view, InverseReturnMode inverse_return_mode) {
+  if (inverse_return_mode != InverseReturnMode::NeverView) {
+    return at::_lazy_clone_alias(mutated_view);
+  } else {
+    return at::_lazy_clone_alias_copy(mutated_view);
+  }
+}
+
 Tensor FunctionalInverses::chunk_inverse(const at::Tensor & base, const at::Tensor & mutated_view, InverseReturnMode inverse_return_mode, int64_t mutated_view_idx, int chunks, int dim) {
     // TODO: Can the logic from TensorShape.cpp be reused here somehow?
     const auto dim_size = base.sym_size(dim);

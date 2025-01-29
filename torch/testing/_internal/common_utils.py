@@ -2312,6 +2312,15 @@ def set_default_tensor_type(tensor_type):
     finally:
         torch.set_default_tensor_type(saved_tensor_type)
 
+@contextlib.contextmanager
+def futureLazyCloneGuard(mode=True):
+    try:
+        restore = torch.get_future_lazy_clone()
+        torch.set_future_lazy_clone(mode)
+        yield
+    finally:
+        torch.set_future_lazy_clone(restore)
+
 def iter_indices(tensor):
     if tensor.dim() == 0:
         return range(0)

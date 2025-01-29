@@ -727,6 +727,8 @@ def forward(self, primals_1):
     arange = torch.ops.aten.arange.default(9, dtype = torch.float32, device = device(type='cpu'), pin_memory = False)
     alias = torch.ops.aten.alias.default(primals_1);  primals_1 = None
     view = torch.ops.aten.view.default(arange, [3, 3]);  arange = None
+    _lazy_clone_alias = torch.ops.aten._lazy_clone_alias.default(view);  view = None
+    add = torch.ops.aten.add.Tensor(alias, _lazy_clone_alias);  alias = _lazy_clone_alias = None
     add = torch.ops.aten.add.Tensor(alias, view);  alias = view = None
     return (add,)""",
         )
@@ -4521,7 +4523,8 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1, arg5_1, arg6_1, arg7_1
             """\
 def forward(self, arg0_1):
     view = torch.ops.aten.view.default(arg0_1, [4, 4]);  arg0_1 = None
-    sum_1 = torch.ops.aten.sum.default(view);  view = None
+    _lazy_clone_alias = torch.ops.aten._lazy_clone_alias.default(view);  view = None
+    sum_1 = torch.ops.aten.sum.default(_lazy_clone_alias);  _lazy_clone_alias = None
     return (sum_1,)""",
         )  # noqa: B950
 
