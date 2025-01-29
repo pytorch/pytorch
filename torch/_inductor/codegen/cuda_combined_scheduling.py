@@ -1,7 +1,7 @@
 # mypy: allow-untyped-defs
 from __future__ import annotations
 
-from typing import Any, List, Optional, Tuple, TYPE_CHECKING, Union
+from typing import Any, List, Optional, Tuple, TYPE_CHECKING, TypeAlias, Union
 
 from ..scheduler import (
     BaseSchedulerNode,
@@ -18,10 +18,14 @@ from .triton import TritonScheduling
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
+    from sympy import Expr
+
     import torch
     from torch.utils._ordered_set import OrderedSet
 
     from .common import BackendFeature
+
+    _IntLike: TypeAlias = Union[int, Expr]
 
 
 class CUDACombinedScheduling(BaseScheduling):
@@ -67,7 +71,9 @@ class CUDACombinedScheduling(BaseScheduling):
                 )  # always False at the moment
         return self._triton_scheduling.can_fuse_horizontal(node1, node2)
 
-    def group_fn(self, sizes: Sequence[Sequence[Any]]) -> tuple[Any, ...]:
+    def group_fn(
+        self, sizes: Sequence[Sequence[_IntLike]]
+    ) -> tuple[tuple[_IntLike, ...], ...]:
         return self._triton_scheduling.group_fn(sizes)
 
     def codegen_template(

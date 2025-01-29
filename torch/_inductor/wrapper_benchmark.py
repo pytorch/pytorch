@@ -3,7 +3,7 @@ import datetime
 import tempfile
 from collections import defaultdict
 from types import ModuleType
-from typing import Any, Callable, Dict, Optional
+from typing import Any, Dict, Optional, Protocol
 
 import torch
 from torch.autograd import DeviceType
@@ -11,6 +11,11 @@ from torch.utils._ordered_set import OrderedSet
 
 from .runtime.benchmarking import benchmarker
 from .runtime.runtime_utils import create_bandwidth_info_str, get_num_bytes
+
+
+class BenchmarkCallableType(Protocol):
+    def __call__(self, times: int, repeat: int) -> float:
+        ...
 
 
 _kernel_category_choices = [
@@ -103,9 +108,9 @@ def benchmark_all_kernels(
 
         def get_info_str(
             ms: float,
-            n_regs: Any,
-            n_spills: Any,
-            shared: Any,
+            n_regs: Optional[Any],
+            n_spills: Optional[Any],
+            shared: Optional[Any],
             prefix: str = "",
         ) -> str:
             if not any(x is None for x in [n_regs, n_spills, shared]):
@@ -295,7 +300,7 @@ def perf_profile(
     times: int,
     repeat: int,
     benchmark_name: str,
-    benchmark_compiled_module_fn: Callable[..., float],
+    benchmark_compiled_module_fn: BenchmarkCallableType,
 ) -> None:
     with torch.profiler.profile(record_shapes=True) as p:
         benchmark_compiled_module_fn(times=times, repeat=repeat)
@@ -312,7 +317,7 @@ def perf_profile(
 
 
 def ncu_analyzer(
-    benchmark_name: str, benchmark_compiled_module_fn: Callable[..., float]
+    benchmark_name: str, benchmark_compiled_module_fn: BenchmarkCallableType
 ) -> None:
     import inspect
     import os
@@ -363,7 +368,9 @@ def ncu_analyzer(
         return
 
 
-def collect_memory_snapshot(benchmark_compiled_module_fn: Callable[..., float]) -> None:
+def collect_memory_snapshot(
+    benchmark_compiled_module_fn: BenchmarkCallableType,
+) -> None:
     assert torch.cuda.is_available()
 
     torch.cuda.memory._record_memory_history(max_entries=100000)
@@ -375,7 +382,7 @@ def collect_memory_snapshot(benchmark_compiled_module_fn: Callable[..., float]) 
 
 
 def compiled_module_main(
-    benchmark_name: str, benchmark_compiled_module_fn: Callable[..., float]
+    benchmark_name: str, benchmark_compiled_module_fn: BenchmarkCallableType
 ) -> None:
     """
     This is the function called in __main__ block of a compiled module.
