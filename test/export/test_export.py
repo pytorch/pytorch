@@ -3710,9 +3710,6 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
         dynamic_shapes = ({"k": {"k2": [(dim,)], "k1": [(dim,)]}},)  # ok
         export(N(), inputs, dynamic_shapes=dynamic_shapes)
 
-    @testing.expectedFailureSerDer  # no unbacked bindings after deserialization?
-    @testing.expectedFailureCppSerDes  # no unbacked bindings after deserialization?
-    @testing.expectedFailureSerDerNonStrict
     def test_unbacked_bindings_for_divisible_u_symint(self):
         class M(torch.nn.Module):
             def forward(self, a, b):
@@ -11566,6 +11563,24 @@ class GraphModule(torch.nn.Module):
             export_res = ep.module()(*dyn_inp)
             ref_res = module(*dyn_inp)
             self.assertEqual(export_res, ref_res)
+
+    @testing.expectedFailureSerDer  # T202237665
+    @testing.expectedFailureSerDerNonStrict
+    def test_dynamic_lr_shift(self):
+        class Module(torch.nn.Module):
+            def forward(self, x):
+                rshift = x.shape[0] >> 1
+                lshift = x.shape[0] << 1
+                return x[:rshift], x[:lshift]
+
+        dynamic_shapes = {"x": {0: Dim("N", min=5, max=10)}}
+        inp = (torch.randn(8),)
+        ep = export(Module(), inp, dynamic_shapes=dynamic_shapes)
+        for op in (operator.lshift, operator.rshift):
+            shift_op = [
+                n for n in ep.graph.nodes if n.op == "call_function" and n.target == op
+            ]
+            self.assertEqual(len(shift_op), 1)
 
 
 @unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo isn't support")
