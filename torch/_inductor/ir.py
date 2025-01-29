@@ -385,6 +385,28 @@ def is_aligned_realized_tensor(x: Union[Buffer, TensorBox], alignment: int) -> b
     return aligned_last_dim and aligned_strides
 
 
+def significant_strides_equal(
+    strides1: Sequence[_IntLike],
+    strides2: Sequence[_IntLike],
+    shape: Sequence[_IntLike],
+) -> bool:
+    """
+    Returns true if the strides are equal, ignoring dimensions of size 1 .
+    """
+    for dim, s1, s2 in zip(shape, strides1, strides2):
+        if V.graph.sizevars.statically_known_leq(dim, 1):  # type: ignore[arg-type]
+            continue
+
+        if not V.graph.sizevars.statically_known_equals(
+            s1, s2
+        ) and not V.graph.sizevars.symbolic_hint(s1) == V.graph.sizevars.symbolic_hint(
+            s2
+        ):
+            return False
+
+    return True
+
+
 def try_match_insignificant_strides(
     tensor: Union[TensorBox, BaseView],
     strides: Sequence[Union[int, torch.SymInt]],
@@ -404,21 +426,7 @@ def try_match_insignificant_strides(
     ):
         return tensor  # type: ignore[arg-type]
 
-    def significant_strides_equal(
-        shape: Sequence[Union[Expr, int]],
-        meta_strides: Sequence[Union[Expr, int]],
-        tensor_strides: Sequence[Union[Expr, int]],
-    ) -> bool:
-        for dim, s1, s2 in zip(shape, meta_strides, tensor_strides):
-            if V.graph.sizevars.statically_known_leq(dim, 1):  # type: ignore[arg-type]
-                continue
-
-            if not V.graph.sizevars.statically_known_equals(s1, s2):
-                return False
-
-        return True
-
-    if not significant_strides_equal(tensor.get_size(), strides, tensor.get_stride()):
+    if not significant_strides_equal(strides, tensor.get_stride(), tensor.get_size()):
         return tensor
 
     storage, old_layout = as_storage_and_layout(tensor)
@@ -1023,22 +1031,6 @@ def get_reduction_combine_fn(
 
     else:
         raise NotImplementedError(f"unknown reduction_type={reduction_type}")
-
-
-def significant_strides_equal(
-    strides1: Sequence[_IntLike], strides2: Sequence[_IntLike], size: Sequence[_IntLike]
-) -> bool:
-    """
-    Returns true if the strides are equal, ignoring dimensions of size 1 .
-    """
-    non_1_indices = [
-        i
-        for i, dim in enumerate(size)
-        if V.graph.sizevars.size_hint(dim, fallback=2) != 1
-    ]
-    strides1 = [V.graph.sizevars.size_hint(strides1[i]) for i in non_1_indices]
-    strides2 = [V.graph.sizevars.size_hint(strides2[i]) for i in non_1_indices]
-    return strides1 == strides2
 
 
 @ir_dataclass
