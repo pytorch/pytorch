@@ -269,8 +269,9 @@ class TunableOp {
         }
 
         // collect a small profile
-        constexpr const int approx_num_iter = 3;
-        auto approx_duration = ProfileSimple(candidate, reusable_params, approx_num_iter, offset);
+        int approx_num_iter = 3;
+        auto s = ProfileStats(candidate, reusable_params, approx_num_iter, offset);
+        double approx_duration = s._mean;
         // bail if too slow
         if (approx_duration > 2 * min_duration_ms) {
           TUNABLE_LOG3("├──skip slow instance id=", i, ", ", op_sig, '(', params_sig, ") ", op_names_[i]);
