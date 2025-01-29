@@ -1,7 +1,6 @@
 # mypy: ignore-errors
 
 import builtins
-import collections
 import functools
 import inspect
 import itertools
@@ -21,6 +20,7 @@ from ..source import AttrSource, ConstantSource, DefaultsSource, GetItemSource
 from ..utils import (
     check_constant_args,
     check_unspec_or_constant_args,
+    cmp_name_to_op_mapping,
     counters,
     identity,
     is_function,
@@ -280,6 +280,8 @@ class UserFunctionVariable(BaseUserFunctionVariable):
         return result
 
     def var_getattr(self, tx: "InstructionTranslator", name: str):
+        if name in cmp_name_to_op_mapping:
+            return variables.GetAttrVariable(self, name)
         source = self.source and AttrSource(self.source, name)
         try:
             subobj = inspect.getattr_static(self.fn, name)
@@ -318,6 +320,30 @@ class UserFunctionVariable(BaseUserFunctionVariable):
                 with torch._dynamo.side_effects.allow_side_effects_under_checkpoint(tx):
                     return super().call_function(tx, args, kwargs)
         return super().call_function(tx, args, kwargs)
+
+
+class BuiltinMethodVariable(BaseUserFunctionVariable):
+    def __init__(self, fn, is_constant=False, **kwargs) -> None:
+        super().__init__(**kwargs)
+        assert isinstance(fn, types.BuiltinMethodType)
+        self.fn = fn
+
+    @staticmethod
+    @functools.lru_cache(None)
+    def supported_methods():
+        return {tuple.__new__}
+
+    def call_function(
+        self,
+        tx: "InstructionTranslator",
+        args: "list[VariableTracker]",
+        kwargs: "dict[str, VariableTracker]",
+    ) -> "VariableTracker":
+        method_self = self.fn.__self__
+        name = self.fn.__name__
+        return variables.BuiltinVariable(method_self).call_method(
+            tx, name, args, kwargs
+        )
 
 
 class FunctionDecoratedByContextlibContextManagerVariable(BaseUserFunctionVariable):
@@ -663,13 +689,6 @@ class SkipFunctionVariable(VariableTracker):
             install_guard(source.make_guard(GuardBuilder.FUNCTION_MATCH))
         return cls(value, source=source)
 
-    @staticmethod
-    @functools.lru_cache(None)
-    def fold_through_function_to_wrapper():
-        return {
-            collections.namedtuple: variables.UserDefinedClassVariable,
-        }
-
     def call_function(
         self,
         tx: "InstructionTranslator",
@@ -678,19 +697,6 @@ class SkipFunctionVariable(VariableTracker):
     ) -> "VariableTracker":
         if inspect.getattr_static(self.value, "_torchdynamo_disable", False):
             unimplemented(f"call torch._dynamo.disable() wrapped function {self.value}")
-        # Fold through the functions(e.g, collections.namedtuple)
-        # that inputs & outputs are all python constants
-        elif (
-            self.value in self.fold_through_function_to_wrapper().keys()
-            and check_constant_args(args, kwargs)
-        ):
-            value = self.value(
-                *[x.as_python_constant() for x in args],
-                **{k: v.as_python_constant() for k, v in kwargs.items()},
-            )
-            return self.fold_through_function_to_wrapper().get(self.value)(
-                value, mutation_type=ValueMutationNew()
-            )
         else:
             try:
                 path = inspect.getfile(self.value)
@@ -889,6 +895,28 @@ class FunctoolsWrapsVariable(UserFunctionVariable):
             return variables.LambdaVariable(wraps)
 
         return super().call_function(tx, args, kwargs)
+
+
+class CollectionsNamedTupleFunction(UserFunctionVariable):
+    def as_python_constant(self):
+        return self.fn
+
+    def call_function(
+        self,
+        tx: "InstructionTranslator",
+        args: "list[VariableTracker]",
+        kwargs: "dict[str, VariableTracker]",
+    ) -> "VariableTracker":
+        constant_args = check_constant_args(args, kwargs)
+        if constant_args:
+            value = self.fn(
+                *[x.as_python_constant() for x in args],
+                **{k: v.as_python_constant() for k, v in kwargs.items()},
+            )
+            return variables.UserDefinedClassVariable(
+                value, mutation_type=ValueMutationNew()
+            )
+        unimplemented("namedtuple with non constant args")
 
 
 class FunctoolsPartialVariable(VariableTracker):

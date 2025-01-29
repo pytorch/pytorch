@@ -16,6 +16,7 @@ import numpy as np
 import torch
 import torch._dynamo
 import torch._dynamo.testing
+from torch.nested._internal.dict_tensor import DictTensor
 import torch.nn
 import torch.nn.functional as F
 from torch.nested._internal.nested_tensor import (
@@ -71,7 +72,7 @@ from torch.testing._internal.opinfo.core import (
     SkipRule,
     XFailRule,
 )
-from torch.testing._internal.opinfo.definitions.nested import njt_op_db
+from torch.testing._internal.opinfo.definitions.nested import _sample_njts, njt_op_db
 from torch.utils._pytree import tree_flatten, tree_map_only
 from torch.utils.checkpoint import checkpoint, create_selective_checkpoint_contexts
 
@@ -6109,17 +6110,72 @@ class TestNestedTensorSubclass(NestedTensorTestCase):
 
     @skipIfTorchDynamo("Not a suitable test for TorchDynamo")
     @parametrize(
-        "func", [torch.ones_like, torch.zeros_like], name_fn=lambda f: f.__name__
+        "func",
+        [
+            torch.empty_like,
+            torch.full_like,
+            torch.ones_like,
+            torch.rand_like,
+            torch.randint_like,
+            torch.randn_like,
+            torch.zeros_like,
+        ],
+        name_fn=lambda f: f.__name__,
     )
-    def test_like_value(self, func):
-        nt = random_nt_from_dims(
-            [2, None, 3], torch.device("cpu"), torch.float32, layout=torch.jagged
-        )
-        nt_like = func(nt)
+    def test_like_value(self, func, device):
+        dtype = torch.float32 if func is not torch.randint_like else torch.int32
+        for nt in _sample_njts(device=device, dtype=dtype):
+            extra_kwarg_sets = [{}]
+            if func is torch.full_like:
+                extra_kwarg_sets = [{"fill_value": 4.2}]
+            elif func is torch.randint_like:
+                extra_kwarg_sets = [{"high": 5}, {"low": 4, "high": 9}]
 
-        for nt_ub in nt_like.unbind():
-            t_like = func(nt_ub)
-            self.assertEqual(nt_ub, t_like)
+            # only test changing dtype / device from CUDA -> CPU because CUDA might not be
+            # available when running this test for CPU
+            change_dtype_device_settings = (
+                [False, True] if "cuda" in device else [False]
+            )
+            for change_dtype_device in change_dtype_device_settings:
+                if change_dtype_device:
+                    new_dtype = (
+                        torch.float64 if func is not torch.randint_like else torch.int64
+                    )
+                    new_device = "cpu" if "cuda" in device else device
+                    new_layout = torch.strided
+                    for extra_kwargs in extra_kwarg_sets:
+                        extra_kwargs.update(
+                            {
+                                "dtype": new_dtype,
+                                "device": new_device,
+                                "layout": new_layout,
+                            }
+                        )
+
+                for extra_kwargs in extra_kwarg_sets:
+                    nt_like = func(nt, **extra_kwargs)
+                    self.assertEqual(nt.shape, nt_like.shape)
+                    if change_dtype_device:
+                        self.assertNotEqual(nt.device, nt_like.device)
+                        self.assertNotEqual(nt.device, nt_like.dtype)
+                        # layout should be ignored since only torch.jagged is supported
+                        self.assertEqual(torch.jagged, nt_like.layout)
+                    else:
+                        self.assertEqual(nt.device, nt_like.device)
+                        self.assertEqual(nt.dtype, nt_like.dtype)
+                        self.assertEqual(nt.layout, nt_like.layout)
+                        self.assertEqual(nt.layout, torch.jagged)
+
+                    # don't bother trying to compare random or empty values
+                    if func not in [
+                        torch.empty_like,
+                        torch.rand_like,
+                        torch.randn_like,
+                        torch.randint_like,
+                    ]:
+                        for nt_ub in nt_like.unbind():
+                            t_like = func(nt_ub, **extra_kwargs)
+                            self.assertEqual(nt_ub, t_like)
 
     def test_noncontiguous_pointwise(self, device):
         a = torch.randn(2, 3, 4, requires_grad=True, dtype=torch.float64, device=device)
@@ -8391,11 +8447,12 @@ COMPILE_FORWARD_SKIPS_AND_XFAILS = [
         sample_match_fn=lambda device, sample: ("-> cpu" in sample.name),
         name="cross_device_transfer_wrong_nested_int_in_compile",
     ),
-    # clone() -> contiguous format on an non-contiguous NJT with holes currently uses
-    # unbind(), leading to data-dependent error in torch.compile
+    # clone() -> preserve format on an non-contiguous NJT with holes currently uses
+    # unbind(), leading to data-dependent expression. Should be fixed via torch._check()
     XFailRule(
         error_type=torch._dynamo.exc.Unsupported,
-        error_msg="data dependent operator: aten._local_scalar_dense.default",
+        # Ne(u1, u0) (unhinted: Ne(u1, u0)).  (Size-like symbols: u1, u0)
+        error_msg="Could not guard on data-dependent expression",
         op_match_fn=lambda device, op: (op.full_name == "clone"),
         sample_match_fn=lambda device, sample: (
             "noncontig_holes" in sample.name
@@ -8403,22 +8460,21 @@ COMPILE_FORWARD_SKIPS_AND_XFAILS = [
         ),
         name="clone_unbind_data_dependency",
     ),
-    # chunk() on the batch dim reads the values of offsets to determine shape, leading to
-    # data-dependent error in torch.compile
-    XFailRule(
-        error_type=torch._dynamo.exc.Unsupported,
-        error_msg="data dependent operator: aten._local_scalar_dense.default",
+    # chunk(): broken in several ways on the batch dim; revisit after similar
+    # data-dependency issues are handled for narrow()
+    SkipRule(
         op_match_fn=lambda device, op: (op.full_name == "chunk"),
         sample_match_fn=lambda device, sample: ("batch_dim" in sample.name),
-        name="chunk_batch_dim_data_dependency",
+        name="broken_chunk_compile_backward_on_batch_dim",
     ),
-    # select on dim=0 currently uses unbind(), leading to data-dependent error in torch.compile
+    # select on batch dim currently uses unbind(), leading to data-dependent error in
+    # torch.compile that needs to be addressed via torch._check()
     XFailRule(
-        error_type=torch._dynamo.exc.Unsupported,
-        error_msg="data dependent operator: aten._local_scalar_dense.default",
+        error_type=torch._dynamo.exc.InternalTorchDynamoError,
+        error_msg="Pending unbacked symbols",
         op_match_fn=lambda device, op: (op.full_name == "select"),
-        sample_match_fn=lambda device, sample: (sample.kwargs["dim"] == 0),
-        name="select_unbind_data_dependency",
+        sample_match_fn=lambda device, sample: ("batch_dim" in sample.name),
+        name="broken_select_backward_unbacked",
     ),
     # Bug: no idea what's going on here; needs investigation within AOTAutograd
     XFailRule(
@@ -8441,13 +8497,6 @@ COMPILE_BACKWARD_SKIPS_AND_XFAILS = [
         op_match_fn=lambda device, op: True,
         sample_match_fn=lambda device, sample: ("noncontig_holes" in sample.name),
         name="noncontig_holes_data_dependency",
-    ),
-    # chunk(): broken in several ways on the batch dim; revisit after similar
-    # data-dependency issues are handled for narrow()
-    SkipRule(
-        op_match_fn=lambda device, op: (op.full_name == "chunk"),
-        sample_match_fn=lambda device, sample: ("batch_dim" in sample.name),
-        name="broken_chunk_compile_backward_on_batch_dim",
     ),
     # mean(): weird bug
     XFailRule(
@@ -8491,69 +8540,6 @@ COMPILE_BACKWARD_SKIPS_AND_XFAILS = [
         error_msg="aten.view_as_real.default",
         op_match_fn=lambda device, op: (op.full_name in {"cdouble", "cfloat", "chalf"}),
         name="unimplemented_view_as_real",
-    ),
-    # torch._subclasses.fake_tensor.DataDependentOutputException: aten._local_scalar_dense.default
-    # from item call in clone() -> unbind()
-    XFailRule(
-        error_type=torch._dynamo.exc.Unsupported,
-        error_msg="Backend compiler failed with a fake tensor exception",
-        op_match_fn=lambda device, op: (
-            op.full_name
-            in {
-                "__rpow__",
-                "clamp_max",
-                "clamp_min",
-                "float_power",
-                "pow",
-                "sinc",
-            }
-            or (
-                isinstance(op, BinaryUfuncInfo)
-                and
-                # don't include unimplemented ops
-                op.full_name
-                not in {
-                    "__rsub__",
-                    "complex",
-                    "floor_divide",
-                    "polar",
-                    "rsub",
-                }
-            )
-        ),
-        sample_match_fn=lambda device, sample: (
-            "(NT, T) broadcasting all 1s" in sample.name
-            and "noncontig_holes" in sample.name
-        ),
-        name="backward_unbind_data_dependency",
-    ),
-    # ditto
-    XFailRule(
-        error_type=torch._dynamo.exc.Unsupported,
-        error_msg="Backend compiler failed with a fake tensor exception",
-        op_match_fn=lambda device, op: (op.full_name == "nn.functional.rms_norm"),
-        sample_match_fn=lambda device, sample: (sample.input._lengths is not None),
-        name="rms_norm_backward_unbind_data_dependency",
-    ),
-    # clone() -> preserve format on an non-contiguous NJT with holes currently uses
-    # unbind(), leading to data-dependent error in torch.compile
-    XFailRule(
-        error_type=torch._dynamo.exc.Unsupported,
-        error_msg="Backend compiler failed with a fake tensor exception",
-        op_match_fn=lambda device, op: (op.full_name == "clone"),
-        sample_match_fn=lambda device, sample: (
-            "noncontig_holes" in sample.name
-            and sample.kwargs.get("memory_format", None) == torch.preserve_format
-        ),
-        name="clone_unbind_data_dependency_backward",
-    ),
-    # select(): pending unbacked symints not in returned output (needs fix)
-    XFailRule(
-        error_type=torch._dynamo.exc.InternalTorchDynamoError,
-        error_msg="Pending unbacked symbols",
-        op_match_fn=lambda device, op: (op.full_name == "select"),
-        sample_match_fn=lambda device, sample: ("batch_dim" in sample.name),
-        name="broken_select_backward_unbacked",
     ),
     *COMPILE_FORWARD_SKIPS_AND_XFAILS,
     *BACKWARD_SKIPS_AND_XFAILS,
@@ -8646,11 +8632,13 @@ class TestNestedTensorOpInfo(NestedTensorTestCase):
 
                     self.assertEqualNoncontigAware(grads, grads_ref)
 
-    @torch._dynamo.config.patch(capture_dynamic_output_shape_ops=True)
     @ops(
         [op for op in njt_op_db if op.supports_njt],
         allowed_dtypes=(torch.float32,),
     )
+    @torch._dynamo.config.patch(capture_dynamic_output_shape_ops=True)
+    # needed to avoid "data dependent operator: aten._local_scalar_dense.default"
+    @torch._dynamo.config.patch(capture_scalar_outputs=True)
     @sample_skips_and_xfails(COMPILE_FORWARD_SKIPS_AND_XFAILS)
     def test_compile_forward(self, device, dtype, op):
         for sample, subtest_ctx, skip_xfail_ctx in op.sample_inputs(
@@ -8703,6 +8691,8 @@ class TestNestedTensorOpInfo(NestedTensorTestCase):
         allowed_dtypes=(torch.float32,),
     )
     @torch._dynamo.config.patch(capture_dynamic_output_shape_ops=True)
+    # needed to avoid "data dependent operator: aten._local_scalar_dense.default"
+    @torch._dynamo.config.patch(capture_scalar_outputs=True)
     @sample_skips_and_xfails(COMPILE_BACKWARD_SKIPS_AND_XFAILS)
     def test_compile_backward(self, device, dtype, op):
         for sample, subtest_ctx, skip_xfail_ctx in op.sample_inputs(
@@ -8710,9 +8700,6 @@ class TestNestedTensorOpInfo(NestedTensorTestCase):
         ):
             with subtest_ctx(self), skip_xfail_ctx(self):
                 torch.compiler.reset()
-                # must be set to avoid:
-                # DataDependentOutputException: aten._local_scalar_dense.default
-                torch._dynamo.config.capture_scalar_outputs = True
 
                 op_fn = op.op
 
@@ -8759,6 +8746,7 @@ class TestNestedTensorOpInfo(NestedTensorTestCase):
                     self.assertEqualNoncontigAware(grads_compile, grads_ref)
 
     @torch._dynamo.config.patch(capture_dynamic_output_shape_ops=True)
+    # needed to avoid "data dependent operator: aten._local_scalar_dense.default"
     @torch._dynamo.config.patch(capture_scalar_outputs=True)
     @skipIfTorchDynamo(
         "Dynamo fails on pending unbacked symints at assertEqual(ref_y[0][0][0].item(), 2)"
@@ -8901,128 +8889,6 @@ class TestNestedInt(torch.testing._internal.common_utils.TestCase):
         self.assertTrue(a * 2 == b)
         self.assertTrue(a * 3 >= b)
         self.assertTrue(a * 2 == 2 * a)
-
-
-from torch.nested._internal.cached_tensor import CachedTensor
-
-
-class TestCachedTensor(torch.testing._internal.common_utils.TestCase):
-    def test_basic_eager(self):
-        # Create some tensors
-        a = torch.tensor([1, 2, 3], dtype=torch.float32)
-        b = torch.tensor([4, 5, 6], dtype=torch.float32)
-        c = torch.tensor([7, 8, 9], dtype=torch.float32)
-        metadata = {"a": a, "b": b, "c": None}
-        cached_tensor = CachedTensor(metadata)
-        # Test that cached_tensor is created correctly
-        self.assertIsInstance(cached_tensor, CachedTensor)
-        self.assertEqual(cached_tensor.shape, (0,))
-        # Accessing a field that is listed in all_fields but not present in metadata returns
-        # None instead of raising AttributeError.
-        self.assertIsNone(cached_tensor.c, c)
-
-        # Test that accessing a non-existent field raises AttributeError
-        with self.assertRaises(AttributeError):
-            _ = cached_tensor.d
-
-    def test_open_registration(self):
-        from torch.nested._internal.cached_tensor import (
-            register_cached_tensor_func,
-            set_func_registry,
-        )
-
-        tmp_registry = {}
-
-        with set_func_registry(tmp_registry):
-            # Create some tensors
-            a = torch.tensor([1, 2, 3], dtype=torch.float32)
-            b = torch.tensor([4, 5, 6], dtype=torch.float32)
-            c = torch.tensor([7, 8, 9], dtype=torch.float32)
-            metadata = {"a": a, "b": b, "c": c}
-            cached_tensor = CachedTensor(metadata)
-
-            # Before registration, clone errors
-            with self.assertRaisesRegex(
-                NotImplementedError,
-                "CachedTensor does not support for aten.clone.default",
-            ):
-                cached_tensor.clone()
-
-            # Define a custom clone function that rewraps the output into
-            # a new CachedTensor.
-            @register_cached_tensor_func(torch.ops.aten.clone.default)
-            def cached_tensor_clone(op, inp, *args, **kwargs):
-                cloned_metadata = {}
-                for k, v in inp.metadata.items():
-                    cloned_metadata[k] = v.clone()
-                return CachedTensor(cloned_metadata)
-
-            cloned_cached_tensor = cached_tensor.clone()
-            self.assertIsInstance(cloned_cached_tensor, CachedTensor)
-
-            for key in cached_tensor.metadata.keys():
-                assert isinstance(cloned_cached_tensor, CachedTensor)
-                self.assertEqual(
-                    cloned_cached_tensor.metadata[key], cached_tensor.metadata[key]
-                )
-                self.assertFalse(
-                    cloned_cached_tensor.metadata[key] is cached_tensor.metadata[key]
-                )
-
-        # After leaving the context, clone behaves as it did before.
-        with self.assertRaisesRegex(
-            NotImplementedError, "CachedTensor does not support for aten.clone.default"
-        ):
-            cached_tensor.clone()
-
-    def test_basic_compile(self):
-        from torch.nested._internal.cached_tensor import (
-            register_cached_tensor_func,
-            set_func_registry,
-        )
-
-        tmp_registry = {}
-
-        with set_func_registry(tmp_registry):
-
-            @register_cached_tensor_func(torch.ops.aten.clone.default)
-            def cached_tensor_clone(op, inp, *args, **kwargs):
-                # Unwraps to the 'a' attr and clones
-                out = inp.metadata["a"].clone()
-                return out
-
-            #
-            # Construct CachedTensor outside the graph
-            #
-            a = torch.tensor([1, 2, 3], dtype=torch.float32)
-            b = torch.tensor([4, 5, 6], dtype=torch.float32)
-            c = torch.tensor([7, 8, 9], dtype=torch.float32)
-            metadata = {"a": a, "b": b, "c": c}
-
-            cached_tensor = CachedTensor(metadata)
-
-            @torch.compile(fullgraph=True)
-            def fn1(x):
-                return x.clone().clone()
-
-            out = fn1(cached_tensor)
-            self.assertFalse(isinstance(out, CachedTensor))
-
-            #
-            # Construct CachedTensor inside the graph
-            #
-            a = torch.tensor([1, 2, 3], dtype=torch.float32)
-            b = torch.tensor([4, 5, 6], dtype=torch.float32)
-            c = torch.tensor([7, 8, 9], dtype=torch.float32)
-            metadata = {"a": a, "b": b, "c": c}
-
-            @torch.compile(fullgraph=True)
-            def fn2(y):
-                x = CachedTensor(metadata)
-                return x.clone() * y
-
-            out = fn2(a.clone())
-            self.assertFalse(isinstance(out, CachedTensor))
 
 
 instantiate_parametrized_tests(TestNestedTensor)
