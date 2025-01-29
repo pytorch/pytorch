@@ -1591,9 +1591,6 @@ class RandomClassVariable(VariableTracker):
     def __init__(self, **kwargs) -> None:
         super().__init__(**kwargs)
 
-    def as_python_constant(self):
-        return random.Random
-
     def call_function(self, tx: "InstructionTranslator", args, kwargs):
         if len(args) > 1:
             unimplemented("random.Random() with > 1 arg")
@@ -1716,7 +1713,6 @@ class RandomVariable(VariableTracker):
             tx.output.side_effects.mutation(self)
             state = self.random.getstate()
 
-            # Generate new random object with the same state and call the method
             def call_random_meth(*args, **kwargs):
                 r = random.Random()
                 r.setstate(state)
