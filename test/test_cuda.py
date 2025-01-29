@@ -4537,7 +4537,7 @@ class TestBlockStateAbsorption(TestCase):
         for i in range(len(reconstructed_tensors)):
             self.assertEqual(reconstructed_tensors[i].mean(dtype=torch.float), 2)
 
-        isadd_(1)
+        inp.add_(1)
         graph.replay()
 
         for i in range(len(reconstructed_tensors)):
