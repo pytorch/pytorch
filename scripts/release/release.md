@@ -237,14 +237,8 @@ The full release compatibility matrix matrix can be found in [release.md](https:
 * AOTInductor: ABI-compatible mode code generation. In order to guarantee ABI backward compatibility, we have carefully defined a set of stable C interfaces in libtorch and make sure AOTInductor generates code that only refers to the specific set of APIs and nothing else in libtorch. We will keep the set of C APIs stable across Pytorch versions and thus provide BC guarantees for AOTInductor-compiled models.
 * `export.export_for_inference` and `export.exported_program.core_aten_decompositions` API. `export_for_inference` returns a functional, post-dispatch ATen IR. ([#135912](https://github.com/pytorch/pytorch/pull/135912)).
 
-### Miscellaneous
-
-* Enable forward AD in `functional.affine_grid` ([#135494](https://github.com/pytorch/pytorch/pull/135494))
-* Added SVE support for ARM CPUs ([#119571](https://github.com/pytorch/pytorch/pull/119571))
-* User buffer registration via MemPool API ([#133603](https://github.com/pytorch/pytorch/pull/133603))
-* Add in_order flag for data loader, allowing out-of-order dataloading ([#141833](https://github.com/pytorch/pytorch/pull/141833))
-
 ### Inductor
+
 
 * Move stack allocation related configs in AOTI ([#139093](https://github.com/pytorch/pytorch/pull/139093)). All configs now have a aot_inductor prefix, so `config.use_minimal_arrayref_interface` is now `config.aot_inductor.use_minimal_arrayref_interface` and `config.allow_stack_allocation` is now `config.aot_inductor.allow_stack_allocation`.
 * Move `torch._utils.is_compiling` to `torch.compiler.is_compiling` ([#127690](https://github.com/pytorch/pytorch/pull/127690)) Rewrite `torch._utils.is_compiling()` to `torch.compiler.is_compiling()`.
@@ -315,6 +309,14 @@ The full release compatibility matrix matrix can be found in [release.md](https:
 * Add `torch.xpu.get_arch_list` and `torch.xpu.get_gencode_flags`: Introduces new APIs to retrieve architecture lists and code generation flags for XPU. ([#137773](https://github.com/pytorch/pytorch/pull/137773))
 * Add quantized convolution support for XPU backend ([#133080](https://github.com/pytorch/pytorch/pull/133080))
 * Enable XPU device support for LSTMCell operators ([#140246](https://github.com/pytorch/pytorch/pull/140246))
+
+
+### Miscellaneous
+
+* Enable forward AD in `functional.affine_grid` ([#135494](https://github.com/pytorch/pytorch/pull/135494))
+* Added SVE support for ARM CPUs ([#119571](https://github.com/pytorch/pytorch/pull/119571))
+* User buffer registration via MemPool API ([#133603](https://github.com/pytorch/pytorch/pull/133603))
+* Add in_order flag for data loader, allowing out-of-order dataloading ([#141833](https://github.com/pytorch/pytorch/pull/141833))
 
 
 ## **Improvements**
