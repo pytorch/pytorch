@@ -56,7 +56,12 @@ def _check_compile_cudagraph(test_case, fn, args):
     # So we need to get to iteration 3 to test all ways of running.
     outputs = []
     for i in range(3):
-        outputs.append(cudagraphs_compiled_fn(*args).clone())
+        outputs.append(
+            pytree.tree_map(
+                lambda x: x.clone() if isinstance(x, torch.Tensor) else x,
+                cudagraphs_compiled_fn(*args),
+            )
+        )
     eager_res = fn(*args)
     for output in outputs:
         test_case.assertEqual(eager_res, output)

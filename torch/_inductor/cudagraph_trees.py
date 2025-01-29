@@ -65,8 +65,8 @@ from torch import Tensor
 from torch._dynamo.mutation_guard import GenerationTracker
 from torch._dynamo.utils import counters, dynamo_timed, preserve_rng_state
 from torch._higher_order_ops.cudagraph_conditional_nodes import (
-    CUDAGraphCaptureControlFlowOpDispatchMode,
     ControlFlowOpWarmupDispatchMode,
+    CUDAGraphCaptureControlFlowOpDispatchMode,
 )
 from torch._inductor.compile_fx import (
     align_inputs_from_check_idxs,

@@ -397,21 +397,21 @@ void CUDAGraph::begin_capture_to_if_node(
       !has_graph_exec_,
       "begin_capture_to_if_node() must be called before capture_begin()");
 
-  cudaStreamCaptureStatus status;
-  cudaGraph_t currently_capturing_graph;
+  cudaStreamCaptureStatus status{};
+  cudaGraph_t currently_capturing_graph{};
   AT_CUDA_CHECK(cudaStreamGetCaptureInfo(
       getCurrentCUDAStream(), &status, nullptr, &currently_capturing_graph));
   TORCH_CHECK(
       status == cudaStreamCaptureStatusActive,
       "capture_begin() must be called before begin_capture_to_if_node()");
-  cudaGraphConditionalHandle handle;
+  cudaGraphConditionalHandle handle{};
   AT_CUDA_CHECK(cudaGraphConditionalHandleCreate(
       &handle, currently_capturing_graph, 0, 0));
 
   set_conditional_handle(handle, scalar_cuda_pred_tensor);
 
-  const cudaGraphNode_t* dependencies;
-  size_t num_dependencies;
+  const cudaGraphNode_t* dependencies{};
+  size_t num_dependencies = 0;
   AT_CUDA_CHECK(cudaStreamGetCaptureInfo(
       getCurrentCUDAStream(),
       &status,
@@ -427,7 +427,7 @@ void CUDAGraph::begin_capture_to_if_node(
   params.conditional.type = cudaGraphCondTypeIf;
   params.conditional.size = 1;
 
-  cudaGraphNode_t cond_node;
+  cudaGraphNode_t cond_node{};
   AT_CUDA_CHECK(cudaGraphAddNode(
       &cond_node,
       currently_capturing_graph,
@@ -478,21 +478,21 @@ void CUDAGraph::begin_capture_to_if_node(
 cudaGraphConditionalHandle CUDAGraph::begin_capture_to_while_loop_node(
     const at::Tensor& scalar_cuda_pred_tensor) {
 #if !defined(USE_ROCM) && (defined(CUDA_VERSION) && CUDA_VERSION >= 12040)
-  cudaStreamCaptureStatus status;
-  cudaGraph_t currently_capturing_graph;
+  cudaStreamCaptureStatus status{};
+  cudaGraph_t currently_capturing_graph{};
   AT_CUDA_CHECK(cudaStreamGetCaptureInfo(
       getCurrentCUDAStream(), &status, nullptr, &currently_capturing_graph));
   TORCH_CHECK(
       status == cudaStreamCaptureStatusActive,
       "capture_begin() must be called before begin_capture_to_while_loop_node()");
-  cudaGraphConditionalHandle handle;
+  cudaGraphConditionalHandle handle{};
   AT_CUDA_CHECK(cudaGraphConditionalHandleCreate(
       &handle, currently_capturing_graph, 0, 0));
 
   set_conditional_handle(handle, scalar_cuda_pred_tensor);
 
-  const cudaGraphNode_t* dependencies;
-  size_t num_dependencies;
+  const cudaGraphNode_t* dependencies{};
+  size_t num_dependencies = 0;
   AT_CUDA_CHECK(cudaStreamGetCaptureInfo(
       getCurrentCUDAStream(),
       &status,
@@ -508,7 +508,7 @@ cudaGraphConditionalHandle CUDAGraph::begin_capture_to_while_loop_node(
   params.conditional.type = cudaGraphCondTypeWhile;
   params.conditional.size = 1;
 
-  cudaGraphNode_t cond_node;
+  cudaGraphNode_t cond_node{};
   AT_CUDA_CHECK(cudaGraphAddNode(
       &cond_node,
       currently_capturing_graph,
@@ -574,7 +574,7 @@ void CUDAGraph::end_capture_to_conditional_node() {
   }
 
   CUDAStream stream = conditional_node_streams_.top().first.current_stream();
-  cudaGraph_t graph;
+  cudaGraph_t graph{};
   AT_CUDA_CHECK(cudaStreamEndCapture(stream.stream(), &graph));
   descendent_graphs_.push_back(graph);
   conditional_node_streams_.pop();
@@ -606,9 +606,9 @@ std::function<bool(cudaStream_t)> CUDAGraph::create_allocate_filter() {
 
 std::function<bool(cudaStream_t)> CUDAGraph::create_child_allocate_filter() {
 #if !defined(USE_ROCM) && (defined(CUDA_VERSION) && CUDA_VERSION >= 12040)
-  return [this, &current_capture_id = conditional_graph_capture_streams_ids_.top()](cudaStream_t stream) {
-      cudaStreamCaptureStatus status;
-      CaptureId_t stream_capture_id;
+  return [&current_capture_id = conditional_graph_capture_streams_ids_.top()](cudaStream_t stream) {
+      cudaStreamCaptureStatus status{};
+      CaptureId_t stream_capture_id{};
       AT_CUDA_CHECK(cudaStreamGetCaptureInfo(stream, &status, &stream_capture_id));
       return status == cudaStreamCaptureStatus::cudaStreamCaptureStatusActive && stream_capture_id == current_capture_id;
   };

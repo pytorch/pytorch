@@ -78,8 +78,6 @@ class TestControlFlowInCUDAGraphInitialization(TestCase):
 
         self.assertFalse(torch._C._cuda_hasPrimaryContext(0))
 
-        g = torch.cuda.CUDAGraph()
-
         pred = torch.tensor(True, device="cuda")
         x = torch.ones(1024 * 1024, device="cuda")
 

@@ -133,7 +133,7 @@ struct TORCH_CUDA_CPP_API CUDAGraph {
   static constexpr c10::DeviceIndex UNDEFINED_DEVICE = -1;
   c10::DeviceIndex capture_dev_{UNDEFINED_DEVICE};
 
-  cudaStreamCaptureMode capture_mode_;
+  cudaStreamCaptureMode capture_mode_{};
 
 #if !defined(USE_ROCM) && (defined(CUDA_VERSION) && CUDA_VERSION >= 12040)
   std::stack<std::pair<at::cuda::CUDAStreamGuard, UniquePtrExternalCudaStream>>
