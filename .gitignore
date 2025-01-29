@@ -338,6 +338,8 @@ xla/
 .env
 .envrc
 .psenvrc
+.venv
+.venv/
 
 # generated shellcheck directories
 .shellcheck_generated*/
@@ -366,6 +368,7 @@ third_party/glog/
 
 # Virtualenv
 venv/
+.venv/
 
 # Log files
 *.log
