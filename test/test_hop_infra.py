@@ -45,7 +45,12 @@ class TestHOPInfra(TestCase):
         )
 
     def test_all_hops_are_imported(self):
-        """All HOPs should be listed in torch._higher_order_ops.__all__"""
+        """All HOPs should be listed in torch._higher_order_ops.__all__
+
+        Some constraints (see test_testing.py::TestImports)
+        - Sympy must be lazily imported
+        - Dynamo must be lazily imported
+        """
         imported_hops = torch._higher_order_ops.__all__
         registered_hops = torch._ops._higher_order_ops.keys()
 
@@ -63,6 +68,9 @@ class TestHOPInfra(TestCase):
             "map",
             "custom_function_call",
             "trace_wrapped",
+            "triton_kernel_wrapper_functional",
+            "triton_kernel_wrapper_mutation",
+            "wrap",  # Really weird failure -- importing this causes Dynamo to choke on checkpoint
         }
         not_imported_hops = registered_hops - imported_hops
         not_imported_hops = not_imported_hops - FIXME_ALLOWLIST

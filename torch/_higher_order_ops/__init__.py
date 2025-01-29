@@ -19,14 +19,9 @@ from torch._higher_order_ops.run_const_graph import run_const_graph
 from torch._higher_order_ops.scan import scan
 from torch._higher_order_ops.strict_mode import strict_mode
 from torch._higher_order_ops.torchbind import call_torchbind
-from torch._higher_order_ops.triton_kernel_wrap import (
-    triton_kernel_wrapper_functional,
-    triton_kernel_wrapper_mutation,
-)
 from torch._higher_order_ops.while_loop import while_loop
 from torch._higher_order_ops.wrap import (
     tag_activation_checkpoint,
-    wrap,
     wrap_activation_checkpoint,
     wrap_with_autocast,
     wrap_with_set_grad_enabled,
@@ -40,8 +35,6 @@ __all__ = [
     "scan",
     "flex_attention",
     "flex_attention_backward",
-    "triton_kernel_wrapper_mutation",
-    "triton_kernel_wrapper_functional",
     "hints_wrapper",
     "PrimHOPBase",
     "foreach_map",
@@ -55,7 +48,6 @@ __all__ = [
     "executorch_call_delegate",
     "call_torchbind",
     "run_const_graph",
-    "wrap",
     "wrap_with_set_grad_enabled",
     "wrap_with_autocast",
     "wrap_activation_checkpoint",
