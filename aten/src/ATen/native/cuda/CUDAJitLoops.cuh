@@ -135,6 +135,9 @@ void launch_jitted_vectorized_kernel(
   const auto input_size = c10::scalarTypeToTypeMeta(desc.f_inputs_type).itemsize();
   const int optimal_vec_size = 16 / static_cast<int>(input_size);
   vec_size = std::min<int>(optimal_vec_size, vec_size);
+  // Here we purposely omit vec8 for 1-byte data because of a bug in NVCC
+  // that causes some numerical mismatches with uint8 on sm80 and sm90.
+  // TODO: Revisit this after CUDA 12.8 update.
   if (input_size < 2) {
     vec_size = std::min<int>(vec_size, 4);
   }

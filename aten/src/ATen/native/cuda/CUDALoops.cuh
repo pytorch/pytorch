@@ -209,6 +209,9 @@ static inline void launch_vectorized_kernel(
   const uint16_t max_vec_size = memory::can_vectorize_up_to<func_t>(data);
   uint16_t vec_size = 16 / static_cast<uint16_t>(sizeof(cpp_type));
   vec_size = std::min<uint16_t>(vec_size, max_vec_size);
+  // Here we purposely omit vec8 for 1-byte data because of a bug in NVCC
+  // that causes some numerical mismatches with uint8 on sm80 and sm90.
+  // TODO: Revisit this after CUDA 12.8 update.
   if (sizeof(cpp_type) < 2) {
     vec_size = std::min<uint16_t>(vec_size, 4);
   }
