@@ -27,7 +27,7 @@ Below you can find a small example showcasing this::
 
     cuda = torch.device('cuda')     # Default CUDA device
     cuda0 = torch.device('cuda:0')
-    cuda2 = torch.device('cuda:2')  # GPU 2 (these are 0-indexed)
+    cuda2 = torch.device('cuda:1')  # GPU 2 (these are 0-indexed)
 
     x = torch.tensor([1., 2.], device=cuda0)
     # x.device is device(type='cuda', index=0)
