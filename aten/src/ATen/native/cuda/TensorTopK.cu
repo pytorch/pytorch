@@ -332,7 +332,11 @@ __global__ void radixFindKthValues(
   // if blocks_per_slice == 1, there is no need to do cross-block reduction
   // in this case we use counts saved at registers directly
   if (blocks_per_slice > 1) {
+#if defined(USE_ROCM)
+    __builtin_amdgcn_fence(__ATOMIC_RELEASE, "agent"); // make sure writes are globally visible
+#else
     __threadfence(); // make sure writes are globally visible
+#endif
     __syncthreads(); // make sure all writes are finished before update semaphores
   }
 
@@ -356,7 +360,11 @@ __global__ void radixFindKthValues(
   // accumulates counters from multiple blocks
   if (tidx < RADIX_DIGITS && blocks_per_slice > 1) {
     // the reading thread needs to complete acquire pattern
+#if defined(USE_ROCM)
+    __builtin_amdgcn_fence(__ATOMIC_ACQUIRE, "agent");
+#else
     __threadfence();
+#endif
     digit_count = 0;
     for (int blk = 0; blk < blocks_per_slice; ++blk) {
       digit_count += counts[(slice_idx * blocks_per_slice + blk) * RADIX_DIGITS + tidx];
@@ -614,17 +622,8 @@ int get_items_per_thread(uint64_t num_slices, uint64_t slice_size) {
   constexpr int REGS_PER_BLOCK = REGS_PER_THREAD * BLOCK_THREADS;
   cudaDeviceProp* prop = at::cuda::getCurrentDeviceProperties();
   int mpc = prop->multiProcessorCount;
-#if defined(USE_ROCM)
-  int regs_per_mp = prop->regsPerBlock;
-  int max_blocks_per_mp = 32;
-#else
   int regs_per_mp = prop->regsPerMultiprocessor;
-#if !defined(USE_ROCM)
   int max_blocks_per_mp = prop->maxBlocksPerMultiProcessor;
-#else
-  int max_blocks_per_mp = 32;
-#endif
-#endif
   int blocks_per_mp = std::min(regs_per_mp / REGS_PER_BLOCK, max_blocks_per_mp);
   int64_t items_per_thread = at::ceil_div((int64_t)(slice_size * num_slices), (int64_t)(mpc * blocks_per_mp * BLOCK_THREADS));
   items_per_thread = std::max(MIN_ITEMS_PER_THREAD, std::min((int)items_per_thread, MAX_ITEMS_PER_THREAD)); // clamp to (4, 64)
