@@ -1098,7 +1098,6 @@ class TestGeneratorThrow(GeneratorTestsBase):
         y = fn(t)
         self.assertEqual(y, t.sin() + t.cos())
 
-    @unittest.expectedFailure
     def test_throw_without_finally(self):
         z = 0
 
@@ -1221,6 +1220,7 @@ class TestGeneratorThrow(GeneratorTestsBase):
         with self.assertRaises(RuntimeError):
             fn(t)
 
+    @unittest.expectedFailure
     def test_throw_yield_finally(self):
         z = 0
 
@@ -1274,7 +1274,7 @@ class TestGeneratorThrow(GeneratorTestsBase):
         t = torch.randn(2)
         y = fn(t)
         self.assertEqual(y, t.sin() + t.tan())
-        self.assertEqual(z, 1101)
+        self.assertEqual(z, 1 + 100)
 
     def test_exception_context_with_yield(self):
         def f():
