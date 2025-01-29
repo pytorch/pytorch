@@ -320,6 +320,13 @@ def autograd_cache_key(
     """
     check_cacheable(gm)
     if has_triton_package():
+        # Due to https://github.com/triton-lang/triton/issues/3729,
+        # if triton is < 3.2.0, AOTAutogradCache may cause us to
+        # attempt to load a cache entry without initializing
+        # the CUDA context on the autograd thread.
+
+        # Without caching, we naturally do this initialization when
+        # tracing through the graph with the autograd engine.
         import triton
 
         if triton.__version__ < "3.2.0":
