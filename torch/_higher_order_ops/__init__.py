@@ -1,4 +1,11 @@
+from torch._higher_order_ops.associative_scan import associative_scan
+from torch._higher_order_ops.auto_functionalize import (
+    auto_functionalized,
+    auto_functionalized_v2,
+)
 from torch._higher_order_ops.cond import cond
+from torch._higher_order_ops.effects import with_effects
+from torch._higher_order_ops.executorch_call_delegate import executorch_call_delegate
 from torch._higher_order_ops.flex_attention import (
     flex_attention,
     flex_attention_backward,
@@ -6,9 +13,24 @@ from torch._higher_order_ops.flex_attention import (
 from torch._higher_order_ops.foreach_map import _foreach_map, foreach_map
 from torch._higher_order_ops.hints_wrap import hints_wrapper
 from torch._higher_order_ops.invoke_subgraph import invoke_subgraph
+from torch._higher_order_ops.out_dtype import out_dtype
 from torch._higher_order_ops.prim_hop_base import PrimHOPBase
+from torch._higher_order_ops.run_const_graph import run_const_graph
 from torch._higher_order_ops.scan import scan
+from torch._higher_order_ops.strict_mode import strict_mode
+from torch._higher_order_ops.torchbind import call_torchbind
+from torch._higher_order_ops.triton_kernel_wrap import (
+    triton_kernel_wrapper_functional,
+    triton_kernel_wrapper_mutation,
+)
 from torch._higher_order_ops.while_loop import while_loop
+from torch._higher_order_ops.wrap import (
+    tag_activation_checkpoint,
+    wrap,
+    wrap_activation_checkpoint,
+    wrap_with_autocast,
+    wrap_with_set_grad_enabled,
+)
 
 
 __all__ = [
@@ -18,8 +40,24 @@ __all__ = [
     "scan",
     "flex_attention",
     "flex_attention_backward",
+    "triton_kernel_wrapper_mutation",
+    "triton_kernel_wrapper_functional",
     "hints_wrapper",
     "PrimHOPBase",
     "foreach_map",
     "_foreach_map",
+    "with_effects",
+    "tag_activation_checkpoint",
+    "auto_functionalized",
+    "auto_functionalized_v2",
+    "associative_scan",
+    "out_dtype",
+    "executorch_call_delegate",
+    "call_torchbind",
+    "run_const_graph",
+    "wrap",
+    "wrap_with_set_grad_enabled",
+    "wrap_with_autocast",
+    "wrap_activation_checkpoint",
+    "strict_mode",
 ]
