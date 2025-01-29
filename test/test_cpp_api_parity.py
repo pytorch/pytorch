@@ -78,9 +78,7 @@ assert (
     == 4
 )
 
-module_impl_check.build_cpp_tests(
-    TestCppApiParity, print_cpp_source=PRINT_CPP_SOURCE
-)
+module_impl_check.build_cpp_tests(TestCppApiParity, print_cpp_source=PRINT_CPP_SOURCE)
 functional_impl_check.build_cpp_tests(
     TestCppApiParity, print_cpp_source=PRINT_CPP_SOURCE
 )
