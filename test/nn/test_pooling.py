@@ -1026,8 +1026,12 @@ torch.cuda.synchronize()
             model = torch.nn.MaxPool1d(*args)
             if isinstance(x, list):
                 x = torch.tensor(x, device=device, dtype=dtype)
+            if isinstance(expected, str):
+                with self.assertRaisesRegex(RuntimeError, expected):
+                    model(x)
+            else:
                 expected = torch.tensor(expected, device=device, dtype=dtype)
-            self.assertEqual(model(x), expected)
+                self.assertEqual(model(x), expected)
 
         # Pooling args: (kernel_size, stride, padding, dilation, return_indices, ceil_mode)
         check([[1]], (1, None, 0, 1, False, False), [[1]])
@@ -1039,6 +1043,11 @@ torch.cuda.synchronize()
         )
         check([[1, 2]], (2, 1, 1, 2, False, False), [[2, 1]])
         check([[1, 2]], (2, 2, 1, 2, False, True), [[2, 2]])
+        check(
+            [[1, 2]],
+            (8608480567731124087, None, 1250999896764, 1250999896764, False, True),
+            r"max_pool1d\(\) Invalid stride",
+        )
 
     @onlyCPU
     @dtypes(torch.float, torch.double)
