@@ -74,8 +74,8 @@ class AssociativeScanOp(HigherOrderOperator):
     def __init__(self):
         super().__init__("associative_scan")
 
-    def __call__(self, combine_fn, xs, dim, additional_inputs):
-        return super().__call__(combine_fn, xs, dim, additional_inputs)
+    def __call__(self, combine_fn, xs, additional_inputs):
+        return super().__call__(combine_fn, xs, additional_inputs)
 
 
 associative_scan_op = AssociativeScanOp()
@@ -165,11 +165,13 @@ def associative_scan(
         leaves = [torch.flip(elem, [dim]) for elem in leaves]
 
     ndim = leaves[0].ndim
-    dim = utils.canonicalize_dim(ndim, dim)
+    orig_scan_dim = utils.canonicalize_dim(ndim, dim)
+    # leaves = [torch.movedim(elem, dim, 0) for elem in leaves]
+    leaves = [torch.movedim(elem, dim, 0) for elem in leaves]
 
     # Call the combine_fn with only a slice along the scan dim
     # and check whether the output leaves have the same slice dimensions
-    sliced_leaves = [first_slice_copy(leaf, dim) for leaf in leaves]
+    sliced_leaves = [first_slice_copy(leaf) for leaf in leaves]
 
     out = combine_fn(
         pytree.tree_unflatten(sliced_leaves, spec),
@@ -214,17 +216,15 @@ def associative_scan(
             combine_fn=torch.vmap(
                 combine_fn,
                 in_dims=(
-                    pytree.tree_unflatten([dim] * len(leaves), spec),
-                    pytree.tree_unflatten([dim] * len(leaves), spec),
+                    pytree.tree_unflatten([0] * len(leaves), spec),
+                    pytree.tree_unflatten([0] * len(leaves), spec),
                 ),
-                out_dims=dim,
+                out_dims=0,
             ),
             spec=spec,
             num_leaves=len(leaves),
         )
-        result_flat = generic_associative_scan(
-            combine_fn, leaves, dim, additional_inputs=[]
-        )
+        result_flat = generic_associative_scan(combine_fn, leaves, additional_inputs=[])
     else:
         combine_fn = functools.partial(
             wrap_combine_fn_flat,
@@ -232,10 +232,13 @@ def associative_scan(
             spec=spec,
             num_leaves=len(leaves),
         )
-        result_flat = associative_scan_op(combine_fn, leaves, dim, additional_inputs=[])
+        result_flat = associative_scan_op(combine_fn, leaves, additional_inputs=[])
 
     if reverse:
-        result_flat = [torch.flip(elem, [dim]) for elem in result_flat]
+        result_flat = [torch.flip(elem, [0]) for elem in result_flat]
+
+    # result_flat = [torch.movedim(elem, 0, orig_scan_dim) for elem in result_flat]
+    result_flat = [torch.movedim(elem, 0, orig_scan_dim) for elem in result_flat]
 
     return pytree.tree_unflatten(result_flat, spec)
 
@@ -346,11 +349,10 @@ def trace_associative_scan(
     func_overload,
     combine_fn: Callable,
     xs: list[torch.Tensor],
-    dim: int,
     additional_inputs: list[torch.Tensor],
 ):
     with disable_proxy_modes_tracing():
-        sample_xs = [first_slice_copy(x, dim) for x in itertools.chain(xs, xs)]
+        sample_xs = [first_slice_copy(x) for x in itertools.chain(xs, xs)]
         combine_graph = reenter_make_fx(combine_fn)(*sample_xs, *additional_inputs)
 
     outputs = None
@@ -381,7 +383,7 @@ def trace_associative_scan(
 
     proxy_mode.tracer.root.register_module(combine_graph_name, combine_graph)
 
-    args = (combine_graph, xs, dim, additional_inputs)
+    args = (combine_graph, xs, additional_inputs)
     proxy_args = pytree.tree_map(proxy_mode.tracer.unwrap_proxy, args)
     out_proxy = proxy_mode.tracer.create_proxy(
         "call_function", func_overload, proxy_args, {}, name="associative_scan"
@@ -394,8 +396,8 @@ def trace_associative_scan(
 
 
 @associative_scan_op.py_impl(DispatchKey.CompositeExplicitAutograd)
-def associative_scan_op_dense(combine_fn, xs, dim, additional_inputs):
-    return generic_associative_scan(combine_fn, xs, dim, additional_inputs)
+def associative_scan_op_dense(combine_fn, xs, additional_inputs):
+    return generic_associative_scan(combine_fn, xs, additional_inputs)
 
 
 associative_scan_op.py_impl(DispatchKey.Autograd)(
@@ -404,22 +406,21 @@ associative_scan_op.py_impl(DispatchKey.Autograd)(
 
 
 @associative_scan_op.py_impl(ProxyTorchDispatchMode)
-def associative_scan_proxy_mode(mode, combine_fn, xs, dim, additional_inputs):
+def associative_scan_proxy_mode(mode, combine_fn, xs, additional_inputs):
     return trace_associative_scan(
-        mode, associative_scan_op, combine_fn, xs, dim, additional_inputs
+        mode, associative_scan_op, combine_fn, xs, additional_inputs
     )
 
 
 @associative_scan_op.py_impl(FakeTensorMode)
-def assoiciative_scan_fake_tensor_mode(mode, combine_fn, xs, dim, additional_inputs):
+def assoiciative_scan_fake_tensor_mode(mode, combine_fn, xs, additional_inputs):
     with mode:
         return [x.clone() for x in xs]
 
 
 @associative_scan_op.py_functionalize_impl
-def associative_scan_functionalize(ctx, combine_fn, xs, dim, additional_inputs):
+def associative_scan_functionalize(ctx, combine_fn, xs, additional_inputs):
     unwrapped_xs = ctx.unwrap_tensors(xs)
-    unwrapped_dim = ctx.unwrap_tensors(dim)
     unwrapped_additional_inputs = ctx.unwrap_tensors(additional_inputs)
     with ctx.redispatch_to_next():
         functional_combine_fn = ctx.functionalize(
@@ -428,7 +429,6 @@ def associative_scan_functionalize(ctx, combine_fn, xs, dim, additional_inputs):
         ret = associative_scan_op(
             functional_combine_fn,
             unwrapped_xs,
-            unwrapped_dim,
             unwrapped_additional_inputs,
         )
     return ctx.wrap_tensors(ret)
