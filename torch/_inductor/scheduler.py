@@ -2664,6 +2664,9 @@ class Scheduler:
             for n in node_list
         )
 
+    # Disable CUBIN saving when measuring fusion speedups.  Saving to disk introduces
+    # arbitrary slowdowns that bias benchmark results.
+    @config.patch("triton.store_cubin", False)
     def speedup_by_fusion(
         self, node1: BaseSchedulerNode, node2: BaseSchedulerNode
     ) -> Union[bool, Callable[[], bool]]:
