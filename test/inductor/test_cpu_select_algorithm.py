@@ -127,6 +127,14 @@ def _get_epilogue(epilogue: str, other: Optional[torch.Tensor] = None):
         return lambda x: x / other
 
 
+class SliceMaker:
+    def __getitem__(self, item):
+        return item
+
+
+slice_maker = SliceMaker()
+
+
 class BaseTestSelectAlgorithm(TestCase):
     def _check_amx_counter(self, vec_amx):
         if vec_amx:
@@ -2299,6 +2307,52 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
             self.assertEqual(actual, expected, atol=atol, rtol=rtol)
         self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 2)
 
+    @patches
+    @torch.no_grad
+    @unittest.skipIf(not TEST_MKL, "Test requires MKL")
+    @parametrize(
+        "slices",
+        (
+            ((1, 4, 64, 64), slice_maker[:, 1:]),  # Contiguous slice, dynamic offset
+            ((4, 64, 64), slice_maker[1:]),  # Contiguous slice, same length
+            ((3, 4, 64, 64), slice_maker[2, :3]),  # Contiguous slice of weights
+            ((3, 4, 64, 64), slice_maker[2, 1:]),  # Contiguous slice of weights
+            ((3, 4, 65, 64), slice_maker[:, 2, :64]),  # Non-contigous slice of weights
+            ((3, 64, 64), slice_maker[:]),  # Contigous non-slice of weights
+        ),
+    )
+    @dtypes(torch.float)
+    def test_weight_offset(self, slices, dtype):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, x, w):
+                return x @ w[slices[-1]]
+
+        counters.clear()
+        x_shape = (3, 64, 64)
+        w_shape = slices[-2]
+        x = torch.randn(x_shape).to(dtype=dtype)
+        w = torch.randn(w_shape).to(dtype=dtype)
+        if isinstance(self, _DynamicShapesTestBase):
+            if len(w_shape) == 4:
+                torch._dynamo.mark_dynamic(w, 0)
+                torch._dynamo.mark_dynamic(w, 1)
+                torch._dynamo.mark_static(w, 2)
+                torch._dynamo.mark_static(w, 3)
+            elif len(w_shape) == 3:
+                torch._dynamo.mark_dynamic(w, 0)
+                torch._dynamo.mark_static(w, 1)
+                torch._dynamo.mark_static(w, 2)
+            torch._dynamo.mark_dynamic(x, 0)
+            torch._dynamo.mark_static(x, 1)
+            torch._dynamo.mark_static(x, 2)
+        mod = M().to(dtype=dtype).eval()
+        with verify(dtype) as (atol, rtol), torch.no_grad():
+            self.common(mod, (x, w), atol=atol, rtol=rtol)
+        self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 1)
+
 
 @dynamo_config.patch({"dynamic_shapes": True, "assume_static_by_default": False})
 class _DynamicShapesTestBase(BaseTestSelectAlgorithm):
@@ -2341,6 +2395,7 @@ class TestSelectAlgorithmDynamicShapes(_DynamicShapesTestBase):
     test_linear_thread_factors_dynamic_shapes = (
         TestSelectAlgorithm.test_linear_thread_factors
     )
+    test_weight_offset_dynamic_shapes = TestSelectAlgorithm.test_weight_offset
 
     @patches
     @torch.no_grad
