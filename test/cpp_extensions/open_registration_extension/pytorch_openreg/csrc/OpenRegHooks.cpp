@@ -2,14 +2,18 @@
 
 #include <ATen/detail/PrivateUse1HooksInterface.h>
 #include <c10/core/impl/DeviceGuardImplInterface.h>
+#include "ATen/CPUGeneratorImpl.h"
+#include "ATen/core/GeneratorForPrivateuseone.h"
+#include "c10/core/Device.h"
+#include <c10/util/CallOnce.h>
 
 #include <iostream>
 
 namespace openreg {
 
 namespace {
-// Python dictionary where real implementations can be found
-PyObject* py_registry;
+// Python factory function where real implementations can be found
+PyObject* py_factory;
 
 using host_ptr_t = uint64_t;
 
@@ -47,6 +51,40 @@ struct HostAllocator final : at::Allocator {
 };
 static HostAllocator global_host_alloc;
 
+static c10::DeviceIndex device_count() {
+  py::gil_scoped_acquire acquire;
+  return get_method("deviceCount")().cast<c10::DeviceIndex>();
+}
+
+static c10::DeviceIndex current_device_idx() {
+  py::gil_scoped_acquire acquire;
+  return get_method("getDevice")().cast<c10::DeviceIndex>();
+}
+
+class OpenRegGeneratorImpl : public at::CPUGeneratorImpl {
+ public:
+  OpenRegGeneratorImpl(c10::DeviceIndex device_index) {
+    device_ = c10::Device(c10::DeviceType::PrivateUse1, device_index);
+    key_set_ = c10::DispatchKeySet(c10::DispatchKey::PrivateUse1);
+  }
+  ~OpenRegGeneratorImpl() override = default;
+};
+
+static at::Generator make_openreg_generator(c10::DeviceIndex device_index) {
+  return at::make_generator<OpenRegGeneratorImpl>(device_index);
+}
+
+// Default, global generators, one per device.
+static std::vector<at::Generator> default_generators;
+
+static void initGenerators() {
+  auto deivce_nums = device_count();
+  default_generators.resize(deivce_nums);
+  for (auto i = 0; i < deivce_nums; i++) {
+    default_generators[i] = make_openreg_generator(i);
+    default_generators[i].seed();
+  }
+}
 
 // C++ hooks implementation
 struct OpenRegHooksArgs : public at::PrivateUse1HooksArgs {};
@@ -67,6 +105,23 @@ struct OpenRegHooksInterface : public at::PrivateUse1HooksInterface {
   bool isPinnedPtr(const void* data) const override {
     py::gil_scoped_acquire acquire;
     return get_method("isPinnedPtr")(reinterpret_cast<host_ptr_t>(data)).cast<bool>();
+  }
+
+  const at::Generator& getDefaultGenerator(
+      c10::DeviceIndex device_index) const override {
+    static c10::once_flag generator_init_flag;
+    c10::call_once(generator_init_flag, initGenerators);
+    c10::DeviceIndex idx = device_index;
+    if (idx == -1) {
+      idx = current_device_idx();
+    } else {
+      TORCH_CHECK(idx >= 0 && idx < device_count());
+    }
+    return default_generators[idx];
+  }
+
+  at::Generator getNewGenerator(c10::DeviceIndex device_index) const override {
+    return make_openreg_generator(device_index);
   }
 };
 
@@ -111,9 +166,7 @@ struct OpenRegGuardImpl final : public c10::impl::DeviceGuardImplInterface {
    * Get the current device.
    */
   c10::Device getDevice() const override {
-    py::gil_scoped_acquire acquire;
-    auto device = get_method("getDevice")().cast<c10::DeviceIndex>();
-    return c10::Device(static_type, device);
+    return c10::Device(static_type, current_device_idx());
   }
 
   /**
@@ -235,8 +288,7 @@ struct OpenRegGuardImpl final : public c10::impl::DeviceGuardImplInterface {
    * you should report that there are zero available devices.
    */
   c10::DeviceIndex deviceCount() const noexcept override {
-    py::gil_scoped_acquire acquire;
-    return get_method("deviceCount")().cast<c10::DeviceIndex>();
+    return device_count();
   }
   /**
    * Return true if all the work previously enqueued on the stream for
@@ -292,15 +344,12 @@ C10_REGISTER_GUARD_IMPL(PrivateUse1, OpenRegGuardImpl);
 } // anonymous namspaces
 
 // Setter for the python dictionary with implementations
-void set_impl_registry(PyObject* registry) {
-  py_registry = registry;
+void set_impl_factory(PyObject* factory) {
+  py_factory = factory;
 }
 
 py::function get_method(const char* name) {
-  auto dict = py::cast<py::dict>(py_registry);
-    TORCH_CHECK(dict.contains(name), "OpenReg registry does not contain ",
-        "an implementation for '", name, "' make sure to add it in the __init__.py "
-      "file and register it.")
-  return dict[name];
+  auto factory = py::cast<py::function>(py_factory);
+  return factory(name);
 }
 } // openreg

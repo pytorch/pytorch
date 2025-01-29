@@ -2,7 +2,7 @@
 import math
 
 import torch
-from torch import inf
+from torch import inf, Tensor
 from torch.distributions import constraints
 from torch.distributions.cauchy import Cauchy
 from torch.distributions.transformed_distribution import TransformedDistribution
@@ -42,11 +42,11 @@ class HalfCauchy(TransformedDistribution):
         return super().expand(batch_shape, _instance=new)
 
     @property
-    def scale(self):
+    def scale(self) -> Tensor:
         return self.base_dist.scale
 
     @property
-    def mean(self):
+    def mean(self) -> Tensor:
         return torch.full(
             self._extended_shape(),
             math.inf,
@@ -55,11 +55,11 @@ class HalfCauchy(TransformedDistribution):
         )
 
     @property
-    def mode(self):
+    def mode(self) -> Tensor:
         return torch.zeros_like(self.scale)
 
     @property
-    def variance(self):
+    def variance(self) -> Tensor:
         return self.base_dist.variance
 
     def log_prob(self, value):

@@ -1,7 +1,7 @@
 # mypy: allow-untyped-defs
 # Copyright (c) Meta Platforms, Inc. and affiliates
 import logging
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Optional
 
 import torch
 from torch.fx.node import map_aggregate
@@ -73,7 +73,7 @@ class TensorChunkSpec:
 
     @staticmethod
     def from_tuple(
-        chunk_dims: Tuple[int, ...],
+        chunk_dims: tuple[int, ...],
     ):
         """
         A helper for creating a tuple of `TensorChunkSpec` from a tuple of chunk
@@ -92,7 +92,7 @@ class TensorChunkSpec:
 
     @staticmethod
     def from_dict(
-        chunk_dims: Dict[str, int],
+        chunk_dims: dict[str, int],
     ):
         """
         A helper for creating a dictionary of `TensorChunkSpec` from a
@@ -224,9 +224,7 @@ def _shard_dict_of_args(
     for chunk_idx in range(real_num_chunks):
         chunk_args = {}
         for key, arg in args_sharded_replicated.items():
-            arg_single_chunk = []
-            for v_flat in arg:
-                arg_single_chunk.append(v_flat[chunk_idx])
+            arg_single_chunk = [v_flat[chunk_idx] for v_flat in arg]
             chunk_args[key] = arg_single_chunk
         chunks_flat.append(chunk_args)
 
@@ -244,12 +242,12 @@ def _shard_dict_of_args(
 
 
 def split_args_kwargs_into_chunks(
-    args: Tuple[Any, ...],
-    kwargs: Optional[Dict[str, Any]],
+    args: tuple[Any, ...],
+    kwargs: Optional[dict[str, Any]],
     chunks: int,
-    args_chunk_spec: Optional[Tuple[TensorChunkSpec, ...]] = None,
-    kwargs_chunk_spec: Optional[Dict[str, TensorChunkSpec]] = None,
-) -> Tuple[List[Tuple], List[Dict]]:
+    args_chunk_spec: Optional[tuple[TensorChunkSpec, ...]] = None,
+    kwargs_chunk_spec: Optional[dict[str, TensorChunkSpec]] = None,
+) -> tuple[list[tuple], list[dict]]:
     """
     Given a sequence of args and kwargs, split them into a number of chunks
     according to  their respective chunking specs.
@@ -340,15 +338,16 @@ def split_args_kwargs_into_chunks(
             f"{len(args_split_dict)}, {len(kwargs_split)}"
         )
 
-    args_split = []
-    for chunk_args in args_split_dict:
-        args_split.append(tuple(chunk_args[i] for i in range(len(chunk_args))))
+    args_split = [
+        tuple(chunk_args[i] for i in range(len(chunk_args)))
+        for chunk_args in args_split_dict
+    ]
 
     return args_split, kwargs_split
 
 
 def merge_chunks(
-    chunks: List[Any],
+    chunks: list[Any],
     chunk_spec,
 ):
     """

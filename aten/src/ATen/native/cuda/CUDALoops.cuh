@@ -28,11 +28,10 @@
 // See BinaryOpsKernel.cu for the complete implementation
 //
 
-#include <iostream>
+#include <array>
 #include <tuple>
 #include <type_traits>
 
-#include <ATen/core/Array.h>
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/detail/FunctionTraits.h>
 #include <ATen/native/TensorIterator.h>
@@ -62,6 +61,7 @@ constexpr auto sum_of_sizes(args_t args, std::index_sequence<Is...>) {
     }
 }
 
+#ifdef USE_ROCM
 template <int io_sizes>
 constexpr auto elems_per_thread(){
   if constexpr (io_sizes == 1) {
@@ -72,19 +72,65 @@ constexpr auto elems_per_thread(){
     return 4;
   }
 }
+#else
+template <int io_sizes>
+constexpr auto elems_per_thread(){
+  if constexpr (io_sizes == 1) {
+    return 16;
+  } else {
+    return 8;
+  }
+}
+#endif
 
 template <int io_sizes>
 constexpr auto io_block_work_size() {
   return num_threads() * elems_per_thread<io_sizes>();
 }
 
+#ifdef USE_ROCM
+template <typename args_t, size_t... Is>
+constexpr auto input_size(args_t args, std::index_sequence<Is...>) {
+  if constexpr (sizeof...(Is) == 0) {
+    return 0;
+  } else {
+    return sizeof(std::tuple_element_t<0, args_t>);
+  }
+}
+
+template <int vec_size, int io_size>
+constexpr auto calc_optimal_vec_size() {
+  static_assert(vec_size != 0);
+  static_assert(io_size != 0);
+  if constexpr (io_size == 1 && vec_size >= 16) {
+    return 16;
+  } else if constexpr (io_size <= 2 && vec_size >= 8) {
+    return 8;
+  } else if constexpr (io_size <= 4 && vec_size >= 4) {
+    return 4;
+  } else if constexpr (vec_size >= 4) {
+    return 4;
+  } else if constexpr (vec_size >= 2) {
+    return 2;
+  } else {
+    return 1;
+  }
+}
+#endif
+
 template <typename func_t>
 constexpr auto calc_io_size(){
   using traits = function_traits<func_t>;
   using args_t = typename traits::ArgsTuple;
+#ifdef USE_ROCM
+  constexpr auto input_size = at::native::input_size(args_t{}, std::make_index_sequence<std::tuple_size_v<args_t>>{});
+  constexpr auto output_size = sizeof(typename traits::result_type);
+  return (input_size > 0) ? ((input_size < output_size) ? input_size : output_size) : output_size;
+#else
   constexpr auto input_size = at::native::sum_of_sizes(args_t{}, std::make_index_sequence<std::tuple_size_v<args_t>>{});
   constexpr auto output_size = sizeof(typename traits::result_type);
   return input_size + output_size;
+#endif
 }
 
 template <int vec_size, typename func_t, typename array_t>
@@ -111,8 +157,13 @@ __global__ void vectorized_elementwise_kernel(int N, func_t f, array_t data) {
     elementwise_kernel_helper(f, policy);
   } else { // if this block has a full `block_work_size` data to handle, use
            // vectorized memory access
+#ifdef USE_ROCM
+    constexpr auto optimal_vec_size = calc_optimal_vec_size<vec_size, io_size>();
+#else
+    constexpr auto optimal_vec_size = vec_size;
+#endif
     elementwise_kernel_helper(
-        f, memory::policies::vectorized<vec_size, array_t, elems_per_thread<io_size>()>(data));
+        f, memory::policies::vectorized<optimal_vec_size, array_t, elems_per_thread<io_size>()>(data));
   }
 }
 
@@ -151,9 +202,33 @@ static inline void launch_vectorized_kernel(
   constexpr auto io_size = calc_io_size<func_t>();
   int64_t grid = (N + io_block_work_size<io_size>() - 1) / io_block_work_size<io_size>();
   auto stream = at::cuda::getCurrentCUDAStream();
+#ifdef USE_ROCM
   int vec_size = memory::can_vectorize_up_to<func_t>(data);
-
+#else
+  using cpp_type = typename function_traits<func_t>::result_type;
+  const uint16_t max_vec_size = memory::can_vectorize_up_to<func_t>(data);
+  uint16_t vec_size = 16 / static_cast<uint16_t>(sizeof(cpp_type));
+  vec_size = std::min<uint16_t>(vec_size, max_vec_size);
+  // Here we purposely omit vec8 for 1-byte data because of a bug in NVCC
+  // that causes some numerical mismatches with uint8 on sm80 and sm90.
+  // TODO: Revisit this after CUDA 12.8 update.
+  if (sizeof(cpp_type) < 2) {
+    vec_size = std::min<uint16_t>(vec_size, 4);
+  }
+#endif
   switch (vec_size) {
+#ifdef USE_ROCM
+    case 16:
+      vectorized_elementwise_kernel<16, func_t, array_t>
+          <<<grid, num_threads(), 0, stream>>>(N, f, data);
+      C10_CUDA_KERNEL_LAUNCH_CHECK();
+      break;
+#endif
+    case 8:
+      vectorized_elementwise_kernel<8, func_t, array_t>
+          <<<grid, num_threads(), 0, stream>>>(N, f, data);
+      C10_CUDA_KERNEL_LAUNCH_CHECK();
+      break;
     case 4:
       vectorized_elementwise_kernel<4, func_t, array_t>
           <<<grid, num_threads(), 0, stream>>>(N, f, data);
@@ -296,7 +371,7 @@ void gpu_kernel_impl_nocast(TensorIteratorBase& iter, const func_t& f) {
   TORCH_INTERNAL_ASSERT(iter.noutputs() == 1);
   TORCH_INTERNAL_ASSERT(!needs_dynamic_casting<func_t>::check(iter));
 
-  at::detail::Array<char*, ntensors> data;
+  std::array<char*, ntensors> data;
   for (int i = 0; i < ntensors; i++) {
     data[i] = (char*)iter.data_ptr(i);
   }
@@ -313,7 +388,7 @@ void gpu_kernel_impl_nocast(TensorIteratorBase& iter, const func_t& f) {
   launch_legacy_kernel<128, unroll_factor>(numel, [=] GPU_LAMBDA(int idx) {
     auto offsets = offset_calc.get(idx);
     arg0_t* out = (arg0_t*)(data[0] + offsets[0]);
-    *out = invoke(f, &data.data[1], &offsets.data[1], 1);
+    *out = invoke(f, &data[1], &offsets[1], 1);
   });
 }
 
@@ -330,7 +405,7 @@ void gpu_kernel_impl(TensorIteratorBase& iter, const func_t& f) {
   TORCH_INTERNAL_ASSERT(iter.ninputs() == traits::arity);
   TORCH_INTERNAL_ASSERT(iter.noutputs() == 1);
 
-  at::detail::Array<char*, ntensors> data;
+  std::array<char*, ntensors> data;
   for (int i = 0; i < ntensors; i++) {
     data[i] = (char*)iter.data_ptr(i);
   }
@@ -341,16 +416,16 @@ void gpu_kernel_impl(TensorIteratorBase& iter, const func_t& f) {
 
   if (contiguous) {
 #ifdef USE_ROCM
-    at::detail::Array<ScalarType, ntensors> dtypes;
+    std::array<ScalarType, ntensors> dtypes;
     auto inner_strides = iter.get_inner_strides();
-    at::detail::Array<int, ntensors> strides;
+    std::array<int, ntensors> strides;
     for (int i = 0; i < ntensors; i++) {
       dtypes[i] = iter.dtype(i);
       strides[i] = inner_strides[i];
     }
     launch_legacy_kernel<512, 1>(numel, [=]GPU_LAMBDA(int idx) {
       void* out = data[0] + strides[0] * idx;
-      arg0_t result = invoke(f, &data.data[1], &strides.data[1], &dtypes.data[1], idx);
+      arg0_t result = invoke(f, &data[1], &strides[1], &dtypes[1], idx);
       c10::cast_and_store<arg0_t>(dtypes[0], out, result);
     });
 #else
@@ -368,7 +443,7 @@ void gpu_kernel_impl(TensorIteratorBase& iter, const func_t& f) {
         storer);
 #endif
   } else {
-    at::detail::Array<ScalarType, ntensors> dtypes;
+    std::array<ScalarType, ntensors> dtypes;
     for (int i = 0; i < ntensors; i++) {
       dtypes[i] = iter.dtype(i);
     }
@@ -376,7 +451,7 @@ void gpu_kernel_impl(TensorIteratorBase& iter, const func_t& f) {
     launch_legacy_kernel<128, 4>(numel, [=] GPU_LAMBDA(int idx) {
       auto offsets = offset_calc.get(idx);
       void* out = data[0] + offsets[0];
-      arg0_t result = invoke(f, &data.data[1], &offsets.data[1], &dtypes.data[1], 1);
+      arg0_t result = invoke(f, &data[1], &offsets[1], &dtypes[1], 1);
       c10::cast_and_store<arg0_t>(dtypes[0], out, result);
     });
   }

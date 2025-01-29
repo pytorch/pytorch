@@ -68,7 +68,7 @@ from pickle import (
 )
 from struct import unpack
 from sys import maxsize
-from typing import Any, Callable, Dict, List, Set, Tuple
+from typing import Any, Callable, Union
 
 import torch
 from torch._utils import IMPORT_MAPPING, NAME_MAPPING
@@ -83,15 +83,15 @@ _blocklisted_modules = [
     "nt",
 ]
 
-_marked_safe_globals_set: Set[Any] = set()
+_marked_safe_globals_set: set[Union[Callable, tuple[Callable, str]]] = set()
 
 
-def _add_safe_globals(safe_globals: List[Any]):
+def _add_safe_globals(safe_globals: list[Union[Callable, tuple[Callable, str]]]):
     global _marked_safe_globals_set
     _marked_safe_globals_set = _marked_safe_globals_set.union(set(safe_globals))
 
 
-def _get_safe_globals() -> List[Any]:
+def _get_safe_globals() -> list[Union[Callable, tuple[Callable, str]]]:
     global _marked_safe_globals_set
     return list(_marked_safe_globals_set)
 
@@ -101,13 +101,15 @@ def _clear_safe_globals():
     _marked_safe_globals_set = set()
 
 
-def _remove_safe_globals(globals_to_remove: List[Any]):
+def _remove_safe_globals(
+    globals_to_remove: list[Union[Callable, tuple[Callable, str]]],
+):
     global _marked_safe_globals_set
     _marked_safe_globals_set = _marked_safe_globals_set - set(globals_to_remove)
 
 
 class _safe_globals:
-    def __init__(self, safe_globals: List[Any]):
+    def __init__(self, safe_globals: list[Union[Callable, tuple[Callable, str]]]):
         self.safe_globals = safe_globals
 
     def __enter__(self):
@@ -125,10 +127,22 @@ class _safe_globals:
 # the dynamic additions to safe_globals would not be picked up by
 # _get_allowed_globals due to the lru_cache
 def _get_user_allowed_globals():
-    rc: Dict[str, Any] = {}
+    rc: dict[str, Any] = {}
     for f in _marked_safe_globals_set:
-        module, name = f.__module__, f.__name__
-        rc[f"{module}.{name}"] = f
+        if isinstance(f, tuple):
+            if len(f) != 2:
+                raise ValueError(
+                    f"Expected tuple of length 2 (global, str of callable full path), but got tuple of length: {len(f)}"
+                )
+            if type(f[1]) is not str:
+                raise TypeError(
+                    f"Expected second item in tuple to be str of callable full path, but got: {type(f[1])}"
+                )
+            f, name = f
+            rc[name] = f
+        else:
+            module, name = f.__module__, f.__name__
+            rc[f"{module}.{name}"] = f
     return rc
 
 
@@ -157,7 +171,7 @@ def _tensor_rebuild_functions():
 # Unpickling machinery
 @_functools.lru_cache(maxsize=1)
 def _get_allowed_globals():
-    rc: Dict[str, Any] = {
+    rc: dict[str, Any] = {
         "collections.OrderedDict": OrderedDict,
         "collections.Counter": Counter,
         "torch.nn.parameter.Parameter": torch.nn.Parameter,
@@ -168,20 +182,9 @@ def _get_allowed_globals():
         "_codecs.encode": encode,  # for bytes
         "builtins.bytearray": bytearray,  # for bytearray
         "builtins.set": set,  # for set
+        "builtins.complex": complex,  # for complex
     }
-    # Only add the dtensor related classes if the dtensor module is available
-    if hasattr(torch.distributed, "tensor"):
-        dtensor_rc: Dict[str, Any] = {
-            # DTensor related
-            "torch.distributed.device_mesh.DeviceMesh": torch.distributed.device_mesh.DeviceMesh,
-            "torch.distributed.tensor._dtensor_spec.DTensorSpec": torch.distributed.tensor._dtensor_spec.DTensorSpec,
-            "torch.distributed.tensor._dtensor_spec.TensorMeta": torch.distributed.tensor._dtensor_spec.TensorMeta,
-            "torch.distributed.tensor.DTensor": torch.distributed.tensor.DTensor,
-            "torch.distributed.tensor.placement_types.Partial": torch.distributed.tensor.placement_types.Partial,
-            "torch.distributed.tensor.placement_types.Replicate": torch.distributed.tensor.placement_types.Replicate,
-            "torch.distributed.tensor.placement_types.Shard": torch.distributed.tensor.placement_types.Shard,
-        }
-        rc.update(dtensor_rc)
+
     # dtype
     for t in torch.storage._dtype_to_storage_type_map().keys():
         rc[str(t)] = t
@@ -218,7 +221,7 @@ def _get_allowed_globals():
     return rc
 
 
-def _read_global_instruction(readline: Callable) -> Tuple[str, str]:
+def _read_global_instruction(readline: Callable) -> tuple[str, str]:
     module = readline()[:-1].decode("utf-8")
     name = readline()[:-1].decode("utf-8")
     # Patch since torch.save default protocol is 2
@@ -230,9 +233,8 @@ def _read_global_instruction(readline: Callable) -> Tuple[str, str]:
     return module, name
 
 
-def get_globals_in_pkl(file) -> Set[str]:
+def get_globals_in_pkl(file) -> set[str]:
     globals_in_checkpoint = set()
-    protocol = None
     read = file.read
     readline = file.readline
     op_to_bytes_to_read = {
@@ -288,7 +290,7 @@ def get_globals_in_pkl(file) -> Set[str]:
             read(strlen)
         # first and last op
         elif key[0] == PROTO[0]:
-            protocol = read(1)[0]
+            read(1)[0]
         elif key[0] == STOP[0]:
             return globals_in_checkpoint
         else:
@@ -300,7 +302,7 @@ class Unpickler:
         self.encoding = encoding
         self.readline = file.readline
         self.read = file.read
-        self.memo: Dict[int, Any] = {}
+        self.memo: dict[int, Any] = {}
         self.proto: int = -1
 
     def load(self):
@@ -309,10 +311,9 @@ class Unpickler:
         Return the reconstituted object hierarchy specified in the file.
         """
         self.metastack = []
-        self.stack: List[Any] = []
+        self.stack: list[Any] = []
         self.append = self.stack.append
         read = self.read
-        readline = self.readline
         while True:
             key = read(1)
             if not key:
@@ -330,6 +331,30 @@ class Unpickler:
                     self.append(_get_allowed_globals()[full_path])
                 elif full_path in _get_user_allowed_globals():
                     self.append(_get_user_allowed_globals()[full_path])
+                elif full_path in (
+                    [
+                        "torch.nested._internal.nested_tensor.NestedTensor",
+                        "torch.nested._internal.nested_tensor._rebuild_njt",
+                        "torch._dynamo.decorators._DimRange",
+                    ]
+                ):
+                    raise UnpicklingError(
+                        "``torch.nested`` and ``torch._dynamo`` must be imported to load nested jagged tensors (NJTs)"
+                    )
+                elif full_path in (
+                    [
+                        "torch.distributed.device_mesh.DeviceMesh",
+                        "torch.distributed.tensor._dtensor_spec.DTensorSpec",
+                        "torch.distributed.tensor._dtensor_spec.TensorMeta",
+                        "torch.distributed.tensor.DTensor",
+                        "torch.distributed.tensor.placement_types.Partial",
+                        "torch.distributed.tensor.placement_types.Replicate",
+                        "torch.distributed.tensor.placement_types.Shard",
+                    ]
+                ):
+                    raise UnpicklingError(
+                        "``torch.distributed.tensor`` must be imported to load DTensors"
+                    )
                 else:
                     raise UnpicklingError(
                         f"Unsupported global: GLOBAL {full_path} was not an allowed global by default. "

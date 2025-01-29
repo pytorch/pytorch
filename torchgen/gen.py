@@ -3,11 +3,12 @@ from __future__ import annotations
 import argparse
 import functools
 import json
+import keyword
 import os
 from collections import defaultdict, namedtuple, OrderedDict
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Callable, Literal, Sequence, TypeVar
+from typing import Any, Callable, Literal, TYPE_CHECKING, TypeVar
 
 import yaml
 
@@ -93,6 +94,10 @@ from torchgen.utils import (
     Target,
 )
 from torchgen.yaml_utils import YamlDumper, YamlLoader
+
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
 
 
 T = TypeVar("T")
@@ -228,7 +233,7 @@ def parse_tags_yaml_struct(es: object, path: str = "<stdin>") -> set[str]:
     return rs
 
 
-@functools.lru_cache(maxsize=None)
+@functools.cache
 def parse_tags_yaml(path: str) -> set[str]:
     global _GLOBAL_PARSE_TAGS_YAML_CACHE
     if path not in _GLOBAL_PARSE_TAGS_YAML_CACHE:
@@ -289,6 +294,23 @@ def error_check_native_functions(funcs: Sequence[NativeFunction]) -> None:
                 f"{f.structured_delegate}, but {f.structured_delegate} is not marked as structured. "
                 f"Consider adding 'structured=True' to the delegated operator"
             )
+
+        # Check for reserved Python keywords
+        PYTHON_RESERVED_KEYWORDS = set(keyword.kwlist)
+        # List of pre-existing operators that are known to have reserved keywords
+        # Exclusion list is used to suppress the assertion for these operators
+        EXCLUSION_LIST = {
+            ("_has_compatible_shallow_copy_type", "from"),
+            ("random_.from", "from"),
+            ("uniform_", "from"),
+        }
+
+        for arg in f.func.arguments.flat_all:
+            if arg.name in PYTHON_RESERVED_KEYWORDS:
+                if (str(f.func.name), arg.name) not in EXCLUSION_LIST:
+                    raise AssertionError(
+                        f"Argument name '{arg.name}' in function '{f.func.name}' is a reserved Python keyword."
+                    )
         # See Note [resize_ in Functionalization]
         # resize_() is technically an inplace view op (and therefore needs the tag),
         # but it would be overkill to add a true "view" variant of resize.
@@ -1313,11 +1335,9 @@ def compute_registration_declarations(
     f: NativeFunction, backend_indices: dict[DispatchKey, BackendIndex]
 ) -> str:
     name = dispatcher.name(f.func)
-    returns_type = dispatcher.returns_type(
-        f.func.returns
-    ).cpp_type_registration_declarations()
+    returns_type = dispatcher.returns_type(f.func.returns).cpp_type()
     args = dispatcher.arguments(f.func)
-    args_str = ", ".join(a.no_default().decl_registration_declarations() for a in args)
+    args_str = ", ".join(a.no_default().decl() for a in args)
     comment_data: dict[str, str] = {
         "schema": f"aten::{f.func}",
         # TODO: What exactly is the semantics of the 'dispatch' field?
@@ -1622,9 +1642,6 @@ TORCH_LIBRARY_IMPL({namespace}, {dispatch_key}, m) {{
                 lambda: {
                     "ns_prologue": ns_helper.prologue,
                     "ns_epilogue": ns_helper.epilogue,
-                    "dispatch_helpers": dest.gen_registration_helpers(backend_idx)
-                    if gen_dispatch_helpers
-                    else [],
                     "dispatch_anonymous_definitions": anonymous_definitions[
                         kernel_namespace
                     ],
@@ -2288,32 +2305,49 @@ def gen_source_files(
             dispatch_key != DispatchKey.CompositeImplicitAutogradNestedTensor
         )
 
-        dispatch_definitions = get_native_function_definitions(
-            fm=fm,
-            grouped_native_functions=grouped_native_functions,
-            dispatch_key=dispatch_key,
-            backend_idx=backend_index,
-            selector=selector,
-            rocm=rocm,
-            symint=True,
-            skip_dispatcher_op_registration=skip_dispatcher_op_registration,
-            gen_dispatch_helpers=gen_dispatch_helpers,
-        )
-        fm.write_with_template(
+        register_dispatch_key_base_env = {
+            "extra_cuda_headers": extra_cuda_headers
+            if is_cuda_dispatch_key(dispatch_key)
+            else "",
+            "external_backend_headers": "",
+            "dispatch_headers": dest.gen_registration_headers(
+                backend_index, per_operator_headers, rocm
+            ),
+            # ops_headers *could* be sharded, but doesn't seem necessary?
+            "ops_headers": operator_headers(),
+            "dispatch_helpers": (
+                dest.gen_registration_helpers(backend_index)
+                if gen_dispatch_helpers
+                else []
+            ),
+        }
+
+        def register_dispatch_key_env_callable(
+            gnf: NativeFunction | NativeFunctionsGroup,
+        ) -> dict[str, list[str]]:
+            return {
+                "dispatch_definitions": get_native_function_definitions(
+                    fm=fm,  # noqa: F821
+                    grouped_native_functions=[gnf],
+                    dispatch_key=dispatch_key,
+                    backend_idx=backend_index,
+                    selector=selector,
+                    rocm=rocm,
+                    symint=True,
+                    skip_dispatcher_op_registration=skip_dispatcher_op_registration,
+                    gen_dispatch_helpers=gen_dispatch_helpers,
+                )
+            }
+
+        fm.write_sharded_with_template(
             f"Register{dispatch_key}.cpp",
             "RegisterDispatchKey.cpp",
-            lambda: {
-                "extra_cuda_headers": extra_cuda_headers
-                if is_cuda_dispatch_key(dispatch_key)
-                else "",
-                "external_backend_headers": "",
-                "dispatch_headers": dest.gen_registration_headers(
-                    backend_index, per_operator_headers, rocm
-                ),
-                "ops_headers": operator_headers(),
-                "dispatch_helpers": "",
-                "dispatch_definitions": dispatch_definitions,
-            },
+            grouped_native_functions,
+            key_fn=lambda x: x.root_name,
+            env_callable=register_dispatch_key_env_callable,
+            num_shards=4 if dispatch_key == DispatchKey.CPU else 1,
+            base_env=register_dispatch_key_base_env,
+            sharded_keys={"dispatch_definitions"},
         )
 
         for g in structured_native_functions:
@@ -2615,9 +2649,11 @@ codegen to generate the correct cpp call for this op. Contact AOTInductor team f
     view_map: dict[OperatorName, NativeFunction] = {
         f.func.name: f for f in concatMap(lambda g: list(g.functions()), view_groups)
     }
-    for f in native_functions:
-        if f.func.name not in structured_map and f.func.name not in view_map:
-            all_groups.append(f)
+    all_groups.extend(
+        f
+        for f in native_functions
+        if f.func.name not in structured_map and f.func.name not in view_map
+    )
 
     cpu_fm.write_sharded(
         "RegisterFunctionalization.cpp",

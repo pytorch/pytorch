@@ -1,4 +1,5 @@
 # mypy: allow-untyped-defs
+import collections
 import contextlib
 import functools
 import inspect
@@ -6,7 +7,7 @@ import warnings
 import weakref
 from collections.abc import MutableMapping
 from types import CellType
-from typing import Any, Dict, List, Optional, Set, Type
+from typing import Any, Optional
 
 import torch.nn
 
@@ -19,22 +20,29 @@ from .bytecode_transformation import (
 )
 from .codegen import PyCodegen
 from .exc import unimplemented
-from .source import GlobalSource, LocalSource, Source
-from .utils import is_frozen_dataclass, nn_module_new, object_new
+from .source import GlobalSource, LocalCellSource, LocalSource, Source
+from .utils import dict_new, is_frozen_dataclass, nn_module_new, object_new, tuple_new
 from .variables.base import (
     AttributeMutation,
     AttributeMutationExisting,
     AttributeMutationNew,
     is_side_effect_safe,
     ValueMutationExisting,
+    ValueMutationNew,
     VariableTracker,
 )
 from .variables.user_defined import FrozenDataClassVariable
 
 
-def _manual_update_dict(dict_from, dict_to):
+def _manual_dict_setitem(dict_from, dict_to, mro_index):
+    # Carefully calls the dict or OrderedDict `clear` or `__setitem__`. We have
+    # to be careful because we don't want to trigger the user defined object
+    # setitem or clear. The mro_index is used to find the dict/OrderedDict from
+    # the class mro.
+    dict_class = type(dict_to).__mro__[mro_index]
+    dict_class.clear(dict_to)
     for k, v in dict_from.items():
-        dict_to[k] = v
+        dict_class.__setitem__(dict_to, k, v)
 
 
 class SideEffects:
@@ -43,9 +51,9 @@ class SideEffects:
     applied after an FX graph is run.
     """
 
-    id_to_variable: Dict[int, VariableTracker]
-    store_attr_mutations: Dict[VariableTracker, Dict[str, VariableTracker]]
-    keepalive: List[Any]
+    id_to_variable: dict[int, VariableTracker]
+    store_attr_mutations: dict[VariableTracker, dict[str, VariableTracker]]
+    keepalive: list[Any]
 
     def __init__(
         self,
@@ -158,12 +166,12 @@ class SideEffects:
     def store_cell(self, cellvar, value):
         if cellvar.is_immutable():
             unimplemented("Dynamo currently doesn't support writing to such cell")
-        assert isinstance(cellvar, variables.NewCellVariable)
+        assert isinstance(cellvar, variables.CellVariable)
         assert isinstance(value, variables.VariableTracker)
         self.store_attr(cellvar, "cell_contents", value)
 
     def load_cell(self, cellvar):
-        assert isinstance(cellvar, variables.NewCellVariable)
+        assert isinstance(cellvar, variables.CellVariable)
         if self.has_pending_mutation_of_attr(cellvar, "cell_contents"):
             return self.load_attr(cellvar, "cell_contents", check=False)
         if cellvar.pre_existing_contents:
@@ -181,9 +189,9 @@ class SideEffects:
 
     @staticmethod
     def cls_supports_mutation_side_effects(cls):
-        return (
-            inspect.getattr_static(cls, "__getattribute__", None)
-            is object.__getattribute__
+        return inspect.getattr_static(cls, "__getattribute__", None) in (
+            object.__getattribute__,
+            dict.__getattribute__,
         )
 
     def is_attribute_mutation(self, item):
@@ -202,7 +210,7 @@ class SideEffects:
     def is_modified(self, item):
         if item.is_immutable():
             return False
-        if isinstance(item.mutation_type, AttributeMutationNew):
+        if isinstance(item.mutation_type, (AttributeMutationNew, ValueMutationNew)):
             return True
         if self.is_attribute_mutation(item):
             return item in self.store_attr_mutations
@@ -254,6 +262,10 @@ class SideEffects:
                 obj = torch.autograd.Function()
         elif issubclass(user_cls, torch.nn.Module):
             obj = nn_module_new(user_cls)
+        elif issubclass(user_cls, (dict, collections.OrderedDict)):
+            obj = dict_new(user_cls)
+        elif issubclass(user_cls, tuple):
+            obj = tuple_new(user_cls)
         else:
             try:
                 obj = object_new(user_cls)
@@ -279,11 +291,15 @@ class SideEffects:
         user_cls = cls_variable.value
 
         # Find the variable class
-        variable_cls: Type[
+        variable_cls: type[
             variables.UserDefinedObjectVariable
         ] = variables.UserDefinedObjectVariable
         if issubclass(user_cls, torch.nn.Module):
             variable_cls = variables.UnspecializedNNModuleVariable
+        elif issubclass(user_cls, (dict, collections.OrderedDict)):
+            variable_cls = variables.UserDefinedDictVariable
+        elif issubclass(user_cls, tuple):
+            variable_cls = variables.UserDefinedTupleVariable
         elif issubclass(user_cls, MutableMapping):
             variable_cls = variables.MutableMappingVariable
         elif is_frozen_dataclass(user_cls):
@@ -301,7 +317,7 @@ class SideEffects:
         self,
     ):
         obj = object()
-        variable = variables.NewCellVariable(
+        variable = variables.CellVariable(
             mutation_type=AttributeMutationNew(),
         )
         self.id_to_variable[id(obj)] = variable
@@ -311,7 +327,7 @@ class SideEffects:
     def track_cell_existing(
         self, source: Optional[Source], cell: CellType, contents: VariableTracker
     ):
-        variable = variables.NewCellVariable(
+        variable = variables.CellVariable(
             # We don't support mutation to cell without source because we need
             # source to properly codegen the mutations.
             mutation_type=None if source is None else AttributeMutationExisting(),
@@ -348,11 +364,9 @@ class SideEffects:
                 self.track_object_existing(other_item, other_variable)
 
     def prune_dead_object_new(self, tx):
-        live_new_objects: Set[VariableTracker] = set()
-
-        # use this to avoid cycles in mutation_type (though I'm not sure if that
-        # can actually happen).
-        visited: Set[VariableTracker] = set({})
+        # Avoid VT cycles from e.g., recursive function.
+        visited: set[VariableTracker] = set()
+        live_new_objects: set[VariableTracker] = set()
 
         def visit(var: VariableTracker):
             if var in visited:
@@ -420,32 +434,47 @@ class SideEffects:
     def _get_modified_vars(self):
         return [var for var in self.id_to_variable.values() if self.is_modified(var)]
 
+    def get_new_function(self, var):
+        if isinstance(var, variables.UserDefinedDictVariable):
+            return "dict_new"
+        elif isinstance(var, variables.UserDefinedTupleVariable):
+            return "tuple_new"
+        return "object_new"
+
     def codegen_save_tempvars(self, cg: PyCodegen):
         # Make sure we codegen these modified VT to their source by default, so
         # that mutation and aliasing are properly accounted for.
         for var in self._get_modified_vars():
             if isinstance(var.mutation_type, AttributeMutationNew) and isinstance(
-                var, variables.NewCellVariable
+                var, variables.CellVariable
             ):
                 # Cells created in the root frame are created either by
                 # `MAKE_CELL` or by them being in `co_cellvars`, so we only emit
                 # `make_cell` for the non-root-frame cells here.
                 # TODO generalize this so we never need to call `make_cell`.
-                if not var.is_root_frame_cell():
+                if var.local_name is None:
                     cg.add_push_null(
                         lambda: cg.load_import_from(utils.__name__, "make_cell")
                     )
                     cg.extend_output(create_call_function(0, False))
                     cg.add_cache(var)
                     var.source = LocalSource(cg.tempvars[var])  # type: ignore[attr-defined]
+                elif var.source is None:
+                    var.source = LocalCellSource(var.local_name)
             elif isinstance(var.mutation_type, AttributeMutationNew):
                 if isinstance(var, variables.AutogradFunctionContextVariable):
                     unimplemented("AutogradFunctionContextVariable escaped")
                 cg.add_push_null(
-                    lambda: cg.load_import_from(utils.__name__, "object_new")
+                    lambda: cg.load_import_from(
+                        utils.__name__, self.get_new_function(var)
+                    )
                 )
                 cg(var.mutation_type.cls_source)
-                cg.extend_output(create_call_function(1, False))
+                if isinstance(var, variables.UserDefinedTupleVariable) and var.new_args:
+                    cg(var.new_args)
+                    cg.extend_output(create_call_function(2, False))
+                else:
+                    cg.extend_output(create_call_function(1, False))
                 cg.add_cache(var)
                 var.source = LocalSource(cg.tempvars[var])
             else:
@@ -562,69 +591,70 @@ class SideEffects:
                     ]
                 )
                 suffixes.append([create_instruction("STORE_SUBSCR")])
-            elif isinstance(var, variables.CustomizedDictVariable):
-                # need to update the dict manually since update method may be invalid
-                varname_map = {}
-                for name in _manual_update_dict.__code__.co_varnames:
-                    varname_map[name] = cg.tx.output.new_var()
+            elif isinstance(var, variables.lists.DequeVariable):
+                # For limited maxlen, the order of operations matter for side
+                # effect, but we currently don't track the order, so no support.
+                if not (
+                    isinstance(var.maxlen, variables.ConstantVariable)
+                    and var.maxlen.value is None
+                ):
+                    unimplemented("side effect on existing deque with limited maxlen")
 
-                cg(var.source)  # type: ignore[attr-defined]
-                cg.extend_output(
-                    [create_instruction("STORE_FAST", argval=varname_map["dict_to"])]
-                )
-
+                # old.extend(new), this runs last
+                cg(var.source)
+                cg.load_method("extend")
                 cg(var, allow_cache=False)  # Don't codegen via source
-                cg.extend_output(
-                    [create_instruction("STORE_FAST", argval=varname_map["dict_from"])]
-                )
-
-                cg(var.source)  # type: ignore[attr-defined]
-                cg.load_method("clear")
-
-                # unfortunately can't just use DICT_MERGE due to possible custom behaviors
-                dict_update_insts = bytecode_from_template(
-                    _manual_update_dict, varname_map=varname_map
-                )
-
                 suffixes.append(
                     [
-                        *create_call_method(0),  # clear
+                        *create_call_method(1),
                         create_instruction("POP_TOP"),
-                        *dict_update_insts,
+                    ]
+                )
+
+                # old.clear(), this runs first
+                cg(var.source)
+                cg.load_method("clear")
+                suffixes.append(
+                    [
+                        *create_call_method(0),
                         create_instruction("POP_TOP"),
                     ]
                 )
 
             elif isinstance(var, variables.ConstDictVariable):
                 # Reconstruct works as follow:
-                # (1) codegen(...) each pair of key/value
-                # (2) create a new dictionary with the pairs of key/values above
-                # (3) clear the original dictionary
+                # (1) Skip codegen if there are no new items
+                # (2) codegen(...) each pair of key/value
+                # (3) create a new dictionary with the pairs of key/values above
+                # (4) clear the original dictionary
                 #   + only if a key was removed from the input dict
-                # (4) update the original dictionary with the dict created in (2)
+                # (5) update the original dictionary with the dict created in (2)
 
-                cg(var.source)  # type: ignore[attr-defined]
-                cg.load_method("update")
-                cg(var, allow_cache=False)  # Don't codegen via source
-
-                if var.should_reconstruct_all:
+                if var.has_new_items():
                     cg(var.source)  # type: ignore[attr-defined]
-                    cg.load_method("clear")
+                    cg.load_method("update")
+                    cg(var, allow_cache=False)  # Don't codegen via source
 
-                suffixes.append(
-                    [
-                        *create_call_method(1),  # update
-                        create_instruction("POP_TOP"),
-                    ]
-                )
+                    if var.should_reconstruct_all:
+                        cg(var.source)  # type: ignore[attr-defined]
+                        cg.load_method("clear")
 
-                if var.should_reconstruct_all:
                     suffixes.append(
                         [
-                            *create_call_method(0),  # clear
+                            *create_call_method(1),  # update
                             create_instruction("POP_TOP"),
                         ]
                     )
+
+                    if var.should_reconstruct_all:
+                        # clear will appear before "update" as the suffixes are
+                        # applied in reverse order.
+                        suffixes.append(
+                            [
+                                *create_call_method(0),  # clear
+                                create_instruction("POP_TOP"),
+                            ]
+                        )
 
             elif isinstance(
                 var, variables.torch_function.TorchFunctionModeStackVariable
@@ -652,18 +682,67 @@ class SideEffects:
                 cg.call_function(1, False)
                 cg.append_output(create_instruction("POP_TOP"))
 
-            elif (
-                isinstance(var, variables.NewCellVariable) and var.is_root_frame_cell()
-            ):
+            elif isinstance(var, variables.CellVariable) and var.local_name is not None:
                 # Emit more readable and performant bytecode.
                 # TODO generalize this for cells created during inlining.
                 if var in self.store_attr_mutations:
                     contents_var = self.load_cell(var)
                     cg(contents_var)
-                    cell_name = var.source.local_name  # type: ignore[attr-defined]
-                    suffixes.append([cg.create_store_deref(cell_name)])
+                    suffixes.append([cg.create_store_deref(var.local_name)])
 
             elif self.is_attribute_mutation(var):
+                if isinstance(var, variables.UserDefinedDictVariable):
+                    # Do dict related update manually here. The store_attr
+                    # mutations will be applied later.
+                    varname_map = {}
+                    for name in _manual_dict_setitem.__code__.co_varnames:
+                        varname_map[name] = cg.tx.output.new_var()
+
+                    try:
+                        mro_index = type(var.value).__mro__.index(
+                            collections.OrderedDict
+                        )
+                    except ValueError:
+                        mro_index = type(var.value).__mro__.index(dict)
+
+                    cg.extend_output(
+                        [
+                            create_instruction("LOAD_CONST", argval=mro_index),
+                            create_instruction(
+                                "STORE_FAST", argval=varname_map["mro_index"]
+                            ),
+                        ]
+                    )
+
+                    cg(var.source)  # type: ignore[attr-defined]
+                    cg.extend_output(
+                        [
+                            create_instruction(
+                                "STORE_FAST", argval=varname_map["dict_to"]
+                            )
+                        ]
+                    )
+
+                    cg(var._dict_vt, allow_cache=False)  # Don't codegen via source
+                    cg.extend_output(
+                        [
+                            create_instruction(
+                                "STORE_FAST", argval=varname_map["dict_from"]
+                            )
+                        ]
+                    )
+
+                    dict_update_insts = bytecode_from_template(
+                        _manual_dict_setitem, varname_map=varname_map
+                    )
+
+                    suffixes.append(
+                        [
+                            *dict_update_insts,
+                            create_instruction("POP_TOP"),
+                        ]
+                    )
+
                 # Applying mutations involves two steps: 1) Push all
                 # reconstructed objects onto the stack.  2) Call STORE_ATTR to
                 # apply the mutations.
@@ -717,7 +796,7 @@ class SideEffects:
                         cg(value)
                         cg(var.source)
                         suffixes.append([create_instruction("STORE_ATTR", argval=name)])
-            elif isinstance(var, variables.TupleIteratorVariable):
+            elif isinstance(var, variables.ListIteratorVariable):
                 for _ in range(var.index):
                     cg.add_push_null(
                         lambda: cg.load_import_from(utils.__name__, "iter_next")

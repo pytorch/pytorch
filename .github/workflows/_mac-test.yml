@@ -30,6 +30,14 @@ on:
         default: 270
         description: |
           Set the maximum (in minutes) how long the workflow should take to finish
+      disable-monitor:
+        description: |
+          [Experimental] Disable utilization monitoring for tests.
+          Currently, by default we disable the monitor job and only look for specific tests,
+          since we are investigating the behaviour of the monitor script with different tests.
+        required: false
+        type: boolean
+        default: true
 
 jobs:
   test:
@@ -80,6 +88,14 @@ jobs:
       - name: Checkout PyTorch
         uses: pytorch/pytorch/.github/actions/checkout-pytorch@main
 
+      - name: Start monitoring script
+        id: monitor-script
+        if: ${{ !inputs.disable-monitor }}
+        continue-on-error: true
+        run: |
+          ${CONDA_RUN} python3 -m tools.stats.monitor > usage_log.txt 2>&1 &
+          echo "monitor-script-pid=${!}" >> "${GITHUB_OUTPUT}"
+
       - name: Download build artifacts
         uses: ./.github/actions/download-build-artifacts
         with:
@@ -98,13 +114,6 @@ jobs:
           python-version: ${{ inputs.python-version }}
           environment-file: .github/requirements/conda-env-${{ runner.os }}-${{ runner.arch }}
           pip-requirements-file: .github/requirements/pip-requirements-${{ runner.os }}.txt
-
-      - name: Start monitoring script
-        id: monitor-script
-        continue-on-error: true
-        run: |
-          ${CONDA_RUN} python3 -m tools.stats.monitor > usage_log.txt 2>&1 &
-          echo "monitor-script-pid=${!}" >> "${GITHUB_OUTPUT}"
 
       - name: Parse ref
         id: parse-ref
@@ -200,7 +209,7 @@ jobs:
           cat test/**/*_toprint.log || true
 
       - name: Stop monitoring script
-        if: always() && ${{ steps.monitor-script.outputs.monitor-script-pid }}
+        if: ${{ always() && steps.monitor-script.outputs.monitor-script-pid }}
         continue-on-error: true
         env:
           MONITOR_SCRIPT_PID: ${{ steps.monitor-script.outputs.monitor-script-pid }}
@@ -213,6 +222,14 @@ jobs:
         with:
           use-gha: true
           file-suffix: ${{ github.job }}-${{ matrix.config }}-${{ matrix.shard }}-${{ matrix.num_shards }}-${{ matrix.runner }}_${{ steps.get-job-id.outputs.job-id }}
+
+      - name: Upload the benchmark results
+        uses: pytorch/test-infra/.github/actions/upload-benchmark-results@main
+        with:
+          benchmark-results-dir: test/test-reports
+          dry-run: false
+          schema-version: v3
+          github-token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Clean up disk space
         if: always()

@@ -8,7 +8,9 @@ Python polyfills for common builtins.
 
 # mypy: allow-untyped-defs
 
-from typing import Any, Callable, Sequence, TYPE_CHECKING
+from collections.abc import MutableMapping, Sequence
+from itertools import repeat as _repeat
+from typing import Any, Callable, List, TYPE_CHECKING
 
 import torch
 
@@ -21,7 +23,9 @@ if TYPE_CHECKING:
         builtins as builtins,
         functools as functools,
         itertools as itertools,
+        operator as operator,
         os as os,
+        pytree as pytree,
         sys as sys,
     )
 
@@ -57,7 +61,7 @@ def index(iterator, item, start=0, end=None):
 
 
 def repeat(item, count):
-    for i in range(count):
+    for _ in range(count):
         yield item
 
 
@@ -68,6 +72,8 @@ def radians(x):
 
 
 def accumulate_grad(x, new_grad):
+    if new_grad is None:
+        return
     new_grad = torch.clone(new_grad)
     if x.grad is None:
         x.grad = new_grad
@@ -100,10 +106,15 @@ def set_intersection(set1, set2):
 
 def set_union(set1, set2):
     union_set = set1.copy()
-    for x in set2:
-        if x not in union_set:
-            union_set.add(x)
+    set_update(union_set, set2)
     return union_set
+
+
+def set_update(set1, set2):
+    for x in set2:
+        if x not in set1:
+            set1.add(x)
+    return set1
 
 
 def set_difference(set1, set2):
@@ -112,38 +123,6 @@ def set_difference(set1, set2):
         if x not in set2:
             difference_set.add(x)
     return difference_set
-
-
-def dropwhile(predicate, iterable):
-    # dropwhile(lambda x: x<5, [1,4,6,4,1]) -> 6 4 1
-    iterable = iter(iterable)
-    for x in iterable:
-        if not predicate(x):
-            yield x
-            break
-    yield from iterable
-
-
-def zip_longest(*iterables, fillvalue=None):
-    # Create a list of iterators from the input iterables
-    iterators = [iter(it) for it in iterables]
-    result = []
-    while True:
-        row = []
-        active = False
-        for it in iterators:
-            try:
-                # Try to get the next item from the iterator
-                value = next(it)
-                row.append(value)
-                active = True
-            except StopIteration:
-                # If the iterator is exhausted, use the fillvalue
-                row.append(fillvalue)
-        if not active:
-            break
-        result.append(tuple(row))
-    return result
 
 
 def getattr_and_trace(*args, **kwargs):
@@ -170,6 +149,52 @@ def instantiate_user_defined_class_object(cls, /, *args, **kwargs):
     return obj
 
 
+# Used with something like dict(obj)
+def construct_dict(cls, /, *args, **kwargs):
+    dst = cls.__new__(cls)
+
+    if args:
+        src = args[0]
+
+        # Ensure that the overridden __iter__ method is invoked
+        if isinstance(src, (dict, MutableMapping)):
+            for key in src:
+                # This will inline the __getitem__ of the src object
+                dst[key] = src[key]
+        else:
+            # likely a sequence like tuple of pairs
+            for key, value in src:
+                dst[key] = value
+
+    if kwargs:
+        for key in kwargs:
+            dst[key] = kwargs[key]
+
+    return dst
+
+
+def foreach_map_fn(*args):
+    op = args[0]
+    new_args: list[Any] = []
+    at_least_one_list = False
+    for arg in args[1:]:
+        if not isinstance(arg, (list, tuple)):
+            new_args.append(_repeat(arg))
+        else:
+            at_least_one_list = True
+            new_args.append(arg)
+
+    # Just apply op once to args if there are no lists
+    if not at_least_one_list:
+        return op(*args[1:])
+
+    out = []
+    for unpacked in zip(*new_args):
+        out.append(op(*unpacked))
+
+    return out
+
+
 def foreach_lerp_inplace(self, end, weight):
     # decompose foreach lerp into constituent ops, prevents a graph break due to
     # converting a value to a scalar when arg[2] is a single tensor
@@ -192,3 +217,16 @@ def predicate(obj: Any) -> bool:
     if obj:
         return True
     return False
+
+
+def object_eq(self, other):
+    # Mirrors CPython implementation:
+    # https://github.com/python/cpython/blob/a1c52d1265c65bcf0d9edf87e143843ad54f9b8f/Objects/typeobject.c#L6228-L6233
+    return self is other
+
+
+def object_ne(self, other):
+    # Mirrors CPython implementation:
+    # https://github.com/python/cpython/blob/a1c52d1265c65bcf0d9edf87e143843ad54f9b8f/Objects/typeobject.c#L6235-L6255
+    # Using `==` is important because `self` might have a user-defined `__eq__`.
+    return not (self == other)

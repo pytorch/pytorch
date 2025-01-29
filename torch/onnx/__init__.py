@@ -48,7 +48,7 @@ __all__ = [
     "is_onnxrt_backend_supported",
 ]
 
-from typing import Any, Callable, Collection, Mapping, Sequence, TYPE_CHECKING
+from typing import Any, Callable, TYPE_CHECKING
 
 import torch
 from torch import _C
@@ -107,6 +107,7 @@ from ._internal._exporter_legacy import (  # usort: skip. needs to be last to av
 
 if TYPE_CHECKING:
     import os
+    from collections.abc import Collection, Mapping, Sequence
 
 # Set namespace for exposed private names
 DiagnosticOptions.__module__ = "torch.onnx"
@@ -278,10 +279,10 @@ def export(
         external_data: Whether to save the model weights as an external data file.
             This is required for models with large weights that exceed the ONNX file size limit (2GB).
             When False, the weights are saved in the ONNX file with the model architecture.
-        dynamic_shapes: A dictionary of dynamic shapes for the model inputs. Refer to
+        dynamic_shapes: A dictionary or a tuple of dynamic shapes for the model inputs. Refer to
             :func:`torch.export.export` for more details. This is only used (and preferred) when dynamo is True.
-            Only one parameter `dynamic_axes` or `dynamic_shapes` should be set
-            at the same time.
+            Note that dynamic_shapes is designed to be used when the model is exported with dynamo=True, while
+            dynamic_axes is used when dynamo=False.
         custom_translation_table: A dictionary of custom decompositions for operators in the model.
             The dictionary should have the callable target in the fx Node as the key (e.g. ``torch.ops.aten.stft.default``),
             and the value should be a function that builds that graph using ONNX Script. This option
@@ -299,7 +300,8 @@ def export(
         artifacts_dir: The directory to save the debugging artifacts like the report and the serialized
             exported program. This option is only valid when dynamo is True.
         fallback: Whether to fallback to the TorchScript exporter if the dynamo exporter fails.
-            This option is only valid when dynamo is True.
+            This option is only valid when dynamo is True. When fallback is enabled, It is
+            recommended to set dynamic_axes even when dynamic_shapes is provided.
 
         training: Deprecated option. Instead, set the training mode of the model before exporting.
         operator_export_type: Deprecated option. Only ONNX is supported.
@@ -479,29 +481,20 @@ def dynamo_export(
             )
 
         if export_options is not None and export_options.dynamic_shapes:
-            # Make all shapes dynamic
-            def _to_dynamic_shapes_mapper():
-                arg_order = 0
-
-                def _to_dynamic_shape(x):
-                    nonlocal arg_order
-                    if isinstance(x, torch.Tensor):
-                        rank = len(x.shape)
-                        dynamic_shape = {}
-                        for i in range(rank):
-                            dynamic_shape[i] = torch.export.Dim(
-                                f"arg_{arg_order}_dim_{i}"
-                            )
-                        arg_order += 1
-                        return dynamic_shape
-                    else:
-                        return None
-
-                return _to_dynamic_shape
+            # Make all shapes dynamic if it's possible
+            def _to_dynamic_shape(x):
+                if isinstance(x, torch.Tensor):
+                    rank = len(x.shape)
+                    dynamic_shape = {}
+                    for i in range(rank):
+                        dynamic_shape[i] = torch.export.Dim.AUTO  # type: ignore[attr-defined]
+                    return dynamic_shape
+                else:
+                    return None
 
             # model_args could be nested
             dynamic_shapes = _pytree.tree_map(
-                _to_dynamic_shapes_mapper(),
+                _to_dynamic_shape,
                 model_args,
             )
         else:

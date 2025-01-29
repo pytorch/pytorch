@@ -1159,8 +1159,7 @@ Tensor _cdist_forward_mps(const Tensor& x1, const Tensor& x2, const double p, st
     return inputTensorPNorm;
   };
 
-  std::optional<IntArrayRef> inputBroadcastSize =
-      std::make_optional(makeArrayRef(tensor1_view.data(), tensor1_view.size()));
+  IntArrayRef inputBroadcastSize = makeArrayRef(tensor1_view.data(), tensor1_view.size());
   impl_func_norm_mps(x1,
                      x2,
                      OptionalScalarRef(p),

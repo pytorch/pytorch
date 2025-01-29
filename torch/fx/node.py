@@ -1,9 +1,11 @@
 # Nodes represent a definition of a value in our graph of operators.
 import builtins
 import inspect
+import operator
 import types
 import warnings
-from typing import Any, Callable, Dict, List, Optional, Set, Tuple, TYPE_CHECKING, Union
+from collections.abc import Mapping, Sequence
+from typing import Any, Callable, Optional, TYPE_CHECKING, Union
 
 import torch
 from torch._C import _NodeBase
@@ -45,9 +47,9 @@ Target = Union[Callable[..., Any], str]
 
 Argument = Optional[
     Union[
-        Tuple[Any, ...],  # actually Argument, but mypy can't represent recursive types
-        List[Any],  # actually Argument
-        Dict[str, Any],  # actually Argument
+        tuple["Argument", ...],
+        Sequence["Argument"],
+        Mapping[str, "Argument"],
         slice,  # Slice[Argument, Argument, Argument], but slice is not a templated type in typing
         range,
         "Node",
@@ -67,7 +69,7 @@ _legal_ops = dict.fromkeys(
     ]
 )
 
-_side_effectful_need_to_be_preserved_pre_dispatch: Set[Callable] = {
+_side_effectful_need_to_be_preserved_pre_dispatch: set[Callable] = {
     torch._C._set_grad_enabled,
     torch.amp._enter_autocast,
     torch.amp._exit_autocast,
@@ -75,17 +77,19 @@ _side_effectful_need_to_be_preserved_pre_dispatch: Set[Callable] = {
 
 # TODO: Either refactor this into 2 functions 1 dce for functional graphs and 1 dce for all graphs,
 # or add logic to correctly mark all inplace ops as side effectful.
-_side_effectful_functions: Set[Callable] = {
+_side_effectful_functions: set[Callable] = {
     torch._assert,
     torch._assert_async,
     _ops.aten._assert_async.msg,
     _ops.aten._assert_scalar.default,
+    _ops.aten._assert_tensor_metadata.default,
     _ops.aten.sym_constrain_range.default,
     _ops.aten.sym_constrain_range_for_size.default,
     _ops.profiler._record_function_enter,
     _ops.profiler._record_function_enter_new,
     _ops.profiler._record_function_exit,
     _ops.inductor.accumulate_grad_.default,
+    operator.setitem,
 } | _side_effectful_need_to_be_preserved_pre_dispatch
 if hasattr(_ops.inductor, "resize_storage_bytes_"):
     _side_effectful_functions.add(_ops.inductor.resize_storage_bytes_.default)
@@ -214,18 +218,18 @@ class Node(_NodeBase):
       in the Graph printout.
     """
 
-    _args: Tuple["Argument", ...]
-    _kwargs: Dict[str, "Argument"]
+    _args: tuple["Argument", ...]
+    _kwargs: dict[str, "Argument"]
     graph: "Graph"
     name: str
     op: str
     target: "Target"
-    _input_nodes: Dict["Node", None]
-    users: Dict["Node", None]
+    _input_nodes: dict["Node", None]
+    users: dict["Node", None]
     type: Optional[Any]
     _sort_key: Any
     _repr_fn: Optional[Callable[["Node"], str]]
-    meta: Dict[str, Any]
+    meta: dict[str, Any]
 
     @compatibility(is_backward_compatible=True)
     def __init__(
@@ -234,8 +238,8 @@ class Node(_NodeBase):
         name: str,
         op: str,
         target: "Target",
-        args: Tuple["Argument", ...],
-        kwargs: Dict[str, "Argument"],
+        args: tuple["Argument", ...],
+        kwargs: dict[str, "Argument"],
         return_type: Optional[Any] = None,
     ) -> None:
         """
@@ -326,14 +330,14 @@ class Node(_NodeBase):
         # transformations. This metadata is preserved across node copies
         assign(self, "meta", {})
 
-    def __getstate__(self) -> Dict[str, Any]:
+    def __getstate__(self) -> dict[str, Any]:
         state = self.__dict__.copy()
         state["_erased"] = self._erased
         state["_prev"] = self._prev
         state["_next"] = self._next
         return state
 
-    def __setstate__(self, state: Dict[str, Any]) -> None:
+    def __setstate__(self, state: dict[str, Any]) -> None:
         _erased = state.pop("_erased")
         _prev = state.pop("_prev")
         _next = state.pop("_next")
@@ -429,7 +433,7 @@ class Node(_NodeBase):
         p._next, n._prev = n, p
 
     @property
-    def args(self) -> Tuple[Argument, ...]:
+    def args(self) -> tuple[Argument, ...]:
         """
         The tuple of arguments to this ``Node``. The interpretation of arguments
         depends on the node's opcode. See the :class:`Node` docstring for more
@@ -441,7 +445,7 @@ class Node(_NodeBase):
         return self._args
 
     @args.setter
-    def args(self, a: Tuple[Argument, ...]) -> None:
+    def args(self, a: tuple[Argument, ...]) -> None:
         """
         Set the tuple of arguments to this Node. The interpretation of arguments
         depends on the node's opcode. See the ``fx.Graph`` docstring for more
@@ -452,7 +456,7 @@ class Node(_NodeBase):
         self.__update_args_kwargs(a, self._kwargs)
 
     @property
-    def kwargs(self) -> Dict[str, Argument]:
+    def kwargs(self) -> dict[str, Argument]:
         """
         The dict of keyword arguments to this ``Node``. The interpretation of arguments
         depends on the node's opcode. See the :class:`Node` docstring for more
@@ -464,7 +468,7 @@ class Node(_NodeBase):
         return self._kwargs
 
     @kwargs.setter
-    def kwargs(self, k: Dict[str, Argument]) -> None:
+    def kwargs(self, k: dict[str, Argument]) -> None:
         """
         Set the dict of kwargs to this Node. The interpretation of arguments
         depends on the node's opcode. See the ``fx.Graph`` docstring for more
@@ -475,7 +479,7 @@ class Node(_NodeBase):
         self.__update_args_kwargs(self._args, k)
 
     @property
-    def all_input_nodes(self) -> List["Node"]:
+    def all_input_nodes(self) -> list["Node"]:
         """
         Return all Nodes that are inputs to this Node. This is equivalent to
         iterating over ``args`` and ``kwargs`` and only collecting the values that
@@ -521,7 +525,7 @@ class Node(_NodeBase):
 
         self._args = args_left + (arg,) + args_right
 
-        _new_input_nodes: Dict[Node, None] = {}
+        _new_input_nodes: dict[Node, None] = {}
         map_arg(arg, _new_input_nodes.setdefault)
 
         for new_use in _new_input_nodes.keys():
@@ -561,7 +565,7 @@ class Node(_NodeBase):
         self.meta["stack_trace"] = trace
 
     def __update_args_kwargs(
-        self, new_args: Tuple["Argument", ...], new_kwargs: Dict[str, "Argument"]
+        self, new_args: tuple["Argument", ...], new_kwargs: dict[str, "Argument"]
     ) -> None:
         """
         This API is internal. Do *not* call it directly.
@@ -621,8 +625,8 @@ class Node(_NodeBase):
     @compatibility(is_backward_compatible=True)
     def format_node(
         self,
-        placeholder_names: Optional[List[str]] = None,
-        maybe_return_typename: Optional[List[str]] = None,
+        placeholder_names: Optional[list[str]] = None,
+        maybe_return_typename: Optional[list[str]] = None,
     ) -> Optional[str]:
         """
         Return a descriptive string representation of ``self``.
@@ -691,7 +695,7 @@ class Node(_NodeBase):
         delete_user_cb: Callable[["Node"], bool] = lambda user: True,
         *,
         propagate_meta: bool = False,
-    ) -> List["Node"]:
+    ) -> list["Node"]:
         """
         Replace all uses of ``self`` in the Graph with the Node ``replace_with``.
 
@@ -730,8 +734,9 @@ class Node(_NodeBase):
                 else:
                     return n
 
-            if getattr(m, "_replace_hook", None):
-                m._replace_hook(old=self, new=replace_with.name, user=use_node)
+            if getattr(m, "_replace_hooks", None):
+                for replace_hook in m._replace_hooks:
+                    replace_hook(old=self, new=replace_with.name, user=use_node)
 
             new_args = map_arg(use_node.args, maybe_replace_node)
             new_kwargs = map_arg(use_node.kwargs, maybe_replace_node)
@@ -755,11 +760,17 @@ class Node(_NodeBase):
         if self.op in {"placeholder", "output"}:
             return True
 
-        # Check if an impure function based on schema.
         if self.op == "call_function":
             schema = getattr(self.target, "_schema", None)
-            schema_mutable = schema is not None and schema.is_mutable
-            return schema_mutable or self.target in _side_effectful_functions
+            if schema is not None and schema.is_mutable:
+                # impure since it mutates inputs
+                return True
+
+            if getattr(self.target, "_nondeterministic_seeded", False):
+                # impure since it mutates RNG state
+                return True
+
+            return self.target in _side_effectful_functions
 
         # Check if an impure module.
         if self.op == "call_module":
@@ -778,8 +789,8 @@ class Node(_NodeBase):
     def normalized_arguments(
         self,
         root: torch.nn.Module,
-        arg_types: Optional[Tuple[Any]] = None,
-        kwarg_types: Optional[Dict[str, Any]] = None,
+        arg_types: Optional[tuple[Any]] = None,
+        kwarg_types: Optional[dict[str, Any]] = None,
         normalize_to_only_use_kwargs: bool = False,
     ) -> Optional[ArgsKwargsPair]:
         """
@@ -835,8 +846,9 @@ class Node(_NodeBase):
             return new_input if n == old_input else n
 
         m = self.graph.owning_module
-        if getattr(m, "_replace_hook", None):
-            m._replace_hook(old=old_input, new=new_input.name, user=self)
+        if getattr(m, "_replace_hooks", None):
+            for replace_hook in m._replace_hooks:
+                replace_hook(old=old_input, new=new_input.name, user=self)
 
         new_args = map_arg(self.args, maybe_replace_node)
         new_kwargs = map_arg(self.kwargs, maybe_replace_node)
@@ -854,10 +866,11 @@ class Node(_NodeBase):
     def __setattr__(self, name: str, value: Any) -> None:
         if name == "name" and hasattr(self, "name"):
             m = self.graph.owning_module
-            if getattr(m, "_replace_hook", None):
+            if getattr(m, "_replace_hooks", None):
                 assert isinstance(value, str)
                 for user in self.users:
-                    m._replace_hook(old=self, new=value, user=user)
+                    for replace_hook in m._replace_hooks:
+                        replace_hook(old=self, new=value, user=user)
         update = False
         if (
             hasattr(self, name)

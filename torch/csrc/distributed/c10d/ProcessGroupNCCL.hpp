@@ -24,6 +24,7 @@
 #include <torch/csrc/distributed/c10d/PrefixStore.hpp>
 #include <torch/csrc/distributed/c10d/Store.hpp>
 #include <torch/csrc/distributed/c10d/intra_node_comm.hpp>
+#include <torch/csrc/distributed/c10d/logger.hpp>
 
 #include <ATen/DynamicLibrary.h>
 #include <ATen/cuda/CUDAContext.h>
@@ -63,6 +64,10 @@ static std::vector<std::string> TORCH_NCCL_ASYNC_ERROR_HANDLING = {
 // TORCH_NCCL_ENABLE_MONITORING=1 and TORCH_NCCL_TRACE_BUFFER_SIZE > 0.
 static std::vector<std::string> TORCH_NCCL_DUMP_ON_TIMEOUT = {
     "TORCH_NCCL_DUMP_ON_TIMEOUT"};
+
+// Control whether to propagate NCCL errors to all ranks through TCPStore.
+static std::vector<std::string> TORCH_NCCL_PROPAGATE_ERROR = {
+    "TORCH_NCCL_PROPAGATE_ERROR"};
 
 // Control whether Desync Debug is enabled. This variable must be set
 // together with TORCH_NCCL_ASYNC_ERROR_HANDLING.
@@ -287,7 +292,7 @@ class TORCH_API ProcessGroupNCCL : public Backend {
     // destructs outputs_ tensors who are view tensors in autograd graph.
     WorkNCCL(const WorkNCCL& w);
 
-    ~WorkNCCL() override;
+    ~WorkNCCL() override = default;
 
     // Checks if the NCCL kernel has started to execute.
     bool isStarted();
@@ -456,11 +461,13 @@ class TORCH_API ProcessGroupNCCL : public Backend {
     friend class ProcessGroupNCCL;
   };
 
-  class CUDAEventCache {
+  class CUDAEventCache
+      : public std::enable_shared_from_this<ProcessGroupNCCL::CUDAEventCache> {
    public:
     CUDAEventCache();
     std::shared_ptr<at::cuda::CUDAEvent> create(bool timing);
-    static CUDAEventCache& get();
+    static std::shared_ptr<ProcessGroupNCCL::CUDAEventCache> get(
+        at::DeviceIndex device);
 
    private:
     std::mutex cacheMutex_;
@@ -761,6 +768,8 @@ class TORCH_API ProcessGroupNCCL : public Backend {
 
   ErrorType getError() override;
 
+  std::shared_ptr<c10::Allocator> getMemAllocator() override;
+
   // Performs NCCL user buffer registration for all buffers in
   // the given MemPool
   void registerMemPool(c10::cuda::MemPool* pool);
@@ -824,7 +833,7 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   // In the timeout case and we will dump debug info such as the NCCL flight
   // recorder to storage. Down the road, if we have more complicated or blocking
   // operations, we might need to use a side thread to do it.
-  bool dumpDebuggingInfo();
+  bool dumpDebuggingInfo(bool includeStackTrace = true);
 
   // Abort all communicators on this rank.
   bool abortComms(const std::optional<std::string>& abortReason = std::nullopt);
@@ -909,6 +918,7 @@ class TORCH_API ProcessGroupNCCL : public Backend {
 
   c10::intrusive_ptr<Work> allreduce_impl(
       at::Tensor& tensor,
+      const char* profilingTitle = "nccl:all_reduce",
       const AllreduceOptions& opts = AllreduceOptions());
 
   // Checks for NCCL errors on each of the communicators and returns an
@@ -996,12 +1006,13 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   virtual void terminateProcess(const std::string& errMsg);
 
   // A helper function to wait for a future to complete or timeout.
-  void waitForFutureOrTimeout(
+  // Returns true if the future completes before timeout, false otherwise.
+  bool waitForFutureOrTimeout(
       std::future<bool>& fut,
       const std::chrono::milliseconds& timeOutMilSec,
       const std::string& futDescription,
-      bool throwException = false,
-      bool log = false);
+      ::c10d::C10dLoggingData& debugLog,
+      bool throwException = false);
 
   std::string getNCCLWatchdogTimeoutErrorMsg(const std::string& extraMsg);
 
@@ -1098,7 +1109,7 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   int coordCheckIntervalMilSec_;
 
   // Size of ring buffer where we store NCCL Traces for debugging.
-  int ncclTraceBufferSize_;
+  int traceBufferSize_;
 
   // We gate the heartbeat monitor thread so that we can roll it out gradually.
   std::atomic<bool> monitorThreadEnabled_{};
@@ -1175,7 +1186,7 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   std::unordered_map<std::string, at::cuda::CUDAEvent> ncclEvents_;
 
   // Device Indexes used for all collectives in this group
-  std::set<int> usedDeviceIdxs_;
+  std::set<c10::DeviceIndex> usedDeviceIdxs_;
 
   // Flag to denote if a coalescing groupStart/groupEnd block is active
   int coalescing_state_ = 0;
@@ -1209,6 +1220,10 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   // Whether or not to dump debug info on exception including both watchdog
   // timeout and nccl errors.
   bool dumpOnTimeoutOrEx_;
+
+  // Whether or not to propagate detected errors to all ranks in the same PG
+  // through TCPStore.
+  bool propagatePgError_;
 
   // Whether or not to sleep after an exception is thrown in the watchdog.
   bool sleepAfterException_{};

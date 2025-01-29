@@ -44,7 +44,7 @@ struct XPUGuardImpl final : public c10::impl::DeviceGuardImplInterface {
     c10::xpu::set_device(d.index());
   }
 
-  Stream getStream(Device d) const noexcept override {
+  Stream getStream(Device d) const override {
     return getCurrentXPUStream(d.index()).unwrap();
   }
 
@@ -58,7 +58,7 @@ struct XPUGuardImpl final : public c10::impl::DeviceGuardImplInterface {
   }
 
   // NB: These do NOT set the current device
-  Stream exchangeStream(Stream s) const noexcept override {
+  Stream exchangeStream(Stream s) const override {
     const XPUStream stream(s);
     const auto old_stream = getCurrentXPUStream(s.device().index());
     setCurrentXPUStream(stream);
@@ -103,7 +103,19 @@ struct XPUGuardImpl final : public c10::impl::DeviceGuardImplInterface {
     // Delete the event previously recorded.
     if (xpu_event)
       delete xpu_event;
+#if SYCL_COMPILER_VERSION >= 20250000
+    if (flag == EventFlag::BACKEND_DEFAULT) {
+      // Use the profiling tag to record the event to enable timing feature.
+      xpu_event =
+          new sycl::event(sycl::ext::oneapi::experimental::submit_profiling_tag(
+              xpu_stream.queue()));
+    } else {
+      xpu_event =
+          new sycl::event(xpu_stream.queue().ext_oneapi_submit_barrier());
+    }
+#else
     xpu_event = new sycl::event(xpu_stream.queue().ext_oneapi_submit_barrier());
+#endif
     *event = reinterpret_cast<void*>(xpu_event);
 
     const c10::impl::PyInterpreter* interp = c10::impl::GPUTrace::get_trace();
@@ -159,7 +171,7 @@ struct XPUGuardImpl final : public c10::impl::DeviceGuardImplInterface {
     // Block until both of the recorded events are completed.
     uint64_t end_time_ns = xpu_end_event->get_profiling_info<command_end>();
     uint64_t start_time_ns = xpu_start_event->get_profiling_info<command_end>();
-    // Return the elapsed time in milliseconds.
+    // Return the eplased time in milliseconds.
     return 1e-6 *
         (static_cast<double>(end_time_ns) - static_cast<double>(start_time_ns));
   }

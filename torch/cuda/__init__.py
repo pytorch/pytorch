@@ -45,8 +45,8 @@ except ImportError:
 _initialized = False
 _tls = threading.local()
 _initialization_lock = threading.Lock()
-_queued_calls: List[
-    Tuple[Callable[[], None], List[str]]
+_queued_calls: list[
+    tuple[Callable[[], None], list[str]]
 ] = []  # don't invoke these until initialization occurs
 _is_in_bad_fork = getattr(torch._C, "_cuda_isInBadFork", lambda: False)
 _device_t = Union[_device, str, int, None]
@@ -101,7 +101,7 @@ else:
 has_half: bool = True
 has_magma: bool = torch._C._has_magma
 
-default_generators: Tuple[torch._C.Generator] = ()  # type: ignore[assignment]
+default_generators: tuple[torch._C.Generator] = ()  # type: ignore[assignment]
 
 
 def _is_compiled() -> bool:
@@ -166,6 +166,18 @@ def _check_bf16_tensor_supported(device: _device_t):
         return True
     except Exception:
         return False
+
+
+def is_tf32_supported() -> bool:
+    r"""Return a bool indicating if the current CUDA/ROCm device supports dtype tf32."""
+    # Check for ROCm.  If true, return false, since PyTorch does not currently support
+    # tf32 on ROCm.
+    if torch.version.hip:
+        return False
+
+    # Otherwise, tf32 is supported on CUDA platforms that natively (i.e. no emulation)
+    # support bfloat16.
+    return is_bf16_supported(including_emulation=False)
 
 
 def _sleep(cycles):
@@ -245,20 +257,21 @@ def is_initialized():
 
 
 def _lazy_call(callable, **kwargs):
-    if is_initialized():
-        callable()
-    else:
-        # TODO(torch_deploy): this accesses linecache, which attempts to read the
-        # file system to get traceback info. Patch linecache or do something
-        # else here if this ends up being important.
-        global _lazy_seed_tracker
-        if kwargs.get("seed_all", False):
-            _lazy_seed_tracker.queue_seed_all(callable, traceback.format_stack())
-        elif kwargs.get("seed", False):
-            _lazy_seed_tracker.queue_seed(callable, traceback.format_stack())
+    with _initialization_lock:
+        if is_initialized():
+            callable()
         else:
-            # Don't store the actual traceback to avoid memory cycle
-            _queued_calls.append((callable, traceback.format_stack()))
+            # TODO(torch_deploy): this accesses linecache, which attempts to read the
+            # file system to get traceback info. Patch linecache or do something
+            # else here if this ends up being important.
+            global _lazy_seed_tracker
+            if kwargs.get("seed_all", False):
+                _lazy_seed_tracker.queue_seed_all(callable, traceback.format_stack())
+            elif kwargs.get("seed", False):
+                _lazy_seed_tracker.queue_seed(callable, traceback.format_stack())
+            else:
+                # Don't store the actual traceback to avoid memory cycle
+                _queued_calls.append((callable, traceback.format_stack()))
 
 
 _lazy_call(_check_capability)
@@ -322,9 +335,7 @@ def _lazy_init():
         # However, we must not let any *other* threads in!
         _tls.is_initializing = True
 
-        for calls in _lazy_seed_tracker.get_calls():
-            if calls:
-                _queued_calls.append(calls)
+        _queued_calls.extend(calls for calls in _lazy_seed_tracker.get_calls() if calls)
 
         try:
             for queued_call, orig_traceback in _queued_calls:
@@ -493,7 +504,7 @@ def get_device_name(device: Optional[_device_t] = None) -> str:
     return get_device_properties(device).name
 
 
-def get_device_capability(device: Optional[_device_t] = None) -> Tuple[int, int]:
+def get_device_capability(device: Optional[_device_t] = None) -> tuple[int, int]:
     r"""Get the cuda capability of a device.
 
     Args:
@@ -603,8 +614,9 @@ def stream(stream: Optional["torch.cuda.Stream"]) -> StreamContext:
     Arguments:
         stream (Stream): selected stream. This manager is a no-op if it's
             ``None``.
-    ..Note:: In eager mode stream is of type Stream class while in JIT it is
-    an object of the custom class ``torch.classes.cuda.Stream``.
+    .. note::
+        In eager mode stream is of type Stream class while in JIT it is
+        an object of the custom class ``torch.classes.cuda.Stream``.
     """
     return StreamContext(stream)
 
@@ -642,13 +654,31 @@ def set_stream(stream: Stream):
     )
 
 
-def _parse_visible_devices() -> Union[List[int], List[str]]:
+def _parse_visible_devices() -> Union[list[int], list[str]]:
     r"""Parse CUDA_VISIBLE_DEVICES environment variable."""
     var = os.getenv("CUDA_VISIBLE_DEVICES")
 
     if torch.version.hip:
         hip_devices = os.getenv("HIP_VISIBLE_DEVICES")
-        if hip_devices is not None:
+        rocr_devices = os.getenv("ROCR_VISIBLE_DEVICES")
+
+        # You must take care if both HIP and ROCR env vars are set as they have
+        # different meanings. Both env vars accept either a list of ints or a
+        # list of UUIDs. The ROCR env var is processed first which then reduces
+        # the number of GPUs that HIP can select from.
+        if rocr_devices is not None:
+            rocr_count = len(rocr_devices.split(","))
+            if hip_devices is not None:
+                # sanity check if both env vars are set
+                if len(hip_devices.split(",")) > rocr_count:
+                    raise RuntimeError(
+                        "HIP_VISIBLE_DEVICES contains more devices than ROCR_VISIBLE_DEVICES"
+                    )
+                # HIP_VISIBLE_DEVICES is preferred over ROCR_VISIBLE_DEVICES
+                var = hip_devices
+            else:
+                return list(range(rocr_count))
+        elif hip_devices is not None:
             var = hip_devices
 
     if var is None:
@@ -665,12 +695,12 @@ def _parse_visible_devices() -> Union[List[int], List[str]]:
                 idx += 1
         return int(s[:idx]) if idx > 0 else -1
 
-    def parse_list_with_prefix(lst: str, prefix: str) -> List[str]:
-        rcs: List[str] = []
+    def parse_list_with_prefix(lst: str, prefix: str) -> list[str]:
+        rcs: list[str] = []
         for elem in lst.split(","):
             # Repeated id results in empty set
             if elem in rcs:
-                return cast(List[str], [])
+                return cast(list[str], [])
             # Anything other but prefix is ignored
             if not elem.startswith(prefix):
                 break
@@ -683,12 +713,12 @@ def _parse_visible_devices() -> Union[List[int], List[str]]:
         return parse_list_with_prefix(var, "MIG-")
     # CUDA_VISIBLE_DEVICES uses something like strtoul
     # which makes `1gpu2,2ampere` is equivalent to `1,2`
-    rc: List[int] = []
+    rc: list[int] = []
     for elem in var.split(","):
         x = _strtoul(elem.strip())
         # Repeated ordinal results in empty set
         if x in rc:
-            return cast(List[int], [])
+            return cast(list[int], [])
         # Negative value aborts the sequence
         if x < 0:
             break
@@ -726,7 +756,7 @@ def _raw_device_count_nvml() -> int:
     return dev_count.value
 
 
-def _raw_device_uuid_amdsmi() -> Optional[List[str]]:
+def _raw_device_uuid_amdsmi() -> Optional[list[str]]:
     from ctypes import byref, c_int, c_void_p, CDLL, create_string_buffer
 
     if not _HAS_PYNVML:  # If amdsmi is not available
@@ -742,7 +772,7 @@ def _raw_device_uuid_amdsmi() -> Optional[List[str]]:
     except amdsmi.AmdSmiException:
         warnings.warn("Can't get amdsmi device count")
         return None
-    uuids: List[str] = []
+    uuids: list[str] = []
     for idx in range(dev_count):
         try:
             handler = amdsmi.amdsmi_get_processor_handles()[idx]
@@ -762,7 +792,7 @@ def _raw_device_uuid_amdsmi() -> Optional[List[str]]:
     return uuids
 
 
-def _raw_device_uuid_nvml() -> Optional[List[str]]:
+def _raw_device_uuid_nvml() -> Optional[list[str]]:
     r"""Return list of device UUID as reported by NVML or None if NVM discovery/initialization failed."""
     from ctypes import byref, c_int, c_void_p, CDLL, create_string_buffer
 
@@ -776,7 +806,7 @@ def _raw_device_uuid_nvml() -> Optional[List[str]]:
     if rc != 0:
         warnings.warn("Can't get nvml device count")
         return None
-    uuids: List[str] = []
+    uuids: list[str] = []
     for idx in range(dev_count.value):
         dev_id = c_void_p()
         rc = nvml_h.nvmlDeviceGetHandleByIndex_v2(idx, byref(dev_id))
@@ -794,10 +824,10 @@ def _raw_device_uuid_nvml() -> Optional[List[str]]:
     return uuids
 
 
-def _transform_uuid_to_ordinals(candidates: List[str], uuids: List[str]) -> List[int]:
+def _transform_uuid_to_ordinals(candidates: list[str], uuids: list[str]) -> list[int]:
     r"""Given the set of partial uuids and list of known uuids builds a set of ordinals excluding ambiguous partials IDs."""
 
-    def uuid_to_ordinal(candidate: str, uuids: List[str]) -> int:
+    def uuid_to_ordinal(candidate: str, uuids: list[str]) -> int:
         best_match = -1
         for idx, uuid in enumerate(uuids):
             if not uuid.startswith(candidate):
@@ -808,7 +838,7 @@ def _transform_uuid_to_ordinals(candidates: List[str], uuids: List[str]) -> List
             best_match = idx
         return best_match
 
-    rc: List[int] = []
+    rc: list[int] = []
     for candidate in candidates:
         if torch.version.hip:
             candidate = candidate.replace(
@@ -820,7 +850,7 @@ def _transform_uuid_to_ordinals(candidates: List[str], uuids: List[str]) -> List
             break
         # Duplicates result in empty set
         if idx in rc:
-            return cast(List[int], [])
+            return cast(list[int], [])
         rc.append(idx)
     return rc
 
@@ -835,7 +865,7 @@ def _device_count_amdsmi() -> int:
             if uuids is None:
                 return -1
             # Create string version of visible devices to avoid mypy warnings
-            visible_device_str = cast(List[str], visible_devices)
+            visible_device_str = cast(list[str], visible_devices)
             visible_devices = _transform_uuid_to_ordinals(visible_device_str, uuids)
         else:
             raw_cnt = _raw_device_count_amdsmi()
@@ -869,7 +899,7 @@ def _device_count_nvml() -> int:
             if uuids is None:
                 return -1
             visible_devices = _transform_uuid_to_ordinals(
-                cast(List[str], visible_devices), uuids
+                cast(list[str], visible_devices), uuids
             )
         else:
             raw_cnt = _raw_device_count_nvml()
@@ -895,9 +925,9 @@ def _get_nvml_device_index(device: Optional[Union[int, Device]]) -> int:
         if uuids is None:
             raise RuntimeError("Can't get device UUIDs")
         visible_devices = _transform_uuid_to_ordinals(
-            cast(List[str], visible_devices), uuids
+            cast(list[str], visible_devices), uuids
         )
-    visible_devices = cast(List[int], visible_devices)
+    visible_devices = cast(list[int], visible_devices)
     if idx < 0 or idx >= len(visible_devices):
         raise RuntimeError(
             f"device {idx} is not visible (CUDA_VISIBLE_DEVICES={visible_devices})"
@@ -926,7 +956,7 @@ def device_count() -> int:
     return r
 
 
-def get_arch_list() -> List[str]:
+def get_arch_list() -> list[str]:
     r"""Return list CUDA architectures this library was compiled for."""
     if not is_available():
         return []
@@ -1018,6 +1048,34 @@ def default_stream(device: Optional[_device_t] = None) -> Stream:
     )
 
 
+def get_stream_from_external(
+    data_ptr: int, device: Optional[_device_t] = None
+) -> Stream:
+    r"""Return a :class:`Stream` from an externally allocated CUDA stream.
+
+    This function is used to wrap streams allocated in other libraries in order
+    to facilitate data exchange and multi-library interactions.
+
+    .. note:: This function doesn't manage the stream life-cycle, it is the user
+       responsibility to keep the referenced stream alive while this returned
+       stream is being used.
+
+    Args:
+        data_ptr(int): Integer representation of the `cudaStream_t` value that
+            is allocated externally.
+        device(torch.device or int, optional): the device where the stream
+            was originally allocated. If device is specified incorrectly,
+            subsequent launches using this stream may fail.
+    """
+    _lazy_init()
+    streamdata = torch._C._cuda_getStreamFromExternal(
+        data_ptr, _get_device_index(device, optional=True)
+    )
+    return Stream(
+        stream_id=streamdata[0], device_index=streamdata[1], device_type=streamdata[2]
+    )
+
+
 def current_blas_handle():
     r"""Return cublasHandle_t pointer to current cuBLAS handle"""
     _lazy_init()
@@ -1099,10 +1157,10 @@ def _get_amdsmi_device_index(device: Optional[Union[int, Device]]) -> int:
         if uuids is None:
             raise RuntimeError("Can't get device UUIDs")
         visible_devices_str = cast(
-            List[str], visible_devices
+            list[str], visible_devices
         )  # Create str variable for mypy
         visible_devices = _transform_uuid_to_ordinals(visible_devices_str, uuids)
-    idx_map = dict(enumerate(cast(List[int], visible_devices)))
+    idx_map = dict(enumerate(cast(list[int], visible_devices)))
     if idx not in idx_map:
         raise RuntimeError(
             f"device {idx} is not visible (HIP_VISIBLE_DEVICES={visible_devices})"
@@ -1110,10 +1168,20 @@ def _get_amdsmi_device_index(device: Optional[Union[int, Device]]) -> int:
     return idx_map[idx]
 
 
+def _get_amdsmi_device_memory_used(device: Optional[Union[Device, int]] = None) -> int:
+    handle = _get_amdsmi_handler()
+    device = _get_amdsmi_device_index(device)
+    # amdsmi_get_gpu_vram_usage returns mem usage in megabytes
+    mem_mega_bytes = amdsmi.amdsmi_get_gpu_vram_usage(handle)["vram_used"]
+    mem_bytes = mem_mega_bytes * 1024 * 1024
+    return mem_bytes
+
+
 def _get_amdsmi_memory_usage(device: Optional[Union[Device, int]] = None) -> int:
     handle = _get_amdsmi_handler()
     device = _get_amdsmi_device_index(device)
-    return amdsmi.amdsmi_get_gpu_vram_usage(handle)["vram_used"]
+    handle = amdsmi.amdsmi_get_processor_handles()[device]
+    return amdsmi.amdsmi_get_gpu_activity(handle)["umc_activity"]
 
 
 def _get_amdsmi_utilization(device: Optional[Union[Device, int]] = None) -> int:
@@ -1148,6 +1216,24 @@ def _get_amdsmi_clock_rate(device: Optional[Union[Device, int]] = None) -> int:
         return clock_info["cur_clk"]
     else:
         return clock_info["clk"]
+
+
+def device_memory_used(device: Optional[Union[Device, int]] = None) -> int:
+    r"""Return used global (device) memory in bytes as given by `nvidia-smi` or `amd-smi`.
+
+    Args:
+        device (torch.device or int, optional): selected device. Returns
+            statistic for the current device, given by :func:`~torch.cuda.current_device`,
+            if :attr:`device` is ``None`` (default).
+
+    """
+    if not torch.version.hip:
+        handle = _get_pynvml_handler()
+        device = _get_nvml_device_index(device)
+        handle = pynvml.nvmlDeviceGetHandleByIndex(device)
+        return pynvml.nvmlDeviceGetMemoryInfo(handle).used
+    else:
+        return _get_amdsmi_device_memory_used(device)
 
 
 def memory_usage(device: Optional[Union[Device, int]] = None) -> int:
@@ -1609,6 +1695,7 @@ __all__ = [
     "default_stream",
     "device",
     "device_count",
+    "device_memory_used",
     "device_of",
     "empty_cache",
     "get_allocator_backend",
@@ -1619,8 +1706,10 @@ __all__ = [
     "get_device_name",
     "get_device_properties",
     "get_gencode_flags",
+    "get_per_process_memory_fraction",
     "get_rng_state",
     "get_rng_state_all",
+    "get_stream_from_external",
     "get_sync_debug_mode",
     "graph",
     "graph_pool_handle",
@@ -1634,6 +1723,7 @@ __all__ = [
     "is_bf16_supported",
     "is_current_stream_capturing",
     "is_initialized",
+    "is_tf32_supported",
     "jiterator",
     "list_gpu_processes",
     "make_graphed_callables",

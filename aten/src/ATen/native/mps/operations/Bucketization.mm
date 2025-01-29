@@ -53,14 +53,7 @@ static void searchsorted_mps_contiguous(Tensor& result,
       getMPSProfiler().beginProfileKernel(bucketizationPSO, kernel, {input, boundaries, sorter});
 
       [computeEncoder setComputePipelineState:bucketizationPSO];
-      mtl_setBuffer(computeEncoder, input, 0);
-      mtl_setBuffer(computeEncoder, boundaries, 1);
-      mtl_setBuffer(computeEncoder, result, 2);
-      mtl_setBytes(computeEncoder, idim_in, 3);
-      mtl_setBytes(computeEncoder, idim_bd, 4);
-      mtl_setBytes(computeEncoder, numel_in, 5);
-      mtl_setBytes(computeEncoder, right_i64, 6);
-      mtl_setBytes(computeEncoder, is_1d_boundaries, 7);
+      mtl_setArgs(computeEncoder, input, boundaries, result, idim_in, idim_bd, numel_in, right_i64, is_1d_boundaries);
       if (sorter.defined())
         mtl_setBuffer(computeEncoder, sorter, 8);
 
@@ -82,7 +75,7 @@ Tensor& searchsorted_out_mps(const Tensor& sorted_sequence,
                              const Tensor& self,
                              bool out_int32,
                              bool right,
-                             const std::optional<c10::string_view> side_opt,
+                             const std::optional<std::string_view> side_opt,
                              const std::optional<Tensor>& sorter_opt,
                              Tensor& result) {
   // See [Note: hacky wrapper removal for optional tensor]
@@ -127,7 +120,7 @@ Tensor& searchsorted_out_mps(const Tensor& sorted_sequence,
                              const Scalar& self,
                              bool out_int32,
                              bool right,
-                             const std::optional<c10::string_view> side_opt,
+                             const std::optional<std::string_view> side_opt,
                              const std::optional<Tensor>& sorter_opt,
                              Tensor& result) {
   const Tensor& scalar_tensor = mps::wrapped_scalar_tensor_mps(self, sorted_sequence.device());
@@ -138,7 +131,7 @@ Tensor searchsorted_mps(const Tensor& sorted_sequence,
                         const Tensor& self,
                         bool out_int32,
                         bool right,
-                        const std::optional<c10::string_view> side_opt,
+                        const std::optional<std::string_view> side_opt,
                         const std::optional<Tensor>& sorter) {
   ScalarType scalar_type = out_int32 ? ScalarType::Int : ScalarType::Long;
   c10::TensorOptions options = TensorOptions().device(self.options().device()).dtype(scalar_type);
@@ -151,7 +144,7 @@ Tensor searchsorted_mps(const Tensor& sorted_sequence,
                         const Scalar& self,
                         bool out_int32,
                         bool right,
-                        const std::optional<c10::string_view> side_opt,
+                        const std::optional<std::string_view> side_opt,
                         const std::optional<Tensor>& sorter) {
   const Tensor& scalar_tensor = mps::wrapped_scalar_tensor_mps(self, sorted_sequence.device());
   return searchsorted_mps(sorted_sequence, scalar_tensor, out_int32, right, side_opt, sorter);

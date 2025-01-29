@@ -23,15 +23,20 @@ from .ctx_manager import (
 )
 from .dicts import (
     ConstDictVariable,
-    CustomizedDictVariable,
     DefaultDictVariable,
+    DictKeySetVariable,
     FrozensetVariable,
+    NNModuleHooksDictVariable,
     SetVariable,
 )
 from .distributed import BackwardHookVariable, DistributedVariable, PlacementVariable
 from .functions import (
+    BuiltinMethodVariable,
+    CollectionsNamedTupleFunction,
     CreateTMADescriptorVariable,
+    FunctionDecoratedByContextlibContextManagerVariable,
     FunctoolsPartialVariable,
+    FunctoolsWrapsVariable,
     NestedUserFunctionVariable,
     PolyfilledFunctionVariable,
     SkipFunctionVariable,
@@ -57,6 +62,7 @@ from .iter import (
 from .lazy import LazyVariableTracker
 from .lists import (
     BaseListVariable,
+    FxImmutableListVariable,
     ListIteratorVariable,
     ListVariable,
     NamedTupleVariable,
@@ -69,13 +75,13 @@ from .lists import (
 from .misc import (
     AutogradFunctionContextVariable,
     AutogradFunctionVariable,
+    CellVariable,
     DeletedVariable,
     ExceptionVariable,
     GetAttrVariable,
     InspectSignatureVariable,
     LambdaVariable,
     MethodWrapperVariable,
-    NewCellVariable,
     NewGlobalVariable,
     NumpyVariable,
     PythonModuleVariable,
@@ -111,7 +117,9 @@ from .user_defined import (
     MutableMappingVariable,
     RemovableHandleVariable,
     UserDefinedClassVariable,
+    UserDefinedDictVariable,
     UserDefinedObjectVariable,
+    UserDefinedTupleVariable,
 )
 
 
@@ -128,12 +136,12 @@ __all__ = [
     "CountIteratorVariable",
     "CreateTMADescriptorVariable",
     "CUDADeviceVariable",
-    "CustomizedDictVariable",
     "CycleIteratorVariable",
     "DataPtrVariable",
     "DefaultDictVariable",
     "DeletedVariable",
     "DeterministicAlgorithmsVariable",
+    "DictKeySetVariable",
     "EnumVariable",
     "FakeItemVariable",
     "GetAttrVariable",
@@ -147,7 +155,7 @@ __all__ = [
     "ListVariable",
     "NamedTupleVariable",
     "NestedUserFunctionVariable",
-    "NewCellVariable",
+    "CellVariable",
     "NewGlobalVariable",
     "NNModuleVariable",
     "NumpyNdarrayVariable",
@@ -177,6 +185,7 @@ __all__ = [
     "UnspecializedPythonVariable",
     "UntypedStorageVariable",
     "UserDefinedClassVariable",
+    "UserDefinedTupleVariable",
     "UserDefinedObjectVariable",
     "UserFunctionVariable",
     "UserMethodVariable",

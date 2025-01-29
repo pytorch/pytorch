@@ -18,7 +18,8 @@ import itertools
 import os
 import tempfile
 import warnings
-from typing import Any, Callable, Collection, Mapping, Sequence, Tuple, Union
+from collections.abc import Collection, Mapping, Sequence
+from typing import Any, Callable, Union
 
 import numpy as np
 import numpy.typing as npt
@@ -36,7 +37,7 @@ _ORT_PROVIDERS = ("CPUExecutionProvider",)
 
 _NumericType = Union[Number, torch.Tensor, np.ndarray]
 _ModelType = Union[torch.nn.Module, torch.jit.ScriptModule]
-_InputArgsType = Union[torch.Tensor, Tuple[Any, ...]]
+_InputArgsType = Union[torch.Tensor, tuple[Any, ...]]
 _InputKwargsType = Mapping[str, Any]
 _OutputsType = Union[Sequence[_NumericType], Sequence]
 
@@ -1397,8 +1398,6 @@ class GraphInfo:
         original_outputs = list(graph.outputs())
         original_inputs = list(graph.inputs())
 
-        new_outputs = []
-
         def _process_bridge_value_for_lower(
             graph: torch.Graph, bridge_value: torch.Value
         ) -> torch.Value:
@@ -1416,9 +1415,9 @@ class GraphInfo:
             graph, pivot, process_bridge_value_for_lower
         )
 
-        for output in original_outputs:
-            if _produced_by(output, lower_nodes):
-                new_outputs.append(output)
+        new_outputs = [
+            output for output in original_outputs if _produced_by(output, lower_nodes)
+        ]
         for _ in enumerate(original_outputs):
             graph.eraseOutput(0)
         for output in new_outputs:

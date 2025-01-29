@@ -1695,14 +1695,12 @@ void initJITBindings(PyObject* module) {
                                        c10::DispatchKey dk_,
                                        const py::args& args,
                                        const py::kwargs& kwargs) {
-                    std::optional<c10::DispatchKey> dk =
-                        std::make_optional(dk_);
                     ToIValueAllowNumbersAsTensors g(allow_numbers_as_tensors);
                     return _get_operation_for_overload_or_packet(
-                        {op}, symbol, args, kwargs, /*is_overload*/ true, dk);
+                        {op}, symbol, args, kwargs, /*is_overload*/ true, dk_);
                   });
-              return std::make_optional(
-                  py::make_tuple(func, func_dk, py::cast(op->getTags().vec())));
+              return py::make_tuple(
+                  func, func_dk, py::cast(op->getTags().vec()));
             }
           }
           return std::nullopt;

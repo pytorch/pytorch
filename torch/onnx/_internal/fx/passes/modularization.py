@@ -5,7 +5,7 @@ import abc
 import collections
 import copy
 import operator
-from typing import Any, Dict, Final, Generator, Iterator, Sequence, Tuple
+from typing import Any, Final, TYPE_CHECKING
 
 import torch
 import torch.fx
@@ -13,14 +13,18 @@ from torch.onnx._internal.fx import _pass, diagnostics
 from torch.utils import _pytree as pytree
 
 
-_FX_TRACER_NN_MODULE_META_TYPE = Tuple[str, type]
+if TYPE_CHECKING:
+    from collections.abc import Generator, Iterator, Sequence
+
+
+_FX_TRACER_NN_MODULE_META_TYPE = tuple[str, type]
 """Legacy type of item from `node.meta["nn_module_stack"].items()` produced by FX symbolic tracer."""
 _FX_TRACER_NN_MODULE_STACK_META_TYPE = collections.OrderedDict
 """Legacy type of `node.meta["nn_module_stack"]` produced by FX symbolic tracer."""
 
-_DYNAMO_NN_MODULE_META_TYPE = Tuple[str, Tuple[str, type]]
+_DYNAMO_NN_MODULE_META_TYPE = tuple[str, tuple[str, type]]
 """Type of item from `node.meta["nn_module_stack"].items()` produced by FX dynamo tracer."""
-_DYNAMO_NN_MODULE_STACK_META_TYPE = Dict[str, _DYNAMO_NN_MODULE_META_TYPE]
+_DYNAMO_NN_MODULE_STACK_META_TYPE = dict[str, _DYNAMO_NN_MODULE_META_TYPE]
 """Type of `node.meta["nn_module_stack"]` produced by FX dynamo tracer."""
 
 
@@ -107,12 +111,12 @@ class _ModuleMeta:
         """
         return self._raw_meta
 
-    def __eq__(self, __value: object) -> bool:
-        if not isinstance(__value, _ModuleMeta):
+    def __eq__(self, other: object, /) -> bool:
+        if not isinstance(other, _ModuleMeta):
             return False
         return (
-            self._module_name == __value._module_name
-            and self._module_class == __value._module_class
+            self._module_name == other._module_name
+            and self._module_class == other._module_class
         )
 
     def __hash__(self) -> int:
@@ -286,10 +290,10 @@ class _ModuleStackMeta:
         """Pushes a module meta to the stack."""
         self._module_stack.append(module_meta)
 
-    def __eq__(self, __value: object) -> bool:
-        if not isinstance(__value, _ModuleStackMeta):
+    def __eq__(self, other: object, /) -> bool:
+        if not isinstance(other, _ModuleStackMeta):
             return False
-        return self._module_stack == __value._module_stack
+        return self._module_stack == other._module_stack
 
     @property
     def raw_meta(self) -> dict[str, tuple[str, type]] | None:

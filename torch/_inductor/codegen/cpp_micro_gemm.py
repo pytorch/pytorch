@@ -2,14 +2,22 @@
 import dataclasses
 import sys
 from enum import Enum
-from typing import Callable, Dict, List, Optional, Type
+from typing import Callable, Optional
 
 import sympy
 
 import torch
 
 from .. import cpp_builder, ir
-from ..cpu_vec_isa import pick_vec_isa, VecAMX, VecAVX2, VecAVX512, VecISA
+from ..cpu_vec_isa import (
+    pick_vec_isa,
+    VecAMX,
+    VecAVX2,
+    VecAVX512,
+    VecISA,
+    VecNEON,
+    VecSVE,
+)
 from ..utils import IndentedBuffer, parallel_num_threads
 from ..virtualized import V
 from .common import KernelTemplate
@@ -84,7 +92,7 @@ inline void {{kernel_name}}(
         self.alpha = alpha
 
     def get_common_options(self):
-        if self.input_dtype == torch.uint8:
+        if self.input_dtype in [torch.uint8, torch.int8]:
             assert self.compute_dtype == torch.int32
             assert self.output_dtype == torch.int32
             assert self.input2_dtype == torch.int8
@@ -101,8 +109,8 @@ inline void {{kernel_name}}(
             "compute_t": DTYPE_TO_CPP[self.compute_dtype],
             "alpha": self.alpha,
             "kernel_extra_args_declare": self.get_kernel_extra_args_declare(),
-            "int8_gemm": self.input_dtype == torch.uint8,
-            "vnni_size": 4 if self.input_dtype == torch.uint8 else 2,
+            "int8_gemm": self.input_dtype in [torch.uint8, torch.int8],
+            "vnni_size": 4 if self.input_dtype in [torch.uint8, torch.int8] else 2,
             "restrict_keyword": get_restrict_keyword(),
             "is_msvc_compiler": cpp_builder.is_msvc_cl(),
         }
@@ -181,12 +189,12 @@ class CppMicroGemmConfig:
     input2_dtype: torch.dtype
     output_dtype: torch.dtype
     compute_dtype: torch.dtype
-    vec_isa_cls: Type[VecISA]
+    vec_isa_cls: type[VecISA]
     register_blocking: GemmBlocking
     extra_check: Optional[Callable[..., bool]] = None
 
 
-micro_gemm_configs: Dict[Type[CppMicroGemm], List[CppMicroGemmConfig]] = {}
+micro_gemm_configs: dict[type[CppMicroGemm], list[CppMicroGemmConfig]] = {}
 
 
 def register_micro_gemm(*configs):
@@ -319,6 +327,22 @@ class CppMicroGemmRef(CppMicroGemm):
         [(4, 24, 1), (4, 16, 1), (8, 8, 1)],
         input_dtype=torch.bfloat16,
         input2_dtype=torch.int8,
+        output_dtype=torch.float,
+        compute_dtype=torch.float,
+    ),
+    *generate_gemm_config(
+        VecNEON,
+        [(4, 24, 1), (4, 16, 1), (8, 8, 1)],
+        input_dtype=torch.float,
+        input2_dtype=torch.float,
+        output_dtype=torch.float,
+        compute_dtype=torch.float,
+    ),
+    *generate_gemm_config(
+        VecSVE,
+        [(4, 24, 1), (4, 16, 1), (8, 8, 1)],
+        input_dtype=torch.float,
+        input2_dtype=torch.float,
         output_dtype=torch.float,
         compute_dtype=torch.float,
     ),
@@ -469,11 +493,20 @@ inline void {{kernel_name}}_kernel(
 
 # extra check for CppMicroGemmAMX
 def check_amx_extra(config, m, n, k, alpha, num_threads):
-    vnni_size = 4 if config.input_dtype == torch.uint8 else 2
+    vnni_size = 4 if config.input_dtype in [torch.uint8, torch.int8] else 2
     return k % vnni_size == 0 and alpha == 1
 
 
 @register_micro_gemm(
+    *generate_gemm_config(
+        VecAMX,
+        [(32, 32, 64), (48, 16, 64)],
+        input_dtype=torch.int8,
+        input2_dtype=torch.int8,
+        output_dtype=torch.int32,
+        compute_dtype=torch.int32,
+        extra_check=check_amx_extra,
+    ),
     *generate_gemm_config(
         VecAMX,
         [(32, 32, 32), (48, 16, 32), (16, 48, 32)],
@@ -514,11 +547,8 @@ class CppMicroGemmAMX(CppMicroGemm):
 {%- if use_cached_dequantized_B %}
     // Create a stack-allocated buffer for tiles of B.
     // Except maybe for the tail-case, an AMX tile of B has 16x32 BF16 elements.
-    const auto num_elements_per_b_tile = 512;
-    const auto last_k_offset = K / {{block_k}} * {{block_k}};
-    const auto tail_k_size = K - last_k_offset;
     // we cache K * {{block_n}} elements of dequantized B
-    const auto buf_size = K * {{block_n}} * sizeof({{input_t}});
+    const auto buf_size = K * {{block_n}};
     {%- if is_msvc_compiler %}
     // MSVC doesn't support stack-allocated dynamic-sized arrays, so using heap memory here.
     std::unique_ptr<{{input_t}}[]> heap_deq_b_buf_ptr(new {{input_t}}[buf_size]);
@@ -531,44 +561,42 @@ class CppMicroGemmAMX(CppMicroGemm):
     alignas(4096) {{input_t}} dequantized_B_buf[buf_size];
     {%- endif %}
 
-    const auto b_tile_ptr_stride = ldb * {{vnni_size}};
-
-    auto load_B_row = [&]({{input2_t}}* {{restrict_keyword}} src, {{input_t}}* {{restrict_keyword}} dst) {
-        auto b_int8 = at::vec::Vectorized<int8_t>::loadu(src, static_cast<int64_t>(32));
-        auto b_bf16 = at::vec::convert<{{input_t}}>(b_int8);
-        b_bf16.store(dst);
-    };
-
-    auto load_B_tile = [&]({{input2_t}}* B_ptr, int idx, int num_b_rows) {
-        {{input_t}}* base_addr = dequantized_B_buf + idx;
-        {{kernel.unroll_pragma(8)}}
-        for (int i = 0; i < num_b_rows; i++) {
-            load_B_row(
-                B_ptr + i * b_tile_ptr_stride,
-                base_addr + i * 32
-            );
-        }
-    };
-    auto load_dequantized_B = [&](int n) {
+    auto load_dequantized_B = [&](int base_idx) {
         // Load a tile of B & cache it in L1D.
-        {{kernel.unroll_pragma(4)}}
-        for (int k = 0; k < K; k += {{block_k}}) {
-            int num_b_rows = (k < last_k_offset) ? 16 : tail_k_size;
-            {{kernel.unroll_pragma(2)}}
-            for (int tile_col = 0; tile_col <= 1; tile_col++) {
-                load_B_tile(
-                    const_cast<{{input2_t}}*>(B) + n + k * ldb + tile_col * {{16 * vnni_size}},
-                    (k / {{block_k // 2}} + tile_col) * num_elements_per_b_tile,
-                    num_b_rows
-                );
-            }
+        {{input2_t}}* base_addr = const_cast<{{input2_t}}*>(B) + base_idx;
+        for (int idx_dq = 0, idx_q = 0; idx_dq < buf_size; idx_q += ldb, idx_dq += {{block_n}}) {
+        {%- for vec_idx in range(0, block_n - 1, 32) %}
+            auto b_int8 = at::vec::Vectorized<int8_t>::loadu(
+                base_addr + idx_q + {{vec_idx}} ,
+                static_cast<int64_t>(32)
+            );
+            auto b_bf16 = at::vec::convert<{{input_t}}>(b_int8);
+            b_bf16.store(dequantized_B_buf + idx_dq + {{vec_idx}});
+        {%- endfor %}
+        {%- if (block_n % 32) != 0 %}
+            auto b_int8_tail = at::vec::Vectorized<int8_t>::loadu(
+                base_addr + idx_q + {{block_n - (block_n % 32)}},
+                static_cast<int64_t>({{block_n % 32}})
+            );
+            auto b_bf16_tail = at::vec::convert<{{input_t}}>(b_int8_tail);
+            b_bf16_tail.store(
+                dequantized_B_buf + idx_dq + {{block_n - (block_n % 32)}},
+                static_cast<int64_t>({{block_n % 32}})
+            );
+        {%- endif %}
         }
     };
+{%- endif %}
+// The ldb would not be block_n if N != block_n
+{%- if use_cached_dequantized_B %}
+    const int64_t updated_ldb = {{block_n}};
+{%- else %}
+    const int64_t updated_ldb = ldb;
 {%- endif %}
     // TODO(jgong5): loop unroll for M and N
     for (int64_t n = 0; n < N; n += {{block_n}}) {
 {%- if use_cached_dequantized_B %}
-        // Dequantize K * 32 int8 B elements into BF16
+        // Dequantize K * block_n int8 B elements into BF16
         load_dequantized_B(n);
 {%- endif %}
         for (int64_t m = 0; m < M; m += {{block_m}}) {
@@ -590,7 +618,7 @@ class CppMicroGemmAMX(CppMicroGemm):
                     C + m * ldc + n,
                     K,
                     lda,
-                    ldb,
+                    updated_ldb,
                     ldc,
                     16
                 );
@@ -610,7 +638,7 @@ class CppMicroGemmAMX(CppMicroGemm):
                     C + m_tail * ldc + n,
                     K,
                     lda,
-                    ldb,
+                    updated_ldb,
                     ldc,
                     block_m
                 );
@@ -673,11 +701,6 @@ inline void {{kernel_name}}_amx_kernel_{{num_rows}}_{{num_columns}}(
     }
 
     auto compute = [&](int k) {
-{%- if use_cached_dequantized_B %}
-    // base index for dequantized B
-    const auto num_elements_per_b_tile = 512;
-    const auto base_idx_of_deq_B = (k / {{block_k // 2}}) * num_elements_per_b_tile;
-{%- endif %}
 {%- set tile_offset_a = num_rows // 16 * num_columns %}
 {%- set tile_offset_b = tile_offset_a + num_rows // 16 %}
 {%- for tile_row in range(num_rows // 16) %}
@@ -689,14 +712,14 @@ inline void {{kernel_name}}_amx_kernel_{{num_rows}}_{{num_columns}}(
         _tile_stream_loadd({{tile_idx_a}}, A + {{tile_row * 16}} * lda + k, lda * sizeof({{input_t}}));
         {%- endif %}
         {%- if tile_row == 0 %}
-            {%- if use_cached_dequantized_B %}
-        _tile_loadd({{tile_idx_b}}, B + base_idx_of_deq_B + {{tile_col}} * num_elements_per_b_tile, 64);
-            {%- else %}
         _tile_loadd({{tile_idx_b}}, B + k * ldb + {{tile_col * 16 * vnni_size}}, ldb * {{vnni_size}} * sizeof({{input_t}}));
-            {%- endif %}
         {%- endif %}
         {%- if int8_gemm %}
+            {%- if input_dtype == torch.int8 %}
+        _tile_dpbssd({{tile_idx_c}}, {{tile_idx_a}}, {{tile_idx_b}});
+            {%- else %}
         _tile_dpbusd({{tile_idx_c}}, {{tile_idx_a}}, {{tile_idx_b}});
+            {%- endif %}
         {%- else %}
         _tile_dpbf16ps({{tile_idx_c}}, {{tile_idx_a}}, {{tile_idx_b}});
         {%- endif %}
@@ -737,7 +760,7 @@ inline void {{kernel_name}}_amx_kernel_{{num_rows}}_{{num_columns}}(
         block_m, block_n, block_k = self.register_blocking
         assert block_m % 16 == 0, "Only support block_m % 16 == 0 for AMX"
         assert block_n % 16 == 0, "Only support block_n % 16 == 0 for AMX"
-        if self.input_dtype == torch.uint8:
+        if self.input_dtype in [torch.uint8, torch.int8]:
             assert block_k == 64, "Only support block_k = 64 for AMX INT8"
         else:
             assert block_k == 32, "Only support block_k = 32 for AMX Bfloat16/Float16"
@@ -784,7 +807,7 @@ inline void {{kernel_name}}_amx_kernel_{{num_rows}}_{{num_columns}}(
         return "amx_state,"
 
     def get_b_layout(self):
-        if self.input_dtype == torch.uint8:
+        if self.input_dtype in [torch.uint8, torch.int8]:
             return LayoutType.VNNI4
         else:
             return LayoutType.VNNI2

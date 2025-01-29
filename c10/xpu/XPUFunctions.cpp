@@ -18,6 +18,20 @@ namespace {
  * determined at runtime. There's currently a SYCL device pool that is lazily
  * created and only initialized once, ensuring thread-local safety. Each device
  * within the device pool shares the same default context.
+ *
+ * In certain scenarios, GPU devices may reside on separate SYCL platforms. For
+ * instance, on Windows, an integrated GPU (iGPU) and a discrete GPU (dGPU) may
+ * exist on different platforms. Since sycl::context cannot span across multiple
+ * platforms, creating a single default context that includes both becomes
+ * infeasible.
+ *
+ * To address this limitation, we prioritize the enumeration of dGPU. The device
+ * enumeration logic is as follows:
+ * 1. Identify the first Level Zero (L0) platform that contains at least one
+ *    dGPU and enumerate all dGPUs on that platform.
+ * 2. If no dGPU is found, identify the first L0 platform containing at least
+ *    one iGPU and enumerate all iGPUs on that platform.
+ * 3. If neither dGPUs nor iGPUs are found, conclude that no GPUs are available.
  */
 c10::once_flag init_flag;
 thread_local DeviceIndex curDeviceIndex = 0;
@@ -28,24 +42,75 @@ struct DevicePool {
 } gDevicePool;
 
 void enumDevices(std::vector<std::unique_ptr<sycl::device>>& devices) {
+  // See Note [Device Management] for more details.
   auto platform_list = sycl::platform::get_platforms();
-  // Enumerated GPU devices from the specific platform.
-  for (const auto& platform : platform_list) {
+  auto is_igpu = [](const sycl::device& device) {
+    // Generally, iGPUs share a unified memory subsystem with the host.
+    return device.get_info<sycl::info::device::host_unified_memory>();
+  };
+
+  // Check if a platform contains at least one GPU (either iGPU or dGPU).
+  auto has_gpu = [&is_igpu](const sycl::platform& platform, bool check_igpu) {
+    // Only consider platforms using the Level Zero backend.
     if (platform.get_backend() != sycl::backend::ext_oneapi_level_zero) {
-      continue;
+      return false;
     }
-    auto device_list = platform.get_devices();
-    for (const auto& device : device_list) {
-      if (device.is_gpu()) {
-        devices.push_back(std::make_unique<sycl::device>(device));
+    // Check if the platform contains at least one GPU.
+    for (const auto& device : platform.get_devices()) {
+      if (device.is_gpu() &&
+          (check_igpu ? is_igpu(device) : !is_igpu(device))) {
+        return true;
       }
     }
+    // No GPU found on the platform.
+    return false;
+  };
+
+  // Case 1: Platform with dGPU found. Most platforms with dGPU only have dGPU
+  // or a combination of dGPU and iGPU.
+  for (const auto& platform : platform_list) {
+    // Find the first platform that contains at least one dGPU.
+    if (has_gpu(platform, /*check_igpu=*/false)) {
+      for (const auto& device : platform.get_devices()) {
+        // Only add all dGPUs to the device list.
+        if (device.is_gpu() && !is_igpu(device)) {
+          devices.push_back(std::make_unique<sycl::device>(device));
+        }
+      }
+      return; // Exit early since we already found a platform with dGPU.
+    }
   }
+
+  // Case 2: No dGPU found, but a platform with iGPU is available.
+  for (const auto& platform : platform_list) {
+    // Find the first platform that contains at least one iGPU.
+    if (has_gpu(platform, /*check_igpu=*/true)) {
+      for (const auto& device : platform.get_devices()) {
+        // Add all iGPUs to the device list.
+        if (device.is_gpu()) { // If the device is a GPU, it must be a iGPU.
+          devices.push_back(std::make_unique<sycl::device>(device));
+        }
+      }
+      return; // Exit early since we already found a platform with iGPU.
+    }
+  }
+
+  // Case 3: No GPUs found (neither dGPU nor iGPU) - Do nothing.
 }
 
 inline void initGlobalDevicePoolState() {
-  // Enumerate all GPU devices and record them.
-  enumDevices(gDevicePool.devices);
+  // Attempt to initialize XPU devices. If no device is found or the driver is
+  // not installed correctly, issue a warning message instead of raising an
+  // exception to avoid disrupting the user experience.
+  try {
+    // Enumerate all GPU devices and record them.
+    enumDevices(gDevicePool.devices);
+  } catch (const sycl::exception& e) {
+    TORCH_WARN(
+        "Failed to initialize XPU devices. The driver may not be installed, installed incorrectly, or incompatible with the current setup. ",
+        "Please refer to the guideline (https://github.com/pytorch/pytorch?tab=readme-ov-file#intel-gpu-support) for proper installation and configuration.");
+    return;
+  }
   if (gDevicePool.devices.empty()) {
     TORCH_WARN("XPU device count is zero!");
     return;
@@ -56,8 +121,9 @@ inline void initGlobalDevicePoolState() {
       gDevicePool.devices.size() <= std::numeric_limits<DeviceIndex>::max(),
       "Too many XPU devices, DeviceIndex overflowed!");
 
-#ifdef _WIN32
-  // default context feature is disabled by default on Windows.
+#if defined(_WIN32) && SYCL_COMPILER_VERSION < 20250000
+  // The default context feature is disabled by default on Windows for SYCL
+  // compiler versions earlier than 2025.0.0.
   std::vector<sycl::device> deviceList;
   for (auto it = gDevicePool.devices.begin(); it != gDevicePool.devices.end();
        ++it) {

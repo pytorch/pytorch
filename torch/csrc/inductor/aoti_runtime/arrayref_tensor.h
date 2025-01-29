@@ -1,6 +1,7 @@
 #pragma once
 
 #include <torch/csrc/inductor/aoti_runtime/utils.h>
+#include <torch/csrc/inductor/aoti_torch/c/shim.h>
 
 #include <cassert>
 #include <cstdint>
@@ -226,6 +227,24 @@ class ArrayRefTensor {
     return expensiveCopyToTensor();
   }
 
+  AtenTensorHandle borrowAsTensor() const {
+    AtenTensorHandle result = nullptr;
+    AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_create_tensor_from_blob_v2(
+        data(),
+        sizes_.size(),
+        sizes_.data(),
+        strides_.data(),
+        0,
+        aoti_torch_dtype<std::remove_const_t<T>>(),
+        device_type_,
+        device_idx_,
+        &result,
+        aoti_torch_layout_strided(),
+        nullptr,
+        0));
+    return result;
+  }
+
   // We don't need to free any memory.
   void reset() {}
 
@@ -341,14 +360,25 @@ inline AtenTensorHandle expensive_copy_to_tensor_if_needed(
 }
 
 template <typename T>
-const T& convert_arrayref_tensor_to_tensor(const T& t) {
+const T& copy_arrayref_tensor_to_tensor(const T& t) {
   return t;
 }
 
 template <typename T>
-RAIIAtenTensorHandle convert_arrayref_tensor_to_tensor(
+RAIIAtenTensorHandle copy_arrayref_tensor_to_tensor(
     const ArrayRefTensor<T>& art) {
   return art.expensiveCopyToTensor();
+}
+
+template <typename T>
+const T& borrow_arrayref_tensor_as_tensor(const T& t) {
+  return t;
+}
+
+template <typename T>
+RAIIAtenTensorHandle borrow_arrayref_tensor_as_tensor(
+    const ArrayRefTensor<T>& art) {
+  return art.borrowAsTensor();
 }
 
 } // namespace torch::aot_inductor

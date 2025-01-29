@@ -6,11 +6,11 @@ import json
 import sys
 import unittest
 from pathlib import Path
-from typing import Any, Dict
+from typing import Any
 from unittest import mock
 
 
-REPO_ROOT = Path(__file__).resolve().parent.parent.parent
+REPO_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO_ROOT))
 
 from tools.stats.upload_metrics import add_global_metric, emit_metric, global_metrics
@@ -35,7 +35,7 @@ JOB_NAME = "some-job-name"
 
 @mock.patch("boto3.resource")
 class TestUploadStats(unittest.TestCase):
-    emitted_metric: Dict[str, Any] = {"did_not_emit": True}
+    emitted_metric: dict[str, Any] = {"did_not_emit": True}
 
     def mock_put_item(self, **kwargs: Any) -> None:
         # Utility for mocking putting items into s3.  THis will save the emitted

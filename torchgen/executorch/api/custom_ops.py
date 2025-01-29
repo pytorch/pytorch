@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from collections import defaultdict
 from dataclasses import dataclass
-from typing import Sequence, TYPE_CHECKING
+from typing import TYPE_CHECKING
 
 from torchgen import dest
 
@@ -15,6 +15,8 @@ from torchgen.utils import concatMap, Target
 
 
 if TYPE_CHECKING:
+    from collections.abc import Sequence
+
     from torchgen.executorch.model import ETKernelIndex
     from torchgen.selective_build.selector import SelectiveBuilder
 

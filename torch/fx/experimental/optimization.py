@@ -4,8 +4,9 @@ import logging
 import operator
 import time
 from collections import defaultdict
+from collections.abc import Iterable
 from enum import Enum
-from typing import Any, cast, Dict, Iterable, List, Optional, Tuple, Type
+from typing import Any, cast, Optional
 
 import torch
 import torch.fx as fx
@@ -14,10 +15,26 @@ import torch.nn.functional as F
 import torch.utils.mkldnn as th_mkldnn
 from torch.fx.node import Argument, Target
 from torch.fx.passes.shape_prop import ShapeProp
-from torch.nn.utils.fusion import fuse_conv_bn_eval
+from torch.nn.utils.fusion import fuse_conv_bn_eval, fuse_linear_bn_eval
 
 
-def _parent_name(target: str) -> Tuple[str, str]:
+__all__ = [
+    "matches_module_pattern",
+    "replace_node_module",
+    "fuse",
+    "remove_dropout",
+    "extract_subgraph",
+    "modules_to_mkldnn",
+    "reset_modules",
+    "MklSubgraph",
+    "gen_mkl_autotuner",
+    "use_mkl_length",
+    "UnionFind",
+    "optimize_for_inference",
+]
+
+
+def _parent_name(target: str) -> tuple[str, str]:
     """
     Splits a qualname into parent path and last atom.
     For example, `foo.bar.baz` -> (`foo.bar`, `baz`)
@@ -28,11 +45,11 @@ def _parent_name(target: str) -> Tuple[str, str]:
 
 # Works for length 2 patterns with 2 modules
 def matches_module_pattern(
-    pattern: Iterable[Type], node: fx.Node, modules: Dict[str, Any]
+    pattern: Iterable[type], node: fx.Node, modules: dict[str, Any]
 ):
     if len(node.args) == 0:
         return False
-    nodes: Tuple[Any, fx.Node] = (node.args[0], node)
+    nodes: tuple[Any, fx.Node] = (node.args[0], node)
     for expected_type, current_node in zip(pattern, nodes):
         if not isinstance(current_node, fx.Node):
             return False
@@ -48,7 +65,7 @@ def matches_module_pattern(
 
 
 def replace_node_module(
-    node: fx.Node, modules: Dict[str, Any], new_module: torch.nn.Module
+    node: fx.Node, modules: dict[str, Any], new_module: torch.nn.Module
 ):
     assert isinstance(node.target, str)
     parent_name, name = _parent_name(node.target)
@@ -58,13 +75,14 @@ def replace_node_module(
 
 def fuse(model: torch.nn.Module, inplace=False, no_trace=False) -> torch.nn.Module:
     """
-    Fuses convolution/BN layers for inference purposes. Will deepcopy your
-    model by default, but can modify the model inplace as well.
+    Fuses convolution/BN and linear/BN layers for inference purposes.
+    Will deepcopy your model by default, but can modify the model inplace as well.
     """
     patterns = [
         (nn.Conv1d, nn.BatchNorm1d),
         (nn.Conv2d, nn.BatchNorm2d),
         (nn.Conv3d, nn.BatchNorm3d),
+        (nn.Linear, nn.BatchNorm1d),
     ]
     if not inplace:
         model = copy.deepcopy(model)
@@ -78,14 +96,18 @@ def fuse(model: torch.nn.Module, inplace=False, no_trace=False) -> torch.nn.Modu
     for pattern in patterns:
         for node in new_graph.nodes:
             if matches_module_pattern(pattern, node, modules):
-                if len(node.args[0].users) > 1:  # Output of conv is used by other nodes
+                if len(node.args[0].users) > 1:
+                    # Output of conv/linear is used by other nodes
                     continue
-                conv = modules[node.args[0].target]
+                first_layer = modules[node.args[0].target]
                 bn = modules[node.target]
                 if not bn.track_running_stats:
                     continue
-                fused_conv = fuse_conv_bn_eval(conv, bn)
-                replace_node_module(node.args[0], modules, fused_conv)
+                if pattern[0] in [nn.Conv1d, nn.Conv2d, nn.Conv3d]:
+                    fused_layer = fuse_conv_bn_eval(first_layer, bn)
+                else:  # nn.Linear
+                    fused_layer = fuse_linear_bn_eval(first_layer, bn)
+                replace_node_module(node.args[0], modules, fused_layer)
                 node.replace_all_uses_with(node.args[0])
                 new_graph.erase_node(node)
     return fx.GraphModule(fx_model, new_graph)
@@ -99,7 +121,7 @@ def remove_dropout(model: nn.Module) -> nn.Module:
 
     class DropoutRemover(torch.fx.Transformer):
         def call_module(
-            self, target: Target, args: Tuple[Argument, ...], kwargs: Dict[str, Any]
+            self, target: Target, args: tuple[Argument, ...], kwargs: dict[str, Any]
         ) -> Any:
             if isinstance(self.submodules[target], nn.Dropout):
                 assert len(args) == 1
@@ -112,15 +134,15 @@ def remove_dropout(model: nn.Module) -> nn.Module:
 
 def extract_subgraph(
     orig_module: nn.Module,
-    nodes: List[fx.Node],
-    inputs: List[fx.Node],
-    outputs: List[fx.Node],
+    nodes: list[fx.Node],
+    inputs: list[fx.Node],
+    outputs: list[fx.Node],
 ):
     """
     Given lists of nodes from an existing graph that represent a subgraph, returns a submodule that executes that subgraph.
     """
     new_graph = fx.Graph()
-    env: Dict[fx.Node, fx.Node] = {}
+    env: dict[fx.Node, fx.Node] = {}
     for input in inputs:
         new_node = new_graph.placeholder(input.name)
         env[input] = new_node
@@ -159,13 +181,13 @@ mkldnn_map = {
 }
 
 
-def modules_to_mkldnn(nodes: List[fx.Node], modules: Dict[str, nn.Module]):
+def modules_to_mkldnn(nodes: list[fx.Node], modules: dict[str, nn.Module]):
     """
     For each node, if it's a module that can be preconverted into MKLDNN,
     then we do so and create a mapping to allow us to convert from the MKLDNN
     version of the module to the original.
     """
-    old_modules: Dict[nn.Module, nn.Module] = {}
+    old_modules: dict[nn.Module, nn.Module] = {}
     for node in nodes:
         if node.op == "call_module":
             assert isinstance(node.target, str)
@@ -179,9 +201,9 @@ def modules_to_mkldnn(nodes: List[fx.Node], modules: Dict[str, nn.Module]):
 
 
 def reset_modules(
-    nodes: List[fx.Node],
-    modules: Dict[str, nn.Module],
-    old_modules: Dict[nn.Module, nn.Module],
+    nodes: list[fx.Node],
+    modules: dict[str, nn.Module],
+    old_modules: dict[nn.Module, nn.Module],
 ):
     """
     Maps each module that's been changed with `modules_to_mkldnn` back to its
@@ -198,9 +220,9 @@ def reset_modules(
 class MklSubgraph:
     def __init__(self, fx_graph: fx.Graph):
         self.fx_graph = fx_graph
-        self.nodes: List[fx.Node] = []
-        self.start_nodes: List[fx.Node] = []
-        self.end_nodes: List[fx.Node] = []
+        self.nodes: list[fx.Node] = []
+        self.start_nodes: list[fx.Node] = []
+        self.end_nodes: list[fx.Node] = []
 
 
 def gen_mkl_autotuner(example_inputs, iters=10, warmup=1):
@@ -223,7 +245,7 @@ def gen_mkl_autotuner(example_inputs, iters=10, warmup=1):
             old_modules = graph.fx_graph.old_modules  # type: ignore[attr-defined]
             ShapeProp(fx_model).propagate(example_inputs)
         sample_inputs = [torch.randn(node.shape) for node in input_nodes]  # type: ignore[attr-defined]
-        output_args = cast(List[fx.Node], [node.args[0] for node in graph.end_nodes])
+        output_args = cast(list[fx.Node], [node.args[0] for node in graph.end_nodes])
         submodule = extract_subgraph(fx_model, graph.nodes, input_nodes, output_args)
 
         def benchmark(f):
@@ -260,8 +282,8 @@ def use_mkl_length(graph: MklSubgraph) -> bool:
 
 class UnionFind:
     def __init__(self, n):
-        self.parent: List[Optional[int]] = [None] * n
-        self.size: List[int] = [0] * n
+        self.parent: list[Optional[int]] = [None] * n
+        self.size: list[int] = [0] * n
 
     def make_set(self, v: int):
         self.parent[v] = v
@@ -287,8 +309,8 @@ class UnionFind:
 
 def optimize_for_inference(
     model: torch.nn.Module,
-    pass_config: Optional[Dict[str, Any]] = None,
-    tracer: Type[fx.Tracer] = fx.Tracer,
+    pass_config: Optional[dict[str, Any]] = None,
+    tracer: type[fx.Tracer] = fx.Tracer,
 ) -> torch.nn.Module:
     """
     Performs a set of optimization passes to optimize a model for the
@@ -327,7 +349,7 @@ def optimize_for_inference(
     cur_tracer = tracer()
     fx_graph = cur_tracer.trace(copy.deepcopy(model))
     fx.GraphModule(cur_tracer.root, fx_graph)
-    modules: Dict[str, nn.Module] = dict(model.named_modules())
+    modules: dict[str, nn.Module] = dict(model.named_modules())
 
     class MklSupport(Enum):
         NO = 1
@@ -367,7 +389,7 @@ def optimize_for_inference(
                     node.args, lambda n: fx_graph.call_method("to_mkldnn", (n,))
                 )
 
-            node.args = cast(Tuple[fx.node.Argument], mkldnn_args)
+            node.args = cast(tuple[fx.node.Argument], mkldnn_args)
 
             with fx_graph.inserting_after(node):
                 dense_x = fx_graph.create_node("call_method", "to_dense", (node,))
@@ -434,7 +456,7 @@ def optimize_for_inference(
             for other_color in cur_colors[1:]:
                 uf.join(cur_colors[0], other_color)
 
-    mkldnn_graphs: Dict[int, MklSubgraph] = defaultdict(lambda: MklSubgraph(fx_graph))
+    mkldnn_graphs: dict[int, MklSubgraph] = defaultdict(lambda: MklSubgraph(fx_graph))
     for node in fx_graph.nodes:
         if hasattr(node, "color"):
             mkldnn_graphs[uf.find(node.color)].nodes.append(node)

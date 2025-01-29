@@ -13,7 +13,7 @@ import inspect
 import re
 import typing
 import warnings
-from typing import Any, Callable, cast, Collection, Mapping, Sequence
+from typing import Any, Callable, cast
 
 import torch
 import torch._C._onnx as _C_onnx
@@ -23,6 +23,10 @@ from torch import _C
 from torch.onnx import _constants, _deprecation, errors, symbolic_helper  # noqa: F401
 from torch.onnx._globals import GLOBALS
 from torch.onnx._internal import diagnostics, jit_utils, onnx_proto_utils, registration
+
+
+if typing.TYPE_CHECKING:
+    from collections.abc import Collection, Mapping, Sequence
 
 
 __all__ = [
@@ -653,9 +657,14 @@ def _optimize_graph(
     graph = _C._jit_pass_canonicalize(graph)
     _C._jit_pass_lint(graph)
     if GLOBALS.onnx_shape_inference:
-        _C._jit_pass_onnx_graph_shape_type_inference(
-            graph, params_dict, GLOBALS.export_onnx_opset_version
-        )
+        try:
+            _C._jit_pass_onnx_graph_shape_type_inference(
+                graph, params_dict, GLOBALS.export_onnx_opset_version
+            )
+        except RuntimeError:
+            # NOTE: shape type inference error should not stop the export process
+            # https://github.com/pytorch/pytorch/issues/132205
+            pass
 
     return graph
 
@@ -1118,9 +1127,14 @@ def _model_to_graph(
         _C._jit_pass_dce_allow_deleting_nodes_with_side_effects(graph)
 
     if GLOBALS.onnx_shape_inference:
-        _C._jit_pass_onnx_graph_shape_type_inference(
-            graph, params_dict, GLOBALS.export_onnx_opset_version
-        )
+        try:
+            _C._jit_pass_onnx_graph_shape_type_inference(
+                graph, params_dict, GLOBALS.export_onnx_opset_version
+            )
+        except RuntimeError:
+            # NOTE: shape type inference error should not stop the export process
+            # https://github.com/pytorch/pytorch/issues/132205
+            pass
 
     params_dict = _C._jit_pass_onnx_eliminate_unused_items(graph, params_dict)
 
@@ -1522,8 +1536,8 @@ def _set_input_and_output_names(graph, input_names, output_names):
             return
         if len(name_list) > len(node_list):
             raise RuntimeError(
-                "number of %s names provided (%d) exceeded number of %ss (%d)"
-                % (descriptor, len(name_list), descriptor, len(node_list))
+                f"number of {descriptor} names provided ({len(name_list)}) "
+                f"exceeded number of {descriptor}s ({len(node_list)})"
             )
 
         # Mark if the output node DebugName is set before.

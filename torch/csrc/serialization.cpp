@@ -1,9 +1,9 @@
 #include <torch/csrc/python_headers.h>
-#include <system_error>
 #include <vector>
 
 #include <ATen/ops/from_blob.h>
 #include <c10/core/CPUAllocator.h>
+#include <c10/util/error.h>
 #include <torch/csrc/THP.h>
 #include <torch/csrc/serialization.h>
 
@@ -169,7 +169,11 @@ void doRead(io fildes, void* raw_buf, size_t nbytes) {
         continue;
       } else {
         TORCH_CHECK(
-            false, "read(): fd ", fildes, " failed with ", strerror(err));
+            false,
+            "read(): fd ",
+            fildes,
+            " failed with ",
+            c10::utils::str_error(err));
       }
     } else if (r == 0) {
       break;
@@ -211,7 +215,11 @@ void doWrite(io fildes, void* raw_buf, size_t nbytes) {
         continue;
       } else {
         TORCH_CHECK(
-            false, "write(): fd ", fildes, " failed with ", strerror(err));
+            false,
+            "write(): fd ",
+            fildes,
+            " failed with ",
+            c10::utils::str_error(err));
       }
     }
     buf += r;

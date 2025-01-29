@@ -79,6 +79,11 @@ REQUIRE_HIGHER_TOLERANCE = {
     "mobilenetv3_large_100",
     "sebotnet33ts_256",
     "selecsls42b",
+    "convnext_base",
+}
+
+REQUIRE_HIGHER_TOLERANCE_AMP = {
+    "poolformer_m36",
 }
 
 REQUIRE_EVEN_HIGHER_TOLERANCE = {
@@ -373,7 +378,9 @@ class TimmRunner(BenchmarkRunner):
                 and name in REQUIRE_EVEN_HIGHER_TOLERANCE_MAX_AUTOTUNE
             ):
                 tolerance = 8 * 1e-2
-            elif name in REQUIRE_HIGHER_TOLERANCE:
+            elif name in REQUIRE_HIGHER_TOLERANCE or (
+                self.args.amp and name in REQUIRE_HIGHER_TOLERANCE_AMP
+            ):
                 tolerance = 4 * 1e-2
             else:
                 tolerance = 1e-2

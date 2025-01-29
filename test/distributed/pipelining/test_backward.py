@@ -74,7 +74,7 @@ class StageBackwardTests(TestCase):
         # Forward, then backward of loss with respect to inputs
         out = mod(x)
         loss = loss_fn(out, target)
-        dinputs, param_groups = stage_backward_input(
+        dinputs, _param_groups = stage_backward_input(
             stage_outputs_or_loss=(loss,),
             output_grads=None,
             input_values=[x],
@@ -88,7 +88,7 @@ class StageBackwardTests(TestCase):
 
         torch.testing.assert_close(x.grad, ref_x.grad)
         torch.testing.assert_close(dinputs[0], ref_x.grad)
-        for name, p in mod.named_parameters():
+        for _, p in mod.named_parameters():
             # Check that the weight gradients were not updated
             self.assertEqual(p.grad, None)
 
@@ -109,7 +109,7 @@ class StageBackwardTests(TestCase):
         # Forward, then backward of loss with respect to inputs
         out = mod(x)
         loss = loss_fn(out, target)
-        dinputs, param_groups = stage_backward_input(
+        _dinputs, param_groups = stage_backward_input(
             stage_outputs_or_loss=(loss,),
             output_grads=None,
             input_values=[x],
@@ -157,7 +157,7 @@ class StageBackwardTests(TestCase):
         for x in inputs:
             out = mod(x)
             loss = loss_fn(out, target)
-            dinputs, param_groups = stage_backward_input(
+            _dinputs, param_groups = stage_backward_input(
                 stage_outputs_or_loss=(loss,),
                 output_grads=None,
                 input_values=[x],

@@ -5,21 +5,12 @@
 #include <c10/macros/Macros.h>
 #include <c10/util/Exception.h>
 
-
 #ifdef __OBJC__
 #include <Foundation/Foundation.h>
 #include <Metal/Metal.h>
-#include <MetalPerformanceShaders/MetalPerformanceShaders.h>
 typedef id<MTLDevice> MTLDevice_t;
-typedef id<MTLLibrary> MTLLibrary_t;
-typedef id<MTLComputePipelineState> MTLComputePipelineState_t;
-typedef id<MTLLibrary> MTLLibrary_t;
 #else
-typedef void* MTLDevice;
 typedef void* MTLDevice_t;
-typedef void* MTLLibrary_t;
-typedef void* MTLComputePipelineState_t;
-typedef void* MTLLibrary_t;
 #endif
 
 namespace at::mps {
@@ -33,6 +24,7 @@ enum class MacOSVersion : uint32_t {
   MACOS_VER_14_4_PLUS,
   MACOS_VER_15_0_PLUS,
   MACOS_VER_15_1_PLUS,
+  MACOS_VER_15_2_PLUS,
 };
 
 //-----------------------------------------------------------------

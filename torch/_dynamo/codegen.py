@@ -4,7 +4,8 @@ import dataclasses
 import re
 import sys
 import types
-from typing import Counter, Dict, List, Optional
+from collections import Counter
+from typing import Optional
 
 import torch.nn
 
@@ -16,14 +17,16 @@ from .bytecode_transformation import (
     create_call_method,
     create_dup_top,
     create_instruction,
+    create_load_const,
     create_load_method,
     create_rot_n,
     Instruction,
 )
-from .exc import unimplemented
+from .exc import IncorrectUsage, unimplemented
 from .source import AttrSource, Source
 from .utils import is_safe_constant, rot_n_helper
 from .variables.base import ValueMutationExisting, VariableTracker
+from .variables.functions import FunctionDecoratedByContextlibContextManagerVariable
 from .variables.nn_module import NNModuleVariable
 from .variables.tensor import (
     NumpyNdarrayVariable,
@@ -56,8 +59,8 @@ class PyCodegen:
         self.root = root
         self.top_of_stack: Optional[VariableTracker] = None
         self.uses: Counter[VariableTracker] = collections.Counter()
-        self.graph_outputs: Dict[int, GraphOutputEntry] = {}
-        self._output: List[Instruction] = []
+        self.graph_outputs: dict[int, GraphOutputEntry] = {}
+        self._output: list[Instruction] = []
         # This determines which VariableTracker should be stored as locals, and
         # maps the VariableTracker to the local variable name. Note that it
         # could map to None initially, in which case we'll overwrite it to map
@@ -72,7 +75,7 @@ class PyCodegen:
         # This serves as a way for codegen to use a different source; we need
         # this because sometimes we can't easily modify the original source
         # without affecting other components, e.g., guards.
-        self.overridden_sources: Dict[Source, Source] = overridden_sources or {}
+        self.overridden_sources: dict[Source, Source] = overridden_sources or {}
 
     def restore_stack(self, stack_values, *, value_from_source=True):
         prev = self.value_from_source
@@ -157,6 +160,13 @@ class PyCodegen:
                 output.append(self.create_load(self.tempvars[value]))
                 self.top_of_stack = value
                 return
+
+        if value.is_realized() and isinstance(
+            value, FunctionDecoratedByContextlibContextManagerVariable
+        ):
+            raise IncorrectUsage(
+                "NYI: Returning a @contextmanager object from a torch.compile function"
+            )
 
         # Dynamo normally prefers codegen from source to account for aliasing.
         if value.source is not None and allow_cache:
@@ -253,7 +263,7 @@ class PyCodegen:
                 parts = parts[1:]
             else:
                 assert self.root is not None
-                output.append(self.create_load_output(self.root))
+                output.append(self.create_load_const_unchecked(self.root))
             for part in parts:
                 output.append(self.create_load_attr(part))
         else:
@@ -279,7 +289,7 @@ class PyCodegen:
     def load_graph_output(self, index):
         output = self._output
         output.append(self.create_load(self.graph_output_var))
-        output.append(self._create_load_const(index))
+        output.append(self.create_load_const(index))
         output.append(create_instruction("BINARY_SUBSCR"))
 
     def add_cache(self, value):
@@ -314,7 +324,7 @@ class PyCodegen:
         self._output.extend(insts)
         self.clear_tos()
 
-    def get_instructions(self) -> List[Instruction]:
+    def get_instructions(self) -> list[Instruction]:
         return self._output
 
     def create_load(self, name) -> Instruction:
@@ -345,13 +355,10 @@ class PyCodegen:
         return create_instruction("LOAD_GLOBAL", argval=name)
 
     def create_load_const(self, value) -> Instruction:
-        assert is_safe_constant(value), f"unsafe constant {value}"
-        return self._create_load_const(value)
+        return create_load_const(value)
 
-    def _create_load_const(self, value) -> Instruction:
-        return create_instruction("LOAD_CONST", argval=value)
-
-    create_load_output = _create_load_const
+    def create_load_const_unchecked(self, value) -> Instruction:
+        return create_load_const(value, checked=False)
 
     def load_method(self, name):
         self.tx.output.update_co_names(name)
@@ -407,7 +414,7 @@ class PyCodegen:
             # desired rotate bytecode doesn't exist, generate equivalent bytecode
             return [
                 create_instruction("BUILD_TUPLE", arg=n),
-                self._create_load_const(rot_n_helper(n)),
+                self.create_load_const_unchecked(rot_n_helper(n)),
                 *create_rot_n(2),
                 create_instruction("CALL_FUNCTION_EX", arg=0),
                 create_instruction("UNPACK_SEQUENCE", arg=n),
@@ -418,7 +425,7 @@ class PyCodegen:
         # nop function, calling it (which consumes the null), and popping the result.
         assert sys.version_info >= (3, 11)
         return [
-            self._create_load_const(lambda: None),
+            self.create_load_const_unchecked(lambda: None),
             # 3.13 swapped NULL and callable
             *(
                 (create_instruction("SWAP", arg=2),)
@@ -455,7 +462,7 @@ class PyCodegen:
             # Emitting `LOAD_FAST/LOAD_CLOSURE` with names in `co_freevars`
             # requires that in the generated bytecode, these cells would keep
             # their original local names, which we ensure via
-            # `LocalSource.is_root_frame_cell`.
+            # `CellVariable.local_name`.
             for var in freevars:
                 assert var in self.cell_and_freevars()
                 output.append(self.create_load_closure(var))
@@ -520,7 +527,7 @@ class PyCodegen:
     def load_import_from(self, module_name, object_name) -> None:
         self(AttrSource(self.tx.import_source(module_name), object_name))
 
-    def create_call_function_kw(self, nargs, kw_names, push_null) -> List[Instruction]:
+    def create_call_function_kw(self, nargs, kw_names, push_null) -> list[Instruction]:
         if sys.version_info >= (3, 13):
             output = create_call_function(nargs, push_null)
             assert output[-1].opname == "CALL"

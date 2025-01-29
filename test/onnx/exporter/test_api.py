@@ -149,9 +149,33 @@ class TestExportAPIDynamo(common_utils.TestCase):
                     2: torch.export.Dim("customb_dim_2"),
                 },
             },
+            strict=True,
         )
 
         self.assert_export(exported_program)
+
+    def test_dynamic_shapes_supports_input_names(self):
+        self.assert_export(
+            SampleModelForDynamicShapes(),
+            (
+                torch.randn(2, 2, 3),
+                torch.randn(2, 2, 3),
+            ),
+            dynamic_shapes={
+                "custom_x": {
+                    0: torch.export.Dim("customx_dim_0"),
+                    1: torch.export.Dim("customx_dim_1"),
+                    2: torch.export.Dim("customx_dim_2"),
+                },
+                "custom_b": {
+                    0: torch.export.Dim("customb_dim_0"),
+                    1: torch.export.Dim("customb_dim_1"),
+                    2: torch.export.Dim("customb_dim_2"),
+                },
+            },
+            input_names=["custom_x", "custom_b"],
+            fallback=False,
+        )
 
     def test_partial_dynamic_shapes(self):
         self.assert_export(

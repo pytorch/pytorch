@@ -26,7 +26,8 @@ if not errorlevel 0 goto fail
 
 if "%USE_XPU%"=="1" (
   :: Install xpu support packages
-  call %INSTALLER_DIR%\install_xpu.bat
+  set CUDA_VERSION=xpu
+  call %SCRIPT_HELPERS_DIR%\..\windows\internal\xpu_install.bat
   if errorlevel 1 exit /b 1
 )
 

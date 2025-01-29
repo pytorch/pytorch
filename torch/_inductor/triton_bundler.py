@@ -3,9 +3,9 @@ import logging
 import os
 import uuid
 from pathlib import Path
-from typing import List, Optional, Tuple
+from typing import Optional
 
-from torch._dynamo.utils import counters, dynamo_timed
+from torch._dynamo.utils import counters, dynamo_timed, set_feature_use
 from torch._utils_internal import justknobs_check
 
 from .runtime.runtime_utils import triton_cache_dir
@@ -48,7 +48,7 @@ class TritonKernelArtifacts:
 
     kernel_hash: str
     device: int
-    artifacts: List[TritonKernelArtifact]
+    artifacts: list[TritonKernelArtifact]
 
 
 @dataclasses.dataclass(frozen=True)
@@ -57,7 +57,7 @@ class TritonBundlerMetadata:
     Metadata used for instrumentation
     """
 
-    cached_kernel_names: List[str]
+    cached_kernel_names: list[str]
 
 
 class TritonBundler:
@@ -76,7 +76,7 @@ class TritonBundler:
     - TritonBundler.read_and_emit is called when a cache entry is read
     """
 
-    _entries: Optional[List[TritonBundleEntry]] = None
+    _entries: Optional[list[TritonBundleEntry]] = None
 
     # __grp__kernel_name.json contains metadata with source code paths
     # we use this as sentinal value for search and replace
@@ -134,7 +134,7 @@ class TritonBundler:
     @classmethod
     def collect(
         cls,
-    ) -> Tuple[List[TritonKernelArtifacts], Optional[TritonBundlerMetadata]]:
+    ) -> tuple[list[TritonKernelArtifacts], Optional[TritonBundlerMetadata]]:
         """
         This is the main function called when a cache write happens. This function
         converts all the previously remembered kernels into bundled format so that
@@ -143,17 +143,17 @@ class TritonBundler:
         """
         if not TritonBundler.is_enabled():
             cls.end_compile()
+            set_feature_use("triton_bundling", False)
             return [], None
+        set_feature_use("triton_bundling", True)
 
-        with dynamo_timed(
-            key="TritonBundler.collect", fwd_only=False, log_pt2_compile_event=True
-        ):
+        with dynamo_timed(key="TritonBundler.collect", log_pt2_compile_event=True):
             entries = cls._entries
             if entries is not None:
-                result: List[TritonKernelArtifacts] = []
-                kernel_names: List[str] = []
+                result: list[TritonKernelArtifacts] = []
+                kernel_names: list[str] = []
                 for entry in entries:
-                    artifacts: List[TritonKernelArtifact] = []
+                    artifacts: list[TritonKernelArtifact] = []
                     path = os.path.join(entry.directory, entry.kernel_hash)
                     if not os.path.exists(path):
                         continue
@@ -203,7 +203,7 @@ class TritonBundler:
 
     @staticmethod
     def read_and_emit(
-        bundle: List[TritonKernelArtifacts],
+        bundle: list[TritonKernelArtifacts],
     ) -> Optional[TritonBundlerMetadata]:
         """
         This is the main function called when a cache read happens. This function
@@ -221,11 +221,9 @@ class TritonBundler:
             return None
 
         with dynamo_timed(
-            key="TritonBundler.read_and_emit",
-            fwd_only=False,
-            log_pt2_compile_event=True,
+            key="TritonBundler.read_and_emit", log_pt2_compile_event=True
         ):
-            kernel_names: List[str] = []
+            kernel_names: list[str] = []
 
             for artifacts in bundle:
                 basedir = triton_cache_dir(artifacts.device)

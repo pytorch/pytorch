@@ -219,6 +219,12 @@ std::tuple<Tensor, Tensor> fn_with_input_mutation_impl(
   return {t1 + 1, t1 + 2};
 }
 
+void fn_out_variant_without_return_impl(
+    const Tensor& x,
+    Tensor& out) {
+  out.add_(x);
+}
+
 // NOLINTBEGIN(clang-diagnostic-unused-parameter)
 Tensor fn_with_all_inputs_meta(
     const Tensor& tensor,
@@ -299,6 +305,11 @@ std::tuple<Tensor, Tensor> fn_with_input_mutation_meta(
   return {t1.clone(), t1.clone()};
 }
 
+void fn_out_variant_without_return_meta(
+    const Tensor& x,
+    Tensor& out) {
+}
+
 } // namespace at
 
 TORCH_LIBRARY(aoti_custom_ops, m) {
@@ -342,6 +353,7 @@ TORCH_LIBRARY(aoti_custom_ops, m) {
   m.def(
       "fn_with_input_mutation(Tensor(a!) t0, Tensor t1, Tensor(b!) t2) -> (Tensor, Tensor)");
 
+  m.def("fn_out_variant_without_return(Tensor x, Tensor(a!) out) -> ()");
 }
 
 TORCH_LIBRARY_IMPL(aoti_custom_ops, CompositeExplicitAutograd, m) {
@@ -352,6 +364,7 @@ TORCH_LIBRARY_IMPL(aoti_custom_ops, CompositeExplicitAutograd, m) {
   m.impl("fn_with_list_output", at::fn_with_list_output_impl);
   m.impl("fn_with_mix_outputs", at::fn_with_mix_outputs_impl);
   m.impl("fn_with_input_mutation", at::fn_with_input_mutation_impl);
+  m.impl("fn_out_variant_without_return", at::fn_out_variant_without_return_impl);
 }
 
 TORCH_LIBRARY_IMPL(aoti_custom_ops, Meta, m) {
@@ -361,4 +374,5 @@ TORCH_LIBRARY_IMPL(aoti_custom_ops, Meta, m) {
   m.impl("fn_with_list_output", at::fn_with_list_output_meta);
   m.impl("fn_with_mix_outputs", at::fn_with_mix_outputs_meta);
   m.impl("fn_with_input_mutation", at::fn_with_input_mutation_meta);
+  m.impl("fn_out_variant_without_return", at::fn_out_variant_without_return_meta);
 }

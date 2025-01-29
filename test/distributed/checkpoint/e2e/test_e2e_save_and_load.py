@@ -5,7 +5,7 @@ from dataclasses import dataclass, field
 from enum import auto, Enum
 from functools import partial
 from io import BytesIO
-from typing import Any, Dict, List
+from typing import Any
 
 import torch
 import torch.distributed as dist
@@ -95,9 +95,9 @@ class ModelType(Enum):
 class TestTrainState:
     step: int = 0
     current_loss: float = -1
-    losses: List[float] = field(default_factory=list)
+    losses: list[float] = field(default_factory=list)
 
-    def state_dict(self) -> Dict[str, Any]:
+    def state_dict(self) -> dict[str, Any]:
         loss_bytes = BytesIO()
         torch.save(self.losses, loss_bytes)
         return {
@@ -277,14 +277,14 @@ class TestE2ESaveAndLoad(DTensorTestBase, VerifyStateDictMixin):
         self.assertEqual(loss, dist_loss)
 
         dist_msd, dist_osd = get_state_dict(dist_model, optimizers=dist_optim)
-        model_sd, optim_sd = get_state_dict(model, optimizers=optim)
+        model_sd, _ = get_state_dict(model, optimizers=optim)
 
         self._verify_msd(model_sd, dist_msd)
         self._verify_osd_by_load(model, optim, self._optim(model), dist_osd)
 
     @with_temp_dir
     def test_stateful_and_non_stateful_loads(self) -> None:
-        class StateDict(Dict):
+        class StateDict(dict):
             def __init__(self):
                 self.set_sd_item_called = False
 

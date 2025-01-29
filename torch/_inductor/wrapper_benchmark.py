@@ -1,10 +1,12 @@
 # mypy: allow-untyped-defs
 import dataclasses
+import datetime
 import tempfile
 from collections import defaultdict
 
 import torch
 from torch.autograd import DeviceType
+from torch.utils._ordered_set import OrderedSet
 
 from .runtime.benchmarking import benchmarker
 from .runtime.runtime_utils import create_bandwidth_info_str, get_num_bytes
@@ -193,6 +195,9 @@ def parse_profile_event_list(
         add_event(ev, category)
 
     def report_category(category, profile_events):
+        if not device_name:
+            return 0.0
+
         from tabulate import tabulate
 
         profile_events.sort(key=lambda ev: ev.self_device_time_ms, reverse=True)
@@ -228,8 +233,8 @@ def parse_profile_event_list(
             "triton_unknown",
             "unknown",
         ]
-        assert set(all_events.keys()).issubset(
-            set(category_list)
+        assert OrderedSet(all_events.keys()).issubset(
+            OrderedSet(category_list)
         ), f"{list(all_events.keys())}"
 
         per_category_wall_time = {}
@@ -241,9 +246,13 @@ def parse_profile_event_list(
                 total_device_ms += _time
 
         device_busy_percent = f"{total_device_ms / wall_time_ms * 100:.2f}%"
-        print(
-            f"\nPercent of time when {device_name.upper()} is busy: {device_busy_percent}"
-        )
+        if device_name:
+            print(
+                f"\nPercent of time when {device_name.upper()} is busy: {device_busy_percent}"
+            )
+        else:
+            print("No device detected")
+
         print(f"Total wall time {wall_time_ms:.3f} ms")
 
         # output such a line so we can gather such line from all compiled modules from all
@@ -278,6 +287,56 @@ def perf_profile(
     parse_profile_event_list(
         benchmark_name, event_list, wall_time_ms, times * repeat, p.use_device
     )
+
+
+def ncu_analyzer(benchmark_name, benchmark_compiled_module_fn):
+    import inspect
+    import os
+    import subprocess
+
+    module_file = inspect.getfile(benchmark_compiled_module_fn)
+    module_dir = os.path.dirname(module_file)
+    module_name = os.path.splitext(os.path.basename(module_file))[0]
+
+    ncu_dir = tempfile.gettempdir()
+    timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+    ncu_output = os.path.join(ncu_dir, f"ncu_output_{timestamp}.ncu-rep")
+    python_cmd = (
+        f"""import sys; sys.path.insert(0, '{module_dir}'); """
+        f"""from {module_name} import benchmark_compiled_module; """
+        """benchmark_compiled_module(times=1, repeat=1)"""
+    )
+
+    ncu_cmd = [
+        "ncu",
+        "--target-processes",
+        "all",
+        "--replay-mode",
+        "kernel",
+        "--kernel-name-base",
+        "function",
+        "--print-units",
+        "base",
+        "--set",
+        "full",
+        "--import-source",
+        "yes",
+        "--force-overwrite",
+        "--export",
+        ncu_output,
+        "python",
+        "-c",
+        python_cmd,
+    ]
+
+    try:
+        subprocess.run(ncu_cmd, check=True)
+        print(f"\nNCU profiling results for benchmark {benchmark_name}:")
+        print(f"NCU report has been written to {ncu_output}")
+
+    except subprocess.CalledProcessError as e:
+        print(f"NCU profiling failed with error: {e}")
+        return
 
 
 def collect_memory_snapshot(benchmark_compiled_module_fn):
@@ -325,6 +384,11 @@ def compiled_module_main(benchmark_name, benchmark_compiled_module_fn):
             for details about how to visualize the collected snapshot
         """,
     )
+    parser.add_argument(
+        "--ncu",
+        action="store_true",
+        help="Whether to run ncu analysis",
+    )
     args = parser.parse_args()
 
     if args.benchmark_kernels:
@@ -339,7 +403,7 @@ def compiled_module_main(benchmark_name, benchmark_compiled_module_fn):
 
         if torch.cuda.is_available():
             peak_mem = torch.cuda.max_memory_allocated()
-            print(f"Peak GPU memory usage {peak_mem/1e6:.3f} MB")
+            print(f"Peak GPU memory usage {peak_mem / 1e6:.3f} MB")
 
         if torch.cuda.is_available() and args.cuda_memory_snapshot:
             collect_memory_snapshot(benchmark_compiled_module_fn)
@@ -352,3 +416,5 @@ def compiled_module_main(benchmark_name, benchmark_compiled_module_fn):
                 benchmark_name,
                 benchmark_compiled_module_fn,
             )
+        if args.ncu:
+            ncu_analyzer(benchmark_name, benchmark_compiled_module_fn)
