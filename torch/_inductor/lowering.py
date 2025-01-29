@@ -6723,7 +6723,9 @@ def invoke_subgraph(subgraph_fn: ir.Subgraph, identifier: str, operands):
 
 
 @register_lowering(associative_scan_op, type_promotion_kind=None)
-def associative_scan(combine_fn: ir.Subgraph, xs, additional_inputs: list[torch.Tensor]):
+def associative_scan(
+    combine_fn: ir.Subgraph, xs, additional_inputs: list[torch.Tensor]
+):
     from .subgraph_lowering import InputDescriptor, lower_pointwise_subgraph
 
     # TODO: Implement lifted arguments for inductor
