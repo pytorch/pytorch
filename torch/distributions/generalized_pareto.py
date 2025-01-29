@@ -19,7 +19,8 @@ class GeneralizedPareto(Distribution):
     Special cases include Exponential (when  :attr:`loc` = 0, :attr:`concentration` = 0), Pareto (when :attr:`concentration` > 0,
      :attr:`loc` = :attr:`scale` / :attr:`concentration`), and Uniform (when :attr:`concentration` = -1).
 
-    This distribution is often used to model the tails of other distributions. This implementation is based on the implementation in TensorFlow Probability.
+    This distribution is often used to model the tails of other distributions. This implementation is based on the
+    implementation in TensorFlow Probability.
 
     Example::
 
