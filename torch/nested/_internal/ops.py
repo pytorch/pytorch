@@ -606,12 +606,15 @@ def to_dtype(func, *args, **kwargs):
     return NestedTensor(func(inp._values, **new_kwargs), **extract_kwargs(inp))
 
 
-def new_metadata_with_device(old_metadata, old_non_contig_offsets, old_device, new_device) -> tuple[torch.Tensor, Optional[torch.Tensor]]:
+def new_metadata_with_device(
+    old_metadata, old_non_contig_offsets, old_device, new_device
+) -> tuple[torch.Tensor, Optional[torch.Tensor]]:
     from torch.nested._internal.nested_tensor import (
         make_dict_tensor_for_nested,
         src_field_name,
     )
     from torch.nested._internal.tensor_registry import register_tensor, try_get_int
+
     # To preserve the invariant that the device of the values matches the
     # device of the ragged sources.
     #
@@ -622,20 +625,21 @@ def new_metadata_with_device(old_metadata, old_non_contig_offsets, old_device, n
     new_raw_metadata = old_metadata.metadata.copy()
 
     for k in ("lengths", "offsets"):
-        if old_device != "cpu" and new_device != "cpu":
+        if str(old_device) != "cpu" and str(new_device) != "cpu":
             # Case 1: DtoD
             source_attr = src_field_name("device", k)
             source_tensor = new_raw_metadata.get(source_attr)
             if source_tensor is not None:
                 target_tensor = source_tensor.to(new_device)
-                register_tensor(target_tensor, try_get_int(source_tensor))
+                if (t_id := try_get_int(source_tensor)) is not None:
+                    register_tensor(target_tensor, t_id)
                 new_raw_metadata[source_attr] = target_tensor
             continue
         # Case 2: DtoH or HtoD
         source_attr, target_attr = src_field_name("host", k), src_field_name(
             "device", k
         )
-        if new_device == "cpu":
+        if str(new_device) == "cpu":
             source_attr, target_attr = target_attr, source_attr
 
         source_tensor = new_raw_metadata.get(source_attr)
@@ -643,7 +647,8 @@ def new_metadata_with_device(old_metadata, old_non_contig_offsets, old_device, n
 
         if source_tensor is not None and target_tensor is None:
             target_tensor = source_tensor.to(new_device)
-            register_tensor(target_tensor, try_get_int(source_tensor))
+            if (t_id := try_get_int(source_tensor)) is not None:
+                register_tensor(target_tensor, t_id)
             new_raw_metadata[target_attr] = target_tensor
         if source_tensor is not None:
             # It may be better to not have to get rid of the host tensor
@@ -675,10 +680,7 @@ def to_copy_default(func, *args, **kwargs):
     new_kwargs.pop("layout")
     new_values = func(inp._values, **new_kwargs)
     new_metadata, new_non_contig_offsets = new_metadata_with_device(
-        inp._metadata,
-        inp._non_contig_offsets,
-        inp._values.device,
-        new_values.device
+        inp._metadata, inp._non_contig_offsets, inp._values.device, new_values.device
     )
     inp_kwargs = extract_kwargs(inp)
     inp_kwargs["metadata"] = new_metadata
@@ -749,10 +751,7 @@ def like_factory_default(func, *args, **kwargs):
     new_values = func(inp._values, **new_kwargs)
 
     new_metadata, new_non_contig_offsets = new_metadata_with_device(
-        inp._metadata,
-        inp._non_contig_offsets,
-        inp._values.device,
-        new_values.device
+        inp._metadata, inp._non_contig_offsets, inp._values.device, new_values.device
     )
     output_kwargs = extract_kwargs(inp)
     output_kwargs["metadata"] = new_metadata
