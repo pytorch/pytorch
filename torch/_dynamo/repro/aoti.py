@@ -9,7 +9,7 @@ import shutil
 import sys
 import textwrap
 from importlib import import_module
-from typing import Any, Dict, Optional, Union
+from typing import Any, Optional, Union
 
 import torch
 from torch._dynamo.debug_utils import (
@@ -46,7 +46,7 @@ class AOTIMinifierError(Exception):
 def dump_to_minify(
     exported_program: ExportedProgram,
     compiler_name: str,
-    options: Optional[Dict[str, Any]] = None,
+    options: Optional[dict[str, Any]] = None,
 ):
     out = io.StringIO()
     subdir = os.path.join(minifier_dir(), "checkpoints")
@@ -90,7 +90,7 @@ def save_graph_repro_ep(
     exported_program: Optional[ExportedProgram] = None,
     gm: Optional[torch.nn.Module] = None,
     args: Optional[tuple[Any]] = None,
-    config_patches: Optional[Dict[str, str]] = None,
+    config_patches: Optional[dict[str, str]] = None,
     stable_output=False,
     save_dir=None,
     command="run",
@@ -188,7 +188,7 @@ def dump_compiler_graph_state(
 def generate_compiler_repro_exported_program(
     exported_program,
     *,
-    options: Optional[Dict[str, str]] = None,
+    options: Optional[dict[str, str]] = None,
     stable_output=False,
     save_dir=None,
 ):
@@ -402,7 +402,7 @@ def repro_minify(options, exported_program, config_patches):
 def run_repro(
     exported_program,
     *,
-    config_patches: Optional[Dict[str, str]] = None,
+    config_patches: Optional[dict[str, str]] = None,
     command="run",
     accuracy: Union[bool, str] = "",
     save_dir=None,

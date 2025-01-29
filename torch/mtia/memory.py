@@ -2,7 +2,7 @@
 
 r"""This package adds support for device memory management implemented in MTIA."""
 
-from typing import Any, Dict, Optional
+from typing import Any, Optional
 
 import torch
 
@@ -10,7 +10,7 @@ from . import _device_t, is_initialized
 from ._utils import _get_device_index
 
 
-def memory_stats(device: Optional[_device_t] = None) -> Dict[str, Any]:
+def memory_stats(device: Optional[_device_t] = None) -> dict[str, Any]:
     r"""Return a dictionary of MTIA memory allocator statistics for a given device.
 
     Args:
