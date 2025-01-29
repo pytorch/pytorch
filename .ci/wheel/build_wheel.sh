@@ -190,9 +190,8 @@ retry pip install -r "${pytorch_rootdir}/requirements.txt" || true
 retry pip uninstall -y cmake
 retry conda install ${EXTRA_CONDA_INSTALL_FLAGS} -y  llvm-openmp=14.0.6 cmake ninja "setuptools${SETUPTOOLS_PINNED_VERSION}" typing_extensions
 
-# For USE_DISTRIBUTED=1 on macOS, need libuv and pkg-config to find libuv.
+# For USE_DISTRIBUTED=1 on macOS, need libuv, which is build as part of tensorpipe submodule
 export USE_DISTRIBUTED=1
-retry conda install ${EXTRA_CONDA_INSTALL_FLAGS} -y libuv pkg-config
 
 if [[ -n "$CROSS_COMPILE_ARM64" ]]; then
     export CMAKE_OSX_ARCHITECTURES=arm64
