@@ -214,7 +214,7 @@ class DeviceCodegen:
     cpp_wrapper_codegen: Optional[WrapperConstructor] = None
 
 
-KernelArgType = Union[WorkspaceArg, TensorArg, SizeArg, TMADescriptorArg]
+KernelArgType = Union[WorkspaceArg, TensorArg, SizeArg, TMADescriptorArg, ConstexprArg]
 
 device_codegens: dict[str, DeviceCodegen] = {}
 
@@ -1143,6 +1143,16 @@ class InplacedBuffer(NamedTuple):
     other_names: list[str]
 
 
+@dataclasses.dataclass
+class ArgName:
+    name: str
+    # is_constexpr=True is used to attach a " : tl.constexpr" into the argument list
+    is_constexpr: bool = False
+
+    def full_name(self):
+        return f"{self.name}{' : tl.constexpr' if self.is_constexpr else ''}"
+
+
 class KernelArgs:
     @staticmethod
     def _lookup(prefix: str, odict: dict[SymbolLike, str], name: SymbolLike) -> str:
@@ -1347,15 +1357,17 @@ class KernelArgs:
         assert not self.workspace_args, "Workspace not supported on CPU "
         return arg_defs, call_args, arg_types
 
-    def python_argdefs(self):
-        arg_defs: list[str] = []
+    def python_argdefs(
+        self,
+    ) -> tuple[list[ArgName], list[str], list[KernelArgType], list[torch.dtype]]:
+        arg_defs: list[ArgName] = []
         call_args: list[str] = []
         arg_types: list[torch.dtype] = []
-        precompile_args: list[Union[TensorArg, SizeArg, WorkspaceArg]] = []
+        precompile_args: list[KernelArgType] = []
         for inplaced in unique(self.inplace_buffers.values()):
             if self._buffer_is_marked_removed(inplaced):
                 continue
-            arg_defs.append(inplaced.inner_name)
+            arg_defs.append(ArgName(inplaced.inner_name))
             call_args.append(inplaced.other_names[-1])
             arg_types.append(V.graph.get_dtype(inplaced.other_names[-1]))
             precompile_args.append(
@@ -1370,7 +1382,7 @@ class KernelArgs:
         ):
             if outer in self.inplace_buffers or self._buffer_is_marked_removed(inner):
                 continue
-            arg_defs.append(inner)
+            arg_defs.append(ArgName(inner))
             call_args.append(outer)
             arg_types.append(V.graph.get_dtype(outer))
             precompile_args.append(
@@ -1381,14 +1393,14 @@ class KernelArgs:
                 )
             )
         for outer, inner in self.sizevars.items():
-            arg_defs.append(inner)
+            arg_defs.append(ArgName(inner))
             call_args.append(outer)
             arg_types.append(type(outer))  # type: ignore[arg-type]
             precompile_args.append(SizeArg(inner, outer))
             if V.graph.wrapper_code:
                 V.graph.wrapper_code.ensure_size_computed(outer)
         for arg in self.workspace_args:
-            arg_defs.append(arg.inner_name)
+            arg_defs.append(ArgName(arg.inner_name))
             call_args.append(arg.outer_name)
             precompile_args.append(arg)
             arg_types.append(arg.dtype)
