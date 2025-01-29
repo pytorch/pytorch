@@ -700,7 +700,7 @@ test_inductor_torchbench_smoketest_perf() {
 
   python benchmarks/dynamo/torchbench.py --device cuda --performance --backend inductor --float16 --training \
     --batch-size-file "$(realpath benchmarks/dynamo/torchbench_models_list.txt)" --only hf_Bert \
-    --output "$TEST_REPORTS_DIR/inductor_training_smoketest.csv" -v
+    --output "$TEST_REPORTS_DIR/inductor_training_smoketest.csv"
   # The threshold value needs to be actively maintained to make this check useful
   python benchmarks/dynamo/check_perf_csv.py -f "$TEST_REPORTS_DIR/inductor_training_smoketest.csv" -t 1.4
 
