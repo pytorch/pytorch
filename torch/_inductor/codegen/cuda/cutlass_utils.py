@@ -245,7 +245,7 @@ def get_accumulator_dtype(
             return torch_dtype
         else:
             return torch.float
-    if torch_dtype in (torch.bfloat16, torch.float):
+    if torch_dtype in (torch.float16, torch.bfloat16, torch.float):
         return torch.float
     if torch_dtype == torch.int8:
         return torch.int32

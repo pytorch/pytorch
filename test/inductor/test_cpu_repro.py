@@ -2706,6 +2706,15 @@ class CPUReproTests(TestCase):
                 metrics.reset()
                 self.common(fn, (a, b))
 
+    def test_torch_logit(self):
+        # fix https://github.com/pytorch/pytorch/issues/145379
+        def fn(*args):
+            return torch.logit(args[0], args[1])
+
+        input = torch.tensor(0.3, dtype=torch.float64)
+        eps = torch.tensor(0.9, dtype=torch.float64)
+        self.common(fn, (input, eps))
+
     @requires_vectorization
     @patch("torch.cuda.is_available", lambda: False)
     def test_vec_compare_op_cpu_only(self):
