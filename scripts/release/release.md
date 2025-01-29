@@ -190,7 +190,16 @@ The PyTorch binaries shipped with CUDA 12.6.3 are built with CXX11_ABI=1 and are
 The full release compatibility matrix matrix can be found in (release.md)[https://github.com/pytorch/pytorch/blob/main/RELEASE.md#release-compatibility-matrix]
 
 * **Deprecated `c10d::onCompletionHook` ([#142390](https://github.com/pytorch/pytorch/pull/142390))**
-    * In PT 2.5 and before, users can do: (TODO: there was a code sample here?)
+    * In PT 2.5 and before, users can do:
+      ```py
+      pg = dist.init_process_group()
+      def hook(work_info: torch._C._distributed_c10d.WorkInfo):
+        # do something
+      pg._register_on_completion_hook(hook)
+
+      # The hook will be triggered after the collective complete
+      pg.broadcast([tensor]).wait()
+      ```
     * Starting from PT 2.6, when users write the code above, they will get get a warning message “ProcessGroupNCCL OnCompletion hook will be deprecated in favor of Flight Recorder”
 
 ## **New features**
