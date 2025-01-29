@@ -11782,6 +11782,33 @@ fn
         _, ne = run(torch.ones(1))
         self.assertFalse(ne)
 
+    def test_ne_operator_with_custom_ne(self):
+        class Foo:
+            def __init__(self, x):
+                self.x = x
+                self.ne_called = False
+
+            def __ne__(self, other):
+                # ne_called attr is later checked to ensure that overrideen
+                # `__ne__` is traced
+                self.ne_called = True
+                return not self.__eq__(other)
+
+            def __eq__(self, other):
+                return self.x == other.x
+
+        f1 = Foo(0)
+        f2 = Foo(0)
+
+        @torch.compile(fullgraph=True, backend="eager")
+        def run(x):
+            # `x + 1` prevents Dynamo from skipping this frame.
+            return x + 1, f1 != f2
+
+        _, ne = run(torch.ones(1))
+        self.assertFalse(ne)
+        self.assertTrue(f1.ne_called)
+
     def test_ne_operator_with_custom_graphbreak_eq(self):
         counters.clear()
 
