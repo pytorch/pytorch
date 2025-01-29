@@ -775,45 +775,67 @@ def _create_sparse_block_from_block_mask(
 
 
 def create_mask(
-    mod_fn: Union[_score_mod_signature, _mask_mod_signature],
+    mod_fn: Optional[Union[_score_mod_signature, _mask_mod_signature]],
     B: Optional[int],
     H: Optional[int],
     Q_LEN: int,
     KV_LEN: int,
     device: str = "cuda",
+    *,
+    mask_mod: Optional[_mask_mod_signature] = None,
+    score_mod: Optional[_score_mod_signature] = None,
+    mod_type: _ModificationType = _ModificationType.UNKNOWN,
 ) -> Tensor:
     r"""This function creates a mask tensor from a mod_fn function.
 
     Args:
-        mod_fn (Union[_score_mod_signature, _mask_mod_signature]): Function to modify attention scores.
-        B (int): Batch size.
-        H (int): Number of query heads.
+        mod_fn (Optional[Union[_score_mod_signature, _mask_mod_signature]]): Function to modify attention scores.
+            If provided, the type of function will be infered from the number of arguments.
+            The type can be specified via mod_type or pass mask_mod/score_mod instead.
+        B (Optional[int]): Batch size.
+        H (Optional[int]): Number of query heads.
         Q_LEN (int): Sequence length of query.
         KV_LEN (int): Sequence length of key/value.
         device (str): Device to run the mask creation on.
+        mod_type (_ModificationType): Type of the mod_fn function.
+        mask_mod (Optional[_mask_mod_signature]): Function to modify the mask.
+        score_mod (Optional[_score_mod_signature]): Function to modify the attention scores.
 
     Returns:
         mask (Tensor): A mask tensor with shape (B, H, M, N).
     """
+    if mod_fn is not None:
+        assert (
+            mask_mod is None and score_mod is None
+        ), "cannot provide both mod_fn and mask_mod/score_mod"
+        if mod_type == _ModificationType.UNKNOWN:
+            mod_type = _get_mod_type(mod_fn)
+        if mod_type == _ModificationType.MASK_MOD:
+            mask_mod = mod_fn
+        elif mod_type == _ModificationType.SCORE_MOD:
+            score_mod = mod_fn
+    elif mask_mod is not None or score_mod is not None:
+        assert (
+            mask_mod is None or score_mod is None
+        ), "cannot provide both mask_mod and score_mod"
+
     if B is None:
         B = 1
     if H is None:
         H = 1
+
     b = torch.arange(0, B, device=device)
     h = torch.arange(0, H, device=device)
     m = torch.arange(0, Q_LEN, device=device)
     n = torch.arange(0, KV_LEN, device=device)
-    mod_type = _get_mod_type(mod_fn)
 
     with TransformGetItemToIndex():
-        if mod_type == _ModificationType.SCORE_MOD:
-            score_mod = mod_fn
+        if score_mod:
             score_mod = _vmap_for_bhqkv(score_mod, prefix=(0,))  # first input is score
             out = score_mod(torch.zeros(B, H, Q_LEN, KV_LEN, device=device), b, h, m, n)
             mask = torch.where(torch.isneginf(out), False, True)
             return mask
-        elif mod_type == _ModificationType.MASK_MOD:
-            mask_mod = mod_fn
+        elif mask_mod:
             mask_mod = _vmap_for_bhqkv(mask_mod, prefix=())
             mask = mask_mod(b, h, m, n)
             return mask
