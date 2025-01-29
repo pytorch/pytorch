@@ -1675,7 +1675,6 @@ def _make_user_magic(method, user_type):
         @functools.wraps(fn)
         def wrapper(self, other):
             result = fn(self, other)
-            torch._logging._internal.GET_DTRACE_STRUCTURED = True
             if torch._logging._internal.GET_DTRACE_STRUCTURED:
                 floc = None
                 user_stack = None
@@ -1748,7 +1747,6 @@ def _make_user_magic(method, user_type):
         if other_node is NotImplemented:
             return NotImplemented
         ret = wrap_node(getattr(self.node, method_attr)(other_node))
-
         return get_constant(ret) if is_constant(ret) else ret
 
     @capture_provenance
