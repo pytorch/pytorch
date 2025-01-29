@@ -3,6 +3,7 @@ from typing import Any, Callable, Optional
 
 import torch
 import torch.utils._pytree as pytree
+from torch._inductor.freezing_utils import maybe_set_is_frozen_param
 from torch.utils._ordered_set import OrderedSet
 
 
@@ -51,14 +52,11 @@ def replace_node_with_constant(
         new_input_node.name = node.name
 
     if constant is not None:
-        from .freezing import in_freezing
-
         # needed to suppress `does not reference an nn.Module, nn.Parameter, or buffer` warning
         gm.register_buffer(qualname, constant)
         setattr(gm, qualname, constant)
-        # mark the constants created during freezing
-        if in_freezing():
-            setattr(constant, "_is_frozen_param", True)
+        # mark any constants created during freezing
+        maybe_set_is_frozen_param(constant)
 
 
 def is_const_source(

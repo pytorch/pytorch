@@ -66,7 +66,7 @@ from torch._inductor.cpp_builder import (
 )
 from torch._inductor.cpu_vec_isa import pick_vec_isa
 from torch._inductor.custom_graph_pass import CustomGraphPass, CustomGraphPassType
-from torch._inductor.output_code import has_frozen_params, is_frozen_param
+from torch._inductor.freezing_utils import has_frozen_params, is_frozen_param
 from torch._inductor.runtime.compile_tasks import (
     _module_to_triton_kernel,
     _reload_python_module,

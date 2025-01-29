@@ -1,10 +1,8 @@
 # mypy: allow-untyped-defs
 from __future__ import annotations
 
-import contextlib
 import itertools
 import logging
-import threading
 import weakref
 from typing import Any, Optional
 
@@ -14,6 +12,7 @@ from torch._dynamo.utils import dynamo_timed, lazy_format_graph_code
 from torch._functorch.aot_autograd import MutationType
 from torch._functorch.compile_utils import fx_graph_cse
 from torch._inductor.constant_folding import constant_fold, replace_node_with_constant
+from torch._inductor.freezing_utils import enter_freezing, record_has_frozen_params
 from torch._inductor.fx_passes.freezing_patterns import freezing_passes
 from torch._inductor.fx_passes.post_grad import view_to_reshape
 
@@ -24,27 +23,6 @@ aten = torch.ops.aten
 prims = torch.ops.prims
 
 log = logging.getLogger(__name__)
-
-_TLS = threading.local()
-
-def in_freezing():
-    """
-    Return True when freezing is active.
-    """
-    return getattr(_TLS, "in_freezing", False)
-
-
-@contextlib.contextmanager
-def _mark_freezing():
-    """
-    Context mgr to designate when freezing active.
-    """
-    prev = in_freezing()
-    _TLS.in_freezing = True
-    try:
-        yield
-    finally:
-        _TLS.in_freezing = prev
 
 
 def replace_params_with_constants(
@@ -79,7 +57,6 @@ def replace_params_with_constants(
             preserved_arg_indices.append(i)
             continue
         replace_node_with_constant(gm, node, real_input)
-
     # add on non param inputs
     preserved_arg_indices.extend(range(len(flat_params), len(params)))
     # is this necessary ?
@@ -107,7 +84,7 @@ def freeze(
         Tuple[torch.fx.GraphModule, List[int]]: A tuple containing the frozen GraphModule and a list of indices
         of the inputs that were preserved (not turned into constants).
     """
-    with _mark_freezing():
+    with enter_freezing():
         return _freeze(dynamo_gm, aot_autograd_gm, example_inputs)
 
 
@@ -152,6 +129,7 @@ def _freeze(
         "%s", lazy_format_graph_code("FROZEN GRAPH", aot_autograd_gm, colored=True)
     )
 
+    record_has_frozen_params(aot_autograd_gm)
     return aot_autograd_gm, preserved_arg_indices
 
 
