@@ -48,14 +48,17 @@ runs:
       run: |
         # Remove any previous usage logs if they exist
         rm -f logs-*.zip
+
+        mkdir -p "logs-${FILE_SUFFIX}"
         # this workflow is also run in bazel build test, but we dont generate usage reports for it
         # so check to see if the file exists first
         if [ -f 'usage_log.txt' ]; then
-            zip "logs-${FILE_SUFFIX}.zip" 'usage_log.txt'
+            mv 'usage_log.txt' "logs-${FILE_SUFFIX}"
         fi
         if find "test/test-reports" -name "*.log" 2>/dev/null | grep -q .; then
-            zip -r "logs-${FILE_SUFFIX}.zip" test/test-reports -i '*.log'
+            find "test/test-reports" -name "*.log" -exec mv {} "logs-${FILE_SUFFIX}" \;
         fi
+        zip -r "logs-${FILE_SUFFIX}.zip" "logs-${FILE_SUFFIX}"
 
     - name: Zip debugging artifacts for upload
       if: runner.os != 'Windows' && !inputs.use-gha
