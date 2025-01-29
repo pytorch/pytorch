@@ -539,17 +539,6 @@ static PyObject* dynamo_eval_custom_code(
   return result;
 }
 
-static PyObject* random_state = NULL;
-
-static void save_random_state() {
-  Py_XSETREF(random_state, random_getstate(random_module()));
-}
-
-static void restore_random_state() {
-  DEBUG_NULL_CHECK(random_state);
-  random_setstate(random_module(), random_state);
-}
-
 static PyObject* dynamo__custom_eval_frame_shim(
     PyThreadState* tstate,
     THP_EVAL_API_FRAME_OBJECT* frame,
@@ -760,7 +749,7 @@ static PyObject* dynamo__custom_eval_frame(
   // dynamo_eval_[frame_default]/[custom_code]!
   // call_callback may burn RNG.
   // NOTE: guard eval should NOT modify global state!
-  save_random_state();
+  PyObject* rng_state = system_random_getstate();
 
   CacheEntry* cache_entry = extract_cache_entry(extra);
   FrameState* frame_state = extract_frame_state(extra);
@@ -782,7 +771,8 @@ static PyObject* dynamo__custom_eval_frame(
     // code.
     DEBUG_TRACE("create skip recursive %s", get_frame_name(frame));
     set_extra_state(F_CODE(frame), SKIP_CODE_RECURSIVE);
-    restore_random_state();
+    system_random_setstate(rng_state);
+    Py_DECREF(rng_state);
     PyObject* r = dynamo_eval_frame_default(tstate, frame, throw_flag);
     // Re-enable custom behavior
     eval_frame_callback_set(callback);
@@ -791,7 +781,8 @@ static PyObject* dynamo__custom_eval_frame(
     // Dynamo returned cache_limit_hit_flag, so we should recursively skip code.
     DEBUG_TRACE("create cache limit hit %s", get_frame_name(frame));
     set_extra_state_cache_limit_hit(extra, true);
-    restore_random_state();
+    system_random_setstate(rng_state);
+    Py_DECREF(rng_state);
     PyObject* r = dynamo_eval_frame_default(tstate, frame, throw_flag);
     // Re-enable custom behavior
     eval_frame_callback_set(callback);
@@ -813,7 +804,8 @@ static PyObject* dynamo__custom_eval_frame(
     // Re-enable custom behavior
     eval_frame_callback_set(callback);
     *should_clear_frame = 1;
-    restore_random_state();
+    system_random_setstate(rng_state);
+    Py_DECREF(rng_state);
     return dynamo_eval_custom_code(
         tstate,
         frame,
@@ -826,7 +818,8 @@ static PyObject* dynamo__custom_eval_frame(
     set_extra_state(F_CODE(frame), SKIP_CODE);
     // Re-enable custom behavior
     eval_frame_callback_set(callback);
-    restore_random_state();
+    system_random_setstate(rng_state);
+    Py_DECREF(rng_state);
     return dynamo_eval_frame_default(tstate, frame, throw_flag);
   }
 }
