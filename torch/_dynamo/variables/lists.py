@@ -15,6 +15,7 @@ from ..bytecode_transformation import create_call_function, create_instruction
 from ..exc import raise_observed_exception, unimplemented
 from ..source import AttrSource
 from ..utils import (
+    cmp_name_to_op_mapping,
     get_fake_value,
     guard_if_dyn,
     istype,
@@ -135,6 +136,18 @@ class BaseListVariable(VariableTracker):
                 VariableTracker.build(tx, polyfills.index),
                 [self] + list(args),
                 kwargs,
+            )
+        elif name in cmp_name_to_op_mapping:
+            left = self
+            right = args[0]
+            if not isinstance(left, BaseListVariable) and not isinstance(
+                right, BaseListVariable
+            ):
+                return variables.ConstantVariable.create(NotImplemented)
+            return variables.UserFunctionVariable(polyfills.list_cmp).call_function(
+                tx,
+                [variables.BuiltinVariable(cmp_name_to_op_mapping[name]), left, right],
+                {},
             )
 
         return super().call_method(tx, name, args, kwargs)
@@ -633,6 +646,14 @@ class DequeVariable(CommonListMethodsVariable):
             self.items[:] = [args[0], *self.items]
             slice_within_maxlen = slice(None, maxlen)
             result = ConstantVariable.create(None)
+        elif name == "insert" and len(args) > 0 and self.is_mutable():
+            assert len(args) == 2
+            assert not kwargs
+            if maxlen is not None and len(self.items) == maxlen:
+                raise_observed_exception(
+                    IndexError, tx, args=["deque already at its maximum size"]
+                )
+            result = super().call_method(tx, name, args, kwargs)
         else:
             result = super().call_method(tx, name, args, kwargs)
 
