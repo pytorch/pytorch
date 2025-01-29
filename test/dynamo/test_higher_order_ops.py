@@ -6994,10 +6994,8 @@ class TestHigherOrderOpsOpInfo(torch._dynamo.test_case.TestCase):
         list(filter(lambda op: op.name not in xfail_hops_compile, hop_db)),
         allowed_dtypes=(torch.float,),
     )
-    def test_hops_compile(self, device, dtype, op, backend="aot_eager"):
-        print(f"running {self}")
+    def test_hops_compile(self, device, dtype, op, backend):
         if device == "cuda" and not HAS_CUDA:
-            breakpoint()
             self.skipTest("requires cuda")
 
         # Ensure HOPs can be compiled
