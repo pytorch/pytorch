@@ -3306,8 +3306,12 @@ class NativeCachingAllocator : public CUDAAllocator {
   // Shard allocation region to have independent mutexes to reduce contention.
   static constexpr size_t kNumMutexShard = 67;
 
-  // TODO: use std::hardware_destructive_interference_size once available
-  struct alignas(64) AlignedMutex {
+#ifdef __cpp_lib_hardware_interference_size
+  using std::hardware_destructive_interference_size;
+#else
+  static constexpr std::size_t hardware_destructive_interference_size = 64;
+#endif
+  struct alignas(hardware_destructive_interference_size) AlignedMutex {
     std::mutex m;
   };
 
