@@ -123,7 +123,12 @@ class ReduceOp:
     PREMUL_SUM: RedOpType = ...
     UNUSED: RedOpType = ...
 
-    class RedOpType(Enum): ...
+    # mypy error being ignored:
+    # Detected enum "torch._C._distributed_c10d.ReduceOp.RedOpType" in a type
+    # stub with zero members. There is a chance this is due to a recent change
+    # in the semantics of enum membership. If so, use `member = value` to mark
+    # an enum member, instead of `member: type`
+    class RedOpType(Enum): ... # type: ignore[misc]
 
 class BroadcastOptions:
     rootRank: int
