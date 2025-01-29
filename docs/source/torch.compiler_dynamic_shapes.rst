@@ -32,8 +32,9 @@ The default dynamic behavior in PyTorch 2.1 is:
   when guards are added and why.
 
 - If you know ahead of time something will be dynamic, you can skip the first
-  recompile with ``torch._dynamo.mark_dynamic(tensor, dim)``. If you know ahead of time
-  the ``min`` and ``max`` value this dimension can take, you can specify ``torch._dynamo.mark_dynamic(tensor, dim, min=min, max=max)``
+  recompile with ``torch._dynamo.mark_dynamic(tensor, index)``. If you know ahead of time
+  the ``min`` and ``max`` value this ``index`` (ie. tensor dimension) can take, you
+  can specify ``torch._dynamo.mark_dynamic(tensor, index, min=min, max=max)``
 
 - If you say ``torch.compile(dynamic=False)``, we will turn off automatic
   dynamic shapes on recompiles and always recompile for each distinct size.
