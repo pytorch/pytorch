@@ -105,6 +105,10 @@ static Tensor maybe_movedim(const Tensor& self, int64_t src, int64_t dst) {
 // `out_dim` controls where we should put the batch dimension in the output tensor.
 Tensor _remove_batch_dim(const Tensor& self, int64_t level, int64_t batch_size, int64_t out_dim) {
   if (!has_level(self, level)) {
+    TORCH_CHECK_INDEX((out_dim >=0) && (out_dim <self.dim() + 1),
+     "Output dimension outside of valid range: 0 to ", out_dim <self.dim() + 1)
+    TORCH_CHECK_VALUE(batch_size > 0, "Batch size must be greater than 0.")
+
     auto self_sizes = self.sizes();
     VmapDimVector expanded_sizes(self_sizes.begin(), self_sizes.end());
     expanded_sizes.insert(expanded_sizes.begin() + out_dim, batch_size);
