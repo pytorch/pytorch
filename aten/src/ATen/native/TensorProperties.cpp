@@ -9,7 +9,6 @@
 #include <ATen/Functions.h>
 #include <ATen/NativeFunctions.h>
 #else
-#include <ATen/ops/_access_subclass_inner_tensor.h>
 #include <ATen/ops/_nested_tensor_size_native.h>
 #include <ATen/ops/contiguous_native.h>
 #include <ATen/ops/cudnn_is_acceptable_native.h>

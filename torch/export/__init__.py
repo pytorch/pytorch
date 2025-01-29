@@ -49,6 +49,7 @@ __all__ = [
     "ExportGraphSignature",
     "ExportedProgram",
     "CustomDecompTable",
+    "access_subclass_inner_tensor",
     "ModuleCallEntry",
     "ModuleCallSignature",
     "default_decompositions",
@@ -66,6 +67,7 @@ __all__ = [
 
 
 from .decomp_utils import CustomDecompTable
+from .subclass_utils import access_subclass_inner_tensor
 from .dynamic_shapes import Constraint, Dim, dims, ShapesCollection
 from .exported_program import (
     default_decompositions,
