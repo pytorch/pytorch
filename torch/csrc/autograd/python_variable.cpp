@@ -207,7 +207,7 @@ PyObject* ParameterClass = nullptr;
 
 static PyObject* THPVariable_NewWithVar(
     PyTypeObject* type,
-    const at::TensorBase& _var,
+    at::TensorBase&& _var,
     c10::impl::PyInterpreterStatus status,
     bool allow_preexisting_pyobj = false);
 
@@ -254,7 +254,7 @@ void activateGPUTrace() {
   c10::impl::GPUTrace::set_trace(getPyInterpreter());
 }
 
-PyObject* THPVariable_Wrap(const at::TensorBase& var) {
+PyObject* THPVariable_Wrap(at::TensorBase&& var) {
   if (!var.defined()) {
     Py_RETURN_NONE;
   }
@@ -262,7 +262,7 @@ PyObject* THPVariable_Wrap(const at::TensorBase& var) {
   if (c10::impl::HermeticPyObjectTLS::get_state()) {
     return THPVariable_NewWithVar(
         (PyTypeObject*)THPVariableClass,
-        var,
+        std::move(var),
         c10::impl::PyInterpreterStatus::DEFINITELY_UNINITIALIZED);
   }
 
@@ -281,7 +281,7 @@ PyObject* THPVariable_Wrap(const at::TensorBase& var) {
         // object if all C++ references go to zero
         var.unsafeGetTensorImpl()->pyobj_slot()->set_owns_pyobj(false);
         reinterpret_cast<THPVariable*>(obj)->cdata =
-            MaybeOwned<Variable>::owned(Variable(var));
+            MaybeOwned<Variable>::owned(std::move(var));
         // NB: incref is not necessary, because we are "stealing" the previous
         // ownership from the Variable to return it here for the wrap
         return obj;
@@ -307,14 +307,20 @@ PyObject* THPVariable_Wrap(const at::TensorBase& var) {
   }
 
   if (C10_LIKELY(var.device().type() != c10::kXLA)) {
-    return THPVariable_NewWithVar((PyTypeObject*)THPVariableClass, var, status);
+    return THPVariable_NewWithVar(
+        (PyTypeObject*)THPVariableClass, std::move(var), status);
   }
 
   if (auto clazz = getPythonTensorClass(var.device())) {
-    return THPVariable_NewWithVar((PyTypeObject*)clazz, var, status);
+    return THPVariable_NewWithVar((PyTypeObject*)clazz, std::move(var), status);
   }
 
-  return THPVariable_NewWithVar((PyTypeObject*)THPVariableClass, var, status);
+  return THPVariable_NewWithVar(
+      (PyTypeObject*)THPVariableClass, std::move(var), status);
+}
+
+PyObject* THPVariable_Wrap(const at::TensorBase& var) {
+  return static_cast<PyObject* (*)(at::TensorBase&&)>(THPVariable_Wrap)(at::Tensor(var));
 }
 
 bool isResurrectable(THPVariable* self) {
@@ -518,7 +524,7 @@ static PyObject* view_func_impl(
       }
     }
   }
-  return THPVariable_Wrap(out);
+  return THPVariable_Wrap(std::move(out));
   END_HANDLE_TH_ERRORS
 }
 
@@ -554,7 +560,7 @@ static PyObject* rev_view_func_impl(PyObject* self_, PyObject* arg) {
     TORCH_CHECK(view_info.has_view_fn(), "No _rev_view_func() found");
     out = view_info.rev_view_fn()(new_view);
   }
-  return THPVariable_Wrap(out);
+  return THPVariable_Wrap(std::move(out));
   END_HANDLE_TH_ERRORS
 }
 
@@ -643,7 +649,7 @@ static PyObject* THPVariable_make_subclass(
 
   return THPVariable_NewWithVar(
       (PyTypeObject*)cls,
-      data,
+      std::move(data),
       c10::impl::PyInterpreterStatus::DEFINITELY_UNINITIALIZED);
   END_HANDLE_TH_ERRORS
 }
@@ -791,7 +797,7 @@ static PyObject* THPVariable_make_wrapper_subclass(
 
   return THPVariable_NewWithVar(
       (PyTypeObject*)cls,
-      tensor,
+      std::move(tensor),
       c10::impl::PyInterpreterStatus::DEFINITELY_UNINITIALIZED);
   END_HANDLE_TH_ERRORS
 }
@@ -1797,7 +1803,7 @@ PyObject* THPVariable_pynew(
   // these to be passed on directly.
   return THPVariable_NewWithVar(
       type,
-      tensor,
+      std::move(tensor),
       c10::impl::PyInterpreterStatus::MAYBE_UNINITIALIZED,
       /*allow_preexisting_pyobj=*/true);
   END_HANDLE_TH_ERRORS
@@ -2033,7 +2039,7 @@ void THPVariable_subclass_dealloc(PyObject* self) {
 // It's ALWAYS safe (albeit slower) to call this with MAYBE_UNINITIALIZED.
 static PyObject* THPVariable_NewWithVar(
     PyTypeObject* type,
-    const at::TensorBase& _var,
+    at::TensorBase&& _var,
     c10::impl::PyInterpreterStatus status,
     bool allow_preexisting_pyobj) {
   // Make sure that the reinterpret into a THPVariable* will be valid
@@ -2103,17 +2109,18 @@ static PyObject* THPVariable_NewWithVar(
         " which is not a subclass of the "
         "requested type");
     // We may (in fact, we typically will) need to resurrect this
-    return THPVariable_Wrap(_var);
+    return THPVariable_Wrap(std::move(_var));
   }
 
   PyObject* obj = type->tp_alloc(type, 0);
   if (obj) {
     auto v = (THPVariable*)obj;
-    // TODO: named constructor to avoid default initialization
-    new (&v->cdata) MaybeOwned<Variable>();
-    if (c10::impl::HermeticPyObjectTLS::get_state()) {
+    auto has_state = c10::impl::HermeticPyObjectTLS::get_state();
+    new (&v->cdata)
+        MaybeOwned<Variable>(MaybeOwned<Variable>::owned(std::move(_var)));
+    if (has_state) {
       // Do NOT initialize pyobj field on the tensor, you own the C++
-      v->cdata = MaybeOwned<Variable>::owned(Variable(_var));
+
       TORCH_INTERNAL_ASSERT(
           !check_has_torch_dispatch(obj),
           "While HermeticPyObject was enabled, we attempted to create a tensor "
@@ -2125,12 +2132,10 @@ static PyObject* THPVariable_NewWithVar(
           "Python op registration.");
     } else {
       // Normal codepath
-      v->cdata = MaybeOwned<Variable>::owned(Variable(_var));
-      const auto& var = THPVariable_Unpack(v);
-      var.unsafeGetTensorImpl()->pyobj_slot()->init_pyobj(
+      v->cdata->unsafeGetTensorImpl()->pyobj_slot()->init_pyobj(
           getPyInterpreter(), obj, status);
       if (check_has_torch_dispatch(obj)) {
-        var.unsafeGetTensorImpl()->set_python_dispatch(true);
+        v->cdata->unsafeGetTensorImpl()->set_python_dispatch(true);
       }
     }
   }
