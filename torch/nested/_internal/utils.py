@@ -41,6 +41,7 @@ def _flatten_subclass_to_dict(
         else:
             if isinstance(t, torch.Tensor):
                 res_p[path] = t
+
     recurse(t)
     return dict(res)
 
@@ -65,5 +66,7 @@ def flatten_nested_metadata_to_dict(
             raise RuntimeError("Unsupported traceable wrapper subclass", subclass_cls)
 
     return _flatten_subclass_to_dict(
-        t, unwrap_functional_tensor=unwrap_functional_tensor, filter_fn=filter_fn,
+        t,
+        unwrap_functional_tensor=unwrap_functional_tensor,
+        filter_fn=filter_fn,
     )
