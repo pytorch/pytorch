@@ -804,10 +804,8 @@ def signature_from_schema(
         or name.startswith("new_")
         or name.endswith("_like")
     )
-    is_dummy_function = category_override == "dummy"
-
     tensor_options_args: list[PythonArgument] = []
-    if (is_factory_function or is_like_or_new_function) and not is_dummy_function:
+    if is_factory_function or is_like_or_new_function:
 
         def topt_default_init(name: str) -> str | None:
             topt_args = func.arguments.tensor_options

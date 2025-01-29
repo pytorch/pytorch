@@ -1,6 +1,5 @@
 # mypy: allow-untyped-defs
 from typing import *  # noqa: F403
-from typing import Tuple
 
 import torch
 from torch._C import DispatchKey, DispatchKeySet
@@ -11,6 +10,7 @@ from torch.nested._internal.nested_int import get_metadata, NestedIntNode
 
 # Fully represents raggedness
 SOURCE_FIELDS = ("_device_lengths", "_device_offsets", "_host_lengths", "_host_offsets")
+
 # Derived fields
 EXTRA_FIELDS = (
     "_max_seqlen_tensor",
@@ -19,8 +19,16 @@ EXTRA_FIELDS = (
 )
 
 
+def src_field_name(device_type, source_type):
+    assert source_type in ("lengths", "offsets")
+    assert device_type in ("device", "host")
+    return f"_{device_type}_{source_type}"
+
+
 def get_tensor_symint(metadata_tensor, *, coeff=1):
     from torch._subclasses.fake_tensor import maybe_get_fake_mode
+
+    assert isinstance(metadata_tensor, CachedTensor)
 
     if fake_mode := maybe_get_fake_mode(metadata_tensor):
         return fake_mode.get_nested_int(cache=metadata_tensor, coeff=coeff)
@@ -64,8 +72,8 @@ class NestedTensor(torch.Tensor):
     # We also use nested ints to represent the strides of this tensor.
     # For example, a jagged tensor with shape [B, x, D] can be strided in two
     # ways: [xD, D, 1] and [x, 1, sum(x)], where xD represents x multiplied by D
-    _size: Tuple[int, ...]
-    _strides: Tuple[int, ...]
+    _size: tuple[int, ...]
+    _strides: tuple[int, ...]
     # Indicates that the nth dimension is ragged
     _ragged_idx: int
 
@@ -91,8 +99,13 @@ class NestedTensor(torch.Tensor):
         ragged_size = get_tensor_symint(metadata, coeff=1)
         _ragged_idx = kwargs.get("_ragged_idx", 1)
 
-        # When non_contig_offsets is not None, metadata represents lengths
-        B = metadata.shape[0] - 1 if non_contig_offsets is None else metadata.shape[0]
+        device_type = "host" if values.is_cpu else "device"
+        source_type = "offsets" if non_contig_offsets is None else "lengths"
+        ragged_source = getattr(metadata, src_field_name(device_type, source_type))
+        B = ragged_source.shape[0]
+        if non_contig_offsets is None:
+            # when non_contig_offsets is None, we are offsets
+            B -= 1
 
         # subtract 1 to convert to values dim space
         r = _ragged_idx - 1
@@ -400,7 +413,7 @@ def jagged_from_list(
     offsets: Optional[torch.Tensor],
     dtype=None,
     device=None,
-) -> Tuple[NestedTensor, torch.Tensor]:
+) -> tuple[NestedTensor, torch.Tensor]:
     """Constructs a NestedTensor backed by jagged layout from a list of tensors"""
 
     if len(tensors) == 0:
@@ -483,7 +496,7 @@ def jagged_from_list(
 
 def jagged_from_tensor_and_lengths(
     tensor: torch.Tensor, starts: torch.Tensor, lengths: torch.Tensor
-) -> Tuple[NestedTensor, torch.Tensor, Optional[torch.Tensor]]:
+) -> tuple[NestedTensor, torch.Tensor, Optional[torch.Tensor]]:
     """Constructs a NestedTensor backed by jagged layout from a tensor, starts of sequences, and sequence lengths"""
     batch_size = tensor.shape[0]
     if is_expandable_to(starts.shape, (batch_size,)) and is_expandable_to(
@@ -562,9 +575,7 @@ def make_cached_tensor_for_nested(metadata):
         metadata.get(k) is not None for k in SOURCE_FIELDS
     ), f"At least one of {SOURCE_FIELDS} must be non-None"
 
-    return CachedTensor(
-        metadata, next(k for k in SOURCE_FIELDS if metadata.get(k) is not None)
-    )
+    return CachedTensor(metadata)
 
 
 def make_nested_meta_with_offsets(offsets) -> CachedTensor:
@@ -578,14 +589,13 @@ def make_nested_meta_with_offsets(offsets) -> CachedTensor:
 
 def _make_nested_meta(
     *,
-    offsets: Union[torch.Tensor, CachedTensor],
-    lengths: Optional[Union[torch.Tensor, CachedTensor]],
+    offsets: torch.Tensor,
+    lengths: Optional[torch.Tensor],
     min_seqlen: Optional[Union[torch.Tensor, int]],
     max_seqlen: Optional[Union[torch.Tensor, int]],
 ) -> Tuple[CachedTensor, Optional[torch.Tensor]]:
     # 1. Constructs a fresh CachedTensor from provided metadata
     # - normalizes all fields
-    #   - unwraps CachedTensor
     #   - puts lengths/offsets on correct field based on device
     #   - stuffs min/max seqlen into tensor if necessary
     # - if a piece of metadata is present multiple times, we arbitrarily
@@ -599,12 +609,6 @@ def _make_nested_meta(
     metadata: Dict[str, Optional[torch.Tensor]] = dict.fromkeys(
         SOURCE_FIELDS + EXTRA_FIELDS
     )
-
-    def process_cached_tensor(metadata: Dict, t: torch.Tensor):
-        assert isinstance(t, CachedTensor)
-        for k, v in t.metadata.items():
-            if v is not None:
-                metadata[k] = v
 
     def process_raw_source_tensor(metadata: Dict, key: str, t: torch.Tensor):
         if t.is_cpu:
@@ -622,16 +626,12 @@ def _make_nested_meta(
 
     if offsets is not None and lengths is not None:
         non_contig_offsets = offsets
-        if isinstance(lengths, CachedTensor):
-            process_cached_tensor(metadata, lengths)
-        else:
-            process_raw_source_tensor(metadata, "lengths", lengths)
+        assert not isinstance(lengths, CachedTensor)
+        process_raw_source_tensor(metadata, "lengths", lengths)
     else:
         non_contig_offsets = None
-        if isinstance(offsets, CachedTensor):
-            process_cached_tensor(metadata, offsets)
-        else:
-            process_raw_source_tensor(metadata, "offsets", offsets)
+        assert not  isinstance(offsets, CachedTensor)
+        process_raw_source_tensor(metadata, "offsets", offsets)
 
     if min_seqlen is not None:
         process_min_max_seqlen(metadata, "min_seqlen", min_seqlen)

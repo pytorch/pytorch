@@ -3,7 +3,7 @@ import functools
 import math
 import operator
 from typing import *  # noqa: F403
-from typing import List, Optional
+from typing import Optional
 
 import torch
 import torch.nn.functional as F
@@ -13,7 +13,7 @@ from torch.nested._internal.sdpa import jagged_scaled_dot_product_attention
 from .nested_tensor import NestedTensor
 
 
-__all__: List[Any] = []
+__all__: list[Any] = []
 
 JAGGED_OPS_TABLE: Dict[Any, Any] = {}
 
@@ -602,7 +602,10 @@ def to_dtype(func, *args, **kwargs):
 
 @register_jagged_func(torch.ops.aten._to_copy.default, "self: jt_all")
 def to_copy_default(func, *args, **kwargs):
-    from torch.nested._internal.nested_tensor import make_cached_tensor_for_nested
+    from torch.nested._internal.nested_tensor import (
+        make_cached_tensor_for_nested,
+        src_field_name,
+    )
     from torch.nested._internal.tensor_registry import register_tensor, try_get_int
 
     _, new_kwargs = normalize_function(  # type: ignore[misc]
@@ -620,29 +623,28 @@ def to_copy_default(func, *args, **kwargs):
     # - Registers new offsets/lengths to the same int in the tensor registry
     new_raw_metadata = inp._metadata.metadata.copy()
     for k in ("lengths", "offsets"):
-        device_tensor = new_raw_metadata.get(f"_device_{k}")
-        host_tensor = new_raw_metadata.get(f"_host_{k}")
+        source_attr, target_attr = src_field_name("host", k), src_field_name(
+            "device", k
+        )
         if new_values.is_cpu:
-            if device_tensor is not None and host_tensor is None:
-                host_tensor = device_tensor.to(new_device)
-                register_tensor(host_tensor, try_get_int(device_tensor))
-                new_raw_metadata[f"_host_{k}"] = host_tensor
-            if device_tensor is not None:
-                new_raw_metadata[f"_device_{k}"] = None
-        else:
-            if host_tensor is not None and device_tensor is None:
-                device_tensor = host_tensor.to(new_device)
-                register_tensor(device_tensor, try_get_int(host_tensor))
-                new_raw_metadata[f"_device_{k}"] = device_tensor
-            if host_tensor is not None:
-                # It would be better to not have to get rid of the host tensor but
-                # if we keep the host tensor around, doing
-                # t_cuda.to("cpu").backward() causes mismatch of the metadata
-                # on t_cuda and t_cuda.grad: t_cuda.grad will have the host tensor
-                # (in addition to device tensor), but t_cuda will only have device
-                # tensor. This breaks fakification logic which expects t and t.grad
-                # to have the same symbolic context (we should fix that).
-                new_raw_metadata[f"_host_{k}"] = None
+            source_attr, target_attr = target_attr, source_attr
+        source_tensor = new_raw_metadata.get(source_attr)
+        target_tensor = new_raw_metadata.get(target_attr)
+
+        if source_tensor is not None and target_tensor is None:
+            target_tensor = source_tensor.to(new_device)
+            register_tensor(target_tensor, try_get_int(source_tensor))
+            new_raw_metadata[target_attr] = target_tensor
+        if source_tensor is not None:
+            # It may be better to not have to get rid of the host tensor
+            # when converting from host to device but
+            # if we keep the host tensor around, doing
+            # t_cuda.to("cpu").backward() causes mismatch of the metadata
+            # on t_cuda and t_cuda.grad: t_cuda.grad will have the host tensor
+            # (in addition to device tensor), but t_cuda will only have device
+            # tensor. This breaks fakification logic which expects t and t.grad
+            # to have the same symbolic context (we should fix that).
+            new_raw_metadata[source_attr] = None
 
     new_metadata = make_cached_tensor_for_nested(new_raw_metadata)
 
@@ -668,9 +670,20 @@ def copy_default(func, *args, **kwargs):
     inp = new_kwargs.pop("input")
     src = new_kwargs.pop("src")
     if inp._size != src._size:
-        raise RuntimeError(
-            "copy_ only supports Nested Tensors that have same size and the exact same offset tensor."
-        )
+        # try to recursively copy_ on unbound components to get around nested int mismatch
+        # TODO: eventually do a direct copy when this is possible
+        inp_comps = inp.unbind()
+        inp_comp_shapes = [c.shape for c in inp_comps]
+        src_comps = src.unbind()
+        src_comp_shapes = [c.shape for c in src_comps]
+        if inp_comp_shapes != src_comp_shapes:
+            raise RuntimeError(
+                "copy_(): expected compatible input and src shapes, but got: "
+                f"{inp.shape} and {src.shape}"
+            )
+        for inp_comp, src_comp in zip(inp_comps, src_comps):
+            inp_comp.copy_(src_comp)
+
     # AOTD allows mutations of inputs only, (not views of the inputs).
     # NJT.values() returns _values.detach() to workaround some issues.
     # To keep mutation in the graph, AOTD manually calls copy_ on the input (NJT).
@@ -988,7 +1001,7 @@ def unbind_int(func, *args, **kwargs):
     lengths = inp.lengths()
     ragged_idx = inp._ragged_idx
 
-    def _torch_check(_lengths: List[int], _offsets: Optional[List[int]] = None):
+    def _torch_check(_lengths: list[int], _offsets: Optional[list[int]] = None):
         # This torch._check and torch._check_is_size are needed for torch.compile
         # symbolic shapes processing.
         # offsets and lengths are symbolic variables during compilation,
@@ -2039,6 +2052,42 @@ def argmax_default(func, *args, **kwargs):
     return _apply_reduction(func, "argmax", dtype_min, *args, **kwargs)
 
 
+@register_jagged_func(
+    torch.ops.aten.value_selecting_reduction_backward.default,
+    "grad: jt_all, dim: any, indices: jt_all, sizes: any, keepdim: any",
+)
+def value_selecting_reduction_backward_default(func, *args, **kwargs):
+    from torch.fx.experimental.symbolic_shapes import is_nested_int
+
+    _, new_kwargs = normalize_function(  # type: ignore[misc]
+        func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
+    )
+
+    grad = new_kwargs.pop("grad")
+    new_kwargs["grad"] = grad._values
+    indices = new_kwargs.pop("indices")
+    new_kwargs["indices"] = indices._values
+    # should always succeed; sizes should contain a nested int
+    ragged_idx = next(i for i, s in enumerate(new_kwargs["sizes"]) if is_nested_int(s))
+    # convert dim -> values-space dim
+    new_kwargs["dim"] = _wrap_jagged_dim(
+        len(new_kwargs["sizes"]),
+        new_kwargs["dim"],
+        ragged_idx,
+        "value_selecting_reduction_backward",
+    )
+    # convert saved NJT sizes -> values-space sizes
+    sizes = new_kwargs.pop("sizes")
+    sizes[ragged_idx] = indices._values.size(indices._ragged_idx - 1)
+    sizes = sizes[1:]
+    new_kwargs["sizes"] = sizes
+
+    output_kwargs = extract_kwargs(indices)
+    output_kwargs["_ragged_idx"] = ragged_idx
+
+    return NestedTensor(func(**new_kwargs), **output_kwargs)
+
+
 @register_jagged_func(torch.ops.aten.stack.default, "tensors: any, dim: any")
 def stack_default(func, *args, **kwargs):
     _, new_kwargs = normalize_function(  # type: ignore[misc]
@@ -2361,24 +2410,25 @@ def _nested_select_backward_default(func, *args, **kwargs):
 
 @register_jagged_func(torch.ops.aten.record_stream.default, "self: jt_all, s: any")
 def record_stream_default(func, *args, **kwargs):
-    from torch.nested._internal.utils import apply_to_nested_metadata
-
-    inp = args[0]
-    stream = args[1]
+    from torch.nested._internal.utils import flatten_nested_metadata_to_dict
 
     # ensure all components live until stream computation completes
-    def apply_func(x: torch.Tensor) -> None:
-        if not x.is_cpu:
-            x.record_stream(stream)
-
-    apply_to_nested_metadata(
-        inp._metadata,
-        apply_func,
-        only_source_fields=False,
-        unwrap_functional_tensor=False,
-    )
-    inp._non_contig_offsets.record_stream(stream)
-    inp._values.record_stream(stream)
+    all_components: List[torch.Tensor] = []
+    for t_attr in args[0].__tensor_flatten__()[0]:
+        t = getattr(args[0], t_attr)
+        if t_attr == "_metadata":
+            all_components.extend(
+                flatten_nested_metadata_to_dict(
+                    t,
+                    only_source_fields=False,
+                    unwrap_functional_tensor=False,
+                ).values()
+            )
+        else:
+            all_components.append(t)
+    for t in all_components:
+        if not t.is_cpu:
+            func(t, args[1])
 
 
 @register_jagged_func(
@@ -2425,6 +2475,17 @@ def activation_backward(func, *args, **kwargs):
     )
 
 
+@register_jagged_func(torch.ops.aten.fill.Scalar, "self: jt_all, value: any")
+def fill_Scalar(func, *args, **kwargs):
+    _, new_kwargs = normalize_function(  # type: ignore[misc]
+        func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
+    )
+
+    inp = new_kwargs.pop("input")
+
+    return NestedTensor(func(inp._values, **new_kwargs), **extract_kwargs(inp))
+
+
 @register_jagged_func(torch.ops.aten.fill_.Scalar, "self: jt_all, value: any")
 def fill__Scalar(func, *args, **kwargs):
     _, new_kwargs = normalize_function(  # type: ignore[misc]
@@ -2435,6 +2496,46 @@ def fill__Scalar(func, *args, **kwargs):
 
     func(inp._values, **new_kwargs)
     return inp
+
+
+@register_jagged_func(torch.ops.aten.frexp.Tensor, "self: jt_all")
+def frexp_Tensor(func, *args, **kwargs):
+    _, new_kwargs = normalize_function(  # type: ignore[misc]
+        func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
+    )
+
+    inp = new_kwargs.pop("input")
+    output_kwargs = extract_kwargs(inp)
+
+    mantissa, exponent = func(inp._values)
+    return NestedTensor(mantissa, **output_kwargs), NestedTensor(
+        exponent, **output_kwargs
+    )
+
+
+@register_jagged_func(
+    torch.ops.aten.matmul_backward.default,
+    "grad: jt_all, self: jt_all, other: any, mask: any",
+)
+def matmul_backward_default(func, *args, **kwargs):
+    _, new_kwargs = normalize_function(  # type: ignore[misc]
+        func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
+    )
+
+    grad = new_kwargs.pop("grad")
+    inp = new_kwargs.pop("input")
+    other = new_kwargs.pop("other")
+    grad_input_mask = new_kwargs.pop("mask")
+
+    grad_self = None
+    if grad_input_mask[0]:
+        grad_self = torch.matmul(grad, other.transpose(-1, -2))
+
+    grad_other = None
+    if grad_input_mask[1]:
+        grad_other = torch.matmul(inp.transpose(-1, -2), grad)
+
+    return (grad_self, grad_other)
 
 
 from torch._higher_order_ops.flex_attention import (

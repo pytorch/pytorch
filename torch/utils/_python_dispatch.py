@@ -3,7 +3,8 @@ import contextlib
 
 import warnings
 from dataclasses import dataclass
-from typing import Any, Dict, List, Optional, Set, Union, Protocol, Tuple, Sequence, overload, Deque, Type
+from typing import Any, Optional, Union, Protocol, overload
+from collections.abc import Sequence
 from typing_extensions import TypeIs
 from collections import deque
 
@@ -68,15 +69,15 @@ class TorchDispatchMode:
             assert isinstance(_dispatch_key, torch._C.DispatchKey)
             self.__dict__["_dispatch_key"] = _dispatch_key
 
-        self.old_dispatch_mode_flags: Deque[bool] = deque()
-        self.old_non_infra_dispatch_mode_flags: Deque[bool] = deque()
+        self.old_dispatch_mode_flags: deque[bool] = deque()
+        self.old_non_infra_dispatch_mode_flags: deque[bool] = deque()
 
     def _lazy_init_old_dispatch_mode_flags(self):
         if not hasattr(self, "old_dispatch_mode_flags"):
-            self.old_dispatch_mode_flags: Deque[bool] = deque()  # type: ignore[no-redef]
+            self.old_dispatch_mode_flags: deque[bool] = deque()  # type: ignore[no-redef]
 
         if not hasattr(self, "old_non_infra_dispatch_mode_flags"):
-            self.old_non_infra_dispatch_mode_flags: Deque[bool] = deque()  # type: ignore[no-redef]
+            self.old_non_infra_dispatch_mode_flags: deque[bool] = deque()  # type: ignore[no-redef]
 
 
     def __torch_dispatch__(self, func, types, args=(), kwargs=None):
@@ -293,7 +294,7 @@ class BaseTorchDispatchMode(TorchDispatchMode):
 
 # Subtypes which have __tensor_flatten__ and __tensor_unflatten__.
 class TensorWithFlatten(Protocol):
-    def __tensor_flatten__(self) -> Tuple[Sequence[str], object]:
+    def __tensor_flatten__(self) -> tuple[Sequence[str], object]:
         ...
 
     @staticmethod
@@ -307,7 +308,7 @@ class TensorWithFlatten(Protocol):
     shape: torch._C.Size
 
     @overload
-    def stride(self, dim: None = None) -> Tuple[int, ...]:
+    def stride(self, dim: None = None) -> tuple[int, ...]:
         ...
 
     @overload
@@ -315,7 +316,7 @@ class TensorWithFlatten(Protocol):
         ...
 
     @overload
-    def size(self, dim: None = None) -> Tuple[int, ...]:
+    def size(self, dim: None = None) -> tuple[int, ...]:
         ...
 
     @overload
@@ -402,7 +403,7 @@ def is_traceable_wrapper_subclass(t: object) -> TypeIs[TensorWithFlatten]:
         and hasattr(t, "__tensor_unflatten__")
     )
 
-def is_traceable_wrapper_subclass_type(t: Type) -> TypeIs[Type[TensorWithFlatten]]:
+def is_traceable_wrapper_subclass_type(t: type) -> TypeIs[type[TensorWithFlatten]]:
     """Same as above, but takes a type argument instead of an instance."""
     return (issubclass(t, torch.Tensor) and t != torch.Tensor
             and hasattr(t, "__tensor_flatten__") and hasattr(t, "__tensor_unflatten__"))
@@ -446,38 +447,6 @@ def transform_subclass(t, callback, outer_size=None, outer_stride=None):
     )
 
     return sub
-
-
-def _apply_to_subclass(
-    t: torch.Tensor,
-    callback,
-    *,
-    filter_fn,
-    unwrap_functional_tensor: bool,
-) -> None:
-    """
-    Given a traceable, wrapper tensor subclass ``t`` that implements
-    ``__torch_dispatch__`` and holds some inner tensors,
-    and a callback of type ``Callable[[torch.Tensor], None]``,
-    transform_subclass will grab each inner tensor attribute from the wrapper,
-    passing them into ``callback``.
-    """
-    from torch._subclasses.functional_tensor import FunctionalTensor
-
-    def recurse(t):
-        if is_traceable_wrapper_subclass(t):
-            inner_tensor_names, _ = t.__tensor_flatten__()
-            for t_name in inner_tensor_names:
-                if filter_fn(t_name, type(t)):
-                    recurse(getattr(t, t_name))
-        elif isinstance(t, FunctionalTensor):
-            if unwrap_functional_tensor:
-                t = torch._from_functional_tensor(t.elem)
-            recurse(t)
-        else:
-            assert isinstance(t, torch.Tensor)
-            callback(t)
-    recurse(t)
 
 
 def _correct_storage_aliasing(func, schema_info, args, outs):
@@ -547,19 +516,19 @@ and output of type {type(ret)}. But expected types to match."""
 # and sometimes use torchscript schema parsing (for custom ops, for which torchgen parsing is untested).
 @dataclass
 class AliasInfo:
-    alias_set: Set[str]
+    alias_set: set[str]
     is_write: bool
     name: Optional[str]
 
 
 @dataclass
 class SchemaInfo:
-    args: List[AliasInfo]
-    outs: List[AliasInfo]
+    args: list[AliasInfo]
+    outs: list[AliasInfo]
 
 
 # Can't import torch._ops.OpOverload due to circular reference
-parsed_schema_map: Dict[Any, SchemaInfo] = {}
+parsed_schema_map: dict[Any, SchemaInfo] = {}
 
 
 # Given an OpOverload, returns schema information on it.

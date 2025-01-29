@@ -13,15 +13,10 @@ from typing import (
     Callable,
     ClassVar,
     ContextManager,
-    Dict,
     Generic,
-    List,
     NewType,
     Optional,
     Protocol,
-    Set,
-    Tuple,
-    Type,
     TYPE_CHECKING,
     TypeVar,
     Union,
@@ -66,7 +61,7 @@ def _is_fake_tensor(t: object) -> TypeIs[FakeTensor]:
     return isinstance(t, FakeTensor)
 
 
-DimList = List
+DimList = list
 _TensorLikeT = TypeVar("_TensorLikeT", "MetaTensorDesc", torch.Tensor)
 _T = TypeVar("_T")
 _TensorT = TypeVar("_TensorT", bound=torch.Tensor)
@@ -178,7 +173,7 @@ def is_sparse_any(t: object) -> TypeGuard[torch.Tensor]:
     return is_sparse_coo(t) or is_sparse_compressed(t)
 
 
-def _checked_cast(ty: Type[_T], obj: object) -> _T:
+def _checked_cast(ty: type[_T], obj: object) -> _T:
     assert isinstance(obj, ty), f"expected {ty} but got {type(obj)}"
     return obj
 
@@ -224,8 +219,8 @@ class MetaTensorDescriber:
         # Storage -> int
         self.lookup_storage = WeakIdKeyDictionary()
         self.copy_data = copy_data
-        self.traced_tensors: Set[int] = set()
-        self.traced_storages: Set[int] = set()
+        self.traced_tensors: set[int] = set()
+        self.traced_storages: set[int] = set()
 
     def get_tensor_id(self, t: torch.Tensor) -> MetaTensorId:
         if t not in self.lookup_tensor:
@@ -506,8 +501,8 @@ class MetaNestedIntDesc:
 
 @dataclass(frozen=True)
 class MetaCustomSizeStridesDesc:
-    size: Tuple[Optional[MetaNestedIntDesc], ...]
-    stride: Tuple[Optional[MetaNestedIntDesc], ...]
+    size: tuple[Optional[MetaNestedIntDesc], ...]
+    stride: tuple[Optional[MetaNestedIntDesc], ...]
     # storage_offset can never be NestedInt
 
 
@@ -519,7 +514,7 @@ class MetaStorageDesc:
     # serializable in JSON, you want to do something special here anyway
     data: Optional[torch.UntypedStorage]
 
-    def as_json(self, describer_id: _DescriberId) -> Dict[str, object]:
+    def as_json(self, describer_id: _DescriberId) -> dict[str, object]:
         return {
             "id": self.id,
             "describer_id": describer_id,
@@ -618,8 +613,8 @@ class MetaTensorDesc(Generic[_TensorT]):
     # throw an error, but we don't currently have any subclasses that do this
     # except C++ nested tensor but we're going to have nested int to make this
     # defined on NJT
-    size: Tuple[int, ...]
-    dynamo_dynamic_indices: List[int]
+    size: tuple[int, ...]
+    dynamo_dynamic_indices: list[int]
 
     layout: torch.layout = torch.strided
     is_inference: bool = False
@@ -641,7 +636,7 @@ class MetaTensorDesc(Generic[_TensorT]):
     is_conj: bool = False
     is_neg: bool = False
     is_parameter: bool = False
-    stride: Optional[Tuple[int, ...]] = None
+    stride: Optional[tuple[int, ...]] = None
     storage_offset: int = 0
     # NB: We have a choice whether or not to store the id or a direct pointer
     # to the data structure.  For ease of use, we store the data structure,
@@ -659,13 +654,13 @@ class MetaTensorDesc(Generic[_TensorT]):
     unwrapped: Optional[MetaTensorDesc] = None  # is_functorch_wrapped
     bdim: Optional[int] = None  # is_functorch_wrapped
     base: Optional[MetaTensorDesc] = None  # is_view
-    attrs: Optional[Dict[str, MetaTensorDesc]] = None  # is_traceable_wrapper_subclass
+    attrs: Optional[dict[str, MetaTensorDesc]] = None  # is_traceable_wrapper_subclass
     creation_meta: Optional[CreationMeta] = None
     grad: Optional[MetaTensorDesc] = None
 
     # Everything below is NOT serializable, need some more work
 
-    _UNSERIALIZABLE: ClassVar[Set[str]] = {
+    _UNSERIALIZABLE: ClassVar[set[str]] = {
         "ctx",
         "type",
         "fake_mode",
@@ -680,14 +675,14 @@ class MetaTensorDesc(Generic[_TensorT]):
     }
 
     ctx: Optional[object] = None  # is_traceable_wrapper_subclass
-    type: Optional[Type] = None  # is_traceable_wrapper_subclass
+    type: Optional[type] = None  # is_traceable_wrapper_subclass
     fake_mode: Optional[FakeTensorMode] = None
     view_func: Optional[ViewFunc] = None
     # level looks serializable, but actually it is meaningless without
     # the functorch_stack below
     level: Optional[int] = None  # is_functorch_wrapped
     current_level: Optional[int] = None
-    functorch_stack: Optional[List[CInterpreter]] = None
+    functorch_stack: Optional[list[CInterpreter]] = None
     autograd_meta_from: Optional[torch.Tensor] = None
 
     # This is only populated on copy_data, and typically is not used at all,
@@ -707,7 +702,7 @@ class MetaTensorDesc(Generic[_TensorT]):
 
     # NB: This will reference numeric IDs, and it is assumed that you've
     # already serialized everything this recursively references
-    def as_json(self, describer_id: _DescriberId) -> Dict[str, object]:
+    def as_json(self, describer_id: _DescriberId) -> dict[str, object]:
         def json(k: str, v: object) -> object:
             # Some best-effort debugging serialization for unserializable
             # fields (feel free to add other special cases as appropriate)
@@ -744,7 +739,7 @@ class MetaTensorDesc(Generic[_TensorT]):
         return r
 
     @property
-    def shape(self) -> Tuple[int, ...]:
+    def shape(self) -> tuple[int, ...]:
         return self.size
 
 
@@ -903,6 +898,8 @@ class MetaConverter(Generic[_TensorT]):
             if (
                 inner_contexts := getattr(symbolic_context, "inner_contexts", None)
             ) is not None:
+                # This only be used with NJT today
+                assert t.subclass_inner_attr == "_metadata"
                 inner_context = inner_contexts[t.subclass_inner_attr]
             else:
                 # Run into this case in test_jagged_fake_to_fake_preserved
@@ -952,7 +949,7 @@ class MetaConverter(Generic[_TensorT]):
             symbolic_context: Optional[
                 torch.fx.experimental.symbolic_shapes.SymbolicContext
             ] = symbolic_context,
-        ) -> Tuple[Tuple[int, ...], Tuple[int, ...], int]:
+        ) -> tuple[tuple[int, ...], tuple[int, ...], int]:
             assert t.stride is not None
             if shape_env is not None:
                 fake_mode = t.fake_mode
@@ -1009,8 +1006,8 @@ class MetaConverter(Generic[_TensorT]):
         # symbolic context.
         def empty_create_subclass(
             t: MetaTensorDesc,
-            outer_size: Tuple[int, ...],
-            outer_stride: Tuple[int, ...],
+            outer_size: tuple[int, ...],
+            outer_stride: tuple[int, ...],
             symbolic_context: Optional[
                 torch.fx.experimental.symbolic_shapes.SymbolicContext
             ] = symbolic_context,
@@ -1042,8 +1039,8 @@ class MetaConverter(Generic[_TensorT]):
 
             def _empty_create_subclass(
                 t: MetaTensorDesc,
-                outer_size: Optional[Tuple[int, ...]],
-                outer_stride: Optional[Tuple[int, ...]],
+                outer_size: Optional[tuple[int, ...]],
+                outer_stride: Optional[tuple[int, ...]],
                 symbolic_context: Optional[
                     torch.fx.experimental.symbolic_shapes.SymbolicContext
                 ],
@@ -1089,7 +1086,7 @@ class MetaConverter(Generic[_TensorT]):
                     inner_tensors[attr] = new_empty_tensor
 
                 assert t.type is not None
-                return t.type.__tensor_unflatten__(
+                return t.type.__tensor_unflatten__(  # type: ignore[attr-defined]
                     inner_tensors, t.ctx, outer_size, outer_stride
                 )
 
@@ -1142,7 +1139,7 @@ class MetaConverter(Generic[_TensorT]):
             t_dynamic_sizes = [DimDynamic.DYNAMIC] * t.ndim
             if t.is_traceable_wrapper_subclass:
                 assert t.attrs is not None
-                inner_contexts: Dict[
+                inner_contexts: dict[
                     str, torch.fx.experimental.symbolic_shapes.SymbolicContext
                 ] = {}
                 for attr, inner in t.attrs.items():

@@ -27,7 +27,6 @@ if not c10d.is_available() or not c10d.is_nccl_available():
     print("c10d NCCL not available, skipping tests", file=sys.stderr)
     sys.exit(0)
 
-from typing import Dict, List
 
 import test_c10d_common
 from test_c10d_common import ConvNet, DoubleGpuNet, gpus_for_rank, ModuleForDdpCommHook
@@ -437,6 +436,35 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
         # validate default pg is no longer valid
         with self.assertRaises(ValueError):
             dist.all_reduce(t1)
+
+    @requires_nccl()
+    @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
+    def test_cuda_event_cache_mthd_race(self):
+        # This unit test is to test the case when the collective is launched in
+        # a side thread and the thread dies before the cache has been fully recycled.
+        # More details can be found in this issue: https://github.com/pytorch/pytorch/issues/143470.
+        import threading
+
+        # initiate collectives here
+        def init_collective_task(t):
+            dist.all_reduce(t)
+            dist.all_reduce(t)
+            dist.all_reduce(t)
+
+        os.environ["TORCH_NCCL_CUDA_EVENT_CACHE"] = "1"
+        store = c10d.FileStore(self.file_name, self.world_size)
+        self._create_process_group_nccl(store, self.opts())
+        device = self.rank_to_GPU[self.rank][0]
+
+        t = torch.rand(10, 10, device=device)
+        # First allreduce to initialize state.
+        dist.all_reduce(t)
+        dist.all_reduce(t)
+        dist.all_reduce(t)
+        side_thread = threading.Thread(target=init_collective_task, args=(t,))
+        side_thread.start()
+        side_thread.join()
+        torch.cuda.synchronize()
 
     CUDA_12_AND_ABOVE = torch.cuda.is_available() and (
         torch.version.cuda is not None and int(torch.version.cuda.split(".")[0]) >= 12
@@ -2517,7 +2545,7 @@ class WorkHookTest(MultiProcessTestCase):
     def test_on_completion_hook_broadcast(self):
         pg = self._get_process_group()
         num_hook_fired = 0
-        durations: List[float] = []
+        durations: list[float] = []
 
         def hook(work_info: torch._C._distributed_c10d.WorkInfo):
             nonlocal num_hook_fired, durations
@@ -2545,7 +2573,7 @@ class WorkHookTest(MultiProcessTestCase):
     def test_on_completion_hook_mixed_ops(self):
         pg = self._get_process_group()
         num_hook_fired = 0
-        durations: List[float] = []
+        durations: list[float] = []
 
         def hook(work_info: torch._C._distributed_c10d.WorkInfo):
             nonlocal num_hook_fired, durations
@@ -2586,8 +2614,8 @@ class WorkHookTest(MultiProcessTestCase):
     @skip_if_lt_x_gpu(2)
     def test_on_completion_hook_with_ddp(self):
         pg = self._get_process_group()
-        num_hook_fired: Dict[int, int] = {}
-        durations: Dict[OpType, List[float]] = {}
+        num_hook_fired: dict[int, int] = {}
+        durations: dict[OpType, list[float]] = {}
 
         def hook(work_info: torch._C._distributed_c10d.WorkInfo):
             nonlocal num_hook_fired, durations
@@ -2644,8 +2672,8 @@ class WorkHookTest(MultiProcessTestCase):
         torch.cuda.set_device(self.rank)
 
         pg = self._get_process_group()
-        num_hook_fired: Dict[int, int] = {}
-        durations: Dict[OpType, List[float]] = {}
+        num_hook_fired: dict[int, int] = {}
+        durations: dict[OpType, list[float]] = {}
 
         def hook(work_info: torch._C._distributed_c10d.WorkInfo):
             nonlocal num_hook_fired, durations
