@@ -561,7 +561,9 @@ debug_index_asserts = False
 # For multiple, fused pointwise nodes, inductor will elide the intermediary upcasts and downcasts
 # Typically this should be closer to fp64 ref numerics. However, it can be useful for debugging
 # to emulate the eager numerics.
-emulate_precision_casts = False
+emulate_precision_casts = (
+    os.environ.get("TORCHINDUCTOR_EMULATE_PRECISION_CASTS", "0") == "1"
+)
 
 # warnings intended for PyTorch developers, disable for point releases
 is_nightly_or_source = "dev" in torch.__version__ or "git" in torch.__version__
