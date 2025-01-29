@@ -58,7 +58,7 @@ if TYPE_CHECKING:
     from torch._guards import Source
     from torch._ops import OpOverload
     from torch.fx.experimental.symbolic_shapes import ShapeEnv, SymbolicContext
-    from torch.nested._internal.cached_tensor import CachedTensor
+    from torch.nested._internal.dict_tensor import DictTensor
 
 
 log = logging.getLogger(__name__)
@@ -2506,7 +2506,7 @@ class FakeTensorMode(TorchDispatchMode):
     def get_nested_int(
         self,
         *,
-        cache: CachedTensor,
+        cache: DictTensor,
         coeff: Union[int, torch.SymInt] = 1,
     ) -> torch.SymInt:
         # Note [ Best effort SymInt association ]
@@ -2517,10 +2517,10 @@ class FakeTensorMode(TorchDispatchMode):
         # symbolic shapes guards should serve as the perfect complement to dynamo
         # guards, e.g., two SymInts share the same symbol if dynamo can already guard
         # based on tensor deduping guards that they are the same. Instead of doing that,
-        # we instead associate SymInt on CachedTensor, an object that is somewhat
-        # ephemeral/disposable, e.g. the same CachedTensor gets preserved when
+        # we instead associate SymInt on DictTensor, an object that is somewhat
+        # ephemeral/disposable, e.g. the same DictTensor gets preserved when
         # we do something like pointwise, but calling from_jagged(values, offsets)
-        # actually always creates a new CachedTensor, and we would have a fresh
+        # actually always creates a new DictTensor, and we would have a fresh
         # SymInt in that case.
         #
         # The answer is that:
@@ -2550,7 +2550,7 @@ class FakeTensorMode(TorchDispatchMode):
         else:
             return ret * coeff
 
-    def create_symbolic_nested_int(self, *, cache: CachedTensor) -> torch.SymInt:
+    def create_symbolic_nested_int(self, *, cache: DictTensor) -> torch.SymInt:
         # See Note: [Creating symbolic nested int]
         # Returned nested int always has coeff=1; caller should multiply result by coeff if needed
         import torch.nested._internal.nested_tensor
@@ -2878,7 +2878,7 @@ def _infer_fake_from_real_tensor(
     # We went with the first option.
     fake_strides = [-1] * real_out.dim()
     strides = [(s, idx) for idx, s in enumerate(real_out.stride())]
-    strides.sort()
+    strides.sort(key=lambda x: (x[0], -x[1]))
     expected = 1
     fake_stride = expected
     for s, idx in strides:

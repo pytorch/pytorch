@@ -1633,6 +1633,25 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         opt_test_fn = torch.compile(test_fn, backend=cnt)
         opt_test_fn()
 
+    def test_foreach_decomp_arg_names(self):
+        # https://github.com/pytorch/pytorch/issues/138698
+
+        @torch.compile(fullgraph=True)
+        def foreach_pow(**kwargs):
+            return torch._foreach_pow(**kwargs)
+
+        foreach_pow(self=[torch.ones(2, 2, device="cpu")], exponent=2.7)
+
+        @torch.compile(fullgraph=True)
+        def foreach_lerp_(**kwargs):
+            return torch._foreach_lerp_(**kwargs)
+
+        foreach_lerp_(
+            self=[torch.ones(2, 2, device="cpu")],
+            tensors1=[torch.ones(2, 2, device="cpu")],
+            weights=[torch.ones(2, 2, device="cpu")],
+        )
+
     def test_reformer_min_chunk_len(self):
         def fn(cfg):
             t = torch.empty(10)
@@ -4063,6 +4082,13 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         x = torch.randn(4)
         self.assertEqual(fn(x), torch.sin(x))
 
+    def test_int_format(self):
+        def fn(num: int):
+            return format(num, "b")
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True, dynamic=False)
+        self.assertEqual(fn(10), opt_fn(10))
+
     # Repro of torch._dynamo.exc.InternalTorchDynamoError: 'NoneType' object has no attribute 'guards'
     # due to bad empty list handling
     def test_empty_list_contains_with_jump(self):
@@ -5981,6 +6007,19 @@ def forward(self, s0 : torch.SymInt, s1 : torch.SymInt, L_x_ : torch.Tensor):
         self.assertEqual(fn(config, x), opt_fn(config, x))
         self.assertEqual(cloned_config.baz, 4)
 
+    @unittest.skipIf(not HAS_OMEGACONG, "missing omegaconf package")
+    def test_omegaconf_listconfig_contains(self):
+        def fn(cfg, x):
+            if 1 in cfg:
+                return torch.sin(x)
+            return torch.cos(x)
+
+        config = OmegaConf.create([1, 2, 3, {"key": "value"}])
+
+        x = torch.randn(4)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(fn(config, x), opt_fn(config, x))
+
     # https://github.com/pytorch/pytorch/issues/136257
     def test_overwriting_params(self):
         class M(torch.nn.Module):
@@ -6283,7 +6322,7 @@ def forward(self, s0 : torch.SymInt, s1 : torch.SymInt, L_x_ : torch.Tensor):
             return g(x)
 
         # TODO clear this on all tests
-        torch._dynamo.eval_frame.dynamo_tls.traced_frame_infos.clear()
+        torch._dynamo.eval_frame.clear_dynamo_tls()
 
         opt_f = torch.compile(f, backend="eager", fullgraph=fullgraph, dynamic=False)
         opt_f(torch.randn(3))
