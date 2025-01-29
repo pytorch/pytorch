@@ -1,5 +1,4 @@
 import contextlib
-import enum
 import functools
 import itertools
 import logging
@@ -280,12 +279,6 @@ def mark_nodes_dislike_padding(
         # We only want to mark output nodes. So, move it after the above prior nodes process.
         if not config.pad_outputs and cur in user_visible_output_strides:
             cur.meta["dislike_padding"] = True
-
-
-class SaveOutputCodeContext(enum.Enum):
-    BEFORE_COMPILE = 0
-    AFTER_DESERIALIZATION = 1
-    AFTER_COMPILE = 2
 
 
 class GraphLowering(torch.fx.Interpreter):
@@ -2006,7 +1999,7 @@ class GraphLowering(torch.fx.Interpreter):
         return total_bytes, node_counts, node_runtimes
 
     @staticmethod
-    def save_output_code(code: str, context: SaveOutputCodeContext) -> None:
+    def save_output_code(code: str) -> None:
         # No-op to be patched for unit tests
         pass
 
@@ -2034,7 +2027,7 @@ class GraphLowering(torch.fx.Interpreter):
                 + '"""\n'
             )
             code = tuning_code + code
-        GraphLowering.save_output_code(code, SaveOutputCodeContext.BEFORE_COMPILE)
+        GraphLowering.save_output_code(code)
         output_code_log.debug("Output code: \n%s", code)
 
         inductor_meta = autotune_cache.inductor_meta_from_config()
