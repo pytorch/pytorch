@@ -56,11 +56,6 @@ RUN bash ./install_cuda.sh 11.8
 RUN bash ./install_magma.sh 11.8
 RUN ln -sf /usr/local/cuda-11.8 /usr/local/cuda
 
-FROM cuda as cuda12.1
-RUN bash ./install_cuda.sh 12.1
-RUN bash ./install_magma.sh 12.1
-RUN ln -sf /usr/local/cuda-12.1 /usr/local/cuda
-
 FROM cuda as cuda12.4
 RUN bash ./install_cuda.sh 12.4
 RUN bash ./install_magma.sh 12.4
@@ -70,6 +65,11 @@ FROM cuda as cuda12.6
 RUN bash ./install_cuda.sh 12.6
 RUN bash ./install_magma.sh 12.6
 RUN ln -sf /usr/local/cuda-12.6 /usr/local/cuda
+
+FROM cuda as cuda12.8
+RUN bash ./install_cuda.sh 12.8
+RUN bash ./install_magma.sh 12.8
+RUN ln -sf /usr/local/cuda-12.8 /usr/local/cuda
 
 FROM cpu as rocm
 ARG PYTORCH_ROCM_ARCH

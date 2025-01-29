@@ -1,15 +1,16 @@
+from collections.abc import Sequence
 from pathlib import Path
 from re import match as _match
-from typing import List, Optional, Sequence, Set, Union
+from typing import Optional, Union
 
 
-def read_file(fname: Union[Path, str]) -> List[str]:
+def read_file(fname: Union[Path, str]) -> list[str]:
     with open(fname, encoding="utf-8") as f:
         return f.readlines()
 
 
 def _embed_headers(
-    content: List[str], include_dirs: List[Path], processed_files: Set[str]
+    content: list[str], include_dirs: list[Path], processed_files: set[str]
 ) -> str:
     for line_idx, cur_line in enumerate(content):
         m = _match('^\\s*#include\\s*[<"]([^>"]+)[>"]', cur_line)
