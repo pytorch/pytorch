@@ -11,6 +11,8 @@ from torch.testing._internal.common_device_type import onlyCUDA
 from torch.testing._internal.common_dtype import all_types_and, custom_types
 from torch.testing._internal.opinfo.core import DecorateInfo, OpInfo, SampleInput
 from torch._higher_order_ops.invoke_subgraph import mark_compile_region
+from torch._higher_order_ops import InvokeQuant, invoke_quant_packed
+
 
 def sample_inputs_map(opinfo, device, dtype, requires_grad, **kwargs):
     make_arg = functools.partial(
@@ -194,6 +196,24 @@ def simple_scan(init, xs):
     return torch._higher_order_ops.scan(combine_fn, init, xs)
 
 
+quant_tracer = InvokeQuant()
+
+
+def simple_invoke_quant(x):
+    def fn(x):
+        return (torch.sin(x),)
+
+    return quant_tracer(fn, (x,))[0] + torch.nn.functional.dropout(x)
+
+
+def simple_invoke_quant_packed(x):
+    def fn(x):
+        return (torch.sin(x),)
+
+    return invoke_quant_packed(fn, (x,))[0] + torch.nn.functional.dropout(x)
+
+
+
 hop_db = [
     OpInfo(
         name="scan",
@@ -275,6 +295,51 @@ hop_db = [
         supports_autograd=True,
         # "torch.compile with aot_autograd does not currently support double backward."
         supports_gradgrad=False,
+    ),
+    OpInfo(
+        name="invoke_quant",
+        variant_test_name="simple",
+        op=simple_invoke_quant,
+        sample_inputs_func=sample_inputs_invoke_subgraph,
+        dtypes=all_types_and(torch.bool, torch.half),
+        supports_out=False,
+        check_batched_grad=False,
+        check_batched_gradgrad=False,
+        check_batched_forward_grad=False,
+        check_inplace_batched_forward_grad=False,
+        supports_autograd=True,
+        # "torch.compile with aot_autograd does not currently support double backward."
+        skips=(
+            DecorateInfo(unittest.expectedFailure, "TestHOP", "test_aot_export"),
+            DecorateInfo(
+                unittest.expectedFailure, "TestHOP", "test_pre_dispatch_export"
+            ),
+            DecorateInfo(unittest.expectedFailure, "TestHOP", "test_serialize_export"),
+            DecorateInfo(unittest.expectedFailure, "TestHOP", "test_retrace_export"),
+        ),
+    ),
+    OpInfo(
+        name="invoke_quant_packed",
+        variant_test_name="simple",
+        op=simple_invoke_quant_packed,
+        sample_inputs_func=sample_inputs_invoke_subgraph,
+        dtypes=all_types_and(torch.bool, torch.half),
+        supports_out=False,
+        check_batched_grad=False,
+        check_batched_gradgrad=False,
+        check_batched_forward_grad=False,
+        check_inplace_batched_forward_grad=False,
+        supports_autograd=True,
+        # "torch.compile with aot_autograd does not currently support double backward."
+        supports_gradgrad=False,
+        skips=(
+            DecorateInfo(unittest.expectedFailure, "TestHOP", "test_aot_export"),
+            DecorateInfo(
+                unittest.expectedFailure, "TestHOP", "test_pre_dispatch_export"
+            ),
+            DecorateInfo(unittest.expectedFailure, "TestHOP", "test_serialize_export"),
+            DecorateInfo(unittest.expectedFailure, "TestHOP", "test_retrace_export"),
+        ),
     ),
     OpInfo(
         name="while_loop",
