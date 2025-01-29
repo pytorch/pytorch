@@ -1,0 +1,39 @@
+name: link_check
+
+on:
+  #pull_request:
+  #push:
+    #branches:
+      #- main
+  repository_dispatch:
+  workflow_dispatch:
+#  schedule:
+   # - cron: "35 17 * * *"
+
+jobs:
+  linkChecker:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Link Checker
+        uses: lycheeverse/lychee-action@v1
+        with:
+          # Check all markdown, html and reStructuredText files in repo (default)
+          args: --accept=200,403,429 --base . --verbose --no-progress './**/*.md' './**/*.html' './**/*.rst'
+          # Use json as output format (instead of markdown)
+          # format: json
+          # Use different output file path
+          # output: ./out.md
+          # Use a custom GitHub token, which 
+          token: ${{ secrets.CUSTOM_TOKEN }}
+          # Fail action on broken links
+          fail: true
+
+     # - name: Create Issue From File
+     #   if: env.lychee_exit_code != 0
+    #    uses: peter-evans/create-issue-from-file@v4
+     #   with:
+     #     title: Link Checker Report
+     #    content-filepath: ./lychee/out.md
+     #     labels: report, automated issue
