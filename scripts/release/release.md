@@ -655,6 +655,26 @@ We improved the existing `torch.library` APIs and added new ones.
 
 ## **Bug fixes**
 
+### Python Frontend
+
+
+
+* Fix `torch.mean(..., out=)` for fp16 and bf16 on CPU ([#135174](https://github.com/pytorch/pytorch/pull/135174))
+* Fix serialization for `torch.uint16`, `torch.uint32`, `torch.uint64` ([#137184](https://github.com/pytorch/pytorch/pull/137184))
+* Fix Tensor preservation logic to not lose user-defined attributes in some cases ([#137267](https://github.com/pytorch/pytorch/pull/137267))
+* Fix memory leak in `torch.utils.module_tracker.ModuleTracker` ([#141960](https://github.com/pytorch/pytorch/pull/141960))
+
+
+
+### NN Frontend
+
+
+
+* Fix `nn.functional.softshrink` returning 0 on NAN input  ([#138421](https://github.com/pytorch/pytorch/pull/138421))
+* Fix flex_decode to build offsets off of strides ([#139516](https://github.com/pytorch/pytorch/pull/139516))
+
+
+
 
 ### Autograd Frontend
 
@@ -673,15 +693,6 @@ We improved the existing `torch.library` APIs and added new ones.
 
 
 
-
-
-### Cuda
-
-
-
-* Add missing boundary checks to cunn_SoftMaxForward ([#140682](https://github.com/pytorch/pytorch/pull/140682))
-* Fix CTC cuda backend out-of-bound access ([#141607](https://github.com/pytorch/pytorch/pull/141607))
-* Fixed cuda sanitizer and as_subclass calls ([#138218](https://github.com/pytorch/pytorch/pull/138218))
 
 
 ### Distributed
@@ -742,6 +753,7 @@ We improved the existing `torch.library` APIs and added new ones.
     * Fix fsspec transaction failure cleanup in multithreaded environments ([#135541](https://github.com/pytorch/pytorch/pull/135541))
 
 
+
 ### Dynamo
 
 
@@ -750,6 +762,106 @@ We improved the existing `torch.library` APIs and added new ones.
 * Don’t graph break on inner `torch.compile` ([#135819](https://github.com/pytorch/pytorch/pull/135819))
 * Various closure/cell variable/mutation related fixes ([#136891](https://github.com/pytorch/pytorch/pull/136891), [#139339](https://github.com/pytorch/pytorch/pull/139339), [#140155](https://github.com/pytorch/pytorch/pull/140155))
 * Stop importing some third party libraries ([#136334](https://github.com/pytorch/pytorch/pull/136334), [#142502](https://github.com/pytorch/pytorch/pull/142502), [#142503](https://github.com/pytorch/pytorch/pull/142503))
+
+
+
+### Nested Tensor Frontend
+
+
+
+* Fix NJT operator support: `sum()`, `unsqueeze()`, `to()` on non-contiguous NJTs, `where()`, `select()`, `chunk()`, reductions ([#131945](https://github.com/pytorch/pytorch/pull/131945), [#141392](https://github.com/pytorch/pytorch/pull/141392), [#137124](https://github.com/pytorch/pytorch/pull/137124), [#141500](https://github.com/pytorch/pytorch/pull/141500), [#139317](https://github.com/pytorch/pytorch/pull/139317), [#141506](https://github.com/pytorch/pytorch/pull/141506), [#141604](https://github.com/pytorch/pytorch/pull/141604))
+* Fix NJT `linear_backward()` memory usage using a more efficient formula ([#141163](https://github.com/pytorch/pytorch/pull/141163))
+* Fix NJT serialization ([#137031](https://github.com/pytorch/pytorch/pull/137031))
+
+### Cuda
+
+
+
+* Add missing boundary checks to cunn_SoftMaxForward ([#140682](https://github.com/pytorch/pytorch/pull/140682))
+* Fix CTC cuda backend out-of-bound access ([#141607](https://github.com/pytorch/pytorch/pull/141607))
+* Fixed cuda sanitizer and as_subclass calls ([#138218](https://github.com/pytorch/pytorch/pull/138218))
+
+
+### Mps
+
+
+
+* Allow nan mean reduction in `nll_loss` ([#135434](https://github.com/pytorch/pytorch/pull/135434))
+* Fix AvgPool2d for float16 ([#136822](https://github.com/pytorch/pytorch/pull/136822))
+* Error checking/bfloat16 support for `torch.normal` ([#136863](https://github.com/pytorch/pytorch/pull/136863))
+* Fix reduction ops outputs for empty tensors ([#139446](https://github.com/pytorch/pytorch/pull/139446))
+* Restrict MSELoss to floating types ([#139960](https://github.com/pytorch/pytorch/pull/139960))
+* Fix conv backward pass for channels last ([#141009](https://github.com/pytorch/pytorch/pull/141009))
+* Add autocast rule for SDPA ([#141776](https://github.com/pytorch/pytorch/pull/141776))
+* Release MetalShaderLibrary cached resources ([#142053](https://github.com/pytorch/pytorch/pull/142053))
+* Fixes SiLU on non-contiguous tensors ([#139006](https://github.com/pytorch/pytorch/pull/139006))
+* Fix `channels_last_3d` in `nn.Conv3d` ([#141780](https://github.com/pytorch/pytorch/pull/141780))
+* Guard on flash attention SymFloat scale instead of incorrectly casting to float ([#141725](https://github.com/pytorch/pytorch/pull/141725))
+* Fix memory leak from unreleased NSProcessInfo ([#142052](https://github.com/pytorch/pytorch/pull/142052))
+
+### ROCM
+
+
+
+* Fixed out of memory errors on AMD triton backend ([#139883](https://github.com/pytorch/pytorch/pull/139883))
+* Correct numerical issues in layer norm backwards kernel ([#140259](https://github.com/pytorch/pytorch/pull/140259))
+
+### XPU
+
+
+
+* Resolves an issue with duplicated build environments in XPU Linux CI. ([#141546](https://github.com/pytorch/pytorch/pull/141546))
+* Fix XPU support packages version: Corrects the versioning of XPU support packages. ([#138189](https://github.com/pytorch/pytorch/pull/138189))
+* Fix `c10::Event` unit test failure on XPU backend ([#141800](https://github.com/pytorch/pytorch/pull/141800))
+* Fix mismatched tensor metadata between FakeTensor and XPU concrete tensor in `F.logsigmoid` ([#141333](https://github.com/pytorch/pytorch/pull/141333))
+* Fix memory stats error on XPU: Corrects an error in memory statistics for XPU devices. ([#135818](https://github.com/pytorch/pytorch/pull/135818))
+* Fix XPU CMake typo: Corrects a typo in XPU CMake configuration. ([#140374](https://github.com/pytorch/pytorch/pull/140374))
+* Fix an issue causing endless code regeneration in non-XPU environments. ([#140438](https://github.com/pytorch/pytorch/pull/140438))
+* Fix incorrect device check before skipping concat linear in Inductor XPU. ([#140916](https://github.com/pytorch/pytorch/pull/140916))
+
+
+
+### Profiler
+
+
+
+* Clear Out Dangling AppendOnlyLists after collection ([#137450](https://github.com/pytorch/pytorch/pull/137450))
+* Fix `UnicodeDecodeError: 'utf-8' codec can't decode byte` ([#139062](https://github.com/pytorch/pytorch/pull/139062))
+* Fix ASAN Overflow Issues ([#140441](https://github.com/pytorch/pytorch/pull/140441))
+* Fix devices Parameter Type in benchmark_utilization Function ([#138774](https://github.com/pytorch/pytorch/pull/138774))[ ](https://github.com/pytorch/pytorch/pull/138774)
+
+
+### Quantization
+
+
+
+* Pass `ideep:lowp_kind` to` matmul_forward::compute` on cache misses ([#135058](https://github.com/pytorch/pytorch/pull/135058))
+* fix re-export custom metadata ([#135282](https://github.com/pytorch/pytorch/pull/135282), [#135634](https://github.com/pytorch/pytorch/pull/135634), [#135720](https://github.com/pytorch/pytorch/pull/135720))
+* moving eps in `torchao/quantization/utils.py` to targeted device to avoid device mismatch issue ([#135204](https://github.com/pytorch/pytorch/pull/135204))
+* Add type check for `dilation` in `torch.quantized_max_pool3d()` ([#137845](https://github.com/pytorch/pytorch/pull/137845))
+* Pass all arguments when quantizing embedding bag from float ([#137697](https://github.com/pytorch/pytorch/pull/137697))
+* Fix for split gates enabled quantizable LSTM subclass ([#140818](https://github.com/pytorch/pytorch/pull/140818))
+* Fix ReLU fusion when conv/linear has > 1 user for XNNPACK ([#140846](https://github.com/pytorch/pytorch/pull/140846))
+* Fix RecursionError when `prepare_pt2e` graph with concat of the same node ([#141651](https://github.com/pytorch/pytorch/pull/141651))
+
+
+
+### Sparse Frontend
+
+
+
+* Fix memory leak in MaskedTensor when using autograd ([#137890](https://github.com/pytorch/pytorch/pull/137890))
+* Fix `bmm(COO, dense)` illegal memory access for some shapes ([#131977](https://github.com/pytorch/pytorch/pull/131977))
+* Fix MaskedTensor binary ops for `sparse_csr` layout ([#134335](https://github.com/pytorch/pytorch/pull/134335))
+
+
+### Miscellaneous
+
+
+
+* Fix PyBind 2.10.4 compatibility issue ([#141456](https://github.com/pytorch/pytorch/pull/141456))
+* correctly keep track of processed tensors for foreach reductions (norm, max) ([#140103](https://github.com/pytorch/pytorch/pull/140103))
+* Fixes to `torch.package` for 3.13 ([#141409](https://github.com/pytorch/pytorch/pull/141409))
 
 
 ### Export
@@ -851,113 +963,6 @@ We improved the existing `torch.library` APIs and added new ones.
 * Isolate the locale for NNC’s IRPrinter ([#136458](https://github.com/pytorch/pytorch/pull/136458))
 * Fix misuse of offset param in seek ([#140633](https://github.com/pytorch/pytorch/pull/140633))
 
-
-### Mps
-
-
-
-* Allow nan mean reduction in `nll_loss` ([#135434](https://github.com/pytorch/pytorch/pull/135434))
-* Fix AvgPool2d for float16 ([#136822](https://github.com/pytorch/pytorch/pull/136822))
-* Error checking/bfloat16 support for `torch.normal` ([#136863](https://github.com/pytorch/pytorch/pull/136863))
-* Fix reduction ops outputs for empty tensors ([#139446](https://github.com/pytorch/pytorch/pull/139446))
-* Restrict MSELoss to floating types ([#139960](https://github.com/pytorch/pytorch/pull/139960))
-* Fix conv backward pass for channels last ([#141009](https://github.com/pytorch/pytorch/pull/141009))
-* Add autocast rule for SDPA ([#141776](https://github.com/pytorch/pytorch/pull/141776))
-* Release MetalShaderLibrary cached resources ([#142053](https://github.com/pytorch/pytorch/pull/142053))
-* Fixes SiLU on non-contiguous tensors ([#139006](https://github.com/pytorch/pytorch/pull/139006))
-* Fix `channels_last_3d` in `nn.Conv3d` ([#141780](https://github.com/pytorch/pytorch/pull/141780))
-* Guard on flash attention SymFloat scale instead of incorrectly casting to float ([#141725](https://github.com/pytorch/pytorch/pull/141725))
-* Fix memory leak from unreleased NSProcessInfo ([#142052](https://github.com/pytorch/pytorch/pull/142052))
-
-
-### Nested Tensor Frontend
-
-
-
-* Fix NJT operator support: `sum()`, `unsqueeze()`, `to()` on non-contiguous NJTs, `where()`, `select()`, `chunk()`, reductions ([#131945](https://github.com/pytorch/pytorch/pull/131945), [#141392](https://github.com/pytorch/pytorch/pull/141392), [#137124](https://github.com/pytorch/pytorch/pull/137124), [#141500](https://github.com/pytorch/pytorch/pull/141500), [#139317](https://github.com/pytorch/pytorch/pull/139317), [#141506](https://github.com/pytorch/pytorch/pull/141506), [#141604](https://github.com/pytorch/pytorch/pull/141604))
-* Fix NJT `linear_backward()` memory usage using a more efficient formula ([#141163](https://github.com/pytorch/pytorch/pull/141163))
-* Fix NJT serialization ([#137031](https://github.com/pytorch/pytorch/pull/137031))
-
-
-### NN Frontend
-
-
-
-* Fix `nn.functional.softshrink` returning 0 on NAN input  ([#138421](https://github.com/pytorch/pytorch/pull/138421))
-* Fix flex_decode to build offsets off of strides ([#139516](https://github.com/pytorch/pytorch/pull/139516))
-
-
-### Profiler
-
-
-
-* Clear Out Dangling AppendOnlyLists after collection ([#137450](https://github.com/pytorch/pytorch/pull/137450))
-* Fix `UnicodeDecodeError: 'utf-8' codec can't decode byte` ([#139062](https://github.com/pytorch/pytorch/pull/139062))
-* Fix ASAN Overflow Issues ([#140441](https://github.com/pytorch/pytorch/pull/140441))
-* Fix devices Parameter Type in benchmark_utilization Function ([#138774](https://github.com/pytorch/pytorch/pull/138774))[ ](https://github.com/pytorch/pytorch/pull/138774)
-
-
-### Python Frontend
-
-
-
-* Fix `torch.mean(..., out=)` for fp16 and bf16 on CPU ([#135174](https://github.com/pytorch/pytorch/pull/135174))
-* Fix serialization for `torch.uint16`, `torch.uint32`, `torch.uint64` ([#137184](https://github.com/pytorch/pytorch/pull/137184))
-* Fix Tensor preservation logic to not lose user-defined attributes in some cases ([#137267](https://github.com/pytorch/pytorch/pull/137267))
-* Fix memory leak in `torch.utils.module_tracker.ModuleTracker` ([#141960](https://github.com/pytorch/pytorch/pull/141960))
-
-
-### Quantization
-
-
-
-* Pass `ideep:lowp_kind` to` matmul_forward::compute` on cache misses ([#135058](https://github.com/pytorch/pytorch/pull/135058))
-* fix re-export custom metadata ([#135282](https://github.com/pytorch/pytorch/pull/135282), [#135634](https://github.com/pytorch/pytorch/pull/135634), [#135720](https://github.com/pytorch/pytorch/pull/135720))
-* moving eps in `torchao/quantization/utils.py` to targeted device to avoid device mismatch issue ([#135204](https://github.com/pytorch/pytorch/pull/135204))
-* Add type check for `dilation` in `torch.quantized_max_pool3d()` ([#137845](https://github.com/pytorch/pytorch/pull/137845))
-* Pass all arguments when quantizing embedding bag from float ([#137697](https://github.com/pytorch/pytorch/pull/137697))
-* Fix for split gates enabled quantizable LSTM subclass ([#140818](https://github.com/pytorch/pytorch/pull/140818))
-* Fix ReLU fusion when conv/linear has > 1 user for XNNPACK ([#140846](https://github.com/pytorch/pytorch/pull/140846))
-* Fix RecursionError when `prepare_pt2e` graph with concat of the same node ([#141651](https://github.com/pytorch/pytorch/pull/141651))
-
-
-### ROCM
-
-
-
-* Fixed out of memory errors on AMD triton backend ([#139883](https://github.com/pytorch/pytorch/pull/139883))
-* Correct numerical issues in layer norm backwards kernel ([#140259](https://github.com/pytorch/pytorch/pull/140259))
-
-
-### Sparse Frontend
-
-
-
-* Fix memory leak in MaskedTensor when using autograd ([#137890](https://github.com/pytorch/pytorch/pull/137890))
-* Fix `bmm(COO, dense)` illegal memory access for some shapes ([#131977](https://github.com/pytorch/pytorch/pull/131977))
-* Fix MaskedTensor binary ops for `sparse_csr` layout ([#134335](https://github.com/pytorch/pytorch/pull/134335))
-
-
-### XPU
-
-
-
-* Resolves an issue with duplicated build environments in XPU Linux CI. ([#141546](https://github.com/pytorch/pytorch/pull/141546))
-* Fix XPU support packages version: Corrects the versioning of XPU support packages. ([#138189](https://github.com/pytorch/pytorch/pull/138189))
-* Fix `c10::Event` unit test failure on XPU backend ([#141800](https://github.com/pytorch/pytorch/pull/141800))
-* Fix mismatched tensor metadata between FakeTensor and XPU concrete tensor in `F.logsigmoid` ([#141333](https://github.com/pytorch/pytorch/pull/141333))
-* Fix memory stats error on XPU: Corrects an error in memory statistics for XPU devices. ([#135818](https://github.com/pytorch/pytorch/pull/135818))
-* Fix XPU CMake typo: Corrects a typo in XPU CMake configuration. ([#140374](https://github.com/pytorch/pytorch/pull/140374))
-* Fix an issue causing endless code regeneration in non-XPU environments. ([#140438](https://github.com/pytorch/pytorch/pull/140438))
-* Fix incorrect device check before skipping concat linear in Inductor XPU. ([#140916](https://github.com/pytorch/pytorch/pull/140916))
-
-### Miscellaneous
-
-
-
-* Fix PyBind 2.10.4 compatibility issue ([#141456](https://github.com/pytorch/pytorch/pull/141456))
-* correctly keep track of processed tensors for foreach reductions (norm, max) ([#140103](https://github.com/pytorch/pytorch/pull/140103))
-* Fixes to `torch.package` for 3.13 ([#141409](https://github.com/pytorch/pytorch/pull/141409))
 
 
 ## **Performance**
