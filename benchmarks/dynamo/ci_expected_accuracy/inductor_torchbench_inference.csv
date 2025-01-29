@@ -178,7 +178,7 @@ hf_T5_base,eager_fail_to_run,0
 
 
 
-hf_T5_generate,timeout,0
+hf_T5_generate,pass,0
 
 
 
@@ -314,7 +314,7 @@ sam,pass,0
 
 
 
-sam_fast,model_fail_to_load,0
+sam_fast,pass,0
 
 
 

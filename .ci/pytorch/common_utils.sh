@@ -218,7 +218,7 @@ function checkout_install_torchbench() {
   fi
 
   # TODO (huydhn): transformers-4.44.2 added by https://github.com/pytorch/benchmark/pull/2488
-  # is regression speedup metric. This needs to be investigated further
+  # is regressing speedup metric. This needs to be investigated further
   pip install transformers==4.38.1
 
   echo "Print all dependencies after TorchBench is installed"
