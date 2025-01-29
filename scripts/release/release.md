@@ -968,15 +968,49 @@ We improved the existing `torch.library` APIs and added new ones.
 ## **Performance**
 
 
-
-
-
 ### Dynamo
 
 
 
 * Attempt to use previously compiled code when Dynamo cache limit is hit ([#136655](https://github.com/pytorch/pytorch/pull/136655))
 * Don’t convert Python frame local C buffer into Python dict until necessary [#140063](https://github.com/pytorch/pytorch/pull/140063)
+
+
+### Mps
+
+
+
+* Dispatch to SDP-math-mps for non-contiguous Tensors ([#139791](https://github.com/pytorch/pytorch/pull/139791))
+* Avoid creating spurious instances of `FUSED_ADAM_OPS` ([#141090](https://github.com/pytorch/pytorch/pull/141090))
+
+
+### ROCM
+
+
+
+* Improve `torch.sum` performance by increasing max_values_per_thread ([#135397](https://github.com/pytorch/pytorch/pull/135397))
+* Turn on fast path for index_put on new ROCm version ([#136136](https://github.com/pytorch/pytorch/pull/136136))
+
+### Sparse Frontend
+
+
+
+* Speedup broadcasting of sparse_coo Tensors ([#142364](https://github.com/pytorch/pytorch/pull/142364))
+* Speedup addmm(dense, BSR) for some int8 shapes on A100 ([#136088](https://github.com/pytorch/pytorch/pull/136088))
+* Fuse scaling with addmm(dense, BSR) for some int8 shapes on A100 ([#136104](https://github.com/pytorch/pytorch/pull/136104))
+* Fuse dtype conversion with addmm(dense, BSR) for some int8 shapes on A100 ([#136626](https://github.com/pytorch/pytorch/pull/136626))
+
+
+
+### Miscellaneous
+
+
+* Speed up fp16/bf16 AMP casts on H100+ ([#137053](https://github.com/pytorch/pytorch/pull/137053))
+* c10d
+    * Improved efficiency of NaN checker ([#135414](https://github.com/pytorch/pytorch/pull/135414))
+* Improves performance by avoiding atomic add operations in `scatter_add` for XPU. ([#137966](https://github.com/pytorch/pytorch/pull/137966))
+
+
 
 
 ### Inductor
@@ -1033,40 +1067,6 @@ We improved the existing `torch.library` APIs and added new ones.
 * Adds host-side Triton TMA support ([#137950](https://github.com/pytorch/pytorch/pull/137950)).
 * Optimizes the `can_fuse_vertical()` function ([#135788](https://github.com/pytorch/pytorch/pull/135788)).
 
-
-### Mps
-
-
-
-* Dispatch to SDP-math-mps for non-contiguous Tensors ([#139791](https://github.com/pytorch/pytorch/pull/139791))
-* Avoid creating spurious instances of `FUSED_ADAM_OPS` ([#141090](https://github.com/pytorch/pytorch/pull/141090))
-
-
-### Sparse Frontend
-
-
-
-* Speedup broadcasting of sparse_coo Tensors ([#142364](https://github.com/pytorch/pytorch/pull/142364))
-* Speedup addmm(dense, BSR) for some int8 shapes on A100 ([#136088](https://github.com/pytorch/pytorch/pull/136088))
-* Fuse scaling with addmm(dense, BSR) for some int8 shapes on A100 ([#136104](https://github.com/pytorch/pytorch/pull/136104))
-* Fuse dtype conversion with addmm(dense, BSR) for some int8 shapes on A100 ([#136626](https://github.com/pytorch/pytorch/pull/136626))
-
-
-### ROCM
-
-
-
-* Improve `torch.sum` performance by increasing max_values_per_thread ([#135397](https://github.com/pytorch/pytorch/pull/135397))
-* Turn on fast path for index_put on new ROCm version ([#136136](https://github.com/pytorch/pytorch/pull/136136))
-
-
-### Miscellaneous
-
-
-* Speed up fp16/bf16 AMP casts on H100+ ([#137053](https://github.com/pytorch/pytorch/pull/137053))
-* c10d
-    * Improved efficiency of NaN checker ([#135414](https://github.com/pytorch/pytorch/pull/135414))
-* Improves performance by avoiding atomic add operations in `scatter_add` for XPU. ([#137966](https://github.com/pytorch/pytorch/pull/137966))
 
 
 ## **Documentation**
