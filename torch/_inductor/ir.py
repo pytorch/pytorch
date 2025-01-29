@@ -61,7 +61,11 @@ from torch.utils._sympy.functions import CleanDiv, FloorDiv, ModularIndexing
 from torch.utils._sympy.symbol import SymT
 
 from . import config, dependencies
-from .codegen.common import BackendFeature, index_prevent_reordering
+from .codegen.common import (
+    BackendFeature,
+    get_scheduling_for_device,
+    index_prevent_reordering,
+)
 from .dependencies import (
     Dep,
     extract_free_unbacked_symbols,
@@ -342,7 +346,23 @@ def get_device_type(
 
 
 def is_triton(x: Union[IRNode, torch.device, None, str]) -> bool:
-    return is_gpu(get_device_type(x))
+    device = get_device_type(x)
+    # Special case cpu and cuda as using the method below
+    # to determine if the scheduler is a triton scheduler subclass
+    # requires instantiating a scheduler for them
+    if device in ["cpu", "cuda"]:
+        if getattr(config, f"{device}_backend") == "triton":
+            return True
+        return False
+    if (
+        device is None
+        or (device_scheduling := get_scheduling_for_device(device)) is None
+    ):
+        return False
+    from .codegen.triton import TritonScheduling
+
+    assert isinstance(device_scheduling, type)
+    return issubclass(device_scheduling, TritonScheduling)
 
 
 def is_cpu(x: Union[IRNode, torch.device, None, str]) -> bool:
@@ -6255,13 +6275,15 @@ class AssertScalar(ExternKernel):
         # "u0 == 0" in the runtime asserts, if you subsequently try to
         # simplify(u0 == 0), you will get True (because we've already runtime assert'ed
         # that it's true).  But we're code generating the actual runtime assert here!!
+        symbol = next(iter(self.get_unbacked_symbol_uses()))
+        symbol_str = f"std::to_string({symbol})"
         if V.graph.cpp_wrapper:
             sizevar = V.graph.wrapper_code.codegen_cpp_sizevar(
                 self.scalar, simplify=False
             )
             # TODO: when we start compiling in C++20, annotate with [[unlikely]].
             wrapper.writeline(
-                f'if (!({sizevar})) {{ throw std::runtime_error("{self.msg}"); }}'
+                f'if (!({sizevar})) {{ throw std::runtime_error("Expected {self.msg} but received " + {symbol_str}); }}'
             )
         else:
             sizevar = V.graph.wrapper_code.codegen_python_sizevar(
