@@ -5004,6 +5004,14 @@ def sample_inputs_fractional_max_pool2d(op_info, device, dtype, requires_grad, *
                 return_indices=return_indices,
             )
 
+    yield SampleInput(
+        make_arg((1, 1, 16, 16)),
+        (1, 1),
+        output_ratio=(0.5, 0.5),
+        return_indices=True,
+        _random_samples=make_tensor((1, 1, 2), device=device, dtype=dtype, requires_grad=False),
+    )
+
 def sample_inputs_fractional_max_pool3d(op_info, device, dtype, requires_grad, **kwargs):
     make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
 

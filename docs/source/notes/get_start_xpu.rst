@@ -35,11 +35,11 @@ Binaries
 
 Now that we have `Intel GPU Driver <https://www.intel.com/content/www/us/en/developer/articles/tool/pytorch-prerequisites-for-intel-gpu/2-6.html#driver-installation>`_ installed, use the following commands to install ``pytorch``, ``torchvision``, ``torchaudio`` on Linux.
 
-For preview wheels
+For release wheels
 
 .. code-block::
 
-    pip3 install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/test/xpu
+    pip3 install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/xpu
 
 For nightly wheels
 
