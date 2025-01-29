@@ -110,6 +110,9 @@ class CUDACombinedScheduling(BaseScheduling):
     ) -> Tuple[float, str]:
         return self._triton_scheduling.benchmark_fused_nodes(nodes)
 
+    def benchmark_codegened_module(self, module):
+        return self._triton_scheduling.benchmark_codegened_module(module)
+
     def generate_kernel_code_from_nodes(
         self, nodes: Sequence[Any], benchmark_kernel: bool = False
     ) -> str:

@@ -115,6 +115,7 @@ for test_name in [
     "test_builtins_round_float_ndigits_neg",
     "test_cat_empty",
     "test_cat_unbacked_empty_1d",
+    "test_custom_op_2",
     "test_div1",
     "test_div3",
     "test_erfinv",
