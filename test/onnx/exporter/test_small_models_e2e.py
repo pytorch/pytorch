@@ -125,6 +125,33 @@ class DynamoExporterTest(common_utils.TestCase):
         onnx_testing.assert_onnx_program(onnx_program, args=(torch.tensor([0, 0]),))
         onnx_testing.assert_onnx_program(onnx_program, args=(torch.tensor([43, 43]),))
 
+    def test_onnx_export_control_flow_multi_outputs(self):
+        class CondModel(torch.nn.Module):
+            def forward(self, x):
+                z = torch.ones_like(x)
+
+                def true_fn(x, z):
+                    x = x + 1.0
+                    z = z * 1.0
+                    return x, z
+
+                def false_fn(x, z):
+                    x = x - 1.0
+                    z = z * 0.0
+                    return x, z
+
+                x = torch.cond(x.sum() > 0, true_fn, false_fn, (x, z))
+                return x, z
+
+        onnx_program = torch.onnx.export(
+            CondModel(),
+            (torch.tensor([1, 2]),),
+            dynamo=True,
+            fallback=False,
+        )
+        onnx_testing.assert_onnx_program(onnx_program)
+        onnx_testing.assert_onnx_program(onnx_program, args=(torch.tensor([-1, -2]),))
+
     def test_onnx_export_torchvision_ops(self):
         class VisionModel(torch.nn.Module):
             def __init__(self):
@@ -141,8 +168,6 @@ class DynamoExporterTest(common_utils.TestCase):
         )
         onnx_program = self.export(VisionModel(), args)
         onnx_testing.assert_onnx_program(onnx_program)
-
-    # TODO(justinchuby): Test multi-output HOPs
 
     def test_empty(self):
         def func(x):
