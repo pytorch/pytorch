@@ -592,20 +592,13 @@ class LocalGeneratorObjectVariable(VariableTracker):
                 tx.exn_vt_stack.extend(tracer.exn_vt_stack)
                 raise
 
+            # Throw is not responsible for running the finally block
+            # It should stop at the next yield, if it exists
             retval = self.next_variable(tx)
-
-            if tracer._has_finally_block():
-                # Run the finally block if exists and expect StopIteration from it.
-                # If there's no finally, next_variable will raise StopIteration
-                # If it yields or raises anything else, we need to handle it.
-                try:
-                    r = self.next_variable(tx)
-                    if r:
-                        # msg: generator ignored GeneratorExit
-                        raise_observed_exception(RuntimeError, tracer)
-                except ObservedUserStopIteration:
-                    pass
-            return retval
+            if retval:
+                return retval
+            else:
+                raise_observed_exception(StopIteration, tx)
 
         super().call_method(tx, name, args, kwargs)
 
