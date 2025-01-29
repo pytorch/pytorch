@@ -1128,6 +1128,16 @@ class WhileLoopHigherOrderVariable(TorchHigherOrderOperatorVariable):
                 unimplemented(
                     f"Expected cond_fn to return a scalar tensor or a bool but got {cond_r_meta.shape}"
                 )
+        elif isinstance(cond_r, ConstantVariable):
+            # short-circuiting while_loop when cond_fn returns a constant such as 0, 1 True or False
+            pred = cond_r.as_python_constant()
+            if pred:
+                unimplemented(
+                    f"Infinite loop detected because while_loop's cond_fn always returns the same value {pred}"
+                )
+            else:
+                return operands
+
         # create body subgraph
         (
             (body_r, body_treespec),
