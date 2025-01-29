@@ -102,7 +102,7 @@ void* alloc_cpu(size_t nbytes) {
       "DefaultCPUAllocator: not enough memory: you tried to allocate ",
       nbytes,
       " bytes.");
-#elif defined(_MSC_VER)
+#elif defined(_WIN32)
 #ifdef USE_MIMALLOC
   data = mi_malloc_aligned(nbytes, gAlignment);
 #else
@@ -154,7 +154,7 @@ void* alloc_cpu(size_t nbytes) {
 }
 
 void free_cpu(void* data) {
-#ifdef _MSC_VER
+#ifdef _WIN32
 #ifdef USE_MIMALLOC
   mi_free(data);
 #else
