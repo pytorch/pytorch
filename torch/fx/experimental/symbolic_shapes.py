@@ -3855,8 +3855,7 @@ class ShapeEnv:
         source: Source,
         *,
         symbolic_context: Optional[SymbolicContext] = None,
-        metafy_fn: Optional[Callable] = None,
-        custom_size_strides: Optional[MetaCustomSizeStridesDesc] = None,
+        nested_int_metafy_fn: Optional[Callable] = None,
     ) -> tuple[
         tuple[Union[int, SymInt], ...],
         tuple[Union[int, SymInt], ...],
@@ -3885,8 +3884,7 @@ class ShapeEnv:
             [_is_dim_dynamic(ex, i) for i in range(ex.dim())],
             source,
             symbolic_context=symbolic_context,
-            metafy_fn=metafy_fn,
-            custom_size_strides=custom_size_strides,
+            nested_int_metafy_fn=nested_int_metafy_fn,
         )
 
     # Dynamo may want to wrap FakeTensors with SymInt sizes up e.g. make_fx(opt_f(), tracing_mode="symbolic").
@@ -3946,8 +3944,7 @@ class ShapeEnv:
         source: Source,
         *,
         symbolic_context: Optional[SymbolicContext] = None,
-        metafy_fn: Optional[Callable] = None,
-        custom_size_strides: Optional[MetaCustomSizeStridesDesc] = None,
+        nested_int_metafy_fn: Optional[Callable] = None,
     ) -> tuple[
         tuple[Union[int, SymInt], ...],
         tuple[Union[int, SymInt], ...],
@@ -4022,33 +4019,17 @@ class ShapeEnv:
             symbolic_context,
         )
 
-        custom_size_strides_size = (
-            [None] * len(size)
-            if custom_size_strides is None
-            else custom_size_strides.size
-        )
-        custom_size_strides_stride = (
-            [None] * len(stride)
-            if custom_size_strides is None
-            else custom_size_strides.stride
-        )
-
         sym_sizes = [
             self.create_symintnode(
                 sym,
                 hint=hint,
                 source=TensorPropertySource(source, TensorProperty.SIZE, i),
-                metafy_fn=metafy_fn,
-                nested_int_desc=opt_nested_int,
+                nested_int_metafy_fn=nested_int_metafy_fn,
             )
-            for i, (sym, hint, opt_nested_int) in enumerate(
-                zip(size, ex_size, custom_size_strides_size)
-            )
+            for i, (sym, hint) in enumerate(zip(size, ex_size))
         ]
         sym_stride = []
-        for i, (stride_expr, opt_nested_int) in enumerate(
-            zip(stride, custom_size_strides_stride)
-        ):
+        for i, stride_expr in enumerate(stride):
             # NB: Don't duck size the stride; instead use the expression
             # we computed
             assert stride_expr is not None
@@ -4057,8 +4038,7 @@ class ShapeEnv:
                     stride_expr,
                     hint=ex_stride[i],
                     source=TensorPropertySource(source, TensorProperty.STRIDE, i),
-                    metafy_fn=metafy_fn,
-                    nested_int_desc=opt_nested_int,
+                    nested_int_metafy_fn=nested_int_metafy_fn,
                 )
             )
         sym_storage_offset = self.create_symintnode(
@@ -4139,8 +4119,7 @@ class ShapeEnv:
         *,
         hint: Optional[Union[int, torch.SymInt]],
         source: Optional[Source] = None,
-        metafy_fn: Optional[Callable] = None,
-        nested_int_desc: Optional[MetaNestedIntDesc] = None,
+        nested_int_metafy_fn: Optional[Callable] = None,
     ) -> Union[int, SymInt]:
         """Create a SymInt value from a symbolic expression
 
@@ -4167,15 +4146,14 @@ class ShapeEnv:
             if hint is not None:
                 assert int(sym) == hint
             out = int(sym)
-        elif hint is not None and is_nested_int(hint) and nested_int_desc is not None:
+        elif hint is not None and is_nested_int(hint) and nested_int_metafy_fn is not None:
             from torch._dynamo.source import SymNodePropertySource
             from torch._subclasses.fake_tensor import maybe_get_fake_mode
             from torch.nested._internal.nested_int import NestedIntNode
 
-            assert metafy_fn is not None
+            assert nested_int_metafy_fn is not None
             assert source is not None
-            cache = metafy_fn(
-                nested_int_desc.cache,
+            cache = nested_int_metafy_fn(
                 SymNodePropertySource(source, "nested_int_cache"),
             )
             coeff = hint.node.nested_int_coeff()

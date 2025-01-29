@@ -234,28 +234,6 @@ class MetaTensorDescriber:
             self.next_storage_id = MetaStorageId(self.next_storage_id + 1)
         return self.lookup_storage[s]
 
-    def describe_custom_size_strides(
-        self, t: torch.Tensor
-    ) -> MetaCustomSizeStridesDesc:
-        def process(x: Any) -> Optional[MetaNestedIntDesc]:
-            from torch.nested._internal.nested_int import NestedIntNode
-
-            if isinstance(x, torch.SymInt) and isinstance(x.node, NestedIntNode):
-                # For tensors on symint, you need to explicitly pass the inner
-                # subclass attribute to indicate which inner tensor attribute
-                return MetaNestedIntDesc(
-                    cache=self.describe_tensor(
-                        x.node.nested_int_cache(),
-                        subclass_inner_attr="_metadata",
-                    ),
-                )
-            return None
-
-        return MetaCustomSizeStridesDesc(
-            size=tuple(process(x) for x in t.size()),
-            stride=tuple(process(x) for x in t.stride()),
-        )
-
     def describe_storage(
         self, s: torch.UntypedStorage, *, trace: bool = False
     ) -> MetaStorageDesc:
@@ -377,6 +355,21 @@ class MetaTensorDescriber:
 
         from torch.nested._internal.tensor_registry import try_get_int
 
+        nested_int_metadata: Optional[MetaTensorDesc] = None
+        if is_nested:
+            from torch.nested._internal.nested_int import NestedIntNode
+            from torch.nested._internal.nested_tensor import NestedTensor
+            assert isinstance(t, NestedTensor)
+            nested_int = t.shape[t._ragged_idx]
+            assert (
+                isinstance(nested_int, torch.SymInt) and
+                isinstance(nested_int.node, NestedIntNode)
+            )
+            nested_int_metadata = self.describe_tensor(
+                nested_int.node.nested_int_cache(),
+                subclass_inner_attr="_metadata",
+            )
+
         view_func = ViewFunc.from_tensor(t)
 
         # TODO: Is it important to enable torch.inference_mode before querying
@@ -408,10 +401,7 @@ class MetaTensorDescriber:
             is_traceable_wrapper_subclass=is_traceable_wrapper_subclass_v,
             is_nested=is_nested,
             nested_int=try_get_int(t),
-            custom_size_strides=self.describe_custom_size_strides(t)
-            if is_nested
-            else None,
-            subclass_inner_attr=subclass_inner_attr,
+            nested_int_metadata=nested_int_metadata,
             is_functional=is_functional,
             layout=layout,
             device=t.device,
@@ -629,8 +619,7 @@ class MetaTensorDesc(Generic[_TensorT]):
     is_view: bool = False
     is_nested: bool = False
     nested_int: Optional[int] = None
-    custom_size_strides: Optional[MetaCustomSizeStridesDesc] = None
-    subclass_inner_attr: Optional[str] = None
+    nested_int_metadata: Optional[MetaTensorDesc] = None
     is_traceable_wrapper_subclass: bool = False
     is_functional: bool = False
     is_conj: bool = False
@@ -892,23 +881,23 @@ class MetaConverter(Generic[_TensorT]):
         )
         self.arg_cnt += 1
 
-        def metafy_fn(t: MetaTensorDesc, src: Source) -> torch.Tensor:
-            inner_callback = functools.partial(callback, device=t.device)  # type: ignore[call-arg]
+        def nested_int_metafy_fn(src: Source) -> torch.Tensor:
+            t_inner = t.nested_int_metadata
+            inner_callback = functools.partial(callback, device=t_inner.device)  # type: ignore[call-arg]
 
             if (
                 inner_contexts := getattr(symbolic_context, "inner_contexts", None)
             ) is not None:
                 # This only be used with NJT today
-                assert t.subclass_inner_attr == "_metadata"
-                inner_context = inner_contexts[t.subclass_inner_attr]
+                inner_context = inner_contexts["_metadata"]
             else:
                 # Run into this case in test_jagged_fake_to_fake_preserved
                 inner_context = all_dynamic_symbolic_context(
-                    t, src, shape_env, inner_callback
+                    t_inner, src, shape_env, inner_callback
                 )
 
             return self.meta_tensor(
-                t,
+                t_inner,
                 shape_env,
                 inner_callback,
                 source=src,
@@ -977,8 +966,7 @@ class MetaConverter(Generic[_TensorT]):
                         [d in t.dynamo_dynamic_indices for d in range(t.ndim)],
                         src,
                         symbolic_context=symbolic_context,
-                        metafy_fn=metafy_fn,
-                        custom_size_strides=t.custom_size_strides,
+                        nested_int_metafy_fn=nested_int_metafy_fn,
                     )
             else:
                 return (t.size, t.stride, t.storage_offset)
