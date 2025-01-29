@@ -181,8 +181,10 @@ class TestInvokeQuantInductor(TestInvokeQuant):
 
     @requires_gpu()
     @config.patch(prologue_fusion=True)
-    @unittest.skipIf(not is_big_gpu(), "requires big gpu")
     def test_prologue(self):
+        if not is_big_gpu():
+            raise unittest.SkipTest("requires large gpu to max-autotune")
+
         def gn(x, y):
             return torch.mul(x, y) + (y - 1)
 
