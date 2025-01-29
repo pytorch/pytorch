@@ -150,7 +150,7 @@ def stft(
         raise errors.SymbolicValueError(
             msg="STFT does not currently support the align_to_window option",
             value=input,
-        )  # TODO(#insert-issue-id): add compatibility with align_to_window option.
+        )  # TODO(#145944): add compatibility with align_to_window option.
 
     # Get STFT sizes
     frame_step_value = hop_length if hop_length is not None else n_fft // 4
