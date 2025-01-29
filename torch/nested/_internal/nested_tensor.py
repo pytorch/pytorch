@@ -88,12 +88,6 @@ class NestedTensor(torch.Tensor):
         ks = DispatchKeySet(DispatchKey.NestedTensor)
         ks = ks.add(DispatchKey.AutogradNestedTensor)
 
-        # Only support jagged for now.
-        assert metadata is not None
-        assert metadata.ndim == 1
-        assert not isinstance(values, NestedTensor)
-        assert values.device == metadata.device
-
         # Query cache for the symint associated with offsets or lengths
         # (create a new one if needed).
         ragged_size = get_tensor_symint(metadata, coeff=1)
@@ -101,7 +95,14 @@ class NestedTensor(torch.Tensor):
 
         device_type = "host" if values.is_cpu else "device"
         source_type = "offsets" if non_contig_offsets is None else "lengths"
-        ragged_source = getattr(metadata, src_field_name(device_type, source_type))
+        ragged_source = getattr(metadata, src_field_name(device_type, source_type), None)
+
+        # Only support jagged for now.
+        assert ragged_source is not None
+        assert ragged_source.ndim == 1
+        assert not isinstance(values, NestedTensor)
+        assert values.device == ragged_source.device
+
         B = ragged_source.shape[0]
         if non_contig_offsets is None:
             # when non_contig_offsets is None, we are offsets
