@@ -132,7 +132,6 @@ dtensor_fails = {
     xfail("cumulative_trapezoid"),
     xfail("diagonal_scatter"),
     xfail("dist"),
-    xfail("dot"),
     xfail("empty"),
     xfail("empty_strided"),
     xfail("empty_like"),
