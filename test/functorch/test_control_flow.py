@@ -3,6 +3,7 @@ import contextlib
 import copy
 import functools
 import unittest
+import warnings
 
 import torch
 import torch.utils._pytree as pytree
@@ -41,9 +42,6 @@ from torch.testing._internal.common_utils import (
     TestCase,
     xfailIfTorchDynamo,
 )
-
-
-# todo: figure out if random number generation works as expected
 
 
 @contextlib.contextmanager
@@ -4643,7 +4641,9 @@ def forward(self, arg0_1):
         self._check_compile(fn, inp, backend=backend)
 
     @parametrize(
-        "while_loop_test", set(WHILE_LOOP_TESTS.keys()) - {"const_and_symint_output"}
+        "while_loop_test",
+        set(WHILE_LOOP_TESTS.keys())
+        - {"const_and_symint_output", "int_carry", "pytree_int_carry"},
     )
     @unittest.skipIf(
         not TEST_CUDA_GRAPH_CONDITIONAL_NODES,
@@ -4660,12 +4660,15 @@ def forward(self, arg0_1):
         _check_compile_cudagraph(self, fn, inp)
 
     @unittest.expectedFailure
+    @parametrize(
+        "while_loop_test", {"const_and_symint_output", "int_carry", "pytree_int_carry"}
+    )
     @unittest.skipIf(
         not TEST_CUDA_GRAPH_CONDITIONAL_NODES,
         "CUDA 12.4 or greater is required for CUDA Graphs with conditional nodes",
     )
-    def test_while_loop_cuda_stream_capture_const_and_symint_output(self):
-        fn, inp = WHILE_LOOP_TESTS["const_and_symint_output"]
+    def test_while_loop_cuda_stream_capture_fails(self, while_loop_test):
+        fn, inp = WHILE_LOOP_TESTS[while_loop_test]
 
         if isinstance(fn, torch.nn.Module):
             fn = copy.deepcopy(fn)
@@ -7807,11 +7810,56 @@ class TestControlFlowNN(TestCase):
         _check_compile_cudagraph(self, model, [x])
 
 
+class TestControlFlowAndRNG(TestCase):
+    @parametrize("rng_func", ["custom_generator", "default_generator"])
+    def test_rng_with_conditional_nodes_warns(self, rng_func):
+        pred = torch.tensor(True, device="cuda")
+        x = torch.ones(10, dtype=torch.float32, device="cuda")
+
+        if rng_func == "custom_generator":
+            self.skipTest(
+                "randn() currently does not work with a generator argument in dynamo."
+            )
+            generator = torch.Generator("cuda")
+
+            def custom_generator(x):
+                return x + torch.randn(
+                    *x.shape, generator=generator, dtype=x.dtype, device=x.device
+                )
+
+            rng_func = custom_generator
+        elif rng_func == "default_generator":
+
+            def default_generator(x):
+                return x + torch.randn(*x.shape, dtype=x.dtype, device=x.device)
+
+            rng_func = default_generator
+
+        def func(pred, x):
+            return torch.cond(pred, rng_func, lambda x: 2 * x, [x])
+
+        compiled_func = torch.compile(func, backend="cudagraphs")
+
+        with warnings.catch_warnings(record=True) as warning_objs:
+            for i in range(3):
+                compiled_func(pred, x)
+
+        # Warn first for conditional node warmup, warn second for the
+        # graph capture that we will actually use.
+        self.assertEqual(len(warning_objs), 2)
+
+        warning_message = "You used random numbers in a cuda graph that uses conditional nodes. The previous design assumed that all RNG operations would execute only once, unconditionally, but this is no longer guaranteed with data-dependent control flow. Running with the cuda graph repeatedly may not match running without the cuda graph."  # noqa: B950
+        for warning in warning_objs:
+            self.assertTrue(warning_message in str(warning.message))
+
+
 instantiate_parametrized_tests(TestHopSchema)
 instantiate_parametrized_tests(TestControlFlowTraced)
 
 instantiate_parametrized_tests(TestControlFlow)
 instantiate_parametrized_tests(AssociativeScanTests)
+
+instantiate_parametrized_tests(TestControlFlowAndRNG)
 
 if __name__ == "__main__":
     run_tests()
