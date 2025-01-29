@@ -1037,7 +1037,7 @@ We improved the existing `torch.library` APIs and added new ones.
 * Add batched gemms into gemm max autotune with CK backend ([#141520](https://github.com/pytorch/pytorch/pull/141520))
 * Adding lowering to persistent-tma device kernel for `_scaled_mm` ([#142045](https://github.com/pytorch/pytorch/pull/142045))
 * Add fusion pass for `linear_dynamic_fp16` with RELU ([#141556](https://github.com/pytorch/pytorch/pull/141556))
-* Reverts runtime numeric check in Inductor to reduce compilation time, optimizing the build process ([#137324](https://github.com/pytorch/pytorch/pull/137324)).
+* Reverts runtime numeric check in Inductor to reduce compilation time ([#137324](https://github.com/pytorch/pytorch/pull/137324)).
 * Optimizes ARM64 performance by utilizing 128-bit vectors ([#137426](https://github.com/pytorch/pytorch/pull/137426)).
 * Adjusts `score_fusion_memory_threshold` application strategy in Inductor ([#138970](https://github.com/pytorch/pytorch/pull/138970)).
 * Enhances reduction operations with cooperative multi-kernel support in Inductor ([#138893](https://github.com/pytorch/pytorch/pull/138893138893)).
