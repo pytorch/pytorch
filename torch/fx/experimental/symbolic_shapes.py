@@ -392,6 +392,9 @@ def is_concrete_float(a: Union[float, SymFloat]) -> bool:
 
 def guard_size_oblivious(expr: Union[torch.SymBool, bool]) -> bool:
     """
+    If we encounter any unbacked symbols during the expression evaluation, if those
+    symbols are size-like, we will treat them as >= 2.
+    
     Perform a guard on a symbolic boolean expression in a size oblivious way.
     This is typically used when a non-oblivious test would result in a guard
     on a data dependent value of which we don't know the value of at compile time.
