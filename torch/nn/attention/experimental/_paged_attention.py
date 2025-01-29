@@ -1,4 +1,3 @@
-# mypy: allow-untyped-decorators
 # mypy: allow-untyped-defs
 """
 This module implements Paged Attention on top of flex_attention.
@@ -143,7 +142,7 @@ class PagedAttention:
 
         Args:
             batch_idx (Tensor): batch index; shape :math:`(B)`.
-            input_pos (Tensor): input positions to be assigned for the given batch; shape :math:`(S)`.
+            input_pos (Tensor): input positions to be assigned for the given batch; shape :math:`(B, S)`.
             val (Tensor): value to be assigned; shape :math:`(B, H, S, D)`
             cache (Tensor): the cache to store the values; shape:`(1, H, MAX_S, D)`
         """
@@ -162,7 +161,7 @@ class PagedAttention:
                 f"Expect val and cache has the same number of heads "
                 f"but got H={H} and H={k_cache.shape[1]}."
             )
-        if S != input_pos.shape[0]:
+        if S != input_pos.shape[1]:
             raise RuntimeError(
                 f"Expect val and input_pos has the same length "
                 f"but got S={S} and S={input_pos.shape[0]}."
@@ -179,13 +178,15 @@ class PagedAttention:
             )
 
         # find address
-        logical_block_idx = input_pos // self.page_size  # [S]
-        logical_block_offset = input_pos % self.page_size  # [S]
-        physical_block_idx = self.page_table[batch_idx][:, logical_block_idx]  # [B, S]
+        logical_block_idx = input_pos // self.page_size  # [B, S]
+        logical_block_offset = input_pos % self.page_size  # [B, S]
+        physical_block_idx = torch.gather(
+            self.page_table[batch_idx], 1, logical_block_idx.to(torch.int64)
+        ).to(
+            torch.int32
+        )  # [B, S]
 
-        addr = (
-            physical_block_idx * self.page_size + logical_block_offset[None, :]
-        ).view(
+        addr = (physical_block_idx * self.page_size + logical_block_offset).view(
             -1
         )  # [B*S]
 
@@ -210,7 +211,7 @@ class PagedAttention:
             batch_idx (Tensor): batch index corresponding to the block_mask
                 batch dimension. This provides flexibility to convert a
                 block mask with smaller batch size than the page table;
-                shape :math:`(1)`.
+                shape :math:`(B)`.
         """
         B, H, ROWS, MAX_BLOCKS_IN_COL = block_mask.kv_indices.shape
 

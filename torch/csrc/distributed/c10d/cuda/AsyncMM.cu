@@ -5,7 +5,7 @@
 #include <ATen/cuda/nvrtc_stub/ATenNVRTC.h>
 #include <c10/cuda/CUDAGuard.h>
 
-#if !defined(USE_ROCM) && !defined(_WIN32) && defined(CUDA_VERSION) && \
+#if false && !defined(USE_ROCM) && !defined(_WIN32) && defined(CUDA_VERSION) && \
     CUDA_VERSION >= 12000
 #define BUILD_ASYNC_MM_KERNEL
 #endif

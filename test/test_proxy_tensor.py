@@ -924,6 +924,20 @@ def forward(self, x_1):
                 continue
             self.assertTrue('val' in n.meta)
 
+    def test_fake_tensor_mode(self):
+        def f(a):
+            d = a.cos()
+            return d
+
+        from torch._guards import detect_fake_mode
+
+        existing_fake_mode = FakeTensorMode()
+        with existing_fake_mode:
+            out = make_fx(f, tracing_mode="real")(torch.tensor([[1, 1, 1, 1, 1, 1, 1, 1]]))
+
+        fake_mode = detect_fake_mode([node.meta.get('val', None) for node in out.graph.nodes])
+        self.assertEqual(fake_mode, existing_fake_mode)
+
 def _get_node(fx_g, cond):
     for n in fx_g.graph.nodes:
         if cond(n):
@@ -2000,24 +2014,6 @@ symbolic_tensor_failures = {
     xfail('unique_consecutive', ''),  # aten.unique_consecutive.default - couldn't find symbolic meta function/decomposition
 
     xfail('max_pool2d_with_indices_backward', ''),  # Expected a value of type 'List[int]' for argument 'kernel_size' but...
-
-    # many complex operators incorrect striding, metadata
-    xfail('fft.fft', ''),
-    xfail('fft.hfft2', ''),
-    xfail('fft.hfft', ''),
-    xfail('fft.hfftn', ''),
-    xfail('fft.ifft', ''),
-    xfail('fft.ihfft2', ''),
-    xfail('fft.ihfft', ''),
-    xfail('fft.ihfftn', ''),
-    xfail('fft.ihfft2', ''),
-    xfail('fft.irfft2', ''),
-    xfail('fft.irfft', ''),
-    xfail('fft.irfftn', ''),
-    xfail('fft.rfft2', ''),
-    xfail('fft.rfft', ''),
-    xfail('fft.rfftn', ''),
-    xfail('stft', '')
 }
 symbolic_tensor_segfaults = {
     skip('nn.functional.batch_norm')  # Segfault??
@@ -2044,10 +2040,6 @@ out_symbolic_tensor_failures = {
     xfail('angle', ''),
     xfail('argmax', ''),
     xfail('argmin', ''),
-    xfail('fft.fft2', ''),
-    xfail('fft.fftn', ''),
-    xfail('fft.ifft2', ''),
-    xfail('fft.ifftn', ''),
     xfail('gather', ''),
     xfail('linalg.pinv', ''),
     xfail('linalg.pinv', 'hermitian'),

@@ -10,6 +10,7 @@
 #include <ATen/ops/_nested_tensor_strides_native.h>
 #include <ATen/ops/chunk_native.h>
 #include <ATen/ops/split_with_sizes_native.h>
+#include <ATen/ops/value_selecting_reduction_backward_native.h>
 #endif
 
 namespace at::native {
@@ -164,6 +165,17 @@ std::vector<Tensor> split_with_sizes_nested(
     splits[split_idx] = create_nested_view_tensor(self, new_sizes, new_strides, new_offsets);
   }
   return splits;
+}
+
+Tensor value_selecting_reduction_backward_nested_symint(
+    const Tensor& grad,
+    int64_t dim,
+    const Tensor& indices,
+    c10::SymIntArrayRef sizes,
+    bool keepdim) {
+  TORCH_INTERNAL_ASSERT(
+      false, "value_selecting_reduction_backward(): expected to be implemented in Python"
+  );
 }
 
 } // namespace at::native

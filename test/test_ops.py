@@ -11,7 +11,6 @@ from collections import defaultdict
 from collections.abc import Sequence
 from functools import partial
 from importlib import import_module
-from typing import Dict, List
 
 import torch
 import torch._prims as prims
@@ -1483,7 +1482,7 @@ class TestCommon(TestCase):
         unsupported_dtypes = set()
         supported_backward_dtypes = set()
         unsupported_backward_dtypes = set()
-        dtype_error: Dict[torch.dtype, Exception] = {}
+        dtype_error: dict[torch.dtype, Exception] = {}
 
         def unsupported(dtype, e):
             dtype_error[dtype] = e
@@ -1687,7 +1686,7 @@ class TestCommon(TestCase):
     def test_meta_consistency_out_dtype_mismatch(self, device, dtype, op):
         samples = op.sample_inputs(device, dtype)
 
-        for i, sample in enumerate(samples):
+        for sample in samples:
             input, args, kwargs = (sample.input, sample.args, sample.kwargs)
 
             try:
@@ -1987,7 +1986,7 @@ class TestCompositeCompliance(TestCase):
             for sample in op.sample_inputs(device, dtype, requires_grad=False):
                 inp = sample.input
                 outs = op(inp, *sample.args, **sample.kwargs)
-                if not isinstance(outs, (tuple, List)):
+                if not isinstance(outs, (tuple, list)):
                     outs = [outs]
 
                 # for all outputs that are views of the input, we should be able to replay the
@@ -2764,7 +2763,7 @@ class TestFakeTensor(TestCase):
     def _test_fake_crossref_helper(self, device, dtype, op, context):
         samples = op.sample_inputs(device, dtype, requires_grad=True)
 
-        for iter, sample in enumerate(samples):
+        for sample in samples:
             args = [sample.input] + list(sample.args)
             kwargs = sample.kwargs
 
