@@ -460,15 +460,7 @@ class CompiledFxGraph(OutputCode):
     def __call__(self, inputs: Sequence[Any]) -> Any:
         assert self.current_callable is not None
         try:
-            result = self.current_callable(inputs)
-
-            from torch._inductor.graph import GraphLowering, SaveOutputCodeContext
-
-            GraphLowering.save_output_code(
-                self.source_code, SaveOutputCodeContext.AFTER_COMPILE
-            )
-
-            return result
+            return self.current_callable(inputs)
         finally:
             get_runtime_metrics_context().finish()
             AutotuneCacheBundler.end_compile()
@@ -557,12 +549,10 @@ class CompiledFxGraph(OutputCode):
 
             write_atomic(artifact_path, code, make_dirs=True)
 
-        from .graph import GraphLowering, SaveOutputCodeContext
+        from .graph import GraphLowering
 
         # This is used by tests to check the output for specific details.
-        GraphLowering.save_output_code(
-            code, SaveOutputCodeContext.AFTER_DESERIALIZATION
-        )
+        GraphLowering.save_output_code(code)
 
         try:
             with dynamo_timed(
