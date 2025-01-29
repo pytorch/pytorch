@@ -122,7 +122,7 @@ Each Method has a FunctionSchema that describes the Types of the arguments and r
 
 [ir.h](ir/ir.h)
 
-Graphs are the root of the intermediate representation (IR) used to define the implementation of TorchScript functions. If you are familiar with [LLVM](llvm.org), they are analogous to an `llvm::Function` object. A `Graph` is composed of `Nodes`, `Blocks`, and `Values`. `Nodes` are instructions (e.g. do a matrix multiply). `Nodes` are organized into `Blocks` of sequentially executed `Nodes`. Each `Node` produces a list of output `Values`, and also consumes a list of input `Values`. As an example, a user may write the following TorchScript code:
+Graphs are the root of the intermediate representation (IR) used to define the implementation of TorchScript functions. If you are familiar with [LLVM](https://llvm.org), they are analogous to an `llvm::Function` object. A `Graph` is composed of `Nodes`, `Blocks`, and `Values`. `Nodes` are instructions (e.g. do a matrix multiply). `Nodes` are organized into `Blocks` of sequentially executed `Nodes`. Each `Node` produces a list of output `Values`, and also consumes a list of input `Values`. As an example, a user may write the following TorchScript code:
 
 ```python
 @torch.jit.script
@@ -389,7 +389,6 @@ JIT programs are created using either the tracing frontend (`torch.jit.trace`) o
 
 
 [tracer.h](frontend/tracer.h)
-[tracer_state.h](frontend/tracer_state.h)
 
 The tracer produces graphs by recording what actual operations are done on `Tensors`.
 The entry point from Python into C++ for tracing using `torch.jit.trace` is `_create_method_from_trace`.

@@ -14,7 +14,6 @@
     - [Uncommon autocast usage patterns may not be supported](#uncommon-autocast-usage-patterns-may-not-be-supported)
     - [Limited support for promote autocast policy](#limited-support-for-promote-autocast-policy)
     - [Missing autocast policies](#missing-autocast-policies)
-    - [Mixing eager mode and scripting autocast](#mixing-eager-mode-and-scripting-autocast)
     - [Mixing tracing and scripting autocast (script calling traced)](#mixing-tracing-and-scripting-autocast-script-calling-traced)
     - [Mixing tracing and scripting autocast (traced calling script)](#mixing-tracing-and-scripting-autocast-traced-calling-script)
     - [Disabling eager autocast with scripted autocast](#disabling-eager-autocast-with-scripted-autocast)
