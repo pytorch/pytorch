@@ -105,9 +105,16 @@ class Block:
     def is_class(self) -> bool:
         return self.category == Block.Category.CLASS
 
+    @property
+    def display_name(self) -> str:
+        """A user-friendly name. Examples: 'class One:', 'def One.method()'"""
+        ending = "" if self.is_class else "()"
+        return f"{self.category.value} {self.full_name}{ending}"
+
     DATA_FIELDS = (
         "category",
         "children",
+        "display_name",
         "docstring",
         "full_name",
         "index",
@@ -318,7 +325,7 @@ class DocstringLinter(_linter.FileLinter[DocstringFile]):
         tolerance_ratio = 1 + self.args.grandfather_tolerance / 100.0
 
         def grandfathered(b: Block) -> bool:
-            lines = int(grand.get(b.full_name, 0) * tolerance_ratio)
+            lines = int(grand.get(b.display_name, 0) * tolerance_ratio)
             return b.line_count <= lines
 
         return {b for b in bad if grandfathered(b)}
@@ -382,7 +389,7 @@ class DocstringLinter(_linter.FileLinter[DocstringFile]):
                 for block in blocks:
                     if block["status"] == "bad":
                         d = results.setdefault(path, {})
-                        d[block["full_name"]] = block["line_count"]
+                        d[block["display_name"]] = block["line_count"]
 
             with open(self.args.grandfather, "w") as fp:
                 json.dump(results, fp, sort_keys=True, indent=2)
