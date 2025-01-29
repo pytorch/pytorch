@@ -16,7 +16,6 @@ import numpy as np
 import torch
 import torch._dynamo
 import torch._dynamo.testing
-from torch.nested._internal.dict_tensor import DictTensor
 import torch.nn
 import torch.nn.functional as F
 from torch.nested._internal.nested_tensor import (
