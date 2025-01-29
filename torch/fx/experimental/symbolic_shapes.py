@@ -5924,7 +5924,6 @@ class ShapeEnv:
             # TODO: Help text about how to use our runtime tests to fix this
             # problem
         )
-        self._log_frame_locals(_find_user_code_frame())
         return GuardOnDataDependentSymNode(expr, msg)
 
     def _update_var_to_range(
@@ -6408,40 +6407,39 @@ class ShapeEnv:
         sloc, _ = self._get_stack_summary(framework_loc=framework_loc)
         return sloc
 
-    def _log_frame_locals(self, f: Optional[FrameType]):
-        if f is None:
+    def _log_frame_locals(self) -> Optional[dict[str, Any]]:
+        if (
+            not torch._logging._internal.GET_DTRACE_STRUCTURED
+            or (frame := _find_user_code_frame()) is None
+            or frame.f_code.co_filename == "<string>"
+        ):
             return
 
+        result = {
+            "loc": None,
+            "locals": {},
+            "symbols": {},
+        }
+
         # find bytecode instructions relevant to the frame
-        instructions = list(dis.Bytecode(f.f_code))
+        instructions = list(dis.Bytecode(frame.f_code))
+        co_lines, offset = inspect.getsourcelines(frame.f_code)
+
         start, end, cur = None, None, None
         for i, instr in enumerate(instructions):
             if instr.starts_line is not None:
                 cur = instr.starts_line
-            if cur != f.f_lineno:
+            if cur != frame.f_lineno:
                 continue
             if start is None:
                 start = end = i
             else:
                 end = i
 
-        if start is None:
+        if start is None or end is None:  # no instructions found
             return
 
-        # track values of involved locals
-        last_lineno = f.f_lineno
-        locals_ = {}
-        for instr in instructions[start : end + 1]:
-            if (lineno := instr.starts_line) is not None:
-                last_lineno = max(last_lineno, lineno)
-            if (
-                isinstance(instr.argval, str)
-                and instr.argval in f.f_locals
-            ):
-                locals_[instr.argval] = f.f_locals[instr.argval]
-
-        # track free symbols & print locals
-        free_symbols = set()
+        # track involved locals and free symbols
         def go(x):
             if isinstance(x, torch.Tensor):
                 for y in x.size():
@@ -6449,36 +6447,40 @@ class ShapeEnv:
                 for y in x.stride():
                     go(y)
                 go(x.storage_offset())
-                return f"Tensor(shape: {x.size()}," \
+                return f"Tensor(shape: {x.size()}, " \
                     f"stride: {x.stride()}, " \
                     f"storage_offset: {x.storage_offset()})"
             elif isinstance(x, (SymBool, SymInt, SymFloat)):
-                free_symbols.update(x.node.expr.free_symbols)
-                return x
+                for s in x.node.expr.free_symbols:
+                    if s in result["symbols"]:
+                        continue
+                    result["symbols"][s] = (
+                        self.var_to_sources[s][0].name()  # backed
+                        if s in self.var_to_sources
+                        else None  # unbacked
+                    )
+                return str(x)
             return None
 
-        locals_repr = {
-            name: pytree.tree_map(go, val)
-            for name, val in locals_.items()
-        }
-        if free_symbols:  # log is only interesting if symbols are found
-            co_lines, offset = inspect.getsourcelines(f.f_code)
-            # user code
-            self.log.info(f"{f.f_code.co_filename}({f.f_lineno}){f.f_code.co_name}()")
-            self.log.info("".join(co_lines[f.f_lineno - offset : last_lineno + 1 - offset]))
-            # local values
-            self.log.info("Values during FakeTensor propagation:")
-            for k, v in locals_repr.items():
-                if pytree.tree_all(lambda x: x is None, v):
-                    continue  # ignore locals without symbols
-                self.log.info(f"{k}: {v}")
-            # symbols
-            if all(s not in self.var_to_sources for s in free_symbols):
-                return
-            self.log.info("\nSymbols:")
-            for symbol in free_symbols:
-                if symbol in self.var_to_sources:
-                    self.log.info(f"{symbol}: {self.var_to_sources[symbol][0].name()}")
+        # go through instructions, seeing linenos & involved locals
+        last_lineno = frame.f_lineno
+        for instr in instructions[start : end + 1]:
+            if (lineno := instr.starts_line) is not None:
+                last_lineno = max(last_lineno, lineno)
+            if (
+                isinstance(instr.argval, str)
+                and instr.argval in frame.f_locals
+            ):
+                result["locals"][instr.argval] = pytree.tree_map(go, frame.f_locals[instr.argval])
+
+        # store LOC
+        locs = co_lines[frame.f_lineno - offset : last_lineno + 1 - offset]
+        indent = len(locs[0]) - len(locs[0].lstrip())
+        result["loc"] = "".join([loc[indent:] for loc in locs]).strip()
+
+        if not result["locals"] or not result["symbols"]:  # no symbolic values
+            return
+        return result
 
     def _log_guard(self, prefix: str, g: SympyBoolean, forcing_spec: bool) -> None:
         dtrace_structured(
@@ -6493,6 +6495,7 @@ class ShapeEnv:
                     for k, v in self.source_to_var.items()
                     if v in g.free_symbols
                 },
+                "frame_locals": self._log_frame_locals(),
             },
         )
         trace_structured(
@@ -6527,7 +6530,6 @@ class ShapeEnv:
                 maybe_extra_debug,
                 stack_info=is_debug,
             )
-            self._log_frame_locals(_find_user_code_frame())
 
     @lru_cache(256)
     @record_shapeenv_event(save_tracked_fakes=True)
@@ -6724,6 +6726,22 @@ class ShapeEnv:
                                 "stack": structured.from_traceback(
                                     CapturedTraceback.extract(skip=1).summary()
                                 ),
+                            },
+                        )
+                        dtrace_structured(
+                            "propagate_real_tensors_dtrace",
+                            metadata_fn=lambda: {
+                                "expr": repr(orig_expr),
+                                "result": repr(unsound_result),
+                                "stack": structured.from_traceback(
+                                    CapturedTraceback.extract(skip=1).summary()
+                                ),
+                                "symbol_to_sources": {
+                                    str(v): k
+                                    for k, v in self.source_to_var.items()
+                                    if v in g.free_symbols
+                                },
+                                "frame_locals": self._log_frame_locals(),
                             },
                         )
                         transmute_into_runtime_assert = True

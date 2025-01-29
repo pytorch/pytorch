@@ -55,6 +55,22 @@ def hash_stack(stack: list[dict[str, str]]) -> str:
     return ";".join(f'line: {s["line"]} filename: {s["filename"]}' for s in stack)
 
 
+def print_frame_locals(loc: str, locals: dict[str, Any], symbols: dict[str, Any]) -> str:
+    res = f"    {loc}\n"
+    local_str = "\n".join(f'            {k}: {v}' for k, v in locals.items())
+    res += f"""
+        Locals:
+{local_str}
+"""
+    if any(v is not None for v in symbols.values()):
+        symbol_str = "\n".join(f'           {k}: {v}' for k, v in symbols.items() if v is not None)
+        res += f"""
+        Symbols:
+{symbol_str}
+"""
+    return res
+
+
 def get_loc(filename: str, lineno: int) -> Optional[str]:
     try:
         with open(filename) as f:
@@ -88,10 +104,16 @@ class FailureReport:
 """  # noqa: B950
 
         elif self.failure_type == FailureType.CONSTRAINT_VIOLATION_ERROR:
+            locals_info = (
+                print_frame_locals(**self.data["frame_locals"])
+                if self.data["frame_locals"]
+                else ""
+            )
             return f"""Constraint violation error.
     The specified input dynamic_shapes spec was found to be incorrect during tracing.
     Specifically, this guard was added: {self.data["expr"]}, where {self.data["symbol_to_sources"]}.
-    This occured at the following stacktrace: {prettify_stack(self.data["stack"], str_to_filename)}.
+    This occured at the following stacktrace: {prettify_stack(self.data["stack"], str_to_filename)}:
+        {locals_info}
     Because of this, we have modified the dynamic shapes structure to be the
     following. You can also use torch.export.Dim.AUTO instead to specify your
     dynamic shapes, and we will automatically infer the dynamism for you.
@@ -101,18 +123,16 @@ class FailureReport:
 """
 
         elif self.failure_type == FailureType.DATA_DEPENDENT_ERROR:
-            loc = None
-            if self.data["stack"]:
-                frame = self.data["stack"][-1]
-                loc = (
-                    f"`{get_loc(str_to_filename[frame['filename']], frame['line'])}`"
-                    or ""
-                )
+            locals_info = (
+                print_frame_locals(**self.data["frame_locals"])
+                if self.data["frame_locals"]
+                else ""
+            )
             return f"""Data dependent error.
     When exporting, we were unable to evaluate the value of `{self.data["expr"]}`.
     This was encountered {self.data["occurrences"]} times.
     This occurred at the following stacktrace: {prettify_stack(self.data["stack"], str_to_filename)}:
-        {loc}
+        {locals_info}
     As a result, it was specialized to a constant (e.g. `{self.data["result"]}` in the 1st occurrence), and asserts were inserted into the graph.
 
     Please add `torch._check(...)` to the original code to assert this data-dependent assumption.
@@ -219,7 +239,7 @@ def draft_export(
 
     capture_structured_log = CaptureStructuredTrace(
         [
-            "propagate_real_tensors",
+            "propagate_real_tensors_dtrace",
             "guard_added",
             "missing_fake_kernel",
             "mismatched_fake_kernel",
@@ -267,7 +287,7 @@ def draft_export(
         for log_name, log_contents in capture_structured_log.logs:
             failure_type = None
 
-            if log_name == "propagate_real_tensors":
+            if log_name == "propagate_real_tensors_dtrace":
                 log_contents["stack"] = filter_stack(
                     log_contents["stack"], str_to_filename
                 )
