@@ -75,7 +75,6 @@ def lint_file(
 
     if allowlist_pattern:
         try:
-            print(f"grep -nEHI {allowlist_pattern} {filename}")
             proc = run_command(["grep", "-nEHI", allowlist_pattern, filename])
         except Exception as err:
             return LintMessage(
@@ -227,7 +226,7 @@ def main() -> None:
     lines = []
     try:
         # Split the grep command into multiple batches to avoid hitting the
-        # command line length limit of ~1M
+        # command line length limit
         arg_length = sum(len(x) for x in args.filenames)
         batches = arg_length // 750000 + 1
         batch_size = len(args.filenames) // batches
