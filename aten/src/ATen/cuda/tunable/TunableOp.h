@@ -334,7 +334,7 @@ class TunableOp {
             "instance id=", i, ", ", op_sig, "(", params_sig, ") ", op_names_[i]);
         TUNABLE_LOG3("├──offset at ", offset);
         WarmUp(candidate, reusable_params, warmup_iter, offset);
-        auto s = ProfileStats(candidate, reusable_params, tuning_iter, offset);
+        s = ProfileStats(candidate, reusable_params, tuning_iter, offset);
         auto s_stddev = s.stddev();
         // Assume normal distribution.
         // Solution with smallest mean + 2*sigma will be a better solution
