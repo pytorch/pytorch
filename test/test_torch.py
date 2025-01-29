@@ -56,7 +56,7 @@ from torch.testing._internal.common_device_type import (
 import torch.backends.quantized
 import torch.testing._internal.data
 from torch.testing._internal.common_cuda import (
-    tf32_on_and_off, tf32_is_not_fp32, TEST_CUDNN, TEST_MULTIGPU,
+    tf32_on_and_off, TEST_CUDNN, TEST_MULTIGPU,
     _create_scaling_case, _create_scaling_models_optimizers)
 from torch.testing._internal.common_mkldnn import bf32_on_and_off
 from torch.testing._internal.common_dtype import (
@@ -79,7 +79,7 @@ assert torch.get_default_dtype() is torch.float32
 # sharding on sandcastle. This line silences flake warnings
 load_tests = load_tests
 
-AMPERE_OR_ROCM = TEST_WITH_ROCM or tf32_is_not_fp32()
+AMPERE_OR_ROCM = TEST_WITH_ROCM or torch.cuda.is_tf32_supported()
 
 @contextlib.contextmanager
 def torch_vital_set(value):
