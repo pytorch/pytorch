@@ -232,7 +232,13 @@ def main() -> None:
         batch_size = len(args.filenames) // batches
         for i in range(0, len(args.filenames), batch_size):
             proc = run_command(
-                ["grep", "-nEHI", *files_with_matches, args.pattern, *args.filenames[i : i + batch_size]]
+                [
+                    "grep",
+                    "-nEHI",
+                    *files_with_matches,
+                    args.pattern,
+                    *args.filenames[i : i + batch_size],
+                ]
             )
             lines.extend(proc.stdout.decode().splitlines())
     except Exception as err:
