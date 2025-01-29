@@ -4520,7 +4520,7 @@ class ShapeEnv:
             else:
                 # Only used for jagged layout nested tensors
                 self.var_to_val[sympy_expr] = SingletonInt(
-                    val.node.nested_int(), coeff=val.node.nested_int_coeff()
+                    val.node.nested_int_meta(), coeff=val.node.nested_int_coeff()
                 )
 
             # Do the appending later, because we always want to populate this

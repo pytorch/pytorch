@@ -8853,8 +8853,10 @@ from torch.nested._internal.nested_int import NestedIntNode
 
 class TestNestedInt(torch.testing._internal.common_utils.TestCase):
     def test_comparisons(self):
-        cache = torch.tensor(1.0)
-        cache2 = torch.tensor(1.0)
+        metadata1 = {"_host_lengths": torch.tensor(1.0)}
+        cache = CachedTensor(metadata1)
+        metadata2 = {"_host_lengths": torch.tensor(1.0)}
+        cache2 = CachedTensor(metadata2)
 
         a = torch.SymInt(NestedIntNode(cache, 1))
         b = torch.SymInt(NestedIntNode(cache, 1))
@@ -8930,7 +8932,8 @@ class TestNestedInt(torch.testing._internal.common_utils.TestCase):
         self.assertTrue(a > 1)
 
     def test_with_factor(self):
-        cache = torch.tensor(1.0)
+        metadata1 = {"_host_lengths": torch.tensor(1.0)}
+        cache = CachedTensor(metadata1)
 
         a = torch.SymInt(NestedIntNode(cache, 5))
         b = torch.SymInt(NestedIntNode(cache, 10))
@@ -8947,6 +8950,35 @@ class TestNestedInt(torch.testing._internal.common_utils.TestCase):
         self.assertTrue(a * 2 == b)
         self.assertTrue(a * 3 >= b)
         self.assertTrue(a * 2 == 2 * a)
+
+    def test_multiple_things_in_cache(self):
+        from torch.nested._internal.cached_tensor import CachedTensor
+
+        a = torch.tensor([1, 2, 3], dtype=torch.float32)
+        b = torch.tensor([4, 5, 6], dtype=torch.float32)
+        c = torch.tensor([7, 8, 9], dtype=torch.float32)
+
+        metadata1 = {"_host_lengths": a, "_host_offsets": None, "_device_offsets": c}
+        metadata2 = {"_host_lengths": None, "_host_offsets": b, "_device_offsets": c}
+
+        cached_tensor1 = CachedTensor(metadata1)
+        cached_tensor2 = CachedTensor(metadata2)
+
+        j0 = torch.SymInt(NestedIntNode(cached_tensor1, 5))
+        j1 = torch.SymInt(NestedIntNode(cached_tensor2, 5))
+
+        self.assertTrue(j0 == j1)
+
+        metadata1 = {"_host_lengths": a, "_host_offsets": None}
+        metadata2 = {"_host_lengths": None, "_host_offsets": b}
+
+        cached_tensor1 = CachedTensor(metadata1)
+        cached_tensor2 = CachedTensor(metadata2)
+
+        a = torch.SymInt(NestedIntNode(cached_tensor1, 5))
+        b = torch.SymInt(NestedIntNode(cached_tensor2, 5))
+
+        self.assertFalse(a == b)
 
 
 from torch.nested._internal.cached_tensor import CachedTensor

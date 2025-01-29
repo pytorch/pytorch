@@ -17,16 +17,18 @@ class SingletonInt(sympy.AtomicExpr):
 
     # The semantics of this class should match that of NestedIntSymNodeImpl in
     # c10/core/NestedIntSymNodeImpl.h
-    def __init__(self, val, *, coeff=1):
-        self._val = val
+    def __init__(self, metadata, *, coeff=1):
+        self._metadata = metadata
         self._coeff = coeff
         super().__init__()
 
     # See NOTE [ Inequalities with nested int ]
     def _eval_Eq(self, other):
+        from torch.nested._internal.nested_int import _any_id_equal
+
         if (
             isinstance(other, SingletonInt)
-            and other._val == self._val
+            and _any_id_equal(other._metadata, self._metadata)
             and self._coeff == other._coeff
         ):
             return sympy.true
@@ -88,7 +90,9 @@ def _eval_is_ge(a, b):  # noqa: F811
 
 @dispatch(SingletonInt, SingletonInt)  # type: ignore[no-redef]
 def _eval_is_ge(a, b):  # noqa: F811
-    if a._val == b._val:
+    from torch.nested._internal.nested_int import _any_id_equal
+
+    if _any_id_equal(a._metadata, b._metadata):
         if a._coeff >= b._coeff:
             return sympy.true
         else:

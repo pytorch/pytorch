@@ -1,3 +1,4 @@
+import itertools
 from typing import *  # noqa: F403
 
 import torch
@@ -9,19 +10,38 @@ from torch.nested._internal.utils import flatten_nested_metadata_to_dict
 __all__ = ["NestedIntNode"]
 
 
-# Python version of aten/src/ATen/core/NestedIntSymNodeImpl.cpp
+NestedIntMetaSpec = Tuple[frozenset[int], frozenset[int]]
+
+
+def _any_id_equal(d1: NestedIntMetaSpec, d2: NestedIntMetaSpec) -> bool:
+    # Note: [Nested tensor id equality]
+    #
+    # 1. Equality of j0 and j1 is determined by the object instances
+    #    their caches (we only look at source fields, e.g.
+    #    _{host,device}_{offsets,lengths}. The object instance is mapped
+    #    to an int by TensorRegistry. Two distinct object instances can
+    #    share the same int in the cases of .to().
+    #
+    # 2. j0 holds metadata in the format: Tuple[frozenset, frozenset]
+    #    where the  first set represents the "tensor ids" of the offsets
+    #    and and the second set represents the "tensor_ids" of the lengths.
+    #    Comparison between j0 and j1 is by intersecting the corresponding
+    #    sets. If either intersection is non-empty, then we return True.
+    return bool((d1[0] & d2[0]) | (d1[1] & d2[1]))
+
+
 def _eq(lhs: Any, rhs: Any) -> bool:
     return (
         isinstance(lhs, NestedIntNode)
         and isinstance(rhs, NestedIntNode)
-        and lhs.t_id == rhs.t_id
+        and _any_id_equal(lhs.metadata, rhs.metadata)
         and lhs.coeff == rhs.coeff
     )
 
 
 def _ge(lhs: Any, rhs: Any) -> bool:
     if isinstance(rhs, NestedIntNode) and isinstance(lhs, NestedIntNode):
-        if lhs.t_id == rhs.t_id:
+        if _any_id_equal(lhs.metadata, rhs.metadata):
             return lhs.coeff >= rhs.coeff
         raise ValueError("ge: relation is indeterminate")
     elif isinstance(lhs, NestedIntNode):
@@ -36,28 +56,34 @@ def _ge(lhs: Any, rhs: Any) -> bool:
         raise ValueError("inputs unsupported")
 
 
-def _get_tensor_id(t: torch.Tensor) -> int:
-    ret: List[Optional[int]] = []
+def _get_tensor_ids(t: torch.Tensor) -> Tuple[frozenset, frozenset]:
+    tmp: Tuple[set[int], set[int]] = (set(), set())
 
-    for t in flatten_nested_metadata_to_dict(
+    for t_name, t_inner in flatten_nested_metadata_to_dict(
         t,
         only_source_fields=True,
         unwrap_functional_tensor=True,
-    ).values():
-        if try_get_int(t) is None:
-            ret.append(register_tensor(t))
-        else:
-            ret.append(try_get_int(t))
-
-    assert ret[0] is not None
-    return ret[0]
+    ).items():
+        if (t_id := try_get_int(t_inner)) is None:
+            t_id = register_tensor(t_inner)
+        if "lengths" in t_name[-1]:
+            tmp[0].add(t_id)
+        elif "offsets" in t_name[-1]:
+            tmp[1].add(t_id)
+    ret = (frozenset(tmp[0]), frozenset(tmp[1]))
+    return ret
 
 
 class NestedIntNode:
     def __init__(self, cache: torch.Tensor, coeff: int):
         self.cache = cache
-        self.t_id = _get_tensor_id(cache)
+        self.metadata: NestedIntMetaSpec = _get_tensor_ids(cache)
         self.coeff = coeff
+        # For the purpose of j-number printing, arbitrarily
+        # choose the first tensor id in the dict.
+        self.str_id = next(
+            itertools.chain(iter(self.metadata[0]), iter(self.metadata[1]))
+        )
 
     def nested_int_coeff(self) -> int:
         return self.coeff
@@ -85,8 +111,8 @@ class NestedIntNode:
 
     def _str(self) -> Any:
         if self.coeff == 1:
-            return f"j{self.t_id}"
-        return f"{self.coeff}*j{self.t_id}"
+            return f"j{self.str_id}"
+        return f"{self.coeff}*j{self.str_id}"
 
     def str(self) -> Any:
         return self._str()
@@ -128,8 +154,9 @@ class NestedIntNode:
     def is_symbolic(self) -> bool:
         return False
 
-    def nested_int(self) -> int:
-        return self.t_id
+    def nested_int_meta(self) -> Tuple[frozenset, frozenset]:
+        # Needs to be hashable
+        return self.metadata
 
     def is_constant(self) -> bool:
         return False
