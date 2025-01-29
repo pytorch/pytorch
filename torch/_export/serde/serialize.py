@@ -2060,7 +2060,9 @@ class GraphModuleDeserializer(metaclass=Final):
             # deserialization does analysis with checks on 0/1, so we create fake range constraints and
             # restore the original range constraints afterwards
             self.symbol_name_to_range = {}
-            max_unbacked_symfloat, max_unbacked_symint = -1, -1
+            # we also need to bump unbacked sym[float,int] counters in the
+            # shape env to accommodate unbacked symbols in the exported program
+            count_unbacked_symfloat, count_unbacked_symint = -1, -1
             unbacked_symfloat_prefix, unbacked_symint_prefix = (
                 prefix_str[t] for t in [SymT.UNBACKED_FLOAT, SymT.UNBACKED_INT]
             )
@@ -2072,14 +2074,14 @@ class GraphModuleDeserializer(metaclass=Final):
                     self.symbol_name_to_range[k] = symbolic_shapes.ValueRanges(_int_to_sympy_int(lower, -int_oo), vr.upper)
                     if k.startswith(unbacked_symfloat_prefix):
                         i = int(k[len(unbacked_symfloat_prefix):])
-                        max_unbacked_symfloat = max(max_unbacked_symfloat, i)
+                        count_unbacked_symfloat = max(count_unbacked_symfloat, i)
                     elif k.startswith(unbacked_symint_prefix):
                         i = int(k[len(unbacked_symint_prefix):])
-                        max_unbacked_symint = max(max_unbacked_symint, i)
+                        count_unbacked_symint = max(count_unbacked_symint, i)
 
-            for _ in range(max_unbacked_symfloat + 1):
+            for _ in range(count_unbacked_symfloat + 1):
                 next(self.shape_env.unbacked_symfloat_counter)
-            for _ in range(max_unbacked_symint + 1):
+            for _ in range(count_unbacked_symint + 1):
                 next(self.shape_env.unbacked_symint_counter)
 
             if example_inputs is not None and len(example_inputs) > 0:
