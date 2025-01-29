@@ -1,6 +1,7 @@
 import contextlib
 import functools
 import itertools
+import json
 import logging
 import operator
 import os
@@ -1956,7 +1957,15 @@ class GraphLowering(torch.fx.Interpreter):
             )
 
             # Dump the inductor_triton_kernel_to_post_grad_node_info to a json file for debugging trace
-            V.debug.log_inductor_triton_kernel_to_post_grad_node_info()
+            debug_info = V.debug.log_inductor_triton_kernel_to_post_grad_node_info()
+            trace_structured(
+                "artifact",
+                metadata_fn=lambda: {
+                    "name": "inductor_triton_kernel_to_post_grad_nodes",
+                    "encoding": "json",
+                },
+                payload_fn=lambda: json.dumps(debug_info),
+            )
 
             result = self.wrapper_code.generate(self.is_inference)
             self.wrapper_code.pop_codegened_graph()
