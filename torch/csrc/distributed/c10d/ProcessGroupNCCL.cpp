@@ -20,7 +20,6 @@
 #include <c10/util/WaitCounter.h>
 #include <c10/util/irange.h>
 #include <c10/util/thread_name.h>
-#include <torch/csrc/cuda/CUDAPluggableAllocator.h>
 #include <torch/csrc/cuda/nccl.h>
 #include <torch/csrc/distributed/c10d/FlightRecorder.hpp>
 #include <torch/csrc/distributed/c10d/NCCLUtils.hpp>
@@ -5248,37 +5247,6 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::_allgather_base(
       OpType::_ALLGATHER_BASE,
       "nccl:_all_gather_base",
       avoidRecordStreams);
-}
-
-// Create a memory allocator for NCCL. This allocator is used to allocate memory
-// that supports NVLink Sharp functionality. This allocator is later pybinded to
-// python, so that users can use it to create MemPool. For example:
-// >>> pool = torch.cuda.MemPool(backend.mem_allocator)
-
-// Allocate function
-void* _ncclMemAlloc(size_t size, int device, void* stream) {
-  LOG(INFO) << "NCCL mem allocator: allocating " << size << " bytes";
-  at::cuda::OptionalCUDAGuard gpuGuard(device);
-  void* ptr = nullptr;
-  TORCH_CHECK(ncclMemAlloc(&ptr, size) == ncclSuccess, "ncclMemAlloc failed");
-  return ptr;
-}
-
-// Free function
-void _ncclMemFree(void* ptr, size_t size, int device, void* stream) {
-  LOG(INFO) << "NCCL mem allocator: freeing " << size << " bytes";
-  at::cuda::OptionalCUDAGuard gpuGuard(device);
-  TORCH_CHECK(ncclMemFree(ptr) == ncclSuccess, "ncclMemFree failed");
-}
-
-// Create a `CUDAPluggableAllocator` that uses the above functions.
-std::shared_ptr<c10::Allocator> ProcessGroupNCCL::getMemAllocator() {
-  C10_LOG_API_USAGE_ONCE("ProcessGroupNCCL.getMemAllocator");
-  static std::shared_ptr<c10::cuda::CUDACachingAllocator::CUDAAllocator>
-      ncclMemAllocator =
-          torch::cuda::CUDAPluggableAllocator::createCustomAllocator(
-              _ncclMemAlloc, _ncclMemFree);
-  return ncclMemAllocator;
 }
 
 } // namespace c10d
