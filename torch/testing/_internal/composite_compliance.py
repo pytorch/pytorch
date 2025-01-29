@@ -72,6 +72,7 @@ def is_view_fn(func):
         'chunk',
         'swapaxes',
         'slice',
+        '_lazy_clone_alias',
         '_reshape_alias',
         '_unsafe_view',
         '_conj',

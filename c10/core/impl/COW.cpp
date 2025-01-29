@@ -149,4 +149,24 @@ C10_API void materialize_cow_storage(StorageImpl& storage) {
   old_data_ptr.release_context();
 }
 
+static bool _future_lazy_clone = false;
+
+C10_API void set_future_lazy_clone(bool mode) {
+  _future_lazy_clone = mode;
+}
+
+C10_API bool get_future_lazy_clone() {
+  return _future_lazy_clone;
+}
+
+static bool _error_on_conditional_view_warnings = false;
+
+C10_API void set_error_on_conditional_view_warnings(bool mode) {
+  _error_on_conditional_view_warnings = mode;
+}
+
+C10_API bool get_error_on_conditional_view_warnings() {
+  return _error_on_conditional_view_warnings;
+}
+
 } // namespace c10::impl::cow

@@ -136,6 +136,10 @@ struct C10_API StorageImpl : public c10::intrusive_ptr_target {
     return data_ptr_;
   }
 
+  const at::DataPtr& _data_ptr_no_checks() const {
+    return data_ptr_;
+  }
+
   at::DataPtr& mutable_data_ptr() {
     if (C10_UNLIKELY(has_mutable_data_ptr_check_)) {
       if (throw_on_immutable_data_ptr_) {
