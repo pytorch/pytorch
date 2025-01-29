@@ -149,6 +149,28 @@ main()
         for _ in range(3):
             self.run_as_subprocess(script)
 
+    def test_reset(self):
+        compiled_autograd.compiled_autograd_enabled = True
+        torch._C._dynamo.compiled_autograd.set_autograd_compiler(lambda: None, True)
+        # TODO: return prior verbose logger
+        # torch._C._dynamo.compiled_autograd.set_verbose_logger(dummy)
+        compiled_autograd.COMPILE_COUNTER = None
+
+        # state should be clean after reset
+        compiled_autograd.reset()
+
+        assert compiled_autograd.compiled_autograd_enabled is False
+        (
+            prior_compiler,
+            prior_dynamic,
+        ) = torch._C._dynamo.compiled_autograd.set_autograd_compiler(None, False)
+        assert prior_compiler is None
+        assert prior_dynamic is False
+        assert (
+            compiled_autograd.COMPILE_COUNTER is not None
+            and next(compiled_autograd.COMPILE_COUNTER) == 0
+        )
+
     def test_basic(self):
         def fn():
             model = torch.nn.Sequential(
@@ -906,38 +928,46 @@ main()
             torch.ones(1000000, dtype=torch.float32),
             LoggingTensor(torch.ones(1)),
         ]
+        match_done = False
 
         def bytecode_hook(code, out_code):
             import dis
             import sys
 
-            if sys.version_info < (3, 11):
-                call_op = "CALL_FUNCTION"
-            else:
-                call_op = "CALL"
+            nonlocal match_done
 
-            insts = list(dis.get_instructions(out_code))
-            call_graph_idx = next(
-                i for i, inst in enumerate(insts) if inst.opname == call_op
-            )
-            # pre-graph should alias: inputs_ref_0 = inputs[0]
-            matches = [
-                inst
-                for inst in insts[:call_graph_idx]
-                if inst.opname == "STORE_FAST" and inst.argval == "inputs_ref_0"
-            ]
-            self.assertTrue(len(matches) == 1)
-            # post-graph should access inputs_ref_0 instead of inputs
-            matches = [
-                inst for inst in insts[call_graph_idx:] if inst.argval == "inputs"
-            ]
-            self.assertTrue(len(matches) == 0)
-            matches = [
-                inst
-                for inst in insts[call_graph_idx:]
-                if inst.opname == "LOAD_FAST" and inst.argval == "inputs_ref_0"
-            ]
-            self.assertTrue(len(matches) == 1)
+            # test is sensitive to what Dynamo traces. So as soon as the main
+            # graph is tested, we skip the bytecode hook checks for future
+            # frames.
+            if not match_done:
+                if sys.version_info < (3, 11):
+                    call_op = "CALL_FUNCTION"
+                else:
+                    call_op = "CALL"
+
+                insts = list(dis.get_instructions(out_code))
+                call_graph_idx = next(
+                    i for i, inst in enumerate(insts) if inst.opname == call_op
+                )
+                # pre-graph should alias: inputs_ref_0 = inputs[0]
+                matches = [
+                    inst
+                    for inst in insts[:call_graph_idx]
+                    if inst.opname == "STORE_FAST" and inst.argval == "inputs_ref_0"
+                ]
+                self.assertTrue(len(matches) == 1)
+                # post-graph should access inputs_ref_0 instead of inputs
+                matches = [
+                    inst for inst in insts[call_graph_idx:] if inst.argval == "inputs"
+                ]
+                self.assertTrue(len(matches) == 0)
+                matches = [
+                    inst
+                    for inst in insts[call_graph_idx:]
+                    if inst.opname == "LOAD_FAST" and inst.argval == "inputs_ref_0"
+                ]
+                self.assertTrue(len(matches) == 1)
+                match_done = True
 
         torch._dynamo.reset()
         handle = torch._dynamo.convert_frame.register_bytecode_hook(bytecode_hook)
