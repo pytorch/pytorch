@@ -1494,11 +1494,6 @@ class CSEVariable:
         return f"{self.__class__.__name__}({self.name!r})"
 
 
-class CppWrapperKernelArgs(KernelArgs):
-    def wrap_size_arg(self, size):
-        return f"{size}"
-
-
 class CSE:
     """Common subexpression elimination"""
 
