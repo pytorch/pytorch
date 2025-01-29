@@ -398,7 +398,11 @@ def significant_strides_equal(
         if V.graph.sizevars.statically_known_leq(dim, 1):  # type: ignore[arg-type]
             continue
 
-        if not V.graph.sizevars.statically_known_equals(s1, s2):
+        if not V.graph.sizevars.statically_known_equals(
+            s1, s2
+        ) and not V.graph.sizevars.symbolic_hint(s1) == V.graph.sizevars.symbolic_hint(
+            s2
+        ):
             return False
 
     return True
