@@ -24,6 +24,7 @@ from torch.testing._internal.common_dtype import (
     all_types_and_complex_and,
     floating_types,
     floating_types_and,
+    get_all_dtypes,
     integral_types_and,
 )
 from torch.testing._internal.common_methods_invocations import (
@@ -1348,6 +1349,16 @@ class TestForeach(TestCase):
                 ]
                 for t, ref_t in zip(out, ref_out):
                     self.assertTrue(torch.equal(t, ref_t))
+
+    @dtypes(*get_all_dtypes())
+    def test_foreach_clone_tensors(self, device, dtype):
+        t1 = make_tensor((5, 5), dtype=dtype, device=device, low=1, high=100)
+        t2 = make_tensor((5, 5), dtype=dtype, device=device, low=1, high=100)
+        c1, c2 = torch._foreach_clone([t1, t2])
+        self.assertEqual(t1, c1)
+        self.assertFalse(t1 is c1)
+        self.assertEqual(t2, c2)
+        self.assertFalse(t2 is c2)
 
     # Test reverse-mode & forward-mode AD if supported.
     @onlyCUDA
