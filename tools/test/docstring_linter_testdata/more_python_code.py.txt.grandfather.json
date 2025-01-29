@@ -1,10 +1,10 @@
 {
   "tools/test/docstring_linter_testdata/more_python_code.py.txt": {
-    "LintInit": 6
+    "class LintInit": 6
   },
   "tools/test/docstring_linter_testdata/python_code.py.txt": {
-    "ImpossibleCombo.needs_docs": 12,
-    "LongWithShortDocstring": 6,
-    "LongWithoutDocstring": 4
+    "class LongWithShortDocstring": 6,
+    "class LongWithoutDocstring": 4,
+    "def ImpossibleCombo.needs_docs()": 12
   }
 }

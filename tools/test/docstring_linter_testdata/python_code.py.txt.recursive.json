@@ -2,6 +2,7 @@
   {
     "category": "class",
     "children": [],
+    "display_name": "class ShortWithDocstring",
     "docstring": "\"\"\"This docstring, while short, is enough\"\"\"",
     "full_name": "ShortWithDocstring",
     "index": 0,
@@ -14,6 +15,7 @@
   {
     "category": "class",
     "children": [],
+    "display_name": "class Short",
     "docstring": "",
     "full_name": "Short",
     "index": 1,
@@ -29,6 +31,7 @@
       {
         "category": "def",
         "children": [],
+        "display_name": "def LongWithDocstring.short1()",
         "docstring": "",
         "full_name": "LongWithDocstring.short1",
         "index": 3,
@@ -39,6 +42,7 @@
         "start_line": 14
       }
     ],
+    "display_name": "class LongWithDocstring",
     "docstring": "\"\"\"This docstring, while short, is enough\"\"\"",
     "full_name": "LongWithDocstring",
     "index": 2,
@@ -54,6 +58,7 @@
       {
         "category": "def",
         "children": [],
+        "display_name": "def LongWithoutDocstring.short1()",
         "docstring": "",
         "full_name": "LongWithoutDocstring.short1",
         "index": 5,
@@ -64,6 +69,7 @@
         "start_line": 21
       }
     ],
+    "display_name": "class LongWithoutDocstring",
     "docstring": "",
     "full_name": "LongWithoutDocstring",
     "index": 4,
@@ -79,6 +85,7 @@
       {
         "category": "def",
         "children": [],
+        "display_name": "def LongWithShortDocstring.short1()",
         "docstring": "",
         "full_name": "LongWithShortDocstring.short1",
         "index": 7,
@@ -89,6 +96,7 @@
         "start_line": 28
       }
     ],
+    "display_name": "class LongWithShortDocstring",
     "docstring": "\"\"\"TODO\"\"\"",
     "full_name": "LongWithShortDocstring",
     "index": 6,
@@ -104,6 +112,7 @@
       {
         "category": "def",
         "children": [],
+        "display_name": "def _Protected.short1()",
         "docstring": "",
         "full_name": "_Protected.short1",
         "index": 9,
@@ -114,6 +123,7 @@
         "start_line": 35
       }
     ],
+    "display_name": "class _Protected",
     "docstring": "\"\"\"TODO\"\"\"",
     "full_name": "_Protected",
     "index": 8,
@@ -126,6 +136,7 @@
   {
     "category": "def",
     "children": [],
+    "display_name": "def short()",
     "docstring": "",
     "full_name": "short",
     "index": 10,
@@ -138,6 +149,7 @@
   {
     "category": "def",
     "children": [],
+    "display_name": "def long()",
     "docstring": "\"\"\"This docstring, while short, is enough\"\"\"",
     "full_name": "long",
     "index": 11,
@@ -150,6 +162,7 @@
   {
     "category": "def",
     "children": [],
+    "display_name": "def long_without_docstring()",
     "docstring": "",
     "full_name": "long_without_docstring",
     "index": 12,
@@ -171,6 +184,7 @@
               {
                 "category": "class",
                 "children": [],
+                "display_name": "class ImpossibleCombo.needs_docs.not_short.Long",
                 "docstring": "",
                 "full_name": "ImpossibleCombo.needs_docs.not_short.Long",
                 "index": 16,
@@ -183,6 +197,7 @@
               {
                 "category": "class",
                 "children": [],
+                "display_name": "class ImpossibleCombo.needs_docs.not_short.Short",
                 "docstring": "",
                 "full_name": "ImpossibleCombo.needs_docs.not_short.Short",
                 "index": 17,
@@ -193,6 +208,7 @@
                 "start_line": 81
               }
             ],
+            "display_name": "def ImpossibleCombo.needs_docs.not_short()",
             "docstring": "",
             "full_name": "ImpossibleCombo.needs_docs.not_short",
             "index": 15,
@@ -205,6 +221,7 @@
           {
             "category": "class",
             "children": [],
+            "display_name": "class ImpossibleCombo.needs_docs.not_short.Long",
             "docstring": "",
             "full_name": "ImpossibleCombo.needs_docs.not_short.Long",
             "index": 16,
@@ -217,6 +234,7 @@
           {
             "category": "class",
             "children": [],
+            "display_name": "class ImpossibleCombo.needs_docs.not_short.Short",
             "docstring": "",
             "full_name": "ImpossibleCombo.needs_docs.not_short.Short",
             "index": 17,
@@ -227,6 +245,7 @@
             "start_line": 81
           }
         ],
+        "display_name": "def ImpossibleCombo.needs_docs()",
         "docstring": "",
         "full_name": "ImpossibleCombo.needs_docs",
         "index": 14,
@@ -242,6 +261,7 @@
           {
             "category": "class",
             "children": [],
+            "display_name": "class ImpossibleCombo.needs_docs.not_short.Long",
             "docstring": "",
             "full_name": "ImpossibleCombo.needs_docs.not_short.Long",
             "index": 16,
@@ -254,6 +274,7 @@
           {
             "category": "class",
             "children": [],
+            "display_name": "class ImpossibleCombo.needs_docs.not_short.Short",
             "docstring": "",
             "full_name": "ImpossibleCombo.needs_docs.not_short.Short",
             "index": 17,
@@ -264,6 +285,7 @@
             "start_line": 81
           }
         ],
+        "display_name": "def ImpossibleCombo.needs_docs.not_short()",
         "docstring": "",
         "full_name": "ImpossibleCombo.needs_docs.not_short",
         "index": 15,
@@ -276,6 +298,7 @@
       {
         "category": "class",
         "children": [],
+        "display_name": "class ImpossibleCombo.needs_docs.not_short.Long",
         "docstring": "",
         "full_name": "ImpossibleCombo.needs_docs.not_short.Long",
         "index": 16,
@@ -288,6 +311,7 @@
       {
         "category": "class",
         "children": [],
+        "display_name": "class ImpossibleCombo.needs_docs.not_short.Short",
         "docstring": "",
         "full_name": "ImpossibleCombo.needs_docs.not_short.Short",
         "index": 17,
@@ -298,6 +322,7 @@
         "start_line": 81
       }
     ],
+    "display_name": "class ImpossibleCombo",
     "docstring": "\"\"\"This docstring, while short, is enough\"\"\"",
     "full_name": "ImpossibleCombo",
     "index": 13,
@@ -313,6 +338,7 @@
       {
         "category": "def",
         "children": [],
+        "display_name": "def NotDocstring.short1()",
         "docstring": "",
         "full_name": "NotDocstring.short1",
         "index": 19,
@@ -325,6 +351,7 @@
       {
         "category": "def",
         "children": [],
+        "display_name": "def NotDocstring.short2()",
         "docstring": "",
         "full_name": "NotDocstring.short2",
         "index": 20,
@@ -337,6 +364,7 @@
       {
         "category": "def",
         "children": [],
+        "display_name": "def NotDocstring.short3()",
         "docstring": "",
         "full_name": "NotDocstring.short3",
         "index": 21,
@@ -347,6 +375,7 @@
         "start_line": 94
       }
     ],
+    "display_name": "class NotDocstring",
     "docstring": "",
     "full_name": "NotDocstring",
     "index": 18,
@@ -359,6 +388,7 @@
   {
     "category": "def",
     "children": [],
+    "display_name": "def long_with_omit()",
     "docstring": "",
     "full_name": "long_with_omit",
     "index": 22,
