@@ -49,6 +49,7 @@ LOG_TRACE_HANDLER: Optional["LazyTraceHandler"] = None
 
 GET_DTRACE_STRUCTURED = False
 
+
 @dataclass
 class LogRegistry:
     # shorthand name to log qualified name
@@ -984,7 +985,6 @@ def _init_logs(log_file_name=None):
     # Setup handler for the special trace_log, with different default
     # configuration
     trace_dir_name = os.environ.get(TRACE_ENV_VAR, None)
-
 
     if os.environ.get(DTRACE_ENV_VAR, None):
         GET_DTRACE_STRUCTURED = True
