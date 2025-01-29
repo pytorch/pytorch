@@ -1381,15 +1381,6 @@ class OutputGraph:
             with self.restore_global_state():
                 compiled_fn = self.call_user_compiler(gm)
 
-            torch._logging.trace_structured(
-                "artifact",
-                metadata_fn=lambda: {
-                    "name": "shape_env",
-                    "encoding": "json",
-                },
-                payload_fn=lambda: old_fake_mode.shape_env._jsonify_metadata(),
-            )
-
             from torch.fx._lazy_graph_module import _LazyGraphModule
 
             if isinstance(compiled_fn, _LazyGraphModule) or (
