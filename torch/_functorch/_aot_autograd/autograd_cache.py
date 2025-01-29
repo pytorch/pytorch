@@ -351,7 +351,7 @@ def initialize_cuda_on_backward():
 
             # TODO This is such a hacky way to initialize CUDA on the backward pass
             # Is there a cleaner way?
-            torch.empty(1, device="cuda", requires_grad=True).backward()
+            torch.empty(0, device="cuda", requires_grad=True).backward()
     return True
 
 
@@ -533,9 +533,9 @@ class AOTAutogradCacheEntry:
 
         compiled_fw_func = self.compiled_fw.load(args, fx_config)
         compiled_bw_func = None
-        initialize_cuda_on_backward()
 
         if self.compiled_bw is not None:
+            initialize_cuda_on_backward()
             compiled_bw_func = self.compiled_bw.load(args, fx_config)
             needs_autograd = True
             CompileEventLogger.try_add_pt2_compile(
