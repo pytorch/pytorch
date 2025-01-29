@@ -460,7 +460,13 @@ def test_subclasses(gm, inputs, **kwargs):
             )
         except Exception as ex:
             try:
-                # TODO: Print script with graph and inputs for repro
+                inputs_str = "["
+                for ti in test_inputs:
+                    if _is_tensor(ti):
+                        inputs_str += f"{type(ti)} {ti.dtype} {ti.shape} {ti.stride()} req_grad:{ti.requires_grad}"
+                    else:
+                        inputs_str += ti
+                inputs_str += "]"
                 repro_py = f"""
 import torch
 from torch import tensor
@@ -471,20 +477,14 @@ from torch.testing._internal.subclasses import (
 )
 from torch.testing._internal.two_tensor import TwoTensor
 from torch.nested._internal.nested_tensor import NestedTensor
-
-inputs = {[ti.detach() if _is_tensor(ti) else ti for ti in test_inputs]}
+inputs={inputs_str}
 {gm.print_readable(False)}
 gm = GraphModule()
 aot_eager(gm, inputs)"""
-
-                log.error(
-                    "test_subclasses error compiling\ninputs:%s\ntransform_seqs:%s\n---REPRO_BEGIN---%s\n---REPRO_END---\nexception:%s",
-                    test_inputs,
-                    transform_seqs,
-                    repro_py,
-                    "".join(traceback.format_exception(type(ex), ex, ex.__traceback__)),
-                )
-            except Exception as inner_ex:
+                error_str = f"test_subclasses error compiling\ninputs:{inputs_str}\ntransform_seqs:{transform_seqs}\n---REPRO_BEGIN---{repro_py}\n---REPRO_END---\nexception:%s"
+                error_str += "".join(traceback.format_exception(type(ex), ex, ex.__traceback__))
+                log.error(error_str)
+            except:
                 print(f"Error {inner_ex} during handling exception {ex} in 'test_subclasses' backend")
             raise ex
 
