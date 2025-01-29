@@ -39,7 +39,8 @@ PyObject* THCPModule_nccl_unique_id(PyObject* self, PyObject* args) {
 
 static torch::cuda::nccl::ncclComm_t unpack_nccl_comm(PyObject* capsule) {
   torch::cuda::nccl::ncclComm_t comm =
-      (torch::cuda::nccl::ncclComm_t)PyCapsule_GetPointer(capsule, COMM_CAPSULE_NAME);
+      (torch::cuda::nccl::ncclComm_t)PyCapsule_GetPointer(
+          capsule, COMM_CAPSULE_NAME);
   if (!comm)
     throw python_error();
   return comm;
@@ -72,7 +73,9 @@ static std::vector<std::optional<at::cuda::CUDAStream>> unpack_streams(
 static at::Tensor extract_tensor(PyObject* obj);
 static std::vector<at::Tensor> extract_tensors(PyObject* obj);
 
-static std::vector<torch::cuda::nccl::ncclComm_t> unpack_comms(PyObject* obj, size_t size) {
+static std::vector<torch::cuda::nccl::ncclComm_t> unpack_comms(
+    PyObject* obj,
+    size_t size) {
   if (obj == Py_None) {
     return std::vector<torch::cuda::nccl::ncclComm_t>();
   }
