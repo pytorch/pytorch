@@ -19,9 +19,10 @@ class _DDPBucketAssignment:
     tensor: torch.Tensor | None
 
 class _OverlapStatus(enum.IntEnum):
-    UNINITIALIZED: int = ...
-    DDP_HAS_REBUILT_BUCKETS: int = ...
-    INITIALIZED: int = ...
+    # Ignores needed to avoid mypy error 'enum members must be left unannotated'
+    UNINITIALIZED: int = ... # type: ignore[misc]
+    DDP_HAS_REBUILT_BUCKETS: int = ... # type: ignore[misc]
+    INITIALIZED: int = ... # type: ignore[misc]
 
 class _OverlapInfo:
     status: Any = ...
