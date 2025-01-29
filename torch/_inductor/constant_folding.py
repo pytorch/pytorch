@@ -51,9 +51,14 @@ def replace_node_with_constant(
         new_input_node.name = node.name
 
     if constant is not None:
+        from .freezing import in_freezing
+
         # needed to suppress `does not reference an nn.Module, nn.Parameter, or buffer` warning
         gm.register_buffer(qualname, constant)
         setattr(gm, qualname, constant)
+        # mark the constants created during freezing
+        if in_freezing():
+            setattr(constant, "_is_frozen_param", True)
 
 
 def is_const_source(

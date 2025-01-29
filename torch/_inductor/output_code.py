@@ -97,6 +97,10 @@ def has_frozen_params(gm: torch.fx.GraphModule) -> bool:
     return getattr(gm, "_has_frozen_params", False)
 
 
+def is_frozen_param(t: torch.Tensor) -> bool:
+    return getattr(t, "_is_frozen_param", False)
+
+
 # copy_ fails when trying to write to tensors with memory overlap,
 # for expanded dimensions (a dimension which used to have size 1 -> ?)
 # we can select one element from that dimension and write to it
@@ -368,7 +372,7 @@ class CompiledFxGraph(OutputCode):
             self.constants = {}
             self.frozen_param_names = {}
             for k, v in graph.constants.items():
-                if k.startswith("_frozen_param"):
+                if is_frozen_param(v):
                     self.frozen_param_names[k] = graph.allocated_constant_name[k]
                 else:
                     self.constants[k] = v

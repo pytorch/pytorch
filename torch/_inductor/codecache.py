@@ -66,7 +66,7 @@ from torch._inductor.cpp_builder import (
 )
 from torch._inductor.cpu_vec_isa import pick_vec_isa
 from torch._inductor.custom_graph_pass import CustomGraphPass, CustomGraphPassType
-from torch._inductor.output_code import has_frozen_params
+from torch._inductor.output_code import has_frozen_params, is_frozen_param
 from torch._inductor.runtime.compile_tasks import (
     _module_to_triton_kernel,
     _reload_python_module,
@@ -493,14 +493,6 @@ class FxGraphCachePickler(pickle.Pickler):
         self._stream = io.BytesIO()
         super().__init__(self._stream)
 
-        # To support caching when the graph has frozen params, we ignore the tensor values of
-        # the _non-inlined_ frozen constants.
-        self._frozen_params = OrderedSet(
-            [getattr(gm, attr) for attr in dir(gm) if attr.startswith("_frozen_param")]
-            if has_frozen_params(gm)
-            else []
-        )
-
         self.dispatch_table = copyreg.dispatch_table.copy()
         self.dispatch_table.update(
             {
@@ -547,9 +539,10 @@ class FxGraphCachePickler(pickle.Pickler):
             # support, we can remove this.
             raise BypassFxGraphCache("mkldnn tensors unpickleable")
 
-        # If this is a non-inlined frozen parameter, we consider the metadata only.
         metadata = extract_tensor_metadata_for_cache_key(t)
-        if t in self._frozen_params and not GraphLowering.can_inline_constant(t):
+
+        # If this is a non-inlined frozen parameter, we consider the metadata only.
+        if is_frozen_param(t) and not GraphLowering.can_inline_constant(t):
             return (_ident, (metadata,))
 
         # Very large tensors will be expensive to copy to cpu and hash. Let's at least

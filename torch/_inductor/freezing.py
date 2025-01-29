@@ -1,8 +1,10 @@
 # mypy: allow-untyped-defs
 from __future__ import annotations
 
+import contextlib
 import itertools
 import logging
+import threading
 import weakref
 from typing import Any, Optional
 
@@ -22,6 +24,27 @@ aten = torch.ops.aten
 prims = torch.ops.prims
 
 log = logging.getLogger(__name__)
+
+_TLS = threading.local()
+
+def in_freezing():
+    """
+    Return True when freezing is active.
+    """
+    return getattr(_TLS, "in_freezing", False)
+
+
+@contextlib.contextmanager
+def _mark_freezing():
+    """
+    Context mgr to designate when freezing active.
+    """
+    prev = in_freezing()
+    _TLS.in_freezing = True
+    try:
+        yield
+    finally:
+        _TLS.in_freezing = prev
 
 
 def replace_params_with_constants(
@@ -56,6 +79,7 @@ def replace_params_with_constants(
             preserved_arg_indices.append(i)
             continue
         replace_node_with_constant(gm, node, real_input)
+
     # add on non param inputs
     preserved_arg_indices.extend(range(len(flat_params), len(params)))
     # is this necessary ?
@@ -83,6 +107,15 @@ def freeze(
         Tuple[torch.fx.GraphModule, List[int]]: A tuple containing the frozen GraphModule and a list of indices
         of the inputs that were preserved (not turned into constants).
     """
+    with _mark_freezing():
+        return _freeze(dynamo_gm, aot_autograd_gm, example_inputs)
+
+
+def _freeze(
+    dynamo_gm: torch.fx.GraphModule,
+    aot_autograd_gm: torch.fx.GraphModule,
+    example_inputs: list[torch._subclasses.FakeTensor],
+) -> tuple[torch.fx.GraphModule, list[int]]:
     # We have convert conv's weight to channels last which may meet error for .view
     # when doing fake_tensor_prop. So we need to convert view to reshape first.
     # See the details in fx_codegen_and_compile of compile_fx.py.
