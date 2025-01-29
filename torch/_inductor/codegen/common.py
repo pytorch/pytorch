@@ -220,55 +220,55 @@ device_codegens: dict[str, DeviceCodegen] = {}
 
 
 class DeviceOpOverrides:
-    def import_get_raw_stream_as(self, name: str):
+    def import_get_raw_stream_as(self, name: str) -> str:
         raise NotImplementedError
 
     def set_device(self, device_idx: int) -> str:
         raise NotImplementedError
 
-    def synchronize(self):
+    def synchronize(self) -> str:
         raise NotImplementedError
 
     def device_guard(self, device_idx: int) -> str:
         raise NotImplementedError
 
-    def cpp_device_guard(self):
+    def cpp_device_guard(self) -> str:
         raise NotImplementedError
 
-    def cpp_aoti_device_guard(self):
+    def cpp_aoti_device_guard(self) -> str:
         raise NotImplementedError
 
-    def cpp_stream_guard(self):
+    def cpp_stream_guard(self) -> str:
         raise NotImplementedError
 
-    def cpp_aoti_stream_guard(self):
+    def cpp_aoti_stream_guard(self) -> str:
         raise NotImplementedError
 
-    def cpp_getStreamFromExternal(self):
+    def cpp_getStreamFromExternal(self) -> str:
         raise NotImplementedError
 
-    def kernel_header(self):
+    def kernel_header(self) -> str:
         raise NotImplementedError
 
-    def kernel_driver(self):
+    def kernel_driver(self) -> str:
         raise NotImplementedError
 
-    def abi_compatible_header(self):
+    def abi_compatible_header(self) -> str:
         raise NotImplementedError
 
-    def cpp_stream_type(self):
+    def cpp_stream_type(self) -> str:
         raise NotImplementedError
 
-    def aoti_get_stream(self):
+    def aoti_get_stream(self) -> str:
         raise NotImplementedError
 
-    def cpp_kernel_type(self):
+    def cpp_kernel_type(self) -> str:
         raise NotImplementedError
 
-    def cpp_device_ptr(self):
+    def cpp_device_ptr(self) -> str:
         raise NotImplementedError
 
-    def tma_descriptor_helpers(self):
+    def tma_descriptor_helpers(self) -> str:
         raise NotImplementedError
 
 
