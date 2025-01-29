@@ -1,6 +1,6 @@
 {
   "torch/_inductor/async_compile.py": {
-    "AsyncCompile": 186
+    "AsyncCompile": 220
   },
   "torch/_inductor/autoheuristic/artifacts/_MMRankingA100.py": {
     "MMRankingA100": 278,
@@ -42,7 +42,7 @@
     "CppKernelProxy.codegen_functions": 183,
     "CppKernelProxy.legalize_lowp_fp_dtype_loopbody": 141,
     "CppOverrides": 444,
-    "CppScheduling": 765,
+    "CppScheduling": 764,
     "CppScheduling.fuse": 81,
     "CppVecKernel": 803,
     "CppVecKernel.reduction": 186,
@@ -54,7 +54,7 @@
     "CppFlexAttentionTemplate": 318
   },
   "torch/_inductor/codegen/cpp_gemm_template.py": {
-    "CppGemmTemplate": 954,
+    "CppGemmTemplate": 955,
     "CppGemmTemplate.add_choices": 152,
     "CppGemmTemplate.get_options": 228
   },
@@ -79,16 +79,15 @@
     "CppWrapperCpu.codegen_reinterpret_view": 110,
     "CppWrapperCpu.generate_extern_kernel_args_decl_if_needed": 133,
     "CppWrapperCpu.generate_input_output_runtime_checks": 93,
-    "CppWrapperCpu.generate_py_arg": 105,
-    "CppWrapperCpu.val_to_arg_str": 83,
+    "CppWrapperCpu.generate_py_arg": 115,
+    "CppWrapperCpu.val_to_arg_str": 88,
     "CppWrapperCpu.write_header": 98,
-    "CppWrapperCpu.write_wrapper_decl": 138
+    "CppWrapperCpu.write_wrapper_decl": 149
   },
   "torch/_inductor/codegen/cpp_wrapper_cpu_array_ref.py": {
     "CppWrapperCpuArrayRef.codegen_reinterpret_view": 112,
     "CppWrapperCpuArrayRef.generate_return": 127,
-    "CppWrapperCpuArrayRef.val_to_arg_str": 88,
-    "CppWrapperCpuArrayRef.write_wrapper_decl": 202
+    "CppWrapperCpuArrayRef.write_wrapper_decl": 214
   },
   "torch/_inductor/codegen/cuda/cutlass_lib_extensions/gemm_operation_extensions.py": {
     "EmitGemmUniversal3xInstanceWithEVT.emit": 94
@@ -100,7 +99,7 @@
   },
   "torch/_inductor/codegen/cuda/gemm_template.py": {
     "CUTLASS2xGemmTemplate": 254,
-    "CUTLASS3xGemmTemplate": 307
+    "CUTLASS3xGemmTemplate": 309
   },
   "torch/_inductor/codegen/debug_utils.py": {
     "DebugPrinterManager": 224
@@ -112,8 +111,8 @@
     "HalidePrinter": 124
   },
   "torch/_inductor/codegen/mps.py": {
-    "MetalKernel": 126,
-    "MetalOverrides": 179
+    "MetalKernel": 124,
+    "MetalOverrides": 217
   },
   "torch/_inductor/codegen/rocm/ck_conv_template.py": {
     "CKGroupedConvFwdTemplate": 488,
@@ -126,34 +125,35 @@
     "ROCmBenchmarkRequest": 117
   },
   "torch/_inductor/codegen/simd.py": {
-    "IterationRangesRoot": 118,
-    "SIMDScheduling": 1043,
+    "IterationRangesRoot": 122,
+    "SIMDScheduling": 1039,
     "SIMDScheduling.candidate_tilings": 122,
     "SIMDScheduling.generate_node_schedule": 95
   },
   "torch/_inductor/codegen/triton.py": {
     "BlockPtrOptions": 272,
-    "TritonKernel": 2267,
-    "TritonKernel.codegen_kernel": 210,
+    "TritonKernel": 2290,
+    "TritonKernel.codegen_kernel": 218,
     "TritonKernel.codegen_kernel_benchmark": 104,
-    "TritonKernel.load": 118,
+    "TritonKernel.load": 123,
     "TritonKernel.reduction": 308,
     "TritonKernel.scan": 101,
     "TritonOverrides": 467,
     "TritonPrinter": 163,
-    "TritonScheduling": 382,
-    "TritonScheduling.benchmark_combo_kernel": 92,
-    "TritonScheduling.benchmark_fused_nodes": 82
+    "TritonScheduling": 391,
+    "TritonScheduling.benchmark_codegened_module": 81,
+    "TritonScheduling.benchmark_combo_kernel": 92
   },
   "torch/_inductor/codegen/triton_combo_kernel.py": {
-    "ComboKernel": 954,
+    "ComboKernel": 957,
     "ComboKernel.codegen_kernel_benchmark": 117
   },
   "torch/_inductor/codegen/triton_split_scan.py": {
     "TritonSplitScanKernel.scan": 113
   },
   "torch/_inductor/codegen/wrapper.py": {
-    "PythonWrapperCodegen.define_user_defined_triton_kernel": 155,
+    "PythonWrapperCodegen.define_user_defined_triton_kernel": 177,
+    "PythonWrapperCodegen.generate_example_arg_value": 82,
     "user_defined_kernel_grid_fn_code": 82
   },
   "torch/_inductor/comm_lowering.py": {
@@ -169,7 +169,7 @@
   },
   "torch/_inductor/config.py": {
     "cpp": 107,
-    "triton": 162
+    "triton": 161
   },
   "torch/_inductor/constant_folding.py": {
     "ConstantFolder": 215,
@@ -216,9 +216,9 @@
     "FakeTensorUpdater.incremental_update": 100
   },
   "torch/_inductor/graph.py": {
-    "GraphLowering": 1783,
+    "GraphLowering": 1819,
     "GraphLowering.output": 84,
-    "GraphLowering.run_node": 370
+    "GraphLowering.run_node": 378
   },
   "torch/_inductor/ir.py": {
     "Buffer": 118,
@@ -228,19 +228,20 @@
     "ExternKernel": 734,
     "ExternKernel.process_kernel": 87,
     "ExternKernel.require_strides": 120,
-    "FallbackKernel": 489,
+    "FallbackKernel": 468,
     "FlexibleLayout": 139,
     "IRNode": 243,
     "Layout": 202,
     "Loops": 127,
-    "Reduction": 682,
+    "Reduction": 686,
     "Reduction.create": 135,
-    "Reduction.num_splits": 148,
+    "Reduction.num_splits": 152,
     "Scan": 191,
     "Scan.create": 81,
     "Sort": 144,
-    "UserDefinedTritonKernel": 178,
-    "View": 146,
+    "UserDefinedTritonKernel": 183,
+    "UserDefinedTritonKernel.codegen": 85,
+    "View": 149,
     "WelfordReduction": 271,
     "WelfordReduction.create": 109,
     "WhileLoop": 133,
@@ -253,12 +254,12 @@
     "convolution": 231
   },
   "torch/_inductor/kernel/flex_attention.py": {
-    "flex_attention": 273,
-    "flex_attention_backward": 311,
-    "lower_cpu": 188
+    "flex_attention": 275,
+    "flex_attention_backward": 314,
+    "lower_cpu": 187
   },
   "torch/_inductor/kernel/flex_decoding.py": {
-    "create_flex_decoding_kernel": 279
+    "create_flex_decoding_kernel": 287
   },
   "torch/_inductor/kernel/mm.py": {
     "tuned_addmm": 167,
@@ -283,7 +284,7 @@
     "MkldnnRnnLayer": 111
   },
   "torch/_inductor/mkldnn_lowerings.py": {
-    "register_onednn_fusion_ops": 1078
+    "register_onednn_fusion_ops": 1117
   },
   "torch/_inductor/mock_cache.py": {
     "PatchCaches": 108
@@ -295,29 +296,30 @@
   "torch/_inductor/runtime/autotune_cache.py": {
     "AutotuneCache": 125
   },
-  "torch/_inductor/runtime/triton_heuristics.py": {
-    "CachingAutotuner.precompile": 130
+  "torch/_inductor/runtime/benchmarking.py": {
+    "InductorBenchmarker": 111
   },
   "torch/_inductor/scheduler.py": {
     "BaseSchedulerNode": 645,
-    "BaseScheduling": 117,
-    "Scheduler": 2008,
+    "BaseScheduling": 139,
+    "Scheduler": 2170,
+    "SchedulerBuffer": 103,
     "SchedulerNode": 254
   },
   "torch/_inductor/select_algorithm.py": {
-    "AlgorithmSelectorCache": 631,
+    "AlgorithmSelectorCache": 651,
     "AlgorithmSelectorCache.log_results": 88,
     "AlgorithmSelectorCache.make_benchmark_fn[2]": 145,
-    "TritonTemplate": 194,
+    "TritonTemplate": 202,
     "TritonTemplateKernel": 743
   },
   "torch/_inductor/sizevars.py": {
-    "SizeVarAllocator": 772
+    "SizeVarAllocator": 778
   },
   "torch/_inductor/utils.py": {
     "IndentedBuffer": 128
   },
   "torch/_inductor/wrapper_benchmark.py": {
-    "parse_profile_event_list": 107
+    "parse_profile_event_list": 114
   }
 }
