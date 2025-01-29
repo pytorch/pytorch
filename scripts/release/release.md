@@ -182,6 +182,10 @@ The PyTorch binaries shipped with CUDA 12.6.3 are built with CXX11_ABI=1 and are
 
 
 ## **Deprecations**
+
+### Inductor
+* Deprecate TORCHINDUCTOR_STACK_ALLOCATION ([#139147](https://github.com/pytorch/pytorch/pull/139147)). Instead of setting TORCHINDUCTOR_STACK_ALLOCATION, update your torch.compile call: `torch.compile(options={"aot_inductor.allow_stack_allocation": True})(foo)`.
+
 ### Releng
 
 ### Removed CUDA 12.1 support in CI/CD ([#141271](https://github.com/pytorch/pytorch/pull/141271)) ([#142177](https://github.com/pytorch/pytorch/pull/142177))
