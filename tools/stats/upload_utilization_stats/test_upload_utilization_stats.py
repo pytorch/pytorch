@@ -194,3 +194,12 @@ def get_base_test_records() -> list[UtilizationRecord]:
 
 if __name__ == "__main__":
     unittest.main()
+
+
+
+def getTimestampStr(timestamp: float) -> str:
+    return f"{timestamp:.0f}"
+
+def getCurrentTimestampStr() -> str:
+    timestamp_now =  datetime.now().timestamp()
+    return getTimestampStr(timestamp_now)

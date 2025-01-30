@@ -2,7 +2,7 @@ from dataclasses import dataclass, field
 from typing import Optional
 
 from dataclasses_json import DataClassJsonMixin
-from datetime import datetime
+
 
 _DATA_MODEL_VERSION = 1.0
 
@@ -23,7 +23,7 @@ class UtilizationMetadata(DataClassJsonMixin):
     job_name: str
     usage_collect_interval: float
     data_model_version: float
-    start_at: str
+    start_at: float
     gpu_count: Optional[int] = None
     cpu_count: Optional[int] = None
     gpu_type: Optional[str] = None
@@ -47,7 +47,7 @@ class RecordData(DataClassJsonMixin):
 @dataclass
 class UtilizationRecord(DataClassJsonMixin):
     level: str
-    timestamp: str
+    timestamp: float
     data: Optional[RecordData] = None
     cmd_names: Optional[list[str]] = None
     error: Optional[str] = None
@@ -105,14 +105,6 @@ class OssCiUtilizationTimeSeriesV1:
 def getDataModelVersion() -> float:
     return _DATA_MODEL_VERSION
 
-def getTimestampStr(timestamp: float) -> str:
-    return f"{timestamp:.0f}"
-
-def getCurrentTimestampStr() -> str:
-    timestamp_now =  datetime.now().timestamp()
-    return getTimestampStr(timestamp_now)
-
-
 @dataclass
 class WorkflowInfo:
     workflow_run_id: int
@@ -121,3 +113,4 @@ class WorkflowInfo:
     run_attempt: int
     job_name: str
     repo: str = "pytorch/pytorch"
+
