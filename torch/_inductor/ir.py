@@ -6817,6 +6817,7 @@ class MultiOutput(ExternKernel):
             self.get_name(),
             self.codegen_list_tuple_access(self.inputs[0].get_name(), self.indices),
         )
+        self.codegen_size_asserts(wrapper)
 
     def __init__(self, layout: OutputSpec, input, indices: list[tuple[Any, ...]]) -> None:  # type: ignore[no-untyped-def]
         super().__init__(None, layout, [input], ())
