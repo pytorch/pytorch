@@ -821,8 +821,6 @@ def mps_ops_modifier(ops):
         'nn.functional.adaptive_avg_pool2d': None,
 
         # Unsupported dtypes
-        # bmm is not supported for integral types
-        'nn.functional.bilinear': [torch.int16, torch.int32, torch.int64, torch.uint8, torch.int8],
         'ones_like': None,
         'zeros_like': None,
 
@@ -849,8 +847,6 @@ def mps_ops_modifier(ops):
         'addbmm': [torch.int16, torch.int32, torch.int64, torch.uint8, torch.int8],
         'addmm': [torch.int16, torch.int32, torch.int64, torch.uint8, torch.int8],
         'baddbmm': [torch.int16, torch.int32, torch.int64, torch.uint8, torch.int8],
-        'bmm': [torch.int16, torch.int32, torch.int64, torch.uint8, torch.int8],
-        'einsum': [torch.int16, torch.int32, torch.int64, torch.uint8, torch.int8],
         'mat': [torch.int16, torch.int32, torch.int64, torch.uint8, torch.int8],
         'unravel_index': [torch.int32, torch.int64],
 
@@ -12431,7 +12427,6 @@ class TestConsistency(TestCaseMPS):
                 # As MPS compute scales in floats, but CPU always used doubles, which results
                 # in slight numerical differences
                 atol, rtol = 1, 0
-            import pdb; pdb.set_trace()
             self.assertEqual(cpu_out, mps_out, atol=atol, rtol=rtol)
 
 

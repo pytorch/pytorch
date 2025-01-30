@@ -47,12 +47,12 @@ kernel void naive_bmm(
     uint thread_index [[thread_position_in_grid]]) {
   uint b = thread_index / (sizes.x * sizes.z);
   uint boffs = thread_index % (sizes.x * sizes.z);
-  uint y = boffs / sizes.x;
-  uint x = boffs % sizes.x;
+  uint y = boffs / sizes.z;
+  uint x = boffs % sizes.z;
   auto rc = dot_product(
-      mat1Data + b * strides[2] + x * strides[0],
-      mat2Data + b * strides[5] + y * strides[4],
-      ulong2(strides[1], strides[3]),
+      mat1Data + b * strides[2] + y * strides[1],
+      mat2Data + b * strides[5] + x * strides[3],
+      ulong2(strides[0], strides[4]),
       sizes.y);
   outputData[b * strides[8] + x * strides[6] + y * strides[7]] = static_cast<T>(rc);
 }
@@ -356,3 +356,6 @@ INSTANTIATE_NAIVE_MM(char);
 INSTANTIATE_NAIVE_MM(uchar);
 INSTANTIATE_NAIVE_BMM(short);
 INSTANTIATE_NAIVE_BMM(int);
+INSTANTIATE_NAIVE_BMM(long);
+INSTANTIATE_NAIVE_BMM(char);
+INSTANTIATE_NAIVE_BMM(uchar);
