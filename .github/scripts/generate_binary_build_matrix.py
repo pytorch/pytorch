@@ -263,9 +263,6 @@ def generate_libtorch_matrix(
         if os == "linux":
             arches += CUDA_ARCHES
             arches += ROCM_ARCHES
-            # skip CUDA 12.8 libtorch builds due to failure
-            if "12.8" in arches:
-                arches.remove("12.8")
         elif os == "windows":
             arches += CUDA_ARCHES
             # skip CUDA 12.8 builds on Windows
@@ -458,6 +455,7 @@ def generate_wheels_matrix(
                 )
 
     return ret
+
 
 validate_nccl_dep_consistency("12.8")
 validate_nccl_dep_consistency("12.6")
