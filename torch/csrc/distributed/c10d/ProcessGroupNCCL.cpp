@@ -20,6 +20,7 @@
 #include <c10/util/WaitCounter.h>
 #include <c10/util/irange.h>
 #include <c10/util/thread_name.h>
+#include <torch/csrc/cuda/CUDAPluggableAllocator.h>
 #include <torch/csrc/cuda/nccl.h>
 #include <torch/csrc/distributed/c10d/FlightRecorder.hpp>
 #include <torch/csrc/distributed/c10d/NCCLUtils.hpp>
@@ -417,6 +418,7 @@ static std::future<bool> launchAsyncGilCheck() {
 
     try {
       auto& gil_checker = get_gil_checker();
+      // NOLINTNEXTLINE(clang-analyzer-core*)
       promise.set_value((*gil_checker)());
     } catch (...) {
       promise.set_exception(std::current_exception());
@@ -1172,7 +1174,9 @@ void ProcessGroupNCCL::registerMemPool(c10::cuda::MemPool* pool) {
         segmentInfo.device == pool->device(),
         "Mismatch between CUDA memory segment device and pool's device");
     ncclComm->registerSegment(
-        reinterpret_cast<void*>(segmentInfo.address), segmentInfo.total_size);
+        // NOLINTNEXTLINE(performance-no-int-to-ptr)
+        reinterpret_cast<void*>(segmentInfo.address),
+        segmentInfo.total_size);
   }
 }
 
@@ -1198,6 +1202,7 @@ void ProcessGroupNCCL::deregisterMemPool(c10::cuda::MemPool* pool) {
     TORCH_INTERNAL_ASSERT(
         segmentInfo.device == pool->device(),
         "Mismatch between CUDA memory segment device and pool's device");
+    // NOLINTNEXTLINE(performance-no-int-to-ptr)
     ncclComm->deregisterSegment(reinterpret_cast<void*>(segmentInfo.address));
   }
 }
@@ -1482,42 +1487,39 @@ void ProcessGroupNCCL::shutdown() {
 ProcessGroupNCCL::~ProcessGroupNCCL() {
   LOG(INFO) << logPrefix() << "ProcessGroupNCCL destructor entered.";
 
-  if (terminateProcessGroup_.load())
-    // `shutdown()` or `abort` already called. Skip the favor of disposing
-    // communicators.
-    goto join_threads;
+  // `shutdown()` or `abort` already called. Skip the favor of disposing
+  // communicators.
+  if (!terminateProcessGroup_.load()) {
+    // If user haven't explicitly destroy/shutdown process group, destructor
+    // needs to do so
+    // First print warning on first rank of each node
+    if (rank_ % localDeviceCount_ == 0) {
+      TORCH_WARN_ONCE(
+          "WARNING: destroy_process_group() was not called before program exit, "
+          "which can leak resources. For more info, please see "
+          "https://pytorch.org/docs/stable/distributed.html#shutdown");
+    }
 
-  // If user haven't explicitly destroy/shutdown process group, destructor
-  // needs to do so
-  // First print warning on first rank of each node
-  if (rank_ % localDeviceCount_ == 0) {
-    TORCH_WARN_ONCE(
-        "WARNING: destroy_process_group() was not called before program exit, "
-        "which can leak resources. For more info, please see "
-        "https://pytorch.org/docs/stable/distributed.html#shutdown");
+    // Note 1: in distributed_c10d.py, a reference to PG is held by the global
+    // context. Therefore, we are here only when the global context is tearing
+    // down, which means the entire program is exiting.  At this point, user
+    // will no longer care about the result of any collective, thus we can use
+    // abort instead of destroy to make the destruction non-blocking.
+
+    // TODO: Note 1 is not true in case of a C++ program using libtorch, which
+    // does not have the global context mentioned. In that case, calling
+    // `abort()` here could lead to corrupted result. We should consider not
+    // doing anything and just let things leak. Adversarial example:
+    /*
+      Work routine(Tensor& t) {
+        pg = ProcessGroupNCCL(…);
+        w = pg.allReduce(t);
+        return w;
+      }
+    */
+    abort();
   }
 
-  // Note 1: in distributed_c10d.py, a reference to PG is held by the global
-  // context. Therefore, we are here only when the global context is tearing
-  // down, which means the entire program is exiting.  At this point, user will
-  // no longer care about the result of any collective, thus we can use abort
-  // instead of destroy to make the destruction non-blocking.
-
-  // TODO: Note 1 is not true in case of a C++ program using libtorch, which
-  // does not have the global context mentioned. In that case, calling `abort()`
-  // here could lead to corrupted result. We should consider not doing anything
-  // and just let things leak.
-  // Adversarial example:
-  /*
-    Work routine(Tensor& t) {
-      pg = ProcessGroupNCCL(…);
-      w = pg.allReduce(t);
-      return w;
-    }
-  */
-  abort();
-
-join_threads:
   // Make sure we've told threads to stop; doesn't hurt if we'd done so before.
   // Tell watchdog and onCompletionHook:
   terminateProcessGroup_.store(true);
@@ -1940,7 +1942,7 @@ void ProcessGroupNCCL::DesyncDebugger::init(
     c10::intrusive_ptr<Store> store) {
   rank_ = rank;
   size_ = size;
-  store_ = store;
+  store_ = std::move(store);
   enabled_ = true;
   traceKeyStart_ = getTraceStartKey("NCCL", rank);
   traceKeyEnd_ = getTraceEndKey("NCCL", rank);
@@ -4631,10 +4633,11 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::barrier(const BarrierOptions& opts) {
   if (!opts.device_ids.empty()) {
     // Use the first device id because PG NCCL is single-device now
     barDevIdx = static_cast<c10::DeviceIndex>(opts.device_ids[0]);
-  } else if (getBoundDeviceId()) {
+  } else if (getBoundDeviceId().has_value()) {
     // 2nd choice: Use the bound GPU device id if available.
     // Bounded device id can be passed to `init_process_group`.
-    barDevIdx = (*getBoundDeviceId()).index();
+    // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
+    barDevIdx = getBoundDeviceId().value().index();
   } else if (!usedDeviceIdxs_.empty()) {
     // 3rd choice: infer the device id from the used device ids.
     barDevIdx = *usedDeviceIdxs_.begin();
@@ -5245,6 +5248,47 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::_allgather_base(
       OpType::_ALLGATHER_BASE,
       "nccl:_all_gather_base",
       avoidRecordStreams);
+}
+
+// Create a memory allocator for NCCL. This allocator is used to allocate memory
+// that supports NVLink Sharp functionality. This allocator is later pybinded to
+// python, so that users can use it to create MemPool. For example:
+// >>> pool = torch.cuda.MemPool(backend.mem_allocator)
+
+// Allocate function
+static void* _ncclMemAlloc(size_t size, int device, void* stream) {
+#ifndef NCCL_HAS_MEM_ALLOC
+  TORCH_CHECK(
+      false, "NCCL mem allocator is not supported in this NCCL version");
+#endif // NCCL_HAS_MEM_ALLOC
+
+  LOG(INFO) << "NCCL mem allocator: allocating " << size << " bytes";
+  at::cuda::OptionalCUDAGuard gpuGuard(device);
+  void* ptr = nullptr;
+  TORCH_CHECK(ncclMemAlloc(&ptr, size) == ncclSuccess, "ncclMemAlloc failed");
+  return ptr;
+}
+
+// Free function
+static void _ncclMemFree(void* ptr, size_t size, int device, void* stream) {
+#ifndef NCCL_HAS_MEM_ALLOC
+  TORCH_CHECK(
+      false, "NCCL mem allocator is not supported in this NCCL version");
+#endif // NCCL_HAS_MEM_ALLOC
+
+  LOG(INFO) << "NCCL mem allocator: freeing " << size << " bytes";
+  at::cuda::OptionalCUDAGuard gpuGuard(device);
+  TORCH_CHECK(ncclMemFree(ptr) == ncclSuccess, "ncclMemFree failed");
+}
+
+// Create a `CUDAPluggableAllocator` that uses the above functions.
+std::shared_ptr<c10::Allocator> ProcessGroupNCCL::getMemAllocator() {
+  C10_LOG_API_USAGE_ONCE("ProcessGroupNCCL.getMemAllocator");
+  static std::shared_ptr<c10::cuda::CUDACachingAllocator::CUDAAllocator>
+      ncclMemAllocator =
+          torch::cuda::CUDAPluggableAllocator::createCustomAllocator(
+              _ncclMemAlloc, _ncclMemFree);
+  return ncclMemAllocator;
 }
 
 } // namespace c10d

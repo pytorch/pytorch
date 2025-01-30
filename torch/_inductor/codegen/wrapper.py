@@ -46,6 +46,7 @@ from ..utils import (
 )
 from ..virtualized import V
 from .common import (
+    ArgName,
     CodeGen,
     DeferredLine,
     IndentedBuffer,
@@ -719,7 +720,8 @@ class PythonWrapperCodegen(CodeGen):
 
         # intermediate tensor value printing utility
         self.debug_printer = DebugPrinterManager(
-            debug_printer_level=config.aot_inductor.debug_intermediate_value_printer
+            debug_printer_level=config.aot_inductor.debug_intermediate_value_printer,
+            use_array_ref=config.aot_inductor.allow_stack_allocation,
         )
 
         # Additional files that are dependent to the wrapper (ex. cubin files)
@@ -1657,7 +1659,7 @@ class PythonWrapperCodegen(CodeGen):
             signature,
             size_dtype=None,  # try to infer based on symints
             indices=non_constant_indices,
-            argdefs=kernel.arg_names,
+            argdefs=[ArgName(x) for x in kernel.arg_names],
         )
         triton_meta: dict[str, Any] = {
             "signature": triton_signature,
