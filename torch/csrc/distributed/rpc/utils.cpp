@@ -316,7 +316,7 @@ parseWireSections(const void* data, size_t data_size) {
 
 static const char* kMeta = "meta";
 static const char* kPayload = "payload";
-}; // namespace
+} // namespace
 
 c10::List<at::Tensor> cloneSparseTensors(
     const std::vector<at::Tensor>& tensors) {

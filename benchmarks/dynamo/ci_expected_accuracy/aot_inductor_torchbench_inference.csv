@@ -278,7 +278,7 @@ resnext50_32x4d,pass,0
 
 
 
-sam,fail_to_run,0
+sam,pass,0
 
 
 
@@ -346,4 +346,4 @@ vision_maskrcnn,fail_to_run,0
 
 
 
-yolov3,fail_to_run,0
+yolov3,pass,0

@@ -519,7 +519,7 @@ __global__ void GammaBetaBackwardSimpleCUDAKernel(
     const T_ACC* rstd,
     T* dg,
     T* db) {
-  const int64_t j = blockIdx.x * blockDim.x + threadIdx.x;
+  const int64_t j = ((int64_t) blockIdx.x) * blockDim.x + threadIdx.x;
   if (j < N) {
     T_ACC sum1 = 0;
     T_ACC sum2 = 0;
@@ -562,7 +562,7 @@ __global__ void GammaBetaBackwardCUDAKernel_32x32(
   T_ACC dg_sum = 0;
   T_ACC db_sum = 0;
 
-  const int64_t j = blockIdx.x * blockDim.x + threadIdx.x;
+  const int64_t j = ((int64_t) blockIdx.x) * blockDim.x + threadIdx.x;
 
   if (j < N) {
     constexpr int unroll_factor = 8;
@@ -659,7 +659,7 @@ __global__ void GammaBetaBackwardCUDAKernel(
   T_ACC* s_dg;
   T_ACC* s_db;
 
-  const int64_t j = blockIdx.x * blockDim.x + threadIdx.x;
+  const int64_t j = ((int64_t) blockIdx.x) * blockDim.x + threadIdx.x;
 
   T_ACC dg_sum = 0;
   T_ACC db_sum = 0;
@@ -745,12 +745,49 @@ void launch_vectorized_layer_norm_kernel(
     auto stream = at::cuda::getCurrentCUDAStream().stream();
     const int warp_size = at::cuda::warp_size();
     const dim3 threads(warp_size, num_threads() / warp_size, 1);
-    const dim3 blocks(M);
+    dim3 blocks(M);
+
+#ifdef USE_ROCM
+    uint64_t workgroupSize = static_cast<uint64_t>(blocks.x) * static_cast<uint64_t>(threads.x);
+    // this caused invalid configuration problem
+    if (workgroupSize > std::numeric_limits<uint32_t>::max()) {
+      // Fix invalid configuration https://github.com/pytorch/pytorch/issues/136291
+      blocks.x = std::numeric_limits<uint32_t>::max() / threads.x;
+    }
+#endif
+
     TORCH_INTERNAL_ASSERT_DEBUG_ONLY(threads.y % 2 == 0 || threads.y == 1);
     int nshared = threads.y > 1 ? threads.y * 3/2 *sizeof(T_ACC) : 0;
     vectorized_layer_norm_kernel<<<blocks, threads, nshared, stream>>>(N, eps, X_data,
     gamma_data, beta_data, mean_data, rstd_data, Y_data);
     C10_CUDA_KERNEL_LAUNCH_CHECK();
+
+#ifdef USE_ROCM
+    // the blocks.x contains the max grid x dimention without invalid configuration error
+    // Fix invalid configuration https://github.com/pytorch/pytorch/issues/136291
+    // Ensure all elements are processed. Prepare for next round
+    int64_t remaining = M - blocks.x;
+    const T* X_data2 = X_data;
+    T_ACC* mean_data2 = mean_data;
+    T_ACC* rstd_data2 = rstd_data;
+    T* Y_data2 = Y_data;
+
+    while (remaining > 0) {
+      X_data2 += N * blocks.x;
+      mean_data2 += blocks.x;
+      rstd_data2 += blocks.x;
+      Y_data2 += N * blocks.x;
+
+      blocks.x = (remaining > blocks.x) ? blocks.x : remaining;
+
+      vectorized_layer_norm_kernel<<<blocks, threads, nshared, stream>>>(N, eps, X_data2,
+        gamma_data, beta_data, mean_data2, rstd_data2, Y_data2);
+      C10_CUDA_KERNEL_LAUNCH_CHECK();
+
+      remaining -= blocks.x;
+    }
+#endif
+
 }
 
 template <typename T, typename T_ACC>
@@ -840,8 +877,8 @@ void cuLoadWriteStridedInputs(
 {
   int i1 = i1_block+thr_load_row_off;
   if (i1 < i1_end) {
-    T curr_mean = mean[i1];
-    T curr_rstd = rstd[i1];
+    T_ACC curr_mean = mean[i1];
+    T_ACC curr_rstd = rstd[i1];
     for (int k = 0;  k < blockDim.y;  ++k) {
       int i2 = i2_off + k;
       int load_idx = i1*N+i2;
@@ -1374,7 +1411,7 @@ std::tuple<Tensor, Tensor, Tensor> layer_norm_cuda(
   for (const auto idx: c10::irange(axis)) {
     stat_shape.push_back(input_shape[idx]);
   }
-  for (const auto C10_UNUSED idx: c10::irange(axis, input.dim())) {
+  for ([[maybe_unused]] const auto idx : c10::irange(axis, input.dim())) {
     stat_shape.push_back(1);
   }
 
@@ -1459,7 +1496,7 @@ std::tuple<Tensor, Tensor, Tensor> layer_norm_backward_cuda(
   return std::make_tuple(std::move(dX), std::move(dgamma), std::move(dbeta));
 }
 
-REGISTER_DISPATCH(LayerNormKernel, &LayerNormKernelImpl);
-REGISTER_DISPATCH(LayerNormBackwardKernel, &LayerNormBackwardKernelImpl);
+REGISTER_DISPATCH(LayerNormKernel, &LayerNormKernelImpl)
+REGISTER_DISPATCH(LayerNormBackwardKernel, &LayerNormBackwardKernelImpl)
 
 } // namespace at::native

@@ -1,95 +1,21 @@
 # Owner(s): ["oncall: distributed"]
 
-import sys
 
-import test_c10d_spawn
 from test_c10d_spawn import _torch_dist_nn_available, TestDistributedNNFunctions
 
 import torch
 import torch.distributed as c10d
-from torch.testing._internal.common_cuda import TEST_MULTIGPU
 from torch.testing._internal.common_distributed import requires_nccl, skip_if_lt_x_gpu
 from torch.testing._internal.common_utils import (
     run_tests,
     skip_but_pass_in_sandcastle_if,
     TEST_WITH_DEV_DBG_ASAN,
-    TestCase,
 )
 
 
 NO_NCCL = not hasattr(c10d, "ProcessGroupNCCL")
 
 # Fails on Python-3.9, see https://github.com/pytorch/pytorch/issues/51619
-if sys.version_info < (3, 9):
-
-    class ProcessGroupShareTensorTest(
-        test_c10d_spawn.AbstractProcessGroupShareTensorTest, TestCase
-    ):
-        @classmethod
-        def _init_pg_nccl(cls, rank, filename, world_size):
-            store = c10d.FileStore(filename, world_size)
-            return c10d.ProcessGroupNCCL(store, rank, world_size)
-
-        @skip_but_pass_in_sandcastle_if(
-            not TEST_MULTIGPU, "At least 2 CUDA GPUS needed"
-        )
-        @skip_but_pass_in_sandcastle_if(NO_NCCL, "NCCL needed")
-        def test_shared_broadcast_nccl(self):
-            self._test_multiprocess(
-                ProcessGroupShareTensorTest._test_broadcast_process,
-                [torch.ones(2, 2).to(i) * i for i in range(self.world_size)],
-                ProcessGroupShareTensorTest._init_pg_nccl,
-                1,
-            )
-
-        @skip_but_pass_in_sandcastle_if(
-            not TEST_MULTIGPU, "At least 2 CUDA GPUS needed"
-        )
-        @skip_but_pass_in_sandcastle_if(NO_NCCL, "NCCL needed")
-        def test_shared_allreduce_nccl(self):
-            self._test_multiprocess(
-                ProcessGroupShareTensorTest._test_allreduce_process,
-                [torch.ones(2, 2).to(i) for i in range(self.world_size)],
-                ProcessGroupShareTensorTest._init_pg_nccl,
-                1,
-            )
-
-        @classmethod
-        def _test_reduce_process(
-            cls, rank, filename, shared_tensors, world_size, init_pg, c2p, p2c
-        ):
-            pg = init_pg(rank, filename, world_size)
-            x = shared_tensors[rank]
-            pg.reduce(x, root=0, op=c10d.ReduceOp.SUM).wait()
-            if rank == 0:
-                c2p.put((rank, torch.ones(2, 2) * 2, x.to("cpu")))
-            else:
-                c2p.put((rank, torch.ones(2, 2), x.to("cpu")))
-            p2c.get()
-
-        @skip_but_pass_in_sandcastle_if(
-            not TEST_MULTIGPU, "At least 2 CUDA GPUS needed"
-        )
-        @skip_but_pass_in_sandcastle_if(NO_NCCL, "NCCL needed")
-        def test_shared_reduce_nccl(self):
-            self._test_multiprocess(
-                ProcessGroupShareTensorTest._test_reduce_process,
-                [torch.ones(2, 2).to(i) for i in range(self.world_size)],
-                ProcessGroupShareTensorTest._init_pg_nccl,
-                1,
-            )
-
-        @skip_but_pass_in_sandcastle_if(
-            not TEST_MULTIGPU, "At least 2 CUDA GPUS needed"
-        )
-        @skip_but_pass_in_sandcastle_if(NO_NCCL, "NCCL needed")
-        def test_shared_allgather_nccl(self):
-            self._test_multiprocess(
-                ProcessGroupShareTensorTest._test_allgather_process,
-                [torch.ones(2, 2).to(i) * i for i in range(self.world_size)],
-                ProcessGroupShareTensorTest._init_pg_nccl,
-                self.world_size,
-            )
 
 
 # Skip dev-asan as torch + multiprocessing spawn have known issues
@@ -207,6 +133,34 @@ if not TEST_WITH_DEV_DBG_ASAN:
             y = torch.empty(5, 5, device=device)
 
             y = torch.distributed.nn.reduce_scatter(y, [x0, x1])
+            NonContiguousGrad.apply(y).sum().backward()
+
+        @requires_nccl()
+        @skip_if_lt_x_gpu(2)
+        @skip_but_pass_in_sandcastle_if(
+            not _torch_dist_nn_available, "torch.distributed.nn is not available"
+        )
+        def test_all_reduce_non_contiguous(self):
+            store = c10d.FileStore(self.file_name, self.world_size)
+            # This is required because these functions calls directly to the .dist and needs
+            # the world to be initialized
+            c10d.init_process_group(
+                store=store, rank=self.rank, world_size=self.world_size, backend="nccl"
+            )
+            device = torch.device(f"cuda:{self.rank}")
+
+            class NonContiguousGrad(torch.autograd.Function):
+                @staticmethod
+                def forward(ctx, input):
+                    return input
+
+                @staticmethod
+                def backward(ctx, grad_output):
+                    # Make grad non-contiguous
+                    return grad_output.clone().transpose(0, 1)
+
+            x = torch.rand(5, 5, device=device, requires_grad=True)
+            y = torch.distributed.nn.all_reduce(x)
             NonContiguousGrad.apply(y).sum().backward()
 
         @requires_nccl()

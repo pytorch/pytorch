@@ -205,6 +205,10 @@ class C10_API WarningHandlerGuard {
       : prev_handler_(c10::WarningUtils::get_warning_handler()) {
     c10::WarningUtils::set_warning_handler(new_handler);
   }
+  WarningHandlerGuard(WarningHandlerGuard&& other) = delete;
+  WarningHandlerGuard(const WarningHandlerGuard&) = delete;
+  WarningHandlerGuard& operator=(const WarningHandlerGuard&) = delete;
+  WarningHandlerGuard& operator=(WarningHandlerGuard&&) = delete;
   ~WarningHandlerGuard() {
     c10::WarningUtils::set_warning_handler(prev_handler_);
   }
@@ -282,6 +286,12 @@ class C10_API LinAlgError : public Error {
 };
 
 class C10_API OutOfMemoryError : public Error {
+  using Error::Error;
+};
+
+// Used for handling syntacitc erros in input arguments.
+// They shuld turn into SytnaxError when the cross into Python
+class C10_API SyntaxError : public Error {
   using Error::Error;
 };
 
@@ -658,12 +668,12 @@ namespace c10::detail {
 // Report a warning to the user only once.  Accepts an arbitrary number of extra
 // arguments which are concatenated into the warning message using operator<<
 //
-#define _TORCH_WARN_ONCE(...)                                             \
-  C10_UNUSED static const auto C10_ANONYMOUS_VARIABLE(torch_warn_once_) = \
-      [&] {                                                               \
-        TORCH_WARN(__VA_ARGS__);                                          \
-        return true;                                                      \
-      }()
+#define _TORCH_WARN_ONCE(...)                                \
+  [[maybe_unused]] static const auto C10_ANONYMOUS_VARIABLE( \
+      torch_warn_once_) = [&] {                              \
+    TORCH_WARN(__VA_ARGS__);                                 \
+    return true;                                             \
+  }()
 
 #ifdef DISABLE_WARN
 #define TORCH_WARN_ONCE(...) ((void)0);

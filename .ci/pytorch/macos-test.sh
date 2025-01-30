@@ -1,4 +1,5 @@
 #!/bin/bash
+set -x
 
 # shellcheck disable=SC2034
 # shellcheck source=./macos-common.sh
@@ -148,9 +149,146 @@ test_jit_hooks() {
   assert_git_not_dirty
 }
 
+torchbench_setup_macos() {
+  git clone --recursive https://github.com/pytorch/vision torchvision
+  git clone --recursive https://github.com/pytorch/audio torchaudio
+
+  pushd torchvision
+  git fetch
+  git checkout "$(cat ../.github/ci_commit_pins/vision.txt)"
+  git submodule update --init --recursive
+  python setup.py clean
+  python setup.py develop
+  popd
+
+  pushd torchaudio
+  git fetch
+  git checkout "$(cat ../.github/ci_commit_pins/audio.txt)"
+  git submodule update --init --recursive
+  python setup.py clean
+  python setup.py develop
+  popd
+
+  # Shellcheck doesn't like it when you pass no arguments to a function that can take args. See https://www.shellcheck.net/wiki/SC2120
+  # shellcheck disable=SC2119,SC2120
+  checkout_install_torchbench
+}
+
+conda_benchmark_deps() {
+  conda install -y astunparse numpy scipy ninja pyyaml setuptools cmake typing-extensions requests protobuf numba cython scikit-learn
+  conda install -y -c conda-forge librosa
+}
+
+
+test_torchbench_perf() {
+  print_cmake_info
+
+  echo "Launching torchbench setup"
+  conda_benchmark_deps
+  torchbench_setup_macos
+
+  TEST_REPORTS_DIR=$(pwd)/test/test-reports
+  mkdir -p "$TEST_REPORTS_DIR"
+
+  local backend=eager
+  local dtype=notset
+  local device=mps
+
+  echo "Setup complete, launching torchbench training performance run"
+  PYTHONPATH="$(pwd)"/torchbench python benchmarks/dynamo/torchbench.py \
+    --performance --backend "$backend" --training --devices "$device" \
+    --output "$TEST_REPORTS_DIR/inductor_${backend}_torchbench_${dtype}_training_${device}_performance.csv"
+
+  echo "Launching torchbench inference performance run"
+  PYTHONPATH="$(pwd)"/torchbench python benchmarks/dynamo/torchbench.py \
+    --performance --backend "$backend" --inference --devices "$device" \
+    --output "$TEST_REPORTS_DIR/inductor_${backend}_torchbench_${dtype}_inference_${device}_performance.csv"
+
+  echo "Pytorch benchmark on mps device completed"
+}
+
+test_torchbench_smoketest() {
+  print_cmake_info
+
+  echo "Launching torchbench setup"
+  conda_benchmark_deps
+  # shellcheck disable=SC2119,SC2120
+  torchbench_setup_macos
+
+  TEST_REPORTS_DIR=$(pwd)/test/test-reports
+  mkdir -p "$TEST_REPORTS_DIR"
+
+  local backend=eager
+  local dtype=notset
+  local device=mps
+
+  touch "$TEST_REPORTS_DIR/inductor_${backend}_torchbench_${dtype}_training_${device}_performance.csv"
+  touch "$TEST_REPORTS_DIR/inductor_${backend}_torchbench_${dtype}_inference_${device}_performance.csv"
+
+  echo "Setup complete, launching torchbench training performance run"
+  for model in hf_T5 llama BERT_pytorch dcgan hf_GPT2 yolov3 resnet152; do
+    PYTHONPATH="$(pwd)"/torchbench python benchmarks/dynamo/torchbench.py \
+      --performance --only "$model" --backend "$backend" --training --devices "$device" \
+      --output "$TEST_REPORTS_DIR/inductor_${backend}_torchbench_${dtype}_training_${device}_performance.csv"
+  done
+
+  echo "Launching torchbench inference performance run"
+  for model in hf_T5 llama BERT_pytorch dcgan hf_GPT2 yolov3 resnet152; do
+    PYTHONPATH="$(pwd)"/torchbench python benchmarks/dynamo/torchbench.py \
+      --performance --only "$model" --backend "$backend" --inference --devices "$device" \
+      --output "$TEST_REPORTS_DIR/inductor_${backend}_torchbench_${dtype}_inference_${device}_performance.csv"
+  done
+
+  echo "Pytorch benchmark on mps device completed"
+}
+
+test_hf_perf() {
+  print_cmake_info
+  TEST_REPORTS_DIR=$(pwd)/test/test-reports
+  mkdir -p "$TEST_REPORTS_DIR"
+  conda_benchmark_deps
+  torchbench_setup_macos
+
+  echo "Launching HuggingFace training perf run"
+  python "$(pwd)"/benchmarks/dynamo/huggingface.py --backend eager --device mps --performance --training --output="${TEST_REPORTS_DIR}"/hf_training.csv
+
+  echo "Launching HuggingFace inference perf run"
+  python "$(pwd)"/benchmarks/dynamo/huggingface.py --backend eager --device mps --performance --training --output="${TEST_REPORTS_DIR}"/hf_inference.csv
+
+  echo "HuggingFace benchmark on mps device completed"
+}
+
+test_timm_perf() {
+  print_cmake_info
+  TEST_REPORTS_DIR=$(pwd)/test/test-reports
+  mkdir -p "$TEST_REPORTS_DIR"
+  conda_benchmark_deps
+  torchbench_setup_macos
+
+  echo "Launching timm training perf run"
+  python "$(pwd)"/benchmarks/dynamo/timm_models.py --backend eager --device mps --performance --training --output="${TEST_REPORTS_DIR}"/timm_training.csv
+
+  echo "Launching timm inference perf run"
+  python "$(pwd)"/benchmarks/dynamo/timm_models.py --backend eager --device mps --performance --training --output="${TEST_REPORTS_DIR}"/timm_inference.csv
+
+  echo "timm benchmark on mps device completed"
+}
+
 install_tlparse
 
-if [[ $NUM_TEST_SHARDS -gt 1 ]]; then
+if [[ $TEST_CONFIG == *"perf_all"* ]]; then
+  test_torchbench_perf
+  test_hf_perf
+  test_timm_perf
+elif [[ $TEST_CONFIG == *"perf_torchbench"* ]]; then
+  test_torchbench_perf
+elif [[ $TEST_CONFIG == *"perf_hf"* ]]; then
+  test_hf_perf
+elif [[ $TEST_CONFIG == *"perf_timm"* ]]; then
+  test_timm_perf
+elif [[ $TEST_CONFIG == *"perf_smoketest"* ]]; then
+  test_torchbench_smoketest
+elif [[ $NUM_TEST_SHARDS -gt 1 ]]; then
   test_python_shard "${SHARD_NUMBER}"
   if [[ "${SHARD_NUMBER}" == 1 ]]; then
     test_libtorch

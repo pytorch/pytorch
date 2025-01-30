@@ -33,8 +33,8 @@ void init_p2p_access_cache(int64_t num_devices) {
 
 }  // namespace detail
 
-bool get_p2p_access(int dev, int dev_to_access) {
-  at::globalContext().lazyInitCUDA();
+bool get_p2p_access(c10::DeviceIndex dev, c10::DeviceIndex dev_to_access) {
+  at::globalContext().lazyInitDevice(c10::DeviceType::CUDA);
 
   TORCH_CHECK(dev >= 0 || dev < num_devices_,
               dev, " is not a device");

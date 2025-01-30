@@ -13,25 +13,16 @@ from ._meta_parser import prepare_for_sending, to_device_no_copy
 _IMPL_REGISTRY = {}
 
 
-# Define all the implementations in the registry
-def _register_same_name(name, with_log=False):
+def impl_factory(name):
+    if name in _IMPL_REGISTRY:
+        return _IMPL_REGISTRY[name]
+
     def _(*args, **kwargs):
-        if with_log:
-            log.info("Calling hook %s", name)
+        log.info("Calling hook %s", name)
         return driver.exec(name, *args, **kwargs)
 
     _IMPL_REGISTRY[name] = _
-
-
-_register_same_name("deviceCount")
-_register_same_name("getDevice")
-_register_same_name("uncheckedSetDevice")
-_register_same_name("exchangeDevice")
-_register_same_name("malloc", True)
-_register_same_name("free", True)
-_register_same_name("isPinnedPtr", True)
-_register_same_name("hostMalloc", True)
-_register_same_name("hostFree", True)
+    return _
 
 
 # TODO: replace it with implementing torch.openreg.device

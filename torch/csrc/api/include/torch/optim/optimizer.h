@@ -29,8 +29,7 @@ class InputArchive;
 } // namespace torch
 #endif // DOXYGEN_SHOULD_SKIP_THIS
 
-namespace torch {
-namespace optim {
+namespace torch::optim {
 
 class TORCH_API OptimizerParamState {
  public:
@@ -86,6 +85,7 @@ class TORCH_API OptimizerParamGroup {
         options_(
             param_group.has_options() ? param_group.options().clone()
                                       : nullptr) {}
+  OptimizerParamGroup(OptimizerParamGroup&& param_group) = default;
   OptimizerParamGroup(std::vector<Tensor> params)
       : params_(std::move(params)) {}
   OptimizerParamGroup(
@@ -95,6 +95,9 @@ class TORCH_API OptimizerParamGroup {
 
   OptimizerParamGroup& operator=(const OptimizerParamGroup& param_group) =
       delete;
+  OptimizerParamGroup& operator=(OptimizerParamGroup&& param_group) noexcept =
+      default;
+  ~OptimizerParamGroup() = default;
   bool has_options() const;
   OptimizerOptions& options();
   const OptimizerOptions& options() const;
@@ -113,9 +116,11 @@ class TORCH_API Optimizer {
   // `state_dict` / `load_state_dict` API to copy an optimizer instead.
   Optimizer(const Optimizer& optimizer) = delete;
   Optimizer(Optimizer&& optimizer) = default;
+  Optimizer& operator=(const Optimizer& optimizer) = delete;
+  Optimizer& operator=(Optimizer&& optimizer) = default;
 
   explicit Optimizer(
-      std::vector<OptimizerParamGroup> param_groups,
+      const std::vector<OptimizerParamGroup>& param_groups,
       std::unique_ptr<OptimizerOptions> defaults)
       : defaults_(std::move(defaults)) {
     for (const auto& param_group : param_groups) {
@@ -129,7 +134,7 @@ class TORCH_API Optimizer {
       std::unique_ptr<OptimizerOptions> defaults)
       : Optimizer(
             {OptimizerParamGroup(std::move(parameters))},
-            std::move(defaults)){};
+            std::move(defaults)) {}
 
   /// Adds the given param_group to the optimizer's param_group list.
   void add_param_group(const OptimizerParamGroup& param_group);
@@ -215,5 +220,4 @@ TORCH_API serialize::InputArchive& operator>>(
     serialize::InputArchive& archive,
     Optimizer& optimizer);
 
-} // namespace optim
-} // namespace torch
+} // namespace torch::optim

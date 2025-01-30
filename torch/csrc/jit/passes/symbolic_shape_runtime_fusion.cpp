@@ -154,7 +154,7 @@ static std::vector<StrideInput> summarizeInputStrides(const TensorType& tt) {
         summarizeStrideDim(sizes, strides, dim, stride_inputs, 0));
   }
   return stride_inputs;
-};
+}
 
 // Todo: incorporate in codegen
 static StrideInput summarizeOutputStrides(const TensorType& tt) {

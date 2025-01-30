@@ -1,9 +1,11 @@
 # mypy: allow-untyped-defs
 import dataclasses
+from collections.abc import Collection, Mapping
 from enum import auto, Enum
-from typing import Collection, Dict, List, Mapping, Optional, Set, TYPE_CHECKING, Union
+from typing import Optional, TYPE_CHECKING, Union
 
 from torch._library.fake_class_registry import FakeScriptObject
+from torch._subclasses.fake_tensor import is_fake
 
 
 if TYPE_CHECKING:
@@ -20,6 +22,8 @@ __all__ = [
     "OutputKind",
     "OutputSpec",
     "SymIntArgument",
+    "SymFloatArgument",
+    "SymBoolArgument",
     "TensorArgument",
 ]
 
@@ -40,6 +44,16 @@ class SymIntArgument:
 
 
 @dataclasses.dataclass
+class SymFloatArgument:
+    name: str
+
+
+@dataclasses.dataclass
+class SymBoolArgument:
+    name: str
+
+
+@dataclasses.dataclass
 class CustomObjArgument:
     name: str
     class_fqn: str
@@ -55,6 +69,8 @@ class ConstantArgument:
 ArgumentSpec = Union[
     TensorArgument,
     SymIntArgument,
+    SymFloatArgument,
+    SymBoolArgument,
     ConstantArgument,
     CustomObjArgument,
     TokenArgument,
@@ -87,6 +103,8 @@ class InputSpec:
             (
                 TensorArgument,
                 SymIntArgument,
+                SymFloatArgument,
+                SymBoolArgument,
                 ConstantArgument,
                 CustomObjArgument,
                 TokenArgument,
@@ -116,6 +134,8 @@ class OutputSpec:
             (
                 TensorArgument,
                 SymIntArgument,
+                SymFloatArgument,
+                SymBoolArgument,
                 ConstantArgument,
                 TokenArgument,
                 CustomObjArgument,
@@ -125,8 +145,8 @@ class OutputSpec:
 
 @dataclasses.dataclass
 class ExportBackwardSignature:
-    gradients_to_parameters: Dict[str, str]
-    gradients_to_user_inputs: Dict[str, str]
+    gradients_to_parameters: dict[str, str]
+    gradients_to_user_inputs: dict[str, str]
     loss_output: str
 
 
@@ -202,8 +222,8 @@ class ExportGraphSignature:
         )
     """
 
-    input_specs: List[InputSpec]
-    output_specs: List[OutputSpec]
+    input_specs: list[InputSpec]
+    output_specs: list[OutputSpec]
 
     # A list of parameters uniquely identified by mangled fully qualified name
     @property
@@ -257,12 +277,21 @@ class ExportGraphSignature:
     # Graph node names of pytree-flattened inputs of original program
     @property
     def user_inputs(self) -> Collection[Union[int, float, bool, None, str]]:
-        user_inputs: List[Union[int, float, bool, None, str]] = []
+        user_inputs: list[Union[int, float, bool, None, str]] = []
         for s in self.input_specs:
             if s.kind != InputKind.USER_INPUT:
                 continue
 
-            if isinstance(s.arg, (TensorArgument, SymIntArgument, CustomObjArgument)):
+            if isinstance(
+                s.arg,
+                (
+                    TensorArgument,
+                    SymIntArgument,
+                    SymFloatArgument,
+                    SymBoolArgument,
+                    CustomObjArgument,
+                ),
+            ):
                 user_inputs.append(s.arg.name)
             elif isinstance(s.arg, ConstantArgument):
                 user_inputs.append(s.arg.value)
@@ -271,14 +300,21 @@ class ExportGraphSignature:
         return tuple(user_inputs)
 
     # Graph node names of pytree-flattened outputs of original program
+    # For joint-graph purposes, will include the loss output.
     @property
     def user_outputs(self) -> Collection[Union[int, float, bool, None, str]]:
-        user_outputs: List[Union[int, float, bool, None, str]] = []
+        user_outputs: list[Union[int, float, bool, None, str]] = []
         for s in self.output_specs:
-            if s.kind != OutputKind.USER_OUTPUT:
+            if s.kind not in [
+                OutputKind.USER_OUTPUT,
+                OutputKind.LOSS_OUTPUT,
+            ]:
                 continue
 
-            if isinstance(s.arg, (TensorArgument, SymIntArgument)):
+            if isinstance(
+                s.arg,
+                (TensorArgument, SymIntArgument, SymFloatArgument, SymBoolArgument),
+            ):
                 user_outputs.append(s.arg.name)
             elif isinstance(s.arg, ConstantArgument):
                 user_outputs.append(s.arg.value)
@@ -358,8 +394,8 @@ class ExportGraphSignature:
     @property
     def backward_signature(self) -> Optional[ExportBackwardSignature]:
         loss_output = None
-        gradients_to_parameters: Dict[str, str] = {}
-        gradients_to_user_inputs: Dict[str, str] = {}
+        gradients_to_parameters: dict[str, str] = {}
+        gradients_to_user_inputs: dict[str, str] = {}
         for spec in self.output_specs:
             if spec.kind == OutputKind.LOSS_OUTPUT:
                 assert loss_output is None
@@ -425,7 +461,14 @@ class ExportGraphSignature:
         """
         assert isinstance(old, str)
         assert isinstance(new, str)
-        arg_types = (TensorArgument, SymIntArgument, CustomObjArgument, TokenArgument)
+        arg_types = (
+            TensorArgument,
+            SymIntArgument,
+            SymFloatArgument,
+            SymBoolArgument,
+            CustomObjArgument,
+            TokenArgument,
+        )
         for o in self.output_specs:
             if isinstance(o.arg, arg_types):
                 if o.arg.name == old:
@@ -435,9 +478,11 @@ class ExportGraphSignature:
                 if i.arg.name == old:
                     i.arg.name = new
 
-    def get_replace_hook(self):
+    def get_replace_hook(self, replace_inputs=False):
         def _(old, new, user):
-            if user.op in ("output", "input"):
+            if user.op == "output":
+                self.replace_all_uses(old.name, new)
+            if replace_inputs and old.op == "placeholder":
                 self.replace_all_uses(old.name, new)
 
         return _
@@ -454,9 +499,8 @@ def _immutable_dict(items):
 
 
 def _make_argument_spec(node, token_names) -> ArgumentSpec:
-    from torch import ScriptObject, SymInt
+    from torch import ScriptObject, SymBool, SymFloat, SymInt
     from torch._library.fake_class_registry import FakeScriptObject
-    from torch._subclasses.fake_tensor import FakeTensor
 
     if isinstance(node, (int, bool, float, type(None), str)):
         # For const outputs we just directly return this
@@ -468,10 +512,14 @@ def _make_argument_spec(node, token_names) -> ArgumentSpec:
     val = node.meta["val"]
     if node.name in token_names:
         return TokenArgument(name=node.name)
-    elif isinstance(val, FakeTensor):
+    elif is_fake(val):
         return TensorArgument(name=node.name)
     elif isinstance(val, SymInt):
         return SymIntArgument(name=node.name)
+    elif isinstance(val, SymFloat):
+        return SymFloatArgument(name=node.name)
+    elif isinstance(val, SymBool):
+        return SymBoolArgument(name=node.name)
     elif isinstance(val, ScriptObject):
         return CustomObjArgument(name=node.name, class_fqn=val._type().qualified_name())  # type: ignore[attr-defined]
     elif isinstance(val, FakeScriptObject):
@@ -490,7 +538,7 @@ def _make_argument_spec(node, token_names) -> ArgumentSpec:
 def _convert_to_export_graph_signature(
     graph_signature: "GraphSignature",
     gm: "torch.fx.GraphModule",
-    non_persistent_buffers: Set[str],
+    non_persistent_buffers: set[str],
 ) -> "ExportGraphSignature":
     from torch.utils import _pytree as pytree
 

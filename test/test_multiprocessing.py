@@ -1,5 +1,5 @@
 # Owner(s): ["module: multiprocessing"]
-
+# ruff: noqa: F841
 import contextlib
 import copy
 import gc
@@ -24,7 +24,6 @@ from torch.testing._internal.common_utils import (
     slowTest,
     TEST_WITH_ASAN,
     TEST_WITH_ROCM,
-    TEST_WITH_TORCHDYNAMO,
     TEST_WITH_TSAN,
     TestCase,
 )
@@ -415,10 +414,6 @@ class TestMultiprocessing(TestCase):
         TEST_WITH_ASAN,
         "seems to hang with ASAN, see https://github.com/pytorch/pytorch/issues/5326",
     )
-    @unittest.skipIf(
-        TEST_WITH_TORCHDYNAMO,
-        "Fail to clean up temporary /dev/shm/torch_* file, see https://github.com/pytorch/pytorch/issues/91467",
-    )
     def test_fs_sharing(self):
         with fs_sharing():
             # The test works but is very slow on MacOS, see https://github.com/pytorch/pytorch/pull/93183,
@@ -426,27 +421,15 @@ class TestMultiprocessing(TestCase):
             repeat = 1 if IS_MACOS else TEST_REPEATS
             self._test_sharing(repeat=repeat)
 
-    @unittest.skipIf(
-        TEST_WITH_TORCHDYNAMO,
-        "Fail to clean up temporary /dev/shm/torch_* file, see https://github.com/pytorch/pytorch/issues/91467",
-    )
     def test_fs_preserve_sharing(self):
         with fs_sharing():
             self._test_preserve_sharing(repeat=TEST_REPEATS)
 
-    @unittest.skipIf(
-        TEST_WITH_TORCHDYNAMO,
-        "Fail to clean up temporary /dev/shm/torch_* file, see https://github.com/pytorch/pytorch/issues/91467",
-    )
     def test_fs_pool(self):
         with fs_sharing():
             self._test_pool(repeat=TEST_REPEATS)
 
     @unittest.skipIf(not HAS_SHM_FILES, "don't not how to check if shm files exist")
-    @unittest.skipIf(
-        TEST_WITH_TORCHDYNAMO,
-        "Fail to clean up temporary /dev/shm/torch_* file, see https://github.com/pytorch/pytorch/issues/91467",
-    )
     def test_fs(self):
         def queue_put():
             x = torch.DoubleStorage(4)

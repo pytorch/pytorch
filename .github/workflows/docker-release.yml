@@ -35,6 +35,7 @@ permissions: read-all
 
 jobs:
   get-label-type:
+    if: github.repository_owner == 'pytorch'
     name: get-label-type
     uses: pytorch/pytorch/.github/workflows/_runner-determinator.yml@main
     with:
@@ -152,7 +153,7 @@ jobs:
           docker push ghcr.io/pytorch/pytorch-nightly:"${PYTORCH_NIGHTLY_COMMIT}${CUDA_SUFFIX}"
 
           # Please note, here we ned to pin specific verison of CUDA as with latest label
-          if [[ ${CUDA_VERSION_SHORT} == "12.1" ]]; then
+          if [[ ${CUDA_VERSION_SHORT} == "12.4" ]]; then
             docker tag ghcr.io/pytorch/pytorch-nightly:"${PYTORCH_NIGHTLY_COMMIT}${CUDA_SUFFIX}" \
                     ghcr.io/pytorch/pytorch-nightly:latest
             docker push ghcr.io/pytorch/pytorch-nightly:latest
@@ -164,7 +165,7 @@ jobs:
 
   validate:
     needs: build
-    uses: pytorch/builder/.github/workflows/validate-docker-images.yml@main
+    uses: pytorch/test-infra/.github/workflows/validate-docker-images.yml@main
     with:
       channel: nightly
       ref: main

@@ -11,8 +11,8 @@
 #include <sleef.h>
 #endif
 
-namespace at {
-namespace vec {
+
+namespace at::vec {
 // See Note [CPU_CAPABILITY namespace]
 inline namespace CPU_CAPABILITY {
 
@@ -40,6 +40,9 @@ public:
     values = _mm512_setr_ps(val1, val2, val3, val4, val5, val6, val7, val8,
                             val9, val10, val11, val12, val13, val14, val15, val16);
   }
+  Vectorized(const float (&arr)[16])
+      : Vectorized(arr[0], arr[1], arr[2], arr[3], arr[4], arr[5], arr[6], arr[7],
+                   arr[8], arr[9], arr[10], arr[11], arr[12], arr[13], arr[14], arr[15]) {}
   operator __m512() const {
     return values;
   }
@@ -174,6 +177,9 @@ public:
   }
   Vectorized<float> asin() const {
     return Vectorized<float>(Sleef_asinf16_u10(values));
+  }
+  Vectorized<float> asinh() const {
+    return Vectorized<float>(Sleef_asinhf16_u10(values));
   }
   Vectorized<float> atan() const {
     return Vectorized<float>(Sleef_atanf16_u10(values));
@@ -396,6 +402,12 @@ public:
   }
   Vectorized<float> pow(const Vectorized<float> &b) const {
     return Vectorized<float>(Sleef_powf16_u10(values, b));
+  }
+  float reduce_add() const {
+    return _mm512_reduce_add_ps(values);
+  }
+  float reduce_max() const {
+    return _mm512_reduce_max_ps(values);
   }
   // Comparison using the _CMP_**_OQ predicate.
   //   `O`: get false if an operand is NaN
@@ -698,11 +710,11 @@ inline void transpose_mxn<float>(const float* src, int64_t ld_src, float* dst, i
 }
 
 template <typename T, int M, int N,
-          typename std::enable_if_t<std::is_same<T, float>::value, int> = 0>
+          typename std::enable_if_t<std::is_same_v<T, float>, int> = 0>
 inline void transpose_mxn(const float* src, int64_t ld_src, float* dst, int64_t ld_dst) {
   transpose_mxn<float>(src, ld_src, dst, ld_dst, M, N);
 }
 
 #endif
 
-}}}
+}}

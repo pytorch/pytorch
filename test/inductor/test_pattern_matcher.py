@@ -3,6 +3,7 @@ import copy
 import itertools
 import os
 import unittest
+from typing import Callable, Optional
 
 import torch
 import torch._dynamo.config as dynamo_config
@@ -10,11 +11,13 @@ import torch._inductor.config as inductor_config
 import torch._inductor.fx_passes.post_grad
 import torch.nn.functional as F
 from torch._dynamo.utils import count_calls, counters
+from torch._higher_order_ops.auto_functionalize import auto_functionalized
 from torch._higher_order_ops.out_dtype import out_dtype
 from torch._inductor.fx_passes import joint_graph
 from torch._inductor.pattern_matcher import (
     Arg,
     CallFunction,
+    fwd_only,
     gen_pattern,
     is_mutation_op,
     KeywordArg,
@@ -22,15 +25,23 @@ from torch._inductor.pattern_matcher import (
     PatternMatcherPass,
     PatternPrettyPrinter,
     register_graph_pattern,
+    register_replacement,
     stable_topological_sort,
 )
 from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import run_and_get_code
 from torch._inductor.virtualized import V
+from torch.fx.experimental.proxy_tensor import make_fx
 from torch.testing import FileCheck
-from torch.testing._internal.common_cuda import SM80OrLater
+from torch.testing._internal.common_cuda import SM80OrLater, xfailIfSM89
 from torch.testing._internal.common_device_type import expectedFailureXPU, skipCUDAIf
-from torch.testing._internal.common_utils import IS_LINUX, skipIfRocm, skipIfXpu
+from torch.testing._internal.common_utils import (
+    instantiate_parametrized_tests,
+    IS_LINUX,
+    parametrize,
+    skipIfRocm,
+    skipIfXpu,
+)
 from torch.testing._internal.inductor_utils import (
     GPU_TYPE,
     HAS_GPU,
@@ -40,6 +51,10 @@ from torch.testing._internal.inductor_utils import (
 from torch.utils import _pytree as pytree
 
 
+aten = torch.ops.aten
+
+
+@instantiate_parametrized_tests
 class TestPatternMatcher(TestCase):
     device_type = GPU_TYPE
 
@@ -128,7 +143,6 @@ class TestPatternMatcher(TestCase):
                 ref[indices], test[indices]
             )  # also checks that dtype is correct
 
-    @skipIfRocm
     @skipIfXpu
     @skipCUDAIf(not SM80OrLater, "need sm_80")
     @inductor_config.patch(force_fuse_int_mm_with_mul=True)
@@ -140,6 +154,105 @@ class TestPatternMatcher(TestCase):
             return (out_dtype(torch.ops.aten.mm.default, torch.int32, a, b) * c).to(
                 torch.bfloat16
             )
+
+        args_list = [
+            (
+                torch.randint(-128, 127, (32, 32), dtype=torch.int8, device=GPU_TYPE),
+                torch.randint(-128, 127, (32, 8), dtype=torch.int8, device=GPU_TYPE),
+                torch.randn((32, 1), dtype=torch.float16, device=GPU_TYPE) * 0 + 0.5,
+            ),
+            (
+                torch.randint(-128, 127, (32, 32), dtype=torch.int8, device=GPU_TYPE),
+                torch.randint(-128, 127, (32, 8), dtype=torch.int8, device=GPU_TYPE),
+                torch.randn((1, 8), dtype=torch.bfloat16, device=GPU_TYPE),
+            ),
+            (
+                torch.randint(-128, 127, (32, 32), dtype=torch.int8, device=GPU_TYPE),
+                torch.randint(-128, 127, (32, 8), dtype=torch.int8, device=GPU_TYPE),
+                torch.randn((1, 8), dtype=torch.float32, device=GPU_TYPE),
+            ),
+        ]
+
+        for args in args_list:
+            self._test_fused_int_mm_mul_impl(fn1, args, True)
+            self._test_fused_int_mm_mul_impl(fn2, args, True)
+
+    def test_duplicate_search(self):
+        from collections.abc import Iterable
+        from typing import Callable
+
+        import torch
+        from torch._inductor.pattern_matcher import (
+            fwd_only,
+            PatternMatcherPass,
+            register_replacement,
+        )
+
+        def pattern1(x: torch.Tensor) -> torch.Tensor:
+            return x + 1
+
+        def replacement1(x: torch.Tensor) -> torch.Tensor:
+            return x - 1
+
+        def pattern2(x: torch.Tensor) -> torch.Tensor:
+            return x + 2
+
+        def replacement2(x: torch.Tensor) -> torch.Tensor:
+            return x - 2
+
+        patterns = PatternMatcherPass()
+        inputs = [torch.empty(4, 5, dtype=torch.float32, device=GPU_TYPE)]
+        register_replacement(pattern1, replacement1, inputs, fwd_only, patterns)
+        register_replacement(pattern2, replacement2, inputs, fwd_only, patterns)
+
+        count = 0
+
+        def custom_pass(graph: torch.fx.Graph):
+            nonlocal count
+            count = patterns.apply(graph)
+
+        def custom_backend(
+            graph: torch.fx.GraphModule, example_inputs: Iterable[torch.Tensor]
+        ) -> Callable:
+            from torch._inductor import config
+
+            current_config = config.shallow_copy_dict()
+            from torch._inductor.compile_fx import compile_fx
+
+            current_config["post_grad_custom_post_pass"] = custom_pass
+            return compile_fx(graph, example_inputs, config_patches=current_config)
+
+        @torch.compile(backend=custom_backend)
+        def f(x: torch.Tensor) -> torch.Tensor:
+            y = x + 1
+            y2 = y.relu() + 2
+            return y2
+
+        def f_replaced(x: torch.Tensor) -> torch.Tensor:
+            y = x - 1
+            y2 = y.relu() - 2
+            return y2
+
+        inp = torch.rand(3, 5, device=GPU_TYPE)
+        self.assertEqual(f(inp), f_replaced(inp))
+        self.assertEqual(count, 2)
+
+    @skipIfXpu
+    @skipCUDAIf(not SM80OrLater, "need sm_80")
+    @inductor_config.patch(force_fuse_int_mm_with_mul=True)
+    def test_fused_int_mm_mul_epilogue(self):
+        def fn1(a, b, c):
+            return (
+                (out_dtype(torch.ops.aten.mm.default, torch.int32, a, b) * c) * 0.5
+            ).relu()
+
+        def fn2(a, b, c):
+            return (
+                (out_dtype(torch.ops.aten.mm.default, torch.int32, a, b) * c).to(
+                    torch.bfloat16
+                )
+                * 0.5
+            ).relu()
 
         args_list = [
             (
@@ -508,6 +621,55 @@ class TestPatternMatcher(TestCase):
         )
         self._test_mixed_impl(fn, args, False, False)
 
+    @parametrize(
+        "case",
+        [
+            ((4, 8), GPU_TYPE),
+            ("dynamic", GPU_TYPE),
+        ],
+    )
+    def test_unsuccessful_partial_reuse(self, case):
+        shape, device = case
+
+        def test_fn(x):
+            partial = torch.amax(x, [0], True)
+            full = torch.amax(x)
+            return partial, full
+
+        if shape == "dynamic":
+            x = torch.rand([2048, 64], device=GPU_TYPE)
+            torch._dynamo.mark_dynamic(x, 0)
+        else:
+            x = torch.randn(*shape, device=device)
+
+        compiled_fn = torch.compile(test_fn)
+
+        self.assertEqual(compiled_fn(x), test_fn(x))
+        self.assertEqual(counters["inductor"]["partial_reduction_reuse"], 0)
+
+    @parametrize(
+        "case",
+        [
+            ((2048, 2048), (torch.amax, torch.amax)),
+            ((1024, 1024), (torch.amin, torch.min)),
+            ((4096, 512), (torch.amax, torch.max)),
+        ],
+    )
+    def test_successful_partial_reuse(self, case):
+        shape, (partial_fn, full_fn) = case
+
+        def test_fn(x):
+            partial = partial_fn(x, [0], True)
+            full = full_fn(x)
+            return partial, full
+
+        x = torch.randn(*shape, device=GPU_TYPE)
+
+        compiled_fn = torch.compile(test_fn)
+
+        self.assertEqual(compiled_fn(x), test_fn(x))
+        self.assertEqual(counters["inductor"]["partial_reduction_reuse"], 1)
+
     @expectedFailureXPU
     @skipCUDAIf(not SM80OrLater, "need sm_80")
     @inductor_config.patch(use_mixed_mm=True)
@@ -816,6 +978,72 @@ class TestPatternMatcher(TestCase):
             torch.randn(2, 16, device=GPU_TYPE),
         ]
         self.common(fn, args, 1, 3)
+
+    def test_pointless_view_pair(self):
+        def f(x):
+            x = aten.view.default(x, [3, 5, 7])
+            x = aten.view.default(x, [15, 7])
+            return x
+
+        x = torch.randn(15, 7, device=GPU_TYPE)
+        gm = make_fx(f)(x)
+        self.assertEqual(count_calls(gm.graph), 2)
+        joint_graph.joint_graph_passes(gm)
+        self.assertEqual(count_calls(gm.graph), 0)
+
+        def f(x):
+            x1 = aten.view.default(x, [3, 5, 7])
+            x2 = aten.view.default(x1, [15, 7])
+            return x1, x2
+
+        gm = make_fx(f)(x)
+        self.assertEqual(count_calls(gm.graph), 2)
+        joint_graph.joint_graph_passes(gm)
+        self.assertEqual(count_calls(gm.graph), 2)
+
+    def test_pointless_permute_pair(self):
+        def f(x):
+            x = aten.permute.default(x, [1, 0])
+            x = aten.permute.default(x, [1, 0])
+            return x
+
+        x = torch.randn(15, 7, device=GPU_TYPE)
+        gm = make_fx(f)(x)
+        self.assertEqual(count_calls(gm.graph), 2)
+        joint_graph.joint_graph_passes(gm)
+        self.assertEqual(count_calls(gm.graph), 0)
+
+        def f(x):
+            x1 = aten.permute.default(x, [1, 0])
+            x2 = aten.permute.default(x1, [1, 0])
+            return x1, x2
+
+        gm = make_fx(f)(x)
+        self.assertEqual(count_calls(gm.graph), 2)
+        joint_graph.joint_graph_passes(gm)
+        self.assertEqual(count_calls(gm.graph), 2)
+
+    def test_pointless_permute_pair_3d(self):
+        def f(x):
+            x = aten.permute.default(x, [1, 0, 2])
+            x = aten.permute.default(x, [1, 0, 2])
+            return x
+
+        x = torch.randn(3, 5, 7, device=GPU_TYPE)
+        gm = make_fx(f)(x)
+        self.assertEqual(count_calls(gm.graph), 2)
+        joint_graph.joint_graph_passes(gm)
+        self.assertEqual(count_calls(gm.graph), 0)
+
+        def f(x):
+            x1 = aten.permute.default(x, [1, 0, 2])
+            x2 = aten.permute.default(x1, [1, 0, 2])
+            return x1, x2
+
+        gm = make_fx(f)(x)
+        self.assertEqual(count_calls(gm.graph), 2)
+        joint_graph.joint_graph_passes(gm)
+        self.assertEqual(count_calls(gm.graph), 2)
 
     def test_pointless_convert(self):
         def fn1(x):
@@ -1153,7 +1381,7 @@ class TestPatternMatcher(TestCase):
         def fn(a, b):
             return torch.mm(a, b).clone()
 
-        result, (code) = run_and_get_code(fn, torch.randn(8, 8), torch.randn(8, 8))
+        _, (code) = run_and_get_code(fn, torch.randn(8, 8), torch.randn(8, 8))
         # clone would create a buf1
         self.assertIn("return (buf0, )", code[0])
         self.assertNotIn("async_compile.cpp", code[0])
@@ -1233,6 +1461,38 @@ class TestPatternMatcher(TestCase):
                 # also match (since search_fn_pattern is the serialized version
                 # of search_fn).
                 self.assertTrue(pattern.pattern_eq(search_fn_pattern))
+
+    @skipIfXpu
+    @xfailIfSM89
+    @inductor_config.patch(
+        {
+            "triton.unique_kernel_names": "original_aten",
+            "fx_graph_remote_cache": False,
+            "max_autotune_gemm_backends": "TRITON",
+        }
+    )
+    def test_original_aten_preserved_split_addmm(self):
+        # addmm -> elementwise should be decomposed into mm -> add -> elementwise
+        def fn(x, y, z):
+            return torch.addmm(z, x, y).sin()
+
+        args = [
+            torch.randn(16, 24, device=GPU_TYPE),
+            torch.randn(24, 32, device=GPU_TYPE),
+            torch.randn(16, 32, device=GPU_TYPE),
+        ]
+
+        counters.clear()
+
+        opt_fn = torch.compile(fn, mode="max-autotune")
+        ret, code = run_and_get_code(opt_fn, *args)
+        self.assertEqual(counters["inductor"]["pattern_matcher_count"], 1)
+
+        # The mm kernel should use a template (because we set max_autotune_gemm_backends = TRITON).
+        # Its name should contain `addmm` because `addmm` was the original aten op where the mm came from.
+        FileCheck().check_not("extern_kernels.addmm(").check(
+            "def triton_tem_fused_addmm"
+        ).run(code[0])
 
     @inductor_config.patch(fx_graph_remote_cache=False)
     def test_match_equivalent_function_invocations1(self):
@@ -1517,6 +1777,148 @@ class TestPatternMatcher(TestCase):
             {},
             expect=False,
         )
+
+    def test_multioutput_register_replacement(self):
+        @torch.library.custom_op(
+            "vllm::fused_rms_norm_quant_static", mutates_args=["result", "scale"]
+        )
+        def fused_rms_norm_quant_static(
+            result: torch.Tensor,
+            input: torch.Tensor,
+            weight: torch.Tensor,
+            scale: torch.Tensor,
+            azp: torch.Tensor,
+            epsilon: float,
+        ) -> None:
+            print("vllm::fused_rms_norm_quant_static")
+            result_rms = torch.mul(input, weight) + epsilon
+            _result = torch.mul(result_rms, scale).to(torch.int8)
+            scale.fill_(0.5)
+
+        @torch.library.custom_op("vllm::rms_norm", mutates_args=["result"])
+        def rms_norm(
+            result: torch.Tensor,
+            input: torch.Tensor,
+            weight: torch.Tensor,
+            epsilon: float,
+        ) -> None:
+            # bogus implementation doesn't matter
+            _result = torch.mul(input, weight) + epsilon
+
+        @torch.library.custom_op(
+            "vllm::static_scaled_int8_quant", mutates_args=["result", "scale"]
+        )
+        def static_scaled_int8_quant(
+            result: torch.Tensor,
+            input: torch.Tensor,
+            scale: torch.Tensor,
+            azp: Optional[torch.Tensor] = None,
+        ) -> None:
+            # bogus implementation doesn't matter
+            _result = torch.mul(input, scale).to(torch.int8)
+            scale.fill_(0.5)
+
+        def rms_pattern_static(
+            result: torch.Tensor,
+            result_rms: torch.Tensor,
+            input: torch.Tensor,
+            weight: torch.Tensor,
+            scale: torch.Tensor,
+        ):
+            at1 = auto_functionalized(
+                torch.ops.vllm.rms_norm.default,
+                result=result_rms,
+                input=input,
+                weight=weight,
+                epsilon=1e-6,
+            )
+            at2 = auto_functionalized(
+                torch.ops.vllm.static_scaled_int8_quant.default,
+                result=result,
+                input=at1[1],
+                scale=scale,
+                azp=None,
+            )
+
+            return at2[1], at2[2]
+
+        def rms_replacement_static(
+            result: torch.Tensor,
+            result_rms: torch.Tensor,
+            input: torch.Tensor,
+            weight: torch.Tensor,
+            scale: torch.Tensor,
+        ):
+            at = auto_functionalized(
+                torch.ops.vllm.fused_rms_norm_quant_static.default,
+                result=result,
+                input=input,
+                weight=weight,
+                epsilon=1e-6,
+                scale=scale,
+                azp=None,
+            )
+            return at[1], at[2]
+
+        def empty_bf16(*args, **kwargs):
+            return torch.empty(*args, **kwargs, dtype=torch.bfloat16)
+
+        def empty_int8(*args, **kwargs):
+            return torch.empty(*args, **kwargs, dtype=torch.int8)
+
+        my_patterns = PatternMatcherPass()
+        inputs = [
+            empty_int8(5, 4),
+            empty_bf16(5, 4),
+            empty_bf16(5, 4),
+            empty_bf16(5, 1),
+            torch.empty(1, 1),
+        ]
+        register_replacement(
+            rms_pattern_static, rms_replacement_static, inputs, fwd_only, my_patterns
+        )
+
+        def custom_pass(graph: torch.fx.Graph) -> torch.fx.Graph:
+            _count = my_patterns.apply(graph)
+            # print(f"Count: {_count}")
+            graph.eliminate_dead_code()
+            # graph.print_tabular()
+            return graph
+
+        def custom_backend(
+            graph: torch.fx.GraphModule, example_inputs: list[torch.Tensor]
+        ) -> Callable:
+            from torch._inductor import config
+
+            current_config = config.shallow_copy_dict()
+            from torch._inductor.compile_fx import compile_fx
+
+            current_config["post_grad_custom_post_pass"] = custom_pass
+            return compile_fx(graph, example_inputs, config_patches=current_config)
+
+        @torch.compile(backend=custom_backend)
+        def my_func_static(x, w, epsilon):
+            quant_result = torch.empty_like(x, dtype=torch.int8)
+            result_rms = torch.empty_like(x, dtype=torch.bfloat16)
+            scale = torch.ones((1, 1))
+
+            x = x.to(torch.bfloat16)
+            w = w.to(torch.bfloat16)
+
+            quant_result, scale = rms_pattern_static(
+                result=quant_result,
+                result_rms=result_rms,
+                input=x,
+                weight=w,
+                scale=scale,
+            )
+
+            return quant_result, scale
+
+        inputs = [torch.empty((5, 4)), torch.empty((5, 1)), 1e-6]
+        # print(my_func_static(*inputs))
+        test, (code,) = run_and_get_code(my_func_static, *inputs)
+        self.assertTrue("static_scaled_int8_quant" not in code)
 
 
 if __name__ == "__main__":

@@ -11,6 +11,7 @@ set(LAZY_TEST_SRCS
   ${LAZY_TEST_ROOT}/test_shape.cpp
   ${LAZY_TEST_ROOT}/test_trie_cache.cpp
   ${LAZY_TEST_ROOT}/test_util.cpp
+  ${LAZY_TEST_ROOT}/test_lazy_graph_executor.cpp
 )
 if(BUILD_LAZY_TS_BACKEND)
     list(APPEND LAZY_TEST_SRCS
@@ -44,6 +45,7 @@ elseif(USE_ROCM)
 endif()
 
 if(INSTALL_TEST)
+  set_target_properties(test_lazy PROPERTIES INSTALL_RPATH "${CMAKE_INSTALL_RPATH}:${_rpath_portable_origin}/../lib")
   install(TARGETS test_lazy DESTINATION bin)
   # Install PDB files for MSVC builds
   if(MSVC AND BUILD_SHARED_LIBS)

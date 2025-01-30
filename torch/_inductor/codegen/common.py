@@ -1,6 +1,9 @@
 # mypy: allow-untyped-defs
+from __future__ import annotations
+
 import contextlib
 import dataclasses
+import enum
 import functools
 import itertools
 import logging
@@ -9,35 +12,28 @@ import operator
 import re
 from enum import auto, Enum
 from itertools import chain
-from typing import (
-    Any,
-    Callable,
-    ClassVar,
-    Dict,
-    List,
-    NamedTuple,
-    Optional,
-    Tuple,
-    Union,
-)
+from typing import Any, Callable, ClassVar, NamedTuple, Optional, TYPE_CHECKING, Union
 
 import sympy
-from sympy.printing.printer import Printer
 
 import torch
 import torch.fx
+from torch._inductor.dtype_propagation import DtypePropagationOpsHandler
 from torch._prims_common import ELEMENTWISE_TYPE_PROMOTION_KIND
 from torch.utils import _pytree as pytree
 from torch.utils._ordered_set import OrderedSet
 from torch.utils._sympy.numbers import int_oo
+from torch.utils._sympy.printers import PythonPrinter as _PythonPrinter
 from torch.utils._sympy.symbol import free_symbol_is_type, symbol_is_type, SymT
 from torch.utils._sympy.value_ranges import bound_sympy, ValueRangeAnalysis, ValueRanges
 
 from .. import config, metrics
 from ..utils import (
+    boolean_ops,
     DeferredLineBase,
     generate_assert,
     IndentedBuffer,
+    ir_dataclass,
     sympy_dot,
     sympy_subs,
     unique,
@@ -45,24 +41,141 @@ from ..utils import (
 from ..virtualized import ops, OpsHandler, OpsValue, ReductionType, StoreMode, V
 
 
+if TYPE_CHECKING:
+    from typing import Never, TypeVar
+
+    from ..ir import FixedLayout
+    from ..loop_body import LoopBody
+    from ..scheduler import BaseScheduling, Scheduler
+    from .wrapper import PythonWrapperCodegen
+
+    _T = TypeVar("_T")
+    SchedulingConstructor = Callable[[Optional[Scheduler]], BaseScheduling]
+    WrapperConstructor = type[PythonWrapperCodegen]
+    SymbolLike = Union[str, sympy.Symbol]
+
 schedule_log = torch._logging.getArtifactLogger(__name__, "schedule")
+log = logging.getLogger(__name__)
 
 
-def data_type_logger(msg):
+def data_type_logger(msg: str) -> None:
     if schedule_log.isEnabledFor(logging.DEBUG):
         schedule_log.debug("Data type propagation: %s", msg)
 
 
-@dataclasses.dataclass
+class WorkspaceZeroMode(enum.Enum):
+    UNINITIALIZED = 0
+    ZERO_ON_CALL = 1  # kernel may leave workspace dirty
+    ZERO_PER_GRAPH = 2  # must be re-zeroed by kernel
+
+    @staticmethod
+    def combine(a: WorkspaceZeroMode, b: WorkspaceZeroMode) -> WorkspaceZeroMode:
+        if a == b or b == WorkspaceZeroMode.UNINITIALIZED:
+            return a
+        if a == WorkspaceZeroMode.UNINITIALIZED:
+            return b
+        raise NotImplementedError(f"WorkspaceZeroMode.combine({a!r}, {b!r})")
+
+    @staticmethod
+    def from_bool(zero_fill: bool) -> WorkspaceZeroMode:
+        if zero_fill:
+            return WorkspaceZeroMode.ZERO_ON_CALL
+        return WorkspaceZeroMode.UNINITIALIZED
+
+
+@ir_dataclass(frozen=True)
 class WorkspaceArg:
     """A temporary buffer used for a single kernel, then discarded.
 
     Not registered as a traditional buffer since there are no users,
     so it would be dead code eliminated.
+
+    Args:
+        nbytes: The size of the buffer in bytes.
+        zero_fill: Whether the buffer should be initialized to zero.
+
     """
 
-    nbytes: sympy.Expr
-    zero_fill: bool
+    count: sympy.Expr
+    zero_mode: WorkspaceZeroMode
+    device: torch.device
+    outer_name: str
+    inner_name: str = "ws_ptr"
+    dtype: torch.dtype = torch.uint8
+
+    @staticmethod
+    def unique_name(prefix="workspace_") -> str:
+        return f"{prefix}{next(V.graph.workspace_id)}"
+
+    @staticmethod
+    def can_join(a: WorkspaceArg, b: WorkspaceArg) -> bool:
+        return (
+            a.inner_name == b.inner_name and a.dtype == b.dtype and a.device == b.device
+        )
+
+    @staticmethod
+    def join(a: WorkspaceArg, b: WorkspaceArg) -> WorkspaceArg:
+        return WorkspaceArg(
+            count=a.count + b.count,
+            zero_mode=WorkspaceZeroMode.combine(a.zero_mode, b.zero_mode),
+            dtype=a.dtype,
+            device=a.device,
+            inner_name=a.inner_name,
+            outer_name=a.outer_name,
+        )
+
+    @staticmethod
+    def maximum(a: WorkspaceArg, b: WorkspaceArg) -> WorkspaceArg:
+        assert (
+            a.dtype == b.dtype and a.device == b.device and a.inner_name == b.inner_name
+        )
+        return WorkspaceArg(
+            count=sympy.Max(a.count, b.count),
+            zero_mode=WorkspaceZeroMode.combine(a.zero_mode, b.zero_mode),
+            dtype=a.dtype,
+            device=a.device,
+            inner_name=a.inner_name,
+            outer_name=a.outer_name,
+        )
+
+    # These methods let WorkspaceArg pretend it is a buffer to reuse allocation code
+    def get_device(self) -> torch.device:
+        return self.device
+
+    get_device_or_error = get_device
+
+    def get_dtype(self) -> torch.dtype:
+        return self.dtype
+
+    def get_layout(self) -> FixedLayout:
+        from ..ir import FixedLayout
+
+        return FixedLayout(
+            device=self.device,
+            dtype=self.dtype,
+            size=[self.count],
+            stride=[1],
+        )
+
+    @property
+    def layout(self) -> FixedLayout:
+        return self.get_layout()
+
+    get_output_spec = get_layout
+    maybe_get_output_spec = get_layout
+    maybe_get_layout = get_layout
+
+    def get_size(self) -> list[sympy.Expr]:
+        return [self.count]
+
+    def get_stride(self) -> list[sympy.Expr]:
+        return [sympy.S.One]
+
+    def get_name(self) -> str:
+        return self.outer_name
+
+    def get_inputs_that_alias_output(self) -> list[str]:
+        return []
 
 
 @dataclasses.dataclass
@@ -70,7 +183,7 @@ class TensorArg:
     name: str
     buffer: str
     dtype: torch.dtype
-    offset: sympy.Expr = sympy.Integer(0)  # c++ only
+    offset: sympy.Expr = sympy.S.Zero  # c++ only
     alias_of: Optional[str] = None  # halide only
 
 
@@ -80,33 +193,43 @@ class SizeArg:
     expr: sympy.Expr
 
     @property
-    def alias_of(self):
+    def alias_of(self) -> Optional[str]:
         return None
 
 
 @dataclasses.dataclass
+class ConstexprArg:
+    name: str
+
+
+@dataclasses.dataclass
+class TMADescriptorArg:
+    name: str
+
+
+@dataclasses.dataclass
 class DeviceCodegen:
-    scheduling: Any
-    wrapper_codegen: type
-    cpp_wrapper_codegen: type = type(None)
+    scheduling: SchedulingConstructor
+    wrapper_codegen: WrapperConstructor
+    cpp_wrapper_codegen: Optional[WrapperConstructor] = None
 
 
-KernelArgType = Union[WorkspaceArg, TensorArg, SizeArg]
+KernelArgType = Union[WorkspaceArg, TensorArg, SizeArg, TMADescriptorArg, ConstexprArg]
 
-device_codegens: Dict[str, DeviceCodegen] = {}
+device_codegens: dict[str, DeviceCodegen] = {}
 
 
 class DeviceOpOverrides:
-    def import_get_raw_stream_as(self, name):
+    def import_get_raw_stream_as(self, name: str):
         raise NotImplementedError
 
-    def set_device(self, device_idx):
+    def set_device(self, device_idx: int) -> str:
         raise NotImplementedError
 
     def synchronize(self):
         raise NotImplementedError
 
-    def device_guard(self, device_idx):
+    def device_guard(self, device_idx: int) -> str:
         raise NotImplementedError
 
     def cpp_device_guard(self):
@@ -130,9 +253,6 @@ class DeviceOpOverrides:
     def kernel_driver(self):
         raise NotImplementedError
 
-    def abi_compatible_header(self):
-        raise NotImplementedError
-
     def cpp_stream_type(self):
         raise NotImplementedError
 
@@ -145,8 +265,11 @@ class DeviceOpOverrides:
     def cpp_device_ptr(self):
         raise NotImplementedError
 
+    def tma_descriptor_helpers(self):
+        raise NotImplementedError
 
-device_op_overrides_dict: Dict[str, DeviceOpOverrides] = {}
+
+device_op_overrides_dict: dict[str, DeviceOpOverrides] = {}
 
 
 # The code generated by Inductor consists of two main parts: kernel code and wrapper code.
@@ -172,10 +295,10 @@ device_op_overrides_dict: Dict[str, DeviceOpOverrides] = {}
 # https://github.com/intel/intel-extension-for-pytorch/blob/5dcc9d57e5422cf295e1a1ee97896d6b6a554a85/intel_extension_for_pytorch/_inductor/__init__.py#L9
 def register_backend_for_device(
     device: str,
-    device_scheduling: Any,
-    device_wrapper_codegen: type,
-    device_cpp_wrapper_codegen: type = type(None),
-):
+    device_scheduling: SchedulingConstructor,
+    device_wrapper_codegen: WrapperConstructor,
+    device_cpp_wrapper_codegen: Optional[WrapperConstructor] = None,
+) -> None:
     device_codegens[device] = DeviceCodegen(
         device_scheduling, device_wrapper_codegen, device_cpp_wrapper_codegen
     )
@@ -194,7 +317,11 @@ class BackendFeature(Enum):
     REDUCE_TO_SINGLE_ELEMENT = auto()
 
 
-def get_backend_features(device: Union[torch.device, str]):
+def get_backend_features(
+    device: Union[torch.device, str, None]
+) -> OrderedSet[BackendFeature]:
+    if device is None:
+        return OrderedSet()
     init_backend_registration()
     if isinstance(device, torch.device):
         device_type = device.type
@@ -202,21 +329,27 @@ def get_backend_features(device: Union[torch.device, str]):
         assert isinstance(device, str)
         device_type = device
         device = torch.device(device_type)
-    scheduling = get_scheduling_for_device(device_type)
-    return scheduling(None).get_backend_features(device)
+    scheduling_ctor = get_scheduling_for_device(device_type)
+    assert scheduling_ctor
+    scheduling = scheduling_ctor(None)
+    return scheduling.get_backend_features(device)
 
 
-def has_backend_feature(device, feature):
+def has_backend_feature(
+    device: Union[torch.device, str, None], feature: BackendFeature
+) -> bool:
     """See also V.graph.has_feature"""
     assert isinstance(feature, BackendFeature)
     return feature in get_backend_features(device)
 
 
-def get_scheduling_for_device(device: str):
+def get_scheduling_for_device(device: str) -> Optional[SchedulingConstructor]:
     return device_codegens[device].scheduling if device in device_codegens else None
 
 
-def get_wrapper_codegen_for_device(device: str, cpp_wrapper: bool = False):
+def get_wrapper_codegen_for_device(
+    device: str, cpp_wrapper: bool = False
+) -> Optional[WrapperConstructor]:
     if device in device_codegens:
         wrapper_codegen_obj: DeviceCodegen = device_codegens[device]
         return (
@@ -224,18 +357,18 @@ def get_wrapper_codegen_for_device(device: str, cpp_wrapper: bool = False):
             if cpp_wrapper
             else wrapper_codegen_obj.wrapper_codegen
         )
-    else:
-        return None
+    return None
 
 
 @functools.lru_cache(None)
-def init_backend_registration():
+def init_backend_registration() -> None:
     from .cpp import CppScheduling
     from .cpp_wrapper_cpu import CppWrapperCpu
     from .cpp_wrapper_cpu_array_ref import CppWrapperCpuArrayRef
     from .cpp_wrapper_gpu import CppWrapperGpu
     from .cuda_combined_scheduling import CUDACombinedScheduling
     from .halide import HalideScheduling
+    from .mps import MetalScheduling
     from .triton import TritonScheduling
     from .wrapper import PythonWrapperCodegen
 
@@ -247,17 +380,22 @@ def init_backend_registration():
         }
         register_backend_for_device(
             "cpu",
-            lambda *args, **kwargs: cpu_backends[config.cpu_backend](*args, **kwargs),
+            lambda scheduling: cpu_backends[config.cpu_backend](scheduling),
             PythonWrapperCodegen,
-            CppWrapperCpuArrayRef if config.allow_stack_allocation else CppWrapperCpu,
+            CppWrapperCpuArrayRef
+            if config.aot_inductor.allow_stack_allocation
+            else CppWrapperCpu,
         )
 
     if get_scheduling_for_device("cuda") is None:
         # CUDACombinedScheduling combines Triton and CUDA C++ scheduling for CUDA devices via delegation
-        cuda_backends = {"triton": CUDACombinedScheduling, "halide": HalideScheduling}
+        cuda_backends = {
+            "triton": CUDACombinedScheduling,
+            "halide": HalideScheduling,
+        }
         register_backend_for_device(
             "cuda",
-            lambda *args, **kwargs: cuda_backends[config.cuda_backend](*args, **kwargs),
+            lambda scheduling: cuda_backends[config.cuda_backend](scheduling),
             PythonWrapperCodegen,
             CppWrapperGpu,
         )
@@ -267,6 +405,15 @@ def init_backend_registration():
             "xpu",
             TritonScheduling,
             PythonWrapperCodegen,
+            CppWrapperGpu,
+        )
+
+    if get_scheduling_for_device("mps") is None:
+        register_backend_for_device(
+            "mps",
+            MetalScheduling,
+            PythonWrapperCodegen,
+            CppWrapperGpu,
         )
 
     private_backend = torch._C._get_privateuse1_backend_name()
@@ -291,46 +438,33 @@ def init_backend_registration():
             pass
 
 
-def index_prevent_reordering(index: List[sympy.Expr], index_vars, sizes):
+def index_prevent_reordering(
+    index: list[sympy.Expr], index_vars, sizes
+) -> list[sympy.Expr]:
     from ..ir import FlexibleLayout
 
     # added contiguous index prevents reordering
     return [*index, sympy_dot(index_vars, FlexibleLayout.contiguous_strides(sizes))]
 
 
-def register_device_op_overrides(device: str, device_op_overrides: DeviceOpOverrides):
+def register_device_op_overrides(
+    device: str, device_op_overrides: DeviceOpOverrides
+) -> None:
     device_op_overrides_dict[device] = device_op_overrides
 
 
-def get_device_op_overrides(device: str):
+def get_device_op_overrides(device: str) -> DeviceOpOverrides:
     assert isinstance(device, str)
 
-    if not device_op_overrides_dict.keys():
-        from . import cpu_device_op_overrides  # noqa: F401
+    if not device_op_overrides_dict:
+        from . import cpu_device_op_overrides, mps_device_op_overrides  # noqa: F401
         from .cuda import device_op_overrides  # noqa: F401
         from .xpu import device_op_overrides as xpu_op_overrides  # noqa: F401
 
-    if device in device_op_overrides_dict.keys():
-        return device_op_overrides_dict[device]
+    return device_op_overrides_dict[device]
 
 
-@functools.lru_cache(None)
-def boolean_ops():
-    return (
-        "isinf",
-        "isnan",
-        "logical_not",
-        "signbit",
-        "le",
-        "lt",
-        "ge",
-        "gt",
-        "eq",
-        "ne",
-    )
-
-
-DTYPE_TO_COMPUTATION_DTYPE = {
+DTYPE_TO_COMPUTATION_DTYPE: dict[torch.dtype, torch.dtype] = {
     torch.bfloat16: torch.float,
     torch.float16: torch.float,
     **{
@@ -354,8 +488,8 @@ DTYPE_TO_COMPUTATION_DTYPE = {
 
 def deduce_output_dtype_by_name(
     op_name: str,
-    *args,
-    **kwargs,
+    *args: Any,
+    **kwargs: Any,
 ) -> Optional[torch.dtype]:
     """
     Given op name and a list of input dtypes, deduce the output dtype
@@ -396,15 +530,15 @@ def deduce_output_dtype_by_name(
 
 
 class DataTypePropagation:
-    def __init__(self, body) -> None:
+    def __init__(self, body: LoopBody) -> None:
         self.body = body
-        self.graphs: Dict[Union[Callable[..., Any], str], Any] = {
+        self.graphs: dict[Union[Callable[..., Any], str], Any] = {
             "root": body.root_block.graph
         }
         for k, v in body.subblocks.items():
             self.graphs[k] = v.graph
 
-    def deduce_node_dtype_by_inputs(self, node: torch.fx.Node):
+    def deduce_node_dtype_by_inputs(self, node: torch.fx.Node) -> Optional[torch.dtype]:
         inputs = node.all_input_nodes
         input_nodes = [
             n for n in inputs if isinstance(n, torch.fx.Node) and n.op != "placeholder"
@@ -425,13 +559,13 @@ class DataTypePropagation:
             [n.meta[OptimizationContext.key].dtype for n in input_nodes],
         )
 
-    def deduce_node_dtype_by_subgraph(self, node: torch.fx.Node):
+    def deduce_node_dtype_by_subgraph(self, node: torch.fx.Node) -> torch.dtype:
         sub_graph = self.graphs[node.target]
         dtype = self.propagate_graph(sub_graph)
         assert dtype
         return dtype
 
-    def deduce_node_dtype(self, node: torch.fx.Node):
+    def deduce_node_dtype(self, node: torch.fx.Node) -> Optional[torch.dtype]:
         if node.op == "placeholder":
             return None
 
@@ -458,9 +592,9 @@ class DataTypePropagation:
 
         return self.deduce_node_dtype_by_inputs(node)
 
-    def propagate_graph(self, graph: torch.fx.Graph):
+    def propagate_graph(self, graph: torch.fx.Graph) -> Optional[torch.dtype]:
         assert graph.nodes
-        graph_dtype = None
+        graph_dtype: Optional[torch.dtype] = None
         # For masked_subblock, we use output's dtype to represent
         # the dtype of this subgraph. For other cases, graph_dtype
         # might be None
@@ -476,320 +610,42 @@ class DataTypePropagation:
                 graph_dtype = opt_ctx.dtype
         return graph_dtype
 
-    def propagate(self):
-        self.propagate_graph(self.graphs["root"])
+    def propagate(self) -> Optional[torch.dtype]:
+        return self.propagate_graph(self.graphs["root"])
 
     @classmethod
-    def propagate_loopbody(cls, body):
+    def propagate_loopbody(cls, body) -> Optional[torch.dtype]:
         return cls(body).propagate()
 
     @classmethod
-    def propagate_scheduler_node(cls, node):
+    def propagate_scheduler_node(cls, node) -> Optional[torch.dtype]:
         from ..loop_body import LoopBody
         from ..scheduler import SchedulerNode
 
         assert isinstance(node, SchedulerNode)
         assert isinstance(node._body, LoopBody)
-        DataTypePropagation.propagate_loopbody(node._body)
+        return DataTypePropagation.propagate_loopbody(node._body)
 
 
-# This printer contains rules that are supposed to be generic for both C/C++ and
-# Python
-class ExprPrinter(Printer):
-    @staticmethod
-    def paren(string):
-        def all_in_parens(string):
-            if string[0] != "(" or len(string) < 2:
-                return False
-            count = 1
-            for i, char in enumerate(string[1:]):
-                if char == "(":
-                    count += 1
-                elif char == ")":
-                    count -= 1
-                if count == 0 and i != len(string) - 2:
-                    return False
-            assert count == 0
-            return True
-
-        if (
-            isinstance(string, CSEVariable)
-            or re.match(r"^[a-z0-9_.]+$", string, re.IGNORECASE)
-            or re.match(r"^\([^)]*\)$", string, re.IGNORECASE)
-            or string == ""
-        ):
-            return string
-        # don't put extra parens for strings that are already wrapped in parens
-        if all_in_parens(string):
-            return string
-        return f"({string})"
-
-    def _print_Relational(self, expr):
-        return f" {expr.rel_op} ".join(map(self.paren, map(self._print, expr.args)))
-
-    def _print_Mul(self, expr):
-        return "*".join(map(self.paren, map(self._print, expr.args)))
-
-    def _print_Add(self, expr):
-        return " + ".join(map(self.paren, map(self._print, expr.args)))
-
-    # NB: this is OK to put here, because Mod is only defined for positive
-    # numbers, and so across C/Python its behavior is consistent
-    def _print_Mod(self, expr):
-        return " % ".join(map(self.paren, map(self._print, expr.args)))
-
-    def _print_FloatTrueDiv(self, expr):
-        lhs, rhs = expr.args
-        return f"{self.paren(self._print(lhs))} / {self.paren(self._print(rhs))}"
-
-    def _print_CleanDiv(self, expr):
-        return self._print_FloorDiv(expr)
-
-    def _print_Identity(self, expr):
-        return self._print(expr.args[0])
-
-    def _print_GreaterThan(self, expr):
-        # GreaterThan:          >=
-        # StrictlyGreaterThan:  >
-        # Go figure...
-        return " >= ".join(map(self.paren, map(self._print, expr.args)))
-
-    # NB: The C implementation is injected into codegen at
-    # torch/_inductor/codegen/wrapper.py
-    def _print_align(self, expr):
-        assert len(expr.args) == 1
-        return f"align({self._print(expr.args[0])})"
-
-    # This must be implemented because sympy will collect x * x into Pow(x, 2), without
-    # any explicit intervention.  We print it just like x * x, notably, we
-    # never generate sympy.Pow with floats.
-    #
-    # NB: this pow by natural, you should never have used builtin sympy.pow
-    # for FloatPow, and a symbolic exponent should be PowByNatural.  These
-    # means exp is guaranteed to be integer.
-    def _print_Pow(self, expr):
-        base, exp = expr.args
-        base = self._print(base)
-        assert exp == int(exp), exp
-        exp = int(exp)
-        assert exp >= 0
-        if exp > 0:
-            return "*".join([self.paren(base)] * exp)
-        else:  # exp == 0
-            return "1"
-
-    # Explicit NotImplemented functions are to prevent default sympy printing
-    # behavior, which will just barf out ToFloat(...) to your IR.  The error
-    # message is better here because it tells you which printer class it needs
-    # to go in.
-
-    def _print_ToFloat(self, expr):
-        raise NotImplementedError(f"_print_ToFloat not implemented for {type(self)}")
-
-    def _print_Infinity(self, expr):
-        raise NotImplementedError(f"_print_Infinity not implemented for {type(self)}")
-
-    def _print_NegativeInfinity(self, expr):
-        raise NotImplementedError(
-            f"_print_NegativeInfinity not implemented for {type(self)}"
-        )
-
-    def _print_FloorDiv(self, expr):
-        raise NotImplementedError(f"_print_FloorDiv not implemented for {type(self)}")
-
-    def _print_PythonMod(self, expr):
-        raise NotImplementedError(f"_print_PythonMod not implemented for {type(self)}")
-
-    def _print_IntTrueDiv(self, expr):
-        raise NotImplementedError(f"_print_IntTrueDiv not implemented for {type(self)}")
-
-    def _print_PowByNatural(self, expr):
-        raise NotImplementedError(
-            f"_print_PowByNatural not implemented for {type(self)}"
-        )
-
-    def _print_FloatPow(self, expr):
-        raise NotImplementedError(f"_print_FloatPow not implemented for {type(self)}")
-
-    def _print_TruncToInt(self, expr):
-        raise NotImplementedError(f"_print_TruncToInt not implemented for {type(self)}")
-
-    def _print_RoundToInt(self, expr):
-        raise NotImplementedError(f"_print_RoundToInt not implemented for {type(self)}")
-
-    def _print_RoundDecimal(self, expr):
-        raise NotImplementedError(
-            f"_print_RoundDecimal not implemented for {type(self)}"
-        )
-
-    # NB: Some float operations are INTENTIONALLY not implemented for
-    # printers.  You can implement them as a quick unblock, but it is better
-    # to ask yourself why we haven't done this computation in the Tensor
-    # universe instead
-
-    def _print_TruncToFloat(self, expr):
-        raise NotImplementedError(
-            f"_print_TruncToFloat not implemented for {type(self)}"
-        )
-
-    def doprint(self, expr, *, simplify: bool = True):
+class PythonPrinter(_PythonPrinter):
+    def doprint(
+        self, expr: sympy.Expr, *, simplify: bool = True, p: bool = True
+    ) -> str:
         # TODO: why are people passing strings to the printer here :think:
         if simplify and isinstance(expr, sympy.Expr) and hasattr(V.graph, "sizevars"):
             expr = V.graph.sizevars.simplify(expr)
         return super().doprint(expr)
 
 
-class PythonPrinter(ExprPrinter):
-    def _print_ToFloat(self, expr):
-        assert len(expr.args) == 1
-        return f"float({self._print(expr.args[0])})"
-
-    def _print_ModularIndexing(self, expr):
-        x, div, mod = expr.args
-        x = self.paren(self.doprint(x))
-        div = self.paren(self.doprint(div))
-        mod = self.paren(self.doprint(mod))
-        if div != "1":
-            x = f"({x} // {div})"
-        return f"{x} % {mod}"
-
-    def _print_Infinity(self, expr):
-        return "math.inf"
-
-    def _print_NegativeInfinity(self, expr):
-        return "-math.inf"
-
-    # WARNING: this is dangerous for Triton, which has C-style modulus
-    def _print_PythonMod(self, expr):
-        return " % ".join(map(self.paren, map(self._print, expr.args)))
-
-    # WARNING: this is dangerous for Triton, which has C-style modulus
-    def _print_FloorDiv(self, expr):
-        x, div = expr.args
-        x = self.paren(self.doprint(x))
-        div = self.paren(self.doprint(div))
-        return f"({x} // {div})"
-
-    # WARNING: this is dangerous for Triton, when lhs, rhs > 2**53, Python
-    # does a special algorithm
-    def _print_IntTrueDiv(self, expr):
-        lhs, rhs = expr.args
-        return f"{self.paren(self._print(lhs))} / {self.paren(self._print(rhs))}"
-
-    def _helper_sqrt(self, expr):
-        return f"math.sqrt({self._print(expr)})"
-
-    def _print_OpaqueUnaryFn_sqrt(self, expr):
-        return self._helper_sqrt(expr.args[0])
-
-    def _print_FloatPow(self, expr):
-        base, exp = expr.args
-        return f"{self.paren(self._print(base))} ** {self.paren(self._print(exp))}"
-
-    # TODO: Not sure this works with Triton, even when base/exp are integral
-    def _print_PowByNatural(self, expr):
-        base, exp = expr.args
-        return f"{self.paren(self._print(base))} ** {self.paren(self._print(exp))}"
-
-    def _print_floor(self, expr):
-        assert len(expr.args) == 1
-        return f"math.floor({self._print(expr.args[0])})"
-
-    def _print_FloorToInt(self, expr):
-        assert len(expr.args) == 1
-        return f"math.floor({self._print(expr.args[0])})"
-
-    def _print_TruncToInt(self, expr):
-        assert len(expr.args) == 1
-        # This also could have been int(), they'll do the same thing for float
-        return f"math.trunc({self._print(expr.args[0])})"
-
-    def _print_ceiling(self, expr):
-        assert len(expr.args) == 1
-        return f"math.ceil({self._print(expr.args[0])})"
-
-    def _print_CeilToInt(self, expr):
-        assert len(expr.args) == 1
-        return f"math.ceil({self._print(expr.args[0])})"
-
-    def _print_Abs(self, expr):
-        assert len(expr.args) == 1
-        return f"abs({self._print(expr.args[0])})"
-
-    # NB: It's expected that we've made explicit any promotion in the sympy
-    # expression, so it doesn't matter that Python max/min doesn't perform
-    # promotion
-    def _print_Max(self, expr):
-        assert len(expr.args) >= 2
-        return f"max({', '.join(map(self._print, expr.args))})"
-
-    def _print_Min(self, expr):
-        assert len(expr.args) >= 2
-        return f"min({', '.join(map(self._print, expr.args))})"
-
-    def _print_OpaqueUnaryFn_cos(self, expr):
-        assert len(expr.args) == 1
-        return f"math.cos({self._print(expr.args[0])})"
-
-    def _print_OpaqueUnaryFn_cosh(self, expr):
-        assert len(expr.args) == 1
-        return f"math.cosh({self._print(expr.args[0])})"
-
-    def _print_OpaqueUnaryFn_acos(self, expr):
-        assert len(expr.args) == 1
-        return f"math.acos({self._print(expr.args[0])})"
-
-    def _print_OpaqueUnaryFn_sin(self, expr):
-        assert len(expr.args) == 1
-        return f"math.sin({self._print(expr.args[0])})"
-
-    def _print_OpaqueUnaryFn_sinh(self, expr):
-        assert len(expr.args) == 1
-        return f"math.sinh({self._print(expr.args[0])})"
-
-    def _print_OpaqueUnaryFn_asin(self, expr):
-        assert len(expr.args) == 1
-        return f"math.asin({self._print(expr.args[0])})"
-
-    def _print_OpaqueUnaryFn_tan(self, expr):
-        assert len(expr.args) == 1
-        return f"math.tan({self._print(expr.args[0])})"
-
-    def _print_OpaqueUnaryFn_tanh(self, expr):
-        assert len(expr.args) == 1
-        return f"math.tanh({self._print(expr.args[0])})"
-
-    def _print_OpaqueUnaryFn_atan(self, expr):
-        assert len(expr.args) == 1
-        return f"math.atan({self._print(expr.args[0])})"
-
-    def _print_RoundToInt(self, expr):
-        assert len(expr.args) == 1
-        return f"round({self._print(expr.args[0])})"
-
-    def _print_RoundDecimal(self, expr):
-        assert len(expr.args) == 2
-        number, ndigits = expr.args
-        assert isinstance(ndigits, sympy.Integer)
-        return f"round({self._print(number)}, {ndigits})"
-
-
-class OpOverrides:
-    def __init__(self, parent):
-        super().__init__()
-        self._parent = parent
-
-    def __getattr__(self, item):
-        return getattr(self._parent, item)
+class OpDecompositions:
+    """
+    Decomposes inductor ops
+    """
 
     @staticmethod
-    def identity(value):
+    def identity(value: _T) -> _T:
         # used to trigger cse
         return value
-
-    @staticmethod
-    def constant(value, dtype):
-        return repr(value)
 
     @staticmethod
     def reciprocal(x):
@@ -833,13 +689,84 @@ class OpOverrides:
         return ops.truediv(one, ops.add(one, ops.exp(ops.neg(x))))
 
     @staticmethod
+    def relu(x):
+        return ops.maximum(x, ops.constant(0, torch.int32))
+
+    @staticmethod
+    def fma(x, y, z):
+        # for backends that don't override this (halide)
+        return ops.add(ops.mul(x, y), z)
+
+    @staticmethod
+    def floor_to_int(a, dtype):
+        return ops.to_dtype(ops.floor(a), dtype)
+
+    @staticmethod
+    def ceil_to_int(a, dtype):
+        return ops.to_dtype(ops.ceil(a), dtype)
+
+    @staticmethod
+    def trunc_to_int(a, dtype):
+        return ops.to_dtype(ops.trunc(a), dtype)
+
+    @staticmethod
+    def remainder(a, b):
+        r = ops.mod(a, b)
+        cond = ops.and_(
+            ops.ne(r, ops.constant(0, torch.int32)),
+            ops.ne(ops.signbit(r), ops.signbit(b)),
+        )
+        return ops.where(cond, ops.add(r, b), r)
+
+    @staticmethod
+    def round_to_int(a, dtype):
+        return ops.to_dtype(ops.round(a), dtype)
+
+
+class OpOverrides(OpDecompositions):
+    def __init__(self, parent):
+        super().__init__()
+        self._parent = parent
+
+    @staticmethod
+    def paren(string: str) -> str:
+        def all_in_parens(string: str) -> bool:
+            if string[0] != "(" or len(string) < 2:
+                return False
+            count = 1
+            for i, char in enumerate(string[1:]):
+                if char == "(":
+                    count += 1
+                elif char == ")":
+                    count -= 1
+                if count == 0 and i != len(string) - 2:
+                    return False
+            assert count == 0
+            return True
+
+        if (
+            isinstance(string, CSEVariable)
+            or re.match(r"^[a-z0-9_.]+$", string, re.IGNORECASE)
+            or re.match(r"^\([^)]*\)$", string, re.IGNORECASE)
+            or string == ""
+        ):
+            return string
+        # don't put extra parens for strings that are already wrapped in parens
+        if all_in_parens(string):
+            return string
+        return f"({string})"
+
+    def __getattr__(self, item):
+        return getattr(self._parent, item)
+
+    @staticmethod
+    def constant(value, dtype):
+        return repr(value)
+
+    @staticmethod
     def libdevice_sigmoid(x):
         one = ops.constant(1, torch.int32)
         return ops.truediv(one, ops.add(one, ops.libdevice_exp(ops.neg(x))))
-
-    @staticmethod
-    def relu(x):
-        return ops.maximum(x, ops.constant(0, torch.int32))
 
     @staticmethod
     def libdevice_abs(x):
@@ -867,61 +794,31 @@ class OpOverrides:
 
     @staticmethod
     def bitwise_not(x):
-        return f"~{ExprPrinter.paren(x)}"
+        return f"~{OpOverrides.paren(x)}"
 
     @staticmethod
     def logical_not(a):
-        return f"{ExprPrinter.paren(a)} == 0"
+        return f"{OpOverrides.paren(a)} == 0"
 
     @staticmethod
     def bitwise_and(x, y):
-        return f"{ExprPrinter.paren(x)} & {ExprPrinter.paren(y)}"
+        return f"{OpOverrides.paren(x)} & {OpOverrides.paren(y)}"
 
     @staticmethod
     def bitwise_or(x, y):
-        return f"{ExprPrinter.paren(x)} | {ExprPrinter.paren(y)}"
+        return f"{OpOverrides.paren(x)} | {OpOverrides.paren(y)}"
 
     @staticmethod
     def bitwise_xor(x, y):
-        return f"{ExprPrinter.paren(x)} ^ {ExprPrinter.paren(y)}"
+        return f"{OpOverrides.paren(x)} ^ {OpOverrides.paren(y)}"
 
     @staticmethod
     def bitwise_left_shift(x, y):
-        return f"{ExprPrinter.paren(x)} << {ExprPrinter.paren(y)}"
+        return f"{OpOverrides.paren(x)} << {OpOverrides.paren(y)}"
 
     @staticmethod
     def bitwise_right_shift(x, y):
-        return f"{ExprPrinter.paren(x)} >> {ExprPrinter.paren(y)}"
-
-    @staticmethod
-    def remainder(a, b):
-        r = ops.mod(a, b)
-        cond = ops.and_(
-            ops.ne(r, ops.constant(0, torch.int32)),
-            ops.ne(ops.signbit(r), ops.signbit(b)),
-        )
-        return ops.where(cond, ops.add(r, b), r)
-
-    @staticmethod
-    def fma(x, y, z):
-        # for backends that don't override this (halide)
-        return ops.add(ops.mul(x, y), z)
-
-    @staticmethod
-    def trunc_to_int(a, dtype):
-        return ops.to_dtype(ops.trunc(a), dtype)
-
-    @staticmethod
-    def floor_to_int(a, dtype):
-        return ops.to_dtype(ops.floor(a), dtype)
-
-    @staticmethod
-    def ceil_to_int(a, dtype):
-        return ops.to_dtype(ops.ceil(a), dtype)
-
-    @staticmethod
-    def round_to_int(a, dtype):
-        return ops.to_dtype(ops.round(a), dtype)
+        return f"{OpOverrides.paren(x)} >> {OpOverrides.paren(y)}"
 
     @staticmethod
     def int_truediv(a, b):
@@ -936,7 +833,7 @@ class OpOverrides:
 
     @classmethod
     def _initialize_pointwise_overrides(cls, target):
-        assert target in {"triton", "cpp", "cppvec"}, target
+        assert target in ("triton", "cpp", "cppvec"), target
 
         for funcname, data in pointwise_overrides_data.items():
             impl = getattr(data, target)
@@ -960,7 +857,7 @@ class OverridesData:
 
 # NB: if you add a new special function, don't forget to update
 # torch._inductor.ops_handler too
-pointwise_overrides_data: Dict[str, OverridesData] = dict(
+pointwise_overrides_data: dict[str, OverridesData] = dict(
     airy_ai=OverridesData(
         type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
         cpp=lambda x: f"airy_ai_forward({x})",
@@ -1097,7 +994,7 @@ pointwise_overrides_data: Dict[str, OverridesData] = dict(
     ),
     polygamma=OverridesData(
         type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
-        cpp=lambda x, y: f"calc_polygamma({y}, {x})",
+        cpp=lambda x, y: f"{x} == 0 ? calc_digamma({y}) : calc_polygamma({y}, {x})",
         name="polygamma",
     ),
     # psi - alias to digamma
@@ -1217,7 +1114,7 @@ class DeferredLine(DeferredLineBase):
 
 
 class BracesBuffer(IndentedBuffer):
-    def indent(self, offset=1):
+    def indent(self, offset=1) -> contextlib.AbstractContextManager[None]:
         @contextlib.contextmanager
         def ctx():
             for _ in range(offset):
@@ -1239,12 +1136,22 @@ class BracesBuffer(IndentedBuffer):
 
 class InplacedBuffer(NamedTuple):
     inner_name: str
-    other_names: List[str]
+    other_names: list[str]
+
+
+@dataclasses.dataclass
+class ArgName:
+    name: str
+    # is_constexpr=True is used to attach a " : tl.constexpr" into the argument list
+    is_constexpr: bool = False
+
+    def full_name(self):
+        return f"{self.name}{' : tl.constexpr' if self.is_constexpr else ''}"
 
 
 class KernelArgs:
     @staticmethod
-    def _lookup(prefix, odict, name):
+    def _lookup(prefix: str, odict: dict[SymbolLike, str], name: SymbolLike) -> str:
         assert isinstance(name, (str, sympy.Symbol))
         if name not in odict:
             odict[name] = f"{prefix}{len(odict)}"
@@ -1255,9 +1162,9 @@ class KernelArgs:
         self.output_buffers = {}
         self.inplace_buffers = {}
         self.sizevars = sizevars or {}
-        self.workspace_arg = None
+        self.workspace_args = []
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         return "KernelArgs({})".format(
             ", ".join(
                 map(
@@ -1309,15 +1216,74 @@ class KernelArgs:
             self.inplace_buffers[input_name] = buf
             self.inplace_buffers[output_name] = buf
 
-    def workspace(self, nbytes: sympy.Expr, zero_fill: bool):
-        if self.workspace_arg is None:
-            self.workspace_arg = WorkspaceArg(nbytes, zero_fill)
-            return "ws_ptr", 0
+    def workspace(self, nbytes: sympy.Expr, zero_fill: bool) -> tuple[str, int]:
+        """
+        Allocate or extend a workspace buffer of nbytes bytes.
 
-        offset = self.workspace_arg.nbytes
-        zero_fill = zero_fill or self.workspace_arg.zero_fill
-        self.workspace_arg = WorkspaceArg(offset + nbytes, zero_fill)
-        return "ws_ptr", offset
+        This function manages the allocation of a workspace buffer. It either creates
+        a new WorkspaceArg or extends an existing one.
+
+        Note:
+        - Calling this function will in-place mutate the args by adding or updating
+        a WorkspaceArg.
+        - The codegen for generating the Python argdefs and call_defs will check
+        this field and allocate the buffer accordingly.
+        - A new argument "ws_ptr" will be present in the generated code.
+
+        Args:
+            nbytes (sympy.Expr): The number of bytes to allocate.
+            zero_fill (bool): Whether to initialize the buffer to zero.
+
+        Returns:
+            Tuple[str, int]: A tuple containing:
+                - "ws_ptr": A string identifier for the workspace pointer.
+                - offset: An integer representing the byte offset in the workspace.
+        """
+        arg = WorkspaceArg(
+            count=nbytes,
+            zero_mode=WorkspaceZeroMode.from_bool(zero_fill),
+            device=V.graph.get_current_device_or_throw(),
+            outer_name=WorkspaceArg.unique_name(),
+        )
+        for i, existing_arg in enumerate(self.workspace_args):
+            if WorkspaceArg.can_join(existing_arg, arg):
+                offset = existing_arg.count
+                self.workspace_args[i] = WorkspaceArg.join(existing_arg, arg)
+                return existing_arg.inner_name, offset
+            assert (
+                existing_arg.inner_name != arg.inner_name
+                and existing_arg.outer_name != arg.outer_name
+            )
+        self.workspace_args.append(arg)
+        return arg.inner_name, 0
+
+    def semaphores(self, min_size: sympy.Expr) -> str:
+        """
+        Lazily allocate a graph-wide semaphores buffer with at least min_size.  This is a single buffer shared by
+        all kernels and zero initialized once at graph start.  Each kernel must leave the buffer zeroed on exit.
+
+        Warning: multiple calls to this function will return the same buffer.
+
+        Args:
+            min_size: the number of int32 semaphores required
+
+        Returns:
+            name of the semaphores buffer
+        """
+        current_device = V.graph.get_current_device_or_throw()
+        arg = WorkspaceArg(
+            count=min_size,
+            zero_mode=WorkspaceZeroMode.ZERO_PER_GRAPH,
+            dtype=torch.uint32,
+            inner_name="sem_ptr",
+            outer_name=f"semaphores_{current_device.type}_{current_device.index}",
+            device=current_device,
+        )
+        for existing_arg in self.workspace_args:
+            if existing_arg.inner_name == arg.inner_name:
+                assert arg == existing_arg
+        self.workspace_args.append(arg)
+        return arg.inner_name
 
     def seed_offset(self, name, value):
         if value in self.sizevars:
@@ -1384,18 +1350,20 @@ class KernelArgs:
             arg_types.append(f"const {INDEX_TYPE}")
             if V.graph.wrapper_code:
                 V.graph.wrapper_code.ensure_size_computed(outer)
-        assert self.workspace_arg is None, "Workspace not supported on CPU "
+        assert not self.workspace_args, "Workspace not supported on CPU "
         return arg_defs, call_args, arg_types
 
-    def python_argdefs(self):
-        arg_defs: List[str] = []
-        call_args: List[str] = []
-        arg_types: List[torch.dtype] = []
-        precompile_args: List[Union[TensorArg, SizeArg, WorkspaceArg]] = []
+    def python_argdefs(
+        self,
+    ) -> tuple[list[ArgName], list[str], list[KernelArgType], list[torch.dtype]]:
+        arg_defs: list[ArgName] = []
+        call_args: list[str] = []
+        arg_types: list[torch.dtype] = []
+        precompile_args: list[KernelArgType] = []
         for inplaced in unique(self.inplace_buffers.values()):
             if self._buffer_is_marked_removed(inplaced):
                 continue
-            arg_defs.append(inplaced.inner_name)
+            arg_defs.append(ArgName(inplaced.inner_name))
             call_args.append(inplaced.other_names[-1])
             arg_types.append(V.graph.get_dtype(inplaced.other_names[-1]))
             precompile_args.append(
@@ -1410,7 +1378,7 @@ class KernelArgs:
         ):
             if outer in self.inplace_buffers or self._buffer_is_marked_removed(inner):
                 continue
-            arg_defs.append(inner)
+            arg_defs.append(ArgName(inner))
             call_args.append(outer)
             arg_types.append(V.graph.get_dtype(outer))
             precompile_args.append(
@@ -1421,17 +1389,17 @@ class KernelArgs:
                 )
             )
         for outer, inner in self.sizevars.items():
-            arg_defs.append(inner)
+            arg_defs.append(ArgName(inner))
             call_args.append(outer)
             arg_types.append(type(outer))  # type: ignore[arg-type]
             precompile_args.append(SizeArg(inner, outer))
             if V.graph.wrapper_code:
                 V.graph.wrapper_code.ensure_size_computed(outer)
-        if self.workspace_arg is not None:
-            arg_defs.append("ws_ptr")
-            call_args.append("workspace")
-            precompile_args.append(self.workspace_arg)
-            arg_types.append(torch.uint8)
+        for arg in self.workspace_args:
+            arg_defs.append(ArgName(arg.inner_name))
+            call_args.append(arg.outer_name)
+            precompile_args.append(arg)
+            arg_types.append(arg.dtype)
         return arg_defs, call_args, precompile_args, arg_types
 
     def aliases(self):
@@ -1480,11 +1448,17 @@ class CSEVariable:
     See example of TritonCSEVariable in triton.py
     """
 
-    def __init__(self, name, bounds: ValueRanges[Any]):
+    def __init__(
+        self,
+        name,
+        bounds: ValueRanges[Any],
+        dtype: Optional[torch.dtype] = None,
+    ):
         assert isinstance(bounds, ValueRanges)
         self.name = name
         self.bounds = bounds
-        self.use_count = 1  # track how many tims this expression is used
+        self.use_count = 1  # track how many times this expression is used
+        self.dtype = dtype
 
     def __str__(self):
         return self.name
@@ -1522,24 +1496,24 @@ class CSE:
     ):
         self.prefix = prefix
         self.suffix = suffix
-        self.cache = {}
+        self._cache = {}
         self.name_prefix = name_prefix
         self.store_cache = store_cache or {}
         self.reduction_cache = reduction_cache or {}
         self.iter_buffer_ids = iter_buffers or itertools.count()
-        self.invalidated_stores = OrderedSet()  # type: ignore[var-annotated]
+        self.invalidated_stores = OrderedSet[str]()
         self.varname_map = varname_map or {}
 
-    def invalidate(self, keep_vars: OrderedSet[str]):
+    def invalidate(self, keep_vars: Union[OrderedSet[str], OrderedSet[Never]]):
         for name, tmp in list(self.store_cache.items()):
             if tmp not in keep_vars:
                 del self.store_cache[name]
                 self.invalidated_stores.add(name)
-        self.cache = {k: v for k, v in self.cache.items() if v in keep_vars}
+        self._cache = {k: v for k, v in self._cache.items() if v in keep_vars}
 
     def clone(self):
         # Note(fdrocha): reduction_cache is not being cloned, not sure if this is intentional
-        return CSE(
+        return type(self)(
             prefix=self.prefix,
             suffix=self.suffix,
             name_prefix=self.name_prefix,
@@ -1548,19 +1522,35 @@ class CSE:
             varname_map=self.varname_map,
         )
 
+    def augment_key(self, cache_key: object) -> object:
+        "Override this method to augment cache key with backend specifics"
+        return cache_key
+
+    def put(self, cache_key: object, val: CSEVariable) -> None:
+        self._cache[self.augment_key(cache_key)] = val
+
+    def contains(self, cache_key) -> bool:
+        return self.augment_key(cache_key) in self._cache
+
+    def try_get(self, cache_key: object) -> Optional[CSEVariable]:
+        return self._cache.get(self.augment_key(cache_key), None)
+
+    def get(self, cache_key: object) -> CSEVariable:
+        return self._cache[self.augment_key(cache_key)]
+
     def generate(
         self,
         buffer: IndentedBuffer,
-        expr: Union[str, CSEVariable, OpsValue, IndentedBuffer],
+        expr: Union[str, CSEVariable, OpsValue, IndentedBuffer, DeferredLineBase],
         *,
         bounds: ValueRanges[Any] = ValueRanges.unknown(),
         write=True,
         assignment=True,
+        dtype: Optional[torch.dtype] = None,
     ) -> CSEVariable:
         if isinstance(expr, OpsValue):
             expr = expr.value
 
-        assert isinstance(expr, (str, CSEVariable, IndentedBuffer)), type(expr)
         assert write or assignment
         if isinstance(expr, CSEVariable):
             # If the expressions were always created with all the information, we could
@@ -1569,11 +1559,17 @@ class CSE:
             expr.bounds = expr.bounds.tighten(bounds)
             expr.use_count += 1
             return expr
-        cache_key = expr.getvalue() if isinstance(expr, IndentedBuffer) else expr
-        var = self.cache.get(cache_key, None)
+        elif isinstance(expr, IndentedBuffer):
+            cache_key = expr.getvalue()
+        elif isinstance(expr, DeferredLineBase):
+            cache_key = expr.line
+        else:
+            assert isinstance(expr, str)
+            cache_key = expr
+        var = self.try_get(cache_key)
         if not var:
-            var = self.newvar(bounds)
-            self.cache[cache_key] = var
+            var = self.newvar(bounds, dtype)
+            self.put(cache_key, var)
             if write:
                 if V.kernel.current_node:
                     V.kernel.current_node.codegen_originating_info(
@@ -1584,6 +1580,11 @@ class CSE:
                         buffer.writeline(f"{self.prefix}{var} =")
                     buffer.splice(expr)
                     buffer.writeline(self.suffix)
+                elif isinstance(expr, DeferredLineBase):
+                    assert assignment
+                    buffer.writeline(
+                        expr._new_line(f"{self.prefix}{var} = {expr.line}{self.suffix}")
+                    )
                 else:
                     if assignment:
                         line = f"{self.prefix}{var} = {expr}{self.suffix}"
@@ -1596,10 +1597,27 @@ class CSE:
 
         return var
 
-    def newvar(self, bounds: ValueRanges[Any] = ValueRanges.unknown()) -> CSEVariable:
+    def newvar(
+        self,
+        bounds: ValueRanges[Any] = ValueRanges.unknown(),
+        dtype: Optional[torch.dtype] = None,
+    ) -> CSEVariable:
         var_name = f"{self.name_prefix}{next(self.iter_buffer_ids)}"
-        var = V.kernel.create_cse_var(var_name, bounds)
+        var = V.kernel.create_cse_var(var_name, bounds, dtype)
         self.varname_map[var_name] = var
+        return var
+
+    def namedvar(
+        self,
+        name: str,
+        bounds: ValueRanges[Any] = ValueRanges.unknown(),
+        dtype: Optional[torch.dtype] = None,
+    ) -> CSEVariable:
+        torch._check_value(
+            name not in self.varname_map, lambda: f"duplicate name: {name}"
+        )
+        var = V.kernel.create_cse_var(name, bounds, dtype)
+        self.varname_map[name] = var
         return var
 
 
@@ -1659,16 +1677,16 @@ class Kernel(CodeGen):
         self.num_reduction = 0
 
         self.cse: CSE = CSE(self.newvar_prefix, self.suffix)
-        self.must_keep_buffers = OrderedSet()  # type: ignore[var-annotated]
-        self.store_buffer_names = OrderedSet()  # type: ignore[var-annotated]
+        self.must_keep_buffers = OrderedSet[str]()
+        self.store_buffer_names = OrderedSet[str]()
         self._load_mask = None
         self._load_other = None
         # OrderedSet in set_current_node
         self.current_node = None
-        self.node_to_bounds: Optional[Dict[torch.fx.Node, ValueRanges[Any]]] = None
+        self.node_to_bounds: Optional[dict[torch.fx.Node, ValueRanges[Any]]] = None
 
-        self.removed_buffers = OrderedSet()  # type: ignore[var-annotated]
-        self.inplaced_to_remove = OrderedSet()  # type: ignore[var-annotated]
+        self.removed_buffers = OrderedSet[str]()
+        self.inplaced_to_remove = OrderedSet[str]()
 
         # key: the buffer to write
         # value: the buffer to read and whose memory can be reused for
@@ -1692,7 +1710,7 @@ class Kernel(CodeGen):
     def swap_buffers(self, lb, cb=None, sb=None):
         def scope_cse(cse):
             new_cse = cse.clone()
-            new_cse.cache = ScopedDict(cse.cache)
+            new_cse._cache = ScopedDict(cse._cache)
             new_cse.reduction_cache = ScopedDict(cse.reduction_cache)
             new_cse.store_cache = ScopedDict(cse.store_cache)
             return new_cse
@@ -1741,27 +1759,27 @@ class Kernel(CodeGen):
         dtype: torch.dtype,
         src_dtype: torch.dtype,
         reduction_type: ReductionType,
-        value: Union[CSEVariable, Tuple[CSEVariable, ...]],
-    ) -> Union[CSEVariable, Tuple[CSEVariable, ...]]:
+        value: Union[CSEVariable, tuple[CSEVariable, ...]],
+    ) -> Union[CSEVariable, tuple[CSEVariable, ...]]:
         raise NotImplementedError
 
     def scan(
         self,
-        dtypes: Tuple[torch.dtype, ...],
+        dtypes: tuple[torch.dtype, ...],
         combine_fn: Callable[
-            [Tuple[CSEVariable, ...], Tuple[CSEVariable, ...]], Tuple[CSEVariable, ...]
+            [tuple[CSEVariable, ...], tuple[CSEVariable, ...]], tuple[CSEVariable, ...]
         ],
-        values: Tuple[CSEVariable, ...],
-    ) -> Tuple[CSEVariable, ...]:
+        values: tuple[CSEVariable, ...],
+    ) -> tuple[CSEVariable, ...]:
         raise NotImplementedError
 
     def sort(
         self,
-        dtypes: Tuple[torch.dtype, ...],
-        values: Tuple[CSEVariable, ...],
+        dtypes: tuple[torch.dtype, ...],
+        values: tuple[CSEVariable, ...],
         stable: bool,
         descending: bool,
-    ) -> Tuple[CSEVariable, ...]:
+    ) -> tuple[CSEVariable, ...]:
         raise NotImplementedError
 
     def var_ranges(self):
@@ -1770,11 +1788,11 @@ class Kernel(CodeGen):
     def bucketize(
         self,
         values: CSEVariable,
-        boundaries: Tuple[str, sympy.Expr, sympy.Expr, sympy.Expr],
+        boundaries: tuple[str, sympy.Expr, sympy.Expr, sympy.Expr],
         boundary_indices: CSEVariable,
         indexing_dtype: torch.dtype,
         right: bool,
-        sorter: Optional[Tuple[str, sympy.Expr]] = None,
+        sorter: Optional[tuple[str, sympy.Expr]] = None,
         sorter_indices: Optional[CSEVariable] = None,
     ) -> CSEVariable:
         """
@@ -1836,12 +1854,62 @@ class Kernel(CodeGen):
                     bounds = CSEProxy._bound_variable(name, *args, **kwargs)
 
                     value = getattr(parent_handler, name)(*args, **kwargs)  # type: ignore[has-type]
+                    dtype_handler = DtypePropagationOpsHandler()
+
+                    output_idx = 0
 
                     def do_cse(v):
+                        # cpp backend doesnt set current device - TODO: fix
+                        if V.graph.current_device is not None:
+                            device_str = V.graph.get_current_device_or_throw().type
+                            triton_backend = (
+                                config.cpu_backend == "triton"
+                                if device_str == "cpu"
+                                else config.cuda_backend == "triton"
+                                if device_str != "mps"
+                                else False
+                            )
+                        else:
+                            triton_backend = False
+
+                        # only triton backend tracks dtype currently
+                        if triton_backend:
+                            if name == "masked":
+                                output_dtype = value.dtype
+                            else:
+                                output_dtype = getattr(
+                                    dtype_handler,
+                                    name,
+                                )(*args, **kwargs)
+                        else:
+                            # cpp backend doesnt track dtype yet
+                            output_dtype = None
+
                         csevar = V.kernel.cse.generate(
-                            V.kernel.compute, v, bounds=bounds
+                            V.kernel.compute,
+                            v,
+                            bounds=bounds,
+                            dtype=output_dtype,
                         )
+
+                        nonlocal output_idx
+                        if (
+                            config.test_configs.runtime_triton_dtype_assert
+                            and triton_backend
+                        ):
+                            from torch._inductor.codegen.triton import triton_type
+
+                            # we tree_map over the output, so we need to fetch corresponding dtype
+                            if isinstance(output_dtype, (list, tuple)):
+                                output_dtype = output_dtype[output_idx]
+
+                            V.kernel.compute.writeline(
+                                f"tl.static_assert({csevar}.dtype == {triton_type(output_dtype)})"
+                            )
+                        output_idx += 1
+
                         csevar.update_on_args(name, args, kwargs)
+
                         return csevar
 
                     return pytree.tree_map(do_cse, value)
@@ -1888,8 +1956,7 @@ class Kernel(CodeGen):
 
                     arg_bounds = list(map(arg_to_bound, args))
                     return getattr(CSEProxy.vr_analysis, name)(*arg_bounds)
-                else:
-                    return ValueRanges.unknown()
+                return ValueRanges.unknown()
 
             @staticmethod
             def indirect_indexing(
@@ -1983,8 +2050,7 @@ class Kernel(CodeGen):
                     CSEProxy._update_store_cache(name, value)
                 if name not in V.graph.removed_buffers:
                     return self.store(name, index, value, mode=mode)
-                else:
-                    return None  # type: ignore[return-value]
+                return None  # type: ignore[return-value]
 
             @staticmethod
             def store_reduction(name: str, index: sympy.Expr, value: CSEVariable):
@@ -1999,39 +2065,39 @@ class Kernel(CodeGen):
                 dtype: torch.dtype,
                 src_dtype: torch.dtype,
                 reduction_type: ReductionType,
-                value: Union[CSEVariable, Tuple[CSEVariable, ...]],
-            ) -> Union[CSEVariable, Tuple[CSEVariable, ...]]:
+                value: Union[CSEVariable, tuple[CSEVariable, ...]],
+            ) -> Union[CSEVariable, tuple[CSEVariable, ...]]:
                 self.num_reduction += 1
                 return self.reduction(dtype, src_dtype, reduction_type, value)
 
             @staticmethod
             def scan(
-                dtypes: Tuple[torch.dtype, ...],
+                dtypes: tuple[torch.dtype, ...],
                 combine_fn: Callable[
-                    [Tuple[CSEVariable, ...], Tuple[CSEVariable, ...]],
-                    Tuple[CSEVariable, ...],
+                    [tuple[CSEVariable, ...], tuple[CSEVariable, ...]],
+                    tuple[CSEVariable, ...],
                 ],
-                values: Tuple[CSEVariable, ...],
-            ) -> Tuple[CSEVariable, ...]:
+                values: tuple[CSEVariable, ...],
+            ) -> tuple[CSEVariable, ...]:
                 return self.scan(dtypes, combine_fn, values)
 
             @staticmethod
             def sort(
-                dtypes: Tuple[torch.dtype, ...],
-                values: Tuple[CSEVariable, ...],
+                dtypes: tuple[torch.dtype, ...],
+                values: tuple[CSEVariable, ...],
                 stable: bool,
                 descending: bool,
-            ) -> Tuple[CSEVariable, ...]:
+            ) -> tuple[CSEVariable, ...]:
                 return self.sort(dtypes, values, stable, descending)
 
             @staticmethod
             def bucketize(
                 values: CSEVariable,
-                boundaries: Tuple[str, sympy.Expr, sympy.Expr, sympy.Expr],
+                boundaries: tuple[str, sympy.Expr, sympy.Expr, sympy.Expr],
                 boundary_indices: CSEVariable,
                 indexing_dtype: torch.dtype,
                 right: bool,
-                sorter: Optional[Tuple[str, sympy.Expr]] = None,
+                sorter: Optional[tuple[str, sympy.Expr]] = None,
                 sorter_indices: Optional[CSEVariable] = None,
             ) -> CSEVariable:
                 """
@@ -2116,13 +2182,61 @@ class Kernel(CodeGen):
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
+        self.remove_kernel_local_buffers()
+        super().__exit__(exc_type, exc_val, exc_tb)
+
+    def remove_kernel_local_buffers(self) -> None:
         """
+        Any buffers that are both created and have a last use in the
+        same kernel can be removed.
+
         Note that V.graph.scheduler can be None when codegening triton template
         kernels.
         """
-        if V.graph.scheduler:
-            V.graph.scheduler.remove_kernel_local_buffers()
-        super().__exit__(exc_type, exc_val, exc_tb)
+        scheduler = V.graph.scheduler
+        if not scheduler:
+            return
+        fused_node_names = OrderedSet(
+            scheduler.name_to_buf[buf].defining_op_name()
+            for buf in self.store_buffer_names
+            if buf in scheduler.name_to_buf
+        )
+        names_to_remove = OrderedSet[str]()
+        for name in self.store_buffer_names:
+            if (
+                name not in self.must_keep_buffers
+                and name not in self.args.input_buffers
+                and scheduler.can_buffer_be_removed_through_fusion(
+                    name, fused_node_names
+                )
+            ):
+                names_to_remove.add(name)
+
+        for name in names_to_remove:
+            if name in self.args.inplace_buffers:
+                buf = self.args.inplace_buffers[name]
+                if isinstance(buf, str) and buf.startswith("REMOVED"):
+                    continue
+                remove = all(n in names_to_remove for n in buf.other_names)
+                if remove:
+                    self.remove_inplace_buffer(name)
+                self.inplaced_to_remove.add(name)
+            else:
+                self.remove_buffer(name)
+
+    def remove_buffer(self, name: str) -> None:
+        # Assign a special value instead of deleting the entry
+        # because we still rely on output_buffers's length to
+        # generate unique arg name.
+        log.debug("remove_buffer(%r)", name)
+        self.args.output_buffers[name] = "REMOVED"
+        self.removed_buffers.add(name)
+
+    def remove_inplace_buffer(self, name: str) -> None:
+        log.debug("removing_inplace_buffer(%r)", name)
+        inner_name = self.args.inplace_buffers[name].inner_name
+        self.args.inplace_buffers[name] = inner_name.replace("in_out_ptr", "REMOVED")
+        self.removed_buffers.add(name)
 
     def rename_indexing(self, index) -> sympy.Expr:
         # adds the necessary kernel args for index expressions
@@ -2188,47 +2302,46 @@ class KernelTemplate:
     @staticmethod
     def _template_from_string(source):
         env = jinja2_env()
-        if env is not None:
-            env.filters["indent_except_first"] = KernelTemplate.indent_except_first
-            from jinja2 import TemplateSyntaxError
+        if env is None:
+            return None
+        env.filters["indent_except_first"] = KernelTemplate.indent_except_first
+        from jinja2 import TemplateSyntaxError
 
-            class DetailedTemplateSyntaxError(TemplateSyntaxError):
-                def __init__(self, original_error):
-                    super().__init__(
-                        original_error.message,
-                        original_error.lineno,
-                        original_error.name,
-                        original_error.filename,
-                    )
-                    self.original_error = original_error
+        class DetailedTemplateSyntaxError(TemplateSyntaxError):
+            def __init__(self, original_error):
+                super().__init__(
+                    original_error.message,
+                    original_error.lineno,
+                    original_error.name,
+                    original_error.filename,
+                )
+                self.original_error = original_error
 
-                def __str__(self):
-                    error_info = f"Error in template at line {self.lineno}\n"
-                    error_info += f"Error message: {self.message}\n"
-                    if hasattr(self.original_error, "source"):
-                        lines = self.original_error.source.split("\n")
-                        error_info += "Context:\n"
-                        start = max(0, self.lineno - 2)
-                        end = min(len(lines), self.lineno + 2)
-                        for i in range(start, end):
-                            if i == self.lineno - 1:
-                                error_info += f"{i + 1}: --> {lines[i]}\n"
-                                if hasattr(self.original_error, "column"):
-                                    error_info += (
-                                        "     "
-                                        + " " * (self.original_error.column - 1)
-                                        + "^\n"
-                                    )
-                            else:
-                                error_info += f"{i + 1}:     {lines[i]}\n"
-                    return error_info
+            def __str__(self):
+                error_info = f"Error in template at line {self.lineno}\n"
+                error_info += f"Error message: {self.message}\n"
+                if hasattr(self.original_error, "source"):
+                    lines = self.original_error.source.split("\n")
+                    error_info += "Context:\n"
+                    start = max(0, self.lineno - 2)
+                    end = min(len(lines), self.lineno + 2)
+                    for i in range(start, end):
+                        if i == self.lineno - 1:
+                            error_info += f"{i + 1}: --> {lines[i]}\n"
+                            if hasattr(self.original_error, "column"):
+                                error_info += (
+                                    "     "
+                                    + " " * (self.original_error.column - 1)
+                                    + "^\n"
+                                )
+                        else:
+                            error_info += f"{i + 1}:     {lines[i]}\n"
+                return error_info
 
-            try:
-                return env.from_string(source)
-            except TemplateSyntaxError as e:
-                raise DetailedTemplateSyntaxError(e) from e
-
-        return None
+        try:
+            return env.from_string(source)
+        except TemplateSyntaxError as e:
+            raise DetailedTemplateSyntaxError(e) from e
 
     @staticmethod
     def _fake_get_dtype(fake_out):
@@ -2247,6 +2360,7 @@ class KernelTemplate:
     def maybe_append_choice(self, choices, **kwargs):
         """
         Maybe generates a new ChoiceCaller and appends it into existing choices.
+        Returns None if success, otherwise returns the error.
 
         choices: A list of ChoiceCallers.
         kwargs: Additional kwargs to be passed to self.generate() to generate a new ChoiceCaller.
@@ -2254,10 +2368,11 @@ class KernelTemplate:
 
         try:
             choices.append(self.generate(**kwargs))
+            return None
         except NotImplementedError as e:
-            pass
+            return e
 
-    def generate(self, **kwargs) -> "torch._inductor.ir.ChoiceCaller":
+    def generate(self, **kwargs) -> torch._inductor.ir.ChoiceCaller:
         """
         Generates a ChoiceCaller instance from the given arguments.
         """

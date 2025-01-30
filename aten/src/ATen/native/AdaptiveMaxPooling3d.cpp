@@ -66,7 +66,19 @@ TORCH_META_FUNC(adaptive_max_pool3d) (const Tensor& input, IntArrayRef output_si
 
 TORCH_META_FUNC(adaptive_max_pool3d_backward)
 (const Tensor& gradOutput, const Tensor& input, const Tensor& indices) {
+  int64_t ndim = gradOutput.ndimension();
+  TORCH_CHECK(ndim == 4 || ndim == 5,
+    "adaptive_max_pool3d_backward(): Expected 4D or 5D gradOutput, but got: ", gradOutput.sizes());
+
     at::native::adaptive_pool_empty_output_check(gradOutput, "adaptive_max_pool3d_backward");
+
+    TORCH_CHECK(input.ndimension() == indices.ndimension(),
+    "expected dimensions ", input.ndimension(), " for `indices` but got dimensions ", indices.ndimension());
+    TORCH_CHECK(input.dtype() == gradOutput.dtype(),
+      "expected dtype ", input.dtype(), " for `gradOutput` but got dtype ", gradOutput.dtype());
+    TORCH_CHECK(indices.sizes() == gradOutput.sizes(),
+      "expected sizes ", indices.sizes(), " for `gradOutput` but got sizes ", gradOutput.sizes());
+
     set_output_raw_strided(0, input.sizes(), {}, input.options());
 }
 } // namespace meta

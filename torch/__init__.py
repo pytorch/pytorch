@@ -24,17 +24,14 @@ import threading
 from typing import (
     Any as _Any,
     Callable as _Callable,
-    Dict as _Dict,
+    get_origin as _get_origin,
     Optional as _Optional,
     overload as _overload,
-    Set as _Set,
-    Tuple as _Tuple,
-    Type as _Type,
     TYPE_CHECKING,
     TypeVar as _TypeVar,
     Union as _Union,
 )
-from typing_extensions import ParamSpec as _ParamSpec, TypeGuard as _TypeGuard
+from typing_extensions import ParamSpec as _ParamSpec
 
 
 if TYPE_CHECKING:
@@ -64,7 +61,15 @@ from torch._utils_internal import (
 # TODO(torch_deploy) figure out how to freeze version.py in fbcode build
 if _running_with_deploy():
     __version__ = "torch-deploy-1.8"
+    # TODO: Remove this ugly hack when deploy typing extensions are updated to 4.10+
+    if not TYPE_CHECKING:
+        import typing_extensions
+
+        _TypeIs = typing_extensions.TypeGuard
+        typing_extensions.TypeIs = _TypeIs
 else:
+    from typing_extensions import TypeIs as _TypeIs
+
     from torch.torch_version import __version__ as __version__
 
 __all__ = [
@@ -128,11 +133,13 @@ __all__ = [
     "split",
     "stack",
     "sym_float",
+    "sym_fresh_size",
     "sym_int",
     "sym_ite",
     "sym_max",
     "sym_min",
     "sym_not",
+    "sym_sum",
     "typename",
     "unravel_index",
     "use_deterministic_algorithms",
@@ -219,7 +226,8 @@ if sys.platform == "win32":
         try:
             ctypes.CDLL("vcruntime140.dll")
             ctypes.CDLL("msvcp140.dll")
-            ctypes.CDLL("vcruntime140_1.dll")
+            if platform.machine() != "ARM64":
+                ctypes.CDLL("vcruntime140_1.dll")
         except OSError:
             print(
                 textwrap.dedent(
@@ -276,6 +284,12 @@ def _preload_cuda_deps(lib_folder: str, lib_name: str) -> None:
         candidate_lib_paths = glob.glob(
             os.path.join(nvidia_path, lib_folder, "lib", lib_name)
         )
+        # if path/nvidia/lib_folder/ is not found look in path/lib_folder/
+        if not candidate_lib_paths:
+            candidate_lib_paths = glob.glob(
+                os.path.join(path, lib_folder, "lib", lib_name)
+            )
+
         if candidate_lib_paths and not lib_path:
             lib_path = candidate_lib_paths[0]
         if lib_path:
@@ -298,20 +312,39 @@ def _load_global_deps() -> None:
 
     try:
         ctypes.CDLL(global_deps_lib_path, mode=ctypes.RTLD_GLOBAL)
+        # Workaround slim-wheel CUDA dependency bugs in cusparse and cudnn by preloading nvjitlink
+        # and nvrtc. In CUDA-12.4+ cusparse depends on nvjitlink, but does not have rpath when
+        # shipped as wheel, which results in OS picking wrong/older version of nvjitlink library
+        # if `LD_LIBRARY_PATH` is defined, see https://github.com/pytorch/pytorch/issues/138460
+        # Similar issue exist in cudnn that dynamically loads nvrtc, unaware of its relative path.
+        # See https://github.com/pytorch/pytorch/issues/145580
+        try:
+            with open("/proc/self/maps") as f:
+                _maps = f.read()
+            # libtorch_global_deps.so always depends in cudart, check if its installed via wheel
+            if "nvidia/cuda_runtime/lib/libcudart.so" not in _maps:
+                return
+            # If all above-mentioned conditions are met, preload nvrtc and nvjitlink
+            # Please note that order are important for CUDA-11.8 , as nvjitlink does not exist there
+            _preload_cuda_deps("cuda_nvrtc", "libnvrtc.so.*[0-9]")
+            _preload_cuda_deps("nvjitlink", "libnvJitLink.so.*[0-9]")
+        except Exception:
+            pass
+
     except OSError as err:
         # Can only happen for wheel with cuda libs as PYPI deps
         # As PyTorch is not purelib, but nvidia-*-cu12 is
-        cuda_libs: _Dict[str, str] = {
+        cuda_libs: dict[str, str] = {
             "cublas": "libcublas.so.*[0-9]",
             "cudnn": "libcudnn.so.*[0-9]",
             "cuda_nvrtc": "libnvrtc.so.*[0-9]",
             "cuda_runtime": "libcudart.so.*[0-9]",
             "cuda_cupti": "libcupti.so.*[0-9]",
             "cufft": "libcufft.so.*[0-9]",
-            "cufile": "libcufile.so.*[0-9]",
             "curand": "libcurand.so.*[0-9]",
             "nvjitlink": "libnvJitLink.so.*[0-9]",
             "cusparse": "libcusparse.so.*[0-9]",
+            "cusparselt": "libcusparseLt.so.*[0-9]",
             "cusolver": "libcusolver.so.*[0-9]",
             "nccl": "libnccl.so.*[0-9]",
             "nvtx": "libnvToolsExt.so.*[0-9]",
@@ -523,6 +556,15 @@ class SymInt:
     def __sub__(self, other: "IntLikeType") -> "SymInt":
         raise TypeError("type stub not overridden")
 
+    def __rsub__(self, other: "IntLikeType") -> "SymInt":
+        raise TypeError("type stub not overridden")
+
+    def __and__(self, other) -> "SymInt":
+        raise TypeError("type stub not overridden")
+
+    def __or__(self, other) -> "SymInt":
+        raise TypeError("type stub not overridden")
+
     def __repr__(self):
         return self.node._graph_repr()
 
@@ -541,7 +583,7 @@ class SymInt:
             # https://github.com/arogozhnikov/einops/blob/6181e1e95dc58c00a3143c1726da1c6ee0463164/einops/einops.py#L237
             # return hash(builtins.int(self))
 
-    def as_integer_ratio(self) -> _Tuple["SymInt", builtins.int]:
+    def as_integer_ratio(self) -> tuple["SymInt", builtins.int]:
         """Represent this int as an exact integer ratio"""
         return self, 1
 
@@ -653,7 +695,7 @@ class SymFloat:
         """Return True if the float is an integer."""
         raise TypeError("type stub not overridden")
 
-    def as_integer_ratio(self) -> _Tuple[builtins.int, builtins.int]:
+    def as_integer_ratio(self) -> tuple[builtins.int, builtins.int]:
         """Represent this float as an exact integer ratio"""
         return builtins.float(self).as_integer_ratio()
 
@@ -665,6 +707,14 @@ class SymFloat:
 
     def __hash__(self):
         return hash(builtins.float(self))
+
+    def conjugate(self) -> "SymFloat":
+        """Returns the complex conjugate of the float."""
+        return self
+
+    def hex(self) -> str:
+        """Returns the hexadecimal representation of the float."""
+        return self.node.guard_float("", 0).hex()
 
 
 class SymBool:
@@ -804,22 +854,22 @@ def sym_max(a, b):
     assert isinstance(a, all_types), type(a)
     assert isinstance(b, all_types), type(b)
     if isinstance(a, float_types) or isinstance(b, float_types):
-        return builtins.float(builtins.max(a, b))
+        return builtins.float(builtins.max(a, b))  # type: ignore[call-overload]
     else:
-        return builtins.max(a, b)
+        return builtins.max(a, b)  # type: ignore[call-overload]
 
 
-def __all_and_float_types() -> _Tuple[_Tuple[_Type, ...], _Tuple[_Type, ...]]:
+def __all_and_float_types() -> tuple[tuple[type, ...], tuple[type, ...]]:
     try:
         import numpy as np
 
-        all_types: _Tuple[_Type, ...] = (
+        all_types: tuple[type, ...] = (
             np.integer,
             np.floating,
             builtins.int,
             builtins.float,
         )
-        float_types: _Tuple[_Type, ...] = (np.floating, builtins.float)
+        float_types: tuple[type, ...] = (np.floating, builtins.float)
     except ModuleNotFoundError:
         all_types = (builtins.int, builtins.float)
         float_types = (builtins.float,)
@@ -841,9 +891,31 @@ def sym_min(a, b):
     assert isinstance(a, all_types), type(a)
     assert isinstance(b, all_types), type(b)
     if isinstance(a, float_types) or isinstance(b, float_types):
-        return builtins.float(builtins.min(a, b))
+        return builtins.float(builtins.min(a, b))  # type: ignore[call-overload]
     else:
-        return builtins.min(a, b)
+        return builtins.min(a, b)  # type: ignore[call-overload]
+
+
+def sym_sum(args):
+    """
+    N-ary add which is faster to compute for long lists than iterated binary
+    addition.  Only does something special for integers.
+    """
+    if overrides.has_torch_function(args):
+        return overrides.handle_torch_function(sym_sum, args, args)
+
+    found = None
+    for a in args:
+        if not isinstance(a, (SymInt, builtins.int)):
+            return builtins.sum(args)
+        if isinstance(a, SymInt):
+            found = a.node
+    if found is None:
+        return builtins.sum(args)
+
+    from torch.fx.experimental.sym_node import to_node, wrap_node
+
+    return wrap_node(found.sym_sum(tuple(to_node(found, a) for a in args)))
 
 
 # Drop in replacement for math.sqrt, math.sin, math.cos etc
@@ -851,6 +923,8 @@ def _get_sym_math_fn(name):
     def fn(a):
         if overrides.has_torch_function_unary(a):
             return overrides.handle_torch_function(fn, (a,), a)
+        if isinstance(a, SymInt):
+            a = torch.sym_float(a)
         if hasattr(a, f"__sym_{name}__"):
             return getattr(a, f"__sym_{name}__")()
         return getattr(math, name)(a)
@@ -870,11 +944,13 @@ for __name in (
     "asin",
     "acos",
     "atan",
+    "log2",
 ):
     __sym_name = f"_sym_{__name}"
     __fn = _get_sym_math_fn(__name)
     __fn.__qualname__ = __fn.__name__ = __sym_name
     globals()[__sym_name] = __fn
+
 
 del __fn, __name, __sym_name, _get_sym_math_fn
 
@@ -890,6 +966,11 @@ def sym_ite(b, t, f):
     if isinstance(b, SymBool):
         return b.__sym_ite__(t, f)
     return t if b else f
+
+
+# Create a fresh unbacked int, from an (possibly unbacked int) expression.
+def sym_fresh_size(expr):
+    return torch.tensor(expr).item()
 
 
 # Check to see if we can load C extensions, and if not provide some guidance
@@ -1008,7 +1089,7 @@ def typename(obj: _Any, /) -> str:
     return f"{module}.{qualname}"
 
 
-def is_tensor(obj: _Any, /) -> _TypeGuard["torch.Tensor"]:
+def is_tensor(obj: _Any, /) -> _TypeIs["torch.Tensor"]:
     r"""Returns True if `obj` is a PyTorch tensor.
 
     Note that this function is simply doing ``isinstance(obj, Tensor)``.
@@ -1028,7 +1109,7 @@ def is_tensor(obj: _Any, /) -> _TypeGuard["torch.Tensor"]:
     return isinstance(obj, torch.Tensor)
 
 
-def is_storage(obj: _Any, /) -> _TypeGuard[_Union["TypedStorage", "UntypedStorage"]]:
+def is_storage(obj: _Any, /) -> _TypeIs[_Union["TypedStorage", "UntypedStorage"]]:
     r"""Returns True if `obj` is a PyTorch storage object.
 
     Args:
@@ -1120,7 +1201,7 @@ def set_default_device(
     _GLOBAL_DEVICE_CONTEXT.device_context = device_context
 
 
-def set_default_tensor_type(t: _Union[_Type["torch.Tensor"], str], /) -> None:
+def set_default_tensor_type(t: _Union[type["torch.Tensor"], str], /) -> None:
     r"""
     .. warning::
 
@@ -1241,7 +1322,6 @@ def use_deterministic_algorithms(
         * :func:`torch.Tensor.put_` with ``accumulate=True`` when called on a CPU
           tensor
         * :func:`torch.Tensor.scatter_add_` when called on a CUDA tensor
-        * :func:`torch.cumsum` when called on a CUDA tensor
         * :func:`torch.gather` when called on a CUDA tensor that requires grad
         * :func:`torch.index_add` when called on CUDA tensor
         * :func:`torch.index_select` when attempting to differentiate a CUDA tensor
@@ -1288,6 +1368,7 @@ def use_deterministic_algorithms(
         * :func:`torch.kthvalue` with called on a CUDA tensor
         * :func:`torch.median` with indices output when called on a CUDA tensor
         * :func:`torch.nn.functional.grid_sample` when attempting to differentiate a CUDA tensor
+        * :func:`torch.cumsum` when called on a CUDA tensor when dtype is floating point or complex
         * :func:`torch.Tensor.scatter_reduce` when ``reduce='prod'`` and called on CUDA tensor
         * :func:`torch.Tensor.resize_` when called with a quantized tensor
 
@@ -1571,11 +1652,18 @@ def _check(cond, message=None):  # noqa: F811
     _check_with(RuntimeError, cond, message)
 
 
-def _check_is_size(i, message=None):
+def _check_is_size(i, message=None, *, max=None):
     """Checks that a given integer is a valid size (i.e., is non-negative).
-    You should use this over _check(i >= 0) because we can use the semantic
-    information (that i is a size) to make some further inferences in case
-    i is an unbacked SymInt.
+    You should use this over ``_check(i >= 0)`` because it can prevent
+    ``GuardOnDataDependentSymNode`` exceptions by opting yourself into alternate
+    semantics for ``guard_size_oblivious`` tests that treat values 0 and 1
+    equivalently to all other values.
+
+    When max is not None, this specifies an upper bound equivalent to
+    ``_check(i <= max)``.  This bound is also subject to alternate semantics:
+    in ``guard_size_oblivious`` tests, we assume that a constant max bound is
+    treated equivalently to all other values.  Symbolic max bounds are not yet
+    supported.
 
     NB: Do NOT use this in contexts where a -1 size would be valid (indicating
     to infer the size from context, or if you should wrap-around or truncate).
@@ -1586,6 +1674,13 @@ def _check_is_size(i, message=None):
     from torch.fx.experimental.symbolic_shapes import _advise_is_size
 
     _advise_is_size(i)
+
+    if max is not None:
+        _check(i <= max, message)
+
+        from torch.fx.experimental.symbolic_shapes import _advise_is_bounded
+
+        _advise_is_bounded(i, max)
 
 
 def _check_index(cond, message=None):  # noqa: F811
@@ -1909,7 +2004,7 @@ class QUInt2x4Storage(_LegacyStorage):
         return torch.quint2x4
 
 
-_storage_classes: _Set[_Type[_Union[TypedStorage, UntypedStorage]]] = {
+_storage_classes: set[type[_Union[TypedStorage, UntypedStorage]]] = {
     UntypedStorage,
     DoubleStorage,
     FloatStorage,
@@ -1932,7 +2027,7 @@ _storage_classes: _Set[_Type[_Union[TypedStorage, UntypedStorage]]] = {
 }
 
 # The _tensor_classes set is initialized by the call to initialize_python_bindings.
-_tensor_classes: _Set[_Type["torch.Tensor"]] = set()
+_tensor_classes: set[type["torch.Tensor"]] = set()
 
 # If you edit these imports, please update torch/__init__.py.in as well
 from torch import amp as amp, random as random, serialization as serialization
@@ -2067,6 +2162,7 @@ from torch import (
     __config__ as __config__,
     __future__ as __future__,
     _awaits as _awaits,
+    accelerator as accelerator,
     autograd as autograd,
     backends as backends,
     cpu as cpu,
@@ -2181,10 +2277,13 @@ class _TorchCompileInductorWrapper:
     compiler_name = "inductor"
 
     def __init__(self, mode, options, dynamic):
-        self.config: _Dict[str, _Any] = {}
+        from torch._inductor.compiler_bisector import CompilerBisector
+
+        self.config: dict[str, _Any] = {}
         self.dynamic = dynamic
         self.apply_mode(mode)
         self.apply_options(options)
+        self.apply_options(CompilerBisector.get_config_change("inductor"))
 
         if self.config.get("triton.cudagraphs", False):
             os.environ["DISABLE_CUPTI_LAZY_REINIT"] = "1"
@@ -2202,32 +2301,18 @@ class _TorchCompileInductorWrapper:
         )
 
     def apply_mode(self, mode: _Optional[str]):
-        if mode is None or mode == "default":
-            pass
-        elif mode in {"reduce-overhead", "max-autotune", "max-autotune-no-cudagraphs"}:
+        if mode and mode != "default":
             from torch._inductor import list_mode_options
 
             self.apply_options(list_mode_options(mode, self.dynamic))
-        else:
-            raise RuntimeError(
-                f"Unrecognized mode={mode}, should be one of: default, reduce-overhead, max-autotune, max-autotune-no-cudagraphs"
-            )
 
-    def apply_options(self, options: _Optional[_Dict[str, _Any]]):
-        from torch._inductor.bisect_helper import BisectionManager
-
-        if bisect_changes := BisectionManager.get_config_change("inductor"):
-            options = {} if options is None else options
-            options = (
-                {**bisect_changes} if options is None else {**options, **bisect_changes}  # type: ignore[dict-item]
-            )
-
+    def apply_options(self, options: _Optional[dict[str, _Any]]):
         if not options:
             return
 
         from torch._inductor import config
 
-        current_config: _Dict[str, _Any] = config.shallow_copy_dict()
+        current_config: dict[str, _Any] = config.get_config_copy()
 
         for key, val in options.items():
             attr_name = key.replace("-", "_")
@@ -2235,12 +2320,17 @@ class _TorchCompileInductorWrapper:
                 raise RuntimeError(
                     f"Unexpected optimization option {key}, known options are {list(current_config.keys())}"
                 )
-            if type(val) is not type(current_config[attr_name]):
-                val_type_str = type(val).__name__
-                expected_type_str = type(current_config[attr_name]).__name__
-                raise RuntimeError(
-                    f"Unexpected type of attr {key}, got {val_type_str} should be {expected_type_str}"
-                )
+            attr_type = config.get_type(attr_name)  # type: ignore[attr-defined]
+            # Subscriptable generic types don't support isinstance so skip the type
+            # check. There doesn't seem to be a good way of checking membership without
+            # 3rd party libraries.
+            if _get_origin(attr_type) is None:
+                if not isinstance(val, attr_type):
+                    val_type_str = type(val).__name__
+                    expected_type_str = type(current_config[attr_name]).__name__
+                    raise RuntimeError(
+                        f"Unexpected type of attr {key}, got {val_type_str} should be {expected_type_str}"
+                    )
             self.config[attr_name] = val
 
     def __call__(self, model_, inputs_):
@@ -2310,7 +2400,7 @@ def compile(
     dynamic: _Optional[builtins.bool] = None,
     backend: _Union[str, _Callable] = "inductor",
     mode: _Union[str, None] = None,
-    options: _Optional[_Dict[str, _Union[str, builtins.int, builtins.bool]]] = None,
+    options: _Optional[dict[str, _Union[str, builtins.int, builtins.bool]]] = None,
     disable: builtins.bool = False,
 ) -> _Callable[_InputT, _RetT]: ...
 
@@ -2323,7 +2413,7 @@ def compile(
     dynamic: _Optional[builtins.bool] = None,
     backend: _Union[str, _Callable] = "inductor",
     mode: _Union[str, None] = None,
-    options: _Optional[_Dict[str, _Union[str, builtins.int, builtins.bool]]] = None,
+    options: _Optional[dict[str, _Union[str, builtins.int, builtins.bool]]] = None,
     disable: builtins.bool = False,
 ) -> _Callable[[_Callable[_InputT, _RetT]], _Callable[_InputT, _RetT]]: ...
 
@@ -2335,7 +2425,7 @@ def compile(
     dynamic: _Optional[builtins.bool] = None,
     backend: _Union[str, _Callable] = "inductor",
     mode: _Union[str, None] = None,
-    options: _Optional[_Dict[str, _Union[str, builtins.int, builtins.bool]]] = None,
+    options: _Optional[dict[str, _Union[str, builtins.int, builtins.bool]]] = None,
     disable: builtins.bool = False,
 ) -> _Union[
     _Callable[[_Callable[_InputT, _RetT]], _Callable[_InputT, _RetT]],
@@ -2352,7 +2442,7 @@ def compile(
     results are not applicable for subsequent calls (this is called a "guard
     failure), you can use TORCH_LOGS=guards to debug these situations.
     Multiple compiled results can be associated with a frame up to
-    ``torch._dynamo.config.cache_size_limit``, which defaults to 8; at which
+    ``torch._dynamo.config.recompile_limit``, which defaults to 8; at which
     point we will fall back to eager.  Note that compile caches are per
     *code object*, not frame; if you dynamically create multiple copies of a
     function, they will all share the same code cache.
@@ -2426,9 +2516,15 @@ def compile(
             return torch.sin(x) + torch.cos(x)
 
     """
+    import sysconfig
+
     _C._log_api_usage_once("torch.compile")
-    if sys.version_info >= (3, 13):
-        raise RuntimeError("Dynamo is not supported on Python 3.13+")
+    if sys.version_info >= (3, 14):
+        raise RuntimeError("torch.compile is not supported on Python 3.14+")
+    elif sysconfig.get_config_var("Py_GIL_DISABLED") == 1:
+        raise RuntimeError(
+            "torch.compile is not supported on Python built with GIL disabled"
+        )
 
     # Decorator mode
     if model is None:
@@ -2455,9 +2551,9 @@ def compile(
     if mode is None and options is None:
         mode = "default"
 
-    from torch._inductor.bisect_helper import BisectionManager
+    from torch._inductor.compiler_bisector import CompilerBisector
 
-    if bisect_backend := BisectionManager.get_backend():
+    if bisect_backend := CompilerBisector.get_backend():
         backend = bisect_backend
 
     if backend == "inductor":
@@ -2514,6 +2610,7 @@ if "TORCH_CUDA_SANITIZER" in os.environ:
 
 # Populate magic methods on SymInt and SymFloat
 import torch.fx.experimental.sym_node
+from torch import fx as fx
 
 
 # Register MPS specific decomps
@@ -2524,7 +2621,7 @@ if not _running_with_deploy():
 
     class _TritonLibrary:
         lib = torch.library.Library("triton", "DEF")
-        ops_table: _Dict[_Tuple[str, str], _Callable] = {}
+        ops_table: dict[tuple[str, str], _Callable] = {}
 
         @classmethod
         def registerOp(cls, op_key, full_schema, op_impl, dispatch_key):

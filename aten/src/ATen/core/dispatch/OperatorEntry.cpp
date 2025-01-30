@@ -3,8 +3,7 @@
 #include <ATen/core/dispatch/Dispatcher.h>
 #include <ATen/core/dispatch/ObservedOperators.h>
 
-namespace c10 {
-namespace impl {
+namespace c10::impl {
 
 namespace {
 #ifndef STRIP_ERROR_MESSAGES
@@ -510,7 +509,7 @@ void OperatorEntry::reportSignatureError(const CppSignature& call_signature, con
         "This likely happened in a call to OperatorHandle::typed<Return (Args...)>(). ",
         "Please make sure that the function signature matches the signature in the operator registration call."
   );
-};
+}
 
 #ifndef STRIP_ERROR_MESSAGES
 static std::string post_process_dispatch_key_str(std::string dispatch_key) {
@@ -629,5 +628,4 @@ std::string OperatorEntry::dumpState() const {
   return oss.str();
 }
 
-}
 }

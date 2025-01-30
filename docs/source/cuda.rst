@@ -16,17 +16,20 @@ torch.cuda
     default_stream
     device
     device_count
+    device_memory_used
     device_of
     get_arch_list
     get_device_capability
     get_device_name
     get_device_properties
     get_gencode_flags
+    get_stream_from_external
     get_sync_debug_mode
     init
     ipc_collect
     is_available
     is_initialized
+    is_tf32_supported
     memory_usage
     set_device
     set_stream
@@ -100,6 +103,7 @@ Memory management
     :nosignatures:
 
      empty_cache
+     get_per_process_memory_fraction
      list_gpu_processes
      mem_get_info
      memory_stats

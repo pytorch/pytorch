@@ -2,18 +2,16 @@ import logging
 import operator
 import types
 from collections import defaultdict
-from typing import Dict, List, Optional, Set, Tuple
+from typing import Optional
 
 import torch
 import torch.fx._pytree as fx_pytree
 import torch.utils._pytree as pytree
-from torch.export._tree_utils import reorder_kwargs
 from torch.export.exported_program import (
     ConstantArgument,
     ExportedProgram,
     ModuleCallSignature,
 )
-from torch.fx._symbolic_trace import is_fx_tracing
 from torch.fx.passes.tools_common import legalize_graph, NodeList
 from torch.fx.passes.utils.fuser_utils import erase_nodes, fuse_as_graphmodule
 
@@ -21,13 +19,16 @@ from torch.fx.passes.utils.fuser_utils import erase_nodes, fuse_as_graphmodule
 log = logging.getLogger(__name__)
 
 
-def _get_getitem_users(node: torch.fx.Node) -> Set[torch.fx.Node]:
+def _get_getitem_users(node: torch.fx.Node) -> set[torch.fx.Node]:
     node_users = list(node.users.keys())
     getitem_users = set()
     for user in node_users:
+        if user.op == "output":
+            continue
+
         assert (
             user.op == "call_function" and user.target == operator.getitem
-        ), f"Expected getitem node as ser for {node}, instead got {user}"
+        ), f"Expected getitem node as user for {node}, instead got {user}"
         getitem_users.update(list(user.users.keys()))
     return getitem_users
 
@@ -171,9 +172,9 @@ def _remove_extraneous_pytrees(gm: torch.fx.GraphModule) -> None:
 def _construct_inputs(
     gm: torch.fx.GraphModule,
     signature: ModuleCallSignature,
-    node_name_map: Dict[str, torch.fx.Node],
-) -> Tuple[List[torch.fx.Node], Dict[str, torch.fx.Node]]:
-    tree_unflatten_args: List[Optional[torch.fx.Node]] = []
+    node_name_map: dict[str, torch.fx.Node],
+) -> tuple[list[torch.fx.Node], dict[str, torch.fx.Node]]:
+    tree_unflatten_args: list[Optional[torch.fx.Node]] = []
     for input_ in signature.inputs:
         if isinstance(input_, ConstantArgument) and input_.value is None:
             # Constants should be directly embedded into the graph and not used
@@ -212,8 +213,8 @@ def _construct_inputs(
 
 def _insert_call_module(
     gm: torch.fx.GraphModule,
-    args_nodes: List[torch.fx.Node],
-    kwargs_nodes: Dict[str, torch.fx.Node],
+    args_nodes: list[torch.fx.Node],
+    kwargs_nodes: dict[str, torch.fx.Node],
     module_to_swap: torch.nn.Module,
     name: str,
 ) -> torch.fx.Node:
@@ -228,12 +229,12 @@ def _deconstruct_outputs(
     gm: torch.fx.GraphModule,
     signature: ModuleCallSignature,
     module_node: torch.fx.Node,
-    node_name_map: Dict[str, torch.fx.Node],
-    orig_outputs: Tuple[torch.fx.Node, ...],
+    node_name_map: dict[str, torch.fx.Node],
+    orig_outputs: tuple[torch.fx.Node, ...],
 ) -> None:
-    from .unflatten import _generate_flatten
+    from .unflatten import _generate_flatten_spec
 
-    flatten_node = _generate_flatten(gm, module_node, signature.out_spec)
+    flatten_node = _generate_flatten_spec(gm, module_node, signature.out_spec)
 
     for i, orig_output in enumerate(orig_outputs):
         # Use Proxy to record getitem access.
@@ -245,17 +246,17 @@ def _deconstruct_outputs(
 
 def _swap_module_helper(
     gm: torch.fx.GraphModule,
-    modules_to_swap: Dict[str, torch.nn.Module],
-    module_call_graph: Dict[str, ModuleCallSignature],
+    modules_to_swap: dict[str, torch.nn.Module],
+    module_call_graph: dict[str, ModuleCallSignature],
 ) -> torch.fx.GraphModule:
     log.debug("Starting graph:")
     log.debug(gm.graph)
 
     legalize_graph(gm)
 
-    partitions: Dict[str, NodeList] = defaultdict(list)
+    partitions: dict[str, NodeList] = defaultdict(list)
 
-    node_name_map: Dict[str, torch.fx.Node] = {
+    node_name_map: dict[str, torch.fx.Node] = {
         node.name: node for node in gm.graph.nodes
     }
 
@@ -345,46 +346,60 @@ def _swap_module_helper(
     return gm
 
 
-def _custom_forward(self, *args, **kwargs):  # type: ignore[no-untyped-def]
+def _fix_input_output_signature(
+    gm: torch.fx.GraphModule, signature: ModuleCallSignature
+) -> None:
     """
-    Custom forward function for the swapped module. If `run_with_interpreter` is
-    specified from the swap API, then we will run the graph using
-    fx.Interpreter. This will be easier for debugging, but may result in a QPS
-    gap.
+    Given the unlifted module from calling ep.module(), we want to remove the
+    pytree processing from the graph module's PyTreeCodeGen and instead make it
+    nodes inside of the graph. This allows us to do some optimizations, like
+    remove these pytree calls if it is unnecessary, and makes the PyTree part
+    more obvious to graph passes.
     """
+    from torch.export.unflatten import _generate_flatten, _generate_unflatten
 
-    signature = self.module_call_graph[0].signature
-    reordered_kwargs = reorder_kwargs(kwargs, signature.in_spec)
-    flat_args, in_spec = pytree.tree_flatten((args, reordered_kwargs))
+    # Remove the registered pytree codegen because we will take care of it
+    # through inserting pytree nodes into the graph
+    gm.graph._codegen = torch.fx.graph.CodeGen()
 
-    if is_fx_tracing():
-        return_val = torch.fx.Interpreter(self, graph=self.graph).run(
-            *flat_args, enable_io_processing=False
-        )
-        # For scalar return value, fx.Graph wraps in a tuple
-        if isinstance(return_val, tuple) and len(return_val) == 1:
-            return return_val[0]
-        return return_val
+    old_placeholders = [node for node in gm.graph.nodes if node.op == "placeholder"]
 
-    if in_spec != signature.in_spec:
-        raise RuntimeError(
-            "Input treespec does not match with exported module's: \n"
-            f"Input treespec: {in_spec}. ",
-            f"Exported module treespec: {signature.in_spec}",
-        )
+    new_placeholders = []
+    forward_arg_names = signature.forward_arg_names
+    if forward_arg_names is None:
+        forward_arg_names = []
+        assert signature.in_spec.num_children == 2
+        arg_spec = signature.in_spec.children_specs[0]
+        kwarg_spec = signature.in_spec.children_specs[1]
+        assert arg_spec.type == tuple
+        assert kwarg_spec.type == dict
+        for i in range(arg_spec.num_children):
+            forward_arg_names.append(f"arg_{i}")
+        forward_arg_names.extend(kwarg_spec.context)
 
-    if torch.compiler.is_dynamo_compiling() and not self.run_with_interpreter:
-        flat_out = type(self).forward(self, *flat_args)
-    else:
-        flat_out = torch.fx.Interpreter(self, graph=self.graph).run(
-            *flat_args, enable_io_processing=False
-        )
+    for arg in forward_arg_names:
+        with gm.graph.inserting_before(old_placeholders[0]):
+            new_placeholders.append(gm.graph.placeholder(arg))
 
-    return pytree.tree_unflatten(flat_out, signature.out_spec)
+    # Insert flatten call for the inputs
+    with gm.graph.inserting_before(old_placeholders[0]):
+        flat_node = _generate_flatten(gm, tuple(new_placeholders))
+        for i, old_placeholder in enumerate(old_placeholders):
+            old_placeholder.op = "call_function"
+            old_placeholder.target = operator.getitem
+            old_placeholder.args = (flat_node, i)
+
+    # Insert unflatten call for the outputs
+    output_node = next(node for node in gm.graph.nodes if node.op == "output")
+    with gm.graph.inserting_before(output_node):
+        unflat = _generate_unflatten(gm, output_node.args[0], signature.out_spec)
+        output_node.args = (unflat,)
+
+    gm.recompile()
 
 
 def _swap_modules(
-    ep: ExportedProgram, modules_to_swap: Dict[str, torch.nn.Module]
+    ep: ExportedProgram, modules_to_swap: dict[str, torch.nn.Module]
 ) -> torch.fx.GraphModule:
     """
     Unlifts the given ExportedProgram into a fx.GraphModule, and then swaps
@@ -408,14 +423,12 @@ def _swap_modules(
     }
 
     gm = ep.module()
-    gm.graph.eliminate_dead_code()
-
-    # Unset the pytree codegen because we will take care of it with our own
-    # custom forward function
-    gm.graph._codegen = torch.fx.graph.CodeGen()
+    gm.validate_inputs = False  # type: ignore[assignment]
+    gm.graph.eliminate_dead_code()  # type: ignore[operator, union-attr]
+    assert isinstance(gm, torch.fx.GraphModule)
+    _fix_input_output_signature(gm, ep.module_call_graph[0].signature)
 
     gm.module_call_graph = ep.module_call_graph
-    gm.forward = types.MethodType(_custom_forward, gm)
     gm.train = types.MethodType(type(gm).train, gm)  # type: ignore[assignment]
     gm.eval = types.MethodType(type(gm).eval, gm)  # type: ignore[assignment]
 

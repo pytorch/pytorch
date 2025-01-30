@@ -142,6 +142,19 @@ def register_op_impl(run_impl_check: Union[Callable[[OpOverload], bool], OpOverl
     return impl_decorator
 
 
+def _is_op_registered_to_fake_rule(op):
+    return op in op_implementations_dict
+
+
+def _deregister_op_impl(op):
+    if op in op_implementations_dict:
+        del op_implementations_dict[op]
+    for check, impl in op_implementations_checks:
+        if check is op:
+            op_implementations_checks.remove((check, impl))
+            break
+
+
 @register_op_impl(op_implementations_dict.__contains__)
 def dispatch_to_op_implementations_dict(fake_mode, func, *args, **kwargs):
     return op_implementations_dict[func](fake_mode, func, *args, **kwargs)
@@ -209,14 +222,6 @@ def non_kwarg_to(fake_mode, func, *args, **kwargs):
 
 
 def stride_incorrect_op(op):
-    if op.namespace not in ("aten", "prims"):
-        return False
-    if op is aten._fft_c2c.default:
-        return False
-
-    op_name = op.name()
-    if "fft" in op_name:
-        return True
     return False
 
 
@@ -269,7 +274,15 @@ def dyn_shape(fake_mode, func, *args, **kwargs):
 
 
 def _unique(
-    fake_mode, func, arg, dim, sorted=True, return_inverse=False, return_counts=False
+    fake_mode,
+    func,
+    arg,
+    dim,
+    sorted=True,
+    return_inverse=False,
+    return_counts=False,
+    *,
+    unique_consecutive=False,
 ):
     if (
         fake_mode.shape_env is None
@@ -278,8 +291,10 @@ def _unique(
         # Without symints/symfloats, cannot handle this
         raise DynamicOutputShapeException(func)
 
+    nnz = arg.unique_consecutive_memo if unique_consecutive else arg.unique_memo
+
     # Do not use a memo for unique_dim
-    if dim is not None or (nnz := arg.unique_memo) is None:
+    if dim is not None or nnz is None:
         # Avoid importing sympy at a module level
         from torch.fx.experimental.symbolic_shapes import (
             _constrain_range_for_size,
@@ -308,7 +323,10 @@ def _unique(
             _constrain_range_for_size(nnz, max=maxval)
 
         if dim is None:
-            arg.unique_memo = nnz
+            if unique_consecutive:
+                arg.unique_consecutive_memo = nnz
+            else:
+                arg.unique_memo = nnz
 
     if dim is None:
         ret = [arg.new_empty((nnz,))]
@@ -354,6 +372,20 @@ def unique_dim(
     )
 
 
+@register_op_impl(aten.unique_consecutive.default)
+def _(fake_mode, func, arg, return_inverse=False, return_counts=False, dim=None):
+    return _unique(
+        fake_mode,
+        func,
+        arg,
+        dim,
+        False,
+        return_inverse,
+        return_counts,
+        unique_consecutive=True,
+    )
+
+
 @register_op_impl(aten.repeat_interleave.Tensor)
 def repeat_interleave_tensor(fake_mode, func, repeats, output_size=None):
     if output_size is None:
@@ -396,6 +428,11 @@ def local_scalar_dense(fake_mode, func, arg):
     return r
 
 
+@register_op_impl(torch.ops.aten.nonzero_numpy.default)
+def nonzero_numpy(fake_mode, func, arg):
+    return torch.ops.aten.nonzero.default(arg).unbind(1)
+
+
 @register_op_impl(torch.ops.aten.nonzero.default)
 def nonzero(fake_mode, func, arg):
     if (
@@ -411,6 +448,8 @@ def nonzero(fake_mode, func, arg):
             _constrain_range_for_size,
             has_free_symbols,
         )
+        from torch.utils._sympy.numbers import IntInfinity
+        from torch.utils._sympy.value_ranges import bound_sympy
 
         if not has_free_symbols(arg.numel()) and arg.numel() == 0:
             # If numel is zero, then the output size must be zero.
@@ -429,12 +468,21 @@ def nonzero(fake_mode, func, arg):
 
             if not has_free_symbols(arg.numel()):
                 maxval = int(arg.numel())
+            else:
+                prod_node = math.prod(arg.shape).node
+                prod_range = bound_sympy(
+                    prod_node.expr, prod_node.shape_env.var_to_range
+                )
+                if isinstance(prod_range.upper, IntInfinity):
+                    maxval = sys.maxsize - 1
+                else:
+                    maxval = prod_range.upper
 
             _constrain_range_for_size(nnz, max=maxval)
 
         arg.nonzero_memo = nnz
 
-    return arg.new_empty((nnz, arg.dim()), dtype=torch.int64)
+    return arg.new_empty_strided((nnz, arg.dim()), (1, nnz), dtype=torch.int64)
 
 
 @register_op_impl(torch.ops.aten._padded_dense_to_jagged_forward.default)
@@ -556,19 +604,18 @@ def has_meta(func):
     lambda func: is_builtin(func) and "foreach" in func.name() and has_meta(func)
 )
 def foreach_run_and_map_input_device(fake_mode, func, *args, **kwargs):
-    tensor_lists = []
-    for arg in itertools.chain(args, kwargs.values()):
-        if (
-            isinstance(arg, (list, tuple))
-            and len(arg)
-            and isinstance(arg[0], torch.Tensor)
-        ):
-            tensor_lists.append(arg)
+    tensor_lists = [
+        arg
+        for arg in itertools.chain(args, kwargs.values())
+        if isinstance(arg, (list, tuple))
+        and len(arg)
+        and isinstance(arg[0], torch.Tensor)
+    ]
 
     try:
         with in_kernel_invocation_manager(fake_mode):
             out_meta = func(*args, **kwargs)
-    except NotImplementedError as not_implemented_error:
+    except NotImplementedError:
         return NotImplemented
 
     if not out_meta:
@@ -846,15 +893,9 @@ def make_fast_binary_impl(slow_ref):
         operands = args
 
         # compute_shape
-        has_scalars = False
-        has_tensors = False
         final_shape = None
         for op in operands:
             shape = op.shape if isinstance(op, torch.Tensor) else ()
-            if len(shape) == 0:
-                has_scalars = True
-            else:
-                has_tensors = True
             if final_shape is None:
                 final_shape = shape
             # TODO: Minor optimization: track if the shapes
@@ -881,7 +922,6 @@ def make_fast_binary_impl(slow_ref):
         cpu = torch.device("cpu")
         common_device = cpu
         common_dtype = None
-        output_dtype = None
         has_different_input_dtypes = False
         for op in operands:
             if not isinstance(op, torch.Tensor):

@@ -43,6 +43,11 @@ nn/qat/ @jerryzh168
 /torch/csrc/distributed/rpc/tensorpipe_agent.cpp @jiayisuse @osalpekar @lw
 /torch/csrc/distributed/rpc/tensorpipe_agent.h @jiayisuse @osalpekar @lw
 
+# Distributed
+# c10d backend APIs
+/torch/csrc/distributed/c10d/Backend.* @kwen2501
+/torch/csrc/distributed/c10d/Ops.* @kwen2501
+
 # ONNX Export
 /torch/_dynamo/backends/onnxrt.py @wschin @xadupre
 /torch/csrc/jit/passes/onnx.h @titaiwangms @shubhambhokare1 @xadupre
@@ -68,7 +73,6 @@ nn/qat/ @jerryzh168
 /test/run_test.py @pytorch/pytorch-dev-infra
 /torch/testing/_internal/common_device_type.py @mruberry
 /torch/testing/_internal/common_utils.py @pytorch/pytorch-dev-infra
-/torch/testing/_internal/hop_db.py @tugsbayasgalan @zou3519 @ydwu4
 
 # Parametrizations
 /torch/nn/utils/parametriz*.py @lezcano
@@ -101,6 +105,8 @@ test/functorch/test_vmap.py @zou3519 @chillee @kshitij12345
 # HOPs
 torch/_higher_order_ops/*.py @zou3519
 torch/_dynamo/variables/higher_order_ops.py @zou3519
+test/test_hop_infra.py @zou3519
+torch/testing/_internal/hop_db.py @tugsbayasgalan @zou3519 @ydwu4
 
 # AOTAutograd
 torch/_functorch/_aot_autograd/*.py @bdhirsh
@@ -116,10 +122,10 @@ aten/src/ATen/detail/MTIAHooksInterface.h @egienvalue
 torch/csrc/mtia/ @egienvalue
 
 # Profiler
-torch/csrc/autograd/profiler* @aaronenyeshi @sraikund16
-torch/autograd/profiler* @aaronenyeshi @sraikund16
-torch/csrc/profiler/ @aaronenyeshi @sraikund16
-torch/profiler/ @aaronenyeshi @sraikund16
+torch/csrc/autograd/profiler* @sraikund16
+torch/autograd/profiler* @sraikund16
+torch/csrc/profiler/ @sraikund16
+torch/profiler/ @sraikund16
 
 # AOTDispatch tests
 test/functorch/test_aotdispatch.py @ezyang @Chillee
@@ -143,6 +149,7 @@ caffe2/utils/hip @jeffdaily @jithunnair-amd
 
 # XPU-specific files
 /aten/src/ATen/xpu/ @EikanWang @gujinghui
+/aten/src/ATen/native/mkldnn/xpu/ @EikanWang @gujinghui
 /c10/xpu/ @EikanWang @gujinghui
 /torch/csrc/xpu/ @EikanWang @gujinghui
 /torch/xpu/ @EikanWang @gujinghui

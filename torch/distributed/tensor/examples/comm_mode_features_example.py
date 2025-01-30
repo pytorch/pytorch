@@ -4,7 +4,7 @@ torchrun --standalone --nnodes=1 --nproc-per-node=4 comm_mode_features_example.p
 """
 import argparse
 import os
-from typing import Callable, Dict, Union
+from typing import Callable, Union
 
 import torch
 import torch.nn as nn
@@ -269,7 +269,7 @@ class CommDebugModeExample:
 
         comm_mode = CommDebugMode()
         with comm_mode:
-            output = model(inp)
+            model(inp)
 
         # print the module level collective tracing information
         print(comm_mode.generate_comm_debug_tracing_table(noise_level=0))
@@ -592,7 +592,7 @@ class CommDebugModeExample:
 
         comm_mode = CommDebugMode()
         with comm_mode:
-            output = model(inp)
+            model(inp)
 
         # print the operation level collective tracing information
         print(comm_mode.generate_comm_debug_tracing_table(noise_level=2))
@@ -628,7 +628,7 @@ class CommDebugModeExample:
 
         comm_mode = CommDebugMode()
         with comm_mode:
-            output = model(inp)
+            model(inp)
 
         comm_mode.generate_json_dump(file_name="transformer_log.json", noise_level=1)
         comm_mode.generate_json_dump(file_name="transformer_log_2.json", noise_level=2)
@@ -713,7 +713,7 @@ def run_example(world_size: int, rank: int, example_name: str) -> None:
     # intializing class with all of the functions
     instantiated_example = CommDebugModeExample(world_size, rank)
     # dict that stores example code function names
-    name_to_example_code: Dict[str, Callable[[], None]] = {
+    name_to_example_code: dict[str, Callable[[], None]] = {
         "MLP_distributed_sharding_display": instantiated_example.example_MLP_distributed_sharding_display,
         "MLPStacked_distributed_sharding_display": instantiated_example.example_MLPStacked_distributed_sharding_display,
         "MLP_module_tracing": instantiated_example.example_MLP_module_tracing,
