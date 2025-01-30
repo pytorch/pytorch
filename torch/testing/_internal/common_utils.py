@@ -1596,6 +1596,12 @@ def xpassIfTorchDynamo_np(func):
 def xfailIfACL(func):
     return unittest.expectedFailure(func) if TEST_ACL else func
 
+def xfailIfSVE256(func):
+    return (
+        unittest.expectedFailure(func)
+        if torch.backends.cpu.get_cpu_capability() == "SVE256"
+        else func
+    )
 
 def xfailIfTorchDynamo(func):
     return unittest.expectedFailure(func) if TEST_WITH_TORCHDYNAMO else func

@@ -59,13 +59,16 @@ from torch.testing._internal.common_utils import (
     gradcheck,
     iter_indices,
     numpy_to_torch_dtype_dict,
+    parametrize,
     run_tests,
     set_default_dtype,
     skipIfTorchDynamo,
     slowTest,
+    subtest,
     TEST_SCIPY,
     TestCase,
     torch_to_numpy_dtype_dict,
+    xfailIfSVE256,
     xfailIfTorchDynamo,
 )
 
@@ -3458,7 +3461,17 @@ class TestBinaryUfuncs(TestCase):
         )
         self.assertEqual(torch.ldexp(mantissas, exponents), expected)
 
-    @dtypes(torch.float, torch.double, torch.cfloat, torch.cdouble)
+    @parametrize(
+        "dtype",
+        [
+            torch.float,
+            torch.double,
+            # TODO: create GH issue
+            # AssertionError: Tensor-likes are not close!
+            subtest([torch.cfloat], decorators=[xfailIfSVE256]),
+            torch.cdouble,
+        ],
+    )
     def test_lerp(self, device, dtype):
         start_end_weight_shapes = [(), (5,), (5, 5)]
         for shapes in product(

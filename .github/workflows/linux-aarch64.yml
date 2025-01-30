@@ -34,7 +34,7 @@ jobs:
       runner_prefix: ${{ needs.get-label-type.outputs.label-type }}
       build-environment: linux-jammy-aarch64-py3.10
       docker-image-name: pytorch-linux-jammy-aarch64-py3.10-gcc11
-      runner: linux.arm64.2xlarge
+      runner: linux.arm64.m7g.4xlarge
       test-matrix: |
         { include: [
           { config: "default", shard: 1, num_shards: 4, runner: "linux.arm64.2xlarge" },
