@@ -43,6 +43,11 @@ class BlockPatternMatcher:
         return [*numels]
 
     @classmethod
+    def _preprocess(cls, index: Expr) -> Expr:
+        # Remove any Identity nodes, e.g. expand x + (5 * y) to x + 5 * y.
+        return index.expand(identity=True)
+
+    @classmethod
     def match_mod_div_block_expr(
         cls,
         index: Expr,
@@ -54,6 +59,7 @@ class BlockPatternMatcher:
         Matches modular indexing expressions, converting them to implied block dimensions and strides.
         See triton.py for more information.
         """
+        index = cls._preprocess(index)
 
         # Pattern match to find the strides and offset.
         wild = functools.partial(sympy.Wild, exclude=[index_var])
@@ -141,3 +147,22 @@ class BlockPatternMatcher:
         )
 
         return dims, strides, block_index_exprs
+
+    @classmethod
+    def match_affine_block_expr(
+        cls,
+        index: Expr,
+        index_var: Symbol,
+    ) -> Optional[Expr]:
+        """
+        Matches simple expressions of the from stride * index, returning the
+        stride.
+        See triton.py for more information.
+        """
+        index = cls._preprocess(index)
+        stride = sympy.Wild("stride", exclude=[index_var])
+        m = index.match(index_var * stride)
+        if m is None:
+            return None
+
+        return m[stride]
