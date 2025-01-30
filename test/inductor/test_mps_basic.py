@@ -39,50 +39,6 @@ class MPSBasicTests(TestCase):
     common = check_model_gpu
     device = "mps"
 
-    test_add_const_int = CommonTemplate.test_add_const_int
-    test_add_inplace_permuted_mps = CommonTemplate.test_add_inplace_permuted
-    test_addmm = CommonTemplate.test_addmm
-    test_arange5 = CommonTemplate.test_arange5
-    test_argmax_min_int32 = CommonTemplate.test_argmax_min_int32
-    test_avg_pool2d5 = CommonTemplate.test_avg_pool2d5
-    test_avg_pool2d8 = CommonTemplate.test_avg_pool2d8
-    test_div1 = CommonTemplate.test_div1
-    test_div3 = CommonTemplate.test_div3
-    test_cat_empty = CommonTemplate.test_cat_empty
-    test_cat_unbacked_empty_1d = CommonTemplate.test_cat_unbacked_empty_1d
-    test_floordiv = CommonTemplate.test_floordiv
-    test_full_truncation = CommonTemplate.test_full_truncation
-    test_fmod = CommonTemplate.test_fmod
-    test_fmod_zero_dim = CommonTemplate.test_fmod_zero_dim
-    test_index_dynamic_shapes = CommonTemplate.test_index_dynamic_shapes
-    test_inf = CommonTemplate.test_inf
-    test_isinf = CommonTemplate.test_isinf
-    test_isinf2 = CommonTemplate.test_isinf2
-    test_log_fp64 = CommonTemplate.test_log_fp64
-    test_low_memory_max_pool = CommonTemplate.test_low_memory_max_pool
-    test_max_min = CommonTemplate.test_max_min
-    test_max_pool2d2 = CommonTemplate.test_max_pool2d2
-    test_nan_to_num = CommonTemplate.test_nan_to_num
-    test_pow2 = CommonTemplate.test_pow2
-    test_remainder = CommonTemplate.test_remainder
-    test_remove_no_ops = CommonTemplate.test_remove_no_ops
-    test_reflection_pad2d = CommonTemplate.test_reflection_pad2d
-    test_rsqrt = CommonTemplate.test_rsqrt
-    test_scalar_cpu_tensor_arg = CommonTemplate.test_scalar_cpu_tensor_arg
-    test_scalar_output = CommonTemplate.test_scalar_output
-    test_setitem_with_int_parameter = CommonTemplate.test_setitem_with_int_parameter
-    test_signbit = CommonTemplate.test_signbit
-    test_silu = CommonTemplate.test_silu
-    test_slice_scatter4 = CommonTemplate.test_slice_scatter4
-    test_sort = CommonTemplate.test_sort
-    test_tanh = CommonTemplate.test_tanh
-    test_view_as_complex = CommonTemplate.test_view_as_complex
-    test_view_on_aliased = CommonTemplate.test_view_on_aliased
-    test_views3 = CommonTemplate.test_views3
-    test_views6 = CommonTemplate.test_views6
-    test_views7 = CommonTemplate.test_views7
-    test_zero_dim_reductions = CommonTemplate.test_zero_dim_reductions
-
     @parametrize("dtype", MPS_DTYPES)
     def test_add(self, dtype):
         self.common(
@@ -148,12 +104,56 @@ class MPSBasicTests(TestCase):
 
 # Copy tests
 for test_name in [
+    "test_add_const_int",
+    "test_add_inplace_permuted",
+    "test_addmm",
+    "test_arange5",
+    "test_argmax_min_int32",
+    "test_avg_pool2d5",
+    "test_avg_pool2d8",
     "test_builtins_round",
     "test_builtins_round_float_ndigits_neg",
-    "test_lgamma",
+    "test_cat_empty",
+    "test_cat_unbacked_empty_1d",
+    "test_custom_op_2",
+    "test_div1",
+    "test_div3",
     "test_erfinv",
+    "test_floordiv",
+    "test_full_truncation",
+    "test_fmod",
+    "test_fmod_zero_dim",
+    "test_index_dynamic_shapes",
+    "test_inf",
+    "test_isinf",
+    "test_isinf2",
+    "test_lgamma",
+    "test_log_fp64",
+    "test_low_memory_max_pool",
+    "test_max_min",
+    "test_max_pool2d2",
+    "test_nan_to_num",
+    "test_pow2",
     "test_randint_int64_mod",
     "test_randn_generator",
+    "test_remainder",
+    "test_remove_no_ops",
+    "test_reflection_pad2d",
+    "test_rsqrt",
+    "test_scalar_cpu_tensor_arg",
+    "test_scalar_output",
+    "test_setitem_with_int_parameter",
+    "test_signbit",
+    "test_silu",
+    "test_slice_scatter4",
+    "test_sort",
+    "test_tanh",
+    "test_view_as_complex",
+    "test_view_on_aliased",
+    "test_views3",
+    "test_views6",
+    "test_views7",
+    "test_zero_dim_reductions",
 ]:
     setattr(MPSBasicTests, test_name, getattr(CommonTemplate, test_name))
 
