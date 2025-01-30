@@ -2,13 +2,14 @@
 import cProfile
 import inspect
 import io
+import itertools
 import os
 import warnings
 from collections.abc import Sequence
 from contextlib import contextmanager
 from functools import wraps
 from pstats import Stats
-from typing import Any, Callable, cast, Optional, TypeVar, Union
+from typing import Any, Callable, cast, Optional, Set, TypeVar, Union
 
 import torch
 import torch.distributed as dist
@@ -37,6 +38,36 @@ def _get_failure_dict(
         dict[int, WRAPPED_EXCEPTION],
         {i: err for i, err in enumerate(results) if _is_wrapped_exception(err)},
     )
+
+
+def _all_gather_keys(
+    local_dict: dict[Any, Any], group: Optional[dist.ProcessGroup] = None
+) -> Set[Any]:
+    """Gathers all keys, and returns them sorted."""
+    keys = list(local_dict.keys())
+    gathered_keys: list[list[Any]] = [None] * dist.get_world_size(group)  # type: ignore[list-item]
+
+    dist.all_gather_object(gathered_keys, keys, group=group)
+    return set(itertools.chain.from_iterable(gathered_keys))
+
+
+def assert_same_keys(
+    state_dict: dict[Any, Any], process_group: Optional[dist.ProcessGroup] = None
+) -> None:
+    """
+    Asserts that all ranks have the same keys in their state dict.
+    This is a collective call which requires all ranks in ``process_group`` to
+    join. It will also induce cross-rank communication and block CPU.
+    """
+
+    if dist.get_world_size(process_group) == 1:
+        return
+
+    all_keys = _all_gather_keys(state_dict, process_group)
+    my_keys = set(state_dict.keys())
+    diff = all_keys - my_keys
+    if len(diff) > 0:
+        raise AssertionError(f"Keys mismatch between ranks, difference: {diff}")
 
 
 class _DistWrapper:

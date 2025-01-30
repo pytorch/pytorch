@@ -62,7 +62,8 @@ def load(
     Load a checkpoint into a distributed state dict in SPMD style.
 
     Each rank must have the same keys in their ``state_dict`` provided to this
-    API. Mismatched keys may result in hangs or errors.
+    API. Mismatched keys may result in hangs or errors. If unsure, you can use
+    the ``assert_same_keys`` API to check (but may induce communication costs).
 
     Each rank will try to read the least amount of data necessary
     to fullfill the requested `state_dict`. When loading :class:`ShardedTensor`
