@@ -134,11 +134,6 @@ def cond(
             (Note: in-place tensor operations such as `add_` for intermediate results
             are allowed in a branch)
 
-    .. warning::
-        Temporal Limitations:
-
-        - The **output** of branches must be a **single Tensor**. Pytree of tensors will be supported in the future.
-
     """
     if torch.compiler.is_dynamo_compiling():
         return cond_op(pred, true_fn, false_fn, operands)
