@@ -1930,9 +1930,6 @@ class Scheduler:
         with dynamo_timed("Scheduler.__init__"):
             self._init(nodes)
 
-    # Disable CUBIN saving when measuring speedups.  Saving to disk introduces arbitrary
-    # slowdowns that bias benchmark results.
-    @config.patch("triton.store_cubin", False)
     def _init(self, nodes: list[ir.Operation]) -> None:
         super().__init__()
         self.__dep_size_hint_cache = {}
