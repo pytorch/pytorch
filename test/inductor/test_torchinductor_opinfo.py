@@ -528,11 +528,14 @@ inductor_override_kwargs["cuda"] = {
     ("index_reduce.amax", f32): {"check_gradient": False},
     ("index_reduce.amax", f16): {"check_gradient": False},
     ("tanh", f16): {"atol": 1e-4, "rtol": 1e-2},
-    ("_unsafe_masked_index", f16): {"atol": 5e-4, "rtol": 2e-3},
-    ("nn.functional.interpolate.linear", f16): {"atol": 5e-5, "rtol": 2e-3},
-    ("addmm", f16): {"atol": 5e-5, "rtol": 5e-3},
-    ("logaddexp", f16): {"atol": 2e-4, "rtol": 5e-3},
-    ("std_mean", f16): {"atol": 2e-4, "rtol": 0.16},
+    ("_unsafe_masked_index", f16): {"reference_in_float": True},
+    ("nn.functional.interpolate.linear", f16): {"reference_in_float": True},
+    ("addmm", f16): {"reference_in_float": True},
+    ("logaddexp", f16): {"reference_in_float": True},
+    ("std_mean", f16): {"reference_in_float": True},
+    ("hypot", f16): {"reference_in_float": True},
+    ("cummin", f16): {"reference_in_float": True},
+    ("unfold_copy", f16): {"reference_in_float": True},
 }
 
 inductor_override_kwargs["xpu"] = {
