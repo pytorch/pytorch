@@ -408,18 +408,22 @@ def test_subclasses(gm, inputs, **kwargs):
     TRANSFORM_SEQS: List[Any] = [
         (),  # empty tuple means no transformation
     ]
+    print("XXX BEFORE product0")
     for k in range(1, MAX_SUBCLASSES_NESTING + 1):
         for p in itertools.product(list(range(N)), repeat=k):
             TRANSFORM_SEQS.append(p)  # noqa: PERF402
+    print("XXX AFTER product0")
 
     TENSOR_INPUTS_IDXS: List[int] = [
         i for i, inp in enumerate(inputs) if _is_tensor(inp)
     ]
     NUM_TENSOR_INPUTS = len(TENSOR_INPUTS_IDXS)
 
+    print("XXX BEFORE product")
     TENSOR_INPUTS_TRANSFORM_SEQS = list(
         itertools.product(TRANSFORM_SEQS, repeat=NUM_TENSOR_INPUTS)
     )
+    print("XXX AFTER product")
     NUM_TENSOR_INPUTS_TRANSFORM_SEQS = len(TENSOR_INPUTS_TRANSFORM_SEQS)
     log.debug(
         "test_subclasses backend TENSOR_INPUTS_TRANSFORM_SEQS:%s",
@@ -440,7 +444,16 @@ def test_subclasses(gm, inputs, **kwargs):
         NUM_TENSOR_INPUTS_TRANSFORM_SEQS,
         test_gm.print_readable(False),
     )
-    for i, transform_seqs in enumerate(TENSOR_INPUTS_TRANSFORM_SEQS):
+    MAX_INPUT_VARIANTS: int = int(
+        os.getenv("PYTORCH_TEST_WITH_SUBCLASSES_MAX_INPUT_VARIANTS", default=64)
+    )
+    import random
+    variants = TENSOR_INPUTS_TRANSFORM_SEQS
+    if len(variants) > MAX_INPUT_VARIANTS:
+        variants = random.sample(TENSOR_INPUTS_TRANSFORM_SEQS, MAX_INPUT_VARIANTS)
+    for i, transform_seqs in enumerate(variants):
+        # TODO: test random vars of 128 with stable id of transform seqs, to repro
+
         test_inputs = pytree.tree_map(lambda x: x.detach() if isinstance(x, torch.Tensor) else x, copy.copy(inputs))
         # Have to copy GraphModule, as AOTD caches some info based on inputs in attrs
         _test_gm = copy.deepcopy(test_gm)
