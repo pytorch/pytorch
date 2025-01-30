@@ -49,9 +49,6 @@ static_assert(
 // CGA fields because they have already been pybinded out.
 #if defined(NCCL_MAJOR) && NCCL_VERSION_CODE >= NCCL_VERSION(2, 17, 0)
 #define NCCL_HAS_CONFIG
-#endif
-
-#if defined(NCCL_MAJOR) && NCCL_VERSION_CODE >= NCCL_VERSION(2, 17, 0)
 #define NCCL_HAS_COMM_SPLIT
 #endif
 
