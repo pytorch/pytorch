@@ -3,7 +3,7 @@ import dataclasses
 import inspect
 import sys
 import warnings
-from typing import Callable, Dict, List, Optional, TYPE_CHECKING, Union
+from typing import Callable, Optional, TYPE_CHECKING, Union
 
 import torch._C
 from torch._guards import Guard
@@ -111,8 +111,8 @@ class ContextWrappingVariable(VariableTracker):
     def call_function(
         self,
         tx: "InstructionTranslator",
-        args: "List[VariableTracker]",
-        kwargs: "Dict[str, VariableTracker]",
+        args: "list[VariableTracker]",
+        kwargs: "dict[str, VariableTracker]",
     ) -> "VariableTracker":
         assert len(args) == 1
         if isinstance(args[0], NestedUserFunctionVariable):
@@ -507,8 +507,8 @@ class GradModeVariable(ContextWrappingVariable):
     def call_function(
         self,
         tx: "InstructionTranslator",
-        args: "List[VariableTracker]",
-        kwargs: "Dict[str, VariableTracker]",
+        args: "list[VariableTracker]",
+        kwargs: "dict[str, VariableTracker]",
     ):
         self._call_func(tx, self.initial_values)  # undo eager initialization
         return super().call_function(tx, args, kwargs)
@@ -972,8 +972,8 @@ class FSDPParamGroupUseTrainingStateVariable(ContextWrappingVariable):
     def call_function(
         self,
         tx: "InstructionTranslator",
-        args: "List[VariableTracker]",
-        kwargs: "Dict[str, VariableTracker]",
+        args: "list[VariableTracker]",
+        kwargs: "dict[str, VariableTracker]",
     ):
         self._call_func(tx, self.initial_values)  # undo eager initialization
         return super().call_function(tx, args, kwargs)
@@ -1016,7 +1016,7 @@ class SDPAKernelVariable(ContextWrappingVariable):
 
     def __init__(
         self,
-        target_values: List[torch.nn.attention.SDPBackend],
+        target_values: list[torch.nn.attention.SDPBackend],
         initial_values=None,
         **kwargs,
     ) -> None:
@@ -1089,8 +1089,8 @@ class StreamVariable(VariableTracker):
         self,
         tx,
         name,
-        args: "List[VariableTracker]",
-        kwargs: "Dict[str, VariableTracker]",
+        args: "list[VariableTracker]",
+        kwargs: "dict[str, VariableTracker]",
     ) -> "VariableTracker":
         assert hasattr(self.value, name), f"no stream method found named {name}"
         assert name in [
@@ -1158,8 +1158,8 @@ class EventVariable(VariableTracker):
         self,
         tx,
         name,
-        args: "List[VariableTracker]",
-        kwargs: "Dict[str, VariableTracker]",
+        args: "list[VariableTracker]",
+        kwargs: "dict[str, VariableTracker]",
     ) -> "VariableTracker":
         from ..utils import proxy_args_kwargs
         from .builder import wrap_fx_proxy_cls
@@ -1215,8 +1215,8 @@ class WithExitFunctionVariable(VariableTracker):
     def call_function(
         self,
         tx: "InstructionTranslator",
-        args: "List[VariableTracker]",
-        kwargs: "Dict[str, VariableTracker]",
+        args: "list[VariableTracker]",
+        kwargs: "dict[str, VariableTracker]",
     ) -> "VariableTracker":
         assert not kwargs
         return self.ctx.exit(tx, *args)
