@@ -13,7 +13,7 @@ import argparse
 import json
 import zipfile
 from dataclasses import asdict
-from datetime import datetime, timezone
+from datetime import datetime
 from typing import Any, Optional
 
 import pandas as pd  # type: ignore[import]
@@ -80,8 +80,8 @@ class SegmentGenerator:
                 segment = OssCiSegmentV1(
                     level=CMD_PYTHON_LEVEL,
                     name=value,
-                    start_at=row["start_time"].timestamp(),
-                    end_at=row["end_time"].timestamp(),
+                    start_at=getTimestampString(row["start_time"].timestamp()),
+                    end_at=getTimestampString(row["end_time"].timestamp()),
                     extra_info={},
                 )
                 segments.append(segment)
@@ -124,10 +124,10 @@ class UtilizationDbConverter:
         self.metadata = metadata
         self.records = records
         self.segments = segments
-        self.created_at = datetime.now().timestamp()
+        self.created_at = getTimestampString(datetime.now().timestamp())
         self.info = info
         end_time_stamp = max([record.timestamp for record in records])
-        self.end_at = end_time_stamp
+        self.end_at = getTimestampString(end_time_stamp)
 
     def convert(
         self,
@@ -150,7 +150,7 @@ class UtilizationDbConverter:
             gpu_count=self.metadata.gpu_count if self.metadata.gpu_count else 0,
             cpu_count=self.metadata.cpu_count if self.metadata.cpu_count else 0,
             gpu_type=self.metadata.gpu_type if self.metadata.gpu_type else "",
-            start_at=self.metadata.start_at,
+            start_at=getTimestampString(self.metadata.start_at),
             end_at=self.end_at,
             segments=self.segments,
             tags=[],
@@ -169,14 +169,14 @@ class UtilizationDbConverter:
             created_at=self.created_at,
             type=type,
             tags=tags,
-            time_stamp=record.timestamp,
+            time_stamp=getTimestampString(record.timestamp),
             repo=self.info.repo,
             workflow_id=self.info.workflow_run_id,
             run_attempt=self.info.run_attempt,
             job_id=self.info.job_id,
             workflow_name=self.info.workflow_name,
             job_name=self.info.job_name,
-            json_data=str(asdict(record.data) if record.data else {}),
+            json_data=str(record.data.to_json() if record.data else {}),
         )
 
 
@@ -367,10 +367,8 @@ def unzip_file(path: Path, file_name: str) -> str:
         return ""
 
 
-def get_datetime_string(timestamp: float) -> str:
-    dt = datetime.fromtimestamp(timestamp, timezone.utc)
-    dt_str = dt.strftime("%Y-%m-%d %H:%M:%S.%f")
-    return dt_str
+def getTimestampString(timestamp: float) -> str:
+    return f"{timestamp:.0f}"
 
 
 def parse_args() -> argparse.Namespace:

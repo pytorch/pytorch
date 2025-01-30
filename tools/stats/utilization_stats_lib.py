@@ -58,8 +58,8 @@ class UtilizationRecord(DataClassJsonMixin):
 class OssCiSegmentV1(DataClassJsonMixin):
     level: str
     name: str
-    start_at: float
-    end_at: float
+    start_at: str
+    end_at: str
     extra_info: dict[str, str]
 
 
@@ -67,7 +67,7 @@ class OssCiSegmentV1(DataClassJsonMixin):
 # https://github.com/pytorch/test-infra/blob/main/clickhouse_db_schema/oss_ci_utilization/oss_ci_utilization_metadata_schema.sql
 @dataclass
 class OssCiUtilizationMetadataV1:
-    created_at: float
+    created_at: str
     repo: str
     workflow_id: int
     run_attempt: int
@@ -79,8 +79,8 @@ class OssCiUtilizationMetadataV1:
     gpu_count: int
     cpu_count: int
     gpu_type: str
-    start_at: float
-    end_at: float
+    start_at: str
+    end_at: str
     segments: list[OssCiSegmentV1]
     tags: list[str] = field(default_factory=list)
 
@@ -89,10 +89,10 @@ class OssCiUtilizationMetadataV1:
 # https://github.com/pytorch/test-infra/blob/main/clickhouse_db_schema/oss_ci_utilization/oss_ci_utilization_time_series_schema.sql
 @dataclass
 class OssCiUtilizationTimeSeriesV1:
-    created_at: float
+    created_at: str
     type: str
     tags: list[str]
-    time_stamp: float
+    time_stamp: str
     repo: str
     workflow_id: int
     run_attempt: int
