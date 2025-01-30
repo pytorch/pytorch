@@ -46,6 +46,7 @@ from ..utils import (
 )
 from ..virtualized import V
 from .common import (
+    ArgName,
     CodeGen,
     DeferredLine,
     IndentedBuffer,
@@ -727,9 +728,13 @@ class PythonWrapperCodegen(CodeGen):
 
     @staticmethod
     def create(
-        is_subgraph: bool, subgraph_name: str, parent_wrapper: PythonWrapperCodegen
+        is_subgraph: bool,
+        subgraph_name: Optional[str],
+        parent_wrapper: Optional[PythonWrapperCodegen],
     ):
         if is_subgraph:
+            assert subgraph_name is not None
+            assert parent_wrapper is not None
             return SubgraphPythonWrapperCodegen(subgraph_name, parent_wrapper)
         return PythonWrapperCodegen()
 
@@ -1653,7 +1658,7 @@ class PythonWrapperCodegen(CodeGen):
             signature,
             size_dtype=None,  # try to infer based on symints
             indices=non_constant_indices,
-            argdefs=kernel.arg_names,
+            argdefs=[ArgName(x) for x in kernel.arg_names],
         )
         triton_meta: dict[str, Any] = {
             "signature": triton_signature,
@@ -1774,7 +1779,9 @@ class PythonWrapperCodegen(CodeGen):
         elif ws.zero_mode == WorkspaceZeroMode.ZERO_PER_GRAPH:
             prior = self.allocated_workspaces.get(name)
             if prior:
-                assert isinstance(prior, AllocateLine)
+                assert isinstance(prior, AllocateLine) and isinstance(
+                    prior.node, WorkspaceArg
+                )
                 # expand existing allocation
                 prior.node = WorkspaceArg.maximum(prior.node, ws)
             else:
@@ -2554,7 +2561,7 @@ class SubgraphPythonWrapperCodegen(PythonWrapperCodegen):
     imports twice in the output code)
     """
 
-    def __init__(self, subgraph_name, parent_wrapper):
+    def __init__(self, subgraph_name: str, parent_wrapper: PythonWrapperCodegen):
         # It is necessary to set the subgraph_name before calling super __init__
         # because __init__ calls set_launcher_fn_name
         self.subgraph_name = subgraph_name
