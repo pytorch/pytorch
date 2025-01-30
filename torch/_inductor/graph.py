@@ -127,36 +127,6 @@ else:
         pass
 
 
-def supported_dtype_of_cpp_wrapper(dtype: torch.dtype, device_type: str) -> bool:
-    supported_dtype = OrderedSet(
-        [
-            torch.float32,
-            torch.float64,
-            torch.int64,
-            torch.int32,
-            torch.int16,
-            torch.int8,
-            torch.uint64,
-            torch.uint32,
-            torch.uint16,
-            torch.uint8,
-            torch.bool,
-            torch.bfloat16,
-            torch.complex32,
-            torch.complex64,
-            torch.complex128,
-            torch.float16,
-        ]
-    )
-    if device_type == "cuda":
-        supported_dtype.add(torch.float8_e4m3fn)
-        supported_dtype.add(torch.float8_e5m2)
-        supported_dtype.add(torch.float8_e4m3fnuz)
-        supported_dtype.add(torch.float8_e5m2fnuz)
-
-    return dtype in supported_dtype
-
-
 def may_get_constant_buffer_dtype(constant_buffer: sympy.Expr) -> Optional[torch.dtype]:
     assert isinstance(
         constant_buffer, (sympy.Symbol, sympy.Expr, sympy.core.numbers.Integer)
@@ -1789,20 +1759,8 @@ class GraphLowering(torch.fx.Interpreter):
         if config.disable_cpp_codegen:
             raise CppWrapperCodegenError("C++ codegen is disabled")
 
-        if sys.platform not in ["linux", "darwin", "win32"]:
+        if sys.platform not in ("linux", "darwin", "win32"):
             raise CppWrapperCodegenError(f"Unsupported platform {sys.platform}")
-
-        for value in self.graph_inputs.values():
-            dtype = None
-            if isinstance(value, TensorBox):
-                dtype = value.get_dtype()
-            elif isinstance(
-                value, (sympy.Symbol, sympy.Expr, sympy.core.numbers.Integer)
-            ):
-                dtype = may_get_constant_buffer_dtype(value)
-
-            if not supported_dtype_of_cpp_wrapper(dtype, self.device_type):  # type: ignore[arg-type]
-                raise CppWrapperCodegenError(f"Unsupported input dtype {dtype}")
 
     def init_wrapper_code(
         self,
