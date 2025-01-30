@@ -58,7 +58,7 @@ class SegmentGenerator:
                 for process in (record.cmd_names or [])
             ]
         )
-        df[time_col_name] = pd.to_datetime(df[time_col_name], unit="s",utc=True)
+        df[time_col_name] = pd.to_datetime(df[time_col_name], unit="s", utc=True)
 
         # get unique cmd names
         unique_cmds_df = pd.DataFrame(df[cmd_col_name].unique(), columns=[cmd_col_name])
@@ -81,7 +81,7 @@ class SegmentGenerator:
                     level=CMD_PYTHON_LEVEL,
                     name=value,
                     start_at=int(row["start_time"].timestamp()),
-                    end_at= int(row["end_time"].timestamp()),
+                    end_at=int(row["end_time"].timestamp()),
                     extra_info={},
                 )
                 segments.append(segment)
@@ -365,6 +365,7 @@ def unzip_file(path: Path, file_name: str) -> str:
     except Exception as e:
         print(f"::warning trying to download test log {object} failed by: {e}")
         return ""
+
 
 def parse_args() -> argparse.Namespace:
     """
