@@ -79,12 +79,12 @@ jobs:
       run:
         shell: bash
     steps:
-      # temporarily disabled
-      # - name: Configure AWS credentials(PyTorch account)
-      #   uses: aws-actions/configure-aws-credentials@v3
-      #   with:
-      #     role-to-assume: arn:aws:iam::308535385114:role/gha_workflow_s3_ossci_linux_windows_read_write
-      #     aws-region: us-east-1
+      temporarily disabled
+      - name: Configure AWS credentials(PyTorch account)
+        uses: aws-actions/configure-aws-credentials@v3
+        with:
+          role-to-assume: arn:aws:iam::308535385114:role/gha_workflow_s3_ossci_linux_windows_read_write
+          aws-region: us-east-1
       - name: Git checkout PyTorch
         uses: actions/checkout@v4
         with:
@@ -135,12 +135,13 @@ jobs:
         id: parse-ref
         shell: bash
         run: python3 pytorch/.github/scripts/parse_ref.py
-      - name: Get workflow job id
-        id: get-job-id
-        uses: pytorch/.github/actions/get-workflow-job-id
-        if: always()
-        with:
-          github-token: ${{ secrets.GITHUB_TOKEN }}
+      # temporarily disabled
+      # - name: Get workflow job id
+      #   id: get-job-id
+      #   uses: pytorch/.github/actions/get-workflow-job-id
+      #   if: always()
+      #   with:
+      #     github-token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Build
         id: build
