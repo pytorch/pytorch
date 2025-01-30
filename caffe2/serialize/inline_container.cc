@@ -593,6 +593,14 @@ static int64_t read_le_16(uint8_t* buf) {
   return buf[0] + (buf[1] << 8);
 }
 
+size_t PyTorchStreamReader::getRecordHeaderOffset(const std::string& name) {
+  std::lock_guard<std::mutex> guard(reader_lock_);
+  mz_zip_archive_file_stat stat;
+  mz_zip_reader_file_stat(ar_.get(), getRecordID(name), &stat);
+  valid("retrieving file meta-data for ", name.c_str());
+  return stat.m_local_header_ofs;
+}
+
 size_t PyTorchStreamReader::getRecordOffset(const std::string& name) {
   std::lock_guard<std::mutex> guard(reader_lock_);
   mz_zip_archive_file_stat stat;

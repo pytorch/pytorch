@@ -1929,11 +1929,13 @@ def _load(
         if current_offset is None:
             assert key == "0"
             current_offset = zip_file.get_record_offset(name)
+            local_header_offset = zip_file.get_record_header_offset(name)
             storage_offset = current_offset
         else:
             storage_offset = zip_file.get_record_offset_no_read(
                 current_offset, name, numel
             )
+            local_header_offset = current_offset
 
         # This is only actually needed for storages that have typed_storage._data_ptr() == 0
         # after being read. Otherwise persistent_load would never "re-call" load_tensor
@@ -1941,7 +1943,6 @@ def _load(
         offsets[name] = storage_offset
 
         # Increment current_offset of offset where next zipfile header starts
-        local_header_offset = current_offset
         current_offset = storage_offset + numel
         # add size of data descriptor after payload
         if numel > 0:
