@@ -1425,9 +1425,7 @@ def gen_pyi(
     # Dispatch key hints
     # ~~~~~~~~~~~~~~~~~~
     dispatch_key_hints = [f"{d.name} = ..." for d in DispatchKey]
-    torch_dispatch_mode_key_hints = [
-        f"{k.name} = ..." for k in _TorchDispatchModeKey
-    ]
+    torch_dispatch_mode_key_hints = [f"{k.name} = ..." for k in _TorchDispatchModeKey]
 
     # Tags Enum type hints
     # ~~~~~~~~~~~~~~~~~~~~
