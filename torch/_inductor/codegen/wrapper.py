@@ -46,6 +46,7 @@ from ..utils import (
 )
 from ..virtualized import V
 from .common import (
+    ArgName,
     CodeGen,
     DeferredLine,
     IndentedBuffer,
@@ -719,7 +720,8 @@ class PythonWrapperCodegen(CodeGen):
 
         # intermediate tensor value printing utility
         self.debug_printer = DebugPrinterManager(
-            debug_printer_level=config.aot_inductor.debug_intermediate_value_printer
+            debug_printer_level=config.aot_inductor.debug_intermediate_value_printer,
+            use_array_ref=config.aot_inductor.allow_stack_allocation,
         )
 
         # Additional files that are dependent to the wrapper (ex. cubin files)
@@ -727,9 +729,13 @@ class PythonWrapperCodegen(CodeGen):
 
     @staticmethod
     def create(
-        is_subgraph: bool, subgraph_name: str, parent_wrapper: PythonWrapperCodegen
+        is_subgraph: bool,
+        subgraph_name: Optional[str],
+        parent_wrapper: Optional[PythonWrapperCodegen],
     ):
         if is_subgraph:
+            assert subgraph_name is not None
+            assert parent_wrapper is not None
             return SubgraphPythonWrapperCodegen(subgraph_name, parent_wrapper)
         return PythonWrapperCodegen()
 
@@ -1078,7 +1084,7 @@ class PythonWrapperCodegen(CodeGen):
             arg.get_dtype() if isinstance(arg, IRNode) else type(arg)
             for arg in raw_args
         ]
-        # Because generate_kernel_call can be overriden by a subclass, explictly call
+        # Because generate_kernel_call can be overriden by a subclass, explicitly call
         # PythonWrapperCodegen.generate_kernel_call here
         PythonWrapperCodegen.generate_kernel_call(
             self,
@@ -1653,7 +1659,7 @@ class PythonWrapperCodegen(CodeGen):
             signature,
             size_dtype=None,  # try to infer based on symints
             indices=non_constant_indices,
-            argdefs=kernel.arg_names,
+            argdefs=[ArgName(x) for x in kernel.arg_names],
         )
         triton_meta: dict[str, Any] = {
             "signature": triton_signature,
@@ -1774,7 +1780,9 @@ class PythonWrapperCodegen(CodeGen):
         elif ws.zero_mode == WorkspaceZeroMode.ZERO_PER_GRAPH:
             prior = self.allocated_workspaces.get(name)
             if prior:
-                assert isinstance(prior, AllocateLine)
+                assert isinstance(prior, AllocateLine) and isinstance(
+                    prior.node, WorkspaceArg
+                )
                 # expand existing allocation
                 prior.node = WorkspaceArg.maximum(prior.node, ws)
             else:
@@ -2376,7 +2384,7 @@ class PythonWrapperCodegen(CodeGen):
 
     def codegen_subgraph_prefix(self, subgraph, outer_inputs, outer_outputs):
         # All inputs of hops must be explicitly passed in.
-        # Free tensors and basic symbols should have been explictily lifted as inputs in dynamo.
+        # Free tensors and basic symbols should have been explicitly lifted as inputs in dynamo.
         assert len(outer_inputs) == len(
             subgraph.graph.graph_input_names
         ), f"graph_input_names:{subgraph.graph.graph_input_names}, outer_inputs: {outer_inputs}"
@@ -2554,7 +2562,7 @@ class SubgraphPythonWrapperCodegen(PythonWrapperCodegen):
     imports twice in the output code)
     """
 
-    def __init__(self, subgraph_name, parent_wrapper):
+    def __init__(self, subgraph_name: str, parent_wrapper: PythonWrapperCodegen):
         # It is necessary to set the subgraph_name before calling super __init__
         # because __init__ calls set_launcher_fn_name
         self.subgraph_name = subgraph_name

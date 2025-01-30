@@ -305,7 +305,7 @@ class CachingAutotuner(KernelInterface):
             assert device_prop.regs_per_multiprocessor
             assert device_prop.max_threads_per_multi_processor
             assert device_prop.multi_processor_count
-            seen_configs: OrderedSet[Config] = OrderedSet(self.configs)
+            seen_config_hashes: Optional[OrderedSet[Hashable]] = None
             warp_size = device_prop.warp_size or 32
             for result in self.compile_results:
                 triton_config = result.config
@@ -369,9 +369,17 @@ class CachingAutotuner(KernelInterface):
                 )
                 new_config.kwargs[largest_rkwarg] //= 2
 
-                if new_config in seen_configs:
+                if seen_config_hashes is None:
+                    seen_config_hashes = OrderedSet(
+                        [
+                            triton_config_to_hashable(x.config)
+                            for x in self.compile_results
+                        ]
+                    )
+                new_config_hash = triton_config_to_hashable(new_config)
+                if new_config_hash in seen_config_hashes:
                     continue
-                seen_configs.add(new_config)
+                seen_config_hashes.add(new_config_hash)
                 log.debug(
                     "Dynamically scale down %s from TritonConfig(%s) and get a new TritonConfig(%s)",
                     largest_rkwarg,
