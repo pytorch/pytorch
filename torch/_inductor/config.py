@@ -564,7 +564,9 @@ debug_index_asserts = False
 # Inductor's behavior should be closer to fp64 ref numerics.  However, with
 # this knob you can ensure the downcast-upcast are preserved so that you can
 # emulate the eager numerics.
-emulate_precision_casts = False
+emulate_precision_casts = (
+    os.environ.get("TORCHINDUCTOR_EMULATE_PRECISION_CASTS", "0") == "1"
+)
 
 # warnings intended for PyTorch developers, disable for point releases
 is_nightly_or_source = "dev" in torch.__version__ or "git" in torch.__version__
@@ -1263,7 +1265,7 @@ class cuda:
     # Set this to "pingpong" to avoid numerical issues
     # caused by the op ordering of the "pingpong" memory access
     # pattern used by some Cutlass Kernels.
-    cutlass_op_denylist_regex: Optional[str] = "pingpong"
+    cutlass_op_denylist_regex: Optional[str] = None
 
 
 class rocm:

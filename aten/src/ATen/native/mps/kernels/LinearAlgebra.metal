@@ -42,7 +42,7 @@ kernel void naive_bmm(
     constant T* mat1Data [[buffer(0)]],
     constant T* mat2Data [[buffer(1)]],
     device T* outputData [[buffer(2)]],
-    constant array<ulong3, 3>& strides [[buffer(3)]],
+    constant array<ulong, 9>& strides [[buffer(3)]],
     constant uint4& sizes [[buffer(4)]],
     uint thread_index [[thread_position_in_grid]]) {
   uint b = thread_index / (sizes.x * sizes.z);
@@ -50,11 +50,11 @@ kernel void naive_bmm(
   uint y = boffs / sizes.x;
   uint x = boffs % sizes.x;
   auto rc = dot_product(
-      mat1Data + b * strides[0].z + x * strides[0].x,
-      mat2Data + b * strides[1].z + y * strides[1].y,
-      ulong2(strides[0].y, strides[1].x),
+      mat1Data + b * strides[2] + x * strides[0],
+      mat2Data + b * strides[5] + y * strides[4],
+      ulong2(strides[1], strides[3]),
       sizes.y);
-  outputData[b * strides[2].z + x * strides[2].x + y * strides[2].y] = static_cast<T>(rc);
+  outputData[b * strides[8] + x * strides[6] + y * strides[7]] = static_cast<T>(rc);
 }
 
 inline float blockReduceSum(
@@ -338,7 +338,7 @@ kernel void applySYRK(
       constant DTYPE * mat1Data [[buffer(0)]],             \
       constant DTYPE * mat2Data [[buffer(1)]],             \
       device DTYPE * outputData [[buffer(2)]],             \
-      constant array<ulong3, 3> & strides [[buffer(3)]],   \
+      constant array<ulong, 9> & strides [[buffer(3)]],   \
       constant uint4 & sizes [[buffer(4)]],                \
       uint thread_index [[thread_position_in_grid]])
 

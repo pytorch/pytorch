@@ -2176,6 +2176,33 @@ class AOTInductorTestsTemplate:
         )
         self.check_model(model, example_inputs)
 
+    def test_triton_next_power_of_2(self):
+        if self.device != GPU_TYPE:
+            raise unittest.SkipTest("requires GPU")
+
+        class Model(torch.nn.Module):
+            def forward(self, a, b, lengths):
+                n_elements = a.numel()
+                out = torch.empty_like(a)
+                max_len = int(lengths.max())
+                scaling_factor = triton.next_power_of_2(max_len)
+                add_kernel_with_scaling[(n_elements,)](
+                    a,
+                    b,
+                    out,
+                    n_elements,
+                    scaling_factor,
+                    BLOCK_SIZE=16,
+                )
+                return out
+
+        example_inputs = (
+            torch.randn(2, device=self.device),
+            torch.randn(2, device=self.device),
+            torch.arange(end=4, device=self.device),
+        )
+        self.check_model(Model(), example_inputs)
+
     @common_utils.parametrize("grid_type", [1, 2, 3])
     @common_utils.parametrize("num_dims", [1, 2])
     @common_utils.parametrize("dynamic", [False, True])
@@ -3865,6 +3892,45 @@ class AOTInductorTestsTemplate:
             ).run(code)
 
         self.check_model(Model(), example_inputs)
+
+    @common_utils.parametrize("mark_unbacked", (True, False))
+    def test_unbacked_equals_input_size_runtime_assertion(self, mark_unbacked: bool):
+        # This test checks the unbacked symint runtime assertions, for the following cases:
+        # (A) an unbacked symint equals an unbacked symint (mark_unbacked=True)
+        # (B) an unbacked symint equals a backed symint    (mark_unbacked=False)
+        class Model(torch.nn.Module):
+            def forward(self, a, b, c):
+                nz = torch.nonzero(a)
+                ones = a.new_ones([nz.size(0), b.size(0)])
+                torch._check(ones.size(0) >= 1)
+                equals = torch.add(ones, c)
+                return equals
+
+        model = Model()
+        example_inputs = (
+            torch.ones(64, device=self.device),
+            b := torch.randn((32,), device=self.device),
+            c := torch.randn((64, 32), device=self.device),
+        )
+        if mark_unbacked:
+            torch._dynamo.decorators.mark_unbacked(c, 0)
+        else:
+            torch._dynamo.mark_dynamic(c, 0)
+
+        # Check the runtime assertion is codegen'ed.
+        so_path, code = run_and_get_cpp_code(
+            AOTIRunnerUtil.compile, model, example_inputs
+        )
+        lowerbound_check = "u1 >= 1" if mark_unbacked else "u0 >= 2"
+        FileCheck().check_count(lowerbound_check, 1).run(code)
+
+        compiled = AOTIRunnerUtil.load(self.device, so_path)
+        compiled(*example_inputs)
+
+        # Check the runtime assertion.
+        with self.assertRaisesRegex(Exception, ""):
+            unexpected_inputs = (torch.ones(0, device=self.device), b, c)
+            compiled(*unexpected_inputs)
 
     def test_none_args_aot_codegen(self):
         if self.device != GPU_TYPE:
