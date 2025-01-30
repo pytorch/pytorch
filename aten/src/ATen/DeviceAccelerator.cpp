@@ -5,21 +5,20 @@
 namespace at::accelerator {
 
 std::optional<c10::DeviceType> getAccelerator(bool checked) {
-  // 1. Check runtime backends
-  // Note that all runtime checks should be migrated to use
-  // Use at::detail::getXXXHooks()->isAvailable()
-  // once all these out-of-tree backends are updated to provide this function
-
+  // 1. Check PrivateUse1 backends
+  // We explicitly allow PrivateUse1 and another device at the same time as we
+  // use this for testing. Whenever a PrivateUse1 device is registered, use it
+  // first.
+  // Note that this check only for hook registration and thus is NOT initializing
+  // the device or fork poisoning.
   if (is_privateuse1_backend_registered()) {
-    // We explicitly allow PrivateUse1 and another device at the same time as we
-    // use this for testing. Whenever a PrivateUse1 device is registered, use it
-    // first.
     return kPrivateUse1;
   }
 
-  // These runtime checks should be moved to compile-time once they provide
-  // the new isBuilt API and we are sure they're never in the same binary as
-  // another accelerator.
+  // 2. Check runtime backends
+  // This state is temporary, these runtime checks should be moved to compile-time
+  // once they provide the new isBuilt API and we are sure they're never in the
+  // same binary as another accelerator.
 #define DETECT_RUNTIME_ACCELERATOR(device_name)     \
   if (at::has##device_name()) {                     \
     return k##device_name;                          \
