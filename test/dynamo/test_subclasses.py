@@ -3155,16 +3155,18 @@ class GraphModule(torch.nn.Module):
 
         fn(t_cpu_cleared, t_cuda)
 
+        singleton_int_0 = SingletonInt((frozenset(), frozenset({0})))
+
         expected_var_to_val = {
-            "s0": SingletonInt(0),
+            "s0": singleton_int_0,
             "s1": 18,
             "s2": 2,
             "s3": 23,
-            "s4": SingletonInt(0),
-            "s5": SingletonInt(0),
+            "s4": singleton_int_0,
+            "s5": singleton_int_0,
             "s6": 23,
             "s7": 23,
-            "s8": SingletonInt(0),
+            "s8": singleton_int_0,
         }
         # We create extraneous symbols, but for we make sure to reuse symbols for
         # the common case, e.g. raggedness/metadata preserving operations like pointwise.
@@ -3393,8 +3395,7 @@ Eq(s6, s1)""",
                     guard_str,
                     """\
 Eq(s4 - 1, s2)
-Eq(s6, s3)
-Eq(s2 + 1, s7)""",
+Eq(s6, s3)""",
                 )
             elif nt_view_name.startswith("base_is_nt_True"):
                 self.assertExpectedInline(
