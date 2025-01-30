@@ -476,7 +476,7 @@ def dynamo_export(
                 "You are using an experimental ONNX export logic, which currently only supports dynamic shapes. "
                 "For a more comprehensive set of export options, including advanced features, please consider using "
                 "`torch.onnx.export(..., dynamo=True)`. ",
-                category=FutureWarning,
+                category=DeprecationWarning,
             )
 
         if export_options is not None and export_options.dynamic_shapes:

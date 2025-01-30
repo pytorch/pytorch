@@ -82,7 +82,7 @@ class ONNXFakeContext:
 
 @deprecated(
     "torch.onnx.dynamo_export is deprecated since 2.6.0. Please use torch.onnx.export(..., dynamo=True) instead.",
-    category=FutureWarning,
+    category=DeprecationWarning,
 )
 class OnnxRegistry:
     """Registry for ONNX functions.
@@ -230,7 +230,7 @@ class OnnxRegistry:
 
 @deprecated(
     "torch.onnx.dynamo_export is deprecated since 2.6.0. Please use torch.onnx.export(..., dynamo=True) instead.",
-    category=FutureWarning,
+    category=DeprecationWarning,
 )
 class ExportOptions:
     """Options to influence the TorchDynamo ONNX exporter.
@@ -441,7 +441,7 @@ def enable_fake_mode():
 
 @deprecated(
     "torch.onnx.dynamo_export is deprecated since 2.6.0. Please use torch.onnx.export(..., dynamo=True) instead.",
-    category=FutureWarning,
+    category=DeprecationWarning,
 )
 class ONNXRuntimeOptions:
     """Options to influence the execution of the ONNX model through ONNX Runtime.
@@ -699,7 +699,7 @@ def _assert_dependencies(export_options: ResolvedExportOptions):
 
 @deprecated(
     "torch.onnx.dynamo_export is deprecated since 2.6.0. Please use torch.onnx.export(..., dynamo=True) instead.",
-    category=FutureWarning,
+    category=DeprecationWarning,
 )
 def dynamo_export(
     model: torch.nn.Module | Callable,
