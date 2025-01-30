@@ -783,6 +783,20 @@ class DictTests(torch._dynamo.test_case.TestCase):
         x = torch.randn(4)
         self.assertEqual(fn(x), opt_fn(x))
 
+    def test_fn_id(self):
+        def fn(x, f):
+            d = {id(f): 3}
+            return x * d[id(f)]
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        x = torch.randn(4)
+
+        def nothing():
+            pass
+
+        f = nothing
+        self.assertEqual(fn(x, f), opt_fn(x, f))
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
