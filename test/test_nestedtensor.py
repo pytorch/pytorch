@@ -8969,6 +8969,32 @@ class TestNestedInt(torch.testing._internal.common_utils.TestCase):
 
         self.assertFalse(a == b)
 
+    def test_assertion(self):
+        from torch.nested._internal.dict_tensor import DictTensor
+
+        a = torch.tensor([1, 2, 3], dtype=torch.float32)
+        b = torch.tensor([4, 5, 6], dtype=torch.float32)
+        c = torch.tensor([7, 8, 9], dtype=torch.float32)
+
+        # Correct case
+        metadata1 = {"_host_lengths": a, "_host_offsets": None, "_device_offsets": c}
+        metadata2 = {"_host_lengths": None, "_host_offsets": b, "_device_offsets": c.clone()}
+
+        dict_tensor1 = DictTensor(metadata1)
+        dict_tensor2 = DictTensor(metadata2)
+
+        torch._nested_assert_metadata_equal(dict_tensor1, dict_tensor2)
+
+        # Failure case
+        metadata1 = {"_host_lengths": a, "_host_offsets": None, "_device_offsets": c}
+        metadata2 = {"_host_lengths": None, "_host_offsets": b, "_device_offsets": a.clone()}
+
+        dict_tensor1 = DictTensor(metadata1)
+        dict_tensor2 = DictTensor(metadata2)
+
+        with self.assertRaises(AssertionError):
+            torch._nested_assert_metadata_equal(dict_tensor1, dict_tensor2)
+
 
 instantiate_parametrized_tests(TestNestedTensor)
 instantiate_device_type_tests(TestNestedTensorDeviceType, globals())

@@ -6303,6 +6303,11 @@
   dispatch:
     CPU, CUDA: _nested_compute_contiguous_strides_offsets
 
+- func: _nested_assert_metadata_equal(Tensor lhs, Tensor rhs) -> Tensor
+  variants: function
+  device_check: NoCheck
+  dispatch: {}
+
 - func: _trilinear(Tensor i1, Tensor i2, Tensor i3, int[] expand1, int[] expand2, int[] expand3, int[] sumdim, int unroll_dim=1) -> Tensor
   dispatch:
     # calls unsqueeze

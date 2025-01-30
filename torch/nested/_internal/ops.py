@@ -2384,6 +2384,73 @@ def _nested_view_from_jagged_default(func, *args, **kwargs):
     )
 
 
+lib = torch.library.Library("nested", "FRAGMENT")
+
+lib.define("_assert_equal(Tensor lhs, Tensor rhs) -> ()")
+
+def _assert_equal_impl(lhs, rhs):
+    # Next:
+    # - Device side Asserts for the CUDA case
+    # - Pass through better context through a string
+    if not torch.equal(lhs, rhs):
+        raise AssertionError("Expected lengths or offsets to be equal")
+
+def _assert_equal_meta(mb_lhs, mb_rhs):
+    # No-op during compile
+    return
+
+lib.impl("_assert_equal", _assert_equal_impl, "CPU")
+lib.impl("_assert_equal", _assert_equal_impl, "CUDA")
+lib.impl("_assert_equal", _assert_equal_meta, "Meta")
+
+
+from torch._higher_order_ops.effects import _EffectType, _register_effectful_op
+
+_register_effectful_op(torch.ops.nested._assert_equal.default, _EffectType.ORDERED)
+
+
+_PREFERRED_PAIRS = {
+    # Smallest score is best
+    ("host", "host"): 0,
+    ("device", "device"): 1,
+    ("host", "device"): 2,
+    ("device", "host"): 2,
+}
+
+@register_dict_tensor_func(torch.ops.aten._nested_assert_metadata_equal.default)
+@maybe_enable_thunkify
+def _nested_assert_metadata_equal(func, *args, **kwargs):
+    from torch.nested._internal.nested_tensor import DictTensor
+    from torch.nested._internal.nested_tensor import src_field_name
+
+    assert isinstance(args[0], DictTensor) and isinstance(args[1], DictTensor)
+
+    # look at the lengths
+    # look at host and device of each side.
+    candidates = []
+    for source_type in ("lengths", "offsets"):
+        for device_type_lhs in ("host", "device"):
+            for device_type_rhs in ("host", "device"):
+                if (
+                    getattr(args[0], src_field_name(device_type_lhs, source_type), None) is not None and
+                    getattr(args[1], src_field_name(device_type_rhs, source_type), None) is not None
+                ):
+                    candidates.append(
+                        ((device_type_lhs, source_type), (device_type_rhs, source_type))
+                    )
+
+    def score(candidate):
+        return _PREFERRED_PAIRS[(candidate[0][0], candidate[1][0])]
+
+    candidates = sorted(candidates, key=score)
+    pair = candidates[0]
+
+    lhs = getattr(args[0], src_field_name(pair[0][0], pair[0][1]))
+    rhs = getattr(args[1], src_field_name(pair[1][0], pair[1][1]))
+
+    torch.ops.nested._assert_equal(lhs, rhs)
+
+
 @register_jagged_func(
     torch.ops.aten._nested_get_non_contig_offsets.default, "self: jt_all"
 )
