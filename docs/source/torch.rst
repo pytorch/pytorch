@@ -717,6 +717,8 @@ Utilities
     is_warn_always_enabled
     get_future_lazy_clone
     set_future_lazy_clone
+    get_error_on_conditional_view_warnings
+    set_error_on_conditional_view_warnings
     vmap
     _assert
 
