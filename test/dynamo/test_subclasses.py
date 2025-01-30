@@ -3155,7 +3155,7 @@ class GraphModule(torch.nn.Module):
 
         fn(t_cpu_cleared, t_cuda)
 
-        singleton_int_0 = SingletonInt((frozenset(), frozenset({0})))
+        singleton_int_0 = SingletonInt(0)
 
         expected_var_to_val = {
             "s0": singleton_int_0,
