@@ -418,6 +418,8 @@ class ConstDictVariable(VariableTracker):
             # missing item, return the default value. Install no DICT_CONTAINS guard.
             self.install_dict_contains_guard(tx, args)
             if len(args) == 1:
+                if name == "pop":
+                    raise_observed_exception(KeyError, tx)
                 return ConstantVariable(None)
             else:
                 return args[1]
