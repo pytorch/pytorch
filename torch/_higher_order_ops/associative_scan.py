@@ -16,7 +16,6 @@ from torch._higher_order_ops.utils import (
     reenter_make_fx,
     unique_graph_id,
 )
-from torch._inductor.utils import is_pointwise_use
 from torch._ops import HigherOrderOperator
 from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.fx.experimental.proxy_tensor import (
@@ -351,6 +350,8 @@ def trace_associative_scan(
     xs: list[torch.Tensor],
     additional_inputs: list[torch.Tensor],
 ):
+    from torch._inductor.utils import is_pointwise_use
+
     with disable_proxy_modes_tracing():
         sample_xs = [first_slice_copy(x) for x in itertools.chain(xs, xs)]
         combine_graph = reenter_make_fx(combine_fn)(*sample_xs, *additional_inputs)
