@@ -37,6 +37,26 @@ kernel void naive_matmul(
   outputData[x * strides[2].x + y * strides[2].y] = static_cast<T>(rc);
 }
 
+template <typename T>
+kernel void naive_bmm(
+    constant T* mat1Data [[buffer(0)]],
+    constant T* mat2Data [[buffer(1)]],
+    device T* outputData [[buffer(2)]],
+    constant array<ulong3, 3>& strides [[buffer(3)]],
+    constant uint4& sizes [[buffer(4)]],
+    uint thread_index [[thread_position_in_grid]]) {
+  uint b = thread_index / (sizes.x * sizes.z);
+  uint boffs = thread_index % (sizes.x * sizes.z);
+  uint y = boffs / sizes.x;
+  uint x = boffs % sizes.x;
+  auto rc = dot_product(
+      mat1Data + b * strides[0].z + x * strides[0].x,
+      mat2Data + b * strides[1].z + y * strides[1].y,
+      ulong2(strides[0].y, strides[1].x),
+      sizes.y);
+  outputData[b * strides[2].z + x * strides[2].x + y * strides[2].y] = static_cast<T>(rc);
+}
+
 inline float blockReduceSum(
     threadgroup float* sharedScratch,
     float val,
@@ -312,6 +332,16 @@ kernel void applySYRK(
       constant uint3 & sizes [[buffer(4)]],                  \
       uint thread_index [[thread_position_in_grid]])
 
+#define INSTANTIATE_NAIVE_BMM(DTYPE)                       \
+  template [[host_name("naive_bmm_" #DTYPE)]] kernel void  \
+  naive_bmm<DTYPE>(                                        \
+      constant DTYPE * mat1Data [[buffer(0)]],             \
+      constant DTYPE * mat2Data [[buffer(1)]],             \
+      device DTYPE * outputData [[buffer(2)]],             \
+      constant array<ulong3, 3> & strides [[buffer(3)]],   \
+      constant uint4 & sizes [[buffer(4)]],                \
+      uint thread_index [[thread_position_in_grid]])
+
 INSTANTIATE_NAIVE_MM(float);
 INSTANTIATE_NAIVE_MM(half);
 #if __METAL_VERSION__ >= 310
@@ -324,3 +354,5 @@ INSTANTIATE_NAIVE_MM(int);
 INSTANTIATE_NAIVE_MM(long);
 INSTANTIATE_NAIVE_MM(char);
 INSTANTIATE_NAIVE_MM(uchar);
+INSTANTIATE_NAIVE_BMM(short);
+INSTANTIATE_NAIVE_BMM(int);

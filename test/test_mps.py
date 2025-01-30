@@ -12431,6 +12431,7 @@ class TestConsistency(TestCaseMPS):
                 # As MPS compute scales in floats, but CPU always used doubles, which results
                 # in slight numerical differences
                 atol, rtol = 1, 0
+            import pdb; pdb.set_trace()
             self.assertEqual(cpu_out, mps_out, atol=atol, rtol=rtol)
 
 

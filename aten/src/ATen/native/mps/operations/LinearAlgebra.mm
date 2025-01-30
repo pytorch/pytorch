@@ -60,6 +60,29 @@ Tensor& do_metal_mm(const Tensor& self, const Tensor& other, Tensor& output) {
   return output;
 }
 
+Tensor& do_metal_bmm(const Tensor& batch1, const Tensor& batch2, Tensor& output) {
+  auto stream = getCurrentMPSStream();
+  auto device = MPSDevice::getInstance()->device();
+  auto matmulPSO = lib.getPipelineStateForFunc("naive_bmm_" + mps::scalarToMetalTypeString(output));
+  dispatch_sync_with_rethrow(stream->queue(), ^() {
+    @autoreleasepool {
+      getMPSProfiler().beginProfileKernel(matmulPSO, "naive_batch_matmul", {batch1, batch2});
+      auto computeEncoder = stream->commandEncoder();
+      [computeEncoder setComputePipelineState:matmulPSO];
+      std::array<uint32_t, 4> sizes = {static_cast<uint32_t>(batch1.size(0)),
+                                       static_cast<uint32_t>(batch1.size(1)),
+                                       static_cast<uint32_t>(output.size(1)),
+                                       static_cast<uint32_t>(output.size(2))};
+      std::array<int64_t, 9> strides = {
+          batch1.stride(0), batch1.stride(1), batch1.stride(2), batch2.stride(0), batch2.stride(1), batch2.stride(2), output.stride(0), output.stride(1), output.stride(2)};
+      mtl_setArgs(computeEncoder, batch1, batch2, output, strides, sizes);
+      mtl_dispatch1DJob(computeEncoder, matmulPSO, output.numel());
+      getMPSProfiler().endProfileKernel(matmulPSO);
+    }
+  });
+  return output;
+}
+
 std::tuple<MPSGraphTensor*, MPSGraphTensor*, MPSGraphTensor*> do_mm(MPSGraph* graph,
                                                                     const Tensor& self,
                                                                     const Tensor& other) {
@@ -79,7 +102,7 @@ bool use_metal_mm(const Tensor& self, const Tensor& other, const Tensor& output)
   static bool always_use_metal = std::getenv("PYTORCH_MPS_PREFER_METAL") != nullptr;
   constexpr auto max_stride_size = 32768;
   static bool is_macos_14_4_or_newer = is_macos_13_or_newer(MacOSVersion::MACOS_VER_14_4_PLUS);
-  if (always_use_metal || c10::isIntegralType(self.scalar_type(), false)) {
+  if (always_use_metal || c10::isIntegralType(self.scalar_type(), true)) {
     return true;
   }
   return !is_macos_14_4_or_newer &&
@@ -602,8 +625,6 @@ static Tensor& tiled_bmm_out_mps_impl(const Tensor& batch1, const Tensor& batch2
 static Tensor& bmm_out_mps_impl(const Tensor& batch1, const Tensor& batch2, Tensor& result) {
   using namespace mps;
 
-  TORCH_CHECK(supportedFloatingOrComplexType(batch1), "MPS device does not support bmm for non-float inputs");
-
   // Matmul not supported if any output dimension size is larger than 2**32
   for (auto elem : result.sizes()) {
     TORCH_CHECK_NOT_IMPLEMENTED(elem <= pow(2, 32),
@@ -613,6 +634,10 @@ static Tensor& bmm_out_mps_impl(const Tensor& batch1, const Tensor& batch2, Tens
   if (batch1.numel() == 0 || batch2.numel() == 0) {
     result.zero_();
     return result;
+  }
+
+  if (c10::isIntegralType(batch1.scalar_type(), true)) {
+    return do_metal_bmm(batch1, batch2, result);
   }
 
   static const bool is_macOS_15_0_or_newer = is_macos_13_or_newer(MacOSVersion::MACOS_VER_15_0_PLUS);
