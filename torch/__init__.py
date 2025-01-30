@@ -341,7 +341,6 @@ def _load_global_deps() -> None:
             "cuda_runtime": "libcudart.so.*[0-9]",
             "cuda_cupti": "libcupti.so.*[0-9]",
             "cufft": "libcufft.so.*[0-9]",
-            "cufile": "libcufile.so.*[0-9]",
             "curand": "libcurand.so.*[0-9]",
             "nvjitlink": "libnvJitLink.so.*[0-9]",
             "cusparse": "libcusparse.so.*[0-9]",

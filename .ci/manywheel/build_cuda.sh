@@ -173,6 +173,7 @@ if [[ $CUDA_VERSION == "12.4" || $CUDA_VERSION == "12.6" ]]; then
             '$ORIGIN/../../nvidia/cuda_runtime/lib'
             '$ORIGIN/../../nvidia/cudnn/lib'
             '$ORIGIN/../../nvidia/cufft/lib'
+            '$ORIGIN/../../nvidia/cufile/lib'
             '$ORIGIN/../../nvidia/curand/lib'
             '$ORIGIN/../../nvidia/cusolver/lib'
             '$ORIGIN/../../nvidia/cusparse/lib'
