@@ -196,10 +196,10 @@ if __name__ == "__main__":
     unittest.main()
 
 
-
 def getTimestampStr(timestamp: float) -> str:
     return f"{timestamp:.0f}"
 
+
 def getCurrentTimestampStr() -> str:
-    timestamp_now =  datetime.now().timestamp()
+    timestamp_now = datetime.now().timestamp()
     return getTimestampStr(timestamp_now)

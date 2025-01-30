@@ -54,6 +54,8 @@ class UtilizationRecord(DataClassJsonMixin):
     log_duration: Optional[str] = None
 
 
+# the db schema related to this is:
+# https://github.com/pytorch/test-infra/blob/main/clickhouse_db_schema/oss_ci_utilization/oss_ci_utilization_metadata_schema.sql
 @dataclass
 class OssCiSegmentV1(DataClassJsonMixin):
     level: str
@@ -63,8 +65,6 @@ class OssCiSegmentV1(DataClassJsonMixin):
     extra_info: dict[str, str]
 
 
-# the db schema related to this is:
-# https://github.com/pytorch/test-infra/blob/main/clickhouse_db_schema/oss_ci_utilization/oss_ci_utilization_metadata_schema.sql
 @dataclass
 class OssCiUtilizationMetadataV1:
     created_at: str
@@ -105,6 +105,7 @@ class OssCiUtilizationTimeSeriesV1:
 def getDataModelVersion() -> float:
     return _DATA_MODEL_VERSION
 
+
 @dataclass
 class WorkflowInfo:
     workflow_run_id: int
@@ -113,4 +114,3 @@ class WorkflowInfo:
     run_attempt: int
     job_name: str
     repo: str = "pytorch/pytorch"
-

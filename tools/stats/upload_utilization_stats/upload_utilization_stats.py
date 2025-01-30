@@ -150,8 +150,8 @@ class UtilizationDbConverter:
             gpu_count=self.metadata.gpu_count if self.metadata.gpu_count else 0,
             cpu_count=self.metadata.cpu_count if self.metadata.cpu_count else 0,
             gpu_type=self.metadata.gpu_type if self.metadata.gpu_type else "",
-            start_at= get_ts_str(self.metadata.start_at),
-            end_at= get_ts_str(self.end_at),
+            start_at=get_ts_str(self.metadata.start_at),
+            end_at=get_ts_str(self.end_at),
             segments=self.segments,
             tags=[],
         )
@@ -366,11 +366,14 @@ def unzip_file(path: Path, file_name: str) -> str:
         print(f"::warning trying to download test log {object} failed by: {e}")
         return ""
 
+
 def get_ts_str(timestamp: float) -> str:
     return f"{timestamp:.0f}"
 
-def get_crt_ts_str():
+
+def get_crt_ts_str() -> str:
     return get_ts_str(datetime.now().timestamp())
+
 
 def parse_args() -> argparse.Namespace:
     """
