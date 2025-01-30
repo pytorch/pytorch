@@ -11,7 +11,6 @@ import warnings
 from typing import Optional, TYPE_CHECKING
 
 import torch._C
-from torch._higher_order_ops.access_subclass_inner_tensor import AccessSubclassInnerTensor
 import torch.fx
 import torch.nn
 from torch._dispatch.python import enable_python_dispatcher
@@ -756,8 +755,6 @@ class TorchHigherOrderOperatorVariable(VariableTracker):
             return AutoFunctionalizeHigherOrderVariable(value, source, **kwargs)
         elif value.__name__ == "invoke_subgraph":
             return InvokeSubgraphHigherOrderVariable(value, source, **kwargs)
-        elif value.__name__ == "access_subclass_inner_tensor":
-            return AccessSubclassInnerTensorHigherOrderVariable(value, source, **kwargs)
         elif isinstance(value, PrimHOPBase):
             return PrimHOPBaseVariable(value, source, **kwargs)
         else:
@@ -1954,79 +1951,6 @@ class HintsWrapperHigherOrderVariable(TorchHigherOrderOperatorVariable):
         return _call_function_and_unflatten_output(
             tx, self.value, p_args, p_kwargs, flat_example_value, treespec
         )
-
-
-class AccessSubclassInnerTensorHigherOrderVariable(TorchHigherOrderOperatorVariable):
-    @raise_hard_error_if_graph_break(
-        reason="access_subclass_inner_tensor doesn't work unless it is captured completely with torch.compile."
-    )
-    def call_function(
-        self, tx, args: "list[VariableTracker]", kwargs: "dict[str, VariableTracker]"
-    ) -> "VariableTracker":
-
-        breakpoint()
-
-        # inputs
-        if len(args) != 2:
-            unimplemented(
-                f"Expected 2 arguments but got {len(args)}.\n"
-                f"Usage: access_subclass_inner_tensor(src_subclass_tensor, attr).\n"
-            )
-
-        assert isnstance(args[1], ConstantVariable)
-
- 
-        operands = args[1].unpack_var_sequence(tx)
-
-        if not isinstance(args[2], ConstDictVariable):
-            unimplemented(
-                f"Expected a dict but got {args[2].python_type()}",
-            )
-
-        if "hints" not in kwargs:
-            raise IncorrectUsage("hints_wrapper - key hints not provided")
-
-        (
-            (body_r, treespec),
-            body_graph,
-            body_lifted_freevars,
-        ) = speculate_subgraph(
-            tx,
-            args[0],  # function
-            operands,
-            args[2].as_python_constant(),
-            "hints_wrapper",
-            source_target=self.value,
-            should_flatten_outputs=True,
-        )
-
-        body_gmod = torch.fx.GraphModule(tx.output.nn_modules, body_graph)
-        body_name = tx.output.install_subgraph(
-            "hints_wrapper_body",
-            body_gmod,
-        )
-
-        body_node = make_attr(tx, body_name)
-
-        # Since, we call `speculate_subgraph` with `set_subgraph_inputs="automatic`,
-        # all the arguments are lifted.
-        lifted_args = tuple(arg for arg in body_lifted_freevars.keys())
-        p_args = (body_node, lifted_args, {})
-
-        p_kwargs = {}
-        # add hints into p_kwargs
-        p_kwargs["hints"] = kwargs["hints"].as_python_constant()
-
-        flat_example_value = pytree.tree_map_only(
-            torch.fx.Proxy,
-            lambda a: a.node.meta["example_value"],
-            body_r.as_proxy(),
-        )
-
-        return _call_function_and_unflatten_output(
-            tx, self.value, p_args, p_kwargs, flat_example_value, treespec
-        )
-
 
 
 class OutDtypeHigherOrderVariable(TorchHigherOrderOperatorVariable):
