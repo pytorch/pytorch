@@ -54,7 +54,8 @@ kernel void naive_bmm(
       mat2Data + b * strides[5] + x * strides[3],
       ulong2(strides[0], strides[4]),
       sizes.y);
-  outputData[b * strides[8] + x * strides[6] + y * strides[7]] = static_cast<T>(rc);
+  outputData[b * strides[8] + x * strides[6] + y * strides[7]] =
+      static_cast<T>(rc);
 }
 
 inline float blockReduceSum(
@@ -332,14 +333,13 @@ kernel void applySYRK(
       constant uint3 & sizes [[buffer(4)]],                  \
       uint thread_index [[thread_position_in_grid]])
 
-#define INSTANTIATE_NAIVE_BMM(DTYPE)                       \
-  template [[host_name("naive_bmm_" #DTYPE)]] kernel void  \
-  naive_bmm<DTYPE>(                                        \
-      constant DTYPE * mat1Data [[buffer(0)]],             \
-      constant DTYPE * mat2Data [[buffer(1)]],             \
-      device DTYPE * outputData [[buffer(2)]],             \
-      constant array<ulong, 9> & strides [[buffer(3)]],   \
-      constant uint4 & sizes [[buffer(4)]],                \
+#define INSTANTIATE_NAIVE_BMM(DTYPE)                                        \
+  template [[host_name("naive_bmm_" #DTYPE)]] kernel void naive_bmm<DTYPE>( \
+      constant DTYPE * mat1Data [[buffer(0)]],                              \
+      constant DTYPE * mat2Data [[buffer(1)]],                              \
+      device DTYPE * outputData [[buffer(2)]],                              \
+      constant array<ulong, 9> & strides [[buffer(3)]],                     \
+      constant uint4 & sizes [[buffer(4)]],                                 \
       uint thread_index [[thread_position_in_grid]])
 
 INSTANTIATE_NAIVE_MM(float);

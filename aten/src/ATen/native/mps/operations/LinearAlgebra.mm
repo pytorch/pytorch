@@ -73,8 +73,15 @@ Tensor& do_metal_bmm(const Tensor& batch1, const Tensor& batch2, Tensor& output)
                                        static_cast<uint32_t>(batch1.size(2)),
                                        static_cast<uint32_t>(output.size(2)),
                                        static_cast<uint32_t>(output.size(0))};
-      std::array<int64_t, 9> strides = {
-          batch1.stride(2), batch1.stride(1), batch1.stride(0), batch2.stride(2), batch2.stride(1), batch2.stride(0), output.stride(2), output.stride(1), output.stride(0)};
+      std::array<int64_t, 9> strides = {batch1.stride(2),
+                                        batch1.stride(1),
+                                        batch1.stride(0),
+                                        batch2.stride(2),
+                                        batch2.stride(1),
+                                        batch2.stride(0),
+                                        output.stride(2),
+                                        output.stride(1),
+                                        output.stride(0)};
       mtl_setArgs(computeEncoder, batch1, batch2, output, strides, sizes);
       mtl_dispatch1DJob(computeEncoder, matmulPSO, output.numel());
       getMPSProfiler().endProfileKernel(matmulPSO);

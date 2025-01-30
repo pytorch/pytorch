@@ -832,7 +832,7 @@ def mps_ops_modifier(ops):
         'nn.functional.conv_transpose2d': [torch.int64, torch.bfloat16],
 
         # Unsupported dtypes
-        'dot': [torch.int64],
+        'dot': [torch.int64] if MACOS_VERSION < 14.0 else [],
         'histc': [torch.float16, torch.bfloat16],
         'index_add': [torch.int64],
         'log1p': [torch.int64],
