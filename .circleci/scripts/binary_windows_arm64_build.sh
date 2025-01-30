@@ -6,11 +6,8 @@ mkdir -p "$PYTORCH_FINAL_PACKAGE_DIR"
 
 export USE_SCCACHE=1
 export SCCACHE_BUCKET=ossci-compiler-cache
-export SCCACHE_S3_KEY_PREFIX=windows-arm64-binary-build
 export SCCACHE_REGION=us-east-1
-export SCCACHE_LOG_LEVEL=debug
 export SCCACHE_IGNORE_SERVER_IO_ERROR=1
-export AWS_DEFAULT_REGION=us-east-1
 
 echo "Free space on filesystem before build:"
 df -h
