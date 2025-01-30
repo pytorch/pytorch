@@ -5,16 +5,10 @@
 namespace at::accelerator {
 
 std::optional<c10::DeviceType> getAccelerator(bool checked) {
-#define DETECT_AND_ASSIGN_ACCELERATOR(device_name) \
-  if (at::has##device_name()) {                    \
-    device_type = k##device_name;                  \
-    TORCH_CHECK(                                   \
-        !is_accelerator_detected,                  \
-        "Cannot have ",                            \
-        device_type.value(),                       \
-        " with other accelerators.");              \
-    is_accelerator_detected = true;                \
-  }
+  // 1. Check runtime backends
+  // Note that all runtime checks should be migrated to use
+  // Use at::detail::getXXXHooks()->isAvailable()
+  // once all these out-of-tree backends are updated to provide this function
 
   if (is_privateuse1_backend_registered()) {
     // We explicitly allow PrivateUse1 and another device at the same time as we
@@ -22,21 +16,43 @@ std::optional<c10::DeviceType> getAccelerator(bool checked) {
     // first.
     return kPrivateUse1;
   }
+
+  // These runtime checks should be moved to compile-time once they provide
+  // the new isBuilt API and we are sure they're never in the same binary as
+  // another accelerator.
+#define DETECT_RUNTIME_ACCELERATOR(device_name)     \
+  if (at::has##device_name()) {                     \
+    return k##device_name;                          \
+  }
+
+  DETECT_RUNTIME_ACCELERATOR(MTIA)
+  DETECT_RUNTIME_ACCELERATOR(HPU)
+
+#undef DETECT_RUNTIME_ACCELERATOR
+
+  // 2. Check compile-time backends
   std::optional<c10::DeviceType> device_type = std::nullopt;
-  bool is_accelerator_detected = false;
-  DETECT_AND_ASSIGN_ACCELERATOR(CUDA)
-  DETECT_AND_ASSIGN_ACCELERATOR(MTIA)
-  DETECT_AND_ASSIGN_ACCELERATOR(XPU)
-  DETECT_AND_ASSIGN_ACCELERATOR(HIP)
-  DETECT_AND_ASSIGN_ACCELERATOR(MPS)
-  DETECT_AND_ASSIGN_ACCELERATOR(HPU)
+
+#define DETECT_AND_ASSIGN_ACCELERATOR_COMP(device_name) \
+  if (at::detail::get##device_name##Hooks().isBuilt()) {  \
+    TORCH_CHECK(                                         \
+        !device_type.has_value(),                        \
+        "Cannot have both " #device_name " and ",             \
+        device_type.value(), ".");                       \
+    device_type = k##device_name;                        \
+  }
+
+  DETECT_AND_ASSIGN_ACCELERATOR_COMP(CUDA)
+  DETECT_AND_ASSIGN_ACCELERATOR_COMP(XPU)
+  DETECT_AND_ASSIGN_ACCELERATOR_COMP(HIP)
+  DETECT_AND_ASSIGN_ACCELERATOR_COMP(MPS)
   if (checked) {
     TORCH_CHECK(
         device_type, "Cannot access accelerator device when none is available.")
   }
   return device_type;
 
-#undef DETECT_AND_ASSIGN_ACCELERATOR
+#undef DETECT_AND_ASSIGN_ACCELERATOR_COMP
 }
 
 bool isAccelerator(c10::DeviceType device_type) {
