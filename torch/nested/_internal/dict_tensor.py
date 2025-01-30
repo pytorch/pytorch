@@ -74,7 +74,7 @@ class DictTensor(torch.Tensor):
 
         if op is torch.ops.aten.detach.default:
             # detach is needed for torch.compile
-            return args[0]
+            return DictTensor(args[0].metadata)
 
         if op in _func_registry:
             return _func_registry[op](op, *args, **kwargs)
