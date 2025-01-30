@@ -965,7 +965,7 @@ class TestIdentity(TestCase):
         expr = Identity(arg)
         expanded = expr.expand(identity=True)
         self.assertEqual(expanded.count(Identity), 0)
-        self.assertEqual(expanded - arg, sympy.S.Zero)
+        self.assertEqual(expanded, arg)
 
 instantiate_parametrized_tests(TestValueRanges)
 instantiate_parametrized_tests(TestSympyInterp)
