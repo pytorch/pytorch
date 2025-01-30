@@ -2781,11 +2781,11 @@ class BenchmarkRunner:
             batch_size = self.decay_batch_exp(batch_size)
         return 1
 
-    def run_n_iterations(self, mod, inputs):
+    def run_n_iterations(self, mod, inputs, model_iter_fn):
         n = self.args.iterations
         for _ in range(n - 1):
-            self.model_iter_fn(mod, inputs, collect_outputs=False)
-        return self.model_iter_fn(mod, inputs, collect_outputs=True)
+            model_iter_fn(mod, inputs, collect_outputs=False)
+        return model_iter_fn(mod, inputs, collect_outputs=True)
 
     @torch._disable_dynamo(recursive=True)
     def optimizer_zero_grad(self, mod):
@@ -2953,7 +2953,9 @@ class BenchmarkRunner:
                     clone_inputs(example_inputs),
                 )
                 self.init_optimizer(name, current_device, model_fp64.parameters())
-                fp64_outputs = self.run_n_iterations(model_fp64, inputs_fp64)
+                fp64_outputs = self.run_n_iterations(
+                    model_fp64, inputs_fp64, self.model_iter_fn
+                )
                 fp64_outputs = tree_map(
                     lambda x: x.to(torch.float64)
                     if isinstance(x, torch.Tensor) and x.is_floating_point()
@@ -2986,7 +2988,7 @@ class BenchmarkRunner:
                 model_copy = self.deepcopy_and_maybe_parallelize(model)
                 self.init_optimizer(name, current_device, model_copy.parameters())
                 correct_result = self.run_n_iterations(
-                    model_copy, clone_inputs(example_inputs)
+                    model_copy, clone_inputs(example_inputs), self.model_iter_fn
                 )
             except Exception as e:
                 accuracy_status = (
@@ -3007,7 +3009,7 @@ class BenchmarkRunner:
                 model_copy = self.deepcopy_and_maybe_parallelize(model)
                 self.init_optimizer(name, current_device, model_copy.parameters())
                 correct_rerun_result = self.run_n_iterations(
-                    model_copy, clone_inputs(example_inputs)
+                    model_copy, clone_inputs(example_inputs), self.model_iter_fn
                 )
             except Exception as e:
                 accuracy_status = (
@@ -3066,13 +3068,15 @@ class BenchmarkRunner:
                         )
                         new_result = optimized_model_iter_fn(model_copy, example_inputs)
                 else:
-                    optimized_model_iter_fn = optimize_ctx(self.run_n_iterations)
+                    optimized_model_iter_fn = optimize_ctx(self.model_iter_fn)
                     with maybe_enable_compiled_autograd(
                         self.args.compiled_autograd,
                         fullgraph=self.args.nopython,
                         dynamic=self.args.dynamic_shapes,
                     ):
-                        new_result = optimized_model_iter_fn(model_copy, example_inputs)
+                        new_result = self.run_n_iterations(
+                            model_copy, example_inputs, optimized_model_iter_fn
+                        )
             except Exception as e:
                 log.exception("")
                 print(
@@ -3167,7 +3171,9 @@ class BenchmarkRunner:
                 lambda x: x.to(base_device), example_inputs_copy
             )
             self.init_optimizer(name, base_device, model_copy.parameters())
-            correct_result = self.run_n_iterations(model_copy, example_inputs_copy)
+            correct_result = self.run_n_iterations(
+                model_copy, example_inputs_copy, self.model_iter_fn
+            )
 
             # Run with Dynamo
             # Sometime CI fails with random triton compilation failure which will be skipped for now
@@ -3176,8 +3182,10 @@ class BenchmarkRunner:
             torch._dynamo.reset()
             try:
                 self.init_optimizer(name, current_device, model.parameters())
-                optimized_model_iter_fn = optimize_ctx(self.run_n_iterations)
-                new_result = optimized_model_iter_fn(model, example_inputs)
+                optimized_model_iter_fn = optimize_ctx(self.model_iter_fn)
+                new_result = self.run_n_iterations(
+                    model_copy, example_inputs, optimized_model_iter_fn
+                )
             except Exception:
                 log.exception("")
                 print(
@@ -3438,11 +3446,15 @@ class BenchmarkRunner:
                 self.args.snapshot_memory, f"eager_{self.args.only}"
             ):
                 eager_latency, eager_peak_mem, _ = warmup(
-                    self.model_iter_fn, model, example_inputs, "eager"
+                    self.model_iter_fn, copy.deepcopy(model), example_inputs, "eager"
                 )
                 if self.args.use_warm_peak_memory:
                     _, eager_peak_mem, _ = warmup(
-                        self.model_iter_fn, model, example_inputs, "eager", niters=1
+                        self.model_iter_fn,
+                        copy.deepcopy(model),
+                        example_inputs,
+                        "eager",
+                        niters=1,
                     )
 
             if self.args.export_aot_inductor:
@@ -4459,6 +4471,16 @@ def run(runner, args, original_dir=None):
 
         # Stricter check to disable fallbacks
         args.suppress_errors = False
+
+        if not args.disable_cudagraphs:
+            runner.skip_models.update(
+                {
+                    # xfail: https://github.com/pytorch/pytorch/issues/145773
+                    "convit_base",
+                    "llama",
+                    "cm3leon_generate",
+                }
+            )
 
     if args.device_index is not None:
         if args.multiprocess:
