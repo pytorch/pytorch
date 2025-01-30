@@ -16,6 +16,7 @@ from ..loop_body import LoopBody
 from ..select_algorithm import PartialRender
 from ..utils import sympy_index_symbol, sympy_index_symbol_with_prefix
 from ..virtualized import V
+from .common import REMOVED
 from .cpp import CppKernel, CppKernelProxy, KernelGroup
 from .cpp_utils import cexpr_index, DTYPE_TO_CPP, LocalBufferContext
 
@@ -102,9 +103,11 @@ class CppTemplateKernel(CppKernel):
             if aliases is not None:
                 for alias in aliases:
                     if alias in self.args.input_buffers:
-                        self.args.input_buffers[alias] = "REMOVED"
+                        raise AssertionError(
+                            f"input_buffers cannot be removed: {alias}"
+                        )
                     if alias in self.args.output_buffers:
-                        self.args.output_buffers[alias] = "REMOVED"
+                        self.args.output_buffers[alias] = REMOVED
             cpp_argdefs, _, _ = self.args.cpp_argdefs()
             return f"void {function_name}({', '.join(cpp_argdefs)})"
 
@@ -467,7 +470,8 @@ class CppTemplateKernel(CppKernel):
                         multi_output_name = multi_output_buffers[gemm_idx].get_name()
                         if (
                             multi_output_name in self.args.output_buffers
-                            and self.args.output_buffers[multi_output_name] != "REMOVED"
+                            and self.args.output_buffers[multi_output_name]
+                            is not REMOVED
                         ):
                             self.remove_buffer(multi_output_name)
                 return res
