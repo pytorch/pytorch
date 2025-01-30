@@ -188,29 +188,20 @@ class InPlaceCompilationTests(TestCase):
         with self.assertRaises(AttributeError):
             fn(x)
 
+    @torch._dynamo.config.patch(inline_inbuilt_nn_modules=False)
     def test_compilation_nn_module_invalid_method(self):
-        class testModel(torch.nn.Module):
+        class Mod(torch.nn.Module):
             def __init__(self):
                 super().__init__()
-                self.custom_dict = {"queue": [torch.rand((2, 2)) for _ in range(3)]}
-                self.other_attr = torch.rand((2, 2))
-
-            def __getattr__(self, name):
-                custom_dict = self.custom_dict
-                if name in custom_dict:
-                    return custom_dict[name]
-                return super().__getattr__(name)
 
             def forward(self, x):
-                return self.does_not_exist(x)
+                return x + self.doesnotexist
 
-        @torch.compile()
-        def fn(m, x):
-            return m(x)
-
-        x = torch.randn(10, 10)
-        # with self.assertRaises(AttributeError):
-        fn(testModel(), x)
+        mod = Mod()
+        opt_mod = torch.compile(mod, backend="eager")
+        x = torch.randn(1,1)
+        with self.assertRaises(AttributeError):
+            opt_mod(x)
 
 
 # The private variants of the below functions are extensively tested

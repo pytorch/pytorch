@@ -42,6 +42,7 @@ from torch.fx.experimental import symbolic_shapes
 from torch.utils import _pytree as pytree
 from torch.utils._pytree import treespec_dumps, treespec_loads
 from torch.utils._sympy.numbers import int_oo
+from torch.utils._sympy.symbol import symbol_is_type, SymT
 from torch.utils._sympy.value_ranges import ValueRanges
 
 from ..utils import remove_proxy_from_state_dict
@@ -599,6 +600,13 @@ class GraphModuleSerializer(metaclass=Final):
 
     def serialize_metadata(self, node: torch.fx.Node) -> dict[str, str]:
         ret = {}
+        if unbacked_bindings := node.meta.get("unbacked_bindings"):
+            # serialize the symbol names of unbacked bindings;
+            # reconstruct the key paths to those symbols when deserializing
+            ret["unbacked_bindings"] = ",".join(
+                u.name for u in unbacked_bindings.keys()
+            )
+
         if stack_trace := node.meta.get("stack_trace"):
             ret["stack_trace"] = stack_trace
 
@@ -1392,7 +1400,7 @@ class GraphModuleSerializer(metaclass=Final):
 
     def serialize_graph(self, graph_module: torch.fx.GraphModule) -> Graph:
         assert isinstance(graph_module, torch.fx.GraphModule)
-        log.debug("[serialize_graph]\n\n%s", graph_module.print_readable())
+        log.debug("[serialize_graph]\n\n%s", graph_module.print_readable(print_output=False))
 
         for node in graph_module.graph.nodes:
             try:
@@ -1878,6 +1886,30 @@ class GraphModuleDeserializer(metaclass=Final):
             fx_node.kwargs,
             fx_node.meta.get("val"),
         )
+        if "unbacked_bindings" in serialized_node.metadata:
+            for u_name in serialized_node.metadata["unbacked_bindings"].split(","):
+                u = self.symbol_name_to_symbol[u_name]
+                # these are pending fresh unbacked symbols, so update shape env
+                if symbol_is_type(u, SymT.UNBACKED_FLOAT):
+                    suffix = str(next(self.shape_env.unbacked_symfloat_counter))
+                    if not u.name.endswith(suffix):
+                        log.warning(
+                            "Expected symbol %s to end with suffix %s", u.name, suffix
+                        )
+                elif symbol_is_type(u, SymT.UNBACKED_INT):
+                    suffix = str(next(self.shape_env.unbacked_symint_counter))
+                    if not u.name.endswith(suffix):
+                        log.warning(
+                            "Expected symbol %s to end with suffix %s", u.name, suffix
+                        )
+                else:
+                    raise AssertionError(f"Illegal unbacked symbol {u}")
+                self.shape_env.pending_fresh_unbacked_symbols.append(u)
+            # consume pending fresh unbacked symbols and reconstruct key paths to them
+            unbacked_bindings = symbolic_shapes.compute_unbacked_bindings(
+                self.shape_env, fx_node.meta["val"]
+            )
+            fx_node.meta["unbacked_bindings"] = unbacked_bindings
         if fx_node.op not in ["placeholder", "output"] and "nn_module_stack" not in fx_node.meta:
             fx_node.meta["nn_module_stack"] = {}  # serialization throws away empty dicts
 
