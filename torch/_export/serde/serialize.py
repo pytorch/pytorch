@@ -1400,7 +1400,7 @@ class GraphModuleSerializer(metaclass=Final):
 
     def serialize_graph(self, graph_module: torch.fx.GraphModule) -> Graph:
         assert isinstance(graph_module, torch.fx.GraphModule)
-        log.debug("[serialize_graph]\n\n%s", graph_module.print_readable())
+        log.debug("[serialize_graph]\n\n%s", graph_module.print_readable(print_output=False))
 
         for node in graph_module.graph.nodes:
             try:
@@ -1892,10 +1892,16 @@ class GraphModuleDeserializer(metaclass=Final):
                 # these are pending fresh unbacked symbols, so update shape env
                 if symbol_is_type(u, SymT.UNBACKED_FLOAT):
                     suffix = str(next(self.shape_env.unbacked_symfloat_counter))
-                    assert u.name.endswith(suffix)
+                    if not u.name.endswith(suffix):
+                        log.warning(
+                            "Expected symbol %s to end with suffix %s", u.name, suffix
+                        )
                 elif symbol_is_type(u, SymT.UNBACKED_INT):
                     suffix = str(next(self.shape_env.unbacked_symint_counter))
-                    assert u.name.endswith(suffix)
+                    if not u.name.endswith(suffix):
+                        log.warning(
+                            "Expected symbol %s to end with suffix %s", u.name, suffix
+                        )
                 else:
                     raise AssertionError(f"Illegal unbacked symbol {u}")
                 self.shape_env.pending_fresh_unbacked_symbols.append(u)
