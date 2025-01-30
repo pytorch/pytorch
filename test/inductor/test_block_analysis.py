@@ -4,16 +4,14 @@ import sympy
 
 import torch
 from torch._inductor.codegen.block_analysis import BlockPatternMatcher
-from torch._inductor.compile_fx import shape_env_from_inputs
-from torch._inductor.graph import GraphLowering
 from torch._inductor.virtualized import V
-from torch.fx.experimental.proxy_tensor import make_fx
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
     run_tests,
     TestCase,
 )
+from torch.testing._internal.inductor_utils import dummy_graph
 from torch.utils._sympy.functions import FloorDiv, Identity, ModularIndexing
 
 
@@ -28,13 +26,7 @@ class BlockAnalysisTest(TestCase):
         super().setUpClass()
 
         # Create a GraphLowering, so we can access V.graph.
-        example_inputs = [torch.randn(10) for _ in range(2)]
-        gm = make_fx(torch.add, tracing_mode="fake")(*example_inputs)
-        shape_env = shape_env_from_inputs(example_inputs)
-        cls.graph = GraphLowering(
-            gm,
-            shape_env=shape_env,
-        )
+        cls.graph = dummy_graph()
 
     @parametrize(
         "stride,symbol,expr",
