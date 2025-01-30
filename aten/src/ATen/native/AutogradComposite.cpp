@@ -117,7 +117,6 @@ Tensor _lazy_clone_future(Tensor const& self) {
 }
 
 Tensor _lazy_clone_alias(Tensor const& self) {
-  // TODO: Add more info about how user can future-proof their code.
   c10::impl::cow::alert_conditional_view(
     "This operation conditionally creates either a view or copy of a tensor, ",
     "and this particular call created a view. This behavior is deprecated, ",
