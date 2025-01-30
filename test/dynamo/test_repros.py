@@ -4104,7 +4104,18 @@ class ReproTests(torch._dynamo.test_case.TestCase):
     def test_graph_break_on_jit_isinstance(self):
         @torch.compile(backend="eager")
         def fn(x):
-            if torch.jit.isinstance(x, typing.List[str]):
+            if torch.jit.isinstance(x, typing.List[str]):  # noqa: UP006
+                return x * 2
+            return x
+
+        opt_fn = torch.compile(fn, backend="eager")
+        x = torch.rand(4)
+        self.assertTrue(same(fn(x), opt_fn(x)))
+
+    def test_graph_break_on_jit_isinstance_pep585(self):
+        @torch.compile(backend="eager")
+        def fn(x):
+            if torch.jit.isinstance(x, list[str]):
                 return x * 2
             return x
 

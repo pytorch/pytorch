@@ -5,6 +5,7 @@ import inspect
 import logging
 import math
 import re
+from collections.abc import Sequence
 from typing import TYPE_CHECKING
 
 import torch._C
@@ -207,7 +208,7 @@ class BaseTorchVariable(VariableTracker):
     def as_python_constant(self):
         return self.value
 
-    def call_hasattr(self, tx: "InstructionTranslator", name):
+    def call_obj_hasattr(self, tx: "InstructionTranslator", name):
         result = hasattr(self.value, name)
         return variables.ConstantVariable.create(result)
 
@@ -242,7 +243,7 @@ class TorchCtxManagerClassVariable(BaseTorchVariable):
     def call_function(
         self,
         tx: "InstructionTranslator",
-        args: "list[VariableTracker]",
+        args: Sequence[VariableTracker],
         kwargs: "dict[str, VariableTracker]",
     ) -> "VariableTracker":
         from . import (
@@ -931,7 +932,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
     def call_function(
         self,
         tx: "InstructionTranslator",
-        args: "list[VariableTracker]",
+        args: Sequence[VariableTracker],
         kwargs: "dict[str, VariableTracker]",
     ) -> "VariableTracker":
         from . import ConstantVariable, SymNodeVariable, TensorVariable
