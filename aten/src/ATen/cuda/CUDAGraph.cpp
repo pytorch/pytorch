@@ -245,11 +245,14 @@ void CUDAGraph::capture_end() {
 
   has_graph_exec_ = true;
 
-  bool any_wholegraph_increments_nonzero = false;
-
   for (auto& [generator_state, wholegraph_increments] :
        captured_generator_states_) {
     wholegraph_increments = generator_state->capture_epilogue();
+  }
+
+#if !defined(USE_ROCM) && (defined(CUDA_VERSION) && CUDA_VERSION >= 12040)
+  bool any_wholegraph_increments_nonzero = false;
+  for (auto& [generator_state, wholegraph_increments] : captured_generator_states_) {
     if (wholegraph_increments != 0) {
       any_wholegraph_increments_nonzero = true;
     }
@@ -258,6 +261,7 @@ void CUDAGraph::capture_end() {
   if (any_wholegraph_increments_nonzero && !descendent_graphs_.empty()) {
     TORCH_WARN("You used random numbers in a cuda graph that uses conditional nodes. The previous design assumed that all RNG operations would execute only once, unconditionally, but this is no longer guaranteed with data-dependent control flow. Running with the cuda graph repeatedly may not match running without the cuda graph.");
   }
+#endif // !defined(USE_ROCM) && defined(CUDA_VERSION) && CUDA_VERSION >= 12040
 
   size_t numCUDAGraphNodes = 0;
   AT_CUDA_CHECK(cudaGraphGetNodes(graph_, nullptr, &numCUDAGraphNodes));
