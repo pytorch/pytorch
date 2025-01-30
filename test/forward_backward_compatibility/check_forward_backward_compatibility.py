@@ -146,7 +146,7 @@ ALLOW_LIST_COMPILED = [
     (
         re.compile(item[0]),
         item[1],
-        re.compile(item[2]) if len(item) > 2 else None,
+        re.compile(item[2]) if (len(item) > 2 and item[2] is not None) else None,
         item[3] if len(item) > 3 else False,
     )
     for item in ALLOW_LIST
