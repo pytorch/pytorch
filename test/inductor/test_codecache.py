@@ -1150,6 +1150,8 @@ class TestFxGraphCacheHashing(TestCase):
         gm._has_frozen_params = True
         gm._frozen_param0 = small
         gm._frozen_param1 = large
+        small._is_frozen_param = True
+        large._is_frozen_param = True
         pickler = FxGraphCachePickler(gm)
 
         data = pickler.dumps(small)
