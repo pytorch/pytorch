@@ -134,11 +134,8 @@ void quick_select_template(
     int64_t k,
     Comp gt_or_nan,
     Fn swap_fn) {
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  int64_t P, L, R, i, j;
-  scalar_t piv;
-  L = 0;
-  R = arr.size(0) - 1;
+  int64_t L = 0;
+  int64_t R = arr.size(0) - 1;
 
   do {
     if (R <= L) // One element only
@@ -152,7 +149,7 @@ void quick_select_template(
     }
 
     // Use median of three for pivot choice
-    P = L + (R - L) / 2;
+    auto P = L + (R - L) / 2;
     swap_fn(P, L + 1);
     if (gt_or_nan(arr[L + 1], arr[R])) {
       swap_fn(L + 1, R);
@@ -164,9 +161,9 @@ void quick_select_template(
       swap_fn(L + 1, L);
     }
 
-    i = L + 1;
-    j = R;
-    piv = arr[L];
+    auto i = L + 1;
+    auto j = R;
+    auto piv = arr[L];
     do {
       do
         i++;
