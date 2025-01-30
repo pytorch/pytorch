@@ -1,10 +1,12 @@
 # mypy: allow-untyped-defs
+from numbers import Number
+
 import torch
 from torch import nan, Tensor
 from torch.distributions import constraints
 from torch.distributions.distribution import Distribution
 from torch.distributions.utils import broadcast_all
-from torch.types import _Number, _size
+from torch.types import _size
 
 
 __all__ = ["Uniform"]
@@ -52,7 +54,7 @@ class Uniform(Distribution):
     def __init__(self, low, high, validate_args=None):
         self.low, self.high = broadcast_all(low, high)
 
-        if isinstance(low, _Number) and isinstance(high, _Number):
+        if isinstance(low, Number) and isinstance(high, Number):
             batch_shape = torch.Size()
         else:
             batch_shape = self.low.size()

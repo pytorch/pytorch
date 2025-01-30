@@ -3,6 +3,7 @@ import contextlib
 import copy
 import dataclasses
 import functools
+import io
 import itertools
 import json
 import logging
@@ -24,7 +25,6 @@ from torch._dynamo.utils import get_debug_dir
 from torch.fx.graph_module import GraphModule
 from torch.fx.passes.shape_prop import _extract_tensor_metadata, TensorMetadata
 from torch.fx.passes.tools_common import legalize_graph
-from torch.types import FileLike
 from torch.utils._ordered_set import OrderedSet
 from torch.utils._pytree import tree_map
 
@@ -728,7 +728,7 @@ def aot_inductor_minifier_wrapper(
     exported_program: torch.export.ExportedProgram,
     *,
     inductor_configs: dict[str, Any],
-    package_path: Optional[FileLike] = None,
+    package_path: Optional[Union[str, io.BytesIO]] = None,
 ) -> str:
     from torch._dynamo.debug_utils import AccuracyError
     from torch._dynamo.repro.aoti import dump_to_minify

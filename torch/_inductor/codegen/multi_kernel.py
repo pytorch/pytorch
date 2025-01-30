@@ -26,7 +26,7 @@ log = logging.getLogger(__name__)
 
 def get_kernel_argdefs(kernel):
     arg_defs, _, _, _ = kernel.args.python_argdefs()
-    return [x.name for x in arg_defs]
+    return arg_defs
 
 
 def _get_all_args(args_list, arg_types_list=None):

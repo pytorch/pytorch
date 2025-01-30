@@ -15,7 +15,7 @@ import threading
 import warnings
 from contextlib import closing, contextmanager
 from enum import Enum
-from typing import Any, Callable, cast, Generic, IO, Optional, TypeVar, Union
+from typing import Any, BinaryIO, Callable, cast, IO, Optional, Union
 from typing_extensions import TypeAlias, TypeIs
 
 import torch
@@ -23,7 +23,7 @@ import torch._weights_only_unpickler as _weights_only_unpickler
 from torch._sources import get_source_lines_and_file
 from torch._utils import _import_dotted_name
 from torch.storage import _get_dtype_from_pickle_storage_type
-from torch.types import FileLike, Storage
+from torch.types import Storage
 
 
 __all__ = [
@@ -65,6 +65,7 @@ MAGIC_NUMBER = 0x1950A86A20F9469CFC6C
 PROTOCOL_VERSION = 1001
 STORAGE_KEY_SEPARATOR = ","
 
+FILE_LIKE: TypeAlias = Union[str, os.PathLike, BinaryIO, IO[bytes]]
 MAP_LOCATION: TypeAlias = Optional[
     Union[Callable[[Storage, str], Storage], torch.device, str, dict[str, str]]
 ]
@@ -325,7 +326,7 @@ class safe_globals(_weights_only_unpickler._safe_globals):
     """
 
 
-def get_unsafe_globals_in_checkpoint(f: FileLike) -> list[str]:
+def get_unsafe_globals_in_checkpoint(f: FILE_LIKE) -> list[str]:
     """Returns a list of strings of functions/classes in a ``torch.save`` object that are not safe for ``weights_only``.
 
     For a given function or class ``f``, the corresponding string will be of the form
@@ -701,16 +702,13 @@ def storage_to_tensor_type(storage):
     return getattr(module, storage_type.__name__.replace("Storage", "Tensor"))
 
 
-def _is_path(name_or_buffer: object) -> TypeIs[Union[str, os.PathLike]]:
+def _is_path(name_or_buffer) -> TypeIs[Union[str, os.PathLike]]:
     return isinstance(name_or_buffer, (str, os.PathLike))
 
 
-T = TypeVar("T")
-
-
-class _opener(Generic[T]):
-    def __init__(self, file_like: T) -> None:
-        self.file_like: T = file_like
+class _opener:
+    def __init__(self, file_like):
+        self.file_like = file_like
 
     def __enter__(self):
         return self.file_like
@@ -719,26 +717,26 @@ class _opener(Generic[T]):
         pass
 
 
-class _open_file(_opener[IO[bytes]]):
-    def __init__(self, name: Union[str, os.PathLike[str]], mode: str) -> None:
+class _open_file(_opener):
+    def __init__(self, name, mode):
         super().__init__(open(name, mode))
 
     def __exit__(self, *args):
         self.file_like.close()
 
 
-class _open_buffer_reader(_opener[IO[bytes]]):
-    def __init__(self, buffer: IO[bytes]) -> None:
+class _open_buffer_reader(_opener):
+    def __init__(self, buffer):
         super().__init__(buffer)
         _check_seekable(buffer)
 
 
-class _open_buffer_writer(_opener[IO[bytes]]):
+class _open_buffer_writer(_opener):
     def __exit__(self, *args):
         self.file_like.flush()
 
 
-def _open_file_like(name_or_buffer: FileLike, mode: str) -> _opener[IO[bytes]]:
+def _open_file_like(name_or_buffer, mode):
     if _is_path(name_or_buffer):
         return _open_file(name_or_buffer, mode)
     else:
@@ -750,15 +748,15 @@ def _open_file_like(name_or_buffer: FileLike, mode: str) -> _opener[IO[bytes]]:
             raise RuntimeError(f"Expected 'r' or 'w' in mode but got {mode}")
 
 
-class _open_zipfile_reader(_opener[torch._C.PyTorchFileReader]):
-    def __init__(self, name_or_buffer: Union[str, IO[bytes]]) -> None:
+class _open_zipfile_reader(_opener):
+    def __init__(self, name_or_buffer) -> None:
         super().__init__(torch._C.PyTorchFileReader(name_or_buffer))
 
 
-class _open_zipfile_writer_file(_opener[torch._C.PyTorchFileWriter]):
-    def __init__(self, name: str) -> None:
+class _open_zipfile_writer_file(_opener):
+    def __init__(self, name) -> None:
         self.file_stream = None
-        self.name = name
+        self.name = str(name)
         try:
             self.name.encode("ascii")
         except UnicodeEncodeError:
@@ -778,8 +776,8 @@ class _open_zipfile_writer_file(_opener[torch._C.PyTorchFileWriter]):
             self.file_stream.close()
 
 
-class _open_zipfile_writer_buffer(_opener[torch._C.PyTorchFileWriter]):
-    def __init__(self, buffer: IO[bytes]) -> None:
+class _open_zipfile_writer_buffer(_opener):
+    def __init__(self, buffer) -> None:
         if not callable(getattr(buffer, "write", None)):
             msg = f"Buffer of {str(type(buffer)).strip('<>')} has no callable attribute 'write'"
             if not hasattr(buffer, "write"):
@@ -793,7 +791,7 @@ class _open_zipfile_writer_buffer(_opener[torch._C.PyTorchFileWriter]):
         self.buffer.flush()
 
 
-def _open_zipfile_writer(name_or_buffer: Union[str, IO[bytes]]) -> _opener:
+def _open_zipfile_writer(name_or_buffer):
     container: type[_opener]
     if _is_path(name_or_buffer):
         container = _open_zipfile_writer_file
@@ -881,7 +879,7 @@ def _check_save_filelike(f):
 
 def save(
     obj: object,
-    f: FileLike,
+    f: FILE_LIKE,
     pickle_module: Any = pickle,
     pickle_protocol: int = DEFAULT_PROTOCOL,
     _use_new_zipfile_serialization: bool = True,
@@ -930,9 +928,6 @@ def save(
     torch._C._log_api_usage_once("torch.save")
     _check_dill_version(pickle_module)
     _check_save_filelike(f)
-
-    if isinstance(f, (str, os.PathLike)):
-        f = os.fspath(f)
 
     if _use_new_zipfile_serialization:
         with _open_zipfile_writer(f) as opened_zipfile:
@@ -1227,7 +1222,7 @@ def _save(
 
 
 def load(
-    f: FileLike,
+    f: FILE_LIKE,
     map_location: MAP_LOCATION = None,
     pickle_module: Any = None,
     *,

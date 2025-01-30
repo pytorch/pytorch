@@ -3,7 +3,6 @@ import collections
 import importlib.machinery
 import io
 import linecache
-import os
 import pickletools
 import platform
 import types
@@ -13,11 +12,11 @@ from dataclasses import dataclass
 from enum import Enum
 from importlib.machinery import SourceFileLoader
 from pathlib import Path
-from typing import Any, Callable, cast, IO, Optional, Union
+from typing import Any, BinaryIO, Callable, cast, Optional, Union
 
 import torch
 from torch.serialization import location_tag, normalize_storage_type
-from torch.types import FileLike, Storage
+from torch.types import Storage
 from torch.utils.hooks import RemovableHandle
 
 from ._digraph import DiGraph
@@ -202,10 +201,10 @@ class PackageExporter:
 
     def __init__(
         self,
-        f: FileLike,
+        f: Union[str, Path, BinaryIO],
         importer: Union[Importer, Sequence[Importer]] = sys_importer,
         debug: bool = False,
-    ) -> None:
+    ):
         """
         Create an exporter.
 
@@ -218,9 +217,9 @@ class PackageExporter:
         """
         torch._C._log_api_usage_once("torch.package.PackageExporter")
         self.debug = debug
-        if isinstance(f, (str, os.PathLike)):
-            f = os.fspath(f)
-            self.buffer: Optional[IO[bytes]] = None
+        if isinstance(f, (Path, str)):
+            f = str(f)
+            self.buffer: Optional[BinaryIO] = None
         else:  # is a byte buffer
             self.buffer = f
 

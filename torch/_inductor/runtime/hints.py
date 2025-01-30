@@ -95,7 +95,9 @@ if _is_triton_available():
             divisible_by_16=None,
             equal_to_1=None,
         ):
-            return {(x,): [["tt.divisibility", 16]] for x in divisible_by_16}
+            return {
+                tuple((x,) for x in divisible_by_16): [["tt.divisibility", 16]],
+            }
 
 else:
     # Define a namedtuple as a fallback when AttrsDescriptor is not available

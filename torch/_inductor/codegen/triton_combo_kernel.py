@@ -19,7 +19,6 @@ from ..scheduler import BaseSchedulerNode
 from ..utils import Placeholder, triton_version_uses_attrs_dict
 from ..virtualized import V
 from .common import (
-    ArgName,
     ConstexprArg,
     DeferredLine,
     IndentedBuffer,
@@ -650,7 +649,7 @@ class ComboKernel(Kernel):
         size_hints: dict[str, int],
         selected_kernel: TritonKernel,
         signature: list[Any],
-        argdefs: list[ArgName],
+        argdefs: list[str],
         pointwise_with_reduce: bool = False,
     ) -> str:
         can_use_32bit = all(k.index_dtype == "tl.int32" for k in self.sub_kernels)
@@ -750,16 +749,14 @@ class ComboKernel(Kernel):
 
         return [ConstexprArg(x) for x in block_names.keys()]
 
-    def add_numel_to_args(
-        self, argdefs: list[ArgName], signature: list[Any]
-    ) -> list[ArgName]:
+    def add_numel_to_args(self, argdefs: list[str], signature: list[Any]) -> list[str]:
         for num, sub_kernel in enumerate(self.sub_kernels):
             for tree in sub_kernel.active_range_trees():
                 if not isinstance(tree.numel, (Integer, int)):
                     # only if it is a dynamic shape
                     sizearg = SizeArg(f"{tree.prefix}numel_{num}", tree.numel)
                     signature.append(sizearg)
-                    argdefs.append(ArgName(f"{tree.prefix}numel_{num}"))
+                    argdefs.append(f"{tree.prefix}numel_{num}")
                     self.dynamic_shape_args.append(f"{tree.prefix}numel_{num}")
         return argdefs
 
@@ -837,7 +834,7 @@ class ComboKernel(Kernel):
         argdefs = self.add_numel_to_args(argdefs, signature)
         block_args = self.get_block_args()
         if self.enable_autotune:
-            argdefs.extend([ArgName(x.name, is_constexpr=True) for x in block_args])
+            argdefs.extend([f"{x.name}: tl.constexpr" for x in block_args])
             if triton_version_uses_attrs_dict():
                 signature.extend(block_args)
 
@@ -852,7 +849,7 @@ class ComboKernel(Kernel):
             )
         )
         code.writeline(
-            f"def {name or str(Placeholder.KERNEL_NAME)}({', '.join(x.full_name() for x in argdefs)}):"
+            f"def {name or str(Placeholder.KERNEL_NAME)}({', '.join(argdefs)}):"
         )
 
         with code.indent():

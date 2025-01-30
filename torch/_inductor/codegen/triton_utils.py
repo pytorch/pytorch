@@ -10,7 +10,6 @@ from ..runtime.hints import AttrsDescriptorWrapper
 from ..utils import _type_of, expr_fits_within_32bit, triton_version_uses_attrs_dict
 from ..virtualized import V
 from .common import (
-    ArgName,
     ConstexprArg,
     KernelArgType,
     SizeArg,
@@ -105,13 +104,13 @@ def signature_to_meta(
     signature: list[KernelArgType],
     *,
     size_dtype: Optional[str],
-    argdefs: list[ArgName],
+    argdefs: list[str],
     indices: Optional[list[int]] = None,
 ) -> dict[str, str]:
     if indices is None:
         indices = list(range(len(signature)))
     return {
-        argdefs[i].name: signature_of(arg, size_dtype=size_dtype)
+        argdefs[i]: signature_of(arg, size_dtype=size_dtype)
         for i, arg in zip(indices, signature)
     }
 
