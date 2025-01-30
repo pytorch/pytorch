@@ -20,6 +20,7 @@ import pandas as pd  # type: ignore[import]
 from tools.stats.upload_stats_lib import download_s3_artifacts, upload_to_s3
 from tools.stats.utilization_stats_lib import (
     getDataModelVersion,
+    getTimestampString,
     OssCiSegmentV1,
     OssCiUtilizationMetadataV1,
     OssCiUtilizationTimeSeriesV1,
@@ -365,10 +366,6 @@ def unzip_file(path: Path, file_name: str) -> str:
     except Exception as e:
         print(f"::warning trying to download test log {object} failed by: {e}")
         return ""
-
-
-def getTimestampString(timestamp: float) -> str:
-    return f"{timestamp:.0f}"
 
 
 def parse_args() -> argparse.Namespace:

@@ -106,6 +106,10 @@ def getDataModelVersion() -> float:
     return _DATA_MODEL_VERSION
 
 
+def getTimestampString(timestamp: float) -> str:
+    return f"{timestamp:.0f}"
+
+
 @dataclass
 class WorkflowInfo:
     workflow_run_id: int
