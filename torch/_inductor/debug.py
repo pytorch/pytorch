@@ -551,10 +551,12 @@ class DebugFormatter:
 
     def log_inductor_triton_kernel_to_post_grad_node_info(
         self, filename: str = "inductor_triton_kernel_to_post_grad_nodes.json"
-    ) -> None:
+    ) -> dict[str, list[str]]:
         with self.fopen(filename, "w") as fd:
             log.info("Writing provenance tracing debugging info to %s", fd.name)
-            json.dump(DebugContext._inductor_triton_kernel_to_post_grad_node_info, fd)
+            debug_info = DebugContext._inductor_triton_kernel_to_post_grad_node_info
+            json.dump(debug_info, fd)
+        return debug_info
 
     def log_autotuning_results(
         self,
