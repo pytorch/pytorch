@@ -1,5 +1,8 @@
 name: windows-arm64-build
 
+permissions:
+  id-token: write
+
 on:
   workflow_call:
     inputs:
