@@ -442,6 +442,7 @@ S390X_TESTLIST = [
     "test_namedtuple_return_api",
     "test_native_mha",
     "test_nestedtensor",
+    "test_dict_tensor",
     "test_numba_integration",
     "test_numpy_interop",
     "test_openmp",
