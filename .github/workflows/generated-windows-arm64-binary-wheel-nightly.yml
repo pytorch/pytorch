@@ -31,6 +31,9 @@ env:
   MSVC_VERSION : latest
   AWS_DEFAULT_REGION: us-east-1
 
+permissions:
+  id-token: write
+
 jobs:
   get-label-type:
     if: github.repository_owner == 'pytorch'
