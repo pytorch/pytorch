@@ -1,7 +1,8 @@
 # mypy: allow-untyped-defs
 # Copyright (c) Meta Platforms, Inc. and affiliates
+from collections.abc import Sequence
 from functools import partial
-from typing import Callable, List, Sequence, Union
+from typing import Callable, Union
 
 import torch
 from torch._ops import OpOverload
@@ -21,7 +22,7 @@ from torch.distributed.tensor._ops.utils import expand_to_full_mesh_op_strategy
 __all__ = ["register_sharding"]
 
 
-def register_sharding(op: Union[OpOverload, List[OpOverload]]):
+def register_sharding(op: Union[OpOverload, list[OpOverload]]):
     """
     :meth:`register_sharding` is an experimental API that allows users to register sharding
     strategies for an operator when the tensor inputs and outputs are DTensor.
@@ -89,7 +90,7 @@ def register_sharding(op: Union[OpOverload, List[OpOverload]]):
 
         acceptable_shardings = custom_sharding_fn(*args_schema, **kwargs_schema)
 
-        single_mesh_dim_strategies: List[PlacementList] = []
+        single_mesh_dim_strategies: list[PlacementList] = []
         for output_specs, input_specs in acceptable_shardings:
             single_mesh_dim_strategies.append(output_specs + input_specs)
 
@@ -110,7 +111,7 @@ def register_sharding(op: Union[OpOverload, List[OpOverload]]):
             #       2. let static_kwargkey include all the int type kwargs
             #       3. always set needs_pytree=True
             static_argnum = 100
-            static_kwargkey: List[str] = []
+            static_kwargkey: list[str] = []
             for i, arg in enumerate(op._schema.arguments):
                 if isinstance(arg.type, torch.IntType) or (
                     isinstance(arg.type, torch.OptionalType)

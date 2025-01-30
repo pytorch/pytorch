@@ -6,7 +6,7 @@ import sys
 import unittest
 from copy import deepcopy
 from enum import Enum
-from typing import Any, Dict, List, Union
+from typing import Any, Union
 
 import torch
 from torch import Tensor
@@ -56,9 +56,9 @@ class OptimizerInput:
     def __init__(
         self,
         params: Union[
-            List[Parameter], List[Tensor], Dict[Any, Any], List[Dict[str, Any]]
+            list[Parameter], list[Tensor], dict[Any, Any], list[dict[str, Any]]
         ],
-        kwargs: Dict[str, Any],
+        kwargs: dict[str, Any],
         desc: str = "",
     ):
         # params can be a list of Tensors OR param_groups OR None
@@ -1256,7 +1256,7 @@ def _get_device_type(device: Union[str, torch.device]) -> str:
 
 def _get_optim_inputs_including_global_cliquey_kwargs(
     device, dtype, optim_info, skip=()
-) -> List[OptimizerInput]:
+) -> list[OptimizerInput]:
     """
     Return a list of all configs for a given optimizer as a list of OptimizerInputs,
     including configs that have supported global cliquey kwargs (foreach, fused,
@@ -1312,7 +1312,7 @@ def _get_optim_inputs_including_global_cliquey_kwargs(
 
 
 # Database of OptimizerInfo entries in alphabetical order.
-optim_db: List[OptimizerInfo] = [
+optim_db: list[OptimizerInfo] = [
     OptimizerInfo(
         Adadelta,
         optim_inputs_func=optim_inputs_func_adadelta,
