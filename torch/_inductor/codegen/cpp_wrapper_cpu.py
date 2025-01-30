@@ -152,9 +152,6 @@ class CppWrapperCpu(PythonWrapperCodegen):
 
         self.header.splice(self.get_device_include())
 
-        if config.is_fbcode():
-            self.header.splice("#include <pybind11/pybind11.h>")
-
         if V.graph.aot_mode:
             with open(
                 os.path.join(os.path.dirname(__file__), "aoti_runtime", "interface.cpp")
