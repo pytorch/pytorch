@@ -6,6 +6,7 @@ on:
       - main
     tags:
       - ciflow/unstable/*
+  pull_request:
   workflow_dispatch:
 
 concurrency:
