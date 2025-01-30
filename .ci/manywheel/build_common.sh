@@ -91,6 +91,13 @@ if [[ "$patchelf_version" == "patchelf 0.9" ]]; then
     exit 1
 fi
 
+# CUDA 11.8 build need to use nccl module=v2.21.5-1
+if [[ ${DESIRED_CUDA} == "11.8" ]]; then
+    pushd $PYTORCH_ROOT/third_party/nccl/nccl/
+    git checkout ab2b89c4c339bd7f816fbc114a4b05d386b66290
+    popd
+fi
+
 ########################################################
 # Compile wheels as well as libtorch
 #######################################################
