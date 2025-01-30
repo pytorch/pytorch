@@ -1,4 +1,5 @@
 import dataclasses
+import importlib
 import tempfile
 import operator
 import random
@@ -12,7 +13,8 @@ import torch
 from torch._subclasses.fake_tensor import FakeTensorMode
 
 from .. import config, ir
-from torch._inductor.runtime.triton_heuristics import grid
+from torch._inductor.runtime.triton_heuristics import grid, CachingAutotuner
+from torch._inductor.codecache import TritonFuture
 from .common import (
     IndentedBuffer,
 )
@@ -79,7 +81,7 @@ class WrapperFxCodegen(PythonWrapperCodegen):
         super().__init__()
         self.graph = torch.fx.Graph() # Wrapper FX IR.
         self.buffer_to_node: dict[MemoryPlanningLine, torch.fx.Node] = {} # Symbol table for codegen.
-        kernels = {} # Table to store Triton kernels.
+        self.kernels: Dict[str, CachingAutotuner] = {} # Table to store Triton kernels.
 
     @staticmethod
     def create(
@@ -91,12 +93,17 @@ class WrapperFxCodegen(PythonWrapperCodegen):
         """
         Imports a kernel as a python module.
         """
-        with tempfile.NamedTemporaryFile(suffix=".py") as f:
-            kernel.dump(path)
-            spec = importlib.util.spec_from_file_location(kernel_name, f.name)
+        with tempfile.NamedTemporaryFile(suffix=".py") as fp:
+            # Write a module containing the kernel and any necessary imports.
+            with open(fp.name, 'w') as f:
+                f.write(self.imports.getvalue())
+                f.write(self.header.getvalue())
+                f.write(code)
 
-        mod = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(mod)
+            # Import the module to retrieve the kernel.
+            spec = importlib.util.spec_from_file_location(kernel_name, f.name)
+            mod = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(mod)
 
         return mod
 
@@ -186,7 +193,7 @@ class WrapperFxCodegen(PythonWrapperCodegen):
 
     def _generate_allocate(self, line: Line) -> None:
         assert isinstance(line, AllocateLine)
-        buffer = self.node
+        buffer = line.node
         name = buffer.get_name()
         assert name not in V.graph.removed_buffers
 
@@ -334,4 +341,7 @@ class WrapperFxCodegen(PythonWrapperCodegen):
         # Import the code and store the kernel.
         mod = self._import_kernel(line.kernel_name, kernel_code)
         kernel = getattr(mod, line.kernel_name)
+        if isinstance(kernel, TritonFuture):
+            kernel = kernel.kernel
+        assert isinstance(kernel, CachingAutotuner)
         self.kernels[line.kernel_name] = kernel
