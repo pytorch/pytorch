@@ -199,7 +199,7 @@ class InPlaceCompilationTests(TestCase):
 
         mod = Mod()
         opt_mod = torch.compile(mod, backend="eager")
-        x = torch.randn(1,1)
+        x = torch.randn(1, 1)
         with self.assertRaises(AttributeError):
             opt_mod(x)
 
