@@ -7906,9 +7906,9 @@ utils_device.CURRENT_DEVICE == None""".split(
             ]
 
         def write_state(state):
-            torch.set_grad_enabled(state[0]),
+            torch.set_grad_enabled(state[0])
             torch.use_deterministic_algorithms(state[1])
-            torch._C._set_cublas_allow_tf32(state[2]),
+            torch._C._set_cublas_allow_tf32(state[2])
 
         @torch.compile(backend=my_compiler)
         def fn(x):
