@@ -14,6 +14,7 @@ export USE_CUDA_STATIC_LINK=1
 export INSTALL_TEST=0 # dont install test binaries into site-packages
 export USE_CUPTI_SO=0
 export USE_CUSPARSELT=${USE_CUSPARSELT:-1} # Enable if not disabled by libtorch build
+export USE_CUFILE=${USE_CUFILE:-1}
 
 # Keep an array of cmake variables to add to
 if [[ -z "$CMAKE_ARGS" ]]; then
