@@ -563,6 +563,10 @@ def compile_fx_inner(
         # the counter here because we may dropped into compile_fx directly
         # from lazy backwards compilation.
         stack.enter_context(_WaitCounter("pytorch.wait_counter.dynamo_compile").guard())
+
+        if torch._dynamo.callback_handler.prevent_duplicate_callbacks:
+            stack.enter_context(torch._dynamo.callback_handler.install_callbacks())
+
         stack.enter_context(with_fresh_cache_if_config())
         stack.enter_context(DebugContext())
         CompileEventLogger.pt2_compile(
@@ -760,7 +764,7 @@ def _compile_fx_inner(
 
         # Don't clog up the main tlparse output with disabled cache
         if cache_info is not None:
-            torch._logging.trace_structured(
+            trace_structured(
                 "artifact",
                 metadata_fn=lambda: {
                     "name": f"fx_graph_cache_{cache_state}",
@@ -859,7 +863,7 @@ class _InProcessFxCompile(FxCompile):
                 )
                 return fd.getvalue()
 
-            torch._logging.trace_structured(
+            trace_structured(
                 "artifact",
                 metadata_fn=lambda: {
                     "name": "fx_graph_runnable",
