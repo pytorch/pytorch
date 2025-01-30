@@ -13,6 +13,7 @@ import torch
 from torch._subclasses.fake_tensor import FakeTensorMode
 
 from .. import config, ir
+from torch._inductor.virtualized import V
 from torch._inductor.runtime.triton_heuristics import grid, CachingAutotuner
 from torch._inductor.codecache import TritonFuture
 from .common import (
@@ -80,7 +81,7 @@ class WrapperFxCodegen(PythonWrapperCodegen):
     def __init__(self):
         super().__init__()
         self.graph = torch.fx.Graph() # Wrapper FX IR.
-        self.buffer_to_node: dict[MemoryPlanningLine, torch.fx.Node] = {} # Symbol table for codegen.
+        self.buffer_to_node: dict[str, torch.fx.Node] = {} # Symbol table for codegen.
         self.kernels: Dict[str, CachingAutotuner] = {} # Table to store Triton kernels.
 
     @staticmethod
@@ -119,33 +120,33 @@ class WrapperFxCodegen(PythonWrapperCodegen):
         """
         self.writeline(KernelDefinitionLine(self, kernel_name, kernel_body, metadata))
 
-    def _fake_tensor(self, size, stride, dtype) -> torch.Tensor:
+    def _fake_tensor(self, size, stride, **kwargs) -> torch.Tensor:
         with V.fake_mode:
             return torch.empty_strided(
                 size,
                 stride,
-                dtype=tensor_meta.dtype,
+                **kwargs,
             )
 
     def _create_meta_from_buffer(self, node: torch.fx.Node, buffer: BufferLike) -> None:
         node.meta["val"] = self._fake_tensor(tuple(buffer.get_size()), tuple(buffer.get_stride()), dtype=buffer.get_dtype(), device=buffer.get_device())
 
-    def _record_allocation(buffer: BufferLike, node: torch.fx.Node) -> None:
+    def _record_allocation(self, buffer: BufferLike, node: torch.fx.Node) -> None:
         """
         Updates the symbol table to record that an Inductor buffer maps to the result of
         an FX node.
         """
         assert node not in self.buffer_to_node
-        self.buffer_to_node[buffer] = node
+        self.buffer_to_node[buffer.name] = node
 
-    def _free(buffer: BufferLike) -> None:
+    def _free(self, buffer: BufferLike) -> None:
         """
         Generates FX IR to delete a buffer.
         Removes the buffer from the symbol table.
         """
-        node = self.buffer_to_node[buffer]
+        node = self.buffer_to_node[buffer.name]
         self.graph.call_function(operator.delitem, args=(node, None))
-        del self.buffer_to_node[buffer]
+        del self.buffer_to_node[buffer.name]
 
     def _generate(self, is_inference):
 
@@ -208,7 +209,7 @@ class WrapperFxCodegen(PythonWrapperCodegen):
         self._record_allocation(buffer, node)
 
     def _generate_comment(self, line: Line) -> None:
-        assert isintance(line, CommentLine)
+        assert isinstance(line, CommentLine)
         # We ignore comments in FX IR.
 
     def _generate_enter_device_context_manager(self, line: Line) -> None:
@@ -245,7 +246,7 @@ class WrapperFxCodegen(PythonWrapperCodegen):
         assert not any(buf.get_name() in V.graph.removed_buffers for buf in (old, new))
         assert old.get_dtype() == new.get_dtype()
 
-        result_node = self.buffer_to_node[old]
+        result_node = self.buffer_to_node[old.name]
 
         # Free the old buffer.
         if old.get_name() not in V.graph.get_output_names() and delete_old:
