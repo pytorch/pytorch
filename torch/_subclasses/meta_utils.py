@@ -258,7 +258,6 @@ class MetaTensorDescriber:
         *,
         recurse: bool = True,
         trace: bool = False,
-        subclass_inner_attr: Optional[str] = None,
     ) -> MetaTensorDesc:
         is_leaf = safe_is_leaf(t)
         is_view = t._is_view()
@@ -359,23 +358,27 @@ class MetaTensorDescriber:
         if is_nested:
             from torch.nested._internal.nested_int import NestedIntNode
             from torch.nested._internal.nested_tensor import NestedTensor
+            from torch.fx.experimental.sym_node import SymNode
 
             assert isinstance(t, NestedTensor)
             nested_int = t.shape[t._ragged_idx]
 
-            # Why isn't this an assert? When fakifying a tensor that is
-            # already fake (test_jagged_fake_to_fake_preserved), nested_int is
-            # actually a symbolic nested int, e.g. SymNode holding j0 as hint.
-            # So isinstance(nested_int.node, NestedIntNode).
-            # Not sure if ignoring is actually the right thing to do here, but
-            # at least it passes the test.
-            if isinstance(nested_int, torch.SymInt) and isinstance(
-                nested_int.node, NestedIntNode
-            ):
-                nested_int_metadata = self.describe_tensor(
-                    nested_int.node.nested_int_cache(),
-                    subclass_inner_attr="_metadata",
-                )
+
+            assert isinstance(nested_int, torch.SymInt) and nested_int.node.is_nested_int()
+
+            node = nested_int.node
+
+            if isinstance(node, NestedIntNode):
+                metadata = node.nested_int_cache()
+            else:
+                # When fakifying a tensor that is already fake
+                # (test_jagged_fake_to_fake_preserved), nested_int is
+                # actually a symbolic nested int, e.g. SymNode holding j0 as hint.
+                # So isinstance(nested_int.node, NestedIntNode).
+                assert isinstance(node, SymNode)
+                metadata = node.hint.node.nested_int_cache()
+
+            nested_int_metadata = self.describe_tensor(metadata)
 
         view_func = ViewFunc.from_tensor(t)
 
@@ -888,10 +891,11 @@ class MetaConverter(Generic[_TensorT]):
         )
         self.arg_cnt += 1
 
+        nested_int_meta = t.nested_int_metadata
+
         def nested_int_metafy_fn(src: Source) -> torch.Tensor:
-            t_inner = t.nested_int_metadata
-            assert t_inner is not None
-            inner_callback = functools.partial(callback, device=t_inner.device)  # type: ignore[call-arg]
+            assert nested_int_meta is not None
+            inner_callback = functools.partial(callback, device=nested_int_meta.device)  # type: ignore[call-arg]
 
             if (
                 inner_contexts := getattr(symbolic_context, "inner_contexts", None)
@@ -901,11 +905,11 @@ class MetaConverter(Generic[_TensorT]):
             else:
                 # Run into this case in test_jagged_fake_to_fake_preserved
                 inner_context = all_dynamic_symbolic_context(
-                    t_inner, src, shape_env, inner_callback
+                    nested_int_meta, src, shape_env, inner_callback
                 )
 
             return self.meta_tensor(
-                t_inner,
+                nested_int_meta,
                 shape_env,
                 inner_callback,
                 source=src,
