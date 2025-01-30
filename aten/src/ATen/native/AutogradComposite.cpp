@@ -103,11 +103,6 @@ Tensor _lazy_clone_future(Tensor const& self) {
   // a COW data pointer. So we just clone it.
   if (MapAllocator::fromDataPtr(self_storage->_data_ptr_no_checks())) {
     return self.clone();
-    //TORCH_WARN(
-    //    "This operation creates a conditional view of a tensor that is ",
-    //    "shared between multiple processes. This behavior is deprecated, ",
-    //    "and in the future it will unconditionally create a clone instead.");
-    //return self.view_symint(self.sym_sizes());
   }
 
   c10::intrusive_ptr<c10::StorageImpl> storage =
@@ -115,14 +110,6 @@ Tensor _lazy_clone_future(Tensor const& self) {
 
   if (storage == nullptr) {
     return self.clone();
-    //// It's not easy to give more information about why the tensor cannot be
-    //// lazily cloned here. For instance, if it is a numpy-based tensor, there
-    //// is nothing currently attached to the tensor that says so.
-    //TORCH_WARN(
-    //    "This operation creates a conditional view of a tensor that has a ",
-    //    "non-standard data pointer. This behavior is deprecated, and in the ",
-    //    "future it will unconditionally create a clone instead.");
-    //return self.view_symint(self.sym_sizes());
   }
   auto tensor = self.view_symint(self.sym_sizes());
   tensor.unsafeGetTensorImpl()->set_storage_keep_dtype(std::move(storage));
@@ -131,10 +118,15 @@ Tensor _lazy_clone_future(Tensor const& self) {
 
 Tensor _lazy_clone_alias(Tensor const& self) {
   // TODO: Add more info about how user can future-proof their code.
-  c10::impl::cow::alert_cowsim(
-    "This operation creates a conditional view. This behavior is ",
-    "deprecated, and in the future it will unconditionally create a ",
-    "lazy clone (which is semantically the same as a copy) instead.");
+  c10::impl::cow::alert_conditional_view(
+    "This operation conditionally creates either a view or copy of a tensor, ",
+    "and this particular call created a view. This behavior is deprecated, ",
+    "and in a future release it will unconditionally create a copy instead. ",
+    "Depending on how your code interacts with this view, the future release ",
+    "may change the behavior of your script. To check if your code will still ",
+    "work in the future, please enable the future behavior at the beginning ",
+    "of your script by calling `torch.set_future_lazy_clone(True)`. See the ",
+    "documentation of that function for more information.");
   return self.view_symint(self.sym_sizes());
 }
 
