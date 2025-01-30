@@ -1,4 +1,4 @@
-from typing import Any, Dict, List, Optional
+from typing import Any, Optional
 
 import torch
 import torch.utils._pytree as pytree
@@ -54,8 +54,8 @@ if not torch._running_with_deploy():
 
     @torch.library.custom_op("flex_lib::zeros_and_scatter", mutates_args=())  # type: ignore[misc]
     def zeros_and_scatter(
-        shape: List[int],
-        indices: List[Tensor],
+        shape: list[int],
+        indices: list[Tensor],
         vals: Tensor,
     ) -> Tensor:
         """Custom Op so that we can register a custom lowering for the new_output + scatter in the backwards pass"""
@@ -64,8 +64,8 @@ if not torch._running_with_deploy():
 
     @zeros_and_scatter.register_fake  # type: ignore[misc]
     def _(
-        shape: List[int],
-        indices: List[Tensor],
+        shape: list[int],
+        indices: list[Tensor],
         vals: Tensor,
     ) -> Tensor:
         return vals.new_empty(shape)
@@ -96,7 +96,7 @@ class ModIndex(torch.autograd.Function):
     generate_vmap_rule = True
 
     @staticmethod
-    def forward(x: Tensor, indices: List[Tensor]) -> Tensor:
+    def forward(x: Tensor, indices: list[Tensor]) -> Tensor:
         return torch.ops.aten.index(x, indices)
 
     @staticmethod
@@ -133,7 +133,7 @@ class TransformGetItemToIndex(TorchFunctionMode):
         func: OpOverload,
         types: tuple[torch._C._TensorMeta, ...],
         args: tuple[object, ...] = (),
-        kwargs: Optional[Dict[str, object]] = None,
+        kwargs: Optional[dict[str, object]] = None,
     ) -> object:
         if func == torch.Tensor.__getitem__:
             index_args = pytree.tree_leaves(args[1])

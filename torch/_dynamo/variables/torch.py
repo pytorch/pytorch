@@ -5,7 +5,8 @@ import inspect
 import logging
 import math
 import re
-from typing import Dict, List, TYPE_CHECKING
+from collections.abc import Sequence
+from typing import TYPE_CHECKING
 
 import torch._C
 import torch._refs
@@ -38,7 +39,7 @@ from ..utils import (
 from .base import VariableTracker
 from .ctx_manager import (
     AutocastModeVariable,
-    NullContextVariable,
+    ProfilerContextVariable,
     TorchFunctionDisableVariable,
 )
 from .distributed import DistributedVariable, ProcessGroupVariable
@@ -207,7 +208,7 @@ class BaseTorchVariable(VariableTracker):
     def as_python_constant(self):
         return self.value
 
-    def call_hasattr(self, tx: "InstructionTranslator", name):
+    def call_obj_hasattr(self, tx: "InstructionTranslator", name):
         result = hasattr(self.value, name)
         return variables.ConstantVariable.create(result)
 
@@ -242,8 +243,8 @@ class TorchCtxManagerClassVariable(BaseTorchVariable):
     def call_function(
         self,
         tx: "InstructionTranslator",
-        args: "List[VariableTracker]",
-        kwargs: "Dict[str, VariableTracker]",
+        args: Sequence[VariableTracker],
+        kwargs: "dict[str, VariableTracker]",
     ) -> "VariableTracker":
         from . import (
             DisabledSavedTensorsHooksVariable,
@@ -303,13 +304,15 @@ class TorchCtxManagerClassVariable(BaseTorchVariable):
         ):
             return AutocastModeVariable.create(self.value, args, kwargs)
         elif self.value in (
+            # NOTE any class added here must align with the semantic
+            # requirements of `ProfilerContextVariable`.
             torch.profiler.profile,
             torch.profiler.record_function,
             torch.autograd.profiler.profile,
             torch.autograd.profiler.record_function,
         ):
             warning_once(log, "Profiler function %s will be ignored", self.value)
-            return NullContextVariable()
+            return ProfilerContextVariable()
         elif self.value is torch._C.DisableTorchFunctionSubclass:
             assert not (args or kwargs)
             return TorchFunctionDisableVariable.create(tx)
@@ -654,7 +657,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
 
         @register(torch._foreach_lerp_)
         def handle_inplace_foreach_lerp_scalar(
-            self, tx: "InstructionTranslator", *args, **kwargs
+            _, tx: "InstructionTranslator", *args, **kwargs
         ):
             if len(args) == 3 and not isinstance(args[2], ListVariable) and not kwargs:
                 return tx.inline_user_function_return(
@@ -664,9 +667,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                 )
 
         @register(torch._foreach_pow)
-        def handle_foreach_pow_scalar(
-            self, tx: "InstructionTranslator", *args, **kwargs
-        ):
+        def handle_foreach_pow_scalar(_, tx: "InstructionTranslator", *args, **kwargs):
             # In eager it's more performant to call item() from within the C op implementation
             # in compile, it's more performant to not graph break.
             if len(args) == 2 and isinstance(args[0], TensorVariable) and not kwargs:
@@ -931,8 +932,8 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
     def call_function(
         self,
         tx: "InstructionTranslator",
-        args: "List[VariableTracker]",
-        kwargs: "Dict[str, VariableTracker]",
+        args: Sequence[VariableTracker],
+        kwargs: "dict[str, VariableTracker]",
     ) -> "VariableTracker":
         from . import ConstantVariable, SymNodeVariable, TensorVariable
         from .builder import wrap_fx_proxy
@@ -1263,8 +1264,8 @@ class DispatchKeySetVariable(BaseTorchVariable):
         self,
         tx,
         name,
-        args: "List[VariableTracker]",
-        kwargs: "Dict[str, VariableTracker]",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
     ) -> "VariableTracker":
         if self.is_constant_fold_method(name) and check_unspec_or_constant_args(
             args, kwargs
@@ -1293,8 +1294,8 @@ class FuncTorchInterpreterVariable(BaseTorchVariable):
         self,
         tx,
         name,
-        args: "List[VariableTracker]",
-        kwargs: "Dict[str, VariableTracker]",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
     ) -> "VariableTracker":
         if name == "key":
             return variables.EnumVariable(self.value.key())

@@ -4,7 +4,7 @@ import copy
 import functools
 import unittest
 from contextlib import nullcontext
-from typing import Dict, Optional
+from typing import Optional
 
 import torch
 import torch.nn as nn
@@ -308,7 +308,7 @@ class TestFullyShardStateDictMultiProcess(FSDPTest):
 
         # Verify that we can load a new state dict that contains DTensors with
         # storages different from the current model parameters
-        new_state_dict: Dict[str, DTensor] = {}
+        new_state_dict: dict[str, DTensor] = {}
         for param_name, dtensor in state_dict.items():
             # Construct new DTensors to exercise load state dict writeback
             new_state_dict[param_name] = dtensor.detach().clone().fill_(new_fill_value)
