@@ -80,6 +80,23 @@ class BlockAnalysisTest(TestCase):
         self.assertEqual(matched_dims, dims)
         self.assertEqual(matched_strides, strides)
 
+    @parametrize(
+        "symbol,expr,subexpr",
+        [
+            (x, Identity(x), x),
+            (x, Identity(x + 5), x),
+            (y, Identity(x + 2 * y) + 5, 2 * y),
+        ],
+    )
+    def test_subexpr_identity(
+        self,
+        symbol: sympy.Symbol,
+        expr: sympy.Expr,
+        subexpr: sympy.Expr,
+    ):
+        matched_subexpr = BlockPatternMatcher.get_subexpr_involving_symbol(expr, symbol)
+        self.assertEqual(matched_subexpr, subexpr)
+
 
 if __name__ == "__main__":
     run_tests()

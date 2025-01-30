@@ -17,8 +17,8 @@ class BlockPatternMatcher:
     Matches block indexing expressions.
     """
 
-    @staticmethod
-    def get_subexpr_involving_symbol(expr: Expr, symbol: Symbol) -> Expr:
+    @classmethod
+    def get_subexpr_involving_symbol(cls, expr: Expr, symbol: Symbol) -> Expr:
         """
         Given a sympy expression, return the subexpression comprised only of terms
         involving the specified symbol.
@@ -26,6 +26,7 @@ class BlockPatternMatcher:
         For example, if `expr` is `x * 5 + x ** 2 + y * 2 + 5`, and `symbol` is `x`,
         this returns `x * 5 + x ** 2`.
         """
+        expr = cls._preprocess(expr)
         return sympy.S.Zero + sum(
             term for term in sympy.Add.make_args(expr) if symbol in term.free_symbols
         )
@@ -42,10 +43,10 @@ class BlockPatternMatcher:
             numels.appendleft(numel)
         return [*numels]
 
-    @classmethod
-    def _preprocess(cls, index: Expr) -> Expr:
+    @staticmethod
+    def _preprocess(expr: Expr) -> Expr:
         # Remove any Identity nodes, e.g. expand x + (5 * y) to x + 5 * y.
-        return index.expand(identity=True)
+        return expr.expand(identity=True)
 
     @classmethod
     def match_mod_div_block_expr(
