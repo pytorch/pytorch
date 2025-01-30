@@ -170,7 +170,6 @@ function install_torchrec_and_fbgemm() {
   local fbgemm_commit
   fbgemm_commit=$(get_pinned_commit fbgemm)
   if [[ "$BUILD_ENVIRONMENT" == *rocm* ]] ; then
-    pip_install tabulate  # needed for newer fbgemm
     fbgemm_commit=$(get_pinned_commit fbgemm_rocm)
   fi
   pip_uninstall torchrec-nightly
@@ -178,7 +177,12 @@ function install_torchrec_and_fbgemm() {
   pip_install setuptools-git-versioning scikit-build pyre-extensions
 
   if [[ "$BUILD_ENVIRONMENT" == *rocm* ]] ; then
-    pip_install patchelf
+    # install torchrec first because it installs fbgemm nightly on top of rocm fbgemm
+    pip_install --no-use-pep517 --user "git+https://github.com/pytorch/torchrec.git@${torchrec_commit}"
+    pip_uninstall fbgemm-gpu-nightly
+
+    pip_install tabulate  # needed for newer fbgemm
+    pip_install patchelf  # needed for rocm fbgemm
     git clone --recursive https://github.com/pytorch/fbgemm
     pushd fbgemm/fbgemm_gpu
     git checkout "${fbgemm_commit}"
@@ -189,7 +193,6 @@ function install_torchrec_and_fbgemm() {
       -DCMAKE_CXX_FLAGS="-DTORCH_USE_HIP_DSA"
     popd
     rm -rf fbgemm
-    pip_install --no-use-pep517 --user "git+https://github.com/pytorch/torchrec.git@${torchrec_commit}"
   else
     # See https://github.com/pytorch/pytorch/issues/106971
     CUDA_PATH=/usr/local/cuda-12.1 pip_install --no-use-pep517 --user "git+https://github.com/pytorch/FBGEMM.git@${fbgemm_commit}#egg=fbgemm-gpu&subdirectory=fbgemm_gpu"
