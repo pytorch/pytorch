@@ -20,7 +20,8 @@ import pandas as pd  # type: ignore[import]
 from tools.stats.upload_stats_lib import download_s3_artifacts, upload_to_s3
 from tools.stats.utilization_stats_lib import (
     getDataModelVersion,
-    getTimestampString,
+    getTimestampStr,
+    getCurrentTimestampStr,
     OssCiSegmentV1,
     OssCiUtilizationMetadataV1,
     OssCiUtilizationTimeSeriesV1,
@@ -81,8 +82,8 @@ class SegmentGenerator:
                 segment = OssCiSegmentV1(
                     level=CMD_PYTHON_LEVEL,
                     name=value,
-                    start_at=getTimestampString(row["start_time"].timestamp()),
-                    end_at=getTimestampString(row["end_time"].timestamp()),
+                    start_at=getTimestampStr(row["start_time"].timestamp()),
+                    end_at=getTimestampStr(row["end_time"].timestamp()),
                     extra_info={},
                 )
                 segments.append(segment)
@@ -125,10 +126,10 @@ class UtilizationDbConverter:
         self.metadata = metadata
         self.records = records
         self.segments = segments
-        self.created_at = getTimestampString(datetime.now().timestamp())
+        self.created_at = getCurrentTimestampStr()
         self.info = info
         end_time_stamp = max([record.timestamp for record in records])
-        self.end_at = getTimestampString(end_time_stamp)
+        self.end_at = end_time_stamp
 
     def convert(
         self,
@@ -151,7 +152,7 @@ class UtilizationDbConverter:
             gpu_count=self.metadata.gpu_count if self.metadata.gpu_count else 0,
             cpu_count=self.metadata.cpu_count if self.metadata.cpu_count else 0,
             gpu_type=self.metadata.gpu_type if self.metadata.gpu_type else "",
-            start_at=getTimestampString(self.metadata.start_at),
+            start_at= self.metadata.start_at,
             end_at=self.end_at,
             segments=self.segments,
             tags=[],
@@ -170,7 +171,7 @@ class UtilizationDbConverter:
             created_at=self.created_at,
             type=type,
             tags=tags,
-            time_stamp=getTimestampString(record.timestamp),
+            time_stamp=record.timestamp,
             repo=self.info.repo,
             workflow_id=self.info.workflow_run_id,
             run_attempt=self.info.run_attempt,
