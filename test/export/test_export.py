@@ -939,6 +939,49 @@ graph():
         for vr_upper in vr_upper_bounds:
             self.assertEqual(vr_upper, 1)
 
+    def test_mask_nonzero_static(self):
+        class TestModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+            def forward(self, seq_embeddings, mask, exp):
+                # Instead of `output = seq_embeddings[mask]`` which makes
+                # output.shape have unbacked symint, encode side knowledge of
+                # output.shape as exp.shape to force it to have backed symint
+                index = torch.nonzero_static(mask, size=exp.shape[0])
+                chunked_index = index.chunk(chunks=mask.dim(), dim=1)
+                output = seq_embeddings[chunked_index].squeeze()
+                final_output = output * 2
+                return final_output
+
+        m = TestModule()
+
+        seq_embeddings = torch.randn(5, 5)
+        mask = torch.ones(5, 5, dtype=torch.bool)
+        exp = torch.randn(25)
+        output = m(seq_embeddings, mask, exp)
+
+        batch = torch.export.Dim("batch")
+        exp_size = torch.export.Dim('exp_size', max=100)
+        ep = export(
+            m,
+            (seq_embeddings, mask, exp),
+            dynamic_shapes = {
+                "seq_embeddings": (batch, None),
+                "mask" : (batch, None),
+                "exp": (exp_size,),
+            },
+            # strict=False,
+        )
+        ep_output = ep.module()(seq_embeddings, mask, exp)
+        self.assertTrue(torch.allclose(output, ep_output))
+
+        seq_embeddings = torch.randn(6, 5)
+        mask = torch.ones(6, 5, dtype=torch.bool)
+        exp = torch.randn(30)
+        output = m(seq_embeddings, mask, exp)
+        ep_output = ep.module()(seq_embeddings, mask, exp)
+        self.assertTrue(torch.allclose(output, ep_output))
+
     def test_setgrad_lifted_tensor(self):
         class M(torch.nn.Module):
             def forward(self, x, y):
