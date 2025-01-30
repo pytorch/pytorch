@@ -349,7 +349,9 @@ class ExprPrinterTests(InductorTestCase):
         x = sympy.Symbol("x", integer=True)
         expr = PythonMod(x - 10, x)
         self.assertExpectedInline(pexpr(expr), """((-10) + x) % x""")
-        self.assertExpectedInline(cexpr(expr), f"""((-10{LONG_SUFFIX}) + x) % x""")
+        self.assertExpectedInline(
+            cexpr(expr), f"""c10::div_mod((-10{LONG_SUFFIX}) + x, x)"""
+        )
         self.assertExpectedInline(
             texpr(expr), """triton_helpers.remainder_integer((-10) + x, x)"""
         )

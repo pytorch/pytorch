@@ -87,8 +87,8 @@ class Benchmarker:
     def benchmark(
         self: Self,
         fn: Callable[..., Any],
-        fn_args: Tuple[Any, ...],
-        fn_kwargs: Dict[str, Any],
+        fn_args: tuple[Any, ...],
+        fn_kwargs: dict[str, Any],
         **kwargs: Any,
     ) -> float:
         """Benchmark `fn(*fn_args, *fn_kwargs)` and return the runtime, in milliseconds (the
@@ -139,7 +139,7 @@ class Benchmarker:
         - The median runtime of `_callable`, in milliseconds.
         """
 
-        def run_for(ms: int) -> List[float]:
+        def run_for(ms: int) -> list[float]:
             timings = []
             run_start_t = time.perf_counter()
             while True:
@@ -325,7 +325,7 @@ class InductorBenchmarker(TritonBenchmarker):
 
     def get_event_pairs(
         self: Self, iters: int
-    ) -> List[Tuple[torch.cuda.Event, torch.cuda.Event]]:
+    ) -> list[tuple[torch.cuda.Event, torch.cuda.Event]]:
         """Get `iters` pairs of CUDA events."""
         return [
             (
@@ -336,7 +336,7 @@ class InductorBenchmarker(TritonBenchmarker):
         ]
 
     def get_event_pairs_min_timing(
-        self: Self, event_pairs: List[Tuple[torch.cuda.Event, torch.cuda.Event]]
+        self: Self, event_pairs: list[tuple[torch.cuda.Event, torch.cuda.Event]]
     ) -> float:
         """Get the minimum timing, in milliseconds, for a group of CUDA event pairs."""
         return min(
