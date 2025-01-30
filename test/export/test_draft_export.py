@@ -203,12 +203,6 @@ class TestDraftExport(TestCase):
             def foo_impl(a, b):
                 return a + b
 
-            @torch.library.register_fake("mylib::foo1", lib=lib)
-            def mylib_foo_default_fake(*args, **kwargs):
-                ctx = torch.library.get_ctx()
-                fake_shape = [ctx.new_dynamic_size() for _ in range(2)]
-                return torch.empty(fake_shape, dtype=torch.float32, device="cpu")
-
             class M(torch.nn.Module):
                 def forward(self, a, b, c):
                     res = torch.ops.mylib.foo1(a, b)
@@ -221,7 +215,10 @@ class TestDraftExport(TestCase):
             ep, report = draft_export(M(), inp)
             self.assertTrue(len(report.failures) > 0)
             self.assertEqual(
-                report.failures[0].failure_type, FailureType.DATA_DEPENDENT_ERROR
+                report.failures[0].failure_type, FailureType.MISSING_FAKE_KERNEL
+            )
+            self.assertEqual(
+                report.failures[1].failure_type, FailureType.DATA_DEPENDENT_ERROR
             )
 
             inp = (torch.randn(3, 3), torch.randn(3, 3), torch.tensor(2))
