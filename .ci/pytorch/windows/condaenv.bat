@@ -15,7 +15,7 @@ FOR %%v IN (%DESIRED_PYTHON%) DO (
     if "%%v" == "3.12" call conda create -n py!PYTHON_VERSION_STR! -y -c=conda-forge numpy=2.0.1  python=%%v
     if "%%v" == "3.13" call conda create -n py!PYTHON_VERSION_STR! -y -c=conda-forge numpy=2.1.2  python=%%v
     if "%%v" == "3.13t" call conda create -n py!PYTHON_VERSION_STR! -y -c=conda-forge numpy=2.1.2 python-freethreading python=3.13
-    call conda run -n py!PYTHON_VERSION_STR! pip install pyyaml boto3 cmake ninja typing_extensions setuptools=72.1.0
+    call conda run -n py!PYTHON_VERSION_STR! pip install pyyaml boto3 cmake ninja typing_extensions setuptools==72.1.0
     call conda run -n py!PYTHON_VERSION_STR! pip install mkl-static mkl-include
 )
 endlocal
