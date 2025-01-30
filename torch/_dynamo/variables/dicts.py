@@ -2,6 +2,7 @@
 
 import collections
 import functools
+import types
 from typing import Optional, TYPE_CHECKING
 
 from torch._subclasses.fake_tensor import is_fake
@@ -11,7 +12,7 @@ from ..bytecode_transformation import create_call_function, create_instruction
 from ..exc import raise_observed_exception, unimplemented
 from ..guards import GuardBuilder, install_guard
 from ..source import is_from_local_source
-from ..utils import cmp_name_to_op_mapping, dict_keys, dict_values, specialize_symnode
+from ..utils import dict_keys, dict_values, specialize_symnode
 from .base import ValueMutationNew, VariableTracker
 from .constant import ConstantVariable
 
@@ -502,6 +503,39 @@ class ConstDictVariable(VariableTracker):
         return super().clone(**kwargs)
 
 
+class MappingProxyVariable(VariableTracker):
+    # proxies to the original dict_vt
+    def __init__(self, dv_dict: ConstDictVariable, **kwargs) -> None:
+        super().__init__(**kwargs)
+        assert isinstance(dv_dict, ConstDictVariable)
+        self.dv_dict = dv_dict
+
+    def unpack_var_sequence(self, tx):
+        return self.dv_dict.unpack_var_sequence(tx)
+
+    def reconstruct(self, codegen):
+        # load types.MappingProxyType
+        codegen.add_push_null(
+            lambda: codegen.extend_output(
+                [
+                    codegen.create_load_python_module(types),
+                    codegen.create_load_attr("MappingProxyType"),
+                ]
+            )
+        )
+        codegen(self.dv_dict)
+        codegen.extend_output(create_call_function(1, False))
+
+    def call_method(
+        self,
+        tx,
+        name,
+        args: list["VariableTracker"],
+        kwargs: dict[str, "VariableTracker"],
+    ) -> "VariableTracker":
+        return self.dv_dict.call_method(tx, name, args, kwargs)
+
+
 class NNModuleHooksDictVariable(ConstDictVariable):
     # Special class to avoid adding any guards on the nn module hook ids.
     def install_dict_keys_match_guard(self):
@@ -753,9 +787,7 @@ class DictKeySetVariable(SetVariable):
         return dict_keys
 
     def as_python_constant(self):
-        return dict.fromkeys(
-            {k.vt.as_python_constant() for k in self.set_items}, None
-        ).keys()
+        unimplemented("DictKeySetVariable.as_python_constant")
 
     def call_method(
         self,
@@ -841,12 +873,6 @@ class DictKeysVariable(DictViewVariable):
     ) -> "VariableTracker":
         if name == "__contains__":
             return self.dv_dict.call_method(tx, name, args, kwargs)
-        if name in cmp_name_to_op_mapping:
-            if not isinstance(args[0], (SetVariable, DictKeysVariable)):
-                return ConstantVariable.create(NotImplemented)
-            return ConstantVariable.create(
-                cmp_name_to_op_mapping[name](self.set_items, args[0].set_items)
-            )
         return super().call_method(tx, name, args, kwargs)
 
 
