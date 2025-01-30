@@ -3262,10 +3262,10 @@ class DeviceCachingAllocator {
 static bool forceUncachedAllocator() {
   // Allow either CUDA or HIP name for env var for maximum user comfort
   // the CUDA env var avoids being hipified in cuda_to_hip_mappings.py
-  static bool has_cuda_env =
-      c10::utils::get_env("PYTORCH_NO_CUDA_MEMORY_CACHING") == "1";
-  static bool has_rocm_env =
-      c10::utils::get_env("PYTORCH_NO_HIP_MEMORY_CACHING") == "1";
+  static auto has_cuda_env =
+      c10::utils::check_env("PYTORCH_NO_CUDA_MEMORY_CACHING") == true;
+  static auto has_rocm_env =
+      c10::utils::check_env("PYTORCH_NO_HIP_MEMORY_CACHING") == true;
   static bool force_uncached = has_cuda_env || has_rocm_env;
   return force_uncached;
 }
