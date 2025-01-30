@@ -1,6 +1,7 @@
 # Nodes represent a definition of a value in our graph of operators.
 import builtins
 import inspect
+import operator
 import types
 import warnings
 from collections.abc import Mapping, Sequence
@@ -88,6 +89,7 @@ _side_effectful_functions: set[Callable] = {
     _ops.profiler._record_function_enter_new,
     _ops.profiler._record_function_exit,
     _ops.inductor.accumulate_grad_.default,
+    operator.setitem,
 } | _side_effectful_need_to_be_preserved_pre_dispatch
 if hasattr(_ops.inductor, "resize_storage_bytes_"):
     _side_effectful_functions.add(_ops.inductor.resize_storage_bytes_.default)
@@ -596,8 +598,7 @@ class Node(_NodeBase):
             return self._repr_fn(self)
         return self.name
 
-    @staticmethod
-    def _pretty_print_target(target: object) -> str:
+    def _pretty_print_target(self, target: object) -> str:
         """
         Make target printouts more user-friendly.
         1) builtins will be printed as `builtins.xyz`

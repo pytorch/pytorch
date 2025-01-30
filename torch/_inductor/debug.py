@@ -3,7 +3,6 @@ import contextlib
 import copy
 import dataclasses
 import functools
-import io
 import itertools
 import json
 import logging
@@ -25,6 +24,7 @@ from torch._dynamo.utils import get_debug_dir
 from torch.fx.graph_module import GraphModule
 from torch.fx.passes.shape_prop import _extract_tensor_metadata, TensorMetadata
 from torch.fx.passes.tools_common import legalize_graph
+from torch.types import FileLike
 from torch.utils._ordered_set import OrderedSet
 from torch.utils._pytree import tree_map
 
@@ -551,10 +551,12 @@ class DebugFormatter:
 
     def log_inductor_triton_kernel_to_post_grad_node_info(
         self, filename: str = "inductor_triton_kernel_to_post_grad_nodes.json"
-    ) -> None:
+    ) -> dict[str, list[str]]:
         with self.fopen(filename, "w") as fd:
             log.info("Writing provenance tracing debugging info to %s", fd.name)
-            json.dump(DebugContext._inductor_triton_kernel_to_post_grad_node_info, fd)
+            debug_info = DebugContext._inductor_triton_kernel_to_post_grad_node_info
+            json.dump(debug_info, fd)
+        return debug_info
 
     def log_autotuning_results(
         self,
@@ -728,7 +730,7 @@ def aot_inductor_minifier_wrapper(
     exported_program: torch.export.ExportedProgram,
     *,
     inductor_configs: dict[str, Any],
-    package_path: Optional[Union[str, io.BytesIO]] = None,
+    package_path: Optional[FileLike] = None,
 ) -> str:
     from torch._dynamo.debug_utils import AccuracyError
     from torch._dynamo.repro.aoti import dump_to_minify
