@@ -38,6 +38,7 @@ from torch._inductor.cudagraph_utils import (
     get_placeholder_info,
     log_cudagraph_skip_and_bump_counter,
 )
+from torch._inductor.freezing_utils import has_frozen_params, is_frozen_param
 from torch._inductor.utils import (
     align_inputs_from_check_idxs,
     BoxedBool,
@@ -91,10 +92,6 @@ class OutputCode:
 
 
 _StrideExprStr: TypeAlias = str
-
-
-def has_frozen_params(gm: torch.fx.GraphModule) -> bool:
-    return getattr(gm, "_has_frozen_params", False)
 
 
 # copy_ fails when trying to write to tensors with memory overlap,
@@ -368,7 +365,7 @@ class CompiledFxGraph(OutputCode):
             self.constants = {}
             self.frozen_param_names = {}
             for k, v in graph.constants.items():
-                if k.startswith("_frozen_param"):
+                if is_frozen_param(v):
                     self.frozen_param_names[k] = graph.allocated_constant_name[k]
                 else:
                     self.constants[k] = v
