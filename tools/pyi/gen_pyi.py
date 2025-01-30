@@ -1424,9 +1424,9 @@ def gen_pyi(
 
     # Dispatch key hints
     # ~~~~~~~~~~~~~~~~~~
-    dispatch_key_hints = [f"{d.name}: DispatchKey = ..." for d in DispatchKey]
+    dispatch_key_hints = [f"{d.name} = ..." for d in DispatchKey]
     torch_dispatch_mode_key_hints = [
-        f"{k.name}: _TorchDispatchModeKey = ..." for k in _TorchDispatchModeKey
+        f"{k.name} = ..." for k in _TorchDispatchModeKey
     ]
 
     # Tags Enum type hints
@@ -1434,7 +1434,7 @@ def gen_pyi(
 
     tag_names = sorted(parse_tags_yaml(tags_yaml_path))
     tag_attributes = "\n".join(
-        f"{name}: _int = {index}" for index, name in enumerate(tag_names)
+        f"{name} = {index}" for index, name in enumerate(tag_names)
     )
 
     # Write out the stub
