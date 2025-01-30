@@ -3,13 +3,13 @@
 
 #include <c10/macros/Macros.h>
 #include <c10/util/string_utils.h>
-#include <c10/util/string_view.h>
 
 #include <cstddef>
 #include <optional>
 #include <ostream>
 #include <sstream>
 #include <string>
+#include <string_view>
 
 C10_CLANG_DIAGNOSTIC_PUSH()
 #if C10_CLANG_HAS_WARNING("-Wshorten-64-to-32")
