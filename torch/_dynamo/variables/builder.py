@@ -1031,10 +1031,9 @@ class VariableBuilder:
         elif value is collections.namedtuple:
             self.install_guards(GuardBuilder.ID_MATCH)
             return CollectionsNamedTupleFunction(value, source=self.source)
-        elif (
-            isinstance(value, types.BuiltinMethodType)
-            and value in BuiltinMethodVariable.supported_methods()
-        ):
+        elif isinstance(
+            value, types.BuiltinMethodType
+        ) and BuiltinMethodVariable.is_supported_builtin_method(value):
             self.install_guards(GuardBuilder.ID_MATCH)
             return BuiltinMethodVariable(value, source=self.source)
         elif is_function_or_wrapper(value):
