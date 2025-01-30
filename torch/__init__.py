@@ -1296,20 +1296,20 @@ def set_future_lazy_clone(mode: builtins.bool) -> None:
     Currently, some operators in PyTorch conditionally return either a view or a
     copy of a tensor. This behavior has been deprecated, and in a future release
     these operators will unconditionally return a copy. Depending on how user
-    code interacts with a conditionally-created view, the future release may
-    change the behavior of the code.
+    code interacts with one of these conditionally-created views, the future
+    release may change the behavior of the code.
 
-    This function allows you to opt into the future behavior to check if it will
-    require you to change your code. This should be enabled at the beginning of
-    your script.
+    This function allows you to opt into the future behavior, so you can check
+    if it will require you to change your code. This should be enabled at the
+    beginning of your script.
 
     In what situations can you expect enabling future behavior to cause the
     behavior of your script to change? Given a tensor ``a``, if the following
     three steps occur in order, the behavior of your script will likely change:
 
-    #. An operator ``op``, which conditionally creates a view, is called like
-        ``b = op(a, ...)``, and meets the condition to cause ``b`` to be a view
-        of ``a``.
+    #. An operator ``op`` which conditionally creates a view is called, like
+       :code:`b = op(a, ...)`, and meets the condition to cause ``b`` to be a
+       view of ``a``.
 
     #. Either ``a`` or ``b`` is mutated in-place.
 
@@ -1319,7 +1319,7 @@ def set_future_lazy_clone(mode: builtins.bool) -> None:
     For instance, :func:`torch.reshape` is one of the functions which
     conditionally creates a view. The following is an example where the same
     code is run with and without the future behavior enabled. Notice that the
-    output ``result`` differs in both cases.
+    tensor ``result`` differs between the two cases.
 
     Current behavior:
 
@@ -1348,6 +1348,7 @@ def set_future_lazy_clone(mode: builtins.bool) -> None:
         False
 
     See also:
+
     * :func:`torch.get_future_lazy_clone()`
     * :func:`torch.set_error_on_conditional_view_warnings()`
     * :func:`torch.get_error_on_conditional_view_warnings()`
@@ -1361,6 +1362,8 @@ def set_future_lazy_clone(mode: builtins.bool) -> None:
 def get_future_lazy_clone() -> builtins.bool:
     r"""Check whether future behavior of always copying is enabled for operators
     that currently conditionally return a copy or view of the input.
+
+    See also: :func:`torch.set_future_lazy_clone()`
     """
     return _C._get_future_lazy_clone()
 
@@ -1368,13 +1371,20 @@ def get_future_lazy_clone() -> builtins.bool:
 def set_error_on_conditional_view_warnings(mode: builtins.bool) -> None:
     r"""Enables raising an error instead of a warning when an operation
     conditionally creates a view.
+
+    See also: :func:`torch.set_future_lazy_clone()`
+
+    Args:
+        mode (bool): Whether to enable raising errors
     """
     return _C._set_error_on_conditional_view_warnings(mode)
 
 
-def get_error_on_conditional_view_warnings() -> None:
+def get_error_on_conditional_view_warnings() -> builtins.bool:
     r"""Check whether raising an error instead of a warning is enabled when an
     operation conditionally creates a view.
+
+    See also: :func:`torch.set_future_lazy_clone()`
     """
     return _C._get_error_on_conditional_view_warnings()
 
