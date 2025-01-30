@@ -1,8 +1,9 @@
+# mypy: allow-untyped-defs
+
 # In some cases, these basic types are shadowed by corresponding
 # top-level values.  The underscore variants let us refer to these
 # types.  See https://github.com/python/mypy/issues/4146 for why these
 # workarounds is necessary
-import os
 from builtins import (  # noqa: F401
     bool as _bool,
     bytes as _bytes,
@@ -12,8 +13,8 @@ from builtins import (  # noqa: F401
     str as _str,
 )
 from collections.abc import Sequence
-from typing import Any, IO, TYPE_CHECKING, Union
-from typing_extensions import Self, TypeAlias
+from typing import Any, TYPE_CHECKING, Union
+from typing_extensions import TypeAlias
 
 # `as` imports have better static analysis support than assignment `ExposedType: TypeAlias = HiddenType`
 from torch import (  # noqa: F401
@@ -34,7 +35,7 @@ if TYPE_CHECKING:
     from torch.autograd.graph import GradientEdge
 
 
-__all__ = ["Number", "Device", "FileLike", "Storage"]
+__all__ = ["Number", "Device", "Storage"]
 
 # Convenience aliases for common composite types that we need
 # to talk about in PyTorch
@@ -57,16 +58,11 @@ FloatLikeType: TypeAlias = Union[float, SymFloat]
 # bool or SymBool
 BoolLikeType: TypeAlias = Union[bool, SymBool]
 
-py_sym_types = (SymInt, SymFloat, SymBool)  # left un-annotated intentionally
+py_sym_types = (SymInt, SymFloat, SymBool)
 PySymType: TypeAlias = Union[SymInt, SymFloat, SymBool]
 
 # Meta-type for "numeric" things; matches our docs
 Number: TypeAlias = Union[int, float, bool]
-# tuple for isinstance(x, Number) checks.
-# FIXME: refactor once python 3.9 support is dropped.
-_Number = (int, float, bool)
-
-FileLike: TypeAlias = Union[str, os.PathLike[str], IO[bytes]]
 
 # Meta-type for "device-like" things.  Not to be confused with 'device' (a
 # literal device object).  This nomenclature is consistent with PythonArgParser.
@@ -81,10 +77,10 @@ class Storage:
     dtype: _dtype
     _torch_load_uninitialized: bool
 
-    def __deepcopy__(self, memo: dict[int, Any]) -> Self:
+    def __deepcopy__(self, memo: dict[int, Any]) -> "Storage":
         raise NotImplementedError
 
-    def _new_shared(self, size: int) -> Self:
+    def _new_shared(self, size: int) -> "Storage":
         raise NotImplementedError
 
     def _write_file(
@@ -102,13 +98,13 @@ class Storage:
     def is_shared(self) -> bool:
         raise NotImplementedError
 
-    def share_memory_(self) -> Self:
+    def share_memory_(self) -> "Storage":
         raise NotImplementedError
 
     def nbytes(self) -> int:
         raise NotImplementedError
 
-    def cpu(self) -> Self:
+    def cpu(self) -> "Storage":
         raise NotImplementedError
 
     def data_ptr(self) -> int:
@@ -119,12 +115,12 @@ class Storage:
         filename: str,
         shared: bool = False,
         nbytes: int = 0,
-    ) -> Self:
+    ) -> "Storage":
         raise NotImplementedError
 
     def _new_with_file(
         self,
         f: Any,
         element_size: int,
-    ) -> Self:
+    ) -> "Storage":
         raise NotImplementedError

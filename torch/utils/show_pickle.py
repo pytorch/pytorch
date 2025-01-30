@@ -6,7 +6,7 @@ import struct
 import pprint
 import zipfile
 import fnmatch
-from typing import Any, IO
+from typing import Any, IO, BinaryIO, Union
 
 __all__ = ["FakeObject", "FakeClass", "DumpUnpickler", "main"]
 
@@ -119,7 +119,7 @@ def main(argv, output_stream=None):
         return 2
 
     fname = argv[1]
-    handle: IO[bytes]
+    handle: Union[IO[bytes], BinaryIO]
     if "@" not in fname:
         with open(fname, "rb") as handle:
             DumpUnpickler.dump(handle, output_stream)

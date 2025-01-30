@@ -1,7 +1,6 @@
 import os
 import re
-from re import Pattern
-from typing import Optional
+from typing import List, Optional, Pattern, Tuple
 
 
 BOT_COMMANDS_WIKI = "https://github.com/pytorch/pytorch/wiki/Bot-commands"
@@ -14,13 +13,13 @@ CONTACT_US = f"Questions? Feedback? Please reach out to the [PyTorch DevX Team](
 ALTERNATIVES = f"Learn more about merging in the [wiki]({BOT_COMMANDS_WIKI})."
 
 
-def has_label(labels: list[str], pattern: Pattern[str] = CIFLOW_LABEL) -> bool:
+def has_label(labels: List[str], pattern: Pattern[str] = CIFLOW_LABEL) -> bool:
     return len(list(filter(pattern.match, labels))) > 0
 
 
 class TryMergeExplainer:
     force: bool
-    labels: list[str]
+    labels: List[str]
     pr_num: int
     org: str
     project: str
@@ -32,7 +31,7 @@ class TryMergeExplainer:
     def __init__(
         self,
         force: bool,
-        labels: list[str],
+        labels: List[str],
         pr_num: int,
         org: str,
         project: str,
@@ -48,7 +47,7 @@ class TryMergeExplainer:
     def _get_flag_msg(
         self,
         ignore_current_checks: Optional[
-            list[tuple[str, Optional[str], Optional[int]]]
+            List[Tuple[str, Optional[str], Optional[int]]]
         ] = None,
     ) -> str:
         if self.force:
@@ -69,7 +68,7 @@ class TryMergeExplainer:
     def get_merge_message(
         self,
         ignore_current_checks: Optional[
-            list[tuple[str, Optional[str], Optional[int]]]
+            List[Tuple[str, Optional[str], Optional[int]]]
         ] = None,
     ) -> str:
         title = "### Merge started"
