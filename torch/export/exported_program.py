@@ -370,7 +370,10 @@ def _decompose_and_get_gm_with_new_signature_constants(
     if not _is_joint_ir_decomp(ep, joint_loss_index):
         mod = ep.module()
 
-        wrapped_params = dict(mod.named_parameters(remove_duplicate=False))
+        wrapped_params_buffers = {
+            **dict(mod.named_parameters(remove_duplicate=False)),
+            **dict(mod.named_buffers(remove_duplicate=False)),
+        }
 
         from torch._functorch._aot_autograd.subclass_parametrization import (
             unwrap_tensor_subclass_parameters,
@@ -385,7 +388,10 @@ def _decompose_and_get_gm_with_new_signature_constants(
         # This is fine because run_decompositions is supposed to specialize to post-autograd
         # graph where the subclass desugaring is supposed to happen.
         unwrap_tensor_subclass_parameters(mod)
-        unwrapped_params = dict(mod.named_parameters(remove_duplicate=False))
+        unwrapped_params_buffers = {
+            **dict(mod.named_parameters(remove_duplicate=False)),
+            **dict(mod.named_buffers(remove_duplicate=False)),
+        }
 
         # TODO T204030333
         fake_mode = _detect_fake_mode_from_gm(ep.graph_module)
@@ -514,13 +520,13 @@ def _decompose_and_get_gm_with_new_signature_constants(
         # the state dict of ep.module but ep.module only stores params
         # buffers that participate in forward. If we undo this behaviour,
         # it would break some downstream users.
-        for name, p in unwrapped_params.items():
-            if name not in wrapped_params:
+        for name, p in unwrapped_params_buffers.items():
+            if name not in wrapped_params_buffers:
                 ep.state_dict[name] = p
 
-        for name, p in wrapped_params.items():
+        for name, p in wrapped_params_buffers.items():
             assert name in ep.state_dict
-            if name not in unwrapped_params:
+            if name not in unwrapped_params_buffers:
                 ep.state_dict.pop(name)
 
         return gm, new_graph_signature, ep.state_dict
