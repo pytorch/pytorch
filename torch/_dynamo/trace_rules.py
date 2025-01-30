@@ -3146,7 +3146,6 @@ BUILTIN_SKIPLIST = (
     copy,
     inspect,
     random,
-    types,
     traceback,
     unittest,
 )
