@@ -575,6 +575,10 @@ class build_ext(setuptools.command.build_ext.build_ext):
         omplib_path = get_cmake_cache_vars()["OpenMP_libomp_LIBRARY"]
         omplib_name = get_cmake_cache_vars()["OpenMP_C_LIB_NAMES"] + ".dylib"
         omplib_rpath_path = os.path.join("@rpath", omplib_name)
+
+        # This logic is fragile and checks only two cases:
+        # - libtorch_cpu depends on `@rpath/libomp.dylib`e (happens when built inside miniconda environment)
+        # - libtorch_cpu depends on `/abs/path/to/libomp.dylib` (happens when built with libomp from homebrew)
         if not any(c in libs for c in [omplib_path, omplib_rpath_path]):
             return
 
@@ -605,10 +609,10 @@ class build_ext(setuptools.command.build_ext.build_ext):
                 omplib_rpath_path,
             ]
             if "@loader_path" not in rpaths:
-                    install_name_tool_args += [
-                        "-add_rpath",
-                        "@loader_path",
-                    ]
+                install_name_tool_args += [
+                    "-add_rpath",
+                    "@loader_path",
+                ]
             libomp_relocated = True
         if libomp_relocated:
             install_name_tool_args.insert(0, "install_name_tool")
