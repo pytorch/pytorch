@@ -546,11 +546,6 @@ class CompiledFxGraph(OutputCode):
 
             write_atomic(artifact_path, code, make_dirs=True)
 
-        from .graph import GraphLowering
-
-        # This is used by tests to check the output for specific details.
-        GraphLowering.save_output_code(code)
-
         try:
             with dynamo_timed(
                 "PyCodeCache.load_by_key_path",
