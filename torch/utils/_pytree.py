@@ -25,27 +25,16 @@ import threading
 import types
 import warnings
 from collections import defaultdict, deque, namedtuple, OrderedDict
+from collections.abc import Hashable, Iterable, Mapping, Sequence
 from enum import Enum
 from typing import (
     Any,
     Callable,
     cast,
-    DefaultDict,
-    Deque,
-    Dict,
-    FrozenSet,
     Generic,
-    Hashable,
-    Iterable,
-    List,
-    Mapping,
     Optional,
-    OrderedDict as GenericOrderedDict,
     overload,
     Protocol,
-    Sequence,
-    Tuple,
-    Type,
     TypeVar,
     Union,
 )
@@ -120,15 +109,15 @@ class EnumEncoder(json.JSONEncoder):
 
 Context = Any
 PyTree = Any
-FlattenFunc = Callable[[PyTree], Tuple[List[Any], Context]]
+FlattenFunc = Callable[[PyTree], tuple[list[Any], Context]]
 UnflattenFunc = Callable[[Iterable[Any], Context], PyTree]
 DumpableContext = Any  # Any json dumpable text
 ToDumpableContextFn = Callable[[Context], DumpableContext]
 FromDumpableContextFn = Callable[[DumpableContext], Context]
-ToStrFunc = Callable[["TreeSpec", List[str]], str]
-MaybeFromStrFunc = Callable[[str], Optional[Tuple[Any, Context, str]]]
-KeyPath = Tuple[KeyEntry, ...]
-FlattenWithKeysFunc = Callable[[PyTree], Tuple[List[Tuple[KeyEntry, Any]], Any]]
+ToStrFunc = Callable[["TreeSpec", list[str]], str]
+MaybeFromStrFunc = Callable[[str], Optional[tuple[Any, Context, str]]]
+KeyPath = tuple[KeyEntry, ...]
+FlattenWithKeysFunc = Callable[[PyTree], tuple[list[tuple[KeyEntry, Any]], Any]]
 
 
 # A NodeDef holds two callables:
@@ -141,14 +130,14 @@ FlattenWithKeysFunc = Callable[[PyTree], Tuple[List[Tuple[KeyEntry, Any]], Any]]
 # - flatten_with_keys_fn, which is a callable that takes a
 #   pytree and returns a list of (keypath, value) pairs and a context.
 class NodeDef(NamedTuple):
-    type: Type[Any]
+    type: type[Any]
     flatten_fn: FlattenFunc
     unflatten_fn: UnflattenFunc
     flatten_with_keys_fn: Optional[FlattenWithKeysFunc]
 
 
 _NODE_REGISTRY_LOCK = threading.Lock()
-SUPPORTED_NODES: Dict[Type[Any], NodeDef] = {}
+SUPPORTED_NODES: dict[type[Any], NodeDef] = {}
 
 
 # _SerializeNodeDef holds the following:
@@ -159,14 +148,14 @@ SUPPORTED_NODES: Dict[Type[Any], NodeDef] = {}
 # - from_dumpable_context takes in a string representation of the context, and the
 #   version, and returns the deserialized context
 class _SerializeNodeDef(NamedTuple):
-    typ: Type[Any]
+    typ: type[Any]
     serialized_type_name: str
     to_dumpable_context: Optional[ToDumpableContextFn]
     from_dumpable_context: Optional[FromDumpableContextFn]
 
 
-SUPPORTED_SERIALIZED_TYPES: Dict[Type[Any], _SerializeNodeDef] = {}
-SERIALIZED_TYPE_TO_PYTHON_TYPE: Dict[str, Type[Any]] = {}
+SUPPORTED_SERIALIZED_TYPES: dict[type[Any], _SerializeNodeDef] = {}
+SERIALIZED_TYPE_TO_PYTHON_TYPE: dict[str, type[Any]] = {}
 
 # NB: we try really hard to not import _cxx_pytree (which depends on optree)
 # as much as possible. This is for isolation: a user who is not using C++ pytree
@@ -191,11 +180,11 @@ else:
     del Version
 
 _cxx_pytree_imported = False
-_cxx_pytree_pending_imports: List[Any] = []
+_cxx_pytree_pending_imports: list[Any] = []
 
 
 def register_pytree_node(
-    cls: Type[Any],
+    cls: type[Any],
     flatten_fn: FlattenFunc,
     unflatten_fn: UnflattenFunc,
     *,
@@ -267,7 +256,7 @@ def register_pytree_node(
 
 
 def _register_namedtuple(
-    cls: Type[Any],
+    cls: type[Any],
     *,
     serialized_type_name: str,
 ) -> None:
@@ -300,7 +289,7 @@ def _register_namedtuple(
     category=FutureWarning,
 )
 def _register_pytree_node(
-    cls: Type[Any],
+    cls: type[Any],
     flatten_fn: FlattenFunc,
     unflatten_fn: UnflattenFunc,
     to_str_fn: Optional[ToStrFunc] = None,  # deprecated
@@ -355,7 +344,7 @@ def _register_pytree_node(
 
 
 def _deregister_pytree_node(
-    cls: Type[Any],
+    cls: type[Any],
 ) -> None:
     """This is an internal function that is used to deregister a pytree node type
     for the Python pytree only. This should be only used inside PyTorch.
@@ -368,7 +357,7 @@ def _deregister_pytree_node(
 
 
 def _private_register_pytree_node(
-    cls: Type[Any],
+    cls: type[Any],
     flatten_fn: FlattenFunc,
     unflatten_fn: UnflattenFunc,
     *,
@@ -447,56 +436,56 @@ class GetAttrKey:
         return getattr(obj, self.name)
 
 
-def _tuple_flatten(d: Tuple[T, ...]) -> Tuple[List[T], Context]:
+def _tuple_flatten(d: tuple[T, ...]) -> tuple[list[T], Context]:
     return list(d), None
 
 
 def _tuple_flatten_with_keys(
-    d: Tuple[T, ...]
-) -> Tuple[List[Tuple[KeyEntry, T]], Context]:
+    d: tuple[T, ...]
+) -> tuple[list[tuple[KeyEntry, T]], Context]:
     values, context = _tuple_flatten(d)
     return [(SequenceKey(i), v) for i, v in enumerate(values)], context
 
 
-def _tuple_unflatten(values: Iterable[T], context: Context) -> Tuple[T, ...]:
+def _tuple_unflatten(values: Iterable[T], context: Context) -> tuple[T, ...]:
     return tuple(values)
 
 
-def _list_flatten(d: List[T]) -> Tuple[List[T], Context]:
+def _list_flatten(d: list[T]) -> tuple[list[T], Context]:
     return d, None
 
 
-def _list_flatten_with_keys(d: List[T]) -> Tuple[List[Tuple[KeyEntry, T]], Context]:
+def _list_flatten_with_keys(d: list[T]) -> tuple[list[tuple[KeyEntry, T]], Context]:
     values, context = _list_flatten(d)
     return [(SequenceKey(i), v) for i, v in enumerate(values)], context
 
 
-def _list_unflatten(values: Iterable[T], context: Context) -> List[T]:
+def _list_unflatten(values: Iterable[T], context: Context) -> list[T]:
     return list(values)
 
 
-def _dict_flatten(d: Dict[Any, T]) -> Tuple[List[T], Context]:
+def _dict_flatten(d: dict[Any, T]) -> tuple[list[T], Context]:
     return list(d.values()), list(d.keys())
 
 
 def _dict_flatten_with_keys(
-    d: Dict[Any, T]
-) -> Tuple[List[Tuple[KeyEntry, T]], Context]:
+    d: dict[Any, T]
+) -> tuple[list[tuple[KeyEntry, T]], Context]:
     values, context = _dict_flatten(d)
     return [(MappingKey(k), v) for k, v in zip(context, values)], context
 
 
-def _dict_unflatten(values: Iterable[T], context: Context) -> Dict[Any, T]:
+def _dict_unflatten(values: Iterable[T], context: Context) -> dict[Any, T]:
     return dict(zip(context, values))
 
 
-def _namedtuple_flatten(d: NamedTuple) -> Tuple[List[Any], Context]:
+def _namedtuple_flatten(d: NamedTuple) -> tuple[list[Any], Context]:
     return list(d), type(d)
 
 
 def _namedtuple_flatten_with_keys(
     d: NamedTuple,
-) -> Tuple[List[Tuple[KeyEntry, Any]], Context]:
+) -> tuple[list[tuple[KeyEntry, Any]], Context]:
     values, context = _namedtuple_flatten(d)
     return (
         [(GetAttrKey(field), v) for field, v in zip(context._fields, values)],
@@ -539,13 +528,13 @@ def _namedtuple_deserialize(dumpable_context: DumpableContext) -> Context:
     return typ
 
 
-def _ordereddict_flatten(d: GenericOrderedDict[Any, T]) -> Tuple[List[T], Context]:
+def _ordereddict_flatten(d: OrderedDict[Any, T]) -> tuple[list[T], Context]:
     return list(d.values()), list(d.keys())
 
 
 def _ordereddict_flatten_with_keys(
-    d: GenericOrderedDict[Any, T]
-) -> Tuple[List[Tuple[KeyEntry, T]], Context]:
+    d: OrderedDict[Any, T]
+) -> tuple[list[tuple[KeyEntry, T]], Context]:
     values, context = _ordereddict_flatten(d)
     return [(MappingKey(k), v) for k, v in zip(context, values)], context
 
@@ -553,7 +542,7 @@ def _ordereddict_flatten_with_keys(
 def _ordereddict_unflatten(
     values: Iterable[T],
     context: Context,
-) -> GenericOrderedDict[Any, T]:
+) -> OrderedDict[Any, T]:
     return OrderedDict((key, value) for key, value in zip(context, values))
 
 
@@ -561,14 +550,14 @@ _odict_flatten = _ordereddict_flatten
 _odict_unflatten = _ordereddict_unflatten
 
 
-def _defaultdict_flatten(d: DefaultDict[Any, T]) -> Tuple[List[T], Context]:
+def _defaultdict_flatten(d: defaultdict[Any, T]) -> tuple[list[T], Context]:
     values, dict_context = _dict_flatten(d)
     return values, [d.default_factory, dict_context]
 
 
 def _defaultdict_flatten_with_keys(
-    d: DefaultDict[Any, T]
-) -> Tuple[List[Tuple[KeyEntry, T]], Context]:
+    d: defaultdict[Any, T]
+) -> tuple[list[tuple[KeyEntry, T]], Context]:
     values, context = _defaultdict_flatten(d)
     _, dict_context = context
     return [(MappingKey(k), v) for k, v in zip(dict_context, values)], context
@@ -577,7 +566,7 @@ def _defaultdict_flatten_with_keys(
 def _defaultdict_unflatten(
     values: Iterable[T],
     context: Context,
-) -> DefaultDict[Any, T]:
+) -> defaultdict[Any, T]:
     default_factory, dict_context = context
     return defaultdict(default_factory, _dict_unflatten(values, dict_context))
 
@@ -611,18 +600,18 @@ def _defaultdict_deserialize(dumpable_context: DumpableContext) -> Context:
     return [default_factory, dict_context]
 
 
-def _deque_flatten(d: Deque[T]) -> Tuple[List[T], Context]:
+def _deque_flatten(d: deque[T]) -> tuple[list[T], Context]:
     return list(d), d.maxlen
 
 
 def _deque_flatten_with_keys(
-    d: Deque[T],
-) -> Tuple[List[Tuple[KeyEntry, T]], Context]:
+    d: deque[T],
+) -> tuple[list[tuple[KeyEntry, T]], Context]:
     values, context = _deque_flatten(d)
     return [(SequenceKey(i), v) for i, v in enumerate(values)], context
 
 
-def _deque_unflatten(values: Iterable[T], context: Context) -> Deque[T]:
+def _deque_unflatten(values: Iterable[T], context: Context) -> deque[T]:
     return deque(values, maxlen=context)
 
 
@@ -681,10 +670,10 @@ _private_register_pytree_node(
 )
 
 
-STANDARD_DICT_TYPES: FrozenSet[type] = frozenset(
+STANDARD_DICT_TYPES: frozenset[type] = frozenset(
     {dict, OrderedDict, defaultdict},
 )
-BUILTIN_TYPES: FrozenSet[type] = frozenset(
+BUILTIN_TYPES: frozenset[type] = frozenset(
     {tuple, list, dict, namedtuple, OrderedDict, defaultdict, deque},  # type: ignore[arg-type]
 )
 
@@ -723,7 +712,7 @@ def _is_leaf(tree: PyTree, is_leaf: Optional[Callable[[PyTree], bool]] = None) -
 class TreeSpec:
     type: Any
     context: Context
-    children_specs: List["TreeSpec"]
+    children_specs: list["TreeSpec"]
 
     num_nodes: int = dataclasses.field(init=False)
     num_leaves: int = dataclasses.field(init=False)
@@ -756,8 +745,8 @@ class TreeSpec:
     def is_leaf(self) -> bool:
         return self.num_nodes == 1 and self.num_leaves == 1
 
-    def flatten_up_to(self, tree: PyTree) -> List[PyTree]:
-        def helper(treespec: TreeSpec, tree: PyTree, subtrees: List[PyTree]) -> None:
+    def flatten_up_to(self, tree: PyTree) -> list[PyTree]:
+        def helper(treespec: TreeSpec, tree: PyTree, subtrees: list[PyTree]) -> None:
             if treespec.is_leaf():
                 subtrees.append(tree)
                 return
@@ -835,7 +824,7 @@ class TreeSpec:
             for subtree, subspec in zip(children, treespec.children_specs):
                 helper(subspec, subtree, subtrees)
 
-        subtrees: List[PyTree] = []
+        subtrees: list[PyTree] = []
         helper(self, tree, subtrees)
         return subtrees
 
@@ -886,12 +875,12 @@ _LEAF_SPEC = LeafSpec()
 def tree_flatten(
     tree: PyTree,
     is_leaf: Optional[Callable[[PyTree], bool]] = None,
-) -> Tuple[List[Any], TreeSpec]:
+) -> tuple[list[Any], TreeSpec]:
     """Flattens a pytree into a list of values and a TreeSpec that can be used
     to reconstruct the pytree.
     """
 
-    def helper(node: PyTree, leaves: List[Any]) -> TreeSpec:
+    def helper(node: PyTree, leaves: list[Any]) -> TreeSpec:
         if _is_leaf(node, is_leaf=is_leaf):
             leaves.append(node)
             return _LEAF_SPEC
@@ -904,7 +893,7 @@ def tree_flatten(
         subspecs = [helper(child, leaves) for child in children]
         return TreeSpec(node_type, context, subspecs)
 
-    leaves: List[Any] = []
+    leaves: list[Any] = []
     treespec = helper(tree, leaves)
     return leaves, treespec
 
@@ -941,7 +930,7 @@ def tree_iter(
 def tree_leaves(
     tree: PyTree,
     is_leaf: Optional[Callable[[PyTree], bool]] = None,
-) -> List[Any]:
+) -> list[Any]:
     """Get a list of leaves of a pytree."""
     return list(tree_iter(tree, is_leaf=is_leaf))
 
@@ -1032,12 +1021,12 @@ def tree_map_(
     return tree
 
 
-Type2 = Tuple[Type[T], Type[S]]
-Type3 = Tuple[Type[T], Type[S], Type[U]]
+Type2 = tuple[type[T], type[S]]
+Type3 = tuple[type[T], type[S], type[U]]
 if sys.version_info >= (3, 10):
-    TypeAny = Union[Type[Any], Tuple[Type[Any], ...], types.UnionType]
+    TypeAny = Union[type[Any], tuple[type[Any], ...], types.UnionType]
 else:
-    TypeAny = Union[Type[Any], Tuple[Type[Any], ...]]
+    TypeAny = Union[type[Any], tuple[type[Any], ...]]
 
 Fn2 = Callable[[Union[T, S]], R]
 Fn3 = Callable[[Union[T, S, U]], R]
@@ -1060,7 +1049,7 @@ def map_only(type_or_types_or_pred: Type3[T, S, U], /) -> MapOnlyFn[Fn3[T, S, U,
 
 
 @overload
-def map_only(type_or_types_or_pred: Type[T], /) -> MapOnlyFn[Fn[T, Any]]:
+def map_only(type_or_types_or_pred: type[T], /) -> MapOnlyFn[Fn[T, Any]]:
     ...
 
 
@@ -1123,7 +1112,7 @@ def map_only(
 
 @overload
 def tree_map_only(
-    type_or_types_or_pred: Type[T],
+    type_or_types_or_pred: type[T],
     /,
     func: Fn[T, Any],
     tree: PyTree,
@@ -1177,7 +1166,7 @@ def tree_map_only(
 
 @overload
 def tree_map_only_(
-    type_or_types_or_pred: Type[T],
+    type_or_types_or_pred: type[T],
     /,
     func: Fn[T, Any],
     tree: PyTree,
@@ -1249,7 +1238,7 @@ def tree_any(
 
 @overload
 def tree_all_only(
-    type_or_types: Type[T],
+    type_or_types: type[T],
     /,
     pred: Fn[T, bool],
     tree: PyTree,
@@ -1293,7 +1282,7 @@ def tree_all_only(
 
 @overload
 def tree_any_only(
-    type_or_types: Type[T],
+    type_or_types: type[T],
     /,
     pred: Fn[T, bool],
     tree: PyTree,
@@ -1347,7 +1336,7 @@ def _broadcast_to_and_flatten(
     tree: PyTree,
     treespec: TreeSpec,
     is_leaf: Optional[Callable[[PyTree], bool]] = None,
-) -> Optional[List[Any]]:
+) -> Optional[list[Any]]:
     assert isinstance(treespec, TreeSpec)
 
     if _is_leaf(tree, is_leaf=is_leaf):
@@ -1366,7 +1355,7 @@ def _broadcast_to_and_flatten(
         return None
 
     # Recursively flatten the children
-    result: List[Any] = []
+    result: list[Any] = []
     for child, child_spec in zip(child_pytrees, treespec.children_specs):
         flat = _broadcast_to_and_flatten(child, child_spec, is_leaf=is_leaf)
         if flat is not None:
@@ -1389,7 +1378,7 @@ class _TreeSpecSchema:
 
     type: Optional[str]
     context: DumpableContext
-    children_spec: List["_TreeSpecSchema"]
+    children_spec: list["_TreeSpecSchema"]
 
 
 class _ProtocolFn(NamedTuple):
@@ -1397,7 +1386,7 @@ class _ProtocolFn(NamedTuple):
     json_to_treespec: Callable[[DumpableContext], TreeSpec]
 
 
-_SUPPORTED_PROTOCOLS: Dict[int, _ProtocolFn] = {}
+_SUPPORTED_PROTOCOLS: dict[int, _ProtocolFn] = {}
 
 
 def _treespec_to_json(treespec: TreeSpec) -> _TreeSpecSchema:
@@ -1538,12 +1527,12 @@ def str_to_pytree(json: str) -> TreeSpec:
     return treespec_loads(json)
 
 
-def arg_tree_leaves(*args: PyTree, **kwargs: PyTree) -> List[Any]:
+def arg_tree_leaves(*args: PyTree, **kwargs: PyTree) -> list[Any]:
     """Get a flat list of arguments to this function
 
     A slightly faster version of tree_leaves((args, kwargs))
     """
-    leaves: List[Any] = []
+    leaves: list[Any] = []
     for a in args:
         leaves.extend(tree_iter(a))
     for a in kwargs.values():
@@ -1554,7 +1543,7 @@ def arg_tree_leaves(*args: PyTree, **kwargs: PyTree) -> List[Any]:
 def tree_flatten_with_path(
     tree: PyTree,
     is_leaf: Optional[Callable[[PyTree], bool]] = None,
-) -> Tuple[List[Tuple[KeyPath, Any]], TreeSpec]:
+) -> tuple[list[tuple[KeyPath, Any]], TreeSpec]:
     """Flattens a pytree like :func:`tree_flatten`, but also returns each leaf's key path.
 
     Args:
@@ -1578,7 +1567,7 @@ def tree_flatten_with_path(
 def tree_leaves_with_path(
     tree: PyTree,
     is_leaf: Optional[Callable[[PyTree], bool]] = None,
-) -> List[Tuple[KeyPath, Any]]:
+) -> list[tuple[KeyPath, Any]]:
     """Gets the leaves of a pytree like ``tree_leaves`` and returns each leaf's key path.
 
     Args:
@@ -1600,7 +1589,7 @@ def _generate_key_paths(
     key_path: KeyPath,
     tree: PyTree,
     is_leaf: Optional[Callable[[PyTree], bool]] = None,
-) -> Iterable[Tuple[KeyPath, Any]]:
+) -> Iterable[tuple[KeyPath, Any]]:
     if is_leaf and is_leaf(tree):
         yield key_path, tree
         return
