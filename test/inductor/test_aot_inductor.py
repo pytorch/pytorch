@@ -18,7 +18,6 @@ from torch._dynamo.device_interface import get_interface_for_device
 from torch._dynamo.testing import rand_strided, same
 from torch._dynamo.utils import counters
 from torch._inductor import config
-from torch._inductor.exc import CppWrapperCodegenError
 from torch._inductor.runtime.runtime_utils import cache_dir
 from torch._inductor.test_case import TestCase
 from torch._inductor.utils import is_big_gpu, run_and_get_cpp_code
@@ -1930,30 +1929,6 @@ class AOTInductorTestsTemplate:
             "pytree processing of the outputs.",
         ):
             torch._inductor.aot_compile(gm, example_inputs)
-
-    @unittest.mock.patch("torch._inductor.graph.supported_dtype_of_cpp_wrapper")
-    def test_unsupported_input_dtype(self, supported_dtype_of_cpp_wrapper_mock):
-        supported_dtype_of_cpp_wrapper_mock.return_value = False
-
-        class Model(torch.nn.Module):
-            def __init__(self) -> None:
-                super().__init__()
-
-            def forward(self, x, y):
-                return x + y
-
-        example_inputs = (
-            torch.randn(10, 10).to(self.device),
-            torch.randn(10, 10).to(self.device),
-        )
-        with self.assertRaisesRegex(
-            CppWrapperCodegenError, "Unsupported input dtype torch.float32"
-        ):
-            torch._export.aot_compile(Model(), example_inputs)
-
-        supported_dtype_of_cpp_wrapper_mock.assert_called_once_with(
-            torch.float32, self.device
-        )
 
     def test_consecutive_compiles(self):
         """Test that compilation behaves correctly with cache hits"""

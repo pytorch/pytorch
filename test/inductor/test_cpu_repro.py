@@ -267,15 +267,16 @@ class CPUReproTests(TestCase):
 
         with torch.no_grad():
             compiled_m = torch.compile(m)
-            if config.cpp_wrapper:
-                with self.assertRaises(RuntimeError):
-                    compiled_m(input)
-            else:
-                with self.assertRaisesRegex(
-                    RuntimeError,
-                    "output padding must be smaller than either stride or dilation",
-                ):
-                    compiled_m(input)
+            # The cpp_wrapper C-shim can't utilize the Python error API, so error
+            # messages are printed to stderr directly, and the intercepted RuntimeError
+            # is significantly less verbose.
+            msg = (
+                r"aoti_torch_cpu_convolution\(.*\) API call failed"
+                if config.cpp_wrapper
+                else "output padding must be smaller than either stride or dilation"
+            )
+            with self.assertRaisesRegex(RuntimeError, msg):
+                compiled_m(input)
 
     @unittest.skipIf(not torch.backends.mkldnn.is_available(), "MKLDNN is not enabled")
     @patch("torch.cuda.is_available", lambda: False)
