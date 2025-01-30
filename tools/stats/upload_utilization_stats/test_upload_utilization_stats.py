@@ -191,6 +191,5 @@ def get_base_test_records() -> list[UtilizationRecord]:
     )
     return [record1, record2, record3, record4, record5, record6]
 
-
 if __name__ == "__main__":
     unittest.main()
