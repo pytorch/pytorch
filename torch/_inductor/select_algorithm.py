@@ -228,8 +228,22 @@ class ModificationWrapper(V.WrapperHandler):  # type: ignore[name-defined]
         if name not in self.fixed_inputs:
             index_str = self._process_indexing(index)
             var = self._add_kernel_input(name)
-            return f"tl.load({var} + {index_str})"
-        return f"({self.fixed_inputs[name]})"
+            var_dtype = V.graph.get_buffer(name).dtype
+            line = f"tl.load({var} + {index_str})"
+
+            if (
+                var_dtype in (torch.float16, torch.bfloat16)
+                and config.triton.codegen_upcast_to_fp32
+            ):
+                line += ".to(tl.float32)"
+                var_dtype = torch.float32
+
+            out = self.kernel.cse.generate(self.kernel.compute, line, dtype=var_dtype)
+            return out
+
+        return self.kernel.cse.generate(
+            self.kernel.compute, f"({self.fixed_inputs[name]})", dtype=torch.float32
+        )
 
     def indirect_indexing(self, index_var: str, size, check, wrap_neg=True):
         """Convert index variable to symbolic form."""
@@ -445,7 +459,7 @@ class TritonTemplateKernel(TritonKernel):
         def hook():
             # python_argdefs() cannot be run until after the rest of the template lazily adds more args
             arg_defs, *_ = self.args.python_argdefs()
-            return f"{', '.join(arg_defs)}"
+            return f"{', '.join(x.full_name() for x in arg_defs)}"
 
         self.render_hooks["<ARGDEFS>"] = hook
         return "<ARGDEFS>"
@@ -515,7 +529,9 @@ class TritonTemplateKernel(TritonKernel):
             code = IndentedBuffer()
             code.splice(gen_common_triton_imports())
             code.splice(self.jit_lines())
-            code.writeline(f"def {self.kernel_name}({', '.join(arg_defs)}):")
+            code.writeline(
+                f"def {self.kernel_name}({', '.join(x.full_name() for x in arg_defs)}):"
+            )
             with code.indent():
                 code.splice(self.defines)
                 code.splice(renames.getvalue())
@@ -1063,6 +1079,14 @@ class TritonTemplate(KernelTemplate):
         """
         assert self.template, "requires jinja2"
         defines = StringIO()
+
+        # HACK: Triton currently breaks if TF32 floats are requested, but the CUDA
+        # capability doesn't support them.  This is a bug in Triton, but for now we'll
+        # patch around it here.  See https://github.com/triton-lang/triton/issues/3011
+        # for one example issue with this problem.
+        if not torch.cuda.is_tf32_supported():
+            kwargs["ALLOW_TF32"] = "False"
+
         for name, val in kwargs.items():
             defines.write(f"{name} : tl.constexpr = {val}\n")
         defines = defines.getvalue()
@@ -2168,7 +2192,7 @@ class AlgorithmSelectorCache(PersistentCache):
         # sizes/strides
         return AlgorithmSelectorCache.generate_example_value(
             V.graph.sizevars.size_hints(
-                V.graph.get_allocation_size(node),
+                node.get_size(),
                 fallback=config.unbacked_symint_fallback,
             ),
             V.graph.sizevars.size_hints(
@@ -2178,29 +2202,35 @@ class AlgorithmSelectorCache(PersistentCache):
             node.get_device(),
             node.get_dtype(),
             node.layout.offset,
-        ).as_strided(
             V.graph.sizevars.size_hints(
-                node.get_size(),
-                fallback=config.unbacked_symint_fallback,
-            ),
-            V.graph.sizevars.size_hints(
-                node.get_stride(),
+                V.graph.get_allocation_size(node),
                 fallback=config.unbacked_symint_fallback,
             ),
         )
 
     @staticmethod
-    def generate_example_value(size, stride, device, dtype, extra_size):
+    def generate_example_value(
+        size, stride, device, dtype, extra_size, allocation_size=None
+    ):
         # preserve rng states to avoid the rand_strided call below changes
         # the rng states for the real model code.
         with preserve_rng_state():
-            return rand_strided(
-                size,
-                stride,
-                device=device,
-                dtype=dtype,
-                extra_size=extra_size,
-            )
+            if allocation_size is None or allocation_size == size:
+                return rand_strided(
+                    size,
+                    stride,
+                    device=device,
+                    dtype=dtype,
+                    extra_size=extra_size,
+                )
+            else:
+                return rand_strided(
+                    allocation_size,
+                    stride,
+                    device=device,
+                    dtype=dtype,
+                    extra_size=extra_size,
+                ).as_strided(size, stride)
 
     @staticmethod
     def key_of(node):

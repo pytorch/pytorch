@@ -30,6 +30,36 @@ T erf(T x) {
   return sign * y;
 }
 
+template <typename T>
+float erfinv(T y) {
+  /* coefficients in rational expansion */
+  constexpr float a[4] = {0.886226899, -1.645349621, 0.914624893, -0.140543331};
+  constexpr float b[4] = {-2.118377725, 1.442710462, -0.329097515, 0.012229801};
+  constexpr float c[4] = {-1.970840454, -1.624906493, 3.429567803, 1.641345311};
+  constexpr float d[2] = {3.543889200, 1.637067800};
+
+  float x, z, num, dem; /*working variables */
+
+  float y_abs = ::metal::abs(static_cast<float>(y));
+  if (y_abs >= 1.0f) {
+    return y_abs > 1.0f ? NAN
+                        : ::metal::copysign(INFINITY, static_cast<float>(y));
+  }
+  if (y_abs <= 0.7f) {
+    z = y * y;
+    num = ((a[3] * z + a[2]) * z + a[1]) * z + a[0];
+    dem = (((b[3] * z + b[2]) * z + b[1]) * z + b[0]) * z + 1.0f;
+    x = y * num / dem;
+  } else {
+    z = ::metal::sqrt(-1.0f * ::metal::log((1.0 - y_abs) / 2.0));
+    num = ((c[3] * z + c[2]) * z + c[1]) * z + c[0];
+    dem = (d[1] * z + d[0]) * z + 1.0f;
+    x = ::metal::copysign(num, static_cast<float>(y)) / dem;
+  }
+
+  return x;
+}
+
 /*
  * For licensing information and documentation, please refer to the cpu
  * implementation located in "ATen/native/Math.h".
@@ -275,8 +305,10 @@ float log_gamma(const T x) {
   }
 
   // Reflection formula
-  return LOG_PI - rc -
-      ::metal::log(::metal::abs(abs_x * ::metal::sinpi(abs_x)));
+  // Compute arg first to workaround Metal compiler bgg of sorts on M4
+  // See https://github.com/pytorch/pytorch/pull/145740 for more details
+  auto log_arg = abs_x * ::metal::abs(::metal::sinpi(abs_x));
+  return LOG_PI - rc - ::metal::log(log_arg);
 }
 
 } // namespace metal

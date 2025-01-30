@@ -1,35 +1,20 @@
 # mypy: allow-untyped-defs
-import _collections_abc
-import _weakrefset
-import abc
 import builtins
 import collections
 import copy
-import copyreg
 import dataclasses
-import enum
 import functools
 import importlib
 import inspect
-import linecache
-import logging
-import multiprocessing
 import operator
 import os
-import posixpath
 import random
 import re
-import selectors
-import signal
 import sys
-import tempfile
-import threading
-import tokenize
 import traceback
 import types
 import typing
 import unittest
-import weakref
 from collections import defaultdict
 from pathlib import Path
 from typing import Any, Callable, cast, Optional, Union
@@ -183,6 +168,9 @@ manual_torch_name_rule_map = {
     "torch.nested._internal.nested_tensor.nested_from_padded": TorchInGraphFunctionVariable,
     "torch.nested.nested_tensor_from_jagged": UserFunctionVariable,
     "torch.nested.nested_tensor_from_padded": UserFunctionVariable,
+    # torch.fx map utils
+    "torch.fx.node.map_aggregate": UserFunctionVariable,
+    "torch.fx.node.map_arg": UserFunctionVariable,
     # symbol operators implemented in Python
     "torch.sym_not": TorchInGraphFunctionVariable,
     "torch.sym_float": TorchInGraphFunctionVariable,
@@ -1382,6 +1370,8 @@ torch_c_binding_in_graph_functions = dict.fromkeys(
         "torch._dim_arange",
         "torch._dirichlet_grad",
         "torch._disable_functionalization",
+        "torch._dyn_quant_matmul_4bit",
+        "torch._dyn_quant_pack_4bit_weight",
         "torch._efficientzerotensor",
         "torch._embedding_bag_forward_only",
         "torch._embedding_bag",
@@ -3152,33 +3142,12 @@ def is_numpy_type_info(obj) -> bool:
 
 
 BUILTIN_SKIPLIST = (
-    abc,
     collections,
     copy,
-    copyreg,
-    enum,
-    functools,
-    importlib,
     inspect,
-    linecache,
-    logging,
-    multiprocessing,
-    operator,
-    posixpath,
     random,
-    re,
-    selectors,
-    signal,
-    tempfile,
-    threading,
-    tokenize,
     traceback,
-    types,
-    typing,
     unittest,
-    weakref,
-    _collections_abc,
-    _weakrefset,
 )
 
 # third party libraries skiplist is defined by str, because users may not use these libraries.
@@ -3778,6 +3747,10 @@ def lookup_inner(
             if reasons is not None:
                 reasons.add("get_torch_obj_rule_map")
             return rule
+    elif name == "<listcomp>":
+        if reasons is not None:
+            reasons.add("inlining frame from list comprehension")
+        return UserFunctionVariable
 
     # Step 2: lookup obj's tracing rule by function name.
     if is_direct_call:

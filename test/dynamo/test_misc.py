@@ -2643,6 +2643,18 @@ utils_device.CURRENT_DEVICE == None""".split(
         self.assertEqual(r.dtype, torch.int64)
         self.assertEqual(cnts.frame_count, 1)
 
+    @torch._dynamo.config.patch(capture_dynamic_output_shape_ops=True)
+    def test_unique_consecutive(self):
+        x = torch.tensor([1, 1, 2, 2, 1, 3])
+
+        def fn(x):
+            return torch.unique_consecutive(x)
+
+        expected = fn(x)
+        opt_fn = torch.compile(fn, fullgraph=True, backend="eager")
+        result = opt_fn(x)
+        self.assertEqual(result, expected)
+
     def test_numpy_unique_f16(self):
         def fn():
             x = np.asarray([1, 1, 2, 2, 3], dtype=np.float16)
@@ -3973,6 +3985,21 @@ utils_device.CURRENT_DEVICE == None""".split(
         self.assertEqual(0, get_x())
         x += 1
         self.assertEqual(1, get_x())
+
+    def test_input_cell_mutation(self):
+        def fn(x):
+            x = x.cos()
+
+            def inner():
+                return x.sin()
+
+            return inner()
+
+        x = torch.ones(10)
+        opt_fn = torch.compile(fn, fullgraph=True, backend="eager")
+        ref = fn(x)
+        res = opt_fn(x)
+        self.assertEqual(res, ref)
 
     def test_top_package_import(self):
         def fn(x):
@@ -6974,6 +7001,25 @@ utils_device.CURRENT_DEVICE == None""".split(
         inputs = [torch.randn(10, 10) for _ in range(4)]
         self.assertTrue(same(fn(iter(tuple(inputs))), opt_fn(iter(tuple(inputs)))))
 
+    @torch._dynamo.config.patch(capture_dynamic_output_shape_ops=True)
+    def test_argwhere_with_dynamic_shapes(self):
+        def fn(
+            tensor: torch.Tensor,
+            mapping: torch.Tensor,
+        ) -> torch.Tensor:
+            xx, yy = torch.meshgrid(mapping, tensor, indexing="ij")
+            indices = torch.argwhere(xx == yy)
+
+            mapped_values = torch.zeros_like(tensor)
+            mapped_values[indices[:, 1]] = indices[:, 0]
+
+            return mapped_values
+
+        tensor = torch.tensor([1, 2, 3, 5, 6, 7])
+        mapping = torch.tensor([0, 3, 4, 5, 7])
+        opt = torch.compile(fn, fullgraph=True)
+        self.assertEqual(fn(tensor, mapping), opt(tensor, mapping))
+
     def test_torch_package_working_with_trace(self):
         # from torch._dynamo.test_case import run_tests
 
@@ -7613,6 +7659,26 @@ utils_device.CURRENT_DEVICE == None""".split(
         torch._dynamo.mark_dynamic(y, 0)
         opt = torch.compile(fn, fullgraph=True)
         opt(*inputs)
+
+    @torch._dynamo.config.patch(capture_scalar_outputs=True)
+    @torch._dynamo.config.patch(assume_static_by_default=True)
+    def test_symint_copy_into_unbacked_slice(self):
+        @torch.compile()
+        def fn(a, x):
+            u0 = torch.tensor(x[0].to(torch.int64).item()).item()
+            B, H, T, D = a.shape
+            a_padding = torch.zeros((B, H, u0, D), dtype=torch.float64)
+            b = torch.cat([a, a_padding], dim=2)
+            c = torch.randn(B, H, 152, D)
+            b[:, :, :152, :] = c
+            return b
+
+        x = torch.tensor([0])
+        torch._dynamo.decorators.mark_unbacked(x, 0)
+        a = torch.zeros((1, 16, 152, 96))
+
+        # Previously would crash with guard on data dependent error
+        fn(a, x)
 
     @torch._dynamo.config.patch(capture_scalar_outputs=True)
     def test_symint_fold_nontrivial_product_modulo(self):

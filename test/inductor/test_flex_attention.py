@@ -861,7 +861,8 @@ class TestFlexAttention(InductorTestCase):
         torch._dynamo.reset()
 
         # First compilation with original dimensions
-        compiled_sdpa1 = torch.compile(sdpa_partial1, dynamic=True)
+        backend = torch._dynamo.testing.CompileCounterWithBackend("inductor")
+        compiled_sdpa1 = torch.compile(sdpa_partial1, backend=backend, dynamic=True)
         compiled_out1 = compiled_sdpa1(q1, k1, v1)
         compiled_out1.backward(backward_grad1)
 
@@ -879,10 +880,10 @@ class TestFlexAttention(InductorTestCase):
             v1_ref,
             v1,
         )
-        self.assertEqual(torch._dynamo.utils.counters["frames"]["ok"], 1)
+        self.assertEqual(backend.frame_count, 1)
 
         # Second compilation with new dimensions
-        compiled_sdpa2 = torch.compile(sdpa_partial2, dynamic=True)
+        compiled_sdpa2 = torch.compile(sdpa_partial2, backend=backend, dynamic=True)
         compiled_out2 = compiled_sdpa2(q2, k2, v2)
         compiled_out2.backward(backward_grad2)
 
@@ -900,10 +901,10 @@ class TestFlexAttention(InductorTestCase):
             v2_ref,
             v2,
         )
-        self.assertEqual(torch._dynamo.utils.counters["frames"]["ok"], 1)
+        self.assertEqual(backend.frame_count, 1)
 
         # Third compilation with new dimensions
-        compiled_sdpa3 = torch.compile(sdpa_partial3, dynamic=True)
+        compiled_sdpa3 = torch.compile(sdpa_partial3, backend=backend, dynamic=True)
         compiled_out3 = compiled_sdpa3(q3, k3, v3)
         compiled_out3.backward(backward_grad3)
 
@@ -921,7 +922,7 @@ class TestFlexAttention(InductorTestCase):
             v3_ref,
             v3,
         )
-        self.assertEqual(torch._dynamo.utils.counters["frames"]["ok"], 1)
+        self.assertEqual(backend.frame_count, 1)
 
     def run_automatic_dynamic_test(
         self,
@@ -1033,19 +1034,20 @@ class TestFlexAttention(InductorTestCase):
             fudge_factor = 1.1
 
         # The first batch.
-        compiled_out1 = torch.compile(sdpa_partial1)(q1, k1, v1)
+        backend = torch._dynamo.testing.CompileCounterWithBackend("inductor")
+        compiled_out1 = torch.compile(sdpa_partial1, backend=backend)(q1, k1, v1)
         self._check_equal(golden_out1, ref_out1, compiled_out1, fudge_factor)
-        self.assertEqual(torch._dynamo.utils.counters["frames"]["ok"], 1)
+        self.assertEqual(backend.frame_count, 1)
 
         # The second batch (automatic dynamic).
-        compiled_out2 = torch.compile(sdpa_partial2)(q2, k2, v2)
+        compiled_out2 = torch.compile(sdpa_partial2, backend=backend)(q2, k2, v2)
         self._check_equal(golden_out2, ref_out2, compiled_out2, fudge_factor)
-        self.assertEqual(torch._dynamo.utils.counters["frames"]["ok"], 2)
+        self.assertEqual(backend.frame_count, 2)
 
         # The third batch (no re-compilation).
-        compiled_out3 = torch.compile(sdpa_partial3)(q3, k3, v3)
+        compiled_out3 = torch.compile(sdpa_partial3, backend=backend)(q3, k3, v3)
         self._check_equal(golden_out3, ref_out3, compiled_out3, fudge_factor)
-        self.assertEqual(torch._dynamo.utils.counters["frames"]["ok"], 2)
+        self.assertEqual(backend.frame_count, 2)
 
     @common_utils.parametrize("dtype", test_dtypes)
     @common_utils.parametrize("score_mod", test_score_mods)
@@ -2131,6 +2133,12 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         torch.compile(flex_attention)(q, k, v, score_mod, block_mask=block_mask)
 
     @supported_platform
+    @common_utils.parametrize("head_dim", [13, 24, 94, 121])
+    @common_utils.parametrize("dtype", test_dtypes_fast)
+    def test_non_pow_2_headdim(self, dtype, head_dim):
+        self.run_test(_rel_bias, torch.float16, B, H, S, head_dim, B, H, S, head_dim)
+
+    @supported_platform
     def test_GQA_causal_mask(self):
         def mask_mod(b, h, q, kv):
             return q >= kv
@@ -2512,6 +2520,10 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
     )
     @common_utils.parametrize("shape", [(2, 1, 128, 16), (4, 2, 64, 16)])
     def test_flex_attention_stride_ordering(self, mode, permute_order, shape):
+        if TEST_WITH_ROCM:
+            self.skipTest(
+                "ROCM BUG SEE: https://github.com/pytorch/pytorch/issues/140855"
+            )
         from torch._inductor.ir import get_stride_order
 
         dtype = torch.float32
@@ -3901,6 +3913,18 @@ BlockMask(shape=(1,s1,s2048,s2048),ssparsity=46.88%,s
         self.assertEqual(block_mask_custom.BLOCK_SIZE, custom_block_size)
 
     @supported_platform
+    def test_upcast_appropriately(self):
+        q = torch.randn((1, 1, 128, 16), dtype=torch.float16, device="cuda")
+        k = torch.randn((1, 1, 128, 16), dtype=torch.float16, device="cuda")
+        v = torch.randn((1, 1, 128, 16), dtype=torch.float16, device="cuda")
+        mass = torch.ones((1), dtype=torch.float16, device="cuda")
+
+        def score_mod(score, b, h, q_idx, kv_idx):
+            return score + torch.log(mass[0])
+
+        torch.compile(flex_attention)(q, k, v, score_mod=score_mod)
+
+    @supported_platform
     def test_init_mismatched_full_kv(self):
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         kv_num_blocks, kv_indices, full_kv_num_blocks, _ = self.generate_test_inputs(
@@ -4091,6 +4115,18 @@ BlockMask(shape=(1,s1,s2048,s2048),ssparsity=46.88%,s
             expected_shape,
             f"Expected output shape {expected_shape}, but got {result.shape}",
         )
+
+    @supported_platform
+    def test_create_is_cuda_graphable(self):
+        def mask_mod(b, h, q, kv):
+            return q >= kv
+
+        g = torch.cuda.CUDAGraph()
+
+        with torch.cuda.graph(g):
+            create_block_mask(mask_mod, None, None, 256, 256)
+
+        g.replay()
 
     @common_utils.parametrize("compile", [False, True])
     @supported_platform
