@@ -62,5 +62,5 @@ def sum(iterable: Iterable[_T], /, start: _T = 0) -> _T:  # type: ignore[assignm
 
 
 @substitute_in_graph(keyword.iskeyword, can_constant_fold_through=True)  # type: ignore[arg-type]
-def iskeyword(s: _T) -> bool:
+def iskeyword(s: str) -> bool:
     return s in keyword.kwlist
