@@ -2,8 +2,7 @@ from dataclasses import dataclass, field
 from typing import Optional
 
 from dataclasses_json import DataClassJsonMixin
-
-
+from datetime import datetime, timezone
 _DATA_MODEL_VERSION = 1.0
 
 
@@ -23,7 +22,7 @@ class UtilizationMetadata(DataClassJsonMixin):
     job_name: str
     usage_collect_interval: float
     data_model_version: float
-    start_at: float
+    start_at: int
     gpu_count: Optional[int] = None
     cpu_count: Optional[int] = None
     gpu_type: Optional[str] = None
@@ -47,7 +46,7 @@ class RecordData(DataClassJsonMixin):
 @dataclass
 class UtilizationRecord(DataClassJsonMixin):
     level: str
-    timestamp: float
+    timestamp: int
     data: Optional[RecordData] = None
     cmd_names: Optional[list[str]] = None
     error: Optional[str] = None
@@ -60,14 +59,13 @@ class UtilizationRecord(DataClassJsonMixin):
 class OssCiSegmentV1(DataClassJsonMixin):
     level: str
     name: str
-    start_at: str
-    end_at: str
+    start_at: int
+    end_at: int
     extra_info: dict[str, str]
-
 
 @dataclass
 class OssCiUtilizationMetadataV1:
-    created_at: str
+    created_at: int
     repo: str
     workflow_id: int
     run_attempt: int
@@ -79,8 +77,8 @@ class OssCiUtilizationMetadataV1:
     gpu_count: int
     cpu_count: int
     gpu_type: str
-    start_at: str
-    end_at: str
+    start_at: int
+    end_at: int
     segments: list[OssCiSegmentV1]
     tags: list[str] = field(default_factory=list)
 
@@ -89,7 +87,7 @@ class OssCiUtilizationMetadataV1:
 # https://github.com/pytorch/test-infra/blob/main/clickhouse_db_schema/oss_ci_utilization/oss_ci_utilization_time_series_schema.sql
 @dataclass
 class OssCiUtilizationTimeSeriesV1:
-    created_at: str
+    created_at: int
     type: str
     tags: list[str]
     time_stamp: str
@@ -105,6 +103,9 @@ class OssCiUtilizationTimeSeriesV1:
 def getDataModelVersion() -> float:
     return _DATA_MODEL_VERSION
 
+def getTsNow() -> int:
+    ts = datetime.now().timestamp()
+    return int(ts)
 
 @dataclass
 class WorkflowInfo:
