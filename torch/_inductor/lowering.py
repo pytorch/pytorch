@@ -5243,7 +5243,14 @@ def _avg_poolnd(
         else:
 
             def fn(idx):
-                return ops.truediv(fn_sum(idx, x_loader), ops.constant(divisor, dtype))
+                # int_truediv performs int / int -> float
+                # truncate to int as done in native/cpu/AvgPoolKernel.cpp
+                return ops.to_dtype(
+                    ops.int_truediv(
+                        fn_sum(idx, x_loader), ops.constant(divisor, dtype)
+                    ),
+                    dtype,
+                )
 
     else:
 
@@ -5260,7 +5267,13 @@ def _avg_poolnd(
                 factor = ops.index_expr(hend - hstart, torch.int32)
                 divide_factors.append(factor)
             divide_factor = functools.reduce(ops.mul, divide_factors)
-            return ops.truediv(fn_sum(idx, x_loader), divide_factor)
+            if dtype.is_floating_point:
+                return ops.truediv(fn_sum(idx, x_loader), divide_factor)
+            # int_truediv performs int / int -> float
+            # truncate to int as done in native/cpu/AvgPoolKernel.cpp
+            return ops.to_dtype(
+                ops.int_truediv(fn_sum(idx, x_loader), divide_factor), dtype
+            )
 
     rv = Pointwise.create(
         device=x.get_device(),
