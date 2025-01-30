@@ -1,5 +1,4 @@
 from dataclasses import dataclass
-from typing import List
 
 from torch._export.serde.schema import Node
 
@@ -12,4 +11,4 @@ class ExternKernelNode:
 
 @dataclass
 class ExternKernelNodes:
-    nodes: List[ExternKernelNode]
+    nodes: list[ExternKernelNode]
