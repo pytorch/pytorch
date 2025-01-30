@@ -564,7 +564,9 @@ debug_index_asserts = False
 # Inductor's behavior should be closer to fp64 ref numerics.  However, with
 # this knob you can ensure the downcast-upcast are preserved so that you can
 # emulate the eager numerics.
-emulate_precision_casts = False
+emulate_precision_casts = (
+    os.environ.get("TORCHINDUCTOR_EMULATE_PRECISION_CASTS", "0") == "1"
+)
 
 # warnings intended for PyTorch developers, disable for point releases
 is_nightly_or_source = "dev" in torch.__version__ or "git" in torch.__version__
@@ -874,7 +876,7 @@ class cpp:
 
     # similar to config.triton.descriptive_names
     descriptive_names: Union[
-        Literal["torch", "original_aten", "inductor_node"]
+        bool, Literal["torch", "original_aten", "inductor_node"]
     ] = "original_aten"
 
     # how many nodes to allow into a single horizontal fusion
@@ -1031,11 +1033,12 @@ class triton:
     )
 
     # should we put op names in kernel names
+    # False: No special names (just triton__1, triton__2, etc.)
     # "torch": Maps to the fx op in the Dynamo graph (module name, method name, etc.)
     # "original_aten": Maps to the highest-level aten op (i.e. pre-decompositions)
     # "inductor_node": Maps to the node name in the FX graph passed to Inductor
     descriptive_names: Union[
-        Literal["torch", "original_aten", "inductor_node"]
+        bool, Literal["torch", "original_aten", "inductor_node"]
     ] = "original_aten"
 
     # use alternate codegen for smaller reductions
