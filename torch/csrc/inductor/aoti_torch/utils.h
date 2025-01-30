@@ -36,6 +36,10 @@ inline AtenTensorHandle tensor_pointer_to_tensor_handle(at::Tensor* tensor) {
 inline at::Tensor resolve_tensor_dispatch_flags(AtenTensorHandle handle) {
   at::Tensor* tensor{tensor_handle_to_tensor_pointer(handle)};
   if (tensor->is_conj() || tensor->is_neg()) {
+    // If the conjugation or negation dispatch flags are set, runtime dispatch
+    // handles them by cloning the tensor before passing them to the native ATen
+    // function.  Since the C-shim calls the native function directly, we have
+    // to handle the flags ourselves, or results will be silently incorrect.
     return tensor->clone();
   }
   return *tensor;
