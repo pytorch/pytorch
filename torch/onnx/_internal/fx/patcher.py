@@ -1,7 +1,7 @@
 # mypy: allow-untyped-defs
 import copy
 import functools
-from typing import List, TYPE_CHECKING, Union
+from typing import TYPE_CHECKING, Union
 
 import torch
 
@@ -55,7 +55,7 @@ class ONNXTorchPatcher:
 
     def __init__(self) -> None:
         # List of file paths processed by torch.load.
-        self.paths: List[Union[str, io.BufferedIOBase]] = []
+        self.paths: list[Union[str, io.BufferedIOBase]] = []
 
         def torch_load_wrapper(f, *args, **kwargs):
             # Record path for later serialization into ONNX proto

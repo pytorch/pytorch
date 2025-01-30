@@ -137,7 +137,7 @@ def logit(self: TensorLikeType, eps: Optional[float] = None) -> TensorLikeType:
         eps = -1.0
     lo = eps
     hi = 1 - eps
-    self = torch.clamp(self, lo, hi)
+    self = torch.where(self < lo, lo, torch.where(self > hi, hi, self))
     return torch.log(torch.true_divide(self, torch.sub(1, self)))
 
 
