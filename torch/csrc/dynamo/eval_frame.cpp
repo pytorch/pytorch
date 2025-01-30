@@ -65,9 +65,13 @@ PyObject* dynamo__custom_eval_frame(
   // exit functions
   auto eval_default = [&]() {
     eval_frame_callback_set(recursive_callback);
-    // eval_frame_callback_set(Py_None);
     eval_result = dynamo_eval_frame_default(tstate, frame, throw_flag);
     if (callback != recursive_callback) {
+      // NB: Only set the callback if it's different than the recursive
+      // callback! Setting the callback is dangerous in the case that `frame`
+      // also sets the eval frame callback. This happens in some functions in
+      // eval_frame.py. These functions should be skipped with DEFAULT recursive
+      // action, so we won't accidentally overwrite the callback.
       eval_frame_callback_set(callback);
     }
   };

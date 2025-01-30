@@ -536,13 +536,6 @@ static PyObject* dynamo__custom_eval_frame_shim(
     return dynamo_eval_frame_default(tstate, frame, throw_flag);
   }
 
-  // int should_clear_frame = 0;
-  // PyObject* result = dynamo__custom_eval_frame(
-  //     tstate, frame, throw_flag, callback, &should_clear_frame);
-  // if (should_clear_frame) {
-  //   clear_old_frame_if_python_312_plus(tstate, frame);
-  // }
-  // return result;
   return dynamo__custom_eval_frame(tstate, frame, throw_flag, callback);
 }
 
