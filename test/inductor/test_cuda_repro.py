@@ -7,7 +7,6 @@ import math
 import sys
 import unittest
 
-from torch._inductor.utils import ceildiv
 import torch
 import torch._dynamo.config as dynamo_config
 import torch.backends.cuda
