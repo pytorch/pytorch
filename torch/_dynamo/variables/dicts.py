@@ -2,6 +2,7 @@
 
 import collections
 import functools
+import types
 from typing import Optional, TYPE_CHECKING
 
 from torch._subclasses.fake_tensor import is_fake
@@ -500,6 +501,39 @@ class ConstDictVariable(VariableTracker):
     def clone(self, **kwargs):
         self.install_dict_keys_match_guard()
         return super().clone(**kwargs)
+
+
+class MappingProxyVariable(VariableTracker):
+    # proxies to the original dict_vt
+    def __init__(self, dv_dict: ConstDictVariable, **kwargs) -> None:
+        super().__init__(**kwargs)
+        assert isinstance(dv_dict, ConstDictVariable)
+        self.dv_dict = dv_dict
+
+    def unpack_var_sequence(self, tx):
+        return self.dv_dict.unpack_var_sequence(tx)
+
+    def reconstruct(self, codegen):
+        # load types.MappingProxyType
+        codegen.add_push_null(
+            lambda: codegen.extend_output(
+                [
+                    codegen.create_load_python_module(types),
+                    codegen.create_load_attr("MappingProxyType"),
+                ]
+            )
+        )
+        codegen(self.dv_dict)
+        codegen.extend_output(create_call_function(1, False))
+
+    def call_method(
+        self,
+        tx,
+        name,
+        args: list["VariableTracker"],
+        kwargs: dict[str, "VariableTracker"],
+    ) -> "VariableTracker":
+        return self.dv_dict.call_method(tx, name, args, kwargs)
 
 
 class NNModuleHooksDictVariable(ConstDictVariable):

@@ -638,6 +638,14 @@ class UserDefinedClassVariable(UserDefinedVariable):
             random_object = random.Random(seed)
             return RandomVariable(random_object)
         elif (
+            self.value is types.MappingProxyType
+            and len(args) == 1
+            and isinstance(args[0], variables.ConstDictVariable)
+        ):
+            # types.MappingProxyType is a read-only proxy of the dict. If the
+            # original dict changes, the changes are reflected in proxy as well.
+            return variables.MappingProxyVariable(args[0])
+        elif (
             not self.is_standard_new()
             and SideEffects.cls_supports_mutation_side_effects(self.value)
             and self.source
@@ -649,7 +657,6 @@ class UserDefinedClassVariable(UserDefinedVariable):
                 [self, *args],
                 kwargs,
             )
-
         return super().call_function(tx, args, kwargs)
 
     def is_standard_new(self):
