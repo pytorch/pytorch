@@ -843,8 +843,6 @@ fn(torch.randn(5))
 
     @make_settings_test("torch._dynamo.eval_frame")
     def test_log_traced_frames(self, records):
-        torch._dynamo.eval_frame.clear_dynamo_tls()
-
         # Test program
         @torch.compile()
         def foo():

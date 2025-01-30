@@ -27,7 +27,6 @@
 #include <ATen/ops/triangular_solve_native.h>
 #endif
 
-#include <c10/util/env.h>
 #include <algorithm>
 
 namespace at::native {
@@ -77,7 +76,7 @@ std::tuple<MPSGraphTensor*, MPSGraphTensor*, MPSGraphTensor*> do_mm(MPSGraph* gr
 }
 
 bool use_metal_mm(const Tensor& self, const Tensor& other, const Tensor& output) {
-  static bool always_use_metal = c10::utils::has_env("PYTORCH_MPS_PREFER_METAL");
+  static bool always_use_metal = std::getenv("PYTORCH_MPS_PREFER_METAL") != nullptr;
   constexpr auto max_stride_size = 32768;
   static bool is_macos_14_4_or_newer = is_macos_13_or_newer(MacOSVersion::MACOS_VER_14_4_PLUS);
   return always_use_metal ||
@@ -816,16 +815,21 @@ static Tensor& linalg_cholesky_mps_impl(const Tensor& input, bool upper, Tensor&
   int64_t numBlocks = (N + NB - 1) / NB;
 
   Tensor success = at::empty({B}, input.options().dtype(kInt)).fill_(1);
+  id<MTLBuffer> successBuffer = getMTLBufferStorage(success);
 
   MTLSize threadGroupSize = MTLSizeMake(256, 1, 1);
+  id<MTLBuffer> outBuffer = getMTLBufferStorage(out);
+  id<MTLComputeCommandEncoder> computeEncoder = stream->commandEncoder();
+  [computeEncoder setBuffer:outBuffer offset:0 atIndex:0];
+  [computeEncoder setBytes:&N length:sizeof(int64_t) atIndex:2];
+  [computeEncoder setBytes:&NB length:sizeof(int64_t) atIndex:3];
 
   @autoreleasepool {
     dispatch_sync_with_rethrow(stream->queue(), ^() {
-      auto computeEncoder = stream->commandEncoder();
-      mtl_setArgs(computeEncoder, out, success, N, NB);
       for (int64_t k = 0; k < numBlocks; k++) {
         [computeEncoder setComputePipelineState:factorDiagonalPSO];
-        mtl_setBytes(computeEncoder, k, 4);
+        [computeEncoder setBuffer:successBuffer offset:0 atIndex:1];
+        [computeEncoder setBytes:&k length:sizeof(int64_t) atIndex:4];
         MTLSize gridSize = MTLSizeMake(B, 1, 1);
         [computeEncoder dispatchThreadgroups:gridSize threadsPerThreadgroup:threadGroupSize];
 

@@ -1026,9 +1026,8 @@ class SIMDKernel(Kernel):
                         for name in call_args
                     ]
 
-                    argdef_names = [x.name for x in argdefs]
                     msg = yellow_text(
-                        f"  param names {argdef_names}\n  buf names {call_args}\n  strides {stride_order_list}"
+                        f"  param names {argdefs}\n  buf names {call_args}\n  strides {stride_order_list}"
                         + f"\n  sizes {size_list}\n  sources {source_list}\n"
                     )
                     log.warning(msg)

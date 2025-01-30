@@ -1,6 +1,6 @@
 """test_check_labels.py"""
 
-from typing import Any
+from typing import Any, List
 from unittest import main, mock, TestCase
 
 from check_labels import (
@@ -31,7 +31,7 @@ def mock_delete_all_label_err_comments(pr: "GitHubPR") -> None:
     pass
 
 
-def mock_get_comments() -> list[GitHubComment]:
+def mock_get_comments() -> List[GitHubComment]:
     return [
         # Case 1 - a non label err comment
         GitHubComment(

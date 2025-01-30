@@ -3974,21 +3974,6 @@ utils_device.CURRENT_DEVICE == None""".split(
         x += 1
         self.assertEqual(1, get_x())
 
-    def test_input_cell_mutation(self):
-        def fn(x):
-            x = x.cos()
-
-            def inner():
-                return x.sin()
-
-            return inner()
-
-        x = torch.ones(10)
-        opt_fn = torch.compile(fn, fullgraph=True, backend="eager")
-        ref = fn(x)
-        res = opt_fn(x)
-        self.assertEqual(res, ref)
-
     def test_top_package_import(self):
         def fn(x):
             import torch.fx
@@ -6988,25 +6973,6 @@ utils_device.CURRENT_DEVICE == None""".split(
         # Force recompilation
         inputs = [torch.randn(10, 10) for _ in range(4)]
         self.assertTrue(same(fn(iter(tuple(inputs))), opt_fn(iter(tuple(inputs)))))
-
-    @torch._dynamo.config.patch(capture_dynamic_output_shape_ops=True)
-    def test_argwhere_with_dynamic_shapes(self):
-        def fn(
-            tensor: torch.Tensor,
-            mapping: torch.Tensor,
-        ) -> torch.Tensor:
-            xx, yy = torch.meshgrid(mapping, tensor, indexing="ij")
-            indices = torch.argwhere(xx == yy)
-
-            mapped_values = torch.zeros_like(tensor)
-            mapped_values[indices[:, 1]] = indices[:, 0]
-
-            return mapped_values
-
-        tensor = torch.tensor([1, 2, 3, 5, 6, 7])
-        mapping = torch.tensor([0, 3, 4, 5, 7])
-        opt = torch.compile(fn, fullgraph=True)
-        self.assertEqual(fn(tensor, mapping), opt(tensor, mapping))
 
     def test_torch_package_working_with_trace(self):
         # from torch._dynamo.test_case import run_tests

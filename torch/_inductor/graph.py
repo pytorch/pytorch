@@ -1,4 +1,5 @@
 import contextlib
+import enum
 import functools
 import itertools
 import logging
@@ -76,7 +77,6 @@ from .ir import (
     TorchBindObject,
 )
 from .lowering import (
-    constrain_to_fake_tensors,
     constrain_to_fx_strides,
     FALLBACK_ALLOW_LIST,
     fallback_handler,
@@ -255,13 +255,6 @@ def mark_nodes_dislike_padding(
         )
 
     for cur in reversed(g.nodes):
-        if isinstance(
-            cur.target,
-            torch._higher_order_ops.triton_kernel_wrap.TritonKernelWrapperMutation,
-        ):
-            cur.meta["dislike_padding"] = True
-            continue
-
         op = _get_overload_packet(cur)
         if not op:
             continue
@@ -279,6 +272,12 @@ def mark_nodes_dislike_padding(
         # We only want to mark output nodes. So, move it after the above prior nodes process.
         if not config.pad_outputs and cur in user_visible_output_strides:
             cur.meta["dislike_padding"] = True
+
+
+class SaveOutputCodeContext(enum.Enum):
+    BEFORE_COMPILE = 0
+    AFTER_DESERIALIZATION = 1
+    AFTER_COMPILE = 2
 
 
 class GraphLowering(torch.fx.Interpreter):
@@ -1362,9 +1361,8 @@ class GraphLowering(torch.fx.Interpreter):
             for name in mutated:
                 old_arg = old_kwargs["kwargs"][name]
                 new_arg = new_kwargs["kwargs"][name]
-                if old_arg is new_arg:
+                if old_arg is new_args:
                     continue
-
                 self.call_function(torch.ops.aten.copy_.default, (old_arg, new_arg), {})
             return
 
@@ -1448,15 +1446,7 @@ class GraphLowering(torch.fx.Interpreter):
                 ):
                     old_args = args  # type: ignore[possibly-undefined]
                     old_kwargs = kwargs  # type: ignore[possibly-undefined]
-
-                    if arg_kwarg_vals := n.meta.get("arg_kwarg_vals"):
-                        inp_args = arg_kwarg_vals[0]
-                        inp_kwargs = arg_kwarg_vals[1]
-                        args, kwargs = constrain_to_fake_tensors(
-                            args, kwargs, inp_args, inp_kwargs
-                        )
-                    else:
-                        args, kwargs = constrain_to_fx_strides(n, *args, **kwargs)  # type: ignore[index]
+                    args, kwargs = constrain_to_fx_strides(n, *args, **kwargs)  # type: ignore[index]
                     result = self.call_function(n.target, args, kwargs)  # type: ignore[arg-type]
                     self.propagate_mutation(n, old_args, old_kwargs, args, kwargs)  # type: ignore[possibly-undefined]
                 else:
@@ -1999,7 +1989,7 @@ class GraphLowering(torch.fx.Interpreter):
         return total_bytes, node_counts, node_runtimes
 
     @staticmethod
-    def save_output_code(code: str) -> None:
+    def save_output_code(code: str, context: SaveOutputCodeContext) -> None:
         # No-op to be patched for unit tests
         pass
 
@@ -2027,7 +2017,7 @@ class GraphLowering(torch.fx.Interpreter):
                 + '"""\n'
             )
             code = tuning_code + code
-        GraphLowering.save_output_code(code)
+        GraphLowering.save_output_code(code, SaveOutputCodeContext.BEFORE_COMPILE)
         output_code_log.debug("Output code: \n%s", code)
 
         inductor_meta = autotune_cache.inductor_meta_from_config()

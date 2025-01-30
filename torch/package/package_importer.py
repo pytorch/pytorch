@@ -10,12 +10,11 @@ import sys
 import types
 from collections.abc import Iterable
 from contextlib import contextmanager
-from typing import Any, Callable, cast, Optional, TYPE_CHECKING, Union
+from typing import Any, BinaryIO, Callable, cast, Optional, TYPE_CHECKING, Union
 from weakref import WeakValueDictionary
 
 import torch
 from torch.serialization import _get_restore_location, _maybe_decode_ascii
-from torch.types import FileLike
 
 from ._directory_reader import DirectoryReader
 from ._importlib import (
@@ -85,7 +84,7 @@ class PackageImporter(Importer):
 
     def __init__(
         self,
-        file_or_buffer: Union[FileLike, torch._C.PyTorchFileReader],
+        file_or_buffer: Union[str, torch._C.PyTorchFileReader, os.PathLike, BinaryIO],
         module_allowed: Callable[[str], bool] = lambda module_name: True,
     ):
         """Open ``file_or_buffer`` for importing. This checks that the imported package only requires modules

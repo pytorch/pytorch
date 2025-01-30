@@ -56,6 +56,8 @@ static void avg_pool2d_out_frame(
 
   at::parallel_for(0, nInputPlane, 0, [&](int64_t start, int64_t end) {
     for (const auto k : c10::irange(start, end)) {
+      // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
+      int64_t xx, yy;
       /* For all output pixels... */
       scalar_t* ptr_output = output_data + k * outputWidth * outputHeight;
       const scalar_t* ptr_input = input_data + k * inputWidth * inputHeight;
@@ -63,8 +65,8 @@ static void avg_pool2d_out_frame(
           std::numeric_limits<typename scalar_t::underlying>::lowest();
       auto maximum = std::numeric_limits<typename scalar_t::underlying>::max();
 
-      for (int64_t yy = 0; yy < outputHeight; yy++) {
-        for (int64_t xx = 0; xx < outputWidth; xx++) {
+      for (yy = 0; yy < outputHeight; yy++) {
+        for (xx = 0; xx < outputWidth; xx++) {
           /* Compute the mean of the input image... */
           int64_t hstart = yy * dH - padH;
           int64_t wstart = xx * dW - padW;
@@ -79,7 +81,8 @@ static void avg_pool2d_out_frame(
           int sum_int = 0;
           ptr_output->val_ = 0;
 
-          int64_t divide_factor = 0;
+          // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
+          int64_t divide_factor;
           int64_t size = (hend - hstart) * (wend - wstart);
           if (divisor_override.has_value()) {
             divide_factor = divisor_override.value();
@@ -91,8 +94,10 @@ static void avg_pool2d_out_frame(
             }
           }
 
-          for (int64_t ky = hstart; ky < hend; ky++) {
-            for (int64_t kx = wstart; kx < wend; kx++)
+          // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
+          int64_t kx, ky;
+          for (ky = hstart; ky < hend; ky++) {
+            for (kx = wstart; kx < wend; kx++)
               sum_int += (ptr_input + ky * inputWidth + kx)->val_;
           }
           // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
@@ -180,6 +185,7 @@ Tensor q_avg_pool2d(
     bool ceil_mode,
     bool count_include_pad,
     std::optional<int64_t> divisor_override) {
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   auto [kW, kH] = get_kernel(kernel_size);
   auto [dW, dH] = get_stride(stride, kW, kH);
   auto [padW, padH] = get_padding(padding);
