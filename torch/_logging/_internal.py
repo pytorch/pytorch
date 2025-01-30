@@ -42,6 +42,7 @@ DEFAULT_LOG_LEVEL = logging.WARNING
 LOG_ENV_VAR = "TORCH_LOGS"
 LOG_OUT_ENV_VAR = "TORCH_LOGS_OUT"
 LOG_FORMAT_ENV_VAR = "TORCH_LOGS_FORMAT"
+LOG_TRACE_ID_FILTER = "TORCH_LOGS_TRACE_ID_FILTER"
 TRACE_ENV_VAR = "TORCH_TRACE"
 
 LOG_TRACE_HANDLER: Optional["LazyTraceHandler"] = None
@@ -783,9 +784,10 @@ def make_module_path_relative(abs_path):
 
 # apply custom formats to artifacts when necessary
 class TorchLogsFormatter(logging.Formatter):
-    def __init__(self, *, trace: bool = False):
+    def __init__(self, *, trace: bool = False, trace_id_filter: Optional[str] = None):
         super().__init__()
         self._is_trace = trace
+        self._trace_id_filter = trace_id_filter
 
     def format(self, record):
         artifact_name = getattr(logging.getLogger(record.name), "artifact_name", None)
@@ -843,6 +845,9 @@ class TorchLogsFormatter(logging.Formatter):
 
         filepath = make_module_path_relative(record.pathname)
 
+        if self._trace_id_filter is not None and self._trace_id_filter != record.traceid.strip():
+            return ""
+
         prefix = (
             f"{record.rankprefix}{shortlevel}{record.asctime}.{int(record.msecs * 1000):06d} {record.process} "
             f"{filepath}:"
@@ -865,8 +870,9 @@ class TorchLogsFormatter(logging.Formatter):
 
 def _default_formatter():
     fmt = os.environ.get(LOG_FORMAT_ENV_VAR, None)
+    trace_id_filter = os.environ.get(LOG_TRACE_ID_FILTER, None)
     if fmt is None:
-        return TorchLogsFormatter()
+        return TorchLogsFormatter(trace_id_filter=trace_id_filter)
     else:
         if fmt in ("short", "basic"):
             fmt = logging.BASIC_FORMAT
