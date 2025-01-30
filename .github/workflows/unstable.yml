@@ -7,6 +7,7 @@ on:
     tags:
       - ciflow/unstable/*
   workflow_dispatch:
+  pull_request:
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref_name }}-${{ github.ref_type == 'branch' && github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
@@ -66,12 +67,12 @@ jobs:
       sync-tag: rocm-build
       test-matrix: |
         { include: [
-          { config: "default", shard: 1, num_shards: 6, runner: "linux.rocm.gpu.mi300.2" },
-          { config: "default", shard: 2, num_shards: 6, runner: "linux.rocm.gpu.mi300.2" },
-          { config: "default", shard: 3, num_shards: 6, runner: "linux.rocm.gpu.mi300.2" },
-          { config: "default", shard: 4, num_shards: 6, runner: "linux.rocm.gpu.mi300.2" },
-          { config: "default", shard: 5, num_shards: 6, runner: "linux.rocm.gpu.mi300.2" },
-          { config: "default", shard: 6, num_shards: 6, runner: "linux.rocm.gpu.mi300.2" },
+          { config: "default", shard: 1, num_shards: 6, runner: "linux.rocm.gpu.mi300.2.c2" },
+          { config: "default", shard: 2, num_shards: 6, runner: "linux.rocm.gpu.mi300.2.c2" },
+          { config: "default", shard: 3, num_shards: 6, runner: "linux.rocm.gpu.mi300.2.c2" },
+          { config: "default", shard: 4, num_shards: 6, runner: "linux.rocm.gpu.mi300.2.c2" },
+          { config: "default", shard: 5, num_shards: 6, runner: "linux.rocm.gpu.mi300.2.c2" },
+          { config: "default", shard: 6, num_shards: 6, runner: "linux.rocm.gpu.mi300.2.c2" },
         ]}
     secrets: inherit
 
@@ -102,8 +103,8 @@ jobs:
       docker-image-name: pytorch-linux-focal-rocm-n-py3
       test-matrix: |
         { include: [
-          { config: "inductor", shard: 1, num_shards: 2, runner: "linux.rocm.gpu.mi300.2" },
-          { config: "inductor", shard: 2, num_shards: 2, runner: "linux.rocm.gpu.mi300.2" },
+          { config: "inductor", shard: 1, num_shards: 2, runner: "linux.rocm.gpu.mi300.2.c2" },
+          { config: "inductor", shard: 2, num_shards: 2, runner: "linux.rocm.gpu.mi300.2.c2" },
         ]}
     secrets: inherit
 
