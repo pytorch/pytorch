@@ -222,6 +222,16 @@ static size_t _getWorkspaceSize() {
   return workspace_size;
 }
 
+void* _getWorkspaceWithoutHandle() {
+  cublasHandle_t handle = at::cuda::getCurrentCUDABlasHandle();
+  auto stream = c10::cuda::getCurrentCUDAStream();
+  cudaStream_t _stream = stream;
+  auto key = std::make_tuple(static_cast<void *>(handle), static_cast<void *>(_stream));
+  auto workspace_it = at::cuda::cublas_handle_stream_to_workspace().find(key);
+  TORCH_CHECK(workspace_it != at::cuda::cublas_handle_stream_to_workspace().end());
+  return workspace_it->second.mutable_get();
+}
+
 } // anonymous namespace
 
 namespace at::cuda::blas {
@@ -435,13 +445,7 @@ static inline void bgemm_internal_cublaslt(CUDABLAS_BGEMM_ARGTYPES(Dtype)) {
   auto workspace_ptr = workspace.mutable_get();
   TORCH_CHECK(workspace_ptr != nullptr, "OOM trying to allocate workspace for cublaslt");
 #else
-  cublasHandle_t handle = at::cuda::getCurrentCUDABlasHandle();
-  auto stream = c10::cuda::getCurrentCUDAStream();
-  cudaStream_t _stream = stream;
-  auto key = std::make_tuple(static_cast<void *>(handle), static_cast<void *>(_stream));
-  auto workspace_it = cublas_handle_stream_to_workspace().find(key);
-  TORCH_CHECK(workspace_it != cublas_handle_stream_to_workspace().end());
-  auto workspace_ptr = workspace_it->second.mutable_get();
+  auto workspace_ptr = _getWorkspaceWithoutHandle();
 #endif
 
   cublasLtMatmulHeuristicResult_t heuristicResult = {};
@@ -1404,12 +1408,7 @@ void gemm_and_bias(
   auto workspace_ptr = workspace.mutable_get();
   TORCH_CHECK(workspace_ptr != nullptr, "OOM trying to allocate workspace for cublaslt");
 #else
-  cublasHandle_t handle = at::cuda::getCurrentCUDABlasHandle();
-  cudaStream_t _stream = stream;
-  auto key = std::make_tuple(static_cast<void *>(handle), static_cast<void *>(_stream));
-  auto workspace_it = cublas_handle_stream_to_workspace().find(key);
-  TORCH_CHECK(workspace_it != cublas_handle_stream_to_workspace().end());
-  auto workspace_ptr = workspace_it->second.mutable_get();
+  auto workspace_ptr = _getWorkspaceWithoutHandle();
 #endif
 
   cublasLtMatmulHeuristicResult_t heuristicResult = {};
@@ -1624,21 +1623,14 @@ void scaled_gemm(
   }
 
   auto stream = c10::cuda::getCurrentCUDAStream();
-
-#ifdef USE_ROCM
   size_t workspaceSize = _getWorkspaceSize();
+#ifdef USE_ROCM
   auto& allocator = *::c10::cuda::CUDACachingAllocator::get();
   auto workspace = allocator.allocate(workspaceSize);
   auto workspace_ptr = workspace.mutable_get();
   TORCH_CHECK(workspace_ptr != nullptr, "OOM trying to allocate workspace for cublaslt");
 #else
-  size_t workspaceSize = getChosenWorkspaceSize();
-  cublasHandle_t handle = at::cuda::getCurrentCUDABlasHandle();
-  cudaStream_t _stream = stream;
-  auto key = std::make_tuple(static_cast<void *>(handle), static_cast<void *>(_stream));
-  auto workspace_it = cublas_handle_stream_to_workspace().find(key);
-  TORCH_CHECK(workspace_it != cublas_handle_stream_to_workspace().end());
-  auto workspace_ptr = workspace_it->second.mutable_get();
+  auto workspace_ptr = _getWorkspaceWithoutHandle();
 #endif
 
   CuBlasLtMatmulPreference preference;
