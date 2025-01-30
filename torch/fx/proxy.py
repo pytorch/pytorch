@@ -289,6 +289,8 @@ class TracerBase:
 
         Can be override to support more trace-specific types.
         """
+        import torch.utils._pytree
+
         if isinstance(a, Proxy):
             return a.node  # most common arg type goes first
         elif hasattr(a, "__fx_create_arg__"):
@@ -348,6 +350,8 @@ class TracerBase:
             return self.create_node("call_function", a.__class__, (), kwargs)
 
         elif isinstance(a, (*base_types, enum.Enum)) or a is None or a is ...:
+            return a
+        elif isinstance(a, torch.utils._pytree.TreeSpec):
             return a
 
         raise NotImplementedError(f"argument of type: {type(a)}")
