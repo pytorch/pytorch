@@ -4,7 +4,7 @@ set -ex
 
 SCRIPTPATH="$( cd "$(dirname "$0")" ; pwd -P ))"
 
-export TORCH_NVCC_FLAGS="-Xfatbin -compress-all"
+export TORCH_NVCC_FLAGS="-Xfatbin -compress-all --host-linker-script=use-lcs"
 export NCCL_ROOT_DIR=/usr/local/cuda
 export TH_BINARY_BUILD=1
 export USE_STATIC_CUDNN=1
