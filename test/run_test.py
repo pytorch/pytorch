@@ -4,7 +4,6 @@ import argparse
 import copy
 import glob
 import json
-import numpy
 import os
 import pathlib
 import re
@@ -17,16 +16,19 @@ import time
 from collections import defaultdict
 from contextlib import ExitStack
 from datetime import datetime
-from packaging.version import Version
 from typing import Any, cast, Dict, List, NamedTuple, Optional, Sequence, Tuple, Union
 
+import numpy
+
 import pkg_resources
+from packaging.version import Version
 
 import torch
 import torch.distributed as dist
 from torch.multiprocessing import current_process, get_context
 from torch.testing._internal.common_utils import (
     get_report_path,
+    HAS_HIPCC,
     IS_CI,
     IS_MACOS,
     IS_WINDOWS,
@@ -38,7 +40,6 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_CROSSREF,
     TEST_WITH_ROCM,
     TEST_WITH_SLOW_GRADCHECK,
-    HAS_HIPCC,
 )
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parent.parent
@@ -188,8 +189,29 @@ ROCM_BLOCKLIST = [
     "distributed/_tensor/test_attention",
 ]
 
+# Skip inductor tests on Navi4
+if TEST_WITH_ROCM:
+    gcn_arch = str(torch.cuda.get_device_properties(0).gcnArchName.split(":", 1)[0])
+    if "gfx12" in gcn_arch:
+        NAVI_BLOCKLIST = [
+            "inductor/test_aot_inductor.py",
+            "inductor/test_compiled_optimizers.py",
+            "inductor/test_control_flow.py",
+            "inductor/test_cuda_cpp_wrapper.py",
+            "inductor/test_cuda_repro.py",
+            "inductor/test_multi_kernel.py",
+            "inductor/test_padding.py",
+            "inductor/test_pattern_matcher.py",
+            "inductor/test_torchinductor_codegen_dynamic_shapes.py",
+            "inductor/test_torchinductor_dynamic_shapes.py",
+            "inductor/test_torchinductor_opinfo.py",
+            "inductor/test_torchinductor.py",
+            "inductor/test_unbacked_symints.py",
+        ]
+        ROCM_BLOCKLIST.extend(NAVI_BLOCKLIST)
+
 # Remove test_typing if python version is 3.9.* or less
-if Version(numpy.__version__) < Version('1.21'):
+if Version(numpy.__version__) < Version("1.21"):
     ROCM_BLOCKLIST.append("test_typing")
 
 # Remove test_tensorexpr for WHL builds since there is no compiler

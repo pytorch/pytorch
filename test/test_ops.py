@@ -647,7 +647,12 @@ class TestCommon(TestCase):
     @ops(op_db, allowed_dtypes=(torch.float32, torch.long, torch.complex64))
     def test_noncontiguous_samples(self, device, dtype, op):
         # temp skip
-        if 'cuda' in device and TEST_WITH_ROCM and dtype==torch.complex64 and op.name=='svd_lowrank':
+        if (
+            "cuda" in device
+            and TEST_WITH_ROCM
+            and dtype == torch.complex64
+            and op.name == "svd_lowrank"
+        ):
             self.skipTest(f"Failing on ROCm with complex64 for {op.name}")
         test_grad = dtype in op.supported_backward_dtypes(torch.device(device).type)
         sample_inputs = op.sample_inputs(device, dtype, requires_grad=test_grad)
@@ -1362,6 +1367,20 @@ class TestCommon(TestCase):
     @ops(op_db, allowed_dtypes=(torch.bool,))
     @unittest.skipIf(TEST_WITH_UBSAN, "Test uses undefined behavior")
     def test_non_standard_bool_values(self, device, dtype, op):
+        if TEST_WITH_ROCM and "cuda" in device:
+            rocm_blocklist = [
+                "test_non_standard_bool_values_masked_scatter_cuda_bool",
+                # "test_non_standard_bool_values_nn_functional_unfold_cuda_bool",  # only in rocm6.4_internal_testing
+                "test_non_standard_bool_values_put_cuda_bool",
+                "test_non_standard_bool_values_scatter_add_cuda_bool",
+                "test_non_standard_bool_values_scatter_cuda_bool",
+                "test_non_standard_bool_values_scatter_reduce_sum_cuda_bool",
+                "test_non_standard_bool_values_tril_cuda_bool",
+                "test_non_standard_bool_values_triu_cuda_bool",
+            ]
+            if self._testMethodName in rocm_blocklist:
+                self.skipTest("Failed on ROCm")
+
         # Test boolean values other than 0x00 and 0x01 (gh-54789)
         def convert_boolean_tensors(x):
             if not isinstance(x, torch.Tensor) or x.dtype != torch.bool:
@@ -1609,7 +1628,12 @@ class TestCompositeCompliance(TestCase):
     )
     @ops(op_db, allowed_dtypes=(torch.float,))
     def test_operator(self, device, dtype, op):
-        if 'cuda' in device and TEST_WITH_ROCM and dtype==torch.float32 and op.name=='nn.functional.scaled_dot_product_attention':
+        if (
+            "cuda" in device
+            and TEST_WITH_ROCM
+            and dtype == torch.float32
+            and op.name == "nn.functional.scaled_dot_product_attention"
+        ):
             self.skipTest(f"Failing on ROCm with float32 for {op.name}")
         samples = op.sample_inputs(device, dtype, requires_grad=False)
 

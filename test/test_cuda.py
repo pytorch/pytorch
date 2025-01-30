@@ -373,7 +373,10 @@ class TestCuda(TestCase):
         if torch.version.hip:
             default_workspace_size = 1024 * 32 * 1024  # :1024:32  32MiB
             # different size (128 MiB) expected on MI300 GPU
-            if torch.cuda.get_device_capability() >= (9, 4):
+            gcn_arch = str(
+                torch.cuda.get_device_properties(0).gcnArchName.split(":", 1)[0]
+            )
+            if "gfx94" in gcn_arch:
                 default_workspace_size = 1024 * 128 * 1024  # :1024:128
         else:
             default_workspace_size = (

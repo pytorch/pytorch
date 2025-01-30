@@ -30,11 +30,11 @@ from torch.nn import Parameter
 from torch.nn.parallel._functions import Broadcast
 from torch.testing._internal.common_dtype import integral_types, get_all_math_dtypes, floating_types
 from torch.testing._internal.common_utils import freeze_rng_state, run_tests, TestCase, skipIfNoLapack, skipIfRocm, \
-    TEST_NUMPY, TEST_SCIPY, TEST_WITH_CROSSREF, TEST_WITH_ROCM, \
+    NAVI4_ARCH, TEST_NUMPY, TEST_SCIPY, TEST_WITH_CROSSREF, TEST_WITH_ROCM, \
     download_file, get_function_arglist, load_tests, skipIfMps, \
     IS_PPC, \
     parametrize as parametrize_test, subtest, instantiate_parametrized_tests, \
-    skipIfTorchDynamo, gcIfJetson, set_default_dtype
+    skipIfRocmArch, skipIfTorchDynamo, gcIfJetson, set_default_dtype
 from torch.testing._internal.common_cuda import TEST_CUDA, TEST_MULTIGPU, TEST_CUDNN, PLATFORM_SUPPORTS_FLASH_ATTENTION
 from torch.testing._internal.common_nn import NNTestCase, NewModuleTest, CriterionTest, \
     module_tests, criterion_tests, loss_reference_fns, _create_basic_net, \
@@ -12216,6 +12216,7 @@ if __name__ == '__main__':
 
     @skipMeta
     @dtypes(torch.float32, torch.float64)
+    @skipIfRocmArch(NAVI4_ARCH)  # Flaky on Navi4
     def test_module_to_empty(self, device, dtype):
         class MyModule(nn.Module):
             def __init__(self, in_features, out_features, device=None, dtype=None):

@@ -9967,7 +9967,6 @@ fn
         gc.collect()
         self.assertTrue(cleared)
 
-    @xfailIfPy312
     def test_parameter_free(self):
         def model_inp_ctr():
             param = torch.nn.Parameter(torch.randn(100, 100))
