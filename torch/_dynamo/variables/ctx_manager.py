@@ -819,8 +819,6 @@ class AutocastModeVariable(ContextWrappingVariable):
 class NullContextVariable(ContextWrappingVariable):
     """
     This class represents Python contextlib.nullcontext.
-    It's used as a placeholder for other context managers that Dynamo doesn't
-    support yet, e.g, torch.autograd.profiler.record_function.
     """
 
     def __init__(self, target_values=None, **kwargs) -> None:
@@ -837,6 +835,39 @@ class NullContextVariable(ContextWrappingVariable):
 
     def fn_name(self):
         return "nullcontext"
+
+
+class ProfilerContextVariable(ContextWrappingVariable):
+    """
+    This class represents a set of torch profiler context objects, where Dynamo
+    ignores all the side-effects in the __init__, __enter__ and __exit__ methods
+    by treating the object mostly as a `contextlib.nullcontext`, except for edge
+    cases like the `__enter__` method which returns the object itself rather
+    than `None`, per implementation of the torch objects.
+    """
+
+    def __init__(self, **kwargs) -> None:
+        super().__init__(target_values=None, **kwargs)
+
+    def enter(self, tx):
+        return self
+
+    def exit(self, tx: "InstructionTranslator", *args):
+        return variables.ConstantVariable.create(None)
+
+    def module_name(self):
+        return "contextlib"
+
+    def fn_name(self):
+        return "nullcontext"
+
+    def reconstruct(self, cg):
+        unimplemented(
+            """
+Dynamo doesn't support compiling a region that leaks torch profiler context
+objects which will be used outside the region
+"""
+        )
 
 
 class StreamContextVariable(ContextWrappingVariable):
