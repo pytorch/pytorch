@@ -180,6 +180,20 @@ PyTorch will stop publishing Anaconda packages that depend on Anaconda’s defau
 
 The PyTorch binaries shipped with CUDA 12.6.3 are built with CXX11_ABI=1 and are using the Manylinux 2.28 build platform. If you are building PyTorch extensions with custom C++ or CUDA extensions, please update these builds to use CXX_ABI=1 as well and report any issues you are seeing. For the next PyTorch 2.7 release we plan to switch all Linux builds to Manylinux 2.28 and CXX11_ABI=1, please see [[RFC] PyTorch next wheel build platform: manylinux-2.28](https://github.com/pytorch/pytorch/issues/123649) for the details and discussion.
 
+### ONNX
+
+### torch.onnx.export(..., dynamo=True) now creates ONNX models using IR version 10 ([#141207](https://github.com/pytorch/pytorch/pull/141207)) 
+
+ONNX ir_version=10 is used to add support for UINT4, INT4 data types and include metadata in GraphProto and NodeProto.  
+
+###Several obsolete APIs are removed ([#133825, #136279, #137789, #137790](https://github.com/pytorch/pytorch/pull/133825)) 
+
+### TODO is _optimize_graph private? if so, shouldn't be in release notes
+Some logging APIs, `torch.onnx._optimize_graph`, `torch.onnx.ExportTypes`, `torch.onnx.export_to_pretty_string` are removed. Users should use public APIs for model export and remove usage of the APIs above. 
+
+###torch.onnx.ONNXProgram has been reimplemented and improved ([#136281](https://github.com/pytorch/pytorch/pull/136281)) 
+
+All ONNX "dynamo" APIs will return the new ONNXProgram class. Some notable methods available are `save()`, `optimize()`. It can also be directly applied on PyTorch tensors to leverage ONNX Runtime to verify the ONNX graph. Some legacy methods are no longer available.
 
 ## **Deprecations**
 
@@ -204,6 +218,12 @@ The full release compatibility matrix matrix can be found in [release.md](https:
   pg.broadcast([tensor]).wait()
   ```
 * Starting from PT 2.6, when users write the code above, they will get get a warning message “ProcessGroupNCCL OnCompletion hook will be deprecated in favor of Flight Recorder”
+
+### ONNX
+
+### TODO add links to relevant PRs
+* `torch.onnx.dynamo_export()` is deprecated. The supporting classes `ExportOptions`, `ONNXRuntimeOptions`, `DiagnosticOptions` and `OnnxRegistry` are deprecated as well. Please use the `torch.onnx.export(..., dynamo=True)` option going forward. 
+* `torch.onnx.OperatorExportTypes` is deprecated. The only option supported will be converting models to use ONNX operators only. 
 
 ## **New features**
 
@@ -308,6 +328,47 @@ The full release compatibility matrix matrix can be found in [release.md](https:
 * Enables auto functionalize v2 by default ([#136685](https://github.com/pytorch/pytorch/pull/136685)).
 * Adds raise_error_on_ignored_optimization to the aoti config ([#138035](https://github.com/pytorch/pytorch/pull/138035)).
 * Adds stats summary (mean/min/max, etc) for jit inductor tensor value printing ([#135887](https://github.com/pytorch/pytorch/pull/135887)).
+
+### ONNX
+
+### TODO add links to relevant PRs, match formatting, i'm not sure where one bullet begins and next ends for most of these
+
+Models using `torch.cond` is supported 
+
+`torch.cond` is the recommended way to introduce control flows that can be converted to an ONNX model. 
+
+Users can provide a ` custom_translation_table` to provide custom implementations for converting operators to ONNX 
+
+This is useful when you need to override an implementation or provide one that is not currently implemented. Refer to the tutorials for a more complete description of the operator registration mechanism. 
+
+
+```py 
+# Define the translation using ONNX Script 
+from onnxscript import opset18 as op 
+
+
+def sym_not_onnx(input): 
+   return op.Not(input) 
+torch.onnx.export(... 
+  dynamo=True,  
+   custom_translation_table = { # Then provide it here 
+      torch.sym_not: sym_not_onnx,  
+}) 
+``` 
+
+`ONNXProgram` has a new `optimize()` method 
+
+Users can run `optimize()` to flatten nested structures in the ONNX graph, perform constant folding and remove redundancies in the ONNX model. Calling `optimize()` after exporting to ONNX is recommended. 
+
+
+```py 
+onnx_program = torch.onnx.export(..., dynamo=True) 
+onnx_program.optimize()  # Optimize the graph before saving is recommended 
+onnx_program.save(...) 
+``` 
+
+
+* Users can now use complex constants in their models and export to ONNX ([#138279](https://github.com/pytorch/pytorch/pull/138279)) 
 
 ## **Improvements**
 
@@ -653,7 +714,16 @@ We improved the existing `torch.library` APIs and added new ones.
 * Updates Inductor's support for Triton AttrsDescriptor ([#137757](https://github.com/pytorch/pytorch/pull/137757)).
 * Update C++ runner API to take a const vector ([#139955](https://github.com/pytorch/pytorch/pull/139955))
 
+### ONNX
 
+
+* Remove type promotion rule for pow ([#139527](https://github.com/pytorch/pytorch/pull/139527))
+* Prioritize strict=False export strategy ([#139905](https://github.com/pytorch/pytorch/pull/139905))
+* Update TorchTensor implementation to handle fake mode ([#139534](https://github.com/pytorch/pytorch/pull/139534))
+* Use TracedONNXFunction op signature to promote inputs to tensors ([#138770](https://github.com/pytorch/pytorch/pull/138770))
+* Separate decomp into single step and add to the report ([#140767](https://github.com/pytorch/pytorch/pull/140767))
+* Improve the conversion of `from dynamic axes to shapes` ([#140488](https://github.com/pytorch/pytorch/pull/140488))
+* Use the torchlib opset number and fix opset import logic ([#141413](https://github.com/pytorch/pytorch/pull/141413))
 
 ## **Bug fixes**
 
@@ -965,7 +1035,15 @@ We improved the existing `torch.library` APIs and added new ones.
 * Isolate the locale for NNC’s IRPrinter ([#136458](https://github.com/pytorch/pytorch/pull/136458))
 * Fix misuse of offset param in seek ([#140633](https://github.com/pytorch/pytorch/pull/140633))
 
+### ONNX
 
+* Drop final None values as inputs for nodes in exporter graph ([#135520](https://github.com/pytorch/pytorch/pull/135520))
+* Insert contiguous node between transpose and view before calling `run_decompositions` ([#137340](https://github.com/pytorch/pytorch/pull/137340))
+* Fix sequence handling in graph building ([#138656](https://github.com/pytorch/pytorch/pull/138656))
+* Fix 2GB exporting crash during onnx shape type inference ([#140962](https://github.com/pytorch/pytorch/pull/140962))
+* Support from dynamic_shapes to dynamic_axes when `torch.onnx.export(fallback=True)` is triggered  ([#139532](https://github.com/pytorch/pytorch/pull/139532))
+* Remove special handling of `torchvision.ops` imports in onnx export ([#141569](https://github.com/pytorch/pytorch/pull/141569))
+* Fix `tensor.index_fill` when dim=0 #139594 ([#139596](https://github.com/pytorch/pytorch/pull/139596))
 
 ## **Performance**
 
