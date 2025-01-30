@@ -2765,9 +2765,7 @@ Arguments:
           .def(
               "_end_coalescing",
               &::c10d::Backend::endCoalescing,
-              py::call_guard<py::gil_scoped_release>())
-          .def_property_readonly(
-              "mem_allocator", &::c10d::Backend::getMemAllocator);
+              py::call_guard<py::gil_scoped_release>());
 
   // base Backend::Options binding
   // TODO: Maybe we can consider how to merge this with
