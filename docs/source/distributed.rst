@@ -411,10 +411,11 @@ returns a distributed request object. In general, you don't need to create it ma
 is guaranteed to support two methods:
 
 * ``is_completed()`` - in the case of CPU collectives, returns ``True`` if completed. In the case of CUDA operations,
-  returns ``True`` if the operation has been successfully enqueued onto a CUDA stream and the output can be utilized on the
-  stream in which ``is_completed()`` is called without further synchronization.
+  returns ``True`` if the operation has been successfully completed on a CUDA stream, and the output can be utilized
+  on the allocation stream without further synchronization.
 * ``wait()`` - in the case of CPU collectives, will block the process until the operation is completed. In the case
-  of CUDA collectives, will block the CUDA stream in which ``wait()`` is called until the operation is completed (but will not block the CPU).
+  of CUDA collectives, will block the currently active CUDA stream (in which wait() is called) until the operation is
+  completed (but will not block the CPU).
 * ``get_future()`` - returns ``torch._C.Future`` object. Supported for NCCL, also supported for most operations on GLOO
   and MPI, except for peer to peer operations.
   Note: as we continue adopting Futures and merging APIs, ``get_future()`` call might become redundant.
