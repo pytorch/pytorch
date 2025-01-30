@@ -8,7 +8,7 @@ import argparse
 import ast
 import os
 import sys
-from typing import Any, Dict, List, Set, Tuple  # type: ignore[attr-defined]
+from typing import Any  # type: ignore[attr-defined]
 
 from tools.flight_recorder.components.fr_logger import FlightRecorderLogger
 from tools.flight_recorder.components.types import (
@@ -57,12 +57,12 @@ Flat DB builder
 
 def build_groups_memberships(
     pg_config: Any,
-) -> Tuple[
-    List[Group],
-    Dict[Any, Group],
-    List[Membership],
-    Dict[str, Set[Any]],
-    Dict[Tuple[str, int], str],
+) -> tuple[
+    list[Group],
+    dict[Any, Group],
+    list[Membership],
+    dict[str, set[Any]],
+    dict[tuple[str, int], str],
 ]:
     """
     pg_config: {
@@ -126,12 +126,12 @@ def build_groups_memberships(
 
 
 def build_collectives(
-    all_entries: Dict[int, List[Dict[str, Any]]],
-    _groups: Dict[str, Group],
-    _memberships: Dict[str, Set[Any]],
-    _pg_guids: Dict[Tuple[str, int], str],
+    all_entries: dict[int, list[dict[str, Any]]],
+    _groups: dict[str, Group],
+    _memberships: dict[str, set[Any]],
+    _pg_guids: dict[tuple[str, int], str],
     version: str,
-) -> Tuple[List[Traceback], List[Collective], List[NCCLCall]]:
+) -> tuple[list[Traceback], list[Collective], list[NCCLCall]]:
     """
     groups, memberships are the non-flat dicts that are indexable
     all_entries is a raw dict from the original dumps:
@@ -161,10 +161,10 @@ def build_collectives(
     }
     """
     major_v, minor_v = get_version_detail(version)
-    tracebacks: List[Traceback] = []
+    tracebacks: list[Traceback] = []
 
-    collectives: List[Collective] = []
-    nccl_calls: List[NCCLCall] = []
+    collectives: list[Collective] = []
+    nccl_calls: list[NCCLCall] = []
 
     # once we find one mismatch, we stop pairing up collectives since the pairing is possibly incorrect
     # instead, just record the remaining ops as NCCLCalls
@@ -420,7 +420,7 @@ def build_collectives(
 
 
 def build_db(
-    details: Dict[str, Dict[str, Any]], args: argparse.Namespace, version: str
+    details: dict[str, dict[str, Any]], args: argparse.Namespace, version: str
 ) -> Database:
     if args.verbose:
         os.environ["FR_TRACE_VERBOSE_OUTPUT"] = "1"
