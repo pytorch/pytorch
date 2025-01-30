@@ -22,12 +22,12 @@ TEST_DT_PLUS_30S = TEST_DT_BASE + timedelta(seconds=30)
 TEST_DT_PLUS_40S = TEST_DT_BASE + timedelta(seconds=40)
 
 # timestamps from January 1, 2022 12:00:00
-TEST_TS_BASE = TEST_DT_BASE.timestamp()
-TEST_TS_PLUS_5S = TEST_DT_PLUS_5S.timestamp()
-TEST_TS_PLUS_10S = TEST_DT_PLUS_10S.timestamp()
-TEST_TS_PLUS_15S = TEST_DT_PLUS_15S.timestamp()
-TEST_TS_PLUS_30S = TEST_DT_PLUS_30S.timestamp()
-TEST_TS_PLUS_40S = TEST_DT_PLUS_40S.timestamp()
+TEST_TS_BASE = int(TEST_DT_BASE.timestamp())
+TEST_TS_PLUS_5S = int(TEST_DT_PLUS_5S.timestamp())
+TEST_TS_PLUS_10S = int(TEST_DT_PLUS_10S.timestamp())
+TEST_TS_PLUS_15S = int(TEST_DT_PLUS_15S.timestamp())
+TEST_TS_PLUS_30S = int(TEST_DT_PLUS_30S.timestamp())
+TEST_TS_PLUS_40S = int(TEST_DT_PLUS_40S.timestamp())
 
 
 # test cmd names
@@ -156,8 +156,8 @@ class TestSegmentGenerator(unittest.TestCase):
         self, segment: OssCiSegmentV1, name: str, start_at: float, end_at: float
     ) -> None:
         self.assertEqual(segment.name, name)
-        self.assertEqual(segment.start_at, str(int(start_at)))
-        self.assertEqual(segment.end_at, str(int(end_at)))
+        self.assertEqual(segment.start_at, start_at)
+        self.assertEqual(segment.end_at, end_at)
 
 
 def get_base_test_records() -> list[UtilizationRecord]:
