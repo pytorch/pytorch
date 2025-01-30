@@ -417,9 +417,9 @@ class ConstDictVariable(VariableTracker):
         elif name in ("pop", "get") and len(args) in (1, 2) and args[0] not in self:
             # missing item, return the default value. Install no DICT_CONTAINS guard.
             self.install_dict_contains_guard(tx, args)
-            if name == "pop":
-                raise_observed_exception(KeyError, tx)
             if len(args) == 1:
+                if name == "pop":
+                    raise_observed_exception(KeyError, tx)
                 return ConstantVariable(None)
             else:
                 return args[1]
