@@ -101,9 +101,19 @@ SpacesInParentheses: false
 SpacesInSquareBrackets: false
 Standard:        c++17
 StatementMacros:
+  - C10_DEFINE_bool
+  - C10_DEFINE_int
+  - C10_DEFINE_int32
+  - C10_DEFINE_int64
+  - C10_DEFINE_string
+  - C10_DEFINE_REGISTRY_WITHOUT_WARNING
+  - C10_REGISTER_CREATOR
+  - DEFINE_BINARY
   - PyObject_HEAD
   - PyObject_VAR_HEAD
   - PyException_HEAD
+  - TORCH_DECLARE_bool
+
 TabWidth:        8
 UseTab:          Never
 ---

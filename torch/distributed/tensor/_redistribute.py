@@ -1,8 +1,8 @@
 # mypy: allow-untyped-defs
 # Copyright (c) Meta Platforms, Inc. and affiliates
 import logging
-from functools import lru_cache
-from typing import cast, List, NamedTuple, Tuple
+from functools import cache
+from typing import cast, NamedTuple
 
 import torch
 import torch.distributed._functional_collectives as funcol
@@ -22,15 +22,15 @@ logger = logging.getLogger(__name__)
 
 class _TransformInfo(NamedTuple):
     mesh_dim: int
-    src_dst_placements: Tuple[Placement, Placement]
+    src_dst_placements: tuple[Placement, Placement]
     # logical_shape on this mesh dimension
-    logical_shape: List[int]
+    logical_shape: list[int]
 
 
 def _gen_transform_infos_non_cached(
     src_spec: DTensorSpec,
     dst_spec: DTensorSpec,
-) -> List[_TransformInfo]:
+) -> list[_TransformInfo]:
     """
     Generate the transform infos from the source placements to the target placements.
 
@@ -42,7 +42,7 @@ def _gen_transform_infos_non_cached(
     the former is a nested-sharding of a tensor already already sharded dimension 0, whereras
     the latter is the first sharding on tensor dimension 0.
     """
-    transform_infos: List[_TransformInfo] = []
+    transform_infos: list[_TransformInfo] = []
 
     device_mesh = src_spec.device_mesh
     my_coordinate = device_mesh.get_coordinate()
@@ -67,7 +67,7 @@ def _gen_transform_infos_non_cached(
     # Handle multi-dim device mesh placement redistribution
     # First, we need to build the logical shape for each mesh dim
     # for correct allgathering uneven shards on each mesh dim (with dynamic padding)
-    for i, (src, dst) in enumerate(zip(src_spec.placements, dst_spec.placements)):
+    for i, src in enumerate(src_spec.placements):
         current_logical_shape = mesh_dims_to_logical_shape[i]
         if isinstance(src, Shard):
             if i < device_mesh.ndim - 1:
@@ -145,11 +145,11 @@ def _gen_transform_infos_non_cached(
     return transform_infos
 
 
-@lru_cache(maxsize=None)
+@cache
 def _gen_transform_infos(
     src_spec: DTensorSpec,
     dst_spec: DTensorSpec,
-) -> List[_TransformInfo]:
+) -> list[_TransformInfo]:
     return _gen_transform_infos_non_cached(src_spec, dst_spec)
 
 
@@ -192,7 +192,7 @@ def redistribute_local_tensor(
     for transform_info in transform_infos:
         i = transform_info.mesh_dim
         current, target = transform_info.src_dst_placements
-        num_chunks = device_mesh.size(mesh_dim=i)
+        device_mesh.size(mesh_dim=i)
 
         if current == target:
             # short cut, just use the original local tensor
@@ -220,7 +220,6 @@ def redistribute_local_tensor(
         elif target.is_shard():
             # Case 2: target is Shard
             target_placement = cast(Shard, target)
-            target_dim = target_placement.dim
             if current.is_partial():
                 partial_spec = cast(Partial, current)
                 new_local_tensor = partial_spec._reduce_shard_value(
@@ -291,7 +290,7 @@ class Redistribute(torch.autograd.Function):
         ctx,
         input: "dtensor.DTensor",
         device_mesh: DeviceMesh,
-        placements: Tuple[Placement, ...],
+        placements: tuple[Placement, ...],
         async_op: bool = False,
     ):
         current_spec = input._spec
@@ -333,7 +332,7 @@ class Redistribute(torch.autograd.Function):
             is_backward=True,
         )
         # normalize the target placement to replicate if it is partial
-        normalized_placements: List[Placement] = []
+        normalized_placements: list[Placement] = []
         for previous_placement in previous_spec.placements:
             if previous_placement.is_partial():
                 # keep target placement to replicate instead of partial in this case

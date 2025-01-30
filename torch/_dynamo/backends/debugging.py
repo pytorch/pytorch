@@ -4,7 +4,7 @@ import dataclasses
 import functools
 import logging
 from importlib import import_module
-from typing import Any, List, Optional
+from typing import Any, Optional
 
 import torch
 from functorch.compile import min_cut_rematerialization_partition
@@ -118,6 +118,38 @@ def boxed_nop(fx_g, example_inputs):
     return run
 
 
+def boxed_nop_with_mode(fx_g, example_inputs, *, mode):
+    def run(args):
+        with mode:
+            return torch.fx.Interpreter(fx_g).boxed_run(args)
+
+    run._boxed_call = True
+    return run
+
+
+def fake_crossref_boxed_nop(fx_g, example_inputs, ignore_op_fn=None):
+    def run(args):
+        with torch._subclasses.CrossRefFakeMode(ignore_op_fn):
+            return torch.fx.Interpreter(fx_g).boxed_run(args)
+
+    run._boxed_call = True
+    return run
+
+
+def ignore_builtins(op: torch._ops.OpOverload) -> bool:
+    return op.namespace in ("aten", "prims", "prim")
+
+
+def get_nop_func():
+    if not torch._functorch.config.fake_tensor_crossref:
+        return boxed_nop
+    elif torch._functorch.config.fake_tensor_crossref == "all":
+        return fake_crossref_boxed_nop
+    else:
+        assert torch._functorch.config.fake_tensor_crossref == "custom_ops"
+        return functools.partial(fake_crossref_boxed_nop, ignore_op_fn=ignore_builtins)
+
+
 # Useful for debugging purpose
 # aot_eager uses AOT Autograd backend with nop compiler. It is helpful in debugging.
 def aot_eager(
@@ -155,10 +187,10 @@ def aot_eager_decomp_partition(gm, fake_tensor_inputs, **kwargs):
             "aot_eager_decomp_partition backend ignoring extra kwargs %s", kwargs
         )
 
-    from torch._inductor.bisect_helper import BisectionManager
+    from torch._inductor.compiler_bisector import CompilerBisector
 
     config_patches = {"unlift_effect_tokens": True}
-    if bisect_changes := BisectionManager.get_config_change(
+    if bisect_changes := CompilerBisector.get_config_change(
         "aot_eager_decomp_partition"
     ):
         config_patches.update(bisect_changes)
@@ -166,8 +198,8 @@ def aot_eager_decomp_partition(gm, fake_tensor_inputs, **kwargs):
     with functorch_config.patch(config_patches):
         return aot_autograd(
             # these are taken from memory_efficient_fusion()
-            fw_compiler=boxed_nop,
-            bw_compiler=boxed_nop,
+            fw_compiler=get_nop_func(),
+            bw_compiler=get_nop_func(),
             # NB: lambda here is to delay import of inductor
             decompositions=lambda: import_module(
                 "torch._inductor.compile_fx"
@@ -180,6 +212,48 @@ def aot_eager_decomp_partition(gm, fake_tensor_inputs, **kwargs):
 
 register_backend(
     name="aot_eager_decomp_partition", compiler_fn=aot_eager_decomp_partition
+)
+
+
+# aot_eager_decomp_partition_with_mode is similar as aot_eager_decomp_partition,
+# except that it takes a TorchDispatchMode mode and run the fw/bw in the mode
+def aot_eager_decomp_partition_with_mode(gm, fake_tensor_inputs, mode, **kwarg):
+    return aot_autograd(
+        # these are taken from memory_efficient_fusion()
+        fw_compiler=functools.partial(boxed_nop_with_mode, mode=mode),
+        bw_compiler=functools.partial(boxed_nop_with_mode, mode=mode),
+        # NB: lambda here is to delay import of inductor
+        decompositions=lambda: import_module(
+            "torch._inductor.compile_fx"
+        ).select_decomp_table(),
+        partition_fn=functools.partial(
+            min_cut_rematerialization_partition, compiler="inductor"
+        ),
+    )(gm, fake_tensor_inputs)
+
+
+register_backend(
+    name="aot_eager_decomp_partition_with_mode",
+    compiler_fn=aot_eager_decomp_partition_with_mode,
+)
+
+
+def aot_eager_decomp_partition_crossref(gm, fake_tensor_inputs, **kwargs):
+    # if the config is set, respect it, otherwise only test custom_ops.
+    # custom_op bad metas always manifest as an error whereas aten will only sometimes.
+    # by default, use the less noisy option
+    config_val = (
+        "custom_ops"
+        if not functorch_config.fake_tensor_crossref
+        else functorch_config.fake_tensor_crossref
+    )
+    with functorch_config.patch(fake_tensor_crossref=config_val):
+        return aot_eager_decomp_partition(gm, fake_tensor_inputs, **kwargs)
+
+
+register_backend(
+    name="aot_eager_decomp_partition_crossref",
+    compiler_fn=aot_eager_decomp_partition_crossref,
 )
 
 
@@ -252,15 +326,15 @@ class ExplainOutput:
     There is no reason to create this class directly.
     """
 
-    graphs: List[torch.fx.GraphModule]
+    graphs: list[torch.fx.GraphModule]
     graph_count: int
     graph_break_count: int
-    break_reasons: List[
+    break_reasons: list[
         Any
     ]  # Type is GraphCompileReason but doesn't matter for this purpose
     op_count: int
-    ops_per_graph: Optional[List[torch.fx.Node]] = None
-    out_guards: Optional[List[_guards.Guard]] = None
+    ops_per_graph: Optional[list[torch.fx.Node]] = None
+    out_guards: Optional[list[_guards.Guard]] = None
     compile_times: Optional[str] = None
 
     def __str__(self) -> str:
@@ -270,7 +344,7 @@ class ExplainOutput:
 
         output += "Break Reasons:\n"
         for idx, break_reason in enumerate(self.break_reasons):
-            output += f"  Break Reason {idx+1}:\n"
+            output += f"  Break Reason {idx + 1}:\n"
             output += f"    Reason: {break_reason.reason}\n"
             output += "    User Stack:\n"
             for frame_summary in break_reason.user_stack:
@@ -279,14 +353,14 @@ class ExplainOutput:
         if self.ops_per_graph is not None:
             output += "Ops per Graph:\n"
             for idx, ops in enumerate(self.ops_per_graph):
-                output += f"  Ops {idx+1}:\n"
+                output += f"  Ops {idx + 1}:\n"
                 for op in ops:
                     output += f"    {op}\n"
 
         if self.out_guards is not None:
             output += "Out Guards:\n"
             for i, guard in enumerate(self.out_guards):
-                output += f"  Guard {i+1}:\n"
+                output += f"  Guard {i + 1}:\n"
                 output += f"    {str(guard)}"
 
         if self.compile_times is not None:

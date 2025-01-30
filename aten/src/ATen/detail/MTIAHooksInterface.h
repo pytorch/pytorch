@@ -31,7 +31,7 @@ struct TORCH_API MTIAHooksInterface : AcceleratorHooksInterface {
 
   ~MTIAHooksInterface() override = default;
 
-  virtual void initMTIA() const {
+  void init() const override {
     // Avoid logging here, since MTIA needs init devices first then it will know
     // how many devices are available. Make it as no-op if mtia extension is not
     // dynamically loaded.
@@ -109,11 +109,34 @@ struct TORCH_API MTIAHooksInterface : AcceleratorHooksInterface {
     FAIL_MTIAHOOKS_FUNC(__func__);
     return nullptr;
   }
+
+  virtual void emptyCache() const {
+    FAIL_MTIAHOOKS_FUNC(__func__);
+  }
+
+
+  virtual void recordMemoryHistory(
+    const std::optional<std::string>& enabled,
+    const std::string& stacks,
+    size_t max_entries) const {
+    FAIL_MTIAHOOKS_FUNC(__func__);
+  }
+
+  virtual PyObject* memorySnapshot() const {
+    FAIL_MTIAHOOKS_FUNC(__func__);
+    return nullptr;
+  }
+
+  virtual DeviceIndex getDeviceCount() const {
+    FAIL_MTIAHOOKS_FUNC(__func__);
+    return 0;
+  }
+
 };
 
 struct TORCH_API MTIAHooksArgs {};
 
-C10_DECLARE_REGISTRY(MTIAHooksRegistry, MTIAHooksInterface, MTIAHooksArgs);
+TORCH_DECLARE_REGISTRY(MTIAHooksRegistry, MTIAHooksInterface, MTIAHooksArgs);
 #define REGISTER_MTIA_HOOKS(clsname) \
   C10_REGISTER_CLASS(MTIAHooksRegistry, clsname, clsname)
 

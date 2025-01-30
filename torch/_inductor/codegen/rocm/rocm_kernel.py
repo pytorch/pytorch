@@ -1,12 +1,13 @@
 # mypy: allow-untyped-defs
 import logging
-from typing import Callable, Dict, List, Optional, TYPE_CHECKING, Union
+from collections.abc import Sequence
+from typing import Callable, Optional, TYPE_CHECKING, Union
 
 from torch._inductor.codegen.cpp_wrapper_cpu import CppWrapperCpu
 
 from ...ir import Buffer, ChoiceCaller, IRNode, Layout, PrimitiveInfoType, TensorBox
 from ...virtualized import V
-from ..common import Kernel, OpOverrides
+from ..common import Kernel, OpOverrides, WorkspaceArg, WorkspaceZeroMode
 from ..cpp_utils import CppPrinter
 from .rocm_benchmark_request import ROCmBenchmarkRequest
 from .rocm_template_buffer import ROCmTemplateBuffer
@@ -49,7 +50,7 @@ class ROCmTemplateKernel(ROCmKernel):
         super().__init__()
         self.kernel_name = kernel_name
         # Mapping from arg name to IRNode.
-        self.named_nodes: Dict[str, IRNode] = {}
+        self.named_nodes: dict[str, IRNode] = {}
 
     def arg_name(self, node: IRNode) -> Optional[str]:
         """
@@ -66,11 +67,11 @@ class ROCmTemplateKernel(ROCmKernel):
 
     def def_kernel(
         self,
-        inputs: List[IRNode],
-        outputs: List[IRNode],
-        size_args: List[str],
+        inputs: list[IRNode],
+        outputs: list[IRNode],
+        size_args: list[str],
         names_str: str = "",
-        input_reorder: Optional[List[int]] = None,
+        input_reorder: Optional[list[int]] = None,
     ) -> str:
         """
         Hook called from template code to generate function definition and
@@ -85,12 +86,14 @@ class ROCmTemplateKernel(ROCmKernel):
                            and the actual input passed into this template could be [Bias, X, W].
                            In this case, the `input_reorder` would be [2, 0, 1].
         """
-
         names = [x.strip() for x in names_str.strip().split(",")]
         if len(inputs) + len(outputs) != len(names):
             raise RuntimeError(
                 f"{len(inputs) + len(outputs)=} != {len(names)=}, {inputs=}, {outputs=}, {names=}"
             )
+
+        if input_reorder == [2, 0, 1]:
+            input_reorder = [4, 0, 1, 2, 3]
 
         if input_reorder is not None:
             assert len(inputs) == len(input_reorder)
@@ -111,7 +114,7 @@ class ROCmTemplateKernel(ROCmKernel):
 
         arg_defs, *_ = self.args.cpp_argdefs()
 
-        signature = f"int {self.kernel_name}({', '.join(arg_defs)}, {', '.join(size_args)}, {self._EXTRA_CPP_ARGS})"
+        signature = f"int {self.kernel_name}({', '.join(arg_defs + size_args)}, {self._EXTRA_CPP_ARGS})"
         self.signature = signature
         return signature
 
@@ -170,19 +173,24 @@ class ROCmTemplateKernel(ROCmKernel):
             arg_types.append("size_t*")
 
         if node.get_workspace_size() > 0:
-            wrapper.generate_workspace_allocation(
-                node.get_workspace_size(), V.graph.scheduler.current_device, False
+            ws = WorkspaceArg(
+                count=node.get_workspace_size(),
+                device=V.graph.get_current_device_or_throw(),
+                zero_mode=WorkspaceZeroMode.UNINITIALIZED,
+                outer_name=WorkspaceArg.unique_name(),
             )
-            data_ptr = "workspace.data_ptr()"
+            wrapper.generate_workspace_allocation(ws)
+            data_ptr = f"{ws.outer_name}.data_ptr()"
             kernel_args.append(
                 data_ptr if V.graph.cpp_wrapper else f"c_void_p({data_ptr})"
             )
         else:
+            ws = None
             kernel_args.append("nullptr" if V.graph.cpp_wrapper else "None")
         if V.graph.cpp_wrapper:
             arg_types.append("uint8_t*")
 
-        current_device = V.graph.scheduler.get_current_device_or_throw()
+        current_device = V.graph.get_current_device_or_throw()
         wrapper.generate_kernel_call(
             name,
             kernel_args,
@@ -191,8 +199,8 @@ class ROCmTemplateKernel(ROCmKernel):
             triton=False,
             arg_types=arg_types,
         )
-        if node.get_workspace_size() > 0:
-            wrapper.writeline(wrapper.make_free_by_names(["workspace"]))
+        if ws:
+            wrapper.generate_workspace_deallocation(ws)
 
 
 class ROCmTemplateCaller(ChoiceCaller):
@@ -211,12 +219,14 @@ class ROCmTemplateCaller(ChoiceCaller):
         self,
         name: str,
         category: str,
-        input_nodes: List[Buffer],
+        input_nodes: list[Buffer],
         layout: Layout,
-        make_kernel_render: Callable[[ROCmTemplateBuffer, Optional[List[IRNode]]], str],
+        make_kernel_render: Callable[
+            [ROCmTemplateBuffer, Optional[Sequence[IRNode]]], str
+        ],
         bmreq: ROCmBenchmarkRequest,
         template: "ROCmTemplate",  # type: ignore[name-defined]
-        info_kwargs: Optional[Dict[str, Union[PrimitiveInfoType, List[PrimitiveInfoType]]]],  # type: ignore[type-arg]
+        info_kwargs: Optional[dict[str, Union[PrimitiveInfoType, list[PrimitiveInfoType]]]],  # type: ignore[type-arg]
     ) -> None:
         super().__init__(name, input_nodes, layout, description="")
         self.category = category
@@ -247,7 +257,7 @@ class ROCmTemplateCaller(ChoiceCaller):
             ]
         )
 
-    def info_dict(self) -> Dict[str, Union[PrimitiveInfoType, List[PrimitiveInfoType]]]:
+    def info_dict(self) -> dict[str, Union[PrimitiveInfoType, list[PrimitiveInfoType]]]:
         """Information returned here is logged to the autotune log file when that is enabled."""
         return {
             "backend": "ROCm",

@@ -154,7 +154,7 @@ static bool THPStorage_isPreservable(THPStorage* self) {
 
   if (storage.unsafeGetStorageImpl()->pyobj_slot()->check_pyobj(
           getPyInterpreter(), /*ignore_hermetic_tls=*/true) !=
-      std::make_optional((PyObject*)self)) {
+      (PyObject*)self) {
     return false;
   }
   if (storage.use_count() <= 1) {
@@ -588,9 +588,12 @@ struct THPStorageMeta {
   PyHeapTypeObject base;
 };
 
-int THPStorageMetaType_init(PyObject* cls, PyObject* args, PyObject* kwargs);
+static int THPStorageMetaType_init(
+    PyObject* cls,
+    PyObject* args,
+    PyObject* kwargs);
 
-PyTypeObject THPStorageMetaType = {
+static PyTypeObject THPStorageMetaType = {
     PyVarObject_HEAD_INIT(DEFERRED_ADDRESS(&PyType_Type), 0)
     "torch._C._StorageMeta", /* tp_name */
     sizeof(THPStorageMeta), /* tp_basicsize */
@@ -692,7 +695,7 @@ static PyObject* THPStorage_device(THPStorage* self, void* unused) {
   END_HANDLE_TH_ERRORS
 }
 
-PyObject* THPStorage_get_cdata(THPStorage* self, void* unused) {
+static PyObject* THPStorage_get_cdata(THPStorage* self, void* unused) {
   HANDLE_TH_ERRORS
   return PyLong_FromVoidPtr(THPStorage_Unpack(self).unsafeGetStorageImpl());
   END_HANDLE_TH_ERRORS

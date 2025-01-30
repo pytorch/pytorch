@@ -1,25 +1,13 @@
 #pragma once
 
-#include <torch/detail/static.h>
-#include <torch/nn/module.h>
 #include <torch/nn/modules/container/any.h>
-#include <torch/nn/pimpl.h>
 #include <torch/types.h>
 
-#include <torch/csrc/autograd/variable.h>
-#include <torch/csrc/utils/variadic.h>
-
-#include <ATen/Device.h>
-
-#include <initializer_list>
 #include <memory>
 #include <type_traits>
-#include <typeinfo>
 #include <utility>
-#include <vector>
 
-namespace torch {
-namespace nn {
+namespace torch::nn {
 
 /// Stores a type erased `Module` with name.
 ///
@@ -51,13 +39,13 @@ class NamedAnyModule {
 
   /// Creates a `NamedAnyModule` from a `Module`, moving or copying it
   /// into a `shared_ptr` internally.
-  // NOTE: We need to use `std::remove_reference<M>::type` to get rid of
+  // NOTE: We need to use `std::remove_reference_t<M>` to get rid of
   // any reference components for make_unique.
   template <typename M, typename = torch::detail::enable_if_module_t<M>>
   NamedAnyModule(std::string name, M&& module)
       : NamedAnyModule(
             std::move(name),
-            std::make_shared<typename std::remove_reference<M>::type>(
+            std::make_shared<std::remove_reference_t<M>>(
                 std::forward<M>(module))) {}
 
   /// Creates a `NamedAnyModule` from a `Module` that is unwrapped from
@@ -90,5 +78,4 @@ class NamedAnyModule {
   AnyModule module_;
 };
 
-} // namespace nn
-} // namespace torch
+} // namespace torch::nn

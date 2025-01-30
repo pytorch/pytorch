@@ -25,7 +25,7 @@ void index_kernel(TensorIteratorBase& iter, IntArrayRef index_size, IntArrayRef 
   AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND4(kComplexHalf, kHalf, kBool, kBFloat16,
     iter.dtype(), "index_cpu", [&] {
     cpu_index_kernel<scalar_t>(iter, index_size, index_stride, [](char* dst, char* src, int64_t offset) {
-      *(scalar_t*)dst = *(scalar_t*)(src + offset);
+      *(scalar_t*)dst = c10::load((scalar_t*)(src + offset));
     });
   });
 }
@@ -78,7 +78,7 @@ void cpu_take_put_kernel(
   auto loop = [&](char** data, const int64_t* strides, int64_t n) {
     auto* iterated_data_bytes = data[0];
     auto* index_data_bytes = data[1];
-    for (C10_UNUSED const auto elem : c10::irange(n)) {
+    for ([[maybe_unused]] const auto elem : c10::irange(n)) {
       auto idx = *reinterpret_cast<int64_t*>(index_data_bytes);
       auto& iterated = *reinterpret_cast<scalar_t*>(iterated_data_bytes);
 
@@ -128,14 +128,14 @@ void put_kernel(
         // Unlike the non-accumulate case, this needs to be thread-safe.
         cpu_take_put_kernel<scalar_t>(iter, self, true,
             [](scalar_t& iterated, scalar_t* indexed, const int64_t idx) {
-                indexed[idx] += iterated;
+                indexed[idx] += c10::load(&iterated);
               },
             /*serial_execution=*/true);
       }
     } else {
       cpu_take_put_kernel<scalar_t>(iter, self, true,
           [](scalar_t& iterated, scalar_t* indexed, const int64_t idx) {
-              indexed[idx] = iterated;
+              indexed[idx] = c10::load(&iterated);
             });
     }
   });
@@ -148,7 +148,7 @@ void take_kernel(
     iter.dtype(), "take_cpu", [&] {
       cpu_take_put_kernel<scalar_t>(iter, input, false,
           [](scalar_t& iterated, const scalar_t* indexed, const int64_t idx) {
-              iterated = indexed[idx];
+              iterated = c10::load(&(indexed[idx]));
             });
     });
 }
@@ -174,12 +174,12 @@ void index_put_kernel(TensorIterator& iter, IntArrayRef index_size, IntArrayRef 
           // TODO: investigate parallelization of the accumulate kernel. Unlike the non-accumulate case,
           // this needs to be thread-safe.
           cpu_index_kernel<scalar_t>(iter, index_size, index_stride, [](char* dst, char* src, int64_t offset) {
-            *(scalar_t*)(dst + offset) += *(scalar_t*)src;
+            *(scalar_t*)(dst + offset) += c10::load(reinterpret_cast<scalar_t*>(src));
           }, /*serial_execution=*/true);
         }
       } else {
         cpu_index_kernel<scalar_t>(iter, index_size, index_stride, [](char* dst, char* src, int64_t offset) {
-          *(scalar_t*)(dst + offset) = *(scalar_t*)src;
+          *(scalar_t*)(dst + offset) = c10::load(reinterpret_cast<scalar_t*>(src));
         }, /*serial_execution=*/is_deterministic);
       }
     }),
@@ -203,7 +203,7 @@ void index_fill_kernel(
     auto handle_nonzero_idx_stride = [&](char** data, const int64_t* strides, int64_t n) {
       auto* self_data_bytes = data[0];
       auto* index_data_bytes = data[1];
-      for (C10_UNUSED const auto elem : c10::irange(n)) {
+      for ([[maybe_unused]] const auto elem : c10::irange(n)) {
         auto* self_data = reinterpret_cast<scalar_t*>(self_data_bytes);
         auto idx = *reinterpret_cast<int64_t*>(index_data_bytes);
         TORCH_CHECK_INDEX(idx >= -self_dim_size && idx < self_dim_size,
@@ -229,7 +229,7 @@ void index_fill_kernel(
       if (idx < 0) {
         idx += self_dim_size;
       }
-      for (C10_UNUSED const auto elem: c10::irange(n)) {
+      for ([[maybe_unused]] const auto elem : c10::irange(n)) {
         auto* self_data = reinterpret_cast<scalar_t*>(self_data_bytes);
 
         self_data[idx * self_dim_stride] = fill_val;
@@ -262,7 +262,7 @@ void index_copy_kernel(
       auto* self_data_bytes = data[0];
       auto* index_data_bytes = data[1];
       auto* source_data_bytes = data[2];
-      for (C10_UNUSED const auto elem : c10::irange(n)) {
+      for ([[maybe_unused]] const auto elem : c10::irange(n)) {
         auto* self_data = reinterpret_cast<scalar_t*>(self_data_bytes);
         auto idx = *reinterpret_cast<int64_t*>(index_data_bytes);
         auto* source_data = reinterpret_cast<scalar_t*>(source_data_bytes);
@@ -270,7 +270,7 @@ void index_copy_kernel(
               "index_copy_(): index ", idx, " is out of bounds for dimension ",
               dim, " with size ", self_dim_size);
 
-        self_data[idx * self_dim_stride] = *source_data;
+        self_data[idx * self_dim_stride] = c10::load(source_data);
 
         self_data_bytes += strides[0];
         index_data_bytes += strides[1];
@@ -285,11 +285,11 @@ void index_copy_kernel(
       TORCH_CHECK_INDEX(idx >= 0 && idx < self_dim_size,
             "index_copy_(): index ", idx, " is out of bounds for dimension ",
             dim, " with size ", self_dim_size);
-      for (C10_UNUSED const auto elem : c10::irange(n)) {
+      for ([[maybe_unused]] const auto elem : c10::irange(n)) {
         auto* self_data = reinterpret_cast<scalar_t*>(self_data_bytes);
         auto* source_data = reinterpret_cast<scalar_t*>(source_data_bytes);
 
-        self_data[idx * self_dim_stride] = *source_data;
+        self_data[idx * self_dim_stride] = c10::load(source_data);
 
         self_data_bytes += strides[0];
         source_data_bytes += strides[2];
@@ -320,7 +320,7 @@ void cpu_masked_fill_kernel(TensorIterator& iter, scalar_t value) {
     char* dst = data[0];
     char* mask = data[1];
     for (const auto i : c10::irange(n)) {
-      bool mask_value = *reinterpret_cast<bool*>(mask + strides[1] * i);
+      bool mask_value = c10::load(reinterpret_cast<bool*>(mask + strides[1] * i));
 
       if (mask_value) {
         *(scalar_t*)(dst + strides[0] * i) = value;
@@ -353,10 +353,11 @@ void cpu_masked_scatter_kernel(TensorIterator& iter, const TensorBase& source) {
     char* mask = data[1];
     const int64_t mask_stride = strides[1];
     for (const auto i : c10::irange(n)) {
-      auto mask_value = *reinterpret_cast<bool*>(mask + mask_stride * i);
+      auto mask_value = c10::load(reinterpret_cast<bool*>(mask + mask_stride * i));
+
       if (mask_value) {
         TORCH_CHECK(source_cntr < numel, "Number of elements of source < number of ones in mask");
-        *(scalar_t*)(dst + dst_stride * i) = *(source_ptr);
+        *(scalar_t*)(dst + dst_stride * i) = c10::load(source_ptr);
         source_ptr++;
         source_cntr++;
       }
@@ -387,8 +388,8 @@ void cpu_masked_select_serial_kernel(TensorIterator& iter, const func_t& f) {
     char* src = data[1];
     char* mask = data[2];
     for (const auto i : c10::irange(n)) {
-      mask_t mask_value = *(mask_t*)(mask + strides[2] * i);
-      if constexpr (!std::is_same<mask_t, bool>::value) {
+      mask_t mask_value = c10::load((mask_t*)(mask + strides[2] * i));
+      if constexpr (!std::is_same_v<mask_t, bool>) {
         TORCH_CHECK(mask_value == 0 || mask_value == 1, "Mask tensor can take 0 and 1 values only");
       }
       if (mask_value) {
@@ -402,19 +403,24 @@ void cpu_masked_select_serial_kernel(TensorIterator& iter, const func_t& f) {
 }
 
 void masked_select_serial_kernel(TensorIterator& iter, int64_t result_stride) {
-  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(ScalarType::Bool, ScalarType::BFloat16, ScalarType::Half,
-    iter.dtype(), "masked_select", [&] {
+  AT_DISPATCH_V2(iter.dtype(), "masked_select", AT_WRAP([&] {
       auto mask_dtype = iter.input_dtype(1);
       if (mask_dtype == ScalarType::Bool) {
         cpu_masked_select_serial_kernel<scalar_t, bool>(iter, [result_stride](char* dst, char* src, int64_t offset) {
-          *(scalar_t*)(dst + offset*result_stride) = *(scalar_t*)src;
+          *(scalar_t*)(dst + offset*result_stride) = c10::load((scalar_t*)src);
         });
       } else {
         cpu_masked_select_serial_kernel<scalar_t, unsigned char>(iter, [result_stride](char* dst, char* src, int64_t offset) {
-          *(scalar_t*)(dst + offset*result_stride) = *(scalar_t*)src;
+          *(scalar_t*)(dst + offset*result_stride) = c10::load((scalar_t*)src);
         });
       }
-    });
+    }),
+    AT_EXPAND(AT_ALL_TYPES_AND_COMPLEX),
+    AT_EXPAND(AT_FLOAT8_TYPES),
+    kComplexHalf,
+    kHalf,
+    kBool,
+    kBFloat16);
 }
 
 template <typename scalar_t, typename mask_t, typename func_t>
@@ -425,8 +431,8 @@ void cpu_masked_select_kernel(TensorIterator& iter, const func_t& f) {
     char* mask = data[2];
     char* mask_prefix_sum = data[3];
     for (const auto i : c10::irange(n)) {
-      mask_t mask_value = *(mask_t*)(mask + strides[2] * i);
-      if constexpr (!std::is_same<mask_t, bool>::value) {
+      mask_t mask_value = c10::load((mask_t*)(mask + strides[2] * i));
+      if constexpr (!std::is_same_v<mask_t, bool>) {
         TORCH_CHECK(mask_value == 0 || mask_value == 1, "Mask tensor can take 0 and 1 values only");
       }
       if (mask_value) {
@@ -440,19 +446,24 @@ void cpu_masked_select_kernel(TensorIterator& iter, const func_t& f) {
 }
 
 void masked_select_kernel(TensorIterator& iter, int64_t result_stride) {
-  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(ScalarType::Bool, ScalarType::BFloat16, ScalarType::Half,
-    iter.dtype(), "masked_select", [&] {
+  AT_DISPATCH_V2(iter.dtype(), "masked_select", AT_WRAP([&] {
       auto mask_dtype = iter.input_dtype(1);
       if (mask_dtype == ScalarType::Bool) {
         cpu_masked_select_kernel<scalar_t, bool>(iter, [result_stride](char* dst, char* src, int64_t offset) {
-          *(scalar_t*)(dst + offset*result_stride) = *(scalar_t*)src;
+          *(scalar_t*)(dst + offset*result_stride) = c10::load((scalar_t*)src);
         });
       } else {
         cpu_masked_select_kernel<scalar_t, unsigned char>(iter, [result_stride](char* dst, char* src, int64_t offset) {
           *(scalar_t*)(dst + offset*result_stride) = *(scalar_t*)src;
         });
       }
-    });
+    }),
+    AT_EXPAND(AT_ALL_TYPES_AND_COMPLEX),
+    AT_EXPAND(AT_FLOAT8_TYPES),
+    kComplexHalf,
+    kHalf,
+    kBool,
+    kBFloat16);
 }
 
 template <typename scalar_t>
@@ -474,8 +485,7 @@ void cpu_hflip_vec(at::TensorIterator& iter) {
     constexpr auto stride = sizeof(scalar_t);
     TORCH_INTERNAL_ASSERT(stride == -strides[0] && stride == strides[1]);
 
-    for (C10_UNUSED const auto j : c10::irange(size1)) {
-
+    for ([[maybe_unused]] const auto j : c10::irange(size1)) {
       // vectorized loop with negative stride for output
       char** C10_RESTRICT data_ = data_arr.data();
       int64_t n = size0;
@@ -492,7 +502,7 @@ void cpu_hflip_vec(at::TensorIterator& iter) {
       offset = (offset >= n) ? n : offset;
       for (; i < offset; i++) {
         scalar_t* out_ptr = (scalar_t*)(data[0] - i * stride);
-        *out_ptr = *(scalar_t *)(data[1] + i * stride);
+        *out_ptr = c10::load((scalar_t *)(data[1] + i * stride));
       }
       // Empirically found that it is faster to process 3 data items together vs 2 or 4
       for (; i <= n - 3 * Vec::size(); i += 3 * Vec::size()) {
@@ -510,7 +520,7 @@ void cpu_hflip_vec(at::TensorIterator& iter) {
       if (i < n) {
         for (; i < n; i++) {
           scalar_t* out_ptr = (scalar_t*)(data[0] - i * stride);
-          *out_ptr = *(scalar_t *)(data[1] + i * stride);
+          *out_ptr = c10::load((scalar_t *)(data[1] + i * stride));
         }
       }
 
@@ -543,8 +553,7 @@ void cpu_vflip_memcpy(at::TensorIterator& iter) {
     TORCH_INTERNAL_ASSERT(strides[0] == strides[1]);
     const int64_t stride = strides[0];
 
-    for (C10_UNUSED const auto j : c10::irange(size1)) {
-
+    for ([[maybe_unused]] const auto j : c10::irange(size1)) {
       char** C10_RESTRICT data_ = data_arr.data();
       int64_t n = size0;
 
@@ -783,16 +792,16 @@ void flip_kernel(TensorIterator& iter, const bool quantized) {
 
 } // anonymous namespace
 
-REGISTER_DISPATCH(index_stub, &index_kernel);
-REGISTER_DISPATCH(index_fill_stub, &index_fill_kernel);
-REGISTER_DISPATCH(index_copy_stub, &index_copy_kernel);
-REGISTER_DISPATCH(index_put_stub, &index_put_kernel);
-REGISTER_DISPATCH(put_stub, &put_kernel);
-REGISTER_DISPATCH(take_stub, &take_kernel);
-REGISTER_DISPATCH(masked_fill_stub, &masked_fill_kernel);
-REGISTER_DISPATCH(masked_select_serial_stub, &masked_select_serial_kernel);
-REGISTER_DISPATCH(masked_select_stub, &masked_select_kernel);
-REGISTER_DISPATCH(masked_scatter_stub, &masked_scatter_kernel);
-REGISTER_DISPATCH(flip_stub, &flip_kernel);
+REGISTER_DISPATCH(index_stub, &index_kernel)
+REGISTER_DISPATCH(index_fill_stub, &index_fill_kernel)
+REGISTER_DISPATCH(index_copy_stub, &index_copy_kernel)
+REGISTER_DISPATCH(index_put_stub, &index_put_kernel)
+REGISTER_DISPATCH(put_stub, &put_kernel)
+REGISTER_DISPATCH(take_stub, &take_kernel)
+REGISTER_DISPATCH(masked_fill_stub, &masked_fill_kernel)
+REGISTER_DISPATCH(masked_select_serial_stub, &masked_select_serial_kernel)
+REGISTER_DISPATCH(masked_select_stub, &masked_select_kernel)
+REGISTER_DISPATCH(masked_scatter_stub, &masked_scatter_kernel)
+REGISTER_DISPATCH(flip_stub, &flip_kernel)
 
 } // namespace at::native

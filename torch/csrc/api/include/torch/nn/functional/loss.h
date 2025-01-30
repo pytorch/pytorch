@@ -4,9 +4,7 @@
 #include <torch/nn/functional/activation.h>
 #include <torch/nn/options/loss.h>
 
-namespace torch {
-namespace nn {
-namespace functional {
+namespace torch::nn::functional {
 
 #ifndef DOXYGEN_SHOULD_SKIP_THIS
 namespace detail {
@@ -404,9 +402,9 @@ inline Tensor smooth_l1_loss(
     const SmoothL1LossFuncOptions& options,
     double beta) {
   TORCH_CHECK(
-      options.beta() == std::nullopt,
+      !options.beta().has_value(),
       "expected beta not to be provided in 'options', but got ",
-      options.beta().value());
+      options.beta());
   return detail::smooth_l1_loss(input, target, options.reduction(), beta);
 }
 
@@ -1038,6 +1036,4 @@ inline Tensor binary_cross_entropy_with_logits(
       options.pos_weight());
 }
 
-} // namespace functional
-} // namespace nn
-} // namespace torch
+} // namespace torch::nn::functional

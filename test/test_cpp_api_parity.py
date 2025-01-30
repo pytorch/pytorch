@@ -42,7 +42,7 @@ if not common.IS_ARM64:
         (sample_module.module_tests, common_nn.NewModuleTest),
         (sample_functional.functional_tests, common_nn.NewModuleTest),
         (common_nn.module_tests, common_nn.NewModuleTest),
-        (common_nn.new_module_tests, common_nn.NewModuleTest),
+        (common_nn.get_new_module_tests(), common_nn.NewModuleTest),
         (common_nn.criterion_tests, common_nn.CriterionTest),
     ]:
         for test_params_dict in test_params_dicts:

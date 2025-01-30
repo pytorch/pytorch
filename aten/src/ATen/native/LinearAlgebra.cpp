@@ -20,6 +20,7 @@
 #include <ATen/native/Resize.h>
 #include <ATen/native/mkldnn/Matmul.h>
 #include <ATen/native/mkldnn/Utils.h>
+#include <ATen/cpu/Utils.h>
 #include <c10/core/GradMode.h>
 #include <c10/util/accumulate.h>
 #include <c10/util/irange.h>
@@ -31,7 +32,9 @@
 #else
 #include <ATen/ops/_addmm_activation_native.h>
 #include <ATen/ops/_compute_linear_combination_native.h>
-#include <ATen/ops/_convert_weight_to_int4pack_native.h>
+#include <ATen/ops/_convert_weight_to_int4pack_for_cpu_native.h>
+#include <ATen/ops/_dyn_quant_matmul_4bit_native.h>
+#include <ATen/ops/_dyn_quant_pack_4bit_weight_native.h>
 #include <ATen/ops/_int_mm_native.h>
 #include <ATen/ops/_linalg_check_errors.h>
 #include <ATen/ops/_linalg_det.h>
@@ -39,7 +42,7 @@
 #include <ATen/ops/_linalg_slogdet.h>
 #include <ATen/ops/_linalg_slogdet_native.h>
 #include <ATen/ops/_unsafe_view.h>
-#include <ATen/ops/_weight_int4pack_mm_native.h>
+#include <ATen/ops/_weight_int4pack_mm_for_cpu_native.h>
 #include <ATen/ops/_weight_int8pack_mm_native.h>
 #include <ATen/ops/abs.h>
 #include <ATen/ops/addbmm_native.h>
@@ -451,7 +454,7 @@ std::tuple<Tensor, Tensor> get_atol_rtol(
     const Tensor& input,
     const std::optional<Tensor>& atol_opt,
     const std::optional<Tensor>& rtol_opt,
-    const c10::string_view function_name) {
+    const std::string_view function_name) {
   auto options = input.options();
   if (input.device().type() == kMetal || input.device().type() == kMPS) {
     options = options.dtype(ScalarType::Float);
@@ -1510,8 +1513,12 @@ static void addmm_impl_cpu_(
   // that will call then into Arm® Compute Library (ACL) GEMM kernel and also
   // additionally have support for running kernel with BF16 instructions
   if (transpose_c) {
-    bool apply_heur = apply_mkldnn_matmul_heur(b.sizes()[0], b.sizes()[1], a.sizes()[1]);
-    if (apply_heur && transpose_a && !transpose_b && result.scalar_type() == at::ScalarType::Float) {
+    bool apply_heur =
+        apply_mkldnn_matmul_heur(b.sizes()[0], b.sizes()[1], a.sizes()[1]);
+    if (apply_heur && transpose_a && !transpose_b &&
+        (result.scalar_type() == at::ScalarType::Float ||
+         result.scalar_type() == at::ScalarType::BFloat16 ||
+         result.scalar_type() == at::ScalarType::Half)) {
       try {
         mkldnn_matmul(b, a, c, beta.to<float>(), alpha.to<float>());
         // We have dispatched to ACL GEMM for single precision float
@@ -2949,7 +2956,7 @@ Tensor& linalg_matrix_norm_out(
 // fro / nuc
 Tensor linalg_matrix_norm(
     const Tensor& A,
-    c10::string_view ord,
+    std::string_view ord,
     IntArrayRef dim,
     bool keepdim,
     std::optional<ScalarType> opt_dtype) {
@@ -2978,7 +2985,7 @@ Tensor linalg_matrix_norm(
 
 Tensor& linalg_matrix_norm_out(
     const Tensor& A,
-    c10::string_view ord,
+    std::string_view ord,
     IntArrayRef dim,
     bool keepdim,
     std::optional<ScalarType> opt_dtype,
@@ -3031,10 +3038,10 @@ Tensor& linalg_norm_out(const Tensor& X, const std::optional<Scalar>& opt_ord, O
 }
 
 // Frobenius and nuclear norms
-Tensor linalg_norm(const Tensor& X, c10::string_view ord, OptionalIntArrayRef opt_dim, bool keepdim, std::optional<ScalarType> opt_dtype) {
+Tensor linalg_norm(const Tensor& X, std::string_view ord, OptionalIntArrayRef opt_dim, bool keepdim, std::optional<ScalarType> opt_dtype) {
   if (opt_dim.has_value()) {
     TORCH_CHECK(opt_dim->size() == 1 || opt_dim ->size() == 2, "linalg.norm: If ",
-              "dim is specified, it mut be of length 1 or 2. Got ", *opt_dim);
+              "dim is specified, it must be of length 1 or 2. Got ", *opt_dim);
   } else {
     TORCH_CHECK(X.dim() == 1 || X.dim() == 2, "linalg.norm: If ",
                 "dim is not specified but ord is, the input must be 1D or 2D. Got ", X.dim(), "D.");
@@ -3044,7 +3051,7 @@ Tensor linalg_norm(const Tensor& X, c10::string_view ord, OptionalIntArrayRef op
   return at::linalg_matrix_norm(X, ord, dim, keepdim, opt_dtype);
 }
 
-Tensor& linalg_norm_out(const Tensor& X, c10::string_view ord, OptionalIntArrayRef opt_dim, bool keepdim, std::optional<ScalarType> opt_dtype, Tensor& result) {
+Tensor& linalg_norm_out(const Tensor& X, std::string_view ord, OptionalIntArrayRef opt_dim, bool keepdim, std::optional<ScalarType> opt_dtype, Tensor& result) {
   checkSameDevice("linalg.norm", X, result);
   auto out = at::linalg_norm(X, ord, opt_dim, keepdim, opt_dtype);
   TORCH_CHECK(out.scalar_type() == result.scalar_type(),
@@ -3143,7 +3150,7 @@ Tensor& nuclear_norm_out(const Tensor& self, IntArrayRef dim, bool keepdim, Tens
 
 
 // This function helps to dispatch norm computations depending on 'ord' of variant type
-static Tensor _linalg_cond_helper(const Tensor& self, std::variant<Scalar, c10::string_view> ord_variant) {
+static Tensor _linalg_cond_helper(const Tensor& self, std::variant<Scalar, std::string_view> ord_variant) {
   Tensor inverse, info;
   std::tie(inverse, info) = at::linalg_inv_ex(self);
   info.unsqueeze_(-1).unsqueeze_(-1);
@@ -3166,14 +3173,14 @@ static Tensor _linalg_cond_empty_matrix(const Tensor& self, c10::ScalarType dtyp
   return at::zeros(result_shape, options);
 }
 
-static void _linalg_cond_check_ord(std::variant<Scalar, c10::string_view> ord_variant) {
+static void _linalg_cond_check_ord(std::variant<Scalar, std::string_view> ord_variant) {
   if (ord_variant.index() == 0) {
     Scalar* ord = std::get_if<Scalar>(&ord_variant);
     double abs_ord = std::abs(ord->toDouble());
     TORCH_CHECK(abs_ord == 2.0 || abs_ord == 1.0 || abs_ord == INFINITY,
       "linalg.cond got an invalid norm type: ", ord->toDouble());
   } else if (ord_variant.index() == 1) {
-    c10::string_view* ord = std::get_if<c10::string_view>(&ord_variant);
+    std::string_view* ord = std::get_if<std::string_view>(&ord_variant);
     TORCH_CHECK(*ord == "fro" || *ord == "nuc",
       "linalg.cond got an invalid norm type: ", *ord);
   } else {
@@ -3189,7 +3196,7 @@ Tensor linalg_cond(const Tensor& self, const std::optional<Scalar>& opt_ord) {
   // The default case is using 2-norm
   Scalar ord = opt_ord.has_value() ? opt_ord.value() : 2;
 
-  std::variant<Scalar, c10::string_view> ord_variant = ord;
+  std::variant<Scalar, std::string_view> ord_variant = ord;
   _linalg_cond_check_ord(ord_variant);
 
   // NumPy doesn't define the condition number for 0x0 matrices, we return 0.0 for such input
@@ -3235,9 +3242,9 @@ Tensor& linalg_cond_out(const Tensor& self, const std::optional<Scalar>& opt_ord
 }
 
 // Frobenius or nuclear norms
-Tensor linalg_cond(const Tensor& self, c10::string_view ord) {
+Tensor linalg_cond(const Tensor& self, std::string_view ord) {
   squareCheckInputs(self, ("linalg.cond(ord=" + std::string(ord) + ")").c_str());
-  std::variant<Scalar, c10::string_view> ord_variant = ord;
+  std::variant<Scalar, std::string_view> ord_variant = ord;
   _linalg_cond_check_ord(ord_variant);
 
   // NumPy doesn't define the condition number for 0x0 matrices, we return 0.0 for such input
@@ -3257,7 +3264,7 @@ Tensor linalg_cond(const Tensor& self, c10::string_view ord) {
 }
 
 // TODO: implement _out variant avoiding copy and using already allocated storage directly
-Tensor& linalg_cond_out(const Tensor& self, c10::string_view ord, Tensor& result) {
+Tensor& linalg_cond_out(const Tensor& self, std::string_view ord, Tensor& result) {
   checkSameDevice("linalg.cond", result, self);
   ScalarType real_dtype = toRealValueType(self.scalar_type());
   checkLinalgCompatibleDtype("linalg.cond", result.scalar_type(), real_dtype);
@@ -3428,6 +3435,8 @@ Tensor kron(const Tensor& self, const Tensor& other) {
 DEFINE_DISPATCH(weight_to_int4pack_stub);
 DEFINE_DISPATCH(int4pack_mm_stub);
 DEFINE_DISPATCH(int8pack_mm_stub);
+DEFINE_DISPATCH(dyn_quant_pack_4bit_weight_stub);
+DEFINE_DISPATCH(dyn_quant_matmul_4bit_stub);
 
 Tensor _convert_weight_to_int4pack_cpu(
     const Tensor& in,
@@ -3435,34 +3444,21 @@ Tensor _convert_weight_to_int4pack_cpu(
 
   TORCH_CHECK(in.dim() == 2,
       __func__, " : expect weight to be 2D tensor.");
-  TORCH_CHECK(in.dtype() == at::kByte,
-      __func__, " : expect weight to be kByte.");
-  TORCH_CHECK(innerKTiles == 2 || innerKTiles == 4 || innerKTiles == 8,
-      __func__, " : innerKTiles need to be 2, 4, or 8, got ", innerKTiles);
+  TORCH_CHECK(in.dtype() == at::kInt,
+      __func__, " : expect weight to be kInt.");
 
   auto weight = in.contiguous();
   auto N = weight.size(0);
-  auto K = weight.size(1) * 2;
-
-  // Create fake shapes for cpu. The meta registration in dynamo requires
-  // operator has the same output shape for each device. So creating a fake
-  // shape {N / 8, K / (16 * innerKTiles), 32, innerKTiles / 2}
-  constexpr int64_t kNTileSize = 8;
-  constexpr int64_t kKTileSize = 16;
-  auto nTiles = (N + kNTileSize - 1) / kNTileSize;
+  auto K = weight.size(1);
 
   TORCH_CHECK(N % 16 == 0,
       __func__, " : expect N to be dividable by 16");
-  const int64_t kSuperKTileSize = kKTileSize * innerKTiles;
-  TORCH_CHECK( K % kSuperKTileSize == 0,
-      __func__, " : epxect K to be dividable by ", kSuperKTileSize);
-  auto kSuperTiles = (K + kSuperKTileSize - 1) / kSuperKTileSize;
+  TORCH_CHECK(K % 2 == 0,
+      "_convert_weight_to_int4pack: expect K to be dividable by 2");
 
-  auto weight_packed = at::empty(
-      {nTiles, kSuperTiles, 32, innerKTiles / 2},
-      at::TensorOptions().dtype(at::kInt));
+  auto weight_packed = at::empty({N, K / 2}, weight.options().dtype(at::kByte));
 
-  weight_to_int4pack_stub(kCPU, weight_packed, weight, N, K);
+  weight_to_int4pack_stub(kCPU, weight_packed, weight);
   return weight_packed;
 }
 
@@ -3472,10 +3468,8 @@ Tensor _weight_int4pack_mm_cpu(
     int64_t qGroupSize,
     const Tensor& qScaleAndZeros) {
 
-  constexpr int64_t kNTileSize = 8;
-
   auto M = A.size(0);
-  auto N = B.size(0) * kNTileSize;
+  auto N = B.size(0);
   auto K = A.size(1);
 
   TORCH_CHECK(A.dtype() == kBFloat16 || A.dtype() == kHalf || A.dtype() == kFloat,
@@ -3485,12 +3479,12 @@ Tensor _weight_int4pack_mm_cpu(
   TORCH_CHECK(A.dim() == 2,
       __func__, " : expect A to be 2D tensor.");
 
-  TORCH_CHECK(B.dtype() == kInt,
-      __func__, " : expect B to be int32 tensor.");
+  TORCH_CHECK(B.dtype() == kByte,
+      __func__, " : expect B to be uint8 tensor.");
   TORCH_CHECK(B.is_contiguous(),
       __func__, " : expect B to be contiguous.");
-  TORCH_CHECK(B.dim() == 4,
-      __func__, " : expect B to 4d tensor.");
+  TORCH_CHECK(B.size(1) == K / 2,
+      __func__, " : expect B.size(1) to be K/2, got ", B.size(1));
 
   TORCH_CHECK(qGroupSize == 32 || qGroupSize == 64 || qGroupSize == 128
       || qGroupSize == 256,
@@ -3501,9 +3495,72 @@ Tensor _weight_int4pack_mm_cpu(
       __func__, ": expect qScaleAndZeros to be 3d tensor with sizes [:, ", N, ", 2]");
 
   auto C = at::empty({M, N}, A.options());
-  int4pack_mm_stub(kCPU, C, A, B, qGroupSize, qScaleAndZeros, N, K);
+  int4pack_mm_stub(kCPU, C, A, B, qGroupSize, qScaleAndZeros);
 
   return C;
+}
+
+Tensor _dyn_quant_pack_4bit_weight_cpu(
+    const Tensor& weights,
+    const Tensor& scales_zeros,
+    const std::optional<Tensor>& bias,
+    const int64_t block_size,
+    const int64_t in_features,
+    const int64_t out_features) {
+  TORCH_CHECK(
+      weights.dtype() == at::kByte, __func__, " : expect weight to be kByte.");
+  TORCH_CHECK(
+      block_size == in_features ||
+          (!(block_size % 32) && !(in_features % block_size)),
+      __func__,
+      ": Group size should be multiple of 32, in_features [",
+      in_features,
+      "]. Provided ",
+      block_size);
+  Tensor packed_weights =
+      at::empty(weights.sizes(), weights.options().dtype(at::kByte));
+  dyn_quant_pack_4bit_weight_stub(
+      kCPU,
+      packed_weights,
+      weights,
+      scales_zeros,
+      bias,
+      out_features,
+      in_features,
+      block_size);
+  return packed_weights;
+}
+
+Tensor _dyn_quant_matmul_4bit_cpu(
+    const Tensor& inp,
+    const Tensor& packed_weights,
+    const int64_t block_size,
+    const int64_t in_features,
+    const int64_t out_features) {
+  auto M = inp.size(0);
+  TORCH_CHECK(
+      inp.dtype() == kFloat,
+      __func__,
+      " : expect input to be 32-bit float tensor.");
+  TORCH_CHECK(
+      block_size == in_features ||
+          (!(block_size % 32) && !(in_features % block_size)),
+      __func__,
+      ": Group size should be multiple of 32, in_features [",
+      in_features,
+      "]. Provided ",
+      block_size);
+  auto output = at::empty({M, out_features}, inp.options());
+  dyn_quant_matmul_4bit_stub(
+      kCPU,
+      output,
+      inp,
+      packed_weights,
+      M,
+      out_features,
+      in_features,
+      block_size);
+  return output;
 }
 
 Tensor _weight_int8pack_mm_cpu(
@@ -3540,7 +3597,7 @@ Tensor _weight_int8pack_mm_cpu(
 
 Tensor& _int_mm_out_cpu(const Tensor& self, const Tensor& mat2, Tensor& result) {
 #ifndef STRIP_ERROR_MESSAGES
-  static constexpr c10::string_view func_name = "int_mm_out_cpu";
+  static constexpr std::string_view func_name = "int_mm_out_cpu";
 #endif
   TORCH_CHECK(self.dim() == 2, func_name, ": Expected self to be of dimension 2 but got ", self.dim());
   TORCH_CHECK(mat2.dim() == 2, func_name, ": Expected mat2 to be of dimension 2 but got ", mat2.dim());
@@ -3558,7 +3615,7 @@ Tensor& _int_mm_out_cpu(const Tensor& self, const Tensor& mat2, Tensor& result) 
   }
 
   bool dispatched = false;
-  if (at::globalContext().userEnabledMkldnn()) {
+  if (at::globalContext().userEnabledMkldnn() && at::cpu::is_avx512_vnni_supported()) {
     try {
       mkldnn_matmul_i8i8i32(self, mat2, result);
       dispatched = true;

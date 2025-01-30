@@ -5,8 +5,7 @@
 #include <torch/expanding_array.h>
 #include <torch/types.h>
 
-namespace torch {
-namespace nn {
+namespace torch::nn {
 
 /// Options for the `Fold` module.
 ///
@@ -17,8 +16,7 @@ namespace nn {
 /// ```
 struct TORCH_API FoldOptions {
   FoldOptions(ExpandingArray<2> output_size, ExpandingArray<2> kernel_size)
-      : output_size_(std::move(output_size)),
-        kernel_size_(std::move(kernel_size)) {}
+      : output_size_(output_size), kernel_size_(kernel_size) {}
 
   /// describes the spatial shape of the large containing tensor of the sliding
   /// local blocks. It is useful to resolve the ambiguity when multiple input
@@ -63,8 +61,7 @@ using FoldFuncOptions = FoldOptions;
 /// Unfold model(UnfoldOptions({2, 4}).dilation(2).padding({2, 1}).stride(2));
 /// ```
 struct TORCH_API UnfoldOptions {
-  UnfoldOptions(ExpandingArray<2> kernel_size)
-      : kernel_size_(std::move(kernel_size)) {}
+  UnfoldOptions(ExpandingArray<2> kernel_size) : kernel_size_(kernel_size) {}
 
   /// the size of the sliding blocks
   TORCH_ARG(ExpandingArray<2>, kernel_size);
@@ -95,5 +92,4 @@ namespace functional {
 using UnfoldFuncOptions = UnfoldOptions;
 } // namespace functional
 
-} // namespace nn
-} // namespace torch
+} // namespace torch::nn

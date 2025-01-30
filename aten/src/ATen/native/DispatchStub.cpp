@@ -2,6 +2,7 @@
 #include <ATen/native/DispatchStub.h>
 
 #include <c10/core/DeviceType.h>
+#include <c10/util/Array.h>
 #include <c10/util/Exception.h>
 
 #if !defined(__s390x__) && !defined(__powerpc__)
@@ -262,7 +263,7 @@ void* DispatchStubImpl::get_call_ptr(
             false, "DispatchStub: missing kernel for ", device_type);
         return nullptr;
       case ErrorType::DeviceNotSupported:
-        AT_ERROR("DispatchStub: unsupported device type", device_type);
+        TORCH_CHECK(false, "DispatchStub: unsupported device type", device_type);
     }
   }
 

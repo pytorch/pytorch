@@ -13,6 +13,7 @@
 
 namespace torch::lazy {
 
+// NOLINTNEXTLINE(cppcoreguidelines-special-member-functions)
 class TORCH_API Completion {
  public:
   class Data;

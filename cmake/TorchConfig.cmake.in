@@ -94,6 +94,11 @@ else()
 
   if(@USE_XNNPACK@)
     append_torchlib_if_found(XNNPACK)
+    append_torchlib_if_found(microkernels-prod)
+  endif()
+
+  if(@USE_KLEIDIAI@)
+    append_torchlib_if_found(kleidiai)
   endif()
 
   append_torchlib_if_found(caffe2_protos protobuf-lite protobuf protoc)
@@ -102,11 +107,8 @@ else()
   append_torchlib_if_found(fmt)
   append_torchlib_if_found(cpuinfo clog)
 
-  if(NOT @USE_INTERNAL_PTHREADPOOL_IMPL@)
-    append_torchlib_if_found(pthreadpool)
-  endif()
-
   append_torchlib_if_found(eigen_blas)
+  append_torchlib_if_found(pthreadpool)
 
   if(@USE_FBGEMM@)
     append_torchlib_if_found(fbgemm)

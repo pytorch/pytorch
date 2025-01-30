@@ -531,7 +531,7 @@ Tensor to_functional_tensor(const Tensor& tensor) {
 }
 std::optional<Tensor> to_functional_tensor(const std::optional<Tensor>& tensor) {
   if (tensor.has_value()) {
-    return std::make_optional<Tensor>(to_functional_tensor(*tensor));
+    return to_functional_tensor(*tensor);
   }
   return std::nullopt;
 }
@@ -569,7 +569,7 @@ Tensor from_functional_tensor(const Tensor& tensor, bool assert_functional) {
 }
 std::optional<Tensor> from_functional_tensor(const std::optional<Tensor>& t, bool assert_functional) {
   if (t.has_value()) {
-    return std::make_optional<Tensor>(from_functional_tensor(*t, assert_functional));
+    return from_functional_tensor(*t, assert_functional);
   }
   return std::nullopt;
 }
@@ -638,7 +638,7 @@ void replace_(const ITensorListRef functional_tensor, ITensorListRef other) {
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(functional_tensor.size() == other.size());
   auto functional_tensor_it = functional_tensor.begin();
   auto other_it = other.begin();
-  for (C10_UNUSED const auto i : c10::irange(functional_tensor.size())) {
+  for ([[maybe_unused]] const auto i : c10::irange(functional_tensor.size())) {
     replace_(*functional_tensor_it++, *other_it++);
   }
 }
@@ -655,7 +655,7 @@ void propagate_xla_data(const ITensorListRef functional_tensor, ITensorListRef o
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(functional_tensor.size() == other.size());
   auto functional_tensor_it = functional_tensor.begin();
   auto other_it = other.begin();
-  for (C10_UNUSED const auto i : c10::irange(functional_tensor.size())) {
+  for ([[maybe_unused]] const auto i : c10::irange(functional_tensor.size())) {
     propagate_xla_data(*functional_tensor_it++, *other_it++);
   }
 }
@@ -670,7 +670,7 @@ void propagate_xla_data_direct(const ITensorListRef tensor,
                                ITensorListRef other) {
   auto tensor_it = tensor.begin();
   auto other_it = other.begin();
-  for (C10_UNUSED const auto i : c10::irange(tensor.size())) {
+  for ([[maybe_unused]] const auto i : c10::irange(tensor.size())) {
     propagate_xla_data_direct(*tensor_it++, *other_it++);
   }
 }
@@ -727,8 +727,9 @@ bool isFunctionalTensor(const c10::List<::std::optional<Tensor>>& t_list) {
   if (t_list.empty()) return false;
   auto functional_count = 0;
   for (const auto i : c10::irange(t_list.size())) {
-    if (!t_list[i].has_value() || !t_list[i]->defined()) continue;
-    if (isFunctionalTensor(t_list[i])) {
+    auto const & e= t_list[i];
+    if (!e.has_value() || !e->defined()) continue;
+    if (isFunctionalTensor(e)) {
       ++functional_count;
     }
   }

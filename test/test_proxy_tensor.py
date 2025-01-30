@@ -1,4 +1,5 @@
 # Owner(s): ["module: ProxyTensor"]
+# ruff: noqa: F841
 
 from torch.testing._internal.common_utils import TestCase, run_tests
 import torch
@@ -191,8 +192,8 @@ def forward(self, a_1):
             torch.set_grad_enabled(True)
             return b + c.sin()
         a1 = torch.randn(4, requires_grad=True)
-        a2 = a1.clone().detach().requires_grad_(True)
-        a_tmp = a1.clone().detach().requires_grad_(True)
+        a2 = a1.detach().clone().requires_grad_(True)
+        a_tmp = a1.detach().clone().requires_grad_(True)
         fx_g = make_fx(f, pre_dispatch=True)(a_tmp)
         out1 = f(a1)
         out2 = fx_g(a2)
@@ -923,6 +924,20 @@ def forward(self, x_1):
                 continue
             self.assertTrue('val' in n.meta)
 
+    def test_fake_tensor_mode(self):
+        def f(a):
+            d = a.cos()
+            return d
+
+        from torch._guards import detect_fake_mode
+
+        existing_fake_mode = FakeTensorMode()
+        with existing_fake_mode:
+            out = make_fx(f, tracing_mode="real")(torch.tensor([[1, 1, 1, 1, 1, 1, 1, 1]]))
+
+        fake_mode = detect_fake_mode([node.meta.get('val', None) for node in out.graph.nodes])
+        self.assertEqual(fake_mode, existing_fake_mode)
+
 def _get_node(fx_g, cond):
     for n in fx_g.graph.nodes:
         if cond(n):
@@ -1519,11 +1534,6 @@ def forward(self, x_1, y_1):
             z3 = x3.item()
             torch._check(z1 == z2 + z3)
             return y * 2
-            if z2 + z3 == z1:
-                return y * 2
-            else:
-                return y + 3
-
         # NB: inputs are done as CUDA to ensure they aren't queried to be
         # backed
 
@@ -1989,10 +1999,7 @@ only_fake_tensor_failures = {
     xfail('narrow'),
 }
 
-fake_tensor_failures = {
-    # ASAN failures due to divide by 0
-    skip('nn.functional.nll_loss'),
-}
+fake_tensor_failures = set()
 
 symbolic_tensor_failures = {
     xfail('combinations', ''),
@@ -2004,27 +2011,8 @@ symbolic_tensor_failures = {
     xfail('nn.functional.cross_entropy', ''),  # aten.size.default - couldn't find symbolic meta function/decomposition
     xfail('nn.functional.ctc_loss'),  # aten._ctc_loss.Tensor - couldn't find symbolic meta function/decomposition
     xfail('quantile', ''),  # Could not run 'aten::equal' with arguments from the 'Meta' backend.
-    xfail('unique_consecutive', ''),  # aten.unique_consecutive.default - couldn't find symbolic meta function/decomposition
 
     xfail('max_pool2d_with_indices_backward', ''),  # Expected a value of type 'List[int]' for argument 'kernel_size' but...
-
-    # many complex operators incorrect striding, metadata
-    xfail('fft.fft', ''),
-    xfail('fft.hfft2', ''),
-    xfail('fft.hfft', ''),
-    xfail('fft.hfftn', ''),
-    xfail('fft.ifft', ''),
-    xfail('fft.ihfft2', ''),
-    xfail('fft.ihfft', ''),
-    xfail('fft.ihfftn', ''),
-    xfail('fft.ihfft2', ''),
-    xfail('fft.irfft2', ''),
-    xfail('fft.irfft', ''),
-    xfail('fft.irfftn', ''),
-    xfail('fft.rfft2', ''),
-    xfail('fft.rfft', ''),
-    xfail('fft.rfftn', ''),
-    xfail('stft', '')
 }
 symbolic_tensor_segfaults = {
     skip('nn.functional.batch_norm')  # Segfault??
@@ -2051,10 +2039,6 @@ out_symbolic_tensor_failures = {
     xfail('angle', ''),
     xfail('argmax', ''),
     xfail('argmin', ''),
-    xfail('fft.fft2', ''),
-    xfail('fft.fftn', ''),
-    xfail('fft.ifft2', ''),
-    xfail('fft.ifftn', ''),
     xfail('gather', ''),
     xfail('linalg.pinv', ''),
     xfail('linalg.pinv', 'hermitian'),
@@ -2062,7 +2046,6 @@ out_symbolic_tensor_failures = {
     xfail('scatter_add', ''),
     xfail('scatter', ''),
     xfail('take_along_dim', ''),
-    xfail('triangular_solve', ''),
 
     # SymIntArrayRef expected to contain only concrete
     xfail('ones', ''),

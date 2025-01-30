@@ -1,8 +1,9 @@
 ---
 # NOTE there must be no spaces before the '-', so put the comma last.
-# The check bugprone-unchecked-optional-access is also turned off atm
-# because it causes clang-tidy to hang randomly. The tracking issue
+# The check bugprone-unchecked-optional-access is also turned on.
+# Note that it can cause clang-tidy to hang randomly. The tracking issue
 # can be found at https://github.com/llvm/llvm-project/issues/69369.
+# When that happens, we can disable it on the problematic code by NOLINT.
 InheritParentConfig: true
 Checks: '
 bugprone-*,
@@ -12,7 +13,10 @@ bugprone-*,
 -bugprone-lambda-function-name,
 -bugprone-reserved-identifier,
 -bugprone-swapped-arguments,
--bugprone-unchecked-optional-access,
+clang-analyzer-core.*,
+clang-analyzer-cplusplus.*,
+clang-analyzer-nullability.*,
+clang-analyzer-deadcode.*,
 clang-diagnostic-missing-prototypes,
 cppcoreguidelines-*,
 -cppcoreguidelines-avoid-do-while,
@@ -29,19 +33,19 @@ cppcoreguidelines-*,
 -cppcoreguidelines-pro-type-static-cast-downcast,
 -cppcoreguidelines-pro-type-union-access,
 -cppcoreguidelines-pro-type-vararg,
--cppcoreguidelines-special-member-functions,
 -cppcoreguidelines-non-private-member-variables-in-classes,
 -facebook-hte-RelativeInclude,
 hicpp-exception-baseclass,
 hicpp-avoid-goto,
 misc-*,
+-misc-confusable-identifiers,
 -misc-const-correctness,
 -misc-include-cleaner,
 -misc-use-anonymous-namespace,
 -misc-unused-parameters,
 -misc-no-recursion,
 -misc-non-private-member-variables-in-classes,
--misc-confusable-identifiers,
+-misc-unused-using-decls,
 modernize-*,
 -modernize-macro-to-enum,
 -modernize-return-braced-init-list,
@@ -55,13 +59,16 @@ readability-container-size-empty,
 readability-delete-null-pointer,
 readability-duplicate-include
 readability-misplaced-array-index,
-readability-redundant-function-ptr-dereference,
-readability-redundant-smartptr-get,
+readability-redundant*
 readability-simplify-subscript-expr,
 readability-string-compare,
+-readability-redundant-access-specifiers,
+-readability-redundant-control-flow,
 '
 HeaderFilterRegex: '^(aten/|c10/|torch/).*$'
 WarningsAsErrors: '*'
 CheckOptions:
-  misc-header-include-cycle.IgnoredFilesList: 'format.h;ivalue.h;custom_class.h;Dict.h;List.h'
+  cppcoreguidelines-special-member-functions.AllowSoleDefaultDtor: true
+  cppcoreguidelines-special-member-functions.AllowImplicitlyDeletedCopyOrMove: true
+  misc-header-include-cycle.IgnoredFilesList: 'format.h;ivalue.h;custom_class.h;Dict.h;List.h;IListRef.h'
 ...

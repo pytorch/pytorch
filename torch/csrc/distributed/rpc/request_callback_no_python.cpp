@@ -32,6 +32,10 @@ struct DistAutogradContextGuard {
     prevCtxId_ = container.currentContextId();
     container.forceCurrentContextId(ctxId);
   }
+  DistAutogradContextGuard(const DistAutogradContextGuard&) = delete;
+  DistAutogradContextGuard(DistAutogradContextGuard&&) = delete;
+  DistAutogradContextGuard& operator=(const DistAutogradContextGuard&) = delete;
+  DistAutogradContextGuard& operator=(DistAutogradContextGuard&&) = delete;
   ~DistAutogradContextGuard() {
     auto& container = DistAutogradContainer::getInstance();
     container.forceCurrentContextId(prevCtxId_);

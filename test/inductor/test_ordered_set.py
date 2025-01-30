@@ -1,5 +1,5 @@
 # Owner(s): ["module: inductor"]
-# mypy: ignore-errors
+# ruff: noqa: F841
 # flake8: noqa
 import collections
 import collections.abc

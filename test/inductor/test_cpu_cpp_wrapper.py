@@ -13,6 +13,7 @@ from torch.testing._internal.common_utils import (
     IS_MACOS,
     IS_WINDOWS,
     slowTest,
+    TEST_MKL,
     TEST_WITH_ROCM,
 )
 from torch.testing._internal.inductor_utils import HAS_CPU
@@ -200,12 +201,18 @@ if RUN_CPU:
         BaseTest("test_adding_tensor_offsets"),
         BaseTest("test_inductor_layout_optimization_input_mutations"),
         BaseTest("test_int_div", "", test_cpu_repro.CPUReproTests()),
+        BaseTest("test_int8_weight_only_quant"),
         BaseTest("test_linear1"),
         BaseTest("test_linear2"),
         *[
             BaseTest(func, "", test_cpu_select_algorithm.TestSelectAlgorithmCPU())
             for func in dir(test_cpu_select_algorithm.TestSelectAlgorithmCPU())
-            if func.startswith("test_linear_with_pointwise")
+            if func.startswith(
+                (
+                    "test_linear_with_pointwise",
+                    "test_grouped_linear",
+                )
+            )
         ],
         BaseTest("test_polar"),
         BaseTest(
@@ -236,6 +243,9 @@ if RUN_CPU:
             if func.startswith("test_lstm_packed_change_input_sizes")
         ],
         BaseTest("test_max_pool2d6"),
+        BaseTest(
+            "test_mkl_linear", "", test_cpu_repro.CPUReproTests(), condition=TEST_MKL
+        ),
         BaseTest("test_mm_views"),
         BaseTest("test_multihead_attention", "cpu", test_cpu_repro.CPUReproTests()),
         BaseTest(
@@ -281,7 +291,11 @@ if RUN_CPU:
             test_mkldnn_pattern_matcher.TestDynamicPatternMatcher(),
             condition=torch.backends.mkldnn.is_available() and not IS_WINDOWS,
             func_inputs=[
-                None,
+                [
+                    "aoti_torch_cpu__qconv2d_pointwise_tensor",
+                    "torch.ops.quantized.max_pool2d",
+                    "aoti_torch_cpu__qlinear_pointwise_tensor",
+                ]
             ],
         ),
         *[
@@ -294,6 +308,12 @@ if RUN_CPU:
             for func in dir(test_mkldnn_pattern_matcher.TestPatternMatcher())
             if func.startswith("test_qlinear")
         ],
+        BaseTest(
+            "test_qconv2d_with_concat",
+            "cpu",
+            test_mkldnn_pattern_matcher.TestPatternMatcher(),
+            condition=torch.backends.mkldnn.is_available() and not IS_WINDOWS,
+        ),
         BaseTest(
             "test_dynamic_qlinear",
             "cpu",

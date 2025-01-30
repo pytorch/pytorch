@@ -277,7 +277,9 @@ static Tensor& bce_loss_out_impl(const Tensor& input,
 } // namespace BCELoss
 
 static inline MPSGraphTensor* divisionNoNaN(MPSGraph* mpsGraph, MPSGraphTensor* divident, MPSGraphTensor* divisor) {
-  auto* div = [mpsGraph divisionWithPrimaryTensor:divident secondaryTensor:divisor name:@"divisionTensor"];
+  auto* div = [mpsGraph divisionWithPrimaryTensor:divident
+                                  secondaryTensor:castMPSTensor(mpsGraph, divisor, divident.dataType)
+                                             name:@"divisionTensor"];
   // Replace NaNs with 0 for divident elements equal to 0
   return [mpsGraph selectWithPredicateTensor:castMPSTensor(mpsGraph, divisor, MPSDataTypeBool)
                          truePredicateTensor:div
@@ -995,7 +997,7 @@ Tensor& huber_loss_backward_out_mps(const Tensor& grad_output,
 
 // MSELoss
 TORCH_IMPL_FUNC(mse_loss_out_mps)(const Tensor& input, const Tensor& target, int64_t reduction, const Tensor& output_) {
-  string op_name = __func__;
+  string op_name = "mse_loss_out_mps";
   using namespace mps;
   bool contiguousOutput = !needsGather(output_);
   Tensor output = output_;
@@ -1003,7 +1005,9 @@ TORCH_IMPL_FUNC(mse_loss_out_mps)(const Tensor& input, const Tensor& target, int
     output = output_.contiguous();
   }
 
-  TORCH_CHECK(target.is_same_size(input), op_name + ": target and input tensors must have identical shapes")
+  TORCH_CHECK(target.is_same_size(input), op_name + ": target and input tensors must have identical shapes");
+  TORCH_CHECK(c10::isFloatingType(input.scalar_type()) && c10::isFloatingType(target.scalar_type()),
+              op_name + ": only defined for floating types");
   TORCH_CHECK(output.is_mps());
 
   struct CachedGraph : public MPSCachedGraph {

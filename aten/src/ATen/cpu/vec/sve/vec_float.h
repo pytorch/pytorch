@@ -10,8 +10,8 @@
 #else
 #define USE_SLEEF(sleef_code, non_sleef_code) non_sleef_code
 #endif
-namespace at {
-namespace vec {
+
+namespace at::vec {
 // Note [CPU_CAPABILITY namespace]
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 // This header, and all of its subheaders, will be compiled with
@@ -146,6 +146,9 @@ public:
   }
   Vectorized<float> asin() const {
     return USE_SLEEF(Vectorized<float>(Sleef_asinfx_u10sve(values)),map(std::asin));
+  }
+  Vectorized<float> asinh() const {
+    return USE_SLEEF(Vectorized<float>(Sleef_asinhfx_u10sve(values)),map(std::asinh));
   }
   Vectorized<float> atan() const {
     return USE_SLEEF(Vectorized<float>(Sleef_atanfx_u10sve(values)),map(std::atan));
@@ -567,4 +570,4 @@ Vectorized<float> inline fmadd(const Vectorized<float>& a, const Vectorized<floa
 
 #endif // defined(CPU_CAPABILITY_SVE)
 
-}}}
+}}

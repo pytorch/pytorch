@@ -2,9 +2,7 @@
 
 #include <torch/csrc/jit/tensorexpr/kernel.h>
 
-namespace torch {
-namespace jit {
-namespace tensorexpr {
+namespace torch::jit::tensorexpr {
 
 TORCH_API Tensor computeSum(
     const std::vector<ArgValue>& inputs,
@@ -31,6 +29,4 @@ Tensor computeMax(
     const std::optional<ScalarType>& outputType,
     at::Device device);
 
-} // namespace tensorexpr
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit::tensorexpr

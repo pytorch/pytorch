@@ -3,7 +3,7 @@ import json
 import math
 import os
 import re
-from typing import Dict, List, Optional, Set
+from typing import Optional
 
 import torch
 import torch.utils.benchmark as benchmark
@@ -34,7 +34,7 @@ class Pattern:
         self.url = ""
         assert prof.profiler is not None and prof.profiler.kineto_results is not None
         self.event_tree = prof.profiler.kineto_results.experimental_event_tree()
-        self.tid_root: Dict[int, List[_ProfilerEvent]] = {}
+        self.tid_root: dict[int, list[_ProfilerEvent]] = {}
         for event in self.event_tree:
             self.tid_root.setdefault(event.start_tid, []).append(event)
 
@@ -55,7 +55,7 @@ class Pattern:
         """
         yield from traverse_dfs(self.event_tree)
 
-    def summary(self, events: List[_ProfilerEvent]):
+    def summary(self, events: list[_ProfilerEvent]):
         default_summary = f"{self.name}: {len(events)} events matched."
         if self.should_benchmark:
             # If benchmark summary is not empty, use it.
@@ -66,7 +66,7 @@ class Pattern:
             )
         return default_summary
 
-    def benchmark_summary(self, events: List[_ProfilerEvent]):
+    def benchmark_summary(self, events: list[_ProfilerEvent]):
         def format_time(time_ns: int):
             unit_lst = ["ns", "us", "ms"]
             for unit in unit_lst:
@@ -84,7 +84,7 @@ class Pattern:
         )
         return (
             f"{self.name}: {len(events)} events matched. "
-            f"Total Estimated Speedup: {format_time(original_time - new_time)} ({round(original_time/new_time, 2)}X)"
+            f"Total Estimated Speedup: {format_time(original_time - new_time)} ({round(original_time / new_time, 2)}X)"
         )
 
     def match(self, event: _ProfilerEvent):
@@ -97,10 +97,9 @@ class Pattern:
     def matched_events(self):
         if self.skip:
             return []
-        matched_events = []
-        for event in self.eventTreeTraversal():
-            if self.match(event):
-                matched_events.append(event)
+        matched_events = [
+            event for event in self.eventTreeTraversal() if self.match(event)
+        ]
         return matched_events
 
     def root_of(self, event: _ProfilerEvent):
@@ -216,7 +215,7 @@ class ExtraCUDACopyPattern(Pattern):
         return event.name in self.init_ops
         # TODO: Check if tensor is reused
 
-    def benchmark(self, events: List[_ProfilerEvent]):
+    def benchmark(self, events: list[_ProfilerEvent]):
         shapes_factor_map = {input_shapes(event): 0.0 for event in events}
         for shape in shapes_factor_map:
             size = shape[0]
@@ -253,7 +252,7 @@ class ForLoopIndexingPattern(Pattern):
         super().__init__(prof, should_benchmark)
         self.name = "For Loop Indexing Pattern"
         self.description = "For loop indexing detected. Vectorization recommended."
-        self.visited: Set[int] = set()
+        self.visited: set[int] = set()
 
     def eventTreeTraversal(self):
         """
@@ -327,7 +326,7 @@ class FP32MatMulPattern(Pattern):
     def report(self, event: _ProfilerEvent):
         return self.description
 
-    def benchmark(self, events: List[_ProfilerEvent]):
+    def benchmark(self, events: list[_ProfilerEvent]):
         shapes_factor_map = {input_shapes(event): 0.0 for event in events}
         for shape in shapes_factor_map:
             matrixA = torch.randn(shape[0], device="cuda", dtype=torch.float32)
@@ -554,7 +553,7 @@ class MatMulDimInFP16Pattern(Pattern):
             return True
         return False
 
-    def benchmark(self, events: List[_ProfilerEvent]):
+    def benchmark(self, events: list[_ProfilerEvent]):
         def closest_multiple(shapes, multiple):
             return [multiple * math.ceil(shape / multiple) for shape in shapes]
 
@@ -610,7 +609,7 @@ def report_all_anti_patterns(
     print_enable: bool = True,
     json_report_dir: Optional[str] = None,
 ):
-    report_dict: Dict = {}
+    report_dict: dict = {}
     anti_patterns = [
         ExtraCUDACopyPattern(prof, should_benchmark),
         # ForLoopIndexingPattern(prof, should_benchmark),
@@ -623,7 +622,7 @@ def report_all_anti_patterns(
     ]
     reported = set()
     summaries = []
-    message_list = [f"{'-'*40}TorchTidy Report{'-'*40}"]
+    message_list = [f"{'-' * 40}TorchTidy Report{'-' * 40}"]
     message_list.append("Matched Events:")
 
     for anti_pattern in anti_patterns:
@@ -658,6 +657,6 @@ def report_all_anti_patterns(
 
     message_list.append("Summary:")
     message_list += summaries
-    message_list.append(f"{'-'*40}TorchTidy Report{'-'*40}")
+    message_list.append(f"{'-' * 40}TorchTidy Report{'-' * 40}")
     if print_enable:
         print("\n".join(message_list))

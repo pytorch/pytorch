@@ -14,8 +14,7 @@ import random
 import types
 import unittest
 import warnings
-from collections import namedtuple
-from typing import OrderedDict
+from collections import namedtuple, OrderedDict
 from unittest.case import skipIf
 
 from common_utils import (
@@ -32,6 +31,7 @@ from common_utils import (
     skipOps,
     tol1,
     xfail,
+    xfailIf,
 )
 from functorch_additional_op_db import additional_op_db
 
@@ -681,6 +681,8 @@ class TestVmapAPI(TestCase):
         vmap(torch.mul, (0, 0))(x, y)
 
     def test_integer_in_dim_but_not_tensor_input_err_msg(self):
+        # noqa: F841
+
         def foo(xy):
             return xy[0] * xy[1]
 
@@ -1245,7 +1247,7 @@ class TestVmapAPI(TestCase):
 
     def test_data_attribute(self):
         def foo(x):
-            y = x.data
+            y = x.data  # noqa: F841
             return x
 
         with self.assertRaisesRegex(
@@ -4141,50 +4143,55 @@ class TestVmapOperatorsOpInfo(TestCase):
                 "special.shifted_chebyshev_polynomial_w",
             }
             if op.name in sample_inputs_op:
-                sample_inputs_itr = op.sample_inputs(device, dtype, requires_grad=False)
+                sample_inputs_itr = op.sample_inputs(
+                    device, dtype, requires_grad=False, use_subtests=True
+                )
             else:
                 sample_inputs_itr = op.reference_inputs(
-                    device, dtype, requires_grad=False
+                    device, dtype, requires_grad=False, use_subtests=True
                 )
             aliases, inplace_aliases = discover_variants(op)
             check_shape_only = op.name in ("empty_like", "new_empty")
-            for sample_input in sample_inputs_itr:
-                args = (sample_input.input,) + sample_input.args
-                if not any(isinstance(arg, torch.Tensor) for arg in args):
-                    # Atleast one tensor required for vmap.
-                    continue
-                kwargs = sample_input.kwargs
-                is_batch_norm_and_training = is_batch_norm_training(op.name, kwargs)
-                out_dim = 0
-                if op.name == "NumpySplitCopyWithIntCustomOp":
-                    # special case for this custom op
-                    def sample_vmap_out_dim_numpy_split_copy_with_int(x, splits, dim):
-                        return [0 for _ in range(len(splits) + 1)], None
+            for sample_input, subtest_ctx, skip_xfail_ctx in sample_inputs_itr:
+                with subtest_ctx(self), skip_xfail_ctx(self):
+                    args = (sample_input.input,) + sample_input.args
+                    if not any(isinstance(arg, torch.Tensor) for arg in args):
+                        # Atleast one tensor required for vmap.
+                        continue
+                    kwargs = sample_input.kwargs
+                    is_batch_norm_and_training = is_batch_norm_training(op.name, kwargs)
+                    out_dim = 0
+                    if op.name == "NumpySplitCopyWithIntCustomOp":
+                        # special case for this custom op
+                        def sample_vmap_out_dim_numpy_split_copy_with_int(
+                            x, splits, dim
+                        ):
+                            return [0 for _ in range(len(splits) + 1)], None
 
-                    out_dim = sample_vmap_out_dim_numpy_split_copy_with_int(*args)
-                for batched_args, in_dims, _ in generate_vmap_inputs(
-                    args, {}, is_batch_norm_and_training=is_batch_norm_and_training
-                ):
-                    for func in aliases:
-                        self.vmap_outplace_test(
-                            func,
-                            batched_args,
-                            kwargs,
-                            in_dims,
-                            check_shape_only,
-                            postprocess_fn,
-                            out_dim=out_dim,
-                        )
-                    if op.name in skip_inplace:
-                        continue
-                    if not is_valid_inplace_sample_input(
-                        sample_input, op, op.inplace_variant
+                        out_dim = sample_vmap_out_dim_numpy_split_copy_with_int(*args)
+                    for batched_args, in_dims, _ in generate_vmap_inputs(
+                        args, {}, is_batch_norm_and_training=is_batch_norm_and_training
                     ):
-                        continue
-                    for func in inplace_aliases:
-                        self.vmap_inplace_test(
-                            func, batched_args, kwargs, in_dims, postprocess_fn
-                        )
+                        for func in aliases:
+                            self.vmap_outplace_test(
+                                func,
+                                batched_args,
+                                kwargs,
+                                in_dims,
+                                check_shape_only,
+                                postprocess_fn,
+                                out_dim=out_dim,
+                            )
+                        if op.name in skip_inplace:
+                            continue
+                        if not is_valid_inplace_sample_input(
+                            sample_input, op, op.inplace_variant
+                        ):
+                            continue
+                        for func in inplace_aliases:
+                            self.vmap_inplace_test(
+                                func, batched_args, kwargs, in_dims, postprocess_fn
+                            )
 
         if check_has_batch_rule:
             check_vmap_fallback(self, test, op)
@@ -4244,7 +4251,6 @@ class TestVmapOperatorsOpInfo(TestCase):
         skip(
             "linalg.eigh", ""
         ),  # not always return the same result for the same input, see test_linalg_eigh for manual test
-        skip("to"),  # RuntimeError: required rank 4 tensor to use channels_last format
         # UnimplementedError: data-dependent operators cannot be vmapped
         xfail("NumpyNonzeroCustomOp"),
         xfail("NumpyNMSCustomOp"),
@@ -4375,6 +4381,16 @@ class TestVmapOperatorsOpInfo(TestCase):
                 xfail("torch.ops.aten._efficient_attention_forward"),  # outputs ints
                 # TypeError: expected Tensor as element 0 in argument 0, but got float
                 xfail("item"),
+                xfail(
+                    "unbind_copy"
+                ),  # Batching rule not implemented for aten::unbind_copy.int.
+                # RuntimeError: required rank 4 tensor to use channels_last format
+                xfailIf(
+                    "to",
+                    lambda sample: (
+                        sample.kwargs["memory_format"] == torch.channels_last
+                    ),
+                ),
             }
         ),
     )
@@ -4450,6 +4466,9 @@ class TestVmapOperatorsOpInfo(TestCase):
                 xfail("item"),
                 xfail("tril"),  # Exception not raised on error input
                 xfail("triu"),  # Exception not raised on error input
+                xfail(
+                    "unbind_copy"
+                ),  # Batching rule not implemented for aten::unbind_copy.int.
                 xfail("__getitem__", ""),
                 xfail("count_nonzero"),
                 xfail(
@@ -4472,6 +4491,7 @@ class TestVmapOperatorsOpInfo(TestCase):
                 xfail("histc"),
                 xfail("as_strided"),
                 xfail("as_strided_copy"),
+                xfail("permute_copy"),
                 xfail("t_copy"),
                 xfail("unsqueeze_copy"),
                 xfail("istft"),
@@ -4485,7 +4505,6 @@ class TestVmapOperatorsOpInfo(TestCase):
                 xfail("linalg.tensorsolve"),
                 xfail("bernoulli", ""),
                 xfail("nn.functional.feature_alpha_dropout", "with_train"),
-                xfail("native_dropout_backward"),
                 xfail("nn.functional.kl_div", ""),
                 xfail("multinomial", ""),
                 xfail("pca_lowrank", ""),

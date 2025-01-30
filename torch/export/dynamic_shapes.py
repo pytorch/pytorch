@@ -5,7 +5,7 @@ import logging
 import sys
 from collections import defaultdict
 from enum import auto, Enum
-from typing import Any, Callable, Dict, List, Optional, Set, Tuple, TYPE_CHECKING, Union
+from typing import Any, Callable, Optional, TYPE_CHECKING, Union
 
 import torch
 from torch.utils._pytree import (
@@ -240,9 +240,14 @@ Dim.STATIC = _DimHint.STATIC  # type: ignore[attr-defined]
 Dim.DYNAMIC = _DimHint.DYNAMIC  # type: ignore[attr-defined]
 
 
-def dims(*names: str, min: Optional[int] = None, max: Optional[int] = None):
+def dims(
+    *names: str, min: Optional[int] = None, max: Optional[int] = None
+) -> tuple[_Dim, ...]:
     """
     Util to create multiple :func:`Dim` types.
+
+    Returns:
+        A tuple of :func:`Dim` types.
     """
     return tuple(Dim(name, min=min, max=max) for name in names)
 
@@ -374,17 +379,35 @@ class _DerivedConstraint(_ConstraintTarget):
         }
 
 
-Constraint = Union[_Constraint, _DerivedConstraint]
+@dataclasses.dataclass
+class _RelaxedConstraint(_ConstraintTarget):
+    """
+    This represents a dim marked with Dim.AUTO/DYNAMIC (i.e. mark_dynamic() or maybe_mark_dynamic()),
+    which leaves relations & min/max ranges for inference, instead of requiring explicit specification.
+    The intention is for constraint violations to not be raised if produce_guards() finds equalities or
+    relations between a _RelaxedConstraint and another type of _Constraint.
+    """
+
+    @property
+    def serializable_spec(self):
+        return {
+            "t_id": self.t_id,
+            "dim": self.dim,
+        }
+
+
+Constraint = Union[_Constraint, _DerivedConstraint, _RelaxedConstraint]
 
 
 def _process_equalities(
     constraint: Constraint,
-    get_sources: Callable[[int, int], List["Source"]],
+    get_sources: Callable[[int, int], list["Source"]],
     shape_env: "ShapeEnv",
-    names: Dict[str, Tuple[int, int]],
-    source_pairs: List[Tuple["Source", "Source"]],
-    derived_equalities: List[Tuple["Source", Union["Source", "Symbol"], Callable]],
-    phantom_symbols: Dict[str, "Symbol"],
+    names: dict[str, tuple[int, int]],
+    source_pairs: list[tuple["Source", "Source"]],
+    derived_equalities: list[tuple["Source", Union["Source", "Symbol"], Callable]],
+    phantom_symbols: dict[str, "Symbol"],
+    relaxed_sources: set["Source"],
 ):
     """
     Updates `source_pairs`, `derived_equalities`, and `phantom_symbols` (which become
@@ -399,7 +422,7 @@ def _process_equalities(
     # When t.size()[dim] maps to src0, src1, ..., srcN, we add
     # constraints that make src0 "equal" to src1, ..., srcN.
     source_pairs.extend((source, other_source) for other_source in other_sources)
-    if not isinstance(constraint, _DerivedConstraint):
+    if isinstance(constraint, _Constraint):
         if constraint.name in names:
             shared_t_id, shared_dim = names[constraint.name]
             other_sources = get_sources(shared_t_id, shared_dim)
@@ -408,15 +431,15 @@ def _process_equalities(
             )
         else:
             names[constraint.name] = (constraint.t_id, constraint.dim)
-    else:
+    elif isinstance(constraint, _DerivedConstraint):
         # branch based on the root of the _DerivedConstraint
         if not isinstance(constraint.root, _PhantomRoot):
             # either root points to an input source
-            root = get_sources(constraint.root.t_id, constraint.root.dim)[0]  # type: ignore[assignment]
+            root = get_sources(constraint.root.t_id, constraint.root.dim)[0]
         else:
             # or root points to a phantom symbol
             if constraint.root.name in phantom_symbols:
-                root = phantom_symbols[constraint.root.name]  # type: ignore[assignment]
+                root = phantom_symbols[constraint.root.name]
             else:
                 # create a phantom symbol in the shape env based on the _PhantomRoot
                 root = shape_env.create_symbol(
@@ -425,12 +448,14 @@ def _process_equalities(
                     dynamic_dim=torch.fx.experimental.symbolic_shapes.DimDynamic.DYNAMIC,
                     constraint_dim=constraint.root.constraint_range,
                 )
-                phantom_symbols[constraint.root.name] = root  # type: ignore[assignment]
+                phantom_symbols[constraint.root.name] = root
 
         fn = constraint.fn
         # A derived equality (source, root, fn) informally corresponds to source = fn(root).
         # Here source describes an input and root might describe another input or a phantom symbol.
         derived_equalities.append((source, root, fn))
+    elif isinstance(constraint, _RelaxedConstraint):
+        relaxed_sources.add(source)
 
 
 def _tree_map_with_path(
@@ -557,7 +582,7 @@ def _tree_map_with_path(
         raise
 
 
-def _combine_args(f, args, kwargs, _is_torch_jit_trace=False) -> Dict[str, Any]:
+def _combine_args(f, args, kwargs, _is_torch_jit_trace=False) -> dict[str, Any]:
     # combine args and kwargs following the signature of f, as it happens
     # in the body of f when called with *args, **kwargs
     if isinstance(f, ExportedProgram):
@@ -578,7 +603,12 @@ class ShapesCollection:
     Builder for dynamic_shapes.
     Used to assign dynamic shape specifications to tensors that appear in inputs.
 
+    This is useful particularly when :func:`args` is a nested input structure, and it's
+    easier to index the input tensors, than to replicate the structure of :func:`args` in
+    the :func:`dynamic_shapes` specification.
+
     Example::
+
         args = ({"x": tensor_x, "others": [tensor_y, tensor_z]})
 
         dim = torch.export.Dim(...)
@@ -620,7 +650,7 @@ class ShapesCollection:
 
     def dynamic_shapes(self, m, args, kwargs=None):
         """
-        Generate dynamic_shapes.
+        Generates the :func:`dynamic_shapes` pytree structure according to :func:`args` and :func:`kwargs`.
         """
 
         t_ids = set()
@@ -654,22 +684,21 @@ def _warn_on_None_dynamic_shape_dimension():
 
 
 def _check_dynamic_shapes(
-    combined_args: Dict[str, Any],
-    dynamic_shapes: Union[Dict[str, Any], Tuple[Any], List[Any], None],
+    combined_args: dict[str, Any],
+    dynamic_shapes: Union[dict[str, Any], tuple[Any], list[Any], None],
 ):
     """
     Checks the dynamic_shapes specification for correctness,
     using combined args + kwargs as reference for inputs structure.
     """
     from torch._dynamo.exc import UserError, UserErrorType
-    from torch._export.non_strict_utils import _flatten_dynamic_shapes
 
     if dynamic_shapes is None or len(dynamic_shapes) == 0:
         return
     if isinstance(dynamic_shapes, (tuple, list)):
         combined_args = type(dynamic_shapes)(combined_args.values())  # type: ignore[assignment, misc]
 
-    bounds: Dict[str, Tuple[int, int]] = {}
+    bounds: dict[str, tuple[int, int]] = {}
 
     def check_same_bounds(dim):
         if dim.__name__ in bounds:
@@ -768,29 +797,11 @@ def _check_dynamic_shapes(
 
     _tree_map_with_path(check_shape, combined_args, dynamic_shapes, tree_name="inputs")
 
-    # raise user warning if both Dim.AUTO & Dims are specified in dynamic_shapes
-    flat_dynamic_shapes = _flatten_dynamic_shapes(combined_args, dynamic_shapes)
-    flatter_dynamic_shapes, _ = tree_flatten(flat_dynamic_shapes)
-    if any(isinstance(s, _Dim) for s in flatter_dynamic_shapes) and any(
-        s == _DimHint.AUTO for s in flatter_dynamic_shapes
-    ):
-        raise UserError(
-            UserErrorType.INVALID_INPUT,
-            "Specifying both `Dim.AUTO/Dim.DYNAMIC` and `Dim/DerivedDim` in `dynamic_shapes` is not "
-            "well supported at the moment, and can easily lead to constraint violation errors or obscure errors "
-            "in torch.export. Dim/DerivedDims expect all equal or related dimensions to be specified, "
-            "and do not yet compose well with `Dim.AUTO`. We suggest using `Dim.AUTO/Dim.DYNAMIC` mixed with "
-            "`Dim.STATIC` for auto-dynamic + static shapes, plus torch._check(dim >= min), torch._check(dim <= max) "
-            "calls in your program to specify min/max ranges, or `Dim`/`DerivedDim` mixed with `Dim.STATIC` "
-            "if you want to assert on the exact specification of your program's dynamic shapes behavior.",
-            case_name="dynamic_shapes_validation",
-        )
-
 
 def _process_dynamic_shapes(
-    combined_args: Dict[str, Any],
-    dynamic_shapes: Union[Dict[str, Any], Tuple[Any], List[Any], None],
-) -> List[Constraint]:
+    combined_args: dict[str, Any],
+    dynamic_shapes: Union[dict[str, Any], tuple[Any], list[Any], None],
+) -> list[Constraint]:
     """
     Reads the dynamic_shapes specification and produces a list of constraints.
     """
@@ -803,12 +814,12 @@ def _process_dynamic_shapes(
         combined_args = type(dynamic_shapes)(combined_args.values())  # type: ignore[assignment, misc]
 
     # map of Dim names representing input shape dimensions to constraints on them
-    symbols: Dict[str, List[Constraint]] = defaultdict(list)
+    symbols: dict[str, list[Constraint]] = defaultdict(list)
     # track roots that do not directly represent input shape dimensions
-    phantom_roots: Dict[str, _PhantomRoot] = {}
-    derived_constraints_with_phantom_root: List[_DerivedConstraint] = []
+    phantom_roots: dict[str, _PhantomRoot] = {}
+    derived_constraints_with_phantom_root: list[_DerivedConstraint] = []
     # list of constraints to return
-    constraints: List[Constraint] = []
+    constraints: list[Constraint] = []
 
     def to_constraint(dim, tensor, i):
         import sympy
@@ -824,7 +835,7 @@ def _process_dynamic_shapes(
             expr = dim.fn(symbol)
             solution = try_solve(sympy.Eq(expr, tensor.shape[i]), symbol)
             if solution is not None:
-                return int(solution[1])  # type: ignore[call-overload]
+                return int(solution[1])
             else:
                 raise UserError(  # noqa: B904
                     UserErrorType.CONSTRAINT_VIOLATION,
@@ -919,6 +930,7 @@ def _process_dynamic_shapes(
                         torch._dynamo.mark_static(tensor, i)
                     elif dim == _DimHint.DYNAMIC:
                         torch._dynamo.mark_dynamic(tensor, i)
+                    constraints.append(_RelaxedConstraint(id(tensor), i))
                 elif dim is None:
                     torch._dynamo.mark_static(tensor, i)
         elif isinstance(shape, (tuple, list)):
@@ -935,6 +947,7 @@ def _process_dynamic_shapes(
                         torch._dynamo.mark_static(tensor, i)
                     elif dim == _DimHint.DYNAMIC:
                         torch._dynamo.mark_dynamic(tensor, i)
+                    constraints.append(_RelaxedConstraint(id(tensor), i))
                 elif dim is None:
                     torch._dynamo.mark_static(tensor, i)
         elif shape is None:
@@ -962,11 +975,11 @@ def _process_dynamic_shapes(
     for dynamic_dims in symbols.values():
         constraints.extend(dynamic_dims)
 
-    return constraints  # type: ignore[return-value]
+    return constraints
 
 
 def _get_dim_name_mapping(
-    dynamic_shapes: Union[Dict[str, Any], Tuple[Any], List[Any], None]
+    dynamic_shapes: Union[dict[str, Any], tuple[Any], list[Any], None]
 ):
     name_to_dim = {}
     for dim in tree_flatten(
@@ -989,45 +1002,34 @@ def _get_dim_name_mapping(
 
 def refine_dynamic_shapes_from_suggested_fixes(
     msg: str,
-    dynamic_shapes: Union[Dict[str, Any], Tuple[Any], List[Any]],
-) -> Union[Dict[str, Any], Tuple[Any], List[Any]]:
+    dynamic_shapes: Union[dict[str, Any], tuple[Any], list[Any]],
+) -> Union[dict[str, Any], tuple[Any], list[Any]]:
     """
-    For working with export's dynamic shapes suggested fixes, and/or automatic dynamic shapes.
-    Refines the given dynamic shapes spec, given a ConstraintViolation error message and the original dynamic shapes.
+    When exporting with :func:`dynamic_shapes`, export may fail with a ConstraintViolation error if the specification
+    doesn't match the constraints inferred from tracing the model. The error message may provide suggested fixes -
+    changes that can be made to :func:`dynamic_shapes` to export successfully.
 
-    For most cases behavior is straightforward - i.e. for suggested fixes that specialize or refine a Dim's range,
-    or fixes that suggest a derived relation, the new dynamic shapes spec will be updated as such.
+    Example ConstraintViolation error message::
 
-    e.g.
-    Suggested fixes:
+        Suggested fixes:
 
-        dim = Dim('dim', min=3, max=6) -> this just refines the dim's range
-        dim = 4 -> this specializes to a constant
-        dy = dx + 1 -> dy was specified as an independent dim, but is actually tied to dx with this relation
+            dim = Dim('dim', min=3, max=6)  # this just refines the dim's range
+            dim = 4  # this specializes to a constant
+            dy = dx + 1  # dy was specified as an independent dim, but is actually tied to dx with this relation
 
-    However, suggested fixes associated with derived dims can be more complicated.
-    For example, if a suggested fix is provided for a root dim, the new derived dim value is evaluated based on the root.
+    This is a helper function that takes the ConstraintViolation error message and the original :func:`dynamic_shapes` spec,
+    and returns a new :func:`dynamic_shapes` spec that incorporates the suggested fixes.
 
-    e.g.
-    dx = Dim('dx')
-    dy = dx + 2
-    dynamic_shapes = {"x": (dx,), "y": (dy,)}
+    Example usage::
 
-    Suggested fixes:
+        try:
+            ep = export(mod, args, dynamic_shapes=dynamic_shapes)
+        except torch._dynamo.exc.UserError as exc:
+            new_shapes = refine_dynamic_shapes_from_suggested_fixes(
+                exc.msg, dynamic_shapes
+            )
+            ep = export(mod, args, dynamic_shapes=new_shapes)
 
-        dx = 4  # specialization will lead to dy also specializing = 6
-        dx = Dim('dx', max=6)  # dy now has max = 8
-
-    Derived dims suggested fixes can also be used to express divisibility constraints.
-    This involves creating new root dims that aren't tied to a particular input shape.
-    In this case the root dims won't appear directly in the new spec, but as a root of
-    one of the dims.
-
-    e.g.
-    Suggested fixes:
-
-        _dx = Dim('_dx', max=1024)  # this won't appear in the return result, but dx will
-        dx = 4*_dx  # dx is now divisible by 4, with a max value of 4096
     """
 
     import re
@@ -1062,7 +1064,7 @@ def refine_dynamic_shapes_from_suggested_fixes(
             expr = sympy.sympify(expr)
             if isinstance(expr, sympy.Number):
                 # static, integer
-                shape_fixes[name] = int(expr)  # type: ignore[assignment]
+                shape_fixes[name] = int(expr)
             else:
                 # relation or derived dim
                 shape_fixes[name] = expr
@@ -1070,7 +1072,7 @@ def refine_dynamic_shapes_from_suggested_fixes(
     name_to_dim = _get_dim_name_mapping(dynamic_shapes)
 
     # track derived dim roots
-    roots: Set[str] = set()
+    roots: set[str] = set()
     for k, c in shape_fixes.items():
         assert isinstance(c, (int, _Dim, _DerivedDim, sympy.Expr))
         if isinstance(c, sympy.Expr):  # check dim/derived dim expression
@@ -1085,7 +1087,7 @@ def refine_dynamic_shapes_from_suggested_fixes(
         assert k in name_to_dim or k in roots
 
     # cache so we don't produce multiple derived dim objects
-    derived_dim_cache: Dict[str, _DerivedDim] = {}
+    derived_dim_cache: dict[str, _DerivedDim] = {}
 
     def apply_fixes(path, dim, dummy):
         if dim is None or isinstance(dim, int):  # not dynamic
@@ -1098,11 +1100,11 @@ def refine_dynamic_shapes_from_suggested_fixes(
                 else:
                     symbol = next(iter(fix.free_symbols))
                     # try to locate symbol
-                    if symbol.name in shape_fixes:  # type: ignore[attr-defined]
-                        root = shape_fixes[symbol.name]  # type: ignore[attr-defined]
+                    if symbol.name in shape_fixes:
+                        root = shape_fixes[symbol.name]
                     else:
-                        assert symbol.name in name_to_dim  # type: ignore[attr-defined]
-                        root = name_to_dim[symbol.name]  # type: ignore[attr-defined]
+                        assert symbol.name in name_to_dim
+                        root = name_to_dim[symbol.name]
                     # figure out value of fix
                     modulus, remainder = sympy.polys.polytools.div(fix, symbol)
                     dim = root

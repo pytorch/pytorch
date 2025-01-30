@@ -34,7 +34,7 @@ class TestNumPyInterop(TestCase):
     @onlyCPU
     def test_numpy_unresizable(self, device) -> None:
         x = np.zeros((2, 2))
-        y = torch.from_numpy(x)
+        y = torch.from_numpy(x)  # noqa: F841
         with self.assertRaises(ValueError):
             x.resize((5, 5))
 
@@ -278,7 +278,7 @@ class TestNumPyInterop(TestCase):
     def test_from_numpy_no_leak_on_invalid_dtype(self):
         # This used to leak memory as the `from_numpy` call raised an exception and didn't decref the temporary
         # object. See https://github.com/pytorch/pytorch/issues/121138
-        x = np.array("value".encode("ascii"))
+        x = np.array(b"value")
         for _ in range(1000):
             try:
                 torch.from_numpy(x)
@@ -578,7 +578,7 @@ class TestNumPyInterop(TestCase):
     @dtypes(*all_types_and_complex_and(torch.half, torch.bool))
     def test___eq__(self, device, dtype):
         a = make_tensor((5, 7), dtype=dtype, device=device, low=-9, high=9)
-        b = a.clone().detach()
+        b = a.detach().clone()
         b_np = b.numpy()
 
         # Check all elements equal
