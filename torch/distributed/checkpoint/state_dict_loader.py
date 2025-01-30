@@ -57,6 +57,7 @@ def load(
     storage_reader: Optional[StorageReader] = None,
     planner: Optional[LoadPlanner] = None,
     process_group: Optional[dist.ProcessGroup] = None,
+    no_dist: bool = False,
 ) -> None:
     """
     Load a distributed ``state_dict`` in SPMD style.
@@ -109,7 +110,8 @@ def load(
         process_group (Optional[ProcessGroup]):
             ProcessGroup to be used for cross-rank synchronization.
             (Default: ``None``)
-
+        no_dist (bool): If ``True``, this function will assume the intent is to load
+            a checkpoint without using cross-rank synchronization. (Default: ``False``)
     Returns:
         None.
 
@@ -139,10 +141,10 @@ def load(
         rank has an individual GPU, via ``torch.cuda.set_device()``.
     """
 
-    no_dist = not (dist.is_available() and dist.is_initialized())
+    no_dist = no_dist or (not dist.is_available()) or (not dist.is_initialized())
     if no_dist:
         warnings.warn(
-            "torch.distributed is unavailable or uninitialized, assuming the intent is to load in a single process."
+            "torch.distributed is disabled, unavailable or uninitialized, assuming the intent is to load in a single process."
         )
 
     with _profile():
