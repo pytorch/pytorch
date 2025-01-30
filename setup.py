@@ -22,6 +22,11 @@
 #     also applies to C++ files (unless CXXFLAGS is set), in contrast to the
 #     default behavior of autogoo and cmake build systems.)
 #
+#     A specific flag that can be used is
+#     -DHAS_TORCH_SHOW_DISPATCH_TRACE
+#       build with dispatch trace that can be enabled with
+#       TORCH_SHOW_DISPATCH_TRACE=1 at runtime.
+#
 #   CC
 #     the C/C++ compiler to use
 #
@@ -1285,6 +1290,7 @@ def main():
         "include/torch/csrc/distributed/autograd/rpc_messages/*.h",
         "include/torch/csrc/dynamo/*.h",
         "include/torch/csrc/inductor/*.h",
+        "include/torch/csrc/inductor/aoti_include/*.h",
         "include/torch/csrc/inductor/aoti_package/*.h",
         "include/torch/csrc/inductor/aoti_runner/*.h",
         "include/torch/csrc/inductor/aoti_runtime/*.h",
@@ -1292,6 +1298,8 @@ def main():
         "include/torch/csrc/inductor/aoti_torch/c/*.h",
         "include/torch/csrc/inductor/aoti_torch/generated/*.h",
         "include/torch/csrc/inductor/aoti_torch/generated/extend/*.h",
+        "include/torch/csrc/inductor/cpp_wrapper/*.h",
+        "include/torch/csrc/inductor/cpp_wrapper/device_internal/*.h",
         "include/torch/csrc/jit/*.h",
         "include/torch/csrc/jit/backends/*.h",
         "include/torch/csrc/jit/generated/*.h",
