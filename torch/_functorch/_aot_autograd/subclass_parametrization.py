@@ -1,5 +1,6 @@
 import dataclasses
-from typing import Any
+import itertools
+from typing import Any, Iterable, Union
 
 import torch
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
@@ -15,6 +16,8 @@ class SubclassCreationMeta:
     class_type: Any
     attrs: dict[str, "SubclassCreationMeta"]
     metadata: Any
+    outer_size: Iterable[Union[None, int, torch.SymInt]]
+    outer_stride: Iterable[Union[None, int, torch.SymInt]]
 
 
 class UnwrapTensorSubclass(torch.nn.Module):
@@ -29,7 +32,10 @@ class UnwrapTensorSubclass(torch.nn.Module):
                 built_tensor, offset = _unwrap_tensor_subclasses(meta, tensors, offset)
                 inner_tensors[attr] = built_tensor
             rebuilt = subclass_meta.class_type.__tensor_unflatten__(
-                inner_tensors, subclass_meta.metadata, None, None
+                inner_tensors,
+                subclass_meta.metadata,
+                subclass_meta.outer_size,
+                subclass_meta.outer_stride,
             )
             return rebuilt, offset
 
@@ -59,6 +65,8 @@ class UnwrapTensorSubclass(torch.nn.Module):
                     class_type=type(tensor),
                     attrs=attr_to_meta,
                     metadata=metadata,
+                    outer_size=tensor.size(),
+                    outer_stride=tensor.stride(),
                 ),
                 new_idx,
             )
@@ -79,11 +87,11 @@ def unwrap_tensor_subclass_parameters(module: torch.nn.Module) -> torch.nn.Modul
     becomes: {"parametrizations.p2.original0": torch.Tensor, "parametrizations.p2.original1": torch.Tensor}
 
     """
-    name_param: list[tuple[str, torch.nn.Parameter]] = list(
-        module.named_parameters(recurse=False)
-    )
-    for name, param in name_param:
-        if is_traceable_wrapper_subclass(param):
+    for name, tensor in itertools.chain(
+        list(module.named_parameters(recurse=False)),
+        list(module.named_buffers(recurse=False)),
+    ):
+        if is_traceable_wrapper_subclass(tensor):
             torch.nn.utils.parametrize.register_parametrization(
                 module, name, UnwrapTensorSubclass()
             )
