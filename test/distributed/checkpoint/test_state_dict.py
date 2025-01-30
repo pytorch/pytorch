@@ -4,7 +4,7 @@ import copy
 import functools
 import sys
 from itertools import chain
-from typing import Callable, Union
+from typing import Callable, Dict, Union
 
 import torch
 import torch.distributed as dist
@@ -61,6 +61,51 @@ if TEST_WITH_DEV_DBG_ASAN:
         file=sys.stderr,
     )
     sys.exit(0)
+
+
+class FusionEmbedding(nn.Module):
+    def __init__(self, vocab_size: int, fusion_vocab_size: int, embed_dim: int) -> None:
+        super().__init__()
+        self.embedding = nn.Embedding(vocab_size, embed_dim)
+        self.fusion_embedding = nn.Embedding(fusion_vocab_size, embed_dim)
+
+
+class FusionEmbeddingWithHook(nn.Module):
+    def __init__(self, vocab_size: int, fusion_vocab_size: int, embed_dim: int) -> None:
+        super().__init__()
+        self.embedding = nn.Embedding(vocab_size, embed_dim)
+        self.fusion_embedding = nn.Embedding(fusion_vocab_size, embed_dim)
+        self._register_state_dict_hook(FusionEmbeddingWithHook._state_dict_hook)
+        self._register_load_state_dict_pre_hook(
+            FusionEmbeddingWithHook._load_state_dict_hook, with_module=True
+        )
+
+    def _state_dict_hook(self, destination, prefix, keep_vars):
+        """Remove "embedding" from the original embedding in the state_dict
+        name. This keeps the orginal state dict name for the embedding
+        from before fusing with the FusionEmbedding.
+        """
+        key = prefix + "embedding.weight"
+        new_key = prefix + "weight"
+        destination[new_key] = destination[key]
+        del destination[key]
+
+    def _load_state_dict_hook(self, state_dict, prefix, *args, **kwargs):
+        """Apply extra "embedding" prefix to the state_dict key to
+        account for the FusionEmbedding wrapping.
+        """
+        if state_dict:
+            key = prefix + "weight"
+            new_key = prefix + "embedding.weight"
+            state_dict[new_key] = state_dict[key]
+            del state_dict[key]
+
+
+class FusionEmbeddingWithModifier(FusionEmbeddingWithHook):
+    def fqn_modifiers(self) -> Dict[str, str]:
+        return {
+            "weight": "embedding",
+        }
 
 
 class TestStateDict(DTensorTestBase, VerifyStateDictMixin):
@@ -656,9 +701,7 @@ class TestStateDict(DTensorTestBase, VerifyStateDictMixin):
             fully_shard(layer)
         fully_shard(model)
         optim = torch.optim.Adam(model.parameters(), lr=1e-2)
-        torch.optim.lr_scheduler.LambdaLR(
-            optim, lr_lambda=[lambda epoch: 0.95**epoch]
-        )
+        torch.optim.lr_scheduler.LambdaLR(optim, lr_lambda=[lambda epoch: 0.95**epoch])
         opt_state_dict = ptd_state_dict.get_optimizer_state_dict(
             model,
             optim,
@@ -918,6 +961,19 @@ class TestStateDict(DTensorTestBase, VerifyStateDictMixin):
                     broadcast_from_rank0=True, full_state_dict=True, strict=False
                 ),
             )
+
+    @with_comms
+    @skip_if_lt_x_gpu(2)
+    def test_state_dict_with_hook_on_keys(self) -> None:
+        with torch.device("meta"):
+            metamodel = FusionEmbedding(4, 4, 4)
+        with torch.device("cuda"):
+            gpumodel = FusionEmbeddingWithHook(4, 4, 4)
+        with self.assertRaisesRegex(RuntimeError, "Missing key"):
+            set_model_state_dict(metamodel, gpumodel.state_dict())
+        with torch.device("meta"):
+            metamodel_modified = FusionEmbeddingWithModifier(4, 4, 4)
+        set_model_state_dict(metamodel_modified, gpumodel.state_dict())
 
 
 class TestNoComm(MultiProcessTestCase):

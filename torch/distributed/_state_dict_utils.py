@@ -66,8 +66,7 @@ def _all_gather_sharded_tensor(
     return tensor
 
 
-class CompanionMismatch(Exception):
-    ...
+class CompanionMismatch(Exception): ...
 
 
 def _iterate_state_dict(
