@@ -2643,6 +2643,18 @@ utils_device.CURRENT_DEVICE == None""".split(
         self.assertEqual(r.dtype, torch.int64)
         self.assertEqual(cnts.frame_count, 1)
 
+    @torch._dynamo.config.patch(capture_dynamic_output_shape_ops=True)
+    def test_unique_consecutive(self):
+        x = torch.tensor([1, 1, 2, 2, 1, 3])
+
+        def fn(x):
+            return torch.unique_consecutive(x)
+
+        expected = fn(x)
+        opt_fn = torch.compile(fn, fullgraph=True, backend="eager")
+        result = opt_fn(x)
+        self.assertEqual(result, expected)
+
     def test_numpy_unique_f16(self):
         def fn():
             x = np.asarray([1, 1, 2, 2, 3], dtype=np.float16)
@@ -11781,33 +11793,6 @@ fn
 
         _, ne = run(torch.ones(1))
         self.assertFalse(ne)
-
-    def test_ne_operator_with_custom_ne(self):
-        class Foo:
-            def __init__(self, x):
-                self.x = x
-                self.ne_called = False
-
-            def __ne__(self, other):
-                # ne_called attr is later checked to ensure that overrideen
-                # `__ne__` is traced
-                self.ne_called = True
-                return not self.__eq__(other)
-
-            def __eq__(self, other):
-                return self.x == other.x
-
-        f1 = Foo(0)
-        f2 = Foo(0)
-
-        @torch.compile(fullgraph=True, backend="eager")
-        def run(x):
-            # `x + 1` prevents Dynamo from skipping this frame.
-            return x + 1, f1 != f2
-
-        _, ne = run(torch.ones(1))
-        self.assertFalse(ne)
-        self.assertTrue(f1.ne_called)
 
     def test_ne_operator_with_custom_graphbreak_eq(self):
         counters.clear()
