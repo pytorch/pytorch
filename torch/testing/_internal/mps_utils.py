@@ -81,9 +81,8 @@ class MPSSkipInfo:
             self.tests = []
             self.skip = xfailUnimplemented
 
+""" Failures due to lack of op implementation on MPS backend """
 UNIMPLEMENTED_XFAILIST = {
-    """ Failures due to lack of op implementation on MPS backend """
-
     'login': MPSSkipInfo(UNIMPLEMENTED),
     'logspace': MPSSkipInfo(UNIMPLEMENTED),
     'logspacetensor_overload': MPSSkipInfo(UNIMPLEMENTED),
@@ -91,9 +90,13 @@ UNIMPLEMENTED_XFAILIST = {
     'linalg.eigvals': MPSSkipInfo(UNIMPLEMENTED),
     'put': MPSSkipInfo(UNIMPLEMENTED),
     'nn.functional.conv_transpose3d': MPSSkipInfo(UNIMPLEMENTED),
-    'rounddecimals_neg_3': MPSSkipInfo(UNIMPLEMENTED),
-    'rounddecimals_3': MPSSkipInfo(UNIMPLEMENTED),
-    'rounddecimals_0': MPSSkipInfo(UNIMPLEMENTED),
+    'round': [
+        MPSSkipInfo(UNIMPLEMENTED, variant="decimals_neg_3"),
+        MPSSkipInfo(UNIMPLEMENTED, variant="decimals_3"),
+        MPSSkipInfo(UNIMPLEMENTED, variant="decimals_0"),
+        # round not working properly for float16 and bfloat16
+        MPSSkipInfo(UNIMPLEMENTED, dtypes=[torch.float16, torch.bfloat16]),
+    ],
     '__rsub__': MPSSkipInfo(UNIMPLEMENTED),
     'cauchy_': MPSSkipInfo(UNIMPLEMENTED),
     'cauchy': MPSSkipInfo(UNIMPLEMENTED),
@@ -110,10 +113,7 @@ UNIMPLEMENTED_XFAILIST = {
     'igamma': MPSSkipInfo(UNIMPLEMENTED),
     'igammac': MPSSkipInfo(UNIMPLEMENTED),
     'index_copy': MPSSkipInfo(UNIMPLEMENTED),
-    'index_reduceprod': MPSSkipInfo(UNIMPLEMENTED),
-    'index_reducemean': MPSSkipInfo(UNIMPLEMENTED),
-    'index_reduceamax': MPSSkipInfo(UNIMPLEMENTED),
-    'index_reduceamin': MPSSkipInfo(UNIMPLEMENTED),
+    'index_reduce': MPSSkipInfo(UNIMPLEMENTED),
     'kthvalue': MPSSkipInfo(UNIMPLEMENTED),
     'lcm': MPSSkipInfo(UNIMPLEMENTED),
     'linalg.cholesky_ex': MPSSkipInfo(UNIMPLEMENTED),
@@ -150,14 +150,16 @@ UNIMPLEMENTED_XFAILIST = {
     'mode': MPSSkipInfo(UNIMPLEMENTED),
     'nanmedian': MPSSkipInfo(UNIMPLEMENTED),
     'native_dropout_backward': MPSSkipInfo(UNIMPLEMENTED),
-    'normnuc': MPSSkipInfo(UNIMPLEMENTED),
+    'norm': MPSSkipInfo(UNIMPLEMENTED, variant="nuc"),
     'nn.functional.fractional_max_pool2d': MPSSkipInfo(UNIMPLEMENTED),
     'nn.functional.fractional_max_pool3d': MPSSkipInfo(UNIMPLEMENTED),
     'nn.functional.adaptive_avg_pool3d': MPSSkipInfo(UNIMPLEMENTED),
     'nn.functional.adaptive_max_pool3d': MPSSkipInfo(UNIMPLEMENTED),
-    'nn.functional.interpolatearea': MPSSkipInfo(UNIMPLEMENTED),
-    'nn.functional.interpolatebicubic': MPSSkipInfo(UNIMPLEMENTED, dtypes=[torch.uint8]),
-    'nn.functional.interpolatetrilinear': MPSSkipInfo(UNIMPLEMENTED),
+    'nn.functional.interpolate': [
+        MPSSkipInfo(UNIMPLEMENTED, variant="area"),
+        MPSSkipInfo(UNIMPLEMENTED, dtypes=[torch.uint8], variant="bicubic"),
+        MPSSkipInfo(UNIMPLEMENTED, variant="trilinear"),
+    ],
     'nn.functional.max_unpool1dgrad': MPSSkipInfo(UNIMPLEMENTED),
     'nn.functional.max_unpool2dgrad': MPSSkipInfo(UNIMPLEMENTED),
     'nn.functional.max_unpool3dgrad': MPSSkipInfo(UNIMPLEMENTED),
@@ -178,28 +180,30 @@ UNIMPLEMENTED_XFAILIST = {
     'pca_lowrank': MPSSkipInfo(UNIMPLEMENTED),
     'qr': MPSSkipInfo(UNIMPLEMENTED),
     'rsub': MPSSkipInfo(UNIMPLEMENTED),
-    'scatter_reduceamax': [
+    'scatter_reduce': [
         MPSSkipInfo(
             UNIMPLEMENTED,
             dtypes=[torch.int64],
             lower=15.0,
+            variant='amax',
         ),
         MPSSkipInfo(
             UNIMPLEMENTED,
             dtypes=[torch.int32, torch.int64],
             upper=15.0,
+            variant='amax',
         ),
-    ],
-    'scatter_reduceamin': [
         MPSSkipInfo(
             UNIMPLEMENTED,
             dtypes=[torch.int64],
             lower=15.0,
+            variant='amin',
         ),
         MPSSkipInfo(
             UNIMPLEMENTED,
             dtypes=[torch.int32, torch.int64],
             upper=15.0,
+            variant='amin',
         ),
     ],
     'segment_reduce': MPSSkipInfo(UNIMPLEMENTED),
@@ -252,13 +256,12 @@ UNIMPLEMENTED_XFAILIST = {
     'log_normal': MPSSkipInfo(UNIMPLEMENTED),
     'cdouble': MPSSkipInfo(UNIMPLEMENTED),
     'double': MPSSkipInfo(UNIMPLEMENTED),
-    'nn.functional.softminwith_dtype': MPSSkipInfo(UNIMPLEMENTED),
-    'log_softmaxwith_dtype': MPSSkipInfo(UNIMPLEMENTED),
-    'softmaxwith_dtype': MPSSkipInfo(UNIMPLEMENTED),
+    'nn.functional.softmin': MPSSkipInfo(UNIMPLEMENTED, variant="with_dtype"),
+    'log_softmax': MPSSkipInfo(UNIMPLEMENTED, variant="with_dtype"),
+    'softmax': MPSSkipInfo(UNIMPLEMENTED, variant="with_dtype"),
     'float_power': MPSSkipInfo(UNIMPLEMENTED),
     'full_like': MPSSkipInfo(UNIMPLEMENTED),
-    'linalg.matrix_rankhermitian': MPSSkipInfo(UNIMPLEMENTED),
-    'linalg.pinvhermitian': MPSSkipInfo(UNIMPLEMENTED),
+    'linalg.pinv': MPSSkipInfo(UNIMPLEMENTED, variant="hermitian"),
     'nonzero_static': MPSSkipInfo(UNIMPLEMENTED),
 
     # MPS: input sizes must be divisible by output sizes
@@ -313,14 +316,21 @@ UNIMPLEMENTED_XFAILIST = {
     'bincount': MPSSkipInfo(UNIMPLEMENTED, dtypes=[torch.int16, torch.int32, torch.int64, torch.uint8, torch.int8]),
 
     # trunc_tensor not working properly for float16 and bfloat16
-    'divtrunc_rounding': MPSSkipInfo(UNIMPLEMENTED, dtypes=[torch.float16, torch.bfloat16]),
+    'div': [
+        MPSSkipInfo(
+            UNIMPLEMENTED,
+            dtypes=[torch.float16, torch.bfloat16],
+            variant='trunc_rounding',
+        ),
+        MPSSkipInfo(
+            UNIMPLEMENTED,
+            dtypes=[torch.bfloat16],  # bfloat16 has issues with rounding
+            variant="floor_rounding",
+        ),
+    ],
     'fmod': MPSSkipInfo(UNIMPLEMENTED, dtypes=[torch.float16]),
 
-    # round not working properly for float16 and bfloat16
-    'round': MPSSkipInfo(UNIMPLEMENTED, dtypes=[torch.float16, torch.bfloat16]),
-
     # bfloat16 have weird issues with rounding
-    'divfloor_rounding': MPSSkipInfo(UNIMPLEMENTED, dtypes=[torch.bfloat16]),
     'floor_divide': MPSSkipInfo(UNIMPLEMENTED, dtypes=[torch.bfloat16]),
     'remainder': MPSSkipInfo(UNIMPLEMENTED, dtypes=[torch.bfloat16]),
 
@@ -332,6 +342,7 @@ UNIMPLEMENTED_XFAILIST = {
 }
 
 COMPLEX_DTYPES = [torch.complex32, torch.complex64]
+"""Ops which do not have support for complex dtypes and are expected to fail"""
 COMPLEX_XFAILLIST = {
     '__rdiv__': MPSSkipInfo(
         dtypes=COMPLEX_DTYPES,
@@ -413,10 +424,12 @@ COMPLEX_XFAILLIST = {
         dtypes=COMPLEX_DTYPES,
         upper=15.0,
     ),
+    'baddbmm': MPSSkipInfo(dtypes=COMPLEX_DTYPES),
     'bfloat16': MPSSkipInfo(
         dtypes=COMPLEX_DTYPES,
         upper=15.0,
     ),
+    'block_diag': MPSSkipInfo(dtypes=COMPLEX_DTYPES),
     'bmm': MPSSkipInfo(
         dtypes=COMPLEX_DTYPES,
         upper=15.0,
@@ -437,6 +450,7 @@ COMPLEX_XFAILLIST = {
         dtypes=COMPLEX_DTYPES,
         upper=15.0,
     ),
+    'cholesky': MPSSkipInfo(dtypes=COMPLEX_DTYPES),
     'column_stack': MPSSkipInfo(
         dtypes=COMPLEX_DTYPES,
         upper=15.0,
@@ -465,10 +479,16 @@ COMPLEX_XFAILLIST = {
         dtypes=COMPLEX_DTYPES,
         upper=15.0,
     ),
+    'cov': MPSSkipInfo(dtypes=COMPLEX_DTYPES),
+    'cross': MPSSkipInfo(dtypes=COMPLEX_DTYPES),
+    'cumprod': MPSSkipInfo(dtypes=COMPLEX_DTYPES),
+    'cumsum': MPSSkipInfo(dtypes=COMPLEX_DTYPES),
+    'cumulative_trapezoid': MPSSkipInfo(dtypes=COMPLEX_DTYPES),
     'diff': MPSSkipInfo(
         dtypes=COMPLEX_DTYPES,
         upper=15.0,
     ),
+    'dist': MPSSkipInfo(dtypes=COMPLEX_DTYPES),
     'div': MPSSkipInfo(
         dtypes=COMPLEX_DTYPES,
         upper=15.0,
@@ -581,6 +601,7 @@ COMPLEX_XFAILLIST = {
         dtypes=COMPLEX_DTYPES,
         upper=15.0,
     ),
+    'gather': MPSSkipInfo(dtypes=COMPLEX_DTYPES),
     'gradient': MPSSkipInfo(
         dtypes=COMPLEX_DTYPES,
         upper=15.0,
@@ -593,6 +614,9 @@ COMPLEX_XFAILLIST = {
         dtypes=COMPLEX_DTYPES,
         upper=15.0,
     ),
+    'index_add': MPSSkipInfo(dtypes=COMPLEX_DTYPES),
+    'index_fill': MPSSkipInfo(dtypes=COMPLEX_DTYPES),
+    'index_put': MPSSkipInfo(dtypes=COMPLEX_DTYPES),
     'inner': MPSSkipInfo(
         dtypes=COMPLEX_DTYPES,
         upper=15.0,
@@ -609,18 +633,32 @@ COMPLEX_XFAILLIST = {
         dtypes=COMPLEX_DTYPES,
         upper=15.0,
     ),
+    'istft': MPSSkipInfo(dtypes=COMPLEX_DTYPES),
     'ldexp': MPSSkipInfo(
         dtypes=COMPLEX_DTYPES,
         upper=15.0,
     ),
+    'lerp': MPSSkipInfo(dtypes=COMPLEX_DTYPES),
+    'linalg.cholesky': MPSSkipInfo(dtypes=COMPLEX_DTYPES),
+    'linalg.cross': MPSSkipInfo(dtypes=COMPLEX_DTYPES),
+    'linalg.inv': MPSSkipInfo(dtypes=COMPLEX_DTYPES),
+    'linalg.inv_ex': MPSSkipInfo(dtypes=COMPLEX_DTYPES),
+    'linalg.lu_factor': MPSSkipInfo(dtypes=COMPLEX_DTYPES),
+    'linalg.matrix_norm': MPSSkipInfo(dtypes=COMPLEX_DTYPES),
+    'linalg.matrix_power': MPSSkipInfo(dtypes=COMPLEX_DTYPES),
     'linalg.multi_dot': MPSSkipInfo(
         dtypes=COMPLEX_DTYPES,
         upper=15.0,
     ),
+    'linalg.norm': MPSSkipInfo(dtypes=COMPLEX_DTYPES),
     'linalg.pinv': MPSSkipInfo(
         dtypes=COMPLEX_DTYPES,
         upper=15.0,
     ),
+    'linalg.solve_triangular': MPSSkipInfo(dtypes=COMPLEX_DTYPES),
+    'linalg.tensorinv': MPSSkipInfo(dtypes=COMPLEX_DTYPES),
+    'linalg.vander': MPSSkipInfo(dtypes=COMPLEX_DTYPES),
+    'linalg.vector_norm': MPSSkipInfo(dtypes=COMPLEX_DTYPES),
     'linspace': MPSSkipInfo(
         dtypes=COMPLEX_DTYPES,
         upper=15.0,
@@ -661,6 +699,7 @@ COMPLEX_XFAILLIST = {
         dtypes=COMPLEX_DTYPES,
         upper=15.0,
     ),
+    'logaddexp': MPSSkipInfo(dtypes=COMPLEX_DTYPES),
     'logsumexp': MPSSkipInfo(
         dtypes=COMPLEX_DTYPES,
         upper=15.0,
@@ -673,10 +712,13 @@ COMPLEX_XFAILLIST = {
         dtypes=COMPLEX_DTYPES,
         upper=15.0,
     ),
+    'masked.cumprod': MPSSkipInfo(dtypes=COMPLEX_DTYPES),
+    'masked.cumsum': MPSSkipInfo(dtypes=COMPLEX_DTYPES),
     'masked.mean': MPSSkipInfo(
         dtypes=COMPLEX_DTYPES,
         upper=15.0,
     ),
+    'masked.normalize': MPSSkipInfo(dtypes=COMPLEX_DTYPES),
     'masked.prod': MPSSkipInfo(
         dtypes=COMPLEX_DTYPES,
         upper=15.0,
@@ -721,6 +763,10 @@ COMPLEX_XFAILLIST = {
         dtypes=COMPLEX_DTYPES,
         upper=15.0,
     ),
+    'nn.functional.conv3d': MPSSkipInfo(dtypes=COMPLEX_DTYPES),
+    'nn.functional.l1_loss': MPSSkipInfo(dtypes=COMPLEX_DTYPES),
+    'nn.functional.linear': MPSSkipInfo(dtypes=COMPLEX_DTYPES),
+    'nn.functional.normalize': MPSSkipInfo(dtypes=COMPLEX_DTYPES),
     'nn.functional.padconstant': MPSSkipInfo(
         dtypes=COMPLEX_DTYPES,
         upper=15.0,
@@ -733,6 +779,7 @@ COMPLEX_XFAILLIST = {
         dtypes=COMPLEX_DTYPES,
         upper=15.0,
     ),
+    'nn.functional.pairwise_distance': MPSSkipInfo(dtypes=COMPLEX_DTYPES),
     'nn.functional.pixel_shuffle': MPSSkipInfo(
         dtypes=COMPLEX_DTYPES,
         upper=15.0,
@@ -745,22 +792,33 @@ COMPLEX_XFAILLIST = {
         dtypes=COMPLEX_DTYPES,
         upper=15.0,
     ),
+    'nn.functional.silu': MPSSkipInfo(dtypes=COMPLEX_DTYPES),
     'nn.functional.softsign': MPSSkipInfo(
         dtypes=COMPLEX_DTYPES,
         upper=15.0,
     ),
+    'nn.functional.triplet_margin_loss': MPSSkipInfo(dtypes=COMPLEX_DTYPES),
+    'nn.functional.triplet_margin_with_distance_loss': MPSSkipInfo(dtypes=COMPLEX_DTYPES),
+    'norm': MPSSkipInfo(dtypes=COMPLEX_DTYPES),
+    'normal': MPSSkipInfo(dtypes=COMPLEX_DTYPES, variant="in_place"),
     'pinverse': MPSSkipInfo(
         dtypes=COMPLEX_DTYPES,
         upper=15.0,
     ),
+    'pow': MPSSkipInfo(dtypes=COMPLEX_DTYPES),
     'prod': MPSSkipInfo(
         dtypes=COMPLEX_DTYPES,
         upper=15.0,
     ),
+    'rand_like': MPSSkipInfo(dtypes=COMPLEX_DTYPES),
     'reciprocal': MPSSkipInfo(
         dtypes=COMPLEX_DTYPES,
         upper=15.0,
     ),
+    'renorm': MPSSkipInfo(dtypes=COMPLEX_DTYPES),
+    'repeat': MPSSkipInfo(dtypes=COMPLEX_DTYPES),
+    'resize_': MPSSkipInfo(dtypes=COMPLEX_DTYPES),
+    'resize_as_': MPSSkipInfo(dtypes=COMPLEX_DTYPES),
     'roll': MPSSkipInfo(
         dtypes=COMPLEX_DTYPES,
         upper=15.0,
@@ -773,6 +831,12 @@ COMPLEX_XFAILLIST = {
         dtypes=COMPLEX_DTYPES,
         upper=15.0,
     ),
+    'scatter_add': MPSSkipInfo(dtypes=COMPLEX_DTYPES),
+    'scatter': MPSSkipInfo(dtypes=COMPLEX_DTYPES),
+    'scatter_reduce': [
+        MPSSkipInfo(dtypes=COMPLEX_DTYPES, variant="amax"),
+        MPSSkipInfo(dtypes=COMPLEX_DTYPES, variant="amin"),
+    ],
     'short': MPSSkipInfo(
         dtypes=COMPLEX_DTYPES,
         upper=15.0,
@@ -801,6 +865,8 @@ COMPLEX_XFAILLIST = {
         dtypes=COMPLEX_DTYPES,
         upper=15.0,
     ),
+    'std': MPSSkipInfo(dtypes=COMPLEX_DTYPES),
+    'std_mean': MPSSkipInfo(dtypes=COMPLEX_DTYPES),
     'stft': MPSSkipInfo(
         dtypes=COMPLEX_DTYPES,
         upper=15.0,
@@ -813,6 +879,7 @@ COMPLEX_XFAILLIST = {
         dtypes=COMPLEX_DTYPES,
         upper=15.0,
     ),
+    'take_along_dim': MPSSkipInfo(dtypes=COMPLEX_DTYPES),
     'tan': MPSSkipInfo(
         dtypes=COMPLEX_DTYPES,
         upper=15.0,
@@ -821,6 +888,7 @@ COMPLEX_XFAILLIST = {
         dtypes=COMPLEX_DTYPES,
         upper=15.0,
     ),
+    'tile': MPSSkipInfo(dtypes=COMPLEX_DTYPES),
     'trace': MPSSkipInfo(
         dtypes=COMPLEX_DTYPES,
         upper=15.0,
@@ -833,6 +901,7 @@ COMPLEX_XFAILLIST = {
         dtypes=COMPLEX_DTYPES,
         upper=15.0,
     ),
+    'triangular_solve': MPSSkipInfo(dtypes=COMPLEX_DTYPES),
     'tril': MPSSkipInfo(
         dtypes=COMPLEX_DTYPES,
         upper=15.0,
@@ -845,6 +914,9 @@ COMPLEX_XFAILLIST = {
         dtypes=COMPLEX_DTYPES,
         upper=15.0,
     ),
+    'uniform': MPSSkipInfo(dtypes=COMPLEX_DTYPES),
+    'var': MPSSkipInfo(dtypes=COMPLEX_DTYPES),
+    'var_mean': MPSSkipInfo(dtypes=COMPLEX_DTYPES),
     'vstack': MPSSkipInfo(
         dtypes=COMPLEX_DTYPES,
         upper=15.0,
@@ -859,16 +931,21 @@ COMPLEX_XFAILLIST = {
     ),
 }
 
+"""Failures due to known errors in the MPS backend"""
 MPS_DOWNSTREAM_XFAILLIST = {
-    """Failures due to known errors in the MPS backend"""
     'arange': MPSSkipInfo(dtypes=[torch.uint8]),
+    # TODO: remove this once downstream function 'aten::_linalg_svd.U' have been implemented
+    'linalg.matrix_rank': MPSSkipInfo(),
 }
 
+"""Other uncategorized xfails"""
 OTHER_XFAILLIST = {
-    """Other uncategorized xfails"""
 
     # Since CPU is not using argsort with stable=True, these cases result in undefined behaviour.
     'argsort': MPSSkipInfo(dtypes=[torch.float16, torch.int8, torch.uint8, torch.bool, torch.bfloat16]),
+    # Same issue as `argsort` with duplicate indices. This test checks both the sorted values and the indices.
+    # The values of the sorted tensor match the CPU, but in case of the returned indices this results in undefined behaviour.
+    'sort': MPSSkipInfo(dtypes=[torch.int8, torch.uint8, torch.bool, torch.float16, torch.bfloat16]),
 
     # topk fails with duplicate indices
     'topk': MPSSkipInfo(
@@ -896,16 +973,11 @@ OTHER_XFAILLIST = {
     'exponential': MPSSkipInfo(
         dtypes=[torch.float16, torch.float32, torch.bfloat16]
     ),
-    'nn.functional.feature_alpha_dropoutwith_train': MPSSkipInfo(
-        dtypes=[torch.float16, torch.float32, torch.bfloat16]
+    'nn.functional.feature_alpha_dropout': MPSSkipInfo(
+        dtypes=[torch.float16, torch.float32, torch.bfloat16],
+        variant="with_train",
     ),
     'normal': MPSSkipInfo(
-        dtypes=[torch.float16, torch.float32, torch.bfloat16]
-    ),
-    'normalin_place': MPSSkipInfo(
-        dtypes=[torch.float16, torch.float32, torch.bfloat16]
-    ),
-    'normalnumber_mean': MPSSkipInfo(
         dtypes=[torch.float16, torch.float32, torch.bfloat16]
     ),
     'nn.functional.alpha_dropout': MPSSkipInfo(
@@ -939,6 +1011,12 @@ OTHER_XFAILLIST = {
         dtypes=[torch.float16, torch.float32, torch.bfloat16]
     ),
 
+    # before macOS 13.2 it falls back to cpu and pass the forward pass
+    'grid_sampler_2d': MPSSkipInfo(
+        dtypes=[torch.float32, torch.float16, torch.bfloat16],  # Unsupported Border padding mode
+        lower=13.2,
+    ),
+
     # CPU Errors:
     'addr': MPSSkipInfo(
         dtypes=[torch.bool, torch.int16, torch.int32, 
@@ -961,6 +1039,19 @@ OTHER_XFAILLIST = {
 
     # float output for float16 input on MPS
     'logit': MPSSkipInfo(dtypes=[torch.float16, torch.bfloat16]),
+
+    # Fill tensors with uninitialized data, causing mismatch with CPU.
+    # They occasionally match, thus skipping them.
+    # See https://github.com/pytorch/pytorch/issues/100175
+    'new_empty': MPSSkipInfo(),
+    'new_empty_strided': MPSSkipInfo(),
+    'empty_strided': MPSSkipInfo(),
+    # CPU: empty is returning all 0's and there is a mismatch with MPS
+    # allocation (MacOS 13). According to
+    # https://pytorch.org/docs/2.0/generated/torch.empty.html
+    'empty': MPSSkipInfo(),
+    'empty_like': MPSSkipInfo(),
+    'empty_permuted': MPSSkipInfo(),
 }
 
 
