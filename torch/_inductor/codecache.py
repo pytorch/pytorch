@@ -1053,6 +1053,13 @@ class FxGraphCache:
 
         try:
             artifact_path = graph.after_deserialization(constants)
+
+            from .graph import GraphLowering
+
+            # This is used by tests to check the output for specific details.
+            if GraphLowering.save_output_code is not None:
+                GraphLowering.save_output_code(graph.source_code)
+
         except OSError:
             # Not expected, but in case the PyCodeCache entry is removed from
             # underneath us, treat it as a cache miss and recompile.
