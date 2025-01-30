@@ -847,6 +847,8 @@ def mps_ops_modifier(ops):
         'addmm': [torch.int16, torch.int32, torch.int64, torch.uint8, torch.int8],
         'baddbmm': [torch.int16, torch.int32, torch.int64, torch.uint8, torch.int8],
         'mat': [torch.int16, torch.int32, torch.int64, torch.uint8, torch.int8],
+        'matmul': [torch.int64] if MACOS_VERSION < 14.0 else [],
+        '__rmatmul__': [torch.int64] if MACOS_VERSION < 14.0 else [],
         'unravel_index': [torch.int32, torch.int64],
 
         # returned output on CPU is float64
