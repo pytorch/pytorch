@@ -154,17 +154,18 @@ jobs:
       test-matrix: ${{ needs.win-vs2019-cpu-py3-build.outputs.test-matrix }}
     secrets: inherit
 
-  win-vs2019-cuda12_1-py3-build:
-    name: win-vs2019-cuda12.1-py3
+  win-vs2019-cuda12_4-py3-build:
+    name: win-vs2019-cuda12.4-py3
     uses: ./.github/workflows/_win-build.yml
     needs: get-label-type
     with:
-      build-environment: win-vs2019-cuda12.1-py3
-      cuda-version: "12.1"
+      build-environment: win-vs2019-cuda12.4-py3
+      cuda-version: "12.4"
       runner: "${{ needs.get-label-type.outputs.label-type }}windows.4xlarge.nonephemeral"
     secrets: inherit
 
   linux-focal-rocm6_3-py3_10-build:
+    if: ${{ startsWith(github.event.ref, 'refs/tags/ciflow/trunk') }}
     name: linux-focal-rocm6.3-py3.10
     uses: ./.github/workflows/_linux-build.yml
     needs: get-label-type
@@ -175,13 +176,14 @@ jobs:
       sync-tag: rocm-build
       test-matrix: |
         { include: [
-          { config: "default", shard: 1, num_shards: 2, runner: "${{ github.event_name == 'push' && github.event.ref == 'refs/heads/main' && 'linux.rocm.gpu.mi300.2' || 'linux.rocm.gpu.2' }}" },
-          { config: "default", shard: 2, num_shards: 2, runner: "${{ github.event_name == 'push' && github.event.ref == 'refs/heads/main' && 'linux.rocm.gpu.mi300.2' || 'linux.rocm.gpu.2' }}" },
-          { config: "distributed", shard: 1, num_shards: 1, runner: "${{ github.event_name == 'push' && github.event.ref == 'refs/heads/main' && 'linux.rocm.gpu.mi300.4' || 'linux.rocm.gpu.4' }}" },
+          { config: "default", shard: 1, num_shards: 2, runner: "linux.rocm.gpu.2" },
+          { config: "default", shard: 2, num_shards: 2, runner: "linux.rocm.gpu.2" },
+          { config: "distributed", shard: 1, num_shards: 1, runner: "linux.rocm.gpu.4" },
         ]}
     secrets: inherit
 
   linux-focal-rocm6_3-py3_10-test:
+    if: ${{ startsWith(github.event.ref, 'refs/tags/ciflow/trunk') }}
     permissions:
       id-token: write
       contents: read
@@ -235,12 +237,12 @@ jobs:
     secrets: inherit
 
   # NB: Keep this in sync with inductor-perf-test-nightly.yml
-  linux-focal-cuda12_1-py3_10-gcc9-inductor-build:
-    name: cuda12.1-py3.10-gcc9-sm80
+  linux-focal-cuda12_4-py3_10-gcc9-inductor-build:
+    name: cuda12.4-py3.10-gcc9-sm80
     uses: ./.github/workflows/_linux-build.yml
     needs: get-label-type
     with:
-      build-environment: linux-focal-cuda12.1-py3.10-gcc9-sm80
-      docker-image-name: pytorch-linux-focal-cuda12.1-cudnn9-py3-gcc9-inductor-benchmarks
+      build-environment: linux-focal-cuda12.4-py3.10-gcc9-sm80
+      docker-image-name: pytorch-linux-focal-cuda12.4-cudnn9-py3-gcc9-inductor-benchmarks
       cuda-arch-list: '8.0'
     secrets: inherit
