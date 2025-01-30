@@ -188,6 +188,21 @@ class InPlaceCompilationTests(TestCase):
         with self.assertRaises(AttributeError):
             fn(x)
 
+    @torch._dynamo.config.patch(inline_inbuilt_nn_modules=False)
+    def test_compilation_nn_module_invalid_method(self):
+        class Mod(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, x):
+                return x + self.doesnotexist
+
+        mod = Mod()
+        opt_mod = torch.compile(mod, backend="eager")
+        x = torch.randn(1,1)
+        with self.assertRaises(AttributeError):
+            opt_mod(x)
+
 
 # The private variants of the below functions are extensively tested
 # So as long as the signatures match we're good
