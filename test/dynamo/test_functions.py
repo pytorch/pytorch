@@ -31,10 +31,12 @@ from torch._dynamo.variables import ConstantVariable
 from torch._dynamo.variables.lists import RangeVariable
 from torch.nn import functional as F
 from torch.testing._internal.common_cuda import TEST_MULTIGPU
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import (
     disable_translation_validation_if_dynamic_shapes,
     instantiate_parametrized_tests,
     parametrize,
+    skipIfHpu,
 )
 
 # Defines all the kernels for tests
@@ -1020,25 +1022,10 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         if not x.is_cuda:
             return x + 1
 
-    @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
-    @make_test
-    def test_get_device_properties_tensor_device(a):
-        x = a.to("cuda")
-        prop = torch.cuda.get_device_properties(x.device)
-        if prop.major == 8:
-            return x + prop.multi_processor_count
-        return x + prop.max_threads_per_multi_processor
-
     @make_test
     def test_tensor_type(a, b):
         m = a.to(torch.float16)
         return b.type(m.type())
-
-    @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
-    @make_test
-    def test_tensor_type2(a, b):
-        m = a.to("cuda")
-        return m + b.type(m.type())
 
     @make_test
     def test_tensor_type3(a, b):
@@ -1048,12 +1035,6 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
     @make_test
     def test_tensor_type4(a, b):
         m = a.type("torch.HalfTensor")
-        return b.type(m.type())
-
-    @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
-    @make_test
-    def test_tensor_type5(a, b):
-        m = a.type(torch.cuda.HalfTensor)
         return b.type(m.type())
 
     @make_test
@@ -4506,7 +4487,34 @@ class DefaultsTests(torch._dynamo.test_case.TestCase):
         self.assertTrue(isinstance(res, tuple))
 
 
+class FunctionTestsDevice(torch._dynamo.test_case.TestCase):
+    @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
+    @skipIfHpu
+    @make_test
+    def test_get_device_properties_tensor_device(a, device):
+        x = a.to(device)
+        prop = torch.cuda.get_device_properties(x.device)
+        if prop.major == 8:
+            return x + prop.multi_processor_count
+        return x + prop.max_threads_per_multi_processor
+
+    @make_test
+    def test_tensor_type2(a, b, device):
+        m = a.to(device)
+        return m + b.type(m.type())
+
+    @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
+    @skipIfHpu
+    @make_test
+    def test_tensor_type5(a, b, device):
+        m = a.type(torch.cuda.HalfTensor)
+        return b.type(m.type())
+
+
 instantiate_parametrized_tests(FunctionTests)
+devices = ("cuda", "hpu")
+instantiate_device_type_tests(FunctionTestsDevice, globals(), only_for=devices)
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
