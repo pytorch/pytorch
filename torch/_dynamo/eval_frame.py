@@ -376,6 +376,10 @@ class DynamoTLS(threading.local):
 dynamo_tls = DynamoTLS()
 
 
+def clear_dynamo_tls():
+    dynamo_tls.traced_frame_infos.clear()
+
+
 @atexit.register
 def _log_traced_frames():
     """
