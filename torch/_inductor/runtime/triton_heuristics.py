@@ -81,6 +81,20 @@ def get_total_reduction_numel(numels: dict[str, int]) -> int:
     )
 
 
+def validate_args(func, args, kwargs, exclude = 0):
+    """Ensure the correct number of arguments are passed to the method."""
+    expected_params = inspect.signature(func).parameters
+    expected_args_count = len(expected_params) - exclude  # Excluding 'grid' and 'stream'
+    actual_args_count = len(args)
+
+    if actual_args_count != expected_args_count:
+        raise TypeError(
+            f"Incorrect number of arguments passed to method. "
+            f"Expected {expected_args_count}, but got {actual_args_count}. "
+            f"Ensure the kernel has the correct argument count."
+        )
+
+    
 def autotune_hints_to_configs(
     hints: OrderedSet[AutotuneHint],
     size_hints,
@@ -575,6 +589,7 @@ class CachingAutotuner(KernelInterface):
             # reset to zero before evaluating any config
             self.reset_to_zero_args(*args, **kwargs)
             args_with_constexprs = self._get_args_with_constexprs(cloned_args, launcher)
+            validate_args(launcher, *args_with_constexprs, **cloned_kwargs)
             launcher(
                 *args_with_constexprs,
                 **cloned_kwargs,
@@ -897,6 +912,7 @@ class CachingAutotuner(KernelInterface):
                     "stream": stream,
                 },
             ):
+                validate_args(launcher, *args_with_constexprs, **cloned_kwargs)
                 return launcher(
                     *args,
                     **kwargs,
@@ -904,6 +920,7 @@ class CachingAutotuner(KernelInterface):
                     stream=stream,
                 )
         else:
+            validate_args(launcher, *args_with_constexprs, **cloned_kwargs)
             return launcher(
                 *args,
                 **kwargs,
