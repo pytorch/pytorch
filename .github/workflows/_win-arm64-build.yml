@@ -79,7 +79,6 @@ jobs:
       run:
         shell: bash
     steps:
-      temporarily disabled
       - name: Configure AWS credentials(PyTorch account)
         uses: aws-actions/configure-aws-credentials@v3
         with:
