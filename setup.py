@@ -46,7 +46,7 @@
 #   USE_CUDSS=0
 #     disables the cuDSS build
 #
-#   USE_CUFILE=1
+#   USE_CUFILE=0
 #     disables the cuFile build
 #
 #   USE_FBGEMM=0
