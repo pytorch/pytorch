@@ -17,10 +17,10 @@ import io
 import itertools
 import os
 import tempfile
+import typing_extensions
 import warnings
 from collections.abc import Collection, Mapping, Sequence
 from typing import Any, Callable, Union
-from typing_extensions import deprecated
 
 import numpy as np
 import numpy.typing as npt
@@ -772,7 +772,7 @@ def check_export_model_diff(
     )
 
 
-@deprecated(
+@typing_extensions.deprecated(
     "torch.onnx.verification.* is deprecated. Consider using torch.onnx.export(..., dynamo=True) "
     "and use ONNXProgram to test the ONNX model",
     category=DeprecationWarning,
@@ -864,7 +864,7 @@ def verify(
         )
 
 
-@deprecated(
+@typing_extensions.deprecated(
     "torch.onnx.verification.* is deprecated. Consider using torch.onnx.export(..., dynamo=True) "
     "and use ONNXProgram to test the ONNX model",
     category=DeprecationWarning,
@@ -1159,7 +1159,7 @@ class OnnxTestCaseRepro:
         _compare_onnx_pytorch_outputs_in_np(run_outputs, expected_outs, options)
 
 
-@deprecated(
+@typing_extensions.deprecated(
     "torch.onnx.verification.* is deprecated. Consider using torch.onnx.export(..., dynamo=True) "
     "and use ONNXProgram to test the ONNX model",
     category=DeprecationWarning,
