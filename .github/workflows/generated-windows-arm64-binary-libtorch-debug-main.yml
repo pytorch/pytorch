@@ -10,9 +10,6 @@ on:
       - main
   workflow_dispatch:
 
-permissions:
-  id-token: write
-
 env:
   BUILD_ENVIRONMENT: windows-arm64-binary-libtorch-debug
   GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -65,11 +62,6 @@ jobs:
           echo BINARY_ENV_FILE=%RUNNER_TEMP%/env>> %GITHUB_ENV%
           echo PYTORCH_FINAL_PACKAGE_DIR=%RUNNER_TEMP%/artifacts>> %GITHUB_ENV%
           echo WIN_PACKAGE_WORK_DIR=%RUNNER_TEMP%>> %GITHUB_ENV%
-      - name: Configure AWS credentials(PyTorch account)
-        uses: aws-actions/configure-aws-credentials@v3
-        with:
-          role-to-assume: arn:aws:iam::308535385114:role/gha_workflow_s3_ossci_linux_windows_read_write
-          aws-region: us-east-1
       - name: Bootstrap folders
         shell: cmd
         run: |
