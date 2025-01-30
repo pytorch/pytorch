@@ -4,7 +4,7 @@ import math
 from copy import copy
 from dataclasses import dataclass
 from functools import partial
-from typing import List, Optional
+from typing import Optional
 
 import torch
 from torch.fx.experimental.symbolic_shapes import is_nested_int
@@ -41,7 +41,7 @@ class ExtraOpData:
     # each is simply "dim". Its entry should be: [["dim"], ["dim..."]].
     #
     # If no overload of the op accepts dim-related args, this should be None.
-    dim_args: List[List[str]] = None
+    dim_args: list[list[str]] = None
 
     # Helper function to extract names of dim-related args.
     # Returns: tuple of (single dim argname if available, dim list argname if available)
@@ -831,7 +831,7 @@ def batchwise_reference_chunk(op, sample):
         start += chunk_size
 
     # rejoin into NJT outputs
-    return [torch.nested.nested_tensor(lst, layout=torch.jagged) for lst in chunks]
+    return [torch.nested.as_nested_tensor(lst, layout=torch.jagged) for lst in chunks]
 
 
 def batchwise_reference_narrow(op, sample):
@@ -887,6 +887,14 @@ def sample_inputs_clone(op_info, device, dtype, requires_grad, **kwargs):
             kwargs={"memory_format": memory_format},
             name=f"{njt_desc}: {memory_format})",
         )
+
+
+def sample_inputs_fill(op_info, device, dtype, requires_grad, **kwargs):
+    # scalar case
+    unary_func = partial(sample_inputs_elementwise_njt_unary, op_kwargs={"value": 42.0})
+    yield from unary_func(op_info, device, dtype, requires_grad)
+
+    # TODO: add Tensor case
 
 
 def sample_inputs_mvl_gamma(p):
@@ -1443,6 +1451,7 @@ njt_sample_inputs = {
     "chunk": sample_inputs_chunk,
     "clone": sample_inputs_clone,
     "count_nonzero": partial(sample_inputs_njt_reduction, supports_keepdim=False),
+    "fill": sample_inputs_fill,
     **{f"mvlgamma.mvlgamma_p_{p}": sample_inputs_mvl_gamma(p=1) for p in (1, 3, 5)},
     "nn.functional.embedding": sample_inputs_nn_functional_embedding,
     "nn.functional.embedding_bag": sample_inputs_nn_functional_embedding_bag,
