@@ -2,7 +2,6 @@
 import cProfile
 import inspect
 import io
-import itertools
 import os
 import warnings
 from collections.abc import Sequence
@@ -38,17 +37,6 @@ def _get_failure_dict(
         dict[int, WRAPPED_EXCEPTION],
         {i: err for i, err in enumerate(results) if _is_wrapped_exception(err)},
     )
-
-
-def _all_gather_keys(
-    local_dict: dict[Any, Any], group: Optional[dist.ProcessGroup] = None
-) -> list[Any]:
-    """Gathers all keys, and returns them sorted."""
-    keys = list(local_dict.keys())
-    gathered_keys: list[list[Any]] = [None] * dist.get_world_size(group)  # type: ignore[list-item]
-
-    dist.all_gather_object(gathered_keys, keys, group=group)
-    return sorted(set(itertools.chain.from_iterable(gathered_keys)))
 
 
 class _DistWrapper:
