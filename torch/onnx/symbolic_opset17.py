@@ -18,7 +18,8 @@ New operators:
 """
 
 import functools
-from typing import Optional, Sequence
+from collections.abc import Sequence
+from typing import Optional
 
 import torch
 from torch import _C
@@ -97,7 +98,7 @@ def _compute_edge_sizes(n_fft, window_size):
 
 
 @_onnx_symbolic("aten::stft")
-@symbolic_helper.parse_args("v", "i", "i", "i", "v", "b", "b", "b")
+@symbolic_helper.parse_args("v", "i", "i", "i", "v", "b", "s", "b", "b", "b")
 def stft(
     g: jit_utils.GraphContext,
     input: _C.Value,
@@ -105,6 +106,8 @@ def stft(
     hop_length: Optional[int] = None,
     win_length: Optional[int] = None,
     window: Optional[_C.Value] = None,
+    center: Optional[bool] = True,
+    pad_mode: str = "reflect",
     normalized: bool = False,
     onesided: Optional[bool] = True,
     return_complex: Optional[bool] = False,
@@ -135,6 +138,12 @@ def stft(
         raise errors.SymbolicValueError(
             msg="STFT does not currently support complex types", value=input
         )
+
+    if center or pad_mode != "reflect":
+        raise errors.SymbolicValueError(
+            msg='STFT does not currently support center = True or pad_mode != "reflect"',
+            value=input,
+        )  # TODO(#145943): add center functionality and tests.
 
     # Get STFT sizes
     frame_step_value = hop_length if hop_length is not None else n_fft // 4
