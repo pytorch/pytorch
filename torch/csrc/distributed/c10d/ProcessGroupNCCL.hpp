@@ -768,8 +768,6 @@ class TORCH_API ProcessGroupNCCL : public Backend {
 
   ErrorType getError() override;
 
-  std::shared_ptr<c10::Allocator> getMemAllocator() override;
-
   // Performs NCCL user buffer registration for all buffers in
   // the given MemPool
   void registerMemPool(c10::cuda::MemPool* pool);
