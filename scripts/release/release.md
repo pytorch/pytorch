@@ -180,20 +180,21 @@ PyTorch will stop publishing Anaconda packages that depend on Anaconda’s defau
 
 The PyTorch binaries shipped with CUDA 12.6.3 are built with CXX11_ABI=1 and are using the Manylinux 2.28 build platform. If you are building PyTorch extensions with custom C++ or CUDA extensions, please update these builds to use CXX_ABI=1 as well and report any issues you are seeing. For the next PyTorch 2.7 release we plan to switch all Linux builds to Manylinux 2.28 and CXX11_ABI=1, please see [[RFC] PyTorch next wheel build platform: manylinux-2.28](https://github.com/pytorch/pytorch/issues/123649) for the details and discussion.
 
+
 ### ONNX
 
-### torch.onnx.export(..., dynamo=True) now creates ONNX models using IR version 10 ([#141207](https://github.com/pytorch/pytorch/pull/141207)) 
+
+#### `torch.onnx.export(..., dynamo=True)` now creates ONNX models using IR version 10 ([#141207](https://github.com/pytorch/pytorch/pull/141207)) 
 
 ONNX ir_version=10 is used to add support for UINT4, INT4 data types and include metadata in GraphProto and NodeProto.  
 
-###Several obsolete APIs are removed ([#133825, #136279, #137789, #137790](https://github.com/pytorch/pytorch/pull/133825)) 
+#### Several obsolete APIs are removed ([#133825, #136279, #137789, #137790](https://github.com/pytorch/pytorch/pull/133825)) 
 
-### TODO is _optimize_graph private? if so, shouldn't be in release notes
-Some logging APIs, `torch.onnx._optimize_graph`, `torch.onnx.ExportTypes`, `torch.onnx.export_to_pretty_string` are removed. Users should use public APIs for model export and remove usage of the APIs above. 
+Some logging APIs, `torch.onnx.ExportTypes`, `torch.onnx.export_to_pretty_string` are removed. Users should remove usage of the APIs above. 
 
-###torch.onnx.ONNXProgram has been reimplemented and improved ([#136281](https://github.com/pytorch/pytorch/pull/136281)) 
+#### `torch.onnx.ONNXProgram` has been reimplemented and improved ([#136281](https://github.com/pytorch/pytorch/pull/136281)) 
 
-All ONNX "dynamo" APIs will return the new ONNXProgram class. Some notable methods available are `save()`, `optimize()`. It can also be directly applied on PyTorch tensors to leverage ONNX Runtime to verify the ONNX graph. Some legacy methods are no longer available.
+All ONNX "dynamo" APIs will return the new `ONNXProgram` class. Some notable methods available are `save()`, `optimize()`. It can also be directly applied on PyTorch tensors to leverage ONNX Runtime to verify the ONNX graph. Some legacy methods are no longer available.
 
 ## **Deprecations**
 
@@ -218,12 +219,6 @@ The full release compatibility matrix matrix can be found in [release.md](https:
   pg.broadcast([tensor]).wait()
   ```
 * Starting from PT 2.6, when users write the code above, they will get get a warning message “ProcessGroupNCCL OnCompletion hook will be deprecated in favor of Flight Recorder”
-
-### ONNX
-
-### TODO add links to relevant PRs
-* `torch.onnx.dynamo_export()` is deprecated. The supporting classes `ExportOptions`, `ONNXRuntimeOptions`, `DiagnosticOptions` and `OnnxRegistry` are deprecated as well. Please use the `torch.onnx.export(..., dynamo=True)` option going forward. 
-* `torch.onnx.OperatorExportTypes` is deprecated. The only option supported will be converting models to use ONNX operators only. 
 
 ## **New features**
 
@@ -331,21 +326,17 @@ The full release compatibility matrix matrix can be found in [release.md](https:
 
 ### ONNX
 
-### TODO add links to relevant PRs, match formatting, i'm not sure where one bullet begins and next ends for most of these
+#### Models using `torch.cond` is supported [#137428](https://github.com/pytorch/pytorch/pull/137428)
 
-Models using `torch.cond` is supported 
+`torch.cond` is the recommended way to introduce control flows that can be converted to an ONNX model.
 
-`torch.cond` is the recommended way to introduce control flows that can be converted to an ONNX model. 
-
-Users can provide a ` custom_translation_table` to provide custom implementations for converting operators to ONNX 
+#### Users can provide a `custom_translation_table` to provide custom implementations for converting operators to ONNX [#135403](https://github.com/pytorch/pytorch/pull/135403)
 
 This is useful when you need to override an implementation or provide one that is not currently implemented. Refer to the tutorials for a more complete description of the operator registration mechanism. 
-
 
 ```py 
 # Define the translation using ONNX Script 
 from onnxscript import opset18 as op 
-
 
 def sym_not_onnx(input): 
    return op.Not(input) 
@@ -356,10 +347,9 @@ torch.onnx.export(...
 }) 
 ``` 
 
-`ONNXProgram` has a new `optimize()` method 
+#### `ONNXProgram` has a new `optimize()` method [#137667](https://github.com/pytorch/pytorch/pull/137667)
 
 Users can run `optimize()` to flatten nested structures in the ONNX graph, perform constant folding and remove redundancies in the ONNX model. Calling `optimize()` after exporting to ONNX is recommended. 
-
 
 ```py 
 onnx_program = torch.onnx.export(..., dynamo=True) 
@@ -367,8 +357,7 @@ onnx_program.optimize()  # Optimize the graph before saving is recommended
 onnx_program.save(...) 
 ``` 
 
-
-* Users can now use complex constants in their models and export to ONNX ([#138279](https://github.com/pytorch/pytorch/pull/138279)) 
+#### Users can now use complex constants in their models and export to ONNX ([#138279](https://github.com/pytorch/pytorch/pull/138279)) 
 
 ## **Improvements**
 
