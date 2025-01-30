@@ -237,6 +237,7 @@ def process_version_map(version_map):
         output[operator_name][key] = schema_entries
     return output
 
+
 def is_core_aten_op(schema) -> bool:
     # Check if the schema is a core ATen op
     if "::" not in schema.name:
@@ -273,12 +274,12 @@ def check_bc(existing_schemas):
                 continue
             else:
                 logging.info(
-                    "schema: %s found on allowlist, but is a core ATen op, checking BC",
-                    existing_schema,
-                    "If you have removed an operator we will conservatively assume that "
+                    "schema: %s found on allowlist, but is a core ATen op, checking BC. "
+                    "NOTE: If you have removed an operator we will conservatively assume that "
                     "it is a core ATen op. If the operator you removed is not a core ATen op, "
                     "please specify that in the ALLOW_LIST entry (see comment block on top "
-                    "of ALLOW_LIST more info)"
+                    "of ALLOW_LIST more info)",
+                    existing_schema,
                 )
         if has_valid_upgraders(existing_schema, version_map):
             if not is_core_aten_op(existing_schema):
