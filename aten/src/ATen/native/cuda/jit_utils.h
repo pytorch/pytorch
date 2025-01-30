@@ -60,10 +60,6 @@ inline int can_vectorize_up_to(size_t default_alignment, void *pointer) {
   if ((default_alignment <= 2) && (ip % (8 * default_alignment) == 0)) {
     return 8;
   }
-#else
-  if (ip % (8 * default_alignment) == 0) {
-    return 8;
-  }
 #endif
   if (ip % (4 * default_alignment) == 0) {
     return 4;
@@ -92,17 +88,15 @@ inline int can_vectorize_up_to(const KernelDescriptor &desc, c10::ArrayRef<char*
 }
 
 //FIXME - this are defined in Loops.cuh, but including Loops.cuh here would lead to circular includes Loops.cuh -> CUDALoops.cuh -> jit_utils.h -> Loops.cuh
-#ifdef USE_ROCM
 #define JIT_THREAD_WORK_SIZE 4
-#else
-#define JIT_THREAD_WORK_SIZE 8
-#endif
 
+#ifdef USE_ROCM
 int calc_io_size(
     const int nInputs,
     const int nOutputs,
     const c10::ScalarType& inputs_type,
     const c10::ScalarType& result_type);
+#endif
 
 int calc_thread_work_size(
     const int nInputs,

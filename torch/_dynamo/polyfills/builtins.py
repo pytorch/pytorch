@@ -6,7 +6,6 @@ from __future__ import annotations
 
 import builtins
 import functools
-import keyword
 import operator
 from typing import TYPE_CHECKING, TypeVar
 
@@ -59,8 +58,3 @@ def enumerate(iterable: Iterable[_T], start: int = 0) -> Iterable[tuple[int, _T]
 @substitute_in_graph(builtins.sum, can_constant_fold_through=True)  # type: ignore[arg-type]
 def sum(iterable: Iterable[_T], /, start: _T = 0) -> _T:  # type: ignore[assignment]
     return functools.reduce(operator.add, iterable, start)
-
-
-@substitute_in_graph(keyword.iskeyword, can_constant_fold_through=True)  # type: ignore[arg-type]
-def iskeyword(s: str) -> bool:
-    return s in keyword.kwlist
