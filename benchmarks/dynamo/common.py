@@ -3446,11 +3446,15 @@ class BenchmarkRunner:
                 self.args.snapshot_memory, f"eager_{self.args.only}"
             ):
                 eager_latency, eager_peak_mem, _ = warmup(
-                    self.model_iter_fn, model, example_inputs, "eager"
+                    self.model_iter_fn, copy.deepcopy(model), example_inputs, "eager"
                 )
                 if self.args.use_warm_peak_memory:
                     _, eager_peak_mem, _ = warmup(
-                        self.model_iter_fn, model, example_inputs, "eager", niters=1
+                        self.model_iter_fn,
+                        copy.deepcopy(model),
+                        example_inputs,
+                        "eager",
+                        niters=1,
                     )
 
             if self.args.export_aot_inductor:
