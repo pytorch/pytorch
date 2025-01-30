@@ -161,21 +161,23 @@ class NCCLComm {
       ncclUniqueId commId,
       at::DeviceIndex deviceIndex);
 
-#ifdef NCCL_HAS_COMM_NONBLOCKING
+#ifdef NCCL_HAS_CONFIG
   static std::shared_ptr<NCCLComm> create(
       int numRanks,
       int rank,
       ncclUniqueId commId,
       at::DeviceIndex deviceIndex,
       ncclConfig_t& config);
+#endif // NCCL_HAS_CONFIG
 
+#ifdef NCCL_HAS_COMM_SPLIT
   static std::shared_ptr<NCCLComm> split(
       NCCLComm* source,
       int color_id,
       int rank,
       ncclConfig_t& config,
       std::vector<uint64_t>& ranks_ull);
-#endif // NCCL_HAS_COMM_NONBLOCKING
+#endif // NCCL_HAS_COMM_SPLIT
 
 #if (defined(IS_NCCLX) || defined(USE_ROCM)) && defined(NCCL_COMM_DUMP)
   std::unordered_map<std::string, std::string> ncclCommDump();

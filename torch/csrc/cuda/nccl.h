@@ -21,8 +21,7 @@ static_assert(
 
 // NCCL BFloat16 is enabled only for CUDA 11+ and NCCL versions 2.10+, or for
 // HIP 3.1+
-#if defined(NCCL_MAJOR) && \
-    ((NCCL_MAJOR > 2) || (NCCL_MAJOR == 2) && (NCCL_MINOR >= 10))
+#if defined(NCCL_MAJOR) && NCCL_VERSION_CODE >= NCCL_VERSION(2, 10, 0)
 #if defined(__CUDA_BF16_TYPES_EXIST__)
 #define HAS_NCCL_BF16_DATATYPE
 #endif // defined(__CUDA_BF16_TYPES_EXIST__)
@@ -31,31 +30,34 @@ static_assert(
 #define HAS_NCCL_BF16_DATATYPE
 #endif // NCCL >= 2.10
 
-#if defined(NCCL_MAJOR) && \
-    (NCCL_MAJOR > 2 || (NCCL_MAJOR == 2 && NCCL_MINOR >= 11))
+#if defined(NCCL_MAJOR) && NCCL_VERSION_CODE >= NCCL_VERSION(2, 11, 0)
 #define ENABLE_NCCL_PREMUL_SUM_SUPPORT
 #endif
 
-#if defined(NCCL_MAJOR) && \
-    (NCCL_MAJOR > 2 || (NCCL_MAJOR == 2 && NCCL_MINOR >= 13))
+// ncclGetLastError() is enabled only for NCCL versions 2.13+
+// ncclRemoteError only exists in NCCL versions 2.13+
+#if defined(NCCL_MAJOR) && NCCL_VERSION_CODE >= NCCL_VERSION(2, 13, 0)
 #define NCCL_HAS_REMOTE_ERROR
-#define ENABLE_NCCL_GET_LAST_ERROR
 #endif
 
-#if defined(NCCL_MAJOR) && \
-    (NCCL_MAJOR > 2 || (NCCL_MAJOR == 2 && NCCL_MINOR >= 14))
+#if defined(NCCL_MAJOR) && NCCL_VERSION_CODE >= NCCL_VERSION(2, 14, 0)
 #define NCCL_HAS_COMM_NONBLOCKING
 #endif
 
-#if defined(NCCL_MAJOR) && \
-    (NCCL_MAJOR > 2 || (NCCL_MAJOR == 2 && NCCL_MINOR >= 17))
-#define NCCL_HAS_COMM_CTA_CGA
+// Note: the first version that supports ncclConfig_t is 2.14. Here we
+// fast-forward the version requirement to 2.17 where ncclConfig_t has CTA and
+// CGA fields because they have already been pybinded out.
+#if defined(NCCL_MAJOR) && NCCL_VERSION_CODE >= NCCL_VERSION(2, 17, 0)
+#define NCCL_HAS_CONFIG
+#endif
+
+#if defined(NCCL_MAJOR) && NCCL_VERSION_CODE >= NCCL_VERSION(2, 17, 0)
 #define NCCL_HAS_COMM_SPLIT
 #endif
 
-#if defined(NCCL_MAJOR) && \
-    (NCCL_MAJOR > 2 || (NCCL_MAJOR == 2 && NCCL_MINOR >= 19))
+#if defined(NCCL_MAJOR) && NCCL_VERSION_CODE >= NCCL_VERSION(2, 19, 0)
 #define NCCL_HAS_COMM_REGISTER
+#define NCCL_HAS_MEM_ALLOC
 #endif
 
 namespace torch::cuda::nccl {
