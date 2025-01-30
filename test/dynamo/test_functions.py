@@ -5,6 +5,7 @@ import contextlib
 import functools
 import inspect
 import itertools
+import keyword
 import math
 import operator
 import random
@@ -4504,6 +4505,27 @@ class DefaultsTests(torch._dynamo.test_case.TestCase):
         res = opt_fn(x, tuple)
         self.assertEqual(ref, res)
         self.assertTrue(isinstance(res, tuple))
+
+    def test_keyword(self):
+        def fn(x, word):
+            if keyword.iskeyword(word):
+                return torch.sin(x)
+            return torch.cos(x)
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        x = torch.randn(4)
+        word = "None"
+        self.assertEqual(fn(x, word), opt_fn(x, word))
+        word = "dynamo"
+        self.assertEqual(fn(x, word), opt_fn(x, word))
+
+    def test_sys_recursionlimit(self):
+        def fn(x):
+            return x.sin() * sys.getrecursionlimit()
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        x = torch.randn(4)
+        self.assertEqual(fn(x), opt_fn(x))
 
 
 instantiate_parametrized_tests(FunctionTests)
