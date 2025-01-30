@@ -321,7 +321,7 @@ def _cumulative_and_max_seq_len_nnz(qkv: torch.Tensor) -> tuple[torch.Tensor, in
     else:
         # TODO: Explore performance impact of copying
         cumulative_seqlen = (
-            qkv.lengths().cumsum(0).to(dtype=torch.int32, device=qkv.device)
+            qkv.lengths().cumsum(0).to(dtype=torch.int32, device=qkv.device)  # type: ignore[union-attr]
         )
         max_seqlen = qkv._get_max_seqlen()
         # TODO: Explore performance impact when compiling
