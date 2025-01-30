@@ -117,7 +117,7 @@ fi
 
 # Turn USE_CUFILE off for CUDA 11.8
 # since nvidia-cufile-cu11 is not available in PYPI
-if [[ $USE_CUSPARSELT == "1" && $CUDA_VERSION == "11.8" ]]; then
+if [[ $USE_CUFILE == "1" && $CUDA_VERSION == "11.8" ]]; then
     export USE_CUFILE=0
 fi
 
