@@ -669,6 +669,25 @@ class AutogradCompilerInstance:
         after = len(self.fx_tracer.graph.nodes)
         verbose_log.debug("DCE removed %d nodes", before - after)
 
+    def handle_disable_regions(self):
+        # could be done in O(num of disables)
+        in_disable = False
+        for node in self.fx_tracer.graph.nodes:
+            if node.op != "call_function":
+                continue
+
+            print("processing ", node)
+            if node.target is call_backward:
+                if "CaDisableRegionEndBackward" in node.meta["stack_trace"]:
+                    assert not in_disable, "nested not supported yet"
+                    in_disable = True
+                elif "CaDisableRegionStartBackward" in node.meta["stack_trace"]:
+                    in_disable = False
+
+            # is disable overhead bearable?
+            if in_disable:
+                node.target = torch._dynamo.disable(node.target)
+
     def end_capture(self, outputs):
         self.fx_tracer.create_proxy(
             "call_function",
@@ -702,6 +721,18 @@ class AutogradCompilerInstance:
         self.reorder_pre_hook_nodes_to_mimic_eager()
         self.reorder_post_acc_grad_hook_nodes()
         self.reorder_post_hook_nodes()
+        graph = GraphModule(
+            self.fx_tracer.root, self.fx_tracer.graph, f"CompiledAutograd{self.id}"
+        )
+        lazy_graph_code = lazy_format_graph_code(
+            "Compiled autograd graph",
+            graph,
+            include_device=True,
+            include_stride=True,
+            colored=True,
+        )
+        compiled_autograd_log.info("%s", lazy_graph_code)
+        self.handle_disable_regions()
         # TODO(yf225): work around: remove dead codes like `sym_size` and `sym_numel` which are not used downstream. e.g.
         # ```
         # sym_numel_default = torch.ops.aten.sym_numel.default(sum_109);  sum_109 = None
@@ -1220,6 +1251,42 @@ def _disable():
         torch._C._dynamo.compiled_autograd.set_autograd_compiler(
             prior_compiler, prior_dynamic
         )
+
+
+########################################################
+# Didn't think this through yet, just to unblock internal
+
+class CaDisableRegionStart(torch.autograd.Function):
+    @staticmethod
+    def forward(ctx, inp):
+        return inp
+
+    @staticmethod
+    def backward(ctx, grad_out):
+        return grad_out
+
+
+class CaDisableRegionEnd(torch.autograd.Function):
+    @staticmethod
+    def forward(ctx, inp):
+        return inp
+
+    @staticmethod
+    def backward(ctx, grad_out):
+        return grad_out
+
+
+def disable_start(t: torch.Tensor):
+    assert t.requires_grad
+    return CaDisableRegionStart.apply(t)
+
+
+def disable_end(t: torch.Tensor):
+    assert t.requires_grad
+    return CaDisableRegionEnd.apply(t)
+
+
+########################################################
 
 
 # return to starting state of a new process
