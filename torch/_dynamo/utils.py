@@ -2528,6 +2528,7 @@ def same(
     ignore_non_fp=False,
     log_error=log.error,
     use_larger_multiplier_for_smaller_tensor=False,
+    force_max_multiplier: bool = False,
 ):
     """Check correctness to see if ref and res match"""
     if fp64_ref is None:
@@ -2554,6 +2555,7 @@ def same(
                 ignore_non_fp,
                 log_error=log_error,
                 use_larger_multiplier_for_smaller_tensor=use_larger_multiplier_for_smaller_tensor,
+                force_max_multiplier=force_max_multiplier,
             )
             for ai, bi, fp64_refi in zip(ref, res, fp64_ref)
         )
@@ -2573,6 +2575,7 @@ def same(
             ignore_non_fp,
             log_error=log_error,
             use_larger_multiplier_for_smaller_tensor=use_larger_multiplier_for_smaller_tensor,
+            force_max_multiplier=force_max_multiplier,
         )
     elif isinstance(ref, dict):
         assert isinstance(res, dict)
@@ -2593,6 +2596,7 @@ def same(
                     ignore_non_fp=ignore_non_fp,
                     log_error=log_error,
                     use_larger_multiplier_for_smaller_tensor=use_larger_multiplier_for_smaller_tensor,
+                    force_max_multiplier=force_max_multiplier,
                 )
             ):
                 log_error("Accuracy failed for key name %s", k)
@@ -2685,33 +2689,42 @@ def same(
 
                 res_error = rmse(fp64_ref, res).item()
 
-                # In the case of using AMP (Automatic Mixed Precision), certain models have
-                # failed the benchmark's correctness check. However, the end-to-end model's
-                # accuracy when comparing AMP with FP32 is within a difference of less than 0.1%.
-                # Thus, it's possible that the correctness check failures for these models are
-                # false alarms. We use multiplier of 3 instead of 2 to avoid these false alarms.
-                multiplier = (
-                    3.0 if res.dtype in (torch.float16, torch.bfloat16) else 2.0
-                )
+                def get_multiplier():
+                    # In some particular cases, we expect high difference in results.
+                    # At the moment one of this cases is inductor freezing bfloat16 convolution const folding.
+                    # In case of it the res_error is at least one order of magnitude higher.
+                    if force_max_multiplier:
+                        return 10.0
+                    # In the case of using AMP (Automatic Mixed Precision), certain models have
+                    # failed the benchmark's correctness check. However, the end-to-end model's
+                    # accuracy when comparing AMP with FP32 is within a difference of less than 0.1%.
+                    # Thus, it's possible that the correctness check failures for these models are
+                    # false alarms. We use multiplier of 3 instead of 2 to avoid these false alarms.
+                    multiplier = (
+                        3.0 if res.dtype in (torch.float16, torch.bfloat16) else 2.0
+                    )
 
-                if use_larger_multiplier_for_smaller_tensor and (
-                    fp64_ref.numel() <= 10 and tol >= 4 * 1e-2
-                ):
-                    multiplier = 10.0
-                elif use_larger_multiplier_for_smaller_tensor and (
-                    fp64_ref.numel() <= 500 and tol >= 4 * 1e-2
-                ):
-                    multiplier = 5.0
-                elif (
-                    fp64_ref.numel() < 1000
-                    or (ref.ndim == 4 and ref.shape[-1] == ref.shape[-2] == 1)
-                    # large tol means a benchmark has been specified as REQUIRE_HIGHER_TOLERANCE
-                    or tol >= 2 * 1e-2
-                ):
-                    # In the presence of noise, noise might dominate our error
-                    # metric for smaller tensors.
-                    # Similary, for 1x1 kernels, there seems to be high noise with amp.
-                    multiplier = 3.0
+                    if use_larger_multiplier_for_smaller_tensor and (
+                        fp64_ref.numel() <= 10 and tol >= 4 * 1e-2
+                    ):
+                        multiplier = 10.0
+                    elif use_larger_multiplier_for_smaller_tensor and (
+                        fp64_ref.numel() <= 500 and tol >= 4 * 1e-2
+                    ):
+                        multiplier = 5.0
+                    elif (
+                        fp64_ref.numel() < 1000
+                        or (ref.ndim == 4 and ref.shape[-1] == ref.shape[-2] == 1)
+                        # large tol means a benchmark has been specified as REQUIRE_HIGHER_TOLERANCE
+                        or tol >= 2 * 1e-2
+                    ):
+                        # In the presence of noise, noise might dominate our error
+                        # metric for smaller tensors.
+                        # Similary, for 1x1 kernels, there seems to be high noise with amp.
+                        multiplier = 3.0
+                    return multiplier
+
+                multiplier = get_multiplier()
 
                 passes_test = res_error <= (multiplier * ref_error + tol / 10.0)
                 if (
