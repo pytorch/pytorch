@@ -1727,7 +1727,6 @@ class RandomVariable(VariableTracker):
             tx.output.side_effects.mutation(self)
             state = self.random.getstate()
 
-            # Generate new random object with the same state and call the method
             def call_random_meth(*args, **kwargs):
                 r = random.Random()
                 r.setstate(state)

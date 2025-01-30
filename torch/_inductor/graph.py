@@ -1,7 +1,7 @@
 import contextlib
-import enum
 import functools
 import itertools
+import json
 import logging
 import operator
 import os
@@ -272,12 +272,6 @@ def mark_nodes_dislike_padding(
         # We only want to mark output nodes. So, move it after the above prior nodes process.
         if not config.pad_outputs and cur in user_visible_output_strides:
             cur.meta["dislike_padding"] = True
-
-
-class SaveOutputCodeContext(enum.Enum):
-    BEFORE_COMPILE = 0
-    AFTER_DESERIALIZATION = 1
-    AFTER_COMPILE = 2
 
 
 class GraphLowering(torch.fx.Interpreter):
@@ -1944,9 +1938,16 @@ class GraphLowering(torch.fx.Interpreter):
                 "Finished codegen for all nodes. The list of kernel names available: %s",
                 V.graph.all_codegen_kernel_names,
             )
-
             # Dump the inductor_triton_kernel_to_post_grad_node_info to a json file for debugging trace
-            V.debug.log_inductor_triton_kernel_to_post_grad_node_info()
+            debug_info = V.debug.log_inductor_triton_kernel_to_post_grad_node_info()
+            trace_structured(
+                "artifact",
+                metadata_fn=lambda: {
+                    "name": "inductor_triton_kernel_to_post_grad_nodes",
+                    "encoding": "json",
+                },
+                payload_fn=lambda: json.dumps(debug_info),
+            )
 
             result = self.wrapper_code.generate(self.is_inference)
             self.wrapper_code.pop_codegened_graph()
@@ -1988,10 +1989,8 @@ class GraphLowering(torch.fx.Interpreter):
 
         return total_bytes, node_counts, node_runtimes
 
-    @staticmethod
-    def save_output_code(code: str, context: SaveOutputCodeContext) -> None:
-        # No-op to be patched for unit tests
-        pass
+    # No-op to be patched for unit tests
+    save_output_code: Optional[Callable[[str], None]] = None
 
     def compile_to_module(self) -> ModuleType:
         with dynamo_timed(
@@ -2017,7 +2016,8 @@ class GraphLowering(torch.fx.Interpreter):
                 + '"""\n'
             )
             code = tuning_code + code
-        GraphLowering.save_output_code(code, SaveOutputCodeContext.BEFORE_COMPILE)
+        if GraphLowering.save_output_code is not None:
+            GraphLowering.save_output_code(code)
         output_code_log.debug("Output code: \n%s", code)
 
         inductor_meta = autotune_cache.inductor_meta_from_config()
@@ -2051,7 +2051,7 @@ class GraphLowering(torch.fx.Interpreter):
         self.cache_path = path
         self.cache_linemap = linemap  # type: ignore[assignment]
 
-        if config.profile_bandwidth_output:
+        if config.benchmark_harness and config.profile_bandwidth_output:
             # run the inputs code gen to get the bandwidth info
             mod.benchmark_compiled_module(times=1, repeat=1)
         # Logged twice as per https://github.com/pytorch/pytorch/pull/99038#discussion_r1167826029

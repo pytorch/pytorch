@@ -619,6 +619,7 @@ class FakeTensor(Tensor):
     nonzero_memo = SymNumberMemoDescriptor()
     item_memo = SymNumberMemoDescriptor()
     unique_memo = SymNumberMemoDescriptor()
+    unique_consecutive_memo = SymNumberMemoDescriptor()
 
     # We expect nested_int_memo to be None when an offsets is a graph
     # intermediate, or an input that has never been associated with a
@@ -721,6 +722,7 @@ class FakeTensor(Tensor):
         self.nonzero_memo = None
         self.item_memo = None
         self.unique_memo = None
+        self.unique_consecutive_memo = None
         self.nested_int_memo = None
 
         if FakeTensorConfig.debug:
