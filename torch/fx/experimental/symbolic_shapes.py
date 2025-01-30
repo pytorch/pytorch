@@ -29,7 +29,6 @@ from collections.abc import Iterator, Mapping, Sequence
 from contextlib import _GeneratorContextManager, contextmanager
 from dataclasses import dataclass, field
 from enum import Enum
-from types import FrameType
 from typing import (
     Any,
     Callable,
@@ -6407,24 +6406,26 @@ class ShapeEnv:
         sloc, _ = self._get_stack_summary(framework_loc=framework_loc)
         return sloc
 
-    def _log_frame_locals(self) -> Optional[dict[str, Any]]:
+    def _find_frame_locals(self) -> dict[str, Any]:
+        """
+        Given the current user code frame, finds the relevant lines of code,
+        values of symbolic locals, and free symbols involved.
+        """
+        result: dict[str, Any] = {
+            "loc": None,  # str/None
+            "locals": {},  # str -> Any
+            "symbols": {},  # str(symbol) -> str(source)
+        }
         if (
             not torch._logging._internal.GET_DTRACE_STRUCTURED
             or (frame := _find_user_code_frame()) is None
             or frame.f_code.co_filename == "<string>"
         ):
-            return
-
-        result = {
-            "loc": None,
-            "locals": {},
-            "symbols": {},
-        }
+            return result
 
         # find bytecode instructions relevant to the frame
         instructions = list(dis.Bytecode(frame.f_code))
         co_lines, offset = inspect.getsourcelines(frame.f_code)
-
         start, end, cur = None, None, None
         for i, instr in enumerate(instructions):
             if instr.starts_line is not None:
@@ -6437,24 +6438,26 @@ class ShapeEnv:
                 end = i
 
         if start is None or end is None:  # no instructions found
-            return
+            return result
 
         # track involved locals and free symbols
-        def go(x):
+        def go(x: Any) -> Optional[str]:
             if isinstance(x, torch.Tensor):
                 for y in x.size():
                     go(y)
                 for y in x.stride():
                     go(y)
                 go(x.storage_offset())
-                return f"Tensor(shape: {x.size()}, " \
-                    f"stride: {x.stride()}, " \
+                return (
+                    f"Tensor(shape: {x.size()}, "
+                    f"stride: {x.stride()}, "
                     f"storage_offset: {x.storage_offset()})"
+                )
             elif isinstance(x, (SymBool, SymInt, SymFloat)):
                 for s in x.node.expr.free_symbols:
-                    if s in result["symbols"]:
+                    if str(s) in result["symbols"]:  # type: ignore[operator]
                         continue
-                    result["symbols"][s] = (
+                    result["symbols"][str(s)] = (  # type: ignore[index]
                         self.var_to_sources[s][0].name()  # backed
                         if s in self.var_to_sources
                         else None  # unbacked
@@ -6467,19 +6470,15 @@ class ShapeEnv:
         for instr in instructions[start : end + 1]:
             if (lineno := instr.starts_line) is not None:
                 last_lineno = max(last_lineno, lineno)
-            if (
-                isinstance(instr.argval, str)
-                and instr.argval in frame.f_locals
-            ):
-                result["locals"][instr.argval] = pytree.tree_map(go, frame.f_locals[instr.argval])
+            if isinstance(instr.argval, str) and instr.argval in frame.f_locals:
+                result["locals"][instr.argval] = pytree.tree_map(
+                    go, frame.f_locals[instr.argval]  # type: ignore[index]
+                )
 
         # store LOC
         locs = co_lines[frame.f_lineno - offset : last_lineno + 1 - offset]
         indent = len(locs[0]) - len(locs[0].lstrip())
-        result["loc"] = "".join([loc[indent:] for loc in locs]).strip()
-
-        if not result["locals"] or not result["symbols"]:  # no symbolic values
-            return
+        result["loc"] = "".join([loc[indent:] for loc in locs]).strip()  # type: ignore[assignment]
         return result
 
     def _log_guard(self, prefix: str, g: SympyBoolean, forcing_spec: bool) -> None:
@@ -6495,7 +6494,7 @@ class ShapeEnv:
                     for k, v in self.source_to_var.items()
                     if v in g.free_symbols
                 },
-                "frame_locals": self._log_frame_locals(),
+                "frame_locals": self._find_frame_locals(),
             },
         )
         trace_structured(
@@ -6729,7 +6728,7 @@ class ShapeEnv:
                             },
                         )
                         dtrace_structured(
-                            "propagate_real_tensors_dtrace",
+                            "propagate_real_tensors (dtrace)",
                             metadata_fn=lambda: {
                                 "expr": repr(orig_expr),
                                 "result": repr(unsound_result),
@@ -6741,7 +6740,7 @@ class ShapeEnv:
                                     for k, v in self.source_to_var.items()
                                     if v in g.free_symbols
                                 },
-                                "frame_locals": self._log_frame_locals(),
+                                "frame_locals": self._find_frame_locals(),
                             },
                         )
                         transmute_into_runtime_assert = True

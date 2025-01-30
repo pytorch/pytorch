@@ -38,6 +38,26 @@ def prettify_stack(stack: list[dict[str, str]], str_to_filename: dict[str, str])
     return res
 
 
+def prettify_frame_locals(
+    loc: str, locals: dict[str, Any], symbols: dict[str, Any]
+) -> str:
+    res = f"    {loc}\n"
+    local_str = "\n".join(f"            {k}: {v}" for k, v in locals.items())
+    res += f"""
+        Locals:
+{local_str}
+"""
+    if any(v is not None for v in symbols.values()):
+        symbol_str = "\n".join(
+            f"           {k}: {v}" for k, v in symbols.items() if v is not None
+        )
+        res += f"""
+        Symbols:
+{symbol_str}
+"""
+    return res
+
+
 def filter_stack(
     stack: list[dict[str, str]], str_to_filename: dict[str, str]
 ) -> list[dict[str, str]]:
@@ -53,22 +73,6 @@ def filter_stack(
 
 def hash_stack(stack: list[dict[str, str]]) -> str:
     return ";".join(f'line: {s["line"]} filename: {s["filename"]}' for s in stack)
-
-
-def print_frame_locals(loc: str, locals: dict[str, Any], symbols: dict[str, Any]) -> str:
-    res = f"    {loc}\n"
-    local_str = "\n".join(f'            {k}: {v}' for k, v in locals.items())
-    res += f"""
-        Locals:
-{local_str}
-"""
-    if any(v is not None for v in symbols.values()):
-        symbol_str = "\n".join(f'           {k}: {v}' for k, v in symbols.items() if v is not None)
-        res += f"""
-        Symbols:
-{symbol_str}
-"""
-    return res
 
 
 def get_loc(filename: str, lineno: int) -> Optional[str]:
@@ -105,7 +109,7 @@ class FailureReport:
 
         elif self.failure_type == FailureType.CONSTRAINT_VIOLATION_ERROR:
             locals_info = (
-                print_frame_locals(**self.data["frame_locals"])
+                prettify_frame_locals(**self.data["frame_locals"])
                 if self.data["frame_locals"]
                 else ""
             )
@@ -124,7 +128,7 @@ class FailureReport:
 
         elif self.failure_type == FailureType.DATA_DEPENDENT_ERROR:
             locals_info = (
-                print_frame_locals(**self.data["frame_locals"])
+                prettify_frame_locals(**self.data["frame_locals"])
                 if self.data["frame_locals"]
                 else ""
             )
@@ -239,7 +243,7 @@ def draft_export(
 
     capture_structured_log = CaptureStructuredTrace(
         [
-            "propagate_real_tensors_dtrace",
+            "propagate_real_tensors (dtrace)",
             "guard_added",
             "missing_fake_kernel",
             "mismatched_fake_kernel",
@@ -287,7 +291,7 @@ def draft_export(
         for log_name, log_contents in capture_structured_log.logs:
             failure_type = None
 
-            if log_name == "propagate_real_tensors_dtrace":
+            if log_name == "propagate_real_tensors (dtrace)":
                 log_contents["stack"] = filter_stack(
                     log_contents["stack"], str_to_filename
                 )
