@@ -186,7 +186,7 @@ The PyTorch binaries shipped with CUDA 12.6.3 are built with CXX11_ABI=1 and are
 
 #### `torch.onnx.export(..., dynamo=True)` now creates ONNX models using IR version 10 ([#141207](https://github.com/pytorch/pytorch/pull/141207)) 
 
-ONNX ir_version=10 is used to add support for UINT4, INT4 data types and include metadata in GraphProto and NodeProto.  
+ONNX ir_version=10 is used to add support for UINT4, INT4 data types and include metadata in GraphProto and NodeProto. Make sure model consumers are able to accept IR version 10 ONNX models. You may read more about IRv10 on https://github.com/onnx/onnx/releases/tag/v1.16.0.
 
 #### Several obsolete APIs are removed ([#133825, #136279, #137789, #137790](https://github.com/pytorch/pytorch/pull/133825)) 
 
@@ -326,11 +326,11 @@ The full release compatibility matrix matrix can be found in [release.md](https:
 
 ### ONNX
 
-#### Models using `torch.cond` is supported [#137428](https://github.com/pytorch/pytorch/pull/137428)
+#### Models using `torch.cond` is supported ([#137428](https://github.com/pytorch/pytorch/pull/137428))
 
 `torch.cond` is the recommended way to introduce control flows that can be converted to an ONNX model.
 
-#### Users can provide a `custom_translation_table` to provide custom implementations for converting operators to ONNX [#135403](https://github.com/pytorch/pytorch/pull/135403)
+#### Users can provide a `custom_translation_table` to provide custom implementations for converting operators to ONNX ([#135403](https://github.com/pytorch/pytorch/pull/135403))
 
 This is useful when you need to override an implementation or provide one that is not currently implemented. Refer to the tutorials for a more complete description of the operator registration mechanism. 
 
@@ -347,7 +347,7 @@ torch.onnx.export(...
 }) 
 ``` 
 
-#### `ONNXProgram` has a new `optimize()` method [#137667](https://github.com/pytorch/pytorch/pull/137667)
+#### `ONNXProgram` has a new `optimize()` method ([#137667](https://github.com/pytorch/pytorch/pull/137667))
 
 Users can run `optimize()` to flatten nested structures in the ONNX graph, perform constant folding and remove redundancies in the ONNX model. Calling `optimize()` after exporting to ONNX is recommended. 
 
