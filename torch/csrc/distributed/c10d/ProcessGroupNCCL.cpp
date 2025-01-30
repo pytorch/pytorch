@@ -5258,13 +5258,13 @@ static void* _ncclMemAlloc(size_t size, int device, void* stream) {
 #ifndef NCCL_HAS_MEM_ALLOC
   TORCH_CHECK(
       false, "NCCL mem allocator is not supported in this NCCL version");
-#endif // NCCL_HAS_MEM_ALLOC
-
+#else
   LOG(INFO) << "NCCL mem allocator: allocating " << size << " bytes";
   at::cuda::OptionalCUDAGuard gpuGuard(device);
   void* ptr = nullptr;
   TORCH_CHECK(ncclMemAlloc(&ptr, size) == ncclSuccess, "ncclMemAlloc failed");
   return ptr;
+#endif // NCCL_HAS_MEM_ALLOC
 }
 
 // Free function
@@ -5272,15 +5272,19 @@ static void _ncclMemFree(void* ptr, size_t size, int device, void* stream) {
 #ifndef NCCL_HAS_MEM_ALLOC
   TORCH_CHECK(
       false, "NCCL mem allocator is not supported in this NCCL version");
-#endif // NCCL_HAS_MEM_ALLOC
-
+#else
   LOG(INFO) << "NCCL mem allocator: freeing " << size << " bytes";
   at::cuda::OptionalCUDAGuard gpuGuard(device);
   TORCH_CHECK(ncclMemFree(ptr) == ncclSuccess, "ncclMemFree failed");
+#endif // NCCL_HAS_MEM_ALLOC
 }
 
 // Create a `CUDAPluggableAllocator` that uses the above functions.
 std::shared_ptr<c10::Allocator> ProcessGroupNCCL::getMemAllocator() {
+#ifndef NCCL_HAS_MEM_ALLOC
+  TORCH_CHECK(
+      false, "NCCL mem allocator is not supported in this NCCL version");
+#endif // NCCL_HAS_MEM_ALLOC
   C10_LOG_API_USAGE_ONCE("ProcessGroupNCCL.getMemAllocator");
   static std::shared_ptr<c10::cuda::CUDACachingAllocator::CUDAAllocator>
       ncclMemAllocator =
