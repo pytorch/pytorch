@@ -729,7 +729,6 @@ def forward(self, primals_1):
     view = torch.ops.aten.view.default(arange, [3, 3]);  arange = None
     _lazy_clone_alias = torch.ops.aten._lazy_clone_alias.default(view);  view = None
     add = torch.ops.aten.add.Tensor(alias, _lazy_clone_alias);  alias = _lazy_clone_alias = None
-    add = torch.ops.aten.add.Tensor(alias, view);  alias = view = None
     return (add,)""",
         )
 

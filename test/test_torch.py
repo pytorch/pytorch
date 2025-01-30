@@ -97,7 +97,7 @@ def torch_vital_set(value):
 
 @contextlib.contextmanager
 def assertNoLeakedLazyCloneWarnings(ignore=False):
-    pattern = ".*creates a conditional view"
+    pattern = ".*conditionally creates either a view or copy"
     with warnings.catch_warnings(record=True) as w:
         warnings.filterwarnings('ignore')
         if not ignore:
@@ -5247,17 +5247,17 @@ else:
     def test_lazy_clone_warning(self, device, dtype):
         # Test warning
         a = torch.randn(10)
-        with self.assertWarnsRegex(UserWarning, "creates a conditional view"):
+        with self.assertWarnsRegex(UserWarning, "conditionally creates either a view or copy"):
             torch._lazy_clone(a)
 
         # Test error
         try:
-            torch._C._set_error_on_conditional_view_warnings(True)
+            torch.set_error_on_conditional_view_warnings(True)
             a = torch.randn(10)
-            with self.assertRaisesRegex(RuntimeError, "creates a conditional view"):
+            with self.assertRaisesRegex(RuntimeError, "conditionally creates either a view or copy"):
                 torch._lazy_clone(a)
         finally:
-            torch._C._set_error_on_conditional_view_warnings(False)
+            torch.set_error_on_conditional_view_warnings(False)
 
     # See Note [lazy_clone_ tests with inductor enabled]
     @skipXLA
@@ -5405,7 +5405,7 @@ else:
         # Test deprecated behavior
         a0 = init_fn(device, dtype)
         with futureLazyCloneGuard(False):
-            with self.assertWarnsRegex(UserWarning, "creates a conditional view"):
+            with self.assertWarnsRegex(UserWarning, "conditionally creates either a view or copy"):
                 r0 = view_fn(a0)
         self.assertFalse(torch._C._is_cow_tensor(r0))
 

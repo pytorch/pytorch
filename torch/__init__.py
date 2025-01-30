@@ -106,7 +106,9 @@ __all__ = [
     "get_default_device",
     "get_deterministic_debug_mode",
     "get_device_module",
+    "get_error_on_conditional_view_warnings",
     "get_float32_matmul_precision",
+    "get_future_lazy_clone",
     "get_rng_state",
     "inference_mode",
     "initial_seed",
@@ -126,7 +128,9 @@ __all__ = [
     "set_default_device",
     "set_default_tensor_type",
     "set_deterministic_debug_mode",
+    "set_error_on_conditional_view_warnings",
     "set_float32_matmul_precision",
+    "set_future_lazy_clone",
     "set_printoptions",
     "set_rng_state",
     "set_warn_always",
@@ -1286,8 +1290,70 @@ def set_default_dtype(d: "torch.dtype", /) -> None:
 
 
 def set_future_lazy_clone(mode: builtins.bool) -> None:
-    r"""Enables future behavior of always copying for operators that currently
+    r"""Enables future behavior of always copying, for operators that currently
     conditionally return a copy or view of the input.
+
+    Currently, some operators in PyTorch conditionally return either a view or a
+    copy of a tensor. This behavior has been deprecated, and in a future release
+    these operators will unconditionally return a copy. Depending on how user
+    code interacts with a conditionally-created view, the future release may
+    change the behavior of the code.
+
+    This function allows you to opt into the future behavior to check if it will
+    require you to change your code. This should be enabled at the beginning of
+    your script.
+
+    In what situations can you expect enabling future behavior to cause the
+    behavior of your script to change? Given a tensor ``a``, if the following
+    three steps occur in order, the behavior of your script will likely change:
+
+    #. An operator ``op``, which conditionally creates a view, is called like
+        ``b = op(a, ...)``, and meets the condition to cause ``b`` to be a view
+        of ``a``.
+
+    #. Either ``a`` or ``b`` is mutated in-place.
+
+    #. The other tensor that was not mutated in the previous step is either
+       mutated or its data is read as an input to another operation.
+
+    For instance, :func:`torch.reshape` is one of the functions which
+    conditionally creates a view. The following is an example where the same
+    code is run with and without the future behavior enabled. Notice that the
+    output ``result`` differs in both cases.
+
+    Current behavior:
+
+        >>> torch.set_future_lazy_clone(False)
+        >>> a = torch.ones(4)
+        >>> b = a.reshape((2, 2))  # `b` is a view of `a`
+        >>> a += 1                 # `a` is mutated, which also mutates `b`
+        >>> result = b + 2
+        >>> result
+        tensor([[4., 4.],
+                [4., 4.]])
+        >>> a.data_ptr() == b.data_ptr()
+        True
+
+    Future behavior:
+
+        >>> torch.set_future_lazy_clone(True)
+        >>> a = torch.ones(4)
+        >>> b = a.reshape((2, 2))  # `b` is a copy of `a`, not a view
+        >>> a += 1                 # `a` is mutated, but `b` is not
+        >>> result = b + 2
+        >>> result
+        tensor([[3., 3.],
+                [3., 3.]])
+        >>> a.data_ptr() == b.data_ptr()
+        False
+
+    See also:
+    * :func:`torch.get_future_lazy_clone()`
+    * :func:`torch.set_error_on_conditional_view_warnings()`
+    * :func:`torch.get_error_on_conditional_view_warnings()`
+
+    Args:
+        mode (bool): Whether to enable the future behavior
     """
     return _C._set_future_lazy_clone(mode)
 
@@ -1297,6 +1363,20 @@ def get_future_lazy_clone() -> builtins.bool:
     that currently conditionally return a copy or view of the input.
     """
     return _C._get_future_lazy_clone()
+
+
+def set_error_on_conditional_view_warnings(mode: builtins.bool) -> None:
+    r"""Enables raising an error instead of a warning when an operation
+    conditionally creates a view.
+    """
+    return _C._set_error_on_conditional_view_warnings(mode)
+
+
+def get_error_on_conditional_view_warnings() -> None:
+    r"""Check whether raising an error instead of a warning is enabled when an
+    operation conditionally creates a view.
+    """
+    return _C._get_error_on_conditional_view_warnings()
 
 
 def use_deterministic_algorithms(
