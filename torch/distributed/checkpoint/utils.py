@@ -41,18 +41,18 @@ def _get_failure_dict(
 
 
 def _all_gather_keys(
-    local_dict: dict[Any, Any], group: Optional[dist.ProcessGroup] = None
-) -> Set[Any]:
+    local_dict: dict[str, Any], group: Optional[dist.ProcessGroup] = None
+) -> Set[str]:
     """Gathers all keys, and returns them sorted."""
     keys = list(local_dict.keys())
-    gathered_keys: list[list[Any]] = [None] * dist.get_world_size(group)  # type: ignore[list-item]
+    gathered_keys: list[list[str]] = [None] * dist.get_world_size(group)  # type: ignore[list-item]
 
     dist.all_gather_object(gathered_keys, keys, group=group)
     return set(itertools.chain.from_iterable(gathered_keys))
 
 
 def assert_same_keys(
-    state_dict: dict[Any, Any], process_group: Optional[dist.ProcessGroup] = None
+    state_dict: dict[str, Any], process_group: Optional[dist.ProcessGroup] = None
 ) -> None:
     """
     Asserts that all ranks have the same keys in their state dict.
