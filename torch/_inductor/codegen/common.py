@@ -20,6 +20,7 @@ from typing import (
     ClassVar,
     Generic,
     Iterator,
+    MutableMapping,
     NamedTuple,
     Optional,
     TYPE_CHECKING,
@@ -47,6 +48,7 @@ from ..utils import (
     generate_assert,
     IndentedBuffer,
     ir_dataclass,
+    ScopedDict,
     sympy_dot,
     sympy_subs,
     unique,
@@ -57,7 +59,7 @@ from ..virtualized import ops, OpsHandler, OpsValue, ReductionType, StoreMode, V
 if TYPE_CHECKING:
     from ..ir import FixedLayout
     from ..loop_body import LoopBody
-    from ..scheduler import BaseScheduling, Scheduler
+    from ..scheduler import BaseScheduling, Scheduler, SchedulerNode
     from .wrapper import PythonWrapperCodegen
 
     _T = TypeVar("_T")
@@ -1525,16 +1527,18 @@ class CSE(Generic[CSEVariableType, AugmentedKeyT]):
         suffix: str = "",
         name_prefix: str = "tmp",
         iter_buffers: Optional[itertools.count[int]] = None,
-        store_cache: Optional[dict[str, CSEVariableType]] = None,
-        reduction_cache: Optional[dict[ReductionCacheKey, CSEVariableType]] = None,
+        store_cache: Optional[MutableMapping[str, CSEVariableType]] = None,
+        reduction_cache: Optional[
+            MutableMapping[ReductionCacheKey, CSEVariableType]
+        ] = None,
         varname_map: Optional[dict[str, CSEVariableType]] = None,
     ):
         self.prefix = prefix
         self.suffix = suffix
-        self._cache: dict[AugmentedKeyT, CSEVariableType] = {}
+        self._cache: MutableMapping[AugmentedKeyT, CSEVariableType] = {}
         self.name_prefix = name_prefix
-        self.store_cache: dict[str, CSEVariableType] = store_cache or {}
-        self.reduction_cache: dict[ReductionCacheKey, CSEVariableType] = (
+        self.store_cache: MutableMapping[str, CSEVariableType] = store_cache or {}
+        self.reduction_cache: MutableMapping[ReductionCacheKey, CSEVariableType] = (
             reduction_cache or {}
         )
         self.iter_buffer_ids: itertools.count[int] = iter_buffers or itertools.count()
@@ -1549,7 +1553,6 @@ class CSE(Generic[CSEVariableType, AugmentedKeyT]):
         self._cache = {k: v for k, v in self._cache.items() if v in keep_vars}
 
     def clone(self) -> typing.Self:
-        # Note(fdrocha): reduction_cache is not being cloned, not sure if this is intentional
         return type(self)(
             prefix=self.prefix,
             suffix=self.suffix,
@@ -1557,6 +1560,7 @@ class CSE(Generic[CSEVariableType, AugmentedKeyT]):
             iter_buffers=self.iter_buffer_ids,
             store_cache=self.store_cache,
             varname_map=self.varname_map,
+            reduction_cache=self.reduction_cache,
         )
 
     def augment_key(self, cache_key: str) -> AugmentedKeyT:
@@ -1663,45 +1667,22 @@ class CodeGen:
         super().__init__()
         self.exit_stack = contextlib.ExitStack()
 
-    def __enter__(self):
+    def __enter__(self) -> typing.Self:
         self.exit_stack.__enter__()
         return self
 
-    def __exit__(self, exc_type, exc_val, exc_tb):
+    def __exit__(self, exc_type: Any, exc_val: Any, exc_tb: Any) -> None:
         self.exit_stack.__exit__(exc_type, exc_val, exc_tb)
 
 
-class ScopedDict:
-    def __init__(self, original_dict):
-        self.original_dict = original_dict
-        self.new_items = {}
-
-    def __getitem__(self, key):
-        if key in self.new_items:
-            return self.new_items[key]
-        return self.original_dict[key]
-
-    def __setitem__(self, key, value):
-        self.new_items[key] = value
-
-    def __contains__(self, key):
-        return key in self.new_items or key in self.original_dict
-
-    def get(self, key, default=None):
-        if key in self.new_items:
-            return self.new_items[key]
-        return self.original_dict.get(key, default)
-
-
 class Kernel(CodeGen, Generic[CSEVariableType]):
-    newvar_prefix = ""
-    suffix = ""
+    newvar_prefix: str = ""
+    suffix: str = ""
     overrides: Optional[Callable[[OpsHandler[Any]], OpsHandler[Any]]] = None
-    # TODO: these look dead, but with all the getattr it's hard to tell...
-    load_format: None = None
-    store_format: None = None
 
-    def __init__(self, args=None, increase_kernel_count=True):
+    def __init__(
+        self, args: Optional[KernelArgs] = None, increase_kernel_count: bool = True
+    ) -> None:
         super().__init__()
         if increase_kernel_count:
             metrics.generated_kernel_count += 1
@@ -1716,22 +1697,18 @@ class Kernel(CodeGen, Generic[CSEVariableType]):
         self.cse: CSE[CSEVariableType, Any] = CSE(self.newvar_prefix, self.suffix)
         self.must_keep_buffers = OrderedSet[str]()
         self.store_buffer_names = OrderedSet[str]()
-        self._load_mask = None
-        self._load_other = None
+        self._load_mask: Optional[str] = None
+        self._load_other: Union[None, int, float] = None
         # OrderedSet in set_current_node
-        self.current_node = None
+        self.current_node: Optional[SchedulerNode] = None
         self.node_to_bounds: Optional[dict[torch.fx.Node, ValueRanges[Any]]] = None
 
         self.removed_buffers = OrderedSet[str]()
         self.inplaced_to_remove = OrderedSet[str]()
 
-        # key: the buffer to write
-        # value: the buffer to read and whose memory can be reused for
-        #   the buffer specified by key
-        self.inplace_update_buffers = {}
         # Set minimum number of elements processed per thread.
         self.min_elem_per_thread = 1
-        self.kernel_name = None
+        self.kernel_name: Optional[str] = None
 
     @contextlib.contextmanager
     def set_current_node(self, node):
@@ -1745,7 +1722,7 @@ class Kernel(CodeGen, Generic[CSEVariableType]):
 
     @contextlib.contextmanager
     def swap_buffers(self, lb, cb=None, sb=None):
-        def scope_cse(cse):
+        def scope_cse(cse: CSE[CSEVariableType, Any]):
             new_cse = cse.clone()
             new_cse._cache = ScopedDict(cse._cache)
             new_cse.reduction_cache = ScopedDict(cse.reduction_cache)

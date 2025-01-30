@@ -3350,9 +3350,9 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                     cast(InplacedBuffer, self.args.inplace_buffers[mutation]).inner_name
                 )
             if mutation in self.args.output_buffers:
-                argname = self.args.output_buffers[mutation]
-                assert not isinstance(argname, RemovedArg)
-                mutated_args.add(argname)
+                mutation_arg = self.args.output_buffers[mutation]
+                assert not isinstance(mutation_arg, RemovedArg)
+                mutated_args.add(mutation_arg)
 
         # Note: [Workspace Mutation]
         # workspace arguments are mutated, but are not marked as mutations in self.mutations

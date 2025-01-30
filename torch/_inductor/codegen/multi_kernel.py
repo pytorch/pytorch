@@ -16,7 +16,7 @@ from ..runtime.triton_heuristics import (
     grid,
     maybe_cooperative_reduction_grid,
 )
-from ..utils import cache_on_self, IndentedBuffer
+from ..utils import IndentedBuffer
 from ..virtualized import V
 from .common import TensorArg, WorkspaceArg
 
@@ -272,16 +272,6 @@ class MultiKernel:
     @property
     def inplaced_to_remove(self):
         return OrderedSet.intersection(*[k.inplaced_to_remove for k in self.kernels])
-
-    @property
-    @cache_on_self
-    def inplace_update_buffers(self):
-        """
-        Make sure all kernels have the same inplace update mappings.
-        """
-        for k in self.kernels[1:]:
-            assert k.inplace_update_buffers == self.kernels[0].inplace_update_buffers
-        return self.kernels[0].inplace_update_buffers
 
     def warn_mix_layout(self, kernel_name: str):
         pass
