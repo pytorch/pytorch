@@ -70,6 +70,7 @@ class MemoryDep(Dep):
     var_names: tuple[sympy.Symbol, ...]
     size: tuple[sympy.Expr, ...]
     mode: Optional[str] = None
+    # need to be updated with more information rather than just True/False
     indirect_broadcast: bool = False
 
     def __repr__(self) -> str:
@@ -687,6 +688,7 @@ def extract_loop_body_with_args(
                 if free_symbol in repl_reverse:
                     for node in fn.root_block.graph.nodes:
                         if node.name == f"set_{repl_reverse[free_symbol].name}" and len(node.args) == 1 and node.args[0].name.startswith("load"):
+                            # not sure if this is the correct way to update deps
                             read_new = read.set_indirect_broadcast_to_True()
                             replacement_mem_dep[read] = read_new
     for read,read_new in replacement_mem_dep.items():
