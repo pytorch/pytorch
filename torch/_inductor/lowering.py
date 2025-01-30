@@ -2546,7 +2546,14 @@ def sdpa_constraint(fx_node, *args, **kwargs):
                     stride = ceildiv(stride, ALIGNMENT) * ALIGNMENT
 
                 out_strides[i] = stride
-            return ir.ExternKernel.require_exact_strides(arg, out_strides)
+
+            orig_size = arg.get_size()
+            for dim in expanded_dims:
+                arg = slice_(arg, dim, 0, 1)
+
+            out = ir.ExternKernel.require_exact_strides(arg, out_strides)
+            return expand(TensorBox(out), orig_size)
+
 
         def is_aligned(x):
             return (V.graph.sizevars.size_hint(x.get_size()[-1]) % ALIGNMENT) == 0
