@@ -1020,11 +1020,12 @@ class TestMultiIndexingAutomated(TestCase):
             # np.VisibleDeprecationWarning moved to np.exceptions in numpy>=2.0.0
             # np.exceptions only available in numpy>=1.25.0
             has_exceptions_ns = hasattr(np, "exceptions")
-            VisibleDeprecationWarning = (
+            VisibleDeprecationWarning = (  # noqa: F841
                 np.exceptions.VisibleDeprecationWarning
                 if has_exceptions_ns
                 else np.VisibleDeprecationWarning
             )
+            # FIXME(rec): should this use VisibleDeprecationWarning instead?
             warnings.filterwarnings("error", "", np.VisibleDeprecationWarning)
 
             def isskip(idx):

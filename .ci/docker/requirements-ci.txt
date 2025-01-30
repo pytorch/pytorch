@@ -294,7 +294,7 @@ ghstack==0.8.0
 #Pinned versions: 0.8.0
 #test that import:
 
-jinja2==3.1.4
+jinja2==3.1.5
 #Description: jinja2 template engine
 #Pinned versions: 3.1.4
 #test that import:
@@ -304,7 +304,7 @@ pytest-cpp==2.3.0
 #Pinned versions: 2.3.0
 #test that import:
 
-z3-solver==4.12.2.0
+z3-solver==4.12.6.0
 #Description: The Z3 Theorem Prover Project
 #Pinned versions:
 #test that import:
@@ -362,6 +362,7 @@ pwlf==2.2.1 ; python_version >= "3.8"
 # To build PyTorch itself
 astunparse
 PyYAML
+pyzstd
 setuptools
 
 ninja==1.11.1 ; platform_machine == "aarch64"
@@ -371,3 +372,8 @@ pulp==2.9.0 ; python_version >= "3.8"
 #Description: required for testing ilp formulaiton under torch/distributed/_tools
 #Pinned versions: 2.9.0
 #test that import: test_sac_ilp.py
+
+dataclasses_json==0.6.7
+#Description: required for data pipeline and scripts under tools/stats
+#Pinned versions: 0.6.7
+#test that import:

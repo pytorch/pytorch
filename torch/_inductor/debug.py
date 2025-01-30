@@ -1,9 +1,10 @@
 import collections
 import contextlib
+import copy
 import dataclasses
 import functools
-import io
 import itertools
+import json
 import logging
 import os
 import os.path
@@ -11,7 +12,8 @@ import pickle
 import pstats
 import shutil
 import subprocess
-from typing import Any, Callable, Dict, IO, Iterator, List, Optional, Type, Union
+from collections.abc import Iterator
+from typing import Any, Callable, IO, Optional, Union
 from unittest.mock import patch
 
 import torch
@@ -22,6 +24,7 @@ from torch._dynamo.utils import get_debug_dir
 from torch.fx.graph_module import GraphModule
 from torch.fx.passes.shape_prop import _extract_tensor_metadata, TensorMetadata
 from torch.fx.passes.tools_common import legalize_graph
+from torch.types import FileLike
 from torch.utils._ordered_set import OrderedSet
 from torch.utils._pytree import tree_map
 
@@ -38,7 +41,7 @@ from .virtualized import V
 
 log = logging.getLogger(__name__)
 
-SchedulerNodeList = List[Any]
+SchedulerNodeList = list[Any]
 BufMeta = collections.namedtuple("BufMeta", ["name", "n_origin"])
 GRAPHVIZ_COMMAND_SCALABLE = ["dot", "-Gnslimit=2", "-Gnslimit1=2", "-Gmaxiter=5000"]
 
@@ -53,7 +56,7 @@ def has_dot() -> bool:
 
 
 def draw_buffers(
-    nodes: List[BaseSchedulerNode],
+    nodes: list[BaseSchedulerNode],
     print_graph: bool = False,
     fname: Optional[str] = None,
 ) -> None:
@@ -98,7 +101,7 @@ def draw_buffers(
     )
 
 
-def create_fx_from_snodes(snodes: List[BaseSchedulerNode]) -> fx.Graph:
+def create_fx_from_snodes(snodes: list[BaseSchedulerNode]) -> fx.Graph:
     """
     Creates a FX Graph from a list of SchedulerNode objects.
     """
@@ -198,7 +201,7 @@ def create_fx_from_snodes(snodes: List[BaseSchedulerNode]) -> fx.Graph:
 
 def update_orig_fx_node_name_to_buf_name(
     nodes: Optional[SchedulerNodeList],
-    node_name_to_buf_name: Dict[str, str],
+    node_name_to_buf_name: dict[str, str],
     parent_buf_name: Optional[str] = None,
     n_origins: int = 0,
 ) -> None:
@@ -232,8 +235,8 @@ def update_orig_fx_node_name_to_buf_name(
 
 
 def get_node_name_to_buf_meta(
-    node_name_to_buf_name: Dict[str, str]
-) -> Dict[str, BufMeta]:
+    node_name_to_buf_name: dict[str, str]
+) -> dict[str, BufMeta]:
     buf_name_to_n_node = {}
     for node_name, buf_name in node_name_to_buf_name.items():
         if buf_name not in buf_name_to_n_node:
@@ -255,7 +258,7 @@ def annotate_orig_fx_with_snodes(
     """
     Creates a FX Graph from a list of SchedulerNode objects.
     """
-    node_name_to_buf_name: Dict[str, str] = {}
+    node_name_to_buf_name: dict[str, str] = {}
     update_orig_fx_node_name_to_buf_name(snodes, node_name_to_buf_name)
     if node_name_to_buf_name is None:
         return
@@ -308,6 +311,7 @@ def enable_aot_logging() -> Iterator[None]:
 
 class DebugContext:
     _counter = itertools.count()
+    _inductor_triton_kernel_to_post_grad_node_info: dict[str, list[str]] = {}
 
     @staticmethod
     def create_debug_dir(folder_name: str) -> Optional[str]:
@@ -423,7 +427,7 @@ class DebugContext:
 
     def __exit__(
         self,
-        exc_type: Optional[Type[BaseException]],
+        exc_type: Optional[type[BaseException]],
         exc_val: Optional[BaseException],
         exc_tb: Optional[Any],
     ) -> None:
@@ -472,7 +476,7 @@ class DebugFormatter:
     def fx_graph(
         self,
         gm: torch.fx.GraphModule,
-        inputs: List[torch.Tensor],
+        inputs: list[torch.Tensor],
     ) -> None:
         with self.fopen("fx_graph_runnable.py") as fd:
             save_dir = None
@@ -502,7 +506,7 @@ class DebugFormatter:
     def fx_graph_transformed(
         self,
         gm: torch.fx.GraphModule,
-        inputs: List[torch.Tensor],
+        inputs: list[torch.Tensor],
     ) -> None:
         with self.fopen("fx_graph_transformed.py") as fd:
             fd.write(gm.print_readable(print_output=False))
@@ -545,19 +549,26 @@ class DebugFormatter:
     def output_code(self, filename: str) -> None:
         shutil.copy(filename, self.filename("output_code.py"))
 
+    def log_inductor_triton_kernel_to_post_grad_node_info(
+        self, filename: str = "inductor_triton_kernel_to_post_grad_nodes.json"
+    ) -> dict[str, list[str]]:
+        with self.fopen(filename, "w") as fd:
+            log.info("Writing provenance tracing debugging info to %s", fd.name)
+            debug_info = DebugContext._inductor_triton_kernel_to_post_grad_node_info
+            json.dump(debug_info, fd)
+        return debug_info
+
     def log_autotuning_results(
         self,
         name: str,
-        input_nodes: List[ir.IRNode],
-        timings: Dict["ChoiceCaller", float],  # type: ignore[name-defined] # noqa: F821
+        input_nodes: list[ir.IRNode],
+        timings: dict["ChoiceCaller", float],  # type: ignore[name-defined] # noqa: F821
         elapse: float,
         precompile_elapse: float,
     ) -> None:
-        import json
-
         from .ir import FixedLayout
 
-        def build_node_info(node: ir.IRNode) -> Dict[str, str]:
+        def build_node_info(node: ir.IRNode) -> dict[str, str]:
             if hasattr(node, "name"):
                 node_name = node.name
             else:
@@ -718,10 +729,13 @@ def aot_inductor_minifier_wrapper(
     func: Callable[..., str],
     exported_program: torch.export.ExportedProgram,
     *,
-    inductor_configs: Dict[str, Any],
-    package_path: Optional[Union[str, io.BytesIO]] = None,
+    inductor_configs: dict[str, Any],
+    package_path: Optional[FileLike] = None,
 ) -> str:
+    from torch._dynamo.debug_utils import AccuracyError
+    from torch._dynamo.repro.aoti import dump_to_minify
     from torch._inductor import config
+    from torch._inductor.compile_fx import _aoti_flatten_inputs
 
     use_minifier = config.aot_inductor.dump_aoti_minifier
 
@@ -731,6 +745,37 @@ def aot_inductor_minifier_wrapper(
     args, kwargs = exported_program.example_inputs
 
     try:
+        if use_minifier and config.aot_inductor.repro_level == 3:
+            # Always dump the original module in case we have segfaults
+            dump_to_minify(
+                exported_program,
+                "aot_inductor",
+                options=inductor_configs,
+            )
+        if use_minifier and config.aot_inductor.repro_level == 4:
+            # Check for accuracy
+            # We will first flatten the inputs before compiling and checking for accuracy.
+            # This is ok because we will flatten the inputs in the minifier anyway.
+            gm_copy = copy.deepcopy(gm)
+            example_inputs_copy = copy.deepcopy(exported_program.example_inputs)
+            config_copy = copy.deepcopy(inductor_configs)
+            flat_example_inputs, config_copy = _aoti_flatten_inputs(
+                gm_copy,
+                example_inputs_copy[0],
+                example_inputs_copy[1],
+                options=config_copy,
+            )
+            tuple_inputs = tuple(flat_example_inputs)
+            flattened_ep = torch.export.export(gm_copy, tuple_inputs, strict=False)
+            func(
+                flattened_ep.module(),
+                tuple_inputs,
+                inductor_configs=config_copy,
+                package_path=package_path,
+                load_and_run=True,
+                check_accuracy="accuracy",
+            )
+
         return func(
             gm,
             args,
@@ -739,14 +784,26 @@ def aot_inductor_minifier_wrapper(
             package_path=package_path,
             load_and_run=use_minifier,
         )
+    except AccuracyError as e:
+        dump_to_minify(
+            exported_program,
+            "aot_inductor_accuracy",
+            command="minify",
+            options=inductor_configs,
+        )
+        log.warning("Accuracy failed")
+        raise e
     except Exception as e:
         if use_minifier:
-            # TODO: check accuracy and re-direct to minifier
-            from torch._dynamo.repro.aoti import dump_to_minify
+            command = "minify"
+
+            if config.aot_inductor.repro_level == 1:
+                command = "run"
 
             dump_to_minify(
                 exported_program,
-                "compile_fx_aot",
+                "aot_inductor",
+                command=command,
                 options=inductor_configs,
             )
         raise e

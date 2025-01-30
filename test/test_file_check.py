@@ -6,7 +6,7 @@ from torch.testing._internal.common_utils import run_tests, TestCase
 
 class TestFileCheck(TestCase):
     def test_not_run(self):
-        stdout, stderr = self.run_process_no_exception(
+        stdout, _ = self.run_process_no_exception(
             """\
 from torch.testing import FileCheck
 file_check = FileCheck().check("not run")

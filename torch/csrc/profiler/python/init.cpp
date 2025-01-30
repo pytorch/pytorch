@@ -337,7 +337,8 @@ void initPythonBindings(PyObject* module) {
               std::vector<std::string> /* performance_events  */,
               bool /* enable_cuda_sync_events */,
               bool /* adjust_profiler_step */,
-              bool /* disable_external_correlation*/
+              bool /* disable_external_correlation*/,
+              bool /* profile_all_threads */
               >(),
           "An experimental config for Kineto features. Please note that"
           "backward compatibility is not guaranteed.\n"
@@ -354,13 +355,15 @@ void initPythonBindings(PyObject* module) {
           "    adjust_profiler_step (bool) : whether to adjust the profiler step to\n"
           "       match the parent python event duration. This feature is new and currently disabled by default.\n",
           "    disable_external_correlation (bool) : whether to disable external correlation\n",
+          "    profile_all_threads (bool) : whether to profile all threads\n",
           py::arg("profiler_metrics") = std::vector<std::string>(),
           py::arg("profiler_measure_per_kernel") = false,
           py::arg("verbose") = false,
           py::arg("performance_events") = std::vector<std::string>(),
           py::arg("enable_cuda_sync_events") = false,
           py::arg("adjust_profiler_step") = false,
-          py::arg("disable_external_correlation") = false)
+          py::arg("disable_external_correlation") = false,
+          py::arg("profile_all_threads") = false)
       .def(py::pickle(
           [](const ExperimentalConfig& p) { // __getstate__
             py::list py_metrics;
@@ -381,6 +384,7 @@ void initPythonBindings(PyObject* module) {
                 p.enable_cuda_sync_events,
                 p.adjust_profiler_step,
                 p.disable_external_correlation,
+                p.profile_all_threads,
                 p.performance_events);
           },
           [](const py::tuple& t) { // __setstate__

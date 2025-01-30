@@ -8,7 +8,6 @@ import math
 import operator
 import unittest
 from re import escape
-from typing import List, Set
 
 import torch
 from functorch.experimental.control_flow import cond
@@ -75,11 +74,11 @@ class _AtenAddOperatorSupport(OperatorSupport):
         return node.op == "call_function" and node.target in {torch.ops.aten.add.Tensor}
 
 
-def _to_partition_names(partitions: List[Partition]) -> List[Set[str]]:
+def _to_partition_names(partitions: list[Partition]) -> list[set[str]]:
     return [{n.name for n in p.nodes} for p in partitions]
 
 
-def _get_output_names(gm: torch.fx.GraphModule) -> List[str]:
+def _get_output_names(gm: torch.fx.GraphModule) -> list[str]:
     output_node = next(n for n in gm.graph.nodes if n.op == "output")
     args = pytree.tree_leaves(output_node.args)
     # if isinstance(args, tuple) and len(args) == 1:
@@ -404,7 +403,9 @@ class TestPasses(TestCase):
         x = torch.zeros(2, 2, 3)
 
         dim1_x = torch.export.Dim("dim1_x", min=2, max=6)
-        ep = torch.export.export(M(), (x,), dynamic_shapes={"x": {1: dim1_x}})
+        ep = torch.export.export(
+            M(), (x,), dynamic_shapes={"x": {1: dim1_x}}, strict=True
+        )
 
         with self.assertRaisesRegex(
             RuntimeError,
@@ -431,7 +432,10 @@ class TestPasses(TestCase):
         dim0_x, dim0_y = torch.export.dims("dim0_x", "dim0_y", min=3)
 
         ep = torch.export.export(
-            M(), (x, y), dynamic_shapes={"x": {0: dim0_x, 1: dim1_x}, "y": {0: dim0_y}}
+            M(),
+            (x, y),
+            dynamic_shapes={"x": {0: dim0_x, 1: dim1_x}, "y": {0: dim0_y}},
+            strict=True,
         )
 
         with self.assertRaisesRegex(
@@ -461,7 +465,10 @@ class TestPasses(TestCase):
         dim0_x = torch.export.Dim("dim0_x", min=3)
 
         ep = torch.export.export(
-            M(), (x, y), dynamic_shapes={"x": {0: dim0_x, 1: dim1_x}, "y": None}
+            M(),
+            (x, y),
+            dynamic_shapes={"x": {0: dim0_x, 1: dim1_x}, "y": None},
+            strict=True,
         )
 
         with self.assertRaisesRegex(
@@ -496,7 +503,7 @@ class TestPasses(TestCase):
 
         dim1_y = torch.export.Dim("dim1_y", min=3, max=6)
         ep = torch.export.export(
-            M(), (x, y), dynamic_shapes={"x": None, "y": {1: dim1_y}}
+            M(), (x, y), dynamic_shapes={"x": None, "y": {1: dim1_y}}, strict=True
         )
 
         with self.assertRaisesRegex(RuntimeError, escape("shape[1] to be equal to 2")):
@@ -526,7 +533,7 @@ class TestPasses(TestCase):
 
         x = torch.zeros(4, 2, 3)
 
-        ep = export(M(), (x,))
+        ep = export(M(), (x,), strict=True)
         self.assertEqual(count_call_function(ep.graph, torch.ops.aten.view.default), 1)
 
         ep = ep._transform_do_not_use(ReplaceViewOpsWithViewCopyOpsPass())
@@ -542,7 +549,7 @@ class TestPasses(TestCase):
 
         x = torch.zeros(4, 2, 3)
         foo = Module()
-        ep = export(foo, (x,))._transform_do_not_use(
+        ep = export(foo, (x,), strict=True)._transform_do_not_use(
             ReplaceViewOpsWithViewCopyOpsPass()
         )
         # After this pass, there shouldn't be any view nodes in the graph
@@ -643,7 +650,7 @@ def forward(self, token, obj_attr, x):
                 allow_non_fake_inputs=True,
             )
             with _fakify_script_objects(m, (), {}, fake_mode) as (
-                patched_mod,
+                _,
                 _,
                 _,
                 fake_constant_attrs,
@@ -657,17 +664,16 @@ def forward(self, token, obj_attr, x):
     @unittest.expectedFailure
     def test_fakify_script_objects_properly_handle_containers(self):
         m = ModelsWithScriptObjectAttr.SimpleWithAttrInContainer()
-        constant_attrs = _gather_constant_attrs(m)
         fake_mode = FakeTensorMode(
             shape_env=ShapeEnv(tracked_fakes=[]),
             allow_non_fake_inputs=True,
         )
         with _fakify_script_objects(m, (), {}, fake_mode) as (
-            patched_mod,
+            _,
             _,
             _,
             fake_constant_attrs,
-            fake_to_real,
+            _,
         ):
             self.assertTrue("attr" in fake_constant_attrs.values())
             self.assertTrue("pytree_attr2" in fake_constant_attrs.values())
@@ -685,7 +691,7 @@ def forward(self, token, obj_attr, x):
 
         x = torch.tensor([2])
         mod = M()
-        ep = export(mod, (x,))
+        ep = export(mod, (x,), strict=True)
 
         with self.assertRaisesRegex(
             RuntimeError, r"Runtime assertion failed for expression u[\d+] \<\= 5"
@@ -710,7 +716,9 @@ def forward(self, token, obj_attr, x):
 
         mod = M()
         dim0_x = torch.export.Dim("dim0_x")
-        ep = torch.export.export(mod, (x,), dynamic_shapes={"x": {0: dim0_x}})
+        ep = torch.export.export(
+            mod, (x,), dynamic_shapes={"x": {0: dim0_x}}, strict=True
+        )
 
         num_assert = count_call_function(
             ep.graph, torch.ops.aten._assert_scalar.default
@@ -763,7 +771,7 @@ def forward(self, token, obj_attr, x):
         x = torch.tensor([2])
         y = torch.tensor([5])
         mod = M()
-        ep = export(mod, (torch.tensor(True), x, y))
+        ep = export(mod, (torch.tensor(True), x, y), strict=True)
 
         with self.assertRaisesRegex(
             RuntimeError, "is outside of inline constraint \\[2, 5\\]."
@@ -780,7 +788,7 @@ def forward(self, token, obj_attr, x):
 
         func = Module()
         x = torch.randn(1, dtype=torch.float32)
-        ep = torch.export.export(func, args=(x,))
+        ep = torch.export.export(func, args=(x,), strict=True)
         _ExportPassBaseDeprecatedDoNotUse()(ep.graph_module)
 
     def test_predispatch_set_grad(self):
@@ -1232,7 +1240,7 @@ def forward(self, add_1):
 
             mod = M()
             x = torch.randn([3, 3])
-            ep = export(mod, (x,))
+            ep = export(mod, (x,), strict=True)
             inplace_ep = unsafe_remove_auto_functionalized_pass(ep)
             nodes = inplace_ep.graph.nodes
             for node in nodes:
@@ -1275,7 +1283,7 @@ def forward(self, add_1):
 
             mod = M()
             x = torch.randn([3, 3])
-            ep = export(mod, (x,)).run_decompositions({})
+            ep = export(mod, (x,), strict=True).run_decompositions({})
             inplace_ep = unsafe_remove_auto_functionalized_pass(ep)
             graph_text = str(inplace_ep.graph)
             self.assertExpectedInline(
@@ -1305,7 +1313,7 @@ default](args = (%x, %b_state), kwargs = {})
         # move the exported program from cpu to cuda:0
         mod = Model()
         example_inputs = (torch.rand(1, 10, 4),)
-        ep = export(mod, example_inputs)
+        ep = export(mod, example_inputs, strict=True)
         location = torch.device("cuda:0")
         ep = move_to_device_pass(ep, location=location)
         gm = ep.module()
