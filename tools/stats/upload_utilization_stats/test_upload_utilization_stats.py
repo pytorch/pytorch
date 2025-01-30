@@ -29,6 +29,7 @@ TEST_TS_PLUS_15S = TEST_DT_PLUS_15S.timestamp()
 TEST_TS_PLUS_30S = TEST_DT_PLUS_30S.timestamp()
 TEST_TS_PLUS_40S = TEST_DT_PLUS_40S.timestamp()
 
+
 # test cmd names
 PYTEST1_NAME = "python test1.py"
 PYTEST2_NAME = "python test2.py"
@@ -155,8 +156,8 @@ class TestSegmentGenerator(unittest.TestCase):
         self, segment: OssCiSegmentV1, name: str, start_at: float, end_at: float
     ) -> None:
         self.assertEqual(segment.name, name)
-        self.assertEqual(segment.start_at, start_at)
-        self.assertEqual(segment.end_at, end_at)
+        self.assertEqual(segment.start_at, str(int(start_at)))
+        self.assertEqual(segment.end_at, str(int(end_at)))
 
 
 def get_base_test_records() -> list[UtilizationRecord]:
