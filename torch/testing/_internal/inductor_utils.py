@@ -149,12 +149,16 @@ def maybe_skip_size_asserts(op):
         op.aten_name
         in (
             "fft_hfftn",
+            "fft_ihfftn",
             "fft_fft",
             "fft_ifft",
             "fft_ihfft",
             "fft_ihfft2",
             "fft_rfft",
             "fft_rfft2",
+            "fft_rfftn",
+            "linalg_eig",
+            "linalg_eigvals",
         )
         and "TORCHINDUCTOR_SIZE_ASSERTS" not in os.environ
     ):
