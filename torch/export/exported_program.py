@@ -525,9 +525,13 @@ def _decompose_and_get_gm_with_new_signature_constants(
                 ep.state_dict[name] = p
 
         for name, p in wrapped_params_buffers.items():
-            assert name in ep.state_dict
-            if name not in unwrapped_params_buffers:
-                ep.state_dict.pop(name)
+            # Buffers can be persistent/non-persistent
+            if name not in ep.state_dict:
+                assert not isinstance(p, torch.nn.Parameter)
+
+            if name in ep.state_dict:
+                if name not in unwrapped_params_buffers:
+                    ep.state_dict.pop(name)
 
         return gm, new_graph_signature, ep.state_dict
 
