@@ -19,13 +19,13 @@ def _flatten_subclass_to_dict(
     from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 
     res = Dct()
+    # Avoid a refcycle. Refcycle can be extra problematic when a dead cycle
+    # holds the last reference to a resurrectable Tensor, in which case
+    # resurrection won't actually prevent its weakrefs from being cleared!
+    # See https://github.com/pytorch/pytorch/issues/145253
+    res_p = weakref.proxy(res)
 
     def recurse(t: Any, path: tuple[str, ...] = ()) -> None:
-        # Avoid a refcycle. Refcycle can be extra problematic when a dead cycle
-        # holds the last reference to a resurrectable Tensor, in which case
-        # resurrection won't actually prevent its weakrefs from being cleared!
-        # See https://github.com/pytorch/pytorch/issues/145253
-        res_p = weakref.proxy(res)
         if is_traceable_wrapper_subclass(t):
             inner_names, _ = t.__tensor_flatten__()
             for name in inner_names:
