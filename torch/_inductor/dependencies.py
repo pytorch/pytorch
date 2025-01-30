@@ -2,6 +2,7 @@ import abc
 import dataclasses
 import itertools
 import logging
+from os import replace
 import re
 from collections.abc import Sequence
 from typing import Any, Callable, Iterable, List, Optional, Tuple, TypeVar, Union
@@ -69,6 +70,7 @@ class MemoryDep(Dep):
     var_names: tuple[sympy.Symbol, ...]
     size: tuple[sympy.Expr, ...]
     mode: Optional[str] = None
+    indirect_broadcast: bool = False
 
     def __repr__(self) -> str:
         maybe_mode = ""
@@ -285,6 +287,16 @@ class MemoryDep(Dep):
 
     def is_indirect(self) -> bool:
         return any(is_indirect(v.name) for v in self.index.free_symbols)  # type: ignore[attr-defined]
+
+    def set_indirect_broadcast_to_True(self) -> "MemoryDep":
+        return MemoryDep(
+            name=self.name,
+            index=self.index,
+            var_names=self.var_names,
+            size=self.size,
+            mode=self.mode,
+            indirect_broadcast=True,
+        )
 
 
 @dataclasses.dataclass(frozen=True)
@@ -639,6 +651,8 @@ def extract_loop_body_with_args(
     # Fast path to avoid tracing when we already have a LoopBody
     inner = _RecordLoadStoreInner(var_ranges=var_ranges, normalize=normalize)
     name_to_index = fn.indexing_from_args(args)
+    repl = {}
+
     if fn.indirect_vars:
         # mimic the `tmpX` naming tracing gives us
         repl = {v: make_symbol(SymT.TMP, i) for i, v in enumerate(fn.indirect_vars)}
@@ -664,6 +678,20 @@ def extract_loop_body_with_args(
             None, (entry.buffer_name, None, None, None), None, None, None  # type: ignore[arg-type]
         )
     # fn.memory_usage[MemoryUsageType.CHECK_BOUNDS] intentionally skipped
+    # detect indirect broadcast
+    repl_reverse = {v: k for k, v in repl.items()}  # type: ignore[assignment]
+    replacement_mem_dep = {}
+    for i, read in enumerate(inner._reads):
+        if isinstance(read, MemoryDep):
+            for free_symbol in read.index.free_symbols:
+                if free_symbol in repl_reverse:
+                    for node in fn.root_block.graph.nodes:
+                        if node.name == f"set_{repl_reverse[free_symbol].name}" and len(node.args) == 1 and node.args[0].name.startswith("load"):
+                            read_new = read.set_indirect_broadcast_to_True()
+                            replacement_mem_dep[read] = read_new
+    for read,read_new in replacement_mem_dep.items():
+        inner._reads.remove(read)
+        inner._reads.add(read_new)
     return inner
 
 
