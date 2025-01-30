@@ -226,9 +226,6 @@ class CUDADeviceOpOverrides(DeviceOpOverrides):
             #endif
         """
 
-    def abi_compatible_header(self) -> str:
-        return "#include <torch/csrc/inductor/aoti_runtime/utils_cuda.h>"
-
     def cpp_stream_type(self) -> str:
         return "cudaStream_t"
 

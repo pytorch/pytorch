@@ -5256,7 +5256,12 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::_allgather_base(
 // >>> pool = torch.cuda.MemPool(backend.mem_allocator)
 
 // Allocate function
-void* _ncclMemAlloc(size_t size, int device, void* stream) {
+static void* _ncclMemAlloc(size_t size, int device, void* stream) {
+#ifndef NCCL_HAS_MEM_ALLOC
+  TORCH_CHECK(
+      false, "NCCL mem allocator is not supported in this NCCL version");
+#endif // NCCL_HAS_MEM_ALLOC
+
   LOG(INFO) << "NCCL mem allocator: allocating " << size << " bytes";
   at::cuda::OptionalCUDAGuard gpuGuard(device);
   void* ptr = nullptr;
@@ -5265,7 +5270,12 @@ void* _ncclMemAlloc(size_t size, int device, void* stream) {
 }
 
 // Free function
-void _ncclMemFree(void* ptr, size_t size, int device, void* stream) {
+static void _ncclMemFree(void* ptr, size_t size, int device, void* stream) {
+#ifndef NCCL_HAS_MEM_ALLOC
+  TORCH_CHECK(
+      false, "NCCL mem allocator is not supported in this NCCL version");
+#endif // NCCL_HAS_MEM_ALLOC
+
   LOG(INFO) << "NCCL mem allocator: freeing " << size << " bytes";
   at::cuda::OptionalCUDAGuard gpuGuard(device);
   TORCH_CHECK(ncclMemFree(ptr) == ncclSuccess, "ncclMemFree failed");
