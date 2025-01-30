@@ -1,10 +1,11 @@
-from typing import Callable, Optional, Union, List, Iterable, Dict
 import unittest
 import warnings
+from typing import Callable, Dict, Iterable, List, Optional, Union
 
 import torch
 from torch.testing._internal.common_utils import MACOS_VERSION
 from torch.testing._internal.opinfo.core import DecorateInfo, OpInfo
+
 
 UNIMPLEMENTED = "unimplemented"
 TEST_OUTPUT_MATCH = "test_output_match"
@@ -30,10 +31,12 @@ def xfailUnimplemented(test_func: Callable) -> Callable:
             raise e
         except Exception as e:
             warnings.warn(
-                f"Test is marked as unimplemented on MPS, but instead of NotImplementedError or TypeError we received {type(e).__name__}:{e} "
+                "Test is marked as unimplemented on MPS,"
+                "but instead of NotImplementedError or TypeError we received {type(e).__name__}:{e} "
             )
             raise unittest.SkipTest(
-                f"[WARNING]: Test is marked as unimplemented on MPS, but instead of NotImplementedError or TypeError we received {type(e).__name__}:{e} "
+                "[WARNING]: Test is marked as unimplemented on MPS,"
+                "but instead of NotImplementedError or TypeError we received {type(e).__name__}:{e} "
             ) from e
         else:
             raise RuntimeError(
@@ -81,246 +84,297 @@ class MPSSkipInfo:
             self.tests = []
             self.skip = xfailUnimplemented
 
+
 """ Failures due to lack of op implementation on MPS backend """
 UNIMPLEMENTED_XFAILIST = {
-    'login': MPSSkipInfo(UNIMPLEMENTED),
-    'logspace': MPSSkipInfo(UNIMPLEMENTED),
-    'logspacetensor_overload': MPSSkipInfo(UNIMPLEMENTED),
-    'linalg.eig': MPSSkipInfo(UNIMPLEMENTED),
-    'linalg.eigvals': MPSSkipInfo(UNIMPLEMENTED),
-    'put': MPSSkipInfo(UNIMPLEMENTED),
-    'nn.functional.conv_transpose3d': MPSSkipInfo(UNIMPLEMENTED),
-    'round': [
+    "login": MPSSkipInfo(UNIMPLEMENTED),
+    "logspace": MPSSkipInfo(UNIMPLEMENTED),
+    "logspacetensor_overload": MPSSkipInfo(UNIMPLEMENTED),
+    "linalg.eig": MPSSkipInfo(UNIMPLEMENTED),
+    "linalg.eigvals": MPSSkipInfo(UNIMPLEMENTED),
+    "put": MPSSkipInfo(UNIMPLEMENTED),
+    "nn.functional.conv_transpose3d": MPSSkipInfo(UNIMPLEMENTED),
+    "round": [
         MPSSkipInfo(UNIMPLEMENTED, variant="decimals_neg_3"),
         MPSSkipInfo(UNIMPLEMENTED, variant="decimals_3"),
         MPSSkipInfo(UNIMPLEMENTED, variant="decimals_0"),
         # round not working properly for float16 and bfloat16
         MPSSkipInfo(UNIMPLEMENTED, dtypes=[torch.float16, torch.bfloat16]),
     ],
-    '__rsub__': MPSSkipInfo(UNIMPLEMENTED),
-    'cauchy_': MPSSkipInfo(UNIMPLEMENTED),
-    'cauchy': MPSSkipInfo(UNIMPLEMENTED),
-    'cholesky_inverse': MPSSkipInfo(UNIMPLEMENTED),
-    'cholesky_solve': MPSSkipInfo(UNIMPLEMENTED),
-    'cummax': MPSSkipInfo(UNIMPLEMENTED),
-    'cummin': MPSSkipInfo(UNIMPLEMENTED),
-    'erfc': MPSSkipInfo(UNIMPLEMENTED),
-    'frexp': MPSSkipInfo(UNIMPLEMENTED),
-    'gcd': MPSSkipInfo(UNIMPLEMENTED),
-    'geqrf': MPSSkipInfo(UNIMPLEMENTED),
-    'nn.functional.grid_sample': MPSSkipInfo(UNIMPLEMENTED),  # Unsupported Border padding mode
-    'heaviside': MPSSkipInfo(UNIMPLEMENTED),
-    'igamma': MPSSkipInfo(UNIMPLEMENTED),
-    'igammac': MPSSkipInfo(UNIMPLEMENTED),
-    'index_copy': MPSSkipInfo(UNIMPLEMENTED),
-    'index_reduce': MPSSkipInfo(UNIMPLEMENTED),
-    'kthvalue': MPSSkipInfo(UNIMPLEMENTED),
-    'lcm': MPSSkipInfo(UNIMPLEMENTED),
-    'linalg.cholesky_ex': MPSSkipInfo(UNIMPLEMENTED),
-    'linalg.cond': MPSSkipInfo(UNIMPLEMENTED),
-    'linalg.det': MPSSkipInfo(UNIMPLEMENTED),
-    'linalg.eigh': MPSSkipInfo(UNIMPLEMENTED),
-    'linalg.eigvalsh': MPSSkipInfo(UNIMPLEMENTED),
-    'linalg.householder_product': MPSSkipInfo(UNIMPLEMENTED),
-    'linalg.ldl_factor': MPSSkipInfo(UNIMPLEMENTED),
-    'linalg.ldl_factor_ex': MPSSkipInfo(UNIMPLEMENTED),
-    'linalg.ldl_solve': MPSSkipInfo(UNIMPLEMENTED),
-    'linalg.lstsq': MPSSkipInfo(UNIMPLEMENTED),
-    'linalg.lstsqgrad_oriented': MPSSkipInfo(UNIMPLEMENTED),
-    'linalg.lu': MPSSkipInfo(UNIMPLEMENTED),
-    'linalg.lu_factor_ex': MPSSkipInfo(UNIMPLEMENTED),
-    'linalg.lu_solve': MPSSkipInfo(UNIMPLEMENTED),
-    'linalg.matrix_norm': MPSSkipInfo(UNIMPLEMENTED, dtypes=[torch.float32]),
-    'linalg.norm': MPSSkipInfo(UNIMPLEMENTED, dtypes=[torch.float32]),
-    'linalg.normsubgradients_at_zero': MPSSkipInfo(UNIMPLEMENTED, dtypes=[torch.float32]),
-    'linalg.qr': MPSSkipInfo(UNIMPLEMENTED),
-    'linalg.slogdet': MPSSkipInfo(UNIMPLEMENTED),
-    'linalg.solve': MPSSkipInfo(UNIMPLEMENTED),
-    'linalg.solve_ex': MPSSkipInfo(UNIMPLEMENTED),
-    'linalg.svdvals': MPSSkipInfo(UNIMPLEMENTED),
-    'linalg.tensorsolve': MPSSkipInfo(UNIMPLEMENTED),
-    'linalg.vecdot': MPSSkipInfo(UNIMPLEMENTED),
-    'logcumsumexp': MPSSkipInfo(UNIMPLEMENTED),
-    'logdet': MPSSkipInfo(UNIMPLEMENTED),
-    'lu': MPSSkipInfo(UNIMPLEMENTED),
-    'lu_solve': MPSSkipInfo(UNIMPLEMENTED),
-    'lu_unpack': MPSSkipInfo(UNIMPLEMENTED),
-    'masked.median': MPSSkipInfo(UNIMPLEMENTED),
-    'matrix_exp': MPSSkipInfo(UNIMPLEMENTED),
-    'mode': MPSSkipInfo(UNIMPLEMENTED),
-    'nanmedian': MPSSkipInfo(UNIMPLEMENTED),
-    'native_dropout_backward': MPSSkipInfo(UNIMPLEMENTED),
-    'norm': MPSSkipInfo(UNIMPLEMENTED, variant="nuc"),
-    'nn.functional.fractional_max_pool2d': MPSSkipInfo(UNIMPLEMENTED),
-    'nn.functional.fractional_max_pool3d': MPSSkipInfo(UNIMPLEMENTED),
-    'nn.functional.adaptive_avg_pool3d': MPSSkipInfo(UNIMPLEMENTED),
-    'nn.functional.adaptive_max_pool3d': MPSSkipInfo(UNIMPLEMENTED),
-    'nn.functional.interpolate': [
+    "__rsub__": MPSSkipInfo(UNIMPLEMENTED),
+    "cauchy_": MPSSkipInfo(UNIMPLEMENTED),
+    "cauchy": MPSSkipInfo(UNIMPLEMENTED),
+    "cholesky_inverse": MPSSkipInfo(UNIMPLEMENTED),
+    "cholesky_solve": MPSSkipInfo(UNIMPLEMENTED),
+    "cummax": MPSSkipInfo(UNIMPLEMENTED),
+    "cummin": MPSSkipInfo(UNIMPLEMENTED),
+    "erfc": MPSSkipInfo(UNIMPLEMENTED),
+    "frexp": MPSSkipInfo(UNIMPLEMENTED),
+    "gcd": MPSSkipInfo(UNIMPLEMENTED),
+    "geqrf": MPSSkipInfo(UNIMPLEMENTED),
+    "nn.functional.grid_sample": MPSSkipInfo(
+        UNIMPLEMENTED
+    ),  # Unsupported Border padding mode
+    "heaviside": MPSSkipInfo(UNIMPLEMENTED),
+    "igamma": MPSSkipInfo(UNIMPLEMENTED),
+    "igammac": MPSSkipInfo(UNIMPLEMENTED),
+    "index_copy": MPSSkipInfo(UNIMPLEMENTED),
+    "index_reduce": MPSSkipInfo(UNIMPLEMENTED),
+    "kthvalue": MPSSkipInfo(UNIMPLEMENTED),
+    "lcm": MPSSkipInfo(UNIMPLEMENTED),
+    "linalg.cholesky_ex": MPSSkipInfo(UNIMPLEMENTED),
+    "linalg.cond": MPSSkipInfo(UNIMPLEMENTED),
+    "linalg.det": MPSSkipInfo(UNIMPLEMENTED),
+    "linalg.eigh": MPSSkipInfo(UNIMPLEMENTED),
+    "linalg.eigvalsh": MPSSkipInfo(UNIMPLEMENTED),
+    "linalg.householder_product": MPSSkipInfo(UNIMPLEMENTED),
+    "linalg.ldl_factor": MPSSkipInfo(UNIMPLEMENTED),
+    "linalg.ldl_factor_ex": MPSSkipInfo(UNIMPLEMENTED),
+    "linalg.ldl_solve": MPSSkipInfo(UNIMPLEMENTED),
+    "linalg.lstsq": MPSSkipInfo(UNIMPLEMENTED),
+    "linalg.lstsqgrad_oriented": MPSSkipInfo(UNIMPLEMENTED),
+    "linalg.lu": MPSSkipInfo(UNIMPLEMENTED),
+    "linalg.lu_factor_ex": MPSSkipInfo(UNIMPLEMENTED),
+    "linalg.lu_solve": MPSSkipInfo(UNIMPLEMENTED),
+    "linalg.matrix_norm": MPSSkipInfo(UNIMPLEMENTED, dtypes=[torch.float32]),
+    "linalg.norm": MPSSkipInfo(UNIMPLEMENTED, dtypes=[torch.float32]),
+    "linalg.normsubgradients_at_zero": MPSSkipInfo(
+        UNIMPLEMENTED, dtypes=[torch.float32]
+    ),
+    "linalg.qr": MPSSkipInfo(UNIMPLEMENTED),
+    "linalg.slogdet": MPSSkipInfo(UNIMPLEMENTED),
+    "linalg.solve": MPSSkipInfo(UNIMPLEMENTED),
+    "linalg.solve_ex": MPSSkipInfo(UNIMPLEMENTED),
+    "linalg.svdvals": MPSSkipInfo(UNIMPLEMENTED),
+    "linalg.tensorsolve": MPSSkipInfo(UNIMPLEMENTED),
+    "linalg.vecdot": MPSSkipInfo(UNIMPLEMENTED),
+    "logcumsumexp": MPSSkipInfo(UNIMPLEMENTED),
+    "logdet": MPSSkipInfo(UNIMPLEMENTED),
+    "lu": MPSSkipInfo(UNIMPLEMENTED),
+    "lu_solve": MPSSkipInfo(UNIMPLEMENTED),
+    "lu_unpack": MPSSkipInfo(UNIMPLEMENTED),
+    "masked.median": MPSSkipInfo(UNIMPLEMENTED),
+    "matrix_exp": MPSSkipInfo(UNIMPLEMENTED),
+    "mode": MPSSkipInfo(UNIMPLEMENTED),
+    "nanmedian": MPSSkipInfo(UNIMPLEMENTED),
+    "native_dropout_backward": MPSSkipInfo(UNIMPLEMENTED),
+    "norm": MPSSkipInfo(UNIMPLEMENTED, variant="nuc"),
+    "nn.functional.fractional_max_pool2d": MPSSkipInfo(UNIMPLEMENTED),
+    "nn.functional.fractional_max_pool3d": MPSSkipInfo(UNIMPLEMENTED),
+    "nn.functional.adaptive_avg_pool3d": MPSSkipInfo(UNIMPLEMENTED),
+    "nn.functional.adaptive_max_pool3d": MPSSkipInfo(UNIMPLEMENTED),
+    "nn.functional.interpolate": [
         MPSSkipInfo(UNIMPLEMENTED, variant="area"),
         MPSSkipInfo(UNIMPLEMENTED, dtypes=[torch.uint8], variant="bicubic"),
         MPSSkipInfo(UNIMPLEMENTED, variant="trilinear"),
     ],
-    'nn.functional.max_unpool1dgrad': MPSSkipInfo(UNIMPLEMENTED),
-    'nn.functional.max_unpool2dgrad': MPSSkipInfo(UNIMPLEMENTED),
-    'nn.functional.max_unpool3dgrad': MPSSkipInfo(UNIMPLEMENTED),
-    'nn.functional.avg_pool3d': MPSSkipInfo(UNIMPLEMENTED),
-    'nn.functional.ctc_loss': MPSSkipInfo(UNIMPLEMENTED),
-    'nn.functional.embedding_bag': MPSSkipInfo(UNIMPLEMENTED),
-    'nn.functional.hardshrink': MPSSkipInfo(UNIMPLEMENTED),
-    'nn.functional.max_pool3d': MPSSkipInfo(UNIMPLEMENTED),
-    'nn.functional.max_unpool1d': MPSSkipInfo(UNIMPLEMENTED),
-    'nn.functional.max_unpool2d': MPSSkipInfo(UNIMPLEMENTED),
-    'nn.functional.max_unpool3d': MPSSkipInfo(UNIMPLEMENTED),
-    'nn.functional.multi_margin_loss': MPSSkipInfo(UNIMPLEMENTED),
-    'nn.functional.multilabel_margin_loss': MPSSkipInfo(UNIMPLEMENTED),
-    'nn.functional.pdist': MPSSkipInfo(UNIMPLEMENTED),
-    'nn.functional.rrelu': MPSSkipInfo(UNIMPLEMENTED),
-    'nn.functional.norm': MPSSkipInfo(UNIMPLEMENTED),
-    'ormqr': MPSSkipInfo(UNIMPLEMENTED),
-    'pca_lowrank': MPSSkipInfo(UNIMPLEMENTED),
-    'qr': MPSSkipInfo(UNIMPLEMENTED),
-    'rsub': MPSSkipInfo(UNIMPLEMENTED),
-    'scatter_reduce': [
+    "nn.functional.max_unpool1dgrad": MPSSkipInfo(UNIMPLEMENTED),
+    "nn.functional.max_unpool2dgrad": MPSSkipInfo(UNIMPLEMENTED),
+    "nn.functional.max_unpool3dgrad": MPSSkipInfo(UNIMPLEMENTED),
+    "nn.functional.avg_pool3d": MPSSkipInfo(UNIMPLEMENTED),
+    "nn.functional.ctc_loss": MPSSkipInfo(UNIMPLEMENTED),
+    "nn.functional.embedding_bag": MPSSkipInfo(UNIMPLEMENTED),
+    "nn.functional.hardshrink": MPSSkipInfo(UNIMPLEMENTED),
+    "nn.functional.max_pool3d": MPSSkipInfo(UNIMPLEMENTED),
+    "nn.functional.max_unpool1d": MPSSkipInfo(UNIMPLEMENTED),
+    "nn.functional.max_unpool2d": MPSSkipInfo(UNIMPLEMENTED),
+    "nn.functional.max_unpool3d": MPSSkipInfo(UNIMPLEMENTED),
+    "nn.functional.multi_margin_loss": MPSSkipInfo(UNIMPLEMENTED),
+    "nn.functional.multilabel_margin_loss": MPSSkipInfo(UNIMPLEMENTED),
+    "nn.functional.pdist": MPSSkipInfo(UNIMPLEMENTED),
+    "nn.functional.rrelu": MPSSkipInfo(UNIMPLEMENTED),
+    "nn.functional.norm": MPSSkipInfo(UNIMPLEMENTED),
+    "ormqr": MPSSkipInfo(UNIMPLEMENTED),
+    "pca_lowrank": MPSSkipInfo(UNIMPLEMENTED),
+    "qr": MPSSkipInfo(UNIMPLEMENTED),
+    "rsub": MPSSkipInfo(UNIMPLEMENTED),
+    "scatter_reduce": [
         MPSSkipInfo(
             UNIMPLEMENTED,
             dtypes=[torch.int64],
             lower=15.0,
-            variant='amax',
+            variant="amax",
         ),
         MPSSkipInfo(
             UNIMPLEMENTED,
             dtypes=[torch.int32, torch.int64],
             upper=15.0,
-            variant='amax',
+            variant="amax",
         ),
         MPSSkipInfo(
             UNIMPLEMENTED,
             dtypes=[torch.int64],
             lower=15.0,
-            variant='amin',
+            variant="amin",
         ),
         MPSSkipInfo(
             UNIMPLEMENTED,
             dtypes=[torch.int32, torch.int64],
             upper=15.0,
-            variant='amin',
+            variant="amin",
         ),
     ],
-    'segment_reduce': MPSSkipInfo(UNIMPLEMENTED),
-    '_segment.reduce': MPSSkipInfo(UNIMPLEMENTED),
-    'segment.reduce': MPSSkipInfo(UNIMPLEMENTED),
-    'segment_reduce_offsets': MPSSkipInfo(UNIMPLEMENTED),
-    '_segment_reduce': MPSSkipInfo(UNIMPLEMENTED),
-    '_segment_reducelengths': MPSSkipInfo(UNIMPLEMENTED),
-    '_segment_reduceoffsets': MPSSkipInfo(UNIMPLEMENTED),
-    'sinc': MPSSkipInfo(UNIMPLEMENTED),
-    'sparse.mm': MPSSkipInfo(UNIMPLEMENTED),
-    'sparse.mmreduce': MPSSkipInfo(UNIMPLEMENTED),
-    'special.airy_ai': MPSSkipInfo(UNIMPLEMENTED),
-    'special.bessel_j0': MPSSkipInfo(UNIMPLEMENTED),
-    'special.bessel_j1': MPSSkipInfo(UNIMPLEMENTED),
-    'special.bessel_y0': MPSSkipInfo(UNIMPLEMENTED),
-    'special.bessel_y1': MPSSkipInfo(UNIMPLEMENTED),
-    'special.chebyshev_polynomial_t': MPSSkipInfo(UNIMPLEMENTED),
-    'special.chebyshev_polynomial_u': MPSSkipInfo(UNIMPLEMENTED),
-    'special.entr': MPSSkipInfo(UNIMPLEMENTED),
-    'special.erfcx': MPSSkipInfo(UNIMPLEMENTED),
-    'special.hermite_polynomial_h': MPSSkipInfo(UNIMPLEMENTED),
-    'special.hermite_polynomial_he': MPSSkipInfo(UNIMPLEMENTED),
-    'special.i0e': MPSSkipInfo(UNIMPLEMENTED),
-    'special.i1e': MPSSkipInfo(UNIMPLEMENTED),
-    'special.laguerre_polynomial_l': MPSSkipInfo(UNIMPLEMENTED),
-    'special.log_ndtr': MPSSkipInfo(UNIMPLEMENTED),
-    'special.modified_bessel_i0': MPSSkipInfo(UNIMPLEMENTED),
-    'special.modified_bessel_i1': MPSSkipInfo(UNIMPLEMENTED),
-    'special.modified_bessel_k0': MPSSkipInfo(UNIMPLEMENTED),
-    'special.modified_bessel_k1': MPSSkipInfo(UNIMPLEMENTED),
-    'special.ndtri': MPSSkipInfo(UNIMPLEMENTED),
-    'special.scaled_modified_bessel_k0': MPSSkipInfo(UNIMPLEMENTED),
-    'special.scaled_modified_bessel_k1': MPSSkipInfo(UNIMPLEMENTED),
-    'special.spherical_bessel_j0': MPSSkipInfo(UNIMPLEMENTED),
-    'special.xlog1py': MPSSkipInfo(UNIMPLEMENTED),
-    'special.zeta': MPSSkipInfo(UNIMPLEMENTED),
-    'svd_lowrank': MPSSkipInfo(UNIMPLEMENTED),
-    'symeig': MPSSkipInfo(UNIMPLEMENTED),
-    'take': MPSSkipInfo(UNIMPLEMENTED),
-    'to': MPSSkipInfo(UNIMPLEMENTED),
-    'to_sparse': MPSSkipInfo(UNIMPLEMENTED),
-    'unique': MPSSkipInfo(UNIMPLEMENTED),
-    'vdot': MPSSkipInfo(UNIMPLEMENTED),
-    'segment_reduce_': MPSSkipInfo(UNIMPLEMENTED),
-    '_upsample_bilinear2d_aa': MPSSkipInfo(UNIMPLEMENTED),
-    'geometric' : MPSSkipInfo(UNIMPLEMENTED),
-    'geometric_': MPSSkipInfo(UNIMPLEMENTED),
-    'log_normal_': MPSSkipInfo(UNIMPLEMENTED),
-    'log_normal': MPSSkipInfo(UNIMPLEMENTED),
-    'cdouble': MPSSkipInfo(UNIMPLEMENTED),
-    'double': MPSSkipInfo(UNIMPLEMENTED),
-    'nn.functional.softmin': MPSSkipInfo(UNIMPLEMENTED, variant="with_dtype"),
-    'log_softmax': MPSSkipInfo(UNIMPLEMENTED, variant="with_dtype"),
-    'softmax': MPSSkipInfo(UNIMPLEMENTED, variant="with_dtype"),
-    'float_power': MPSSkipInfo(UNIMPLEMENTED),
-    'full_like': MPSSkipInfo(UNIMPLEMENTED),
-    'linalg.pinv': MPSSkipInfo(UNIMPLEMENTED, variant="hermitian"),
-    'nonzero_static': MPSSkipInfo(UNIMPLEMENTED),
-
+    "segment_reduce": MPSSkipInfo(UNIMPLEMENTED),
+    "_segment.reduce": MPSSkipInfo(UNIMPLEMENTED),
+    "segment.reduce": MPSSkipInfo(UNIMPLEMENTED),
+    "segment_reduce_offsets": MPSSkipInfo(UNIMPLEMENTED),
+    "_segment_reduce": MPSSkipInfo(UNIMPLEMENTED),
+    "_segment_reducelengths": MPSSkipInfo(UNIMPLEMENTED),
+    "_segment_reduceoffsets": MPSSkipInfo(UNIMPLEMENTED),
+    "sinc": MPSSkipInfo(UNIMPLEMENTED),
+    "sparse.mm": MPSSkipInfo(UNIMPLEMENTED),
+    "sparse.mmreduce": MPSSkipInfo(UNIMPLEMENTED),
+    "special.airy_ai": MPSSkipInfo(UNIMPLEMENTED),
+    "special.bessel_j0": MPSSkipInfo(UNIMPLEMENTED),
+    "special.bessel_j1": MPSSkipInfo(UNIMPLEMENTED),
+    "special.bessel_y0": MPSSkipInfo(UNIMPLEMENTED),
+    "special.bessel_y1": MPSSkipInfo(UNIMPLEMENTED),
+    "special.chebyshev_polynomial_t": MPSSkipInfo(UNIMPLEMENTED),
+    "special.chebyshev_polynomial_u": MPSSkipInfo(UNIMPLEMENTED),
+    "special.entr": MPSSkipInfo(UNIMPLEMENTED),
+    "special.erfcx": MPSSkipInfo(UNIMPLEMENTED),
+    "special.hermite_polynomial_h": MPSSkipInfo(UNIMPLEMENTED),
+    "special.hermite_polynomial_he": MPSSkipInfo(UNIMPLEMENTED),
+    "special.i0e": MPSSkipInfo(UNIMPLEMENTED),
+    "special.i1e": MPSSkipInfo(UNIMPLEMENTED),
+    "special.laguerre_polynomial_l": MPSSkipInfo(UNIMPLEMENTED),
+    "special.log_ndtr": MPSSkipInfo(UNIMPLEMENTED),
+    "special.modified_bessel_i0": MPSSkipInfo(UNIMPLEMENTED),
+    "special.modified_bessel_i1": MPSSkipInfo(UNIMPLEMENTED),
+    "special.modified_bessel_k0": MPSSkipInfo(UNIMPLEMENTED),
+    "special.modified_bessel_k1": MPSSkipInfo(UNIMPLEMENTED),
+    "special.ndtri": MPSSkipInfo(UNIMPLEMENTED),
+    "special.scaled_modified_bessel_k0": MPSSkipInfo(UNIMPLEMENTED),
+    "special.scaled_modified_bessel_k1": MPSSkipInfo(UNIMPLEMENTED),
+    "special.spherical_bessel_j0": MPSSkipInfo(UNIMPLEMENTED),
+    "special.xlog1py": MPSSkipInfo(UNIMPLEMENTED),
+    "special.zeta": MPSSkipInfo(UNIMPLEMENTED),
+    "svd_lowrank": MPSSkipInfo(UNIMPLEMENTED),
+    "symeig": MPSSkipInfo(UNIMPLEMENTED),
+    "take": MPSSkipInfo(UNIMPLEMENTED),
+    "to": MPSSkipInfo(UNIMPLEMENTED),
+    "to_sparse": MPSSkipInfo(UNIMPLEMENTED),
+    "unique": MPSSkipInfo(UNIMPLEMENTED),
+    "vdot": MPSSkipInfo(UNIMPLEMENTED),
+    "segment_reduce_": MPSSkipInfo(UNIMPLEMENTED),
+    "_upsample_bilinear2d_aa": MPSSkipInfo(UNIMPLEMENTED),
+    "geometric": MPSSkipInfo(UNIMPLEMENTED),
+    "geometric_": MPSSkipInfo(UNIMPLEMENTED),
+    "log_normal_": MPSSkipInfo(UNIMPLEMENTED),
+    "log_normal": MPSSkipInfo(UNIMPLEMENTED),
+    "cdouble": MPSSkipInfo(UNIMPLEMENTED),
+    "double": MPSSkipInfo(UNIMPLEMENTED),
+    "nn.functional.softmin": MPSSkipInfo(UNIMPLEMENTED, variant="with_dtype"),
+    "log_softmax": MPSSkipInfo(UNIMPLEMENTED, variant="with_dtype"),
+    "softmax": MPSSkipInfo(UNIMPLEMENTED, variant="with_dtype"),
+    "float_power": MPSSkipInfo(UNIMPLEMENTED),
+    "full_like": MPSSkipInfo(UNIMPLEMENTED),
+    "linalg.pinv": MPSSkipInfo(UNIMPLEMENTED, variant="hermitian"),
+    "nonzero_static": MPSSkipInfo(UNIMPLEMENTED),
     # MPS: input sizes must be divisible by output sizes
-    'nn.functional.adaptive_avg_pool1d': MPSSkipInfo(UNIMPLEMENTED),
-    'nn.functional.adaptive_avg_pool2d': MPSSkipInfo(UNIMPLEMENTED),
-
+    "nn.functional.adaptive_avg_pool1d": MPSSkipInfo(UNIMPLEMENTED),
+    "nn.functional.adaptive_avg_pool2d": MPSSkipInfo(UNIMPLEMENTED),
     # Unsupported dtypes
     # bmm is not supported for integral types
-    'nn.functional.bilinear': MPSSkipInfo(
+    "nn.functional.bilinear": MPSSkipInfo(
         UNIMPLEMENTED,
         dtypes=[torch.int16, torch.int32, torch.int64, torch.uint8, torch.int8],
     ),
-    'ones_like': MPSSkipInfo(UNIMPLEMENTED),
-    'zeros_like': MPSSkipInfo(UNIMPLEMENTED),
-
+    "ones_like": MPSSkipInfo(UNIMPLEMENTED),
+    "zeros_like": MPSSkipInfo(UNIMPLEMENTED),
     # Convolution for integral types is not supported on MPS
-    'nn.functional.conv1d': MPSSkipInfo(UNIMPLEMENTED, dtypes=[torch.int64]),
-    'nn.functional.conv2d': MPSSkipInfo(UNIMPLEMENTED, dtypes=[torch.int64]),
-    'nn.functional.conv3d': MPSSkipInfo(UNIMPLEMENTED, dtypes=[torch.int64]),
-    'nn.functional.conv_transpose1d': MPSSkipInfo(UNIMPLEMENTED, dtypes=[torch.int64]),
-    'nn.functional.conv_transpose2d': MPSSkipInfo(UNIMPLEMENTED, dtypes=[torch.int64, torch.bfloat16]),
-
+    "nn.functional.conv1d": MPSSkipInfo(UNIMPLEMENTED, dtypes=[torch.int64]),
+    "nn.functional.conv2d": MPSSkipInfo(UNIMPLEMENTED, dtypes=[torch.int64]),
+    "nn.functional.conv3d": MPSSkipInfo(UNIMPLEMENTED, dtypes=[torch.int64]),
+    "nn.functional.conv_transpose1d": MPSSkipInfo(UNIMPLEMENTED, dtypes=[torch.int64]),
+    "nn.functional.conv_transpose2d": MPSSkipInfo(
+        UNIMPLEMENTED, dtypes=[torch.int64, torch.bfloat16]
+    ),
     # Unsupported dtypes
-    'dot': MPSSkipInfo(UNIMPLEMENTED, dtypes=[torch.int64]),
-    'histc': MPSSkipInfo(UNIMPLEMENTED, dtypes=[torch.float16, torch.bfloat16]),
-    'index_add': MPSSkipInfo(UNIMPLEMENTED, dtypes=[torch.int64]),
-    'log1p': MPSSkipInfo(UNIMPLEMENTED, dtypes=[torch.int64]),
-    'sigmoid': MPSSkipInfo(UNIMPLEMENTED, dtypes=[torch.int64]),
-    'atan2': MPSSkipInfo(UNIMPLEMENTED, dtypes=[torch.int64]),
-    'angle': MPSSkipInfo(UNIMPLEMENTED, dtypes=[torch.int64]),
-
+    "dot": MPSSkipInfo(UNIMPLEMENTED, dtypes=[torch.int64]),
+    "histc": MPSSkipInfo(UNIMPLEMENTED, dtypes=[torch.float16, torch.bfloat16]),
+    "index_add": MPSSkipInfo(UNIMPLEMENTED, dtypes=[torch.int64]),
+    "log1p": MPSSkipInfo(UNIMPLEMENTED, dtypes=[torch.int64]),
+    "sigmoid": MPSSkipInfo(UNIMPLEMENTED, dtypes=[torch.int64]),
+    "atan2": MPSSkipInfo(UNIMPLEMENTED, dtypes=[torch.int64]),
+    "angle": MPSSkipInfo(UNIMPLEMENTED, dtypes=[torch.int64]),
     # GEMM on MPS is not supported for integral types
-    'nn.functional.linear': MPSSkipInfo(UNIMPLEMENTED, dtypes=[torch.int16, torch.int32, torch.int64, torch.uint8, torch.int8]),
-    '__rmatmul__': MPSSkipInfo(UNIMPLEMENTED, dtypes=[torch.int16, torch.int32, torch.int64, torch.uint8, torch.int8]),
-    'addmmdecomposed': MPSSkipInfo(UNIMPLEMENTED, dtypes=[torch.int16, torch.int32, torch.int64, torch.uint8, torch.int8]),
-    'addbmm': MPSSkipInfo(UNIMPLEMENTED, dtypes=[torch.int16, torch.int32, torch.int64, torch.uint8, torch.int8]),
-    'addmm': MPSSkipInfo(UNIMPLEMENTED, dtypes=[torch.int16, torch.int32, torch.int64, torch.uint8, torch.int8]),
-    'addmv': MPSSkipInfo(UNIMPLEMENTED, dtypes=[torch.int16, torch.int32, torch.int64, torch.uint8, torch.int8]),
-    'baddbmm': MPSSkipInfo(UNIMPLEMENTED, dtypes=[torch.int16, torch.int32, torch.int64, torch.uint8, torch.int8]),
-    'mm': MPSSkipInfo(UNIMPLEMENTED, dtypes=[torch.int16, torch.int32, torch.int64, torch.uint8, torch.int8]),
-    'bmm': MPSSkipInfo(UNIMPLEMENTED, dtypes=[torch.int16, torch.int32, torch.int64, torch.uint8, torch.int8]),
-    'einsum': MPSSkipInfo(UNIMPLEMENTED, dtypes=[torch.int16, torch.int32, torch.int64, torch.uint8, torch.int8]),
-    'inner': MPSSkipInfo(UNIMPLEMENTED, dtypes=[torch.int16, torch.int32, torch.int64, torch.uint8, torch.int8]),
-    'linalg.multi_dot': MPSSkipInfo(UNIMPLEMENTED, dtypes=[torch.int16, torch.int32, torch.int64, torch.uint8, torch.int8]),
-    'matmul': MPSSkipInfo(UNIMPLEMENTED, dtypes=[torch.int16, torch.int32, torch.int64, torch.uint8, torch.int8]),
-    'mat': MPSSkipInfo(UNIMPLEMENTED, dtypes=[torch.int16, torch.int32, torch.int64, torch.uint8, torch.int8]),
-    'mv': MPSSkipInfo(UNIMPLEMENTED, dtypes=[torch.int16, torch.int32, torch.int64, torch.uint8, torch.int8]),
-    'tensordot': MPSSkipInfo(UNIMPLEMENTED, dtypes=[torch.int16, torch.int32, torch.int64, torch.uint8, torch.int8]),
-    'unravel_index': MPSSkipInfo(UNIMPLEMENTED, dtypes=[torch.int32, torch.int64]),
-
+    "nn.functional.linear": MPSSkipInfo(
+        UNIMPLEMENTED,
+        dtypes=[torch.int16, torch.int32, torch.int64, torch.uint8, torch.int8],
+    ),
+    "__rmatmul__": MPSSkipInfo(
+        UNIMPLEMENTED,
+        dtypes=[torch.int16, torch.int32, torch.int64, torch.uint8, torch.int8],
+    ),
+    "addmmdecomposed": MPSSkipInfo(
+        UNIMPLEMENTED,
+        dtypes=[torch.int16, torch.int32, torch.int64, torch.uint8, torch.int8],
+    ),
+    "addbmm": MPSSkipInfo(
+        UNIMPLEMENTED,
+        dtypes=[torch.int16, torch.int32, torch.int64, torch.uint8, torch.int8],
+    ),
+    "addmm": MPSSkipInfo(
+        UNIMPLEMENTED,
+        dtypes=[torch.int16, torch.int32, torch.int64, torch.uint8, torch.int8],
+    ),
+    "addmv": MPSSkipInfo(
+        UNIMPLEMENTED,
+        dtypes=[torch.int16, torch.int32, torch.int64, torch.uint8, torch.int8],
+    ),
+    "baddbmm": MPSSkipInfo(
+        UNIMPLEMENTED,
+        dtypes=[torch.int16, torch.int32, torch.int64, torch.uint8, torch.int8],
+    ),
+    "mm": MPSSkipInfo(
+        UNIMPLEMENTED,
+        dtypes=[torch.int16, torch.int32, torch.int64, torch.uint8, torch.int8],
+    ),
+    "bmm": MPSSkipInfo(
+        UNIMPLEMENTED,
+        dtypes=[torch.int16, torch.int32, torch.int64, torch.uint8, torch.int8],
+    ),
+    "einsum": MPSSkipInfo(
+        UNIMPLEMENTED,
+        dtypes=[torch.int16, torch.int32, torch.int64, torch.uint8, torch.int8],
+    ),
+    "inner": MPSSkipInfo(
+        UNIMPLEMENTED,
+        dtypes=[torch.int16, torch.int32, torch.int64, torch.uint8, torch.int8],
+    ),
+    "linalg.multi_dot": MPSSkipInfo(
+        UNIMPLEMENTED,
+        dtypes=[torch.int16, torch.int32, torch.int64, torch.uint8, torch.int8],
+    ),
+    "matmul": MPSSkipInfo(
+        UNIMPLEMENTED,
+        dtypes=[torch.int16, torch.int32, torch.int64, torch.uint8, torch.int8],
+    ),
+    "mat": MPSSkipInfo(
+        UNIMPLEMENTED,
+        dtypes=[torch.int16, torch.int32, torch.int64, torch.uint8, torch.int8],
+    ),
+    "mv": MPSSkipInfo(
+        UNIMPLEMENTED,
+        dtypes=[torch.int16, torch.int32, torch.int64, torch.uint8, torch.int8],
+    ),
+    "tensordot": MPSSkipInfo(
+        UNIMPLEMENTED,
+        dtypes=[torch.int16, torch.int32, torch.int64, torch.uint8, torch.int8],
+    ),
+    "unravel_index": MPSSkipInfo(UNIMPLEMENTED, dtypes=[torch.int32, torch.int64]),
     # returned output on CPU is float64
-    'bincount': MPSSkipInfo(UNIMPLEMENTED, dtypes=[torch.int16, torch.int32, torch.int64, torch.uint8, torch.int8]),
-
+    "bincount": MPSSkipInfo(
+        UNIMPLEMENTED,
+        dtypes=[torch.int16, torch.int32, torch.int64, torch.uint8, torch.int8],
+    ),
     # trunc_tensor not working properly for float16 and bfloat16
-    'div': [
+    "div": [
         MPSSkipInfo(
             UNIMPLEMENTED,
             dtypes=[torch.float16, torch.bfloat16],
-            variant='trunc_rounding',
+            variant="trunc_rounding",
         ),
         MPSSkipInfo(
             UNIMPLEMENTED,
@@ -328,74 +382,80 @@ UNIMPLEMENTED_XFAILIST = {
             variant="floor_rounding",
         ),
     ],
-    'fmod': MPSSkipInfo(UNIMPLEMENTED, dtypes=[torch.float16]),
-
+    "fmod": MPSSkipInfo(UNIMPLEMENTED, dtypes=[torch.float16]),
     # bfloat16 have weird issues with rounding
-    'floor_divide': MPSSkipInfo(UNIMPLEMENTED, dtypes=[torch.bfloat16]),
-    'remainder': MPSSkipInfo(UNIMPLEMENTED, dtypes=[torch.bfloat16]),
-
+    "floor_divide": MPSSkipInfo(UNIMPLEMENTED, dtypes=[torch.bfloat16]),
+    "remainder": MPSSkipInfo(UNIMPLEMENTED, dtypes=[torch.bfloat16]),
     # atomic operations not supported
-    '_unsafe_masked_index_put_accumulate': MPSSkipInfo(
-        UNIMPLEMENTED, 
-        dtypes=[torch.bool, torch.int8, torch.uint8, torch.float16, torch.int16, torch.int64, torch.bfloat16]
+    "_unsafe_masked_index_put_accumulate": MPSSkipInfo(
+        UNIMPLEMENTED,
+        dtypes=[
+            torch.bool,
+            torch.int8,
+            torch.uint8,
+            torch.float16,
+            torch.int16,
+            torch.int64,
+            torch.bfloat16,
+        ],
     ),
 }
 
 COMPLEX_DTYPES = [torch.complex32, torch.complex64]
 """Ops which do not have support for complex dtypes and are expected to fail"""
 COMPLEX_XFAILLIST = {
-    '__rdiv__': MPSSkipInfo(
+    "__rdiv__": MPSSkipInfo(
         dtypes=COMPLEX_DTYPES,
         upper=15.0,
     ),
-    '__rmatmul__': MPSSkipInfo(
+    "__rmatmul__": MPSSkipInfo(
         dtypes=COMPLEX_DTYPES,
         upper=15.0,
     ),
-    '__rpow__': MPSSkipInfo(dtypes=COMPLEX_DTYPES),
-    '_chunk_cat': MPSSkipInfo(
+    "__rpow__": MPSSkipInfo(dtypes=COMPLEX_DTYPES),
+    "_chunk_cat": MPSSkipInfo(
         dtypes=COMPLEX_DTYPES,
         upper=15.0,
     ),
-    '_unsafe_masked_index': MPSSkipInfo(
+    "_unsafe_masked_index": MPSSkipInfo(
         dtypes=COMPLEX_DTYPES,
         upper=15.0,
     ),
-    '_unsafe_masked_index_put_accumulate':MPSSkipInfo(dtypes=COMPLEX_DTYPES),
-    'acos': MPSSkipInfo(
+    "_unsafe_masked_index_put_accumulate": MPSSkipInfo(dtypes=COMPLEX_DTYPES),
+    "acos": MPSSkipInfo(
         dtypes=COMPLEX_DTYPES,
         upper=15.0,
     ),
-    'acosh': MPSSkipInfo(
+    "acosh": MPSSkipInfo(
         dtypes=COMPLEX_DTYPES,
         upper=15.0,
     ),
-    'all': MPSSkipInfo(
+    "all": MPSSkipInfo(
         dtypes=COMPLEX_DTYPES,
         upper=15.0,
     ),
-    'allclose': MPSSkipInfo(
+    "allclose": MPSSkipInfo(
         dtypes=COMPLEX_DTYPES,
         upper=15.0,
     ),
-    'angle': MPSSkipInfo(
+    "angle": MPSSkipInfo(
         dtypes=COMPLEX_DTYPES,
         upper=15.0,
     ),
-    'any': MPSSkipInfo(
+    "any": MPSSkipInfo(
         dtypes=COMPLEX_DTYPES,
         upper=15.0,
     ),
-    'addbmm': MPSSkipInfo(dtypes=COMPLEX_DTYPES),
-    'addcdiv': MPSSkipInfo(
+    "addbmm": MPSSkipInfo(dtypes=COMPLEX_DTYPES),
+    "addcdiv": MPSSkipInfo(
         dtypes=COMPLEX_DTYPES,
         upper=15.0,
     ),
-    'addcmul': MPSSkipInfo(
+    "addcmul": MPSSkipInfo(
         dtypes=COMPLEX_DTYPES,
         upper=15.0,
     ),
-    'addmm': [
+    "addmm": [
         MPSSkipInfo(
             dtypes=COMPLEX_DTYPES,
             variant=" ",
@@ -406,526 +466,528 @@ COMPLEX_XFAILLIST = {
             upper=15.0,
         ),
     ],
-    'addmv': MPSSkipInfo(
+    "addmv": MPSSkipInfo(
         dtypes=COMPLEX_DTYPES,
         upper=15.0,
     ),
-    'addr': MPSSkipInfo(dtypes=COMPLEX_DTYPES),
-    'asin': MPSSkipInfo(
+    "addr": MPSSkipInfo(dtypes=COMPLEX_DTYPES),
+    "asin": MPSSkipInfo(
         dtypes=COMPLEX_DTYPES,
         upper=15.0,
     ),
-    'asinh': MPSSkipInfo(dtypes=COMPLEX_DTYPES),
-    'atan': MPSSkipInfo(
+    "asinh": MPSSkipInfo(dtypes=COMPLEX_DTYPES),
+    "atan": MPSSkipInfo(
         dtypes=COMPLEX_DTYPES,
         upper=15.0,
     ),
-    'atanh': MPSSkipInfo(
+    "atanh": MPSSkipInfo(
         dtypes=COMPLEX_DTYPES,
         upper=15.0,
     ),
-    'baddbmm': MPSSkipInfo(dtypes=COMPLEX_DTYPES),
-    'bfloat16': MPSSkipInfo(
+    "baddbmm": MPSSkipInfo(dtypes=COMPLEX_DTYPES),
+    "bfloat16": MPSSkipInfo(
         dtypes=COMPLEX_DTYPES,
         upper=15.0,
     ),
-    'block_diag': MPSSkipInfo(dtypes=COMPLEX_DTYPES),
-    'bmm': MPSSkipInfo(
+    "block_diag": MPSSkipInfo(dtypes=COMPLEX_DTYPES),
+    "bmm": MPSSkipInfo(
         dtypes=COMPLEX_DTYPES,
         upper=15.0,
     ),
-    'bool': MPSSkipInfo(
+    "bool": MPSSkipInfo(
         dtypes=COMPLEX_DTYPES,
         upper=15.0,
     ),
-    'cartesian_prod': MPSSkipInfo(
+    "cartesian_prod": MPSSkipInfo(
         dtypes=COMPLEX_DTYPES,
         upper=15.0,
     ),
-    'cat': MPSSkipInfo(
+    "cat": MPSSkipInfo(
         dtypes=COMPLEX_DTYPES,
         upper=15.0,
     ),
-    'char': MPSSkipInfo(
+    "char": MPSSkipInfo(
         dtypes=COMPLEX_DTYPES,
         upper=15.0,
     ),
-    'cholesky': MPSSkipInfo(dtypes=COMPLEX_DTYPES),
-    'column_stack': MPSSkipInfo(
+    "cholesky": MPSSkipInfo(dtypes=COMPLEX_DTYPES),
+    "column_stack": MPSSkipInfo(
         dtypes=COMPLEX_DTYPES,
         upper=15.0,
     ),
-    'combinations': MPSSkipInfo(
+    "combinations": MPSSkipInfo(
         dtypes=COMPLEX_DTYPES,
         upper=15.0,
     ),
-    'corrcoef': MPSSkipInfo(
+    "corrcoef": MPSSkipInfo(
         dtypes=COMPLEX_DTYPES,
         upper=15.0,
     ),
-    'constant_pad_nd': MPSSkipInfo(
+    "constant_pad_nd": MPSSkipInfo(
         dtypes=COMPLEX_DTYPES,
         upper=15.0,
     ),
-    'cos': MPSSkipInfo(
+    "cos": MPSSkipInfo(
         dtypes=COMPLEX_DTYPES,
         upper=15.0,
     ),
-    'cosh': MPSSkipInfo(
+    "cosh": MPSSkipInfo(
         dtypes=COMPLEX_DTYPES,
         upper=15.0,
     ),
-    'count_nonzero': MPSSkipInfo(
+    "count_nonzero": MPSSkipInfo(
         dtypes=COMPLEX_DTYPES,
         upper=15.0,
     ),
-    'cov': MPSSkipInfo(dtypes=COMPLEX_DTYPES),
-    'cross': MPSSkipInfo(dtypes=COMPLEX_DTYPES),
-    'cumprod': MPSSkipInfo(dtypes=COMPLEX_DTYPES),
-    'cumsum': MPSSkipInfo(dtypes=COMPLEX_DTYPES),
-    'cumulative_trapezoid': MPSSkipInfo(dtypes=COMPLEX_DTYPES),
-    'diff': MPSSkipInfo(
+    "cov": MPSSkipInfo(dtypes=COMPLEX_DTYPES),
+    "cross": MPSSkipInfo(dtypes=COMPLEX_DTYPES),
+    "cumprod": MPSSkipInfo(dtypes=COMPLEX_DTYPES),
+    "cumsum": MPSSkipInfo(dtypes=COMPLEX_DTYPES),
+    "cumulative_trapezoid": MPSSkipInfo(dtypes=COMPLEX_DTYPES),
+    "diff": MPSSkipInfo(
         dtypes=COMPLEX_DTYPES,
         upper=15.0,
     ),
-    'dist': MPSSkipInfo(dtypes=COMPLEX_DTYPES),
-    'div': MPSSkipInfo(
+    "dist": MPSSkipInfo(dtypes=COMPLEX_DTYPES),
+    "div": MPSSkipInfo(
         dtypes=COMPLEX_DTYPES,
         upper=15.0,
     ),
-    'divno_rounding_mode': MPSSkipInfo(
+    "divno_rounding_mode": MPSSkipInfo(
         dtypes=COMPLEX_DTYPES,
         upper=15.0,
     ),
-    'dot': MPSSkipInfo(
+    "dot": MPSSkipInfo(
         dtypes=COMPLEX_DTYPES,
         upper=15.0,
     ),
-    'dstack': MPSSkipInfo(
+    "dstack": MPSSkipInfo(
         dtypes=COMPLEX_DTYPES,
         upper=15.0,
     ),
-    'einsum': MPSSkipInfo(
+    "einsum": MPSSkipInfo(
         dtypes=COMPLEX_DTYPES,
         upper=15.0,
     ),
-    'eq': MPSSkipInfo(
+    "eq": MPSSkipInfo(
         dtypes=COMPLEX_DTYPES,
         upper=15.0,
     ),
-    'equal': MPSSkipInfo(
+    "equal": MPSSkipInfo(
         dtypes=COMPLEX_DTYPES,
         upper=15.0,
     ),
-    'exp2': MPSSkipInfo(
+    "exp2": MPSSkipInfo(
         dtypes=COMPLEX_DTYPES,
         upper=15.0,
     ),
-    'expm1': MPSSkipInfo(
+    "expm1": MPSSkipInfo(
         dtypes=COMPLEX_DTYPES,
         upper=15.0,
     ),
-    'eye': MPSSkipInfo(
+    "eye": MPSSkipInfo(
         dtypes=COMPLEX_DTYPES,
         upper=15.0,
     ),
-    'fft.fft': MPSSkipInfo(
+    "fft.fft": MPSSkipInfo(
         dtypes=COMPLEX_DTYPES,
         upper=15.0,
     ),
-    'fft.fft2': MPSSkipInfo(
+    "fft.fft2": MPSSkipInfo(
         dtypes=COMPLEX_DTYPES,
         upper=15.0,
     ),
-    'fft.fftn': MPSSkipInfo(
+    "fft.fftn": MPSSkipInfo(
         dtypes=COMPLEX_DTYPES,
         upper=15.0,
     ),
-    'fft.fftshift': MPSSkipInfo(
+    "fft.fftshift": MPSSkipInfo(
         dtypes=COMPLEX_DTYPES,
         upper=15.0,
     ),
-    'fft.ifft': MPSSkipInfo(
+    "fft.ifft": MPSSkipInfo(
         dtypes=COMPLEX_DTYPES,
         upper=15.0,
     ),
-    'fft.ifft2': MPSSkipInfo(
+    "fft.ifft2": MPSSkipInfo(
         dtypes=COMPLEX_DTYPES,
         upper=15.0,
     ),
-    'fft.ifftn': MPSSkipInfo(
+    "fft.ifftn": MPSSkipInfo(
         dtypes=COMPLEX_DTYPES,
         upper=15.0,
     ),
-    'fft.ifftshift': MPSSkipInfo(
+    "fft.ifftshift": MPSSkipInfo(
         dtypes=COMPLEX_DTYPES,
         upper=15.0,
     ),
-    'fft.irfftn': MPSSkipInfo(
+    "fft.irfftn": MPSSkipInfo(
         dtypes=COMPLEX_DTYPES,
         upper=15.0,
     ),
-    'fft.irfft2': MPSSkipInfo(
+    "fft.irfft2": MPSSkipInfo(
         dtypes=COMPLEX_DTYPES,
         upper=15.0,
     ),
-    'fft.irfft': MPSSkipInfo(
+    "fft.irfft": MPSSkipInfo(
         dtypes=COMPLEX_DTYPES,
         upper=15.0,
     ),
-    'fft.hfftn': MPSSkipInfo(
+    "fft.hfftn": MPSSkipInfo(
         dtypes=COMPLEX_DTYPES,
         upper=15.0,
     ),
-    'fft.hfft2': MPSSkipInfo(
+    "fft.hfft2": MPSSkipInfo(
         dtypes=COMPLEX_DTYPES,
         upper=15.0,
     ),
-    'fft.hfft': MPSSkipInfo(
+    "fft.hfft": MPSSkipInfo(
         dtypes=COMPLEX_DTYPES,
         upper=15.0,
     ),
-    'flip': MPSSkipInfo(
+    "flip": MPSSkipInfo(
         dtypes=COMPLEX_DTYPES,
         upper=15.0,
     ),
-    'fliplr': MPSSkipInfo(
+    "fliplr": MPSSkipInfo(
         dtypes=COMPLEX_DTYPES,
         upper=15.0,
     ),
-    'flipud': MPSSkipInfo(
+    "flipud": MPSSkipInfo(
         dtypes=COMPLEX_DTYPES,
         upper=15.0,
     ),
-    'float': MPSSkipInfo(
+    "float": MPSSkipInfo(
         dtypes=COMPLEX_DTYPES,
         upper=15.0,
     ),
-    'gather': MPSSkipInfo(dtypes=COMPLEX_DTYPES),
-    'gradient': MPSSkipInfo(
+    "gather": MPSSkipInfo(dtypes=COMPLEX_DTYPES),
+    "gradient": MPSSkipInfo(
         dtypes=COMPLEX_DTYPES,
         upper=15.0,
     ),
-    'half': MPSSkipInfo(
+    "half": MPSSkipInfo(
         dtypes=COMPLEX_DTYPES,
         upper=15.0,
     ),
-    'hstack': MPSSkipInfo(
+    "hstack": MPSSkipInfo(
         dtypes=COMPLEX_DTYPES,
         upper=15.0,
     ),
-    'index_add': MPSSkipInfo(dtypes=COMPLEX_DTYPES),
-    'index_fill': MPSSkipInfo(dtypes=COMPLEX_DTYPES),
-    'index_put': MPSSkipInfo(dtypes=COMPLEX_DTYPES),
-    'inner': MPSSkipInfo(
+    "index_add": MPSSkipInfo(dtypes=COMPLEX_DTYPES),
+    "index_fill": MPSSkipInfo(dtypes=COMPLEX_DTYPES),
+    "index_put": MPSSkipInfo(dtypes=COMPLEX_DTYPES),
+    "inner": MPSSkipInfo(
         dtypes=COMPLEX_DTYPES,
         upper=15.0,
     ),
-    'int': MPSSkipInfo(
+    "int": MPSSkipInfo(
         dtypes=COMPLEX_DTYPES,
         upper=15.0,
     ),
-    'isclose': MPSSkipInfo(
+    "isclose": MPSSkipInfo(
         dtypes=COMPLEX_DTYPES,
         upper=15.0,
     ),
-    'isnan': MPSSkipInfo(
+    "isnan": MPSSkipInfo(
         dtypes=COMPLEX_DTYPES,
         upper=15.0,
     ),
-    'istft': MPSSkipInfo(dtypes=COMPLEX_DTYPES),
-    'ldexp': MPSSkipInfo(
+    "istft": MPSSkipInfo(dtypes=COMPLEX_DTYPES),
+    "ldexp": MPSSkipInfo(
         dtypes=COMPLEX_DTYPES,
         upper=15.0,
     ),
-    'lerp': MPSSkipInfo(dtypes=COMPLEX_DTYPES),
-    'linalg.cholesky': MPSSkipInfo(dtypes=COMPLEX_DTYPES),
-    'linalg.cross': MPSSkipInfo(dtypes=COMPLEX_DTYPES),
-    'linalg.inv': MPSSkipInfo(dtypes=COMPLEX_DTYPES),
-    'linalg.inv_ex': MPSSkipInfo(dtypes=COMPLEX_DTYPES),
-    'linalg.lu_factor': MPSSkipInfo(dtypes=COMPLEX_DTYPES),
-    'linalg.matrix_norm': MPSSkipInfo(dtypes=COMPLEX_DTYPES),
-    'linalg.matrix_power': MPSSkipInfo(dtypes=COMPLEX_DTYPES),
-    'linalg.multi_dot': MPSSkipInfo(
+    "lerp": MPSSkipInfo(dtypes=COMPLEX_DTYPES),
+    "linalg.cholesky": MPSSkipInfo(dtypes=COMPLEX_DTYPES),
+    "linalg.cross": MPSSkipInfo(dtypes=COMPLEX_DTYPES),
+    "linalg.inv": MPSSkipInfo(dtypes=COMPLEX_DTYPES),
+    "linalg.inv_ex": MPSSkipInfo(dtypes=COMPLEX_DTYPES),
+    "linalg.lu_factor": MPSSkipInfo(dtypes=COMPLEX_DTYPES),
+    "linalg.matrix_norm": MPSSkipInfo(dtypes=COMPLEX_DTYPES),
+    "linalg.matrix_power": MPSSkipInfo(dtypes=COMPLEX_DTYPES),
+    "linalg.multi_dot": MPSSkipInfo(
         dtypes=COMPLEX_DTYPES,
         upper=15.0,
     ),
-    'linalg.norm': MPSSkipInfo(dtypes=COMPLEX_DTYPES),
-    'linalg.pinv': MPSSkipInfo(
+    "linalg.norm": MPSSkipInfo(dtypes=COMPLEX_DTYPES),
+    "linalg.pinv": MPSSkipInfo(
         dtypes=COMPLEX_DTYPES,
         upper=15.0,
     ),
-    'linalg.solve_triangular': MPSSkipInfo(dtypes=COMPLEX_DTYPES),
-    'linalg.tensorinv': MPSSkipInfo(dtypes=COMPLEX_DTYPES),
-    'linalg.vander': MPSSkipInfo(dtypes=COMPLEX_DTYPES),
-    'linalg.vector_norm': MPSSkipInfo(dtypes=COMPLEX_DTYPES),
-    'linspace': MPSSkipInfo(
+    "linalg.solve_triangular": MPSSkipInfo(dtypes=COMPLEX_DTYPES),
+    "linalg.tensorinv": MPSSkipInfo(dtypes=COMPLEX_DTYPES),
+    "linalg.vander": MPSSkipInfo(dtypes=COMPLEX_DTYPES),
+    "linalg.vector_norm": MPSSkipInfo(dtypes=COMPLEX_DTYPES),
+    "linspace": MPSSkipInfo(
         dtypes=COMPLEX_DTYPES,
         upper=15.0,
     ),
-    'linspacetensor_overload': MPSSkipInfo(
+    "linspacetensor_overload": MPSSkipInfo(
         dtypes=COMPLEX_DTYPES,
         upper=15.0,
     ),
-    'log10': MPSSkipInfo(
+    "log10": MPSSkipInfo(
         dtypes=COMPLEX_DTYPES,
         upper=15.0,
     ),
-    'log1p': MPSSkipInfo(
+    "log1p": MPSSkipInfo(
         dtypes=COMPLEX_DTYPES,
         upper=15.0,
     ),
-    'log2': MPSSkipInfo(
+    "log2": MPSSkipInfo(
         dtypes=COMPLEX_DTYPES,
         upper=15.0,
     ),
-    'log': MPSSkipInfo(
+    "log": MPSSkipInfo(
         dtypes=COMPLEX_DTYPES,
         upper=15.0,
     ),
-    'logical_and': MPSSkipInfo(
+    "logical_and": MPSSkipInfo(
         dtypes=COMPLEX_DTYPES,
         upper=15.0,
     ),
-    'logical_not': MPSSkipInfo(
+    "logical_not": MPSSkipInfo(
         dtypes=COMPLEX_DTYPES,
         upper=15.0,
     ),
-    'logical_or': MPSSkipInfo(
+    "logical_or": MPSSkipInfo(
         dtypes=COMPLEX_DTYPES,
         upper=15.0,
     ),
-    'logical_xor': MPSSkipInfo(
+    "logical_xor": MPSSkipInfo(
         dtypes=COMPLEX_DTYPES,
         upper=15.0,
     ),
-    'logaddexp': MPSSkipInfo(dtypes=COMPLEX_DTYPES),
-    'logsumexp': MPSSkipInfo(
+    "logaddexp": MPSSkipInfo(dtypes=COMPLEX_DTYPES),
+    "logsumexp": MPSSkipInfo(
         dtypes=COMPLEX_DTYPES,
         upper=15.0,
     ),
-    'long': MPSSkipInfo(
+    "long": MPSSkipInfo(
         dtypes=COMPLEX_DTYPES,
         upper=15.0,
     ),
-    'masked_fill': MPSSkipInfo(
+    "masked_fill": MPSSkipInfo(
         dtypes=COMPLEX_DTYPES,
         upper=15.0,
     ),
-    'masked.cumprod': MPSSkipInfo(dtypes=COMPLEX_DTYPES),
-    'masked.cumsum': MPSSkipInfo(dtypes=COMPLEX_DTYPES),
-    'masked.mean': MPSSkipInfo(
+    "masked.cumprod": MPSSkipInfo(dtypes=COMPLEX_DTYPES),
+    "masked.cumsum": MPSSkipInfo(dtypes=COMPLEX_DTYPES),
+    "masked.mean": MPSSkipInfo(
         dtypes=COMPLEX_DTYPES,
         upper=15.0,
     ),
-    'masked.normalize': MPSSkipInfo(dtypes=COMPLEX_DTYPES),
-    'masked.prod': MPSSkipInfo(
+    "masked.normalize": MPSSkipInfo(dtypes=COMPLEX_DTYPES),
+    "masked.prod": MPSSkipInfo(
         dtypes=COMPLEX_DTYPES,
         upper=15.0,
     ),
-    'masked.std': MPSSkipInfo(
+    "masked.std": MPSSkipInfo(
         dtypes=COMPLEX_DTYPES,
         upper=15.0,
     ),
-    'masked.sum': MPSSkipInfo(
+    "masked.sum": MPSSkipInfo(
         dtypes=COMPLEX_DTYPES,
         upper=15.0,
     ),
-    'masked.var': MPSSkipInfo(
+    "masked.var": MPSSkipInfo(
         dtypes=COMPLEX_DTYPES,
         upper=15.0,
     ),
-    'masked.logsumexp': MPSSkipInfo(
+    "masked.logsumexp": MPSSkipInfo(
         dtypes=COMPLEX_DTYPES,
         upper=15.0,
     ),
-    'matmul': MPSSkipInfo(
+    "matmul": MPSSkipInfo(
         dtypes=COMPLEX_DTYPES,
         upper=15.0,
     ),
-    'mean': MPSSkipInfo(
+    "mean": MPSSkipInfo(
         dtypes=COMPLEX_DTYPES,
         upper=15.0,
     ),
-    'mm': MPSSkipInfo(
+    "mm": MPSSkipInfo(
         dtypes=COMPLEX_DTYPES,
         upper=15.0,
     ),
-    'mv': MPSSkipInfo(
+    "mv": MPSSkipInfo(
         dtypes=COMPLEX_DTYPES,
         upper=15.0,
     ),
-    'ne': MPSSkipInfo(
+    "ne": MPSSkipInfo(
         dtypes=COMPLEX_DTYPES,
         upper=15.0,
     ),
-    'neg': MPSSkipInfo(
+    "neg": MPSSkipInfo(
         dtypes=COMPLEX_DTYPES,
         upper=15.0,
     ),
-    'nn.functional.conv3d': MPSSkipInfo(dtypes=COMPLEX_DTYPES),
-    'nn.functional.l1_loss': MPSSkipInfo(dtypes=COMPLEX_DTYPES),
-    'nn.functional.linear': MPSSkipInfo(dtypes=COMPLEX_DTYPES),
-    'nn.functional.normalize': MPSSkipInfo(dtypes=COMPLEX_DTYPES),
-    'nn.functional.padconstant': MPSSkipInfo(
+    "nn.functional.conv3d": MPSSkipInfo(dtypes=COMPLEX_DTYPES),
+    "nn.functional.l1_loss": MPSSkipInfo(dtypes=COMPLEX_DTYPES),
+    "nn.functional.linear": MPSSkipInfo(dtypes=COMPLEX_DTYPES),
+    "nn.functional.normalize": MPSSkipInfo(dtypes=COMPLEX_DTYPES),
+    "nn.functional.padconstant": MPSSkipInfo(
         dtypes=COMPLEX_DTYPES,
         upper=15.0,
     ),
-    'nn.functional.padreflect': MPSSkipInfo(
+    "nn.functional.padreflect": MPSSkipInfo(
         dtypes=COMPLEX_DTYPES,
         upper=15.0,
     ),
-    'nn.functional.padreplicate': MPSSkipInfo(
+    "nn.functional.padreplicate": MPSSkipInfo(
         dtypes=COMPLEX_DTYPES,
         upper=15.0,
     ),
-    'nn.functional.pairwise_distance': MPSSkipInfo(dtypes=COMPLEX_DTYPES),
-    'nn.functional.pixel_shuffle': MPSSkipInfo(
+    "nn.functional.pairwise_distance": MPSSkipInfo(dtypes=COMPLEX_DTYPES),
+    "nn.functional.pixel_shuffle": MPSSkipInfo(
         dtypes=COMPLEX_DTYPES,
         upper=15.0,
     ),
-    'nn.functional.pixel_unshuffle': MPSSkipInfo(
+    "nn.functional.pixel_unshuffle": MPSSkipInfo(
         dtypes=COMPLEX_DTYPES,
         upper=15.0,
     ),
-    'nn.functional.rms_norm': MPSSkipInfo(
+    "nn.functional.rms_norm": MPSSkipInfo(
         dtypes=COMPLEX_DTYPES,
         upper=15.0,
     ),
-    'nn.functional.silu': MPSSkipInfo(dtypes=COMPLEX_DTYPES),
-    'nn.functional.softsign': MPSSkipInfo(
+    "nn.functional.silu": MPSSkipInfo(dtypes=COMPLEX_DTYPES),
+    "nn.functional.softsign": MPSSkipInfo(
         dtypes=COMPLEX_DTYPES,
         upper=15.0,
     ),
-    'nn.functional.triplet_margin_loss': MPSSkipInfo(dtypes=COMPLEX_DTYPES),
-    'nn.functional.triplet_margin_with_distance_loss': MPSSkipInfo(dtypes=COMPLEX_DTYPES),
-    'norm': MPSSkipInfo(dtypes=COMPLEX_DTYPES),
-    'normal': MPSSkipInfo(dtypes=COMPLEX_DTYPES, variant="in_place"),
-    'pinverse': MPSSkipInfo(
+    "nn.functional.triplet_margin_loss": MPSSkipInfo(dtypes=COMPLEX_DTYPES),
+    "nn.functional.triplet_margin_with_distance_loss": MPSSkipInfo(
+        dtypes=COMPLEX_DTYPES
+    ),
+    "norm": MPSSkipInfo(dtypes=COMPLEX_DTYPES),
+    "normal": MPSSkipInfo(dtypes=COMPLEX_DTYPES, variant="in_place"),
+    "pinverse": MPSSkipInfo(
         dtypes=COMPLEX_DTYPES,
         upper=15.0,
     ),
-    'pow': MPSSkipInfo(dtypes=COMPLEX_DTYPES),
-    'prod': MPSSkipInfo(
+    "pow": MPSSkipInfo(dtypes=COMPLEX_DTYPES),
+    "prod": MPSSkipInfo(
         dtypes=COMPLEX_DTYPES,
         upper=15.0,
     ),
-    'rand_like': MPSSkipInfo(dtypes=COMPLEX_DTYPES),
-    'reciprocal': MPSSkipInfo(
+    "rand_like": MPSSkipInfo(dtypes=COMPLEX_DTYPES),
+    "reciprocal": MPSSkipInfo(
         dtypes=COMPLEX_DTYPES,
         upper=15.0,
     ),
-    'renorm': MPSSkipInfo(dtypes=COMPLEX_DTYPES),
-    'repeat': MPSSkipInfo(dtypes=COMPLEX_DTYPES),
-    'resize_': MPSSkipInfo(dtypes=COMPLEX_DTYPES),
-    'resize_as_': MPSSkipInfo(dtypes=COMPLEX_DTYPES),
-    'roll': MPSSkipInfo(
+    "renorm": MPSSkipInfo(dtypes=COMPLEX_DTYPES),
+    "repeat": MPSSkipInfo(dtypes=COMPLEX_DTYPES),
+    "resize_": MPSSkipInfo(dtypes=COMPLEX_DTYPES),
+    "resize_as_": MPSSkipInfo(dtypes=COMPLEX_DTYPES),
+    "roll": MPSSkipInfo(
         dtypes=COMPLEX_DTYPES,
         upper=15.0,
     ),
-    'rot90': MPSSkipInfo(
+    "rot90": MPSSkipInfo(
         dtypes=COMPLEX_DTYPES,
         upper=15.0,
     ),
-    'rsqrt': MPSSkipInfo(
+    "rsqrt": MPSSkipInfo(
         dtypes=COMPLEX_DTYPES,
         upper=15.0,
     ),
-    'scatter_add': MPSSkipInfo(dtypes=COMPLEX_DTYPES),
-    'scatter': MPSSkipInfo(dtypes=COMPLEX_DTYPES),
-    'scatter_reduce': [
+    "scatter_add": MPSSkipInfo(dtypes=COMPLEX_DTYPES),
+    "scatter": MPSSkipInfo(dtypes=COMPLEX_DTYPES),
+    "scatter_reduce": [
         MPSSkipInfo(dtypes=COMPLEX_DTYPES, variant="amax"),
         MPSSkipInfo(dtypes=COMPLEX_DTYPES, variant="amin"),
     ],
-    'short': MPSSkipInfo(
+    "short": MPSSkipInfo(
         dtypes=COMPLEX_DTYPES,
         upper=15.0,
     ),
-    'sigmoid': MPSSkipInfo(
+    "sigmoid": MPSSkipInfo(
         dtypes=COMPLEX_DTYPES,
         upper=15.0,
     ),
-    'sin': MPSSkipInfo(
+    "sin": MPSSkipInfo(
         dtypes=COMPLEX_DTYPES,
         upper=15.0,
     ),
-    'sinh': MPSSkipInfo(
+    "sinh": MPSSkipInfo(
         dtypes=COMPLEX_DTYPES,
         upper=15.0,
     ),
-    'sqrt': MPSSkipInfo(
+    "sqrt": MPSSkipInfo(
         dtypes=COMPLEX_DTYPES,
         upper=15.0,
     ),
-    'square': MPSSkipInfo(
+    "square": MPSSkipInfo(
         dtypes=COMPLEX_DTYPES,
         upper=15.0,
     ),
-    'stack': MPSSkipInfo(
+    "stack": MPSSkipInfo(
         dtypes=COMPLEX_DTYPES,
         upper=15.0,
     ),
-    'std': MPSSkipInfo(dtypes=COMPLEX_DTYPES),
-    'std_mean': MPSSkipInfo(dtypes=COMPLEX_DTYPES),
-    'stft': MPSSkipInfo(
+    "std": MPSSkipInfo(dtypes=COMPLEX_DTYPES),
+    "std_mean": MPSSkipInfo(dtypes=COMPLEX_DTYPES),
+    "stft": MPSSkipInfo(
         dtypes=COMPLEX_DTYPES,
         upper=15.0,
     ),
-    'sum': MPSSkipInfo(
+    "sum": MPSSkipInfo(
         dtypes=COMPLEX_DTYPES,
         upper=15.0,
     ),
-    'sum_to_size': MPSSkipInfo(
+    "sum_to_size": MPSSkipInfo(
         dtypes=COMPLEX_DTYPES,
         upper=15.0,
     ),
-    'take_along_dim': MPSSkipInfo(dtypes=COMPLEX_DTYPES),
-    'tan': MPSSkipInfo(
+    "take_along_dim": MPSSkipInfo(dtypes=COMPLEX_DTYPES),
+    "tan": MPSSkipInfo(
         dtypes=COMPLEX_DTYPES,
         upper=15.0,
     ),
-    'tensordot': MPSSkipInfo(
+    "tensordot": MPSSkipInfo(
         dtypes=COMPLEX_DTYPES,
         upper=15.0,
     ),
-    'tile': MPSSkipInfo(dtypes=COMPLEX_DTYPES),
-    'trace': MPSSkipInfo(
+    "tile": MPSSkipInfo(dtypes=COMPLEX_DTYPES),
+    "trace": MPSSkipInfo(
         dtypes=COMPLEX_DTYPES,
         upper=15.0,
     ),
-    'trapz': MPSSkipInfo(
+    "trapz": MPSSkipInfo(
         dtypes=COMPLEX_DTYPES,
         upper=15.0,
     ),
-    'trapezoid': MPSSkipInfo(
+    "trapezoid": MPSSkipInfo(
         dtypes=COMPLEX_DTYPES,
         upper=15.0,
     ),
-    'triangular_solve': MPSSkipInfo(dtypes=COMPLEX_DTYPES),
-    'tril': MPSSkipInfo(
+    "triangular_solve": MPSSkipInfo(dtypes=COMPLEX_DTYPES),
+    "tril": MPSSkipInfo(
         dtypes=COMPLEX_DTYPES,
         upper=15.0,
     ),
-    'triu': MPSSkipInfo(
+    "triu": MPSSkipInfo(
         dtypes=COMPLEX_DTYPES,
         upper=15.0,
     ),
-    'true_divide': MPSSkipInfo(
+    "true_divide": MPSSkipInfo(
         dtypes=COMPLEX_DTYPES,
         upper=15.0,
     ),
-    'uniform': MPSSkipInfo(dtypes=COMPLEX_DTYPES),
-    'var': MPSSkipInfo(dtypes=COMPLEX_DTYPES),
-    'var_mean': MPSSkipInfo(dtypes=COMPLEX_DTYPES),
-    'vstack': MPSSkipInfo(
+    "uniform": MPSSkipInfo(dtypes=COMPLEX_DTYPES),
+    "var": MPSSkipInfo(dtypes=COMPLEX_DTYPES),
+    "var_mean": MPSSkipInfo(dtypes=COMPLEX_DTYPES),
+    "vstack": MPSSkipInfo(
         dtypes=COMPLEX_DTYPES,
         upper=15.0,
     ),
-    'where': MPSSkipInfo(
+    "where": MPSSkipInfo(
         dtypes=COMPLEX_DTYPES,
         upper=15.0,
     ),
-    'byte': MPSSkipInfo(
+    "byte": MPSSkipInfo(
         dtypes=COMPLEX_DTYPES,
         upper=15.0,
     ),
@@ -933,97 +995,107 @@ COMPLEX_XFAILLIST = {
 
 """Failures due to known errors in the MPS backend"""
 MPS_DOWNSTREAM_XFAILLIST = {
-    'arange': MPSSkipInfo(dtypes=[torch.uint8]),
+    "arange": MPSSkipInfo(dtypes=[torch.uint8]),
     # TODO: remove this once downstream function 'aten::_linalg_svd.U' have been implemented
-    'linalg.matrix_rank': MPSSkipInfo(),
+    "linalg.matrix_rank": MPSSkipInfo(),
 }
 
 """Other uncategorized xfails"""
 OTHER_XFAILLIST = {
-
     # Since CPU is not using argsort with stable=True, these cases result in undefined behaviour.
-    'argsort': MPSSkipInfo(dtypes=[torch.float16, torch.int8, torch.uint8, torch.bool, torch.bfloat16]),
+    "argsort": MPSSkipInfo(
+        dtypes=[torch.float16, torch.int8, torch.uint8, torch.bool, torch.bfloat16]
+    ),
     # Same issue as `argsort` with duplicate indices. This test checks both the sorted values and the indices.
     # The values of the sorted tensor match the CPU, but in case of the returned indices this results in undefined behaviour.
-    'sort': MPSSkipInfo(dtypes=[torch.int8, torch.uint8, torch.bool, torch.float16, torch.bfloat16]),
-
-    # topk fails with duplicate indices
-    'topk': MPSSkipInfo(
-        dtypes=[torch.int16, torch.int32, torch.int64, torch.uint8, torch.int8, torch.bfloat16]
+    "sort": MPSSkipInfo(
+        dtypes=[torch.int8, torch.uint8, torch.bool, torch.float16, torch.bfloat16]
     ),
-
+    # topk fails with duplicate indices
+    "topk": MPSSkipInfo(
+        dtypes=[
+            torch.int16,
+            torch.int32,
+            torch.int64,
+            torch.uint8,
+            torch.int8,
+            torch.bfloat16,
+        ]
+    ),
     # Failures due to random output that they generate using
     # Philox engine causing mismatch with CPU results
-    'multinomial': MPSSkipInfo(
+    "multinomial": MPSSkipInfo(
         dtypes=[torch.float16, torch.float32, torch.bfloat16],  # random results
     ),
-    'uniform': MPSSkipInfo(
-        dtypes=[torch.float16, torch.float32, torch.bfloat16]
-    ),
-    'rand_like': MPSSkipInfo(
-        dtypes=[torch.float16, torch.float32, torch.bfloat16]
-    ),
-    'randint': MPSSkipInfo(),
-    'randint_like': MPSSkipInfo(),
-    'randn': MPSSkipInfo(),
-    'randn_like': MPSSkipInfo(),
-    'bernoulli': MPSSkipInfo(
-        dtypes=[torch.float16, torch.float32, torch.bfloat16]
-    ),
-    'exponential': MPSSkipInfo(
-        dtypes=[torch.float16, torch.float32, torch.bfloat16]
-    ),
-    'nn.functional.feature_alpha_dropout': MPSSkipInfo(
+    "uniform": MPSSkipInfo(dtypes=[torch.float16, torch.float32, torch.bfloat16]),
+    "rand_like": MPSSkipInfo(dtypes=[torch.float16, torch.float32, torch.bfloat16]),
+    "randint": MPSSkipInfo(),
+    "randint_like": MPSSkipInfo(),
+    "randn": MPSSkipInfo(),
+    "randn_like": MPSSkipInfo(),
+    "bernoulli": MPSSkipInfo(dtypes=[torch.float16, torch.float32, torch.bfloat16]),
+    "exponential": MPSSkipInfo(dtypes=[torch.float16, torch.float32, torch.bfloat16]),
+    "nn.functional.feature_alpha_dropout": MPSSkipInfo(
         dtypes=[torch.float16, torch.float32, torch.bfloat16],
         variant="with_train",
     ),
-    'normal': MPSSkipInfo(
+    "normal": MPSSkipInfo(dtypes=[torch.float16, torch.float32, torch.bfloat16]),
+    "nn.functional.alpha_dropout": MPSSkipInfo(
         dtypes=[torch.float16, torch.float32, torch.bfloat16]
     ),
-    'nn.functional.alpha_dropout': MPSSkipInfo(
+    "nn.functional.dropout": MPSSkipInfo(
         dtypes=[torch.float16, torch.float32, torch.bfloat16]
     ),
-    'nn.functional.dropout': MPSSkipInfo(
+    "nn.functional.dropout2d": MPSSkipInfo(
         dtypes=[torch.float16, torch.float32, torch.bfloat16]
     ),
-    'nn.functional.dropout2d': MPSSkipInfo(
-        dtypes=[torch.float16, torch.float32, torch.bfloat16]
-    ),
-    'nn.functional.dropout3d': MPSSkipInfo(
+    "nn.functional.dropout3d": MPSSkipInfo(
         dtypes=[torch.float16, torch.float32, torch.bfloat16]
     ),
     # See https://github.com/pytorch/pytorch/issues/111479
-    'nn.functional.multi_head_attention_forward': MPSSkipInfo(
+    "nn.functional.multi_head_attention_forward": MPSSkipInfo(
         dtypes=[torch.float32, torch.float16, torch.bfloat16]
     ),
-
-    'index_put': MPSSkipInfo(
-        dtypes=[torch.bool, torch.uint8, torch.int8, torch.int16, torch.int64, torch.float16, torch.bfloat16]
+    "index_put": MPSSkipInfo(
+        dtypes=[
+            torch.bool,
+            torch.uint8,
+            torch.int8,
+            torch.int16,
+            torch.int64,
+            torch.float16,
+            torch.bfloat16,
+        ]
     ),
     # zero to negative integer powers are undefined
-    '__rpow__': MPSSkipInfo(
+    "__rpow__": MPSSkipInfo(
         dtypes=[torch.int8, torch.int16, torch.int32, torch.int64],
     ),
-    'resize_': MPSSkipInfo(
-        dtypes=[torch.float16, torch.float32, torch.bfloat16]
-    ),
-    'resize_as_': MPSSkipInfo(
-        dtypes=[torch.float16, torch.float32, torch.bfloat16]
-    ),
-
+    "resize_": MPSSkipInfo(dtypes=[torch.float16, torch.float32, torch.bfloat16]),
+    "resize_as_": MPSSkipInfo(dtypes=[torch.float16, torch.float32, torch.bfloat16]),
     # before macOS 13.2 it falls back to cpu and pass the forward pass
-    'grid_sampler_2d': MPSSkipInfo(
-        dtypes=[torch.float32, torch.float16, torch.bfloat16],  # Unsupported Border padding mode
+    "grid_sampler_2d": MPSSkipInfo(
+        dtypes=[
+            torch.float32,
+            torch.float16,
+            torch.bfloat16,
+        ],  # Unsupported Border padding mode
         lower=13.2,
     ),
-
     # CPU Errors:
-    'addr': MPSSkipInfo(
-        dtypes=[torch.bool, torch.int16, torch.int32, 
-                torch.int64, torch.uint8, torch.int8],
+    "addr": MPSSkipInfo(
+        dtypes=[
+            torch.bool,
+            torch.int16,
+            torch.int32,
+            torch.int64,
+            torch.uint8,
+            torch.int8,
+        ],
     ),  # "addmv_impl_cpu" not implemented for 'Half'
-    'as_strided': MPSSkipInfo(variant="partial_views"),  # cpu result off, showing random values
-
+    "as_strided": MPSSkipInfo(
+        variant="partial_views"
+    ),  # cpu result off, showing random values
     # random results
     # mps vs cpu:
     # Mismatched elements: 40 / 96 (41.7%)
@@ -1033,30 +1105,30 @@ OTHER_XFAILLIST = {
     # Mismatched elements: 56 / 96 (58.3%)
     # Greatest absolute difference: 17.892311096191406 at index (1, 0, 2) (up to 1e-05 allowed)
     # Greatest relative difference: inf at index (1, 0, 0) (up to 1.3e-06 allowed)
-    'nn.functional.scaled_dot_product_attention': MPSSkipInfo(
+    "nn.functional.scaled_dot_product_attention": MPSSkipInfo(
         dtypes=[torch.float32, torch.float16, torch.bfloat16]
     ),
-
     # float output for float16 input on MPS
-    'logit': MPSSkipInfo(dtypes=[torch.float16, torch.bfloat16]),
-
+    "logit": MPSSkipInfo(dtypes=[torch.float16, torch.bfloat16]),
     # Fill tensors with uninitialized data, causing mismatch with CPU.
     # They occasionally match, thus skipping them.
     # See https://github.com/pytorch/pytorch/issues/100175
-    'new_empty': MPSSkipInfo(),
-    'new_empty_strided': MPSSkipInfo(),
-    'empty_strided': MPSSkipInfo(),
+    "new_empty": MPSSkipInfo(),
+    "new_empty_strided": MPSSkipInfo(),
+    "empty_strided": MPSSkipInfo(),
     # CPU: empty is returning all 0's and there is a mismatch with MPS
     # allocation (MacOS 13). According to
     # https://pytorch.org/docs/2.0/generated/torch.empty.html
-    'empty': MPSSkipInfo(),
-    'empty_like': MPSSkipInfo(),
-    'empty_permuted': MPSSkipInfo(),
+    "empty": MPSSkipInfo(),
+    "empty_like": MPSSkipInfo(),
+    "empty_permuted": MPSSkipInfo(),
 }
 
 
-MPS_OPINFO = {}
-def append_skips(skip_list: Dict):
+MPS_OPINFO: Dict[str, List[MPSSkipInfo]] = {}
+
+
+def append_skips(skip_list: Dict) -> None:
     for op_name, skip in skip_list.items():
         if not isinstance(skip, Iterable):
             skip = [skip]
@@ -1064,11 +1136,13 @@ def append_skips(skip_list: Dict):
             MPS_OPINFO[op_name] += skip
         else:
             MPS_OPINFO[op_name] = skip
+
+
 append_skips(UNIMPLEMENTED_XFAILIST)
 append_skips(COMPLEX_XFAILLIST)
 append_skips(OTHER_XFAILLIST)
 append_skips(MPS_DOWNSTREAM_XFAILLIST)
-            
+
 
 def mps_op_db(op_db: List[OpInfo]) -> List[OpInfo]:
     """Utility function for OpInfo tests, updates the op_db with xfails defined in MPS_OPINFO_SKIPLIST"""
