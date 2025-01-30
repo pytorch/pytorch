@@ -356,15 +356,16 @@ class MetaTensorDescriber:
 
         nested_int_metadata: Optional[MetaTensorDesc] = None
         if is_nested:
+            from torch.fx.experimental.sym_node import SymNode
             from torch.nested._internal.nested_int import NestedIntNode
             from torch.nested._internal.nested_tensor import NestedTensor
-            from torch.fx.experimental.sym_node import SymNode
 
             assert isinstance(t, NestedTensor)
             nested_int = t.shape[t._ragged_idx]
 
-
-            assert isinstance(nested_int, torch.SymInt) and nested_int.node.is_nested_int()
+            assert (
+                isinstance(nested_int, torch.SymInt) and nested_int.node.is_nested_int()
+            )
 
             node = nested_int.node
 
