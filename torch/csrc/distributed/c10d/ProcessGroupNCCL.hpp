@@ -492,7 +492,7 @@ class TORCH_API ProcessGroupNCCL : public Backend {
     // Schedule NCCL operations on high priority CUDA streams
     bool is_high_priority_stream;
 
-#ifdef NCCL_HAS_COMM_NONBLOCKING
+#ifdef NCCL_HAS_CONFIG
     // Configure ranks
     ncclConfig_t config = NCCL_CONFIG_INITIALIZER;
 #endif
