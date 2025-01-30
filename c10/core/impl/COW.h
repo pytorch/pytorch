@@ -58,7 +58,7 @@ class C10_API FutureLazyCloneGuard {
 };
 
 template <typename... Args>
-void alert_cowsim(const Args&... args) {
+void alert_conditional_view(const Args&... args) {
   if (get_error_on_conditional_view_warnings()) {
     TORCH_CHECK_ALWAYS_SHOW_CPP_STACKTRACE(false, args...);
   } else {
