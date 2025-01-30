@@ -10441,6 +10441,13 @@ def forward(self, x, y):
             ep.module()(torch.randn(400, 20, 16))
         ep.module()(torch.randn(42, 20, 16))
 
+    def test_full_on_scalar_tensor(self):
+        class Foo(torch.nn.Module):
+            def forward(self, val):
+                return torch.full((80, 2), val, dtype=torch.float32)
+
+        export(Foo(), args=(torch.tensor(1),))
+
     def test_allow_explicit_guards_as_runtime_asserts(self):
         # check that explicit guards are treated as runtime assertions
         class Foo(torch.nn.Module):
