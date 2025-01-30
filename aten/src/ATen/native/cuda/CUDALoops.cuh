@@ -212,7 +212,7 @@ static inline void launch_vectorized_kernel(
   // Here we purposely omit vec8 for 1-byte data because of a bug in NVCC
   // that causes some numerical mismatches with uint8 on sm80 and sm90.
   // TODO: Revisit this after CUDA 12.8 update.
-  if (sizeof(cpp_type) < 2) {
+  if constexpr (sizeof(cpp_type) < 2) {
     vec_size = std::min<uint16_t>(vec_size, 4);
   }
 #endif
