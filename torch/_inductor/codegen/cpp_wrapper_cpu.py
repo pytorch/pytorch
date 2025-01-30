@@ -8,7 +8,6 @@ from itertools import count
 from typing import Callable, Optional
 
 import sympy
-from sympy import Expr
 
 import torch
 import torch._inductor.async_compile  # noqa: F401 required to warm up AsyncCompile pools
@@ -229,6 +228,11 @@ class CppWrapperCpu(PythonWrapperCodegen):
             self.codegen_input_stride_var_decl(code, name)
             return f"{name}_stride"
 
+        def codegen_symbol(sym: sympy.Symbol, base_name: str, dim: int):
+            if isinstance(sym, sympy.Symbol) and sym not in bound_vars:
+                code.writeline(f"int64_t {sym} = {base_name}[{dim}];")
+                bound_vars.add(sym)
+
         if isinstance(value, sympy.Expr):
             if not isinstance(value, sympy.Symbol) or value in bound_vars:
                 return
@@ -242,13 +246,9 @@ class CppWrapperCpu(PythonWrapperCodegen):
             bound_vars.add(value)
         elif isinstance(value, ir.TensorBox):
             for dim, size in enumerate(value.get_size()):
-                if isinstance(size, sympy.Symbol) and size not in bound_vars:
-                    code.writeline(f"int64_t {size} = {sizeof(name)}[{dim}];")
-                    bound_vars.add(size)
+                codegen_symbol(size, sizeof(name), dim)
             for dim, stride in enumerate(value.get_stride()):
-                if isinstance(stride, sympy.Symbol) and stride not in bound_vars:
-                    code.writeline(f"int64_t {stride} = {strideof(name)}[{dim}];")
-                    bound_vars.add(stride)
+                codegen_symbol(stride, strideof(name), dim)
         else:
             raise AssertionError(f"Unknown value type: {type(value)}")
 
@@ -1128,17 +1128,17 @@ class CppWrapperCpu(PythonWrapperCodegen):
             return
         super().add_benchmark_harness(output)
 
-    def codegen_cpp_sizevar(self, x: Expr, *, simplify: bool = True) -> str:
+    def codegen_cpp_sizevar(self, x: sympy.Expr, *, simplify: bool = True) -> str:
         return cexpr(V.graph.sizevars.simplify(x) if simplify else x)
 
-    def codegen_sizevar(self, x: Expr) -> str:
+    def codegen_sizevar(self, x: sympy.Expr) -> str:
         return self.codegen_cpp_sizevar(x)
 
     def codegen_tuple_access(self, basename: str, name: str, index: str) -> str:
         # in the abi_compatible mode, outputs are returned via arguments
         return name
 
-    def codegen_shape_tuple(self, shape: Sequence[Expr]) -> str:
+    def codegen_shape_tuple(self, shape: Sequence[sympy.Expr]) -> str:
         parts = [*map(self.codegen_sizevar, shape)]
         if len(parts) == 0:
             return "{}"
