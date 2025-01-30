@@ -1508,6 +1508,9 @@ class TestSymNumberMagicMethods(TestCase):
         hash(create_symint(shape_env, 3))
 
     def test_symnode_hashing(self):
+        from torch.nested._internal.dict_tensor import DictTensor
+        from torch.nested._internal.nested_int import NestedIntNode
+
         shape_env = ShapeEnv()
 
         # These all trigger specialization when hashed
@@ -1517,9 +1520,13 @@ class TestSymNumberMagicMethods(TestCase):
         hash(create_symfloat(shape_env, 3.0))
 
         # NestedInt (SymInt), constant SymBool, SymNode are hashable
-        j1 = torch._C._get_nested_int(1, 1)
-        j1_copy = torch._C._get_nested_int(1, 1)
-        j2 = torch._C._get_nested_int(2, 1)
+        metadata1 = {"_host_lengths": torch.tensor(1.0)}
+        cache1 = DictTensor(metadata1)
+        metadata2 = {"_host_lengths": torch.tensor(1.0)}
+        cache2 = DictTensor(metadata2)
+        j1 = torch.SymInt(NestedIntNode(cache1, 1))
+        j1_copy = torch.SymInt(NestedIntNode(cache1, 1))
+        j2 = torch.SymInt(NestedIntNode(cache2, 1))
         t = self.get_constant_bool(True)
         t_copy = self.get_constant_bool(True)
         f = self.get_constant_bool(False)
