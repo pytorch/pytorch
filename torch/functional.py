@@ -5,7 +5,7 @@ from collections.abc import Sequence
 from typing import Any, Optional, TYPE_CHECKING, Union
 
 import torch
-import torch.nn.functional as F
+import torch.nn.functional as F  # noqa: F401
 from torch import _VF, Tensor
 from torch._C import _add_docstr
 from torch._jit_internal import _overload as overload, boolean_dispatch
@@ -699,20 +699,14 @@ def stft(
             onesided=onesided,
             return_complex=return_complex,
         )
-    # NOTE: Do not edit. This code will be removed once the forward-compatibility
-    #       period is over for PR #73432
-    if center:
-        signal_dim = input.dim()
-        extended_shape = [1] * (3 - signal_dim) + list(input.size())
-        pad = int(n_fft // 2)
-        input = F.pad(input.view(extended_shape), [pad, pad], pad_mode)
-        input = input.view(input.shape[-signal_dim:])
     return _VF.stft(  # type: ignore[attr-defined]
         input,
         n_fft,
         hop_length,
         win_length,
         window,
+        center,
+        pad_mode,
         normalized,
         onesided,
         return_complex,
