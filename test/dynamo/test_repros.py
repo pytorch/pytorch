@@ -4082,6 +4082,13 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         x = torch.randn(4)
         self.assertEqual(fn(x), torch.sin(x))
 
+    def test_int_format(self):
+        def fn(num: int):
+            return format(num, "b")
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True, dynamic=False)
+        self.assertEqual(fn(10), opt_fn(10))
+
     # Repro of torch._dynamo.exc.InternalTorchDynamoError: 'NoneType' object has no attribute 'guards'
     # due to bad empty list handling
     def test_empty_list_contains_with_jump(self):
@@ -6302,7 +6309,7 @@ def forward(self, s0 : torch.SymInt, s1 : torch.SymInt, L_x_ : torch.Tensor):
             return g(x)
 
         # TODO clear this on all tests
-        torch._dynamo.eval_frame.dynamo_tls.traced_frame_infos.clear()
+        torch._dynamo.eval_frame.clear_dynamo_tls()
 
         opt_f = torch.compile(f, backend="eager", fullgraph=fullgraph, dynamic=False)
         opt_f(torch.randn(3))
