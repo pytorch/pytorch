@@ -6983,22 +6983,20 @@ xfail_hops_compile = {
     "map",  # assert type(args[1].realize()) is TensorVariable
     "scan",  # scan is not an OpOverload
     # inductor
-    "while",  # LoweringException: AssertionError
+    "while_loop",  # LoweringException: AssertionError
     "flex_attention",  # LoweringException: AssertionError
+    "flex_attention_backward",  # AssertionError: Input shapes should have M >= 16, N >= 16 and K >= 16
 }
 
 
 class TestHigherOrderOpsOpInfo(torch._dynamo.test_case.TestCase):
+    @requires_cuda
     @parametrize("backend", ("aot_eager", "inductor"))
     @ops(
         list(filter(lambda op: op.name not in xfail_hops_compile, hop_db)),
         allowed_dtypes=(torch.float,),
     )
     def test_hops_compile(self, device, dtype, op, backend):
-        # if device == "cuda" and not HAS_CUDA:
-        if True:
-            unittest.skipTest("requires cuda test")
-
         # Ensure HOPs can be compiled
         sample_inputs_itr = op.sample_inputs(
             device, dtype, requires_grad=op.supports_autograd
@@ -7020,7 +7018,7 @@ class TestHigherOrderOpsOpInfo(torch._dynamo.test_case.TestCase):
             self.assertEqual(eager_out, compiled_out)
 
 
-instantiate_device_type_tests(TestHigherOrderOpsOpInfo, globals())
+instantiate_device_type_tests(TestHigherOrderOpsOpInfo, globals(), only_for=("cuda",))
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
