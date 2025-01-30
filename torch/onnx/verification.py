@@ -773,7 +773,8 @@ def check_export_model_diff(
 
 
 @deprecated(
-    "torch.onnx.verification.* is deprecated. Consider using torch.onnx.export(..., dynamo=True) and use ONNXProgram to test the ONNX model",
+    "torch.onnx.verification.* is deprecated. Consider using torch.onnx.export(..., dynamo=True) "
+    "and use ONNXProgram to test the ONNX model",
     category=DeprecationWarning,
 )
 def verify(
@@ -864,7 +865,8 @@ def verify(
 
 
 @deprecated(
-    "torch.onnx.verification.* is deprecated. Consider using torch.onnx.export(..., dynamo=True) and use ONNXProgram to test the ONNX model",
+    "torch.onnx.verification.* is deprecated. Consider using torch.onnx.export(..., dynamo=True) "
+    "and use ONNXProgram to test the ONNX model",
     category=DeprecationWarning,
 )
 def verify_aten_graph(
@@ -1158,7 +1160,8 @@ class OnnxTestCaseRepro:
 
 
 @deprecated(
-    "torch.onnx.verification.* is deprecated. Consider using torch.onnx.export(..., dynamo=True) and use ONNXProgram to test the ONNX model",
+    "torch.onnx.verification.* is deprecated. Consider using torch.onnx.export(..., dynamo=True) "
+    "and use ONNXProgram to test the ONNX model",
     category=DeprecationWarning,
 )
 @dataclasses.dataclass
