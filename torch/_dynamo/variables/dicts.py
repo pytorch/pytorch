@@ -11,7 +11,7 @@ from ..bytecode_transformation import create_call_function, create_instruction
 from ..exc import raise_observed_exception, unimplemented
 from ..guards import GuardBuilder, install_guard
 from ..source import is_from_local_source
-from ..utils import cmp_name_to_op_mapping, dict_keys, dict_values, specialize_symnode
+from ..utils import dict_keys, dict_values, specialize_symnode
 from .base import ValueMutationNew, VariableTracker
 from .constant import ConstantVariable
 
@@ -753,9 +753,7 @@ class DictKeySetVariable(SetVariable):
         return dict_keys
 
     def as_python_constant(self):
-        return dict.fromkeys(
-            {k.vt.as_python_constant() for k in self.set_items}, None
-        ).keys()
+        unimplemented("DictKeySetVariable.as_python_constant")
 
     def call_method(
         self,
@@ -841,12 +839,6 @@ class DictKeysVariable(DictViewVariable):
     ) -> "VariableTracker":
         if name == "__contains__":
             return self.dv_dict.call_method(tx, name, args, kwargs)
-        if name in cmp_name_to_op_mapping:
-            if not isinstance(args[0], (SetVariable, DictKeysVariable)):
-                return ConstantVariable.create(NotImplemented)
-            return ConstantVariable.create(
-                cmp_name_to_op_mapping[name](self.set_items, args[0].set_items)
-            )
         return super().call_method(tx, name, args, kwargs)
 
 
