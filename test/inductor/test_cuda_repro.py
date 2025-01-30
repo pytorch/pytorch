@@ -151,6 +151,32 @@ class CudaReproTests(TestCase):
         # dont check rng state
         self.assertEqual(out[:2], fn(query, key, value, input_tensor2)[:2])
 
+    def test_effn_attn_bias_padding_misaligned(self):
+        seqlen_start = 1008
+
+        for offset in range(-1, 2):
+            seqlen = seqlen_start + offset
+            torch._dynamo.reset()
+
+            bsz = 32
+            q = torch.randn(bsz, 16, seqlen, 64, dtype=torch.bfloat16, device="cuda")
+            k = torch.randn(bsz, 16, seqlen, 64, dtype=torch.bfloat16, device="cuda")
+            v = torch.randn(bsz, 16, seqlen, 64, dtype=torch.bfloat16, device="cuda")
+            mask = torch.ones([bsz, 1, seqlen, seqlen], dtype=torch.bool, device="cuda")
+            inputs = [q, k, v, mask]
+
+            def f(q, k, v, mask):
+                return F.scaled_dot_product_attention(
+                    q, k, v, attn_mask=mask, dropout_p=0.0
+                )
+
+            f_compiled = torch.compile(f)
+
+            out, code = run_and_get_code(f_compiled, *inputs)
+            # padded bias should have an expanded dim
+            FileCheck().check("buf0 =").check_same(", 0, ").run(code[0])
+            self.assertEqual(out, f(*inputs))
+
     @skipIfRocm
     def test_input_channels_last(self):
         m = torch.nn.Sequential(

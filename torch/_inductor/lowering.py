@@ -2515,12 +2515,15 @@ def sdpa_constraint(fx_node, *args, **kwargs):
             out_size = list(arg.get_size())
 
             expanded_dims = []
-            if arg.maybe_get_stride() is not None:
-                # We require a dense last dimension, but the other strides
-                # can be expanded, which results in a smaller tensor
-                for i, s in enumerate(arg.get_stride()[0:-1]):
-                    if V.graph.sizevars.statically_known_equals(s, 0):
-                        expanded_dims.append(i)
+            # We require a dense last dimension, but the other strides
+            # can be expanded, which results in a smaller tensor
+            maybe_stride = arg.maybe_get_stride()
+            for i in range(len(arg.get_size()) - 1):
+                if V.graph.sizevars.statically_known_equals(meta_stride_expr[i], 0) or (
+                    maybe_stride is not None
+                    and V.graph.sizevars.statically_known_equals(maybe_stride[i], 0)
+                ):
+                    expanded_dims.append(i)
 
             # Now, pad strides to alignment
             out_strides = [-1] * len(out_size)
