@@ -369,7 +369,7 @@ def generate_wheels_matrix(
                 continue
 
             if use_split_build and (
-                (arch_version not in CUDA_ARCHES and arch_version != "cpu") 
+                (arch_version not in CUDA_ARCHES and arch_version != "cpu")
                 or os != "linux"
             ):
                 raise RuntimeError(
