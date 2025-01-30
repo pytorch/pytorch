@@ -248,7 +248,6 @@ class NNModuleVariable(VariableTracker):
         )
 
     def var_getattr(self, tx: "InstructionTranslator", name):
-        print("VAR_GETAATTR")
         source = self.source and AttrSource(self.source, name)
 
         base = tx.output.get_submodule(self.module_key)
@@ -287,9 +286,8 @@ class NNModuleVariable(VariableTracker):
                 )
                 if result is not None:
                     return result
-                # if we can't find a __getattr__, we can't parse this, raise unimplemented
-                print("HIT IT")
-                unimplemented(f"missing attribute {name} - {typestr(base)}")
+                # if we can't find a __getattr__, just raise the AttributeError
+                raise
 
         if name == "forward":
             guard_to_detect_forward_monkeypatching(self.source, base)
