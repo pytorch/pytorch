@@ -3761,15 +3761,6 @@ known_failing_tests = {
     "test_dtensor_partial_placement_graph_output",
     "test_tp_compile_comm_reordering",
     "test_unwrap_async_collective_tensor_tangent",
-    # Category: Higher Order Ops
-    # # AssertionError: Tensor-likes are not close!
-    "inductor.test_compiled_autograd.TestCompiledAutogradOpInfoCPU.test_hops_in_bwd_auto_functionalize_simple_cpu_float32",
-    # # BypassAOTAutogradCache: Cannot cache a graph with compiled autograd enabled
-    "inductor.test_compiled_autograd.TestCompiledAutogradOpInfoCPU.test_hops_in_bwd_invoke_subgraph_simple_cpu_float32",
-    # # AssertionError: assert type(args[1].realize()) is TensorVariable
-    "inductor.test_compiled_autograd.TestCompiledAutogradOpInfoCPU.test_hops_in_bwd_map_nested_cpu_float32",
-    "inductor.test_compiled_autograd.TestCompiledAutogradOpInfoCPU.test_hops_in_bwd_map_simple_cpu_float32",
-    "inductor.test_compiled_autograd.TestCompiledAutogradOpInfoCPU.test_hops_in_bwd_map_triple_nested_cpu_float32",
     # Uncategorized
     "test_not_implemented_grad",  # Dynamo changes the types of exceptions
 }
@@ -3792,6 +3783,15 @@ if torch.distributed.is_available() and HAS_CUDA:
         test_dtensor.TestDTensorCompile
     )
 
+xfail_hops = {
+    # AssertionError: Tensor-likes are not close!
+    "auto_functionalize",
+    # BypassAOTAutogradCache: Cannot cache a graph with compiled autograd enabled
+    "invoke_subgraph",
+    # AssertionError: assert type(args[1].realize()) is TensorVariable
+    "map",
+}
+
 
 class TestCompiledAutogradOpInfo(TestCase):
     def setUp(self) -> None:
@@ -3802,11 +3802,11 @@ class TestCompiledAutogradOpInfo(TestCase):
         super(TestCase, self).tearDown()
         reset()
 
-    @ops(hop_db, allowed_dtypes=(torch.float,))
+    @ops(
+        list(filter(lambda op: op.name not in xfail_hops, hop_db)),
+        allowed_dtypes=(torch.float,),
+    )
     def test_hops_in_bwd(self, device, dtype, op):
-        if self.id() in known_failing_tests:
-            unittest.skipTest("Expected to fail.")
-
         def create_bwd_fn_closure(op_args, op_kwargs):
             op_out_ref = []
 
