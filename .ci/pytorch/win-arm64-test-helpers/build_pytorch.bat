@@ -1,3 +1,4 @@
+:: TODO: we may can use existing build_pytorch.bat for arm64
 if "%DEBUG%" == "1" (
   set BUILD_TYPE=debug
 ) ELSE (
@@ -17,36 +18,50 @@ set INSTALLER_DIR=%SCRIPT_HELPERS_DIR%\installation-helpers
 @echo on
 popd
 
+:: environment variables
 :: The default sccache idle timeout is 600, which is too short and leads to intermittent build errors.
 set SCCACHE_IDLE_TIMEOUT=0
 set SCCACHE_IGNORE_SERVER_IO_ERROR=1
-sccache --stop-server
-sccache --start-server
-sccache --zero-stats
+set CMAKE_BUILD_TYPE=%BUILD_TYPE%
 set CMAKE_C_COMPILER_LAUNCHER=sccache
 set CMAKE_CXX_COMPILER_LAUNCHER=sccache
-
-:: environment variables
-set BLAS=APL
-set USE_LAPACK=1
-set CMAKE_BUILD_TYPE=%BUILD_TYPE%
+set libuv_ROOT=%DEPENDENCIES_DIR%\libuv\install
+set MSSdk=1
 if defined PYTORCH_BUILD_VERSION (
   set PYTORCH_BUILD_VERSION=%PYTORCH_BUILD_VERSION%
   set PYTORCH_BUILD_NUMBER=1
 )
 
-:: Print all existing environment variable for debugging
-set
+:: Set BLAS type
+if %ENABLE_APL% == 1 (
+    set BLAS=APL
+    set USE_LAPACK=1
+) else if %ENABLE_OPENBLAS% == 1 (
+    set BLAS=OpenBLAS
+    set OpenBLAS_HOME=%DEPENDENCIES_DIR%\OpenBLAS\install
+)
 
 :: activate visual studio
-call "%DEPENDENCIES_DIR%\VSBuildTools\VC\Auxiliary\Build\vcvarsall.bat" arm64 -vcvars_ver=%MSVC_VERSION%
+call "%DEPENDENCIES_DIR%\VSBuildTools\VC\Auxiliary\Build\vcvarsall.bat" arm64
 where cl.exe
+
+:: change to source directory
+cd %PYTORCH_ROOT%
+
+:: copy libuv.dll
+copy %libuv_ROOT%\lib\Release\uv.dll torch\lib\uv.dll
 
 :: create virtual environment
 python -m venv .venv
 echo * > .venv\.gitignore
 call .\.venv\Scripts\activate
 where python
+
+:: Print all existing environment variable for debugging
+set
+sccache --stop-server
+sccache --start-server
+sccache --zero-stats
 
 python setup.py bdist_wheel
 if errorlevel 1 goto fail
@@ -63,6 +78,8 @@ python -c "import os, glob; os.system('python -mpip install --no-index --no-deps
     python tools/stats/export_test_times.py
     robocopy /E ".additional_ci_files" "%PYTORCH_FINAL_PACKAGE_DIR%\.additional_ci_files"
 
+    :: Also save build/.ninja_log as an artifact
+    copy /Y "build\.ninja_log" "%PYTORCH_FINAL_PACKAGE_DIR%\"
   )
 )
 

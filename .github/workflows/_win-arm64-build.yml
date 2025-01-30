@@ -56,8 +56,13 @@ on:
 env:
   GIT_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
   PYTHON_VERSION: "3.12"
+  PYTORCH_ROOT: ${{ github.workspace }}/pytorch
   DOWNLOADS_DIR: c:\temp\downloads
   DEPENDENCIES_DIR: c:\temp\dependencies
+  ENABLE_APL: 1
+  ENABLE_OPENBLAS: 0
+  MSVC_VERSION: latest
+  BUILD_TYPE: release
 
 jobs:
   build:
@@ -71,12 +76,17 @@ jobs:
       run:
         shell: bash
     steps:
+      - name: Configure AWS credentials(PyTorch account)
+        uses: aws-actions/configure-aws-credentials@v3
+        with:
+          role-to-assume: arn:aws:iam::308535385114:role/gha_workflow_s3_ossci_linux_windows_read_write
+          aws-region: us-east-1
       - name: Git checkout PyTorch
         uses: actions/checkout@v4
         with:
-          repository:  "iremyux/pytorch"
+          repository: "iremyux/pytorch"
           ref: "nightly-for-win-arm64"
-          path: pytorch 
+          path: pytorch
       - name: Bootstrap Git
         shell: cmd
         run: |
@@ -91,7 +101,7 @@ jobs:
           repository:  "iremyux/pytorch"
           ref: "nightly-for-win-arm64"
           path: "%PYTORCH_ROOT%"
-          submodules: recursive      
+          submodules: recursive
       - name: Bootstrap Python
         shell: cmd        
         run: |
@@ -112,6 +122,22 @@ jobs:
         shell: cmd
         run: |
           "pytorch/.ci/pytorch/windows/arm64/bootstrap_sccache.bat"
+      - name: Bootstrap Libuv
+        shell: cmd
+        run: |
+          "pytorch/.ci/pytorch/windows/arm64/bootstrap_libuv.bat"
+
+      - name: Parse ref
+        id: parse-ref
+        shell: bash
+        run: python3 pytorch/.github/scripts/parse_ref.py
+      - name: Get workflow job id
+        id: get-job-id
+        uses: pytorch/.github/actions/get-workflow-job-id
+        if: always()
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
       - name: Build
         id: build
         shell: bash
