@@ -134,6 +134,8 @@ class Verifier(metaclass=_VerifierMeta):
             operator.pow,
             operator.neg,
             operator.abs,
+            operator.lshift,
+            operator.rshift,
             math.ceil,
             math.floor,
             math.trunc,
