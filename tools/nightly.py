@@ -122,6 +122,7 @@ PIP_SOURCES = {
         supported_platforms={"Linux", "macOS", "Windows"},
         accelerator="cpu",
     ),
+    # NOTE: Sync with CUDA_ARCHES in .github/scripts/generate_binary_build_matrix.py
     "cuda-11.8": PipSource(
         name="cuda-11.8",
         index_url=f"{PYTORCH_NIGHTLY_PIP_INDEX_URL}/cu118",
@@ -140,9 +141,10 @@ PIP_SOURCES = {
         supported_platforms={"Linux", "Windows"},
         accelerator="cuda",
     ),
-    "rocm-6.2": PipSource(
-        name="rocm-6.2",
-        index_url=f"{PYTORCH_NIGHTLY_PIP_INDEX_URL}/rocm6.2",
+    # NOTE: Sync with ROCM_ARCHES in .github/scripts/generate_binary_build_matrix.py
+    "rocm-6.2.4": PipSource(
+        name="rocm-6.2.4",
+        index_url=f"{PYTORCH_NIGHTLY_PIP_INDEX_URL}/rocm6.2.4",
         supported_platforms={"Linux"},
         accelerator="rocm",
     ),

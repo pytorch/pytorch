@@ -1,35 +1,20 @@
 # mypy: allow-untyped-defs
-import _collections_abc
-import _weakrefset
-import abc
 import builtins
 import collections
 import copy
-import copyreg
 import dataclasses
-import enum
 import functools
 import importlib
 import inspect
-import linecache
-import logging
-import multiprocessing
 import operator
 import os
-import posixpath
 import random
 import re
-import selectors
-import signal
 import sys
-import tempfile
-import threading
-import tokenize
 import traceback
 import types
 import typing
 import unittest
-import weakref
 from collections import defaultdict
 from pathlib import Path
 from typing import Any, Callable, cast, Optional, Union
@@ -3157,32 +3142,13 @@ def is_numpy_type_info(obj) -> bool:
 
 
 BUILTIN_SKIPLIST = (
-    abc,
     collections,
     copy,
-    copyreg,
-    enum,
-    importlib,
     inspect,
-    linecache,
-    logging,
-    multiprocessing,
-    operator,
-    posixpath,
     random,
-    re,
-    selectors,
-    signal,
-    tempfile,
-    threading,
-    tokenize,
-    traceback,
     types,
-    typing,
+    traceback,
     unittest,
-    weakref,
-    _collections_abc,
-    _weakrefset,
 )
 
 # third party libraries skiplist is defined by str, because users may not use these libraries.
@@ -3276,6 +3242,7 @@ if torch.distributed.is_available():
 MOD_INLINELIST = [
     "torch._decomp",
     "torch._dynamo._trace_wrapped_higher_order_op",
+    "torch._dynamo.compiled_autograd",
     "torch._dynamo.comptime",
     "torch._dynamo.polyfills",
     "torch._functorch._aot_autograd.subclass_parametrization",
