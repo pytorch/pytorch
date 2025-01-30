@@ -4523,6 +4523,16 @@ class TestSerialization(TestCase, SerializationMixin):
             finally:
                 serialization_config.save.use_pinned_memory_for_d2h = pinned_before
 
+    def test_has_format_version(self):
+        sd = torch.nn.Linear(2, 3).state_dict()
+        with tempfile.NamedTemporaryFile() as f:
+            torch.save(sd, f)
+            f.seek(0)
+            with torch.serialization._open_file_like(f, "rb") as opened_file:
+                with torch.serialization._open_zipfile_reader(opened_file) as opened_zipfile:
+                    self.assertTrue(opened_zipfile.has_record(".format_version"))
+                    self.assertEqual(opened_zipfile.get_record(".format_version"), b'1')
+
 
     def run(self, *args, **kwargs):
         with serialization_method(use_zip=True):
