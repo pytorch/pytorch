@@ -6,6 +6,7 @@
 import dataclasses
 import gc
 import itertools
+import types
 import unittest
 import weakref
 from collections import defaultdict, namedtuple, OrderedDict
@@ -796,6 +797,44 @@ class DictTests(torch._dynamo.test_case.TestCase):
 
         f = nothing
         self.assertEqual(fn(x, f), opt_fn(x, f))
+
+    def test_mapping_proxy_for_local(self):
+        def fn(x):
+            d = {"a": 2, "b": 3, "c": 5 * x}
+            mp = types.MappingProxyType(d)
+            y = torch.sin(x * mp["a"])
+            for k, v in mp.items():
+                y += torch.cos(x * v)
+            return mp
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        x = torch.randn(4)
+        ref = fn(x)
+        res = opt_fn(x)
+        self.assertEqual(ref, res)
+        self.assertTrue(type(res) is types.MappingProxyType)
+
+    def test_mapping_proxy_for_nonlocal(self):
+        d = {"a": 2, "b": 3, "c": 5}
+
+        def fn(x):
+            mp = types.MappingProxyType(d)
+            y = torch.sin(x * mp["a"])
+            for k, v in mp.items():
+                y += torch.cos(x * v)
+            d["d"] = 4
+            return mp
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        x = torch.randn(4)
+        ref = fn(x)
+        res = opt_fn(x)
+        self.assertEqual(ref, res)
+        self.assertTrue(type(res) is types.MappingProxyType)
+
+        # check update to d is reflected in res
+        d["e"] = 5
+        self.assertEqual(d["e"], res["e"])
 
 
 if __name__ == "__main__":
