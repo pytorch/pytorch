@@ -6,7 +6,6 @@
 #include <ATen/cuda/CUDAContext.h>
 #include <c10/cuda/CUDACachingAllocator.h>
 #include <c10/cuda/CUDAGuard.h>
-#include <c10/util/env.h>
 #include <c10/util/error.h>
 
 #if !defined(USE_ROCM) && defined(PYTORCH_C10_DRIVER_API_SUPPORTED)
@@ -178,10 +177,10 @@ class IpcChannel {
 
  private:
   static std::string get_socket_name(int pid) {
-    std::string tmp_dir = "/tmp";
+    const char* tmp_dir = "/tmp";
     for (const char* env_var : {"TMPDIR", "TMP", "TEMP", "TEMPDIR"}) {
-      if (const auto path = c10::utils::get_env(env_var)) {
-        tmp_dir = path.value();
+      if (const char* path = getenv(env_var)) {
+        tmp_dir = path;
         break;
       }
     }
@@ -818,8 +817,6 @@ c10::intrusive_ptr<SymmetricMemory> CUDASymmetricMemoryAllocator::rendezvous(
   if (it != block->symm_mems.end()) {
     return it->second;
   }
-
-  c10::cuda::CUDAGuard guard(block->device_idx);
 
   IpcChannel ipc_channel;
   auto group_info = get_group_info(group_name_);

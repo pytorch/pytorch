@@ -15,14 +15,44 @@ concurrency:
 permissions: read-all
 
 jobs:
-  get-label-type:
-    name: get-label-type
-    uses: pytorch/pytorch/.github/workflows/_runner-determinator.yml@main
-    if: ${{ (github.event_name != 'schedule' || github.repository == 'pytorch/pytorch') && github.repository_owner == 'pytorch' }}
-    with:
-      triggering_actor: ${{ github.triggering_actor }}
-      issue_owner: ${{ github.event.pull_request.user.login || github.event.issue.user.login }}
-      curr_branch: ${{ github.head_ref || github.ref_name }}
-      curr_ref_type: ${{ github.ref_type }}
+  target-determination:
+    if: github.repository_owner == 'pytorch'
+    name: before-test
+    uses: ./.github/workflows/target_determination.yml
+    permissions:
+      id-token: write
+      contents: read
 
-  # Build and test jobs moved to unstable.yml to make CI green. Jobs will be moved back when MI300 runners are better isolated from each other.
+  linux-focal-rocm6_3-py3_10-build:
+    if: ${{ (github.event_name != 'schedule' || github.repository == 'pytorch/pytorch') && github.repository_owner == 'pytorch' }}
+    name: linux-focal-rocm6.3-py3.10
+    uses: ./.github/workflows/_linux-build.yml
+    with:
+      build-environment: linux-focal-rocm6.3-py3.10
+      docker-image-name: pytorch-linux-focal-rocm-n-py3
+      sync-tag: rocm-build
+      test-matrix: |
+        { include: [
+          { config: "default", shard: 1, num_shards: 6, runner: "linux.rocm.gpu.mi300.2" },
+          { config: "default", shard: 2, num_shards: 6, runner: "linux.rocm.gpu.mi300.2" },
+          { config: "default", shard: 3, num_shards: 6, runner: "linux.rocm.gpu.mi300.2" },
+          { config: "default", shard: 4, num_shards: 6, runner: "linux.rocm.gpu.mi300.2" },
+          { config: "default", shard: 5, num_shards: 6, runner: "linux.rocm.gpu.mi300.2" },
+          { config: "default", shard: 6, num_shards: 6, runner: "linux.rocm.gpu.mi300.2" },
+        ]}
+    secrets: inherit
+
+  linux-focal-rocm6_3-py3_10-test:
+    permissions:
+      id-token: write
+      contents: read
+    name: linux-focal-rocm6.3-py3.10
+    uses: ./.github/workflows/_rocm-test.yml
+    needs:
+      - linux-focal-rocm6_3-py3_10-build
+      - target-determination
+    with:
+      build-environment: linux-focal-rocm6.3-py3.10
+      docker-image: ${{ needs.linux-focal-rocm6_3-py3_10-build.outputs.docker-image }}
+      test-matrix: ${{ needs.linux-focal-rocm6_3-py3_10-build.outputs.test-matrix }}
+    secrets: inherit

@@ -4,7 +4,7 @@ from __future__ import annotations
 import io
 import logging
 import os
-from typing import IO, TYPE_CHECKING
+from typing import TYPE_CHECKING
 
 import torch
 from torch.onnx import _type_utils as jit_type_utils
@@ -12,8 +12,6 @@ from torch.onnx import _type_utils as jit_type_utils
 
 if TYPE_CHECKING:
     import onnx
-
-    from torch.types import FileLike
 
 log = logging.getLogger(__name__)
 
@@ -119,7 +117,7 @@ def save_model_with_external_data(
     basepath: str,
     model_location: str,
     initializer_location: str,
-    torch_state_dicts: tuple[dict | FileLike, ...],
+    torch_state_dicts: tuple[dict | str | io.BytesIO, ...],
     onnx_model: onnx.ModelProto,  # type: ignore[name-defined]
     rename_initializer: bool = False,
 ) -> None:
@@ -167,9 +165,7 @@ def save_model_with_external_data(
             # Using torch.save wouldn't leverage mmap, leading to higher memory usage
             state_dict = el
         else:
-            if isinstance(el, (str, os.PathLike)) and os.fspath(el).endswith(
-                ".safetensors"
-            ):
+            if isinstance(el, str) and el.endswith(".safetensors"):
                 state_dict = _convert_safetensors_to_torch_format(el)
             else:
                 try:
@@ -177,16 +173,14 @@ def save_model_with_external_data(
                     # The underlying torch.UntypedStorage is memory mapped, so state_dict is lazy loaded
                     state_dict = torch.load(el, map_location="cpu", mmap=True)
                 except (RuntimeError, ValueError) as e:
-                    if "mmap can only be used with files saved with" in str(e) or (
-                        isinstance(el, (io.IOBase, IO))
-                        and el.readable()
-                        and el.seekable()
-                    ):
+                    if "mmap can only be used with files saved with" in str(
+                        e
+                    ) or isinstance(el, io.BytesIO):
                         log.warning(
                             "Failed to load the checkpoint with memory-map enabled, retrying without memory-map."
                             "Consider updating the checkpoint with mmap by using torch.save() on PyTorch version >= 1.6."
                         )
-                        if isinstance(el, (io.IOBase, IO)):
+                        if isinstance(el, io.BytesIO):
                             el.seek(0)  # torch.load from `try:` has read the file.
                         state_dict = torch.load(el, map_location="cpu")
                     else:

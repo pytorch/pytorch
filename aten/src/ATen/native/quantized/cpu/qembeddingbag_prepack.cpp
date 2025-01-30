@@ -47,7 +47,8 @@ c10::intrusive_ptr<EmbeddingPackedParamsBase> PackedEmbeddingBagWeight::prepack(
   at::Tensor weight_contig =
       qweight.contiguous(qweight.suggest_memory_format());
 
-  int bit_width = 0, scale_bias_bytes = 0;
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
+  int bit_width, scale_bias_bytes;
   uint8_t* weight_data = static_cast<uint8_t*>(weight_contig.data_ptr());
   if (qweight.scalar_type() == c10::kQUInt8) {
     bit_width = 8;
@@ -435,7 +436,8 @@ Tensor _qembeddingbag_nbit_prepack_helper(
       const float* input_row = weight_data + row * embedding_cols;
       std::uint8_t* output_row = output_data + row * output_columns;
 
-      float Xmin = std::numeric_limits<float>::quiet_NaN(), Xmax = std::numeric_limits<float>::quiet_NaN();
+      // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
+      float Xmin, Xmax;
       if (optimized_qparams) {
         auto [xmax_tensor, xmin_tensor] = at::choose_qparams_optimized(
             float_weight[row], embedding_cols, nbins, ratio, bit_width);

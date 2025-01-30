@@ -6,7 +6,7 @@ import re
 import sys
 import tempfile
 from pathlib import Path
-from typing import Any
+from typing import Any, Dict, List, Tuple
 
 import requests
 from gitutils import retries_decorator
@@ -76,7 +76,7 @@ DISABLED_TESTS_JSON = (
 
 
 @retries_decorator()
-def query_db(query: str, params: dict[str, Any]) -> list[dict[str, Any]]:
+def query_db(query: str, params: Dict[str, Any]) -> List[Dict[str, Any]]:
     return query_clickhouse(query, params)
 
 
@@ -97,7 +97,7 @@ def download_log_worker(temp_dir: str, id: int, name: str) -> None:
         f.write(data)
 
 
-def printer(item: tuple[str, tuple[int, str, list[Any]]], extra: str) -> None:
+def printer(item: Tuple[str, Tuple[int, str, List[Any]]], extra: str) -> None:
     test, (_, link, _) = item
     print(f"{link:<55} {test:<120} {extra}")
 
@@ -120,8 +120,8 @@ def close_issue(num: int) -> None:
 
 
 def check_if_exists(
-    item: tuple[str, tuple[int, str, list[str]]], all_logs: list[str]
-) -> tuple[bool, str]:
+    item: Tuple[str, Tuple[int, str, List[str]]], all_logs: List[str]
+) -> Tuple[bool, str]:
     test, (_, link, _) = item
     # Test names should look like `test_a (module.path.classname)`
     reg = re.match(r"(\S+) \((\S*)\)", test)

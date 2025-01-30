@@ -55,17 +55,6 @@ def hash_stack(stack: list[dict[str, str]]) -> str:
     return ";".join(f'line: {s["line"]} filename: {s["filename"]}' for s in stack)
 
 
-def get_loc(filename: str, lineno: int) -> Optional[str]:
-    try:
-        with open(filename) as f:
-            for i, line in enumerate(f):
-                if i == lineno - 1:
-                    return line.strip()
-    except FileNotFoundError:
-        pass
-    return None
-
-
 class FailureReport:
     def __init__(
         self, failure_type: FailureType, data: dict[str, Any], xfail: bool = False
@@ -101,18 +90,10 @@ class FailureReport:
 """
 
         elif self.failure_type == FailureType.DATA_DEPENDENT_ERROR:
-            loc = None
-            if self.data["stack"]:
-                frame = self.data["stack"][-1]
-                loc = (
-                    f"`{get_loc(str_to_filename[frame['filename']], frame['line'])}`"
-                    or ""
-                )
             return f"""Data dependent error.
-    When exporting, we were unable to evaluate the value of `{self.data["expr"]}`.
+    When exporting, we were unable to figure out if the expression `{self.data["expr"]}` always holds.
     This was encountered {self.data["occurrences"]} times.
-    This occurred at the following stacktrace: {prettify_stack(self.data["stack"], str_to_filename)}:
-        {loc}
+    This occurred at the following stacktrace: {prettify_stack(self.data["stack"], str_to_filename)}.
     As a result, it was specialized to a constant (e.g. `{self.data["result"]}` in the 1st occurrence), and asserts were inserted into the graph.
 
     Please add `torch._check(...)` to the original code to assert this data-dependent assumption.

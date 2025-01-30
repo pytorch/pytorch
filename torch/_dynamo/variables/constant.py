@@ -7,7 +7,7 @@ import torch
 from torch._dynamo.source import AttrSource, GetItemSource
 
 from .. import variables
-from ..exc import raise_observed_exception, unimplemented
+from ..exc import unimplemented
 from ..utils import common_constant_types, istype, np
 from .base import typestr, VariableTracker
 
@@ -153,10 +153,7 @@ its type to `common_constant_types`.
 
         if isinstance(self.value, str) and name in str.__dict__.keys():
             method = getattr(self.value, name)
-            try:
-                return ConstantVariable.create(method(*const_args, **const_kwargs))
-            except Exception as e:
-                raise_observed_exception(type(e), tx)
+            return ConstantVariable.create(method(*const_args, **const_kwargs))
         elif isinstance(self.value, (float, int)):
             if not (args or kwargs):
                 return ConstantVariable.create(getattr(self.value, name)())

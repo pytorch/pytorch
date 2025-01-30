@@ -224,7 +224,7 @@ def assign_memory_planning_info_for_scheduler_nodes(
             elif dep.name in name_to_freeable_input_buf:
                 pred_buffers.add(name_to_freeable_input_buf[dep.name])
         pred_nodes = OrderedSet(
-            name_to_fused_node[pred_buffer.defining_op_name()]
+            name_to_fused_node[pred_buffer.defining_op.get_name()]
             for pred_buffer in pred_buffers
             if (isinstance(pred_buffer, SchedulerBuffer))
         )

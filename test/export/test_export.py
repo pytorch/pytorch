@@ -9477,8 +9477,8 @@ def forward(self, p_bar_linear_weight, p_bar_linear_bias, x):
             torch.tensor([12]),
         )
         spec = {
-            "x": (Dim.AUTO, Dim.AUTO),
-            "t": (Dim.AUTO,),
+            "x": (Dim.AUTO, Dim.STATIC),
+            "t": (Dim.STATIC,),
         }
         ep = export(Model(), inp, dynamic_shapes=spec)
         self.assertTrue(torch.allclose(Model()(*inp), ep.module()(*inp)))
