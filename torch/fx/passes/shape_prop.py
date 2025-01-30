@@ -1,7 +1,7 @@
 # mypy: ignore-errors
 
 import traceback
-from typing import Any, Dict, NamedTuple, Optional, Tuple
+from typing import Any, NamedTuple, Optional
 
 import torch
 import torch.fx
@@ -24,12 +24,12 @@ class TensorMetadata(NamedTuple):
     shape: torch.Size
     dtype: torch.dtype
     requires_grad: bool
-    stride: Tuple[int, ...]
+    stride: tuple[int, ...]
     memory_format: Optional[torch.memory_format]
 
     # Quantization metadata
     is_quantized: bool
-    qparams: Dict[str, Any]
+    qparams: dict[str, Any]
 
 
 def _extract_tensor_metadata(
@@ -57,7 +57,7 @@ def _extract_tensor_metadata(
                 break
 
     is_quantized = result.is_quantized
-    qparams: Dict[str, Any] = {}
+    qparams: dict[str, Any] = {}
     if is_quantized:
         qscheme = result.qscheme()
         qparams["qscheme"] = qscheme
