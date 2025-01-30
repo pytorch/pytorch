@@ -139,9 +139,9 @@ class StateDictOptions:
 
 @dataclass
 class _StateDictInfo(StateDictOptions):
-    fqn_param_mapping: dict[Union[str, torch.Tensor], Union[FQNS_T, torch.Tensor]] = (
-        field(default_factory=dict)
-    )
+    fqn_param_mapping: dict[
+        Union[str, torch.Tensor], Union[FQNS_T, torch.Tensor]
+    ] = field(default_factory=dict)
     shared_params_mapping: dict[
         Union[str, torch.Tensor], Union[FQNS_T, torch.Tensor]
     ] = field(default_factory=dict)
@@ -229,7 +229,7 @@ class _EXTRA_STATE:
 
 
 def _iterate_valid_model_state(model, fqn_prefix_modifiers="fqn_modifiers"):
-    visited_modules: Set[nn.Module] = set()
+    visited_modules: set[nn.Module] = set()
 
     def recurse(module: nn.Module, curr_fqn: str) -> Generator:
         visited_modules.add(module)
@@ -292,9 +292,9 @@ def _verify_options(
 
     options = options or StateDictOptions()
 
-    fqn_param_mapping: dict[Union[str, torch.Tensor], Union[set[str], torch.Tensor]] = (
-        {}
-    )
+    fqn_param_mapping: dict[
+        Union[str, torch.Tensor], Union[set[str], torch.Tensor]
+    ] = {}
     shared_params_mapping: dict[
         Union[str, torch.Tensor], Union[set[str], torch.Tensor]
     ] = {}
