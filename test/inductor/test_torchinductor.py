@@ -57,6 +57,7 @@ from torch._inductor.utils import (
     run_and_get_kernels,
     run_and_get_triton_code,
     run_fw_bw_and_get_code,
+    triton_version_uses_attrs_dict,
 )
 from torch._inductor.virtualized import V
 from torch._prims_common import is_integer_dtype
@@ -200,40 +201,43 @@ def _large_cumprod_input(shape, dim, dtype, device):
     return (t * sign).to(dtype)
 
 
-def define_custom_op_for_test(id_, fn_cpu, fn_cuda, fn_xpu, fn_meta, tags=()):
+def define_custom_op_for_test(id_, fn, fn_meta, tags=()):
     global libtest
     global ids
     if id_ not in ids:
         libtest.define(f"{id_}(Tensor self) -> Tensor", tags=tags)
-        libtest.impl(id_, fn_cpu, "CPU")
-        libtest.impl(id_, fn_cuda, "CUDA")
-        libtest.impl(id_, fn_xpu, "XPU")
+        libtest.impl(id_, fn, "CPU")
+        libtest.impl(id_, fn, "CUDA")
+        libtest.impl(id_, fn, "XPU")
+        libtest.impl(id_, fn, "MPS")
         libtest.impl(id_, fn_meta, "Meta")
         ids.add(id_)
 
 
-def define_custom_op_2_for_test(id_, fn_cpu, fn_cuda, fn_xpu, fn_meta, tags=()):
+def define_custom_op_2_for_test(id_, fn, fn_meta, tags=()):
     global libtest
     global ids
     if id_ not in ids:
         libtest.define(
             f"{id_}(Tensor self, float scale) -> (Tensor, Tensor)", tags=tags
         )
-        libtest.impl(id_, fn_cpu, "CPU")
-        libtest.impl(id_, fn_cuda, "CUDA")
-        libtest.impl(id_, fn_xpu, "XPU")
+        libtest.impl(id_, fn, "CPU")
+        libtest.impl(id_, fn, "CUDA")
+        libtest.impl(id_, fn, "XPU")
+        libtest.impl(id_, fn, "MPS")
         libtest.impl(id_, fn_meta, "Meta")
         ids.add(id_)
 
 
-def define_custom_op_3_for_test(id_, fn_cpu, fn_cuda, fn_xpu, fn_meta, tags=()):
+def define_custom_op_3_for_test(id_, fn, fn_meta, tags=()):
     global libtest
     global ids
     if id_ not in ids:
         libtest.define(f"{id_}(Tensor[] x) -> Tensor", tags=tags)
-        libtest.impl(id_, fn_cpu, "CPU")
-        libtest.impl(id_, fn_cuda, "CUDA")
-        libtest.impl(id_, fn_xpu, "XPU")
+        libtest.impl(id_, fn, "CPU")
+        libtest.impl(id_, fn, "CUDA")
+        libtest.impl(id_, fn, "XPU")
+        libtest.impl(id_, fn, "MPS")
         libtest.impl(id_, fn_meta, "Meta")
         ids.add(id_)
 
@@ -6471,10 +6475,17 @@ class CommonTemplate:
         def fn(x):
             return torch.log(x), torch.log2(x)
 
-        self.common(
-            fn,
-            (torch.randn([1024], dtype=torch.float64) + 10,),
+        _dtype = torch.float64
+        ctx = (
+            contextlib.nullcontext()
+            if self.is_dtype_supported(_dtype)
+            else self.assertRaises(TypeError)
         )
+        with ctx:
+            self.common(
+                fn,
+                (torch.randn([1024], dtype=_dtype) + 10,),
+            )
 
     def test_bitwise(self):
         def fn(x, y):
@@ -10606,14 +10617,6 @@ class CommonTemplate:
         x = torch.rand(48, 3, 512, 512)
         self.common(fn, (x,))
 
-    def test_pad_single(self):
-        def fn(a):
-            y = torch.nn.functional.pad(a, (10, 10))
-            return y
-
-        x = torch.rand(1, 1, 1)
-        self.common(fn, (x,))
-
     def test_pad_cast(self):
         def fn(x):
             return torch.nn.functional.pad(x.to(torch.float32), (0, 3, 0, 0))
@@ -11247,19 +11250,13 @@ class CommonTemplate:
     def test_custom_op_1(self):
         import torch.library
 
-        def foo_cpu(x):
-            return 3 * x
-
-        def foo_cuda(x):
-            return 3 * x
-
-        def foo_xpu(x):
+        def foo(x):
             return 3 * x
 
         def foo_meta(x):
             return torch.empty_like(x)
 
-        define_custom_op_for_test("foo", foo_cpu, foo_cuda, foo_xpu, foo_meta)
+        define_custom_op_for_test("foo", foo, foo_meta)
 
         def fn(x):
             a = torch.nn.functional.relu(x)
@@ -11273,19 +11270,13 @@ class CommonTemplate:
     def test_custom_op_2(self):
         import torch.library
 
-        def foo_cpu(x, scale: float):
-            return scale * x, torch.cos(x)
-
-        def foo_cuda(x, scale: float):
-            return scale * x, torch.cos(x)
-
-        def foo_xpu(x, scale: float):
+        def foo(x, scale: float):
             return scale * x, torch.cos(x)
 
         def foo_meta(x, scale: float):
             return torch.empty_like(x), torch.empty_like(x)
 
-        define_custom_op_2_for_test("foo2", foo_cpu, foo_cuda, foo_xpu, foo_meta)
+        define_custom_op_2_for_test("foo2", foo, foo_meta)
 
         def fn(x, scale: float):
             a = torch.nn.functional.relu(x)
@@ -11295,21 +11286,7 @@ class CommonTemplate:
 
     @config.patch(implicit_fallbacks=True)
     def test_custom_op_3(self):
-        import torch.library
-
-        def foo_cpu(x):
-            result = torch.zeros_like(x[0])
-            for t in x:
-                result += t
-            return result
-
-        def foo_cuda(x):
-            result = torch.zeros_like(x[0])
-            for t in x:
-                result += t
-            return result
-
-        def foo_xpu(x):
+        def foo(x):
             result = torch.zeros_like(x[0])
             for t in x:
                 result += t
@@ -11318,7 +11295,7 @@ class CommonTemplate:
         def foo_meta(x):
             return torch.empty_like(x[0])
 
-        define_custom_op_3_for_test("foo3", foo_cpu, foo_cuda, foo_xpu, foo_meta)
+        define_custom_op_3_for_test("foo3", foo, foo_meta)
 
         def fn(x):
             return torch.ops.test.foo3(x)
@@ -11374,15 +11351,7 @@ class CommonTemplate:
         inp = torch.rand(2, 3, 128, 128, device=GPU_TYPE)
         expected_stride = mod(inp).stride()
 
-        def bar_cpu(x):
-            self.assertEqual(x.stride(), expected_stride)
-            return x.clone()
-
-        def bar_cuda(x):
-            self.assertEqual(x.stride(), expected_stride)
-            return x.clone()
-
-        def bar_xpu(x):
+        def bar(x):
             self.assertEqual(x.stride(), expected_stride)
             return x.clone()
 
@@ -11391,9 +11360,7 @@ class CommonTemplate:
 
         define_custom_op_for_test(
             "bar",
-            bar_cpu,
-            bar_cuda,
-            bar_xpu,
+            bar,
             bar_meta,
             tags=[torch._C.Tag.needs_fixed_stride_order],
         )
@@ -11530,15 +11497,7 @@ class CommonTemplate:
         input_t = input_t.to(memory_format=torch.channels_last)
         expected_strides = model.helper(input_t).stride()
 
-        def baz_cpu(x):
-            self.assertEqual(expected_strides, x.stride())
-            return x.clone()
-
-        def baz_cuda(x):
-            self.assertEqual(expected_strides, x.stride())
-            return x.clone()
-
-        def baz_xpu(x):
+        def baz(x):
             self.assertEqual(expected_strides, x.stride())
             return x.clone()
 
@@ -11547,9 +11506,7 @@ class CommonTemplate:
 
         define_custom_op_for_test(
             "baz",
-            baz_cpu,
-            baz_cuda,
-            baz_xpu,
+            baz,
             baz_meta,
             tags=[torch._C.Tag.needs_fixed_stride_order],
         )
@@ -12413,7 +12370,7 @@ def copy_tests(
                 new_test = unittest.expectedFailure(new_test)
 
             tf = test_failures and test_failures.get(name)
-            if tf is not None and suffix in tf.suffixes:
+            if tf and suffix in tf.suffixes:
                 skip_func = (
                     unittest.skip("Skipped!")
                     if tf.is_skip
@@ -13644,6 +13601,23 @@ if HAS_GPU and not TEST_WITH_ASAN:
                 FileCheck().check_regex(
                     r"reinterpret_tensor\(.*, \(1024, 50257\).*# reuse"
                 ).run(code[1])
+
+        @unittest.skipIf(
+            not triton_version_uses_attrs_dict(),
+            "Test only applies to newer triton versions",
+        )
+        def test_triton_attrs_dict_constexpr_signature(self):
+            def fn(x):
+                return x.sin()
+
+            fn_c = torch.compile(fn)
+            x = torch.rand(16, device="cuda")
+
+            _, code = run_and_get_code(fn_c, x)
+
+            FileCheck().check("triton_meta").check("'signature':").check(
+                "'XBLOCK': 'constexpr'"
+            ).run(code[0])
 
     class RNNTest(TestCase):
         device_type = GPU_TYPE
