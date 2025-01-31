@@ -64,9 +64,10 @@ class FlatApply(HigherOrderOperator):
 
         The semantics of flat_apply(func, in_spec, *flat_args) are roughly equivalent to:
 
-        >>> args, kwargs = pytree.tree_unflatten(flat_args, in_spec)
-        >>> output = func(*args, **kwargs)
-        >>> return output
+        >>> def flat_apply_impl(func, in_spec, *flat_args):
+        >>>     args, kwargs = pytree.tree_unflatten(flat_args, in_spec)
+        >>>     output = func(*args, **kwargs)
+        >>>     return output
 
         flat_apply supports the following two cases:
         - an input type is a container type (e.g. of tensors) registered as a pytree.
