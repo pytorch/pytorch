@@ -488,6 +488,14 @@ class UserMethodVariable(UserFunctionVariable):
     def inspect_parameter_names(self):
         return super().inspect_parameter_names()[1:]
 
+    def var_getattr(self, tx: "InstructionTranslator", name: str):
+        source = self.source and AttrSource(self.source, name)
+        if name == "__self__":
+            return self.obj
+        if name == "__func__":
+            return VariableTracker.build(tx, self.fn, source)
+        return super().var_getattr(tx, name)
+
 
 class WrappedUserMethodVariable(UserMethodVariable):
     def __init__(self, wrapped, context, **kwargs) -> None:
@@ -698,6 +706,14 @@ class SkipFunctionVariable(VariableTracker):
         super().__init__(**kwargs)
         self.value = value
         self.reason = reason
+        self._known_dunder_attrs = {
+            "__annotations__",
+            "__defaults__",
+            "__kwdefaults__",
+            "__code__",
+            "__globals__",
+            "__closure__",
+        }
 
     def as_python_constant(self):
         return self.value
@@ -765,6 +781,25 @@ class SkipFunctionVariable(VariableTracker):
                 )
             msg += f"', {self.reason}'" if self.reason else ""
             unimplemented(msg)
+
+    def call_obj_hasattr(self, tx: "InstructionTranslator", name):
+        return variables.ConstantVariable.create(hasattr(self.value, name))
+
+    def var_getattr(self, tx: "InstructionTranslator", name: str):
+        source = self.source and AttrSource(self.source, name)
+        try:
+            subobj = inspect.getattr_static(self.value, name)
+        except AttributeError:
+            # function does not have a __getattr__ or __getattribute__ method,
+            # so we can safely assume that this attribute is absent
+            raise_observed_exception(AttributeError, tx)
+
+        # Special handling for known dunder attributes
+        if name in self._known_dunder_attrs:
+            subobj = getattr(self.value, name)
+        if source:
+            return variables.LazyVariableTracker.create(subobj, source)
+        return VariableTracker.build(tx, subobj)
 
 
 class WrapperUserFunctionVariable(VariableTracker):
