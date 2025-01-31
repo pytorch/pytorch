@@ -6036,7 +6036,9 @@ class ShapeEnv:
                     )
                     self._update_var_to_range(b, b_bound, self.var_to_range_sloc[a])
                     tgt_bound = self.bound_sympy(tgt)
-                    assert tgt_bound.issubset(src_bound)
+                    assert tgt_bound.issubset(
+                        src_bound
+                    ), f"{tgt_bound=} not a subset of {src_bound=}"
 
             # TODO: Should we propagate size-like-ness?
             #
