@@ -1012,6 +1012,30 @@ class TestGeneratorThrow(GeneratorTestsBase):
         y = fn(t)
         self.assertEqual(y, t.sin() + t.cos())
 
+    def test_throw_with_finally(self):
+        z = 0
+
+        def whoo():
+            nonlocal z
+            z = 0
+            try:
+                yield 1
+            except ValueError:
+                yield 2
+            finally:
+                z += 1
+            z += 10
+
+        @torch.compile(fullgraph=True, backend="eager")
+        def f(x):
+            gen = whoo()
+            next(gen)
+            gen.throw(ValueError)
+            return x.sin()
+
+        f(torch.randn(3))
+        print("z", z)
+
     def test_throw_without_finally(self):
         z = 0
 

@@ -621,7 +621,7 @@ class LocalGeneratorObjectVariable(VariableTracker):
             # In this scenario, a generator can yield after `throw()` is called. Even
             # after the exception is raised, it remains active within the `YIELD_VALUE`
             # instruction. When the generator resumes, we cannot simply return to the
-            # `RESUME` point; instead, we must consult the exception table to determine
+            # `RESUME` instruction; instead, we must consult the exception table to determine
             # the correct target.
             #
             # Re-raising the exception allows us to jump to the correct instruction
@@ -629,14 +629,13 @@ class LocalGeneratorObjectVariable(VariableTracker):
             # proceed to the next instruction, it would follow the control flow where
             # the exception raised by `throw()` was handled and swallowed, potentially
             # leading to incorrect behavior.
-            self._setup_exception(tx, args[0])
-
             if type(args[0]) is variables.BuiltinVariable:
                 exc_type = args[0].fn
             else:
                 exc_type = args[0].exc_type
 
             try:
+                self._setup_exception(tx, args[0])
                 self.next_variable(tx)
             except get_dynamo_observed_exception(exc_type):
                 # We should get back the exception raised before.
