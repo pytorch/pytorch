@@ -2502,7 +2502,6 @@ class TestMethods(TestCase):
     def test_arr_mult(self, func):
         a = np.array([[1, 0], [0, 1]])
         b = np.array([[0, 1], [1, 0]])
-        # c = np.array([[9, 1], [1, -9]])
         d = np.arange(24).reshape(4, 6)
         ddt = np.array(
             [
