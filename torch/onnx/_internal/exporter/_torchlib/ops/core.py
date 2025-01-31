@@ -4267,7 +4267,7 @@ def aten_index(self: TensorType, indices: Sequence[Optional[INT64]]) -> TensorTy
 
 
 @onnx_impl((aten.index.Tensor, aten._unsafe_index.Tensor), trace_only=True)
-def aten_index_bool(self: TensorType, indices: Sequence[Optional[BOOL]]) -> TensorType:  # pylint: disable=inconsistent-return-statements
+def aten_index_bool(self: TensorType, indices: Sequence[Optional[BOOL]]) -> TensorType:  # type: ignore[return]
     index_ranks = [len(index.shape) for index in indices if index is not None]
 
     if index_ranks[0] == 1:

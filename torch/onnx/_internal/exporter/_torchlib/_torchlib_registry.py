@@ -33,7 +33,7 @@ def onnx_impl(
     trace_only: bool = False,
     complex: bool = False,
     traceable: bool = False,
-    private: bool = False
+    private: bool = False,
 ) -> Callable[[_T], _T]:
     """Register an ONNX implementation of a torch op."""
 
@@ -79,7 +79,7 @@ def onnx_impl(
                 if not isinstance(target, Sequence):
                     targets = (target,)
                 else:
-                    targets = target
+                    targets = target  # type: ignore[assignment]
 
                 for t in targets:
                     _registry.append(
