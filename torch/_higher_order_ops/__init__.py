@@ -1,3 +1,4 @@
+from torch._higher_order_ops.aoti_call_delegate import aoti_call_delegate
 from torch._higher_order_ops.associative_scan import associative_scan
 from torch._higher_order_ops.auto_functionalize import (
     auto_functionalized,
@@ -52,4 +53,5 @@ __all__ = [
     "wrap_with_autocast",
     "wrap_activation_checkpoint",
     "strict_mode",
+    "aoti_call_delegate",
 ]

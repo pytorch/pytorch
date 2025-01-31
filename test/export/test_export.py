@@ -90,6 +90,9 @@ from torch.utils._pytree import (
 )
 
 
+if not IS_MACOS:
+    from torch.testing._internal.distributed.fake_pg import FakeStore
+
 if HAS_GPU:
     import triton
     import triton.language as tl
@@ -938,6 +941,46 @@ graph():
         ]
         for vr_upper in vr_upper_bounds:
             self.assertEqual(vr_upper, 1)
+
+    def test_mask_nonzero_static(self):
+        class TestModule(torch.nn.Module):
+            def forward(self, seq_embeddings, mask, exp):
+                # Instead of `output = seq_embeddings[mask]`` which makes
+                # output.shape have unbacked symint, encode side knowledge of
+                # output.shape as exp.shape to force it to have backed symint
+                index = torch.nonzero_static(mask, size=exp.shape[0])
+                chunked_index = index.chunk(chunks=mask.dim(), dim=1)
+                output = seq_embeddings[chunked_index].squeeze()
+                final_output = output * 2
+                return final_output
+
+        m = TestModule()
+
+        seq_embeddings = torch.randn(5, 5)
+        mask = torch.ones(5, 5, dtype=torch.bool)
+        exp = torch.randn(25)
+        output = m(seq_embeddings, mask, exp)
+
+        batch = torch.export.Dim("batch")
+        exp_size = torch.export.Dim("exp_size", max=100)
+        ep = export(
+            m,
+            (seq_embeddings, mask, exp),
+            dynamic_shapes={
+                "seq_embeddings": (batch, None),
+                "mask": (batch, None),
+                "exp": (exp_size,),
+            },
+        )
+        ep_output = ep.module()(seq_embeddings, mask, exp)
+        self.assertTrue(torch.allclose(output, ep_output))
+
+        seq_embeddings = torch.randn(6, 5)
+        mask = torch.ones(6, 5, dtype=torch.bool)
+        exp = torch.randn(30)
+        output = m(seq_embeddings, mask, exp)
+        ep_output = ep.module()(seq_embeddings, mask, exp)
+        self.assertTrue(torch.allclose(output, ep_output))
 
     def test_setgrad_lifted_tensor(self):
         class M(torch.nn.Module):
@@ -9483,6 +9526,30 @@ def forward(self, p_bar_linear_weight, p_bar_linear_bias, x):
             "torch.ops.profiler._record_function_enter_new.default", 0, exactly=True
         ).run(ep.graph_module.code)
 
+    @testing.expectedFailureSerDerNonStrict
+    def test_replace_unbacked_with_very_large_upperbound(self):
+        # beyond 2^53 where python floats lose precision
+        VERY_LARGE_INT = 1000000007999999992
+
+        class Model(torch.nn.Module):
+            def forward(self, x, t):
+                unbacked = t.item()
+                torch._check(unbacked <= VERY_LARGE_INT)
+
+                y = torch.ones(unbacked)
+                return x.reshape([-1]) + y
+
+        inp = (
+            torch.randn(6, 2),
+            torch.tensor([12]),
+        )
+        spec = {
+            "x": (Dim.AUTO, Dim.STATIC),
+            "t": (Dim.STATIC,),
+        }
+        ep = export(Model(), inp, dynamic_shapes=spec)
+        self.assertTrue(torch.allclose(Model()(*inp), ep.module()(*inp)))
+
     def test_predispatch_cond(self):
         class Model(torch.nn.Module):
             def __init__(self) -> None:
@@ -10463,6 +10530,13 @@ def forward(self, x, y):
         ):
             ep.module()(torch.randn(400, 20, 16))
         ep.module()(torch.randn(42, 20, 16))
+
+    def test_full_on_scalar_tensor(self):
+        class Foo(torch.nn.Module):
+            def forward(self, val):
+                return torch.full((80, 2), val, dtype=torch.float32)
+
+        export(Foo(), args=(torch.tensor(1),))
 
     def test_allow_explicit_guards_as_runtime_asserts(self):
         # check that explicit guards are treated as runtime assertions
@@ -11587,7 +11661,7 @@ class GraphModule(torch.nn.Module):
             ref_res = module(*dyn_inp)
             self.assertEqual(export_res, ref_res)
 
-    @testing.expectedFailureSerDer  # T202237665
+    @testing.expectedFailureSerDer
     @testing.expectedFailureSerDerNonStrict
     def test_dynamic_lr_shift(self):
         class Module(torch.nn.Module):
@@ -12175,6 +12249,39 @@ class TestExportCustomClass(TorchTestCase):
         FileCheck().check_count("torch.ops.aten.elu.default", 1, exactly=True).run(
             ep.graph_module.code
         )
+
+    @unittest.skipIf(IS_MACOS, "Distributed not packaged in macos")
+    @testing.expectedFailureSerDerNonStrict  # nonstrict doesn't support allreduce
+    @testing.expectedFailureNonStrict
+    @testing.expectedFailureTrainingIRToRunDecompNonStrict  # source_fn_stack failure
+    @testing.expectedFailureRetraceabilityNonStrict
+    @testing.expectedFailureLegacyExportNonStrict
+    def test_distributed_all_reduce(self):
+        class Foo(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(4, 3)
+
+            def forward(self, x):
+                y = self.linear(x).abs().clamp(max=1.0) * 2
+                torch.distributed.all_reduce(y)
+                return y
+
+        try:
+            torch.distributed.init_process_group(
+                backend="fake",
+                world_size=2,
+                rank=0,
+                store=FakeStore(),
+            )
+
+            m = Foo()
+            ep = export(m, (torch.randn(4, 4),))
+            inp = (torch.randn(4, 4),)
+            self.assertTrue(torch.allclose(ep.module()(*inp), m(*inp)))
+
+        finally:
+            torch.distributed.destroy_process_group()
 
     def test_preserve_cia_op(self):
         class StaticResizeBilinear2dModule(torch.nn.Module):

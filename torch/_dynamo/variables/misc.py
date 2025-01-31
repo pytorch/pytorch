@@ -1157,7 +1157,7 @@ class PythonModuleVariable(VariableTracker):
     def __repr__(self) -> str:
         return f"PythonModuleVariable({self.value})"
 
-    def call_hasattr(self, tx: "InstructionTranslator", name):
+    def call_obj_hasattr(self, tx: "InstructionTranslator", name):
         result = hasattr(self.value, name)
         return variables.ConstantVariable.create(result)
 
@@ -1208,9 +1208,39 @@ class TypingVariable(VariableTracker):
     def as_python_constant(self):
         return self.value
 
+    def reconstruct(self, codegen: "torch._dynamo.codegen.PyCodegen") -> None:
+        # We're just trying to load the type here. Reconstructing the type from
+        # scratch is tricky - for a type like `typing.List[int]` we'd need to
+        # deconstruct the origin and args.  The origin for `List[int]` is `list`
+        # and the args is `(int,)`. When we recombine those we get the parts
+        # back and need to emit code for:
+        #
+        #     `typing.List[int]`
+        #
+        # But it's # worse than that - what if `typing` isn't in the globals (or
+        # was loaded like `import typing as _typing ; _typing.List[int]`?) so we
+        # really need to do something like:
+        #
+        #   `sys.modules["typing"].List[int]`
+        #
+        # Argh - but what if they rewrote the global `int`?  So we have to do:
+        #
+        #   `sys.modules["typing"].List[sys.modules["builtins"].int]`
+        #
+        # But where do we get `sys`? What if they never imported it or have
+        # something ELSE called `sys`?
+        #
+        # Let's skip all that noise and just emit it as a simple const.
+        #
+        codegen.append_output(codegen.create_load_const(self.value))
+
 
 @functools.lru_cache(maxsize=1)
 def get_np_to_tnp_map():
+    """
+    This generates a mapping from numpy modules to their torch._numpy
+    modules equivalents.
+    """
     from ..utils import NP_TO_TNP_MODULE
 
     np_fn_to_tnp_fn = {}
@@ -1224,6 +1254,16 @@ def get_np_to_tnp_map():
                     np_fn_to_tnp_fn[np_fn] = tnp_fn
 
     return np_fn_to_tnp_fn
+
+
+@functools.lru_cache(maxsize=1)
+def get_tnp_to_np_map():
+    """
+    This is just the reverse mapping of get_np_to_tnp_map() - mapping from
+    torch._numpy modules to numpy equivalents.
+    """
+    m = get_np_to_tnp_map()
+    return {v: k for k, v in m.items()}
 
 
 class NumpyVariable(VariableTracker):

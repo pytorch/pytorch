@@ -813,7 +813,7 @@ class NoopTests(TestCase):
             c = unfusible(b)
             return b, c
 
-        self.assertExpectedInline(count_numel(f, inp), """40""")
+        self.assertExpectedInline(count_numel(f, inp), """20""")
 
     def test_noop_slice_scatter(self):
         def f(a):
