@@ -1182,6 +1182,19 @@ TreeSpec(tuple, None, [*,
         )
         self.assertEqual(all_zeros, [dict.fromkeys(range(10), 0)])
 
+    def test_dataclass(self):
+        @dataclass
+        class Point:
+            x: torch.Tensor
+            y: torch.Tensor
+
+        py_pytree.register_dataclass(Point)
+
+        point = Point(torch.tensor(0), torch.tensor(1))
+        point = py_pytree.tree_map(lambda x: x + 1, point)
+        self.assertEqual(point.x, torch.tensor(1))
+        self.assertEqual(point.y, torch.tensor(2))
+
     def test_tree_map_with_path_multiple_trees(self):
         @dataclass
         class ACustomPytree:
