@@ -2044,7 +2044,7 @@ softplus = _add_docstr(
     r"""
 softplus(input, beta=1, threshold=20) -> Tensor
 
-Applies element-wise, the function :math:`\text{Softplus}(x) = \frac{1}{\beta} * \log(1 + \exp(\beta * x))`.
+Applies element-wise, the function :math:`\text{Softplus}(x) = \frac{1}{\beta} * \ln(1 + \exp(\beta * x))`.
 
 For numerical stability the implementation reverts to the linear function
 when :math:`input \times \beta > threshold`.

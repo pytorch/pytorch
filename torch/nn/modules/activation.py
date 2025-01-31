@@ -859,7 +859,7 @@ class Softplus(Module):
     r"""Applies the Softplus function element-wise.
 
     .. math::
-        \text{Softplus}(x) = \frac{1}{\beta} * \log(1 + \exp(\beta * x))
+        \text{Softplus}(x) = \frac{1}{\beta} * \ln(1 + \exp(\beta * x))
 
     SoftPlus is a smooth approximation to the ReLU function and can be used
     to constrain the output of a machine to always be positive.
