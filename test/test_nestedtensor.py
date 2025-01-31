@@ -8980,6 +8980,7 @@ class TestNestedInt(torch.testing._internal.common_utils.TestCase):
 
     def test_assertion(self):
         from torch.nested._internal.dict_tensor import DictTensor
+        from torch.nested._internal.nested_int import _nested_assert_metadata_equal
 
         a = torch.tensor([1, 2, 3], dtype=torch.float32)
         b = torch.tensor([4, 5, 6], dtype=torch.float32)
@@ -8987,22 +8988,30 @@ class TestNestedInt(torch.testing._internal.common_utils.TestCase):
 
         # Correct case
         metadata1 = {"_host_lengths": a, "_host_offsets": None, "_device_offsets": c}
-        metadata2 = {"_host_lengths": None, "_host_offsets": b, "_device_offsets": c.clone()}
+        metadata2 = {
+            "_host_lengths": None,
+            "_host_offsets": b,
+            "_device_offsets": c.clone(),
+        }
 
         dict_tensor1 = DictTensor(metadata1)
         dict_tensor2 = DictTensor(metadata2)
 
-        torch._nested_assert_metadata_equal(dict_tensor1, dict_tensor2, "hello")
+        _nested_assert_metadata_equal(dict_tensor1, dict_tensor2, "hello")
 
         # Failure case
         metadata1 = {"_host_lengths": a, "_host_offsets": None, "_device_offsets": c}
-        metadata2 = {"_host_lengths": None, "_host_offsets": b, "_device_offsets": a.clone()}
+        metadata2 = {
+            "_host_lengths": None,
+            "_host_offsets": b,
+            "_device_offsets": a.clone(),
+        }
 
         dict_tensor1 = DictTensor(metadata1)
         dict_tensor2 = DictTensor(metadata2)
 
         with self.assertRaises(AssertionError):
-            torch._nested_assert_metadata_equal(dict_tensor1, dict_tensor2, "hello")
+            _nested_assert_metadata_equal(dict_tensor1, dict_tensor2, "hello")
 
 
 instantiate_parametrized_tests(TestNestedTensor)

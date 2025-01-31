@@ -16,8 +16,8 @@
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
 #else
-#include <ATen/ops/zeros.h>
 #include <ATen/ops/_nested_assert_expandable_to.h>
+#include <ATen/ops/zeros.h>
 #endif
 
 namespace torch::autograd {

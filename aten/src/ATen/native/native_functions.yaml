@@ -6303,11 +6303,6 @@
   dispatch:
     CPU, CUDA: _nested_compute_contiguous_strides_offsets
 
-- func: _nested_assert_metadata_equal(Tensor lhs, Tensor rhs, str msg) -> ()
-  variants: function
-  device_check: NoCheck
-  dispatch: {}
-
 - func: _nested_assert_expandable_to(Tensor tgt, SymInt[] src_shape, str msg) -> ()
   variants: function
   device_check: NoCheck

@@ -67,7 +67,6 @@ FUNCTIONAL_OPS_THAT_CANNOT_GET_AN_OUT_VARIANT = [
     "_local_scalar_dense",  # returns a Scalar
     "_nested_tensor_from_mask_left_aligned",  # returns a boolean
     "_nnz",  # returns an int
-    "_nested_assert_metadata_equal",  # no return
     "_nested_assert_expandable_to",  # no return
     "_use_cudnn_ctc_loss",  # returns a boolean
     "_use_cudnn_ctc_loss.Tensor",  # returns a boolean

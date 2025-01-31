@@ -193,6 +193,7 @@ def raggedness_matches(nt, size):
 
 def assert_raggedness_matches(nt, size, msg):
     from torch.fx.experimental.symbolic_shapes import is_nested_int
+    from torch.nested._internal.nested_int import _nested_assert_metadata_equal
 
     end = nt._ragged_idx + 1
     nt_ragged = nt._size[:end]
@@ -205,10 +206,8 @@ def assert_raggedness_matches(nt, size, msg):
         if ns != s:
             if not (is_nested_int(ns) and is_nested_int(s)):
                 raise RuntimeError(msg)
-            torch._nested_assert_metadata_equal(
-                get_nested_int_metadata(ns),
-                get_nested_int_metadata(s),
-                msg
+            _nested_assert_metadata_equal(
+                get_nested_int_metadata(ns), get_nested_int_metadata(s), msg
             )
 
 
@@ -333,8 +332,7 @@ def jagged_binary_pointwise(func, *args, **kwargs):
         # ex: (B, j0, D) + (B, j0, D)
         # ex: (B, j0, D) + (B, j0, 1)
         assert_raggedness_matches(
-            a, b._size,
-            mismatch_error_msg.format(func.__name__, a._size, b._size)
+            a, b._size, mismatch_error_msg.format(func.__name__, a._size, b._size)
         )
         return NestedTensor(
             func(a._values, b._values, *args[2:], **kwargs), **extract_kwargs(a)
@@ -1249,6 +1247,7 @@ def matmul_default(func, *args, **kwargs):
             max_seqlen=max_seqlen,
         )
 
+    error_msg = f"matmul(): not supported between inputs of shapes {inp._size} and {other.shape}"
     # TODO: Back these with proper kernels (e.g. grouped GEMM)
     # NJT x dense
     if inp.is_nested and not other.is_nested:
@@ -1269,7 +1268,7 @@ def matmul_default(func, *args, **kwargs):
         # Support ragged batch dim:
         # (B, j1, D, E) x (B, j1, E, F) => (B, j1, D, F), etc.
         if inp.dim() > 3 and other.dim() > 3:
-            assert_raggedness_matches(inp, other._size)
+            assert_raggedness_matches(inp, other._size, error_msg)
             return NestedTensor(func(inp._values, other._values), **extract_kwargs(inp))
         # Support reducing over ragged with dense output:
         # (B, D, j1) x (B, j1, E) => (B, D, E)
@@ -1283,9 +1282,7 @@ def matmul_default(func, *args, **kwargs):
             # do unbind for this; can't use padded conversion due to j1 in last dim
             return torch.stack(_unbind_impl(inp, other))
 
-    raise RuntimeError(
-        f"matmul(): not supported between inputs of shapes {inp._size} and {other.shape}"
-    )
+    raise RuntimeError(error_msg)
 
 
 @register_jagged_func(torch.ops.aten.bmm.default, "self: jt_all, mat2: any")
@@ -1318,8 +1315,7 @@ def expand_default(func, *args, **kwargs):
 
     assert ("implicit" not in new_kwargs) or (not new_kwargs.pop("implicit"))
     assert_raggedness_matches(
-        inp, size,
-        f"expand(): cannot expand shape {inp._size} -> {size}"
+        inp, size, f"expand(): cannot expand shape {inp._size} -> {size}"
     )
 
     expand_arg = [-1 if d == inp._ragged_idx else size[d] for d in range(1, inp.dim())]
@@ -2197,8 +2193,9 @@ def stack_default(func, *args, **kwargs):
             )
 
         assert_raggedness_matches(
-            t, tensors[0].shape,
-            "stack(): expected all nested tensors to have the same nested structure"
+            t,
+            tensors[0].shape,
+            "stack(): expected all nested tensors to have the same nested structure",
         )
 
     new_kwargs["dim"] = _wrap_jagged_dim(
@@ -2424,79 +2421,14 @@ def _nested_view_from_jagged_default(func, *args, **kwargs):
     )
 
 
-lib = torch.library.Library("nested", "FRAGMENT")
-
-lib.define("_assert_equal(Tensor lhs, Tensor rhs, str msg) -> ()")
-
-def _assert_equal_impl(lhs, rhs, msg):
-    # Next:
-    # - Device side Asserts for the CUDA case
-    # - Pass through better context through a string
-    if not torch.equal(lhs, rhs):
-        raise RuntimeError(msg)
-
-def _assert_equal_meta(lhs, rhs, msg):
-    # No-op during compile
-    return
-
-lib.impl("_assert_equal", _assert_equal_impl, "CPU")
-lib.impl("_assert_equal", _assert_equal_impl, "CUDA")
-lib.impl("_assert_equal", _assert_equal_meta, "Meta")
-
-
-from torch._higher_order_ops.effects import _EffectType, _register_effectful_op
-
-_register_effectful_op(torch.ops.nested._assert_equal.default, _EffectType.ORDERED)
-
-
-_PREFERRED_PAIRS = {
-    # Smallest score is best
-    ("host", "host"): 0,
-    ("device", "device"): 1,
-    ("host", "device"): 2,
-    ("device", "host"): 2,
-}
-
-# TODO: test the ranking
-@register_dict_tensor_func(torch.ops.aten._nested_assert_metadata_equal.default)
-@maybe_enable_thunkify
-def _nested_assert_metadata_equal(func, *args, **kwargs):
-    from torch.nested._internal.nested_tensor import DictTensor
-    from torch.nested._internal.nested_tensor import src_field_name
-
-    assert isinstance(args[0], DictTensor) and isinstance(args[1], DictTensor)
-
-    candidates = []
-    for source_type in ("lengths", "offsets"):
-        for device_type_lhs in ("host", "device"):
-            for device_type_rhs in ("host", "device"):
-                if (
-                    getattr(args[0], src_field_name(device_type_lhs, source_type), None) is not None and
-                    getattr(args[1], src_field_name(device_type_rhs, source_type), None) is not None
-                ):
-                    candidates.append(
-                        ((device_type_lhs, source_type), (device_type_rhs, source_type))
-                    )
-
-    def score(candidate):
-        return _PREFERRED_PAIRS[(candidate[0][0], candidate[1][0])]
-
-    candidates = sorted(candidates, key=score)
-    pair = candidates[0]
-
-    lhs = getattr(args[0], src_field_name(pair[0][0], pair[0][1]))
-    rhs = getattr(args[1], src_field_name(pair[1][0], pair[1][1]))
-    msg = args[2]
-
-    torch.ops.nested._assert_equal(lhs, rhs, msg)
-
-
 # Used by autograd engine to compare shapes
 @register_jagged_func(
-    torch.ops.aten._nested_assert_expandable_to.default, "tgt: any, src_shape: any, msg: any"
+    torch.ops.aten._nested_assert_expandable_to.default,
+    "tgt: any, src_shape: any, msg: any",
 )
 def _nested_assert_expandable_to(func, *args, **kwargs):
     from torch.fx.experimental.symbolic_shapes import is_nested_int
+    from torch.nested._internal.nested_int import _nested_assert_metadata_equal
 
     _, new_kwargs = normalize_function(  # type: ignore[misc]
         func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
@@ -2516,7 +2448,7 @@ def _nested_assert_expandable_to(func, *args, **kwargs):
         if src_s != tgt_s:
             if not (is_nested_int(src_s) and is_nested_int(tgt_s)):
                 raise RuntimeError(msg)
-            torch._nested_assert_metadata_equal(
+            _nested_assert_metadata_equal(
                 get_nested_int_metadata(src_s),
                 get_nested_int_metadata(tgt_s),
                 msg,
