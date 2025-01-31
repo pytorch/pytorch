@@ -119,13 +119,17 @@ def make_test_case(
                 _, code = test_torchinductor.run_and_get_cpp_code(
                     func, *func_inputs if func_inputs else []
                 )
-                self.assertEqual("CppWrapperCodeCache" in code, True)
-                self.assertTrue(
-                    all(
-                        code.count(string) == code_string_count[string]
-                        for string in code_string_count
+                # If a test generates no code, skip the remaining checks.  This can
+                # happen for tests validating build-dependent features (e.g. datatypes
+                # that are available on some platforms and not others).
+                if code:
+                    self.assertIn("CppWrapperCodeCache", code)
+                    self.assertTrue(
+                        all(
+                            code.count(string) == code_string_count[string]
+                            for string in code_string_count
+                        )
                     )
-                )
         finally:
             tests.tearDown()
             tests.tearDownClass()
