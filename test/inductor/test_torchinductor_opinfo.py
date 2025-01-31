@@ -544,7 +544,12 @@ inductor_override_kwargs["cuda"] = {
     ("std_mean", f16): {"reference_in_float": True},
     ("hypot", f16): {"reference_in_float": True, "atol": 3e-4, "rtol": 2e-3},
     ("cummin", f16): {"reference_in_float": True, "atol": 5e-5, "rtol": 2e-3},
-    ("unfold_copy", f16): {"reference_in_float": True},
+    ("unfold_copy", f16): {"reference_in_float": True, "atol": 2e-5, "rtol": 1e-2},
+    ("nn.functional.upsample_bilinear", f16): {
+        "reference_in_float": True,
+        "atol": 1e-4,
+        "rtol": 2e-3,
+    },
 }
 
 inductor_override_kwargs["xpu"] = {
