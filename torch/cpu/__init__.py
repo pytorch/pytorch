@@ -70,6 +70,11 @@ def _is_arm_sve_supported() -> bool:
     return torch._C._cpu._is_arm_sve_supported()
 
 
+def _is_arm_sve_bf16_supported() -> bool:
+    r"""Returns a bool indicating if CPU supports Arm SVE."""
+    return torch._C._cpu._is_arm_sve_bf16_supported()
+
+
 def is_available() -> bool:
     r"""Returns a bool indicating if CPU is currently available.
 
