@@ -48,7 +48,7 @@ __all__ = [
     "is_onnxrt_backend_supported",
 ]
 
-from typing import Any, Callable, Collection, Mapping, Sequence, TYPE_CHECKING
+from typing import Any, Callable, TYPE_CHECKING
 
 import torch
 from torch import _C
@@ -107,6 +107,7 @@ from ._internal._exporter_legacy import (  # usort: skip. needs to be last to av
 
 if TYPE_CHECKING:
     import os
+    from collections.abc import Collection, Mapping, Sequence
 
 # Set namespace for exposed private names
 DiagnosticOptions.__module__ = "torch.onnx"
@@ -164,7 +165,6 @@ def export(
     custom_opsets: Mapping[str, int] | None = None,
     export_modules_as_functions: bool | Collection[type[torch.nn.Module]] = False,
     autograd_inlining: bool = True,
-    **_: Any,  # ignored options
 ) -> ONNXProgram | None:
     r"""Exports a model into ONNX format.
 
@@ -476,7 +476,7 @@ def dynamo_export(
                 "You are using an experimental ONNX export logic, which currently only supports dynamic shapes. "
                 "For a more comprehensive set of export options, including advanced features, please consider using "
                 "`torch.onnx.export(..., dynamo=True)`. ",
-                category=FutureWarning,
+                category=DeprecationWarning,
             )
 
         if export_options is not None and export_options.dynamic_shapes:

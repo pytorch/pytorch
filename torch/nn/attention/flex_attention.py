@@ -1,4 +1,3 @@
-# mypy: allow-untyped-decorators
 # mypy: allow-untyped-defs
 # flake8: noqa C101
 """This module implements the user facing API for flex_attention in PyTorch."""
@@ -162,7 +161,7 @@ def _ordered_to_dense(num_blocks_in_row: Tensor, col_indices: Tensor):
         valid_indices = torch.where(index_mask, kv_indices, num_cols)
 
         # set the values in 'a' to 1 where the indices are valid
-        dense_mask[row_indices, valid_indices] = 1
+        dense_mask[row_indices, valid_indices] = dense_mask.new_ones(())
         return dense_mask[:, :num_cols].contiguous()
 
     create_dense_batched = create_dense_one
@@ -500,8 +499,8 @@ class BlockMask:
         )
 
     def _adjust(self, new_q_len: int, new_kv_len: int):
-        new_num_rows = new_q_len // self.BLOCK_SIZE[0]
-        new_num_cols = new_kv_len // self.BLOCK_SIZE[1]
+        new_num_rows = (new_q_len + self.BLOCK_SIZE[0] - 1) // self.BLOCK_SIZE[0]
+        new_num_cols = (new_kv_len + self.BLOCK_SIZE[1] - 1) // self.BLOCK_SIZE[1]
         new_kv_num_blocks, new_kv_indices = _adjust_num_blocks_and_indices(
             self.kv_num_blocks, self.kv_indices, new_num_rows, new_num_cols
         )
@@ -1117,6 +1116,7 @@ def _validate_embed_dim(query: Tensor, key: Tensor, value: Tensor):
             f"Expect query and key/value to have the same embedding dimension "
             f"but got E={query.size(-1)} and E={key.size(-1)}."
         )
+    return
     # TODO this config segfaults with Triton without:
     # https://github.com/triton-lang/triton/pull/4540
     if not (

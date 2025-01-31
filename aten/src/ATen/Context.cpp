@@ -254,8 +254,8 @@ void Context::setAllowTF32CuBLAS(bool b) {
 #ifdef USE_ROCM
   const static auto allow_tf32 = c10::utils::check_env(hipblaslt_allow_tf32);
   if (allow_tf32 != true) {
-    LOG(INFO) << "torch.backends.cuda.matmul.allow_tf32 is not supported on ROCm by default. "
-              << "Please set environment variable HIPBLASLT_ALLOW_TF32=1 to enable it.";
+    C10_LOG_FIRST_N(INFO, 10) << "torch.backends.cuda.matmul.allow_tf32 is not supported on ROCm by default. "
+                              << "Please set environment variable HIPBLASLT_ALLOW_TF32=1 to enable it.";
     return;
   }
 #endif
@@ -394,7 +394,6 @@ void Context::setROCmFAPreferredBackend(at::ROCmFABackend b) {
   rocm_fa_preferred_backend = b;
 }
 
-
 bool Context::allowFP16ReductionCuBLAS() const {
   return allow_fp16_reduction_cublas;
 }
@@ -409,6 +408,14 @@ bool Context::allowBF16ReductionCuBLAS() const {
 
 void Context::setAllowBF16ReductionCuBLAS(bool b) {
   allow_bf16_reduction_cublas = b;
+}
+
+bool Context::allowFP16AccumulationCuBLAS() const {
+  return allow_fp16_accumulation_cublas;
+}
+
+void Context::setAllowFP16AccumulationCuBLAS(bool b) {
+  allow_fp16_accumulation_cublas = b;
 }
 
 
