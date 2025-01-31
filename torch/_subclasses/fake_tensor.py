@@ -379,7 +379,7 @@ class FakeTensorConverter:
         out = self.meta_converter(
             t,
             shape_env=shape_env,
-            callback=mk_fake_tensor,  # type: ignore[arg-type]
+            callback=mk_fake_tensor,
             source=source,
             symbolic_context=symbolic_context,
             trace=trace,
@@ -1089,7 +1089,7 @@ class DispatchCacheInfo:
 # for the duration of `with FakeTensorMode()`.
 # This allows accurate storage aliasing across invocation of
 # different operators. While this will keep all freshly allocated
-# tensors alive during `FakeTensorMode`, there will no be no
+# tensors alive during `FakeTensorMode`, there will be no
 # new allocations of Tensors which have non-meta storage so
 # memory should not significantly increase.
 
