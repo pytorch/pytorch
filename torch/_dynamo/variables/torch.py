@@ -5,6 +5,7 @@ import inspect
 import logging
 import math
 import re
+from collections.abc import Sequence
 from typing import TYPE_CHECKING
 
 import torch._C
@@ -38,7 +39,7 @@ from ..utils import (
 from .base import VariableTracker
 from .ctx_manager import (
     AutocastModeVariable,
-    NullContextVariable,
+    ProfilerContextVariable,
     TorchFunctionDisableVariable,
 )
 from .distributed import DistributedVariable, ProcessGroupVariable
@@ -207,7 +208,7 @@ class BaseTorchVariable(VariableTracker):
     def as_python_constant(self):
         return self.value
 
-    def call_hasattr(self, tx: "InstructionTranslator", name):
+    def call_obj_hasattr(self, tx: "InstructionTranslator", name):
         result = hasattr(self.value, name)
         return variables.ConstantVariable.create(result)
 
@@ -242,7 +243,7 @@ class TorchCtxManagerClassVariable(BaseTorchVariable):
     def call_function(
         self,
         tx: "InstructionTranslator",
-        args: "list[VariableTracker]",
+        args: Sequence[VariableTracker],
         kwargs: "dict[str, VariableTracker]",
     ) -> "VariableTracker":
         from . import (
@@ -303,13 +304,15 @@ class TorchCtxManagerClassVariable(BaseTorchVariable):
         ):
             return AutocastModeVariable.create(self.value, args, kwargs)
         elif self.value in (
+            # NOTE any class added here must align with the semantic
+            # requirements of `ProfilerContextVariable`.
             torch.profiler.profile,
             torch.profiler.record_function,
             torch.autograd.profiler.profile,
             torch.autograd.profiler.record_function,
         ):
             warning_once(log, "Profiler function %s will be ignored", self.value)
-            return NullContextVariable()
+            return ProfilerContextVariable()
         elif self.value is torch._C.DisableTorchFunctionSubclass:
             assert not (args or kwargs)
             return TorchFunctionDisableVariable.create(tx)
@@ -929,7 +932,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
     def call_function(
         self,
         tx: "InstructionTranslator",
-        args: "list[VariableTracker]",
+        args: Sequence[VariableTracker],
         kwargs: "dict[str, VariableTracker]",
     ) -> "VariableTracker":
         from . import ConstantVariable, SymNodeVariable, TensorVariable
