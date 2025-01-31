@@ -1,6 +1,6 @@
 # mypy: allow-untyped-defs
 import contextlib
-from typing import Callable, List, Tuple, Union
+from typing import Callable, Union
 
 import torch
 import torch.utils._pytree as pytree
@@ -34,17 +34,17 @@ class WhileLoopOp(HigherOrderOperator):
         self,
         cond_fn: Callable,
         body_fn: Callable,
-        carried_inputs: Tuple[Union[torch.Tensor, int, float, bool]],
-        additional_inputs: Tuple[Union[torch.Tensor, torch.SymInt, int], ...],
+        carried_inputs: tuple[Union[torch.Tensor, int, float, bool]],
+        additional_inputs: tuple[Union[torch.Tensor, torch.SymInt, int], ...],
         /,
     ):
-        if not isinstance(carried_inputs, tuple):
+        if not isinstance(carried_inputs, (tuple, list)):
             raise RuntimeError(
-                f"carried_inputs must be a tuple, got {type(carried_inputs)}"
+                f"carried_inputs must be a tuple or list, got {type(carried_inputs)}"
             )
-        if not isinstance(additional_inputs, tuple):
+        if not isinstance(additional_inputs, (tuple, list)):
             raise RuntimeError(
-                f"additional_inputs must be a tuple, got {type(additional_inputs)}"
+                f"additional_inputs must be a tuple or list, got {type(additional_inputs)}"
             )
 
         validate_subgraph_args_types(carried_inputs)
@@ -127,7 +127,7 @@ def while_loop(cond_fn, body_fn, carried_inputs):
 
     # Currently, additional_inputs is not a user-facing input. It will be automatically set in dynamo.
     # parameters and buffers accessed in cond_fn or body_fn or tensor closures will become additional_inputs.
-    additional_inputs: Tuple = ()
+    additional_inputs: tuple = ()
 
     # The reason we flatten the output before calling into dynamo is that
     # we want to create a consistent input ordering for cond_fn and body_fn.
@@ -198,9 +198,9 @@ def while_loop_dense(cond_fn, body_fn, carried_inputs, additional_inputs):
                 f"cond_fn must return a boolean scalar tensor or a boolean but got {pred}"
             )
 
-    if not isinstance(carried_inputs, tuple):
+    if not isinstance(carried_inputs, (tuple, list)):
         raise RuntimeError(
-            f"carried_inputs must be a tuple but got {type(carried_inputs)}"
+            f"carried_inputs must be a tuple or list but got {type(carried_inputs)}"
         )
 
     while pred := cond_fn(*carried_vals, *additional_inputs):
@@ -341,15 +341,15 @@ def while_loop_tracing(mode, cond_fn, body_fn, carried_inputs, additional_inputs
 
 
 def check_meta_consistency(
-    lhs_list: List[Union[torch.Tensor, torch.SymInt, int]],
-    rhs_list: List[Union[torch.Tensor, torch.SymInt, int]],
+    lhs_list: list[Union[torch.Tensor, torch.SymInt, int]],
+    rhs_list: list[Union[torch.Tensor, torch.SymInt, int]],
     lhs_name: str,
     rhs_name: str,
 ) -> None:
     def diff_meta_pairs(
-        lhs_list: List[Union[torch.Tensor, torch.SymInt, int]],
-        rhs_list: List[Union[torch.Tensor, torch.SymInt, int]],
-    ) -> List[str]:
+        lhs_list: list[Union[torch.Tensor, torch.SymInt, int]],
+        rhs_list: list[Union[torch.Tensor, torch.SymInt, int]],
+    ) -> list[str]:
         def diff_meta(
             lhs: Union[torch.Tensor, torch.SymInt, int],
             rhs: Union[torch.Tensor, torch.SymInt, int],
@@ -468,8 +468,8 @@ def while_loop_func(ctx, cond_fn, body_fn, carried_inputs, additional_inputs):
         functional_body_fn = ctx.functionalize(_maybe_run_with_interpreter(body_fn))
         pre_dispatch = hasattr(ctx, "mode") and ctx.mode.pre_dispatch
         for fn, fn_name in [
-            (functional_cond_fn, "cond_fn"),
-            (functional_body_fn, "body_fn"),
+            (cond_fn, "cond_fn"),
+            (body_fn, "body_fn"),
         ]:
             if _has_potential_branch_input_mutation(
                 fn, unwrapped_inputs, pre_dispatch=pre_dispatch

@@ -1123,7 +1123,6 @@ L['x'].ndimension() == 2
 L['x'].requires_grad == False
 L['x'].size()[1] == L['x'].size()[0]
 L['x'].storage_offset() == 0
-___dict_contains('builtins', G['sys'].modules)
 ___dict_contains('operator', G['sys'].modules)
 ___dict_contains('operator', G['sys'].modules)
 hasattr(L['x'], '_dynamo_dynamic_indices') == False
@@ -2644,6 +2643,18 @@ utils_device.CURRENT_DEVICE == None""".split(
         self.assertEqual(r.dtype, torch.int64)
         self.assertEqual(cnts.frame_count, 1)
 
+    @torch._dynamo.config.patch(capture_dynamic_output_shape_ops=True)
+    def test_unique_consecutive(self):
+        x = torch.tensor([1, 1, 2, 2, 1, 3])
+
+        def fn(x):
+            return torch.unique_consecutive(x)
+
+        expected = fn(x)
+        opt_fn = torch.compile(fn, fullgraph=True, backend="eager")
+        result = opt_fn(x)
+        self.assertEqual(result, expected)
+
     def test_numpy_unique_f16(self):
         def fn():
             x = np.asarray([1, 1, 2, 2, 3], dtype=np.float16)
@@ -3551,6 +3562,29 @@ utils_device.CURRENT_DEVICE == None""".split(
         self.assertEqual(cnts.frame_count, 2)
         self.assertEqual(cnts.op_count, 2)
 
+    def test_function_generic_alias_annotation(self):
+        class Variable:
+            pass
+
+        def fn(x):
+            x = x / 3.0
+
+            def inner(y: list[Variable]):
+                return x + 1
+
+            return inner
+
+        x1 = torch.randn(10)
+        obj2 = fn(x1)([])
+
+        cnts = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch._dynamo.optimize_assert(cnts)(fn)
+        opt_fn_inner = torch._dynamo.optimize_assert(cnts)(opt_fn(x1))
+        obj1 = opt_fn_inner([])
+        self.assertTrue(same(obj1, obj2))
+        self.assertEqual(cnts.frame_count, 2)
+        self.assertEqual(cnts.op_count, 2)
+
     def test_nested_closure(self):
         v0 = torch.randn(10)
 
@@ -3951,6 +3985,21 @@ utils_device.CURRENT_DEVICE == None""".split(
         self.assertEqual(0, get_x())
         x += 1
         self.assertEqual(1, get_x())
+
+    def test_input_cell_mutation(self):
+        def fn(x):
+            x = x.cos()
+
+            def inner():
+                return x.sin()
+
+            return inner()
+
+        x = torch.ones(10)
+        opt_fn = torch.compile(fn, fullgraph=True, backend="eager")
+        ref = fn(x)
+        res = opt_fn(x)
+        self.assertEqual(res, ref)
 
     def test_top_package_import(self):
         def fn(x):
@@ -5046,24 +5095,6 @@ utils_device.CURRENT_DEVICE == None""".split(
         opt_fn = torch.compile(fn, backend=cnts)
         res2 = opt_fn(x)
         self.assertTrue(same(res1, res2))
-
-    def test_dict_reconstruct_keeps_original_order(self):
-        def fn():
-            modules = collections.OrderedDict([("act", torch.nn.ReLU())])
-            module_dict = torch.nn.ModuleDict(modules)
-
-            next_modules = {"fc4": torch.nn.Linear(5, 6), "act3": torch.nn.Sigmoid()}
-            modules.update(next_modules.items())
-            module_dict.update(next_modules)
-            return modules, module_dict
-
-        cnts = torch._dynamo.testing.CompileCounter()
-        opt_fn = torch.compile(fn, backend=cnts)
-        modules, module_dict = opt_fn()
-
-        self.assertEqual(len(module_dict), len(modules))
-        for k1, m2 in zip(modules, module_dict.children()):
-            self.assertTrue(modules[k1] is m2)
 
     def test_side_effects_codegen_update_mutated(self):
         # codegen to update mutated variables with side effect
@@ -6970,6 +7001,25 @@ utils_device.CURRENT_DEVICE == None""".split(
         inputs = [torch.randn(10, 10) for _ in range(4)]
         self.assertTrue(same(fn(iter(tuple(inputs))), opt_fn(iter(tuple(inputs)))))
 
+    @torch._dynamo.config.patch(capture_dynamic_output_shape_ops=True)
+    def test_argwhere_with_dynamic_shapes(self):
+        def fn(
+            tensor: torch.Tensor,
+            mapping: torch.Tensor,
+        ) -> torch.Tensor:
+            xx, yy = torch.meshgrid(mapping, tensor, indexing="ij")
+            indices = torch.argwhere(xx == yy)
+
+            mapped_values = torch.zeros_like(tensor)
+            mapped_values[indices[:, 1]] = indices[:, 0]
+
+            return mapped_values
+
+        tensor = torch.tensor([1, 2, 3, 5, 6, 7])
+        mapping = torch.tensor([0, 3, 4, 5, 7])
+        opt = torch.compile(fn, fullgraph=True)
+        self.assertEqual(fn(tensor, mapping), opt(tensor, mapping))
+
     def test_torch_package_working_with_trace(self):
         # from torch._dynamo.test_case import run_tests
 
@@ -7609,6 +7659,26 @@ utils_device.CURRENT_DEVICE == None""".split(
         torch._dynamo.mark_dynamic(y, 0)
         opt = torch.compile(fn, fullgraph=True)
         opt(*inputs)
+
+    @torch._dynamo.config.patch(capture_scalar_outputs=True)
+    @torch._dynamo.config.patch(assume_static_by_default=True)
+    def test_symint_copy_into_unbacked_slice(self):
+        @torch.compile()
+        def fn(a, x):
+            u0 = torch.tensor(x[0].to(torch.int64).item()).item()
+            B, H, T, D = a.shape
+            a_padding = torch.zeros((B, H, u0, D), dtype=torch.float64)
+            b = torch.cat([a, a_padding], dim=2)
+            c = torch.randn(B, H, 152, D)
+            b[:, :, :152, :] = c
+            return b
+
+        x = torch.tensor([0])
+        torch._dynamo.decorators.mark_unbacked(x, 0)
+        a = torch.zeros((1, 16, 152, 96))
+
+        # Previously would crash with guard on data dependent error
+        fn(a, x)
 
     @torch._dynamo.config.patch(capture_scalar_outputs=True)
     def test_symint_fold_nontrivial_product_modulo(self):
@@ -9286,7 +9356,6 @@ def ___make_guard_fn():
         self.assertEqual(counter.frame_count, 0)
 
     # just to be sure in case anyone tries to run this in older versions of Python
-    @unittest.skipIf(sys.version_info < (3, 7), "Made default on Python 3.7")
     def test_pep0479_convert_stopiteration(self):
         # https://peps.python.org/pep-0479/
         def generator_with_stop_iteration():
@@ -10460,27 +10529,6 @@ ShapeEnv not equal: field values don't match:
 
         foo()
 
-    def test_dict_subclass_initialization_in_graph(self):
-        for super_class in (
-            collections.OrderedDict,
-            dict,
-        ):
-
-            class CustomDict(super_class):
-                def __init__(self, *args, **kwargs):
-                    super().__init__(*args, **kwargs)
-
-            def fn(x):
-                c = CustomDict()
-                c["key"] = x
-                assert "key" in c
-                return c["key"] + 1
-
-            opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
-
-            x = torch.rand(4)
-            self.assertEqual(fn(x), opt_fn(x))
-
     @wrapDeterministicFlagAPITest
     def test_backward_deterministic_mode_mismatch_warning(self):
         @torch.compile
@@ -11327,33 +11375,6 @@ fn
 
         f(torch.tensor([30, 30], device="cuda"), torch.tensor([68, 32], device="cuda"))
 
-    def test_contains_dunder_dict(self):
-        class UserDefined:
-            def __init__(self) -> None:
-                self.a = 3
-                self.b = 5
-
-            def run(self, x):
-                if "a" in self.__dict__:
-                    x = x * self.a
-                if "b" in self.__dict__:
-                    x = x * self.b
-                self.c = 7
-                if "c" in self.__dict__:
-                    x = x * self.c
-                return x * self.__dict__.get("a") * self.__dict__.get("z", 2)
-
-        obj = UserDefined()
-
-        def fn(x):
-            return obj.run(x)
-
-        x = torch.randn(4)
-        ref = fn(x)
-        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
-        res = opt_fn(x)
-        self.assertEqual(ref, res)
-
     def test_iter_type(self):
         @torch.compile(fullgraph=True)
         def fn(y):
@@ -11410,24 +11431,6 @@ fn
             "expected size 2==5, stride 12==9 at dim=0; expected size 3==6, stride 4==9 at dim=1; expected size 4==7, stride 1==10 at dim=2",
         ):
             torch._C._dynamo.guards.assert_size_stride(x, (5, 6, 7), (9, 9, 10))
-
-    def test_module_dunder_dict(self):
-        class MyModule(torch.nn.Module):
-            def __init__(self) -> None:
-                super().__init__()
-                self.foo = 1
-                self.bar = 2
-                self.baz = 3
-
-            def forward(self, x):
-                if "foo" in self.__dict__:
-                    return x * self.bar
-                return x * self.baz
-
-        mod = MyModule()
-        x = torch.randn(10)
-        opt_mod = torch.compile(mod, backend="eager", fullgraph=True)
-        self.assertEqual(mod(x), opt_mod(x))
 
     def test_frozen_dict(self):
         # A pattern from StableDiffusion

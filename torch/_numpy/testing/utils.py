@@ -2274,7 +2274,7 @@ def check_free_memory(free_bytes):
             )
 
         msg = (
-            f"{free_bytes/1e9} GB memory required, but environment variable "
+            f"{free_bytes / 1e9} GB memory required, but environment variable "
             f"NPY_AVAILABLE_MEM={env_value} set"
         )
     else:
@@ -2288,9 +2288,7 @@ def check_free_memory(free_bytes):
             )
             mem_free = -1
         else:
-            msg = (
-                f"{free_bytes/1e9} GB memory required, but {mem_free/1e9} GB available"
-            )
+            msg = f"{free_bytes / 1e9} GB memory required, but {mem_free / 1e9} GB available"
 
     return msg if mem_free < free_bytes else None
 
