@@ -95,14 +95,15 @@ def generate_stage_to_rank_mapping(
     Compute the stage id to rank mapping for either a looped or V-style schedule
     """
     mapping = {}
-    if num_stages % pp_size != 0:
-        raise ValueError(
-            f"num_stages {num_stages} must be evenly divisible by pp_size {pp_size}"
-        )
     if style == "loop":
         for stage_index in range(num_stages):
             mapping[stage_index] = stage_index % pp_size
     elif style == "v":
+        if num_stages % pp_size != 0:
+            raise ValueError(
+                f"num_stages {num_stages} must be evenly divisible by pp_size {pp_size} for V schedules"
+            )
+
         rank_index = 0
         for stage_index in range(num_stages):
             mapping[stage_index] = rank_index

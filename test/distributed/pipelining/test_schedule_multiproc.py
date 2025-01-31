@@ -432,7 +432,6 @@ class ScheduleTest(MultiProcContinousTest):
                 stages,
                 num_microbatches,
                 loss_fn=loss_fn,
-                stage_index_to_group_rank=old_schedule.stage_index_to_group_rank,
                 scale_grads=False,
             )
             tmp_schedule._load_actions(old_schedule.pipeline_order)
@@ -441,7 +440,6 @@ class ScheduleTest(MultiProcContinousTest):
                 stages,
                 num_microbatches,
                 loss_fn=loss_fn,
-                stage_index_to_group_rank=old_schedule.stage_index_to_group_rank,
                 scale_grads=False,
             )
             with tempfile.NamedTemporaryFile() as f:
@@ -452,7 +450,6 @@ class ScheduleTest(MultiProcContinousTest):
                 stages,
                 num_microbatches,
                 loss_fn=loss_fn,
-                stage_index_to_group_rank=old_schedule.stage_index_to_group_rank,
                 scale_grads=False,
             )
             one_more_schedule._load_actions(
@@ -772,28 +769,18 @@ class ScheduleTest(MultiProcContinousTest):
             for stage_module, stage_idx in zip(stage_modules, rank_stages[self.rank])
         ]
 
-        # Attach to a schedule
-        stage_index_to_group_rank = {
-            value: key for key, values in rank_stages.items() for value in values
-        }
         schedule = schedule_class(
             stages,
             num_microbatches,
             loss_fn=loss_fn,
             scale_grads=False,
         )
-        # TODO: remove this once we get rid of stage_index_to_group_rank
-        schedule.stage_index_to_group_rank = stage_index_to_group_rank
-        for stage in stages:
-            stage.stage_index_to_group_rank = stage_index_to_group_rank
-
         if use_new_runtime:
             old_schedule = schedule
             schedule = _PipelineScheduleRuntime(
                 stages,
                 num_microbatches,
                 loss_fn=loss_fn,
-                stage_index_to_group_rank=old_schedule.stage_index_to_group_rank,
             )
             schedule._load_actions(old_schedule.pipeline_order)
 
