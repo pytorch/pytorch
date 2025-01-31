@@ -62,7 +62,7 @@ std::shared_ptr<NCCLComm> NCCLComm::create(
   return comm;
 }
 
-#ifdef NCCL_HAS_COMM_NONBLOCKING
+#ifdef NCCL_HAS_CONFIG
 std::shared_ptr<NCCLComm> NCCLComm::create(
     int numRanks,
     int rank,
@@ -87,7 +87,7 @@ std::shared_ptr<NCCLComm> NCCLComm::create(
   comm->initialized_ = !comm->nonBlocking_;
   return comm;
 }
-#endif
+#endif // NCCL_HAS_CONFIG
 
 ncclComm_t NCCLComm::getNcclComm() {
   LockType lock(mutex_);
