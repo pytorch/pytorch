@@ -15,6 +15,7 @@ from torch._higher_order_ops.utils import (
     first_slice_copy,
     reenter_make_fx,
     unique_graph_id,
+    validate_subgraph_args_types,
 )
 from torch._ops import HigherOrderOperator
 from torch._subclasses.fake_tensor import FakeTensorMode
@@ -74,6 +75,10 @@ class AssociativeScanOp(HigherOrderOperator):
         super().__init__("associative_scan")
 
     def __call__(self, combine_fn, xs, additional_inputs):
+        assert isinstance(
+            additional_inputs, tuple
+        ), "additional_inputs must be a tuple."
+        validate_subgraph_args_types(additional_inputs)
         return super().__call__(combine_fn, xs, additional_inputs)
 
 
@@ -83,7 +88,7 @@ associative_scan_op = AssociativeScanOp()
 def associative_scan(
     combine_fn: Callable[[pytree.PyTree, pytree.PyTree], pytree.PyTree],
     xs: pytree.PyTree,
-    dim: int = 0,
+    dim: int,
     reverse: bool = False,
     combine_mode: str = "pointwise",
 ) -> torch.Tensor:
@@ -223,7 +228,7 @@ def associative_scan(
             spec=spec,
             num_leaves=len(leaves),
         )
-        result_flat = generic_associative_scan(combine_fn, leaves, additional_inputs=[])
+        result_flat = generic_associative_scan(combine_fn, leaves, additional_inputs=())
     else:
         combine_fn = functools.partial(
             wrap_combine_fn_flat,
@@ -231,7 +236,7 @@ def associative_scan(
             spec=spec,
             num_leaves=len(leaves),
         )
-        result_flat = associative_scan_op(combine_fn, leaves, additional_inputs=[])
+        result_flat = associative_scan_op(combine_fn, leaves, additional_inputs=())
 
     if reverse:
         result_flat = [torch.flip(elem, [0]) for elem in result_flat]
@@ -242,7 +247,7 @@ def associative_scan(
     return pytree.tree_unflatten(result_flat, spec)
 
 
-def generic_associative_scan(operator, leaves, dim=0, additional_inputs=None):
+def generic_associative_scan(operator, leaves, dim=0, additional_inputs=()):
     r"""
     This function performs the associative_scan operation.
     The algorithm works by recursively collecting neighbours of ``leaves`` and subsequently
@@ -290,7 +295,6 @@ def generic_associative_scan(operator, leaves, dim=0, additional_inputs=None):
             res = torch.tensor([0.0, 1.0, 3.0, 6.0])
 
     """
-    additional_inputs = additional_inputs if additional_inputs is not None else []
 
     def _scan(elems):
         """Perform the actual recursive scan on ``elems``."""
@@ -348,7 +352,7 @@ def trace_associative_scan(
     func_overload,
     combine_fn: Callable,
     xs: list[torch.Tensor],
-    additional_inputs: list[torch.Tensor],
+    additional_inputs: tuple[torch.Tensor],
 ):
     from torch._inductor.utils import is_pointwise_use
 
@@ -398,7 +402,7 @@ def trace_associative_scan(
 
 @associative_scan_op.py_impl(DispatchKey.CompositeExplicitAutograd)
 def associative_scan_op_dense(combine_fn, xs, additional_inputs):
-    return generic_associative_scan(combine_fn, xs, additional_inputs)
+    return generic_associative_scan(combine_fn, xs, additional_inputs=additional_inputs)
 
 
 associative_scan_op.py_impl(DispatchKey.Autograd)(
