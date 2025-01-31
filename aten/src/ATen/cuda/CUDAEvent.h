@@ -3,6 +3,7 @@
 #include <ATen/cuda/ATenCUDAGeneral.h>
 #include <ATen/cuda/CUDAContext.h>
 #include <c10/core/impl/GPUTrace.h>
+#include <c10/cuda/CUDAGraphsC10Utils.h>
 #include <c10/cuda/CUDAStream.h>
 #include <c10/cuda/CUDAGuard.h>
 #include <ATen/cuda/Exceptions.h>
@@ -118,7 +119,11 @@ struct TORCH_CUDA_CPP_API CUDAEvent {
     TORCH_CHECK(device_index_ == stream.device_index(), "Event device ", device_index_,
       " does not match recording stream's device ", stream.device_index(), ".");
     CUDAGuard guard(device_index_);
-    AT_CUDA_CHECK(cudaEventRecord(event_, stream));
+    if (c10::cuda::currentStreamCaptureStatusMayInitCtx() == c10::cuda::CaptureStatus::None) {
+      AT_CUDA_CHECK(cudaEventRecord(event_, stream));
+    } else {
+      AT_CUDA_CHECK(cudaEventRecordWithFlags(event_, stream, cudaEventRecordExternal));
+    }
     const c10::impl::PyInterpreter* interp = c10::impl::GPUTrace::get_trace();
     if (C10_UNLIKELY(interp)) {
       (*interp)->trace_gpu_event_record(at::kCUDA,
