@@ -341,20 +341,6 @@ void f8f8bf16_rowwise_impl_sm89(
       cutlass::arch::OpMultiplyAdd>;
   constexpr auto NumEVTEpilogueStages = 1;
 
-  using ScaleTileThreadMap =
-      cutlass::epilogue::threadblock::OutputTileThreadLayout<
-          ThreadblockShape,
-          WarpShape,
-          DtypeScale,
-          AlignmentScale,
-          NumEVTEpilogueStages>;
-  using BiasTileThreadMap =
-      cutlass::epilogue::threadblock::OutputTileThreadLayout<
-          ThreadblockShape,
-          WarpShape,
-          DtypeBias,
-          AlignmentBias,
-          NumEVTEpilogueStages>;
   using OutputTileThreadMap =
       cutlass::epilogue::threadblock::OutputTileThreadLayout<
           ThreadblockShape,
@@ -365,25 +351,19 @@ void f8f8bf16_rowwise_impl_sm89(
 
   using Accum = cutlass::epilogue::threadblock::VisitorAccFetch;
 
-  using XScale =
-      cutlass::epilogue::threadblock::VisitorColBroadcast<
-          ScaleTileThreadMap,
-          DtypeScale,
-          cute::Stride<cute::_1, cute::_0, int64_t>>;
+  using XScale = cutlass::epilogue::threadblock::VisitorColBroadcast<
+      OutputTileThreadMap, DtypeScale,
+      cute::Stride<cute::_1, cute::_0, int64_t>>;
   using XScaleArguments = typename XScale::Arguments;
 
-  using WScale =
-      cutlass::epilogue::threadblock::VisitorRowBroadcast<
-          ScaleTileThreadMap,
-          DtypeScale,
-          cute::Stride<cute::_0, cute::_1, int64_t>>;
+  using WScale = cutlass::epilogue::threadblock::VisitorRowBroadcast<
+      OutputTileThreadMap, DtypeScale,
+      cute::Stride<cute::_0, cute::_1, int64_t>>;
   using WScaleArguments = typename WScale::Arguments;
 
-  using Bias =
-      cutlass::epilogue::threadblock::VisitorRowBroadcast<
-          BiasTileThreadMap,
-          DtypeBias,
-          cute::Stride<cute::_0, cute::_1, int64_t>>;
+  using Bias = cutlass::epilogue::threadblock::VisitorRowBroadcast<
+      OutputTileThreadMap, DtypeBias,
+      cute::Stride<cute::_0, cute::_1, int64_t>>;
   using BiasArguments = typename Bias::Arguments;
 
   using ApplyXScale = cutlass::epilogue::threadblock::VisitorCompute<
@@ -423,8 +403,7 @@ void f8f8bf16_rowwise_impl_sm89(
       Output,
       EVTApplyBias>;
 
-  using EVTKernel =
-      typename cutlass::gemm::kernel::DefaultGemmWithVisitor<
+  using EVTKernel = typename cutlass::gemm::kernel::DefaultGemmWithVisitor<
       DtypeA, LayoutInputA, cutlass::ComplexTransform::kNone, AlignmentInputA,
       DtypeB, LayoutInputB, cutlass::ComplexTransform::kNone, AlignmentInputB,
       DtypeOutput, LayoutOutput, AlignmentOutput,
