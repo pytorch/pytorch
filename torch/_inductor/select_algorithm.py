@@ -1590,10 +1590,17 @@ class NoValidChoicesError(RuntimeError):
 
 
 @functools.lru_cache(None)
-def get_env_num_workers() -> Optional[int]:
+def get_num_workers() -> int:
     if "TORCHINDUCTOR_COMPILE_THREADS" in os.environ:
         return int(os.environ["TORCHINDUCTOR_COMPILE_THREADS"])
-    return None
+
+    cpu_count = (
+        len(os.sched_getaffinity(0))
+        if hasattr(os, "sched_getaffinity")
+        else os.cpu_count()
+    )
+    assert cpu_count
+    return cpu_count
 
 
 def create_inputs_key(input_nodes) -> str:
@@ -1714,8 +1721,7 @@ class AlgorithmSelectorCache(PersistentCache):
             ):
                 return no_op
 
-            env_workers = get_env_num_workers()
-            num_workers = env_workers if env_workers is not None else (len(choices))
+            num_workers = min(get_num_workers(), len(choices))
 
             if num_workers <= 0:
                 return no_op
