@@ -18,6 +18,8 @@
 #include <ATen/ops/addr_native.h>
 #include <ATen/ops/baddbmm_native.h>
 #include <ATen/ops/bmm_native.h>
+#include <ATen/ops/cholesky_native.h>
+#include <ATen/ops/linalg_cholesky_native.h>
 #include <ATen/ops/linalg_lu_factor_native.h>
 #include <ATen/ops/linalg_solve_triangular_native.h>
 #include <ATen/ops/mm_native.h>
@@ -58,6 +60,36 @@ Tensor& do_metal_mm(const Tensor& self, const Tensor& other, Tensor& output) {
   return output;
 }
 
+Tensor& do_metal_bmm(const Tensor& batch1, const Tensor& batch2, Tensor& output) {
+  auto stream = getCurrentMPSStream();
+  auto device = MPSDevice::getInstance()->device();
+  auto matmulPSO = lib.getPipelineStateForFunc("naive_bmm_" + mps::scalarToMetalTypeString(output));
+  dispatch_sync_with_rethrow(stream->queue(), ^() {
+    @autoreleasepool {
+      getMPSProfiler().beginProfileKernel(matmulPSO, "naive_batch_matmul", {batch1, batch2});
+      auto computeEncoder = stream->commandEncoder();
+      [computeEncoder setComputePipelineState:matmulPSO];
+      std::array<uint32_t, 4> sizes = {static_cast<uint32_t>(batch1.size(1)),
+                                       static_cast<uint32_t>(batch1.size(2)),
+                                       static_cast<uint32_t>(output.size(2)),
+                                       static_cast<uint32_t>(output.size(0))};
+      std::array<int64_t, 9> strides = {batch1.stride(2),
+                                        batch1.stride(1),
+                                        batch1.stride(0),
+                                        batch2.stride(2),
+                                        batch2.stride(1),
+                                        batch2.stride(0),
+                                        output.stride(2),
+                                        output.stride(1),
+                                        output.stride(0)};
+      mtl_setArgs(computeEncoder, batch1, batch2, output, strides, sizes);
+      mtl_dispatch1DJob(computeEncoder, matmulPSO, output.numel());
+      getMPSProfiler().endProfileKernel(matmulPSO);
+    }
+  });
+  return output;
+}
+
 std::tuple<MPSGraphTensor*, MPSGraphTensor*, MPSGraphTensor*> do_mm(MPSGraph* graph,
                                                                     const Tensor& self,
                                                                     const Tensor& other) {
@@ -77,11 +109,13 @@ bool use_metal_mm(const Tensor& self, const Tensor& other, const Tensor& output)
   static bool always_use_metal = std::getenv("PYTORCH_MPS_PREFER_METAL") != nullptr;
   constexpr auto max_stride_size = 32768;
   static bool is_macos_14_4_or_newer = is_macos_13_or_newer(MacOSVersion::MACOS_VER_14_4_PLUS);
-  return always_use_metal ||
-      (!is_macos_14_4_or_newer &&
-       (self.stride(0) > max_stride_size || self.stride(1) > max_stride_size || self.size(0) > max_stride_size ||
-        self.size(1) > max_stride_size || other.stride(0) > max_stride_size || other.stride(1) > max_stride_size ||
-        other.size(0) > max_stride_size || other.size(1) > max_stride_size));
+  if (always_use_metal || c10::isIntegralType(self.scalar_type(), true)) {
+    return true;
+  }
+  return !is_macos_14_4_or_newer &&
+      (self.stride(0) > max_stride_size || self.stride(1) > max_stride_size || self.size(0) > max_stride_size ||
+       self.size(1) > max_stride_size || other.stride(0) > max_stride_size || other.stride(1) > max_stride_size ||
+       other.size(0) > max_stride_size || other.size(1) > max_stride_size);
 }
 
 } // anonymous namespace
@@ -207,8 +241,6 @@ static Tensor& mm_out_mps_impl(const Tensor& self, const Tensor& other, Tensor& 
               self.dtype(),
               " != ",
               other.dtype())
-  TORCH_CHECK(supportedFloatingOrComplexType(self), "MPS device does not support mm for non-float inputs");
-
   TensorArg args[]{{output, "out", 0}, {self, "mat1", 1}, {other, "mat2", 2}};
   checkAllSameGPU("mm", args);
 
@@ -600,8 +632,6 @@ static Tensor& tiled_bmm_out_mps_impl(const Tensor& batch1, const Tensor& batch2
 static Tensor& bmm_out_mps_impl(const Tensor& batch1, const Tensor& batch2, Tensor& result) {
   using namespace mps;
 
-  TORCH_CHECK(supportedFloatingOrComplexType(batch1), "MPS device does not support bmm for non-float inputs");
-
   // Matmul not supported if any output dimension size is larger than 2**32
   for (auto elem : result.sizes()) {
     TORCH_CHECK_NOT_IMPLEMENTED(elem <= pow(2, 32),
@@ -611,6 +641,10 @@ static Tensor& bmm_out_mps_impl(const Tensor& batch1, const Tensor& batch2, Tens
   if (batch1.numel() == 0 || batch2.numel() == 0) {
     result.zero_();
     return result;
+  }
+
+  if (c10::isIntegralType(batch1.scalar_type(), true)) {
+    return do_metal_bmm(batch1, batch2, result);
   }
 
   static const bool is_macOS_15_0_or_newer = is_macos_13_or_newer(MacOSVersion::MACOS_VER_15_0_PLUS);
@@ -780,6 +814,78 @@ static Tensor& linalg_solve_triangular_mps_impl(const Tensor& A,
   return out;
 }
 
+static Tensor& linalg_cholesky_mps_impl(const Tensor& input, bool upper, Tensor& out) {
+  using namespace mps;
+
+  TORCH_CHECK(out.is_mps());
+  TORCH_CHECK(input.scalar_type() == at::ScalarType::Float, "linalg.cholesky: Input tensor must be float32");
+  TORCH_CHECK(input.dim() >= 2, "linalg.cholesky: Input tensor must be at least 2D");
+  TORCH_CHECK(input.size(-2) == input.size(-1), "linalg.cholesky: Input tensor must be square");
+
+  if (input.numel() == 0 || out.numel() == 0) {
+    out.zero_();
+    return out;
+  }
+  resize_output(out, input.sizes());
+  out.copy_(input);
+
+  int64_t ndim = out.dim();
+  int64_t N = out.size(-1);
+  int64_t B = 1;
+  for (int64_t i = 0; i < ndim - 2; i++) {
+    B *= out.size(i);
+  }
+
+  auto stream = getCurrentMPSStream();
+  auto device = MPSDevice::getInstance()->device();
+
+  auto factorDiagonalPSO = lib.getPipelineStateForFunc("factorDiagonalBlock");
+  auto applyTRSMPSO = lib.getPipelineStateForFunc("applyTRSM");
+  auto applySYRKPSO = lib.getPipelineStateForFunc("applySYRK");
+
+  int64_t NB = std::min<int64_t>(32, N);
+  int64_t numBlocks = (N + NB - 1) / NB;
+
+  Tensor success = at::empty({B}, input.options().dtype(kInt)).fill_(1);
+
+  MTLSize threadGroupSize = MTLSizeMake(32, 8, 1);
+
+  @autoreleasepool {
+    dispatch_sync_with_rethrow(stream->queue(), ^() {
+      auto computeEncoder = stream->commandEncoder();
+      mtl_setArgs(computeEncoder, out, success, N, NB);
+      for (int64_t k = 0; k < numBlocks; k++) {
+        [computeEncoder setComputePipelineState:factorDiagonalPSO];
+        mtl_setBytes(computeEncoder, k, 4);
+        MTLSize gridSize = MTLSizeMake(B, 1, 1);
+        [computeEncoder dispatchThreadgroups:gridSize threadsPerThreadgroup:threadGroupSize];
+
+        // process all remaining blocks in this row/column in parallel
+        if (k < numBlocks - 1) {
+          int64_t startJ = k + 1;
+          int64_t nBlocksJ = (numBlocks - startJ);
+
+          if (nBlocksJ > 0) {
+            // TRSM for all blocks in parallel
+            MTLSize trsmGridSize = MTLSizeMake(B, nBlocksJ, 1);
+            [computeEncoder setComputePipelineState:applyTRSMPSO];
+            [computeEncoder dispatchThreadgroups:trsmGridSize threadsPerThreadgroup:threadGroupSize];
+
+            // SYRK for all independent block pairs in parallel
+            uint32_t nPairs = nBlocksJ * (nBlocksJ + 1) / 2;
+            MTLSize syrkGridSize = MTLSizeMake(B, nPairs, 1);
+            [computeEncoder setComputePipelineState:applySYRKPSO];
+            [computeEncoder dispatchThreadgroups:syrkGridSize threadsPerThreadgroup:threadGroupSize];
+          }
+        }
+      }
+    });
+  }
+
+  TORCH_CHECK(success.all().item<bool>(), "linalg.cholesky: Input matrix is not positive definite");
+  out.tril_(); //
+  return upper ? out.transpose_(ndim - 2, ndim - 1) : out;
+}
 } // namespace mps
 
 Tensor addr_mps(const Tensor& self, const Tensor& vec1, const Tensor& vec2, const Scalar& beta, const Scalar& alpha) {
@@ -938,6 +1044,25 @@ Tensor& addbmm_out_mps(const Tensor& self,
 
   mps::addbmm_or_baddbmm_out_mps_impl(*b_self, batch1, batch2, beta, alpha, result, mps::ADDBMM_OP_TYPE);
   return result;
+}
+
+Tensor cholesky_mps(const Tensor& self, bool upper) {
+  auto out = at::empty_like(self, MemoryFormat::Contiguous);
+  mps::linalg_cholesky_mps_impl(self, upper, out);
+  return out;
+}
+
+Tensor& cholesky_mps_out(const Tensor& self, bool upper, Tensor& out) {
+  return mps::linalg_cholesky_mps_impl(self, upper, out);
+}
+
+Tensor& linalg_cholesky_out_mps(const Tensor& self, bool upper, Tensor& out) {
+  return mps::linalg_cholesky_mps_impl(self, upper, out);
+}
+
+Tensor linalg_cholesky_mps(const Tensor& self, bool upper) {
+  auto out = at::empty_like(self, MemoryFormat::Contiguous);
+  return mps::linalg_cholesky_mps_impl(self, upper, out);
 }
 
 Tensor addbmm_mps(const Tensor& self,
