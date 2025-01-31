@@ -357,17 +357,17 @@ class FuncArgs(NamedTuple):
 
 
 class Wrapper:
-    def __init__(self, step_fn: Callable[..., Any], kwargs: dict[str, Any]) -> None:
-        self.step_fn = step_fn
+    def __init__(self, wrapper_fn: Callable[..., Any], kwargs: dict[str, Any]) -> None:
+        self.wrapper_fn = wrapper_fn
         self.kwargs = kwargs
-        self._params = frozenset(inspect.signature(self.step_fn).parameters)
+        self._params = frozenset(inspect.signature(self.wrapper_fn).parameters)
 
     def __call__(self, func_args: FuncArgs, **kwargs: Any) -> FuncArgs:
         """Wrap a FuncArgs to produce new FuncArgs"""
         kwargs["args"] = func_args.args
         kwargs = {k: v for k, v in kwargs.items() if k in self._params}
 
-        r = self.step_fn(func_args.fn, **kwargs, **self.kwargs)
+        r = self.wrapper_fn(func_args.fn, **kwargs, **self.kwargs)
         if isinstance(r, tuple):
             assert len(r) == 2, str(r)
             fn, args = r
@@ -383,8 +383,8 @@ class Wrapper:
 class WrapperSteps:
     """A sequence of wrappers that operate recursively on a FuncArgs"""
 
-    def __init__(self, *step_fn: Callable[..., Any], **kwargs: Any) -> None:
-        self.steps = [Wrapper(s, kwargs) for s in step_fn]
+    def __init__(self, *steps: Callable[..., Any], **kwargs: Any) -> None:
+        self.steps = [Wrapper(s, kwargs) for s in steps]
 
     def run_all(self, func_args: FuncArgs, **kwargs: Any) -> list[FuncArgs]:
         return [f := func_args] + [f := step(f, **kwargs) for step in self.steps]
