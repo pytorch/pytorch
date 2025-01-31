@@ -28,18 +28,12 @@ from torch.testing._internal.common_device_type import (
 from torch.testing._internal.common_methods_invocations import (
     ReductionOpInfo, ReductionPythonRefInfo, reduction_ops, reference_masked_ops)
 
-# TODO: replace with make_tensor
 def _generate_input(shape, dtype, device, with_extremal):
     if shape == ():
-        x = torch.tensor((), dtype=dtype, device=device)
+        x = make_tensor(0, device=device, dtype=dtype)
     else:
+        x = make_tensor(shape, device=device, dtype=dtype, high=100)
         if dtype.is_floating_point or dtype.is_complex:
-            # work around torch.randn not being implemented for bfloat16
-            if dtype == torch.bfloat16:
-                x = torch.randn(*shape, device=device) * random.randint(30, 100)
-                x = x.to(torch.bfloat16)
-            else:
-                x = torch.randn(*shape, dtype=dtype, device=device) * random.randint(30, 100)
             x[torch.randn(*shape) > 0.5] = 0
             if with_extremal and dtype.is_floating_point:
                 # Use extremal values
@@ -50,15 +44,9 @@ def _generate_input(shape, dtype, device, with_extremal):
                 x[torch.randn(*shape) > 0.5] = complex('nan')
                 x[torch.randn(*shape) > 0.5] = complex('inf')
                 x[torch.randn(*shape) > 0.5] = complex('-inf')
-        elif dtype == torch.bool:
-            x = torch.zeros(shape, dtype=dtype, device=device)
-            x[torch.randn(*shape) > 0.5] = True
-        else:
-            x = torch.randint(15, 100, shape, dtype=dtype, device=device)
 
     return x
 
-# TODO: replace with make_tensor
 def _rand_shape(dim, min_size, max_size):
     shape = []
     for _ in range(dim):
@@ -1952,58 +1940,35 @@ class TestReductions(TestCase):
 
         for ndim in range(5):
             shape = _rand_shape(ndim, 1, 5)
-            x = _generate_input(shape, dtype, device, with_extremal=False)
-            _test_all_any(x)
-            _test_all_any(x.T)
-            _test_all_any(x[..., ::2])
+            for with_extremal in [False, True]:
+                x = _generate_input(shape, dtype, device, with_extremal=with_extremal)
+                _test_all_any(x)
+                _test_all_any(x.T)
+                _test_all_any(x[..., ::2])
 
-            x = _generate_input(shape, dtype, device, with_extremal=True)
-            _test_all_any(x)
-            _test_all_any(x.T)
-            _test_all_any(x[..., ::2])
+            for t in [torch.zeros_like(x), torch.ones_like(x)]:
+                _test_all_any(t)
+                _test_all_any(t.T)
+                _test_all_any(t[..., ::2])
+                _test_output_dtype(t)
 
-            x = torch.zeros_like(x)
-            _test_all_any(x)
-            _test_all_any(x.T)
-            _test_all_any(x[..., ::2])
-
-            x = torch.ones_like(x)
-            _test_all_any(x)
-            _test_all_any(x.T)
-            _test_all_any(x[..., ::2])
-            _test_output_dtype(x)
             for dim in range(ndim):
-                x = _generate_input(shape, dtype, device, with_extremal=False)
-                _test_all_any_with_dim(x, dim)
-                _test_all_any_with_dim(x.T, dim)
-                _test_all_any_with_dim(x[..., ::2], dim)
-                _test_out_variant(x, dim)
-                _test_all_any_with_dim_keepdim(x, dim, keepdim=True)
-                _test_all_any_with_dim_keepdim(x, dim, keepdim=False)
+                for with_extremal in [False, True]:
+                    x = _generate_input(shape, dtype, device, with_extremal=with_extremal)
+                    _test_all_any_with_dim(x, dim)
+                    _test_all_any_with_dim(x.T, dim)
+                    _test_all_any_with_dim(x[..., ::2], dim)
+                    _test_out_variant(x, dim)
+                    _test_all_any_with_dim_keepdim(x, dim, keepdim=True)
+                    _test_all_any_with_dim_keepdim(x, dim, keepdim=False)
 
-                x = _generate_input(shape, dtype, device, with_extremal=True)
-                _test_all_any_with_dim(x, dim)
-                _test_all_any_with_dim(x.T, dim)
-                _test_all_any_with_dim(x[..., ::2], dim)
-                _test_out_variant(x, dim)
-                _test_all_any_with_dim_keepdim(x, dim, keepdim=True)
-                _test_all_any_with_dim_keepdim(x, dim, keepdim=False)
-
-                x = torch.zeros_like(x)
-                _test_all_any_with_dim(x, dim)
-                _test_all_any_with_dim(x.T, dim)
-                _test_all_any_with_dim(x[..., ::2], dim)
-                _test_out_variant(x, dim)
-                _test_all_any_with_dim_keepdim(x, dim, keepdim=True)
-                _test_all_any_with_dim_keepdim(x, dim, keepdim=False)
-
-                x = torch.ones_like(x)
-                _test_all_any_with_dim(x, dim)
-                _test_all_any_with_dim(x.T, dim)
-                _test_all_any_with_dim(x[..., ::2], dim)
-                _test_out_variant(x, dim)
-                _test_all_any_with_dim_keepdim(x, dim, keepdim=True)
-                _test_all_any_with_dim_keepdim(x, dim, keepdim=False)
+                for t in [torch.zeros_like(x), torch.ones_like(x)]:
+                    _test_all_any_with_dim(t, dim)
+                    _test_all_any_with_dim(t.T, dim)
+                    _test_all_any_with_dim(t[..., ::2], dim)
+                    _test_out_variant(t, dim)
+                    _test_all_any_with_dim_keepdim(t, dim, keepdim=True)
+                    _test_all_any_with_dim_keepdim(t, dim, keepdim=False)
 
     # TODO: part of this test covers torch.norm, with should be covered by test_linalg
     @onlyNativeDeviceTypes
