@@ -1828,14 +1828,18 @@ def min_cut_rematerialization_partition(
             joint_module.graph, inputs, fwd_outputs, "forward"
         )
         required_fw_nodes: OrderedSet[fx.Node] = OrderedSet(
-            name_to_node[node.name]
-            for node in forward_only_graph.nodes
-            if node.op != "output"
+            [
+                name_to_node[node.name]
+                for node in forward_only_graph.nodes
+                if node.op != "output"
+            ]
         )
         unclaimed_nodes: OrderedSet[fx.Node] = OrderedSet(
-            node
-            for node in joint_module.graph.nodes
-            if node not in required_fw_nodes and node not in required_bw_nodes
+            [
+                node
+                for node in joint_module.graph.nodes
+                if node not in required_fw_nodes and node not in required_bw_nodes
+            ]
         )
         fw_cnt = 0
         fw_order = {}
