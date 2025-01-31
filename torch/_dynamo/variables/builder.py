@@ -1479,9 +1479,8 @@ class VariableBuilder:
 
             # we can't do this assert inside FSDP constructor,
             # since we don't know yet whether dynamo will be used
-            assert getattr(
-                value, "_fsdp_use_orig_params", False
-            ), "Dynamo only supports FSDP with use_orig_params=True"
+            if not getattr(value, "_fsdp_use_orig_params", False):
+                unimplemented("Dynamo only supports FSDP with use_orig_params=True")
 
             # Note on FSDP guarding
             # Eager FSDP already assumes (requires, but without enforcement)
