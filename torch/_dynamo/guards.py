@@ -2893,7 +2893,7 @@ def get_guard_fail_reason(
     return reason_str
 
 
-def get_and_maybe_log_recompilation_reason(
+def get_and_maybe_log_recompilation_reasons(
     cache_entry, frame: DynamoFrameType
 ) -> list[str]:
     """
