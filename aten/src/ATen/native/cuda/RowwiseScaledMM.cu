@@ -315,9 +315,6 @@ void f8f8bf16_rowwise_impl_sm89(
   using LayoutInputB = cutlass::layout::ColumnMajor;
   constexpr int AlignmentInputB = 16 / sizeof(DtypeB);
 
-  constexpr int AlignmentScale = 16 / sizeof(DtypeScale);
-  constexpr int AlignmentBias = 16 / sizeof(DtypeBias);
-
   using LayoutOutput = cutlass::layout::RowMajor;
   constexpr int AlignmentOutput = 16 / sizeof(DtypeOutput);
 
