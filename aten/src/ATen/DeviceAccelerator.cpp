@@ -9,7 +9,7 @@ std::optional<c10::DeviceType> getAccelerator(bool checked) {
   // We explicitly allow PrivateUse1 and another device at the same time as we
   // use this for testing. Whenever a PrivateUse1 device is registered, use it
   // first.
-  // Note that this check only for hook registration and thus is NOT initializing
+  // Note that this check is only for hook registration and thus is NOT initializing
   // the device or fork poisoning.
   if (is_privateuse1_backend_registered()) {
     return kPrivateUse1;
