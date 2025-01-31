@@ -164,4 +164,5 @@ jobs:
           XPU_VERSION: "${{ inputs.xpu-version }}"
           OUR_GITHUB_JOB_ID: ${{ steps.get-job-id.outputs.job-id }}
         run: |
-          pytorch/.ci/pytorch/win-arm64-build.sh
+          cd pytorch
+          .ci/pytorch/win-arm64-build.sh

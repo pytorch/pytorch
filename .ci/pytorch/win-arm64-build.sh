@@ -10,10 +10,6 @@ if [ ! -f setup.py ]; then
 fi
 
 SCRIPT_PARENT_DIR=$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )
-# shellcheck source=./common.sh
-source "$SCRIPT_PARENT_DIR/common.sh"
-# shellcheck source=./common-build.sh
-source "$SCRIPT_PARENT_DIR/common-build.sh"
 
 export TMP_DIR="${PWD}/build/win_tmp"
 TMP_DIR_WIN=$(cygpath -w "${TMP_DIR}")
