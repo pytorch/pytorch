@@ -1,7 +1,7 @@
 # Owner(s): ["module: fx"]
 
 #
-# Tests the graph pickler by using pickling on all the inductor tests.
+# Tests compiling the inductor tests in a subprocess.
 #
 
 import contextlib
@@ -15,7 +15,7 @@ import torch.library
 from torch._dynamo.testing import make_test_cls_with_patches
 from torch._inductor.test_case import TestCase
 from torch.testing._internal.common_utils import TEST_WITH_ASAN
-from torch.testing._internal.inductor_utils import HAS_CPU, HAS_GPU
+from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_CPU, HAS_GPU
 
 
 # Make the helper files in test/ importable
@@ -23,6 +23,7 @@ pytorch_test_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
 sys.path.append(pytorch_test_dir)
 from inductor.test_torchinductor import (  # @manual=fbcode//caffe2/test/inductor:test_inductor-library
     check_model,
+    check_model_gpu,
     CommonTemplate,
     copy_tests,
     TestFailure,
@@ -34,37 +35,44 @@ importlib.import_module("filelock")
 # xfail by default, set is_skip=True to skip
 test_failures = {
     # TypeError: cannot pickle 'generator' object
-    "test_layer_norm_graph_pickler": TestFailure(("cpu"), is_skip=True),
+    "test_layer_norm": TestFailure(("cpu", "cuda"), is_skip=True),
 }
 
 
-def make_test_cls(cls, xfail_prop="_expected_failure_graph_pickler"):
+def make_test_cls(cls):
     return make_test_cls_with_patches(
         cls,
-        "GraphPickler",
-        "_graph_pickler",
+        "Subprocess",
+        "",
         (
             torch._inductor.compile_fx,
             "fx_compile_mode",
-            torch._inductor.compile_fx.FxCompileMode.SERIALIZE,
+            torch._inductor.compile_fx.FxCompileMode.SUBPROCESS,
         ),
-        xfail_prop=xfail_prop,
     )
 
 
-GraphPicklerCommonTemplate = make_test_cls(CommonTemplate)
+CommonTemplate = make_test_cls(CommonTemplate)
 
 
 if HAS_CPU:
 
-    class GraphPicklerCpuTests(TestCase):
+    class CpuTests(TestCase):
         common = check_model
         device = "cpu"
 
-    copy_tests(GraphPicklerCommonTemplate, GraphPicklerCpuTests, "cpu", test_failures)
+    copy_tests(CommonTemplate, CpuTests, "cpu", test_failures)
+
+if HAS_GPU and not TEST_WITH_ASAN:
+
+    class GpuTests(TestCase):
+        common = check_model_gpu
+        device = GPU_TYPE
+
+    copy_tests(CommonTemplate, GpuTests, GPU_TYPE, test_failures)
 
 
-class TestGraphPickler(TestCase):
+class TestSubprocess(TestCase):
     def setUp(self):
         torch._dynamo.reset()
         TestCase.setUp(self)
@@ -82,19 +90,9 @@ class TestGraphPickler(TestCase):
         TestCase.tearDown(self)
         torch._dynamo.reset()
 
-    def test_simple(self):
-        # Make sure that compiling works when we pass the input + output from
-        # fx_codegen_and_compile() through serde.
-
-        def fn(a, b):
-            return a + b
-
-        check_model(self, fn, (torch.tensor([False, True]), torch.tensor([True, True])))
-
 
 if __name__ == "__main__":
     from torch._inductor.test_case import run_tests
 
-    # Slow on ASAN after https://github.com/pytorch/pytorch/pull/94068
-    if (HAS_CPU or HAS_GPU) and not TEST_WITH_ASAN:
+    if HAS_CPU or HAS_GPU:
         run_tests(needs="filelock")
