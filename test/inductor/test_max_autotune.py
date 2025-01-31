@@ -1331,6 +1331,54 @@ class TestPrologueFusion(TestCase):
             "tl.store"
         ).run(code[0])
 
+    @config.patch(
+        {
+            "max_autotune_gemm_backends": "Triton",
+            "benchmark_epilogue_fusion": True,
+            "use_mixed_mm": False,
+            "mixed_mm_choice": "default",
+            "max_epilogue_benchmarked_choices": 3,
+        }
+    )
+    def test_pending_fusions_multiple(self):
+        def multi_use(x, y):
+            return (x @ x.T) * (y @ y.T)
+
+        x = torch.rand([128, 16], device=GPU_TYPE)
+        y = torch.rand([128, 32], device=GPU_TYPE)
+
+        out, code = run_and_get_code(torch.compile(multi_use), x, y)
+
+        FileCheck().check("def call").check_count(".run(", 2, exactly=True).run(code[0])
+        self.assertEqual(out, multi_use(x, y), atol=0.05, rtol=0.05)
+
+        def resolve_pending(x):
+            return (x @ x).relu()
+
+        x = torch.rand([128, 128], device=GPU_TYPE)
+        out, code = run_and_get_code(torch.compile(resolve_pending), x)
+        FileCheck().check("def call").check_count(".run(", 1, exactly=True).run(code[0])
+        self.assertEqual(out, resolve_pending(x), atol=0.05, rtol=0.05)
+
+    @config.patch(
+        {
+            "max_autotune_gemm_backends": "Triton",
+            "benchmark_epilogue_fusion": True,
+            "use_mixed_mm": False,
+            "mixed_mm_choice": "default",
+            "max_epilogue_benchmarked_choices": 3,
+        }
+    )
+    def test_pending_fusion_pro_and_epi(self):
+        def test_multiple_fusions(x):
+            y = x.to(torch.float)
+            return (y @ y).relu()
+
+        x = torch.rand([128, 128], dtype=torch.float16, device=GPU_TYPE)
+        out, code = run_and_get_code(torch.compile(test_multiple_fusions), x)
+        FileCheck().check("def call").check_count(".run(", 1, exactly=True).run(code[0])
+        self.assertEqual(out, test_multiple_fusions(x), atol=0.05, rtol=0.05)
+
     @parametrize("sizes", ((64, 128, 256), (128, 128, 128), (63, 120, 250)))
     def test_multiple_inputs(self, sizes):
         M, K, N = sizes
