@@ -336,8 +336,8 @@ class BuiltinMethodVariable(BaseUserFunctionVariable):
         method_name = obj.__name__
 
         # TODO(anijain2305) - Add support for more builtin methods
-        # Supports list.__new__ and frozenset({....}).__contains__
-        return (method_self is list and method_name == "__new__") or (
+        # Supports tuple.__new__ and frozenset({....}).__contains__
+        return (method_self is tuple and method_name == "__new__") or (
             type(method_self) is frozenset and method_name == "__contains__"
         )
 
