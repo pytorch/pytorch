@@ -2579,7 +2579,7 @@ void ProcessGroupNCCL::allgatherUniqueNCCLIDs(
     storeKeys.emplace_back("UniqueNCCLID:" + std::to_string(r));
   }
   // For non-root rank, rootIdx is set to -1.
-  if (rootIdx > 0) {
+  if (rootIdx >= 0) {
     auto vec = std::vector<uint8_t>(
         reinterpret_cast<uint8_t*>(ncclID),
         reinterpret_cast<uint8_t*>(ncclID) + NCCL_UNIQUE_ID_BYTES);
@@ -2779,8 +2779,9 @@ std::shared_ptr<NCCLComm> ProcessGroupNCCL::initNCCLComm(
 
     if (!ncclComm) {
       auto rootIdx = getRootIndex(rank_, getSize(), numRoots);
-      // We only need to get unique IDs for roots.
-      if (rootIdx > 0) {
+      // We only need to get unique IDs for roots. For non-root rank, index is
+      // set to -1.
+      if (rootIdx >= 0) {
         C10D_NCCL_CHECK(ncclGetUniqueId(&ncclID), std::nullopt);
       }
       // We only need to all-gather the ncclID if the rank is root.
