@@ -1,10 +1,15 @@
+#include <c10/metal/utils.h>
 #include <metal_array>
 #include <metal_stdlib>
 
 using namespace metal;
 template <typename T>
-T dot_product(constant T* v1, constant T* v2, ulong2 strides, uint32_t size) {
-  T rc = T(0.0);
+c10::metal::opmath_t<T> dot_product(
+    constant T* v1,
+    constant T* v2,
+    ulong2 strides,
+    uint32_t size) {
+  auto rc = c10::metal::opmath_t<T>(0.0);
   for (uint32_t i = 0; i < size; ++i) {
     rc += v1[i * strides.x] * v2[i * strides.y];
   }
@@ -29,7 +34,28 @@ kernel void naive_matmul(
       mat2Data + y * strides[1].y,
       ulong2(strides[0].y, strides[1].x),
       sizes.y);
-  outputData[x * strides[2].x + y * strides[2].y] = rc;
+  outputData[x * strides[2].x + y * strides[2].y] = static_cast<T>(rc);
+}
+
+template <typename T>
+kernel void naive_bmm(
+    constant T* mat1Data [[buffer(0)]],
+    constant T* mat2Data [[buffer(1)]],
+    device T* outputData [[buffer(2)]],
+    constant array<ulong, 9>& strides [[buffer(3)]],
+    constant uint4& sizes [[buffer(4)]],
+    uint thread_index [[thread_position_in_grid]]) {
+  uint b = thread_index / (sizes.x * sizes.z);
+  uint boffs = thread_index % (sizes.x * sizes.z);
+  uint y = boffs / sizes.z;
+  uint x = boffs % sizes.z;
+  auto rc = dot_product(
+      mat1Data + b * strides[2] + y * strides[1],
+      mat2Data + b * strides[5] + x * strides[3],
+      ulong2(strides[0], strides[4]),
+      sizes.y);
+  outputData[b * strides[8] + x * strides[6] + y * strides[7]] =
+      static_cast<T>(rc);
 }
 
 inline float blockReduceSum(
@@ -307,8 +333,29 @@ kernel void applySYRK(
       constant uint3 & sizes [[buffer(4)]],                  \
       uint thread_index [[thread_position_in_grid]])
 
+#define INSTANTIATE_NAIVE_BMM(DTYPE)                                        \
+  template [[host_name("naive_bmm_" #DTYPE)]] kernel void naive_bmm<DTYPE>( \
+      constant DTYPE * mat1Data [[buffer(0)]],                              \
+      constant DTYPE * mat2Data [[buffer(1)]],                              \
+      device DTYPE * outputData [[buffer(2)]],                              \
+      constant array<ulong, 9> & strides [[buffer(3)]],                     \
+      constant uint4 & sizes [[buffer(4)]],                                 \
+      uint thread_index [[thread_position_in_grid]])
+
 INSTANTIATE_NAIVE_MM(float);
 INSTANTIATE_NAIVE_MM(half);
 #if __METAL_VERSION__ >= 310
 INSTANTIATE_NAIVE_MM(bfloat);
 #endif
+
+// Integral MM
+INSTANTIATE_NAIVE_MM(short);
+INSTANTIATE_NAIVE_MM(int);
+INSTANTIATE_NAIVE_MM(long);
+INSTANTIATE_NAIVE_MM(char);
+INSTANTIATE_NAIVE_MM(uchar);
+INSTANTIATE_NAIVE_BMM(short);
+INSTANTIATE_NAIVE_BMM(int);
+INSTANTIATE_NAIVE_BMM(long);
+INSTANTIATE_NAIVE_BMM(char);
+INSTANTIATE_NAIVE_BMM(uchar);
