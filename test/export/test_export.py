@@ -939,6 +939,46 @@ graph():
         for vr_upper in vr_upper_bounds:
             self.assertEqual(vr_upper, 1)
 
+    def test_mask_nonzero_static(self):
+        class TestModule(torch.nn.Module):
+            def forward(self, seq_embeddings, mask, exp):
+                # Instead of `output = seq_embeddings[mask]`` which makes
+                # output.shape have unbacked symint, encode side knowledge of
+                # output.shape as exp.shape to force it to have backed symint
+                index = torch.nonzero_static(mask, size=exp.shape[0])
+                chunked_index = index.chunk(chunks=mask.dim(), dim=1)
+                output = seq_embeddings[chunked_index].squeeze()
+                final_output = output * 2
+                return final_output
+
+        m = TestModule()
+
+        seq_embeddings = torch.randn(5, 5)
+        mask = torch.ones(5, 5, dtype=torch.bool)
+        exp = torch.randn(25)
+        output = m(seq_embeddings, mask, exp)
+
+        batch = torch.export.Dim("batch")
+        exp_size = torch.export.Dim("exp_size", max=100)
+        ep = export(
+            m,
+            (seq_embeddings, mask, exp),
+            dynamic_shapes={
+                "seq_embeddings": (batch, None),
+                "mask": (batch, None),
+                "exp": (exp_size,),
+            },
+        )
+        ep_output = ep.module()(seq_embeddings, mask, exp)
+        self.assertTrue(torch.allclose(output, ep_output))
+
+        seq_embeddings = torch.randn(6, 5)
+        mask = torch.ones(6, 5, dtype=torch.bool)
+        exp = torch.randn(30)
+        output = m(seq_embeddings, mask, exp)
+        ep_output = ep.module()(seq_embeddings, mask, exp)
+        self.assertTrue(torch.allclose(output, ep_output))
+
     def test_setgrad_lifted_tensor(self):
         class M(torch.nn.Module):
             def forward(self, x, y):
@@ -5582,6 +5622,25 @@ def forward(self, x):
             test_inp = (torch.randint(1, 2, (2, 2)), torch.randint(3, 5, (2, 3)))
             _ = ep.module()(*test_inp)
 
+    def test_while_loop_simple(self):
+        class Simple(torch.nn.Module):
+            def forward(self, ci, a, b):
+                def cond_fn(i, x, y):
+                    return i > 0
+
+                def body_fn(i, x, y):
+                    return i - 1, x + y, y - x
+
+                return torch._higher_order_ops.while_loop(cond_fn, body_fn, [ci, a, b])
+
+        example_inputs = (
+            torch.tensor(1),
+            torch.randn(10, 20),
+            torch.randn(10, 20),
+        )
+        ep = export(Simple(), example_inputs)
+        self.assertEqual(ep.module()(*example_inputs), Simple()(*example_inputs))
+
     def test_constrain_size_with_various_cases(self):
         class Module1(torch.nn.Module):
             def forward(self, x, y):
@@ -9460,6 +9519,30 @@ def forward(self, p_bar_linear_weight, p_bar_linear_bias, x):
             "torch.ops.profiler._record_function_enter_new.default", 0, exactly=True
         ).run(ep.graph_module.code)
 
+    @testing.expectedFailureSerDerNonStrict
+    def test_replace_unbacked_with_very_large_upperbound(self):
+        # beyond 2^53 where python floats lose precision
+        VERY_LARGE_INT = 1000000007999999992
+
+        class Model(torch.nn.Module):
+            def forward(self, x, t):
+                unbacked = t.item()
+                torch._check(unbacked <= VERY_LARGE_INT)
+
+                y = torch.ones(unbacked)
+                return x.reshape([-1]) + y
+
+        inp = (
+            torch.randn(6, 2),
+            torch.tensor([12]),
+        )
+        spec = {
+            "x": (Dim.AUTO, Dim.STATIC),
+            "t": (Dim.STATIC,),
+        }
+        ep = export(Model(), inp, dynamic_shapes=spec)
+        self.assertTrue(torch.allclose(Model()(*inp), ep.module()(*inp)))
+
     def test_predispatch_cond(self):
         class Model(torch.nn.Module):
             def __init__(self) -> None:
@@ -11564,7 +11647,7 @@ class GraphModule(torch.nn.Module):
             ref_res = module(*dyn_inp)
             self.assertEqual(export_res, ref_res)
 
-    @testing.expectedFailureSerDer  # T202237665
+    @testing.expectedFailureSerDer
     @testing.expectedFailureSerDerNonStrict
     def test_dynamic_lr_shift(self):
         class Module(torch.nn.Module):
