@@ -2451,7 +2451,9 @@ class TritonKernel(SIMDKernel):
                     self.cse.generate(
                         self.compute,
                         f"tl.broadcast_to({reduction_range_prefix}index, {masked_value}.shape)",
-                        dtype=self.index_dtype,
+                        dtype=torch.int32
+                        if V.kernel.index_dtype == "tl.int32"
+                        else torch.int64,
                     )
                 )
                 root_op = {"argmax": "max", "argmin": "min"}[reduction_type]
@@ -2975,6 +2977,7 @@ class TritonKernel(SIMDKernel):
         cse_compute = functools.partial(self.cse.generate, self.compute)
         dim = self.triton_tensor_ndim() - self.num_reduction_dims
 
+        dtypes = tuple(upcast_compute_type(dtype) for dtype in dtypes)
         assert len(dtypes) == len(values)
         broadcasted_values = [
             cse_compute(
