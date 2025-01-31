@@ -84,9 +84,6 @@ fi
 # CMake 3.18 is needed to support CUDA17 language variant
 CMAKE_VERSION=3.18.5
 
-_UCX_COMMIT=7bb2722ff2187a0cad557ae4a6afa090569f83fb
-_UCC_COMMIT=20eae37090a4ce1b32bcce6144ccad0b49943e0b
-
 # It's annoying to rename jobs every time you want to rewrite a
 # configuration, so we hardcode everything here rather than do it
 # from scratch
@@ -100,8 +97,6 @@ case "$image" in
     DB=yes
     VISION=yes
     KATEX=yes
-    UCX_COMMIT=${_UCX_COMMIT}
-    UCC_COMMIT=${_UCC_COMMIT}
     CONDA_CMAKE=yes
     TRITON=yes
     ;;
@@ -114,8 +109,6 @@ case "$image" in
     DB=yes
     VISION=yes
     KATEX=yes
-    UCX_COMMIT=${_UCX_COMMIT}
-    UCC_COMMIT=${_UCC_COMMIT}
     CONDA_CMAKE=yes
     TRITON=yes
     INDUCTOR_BENCHMARKS=yes
@@ -129,8 +122,6 @@ case "$image" in
     DB=yes
     VISION=yes
     KATEX=yes
-    UCX_COMMIT=${_UCX_COMMIT}
-    UCC_COMMIT=${_UCC_COMMIT}
     CONDA_CMAKE=yes
     TRITON=yes
     INDUCTOR_BENCHMARKS=yes
@@ -144,8 +135,6 @@ case "$image" in
     DB=yes
     VISION=yes
     KATEX=yes
-    UCX_COMMIT=${_UCX_COMMIT}
-    UCC_COMMIT=${_UCC_COMMIT}
     CONDA_CMAKE=yes
     TRITON=yes
     INDUCTOR_BENCHMARKS=yes
@@ -159,8 +148,6 @@ case "$image" in
     DB=yes
     VISION=yes
     KATEX=yes
-    UCX_COMMIT=${_UCX_COMMIT}
-    UCC_COMMIT=${_UCC_COMMIT}
     CONDA_CMAKE=yes
     TRITON=yes
     ;;
@@ -441,8 +428,6 @@ docker build \
        --build-arg "ROCM_VERSION=${ROCM_VERSION:-}" \
        --build-arg "PYTORCH_ROCM_ARCH=${PYTORCH_ROCM_ARCH:-gfx90a;gfx942}" \
        --build-arg "IMAGE_NAME=${IMAGE_NAME}" \
-       --build-arg "UCX_COMMIT=${UCX_COMMIT}" \
-       --build-arg "UCC_COMMIT=${UCC_COMMIT}" \
        --build-arg "CONDA_CMAKE=${CONDA_CMAKE}" \
        --build-arg "TRITON=${TRITON}" \
        --build-arg "TRITON_CPU=${TRITON_CPU}" \

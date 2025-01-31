@@ -64,17 +64,6 @@ RUN if [ -n "${VISION}" ]; then bash ./install_vision.sh; fi
 RUN rm install_vision.sh cache_vision_models.sh common_utils.sh
 ENV INSTALLED_VISION ${VISION}
 
-# (optional) Install UCC
-ARG UCX_COMMIT
-ARG UCC_COMMIT
-ENV UCX_COMMIT $UCX_COMMIT
-ENV UCC_COMMIT $UCC_COMMIT
-ENV UCX_HOME /usr
-ENV UCC_HOME /usr
-ADD ./common/install_ucc.sh install_ucc.sh
-RUN if [ -n "${UCX_COMMIT}" ] && [ -n "${UCC_COMMIT}" ]; then bash ./install_ucc.sh; fi
-RUN rm install_ucc.sh
-
 COPY ./common/install_openssl.sh install_openssl.sh
 ENV OPENSSL_ROOT_DIR /opt/openssl
 RUN bash ./install_openssl.sh
