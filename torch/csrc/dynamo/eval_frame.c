@@ -9,13 +9,14 @@
 #include <torch/csrc/dynamo/debug_macros.h>
 #include <torch/csrc/dynamo/extra_state.h>
 #include <torch/csrc/dynamo/framelocals_mapping.h>
+#include <torch/csrc/dynamo/utils.h>
 #include <torch/csrc/utils/python_compat.h>
 
 PyObject* guard_error_hook = NULL;
 const char* cache_lookup_profiler_str = "TorchDynamo Cache Lookup";
 
 typedef struct {
-    int active_dynamo_threads;
+  int active_dynamo_threads;
 } ModuleState;
 
 // static int active_dynamo_threads = 0;
@@ -295,6 +296,7 @@ static PyObject* dynamo_call_callback(
   PyObject* cache_entry_pyobj = CacheEntry_to_obj(cache_entry);
   PyObject* res = PyObject_CallFunction(
       callable, "OOO", frame, cache_entry_pyobj, frame_state);
+
   Py_DECREF(frame);
   Py_DECREF(cache_entry_pyobj);
   return res;
@@ -700,7 +702,6 @@ static PyObject* dynamo__custom_eval_frame(
     return dynamo_eval_custom_code(
         tstate, frame, cached_code, trace_annotation, throw_flag);
   }
-  DEBUG_CHECK(PyDict_CheckExact(locals));
   DEBUG_CHECK(PyDict_CheckExact(frame->f_globals));
   DEBUG_CHECK(PyDict_CheckExact(frame->f_builtins));
 
@@ -742,6 +743,17 @@ static PyObject* dynamo__custom_eval_frame(
     return NULL;
   }
   // cache miss
+
+  // Preserve random state - restore before calling
+  // dynamo_eval_[frame_default]/[custom_code]!
+  // call_callback may burn RNG.
+  // NOTE: guard eval should NOT modify global state!
+  PyObject* rng_state = system_random_getstate();
+  if (rng_state == NULL) {
+    *should_clear_frame = 1;
+    return NULL;
+  }
+
   CacheEntry* cache_entry = extract_cache_entry(extra);
   FrameState* frame_state = extract_frame_state(extra);
   PyObject* result =
@@ -756,8 +768,12 @@ static PyObject* dynamo__custom_eval_frame(
     // Dynamo barfs, that's it for Dynamo, even if you catch the exception
     // inside the torch.compile block we won't try to Dynamo anything else.
     *should_clear_frame = 1;
+    Py_DECREF(rng_state);
     return NULL;
-  } else if (result == skip_code_recursive_flag) {
+  }
+  system_random_setstate(rng_state);
+  Py_DECREF(rng_state);
+  if (result == skip_code_recursive_flag) {
     // Dynamo returned skip_code_recursive_flag, so we should recursively skip
     // code.
     DEBUG_TRACE("create skip recursive %s", get_frame_name(frame));
@@ -831,7 +847,9 @@ static PyTypeObject THPPyInterpreterFrameType = {
 
 #endif // !(IS_PYTHON_3_14_PLUS)
 
-static PyObject* increment_working_threads(PyThreadState* tstate, PyObject* module) {
+static PyObject* increment_working_threads(
+    PyThreadState* tstate,
+    PyObject* module) {
   ModuleState* state = PyModule_GetState(module);
 
   if (state != NULL) {
@@ -844,11 +862,13 @@ static PyObject* increment_working_threads(PyThreadState* tstate, PyObject* modu
   Py_RETURN_NONE;
 }
 
-static PyObject* decrement_working_threads(PyThreadState* tstate, PyObject* module) {
+static PyObject* decrement_working_threads(
+    PyThreadState* tstate,
+    PyObject* module) {
   ModuleState* state = PyModule_GetState(module);
 
   if (state != NULL) {
-      if (state->active_dynamo_threads > 0) {
+    if (state->active_dynamo_threads > 0) {
       state->active_dynamo_threads = state->active_dynamo_threads - 1;
       if (state->active_dynamo_threads == 0) {
         enable_eval_frame_default(tstate);
@@ -859,7 +879,10 @@ static PyObject* decrement_working_threads(PyThreadState* tstate, PyObject* modu
   Py_RETURN_NONE;
 }
 
-static PyObject* set_eval_frame(PyObject* new_callback, PyThreadState* tstate, PyObject* module) {
+static PyObject* set_eval_frame(
+    PyObject* new_callback,
+    PyThreadState* tstate,
+    PyObject* module) {
   // Change the eval frame callback and return the old one
   //  - None: disables TorchDynamo
   //  - False: run-only mode (reuse existing compiles)
@@ -982,13 +1005,13 @@ static PyObject* raise_sigtrap(PyObject* dummy, PyObject* obj) {
   Py_RETURN_NONE;
 }
 
-static int clear_state(PyObject *module) {
-    ModuleState* state = PyModule_GetState(module);
-    if (state) {
-        state->active_dynamo_threads = 0;
-        return 0;
-    }
-    return -1;
+static int clear_state(PyObject* module) {
+  ModuleState* state = PyModule_GetState(module);
+  if (state) {
+    state->active_dynamo_threads = 0;
+    return 0;
+  }
+  return -1;
 }
 
 static PyMethodDef _methods[] = {
