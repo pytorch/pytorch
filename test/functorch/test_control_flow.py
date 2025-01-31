@@ -101,6 +101,18 @@ def compile_mode_helper(fct, compile_mode):
         return fct
 
 
+ALIAS_FN = [
+    lambda x: x,
+    lambda x: x.view(-1),
+    lambda x: x.reshape(-1),
+    lambda x: x.squeeze(0),
+    lambda x: x.unsqueeze(0),
+    lambda x: x.transpose(0, 1),
+    lambda x: x.flatten(),
+    lambda x: x.expand(1, *x.size()),
+]
+
+
 def get_scan_combine_fn(name, associative=True):
     def add(x: torch.Tensor, y: torch.Tensor):
         return x + y
@@ -322,10 +334,7 @@ def _while_loop_tests():
                 out_it + 1,
                 out_it + out_x,
                 out_it < x.shape[0],
-                # Data dependent error on Eq(out_it * 2) in torch.compile path.
-                # Issue tracked here: https://github.com/pytorch/pytorch/issues/143157
-                # torch.ones(out_it * 2),
-                torch.ones(out_it),
+                torch.ones(out_it * 2),
             )
 
     class ConstAndSymIntOutput(torch.nn.Module):
@@ -2868,15 +2877,16 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1, arg5_1):
             gm.code.strip(),
             """\
 def forward(self, fct_1, init_1, xs_1):
-    select = torch.ops.aten.select.int(xs_1, 0, 0)
-    add = torch.ops.aten.add.Tensor(init_1, select);  add = None
-    add_1 = torch.ops.aten.add.Tensor(init_1, select);  select = add_1 = None
+    permute = torch.ops.aten.permute.default(xs_1, [0, 1, 2])
+    select_copy = torch.ops.aten.select_copy.int(permute, 0, 0)
+    add = torch.ops.aten.add.Tensor(init_1, select_copy);  add = None
+    add_1 = torch.ops.aten.add.Tensor(init_1, select_copy);  select_copy = add_1 = None
     sym_size_int_1 = torch.ops.aten.sym_size.int(init_1, 1)
     sym_size_int_2 = torch.ops.aten.sym_size.int(init_1, 2)
     sym_size_int_3 = torch.ops.aten.sym_size.int(xs_1, 1)
-    sym_size_int_4 = torch.ops.aten.sym_size.int(xs_1, 2)
+    sym_size_int_4 = torch.ops.aten.sym_size.int(xs_1, 2);  xs_1 = None
     scan_combine_graph_0 = self.scan_combine_graph_0
-    scan = torch.ops.higher_order.scan(scan_combine_graph_0, [init_1], [xs_1], 0, True, [sym_size_int_1, sym_size_int_2, sym_size_int_3, sym_size_int_4]);  scan_combine_graph_0 = init_1 = xs_1 = sym_size_int_1 = sym_size_int_2 = sym_size_int_3 = sym_size_int_4 = None
+    scan = torch.ops.higher_order.scan(scan_combine_graph_0, [init_1], [permute], True, [sym_size_int_1, sym_size_int_2, sym_size_int_3, sym_size_int_4]);  scan_combine_graph_0 = init_1 = permute = sym_size_int_1 = sym_size_int_2 = sym_size_int_3 = sym_size_int_4 = None
     getitem = scan[0]
     getitem_1 = scan[1];  scan = None
     return (getitem, getitem_1)""",  # noqa: B950
@@ -2893,11 +2903,12 @@ def forward(self, fct_1, init_1, xs_1):
 def forward(self, L_init_ : torch.Tensor, L_xs_ : torch.Tensor):
     l_init_ = L_init_
     l_xs_ = L_xs_
-    select = l_xs_.select(0, 0)
-    new_carry = l_init_ + select;  new_carry = None
-    add_1 = l_init_ + select;  select = add_1 = None
+    elem = torch.movedim(l_xs_, 0, 0);  l_xs_ = None
+    select_copy = torch.select_copy(elem, 0, 0)
+    new_carry = l_init_ + select_copy;  new_carry = None
+    add_1 = l_init_ + select_copy;  select_copy = add_1 = None
     scan_combine_fn_0 = self.scan_combine_fn_0
-    scan = torch.ops.higher_order.scan(scan_combine_fn_0, [l_init_], [l_xs_], 0, True, []);  scan_combine_fn_0 = l_init_ = l_xs_ = None
+    scan = torch.ops.higher_order.scan(scan_combine_fn_0, [l_init_], [elem], True, []);  scan_combine_fn_0 = l_init_ = elem = None
     getitem = scan[0]
     getitem_1 = scan[1];  scan = None
     return (getitem, getitem_1)""",  # noqa: B950
@@ -4088,9 +4099,9 @@ def forward(self, L_it_ : torch.Tensor, L_pytree_input_0_0_ : torch.Tensor, L_py
     while_loop = torch.ops.higher_order.while_loop(cond_fn_0, body_fn_0, (l_it_, l_pytree_input_0_0_, l_pytree_input_1_x_, l_pytree_input_1_y_), ());  cond_fn_0 = body_fn_0 = l_it_ = l_pytree_input_0_0_ = l_pytree_input_1_x_ = l_pytree_input_1_y_ = None
     getitem = while_loop[0]
     getitem_1 = while_loop[1]
-    getitem_2 = while_loop[2]
-    getitem_3 = while_loop[3];  while_loop = None
-    return (getitem, getitem_1, getitem_2, getitem_3)""",  # noqa: B950
+    value = while_loop[2]
+    value_1 = while_loop[3];  while_loop = None
+    return (getitem, getitem_1, value, value_1)""",  # noqa: B950
             )
 
     def _wrap_with_functionalize(self, fn, func_type):
@@ -6514,13 +6525,14 @@ def forward(self, L_init_ : torch.Tensor, L_xs_ : torch.Tensor, L_add_closure_0_
     l_xs_ = L_xs_
     l_add_closure_0_cell_contents_0_param_ = L_add_closure_0_cell_contents_0_param_
     l_add_closure_0_cell_contents_1_0_ = L_add_closure_0_cell_contents_1_0_
-    r = l_xs_.select(0, 0)
-    r_1 = l_init_.matmul(l_add_closure_0_cell_contents_0_param_)
-    r_2 = r_1.matmul(r);  r_1 = r = None
-    r_3 = r_2.add(l_add_closure_0_cell_contents_1_0_);  r_2 = None
-    r_4 = r_3.sum();  r_3 = r_4 = None
+    r = torch.movedim(l_xs_, 0, 0);  l_xs_ = None
+    r_1 = torch.select_copy(r, 0, 0)
+    r_2 = l_init_.matmul(l_add_closure_0_cell_contents_0_param_)
+    r_3 = r_2.matmul(r_1);  r_2 = r_1 = None
+    r_4 = r_3.add(l_add_closure_0_cell_contents_1_0_);  r_3 = None
+    r_5 = r_4.sum();  r_4 = r_5 = None
     scan_combine_fn_0 = self.scan_combine_fn_0
-    scan = torch.ops.higher_order.scan(scan_combine_fn_0, [l_init_], [l_xs_], 0, False, [l_add_closure_0_cell_contents_0_param_, l_add_closure_0_cell_contents_1_0_]);  scan_combine_fn_0 = l_init_ = l_xs_ = l_add_closure_0_cell_contents_0_param_ = l_add_closure_0_cell_contents_1_0_ = None
+    scan = torch.ops.higher_order.scan(scan_combine_fn_0, [l_init_], [r], False, [l_add_closure_0_cell_contents_0_param_, l_add_closure_0_cell_contents_1_0_]);  scan_combine_fn_0 = l_init_ = r = l_add_closure_0_cell_contents_0_param_ = l_add_closure_0_cell_contents_1_0_ = None
     getitem = scan[0]
     getitem_1 = scan[1];  scan = None
     return (getitem, getitem_1)""",  # noqa: B950
@@ -6535,13 +6547,14 @@ def forward(self, L_init_ : torch.Tensor, L_xs_ : torch.Tensor, L_add_closure_0_
     l_xs_ = L_xs_
     l_add_closure_0_cell_contents_0_param_ = L_add_closure_0_cell_contents_0_param_
     l_add_closure_0_cell_contents_1_0_ = L_add_closure_0_cell_contents_1_0_
-    select = l_xs_.select(0, 0)
+    elem = torch.movedim(l_xs_, 0, 0);  l_xs_ = None
+    select_copy = torch.select_copy(elem, 0, 0)
     matmul = l_init_ @ l_add_closure_0_cell_contents_0_param_
-    matmul_1 = matmul @ select;  matmul = select = None
+    matmul_1 = matmul @ select_copy;  matmul = select_copy = None
     ret = matmul_1 + l_add_closure_0_cell_contents_1_0_;  matmul_1 = None
     sum_1 = ret.sum();  ret = sum_1 = None
     scan_combine_fn_0 = self.scan_combine_fn_0
-    scan = torch.ops.higher_order.scan(scan_combine_fn_0, [l_init_], [l_xs_], 0, False, [l_add_closure_0_cell_contents_0_param_, l_add_closure_0_cell_contents_1_0_]);  scan_combine_fn_0 = l_init_ = l_xs_ = l_add_closure_0_cell_contents_0_param_ = l_add_closure_0_cell_contents_1_0_ = None
+    scan = torch.ops.higher_order.scan(scan_combine_fn_0, [l_init_], [elem], False, [l_add_closure_0_cell_contents_0_param_, l_add_closure_0_cell_contents_1_0_]);  scan_combine_fn_0 = l_init_ = elem = l_add_closure_0_cell_contents_0_param_ = l_add_closure_0_cell_contents_1_0_ = None
     getitem = scan[0]
     getitem_1 = scan[1];  scan = None
     return (getitem, getitem_1)""",  # noqa: B950
@@ -6577,7 +6590,6 @@ class GraphModule(torch.nn.Module):
         while_loop = torch.ops.higher_order.while_loop(while_loop_cond_graph_0, while_loop_body_graph_0, (0, x), ());  while_loop_cond_graph_0 = while_loop_body_graph_0 = x = None
 
         getitem_2: "Sym(u1)" = while_loop[0]
-        sym_constrain_range_for_size_default = torch.ops.aten.sym_constrain_range_for_size.default(getitem_2);  sym_constrain_range_for_size_default = None
 
         ge: "Sym(u1 >= 1)" = getitem_2 >= 1
         _assert_scalar_default = torch.ops.aten._assert_scalar.default(ge, "Runtime assertion failed for expression u1 >= 1 on node 'ge'");  ge = _assert_scalar_default = None
@@ -6593,7 +6605,8 @@ class GraphModule(torch.nn.Module):
 
         lt: "Sym(u1 < s0)" = getitem_2 < sym_size_int_1;  sym_size_int_1 = None
 
-        ones: "f32[u1]" = torch.ops.aten.ones.default([getitem_2], device = device(type='cpu'), pin_memory = False);  getitem_2 = None
+        mul: "Sym(2*u1)" = getitem_2 * 2;  getitem_2 = None
+        ones: "f32[2*u1]" = torch.ops.aten.ones.default([mul], device = device(type='cpu'), pin_memory = False);  mul = None
         return pytree.tree_unflatten((add, add_1, lt, ones), self._out_spec)
 
     class while_loop_cond_graph_0(torch.nn.Module):
@@ -6642,7 +6655,6 @@ class GraphModule(torch.nn.Module):
         while_loop = torch.ops.higher_order.while_loop(cond_fn_0, body_fn_0, (0, l_x_), (s0, s1));  cond_fn_0 = body_fn_0 = l_x_ = s1 = None
 
         getitem_4: "Sym(u1)" = while_loop[0]
-        _check_is_size = torch._check_is_size(getitem_4);  _check_is_size = None
 
         ge: "Sym(u1 >= 1)" = getitem_4 >= 1
         _assert_scalar_default = torch.ops.aten._assert_scalar.default(ge, "Runtime assertion failed for expression u1 >= 1 on node 'ge'");  ge = _assert_scalar_default = None
@@ -6658,7 +6670,8 @@ class GraphModule(torch.nn.Module):
 
         lt: "Sym(u1 < s0)" = getitem_4 < s0;  s0 = None
 
-        ones: "f32[u1]" = torch.ones(getitem_4);  getitem_4 = None
+        mul: "Sym(2*u1)" = getitem_4 * 2;  getitem_4 = None
+        ones: "f32[2*u1]" = torch.ones(mul);  mul = None
         return (add, add_1, lt, ones)
 
     class cond_fn_0(torch.nn.Module):
@@ -6850,12 +6863,7 @@ class GraphModule(torch.nn.Module):
             )
 
     @skipIfTorchDynamo("Skip because we're testing export")
-    # TODO: we cannot turn on strict=False yet, also see #141762
-    # torch._dynamo.exc.Unsupported: call_method UserDefinedObjectVariable(set) __contains__
-    # [TorchInGraphFunctionVariable(<method 'add' of 'torch._C.TensorBase' objects>)] {}
-    # Seems we're inside the PreDispatchTorchFunctionMode, _side_effectful_need_to_be_preserved_pre_dispatch
-    # becomes a user defined variable instead of SetVariable.
-    @parametrize("strict", [True])
+    @parametrize("strict", [True, False])
     @parametrize("dynamic", [True, False])
     def test_while_loop_op_pytree_int_carry_export(self, strict, dynamic):
         m, args = WHILE_LOOP_TESTS["pytree_int_carry"]
@@ -6991,6 +6999,56 @@ class GraphModule(torch.nn.Module):
             return (add, add_1, add_2, add_3, add_4, child_1)
 """,  # noqa: B950
             )
+
+    def test_input_output_alias(self):
+        def fn(f, *args):
+            return torch.cond(args[0].sum() > 0, f, f, args)
+
+        x = torch.randn(2, 2)
+        for f in ALIAS_FN:
+            with self.assertRaisesRegex(
+                torch._dynamo.exc.BackendCompilerFailed, "might be aliasing the input"
+            ):
+                torch.compile(fn)(f, x)
+
+    def test_input_input_alias(self):
+        def fn(view_f, arg):
+            def f(arg1, arg2):
+                return arg1.cos(), arg2.sin()
+
+            return torch.cond(arg.sum() > 0, f, f, (arg, view_f(arg)))
+
+        x = torch.randn(2, 2)
+        # ALIAS_FN[0] is an identical function, cond optimizes the duplication
+        # as a result of auto lifting.
+        for view_f in ALIAS_FN[1:]:
+            with self.assertRaisesRegex(
+                torch._dynamo.exc.BackendCompilerFailed, "might be aliasing the input"
+            ):
+                torch.compile(fn)(view_f, x)
+
+    @parametrize("inference_mode", [True, False])
+    def test_input_mutation(self, inference_mode):
+        def fn(view_f, *args):
+            def mutate_f(x):
+                v = view_f(x)
+                v.add_(1)
+                return v.sin()
+
+            return torch.cond(args[0].sum() > 0, mutate_f, mutate_f, args)
+
+        x = torch.randn(2, 2)
+        for f in ALIAS_FN:
+            with self.assertRaisesRegex(
+                torch._dynamo.exc.BackendCompilerFailed, "might be modifying the input"
+            ):
+                torch.compile(fn)(f, x)
+
+            with self.assertRaisesRegex(
+                torch._dynamo.exc.BackendCompilerFailed, "might be modifying the input"
+            ):
+                with torch.inference_mode(inference_mode):
+                    torch.compile(fn)(f, x)
 
     @skipIfTorchDynamo("Graph is not captured correctly when test with dynamo")
     def test_while_loop_unbacked_bindings(self):

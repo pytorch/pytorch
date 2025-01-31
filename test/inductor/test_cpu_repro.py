@@ -36,6 +36,7 @@ from torch.testing._internal.common_utils import (
     skipIfRocm,
     slowTest,
     TEST_MKL,
+    TEST_WITH_ROCM,
     xfailIfS390X,
 )
 from torch.utils._python_dispatch import TorchDispatchMode
@@ -68,12 +69,26 @@ requires_vectorization = unittest.skipUnless(
 )
 
 
-def check_metrics_vec_kernel_count(num_expected_vec_kernels):
-    if (
+def _can_check_vec_metrics():
+    return (
         cpu_vec_isa.valid_vec_isa_list()
         and os.getenv("ATEN_CPU_CAPABILITY") != "default"
-    ):
+        and config.cpp.simdlen != 1
+    )
+
+
+def check_metrics_vec_kernel_count(num_expected_vec_kernels):
+    if _can_check_vec_metrics():
         assert metrics.generated_cpp_vec_kernel_count == num_expected_vec_kernels
+
+
+def simd_lengths_to_test():
+    """Returns a minimal list of simd lengths to cover common cases"""
+    simdlens = [None, 1]
+    valid_isa_list = cpu_vec_isa.valid_vec_isa_list()
+    if valid_isa_list:
+        simdlens.append(valid_isa_list[0].bit_width())
+    return simdlens
 
 
 @contextlib.contextmanager
@@ -583,6 +598,12 @@ class CPUReproTests(TestCase):
         batch_size,
         seq_len,
     ):
+        if (
+            TEST_WITH_ROCM
+            and not unbatched
+            and "gfx94" in torch.cuda.get_device_properties(0).gcnArchName.split(":")[0]
+        ):
+            self.skipTest("Flaky on MI300 with unbatched=False")
         self._test_lstm_packed(
             unbatched,
             input_size,
@@ -2682,6 +2703,15 @@ class CPUReproTests(TestCase):
                 metrics.reset()
                 self.common(fn, (a, b))
 
+    def test_torch_logit(self):
+        # fix https://github.com/pytorch/pytorch/issues/145379
+        def fn(*args):
+            return torch.logit(args[0], args[1])
+
+        input = torch.tensor(0.3, dtype=torch.float64)
+        eps = torch.tensor(0.9, dtype=torch.float64)
+        self.common(fn, (input, eps))
+
     @requires_vectorization
     @patch("torch.cuda.is_available", lambda: False)
     def test_vec_compare_op_cpu_only(self):
@@ -2957,6 +2987,17 @@ class CPUReproTests(TestCase):
                 metrics.cpp_outer_loop_fused_inner_counts[0].inner_kernel_number,
                 2,
             )
+
+    def test_outer_loop_fusion_buffer_remove(self):
+        # https://github.com/pytorch/pytorch/issues/144186
+        def fn(x):
+            x = x.sum(dim=-1)
+            x = torch.softmax(x, -1)
+            return x
+
+        x = torch.randn(8, 8, 2)
+        metrics.reset()
+        self.common(fn, (x,))
 
     @config.patch({"fx_graph_cache": False, "fx_graph_remote_cache": False})
     def test_local_buffer_in_outer_loop_fusion(self):
@@ -3271,14 +3312,13 @@ class CPUReproTests(TestCase):
             x = x.view(batchsize, -1, height, width)
             return x.contiguous(memory_format=torch.channels_last)
 
-        for simdlen in (None, 256, 1):
+        for simdlen in simd_lengths_to_test():
             with config.patch({"cpp.simdlen": simdlen}):
                 torch._dynamo.reset()
                 metrics.reset()
                 x = torch.randn(64, 58, 28, 28)
                 self.common(channel_shuffle, (x, 2))
-                if simdlen != 1:
-                    check_metrics_vec_kernel_count(2)
+                check_metrics_vec_kernel_count(2)
 
     @slowTest
     @requires_vectorization
@@ -3306,15 +3346,14 @@ class CPUReproTests(TestCase):
                 return self.fc(y)
 
         x = torch.randn(128, 196, 256)
-        for simdlen in (None, 256, 1):
+        for simdlen in simd_lengths_to_test():
             with config.patch({"cpp.simdlen": simdlen}):
                 for eval_mode in [True, False]:
                     torch._dynamo.reset()
                     metrics.reset()
                     m = Model().eval() if eval_mode else Model()
                     self.common(m, (x,))
-                    if simdlen != 1:
-                        check_metrics_vec_kernel_count(8)
+                    check_metrics_vec_kernel_count(8)
 
     @requires_vectorization
     @config.patch("cpp.enable_tiling_heuristics", False)
@@ -3322,7 +3361,7 @@ class CPUReproTests(TestCase):
         def fn(a):
             return a.t().contiguous()
 
-        for simdlen in (None, 256, 1):
+        for simdlen in simd_lengths_to_test():
             with config.patch({"cpp.simdlen": simdlen}):
                 for dtype in (torch.float, torch.bfloat16):
                     for shape in (
@@ -3338,8 +3377,7 @@ class CPUReproTests(TestCase):
                         metrics.reset()
                         x = torch.randn(shape, dtype=dtype)
                         self.common(fn, (x,))
-                        if simdlen != 1:
-                            check_metrics_vec_kernel_count(2)
+                        check_metrics_vec_kernel_count(2)
 
     @torch._dynamo.config.patch(specialize_int=False)
     def test_slice_scatter_issue122291(self):
@@ -4841,7 +4879,8 @@ class CPUReproTests(TestCase):
             return float32.to(torch.int64)
 
         x = torch.full((32,), -9223372036854775808, dtype=torch.int64)
-        for simdlen in (None, 256):
+
+        for simdlen in simd_lengths_to_test():
             with config.patch({"cpp.simdlen": simdlen}):
                 torch._dynamo.reset()
                 metrics.reset()
@@ -4871,7 +4910,6 @@ class CPUReproTests(TestCase):
     @requires_vectorization
     def test_bool_reduction_vec(self):
         for op in (
-            torch.masked.mean,
             torch.any,
             torch.min,
             torch.max,

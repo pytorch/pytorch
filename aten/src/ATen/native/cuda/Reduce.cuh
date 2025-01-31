@@ -1095,17 +1095,17 @@ ReduceConfig setReduceConfig(const TensorIterator& iter){
 
   const int warp_split_threshold =
       std::min<int>(block_height * 16, max_values_per_thread);
+  bool split_across_warps = config.values_per_thread() >= warp_split_threshold;
   const int num_mp =
       at::cuda::getCurrentDeviceProperties()->multiProcessorCount;
-  bool force_splitting_output = false;
 #ifdef USE_ROCM
-  force_splitting_output = iter.ndim() == 2 &&
+  bool force_splitting_output = iter.ndim() == 2 &&
       reduction_on_fastest_striding_dimension &&
       config.values_per_thread() < 1024 && num_mp < 100;
+  split_across_warps = !force_splitting_output && split_across_warps;
 #endif
 
-  if (!force_splitting_output &&
-      config.values_per_thread() >= warp_split_threshold) {
+  if (split_across_warps) {
     // Divide the input across warps in a thread-block, if that leaves at least
     // 16 elements to be summed by each thread. This will require inter-warp
     // reduction using shared memory.

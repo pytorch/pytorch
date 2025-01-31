@@ -1,5 +1,6 @@
+from collections.abc import Iterator
 from io import IOBase
-from typing import Iterator, Optional, Tuple
+from typing import Optional
 
 from torch.utils.data.datapipes._decorator import functional_datapipe
 from torch.utils.data.datapipes.datapipe import IterDataPipe
@@ -9,7 +10,7 @@ __all__ = ["StreamReaderIterDataPipe"]
 
 
 @functional_datapipe("read_from_stream")
-class StreamReaderIterDataPipe(IterDataPipe[Tuple[str, bytes]]):
+class StreamReaderIterDataPipe(IterDataPipe[tuple[str, bytes]]):
     r"""
     Given IO streams and their label names, yield bytes with label name as tuple.
 
@@ -30,12 +31,12 @@ class StreamReaderIterDataPipe(IterDataPipe[Tuple[str, bytes]]):
     """
 
     def __init__(
-        self, datapipe: IterDataPipe[Tuple[str, IOBase]], chunk: Optional[int] = None
+        self, datapipe: IterDataPipe[tuple[str, IOBase]], chunk: Optional[int] = None
     ):
         self.datapipe = datapipe
         self.chunk = chunk
 
-    def __iter__(self) -> Iterator[Tuple[str, bytes]]:
+    def __iter__(self) -> Iterator[tuple[str, bytes]]:
         for furl, stream in self.datapipe:
             while True:
                 d = stream.read(self.chunk)
