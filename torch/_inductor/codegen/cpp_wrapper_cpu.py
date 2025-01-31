@@ -248,7 +248,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
                         else:
                             raise AssertionError(
                                 str(sym_or_exp)
-                                + " contains more than one undeclared symbols"
+                                + " contains more than one undefined symbols"
                             )
                 if free_symbol is None:
                     return
