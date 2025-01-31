@@ -226,7 +226,7 @@ Adafactor.__doc__ = (
     Args:
         {_params_doc}
         lr (float, Tensor, optional): unlike other optimizers, Adafactor does not require a
-            learning rate, and Shazeer, Noam, and Mitchell Stern do not use lr at all.
+            learning rate, and Noam Shazeer and Mitchell Stern do not use lr at all.
             Deviating from the paper, this implementation uses lr for applying weight
             decay and as the maximum value for relative step size rho_t. Note that in
             the paper, a constant of 0.01 is used as the maximum value for relative
@@ -252,11 +252,11 @@ Adafactor.__doc__ = (
         {_maximize_doc}"""
     + r"""
     .. Note::
-        The implementation of Adafactor subtly differs from Shazeer, Noam, and Mitchell Stern
+        The implementation of Adafactor subtly differs from Noam Shazeer and Mitchell Stern
         and implementations in some other frameworks with its use of learning rate and
         :math:`\epsilon_1`.
 
-        Regarding the learning rate hyperparameter: Shazeer, Noam, and Mitchell Stern do not
+        Regarding the learning rate hyperparameter: Noam Shazeer and Mitchell Stern do not
         use lr at all, as the stated algorithm uses :math:`\rho_t` and update clipping to
         affect the step size.
 
@@ -267,7 +267,7 @@ Adafactor.__doc__ = (
                 &\hspace{5mm}\rho_t \leftarrow min(lr, \frac{1}{\sqrt{t}})
             \end{aligned}
 
-        This differs from Shazeer, Noam, and Mitchell Stern, who use a constant of 0.01 as
+        This differs from Noam Shazeer and Mitchell Stern, who use a constant of 0.01 as
         the maximum value of :math:`\rho_t`
 
         .. math::
@@ -275,12 +275,12 @@ Adafactor.__doc__ = (
                 &\hspace{5mm}\rho_t \leftarrow min(0.01, \frac{1}{\sqrt{t}})
             \end{aligned}
 
-        Shazeer, Noam, and Mitchell Stern do not enforce an opinion on how weight decay should
+        Noam Shazeer and Mitchell Stern do not enforce an opinion on how weight decay should
         be computed, and so we use the learning rate as a coefficient for decoupled weight
         decay, similar to what is suggested in `Decoupled Weight Decay Regularization`_.
 
         Regarding the use of :math:`\epsilon_1`: The implementation attempts to replicate the
-        presumed intention of Shazeer, Noam, and Mitchell Stern to use :math:`\epsilon_1` as
+        presumed intention of Noam Shazeer and Mitchell Stern to use :math:`\epsilon_1` as
         a stabilizing term when the squared gradient becomes small.
 
         This stabilization can be written as
@@ -300,7 +300,7 @@ Adafactor.__doc__ = (
         are left alone, and we apply :math:`\epsilon_1` at the final calculation of
         the variance estimate :math:`\widehat{V}_t` and for the update :math:`U_t`.
 
-        This is in contrast to Shazeer, Noam, and Mitchell Stern and other frameworks which
+        This is in contrast to Noam Shazeer and Mitchell Stern and other frameworks which
         apply :math:`\epsilon_1` to both row and column factors of the squared gradient, but
         not in the calculations after:
 
