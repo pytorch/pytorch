@@ -1593,7 +1593,6 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         "count_include_pad",
         (True, False),
     )
-    @skipIfUnsupportedMinOpsetVersion(10)
     def test_avgpool_2d(self, padding, count_include_pad):
         model = torch.nn.AvgPool2d(
             3,
