@@ -177,6 +177,9 @@ class FxCompileMode(enum.Enum):
     SERIALIZE = 1
     # Compile using a subprocess instead of in-process.
     SUBPROCESS = 2
+    # Like SUBPROCESS but while waiting for the compile to finish run with
+    # backend=eager.
+    ASYNC = 3
 
 
 def _fx_compile_mode_default() -> FxCompileMode:
@@ -189,6 +192,7 @@ def _fx_compile_mode_default() -> FxCompileMode:
         "normal": FxCompileMode.NORMAL,
         "serialize": FxCompileMode.SERIALIZE,
         "subprocess": FxCompileMode.SUBPROCESS,
+        "async": FxCompileMode.ASYNC,
     }
     if value not in modes:
         import logging
@@ -1702,6 +1706,231 @@ class _SubprocessFxCompile(_OutOfProcessFxCompile):
         return result
 
 
+class _AsyncOutputCode(OutputCode):
+    _forward: Callable[..., Any]
+    _future: Optional[Future[_WireProtocolPickledOutput]]
+    _post_compile_data: Optional[_PostCompileData] = None
+
+    def __init__(
+        self,
+        eager_forward: Callable[..., Any],
+        future: Future[_WireProtocolPickledOutput],
+    ) -> None:
+        assert eager_forward is not None
+        self._future = future
+        self._forward = make_boxed_func(eager_forward)
+        self._post_compile_data = None
+
+        # This is so the caller will call us with a boxed input instead of
+        # *args.
+        self._boxed_call = True
+
+    @override
+    @property
+    def _fx_graph_cache_key(self) -> Optional[str]:
+        co_name = inspect.currentframe().f_code.co_name  # type: ignore[union-attr]
+        raise NotImplementedError(
+            f"unimplemented {self.__class__}.{co_name} {type(self)}"
+        )
+
+    @_fx_graph_cache_key.setter
+    def _fx_graph_cache_key(self) -> Optional[str]:
+        co_name = inspect.currentframe().f_code.co_name  # type: ignore[union-attr]
+        raise NotImplementedError(
+            f"unimplemented {self.__class__}.{co_name} {type(self)}"
+        )
+
+    @override
+    def __call__(self, inputs: Sequence[Any]) -> Any:
+        print("_AsyncOutputCode: it's this call here")
+        if self._future is not None and self._future.done():
+            print("--- background compile is finished - switching over")
+            # TODO: If the future ended in an exception do we want to continue
+            # running eager or hit the exception now?
+            pcd, self._post_compile_data = self._post_compile_data, None
+            assert pcd is not None
+            output = self._future.result().deserialize(pcd.constants)
+            # TODO: _OutOfProcessFxCompile._postprocess
+            output.graph.post_compile(*pcd)
+            self._forward = output.graph
+            self._future = None
+            print("--- background compile is finished - switched")
+
+            # TODO: If we end before the future is done then we currently hang
+            # until the future finishes. Fix that. Daemon mode?
+
+        # TODO: needs to run the forward function
+        return self._forward(inputs)
+
+    @override
+    def post_compile(
+        self,
+        example_inputs: Sequence[InputType],
+        cudagraphs: BoxedBool,
+        constants: CompiledFxGraphConstants,
+    ) -> None:
+        self._post_compile_data = _PostCompileData(
+            example_inputs, cudagraphs, constants
+        )
+
+
+class _AsyncWireProtocolOutput(_WireProtocolOutput):
+    _eager_forward: Callable[..., Any]
+    _future: Future[_WireProtocolPickledOutput]
+
+    def __init__(
+        self,
+        eager_forward: Callable[..., Any],
+        future: Future[_WireProtocolPickledOutput],
+    ) -> None:
+        self._eager_forward = eager_forward
+        self._future = future
+
+    @override
+    @property
+    def graph(self) -> OutputCode:
+        return _AsyncOutputCode(self._eager_forward, self._future)
+
+    @graph.setter
+    def graph(self, _: OutputCode) -> None:
+        co_name = inspect.currentframe().f_code.co_name  # type: ignore[union-attr]
+        raise NotImplementedError(
+            f"unimplemented {self.__class__}.{co_name} {type(self)}"
+        )
+
+    @override
+    @property
+    def metrics(self) -> CachedMetricsDeltas:
+        co_name = inspect.currentframe().f_code.co_name  # type: ignore[union-attr]
+        raise NotImplementedError(
+            f"unimplemented {self.__class__}.{co_name} {type(self)}"
+        )
+
+    @metrics.setter
+    def metrics(self, _: CachedMetricsDeltas) -> None:
+        co_name = inspect.currentframe().f_code.co_name  # type: ignore[union-attr]
+        raise NotImplementedError(
+            f"unimplemented {self.__class__}.{co_name} {type(self)}"
+        )
+
+    @override
+    @property
+    def logs(self) -> list[logging.LogRecord]:
+        co_name = inspect.currentframe().f_code.co_name  # type: ignore[union-attr]
+        raise NotImplementedError(
+            f"unimplemented {self.__class__}.{co_name} {type(self)}"
+        )
+
+    @logs.setter
+    def logs(self, _: list[logging.LogRecord]) -> None:
+        co_name = inspect.currentframe().f_code.co_name  # type: ignore[union-attr]
+        raise NotImplementedError(
+            f"unimplemented {self.__class__}.{co_name} {type(self)}"
+        )
+
+
+class _AsyncWireProtocolPickledOutput(_WireProtocolPickledOutput):
+    _future: Future[_WireProtocolPickledOutput]
+    _eager_forward: Callable[..., Any]
+
+    def __init__(
+        self,
+        eager_forward: Callable[..., Any],
+        future: Future[_WireProtocolPickledOutput],
+    ) -> None:
+        self._future = future
+        self._eager_forward = eager_forward
+
+    @override
+    def deserialize(self, constants: CompiledFxGraphConstants) -> _WireProtocolOutput:
+        output = _AsyncWireProtocolOutput(self._eager_forward, self._future)
+        output._future = self._future
+        return output
+
+    @override
+    @property
+    def value(self) -> bytes:
+        co_name = inspect.currentframe().f_code.co_name  # type: ignore[union-attr]
+        raise NotImplementedError(
+            f"unimplemented {self.__class__}.{co_name} {type(self)}"
+        )
+
+    @value.setter
+    def value(self, _: bytes) -> None:
+        co_name = inspect.currentframe().f_code.co_name  # type: ignore[union-attr]
+        raise NotImplementedError(
+            f"unimplemented {self.__class__}.{co_name} {type(self)}"
+        )
+
+
+class _AsyncFxCompile(_OutOfProcessFxCompile):
+    _eager_forward: Callable[..., Any]
+
+    def __init__(self, eager_forward: Callable[..., Any]) -> None:
+        self._eager_forward = eager_forward
+
+    @override
+    def _send_to_child(
+        self, input: _WireProtocolPickledInput
+    ) -> _WireProtocolPickledOutput:
+        # TODO: Do we need to copy across some kind of logging IDs? (ChromiumEventLogger)
+
+        pool = torch._inductor.async_compile.AsyncCompile.process_pool()
+
+        # TODO: This is the wrong thing to do long-term - but for now let's
+        # share the cache so we can identify tests broken by this later.
+        env_vars = ["TORCHINDUCTOR_CACHE_DIR", "TRITON_CACHE_DIR"]
+        extra_env = {v: os.environ[v] for v in env_vars if v in os.environ}
+
+        # start = time.time()
+        f = pool.submit(_AsyncFxCompile._run_in_child_subprocess, input, extra_env)
+        return _AsyncWireProtocolPickledOutput(self._eager_forward, f)
+
+        # -- last = time.time()
+        # -- while not f.done():
+        # --     # DEBUG: To print status updates...
+        # --     # print("tick...")
+        # --     time.sleep(0.125)
+        # --     now = time.time()
+        # --     if now - last > 1:
+        # --         last = now
+        # -- output = f.result()
+        # -- # end = time.time()
+        # --
+        # -- return output
+
+    @classmethod
+    def _run_in_child_subprocess(
+        cls,
+        pickled_input: _WireProtocolPickledInput,
+        extra_env: Optional[Mapping[str, str]],
+    ) -> _WireProtocolPickledOutput:
+        # TODO: In subprocess mode we need to clear the inductor caches.
+        # The problem:
+        #   1. We compile in worker A which fills stuff in tmpdir
+        #   2. parent clears inductor caches which deletes tmpdirs and tells
+        #      cpp_prefix_path() to clear its LRU cache
+        #   3. We compile a second time in subproc A - but since we never told
+        #      cpp_prefix_path() in worker A to clear its LRU it thinks the
+        #      tmpdir still exists and fails to compile.
+        #
+        # TODO: We probably should be using a separate tmpdir in the worker
+        # anyway... but we should probably still respect clear_inductor_caches()
+        # in the parent... maybe?
+        #
+        # TODO: We could be less aggressive by keeping a clock which gets
+        # incremented when we clear the cache, send the clock to the worker and
+        # only clear caches if the clock changed since last time.
+        #
+        clear_inductor_caches()
+        torch._inductor.metrics.reset()
+
+        # TODO: turn off config.fx_graph_async_compile
+
+        result = cls._run_in_child(pickled_input, extra_env)
+        return result
+
+
 # For debugging - create a _FxCompile which writes the serialized data to a file
 # and then exits.
 #
@@ -1765,6 +1994,8 @@ def fx_codegen_and_compile(
         scheme = _DebugSerdeFxCompile()
     elif fx_compile_mode == FxCompileMode.SUBPROCESS:
         scheme = _SubprocessFxCompile()
+    elif fx_compile_mode == FxCompileMode.ASYNC:
+        scheme = _AsyncFxCompile(gm.forward)
 
     return scheme.codegen_and_compile(gm, example_inputs, inputs_to_check, graph_kwargs)
 
