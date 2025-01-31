@@ -1304,12 +1304,19 @@ class TritonKernelOverrides(TritonOverrides):
         # we only respect non int32-int64 dtypes and otherwise use current kernel indexing dtype
         index_dtype = torch.int32 if V.kernel.index_dtype == "tl.int32" else torch.int64
         dtype = dtype if dtype not in (torch.int32, torch.int64) else index_dtype
-        var = V.kernel.cse.generate(
-            V.kernel.compute,
-            indexing.index_str,
-            bounds=get_bounds_index_expr(expr),
-            dtype=dtype,
-        )
+
+        # after we emit this var we cast it to the correct dtype
+        orig = config.test_configs.runtime_triton_dtype_assert
+        try:
+            config.test_configs.runtime_triton_dtype_assert = False
+            var = V.kernel.cse.generate(
+                V.kernel.compute,
+                indexing.index_str,
+                bounds=get_bounds_index_expr(expr),
+                dtype=dtype,
+            )
+        finally:
+            config.test_configs.runtime_triton_dtype_assert = orig
 
         if dtype not in (torch.int32, torch.int64):
             var = V.kernel.cse.generate(
