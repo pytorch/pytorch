@@ -720,7 +720,8 @@ class PythonWrapperCodegen(CodeGen):
 
         # intermediate tensor value printing utility
         self.debug_printer = DebugPrinterManager(
-            debug_printer_level=config.aot_inductor.debug_intermediate_value_printer
+            debug_printer_level=config.aot_inductor.debug_intermediate_value_printer,
+            use_array_ref=config.aot_inductor.allow_stack_allocation,
         )
 
         # Additional files that are dependent to the wrapper (ex. cubin files)
@@ -1212,7 +1213,8 @@ class PythonWrapperCodegen(CodeGen):
             if config.triton.autotune_at_compile_time:
                 self.generate_and_run_autotune_block()
 
-            if config.annotate_training:
+            # cpp_wrapper currently doesn't support nvtx
+            if config.annotate_training and not config.cpp_wrapper:
                 self.wrapper_call.writeline(
                     "nvtx._device_range_end(training_annotation)"
                 )

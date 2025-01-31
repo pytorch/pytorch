@@ -228,8 +228,22 @@ class ModificationWrapper(V.WrapperHandler):  # type: ignore[name-defined]
         if name not in self.fixed_inputs:
             index_str = self._process_indexing(index)
             var = self._add_kernel_input(name)
-            return f"tl.load({var} + {index_str})"
-        return f"({self.fixed_inputs[name]})"
+            var_dtype = V.graph.get_buffer(name).dtype
+            line = f"tl.load({var} + {index_str})"
+
+            if (
+                var_dtype in (torch.float16, torch.bfloat16)
+                and config.triton.codegen_upcast_to_fp32
+            ):
+                line += ".to(tl.float32)"
+                var_dtype = torch.float32
+
+            out = self.kernel.cse.generate(self.kernel.compute, line, dtype=var_dtype)
+            return out
+
+        return self.kernel.cse.generate(
+            self.kernel.compute, f"({self.fixed_inputs[name]})", dtype=torch.float32
+        )
 
     def indirect_indexing(self, index_var: str, size, check, wrap_neg=True):
         """Convert index variable to symbolic form."""
@@ -1065,6 +1079,14 @@ class TritonTemplate(KernelTemplate):
         """
         assert self.template, "requires jinja2"
         defines = StringIO()
+
+        # HACK: Triton currently breaks if TF32 floats are requested, but the CUDA
+        # capability doesn't support them.  This is a bug in Triton, but for now we'll
+        # patch around it here.  See https://github.com/triton-lang/triton/issues/3011
+        # for one example issue with this problem.
+        if not torch.cuda.is_tf32_supported():
+            kwargs["ALLOW_TF32"] = "False"
+
         for name, val in kwargs.items():
             defines.write(f"{name} : tl.constexpr = {val}\n")
         defines = defines.getvalue()
