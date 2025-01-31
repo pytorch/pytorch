@@ -6,6 +6,7 @@ import dataclasses
 import functools
 import importlib
 import inspect
+import linecache
 import operator
 import os
 import random
@@ -3147,6 +3148,7 @@ BUILTIN_SKIPLIST = (
     inspect,
     random,
     traceback,
+    linecache,
     unittest,
 )
 
