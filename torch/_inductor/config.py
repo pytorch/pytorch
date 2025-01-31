@@ -16,6 +16,14 @@ def fx_graph_remote_cache_default() -> Optional[bool]:
     return get_tristate_env("TORCHINDUCTOR_FX_GRAPH_REMOTE_CACHE")
 
 
+def vec_isa_ok_default() -> Optional[bool]:
+    if os.environ.get("TORCHINDUCTOR_VEC_ISA_OK") == "1":
+        return True
+    if os.environ.get("TORCHINDUCTOR_VEC_ISA_OK") == "0":
+        return False
+    return None
+
+
 def autotune_remote_cache_default() -> Optional[bool]:
     return get_tristate_env("TORCHINDUCTOR_AUTOTUNE_REMOTE_CACHE")
 
@@ -46,8 +54,10 @@ disable_progress = True
 verbose_progress = False
 
 # use fx aot graph codegen cache
-fx_graph_cache = (
-    os.environ.get("TORCHINDUCTOR_FX_GRAPH_CACHE", "0" if is_fbcode() else "1") == "1"
+fx_graph_cache: bool = Config(
+    justknob="pytorch/remote_cache:enable_local_fx_graph_cache",
+    env_name_force="TORCHINDUCTOR_FX_GRAPH_CACHE",
+    default=True,
 )
 
 # use remote fx aot graph codegen cache
@@ -871,8 +881,8 @@ class cpp:
     inject_log1p_bug_TESTING_ONLY: Optional[str] = None
 
     # If None, autodetect whether or not AVX512/AVX2 can be used.  Otherwise,
-    # force usage as specified, without testing.
-    vec_isa_ok: Optional[bool] = None
+    # force usage as specified, without testing. Default None.
+    vec_isa_ok: Optional[bool] = get_tristate_env("TORCHINDUCTOR_VEC_ISA_OK")
 
     # similar to config.triton.descriptive_names
     descriptive_names: Union[

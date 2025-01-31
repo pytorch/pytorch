@@ -228,9 +228,11 @@ class CppWrapperCpu(PythonWrapperCodegen):
             self.codegen_input_stride_var_decl(code, name)
             return f"{name}_stride"
 
-        def codegen_symbol(sym: sympy.Symbol, base_name: str, dim: int):
+        def codegen_symbol(
+            sym: sympy.Symbol, base_name: str, name_fn: Callable[[str], str], dim: int
+        ):
             if isinstance(sym, sympy.Symbol) and sym not in bound_vars:
-                code.writeline(f"int64_t {sym} = {base_name}[{dim}];")
+                code.writeline(f"int64_t {sym} = {name_fn(base_name)}[{dim}];")
                 bound_vars.add(sym)
 
         if isinstance(value, sympy.Expr):
@@ -246,9 +248,9 @@ class CppWrapperCpu(PythonWrapperCodegen):
             bound_vars.add(value)
         elif isinstance(value, ir.TensorBox):
             for dim, size in enumerate(value.get_size()):
-                codegen_symbol(size, sizeof(name), dim)
+                codegen_symbol(size, name, sizeof, dim)
             for dim, stride in enumerate(value.get_stride()):
-                codegen_symbol(stride, strideof(name), dim)
+                codegen_symbol(stride, name, strideof, dim)
         else:
             raise AssertionError(f"Unknown value type: {type(value)}")
 
