@@ -297,6 +297,9 @@ class UnflattenedModule(torch.nn.Module):
         self.graph.owning_module = self
         self.module_call_graph = deepcopy(export_module.module_call_graph)
         self.flat_args_adapter = flat_args_adapter
+
+        self.meta = export_module.graph_module.meta
+
         # Flag to indicate whether args have been adapted.
         self.adapted = False
         self._run_with_interpreter = RUN_WITH_INTERPRETER
@@ -1012,9 +1015,9 @@ class _ModuleFrame:
 
                     if arg.name in self.seen_nodes:
                         flat_arg_node.meta = copy.copy(self.seen_nodes[arg.name].meta)
-                        self.node_to_placeholder[
-                            self.seen_nodes[arg.name]
-                        ] = flat_arg_node
+                        self.node_to_placeholder[self.seen_nodes[arg.name]] = (
+                            flat_arg_node
+                        )
 
             with self.parent.graph.inserting_before(self.parent_call_module):
                 input_nodes: list[Optional[torch.fx.Node]] = []
