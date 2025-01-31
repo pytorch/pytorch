@@ -16,6 +16,7 @@
 #include <c10/util/Exception.h>
 #include <c10/util/Logging.h>
 #include <c10/util/hash.h>
+#include <c10/util/string_view.h>
 
 #include "caffe2/core/common.h"
 #include "caffe2/serialize/file_adapter.h"
