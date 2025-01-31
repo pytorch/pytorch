@@ -2472,7 +2472,6 @@ def sdpa_constraint(fx_node, *args, **kwargs):
         if len(arg.get_size()) not in (3, 4):
             return arg
 
-
         if effn_attn_fwd_bias:
             out_size = arg.get_size()
 
@@ -2505,11 +2504,14 @@ def sdpa_constraint(fx_node, *args, **kwargs):
 
                 out_strides[i] = stride
 
+            # TODO: clone_input does not handle expanded dims well
             for dim in expanded_dims:
                 arg = slice_(arg, dim, 0, 1)
 
             out = ir.ExternKernel.require_exact_strides(arg, out_strides)
-            return ir.try_match_insignificant_strides(expand(TensorBox(out), out_size), out_strides)
+            return ir.try_match_insignificant_strides(
+                expand(TensorBox(out), out_size), out_strides
+            )
 
         if ir.is_aligned_realized_tensor(arg, ALIGNMENT):
             return ir.try_match_insignificant_strides(
