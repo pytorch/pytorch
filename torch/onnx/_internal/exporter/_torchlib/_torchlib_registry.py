@@ -33,6 +33,7 @@ def onnx_impl(
     trace_only: bool = False,
     complex: bool = False,
     traceable: bool = False,
+    private: bool = False
 ) -> Callable[[_T], _T]:
     """Register an ONNX implementation of a torch op."""
 
@@ -60,32 +61,35 @@ def onnx_impl(
                 processed_func = onnxscript.script(opset=custom_opset)(func)
                 processed_func.traceable = traceable
 
-            if isinstance(processed_func, onnxscript.OnnxFunction):
-                opset_version = processed_func.opset.version
-            else:
-                opset_version = 1
+            if not private:
+                # Skip registration if private
+                # TODO(justinchuby): Simplify the logic and remove the private attribute
+                if isinstance(processed_func, onnxscript.OnnxFunction):
+                    opset_version = processed_func.opset.version
+                else:
+                    opset_version = 1
 
-            signature = _schemas.OpSignature.from_function(
-                processed_func,
-                _constants.DOMAIN,
-                processed_func.name,
-                opset_version=opset_version,
-            )
-
-            if not isinstance(target, Sequence):
-                targets = (target,)
-            else:
-                targets = target
-
-            for t in targets:
-                _registry.append(
-                    _registration.OnnxDecompMeta(
-                        onnx_function=processed_func,
-                        fx_target=t,
-                        signature=signature,
-                        is_complex=complex,
-                    )
+                signature = _schemas.OpSignature.from_function(
+                    processed_func,
+                    _constants.DOMAIN,
+                    processed_func.name,
+                    opset_version=opset_version,
                 )
+
+                if not isinstance(target, Sequence):
+                    targets = (target,)
+                else:
+                    targets = target
+
+                for t in targets:
+                    _registry.append(
+                        _registration.OnnxDecompMeta(
+                            onnx_function=processed_func,
+                            fx_target=t,
+                            signature=signature,
+                            is_complex=complex,
+                        )
+                    )
             return processed_func  # type: ignore[return-value]
         except Exception:
             logger.exception(
