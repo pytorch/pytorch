@@ -377,6 +377,18 @@ class HigherOrderOperator(OperatorBase, abc.ABC):
                     == torch._C._disabled_torch_dispatch_impl
                 ):
                     continue
+
+                # In some case, people are using FakeTensor without a FakeTensorMode.
+                # For example, some sparse arch model has a mix of FakeTensor and real
+                # tensor for weights during lowering, and ppl tends to run eager evaluation
+                # on the model without setting up the FakeTensorMode.
+                # In this case, we pull FakeTensorMode impl.
+                if subclass_type is torch._subclasses.fake_tensor.FakeTensor:
+                    subclass_type = torch._subclasses.fake_tensor.FakeTensorMode  # type: ignore[assignment]
+                    handler = self.python_key_table[subclass_type]
+                    result = handler(arg.fake_mode, *args, **kwargs)  # type: ignore[attr-defined]
+                    return result
+
                 if subclass_type in self.python_key_table:
                     handler = self.python_key_table[subclass_type]
                     # "natural" calling convention: (*args, **kwargs)
