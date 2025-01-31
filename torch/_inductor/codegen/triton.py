@@ -2451,7 +2451,7 @@ class TritonKernel(SIMDKernel):
                     self.cse.generate(
                         self.compute,
                         f"tl.broadcast_to({reduction_range_prefix}index, {masked_value}.shape)",
-                        dtype=torch.int64,
+                        dtype=self.index_dtype,
                     )
                 )
                 root_op = {"argmax": "max", "argmin": "min"}[reduction_type]
