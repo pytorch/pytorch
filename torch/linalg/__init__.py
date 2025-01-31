@@ -1977,10 +1977,9 @@ the output has the same batch dimensions.
 
 where `inf` refers to `float('inf')`, NumPy's `inf` object, or any equivalent object.
 
-For :attr:`p` is one of `('fro', 'nuc', inf, -inf, 1, -1)`, this function uses
+For :attr:`p` as one of `('fro', 'nuc', inf, -inf, 1, -1)`, this function uses
 :func:`torch.linalg.norm` and :func:`torch.linalg.inv`.
-As such, in this case, the matrix (or every matrix in the batch) :attr:`A` has to be square
-and invertible.
+In this case, the matrix (or every matrix in the batch) :attr:`A` has to be square.
 
 For :attr:`p` in `(2, -2)`, this function can be computed in terms of the singular values
 :math:`\sigma_1 \geq \ldots \geq \sigma_n`
@@ -2012,7 +2011,8 @@ Keyword args:
     out (Tensor, optional): output tensor. Ignored if `None`. Default: `None`.
 
 Returns:
-    A real-valued tensor, even when :attr:`A` is complex.
+    A real-valued tensor, even when :attr:`A` is complex. If :attr:`p` is one of `('fro', 'nuc', inf, -inf, 1, -1)`, 
+    and the :attr:`A` matrix is not invertible, returns `inf`.
 
 Raises:
     RuntimeError:
@@ -2022,8 +2022,6 @@ Raises:
 
 Examples::
 
-    >>> A = torch.randn(3, 4, 4, dtype=torch.complex64)
-    >>> torch.linalg.cond(A)
     >>> A = torch.tensor([[1., 0, -1], [0, 1, 0], [1, 0, 1]])
     >>> torch.linalg.cond(A)
     tensor([1.4142])
@@ -2052,6 +2050,12 @@ Examples::
     >>> torch.linalg.cond(A)
     tensor([[4.6245],
             [4.5671]])
+            
+    >>> a = torch.eye(3, 3).reshape((1, 3, 3)).repeat(3, 1, 1)
+    >>> a[1, -1, -1] = 0 # now a[1] is singular
+    >>> torch.linalg.cond(a, 'fro')
+    tensor([3., inf, 3.])
+                            
 """,
 )
 
