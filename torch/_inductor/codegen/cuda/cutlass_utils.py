@@ -44,7 +44,12 @@ def try_import_cutlass() -> bool:
         return True
 
     try:
+        import cutlass  # noqa: F401
         import cutlass_library  # noqa: F401
+
+        cutlass_minor_vesion = int(cutlass.__version__.split(".")[1])
+        if cutlass_minor_vesion < 7:
+            log.warning("CUTLASS version < 3.7 is not recommended.")
 
         log.debug(
             "Found cutlass_library in python search path, overriding config.cuda.cutlass_dir"
