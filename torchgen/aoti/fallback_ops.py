@@ -134,6 +134,7 @@ inductor_fallback_ops = {
     "aten.searchsorted.Tensor",
     "aten._segment_reduce_backward.default",
     "aten.segment_reduce.default",
+    "aten.set_.source_Tensor",
     "aten.slice.Tensor",
     "aten.soft_margin_loss_backward.default",
     "aten.sort.default",

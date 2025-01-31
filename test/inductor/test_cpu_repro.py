@@ -714,12 +714,15 @@ class CPUReproTests(TestCase):
         model = M(H=32, W=32, num_channels=4, num_colors=2)
         fn_opt = torch.compile(model, backend="inductor")
         v = (torch.rand(10, 32, 32, 4) > 0.5).to(torch.float32)
-        inps = [
-            v.clone(),
-        ]
-        result, code = run_and_get_cpp_code(fn_opt, *inps)
-        self.assertTrue("aten.set_.source_Tensor" in code)
-        self.assertEqual(model(*inps), result)
+        inp = v.clone()
+        result, code = run_and_get_cpp_code(fn_opt, inp)
+        self.assertIn(
+            "aoti_torch_cpu_set__source_Tensor"
+            if config.cpp_wrapper
+            else "aten.set_.source_Tensor",
+            code,
+        )
+        self.assertEqual(model(inp), result)
 
     @torch._dynamo.config.patch(dynamic_shapes=True)
     @torch._dynamo.config.patch(assume_static_by_default=False)
