@@ -6,7 +6,6 @@
 
 namespace c10 {
 
-// NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
 SymbolicShapeMeta::SymbolicShapeMeta(const SymbolicShapeMeta& other)
     // Non-mutables can be accessed outside the mutex
     : sizes_(other.sizes_),
