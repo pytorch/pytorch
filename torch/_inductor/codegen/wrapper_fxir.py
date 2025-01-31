@@ -65,8 +65,11 @@ class WrapperIRLine(MemoryPlanningLine):
 
 @dataclasses.dataclass
 class KernelCallLine(WrapperIRLine):
-    args: tuple
-    kwargs: dict
+    kernel_name: str
+    call_args: tuple
+    grid: tuple
+    grid_fn: str
+    triton: bool
 
 @dataclasses.dataclass
 class KernelDefinitionLine(WrapperIRLine):
@@ -148,6 +151,37 @@ class WrapperFxCodegen(PythonWrapperCodegen):
         self.graph.call_function(operator.delitem, args=(node, None))
         del self.buffer_to_node[buffer.name]
 
+    def _get_buffer(self, node: ir.IRNode) -> BufferLike:
+        """
+        Extract buffer data from an IR node.
+        """
+        if isinstance(node, BufferLike):
+            return node
+        elif isinstance(node, ir.MutableBox):
+            return self._get_buffer(node.data)
+        else:
+            raise NotImplementedError(f"Unable to extract buffer from node: {buffer}")
+
+    def _generate_graph_inputs(self) -> None:
+        """
+        Converts graph inputs to FX placeholders.
+        """
+        for name, buffer in V.graph.graph_inputs.items():
+            buffer = self._get_buffer(buffer)
+            node = self.graph.placeholder(buffer.name)
+            self._create_meta_from_buffer(node, buffer)
+            self._record_allocation(buffer, node)
+
+    def _generate_graph_outputs(self) -> None:
+        """
+        Convert graph outputs to FX.
+        """
+        outputs = tuple(
+            self.buffer_to_node[self._get_buffer(output).name]
+            for output in V.graph.graph_outputs
+        )
+        self.graph.output(outputs)
+
     def _generate(self, is_inference):
 
         # We disable planning during training because it presently increases peak memory consumption.
@@ -158,6 +192,7 @@ class WrapperFxCodegen(PythonWrapperCodegen):
             self.memory_plan_reuse()
 
         # Generate FX IR from Wrapper IR.
+        self._generate_graph_inputs()
         for line in self.lines:
 
             line_type = type(line)
@@ -168,6 +203,7 @@ class WrapperFxCodegen(PythonWrapperCodegen):
                 ExitDeviceContextManagerLine: self._generate_exit_device_context_manager,
                 EnterSubgraphLine: self._generate_enter_subgraph,
                 ExitSubgraphLine: self._generate_exit_subgraph,
+                FreeLine: self._generate_free,
                 FreeIfNotReusedLine: self._generate_free_if_not_reused,
                 LineContext: self._generate_line_context,
                 ReuseLine: self._generate_reuse,
@@ -191,6 +227,11 @@ class WrapperFxCodegen(PythonWrapperCodegen):
                 ))
 
             conversion_func(line)
+        self._generate_graph_outputs()
+
+        # This class does not yet support Python codegen.
+        # Exit early.
+        raise NotImplementedError("Python codegen not yet supported!")
 
     def _generate_allocate(self, line: Line) -> None:
         assert isinstance(line, AllocateLine)
@@ -228,12 +269,17 @@ class WrapperFxCodegen(PythonWrapperCodegen):
         assert isinstance(line, ExitSubgraphLine)
         raise NotImplementedError("Subgraphs are not yet supported by FX conversion")
 
+    def _generate_free(self, line: Line) -> None:
+        assert isinstance(line, FreeLine)
+        buf = line.node
+        self._free(buf)
+
     def _generate_free_if_not_reused(self, line: Line) -> None:
         assert isinstance(line, FreeIfNotReusedLine)
         buf = line.node
         assert buf.get_name() not in V.graph.removed_buffers
         if not buf.is_reused:
-            buf._free(self.node)
+            self._free(buf)
 
     def _generate_line_context(self, line: Line) -> None:
         assert isinstance(line, LineContext)
@@ -303,28 +349,45 @@ class WrapperFxCodegen(PythonWrapperCodegen):
         self.graph.free(line.node)
 
     def _generate_triton_call(self, line: Line) -> None:
-        assert isinstance(line, KernelCallLine) #TODO create this in Wrapper IR
+        assert isinstance(line, KernelCallLine)
 
-        if line.kwargs["grid_fn"] not in ("grid", None):
+        if line.grid_fn not in ("grid", None):
             raise NotImplementedError(f"Unsupported grid_fn: '{grid_fn}'")
 
+        # Map call args back to FX nodes.
+        call_args = tuple(
+            self.buffer_to_node[arg]
+            if isinstance(arg, str)
+            else arg
+            for arg in line.call_args
+        )
 
-        kernel_name, call_args = line.args
-        kernel = self.kernels[kernel_name]
-
-        node = self.graph.call_function(call_triton_kernel, args=(kernel, grid, call_args))
+        kernel = self.kernels[line.kernel_name]
+        node = self.graph.call_function(call_triton_kernel, args=(kernel, line.grid, call_args))
 
     def generate_kernel_call(
-        self, *args, **kwargs,
-    ):
+            self,
+            kernel_name: str,
+            call_args,
+            grid=None,
+            device_index=None,
+            gpu=True,
+            triton=True,
+            arg_types=None,
+            raw_args=None,
+            grid_fn: str = "grid",
+            triton_meta=None,
+            autotune_configs=None,
+            grid_extra_kwargs="",
+            ):
         """
         Generates Wrapper IR for a kernel call.
         """
-        self.writeline(KernelCallLine(self, args, kwargs))
+        self.writeline(KernelCallLine(self, kernel_name=kernel_name, call_args=call_args, grid=tuple(grid), grid_fn=grid_fn, triton=triton))
 
     def _generate_kernel_call(self, line: Line):
         assert isinstance(line, KernelCallLine)
-        if not line.kwargs["triton"]:
+        if not line.triton:
             raise NotImplementedError("FX conversion only supports Triton kernels.")
 
         self._generate_triton_call(line)
