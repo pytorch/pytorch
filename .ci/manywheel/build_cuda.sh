@@ -146,6 +146,8 @@ if [[ $CUDA_VERSION == "12.4" || $CUDA_VERSION == "12.6" ]]; then
             "/usr/local/cuda/lib64/libnvToolsExt.so.1"
             "/usr/local/cuda/lib64/libnvrtc.so.12"
             "/usr/local/cuda/lib64/libnvrtc-builtins.so"
+            "/usr/local/cuda/lib64/libcufile.so.0"
+            "/usr/local/cuda/lib64/libcufile_rdma.so.1"
         )
         DEPS_SONAME+=(
             "libcudnn_adv.so.9"
@@ -163,6 +165,8 @@ if [[ $CUDA_VERSION == "12.4" || $CUDA_VERSION == "12.6" ]]; then
             "libnvToolsExt.so.1"
             "libnvrtc.so.12"
             "libnvrtc-builtins.so"
+            "libcufile.so.0"
+            "libcufile_rdma.so.1"
         )
     else
         echo "Using nvidia libs from pypi."
@@ -217,8 +221,6 @@ elif [[ $CUDA_VERSION == "11.8" ]]; then
             "/usr/local/cuda/lib64/libnvToolsExt.so.1"
             "/usr/local/cuda/lib64/libnvrtc.so.11.2"    # this is not a mistake, it links to more specific cuda version
             "/usr/local/cuda/lib64/libnvrtc-builtins.so.11.8"
-            "/usr/local/cuda/lib64/libcufile.so.0"
-            "/usr/local/cuda/lib64/libcufile_rdma.so.1"
         )
         DEPS_SONAME+=(
             "libcudnn_adv.so.9"
