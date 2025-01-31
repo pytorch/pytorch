@@ -1476,24 +1476,26 @@ class Reduction(Loops):
             if is_float_dtype(dtype):
                 return float("-inf")
             elif is_boolean_dtype(dtype):
-                return 0
+                return False
             else:
                 return torch.iinfo(dtype).min
         if reduction_type in ("min", "argmin"):
             if is_float_dtype(dtype):
                 return float("inf")
             elif is_boolean_dtype(dtype):
-                return 1
+                return True
             else:
                 return torch.iinfo(dtype).max
 
+        zero = False if is_boolean_dtype(dtype) else 0
+        one = True if is_boolean_dtype(dtype) else 1
         return {
-            "sum": 0,
-            "prod": 1,
-            "xor_sum": 0,
-            "any": 0,
-            "welford_reduce": (0, 0, 0),
-            "welford_combine": (0, 0, 0),
+            "sum": zero,
+            "prod": one,
+            "xor_sum": zero,
+            "any": zero,
+            "welford_reduce": (zero, zero, zero),
+            "welford_combine": (zero, zero, zero),
         }[reduction_type]
 
     @staticmethod
