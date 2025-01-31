@@ -1,5 +1,6 @@
 #pragma once
 
+#include <c10/core/DispatchKeySet.h>
 #include <c10/core/SafePyObject.h>
 #include <c10/core/SymNodeImpl.h>
 
@@ -301,6 +302,11 @@ class PythonSymNodeImpl : public c10::SymNodeImpl {
 
   c10::SymNode sym_float() override {
     return dispatch_common_(__func__);
+  }
+
+  c10::DispatchKeySet key_set() const override {
+    py::gil_scoped_acquire acquire;
+    return getPyObj().attr("key_set")().cast<c10::DispatchKeySet>();
   }
 
   py::handle getPyObj() const {

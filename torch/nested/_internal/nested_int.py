@@ -5,6 +5,7 @@ import torch
 from torch.fx.experimental._constant_symnode import ConstantIntNode
 from torch.nested._internal.tensor_registry import register_tensor, try_get_int
 from torch.nested._internal.utils import flatten_nested_metadata_to_dict
+from torch._C import DispatchKey, DispatchKeySet
 
 
 __all__ = ["NestedIntNode"]
@@ -164,6 +165,11 @@ class NestedIntNode:
     def wrap_int(self, num: int) -> ConstantIntNode:
         assert type(num) is int
         return ConstantIntNode(num)
+
+    def key_set(self) -> Any:
+        ks = DispatchKeySet(DispatchKey.Python)
+        ks = ks.add(DispatchKey.PythonTLSSnapshot)
+        return ks
 
 
 def get_metadata(x: torch.SymInt) -> torch.Tensor:

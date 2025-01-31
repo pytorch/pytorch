@@ -3777,6 +3777,7 @@ class TestNestedTensorSubclass(NestedTensorTestCase):
             lengths=None,
             max_seqlen=None,
             min_seqlen=None,
+            sum_lengths=None,
         )
         assert non_contig_offsets is None
         nested_int = get_tensor_symint(metadata, coeff=1)
@@ -6118,6 +6119,43 @@ class TestNestedTensorSubclass(NestedTensorTestCase):
         for nt_ub in nt_like.unbind():
             t_like = func(nt_ub)
             self.assertEqual(nt_ub.shape, t_like.shape)
+
+    @torch._dynamo.config.patch(suppress_errors=True)
+    @dtypes(torch.float, torch.double, torch.half)
+    @parametrize("requires_grad", [False, True])
+    def test_factory_functions(self, device, dtype, requires_grad):
+        for tensor_list in self._get_example_tensor_lists():
+            kwargs = {
+                "device": device,
+                "dtype": dtype,
+                "requires_grad": requires_grad,
+            }
+            nt = torch.nested.nested_tensor(
+                tensor_list,
+                layout=torch.jagged,
+                **kwargs
+            )
+            zeros = torch.zeros(nt.shape, **kwargs)
+            ones = torch.ones(nt.shape, **kwargs)
+            # empty = torch.empty(nt.shape, **kwargs)
+            full = torch.full(nt.shape, 2, **kwargs)
+
+            self.assertEqual(zeros, nt * 0)
+            self.assertEqual(ones, nt * 0 + 1)
+            self.assertEqual(full, nt * 0 + 2)
+
+            self.assertEqual(nt.device, zeros.device)
+            self.assertEqual(nt.dtype, zeros.dtype)
+            self.assertEqual(nt.requires_grad, zeros.requires_grad)
+
+            transposed_shape = nt.transpose(1, 2).shape
+            with self.assertRaisesRegex(
+                    ValueError, "only supports shapes of form"):
+                torch.zeros(transposed_shape, **kwargs)
+
+            new_shape = nt.shape[:2] + (3, 4)
+            zeros = torch.zeros(new_shape, **kwargs)
+            self.assertEqual(zeros.shape, new_shape)
 
     @skipIfTorchDynamo("Not a suitable test for TorchDynamo")
     @parametrize(

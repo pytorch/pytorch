@@ -1050,6 +1050,7 @@ def chunk_default(func, *args, **kwargs):
                 lengths=None,
                 max_seqlen=None,
                 min_seqlen=None,
+                sum_lengths=vals.shape[ragged_idx - 1],
             )
             # The result is always contiguous
             assert non_contig_offsets is None
@@ -2504,6 +2505,7 @@ def masked_select_default(func, *args, **kwargs):
         lengths=None,
         min_seqlen=None,
         max_seqlen=None,
+        sum_lengths=res_values[args["_ragged_idx"] - 1],
     )
     args["metadata"] = metadata
     return NestedTensor(
@@ -2797,3 +2799,41 @@ with torch.library._scoped_library("aten", "IMPL") as aten:
     aten.impl("_nested_get_jagged_metadata", _nested_get_jagged_dummy, "CPU")
     aten.impl("_nested_get_jagged_metadata", _nested_get_jagged_dummy, "CUDA")
     aten.impl("_nested_get_jagged_metadata", _nested_get_jagged_dummy, "Meta")
+
+
+@register_jagged_func(
+    [
+        torch.ops.aten.zeros.default,
+        torch.ops.aten.full.default,
+        torch.ops.aten.ones.default,
+    ],
+    "size: any, dtype: any?, layout: any?, device: any?, pin_memory: any?",
+)
+def jagged_factory(func, *args, **kwargs):
+    from torch.fx.experimental.symbolic_shapes import is_nested_int
+    from torch.nested._internal.nested_tensor import _load_val_from_tensor
+
+    _, new_kwargs = normalize_function(
+        func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
+    )
+    _unused_B, nested_int, *Ds = new_kwargs.pop("size")
+
+    if not is_nested_int(nested_int):
+        # Storing ragged_idx would fix this
+        raise ValueError(
+            f"{func.__name__}() only supports shapes of form (B, *, D1, D2...) "
+            "where only the second-left-most dimension is ragged. "
+        )
+    metadata = get_nested_int_metadata(nested_int)
+    sum_lengths_tensor = metadata._sum_lengths_tensor
+    if sum_lengths_tensor is None:
+        raise RuntimeError("Factory function expects _sum_lengths_tensor to be present on nested int")
+    sum_lengths = _load_val_from_tensor(metadata._sum_lengths_tensor)
+    new_kwargs["size"] = [sum_lengths, *Ds]
+
+    return NestedTensor(
+        func(**new_kwargs),
+        metadata,
+        non_contig_offsets=None,
+        _ragged_idx=1
+    )

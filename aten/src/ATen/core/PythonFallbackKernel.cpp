@@ -107,6 +107,14 @@ void pythonFallback(const c10::OperatorHandle& op, c10::DispatchKeySet dispatch_
           }
         }
       }
+    } else if (ivalue.isSymIntList()) {
+      for (const auto& nv : ivalue.toListRef()) {
+        // IValues tagged SymInt are guaranteed to be heap_allocated
+        if (nv.isSymInt() && nv.toSymNodeImplUnowned()->key_set().has(c10::DispatchKey::Python)) {
+           (*c10::impl::get_global_pyinterpreter())->dispatch(op, stack);
+          return;
+        }
+      }
     }
   }
 
