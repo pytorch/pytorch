@@ -401,6 +401,154 @@ UNIMPLEMENTED_XFAILIST = {
     ),
 }
 
+"""Expected failures due to backwards pass issues"""
+XFAILLIST_GRAD = {
+    # precision issues
+    "special.polygamma": MPSSkipInfo(
+        TEST_OUTPUT_GRAD_MATCH, dtypes=[torch.float16], variant="special_polygamma_n_0"
+    ),
+    "polygamma": MPSSkipInfo(
+        TEST_OUTPUT_GRAD_MATCH, dtypes=[torch.float16], variant="polygamma_n_0"
+    ),
+    "nn.functional.binary_cross_entropy": MPSSkipInfo(
+        TEST_OUTPUT_GRAD_MATCH, dtypes=[torch.float16]
+    ),
+    # Unimplemented ops
+    "__getitem__": MPSSkipInfo(TEST_OUTPUT_GRAD_MATCH, dtypes=[torch.float16]),
+    "_segment_reduce": MPSSkipInfo(
+        TEST_OUTPUT_GRAD_MATCH, dtypes=[torch.float16, torch.float32]
+    ),
+    "_chunk_cat": MPSSkipInfo(
+        TEST_OUTPUT_GRAD_MATCH, dtypes=[torch.float16, torch.float32]
+    ),
+    "sparse.mmreduce": MPSSkipInfo(
+        TEST_OUTPUT_GRAD_MATCH, dtypes=[torch.float32]
+    ),  # csr not supported
+    "unique_consecutive": MPSSkipInfo(
+        TEST_OUTPUT_GRAD_MATCH, dtypes=[torch.float16, torch.float32]
+    ),
+    "special_modified_bessel_i0": MPSSkipInfo(
+        TEST_OUTPUT_GRAD_MATCH, dtypes=[torch.float16, torch.float32]
+    ),
+    "scalar_tensor": MPSSkipInfo(
+        TEST_OUTPUT_GRAD_MATCH, dtypes=[torch.float16, torch.float32]
+    ),
+    "cdist": MPSSkipInfo(TEST_OUTPUT_GRAD_MATCH, dtypes=[torch.float32]),
+    "masked.scatter": MPSSkipInfo(
+        TEST_OUTPUT_GRAD_MATCH, dtypes=[torch.float16, torch.float32]
+    ),
+    "index_fill": MPSSkipInfo(
+        TEST_OUTPUT_GRAD_MATCH, dtypes=[torch.float16, torch.float32]
+    ),  # missing `aten::_unique`.
+    "linalg.lu_factor": MPSSkipInfo(
+        TEST_OUTPUT_GRAD_MATCH, dtypes=[torch.float16, torch.float32]
+    ),  # missing `aten::lu_unpack`.
+    "aminmax": MPSSkipInfo(
+        TEST_OUTPUT_GRAD_MATCH, dtypes=[torch.float32, torch.float16]
+    ),
+    "special.i1": MPSSkipInfo(
+        TEST_OUTPUT_GRAD_MATCH, dtypes=[torch.float16]
+    ),  # "i1_backward" not implemented for 'Half'
+    # Correctness issues
+    "atanh": MPSSkipInfo(TEST_OUTPUT_GRAD_MATCH, dtypes=[torch.float32]),
+    # Random output
+    "exponential": MPSSkipInfo(
+        TEST_OUTPUT_GRAD_MATCH, dtypes=[torch.float16, torch.float32]
+    ),
+    # CPU errors
+    # derivative for aten::nextafter is not implemented on CPU
+    "nextafter": MPSSkipInfo(TEST_OUTPUT_GRAD_MATCH),
+    # derivative for aten::floor_divide is not implemented on CPU
+    "floor_divide": MPSSkipInfo(
+        TEST_OUTPUT_GRAD_MATCH, dtypes=[torch.float16, torch.float32]
+    ),
+    # derivative for aten::narrow_copy is not implemented on CPU
+    "narrow_copy": MPSSkipInfo(
+        TEST_OUTPUT_GRAD_MATCH, dtypes=[torch.float16, torch.float32]
+    ),
+    # derivative for aten::_histogramdd_from_bin_cts is not implemented on CPU
+    "histogramdd": MPSSkipInfo(
+        TEST_OUTPUT_GRAD_MATCH, dtypes=[torch.float16, torch.float32]
+    ),
+    # derivative for aten::histogram is not implemented
+    "histogram": MPSSkipInfo(
+        TEST_OUTPUT_GRAD_MATCH, dtypes=[torch.float16, torch.float32]
+    ),
+    # 'bool' object is not iterable
+    "allclose": MPSSkipInfo(
+        TEST_OUTPUT_GRAD_MATCH, dtypes=[torch.float16, torch.float32]
+    ),
+    "equal": MPSSkipInfo(TEST_OUTPUT_GRAD_MATCH, dtypes=[torch.float16, torch.float32]),
+    # 'float' object is not iterable
+    "item": MPSSkipInfo(TEST_OUTPUT_GRAD_MATCH, dtypes=[torch.float16, torch.float32]),
+    # "mse_backward_cpu_out" not implemented for 'Half'
+    "nn.functional.mse_loss": MPSSkipInfo(
+        TEST_OUTPUT_GRAD_MATCH, dtypes=[torch.float16]
+    ),
+    # "smooth_l1_backward_cpu_out" not implemented for 'Half'
+    "nn.functional.smooth_l1_loss": MPSSkipInfo(
+        TEST_OUTPUT_GRAD_MATCH, dtypes=[torch.float16]
+    ),
+    # cpu error: grad requires non-empty inputs
+    "randn": MPSSkipInfo(TEST_OUTPUT_GRAD_MATCH, dtypes=[torch.float16, torch.float32]),
+    "signal.windows.bartlett": MPSSkipInfo(
+        TEST_OUTPUT_GRAD_MATCH, dtypes=[torch.float32]
+    ),
+    "signal.windows.blackman": MPSSkipInfo(
+        TEST_OUTPUT_GRAD_MATCH, dtypes=[torch.float32]
+    ),
+    "signal.windows.cosine": MPSSkipInfo(
+        TEST_OUTPUT_GRAD_MATCH, dtypes=[torch.float32]
+    ),
+    "signal.windows.exponential": MPSSkipInfo(
+        TEST_OUTPUT_GRAD_MATCH, dtypes=[torch.float32]
+    ),
+    "signal.windows.gaussian": MPSSkipInfo(
+        TEST_OUTPUT_GRAD_MATCH, dtypes=[torch.float32]
+    ),
+    "signal.windows.general_cosine": MPSSkipInfo(
+        TEST_OUTPUT_GRAD_MATCH, dtypes=[torch.float32]
+    ),
+    "signal.windows.general_hamming": MPSSkipInfo(
+        TEST_OUTPUT_GRAD_MATCH, dtypes=[torch.float32]
+    ),
+    "signal.windows.hamming": MPSSkipInfo(
+        TEST_OUTPUT_GRAD_MATCH, dtypes=[torch.float32]
+    ),
+    "signal.windows.hann": MPSSkipInfo(TEST_OUTPUT_GRAD_MATCH, dtypes=[torch.float32]),
+    "signal.windows.kaiser": MPSSkipInfo(
+        TEST_OUTPUT_GRAD_MATCH, dtypes=[torch.float32]
+    ),
+    "signal.windows.nuttall": MPSSkipInfo(
+        TEST_OUTPUT_GRAD_MATCH, dtypes=[torch.float32]
+    ),
+    "eye": MPSSkipInfo(TEST_OUTPUT_GRAD_MATCH, dtypes=[torch.float16, torch.float32]),
+    # trunc_tensor not working properly for float16
+    "divtrunc_rounding": MPSSkipInfo(TEST_OUTPUT_GRAD_MATCH, dtypes=[torch.float16]),
+    "fmod": MPSSkipInfo(TEST_OUTPUT_GRAD_MATCH, dtypes=[torch.float16]),
+    # round not working properly for float16
+    "round": MPSSkipInfo(TEST_OUTPUT_GRAD_MATCH, dtypes=[torch.float16]),
+    # atomic operation in backward pass
+    "_unsafe_masked_index": MPSSkipInfo(TEST_OUTPUT_GRAD_MATCH, dtypes=[torch.float16]),
+    "_unsafe_masked_index_put_accumulate": MPSSkipInfo(
+        TEST_OUTPUT_GRAD_MATCH, dtypes=[torch.float16]
+    ),
+    # Same issue as `argsort` and `sort` with duplicate elements (undefined behaviour).
+    # Forward pass is passing since `msort` doesn't return the indices, just the values, which match the CPU.
+    # On the backward pass for `sort` both are used (values and indices), thus resulting in a issmatch between CPU and MPS.
+    # Running `msort` with stable `sort` passes.
+    "msort": MPSSkipInfo(TEST_OUTPUT_GRAD_MATCH, dtypes=[torch.float16]),
+    "nn.functional.pairwise_distance": MPSSkipInfo(
+        TEST_OUTPUT_GRAD_MATCH, dtypes=[torch.float16]
+    ),
+    "nn.functional.conv1d": MPSSkipInfo(TEST_OUTPUT_GRAD_MATCH, dtypes=[torch.float16]),
+    "nn.functional.conv2d": MPSSkipInfo(TEST_OUTPUT_GRAD_MATCH, dtypes=[torch.float16]),
+    "nn.functional.conv3d": MPSSkipInfo(
+        TEST_OUTPUT_GRAD_MATCH, dtypes=[torch.float16, torch.float32]
+    ),
+}
+
+
 COMPLEX_DTYPES = [torch.complex32, torch.complex64]
 """Ops which do not have support for complex dtypes and are expected to fail"""
 COMPLEX_XFAILLIST = {
@@ -1139,6 +1287,7 @@ def append_skips(skip_list: Dict) -> None:
 
 
 append_skips(UNIMPLEMENTED_XFAILIST)
+append_skips(XFAILLIST_GRAD)
 append_skips(COMPLEX_XFAILLIST)
 append_skips(OTHER_XFAILLIST)
 append_skips(MPS_DOWNSTREAM_XFAILLIST)
