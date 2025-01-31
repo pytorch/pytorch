@@ -98,8 +98,8 @@ static inline void slow_conv_transpose3d_shape_check(
   if (weight.defined()) {
     /* TODO: TORCH_CHECK just have 2 args: condition and message */
     TORCH_CHECK(
-        weight.dim() == 5,
-        "5D (n_output_plane x n_input_plane x kernel_depth",
+        weight.numel() != 0 && weight.dim() == 5,
+        "non-empty 5D (n_output_plane x n_input_plane x kernel_depth",
         " x kernel_height x kernel_width) tensor ",
         "expected for weight, but got: ",
         weight.sizes());
@@ -668,8 +668,7 @@ void slow_conv_transpose3d_acc_grad_parameters_cpu(
       output_padding_height,
       1);
 
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  int64_t n_output_plane;
+  int64_t n_output_plane = 0;
   if (grad_weight.defined()) {
     n_output_plane = grad_weight.size(1);
   } else if (grad_bias.defined()) {

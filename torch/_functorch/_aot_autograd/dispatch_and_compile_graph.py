@@ -297,17 +297,6 @@ def aot_dispatch_autograd_graph(
     return fx_g, saved_updated_joint_inputs, maybe_subclass_meta
 
 
-# aot_dispatch_autograd_graph()` and `aot_dispatch_base_graph()` have the same pattern:
-# a series of steps where a function with its arguments is repeatedly wrapped,
-# resulting in a sequence of functions with the same signature, each wrapping
-# the previous one.
-
-
-class WrapState(NamedTuple):
-    fn: Callable[..., Any]
-    args: Sequence[Tensor]
-
-
 def _aot_dispatch_function_wrapper(
     fn: Callable[..., Any],
     args: list[Tensor],
@@ -316,7 +305,7 @@ def _aot_dispatch_function_wrapper(
     aot_config: AOTConfig,
     functionalized_inputs: Optional[Sequence[Any]] = None,
     **kwargs: Any,
-) -> tuple[WrapState, Optional[SubclassTracingInfo]]:
+) -> tuple["FuncArgs", Optional[SubclassTracingInfo]]:
     """Wrap a function with a list of tensor arguments"""
     subclass_tracing_info: SubclassTracingInfo | None = None
 
@@ -326,7 +315,7 @@ def _aot_dispatch_function_wrapper(
         args: list[Tensor],
         **kwargs: Any,
     ) -> tuple[Callable[..., Any], list[Tensor]]:
-        # TODO(rec): this is our one side-effect!
+        # TODO(rec): make this purely functional
         nonlocal subclass_tracing_info
         subclass_tracing_info = aot_dispatch_subclass(fn, args, **kwargs)
         return subclass_tracing_info[:2]
@@ -342,7 +331,7 @@ def _aot_dispatch_function_wrapper(
         inputs = functionalized_inputs or args
         return create_functionalized_fn(fn, inputs, **kwargs)
 
-    steps = WrapSteps(
+    steps = WrapperSteps(
         *wrappers,
         _create_functionalized_fn,
         _aot_dispatch_subclass,
@@ -352,46 +341,53 @@ def _aot_dispatch_function_wrapper(
     # fn_input_mutations_to_outputs and create_functionalized_fn
     # into CompilerWrappers.
 
-    state = steps.run(
-        WrapState(fn, args),
+    func_args = steps.run(
+        FuncArgs(fn, args),
         aot_config=aot_config,
         fw_only=fn,
         keep_data_input_mutations=aot_config.keep_inference_input_mutations,
         **kwargs,
     )
-    return state, subclass_tracing_info
+    return func_args, subclass_tracing_info
 
 
-class WrapStep:
+class FuncArgs(NamedTuple):
+    fn: Callable[..., Any]
+    args: Sequence[Tensor]
+
+
+class Wrapper:
     def __init__(self, step_fn: Callable[..., Any], kwargs: dict[str, Any]) -> None:
         self.step_fn = step_fn
         self.kwargs = kwargs
         self._params = frozenset(inspect.signature(self.step_fn).parameters)
 
-    def __call__(self, state: WrapState, **kwargs: Any) -> WrapState:
-        # Add any parameters that step_fn uses.
-        kwargs["args"] = state.args
+    def __call__(self, func_args: FuncArgs, **kwargs: Any) -> FuncArgs:
+        """Wrap a FuncArgs to produce new FuncArgs"""
+        kwargs["args"] = func_args.args
         kwargs = {k: v for k, v in kwargs.items() if k in self._params}
 
-        r = self.step_fn(state.fn, **kwargs, **self.kwargs)
+        r = self.step_fn(func_args.fn, **kwargs, **self.kwargs)
         if isinstance(r, tuple):
             assert len(r) == 2, str(r)
             fn, args = r
         else:
-            fn, args = r, state.args
+            fn, args = r, func_args.args
 
         assert callable(fn)
         assert isinstance(args, Sequence)
 
-        return WrapState(fn, args)
+        return FuncArgs(fn, args)
 
 
-class WrapSteps:
+class WrapperSteps:
+    """A sequence of wrappers that operate recursively on a FuncArgs"""
+
     def __init__(self, *step_fn: Callable[..., Any], **kwargs: Any) -> None:
-        self.steps = [WrapStep(s, kwargs) for s in step_fn]
+        self.steps = [Wrapper(s, kwargs) for s in step_fn]
 
-    def run_all(self, state: WrapState, **kwargs: Any) -> list[WrapState]:
-        return [s := state] + [s := step(s, **kwargs) for step in self.steps]
+    def run_all(self, func_args: FuncArgs, **kwargs: Any) -> list[FuncArgs]:
+        return [f := func_args] + [f := step(f, **kwargs) for step in self.steps]
 
-    def run(self, state: WrapState, **kwargs: Any) -> WrapState:
-        return self.run_all(state, **kwargs)[-1]
+    def run(self, func_args: FuncArgs, **kwargs: Any) -> FuncArgs:
+        return self.run_all(func_args, **kwargs)[-1]
