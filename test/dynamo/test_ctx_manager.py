@@ -1744,10 +1744,11 @@ class GraphModule(torch.nn.Module):
 
 class ContextlibContextManagerTests(torch._dynamo.test_case.TestCase):
     def setUp(self):
+        self._prev = torch._dynamo.config.enable_trace_contextlib
         torch._dynamo.config.enable_trace_contextlib = True
 
     def tearDown(self):
-        torch._dynamo.config.enable_trace_contextlib = False
+        torch._dynamo.config.enable_trace_contextlib = self._prev
 
     def test_ctx_basic0(self):
         @contextlib.contextmanager
