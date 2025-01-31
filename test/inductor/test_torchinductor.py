@@ -12364,7 +12364,7 @@ def copy_tests(
                 new_test = unittest.expectedFailure(new_test)
 
             tf = test_failures and test_failures.get(name)
-            if tf is not None and suffix in tf.suffixes:
+            if tf and suffix in tf.suffixes:
                 skip_func = (
                     unittest.skip("Skipped!")
                     if tf.is_skip

@@ -2704,12 +2704,12 @@ std::shared_ptr<NCCLComm> ProcessGroupNCCL::initNCCLComm(
                 << timerDeltaMs << " ms";
     }
 
-#ifdef NCCL_HAS_COMM_NONBLOCKING
+#ifdef NCCL_HAS_CONFIG
     ncclComm =
         NCCLComm::create(numRanks, rank, ncclID, deviceIndex, options_->config);
 #else
     ncclComm = NCCLComm::create(numRanks, rank, ncclID, deviceIndex);
-#endif // NCCL_HAS_COMM_NONBLOCKING
+#endif // NCCL_HAS_CONFIG
   }
 
   // Creates the NCCL streams
@@ -5256,23 +5256,37 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::_allgather_base(
 // >>> pool = torch.cuda.MemPool(backend.mem_allocator)
 
 // Allocate function
-void* _ncclMemAlloc(size_t size, int device, void* stream) {
+static void* _ncclMemAlloc(size_t size, int device, void* stream) {
+#ifndef NCCL_HAS_MEM_ALLOC
+  TORCH_CHECK(
+      false, "NCCL mem allocator is not supported in this NCCL version");
+#else
   LOG(INFO) << "NCCL mem allocator: allocating " << size << " bytes";
   at::cuda::OptionalCUDAGuard gpuGuard(device);
   void* ptr = nullptr;
   TORCH_CHECK(ncclMemAlloc(&ptr, size) == ncclSuccess, "ncclMemAlloc failed");
   return ptr;
+#endif // NCCL_HAS_MEM_ALLOC
 }
 
 // Free function
-void _ncclMemFree(void* ptr, size_t size, int device, void* stream) {
+static void _ncclMemFree(void* ptr, size_t size, int device, void* stream) {
+#ifndef NCCL_HAS_MEM_ALLOC
+  TORCH_CHECK(
+      false, "NCCL mem allocator is not supported in this NCCL version");
+#else
   LOG(INFO) << "NCCL mem allocator: freeing " << size << " bytes";
   at::cuda::OptionalCUDAGuard gpuGuard(device);
   TORCH_CHECK(ncclMemFree(ptr) == ncclSuccess, "ncclMemFree failed");
+#endif // NCCL_HAS_MEM_ALLOC
 }
 
 // Create a `CUDAPluggableAllocator` that uses the above functions.
 std::shared_ptr<c10::Allocator> ProcessGroupNCCL::getMemAllocator() {
+#ifndef NCCL_HAS_MEM_ALLOC
+  TORCH_CHECK(
+      false, "NCCL mem allocator is not supported in this NCCL version");
+#endif // NCCL_HAS_MEM_ALLOC
   C10_LOG_API_USAGE_ONCE("ProcessGroupNCCL.getMemAllocator");
   static std::shared_ptr<c10::cuda::CUDACachingAllocator::CUDAAllocator>
       ncclMemAllocator =
