@@ -9,7 +9,7 @@ import operator
 import os
 from collections import defaultdict
 from dataclasses import dataclass, replace
-from typing import Callable, Optional, Tuple, TYPE_CHECKING, Union
+from typing import Callable, Optional, TYPE_CHECKING, Union
 
 import torch
 import torch._inductor.inductor_prims
@@ -1087,7 +1087,7 @@ def solve_min_cut(
         Finds the first unfusible node in the chain of nodes starting from
         `start_nodes` and returns its position.
         """
-        sorted_nodes: list[Tuple[int, fx.Node, bool, int]] = []
+        sorted_nodes: list[tuple[int, fx.Node, bool, int]] = []
         for n in start_nodes:
             heapq.heappush(
                 sorted_nodes, (node_info.get_fw_order(n), n, True, get_tiebreak_count())
@@ -1101,7 +1101,7 @@ def solve_min_cut(
                 if node_info.is_required_fw(user):
                     if node_info.get_fw_order(user) > max_range:
                         continue
-                    val: Tuple[int, fx.Node, bool, int] = (
+                    val: tuple[int, fx.Node, bool, int] = (
                         node_info.get_fw_order(user),
                         user,
                         is_fusible(node, user),
@@ -1160,7 +1160,7 @@ def solve_min_cut(
         for start_node in joint_graph.nodes:
             if not node_info.is_required_fw(start_node):
                 continue
-            fusible: list[Tuple[int, fx.Node, int]] = [
+            fusible: list[tuple[int, fx.Node, int]] = [
                 (node_info.get_fw_order(start_node), start_node, get_tiebreak_count())
             ]
             start_order = node_info.get_fw_order(start_node)
@@ -1204,7 +1204,7 @@ def solve_min_cut(
         raise
 
     reachable, non_reachable = partition
-    cutset: OrderedSet[Tuple[str, str]] = OrderedSet()
+    cutset: OrderedSet[tuple[str, str]] = OrderedSet()
     for u, nbrs in ((n, nx_graph[n]) for n in reachable):
         cutset.update((u, v) for v in nbrs if v in non_reachable)
 
