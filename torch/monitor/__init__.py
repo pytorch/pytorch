@@ -1,12 +1,12 @@
 from typing import TYPE_CHECKING
 
 from torch._C._monitor import *  # noqa: F403
-from torch._C._monitor import _WaitCounter  # type: ignore[attr-defined]
+from torch._C._monitor import _WaitCounter
 
 
 if TYPE_CHECKING:
+    from torch._C._monitor import _WaitCounterTracker
     from torch.utils.tensorboard import SummaryWriter
-
 
 STAT_EVENT = "torch.monitor.Stat"
 
