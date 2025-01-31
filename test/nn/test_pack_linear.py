@@ -29,14 +29,16 @@ class TestPackLinear(TestCase):
                 return self.linear(x)
 
         model = Foo()
-        packed_model = torch.nn.utils.pack_linear.pack_linear_weights(model)
         inputs = (
             torch.randint(0, 128, (batch_size, M, N), dtype=torch.float32)
             if batch_size
             else torch.randint(0, 128, (M, N), dtype=torch.float32)
         )
 
-        self.assertEqual(model(inputs), packed_model(inputs))
+        expected = model(inputs)
+        with torch.no_grad():
+            actual = model(inputs)
+        self.assertEqual(expected, actual)
 
     @parameterized.expand(
         [
@@ -60,14 +62,16 @@ class TestPackLinear(TestCase):
                 return self.linear2(x)
 
         model = Foo()
-        packed_model = torch.nn.utils.pack_linear.pack_linear_weights(model)
         inputs = (
             torch.randint(0, 128, (batch_size, channels, M, N), dtype=torch.float32)
             if batch_size
             else torch.randint(0, 128, (channels, M, N), dtype=torch.float32)
         )
 
-        self.assertEqual(model(inputs), packed_model(inputs))
+        expected = model(inputs)
+        with torch.no_grad():
+            actual = model(inputs)
+        self.assertEqual(expected, actual)
 
     @parameterized.expand(
         [
@@ -101,14 +105,16 @@ class TestPackLinear(TestCase):
                 return self.linear2(x)
 
         model = Foo()
-        packed_model = torch.nn.utils.pack_linear.pack_linear_weights(model)
         inputs = (
             torch.randint(0, 128, (batch_size, channels, M, N), dtype=torch.float32)
             if batch_size
             else torch.randint(0, 128, (channels, M, N), dtype=torch.float32)
         )
 
-        self.assertEqual(model(inputs), packed_model(inputs))
+        expected = model(inputs)
+        with torch.no_grad():
+            actual = model(inputs)
+        self.assertEqual(expected, actual)
 
     @parameterized.expand(
         [
@@ -150,8 +156,11 @@ class TestPackLinear(TestCase):
         )
 
         with torch.autocast(device_type="cpu", dtype=torch.bfloat16):
-            packed_model = torch.nn.utils.pack_linear.pack_linear_weights(model)
-            self.assertEqual(model(inputs), packed_model(inputs))
+            expected = model(inputs)
+            with torch.no_grad():
+                actual = model(inputs)
+
+        self.assertEqual(expected, actual)
 
     @parameterized.expand(
         [
@@ -183,10 +192,12 @@ class TestPackLinear(TestCase):
                 return self.linear2(x)
 
         model = torch.compile(Foo())
-        packed_model = torch.nn.utils.pack_linear.pack_linear_weights(model)
         inputs = torch.randint(0, 128, (channels, M, N), dtype=torch.float32)
 
-        self.assertEqual(model(inputs), packed_model(inputs))
+        expected = model(inputs)
+        with torch.no_grad():
+            actual = model(inputs)
+        self.assertEqual(expected, actual)
 
     @parameterized.expand(
         [
@@ -222,14 +233,16 @@ class TestPackLinear(TestCase):
         model = torch.ao.quantization.quantize_dynamic(
             Foo(), {torch.nn.Linear}, dtype=torch.qint8
         )
-        packed_model = torch.nn.utils.pack_linear.pack_linear_weights(model)
         inputs = (
             torch.randint(0, 128, (batch_size, channels, M, N), dtype=torch.float32)
             if batch_size
             else torch.randint(0, 128, (channels, M, N), dtype=torch.float32)
         )
 
-        self.assertEqual(model(inputs), packed_model(inputs))
+        expected = model(inputs)
+        with torch.no_grad():
+            actual = model(inputs)
+        self.assertEqual(expected, actual)
 
 
 if __name__ == "__main__":

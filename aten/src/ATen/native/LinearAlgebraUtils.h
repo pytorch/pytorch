@@ -7,6 +7,7 @@
 #include <ATen/core/Tensor.h>
 #include <ATen/ExpandUtils.h>
 #include <ATen/TensorUtils.h>
+#include <ATen/native/mkldnn/Utils.h>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/TransposeType.h>
 #include <limits>
@@ -161,6 +162,41 @@ inline TransposeType to_transpose_type(const bool contig, const bool conj) {
     if (contig) { return TransposeType::NoTranspose; }
     else {        return TransposeType::Transpose; }
   }
+}
+
+
+static inline int64_t get_mkldnn_matmul_min_dim() {
+  static auto value = [&] {
+    const int64_t default_min_dim = [&] {
+      // Minimum dimension requirement for MKLDNN; derived based on experiments.
+      //it's enabled on all Neoverse cpus.
+      return is_arm_neoverse() ? 8 : 0;
+    }();
+    const char* ptr = std::getenv("TORCH_MKLDNN_MATMUL_MIN_DIM");
+    return ptr != nullptr ? std::atoi(ptr) : default_min_dim;
+  }();
+  return value;
+}
+
+
+static inline int64_t get_mkldnn_matmul_min_size() {
+  static auto value = [&] {
+    const int64_t default_min_size = [&] {
+      // Minimum size requirement for MKLDNN; derived based on experiments.
+      // it's enabled on all Neoverse cpus.
+      return is_arm_neoverse() ? 8 * 1024 : 0;
+    }();
+    const char* ptr = std::getenv("TORCH_MKLDNN_MATMUL_MIN_SIZE");
+    return ptr != nullptr ? std::atoi(ptr) : default_min_size;
+  }();
+  return value;
+}
+
+
+static inline bool apply_mkldnn_matmul_heur(int64_t m, int64_t k, int64_t n) {
+  const int64_t min_dim = get_mkldnn_matmul_min_dim();
+  const int64_t min_size = get_mkldnn_matmul_min_size();
+  return at::globalContext().userEnabledMkldnn() && m > min_dim && k > min_dim && n > min_dim && m * k * n > min_size;
 }
 
 
