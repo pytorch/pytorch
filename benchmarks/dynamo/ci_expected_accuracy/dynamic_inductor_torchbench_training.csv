@@ -110,11 +110,11 @@ hf_GPT2_large,pass_due_to_skip,0
 
 
 
-hf_Reformer,fail_to_run,23
+hf_Reformer,fail_to_run,19
 
 
 
-hf_Roberta_base,fail_accuracy,0
+hf_Roberta_base,fail_accuracy,6
 
 
 
