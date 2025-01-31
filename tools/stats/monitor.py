@@ -39,12 +39,12 @@ import psutil  # type: ignore[import]
 
 from tools.stats.utilization_stats_lib import (
     getDataModelVersion,
+    getTsNow,
     GpuUsage,
     RecordData,
     UtilizationMetadata,
     UtilizationRecord,
     UtilizationStats,
-    getTsNow,
 )
 
 
@@ -190,7 +190,7 @@ class UsageLogger:
             job_name=_job_name,
             workflow_id=_workflow_run_id,
             workflow_name=_workflow_name,
-            start_at= getTsNow(),
+            start_at=getTsNow(),
         )
         self._data_collect_interval = data_collect_interval
         self._has_pynvml = pynvml_enabled

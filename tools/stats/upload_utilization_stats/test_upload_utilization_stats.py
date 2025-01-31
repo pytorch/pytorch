@@ -96,12 +96,12 @@ class TestSegmentGenerator(unittest.TestCase):
         test_gap_dt1 = TEST_DT_PLUS_30S + timedelta(seconds=80)
         test_gap_dt2 = TEST_DT_PLUS_30S + timedelta(seconds=85)
         record_gap_1 = UtilizationRecord(
-            timestamp=test_gap_dt1.timestamp(),
+            timestamp=int(test_gap_dt1.timestamp()),
             cmd_names=[PYTEST1_NAME],
             level="PYTHON_CMD",
         )
         record_gap_2 = UtilizationRecord(
-            timestamp=test_gap_dt2.timestamp(),
+            timestamp=int(test_gap_dt2.timestamp()),
             cmd_names=[PYTEST1_NAME],
             level="PYTHON_CMD",
         )
