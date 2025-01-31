@@ -1707,7 +1707,7 @@ class AlgorithmSelectorCache(PersistentCache):
             ):
                 return no_op
 
-            num_workers = get_num_workers()
+            num_workers = min(get_num_workers(), len(choices))
 
             if num_workers <= 0:
                 return no_op
