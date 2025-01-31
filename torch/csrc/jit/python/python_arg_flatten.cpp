@@ -117,7 +117,11 @@ py::object cast_sequence(std::vector<py::object> objs) {
   for (const auto i : c10::irange(num_objs)) {
     sequence[i] = std::move(objs[i]);
   }
+#if __cplusplus >= 202002L
+  return sequence;
+#else
   return std::move(sequence);
+#endif
 }
 
 py::object cast_dict(std::vector<py::object> objs) {
@@ -127,7 +131,11 @@ py::object cast_dict(std::vector<py::object> objs) {
     py::tuple obj = py::reinterpret_borrow<py::tuple>(objs[i]);
     sequence[obj[0]] = obj[1];
   }
+#if __cplusplus >= 202002L
+  return sequence;
+#else
   return std::move(sequence);
+#endif
 }
 
 py::object unflatten_rec(
