@@ -283,6 +283,7 @@ class ObservedAttributeError(ObservedException):
 
 
 class ObservedRuntimeError(ObservedException):
+    # A RuntimeError exception to be raised from inside Dynamo tracing. This can happen on generator.throw(..) method
     pass
 
 
