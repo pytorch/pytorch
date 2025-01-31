@@ -366,7 +366,10 @@ def code_hash(code: Union[str, bytes], extra: str = "") -> str:
 
 
 def get_path(
-    basename: str, extension: str, specified_dir: str = ""
+    basename: str,
+    extension: str,
+    specified_dir: str = "",
+    prefix: str = "",
 ) -> tuple[str, str, str]:
     if specified_dir:
         if os.path.isabs(specified_dir):
@@ -375,7 +378,7 @@ def get_path(
             subdir = os.path.join(cache_dir(), specified_dir)
     else:
         subdir = os.path.join(cache_dir(), basename[1:3])
-    path = os.path.join(subdir, f"{basename}.{extension}")
+    path = os.path.join(subdir, f"{prefix}{basename}.{extension}")
     return basename, subdir, path
 
 
@@ -395,12 +398,13 @@ def write(
     extra: str = "",
     hash_type: str = "code",
     specified_dir: str = "",
+    prefix: str = "",
 ) -> tuple[str, str]:
     # use striped content to compute hash so we don't end up with different
     # hashes just because the content begins/ends with different number of
     # spaces.
     key: str = get_hash(content.strip(), extra, hash_type)
-    basename, _subdir, path = get_path(key, extension, specified_dir)
+    basename, _subdir, path = get_path(key, extension, specified_dir, prefix)
     if not os.path.exists(path):
         write_atomic(path, content, make_dirs=True)
     return basename, path
@@ -1444,6 +1448,7 @@ class AotCodeCompiler:
             "cpp",
             extra=cpp_command,
             specified_dir=specified_output_path,
+            prefix="model_",
         )
 
         if config.aot_inductor.package:
@@ -1510,6 +1515,7 @@ class AotCodeCompiler:
                 consts_asm,
                 "S",
                 specified_dir=str(specified_sub_dir),
+                prefix="const_",
             )
             consts_s = Path(consts_s)
             object_build_options = CppTorchDeviceOptions(
@@ -1671,6 +1677,7 @@ class AotCodeCompiler:
                 generated_files.append(compile_flags)
                 object_builder.save_compile_cmd_to_cmake(cmake_path)
                 object_builder.save_src_to_cmake(cmake_path, cpp_path)
+                object_builder.save_src_to_cmake(cmake_path, "interface.cpp")
                 generated_files.append(cmake_path)
             else:
                 if fbcode_aot_cpu_re:

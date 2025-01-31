@@ -686,6 +686,9 @@ class PythonWrapperCodegen(CodeGen):
         self.codegened_graph_stack = []
         self.computed_sizes_stack = []
 
+        # Additional files that are dependent to the wrapper (ex. cubin files)
+        self.additional_files = []
+
         self.write_header()
         self.write_prefix()
         self.write_kernel_autotune_defs_header()
@@ -723,9 +726,6 @@ class PythonWrapperCodegen(CodeGen):
             debug_printer_level=config.aot_inductor.debug_intermediate_value_printer,
             use_array_ref=config.aot_inductor.allow_stack_allocation,
         )
-
-        # Additional files that are dependent to the wrapper (ex. cubin files)
-        self.additional_files = []
 
     @staticmethod
     def create(

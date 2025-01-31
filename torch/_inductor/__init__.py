@@ -173,19 +173,12 @@ def _aoti_compile_and_package_inner(
     assert isinstance(aoti_files, list)
 
     if package_path is None:
-        path = [
-            os.path.splitext(file)[0]
-            for file in aoti_files
-            if os.path.splitext(file)[1] == ".so"
-        ]
-        if len(path) == 0:
-            path = [
-                os.path.splitext(file)[0]
-                for file in aoti_files
-                if os.path.splitext(file)[1] == ".cpp"
-            ]
-        package_path = path[0] + ".pt2"
-
+        for file in aoti_files:
+            base_name, ext_name = os.path.splitext(file)
+            if ext_name == ".so" or (ext_name == ".cpp" and "model_" in base_name):
+                package_path = base_name + ".pt2"
+                break
+        assert package_path is not None
     res = package_aoti(package_path, aoti_files)
     assert res == package_path
 

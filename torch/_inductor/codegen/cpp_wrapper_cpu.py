@@ -153,10 +153,15 @@ class CppWrapperCpu(PythonWrapperCodegen):
         self.header.splice(self.get_device_include())
 
         if V.graph.aot_mode:
-            with open(
-                os.path.join(os.path.dirname(__file__), "aoti_runtime", "interface.cpp")
-            ) as f:
-                self.header.splice(f.read())
+            cpp_file = os.path.join(
+                os.path.dirname(__file__), "aoti_runtime", "interface.cpp"
+            )
+            if config.aot_inductor.package_cpp_only:
+                # Emit interface.cpp into a separate file instead of embedding into the main file
+                self.additional_files.append(str(cpp_file))
+            else:
+                with open(cpp_file) as f:
+                    self.header.splice(f.read())
 
         extend_aoti_c_shim_include = (
             f"torch/csrc/inductor/aoti_torch/generated/extend/c_shim_{self.device}.h"
