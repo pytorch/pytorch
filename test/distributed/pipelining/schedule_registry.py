@@ -34,7 +34,6 @@ class ScheduleVShaped(PipelineScheduleMulti):
         self,
         stages: list[_PipelineStageBase],
         n_microbatches: int,
-        stage_index_to_group_rank: dict[int, int],
         loss_fn: Optional[Callable] = None,
         scale_grads: bool = True,
     ):
@@ -42,7 +41,8 @@ class ScheduleVShaped(PipelineScheduleMulti):
             stages=stages,
             n_microbatches=n_microbatches,
             loss_fn=loss_fn,
-            stage_index_to_group_rank=stage_index_to_group_rank,
+            # TODO: placeholder remove later
+            stage_index_to_group_rank={},
             scale_grads=scale_grads,
         )
 
@@ -84,7 +84,6 @@ class ScheduleUnbalanced(PipelineScheduleMulti):
         self,
         stages: list[_PipelineStageBase],
         n_microbatches: int,
-        stage_index_to_group_rank: dict[int, int],
         loss_fn: Optional[Callable] = None,
         scale_grads: bool = True,
     ):
@@ -92,7 +91,8 @@ class ScheduleUnbalanced(PipelineScheduleMulti):
             stages=stages,
             n_microbatches=n_microbatches,
             loss_fn=loss_fn,
-            stage_index_to_group_rank=stage_index_to_group_rank,
+            # TODO: placeholder remove later
+            stage_index_to_group_rank={},
             scale_grads=scale_grads,
         )
 
