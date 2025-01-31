@@ -175,6 +175,18 @@ class TestTorchDeviceType(TestCase):
             scalar = bytes_to_scalar(bytes_list, dtype, device)
             self.assertEqual(scalar.storage().untyped().tolist(), bytes_list)
 
+    # For testing in64 support in upsample_nearest3d
+    @onlyCUDA
+    @largeTensorTest('56GB', device='cuda')
+    @dtypes(torch.bfloat16)
+    @unittest.skipIf(IS_JETSON, "Large tensor tests are too large for Jetson.")
+    def test_int64_upsample3d(self, device, dtype):
+        x = torch.ones((1, 256, 16, 720, 1280), dtype=dtype, device=device)
+        try:
+            torch.nn.functional.interpolate(x, scale_factor=2, mode='nearest')
+        except Exception as e:
+            self.fail(f"Unexpected exception raised: {e}")
+
     @dtypes(torch.int8, torch.uint8, torch.int16, torch.int32, torch.int64,
             torch.bool, torch.float32, torch.complex64, torch.float64,
             torch.complex128, torch.uint16, torch.uint32, torch.uint64)
