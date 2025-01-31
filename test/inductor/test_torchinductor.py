@@ -57,6 +57,7 @@ from torch._inductor.utils import (
     run_and_get_kernels,
     run_and_get_triton_code,
     run_fw_bw_and_get_code,
+    triton_version_uses_attrs_dict,
 )
 from torch._inductor.virtualized import V
 from torch._prims_common import is_integer_dtype
@@ -12369,7 +12370,7 @@ def copy_tests(
                 new_test = unittest.expectedFailure(new_test)
 
             tf = test_failures and test_failures.get(name)
-            if tf is not None and suffix in tf.suffixes:
+            if tf and suffix in tf.suffixes:
                 skip_func = (
                     unittest.skip("Skipped!")
                     if tf.is_skip
@@ -13600,6 +13601,23 @@ if HAS_GPU and not TEST_WITH_ASAN:
                 FileCheck().check_regex(
                     r"reinterpret_tensor\(.*, \(1024, 50257\).*# reuse"
                 ).run(code[1])
+
+        @unittest.skipIf(
+            not triton_version_uses_attrs_dict(),
+            "Test only applies to newer triton versions",
+        )
+        def test_triton_attrs_dict_constexpr_signature(self):
+            def fn(x):
+                return x.sin()
+
+            fn_c = torch.compile(fn)
+            x = torch.rand(16, device="cuda")
+
+            _, code = run_and_get_code(fn_c, x)
+
+            FileCheck().check("triton_meta").check("'signature':").check(
+                "'XBLOCK': 'constexpr'"
+            ).run(code[0])
 
     class RNNTest(TestCase):
         device_type = GPU_TYPE

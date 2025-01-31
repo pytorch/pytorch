@@ -130,7 +130,9 @@ class BaseUserFunctionVariable(VariableTracker):
     ) -> "VariableTracker":
         return tx.inline_user_function_return(self, [*self.self_args(), *args], kwargs)
 
-    def call_hasattr(self, tx: "InstructionTranslator", name: str) -> VariableTracker:
+    def call_obj_hasattr(
+        self, tx: "InstructionTranslator", name: str
+    ) -> VariableTracker:
         result = False
 
         try:
@@ -299,7 +301,9 @@ class UserFunctionVariable(BaseUserFunctionVariable):
             return variables.LazyVariableTracker.create(subobj, source)
         return VariableTracker.build(tx, subobj)
 
-    def call_hasattr(self, tx: "InstructionTranslator", name: str) -> VariableTracker:
+    def call_obj_hasattr(
+        self, tx: "InstructionTranslator", name: str
+    ) -> VariableTracker:
         result = hasattr(self.fn, name)
         return variables.ConstantVariable.create(result)
 
@@ -1221,7 +1225,9 @@ class FunctoolsPartialVariable(VariableTracker):
         merged_kwargs = {**self.keywords, **kwargs}
         return self.func.call_function(tx, merged_args, merged_kwargs)
 
-    def call_hasattr(self, tx: "InstructionTranslator", name: str) -> VariableTracker:
+    def call_obj_hasattr(
+        self, tx: "InstructionTranslator", name: str
+    ) -> VariableTracker:
         # functools.partial uses slots, so attributes are constant
         return variables.ConstantVariable.create(
             hasattr(functools.partial(identity), name)
