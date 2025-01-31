@@ -1385,7 +1385,7 @@ def get_default_op_list() -> OpTypes:
     default_recomputable_ops += [method_to_operator(m) for m in magic_methods]
     recomputable_ops = OrderedSet(default_recomputable_ops)
 
-    random_ops = [aten.native_dropout, aten.rand_like, aten.randn_like]
+    random_ops = OrderedSet([aten.native_dropout, aten.rand_like, aten.randn_like])
     compute_intensive_ops = [
         aten.mm,
         aten.convolution,
@@ -1400,13 +1400,13 @@ def get_default_op_list() -> OpTypes:
         aten._scaled_mm,
     ]  # noqa: E501,B950
 
-    fusible_ops = recomputable_ops | OrderedSet(random_ops)
+    fusible_ops = recomputable_ops | random_ops
     return OpTypes(
-        OrderedSet(fusible_ops),
+        fusible_ops,
         OrderedSet(compute_intensive_ops),
-        OrderedSet(random_ops),
+        random_ops,
         OrderedSet(view_ops),
-        OrderedSet(recomputable_ops),
+        recomputable_ops,
     )
 
 
