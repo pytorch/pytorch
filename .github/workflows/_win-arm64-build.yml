@@ -1,5 +1,10 @@
 name: windows-arm64-build
 
+
+# DISABLED: Since it says id-token: write is not allowed
+# permissions:
+#   id-token: write
+
 on:
   workflow_call:
     inputs:
@@ -76,6 +81,7 @@ jobs:
       run:
         shell: bash
     steps:
+      # DISABLED: Since it requires id-token: write permission?
       # - name: Configure AWS credentials(PyTorch account)
       #   uses: aws-actions/configure-aws-credentials@v3
       #   with:
@@ -126,18 +132,6 @@ jobs:
         shell: cmd
         run: |
           "pytorch/.ci/pytorch/windows/arm64/bootstrap_libuv.bat"
-
-      # - name: Parse ref
-      #   id: parse-ref
-      #   shell: bash
-      #   run: python pytorch/.github/scripts/parse_ref.py
-      # - name: Get workflow job id
-      #   id: get-job-id
-      #   uses: pytorch/.github/actions/get-workflow-job-id
-      #   if: always()
-      #   with:
-      #     github-token: ${{ secrets.GITHUB_TOKEN }}
-
       - name: Build
         id: build
         shell: bash
@@ -148,9 +142,10 @@ jobs:
           BUILD_WHEEL: 1
           MAX_JOBS: 8
           PYTHON_VERSION: "3.12"
-          SCCACHE_BUCKET: "ossci-compiler-cache"
-          SCCACHE_S3_KEY_PREFIX: ${{ github.workflow }}
-          SCCACHE_REGION: us-east-1
+          # DISABLED: since sccache can't connect to the bucket
+          # SCCACHE_BUCKET: "ossci-compiler-cache"
+          # SCCACHE_S3_KEY_PREFIX: ${{ github.workflow }}
+          # SCCACHE_REGION: us-east-1
           VC_PRODUCT: "BuildTools"
           VC_VERSION: ""
           VC_YEAR: "${{ inputs.vc-year }}"
