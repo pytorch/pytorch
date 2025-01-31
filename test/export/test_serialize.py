@@ -3,7 +3,6 @@ PYTEST_DONT_REWRITE (prevents pytest from rewriting assertions, which interferes
 with test_sym_bool)
 """
 
-
 # Owner(s): ["oncall: export"]
 import copy
 import io
@@ -949,6 +948,14 @@ class TestDeserialize(TestCase):
                 return cond(x[0][0] > 4, t, f, [x, y])
 
         self.check_graph(M(), inputs)
+
+    def test_sym_float(self):
+        class M(torch.nn.Module):
+            def forward(self, x):
+                b = x.item()
+                return b * 0.1
+
+        self.check_graph(M(), (torch.tensor(1.0),))
 
     def test_arg_from(self):
         class M(torch.nn.Module):
