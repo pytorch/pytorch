@@ -66,15 +66,20 @@ at::Tensor InputMetadata::maybe_reduce(
   // careful oblivious logic as seen below
   if (is_nested_ || is_cpp_nested_tensor() || grad.is_nested() ||
       ::torch::autograd::is_cpp_nested_tensor(grad)) {
-    if (!is_same_shape(grad)) {
-      if (is_expandable_to_shape(grad)) {
-        return reduce_grad(grad);
-      } else {
-        fail();
+
+    if (!maybe_expandable_to(grad)) {
+      if (is_same_shape(grad)) {
+        return grad;
       }
-    } else {
-      return grad;
+      fail();
     }
+    at::_nested_assert_expandable_to_symint(
+      grad,
+      shape_as_dim_vector(),
+      incompatible_shape_error_message(i, grad).str()
+    );
+    // Should be a no-op if the shapes are actually the same
+    return reduce_grad(grad);
   }
 
   auto shape = shape_as_dim_vector();

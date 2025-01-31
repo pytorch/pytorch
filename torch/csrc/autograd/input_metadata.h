@@ -17,6 +17,7 @@
 #include <ATen/Functions.h>
 #else
 #include <ATen/ops/zeros.h>
+#include <ATen/ops/_nested_assert_expandable_to.h>
 #endif
 
 namespace torch::autograd {

@@ -168,6 +168,18 @@ def check_ragged_dim_same(
         )
 
 
+def get_nested_int_metadata(nested_int):
+    from torch.nested._internal.nested_int import NestedIntNode
+
+    assert isinstance(nested_int, torch.SymInt)
+
+    if isinstance(nested_int.node, NestedIntNode):
+        return nested_int.node.cache
+    else:
+        # During compile, we're dealing with symbolic nested int
+        return nested_int.node.hint.node.cache
+
+
 # returns True if the raggedness-relevant portions of the NT shape
 # match those of the specified size
 def raggedness_matches(nt, size):
@@ -177,6 +189,27 @@ def raggedness_matches(nt, size):
     return len(nt_ragged) == len(size_ragged) and (
         all(ns == s or s == -1 for ns, s in zip(nt_ragged, size_ragged))
     )
+
+
+def assert_raggedness_matches(nt, size, msg):
+    from torch.fx.experimental.symbolic_shapes import is_nested_int
+
+    end = nt._ragged_idx + 1
+    nt_ragged = nt._size[:end]
+    size_ragged = size[:end]
+    if not len(nt_ragged) == len(size_ragged):
+        raise RuntimeError(msg)
+    for ns, s in zip(nt_ragged, size_ragged):
+        if s == -1:
+            continue
+        if ns != s:
+            if not (is_nested_int(ns) and is_nested_int(s)):
+                raise RuntimeError(msg)
+            torch._nested_assert_metadata_equal(
+                get_nested_int_metadata(ns),
+                get_nested_int_metadata(s),
+                msg
+            )
 
 
 def squeeze_leading_ones(t):
@@ -299,11 +332,13 @@ def jagged_binary_pointwise(func, *args, **kwargs):
     if isinstance(a, NestedTensor) and isinstance(b, NestedTensor):
         # ex: (B, j0, D) + (B, j0, D)
         # ex: (B, j0, D) + (B, j0, 1)
-        if raggedness_matches(a, b._size):
-            return NestedTensor(
-                func(a._values, b._values, *args[2:], **kwargs), **extract_kwargs(a)
-            )
-        raise RuntimeError(mismatch_error_msg.format(func.__name__, a._size, b._size))
+        assert_raggedness_matches(
+            a, b._size,
+            mismatch_error_msg.format(func.__name__, a._size, b._size)
+        )
+        return NestedTensor(
+            func(a._values, b._values, *args[2:], **kwargs), **extract_kwargs(a)
+        )
     # either a is NT or b is NT at this point
     a_is_nt = isinstance(a, NestedTensor)
     extracted_kwargs = extract_kwargs(a) if a_is_nt else extract_kwargs(b)
@@ -1233,7 +1268,8 @@ def matmul_default(func, *args, **kwargs):
     elif inp.is_nested and other.is_nested:
         # Support ragged batch dim:
         # (B, j1, D, E) x (B, j1, E, F) => (B, j1, D, F), etc.
-        if inp.dim() > 3 and other.dim() > 3 and raggedness_matches(inp, other._size):
+        if inp.dim() > 3 and other.dim() > 3:
+            assert_raggedness_matches(inp, other._size)
             return NestedTensor(func(inp._values, other._values), **extract_kwargs(inp))
         # Support reducing over ragged with dense output:
         # (B, D, j1) x (B, j1, E) => (B, D, E)
@@ -1281,8 +1317,10 @@ def expand_default(func, *args, **kwargs):
     size = new_kwargs["size"]
 
     assert ("implicit" not in new_kwargs) or (not new_kwargs.pop("implicit"))
-    if not raggedness_matches(inp, size):
-        raise RuntimeError(f"expand(): cannot expand shape {inp._size} -> {size}")
+    assert_raggedness_matches(
+        inp, size,
+        f"expand(): cannot expand shape {inp._size} -> {size}"
+    )
 
     expand_arg = [-1 if d == inp._ragged_idx else size[d] for d in range(1, inp.dim())]
     return NestedTensor(func(inp._values, expand_arg), **extract_kwargs(inp))
@@ -1630,8 +1668,10 @@ def view_default(func, *args, **kwargs):
         )
 
     # Ensure specified size still includes batch and ragged dims
-    if len(size) < 3 or not raggedness_matches(inp, size):
-        raise RuntimeError(f"view(): cannot view shape {inp._size} as {size}")
+    error_msg = f"view(): cannot view shape {inp._size} as {size}"
+    if len(size) < 3:
+        raise RuntimeError(error_msg)
+    assert_raggedness_matches(inp, size, error_msg)
 
     # outer size: the size of the NT, e.g. [3, j0, 10]
     # inner size: the size of the values, e.g. [8, 10] (e.g. for offsets = [0, 3, 5, 8])
@@ -2156,10 +2196,10 @@ def stack_default(func, *args, **kwargs):
                 "stack(): expected all nested tensors to have the same dim"
             )
 
-        if not raggedness_matches(t, tensors[0].shape):
-            raise RuntimeError(
-                "stack(): expected all nested tensors to have the same nested structure"
-            )
+        assert_raggedness_matches(
+            t, tensors[0].shape,
+            "stack(): expected all nested tensors to have the same nested structure"
+        )
 
     new_kwargs["dim"] = _wrap_jagged_dim(
         tensors[0].dim() + 1, new_kwargs["dim"], tensors[0]._ragged_idx, "stack"
@@ -2386,16 +2426,16 @@ def _nested_view_from_jagged_default(func, *args, **kwargs):
 
 lib = torch.library.Library("nested", "FRAGMENT")
 
-lib.define("_assert_equal(Tensor lhs, Tensor rhs) -> ()")
+lib.define("_assert_equal(Tensor lhs, Tensor rhs, str msg) -> ()")
 
-def _assert_equal_impl(lhs, rhs):
+def _assert_equal_impl(lhs, rhs, msg):
     # Next:
     # - Device side Asserts for the CUDA case
     # - Pass through better context through a string
     if not torch.equal(lhs, rhs):
-        raise AssertionError("Expected lengths or offsets to be equal")
+        raise RuntimeError(msg)
 
-def _assert_equal_meta(mb_lhs, mb_rhs):
+def _assert_equal_meta(lhs, rhs, msg):
     # No-op during compile
     return
 
@@ -2417,6 +2457,7 @@ _PREFERRED_PAIRS = {
     ("device", "host"): 2,
 }
 
+# TODO: test the ranking
 @register_dict_tensor_func(torch.ops.aten._nested_assert_metadata_equal.default)
 @maybe_enable_thunkify
 def _nested_assert_metadata_equal(func, *args, **kwargs):
@@ -2425,8 +2466,6 @@ def _nested_assert_metadata_equal(func, *args, **kwargs):
 
     assert isinstance(args[0], DictTensor) and isinstance(args[1], DictTensor)
 
-    # look at the lengths
-    # look at host and device of each side.
     candidates = []
     for source_type in ("lengths", "offsets"):
         for device_type_lhs in ("host", "device"):
@@ -2447,8 +2486,41 @@ def _nested_assert_metadata_equal(func, *args, **kwargs):
 
     lhs = getattr(args[0], src_field_name(pair[0][0], pair[0][1]))
     rhs = getattr(args[1], src_field_name(pair[1][0], pair[1][1]))
+    msg = args[2]
 
-    torch.ops.nested._assert_equal(lhs, rhs)
+    torch.ops.nested._assert_equal(lhs, rhs, msg)
+
+
+# Used by autograd engine to compare shapes
+@register_jagged_func(
+    torch.ops.aten._nested_assert_expandable_to.default, "tgt: any, src_shape: any, msg: any"
+)
+def _nested_assert_expandable_to(func, *args, **kwargs):
+    from torch.fx.experimental.symbolic_shapes import is_nested_int
+
+    _, new_kwargs = normalize_function(  # type: ignore[misc]
+        func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
+    )
+    desired = new_kwargs.pop("tgt").shape
+    shape = new_kwargs.pop("src_shape")
+    msg = new_kwargs.pop("msg")
+
+    if len(shape) > len(desired):
+        raise RuntimeError(msg)
+
+    for i in range(len(shape)):
+        src_s = shape[-i - 1]
+        tgt_s = desired[-i - 1]
+        if src_s == 1:
+            continue
+        if src_s != tgt_s:
+            if not (is_nested_int(src_s) and is_nested_int(tgt_s)):
+                raise RuntimeError(msg)
+            torch._nested_assert_metadata_equal(
+                get_nested_int_metadata(src_s),
+                get_nested_int_metadata(tgt_s),
+                msg,
+            )
 
 
 @register_jagged_func(
