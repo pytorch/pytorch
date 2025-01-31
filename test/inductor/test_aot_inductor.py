@@ -2151,6 +2151,33 @@ class AOTInductorTestsTemplate:
         example_inputs = (torch.randn(3, 10, device=self.device),)
         self.check_model(Model(), example_inputs)
 
+    def test_repeated_calling(self):
+        if self.device != "cuda":
+            raise unittest.SkipTest("requires CUDA")
+
+        class Model(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+
+            def forward(self, x):
+                return torch.sin(x)
+
+        example_inputs = (torch.randn(10, 10, device=self.device),)
+        optimized = torch._inductor.aoti_load_package(
+            torch._inductor.aoti_compile_and_package(
+                torch.export.export(Model(), example_inputs)
+            )
+        )
+        try:
+            torch.cuda.memory.empty_cache()
+            torch.cuda.memory._record_memory_history(context=None)
+            for _ in range(10):
+                optimized(*example_inputs)
+        finally:
+            torch.cuda.memory._record_memory_history(False)
+        segments = torch.cuda.memory._snapshot()["segments"]
+        self.assertEqual(segments[0]["requested_size"], 400)
+
     def test_view_outputs(self):
         class Model(torch.nn.Module):
             def forward(self, x):

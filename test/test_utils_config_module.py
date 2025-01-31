@@ -194,8 +194,7 @@ torch.testing._internal.fake_config_module.e_env_default = True
 torch.testing._internal.fake_config_module.e_env_default_FALSE = False
 torch.testing._internal.fake_config_module.e_env_default_str = '1234'
 torch.testing._internal.fake_config_module.e_env_default_str_empty = ''
-torch.testing._internal.fake_config_module.e_env_force = True
-torch.testing._internal.fake_config_module._save_config_ignore = ['e_ignored']""",
+torch.testing._internal.fake_config_module.e_env_force = True""",
         )
 
     def test_codegen_config_function(self):
@@ -389,6 +388,12 @@ torch.testing._internal.fake_config_module3.e_func = _warnings.warn""",
             self.assertTrue(config.e_aliased_bool)
         with config.patch(e_aliased_bool=True):
             self.assertTrue(config2.e_aliasing_bool)
+
+    def test_reference_is_default(self):
+        t = config.e_dict
+        self.assertTrue(config._is_default("e_dict"))
+        t["a"] = "b"
+        self.assertFalse(config._is_default("e_dict"))
 
 
 if __name__ == "__main__":
