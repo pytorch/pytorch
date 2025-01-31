@@ -290,6 +290,68 @@ def register_dataclass(cls: type[Any]) -> None:
     torch.export.register_dataclass(cls)
 
 
+def register_constant(cls: type[Any]) -> None:
+    """Registers a type as a pytree node with no leaves.
+
+    Instances of these types are treated as a constant (sometimes referred to as
+    "static") by :func:`torch.compile`. When used in a function compiled by
+    :func:`torch.compile`, :func:`torch.compile` guards on the instance
+    object's hash: if :func:`torch.compile` sees a new hash then
+    :func:`torch.compile` will recompile the function using the new instance.
+
+    In general, if your class holds Tensors or dynamic int/float/bool (values that
+    may change from run-to-run of a function being compiled), then you probably
+    do not want to register it as a constant.
+
+    Args:
+        cls: the type to register as a constant. This type must be hashable.
+
+    Example:
+
+        >>> from dataclasses import dataclass
+        >>> import torch.utils._pytree as pytree
+        >>>
+        >>> @dataclass
+        >>> class Config:
+        >>>     norm: str
+        >>>
+        >>> pytree.register_constant(Config)
+        >>>
+        >>> config = Config("l2")
+        >>> values, spec = pytree.tree_flatten(config)
+        >>> assert len(values) == 0
+
+    """
+
+    def _flatten(x):  # type: ignore[no-untyped-def]
+        return [], ConstantNode(x)
+
+    def _unflatten(_, context):  # type: ignore[no-untyped-def]
+        return context.value
+
+    _private_register_pytree_node(
+        cls,
+        _flatten,
+        _unflatten,
+    )
+
+
+@dataclasses.dataclass
+class ConstantNode:
+    value: Any
+
+
+def _is_constant_holder(spec: "TreeSpec") -> bool:
+    """Checks if the spec is from a pytree registered with register_constant"""
+    return isinstance(spec.context, ConstantNode)
+
+
+def _retrieve_constant(spec: "TreeSpec") -> Any:
+    """Given a spec from a pytree registered with register_constant, retrieves the constant"""
+    assert _is_constant_holder(spec)
+    return tree_unflatten([], spec)
+
+
 def _register_namedtuple(
     cls: type[Any],
     *,
