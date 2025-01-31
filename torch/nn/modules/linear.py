@@ -110,6 +110,7 @@ class Linear(Module):
         else:
             self.register_parameter("bias", None)
         self.reset_parameters()
+        self.packed = False
 
     def reset_parameters(self) -> None:
         # Setting a=sqrt(5) in kaiming_uniform is the same as initializing with
@@ -121,7 +122,30 @@ class Linear(Module):
             bound = 1 / math.sqrt(fan_in) if fan_in > 0 else 0
             init.uniform_(self.bias, -bound, bound)
 
+    def pack_weights(self, input: Tensor) -> Tensor:
+        if torch._C._has_mkldnn:
+            packed_weight = torch._C._nn.pack_linear(self.weight, input)
+            if packed_weight is not None:
+                self.weight = torch.nn.Parameter(packed_weight)
+        self.packed = True
+
+    def unpack_weights(self) -> Tensor:
+        if torch._C._has_mkldnn:
+            if self.weight.is_mkldnn:
+                unpacked = self.weight.to_dense()
+                if unpacked.shape == (self.in_features, self.out_features):
+                    unpacked = unpacked.t()
+                self.weight = torch.nn.Parameter(torch.empty(self.out_features, self.in_features).copy_(unpacked))
+
+        if self.weight.shape != (self.out_features, self.in_features):
+            raise Exception("Unable to unpack weights")
+        self.packed = False
+
     def forward(self, input: Tensor) -> Tensor:
+        if not torch.is_grad_enabled() and not self.packed:
+            self.pack_weights(input)
+        if torch.is_grad_enabled() and self.packed:
+            self.unpack_weights()
         return F.linear(input, self.weight, self.bias)
 
     def extra_repr(self) -> str:

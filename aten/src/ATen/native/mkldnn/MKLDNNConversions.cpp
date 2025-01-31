@@ -1,6 +1,7 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/Config.h>
 #include <ATen/core/Tensor.h>
+#include <ATen/native/LinearAlgebraUtils.h>
 #include <ATen/native/mkldnn/MKLDNNCommon.h>
 #include <ATen/native/mkldnn/Utils.h>
 #include <ATen/native/utils/ParamUtils.h>
@@ -280,9 +281,9 @@ static Tensor mkldnn_reorder_linear_weight(
   return new_with_itensor_mkldnn(std::move(result), optTypeMetaToScalarType(self.options().dtype_opt()), self.options().device_opt());
 }
 
-Tensor pack_linear(const Tensor& weight) {
+Tensor pack_linear(const Tensor& weight, const Tensor& input) {
 #if !defined(__aarch64__) || !AT_MKLDNN_ACL_ENABLED()
-  return weight
+  return weight;
 #endif
   const auto weight_dim = weight.dim();
   TORCH_CHECK(
@@ -290,15 +291,24 @@ Tensor pack_linear(const Tensor& weight) {
       "weights need to be at least 1D, but they are ",
       weight_dim,
       "D");
+  int64_t flattened_dim = 1;
+  for (int64_t i = 0, ndim = input.sizes().size(); i < ndim - 1; ++i) {
+    flattened_dim *= input.sizes()[i];
+  }
+  if (
+    !input.sizes().size() > 3 || 
+    !apply_mkldnn_matmul_heur(flattened_dim, weight.sizes()[1], weight.sizes()[0])) {
+    return weight;
+  }
   ideep::matmul_forward_params params;
-  ideep::tensor input = itensor_view_from_dense(
-      at::zeros({weight.size(-1), weight.size(-1)}, weight.options()));
+  ideep::tensor input_ = itensor_view_from_dense(
+      at::zeros({flattened_dim, weight.size(-1)}, weight.options()));
   ideep::tensor weight_ = itensor_view_from_dense(weight.t());
   ideep::tensor result = itensor_view_from_dense(
-      at::zeros({weight.size(-1), weight.size(-2)}, weight.options()));
+      at::zeros({flattened_dim, weight.size(-2)}, weight.options()));
   ideep::matmul_forward::prepare(
       params,
-      input,
+      input_,
       weight_,
       result,
       1.0f,

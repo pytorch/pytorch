@@ -61,21 +61,6 @@ namespace at::native {
 Tensor mkldnn_linear(
     const Tensor& self,
     const Tensor& weight_t, const std::optional<Tensor>& bias_opt) {
-  // aarch64 packed weights are reordered to the format expected by 
-  // ComputeLibrary for the ideep::matmul_forward operation. 
-  // Therefore we need to call mkldnn_matmul_prepacked. 
-#if defined(__aarch64__) && AT_MKLDNN_ACL_ENABLED()
-  if (weight_t.is_mkldnn()) {
-    auto bias_ = *expand_size(*bias_opt, {self.sizes()[0], weight_t.sizes()[1]});
-    auto result = at::empty({0}, self.options());
-    at::native::resize_output(result, bias_.sizes());
-    result.copy_(bias_);
-
-    mkldnn_matmul_prepacked(self, weight_t, result);
-
-    return result;
-  }
-#endif
   // See [Note: hacky wrapper removal for optional tensor]
   c10::MaybeOwned<Tensor> bias_maybe_owned = at::borrow_from_optional_tensor(bias_opt);
   const Tensor& bias = *bias_maybe_owned;

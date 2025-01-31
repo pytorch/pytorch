@@ -3369,7 +3369,7 @@
     MkldnnCPU: mkldnn_linear_backward
   autogen: mkldnn_linear_backward.out
 
-- func: pack_linear(Tensor weight) -> Tensor
+- func: pack_linear(Tensor weight, Tensor input) -> Tensor
   python_module: nn
 
 - func: _cslt_compress(Tensor input) -> Tensor
