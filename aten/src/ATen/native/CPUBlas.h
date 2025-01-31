@@ -228,6 +228,19 @@ TORCH_API void brgemm(
     int64_t ld_b,
     int64_t ld_c,
     const bool add_C,
+    const at::BFloat16* A,
+    const at::BFloat16* B,
+    at::BFloat16* C,
+    bool is_vnni = true);
+
+TORCH_API void brgemm(
+    int64_t M,
+    int64_t N,
+    int64_t K,
+    int64_t ld_a,
+    int64_t ld_b,
+    int64_t ld_c,
+    const bool add_C,
     const float* A,
     const float* B,
     float* C,
