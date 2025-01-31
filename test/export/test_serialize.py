@@ -230,6 +230,47 @@ def forward(self, x):
         actual_out = loaded_ep.module()(*inp)
         self.assertEqual(exp_out, actual_out)
 
+    def test_nested_layer_split(self):
+        class Bar(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.layers = torch.nn.Sequential(
+                    torch.nn.SiLU(),
+                    torch.nn.SiLU(),
+                    torch.nn.SiLU(),
+                )
+
+            def forward(self, x):
+                out_start, out_rest = self.layers[0], self.layers[1:]
+                h = out_start(x)
+                h = out_rest(h) + 2
+                return h
+
+        class Foo(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.register_module("a[(1)]", Bar())
+                self.register_module("b[(2)]", Bar())
+                self.register_buffer("c:[22]", torch.randn(1))
+
+            def forward(self, x):
+                out_a, out_b = getattr(self, "a[(1)]"), getattr(self, "b[(2)]")
+                out_c = getattr(self, "c:[22]")
+                h = out_a(x)
+                h = out_b(h)
+                return h + out_c
+
+        inp = (torch.ones(10),)
+        ep = export_for_training(Foo(), inp, strict=True)
+        buffer = io.BytesIO()
+        save(ep, buffer)
+        loaded_ep = load(buffer)
+
+        # Check that both modules run to confirm load was successful.
+        exp_out = ep.module()(*inp)
+        actual_out = loaded_ep.module()(*inp)
+        self.assertEqual(exp_out, actual_out)
+
     def test_serialize_constant_outputs(self):
         class MyModule(torch.nn.Module):
             def __init__(self) -> None:
