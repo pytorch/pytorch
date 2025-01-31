@@ -1,9 +1,13 @@
-# mypy: allow-untyped-defs
+from typing import Optional, Union
+from typing_extensions import Self
+
 from torch import Tensor
-from torch.distributions import constraints
+from torch.distributions import constraints, Independent
+from torch.distributions.constraints import Constraint
 from torch.distributions.normal import Normal
 from torch.distributions.transformed_distribution import TransformedDistribution
 from torch.distributions.transforms import StickBreakingTransform
+from torch.types import _size
 
 
 __all__ = ["LogisticNormal"]
@@ -32,11 +36,20 @@ class LogisticNormal(TransformedDistribution):
         tensor([ 0.7653,  0.0341,  0.0579,  0.1427])
 
     """
-    arg_constraints = {"loc": constraints.real, "scale": constraints.positive}
-    support = constraints.simplex
-    has_rsample = True
+    arg_constraints: dict[str, Constraint] = {
+        "loc": constraints.real,
+        "scale": constraints.positive,
+    }
+    support = constraints.simplex  # type: ignore[assignment]
+    has_rsample: bool = True
+    base_dist: Independent[Normal]
 
-    def __init__(self, loc, scale, validate_args=None):
+    def __init__(
+        self,
+        loc: Union[Tensor, float],
+        scale: Union[Tensor, float],
+        validate_args: Optional[bool] = None,
+    ) -> None:
         base_dist = Normal(loc, scale, validate_args=validate_args)
         if not base_dist.batch_shape:
             base_dist = base_dist.expand([1])
@@ -44,7 +57,7 @@ class LogisticNormal(TransformedDistribution):
             base_dist, StickBreakingTransform(), validate_args=validate_args
         )
 
-    def expand(self, batch_shape, _instance=None):
+    def expand(self, batch_shape: _size, _instance: Optional[Self] = None) -> Self:
         new = self._get_checked_instance(LogisticNormal, _instance)
         return super().expand(batch_shape, _instance=new)
 

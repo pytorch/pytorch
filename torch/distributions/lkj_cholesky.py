@@ -1,4 +1,3 @@
-# mypy: allow-untyped-defs
 """
 This closely follows the implementation in NumPyro (https://github.com/pyro-ppl/numpyro).
 
@@ -9,11 +8,16 @@ Original copyright notice:
 """
 
 import math
+from typing import Optional, Union
+from typing_extensions import Self
 
 import torch
+from torch import Tensor
 from torch.distributions import Beta, constraints
+from torch.distributions.constraints import Constraint
 from torch.distributions.distribution import Distribution
 from torch.distributions.utils import broadcast_all
+from torch.types import _size
 
 
 __all__ = ["LKJCholesky"]
@@ -57,10 +61,15 @@ class LKJCholesky(Distribution):
     Daniel Lewandowski, Dorota Kurowicka, Harry Joe.
     Journal of Multivariate Analysis. 100. 10.1016/j.jmva.2009.04.008
     """
-    arg_constraints = {"concentration": constraints.positive}
+    arg_constraints: dict[str, Constraint] = {"concentration": constraints.positive}
     support = constraints.corr_cholesky
 
-    def __init__(self, dim, concentration=1.0, validate_args=None):
+    def __init__(
+        self,
+        dim: int,
+        concentration: Union[Tensor, float] = 1.0,
+        validate_args: Optional[bool] = None,
+    ) -> None:
         if dim < 2:
             raise ValueError(
                 f"Expected dim to be an integer greater than or equal to 2. Found dim={dim}."
@@ -82,7 +91,7 @@ class LKJCholesky(Distribution):
         self._beta = Beta(beta_conc1, beta_conc0)
         super().__init__(batch_shape, event_shape, validate_args)
 
-    def expand(self, batch_shape, _instance=None):
+    def expand(self, batch_shape: _size, _instance: Optional[Self] = None) -> Self:
         new = self._get_checked_instance(LKJCholesky, _instance)
         batch_shape = torch.Size(batch_shape)
         new.dim = self.dim
@@ -94,7 +103,7 @@ class LKJCholesky(Distribution):
         new._validate_args = self._validate_args
         return new
 
-    def sample(self, sample_shape=torch.Size()):
+    def sample(self, sample_shape: _size = torch.Size()) -> Tensor:
         # This uses the Onion method, but there are a few differences from [1] Sec. 3.2:
         # - This vectorizes the for loop and also works for heterogeneous eta.
         # - Same algorithm generalizes to n=1.
@@ -115,7 +124,7 @@ class LKJCholesky(Distribution):
         w += torch.diag_embed(diag_elems)
         return w
 
-    def log_prob(self, value):
+    def log_prob(self, value: Tensor) -> Tensor:
         # See: https://mc-stan.org/docs/2_25/functions-reference/cholesky-lkj-correlation-distribution.html
         # The probability of a correlation matrix is proportional to
         #   determinant ** (concentration - 1) = prod(L_ii ^ 2(concentration - 1))

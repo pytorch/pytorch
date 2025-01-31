@@ -1,8 +1,10 @@
-# mypy: allow-untyped-defs
+from typing import Optional, Union
+from typing_extensions import Self
 
 import torch
-from torch import Tensor
+from torch import Size, Tensor
 from torch.distributions import constraints
+from torch.distributions.constraints import Constraint
 from torch.distributions.distribution import Distribution
 from torch.distributions.independent import Independent
 from torch.distributions.transforms import ComposeTransform, Transform
@@ -46,9 +48,14 @@ class TransformedDistribution(Distribution):
     :class:`~torch.distributions.relaxed_bernoulli.RelaxedBernoulli` and
     :class:`~torch.distributions.relaxed_categorical.RelaxedOneHotCategorical`
     """
-    arg_constraints: dict[str, constraints.Constraint] = {}
+    arg_constraints: dict[str, Constraint] = {}
 
-    def __init__(self, base_distribution, transforms, validate_args=None):
+    def __init__(
+        self,
+        base_distribution: Distribution,
+        transforms: Union[Transform, list[Transform]],
+        validate_args: Optional[bool] = None,
+    ) -> None:
         if isinstance(transforms, Transform):
             self.transforms = [
                 transforms,
@@ -65,7 +72,7 @@ class TransformedDistribution(Distribution):
             )
 
         # Reshape base_distribution according to transforms.
-        base_shape = base_distribution.batch_shape + base_distribution.event_shape
+        base_shape: Size = base_distribution.batch_shape + base_distribution.event_shape
         base_event_dim = len(base_distribution.event_shape)
         transform = ComposeTransform(self.transforms)
         if len(base_shape) < transform.domain.event_dim:
@@ -100,10 +107,10 @@ class TransformedDistribution(Distribution):
         event_shape = forward_shape[cut:]
         super().__init__(batch_shape, event_shape, validate_args=validate_args)
 
-    def expand(self, batch_shape, _instance=None):
+    def expand(self, batch_shape: _size, _instance: Optional[Self] = None) -> Self:
         new = self._get_checked_instance(TransformedDistribution, _instance)
         batch_shape = torch.Size(batch_shape)
-        shape = batch_shape + self.event_shape
+        shape: Size = batch_shape + self.event_shape
         for t in reversed(self.transforms):
             shape = t.inverse_shape(shape)
         base_batch_shape = shape[: len(shape) - len(self.base_dist.event_shape)]
@@ -116,7 +123,7 @@ class TransformedDistribution(Distribution):
         return new
 
     @constraints.dependent_property(is_discrete=False)
-    def support(self):
+    def support(self) -> Optional[Constraint]:
         if not self.transforms:
             return self.base_dist.support
         support = self.transforms[-1].codomain
@@ -130,7 +137,7 @@ class TransformedDistribution(Distribution):
     def has_rsample(self) -> bool:  # type: ignore[override]
         return self.base_dist.has_rsample
 
-    def sample(self, sample_shape=torch.Size()):
+    def sample(self, sample_shape: _size = torch.Size()) -> Tensor:
         """
         Generates a sample_shape shaped sample or sample_shape shaped batch of
         samples if the distribution parameters are batched. Samples first from
@@ -155,7 +162,7 @@ class TransformedDistribution(Distribution):
             x = transform(x)
         return x
 
-    def log_prob(self, value):
+    def log_prob(self, value: Tensor) -> Tensor:
         """
         Scores the sample by inverting the transform(s) and computing the score
         using the score of the base distribution and the log abs det jacobian.
@@ -179,7 +186,7 @@ class TransformedDistribution(Distribution):
         )
         return log_prob
 
-    def _monotonize_cdf(self, value):
+    def _monotonize_cdf(self, value: Tensor) -> Tensor:
         """
         This conditionally flips ``value -> 1-value`` to ensure :meth:`cdf` is
         monotone increasing.
@@ -191,7 +198,7 @@ class TransformedDistribution(Distribution):
             return value
         return sign * (value - 0.5) + 0.5
 
-    def cdf(self, value):
+    def cdf(self, value: Tensor) -> Tensor:
         """
         Computes the cumulative distribution function by inverting the
         transform(s) and computing the score of the base distribution.
@@ -204,7 +211,7 @@ class TransformedDistribution(Distribution):
         value = self._monotonize_cdf(value)
         return value
 
-    def icdf(self, value):
+    def icdf(self, value: Tensor) -> Tensor:
         """
         Computes the inverse cumulative distribution function using
         transform(s) and computing the score of the base distribution.
