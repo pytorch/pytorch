@@ -146,6 +146,7 @@ class TestModels(pytorch_test_common.ExportTestCase):
         self.exportTest(toC(resnet50()), toC(x), atol=1e-6)
 
     # This test is numerically unstable. Sporadic single element mismatch occurs occasionally.
+    @unittest.skip("FIXME: ONNX Runtime 1.19+ changed implementation of AvgPool")
     def test_inception(self):
         x = Variable(torch.randn(BATCH_SIZE, 3, 299, 299))
         self.exportTest(toC(inception_v3()), toC(x), acceptable_error_percentage=0.01)
