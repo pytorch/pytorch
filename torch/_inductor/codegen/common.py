@@ -1562,7 +1562,10 @@ class CSE(Generic[CSEVariableType, AugmentedKeyT]):
             if tmp not in keep_vars:
                 del self.store_cache[name]
                 self.invalidated_stores.add(name)
-        self._cache = {k: v for k, v in self._cache.items() if v in keep_vars}
+        if keep_vars:
+            self._cache = {k: v for k, v in self._cache.items() if v in keep_vars}
+        else:
+            self._cache = {}
 
     def clone(self) -> typing.Self:
         return type(self)(
