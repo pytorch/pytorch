@@ -4539,7 +4539,7 @@ class DefaultsTests(torch._dynamo.test_case.TestCase):
 
             code = f.__code__
             defaults = f.__defaults__
-            return x * len(defaults) * len(code.co_argcount)
+            return x * len(defaults) * code.co_argcount
 
         opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
         x = torch.randn(4)

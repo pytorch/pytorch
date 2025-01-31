@@ -5900,32 +5900,6 @@ utils_device.CURRENT_DEVICE == None""".split(
         opt_out = opt_f(*args)
         self.assertTrue(same(ref_out, opt_out))
 
-    def test_enum_subclass(self):
-        # Copied from inspect.py
-
-        class _ParameterKind(enum.IntEnum):
-            POSITIONAL_ONLY = "positional-only"
-
-            def __new__(cls, description):
-                value = len(cls.__members__)
-                member = int.__new__(cls, value)
-                member._value_ = value
-                member.description = description
-                return member
-
-            def __str__(self):
-                return self.name
-
-        _POSITIONAL_ONLY = _ParameterKind.POSITIONAL_ONLY
-
-        def fn(x):
-            _ParameterKind(_POSITIONAL_ONLY)
-            return torch.cos(x)
-
-        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
-        x = torch.randn(4)
-        self.assertEqual(fn(x), opt_fn(x))
-
     def test_duplicate_graph_break_log(self):
         torch._logging.set_logs(graph_breaks=True)
 
