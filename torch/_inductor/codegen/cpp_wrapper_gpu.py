@@ -2,7 +2,7 @@
 import functools
 import os
 from itertools import chain, count, zip_longest
-from typing import Any, Callable, List, Optional, Tuple, TYPE_CHECKING, Union
+from typing import Any, Callable, Optional, TYPE_CHECKING, Union
 
 import sympy
 
@@ -38,8 +38,8 @@ class DeferredGpuKernelLine(DeferredLineBase):
         self,
         kernel_name: str,
         line_template: str,
-        keys: Tuple[str, ...],
-        additional_files: List[str],
+        keys: tuple[str, ...],
+        additional_files: list[str],
     ):
         super().__init__(line_template)
         assert not isinstance(line_template, DeferredLineBase)
@@ -94,7 +94,7 @@ class DeferredGpuDefaultGrid:
         # to generate the autotune code block, and thus we need this iterator
         return iter(self.grid)
 
-    def _process_grid(self, grid: Union[List[Any], Tuple[Any, ...]]):
+    def _process_grid(self, grid: Union[list[Any], tuple[Any, ...]]):
         if isinstance(grid, (list, tuple)):
             return [self._process_grid(e) for e in grid]
         else:
@@ -191,7 +191,9 @@ class CppWrapperGpu(CppWrapperCpu):
 
     @staticmethod
     def create(
-        is_subgraph: bool, subgraph_name: str, parent_wrapper: PythonWrapperCodegen
+        is_subgraph: bool,
+        subgraph_name: Optional[str],
+        parent_wrapper: Optional[PythonWrapperCodegen],
     ):
         # TODO - support subgraph codegen by lifting functions. Check the
         # comment at CppWrapperCpu `codegen_subgraph` function.
@@ -203,9 +205,6 @@ class CppWrapperGpu(CppWrapperCpu):
             return
 
         super().write_header()
-
-        self.header.splice("#include <filesystem>")
-        self.header.splice(self.device_codegen.abi_compatible_header())
         self.header.splice(
             maybe_hipify_code_wrapper(self.device_codegen.kernel_driver())
         )
@@ -304,8 +303,8 @@ class CppWrapperGpu(CppWrapperCpu):
     def generate_user_defined_triton_kernel(
         self,
         kernel_name: str,
-        raw_args: List[Any],
-        grid: List[Any],
+        raw_args: list[Any],
+        grid: list[Any],
         configs,
         triton_meta,
         constexprs,
@@ -459,7 +458,7 @@ class CppWrapperGpu(CppWrapperCpu):
     def generate_default_grid(
         self,
         kernel_name: str,
-        grid_args: List[Any],
+        grid_args: list[Any],
         gpu: bool = True,
         grid_callable: Optional[Callable[..., Any]] = default_grid_fn,
         **grid_extra_kwargs,
@@ -514,7 +513,8 @@ class CppWrapperGpu(CppWrapperCpu):
             )
 
         if (
-            config.triton.autotune_at_compile_time
+            triton
+            and config.triton.autotune_at_compile_time
             and kernel_name not in self.kernel_autotune_names
         ):
             # Call PythonWrapperCodegen to create the autotune code block
@@ -613,7 +613,7 @@ class CppWrapperGpu(CppWrapperCpu):
                 new_arg = arg
                 if arg_type.endswith("*") and arg != "nullptr":
                     new_arg = f"{arg}.data_ptr()"
-                casted.append(f"({arg_type}){new_arg}")
+                casted.append(f"({arg_type}){cexpr(new_arg)}")
             call_args_str = ", ".join(casted)
             self.writeline(f"kernels.{kernel_name}({call_args_str}, {stream});")
 

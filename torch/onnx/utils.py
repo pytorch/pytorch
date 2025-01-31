@@ -13,7 +13,7 @@ import inspect
 import re
 import typing
 import warnings
-from typing import Any, Callable, cast, Collection, Mapping, Sequence
+from typing import Any, Callable, cast
 
 import torch
 import torch._C._onnx as _C_onnx
@@ -23,6 +23,10 @@ from torch import _C
 from torch.onnx import _constants, _deprecation, errors, symbolic_helper  # noqa: F401
 from torch.onnx._globals import GLOBALS
 from torch.onnx._internal import diagnostics, jit_utils, onnx_proto_utils, registration
+
+
+if typing.TYPE_CHECKING:
+    from collections.abc import Collection, Mapping, Sequence
 
 
 __all__ = [
@@ -478,14 +482,14 @@ def export(
         warnings.warn(
             "Setting `operator_export_type` to something other than default is deprecated. "
             "The option will be removed in a future release.",
-            category=FutureWarning,
+            category=DeprecationWarning,
         )
     if training == _C_onnx.TrainingMode.TRAINING:
         warnings.warn(
             "Setting `training` to something other than default is deprecated. "
             "The option will be removed in a future release. Please set the training mode "
             "before exporting the model.",
-            category=FutureWarning,
+            category=DeprecationWarning,
         )
 
     args = (args,) if isinstance(args, torch.Tensor) else args

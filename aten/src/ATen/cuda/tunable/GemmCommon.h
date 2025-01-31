@@ -436,6 +436,7 @@ struct ScaledGemmParams : OpParams {
   ScalarType c_dtype{};
   void* amax_ptr{};
   bool use_fast_accum{};
+  bool use_rowwise{};
 private:
   bool duplicate_inputs_{false};
 };
