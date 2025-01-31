@@ -4505,6 +4505,14 @@ class DefaultsTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(ref, res)
         self.assertTrue(isinstance(res, tuple))
 
+    def test_sys_recursionlimit(self):
+        def fn(x):
+            return x.sin() * sys.getrecursionlimit()
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        x = torch.randn(4)
+        self.assertEqual(fn(x), opt_fn(x))
+
 
 instantiate_parametrized_tests(FunctionTests)
 
