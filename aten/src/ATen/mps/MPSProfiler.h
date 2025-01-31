@@ -16,6 +16,10 @@
 #include <unordered_map>
 #include <utility>
 
+#ifndef __OBJC__
+typedef void* MTLCaptureManager;
+#endif
+
 namespace at::mps {
 
 namespace Profiler {
@@ -58,24 +62,7 @@ struct BaseInfo {
   // builds a string for a tensor (format: Device:ScalarType[tensor.sizes()])
   static std::string buildTensorString(
       const Tensor& tensor,
-      bool includeBufferId = false) {
-    if (tensor.defined()) {
-      std::stringstream tensorStr;
-      auto deviceType = tensor.device().type();
-      tensorStr << c10::DeviceTypeName(deviceType);
-      // see comments for INCLUDE_BUFFER_ID
-      if (includeBufferId && deviceType == at::kMPS) {
-        id<MTLBuffer> buffer =
-            __builtin_bit_cast(id<MTLBuffer>, tensor.storage().data());
-        tensorStr << "(buf#" << (getIMPSAllocator()->getBufferId(buffer)) << ":"
-                  << buffer.retainCount << ")";
-      }
-      tensorStr << ":" << tensor.scalar_type() << tensor.sizes();
-      return tensorStr.str();
-    } else {
-      return "undefined";
-    }
-  }
+      bool includeBufferId = false);
   static uint64_t getTime() {
     return clock_gettime_nsec_np(CLOCK_MONOTONIC_RAW);
   }

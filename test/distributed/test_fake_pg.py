@@ -48,7 +48,7 @@ class TestFakePG(TestCase):
         input_tensor = torch.ones(3, 3) * dist.get_rank()
         output_tensors = [torch.empty_like(input_tensor) for _ in range(2)]
         dist.all_gather(output_tensors, input_tensor)
-        for _, out_tensor in enumerate(output_tensors):
+        for out_tensor in output_tensors:
             self.assertEqual(tuple(out_tensor.shape), (3, 3))
 
     def test_reduce_scatter(self):

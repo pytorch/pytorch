@@ -1,16 +1,16 @@
 # Owner(s): ["module: unknown"]
 
-from typing import Dict, Any, Tuple
+from typing import Any
 from torch.ao.pruning import BaseSparsifier
 import torch
 import torch.nn.functional as F
 from torch import nn
 
 class ImplementedSparsifier(BaseSparsifier):
-    def __init__(self, **kwargs: Dict[str, Any]) -> None:
+    def __init__(self, **kwargs: dict[str, Any]) -> None:
         super().__init__(defaults=kwargs)
 
-    def update_mask(self, module: nn.Module, tensor_name: str, **kwargs: Dict[str, Any]) -> None:
+    def update_mask(self, module: nn.Module, tensor_name: str, **kwargs: dict[str, Any]) -> None:
         module.parametrizations.weight[0].mask[0] = 0  # type: ignore[index, union-attr]
         linear_state = self.state['linear1.weight']
         linear_state['step_count'] = linear_state.get('step_count', 0) + 1
@@ -361,7 +361,7 @@ class LSTMLinearModel(nn.Module):
         self.lstm = nn.LSTM(input_dim, hidden_dim, num_layers)
         self.linear = nn.Linear(hidden_dim, output_dim)
 
-    def forward(self, input: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
+    def forward(self, input: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
         output, _hidden = self.lstm(input)
         decoded = self.linear(output)
         return decoded, output
@@ -378,7 +378,7 @@ class LSTMLayerNormLinearModel(nn.Module):
         self.norm = nn.LayerNorm(hidden_dim)
         self.linear = nn.Linear(hidden_dim, output_dim)
 
-    def forward(self, x: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
+    def forward(self, x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
         x, state = self.lstm(x)
         x = self.norm(x)
         x = self.linear(x)

@@ -2,9 +2,10 @@
 # mypy: allow-untyped-defs
 import collections
 import copyreg
+from collections.abc import Sequence
 from contextlib import contextmanager
 from copy import deepcopy
-from typing import Dict, Optional, Sequence, Tuple, Union
+from typing import Optional, Union
 
 import torch
 from torch import Tensor
@@ -25,7 +26,7 @@ __all__ = [
 ]
 
 _cache_enabled = 0
-_cache: Dict[Tuple[int, str], Optional[Tensor]] = {}
+_cache: dict[tuple[int, str], Optional[Tensor]] = {}
 
 
 @contextmanager
@@ -165,9 +166,7 @@ class ParametrizationList(ModuleList):
                         pass
                 # else, or if it throws, we assume that right_inverse is the identity
 
-        if not isinstance(new, Tensor) and not isinstance(
-            new, collections.abc.Sequence
-        ):
+        if not isinstance(new, Tensor) and not isinstance(new, Sequence):
             raise ValueError(
                 "'right_inverse' must return a Tensor or a Sequence of tensors (list, tuple...). "
                 f"Got {type(new).__name__}"

@@ -12,7 +12,7 @@ from collections import defaultdict, deque
 from contextlib import contextmanager
 from dataclasses import dataclass, fields, is_dataclass
 from enum import auto, Enum
-from typing import Any, Callable, List, Optional, Tuple, Type, TYPE_CHECKING
+from typing import Any, Callable, Optional, TYPE_CHECKING
 
 import torch
 import torch.distributed as dist
@@ -815,7 +815,7 @@ class DistributedDataParallel(Module, Joinable):
 
         # Initialize gradient buffers and register all reduce hook
         self._delay_grad_buffer: Optional[torch.Tensor] = None
-        self._delay_grad_views: List[torch.Tensor] = []
+        self._delay_grad_views: list[torch.Tensor] = []
         self._delay_all_reduce_all_params = False
         if len(self._delay_all_reduce_params) != 0:
             self._register_delay_all_reduce_hook(
@@ -853,7 +853,7 @@ class DistributedDataParallel(Module, Joinable):
             param_to_name_mapping,
             static_graph,
         )
-        self._comm_hooks: List[Tuple[Callable, object]] = []
+        self._comm_hooks: list[tuple[Callable, object]] = []
 
         if self.mixed_precision is not None:
             _setup_mixed_precision_params(self.mixed_precision, self.module)
@@ -907,7 +907,7 @@ class DistributedDataParallel(Module, Joinable):
         # Register the AccumulateGrad post hooks if optimize_ddp is
         # True. The hooks will be deregistered if compiled_autograd is not
         # enabled.
-        self._accum_grad_hooks: List[RemovableHandle] = []
+        self._accum_grad_hooks: list[RemovableHandle] = []
         optimize_ddp = torch._dynamo.config._get_optimize_ddp_mode()
         self._use_python_reducer = optimize_ddp in (
             "python_reducer",
@@ -1614,7 +1614,7 @@ class DistributedDataParallel(Module, Joinable):
                 treespec,
                 output_is_rref,
             ) = _tree_flatten_with_rref(output)
-            output_placeholders: List[Optional[torch.Tensor]] = [
+            output_placeholders: list[Optional[torch.Tensor]] = [
                 None for _ in range(len(output_tensor_list))
             ]
             # Do not touch tensors that have no grad_fn, which can cause issues
@@ -2046,7 +2046,7 @@ class DistributedDataParallel(Module, Joinable):
         self.logger._set_comm_hook_name(str(comm_hook_type))
         dist._register_builtin_comm_hook(self.reducer, comm_hook_type)
 
-    def _register_fused_optim(self, optim: Type, *args, optim_params=None, **kwargs):
+    def _register_fused_optim(self, optim: type, *args, optim_params=None, **kwargs):
         r"""
         Register an optimizer in DDP to optimize parameter immediately after its gradient reduction.
 

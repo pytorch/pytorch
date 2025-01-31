@@ -7,7 +7,8 @@ import inspect
 import logging
 import types
 import typing
-from typing import Any, Iterator, Mapping, Optional, Sequence, TypeVar, Union
+from collections.abc import Iterator, Mapping, Sequence
+from typing import Any, Optional, TypeVar, Union
 
 import onnx
 
@@ -224,9 +225,9 @@ def _get_attr_type(type_: type) -> ir.AttributeType:
         if origin_type in (
             collections.abc.Sequence,
             Sequence,
-            typing.List,
             list,
-            typing.Tuple,
+            list,
+            tuple,
             tuple,
         ):
             inner_type = typing.get_args(type_)[0]

@@ -8,7 +8,7 @@ if(WERROR)
 endif()
 
 function(metal_to_air SRC TARGET FLAGS)
-    add_custom_command(COMMAND xcrun metal -c ${SRC} -o ${TARGET} ${FLAGS} ${METAL_CFLAGS}
+    add_custom_command(COMMAND xcrun metal -c ${SRC} -I ${CMAKE_SOURCE_DIR} -o ${TARGET} ${FLAGS} ${METAL_CFLAGS}
                        DEPENDS ${SRC}
                        OUTPUT ${TARGET}
                        COMMENT "Compiling ${SRC} to ${TARGET}"
@@ -25,7 +25,14 @@ function(air_to_metallib TARGET OBJECTS)
 endfunction()
 
 function(metal_to_metallib_h SRC TGT)
-    file(READ ${SRC} SHADER_CONTENT)
+    execute_process(COMMAND ${Python_EXECUTABLE} torch/utils/_cpp_embed_headers.py ${SRC}
+                    WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+                    OUTPUT_VARIABLE SHADER_CONTENT
+                    RESULT_VARIABLE _exitcode)
+    if(NOT _exitcode EQUAL 0)
+        message(FATAL_ERROR "Failed to preprocess Metal shader ${SRC}")
+        return()
+    endif()
     file(WRITE ${TGT} "#include <ATen/native/mps/OperationUtils.h>\n")
     file(APPEND ${TGT} "static ::at::native::mps::MetalShaderLibrary lib(R\"SHDR(\n")
     file(APPEND ${TGT} "${SHADER_CONTENT}")

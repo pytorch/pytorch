@@ -1,7 +1,7 @@
 # mypy: allow-untyped-defs
 from collections import defaultdict
 from copy import deepcopy
-from typing import Any, Dict, Optional, TYPE_CHECKING
+from typing import Any, Optional, TYPE_CHECKING
 
 import pytorch_lightning as pl  # type: ignore[import]
 
@@ -155,7 +155,7 @@ class TrainingAwareDataSparsity(pl.callbacks.Callback):
         self.data_sparsifier.load_state_dict(self.data_sparsifier_state_dict)
 
     def __create_config_based_on_state(self, pl_module):
-        config: Dict = defaultdict()
+        config: dict = defaultdict()
         if self.data_sparsifier_state_dict is None:
             return config
         for name, _ in pl_module.model.named_parameters():

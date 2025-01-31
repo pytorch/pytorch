@@ -4,7 +4,6 @@ import copy
 import csv
 import logging
 import os
-from typing import List
 
 from model_registry import MultiMLP
 
@@ -58,6 +57,7 @@ torch.manual_seed(0)
 class MockPipelineStage(_PipelineStageBase):
     def __init__(self, *args, **kwargs):
         # Mock the necessary attributes
+        self.submod = None
         self.num_stages = kwargs.get("num_stages", 1)
         self.group_size = kwargs.get("group_size", 1)
         self.group_rank = kwargs.get("group_rank", 0)
@@ -137,7 +137,9 @@ class ScheduleTest(TestCase):
             # Add a small perturbation
             target = y + torch.randn(batch_size, d_hid, device=device)
 
-        loss_fn = torch.nn.MSELoss(reduction="sum")
+        def loss_fn(y, target):
+            return torch.nn.functional.cross_entropy(y, target)
+
         # Run reference
         for _ in range(2):
             ref_mod.zero_grad()
@@ -178,9 +180,9 @@ class ScheduleTest(TestCase):
         # Check output
         torch.testing.assert_close(out, ref_out)
         # Check loss
-        # Since the reduction used in the loss function above is "sum", we use
-        # "sum" here to reduce microbatch losses into a single value too.
-        pipe_loss = sum(losses)
+        # Since the reduction used in the loss function above is "mean", we use
+        # "mean" here to reduce microbatch losses into a single value too.
+        pipe_loss = torch.stack(losses).mean()
         torch.testing.assert_close(pipe_loss, ref_loss)
 
         # Check gradients
@@ -194,6 +196,30 @@ class ScheduleTest(TestCase):
             except AssertionError:
                 print(f"Gradient test failed for {name}: {p.grad} vs {ref_p.grad}")
                 raise
+
+        torch.distributed.destroy_process_group()
+
+    def test_zero_bubble_schedule_errors_with_compile(self):
+        """
+        Test that zero bubble schedules raise an error when used with torch.compile.
+        """
+        store = FakeStore()
+        torch.distributed.init_process_group(
+            backend="fake", rank=0, world_size=1, store=store
+        )
+        n_stages = 1
+        device = torch.device("cpu")
+        model = MultiMLP(8, n_layers=n_stages)
+        # full_mod
+        compiled_model = torch.compile(model)
+        stage = PipelineStage(
+            compiled_model,
+            0,
+            n_stages,
+            device,
+        )
+        with self.assertRaises(RuntimeError):
+            ScheduleInterleavedZeroBubble([stage], 2)
 
         torch.distributed.destroy_process_group()
 
@@ -329,7 +355,7 @@ instantiate_parametrized_tests(TestSchedulePlan)
 class TestScheduleLowering(TestCase):
     """Tests lowering passes that convert simple compute-only (FBW) schedules into compute+comms schedules"""
 
-    def _parse_actions(self, actions: List[str]) -> List[_Action]:
+    def _parse_actions(self, actions: list[str]) -> list[_Action]:
         return [_Action.from_str(s) for s in actions]
 
     @parametrize(
@@ -694,6 +720,7 @@ class TestScheduleLowering(TestCase):
             num_microbatches,
             loss_fn=loss_fn,
             stage_index_to_group_rank=[0, 0],
+            scale_grads=False,
         )
         schedule._load_actions(
             {

@@ -20,11 +20,6 @@ struct TORCH_API HPUHooksInterface : AcceleratorHooksInterface {
     return false;
   }
 
-  const Generator& getDefaultHPUGenerator(
-      [[maybe_unused]] DeviceIndex device_index = -1) const {
-    TORCH_CHECK(false, "Cannot get default HPU generator without HPU backend");
-  }
-
   Device getDeviceFromPtr(void* /*data*/) const override {
     TORCH_CHECK(
         false, "Cannot get device of pointer on HPU without HPU backend");

@@ -25,7 +25,6 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 """
 
-from typing import List, Tuple
 
 import numpy as np
 
@@ -34,7 +33,7 @@ from functorch.einops import rearrange
 from torch.testing._internal.common_utils import run_tests, TestCase
 
 
-identity_patterns: List[str] = [
+identity_patterns: list[str] = [
     "...->...",
     "a b c d e-> a b c d e",
     "a b c d e ...-> ... a b c d e",
@@ -45,7 +44,7 @@ identity_patterns: List[str] = [
     "a ... c d e -> a (...) c d e",
 ]
 
-equivalent_rearrange_patterns: List[Tuple[str, str]] = [
+equivalent_rearrange_patterns: list[tuple[str, str]] = [
     ("a b c d e -> (a b) c d e", "a b ... -> (a b) ... "),
     ("a b c d e -> a b (c d) e", "... c d e -> ... (c d) e"),
     ("a b c d e -> a b c d e", "... -> ... "),
@@ -149,7 +148,7 @@ class TestRearrange(TestCase):
 
     def test_concatenations_and_stacking(self) -> None:
         for n_arrays in [1, 2, 5]:
-            shapes: List[List[int]] = [[], [1], [1, 1], [2, 3, 5, 7], [1] * 6]
+            shapes: list[list[int]] = [[], [1], [1, 1], [2, 3, 5, 7], [1] * 6]
             for shape in shapes:
                 arrays1 = [
                     torch.arange(i, i + np.prod(shape, dtype=int)).reshape(shape)

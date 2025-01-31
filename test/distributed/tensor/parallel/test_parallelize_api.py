@@ -4,6 +4,7 @@ from copy import deepcopy
 
 import torch
 from torch.distributed._tensor import DeviceMesh, DTensor, Replicate, Shard
+from torch.distributed.tensor.debug import CommDebugMode
 from torch.distributed.tensor.parallel.api import parallelize_module
 from torch.distributed.tensor.parallel.style import (
     ColwiseParallel,
@@ -215,6 +216,48 @@ class TensorParallelAPITests(DTensorTestBase):
             },
         )
         self._compare_module(model, model_tp, inp_size, rank0_only=False)
+
+    @with_comms
+    def test_parallelize_module_src_data_rank(self):
+        # set seed different for each rank
+        torch.manual_seed(self.rank)
+        model = MLPModule(self.device_type)
+        device_mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
+
+        comm_mode = CommDebugMode()
+
+        # test src_data_rank == 1
+        with comm_mode:
+            model_tp = deepcopy(model)
+            model_tp = parallelize_module(
+                model_tp,
+                device_mesh,
+                {
+                    "net*": ColwiseParallel(output_layouts=Replicate()),
+                },
+                src_data_rank=1,
+            )
+
+        self.assertTrue(comm_mode.get_total_counts() > 0)
+        tp_full_params = [param.full_tensor() for param in model_tp.parameters()]
+        if self.rank == 1:
+            orig_model_params = list(model.parameters())
+            for idx, param in enumerate(tp_full_params):
+                self.assertEqual(param, orig_model_params[idx])
+
+        # test src_data_rank == None
+        model_tp_no_comm = deepcopy(model)
+        with comm_mode:
+            parallelize_module(
+                model_tp_no_comm,
+                device_mesh,
+                {
+                    "net1": ColwiseParallel(),
+                    "net2": RowwiseParallel(),
+                },
+                src_data_rank=None,
+            )
+            self.assertEqual(comm_mode.get_total_counts(), 0)
 
     @with_comms
     def test_parallelize_module_with_question(self):

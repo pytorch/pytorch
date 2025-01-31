@@ -1,7 +1,7 @@
 import logging
 import os
 from dataclasses import dataclass, field
-from typing import Any, Callable, Dict, List, Optional, Type
+from typing import Any, Callable, Optional
 
 from torch.fx._compatibility import compatibility
 from torch.fx.graph import Graph
@@ -34,28 +34,29 @@ logger = _init_logger()
 @dataclass
 class SourcePartition:
     # Nodes in a particular partition
-    nodes: List[Node]
+    nodes: list[Node]
 
     # The source these nodes decomposed from
     source: Any
 
     # Nodes in the graph that are needed as inputs to the partition
-    input_nodes: List[Node] = field(default_factory=list)
+    # These do not include the params of the partition
+    input_nodes: list[Node] = field(default_factory=list)
 
     # Nodes in the partition that are being used by nodes outside of the
     # partition
-    output_nodes: List[Node] = field(default_factory=list)
+    output_nodes: list[Node] = field(default_factory=list)
 
     # Parameters that are being used
-    params: List[Node] = field(default_factory=list)
+    params: list[Node] = field(default_factory=list)
 
 
 @compatibility(is_backward_compatible=False)  # type: ignore[misc]
 def get_source_partitions(
     graph: Graph,
-    wanted_sources: List[Any],
+    wanted_sources: list[Any],
     filter_fn: Optional[Callable[[Node], bool]] = None,
-) -> Dict[Any, List[SourcePartition]]:
+) -> dict[Any, list[SourcePartition]]:
     """
     Args:
         graph: The graph we want to partition
@@ -68,7 +69,7 @@ def get_source_partitions(
         that correspond to the list of nodes that were decomposed from the given
         source.
     """
-    modules: Dict[Type, Dict[str, List[Node]]] = {}
+    modules: dict[type, dict[str, list[Node]]] = {}
 
     for node in graph.nodes:
         # The metadata source_fn should contain a tuple of a unique name for the
@@ -97,17 +98,19 @@ def get_source_partitions(
                 partition = diff_modules.setdefault(source_fn[0], [])
                 partition.append(node)
 
-    def make_partition(nodes: List[Node], module_type: Type) -> SourcePartition:
+    def make_partition(nodes: list[Node], module_type: type) -> SourcePartition:
         input_nodes = set()
         output_nodes = set()
         params = set()
         for node in nodes:
             for arg in node.args:
-                if isinstance(arg, Node) and arg not in nodes:
+                if isinstance(arg, Node) and arg not in nodes and arg.op != "get_attr":
                     input_nodes.add(arg)
 
             if node.op == "get_attr":
                 params.add(node)
+                # get_attr nodes won't be output nodes
+                continue
 
             for user in node.users.keys():
                 if user not in nodes:
@@ -121,7 +124,7 @@ def get_source_partitions(
             list(params),  # type: ignore[arg-type]
         )
 
-    ret: Dict[Type[Any], List[SourcePartition]] = {}
+    ret: dict[type[Any], list[SourcePartition]] = {}
 
     if filter_fn:
         # for each partition, we apply filter_fn to filter out all partitions that doesn't satisfy the

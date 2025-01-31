@@ -10,7 +10,7 @@ class ExtensionWrapperCodegen(wrapper.PythonWrapperCodegen):
 
 class ExtensionScheduling(BaseScheduling):
     def __init__(self, scheduler):
-        self.scheduler = scheduler
+        super().__init__(scheduler)
         self._triton_scheduling = triton.TritonScheduling(scheduler)
 
     def can_fuse_vertical(self, node1, node2):

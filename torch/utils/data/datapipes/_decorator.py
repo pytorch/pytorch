@@ -1,7 +1,7 @@
 # mypy: allow-untyped-defs
 import inspect
 from functools import wraps
-from typing import Any, Callable, get_type_hints, Optional, Type, Union
+from typing import Any, Callable, get_type_hints, Optional, Union
 
 from torch.utils.data.datapipes._typing import _DataPipeMeta
 from torch.utils.data.datapipes.datapipe import IterDataPipe, MapDataPipe
@@ -26,7 +26,7 @@ class functional_datapipe:
 
     def __call__(self, cls):
         if issubclass(cls, IterDataPipe):
-            if isinstance(cls, Type):  # type: ignore[arg-type]
+            if isinstance(cls, type):  # type: ignore[arg-type]
                 if not isinstance(cls, _DataPipeMeta):
                     raise TypeError(
                         "`functional_datapipe` can only decorate IterDataPipe"
@@ -72,13 +72,13 @@ class guaranteed_datapipes_determinism:
 
 
 class non_deterministic:
-    cls: Optional[Type[IterDataPipe]] = None
+    cls: Optional[type[IterDataPipe]] = None
     # TODO: Lambda for picking
     deterministic_fn: Callable[[], bool]
 
-    def __init__(self, arg: Union[Type[IterDataPipe], Callable[[], bool]]) -> None:
+    def __init__(self, arg: Union[type[IterDataPipe], Callable[[], bool]]) -> None:
         # 1. Decorator doesn't have any argument
-        if isinstance(arg, Type):  # type: ignore[arg-type]
+        if isinstance(arg, type):  # type: ignore[arg-type]
             if not issubclass(arg, IterDataPipe):  # type: ignore[arg-type]
                 raise TypeError(
                     "Only `IterDataPipe` can be decorated with `non_deterministic`"

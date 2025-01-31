@@ -1,5 +1,5 @@
 # mypy: allow-untyped-defs
-from typing import Any, Dict, List, Optional
+from typing import Any, Optional
 
 import sympy
 
@@ -7,9 +7,17 @@ import torch
 
 from .. import config
 from ..runtime.hints import AttrsDescriptorWrapper
-from ..utils import _type_of, expr_fits_within_32bit
+from ..utils import _type_of, expr_fits_within_32bit, triton_version_uses_attrs_dict
 from ..virtualized import V
-from .common import KernelArgType, SizeArg, TensorArg, TMADescriptorArg, WorkspaceArg
+from .common import (
+    ArgName,
+    ConstexprArg,
+    KernelArgType,
+    SizeArg,
+    TensorArg,
+    TMADescriptorArg,
+    WorkspaceArg,
+)
 
 
 def should_unwrap_unspec_arg(name: str):
@@ -48,9 +56,15 @@ def signature_of(arg: KernelArgType, *, size_dtype: Optional[str]) -> str:
             return tye
     if isinstance(arg, SizeArg):
         if arg.expr is None:
-            # From triton/runtime/jit.py
-            # `None` is nullptr.  Implicitly convert to *i8.
-            return "*i8"
+            if triton_version_uses_attrs_dict():
+                # In newer versions of Triton, the signature includes "None" args
+                # and their type is marked as "constexpr"
+                return "constexpr"
+            else:
+                # In older versions of Triton...
+                # From triton/runtime/jit.py
+                # `None` is nullptr.  Implicitly convert to *i8.
+                return "*i8"
         elif isinstance(arg.expr, (float, sympy.Float)):
             return "fp32"
 
@@ -73,20 +87,31 @@ def signature_of(arg: KernelArgType, *, size_dtype: Optional[str]) -> str:
         return _type_of(arg.dtype)
     if isinstance(arg, TMADescriptorArg):
         return "nvTmaDesc"
+    if isinstance(arg, ConstexprArg):
+        return "constexpr"
     raise NotImplementedError(f"unhandled {type(arg)}: {arg}")
 
 
+def non_constexpr_signature(signature):
+    new_signature = []
+    for arg in signature:
+        if not isinstance(arg, ConstexprArg):
+            new_signature.append(arg)
+
+    return new_signature
+
+
 def signature_to_meta(
-    signature: List[KernelArgType],
+    signature: list[KernelArgType],
     *,
     size_dtype: Optional[str],
-    argdefs: List[str],
-    indices: Optional[List[int]] = None,
-) -> Dict[str, str]:
+    argdefs: list[ArgName],
+    indices: Optional[list[int]] = None,
+) -> dict[str, str]:
     if indices is None:
         indices = list(range(len(signature)))
     return {
-        argdefs[i]: signature_of(arg, size_dtype=size_dtype)
+        argdefs[i].name: signature_of(arg, size_dtype=size_dtype)
         for i, arg in zip(indices, signature)
     }
 
@@ -119,9 +144,9 @@ def is_unaligned_buffer(arg: TensorArg):
 
 
 def config_of(
-    args: List[KernelArgType],
+    args: list[KernelArgType],
     *,
-    indices: Optional[List[int]] = None,
+    indices: Optional[list[int]] = None,
 ) -> Any:
     if indices is None:
         indices = list(range(len(args)))
@@ -152,7 +177,7 @@ def config_of(
         if isinstance(x, WorkspaceArg):
             # We allocate the workspace ourselves, so it is always aligned
             return True
-        if isinstance(x, TMADescriptorArg):
+        if isinstance(x, (TMADescriptorArg, ConstexprArg)):
             return False
         raise NotImplementedError(f"unhandled {type(x)}: {x}")
 

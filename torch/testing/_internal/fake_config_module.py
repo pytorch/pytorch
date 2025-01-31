@@ -24,6 +24,10 @@ e_jk: bool = Config(justknob="does_not_exist", default=True)
 e_jk_false: bool = Config(justknob="does_not_exist", default=False)
 e_env_default: bool = Config(env_name_default="ENV_TRUE", default=False)
 e_env_default_FALSE: bool = Config(env_name_default="ENV_FALSE", default=True)
+e_env_default_str: bool = Config(env_name_default="ENV_STR", default="default")
+e_env_default_str_empty: bool = Config(
+    env_name_default="ENV_STR_EMPTY", default="default"
+)
 e_env_force: bool = Config(env_name_force="ENV_TRUE", default=False)
 e_aliased_bool: bool = Config(
     alias="torch.testing._internal.fake_config_module2.e_aliasing_bool"

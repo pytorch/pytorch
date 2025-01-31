@@ -133,4 +133,7 @@
 	branch = develop
 [submodule "third_party/kleidiai"]
 	path = third_party/kleidiai
-	url = https://git.gitlab.arm.com/kleidi/kleidiai.git
+	url = https://github.com/ARM-software/kleidiai.git
+[submodule "third_party/flash-attention"]
+	path = third_party/flash-attention
+	url = https://github.com/Dao-AILab/flash-attention.git

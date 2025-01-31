@@ -1066,7 +1066,7 @@ def forward(self, x_1):
         self.assertEqual(cf(torch.empty_strided((u0, 2), (2, 1), device="meta")), 0)
         self.assertEqual(cf(torch.empty_strided((2, u0), (1, 2), device="meta")), 0)
         self.assertEqual(cf(torch.empty_strided((u0,), (1,), device="meta")), 0)
-        self.assertEqual(cf(torch.empty_strided((1,), (u0,), device="meta")), 0)
+        self.assertEqual(cf(torch.empty_strided((1,), (u0,), device="meta")), 2)
         Max = torch.sym_max
         self.assertEqual(
             cf(
@@ -1076,7 +1076,7 @@ def forward(self, x_1):
                     device="meta",
                 )
             ),
-            0,
+            2,
         )
 
         # Wobbling these to zero is OK too

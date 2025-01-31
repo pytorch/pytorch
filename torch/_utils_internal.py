@@ -4,7 +4,7 @@ import logging
 import os
 import sys
 import tempfile
-from typing import Any, Callable, Dict, List, Optional, Tuple, TypeVar
+from typing import Any, Callable, Optional, TypeVar
 from typing_extensions import ParamSpec
 
 import torch
@@ -116,7 +116,7 @@ def compile_time_strobelight_meta(
 #
 # Killswitch is at
 # https://www.internalfb.com/intern/justknobs/?name=pytorch%2Fsignpost#event
-def signpost_event(category: str, name: str, parameters: Dict[str, Any]):
+def signpost_event(category: str, name: str, parameters: dict[str, Any]):
     log.info("%s %s: %r", category, name, parameters)
 
 
@@ -231,7 +231,7 @@ def max_clock_rate():
             return 1100
 
 
-def get_mast_job_name_version() -> Optional[Tuple[str, int]]:
+def get_mast_job_name_version() -> Optional[tuple[str, int]]:
     return None
 
 
@@ -256,8 +256,8 @@ def maybe_upload_prof_stats_to_manifold(profile_path: str) -> Optional[str]:
 
 
 def log_chromium_event_internal(
-    event: Dict[str, Any],
-    stack: List[str],
+    event: dict[str, Any],
+    stack: list[str],
     logger_uuid: str,
     start_time_ns: int,
 ):
@@ -265,6 +265,6 @@ def log_chromium_event_internal(
 
 
 def record_chromium_event_internal(
-    event: Dict[str, Any],
+    event: dict[str, Any],
 ):
     return None

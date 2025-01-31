@@ -226,7 +226,7 @@ template <class T, bool AllowDeprecatedTypes>
 struct assert_is_valid_input_type<
     T,
     AllowDeprecatedTypes,
-    std::enable_if_t<std::is_same<std::vector<bool>, T>::value>> {
+    std::enable_if_t<std::is_same_v<std::vector<bool>, T>>> {
   static_assert(
       guts::false_t<T>::value,
       "You tried to register a kernel with an unsupported input type: vector<bool>. Please use List<bool> instead.");
@@ -363,7 +363,7 @@ template <class T, bool AllowDeprecatedTypes>
 struct assert_is_valid_output_type<
     T,
     AllowDeprecatedTypes,
-    std::enable_if_t<std::is_same<std::vector<bool>, T>::value>> {
+    std::enable_if_t<std::is_same_v<std::vector<bool>, T>>> {
   static_assert(
       guts::false_t<T>::value,
       "You tried to register a kernel with an unsupported output type: vector<bool>. Please use List<bool> instead.");
@@ -546,16 +546,15 @@ struct wrap_kernel_functor_unboxed_<
     ReturnType(ParameterTypes...)>
     final {
   static_assert(
-      std::is_same<
+      std::is_same_v<
           ReturnType,
-          typename guts::infer_function_traits_t<KernelFunctor>::return_type>::
-          value,
+          typename guts::infer_function_traits_t<KernelFunctor>::return_type>,
       "Return type mismatch");
   static_assert(
-      std::is_same<
+      std::is_same_v<
           guts::typelist::typelist<ParameterTypes...>,
           typename guts::infer_function_traits_t<
-              KernelFunctor>::parameter_types>::value,
+              KernelFunctor>::parameter_types>,
       "Parameter types mismatch");
 
   // See [Note: Argument forwarding in the dispatcher] for why ParameterTypes
@@ -588,16 +587,15 @@ struct wrap_kernel_functor_unboxed_<
     ReturnType(DispatchKeySet, ParameterTypes...)>
     final {
   static_assert(
-      std::is_same<
+      std::is_same_v<
           ReturnType,
-          typename guts::infer_function_traits_t<KernelFunctor>::return_type>::
-          value,
+          typename guts::infer_function_traits_t<KernelFunctor>::return_type>,
       "Return type mismatch");
   static_assert(
-      std::is_same<
+      std::is_same_v<
           guts::typelist::typelist<DispatchKeySet, ParameterTypes...>,
           typename guts::infer_function_traits_t<
-              KernelFunctor>::parameter_types>::value,
+              KernelFunctor>::parameter_types>,
       "Parameter types mismatch");
 
   // See [Note: Argument forwarding in the dispatcher] for why ParameterTypes

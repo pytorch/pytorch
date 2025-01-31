@@ -1,7 +1,7 @@
 import hashlib
 import os
 from pathlib import Path
-from typing import Dict, NamedTuple
+from typing import NamedTuple
 
 from file_io_utils import (
     copy_file,
@@ -219,8 +219,8 @@ def _merge_lastfailed_files(source_pytest_cache: Path, dest_pytest_cache: Path) 
 
 
 def _merged_lastfailed_content(
-    from_lastfailed: Dict[str, bool], to_lastfailed: Dict[str, bool]
-) -> Dict[str, bool]:
+    from_lastfailed: dict[str, bool], to_lastfailed: dict[str, bool]
+) -> dict[str, bool]:
     """
     The lastfailed files are dictionaries where the key is the test identifier.
     Each entry's value appears to always be `true`, but let's not count on that.

@@ -3,9 +3,10 @@ This file includes public APIs for FSDP such as the classes used for the
 constructor arguments.
 """
 
+from collections.abc import Sequence
 from dataclasses import dataclass
 from enum import auto, Enum
-from typing import Optional, Sequence, Type
+from typing import Optional
 
 import torch
 from torch.nn.modules.batchnorm import _BatchNorm
@@ -223,7 +224,7 @@ class MixedPrecision:
     keep_low_precision_grads: bool = False
     cast_forward_inputs: bool = False
     cast_root_forward_inputs: bool = True
-    _module_classes_to_ignore: Sequence[Type[torch.nn.Module]] = (_BatchNorm,)
+    _module_classes_to_ignore: Sequence[type[torch.nn.Module]] = (_BatchNorm,)
 
 
 @dataclass

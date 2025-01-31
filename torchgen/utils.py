@@ -210,6 +210,29 @@ class FileManager:
         base_env: dict[str, Any] | None = None,
         sharded_keys: set[str],
     ) -> None:
+        self.write_sharded_with_template(
+            filename,
+            filename,
+            items,
+            key_fn=key_fn,
+            env_callable=env_callable,
+            num_shards=num_shards,
+            base_env=base_env,
+            sharded_keys=sharded_keys,
+        )
+
+    def write_sharded_with_template(
+        self,
+        filename: str,
+        template_fn: str,
+        items: Iterable[T],
+        *,
+        key_fn: Callable[[T], str],
+        env_callable: Callable[[T], dict[str, list[str]]],
+        num_shards: int,
+        base_env: dict[str, Any] | None = None,
+        sharded_keys: set[str],
+    ) -> None:
         everything: dict[str, Any] = {"shard_id": "Everything"}
         shards: list[dict[str, Any]] = [
             {"shard_id": f"_{i}"} for i in range(num_shards)
@@ -256,7 +279,9 @@ class FileManager:
         for shard in all_shards:
             shard_id = shard["shard_id"]
             self.write_with_template(
-                f"{base_filename}{shard_id}{extension}", filename, lambda: shard
+                f"{base_filename}{shard_id}{extension}",
+                template_fn,
+                lambda: shard,
             )
 
         # filenames is used to track compiled files, but FooEverything.cpp isn't meant to be compiled

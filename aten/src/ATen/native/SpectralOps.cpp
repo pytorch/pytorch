@@ -590,11 +590,11 @@ Tensor fft_hfftn_symint(
   return fft_hfftn_impl(self, s, dim, norm, {});
 }
 
-const Tensor& fft_hfftn_symint_out(
+Tensor& fft_hfftn_symint_out(
     const Tensor& self,
     at::OptionalSymIntArrayRef s,
     at::OptionalIntArrayRef dim, std::optional<std::string_view> norm,
-    const Tensor& out) {
+    Tensor& out) {
   fft_hfftn_impl(self, s, dim, norm, out);
   return out;
 }
@@ -632,12 +632,12 @@ Tensor fft_ihfftn_symint(
   return fft_ihfftn_impl(self, s, dim, norm, {});
 }
 
-const Tensor& fft_ihfftn_symint_out(
+Tensor& fft_ihfftn_symint_out(
     const Tensor& self,
     at::OptionalSymIntArrayRef s,
     at::OptionalIntArrayRef dim,
     std::optional<std::string_view> norm,
-    const Tensor& out) {
+    Tensor& out) {
   fft_ihfftn_impl(self, s, dim, norm, out);
   return out;
 }
@@ -682,9 +682,9 @@ Tensor& fft_irfft2_symint_out(const Tensor& self, at::OptionalSymIntArrayRef s,
   return native::fft_irfftn_symint_out(self, s, dim, std::move(norm), out);
 }
 
-const Tensor& fft_hfft2_symint_out(
+Tensor& fft_hfft2_symint_out(
     const Tensor& self, at::OptionalSymIntArrayRef s, IntArrayRef dim,
-    std::optional<std::string_view> norm, const Tensor& out) {
+    std::optional<std::string_view> norm, Tensor& out) {
   return native::fft_hfftn_symint_out(self, s, dim, std::move(norm), out);
 }
 
@@ -693,9 +693,9 @@ Tensor fft_hfft2_symint(const Tensor& self, at::OptionalSymIntArrayRef s,
   return native::fft_hfftn_symint(self, s, dim, std::move(norm));
 }
 
-const Tensor& fft_ihfft2_symint_out(
+Tensor& fft_ihfft2_symint_out(
     const Tensor& self, at::OptionalSymIntArrayRef s, IntArrayRef dim,
-    std::optional<std::string_view> norm, const Tensor& out) {
+    std::optional<std::string_view> norm, Tensor& out) {
   return native::fft_ihfftn_symint_out(self, s, dim, std::move(norm), out);
 }
 

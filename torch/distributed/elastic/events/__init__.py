@@ -37,7 +37,7 @@ from .api import (  # noqa: F401
 )
 
 
-_events_loggers: Dict[str, logging.Logger] = {}
+_events_loggers: dict[str, logging.Logger] = {}
 
 
 def _get_or_create_logger(destination: str = "null") -> logging.Logger:

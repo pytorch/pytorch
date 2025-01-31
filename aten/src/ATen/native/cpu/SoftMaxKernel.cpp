@@ -227,7 +227,7 @@ inline void _vec_host_softmax_backward_lastdim(
           scalar_t* grad_input_data = grad_input_data_base + i * dim_size;
           const scalar_t* grad_data = grad_data_base + i * dim_size;
           const scalar_t* output_data = output_data_base + i * dim_size;
-          if (log_softmax) {
+          if constexpr (log_softmax) {
             auto sum = vec::reduce_all<scalar_t>(
                 [](Vec& x, Vec& y) { return x + y; }, grad_data, dim_size);
             vec::map2(

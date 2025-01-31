@@ -1,5 +1,5 @@
 import copy
-from typing import Dict, Optional, Tuple, List
+from typing import Optional
 
 import torch
 from torch._export.pass_base import _ExportPassBaseDeprecatedDoNotUse, PassResult, Argument
@@ -9,7 +9,7 @@ from torch._ops import OpOverload
 
 aten = torch.ops.aten
 
-_NON_FUNCTIONAL_TO_FUNCTIONAL_SIDE_EFFECTFUL_FUNCS: Dict[OpOverload, OpOverload] = {
+_NON_FUNCTIONAL_TO_FUNCTIONAL_SIDE_EFFECTFUL_FUNCS: dict[OpOverload, OpOverload] = {
     aten.sym_constrain_range.default: aten._functional_sym_constrain_range,
     aten._assert_async.msg: aten._functional_assert_async.msg,
 }
@@ -59,8 +59,8 @@ class _FunctionalizeSideEffectfulOpsPass(_ExportPassBaseDeprecatedDoNotUse):
     def call_operator(
         self,
         op: OpOverload,
-        args: Tuple[Argument, ...],
-        kwargs: Dict[str, Argument],
+        args: tuple[Argument, ...],
+        kwargs: dict[str, Argument],
         meta: NodeMetadata,
     ) -> ProxyValue:
         if op not in _NON_FUNCTIONAL_TO_FUNCTIONAL_SIDE_EFFECTFUL_FUNCS:
@@ -88,7 +88,7 @@ class _FunctionalizeSideEffectfulOpsPass(_ExportPassBaseDeprecatedDoNotUse):
 
         return self._dep_token
 
-    def output(self, results: List[Argument], meta: NodeMetadata) -> ProxyValue:
+    def output(self, results: list[Argument], meta: NodeMetadata) -> ProxyValue:
         assert self._dep_token is not None
 
         return super().output(results=(*results, self._dep_token), meta=meta)  # type: ignore[arg-type]

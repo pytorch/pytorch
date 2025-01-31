@@ -14,10 +14,10 @@
 
 #include <c10/core/SymInt.h>
 #include <c10/core/SymFloat.h>
-#include <c10/util/string_view.h>
 #include <cmath>
 #include <cstdint>
 #include <functional>
+#include <string_view>
 
 namespace sdp {
 

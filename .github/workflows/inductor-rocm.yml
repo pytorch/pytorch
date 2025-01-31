@@ -29,13 +29,13 @@ jobs:
       curr_branch: ${{ github.head_ref || github.ref_name }}
       curr_ref_type: ${{ github.ref_type }}
 
-  linux-focal-rocm6_2-py3_10-inductor-build:
-    name: rocm6.2-py3.10-inductor
+  linux-focal-rocm6_3-py3_10-inductor-build:
+    name: rocm6.3-py3.10-inductor
     uses: ./.github/workflows/_linux-build.yml
     needs: get-label-type
     with:
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
-      build-environment: linux-focal-rocm6.2-py3.10
+      build-environment: linux-focal-rocm6.3-py3.10
       docker-image-name: pytorch-linux-focal-rocm-n-py3
       test-matrix: |
         { include: [
@@ -44,15 +44,15 @@ jobs:
         ]}
     secrets: inherit
 
-  linux-focal-rocm6_2-py3_10-inductor-test:
+  linux-focal-rocm6_3-py3_10-inductor-test:
     permissions:
       id-token: write
       contents: read
-    name: rocm6.2-py3.10-inductor
+    name: rocm6.3-py3.10-inductor
     uses: ./.github/workflows/_rocm-test.yml
-    needs: linux-focal-rocm6_2-py3_10-inductor-build
+    needs: linux-focal-rocm6_3-py3_10-inductor-build
     with:
-      build-environment: linux-focal-rocm6.2-py3.10
-      docker-image: ${{ needs.linux-focal-rocm6_2-py3_10-inductor-build.outputs.docker-image }}
-      test-matrix:  ${{ needs.linux-focal-rocm6_2-py3_10-inductor-build.outputs.test-matrix }}
+      build-environment: linux-focal-rocm6.3-py3.10
+      docker-image: ${{ needs.linux-focal-rocm6_3-py3_10-inductor-build.outputs.docker-image }}
+      test-matrix:  ${{ needs.linux-focal-rocm6_3-py3_10-inductor-build.outputs.test-matrix }}
     secrets: inherit

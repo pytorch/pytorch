@@ -2,7 +2,8 @@
 from __future__ import annotations
 
 import logging
-from typing import Callable, Sequence
+from collections.abc import Sequence
+from typing import Callable
 
 from onnxscript import ir
 

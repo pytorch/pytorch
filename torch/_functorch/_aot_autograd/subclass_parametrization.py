@@ -1,49 +1,69 @@
-from typing import List, Tuple
+import dataclasses
+from typing import Any
 
 import torch
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 
 
+# This is technically very similar to SubclassCreatingMeta
+# in aot_autograd, but we don't need all the stuff in there
+# so just recreated a new dataclass.
+@dataclasses.dataclass
+class SubclassCreationMeta:
+    start_idx: int
+    num_tensors: int
+    class_type: Any
+    attrs: dict[str, "SubclassCreationMeta"]
+    metadata: Any
+
+
 class UnwrapTensorSubclass(torch.nn.Module):
     def forward(self, *tensors) -> torch.Tensor:  # type: ignore[no-untyped-def]
-        todo: List[torch.Tensor] = list(tensors)
-        for tp, meta, inner_tensors_attrs in reversed(self.rebuild_stack):
-            num_children: int = len(inner_tensors_attrs)
-            d = {  # noqa: C416
-                a: b for a, b in zip(inner_tensors_attrs, todo[-num_children:])
-            }
-            todo = todo[:-num_children]
-            rebuilt = tp.__tensor_unflatten__(d, meta, None, None)  # type: ignore[attr-defined]
-            todo.append(rebuilt)
+        todo: list[torch.Tensor] = list(tensors)
 
-        assert len(todo) == 1
-        return todo[0]
+        def _unwrap_tensor_subclasses(subclass_meta, tensors, offset):  # type: ignore[no-untyped-def]
+            if subclass_meta is None:
+                return tensors[offset], offset + 1
+            inner_tensors = {}
+            for attr, meta in subclass_meta.attrs.items():
+                built_tensor, offset = _unwrap_tensor_subclasses(meta, tensors, offset)
+                inner_tensors[attr] = built_tensor
+            rebuilt = subclass_meta.class_type.__tensor_unflatten__(
+                inner_tensors, subclass_meta.metadata, None, None
+            )
+            return rebuilt, offset
 
-    def right_inverse(self, tensor: torch.Tensor) -> List[torch.Tensor]:
+        return _unwrap_tensor_subclasses(self.subclass_meta, todo, 0)[0]
+
+    def right_inverse(self, tensor: torch.Tensor) -> list[torch.Tensor]:
         assert type(tensor) is not torch.Tensor
-        rebuild_stack = []
-        plain_tensors = []
-        todo = [tensor]
-        while todo:
-            obj = todo.pop()
-            inner_tensors_attrnames, metadata = obj.__tensor_flatten__()  # type: ignore[attr-defined]
-            inner_tensors_attrnames_stack_order = []
-            subclasses_attrnames = []
-            for attr_name in inner_tensors_attrnames:
-                val = getattr(obj, attr_name)
-                if type(val) is torch.Tensor:
-                    plain_tensors.append(val)
-                    inner_tensors_attrnames_stack_order.append(attr_name)
-                else:
-                    assert isinstance(val, torch.Tensor)
-                    todo.append(val)
-                    subclasses_attrnames.append(attr_name)
-            inner_tensors_attrnames_stack_order.extend(subclasses_attrnames)
-            rebuild_stack.append(
-                (type(obj), metadata, inner_tensors_attrnames_stack_order)
+        plain_tensors: list[torch.Tensor] = []
+
+        def _create_subclass_meta(tensor, idx, plain_tensor_container):  # type: ignore[no-untyped-def]
+            if type(tensor) is torch.Tensor:
+                plain_tensor_container.append(tensor)
+                return None, idx + 1
+            inner_tensors_attrnames, metadata = tensor.__tensor_flatten__()  # type: ignore[attr-defined]
+            new_idx = idx
+            attr_to_meta = {}
+            for attr in inner_tensors_attrnames:
+                val = getattr(tensor, attr)
+                subclass_meta, new_idx = _create_subclass_meta(
+                    val, new_idx, plain_tensor_container
+                )
+                attr_to_meta[attr] = subclass_meta
+            return (
+                SubclassCreationMeta(
+                    start_idx=idx,
+                    num_tensors=new_idx - idx,
+                    class_type=type(tensor),
+                    attrs=attr_to_meta,
+                    metadata=metadata,
+                ),
+                new_idx,
             )
 
-        self.rebuild_stack = rebuild_stack
+        self.subclass_meta = _create_subclass_meta(tensor, 0, plain_tensors)[0]
         return plain_tensors
 
 
@@ -59,7 +79,7 @@ def unwrap_tensor_subclass_parameters(module: torch.nn.Module) -> torch.nn.Modul
     becomes: {"parametrizations.p2.original0": torch.Tensor, "parametrizations.p2.original1": torch.Tensor}
 
     """
-    name_param: List[Tuple[str, torch.nn.Parameter]] = list(
+    name_param: list[tuple[str, torch.nn.Parameter]] = list(
         module.named_parameters(recurse=False)
     )
     for name, param in name_param:

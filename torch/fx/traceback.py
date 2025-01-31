@@ -4,7 +4,7 @@ import json
 import traceback
 from contextlib import contextmanager
 from enum import Enum
-from typing import Any, Dict, List, Optional
+from typing import Any, Optional, Union
 
 from ._compatibility import compatibility
 from .graph import Graph
@@ -25,12 +25,12 @@ __all__ = [
     "get_graph_provenance_json",
 ]
 
-current_meta: Dict[str, Any] = {}
+current_meta: dict[str, Any] = {}
 should_preserve_node_meta = False
 
 
 @compatibility(is_backward_compatible=False)
-class NodeSourceAction(str, Enum):
+class NodeSourceAction(Enum):
     CREATE = "create"
     REPLACE = "replace"
 
@@ -49,17 +49,24 @@ class NodeSource:
             self.graph_id = graph_id
 
     pass_name: str
-    action: Optional["NodeSourceAction"]
-    from_node: List["NodeSource"]
+    action: list["NodeSourceAction"]
+    from_node: list["NodeSource"]
     node_info: Optional["NodeInfo"]
 
     def __init__(
         self,
         node: Optional[Node],
         pass_name: str = "",
-        action: Optional["NodeSourceAction"] = None,
+        action: Optional[Union["NodeSourceAction", list["NodeSourceAction"]]] = None,
     ):
         self.pass_name = pass_name
+
+        if action is None:
+            action = []
+        elif not isinstance(action, list):
+            action = [action]
+        for a in action:
+            assert isinstance(a, NodeSourceAction)
         self.action = action
         if node:
             self.node_info = self.NodeInfo(
@@ -89,13 +96,17 @@ class NodeSource:
     def __repr__(self):
         return self.print_readable()
 
+    def _get_action_string(self):
+        return "+".join([a.name.lower() for a in self.action])
+
     def print_readable(self, indent=0):
         if indent > 9:
             return ""
         result = ""
+        action_string = self._get_action_string()
         result += (
             " " * indent * 4
-            + f"(name={self.name}, pass_name={self.pass_name}, action={self.action}, graph_id={self.graph_id})\n"
+            + f"(name={self.name}, pass_name={self.pass_name}, action={action_string}, graph_id={self.graph_id})\n"
         )
         for item in self.from_node:
             result += item.print_readable(indent + 1)
@@ -103,35 +114,39 @@ class NodeSource:
 
     def to_dict(self) -> dict:
         # Convert the object to a dictionary
+        action_string = self._get_action_string()
         return {
             "name": self.name,
             "target": self.target,
             "graph_id": self.graph_id,
             "pass_name": self.pass_name,
-            "action": self.action,
+            "action": action_string,
             "from_node": [node.to_dict() for node in self.from_node],
         }
 
 
 @compatibility(is_backward_compatible=False)
 @contextmanager
-def preserve_node_meta():
+def preserve_node_meta(enable=True):
     global should_preserve_node_meta
     global current_meta
-
-    saved_should_preserve_node_meta = should_preserve_node_meta
-    # Shallow copy is OK since fields of current_meta are not mutated
-    saved_current_meta = current_meta.copy()
-    try:
-        should_preserve_node_meta = True
+    # If enable is False, this context manager is a no-op
+    if not enable:
         yield
-    finally:
-        should_preserve_node_meta = saved_should_preserve_node_meta
-        current_meta = saved_current_meta
+    else:
+        saved_should_preserve_node_meta = should_preserve_node_meta
+        # Shallow copy is OK since fields of current_meta are not mutated
+        saved_current_meta = current_meta.copy()
+        try:
+            should_preserve_node_meta = True
+            yield
+        finally:
+            should_preserve_node_meta = saved_should_preserve_node_meta
+            current_meta = saved_current_meta
 
 
 @compatibility(is_backward_compatible=False)
-def set_stack_trace(stack: List[str]):
+def set_stack_trace(stack: list[str]):
     global current_meta
 
     if should_preserve_node_meta and stack:
@@ -167,7 +182,7 @@ def reset_grad_fn_seq_nr():
 
 
 @compatibility(is_backward_compatible=False)
-def format_stack() -> List[str]:
+def format_stack() -> list[str]:
     if should_preserve_node_meta:
         return [current_meta.get("stack_trace", "")]
     else:
@@ -204,7 +219,7 @@ def set_current_meta(node, pass_name=""):
 
 
 @compatibility(is_backward_compatible=False)
-def get_current_meta() -> Dict[str, Any]:
+def get_current_meta() -> dict[str, Any]:
     return current_meta
 
 

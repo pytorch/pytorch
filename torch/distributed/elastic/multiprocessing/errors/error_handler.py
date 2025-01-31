@@ -13,7 +13,7 @@ import os
 import time
 import traceback
 import warnings
-from typing import Any, Dict, Optional
+from typing import Any, Optional
 
 
 __all__ = ["ErrorHandler"]
@@ -86,7 +86,7 @@ class ErrorHandler:
     def override_error_code_in_rootcause_data(
         self,
         rootcause_error_file: str,
-        rootcause_error: Dict[str, Any],
+        rootcause_error: dict[str, Any],
         error_code: int = 0,
     ):
         """Modify the rootcause_error read from the file, to correctly set the exit code."""

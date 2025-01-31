@@ -6,7 +6,7 @@ import os
 import sys
 from dataclasses import dataclass
 from functools import partial, wraps
-from typing import Callable, List
+from typing import Callable
 
 import torch
 import torch.fx as fx
@@ -22,8 +22,8 @@ is_tuple = object()
 
 @dataclass
 class LoadTensorMeta:
-    size: List[int]
-    stride: List[int]
+    size: list[int]
+    stride: list[int]
     dtype: torch.dtype
     device: torch.device
 
@@ -164,7 +164,7 @@ def is_power_of_two(n):
 @dataclass
 class ReproState:
     graph: fx.Graph
-    inps: List[torch.Tensor]
+    inps: list[torch.Tensor]
 
     def __post_init__(self):
         ph_nodes = get_placeholders(self.graph)

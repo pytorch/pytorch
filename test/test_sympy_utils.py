@@ -5,7 +5,7 @@ import itertools
 import math
 import pickle
 import sys
-from typing import Callable, List, Tuple, Type
+from typing import Callable
 
 import sympy
 
@@ -594,7 +594,7 @@ class TestSympyInterp(TestCase):
                     self.fail(f"Unexpected error for {fn}{args}: {str(e)}")
 
 
-def type_name_fn(type: Type) -> str:
+def type_name_fn(type: type) -> str:
     return type.__name__
 
 
@@ -606,7 +606,7 @@ def parametrize_relational_types(*types):
 
 
 class TestSympySolve(TestCase):
-    def _create_integer_symbols(self) -> List[sympy.Symbol]:
+    def _create_integer_symbols(self) -> list[sympy.Symbol]:
         return sympy.symbols("a b c", integer=True)
 
     def test_give_up(self):
@@ -665,9 +665,9 @@ class TestSympySolve(TestCase):
 
     def _test_cases(
         self,
-        cases: List[Tuple[sympy.Basic, sympy.Basic]],
+        cases: list[tuple[sympy.Basic, sympy.Basic]],
         thing: sympy.Basic,
-        op: Type[sympy.Rel],
+        op: type[sympy.Rel],
         **kwargs,
     ):
         for source, expected in cases:
@@ -761,7 +761,7 @@ class TestSympySolve(TestCase):
             Le: (Le(FloorDiv(a, pos), integer), (integer + 1) * pos),
         }[op]
 
-        cases: List[Tuple[sympy.Basic, sympy.Basic]] = [
+        cases: list[tuple[sympy.Basic, sympy.Basic]] = [
             # 'b' is not strictly positive
             (op(FloorDiv(a, b), integer), None),
             # 'c' is not strictly positive

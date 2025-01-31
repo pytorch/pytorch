@@ -1,7 +1,7 @@
 # mypy: allow-untyped-defs
 import collections
 import enum
-from typing import Any, Dict, List, Optional, Set, Tuple
+from typing import Any, Optional
 
 import torch
 from torch.ao.quantization import FakeQuantizeBase, ObserverBase
@@ -21,7 +21,7 @@ from .pattern_utils import (
 toq = torch.ops.quantized
 
 
-def _get_output_nodes(g: Graph) -> List[Node]:
+def _get_output_nodes(g: Graph) -> list[Node]:
     return [n for n in g.nodes if n.op == "output"]
 
 
@@ -37,16 +37,16 @@ class _NSGraphMatchableSubgraphsIterator:
     def __init__(
         self,
         gm: GraphModule,
-        non_matchable_functions: Set[NSNodeTargetType],
-        non_matchable_modules: Set[NSNodeTargetType],
-        non_matchable_methods: Set[NSNodeTargetType],
+        non_matchable_functions: set[NSNodeTargetType],
+        non_matchable_modules: set[NSNodeTargetType],
+        non_matchable_methods: set[NSNodeTargetType],
     ):
         self.gm: GraphModule = gm
-        self.non_matchable_functions: Set[NSNodeTargetType] = non_matchable_functions
-        self.non_matchable_modules: Set[NSNodeTargetType] = non_matchable_modules
-        self.non_matchable_methods: Set[NSNodeTargetType] = non_matchable_methods
-        self.seen_nodes: Set[Node] = set()
-        self.stack: List[Node] = []
+        self.non_matchable_functions: set[NSNodeTargetType] = non_matchable_functions
+        self.non_matchable_modules: set[NSNodeTargetType] = non_matchable_modules
+        self.non_matchable_methods: set[NSNodeTargetType] = non_matchable_methods
+        self.seen_nodes: set[Node] = set()
+        self.stack: list[Node] = []
         for start_node in _get_output_nodes(self.gm.graph):
             self.stack.append(start_node)
 
@@ -181,7 +181,7 @@ def _get_subgraph_relationship_type(
     subgraph_b: NSSubgraph,
     gm_a: GraphModule,
     gm_b: GraphModule,
-    type_a_related_to_b: Set[Tuple[NSNodeTargetType, NSNodeTargetType]],
+    type_a_related_to_b: set[tuple[NSNodeTargetType, NSNodeTargetType]],
 ) -> SubgraphTypeRelationship:
     node_a = subgraph_a.base_op_node
     node_b = subgraph_b.base_op_node
@@ -250,8 +250,8 @@ def _get_subgraph_relationship_type(
 def _get_name_for_subgraph(
     subgraph_a: NSSubgraph,
     gm_a: GraphModule,
-    base_name_to_sets_of_related_ops: Dict[str, Set[NSNodeTargetType]],
-    existing_names: Set[str],
+    base_name_to_sets_of_related_ops: dict[str, set[NSNodeTargetType]],
+    existing_names: set[str],
 ) -> str:
     """
     Returns a unique name for a subgraph. This name is based on two things:
@@ -313,9 +313,9 @@ def _get_node_target_type(node: Node, gm: GraphModule) -> Optional[NSNodeTargetT
 def get_matching_subgraph_pairs(
     gm_a: GraphModule,
     gm_b: GraphModule,
-    base_name_to_sets_of_related_ops: Optional[Dict[str, Set[NSNodeTargetType]]] = None,
-    unmatchable_types_map: Optional[Dict[str, Set[NSNodeTargetType]]] = None,
-) -> Dict[str, Tuple[NSSubgraph, NSSubgraph]]:
+    base_name_to_sets_of_related_ops: Optional[dict[str, set[NSNodeTargetType]]] = None,
+    unmatchable_types_map: Optional[dict[str, set[NSNodeTargetType]]] = None,
+) -> dict[str, tuple[NSSubgraph, NSSubgraph]]:
     """
     Matches matchable subgraphs of graph_a to graph_b.
 
@@ -396,8 +396,8 @@ def get_matching_subgraph_pairs(
         base_name_to_sets_of_related_ops = get_base_name_to_sets_of_related_ops()
     type_a_related_to_b = get_type_a_related_to_b(base_name_to_sets_of_related_ops)
 
-    existing_names_a: Set[str] = set()
-    existing_names_b: Set[str] = set()
+    existing_names_a: set[str] = set()
+    existing_names_b: set[str] = set()
 
     while True:
         # fetch the next subgraphs from a and b

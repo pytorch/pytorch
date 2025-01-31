@@ -16,15 +16,21 @@ DOCKER_RUN = set -eou pipefail; ${DOCKER_CMD} run --rm -i \
 	magma/build_magma.sh
 
 .PHONY: all
+all: magma-cuda128
 all: magma-cuda126
 all: magma-cuda124
-all: magma-cuda121
 all: magma-cuda118
 
 .PHONY:
 clean:
 	$(RM) -r magma-*
 	$(RM) -r output
+
+.PHONY: magma-cuda128
+magma-cuda128: DESIRED_CUDA := 12.8
+magma-cuda128: CUDA_ARCH_LIST += -gencode arch=compute_100,code=sm_100 -gencode arch=compute_120,code=sm_120
+magma-cuda128:
+	$(DOCKER_RUN)
 
 .PHONY: magma-cuda126
 magma-cuda126: DESIRED_CUDA := 12.6
@@ -34,11 +40,6 @@ magma-cuda126:
 .PHONY: magma-cuda124
 magma-cuda124: DESIRED_CUDA := 12.4
 magma-cuda124:
-	$(DOCKER_RUN)
-
-.PHONY: magma-cuda121
-magma-cuda121: DESIRED_CUDA := 12.1
-magma-cuda121:
 	$(DOCKER_RUN)
 
 .PHONY: magma-cuda118

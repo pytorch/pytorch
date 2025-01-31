@@ -11,11 +11,11 @@ import sys
 import time
 import urllib
 import urllib.parse
-from typing import Any, Callable, Dict, List, Optional, Tuple
+from typing import Any, Callable, Optional
 from urllib.request import Request, urlopen
 
 
-def parse_json_and_links(conn: Any) -> Tuple[Any, Dict[str, Dict[str, str]]]:
+def parse_json_and_links(conn: Any) -> tuple[Any, dict[str, dict[str, str]]]:
     links = {}
     # Extract links which GH uses for pagination
     # see https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/Link
@@ -42,7 +42,7 @@ def parse_json_and_links(conn: Any) -> Tuple[Any, Dict[str, Dict[str, str]]]:
 def fetch_url(
     url: str,
     *,
-    headers: Optional[Dict[str, str]] = None,
+    headers: Optional[dict[str, str]] = None,
     reader: Callable[[Any], Any] = lambda x: x.read(),
     retries: Optional[int] = 3,
     backoff_timeout: float = 0.5,
@@ -83,7 +83,7 @@ def parse_args() -> Any:
     return parser.parse_args()
 
 
-def fetch_jobs(url: str, headers: Dict[str, str]) -> List[Dict[str, str]]:
+def fetch_jobs(url: str, headers: dict[str, str]) -> list[dict[str, str]]:
     response, links = fetch_url(url, headers=headers, reader=parse_json_and_links)
     jobs = response["jobs"]
     assert type(jobs) is list
@@ -111,7 +111,7 @@ def fetch_jobs(url: str, headers: Dict[str, str]) -> List[Dict[str, str]]:
 # running.
 
 
-def find_job_id_name(args: Any) -> Tuple[str, str]:
+def find_job_id_name(args: Any) -> tuple[str, str]:
     # From https://docs.github.com/en/actions/learn-github-actions/environment-variables
     PYTORCH_REPO = os.environ.get("GITHUB_REPOSITORY", "pytorch/pytorch")
     PYTORCH_GITHUB_API = f"https://api.github.com/repos/{PYTORCH_REPO}"

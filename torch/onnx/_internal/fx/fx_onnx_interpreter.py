@@ -5,7 +5,7 @@ import inspect
 import logging
 import operator
 import re
-from typing import Callable, Sequence
+from typing import Callable, TYPE_CHECKING
 
 import onnxscript
 from onnxscript.function_libs.torch_lib import (
@@ -23,6 +23,10 @@ from torch.onnx._internal.fx import (
     type_utils as fx_type_utils,
 )
 from torch.utils import _pytree
+
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
 
 
 def _fx_node_to_onnx_message_formatter(

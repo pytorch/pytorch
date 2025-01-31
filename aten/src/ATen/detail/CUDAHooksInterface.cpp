@@ -1,7 +1,5 @@
 #include <ATen/detail/CUDAHooksInterface.h>
 
-#include <memory>
-
 namespace at {
 namespace detail {
 
@@ -22,16 +20,15 @@ namespace detail {
 // you're probably losing only a word (the vptr in the allocated object.)
 
 const CUDAHooksInterface& getCUDAHooks() {
-  auto create_impl= [] {
+  auto create_impl = [] {
 #if !defined C10_MOBILE
-    auto cuda_hooks =
-        CUDAHooksRegistry()->Create("CUDAHooks", CUDAHooksArgs{});
-    if (cuda_hooks) {
-      return cuda_hooks;
+    auto hooks = CUDAHooksRegistry()->Create("CUDAHooks", CUDAHooksArgs{});
+    if (hooks) {
+      return hooks;
     }
 #endif
     return std::make_unique<CUDAHooksInterface>();
-    };
+  };
   // NB: The static initialization here implies that if you try to call any CUDA
   // functionality before libATen_cuda.so is loaded, CUDA is permanently
   // disabled for that copy of ATen.  In principle, we can relax this
@@ -39,8 +36,8 @@ const CUDAHooksInterface& getCUDAHooks() {
   // for an example where we relax this restriction (but if you try to avoid
   // needing a lock, be careful; it doesn't look like Registry.h is thread
   // safe...)
-  static auto cuda_hooks = create_impl();
-  return *cuda_hooks;
+  static auto hooks = create_impl();
+  return *hooks;
 }
 } // namespace detail
 

@@ -108,9 +108,9 @@ class DeviceInterface(device_interface.DeviceInterface):
     def synchronize(device) -> None:
         pass
 
-    @staticmethod
-    def get_device_properties(device) -> DeviceProperties:
-        raise NotImplementedError
+    @classmethod
+    def get_device_properties(cls, device=None) -> DeviceProperties:
+        return cls.Worker.get_device_properties(device)
 
     # Can be mock patched by @patch decorator.
     @staticmethod

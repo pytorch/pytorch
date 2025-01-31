@@ -3,9 +3,13 @@ from __future__ import annotations
 import functools
 import inspect
 import traceback
-from typing import Any, Callable, Mapping, Sequence
+from typing import Any, Callable, TYPE_CHECKING
 
 from torch.onnx._internal.diagnostics.infra import _infra, formatter
+
+
+if TYPE_CHECKING:
+    from collections.abc import Mapping, Sequence
 
 
 def python_frame(frame: traceback.FrameSummary) -> _infra.StackFrame:

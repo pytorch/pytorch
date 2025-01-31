@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from typing import Any, cast, List, NamedTuple, Optional, Tuple
+from typing import Any, cast, NamedTuple, Optional
 
 import torch
 from torch.distributed.device_mesh import DeviceMesh
@@ -16,7 +16,7 @@ class TensorMeta(NamedTuple):
     # intentionally to stay simple only for sharding
     # propagation purposes.
     shape: torch.Size
-    stride: Tuple[int, ...]
+    stride: tuple[int, ...]
     dtype: torch.dtype
 
 
@@ -24,7 +24,7 @@ class TensorMeta(NamedTuple):
 @dataclass
 class DTensorSpec:
     mesh: DeviceMesh
-    placements: Tuple[Placement, ...]
+    placements: tuple[Placement, ...]
 
     # tensor meta will only be set during sharding propagation
     tensor_meta: Optional[TensorMeta] = None
@@ -107,7 +107,7 @@ class DTensorSpec:
         return self.tensor_meta.shape
 
     @property
-    def stride(self) -> Tuple[int, ...]:
+    def stride(self) -> tuple[int, ...]:
         if self.tensor_meta is None:
             raise ValueError("tensor_meta is not set")
         return self.tensor_meta.stride
@@ -133,7 +133,7 @@ class DTensorSpec:
         return self.mesh
 
     @property
-    def dim_map(self) -> List[int]:
+    def dim_map(self) -> list[int]:
         """
         dim_map is a property we derive from `placements` of
         the distributed tensor. It simply return a list of ints
@@ -170,7 +170,7 @@ class DTensorSpec:
         return r
 
     @property
-    def num_shards_map(self) -> List[int]:
+    def num_shards_map(self) -> list[int]:
         """
         dim_map is a property we derive from `placements` of
         the distributed tensor. Unlike `dim_map`, `num_shards_map`
@@ -193,7 +193,7 @@ class DTensorSpec:
         return r
 
     @property
-    def sums(self) -> List[int]:
+    def sums(self) -> list[int]:
         """
         sums is a property we derive from `placements` of the
         distributed tensor. It simply return a list of ints where
@@ -209,8 +209,8 @@ class DTensorSpec:
     def from_dim_map(
         cls,
         mesh: DeviceMesh,
-        dim_map: List[int],
-        sums: List[int],
+        dim_map: list[int],
+        sums: list[int],
         tensor_meta: Optional[TensorMeta] = None,
     ) -> "DTensorSpec":
         """
@@ -228,7 +228,7 @@ class DTensorSpec:
             a class:`DTensorSpec` object
         """
         # by default replicate on device mesh dims
-        placements: List[Placement] = [Replicate() for _ in range(mesh.ndim)]
+        placements: list[Placement] = [Replicate() for _ in range(mesh.ndim)]
 
         # find all mesh dims that need pending reductions
         for s in sums:

@@ -62,7 +62,7 @@ std::shared_ptr<NCCLComm> NCCLComm::create(
   return comm;
 }
 
-#ifdef NCCL_HAS_COMM_NONBLOCKING
+#ifdef NCCL_HAS_CONFIG
 std::shared_ptr<NCCLComm> NCCLComm::create(
     int numRanks,
     int rank,
@@ -87,7 +87,7 @@ std::shared_ptr<NCCLComm> NCCLComm::create(
   comm->initialized_ = !comm->nonBlocking_;
   return comm;
 }
-#endif
+#endif // NCCL_HAS_CONFIG
 
 ncclComm_t NCCLComm::getNcclComm() {
   LockType lock(mutex_);
@@ -377,7 +377,7 @@ std::string NCCLComm::repr() const {
   return c10::str((void*)ncclComm_);
 }
 
-#if defined(IS_NCCLX) && defined(NCCL_COMM_DUMP)
+#if (defined(IS_NCCLX) || defined(USE_ROCM)) && defined(NCCL_COMM_DUMP)
 std::unordered_map<std::string, std::string> NCCLComm::ncclCommDump() {
   std::unordered_map<std::string, std::string> dump;
   if (isAborted()) {
@@ -390,11 +390,9 @@ std::unordered_map<std::string, std::string> NCCLComm::ncclCommDump() {
 #endif
 
 std::string getNcclVersion() {
-  static c10::once_flag ncclGetVersionFlag;
-  static std::string versionString;
-
-  c10::call_once(ncclGetVersionFlag, []() {
+  static std::string versionString = []() {
     int version = 0;
+    std::string versionString;
     ncclResult_t status = ncclGetVersion(&version);
     // can't compute the version if call did not return successfully or version
     // code < 100 (corresponding to 0.1.0)
@@ -417,12 +415,12 @@ std::string getNcclVersion() {
       }
 #endif
     }
-  });
+    return versionString;
+  }();
 
   return versionString;
 }
 
-#ifdef USE_C10D_NCCL
 size_t hashTensors(const std::vector<at::Tensor>& tensors) {
   size_t hash = 0;
   for (auto& tensor : tensors) {
@@ -443,7 +441,6 @@ size_t hashTensors(const std::vector<at::Tensor>& tensors) {
   }
   return hash;
 }
-#endif
 
 // Default value: 30 minutes
 int nccl_nonblocking_timeout() {
@@ -519,6 +516,17 @@ std::string getNcclErrorDetailStr(
       interpret = "Unknown NCCL error!";
   }
   return interpret + err;
+}
+
+// Dump proxyTrace log to stdout
+void printNcclCommProxyTrace(
+    std::string& dumpReason,
+    const std::unordered_map<std::string, std::string>& dumpMap) {
+  LOG(INFO) << "Dumping nccl comm trace, reason: " << dumpReason;
+  for (auto& [key, value] : dumpMap) {
+    LOG(INFO) << "key: " << key << ", value: " << value;
+  }
+  LOG(INFO) << "----------------------";
 }
 
 } // namespace c10d

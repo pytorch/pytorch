@@ -159,7 +159,7 @@ class TestCppExtensionJIT(common.TestCase):
                     f"Output: {output} "
                 )
 
-            actual_arches = sorted(re.findall(r"sm_\d\d", output))
+            actual_arches = sorted(re.findall(r"sm_\d+", output))
             expected_arches = sorted(["sm_" + xx for xx in expected_values])
             self.assertEqual(
                 actual_arches,

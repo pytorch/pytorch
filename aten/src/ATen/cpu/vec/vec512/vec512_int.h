@@ -8,8 +8,8 @@
 #include <c10/macros/Macros.h>
 #include <c10/util/irange.h>
 
-namespace at {
-namespace vec {
+
+namespace at::vec {
 inline namespace CPU_CAPABILITY {
 
 #ifdef CPU_CAPABILITY_AVX512
@@ -277,6 +277,12 @@ public:
     return *this;
   }
   Vectorized<int32_t> neg() const;
+  int32_t reduce_add() const {
+    return _mm512_reduce_add_epi32(values);
+  }
+  int32_t reduce_max() const {
+    return _mm512_reduce_max_epi32(values);
+  }
   Vectorized<int32_t> operator==(const Vectorized<int32_t>& other) const {
     auto mask = _mm512_cmpeq_epi32_mask(values, other.values);
     return _mm512_mask_set1_epi32(zero_vector, mask, 0xFFFFFFFF);
@@ -1456,4 +1462,4 @@ Vectorized<uint8_t> inline operator>>(const Vectorized<uint8_t>& a, const Vector
 
 #endif
 
-}}}
+}}

@@ -42,7 +42,7 @@ auto constexpr MAX_PAYLOAD_LEN = 8 * 1024 * 1024;
 // This controls the preferred size for buffers.
 // Too small and we'll need multiple buffers for one request
 // Too big and we might taxing malloc
-auto constexpr ALLOC_BUFFER_SIZE = size_t(4000);
+auto constexpr ALLOC_BUFFER_SIZE = size_t(4096);
 class UvHandle : public c10::intrusive_ptr_target {
  public:
   ~UvHandle() override = default;
@@ -116,15 +116,6 @@ class UvTcpSocket : public UvHandle {
       const uv_buf_t* buf) {
     auto uv_socket = UvTcpSocket::borrow(client);
 
-    if (nread < 0) {
-      C10D_DEBUG(
-          "Read callback failed. code:{} name:{} desc:{}",
-          nread,
-          uv_err_name(nread),
-          uv_strerror(nread));
-      uv_socket->close();
-      return;
-    }
     if (nread > 0) {
       try {
         uv_socket->processBuf(buf, nread);
@@ -132,6 +123,20 @@ class UvTcpSocket : public UvHandle {
         C10D_WARNING("Error processing client message: {}", ex.what());
         uv_socket->close();
       }
+    } else {
+      // Handle error and EOF cases
+      if (nread < 0) {
+        C10D_DEBUG(
+            "Read callback failed. code:{} name:{} desc:{}",
+            nread,
+            uv_err_name(nread),
+            uv_strerror(nread));
+      } else {
+        C10D_DEBUG("Remote peer closed the connection.");
+      }
+      uv_socket->close();
+      // NOLINTNEXTLINE(cppcoreguidelines-no-malloc)
+      free(buf->base);
     }
   }
 
@@ -616,6 +621,15 @@ class ChunkedStream {
 class LibUVStoreDaemon : public BackgroundThread {
  public:
   explicit LibUVStoreDaemon(int port);
+  // Disable copy constructor
+  LibUVStoreDaemon(const LibUVStoreDaemon& other) = delete;
+  // Disable move constructor
+  LibUVStoreDaemon(LibUVStoreDaemon&& other) = delete;
+  // Disable copy assignment operator
+  LibUVStoreDaemon& operator=(const LibUVStoreDaemon& other) = delete;
+  // Disable move assignment operator
+  LibUVStoreDaemon& operator=(LibUVStoreDaemon&& other) = delete;
+
   ~LibUVStoreDaemon() override;
 
   uint16_t port() const override;

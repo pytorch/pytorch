@@ -15,8 +15,8 @@
 #include <ATen/cpu/vec/sve/vec_qint.h>
 #endif
 
-namespace at {
-namespace vec {
+
+namespace at::vec {
 // Note [CPU_CAPABILITY namespace]
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 // This header, and all of its subheaders, will be compiled with
@@ -173,4 +173,4 @@ inline deinterleave2<float>(const Vectorized<float>& a, const Vectorized<float>&
 
 #endif // defined(CPU_CAPABILITY_SVE)
 
-}}}
+}}

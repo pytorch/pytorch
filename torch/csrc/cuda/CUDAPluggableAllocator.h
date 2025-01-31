@@ -34,7 +34,7 @@ struct TORCH_CUDA_CPP_API CUDAPluggableAllocatorDeleterContext {
   void* data_;
   size_t size_;
   int device_;
-  cudaStream_t stream_;
+  cudaStream_t stream_{};
 };
 
 #if defined(TORCH_HIP_VERSION)
@@ -63,7 +63,7 @@ struct _AllocationMetadata {
       cudaStream_t stream);
   size_t size;
   c10::DeviceIndex device_idx;
-  cudaStream_t stream;
+  cudaStream_t stream{};
 };
 
 struct TORCH_CUDA_CPP_API CUDAPluggableAllocator

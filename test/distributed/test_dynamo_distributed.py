@@ -7,7 +7,6 @@ import unittest
 from contextlib import contextmanager
 from datetime import timedelta
 from io import StringIO
-from typing import List
 from unittest.mock import patch
 
 import numpy as np
@@ -1959,7 +1958,7 @@ class TestSingleProc(DynamoDistributedSingleProcTestCase):
         model = ModuleWithStaticMethod(False)
         x = torch.randn((2, 3), device="cuda")
         ref_out = model(x)
-        test_outs: List[torch.Tensor] = []
+        test_outs: list[torch.Tensor] = []
 
         for use_self in (False, True):
             model = ModuleWithStaticMethod(use_self)

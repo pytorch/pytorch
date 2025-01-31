@@ -6,6 +6,7 @@ This module contains functionality to support the JIT's scripting frontend, nota
 This is not intended to be imported directly; please use the exposed
 functionalities in `torch.jit`.
 """
+
 import collections
 import copy
 import enum
@@ -13,7 +14,7 @@ import functools
 import inspect
 import pickle
 import warnings
-from typing import Any, Callable, Dict, List, Set, Tuple, Union
+from typing import Any, Callable, Union
 
 import torch
 import torch._jit_internal as _jit_internal
@@ -277,12 +278,12 @@ class OrderedModuleDict(OrderedDictWrapper):
 class ScriptMeta(type):
     def __init__(cls, name, bases, attrs):  # noqa: B902
         # Aggregate all the ScriptMethods and constants from superclasses
-        cls._methods: Dict[str, Any] = {}
+        cls._methods: dict[str, Any] = {}
         cls._constants_set = set(getattr(cls, "__constants__", ()))
         for base in reversed(bases):
             for k, v in getattr(base, "_methods", {}).items():
                 cls._methods[k] = v
-            base_constants: Set = getattr(base, "_constants_set", set())
+            base_constants: set = getattr(base, "_constants_set", set())
             cls._constants_set = cls._constants_set.union(base_constants)
 
         # find all the script methods of the current class
@@ -1020,7 +1021,9 @@ def call_prepare_scriptable_func_impl(obj, memo):
     if obj_id in memo:
         return memo[id(obj)]
 
-    obj = obj.__prepare_scriptable__() if hasattr(obj, "__prepare_scriptable__") else obj  # type: ignore[operator]
+    obj = (
+        obj.__prepare_scriptable__() if hasattr(obj, "__prepare_scriptable__") else obj
+    )  # type: ignore[operator]
     # Record obj in memo to avoid infinite recursion in the case of cycles in the module
     # hierarchy when recursing below.
     memo[obj_id] = obj
@@ -1046,7 +1049,7 @@ def call_prepare_scriptable_func_impl(obj, memo):
 
 
 def call_prepare_scriptable_func(obj):
-    memo: Dict[int, torch.nn.Module] = {}
+    memo: dict[int, torch.nn.Module] = {}
     return call_prepare_scriptable_func_impl(obj, memo)
 
 
@@ -1089,7 +1092,7 @@ def _script_impl(
     optimize=None,
     _frames_up=0,
     _rcb=None,
-    example_inputs: Union[List[Tuple], Dict[Callable, List[Tuple]], None] = None,
+    example_inputs: Union[list[tuple], dict[Callable, list[tuple]], None] = None,
 ):
     global type_trace_db
 
@@ -1118,7 +1121,7 @@ def _script_impl(
         if monkeytype_trace:
             monkeytype_config = JitTypeTraceConfig(type_trace_db)
             with monkeytype_trace(monkeytype_config):
-                if isinstance(example_inputs, Dict):
+                if isinstance(example_inputs, dict):
                     # If the obj is an nn.Module or a class, then each method is
                     # executed with the arguments provided in the example inputs.
                     # example inputs here will be of type Dict(class.method, (arguments))
@@ -1127,7 +1130,7 @@ def _script_impl(
                     for module, example_input in example_inputs.items():
                         for example in example_input:
                             module(*example)
-                elif isinstance(example_inputs, List):
+                elif isinstance(example_inputs, list):
                     for examples in example_inputs:
                         obj(*examples)
                 else:
@@ -1148,7 +1151,11 @@ def _script_impl(
             obj, torch.jit._recursive.infer_methods_to_compile
         )
     else:
-        obj = obj.__prepare_scriptable__() if hasattr(obj, "__prepare_scriptable__") else obj  # type: ignore[operator]
+        obj = (
+            obj.__prepare_scriptable__()
+            if hasattr(obj, "__prepare_scriptable__")
+            else obj
+        )  # type: ignore[operator]
 
     if isinstance(obj, dict):
         return create_script_dict(obj)
@@ -1220,7 +1227,7 @@ def script(
     optimize=None,
     _frames_up=0,
     _rcb=None,
-    example_inputs: Union[List[Tuple], Dict[Callable, List[Tuple]], None] = None,
+    example_inputs: Union[list[tuple], dict[Callable, list[tuple]], None] = None,
 ):
     r"""Script the function.
 
@@ -1374,6 +1381,7 @@ def script(
             import torch
             import torch.nn as nn
 
+
             class MyModule(nn.Module):
                 def __init__(self) -> None:
                     super().__init__()
@@ -1387,12 +1395,14 @@ def script(
                     # This function won't be compiled, so any
                     # Python APIs can be used
                     import pdb
+
                     pdb.set_trace()
 
                 def forward(self, input):
                     if self.training:
                         self.python_only_fn(input)
                     return input * 99
+
 
             scripted_module = torch.jit.script(MyModule())
             print(scripted_module.some_entry_point(torch.randn(2, 2)))
@@ -1619,14 +1629,14 @@ class _ScriptProfileColumn:
         self.header = header
         self.alignment = alignment
         self.offset = offset
-        self.rows: Dict[int, Any] = {}
+        self.rows: dict[int, Any] = {}
 
     def add_row(self, lineno: int, value: Any):
         self.rows[lineno] = value
 
     def materialize(self):
         max_length = len(self.header)
-        rows: List[Tuple[int, str]] = []
+        rows: list[tuple[int, str]] = []
         for key, value in self.rows.items():
             cell = str(value)
             rows.append((key, cell))
@@ -1643,13 +1653,13 @@ class _ScriptProfileColumn:
 
 
 class _ScriptProfileTable:
-    def __init__(self, cols: List[_ScriptProfileColumn], source_range: List[int]):
+    def __init__(self, cols: list[_ScriptProfileColumn], source_range: list[int]):
         self.cols = cols
         self.source_range = source_range
 
     def dump_string(self):
-        outputs: List[str] = []
-        cells: List[Tuple[str, Dict[int, str]]] = []
+        outputs: list[str] = []
+        cells: list[tuple[str, dict[int, str]]] = []
         header_buffer = ""
         for col in self.cols:
             header, rows = col.materialize()
@@ -1681,7 +1691,7 @@ class _ScriptProfile:
         self.profile.disable()
 
     def dump_string(self) -> str:
-        outputs: List[str] = []
+        outputs: list[str] = []
         for source_stats in self.profile._dump_stats():
             source_ref = source_stats.source()
             source_lines = source_ref.text().splitlines()

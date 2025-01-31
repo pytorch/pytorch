@@ -1,4 +1,4 @@
-from typing import Any, Dict, runtime_checkable, TypeVar
+from typing import Any, runtime_checkable, TypeVar
 from typing_extensions import Protocol
 
 
@@ -11,7 +11,7 @@ class Stateful(Protocol):
     Stateful protocol for objects that can be checkpointed and restored.
     """
 
-    def state_dict(self) -> Dict[str, Any]:
+    def state_dict(self) -> dict[str, Any]:
         """
         Objects should return their state_dict representation as a dictionary.
         The output of this function will be checkpointed, and later restored in
@@ -28,7 +28,7 @@ class Stateful(Protocol):
 
         ...
 
-    def load_state_dict(self, state_dict: Dict[str, Any]) -> None:
+    def load_state_dict(self, state_dict: dict[str, Any]) -> None:
         """
         Restore the object's state from the provided state_dict.
 

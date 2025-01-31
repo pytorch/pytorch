@@ -2,7 +2,7 @@
 import copy
 import operator
 from collections import namedtuple
-from typing import Callable, Dict, List, Union
+from typing import Callable, Union
 
 import torch
 import torch.ao.nn.intrinsic as nni
@@ -27,7 +27,7 @@ from .backend_config import (
 )
 
 
-__all__: List[str] = []
+__all__: list[str] = []
 
 # TODO: rename to be more explicit, e.g. qat_conv_relu
 _ConvMetadata = namedtuple(
@@ -114,7 +114,7 @@ _FIXED_QPARAM_OP_NEG1TO1_CONSTRAINTS = DTypeWithConstraints(
     scale_exact_match=2.0 / 256.0,
     zero_point_exact_match=128,
 )
-_FIXED_QPARAMS_OP_TO_CONSTRAINTS: Dict[Union[Callable, str], DTypeWithConstraints] = {
+_FIXED_QPARAMS_OP_TO_CONSTRAINTS: dict[Union[Callable, str], DTypeWithConstraints] = {
     torch.nn.Hardsigmoid: _FIXED_QPARAM_OP_0TO1_CONSTRAINTS,
     torch.nn.functional.hardsigmoid: _FIXED_QPARAM_OP_0TO1_CONSTRAINTS,
     "hardsigmoid": _FIXED_QPARAM_OP_0TO1_CONSTRAINTS,
@@ -132,9 +132,9 @@ _FIXED_QPARAMS_OP_TO_CONSTRAINTS: Dict[Union[Callable, str], DTypeWithConstraint
 
 
 def _get_binary_op_configs(
-    dtype_configs: List[DTypeConfig],
-) -> List[BackendPatternConfig]:
-    binary_op_configs: List[BackendPatternConfig] = []
+    dtype_configs: list[DTypeConfig],
+) -> list[BackendPatternConfig]:
+    binary_op_configs: list[BackendPatternConfig] = []
     num_tensor_args_to_observation_type_mapping = {
         # TODO: this is not used right now since we have extra check in prepare
         # will need to change this to NO_OBSERVER later after we implemented
@@ -172,12 +172,12 @@ def _get_binary_op_configs(
     return binary_op_configs
 
 
-def _get_linear_configs(dtype_configs: List[DTypeConfig]) -> List[BackendPatternConfig]:
+def _get_linear_configs(dtype_configs: list[DTypeConfig]) -> list[BackendPatternConfig]:
     """
     Return all configs related to linear modules and ops.
     """
     observation_type = ObservationType.OUTPUT_USE_DIFFERENT_OBSERVER_AS_INPUT
-    linear_configs: List[BackendPatternConfig] = []
+    linear_configs: list[BackendPatternConfig] = []
 
     # (1) Single linear modules/functions
     # -------------------------------------
@@ -471,7 +471,7 @@ def _get_conv_configs(dtype_configs):
     return conv_configs
 
 
-def _get_cat_config(dtype_configs: List[DTypeConfig]) -> BackendPatternConfig:
+def _get_cat_config(dtype_configs: list[DTypeConfig]) -> BackendPatternConfig:
     return (
         BackendPatternConfig(torch.cat)
         .set_observation_type(ObservationType.OUTPUT_SHARE_OBSERVER_WITH_INPUT)
@@ -479,7 +479,7 @@ def _get_cat_config(dtype_configs: List[DTypeConfig]) -> BackendPatternConfig:
     )
 
 
-def _get_ln_configs(dtype_configs: List[DTypeConfig]) -> List[BackendPatternConfig]:
+def _get_ln_configs(dtype_configs: list[DTypeConfig]) -> list[BackendPatternConfig]:
     ln_configs = []
     ln_configs.append(
         BackendPatternConfig(torch.nn.LayerNorm)
@@ -500,8 +500,8 @@ def _get_ln_configs(dtype_configs: List[DTypeConfig]) -> List[BackendPatternConf
 
 
 def _get_default_op_configs(
-    dtype_configs: List[DTypeConfig],
-) -> List[BackendPatternConfig]:
+    dtype_configs: list[DTypeConfig],
+) -> list[BackendPatternConfig]:
     default_ops = [
         torch.nn.ELU,
         torch.nn.LeakyReLU,
@@ -546,9 +546,9 @@ def _get_default_op_configs(
 
 
 def _add_fixed_qparams_to_dtype_configs(
-    dtype_configs: List[DTypeConfig],
+    dtype_configs: list[DTypeConfig],
     constraints: DTypeWithConstraints,
-) -> List[DTypeConfig]:
+) -> list[DTypeConfig]:
     """
     Return a copy of the list of DTypeConfigs where activations are subject to the specified
     constraints required for fixed qparams ops.
@@ -585,8 +585,8 @@ def _add_fixed_qparams_to_dtype_configs(
 
 
 def _get_fixed_qparams_op_configs(
-    dtype_configs: List[DTypeConfig],
-) -> List[BackendPatternConfig]:
+    dtype_configs: list[DTypeConfig],
+) -> list[BackendPatternConfig]:
     fixed_qparams_op_configs = []
     for fixed_qparam_op, constraints in _FIXED_QPARAMS_OP_TO_CONSTRAINTS.items():
         new_dtype_configs = _add_fixed_qparams_to_dtype_configs(
@@ -682,7 +682,7 @@ def _get_share_qparams_op_configs(dtype_configs):
     return [_get_share_qprams_op_backend_config(op) for op in share_qparams_ops]
 
 
-def _get_bn_configs(dtype_configs: List[DTypeConfig]) -> List[BackendPatternConfig]:
+def _get_bn_configs(dtype_configs: list[DTypeConfig]) -> list[BackendPatternConfig]:
     """Get configs related to batchnorm."""
     bn_configs = []
     bn_to_fused_bn = {
@@ -725,7 +725,7 @@ def _get_bn_configs(dtype_configs: List[DTypeConfig]) -> List[BackendPatternConf
     return bn_configs
 
 
-def _get_rnn_op_configs(dtype_configs: List[DTypeConfig]) -> List[BackendPatternConfig]:
+def _get_rnn_op_configs(dtype_configs: list[DTypeConfig]) -> list[BackendPatternConfig]:
     rnn_op_configs = []
     for rnn_op, ref_rnn_op in [
         (nn.GRUCell, nnqr.GRUCell),
@@ -747,8 +747,8 @@ def _get_rnn_op_configs(dtype_configs: List[DTypeConfig]) -> List[BackendPattern
 
 
 def _get_embedding_op_configs(
-    dtype_configs: List[DTypeConfig],
-) -> List[BackendPatternConfig]:
+    dtype_configs: list[DTypeConfig],
+) -> list[BackendPatternConfig]:
     embedding_op_configs = []
     for embedding_op, qat_embedding_op, ref_embedding_op in [
         (nn.Embedding, nnqat.Embedding, nnqr.Embedding),

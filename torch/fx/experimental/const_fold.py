@@ -1,6 +1,6 @@
 # mypy: allow-untyped-defs
 import re
-from typing import Callable, Dict, Optional, Set, Union
+from typing import Callable, Optional, Union
 
 import torch.fx
 from torch.fx.node import map_arg
@@ -100,7 +100,7 @@ def _inline_module(gm: torch.fx.GraphModule, inline_mod_name: str):
     call_mod_args = call_mod_node_to_replace.args
     call_mod_kwargs = call_mod_node_to_replace.kwargs
 
-    replacement_mapping: Dict[torch.fx.Node, torch.fx.Node] = {}
+    replacement_mapping: dict[torch.fx.Node, torch.fx.Node] = {}
     ph_count = 0
 
     def replacement_fn(node):
@@ -171,7 +171,7 @@ def split_const_subgraphs(
 
     # Build up a list of const_nodes, defined as nodes that are themselves
     # get_attrs, or have all get_attr or other constant node inputs.
-    const_nodes: Set[torch.fx.Node] = set()
+    const_nodes: set[torch.fx.Node] = set()
     found_const_folding = False
     for node in mod_traced.graph.nodes:
         # Skip over placeholders/outputs because they can't be const folded and

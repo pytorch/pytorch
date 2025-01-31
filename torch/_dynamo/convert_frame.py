@@ -19,11 +19,10 @@ import threading
 import time
 import traceback
 import typing
-import warnings
 import weakref
 from pathlib import Path
 from types import CellType, CodeType, FunctionType, ModuleType
-from typing import Any, Callable, Dict, List, Optional, Set, Tuple, TypeVar, Union
+from typing import Any, Callable, Optional, TypeVar, Union
 from typing_extensions import ParamSpec
 from weakref import ReferenceType
 
@@ -159,8 +158,8 @@ class TODO_UNKNOWN:
 
 class Tracker:
     def __init__(self) -> None:
-        self.seen: List[ReferenceType[CodeType]] = []
-        self.seen_ids: Set[int] = set()
+        self.seen: list[ReferenceType[CodeType]] = []
+        self.seen_ids: set[int] = set()
 
     def add(self, strong_obj: CodeType) -> None:
         idx = id(strong_obj)
@@ -185,7 +184,7 @@ initial_global_state: Optional[GlobalStateGuard] = None
 
 @functools.wraps(original_forward_from_src)
 def fx_forward_from_src_skip_result(
-    src: str, globals: Dict[str, Any], co_fields: Optional[Dict[str, str]] = None
+    src: str, globals: dict[str, Any], co_fields: Optional[dict[str, str]] = None
 ) -> FunctionType:
     # we monkey patch FX to prevent infinite loop of trying to convert
     # our generated code
@@ -285,7 +284,7 @@ def has_tensor_in_frame(frame: DynamoFrameType) -> bool:
             if np and config.trace_numpy and (obj is np or is_numpy(obj)):
                 return True
 
-    seen_ids: Dict[int, bool] = {}
+    seen_ids: dict[int, bool] = {}
 
     def has_tensor(obj: object) -> bool:
         """Recursively check if the obj has a tensor"""
@@ -463,7 +462,7 @@ class ConvertFrameAssert:
         frame: DynamoFrameType,
         cache_entry: Optional[CacheEntry],
         hooks: Hooks,
-        frame_state: Dict[str, Union[int, FrameStateSizeEntry]],
+        frame_state: dict[str, Union[int, FrameStateSizeEntry]],
         *,
         skip: int = 0,
     ) -> Optional[GuardedCode]:
@@ -602,7 +601,7 @@ if typing.TYPE_CHECKING:
     from .output_graph import OutputGraph
 
 # we have to use `OrderedDict` to make `RemovableHandle` work.
-_bytecode_hooks: Dict[int, BytecodeHook] = OrderedDict()
+_bytecode_hooks: dict[int, BytecodeHook] = OrderedDict()
 
 
 def register_bytecode_hook(hook: BytecodeHook) -> RemovableHandle:
@@ -617,10 +616,10 @@ def register_bytecode_hook(hook: BytecodeHook) -> RemovableHandle:
 
 def _compile(
     code: CodeType,
-    globals: Dict[str, object],
-    locals: Dict[str, object],
-    builtins: Dict[str, object],
-    closure: Tuple[CellType],
+    globals: dict[str, object],
+    locals: dict[str, object],
+    builtins: dict[str, object],
+    closure: tuple[CellType],
     compiler_fn: CompilerFn,
     one_graph: bool,
     export: bool,
@@ -629,7 +628,7 @@ def _compile(
     cache_entry: Optional[CacheEntry],
     cache_size: CacheSizeRelevantForFrame,
     frame: Optional[DynamoFrameType] = None,
-    frame_state: Optional[Dict[str, Union[int, FrameStateSizeEntry]]] = None,
+    frame_state: Optional[dict[str, Union[int, FrameStateSizeEntry]]] = None,
     *,
     compile_id: CompileId,
     skip: int = 0,
@@ -647,13 +646,13 @@ def _compile(
     output: Optional[OutputGraph] = None
     tracer: Optional[InstructionTranslator] = None
 
-    tf_mode_stack: List[
+    tf_mode_stack: list[
         torch.overrides.TorchFunctionMode
     ] = torch.overrides._get_current_function_mode_stack()
 
     @preserve_global_state
     def transform(
-        instructions: List[Instruction], code_options: Dict[str, object]
+        instructions: list[Instruction], code_options: dict[str, object]
     ) -> None:
         nonlocal output
         nonlocal tracer
@@ -700,23 +699,16 @@ def _compile(
         assert output.output_instructions
         instructions[:] = output.output_instructions
         code_options.update(output.code_options)
-
-        # The config.dead_code_elimination flag is deprecated
-        # See https://github.com/pytorch/pytorch/issues/136862 for more information
-        if not config.dead_code_elimination:
-            warnings.warn(
-                "The config.dead_code_elimination flag is deprecated, it's now always true."
-            )
-
         propagate_inst_exn_table_entries(instructions)
         check_inst_exn_tab_entries_valid(instructions)
         instructions[:] = remove_pointless_jumps(remove_dead_code(instructions))
 
+    @compile_time_strobelight_meta(phase_name="compile_inner")
     def compile_inner(
         code: CodeType,
         one_graph: bool,
         hooks: Hooks,
-        transform: Callable[[List[Instruction], Dict[str, Any]], Any],
+        transform: Callable[[list[Instruction], dict[str, Any]], Any],
     ) -> Optional[GuardedCode]:
         with contextlib.ExitStack() as stack:
             stack.enter_context(
@@ -735,13 +727,12 @@ def _compile(
 
         return None  # dead, but see https://github.com/python/mypy/issues/7577
 
-    @compile_time_strobelight_meta(phase_name="compile_inner")
     @maybe_cprofile
     def _compile_inner(
         code: CodeType,
         one_graph: bool,
         hooks: Hooks,
-        transform: Callable[[List[Instruction], Dict[str, Any]], Any],
+        transform: Callable[[list[Instruction], dict[str, Any]], Any],
     ) -> Optional[GuardedCode]:
         nonlocal dynamo_time_before_restart
         last_attempt_start_time = start_time = time.time()
@@ -1097,7 +1088,7 @@ def _compile(
                 # If compilation failed, the entire time is wasted
                 dynamo_time_before_restart = (time.time_ns() - start_time_ns) / 1e9
 
-            def clean_for_json(d: Dict[str, Any]) -> Dict[str, Any]:
+            def clean_for_json(d: dict[str, Any]) -> dict[str, Any]:
                 blocklist = {
                     "TYPE_CHECKING",
                     "log_file_name",
@@ -1121,7 +1112,7 @@ def _compile(
                 }
 
                 return {
-                    key: list(value) if isinstance(value, set) else value
+                    key: sorted(value) if isinstance(value, set) else value
                     for key, value in d.items()
                     if key not in blocklist
                 }
@@ -1151,12 +1142,15 @@ def _compile(
                 "config_suppress_errors": config.suppress_errors,
                 "config_inline_inbuilt_nn_modules": config.inline_inbuilt_nn_modules,
                 "specialize_float": config.specialize_float,
-                "dynamo_config": json.dumps(config_dict),
+                "dynamo_config": json.dumps(config_dict, sort_keys=True),
                 "is_forward": True,
                 "dynamo_compile_time_before_restart_us": to_int_us(
                     dynamo_time_before_restart
                 ),
             }
+            # TODO: replace with CompileEventLogger.compilation_metrics
+            # There are some columns here not in PT2 Compile Events
+            # so we need to slightly change it
             metrics_context.update_outer(metrics)
             # === END WARNING WARNING WARNING ===
 
@@ -1176,7 +1170,7 @@ class ConvertFrame:
         frame: DynamoFrameType,
         cache_entry: Optional[CacheEntry],
         hooks: Hooks,
-        frame_state: Dict[str, Union[int, FrameStateSizeEntry]],
+        frame_state: dict[str, Union[int, FrameStateSizeEntry]],
         skip: int = 0,
     ) -> Optional[
         Union[
@@ -1322,7 +1316,7 @@ class ConvertFrameProtocol(typing.Protocol):
         frame: DynamoFrameType,
         cache_entry: Optional[CacheEntry],
         hooks: Hooks,
-        frame_state: Dict[str, Union[int, FrameStateSizeEntry]],
+        frame_state: dict[str, Union[int, FrameStateSizeEntry]],
         *,
         skip: int = 0,
     ) -> Optional[GuardedCode]:
@@ -1339,7 +1333,7 @@ class CatchErrorsWrapper:
         self,
         frame: DynamoFrameType,
         cache_entry: Optional[CacheEntry],
-        frame_state: Dict[str, Union[int, FrameStateSizeEntry]],
+        frame_state: dict[str, Union[int, FrameStateSizeEntry]],
     ) -> Optional[GuardedCode]:
         assert frame_state is not None
 

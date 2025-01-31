@@ -111,7 +111,7 @@ struct Option {
         is_variadic(is_variadic),
         has_out(has_out) {}
   Option(bool is_variadic, bool has_out)
-      : arguments(), is_variadic(is_variadic), has_out(has_out) {}
+      : is_variadic(is_variadic), has_out(has_out) {}
   Option(const Option&) = delete;
   Option(Option&& other) noexcept = default;
   Option& operator=(const Option&) = delete;

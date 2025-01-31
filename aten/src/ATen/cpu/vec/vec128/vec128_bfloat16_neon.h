@@ -274,7 +274,7 @@ class Vectorized<c10::BFloat16> : public Vectorized16<at_bfloat16x8_t, c10::BFlo
     Vectorized<c10::BFloat16> vec(
         at_vreinterpretq_bf16_u16(
             vbslq_u16(
-                at_vreinterpretq_u16_bf16(mask),
+                mask,
                 at_vreinterpretq_u16_bf16(b.values),
                 at_vreinterpretq_u16_bf16(a.values))));
 
@@ -526,12 +526,7 @@ Vectorized<c10::BFloat16> inline fmadd(
   // elements, not the bottom and top half, so they don't seem
   // particularly useful here. Ideally we would include dot product in
   // the Vectorized interface...
-  const auto [a_float_low, a_float_high] = convert_bfloat16_float(a);
-  const auto [b_float_low, b_float_high] = convert_bfloat16_float(b);
-  const auto [c_float_low, c_float_high] = convert_bfloat16_float(c);
-  return convert_float_bfloat16(
-      fmadd(a_float_low, b_float_low, c_float_low),
-      fmadd(a_float_high, b_float_high, c_float_high));
+  return a * b + c;
 }
 
 template <>
@@ -540,12 +535,7 @@ Vectorized<c10::BFloat16> inline fmsub(
     const Vectorized<c10::BFloat16>& b,
     const Vectorized<c10::BFloat16>& c) {
   // See NOTE [BF16 FMA] above.
-  const auto [a_float_low, a_float_high] = convert_bfloat16_float(a);
-  const auto [b_float_low, b_float_high] = convert_bfloat16_float(b);
-  const auto [c_float_low, c_float_high] = convert_bfloat16_float(c);
-  return convert_float_bfloat16(
-      fmsub(a_float_low, b_float_low, c_float_low),
-      fmsub(a_float_high, b_float_high, c_float_high));
+  return a * b - c;
 }
 
 #endif // !defined(C10_MOBILE) && defined(__aarch64__)

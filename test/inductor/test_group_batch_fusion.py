@@ -2,7 +2,6 @@
 
 import collections
 import unittest
-from typing import List
 
 import torch
 import torch._inductor
@@ -39,7 +38,7 @@ class TestHighwaySelfGating(torch.nn.Module):
 
     def forward(
         self,
-        inputs: List[torch.Tensor],
+        inputs: list[torch.Tensor],
     ) -> torch.Tensor:
         results = []
         for i in range(self.size):

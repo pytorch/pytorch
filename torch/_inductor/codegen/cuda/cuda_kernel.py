@@ -1,17 +1,7 @@
 # mypy: allow-untyped-defs
 import logging
 from dataclasses import dataclass
-from typing import (
-    Any,
-    Callable,
-    Dict,
-    List,
-    Literal,
-    Optional,
-    Tuple,
-    TYPE_CHECKING,
-    Union,
-)
+from typing import Any, Callable, Literal, Optional, TYPE_CHECKING, Union
 
 from sympy import Expr
 
@@ -76,9 +66,9 @@ class CUDAKernel(Kernel):
 
     def __init__(self, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
-        self.layout_args: Dict[str, LayoutArg] = {}
+        self.layout_args: dict[str, LayoutArg] = {}
         # Mapping from arg name to IRNode.
-        self.named_nodes: Dict[str, IRNode] = {}
+        self.named_nodes: dict[str, IRNode] = {}
 
     def find_symbol(
         self, node: IRNode, attr: ValidLayoutAttrs, dim: int
@@ -123,7 +113,7 @@ class CUDAKernel(Kernel):
             self.add_layout_arg("ldc", Bias, "stride", ldc_dim)
         self.add_layout_arg("ldd", Y, "stride", ldd_dim)
 
-    def get_layout_args(self) -> Tuple[Union[Expr, int], ...]:
+    def get_layout_args(self) -> tuple[Union[Expr, int], ...]:
         X = self.named_nodes["X"]
         W = self.named_nodes["W"]
         Y = self.named_nodes["Y"]
@@ -216,10 +206,10 @@ class CUDATemplateKernel(CUDAKernel):
 
     def def_kernel(
         self,
-        inputs: List[IRNode],
-        outputs: List[IRNode],
+        inputs: list[IRNode],
+        outputs: list[IRNode],
         names_str: str = "",
-        input_reorder: Optional[List[int]] = None,
+        input_reorder: Optional[list[int]] = None,
     ) -> str:
         """
         Hook called from template code to generate function definition and
@@ -488,12 +478,12 @@ class CUDATemplateCaller(ChoiceCaller):
         self,
         name: str,
         category: str,
-        input_nodes: List[Buffer],
+        input_nodes: list[Buffer],
         layout: Layout,
-        make_kernel_render: Callable[[CUDATemplateBuffer, Optional[List[IRNode]]], str],
+        make_kernel_render: Callable[[CUDATemplateBuffer, Optional[list[IRNode]]], str],
         bmreq: CUDABenchmarkRequest,
         template: "CUDATemplate",  # type: ignore[name-defined]
-        info_kwargs: Optional[Dict[str, Union[PrimitiveInfoType, List[PrimitiveInfoType]]]],  # type: ignore[type-arg]
+        info_kwargs: Optional[dict[str, Union[PrimitiveInfoType, list[PrimitiveInfoType]]]],  # type: ignore[type-arg]
         description: str,
     ) -> None:
         super().__init__(name, input_nodes, layout, description)
@@ -527,7 +517,7 @@ class CUDATemplateCaller(ChoiceCaller):
             ]
         )
 
-    def info_dict(self) -> Dict[str, Union[PrimitiveInfoType, List[PrimitiveInfoType]]]:
+    def info_dict(self) -> dict[str, Union[PrimitiveInfoType, list[PrimitiveInfoType]]]:
         """Information returned here is logged to the autotune log file when that is enabled."""
         if self.info_kwargs is not None and "op" in self.info_kwargs:
             op: Any = self.info_kwargs["op"]

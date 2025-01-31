@@ -3,7 +3,7 @@
 import json
 import os
 import tempfile
-from typing import Any, Dict, List
+from typing import Any
 from unittest import main, mock, TestCase
 
 import yaml
@@ -101,30 +101,6 @@ MOCKED_DISABLED_UNSTABLE_JOBS = {
         "linux-binary-manywheel",
         "manywheel-py3_8-cuda11_8-build",
         "",
-    ],
-    "inductor / cuda12.1-py3.10-gcc9-sm86 / test (inductor)": [
-        "pytorchbot",
-        "107079",
-        "https://github.com/pytorch/pytorch/issues/107079",
-        "inductor",
-        "cuda12.1-py3.10-gcc9-sm86",
-        "test (inductor)",
-    ],
-    "inductor / cuda12.1-py3.10-gcc9-sm86 / test (inductor_huggingface)": [
-        "pytorchbot",
-        "109153",
-        "https://github.com/pytorch/pytorch/issues/109153",
-        "inductor",
-        "cuda12.1-py3.10-gcc9-sm86",
-        "test (inductor_huggingface)",
-    ],
-    "inductor / cuda12.1-py3.10-gcc9-sm86 / test (inductor_huggingface_dynamic)": [
-        "pytorchbot",
-        "109154",
-        "https://github.com/pytorch/pytorch/issues/109154",
-        "inductor",
-        "cuda12.1-py3.10-gcc9-sm86",
-        "test (inductor_huggingface_dynamic)",
     ],
 }
 
@@ -362,7 +338,7 @@ class TestConfigFilter(TestCase):
             self.assertEqual(case["expected"], json.dumps(filtered_test_matrix))
 
     def test_set_periodic_modes(self) -> None:
-        testcases: List[Dict[str, str]] = [
+        testcases: list[dict[str, str]] = [
             {
                 "job_name": "a CI job",
                 "test_matrix": "{include: []}",
@@ -637,37 +613,6 @@ class TestConfigFilter(TestCase):
                 "expected": '{"include": [{"config": "default", "unstable": "unstable"}]}',
                 "description": "Both binary build and test jobs are unstable",
             },
-            {
-                "workflow": "inductor",
-                "job_name": "cuda12.1-py3.10-gcc9-sm86 / build",
-                "test_matrix": """
-                    { include: [
-                        { config: "inductor" },
-                        { config: "inductor_huggingface", shard: 1 },
-                        { config: "inductor_huggingface", shard: 2 },
-                        { config: "inductor_timm", shard: 1 },
-                        { config: "inductor_timm", shard: 2 },
-                        { config: "inductor_torchbench" },
-                        { config: "inductor_huggingface_dynamic" },
-                        { config: "inductor_torchbench_dynamic" },
-                        { config: "inductor_distributed" },
-                    ]}
-                """,
-                "expected": """
-                    { "include": [
-                        { "config": "inductor", "unstable": "unstable" },
-                        { "config": "inductor_huggingface", "shard": 1, "unstable": "unstable" },
-                        { "config": "inductor_huggingface", "shard": 2, "unstable": "unstable" },
-                        { "config": "inductor_timm", "shard": 1 },
-                        { "config": "inductor_timm", "shard": 2 },
-                        { "config": "inductor_torchbench" },
-                        { "config": "inductor_huggingface_dynamic", "unstable": "unstable" },
-                        { "config": "inductor_torchbench_dynamic" },
-                        { "config": "inductor_distributed" }
-                    ]}
-                """,
-                "description": "Marking multiple unstable configurations",
-            },
         ]
 
         for case in testcases:
@@ -702,7 +647,7 @@ class TestConfigFilter(TestCase):
             )
 
         mocked_subprocess.return_value = b""
-        testcases: List[Dict[str, Any]] = [
+        testcases: list[dict[str, Any]] = [
             {
                 "labels": {},
                 "test_matrix": '{include: [{config: "default"}]}',

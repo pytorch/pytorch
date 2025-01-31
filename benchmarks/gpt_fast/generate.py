@@ -2,7 +2,7 @@ import dataclasses
 import itertools
 import platform
 import time
-from typing import Optional, Tuple
+from typing import Optional
 
 import torchao
 from common import Experiment, register_experiment
@@ -89,7 +89,7 @@ def prefill(
 
 def decode_one_token(
     model: torch.nn.Module, x: torch.Tensor, input_pos: torch.Tensor, **sampling_kwargs
-) -> Tuple[torch.Tensor, torch.Tensor]:
+) -> tuple[torch.Tensor, torch.Tensor]:
     # input_pos: [B, 1]
     assert input_pos.shape[-1] == 1
     logits = model(x, input_pos)

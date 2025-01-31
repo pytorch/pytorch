@@ -6,10 +6,11 @@ import logging
 import os
 import os.path
 import re
-from typing import Dict, List, Optional, Tuple, TYPE_CHECKING
+from typing import Optional, TYPE_CHECKING
 from typing_extensions import override
 
 import torch
+from torch.compiler._cache import CacheArtifactManager, CacheArtifactType
 from torch.utils._triton import has_triton
 
 from ..remote_cache import (
@@ -28,7 +29,7 @@ if TYPE_CHECKING:
 log = logging.getLogger(__name__)
 
 
-_InductorMetaTy = Dict[str, object]
+_InductorMetaTy = dict[str, object]
 
 
 def inductor_meta_from_config() -> _InductorMetaTy:
@@ -61,8 +62,8 @@ def inductor_meta_from_config() -> _InductorMetaTy:
 @dataclasses.dataclass
 class AutotuneCache:
     configs_hash: str
-    local_cache: Optional[Tuple[RemoteCache[JsonDataTy], str]] = None
-    remote_cache: Optional[Tuple[RemoteCache[JsonDataTy], str]] = None
+    local_cache: Optional[tuple[RemoteCache[JsonDataTy], str]] = None
+    remote_cache: Optional[tuple[RemoteCache[JsonDataTy], str]] = None
 
     # Create a AutotuneCache. Returns None if none of the caches can be used.
     @staticmethod
@@ -87,7 +88,7 @@ class AutotuneCache:
         return hashlib.sha256(key.encode("utf-8")).hexdigest()
 
     # Read the best config options from the most local cache and return it.
-    def _read(self) -> Optional[Dict[str, JsonDataTy]]:
+    def _read(self) -> Optional[dict[str, JsonDataTy]]:
         if local_cache := self.local_cache:
             cache, key = local_cache
             if best_config := cache.get(key):
@@ -105,7 +106,7 @@ class AutotuneCache:
     # Read the best config options from the most local cache and figure out
     # which `configs` represents that option.
     def read_best(
-        self, inductor_meta: _InductorMetaTy, configs: List[Config]
+        self, inductor_meta: _InductorMetaTy, configs: list[Config]
     ) -> Optional[Config]:
         if best := self._read():
             return _load_cached_autotuning(
@@ -172,6 +173,9 @@ class AutotuneCache:
             cache, key = local_cache
             cache.put(key, data)
             AutotuneCacheBundler.put(key, data)
+            CacheArtifactManager.record_artifact(
+                CacheArtifactType.AUTOTUNE, os.path.basename(key), data
+            )
 
             if log.isEnabledFor(logging.DEBUG):
                 type_str = "coordesc" if found_by_coordesc else "heuristic"
@@ -192,7 +196,7 @@ class _AutotuneCacheBundlerImpl:
     _cache: RemoteCache[JsonDataTy]
 
     # All known entries from LocalAutotuneCache.put()
-    _entries: Dict[str, JsonDataTy]
+    _entries: dict[str, JsonDataTy]
 
     def end_compile(self) -> None:
         # TODO: Do we need to compute time_taken_ms and encode that somehow?
@@ -403,9 +407,9 @@ def _should_use_remote_autotune_cache(inductor_meta: _InductorMetaTy) -> bool:
 
 
 def _load_cached_autotuning(
-    best_config: Dict[str, JsonDataTy],
+    best_config: dict[str, JsonDataTy],
     configs_hash: str,
-    configs: List[Config],
+    configs: list[Config],
     inductor_meta: _InductorMetaTy,
 ) -> Optional[Config]:
     if best_config is None:
@@ -465,12 +469,16 @@ class LocalAutotuneCache(RemoteCache[JsonDataTy]):
         AutotuneCacheBundler.sync()
         result = super()._get(key, sample)
         if result is not None:
+            assert isinstance(result, dict)
             # What? Why are we doing a put() here? Imagine we have a new model
             # that reuses some existing kernels that have already been
             # compiled. If we didn't do a `put` here (on cache hit) then the new
             # model would only bundle *newly* compiled kernels, not existing
             # kernels that were already compiled and cached.
             AutotuneCacheBundler.put(key, result)
+            CacheArtifactManager.record_artifact(
+                CacheArtifactType.AUTOTUNE, os.path.basename(key), result
+            )
         return result
 
     @override
@@ -479,7 +487,7 @@ class LocalAutotuneCache(RemoteCache[JsonDataTy]):
         super()._put(key, value, sample)
 
 
-def _splitext_nodot(basename: str) -> Tuple[str, str]:
+def _splitext_nodot(basename: str) -> tuple[str, str]:
     root, ext = os.path.splitext(basename)
     if ext:
         ext = ext[1:]

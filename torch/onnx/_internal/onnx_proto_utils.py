@@ -6,7 +6,7 @@ from __future__ import annotations
 import glob
 import os
 import shutil
-from typing import Any, Mapping, TYPE_CHECKING
+from typing import Any, TYPE_CHECKING
 
 import torch
 import torch.jit._trace
@@ -17,6 +17,7 @@ from torch.onnx._internal import jit_utils, registration
 
 if TYPE_CHECKING:
     import io
+    from collections.abc import Mapping
 
 
 def export_as_test_case(

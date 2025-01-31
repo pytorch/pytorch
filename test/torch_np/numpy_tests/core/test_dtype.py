@@ -358,7 +358,6 @@ class TestFromDTypeAttribute(TestCase):
 
 
 @skip(reason="Parameteric dtypes, our stuff is simpler.")
-@skipif(sys.version_info < (3, 9), reason="Requires python 3.9")
 @instantiate_parametrized_tests
 class TestClassGetItem(TestCase):
     def test_dtype(self) -> None:
