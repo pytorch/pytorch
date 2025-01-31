@@ -83,7 +83,8 @@ class WrapperFxCodegen(PythonWrapperCodegen):
     """
     def __init__(self):
         super().__init__()
-        self.graph = torch.fx.Graph() # Wrapper FX IR.
+        graph = torch.fx.Graph()
+        self.gm = torch.fx.GraphModule({}, graph) # Wrapper FX IR.
         self.buffer_to_node: dict[str, torch.fx.Node] = {} # Symbol table for codegen.
         self.kernels: Dict[str, CachingAutotuner] = {} # Table to store Triton kernels.
 
@@ -97,6 +98,7 @@ class WrapperFxCodegen(PythonWrapperCodegen):
         """
         Imports a kernel as a python module.
         """
+        #TODO Use PyCodeCache. That way we can cache identical kernels.
         with tempfile.NamedTemporaryFile(suffix=".py") as fp:
             # Write a module containing the kernel and any necessary imports.
             with open(fp.name, 'w') as f:
@@ -148,7 +150,7 @@ class WrapperFxCodegen(PythonWrapperCodegen):
         Removes the buffer from the symbol table.
         """
         node = self.buffer_to_node[buffer.name]
-        self.graph.call_function(operator.delitem, args=(node, None))
+        self.gm.graph.call_function(operator.delitem, args=(node, None))
         del self.buffer_to_node[buffer.name]
 
     def _get_buffer(self, node: ir.IRNode) -> BufferLike:
@@ -168,7 +170,7 @@ class WrapperFxCodegen(PythonWrapperCodegen):
         """
         for name, buffer in V.graph.graph_inputs.items():
             buffer = self._get_buffer(buffer)
-            node = self.graph.placeholder(buffer.name)
+            node = self.gm.graph.placeholder(buffer.name)
             self._create_meta_from_buffer(node, buffer)
             self._record_allocation(buffer, node)
 
@@ -180,7 +182,7 @@ class WrapperFxCodegen(PythonWrapperCodegen):
             self.buffer_to_node[self._get_buffer(output).name]
             for output in V.graph.graph_outputs
         )
-        self.graph.output(outputs)
+        self.gm.graph.output(outputs)
 
     def _generate(self, is_inference):
 
@@ -244,7 +246,7 @@ class WrapperFxCodegen(PythonWrapperCodegen):
         shape = tuple(buffer.get_size())
         stride = tuple(buffer.get_stride())
 
-        node = self.graph.call_function(torch.empty_strided, args=(shape, stride, dtype, device))
+        node = self.gm.graph.call_function(torch.empty_strided, args=(shape, stride, dtype, device))
         node.name = name
         self._create_meta_from_buffer(node, buffer)
         self._record_allocation(buffer, node)
@@ -271,7 +273,13 @@ class WrapperFxCodegen(PythonWrapperCodegen):
 
     def _generate_free(self, line: Line) -> None:
         assert isinstance(line, FreeLine)
+
         buf = line.node
+
+        # No need to free placeholders.
+        if self.buffer_to_node[buf.name].op == "placeholder":
+            return
+
         self._free(buf)
 
     def _generate_free_if_not_reused(self, line: Line) -> None:
@@ -303,7 +311,7 @@ class WrapperFxCodegen(PythonWrapperCodegen):
         stride = new.get_stride()
         offset = old.offset()
         if old.get_size() != size or old.get_stride() != stride or old.offset() != offset:
-            result_node = self.graph.call_function(
+            result_node = self.gm.graph.call_function(
                 torch.as_strided,
                 args=(size, stride, offset)
             )
@@ -337,7 +345,7 @@ class WrapperFxCodegen(PythonWrapperCodegen):
         # Distributed is not always avaliable. Only import it if used.
         from torch._C._distributed_c10d._SymmetricMemory import empty_strided_p2p
         alloc_id = random.randint(0, 2**64 - 1)
-        node = self.graph.call_function(
+        node = self.gm.graph.call_function(
                 empty_strided_p2p,
                 args=(shape, stride, dtype, device, self.group_name, alloc_id),
         )
@@ -346,7 +354,7 @@ class WrapperFxCodegen(PythonWrapperCodegen):
 
     def _generate_comm_buffer_free(self, line: Line) -> None:
         assert isinstance(line, CommBufferFreeLine)
-        self.graph.free(line.node)
+        self.gm.graph.free(line.node)
 
     def _generate_triton_call(self, line: Line) -> None:
         assert isinstance(line, KernelCallLine)
@@ -363,7 +371,7 @@ class WrapperFxCodegen(PythonWrapperCodegen):
         )
 
         kernel = self.kernels[line.kernel_name]
-        node = self.graph.call_function(call_triton_kernel, args=(kernel, line.grid, call_args))
+        node = self.gm.graph.call_function(call_triton_kernel, args=(kernel, line.grid, call_args))
 
     def generate_kernel_call(
             self,

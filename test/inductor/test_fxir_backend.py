@@ -4,6 +4,7 @@ Test the FX IR backend.
 
 import torch
 
+from torch._inductor.virtualized import V
 from torch._inductor.codegen.triton import TritonScheduling
 from torch._inductor.codegen.wrapper_fxir import WrapperFxCodegen
 from torch._inductor.test_case import TestCase as InductorTestCase
@@ -12,7 +13,10 @@ from torch.testing._internal.inductor_utils import (
     requires_gpu,
 )
 
-from torch._inductor.codegen.common import register_backend_for_device
+from torch._inductor.codegen.common import (
+    register_backend_for_device,
+    get_wrapper_codegen_for_device,
+)
 
 @requires_gpu()
 class FxirTestCase(InductorTestCase):
@@ -30,7 +34,13 @@ class FxirTestCase(InductorTestCase):
         x = torch.rand(8, device=self.device)
         args = (x, x)
         opt = torch.compile(func)
-        result = opt(*args)
 
-        # TODO take the FX IR from the backend
-        # May want to mock create() function
+        try:
+            result = opt(*args)
+        except torch._inductor.exc.InductorError:
+            # Expect this exception, since we don't support Python codegen.
+            pass
+
+        # Get the FX graph from the backend.
+        # TODO call this while mocking codegen:
+        #    gm = V.graph.wrapper_code.gm
