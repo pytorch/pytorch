@@ -14,6 +14,7 @@ export USE_CUDA_STATIC_LINK=1
 export INSTALL_TEST=0 # dont install test binaries into site-packages
 export USE_CUPTI_SO=0
 export USE_CUSPARSELT=${USE_CUSPARSELT:-1} # Enable if not disabled by libtorch build
+export USE_CUFILE=${USE_CUFILE:-1}
 
 # Keep an array of cmake variables to add to
 if [[ -z "$CMAKE_ARGS" ]]; then
@@ -114,6 +115,14 @@ if [[ $USE_CUSPARSELT == "1" && $CUDA_VERSION == "11.8" ]]; then
         )
 fi
 
+
+# Turn USE_CUFILE off for CUDA 11.8
+# since nvidia-cufile-cu11 is not available in PYPI
+if [[ $USE_CUFILE == "1" && $CUDA_VERSION == "11.8" ]]; then
+    export USE_CUFILE=0
+fi
+
+
 if [[ $CUDA_VERSION == "12.4" || $CUDA_VERSION == "12.6" ]]; then
     export USE_STATIC_CUDNN=0
     # Try parallelizing nvcc as well
@@ -137,6 +146,8 @@ if [[ $CUDA_VERSION == "12.4" || $CUDA_VERSION == "12.6" ]]; then
             "/usr/local/cuda/lib64/libnvToolsExt.so.1"
             "/usr/local/cuda/lib64/libnvrtc.so.12"
             "/usr/local/cuda/lib64/libnvrtc-builtins.so"
+            "/usr/local/cuda/lib64/libcufile.so.0"
+            "/usr/local/cuda/lib64/libcufile_rdma.so.1"
         )
         DEPS_SONAME+=(
             "libcudnn_adv.so.9"
@@ -154,6 +165,8 @@ if [[ $CUDA_VERSION == "12.4" || $CUDA_VERSION == "12.6" ]]; then
             "libnvToolsExt.so.1"
             "libnvrtc.so.12"
             "libnvrtc-builtins.so"
+            "libcufile.so.0"
+            "libcufile_rdma.so.1"
         )
     else
         echo "Using nvidia libs from pypi."
@@ -164,6 +177,7 @@ if [[ $CUDA_VERSION == "12.4" || $CUDA_VERSION == "12.6" ]]; then
             '$ORIGIN/../../nvidia/cuda_runtime/lib'
             '$ORIGIN/../../nvidia/cudnn/lib'
             '$ORIGIN/../../nvidia/cufft/lib'
+            '$ORIGIN/../../nvidia/cufile/lib'
             '$ORIGIN/../../nvidia/curand/lib'
             '$ORIGIN/../../nvidia/cusolver/lib'
             '$ORIGIN/../../nvidia/cusparse/lib'
