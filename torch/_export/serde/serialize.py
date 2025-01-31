@@ -11,7 +11,6 @@ import keyword
 import logging
 import math
 import operator
-import re
 import traceback
 import typing
 
@@ -2489,17 +2488,22 @@ class GraphModuleDeserializer(metaclass=Final):
             def import_nn_module_stack(key, path, ty):
                 return key, (path, ty)
 
-            # Helper function that splits strings by commas except for those
-            # encapsulated by parens, which are valid traces.
-            # TODO: Currently this is needed due to indexing Sequential
-            # layers introducing names in the form "layer.slice(1, None, None)".
-            # If that naming is improved, this fancier splitting can probably be
-            # reverted to a simple split by comma.
+            # Helper function to split string by commas, accounting for nested parentheses/brackets
             def metadata_split(metadata):
-                # Remove the parentheses and commas inside them
-                metadata = re.sub(r'\(.*?\)', '', metadata)
-                # Split the string by comma, except for those inside parentheses
-                return re.split(r'(?<!\()\s*,\s*(?!\()', metadata)
+                out = []
+                start, n = 0, 0
+                a, b = "[(", ")]"
+                for end, c in enumerate(metadata):
+                    if c in a:
+                        n += 1
+                    elif c in b:
+                        n -= 1
+                    elif c == "," and n == 0:
+                        out.append(metadata[start : end])
+                        start = end + 1
+                out.append(metadata[start:])
+                assert len(out) == 3
+                return out
 
             nn_module_stack = dict(
                 import_nn_module_stack(*metadata_split(item))
