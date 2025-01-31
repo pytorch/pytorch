@@ -172,6 +172,46 @@ class GraphModule(torch.nn.Module):
 """,
         )
 
+    def test_graph_break_and_reconstruct_generator(self):
+        def whoo(t):
+            yield t.sin()
+            yield t.cos()
+            yield t.tan()
+
+        def g(t):
+            torch._dynamo.graph_break()
+
+        @torch.compile(backend="eager", fullgraph=False)
+        def fn(t):
+            gen = whoo(t)
+            next(gen)
+            g(t)
+            return t.sin(), list(gen)
+
+        t = torch.randn(2)
+        fn(t)
+
+    def test_graph_break_in_generator_while_reconstructing(self):
+        def whoo():
+            yield 1
+            torch._dynamo.graph_break()
+            yield 2
+
+        eager = EagerAndRecordGraphs()
+
+        @torch.compile(backend=eager, fullgraph=False)
+        def fn(t):
+            gen = whoo()
+            s = next(gen)
+            torch._dynamo.graph_break()
+            s += next(gen)
+            return t + s
+
+        t = torch.randn(2)
+        y = fn(t)
+        self.assertEqual(y, t + 3)
+        self.assertEqual(len(eager.graphs), 0)
+
     def test_generator_as_argument(self):
         # The inline tracer needs to be kept in sync if an already advanced generator
         # is given to a compiled function.
@@ -420,6 +460,19 @@ class GraphModule(torch.nn.Module):
         with self.assertRaises(StopIteration):
             next(gen)
 
+    @unittest.expectedFailure
+    def test_reconstruct_generator_mutate_tensor(self):
+        def whoo(t):
+            yield t.sin_()
+            yield t.cos_()
+
+        def fn(t):
+            gen = whoo(t)
+            return gen
+
+        with self.assertRaises(Unsupported):
+            self._compile_check(fn)
+
     def test_subgenerator(self):
         def subgen(t):
             yield t + 1
@@ -525,7 +578,6 @@ class GraphModule(torch.nn.Module):
         got = torch.compile(backend="eager", fullgraph=False)(fn)(t)
         self.assertEqual(expected, got)
 
-    @unittest.expectedFailure
     def test_generator_with_side_effects(self):
         i = 0
 
@@ -538,11 +590,11 @@ class GraphModule(torch.nn.Module):
         def fn(t):
             return whoo(t), t.sin()
 
-        t = torch.randn(2)
-        with self.assertRaises(Unsupported):
-            fn(t)
+        with self.assertRaisesRegex(
+            Unsupported, "Generator: Mutating a variable not in the current scope"
+        ):
+            self._compile_check(fn)
 
-    @unittest.expectedFailure
     def test_subgenerator_with_side_effects(self):
         i = 0
 
@@ -566,10 +618,12 @@ class GraphModule(torch.nn.Module):
         def fn(t):
             return whoo(t), t.sin()
 
-        with self.assertRaises(Unsupported):
+        with self.assertRaisesRegex(
+            Unsupported,
+            "Generator: Mutating a variable not in the current scope",
+        ):
             self._compile_check(fn)
 
-    @unittest.expectedFailure
     def test_generator_with_side_effects_graph_break(self):
         i = 0
 
@@ -579,15 +633,18 @@ class GraphModule(torch.nn.Module):
                 i += 1
                 yield t + j
 
-        @torch.compile(backend="eager", fullgraph=False)
+        eager = EagerAndRecordGraphs()
+
+        @torch.compile(backend=eager, fullgraph=False)
         def fn(t):
             gen = whoo(t)
             torch._dynamo.graph_break()
-            return list(zip(range(3), gen))
+            next(gen)
+            return gen, t.sin()
 
         t = torch.randn(2)
-        with self.assertRaises(Unsupported):
-            fn(t)
+        fn(t)
+        self.assertEqual(len(eager.graphs), 0)
 
     def test_generator_with_side_effects_graph_break_2(self):
         i = 0
@@ -599,15 +656,16 @@ class GraphModule(torch.nn.Module):
                 yield t + j
                 torch._dynamo.graph_break()
 
-        @torch.compile(backend="eager", fullgraph=False)
+        eager = EagerAndRecordGraphs()
+
+        @torch.compile(backend=eager, fullgraph=False)
         def fn(t):
             gen = whoo(t)
             return list(zip(range(3), gen))
 
         t = torch.randn(2)
-        y = fn(t)
-        self.assertEqual(i, 3)
-        self.assertEqual(y, [(0, t), (1, t + 1), (2, t + 2)])
+        fn(t)
+        self.assertEqual(len(eager.graphs), 0)
 
     @unittest.skipIf(sys.version_info < (3, 12), "Test CLEANUP_THROW")
     @unittest.expectedFailure
