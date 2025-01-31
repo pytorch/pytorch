@@ -57,7 +57,7 @@ from ..virtualized import ops, OpsHandler, OpsValue, ReductionType, StoreMode, V
 
 
 if TYPE_CHECKING:
-    from ..ir import FixedLayout
+    from ..ir import FixedLayout, IRNode
     from ..loop_body import LoopBody
     from ..scheduler import BaseScheduling, Scheduler, SchedulerNode
     from .wrapper import PythonWrapperCodegen
@@ -1339,6 +1339,18 @@ class KernelArgs:
             self.input_buffers.keys(), self.output_buffers.keys(), self.sizevars.keys()
         )
 
+    def arg_name(self, name: str) -> Optional[str]:
+        """
+        Returns inner name of a given outer name.
+        """
+        inplaced = self.inplace_buffers.get(name, None)
+        if inplaced is not None and not isinstance(inplaced, RemovedArg):
+            return inplaced.inner_name
+        output_name = self.output_buffers.get(name, None)
+        if output_name is not None and not isinstance(output_name, RemovedArg):
+            return output_name
+        return self.input_buffers.get(name, None)
+
     def wrap_ptr_arg(self, buf: str, dtype: torch.dtype) -> str:
         return buf
 
@@ -2279,6 +2291,14 @@ class Kernel(CodeGen, Generic[CSEVariableType]):
 
     def create_cse_var(self, *args, **kwargs):
         return CSEVariable(*args, **kwargs)
+
+    def arg_name(self, node: IRNode) -> Optional[str]:
+        """
+        Returns arg name of a given input or output node.
+        """
+        if node is None:
+            return None
+        return self.args.arg_name(node.get_name())
 
 
 @dataclasses.dataclass

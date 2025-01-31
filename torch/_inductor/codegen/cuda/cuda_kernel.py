@@ -24,7 +24,6 @@ from ..common import (
     IndentedBuffer,
     Kernel,
     OpOverrides,
-    RemovedArg,
     WorkspaceArg,
     WorkspaceZeroMode,
 )
@@ -163,18 +162,6 @@ class CUDATemplateKernel(CUDAKernel):
         """
         super().__init__()
         self.kernel_name = kernel_name
-
-    def arg_name(self, node: IRNode) -> Optional[str]:
-        """
-        Returns arg name of a given input or output node.
-        """
-        if node is None:
-            return None
-        name = node.get_name()
-        result = self.args.output_buffers.get(name, None)
-        if result is not None and not isinstance(result, RemovedArg):
-            return result
-        return self.args.input_buffers.get(name, None)
 
     def check_not_null(self, node: IRNode) -> str:
         """

@@ -2440,7 +2440,7 @@ KeyType = TypeVar("KeyType")
 ValType = TypeVar("ValType")
 
 
-class ScopedDict(MutableMapping[KeyType, ValType], Generic[KeyType, ValType]):
+class ScopedDict(MutableMapping[KeyType, ValType]):
     """
     A dictionary-like object that allows for scoped updates. It maintains
     an original dictionary and a set of new items that can override
