@@ -33,6 +33,11 @@ inline AtenTensorHandle tensor_pointer_to_tensor_handle(at::Tensor* tensor) {
   return reinterpret_cast<AtenTensorHandle>(tensor);
 }
 
+inline AtenTensorHandle tensor_pointer_to_tensor_handle(
+    const at::Tensor* tensor) {
+  return reinterpret_cast<AtenTensorHandle>(const_cast<at::Tensor*>(tensor));
+}
+
 inline at::Generator* generator_handle_to_generator_pointer(
     AtenGeneratorHandle handle) {
   return reinterpret_cast<at::Generator*>(handle);
