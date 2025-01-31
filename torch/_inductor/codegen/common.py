@@ -1706,6 +1706,10 @@ class Kernel(CodeGen, Generic[CSEVariableType]):
         self.removed_buffers = OrderedSet[str]()
         self.inplaced_to_remove = OrderedSet[str]()
 
+        # key: the buffer to write
+        # value: the buffer to read and whose memory can be reused for
+        #   the buffer specified by key
+        self.inplace_update_buffers: dict[str, str] = {}
         # Set minimum number of elements processed per thread.
         self.min_elem_per_thread = 1
         self.kernel_name: Optional[str] = None

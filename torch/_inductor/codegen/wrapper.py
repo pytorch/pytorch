@@ -1213,7 +1213,8 @@ class PythonWrapperCodegen(CodeGen):
             if config.triton.autotune_at_compile_time:
                 self.generate_and_run_autotune_block()
 
-            if config.annotate_training:
+            # cpp_wrapper currently doesn't support nvtx
+            if config.annotate_training and not config.cpp_wrapper:
                 self.wrapper_call.writeline(
                     "nvtx._device_range_end(training_annotation)"
                 )

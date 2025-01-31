@@ -24,6 +24,7 @@ from ..common import (
     IndentedBuffer,
     Kernel,
     OpOverrides,
+    RemovedArg,
     WorkspaceArg,
     WorkspaceZeroMode,
 )
@@ -169,9 +170,11 @@ class CUDATemplateKernel(CUDAKernel):
         """
         if node is None:
             return None
-        return {**self.args.input_buffers, **self.args.output_buffers}.get(
-            node.get_name(), None
-        )
+        name = node.get_name()
+        result = self.args.output_buffers.get(name, None)
+        if result is not None and not isinstance(result, RemovedArg):
+            return result
+        return self.args.input_buffers.get(name, None)
 
     def check_not_null(self, node: IRNode) -> str:
         """
@@ -273,6 +276,7 @@ class CUDATemplateKernel(CUDAKernel):
         """
         wrapper = V.graph.wrapper_code
 
+        arg_types: list[Any]
         if V.graph.cpp_wrapper:
             # Make sure we initialize these kernels since they're exported as
             # C-style symbol names.
@@ -286,7 +290,7 @@ class CUDATemplateKernel(CUDAKernel):
             _, call_args, _, arg_types = self.args.python_argdefs()
 
         layout_args = self.get_layout_args()
-        call_args.extend(layout_args)
+        call_args.extend(map(str, layout_args))
         arg_types.extend("int" for a in layout_args)
         # dynamo wraps unspec variable as 0d CPU tensor, need convert to scalar
         for i in range(len(call_args)):
