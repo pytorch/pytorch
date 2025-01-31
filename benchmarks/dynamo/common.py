@@ -3054,6 +3054,7 @@ class BenchmarkRunner:
             # Run with Dynamo
             reset_rng_state()
             torch._dynamo.reset()
+            torch._dynamo.utils.counters.clear()
             model_copy = None
             try:
                 model_copy = self.deepcopy_and_maybe_parallelize(model)
@@ -3114,6 +3115,14 @@ class BenchmarkRunner:
                 # The downside and potential problem, is that the output formats may be different.
                 # E.g., the output order might not match, None might be part of output, etc.
 
+            force_max_multiplier = False
+            if (
+                self.args.freezing
+                and self.args.bfloat16
+                and torch._dynamo.utils.counters["inductor"]["binary_folding_conv"] > 0
+            ):
+                force_max_multiplier = True
+
             try:
                 if self.args.training and self.args.amp:
                     if process_fn := self.get_output_amp_train_process_func.get(
@@ -3133,6 +3142,7 @@ class BenchmarkRunner:
                     ),
                     cos_similarity=cos_similarity,
                     tol=tolerance,
+                    force_max_multiplier=force_max_multiplier,
                 ):
                     is_same = False
             except Exception:
