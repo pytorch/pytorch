@@ -1609,10 +1609,6 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
             return a + b
         return a - b
 
-    @unittest.skipIf(
-        sys.version_info < (3, 9),
-        "SET_UPDATE was added at Python 3.9",
-    )
     @make_test
     def test_set_update_bytecode(x):
         # This produces bytecode SET_UPDATE since python 3.9
@@ -1622,10 +1618,6 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         else:
             return x - 1
 
-    @unittest.skipIf(
-        sys.version_info < (3, 9),
-        "SET_UPDATE was added at Python 3.9",
-    )
     @make_test
     def test_set_update_list_with_duplicated_items(x):
         list1 = ["apple", "banana", "apple"]
