@@ -740,8 +740,21 @@ class CachingAutotuner(KernelInterface):
         self.autotune_time_taken_ns = (
             self.precompile_time_taken_ns + benchmark_time_taken_ns
         )
+
+        # log the best config
+        launcher = self.launchers[0]
+        log.debug(
+            "Best config for %s: %s: %f, nreg %d, nspill %d, #shared-mem %s",
+            self.fn.__name__,
+            launcher.config,
+            timings[launcher],
+            launcher.n_regs,
+            launcher.n_spills,
+            launcher.shared,
+        )
+
         if self.save_cache_hook:
-            self.save_cache_hook(self.launchers[0].config, self.autotune_time_taken_ns)
+            self.save_cache_hook(launcher.config, self.autotune_time_taken_ns)
 
     def save_gpu_kernel(self, grid, stream, launcher):
         if callable(grid):
