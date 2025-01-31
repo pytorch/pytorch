@@ -554,6 +554,17 @@ PickleOpCode Unpickler::readInstruction() {
           "Parsing error: stack_ contains ",
           stack_.size(),
           " elements, at least 2 expected");
+
+      // In the OrderedDict case, the id has already been materialized
+      // and added to the stack, thus there's no <functor_idx> but a Dict
+      // there, in this case we can just pop the functor args and break.
+      // The functor args in this case contain some other metadata like
+      // '{_metadata: {: {version: 1}}}' which seem to be safe to ignore.
+      if (stack_.at(stack_.size() - 2).isGenericDict()) {
+        stack_.pop_back();
+        break;
+      }
+
       std::swap(*(stack_.end() - 2), *(stack_.end() - 1));
       size_t idx = stack_.back().toInt();
       stack_.pop_back();
@@ -801,11 +812,12 @@ void Unpickler::readGlobal(
   } else if (module_name == "collections" && class_name == "OrderedDict") {
     // collections.OrderedDict is used in tensor serialization for a tensor's
     // backward hooks (but they are not actually saved with this Pickler)
+    // Python's model.state_dict() is an OrderedDict, but this is not used
+    // for model loading.
     globals_.emplace_back([this] {
-      // drop the Tuple that was argument to OrderedDict, and replace it
-      // with None OrderedDicts only appear in tensor deserialization and
-      // their value is never used
-      stack_.back() = IValue();
+      // The OrderedDict becomes a GenericDict. The inputs which are in
+      // stack.back() are fully ignored, but they are empty anyways.
+      stack_.back() = c10::impl::GenericDict(AnyType::get(), AnyType::get());
     });
   } else if (module_name == "torch" && class_name == "device") {
     globals_.emplace_back([this] {
