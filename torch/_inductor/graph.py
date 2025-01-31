@@ -1993,10 +1993,8 @@ class GraphLowering(torch.fx.Interpreter):
 
         return total_bytes, node_counts, node_runtimes
 
-    @staticmethod
-    def save_output_code(code: str) -> None:
-        # No-op to be patched for unit tests
-        pass
+    # No-op to be patched for unit tests
+    save_output_code: Optional[Callable[[str], None]] = None
 
     def compile_to_module(self) -> ModuleType:
         with dynamo_timed(
@@ -2022,7 +2020,8 @@ class GraphLowering(torch.fx.Interpreter):
                 + '"""\n'
             )
             code = tuning_code + code
-        GraphLowering.save_output_code(code)
+        if GraphLowering.save_output_code is not None:
+            GraphLowering.save_output_code(code)
         output_code_log.debug("Output code: \n%s", code)
 
         inductor_meta = autotune_cache.inductor_meta_from_config()

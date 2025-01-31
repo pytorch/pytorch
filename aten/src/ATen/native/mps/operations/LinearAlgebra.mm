@@ -848,7 +848,7 @@ static Tensor& linalg_cholesky_mps_impl(const Tensor& input, bool upper, Tensor&
 
   Tensor success = at::empty({B}, input.options().dtype(kInt)).fill_(1);
 
-  MTLSize threadGroupSize = MTLSizeMake(256, 1, 1);
+  MTLSize threadGroupSize = MTLSizeMake(32, 8, 1);
 
   @autoreleasepool {
     dispatch_sync_with_rethrow(stream->queue(), ^() {
