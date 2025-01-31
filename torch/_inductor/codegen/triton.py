@@ -7,6 +7,7 @@ import dataclasses
 import functools
 import itertools
 import logging
+import math
 import os
 import textwrap
 from collections.abc import Iterable, Sequence
@@ -804,6 +805,8 @@ def maybe_upcast_float32(convert_output: bool = True):
 class TritonOverrides(OpOverrides):
     """Map element-wise ops to Triton"""
 
+    LOG_2_E = math.log2(math.e)
+
     @staticmethod
     def to_dtype(
         x,
@@ -919,7 +922,17 @@ class TritonOverrides(OpOverrides):
     @staticmethod
     @maybe_upcast_float32()
     def exp(x):
-        return f"tl_math.exp({x})"
+        """
+        When use_fast_math, use the ftz (flushing to zero) variant
+        of exponent computation.
+
+        Check https://github.com/triton-lang/triton/issues/5735 for
+        more details.
+        """
+        if config.use_fast_math:
+            return f"libdevice.exp2({x} * {TritonOverrides.LOG_2_E})"
+        else:
+            return f"tl_math.exp({x})"
 
     @staticmethod
     @maybe_upcast_float32()
