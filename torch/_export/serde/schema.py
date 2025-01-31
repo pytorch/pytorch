@@ -8,7 +8,7 @@ from typing import Annotated, Optional
 from torch._export.serde.union import _Union
 
 # NOTE: Please update this value if any modifications are made to the schema
-SCHEMA_VERSION = (8, 5)
+SCHEMA_VERSION = (8, 6)
 TREESPEC_VERSION = 1
 
 
@@ -413,3 +413,30 @@ class ExportedProgram:
     schema_version: Annotated[SchemaVersion, 60]
     verifiers: Annotated[list[str], 70] = field(default_factory=list)
     torch_version: Annotated[str, 80] = "<=2.4"
+
+#########################################################################
+# Container types for inference tasks, not being used directly for export.
+#########################################################################
+
+@dataclass
+class Program:
+    methods: Annotated[dict[str, ExportedProgram], 200]
+
+# This is the top-level model definition that be will serialized into the package
+@dataclass
+class Model:
+    # unique identifier of the model in the package, e.g. local, remote, merge
+    name: Annotated[str, 10]
+    # key is the FQN of tensor in exported program
+    # value is the archive path of tensor payloads
+    # e.g. "L__self__linear.weight" : "/data/tensor/L__self__linear.weight"
+    tensorPaths: Annotated[dict[str, str], 20]
+    # program exported from torch.export()
+    program: Annotated[Program, 40]
+    # Backend-specialized Lowered GraphModule
+    # e.g. "aotinductor-a100" : ExportedProgram_with_AOTInductor_delegate
+    delegates: Annotated[dict[str, Program], 50]
+    deviceAllocationMap: Annotated[dict[str, str], 60]
+    # key is the FQN of constant in exported program (constant tensor or torchbind objs)
+    # value is the archive path of serialized constants
+    constantPaths: Annotated[dict[str, str], 70]
