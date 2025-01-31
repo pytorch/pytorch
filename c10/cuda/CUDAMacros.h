@@ -1,6 +1,4 @@
 #pragma once
-#include <cstdint>
-#include <limits>
 
 #ifndef C10_USING_CUSTOM_GENERATED_MACROS
 
@@ -49,6 +47,5 @@ o */
 // fbcode depends on this value being 16
 #define C10_COMPILE_TIME_MAX_GPUS 16
 #else
-constexpr std::int64_t C10_COMPILE_TIME_MAX_GPUS =
-    std::numeric_limits<int8_t>::max() + 1;
+#define C10_COMPILE_TIME_MAX_GPUS 120
 #endif
