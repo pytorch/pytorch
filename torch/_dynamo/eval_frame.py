@@ -12,7 +12,6 @@ from __future__ import annotations
 
 import atexit
 import contextlib
-from contextlib import contextmanager
 import functools
 import inspect
 import logging
@@ -26,6 +25,7 @@ import traceback
 import types
 import warnings
 import weakref
+from contextlib import contextmanager
 from dataclasses import dataclass
 from enum import Enum
 from os.path import dirname, join
@@ -862,15 +862,19 @@ def optimize(*args, **kwargs):
 
     return _optimize(rebuild_ctx, *args, **kwargs)
 
+
 _dynamo_override_backend: Optional[str] = None
+
 
 def get_dynamo_override_backend() -> Optional[str]:
     global _dynamo_override_backend
     return _dynamo_override_backend
 
+
 def set_dynamo_override_backend(backend: Optional[str]):
     global _dynamo_override_backend
     _dynamo_override_backend = backend
+
 
 @contextmanager
 def dynamo_override_backend(backend: str):
@@ -879,6 +883,7 @@ def dynamo_override_backend(backend: str):
     _dynamo_override_backend = backend
     yield
     _dynamo_override_backend = original_dynamo_override_backend
+
 
 def _optimize(
     rebuild_ctx: Callable[[], Union[OptimizeContext, _NullDecorator]],

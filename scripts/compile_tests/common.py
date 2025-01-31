@@ -182,13 +182,18 @@ def compute_pass_rate(eager_dir, dynamo_dir):
     fail_keys = eager_pass_keys - subset
     return fail_keys
 
-from enum import Enum, auto
+
+from enum import auto, Enum
+
+
 class TestCaseStatus(Enum):
     PASSED = auto()
     FAILED = auto()
     SKIPPED = auto()
 
+
 from typing import Any
+
 
 @dataclass
 class TestCaseResult:
@@ -205,12 +210,11 @@ class TestCaseResult:
     def is_skipped(self):
         return self.status == TestCaseStatus.SKIPPED
 
+
 def parse_testcase(testcase) -> TestCaseResult:
     children = list(testcase.iter())
     k = key(testcase)
     tags = {child.tag for child in children}
-    #if len(tags) > 1:
-    #    breakpoint()
     if tags <= {"testcase", "system-out", "system-err", "properties", "property"}:
         return TestCaseResult(TestCaseStatus.PASSED, k, testcase)
 
@@ -304,7 +308,7 @@ def compute_pass_rate_tcs(control_tcs, test_tcs):
             c_passed_t_failed += 1
             print(f"CONTROL_PASSED_TEST_FAILED:{k}")
         elif cv.is_failed() and tv.is_passed():
-            c_failed_t_passed +=1
+            c_failed_t_passed += 1
             print(f"STRANGE! CONTROL_FAILED_TEST_PASSED:{k}")
         elif cv.is_failed() and tv.is_failed():
             c_failed_t_failed += 1
@@ -320,10 +324,7 @@ def compute_pass_rate_tcs(control_tcs, test_tcs):
 
 
 def find_test_in_control_statuses(
-    control_tcs,
-    control_status: TestCaseStatus,
-    test_tcs,
-    test_status: TestCaseStatus
+    control_tcs, control_status: TestCaseStatus, test_tcs, test_status: TestCaseStatus
 ):
     for k, tv in test_tcs.items():
         if tv.status != test_status:
@@ -335,14 +336,13 @@ def find_test_in_control_statuses(
         if cv.status != control_status:
             continue
 
-        print(f"XXX TEST:{k} {tv.key} {tv.testcase} (control:{control_status} vs test_status:{test_status}")
+        print(
+            f"XXX TEST:{k} {tv.key} {tv.testcase} (control:{control_status} vs test_status:{test_status}"
+        )
 
 
 def find_control_in_test_statuses(
-    control_tcs,
-    control_status: TestCaseStatus,
-    test_tcs,
-    test_status: TestCaseStatus
+    control_tcs, control_status: TestCaseStatus, test_tcs, test_status: TestCaseStatus
 ):
     for k, cv in control_tcs.items():
         if cv.status != control_status:
@@ -354,7 +354,9 @@ def find_control_in_test_statuses(
         if tv.status != test_status:
             continue
 
-        print(f"XXX TEST:{k} {tv.key} {tv.testcase} (control:{control_status} vs test_status:{test_status}")
+        print(
+            f"XXX TEST:{k} {tv.key} {tv.testcase} (control:{control_status} vs test_status:{test_status}"
+        )
 
 
 def find_control_passed_missing_in_test(
@@ -371,12 +373,12 @@ def find_control_passed_missing_in_test(
         if not (tv is None or tv.is_skipped()):
             continue
 
-        dk = k.split(':')[0]
+        dk = k.split(":")[0]
         d[dk] = d.get(dk, 0) + 1
 
     sd = {k: v for k, v in sorted(d.items(), key=lambda item: item[1])}
     for k, v in sd.items():
-        print(f"PYTORCH_TEST_WITH_SUBCLASSES=1 python test/{k}") 
+        print(f"PYTORCH_TEST_WITH_SUBCLASSES=1 python test/{k}")
 
 
 def compute_pass_rate_aot_eager_subclasses(e_dir, dw_dir, ae_dir, sc_dir):
@@ -384,7 +386,7 @@ def compute_pass_rate_aot_eager_subclasses(e_dir, dw_dir, ae_dir, sc_dir):
     print(f"-- PARSE EAGER XMLS {e_dir}")
     e_xmls = open_test_results(e_dir)
     tcs_e = parse_xmls(e_xmls)
-    
+
     print(f"-- PARSE DYNAMO_WRAPPED XMLS {dw_dir}")
     dw_xmls = open_test_results(dw_dir)
     tcs_dw = parse_xmls(dw_xmls)
@@ -408,7 +410,6 @@ def compute_pass_rate_aot_eager_subclasses(e_dir, dw_dir, ae_dir, sc_dir):
 
     # print("computing pass rate AOT_EAGER vs SC")
     # compute_pass_rate_tcs(tcs_ae, tcs_sc)
-
 
     # test_testcases = get_testcases(test_xmls)
     # tc = {key(t): t for t in test_testcases}

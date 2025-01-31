@@ -285,7 +285,11 @@ def _try_lift_tensor_arguments(gm, inputs):
             node_args = [a for a in n.args if isinstance(a, torch.fx.Node)]
             other_args = [a for a in n.args if not isinstance(a, torch.fx.Node)]
 
-            is_output_tensor = n.meta is not None and "example_value" in n.meta and isinstance(n.meta["example_value"], Tensor)
+            is_output_tensor = (
+                n.meta is not None
+                and "example_value" in n.meta
+                and isinstance(n.meta["example_value"], Tensor)
+            )
 
             if (
                 is_output_tensor
@@ -356,11 +360,7 @@ def test_subclasses(gm, inputs, **kwargs):
     # Verify original inputs
     aot_eager(test_gm, inputs)
 
-    from torch.testing._internal.subclasses import (
-        F32_QI32QuantRWTensor,
-        WrapperSubclass,
-    )
-    from torch.testing._internal.two_tensor import TwoTensor
+    from torch.testing._internal.subclasses import WrapperSubclass
 
     TRANSFORMATIONS: List[TensorToSubclassTransform] = [
         TensorToSubclassTransform(
@@ -373,10 +373,10 @@ def test_subclasses(gm, inputs, **kwargs):
     if bool(os.getenv("PYTORCH_TEST_WITH_SUBCLASSES_NONTRIVIAL", default=0)):
         TRANSFORMATIONS.extend(
             [
-                #TensorToSubclassTransform(
+                # TensorToSubclassTransform(
                 #    factory_fn=lambda t: F32_QI32QuantRWTensor.from_src(t),
                 #    precondition=lambda t: t.ndim <= 2,
-                #),
+                # ),
                 # TODO: NestedTensor transformation can have many false-positive failures
                 # as NT does not support many of the operations
                 TensorToSubclassTransform(
@@ -405,25 +405,39 @@ def test_subclasses(gm, inputs, **kwargs):
     )
     N: int = len(TRANSFORMATIONS)
 
+    EMPTY_TRANSFORM_SEQ = [
+        (),
+    ]
     TRANSFORM_SEQS: List[Any] = [
         (),  # empty tuple means no transformation
     ]
-    print("XXX BEFORE product0")
     for k in range(1, MAX_SUBCLASSES_NESTING + 1):
         for p in itertools.product(list(range(N)), repeat=k):
             TRANSFORM_SEQS.append(p)  # noqa: PERF402
-    print("XXX AFTER product0")
 
     TENSOR_INPUTS_IDXS: List[int] = [
         i for i, inp in enumerate(inputs) if _is_tensor(inp)
     ]
     NUM_TENSOR_INPUTS = len(TENSOR_INPUTS_IDXS)
 
-    print("XXX BEFORE product")
-    TENSOR_INPUTS_TRANSFORM_SEQS = list(
-        itertools.product(TRANSFORM_SEQS, repeat=NUM_TENSOR_INPUTS)
-    )
-    print("XXX AFTER product")
+    MAX_NUM_TENSOR_INPUTS_TRANSFORM = 8
+
+    TENSOR_INPUTS_TRANSFORM_SEQS = []
+    if NUM_TENSOR_INPUTS < MAX_NUM_TENSOR_INPUTS_TRANSFORM:
+        TENSOR_INPUTS_TRANSFORM_SEQS = list(
+            itertools.product(TRANSFORM_SEQS, repeat=NUM_TENSOR_INPUTS)
+        )
+    else:
+        seqs = list(itertools.product(TRANSFORM_SEQS, repeat=MAX_NUM_TENSOR_INPUTS))
+        TENSOR_INPUTS_TRANSFORM_SEQS = [
+            s
+            + [
+                (),
+            ]
+            * (NUM_TENSOR_INPUTS - MAX_NUM_TENSOR_INPUTS_TRANSFORM)
+            for s in seqs
+        ]
+
     NUM_TENSOR_INPUTS_TRANSFORM_SEQS = len(TENSOR_INPUTS_TRANSFORM_SEQS)
     log.debug(
         "test_subclasses backend TENSOR_INPUTS_TRANSFORM_SEQS:%s",
@@ -448,13 +462,17 @@ def test_subclasses(gm, inputs, **kwargs):
         os.getenv("PYTORCH_TEST_WITH_SUBCLASSES_MAX_INPUT_VARIANTS", default=64)
     )
     import random
+
     variants = TENSOR_INPUTS_TRANSFORM_SEQS
     if len(variants) > MAX_INPUT_VARIANTS:
         variants = random.sample(TENSOR_INPUTS_TRANSFORM_SEQS, MAX_INPUT_VARIANTS)
     for i, transform_seqs in enumerate(variants):
         # TODO: test random vars of 128 with stable id of transform seqs, to repro
 
-        test_inputs = pytree.tree_map(lambda x: x.detach() if isinstance(x, torch.Tensor) else x, copy.copy(inputs))
+        test_inputs = pytree.tree_map(
+            lambda x: x.detach() if isinstance(x, torch.Tensor) else x,
+            copy.copy(inputs),
+        )
         # Have to copy GraphModule, as AOTD caches some info based on inputs in attrs
         _test_gm = copy.deepcopy(test_gm)
 
@@ -495,10 +513,14 @@ inputs={inputs_str}
 gm = GraphModule()
 aot_eager(gm, inputs)"""
                 error_str = f"test_subclasses error compiling\ninputs:{inputs_str}\ntransform_seqs:{transform_seqs}\n---REPRO_BEGIN---{repro_py}\n---REPRO_END---\nexception:%s"
-                error_str += "".join(traceback.format_exception(type(ex), ex, ex.__traceback__))
+                error_str += "".join(
+                    traceback.format_exception(type(ex), ex, ex.__traceback__)
+                )
                 log.error(error_str)
             except:
-                print(f"Error {inner_ex} during handling exception {ex} in 'test_subclasses' backend")
+                print(
+                    f"Error during handling exception {ex} in 'test_subclasses' backend"
+                )
             raise ex
 
     return gm
