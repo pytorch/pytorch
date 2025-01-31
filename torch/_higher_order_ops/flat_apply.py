@@ -5,25 +5,31 @@ from typing import Callable
 import torch
 import torch.fx.node
 import torch.utils._pytree as pytree
-from torch._C import DispatchKey
 from torch._ops import HigherOrderOperator
-from torch.fx.experimental.proxy_tensor import ProxyTorchDispatchMode, track_tensor_tree
 
 
 def is_graphable(val) -> bool:
+    """Definition: a graphable type is a type that that is an acceptable input/output type to a FX node."""
     return isinstance(val, torch.fx.node.base_types)
 
 
-def flatten(stuff):
-    # Flatten everything
+def to_graphable(stuff):
+    """Flattens stuff into a flat list of graphable types."""
+    # We can consider preserving things like List[int] to improve
+    # perf and readability (right now that is all flattened out)
     flat_args, spec = pytree.tree_flatten(stuff)
     for arg in flat_args:
-        # TODO: better error message
-        assert is_graphable(arg), f"Expected graphable, got {type(arg)}"
+        if not is_graphable(arg):
+            raise RuntimeError(
+                f"Expected all pytree.tree_leaves of (args, kwargs) to be graphable types, but found "
+                f"non-fx-graphable type {type(arg)}. If this type is meant to be constant, mark it as "
+                f"via pytree.register_constant; otherwise, register it as a pytree."
+            )
     return flat_args, spec
 
 
-def unflatten(flat_args, spec):
+def from_graphable(flat_args, spec):
+    """The inverse of to_graphable."""
     stuff = pytree.tree_unflatten(flat_args, spec)
     return stuff
 
@@ -32,67 +38,67 @@ def unflatten(flat_args, spec):
 class ConstantFunction:
     func: Callable
 
+    def __call__(self, *args, **kwargs):
+        return self.func(*args, **kwargs)
+
 
 pytree.register_constant(ConstantFunction)
 
-
-def plop_in_graph(f):
-    def inner(*args, **kwargs):
-        flat_args, in_spec = flatten((args, kwargs))
-        _, f_spec = pytree.tree_flatten(ConstantFunction(f))
-        return flat_apply(f_spec, in_spec, *flat_args)
-
-    return inner
+_op_types = (
+    torch._ops.OpOverload,
+    torch._ops.OpOverloadPacket,
+    torch._ops.HigherOrderOperator,
+)
 
 
 class FlatApply(HigherOrderOperator):
     def __init__(self) -> None:
         super().__init__("flat_apply")
 
-    def __call__(self, func_spec, in_spec, *args):
+    def __call__(self, func, in_spec, *flat_args, **_unused):
         """
-        The semantics of flat_apply(func_spec, in_spec, *args) is the following:
+        Functions that take in non-graphable types cannot directly be put into FX graph.
 
-        >>> func = pytree.tree_unflatten([], func_spec)
-        >>> args, kwargs = unflatten(args, in_spec)
+        Given func(*args, **kwargs), if all of the non-graphable types are pytrees,
+        then we're able to store a call to flat_apply(func, in_spec, *flat_args) in the FX graph.
+
+        The semantics of flat_apply(func, in_spec, *flat_args) are roughly equivalent to:
+
+        >>> args, kwargs = pytree.tree_unflatten(flat_args, in_spec)
         >>> output = func(*args, **kwargs)
         >>> return output
 
-        TODO: We're also going to need a out_spec (to handle pytree output types).
+        flat_apply supports the following two cases:
+        - an input type is a container type (e.g. of tensors) registered as a pytree.
+        We'll tree_flatten the input type and store the spec.
+        - an input type is a constant type (i.e. torch.compile will specialize on it)
+        registered with pytree.register_constant. The constant type goes directly
+        into the spec.
+
         """
-        return super().__call__(func_spec, in_spec, *args)
+        assert isinstance(func, _op_types) or pytree._is_constant_holder(func)
+        assert len(_unused) == 0
+        return impl(func, in_spec, *flat_args)
 
 
-flat_apply = FlatApply()
+def impl(func, in_spec, *flat_args):
+    if not isinstance(func, _op_types):
+        # assume ConstantFunction
+        func = pytree._retrieve_constant(func)
+        assert isinstance(func, ConstantFunction)
 
-
-@flat_apply.py_impl(DispatchKey.CompositeExplicitAutograd)
-def decomp(func_spec, in_spec, *args):
-    func = pytree.tree_unflatten([], func_spec).func
-    args, kwargs = unflatten(args, in_spec)
+    args, kwargs = from_graphable(flat_args, in_spec)
     out = func(*args, **kwargs)
+    # TODO: The following needs to change for pytree outputs.
+    # I'm not sure if we need to return (flat_output, spec) or just (flat_output,):
+    # in the latter case the tracers need to carry out the output specs
+    # (they need to know how to reconstruct the object from just the flat_output).
+    assert (
+        isinstance(out, torch.Tensor)
+        or isinstance(out, (tuple, list))
+        and all(isinstance(x, torch.Tensor) for x in out)
+    )
     return out
 
 
-@flat_apply.py_impl(ProxyTorchDispatchMode)
-def _(proxy_mode, func_spec, in_spec, *args):
-    qualname = proxy_mode.tracer.get_fresh_qualname("func_spec")
-    setattr(proxy_mode.tracer.root, qualname, func_spec)
-    func_proxy = proxy_mode.tracer.create_proxy("get_attr", qualname, (), {})
-
-    qualname = proxy_mode.tracer.get_fresh_qualname("in_spec")
-    setattr(proxy_mode.tracer.root, qualname, in_spec)
-    in_spec_proxy = proxy_mode.tracer.create_proxy("get_attr", qualname, (), {})
-
-    node_args = (func_proxy, in_spec_proxy, *args)
-    proxy_args = pytree.tree_map(proxy_mode.tracer.unwrap_proxy, node_args)
-    out_proxy = proxy_mode.tracer.create_proxy(
-        "call_function", flat_apply, proxy_args, {}
-    )
-    out = decomp(func_spec, in_spec, *args)
-    return track_tensor_tree(
-        out, out_proxy, constant=None, tracer=proxy_mode.tracer  # type: ignore[arg-type]
-    )
-
-
-flat_apply.fallthrough(DispatchKey.AutogradCPU)
+flat_apply = FlatApply()

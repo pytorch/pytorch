@@ -1195,6 +1195,18 @@ TreeSpec(tuple, None, [*,
         self.assertEqual(point.x, torch.tensor(1))
         self.assertEqual(point.y, torch.tensor(2))
 
+    def test_constant(self):
+        @dataclass
+        class Config:
+            norm: str
+
+        py_pytree.register_constant(Config)
+
+        config = Config("l1")
+        elements, spec = py_pytree.tree_flatten(config)
+        self.assertEqual(elements, [])
+        self.assertEqual(spec.context.value, config)
+
     def test_tree_map_with_path_multiple_trees(self):
         @dataclass
         class ACustomPytree:
