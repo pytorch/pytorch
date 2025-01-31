@@ -82,9 +82,8 @@ cmake_policy(SET CMP0057 NEW) # if IN_LIST
 
 if(NOT "$ENV{OMP_PREFIX}" STREQUAL "")
   set(OpenMP_PREFIX "$ENV{OMP_PREFIX}")
-elseif(${CMAKE_SYSTEM_NAME} STREQUAL "Darwin" AND IS_DIRECTORY /opt/homebrew/Cellar/libomp)
-  file(GLOB HOMEBREW_OMP_VERSIONS "/opt/homebrew/Cellar/libomp/*")
-  list(GET HOMEBREW_OMP_VERSIONS 0 OpenMP_PREFIX)
+elseif(${CMAKE_SYSTEM_NAME} STREQUAL "Darwin" AND EXISTS /opt/homebrew/opt/libomp)
+  set(OpenMP_PREFIX "/opt/homebrew/opt/libomp")
 endif()
 
 function(_OPENMP_FLAG_CANDIDATES LANG)

@@ -26,6 +26,7 @@ from .dicts import (
     DefaultDictVariable,
     DictKeySetVariable,
     FrozensetVariable,
+    MappingProxyVariable,
     NNModuleHooksDictVariable,
     SetVariable,
 )
@@ -191,4 +192,5 @@ __all__ = [
     "UserMethodVariable",
     "VariableTracker",
     "WithExitFunctionVariable",
+    "MappingProxyVariable",
 ]
