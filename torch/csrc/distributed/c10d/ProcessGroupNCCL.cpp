@@ -21,6 +21,7 @@
 #include <c10/util/WaitCounter.h>
 #include <c10/util/irange.h>
 #include <c10/util/thread_name.h>
+#include <torch/csrc/cuda/CUDAPluggableAllocator.h>
 #include <torch/csrc/cuda/nccl.h>
 #include <torch/csrc/distributed/c10d/FlightRecorder.hpp>
 #include <torch/csrc/distributed/c10d/NCCLUtils.hpp>
@@ -2169,24 +2170,17 @@ void ProcessGroupNCCL::checkAndSetRemoteError() {
 // For ranks [0, 1, 2, 3], root rank is 0 and index is 0.
 // For ranks [4, 5, 6], root rank is 4 and index is 1.
 // For ranks [7, 8, 9], root rank is 7 and index is 2.
-static std::pair<int, int> getRootRankAndIndex(
-    const int rank,
-    const int nRanks,
-    const int nIds) {
+static int getRootIndex(const int rank, const int nRanks, const int nIds) {
   const int rmr = nRanks % nIds;
   const int rpr = nRanks / nIds;
   // For the first rmr roots, we assign one more rank to the root.
   const int rlim = rmr * (rpr + 1);
-  int rootIdx = -1, rootRank = -1;
   if (rank < rlim) {
     // Root with `rpr + 1` ranks, (0, 1, 2, ..., rmr - 1).
-    rootIdx = rank / (rpr + 1);
-    return {rootIdx * (rpr + 1), rootIdx};
+    return rank % (rpr + 1) ? -1 : rank / (rpr + 1);
   } else {
     // Root with `rpr` ranks, (rmr, rmr + 1, ..., nIds - 1).
-    rootIdx = ((rank - rlim) / rpr) + rmr;
-    rootRank = ((rank - rlim) / rpr) * rpr + rlim;
-    return {rootRank, rootIdx};
+    return (rank - rlim) % rpr ? -1 : ((rank - rlim) / rpr) + rmr;
   }
 }
 
@@ -2576,7 +2570,6 @@ void ProcessGroupNCCL::broadcastUniqueNCCLID(
 // This is first done by setting the ID by each root and then `multiGet` by all
 // ranks.
 void ProcessGroupNCCL::allgatherUniqueNCCLIDs(
-    int rootRank,
     int rootIdx,
     ncclUniqueId* ncclID,
     std::vector<ncclUniqueId>& ncclIDs) {
@@ -2585,7 +2578,8 @@ void ProcessGroupNCCL::allgatherUniqueNCCLIDs(
   for (size_t r = 0; r < ncclIDs.size(); r++) {
     storeKeys.emplace_back("UniqueNCCLID:" + std::to_string(r));
   }
-  if (rank_ == rootRank) {
+  // For non-root rank, rootIdx is set to -1.
+  if (rootIdx > 0) {
     auto vec = std::vector<uint8_t>(
         reinterpret_cast<uint8_t*>(ncclID),
         reinterpret_cast<uint8_t*>(ncclID) + NCCL_UNIQUE_ID_BYTES);
@@ -2775,24 +2769,23 @@ std::shared_ptr<NCCLComm> ProcessGroupNCCL::initNCCLComm(
   // accoring to
   // https://github.com/pytorch/pytorch/pull/136789#discussion_r1779171615.
   auto ranksPerRoot = getCvarInt(TORCH_NCCL_RANKS_PER_ROOT, 128);
-#ifdef NCCL_HAS_INIT_RANK_SCALABLE
+#if defined(NCCL_HAS_INIT_RANK_SCALABLE) && defined(NCCL_HAS_CONFIG)
   useScalableInit = !singleP2POp && (getSize() > ranksPerRoot);
-#endif // NCCL_HAS_INIT_RANK_SCALABLE
+#endif // NCCL_HAS_INIT_RANK_SCALABLE && NCCL_HAS_CONFIG
 
   if (useScalableInit) {
     auto numRoots = (getSize() + ranksPerRoot - 1) / ranksPerRoot;
     std::vector<ncclUniqueId> ncclIDs(numRoots);
 
     if (!ncclComm) {
-      auto rootRankAndIndex = getRootRankAndIndex(rank_, getSize(), numRoots);
+      auto rootIdx = getRootIndex(rank_, getSize(), numRoots);
       // We only need to get unique IDs for roots.
-      if (rank_ == rootRankAndIndex.first) {
+      if (rootIdx > 0) {
         C10D_NCCL_CHECK(ncclGetUniqueId(&ncclID), std::nullopt);
       }
       // We only need to all-gather the ncclID if the rank is root.
       auto timeStarted = std::chrono::steady_clock::now();
-      allgatherUniqueNCCLIDs(
-          rootRankAndIndex.first, rootRankAndIndex.second, &ncclID, ncclIDs);
+      allgatherUniqueNCCLIDs(rootIdx, &ncclID, ncclIDs);
       auto timerDeltaMs =
           std::chrono::duration_cast<std::chrono::duration<double>>(
               std::chrono::steady_clock::now() - timeStarted)
@@ -2801,16 +2794,16 @@ std::shared_ptr<NCCLComm> ProcessGroupNCCL::initNCCLComm(
       LOG(INFO) << logPrefix()
                 << "ProcessGroupNCCL all-gather unique IDs through store took "
                 << timerDeltaMs << " ms";
-#ifdef NCCL_HAS_INIT_RANK_SCALABLE
-      ncclComm = NCCLComm::create_scalable(
-          numRanks, rootRankAndIndex.second, rank, ncclIDs, options_->config);
+#if defined(NCCL_HAS_INIT_RANK_SCALABLE) && defined(NCCL_HAS_CONFIG)
+      ncclComm =
+          NCCLComm::create_scalable(numRanks, rank, ncclIDs, options_->config);
 #else
       C10_THROW_ERROR(
           DistBackendError,
           c10::str(
               logPrefix(),
               "create_scalable is called when useScalableInit is enabled but ",
-              " NCCL_HAS_INIT_RANK_SCALABLE not defined, this should not happen "));
+              "neither NCCL_HAS_INIT_RANK_SCALABLE nor NCCL_HAS_CONFIG is not defined, this should not happen "));
 #endif // NCCL_HAS_INIT_RANK_SCALABLE
     }
   } else {
@@ -2838,12 +2831,12 @@ std::shared_ptr<NCCLComm> ProcessGroupNCCL::initNCCLComm(
                   << timerDeltaMs << " ms";
       }
 
-#ifdef NCCL_HAS_COMM_NONBLOCKING
+#ifdef NCCL_HAS_CONFIG
       ncclComm = NCCLComm::create(
           numRanks, rank, ncclID, deviceIndex, options_->config);
 #else
       ncclComm = NCCLComm::create(numRanks, rank, ncclID, deviceIndex);
-#endif // NCCL_HAS_COMM_NONBLOCKING
+#endif // NCCL_HAS_CONFIG
     }
   }
 
@@ -5383,6 +5376,51 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::_allgather_base(
       OpType::_ALLGATHER_BASE,
       "nccl:_all_gather_base",
       avoidRecordStreams);
+}
+
+// Create a memory allocator for NCCL. This allocator is used to allocate memory
+// that supports NVLink Sharp functionality. This allocator is later pybinded to
+// python, so that users can use it to create MemPool. For example:
+// >>> pool = torch.cuda.MemPool(backend.mem_allocator)
+
+// Allocate function
+static void* _ncclMemAlloc(size_t size, int device, void* stream) {
+#ifndef NCCL_HAS_MEM_ALLOC
+  TORCH_CHECK(
+      false, "NCCL mem allocator is not supported in this NCCL version");
+#else
+  LOG(INFO) << "NCCL mem allocator: allocating " << size << " bytes";
+  at::cuda::OptionalCUDAGuard gpuGuard(device);
+  void* ptr = nullptr;
+  TORCH_CHECK(ncclMemAlloc(&ptr, size) == ncclSuccess, "ncclMemAlloc failed");
+  return ptr;
+#endif // NCCL_HAS_MEM_ALLOC
+}
+
+// Free function
+static void _ncclMemFree(void* ptr, size_t size, int device, void* stream) {
+#ifndef NCCL_HAS_MEM_ALLOC
+  TORCH_CHECK(
+      false, "NCCL mem allocator is not supported in this NCCL version");
+#else
+  LOG(INFO) << "NCCL mem allocator: freeing " << size << " bytes";
+  at::cuda::OptionalCUDAGuard gpuGuard(device);
+  TORCH_CHECK(ncclMemFree(ptr) == ncclSuccess, "ncclMemFree failed");
+#endif // NCCL_HAS_MEM_ALLOC
+}
+
+// Create a `CUDAPluggableAllocator` that uses the above functions.
+std::shared_ptr<c10::Allocator> ProcessGroupNCCL::getMemAllocator() {
+#ifndef NCCL_HAS_MEM_ALLOC
+  TORCH_CHECK(
+      false, "NCCL mem allocator is not supported in this NCCL version");
+#endif // NCCL_HAS_MEM_ALLOC
+  C10_LOG_API_USAGE_ONCE("ProcessGroupNCCL.getMemAllocator");
+  static std::shared_ptr<c10::cuda::CUDACachingAllocator::CUDAAllocator>
+      ncclMemAllocator =
+          torch::cuda::CUDAPluggableAllocator::createCustomAllocator(
+              _ncclMemAlloc, _ncclMemFree);
+  return ncclMemAllocator;
 }
 
 } // namespace c10d

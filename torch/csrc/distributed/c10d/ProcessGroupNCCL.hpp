@@ -496,7 +496,7 @@ class TORCH_API ProcessGroupNCCL : public Backend {
     // Schedule NCCL operations on high priority CUDA streams
     bool is_high_priority_stream;
 
-#ifdef NCCL_HAS_COMM_NONBLOCKING
+#ifdef NCCL_HAS_CONFIG
     // Configure ranks
     ncclConfig_t config = NCCL_CONFIG_INITIALIZER;
 #endif
@@ -772,6 +772,8 @@ class TORCH_API ProcessGroupNCCL : public Backend {
 
   ErrorType getError() override;
 
+  std::shared_ptr<c10::Allocator> getMemAllocator() override;
+
   // Performs NCCL user buffer registration for all buffers in
   // the given MemPool
   void registerMemPool(c10::cuda::MemPool* pool);
@@ -808,7 +810,6 @@ class TORCH_API ProcessGroupNCCL : public Backend {
 
   // Helper that allgathers nccl unique IDs to all ranks through the store
   void allgatherUniqueNCCLIDs(
-      int rootRank,
       int rootIdx,
       ncclUniqueId* ncclID,
       std::vector<ncclUniqueId>& ncclIDs);

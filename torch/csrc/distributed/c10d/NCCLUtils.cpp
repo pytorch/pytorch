@@ -62,7 +62,7 @@ std::shared_ptr<NCCLComm> NCCLComm::create(
   return comm;
 }
 
-#ifdef NCCL_HAS_COMM_NONBLOCKING
+#ifdef NCCL_HAS_CONFIG
 std::shared_ptr<NCCLComm> NCCLComm::create(
     int numRanks,
     int rank,
@@ -90,7 +90,6 @@ std::shared_ptr<NCCLComm> NCCLComm::create(
 #ifdef NCCL_HAS_INIT_RANK_SCALABLE
 std::shared_ptr<NCCLComm> NCCLComm::create_scalable(
     int numRanks,
-    int rootIdx,
     int rank,
     std::vector<ncclUniqueId>& commIds,
     ncclConfig_t& config) {
@@ -108,13 +107,16 @@ std::shared_ptr<NCCLComm> NCCLComm::create_scalable(
           commIds.data(),
           &config),
       std::nullopt);
-  comm->ncclId_ = commIds[rootIdx];
+  // Only the first ncclUniqueId will be used to create the
+  // communicator hash id, which is used to identify the communicator
+  // in the log file and in the replay tool.
+  comm->ncclId_ = commIds[0];
   comm->rank_ = rank;
   comm->initialized_ = !comm->nonBlocking_;
   return comm;
 }
 #endif // NCCL_HAS_INIT_RANK_SCALABLE
-#endif // NCCL_HAS_COMM_NONBLOCKING
+#endif // NCCL_HAS_CONFIG
 
 ncclComm_t NCCLComm::getNcclComm() {
   LockType lock(mutex_);

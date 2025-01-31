@@ -62,6 +62,7 @@ def is_hashable(x):
                 variables.TorchInGraphFunctionVariable,
                 variables.TypingVariable,
                 variables.FunctoolsPartialVariable,
+                variables.WeakRefVariable,
             ),
         )
 
@@ -107,6 +108,10 @@ class ConstDictVariable(VariableTracker):
                 return self.vt.value
             elif isinstance(self.vt, variables.UserFunctionVariable):
                 return self.vt.get_function()
+            elif isinstance(self.vt, variables.WeakRefVariable):
+                # Access the underlying value inside the referent_vt for the key representation
+                Hashable = ConstDictVariable._HashableTracker
+                return Hashable(self.vt.referent_vt).underlying_value
             else:
                 x = self.vt.as_python_constant()
             return x
@@ -481,7 +486,7 @@ class ConstDictVariable(VariableTracker):
         self.install_dict_keys_match_guard()
         return [x.vt for x in self.items.keys()]
 
-    def call_hasattr(self, tx, name):
+    def call_obj_hasattr(self, tx, name):
         # dict not allow setting arbitrary attributes. To check for hasattr, we can just check the __dict__ of the dict.
         # OrderedDict though requires side effects tracking because it supports arbitrary setattr.
         if self.user_cls is dict:
