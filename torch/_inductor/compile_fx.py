@@ -5,6 +5,7 @@ import contextlib
 import dataclasses
 import enum
 import functools
+import inspect
 import io
 import itertools
 import json
@@ -140,6 +141,7 @@ from .virtualized import V
 
 if TYPE_CHECKING:
     import types
+    from asyncio import Future
     from collections.abc import Generator, Sequence
 
     from torch._inductor.output_code import _StrideExprStr
