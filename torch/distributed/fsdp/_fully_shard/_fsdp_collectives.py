@@ -530,10 +530,10 @@ def _get_gradient_divide_factors(
     reduce_dtype: torch.dtype,
     device_type: str = "",
 ) -> Union[tuple[None, None], tuple[float, float]]:
-    # For fp32/bf16, we do not need to worry about overflow/underflow, so we
-    # use NCCL's built-in division to avoid separate div kernels
-    if reduce_dtype in (torch.float32, torch.bfloat16) and device_type != "mtia":
-        return None, None
+    # NCCL ReduceOp.AVG seems to be buggy for world size 1
+    # enforcing ReduceOp.SUM for debugging purpose
+    # if reduce_dtype in (torch.float32, torch.bfloat16) and device_type != "mtia":
+    #     return None, None
     data_parallel_size = reduce_scatter_group.size()
     if all_reduce_group is not None:
         data_parallel_size *= all_reduce_group.size()
