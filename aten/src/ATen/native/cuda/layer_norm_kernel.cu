@@ -644,7 +644,12 @@ __global__ void GammaBetaBackwardCUDAKernel_32x32(
   }
 }
 
-template <typename T, typename T_ACC>
+// We use template parameters here because the compiler can then constant-propagate these
+// constants and produce faster kernel code. In particular, there is a shared memory
+// reduction loop that can be completely optimized away if block_dim_y < 32 (which it is
+// at the single callsite where this kernel is called).
+template <typename T, typename T_ACC,
+          int block_dim_x, int block_dim_y>
 __global__ void GammaBetaBackwardCUDAKernel(
     int64_t M,
     int64_t N,
@@ -700,30 +705,59 @@ __global__ void GammaBetaBackwardCUDAKernel(
         db_sum += dY_reg;
       }
     }
+    // When using warp shuffles we load from a column in shared memory so we pad
+    // to reduce bank conflicts.
+    int padded_bx = (block_dim_x + 1);
 
-    // Do the final reduction in shared memory
-    s_dg = s_data_typed;
-    s_db = s_data_typed + blockDim.x * blockDim.y;
-    s_dg[threadIdx.y * blockDim.x + threadIdx.x] = dg_sum;
-    s_db[threadIdx.y * blockDim.x + threadIdx.x] = db_sum;
-    __syncthreads();
-
-    for (int offset = blockDim.y / 2; offset >= 1; offset /= 2) {
+    // Note that this loop will be optimized away by the compiler if block_dim_y=32
+    // (which it is from the single callsite where this kernel is called).
+    for (int offset = block_dim_y / 2; offset >= kWarpSize; offset /= 2) {
       if (threadIdx.y < offset) {
-        s_dg[threadIdx.y * blockDim.x + threadIdx.x] +=
-            s_dg[(threadIdx.y + offset) * blockDim.x + threadIdx.x];
-        s_db[threadIdx.y * blockDim.x + threadIdx.x] +=
-            s_db[(threadIdx.y + offset) * blockDim.x + threadIdx.x];
-        }
+        s_dg[threadIdx.y * padded_bx + threadIdx.x] +=
+            s_dg[(threadIdx.y + offset) * padded_bx + threadIdx.x];
+        s_db[threadIdx.y * padded_bx + threadIdx.x] +=
+            s_db[(threadIdx.y + offset) * padded_bx + threadIdx.x];
+      }
       __syncthreads();
     }
+    // These asserts are static and do not cause any runtime cost.
+    static_assert(block_dim_x * block_dim_y % kWarpSize == 0);
+    static_assert(block_dim_x * block_dim_y >= kWarpSize);
 
-    if (threadIdx.y == 0) {
-      if (dg) {
-        dg[j] = s_dg[threadIdx.x];
+    s_dg = s_data_typed;
+    s_db = s_data_typed + padded_bx * block_dim_y;
+    s_dg[threadIdx.y * padded_bx + threadIdx.x] = dg_sum;
+    s_db[threadIdx.y * padded_bx + threadIdx.x] = db_sum;
+    __syncthreads();
+
+    int total_warps_needed = block_dim_x;
+    int active_reduce_warps = (block_dim_x * block_dim_y) / kWarpSize;
+
+    int thread_id = (threadIdx.x + threadIdx.y * block_dim_x);
+    int warp_id = thread_id / kWarpSize;
+    int lid = (thread_id) & (kWarpSize - 1);
+
+    // Now use warp shuffles to do the last 32 rows of the reduction.
+    for (int i = 0; i < total_warps_needed / active_reduce_warps; ++i) {
+      int shared_x = i * active_reduce_warps + warp_id;
+      int shared_y = lid;
+      T_ACC reg_dg = s_dg[shared_y * padded_bx + shared_x];
+      T_ACC reg_db = s_db[shared_y * padded_bx + shared_x];
+
+      for (unsigned delta = kWarpSize >> 1; delta >= 1; delta >>= 1) {
+        reg_dg += WARP_SHFL_XOR(reg_dg, delta, kWarpSize);
+        reg_db += WARP_SHFL_XOR(reg_db, delta, kWarpSize);
       }
-      if (db) {
-        db[j] = s_db[threadIdx.x];
+      if (lid == 0) {
+        int64_t store_index = blockIdx.x * block_dim_x;
+        store_index += i * active_reduce_warps;
+        store_index += (thread_id) / kWarpSize;
+        if (dg) {
+          dg[store_index] = reg_dg;
+        }
+        if (db) {
+          db[store_index] = reg_db;
+        }
       }
     }
   }
@@ -1327,7 +1361,7 @@ void LayerNormBackwardKernelImplInternal(
         dim3 threads{16, 32};
         int blocks = (N + threads.x - 1) / threads.x;
         size_t shmem_sz = 2 * sizeof(T_ACC) * threads.x * threads.y;
-        GammaBetaBackwardCUDAKernel<T, T_ACC>
+        GammaBetaBackwardCUDAKernel<T, T_ACC, 16, 32>
             <<<blocks, threads, shmem_sz, cuda_stream>>>(
                 M,
                 N,
