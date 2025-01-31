@@ -764,7 +764,7 @@ def _compile_fx_inner(
 
         # Don't clog up the main tlparse output with disabled cache
         if cache_info is not None:
-            torch._logging.trace_structured(
+            trace_structured(
                 "artifact",
                 metadata_fn=lambda: {
                     "name": f"fx_graph_cache_{cache_state}",
@@ -863,7 +863,7 @@ class _InProcessFxCompile(FxCompile):
                 )
                 return fd.getvalue()
 
-            torch._logging.trace_structured(
+            trace_structured(
                 "artifact",
                 metadata_fn=lambda: {
                     "name": "fx_graph_runnable",
@@ -1426,8 +1426,6 @@ def fw_compiler_freezing(
         aot_autograd_model,
         aot_example_inputs,  # type: ignore[arg-type]
     )
-
-    setattr(opt_model, "_has_frozen_params", True)  # noqa: B010
 
     aot_example_inputs = [aot_example_inputs[ind] for ind in preserved_arg_indices]
     num_fixed = len(preserved_arg_indices) - num_example_inputs
