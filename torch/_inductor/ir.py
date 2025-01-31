@@ -61,7 +61,11 @@ from torch.utils._sympy.functions import CleanDiv, FloorDiv, ModularIndexing
 from torch.utils._sympy.symbol import SymT
 
 from . import config, dependencies
-from .codegen.common import BackendFeature, index_prevent_reordering
+from .codegen.common import (
+    BackendFeature,
+    get_scheduling_for_device,
+    index_prevent_reordering,
+)
 from .dependencies import (
     Dep,
     extract_free_unbacked_symbols,
@@ -342,7 +346,23 @@ def get_device_type(
 
 
 def is_triton(x: Union[IRNode, torch.device, None, str]) -> bool:
-    return is_gpu(get_device_type(x))
+    device = get_device_type(x)
+    # Special case cpu and cuda as using the method below
+    # to determine if the scheduler is a triton scheduler subclass
+    # requires instantiating a scheduler for them
+    if device in ["cpu", "cuda"]:
+        if getattr(config, f"{device}_backend") == "triton":
+            return True
+        return False
+    if (
+        device is None
+        or (device_scheduling := get_scheduling_for_device(device)) is None
+    ):
+        return False
+    from .codegen.triton import TritonScheduling
+
+    assert isinstance(device_scheduling, type)
+    return issubclass(device_scheduling, TritonScheduling)
 
 
 def is_cpu(x: Union[IRNode, torch.device, None, str]) -> bool:
@@ -365,6 +385,29 @@ def is_aligned_realized_tensor(x: Union[Buffer, TensorBox], alignment: int) -> b
     return aligned_last_dim and aligned_strides
 
 
+def significant_strides_equal(
+    strides1: Sequence[_IntLike],
+    strides2: Sequence[_IntLike],
+    shape: Sequence[_IntLike],
+) -> bool:
+    """
+    Returns true if the strides are equal, ignoring dimensions of size 1 .
+    """
+    assert len(shape) == len(strides1) and len(strides1) == len(strides2)
+    for dim, s1, s2 in zip(shape, strides1, strides2):
+        if V.graph.sizevars.statically_known_leq(dim, 1):  # type: ignore[arg-type]
+            continue
+
+        if not V.graph.sizevars.statically_known_equals(
+            s1, s2
+        ) and not V.graph.sizevars.symbolic_hint(s1) == V.graph.sizevars.symbolic_hint(
+            s2
+        ):
+            return False
+
+    return True
+
+
 def try_match_insignificant_strides(
     tensor: Union[TensorBox, BaseView],
     strides: Sequence[Union[int, torch.SymInt]],
@@ -384,21 +427,7 @@ def try_match_insignificant_strides(
     ):
         return tensor  # type: ignore[arg-type]
 
-    def significant_strides_equal(
-        shape: Sequence[Union[Expr, int]],
-        meta_strides: Sequence[Union[Expr, int]],
-        tensor_strides: Sequence[Union[Expr, int]],
-    ) -> bool:
-        for dim, s1, s2 in zip(shape, meta_strides, tensor_strides):
-            if V.graph.sizevars.statically_known_leq(dim, 1):  # type: ignore[arg-type]
-                continue
-
-            if not V.graph.sizevars.statically_known_equals(s1, s2):
-                return False
-
-        return True
-
-    if not significant_strides_equal(tensor.get_size(), strides, tensor.get_stride()):
+    if not significant_strides_equal(strides, tensor.get_stride(), tensor.get_size()):
         return tensor
 
     storage, old_layout = as_storage_and_layout(tensor)
@@ -1003,22 +1032,6 @@ def get_reduction_combine_fn(
 
     else:
         raise NotImplementedError(f"unknown reduction_type={reduction_type}")
-
-
-def significant_strides_equal(
-    strides1: Sequence[_IntLike], strides2: Sequence[_IntLike], size: Sequence[_IntLike]
-) -> bool:
-    """
-    Returns true if the strides are equal, ignoring dimensions of size 1 .
-    """
-    non_1_indices = [
-        i
-        for i, dim in enumerate(size)
-        if V.graph.sizevars.size_hint(dim, fallback=2) != 1
-    ]
-    strides1 = [V.graph.sizevars.size_hint(strides1[i]) for i in non_1_indices]
-    strides2 = [V.graph.sizevars.size_hint(strides2[i]) for i in non_1_indices]
-    return strides1 == strides2
 
 
 @ir_dataclass
@@ -6255,13 +6268,15 @@ class AssertScalar(ExternKernel):
         # "u0 == 0" in the runtime asserts, if you subsequently try to
         # simplify(u0 == 0), you will get True (because we've already runtime assert'ed
         # that it's true).  But we're code generating the actual runtime assert here!!
+        symbol = next(iter(self.get_unbacked_symbol_uses()))
+        symbol_str = f"std::to_string({symbol})"
         if V.graph.cpp_wrapper:
             sizevar = V.graph.wrapper_code.codegen_cpp_sizevar(
                 self.scalar, simplify=False
             )
             # TODO: when we start compiling in C++20, annotate with [[unlikely]].
             wrapper.writeline(
-                f'if (!({sizevar})) {{ throw std::runtime_error("{self.msg}"); }}'
+                f'if (!({sizevar})) {{ throw std::runtime_error("Expected {self.msg} but received " + {symbol_str}); }}'
             )
         else:
             sizevar = V.graph.wrapper_code.codegen_python_sizevar(
@@ -7194,7 +7209,7 @@ class InvokeSubgraph(ExternKernel):
 @ir_dataclass(frozen=False)
 class Conditional(ExternKernel):
     predicate: Optional[IRNode] = None
-    operands: Optional[list[TensorBox]] = None
+    operands: Optional[list[Union[TensorBox, ShapeAsConstantBuffer]]] = None
     true_subgraph: Optional[Subgraph] = None
     false_subgraph: Optional[Subgraph] = None
     outputs: Optional[list[MultiOutput]] = None
@@ -7202,7 +7217,7 @@ class Conditional(ExternKernel):
     def __init__(
         self,
         predicate: IRNode,
-        operands: list[TensorBox],
+        operands: list[Union[TensorBox, ShapeAsConstantBuffer]],
         true_subgraph: Subgraph,
         false_subgraph: Subgraph,
         layout: MultiOutputLayout,
@@ -7212,15 +7227,13 @@ class Conditional(ExternKernel):
         self.true_subgraph = true_subgraph
         self.false_subgraph = false_subgraph
 
-        inputs = []
-        if not isinstance(predicate, ShapeAsConstantBuffer):
-            inputs.append(predicate)
-        inputs.extend(operands)
+        sym_args, tensor_args = _split_by_sym_type([predicate] + operands)
 
         super().__init__(
             name=None,
             layout=layout,
-            inputs=inputs,
+            inputs=tensor_args,
+            constant_args=sym_args,
         )
 
         self.name = V.graph.register_buffer(self)
@@ -7232,11 +7245,10 @@ class Conditional(ExternKernel):
         predicate: TensorBox,
         true_fn: Subgraph,
         false_fn: Subgraph,
-        operands: list[TensorBox],
+        operands: list[Union[TensorBox, ShapeAsConstantBuffer]],
     ):
         predicate = cls.realize_input(predicate)
         operands = [cls.realize_input(x) for x in operands]
-
         fx_operands = V.graph.current_node.args[-1]
         fake_operands = [x.meta["val"] for x in fx_operands]  # type: ignore[union-attr]
 
@@ -7270,16 +7282,12 @@ class Conditional(ExternKernel):
             assert to.get_dtype() == fo.get_dtype(), (i, to, fo)
             assert to.get_layout().offset == fo.get_layout().offset, (i, to, fo)
 
-        if not isinstance(predicate, ShapeAsConstantBuffer):
-            # use predicate device for consistent codegen-ing
-            device = predicate.get_device()
-        else:
-            # predicate is not a Tensor: use first operand's device
-            assert (
-                len(operands) > 0
-            ), "When predicate is not a Tensor, there must be at least one operand in torch.cond."
-            device = operands[0].get_device()
-
+        device = next(
+            o.get_device()
+            for o in [predicate] + operands
+            if not isinstance(o, ShapeAsConstantBuffer)
+        )
+        assert device is not None, "cannot determine device"
         conditional = Conditional(
             predicate=predicate,
             operands=operands,
@@ -7312,18 +7320,32 @@ class Conditional(ExternKernel):
         wrapper.codegen_conditional(self)
 
 
+def _split_by_sym_type(
+    args: list[Any],
+) -> tuple[list[ShapeAsConstantBuffer], list[Any]]:
+    non_sym_args = []
+    sym_args = []
+    for arg in args:
+        if isinstance(arg, ShapeAsConstantBuffer):
+            sym_args.append(arg.expr)
+        else:
+            non_sym_args.append(arg)
+
+    return sym_args, non_sym_args
+
+
 @ir_dataclass(frozen=False)
 class WhileLoop(ExternKernel):
-    carried_inputs: Optional[list[TensorBox]] = None
-    additional_inputs: Optional[list[TensorBox]] = None
+    carried_inputs: Optional[list[Union[TensorBox, ShapeAsConstantBuffer]]] = None
+    additional_inputs: Optional[list[Union[TensorBox, ShapeAsConstantBuffer]]] = None
     cond_subgraph: Optional[Subgraph] = None
     body_subgraph: Optional[Subgraph] = None
     outputs: Optional[list[MultiOutput]] = None
 
     def __init__(
         self,
-        carried_inputs: list[TensorBox],
-        additional_inputs: list[TensorBox],
+        carried_inputs: list[Union[TensorBox, ShapeAsConstantBuffer]],
+        additional_inputs: list[Union[TensorBox, ShapeAsConstantBuffer]],
         cond_subgraph: Subgraph,
         body_subgraph: Subgraph,
         layout: MultiOutputLayout,
@@ -7333,10 +7355,12 @@ class WhileLoop(ExternKernel):
         self.cond_subgraph = cond_subgraph
         self.body_subgraph = body_subgraph
 
+        sym_args, tensor_args = _split_by_sym_type(carried_inputs + additional_inputs)
         super().__init__(
             name=None,
             layout=layout,
-            inputs=carried_inputs + additional_inputs,
+            inputs=tensor_args,
+            constant_args=sym_args,
         )
 
         self.name = V.graph.register_buffer(self)
@@ -7347,8 +7371,8 @@ class WhileLoop(ExternKernel):
         cls,
         cond_fn: Subgraph,
         body_fn: Subgraph,
-        carried_inputs: list[TensorBox],
-        additional_inputs: list[TensorBox],
+        carried_inputs: list[Union[TensorBox, ShapeAsConstantBuffer]],
+        additional_inputs: list[Union[TensorBox, ShapeAsConstantBuffer]],
     ):
         carried_inputs = [cls.realize_input(x) for x in carried_inputs]
         additional_inputs = [cls.realize_input(x) for x in additional_inputs]
