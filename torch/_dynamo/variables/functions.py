@@ -620,10 +620,11 @@ class LocalGeneratorObjectVariable(VariableTracker):
             # `RESUME` point; instead, we must consult the exception table to determine
             # the correct target.
             #
-            # Re-raising the exception allows us to correctly resume control flow by
-            # ensuring that the exception is handled properly. Without this step, if we
-            # let the trace proceed to the next instruction, it would follow the control
-            # flow where the exception raised by `throw()` was handled and swallowed.
+            # Re-raising the exception allows us to jump to the correct instruction
+            # given by the exception table. Without this step, if we let the trace
+            # proceed to the next instruction, it would follow the control flow where
+            # the exception raised by `throw()` was handled and swallowed, potentially
+            # leading to incorrect behavior.
             self._setup_exception(tx, args[0])
 
             if type(args[0]) is variables.BuiltinVariable:
