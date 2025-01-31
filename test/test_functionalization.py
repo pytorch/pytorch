@@ -1301,8 +1301,10 @@ def forward(self, arg0_1):
     split_copy_1 = torch.ops.aten.split_copy.Tensor(squeeze_copy_3, 2);  squeeze_copy_3 = None
     getitem_2 = split_copy_1[0]
     getitem_3 = split_copy_1[1];  split_copy_1 = getitem_3 = None
-    select_copy = torch.ops.aten.select_copy.int(view_copy_1, 0, 0);  view_copy_1 = select_copy = None
-    view_copy_8 = torch.ops.aten.view_copy.default(getitem_2, [4]);  view_copy_8 = None
+    select_copy = torch.ops.aten.select_copy.int(_lazy_clone_alias_copy, 0, 0);  _lazy_clone_alias_copy = select_copy = None
+    view_copy_8 = torch.ops.aten.view_copy.default(getitem_2, [4])
+    _lazy_clone_alias_copy_4 = torch.ops.aten._lazy_clone_alias_copy.default(view_copy_8);
+    view_copy_8 = _lazy_clone_alias_copy_4 = None
     view_copy_9 = torch.ops.aten.view_copy.default(view_copy_5, [8])
     view_copy_10 = torch.ops.aten.view_copy.default(view_copy_9, [2, 4]);  view_copy_9 = None
     select_copy_1 = torch.ops.aten.select_copy.int(view_copy_10, 0, 0);  view_copy_10 = None
@@ -1315,7 +1317,9 @@ def forward(self, arg0_1):
     getitem_4 = split_copy_2[0]
     getitem_5 = split_copy_2[1];  split_copy_2 = getitem_5 = None
     view_copy_13 = torch.ops.aten.view_copy.default(getitem_4, [4]);  getitem_4 = None
-    add_2 = torch.ops.aten.add.Tensor(select_copy_1, view_copy_13);  select_copy_1 = view_copy_13 = add_2 = None
+    _lazy_clone_alias_copy_7 = torch.ops.aten._lazy_clone_alias_copy.default(view_copy_13);  view_copy_13 = None
+    add_2 = torch.ops.aten.add.Tensor(select_copy_1, _lazy_clone_alias_copy_7);
+    select_copy_1 = _lazy_clone_alias_copy_7 = add_2 = None
     return getitem_2
     """,
         )  # noqa: B950

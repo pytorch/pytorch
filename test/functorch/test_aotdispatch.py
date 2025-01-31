@@ -4521,8 +4521,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1, arg5_1, arg6_1, arg7_1
             """\
 def forward(self, arg0_1):
     view = torch.ops.aten.view.default(arg0_1, [4, 4]);  arg0_1 = None
-    _lazy_clone_alias = torch.ops.aten._lazy_clone_alias.default(view);  view = None
-    sum_1 = torch.ops.aten.sum.default(_lazy_clone_alias);  _lazy_clone_alias = None
+    sum_1 = torch.ops.aten.sum.default(view);  view = None
     return (sum_1,)""",
         )  # noqa: B950
 

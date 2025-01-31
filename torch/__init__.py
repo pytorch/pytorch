@@ -1326,7 +1326,7 @@ def set_future_lazy_clone(mode: builtins.bool) -> None:
         >>> torch.set_future_lazy_clone(False)
         >>> a = torch.ones(4)
         >>> b = a.reshape((2, 2))  # `b` is a view of `a`
-        >>> a += 1                 # `a` is mutated, which also mutates `b`
+        >>> a += 1  # `a` is mutated, which also mutates `b`
         >>> result = b + 2
         >>> result
         tensor([[4., 4.],
@@ -1339,7 +1339,7 @@ def set_future_lazy_clone(mode: builtins.bool) -> None:
         >>> torch.set_future_lazy_clone(True)
         >>> a = torch.ones(4)
         >>> b = a.reshape((2, 2))  # `b` is a copy of `a`, not a view
-        >>> a += 1                 # `a` is mutated, but `b` is not
+        >>> a += 1  # `a` is mutated, but `b` is not
         >>> result = b + 2
         >>> result
         tensor([[3., 3.],
@@ -2883,10 +2883,6 @@ def _is_device_backend_autoload_enabled() -> builtins.bool:
     return os.getenv("TORCH_DEVICE_BACKEND_AUTOLOAD", "1") == "1"
 
 
-if _is_device_backend_autoload_enabled():
-    _import_device_backends()
-
-
 def _as_tensor_fullprec(t):
     """
     Like torch.as_tensor, but when given Python data types it will keep
@@ -2899,3 +2895,10 @@ def _as_tensor_fullprec(t):
         return torch.as_tensor(t, dtype=torch.int64)
     else:
         return torch.as_tensor(t)
+
+
+# `_import_device_backends` should be kept at the end to ensure
+# all the other functions in this module that may be accessed by
+# an autoloaded backend are defined
+if _is_device_backend_autoload_enabled():
+    _import_device_backends()
