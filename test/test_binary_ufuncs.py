@@ -3466,8 +3466,7 @@ class TestBinaryUfuncs(TestCase):
         [
             torch.float,
             torch.double,
-            # TODO: create GH issue
-            # AssertionError: Tensor-likes are not close!
+            # https://github.com/pytorch/pytorch/issues/146155
             subtest([torch.cfloat], decorators=[xfailIfSVE256]),
             torch.cdouble,
         ],
