@@ -252,6 +252,8 @@ class OutputGraph:
     the root InstructionTranslator's OutputGraph.
     """
 
+    side_effects: SideEffects
+
     def __init__(
         self,
         code_options: dict[str, Any],
@@ -628,11 +630,9 @@ class OutputGraph:
         """
         global_state = cast(
             dict[str, tuple[Callable[..., Any], bool]],
-            (
-                out
-                if out is not None
-                else self.tracing_context.global_context.global_state
-            ),
+            out
+            if out is not None
+            else self.tracing_context.global_context.global_state,
         )
 
         # TODO - Consider having a torch level API for torch_function_state. As
