@@ -33,6 +33,7 @@ from ..utils import (
     is_tensor_base_attr_getter,
     proxy_args_kwargs,
     set_example_value,
+    tuple_methods,
 )
 from .base import VariableTracker
 from .functions import (
@@ -213,6 +214,11 @@ class SuperVariable(VariableTracker):
             and inner_fn in self.objvar._dict_methods
         ):
             return self.objvar._dict_vt.call_method(tx, name, args, kwargs)
+        elif (
+            isinstance(self.objvar, variables.UserDefinedTupleVariable)
+            and inner_fn in tuple_methods
+        ):
+            return self.objvar._tuple_vt.call_method(tx, name, args, kwargs)
         elif inner_fn is object.__getattribute__:
             # object.__getattribute__ has no side-effects. We can directly call
             # __getattribute__ to access the attribute.
@@ -1151,7 +1157,7 @@ class PythonModuleVariable(VariableTracker):
     def __repr__(self) -> str:
         return f"PythonModuleVariable({self.value})"
 
-    def call_hasattr(self, tx: "InstructionTranslator", name):
+    def call_obj_hasattr(self, tx: "InstructionTranslator", name):
         result = hasattr(self.value, name)
         return variables.ConstantVariable.create(result)
 
@@ -1201,6 +1207,32 @@ class TypingVariable(VariableTracker):
 
     def as_python_constant(self):
         return self.value
+
+    def reconstruct(self, codegen: "torch._dynamo.codegen.PyCodegen") -> None:
+        # We're just trying to load the type here. Reconstructing the type from
+        # scratch is tricky - for a type like `typing.List[int]` we'd need to
+        # deconstruct the origin and args.  The origin for `List[int]` is `list`
+        # and the args is `(int,)`. When we recombine those we get the parts
+        # back and need to emit code for:
+        #
+        #     `typing.List[int]`
+        #
+        # But it's # worse than that - what if `typing` isn't in the globals (or
+        # was loaded like `import typing as _typing ; _typing.List[int]`?) so we
+        # really need to do something like:
+        #
+        #   `sys.modules["typing"].List[int]`
+        #
+        # Argh - but what if they rewrote the global `int`?  So we have to do:
+        #
+        #   `sys.modules["typing"].List[sys.modules["builtins"].int]`
+        #
+        # But where do we get `sys`? What if they never imported it or have
+        # something ELSE called `sys`?
+        #
+        # Let's skip all that noise and just emit it as a simple const.
+        #
+        codegen.append_output(codegen.create_load_const(self.value))
 
 
 @functools.lru_cache(maxsize=1)
