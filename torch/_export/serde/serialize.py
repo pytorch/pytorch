@@ -548,13 +548,44 @@ class GraphModuleSerializer(metaclass=Final):
                 meta_val = node.meta.get("val", None)
                 return meta_val is not None and isinstance(meta_val, torch.Tensor)
 
-            ex_node = Node(
-                target=self.serialize_operator(node.target),
-                inputs=self.serialize_hoo_inputs(node.args, node.kwargs),
-                outputs=self.serialize_hoo_outputs(node),
-                metadata=self.serialize_metadata(node),
-                is_hop_single_tensor_return=_is_hop_single_tensor_return(node),
-            )
+            # Special handle serialization for aoti_call_delegate
+            if node.target is torch._higher_order_ops.aoti_call_delegate:
+                serializable_args = list(node.args)
+
+                # AOTI lowered module is not serializable, serialize the aoti_path instead
+                lowered_module_name: str = node.args[0].name  # type: ignore[assignment, no-untyped-def, union-attr]
+                assert hasattr(node.graph.owning_module, lowered_module_name)
+                lowered_module = getattr(node.graph.owning_module, lowered_module_name)  # type: ignore[no-untyped-def]
+                serializable_args[0] = lowered_module.aoti_path
+
+                # AOTI compiled graph module in node.args[0] is stateful, and will fail the verifier check
+                # Skip serializing original_gm as a workaround
+                serializable_args[1] = None
+
+                def serialize_tensor_list_output(node):
+                    meta_val = node.meta.get("val", None)
+                    tensor_args = []
+                    for idx, meta in enumerate(meta_val):
+                        name = self._output_node_name_at_index(node, idx)
+                        tensor_args.append(self.serialize_tensor_output(name, meta))
+                    return [Argument.create(as_tensors=tensor_args)]
+
+
+                ex_node = Node(
+                    target=self.serialize_operator(node.target),
+                    inputs=self.serialize_hoo_inputs(serializable_args, node.kwargs),
+                    outputs=serialize_tensor_list_output(node),
+                    metadata=self.serialize_metadata(node),
+                    is_hop_single_tensor_return=False,
+                )
+            else:
+                ex_node = Node(
+                    target=self.serialize_operator(node.target),
+                    inputs=self.serialize_hoo_inputs(node.args, node.kwargs),
+                    outputs=self.serialize_hoo_outputs(node),
+                    metadata=self.serialize_metadata(node),
+                    is_hop_single_tensor_return=_is_hop_single_tensor_return(node),
+                )
         elif type(node.target) in _serialization_registry:
             # Sanity check for unhandled serialization.
             assert type(node.target) in _serialization_registry, f"{type(node.target)} is not supported in export serialization."

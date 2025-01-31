@@ -1061,7 +1061,9 @@ class WhileLoopHigherOrderVariable(TorchHigherOrderOperatorVariable):
             # See NOTE [unspecialize int carry with unbacked symints]
             # Note: this must be run under discard graph changes.
             def create_unbacked_sym_node_var(tx) -> SymNodeVariable:
-                example_value = _create_unbacked_symint(tx.output.fake_mode)
+                example_value = _create_unbacked_symint(
+                    tx.output.fake_mode, ignore_fresh_unbacked_symbols=True
+                )
                 proxy = tx.output.current_tracer.create_graph_input(
                     "unbacked_symint", type(example_value), example_value
                 )
@@ -1213,7 +1215,9 @@ class WhileLoopHigherOrderVariable(TorchHigherOrderOperatorVariable):
         )
         unspecialized_flat_example_value = pytree.tree_map_only(
             (int, torch.SymInt),
-            lambda _: _create_unbacked_symint(tx.output.fake_mode),
+            lambda _: _create_unbacked_symint(
+                tx.output.fake_mode, ignore_fresh_unbacked_symbols=False
+            ),
             flat_example_value,
         )
         return _call_function_and_unflatten_output(
@@ -1336,10 +1340,10 @@ class ScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
 
         args, kwargs = LazyVariableTracker.realize_all((args, kwargs))
 
-        def arg_extractor(combine_fn, init, xs, dim, reverse, additional_inputs):
-            return combine_fn, init, xs, dim, reverse, additional_inputs
+        def arg_extractor(combine_fn, init, xs, reverse, additional_inputs):
+            return combine_fn, init, xs, reverse, additional_inputs
 
-        combine_fn, init, xs, dim, reverse, additional_inputs = arg_extractor(
+        combine_fn, init, xs, reverse, additional_inputs = arg_extractor(
             *args, **kwargs
         )
         assert isinstance(additional_inputs, variables.BaseListVariable)
@@ -1355,12 +1359,12 @@ class ScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
             )
         assert isinstance(init, variables.BaseListVariable)
 
-        dim_fake = (
-            dim.as_proxy()
-            if type(dim.as_proxy()) == int
-            else get_fake_value(dim.as_proxy().node, tx)
-        )
-        scan_length = get_fake_value(xs.items[0].as_proxy().node, tx).size()[dim_fake]
+        # dim_fake = (
+        #     dim.as_proxy()
+        #     if type(dim.as_proxy()) == int
+        #     else get_fake_value(dim.as_proxy().node, tx)
+        # )
+        scan_length = get_fake_value(xs.items[0].as_proxy().node, tx).size()[0]
         if scan_length == 0:
             unimplemented(
                 "scan() operator doesn't support zero-sized tensors during tracing."
@@ -1378,7 +1382,9 @@ class ScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
             # The sub_args_inp is a slice of original input, e.g. if input.size is (3, 4), and scan dim=0
             # the sub_args_inp shape will be (4, ).
             sub_args_inp = [
-                _make_inlined(tx, first_slice_copy)(inp, dim) for inp in xs.items
+                # _make_inlined(tx, first_slice_copy)(inp, dim) for inp in xs.items
+                _make_inlined(tx, first_slice_copy)(inp)
+                for inp in xs.items
             ]
             sub_args_additional_inputs = [
                 t.call_method(tx, "clone", args=(), kwargs={})
@@ -1446,7 +1452,7 @@ class ScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
             make_attr(tx, combine_fn_name),
             init_proxy,
             xs_proxy,
-            dim.as_proxy(),
+            # dim.as_proxy(),
             reverse.as_proxy(),
             additional_inputs_proxy,
         )
