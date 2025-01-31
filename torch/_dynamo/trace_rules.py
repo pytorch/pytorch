@@ -3144,7 +3144,6 @@ def is_numpy_type_info(obj) -> bool:
 BUILTIN_SKIPLIST = (
     collections,
     copy,
-    inspect,
     random,
     traceback,
     unittest,
