@@ -90,7 +90,13 @@ def impl(func, in_spec, *flat_args):
 
     args, kwargs = from_graphable(flat_args, in_spec)
     out = func(*args, **kwargs)
-    # TODO: The following needs to change for pytree outputs.
+    # Right now, all outputs must either be Tensor or lists/tuples of Tensors.
+    # This matches the output type restriction on custom operators.
+    #
+    # TODO: The following can be updated to support non-Tensor outputs and pytrees.
+    # For non-Tensor constant outputs: the assumption would be that they are constant
+    # (everytime the function runs those MUST be the same)
+    # For pytree outputs:
     # I'm not sure if we need to return (flat_output, spec) or just (flat_output,):
     # in the latter case the tracers need to carry out the output specs
     # (they need to know how to reconstruct the object from just the flat_output).

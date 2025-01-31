@@ -319,7 +319,7 @@ def register_constant(cls: type[Any]) -> None:
         >>>
         >>> config = Config("l2")
         >>> values, spec = pytree.tree_flatten(config)
-        >>> assert torch.allclose(values, [])
+        >>> assert len(values) == 0
 
     """
 
