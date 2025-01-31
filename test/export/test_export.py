@@ -2955,8 +2955,9 @@ def forward(self, p_conv_weight, p_conv_bias, p_conv1d_weight, p_conv1d_bias, c_
     conv2d = torch.ops.aten.conv2d.default(x, p_conv_weight, p_conv_bias);  x = p_conv_weight = p_conv_bias = None
     conv1d = torch.ops.aten.conv1d.default(y, p_conv1d_weight, p_conv1d_bias);  y = p_conv1d_weight = p_conv1d_bias = None
     view = torch.ops.aten.view.default(conv2d, [31680, 98]);  conv2d = None
+    _lazy_clone_alias = torch.ops.aten._lazy_clone_alias.default(view);  view = None
     permute = torch.ops.aten.permute.default(c_linear_weight, [1, 0]);  c_linear_weight = None
-    addmm = torch.ops.aten.addmm.default(c_linear_bias, view, permute);  c_linear_bias = view = permute = None
+    addmm = torch.ops.aten.addmm.default(c_linear_bias, _lazy_clone_alias, permute);  c_linear_bias = _lazy_clone_alias = permute = None
     view_1 = torch.ops.aten.view.default(addmm, [20, 33, 48, 20]);  addmm = None
     cos = torch.ops.aten.cos.default(view_1);  view_1 = None
     sum_1 = torch.ops.aten.sum.dim_IntList(conv1d, []);  conv1d = None
@@ -2974,8 +2975,9 @@ def forward(self, p_conv_weight, p_conv_bias, p_conv1d_weight, p_conv1d_bias, c_
     conv2d = torch.ops.aten.conv2d.default(x, p_conv_weight, p_conv_bias);  x = p_conv_weight = p_conv_bias = None
     convolution = torch.ops.aten.convolution.default(y, p_conv1d_weight, p_conv1d_bias, [1], [0], [1], False, [0], 1);  y = p_conv1d_weight = p_conv1d_bias = None
     view = torch.ops.aten.view.default(conv2d, [31680, 98]);  conv2d = None
+    _lazy_clone_alias = torch.ops.aten._lazy_clone_alias.default(view);  view = None
     permute = torch.ops.aten.permute.default(c_linear_weight, [1, 0]);  c_linear_weight = None
-    addmm = torch.ops.aten.addmm.default(c_linear_bias, view, permute);  c_linear_bias = view = permute = None
+    addmm = torch.ops.aten.addmm.default(c_linear_bias, _lazy_clone_alias, permute);  c_linear_bias = _lazy_clone_alias = permute = None
     view_1 = torch.ops.aten.view.default(addmm, [20, 33, 48, 20]);  addmm = None
     cos = torch.ops.aten.cos.default(view_1);  view_1 = None
     sum_1 = torch.ops.aten.sum.dim_IntList(convolution, []);  convolution = None
@@ -3040,8 +3042,9 @@ def forward(self, p_conv_weight, p_conv_bias, p_conv1d_weight, p_conv1d_bias, b_
     conv2d = torch.ops.aten.conv2d.default(x, p_conv_weight, p_conv_bias);  x = p_conv_weight = p_conv_bias = None
     conv1d = torch.ops.aten.conv1d.default(y, p_conv1d_weight, p_conv1d_bias);  y = p_conv1d_weight = p_conv1d_bias = None
     view = torch.ops.aten.view.default(conv2d, [31680, 98]);  conv2d = None
+    _lazy_clone_alias = torch.ops.aten._lazy_clone_alias.default(view);  view = None
     permute = torch.ops.aten.permute.default(b_linear_weight, [1, 0]);  b_linear_weight = None
-    addmm = torch.ops.aten.addmm.default(b_linear_bias, view, permute);  b_linear_bias = view = permute = None
+    addmm = torch.ops.aten.addmm.default(b_linear_bias, _lazy_clone_alias, permute);  b_linear_bias = _lazy_clone_alias = permute = None
     view_1 = torch.ops.aten.view.default(addmm, [20, 33, 48, 20]);  addmm = None
     cos = torch.ops.aten.cos.default(view_1);  view_1 = None
     sum_1 = torch.ops.aten.sum.dim_IntList(conv1d, []);  conv1d = None
@@ -3060,8 +3063,9 @@ def forward(self, p_conv_weight, p_conv_bias, p_conv1d_weight, p_conv1d_bias, b_
     conv2d = torch.ops.aten.conv2d.default(x, p_conv_weight, p_conv_bias);  x = p_conv_weight = p_conv_bias = None
     convolution = torch.ops.aten.convolution.default(y, p_conv1d_weight, p_conv1d_bias, [1], [0], [1], False, [0], 1);  y = p_conv1d_weight = p_conv1d_bias = None
     view = torch.ops.aten.view.default(conv2d, [31680, 98]);  conv2d = None
+    _lazy_clone_alias = torch.ops.aten._lazy_clone_alias.default(view);  view = None
     permute = torch.ops.aten.permute.default(b_linear_weight, [1, 0]);  b_linear_weight = None
-    addmm = torch.ops.aten.addmm.default(b_linear_bias, view, permute);  b_linear_bias = view = permute = None
+    addmm = torch.ops.aten.addmm.default(b_linear_bias, _lazy_clone_alias, permute);  b_linear_bias = _lazy_clone_alias = permute = None
     view_1 = torch.ops.aten.view.default(addmm, [20, 33, 48, 20]);  addmm = None
     cos = torch.ops.aten.cos.default(view_1);  view_1 = None
     sum_1 = torch.ops.aten.sum.dim_IntList(convolution, []);  convolution = None

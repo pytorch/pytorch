@@ -5388,6 +5388,33 @@ else:
         run(10, 2, False, True)
         run(10, 2, True, True)
 
+    # Tests the deprecated behavior of operators that conditionally create
+    # views. When `torch.get_future_lazy_clone() == False`, the operator must
+    # raise a warning in the case where a view is created. When
+    # `torch.get_future_lazy_clone() == True`, the operator must create a lazy
+    # clone, not a view.
+    @dtypes(*all_types_and_complex_and(torch.half, torch.bfloat16))
+    @assertNoLeakedLazyCloneWarnings()
+    @parametrize("init_fn, view_fn", [
+        (
+            lambda device, dtype: make_tensor((10,), dtype=dtype, device=device, low=-9, high=9),
+            lambda a: a.reshape((2, 5)),
+        )
+    ])
+    def test_conditional_view_deprecation(self, device, dtype, init_fn, view_fn):
+        # Test deprecated behavior
+        a0 = init_fn(device, dtype)
+        with futureLazyCloneGuard(False):
+            with self.assertWarnsRegex(UserWarning, "conditionally creates either a view or copy"):
+                r0 = view_fn(a0)
+        self.assertFalse(torch._C._is_cow_tensor(r0))
+
+        # Test future behavior
+        a1 = init_fn(device, dtype)
+        with futureLazyCloneGuard(True):
+            r1 = view_fn(a1)
+        self.assertTrue(torch._C._is_cow_tensor(r1))
+
     # FIXME: move to test distributions
     @skipIfMPS
     @dtypesIfCUDA(torch.float, torch.double, torch.half)

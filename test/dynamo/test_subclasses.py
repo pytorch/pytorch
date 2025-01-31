@@ -2243,7 +2243,9 @@ class GraphModule(torch.nn.Module):
     def forward(self, tangents_1: "f32[12]", tangents_2: "f32[12]"):
         view_2: "f32[3, 4]" = torch.ops.aten.view.default(tangents_1, [3, 4]);  tangents_1 = None
         view_3: "f32[3, 4]" = torch.ops.aten.view.default(tangents_2, [3, 4]);  tangents_2 = None
-        return (view_2, view_3)
+        _lazy_clone_alias: "f32[3, 4]" = torch.ops.aten._lazy_clone_alias.default(view_2);  view_2 = None
+        _lazy_clone_alias_1: "f32[3, 4]" = torch.ops.aten._lazy_clone_alias.default(view_3);  view_3 = None
+        return (_lazy_clone_alias, _lazy_clone_alias_1)
 """,  # noqa: B950
         )
 
@@ -2254,7 +2256,9 @@ class GraphModule(torch.nn.Module):
     def forward(self, primals_5: "Sym(s0)", tangents_1: "f32[3*s0]", tangents_2: "f32[3*s0]"):
         view_2: "f32[3, s0]" = torch.ops.aten.view.default(tangents_1, [3, primals_5]);  tangents_1 = None
         view_3: "f32[3, s0]" = torch.ops.aten.view.default(tangents_2, [3, primals_5]);  tangents_2 = None
-        return (None, view_2, view_3, primals_5, primals_5)
+        _lazy_clone_alias: "f32[3, s0]" = torch.ops.aten._lazy_clone_alias.default(view_2);  view_2 = None
+        _lazy_clone_alias_1: "f32[3, s0]" = torch.ops.aten._lazy_clone_alias.default(view_3);  view_3 = None
+        return (None, _lazy_clone_alias, _lazy_clone_alias_1, primals_5, primals_5)
 """,  # noqa: B950
         )
 
