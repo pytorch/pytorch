@@ -4442,6 +4442,16 @@ class TestMPS(TestCaseMPS):
                     getattr(torch.tensor(val1, dtype=dtype1, device='cpu'), binop)
                            (torch.full(full_shape, val2, dtype=dtype2, device='cpu')))
 
+    def test_xor_non_contigous(self):
+        # See https://github.com/pytorch/pytorch/issues/145203
+        x_mps = torch.randint(-16000, 16000, (10, 2), dtype=torch.int16, device="mps")
+        x_cpu = x_mps.detach().cpu()
+
+        x_mps[:, 0] ^= 3
+        x_cpu[:, 0] ^= 3
+
+        self.assertEqual(x_mps.cpu(), x_cpu)
+
     def test_nansum(self):
         def helper(dtype, noncontiguous, dim):
             zero_cpu = torch.zeros((), dtype=dtype)
