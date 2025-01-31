@@ -114,6 +114,16 @@ if [[ $USE_CUSPARSELT == "1" && $CUDA_VERSION == "11.8" ]]; then
         )
 fi
 
+# CUDA 11.8 have to ship the libnccl.so.2 with the binary
+if [[ $CUDA_VERSION == "11.8" ]]; then
+        DEPS_SONAME+=(
+            "libnccl.so.2"
+        )
+        DEPS_LIST+=(
+            "/usr/local/cuda/lib64/libnccl.so.2"
+        )
+fi
+
 if [[ $CUDA_VERSION == "12.4" || $CUDA_VERSION == "12.6" ]]; then
     export USE_STATIC_CUDNN=0
     # Try parallelizing nvcc as well
