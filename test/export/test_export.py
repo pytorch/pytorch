@@ -1253,6 +1253,21 @@ graph():
         ep = torch.export.export(M(), args)
         self.assertEqual(ep.module()(*args), M()(*args))
 
+    def test_mod_negative(self):
+        class Foo(torch.nn.Module):
+            def forward(self, x, y):
+                size = y.shape[0]
+                h = size // 2
+                start = (192 - h) // 2
+                return x[start : start + h]
+                
+        inps = (torch.randn(192), torch.randn(48))
+        dynamic_shapes = {
+            "x": None,
+            "y": {0: Dim("size")},
+        }
+        export(Foo(), inps, dynamic_shapes=dynamic_shapes)
+
     def test_state_tensors(self):
         class M(torch.nn.Module):  # simple with register buffer
             def __init__(self) -> None:

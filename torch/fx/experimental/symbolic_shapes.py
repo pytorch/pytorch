@@ -2551,6 +2551,9 @@ class DimConstraints:
                     if isinstance(modulus, sympy.Integer) and isinstance(
                         remainder, sympy.Integer
                     ):
+                        # Make sure modulus is non-negative
+                        if modulus < 0:
+                            modulus *= -1
                         # Make sure 0 <= remainder <= modulus.
                         remainder = remainder % modulus
                         remainder_modulus_pairs.append((remainder, modulus))
