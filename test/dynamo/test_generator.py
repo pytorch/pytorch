@@ -1047,9 +1047,15 @@ class TestGeneratorThrow(GeneratorTestsBase):
             nonlocal z
             z = 0
             try:
-                yield 1
+                try:
+                    yield 1
+                except ValueError:
+                    yield 2
+                finally:
+                    z += 2
             except ValueError:
-                yield 2
+                z += 3
+                yield 4
             finally:
                 z += 1
             z += 10
@@ -1062,7 +1068,7 @@ class TestGeneratorThrow(GeneratorTestsBase):
             return x.sin()
 
         f(torch.randn(3))
-        print("z", z)
+        self.assertEqual(z, 3)
 
     def test_throw_without_finally(self):
         z = 0
