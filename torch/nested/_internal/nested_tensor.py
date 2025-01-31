@@ -329,7 +329,6 @@ class NestedTensor(torch.Tensor):
         if torch._C._dispatch_has_kernel_for_dispatch_key(func.name(), dk):
             with torch.overrides.enable_reentrant_dispatch():
                 return func._op_dk(dk, *args, **kwargs)
-
         raise NotImplementedError(func)
 
     @classmethod
