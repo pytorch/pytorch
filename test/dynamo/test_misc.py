@@ -11983,6 +11983,17 @@ class TestCustomFunction(torch.testing._internal.common_utils.TestCase):
 
         torch.allclose(inp1_custom.grad, inp1_usual.grad)
 
+    def test_retain_grad(self):
+        def fn(x, y):
+            y.retain_grad()
+            return torch.sin(y) + x
+
+        opt_fn = torch.compile(fn, backend="aot_eager")
+        x = torch.randn(4, requires_grad=True)
+        y = torch.cos(x)
+        opt_fn(x, y).sum().backward()
+        self.assertTrue(y.grad is not None)
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
