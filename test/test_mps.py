@@ -12641,7 +12641,7 @@ class TestConsistency(TestCaseMPS):
             self.assertEqual(cpu_out, mps_out, atol=atol, rtol=rtol)
 
 
-    @ops(mps_ops_grad_modifier(copy.deepcopy(test_consistency_op_db)), allowed_dtypes=MPS_GRAD_DTYPES)
+    @ops(mps_op_db(copy.deepcopy(test_consistency_op_db)), allowed_dtypes=MPS_GRAD_DTYPES)
     def test_output_grad_match(self, device, dtype, op):
         self.assertEqual(device, "cpu")
 
