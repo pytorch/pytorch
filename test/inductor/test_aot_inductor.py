@@ -2089,6 +2089,28 @@ class AOTInductorTestsTemplate:
         x = torch.randn(5, device=self.device)
         self.check_model(Model(self.device), (x,))
 
+    def test_profile_benchmark_harness(self):
+        batch_size = 32
+        seq_length = 50
+        hidden_size = 768
+
+        def create_test_fn():
+            def test_fn():
+                inp = torch.randn(
+                    batch_size, seq_length, hidden_size, device=self.device
+                )
+                weight = torch.randn(hidden_size, hidden_size, device=self.device)
+                matmul_output = inp @ weight
+                torch.nn.LayerNorm(hidden_size, device=self.device)(matmul_output)
+                return True
+
+            return test_fn
+
+        fn = torch.compile(
+            options={"profile_bandwidth_output": "foo", "benchmark_harness": False}
+        )(create_test_fn())
+        fn()
+
     def test_with_profiler(self):
         class Model(torch.nn.Module):
             def __init__(self) -> None:
@@ -2128,6 +2150,33 @@ class AOTInductorTestsTemplate:
 
         example_inputs = (torch.randn(3, 10, device=self.device),)
         self.check_model(Model(), example_inputs)
+
+    def test_repeated_calling(self):
+        if self.device != "cuda":
+            raise unittest.SkipTest("requires CUDA")
+
+        class Model(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+
+            def forward(self, x):
+                return torch.sin(x)
+
+        example_inputs = (torch.randn(10, 10, device=self.device),)
+        optimized = torch._inductor.aoti_load_package(
+            torch._inductor.aoti_compile_and_package(
+                torch.export.export(Model(), example_inputs)
+            )
+        )
+        try:
+            torch.cuda.memory.empty_cache()
+            torch.cuda.memory._record_memory_history(context=None)
+            for _ in range(10):
+                optimized(*example_inputs)
+        finally:
+            torch.cuda.memory._record_memory_history(False)
+        segments = torch.cuda.memory._snapshot()["segments"]
+        self.assertEqual(segments[0]["requested_size"], 400)
 
     def test_view_outputs(self):
         class Model(torch.nn.Module):
@@ -2175,6 +2224,33 @@ class AOTInductorTestsTemplate:
             torch.randn(4, 3, 64, 64, device=self.device, dtype=torch.float64),
         )
         self.check_model(model, example_inputs)
+
+    def test_triton_next_power_of_2(self):
+        if self.device != GPU_TYPE:
+            raise unittest.SkipTest("requires GPU")
+
+        class Model(torch.nn.Module):
+            def forward(self, a, b, lengths):
+                n_elements = a.numel()
+                out = torch.empty_like(a)
+                max_len = int(lengths.max())
+                scaling_factor = triton.next_power_of_2(max_len)
+                add_kernel_with_scaling[(n_elements,)](
+                    a,
+                    b,
+                    out,
+                    n_elements,
+                    scaling_factor,
+                    BLOCK_SIZE=16,
+                )
+                return out
+
+        example_inputs = (
+            torch.randn(2, device=self.device),
+            torch.randn(2, device=self.device),
+            torch.arange(end=4, device=self.device),
+        )
+        self.check_model(Model(), example_inputs)
 
     @common_utils.parametrize("grid_type", [1, 2, 3])
     @common_utils.parametrize("num_dims", [1, 2])
