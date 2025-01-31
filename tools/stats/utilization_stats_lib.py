@@ -1,8 +1,10 @@
 from dataclasses import dataclass, field
+from datetime import datetime
 from typing import Optional
 
 from dataclasses_json import DataClassJsonMixin
-from datetime import datetime, timezone
+
+
 _DATA_MODEL_VERSION = 1.0
 
 
@@ -63,6 +65,7 @@ class OssCiSegmentV1(DataClassJsonMixin):
     end_at: int
     extra_info: dict[str, str]
 
+
 @dataclass
 class OssCiUtilizationMetadataV1:
     created_at: int
@@ -90,7 +93,7 @@ class OssCiUtilizationTimeSeriesV1:
     created_at: int
     type: str
     tags: list[str]
-    time_stamp: str
+    time_stamp: int
     repo: str
     workflow_id: int
     run_attempt: int
@@ -103,9 +106,11 @@ class OssCiUtilizationTimeSeriesV1:
 def getDataModelVersion() -> float:
     return _DATA_MODEL_VERSION
 
+
 def getTsNow() -> int:
     ts = datetime.now().timestamp()
     return int(ts)
+
 
 @dataclass
 class WorkflowInfo:

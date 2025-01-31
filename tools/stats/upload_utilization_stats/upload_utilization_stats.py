@@ -19,13 +19,13 @@ import pandas as pd  # type: ignore[import]
 from tools.stats.upload_stats_lib import download_s3_artifacts, upload_to_s3
 from tools.stats.utilization_stats_lib import (
     getDataModelVersion,
+    getTsNow,
     OssCiSegmentV1,
     OssCiUtilizationMetadataV1,
     OssCiUtilizationTimeSeriesV1,
     UtilizationMetadata,
     UtilizationRecord,
     WorkflowInfo,
-    getTsNow,
 )
 
 
