@@ -5,6 +5,7 @@ import threading
 from multiprocessing import reduction
 from multiprocessing.util import register_after_fork
 from typing import Union
+from typing_extensions import deprecated as _deprecated
 
 import torch
 from torch._namedtensor_internals import check_serializing_named_tensor
@@ -152,7 +153,48 @@ def rebuild_meta_tensor(
     return t
 
 
+@_deprecated(
+    "`torch.multiprocessing.reductions.rebuild_cuda_tensor` is deprecated."
+    "Please use `torch.multiprocessing.reductions.rebuild_device_tensor` instead.",
+    category=FutureWarning,
+)
 def rebuild_cuda_tensor(
+    tensor_cls,
+    tensor_size,
+    tensor_stride,
+    tensor_offset,
+    storage_cls,
+    dtype,
+    storage_device,
+    storage_handle,
+    storage_size_bytes,
+    storage_offset_bytes,
+    requires_grad,
+    ref_counter_handle,
+    ref_counter_offset,
+    event_handle,
+    event_sync_required,
+):
+    return rebuild_device_tensor(
+        tensor_cls,
+        tensor_size,
+        tensor_stride,
+        tensor_offset,
+        storage_cls,
+        dtype,
+        storage_device,
+        storage_handle,
+        storage_size_bytes,
+        storage_offset_bytes,
+        requires_grad,
+        ref_counter_handle,
+        ref_counter_offset,
+        event_handle,
+        event_sync_required,
+    )
+
+
+def rebuild_device_tensor(
     tensor_cls,
     tensor_size,
     tensor_stride,
@@ -177,8 +219,8 @@ def rebuild_cuda_tensor(
             storage_cls, (storage_handle, storage_offset_bytes)
         )
         if storage is None:
-            torch.cuda._lazy_init()
-            storage = storage_cls._new_shared_cuda(
+            torch.get_device_module()._lazy_init()
+            storage = storage_cls._new_shared_device(
                 storage_device,
                 storage_handle,
                 storage_size_bytes,
@@ -193,9 +235,7 @@ def rebuild_cuda_tensor(
             )
         else:
             # We already ref counting this Storage, but producer needs new ref-counters to be released.
-            storage_cls._release_ipc_counter(
-                ref_counter_handle, ref_counter_offset, device=storage_device
-            )
+            storage_cls._release_ipc_counter(ref_counter_handle, ref_counter_offset)
 
     _storage = (
         storage
@@ -341,41 +381,14 @@ def reduce_tensor(tensor):
 
     storage = tensor._typed_storage()
 
-    if storage._untyped_storage.device.type == "cuda":
-        (
-            device,
-            handle,
-            storage_size_bytes,
-            storage_offset_bytes,
-            ref_counter_handle,
-            ref_counter_offset,
-            event_handle,
-            event_sync_required,
-        ) = storage._share_cuda_()
-        tensor_offset = tensor.storage_offset()
-        shared_cache[handle] = StorageWeakRef(storage)
-        # _backward_hooks purposely omitted here, see
-        # Note [Don't serialize hooks]
-        return (
-            rebuild_cuda_tensor,
-            (
-                type(tensor),
-                tensor.size(),
-                tensor.stride(),
-                tensor_offset,  # tensor offset in its storage
-                type(storage),
-                tensor.dtype,
-                device,
-                handle,  # identifier which CUDA allocation is the storage in.
-                storage_size_bytes,  # size(in bytes) of the storage
-                storage_offset_bytes,  # offset(in bytes) of the storage in the CUDA allocation
-                tensor.requires_grad,
-                ref_counter_handle,
-                ref_counter_offset,
-                event_handle,
-                event_sync_required,
-            ),
+    if storage._untyped_storage.device.type == "cpu":
+        metadata = (
+            tensor.storage_offset(),
+            tensor.size(),
+            tensor.stride(),
+            tensor.requires_grad,
         )
+        return (rebuild_tensor, (type(tensor), storage, metadata))
     elif storage._untyped_storage.device.type == "meta":
         return (
             rebuild_meta_tensor,
@@ -389,15 +402,40 @@ def reduce_tensor(tensor):
                 tensor.requires_grad,
             ),
         )
-
-    # _backward_hooks purposely omitted here, see Note [Don't serialize hooks]
-    metadata = (
-        tensor.storage_offset(),
-        tensor.size(),
-        tensor.stride(),
-        tensor.requires_grad,
+    (
+        device,
+        handle,
+        storage_size_bytes,
+        storage_offset_bytes,
+        ref_counter_handle,
+        ref_counter_offset,
+        event_handle,
+        event_sync_required,
+    ) = storage._share_device_()
+    tensor_offset = tensor.storage_offset()
+    shared_cache[handle] = StorageWeakRef(storage)
+    # _backward_hooks purposely omitted here, see
+    # Note [Don't serialize hooks]
+    return (
+        rebuild_device_tensor,
+        (
+            type(tensor),
+            tensor.size(),
+            tensor.stride(),
+            tensor_offset,  # tensor offset in its storage
+            type(storage),
+            tensor.dtype,
+            device,
+            handle,  # identifier which CUDA allocation is the storage in.
+            storage_size_bytes,  # size(in bytes) of the storage
+            storage_offset_bytes,  # offset(in bytes) of the storage in the CUDA allocation
+            tensor.requires_grad,
+            ref_counter_handle,
+            ref_counter_offset,
+            event_handle,
+            event_sync_required,
+        ),
     )
-    return (rebuild_tensor, (type(tensor), storage, metadata))
 
 
 def rebuild_nested_tensor(
@@ -595,13 +633,10 @@ def reduce_typed_storage_child(storage):
 def reduce_storage(storage):
     from . import get_sharing_strategy
 
-    if storage.is_cuda:
+    device_type = storage.device.type
+    if device_type != "cpu":
         raise RuntimeError(
-            "Cannot pickle CUDA storage; try pickling a CUDA tensor instead"
-        )
-    elif storage.device.type == "meta":
-        raise RuntimeError(
-            "Cannot pickle meta storage; try pickling a meta tensor instead"
+            f"Cannot pickle {device_type} storage; try pickling a {device_type} tensor instead"
         )
     elif get_sharing_strategy() == "file_system":
         metadata = storage._share_filename_cpu_()

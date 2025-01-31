@@ -16,6 +16,7 @@
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/CUDAGeneratorImpl.h>
 #include <ATen/cuda/CachingHostAllocator.h>
+#include <ATen/cuda/CudaIPCTypes.h>
 #include <ATen/cuda/Sleep.h>
 #include <ATen/cuda/detail/CUDAHooks.h>
 #include <ATen/cuda/jiterator.h>
@@ -32,7 +33,6 @@
 #include <c10/util/CallOnce.h>
 #include <c10/util/irange.h>
 
-#include <torch/csrc/CudaIPCTypes.h>
 #include <torch/csrc/Generator.h>
 #include <torch/csrc/cuda/CUDAPluggableAllocator.h>
 #include <torch/csrc/cuda/GdsFile.h>
@@ -470,7 +470,7 @@ PyObject* THCPModule_cudaSynchronize(PyObject* _unused, PyObject* noargs) {
 
 PyObject* THCPModule_cudaIPCCollect(PyObject* _unused, PyObject* noargs) {
   HANDLE_TH_ERRORS
-  torch::CudaIPCCollect();
+  at::cuda::ipc::CudaIPCCollect();
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
 }
