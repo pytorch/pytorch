@@ -2,7 +2,6 @@
 # ruff: noqa: F841
 # flake8: noqa: E731
 # Skip do not assign a lambda expression, use a def
-import contextlib
 import functools
 import logging
 from unittest.mock import patch
@@ -10,18 +9,12 @@ from unittest.mock import patch
 import torch
 import torch._dynamo.testing
 import torch._inductor.test_case
-import torch.utils._pytree as pytree
 from torch._higher_order_ops.triton_kernel_wrap import (
     generate_ttir,
     triton_kernel_wrapper_functional,
     triton_kernel_wrapper_mutation,
 )
 from torch._inductor import metrics
-from torch._inductor.pattern_matcher import (
-    CallFunctionVarArgs,
-    PatternMatcherPass,
-    register_graph_pattern,
-)
 from torch._inductor.utils import run_and_get_code
 from torch._library import capture_triton
 from torch.testing import FileCheck
@@ -33,7 +26,7 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_ROCM,
 )
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_CUDA, HAS_GPU, HAS_XPU
-from torch.testing._internal.logging_utils import logs_to_string
+from torch.testing._internal.logging_utils import log_settings, logs_to_string
 
 # Defines all the kernels for tests
 from torch.testing._internal.triton_utils import *  # noqa: F403
@@ -3265,75 +3258,6 @@ class CustomOpTests(torch._inductor.test_case.TestCase):
         self.assertEqual(z, (x + y) * 2)
 
     @requires_gpu
-    def test_preserves_strides(self):
-        import triton
-        import triton.language as tl
-
-        @triton.jit
-        def add_kernel(
-            in_ptr0,
-            in_ptr1,
-            out_ptr,
-            n_elements,
-            BLOCK_SIZE: "tl.constexpr",
-        ):
-            pid = tl.program_id(axis=0)
-            block_start = pid * BLOCK_SIZE
-            offsets = block_start + tl.arange(0, BLOCK_SIZE)
-            mask = offsets < n_elements
-            x = tl.load(in_ptr0 + offsets, mask=mask)
-            y = tl.load(in_ptr1 + offsets, mask=mask)
-            output = x + y
-            tl.store(out_ptr + offsets, output, mask=mask)
-
-        x = torch.randn(4, 4, 2, 2, device="cuda")
-        other = torch.randn(4, 4, 2, 2, device="cuda")
-
-        def f(x, other):
-            y = x.transpose(2, 3).contiguous().transpose(2, 3)
-            z = y.sin().transpose(2, 3)
-            grid = (z.numel(),)
-            out = torch.empty_like(other)
-            add_kernel[grid](z, other, out, z.numel(), BLOCK_SIZE=16)
-            return out
-
-        class _CustomPass(PatternMatcherPass):
-            def __init__(self) -> None:
-                super().__init__()
-
-            def __call__(self, g: torch.fx.Graph):
-                self.apply(g)
-
-        g = _CustomPass()
-        called = False
-
-        @register_graph_pattern(
-            CallFunctionVarArgs(torch.ops.aten.permute),
-            pass_dict=g,
-        )
-        def _(match, *args, **kwargs):
-            flat_args, spec = pytree.tree_flatten((args, kwargs))
-
-            def decomp(*flat_args):
-                args, kwargs = pytree.tree_unflatten(flat_args, spec)
-                return torch.ops.aten.permute(*args, **kwargs).clone(
-                    memory_format=torch.channels_last
-                )
-
-            nonlocal called
-            called = True
-            match.replace_by_example(decomp, flat_args)
-
-        from torch._inductor import config
-
-        with config.patch(
-            post_grad_custom_post_pass=g,
-        ):
-            f_compile = torch.compile(f)
-            self.assertEqual(f(x, other), f_compile(x, other))
-            self.assertTrue(called)
-
-    @requires_gpu
     @common_utils.parametrize("dynamic", [False, True])
     @common_utils.parametrize("autotune", [False, True])
     def test_capture_triton_special_kwargs(self, dynamic, autotune):
@@ -3506,15 +3430,7 @@ class CustomOpTests(torch._inductor.test_case.TestCase):
 
         torch._dynamo.decorators.mark_unbacked(x, 0)
 
-        @contextlib.contextmanager
-        def enable_output_code_logs():
-            try:
-                torch._logging.set_logs(output_code=True)
-                yield
-            finally:
-                torch._logging.set_logs(output_code=False)
-
-        with enable_output_code_logs(), self.assertLogs(
+        with log_settings("+output_code"), self.assertLogs(
             logger="torch._inductor", level=logging.DEBUG
         ) as log:
             foo(x, w)
