@@ -299,7 +299,7 @@ class PyCodegen:
         output = self._output
         output.append(self.create_load(self.graph_output_var))
         output.append(self.create_load_const(index))
-        output.append(create_instruction("BINARY_SUBSCR"))
+        output.append(self.create_binary_subscr())
 
     def add_cache(self, value):
         var = self.new_var()
@@ -309,6 +309,9 @@ class PyCodegen:
     def foreach(self, items):
         for i in items:
             self(i)
+
+    def create_binary_subscr(self) -> Instruction:
+        return create_instruction("BINARY_SUBSCR")
 
     def setup_globally_cached(self, name, value):
         """Store value in a new global"""
