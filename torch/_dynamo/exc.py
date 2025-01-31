@@ -309,6 +309,10 @@ observed_exception_map = {
 }
 
 
+def get_dynamo_observed_exception(exc_type: type[Exception]) -> type[ObservedException]:
+    return observed_exception_map[exc_type]
+
+
 def raise_observed_exception(
     exc_type: type[Exception],
     tx: InstructionTranslatorBase,
