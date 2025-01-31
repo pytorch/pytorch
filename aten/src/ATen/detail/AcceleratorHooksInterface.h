@@ -27,7 +27,7 @@ struct TORCH_API AcceleratorHooksInterface {
   }
 
   // Whether this backend can be used at runtime, meaning it was built,
-  // runtime dependencies are available (driver) and at least one
+  // its runtime dependencies are available (driver) and at least one
   // supported device can be used.
   // This function should NEVER throw and NOT initialize the context
   // on any device (result of hasPrimaryContext below should not change).
