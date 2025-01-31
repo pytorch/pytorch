@@ -95,6 +95,11 @@ class NullHandler:
     """
 
 
+# If a virtualized value is set to _PoisonedVirtual then any attempt to get the
+# value will result an an exception being raised.
+_PoisonedVirtual = object()
+
+
 class Virtualized(Generic[T]):
     """
     Implements a global variable that redirects via thread local variable
@@ -109,11 +114,12 @@ class Virtualized(Generic[T]):
     """
 
     def __init__(self, vname: str, default: Union[Callable[[], T], type[NullHandler]]):
+        self._vname = vname
         self._key: str = f"__torchinductor_{vname}"
         self._default = default
 
     def _set_handler(self, value: T) -> AbstractContextManager[None]:
-        prior = self._get_handler()
+        prior = self._get_handler(False)
         setattr(threadlocal, self._key, value)
 
         @contextmanager
@@ -125,9 +131,14 @@ class Virtualized(Generic[T]):
 
         return ctx()
 
-    def _get_handler(self) -> T:
+    def _get_handler(self, check_poisoned: bool = True) -> T:
         try:
-            return getattr(threadlocal, self._key)
+            value = getattr(threadlocal, self._key)
+            if check_poisoned and value is _PoisonedVirtual:
+                raise RuntimeError(
+                    f"Attempt to use poisoned virtualized value '{self._vname}'."
+                )
+            return value
         except AttributeError:
             # TODO: To be honest, I feel we probably should just error in this
             # case, instead of making a null handler that will probably error
