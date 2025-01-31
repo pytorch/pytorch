@@ -459,6 +459,7 @@ aten::_nested_from_padded_tensor
 aten::_nested_get_jagged_metadata
 aten::_nested_get_non_contig_offsets
 aten::_nested_get_ragged_idx
+aten::_nested_assert_expandable_to
 aten::_nested_get_values
 aten::_nested_get_values_copy
 aten::_nested_get_values_copy.out
