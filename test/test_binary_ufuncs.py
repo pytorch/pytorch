@@ -3467,9 +3467,12 @@ class TestBinaryUfuncs(TestCase):
             torch.float,
             torch.double,
             # https://github.com/pytorch/pytorch/issues/146155
-            subtest([torch.cfloat], decorators=[xfailIfSVE256]),
+            subtest(torch.cfloat, decorators=[xfailIfSVE256]),
             torch.cdouble,
         ],
+        # Let instantiate_device_type_tests handle the naming
+        # to avoid duplicating the dtype in the test suffix
+        name_fn=lambda *args, **kwargs: "",
     )
     def test_lerp(self, device, dtype):
         start_end_weight_shapes = [(), (5,), (5, 5)]
