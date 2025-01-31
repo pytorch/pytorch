@@ -330,8 +330,8 @@ void f8f8bf16_rowwise_impl_sm89(
 
   // TODO: instead of fixing these values, implement logic alike to
   // what is used for SM90+.
-  using ThreadblockShape = cutlass::gemm::GemmShape<128, 128, 64>;
-  using WarpShape = cutlass::gemm::GemmShape<64, 64, 64>;
+  using ThreadblockShape = cutlass::gemm::GemmShape<64, 128, 64>;
+  using WarpShape = cutlass::gemm::GemmShape<32, 64, 64>;
   using InstructionShape = cutlass::gemm::GemmShape<16, 8, 32>;
   constexpr auto NumStages = 4;
 
@@ -383,7 +383,7 @@ void f8f8bf16_rowwise_impl_sm89(
       cutlass::epilogue::threadblock::VisitorRowBroadcast<
           BiasTileThreadMap,
           DtypeBias,
-          cute::Stride<cute::_0, cute::_1, int32_t>>;
+          cute::Stride<cute::_0, cute::_1, int64_t>>;
   using BiasArguments = typename Bias::Arguments;
 
   using ApplyXScale = cutlass::epilogue::threadblock::VisitorCompute<
@@ -442,7 +442,7 @@ void f8f8bf16_rowwise_impl_sm89(
       NumEVTEpilogueStages
   >::GemmKernel;
 
-  using Gemm = cutlass::gemm::device::GemmUniversalBase<EVTKernel>;
+  using Gemm = cutlass::gemm::device::GemmUniversalAdapter<EVTKernel>;
 
   cutlass::gemm::GemmCoord problem_size(M, N, K);
   constexpr auto SplitKFactor = 1;
@@ -475,14 +475,13 @@ void f8f8bf16_rowwise_impl_sm89(
           {}                  // ApplyXScale
         },                    // EVTApplyXScale
         w_scale_arguments,    // WScale
-        {},                   // ApplyWScale
+        {}                    // ApplyWScale
       },                      // EVTApplyWScale
       bias_arguments,         // Bias
       {}                      // ApplyBias
     },                        // EVTApplyBias
     output_arguments          // Output
   };                          // EVTOutput
-  constexpr auto AvailSms = -1;
 
   typename Gemm::Arguments arguments(
     cutlass::gemm::GemmUniversalMode::kGemm,
@@ -500,8 +499,7 @@ void f8f8bf16_rowwise_impl_sm89(
     problem_size.k(),             // stride A
     problem_size.k(),             // stride B
     0,                            // stride C (unused)
-    0,                            // stride D (unused)
-    AvailSms);
+    0);                           // stride D (unused)
 
   Gemm gemm;
 
@@ -708,13 +706,13 @@ void dispatch_fp8_rowwise_kernel_on_sm(
     at::Tensor out) {
   cudaDeviceProp* properties = at::cuda::getCurrentDeviceProperties();
   const bool sm89 = properties != nullptr && properties->major == 8 && properties->minor == 9;
-  const bool sm90OrLater = properties != nullptr && properties->major >= 9;
-  if (!(sm89 || sm90OrLater)) {
+  const bool sm9x = properties != nullptr && properties->major == 9;
+  if (!(sm89 || sm9x)) {
     TORCH_CHECK(
         false, "Rowwise scaling is not currently supported on your device");
   }
 
-  if (sm90OrLater) {
+  if (sm9x) {
     dispatch_fp8_rowwise_kernel_on_cluster_size_and_transpose<Types...>(XQ, WQ, x_scale, w_scale, bias, out);
   } else {
     f8f8bf16_rowwise_impl_sm89<Types...>(XQ, WQ, x_scale, w_scale, bias, out);
