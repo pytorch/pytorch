@@ -580,13 +580,3 @@ class _TracingContextPickleData:
             self.force_unspec_int_unbacked_size_like
         )
         return context
-
-
-class SubprocGraphPicker(torch._inductor.compile_worker.subproc_pool.SubprocPickler):
-    @override
-    def dumps(self, obj: object) -> bytes:
-        return GraphPickler.dumps(obj)
-
-    @override
-    def loads(self, data: bytes) -> object:
-        return GraphPickler.loads(data, None)  # type: ignore[arg-type]

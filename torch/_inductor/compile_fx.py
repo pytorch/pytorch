@@ -30,7 +30,7 @@ from typing import (
     TypeVar,
     Union,
 )
-from typing_extensions import Never, override, ParamSpec, Protocol, TypedDict, Unpack
+from typing_extensions import Never, override, ParamSpec, Protocol, TypedDict, Unpack, Self
 from unittest import mock
 
 import torch._inductor.async_compile  # noqa: F401 required to warm up AsyncCompile pools
@@ -114,6 +114,7 @@ from ..fx._lazy_graph_module import _use_lazy_graph_module
 from ..fx.graph import _PyTreeCodeGen
 from ..utils._triton import has_triton
 from . import config, metrics
+from .compile_worker.subproc_pool import SubprocPickler
 from .debug import DebugContext
 from .decomposition import select_decomp_table
 from .exc import InductorError
@@ -182,15 +183,12 @@ class FxCompileMode(enum.Enum):
 def _fx_compile_mode_default() -> FxCompileMode:
     name = "TORCHINDUCTOR_FX_COMPILE_MODE"
     value = os.environ.get(name)
-    NORMAL = FxCompileMode.NORMAL
     if value is None:
-        return NORMAL
-    modes = {
-        "normal": FxCompileMode.NORMAL,
-        "serialize": FxCompileMode.SERIALIZE,
-        "subprocess": FxCompileMode.SUBPROCESS,
-    }
-    if value not in modes:
+        return FxCompileMode.NORMAL
+    try:
+        value = value.upper()
+        return FxCompileMode[value]
+    except KeyError:
         import logging
 
         log = logging.getLogger(__name__)
@@ -198,11 +196,11 @@ def _fx_compile_mode_default() -> FxCompileMode:
             "Invalid value of %s for %s. Expected one of %s. Using default.",
             value,
             name,
-            ", ".join(sorted(repr(x) for x in modes.keys())),
+            ", ".join(sorted(repr(x) for x in FxCompileMode.__members__.keys())),
         )
         # Remove from the environment so subprocesses don't ALSO complain.
         os.environ.pop(name)
-    return modes.get(value, FxCompileMode.NORMAL)
+        return FxCompileMode.NORMAL
 
 
 fx_compile_mode = _fx_compile_mode_default()
@@ -1218,31 +1216,50 @@ def _current_fake_mode() -> torch._subclasses.FakeTensorMode:
 
 @dataclass
 class _VirtualizedSerializer:
+    """
+    This handles the data for serializing Virtualized.
+    """
+
+    # The values here get serialized.
     aot_compilation: Any = None
     choices: Any = None
     local_buffer_context: Any = None
     ops: Any = None
     kernel: Any = None
+    current_node: Any = None
 
     @classmethod
     def serialize(cls) -> _VirtualizedSerializer:
+        """
+        Turn the current state of torch._inductor.virtualized.V into a
+        serializable structure.
+        """
         kwargs = {}
         for f in dataclasses.fields(cls):
             kwargs[f.name] = getattr(V, f.name)
         return _VirtualizedSerializer(**kwargs)
 
-    def patch(self) -> contextlib.AbstractContextManager[None]:
+    def patch(self) -> _VirtualizedSerializerContextManager:
+        """
+        Returns a context manager which patches the saved values into the
+        current environment. While patched, any value not listed above will be
+        poisoned so that reads will raise an error.
+        """
         return _VirtualizedSerializerContextManager(self)
 
 
-class _VirtualizedSerializerContextManager(contextlib.AbstractContextManager[None]):
+class _VirtualizedSerializerContextManager(contextlib.ExitStack):
+    """
+    Helper for _VirtualizedSerializer.patch()
+    """
+
     def __init__(self, virtualized: _VirtualizedSerializer) -> None:
+        super().__init__()
         self.virtualized = virtualized
-        self.stack = contextlib.ExitStack()
 
     @override
-    def __enter__(self) -> None:
-        self.stack.__enter__()
+    def __enter__(self) -> Self:
+        super().__enter__()
 
         for set_name in dir(V):
             if not set_name.startswith("set_"):
@@ -1257,16 +1274,9 @@ class _VirtualizedSerializerContextManager(contextlib.AbstractContextManager[Non
                 # poison any values that we don't serialize so that any
                 # unset accesses are caught.
                 value = torch._inductor.virtualized._PoisonedVirtual
-            self.stack.enter_context(set_handler(value))
+            self.enter_context(set_handler(value))
 
-    @override
-    def __exit__(
-        self,
-        exc_type: Optional[Type[BaseException]],
-        exc_value: Optional[BaseException],
-        traceback: Optional[types.TracebackType],
-    ) -> None:
-        self.stack.__exit__(exc_type, exc_value, traceback)
+        return self
 
 
 @dataclass
@@ -1280,7 +1290,6 @@ class _WireProtocolInput:
     example_inputs: Sequence[InputType]
     inputs_to_check: Sequence[int]
     graph_kwargs: _CompileFxKwargs
-    # aot_graph_name: Optional[str] = dataclasses.field(default=None)
     tracing_context: Optional[torch._guards.TracingContext]
     config: dict[str, object]
     virtualized: _VirtualizedSerializer
@@ -1288,7 +1297,6 @@ class _WireProtocolInput:
         torch.testing._internal.common_utils.DeterministicGuard
     ]
     logger_state: _LoggerState
-    # TODO: Ugh - what other random state are we missing?
 
     def serialize(self) -> _WireProtocolPickledInput:
         """
@@ -1359,6 +1367,12 @@ class _WireProtocolPickledOutput:
 
 
 class _LoggerState:
+    """
+    This class is for tracking logging that happens during an out-of-process
+    compile so we can "replay" those messages when the compile is done. Used as
+    a context manager which returns the captured logs (object).
+    """
+
     loggers: dict[str, int]
     # This should be None outside of enter/exit
     _cap: Optional[_CapturedLogs] = None
@@ -1402,6 +1416,11 @@ class _LoggerState:
 
 
 class _CapturedLogs:
+    """
+    Helper for _LoggerState - this class actually attaches to the logger in
+    the child process and grabs the log messages themselves.
+    """
+
     state: _LoggerState
     queue: queue.Queue[logging.LogRecord]
     handlers: Optional[dict[str, logging.Handler]]
@@ -1413,6 +1432,16 @@ class _CapturedLogs:
         self.queue = queue.Queue(-1)
         # Mapping from name to handler (only valid when applied)
         self.handlers = None
+
+    def finish(self) -> list[logging.LogRecord]:
+        assert self.handlers is None
+        logs = []
+        try:
+            while True:
+                logs.append(self.queue.get_nowait())
+        except queue.Empty:
+            pass
+        return logs
 
     def remove(self) -> None:
         assert self.handlers is not None
@@ -1458,12 +1487,6 @@ class _SerializedFxCompile(FxCompile):
             FxGraphCache._check_for_hop(gm)
         except BypassFxGraphCache as e:
             log.debug("Skipping %s compile: %s", type(self), e)
-            return fallback()
-
-        if graph_kwargs.get("aot_mode", False):
-            # TODO: For now skip aot_mode. To handle this we need to detect the
-            # output being a filename which we need to transfer back on output.
-            # TODO: Is this still true with OutputCode?
             return fallback()
 
         context = torch._guards.TracingContext.try_get()
@@ -1561,12 +1584,7 @@ class _SerializedFxCompile(FxCompile):
                 input.graph_kwargs,
             )
 
-        logs = []
-        try:
-            while True:
-                logs.append(captured_logs.queue.get_nowait())
-        except queue.Empty:
-            pass
+        logs = captured_logs.finish()
 
         return _WireProtocolOutput(
             output_graph, metrics.get_deltas(), logs, warning_replay
@@ -1626,6 +1644,19 @@ _PostCompileData = namedtuple(
 )
 
 
+from torch.fx._graph_pickler import GraphPickler
+
+
+class _SubprocGraphPickler(SubprocPickler):
+    @override
+    def dumps(self, obj: object) -> bytes:
+        return GraphPickler.dumps(obj)
+
+    @override
+    def loads(self, data: bytes) -> object:
+        return GraphPickler.loads(data, None)  # type: ignore[arg-type]
+
+
 class _SubprocessFxCompile(_OutOfProcessFxCompile):
     @override
     def _send_to_child(
@@ -1662,7 +1693,7 @@ class _SubprocessFxCompile(_OutOfProcessFxCompile):
             # TODO: Consider raising this limit if we start using async w/
             # subprocess.
             1,
-            pickler=torch.fx._graph_pickler.SubprocGraphPicker(),
+            pickler=_SubprocGraphPickler(),
             kind=SubprocKind.SPAWN,
         )
 

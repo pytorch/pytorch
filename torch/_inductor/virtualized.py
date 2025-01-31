@@ -95,6 +95,8 @@ class NullHandler:
     """
 
 
+# If a virtualized value is set to _PoisonedVirtual then any attempt to get the
+# value will result an an exception being raised.
 _PoisonedVirtual = object()
 
 
