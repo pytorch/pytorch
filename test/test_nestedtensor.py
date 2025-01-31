@@ -3895,27 +3895,36 @@ class TestNestedTensorSubclass(NestedTensorTestCase):
         a = torch.randn(2, 3, requires_grad=True, dtype=torch.float64, device=device)
         b = torch.randn(3, 3, requires_grad=True, dtype=torch.float64, device=device)
         c = torch.randn(4, 3, requires_grad=True, dtype=torch.float64, device=device)
+        d = torch.randn(5, 3, requires_grad=True, dtype=torch.float64, device=device)
 
-        # Incorrect usage: shape check will fail if the offsets tensor are not
-        #                  the same exact tensor object
-        nt1 = torch.nested.as_nested_tensor([a, b, c], layout=torch.jagged)
-        nt2 = torch.nested.as_nested_tensor([a, b, c], layout=torch.jagged)
+        # Case 1: nt1 and nt2 have the same
+        def grad_test_func1(a, b, c):
+            nt1 = torch.nested.as_nested_tensor([a, b, c], layout=torch.jagged)
+            nt2 = torch.nested.as_nested_tensor([a, b, c], layout=torch.jagged)
+            out = nt1 * nt2
+            return out.values()
 
-        self.assertRaisesRegex(
-            RuntimeError,
-            "cannot call binary pointwise function .* with inputs of shapes",
-            lambda: nt1 * nt2,
-        )
+        gradcheck(grad_test_func1, inputs=(a, b, c), check_batched_grad=False)
 
-        # Correct usage: chain the calls using the same offsets tensor object
-        def grad_test_func(a, b, c):
+        # Case 2: chain the calls using the same offsets tensor object
+        def grad_test_func2(a, b, c):
             nt1 = torch.nested.as_nested_tensor([a, b, c], layout=torch.jagged)
             # TODO: Switch to public API that takes in (values, offsets) once it exists
             nt2, offsets = jagged_from_list([a, b, c], nt1.offsets())
             out = nt1 * nt2
             return out.values()
 
-        gradcheck(grad_test_func, inputs=(a, b, c), check_batched_grad=False)
+        gradcheck(grad_test_func2, inputs=(a, b, c), check_batched_grad=False)
+
+        # Error case: shape check fails when the raggedness actually differs
+        nt1 = torch.nested.as_nested_tensor([a, b, c], layout=torch.jagged)
+        nt2 = torch.nested.as_nested_tensor([a, b, d], layout=torch.jagged)
+
+        self.assertRaisesRegex(
+            RuntimeError,
+            "cannot call binary pointwise function .* with inputs of shapes",
+            lambda: nt1 * nt2,
+        )
 
     def test_binary_pointwise_transposed(self, device):
         a, b, c = (
@@ -8968,6 +8977,41 @@ class TestNestedInt(torch.testing._internal.common_utils.TestCase):
         b = torch.SymInt(NestedIntNode(dict_tensor2, 5))
 
         self.assertFalse(a == b)
+
+    def test_assertion(self):
+        from torch.nested._internal.dict_tensor import DictTensor
+        from torch.nested._internal.nested_int import _nested_assert_metadata_equal
+
+        a = torch.tensor([1, 2, 3], dtype=torch.float32)
+        b = torch.tensor([4, 5, 6], dtype=torch.float32)
+        c = torch.tensor([7, 8, 9], dtype=torch.float32)
+
+        # Correct case
+        metadata1 = {"_host_lengths": a, "_host_offsets": None, "_device_offsets": c}
+        metadata2 = {
+            "_host_lengths": None,
+            "_host_offsets": b,
+            "_device_offsets": c.clone(),
+        }
+
+        dict_tensor1 = DictTensor(metadata1)
+        dict_tensor2 = DictTensor(metadata2)
+
+        _nested_assert_metadata_equal(dict_tensor1, dict_tensor2, "hello")
+
+        # Failure case
+        metadata1 = {"_host_lengths": a, "_host_offsets": None, "_device_offsets": c}
+        metadata2 = {
+            "_host_lengths": None,
+            "_host_offsets": b,
+            "_device_offsets": a.clone(),
+        }
+
+        dict_tensor1 = DictTensor(metadata1)
+        dict_tensor2 = DictTensor(metadata2)
+
+        with self.assertRaises(AssertionError):
+            _nested_assert_metadata_equal(dict_tensor1, dict_tensor2, "hello")
 
 
 instantiate_parametrized_tests(TestNestedTensor)

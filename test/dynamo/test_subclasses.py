@@ -2629,6 +2629,33 @@ class TestNestedTensor(torch._dynamo.test_case.TestCase, NestedTensorTestCase):
         nt3, _ = self._get_jagged_tensor(((2, 3, 4), 5), None)
         self._check_recompiles(binary, (nt1, nt2), (nt1, nt3), True)
 
+    def test_binary_recompiles_2(self):
+        def binary(nt1, nt2):
+            return nt1 + nt2
+
+        # Binary recompiles because Dynamo's tensor aliasing guards
+        nt1, offsets = self._get_jagged_tensor(((2, 3, 4), 5), None)
+        nt2, _ = self._get_jagged_tensor(((2, 3, 4), 5), offsets)
+        nt3, _ = self._get_jagged_tensor(((2, 3, 4), 5), None)
+        self._check_recompiles(binary, (nt1, nt2), (nt1, nt3), True)
+
+    def test_binary_assert_in_graph(self):
+        @torch.compile(backend="aot_eager")
+        def binary(nt1, nt2):
+            return nt1 * nt2
+
+        nt1, _ = self._get_jagged_tensor(((2, 3, 4), 5), None)
+        nt2, _ = self._get_jagged_tensor(((2, 3, 4), 5), None)
+        binary(nt1, nt2)
+
+        nt3, _ = self._get_jagged_tensor(((2, 3, 4), 5), None)
+        nt4, _ = self._get_jagged_tensor(((3, 2, 4), 5), None)
+        msg = "cannot call binary pointwise function mul.Tensor with inputs of shapes"
+        with unittest.mock.patch(
+            "torch._dynamo.config.error_on_recompile", True
+        ), self.assertRaisesRegex(RuntimeError, msg):
+            binary(nt3, nt4)
+
     def _validate_compile(self, fn, arg_fn):
         def _gen_grad_outputs(out_val):
             if isinstance(out_val, (list, tuple)):

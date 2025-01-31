@@ -171,3 +171,86 @@ def get_metadata(x: torch.SymInt) -> torch.Tensor:
         return x.node.nested_int_cache()
     else:
         return x.node.hint.node.nested_int_cache()
+
+
+lib = torch.library.Library("nested", "FRAGMENT")  # noqa: TOR901
+
+
+_global_has_ops_registered = False
+
+
+def maybe_register_ops() -> None:
+    global _global_has_ops_registered
+
+    if _global_has_ops_registered:
+        return
+
+    from torch._higher_order_ops.effects import _EffectType, _register_effectful_op
+
+    lib.define("_assert_equal(Tensor lhs, Tensor rhs, str msg) -> ()")
+
+    def _assert_equal_impl(lhs: torch.Tensor, rhs: torch.Tensor, msg: str) -> None:
+        # Next:
+        # - Device side Asserts for the CUDA case
+        # - Pass through better context through a string
+        if not torch.equal(lhs, rhs):
+            raise RuntimeError(msg)
+
+    def _assert_equal_meta(lhs: torch.Tensor, rhs: torch.Tensor, msg: str) -> None:
+        # No-op during compile
+        return
+
+    lib.impl("_assert_equal", _assert_equal_impl, "CPU")
+    lib.impl("_assert_equal", _assert_equal_impl, "CUDA")
+    lib.impl("_assert_equal", _assert_equal_meta, "Meta")
+
+    _register_effectful_op(torch.ops.nested._assert_equal.default, _EffectType.ORDERED)
+
+    _global_has_ops_registered = True
+
+
+def _assert_equal(lhs: torch.Tensor, rhs: torch.Tensor, msg: str) -> None:
+    maybe_register_ops()
+    return torch.ops.nested._assert_equal(lhs, rhs, msg)
+
+
+_DEVICE_PAIR_SCORES = {
+    # Smallest score is best
+    ("host", "host"): 0,
+    ("device", "device"): 1,
+    ("host", "device"): 2,
+    ("device", "host"): 2,
+}
+
+
+def _nested_assert_metadata_equal(
+    lhs: torch.Tensor, rhs: torch.Tensor, msg: str
+) -> None:
+    from torch.nested._internal.nested_tensor import DictTensor, src_field_name
+
+    assert isinstance(lhs, DictTensor) and isinstance(rhs, DictTensor)
+
+    candidates = []
+    for source_type in ("lengths", "offsets"):
+        for device_type_lhs in ("host", "device"):
+            for device_type_rhs in ("host", "device"):
+                if (
+                    getattr(lhs, src_field_name(device_type_lhs, source_type), None)
+                    is not None
+                    and getattr(rhs, src_field_name(device_type_rhs, source_type), None)
+                    is not None
+                ):
+                    candidates.append(
+                        ((device_type_lhs, source_type), (device_type_rhs, source_type))
+                    )
+
+    def score(candidate: Tuple[Tuple[str, str], Tuple[str, str]]) -> int:
+        return _DEVICE_PAIR_SCORES[(candidate[0][0], candidate[1][0])]
+
+    candidates = sorted(candidates, key=score)
+    pair = candidates[0]
+
+    _lhs = getattr(lhs, src_field_name(pair[0][0], pair[0][1]))
+    _rhs = getattr(rhs, src_field_name(pair[1][0], pair[1][1]))
+
+    _assert_equal(_lhs, _rhs, msg)
