@@ -89,7 +89,7 @@ from .exc import (
 )
 from .guards import (
     CheckFunctionManager,
-    get_and_maybe_log_recompilation_reason,
+    get_and_maybe_log_recompilation_reasons,
     GuardedCode,
 )
 from .hooks import Hooks
@@ -895,10 +895,11 @@ def _compile(
             distributed_state = None
 
         # Check recompilations
-        recompile_reasons = None
+        recompile_reason: Optional[str] = None
         if is_recompilation(cache_size) and frame:
-            recompile_reasons = get_and_maybe_log_recompilation_reason(
-                cache_entry, frame
+            reasons = get_and_maybe_log_recompilation_reasons(cache_entry, frame)
+            recompile_reason = (
+                "Unable to find recompilation reasons" if not reasons else reasons[-1]
             )
 
         exceeded, limit_type = exceeds_recompile_limit(cache_size, compile_id)
@@ -906,11 +907,6 @@ def _compile(
 
             def format_func_info(code: CodeType) -> str:
                 return f"'{code.co_name}' ({code.co_filename}:{code.co_firstlineno})"
-
-            def format_guard_failures() -> str:
-                if not recompile_reasons:
-                    return "Unable to find recompilation reasons"
-                return recompile_reasons[-1]
 
             log.warning(
                 "torch._dynamo hit config.%s (%s)\n"
@@ -921,7 +917,7 @@ def _compile(
                 limit_type,
                 getattr(config, limit_type),
                 format_func_info(code),
-                format_guard_failures(),
+                recompile_reason,
                 troubleshooting_url,
             )
             if config.fail_on_recompile_limit_hit:
@@ -1145,6 +1141,7 @@ def _compile(
                 "dynamo_compile_time_before_restart_us": to_int_us(
                     dynamo_time_before_restart
                 ),
+                "recompile_reason": recompile_reason,
             }
             # TODO: replace with CompileEventLogger.compilation_metrics
             # There are some columns here not in PT2 Compile Events
