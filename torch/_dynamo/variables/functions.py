@@ -119,7 +119,9 @@ class BaseUserFunctionVariable(VariableTracker):
     ) -> "VariableTracker":
         return tx.inline_user_function_return(self, [*self.self_args(), *args], kwargs)
 
-    def call_hasattr(self, tx: "InstructionTranslator", name: str) -> VariableTracker:
+    def call_obj_hasattr(
+        self, tx: "InstructionTranslator", name: str
+    ) -> VariableTracker:
         result = False
 
         try:
@@ -288,7 +290,9 @@ class UserFunctionVariable(BaseUserFunctionVariable):
             return variables.LazyVariableTracker.create(subobj, source)
         return VariableTracker.build(tx, subobj)
 
-    def call_hasattr(self, tx: "InstructionTranslator", name: str) -> VariableTracker:
+    def call_obj_hasattr(
+        self, tx: "InstructionTranslator", name: str
+    ) -> VariableTracker:
         result = hasattr(self.fn, name)
         return variables.ConstantVariable.create(result)
 
@@ -317,6 +321,30 @@ class UserFunctionVariable(BaseUserFunctionVariable):
                 with torch._dynamo.side_effects.allow_side_effects_under_checkpoint(tx):
                     return super().call_function(tx, args, kwargs)
         return super().call_function(tx, args, kwargs)
+
+
+class BuiltinMethodVariable(BaseUserFunctionVariable):
+    def __init__(self, fn, is_constant=False, **kwargs) -> None:
+        super().__init__(**kwargs)
+        assert isinstance(fn, types.BuiltinMethodType)
+        self.fn = fn
+
+    @staticmethod
+    @functools.lru_cache(None)
+    def supported_methods():
+        return {tuple.__new__}
+
+    def call_function(
+        self,
+        tx: "InstructionTranslator",
+        args: "list[VariableTracker]",
+        kwargs: "dict[str, VariableTracker]",
+    ) -> "VariableTracker":
+        method_self = self.fn.__self__
+        name = self.fn.__name__
+        return variables.BuiltinVariable(method_self).call_method(
+            tx, name, args, kwargs
+        )
 
 
 class FunctionDecoratedByContextlibContextManagerVariable(BaseUserFunctionVariable):
@@ -926,7 +954,9 @@ class FunctoolsPartialVariable(VariableTracker):
         merged_kwargs = {**self.keywords, **kwargs}
         return self.func.call_function(tx, merged_args, merged_kwargs)
 
-    def call_hasattr(self, tx: "InstructionTranslator", name: str) -> VariableTracker:
+    def call_obj_hasattr(
+        self, tx: "InstructionTranslator", name: str
+    ) -> VariableTracker:
         # functools.partial uses slots, so attributes are constant
         return variables.ConstantVariable.create(
             hasattr(functools.partial(identity), name)

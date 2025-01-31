@@ -32,7 +32,6 @@ from typing import (
     Callable,
     cast,
     Generic,
-    List,
     Optional,
     overload,
     Protocol,
@@ -782,7 +781,7 @@ class TreeSpec:
         return self.num_nodes == 1 and self.num_leaves == 1
 
     def flatten_up_to(self, tree: PyTree) -> list[PyTree]:
-        def helper(treespec: TreeSpec, tree: PyTree, subtrees: List[PyTree]) -> None:
+        def helper(treespec: TreeSpec, tree: PyTree, subtrees: list[PyTree]) -> None:
             if treespec.is_leaf():
                 subtrees.append(tree)
                 return
@@ -916,7 +915,7 @@ def tree_flatten(
     to reconstruct the pytree.
     """
 
-    def helper(node: PyTree, leaves: List[Any]) -> TreeSpec:
+    def helper(node: PyTree, leaves: list[Any]) -> TreeSpec:
         if _is_leaf(node, is_leaf=is_leaf):
             leaves.append(node)
             return _LEAF_SPEC
@@ -1521,6 +1520,7 @@ def treespec_dumps(treespec: TreeSpec, protocol: Optional[int] = None) -> str:
     return str_spec
 
 
+@functools.lru_cache
 def treespec_loads(serialized: str) -> TreeSpec:
     protocol, json_schema = json.loads(serialized)
 

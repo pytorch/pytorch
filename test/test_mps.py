@@ -673,7 +673,6 @@ def mps_ops_modifier(ops):
         '__rsub__': None,
         'cauchy_': None,
         'cauchy': None,
-        'cholesky': None,
         'cholesky_inverse': None,
         'cholesky_solve': None,
         'cummax': None,
@@ -693,7 +692,6 @@ def mps_ops_modifier(ops):
         'index_reduceamin': None,
         'kthvalue': None,
         'lcm': None,
-        'linalg.cholesky': None,
         'linalg.cholesky_ex': None,
         'linalg.cond': None,
         'linalg.det': None,
@@ -823,8 +821,6 @@ def mps_ops_modifier(ops):
         'nn.functional.adaptive_avg_pool2d': None,
 
         # Unsupported dtypes
-        # bmm is not supported for integral types
-        'nn.functional.bilinear': [torch.int16, torch.int32, torch.int64, torch.uint8, torch.int8],
         'ones_like': None,
         'zeros_like': None,
 
@@ -836,7 +832,7 @@ def mps_ops_modifier(ops):
         'nn.functional.conv_transpose2d': [torch.int64, torch.bfloat16],
 
         # Unsupported dtypes
-        'dot': [torch.int64],
+        'dot': [torch.int64] if MACOS_VERSION < 14.0 else [],
         'histc': [torch.float16, torch.bfloat16],
         'index_add': [torch.int64],
         'log1p': [torch.int64],
@@ -846,21 +842,13 @@ def mps_ops_modifier(ops):
 
         # GEMM on MPS is not supported for integral types
         'nn.functional.linear': [torch.int16, torch.int32, torch.int64, torch.uint8, torch.int8],
-        '__rmatmul__': [torch.int16, torch.int32, torch.int64, torch.uint8, torch.int8],
         'addmmdecomposed': [torch.int16, torch.int32, torch.int64, torch.uint8, torch.int8],
         'addbmm': [torch.int16, torch.int32, torch.int64, torch.uint8, torch.int8],
         'addmm': [torch.int16, torch.int32, torch.int64, torch.uint8, torch.int8],
-        'addmv': [torch.int16, torch.int32, torch.int64, torch.uint8, torch.int8],
         'baddbmm': [torch.int16, torch.int32, torch.int64, torch.uint8, torch.int8],
-        'mm': [torch.int16, torch.int32, torch.int64, torch.uint8, torch.int8],
-        'bmm': [torch.int16, torch.int32, torch.int64, torch.uint8, torch.int8],
-        'einsum': [torch.int16, torch.int32, torch.int64, torch.uint8, torch.int8],
-        'inner': [torch.int16, torch.int32, torch.int64, torch.uint8, torch.int8],
-        'linalg.multi_dot': [torch.int16, torch.int32, torch.int64, torch.uint8, torch.int8],
-        'matmul': [torch.int16, torch.int32, torch.int64, torch.uint8, torch.int8],
         'mat': [torch.int16, torch.int32, torch.int64, torch.uint8, torch.int8],
-        'mv': [torch.int16, torch.int32, torch.int64, torch.uint8, torch.int8],
-        'tensordot': [torch.int16, torch.int32, torch.int64, torch.uint8, torch.int8],
+        'matmul': [torch.int64] if MACOS_VERSION < 14.0 else [],
+        '__rmatmul__': [torch.int64] if MACOS_VERSION < 14.0 else [],
         'unravel_index': [torch.int32, torch.int64],
 
         # returned output on CPU is float64
@@ -4454,6 +4442,16 @@ class TestMPS(TestCaseMPS):
                     getattr(torch.tensor(val1, dtype=dtype1, device='cpu'), binop)
                            (torch.full(full_shape, val2, dtype=dtype2, device='cpu')))
 
+    def test_xor_non_contigous(self):
+        # See https://github.com/pytorch/pytorch/issues/145203
+        x_mps = torch.randint(-16000, 16000, (10, 2), dtype=torch.int16, device="mps")
+        x_cpu = x_mps.detach().cpu()
+
+        x_mps[:, 0] ^= 3
+        x_cpu[:, 0] ^= 3
+
+        self.assertEqual(x_mps.cpu(), x_cpu)
+
     def test_nansum(self):
         def helper(dtype, noncontiguous, dim):
             zero_cpu = torch.zeros((), dtype=dtype)
@@ -6387,6 +6385,30 @@ class TestMPS(TestCaseMPS):
                 torch.tensor((10, 20, 30, 40, 50), device=device),
                 atol=0, rtol=0
             )
+
+    def test_cholesky(self):
+        from torch.testing._internal.common_utils import random_hermitian_pd_matrix
+
+        def run_cholesky_test(size, *batch_dims, upper):
+            input_cpu = random_hermitian_pd_matrix(size, *batch_dims, dtype=torch.float32, device="cpu")
+            input_mps = input_cpu.to('mps')
+            output_cpu = torch.linalg.cholesky(input_cpu, upper=upper)
+            output_mps = torch.linalg.cholesky(input_mps, upper=upper)
+            self.assertEqual(output_cpu, output_mps, atol=2e-5, rtol=1e-6)
+
+        # test with different even/odd matrix sizes
+        matrix_sizes = [1, 2, 3, 4, 8, 17, 64, 128, 154]
+        # even/odd batch sizes
+        batch_sizes = [1, 2, 4, 8, 16, 17]
+
+        for upper in [True, False]:
+            for size in matrix_sizes:
+                for batch_size in batch_sizes:
+                    run_cholesky_test(size, batch_size, upper=upper)
+
+        # test >3D matrices
+        run_cholesky_test(128, 10, 10, upper=False)
+        run_cholesky_test(128, 2, 2, 2, 2, 10, 10, upper=True)
 
     def test_upsample_nearest2d(self):
         def helper(N, C, H, W, memory_format):

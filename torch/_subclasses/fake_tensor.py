@@ -619,6 +619,7 @@ class FakeTensor(Tensor):
     nonzero_memo = SymNumberMemoDescriptor()
     item_memo = SymNumberMemoDescriptor()
     unique_memo = SymNumberMemoDescriptor()
+    unique_consecutive_memo = SymNumberMemoDescriptor()
 
     # We expect nested_int_memo to be None when an offsets is a graph
     # intermediate, or an input that has never been associated with a
@@ -721,6 +722,7 @@ class FakeTensor(Tensor):
         self.nonzero_memo = None
         self.item_memo = None
         self.unique_memo = None
+        self.unique_consecutive_memo = None
         self.nested_int_memo = None
 
         if FakeTensorConfig.debug:
@@ -1087,7 +1089,7 @@ class DispatchCacheInfo:
 # for the duration of `with FakeTensorMode()`.
 # This allows accurate storage aliasing across invocation of
 # different operators. While this will keep all freshly allocated
-# tensors alive during `FakeTensorMode`, there will no be no
+# tensors alive during `FakeTensorMode`, there will be no
 # new allocations of Tensors which have non-meta storage so
 # memory should not significantly increase.
 
@@ -2833,7 +2835,7 @@ def _infer_fake_from_real_tensor(
     # We went with the first option.
     fake_strides = [-1] * real_out.dim()
     strides = [(s, idx) for idx, s in enumerate(real_out.stride())]
-    strides.sort()
+    strides.sort(key=lambda x: (x[0], -x[1]))
     expected = 1
     fake_stride = expected
     for s, idx in strides:
