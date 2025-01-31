@@ -209,7 +209,7 @@ jobs:
       - name: Prepare environment - Bootstrap tests
         shell: bash
         run: |
-          "pytorch/.circleci/scripts/bootstrat_tests.bat"
+          "pytorch/.circleci/scripts/bootstrap_tests.bat"
       - name: Test PyTorch binary
         shell: bash
         run: |
