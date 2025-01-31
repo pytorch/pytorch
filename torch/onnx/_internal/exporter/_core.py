@@ -1158,9 +1158,6 @@ def _exported_program_to_onnx_program(
     # Collect and add opset imports to the model
     _ir_passes.add_opset_imports(model)
 
-    # Optimize the model
-    model = onnxscript_apis.optimize(model)
-
     return _onnx_program.ONNXProgram(model, exported_program)
 
 
