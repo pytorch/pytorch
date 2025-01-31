@@ -16,6 +16,7 @@ EXTRA_FIELDS = (
     "_max_seqlen_tensor",
     "_min_seqlen_tensor",
     "_inverse_indices",
+    "_sum_lengths_tensor",
 )
 
 
@@ -596,6 +597,7 @@ def _make_nested_meta(
     lengths: Optional[torch.Tensor],
     min_seqlen: Optional[Union[torch.Tensor, int]],
     max_seqlen: Optional[Union[torch.Tensor, int]],
+    sum_lengths: Optional[int],
 ) -> Tuple[DictTensor, Optional[torch.Tensor]]:
     # 1. Constructs a fresh DictTensor from provided metadata
     # - normalizes all fields
@@ -641,10 +643,16 @@ def _make_nested_meta(
     if max_seqlen is not None:
         process_min_max_seqlen(metadata, "max_seqlen", max_seqlen)
 
+    if sum_lengths is not None:
+        assert isinstance(sum_lengths, int)
+        metadata[f"_sum_lengths_tensor"] = _store_val_in_tensor(sum_lengths)
+
     if metadata.get("_max_seqlen_tensor") is not None:
         torch._dynamo.mark_dynamic(metadata["_max_seqlen_tensor"], 0)
     if metadata.get("_min_seqlen_tensor") is not None:
         torch._dynamo.mark_dynamic(metadata["_min_seqlen_tensor"], 0)
+    if metadata.get("_sum_lengths_tensor") is not None:
+        torch._dynamo.mark_dynamic(metadata["_sum_lengths_tensor"], 0)
 
     metadata_tensor = make_dict_tensor_for_nested(metadata)
     return metadata_tensor, non_contig_offsets
@@ -671,6 +679,7 @@ def _DO_NOT_USE_nested_tensor_ctor_compat(
         lengths=lengths,
         max_seqlen=max_seqlen,
         min_seqlen=min_seqlen,
+        sum_lengths=values.shape[ragged_idx - 1],
     )
     return NestedTensor(
         values=values,
@@ -688,6 +697,7 @@ def nested_view_from_values_offsets(
         lengths=None,
         max_seqlen=max_seqlen,
         min_seqlen=min_seqlen,
+        sum_lengths=values.shape[ragged_idx - 1],
     )
     assert non_contig_offsets is None
     ret = torch._nested_view_from_jagged(  # type: ignore[attr-defined]
@@ -707,6 +717,7 @@ def nested_view_from_values_offsets_lengths(
         lengths=lengths,
         max_seqlen=max_seqlen,
         min_seqlen=min_seqlen,
+        sum_lengths=values.shape[ragged_idx - 1],
     )
     return torch._nested_view_from_jagged(  # type: ignore[attr-defined]
         values,
@@ -724,6 +735,7 @@ def nested_from_padded(
         lengths=None,
         max_seqlen=max_seqlen,
         min_seqlen=min_seqlen,
+        sum_lengths=sum_S,
     )
     assert non_contig_offsets is None
     return torch._nested_from_padded_tensor(

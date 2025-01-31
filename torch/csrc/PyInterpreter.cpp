@@ -300,6 +300,20 @@ void ConcretePyInterpreterVTable::reportErrorCallback(
   func(c10::toString(key));
 }
 
+static PyObject* _get_nested_tensor_cls() {
+  static PyObject* nt_cls = nullptr;
+  if (nt_cls == nullptr) {
+    nt_cls = py::module::import("torch")
+                 .attr("nested")
+                 .attr("_internal")
+                 .attr("nested_tensor")
+                 .attr("NestedTensor")
+                 .ptr();
+    TORCH_INTERNAL_ASSERT(nt_cls);
+  }
+  return nt_cls;
+}
+
 void ConcretePyInterpreterVTable::dispatch(
     const c10::OperatorHandle& op,
     torch::jit::Stack* stack) const {
@@ -334,6 +348,11 @@ void ConcretePyInterpreterVTable::dispatch(
           const auto& tensor = nv.toTensor();
           if (isPythonTensor(tensor)) {
             append_overloaded_tensor(&overloaded_args, py::cast(tensor).ptr());
+          }
+        }
+        if (nv.isSymInt()) {
+          if (nv.toSymNodeImplUnowned()->is_nested_int()) {
+            append_overloaded_type(&overloaded_args, _get_nested_tensor_cls());
           }
         }
       }

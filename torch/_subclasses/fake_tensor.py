@@ -1982,10 +1982,10 @@ class FakeTensorMode(TorchDispatchMode):
         # tensor, it might be related to this line.  Though I'm not sure
         # how you'll know to read this comment, as this line won't show up
         # in the stack trace.
-        has_unrecognized_types = _check_for_subclass(flat_args)
+        has_unrecognized_types = _check_for_user_dispatchable_args(flat_args)
         if has_unrecognized_types:
             unrecognized_types = [
-                type(x) for x in flat_args if _check_for_subclass_arg(x)
+                type(x) for x in flat_args if _check_for_user_dispatchable_arg(x)
             ]
             not_implemented_log.debug(
                 "FakeTensorMode unrecognized subclass(es): %s", unrecognized_types
@@ -2778,7 +2778,8 @@ def _device_handler(args: Sequence[object]) -> torch.device:
         return args[0].fake_device
 
 
-# [subclass inputs]
+# Note [User dispatchable args]
+#
 # Suppose we enable fake tensor mode.  This means that fake tensor
 # mode will run first.  But what if we do an operation that
 # involves a tensor subclass that will desugar into normal tensor
@@ -2788,17 +2789,19 @@ def _device_handler(args: Sequence[object]) -> torch.device:
 # fake tensor is not supported.  What we actually wanted to happen
 # was to give the subclass a chance to figure out what it wants to
 # before erroring out. Returning NotImplemented here allows this.
-def _check_for_subclass(flat_args: Sequence[object]) -> bool:
-    return any(_check_for_subclass_arg(x) for x in flat_args)
+def _check_for_user_dispatchable_args(flat_args: Sequence[object]) -> bool:
+    return any(_check_for_user_dispatchable_arg(x) for x in flat_args)
 
 
-def _check_for_subclass_arg(x: object) -> bool:
+def _check_for_user_dispatchable_arg(x: object) -> bool:
+    from torch.fx.experimental.symbolic_shapes import is_nested_int
+
     return (
         not isinstance(x, FakeTensor)
         and isinstance(x, Tensor)
         and type(x) is not Tensor
         and type(x) is not torch.nn.Parameter
-    )
+    ) or is_nested_int(x)
 
 
 _DISPATCH_META_HANDLERS = {
