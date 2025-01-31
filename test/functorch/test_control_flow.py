@@ -2889,7 +2889,7 @@ def forward(self, fct_1, init_1, xs_1):
     sym_size_int_3 = torch.ops.aten.sym_size.int(xs_1, 1)
     sym_size_int_4 = torch.ops.aten.sym_size.int(xs_1, 2);  xs_1 = None
     scan_combine_graph_0 = self.scan_combine_graph_0
-    scan = torch.ops.higher_order.scan(scan_combine_graph_0, [init_1], [permute], True, [sym_size_int_1, sym_size_int_2, sym_size_int_3, sym_size_int_4]);  scan_combine_graph_0 = init_1 = permute = sym_size_int_1 = sym_size_int_2 = sym_size_int_3 = sym_size_int_4 = None
+    scan = torch.ops.higher_order.scan(scan_combine_graph_0, [init_1], [permute], True, (sym_size_int_1, sym_size_int_2, sym_size_int_3, sym_size_int_4));  scan_combine_graph_0 = init_1 = permute = sym_size_int_1 = sym_size_int_2 = sym_size_int_3 = sym_size_int_4 = None
     getitem = scan[0]
     getitem_1 = scan[1];  scan = None
     return (getitem, getitem_1)""",  # noqa: B950
@@ -2911,7 +2911,7 @@ def forward(self, L_init_ : torch.Tensor, L_xs_ : torch.Tensor):
     new_carry = l_init_ + select_copy;  new_carry = None
     add_1 = l_init_ + select_copy;  select_copy = add_1 = None
     scan_combine_fn_0 = self.scan_combine_fn_0
-    scan = torch.ops.higher_order.scan(scan_combine_fn_0, [l_init_], [elem], True, []);  scan_combine_fn_0 = l_init_ = elem = None
+    scan = torch.ops.higher_order.scan(scan_combine_fn_0, [l_init_], [elem], True, ());  scan_combine_fn_0 = l_init_ = elem = None
     getitem = scan[0]
     getitem_1 = scan[1];  scan = None
     return (getitem, getitem_1)""",  # noqa: B950
@@ -6557,7 +6557,7 @@ def forward(self, L_init_ : torch.Tensor, L_xs_ : torch.Tensor, L_add_closure_0_
     ret = matmul_1 + l_add_closure_0_cell_contents_1_0_;  matmul_1 = None
     sum_1 = ret.sum();  ret = sum_1 = None
     scan_combine_fn_0 = self.scan_combine_fn_0
-    scan = torch.ops.higher_order.scan(scan_combine_fn_0, [l_init_], [elem], False, [l_add_closure_0_cell_contents_0_param_, l_add_closure_0_cell_contents_1_0_]);  scan_combine_fn_0 = l_init_ = elem = l_add_closure_0_cell_contents_0_param_ = l_add_closure_0_cell_contents_1_0_ = None
+    scan = torch.ops.higher_order.scan(scan_combine_fn_0, [l_init_], [elem], False, (l_add_closure_0_cell_contents_0_param_, l_add_closure_0_cell_contents_1_0_));  scan_combine_fn_0 = l_init_ = elem = l_add_closure_0_cell_contents_0_param_ = l_add_closure_0_cell_contents_1_0_ = None
     getitem = scan[0]
     getitem_1 = scan[1];  scan = None
     return (getitem, getitem_1)""",  # noqa: B950

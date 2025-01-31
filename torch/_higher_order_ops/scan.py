@@ -193,7 +193,7 @@ doesn't match the length of the pytree of the init {len(leaves_init)}"
 
     def run_flattened_scan(combine_fn, leaves_init, leaves_xs, reverse):
         return scan_op(
-            combine_fn, leaves_init, leaves_xs, reverse, additional_inputs=[]
+            combine_fn, leaves_init, leaves_xs, reverse, additional_inputs=()
         )
 
     if not torch._dynamo.is_compiling():
@@ -233,7 +233,9 @@ class ScanOp(HigherOrderOperator):
         super().__init__("scan")
 
     def __call__(self, combine_fn, init, xs, reverse, additional_inputs):
-        assert isinstance(additional_inputs, list), "additional_inputs must be a list."
+        assert isinstance(
+            additional_inputs, tuple
+        ), "additional_inputs must be a tuple."
         validate_subgraph_args_types(additional_inputs)
         return super().__call__(combine_fn, init, xs, reverse, additional_inputs)
 
@@ -241,9 +243,7 @@ class ScanOp(HigherOrderOperator):
 scan_op = ScanOp()
 
 
-def generic_scan(operator, init, xs, dim=0, reverse=False, additional_inputs=None):
-    additional_inputs = additional_inputs if additional_inputs is not None else []
-
+def generic_scan(operator, init, xs, dim=0, reverse=False, additional_inputs=()):
     def _scan(init, xs):
         """Perform scan on `elems` using `elems_init."""
         carry = init
@@ -337,7 +337,7 @@ def trace_scan(
     init: list[torch.Tensor],
     xs: list[torch.Tensor],
     reverse: bool,
-    additional_inputs: list[torch.Tensor],
+    additional_inputs: tuple[torch.Tensor],
 ):
     from torch._dynamo.utils import clone_input
 

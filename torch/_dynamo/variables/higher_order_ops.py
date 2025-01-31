@@ -1335,6 +1335,7 @@ class ScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
             first_slice_copy,
             stack_y,
         )
+        from torch._higher_order_ops.while_loop import _create_unbacked_symint
 
         from .builder import wrap_fx_proxy
 
@@ -1346,7 +1347,7 @@ class ScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
         combine_fn, init, xs, reverse, additional_inputs = arg_extractor(
             *args, **kwargs
         )
-        assert isinstance(additional_inputs, variables.BaseListVariable)
+        assert isinstance(additional_inputs, variables.TupleVariable)
 
         if xs.python_type() != list:
             unimplemented(
@@ -1359,11 +1360,6 @@ class ScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
             )
         assert isinstance(init, variables.BaseListVariable)
 
-        # dim_fake = (
-        #     dim.as_proxy()
-        #     if type(dim.as_proxy()) == int
-        #     else get_fake_value(dim.as_proxy().node, tx)
-        # )
         scan_length = get_fake_value(xs.items[0].as_proxy().node, tx).size()[0]
         if scan_length == 0:
             unimplemented(
@@ -1376,20 +1372,33 @@ class ScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
 
         # Trace the subgraph
         with discard_graph_changes(tx):
+            # See NOTE [unspecialize int carry with unbacked symints]
+            # Note: this must be run under discard graph changes.
+            def create_unbacked_sym_node_var(tx) -> SymNodeVariable:
+                example_value = _create_unbacked_symint(
+                    tx.output.fake_mode, ignore_fresh_unbacked_symbols=True
+                )
+                proxy = tx.output.current_tracer.create_graph_input(
+                    "unbacked_symint", type(example_value), example_value
+                )
+                return SymNodeVariable.create(tx, proxy, example_value)
+
             sub_args_init = [
                 ini.call_method(tx, "clone", args=(), kwargs={}) for ini in init.items
             ]
             # The sub_args_inp is a slice of original input, e.g. if input.size is (3, 4), and scan dim=0
             # the sub_args_inp shape will be (4, ).
             sub_args_inp = [
-                # _make_inlined(tx, first_slice_copy)(inp, dim) for inp in xs.items
-                _make_inlined(tx, first_slice_copy)(inp)
-                for inp in xs.items
+                _make_inlined(tx, first_slice_copy)(inp) for inp in xs.items
             ]
             sub_args_additional_inputs = [
-                t.call_method(tx, "clone", args=(), kwargs={})
+                create_unbacked_sym_node_var(tx)
+                if (isinstance(t, ConstantVariable) and t.python_type() is int)
+                or (isinstance(t, SymNodeVariable))
+                else t.call_method(tx, "clone", args=(), kwargs={})
                 for t in additional_inputs.items
             ]
+
         sub_args = sub_args_init + sub_args_inp + sub_args_additional_inputs
         (
             (combine_result, _combine_treespec),
@@ -1404,23 +1413,7 @@ class ScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
             source_target=self.value,
             set_subgraph_inputs="flatten_manual",
         )
-
-        # key in the combine_lifted_freevars are proxies in the root tracer.
-        # We use root tracer's proxies to create scan op's inputs.
-        def _check_phs_position_match(
-            combine_graph: torch.fx.Graph, lifted_proxies: list[torch.fx.Proxy]
-        ):
-            lifted_phs = [
-                node for node in combine_graph.nodes if node.op == "placeholder"
-            ][-len(lifted_proxies) :]
-            for ph, lifted_proxy in zip(lifted_phs, lifted_proxies):
-                if ph is not lifted_proxy.node:
-                    unimplemented(
-                        "The postion lifted freevars doesn't match the order of placeholders in subgraph."
-                    )
-
-        _check_phs_position_match(combine_graph, list(combine_lifted_freevars.values()))
-        combine_freevars_proxy = list(combine_lifted_freevars.keys())
+        combine_freevars_proxy = tuple(combine_lifted_freevars.keys())
 
         if combine_result.python_type() != list:
             unimplemented(
@@ -1452,7 +1445,6 @@ class ScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
             make_attr(tx, combine_fn_name),
             init_proxy,
             xs_proxy,
-            # dim.as_proxy(),
             reverse.as_proxy(),
             additional_inputs_proxy,
         )
