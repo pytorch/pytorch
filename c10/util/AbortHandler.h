@@ -73,7 +73,7 @@ C10_ALWAYS_INLINE void set_terminate_handler() {
   use_custom_terminate = true;
 #endif // _WIN32
   auto result = c10::utils::check_env("TORCH_CUSTOM_TERMINATE");
-  if (result != std::nullopt) {
+  if (result.has_value()) {
     use_custom_terminate = result.value();
   }
   if (use_custom_terminate) {
