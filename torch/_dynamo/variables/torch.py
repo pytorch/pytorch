@@ -655,6 +655,16 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                     tx, [args[0], result], {}
                 )
 
+        @register(torch.full)
+        def handle_full(self, tx, size, fill_value, **kwargs):
+            if isinstance(fill_value, TensorVariable):
+                result = TorchInGraphFunctionVariable(
+                    torch.ops.aten._local_scalar_dense
+                ).call_function(tx, [fill_value], {})
+                return TorchInGraphFunctionVariable(torch.full).call_function(
+                    tx, [size, result], kwargs
+                )
+
         @register(torch._foreach_lerp_)
         def handle_inplace_foreach_lerp_scalar(
             _, tx: "InstructionTranslator", *args, **kwargs
