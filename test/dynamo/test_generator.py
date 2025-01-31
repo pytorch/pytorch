@@ -1026,14 +1026,14 @@ class TestGeneratorThrow(GeneratorTestsBase):
         def whoo(t):
             try:
                 yield t.sin()
-            except ValueError:
+            except RuntimeError:
                 yield t.cos()
 
         @torch.compile(backend="eager", fullgraph=True)
         def fn(t):
             gen = whoo(t)
             a = next(gen)
-            b = gen.throw(ValueError)
+            b = gen.throw(RuntimeError)
             return a + b
 
         t = torch.randn(2)
@@ -1049,7 +1049,7 @@ class TestGeneratorThrow(GeneratorTestsBase):
                 z += 1
                 yield t.sin()
                 z += 10
-            except ValueError:
+            except RuntimeError:
                 z += 100
                 yield t.cos()
                 z += 1_000
@@ -1059,7 +1059,7 @@ class TestGeneratorThrow(GeneratorTestsBase):
         def fn(t):
             gen = whoo(t)
             a = next(gen)
-            b = gen.throw(ValueError)
+            b = gen.throw(RuntimeError)
             return a + b
 
         t = torch.randn(2)
@@ -1162,7 +1162,6 @@ class TestGeneratorThrow(GeneratorTestsBase):
         with self.assertRaises(RuntimeError):
             fn(t)
 
-    @unittest.expectedFailure
     def test_throw_yield_finally(self):
         z = 0
 
@@ -1171,18 +1170,18 @@ class TestGeneratorThrow(GeneratorTestsBase):
             try:
                 z += 1
                 yield t.sin()
-            except ValueError:
+            except RuntimeError:
                 z += 10
                 yield t.cos()
             finally:
                 z += 100
-                yield t.tan()
+                yield t.tan()  # RuntimeError: generator ignored GeneratorExit
 
         @torch.compile(backend="eager", fullgraph=True)
         def fn(t):
             gen = whoo(t)
             a = next(gen)
-            b = gen.throw(ValueError)
+            b = gen.throw(RuntimeError)
             return a + b
 
         t = torch.randn(2)
@@ -1205,6 +1204,7 @@ class TestGeneratorThrow(GeneratorTestsBase):
                 yield t.tan()
             finally:
                 z += 1000
+            z += 10_000
 
         @torch.compile(backend="eager", fullgraph=True)
         def fn(t):
@@ -1216,7 +1216,7 @@ class TestGeneratorThrow(GeneratorTestsBase):
         t = torch.randn(2)
         y = fn(t)
         self.assertEqual(y, t.sin() + t.tan())
-        self.assertEqual(z, 1 + 100)
+        self.assertEqual(z, 1 + 100 + 1000)
 
     def test_exception_context_with_yield(self):
         def f():
