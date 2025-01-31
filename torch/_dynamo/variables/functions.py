@@ -14,7 +14,7 @@ import torch
 
 from .. import polyfills, variables
 from ..bytecode_transformation import create_call_function, create_rot_n
-from ..exc import unimplemented, Unsupported
+from ..exc import raise_observed_exception, unimplemented, Unsupported
 from ..guards import GuardBuilder, install_guard
 from ..source import AttrSource, ConstantSource, DefaultsSource, GetItemSource
 from ..utils import (
@@ -119,7 +119,9 @@ class BaseUserFunctionVariable(VariableTracker):
     ) -> "VariableTracker":
         return tx.inline_user_function_return(self, [*self.self_args(), *args], kwargs)
 
-    def call_hasattr(self, tx: "InstructionTranslator", name: str) -> VariableTracker:
+    def call_obj_hasattr(
+        self, tx: "InstructionTranslator", name: str
+    ) -> VariableTracker:
         result = False
 
         try:
@@ -166,6 +168,14 @@ class UserFunctionVariable(BaseUserFunctionVariable):
         # unpack @torch._dynamo.optimize()(fn) wrapped function
         fn = inspect.getattr_static(fn, "_torchdynamo_inline", fn)
         self.fn: types.FunctionType = fn
+        self._known_dunder_attrs = {
+            "__annotations__",
+            "__defaults__",
+            "__kwdefaults__",
+            "__code__",
+            "__globals__",
+            "__closure__",
+        }
 
     def as_python_constant(self):
         if istype(self, UserFunctionVariable):
@@ -283,12 +293,20 @@ class UserFunctionVariable(BaseUserFunctionVariable):
         try:
             subobj = inspect.getattr_static(self.fn, name)
         except AttributeError:
-            return variables.GetAttrVariable(self, name, source=source)
+            # function does not have a __getattr__ or __getattribute__ method,
+            # so we can safely assume that this attribute is absent
+            raise_observed_exception(AttributeError, tx)
+
+        # Special handling for known dunder attributes
+        if name in self._known_dunder_attrs:
+            subobj = getattr(self.fn, name)
         if source:
             return variables.LazyVariableTracker.create(subobj, source)
         return VariableTracker.build(tx, subobj)
 
-    def call_hasattr(self, tx: "InstructionTranslator", name: str) -> VariableTracker:
+    def call_obj_hasattr(
+        self, tx: "InstructionTranslator", name: str
+    ) -> VariableTracker:
         result = hasattr(self.fn, name)
         return variables.ConstantVariable.create(result)
 
@@ -957,7 +975,9 @@ class FunctoolsPartialVariable(VariableTracker):
         merged_kwargs = {**self.keywords, **kwargs}
         return self.func.call_function(tx, merged_args, merged_kwargs)
 
-    def call_hasattr(self, tx: "InstructionTranslator", name: str) -> VariableTracker:
+    def call_obj_hasattr(
+        self, tx: "InstructionTranslator", name: str
+    ) -> VariableTracker:
         # functools.partial uses slots, so attributes are constant
         return variables.ConstantVariable.create(
             hasattr(functools.partial(identity), name)
