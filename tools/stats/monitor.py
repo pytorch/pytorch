@@ -190,6 +190,7 @@ class UsageLogger:
             job_name=_job_name,
             workflow_id=_workflow_run_id,
             workflow_name=_workflow_name,
+            start_at=datetime.datetime.now().timestamp(),
         )
         self._data_collect_interval = data_collect_interval
         self._has_pynvml = pynvml_enabled
@@ -257,7 +258,11 @@ class UsageLogger:
 
         while not self.exit_event.is_set():
             collecting_start_time = time.time()
-            stats = UtilizationRecord()
+            stats = UtilizationRecord(
+                level="record",
+                timestamp=datetime.datetime.now().timestamp(),
+            )
+
             try:
                 data_list, error_list = self.shared_resource.get_and_reset()
                 if self._debug_mode:
@@ -275,8 +280,6 @@ class UsageLogger:
                 if not data_list:
                     # pass since no data is collected
                     continue
-                stats.level = "record"
-                stats.timestamp = datetime.datetime.now().timestamp()
 
                 cpu_stats = self._generate_stats(
                     [data.cpu_percent for data in data_list]
