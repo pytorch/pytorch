@@ -193,7 +193,9 @@ class NNModuleVariable(VariableTracker):
             )
         return result
 
-    def call_hasattr(self, tx: "InstructionTranslator", name: str) -> "VariableTracker":
+    def call_obj_hasattr(
+        self, tx: "InstructionTranslator", name: str
+    ) -> "VariableTracker":
         mod = tx.output.get_submodule(self.module_key)
         result = hasattr(mod, name)
         install_guard(
@@ -286,8 +288,8 @@ class NNModuleVariable(VariableTracker):
                 )
                 if result is not None:
                     return result
-                # if we can't find a __getattr__, just raise the AttributeError
-                raise
+                # if we can't find a __getattr__, we can't parse this, raise unimplemented
+                unimplemented(f"missing attribute {name} - {typestr(base)}")
 
         if name == "forward":
             guard_to_detect_forward_monkeypatching(self.source, base)
