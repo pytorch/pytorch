@@ -427,9 +427,9 @@ def default_partition(
     forward_only_graph = _extract_graph_with_inputs_outputs(
         joint_module.graph, inputs, fwd_outputs, "forward"
     )
-    forward_node_names = {
-        node.name for node in forward_only_graph.nodes if node.op != "output"
-    }
+    forward_node_names = OrderedSet(
+        [node.name for node in forward_only_graph.nodes if node.op != "output"]
+    )
     saved_values = []
     saved_sym_nodes = []
 
@@ -825,12 +825,17 @@ def solve_min_cut(
     op_types = get_default_op_list()
 
     if AOT_PARTITIONER_DEBUG:
-        joint_module_ops = {
-            str(node.target._overloadpacket)
-            for node in joint_graph.nodes
-            if node.op == "call_function" and hasattr(node.target, "_overloadpacket")
-        }
-        ops_ignored = joint_module_ops - {str(i) for i in op_types.recomputable_ops}
+        joint_module_ops = OrderedSet(
+            [
+                str(node.target._overloadpacket)
+                for node in joint_graph.nodes
+                if node.op == "call_function"
+                and hasattr(node.target, "_overloadpacket")
+            ]
+        )
+        ops_ignored = joint_module_ops - OrderedSet(
+            [str(i) for i in op_types.recomputable_ops]
+        )
         log.info("Ops banned from re-materialization: %s", ops_ignored)
 
     def can_fuse_into_auto_functionalized(a, b):
@@ -889,7 +894,7 @@ def solve_min_cut(
     def is_materialized_backwards(node):
         if op_types.is_view(node):
             return False
-        cur_nodes = {node}
+        cur_nodes = OrderedSet([node])
         while len(cur_nodes) > 0:
             cur = cur_nodes.pop()
             for user in cur.users:
@@ -1587,7 +1592,7 @@ def choose_saved_values_set(
 
     from torch._inductor.fx_utils import get_node_storage
 
-    input_storages = {get_node_storage(node) for node in node_info.inputs}
+    input_storages = OrderedSet([get_node_storage(node) for node in node_info.inputs])
 
     def get_recomputable_banned_nodes(
         banned_nodes: OrderedSet[fx.Node],
@@ -1901,12 +1906,12 @@ def min_cut_rematerialization_partition(
 
         # Log theoretical per activation storage sizes
         log.info("Theoretical Per Activation Storage Sizes: %s", sorted_sizes)
-        fw_module_nodes = {
-            node.name for node in fw_module.graph.nodes if node.op == "call_function"
-        }
-        bw_module_nodes = {
-            node.name for node in bw_module.graph.nodes if node.op == "call_function"
-        }
+        fw_module_nodes = OrderedSet(
+            [node.name for node in fw_module.graph.nodes if node.op == "call_function"]
+        )
+        bw_module_nodes = OrderedSet(
+            [node.name for node in bw_module.graph.nodes if node.op == "call_function"]
+        )
         remat_nodes = fw_module_nodes & bw_module_nodes
 
         counts: dict[str, int] = defaultdict(int)

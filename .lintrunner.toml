@@ -1702,6 +1702,7 @@ command = [
 ]
 include_patterns = [
     "torch/_inductor/**/*.py",
+    "torch/_functorch/partitioners.py",
 ]
 is_formatter = true
 
