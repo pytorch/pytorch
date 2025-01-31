@@ -25,6 +25,7 @@ from torch.testing._internal.common_utils import (
 
 log: logging.Logger = logging.getLogger(__name__)
 
+
 def test_cpu():
     try:
         CppCodeCache.load("")
@@ -37,12 +38,14 @@ def test_cpu():
     ):
         return False
 
+
 HAS_CPU = LazyVal(test_cpu)
 
 HAS_TRITON = has_triton()
 
 if HAS_TRITON:
     import triton
+
     TRITON_HAS_CPU = "cpu" in triton.backends.backends
 else:
     TRITON_HAS_CPU = False
@@ -60,6 +63,7 @@ HAS_MULTIGPU = any(
     getattr(torch, gpu).is_available() and getattr(torch, gpu).device_count() >= 2
     for gpu in GPU_TYPES
 )
+
 
 def _check_has_dynamic_shape(
     self: TestCase,
@@ -82,23 +86,29 @@ def _check_has_dynamic_shape(
 
 def skipDeviceIf(cond, msg, *, device):
     if cond:
+
         def decorate_fn(fn):
             @functools.wraps(fn)
             def inner(self, *args, **kwargs):
                 if not hasattr(self, "device"):
-                    warn_msg = "Expect the test class to have attribute device but not found. "
+                    warn_msg = (
+                        "Expect the test class to have attribute device but not found. "
+                    )
                     if hasattr(self, "device_type"):
                         warn_msg += "Consider using the skip device decorators in common_device_type.py"
                     log.warning(warn_msg)
                 if self.device == device:
                     raise unittest.SkipTest(msg)
                 return fn(self, *args, **kwargs)
+
             return inner
     else:
+
         def decorate_fn(fn):
             return fn
 
     return decorate_fn
+
 
 def skip_windows_ci(name: str, file: str) -> None:
     if IS_WINDOWS and IS_CI:
@@ -110,30 +120,39 @@ def skip_windows_ci(name: str, file: str) -> None:
             sys.exit(0)
         raise unittest.SkipTest("requires sympy/functorch/filelock")
 
+
 requires_gpu = functools.partial(unittest.skipIf, not HAS_GPU, "requires gpu")
 requires_triton = functools.partial(unittest.skipIf, not HAS_TRITON, "requires triton")
 
+
 def requires_cuda_with_enough_memory(min_mem_required):
     def inner(fn):
-        if not torch.cuda.is_available() or torch.cuda.get_device_properties().total_memory < min_mem_required:
-            return unittest.skip(f"Only if the CUDA device has at least {min_mem_required / 1e9:.3f}GB memory to be safe")(fn)
+        if (
+            not torch.cuda.is_available()
+            or torch.cuda.get_device_properties().total_memory < min_mem_required
+        ):
+            return unittest.skip(
+                f"Only if the CUDA device has at least {min_mem_required / 1e9:.3f}GB memory to be safe"
+            )(fn)
         else:
             return fn
 
     return inner
 
+
 skipCUDAIf = functools.partial(skipDeviceIf, device="cuda")
 skipXPUIf = functools.partial(skipDeviceIf, device="xpu")
 skipCPUIf = functools.partial(skipDeviceIf, device="cpu")
 
-IS_A100 = LazyVal(
-    lambda: HAS_CUDA
-    and get_gpu_shared_memory() == 166912
-)
+IS_A100 = LazyVal(lambda: HAS_CUDA and get_gpu_shared_memory() == 166912)
 
-IS_H100 = LazyVal(
-    lambda: HAS_CUDA
-    and get_gpu_shared_memory() == 232448
-)
+IS_H100 = LazyVal(lambda: HAS_CUDA and get_gpu_shared_memory() == 232448)
 
 IS_BIG_GPU = LazyVal(lambda: HAS_CUDA and is_big_gpu())
+
+try:
+    import halide  # @manual
+
+    HAS_HALIDE = halide is not None
+except ImportError:
+    HAS_HALIDE = False
