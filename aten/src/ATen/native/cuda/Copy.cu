@@ -329,11 +329,11 @@ static bool copy_requires_temporaries(TensorIterator& iter, bool p2p_enabled) {
 
     size_t element_size = src_tensor.element_size();
     int64_t dim0 = src_tensor.size(0);
-    int64_t dim1 = iter.ndim() == 1 ? 1 : src_tensor.size(1);
+    int64_t dim1 = src_tensor.dim() > 1 ? src_tensor.size(1) : 1; 
     int64_t src_stride0 = src_tensor.stride(0);
-    int64_t src_stride1 = iter.ndim() == 1 ? 1 : src_tensor.stride(1);
+    int64_t src_stride1 = src_tensor.dim() > 1 ? src_tensor.stride(1) : 1; 
     int64_t dst_stride0 = dst_tensor.stride(0);
-    int64_t dst_stride1 = iter.ndim() == 1 ? 1 : dst_tensor.stride(1);
+    int64_t dst_stride1 = dst_tensor.dim() > 1 ? dst_tensor.stride(1) : 1; // proposed fix
 
     // Check for row-major contiguous data
     bool src_row_contiguous = (src_stride1 == 1);
