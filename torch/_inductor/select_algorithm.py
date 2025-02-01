@@ -52,7 +52,7 @@ from .codegen.triton import (
     TritonKernel,
     TritonScheduling,
 )
-from .codegen.triton_utils import config_of, signature_to_meta
+from .codegen.triton_utils import config_of, equal_1_arg_indices, signature_to_meta
 from .exc import CUDACompileError
 from .ir import ChoiceCaller, PrimitiveInfoType
 from .ops_handler import StoreMode
@@ -430,8 +430,8 @@ class TritonTemplateKernel(TritonKernel):
             "constants": {},
         }
         triton_meta["configs"] = [config_of(signature)]
-        for arg_num in triton_meta["configs"][0].equal_to_1:  # type: ignore[index]
-            triton_meta["constants"][signature[arg_num].name] = 1  # type: ignore[index]
+        for arg_num in equal_1_arg_indices(signature):  # type: ignore[index]
+            triton_meta["constants"][signature[arg_num].name] = 1  # type: ignore[index,union-attr]
         matrix_instr_nonkdim = self.meta.get("matrix_instr_nonkdim", 0)
         if matrix_instr_nonkdim != 0:
             triton_meta["matrix_instr_nonkdim"] = matrix_instr_nonkdim
@@ -1590,10 +1590,17 @@ class NoValidChoicesError(RuntimeError):
 
 
 @functools.lru_cache(None)
-def get_env_num_workers() -> Optional[int]:
+def get_num_workers() -> int:
     if "TORCHINDUCTOR_COMPILE_THREADS" in os.environ:
         return int(os.environ["TORCHINDUCTOR_COMPILE_THREADS"])
-    return None
+
+    cpu_count = (
+        len(os.sched_getaffinity(0))
+        if hasattr(os, "sched_getaffinity")
+        else os.cpu_count()
+    )
+    assert cpu_count
+    return cpu_count
 
 
 def create_inputs_key(input_nodes) -> str:
@@ -1714,8 +1721,7 @@ class AlgorithmSelectorCache(PersistentCache):
             ):
                 return no_op
 
-            env_workers = get_env_num_workers()
-            num_workers = env_workers if env_workers is not None else (len(choices))
+            num_workers = min(get_num_workers(), len(choices))
 
             if num_workers <= 0:
                 return no_op
