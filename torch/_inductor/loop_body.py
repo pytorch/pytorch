@@ -449,7 +449,7 @@ class LoopBodyBlock:
             )
 
         class CaptureIndexing(V.WrapperHandler):  # type: ignore[name-defined]
-            self.name = "CaptureIndexing"
+            name = "CaptureIndexing"
 
             def load(self, name: str, index: sympy.Expr):
                 index = add_index(index, MemoryUsageType.LOAD, buffer_name=name)
