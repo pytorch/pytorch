@@ -221,6 +221,8 @@ def max_clock_rate():
             return 1700
         elif "gfx908" in gcn_arch:
             return 1502
+        elif "gfx12" in gcn_arch:
+            return 1700
         elif "gfx11" in gcn_arch:
             return 1700
         elif "gfx103" in gcn_arch:
