@@ -170,7 +170,6 @@ def associative_scan(
 
     ndim = leaves[0].ndim
     orig_scan_dim = utils.canonicalize_dim(ndim, dim)
-    # leaves = [torch.movedim(elem, dim, 0) for elem in leaves]
     leaves = [torch.movedim(elem, dim, 0) for elem in leaves]
 
     # Call the combine_fn with only a slice along the scan dim
@@ -214,7 +213,6 @@ def associative_scan(
         #            [torch.tensor([[1.0, 3.0],
         #                           [1.0, 3.0]])])
         # The arguments are of shape 2 x 2, but can be evaluated in parallel along the scan dimension.
-        # TODO: In case of the additional inputs, we the in_dims should be set to None
         combine_fn = functools.partial(
             wrap_combine_fn_flat,
             combine_fn=torch.vmap(
@@ -241,7 +239,6 @@ def associative_scan(
     if reverse:
         result_flat = [torch.flip(elem, [0]) for elem in result_flat]
 
-    # result_flat = [torch.movedim(elem, 0, orig_scan_dim) for elem in result_flat]
     result_flat = [torch.movedim(elem, 0, orig_scan_dim) for elem in result_flat]
 
     return pytree.tree_unflatten(result_flat, spec)

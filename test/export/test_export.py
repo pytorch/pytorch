@@ -6265,7 +6265,7 @@ def forward(self, b_a_buffer, x):
 
     @requires_gpu
     def test_export_associative_scan_symbol_dim(self):
-        dim0 = torch.export.Dim("dim0", min=10, max=20)
+        dim1 = torch.export.Dim("dim0", min=5, max=15)
         xs = torch.randn(3, 10, 2, device=torch.device("cuda"))
 
         class Foo(torch.nn.Module):
@@ -6276,28 +6276,28 @@ def forward(self, b_a_buffer, x):
                 return x + y
 
             def forward(self, x):
-                return associative_scan(self.combine_fn, x, 1)
+                return associative_scan(self.combine_fn, x, 2)
 
-        ep = export(Foo(), (xs,), dynamic_shapes={"x": {1: dim0}})
+        ep = export(Foo(), (xs,), dynamic_shapes={"x": {1: dim1}})
         self.assertExpectedInline(
             ep.graph_module.code.strip(),
             """\
 def forward(self, x):
-    movedim = torch.ops.aten.movedim.int(x, 1, 0);  x = None
+    movedim = torch.ops.aten.movedim.int(x, 2, 0);  x = None
     select_copy = torch.ops.aten.select_copy.int(movedim, 0, 0)
     add = torch.ops.aten.add.Tensor(select_copy, select_copy);  select_copy = add = None
     select_copy_1 = torch.ops.aten.select_copy.int(movedim, 0, 0);  select_copy_1 = None
     scan_combine_graph_0 = self.scan_combine_graph_0
     associative_scan = torch.ops.higher_order.associative_scan(scan_combine_graph_0, [movedim], ());  scan_combine_graph_0 = movedim = None
     getitem = associative_scan[0];  associative_scan = None
-    movedim_1 = torch.ops.aten.movedim.int(getitem, 0, 1);  getitem = None
+    movedim_1 = torch.ops.aten.movedim.int(getitem, 0, 2);  getitem = None
     return (movedim_1,)""",
         )
         self.assertTrue(torch.allclose(ep.module()(xs), Foo()(xs)))
 
     @requires_gpu
     def test_export_associative_scan_symbol_scandim(self):
-        dim0 = torch.export.Dim("dim0", min=10, max=20)
+        dim1 = torch.export.Dim("dim0", min=5, max=15)
         xs = torch.randn(3, 10, 2, device=torch.device("cuda"))
 
         class Foo(torch.nn.Module):
@@ -6310,7 +6310,7 @@ def forward(self, x):
             def forward(self, x):
                 return associative_scan(self.combine_fn, x, 1)
 
-        ep = export(Foo(), (xs,), dynamic_shapes={"x": {1: dim0}})
+        ep = export(Foo(), (xs,), dynamic_shapes={"x": {1: dim1}})
         self.assertExpectedInline(
             ep.graph_module.code.strip(),
             """\
@@ -6326,30 +6326,6 @@ def forward(self, x):
     return (movedim_1,)""",
         )
         self.assertTrue(torch.allclose(ep.module()(xs), Foo()(xs)))
-
-    @requires_gpu
-    def test_export_associative_scan_buffer(self):
-        class M(torch.nn.Module):
-            def __init__(self) -> None:
-                super().__init__()
-
-            def combine_fn(self, x, y):
-                return x + y
-
-            def forward(self, x):
-                return associative_scan(self.combine_fn, x, 1)
-
-        inp = torch.nn.Buffer(torch.randn(3, 10, 2, device=torch.device("cuda")))
-        ep = torch.export.export(M(), (inp,))
-        epm = ep.module()
-        self.assertTrue(torch.allclose(epm(inp), M()(inp)))
-
-        for gm in epm.named_modules():
-            if not isinstance(gm, torch.fx.GraphModule):
-                continue
-            self.assertEqual(
-                len([node for node in gm.graph.nodes if node.op == "placeholder"]), 1
-            )
 
     @requires_gpu
     def test_export_associative_scan_lifted_buffers(self):

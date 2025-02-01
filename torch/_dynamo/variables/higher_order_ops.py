@@ -1241,8 +1241,8 @@ class AssociativeScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
         from torch._higher_order_ops.utils import first_slice_copy
-        from torch._higher_order_ops.while_loop import _create_unbacked_symint
 
+        from . import TensorVariable
         from .builder import wrap_fx_proxy
 
         args, kwargs = LazyVariableTracker.realize_all((args, kwargs))
@@ -1258,32 +1258,23 @@ class AssociativeScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
             )
         assert isinstance(xs, torch._dynamo.variables.lists.BaseListVariable)
 
+        # Ensure that all additional_inputs are TensorVariables and no
+        # ints or SymInts as this is not yet supported
+        assert all(isinstance(t, TensorVariable) for t in additional_inputs.items)
+
         # Trace the subgraph
         # The sub_args is a slice of original input, e.g. if input.size is (3, 4), and scan dim=0
         # the sub_args shape will be (4, ).
         with discard_graph_changes(tx):
-            # See NOTE [unspecialize int carry with unbacked symints]
-            # Note: this must be run under discard graph changes.
-            def create_unbacked_sym_node_var(tx) -> SymNodeVariable:
-                example_value = _create_unbacked_symint(
-                    tx.output.fake_mode, ignore_fresh_unbacked_symbols=True
-                )
-                proxy = tx.output.current_tracer.create_graph_input(
-                    "unbacked_symint", type(example_value), example_value
-                )
-                return SymNodeVariable.create(tx, proxy, example_value)
-
             sub_args = [
                 _make_inlined(tx, first_slice_copy)(leaf)
                 for leaf in itertools.chain(xs.items, xs.items)
             ]
             sub_args_additional_inputs = [
-                create_unbacked_sym_node_var(tx)
-                if (isinstance(t, ConstantVariable) and t.python_type() is int)
-                or (isinstance(t, SymNodeVariable))
-                else t.call_method(tx, "clone", args=(), kwargs={})
+                t.call_method(tx, "clone", args=(), kwargs={})
                 for t in additional_inputs.items
             ]
+
         sub_args = sub_args + sub_args_additional_inputs
         (
             (combine_result, _combine_treespec),
