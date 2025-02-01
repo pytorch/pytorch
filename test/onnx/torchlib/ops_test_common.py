@@ -24,18 +24,21 @@ from typing import (
     TypeVar,
 )
 
+import error_reproduction
 import numpy as np
+
 import onnx
 import onnxruntime as ort
 import onnxruntime.capi.onnxruntime_pybind11_state
-import pytest
-import torch
-from torch.testing._internal.opinfo import core as opinfo_core
-
 import onnxscript
 import onnxscript.evaluator
+import pytest
 from onnxscript import ir
-import error_reproduction
+
+import torch
+from torch.onnx._internal.exporter import _building
+from torch.testing._internal.opinfo import core as opinfo_core
+
 
 T = TypeVar("T")
 
@@ -176,9 +179,9 @@ def add_decorate_info(
             # If the OpInfo doesn't exist and it is not enabled, we skip the OpInfo
             # because it could be an OpInfo that is in torch-nightly but not older versions.
             continue
-        assert opinfo is not None, (
-            f"Couldn't find OpInfo for {decorate_meta}. Did you need to specify variant_name?"
-        )
+        assert (
+            opinfo is not None
+        ), f"Couldn't find OpInfo for {decorate_meta}. Did you need to specify variant_name?"
         decorators = list(opinfo.decorators)
         new_decorator = opinfo_core.DecorateInfo(
             decorate_meta.decorator,
@@ -198,7 +201,9 @@ def add_decorate_info(
     return wrapped
 
 
-def duplicate_opinfo(opinfos: list[opinfo_core.OpInfo], name: str, new_names: tuple[str, ...]):
+def duplicate_opinfo(
+    opinfos: list[opinfo_core.OpInfo], name: str, new_names: tuple[str, ...]
+):
     """Duplicate an opinfo in the opinfo database and give it a new name."""
     duplicated = []
     all_info_names = {opinfo.name for opinfo in opinfos}
@@ -209,7 +214,8 @@ def duplicate_opinfo(opinfos: list[opinfo_core.OpInfo], name: str, new_names: tu
                     # NOTE: Avoid duplicating an opinfo that already exists in the database.
                     # New opinfos are expected to be added in torch-nightly.
                     warnings.warn(
-                        f"OpInfo {new_name} already exists in the database.", stacklevel=1
+                        f"OpInfo {new_name} already exists in the database.",
+                        stacklevel=1,
                     )
                     continue
                 new_opinfo = copy.deepcopy(opinfo)
@@ -356,20 +362,23 @@ def _safe_ort_session_run(serialized_model: bytes, ort_inputs: Mapping[str, Any]
     manager = multiprocessing.Manager()
     return_dict = manager.dict()
     process = multiprocessing.Process(
-        target=_ort_session_run_return_dict, args=(serialized_model, ort_inputs, return_dict)
+        target=_ort_session_run_return_dict,
+        args=(serialized_model, ort_inputs, return_dict),
     )
     process.start()
     process.join()
     process.close()
     if not return_dict:
-        raise OrtAbortedError()
+        raise OrtAbortedError
     if return_dict["error"] is not None:
         raise return_dict["error"]
     return return_dict["results"]
 
 
 def _format_model_and_input_information(onnx_model, inputs):
-    return f"Inputs:\n{pprint.pformat(inputs)}\nModel:\n{onnx.printer.to_text(onnx_model)}"
+    return (
+        f"Inputs:\n{pprint.pformat(inputs)}\nModel:\n{onnx.printer.to_text(onnx_model)}"
+    )
 
 
 TORCH_DTYPE_TO_ONNX_STRING = {
@@ -385,6 +394,28 @@ TORCH_DTYPE_TO_ONNX_STRING = {
     torch.complex64: "tensor(complex64)",
     torch.complex128: "tensor(complex128)",
     torch.bfloat16: "tensor(bfloat16)",
+}
+
+_TORCH_DTYPE_TO_ONNX: dict[torch.dtype, ir.DataType] = {
+    torch.bfloat16: ir.DataType.BFLOAT16,
+    torch.bool: ir.DataType.BOOL,
+    torch.complex128: ir.DataType.COMPLEX128,
+    torch.complex64: ir.DataType.COMPLEX64,
+    torch.float16: ir.DataType.FLOAT16,
+    torch.float32: ir.DataType.FLOAT,
+    torch.float64: ir.DataType.DOUBLE,
+    torch.float8_e4m3fn: ir.DataType.FLOAT8E4M3FN,
+    torch.float8_e4m3fnuz: ir.DataType.FLOAT8E4M3FNUZ,
+    torch.float8_e5m2: ir.DataType.FLOAT8E5M2,
+    torch.float8_e5m2fnuz: ir.DataType.FLOAT8E5M2FNUZ,
+    torch.int16: ir.DataType.INT16,
+    torch.int32: ir.DataType.INT32,
+    torch.int64: ir.DataType.INT64,
+    torch.int8: ir.DataType.INT8,
+    torch.uint8: ir.DataType.UINT8,
+    torch.uint16: ir.DataType.UINT16,
+    torch.uint32: ir.DataType.UINT32,
+    torch.uint64: ir.DataType.UINT64,
 }
 
 
@@ -438,13 +469,19 @@ def dtype_op_schema_compatible(dtype: torch.dtype, schema: onnx.defs.OpSchema) -
     first_input_type_name = schema.inputs[0].type_str
     # Find the type constraint for the first input by matching the parameter name
     first_input_type_constraint = next(
-        (x for x in schema.type_constraints if first_input_type_name in x.type_param_str),
+        (
+            x
+            for x in schema.type_constraints
+            if first_input_type_name in x.type_param_str
+        ),
         None,
     )
     assert first_input_type_constraint is not None
     allowed_type_strs = first_input_type_constraint.allowed_type_strs
     # Here we consider seq(tensor(float)) compatible with tensor(float) as well
-    return any(TORCH_DTYPE_TO_ONNX_STRING[dtype] in type_str for type_str in allowed_type_strs)
+    return any(
+        TORCH_DTYPE_TO_ONNX_STRING[dtype] in type_str for type_str in allowed_type_strs
+    )
 
 
 def graph_executor(
@@ -453,23 +490,26 @@ def graph_executor(
 ) -> Callable[[Callable[..., Any], tuple[Any], dict[str, Any]], None]:
     """Eagerly executes a function."""
 
-    def _capture_graph_and_evaluate_torch_script_evaluator(function: Callable, args, kwargs):
+    def _capture_graph_and_evaluate_torch_script_evaluator(
+        function: Callable, args, kwargs
+    ):
         """Captures the graph of a function and evaluates it using TorchScriptEvaluator."""
 
         # Initialize the ONNX graph
-        onnxscript_graph = graph_building.TorchScriptGraph()
-        tracer = graph_building.TorchScriptTracingEvaluator(onnxscript_graph)
+        graph = ir.Graph((), (), nodes=(), opset_imports={"": 18, "pkg.torch.onnx": 1})
+        tracer = _building.OpRecorder(onnxscript.opset18, {})
         ort_inputs = {}
         onnxscript_args: list[Any] = []
         onnxscript_kwargs = {}
         for i, arg in enumerate(args):
             if isinstance(arg, np.ndarray):
                 input_name = f"input_{i}"
-                input = onnxscript_graph.add_input(
+                input = ir.Input(
                     input_name,
-                    torch.tensor(arg).shape,
-                    torch.tensor(arg).dtype,
+                    ir.Shape(torch.tensor(arg).shape),
+                    ir.TensorType(_TORCH_DTYPE_TO_ONNX[torch.tensor(arg).dtype]),
                 )
+                graph.inputs.append(input)
                 onnxscript_args.append(input)
                 ort_inputs[input_name] = arg
             elif isinstance(arg, (list, tuple)):
@@ -479,11 +519,12 @@ def graph_executor(
                     if isinstance(subarg, np.ndarray):
                         input_name = f"input_{i}_{j}"
                         tensor = torch.tensor(subarg)
-                        input = onnxscript_graph.add_input(
+                        input = ir.Input(
                             input_name,
-                            tensor.shape,
-                            tensor.dtype,
+                            ir.Shape(tensor.shape),
+                            ir.TensorType(_TORCH_DTYPE_TO_ONNX[tensor.dtype]),
                         )
+                        graph.inputs.append(input)
                         sequence_input.append(input)
                         ort_inputs[input_name] = subarg
                     else:
@@ -495,11 +536,12 @@ def graph_executor(
                 onnxscript_args.append(arg)
         for key, value in kwargs.items():
             if isinstance(value, np.ndarray):
-                input = onnxscript_graph.add_input(
+                input = ir.Input(
                     key,
-                    torch.tensor(value).shape,
-                    torch.tensor(value).dtype,
+                    ir.Shape(torch.tensor(value).shape),
+                    ir.TensorType(_TORCH_DTYPE_TO_ONNX[torch.tensor(value).dtype]),
                 )
+                graph.inputs.append(input)
                 ort_inputs[key] = value
                 onnxscript_kwargs[key] = input
             else:
@@ -521,20 +563,27 @@ def graph_executor(
                 if isinstance(output, torch.Tensor)
                 else torch.tensor(output, device="cpu")
             )
-            symbolic_output.shape = output.shape
-            symbolic_output.dtype = output.dtype
+            symbolic_output.shape = ir.Shape(output.shape)
+            symbolic_output.dtype = _TORCH_DTYPE_TO_ONNX[output.dtype]
 
-        onnxscript_graph.register_outputs(symbolic_outputs)
-
-        onnx_model = onnxscript_graph.to_model_proto(TEST_OPSET_VERSION)
-        onnx_model = onnx.shape_inference.infer_shapes(onnx_model, data_prop=True)
+        graph.outputs.extend(symbolic_outputs)
+        graph.extend(tracer.nodes)
+        onnx_model = ir.Model(graph, ir_version=10)
+        for identifier, onnxscript_function in tracer.functions.items():
+            if identifier in onnx_model.functions:
+                continue
+            if isinstance(onnxscript_function, ir.Function):
+                ir_function = onnxscript_function
+            else:
+                # TODO: Get IR function directly when onnxscript is updated
+                proto = onnxscript_function.to_function_proto()
+                ir_function = ir.serde.deserialize_function(proto)
+            onnx_model.functions[identifier] = ir_function
         # Make sure the model is valid
         try:
-            onnx.checker.check_model(onnx_model, full_check=True)
+            onnx.checker.check_model(ir.to_proto(onnx_model), full_check=True)
         except (onnx.checker.ValidationError, onnx.shape_inference.InferenceError) as e:
-            raise AssertionError(
-                f"ONNX model is invalid. Model:\n{ir.serde.deserialize_model(onnx_model)}"
-            ) from e
+            raise AssertionError(f"ONNX model is invalid. Model:\n{onnx_model}") from e
 
         try:
             if (
@@ -542,9 +591,13 @@ def graph_executor(
                 or os.environ.get("CREATE_REPRODUCTION_REPORT") == "1"
             ):
                 # Use an individual process to run ONNX Runtime to catch segfaults
-                return _safe_ort_session_run(onnx_model.SerializeToString(), ort_inputs)
+                return _safe_ort_session_run(
+                    ir.to_proto(onnx_model).SerializeToString(), ort_inputs
+                )
 
-            return _ort_session_run(onnx_model.SerializeToString(), ort_inputs)
+            return _ort_session_run(
+                ir.to_proto(onnx_model).SerializeToString(), ort_inputs
+            )
         except (
             # pylint: disable=c-extension-no-member
             onnxruntime.capi.onnxruntime_pybind11_state.Fail,
@@ -556,45 +609,34 @@ def graph_executor(
         ) as e:
             if os.environ.get("CREATE_REPRODUCTION_REPORT") == "1":
                 error_reproduction.create_reproduction_report(
-                    test_name, onnx_model, ort_inputs, e
+                    test_name, ir.to_proto(onnx_model), ort_inputs, e
                 )
             raise RuntimeError(
                 "ONNX Runtime failed to evaluate:\n"
-                + _format_model_and_input_information(onnx_model, ort_inputs)
+                + _format_model_and_input_information(
+                    ir.to_proto(onnx_model), ort_inputs
+                )
             ) from e
         except OrtAbortedError as e:
             if os.environ.get("CREATE_REPRODUCTION_REPORT") == "1":
                 # Save the model and inputs to a file for reproduction
                 error_reproduction.create_reproduction_report(
-                    test_name, onnx_model, ort_inputs, e
+                    test_name, ir.to_proto(onnx_model), ort_inputs, e
                 )
             raise OrtAbortedError(
                 "ONNX Runtime aborted:\n"
-                + _format_model_and_input_information(onnx_model, ort_inputs)
+                + _format_model_and_input_information(
+                    ir.to_proto(onnx_model), ort_inputs
+                )
             ) from e
         except Exception as e:
             if os.environ.get("CREATE_REPRODUCTION_REPORT") == "1":
                 error_reproduction.create_reproduction_report(
-                    test_name, onnx_model, ort_inputs, e
+                    test_name, ir.to_proto(onnx_model), ort_inputs, e
                 )
             raise
 
     return _capture_graph_and_evaluate_torch_script_evaluator
-
-
-def eager_executor(
-    test_name: str,
-    outputs,
-) -> Callable[[Callable[..., Any], tuple[Any], dict[str, Any]], None]:
-    """Eagerly executes a function."""
-
-    del test_name  # Unused
-    del outputs  # Unused
-
-    def executor(function, args, kwargs):
-        return function(*args, **kwargs)
-
-    return executor
 
 
 @contextlib.contextmanager

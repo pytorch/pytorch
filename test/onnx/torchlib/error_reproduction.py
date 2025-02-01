@@ -11,9 +11,12 @@ import traceback
 from typing import Any, Mapping
 
 import numpy as np
+
 import onnx
 import onnxruntime as ort
+
 import torch
+
 
 _REPRODUCTION_TEMPLATE = '''\
 import google.protobuf.text_format
@@ -228,7 +231,9 @@ def create_mismatch_report(
     )
     input_shapes = repr(
         [
-            f"Tensor<{inp.shape}, dtype={inp.dtype}>" if isinstance(inp, torch.Tensor) else inp
+            f"Tensor<{inp.shape}, dtype={inp.dtype}>"
+            if isinstance(inp, torch.Tensor)
+            else inp
             for inp in inputs
         ]
     )

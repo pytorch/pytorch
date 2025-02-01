@@ -27,19 +27,25 @@ from __future__ import annotations
 
 import os
 import unittest
-from typing import Callable, Optional, Sequence, Tuple
+from typing import Callable, Optional, Sequence, Tuple, TYPE_CHECKING
 
+import error_reproduction
 import numpy as np
+
 import onnx
 import onnxruntime as ort
+import onnxscript
+import ops_test_common
+import ops_test_data
 import parameterized
+
 import torch
 from torch.testing._internal import common_device_type
-from torch.testing._internal.opinfo import core as opinfo_core
 from torch.utils import _pytree as pytree
 
-import onnxscript
-import error_reproduction, ops_test_common, ops_test_data
+
+if TYPE_CHECKING:
+    from torch.testing._internal.opinfo import core as opinfo_core
 
 
 # All dtypes will be tested on the generated symbolic functions.
@@ -108,7 +114,9 @@ class TestFunctionValidity(unittest.TestCase):
     @parameterized.parameterized.expand(
         [(info.op.name, info) for info in ops_test_data.TESTED_TORCHLIB_OPS]
     )
-    def test_function_has_op_schema(self, _, torchlib_op_info: ops_test_data.TorchLibOpInfo):
+    def test_function_has_op_schema(
+        self, _, torchlib_op_info: ops_test_data.TorchLibOpInfo
+    ):
         func = torchlib_op_info.op
         schema = func.op_schema
         self.assertIsNotNone(schema)
@@ -184,14 +192,20 @@ def run_test_output_match(
                 op.name, cpu_sample, dtype, device_type
             )
 
-            with ops_test_common.normal_xfail_skip_test_behaviors(test_behavior, reason):
-                input_onnx = [ops_test_common.convert_tensor_to_numpy(x) for x in inputs]
+            with ops_test_common.normal_xfail_skip_test_behaviors(
+                test_behavior, reason
+            ):
+                input_onnx = [
+                    ops_test_common.convert_tensor_to_numpy(x) for x in inputs
+                ]
                 kwargs_onnx = ops_test_common.convert_kwargs_for_onnx(cpu_sample.kwargs)
                 if input_wrangler:
                     input_onnx, kwargs_onnx = input_wrangler(input_onnx, kwargs_onnx)
                 torch_output = op(*inputs, **cpu_sample.kwargs)
 
-                if isinstance(torch_output, torch.Tensor) and torch.is_complex(torch_output):
+                if isinstance(torch_output, torch.Tensor) and torch.is_complex(
+                    torch_output
+                ):
                     torch_output = torch.view_as_real(torch_output.resolve_conj())
 
                 reference_torch_outputs, _ = pytree.tree_flatten(torch_output)
@@ -200,7 +214,11 @@ def run_test_output_match(
                     or op.name.startswith("chunk")
                     or op.name.startswith("unbind")
                     or op.name
-                    in {"atleast_1d_Sequence", "atleast_2d_Sequence", "atleast_3d_Sequence"}
+                    in {
+                        "atleast_1d_Sequence",
+                        "atleast_2d_Sequence",
+                        "atleast_3d_Sequence",
+                    }
                 ):
                     # Hack for handling split, chunk and unbind which relies on SplitToSequence op.
                     # Split returns a Sequence that should be treats as a single
@@ -257,73 +275,17 @@ def run_test_output_match(
                     except AssertionError as e:
                         if os.environ.get("CREATE_REPRODUCTION_REPORT") == "1":
                             error_reproduction.create_mismatch_report(
-                                test_name, i, inputs, cpu_sample.kwargs, actual, expected, e
+                                test_name,
+                                i,
+                                inputs,
+                                cpu_sample.kwargs,
+                                actual,
+                                expected,
+                                e,
                             )
                         if len(flattened_torch_outputs) > 1:
                             raise AssertionError(f"Output {j} mismatch") from e
                         raise
-
-
-class TestOutputConsistencyEager(unittest.TestCase):
-    """Test output consistency between the ONNX op run with ONNX eager mode and PyTorch eager mode.
-
-    This is a parameterized test suite.
-    """
-
-    def setUp(self) -> None:
-        torch.manual_seed(42)
-        np.random.seed(42)
-        ort.set_seed(42)
-
-    @ops_test_common.add_decorate_info(
-        ops_test_data.OPS_DB,
-        "TestOutputConsistencyEager",
-        "test_output_match_opinfo_",
-        skip_or_xfails=ops_test_data.EXPECTED_SKIPS_OR_FAILS,
-    )
-    @common_device_type.ops(  # type: ignore[misc]
-        [info for info in ops_test_data.OPS_DB if info.name in ops_test_data.TESTED_OPS],
-        allowed_dtypes=TESTED_DTYPES,
-    )
-    def test_output_match_opinfo_(
-        self, device: str, dtype: torch.dtype, op: opinfo_core.OpInfo
-    ):
-        # Base test method for testing each op with the eager executor, used by instantiate_device_type_tests.
-        run_test_output_match(
-            self,
-            device,
-            dtype,
-            op,
-            ops_test_common.eager_executor,
-            ops_test_data.TORCHLIB_OPINFO_MAPPING,
-        )
-
-    @ops_test_common.add_decorate_info(
-        ops_test_data.OPS_DB,
-        "TestOutputConsistencyEager",
-        "test_complex_output_match_opinfo_",
-        skip_or_xfails=ops_test_data.EXPECTED_SKIPS_OR_FAILS,
-    )
-    @common_device_type.ops(  # type: ignore[misc]
-        [
-            info
-            for info in ops_test_data.OPS_DB
-            if info.name in ops_test_data.COMPLEX_FUNCTION_MAPPING
-        ],
-        allowed_dtypes=COMPLEX_TYPES,
-    )
-    def test_complex_output_match_opinfo_(
-        self, device: str, dtype: torch.dtype, op: opinfo_core.OpInfo
-    ):
-        """Base test method for testing each op with the eager executor, used by instantiate_device_type_tests."""
-        run_test_output_match(
-            self,
-            device,
-            dtype,
-            op,
-            ops_test_common.eager_executor,
-            ops_test_data.COMPLEX_FUNCTION_MAPPING,
-        )
 
 
 class TestOutputConsistencyFullGraph(unittest.TestCase):
@@ -344,7 +306,11 @@ class TestOutputConsistencyFullGraph(unittest.TestCase):
         skip_or_xfails=ops_test_data.EXPECTED_SKIPS_OR_FAILS,
     )
     @common_device_type.ops(  # type: ignore[misc]
-        [info for info in ops_test_data.OPS_DB if info.name in ops_test_data.TESTED_OPS],
+        [
+            info
+            for info in ops_test_data.OPS_DB
+            if info.name in ops_test_data.TESTED_OPS
+        ],
         allowed_dtypes=TESTED_DTYPES,
     )
     def test_output_match_opinfo_(
@@ -387,10 +353,6 @@ class TestOutputConsistencyFullGraph(unittest.TestCase):
             ops_test_data.COMPLEX_FUNCTION_MAPPING,
         )
 
-
-common_device_type.instantiate_device_type_tests(
-    TestOutputConsistencyEager, globals(), only_for=["cpu", "cuda"]
-)
 
 common_device_type.instantiate_device_type_tests(
     TestOutputConsistencyFullGraph, globals(), only_for=["cpu", "cuda"]

@@ -18,6 +18,7 @@ from torch.testing._internal import (
 )
 from torch.testing._internal.opinfo import core as opinfo_core
 
+
 S = 5
 M = 10
 
@@ -61,7 +62,9 @@ def sample_inputs_bernoulli_p(op_info, device, dtype, requires_grad, **kwargs):
             yield opinfo_core.SampleInput(t, kwargs={"p": p})
 
 
-def sample_inputs_bernoulli_p_deterministic(op_info, device, dtype, requires_grad, **kwargs):
+def sample_inputs_bernoulli_p_deterministic(
+    op_info, device, dtype, requires_grad, **kwargs
+):
     del op_info
 
     shapes = [
@@ -135,17 +138,25 @@ def sample_inputs_col2im(op_info, device, dtype, requires_grad, **kwargs):
     )
 
     make_arg = functools.partial(
-        torch_testing.make_tensor, device=device, dtype=dtype, requires_grad=requires_grad
+        torch_testing.make_tensor,
+        device=device,
+        dtype=dtype,
+        requires_grad=requires_grad,
     )
     for shape, output_size, kernel_size, kwargs in cases:
         tensor = make_arg(shape)
-        yield opinfo_core.SampleInput(tensor, args=(output_size, kernel_size), kwargs=kwargs)
+        yield opinfo_core.SampleInput(
+            tensor, args=(output_size, kernel_size), kwargs=kwargs
+        )
 
 
 def sample_inputs_conv3d(op_info, device, dtype, requires_grad, **kwargs):
     del op_info
     make_arg = functools.partial(
-        torch_testing.make_tensor, device=device, dtype=dtype, requires_grad=requires_grad
+        torch_testing.make_tensor,
+        device=device,
+        dtype=dtype,
+        requires_grad=requires_grad,
     )
 
     # Ordered as shapes for input, weight, bias,
@@ -193,7 +204,10 @@ def sample_inputs_conv3d(op_info, device, dtype, requires_grad, **kwargs):
 def sample_inputs_convolution(op_info, device, dtype, requires_grad, **kwargs):
     del op_info
     make_arg = functools.partial(
-        torch_testing.make_tensor, device=device, dtype=dtype, requires_grad=requires_grad
+        torch_testing.make_tensor,
+        device=device,
+        dtype=dtype,
+        requires_grad=requires_grad,
     )
 
     # Ordered as shapes for input, weight, bias,
@@ -359,7 +373,10 @@ def sample_inputs_embedding_bag(op_info, device, dtype, requires_grad, **kwargs)
                     2,
                 ):  # ('sum', 'mean', 'max')
                     # per_sample_weights only support mode='sum'
-                    if generate_per_sample_weight and mode in (1, 2):  # ('mean', 'max'):
+                    if generate_per_sample_weight and mode in (
+                        1,
+                        2,
+                    ):  # ('mean', 'max'):
                         continue
 
                     # 1-D index tensor
@@ -413,7 +430,9 @@ def sample_inputs_embedding_bag(op_info, device, dtype, requires_grad, **kwargs)
                             },
                         )
 
-                        indices = make_long_input((S, S), low=0, high=M, noncontiguous=True)
+                        indices = make_long_input(
+                            (S, S), low=0, high=M, noncontiguous=True
+                        )
                         per_sample_weights = make_per_sample_weight(
                             generate_per_sample_weight, indices
                         )
@@ -430,7 +449,9 @@ def sample_inputs_embedding_bag(op_info, device, dtype, requires_grad, **kwargs)
                         )
 
 
-def sample_inputs_embedding_bag_padding_idx(op_info, device, dtype, requires_grad, **kwargs):
+def sample_inputs_embedding_bag_padding_idx(
+    op_info, device, dtype, requires_grad, **kwargs
+):
     del op_info
     del kwargs
 
@@ -472,7 +493,10 @@ def sample_inputs_embedding_bag_padding_idx(op_info, device, dtype, requires_gra
                     2,
                 ):  # ('sum', 'mean', 'max')
                     # per_sample_weights only support mode='sum'
-                    if generate_per_sample_weight and mode in (1, 2):  # ('mean', 'max'):
+                    if generate_per_sample_weight and mode in (
+                        1,
+                        2,
+                    ):  # ('mean', 'max'):
                         continue
 
                     for padding_idx in (-1, 0, 1, 2, 3):
@@ -496,7 +520,9 @@ def sample_inputs_embedding_bag_padding_idx(op_info, device, dtype, requires_gra
                             },
                         )
 
-                        indices = make_long_input((S,), low=0, high=M, noncontiguous=True)
+                        indices = make_long_input(
+                            (S,), low=0, high=M, noncontiguous=True
+                        )
                         per_sample_weights = make_per_sample_weight(
                             generate_per_sample_weight, indices
                         )
@@ -697,7 +723,10 @@ def _index_variable_bool(shape, max_indices, device):
     if not isinstance(shape, tuple):
         shape = (shape,)
     index = (
-        torch.rand(*shape, dtype=torch.double, device=device).mul_(max_indices).floor_().bool()
+        torch.rand(*shape, dtype=torch.double, device=device)
+        .mul_(max_indices)
+        .floor_()
+        .bool()
     )
     return index
 
@@ -706,7 +735,10 @@ def sample_inputs_index_bool(op_info, device, dtype, requires_grad, **kwargs):
     del op_info  # Unused
     del kwargs  # Unused
     make_arg = functools.partial(
-        torch_testing.make_tensor, dtype=dtype, device=device, requires_grad=requires_grad
+        torch_testing.make_tensor,
+        dtype=dtype,
+        device=device,
+        requires_grad=requires_grad,
     )
     s = 5
     index_bool = _index_variable_bool(s, s, device=device)
@@ -740,12 +772,17 @@ def sample_inputs_index(op_info, device, dtype, requires_grad, **kwargs):
     del op_info  # Unused
     del kwargs  # Unused
     make_arg = functools.partial(
-        torch_testing.make_tensor, dtype=dtype, device=device, requires_grad=requires_grad
+        torch_testing.make_tensor,
+        dtype=dtype,
+        device=device,
+        requires_grad=requires_grad,
     )
     s = 5
     index_1d = common_methods_invocations.index_variable(2, s, device=device)
     index_2d = common_methods_invocations.index_variable((s + 1, 2), s, device=device)
-    index_3d = common_methods_invocations.index_variable((s + 2, s + 1, 2), s, device=device)
+    index_3d = common_methods_invocations.index_variable(
+        (s + 2, s + 1, 2), s, device=device
+    )
     test_args = [
         ([index_1d],),
         ([None, index_1d],),
@@ -809,7 +846,10 @@ def sample_inputs_layer_norm(op_info, device, dtype, requires_grad, **kwargs):
     del op_info  # unused
     del kwargs
     make_arg = functools.partial(
-        torch_testing.make_tensor, device=device, dtype=dtype, requires_grad=requires_grad
+        torch_testing.make_tensor,
+        device=device,
+        dtype=dtype,
+        requires_grad=requires_grad,
     )
 
     # Ordered as input shape, normalized_shape, eps
@@ -858,7 +898,12 @@ def sample_inputs_like_fns(self, device, dtype, requires_grad, **kwargs):
     ]
     for shape, kwargs in inputs:
         t = torch_testing.make_tensor(
-            shape, dtype=dtype, device=device, low=None, high=None, requires_grad=requires_grad
+            shape,
+            dtype=dtype,
+            device=device,
+            low=None,
+            high=None,
+            requires_grad=requires_grad,
         )
         yield opinfo_core.SampleInput(t, **kwargs)
 
@@ -873,7 +918,10 @@ def sample_inputs__log_softmax(
     del op_info  # Unused
 
     make_arg = functools.partial(
-        torch_testing.make_tensor, device=device, dtype=dtype, requires_grad=requires_grad
+        torch_testing.make_tensor,
+        device=device,
+        dtype=dtype,
+        requires_grad=requires_grad,
     )
     cases = [
         ((S,), (0,)),
@@ -891,7 +939,9 @@ def sample_inputs__log_softmax(
         yield opinfo_core.SampleInput(make_arg(shape), args=dim, kwargs=kwargs)
 
 
-def sample_inputs_max_pool_empty_strides(op_info, device, dtype, requires_grad, **kwargs):
+def sample_inputs_max_pool_empty_strides(
+    op_info, device, dtype, requires_grad, **kwargs
+):
     make_arg = functools.partial(
         torch_testing.make_tensor, device=device, dtype=dtype, requires_grad=False
     )
@@ -906,11 +956,17 @@ def sample_inputs_max_pool_empty_strides(op_info, device, dtype, requires_grad, 
 
     params_generator = params_generator_type_dict[op_info.name]()
     for (shape, memory_format), kwargs in params_generator.gen_input_params():
-        arg = make_arg(shape).to(memory_format=memory_format).requires_grad_(requires_grad)
+        arg = (
+            make_arg(shape)
+            .to(memory_format=memory_format)
+            .requires_grad_(requires_grad)
+        )
         yield opinfo_core.SampleInput(arg, kwargs=kwargs)
 
 
-def sample_inputs_max_pool1d_with_indices(op_info, device, dtype, requires_grad, **kwargs):
+def sample_inputs_max_pool1d_with_indices(
+    op_info, device, dtype, requires_grad, **kwargs
+):
     del op_info
     make_arg = functools.partial(
         torch_testing.make_tensor, device=device, dtype=dtype, requires_grad=False
@@ -919,11 +975,17 @@ def sample_inputs_max_pool1d_with_indices(op_info, device, dtype, requires_grad,
         common_methods_invocations._TestParamsMaxPool1d()  # pylint: disable=protected-access
     )
     for (shape, memory_format), kwargs in params_generator.gen_input_params():
-        arg = make_arg(shape).to(memory_format=memory_format).requires_grad_(requires_grad)
+        arg = (
+            make_arg(shape)
+            .to(memory_format=memory_format)
+            .requires_grad_(requires_grad)
+        )
         yield opinfo_core.SampleInput(arg, kwargs=kwargs)
 
 
-def sample_inputs_max_pool2d_with_indices(op_info, device, dtype, requires_grad, **kwargs):
+def sample_inputs_max_pool2d_with_indices(
+    op_info, device, dtype, requires_grad, **kwargs
+):
     del op_info
     make_arg = functools.partial(
         torch_testing.make_tensor, device=device, dtype=dtype, requires_grad=False
@@ -932,11 +994,17 @@ def sample_inputs_max_pool2d_with_indices(op_info, device, dtype, requires_grad,
         common_methods_invocations._TestParamsMaxPool2d()  # pylint: disable=protected-access
     )
     for (shape, memory_format), kwargs in params_generator.gen_input_params():
-        arg = make_arg(shape).to(memory_format=memory_format).requires_grad_(requires_grad)
+        arg = (
+            make_arg(shape)
+            .to(memory_format=memory_format)
+            .requires_grad_(requires_grad)
+        )
         yield opinfo_core.SampleInput(arg, kwargs=kwargs)
 
 
-def sample_inputs_max_pool3d_with_indices(op_info, device, dtype, requires_grad, **kwargs):
+def sample_inputs_max_pool3d_with_indices(
+    op_info, device, dtype, requires_grad, **kwargs
+):
     del op_info
     make_arg = functools.partial(
         torch_testing.make_tensor, device=device, dtype=dtype, requires_grad=False
@@ -945,14 +1013,21 @@ def sample_inputs_max_pool3d_with_indices(op_info, device, dtype, requires_grad,
         common_methods_invocations._TestParamsMaxPool3d()  # pylint: disable=protected-access
     )
     for (shape, memory_format), kwargs in params_generator.gen_input_params():
-        arg = make_arg(shape).to(memory_format=memory_format).requires_grad_(requires_grad)
+        arg = (
+            make_arg(shape)
+            .to(memory_format=memory_format)
+            .requires_grad_(requires_grad)
+        )
         yield opinfo_core.SampleInput(arg, kwargs=kwargs)
 
 
 def sample_inputs_native_group_norm(op_info, device, dtype, requires_grad, **kwargs):
     del op_info
     make_arg = functools.partial(
-        torch_testing.make_tensor, device=device, dtype=dtype, requires_grad=requires_grad
+        torch_testing.make_tensor,
+        device=device,
+        dtype=dtype,
+        requires_grad=requires_grad,
     )
 
     # Ordered as input shape, C,N,HxW, and kwargs for group and eps
@@ -988,7 +1063,10 @@ def sample_inputs_native_dropout(
     del op_info  # Unused
     del kwargs  # Unused
     make_arg = functools.partial(
-        torch_testing.make_tensor, device=device, dtype=dtype, requires_grad=requires_grad
+        torch_testing.make_tensor,
+        device=device,
+        dtype=dtype,
+        requires_grad=requires_grad,
     )
 
     if valid_input_dim:
@@ -1009,7 +1087,9 @@ def sample_inputs_native_dropout(
 # 2. (input, weight, bias, training, momentum, eps)
 # which requires two function signatures to take the inputs, that's why we have
 # two sample_inputs functions here instead.
-def sample_inputs__native_batch_norm_legit(op_info, device, dtype, requires_grad, **kwargs):
+def sample_inputs__native_batch_norm_legit(
+    op_info, device, dtype, requires_grad, **kwargs
+):
     samples = common_methods_invocations.sample_inputs_batch_norm(
         op_info, device, dtype, requires_grad, **kwargs
     )
@@ -1140,7 +1220,10 @@ def sample_inputs_rand_like(op_info, device, dtype, requires_grad, **kwargs):
     del kwargs  # Unused
 
     make_arg = functools.partial(
-        torch_testing.make_tensor, device=device, dtype=dtype, requires_grad=requires_grad
+        torch_testing.make_tensor,
+        device=device,
+        dtype=dtype,
+        requires_grad=requires_grad,
     )
     shapes = (
         (M,),
@@ -1157,7 +1240,9 @@ def sample_inputs_randint(self, device, dtype, requires_grad, **kwargs):
 
     for sample in sample_inputs_like_fns(self, device, dtype, requires_grad, **kwargs):
         # With high
-        yield opinfo_core.SampleInput(high, sample.input.shape, *sample.args, **sample.kwargs)
+        yield opinfo_core.SampleInput(
+            high, sample.input.shape, *sample.args, **sample.kwargs
+        )
 
 
 def sample_inputs_randint_low(self, device, dtype, requires_grad, **kwargs):
@@ -1185,7 +1270,9 @@ def sample_inputs_randint_like_low_dtype(self, device, dtype, requires_grad, **k
 
     for sample in sample_inputs_like_fns(self, device, dtype, requires_grad, **kwargs):
         # With low and high
-        yield opinfo_core.SampleInput(sample.input, low, high, *sample.args, **sample.kwargs)
+        yield opinfo_core.SampleInput(
+            sample.input, low, high, *sample.args, **sample.kwargs
+        )
 
 
 def sample_inputs_randn(op, device, dtype, requires_grad, **kwargs):
@@ -1212,7 +1299,10 @@ def sample_inputs_reflection_pad1d(op_info, device, dtype, requires_grad, **kwar
     )
 
     make_inp = opinfo_core.partial(
-        torch.testing.make_tensor, device=device, dtype=dtype, requires_grad=requires_grad
+        torch.testing.make_tensor,
+        device=device,
+        dtype=dtype,
+        requires_grad=requires_grad,
     )
 
     for shape, pad in cases:
@@ -1231,7 +1321,10 @@ def sample_inputs_replication_pad1d(op_info, device, dtype, requires_grad, **kwa
     )
 
     make_inp = opinfo_core.partial(
-        torch.testing.make_tensor, device=device, dtype=dtype, requires_grad=requires_grad
+        torch.testing.make_tensor,
+        device=device,
+        dtype=dtype,
+        requires_grad=requires_grad,
     )
 
     for shape, pad in cases:
@@ -1242,7 +1335,10 @@ def sample_inputs_slice_scatter(op_info, device, dtype, requires_grad, **kwargs)
     del op_info
     del kwargs
     make_arg = functools.partial(
-        torch_testing.make_tensor, dtype=dtype, device=device, requires_grad=requires_grad
+        torch_testing.make_tensor,
+        dtype=dtype,
+        device=device,
+        requires_grad=requires_grad,
     )
 
     L = 20
@@ -1357,7 +1453,10 @@ def sample_inputs__softmax(
     del op_info  # Unused
 
     make_arg = functools.partial(
-        torch_testing.make_tensor, device=device, dtype=dtype, requires_grad=requires_grad
+        torch_testing.make_tensor,
+        device=device,
+        dtype=dtype,
+        requires_grad=requires_grad,
     )
     cases = [
         ((S,), (0,)),
@@ -1386,7 +1485,11 @@ def sample_inputs_prims_std_var(op_info, device, dtype, requires_grad, **kwargs)
         requires_grad=requires_grad,
     )
     tensor_1d = functools.partial(
-        opinfo_core.make_tensor, (S,), device=device, dtype=dtype, requires_grad=requires_grad
+        opinfo_core.make_tensor,
+        (S,),
+        device=device,
+        dtype=dtype,
+        requires_grad=requires_grad,
     )
 
     yield opinfo_core.SampleInput(tensor_nd(), dims=(1,), correction=0)
@@ -1414,7 +1517,9 @@ def sample_inputs_stft(op_info, device, dtype, requires_grad, **kwargs):
         yield opinfo_core.SampleInput(mt(100), n_fft=10)
 
     yield opinfo_core.SampleInput(mt(10), n_fft=7, return_complex=True)
-    yield opinfo_core.SampleInput(mt((10, 100)), n_fft=16, hop_length=4, return_complex=True)
+    yield opinfo_core.SampleInput(
+        mt((10, 100)), n_fft=16, hop_length=4, return_complex=True
+    )
 
     window = mt(16, low=0.5, high=2.0)
     yield opinfo_core.SampleInput(
@@ -1500,7 +1605,9 @@ def sample_inputs_upsample_2d(op_info, device, dtype, requires_grad, **kwargs):
         high=1,
     )
 
-    yield opinfo_core.SampleInput(make_arg(shape(D, rank)), shape(SS, rank, False), True)
+    yield opinfo_core.SampleInput(
+        make_arg(shape(D, rank)), shape(SS, rank, False), True
+    )
 
     for align_corners in align_corners_options:
         yield opinfo_core.SampleInput(
@@ -1547,7 +1654,9 @@ def sample_inputs_upsample_2d_vec(op_info, device, dtype, requires_grad, **kwarg
         high=1,
     )
 
-    yield opinfo_core.SampleInput(make_arg(shape(D, rank)), shape(SS, rank, False), True, None)
+    yield opinfo_core.SampleInput(
+        make_arg(shape(D, rank)), shape(SS, rank, False), True, None
+    )
 
     for align_corners in align_corners_options:
         yield opinfo_core.SampleInput(
@@ -1608,7 +1717,9 @@ def sample_inputs_upsample_linear1d(op_info, device, dtype, requires_grad, **kwa
         high=1,
     )
 
-    yield opinfo_core.SampleInput(make_arg(shape(D, rank)), shape(SS, rank, False), True)
+    yield opinfo_core.SampleInput(
+        make_arg(shape(D, rank)), shape(SS, rank, False), True
+    )
 
     for align_corners in align_corners_options:
         yield opinfo_core.SampleInput(
@@ -1666,7 +1777,9 @@ def sample_inputs_upsample_nearest1d(op_info, device, dtype, requires_grad, **kw
     # )
 
 
-def sample_inputs_upsample_nearest1d_vec(op_info, device, dtype, requires_grad, **kwargs):
+def sample_inputs_upsample_nearest1d_vec(
+    op_info, device, dtype, requires_grad, **kwargs
+):
     del op_info
     del kwargs
 
@@ -1748,7 +1861,9 @@ def sample_inputs_upsample_nearest2d(op_info, device, dtype, requires_grad, **kw
     # )
 
 
-def sample_inputs_upsample_nearest2d_vec(op_info, device, dtype, requires_grad, **kwargs):
+def sample_inputs_upsample_nearest2d_vec(
+    op_info, device, dtype, requires_grad, **kwargs
+):
     del op_info
     del kwargs
 
@@ -1830,7 +1945,9 @@ def sample_inputs_upsample_nearest3d(op_info, device, dtype, requires_grad, **kw
     # )
 
 
-def sample_inputs_upsample_nearest3d_vec(op_info, device, dtype, requires_grad, **kwargs):
+def sample_inputs_upsample_nearest3d_vec(
+    op_info, device, dtype, requires_grad, **kwargs
+):
     del op_info
     del kwargs
 
@@ -1906,7 +2023,9 @@ def sample_inputs_upsample_trilinear3d(op_info, device, dtype, requires_grad, **
         )
 
 
-def sample_inputs_upsample_trilinear3d_vec(op_info, device, dtype, requires_grad, **kwargs):
+def sample_inputs_upsample_trilinear3d_vec(
+    op_info, device, dtype, requires_grad, **kwargs
+):
     del op_info
     del kwargs
 
@@ -1932,7 +2051,9 @@ def sample_inputs_upsample_trilinear3d_vec(op_info, device, dtype, requires_grad
         high=1,
     )
 
-    yield opinfo_core.SampleInput(make_arg(shape(D, rank)), shape(SS, rank, False), True, None)
+    yield opinfo_core.SampleInput(
+        make_arg(shape(D, rank)), shape(SS, rank, False), True, None
+    )
 
     for align_corners in align_corners_options:
         yield opinfo_core.SampleInput(
