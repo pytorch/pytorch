@@ -122,7 +122,7 @@ fi
 if [[ $CUDA_VERSION == 12* ]]; then
     export USE_STATIC_CUDNN=0
     # Try parallelizing nvcc as well
-    export TORCH_NVCC_FLAGS="-Xfatbin -compress-all --threads 2"
+    export TORCH_NVCC_FLAGS="-Xfatbin -compress-all --threads 2 --host-linker-script=use-lcs"
 
     if [[ -z "$PYTORCH_EXTRA_INSTALL_REQUIREMENTS" ]]; then
         echo "Bundling with cudnn and cublas."
