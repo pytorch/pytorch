@@ -1196,7 +1196,7 @@ class GraphModuleSerializer(metaclass=Final):
         elif isinstance(x, ep.SymIntArgument):
             return Argument.create(as_sym_int=SymIntArgument.create(as_name=x.name))
         elif isinstance(x, ep.SymFloatArgument):
-            return Argument.create(as_sym_Float=SymFloatArgument.create(as_name=x.name))
+            return Argument.create(as_sym_float=SymFloatArgument.create(as_name=x.name))
         elif isinstance(x, ep.ConstantArgument):
             return self.serialize_input(x.value)
         elif isinstance(x, ep.CustomObjArgument):
