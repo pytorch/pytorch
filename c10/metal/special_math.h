@@ -382,5 +382,13 @@ float zeta(float x, float q) {
   return s;
 }
 
+template <typename T0, typename T1>
+float polygamma(const T0 input, const T1 order) {
+  float x = input;
+  float n = order;
+  float sgn = ((order % 2) ? 1 : -1);
+  return sgn * gamma(n + 1) * zeta(n + 1, x);
+}
+
 } // namespace metal
 } // namespace c10
