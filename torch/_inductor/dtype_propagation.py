@@ -368,6 +368,17 @@ class DtypePropagationOpsHandler:
     ) -> None:
         return None
 
+    def output(self, x: DTypeArg) -> None:
+        raise AssertionError(
+            f"{type(self).__name__}: ops.output should not appear here"
+        )
+        return None
+
+    def placeholder(self, index: int) -> torch.dtype:
+        raise AssertionError(
+            f"{type(self).__name__}: ops.placeholder should not appear here"
+        )
+
 
 if TYPE_CHECKING:
 
