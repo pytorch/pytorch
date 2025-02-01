@@ -1094,6 +1094,7 @@ class MethodWrapperVariable(VariableTracker):
     def __init__(self, method_wrapper, **kwargs) -> None:
         super().__init__(**kwargs)
         self.method_wrapper = method_wrapper
+        self._builtin_fns = {}
 
     def call_function(
         self,
@@ -1107,6 +1108,22 @@ class MethodWrapperVariable(VariableTracker):
             assert len(args) == 1 and len(kwargs) == 0
 
             return args[0].var_getattr(tx, self.method_wrapper.__self__.__name__)
+
+        # method-wrapper variables are common in __init__ calls. For example,
+        # str("foo").__init__ is a method-wrapper. These method wrappers point
+        # to C functions.  Here we intercept if these method-wrappers are from
+        # builtins and then call the function counterpart directly by obtaining
+        # the self object.
+        self_obj = self.method_wrapper.__self__
+        wrapper_name = self.method_wrapper.__name__
+        # TODO(dynamo-team) - We can perhaps expand the scope to more names and
+        # more builtins.
+        if wrapper_name == "__init__":
+            fn_obj = type(self_obj).__init__
+            if fn_obj is object.__init__:
+                return variables.BuiltinVariable(object).call_method(
+                    tx, wrapper_name, [self_obj, *args], kwargs
+                )
 
         super().call_function(tx, args, kwargs)
 
