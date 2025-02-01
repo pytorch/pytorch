@@ -23,18 +23,18 @@ void MPSHeapAllocatorImpl::init_allocator() {
 
   // debug verbosity flags (see DebugVerbosity enum)
   static const auto verbosity_str = c10::utils::get_env("PYTORCH_DEBUG_MPS_ALLOCATOR");
-  m_debug_verbosity = verbosity_str ? std::stol(verbosity_str.value()) : DebugVerbosity::SILENT;
+  m_debug_verbosity = verbosity_str ? strtol(verbosity_str->c_str(), nullptr, 0) : DebugVerbosity::SILENT;
 
   static const auto high_watermark_ratio_str = c10::utils::get_env("PYTORCH_MPS_HIGH_WATERMARK_RATIO");
   const double high_watermark_ratio =
-      high_watermark_ratio_str ? std::stod(high_watermark_ratio_str.value()) : default_high_watermark_ratio;
+      high_watermark_ratio_str ? strtod(high_watermark_ratio_str->c_str(), nullptr) : default_high_watermark_ratio;
   setHighWatermarkRatio(high_watermark_ratio);
 
   const double default_low_watermark_ratio =
       m_device.hasUnifiedMemory ? default_low_watermark_ratio_unified : default_low_watermark_ratio_discrete;
   static const auto low_watermark_ratio_str = c10::utils::get_env("PYTORCH_MPS_LOW_WATERMARK_RATIO");
   const double low_watermark_ratio =
-      low_watermark_ratio_str ? std::stod(low_watermark_ratio_str.value()) : default_low_watermark_ratio;
+      low_watermark_ratio_str ? strtod(low_watermark_ratio_str->c_str(), nullptr) : default_low_watermark_ratio;
   setLowWatermarkRatio(low_watermark_ratio);
 }
 
