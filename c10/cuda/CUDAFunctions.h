@@ -79,7 +79,11 @@ C10_CUDA_API void __inline__ memcpy_and_sync(
     const void* src,
     int64_t nbytes,
     cudaMemcpyKind kind,
-    cudaStream_t stream) {
+    cudaStream_t stream,
+    int64_t width_in_bytes = -1,
+    int64_t src_pitch = -1,
+    int64_t dst_pitch = -1,
+    int64_t height = -1) {
   if (C10_UNLIKELY(
           warning_state().get_sync_debug_mode() != SyncDebugMode::L_DISABLED)) {
     warn_or_error_on_sync();
@@ -89,12 +93,18 @@ C10_CUDA_API void __inline__ memcpy_and_sync(
     (*interp)->trace_gpu_stream_synchronization(
         c10::kCUDA, reinterpret_cast<uintptr_t>(stream));
   }
+  if (width_in_bytes == -1) {
 #if defined(TORCH_HIP_VERSION) && (TORCH_HIP_VERSION >= 301)
-  C10_CUDA_CHECK(hipMemcpyWithStream(dst, src, nbytes, kind, stream));
+    C10_CUDA_CHECK(hipMemcpyWithStream(dst, src, nbytes, kind, stream));
 #else
-  C10_CUDA_CHECK(cudaMemcpyAsync(dst, src, nbytes, kind, stream));
-  C10_CUDA_CHECK(cudaStreamSynchronize(stream));
+    C10_CUDA_CHECK(cudaMemcpyAsync(dst, src, nbytes, kind, stream));
+    C10_CUDA_CHECK(cudaStreamSynchronize(stream));
 #endif
+  } else {
+    C10_CUDA_CHECK(cudaMemcpy2DAsync(
+        dst, dst_pitch, src, src_pitch, width_in_bytes, height, kind, stream));
+    C10_CUDA_CHECK(cudaStreamSynchronize(stream));
+  }
 }
 
 C10_CUDA_API void __inline__ stream_synchronize(cudaStream_t stream) {
