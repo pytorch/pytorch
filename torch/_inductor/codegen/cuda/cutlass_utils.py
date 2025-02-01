@@ -81,6 +81,13 @@ def try_import_cutlass() -> bool:
 
 
 def _normalize_cuda_arch(arch: str) -> str:
+    if int(arch) >= 110:
+        raise NotImplementedError(
+            f"Unexpected cuda arch: {arch}, please report this issue."
+        )
+
+    if int(arch) >= 100:
+        return "100"
     if int(arch) >= 90:
         return "90"
     elif int(arch) >= 80:
