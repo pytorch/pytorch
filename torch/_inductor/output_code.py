@@ -38,6 +38,7 @@ from torch._inductor.cudagraph_utils import (
     get_placeholder_info,
     log_cudagraph_skip_and_bump_counter,
 )
+from torch._inductor.freezing_utils import has_frozen_params, is_frozen_param
 from torch._inductor.utils import (
     align_inputs_from_check_idxs,
     BoxedBool,
@@ -91,10 +92,6 @@ class OutputCode:
 
 
 _StrideExprStr: TypeAlias = str
-
-
-def has_frozen_params(gm: torch.fx.GraphModule) -> bool:
-    return getattr(gm, "_has_frozen_params", False)
 
 
 # copy_ fails when trying to write to tensors with memory overlap,
@@ -368,7 +365,7 @@ class CompiledFxGraph(OutputCode):
             self.constants = {}
             self.frozen_param_names = {}
             for k, v in graph.constants.items():
-                if k.startswith("_frozen_param"):
+                if is_frozen_param(v):
                     self.frozen_param_names[k] = graph.allocated_constant_name[k]
                 else:
                     self.constants[k] = v
@@ -460,15 +457,7 @@ class CompiledFxGraph(OutputCode):
     def __call__(self, inputs: Sequence[Any]) -> Any:
         assert self.current_callable is not None
         try:
-            result = self.current_callable(inputs)
-
-            from torch._inductor.graph import GraphLowering, SaveOutputCodeContext
-
-            GraphLowering.save_output_code(
-                self.source_code, SaveOutputCodeContext.AFTER_COMPILE
-            )
-
-            return result
+            return self.current_callable(inputs)
         finally:
             get_runtime_metrics_context().finish()
             AutotuneCacheBundler.end_compile()
@@ -556,13 +545,6 @@ class CompiledFxGraph(OutputCode):
                     self.source_code = code
 
             write_atomic(artifact_path, code, make_dirs=True)
-
-        from .graph import GraphLowering, SaveOutputCodeContext
-
-        # This is used by tests to check the output for specific details.
-        GraphLowering.save_output_code(
-            code, SaveOutputCodeContext.AFTER_DESERIALIZATION
-        )
 
         try:
             with dynamo_timed(
