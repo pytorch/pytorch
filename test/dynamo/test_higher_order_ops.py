@@ -5,6 +5,7 @@ import pprint
 import re
 import unittest
 import warnings
+from copy import deepcopy
 
 import functorch.experimental.control_flow as control_flow
 import torch
@@ -26,11 +27,17 @@ from torch._dynamo.testing import (
 from torch._dynamo.utils import counters, ifdynstaticdefault
 from torch._higher_order_ops.hints_wrap import hints_wrapper
 from torch._higher_order_ops.wrap import wrap
+from torch.testing._internal.common_device_type import (
+    instantiate_device_type_tests,
+    ops,
+)
 from torch.testing._internal.common_utils import (
     munge_exc,
+    parametrize,
     TEST_WITH_TORCHDYNAMO,
     xfailIfTorchDynamo,
 )
+from torch.testing._internal.hop_db import hop_db
 from torch.testing._internal.inductor_utils import HAS_CUDA
 from torch.testing._internal.logging_utils import LoggingTestCase, make_logging_test
 
@@ -6970,6 +6977,48 @@ class ActivationCheckpointingTests(torch._dynamo.test_case.TestCase):
         ):
             _assert_tensors_nonaliasing(a, a)
 
+
+xfail_hops_compile = {
+    # aot_eager
+    "map",  # assert type(args[1].realize()) is TensorVariable
+    "scan",  # scan is not an OpOverload
+    # inductor
+    "while_loop",  # LoweringException: AssertionError
+    "flex_attention",  # LoweringException: AssertionError
+    "flex_attention_backward",  # AssertionError: Input shapes should have M >= 16, N >= 16 and K >= 16
+}
+
+
+class TestHigherOrderOpsOpInfo(torch._dynamo.test_case.TestCase):
+    @requires_cuda
+    @parametrize("backend", ("aot_eager", "inductor"))
+    @ops(
+        list(filter(lambda op: op.name not in xfail_hops_compile, hop_db)),
+        allowed_dtypes=(torch.float,),
+    )
+    def test_hops_compile(self, device, dtype, op, backend):
+        # Ensure HOPs can be compiled
+        sample_inputs_itr = op.sample_inputs(
+            device, dtype, requires_grad=op.supports_autograd
+        )
+        for inp in sample_inputs_itr:
+            input = inp.input if isinstance(inp.input, tuple) else (inp.input,)
+            eager_args = (*input, *inp.args)
+            eager_kwargs = inp.kwargs
+            compiled_args = deepcopy(eager_args)
+            compiled_kwargs = deepcopy(eager_kwargs)
+
+            def fn(args, kwargs):
+                return op.op(*args, **(kwargs))
+
+            compiled_fn = torch.compile(fn, backend=backend, fullgraph=True)
+
+            eager_out = fn(eager_args, eager_kwargs)
+            compiled_out = compiled_fn(compiled_args, compiled_kwargs)
+            self.assertEqual(eager_out, compiled_out)
+
+
+instantiate_device_type_tests(TestHigherOrderOpsOpInfo, globals(), only_for=("cuda",))
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
