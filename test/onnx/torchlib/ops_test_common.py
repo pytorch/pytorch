@@ -36,7 +36,7 @@ import pytest
 from onnxscript import ir
 
 import torch
-from torch.onnx._internal.exporter import _building
+from torch.onnx._internal.exporter import _building, _ir_passes
 from torch.testing._internal.opinfo import core as opinfo_core
 
 
@@ -585,6 +585,8 @@ def graph_executor(
                 proto = onnxscript_function.to_function_proto()
                 ir_function = ir.serde.deserialize_function(proto)
             onnx_model.functions[identifier] = ir_function
+        _ir_passes.add_torchlib_common_imports(onnx_model)
+        _ir_passes.add_opset_imports(onnx_model)
         # Make sure the model is valid
         model_proto = ir.to_proto(onnx_model)
         try:
