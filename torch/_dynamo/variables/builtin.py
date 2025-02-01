@@ -1997,6 +1997,8 @@ class BuiltinVariable(VariableTracker):
         elif len(args) == 1 and isinstance(args[0], TensorVariable):
             tensor_variable = args[0]
             return tensor_variable.call_id(tx)
+        elif istype(args[0], variables.UserFunctionVariable):
+            return variables.ConstantVariable.create(id(args[0].fn))
         else:
             unimplemented(f"call_id with args {args}")
 
