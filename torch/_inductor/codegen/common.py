@@ -50,6 +50,7 @@ from ..utils import (
     ir_dataclass,
     ScopedDict,
     sympy_dot,
+    sympy_index_symbol,
     sympy_subs,
     unique,
 )
@@ -853,9 +854,7 @@ class OpOverrides(BasicMathOps, OpDecompositions):
         check: bool = True,
         wrap_neg: bool = True,
     ) -> sympy.Symbol:
-        raise NotImplementedError(
-            f"{type(self).__name__}: indirect_indexing should be handled by CSEProxy"
-        )
+        return sympy_index_symbol(str(var))
 
     def check_bounds(
         self, expr: sympy.Expr, size: sympy.Expr, lower: bool, upper: bool

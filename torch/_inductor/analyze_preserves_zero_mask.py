@@ -55,7 +55,7 @@ class PreservesZeros(SymPyOps, DefaultHandler):
         self = V.get_ops_handler()
         return construct_symbol(next(self.count), torch.int32)
 
-    def _default(self, name: str, args: list[Any], kwargs: dict[str, Any]) -> Any:
+    def _default(self, name: str, args: tuple[Any, ...], kwargs: dict[str, Any]) -> Any:
         from torch._inductor.codegen.common import OpDecompositions
 
         if hasattr(OpDecompositions, name):
@@ -114,7 +114,7 @@ class RecordLowPrecisionOps(DefaultHandler):
     def indirect_indexing(*args: Any, **kwargs: Any) -> sympy.Expr:
         return sympy.S.Zero
 
-    def _default(self, name: str, args: list[Any], kwargs: dict[str, Any]) -> Any:
+    def _default(self, name: str, args: tuple[Any, ...], kwargs: dict[str, Any]) -> Any:
         out_dtype = getattr(self.dtype_prop, name)(*args, **kwargs)
         out = DTypeContainer(out_dtype, is_scalar=(name == "constant"))
         if name == "constant":

@@ -659,6 +659,6 @@ class CountOps(DefaultHandler):
         self._inner = inner
         self._counts = counts
 
-    def _default(self, target: str, args: list[Any], kwargs: dict[str, Any]) -> Any:
-        self._counts[target] += 1
-        return getattr(self._inner, target)(*args, **kwargs)
+    def _default(self, name: str, args: tuple[Any, ...], kwargs: dict[str, Any]) -> Any:
+        self._counts[name] += 1
+        return getattr(self._inner, name)(*args, **kwargs)

@@ -754,7 +754,7 @@ class FreeUnbackedSymbolsOpsHandler(DefaultHandler):
     def __init__(self) -> None:
         self.symbols = OrderedSet()
 
-    def _default(self, target: str, args: list[Any], kwargs: dict[str, Any]) -> Any:
+    def _default(self, name: str, args: tuple[Any, ...], kwargs: dict[str, Any]) -> Any:
         for a in itertools.chain(args, kwargs.values()):
             if isinstance(a, (sympy.Expr, sympy.logic.boolalg.Boolean)):
                 self.symbols |= free_unbacked_symbols(a)

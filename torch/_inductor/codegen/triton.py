@@ -2823,7 +2823,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
 
         class CSEProxy(DefaultHandler):
             def _default(
-                self, name: str, args: list[Any], kwargs: dict[str, Any]
+                self, name: str, args: tuple[Any, ...], kwargs: dict[str, Any]
             ) -> Any:
                 nonlocal helper_name
                 helper_name += f"_{name}"

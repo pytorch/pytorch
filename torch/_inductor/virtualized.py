@@ -280,10 +280,10 @@ class OpsWrapper(DefaultHandler):
     can overload the magic methods for writing mathematical expressions fluently.
     """
 
-    def _default(self, target: str, args: list[Any], kwargs: dict[str, Any]) -> Any:
+    def _default(self, name: str, args: tuple[Any, ...], kwargs: dict[str, Any]) -> Any:
         new_args = [OpsWrapper._unwrap(a) for a in args]
         new_kwargs = {k: OpsWrapper._unwrap(v) for k, v in kwargs.items()}
-        return OpsWrapper._wrap(getattr(_ops, target)(*new_args, **new_kwargs))
+        return OpsWrapper._wrap(getattr(_ops, name)(*new_args, **new_kwargs))
 
     @staticmethod
     def _unwrap(x):

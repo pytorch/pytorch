@@ -290,7 +290,7 @@ class IndexPropagation(DefaultHandler):
             return self.fallback(name, args, kwargs)
         return IndexPropVar.new_symbolic(new_expr)
 
-    def _default(self, name: str, args: list[Any], kwargs: dict[str, Any]) -> Any:
+    def _default(self, name: str, args: tuple[Any, ...], kwargs: dict[str, Any]) -> Any:
         if not hasattr(SymPyOps, name):
             return self.fallback(name, args, kwargs)
 
