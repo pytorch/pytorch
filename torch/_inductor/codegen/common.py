@@ -12,7 +12,17 @@ import operator
 import re
 from enum import auto, Enum
 from itertools import chain
-from typing import Any, Callable, ClassVar, NamedTuple, Optional, TYPE_CHECKING, Union
+from typing import (
+    Any,
+    Callable,
+    cast,
+    ClassVar,
+    Iterator,
+    NamedTuple,
+    Optional,
+    TYPE_CHECKING,
+    Union,
+)
 
 import sympy
 
@@ -42,13 +52,14 @@ from ..virtualized import ops, OpsHandler, OpsValue, ReductionType, StoreMode, V
 
 
 if TYPE_CHECKING:
-    from typing import Never
+    from typing import Never, TypeVar
 
     from ..ir import FixedLayout
     from ..loop_body import LoopBody
     from ..scheduler import BaseScheduling, Scheduler
     from .wrapper import PythonWrapperCodegen
 
+    _T = TypeVar("_T")
     SchedulingConstructor = Callable[[Optional[Scheduler]], BaseScheduling]
     WrapperConstructor = type[PythonWrapperCodegen]
     SymbolLike = Union[str, sympy.Symbol]
@@ -1153,20 +1164,33 @@ class ArgName:
         return f"{self.name}{' : tl.constexpr' if self.is_constexpr else ''}"
 
 
+class RemovedArg:
+    def __str__(self) -> str:
+        return "REMOVED"
+
+
+REMOVED = RemovedArg()
+
+
 class KernelArgs:
     @staticmethod
-    def _lookup(prefix: str, odict: dict[SymbolLike, str], name: SymbolLike) -> str:
-        assert isinstance(name, (str, sympy.Symbol))
-        if name not in odict:
-            odict[name] = f"{prefix}{len(odict)}"
-        return odict[name]
+    def _lookup(
+        prefix: str,
+        odict: Union[dict[_T, Union[str, RemovedArg]], dict[_T, str]],
+        name: _T,
+    ) -> str:
+        result: Union[str, RemovedArg] = odict.get(name, REMOVED)
+        if isinstance(result, RemovedArg):
+            odict[name] = new_result = f"{prefix}{len(odict)}"
+            return new_result
+        return result
 
-    def __init__(self, sizevars=None):
-        self.input_buffers = {}
-        self.output_buffers = {}
-        self.inplace_buffers = {}
-        self.sizevars = sizevars or {}
-        self.workspace_args = []
+    def __init__(self) -> None:
+        self.input_buffers: dict[str, str] = {}
+        self.output_buffers: dict[str, Union[str, RemovedArg]] = {}
+        self.inplace_buffers: dict[str, Union[InplacedBuffer, RemovedArg]] = {}
+        self.sizevars: dict[sympy.Expr, str] = {}
+        self.workspace_args: list[WorkspaceArg] = []
 
     def __repr__(self) -> str:
         return "KernelArgs({})".format(
@@ -1183,33 +1207,31 @@ class KernelArgs:
             )
         )
 
-    def _buffer_is_marked_removed(self, name):
-        return isinstance(name, str) and name.startswith("REMOVED")
-
-    def input(self, name):
+    def input(self, name: str) -> str:
         if V.graph.scheduler:
             name = V.graph.scheduler.mutation_real_name.get(name, name)
         assert name not in V.graph.removed_buffers, name
         if name in self.output_buffers:
-            return self.output_buffers[name]
+            return cast(str, self.output_buffers[name])
         if name in self.inplace_buffers:
-            return self.inplace_buffers[name].inner_name
+            return cast(InplacedBuffer, self.inplace_buffers[name]).inner_name
         if name.startswith("seed"):
             return self._lookup("seed", self.input_buffers, name)
         return self._lookup("in_ptr", self.input_buffers, name)
 
-    def output(self, name):
+    def output(self, name: str) -> str:
         if V.graph.scheduler:
             name = V.graph.scheduler.mutation_real_name.get(name, name)
         assert name not in V.graph.removed_buffers, name
         if name in self.inplace_buffers:
-            return self.inplace_buffers[name].inner_name
+            return cast(InplacedBuffer, self.inplace_buffers[name]).inner_name
         return self._lookup("out_ptr", self.output_buffers, name)
 
-    def make_inplace(self, input_name, output_name):
+    def make_inplace(self, input_name: str, output_name: str) -> None:
         assert output_name not in self.inplace_buffers
         if input_name in self.inplace_buffers:
             buf = self.inplace_buffers[input_name]
+            assert not isinstance(buf, RemovedArg)
             buf.other_names.append(output_name)
             self.inplace_buffers[output_name] = buf
         else:
@@ -1289,7 +1311,10 @@ class KernelArgs:
         self.workspace_args.append(arg)
         return arg.inner_name
 
-    def seed_offset(self, name, value):
+    def seed_offset(self, name: str, value: int) -> str:
+        assert isinstance(value, int), (type(value), value)
+        # here we are lifting a constant integer into an arg to the kernel to try to get additional cache hits
+        value = sympy.Integer(value)
         if value in self.sizevars:
             return self.sizevars[value]
         if name in self.sizevars.values():
@@ -1299,31 +1324,32 @@ class KernelArgs:
         self.sizevars[value] = name
         return name
 
-    def size(self, name):
-        if str(name) == "seed":
-            self.sizevars["seed"] = "seed"
+    def size(self, name: sympy.Symbol) -> str:
+        assert isinstance(name, sympy.Symbol), (type(name), name)
+        if name.name == "seed":
+            self.sizevars[name] = "seed"  # dont' mange the name of seeds
             return "seed"
         return self._lookup("ks", self.sizevars, name)
 
-    def call_names(self):
+    def call_names(self) -> Iterator[str]:
         return chain(
             self.input_buffers.keys(), self.output_buffers.keys(), self.sizevars.keys()
         )
 
-    def wrap_ptr_arg(self, buf, dtype):
+    def wrap_ptr_arg(self, buf: str, dtype: torch.dtype) -> str:
         return buf
 
-    def wrap_size_arg(self, size):
+    def wrap_size_arg(self, size: SymbolLike) -> str:
         return str(size)
 
-    def cpp_argdefs(self):
+    def cpp_argdefs(self) -> tuple[list[str], list[str], list[str]]:
         from .cpp_utils import DTYPE_TO_CPP, INDEX_TYPE
 
         call_args = []
         arg_defs = []
         arg_types = []
         for inplaced in unique(self.inplace_buffers.values()):
-            if self._buffer_is_marked_removed(inplaced):
+            if isinstance(inplaced, RemovedArg):
                 continue
             outer = inplaced.other_names[-1]
             inner = inplaced.inner_name
@@ -1340,12 +1366,12 @@ class KernelArgs:
             arg_defs.append(f"const {cpp_dtype}* {inner}")
             call_args.append(self.wrap_ptr_arg(outer, dtype))
             arg_types.append(f"const {cpp_dtype}*")
-        for outer, inner in self.output_buffers.items():
-            if outer in self.inplace_buffers or self._buffer_is_marked_removed(inner):
+        for outer, maybe_inner in self.output_buffers.items():
+            if outer in self.inplace_buffers or isinstance(maybe_inner, RemovedArg):
                 continue
             dtype = V.graph.get_dtype(outer)
             cpp_dtype = DTYPE_TO_CPP[dtype]
-            arg_defs.append(f"{cpp_dtype}* {inner}")
+            arg_defs.append(f"{cpp_dtype}* {maybe_inner}")
             call_args.append(self.wrap_ptr_arg(outer, dtype))
             arg_types.append(f"{cpp_dtype}*")
         for outer, inner in self.sizevars.items():
@@ -1365,7 +1391,7 @@ class KernelArgs:
         arg_types: list[torch.dtype] = []
         precompile_args: list[KernelArgType] = []
         for inplaced in unique(self.inplace_buffers.values()):
-            if self._buffer_is_marked_removed(inplaced):
+            if isinstance(inplaced, RemovedArg):
                 continue
             arg_defs.append(ArgName(inplaced.inner_name))
             call_args.append(inplaced.other_names[-1])
@@ -1380,7 +1406,7 @@ class KernelArgs:
         for outer, inner in chain(
             self.input_buffers.items(), self.output_buffers.items()
         ):
-            if outer in self.inplace_buffers or self._buffer_is_marked_removed(inner):
+            if outer in self.inplace_buffers or isinstance(inner, RemovedArg):
                 continue
             arg_defs.append(ArgName(inner))
             call_args.append(outer)
@@ -1406,9 +1432,9 @@ class KernelArgs:
             arg_types.append(arg.dtype)
         return arg_defs, call_args, precompile_args, arg_types
 
-    def aliases(self):
+    def aliases(self) -> Iterator[tuple[str, str]]:
         for inplaced in unique(self.inplace_buffers.values()):
-            if self._buffer_is_marked_removed(inplaced):
+            if isinstance(inplaced, RemovedArg):
                 continue
             for other in inplaced.other_names:
                 if (
@@ -1419,27 +1445,24 @@ class KernelArgs:
                 if other in self.input_buffers:
                     yield self.input_buffers[other], inplaced.inner_name
                 if other in self.output_buffers:
-                    yield self.output_buffers[other], inplaced.inner_name
+                    yield cast(str, self.output_buffers[other]), inplaced.inner_name
 
-    def is_removed(self, name):
-        def _is_removed(name, buffers):
-            return name not in buffers or self._buffer_is_marked_removed(buffers[name])
-
-        return _is_removed(name, self.output_buffers) and _is_removed(
-            name, self.inplace_buffers
-        )
+    def is_removed(self, name: str) -> bool:
+        return isinstance(
+            self.output_buffers.get(name, REMOVED), RemovedArg
+        ) and isinstance(self.inplace_buffers.get(name, REMOVED), RemovedArg)
 
     # Includes inplace buffers, excludes removed buffers.  Essentially,
     # after you do a call into this kernel, which buffers actually contain
     # updated data?  Modeled off of python_argdefs.
-    def live_output_buffers(self):
+    def live_output_buffers(self) -> OrderedSet[str]:
         live_outs = OrderedSet()  # type: ignore[var-annotated]
         for inplaced in unique(self.inplace_buffers.values()):
-            if self._buffer_is_marked_removed(inplaced):
+            if isinstance(inplaced, RemovedArg):
                 continue
             live_outs.add(inplaced.other_names[-1])
         for outer, inner in self.output_buffers.items():
-            if outer in self.inplace_buffers or self._buffer_is_marked_removed(inner):
+            if outer in self.inplace_buffers or isinstance(inner, RemovedArg):
                 continue
             live_outs.add(outer)
         return live_outs
@@ -1478,11 +1501,6 @@ class CSEVariable:
 
     def __repr__(self):
         return f"{self.__class__.__name__}({self.name!r})"
-
-
-class CppWrapperKernelArgs(KernelArgs):
-    def wrap_size_arg(self, size):
-        return f"{size}"
 
 
 class CSE:
@@ -2219,7 +2237,7 @@ class Kernel(CodeGen):
         for name in names_to_remove:
             if name in self.args.inplace_buffers:
                 buf = self.args.inplace_buffers[name]
-                if isinstance(buf, str) and buf.startswith("REMOVED"):
+                if isinstance(buf, RemovedArg):
                     continue
                 remove = all(n in names_to_remove for n in buf.other_names)
                 if remove:
@@ -2233,13 +2251,12 @@ class Kernel(CodeGen):
         # because we still rely on output_buffers's length to
         # generate unique arg name.
         log.debug("remove_buffer(%r)", name)
-        self.args.output_buffers[name] = "REMOVED"
+        self.args.output_buffers[name] = REMOVED
         self.removed_buffers.add(name)
 
     def remove_inplace_buffer(self, name: str) -> None:
         log.debug("removing_inplace_buffer(%r)", name)
-        inner_name = self.args.inplace_buffers[name].inner_name
-        self.args.inplace_buffers[name] = inner_name.replace("in_out_ptr", "REMOVED")
+        self.args.inplace_buffers[name] = REMOVED
         self.removed_buffers.add(name)
 
     def rename_indexing(self, index) -> sympy.Expr:
