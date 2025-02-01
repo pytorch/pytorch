@@ -3851,7 +3851,7 @@ def aten_ger(self: TensorType, vec2: TensorType) -> TensorType:
     raise NotImplementedError
 
 
-@onnx_impl((operator.getitem, aten.getitem))
+@onnx_impl(operator.getitem)
 def aten_getitem(self: Sequence[TTensor], i: INT64) -> TTensor:
     return op.SequenceAt(self, i)
 
