@@ -1406,8 +1406,10 @@ class TritonKernelOverrides(TritonOverrides):
         return (mantissa, exponent)
 
 
-class _typecheck_TritonKernelOverrides(TritonKernelOverrides, OpsHandler[str]):
-    pass  # mypy will error if we got any of the signatures wrong
+if TYPE_CHECKING:
+
+    class _typecheck_TritonKernelOverrides(TritonKernelOverrides, OpsHandler[str]):
+        pass  # mypy will error if we got any of the signatures wrong
 
 
 class HelperFunctions:

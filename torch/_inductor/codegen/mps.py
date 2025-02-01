@@ -9,7 +9,6 @@ from sympy.printing.precedence import PRECEDENCE
 import torch
 from torch.utils._sympy.printers import ExprPrinter as ExprPrinter_
 
-from ..ops_handler import OpsHandler, StoreMode
 from ..utils import get_bounds_index_expr, get_kernel_metadata
 from ..virtualized import ops, V
 from .common import (
@@ -27,6 +26,7 @@ if TYPE_CHECKING:
 
     import sympy
 
+    from ..ops_handler import OpsHandler, StoreMode
     from ..scheduler import Scheduler, SchedulerNode
     from .common import OpVarT
 
@@ -348,8 +348,10 @@ class MetalOverrides(OpOverrides):
 MetalOverrides._initialize_pointwise_overrides("mps")
 
 
-class _typecheck_MetalOverrides(MetalOverrides, OpsHandler[Any]):
-    pass  # mypy will error if we got any of the signatures wrong
+if TYPE_CHECKING:
+
+    class _typecheck_MetalOverrides(MetalOverrides, OpsHandler[Any]):
+        pass  # mypy will error if we got any of the signatures wrong
 
 
 class MetalKernel(SIMDKernel):

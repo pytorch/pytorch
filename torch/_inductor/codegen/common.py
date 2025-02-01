@@ -22,7 +22,6 @@ from typing import (
     MutableMapping,
     NamedTuple,
     Optional,
-    Sequence,
     TYPE_CHECKING,
     Union,
 )
@@ -58,6 +57,8 @@ from ..virtualized import ops, OpsHandler, OpsValue, ReductionType, StoreMode, V
 
 
 if TYPE_CHECKING:
+    from collections.abc import Sequence
+
     from ..ir import Buffer, ChoiceCaller, FixedLayout, IRNode
     from ..loop_body import LoopBody
     from ..scheduler import BaseScheduling, Scheduler, SchedulerNode
@@ -1207,9 +1208,10 @@ pointwise_overrides_data: dict[str, OverridesData] = dict(
 )
 
 
-# Use mypy to check protocol implemented correctly
-class _typecheck_OpOverrides(OpOverrides, OpsHandler[OpVarT]):
-    pass
+if TYPE_CHECKING:
+
+    class _typecheck_OpOverrides(OpOverrides, OpsHandler[str]):
+        pass  # mypy will error if we got any of the signatures wrong
 
 
 class DeferredLine(DeferredLineBase):

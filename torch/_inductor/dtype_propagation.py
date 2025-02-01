@@ -1,23 +1,18 @@
 # mypy: allow-untyped-defs
 import functools
 from collections.abc import Sequence
-from typing import Callable, Optional, Protocol, TYPE_CHECKING, TypeVar, Union
+from typing import Any, Callable, Optional, Protocol, TYPE_CHECKING, TypeVar, Union
 
 import sympy
 
+import torch
+from torch._prims_common import ELEMENTWISE_TYPE_PROMOTION_KIND, type_to_dtype
 from torch.utils._ordered_set import OrderedSet
 
-
-if TYPE_CHECKING:
-    from torch._inductor.loop_body import LoopBodyBlock
-
-import torch
-from torch._inductor.virtualized import V
-from torch._prims_common import ELEMENTWISE_TYPE_PROMOTION_KIND, type_to_dtype
-
+from .ops_handler import OP_NAMES, OpsHandler
 from .utils import upcast_compute_type
-from .virtualized import OpsValue
-
+from .virtualized import OpsValue, V
+from ..fx.experimental.migrate_gradual_types.constraint_transformation import register_transformation_rule
 
 T = TypeVar("T")
 
@@ -128,10 +123,7 @@ class DtypePropagationOpsHandler:
                     self, op, functools.partial(self.return_dtype, dtype=torch.bool)
                 )
 
-        from torch._inductor.ops_handler import OpsHandler
-
-        ops_set = OrderedSet(s for s in dir(OpsHandler) if s[0] != "_")
-        unimplemented_ops = ops_set - OrderedSet(dir(self))
+        unimplemented_ops = OP_NAMES - OrderedSet(dir(self))
         torch._check(
             len(unimplemented_ops) == 0,
             lambda: f"Unimplemented dtype rule for ops: {unimplemented_ops}",
@@ -164,7 +156,11 @@ class DtypePropagationOpsHandler:
         return torch.int64
 
     @staticmethod
-    def masked(mask: DTypeArg, body: "LoopBodyBlock", other: DTypeArg) -> torch.dtype:
+    def masked(
+        mask: DTypeArg, body: Callable[[], DTypeArg], other: DTypeArg
+    ) -> torch.dtype:
+        from .loop_body import LoopBodyBlock
+        assert isinstance(body, LoopBodyBlock), "body must be a LoopBodyBlock"
         # TODO - we avoid calling this in codegen, needs work for non codegen use cases
         loads = body.graph.find_nodes(op="call_method", target="load")
         if len(loads) <= 1:
@@ -315,6 +311,8 @@ class DtypePropagationOpsHandler:
         boundary_indices: DTypeArg,
         indexing_dtype: torch.dtype,
         right: bool,
+        sorter: Optional[tuple[str, sympy.Expr]] = None,
+        sorter_indices: Optional[T] = None,
     ) -> torch.dtype:
         return indexing_dtype
 
@@ -362,3 +360,15 @@ class DtypePropagationOpsHandler:
     @staticmethod
     def libdevice_abs(x: DTypeArg) -> torch.dtype:
         return promote_types([x])
+
+    @staticmethod
+    def check_bounds(
+        expr: sympy.Expr, size: sympy.Expr, lower: bool, upper: bool
+    ) -> None:
+        return None
+
+
+if TYPE_CHECKING:
+
+    class _typecheck_DtypePropagation(DtypePropagationOpsHandler, OpsHandler[Any]):
+        pass  # mypy will error if we got any of the signatures wrong

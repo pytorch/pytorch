@@ -32,7 +32,7 @@ ReductionType = Literal[
 ]
 
 
-def _arg_str(a: Any) -> str:
+def _arg_str(a: object) -> str:
     if isinstance(a, sympy.Expr):
         return sympy_str(a)
     return str(a)
@@ -66,16 +66,29 @@ class OpsHandler(Protocol[T]):
     Note that this often describes a class of static methods, for stateless
     ops handlers.
 
-    Handlers are often defined using ``__getattr__`` metaprogramming, which means
-    that you cannot declare that a type implements a protocol by inheriting from
-    it (as the type stubs count as attribute declarations and impede the getattr
-    magic method from being called).  Instead, define a function that casts an
-    argument of your type to the protocol, which is sufficient to induce mypy to
-    test that the protocol is implemented correctly.  Search for ``_typecheck_``
-    in this file to see some examples.  If you see an obscure error where a
-    class doesn't implement a Protocol, but mypy doesn't say why, check to see
-    that ``__getattr__`` is typed correctly (typically, it is not possible to
-    type ``__getattr__`` without typing it as ``Callable[..., Any]``)
+    Handlers are often defined using metaprogramming (e.g. _initialize_pointwise_overrides),
+    which means you will get type errors if you subclass OpsHandler since mypy doesn't know
+    about the methods added via metaprogramming and thinks the class is still abstract.
+    Instead, you should add a block like:
+
+        if TYPE_CHECKING:
+
+            class _typecheck_TritonKernelOverrides(TritonKernelOverrides, OpsHandler[str]):
+                pass  # mypy will error if we got any of the signatures wrong
+
+    Which will check the signatures of non-meta-programmed methods and gives decent error messages.
+
+    Some older parts of the code use a pattern like:
+
+        def _typecheck_KernelFormatterHandler(h: KernelFormatterHandler) -> OpsHandler[str]:
+            return h
+
+    This pattern only works if the class defines a __getattr__ method, which we are moving away from.
+    Additionally, this pattern generates horrible error messages if the signatures are wrong.
+    It gives zero information about what the problem is, which makes the pattern harmful.
+
+    Instead of that, we have tests in test/inductor/test_op_completeness.py which check that all
+    operators are implemented after all the metaprogramming has run.
     """
 
     def constant(self, value: Union[bool, float, int], dtype: torch.dtype) -> T:

@@ -563,9 +563,10 @@ class HalideOverrides(OpOverrides):
 HalideOverrides._initialize_pointwise_overrides("halide")
 
 
-# Use mypy to check protocol implemented correctly
-class _typecheck_HalideOverrides(HalideOverrides, OpsHandler[str]):
-    pass  # mypy will error if we got any of the signatures wrong
+if TYPE_CHECKING:
+
+    class _typecheck_HalideOverrides(HalideOverrides, OpsHandler[str]):
+        pass  # mypy will error if we got any of the signatures wrong
 
 
 class HalideCSEVariable(CSEVariable):
