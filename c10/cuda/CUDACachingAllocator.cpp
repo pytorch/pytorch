@@ -613,11 +613,11 @@ struct ExpandableSegment {
   size_t numSegments(size_t size) {
     return (size + segment_size_ - 1) / segment_size_;
   }
-  size_t segmentLeft(char* p) {
+  size_t segmentLeft(const char* p) {
     auto size = p - ptr();
     return size / segment_size_;
   }
-  size_t segmentRight(char* p) {
+  size_t segmentRight(const char* p) {
     auto size = p - ptr();
     return numSegments(size);
   }
