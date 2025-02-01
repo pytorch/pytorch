@@ -81,75 +81,6 @@ float calc_trigamma(float x) {
   return sign * result;
 }
 
-float calc_zeta(float x, float q) {
-  constexpr float MACHEP = 1.11022302462515654042E-16;
-  const float ZETA_EXPANSION[] = {
-      12.0,
-      -720.0,
-      30240.0,
-      -1209600.0,
-      47900160.0,
-      -1.8924375803183791606e9,
-      7.47242496e10,
-      -2.950130727918164224e12,
-      1.1646782814350067249e14,
-      -4.5979787224074726105e15,
-      1.8152105401943546773e17,
-      -7.1661652561756670113e18};
-  if (x == 1.0f) {
-    return INFINITY;
-  }
-
-  if (x < 1.0f) {
-    return NAN;
-  }
-
-  if (q <= 0.0f) {
-    if (q == trunc(q)) {
-      return INFINITY;
-    }
-    if (x != trunc(x)) {
-      return NAN;
-    }
-  }
-
-  float s = pow(q, -x);
-  float a = q;
-  int i = 0;
-  float b = 0.0f;
-  while ((i < 9) || (a <= 9.0f)) {
-    i += 1;
-    a += 1.0f;
-    b = pow(a, -x);
-    s += b;
-    if ((-MACHEP * s < b) && (b < MACHEP * s)) {
-      return s;
-    }
-  }
-
-  float w = a;
-  s += b * w / (x - 1.0f);
-  s -= 0.5f * b;
-  a = 1.0f;
-  float t;
-  float k = 0.0f;
-  for (int i = 0; i < 12; i++) {
-    a *= x + k;
-    b /= w;
-    t = a * b / ZETA_EXPANSION[i];
-    s += t;
-    t = fabs(t / s);
-    if (t < MACHEP) {
-      return s;
-    }
-    k += 1.0f;
-    a *= x + k;
-    b /= w;
-    k += 1.0f;
-  }
-  return s;
-}
-
 template <typename T0, typename T1>
 kernel void lgamma(
     constant T0* input [[buffer(0)]],
@@ -208,8 +139,8 @@ kernel void polygamma(
   float x = input[id];
   float n = order;
   float sgn = ((order % 2) ? 1 : -1);
-  output[id] =
-      static_cast<T1>(sgn * c10::metal::gamma(n + 1) * calc_zeta(n + 1, x));
+  output[id] = static_cast<T1>(
+      sgn * c10::metal::gamma(n + 1) * c10::metal::zeta(n + 1, x));
 }
 
 #define INSTANTIATE_GAMMA_KERNELS(DTYPE0, DTYPE1)                             \
