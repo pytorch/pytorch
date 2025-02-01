@@ -172,7 +172,7 @@ class TORCH_API PyTorchStreamReader final {
       size_t n);
 
   size_t getRecordSize(const std::string& name);
-
+  size_t getRecordHeaderOffset(const std::string& name);
   size_t getRecordOffset(const std::string& name);
   size_t
   getRecordOffsetNoRead(size_t cursor, std::string filename, size_t size);

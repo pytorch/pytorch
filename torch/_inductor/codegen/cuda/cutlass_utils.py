@@ -44,8 +44,8 @@ def try_import_cutlass() -> bool:
         return True
 
     try:
-        import cutlass  # noqa: F401
-        import cutlass_library  # noqa: F401
+        import cutlass  # type: ignore[import-not-found]
+        import cutlass_library  # type: ignore[import-not-found]
 
         cutlass_minor_vesion = int(cutlass.__version__.split(".")[1])
         if cutlass_minor_vesion < 7:
@@ -279,7 +279,7 @@ def get_accumulator_dtype(
             return torch_dtype
         else:
             return torch.float
-    if torch_dtype in (torch.bfloat16, torch.float):
+    if torch_dtype in (torch.float16, torch.bfloat16, torch.float):
         return torch.float
     if torch_dtype == torch.int8:
         return torch.int32
