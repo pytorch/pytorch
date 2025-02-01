@@ -1660,7 +1660,8 @@ at::Tensor tensor_fromDLPackImpl(PyObject* data, T* tensor) {
   // destructor function that will be called when the underlying storage goes
   // out of scope. When the destructor is called, the dlMTensor is destructed
   // too.
-  auto atensor = at::DLPackTraits<T>::fromDLPack(tensor, std::move(deleter_maybe_gil));
+  auto atensor =
+      at::DLPackTraits<T>::fromDLPack(tensor, std::move(deleter_maybe_gil));
 
   // Make sure this capsule will never be used again.
   PyCapsule_SetName(data, at::DLPackTraits<T>::used);
