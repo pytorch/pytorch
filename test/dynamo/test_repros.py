@@ -6307,6 +6307,26 @@ def forward(self, s0 : torch.SymInt, s1 : torch.SymInt, L_x_ : torch.Tensor):
         with mock.patch("torch._dynamo.eval_frame._maybe_set_eval_frame", bad):
             fn(torch.ones(3))
 
+    @torch._dynamo.config.patch(raise_on_ctx_manager_usage=False)
+    def test_no_tracing_into_eval_frame_ctx_manager(self):
+        # Test that dynamo doesn't trace into nested calls from eval_frame
+        # when using a context manager.
+        # Even though we don't officially support Dynamo context managers, we still
+        # have tests that use them, so we should still make sure the eval_frame callback
+        # is set at the correct places in these cases.
+        def fn(x):
+            return x + 1
+
+        orig_fn = torch._dynamo.eval_frame._maybe_set_eval_frame
+
+        def bad(*args, **kwargs):
+            torch._dynamo.graph_break()
+            return orig_fn(*args, **kwargs)
+
+        with mock.patch("torch._dynamo.eval_frame._maybe_set_eval_frame", bad):
+            with torch._dynamo.optimize_assert("eager"):
+                fn(torch.ones(3))
+
     @torch._dynamo.config.patch(allow_empty_graphs=True)
     @parametrize("fullgraph", [True, False])
     def test_empty_graph_nested_calls(self, fullgraph):
