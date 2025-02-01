@@ -207,7 +207,7 @@ if [[ "$BUILD_ENVIRONMENT" == *-clang*-asan* ]]; then
     export USE_CUDA=1
   fi
   export USE_ASAN=1
-  export REL_WITH_DEB_INFO=1
+  export DEBUG=1
   export UBSAN_FLAGS="-fno-sanitize-recover=all"
   unset USE_LLVM
 fi
