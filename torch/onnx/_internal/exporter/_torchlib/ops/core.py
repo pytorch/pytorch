@@ -91,7 +91,7 @@ def aten__log_softmax_half(
     return result
 
 
-@onnx_impl(aten._log_softmax, traceable=True)
+@onnx_impl(aten._log_softmax, trace_only=True)
 def aten__log_softmax(
     self: TFloatHighPrecision,
     dim: int,
@@ -133,28 +133,28 @@ def aten__softmax(
     return aten_softmax_no_dtype(self, dim)
 
 
-@onnx_impl((aten.abs, operator.abs), traceable=True)
+@onnx_impl((aten.abs, operator.abs), trace_only=True)
 def aten_abs(self: TRealOrUInt8) -> TRealOrUInt8:
     """abs(Tensor self) -> Tensor"""
 
     return op.Abs(self)
 
 
-@onnx_impl(aten.abs, complex=True, traceable=True)
+@onnx_impl(aten.abs, complex=True, trace_only=True)
 def aten_abs_complex(self: TRealOrUInt8) -> TRealOrUInt8:
     """abs(Tensor self) -> Tensor"""
 
     return op.ReduceL2(self, [-1], keepdims=False)
 
 
-@onnx_impl(aten.acos, traceable=True)
+@onnx_impl(aten.acos, trace_only=True)
 def aten_acos(self: TFloat) -> TFloat:
     """acos(Tensor self) -> Tensor"""
 
     return op.Acos(self)
 
 
-@onnx_impl(aten.acosh, traceable=True)
+@onnx_impl(aten.acosh, trace_only=True)
 def aten_acosh(self: TFloat) -> TFloat:
     """acosh(Tensor self) -> Tensor"""
 
@@ -258,7 +258,7 @@ def aten_addmv(
     return op.Add(op.Mul(self, beta), op.Mul(op.MatMul(mat, vec), alpha))
 
 
-@onnx_impl(aten.addr, traceable=True)
+@onnx_impl(aten.addr, trace_only=True)
 def aten_addr(
     self: TReal, vec1: TReal, vec2: TReal, beta: float = 1.0, alpha: float = 1.0
 ) -> TReal:
@@ -338,7 +338,7 @@ def aten_align_to(self: TensorType, names: Sequence[str]) -> TensorType:
     raise NotImplementedError
 
 
-@onnx_impl(aten.all, traceable=True)
+@onnx_impl(aten.all, trace_only=True)
 def aten_all(self: TTensor) -> BOOL:
     """all(Tensor self) -> Tensor"""
 
@@ -352,7 +352,7 @@ def aten_all(self: TTensor) -> BOOL:
     return result
 
 
-@onnx_impl(aten.all.dim, traceable=True)
+@onnx_impl(aten.all.dim, trace_only=True)
 def aten_all_dim(self: TTensor, dim: int, keepdim: bool = False) -> BOOL:
     """all.dim(Tensor self, int dim, bool keepdim=False) -> Tensor"""
 
@@ -382,7 +382,7 @@ def aten_all_dims(
     return op.Identity(self)
 
 
-@onnx_impl(aten.all.dims, traceable=True)
+@onnx_impl(aten.all.dims, trace_only=True)
 def aten_all_dims_no_dim(self: TTensor, keepdims: bool) -> BOOL:
     """all.dims(Tensor self, int[]? dim=None, bool keepdim=False) -> Tensor"""
 
@@ -462,7 +462,7 @@ def aten_angle(self: TensorType) -> TensorType:
     raise NotImplementedError
 
 
-@onnx_impl(aten.any, traceable=True)
+@onnx_impl(aten.any, trace_only=True)
 def aten_any(self: TTensor) -> BOOL:
     """any(Tensor self) -> Tensor"""
 
@@ -477,7 +477,7 @@ def aten_any(self: TTensor) -> BOOL:
     return result
 
 
-@onnx_impl(aten.any.dim, traceable=True)
+@onnx_impl(aten.any.dim, trace_only=True)
 def aten_any_dim(self: TTensor, dim: int, keepdim: bool = False) -> BOOL:
     """any.dim(Tensor self, int dim, bool keepdim=False) -> Tensor"""
 
@@ -509,7 +509,7 @@ def aten_any_dims(
     return op.Identity(self)
 
 
-@onnx_impl(aten.any.dims, traceable=True)
+@onnx_impl(aten.any.dims, trace_only=True)
 def aten_any_dims_no_dim(self: TTensor, keepdims: bool) -> BOOL:
     """any.dims(Tensor self, int[1]? dim=None, bool keepdim=False) -> Tensor"""
 
@@ -753,7 +753,7 @@ def aten_argmax(
     return result
 
 
-@onnx_impl(aten.argmax, private=True, traceable=True)
+@onnx_impl(aten.argmax, private=True, trace_only=True)
 def _aten_argmax(self: Union[RealType, UINT8], keepdim: bool = False) -> INT64:
     """argmax(Tensor self, int? dim=None, bool keepdim=False) -> Tensor"""
 
@@ -766,7 +766,7 @@ def _aten_argmax(self: Union[RealType, UINT8], keepdim: bool = False) -> INT64:
     return result
 
 
-@onnx_impl(aten.argmax, private=True, traceable=True)
+@onnx_impl(aten.argmax, private=True, trace_only=True)
 def _aten_argmax_dim(
     self: Union[RealType, UINT8], dim: int, keepdim: bool = False
 ) -> INT64:
@@ -796,7 +796,7 @@ def aten_argmin(
     return result
 
 
-@onnx_impl(aten.argmin, private=True, traceable=True)
+@onnx_impl(aten.argmin, private=True, trace_only=True)
 def _aten_argmin(self: Union[RealType, UINT8], keepdim: bool = False) -> INT64:
     """argmin(Tensor self, int? dim=None, bool keepdim=False) -> Tensor"""
 
@@ -809,7 +809,7 @@ def _aten_argmin(self: Union[RealType, UINT8], keepdim: bool = False) -> INT64:
     return result
 
 
-@onnx_impl(aten.argmin, private=True, traceable=True)
+@onnx_impl(aten.argmin, private=True, trace_only=True)
 def _aten_argmin_dim(
     self: Union[RealType, UINT8], dim: int, keepdim: bool = False
 ) -> INT64:
@@ -930,21 +930,21 @@ def aten_as_strided_scatter(
     raise NotImplementedError
 
 
-@onnx_impl(aten.asin, traceable=True)
+@onnx_impl(aten.asin, trace_only=True)
 def aten_asin(self: TFloat) -> TFloat:
     """asin(Tensor self) -> Tensor"""
 
     return op.Asin(self)
 
 
-@onnx_impl(aten.asinh, traceable=True)
+@onnx_impl(aten.asinh, trace_only=True)
 def aten_asinh(self: TFloat) -> TFloat:
     """asinh(Tensor self) -> Tensor"""
 
     return op.Asinh(self)
 
 
-@onnx_impl(aten.atan, traceable=True)
+@onnx_impl(aten.atan, trace_only=True)
 def aten_atan(self: TFloat) -> TFloat:
     """atan(Tensor self) -> Tensor"""
 
@@ -965,14 +965,14 @@ def aten_atan2(self: TFloat, other: TFloat) -> TFloat:
     return result
 
 
-@onnx_impl(aten.atanh, traceable=True)
+@onnx_impl(aten.atanh, trace_only=True)
 def aten_atanh(self: TFloat) -> TFloat:
     """atanh(Tensor self) -> Tensor"""
 
     return op.Atanh(self)
 
 
-@onnx_impl(aten.atleast_1d, traceable=True)
+@onnx_impl(aten.atleast_1d, trace_only=True)
 def aten_atleast_1d(self: TTensor) -> TTensor:
     """atleast_1d(Tensor self) -> Tensor"""
 
@@ -1020,7 +1020,7 @@ def aten_atleast_2d_sequence(self: Sequence[TTensor]) -> TTensor:
     return op.SequenceMap(self, body=reshape_to_2d)
 
 
-@onnx_impl(aten.atleast_3d, traceable=True)
+@onnx_impl(aten.atleast_3d, trace_only=True)
 def aten_atleast_3d(self: TTensor) -> TTensor:
     """atleast_3d(Tensor self) -> Tensor"""
 
@@ -1185,7 +1185,7 @@ def aten_batch_norm_update_stats(
     raise NotImplementedError
 
 
-@onnx_impl(aten.bernoulli, traceable=True)
+@onnx_impl(aten.bernoulli, trace_only=True)
 def aten_bernoulli(self: TFloat) -> TFloat:
     """Proximal implementation of aten::bernoulli.default
 
@@ -1258,7 +1258,7 @@ def aten_binomial(
         aten.bitwise_and.Scalar_Tensor,
         operator.and_,
     ),
-    traceable=True,
+    trace_only=True,
 )
 def aten_bitwise_and(self: TInt, other: TInt) -> TInt:
     """bitwise_and.Tensor(Tensor self, Tensor other) -> Tensor"""
@@ -1274,7 +1274,7 @@ def aten_bitwise_and(self: TInt, other: TInt) -> TInt:
         aten.bitwise_left_shift.Scalar_Tensor,
         operator.__lshift__,
     ),
-    traceable=True,
+    trace_only=True,
 )
 def aten_bitwise_left_shift_int16(self: INT16, other: INT16) -> INT16:
     """bitwise_left_shift.Tensor(Tensor self, Tensor other) -> Tensor"""
@@ -1294,7 +1294,7 @@ def aten_bitwise_left_shift_int16(self: INT16, other: INT16) -> INT16:
         aten.bitwise_left_shift.Scalar_Tensor,
         operator.__lshift__,
     ),
-    traceable=True,
+    trace_only=True,
 )
 def aten_bitwise_left_shift_int32(self: INT32, other: INT32) -> INT32:
     """bitwise_left_shift.Tensor(Tensor self, Tensor other) -> Tensor"""
@@ -1314,7 +1314,7 @@ def aten_bitwise_left_shift_int32(self: INT32, other: INT32) -> INT32:
         aten.bitwise_left_shift.Scalar_Tensor,
         operator.__lshift__,
     ),
-    traceable=True,
+    trace_only=True,
 )
 def aten_bitwise_left_shift_int64(self: INT64, other: INT64) -> INT64:
     """bitwise_left_shift.Tensor(Tensor self, Tensor other) -> Tensor"""
@@ -1334,7 +1334,7 @@ def aten_bitwise_left_shift_int64(self: INT64, other: INT64) -> INT64:
         aten.bitwise_left_shift.Scalar_Tensor,
         operator.__lshift__,
     ),
-    traceable=True,
+    trace_only=True,
 )
 def aten_bitwise_left_shift_int8(self: INT8, other: INT8) -> INT8:
     """bitwise_left_shift.Tensor(Tensor self, Tensor other) -> Tensor"""
@@ -1347,7 +1347,7 @@ def aten_bitwise_left_shift_int8(self: INT8, other: INT8) -> INT8:
     return op.Cast(result, to=INT8.dtype)
 
 
-@onnx_impl(aten.bitwise_not, traceable=True)
+@onnx_impl(aten.bitwise_not, trace_only=True)
 def aten_bitwise_not(self: TInt) -> TInt:
     """bitwise_not(Tensor self) -> Tensor"""
     # logical_not implements the BOOL variant
@@ -1362,7 +1362,7 @@ def aten_bitwise_not(self: TInt) -> TInt:
         aten.bitwise_or.Scalar_Tensor,
         operator.or_,
     ),
-    traceable=True,
+    trace_only=True,
 )
 def aten_bitwise_or(self: TInt, other: TInt) -> TInt:
     """bitwise_or.Tensor(Tensor self, Tensor other) -> Tensor"""
@@ -1512,7 +1512,7 @@ def aten_bitwise_right_shift_int8(self: INT8, other: INT8) -> INT8:
         aten.bitwise_xor.Scalar,
         aten.bitwise_xor.Scalar_Tensor,
     ),
-    traceable=True,
+    trace_only=True,
 )
 def aten_bitwise_xor(self: TInt, other: TInt) -> TInt:
     """bitwise_xor.Tensor(Tensor self, Tensor other) -> Tensor"""
@@ -1542,7 +1542,7 @@ def aten_block_diag(tensors: Sequence[TensorType]) -> TensorType:
     raise NotImplementedError
 
 
-@onnx_impl(aten.bmm, traceable=True)
+@onnx_impl(aten.bmm, trace_only=True)
 def aten_bmm(self: TFloat, mat2: TFloat) -> TFloat:
     """bmm(Tensor self, Tensor mat2) -> Tensor"""
 
@@ -1623,14 +1623,14 @@ def aten_cdist(
     raise NotImplementedError
 
 
-@onnx_impl(aten.ceil, traceable=True)
+@onnx_impl(aten.ceil, trace_only=True)
 def aten_ceil(self: TFloat) -> TFloat:
     """ceil(Tensor self) -> Tensor"""
 
     return op.Ceil(self)
 
 
-@onnx_impl("math::ceil", traceable=True)
+@onnx_impl("math::ceil", trace_only=True)
 def python_math_ceil(self: TFloat) -> TInt:
     """ceil(Tensor self) -> Tensor"""
     ceil = op.Ceil(self)
@@ -1734,7 +1734,7 @@ def aten_clamp(
     return clamped
 
 
-@onnx_impl((aten.clamp_max, aten.clamp_max.Tensor), traceable=True)
+@onnx_impl((aten.clamp_max, aten.clamp_max.Tensor), trace_only=True)
 def aten_clamp_max(self: TReal, max_: TReal) -> TReal:
     """clamp_max(Tensor self, Tensor max) -> Tensor"""
 
@@ -1749,7 +1749,7 @@ def aten_clamp_max(self: TReal, max_: TReal) -> TReal:
     return result
 
 
-@onnx_impl((aten.clamp_min, aten.clamp_min.Tensor), traceable=True)
+@onnx_impl((aten.clamp_min, aten.clamp_min.Tensor), trace_only=True)
 def aten_clamp_min(self: TReal, min_: TReal) -> TReal:
     """clamp_min(Tensor self, Tensor min) -> Tensor"""
 
@@ -2251,14 +2251,14 @@ def aten_corrcoef(self: TensorType) -> TensorType:
     raise NotImplementedError
 
 
-@onnx_impl(aten.cos, traceable=True)
+@onnx_impl(aten.cos, trace_only=True)
 def aten_cos(self: TFloat) -> TFloat:
     """cos(Tensor self) -> Tensor"""
 
     return op.Cos(self)
 
 
-@onnx_impl(aten.cosh, traceable=True)
+@onnx_impl(aten.cosh, trace_only=True)
 def aten_cosh(self: TFloat) -> TFloat:
     """cosh(Tensor self) -> Tensor"""
 
@@ -2532,7 +2532,7 @@ def aten_data(self: TensorType) -> TensorType:
     raise NotImplementedError
 
 
-@onnx_impl(aten.deg2rad, traceable=True)
+@onnx_impl(aten.deg2rad, trace_only=True)
 def aten_deg2rad(self: TFloat) -> TFloat:
     """deg2rad(Tensor self) -> Tensor"""
 
@@ -2795,7 +2795,7 @@ def aten_div(self: TFloat, other: TFloat) -> TFloat:
     return op.Div(self, other)
 
 
-@onnx_impl(operator.truediv, traceable=True)
+@onnx_impl(operator.truediv, trace_only=True)
 def operator_truediv(self: TensorType, other: TensorType) -> FLOAT:
     return op.Div(op.Cast(self, to=FLOAT.dtype), op.Cast(other, to=FLOAT.dtype))
 
@@ -2879,7 +2879,7 @@ def aten_dot(self: TFloat, tensor: TFloat) -> TFloat:
     return op.MatMul(self, tensor)
 
 
-@onnx_impl(aten.dropout, traceable=True)
+@onnx_impl(aten.dropout, trace_only=True)
 def aten_dropout(input: TFloat, p: FLOAT, train: BOOL) -> TFloat:
     """dropout(Tensor input, float p, bool train) -> Tensor"""
 
@@ -2911,7 +2911,7 @@ def aten_einsum(
     return op.Einsum(*tensors, equation=equation)
 
 
-@onnx_impl(aten.embedding, traceable=True)
+@onnx_impl(aten.embedding, trace_only=True)
 def aten_embedding(
     weight: TTensor,
     indices: TInt,
@@ -3225,7 +3225,7 @@ def aten_embedding_dense_backward(
     raise NotImplementedError
 
 
-@onnx_impl(aten.embedding_renorm, traceable=True)
+@onnx_impl(aten.embedding_renorm, trace_only=True)
 def aten_embedding_renorm(
     weight: TFloat, indices: INT64, max_norm: float, norm_type: float = 2.0
 ) -> TFloat:
@@ -3326,7 +3326,7 @@ def aten_empty_quantized(
     raise NotImplementedError
 
 
-@onnx_impl(aten.empty_strided, traceable=True)
+@onnx_impl(aten.empty_strided, trace_only=True)
 def aten_empty_strided(
     size: INT64,
     stride: INT64,
@@ -3343,14 +3343,14 @@ def aten_empty_strided(
     return op.Expand(zero, size)
 
 
-@onnx_impl((aten.eq, aten.eq.Tensor, aten.eq.Scalar, operator.eq), traceable=True)
+@onnx_impl((aten.eq, aten.eq.Tensor, aten.eq.Scalar, operator.eq), trace_only=True)
 def aten_eq(self: TTensor, other: TTensor) -> BOOL:
     """eq.Tensor(Tensor self, Tensor other) -> Tensor"""
 
     return op.Equal(self, other)
 
 
-@onnx_impl(aten.equal, traceable=True)
+@onnx_impl(aten.equal, trace_only=True)
 def aten_equal(self: TTensor, other: TTensor) -> BOOL:
     """equal(Tensor self, Tensor other) -> bool"""
 
@@ -3376,7 +3376,7 @@ def aten_exp(self: TFloat) -> TFloat:
     return op.Exp(self)
 
 
-@onnx_impl(aten.exp2, traceable=True)
+@onnx_impl(aten.exp2, trace_only=True)
 def aten_exp2(self: TFloat) -> TFloat:
     """exp2(Tensor self) -> Tensor"""
 
@@ -3395,7 +3395,7 @@ def aten_expand(self: TTensor, size: TInt) -> TTensor:
     return op.Expand(self, size)
 
 
-@onnx_impl(aten.expand_as, traceable=True)
+@onnx_impl(aten.expand_as, trace_only=True)
 def aten_expand_as(self: TTensor, other: TTensor) -> TTensor:
     """expand_as(Tensor(a) self, Tensor other) -> Tensor(a)"""
 
@@ -3641,28 +3641,28 @@ def aten_flipud(self: TensorType) -> TensorType:
     raise NotImplementedError
 
 
-@onnx_impl(aten.floor, traceable=True)
+@onnx_impl(aten.floor, trace_only=True)
 def aten_floor(self: TFloat) -> TFloat:
     """floor(Tensor self) -> Tensor"""
 
     return op.Floor(self)
 
 
-@onnx_impl("math::floor", traceable=True)
+@onnx_impl("math::floor", trace_only=True)
 def python_math_floor(self: TFloat) -> TInt:
     """floor(Tensor self) -> Tensor"""
     floor = op.Floor(self)
     return op.Cast(floor, to=INT64.dtype)
 
 
-@onnx_impl(aten.floor_divide, traceable=True)
+@onnx_impl(aten.floor_divide, trace_only=True)
 def aten_floor_divide(self: TFloat, other: TFloat) -> TFloat:
     """floor_divide(Tensor self, Tensor other) -> Tensor"""
 
     return op.Floor(op.Div(self, other))
 
 
-@onnx_impl(operator.floordiv, traceable=True)
+@onnx_impl(operator.floordiv, trace_only=True)
 def operator_floordiv(self: INT64, other: INT64) -> INT64:
     # We implement floor_divide only for positive inputs (using integer division)
     # because that is the usual intended case and is the most efficient.
@@ -3681,14 +3681,14 @@ def aten_fmin(self: TensorType, other: TensorType) -> TensorType:
     raise NotImplementedError
 
 
-@onnx_impl((aten.fmod.Tensor, aten.fmod.Scalar), traceable=True)
+@onnx_impl((aten.fmod.Tensor, aten.fmod.Scalar), trace_only=True)
 def aten_fmod(self: TRealOrUInt8, other: TRealOrUInt8) -> TRealOrUInt8:
     """fmod.Tensor(Tensor self, Tensor other) -> Tensor"""
 
     return op.Mod(self, other, fmod=1)
 
 
-@onnx_impl(aten.frac, traceable=True)
+@onnx_impl(aten.frac, trace_only=True)
 def aten_frac(self: TFloat) -> TFloat:
     """frac(Tensor self) -> Tensor
 
@@ -3777,7 +3777,7 @@ def aten_fused_moving_avg_obs_fake_quant(
     raise NotImplementedError
 
 
-@onnx_impl(aten.gather, traceable=True)
+@onnx_impl(aten.gather, trace_only=True)
 def aten_gather(
     self: TReal,
     dim: int,
@@ -3815,7 +3815,7 @@ def aten_gcd(self: TensorType, other: TensorType) -> TensorType:
 
 @onnx_impl(
     (aten.ge.Tensor, aten.ge.Scalar, aten.greater_equal.Tensor, operator.ge),
-    traceable=True,
+    trace_only=True,
 )
 def aten_ge(self: TReal, other: TReal) -> BOOL:
     """ge.Tensor(Tensor self, Tensor other) -> Tensor"""
@@ -3825,7 +3825,7 @@ def aten_ge(self: TReal, other: TReal) -> BOOL:
 
 @onnx_impl(
     (aten.ge.Tensor, aten.ge.Scalar, aten.greater_equal.Tensor, operator.ge),
-    traceable=True,
+    trace_only=True,
 )
 def aten_ge_bool(self: BOOL, other: BOOL) -> BOOL:
     """ge.Tensor(Tensor self, Tensor other) -> Tensor"""
@@ -3963,7 +3963,7 @@ def aten_gru_cell(
 
 @onnx_impl(
     (aten.gt.Tensor, aten.gt.Scalar, aten.greater.Tensor, operator.gt),
-    traceable=True,
+    trace_only=True,
 )
 def aten_gt(self: TReal, other: TReal) -> BOOL:
     """gt.Tensor(Tensor self, Tensor other) -> Tensor"""
@@ -3973,7 +3973,7 @@ def aten_gt(self: TReal, other: TReal) -> BOOL:
 
 @onnx_impl(
     (aten.gt.Tensor, aten.gt.Scalar, aten.greater.Tensor, operator.gt),
-    traceable=True,
+    trace_only=True,
 )
 def aten_gt_bool(self: BOOL, other: BOOL) -> BOOL:
     """gt.Tensor(Tensor self, Tensor other) -> Tensor"""
@@ -4034,7 +4034,7 @@ def aten_hardshrink_backward(
     raise NotImplementedError
 
 
-@onnx_impl(aten.heaviside, traceable=True)
+@onnx_impl(aten.heaviside, trace_only=True)
 def aten_heaviside(self: TReal, values: TReal) -> TReal:
     """heaviside(Tensor self, Tensor values) -> Tensor"""
 
@@ -4385,7 +4385,7 @@ def aten_index_reduce(
     raise NotImplementedError
 
 
-@onnx_impl(aten.index_select, traceable=True)
+@onnx_impl(aten.index_select, trace_only=True)
 def aten_index_select(self: TTensor, dim: int, index: IntType) -> TTensor:
     """index_select(Tensor self, int dim, Tensor index) -> Tensor"""
 
@@ -4774,7 +4774,7 @@ def aten_ldexp(self: TensorType, other: TensorType) -> TensorType:
 
 @onnx_impl(
     (aten.le.Tensor, aten.le.Scalar, aten.less_equal.Tensor, operator.le),
-    traceable=True,
+    trace_only=True,
 )
 def aten_le(self: TReal, other: TReal) -> BOOL:
     """le.Tensor(Tensor self, Tensor other) -> Tensor"""
@@ -4784,7 +4784,7 @@ def aten_le(self: TReal, other: TReal) -> BOOL:
 
 @onnx_impl(
     (aten.le.Tensor, aten.le.Scalar, aten.less_equal.Tensor, operator.le),
-    traceable=True,
+    trace_only=True,
 )
 def aten_le_bool(self: BOOL, other: BOOL) -> BOOL:
     """le.Tensor(Tensor self, Tensor other) -> Tensor"""
@@ -4883,14 +4883,14 @@ def aten_linspace(
     )
 
 
-@onnx_impl(aten.log, traceable=True)
+@onnx_impl(aten.log, trace_only=True)
 def aten_log(self: TFloat) -> TFloat:
     """log(Tensor self) -> Tensor"""
 
     return op.Log(self)
 
 
-@onnx_impl(aten.log10, traceable=True)
+@onnx_impl(aten.log10, trace_only=True)
 def aten_log10(self: TFloat) -> TFloat:
     """log10(Tensor self) -> Tensor"""
 
@@ -4904,21 +4904,21 @@ def aten_log1p(self: TFloat) -> TFloat:
     return op.Log(op.Add(self, 1.0))
 
 
-@onnx_impl(aten.log2, traceable=True)
+@onnx_impl(aten.log2, trace_only=True)
 def aten_log2(self: TFloat) -> TFloat:
     """log2(Tensor self) -> Tensor"""
 
     return op.Div(op.Log(self), op.CastLike(op.Log(2.0), self))
 
 
-@onnx_impl(aten.logaddexp, traceable=True)
+@onnx_impl(aten.logaddexp, trace_only=True)
 def aten_logaddexp(self: TFloat, other: TFloat) -> TFloat:
     """logaddexp(Tensor self, Tensor other) -> Tensor"""
 
     return op.Log(op.Add(op.Exp(self), op.Exp(other)))
 
 
-@onnx_impl(aten.logaddexp2, traceable=True)
+@onnx_impl(aten.logaddexp2, trace_only=True)
 def aten_logaddexp2(self: TFloat, other: TFloat) -> TFloat:
     """logaddexp2(Tensor self, Tensor other) -> Tensor"""
     two = op.CastLike(2.0, self)
@@ -4927,7 +4927,7 @@ def aten_logaddexp2(self: TFloat, other: TFloat) -> TFloat:
     return op.Div(op.Log(summation), op.Log(two))
 
 
-@onnx_impl(aten.logcumsumexp, traceable=True)
+@onnx_impl(aten.logcumsumexp, trace_only=True)
 def aten_logcumsumexp(self: TFloat, dim: int) -> TFloat:
     """logcumsumexp(Tensor self, int dim) -> Tensor"""
 
@@ -4951,7 +4951,7 @@ def aten_logcumsumexp(self: TFloat, dim: int) -> TFloat:
     return result
 
 
-@onnx_impl(aten.logdet, traceable=True)
+@onnx_impl(aten.logdet, trace_only=True)
 def aten_logdet(self: TFloat) -> TFloat:
     """logdet(Tensor self) -> Tensor"""
 
@@ -4965,7 +4965,7 @@ def aten_logdet(self: TFloat) -> TFloat:
         aten.bitwise_and.Scalar,
         aten.bitwise_and.Scalar_Tensor,
     ),
-    traceable=True,
+    trace_only=True,
 )
 def aten_logical_and(self: BOOL, other: BOOL) -> BOOL:
     """logical_and(Tensor self, Tensor other) -> Tensor"""
@@ -4973,7 +4973,7 @@ def aten_logical_and(self: BOOL, other: BOOL) -> BOOL:
     return op.And(self, other)
 
 
-@onnx_impl((aten.logical_not, aten.bitwise_not), traceable=True)
+@onnx_impl((aten.logical_not, aten.bitwise_not), trace_only=True)
 def aten_logical_not(self: BOOL) -> BOOL:
     """logical_not(Tensor self) -> Tensor"""
 
@@ -4989,7 +4989,7 @@ def aten_logical_not(self: BOOL) -> BOOL:
         aten.add.Tensor,
         aten.add.Scalar,
     ),
-    traceable=True,
+    trace_only=True,
 )
 def aten_logical_or(self: BOOL, other: BOOL) -> BOOL:
     """logical_or(Tensor self, Tensor other) -> Tensor"""
@@ -5004,7 +5004,7 @@ def aten_logical_or(self: BOOL, other: BOOL) -> BOOL:
         aten.bitwise_xor.Scalar,
         aten.bitwise_xor.Scalar_Tensor,
     ),
-    traceable=True,
+    trace_only=True,
 )
 def aten_logical_xor(self: BOOL, other: BOOL) -> BOOL:
     """logical_xor(Tensor self, Tensor other) -> Tensor"""
@@ -5043,7 +5043,7 @@ def aten_logspace(
     raise NotImplementedError
 
 
-@onnx_impl(aten.logsumexp, traceable=True)
+@onnx_impl(aten.logsumexp, trace_only=True)
 def aten_logsumexp(self: TFloat, dim: INT64, keepdim: int = False) -> TFloat:
     """logsumexp(Tensor self, int[1] dim, bool keepdim=False) -> Tensor"""
 
@@ -5091,7 +5091,7 @@ def aten_lstm_mps_backward(
 
 @onnx_impl(
     (aten.lt.Tensor, aten.lt.Scalar, aten.less.Tensor, operator.lt),
-    traceable=True,
+    trace_only=True,
 )
 def aten_lt(self: TReal, other: TReal) -> BOOL:
     """lt.Tensor(Tensor self, Tensor other) -> Tensor"""
@@ -5101,7 +5101,7 @@ def aten_lt(self: TReal, other: TReal) -> BOOL:
 
 @onnx_impl(
     (aten.lt.Tensor, aten.lt.Scalar, aten.less.Tensor, operator.lt),
-    traceable=True,
+    trace_only=True,
 )
 def aten_lt_bool(self: BOOL, other: BOOL) -> BOOL:
     """lt.Tensor(Tensor self, Tensor other) -> Tensor"""
@@ -5180,7 +5180,7 @@ def aten_margin_ranking_loss(
 
 @onnx_impl(
     (aten.masked_fill.Scalar, aten.masked_fill.Tensor),
-    traceable=True,
+    trace_only=True,
 )
 def aten_masked_fill(self: TTensor, mask: BOOL, value: TTensor) -> TTensor:
     """masked_fill.Tensor(Tensor self, Tensor mask, Tensor value) -> Tensor"""
@@ -5269,7 +5269,7 @@ def aten_max(self: TReal) -> TReal:
     return result
 
 
-@onnx_impl(aten.max.dim, traceable=True)
+@onnx_impl(aten.max.dim, trace_only=True)
 def aten_max_dim(self: TReal, dim: int, keepdim: bool = False) -> Tuple[TReal, INT64]:
     """max.dim(Tensor self, int dim, bool keepdim=False) -> (Tensor values, Tensor indices)"""
 
@@ -5305,7 +5305,7 @@ def aten_mean(self: TReal) -> TReal:
     return op.Squeeze(result)
 
 
-@onnx_impl(aten.mean.dim, traceable=True)
+@onnx_impl(aten.mean.dim, trace_only=True)
 def aten_mean_dim(self: TReal, dim: INT64, keepdim: bool = False) -> TReal:
     """mean.dim(Tensor self, int[1]? dim, bool keepdim=False, *, ScalarType? dtype=None) -> Tensor"""
 
@@ -5336,7 +5336,7 @@ def aten_min(self: TReal) -> TReal:
     return op.ReduceMin(self, keepdims=False)
 
 
-@onnx_impl(aten.min.dim, traceable=True)
+@onnx_impl(aten.min.dim, trace_only=True)
 def aten_min_dim(self: TReal, dim: int, keepdim: bool = False) -> Tuple[TReal, TInt]:
     """min.dim(Tensor self, int dim, bool keepdim=False) -> (Tensor values, Tensor indices)"""
     if IsScalar(self):
@@ -5635,7 +5635,7 @@ def aten_mkldnn_max_pool3d_backward(
     raise NotImplementedError
 
 
-@onnx_impl(aten.mm, traceable=True)
+@onnx_impl(aten.mm, trace_only=True)
 def aten_mm(
     self: TRealUnlessInt16OrInt8, mat2: TRealUnlessInt16OrInt8
 ) -> TRealUnlessInt16OrInt8:
@@ -5705,7 +5705,7 @@ def aten_msort(self: TensorType) -> TensorType:
 
 @onnx_impl(
     (aten.mul, aten.mul.Tensor, operator.mul, aten.multiply.Tensor),
-    traceable=True,
+    trace_only=True,
 )
 def aten_mul(self: TReal, other: TReal) -> TReal:
     """mul.Tensor(Tensor self, Tensor other) -> Tensor"""
@@ -5715,7 +5715,7 @@ def aten_mul(self: TReal, other: TReal) -> TReal:
 
 @onnx_impl(
     (aten.mul, aten.mul.Tensor, aten.multiply.Tensor),
-    traceable=True,
+    trace_only=True,
 )
 def aten_mul_bool(self: BOOL, other: BOOL) -> BOOL:
     """ONNX Mul doesn't support Boolean, so use And as an equivalent operator."""
@@ -5728,7 +5728,7 @@ def aten_mul_bool(self: BOOL, other: BOOL) -> BOOL:
 
 @onnx_impl(
     (aten.mul, aten.mul.Tensor, aten.multiply.Tensor),
-    traceable=True,
+    trace_only=True,
     complex=True,
 )
 def aten_mul_complex(self: TReal, other: TReal) -> TReal:
@@ -5844,7 +5844,7 @@ def aten_nansum(
     raise NotImplementedError
 
 
-@onnx_impl(aten.narrow, traceable=True)
+@onnx_impl(aten.narrow, trace_only=True)
 def aten_narrow(self: TTensor, dim: INT64, start: INT64, length: INT64) -> TTensor:
     """narrow(Tensor(a) self, int dim, SymInt start, SymInt length) -> Tensor(a)"""
 
@@ -6329,14 +6329,14 @@ def aten_native_norm(self: TensorType, p: float = 2.0) -> TensorType:
     raise NotImplementedError
 
 
-@onnx_impl((aten.ne, aten.ne.Scalar, aten.ne.Tensor, operator.ne), traceable=True)
+@onnx_impl((aten.ne, aten.ne.Scalar, aten.ne.Tensor, operator.ne), trace_only=True)
 def aten_ne(self: TReal, other: TReal) -> BOOL:
     """ne.Tensor(Tensor self, Tensor other) -> Tensor"""
 
     return op.Not(op.Equal(self, other))
 
 
-@onnx_impl((aten.neg, operator.neg), traceable=True)
+@onnx_impl((aten.neg, operator.neg), trace_only=True)
 def aten_neg(self: TReal) -> TReal:
     """neg(Tensor self) -> Tensor"""
 
@@ -6474,7 +6474,7 @@ def aten_norm_except_dim(v: TensorType, pow: int = 2, dim: int = 0) -> TensorTyp
         aten.normal.float_float,
         aten.normal_functional,
     ),
-    traceable=True,
+    trace_only=True,
 )
 def aten_normal(
     self: TTensor,
@@ -6750,7 +6750,7 @@ def aten_positive(self: TensorType) -> TensorType:
         aten.pow.Tensor_Scalar,
         operator.pow,
     ),
-    traceable=True,
+    trace_only=True,
 )
 def aten_pow(self: TReal, exponent: TTensor) -> TReal:
     """pow(Tensor self, Tensor exponent) -> Tensor"""
@@ -7017,7 +7017,7 @@ def aten_quantized_rnn_tanh_cell(
     raise NotImplementedError
 
 
-@onnx_impl(aten.rad2deg, traceable=True)
+@onnx_impl(aten.rad2deg, trace_only=True)
 def aten_rad2deg(self: TFloat) -> TFloat:
     """rad2deg(Tensor self) -> Tensor"""
 
@@ -7208,7 +7208,7 @@ def aten_real(self: TensorType) -> TensorType:
     raise NotImplementedError
 
 
-@onnx_impl(aten.reciprocal, traceable=True)
+@onnx_impl(aten.reciprocal, trace_only=True)
 def aten_reciprocal(self: TFloat) -> TFloat:
     """reciprocal(Tensor self) -> Tensor"""
 
@@ -7227,7 +7227,7 @@ def aten_refine_names(self: TensorType, names: Sequence[str]) -> TensorType:
     raise NotImplementedError
 
 
-@onnx_impl((aten.remainder.Tensor, aten.remainder.Scalar), traceable=True)
+@onnx_impl((aten.remainder.Tensor, aten.remainder.Scalar), trace_only=True)
 def aten_remainder(self: TFloat, other: TFloat) -> TFloat:
     """remainder.Tensor(Tensor self, Tensor other) -> Tensor"""
 
@@ -7240,7 +7240,7 @@ def aten_remainder(self: TFloat, other: TFloat) -> TFloat:
     return op.Sub(self, op.Mul(rounded_quotient, other))
 
 
-@onnx_impl((aten.remainder.Tensor, aten.remainder.Scalar, operator.mod), traceable=True)
+@onnx_impl((aten.remainder.Tensor, aten.remainder.Scalar, operator.mod), trace_only=True)
 def aten_remainder_int(self: TInt, other: TInt) -> TInt:
     """remainder.Tensor(Tensor self, Tensor other) -> Tensor"""
 
@@ -7467,7 +7467,7 @@ def aten_rot90(
     raise NotImplementedError
 
 
-@onnx_impl(aten.round, traceable=True)
+@onnx_impl(aten.round, trace_only=True)
 def aten_round(self: TFloat) -> TFloat:
     """round(Tensor self) -> Tensor"""
 
@@ -7516,7 +7516,7 @@ def aten_rrelu(
     raise NotImplementedError
 
 
-@onnx_impl(aten.rsqrt, traceable=True)
+@onnx_impl(aten.rsqrt, trace_only=True)
 def aten_rsqrt(self: TFloat) -> TFloat:
     """rsqrt(Tensor self) -> Tensor"""
 
@@ -7670,7 +7670,7 @@ def aten_segment_reduce(
     raise NotImplementedError
 
 
-@onnx_impl(aten.select.int, traceable=True)
+@onnx_impl(aten.select.int, trace_only=True)
 def aten_select(self: TTensor, dim: int, index: int) -> TTensor:
     """select(Tensor self, int dim, int index) -> Tensor"""
 
@@ -7718,7 +7718,7 @@ def aten_sgn(self: TensorType) -> TensorType:
     raise NotImplementedError
 
 
-@onnx_impl(aten.sigmoid, traceable=True)
+@onnx_impl(aten.sigmoid, trace_only=True)
 def aten_sigmoid(self: TFloat) -> TFloat:
     """sigmoid(Tensor self) -> Tensor"""
 
@@ -7738,14 +7738,14 @@ def aten_signbit(self: TensorType) -> TensorType:
     raise NotImplementedError
 
 
-@onnx_impl(aten.sin, traceable=True)
+@onnx_impl(aten.sin, trace_only=True)
 def aten_sin(self: TFloat) -> TFloat:
     """sin(Tensor self) -> Tensor"""
 
     return op.Sin(self)
 
 
-@onnx_impl(aten.sinh, traceable=True)
+@onnx_impl(aten.sinh, trace_only=True)
 def aten_sinh(self: TFloat) -> TFloat:
     """sinh(Tensor self) -> Tensor"""
 
@@ -7897,7 +7897,7 @@ def aten_softmax(self: TFloat, dim: int, dtype: int = -1) -> TFloat:
     return result
 
 
-@onnx_impl((aten.softmax.int, aten.special_softmax), traceable=True)
+@onnx_impl((aten.softmax.int, aten.special_softmax), trace_only=True)
 def aten_softmax_no_dtype(self: TFloat, dim: int) -> TFloat:
     """softmax(Tensor self, int dim, ScalarType? dtype=None) -> Tensor"""
 
@@ -7968,7 +7968,7 @@ def aten_split_with_sizes_copy(
     raise NotImplementedError
 
 
-@onnx_impl(aten.sqrt, traceable=True)
+@onnx_impl(aten.sqrt, trace_only=True)
 def aten_sqrt(self: TFloat) -> TFloat:
     """sqrt(Tensor self) -> Tensor"""
 
@@ -8243,7 +8243,7 @@ def aten_symeig(
     raise NotImplementedError
 
 
-@onnx_impl(aten.t, traceable=True)
+@onnx_impl(aten.t, trace_only=True)
 def aten_t(self: TTensor) -> TTensor:
     """t(Tensor(a) self) -> Tensor(a)"""
 
@@ -8276,33 +8276,33 @@ def aten_take_along_dim(
     raise NotImplementedError
 
 
-@onnx_impl(aten.tan, traceable=True)
+@onnx_impl(aten.tan, trace_only=True)
 def aten_tan(self: TFloat) -> TFloat:
     """tan(Tensor self) -> Tensor"""
 
     return op.Tan(self)
 
 
-@onnx_impl(aten.tanh, traceable=True)
+@onnx_impl(aten.tanh, trace_only=True)
 def aten_tanh(self: TFloat) -> TFloat:
     """tanh(Tensor self) -> Tensor"""
 
     return op.Tanh(self)
 
 
-@onnx_impl(aten.tensor.bool, traceable=True)
+@onnx_impl(aten.tensor.bool, trace_only=True)
 def aten_tensor_bool(self: bool, dtype: int) -> TensorType:
     tensor = op.Constant(value_int=self)
     return op.Cast(tensor, to=dtype)
 
 
-@onnx_impl(aten.tensor.float, traceable=True)
+@onnx_impl(aten.tensor.float, trace_only=True)
 def aten_tensor_float(self: float, dtype: int) -> TensorType:
     tensor = op.Constant(value_float=self)
     return op.Cast(tensor, to=dtype)
 
 
-@onnx_impl(aten.tensor.int, traceable=True)
+@onnx_impl(aten.tensor.int, trace_only=True)
 def aten_tensor_int(self: int, dtype: int) -> TensorType:
     tensor = op.Constant(value_int=self)
     return op.Cast(tensor, to=dtype)
@@ -8554,7 +8554,7 @@ def aten_trunc(self: TFloat) -> TFloat:
     return op.Where(is_negative, op.Neg(integer_parts), integer_parts)
 
 
-@onnx_impl(aten.type_as, traceable=True)
+@onnx_impl(aten.type_as, trace_only=True)
 def aten_type_as(self: TTensor, other: TTensor2) -> TTensor2:
     """type_as(Tensor self, Tensor other) -> Tensor"""
 

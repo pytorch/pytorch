@@ -23,7 +23,7 @@ aten = torch.ops.aten
     (aten._fft_c2c, aten._fft_c2r, aten._fft_r2c),
     private=True,
     complex=True,
-    traceable=True,
+    trace_only=True,
 )
 def _fftn_onnx_normalization(
     self,

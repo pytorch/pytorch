@@ -296,14 +296,14 @@ def aten_binary_cross_entropy_backward(
     raise NotImplementedError
 
 
-@onnx_impl(aten.celu, traceable=True)
+@onnx_impl(aten.celu, trace_only=True)
 def aten_celu(self: FLOAT, alpha: float = 1.0) -> FLOAT:
     """celu(Tensor self, Scalar alpha=1.0) -> Tensor"""
 
     return op.Celu(self, alpha=alpha)  # op.Celu only support float32
 
 
-@onnx_impl(aten.celu, traceable=True)
+@onnx_impl(aten.celu, trace_only=True)
 def aten_celu_type_promoted(
     self: TFloatUnlessFloat32, alpha: float = 1.0
 ) -> TFloatUnlessFloat32:
@@ -362,7 +362,7 @@ def aten_conv_depthwise3d(
     raise NotImplementedError
 
 
-@onnx_impl(aten.cross_entropy_loss, traceable=True)
+@onnx_impl(aten.cross_entropy_loss, trace_only=True)
 def aten_cross_entropy_loss(
     self: TFloat,
     target: IntType,
@@ -389,7 +389,7 @@ def aten_cross_entropy_loss(
     return result
 
 
-@onnx_impl(aten.elu, traceable=True)
+@onnx_impl(aten.elu, trace_only=True)
 def aten_elu(
     self: TFloat,
     alpha: float = 1.0,
@@ -519,7 +519,7 @@ def aten_gelu_backward(
     raise NotImplementedError
 
 
-@onnx_impl(aten.glu, traceable=True)
+@onnx_impl(aten.glu, trace_only=True)
 def aten_glu(self: TFloat, dim: int = -1) -> TFloat:
     """glu(Tensor self, int dim=-1) -> Tensor"""
 
@@ -613,7 +613,7 @@ def aten_glu_jvp(
     raise NotImplementedError
 
 
-@onnx_impl(aten.hardsigmoid, traceable=True)
+@onnx_impl(aten.hardsigmoid, trace_only=True)
 def aten_hardsigmoid(self: TFloat) -> TFloat:
     """hardsigmoid(Tensor self) -> Tensor"""
 
@@ -1305,7 +1305,7 @@ def aten_mkldnn_reorder_conv3d_weight(
     raise NotImplementedError
 
 
-@onnx_impl(aten.mse_loss, traceable=True)
+@onnx_impl(aten.mse_loss, trace_only=True)
 def aten_mse_loss(self: TReal, target: TReal, reduction: int = 1) -> TReal:
     """mse_loss(Tensor self, Tensor target, int reduction=Mean) -> Tensor"""
     # FIXME: When reduction=0, the shape(result) will be different than other case
@@ -1600,14 +1600,14 @@ def aten_reflection_pad3d_backward(
     raise NotImplementedError
 
 
-@onnx_impl(aten.relu, traceable=True)
+@onnx_impl(aten.relu, trace_only=True)
 def aten_relu(self: TReal) -> TReal:
     """relu(Tensor self) -> Tensor"""
 
     return op.Relu(self)
 
 
-@onnx_impl(aten.relu6, traceable=True)
+@onnx_impl(aten.relu6, trace_only=True)
 def aten_relu6(self: TReal) -> TReal:
     """relu6(Tensor self) -> Tensor"""
 
@@ -2214,7 +2214,7 @@ def aten_sigmoid_backward(grad_output: TensorType, output: TensorType) -> Tensor
     raise NotImplementedError
 
 
-@onnx_impl(aten.silu, traceable=True)
+@onnx_impl(aten.silu, trace_only=True)
 def aten_silu(self: TFloat) -> TFloat:
     """silu(Tensor self) -> Tensor"""
 
