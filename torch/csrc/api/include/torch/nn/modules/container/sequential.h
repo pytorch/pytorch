@@ -10,7 +10,6 @@
 
 #include <c10/util/Exception.h>
 
-#include <cstdint>
 #include <memory>
 #include <ostream>
 #include <string>
@@ -104,6 +103,7 @@ class SequentialImpl : public Cloneable<SequentialImpl> {
 
   /// Constructs the `Sequential` from an `OrderedDict` of named `AnyModule`s.
   explicit SequentialImpl(
+      // NOLINTNEXTLINE(cppcoreguidelines-rvalue-reference-param-not-moved)
       torch::OrderedDict<std::string, AnyModule>&& ordered_dict) {
     modules_.reserve(ordered_dict.size());
     for (auto& item : ordered_dict) {

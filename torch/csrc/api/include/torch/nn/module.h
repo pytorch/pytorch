@@ -11,10 +11,8 @@
 
 #include <functional>
 #include <iosfwd>
-#include <map>
 #include <memory>
 #include <string>
-#include <type_traits>
 
 namespace torch::nn {
 
@@ -538,6 +536,7 @@ class TORCH_API Module : public std::enable_shared_from_this<Module> {
   }
 
   virtual std::vector<AnyValue> _forward_populate_default_args(
+      // NOLINTNEXTLINE(*rvalue-reference*)
       std::vector<AnyValue>&& arguments) {
     TORCH_CHECK(
         false,
@@ -682,6 +681,7 @@ std::shared_ptr<ModuleType> Module::replace_module(
 }
 
 template <typename... Ts>
+// NOLINTNEXTLINE(cppcoreguidelines-missing-std-forward)
 void Module::to_impl(Ts&&... ts) {
   // First call `to()` on every child module.
   for (auto& child : children_) {
