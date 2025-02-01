@@ -571,8 +571,10 @@ enable_compiler_collectives = os.environ.get("TORCH_COMPILER_COLLECTIVES", "0") 
 # will typically cause cache misses.  We continuously update the profile,
 # so if we only discover something is dynamic on the second run, we will update
 # the profile for subsequent runs.
-automatic_dynamic_local_pgo: bool = (
-    os.environ.get("TORCH_DYNAMO_AUTOMATIC_DYNAMIC_LOCAL_PGO", "0") == "1"
+automatic_dynamic_local_pgo: bool = Config(
+    justknob="pytorch/remote_cache:enable_local_automatic_dynamic_pgo",
+    env_name_force="TORCH_DYNAMO_AUTOMATIC_DYNAMIC_LOCAL_PGO",
+    default=True,
 )
 
 # Like above, but using remote cache
