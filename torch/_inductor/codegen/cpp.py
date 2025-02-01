@@ -1140,9 +1140,7 @@ class CppVecOverrides(CppOverrides):
                 else:
                     # fallback to scalar ops
                     scalar_ops = super(CppVecOverrides, self)
-                    scalar_func = getattr(
-                        scalar_ops, func.__name__, scalar_ops.__getattr__(func.__name__)  # type: ignore[attr-defined]
-                    )
+                    scalar_func = getattr(scalar_ops, func.__name__)
                     assert scalar_func is not None
                     return scalar_func(*args, **kwargs)
 
@@ -1646,8 +1644,11 @@ class CppVecOverrides(CppOverrides):
                     assert isinstance(other_vec_var, CppCSEVariable), other_vec_var
                     body_vec_var.dtype = dtype
                     other_vec_var.dtype = dtype
+                    overrides: type[
+                        Union[CppOverrides, CppVecOverrides]
+                    ] = V.kernel.overrides  # type: ignore[has-type]
                     code.writeline(
-                        f"return {V.kernel.overrides.where(new_mask, body_vec_var, other_vec_var)};"
+                        f"return {overrides.where(new_mask, body_vec_var, other_vec_var)};"
                     )
             code.writeline("()")
             csevar = V.kernel.cse.generate(
@@ -1748,7 +1749,7 @@ class CppVecOverrides(CppOverrides):
         return mantissa, exponent
 
     @classmethod
-    def scalarize(cls, scalar_func):
+    def _scalarize(cls, scalar_func):
         def inner(*args, **kwargs):
             assert not kwargs
             kernel = V.kernel
@@ -1814,7 +1815,7 @@ class CppVecOverrides(CppOverrides):
             if getattr(method, "__class__", None) == staticmethod and name not in vars(
                 CppVecOverrides
             ):
-                func = cls.scalarize(method.__func__)
+                func = cls._scalarize(method.__func__)
                 func.__name__ = name
                 setattr(cls, name, staticmethod(func))
 
