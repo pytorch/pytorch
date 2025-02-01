@@ -721,7 +721,7 @@ class GetAttrVariable(VariableTracker):
         if self.py_type is not None:
             return self.py_type
         else:
-            super().python_type()
+            return super().python_type()
 
     def __repr__(self) -> str:
         return f"{self.__class__.__name__}({self.obj}, {self.name})"
