@@ -1,4 +1,6 @@
 # mypy: allow-untyped-defs
+from __future__ import annotations
+
 import itertools
 from typing import Any, Callable, Generic, Literal, NamedTuple, Optional, TypeVar, Union
 from typing_extensions import Protocol
@@ -29,7 +31,7 @@ ReductionType = Literal[
 ]
 
 
-def _arg_str(a) -> str:
+def _arg_str(a: Any) -> str:
     if isinstance(a, sympy.Expr):
         return sympy_str(a)
     return str(a)
@@ -44,7 +46,7 @@ class OpsHandler(Protocol[T]):
     """
     Protocol describing the set of valid operations on ``torch._inductor.virtualized.ops``,
     as well as the contract for op handlers.  The type T signifies the domain
-    of the abstract analysis AKA what all of the functions return / take as arguments
+    of the abstract analysis AKA what all the functions return / take as arguments
     anywhere compute occurs.
 
     While these operators are typically dtype polymorphic (e.g., you can use mul
@@ -79,7 +81,7 @@ class OpsHandler(Protocol[T]):
         """Produces a scalar constant of type dtype."""
         ...
 
-    def load_seed(self, name: str, offset: T):
+    def load_seed(self, name: str, offset: T) -> T:
         """Computes inductor_prims.lookup_seed."""
         ...
 
@@ -128,7 +130,7 @@ class OpsHandler(Protocol[T]):
         x: T,
         dtype: torch.dtype,
         src_dtype: Optional[torch.dtype] = None,
-        use_compute_types=True,
+        use_compute_types: bool = True,
     ) -> T:
         """
         Convert x to dtype.  src_dtype can be optionally set to specify what the original
@@ -195,7 +197,7 @@ class OpsHandler(Protocol[T]):
     ) -> sympy.Expr:
         """
         Convert an integral x into a sympy.Expr that can be subsequently used in
-        indexing computation.  'size' represents an upper bound on the what valid
+        indexing computation.  'size' represents an upper bound on what valid
         indexes can be; when 'check' is True, we check that the x is in bounds.
 
         NB: This is typically mandatory to implement for any analysis, because you
@@ -247,7 +249,7 @@ class OpsHandler(Protocol[T]):
     # TODO: in practice, this seems to actually return None, but not returning
     # a T makes common __getattr__ idioms not type correctly.  Figure out if
     # this should be returning something.
-    def store_reduction(self, name: str, index: sympy.Expr, value: T) -> T:
+    def store_reduction(self, name: str, index: sympy.Expr, value: T) -> None:
         """
         Store the fully accumulated result of 'reduction' to the memory
         location 'name' offset by 'expr'.
@@ -1046,7 +1048,7 @@ class ExtractConstantsHandler(NoopHandler):
     def __init__(self, device):
         self.device = device
 
-    def constant(self, value: Any, dtype: torch.dtype) -> "torch._inductor.ir.Constant":
+    def constant(self, value: Any, dtype: torch.dtype) -> torch._inductor.ir.Constant:
         from torch._inductor import ir
 
         return ir.Constant(value=value, dtype=dtype, device=self.device)

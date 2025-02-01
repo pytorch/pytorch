@@ -648,7 +648,7 @@ class TritonTemplateKernel(TritonKernel):
                     self.body.writeline(str(scatter))
 
             body_val = self.body.getvalue()
-            self.cse.invalidate(OrderedSet[str]())
+            self.cse.invalidate(OrderedSet())
             return body_val
 
     def load_input(
