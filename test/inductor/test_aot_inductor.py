@@ -1482,6 +1482,26 @@ class AOTInductorTestsTemplate:
             dynamic_shapes=dynamic_shapes,
         )
 
+    @common_utils.parametrize("dynamic", [False, True])
+    def test_while_loop_with_sym_expr_cond(self, dynamic):
+        inputs = (
+            torch.randn(10, 20, device=self.device),
+            torch.randn(10, 20, device=self.device),
+        )
+        dim0_ab = Dim("s0", min=2, max=1024)
+        dynamic_shapes = None
+        if dynamic:
+            dynamic_shapes = {
+                "c": {},
+                "a": {0: dim0_ab, 1: None},
+                "b": {0: dim0_ab, 1: None},
+            }
+        self.check_model_with_multiple_inputs(
+            WhileLoopModels.SymExprCond(),
+            prepend_counters(inputs),
+            dynamic_shapes=dynamic_shapes,
+        )
+
     @config.patch({"is_predispatch": True})
     def test_constant(self):
         class M(torch.nn.Module):
