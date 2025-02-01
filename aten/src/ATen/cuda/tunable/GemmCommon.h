@@ -583,7 +583,7 @@ struct ScaledGemmParams : OpParams {
   }
 
   std::string Signature() const override {
-    return fmt::sprintf("%c%c_%ld_%ld_%ld_ld_%ld_%ld_%ld_rw_%d", transa, transb, m, n, k, lda, ldb, ldc, use_rowwise);
+    return fmt::sprintf("%c%c_%ld_%ld_%ld_ld_%ld_%ld_%ld_rw_%d_bias_%s", transa, transb, m, n, k, lda, ldb, ldc, use_rowwise, at::toString(bias_dtype));
   }
 
   size_t GetSizeA() const {
