@@ -586,11 +586,12 @@ def graph_executor(
                 ir_function = ir.serde.deserialize_function(proto)
             onnx_model.functions[identifier] = ir_function
         # Make sure the model is valid
+        model_proto = ir.to_proto(onnx_model)
         try:
-            onnx.checker.check_model(ir.to_proto(onnx_model), full_check=True)
+            onnx.checker.check_model(model_proto, full_check=True)
         except (onnx.checker.ValidationError, onnx.shape_inference.InferenceError) as e:
             raise AssertionError(f"ONNX model is invalid. Model:\n{onnx_model}") from e
-
+        model_proto = onnx.shape_inference.infer_shapes(model_proto, data_prop=True)
         try:
             if (
                 os.environ.get("CATCH_ORT_SEGFAULT") == "1"
@@ -598,12 +599,10 @@ def graph_executor(
             ):
                 # Use an individual process to run ONNX Runtime to catch segfaults
                 return _safe_ort_session_run(
-                    ir.to_proto(onnx_model).SerializeToString(), ort_inputs
+                    model_proto.SerializeToString(), ort_inputs
                 )
 
-            return _ort_session_run(
-                ir.to_proto(onnx_model).SerializeToString(), ort_inputs
-            )
+            return _ort_session_run(model_proto.SerializeToString(), ort_inputs)
         except (
             # pylint: disable=c-extension-no-member
             onnxruntime.capi.onnxruntime_pybind11_state.Fail,
@@ -615,30 +614,26 @@ def graph_executor(
         ) as e:
             if os.environ.get("CREATE_REPRODUCTION_REPORT") == "1":
                 error_reproduction.create_reproduction_report(
-                    test_name, ir.to_proto(onnx_model), ort_inputs, e
+                    test_name, model_proto, ort_inputs, e
                 )
             raise RuntimeError(
                 "ONNX Runtime failed to evaluate:\n"
-                + _format_model_and_input_information(
-                    ir.to_proto(onnx_model), ort_inputs
-                )
+                + _format_model_and_input_information(model_proto, ort_inputs)
             ) from e
         except OrtAbortedError as e:
             if os.environ.get("CREATE_REPRODUCTION_REPORT") == "1":
                 # Save the model and inputs to a file for reproduction
                 error_reproduction.create_reproduction_report(
-                    test_name, ir.to_proto(onnx_model), ort_inputs, e
+                    test_name, model_proto, ort_inputs, e
                 )
             raise OrtAbortedError(
                 "ONNX Runtime aborted:\n"
-                + _format_model_and_input_information(
-                    ir.to_proto(onnx_model), ort_inputs
-                )
+                + _format_model_and_input_information(model_proto, ort_inputs)
             ) from e
         except Exception as e:
             if os.environ.get("CREATE_REPRODUCTION_REPORT") == "1":
                 error_reproduction.create_reproduction_report(
-                    test_name, ir.to_proto(onnx_model), ort_inputs, e
+                    test_name, model_proto, ort_inputs, e
                 )
             raise
 
