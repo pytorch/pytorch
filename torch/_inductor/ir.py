@@ -5468,7 +5468,7 @@ class ExternKernel(InputsKernel):
         index = sympy_subs(sympy.expand(index), replacement)
         return index, tuple(new_sizes)
 
-    def codegen_unbacked_symbol_defs(self, wrapper) -> None:  # type: ignore[no-untyped-def]
+    def codegen_unbacked_symbol_defs(self, outputs, wrapper) -> None:  # type: ignore[no-untyped-def]
         if not hasattr(self, "unbacked_bindings"):
             return
 
@@ -5514,7 +5514,6 @@ class ExternKernel(InputsKernel):
                     # because self.get_name() is actually never bound; the
                     # individual output arguments are bound by
                     # generate_c_shim_fallback_kernel
-                    outputs = self.get_outputs()
                     if len(outputs) == 1:
                         return go(outputs[0].get_name(), keypath)
                     else:
@@ -6676,7 +6675,7 @@ class FallbackKernel(ExternKernelAlloc):
             if isinstance(self.layout, Layout):
                 self.codegen_size_asserts(wrapper)
 
-        self.codegen_unbacked_symbol_defs(wrapper)
+        self.codegen_unbacked_symbol_defs(self.outputs, wrapper)
 
     @staticmethod
     def tensor_to_layout(output: torch.Tensor):  # type: ignore[no-untyped-def]
@@ -7517,7 +7516,7 @@ class WhileLoop(ExternKernel):
 
     def codegen(self, wrapper) -> None:  # type: ignore[no-untyped-def]
         wrapper.codegen_while_loop(self)
-        self.codegen_unbacked_symbol_defs(wrapper)
+        self.codegen_unbacked_symbol_defs(self.outputs, wrapper)
 
 
 class EffectfulKernel(FallbackKernel):

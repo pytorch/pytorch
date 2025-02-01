@@ -1552,13 +1552,14 @@ class CppWrapperCpu(PythonWrapperCodegen):
             subgraph.graph.graph_outputs, outer_outputs
         ):
             src = inner_output.codegen_reference()
-            # in ABI-compatible mode, we need to std::move subgraph output (inner_output)
-            # to the conditional output (outer_output), as RAIIAtenTensorHandle's copy
-            # constructor is deleted.
-            src = f"std::move({src})"
-            # in case the outer_output carried a value
-            # before (e.g., in the while_loop codegen)
-            self.writeline(f"{outer_output}.reset();")
+            if not isinstance(inner_output, ir.ShapeAsConstantBuffer):
+                # in ABI-compatible mode, we need to std::move subgraph output (inner_output)
+                # to the conditional output (outer_output), as RAIIAtenTensorHandle's copy
+                # constructor is deleted.
+                src = f"std::move({src})"
+                # in case the outer_output carried a value
+                # before (e.g., in the while_loop codegen)
+                self.writeline(f"{outer_output}.reset();")
             self.writeline(f"{outer_output} = {src};")
 
     def codegen_invoke_subgraph(self, invoke_subgraph):
@@ -1620,6 +1621,9 @@ class CppWrapperCpu(PythonWrapperCodegen):
             self.pop_codegened_graph()
 
     def codegen_while_loop(self, while_loop):
+        is_bool_pred = isinstance(
+            while_loop.cond_subgraph.graph.graph_outputs[0], ir.ShapeAsConstantBuffer
+        )
         name = while_loop.get_name()
         outer_carried_inputs = [
             buf.codegen_reference() for buf in while_loop.carried_inputs
@@ -1628,7 +1632,10 @@ class CppWrapperCpu(PythonWrapperCodegen):
             buf.codegen_reference() for buf in while_loop.additional_inputs
         ]
         cond_result_name = f"{name}_cond_result"
-        self.writeline(f"RAIIAtenTensorHandle {cond_result_name};")
+        if is_bool_pred:
+            self.writeline(f"bool {cond_result_name};")
+        else:
+            self.writeline(f"RAIIAtenTensorHandle {cond_result_name};")
 
         cond_outer_inputs = []
         for inp, out in zip(outer_carried_inputs, while_loop.outputs):
@@ -1658,8 +1665,11 @@ class CppWrapperCpu(PythonWrapperCodegen):
             while_loop.cond_subgraph, cond_outer_inputs, cond_outer_outputs
         )
 
-        cond_result = f"{cond_result_name}_scalar"
-        self.codegen_tensor_item(torch.bool, cond_result_name, cond_result)
+        if is_bool_pred:
+            cond_result = f"{cond_result_name}"
+        else:
+            cond_result = f"{cond_result_name}_scalar"
+            self.codegen_tensor_item(torch.bool, cond_result_name, cond_result)
         self.writeline(f"if (!{cond_result}) break;")
 
         self.writeline(ExitSubgraphLine(self))
