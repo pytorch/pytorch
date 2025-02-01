@@ -2403,16 +2403,6 @@ class TestFunctionalMapDataPipe(TestCase):
         self.assertEqual(2, len(batch_dp_2))
 
 
-# Metaclass conflict for Python 3.6
-# Multiple inheritance with NamedTuple is not supported for Python 3.9
-_generic_namedtuple_allowed = sys.version_info >= (3, 7) and sys.version_info < (3, 9)
-if _generic_namedtuple_allowed:
-
-    class InvalidData(NamedTuple, Generic[T_co]):
-        name: str
-        data: T_co
-
-
 class TestTyping(TestCase):
     def test_isinstance(self):
         class A(IterDataPipe):
@@ -2547,14 +2537,6 @@ class TestTyping(TestCase):
             class InvalidDP3(IterDataPipe[tuple[int, str]]):
                 def __iter__(self) -> Iterator[tuple]:  # type: ignore[override]
                     yield (0,)
-
-        if _generic_namedtuple_allowed:
-            with self.assertRaisesRegex(
-                TypeError, r"is not supported by Python typing"
-            ):
-
-                class InvalidDP4(IterDataPipe["InvalidData[int]"]):  # type: ignore[type-arg, misc]
-                    pass
 
         class DP1(IterDataPipe[tuple[int, str]]):
             def __init__(self, length):
