@@ -3,8 +3,9 @@
 #include <ATen/cpu/vec/intrinsics.h>
 #include <ATen/cpu/vec/vec_base.h>
 #include <ATen/cpu/vec/sve/sve_helper.h>
+#include <c10/util/irange.h>
 #include <cmath>
-#if defined(__aarch64__) && defined(AT_BUILD_ARM_VEC256_WITH_SLEEF)
+#if defined(__aarch64__) && defined(AT_BUILD_ARM_VECSVE_WITH_SLEEF)
 #include <sleef.h>
 #define USE_SLEEF(sleef_code, non_sleef_code) sleef_code
 #else
@@ -491,7 +492,6 @@ inline void convert(const double* src, double* dst, int64_t n) {
   for (int64_t i = 0; i < n - fraction; i += Vectorized<double>::size()) {
     svst1_f64(ptrue, dst + i, svldnt1_f64(ptrue, src + i));
   }
-#pragma unroll
   for (int64_t i = n - fraction; i < n; i += Vectorized<double>::size()) {
     svbool_t pg = svwhilelt_b64(i, n);
     svst1_f64(pg, dst + i, svldnt1_f64(pg, src + i));
