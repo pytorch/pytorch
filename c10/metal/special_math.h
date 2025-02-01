@@ -313,7 +313,7 @@ float log_gamma(const T x) {
 
 float zeta(float x, float q) {
   constexpr float MACHEP = 1.11022302462515654042E-16;
-  const float ZETA_EXPANSION[] = {
+  constexpr float ZETA_EXPANSION[] = {
       12.0,
       -720.0,
       30240.0,
