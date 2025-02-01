@@ -7404,8 +7404,10 @@ class WhileLoop(ExternKernel):
 
         # make sure cond_fn returns a boolean scalar Tensor
         assert len(cond_outputs) == 1, cond_outputs
-        assert cond_outputs[0].get_dtype() == torch.bool, cond_outputs
-        assert len(cond_outputs[0].get_size()) == 0, cond_outputs
+        p = cond_outputs[0]
+        if not isinstance(p, ShapeAsConstantBuffer):
+            assert p.get_dtype() == torch.bool, p
+            assert len(p.get_size()) == 0, p
 
         assert (
             len(all_inputs) > 0
