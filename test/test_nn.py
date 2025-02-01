@@ -6395,7 +6395,7 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
                 for scale_factor in [0.5, 1.5, 2]:
                     m = nn.Upsample(scale_factor=scale_factor, **kwargs)
                     in_t = torch.ones(1, 1, 2)
-                    out_size = int(math.floor(in_t.shape[-1] * scale_factor))
+                    out_size = math.floor(in_t.shape[-1] * scale_factor)
                     with warnings.catch_warnings(record=True) as w:
                         out_t = m(in_t)
                     self.assertEqual(torch.ones(1, 1, out_size), out_t.data)
@@ -6456,7 +6456,7 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
                 for scale_factor in [0.6, 1.6, 2.3]:
                     in_t = torch.ones(2, 2, 2, 2).to(device)
                     out_t = F.interpolate(in_t, scale_factor=scale_factor, **kwargs)
-                    out_size = int(math.floor(in_t.shape[-1] * scale_factor))
+                    out_size = math.floor(in_t.shape[-1] * scale_factor)
                     self.assertEqual(torch.ones(2, 2, out_size, out_size), out_t.data, atol=1e-5, rtol=0)
 
                     input = torch.randn(2, 2, 2, 2, requires_grad=True)
@@ -6631,7 +6631,7 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
                                        F.interpolate, in_t, size=(size,) * dim, **kwargs)
 
         def _test_interpolate_helper(in_t, scale_factor, layer):
-            out_size = int(math.floor(in_t.shape[-1] * scale_factor))
+            out_size = math.floor(in_t.shape[-1] * scale_factor)
             dim = len(in_t.shape) - 2
             out_shape = [1, 1] + [out_size] * dim
             with warnings.catch_warnings(record=True) as w:
@@ -9753,7 +9753,7 @@ class TestNNDeviceType(NNTestCase):
             in_t = torch.ones(
                 2, 3, 8, 8, device=device,
                 dtype=torch.double).contiguous(memory_format=memory_format).requires_grad_()
-            out_size = int(math.floor(in_t.shape[-1] * scale_factor))
+            out_size = math.floor(in_t.shape[-1] * scale_factor)
             with warnings.catch_warnings(record=True) as w:
                 out_t = F.interpolate(in_t, scale_factor=scale_factor, **kwargs)
             expected_out = torch.ones(2, 3, out_size, out_size, device=device, dtype=torch.double)
@@ -10006,7 +10006,7 @@ class TestNNDeviceType(NNTestCase):
             m = nn.Upsample(scale_factor=scale_factor, **kwargs)
             in_t = torch.ones(1, 2, 4, 4, 4, device=device, dtype=torch.double)
             in_t = in_t.contiguous(memory_format=memory_format).requires_grad_()
-            out_size = int(math.floor(in_t.shape[-1] * scale_factor))
+            out_size = math.floor(in_t.shape[-1] * scale_factor)
             with warnings.catch_warnings(record=True) as w:
                 out_t = m(in_t)
             expected_out = torch.ones(1, 2, out_size, out_size, out_size, device=device, dtype=torch.double)
@@ -11680,7 +11680,7 @@ class TestNNDeviceType(NNTestCase):
     @largeTensorTest("45GB", "cuda")
     @parametrize_test("reduction", ("none", "mean", "sum"))
     def test_nll_loss_large_tensor(self, device, reduction):
-        shape = [int(2 ** 16), int(2 ** 16) + 1]
+        shape = [(2 ** 16), (2 ** 16) + 1]
 
         input = torch.randn(shape, device=device, dtype=torch.float32, requires_grad=True)
         labels = torch.randint(shape[0], (shape[0],), dtype=torch.long, device=device)
@@ -12078,7 +12078,7 @@ if __name__ == '__main__':
     @largeTensorTest("70GB", "cuda")
     @parametrize_test("reduction", ("none", "mean", "sum"))
     def test_cross_entropy_large_tensor(self, device, reduction):
-        logits = torch.randn(int(2 ** 16), int(2 ** 16) + 1, dtype=torch.float32, device='cuda', requires_grad=True)
+        logits = torch.randn((2 ** 16), (2 ** 16) + 1, dtype=torch.float32, device='cuda', requires_grad=True)
         labels = torch.zeros(logits.size(0), dtype=torch.long, device='cuda')
         loss = F.cross_entropy(logits, labels, reduction=reduction)
         if reduction != "none":

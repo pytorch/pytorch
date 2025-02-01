@@ -1693,7 +1693,7 @@ class TestConvolutionNNDeviceType(NNTestCase):
             x = torch.rand(1, 1, in_size, device=device, dtype=dtype)
             y = torch.rand(1, 1, k_size, device=device, dtype=dtype)
             z = F.conv1d(x, y, padding="same", dilation=dilation, stride=stride)
-            self.assertEqual(z.size(2), int(math.ceil(in_size / stride)))
+            self.assertEqual(z.size(2), math.ceil(in_size / stride))
 
         # Compare F.conv1d padding='same' output against manual padding
         # Without strides/dilation

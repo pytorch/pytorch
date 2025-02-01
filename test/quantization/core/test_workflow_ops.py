@@ -245,7 +245,7 @@ def _get_scale_zp(
     elif initial_zero_point > qmax:
         nudged_zero_point = qmax
     else:
-        nudged_zero_point = int(round(initial_zero_point))
+        nudged_zero_point = round(initial_zero_point)
 
     return (scale, int(nudged_zero_point))
 

@@ -5219,7 +5219,7 @@ class TestLinalg(TestCase):
         def renorm(matrix, value, dim, max_norm):
             m1 = matrix.transpose(dim, 0).contiguous()
             # collapse non-dim dimensions.
-            m2 = m1.clone().resize_(m1.size(0), int(math.floor(m1.nelement() / m1.size(0))))
+            m2 = m1.clone().resize_(m1.size(0), math.floor(m1.nelement() / m1.size(0)))
             norms = m2.norm(value, 1, True)
             # clip
             new_norms = norms.clone()

@@ -17,7 +17,7 @@ from .setting import (
 
 
 def convert_time(seconds: float) -> str:
-    seconds = int(round(seconds))
+    seconds = round(seconds)
     seconds = seconds % (24 * 3600)
     hour = seconds // 3600
     seconds %= 3600

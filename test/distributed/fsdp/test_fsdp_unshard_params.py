@@ -402,8 +402,8 @@ class TestUnshardParams(TestUnshardParamsBase):
                     unsharded_outer_numel % self.world_size
                 )
         # Round up the sharded numel to account for padding
-        sharded_inner_numel = int(math.ceil(unsharded_inner_numel / self.world_size))
-        sharded_outer_numel = int(math.ceil(unsharded_outer_numel / self.world_size))
+        sharded_inner_numel = math.ceil(unsharded_inner_numel / self.world_size)
+        sharded_outer_numel = math.ceil(unsharded_outer_numel / self.world_size)
         inner_flat_param = model.module[0]._handle.flat_param
         outer_flat_param = model._handle.flat_param
         self.assertEqual(sharded_inner_numel, inner_flat_param.numel())

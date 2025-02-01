@@ -142,7 +142,7 @@ def upload_to_dynamodb(
                 doc["dynamoKey"] = generate_partition_key(repo, doc)
             # This is to move away the _event_time field from Rockset, which we cannot use when
             # reimport the data
-            doc["timestamp"] = int(round(time.time() * 1000))
+            doc["timestamp"] = round(time.time() * 1000)
             batch.put_item(Item=doc)
 
 

@@ -66,7 +66,7 @@ def _calculate_dynamic_qparams(X, dtype, reduce_range=False):
     elif initial_zero_point > qmax:
         nudged_zero_point = qmax
     else:
-        nudged_zero_point = int(round(initial_zero_point))
+        nudged_zero_point = round(initial_zero_point)
 
     return [scale.astype(np.float32), int(nudged_zero_point)]
 

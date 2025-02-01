@@ -797,7 +797,7 @@ class DistributedDataParallel(Module, Joinable):
                     "Run a dummy forward pass to correctly initialize the modules",
                 )
         # used for intra-node param sync and inter-node sync as well
-        self.broadcast_bucket_size = int(250 * 1024 * 1024)
+        self.broadcast_bucket_size = 250 * 1024 * 1024
 
         # reduction bucket size
         if bucket_cap_mb is None:

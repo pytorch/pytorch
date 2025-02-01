@@ -661,7 +661,7 @@ class TestQuantizedOps(TestCase):
         f_min, f_max = -1.0, 1.0
         q_min, q_max = torch.iinfo(torch_type).min, torch.iinfo(torch_type).max
         output_scale = (f_max - f_min) / (q_max - q_min + 1.0)
-        output_zero_point = int(round((q_max + q_min) / 2.0))
+        output_zero_point = round((q_max + q_min) / 2.0)
         qY = torch.quantize_per_tensor(Y, scale=output_scale,
                                        zero_point=output_zero_point,
                                        dtype=torch_type)

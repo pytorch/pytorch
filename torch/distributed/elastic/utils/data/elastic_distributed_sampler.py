@@ -42,8 +42,8 @@ class ElasticDistributedSampler(DistributedSampler):
             )
 
         self.start_index = start_index
-        self.num_samples = int(
-            math.ceil(float(len(self.dataset) - self.start_index) / self.num_replicas)  # type: ignore[arg-type]
+        self.num_samples = math.ceil(
+            float(len(self.dataset) - self.start_index) / self.num_replicas
         )
         self.total_size = self.num_samples * self.num_replicas
 

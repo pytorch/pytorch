@@ -1052,7 +1052,7 @@ class TestSerialization(TestCase, SerializationMixin):
         '''
         # Run GC to clear up as much memory as possible before running this test
         gc.collect()
-        big_model = torch.nn.ModuleList([torch.nn.Linear(1, int(1024 * 1024 * 1024) + 12, bias=False),
+        big_model = torch.nn.ModuleList([torch.nn.Linear(1, (1024 * 1024 * 1024) + 12, bias=False),
                                          torch.nn.Linear(1, 1, bias=False).to(torch.float8_e4m3fn),
                                          torch.nn.Linear(1, 2, bias=False).to(torch.float8_e4m3fn)])
 

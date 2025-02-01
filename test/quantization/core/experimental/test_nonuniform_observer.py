@@ -50,12 +50,12 @@ class TestNonUniformObserver(unittest.TestCase):
         self.assertEqual(gamma, gamma_test)
 
         # check quantization levels size
-        quantlevels_size_test = int(len(quantization_levels))
+        quantlevels_size_test = len(quantization_levels)
         quantlevels_size = 2**4
         self.assertEqual(quantlevels_size_test, quantlevels_size)
 
         # check level indices size
-        levelindices_size_test = int(len(level_indices))
+        levelindices_size_test = len(level_indices)
         self.assertEqual(levelindices_size_test, 16)
 
         # check level indices unique values
@@ -92,12 +92,12 @@ class TestNonUniformObserver(unittest.TestCase):
         self.assertEqual(gamma, gamma_test)
 
         # check quantization levels size
-        quantlevels_size_test = int(len(quantization_levels))
+        quantlevels_size_test = len(quantization_levels)
         quantlevels_size = 2**6
         self.assertEqual(quantlevels_size_test, quantlevels_size)
 
         # check level indices size
-        levelindices_size_test = int(len(level_indices))
+        levelindices_size_test = len(level_indices)
         self.assertEqual(levelindices_size_test, 64)
 
         # check level indices unique values
@@ -135,7 +135,7 @@ class TestNonUniformObserver(unittest.TestCase):
         self.assertEqual(gamma, gamma_test)
 
         # check quantization levels size
-        quantlevels_size_test = int(len(quantization_levels))
+        quantlevels_size_test = len(quantization_levels)
         self.assertEqual(quantlevels_size_test, 49)
 
         # check negatives of each element contained
@@ -148,7 +148,7 @@ class TestNonUniformObserver(unittest.TestCase):
         self.assertTrue(negatives_contained)
 
         # check level indices size
-        levelindices_size_test = int(len(level_indices))
+        levelindices_size_test = len(level_indices)
         self.assertEqual(levelindices_size_test, 49)
 
         # check level indices unique elements
@@ -181,12 +181,12 @@ class TestNonUniformObserver(unittest.TestCase):
         self.assertEqual(gamma, gamma_test)
 
         # check quantization levels size
-        quantlevels_size_test = int(len(quantization_levels))
+        quantlevels_size_test = len(quantization_levels)
         quantlevels_size = 2**6
         self.assertEqual(quantlevels_size_test, quantlevels_size)
 
         # check level indices size
-        levelindices_size_test = int(len(level_indices))
+        levelindices_size_test = len(level_indices)
         level_indices_size = 2**6
         self.assertEqual(levelindices_size_test, level_indices_size)
 

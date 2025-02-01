@@ -1130,7 +1130,7 @@ class BulkLoadingSampler(torch.utils.data.Sampler):
             yield x.tolist()
 
     def __len__(self):
-        return int(math.ceil(len(self.dataset) / float(self.batch_size)))
+        return math.ceil(len(self.dataset) / float(self.batch_size))
 
 
 class TestMultiEpochDataset(IterableDataset):
@@ -2175,7 +2175,7 @@ except RuntimeError as e:
             self._get_data_loader(self.dataset, batch_size=batch_size, sampler=sampler)
         )
         self.assertEqual(
-            int(math.ceil(float(num_samples) / batch_size)),
+            math.ceil(float(num_samples) / batch_size),
             count_num_samples_in_data_loader,
         )
 
@@ -3529,9 +3529,7 @@ class TestSlowIterableDataset(IterableDataset):
 
     def __iter__(self):
         worker_info = torch.utils.data.get_worker_info()
-        per_worker = int(
-            math.ceil((self.end - self.start) / float(worker_info.num_workers))
-        )
+        per_worker = math.ceil((self.end - self.start) / float(worker_info.num_workers))
         worker_id = worker_info.id
         iter_start = self.start + worker_id * per_worker
         iter_end = min(iter_start + per_worker, self.end)
