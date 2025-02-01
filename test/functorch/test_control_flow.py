@@ -305,7 +305,9 @@ def _while_loop_tests():
                     x + 1,
                 )
 
-            carry = ([a, b], {"int_carry": (2, 2, 3)}, x.sin())
+            # TODO: cannot do. {"int_carry" : (2, 2, 3)}). See more details in issue:
+            # https://github.com/pytorch/pytorch/issues/146213
+            carry = ([a, b], {"int_carry": (1, 1, 2)}, x.sin())
             out_shapes, out_it, out_x = while_loop(cond_fn, body_fn, carry)
             out_inc = pytree.tree_map(lambda x: x + 1, out_it)
             out_add = pytree.tree_map(lambda x: x + out_x, out_it)
@@ -6629,7 +6631,7 @@ class GraphModule(torch.nn.Module):
 
     @skipIfTorchDynamo("Graph is not captured correctly when test with dynamo")
     @parametrize("dynamic", [True, False])
-    @parametrize("backend", ["eager", "aot_eager"])
+    @parametrize("backend", ["eager", "aot_eager", "inductor"])
     def test_while_loop_op_int_carry_compile(self, dynamic, backend):
         from torch._dynamo.testing import EagerAndRecordGraphs
 
@@ -6785,7 +6787,7 @@ class GraphModule(torch.nn.Module):
 
     @skipIfTorchDynamo("Graph is not captured correctly when test with dynamo")
     @parametrize("dynamic", [True, False])
-    @parametrize("backend", ["eager", "aot_eager"])
+    @parametrize("backend", ["eager", "aot_eager", "inductor"])
     @torch._dynamo.config.patch(capture_scalar_outputs=True)
     def test_while_loop_op_constant_and_symint_output_compile(self, dynamic, backend):
         from torch._dynamo.testing import EagerAndRecordGraphs
@@ -6884,7 +6886,7 @@ class GraphModule(torch.nn.Module):
 
         while_loop_cond_graph_0 = self.while_loop_cond_graph_0
         while_loop_body_graph_0 = self.while_loop_body_graph_0
-        while_loop = torch.ops.higher_order.while_loop(while_loop_cond_graph_0, while_loop_body_graph_0, (sym_size_int_1, 3, 2, 2, 3, sin), ());  while_loop_cond_graph_0 = while_loop_body_graph_0 = sym_size_int_1 = sin = None
+        while_loop = torch.ops.higher_order.while_loop(while_loop_cond_graph_0, while_loop_body_graph_0, (sym_size_int_1, 3, 1, 1, 2, sin), ());  while_loop_cond_graph_0 = while_loop_body_graph_0 = sym_size_int_1 = sin = None
 
         getitem_6: "Sym(u5)" = while_loop[0]
         getitem_7: "Sym(u6)" = while_loop[1]
@@ -6927,7 +6929,7 @@ class GraphModule(torch.nn.Module):
 
     @skipIfTorchDynamo("Graph is not captured correctly when test with dynamo")
     @parametrize("dynamic", [True, False])
-    @parametrize("backend", ["eager", "aot_eager"])
+    @parametrize("backend", ["eager", "aot_eager", "inductor"])
     @torch._dynamo.config.patch(capture_scalar_outputs=True)
     def test_while_loop_op_pytree_int_carry_compile(self, dynamic, backend):
         from torch._dynamo.testing import EagerAndRecordGraphs
@@ -6953,7 +6955,7 @@ class GraphModule(torch.nn.Module):
 
         cond_fn_0 = self.cond_fn_0
         body_fn_0 = self.body_fn_0
-        while_loop = torch.ops.higher_order.while_loop(cond_fn_0, body_fn_0, (s0, s1, 2, 2, 3, child), (s0, s1));  cond_fn_0 = body_fn_0 = s0 = s1 = child = None
+        while_loop = torch.ops.higher_order.while_loop(cond_fn_0, body_fn_0, (s0, s1, 1, 1, 2, child), (s0, s1));  cond_fn_0 = body_fn_0 = s0 = s1 = child = None
 
         getitem_10: "Sym(u5)" = while_loop[0]
         getitem_11: "Sym(u6)" = while_loop[1]
