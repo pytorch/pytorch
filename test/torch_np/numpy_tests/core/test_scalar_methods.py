@@ -165,7 +165,6 @@ class TestIsInteger(TestCase):
 
 
 @skip(reason="XXX: implementation details of the type system differ")
-@skipif(sys.version_info < (3, 9), reason="Requires python 3.9")
 @instantiate_parametrized_tests
 class TestClassGetItem(TestCase):
     @parametrize(

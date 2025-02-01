@@ -1621,6 +1621,11 @@ void initJITBindings(PyObject* module) {
             return self.getRecordOffset(key);
           })
       .def(
+          "get_record_header_offset",
+          [](PyTorchStreamReader& self, const std::string& key) {
+            return self.getRecordHeaderOffset(key);
+          })
+      .def(
           "get_record_offset_no_read",
           [](PyTorchStreamReader& self,
              size_t zipfile_header_offset,
