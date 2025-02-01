@@ -2,15 +2,13 @@
 
 import io
 import tempfile
-import unittest
 
 import torch
 import torch.utils.show_pickle
-from torch.testing._internal.common_utils import IS_WINDOWS, run_tests, TestCase
+from torch.testing._internal.common_utils import run_tests, TestCase
 
 
 class TestShowPickle(TestCase):
-    @unittest.skipIf(IS_WINDOWS, "Can't re-open temp file on Windows")
     def test_scripted_model(self):
         class MyCoolModule(torch.nn.Module):
             def __init__(self, weight):
