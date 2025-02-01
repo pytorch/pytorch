@@ -75,7 +75,7 @@ class OpNamespace:
     def __init__(self):
         self.custom_function_name_counter: Counter[str] = Counter()
 
-    def add(self, name, fn, is_custom_function=False):
+    def add(self, name, fn, is_custom_function, is_traceable):
         if is_custom_function:
             name = "CppNode" + name
             count = self.custom_function_name_counter[name]
@@ -85,7 +85,8 @@ class OpNamespace:
             assert not hasattr(self, name)
 
         result = Op(name, fn, is_custom_function)
-        torch._dynamo.allow_in_graph(result)
+        if is_traceable:
+            torch._dynamo.allow_in_graph(result)
         setattr(self, name, result)
         return name
 
@@ -478,9 +479,9 @@ class AutogradCompilerInstance:
             # Weird quantity so it's easy to grep
             return torch.zeros([0, 123456789])
 
-    def bind_function(self, fn_name, fn, is_custom_function):
+    def bind_function(self, fn_name, fn, is_custom_function, is_traceable):
         """Binds ops.fn_name = fn"""
-        return ops.add(fn_name, fn, is_custom_function)
+        return ops.add(fn_name, fn, is_custom_function, is_traceable)
 
     def apply_functional(self, fn_name, grads, args, output_metadata):
         """Proxies a call to ops.fn_name(grads, *args) into the graph"""
