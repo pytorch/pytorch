@@ -382,8 +382,8 @@ float zeta(float x, float q) {
   return s;
 }
 
-template <typename T0, typename T1>
-float polygamma(const T0 input, const T1 order) {
+template <typename T0>
+float polygamma(const T0 input, const int64_t order) {
   float x = input;
   float n = order;
   float sgn = ((order % 2) ? 1 : -1);
