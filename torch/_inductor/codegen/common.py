@@ -723,6 +723,24 @@ class OpDecompositions:
         return ops.to_dtype(ops.round(a), dtype)
 
 
+_RE_PAREN_NOT_NEEDED = re.compile(r"[a-z0-9_.]+|\([^)]*\)|", flags=re.IGNORECASE)
+
+
+def _all_in_parens(string: str) -> bool:
+    if string[0] != "(" or len(string) < 2:
+        return False
+    count = 1
+    for i, char in enumerate(string[1:]):
+        if char == "(":
+            count += 1
+        elif char == ")":
+            count -= 1
+        if count == 0 and i != len(string) - 2:
+            return False
+    assert count == 0
+    return True
+
+
 class OpOverrides(OpDecompositions):
     def __init__(self, parent):
         super().__init__()
@@ -730,29 +748,12 @@ class OpOverrides(OpDecompositions):
 
     @staticmethod
     def paren(string: str) -> str:
-        def all_in_parens(string: str) -> bool:
-            if string[0] != "(" or len(string) < 2:
-                return False
-            count = 1
-            for i, char in enumerate(string[1:]):
-                if char == "(":
-                    count += 1
-                elif char == ")":
-                    count -= 1
-                if count == 0 and i != len(string) - 2:
-                    return False
-            assert count == 0
-            return True
-
         if (
             isinstance(string, CSEVariable)
-            or re.match(r"^[a-z0-9_.]+$", string, re.IGNORECASE)
-            or re.match(r"^\([^)]*\)$", string, re.IGNORECASE)
-            or string == ""
+            or _RE_PAREN_NOT_NEEDED.fullmatch(string)
+            or _all_in_parens(string)
         ):
-            return string
-        # don't put extra parens for strings that are already wrapped in parens
-        if all_in_parens(string):
+            # don't put extra parens for strings that are already wrapped in parens
             return string
         return f"({string})"
 
