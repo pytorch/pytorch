@@ -81,7 +81,8 @@ static std::string bind_function(
     const std::string& fn_name,
     functional_apply_t fn,
     std::vector<at::TypePtr> packed_args_schema,
-    bool is_custom_function) {
+    bool is_custom_function,
+    bool is_traceable) {
   // This is the function that can be called from Python.
   auto py_func = py::cpp_function(
       [packed_args_schema = std::move(packed_args_schema), fn = std::move(fn)](
@@ -113,8 +114,8 @@ static std::string bind_function(
         return jit::toPyObject(at::IValue(outputs));
       });
   py::handle handle(py_compiler);
-  auto result =
-      handle.attr("bind_function")(fn_name, py_func, is_custom_function);
+  auto result = handle.attr("bind_function")(
+      fn_name, py_func, is_custom_function, is_traceable);
   return result.cast<std::string>();
 }
 
@@ -155,13 +156,15 @@ struct PyCompilerInterfaceImpl : PyCompilerInterface {
       const std::string& fn_name,
       functional_apply_t fn,
       std::vector<at::TypePtr> packed_args_schema,
-      bool is_custom_function = false) override {
+      bool is_custom_function = false,
+      bool is_traceable = true) override {
     return torch::dynamo::autograd::bind_function(
         py_compiler,
         fn_name,
         std::move(fn),
         std::move(packed_args_schema),
-        is_custom_function);
+        is_custom_function,
+        is_traceable);
   }
   variable_list call_function(
       PyObject* py_compiler,
@@ -922,7 +925,8 @@ static CacheNode* _compiled_autograd_impl(
             "validate_outputs",
             validate_outputs,
             schema,
-            false);
+            /*is_custom_function=*/false,
+            /*is_traceable=*/true);
       });
 
       // Don't emit validate_outputs nodes that follow a CompiledBackward node.
