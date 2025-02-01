@@ -12,7 +12,7 @@ from torch.utils._ordered_set import OrderedSet
 from .ops_handler import OP_NAMES, OpsHandler
 from .utils import upcast_compute_type
 from .virtualized import OpsValue, V
-from ..fx.experimental.migrate_gradual_types.constraint_transformation import register_transformation_rule
+
 
 T = TypeVar("T")
 
@@ -160,6 +160,7 @@ class DtypePropagationOpsHandler:
         mask: DTypeArg, body: Callable[[], DTypeArg], other: DTypeArg
     ) -> torch.dtype:
         from .loop_body import LoopBodyBlock
+
         assert isinstance(body, LoopBodyBlock), "body must be a LoopBodyBlock"
         # TODO - we avoid calling this in codegen, needs work for non codegen use cases
         loads = body.graph.find_nodes(op="call_method", target="load")
