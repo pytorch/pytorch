@@ -1335,8 +1335,8 @@ class ScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
             first_slice_copy,
             stack_y,
         )
-        from torch._higher_order_ops.while_loop import _create_unbacked_symint
 
+        from . import TensorVariable
         from .builder import wrap_fx_proxy
 
         args, kwargs = LazyVariableTracker.realize_all((args, kwargs))
@@ -1348,6 +1348,10 @@ class ScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
             *args, **kwargs
         )
         assert isinstance(additional_inputs, variables.TupleVariable)
+
+        # Ensure that all additional_inputs are TensorVariables and no
+        # ints or SymInts as this is not yet supported
+        assert all(isinstance(t, TensorVariable) for t in additional_inputs.items)
 
         if xs.python_type() != list:
             unimplemented(
@@ -1372,17 +1376,6 @@ class ScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
 
         # Trace the subgraph
         with discard_graph_changes(tx):
-            # See NOTE [unspecialize int carry with unbacked symints]
-            # Note: this must be run under discard graph changes.
-            def create_unbacked_sym_node_var(tx) -> SymNodeVariable:
-                example_value = _create_unbacked_symint(
-                    tx.output.fake_mode, ignore_fresh_unbacked_symbols=True
-                )
-                proxy = tx.output.current_tracer.create_graph_input(
-                    "unbacked_symint", type(example_value), example_value
-                )
-                return SymNodeVariable.create(tx, proxy, example_value)
-
             sub_args_init = [
                 ini.call_method(tx, "clone", args=(), kwargs={}) for ini in init.items
             ]
@@ -1392,10 +1385,7 @@ class ScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
                 _make_inlined(tx, first_slice_copy)(inp) for inp in xs.items
             ]
             sub_args_additional_inputs = [
-                create_unbacked_sym_node_var(tx)
-                if (isinstance(t, ConstantVariable) and t.python_type() is int)
-                or (isinstance(t, SymNodeVariable))
-                else t.call_method(tx, "clone", args=(), kwargs={})
+                t.call_method(tx, "clone", args=(), kwargs={})
                 for t in additional_inputs.items
             ]
 

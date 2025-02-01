@@ -6535,7 +6535,7 @@ def forward(self, L_init_ : torch.Tensor, L_xs_ : torch.Tensor, L_add_closure_0_
     r_4 = r_3.add(l_add_closure_0_cell_contents_1_0_);  r_3 = None
     r_5 = r_4.sum();  r_4 = r_5 = None
     scan_combine_fn_0 = self.scan_combine_fn_0
-    scan = torch.ops.higher_order.scan(scan_combine_fn_0, [l_init_], [r], False, [l_add_closure_0_cell_contents_0_param_, l_add_closure_0_cell_contents_1_0_]);  scan_combine_fn_0 = l_init_ = r = l_add_closure_0_cell_contents_0_param_ = l_add_closure_0_cell_contents_1_0_ = None
+    scan = torch.ops.higher_order.scan(scan_combine_fn_0, [l_init_], [r], False, (l_add_closure_0_cell_contents_0_param_, l_add_closure_0_cell_contents_1_0_));  scan_combine_fn_0 = l_init_ = r = l_add_closure_0_cell_contents_0_param_ = l_add_closure_0_cell_contents_1_0_ = None
     getitem = scan[0]
     getitem_1 = scan[1];  scan = None
     return (getitem, getitem_1)""",  # noqa: B950

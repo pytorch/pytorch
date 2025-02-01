@@ -174,9 +174,8 @@ doesn't match the length of the pytree of the init {len(leaves_init)}"
     _check_new_carry_match_init(leaves_init, carry_leaves)
 
     # There are no pytree restrictions on the second output of the operator
-    out_leaves, tree_out = pytree.tree_flatten(out[1])
+    tree_out = pytree.tree_structure(out[1])
 
-    # TODO: Support closures/nn_modules in order to be able represent RNNs with scan
     # TODO: Support _inductor lowering
     # TODO: Support Autograd
     # TODO: Unify handling of pytrees for control flow ops, such as cond, while_loop, etc.
