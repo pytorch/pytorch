@@ -41,7 +41,7 @@ from torch.utils._sympy.value_ranges import bound_sympy, ValueRangeAnalysis, Val
 
 from .. import config, metrics
 from ..dtype_propagation import DtypePropagationOpsHandler
-from ..ops_handler import BasicMathOps, DefaultHandler
+from ..ops_handler import BasicMathOpsMixin, DefaultHandler
 from ..utils import (
     boolean_ops,
     DeferredLineBase,
@@ -763,7 +763,7 @@ def _all_in_parens(string: str) -> bool:
     return True
 
 
-class OpOverrides(BasicMathOps, OpDecompositions):
+class OpOverrides(BasicMathOpsMixin, OpDecompositions, OpsHandler[Any]):
     @staticmethod
     def paren(string: OpVarT) -> OpVarT:
         if (
@@ -1221,12 +1221,6 @@ pointwise_overrides_data: dict[str, OverridesData] = dict(
         name="special_laguerre_polynomial_l",
     ),
 )
-
-
-if TYPE_CHECKING:
-
-    class _typecheck_OpOverrides(OpOverrides, OpsHandler[str]):
-        pass  # mypy will error if we got any of the signatures wrong
 
 
 class DeferredLine(DeferredLineBase):
@@ -2549,9 +2543,3 @@ class CSEProxy(DefaultHandler):
             sorter,
             sorter_indices,
         )
-
-
-if TYPE_CHECKING:
-
-    class _typecheck_CSEProxy(CSEProxy, OpsHandler[CSEVariable]):
-        pass

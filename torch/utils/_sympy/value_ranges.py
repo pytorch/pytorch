@@ -8,6 +8,7 @@ import logging
 import math
 import operator
 from typing import (
+    Any,
     Callable,
     Generic,
     Optional,
@@ -26,6 +27,7 @@ import torch
 from torch._logging import LazyString
 from torch._prims_common import dtype_to_type
 
+from ..._inductor.ops_handler import DefaultHandler
 from .functions import (
     _keep_float,
     FloatTrueDiv,
@@ -1004,7 +1006,7 @@ class SymPyValueRangeAnalysis:
         return ValueRanges.increasing_map(x, TruncToFloat)
 
 
-class ValueRangeAnalysis(SymPyValueRangeAnalysis):
+class ValueRangeAnalysis(SymPyValueRangeAnalysis, DefaultHandler):
     def __init__(self) -> None:
         self.name = "ValueRangeAnalysis"
         boolean_operators = (
@@ -1021,8 +1023,7 @@ class ValueRangeAnalysis(SymPyValueRangeAnalysis):
         # just assuming bools can have both values
         return ValueRanges(sympy.false, sympy.true)  # type: ignore[arg-type]
 
-    @staticmethod
-    def default_handler(*args, **kwargs):
+    def _default(self, name: str, args: tuple[Any, ...], kwargs: dict[str, Any]) -> Any:
         # many ops are unlikely to show up in optimizable indexing compute,
         # so we dont have full coverage
         return ValueRanges.unknown()
@@ -1033,7 +1034,13 @@ class ValueRangeAnalysis(SymPyValueRangeAnalysis):
     def store(self, name, index, value, mode=None):
         return
 
-    def reduction(self, name, dtype, src_dtype, reduction_type, index, value):
+    def reduction(
+        self,
+        dtype: torch.dtype,
+        src_dtype: torch.dtype,
+        reduction_type,
+        value,
+    ):
         return ValueRanges.unknown()
 
     @classmethod
@@ -1042,7 +1049,12 @@ class ValueRangeAnalysis(SymPyValueRangeAnalysis):
         return cls.to_dtype(index, dtype)
 
     @staticmethod
-    def to_dtype(x, dtype: torch.dtype, src_dtype: Optional[torch.dtype] = None):
+    def to_dtype(
+        x,
+        dtype: torch.dtype,
+        src_dtype: Optional[torch.dtype] = None,
+        use_compute_types: bool = True,
+    ):
         x = ValueRanges.wrap(x)
 
         if dtype == torch.bool:
@@ -1100,10 +1112,6 @@ class ValueRangeAnalysis(SymPyValueRangeAnalysis):
     @classmethod
     def sub(cls, a, b):
         return cls.add(a, cls.neg(b))
-
-    def __getattr__(self, name):
-        log.debug("unhandled ValueRange op %s", name)
-        return self.default_handler
 
 
 def bound_sympy(
