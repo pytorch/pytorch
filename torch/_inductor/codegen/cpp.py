@@ -1812,9 +1812,9 @@ class CppVecOverrides(CppOverrides):
     @classmethod
     def _initialize_scalarize(cls):
         for name, method in vars(CppOverrides).items():
-            if getattr(method, "__class__", None) == staticmethod and name not in vars(
-                CppVecOverrides
-            ):
+            if getattr(
+                method, "__class__", None
+            ) == staticmethod and cls._is_unimplemented(name):
                 func = cls._scalarize(method.__func__)
                 func.__name__ = name
                 setattr(cls, name, staticmethod(func))

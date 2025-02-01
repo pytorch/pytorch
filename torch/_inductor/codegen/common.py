@@ -950,7 +950,13 @@ class OpOverrides(BasicMathOps, OpDecompositions):
             )
 
         unimplemented.__name__ = name
+        unimplemented.is_unimplemented = True  # type: ignore[attr-defined]
         return unimplemented
+
+    @classmethod
+    def _is_unimplemented(cls, name: str) -> bool:
+        fn = getattr(cls, name, None)
+        return not fn or getattr(fn, "is_unimplemented", False)
 
     @classmethod
     def _initialize_pointwise_overrides(cls, target: str) -> None:
