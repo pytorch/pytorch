@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import itertools
+import re
 from typing import Any, Callable, Generic, Literal, NamedTuple, Optional, TypeVar, Union
 from typing_extensions import Protocol
 from unittest.mock import patch
@@ -517,17 +518,6 @@ class OpsHandler(Protocol[T]):
     def rshift(self, x0: T, x1: T) -> T:
         ...
 
-    def getitem(self, x0: T, x1: T) -> T:
-        # TODO: this is probably just illegal lol
-        ...
-
-    def matmul(self, x0: T, x1: T) -> T:
-        # TODO: this is probably just illegal lol
-        ...
-
-    def invert(self, x0: T) -> T:
-        ...
-
     # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     # These are "special" operators.  These only exist if the target
     # language actually supports the operator.  Keep this in sync with
@@ -683,11 +673,6 @@ class OpsHandler(Protocol[T]):
         """
         ...
 
-    def div(self, x0: T, x1: T) -> T:
-        """TODO: to be removed.  This renders as / no matter what the backend is
-        which is incoherent."""
-        ...
-
     def mod(self, x0: T, x1: T) -> T:
         """C-style modulus, take sign from LHS (x0)."""
         ...
@@ -696,8 +681,12 @@ class OpsHandler(Protocol[T]):
         """Python-style modulus, take sign from RHS (x1)."""
         ...
 
-    def round_decimal(self, x0: T, x1: T) -> T:
-        """Python-style round with decimal argument"""
+    def square(self, x0: T) -> T:
+        ...
+
+    def check_bounds(
+        self, expr: sympy.Expr, size: sympy.Expr, lower: bool, upper: bool
+    ) -> None:
         ...
 
     # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -734,16 +723,38 @@ class OpsHandler(Protocol[T]):
     def libdevice_log(self, x0: T) -> T:
         ...
 
+    # triton-only
+    def inline_asm_elementwise(
+        self,
+        *inputs: T,
+        asm: str,
+        constraints: Optional[str] = None,
+        dtype: torch.dtype = torch.float32,
+        is_pure: bool = True,
+        pack: int = 1,
+    ) -> T:
+        ...
+
+
+_ignore_op_re = re.compile(r"_.*|paren").fullmatch
+
+
+def list_ops(cls: type[Any]):
+    return OrderedSet([x for x in dir(cls) if not _ignore_op_re(x)])
+
+
+OP_NAMES = list_ops(OpsHandler)
+
+
+def _return_none(*args, **kwargs):
+    return None
+
 
 class NoopHandler:
-    def __getattr__(self, name):
-        if name == "name":
-            return "NoopHandler"
+    name = "NoopHandler"
 
-        def inner(*args, **kwargs):
-            return None
-
-        return inner
+    def __getattr__(self, name: str) -> Callable[..., None]:
+        return _return_none
 
     @staticmethod
     def masked(mask, body, other) -> None:
@@ -771,11 +782,89 @@ def _typecheck_NoopHandler(h: NoopHandler) -> OpsHandler[None]:
     return h
 
 
-class MockHandler:
-    def __getattr__(self, name):
-        if name == "name":
-            return "MockHandler"
+class BasicMathOps:
+    @staticmethod
+    def add(a, b):
+        return f"{a} + {b}"
 
+    @staticmethod
+    def sub(a, b):
+        return f"{a} - {b}"
+
+    @staticmethod
+    def mul(a, b):
+        return f"{a} * {b}"
+
+    @staticmethod
+    def floordiv(a, b):
+        return f"{a} // {b}"
+
+    @staticmethod
+    def truediv(a, b):
+        return f"{a} / {b}"
+
+    @staticmethod
+    def mod(a, b):
+        # careful, depending on target semantics varies
+        return f"{a} % {b}"
+
+    @staticmethod
+    def pow(a, b):
+        return f"{a} ** {b}"
+
+    @staticmethod
+    def lshift(a, b):
+        return f"{a} << {b}"
+
+    @staticmethod
+    def rshift(a, b):
+        return f"{a} >> {b}"
+
+    @staticmethod
+    def and_(a, b):
+        return f"{a} & {b}"
+
+    @staticmethod
+    def or_(a, b):
+        return f"{a} | {b}"
+
+    @staticmethod
+    def xor(a, b):
+        return f"{a} ^ {b}"
+
+    @staticmethod
+    def eq(a, b):
+        return f"{a} == {b}"
+
+    @staticmethod
+    def ne(a, b):
+        return f"{a} != {b}"
+
+    @staticmethod
+    def lt(a, b):
+        return f"{a} < {b}"
+
+    @staticmethod
+    def gt(a, b):
+        return f"{a} > {b}"
+
+    @staticmethod
+    def le(a, b):
+        return f"{a} <= {b}"
+
+    @staticmethod
+    def ge(a, b):
+        return f"{a} >= {b}"
+
+    @staticmethod
+    def neg(a):
+        return f"-{a}"
+
+
+class MockHandler(BasicMathOps):
+    name = "MockHandler"
+
+    def __getattr__(self, name):
         def inner(*args, **kwargs):
             fargs = [_arg_str(a) for a in args]
             fargs.extend(f"{k}={v}" for k, v in kwargs.items())
@@ -808,41 +897,6 @@ class MockHandler:
     @staticmethod
     def indirect_indexing(index_var, size, check=True, wrap_neg=True) -> sympy.Symbol:
         return sympy_index_symbol(str(index_var))
-
-    @classmethod
-    def _init_cls(cls):
-        def make_handler(format_string):
-            @staticmethod  # type: ignore[misc]
-            def inner(*args):
-                return format_string.format(*args)
-
-            return inner
-
-        for name, format_string in {
-            "add": "{} + {}",
-            "sub": "{} - {}",
-            "mul": "{} * {}",
-            "floordiv": "{} // {}",
-            "truediv": "{} / {}",
-            "mod": "{} % {}",  # careful, depending on target semantics varies
-            "pow": "{} ** {}",
-            "lshift": "{} << {}",
-            "rshift": "{} >> {}",
-            "and_": "{} & {}",
-            "or_": "{} | {}",
-            "xor": "{} ^ {}",
-            "eq": "{} == {}",
-            "ne": "{} != {}",
-            "lt": "{} < {}",
-            "gt": "{} > {}",
-            "le": "{} <= {}",
-            "ge": "{} >= {}",
-            "neg": "-{}",
-        }.items():
-            setattr(cls, name, make_handler(format_string))
-
-
-MockHandler._init_cls()
 
 
 # Use mypy to check protocol implemented correctly
@@ -923,7 +977,7 @@ def _typecheck_KernelFormatterHandler(h: KernelFormatterHandler) -> OpsHandler[s
 
 
 class WrapperHandler(Generic[T]):
-    def __init__(self, inner: OpsHandler[T]):
+    def __init__(self, inner: Any):
         self._inner = inner
 
     def __getattr__(self, item):

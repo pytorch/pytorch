@@ -42,6 +42,7 @@ from torch.utils._sympy.value_ranges import bound_sympy, ValueRangeAnalysis, Val
 
 from .. import config, metrics
 from ..dtype_propagation import DtypePropagationOpsHandler
+from ..ops_handler import BasicMathOps
 from ..utils import (
     boolean_ops,
     DeferredLineBase,
@@ -760,11 +761,7 @@ def _all_in_parens(string: str) -> bool:
     return True
 
 
-class OpOverrides(OpDecompositions):
-    def __init__(self, parent: OpsHandler[OpVarT]) -> None:
-        super().__init__()
-        self._parent = parent
-
+class OpOverrides(BasicMathOps, OpDecompositions):
     @staticmethod
     def paren(string: OpVarT) -> OpVarT:
         if (
@@ -775,9 +772,6 @@ class OpOverrides(OpDecompositions):
             # don't put extra parens for strings that are already wrapped in parens
             return string
         return f"({string})"
-
-    def __getattr__(self, item: str) -> Callable[..., Any]:
-        return getattr(self._parent, item)
 
     @staticmethod
     def constant(value: Union[bool, float, int], dtype: torch.dtype) -> OpVarT:
@@ -851,15 +845,123 @@ class OpOverrides(OpDecompositions):
     def load_seed(name: str, offset: OpVarT) -> OpVarT:
         return ops.load(name, sympy.Integer(offset))
 
+    def indirect_indexing(
+        self,
+        var: OpVarT,
+        size: Union[sympy.Expr, int],
+        check: bool = True,
+        wrap_neg: bool = True,
+    ) -> sympy.Symbol:
+        raise NotImplementedError(
+            f"{type(self).__name__}: indirect_indexing should be handled by CSEProxy"
+        )
+
+    def check_bounds(
+        self, expr: sympy.Expr, size: sympy.Expr, lower: bool, upper: bool
+    ) -> None:
+        raise NotImplementedError(
+            f"{type(self).__name__}: check_bounds should be handled by CSEProxy"
+        )
+
+    def load(self, name: str, index: sympy.Expr) -> OpVarT:
+        raise NotImplementedError(
+            f"{type(self).__name__}: load should be handled by CSEProxy"
+        )
+
+    def store(
+        self, name: str, index: sympy.Expr, value: OpVarT, mode: StoreMode = None
+    ) -> None:
+        raise NotImplementedError(
+            f"{type(self).__name__}: store should be handled by CSEProxy"
+        )
+
+    def store_reduction(self, name: str, index: sympy.Expr, value: OpVarT) -> None:
+        raise NotImplementedError(
+            f"{type(self).__name__}: store_reduction should be handled by CSEProxy"
+        )
+
+    def reduction(
+        self,
+        dtype: torch.dtype,
+        src_dtype: torch.dtype,
+        reduction_type: ReductionType,
+        value: Union[OpVarT, tuple[OpVarT, ...]],
+    ) -> Union[OpVarT, tuple[OpVarT, ...]]:
+        raise NotImplementedError(
+            f"{type(self).__name__}: reduction should be handled by CSEProxy"
+        )
+
+    def scan(
+        self,
+        dtypes: tuple[torch.dtype, ...],
+        combine_fn: Callable[
+            [tuple[OpVarT, ...], tuple[OpVarT, ...]],
+            tuple[OpVarT, ...],
+        ],
+        values: tuple[OpVarT, ...],
+    ) -> tuple[OpVarT, ...]:
+        raise NotImplementedError(
+            f"{type(self).__name__}: scan should be handled by CSEProxy"
+        )
+
+    def sort(
+        self,
+        dtypes: tuple[torch.dtype, ...],
+        values: tuple[OpVarT, ...],
+        stable: bool,
+        descending: bool,
+    ) -> tuple[OpVarT, ...]:
+        raise NotImplementedError(
+            f"{type(self).__name__}: sort should be handled by CSEProxy"
+        )
+
+    def bucketize(
+        self,
+        values: OpVarT,
+        boundaries: tuple[str, sympy.Expr, sympy.Expr, sympy.Expr],
+        boundary_indices: OpVarT,
+        indexing_dtype: torch.dtype,
+        right: bool,
+        sorter: Optional[tuple[str, sympy.Expr]] = None,
+        sorter_indices: Optional[OpVarT] = None,
+    ) -> OpVarT:
+        raise NotImplementedError(
+            f"{type(self).__name__}: bucketize should be handled by CSEProxy"
+        )
+
+    def inline_asm_elementwise(
+        self,
+        *inputs: OpVarT,
+        asm: str,
+        constraints: Optional[str] = None,
+        dtype: torch.dtype = torch.float32,
+        is_pure: bool = True,
+        pack: int = 1,
+    ) -> OpVarT:
+        raise NotImplementedError(
+            f"{type(self).__name__}: inline_asm_elementwise only implemented for Triton backend"
+        )
+
+    @staticmethod
+    def _unimplemented(name: str) -> Callable[..., OpVarT]:
+        def unimplemented(self: OpOverrides, *args: Any, **kwargs: Any) -> OpVarT:
+            raise NotImplementedError(
+                f"{type(self).__name__} does not implement ops.{name}"
+            )
+
+        unimplemented.__name__ = name
+        return unimplemented
+
     @classmethod
     def _initialize_pointwise_overrides(cls, target: str) -> None:
-        assert target in ("triton", "cpp", "cppvec"), target
+        assert target in ("triton", "cpp", "cppvec", "halide", "mps"), target
 
         for funcname, data in pointwise_overrides_data.items():
             impl = getattr(data, target)
             if impl is None:
-                continue
-            setattr(cls, funcname, staticmethod(impl))
+                setattr(cls, funcname, cls._unimplemented(funcname))
+            else:
+                setattr(cls, funcname, staticmethod(impl))
 
 
 @dataclasses.dataclass
@@ -873,6 +975,8 @@ class OverridesData:
     type_promotion_kind: ELEMENTWISE_TYPE_PROMOTION_KIND = (
         ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
     )
+    halide: Optional[Callable[..., str]] = None
+    mps: Optional[Callable[..., str]] = None
 
 
 # NB: if you add a new special function, don't forget to update
@@ -1104,8 +1208,8 @@ pointwise_overrides_data: dict[str, OverridesData] = dict(
 
 
 # Use mypy to check protocol implemented correctly
-def _typecheck_OpOverrides(h: OpOverrides) -> OpsHandler[OpVarT]:
-    return h
+class _typecheck_OpOverrides(OpOverrides, OpsHandler[OpVarT]):
+    pass
 
 
 class DeferredLine(DeferredLineBase):
@@ -1703,7 +1807,7 @@ class CodeGen:
 class Kernel(CodeGen, Generic[CSEVariableType]):
     newvar_prefix: str = ""
     suffix: str = ""
-    overrides: Optional[Callable[[OpsHandler[Any]], OpsHandler[Any]]] = None
+    overrides: Optional[Callable[[], OpsHandler[Any]]] = None
 
     def __init__(
         self, args: Optional[KernelArgs] = None, increase_kernel_count: bool = True
@@ -1890,8 +1994,9 @@ class Kernel(CodeGen, Generic[CSEVariableType]):
     def __enter__(self) -> typing.Self:
         super().__enter__()
         assert self.overrides
-        parent_handler = self.overrides(V.get_ops_handler())
-        self.exit_stack.enter_context(V.set_ops_handler(CSEProxy(self, parent_handler)))
+        self.exit_stack.enter_context(
+            V.set_ops_handler(CSEProxy(self, self.overrides()))
+        )
         self.exit_stack.enter_context(V.set_kernel_handler(self))
         return self
 

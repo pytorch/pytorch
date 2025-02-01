@@ -211,10 +211,6 @@ class DtypePropagationOpsHandler:
         return promote_types([a, b])
 
     @staticmethod
-    def div(a: DTypeArg, b: DTypeArg) -> torch.dtype:
-        return promote_types([a, b])
-
-    @staticmethod
     def truediv(a: DTypeArg, b: DTypeArg) -> torch.dtype:
         return promote_types([a, b])
 
@@ -333,10 +329,6 @@ class DtypePropagationOpsHandler:
         )
 
     @staticmethod
-    def getitem(x: DTypeArg, y: DTypeArg) -> torch.dtype:
-        raise RuntimeError("Unexpected op: getitem")
-
-    @staticmethod
     def trunc_to_int(x: DTypeArg, dtype: torch.dtype) -> torch.dtype:
         return dtype
 
@@ -353,12 +345,7 @@ class DtypePropagationOpsHandler:
         return promote_types([x, y])
 
     @staticmethod
-    def round_decimal(x: DTypeArg, y: DTypeArg) -> torch.dtype:
-        # TODO - dont see it anywhere..
-        return promote_types([x])
-
-    @staticmethod
-    def halide_clamp(value, size, check):
+    def _halide_clamp(value, size, check):
         # TODO - way of registering dtype for op in backend
         return torch.int32
 
@@ -375,11 +362,3 @@ class DtypePropagationOpsHandler:
     @staticmethod
     def libdevice_abs(x: DTypeArg) -> torch.dtype:
         return promote_types([x])
-
-    @staticmethod
-    def invert(x: DTypeArg) -> torch.dtype:
-        raise RuntimeError("Unexpected op: invert")
-
-    @staticmethod
-    def matmul(x: DTypeArg, y: DTypeArg) -> torch.dtype:
-        raise RuntimeError("Unexpected op: matmul")
