@@ -59,11 +59,12 @@ from __future__ import annotations
 
 from contextlib import AbstractContextManager, contextmanager
 from threading import local
-from typing import Any, Callable, Generic, TYPE_CHECKING, TypeVar, Union
+from typing import Any, Callable, cast, Generic, TYPE_CHECKING, TypeVar, Union
 
 from torch.utils._ordered_set import OrderedSet
 
 from .ops_handler import (  # noqa: F401
+    DefaultHandler,
     KernelFormatterHandler,
     MockHandler,
     OpsHandler,
@@ -154,7 +155,9 @@ class NullKernelHandler(NullHandler):
         self.index_dtype = "tl.int64"
 
 
-_ops: Virtualized[OpsHandler[Any]] = Virtualized("ops", MockHandler)
+_ops: Virtualized[OpsHandler[Any]] = Virtualized(
+    "ops", cast(type[OpsHandler[Any]], MockHandler)
+)
 _graph: Virtualized[GraphLowering] = Virtualized("graph", NullHandler)
 _real_inputs: Virtualized[list[torch.Tensor]] = Virtualized("real_inputs", NullHandler)
 _fake_mode: Virtualized[FakeTensorMode] = Virtualized("fake_mode", NullHandler)
@@ -272,18 +275,15 @@ class OpsValue:
         return ops.bitwise_left_shift(self, n)
 
 
-class OpsWrapper:
+class OpsWrapper(DefaultHandler):
     """This wraps any returned IR values into an `OpsValue` instance, so that we
     can overload the magic methods for writing mathematical expressions fluently.
     """
 
-    def __getattr__(self, name):
-        def inner(*args, **kwargs):
-            new_args = [OpsWrapper._unwrap(a) for a in args]
-            new_kwargs = {k: OpsWrapper._unwrap(v) for k, v in kwargs.items()}
-            return OpsWrapper._wrap(getattr(_ops, name)(*new_args, **new_kwargs))
-
-        return inner
+    def _default(self, name: str, args: tuple[Any, ...], kwargs: dict[str, Any]) -> Any:
+        new_args = [OpsWrapper._unwrap(a) for a in args]
+        new_kwargs = {k: OpsWrapper._unwrap(v) for k, v in kwargs.items()}
+        return OpsWrapper._wrap(getattr(_ops, name)(*new_args, **new_kwargs))
 
     @staticmethod
     def _unwrap(x):
@@ -306,7 +306,9 @@ class OpsWrapper:
         return _ops.indirect_indexing(index, size, check, wrap_neg)
 
 
-ops = OpsWrapper()
+# we lie about the type of ops so the rest of the codebase typecheck properly
+# DefaultHandler implements the OpsHandler protocol via metaprogramming
+ops = cast(OpsHandler[Any], OpsWrapper())
 
 
 class _V:

@@ -1,6 +1,19 @@
 # mypy: allow-untyped-defs
+from __future__ import annotations
+
 import itertools
-from typing import Any, Callable, Generic, Literal, NamedTuple, Optional, TypeVar, Union
+import re
+from types import NoneType
+from typing import (
+    Any,
+    Callable,
+    Literal,
+    NamedTuple,
+    Optional,
+    TYPE_CHECKING,
+    TypeVar,
+    Union,
+)
 from typing_extensions import Protocol
 from unittest.mock import patch
 
@@ -29,7 +42,7 @@ ReductionType = Literal[
 ]
 
 
-def _arg_str(a) -> str:
+def _arg_str(a: object) -> str:
     if isinstance(a, sympy.Expr):
         return sympy_str(a)
     return str(a)
@@ -44,7 +57,7 @@ class OpsHandler(Protocol[T]):
     """
     Protocol describing the set of valid operations on ``torch._inductor.virtualized.ops``,
     as well as the contract for op handlers.  The type T signifies the domain
-    of the abstract analysis AKA what all of the functions return / take as arguments
+    of the abstract analysis AKA what all the functions return / take as arguments
     anywhere compute occurs.
 
     While these operators are typically dtype polymorphic (e.g., you can use mul
@@ -63,16 +76,29 @@ class OpsHandler(Protocol[T]):
     Note that this often describes a class of static methods, for stateless
     ops handlers.
 
-    Handlers are often defined using ``__getattr__`` metaprogramming, which means
-    that you cannot declare that a type implements a protocol by inheriting from
-    it (as the type stubs count as attribute declarations and impede the getattr
-    magic method from being called).  Instead, define a function that casts an
-    argument of your type to the protocol, which is sufficient to induce mypy to
-    test that the protocol is implemented correctly.  Search for ``_typecheck_``
-    in this file to see some examples.  If you see an obscure error where a
-    class doesn't implement a Protocol, but mypy doesn't say why, check to see
-    that ``__getattr__`` is typed correctly (typically, it is not possible to
-    type ``__getattr__`` without typing it as ``Callable[..., Any]``)
+    Handlers are often defined using metaprogramming (e.g. _initialize_pointwise_overrides),
+    which means you will get type errors if you subclass OpsHandler since mypy doesn't know
+    about the methods added via metaprogramming and thinks the class is still abstract.
+    Instead, you should add a block like:
+
+        if TYPE_CHECKING:
+
+            class _typecheck_TritonKernelOverrides(TritonKernelOverrides, OpsHandler[str]):
+                pass  # mypy will error if we got any of the signatures wrong
+
+    Which will check the signatures of non-meta-programmed methods and gives decent error messages.
+
+    Some older parts of the code use a pattern like:
+
+        def _typecheck_KernelFormatterHandler(h: KernelFormatterHandler) -> OpsHandler[str]:
+            return h
+
+    This pattern only works if the class defines a __getattr__ method, which we are moving away from.
+    Additionally, this pattern generates horrible error messages if the signatures are wrong.
+    It gives zero information about what the problem is, which makes the pattern harmful.
+
+    Instead of that, we have tests in test/inductor/test_op_completeness.py which check that all
+    operators are implemented after all the metaprogramming has run.
     """
 
     def constant(self, value: Union[bool, float, int], dtype: torch.dtype) -> T:
@@ -247,7 +273,7 @@ class OpsHandler(Protocol[T]):
     # TODO: in practice, this seems to actually return None, but not returning
     # a T makes common __getattr__ idioms not type correctly.  Figure out if
     # this should be returning something.
-    def store_reduction(self, name: str, index: sympy.Expr, value: T) -> T:
+    def store_reduction(self, name: str, index: sympy.Expr, value: T) -> None:
         """
         Store the fully accumulated result of 'reduction' to the memory
         location 'name' offset by 'expr'.
@@ -515,17 +541,6 @@ class OpsHandler(Protocol[T]):
     def rshift(self, x0: T, x1: T) -> T:
         ...
 
-    def getitem(self, x0: T, x1: T) -> T:
-        # TODO: this is probably just illegal lol
-        ...
-
-    def matmul(self, x0: T, x1: T) -> T:
-        # TODO: this is probably just illegal lol
-        ...
-
-    def invert(self, x0: T) -> T:
-        ...
-
     # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     # These are "special" operators.  These only exist if the target
     # language actually supports the operator.  Keep this in sync with
@@ -681,11 +696,6 @@ class OpsHandler(Protocol[T]):
         """
         ...
 
-    def div(self, x0: T, x1: T) -> T:
-        """TODO: to be removed.  This renders as / no matter what the backend is
-        which is incoherent."""
-        ...
-
     def mod(self, x0: T, x1: T) -> T:
         """C-style modulus, take sign from LHS (x0)."""
         ...
@@ -694,8 +704,12 @@ class OpsHandler(Protocol[T]):
         """Python-style modulus, take sign from RHS (x1)."""
         ...
 
-    def round_decimal(self, x0: T, x1: T) -> T:
-        """Python-style round with decimal argument"""
+    def square(self, x0: T) -> T:
+        ...
+
+    def check_bounds(
+        self, expr: sympy.Expr, size: sympy.Expr, lower: bool, upper: bool
+    ) -> None:
         ...
 
     # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -732,16 +746,76 @@ class OpsHandler(Protocol[T]):
     def libdevice_log(self, x0: T) -> T:
         ...
 
+    # triton-only
+    def inline_asm_elementwise(
+        self,
+        *inputs: T,
+        asm: str,
+        constraints: Optional[str] = None,
+        dtype: torch.dtype = torch.float32,
+        is_pure: bool = True,
+        pack: int = 1,
+    ) -> T:
+        ...
 
-class NoopHandler:
-    def __getattr__(self, name):
-        if name == "name":
-            return "NoopHandler"
+    def output(self, x0: T) -> None:
+        """This is a fake op used in analysis but not codegen"""
+        ...
 
-        def inner(*args, **kwargs):
-            return None
+    def placeholder(self, index: int) -> T:
+        """This is a fake op used in analysis but not codegen"""
+        ...
 
-        return inner
+
+_ignore_op_re = re.compile(r"_.*|paren").fullmatch
+
+
+def list_ops(cls: type[Any]):
+    return OrderedSet([x for x in dir(cls) if not _ignore_op_re(x)])
+
+
+OP_NAMES = list_ops(OpsHandler)
+
+
+class DefaultHandler:
+    def _default(self, name: str, args: tuple[Any, ...], kwargs: dict[str, Any]) -> Any:
+        """
+        Default implementation for all ops.  Override in a subclass to
+        provide generic op behavior.
+
+        Args:
+            target: name of the op, see OpHandler.target
+            args: positional args passed to the op
+            kwargs: keyword args passed to the op
+
+        Returns:
+            return value of the op
+
+        """
+        raise NotImplementedError
+
+    @staticmethod
+    def _call_default(target: str):
+        def call_default(self, *args, **kwargs):
+            return self._default(target, args, kwargs)
+
+        call_default.__name__ = target
+        return call_default
+
+    @classmethod
+    def _init_cls(cls):
+        for target in OP_NAMES:
+            setattr(cls, target, cls._call_default(target))
+
+
+DefaultHandler._init_cls()
+
+
+class NoopHandler(DefaultHandler):
+    name = "NoopHandler"
+
+    def _default(self, name: str, args: tuple[Any, ...], kwargs: dict[str, Any]) -> Any:
+        return None
 
     @staticmethod
     def masked(mask, body, other) -> None:
@@ -764,22 +838,99 @@ class NoopHandler:
         return sympy.S.Zero
 
 
-# Use mypy to check protocol implemented correctly
-def _typecheck_NoopHandler(h: NoopHandler) -> OpsHandler[None]:
-    return h
+if TYPE_CHECKING:
+
+    class _typecheck_NoopHandler(NoopHandler, OpsHandler[None]):
+        pass  # mypy will error if we got any of the signatures wrong
 
 
-class MockHandler:
-    def __getattr__(self, name):
-        if name == "name":
-            return "MockHandler"
+class BasicMathOps:
+    @staticmethod
+    def add(a, b):
+        return f"{a} + {b}"
 
-        def inner(*args, **kwargs):
-            fargs = [_arg_str(a) for a in args]
-            fargs.extend(f"{k}={v}" for k, v in kwargs.items())
-            return f"ops.{name}({', '.join(fargs)})"
+    @staticmethod
+    def sub(a, b):
+        return f"{a} - {b}"
 
-        return inner
+    @staticmethod
+    def mul(a, b):
+        return f"{a} * {b}"
+
+    @staticmethod
+    def floordiv(a, b):
+        return f"{a} // {b}"
+
+    @staticmethod
+    def truediv(a, b):
+        return f"{a} / {b}"
+
+    @staticmethod
+    def mod(a, b):
+        # careful, depending on target semantics varies
+        return f"{a} % {b}"
+
+    @staticmethod
+    def pow(a, b):
+        return f"{a} ** {b}"
+
+    @staticmethod
+    def lshift(a, b):
+        return f"{a} << {b}"
+
+    @staticmethod
+    def rshift(a, b):
+        return f"{a} >> {b}"
+
+    @staticmethod
+    def and_(a, b):
+        return f"{a} & {b}"
+
+    @staticmethod
+    def or_(a, b):
+        return f"{a} | {b}"
+
+    @staticmethod
+    def xor(a, b):
+        return f"{a} ^ {b}"
+
+    @staticmethod
+    def eq(a, b):
+        return f"{a} == {b}"
+
+    @staticmethod
+    def ne(a, b):
+        return f"{a} != {b}"
+
+    @staticmethod
+    def lt(a, b):
+        return f"{a} < {b}"
+
+    @staticmethod
+    def gt(a, b):
+        return f"{a} > {b}"
+
+    @staticmethod
+    def le(a, b):
+        return f"{a} <= {b}"
+
+    @staticmethod
+    def ge(a, b):
+        return f"{a} >= {b}"
+
+    @staticmethod
+    def neg(a):
+        return f"-{a}"
+
+
+class MockHandler(BasicMathOps, DefaultHandler):
+    name = "MockHandler"
+
+    def _default(self, name: str, args: tuple[Any, ...], kwargs: dict[str, Any]) -> Any:
+        fargs = [*map(_arg_str, args)]
+        for k, v in kwargs.items():
+            fargs.append(f"{k}={_arg_str(v)}")
+        return f"ops.{name}({', '.join(fargs)})"
 
     @staticmethod
     def masked(mask, body, other) -> str:
@@ -807,51 +958,17 @@ class MockHandler:
     def indirect_indexing(index_var, size, check=True, wrap_neg=True) -> sympy.Symbol:
         return sympy_index_symbol(str(index_var))
 
-    @classmethod
-    def _init_cls(cls):
-        def make_handler(format_string):
-            @staticmethod  # type: ignore[misc]
-            def inner(*args):
-                return format_string.format(*args)
 
-            return inner
+if TYPE_CHECKING:
 
-        for name, format_string in {
-            "add": "{} + {}",
-            "sub": "{} - {}",
-            "mul": "{} * {}",
-            "floordiv": "{} // {}",
-            "truediv": "{} / {}",
-            "mod": "{} % {}",  # careful, depending on target semantics varies
-            "pow": "{} ** {}",
-            "lshift": "{} << {}",
-            "rshift": "{} >> {}",
-            "and_": "{} & {}",
-            "or_": "{} | {}",
-            "xor": "{} ^ {}",
-            "eq": "{} == {}",
-            "ne": "{} != {}",
-            "lt": "{} < {}",
-            "gt": "{} > {}",
-            "le": "{} <= {}",
-            "ge": "{} >= {}",
-            "neg": "-{}",
-        }.items():
-            setattr(cls, name, make_handler(format_string))
+    class _typecheck_MockHandler(MockHandler, OpsHandler[str]):
+        pass  # mypy will error if we got any of the signatures wrong
 
 
-MockHandler._init_cls()
-
-
-# Use mypy to check protocol implemented correctly
-def _typecheck_MockHandler(h: MockHandler) -> OpsHandler[str]:
-    return h
-
-
-class KernelFormatterHandler:
+class KernelFormatterHandler(DefaultHandler):
     def __init__(self, parent_handler):
         self.parent_handler = parent_handler
-        self.output = IndentedBuffer(1)
+        self._output = IndentedBuffer(1)
         self.var_counter = itertools.count()
 
     @staticmethod
@@ -863,8 +980,8 @@ class KernelFormatterHandler:
         names = ["index", "rindex"] if rindex is not None else ["index"]
         formatter = KernelFormatterHandler(MockHandler())
 
-        with formatter.output.indent(-1):
-            formatter.output.writeline(f"def inner_fn({', '.join(names)}):")
+        with formatter._output.indent(-1):
+            formatter._output.writeline(f"def inner_fn({', '.join(names)}):")
         for name, arg in zip(names, args):
             if arg:
                 lhs = ", ".join(
@@ -873,7 +990,7 @@ class KernelFormatterHandler:
                         for v in arg
                     ]
                 )
-                formatter.output.writeline(f"{lhs} = {name}")
+                formatter._output.writeline(f"{lhs} = {name}")
 
         with V.set_ops_handler(formatter), patch.object(
             FlexibleLayout, "allow_indexing", True
@@ -881,21 +998,19 @@ class KernelFormatterHandler:
             result = ir_fn(*args)
             return formatter.getvalue(result)
 
-    def __getattr__(self, name) -> Callable[..., Any]:
-        def inner(*args, **kwargs):
-            line = getattr(self.parent_handler, name)(*args, **kwargs)
-            if name == "indirect_indexing":
-                return line
+    def indirect_indexing(self, *args, **kwargs) -> sympy.Symbol:
+        return self.parent_handler.indirect_indexing(*args, **kwargs)
 
-            def write(line):
-                # replace line with a new variable name
-                varname = f"tmp{next(self.var_counter)}"
-                self.output.writeline(f"{varname} = {line}")
-                return varname
+    def _write(self, line):
+        # replace line with a new variable name
+        varname = f"tmp{next(self.var_counter)}"
+        self._output.writeline(f"{varname} = {line}")
+        return varname
 
-            return pytree.tree_map(write, line)
-
-        return inner
+    def _default(self, name: str, args: tuple[Any, ...], kwargs: dict[str, Any]) -> Any:
+        return pytree.tree_map(
+            self._write, getattr(self.parent_handler, name)(*args, **kwargs)
+        )
 
     def reduction(
         self,
@@ -907,44 +1022,34 @@ class KernelFormatterHandler:
         line = self.parent_handler.reduction(dtype, src_dtype, reduction_type, value)
         num_values = reduction_num_outputs(reduction_type)
         varnames = [f"tmp{next(self.var_counter)}" for _ in range(num_values)]
-        self.output.writeline(f"{','.join(varnames)} = {line}")
+        self._output.writeline(f"{','.join(varnames)} = {line}")
         return tuple(varnames) if num_values > 1 else varnames[0]
 
     def getvalue(self, result):
-        self.output.writeline(f"return {result}")
-        return self.output.getvalue()
+        self._output.writeline(f"return {result}")
+        return self._output.getvalue()
 
 
-# Use mypy to check protocol implemented correctly
-def _typecheck_KernelFormatterHandler(h: KernelFormatterHandler) -> OpsHandler[str]:
-    return h
+if TYPE_CHECKING:
+
+    class _typecheck_KernelFormatterHandler(KernelFormatterHandler, OpsHandler[str]):
+        pass  # mypy will error if we got any of the signatures wrong
 
 
-class WrapperHandler(Generic[T]):
-    def __init__(self, inner: OpsHandler[T]):
+class WrapperHandler(DefaultHandler):
+    def __init__(self, inner: Any):
         self._inner = inner
 
-    def __getattr__(self, item):
-        return getattr(self._inner, item)
+    def _default(self, name: str, args: tuple[Any, ...], kwargs: dict[str, Any]) -> Any:
+        return getattr(self._inner, name)(*args, **kwargs)
 
 
-# Use mypy to check protocol implemented correctly
-def _typecheck_WrapperHandler(h: WrapperHandler[T]) -> OpsHandler[T]:
-    return h
-
-
-class AddParenHandler(WrapperHandler[T]):
-    def __getattr__(self, name):
-        def inner(*args, **kwargs):
-            val = getattr(self._inner, name)(*args, **kwargs)
-            return f"({val})"
-
-        return inner
-
-
-# Use mypy to check protocol implemented correctly
-def _typecheck_AddParenHandler(h: AddParenHandler[T]) -> OpsHandler[T]:
-    return h
+class AddParenHandler(WrapperHandler):
+    def _default(self, name: str, args: tuple[Any, ...], kwargs: dict[str, Any]) -> Any:
+        val = getattr(self._inner, name)(*args, **kwargs)
+        if isinstance(val, (sympy.Expr, tuple, list, NoneType)):
+            return val
+        return f"({val})"
 
 
 class OpCountResult(NamedTuple):
@@ -954,7 +1059,7 @@ class OpCountResult(NamedTuple):
     nontrivial_read_count: int
 
 
-class OpCounterCSE:
+class OpCounterCSE(DefaultHandler):
     """Shim to count how many ops are used"""
 
     def __init__(self, inner):
@@ -962,18 +1067,15 @@ class OpCounterCSE:
         self.parent_handler = inner
         self.op_count = 0
         self.var_names = {}
-        self._used_ops = OrderedSet[str]()
+        self._used_ops: OrderedSet[str] = OrderedSet()
         self._read_names: list[str] = []
         self._nontrivial_read_count = 0
 
-    def __getattr__(self, name):
-        def inner(*args, **kwargs):
-            return pytree.tree_map(
-                self._update_count, getattr(self.parent_handler, name)(*args, **kwargs)
-            )
-
+    def _default(self, name: str, args: tuple[Any, ...], kwargs: dict[str, Any]) -> Any:
         self._used_ops.add(name)
-        return inner
+        return pytree.tree_map(
+            self._update_count, getattr(self.parent_handler, name)(*args, **kwargs)
+        )
 
     def _update_count(self, val):
         varname = self.var_names.get(val)
@@ -1038,58 +1140,61 @@ class OpCounterCSE:
         )
 
 
-def _typecheck_OpCounterCSE(h: OpCounterCSE) -> OpsHandler[str]:
-    return h
+if TYPE_CHECKING:
+
+    class _typecheck_OpCounterCSE(OpCounterCSE, OpsHandler[str]):
+        pass  # mypy will error if we got any of the signatures wrong
 
 
 class ExtractConstantsHandler(NoopHandler):
     def __init__(self, device):
         self.device = device
 
-    def constant(self, value: Any, dtype: torch.dtype) -> "torch._inductor.ir.Constant":
+    def constant(self, value: Any, dtype: torch.dtype) -> torch._inductor.ir.Constant:
         from torch._inductor import ir
 
         return ir.Constant(value=value, dtype=dtype, device=self.device)
 
 
-def _typecheck_ExtractConstantsHandler(h: ExtractConstantsHandler) -> OpsHandler[Any]:
-    return h
+if TYPE_CHECKING:
+
+    class _typecheck_ExtractConstantsHandler(ExtractConstantsHandler, OpsHandler[Any]):
+        pass  # mypy will error if we got any of the signatures wrong
 
 
-class SimpleCSEHandler(WrapperHandler[T]):
+class SimpleCSEHandler(WrapperHandler):
     """Wraps the underlying handler with a CSE pass
 
     NOTE: Compared to codegen level CSE this is simplified as it
     doesn't support stores which require load cache invalidation.
     """
 
-    def __init__(self, inner: OpsHandler[T]):
+    def __init__(self, inner: Any):
         super().__init__(inner)
-        self.cse_cache: dict[str, Union[T, tuple[T, ...]]] = {}
+        self.cse_cache: dict[str, Union[Any, tuple[Any, ...]]] = {}
         self.mock = MockHandler()
 
     def indirect_indexing(self, *args, **kwargs) -> sympy.Expr:
         return super().indirect_indexing(*args, **kwargs)  # type: ignore[misc]
 
-    def store(self, *args, **kwargs) -> T:
+    def store(self, *args, **kwargs) -> None:
         raise NotImplementedError("store not implemented")
 
-    def store_reduction(self, *args, **kwargs) -> T:
+    def store_reduction(self, *args, **kwargs) -> None:
         raise NotImplementedError("store not implemented")
 
-    def __getattr__(self, name) -> Callable[..., Any]:
-        def inner(*args, **kwargs):
-            key = getattr(self.mock, name)(*args, **kwargs)
-            val = self.cse_cache.get(key)
-            if val is not None:
-                return val
-
-            val = getattr(self._inner, name)(*args, **kwargs)
-            self.cse_cache[key] = val
+    def _default(self, name: str, args: tuple[Any, ...], kwargs: dict[str, Any]) -> Any:
+        key = getattr(self.mock, name)(*args, **kwargs)
+        val = self.cse_cache.get(key)
+        if val is not None:
             return val
 
-        return inner
+        val = getattr(self._inner, name)(*args, **kwargs)
+        self.cse_cache[key] = val
+        return val
 
 
-def _typecheck_SimpleCSEHandler(h: SimpleCSEHandler[Any]) -> OpsHandler[Any]:
-    return h
+if TYPE_CHECKING:
+
+    class _typecheck_SimpleCSEHandler(SimpleCSEHandler, OpsHandler[Any]):
+        pass  # mypy will error if we got any of the signatures wrong
