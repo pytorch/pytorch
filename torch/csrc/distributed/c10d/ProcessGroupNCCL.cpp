@@ -5402,6 +5402,7 @@ static void _ncclMemFree(void* ptr, size_t size, int device, void* stream) {
 #else
   TORCH_CHECK(
       false, "NCCL mem allocator is not supported in this NCCL version");
+#endif // NCCL_HAS_MEM_ALLOC
 }
 
 // Create a `CUDAPluggableAllocator` that uses the above functions.
