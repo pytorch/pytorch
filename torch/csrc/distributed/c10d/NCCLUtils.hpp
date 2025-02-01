@@ -168,6 +168,13 @@ class NCCLComm {
       ncclUniqueId commId,
       at::DeviceIndex deviceIndex,
       ncclConfig_t& config);
+#ifdef NCCL_HAS_INIT_RANK_SCALABLE
+  static std::shared_ptr<NCCLComm> create_scalable(
+      int numRanks,
+      int rank,
+      std::vector<ncclUniqueId>& commIds,
+      ncclConfig_t& config);
+#endif // NCCL_HAS_INIT_RANK_SCALABLE
 #endif // NCCL_HAS_CONFIG
 
 #ifdef NCCL_HAS_COMM_SPLIT
