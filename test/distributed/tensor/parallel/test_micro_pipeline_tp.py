@@ -84,7 +84,9 @@ class MicroPipelineTPTest(TestCase):
     def test_find_all_gather_patterns(self):
         group = dist.group.WORLD
 
-        def func(inp: torch.Tensor):
+        def func(
+            inp: torch.Tensor,
+        ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
             a = all_gather_tensor(inp, gather_dim=0, group=group.group_name)
             b = all_gather_tensor(inp, gather_dim=1, group=group.group_name)
             c = _fp8_all_gather(inp, gather_dim=0, group_name=group.group_name)
