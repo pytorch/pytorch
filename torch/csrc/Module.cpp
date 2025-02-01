@@ -592,8 +592,8 @@ void DLPack_Capsule_Destructor(PyObject* data) {
   // since consuming libraries should rename the capsule according to spec.
   // Note that this cannot set a python error (we checked validity above),
   // so we don't need to handle python error state here.
-  DLManagedTensor* dlMTensor =
-      (DLManagedTensor*)PyCapsule_GetPointer(data, at::DLPackTraits<T>::capsule);
+  DLManagedTensor* dlMTensor = (DLManagedTensor*)PyCapsule_GetPointer(
+      data, at::DLPackTraits<T>::capsule);
   // the dlMTensor has not been consumed, call deleter ourselves.
   // DLPack spec mentions that deleter may be NULL, but deleter from
   // `at::toDLPack` is never NULL, so no need for an additional check here.
@@ -601,22 +601,26 @@ void DLPack_Capsule_Destructor(PyObject* data) {
   END_HANDLE_TH_ERRORS_RET()
 }
 
+template <class T>
+PyObject* THPModule_toDLPackImpl(PyObject* _unused, PyObject* data) {
+  HANDLE_TH_ERRORS
+  TORCH_CHECK(THPVariable_Check(data), "data must be a Tensor");
+  auto tensor = at::DLPackTraits<T>::toDLPack(THPVariable_Unpack(data));
+  return PyCapsule_New(
+      tensor, at::DLPackTraits<T>::capsule, DLPack_Capsule_Destructor<T>);
+  END_HANDLE_TH_ERRORS
 }
+
+} // namespace
 
 static PyObject* THPModule_toDLPack(PyObject* _unused, PyObject* data) {
-  HANDLE_TH_ERRORS
-  TORCH_CHECK(THPVariable_Check(data), "data must be a Tensor");
-  auto dlMTensor = at::toDLPack(THPVariable_Unpack(data));
-  return PyCapsule_New(dlMTensor, at::DLPackTraits<DLManagedTensorVersioned>::capsule, DLPack_Capsule_Destructor<DLManagedTensorVersioned>);
-  END_HANDLE_TH_ERRORS
+  return THPModule_toDLPackImpl<DLManagedTensorVersioned>(_unused, data);
 }
 
-static PyObject* THPModule_toDLPackUnversioned(PyObject* _unused, PyObject* data) {
-  HANDLE_TH_ERRORS
-  TORCH_CHECK(THPVariable_Check(data), "data must be a Tensor");
-  auto dlMTensor = at::toDLPackUnversioned(THPVariable_Unpack(data));
-  return PyCapsule_New(dlMTensor, at::DLPackTraits<DLManagedTensor>::capsule, DLPack_Capsule_Destructor<DLManagedTensor>);
-  END_HANDLE_TH_ERRORS
+static PyObject* THPModule_toDLPackUnversioned(
+    PyObject* _unused,
+    PyObject* data) {
+  return THPModule_toDLPackImpl<DLManagedTensor>(_unused, data);
 }
 
 static PyObject* THPModule_fromDLPack(PyObject* _unused, PyObject* data) {

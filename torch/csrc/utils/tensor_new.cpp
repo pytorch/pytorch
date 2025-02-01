@@ -1639,7 +1639,7 @@ Tensor tensor_frombuffer(
 namespace {
 
 template <class T>
-at::Tensor fromDLPackImpl(PyObject* data, T* tensor) {
+at::Tensor tensor_fromDLPackImpl(PyObject* data, T* tensor) {
   // HACK: Ensure that we hold the GIL here just in case the
   // managed tensor originating from a buggy NumPy build.
   bool is_numpy_dlpack_deleter_bugged =
@@ -1660,7 +1660,7 @@ at::Tensor fromDLPackImpl(PyObject* data, T* tensor) {
   // destructor function that will be called when the underlying storage goes
   // out of scope. When the destructor is called, the dlMTensor is destructed
   // too.
-  auto atensor = at::fromDLPack(tensor->dl_tensor, std::move(deleter_maybe_gil));
+  auto atensor = at::DLPackTraits<T>::fromDLPack(tensor, std::move(deleter_maybe_gil));
 
   // Make sure this capsule will never be used again.
   PyCapsule_SetName(data, at::DLPackTraits<T>::used);
@@ -1696,12 +1696,12 @@ Tensor tensor_fromDLPack(PyObject* data) {
         ". Maximum supported version: ",
         DLPACK_MAJOR_VERSION);
 
-    return fromDLPackImpl(data, versioned);
+    return tensor_fromDLPackImpl(data, versioned);
   } else {
     auto managed = (DLManagedTensor*)PyCapsule_GetPointer(
         data, at::DLPackTraits<DLManagedTensor>::capsule);
     TORCH_CHECK(managed != nullptr, bad_capsule);
-    return fromDLPackImpl(data, managed);
+    return tensor_fromDLPackImpl(data, managed);
   }
 }
 

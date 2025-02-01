@@ -13,9 +13,9 @@ TEST(TestDlconvertor, TestDlconvertor) {
   manual_seed(123);
 
   Tensor a = rand({3, 4});
-  DLManagedTensor* dlMTensor = toDLPack(a);
+  DLManagedTensorVersioned* dlMTensor = toDLPack(a);
 
-  Tensor b = fromDLPack(dlMTensor);
+  Tensor b = fromDLPack(dlMTensor->dl_tensor);
 
   ASSERT_TRUE(a.equal(b));
 }
@@ -24,10 +24,10 @@ TEST(TestDlconvertor, TestDlconvertorNoStrides) {
   manual_seed(123);
 
   Tensor a = rand({3, 4});
-  DLManagedTensor* dlMTensor = toDLPack(a);
+  DLManagedTensorVersioned* dlMTensor = toDLPack(a);
   dlMTensor->dl_tensor.strides = nullptr;
 
-  Tensor b = fromDLPack(dlMTensor);
+  Tensor b = fromDLPack(dlMTensor->dl_tensor);
 
   ASSERT_TRUE(a.equal(b));
 }

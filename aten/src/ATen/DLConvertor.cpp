@@ -328,6 +328,43 @@ T* toDLPackImpl(const Tensor& src) {
 template DLManagedTensor* toDLPackImpl<DLManagedTensor>(const Tensor&);
 template DLManagedTensorVersioned* toDLPackImpl<DLManagedTensorVersioned>(const Tensor&);
 
+// This function constructs a Tensor from a memory managed DLPack which
+// may be represented as either: DLManagedTensor and DLManagedTensorVersioned.
+template <class T>
+at::Tensor fromDLPackImpl(T* src, std::optional<std::function<void(void*)>> deleter) {
+  if (!deleter.has_value()) {
+    deleter = [src](void* self [[maybe_unused]]) {
+      if (src->deleter) {
+        src->deleter(src);
+      }
+    };
+  }
+
+  DLTensor& dl_tensor = src->dl_tensor;
+  Device device = getATenDevice(dl_tensor.device, dl_tensor.data);
+  ScalarType stype = toScalarType(dl_tensor.dtype);
+
+  if (!dl_tensor.strides) {
+    return at::from_blob(
+        dl_tensor.data,
+        IntArrayRef(dl_tensor.shape, dl_tensor.ndim),
+        std::move(*deleter),
+        at::device(device).dtype(stype),
+        {device});
+  }
+  return at::from_blob(
+      dl_tensor.data,
+      IntArrayRef(dl_tensor.shape, dl_tensor.ndim),
+      IntArrayRef(dl_tensor.strides, dl_tensor.ndim),
+      *deleter,
+      at::device(device).dtype(stype),
+      {device});
+}
+
+// Explicitly instantiate the template above for both classes.
+template at::Tensor fromDLPackImpl<DLManagedTensor>(DLManagedTensor* src, std::optional<std::function<void(void*)>> deleter);
+template at::Tensor fromDLPackImpl<DLManagedTensorVersioned>(DLManagedTensorVersioned* src, std::optional<std::function<void(void*)>> deleter);
+
 } // namespace
 
 DLManagedTensorVersioned* toDLPack(const Tensor& src) {
@@ -338,23 +375,11 @@ DLManagedTensor* toDLPackUnversioned(const Tensor& src) {
   return toDLPackImpl<DLManagedTensor>(src);
 }
 
-Tensor fromDLPack(DLTensor& dl_tensor, std::function<void(void*)> deleter) {
-  Device device = getATenDevice(dl_tensor.device, dl_tensor.data);
-  ScalarType stype = toScalarType(dl_tensor.dtype);
-  if (!dl_tensor.strides) {
-    return at::from_blob(
-        dl_tensor.data,
-        IntArrayRef(dl_tensor.shape, dl_tensor.ndim),
-        std::move(deleter),
-        at::device(device).dtype(stype),
-        {device});
-  }
-  return at::from_blob(
-      dl_tensor.data,
-      IntArrayRef(dl_tensor.shape, dl_tensor.ndim),
-      IntArrayRef(dl_tensor.strides, dl_tensor.ndim),
-      deleter,
-      at::device(device).dtype(stype),
-      {device});
+Tensor fromDLPack(DLManagedTensorVersioned* src, std::optional<std::function<void(void*)>> deleter) {
+  return fromDLPackImpl<DLManagedTensorVersioned>(src, std::move(deleter));
+}
+
+Tensor fromDLPackUnversioned(DLManagedTensor* src, std::optional<std::function<void(void*)>> deleter) {
+  return fromDLPackImpl<DLManagedTensor>(src, std::move(deleter));
 }
 } // namespace at

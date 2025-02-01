@@ -13,7 +13,7 @@ TEST(TestDlconvertor, TestDlconvertorCUDA) {
   manual_seed(123);
 
   Tensor a = rand({3, 4}, at::kCUDA);
-  DLManagedTensor* dlMTensor = toDLPack(a);
+  DLManagedTensorVersioned* dlMTensor = toDLPack(a);
 
   Tensor b = fromDLPack(dlMTensor);
 
@@ -24,7 +24,7 @@ TEST(TestDlconvertor, TestDlconvertorNoStridesCUDA) {
   manual_seed(123);
 
   Tensor a = rand({3, 4}, at::kCUDA);
-  DLManagedTensor* dlMTensor = toDLPack(a);
+  DLManagedTensorVersioned* dlMTensor = toDLPack(a);
   dlMTensor->dl_tensor.strides = nullptr;
 
   Tensor b = fromDLPack(dlMTensor);
@@ -38,7 +38,7 @@ TEST(TestDlconvertor, TestDlconvertorCUDAHIP) {
   manual_seed(123);
 
   Tensor a = rand({3, 4}, at::kCUDA);
-  DLManagedTensor* dlMTensor = toDLPack(a);
+  DLManagedTensorVersioned* dlMTensor = toDLPack(a);
 
 #if AT_ROCM_ENABLED()
   ASSERT_TRUE(dlMTensor->dl_tensor.device.device_type == DLDeviceType::kDLROCM);
