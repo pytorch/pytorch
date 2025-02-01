@@ -5,6 +5,7 @@ Test the FX IR backend.
 import torch
 import unittest
 
+from torch._inductor import config
 from torch._inductor.virtualized import V
 from torch._inductor.codegen.triton import TritonScheduling
 from torch._inductor.codegen.wrapper_fxir import WrapperFxCodegen
@@ -25,6 +26,7 @@ from torch._inductor.codegen.common import (
 class FxirTestCase(InductorTestCase):
     device = GPU_TYPE
 
+    @config.patch(compile_threads=1) # Disable async compile
     def _run_and_capture_graphs(self, opt, args) -> torch.fx.GraphModule:
 
         gms = []
@@ -51,11 +53,13 @@ class FxirTestCase(InductorTestCase):
 
     def test_basic(self):
         func = torch.add
-        x = torch.rand(8, device=self.device)
-        args = (x, x)
+        args = [torch.rand(8, device=self.device) for _ in range(2)]
         opt = torch.compile(func)
 
 
         # Get the FX graph from the backend.
         gms = self._run_and_capture_graphs(opt, args)
-        result = gms[0](*args)
+        result = gms[0](*args)[0] # FIXME GM returns a tuple
+        ref = func(*args)
+
+        self.assertTrue(torch.allclose(result, ref))

@@ -12,6 +12,9 @@ from triton.runtime.jit import JITFunction
 import torch
 from torch._subclasses.fake_tensor import FakeTensorMode
 
+from torch._higher_order_ops.triton_kernel_wrap import kernel_side_table, triton_kernel_wrapper_mutation
+from torch._library.triton import wrap_triton
+
 from .. import config, ir
 from torch._inductor.virtualized import V
 from torch._inductor.runtime.triton_heuristics import grid, CachingAutotuner
@@ -77,6 +80,14 @@ class KernelDefinitionLine(WrapperIRLine):
     kernel_body: str
     metadata: Optional[str] = None
 
+class TritonKernel:
+    """
+    Stores metadata about Triton kernels for use in FX.
+    """
+    def __init__(self, tuner: CachingAutotuner):
+        self.tuner = tuner
+        self.wrapped = wrap_triton(tuner.fn)
+
 class WrapperFxCodegen(PythonWrapperCodegen):
     """
     Generate Wrapper FX IR, for use in other backends.
@@ -86,7 +97,7 @@ class WrapperFxCodegen(PythonWrapperCodegen):
         graph = torch.fx.Graph()
         self.gm = torch.fx.GraphModule({}, graph) # Wrapper FX IR.
         self.buffer_to_node: dict[str, torch.fx.Node] = {} # Symbol table for codegen.
-        self.kernels: Dict[str, CachingAutotuner] = {} # Table to store Triton kernels.
+        self.kernels: Dict[str, TritonKernel] = {} # Table to store Triton kernels.
 
     @staticmethod
     def create(
@@ -244,7 +255,7 @@ class WrapperFxCodegen(PythonWrapperCodegen):
         shape = tuple(buffer.get_size())
         stride = tuple(buffer.get_stride())
 
-        node = self.gm.graph.call_function(torch.empty_strided, args=(shape, stride, dtype, device))
+        node = self.gm.graph.call_function(torch.empty_strided, args=(shape, stride), kwargs={"dtype": dtype, "device": device})
         node.name = name
         self._create_meta_from_buffer(node, buffer)
         self._record_allocation(buffer, node)
@@ -368,8 +379,19 @@ class WrapperFxCodegen(PythonWrapperCodegen):
             for arg in line.call_args
         )
 
+
         kernel = self.kernels[line.kernel_name]
-        node = self.gm.graph.call_function(call_triton_kernel, args=(kernel, line.grid, call_args))
+        call_kwargs = {name: val for name, val in zip(kernel.tuner.triton_meta["signature"], call_args)}
+        tuned_kwargs = kernel.tuner.compile_results[0].config.kwargs
+        call_kwargs.update(tuned_kwargs)
+
+        # Dynamo uses a side table to store args which can't go in the FX graph.
+        # We don't have any here.
+        constant_args_idx = kernel_side_table.add_constant_args({})
+
+        node = self.gm.graph.call_function(triton_kernel_wrapper_mutation,
+                                           kwargs={"kernel_idx": kernel.wrapped.kernel_idx, "constant_args_idx": constant_args_idx, "grid": [line.grid], "tma_descriptor_metadata": {}, "kwargs": call_kwargs}
+        )
 
     def generate_kernel_call(
             self,
@@ -414,4 +436,4 @@ class WrapperFxCodegen(PythonWrapperCodegen):
         if isinstance(kernel, TritonFuture):
             kernel = kernel.kernel
         assert isinstance(kernel, CachingAutotuner)
-        self.kernels[line.kernel_name] = kernel
+        self.kernels[line.kernel_name] = TritonKernel(kernel)
