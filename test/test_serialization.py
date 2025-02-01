@@ -1,5 +1,4 @@
 # Owner(s): ["module: serialization"]
-# ruff: noqa: F841
 
 import contextlib
 import copy
@@ -59,7 +58,7 @@ from torch.testing._internal.common_utils import (
     TEST_DILL,
     TestCase,
 )
-from torch.testing._internal.two_tensor import TwoTensor  # noqa: F401
+from torch.testing._internal.two_tensor import TwoTensor
 from torch.utils._import_utils import import_dill
 
 
@@ -331,7 +330,7 @@ class SerializationMixin:
             f.seek(0)
             with self.assertRaisesRegex(ValueError, 'supports dill >='):
                 # weights_only=False as this is legacy code that saves the model
-                x2 = torch.load(f, pickle_module=dill, encoding='utf-8', weights_only=False)
+                torch.load(f, pickle_module=dill, encoding='utf-8', weights_only=False)
 
     def test_pickle_module(self):
         class ThrowingUnpickler(pickle.Unpickler):
@@ -441,7 +440,7 @@ class SerializationMixin:
                 with self.assertRaisesRegex(
                         RuntimeError,
                         "size is inconsistent with indices"):
-                    y = torch.load(f, weights_only=weights_only)
+                    torch.load(f, weights_only=weights_only)
 
     def test_serialization_sparse_invalid_legacy_ctor(self):
         # This is set in test class setup but would not be check when running user code
@@ -513,7 +512,7 @@ class SerializationMixin:
             with self.assertRaisesRegex(
                     RuntimeError,
                     f"`{compressed_indices_name}[[]..., 0[]] == 0` is not satisfied."):
-                y = torch.load(f)
+                torch.load(f)
 
     def test_serialization_sparse_csr_invalid(self):
         self._test_serialization_sparse_compressed_invalid(
@@ -603,7 +602,7 @@ class SerializationMixin:
     def test_serialization_save_warnings(self):
         with warnings.catch_warnings(record=True) as warns:
             with tempfile.NamedTemporaryFile() as checkpoint:
-                x = torch.save(torch.nn.Linear(2, 3), checkpoint)
+                torch.save(torch.nn.Linear(2, 3), checkpoint)
                 self.assertEqual(len(warns), 0)
 
     def test_serialization_map_location(self):
@@ -748,7 +747,7 @@ class SerializationMixin:
         f.seek(0)
         data = FilelikeMock(f.read(), has_readinto=True)
 
-        b = torch.load(data)
+        torch.load(data)
         self.assertTrue(data.was_called('readinto'))
 
     def test_serialization_filelike_exceptions(self):
@@ -819,7 +818,7 @@ class SerializationMixin:
     def test_load_python2_unicode_module(self):
         # This Pickle contains some Unicode data!
         path = download_file('https://download.pytorch.org/test_data/legacy_conv2d.pt')
-        with warnings.catch_warnings(record=True) as w:
+        with warnings.catch_warnings(record=True):
             # weights_only=False as this is legacy code that saves the model
             self.assertIsNotNone(torch.load(path, weights_only=False))
 
@@ -1140,7 +1139,7 @@ class TestSerialization(TestCase, SerializationMixin):
         with BytesIOContext() as f:
             torch.save(big_model.state_dict(), f)
             f.seek(0)
-            state = torch.load(f)
+            torch.load(f)
 
     @serialTest()
     def test_serialization_4gb_file(self):
@@ -1393,7 +1392,6 @@ class TestSerialization(TestCase, SerializationMixin):
         lstm = torch.nn.LSTM(3, 3)
         inputs = [torch.randn(1, 3) for _ in range(5)]
         inputs = torch.cat(inputs).view(len(inputs), 1, -1)
-        hidden = (torch.randn(1, 1, 3), torch.randn(1, 1, 3))  # clean out hidden state
 
         databuffer = io.BytesIO()
         torch.save(lstm.state_dict(), databuffer)
@@ -4225,7 +4223,7 @@ class TestSerialization(TestCase, SerializationMixin):
             with self.assertWarnsRegex(UserWarning, "The default load endianness for checkpoints "
                                        "without a byteorder mark on big endian machines "
                                        "was changed from 'native' to 'little' endian"):
-                tensor_be_no_bom = torch.load(buf_be_no_bom)
+                torch.load(buf_be_no_bom)
         finally:
             set_default_load_endianness(current_load_endian)
 
@@ -4859,24 +4857,24 @@ class TestSubclassSerialization(TestCase):
     def test_empty_class_serialization(self):
         tensor = TestEmptySubclass([1.])
         # Ensures it runs fine
-        tensor2 = copy.copy(tensor)
+        copy.copy(tensor)
 
         with BytesIOContext() as f:
             torch.save(tensor, f)
             f.seek(0)
             with safe_globals([TestEmptySubclass]):
-                tensor2 = torch.load(f)
+                torch.load(f)
 
         tensor = TestEmptySubclass()
         # Ensures it runs fine
         # Note that tensor.data_ptr() == 0 here
-        tensor2 = copy.copy(tensor)
+        copy.copy(tensor)
 
         with BytesIOContext() as f:
             torch.save(tensor, f)
             f.seek(0)
             with safe_globals([TestEmptySubclass]):
-                tensor2 = torch.load(f)
+                torch.load(f)
 
     @skipIfTorchDynamo("name 'SYNTHETIC_LOCAL' is not defined")
     def test_safe_globals_for_weights_only(self):
