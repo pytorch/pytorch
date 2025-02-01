@@ -43,7 +43,7 @@ from ..utils import (
     LineContext,
 )
 
-def call_triton_kernel(kernel: Callable, grid, args):
+def call_triton_kernel(kernel: torch.fx.Node, grid, args):
     """
     Call Triton kernels, for testing purposes.
     """
@@ -231,9 +231,7 @@ class WrapperFxCodegen(PythonWrapperCodegen):
             conversion_func(line)
         self._generate_graph_outputs()
 
-        # This class does not yet support Python codegen.
-        # Exit early.
-        raise NotImplementedError("Python codegen not yet supported!")
+        self.gm.recompile()
 
     def _generate_allocate(self, line: Line) -> None:
         assert isinstance(line, AllocateLine)
