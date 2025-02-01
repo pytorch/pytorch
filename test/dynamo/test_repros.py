@@ -15,6 +15,7 @@ import inspect
 import itertools
 import os
 import random
+import types
 import typing
 import unittest
 import warnings
@@ -6634,6 +6635,40 @@ class ReproTestsDevice(torch._dynamo.test_case.TestCase):
             out_ref = f(x_ref, s0, s1, s2)
             out = f_compiled(x, s0, s1, s2)
             self.assertEqual(out_ref, out)
+
+    def test_getattr_return(self):
+        _WrapperDescriptor = type(type.__call__)
+        _MethodWrapper = type(all.__call__)
+        _ClassMethodWrapper = type(int.__dict__["from_bytes"])
+
+        _NonUserDefinedCallables = (
+            _WrapperDescriptor,
+            _MethodWrapper,
+            _ClassMethodWrapper,
+            types.BuiltinFunctionType,
+        )
+
+        def _signature_get_user_defined_method(cls, method_name):
+            try:
+                meth = getattr(cls, method_name)
+            except AttributeError:
+                return
+            else:
+                if not isinstance(meth, _NonUserDefinedCallables):
+                    # Once '__signature__' will be added to 'C'-level
+                    # callables, this check won't be necessary
+                    return meth
+
+        def fn(x):
+            s = _signature_get_user_defined_method(type(torch.nn.Linear), "__call__")
+            if s is None:
+                return torch.cos(x)
+
+            return torch.sin(x)
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        x = torch.randn(4)
+        self.assertEqual(fn(x), opt_fn(x))
 
 
 instantiate_parametrized_tests(ReproTests)
