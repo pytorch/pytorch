@@ -496,7 +496,13 @@ def graph_executor(
         """Captures the graph of a function and evaluates it using TorchScriptEvaluator."""
 
         # Initialize the ONNX graph
-        graph = ir.Graph((), (), nodes=(), opset_imports={"": 18, "pkg.torch.onnx": 1})
+        graph = ir.Graph(
+            (),
+            (),
+            nodes=(),
+            opset_imports={"": 18, "pkg.torch.onnx": 1},
+            name="main_graph",
+        )
         tracer = _building.OpRecorder(onnxscript.opset18, {})
         ort_inputs = {}
         onnxscript_args: list[Any] = []
@@ -568,7 +574,7 @@ def graph_executor(
 
         graph.outputs.extend(symbolic_outputs)
         graph.extend(tracer.nodes)
-        onnx_model = ir.Model(graph, ir_version=10)
+        onnx_model = ir.Model(graph, ir_version=10, producer_name="torch_test")
         for identifier, onnxscript_function in tracer.functions.items():
             if identifier in onnx_model.functions:
                 continue
