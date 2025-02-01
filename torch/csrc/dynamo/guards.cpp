@@ -2411,7 +2411,7 @@ class GuardManager {
         // to avoid early exits when dict_tag matches and the object is
         // immutable.
         new_tag = get_dict_version_unchecked(value);
-        matches_dict_tag = (new_tag == _dict_tag) && !has_relational_guards();
+        matches_dict_tag = (new_tag == _dict_tag);
       }
     }
 
