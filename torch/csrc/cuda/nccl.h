@@ -22,9 +22,7 @@ static_assert(
 // NCCL BFloat16 is enabled only for CUDA 11+ and NCCL versions 2.10+, or for
 // HIP 3.1+
 #if defined(NCCL_MAJOR) && NCCL_VERSION_CODE >= NCCL_VERSION(2, 10, 0)
-#if defined(__CUDA_BF16_TYPES_EXIST__)
-#define HAS_NCCL_BF16_DATATYPE
-#endif // defined(__CUDA_BF16_TYPES_EXIST__)
+#define NCCL_HAS_BF16_DATATYPE
 #define NCCL_HAS_AVG
 #elif defined(USE_ROCM) && (TORCH_HIP_VERSION >= 301)
 #define HAS_NCCL_BF16_DATATYPE

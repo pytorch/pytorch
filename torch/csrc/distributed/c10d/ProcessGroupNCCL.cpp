@@ -65,9 +65,9 @@ std::map<at::ScalarType, ncclDataType_t> ncclDataType = {
     {at::kFloat8_e4m3fn, ncclUint8},
     {at::kFloat8_e4m3fnuz, ncclUint8},
     {at::kFloat8_e5m2fnuz, ncclUint8},
-#ifdef HAS_NCCL_BF16_DATATYPE
+#ifdef NCCL_HAS_BF16_DATATYPE
     {at::kBFloat16, ncclBfloat16},
-#endif // HAS_NCCL_BF16_DATATYPE
+#endif // NCCL_HAS_BF16_DATATYPE
 };
 
 // Helper function that gets the data type and issues error if not supported
