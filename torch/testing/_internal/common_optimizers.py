@@ -651,19 +651,19 @@ def optim_error_inputs_func_adam(device, dtype):
                 OptimizerInput(
                     params=None,
                     kwargs=dict(lr=1e-2, betas=(torch.tensor([0.9]), torch.tensor(0.99))),
-                    desc="Tensor betas[0] must be 0-dimension",
+                    desc=r"Tensor betas\[0\] must be 0-dimension for differentiable=False",
                 ),
                 error_type=ValueError,
-                error_regex="Tensor betas[0] must be 0-dimension",
+                error_regex=r"Tensor betas\[0\] must be 0-dimension for differentiable=False",
             ),
             ErrorOptimizerInput(
                 OptimizerInput(
                     params=None,
                     kwargs=dict(lr=1e-2, betas=(torch.tensor(0.9), torch.tensor([0.99]))),
-                    desc="Tensor betas[1] must be 0-dimension",
+                    desc=r"Tensor betas\[1\] must be 0-dimension for differentiable=False",
                 ),
                 error_type=ValueError,
-                error_regex="Tensor betas[1] must be 0-dimension",
+                error_regex=r"Tensor betas\[1\] must be 0-dimension for differentiable=False",
             ),
         ]
     if _get_device_type(device) == "cuda":

@@ -52,8 +52,19 @@ class Adam(Optimizer):
                 raise ValueError(
                     "lr as a Tensor is not supported for capturable=False and foreach=True"
                 )
-            if lr.dim() != 0:
-                raise ValueError("Tensor lr must be 0-dimension")
+            if fused:
+                if lr.numel() != 1:
+                    raise ValueError("Tensor lr must be 1-element for fused=True")
+            elif differentiable:
+                if lr.dim() > 1 or lr.numel() != 1:
+                    raise ValueError(
+                        "Tensor lr must be 0-dimension, or 1-dimension and 1-element for differentiable=True"
+                    )
+            else:
+                if lr.dim() != 0:
+                    raise ValueError(
+                        "Tensor lr must be 0-dimension for differentiable=False and fused=False"
+                    )
         if not 0.0 <= lr:
             raise ValueError(f"Invalid learning rate: {lr}")
         if not 0.0 <= eps:
@@ -74,15 +85,31 @@ class Adam(Optimizer):
                 raise ValueError(
                     "betas[0] as a Tensor is not supported for capturable=False and foreach=True"
                 )
-            if betas[0].dim() != 0:
-                raise ValueError("Tensor betas[0] must be 0-dimension")
+            if differentiable:
+                if betas[0].dim() > 1 or betas[0].numel() != 1:
+                    raise ValueError(
+                        "Tensor betas[0] must be 0-dimension, or 1-dimension and 1-element for differentiable=True"
+                    )
+            else:
+                if betas[0].dim() != 0:
+                    raise ValueError(
+                        "Tensor betas[0] must be 0-dimension for differentiable=False"
+                    )
         if isinstance(betas[1], Tensor):
             if not capturable and foreach:
                 raise ValueError(
                     "betas[1] as a Tensor is not supported for capturable=False and foreach=True"
                 )
-            if betas[1].dim() != 0:
-                raise ValueError("Tensor betas[1] must be 0-dimension")
+            if differentiable:
+                if betas[1].dim() > 1 or betas[1].numel() != 1:
+                    raise ValueError(
+                        "Tensor betas[1] must be 0-dimension, or 1-dimension and 1-element for differentiable=True"
+                    )
+            else:
+                if betas[1].dim() != 0:
+                    raise ValueError(
+                        "Tensor betas[1] must be 0-dimension for differentiable=False"
+                    )
 
         defaults = dict(
             lr=lr,
