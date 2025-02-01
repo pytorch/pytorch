@@ -32,7 +32,7 @@ def onnx_impl(
     *,
     trace_only: bool = False,
     complex: bool = False,
-    traceable: bool = False,
+    no_compile: bool = False,  # TODO: Complete this
     private: bool = False,
 ) -> Callable[[_T], _T]:
     """Register an ONNX implementation of a torch op."""
@@ -51,7 +51,7 @@ def onnx_impl(
             processed_func: (
                 onnxscript.OnnxFunction | onnxscript.values.TracedOnnxFunction
             )
-            if trace_only or traceable:
+            if trace_only:
                 # TODO(justinchuby): Simplify this implementation
                 processed_func = onnxscript.values.TracedOnnxFunction(
                     custom_opset, func
@@ -59,7 +59,6 @@ def onnx_impl(
             else:
                 # Compile the function
                 processed_func = onnxscript.script(opset=custom_opset)(func)
-                processed_func.traceable = traceable
 
             if not private:
                 # Skip registration if private
