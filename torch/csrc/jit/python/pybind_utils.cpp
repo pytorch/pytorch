@@ -642,7 +642,7 @@ py::object toPyObject(IValue ivalue) {
       t[i] = toPyObject(IValue{list.get(i)});
     }
 #if __cplusplus >= 202002L
-    return t
+    return t;
 #else
     return std::move(t);
 #endif
@@ -681,7 +681,7 @@ py::object toPyObject(IValue ivalue) {
               t, unqualName, fieldNames, py::make_tuple(defaults));
     } else {
 #if __cplusplus >= 202002L
-      return t
+      return t;
 #else
       return std::move(t);
 #endif
