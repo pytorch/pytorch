@@ -784,7 +784,9 @@ def make_module_path_relative(abs_path):
 
 # apply custom formats to artifacts when necessary
 class TorchLogsFormatter(logging.Formatter):
-    def __init__(self, *, trace: bool = False, trace_id_filter: Optional[str] = None):
+    def __init__(
+        self, *, trace: bool = False, trace_id_filter: Optional[set[str]] = None
+    ):
         super().__init__()
         self._is_trace = trace
         self._trace_id_filter = trace_id_filter
@@ -845,7 +847,10 @@ class TorchLogsFormatter(logging.Formatter):
 
         filepath = make_module_path_relative(record.pathname)
 
-        if self._trace_id_filter is not None and self._trace_id_filter != record.traceid.strip():
+        if (
+            self._trace_id_filter
+            and record.traceid.strip() not in self._trace_id_filter
+        ):
             return ""
 
         prefix = (
@@ -870,7 +875,11 @@ class TorchLogsFormatter(logging.Formatter):
 
 def _default_formatter():
     fmt = os.environ.get(LOG_FORMAT_ENV_VAR, None)
-    trace_id_filter = os.environ.get(LOG_TRACE_ID_FILTER, None)
+    trace_id_filter = {
+        item.strip()
+        for item in os.environ.get(LOG_TRACE_ID_FILTER, "").split(",")
+        if item.strip()
+    }
     if fmt is None:
         return TorchLogsFormatter(trace_id_filter=trace_id_filter)
     else:
