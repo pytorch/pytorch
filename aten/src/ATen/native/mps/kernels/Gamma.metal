@@ -136,11 +136,7 @@ kernel void polygamma(
     constant int64_t& order [[buffer(2)]],
     uint id [[thread_position_in_grid]]) {
   // already blocked if n <= 1
-  float x = input[id];
-  float n = order;
-  float sgn = ((order % 2) ? 1 : -1);
-  output[id] = static_cast<T1>(
-      sgn * c10::metal::gamma(n + 1) * c10::metal::zeta(n + 1, x));
+  output[id] = static_cast<T1>(c10::metal::polygamma(input[id], order));
 }
 
 #define INSTANTIATE_GAMMA_KERNELS(DTYPE0, DTYPE1)                             \
