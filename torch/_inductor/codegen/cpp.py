@@ -615,10 +615,6 @@ class CppOverrides(OpOverrides):
     """Map element-wise ops to C++"""
 
     @staticmethod
-    def indirect_indexing(index_var, size, check=True, wrap_neg=True) -> sympy.Symbol:
-        return sympy_index_symbol(str(index_var))
-
-    @staticmethod
     def add(a, b):
         return f"decltype({a})({a} + {b})"
 
