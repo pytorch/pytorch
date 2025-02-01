@@ -1,5 +1,5 @@
 # Owner(s): ["module: onnx"]
-"""Unit tests for the _compat module."""
+"""Unit tests for the _dynamic_shapes module."""
 
 from __future__ import annotations
 
@@ -9,7 +9,7 @@ import tempfile
 import onnx
 
 import torch
-from torch.onnx._internal.exporter import _compat
+from torch.onnx._internal.exporter import _dynamic_shapes
 from torch.testing._internal import common_utils
 from torch.utils import _pytree
 
@@ -112,9 +112,10 @@ class TestCompat(common_utils.TestCase):
     def test_from_dynamic_shapes_to_dynamic_axes_success(
         self, dynamic_shapes, input_names, expected_dynamic_axes
     ):
-        dynamic_axes = _compat._from_dynamic_shapes_to_dynamic_axes(
+        dynamic_axes = _dynamic_shapes.from_dynamic_shapes_to_dynamic_axes(
             dynamic_shapes=dynamic_shapes, input_names=input_names, exception=Exception
         )
+        print(dynamic_axes)
         self.assertEqual(dynamic_axes, expected_dynamic_axes)
 
     def test_from_dynamic_shapes_to_dynamic_axes_fails_when_input_names_is_less_than_flat_dynamic_shapes(
@@ -128,7 +129,7 @@ class TestCompat(common_utils.TestCase):
         )
         input_names = ["input_x", "input_y", "input_z"]
         with self.assertRaises(ValueError):
-            _compat._from_dynamic_shapes_to_dynamic_axes(
+            _dynamic_shapes.from_dynamic_shapes_to_dynamic_axes(
                 dynamic_shapes=dynamic_shapes,
                 input_names=input_names,
                 exception=Exception,
@@ -197,7 +198,7 @@ class TestCompat(common_utils.TestCase):
         )
         # kwargs can still be renamed as long as it's in order
         input_names = ["input_x", "input_y", "input_z", "d", "e", "f"]
-        dynamic_axes = _compat._from_dynamic_shapes_to_dynamic_axes(
+        dynamic_axes = _dynamic_shapes.from_dynamic_shapes_to_dynamic_axes(
             dynamic_shapes=dynamic_shapes, input_names=input_names, exception=Exception
         )
         expected_dynamic_axes = {
@@ -248,7 +249,7 @@ class TestPyTreeDynamicAxesShapes(common_utils.TestCase):
             "x": {0: x_dim},
             "y": {1: y_dim},
         }
-        unflatten_dynamic_shapes = _compat._unflatten_dynamic_shapes_with_inputs_tree(
+        unflatten_dynamic_shapes = _dynamic_shapes._unflatten_dynamic_shapes_with_inputs_tree(
             inputs, dynamic_shapes
         )
 
@@ -266,7 +267,7 @@ class TestPyTreeDynamicAxesShapes(common_utils.TestCase):
             "x": {0: x_dim},
             "y": {1: y_dim},
         }
-        unflatten_dynamic_shapes = _compat._unflatten_dynamic_shapes_with_inputs_tree(
+        unflatten_dynamic_shapes = _dynamic_shapes._unflatten_dynamic_shapes_with_inputs_tree(
             inputs, dynamic_shapes
         )
 
@@ -303,7 +304,7 @@ class TestPyTreeDynamicAxesShapes(common_utils.TestCase):
             "z0": {2: z0_dim_2},
             "z1": {1: z1_dim_1},
         }
-        unflatten_dynamic_shapes = _compat._unflatten_dynamic_shapes_with_inputs_tree(
+        unflatten_dynamic_shapes = _dynamic_shapes._unflatten_dynamic_shapes_with_inputs_tree(
             inputs, dynamic_shapes
         )
         expected_dynamic_shapes = (
@@ -341,7 +342,7 @@ class TestPyTreeDynamicAxesShapes(common_utils.TestCase):
             "z0": {2: z0_dim_2},
             "z1": {1: z1_dim_1},
         }
-        unflatten_dynamic_shapes = _compat._unflatten_dynamic_shapes_with_inputs_tree(
+        unflatten_dynamic_shapes = _dynamic_shapes._unflatten_dynamic_shapes_with_inputs_tree(
             inputs, dynamic_shapes
         )
         expected_dynamic_shapes = {
@@ -464,7 +465,7 @@ class TestPyTreeDynamicAxesShapes(common_utils.TestCase):
             )
         ],
     )
-    def test__from_dynamic_axes_to_dynamic_shapes_succeeds_on_llm(
+    def test_from_dynamic_axes_to_dynamic_shapes_succeeds_on_llm(
         self,
         model,
         args,
@@ -474,7 +475,7 @@ class TestPyTreeDynamicAxesShapes(common_utils.TestCase):
         dynamic_axes,
         expected_dynamic_shapes,
     ):
-        dynamic_shapes, _, _ = _compat._from_dynamic_axes_to_dynamic_shapes(
+        dynamic_shapes, _, _ = _dynamic_shapes.from_dynamic_axes_to_dynamic_shapes(
             model,
             args,
             kwargs,
