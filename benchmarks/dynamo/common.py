@@ -3594,6 +3594,7 @@ def run(runner, args, original_dir=None):
         os.environ["CUBLAS_WORKSPACE_CONFIG"] = ":4096:8"
         if args.only is not None and args.only in {
             "DebertaForQuestionAnswering",
+            "RobertaForQuestionAnswering",
             "nvidia_deeprecommender",
             "volo_d1_224",
         }:
