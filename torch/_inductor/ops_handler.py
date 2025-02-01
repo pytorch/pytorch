@@ -778,7 +778,7 @@ OP_NAMES = list_ops(OpsHandler)
 
 
 class DefaultHandler:
-    def _default(self, target: str, args: list[Any], kwargs: dict[str, Any]) -> Any:
+    def _default(self, name: str, args: tuple[Any, ...], kwargs: dict[str, Any]) -> Any:
         """
         Default implementation for all ops.  Override in a subclass to
         provide generic op behavior.
@@ -814,7 +814,7 @@ DefaultHandler._init_cls()
 class NoopHandler(DefaultHandler):
     name = "NoopHandler"
 
-    def _default(self, target: str, args: list[Any], kwargs: dict[str, Any]) -> Any:
+    def _default(self, name: str, args: tuple[Any, ...], kwargs: dict[str, Any]) -> Any:
         return None
 
     @staticmethod
@@ -926,11 +926,11 @@ class BasicMathOps:
 class MockHandler(BasicMathOps, DefaultHandler):
     name = "MockHandler"
 
-    def _default(self, target: str, args: list[Any], kwargs: dict[str, Any]) -> Any:
+    def _default(self, name: str, args: tuple[Any, ...], kwargs: dict[str, Any]) -> Any:
         fargs = [*map(_arg_str, args)]
         for k, v in kwargs.items():
             fargs.append(f"{k}={_arg_str(v)}")
-        return f"ops.{target}({', '.join(fargs)})"
+        return f"ops.{name}({', '.join(fargs)})"
 
     @staticmethod
     def masked(mask, body, other) -> str:
@@ -1007,9 +1007,9 @@ class KernelFormatterHandler(DefaultHandler):
         self._output.writeline(f"{varname} = {line}")
         return varname
 
-    def _default(self, target: str, args: list[Any], kwargs: dict[str, Any]) -> Any:
+    def _default(self, name: str, args: tuple[Any, ...], kwargs: dict[str, Any]) -> Any:
         return pytree.tree_map(
-            self._write, getattr(self.parent_handler, target)(*args, **kwargs)
+            self._write, getattr(self.parent_handler, name)(*args, **kwargs)
         )
 
     def reduction(
@@ -1040,13 +1040,13 @@ class WrapperHandler(DefaultHandler):
     def __init__(self, inner: Any):
         self._inner = inner
 
-    def _default(self, target: str, args: list[Any], kwargs: dict[str, Any]) -> Any:
-        return getattr(self._inner, target)(*args, **kwargs)
+    def _default(self, name: str, args: tuple[Any, ...], kwargs: dict[str, Any]) -> Any:
+        return getattr(self._inner, name)(*args, **kwargs)
 
 
 class AddParenHandler(WrapperHandler):
-    def _default(self, target: str, args: list[Any], kwargs: dict[str, Any]) -> Any:
-        val = getattr(self._inner, target)(*args, **kwargs)
+    def _default(self, name: str, args: tuple[Any, ...], kwargs: dict[str, Any]) -> Any:
+        val = getattr(self._inner, name)(*args, **kwargs)
         if isinstance(val, (sympy.Expr, tuple, list, NoneType)):
             return val
         return f"({val})"
@@ -1071,10 +1071,10 @@ class OpCounterCSE(DefaultHandler):
         self._read_names: list[str] = []
         self._nontrivial_read_count = 0
 
-    def _default(self, target: str, args: list[Any], kwargs: dict[str, Any]) -> Any:
-        self._used_ops.add(target)
+    def _default(self, name: str, args: tuple[Any, ...], kwargs: dict[str, Any]) -> Any:
+        self._used_ops.add(name)
         return pytree.tree_map(
-            self._update_count, getattr(self.parent_handler, target)(*args, **kwargs)
+            self._update_count, getattr(self.parent_handler, name)(*args, **kwargs)
         )
 
     def _update_count(self, val):
@@ -1183,13 +1183,13 @@ class SimpleCSEHandler(WrapperHandler):
     def store_reduction(self, *args, **kwargs) -> None:
         raise NotImplementedError("store not implemented")
 
-    def _default(self, target: str, args: list[Any], kwargs: dict[str, Any]) -> Any:
-        key = getattr(self.mock, target)(*args, **kwargs)
+    def _default(self, name: str, args: tuple[Any, ...], kwargs: dict[str, Any]) -> Any:
+        key = getattr(self.mock, name)(*args, **kwargs)
         val = self.cse_cache.get(key)
         if val is not None:
             return val
 
-        val = getattr(self._inner, target)(*args, **kwargs)
+        val = getattr(self._inner, name)(*args, **kwargs)
         self.cse_cache[key] = val
         return val
 
