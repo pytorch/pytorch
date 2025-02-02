@@ -3,17 +3,13 @@
 #include <ATen/ATen.h>
 #include <ATen/DLConvertor.h>
 
-#include <iostream>
-// NOLINTNEXTLINE(modernize-deprecated-headers)
-#include <string.h>
-#include <sstream>
-
 using namespace at;
+
 TEST(TestDlconvertor, TestDlconvertor) {
   manual_seed(123);
 
   Tensor a = rand({3, 4});
-  DLManagedTensor* dlMTensor = toDLPack(a);
+  DLManagedTensorVersioned* dlMTensor = toDLPack(a);
 
   Tensor b = fromDLPack(dlMTensor);
 
@@ -24,10 +20,33 @@ TEST(TestDlconvertor, TestDlconvertorNoStrides) {
   manual_seed(123);
 
   Tensor a = rand({3, 4});
-  DLManagedTensor* dlMTensor = toDLPack(a);
+  DLManagedTensorVersioned* dlMTensor = toDLPack(a);
   dlMTensor->dl_tensor.strides = nullptr;
 
   Tensor b = fromDLPack(dlMTensor);
+
+  ASSERT_TRUE(a.equal(b));
+}
+
+TEST(TestDlconvertorUnversioned, TestDlconvertor) {
+  manual_seed(123);
+
+  Tensor a = rand({3, 4});
+  DLManagedTensor* dlMTensor = toDLPackUnversioned(a);
+
+  Tensor b = fromDLPackUnversioned(dlMTensor);
+
+  ASSERT_TRUE(a.equal(b));
+}
+
+TEST(TestDlconvertorUnversioned, TestDlconvertorNoStrides) {
+  manual_seed(123);
+
+  Tensor a = rand({3, 4});
+  DLManagedTensor* dlMTensor = toDLPackUnversioned(a);
+  dlMTensor->dl_tensor.strides = nullptr;
+
+  Tensor b = fromDLPackUnversioned(dlMTensor);
 
   ASSERT_TRUE(a.equal(b));
 }
