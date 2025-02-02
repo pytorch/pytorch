@@ -252,6 +252,14 @@ class MetalOverrides(OpOverrides):
         return f"c10::metal::log_gamma({x})"
 
     @staticmethod
+    def polygamma(n: CSEVariable, x: CSEVariable) -> str:
+        # polygamma's API takes order as first argument
+        # and the input tensor as second, while the
+        # metal shader has these inverted.
+        # TODO (dcci): make this more uniform.
+        return f"c10::metal::polygamma({x}, {n})"
+
+    @staticmethod
     def tan(x: CSEVariable) -> str:
         return f"metal::tan({x})"
 
