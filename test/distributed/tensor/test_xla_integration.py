@@ -26,7 +26,9 @@ def with_xla(func: Callable) -> Callable:
 
     @wraps(func)  # pyre-ignore[6]
     def wrapper(
-        self, *args: tuple[object], **kwargs: dict[str, Any]  # type: ignore[misc]
+        self,
+        *args: tuple[object],
+        **kwargs: dict[str, Any],  # type: ignore[misc]
     ) -> None:
         # TODO(yeounoh) replace this with xr.use_spmd() when we deprecate the flag.
         os.environ["XLA_USE_SPMD"] = "1"
