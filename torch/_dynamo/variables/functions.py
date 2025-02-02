@@ -14,7 +14,7 @@ import torch
 
 from .. import polyfills, variables
 from ..bytecode_transformation import create_call_function, create_rot_n
-from ..exc import unimplemented, Unsupported
+from ..exc import raise_observed_exception, unimplemented, Unsupported
 from ..guards import GuardBuilder, install_guard
 from ..source import AttrSource, ConstantSource, DefaultsSource, GetItemSource
 from ..utils import (
@@ -102,6 +102,34 @@ def _create_nested_fn(
     func.__annotations__ = annotations
 
     return func
+
+
+fn_known_dunder_attrs = {
+    "__annotations__",
+    "__defaults__",
+    "__kwdefaults__",
+    "__code__",
+    "__globals__",
+    "__closure__",
+    "__doc__",
+}
+
+
+def fn_var_getattr(tx, fn, source, name):
+    source = source and AttrSource(source, name)
+    try:
+        subobj = inspect.getattr_static(fn, name)
+    except AttributeError:
+        # function does not have a __getattr__ or __getattribute__ method,
+        # so we can safely assume that this attribute is absent
+        raise_observed_exception(AttributeError, tx)
+
+    # Special handling for known dunder attributes
+    if name in fn_known_dunder_attrs:
+        subobj = getattr(fn, name)
+    if source:
+        return variables.LazyVariableTracker.create(subobj, source)
+    return VariableTracker.build(tx, subobj)
 
 
 class BaseUserFunctionVariable(VariableTracker):
@@ -281,14 +309,7 @@ class UserFunctionVariable(BaseUserFunctionVariable):
         return result
 
     def var_getattr(self, tx: "InstructionTranslator", name: str):
-        source = self.source and AttrSource(self.source, name)
-        try:
-            subobj = inspect.getattr_static(self.fn, name)
-        except AttributeError:
-            return variables.GetAttrVariable(self, name, source=source)
-        if source:
-            return variables.LazyVariableTracker.create(subobj, source)
-        return VariableTracker.build(tx, subobj)
+        return fn_var_getattr(tx, self.fn, self.source, name)
 
     def call_obj_hasattr(
         self, tx: "InstructionTranslator", name: str
@@ -473,6 +494,14 @@ class UserMethodVariable(UserFunctionVariable):
 
     def inspect_parameter_names(self):
         return super().inspect_parameter_names()[1:]
+
+    def var_getattr(self, tx: "InstructionTranslator", name: str):
+        source = self.source and AttrSource(self.source, name)
+        if name == "__self__":
+            return self.obj
+        if name == "__func__":
+            return VariableTracker.build(tx, self.fn, source)
+        return super().var_getattr(tx, name)
 
 
 class WrappedUserMethodVariable(UserMethodVariable):
@@ -751,6 +780,12 @@ class SkipFunctionVariable(VariableTracker):
                 )
             msg += f"', {self.reason}'" if self.reason else ""
             unimplemented(msg)
+
+    def call_obj_hasattr(self, tx: "InstructionTranslator", name):
+        return variables.ConstantVariable.create(hasattr(self.value, name))
+
+    def var_getattr(self, tx: "InstructionTranslator", name: str):
+        return fn_var_getattr(tx, self.value, self.source, name)
 
 
 class WrapperUserFunctionVariable(VariableTracker):
