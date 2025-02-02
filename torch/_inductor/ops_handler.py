@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import itertools
 import re
-from types import NoneType
 from typing import (
     Any,
     Callable,
@@ -758,6 +757,14 @@ class OpsHandler(Protocol[T]):
     ) -> T:
         ...
 
+    def output(self, x0: T) -> None:
+        """This is a fake op used in analysis but not codegen"""
+        ...
+
+    def placeholder(self, index: int) -> T:
+        """This is a fake op used in analysis but not codegen"""
+        ...
+
 
 _ignore_op_re = re.compile(r"_.*|paren").fullmatch
 
@@ -960,7 +967,7 @@ if TYPE_CHECKING:
 class KernelFormatterHandler(DefaultHandler):
     def __init__(self, parent_handler):
         self.parent_handler = parent_handler
-        self.output = IndentedBuffer(1)
+        self._output = IndentedBuffer(1)
         self.var_counter = itertools.count()
 
     @staticmethod
@@ -972,8 +979,8 @@ class KernelFormatterHandler(DefaultHandler):
         names = ["index", "rindex"] if rindex is not None else ["index"]
         formatter = KernelFormatterHandler(MockHandler())
 
-        with formatter.output.indent(-1):
-            formatter.output.writeline(f"def inner_fn({', '.join(names)}):")
+        with formatter._output.indent(-1):
+            formatter._output.writeline(f"def inner_fn({', '.join(names)}):")
         for name, arg in zip(names, args):
             if arg:
                 lhs = ", ".join(
@@ -982,7 +989,7 @@ class KernelFormatterHandler(DefaultHandler):
                         for v in arg
                     ]
                 )
-                formatter.output.writeline(f"{lhs} = {name}")
+                formatter._output.writeline(f"{lhs} = {name}")
 
         with V.set_ops_handler(formatter), patch.object(
             FlexibleLayout, "allow_indexing", True
@@ -996,7 +1003,7 @@ class KernelFormatterHandler(DefaultHandler):
     def _write(self, line):
         # replace line with a new variable name
         varname = f"tmp{next(self.var_counter)}"
-        self.output.writeline(f"{varname} = {line}")
+        self._output.writeline(f"{varname} = {line}")
         return varname
 
     def _default(self, name: str, args: tuple[Any, ...], kwargs: dict[str, Any]) -> Any:
@@ -1014,12 +1021,12 @@ class KernelFormatterHandler(DefaultHandler):
         line = self.parent_handler.reduction(dtype, src_dtype, reduction_type, value)
         num_values = reduction_num_outputs(reduction_type)
         varnames = [f"tmp{next(self.var_counter)}" for _ in range(num_values)]
-        self.output.writeline(f"{','.join(varnames)} = {line}")
+        self._output.writeline(f"{','.join(varnames)} = {line}")
         return tuple(varnames) if num_values > 1 else varnames[0]
 
     def getvalue(self, result):
-        self.output.writeline(f"return {result}")
-        return self.output.getvalue()
+        self._output.writeline(f"return {result}")
+        return self._output.getvalue()
 
 
 if TYPE_CHECKING:
@@ -1039,7 +1046,7 @@ class WrapperHandler(DefaultHandler):
 class AddParenHandler(WrapperHandler):
     def _default(self, name: str, args: tuple[Any, ...], kwargs: dict[str, Any]) -> Any:
         val = getattr(self._inner, name)(*args, **kwargs)
-        if isinstance(val, (sympy.Expr, tuple, list, NoneType)):
+        if not val or isinstance(val, (sympy.Expr, tuple, list)):
             return val
         return f"({val})"
 
