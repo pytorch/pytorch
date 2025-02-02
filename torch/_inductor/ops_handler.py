@@ -783,7 +783,7 @@ class DefaultHandler(OpsHandler[Any]):
         """
         Here we codegen many functions of the form:
 
-            def add(a, b):
+            def add(self, a, b):
                 return self._default('add', (a, b), {})
 
         and install them in cls.  This is the same as _call_default above,
