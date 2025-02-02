@@ -454,6 +454,7 @@ std::unordered_map<std::string, std::string> saveNcclMeta(
     const SaveNcclMetaConfig& config) {
   std::unordered_map<std::string, std::string> map;
 #ifdef USE_DISTRIBUTED
+  static bool save_full_group_ranks = true;
   auto debugInfo = dynamic_cast<ParamCommsDebugInfo*>(
       c10::ThreadLocalDebugInfo::get(c10::DebugInfoKind::PARAM_COMMS_INFO));
 
@@ -495,6 +496,11 @@ std::unordered_map<std::string, std::string> saveNcclMeta(
       map.emplace(kProcessGroupDesc, fmt::format("\"{}\"", group_desc));
     }
     auto& groupRanks = debugInfo->getGroupRanks();
+    if (save_full_group_ranks && group_desc=="default_pg") {
+      autograd::profiler::addMetadataJson(
+          "Default PG Ranks", fmt::format("\"{}\"", groupRanks));
+      save_full_group_ranks = false;
+    }
     map.emplace(kGroupRanks, format_list(groupRanks, config.truncate));
 
     auto rank = debugInfo->getRank();
