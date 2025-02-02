@@ -454,7 +454,7 @@ inline void {{kernel_name}}_kernel(
 {%- endif %}
         }
 
-        vc[i] = at::vec::fmadd(va, vb[col], vc[idx]);
+        vc[i] = at::vec::fmadd(va, vb[col], vc[i]);
     };
 
     for (int k = 0; k < K; ++k) {
