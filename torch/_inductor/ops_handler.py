@@ -760,7 +760,7 @@ class DefaultHandler(OpsHandler[Any]):
         provide generic op behavior.
 
         Args:
-            target: name of the op, see OpHandler.target
+            name: name of the op, see OpHandler.{name}
             args: positional args passed to the op
             kwargs: keyword args passed to the op
 
