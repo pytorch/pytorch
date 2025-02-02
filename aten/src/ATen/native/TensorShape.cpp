@@ -445,7 +445,7 @@ Tensor& set_storage_meta__symint(
     int64_t dim = static_cast<int64_t>(size.size());
     contiguous_strides.resize(dim);
     if (dim > 0) {
-      const auto last_idx = dim - 1;
+      const size_t last_idx = static_cast<size_t>(dim - 1);
       contiguous_strides.at(last_idx) = 1;
       for (size_t i = 0; i < last_idx; i++) {
         // TODO: max with 1
