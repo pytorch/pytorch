@@ -29,7 +29,7 @@ from torch.testing._internal.common_device_type import ops, onlyCPU, instantiate
 import torch.utils._pytree as pytree
 import torch.fx._pytree as fx_pytree
 from torch.fx import symbolic_trace, Proxy, Node, GraphModule, Interpreter, Tracer, Transformer, Graph, wrap, PH, CodeGen
-from torch.fx.node import Target, Argument, _format_arg
+from torch.fx.node import Target, Argument, ArgumentT, _format_arg
 from torch.fx.passes import shape_prop
 from torch.fx.immutable_collections import immutable_dict, immutable_list
 from torch.fx.experimental.rewriter import RewritingTracer
@@ -4159,6 +4159,10 @@ class TestFXAPIBackwardCompatibility(JitTestCase):
                 return f'Callable[[{", ".join(contained_type_annots[:-1])}], {contained_type_annots[-1]}]'
             else:
                 return f'Callable{contained_type_str}'
+
+        if t is ArgumentT:
+            # ArgumentT is a TypeVar bound to torch.fx.node.Argument
+            return f'torch.fx.node.Argument{contained_type_str}'
 
         raise RuntimeError(f'Unrecognized type {t} used in BC-compatible type signature {sig_str}.'
                            f'Please add support for this type and confirm with the '
