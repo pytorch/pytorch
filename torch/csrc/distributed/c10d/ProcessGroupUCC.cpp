@@ -767,6 +767,30 @@ std::unique_ptr<at::cuda::CUDAEvent> ProcessGroupUCC::getPooledEvent() {
 }
 #endif
 
+void ProcessGroupUCC::startCoalescing() {
+  TORCH_CHECK(
+      !capturing_coalesced_coll_,
+      "Coalescing is already in progress. Please call endCoalescing() before starting a new coalescing session.");
+  capturing_coalesced_coll_ = true;
+
+  auto initialize_coalesced_tensors = [this](std::vector<at::Tensor>& tensors) {
+    if (tensors.empty()) {
+      tensors.reserve(size_);
+      std::generate_n(
+          std::back_inserter(tensors), size_, []() { return at::Tensor(); });
+    } else {
+      std::fill(tensors.begin(), tensors.end(), at::Tensor());
+    }
+  };
+  initialize_coalesced_tensors(coalesced_coll_outputTensors_);
+  initialize_coalesced_tensors(coalesced_coll_inputTensors_);
+}
+
+c10::intrusive_ptr<Work> ProcessGroupUCC::endCoalescing() {
+  capturing_coalesced_coll_ = false;
+  return alltoall(coalesced_coll_outputTensors_, coalesced_coll_inputTensors_);
+}
+
 template <typename PreProcess, typename PostProcess>
 c10::intrusive_ptr<Work> ProcessGroupUCC::collective_post(
     OpType opType,
@@ -778,6 +802,32 @@ c10::intrusive_ptr<Work> ProcessGroupUCC::collective_post(
     std::vector<at::Tensor>& inputTensors,
     std::vector<at::Tensor>& outputTensors,
     const char* prof_title) {
+  if (capturing_coalesced_coll_) {
+    TORCH_CHECK(
+        opType == OpType::RECV || opType == OpType::SEND,
+        "Coalescing is only supported for send and recv operations.");
+    TORCH_CHECK(
+        coll.tag == 0,
+        "Coalescing send/recv does not support tag -- must be set to 0, but got ",
+        coll.tag);
+    const int64_t peer_rank = (opType == OpType::RECV)
+        ? getRank() - coll.active_set.stride
+        : getRank() + coll.active_set.stride;
+    std::vector<at::Tensor>& coalesced_tensors = (opType == OpType::RECV)
+        ? coalesced_coll_outputTensors_
+        : coalesced_coll_inputTensors_;
+    TORCH_CHECK(
+        !coalesced_tensors.at(peer_rank).defined(),
+        "We only support one send and one recv maximum per pair of ranks, but found that rank ",
+        getRank(),
+        (opType == OpType::RECV) ? " receives" : " sends",
+        " twice from/to rank ",
+        peer_rank);
+    coalesced_tensors.at(peer_rank) =
+        (opType == OpType::RECV) ? outputTensors[0] : inputTensors[0];
+    return {};
+  }
+
   seq_++;
   set_timeout(coll);
   auto work = c10::make_intrusive<ProcessGroupUCC::WorkUCC>(
@@ -1046,11 +1096,21 @@ c10::intrusive_ptr<Work> ProcessGroupUCC::alltoall(
     std::vector<at::Tensor>& outputTensors,
     std::vector<at::Tensor>& inputTensors,
     const AllToAllOptions& /* unused */) {
-  auto device = outputTensors[0].device();
+  c10::Device device(c10::DeviceType::CPU);
+  for (const auto r : c10::irange(outputTensors.size())) {
+    if (outputTensors[r].defined()) {
+      device = outputTensors[r].device();
+      break;
+    }
+    if (inputTensors[r].defined()) {
+      device = inputTensors[r].device();
+      break;
+    }
+  }
   for (const auto r : c10::irange(outputTensors.size())) {
     TORCH_CHECK(
-        device == outputTensors[r].device() &&
-            device == inputTensors[r].device(),
+        (!outputTensors[r].defined() || device == outputTensors[r].device()) &&
+            (!inputTensors[r].defined() || device == inputTensors[r].device()),
         "Tensors must be on the same device")
   }
 
@@ -1067,13 +1127,17 @@ c10::intrusive_ptr<Work> ProcessGroupUCC::alltoall(
      calculation in UCC layer
       3. post Alltoallv
   */
+  auto compute_length = [](at::Tensor tensor) -> uint64_t {
+    return (tensor.defined()) ? tensor.element_size() * tensor.numel() : 0;
+  };
+  auto compute_offset = [](at::Tensor tensor) -> uint64_t {
+    return (tensor.defined()) ? (uint64_t)tensor.data_ptr() : 0;
+  };
   for (const auto i : c10::irange(size_)) {
-    data->send_lengths[i] =
-        (uint64_t)(inputTensors[i].element_size() * inputTensors[i].numel());
-    data->send_offsets[i] = (uint64_t)inputTensors[i].data_ptr();
-    data->recv_lengths[i] =
-        (uint64_t)(outputTensors[i].element_size() * outputTensors[i].numel());
-    data->recv_offsets[i] = (uint64_t)outputTensors[i].data_ptr();
+    data->send_lengths[i] = compute_length(inputTensors[i]);
+    data->send_offsets[i] = compute_offset(inputTensors[i]);
+    data->recv_lengths[i] = compute_length(outputTensors[i]);
+    data->recv_offsets[i] = compute_offset(outputTensors[i]);
   }
 
   coll.mask = UCC_COLL_ARGS_FIELD_FLAGS;
@@ -1084,12 +1148,12 @@ c10::intrusive_ptr<Work> ProcessGroupUCC::alltoall(
   coll.src.info_v.counts = (ucc_count_t*)data->send_lengths.data();
   coll.src.info_v.displacements = (ucc_aint_t*)data->send_offsets.data();
   coll.src.info_v.datatype = UCC_DT_UINT8;
-  coll.src.info_v.mem_type = to_ucc_memType(inputTensors[0].device().type());
+  coll.src.info_v.mem_type = to_ucc_memType(device.type());
   coll.dst.info_v.buffer = 0;
   coll.dst.info_v.counts = (ucc_count_t*)data->recv_lengths.data();
   coll.dst.info_v.displacements = (ucc_aint_t*)data->recv_offsets.data();
   coll.dst.info_v.datatype = UCC_DT_UINT8;
-  coll.dst.info_v.mem_type = to_ucc_memType(outputTensors[0].device().type());
+  coll.dst.info_v.mem_type = to_ucc_memType(device.type());
 
   SAVE_TENSORS(inputTensors, data->src);
   SAVE_TENSORS(outputTensors, data->dst);
