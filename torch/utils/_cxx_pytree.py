@@ -930,6 +930,7 @@ def treespec_dumps(treespec: TreeSpec, protocol: Optional[int] = None) -> str:
     return python_pytree.treespec_dumps(orig_treespec, protocol=protocol)
 
 
+@functools.lru_cache
 def treespec_loads(serialized: str) -> TreeSpec:
     """Deserialize a treespec from a JSON string."""
     orig_treespec = python_pytree.treespec_loads(serialized)
