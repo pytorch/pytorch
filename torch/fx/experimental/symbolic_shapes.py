@@ -12,9 +12,11 @@ need to make use of these APIs to setup dynamic shapes support appropriately.
 import abc
 import atexit
 import collections
+import copy
 import functools
 import inspect
 import itertools
+import json
 import logging
 import math
 import operator
@@ -39,7 +41,7 @@ from typing import (
     TypeVar,
     Union,
 )
-from typing_extensions import deprecated, TypeAlias, TypeGuard
+from typing_extensions import deprecated, ParamSpec, Self, TypeAlias, TypeGuard, TypeVar
 
 import torch
 import torch.fx
@@ -55,7 +57,6 @@ from torch._utils_internal import signpost_event
 from torch.fx.experimental import _config as config
 from torch.fx.experimental.recording import (
     FakeTensorMeta,
-    record_shapeenv_event,
     replay_shape_env_events,
     shape_env_check_state_equal,
     ShapeEnvEvent,
@@ -86,6 +87,9 @@ from torch.utils._sympy.value_ranges import (
 )
 from torch.utils._traceback import CapturedTraceback, format_frame
 
+
+_P = ParamSpec("_P")
+_T = TypeVar("_T")
 
 if TYPE_CHECKING:
     import types
@@ -158,6 +162,285 @@ __all__ = [
 # FX node metadata keys for symbolic shape FX graph.
 SHAPEENV_EVENT_KEY = "shapeenv_event"
 CURRENT_NODE_KEY = "current_node"
+
+
+def record_shapeenv_event(*args: Any, **kwargs: Any) -> Callable[[Callable[_P, _T]], Callable[_P, _T]]:
+    def decorator(func: Callable[_P, _T]) -> Callable[_P, _T]:
+        @functools.wraps(func)
+        def wrapper(*args: _P.args, **kwargs: _P.kwargs) -> _T:
+            # return func(*args, **kwargs)
+
+            self_obj = args[0]
+            before_snapshot: Dict[str, object] = _snapshot_shapeenv(self_obj)
+            ret: _T = func(*args, **kwargs)
+            after_snapshot: Dict[str, object] = _snapshot_shapeenv(self_obj)
+
+            sloc, _ = self_obj._get_stack_summary(False, None)
+            mutations: List[Dict[str, object]] = _diff_snapshots(
+                before_snapshot, after_snapshot
+            )
+
+            user_stack = None
+            if len(TracingContext.extract_stack()) > 0:
+                user_stack = structured.from_traceback(TracingContext.extract_stack())
+
+            framework_stack = ''.join(traceback.format_stack(inspect.currentframe()))
+
+            mutations.append({
+                    "event": "VAR_SET",
+                    "name": "user_stack",
+                    "value": str(user_stack),
+            })
+            mutations.append({
+                    "event": "VAR_SET",
+                    "name": "framework_stack",
+                    "value": str(framework_stack),
+            })
+
+            if mutations:
+                torch._logging.trace_structured(
+                    "shapenv_mutation",
+                    metadata_fn=lambda: {
+                        "loc": f"{sloc}",
+                        "mutations": mutations,
+                    },
+                )
+
+            return ret
+
+        return wrapper
+
+    return decorator
+
+
+def _snapshot_shapeenv(env: Self) -> Dict[str, object]:
+    snap: Dict[str, object] = {}
+    key_whitelist = [
+        "replacements",
+        "var_to_range",
+        "guards",
+        "axioms",
+        "unbacked_var_to_val",
+        "var_to_val",
+        "unbacked_renamings",
+        "divisible",
+        "size_like",
+        "val_to_var",
+        "deferred_runtime_asserts",
+        "frozen",
+        "runtime_asserts_frozen",
+        "pending_fresh_unbacked_symbols",
+        "var_to_sources",
+    ]
+    # Go through all attributes on the class
+    for name in key_whitelist:
+        # Skip magic or private methods/attributes
+        if name.startswith("__"):
+            continue
+        value = getattr(env, name)
+        # Skip callables (methods/functions)
+        if callable(value):
+            continue
+        # Make a deep copy so later changes won't affect the snapshot
+        try:
+            snap[name] = copy.deepcopy(value)
+        except Exception:
+            # Fallback if something cannot be deep-copied
+            snap[name] = value
+    return snap
+
+
+def _diff_snapshots(
+    before: Dict[str, object], after: Dict[str, object]
+) -> List[Dict[str, object]]:
+    events: List[Dict[str, object]] = []
+    # Union of keys from both snapshots
+    all_keys = set(before.keys()).union(after.keys())
+    for key in all_keys:
+        old_val = before.get(key, None)
+        new_val = after.get(key, None)
+        events.extend(_diff_value(key, old_val, new_val))
+    return events
+
+
+def _diff_value(name: str, old_val: object, new_val: object) -> List[Dict[str, object]]:
+    events: List[Dict[str, object]] = []
+
+    # Handle attribute removal
+    if new_val is None and old_val is not None:
+        # If we removed something, figure out if it's a dict, set, list, or var
+        if isinstance(old_val, dict):
+            for k in old_val:
+                events.append(
+                    {
+                        "event": "DICT_DELETE",
+                        "name": name,
+                        "key": str(k),
+                    }
+                )
+        elif isinstance(old_val, set):
+            for item in old_val:
+                events.append(
+                    {
+                        "event": "SET_DELETE",
+                        "name": name,
+                        "key": str(item),
+                    }
+                )
+        elif isinstance(old_val, list):
+            # If it was a list, we can treat each item as popped
+            # but typically you'd see multiple pop events
+            for _ in old_val:
+                events.append(
+                    {
+                        "event": "ARRAY_POP",
+                        "name": name,
+                    }
+                )
+        else:
+            events.append(
+                {
+                    "event": "VAR_DELETE",
+                    "name": name,
+                }
+            )
+        return events
+
+    # Handle attribute creation
+    if old_val is None and new_val is not None:
+        # If we added something
+        if isinstance(new_val, dict):
+            for k, v in new_val.items():
+                events.append(
+                    {
+                        "event": "DICT_SET",
+                        "name": name,
+                        "key": str(k),
+                        "value": str(v),
+                    }
+                )
+        elif isinstance(new_val, set):
+            for item in new_val:
+                events.append(
+                    {
+                        "event": "SET_ADD",
+                        "name": name,
+                        "key": str(item),
+                    }
+                )
+        elif isinstance(new_val, list):
+            # If it's a list, treat each new item as push
+            for item in new_val:
+                events.append(
+                    {
+                        "event": "ARRAY_PUSH",
+                        "name": name,
+                        "value": str(item),
+                    }
+                )
+        else:
+            # A scalar was created/changed from None
+            events.append(
+                {
+                    "event": "VAR_SET",
+                    "name": name,
+                    "value": str(new_val),
+                }
+            )
+        return events
+
+    # If both old_val and new_val exist, diff them
+    if isinstance(old_val, dict) and isinstance(new_val, dict):
+        # Removed keys
+        for k in old_val:
+            if k not in new_val:
+                events.append(
+                    {
+                        "event": "DICT_DELETE",
+                        "name": name,
+                        "key": str(k),
+                    }
+                )
+            elif str(old_val[k]) != str(new_val[k]):
+                events.append(
+                    {
+                        "event": "DICT_SET",
+                        "name": name,
+                        "key": str(k),
+                        "value": str(new_val[k]),
+                    }
+                )
+        # Added keys
+        for k in new_val:
+            if k not in old_val:
+                events.append(
+                    {
+                        "event": "DICT_SET",
+                        "name": name,
+                        "key": str(k),
+                        "value": str(new_val[k]),
+                    }
+                )
+
+    elif isinstance(old_val, set) and isinstance(new_val, set):
+        # Check what got added
+        added = new_val - old_val
+        for item in added:
+            events.append(
+                {
+                    "event": "SET_ADD",
+                    "name": name,
+                    "key": str(item),
+                }
+            )
+        # Check what got removed
+        removed = old_val - new_val
+        for item in removed:
+            events.append(
+                {
+                    "event": "SET_DELETE",
+                    "name": name,
+                    "key": str(item),
+                }
+            )
+
+    elif isinstance(old_val, list) and isinstance(new_val, list):
+        # We'll do a naive approach that only checks for a single push or pop
+        if len(new_val) == len(old_val) + 1:
+            # One item added => push
+            item = new_val[-1]
+            events.append(
+                {
+                    "event": "ARRAY_PUSH",
+                    "name": name,
+                    "value": str(item),
+                }
+            )
+        elif len(new_val) == len(old_val) - 1:
+            # One item removed => pop
+            events.append(
+                {
+                    "event": "ARRAY_POP",
+                    "name": str(name),
+                }
+            )
+        else:
+            # If there's more complicated changes, you can handle them here
+            # For simplicity, we ignore them
+            pass
+
+    else:
+        # Everything else is treated as a variable (scalar) that may have changed
+        if old_val != new_val:
+            events.append(
+                {
+                    "event": "VAR_SET",
+                    "name": name,
+                    "value": str(new_val),
+                }
+            )
+
+    return events
 
 
 def log_lru_cache_stats(wrapped_f: functools._lru_cache_wrapper[object]) -> None:
