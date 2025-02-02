@@ -59,9 +59,8 @@ static void forked_autograd_child() {
 // Should be called before unsafe for forks (thread pool) calls
 static void track_bad_autograd_forks() {
 #if !defined(WIN32)
-  static c10::once_flag flag;
-  c10::call_once(
-      flag, [&] { pthread_atfork(nullptr, nullptr, forked_autograd_child); });
+  static auto result [[maybe_unused]] =
+      pthread_atfork(nullptr, nullptr, forked_autograd_child);
 #endif
 }
 
@@ -290,8 +289,10 @@ void Engine::stop() {
   stopped_ = true;
   // Under some conditions, autograd threads can hang on shutdown
   // Do not wait for them to shutdown indefinitely but rely on timeout
-  auto wait_duration_str = getenv("TORCH_AUTOGRAD_SHUTDOWN_WAIT_LIMIT");
-  auto wait_duration = wait_duration_str ? std::atof(wait_duration_str) : 10.0;
+  auto wait_duration_str =
+      c10::utils::get_env("TORCH_AUTOGRAD_SHUTDOWN_WAIT_LIMIT");
+  auto wait_duration =
+      wait_duration_str ? std::atof(wait_duration_str->c_str()) : 10.0;
   bool noBackward = true;
   for (auto& queue : device_ready_queues_) {
     noBackward = noBackward && queue->empty();
@@ -898,6 +899,19 @@ bool has_input_metadata<Edge>(const Edge& thing) {
   return thing.is_valid();
 }
 
+std::vector<std::optional<InputMetadata>> collect_input_metadata(
+    const edge_list& edges) {
+  std::vector<std::optional<InputMetadata>> input_metadata;
+  for (const auto& edge : edges) {
+    if (!edge.is_valid()) {
+      input_metadata.emplace_back(std::nullopt);
+      continue;
+    }
+    input_metadata.emplace_back(edge.function->input_metadata(edge.input_nr));
+  }
+  return input_metadata;
+}
+
 // Given an vector<Edge> or vector<optional<InputMetdata>>, validate the
 // outputs. This involves using the InputMetadata to check the outputs and also
 // potentially calling .sum_to on the outputs.
@@ -1359,8 +1373,11 @@ void Engine::initialize_device_threads_pool() {
       !in_bad_autograd_fork,
       "Unable to handle autograd's threading in combination with fork-based multiprocessing. "
       "See https://github.com/pytorch/pytorch/wiki/Autograd-and-Fork");
-  c10::call_once(
-      start_device_threads_flag_, &Engine::start_device_threads, this);
+  // Ensures device_ready_queues_ are initialized only once
+  static bool start_device_threads_flag_ [[maybe_unused]] = [this]() {
+    this->start_device_threads();
+    return true;
+  }();
 }
 
 c10::intrusive_ptr<at::ivalue::Future> Engine::execute_with_graph_task(

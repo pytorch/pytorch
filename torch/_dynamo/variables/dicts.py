@@ -2,7 +2,8 @@
 
 import collections
 import functools
-from typing import Dict, List, Optional, TYPE_CHECKING
+import types
+from typing import Optional, TYPE_CHECKING
 
 from torch._subclasses.fake_tensor import is_fake
 
@@ -62,6 +63,7 @@ def is_hashable(x):
                 variables.TorchInGraphFunctionVariable,
                 variables.TypingVariable,
                 variables.FunctoolsPartialVariable,
+                variables.WeakRefVariable,
             ),
         )
 
@@ -107,6 +109,10 @@ class ConstDictVariable(VariableTracker):
                 return self.vt.value
             elif isinstance(self.vt, variables.UserFunctionVariable):
                 return self.vt.get_function()
+            elif isinstance(self.vt, variables.WeakRefVariable):
+                # Access the underlying value inside the referent_vt for the key representation
+                Hashable = ConstDictVariable._HashableTracker
+                return Hashable(self.vt.referent_vt).underlying_value
             else:
                 x = self.vt.as_python_constant()
             return x
@@ -142,7 +148,7 @@ class ConstDictVariable(VariableTracker):
 
     def __init__(
         self,
-        items: Dict[VariableTracker, VariableTracker],
+        items: dict[VariableTracker, VariableTracker],
         user_cls=dict,
         **kwargs,
     ) -> None:
@@ -340,8 +346,8 @@ class ConstDictVariable(VariableTracker):
         self,
         tx,
         name,
-        args: "List[VariableTracker]",
-        kwargs: "Dict[str, VariableTracker]",
+        args: "list[VariableTracker]",
+        kwargs: "dict[str, VariableTracker]",
     ) -> "VariableTracker":
         # NB - Both key and value are LazyVariableTrackers in the beginning. So,
         # we have to insert guards when a dict method is accessed. For this to
@@ -413,6 +419,8 @@ class ConstDictVariable(VariableTracker):
             # missing item, return the default value. Install no DICT_CONTAINS guard.
             self.install_dict_contains_guard(tx, args)
             if len(args) == 1:
+                if name == "pop":
+                    raise_observed_exception(KeyError, tx)
                 return ConstantVariable(None)
             else:
                 return args[1]
@@ -481,7 +489,7 @@ class ConstDictVariable(VariableTracker):
         self.install_dict_keys_match_guard()
         return [x.vt for x in self.items.keys()]
 
-    def call_hasattr(self, tx, name):
+    def call_obj_hasattr(self, tx, name):
         # dict not allow setting arbitrary attributes. To check for hasattr, we can just check the __dict__ of the dict.
         # OrderedDict though requires side effects tracking because it supports arbitrary setattr.
         if self.user_cls is dict:
@@ -493,6 +501,39 @@ class ConstDictVariable(VariableTracker):
     def clone(self, **kwargs):
         self.install_dict_keys_match_guard()
         return super().clone(**kwargs)
+
+
+class MappingProxyVariable(VariableTracker):
+    # proxies to the original dict_vt
+    def __init__(self, dv_dict: ConstDictVariable, **kwargs) -> None:
+        super().__init__(**kwargs)
+        assert isinstance(dv_dict, ConstDictVariable)
+        self.dv_dict = dv_dict
+
+    def unpack_var_sequence(self, tx):
+        return self.dv_dict.unpack_var_sequence(tx)
+
+    def reconstruct(self, codegen):
+        # load types.MappingProxyType
+        codegen.add_push_null(
+            lambda: codegen.extend_output(
+                [
+                    codegen.create_load_python_module(types),
+                    codegen.create_load_attr("MappingProxyType"),
+                ]
+            )
+        )
+        codegen(self.dv_dict)
+        codegen.extend_output(create_call_function(1, False))
+
+    def call_method(
+        self,
+        tx,
+        name,
+        args: list["VariableTracker"],
+        kwargs: dict[str, "VariableTracker"],
+    ) -> "VariableTracker":
+        return self.dv_dict.call_method(tx, name, args, kwargs)
 
 
 class NNModuleHooksDictVariable(ConstDictVariable):
@@ -533,8 +574,8 @@ class DefaultDictVariable(ConstDictVariable):
         self,
         tx,
         name,
-        args: "List[VariableTracker]",
-        kwargs: "Dict[str, VariableTracker]",
+        args: "list[VariableTracker]",
+        kwargs: "dict[str, VariableTracker]",
     ) -> "VariableTracker":
         if name == "__getitem__":
             assert len(args) == 1
@@ -562,7 +603,7 @@ class SetVariable(ConstDictVariable):
 
     def __init__(
         self,
-        items: List[VariableTracker],
+        items: list[VariableTracker],
         **kwargs,
     ) -> None:
         items = dict.fromkeys(items, SetVariable._default_value())
@@ -600,8 +641,8 @@ class SetVariable(ConstDictVariable):
         self,
         tx,
         name,
-        args: List[VariableTracker],
-        kwargs: Dict[str, VariableTracker],
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
     ) -> "VariableTracker":
         # We foward the calls to the dictionary model
         if name == "add":
@@ -676,7 +717,7 @@ class SetVariable(ConstDictVariable):
 class FrozensetVariable(SetVariable):
     def __init__(
         self,
-        items: List[VariableTracker],
+        items: list[VariableTracker],
         **kwargs,
     ) -> None:
         super().__init__(items, **kwargs)
@@ -712,8 +753,8 @@ class FrozensetVariable(SetVariable):
         self,
         tx,
         name,
-        args: List[VariableTracker],
-        kwargs: Dict[str, VariableTracker],
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
     ) -> "VariableTracker":
         if name in ["add", "pop", "update", "remove", "discard", "clear"]:
             raise RuntimeError(f"Illegal call_method {name} on a frozenset")
@@ -723,7 +764,7 @@ class FrozensetVariable(SetVariable):
 class DictKeySetVariable(SetVariable):
     def __init__(
         self,
-        items: List[VariableTracker],
+        items: list[VariableTracker],
         **kwargs,
     ) -> None:
         super().__init__(items, **kwargs)
@@ -752,8 +793,8 @@ class DictKeySetVariable(SetVariable):
         self,
         tx,
         name,
-        args: List[VariableTracker],
-        kwargs: Dict[str, VariableTracker],
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
     ) -> "VariableTracker":
         if name in ["add", "pop", "update", "remove", "discard", "clear"]:
             raise RuntimeError(f"Illegal call_method {name} on a dict_keys")
@@ -800,8 +841,8 @@ class DictViewVariable(VariableTracker):
         self,
         tx,
         name,
-        args: List["VariableTracker"],
-        kwargs: Dict[str, "VariableTracker"],
+        args: list["VariableTracker"],
+        kwargs: dict[str, "VariableTracker"],
     ) -> "VariableTracker":
         if name == "__len__":
             return self.dv_dict.call_method(tx, name, args, kwargs)
@@ -827,8 +868,8 @@ class DictKeysVariable(DictViewVariable):
         self,
         tx,
         name,
-        args: List["VariableTracker"],
-        kwargs: Dict[str, "VariableTracker"],
+        args: list["VariableTracker"],
+        kwargs: dict[str, "VariableTracker"],
     ) -> "VariableTracker":
         if name == "__contains__":
             return self.dv_dict.call_method(tx, name, args, kwargs)

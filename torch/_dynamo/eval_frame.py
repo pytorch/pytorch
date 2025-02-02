@@ -27,18 +27,7 @@ import weakref
 from dataclasses import dataclass
 from enum import Enum
 from os.path import dirname, join
-from typing import (
-    Any,
-    Callable,
-    Dict,
-    List,
-    NamedTuple,
-    Optional,
-    Set,
-    Tuple,
-    TYPE_CHECKING,
-    Union,
-)
+from typing import Any, Callable, NamedTuple, Optional, TYPE_CHECKING, Union
 from unittest.mock import patch
 
 import sympy
@@ -103,7 +92,7 @@ class Unset(Enum):
     token = 0
 
 
-cached_backends: Dict[int, CompilerFn] = {}
+cached_backends: dict[int, CompilerFn] = {}
 
 unset = Unset.token
 
@@ -111,8 +100,6 @@ unset = Unset.token
 def _maybe_set_eval_frame(callback: DynamoCallback):
     # A wrapper on set_eval_frame that is guarded by a Justknob.
     # Users can disable torchDynamo by setting the JK to False.
-    from torch._C._dynamo.eval_frame import set_eval_frame
-
     if not justknobs_check("pytorch/compiler:enable_compiler_set_eval_frame"):
         torch._dynamo.utils.warn_once(
             "Dynamo disabled by Justknob: enable_compiler_set_eval_frame, skipping set_eval_frame"
@@ -208,7 +195,7 @@ DONT_WRAP_FILES = {
 
 def _debug_get_cache_entry_list(
     code: Union[types.CodeType, Callable[..., Any]]
-) -> List[CacheEntry]:
+) -> list[CacheEntry]:
     """
     Given a code object or a callable object, retrieve the cache entries
      stored in this code.
@@ -381,10 +368,14 @@ def make_set_enable_dynamic(enable: bool):
 class DynamoTLS(threading.local):
     # Each string is a summary of a frame Dynamo attempted to trace, stored in
     # temporal order.
-    traced_frame_infos: List[str] = []
+    traced_frame_infos: list[str] = []
 
 
 dynamo_tls = DynamoTLS()
+
+
+def clear_dynamo_tls():
+    dynamo_tls.traced_frame_infos.clear()
 
 
 @atexit.register
@@ -421,7 +412,7 @@ class _TorchDynamoContext:
         self.export = export
         self._dynamic = dynamic
         self.compiler_config = compiler_config
-        self.cleanup_fns: List[Callable[[], Any]] = []
+        self.cleanup_fns: list[Callable[[], Any]] = []
         self.enter_exit_hooks = []
         patch_fn()
 
@@ -456,20 +447,22 @@ class _TorchDynamoContext:
                 "Please refer to https://pytorch.org/tutorials/intermediate/torch_compile_tutorial.html "
                 "to use torch._dynamo.optimize(...) as an annotation/decorator. "
             )
+        self.prior = set_eval_frame(None)
         self.cleanup_fns = [enter() for enter in self.enter_exit_hooks]
-        self.prior = _maybe_set_eval_frame(_callback_from_stance(self.callback))
         self.prior_skip_guard_eval_unsafe = set_skip_guard_eval_unsafe(
             _is_skip_guard_eval_unsafe_stance()
         )
+        _maybe_set_eval_frame(_callback_from_stance(self.callback))
 
     def __exit__(self, exc_type, exc_val, exc_tb):
         assert self.prior is not unset
-        _maybe_set_eval_frame(self.prior)
+        set_eval_frame(None)
         set_skip_guard_eval_unsafe(self.prior_skip_guard_eval_unsafe)
-        self.prior = unset
         for cleanup in self.cleanup_fns:
             cleanup()
         self.cleanup_fns.clear()
+        _maybe_set_eval_frame(_callback_from_stance(self.prior))
+        self.prior = unset
 
     def __call__(self, fn):
         # public api for compiler config/options
@@ -944,11 +937,11 @@ def explain(f, *extra_args, **extra_kwargs):
 
         reset()
 
-        graphs: List[torch.fx.GraphModule] = []
-        break_reasons: List[Any] = []
+        graphs: list[torch.fx.GraphModule] = []
+        break_reasons: list[Any] = []
         op_count: int = 0
-        ops_per_graph: List[torch.fx.Node] = []
-        out_guards: List[_guards.Guard] = []
+        ops_per_graph: list[torch.fx.Node] = []
+        out_guards: list[_guards.Guard] = []
 
         def dynamo_graph_accumulating_compiler(
             gm: torch.fx.GraphModule, example_inputs
@@ -1014,12 +1007,12 @@ class FlattenInputOutputSignature(torch.fx.Transformer):
     def __init__(
         self,
         m: torch.fx.GraphModule,
-        flat_args: Tuple[Any],
-        matched_input_elements_positions: List[int],
-        flat_results: List[Any],
-        matched_output_elements_positions: List[int],
-        example_fake_inputs: List[torch.Tensor],
-        flat_args_dynamic_dims: List[Set[int]],
+        flat_args: tuple[Any],
+        matched_input_elements_positions: list[int],
+        flat_results: list[Any],
+        matched_output_elements_positions: list[int],
+        example_fake_inputs: list[torch.Tensor],
+        flat_args_dynamic_dims: list[set[int]],
         fake_mode: Optional[fake_tensor.FakeTensorMode] = None,
     ) -> None:
         super().__init__(m)
@@ -1238,7 +1231,7 @@ def rewrite_signature(
                 )
 
     def produce_matching(debug_type, sources, candidates):
-        matched_elements_positions: List[Optional[int]] = []
+        matched_elements_positions: list[Optional[int]] = []
         dict_of_source_vals = {}
         for i, val in enumerate(sources):
             dict_of_source_vals[id(val)] = i
@@ -1279,7 +1272,7 @@ def rewrite_signature(
     ).transform()
 
     # Make dynamo graph to have same input/output spec as user code
-    def argument_names(f_sig, args, kwargs) -> List[str]:
+    def argument_names(f_sig, args, kwargs) -> list[str]:
         def signature_to_fullargspec(sig: inspect.Signature):
             # Get a list of Parameter objects from the Signature object
             params = list(sig.parameters.values())
@@ -1378,10 +1371,10 @@ def export(
     aten_graph: bool = False,
     pre_dispatch: bool = False,
     decomposition_table: Optional[
-        Dict[torch._ops.OpOverload, Callable[..., Any]]
+        dict[torch._ops.OpOverload, Callable[..., Any]]
     ] = None,
     tracing_mode: str = "symbolic",
-    dynamic_shapes: Optional[Union[Dict[str, Any], Tuple[Any], List[Any]]] = None,
+    dynamic_shapes: Optional[Union[dict[str, Any], tuple[Any], list[Any]]] = None,
     specialize_float: bool = True,
     assume_static_by_default: bool = False,
     same_signature: bool = True,
@@ -1472,7 +1465,7 @@ def export(
         graph = None
         out_guards = None
         graph_captured_input = None
-        graph_captured_result: Optional[Tuple[torch.Tensor, ...]] = None
+        graph_captured_result: Optional[tuple[torch.Tensor, ...]] = None
         fake_mode = None
         result_traced = None
 

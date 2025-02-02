@@ -8,7 +8,7 @@ import re
 import sys
 import types
 import warnings
-from typing import Dict, List, Optional, TYPE_CHECKING
+from typing import Optional, TYPE_CHECKING
 
 import torch._C
 import torch._numpy as tnp
@@ -33,6 +33,7 @@ from ..utils import (
     is_tensor_base_attr_getter,
     proxy_args_kwargs,
     set_example_value,
+    tuple_methods,
 )
 from .base import VariableTracker
 from .functions import (
@@ -146,8 +147,8 @@ class SuperVariable(VariableTracker):
         self,
         tx,
         name,
-        args: "List[VariableTracker]",
-        kwargs: "Dict[str, VariableTracker]",
+        args: "list[VariableTracker]",
+        kwargs: "dict[str, VariableTracker]",
     ) -> "VariableTracker":
         inner_fn, source = self._resolved_getattr_and_source(self, name)
         if inner_fn is object.__init__:
@@ -213,6 +214,11 @@ class SuperVariable(VariableTracker):
             and inner_fn in self.objvar._dict_methods
         ):
             return self.objvar._dict_vt.call_method(tx, name, args, kwargs)
+        elif (
+            isinstance(self.objvar, variables.UserDefinedTupleVariable)
+            and inner_fn in tuple_methods
+        ):
+            return self.objvar._tuple_vt.call_method(tx, name, args, kwargs)
         elif inner_fn is object.__getattribute__:
             # object.__getattribute__ has no side-effects. We can directly call
             # __getattribute__ to access the attribute.
@@ -286,8 +292,8 @@ class ComptimeVariable(VariableTracker):
     def call_function(
         self,
         tx: "InstructionTranslator",
-        args: "List[VariableTracker]",
-        kwargs: "Dict[str, VariableTracker]",
+        args: "list[VariableTracker]",
+        kwargs: "dict[str, VariableTracker]",
     ) -> "VariableTracker":
         from ..comptime import ComptimeContext
 
@@ -403,8 +409,8 @@ class InspectSignatureVariable(VariableTracker):
         self,
         tx,
         name,
-        args: "List[VariableTracker]",
-        kwargs: "Dict[str, VariableTracker]",
+        args: "list[VariableTracker]",
+        kwargs: "dict[str, VariableTracker]",
     ) -> "VariableTracker":
         if name == "bind":
             if not hasattr(self.fn, "__kwdefaults__"):
@@ -481,7 +487,7 @@ class InspectBoundArgumentsVariable(VariableTracker):
     def __init__(
         self,
         bound_arguments: inspect.BoundArguments,
-        defaults: Dict[str, VariableTracker],
+        defaults: dict[str, VariableTracker],
         signature: InspectSignatureVariable,
         **kwargs,
     ):
@@ -552,8 +558,8 @@ class InspectBoundArgumentsVariable(VariableTracker):
         self,
         tx,
         name,
-        args: "List[VariableTracker]",
-        kwargs: "Dict[str, VariableTracker]",
+        args: "list[VariableTracker]",
+        kwargs: "dict[str, VariableTracker]",
     ) -> "VariableTracker":
         if name == "apply_defaults":
             # mimic calling apply_defaults
@@ -732,8 +738,8 @@ class AutogradFunctionVariable(VariableTracker):
         self,
         tx,
         name,
-        args: "List[VariableTracker]",
-        kwargs: "Dict[str, VariableTracker]",
+        args: "list[VariableTracker]",
+        kwargs: "dict[str, VariableTracker]",
     ):
         from ..trace_rules import is_callable_allowed
         from .builder import wrap_fx_proxy
@@ -787,7 +793,7 @@ class AutogradFunctionVariable(VariableTracker):
 
 @dataclasses.dataclass
 class SavedTensorBox:
-    tensors: List[VariableTracker] = dataclasses.field(default_factory=list)
+    tensors: list[VariableTracker] = dataclasses.field(default_factory=list)
 
 
 class AutogradFunctionContextVariable(UserDefinedObjectVariable):
@@ -856,8 +862,8 @@ class AutogradFunctionContextVariable(UserDefinedObjectVariable):
         self,
         tx,
         name,
-        args: "List[VariableTracker]",
-        kwargs: "Dict[str, VariableTracker]",
+        args: "list[VariableTracker]",
+        kwargs: "dict[str, VariableTracker]",
     ) -> "VariableTracker":
         if name == "__setattr__":
             return super().call_method(tx, name, args, kwargs)
@@ -918,8 +924,8 @@ class AutogradEngineVariable(UserDefinedObjectVariable):
         self,
         tx,
         name,
-        args: "List[VariableTracker]",
-        kwargs: "Dict[str, VariableTracker]",
+        args: "list[VariableTracker]",
+        kwargs: "dict[str, VariableTracker]",
     ) -> "VariableTracker":
         if name == "queue_callback":
             if torch._dynamo.compiled_autograd.in_compiled_autograd_region:
@@ -950,8 +956,8 @@ class LambdaVariable(VariableTracker):
     def call_function(
         self,
         tx: "InstructionTranslator",
-        args: "List[VariableTracker]",
-        kwargs: "Dict[str, VariableTracker]",
+        args: "list[VariableTracker]",
+        kwargs: "dict[str, VariableTracker]",
     ) -> "VariableTracker":
         return self.fn(*args, **kwargs)
 
@@ -975,7 +981,7 @@ class GetAttrVariable(VariableTracker):
         if self.py_type is not None:
             return self.py_type
         else:
-            super().python_type()
+            return super().python_type()
 
     def __repr__(self) -> str:
         return f"{self.__class__.__name__}({self.obj}, {self.name})"
@@ -1012,8 +1018,8 @@ class GetAttrVariable(VariableTracker):
     def call_function(
         self,
         tx: "InstructionTranslator",
-        args: "List[VariableTracker]",
-        kwargs: "Dict[str, VariableTracker]",
+        args: "list[VariableTracker]",
+        kwargs: "dict[str, VariableTracker]",
     ) -> "VariableTracker":
         return self.obj.call_method(tx, self.name, args, kwargs)
 
@@ -1021,8 +1027,8 @@ class GetAttrVariable(VariableTracker):
         self,
         tx,
         name,
-        args: List[VariableTracker],
-        kwargs: Dict[str, VariableTracker],
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
         if (
             name in ("__getitem__", "get")
@@ -1073,6 +1079,14 @@ class GetAttrVariable(VariableTracker):
             else:
                 return variables.ConstantVariable(False)
 
+        elif name == "__setitem__" and self.name == "__dict__" and not kwargs:
+            if isinstance(self.obj, variables.UserDefinedObjectVariable):
+                # Bypass any custom setattr as we are updating the `__dict__` itself
+                return self.obj.method_setattr_standard(tx, args[0], args[1])
+            if isinstance(self.obj, variables.NNModuleVariable):
+                # This matches how `setattr` is handled for NNModuleVariable
+                self.obj.convert_to_unspecialized(tx)
+
         return super().call_method(tx, name, args, kwargs)
 
 
@@ -1080,12 +1094,13 @@ class MethodWrapperVariable(VariableTracker):
     def __init__(self, method_wrapper, **kwargs) -> None:
         super().__init__(**kwargs)
         self.method_wrapper = method_wrapper
+        self._builtin_fns = {}
 
     def call_function(
         self,
         tx: "InstructionTranslator",
-        args: "List[VariableTracker]",
-        kwargs: "Dict[str, VariableTracker]",
+        args: "list[VariableTracker]",
+        kwargs: "dict[str, VariableTracker]",
     ) -> "VariableTracker":
         if is_tensor_base_attr_getter(self.method_wrapper) and isinstance(
             args[0], variables.TensorVariable
@@ -1093,6 +1108,22 @@ class MethodWrapperVariable(VariableTracker):
             assert len(args) == 1 and len(kwargs) == 0
 
             return args[0].var_getattr(tx, self.method_wrapper.__self__.__name__)
+
+        # method-wrapper variables are common in __init__ calls. For example,
+        # str("foo").__init__ is a method-wrapper. These method wrappers point
+        # to C functions.  Here we intercept if these method-wrappers are from
+        # builtins and then call the function counterpart directly by obtaining
+        # the self object.
+        self_obj = self.method_wrapper.__self__
+        wrapper_name = self.method_wrapper.__name__
+        # TODO(dynamo-team) - We can perhaps expand the scope to more names and
+        # more builtins.
+        if wrapper_name == "__init__":
+            fn_obj = type(self_obj).__init__
+            if fn_obj is object.__init__:
+                return variables.BuiltinVariable(object).call_method(
+                    tx, wrapper_name, [self_obj, *args], kwargs
+                )
 
         super().call_function(tx, args, kwargs)
 
@@ -1143,7 +1174,7 @@ class PythonModuleVariable(VariableTracker):
     def __repr__(self) -> str:
         return f"PythonModuleVariable({self.value})"
 
-    def call_hasattr(self, tx: "InstructionTranslator", name):
+    def call_obj_hasattr(self, tx: "InstructionTranslator", name):
         result = hasattr(self.value, name)
         return variables.ConstantVariable.create(result)
 
@@ -1169,8 +1200,8 @@ class TypingVariable(VariableTracker):
         self,
         tx,
         name,
-        args: "List[VariableTracker]",
-        kwargs: "Dict[str, VariableTracker]",
+        args: "list[VariableTracker]",
+        kwargs: "dict[str, VariableTracker]",
     ) -> "VariableTracker":
         # Create a new typing variable, e.g., `List[int]`
         if name == "__getitem__" and len(args) == 1:
@@ -1194,9 +1225,39 @@ class TypingVariable(VariableTracker):
     def as_python_constant(self):
         return self.value
 
+    def reconstruct(self, codegen: "torch._dynamo.codegen.PyCodegen") -> None:
+        # We're just trying to load the type here. Reconstructing the type from
+        # scratch is tricky - for a type like `typing.List[int]` we'd need to
+        # deconstruct the origin and args.  The origin for `List[int]` is `list`
+        # and the args is `(int,)`. When we recombine those we get the parts
+        # back and need to emit code for:
+        #
+        #     `typing.List[int]`
+        #
+        # But it's # worse than that - what if `typing` isn't in the globals (or
+        # was loaded like `import typing as _typing ; _typing.List[int]`?) so we
+        # really need to do something like:
+        #
+        #   `sys.modules["typing"].List[int]`
+        #
+        # Argh - but what if they rewrote the global `int`?  So we have to do:
+        #
+        #   `sys.modules["typing"].List[sys.modules["builtins"].int]`
+        #
+        # But where do we get `sys`? What if they never imported it or have
+        # something ELSE called `sys`?
+        #
+        # Let's skip all that noise and just emit it as a simple const.
+        #
+        codegen.append_output(codegen.create_load_const(self.value))
+
 
 @functools.lru_cache(maxsize=1)
 def get_np_to_tnp_map():
+    """
+    This generates a mapping from numpy modules to their torch._numpy
+    modules equivalents.
+    """
     from ..utils import NP_TO_TNP_MODULE
 
     np_fn_to_tnp_fn = {}
@@ -1210,6 +1271,16 @@ def get_np_to_tnp_map():
                     np_fn_to_tnp_fn[np_fn] = tnp_fn
 
     return np_fn_to_tnp_fn
+
+
+@functools.lru_cache(maxsize=1)
+def get_tnp_to_np_map():
+    """
+    This is just the reverse mapping of get_np_to_tnp_map() - mapping from
+    torch._numpy modules to numpy equivalents.
+    """
+    m = get_np_to_tnp_map()
+    return {v: k for k, v in m.items()}
 
 
 class NumpyVariable(VariableTracker):
@@ -1238,8 +1309,8 @@ class NumpyVariable(VariableTracker):
     def call_function(
         self,
         tx: "InstructionTranslator",
-        args: "List[VariableTracker]",
-        kwargs: "Dict[str, VariableTracker]",
+        args: "list[VariableTracker]",
+        kwargs: "dict[str, VariableTracker]",
     ) -> "VariableTracker":
         if not config.trace_numpy:
             unimplemented(f"numpy.{self.value}()")
@@ -1303,8 +1374,8 @@ class NumpyVariable(VariableTracker):
         self,
         tx,
         name,
-        args: "List[VariableTracker]",
-        kwargs: "Dict[str, VariableTracker]",
+        args: "list[VariableTracker]",
+        kwargs: "dict[str, VariableTracker]",
     ) -> "VariableTracker":
         unimplemented("numpy")
 
@@ -1456,8 +1527,8 @@ class LoggingLoggerVariable(VariableTracker):
         self,
         tx,
         name,
-        args: "List[VariableTracker]",
-        kwargs: "Dict[str, VariableTracker]",
+        args: "list[VariableTracker]",
+        kwargs: "dict[str, VariableTracker]",
     ) -> "VariableTracker":
         if tx.export:
             # For export cases, we can just make debugging functions no-ops
@@ -1498,8 +1569,8 @@ class ConstantLikeVariable(VariableTracker):
         self,
         tx,
         name,
-        args: List[VariableTracker],
-        kwargs: Dict[str, VariableTracker],
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
         try:
             # we only support constant propagation for methods
@@ -1679,8 +1750,8 @@ class RandomVariable(VariableTracker):
         self,
         tx,
         name,
-        args: List[VariableTracker],
-        kwargs: Dict[str, VariableTracker],
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
         if name == "seed":
             tx.output.side_effects.mutation(self)
@@ -1750,7 +1821,7 @@ class WeakRefVariable(VariableTracker):
     def call_function(
         self,
         tx: "InstructionTranslator",
-        args: "List[VariableTracker]",
-        kwargs: "Dict[str, VariableTracker]",
+        args: "list[VariableTracker]",
+        kwargs: "dict[str, VariableTracker]",
     ) -> "VariableTracker":
         return self.referent_vt

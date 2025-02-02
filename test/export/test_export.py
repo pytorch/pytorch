@@ -76,6 +76,8 @@ from torch.testing._internal.custom_tensor import (
     ConstantExtraMetadataTensor,
     CustomTensorPlainOut,
 )
+from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
+from torch.testing._internal.triton_utils import requires_gpu
 from torch.testing._internal.two_tensor import TwoTensor
 from torch.utils._pytree import (
     LeafSpec,
@@ -87,6 +89,15 @@ from torch.utils._pytree import (
     treespec_loads,
 )
 
+
+if not IS_MACOS:
+    from torch.testing._internal.distributed.fake_pg import FakeStore
+
+if HAS_GPU:
+    import triton
+    import triton.language as tl
+
+    from torch._library import capture_triton
 
 try:
     from torchrec.sparse.jagged_tensor import KeyedJaggedTensor
@@ -169,10 +180,22 @@ def foo_unbacked(x):
 
 
 @dataclass
-class Inp:
+class Inp1:
     x: Tensor
     y: List[Tensor]
     z: Dict[str, Tensor]
+
+
+@dataclass
+class Inp2:
+    a: Tensor
+    b: Tensor
+
+
+@dataclass
+class Inp3:
+    f: torch.Tensor
+    p: torch.Tensor
 
 
 NON_STRICT_SUFFIX = "_non_strict"
@@ -277,6 +300,18 @@ class TestDynamismExpression(TestCase):
             dynamic_shapes=dynamic_shapes,
         )
 
+    def test_export_slice_unbacked_dim1(self):
+        class MySlice(torch.nn.Module):
+            def forward(self, x, seq_len):
+                l = seq_len.item()
+                torch._check_is_size(l, max=x.size(1))
+                x = x.narrow(1, 0, l)
+                return x
+
+        x = torch.randn(10, 7)
+        seq_len = torch.tensor(5)
+        torch.export.export(MySlice(), args=(x, seq_len))
+
     def test_export_constraints_error(self):
         class ConflictingConstraints(torch.nn.Module):
             def forward(self, x):
@@ -343,6 +378,37 @@ class TestDynamismExpression(TestCase):
         # It works if we transform the whole unbacked int expression into
         # an unbacked int.
         export(Module(torch.sym_fresh_size), inputs, strict=True)
+
+
+class InputModule(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.linear = torch.nn.Linear(3, 3)
+
+    def forward(self, x, y):
+        return self.linear(x) * y
+
+
+class InputModuleWithNestedSubclass(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.p1 = torch.nn.Parameter(torch.ones(2, 2))
+        self.p2 = torch.nn.Parameter(
+            CustomTensorPlainOut(
+                CustomTensorPlainOut(
+                    torch.Tensor([[0, 0], [0, 1]]),
+                    torch.Tensor([[0, 0], [1, 0]]),
+                ),
+                CustomTensorPlainOut(
+                    torch.Tensor([[1, 0], [0, 0]]),
+                    torch.Tensor([[0, 1], [0, 0]]),
+                ),
+            )
+        )
+
+    def forward(self, x):
+        a = (x + 2 * self.p1 + self.p2).sum().sum()
+        return x + a
 
 
 @unittest.skipIf(IS_WINDOWS, "Windows isn't supported for this case")
@@ -638,6 +704,157 @@ graph():
         args = (torch.randn(15, 3, 256, 256), torch.ones(15, 32, 256, 256))
         self.assertEqual(gm(*args), m(*args))
 
+    @requires_gpu
+    def test_export_custom_triton_kernel(self):
+        @triton.jit
+        def add_kernel(
+            in_ptr0,
+            in_ptr1,
+            out_ptr,
+            n_elements,
+            BLOCK_SIZE: "tl.constexpr",
+        ):
+            pid = tl.program_id(axis=0)
+            block_start = pid * BLOCK_SIZE
+            offsets = block_start + tl.arange(0, BLOCK_SIZE)
+            mask = offsets < n_elements
+            x = tl.load(in_ptr0 + offsets, mask=mask)
+            y = tl.load(in_ptr1 + offsets, mask=mask)
+            output = x + y
+            tl.store(out_ptr + offsets, output, mask=mask)
+
+        @torch.library.triton_op("mylib::add", mutates_args=())
+        def custom_add(x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
+            output = torch.empty_like(x)
+            n_elements = output.numel()
+
+            def grid(meta):
+                return (triton.cdiv(n_elements, meta["BLOCK_SIZE"]),)
+
+            capture_triton(add_kernel)[grid](x, y, output, n_elements, 16)
+            return output
+
+        class M(torch.nn.Module):
+            def forward(self, x, y):
+                return custom_add(x, y)
+
+        args = (
+            torch.randn(3, device=GPU_TYPE),
+            torch.randn(3, device=GPU_TYPE),
+        )
+        max_len = 128
+        dynamic_shapes = {
+            "x": {0: Dim("dim0_x", max=max_len)},
+            "y": {0: Dim("dim0_y", max=max_len)},
+        }
+        m = M()
+        ep = export(m, args, dynamic_shapes=dynamic_shapes)
+
+        FileCheck().check_count("torch.ops.mylib.add", 1, exactly=True).run(
+            ep.graph_module.code
+        )
+        ep_decomposed = ep.run_decompositions(decompose_custom_triton_ops=False)
+        FileCheck().check_count("torch.ops.mylib.add", 1, exactly=True).run(
+            ep.graph_module.code
+        )
+        ep_decomposed = ep.run_decompositions(decompose_custom_triton_ops=True)
+        FileCheck().check_count(
+            "torch.ops.higher_order.triton_kernel_wrapper_functional", 1, exactly=True
+        ).run(ep_decomposed.graph_module.code)
+        exp_out = m(*args)
+        self.assertEqual(exp_out, ep.module()(*args))
+
+    @requires_gpu
+    def test_export_custom_triton_kernel_mutable(self):
+        @triton.jit
+        def add_kernel(
+            in_ptr0,
+            in_ptr1,
+            out_ptr,
+            n_elements,
+            BLOCK_SIZE: "tl.constexpr",
+        ):
+            pid = tl.program_id(axis=0)
+            block_start = pid * BLOCK_SIZE
+            offsets = block_start + tl.arange(0, BLOCK_SIZE)
+            mask = offsets < n_elements
+            x = tl.load(in_ptr0 + offsets, mask=mask)
+            y = tl.load(in_ptr1 + offsets, mask=mask)
+            output = x + y
+            tl.store(out_ptr + offsets, output, mask=mask)
+
+        @torch.library.triton_op("mylib::add", mutates_args={"output"})
+        def custom_add_out(
+            x: torch.Tensor, y: torch.Tensor, output: torch.Tensor
+        ) -> torch.Tensor:
+            n_elements = output.numel()
+
+            def grid(meta):
+                return (triton.cdiv(n_elements, meta["BLOCK_SIZE"]),)
+
+            capture_triton(add_kernel)[grid](x, y, output, n_elements, 16)
+            return output.clone()
+
+        class M(torch.nn.Module):
+            def forward(self, x, y, out):
+                return custom_add_out(x, y, out)
+
+        args = (
+            torch.randn(3, device=GPU_TYPE),
+            torch.randn(3, device=GPU_TYPE),
+            torch.zeros(3, device=GPU_TYPE),
+        )
+        custom_add_out(*args)
+        max_len = 128
+        dynamic_shapes = {
+            "x": {0: Dim("dim0_x", max=max_len)},
+            "y": {0: Dim("dim0_y", max=max_len)},
+            "out": {0: Dim("dim0_z", max=max_len)},
+        }
+
+        m = M()
+        ep = export(m, args, dynamic_shapes=dynamic_shapes)
+
+        FileCheck().check_count("torch.ops.mylib.add", 1, exactly=True).run(
+            ep.graph_module.code
+        )
+        ep_decomposed = ep.run_decompositions(decompose_custom_triton_ops=False)
+        FileCheck().check_count(
+            "torch.ops.higher_order.auto_functionalized", 1, exactly=True
+        ).run(ep_decomposed.graph_module.code)
+
+        ep_decomposed = ep.run_decompositions(decompose_custom_triton_ops=True)
+        if is_training_ir_test(self._testMethodName):
+            # TODO: For training IR test, we functionalize the custom triton op with auto_functionalized.
+            # The custom op's functional decomposition is not triggered as a result. It might be better to
+            # decompose the custom triton ops. Users can workaround by unwrapping auto_functionalized
+            # in order to get the functional triton hop if needed.
+            FileCheck().check_count(
+                "torch.ops.higher_order.auto_functionalized", 1, exactly=True
+            ).run(ep_decomposed.graph_module.code)
+        else:
+            FileCheck().check_count(
+                "torch.ops.higher_order.triton_kernel_wrapper_functional",
+                1,
+                exactly=True,
+            ).run(ep_decomposed.graph_module.code)
+
+        x, y, out = (
+            torch.randn(3, device=GPU_TYPE),
+            torch.randn(3, device=GPU_TYPE),
+            torch.zeros(3, device=GPU_TYPE),
+        )
+        exp_out = m(x, y, out)
+        out_copy = out.clone()
+        out_copy2 = out.clone()
+        out_copy3 = out.clone()
+        self.assertEqual(exp_out, ep.module()(x, y, out_copy))
+        # For non-functional graph module, out_copy is mutated
+        self.assertEqual(out, out_copy)
+        self.assertEqual(exp_out, ep_decomposed.module()(x, y, out_copy2))
+        # For non-functional graph module, out_copy is not mutated
+        self.assertEqual(out_copy2, out_copy3)
+
     def test_masked_select_dynamic(self):
         class M(torch.nn.Module):
             def __init__(self) -> None:
@@ -724,6 +941,46 @@ graph():
         ]
         for vr_upper in vr_upper_bounds:
             self.assertEqual(vr_upper, 1)
+
+    def test_mask_nonzero_static(self):
+        class TestModule(torch.nn.Module):
+            def forward(self, seq_embeddings, mask, exp):
+                # Instead of `output = seq_embeddings[mask]`` which makes
+                # output.shape have unbacked symint, encode side knowledge of
+                # output.shape as exp.shape to force it to have backed symint
+                index = torch.nonzero_static(mask, size=exp.shape[0])
+                chunked_index = index.chunk(chunks=mask.dim(), dim=1)
+                output = seq_embeddings[chunked_index].squeeze()
+                final_output = output * 2
+                return final_output
+
+        m = TestModule()
+
+        seq_embeddings = torch.randn(5, 5)
+        mask = torch.ones(5, 5, dtype=torch.bool)
+        exp = torch.randn(25)
+        output = m(seq_embeddings, mask, exp)
+
+        batch = torch.export.Dim("batch")
+        exp_size = torch.export.Dim("exp_size", max=100)
+        ep = export(
+            m,
+            (seq_embeddings, mask, exp),
+            dynamic_shapes={
+                "seq_embeddings": (batch, None),
+                "mask": (batch, None),
+                "exp": (exp_size,),
+            },
+        )
+        ep_output = ep.module()(seq_embeddings, mask, exp)
+        self.assertTrue(torch.allclose(output, ep_output))
+
+        seq_embeddings = torch.randn(6, 5)
+        mask = torch.ones(6, 5, dtype=torch.bool)
+        exp = torch.randn(30)
+        output = m(seq_embeddings, mask, exp)
+        ep_output = ep.module()(seq_embeddings, mask, exp)
+        self.assertTrue(torch.allclose(output, ep_output))
 
     def test_setgrad_lifted_tensor(self):
         class M(torch.nn.Module):
@@ -1913,8 +2170,6 @@ graph():
             with torch._functorch.config.patch(fake_tensor_propagate_real_tensors=True):
                 ep = export(model, inputs)
 
-    @testing.expectedFailureSerDer  # SymBool serialization? TODO(pianpwk)
-    @testing.expectedFailureSerDerNonStrict
     def test_real_tensor_bool_cast(self):
         class Foo(torch.nn.Module):
             def forward(self, x):
@@ -1925,8 +2180,6 @@ graph():
         with torch._functorch.config.patch(fake_tensor_propagate_real_tensors=True):
             ep = export(model, inputs, strict=False)
 
-    @testing.expectedFailureSerDer
-    @testing.expectedFailureSerDerNonStrict
     def test_is_nonzero(self):
         class Foo(torch.nn.Module):
             def forward(self, x):
@@ -2081,8 +2334,6 @@ graph():
                 actual_result.append(node.meta.get("torch_fn"))
         self.assertEqual(actual_result, expected_result)
 
-    @testing.expectedFailureSerDer  # failed serializing SymInt nodes in subgraph (known issue)
-    @testing.expectedFailureSerDerNonStrict
     def test_hoo_inline_users_issue(self):
         # This came from an issue where replace_with_hop passes would inline subgraphs,
         # and mess up node.users for nodes present in multiple subgraphs (e.g. _x in SetGradCase
@@ -3359,22 +3610,22 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
 
     # retracing doesn't seem to like dataclass registration,
     # raising a dynamo error in fx_pytree.tree_flatten_spec
-    @testing.expectedFailureRetraceability
+    @testing.expectedFailureRetraceability  # T186979579
     def test_dynamic_shapes_builder_pytree(self):
         torch.export.register_dataclass(
-            Inp,
-            serialized_type_name="test_dynamic_shapes_builder_pytree.Inp",
+            Inp1,
+            serialized_type_name="test_dynamic_shapes_builder_pytree.Inp1",
         )
 
         class M(torch.nn.Module):
-            def forward(self, inp: Inp):
+            def forward(self, inp: Inp1):
                 return inp.x + inp.y[0] + inp.z["k"]
 
         m = M()
         x = torch.randn(4)
         y = [torch.randn(4)]
         z = {"k": torch.randn(4)}
-        args = (Inp(x, y, z),)
+        args = (Inp1(x, y, z),)
 
         shapes_collection = torch.export.ShapesCollection()
         dim = torch.export.Dim("dim", max=10)
@@ -3502,47 +3753,36 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
         dynamic_shapes = ({"k": {"k2": [(dim,)], "k1": [(dim,)]}},)  # ok
         export(N(), inputs, dynamic_shapes=dynamic_shapes)
 
-    @testing.expectedFailureSerDer  # no unbacked bindings after deserialization?
-    @testing.expectedFailureCppSerDes  # no unbacked bindings after deserialization?
-    @testing.expectedFailureSerDerNonStrict
     def test_unbacked_bindings_for_divisible_u_symint(self):
-        with torch.library._scoped_library("mylib", "FRAGMENT") as lib:
-            torch.library.define(
-                "mylib::foo",
-                "(Tensor a, Tensor b) -> (Tensor)",
-                tags=torch.Tag.pt2_compliant_tag,
-                lib=lib,
-            )
+        class M(torch.nn.Module):
+            def forward(self, a, b):
+                return torch.ops.mylib.foo_unbacked(a, b)
 
-            class M(torch.nn.Module):
-                def forward(self, a, b):
-                    return torch.ops.mylib.foo(a, b)
+        @torch.library.custom_op("mylib::foo_unbacked", mutates_args={})
+        def foo_unbacked(a: torch.Tensor, b: torch.Tensor) -> torch.Tensor:
+            return a[b.item()]
 
-            @torch.library.impl("mylib::foo", "cpu", lib=lib)
-            def foo_impl(a, b):
-                return a[b.item()]
+        @foo_unbacked.register_fake
+        def foo_unbacked_fake_impl(a, b):
+            ctx = torch.library.get_ctx()
+            u = ctx.new_dynamic_size(min=0, max=len(a) // 10) * 10
+            return torch.empty(u, a.shape[1], dtype=a.dtype)
 
-            @torch.library.register_fake("mylib::foo", lib=lib)
-            def foo_fake_impl(a, b):
-                ctx = torch.library.get_ctx()
-                u = ctx.new_dynamic_size(min=0, max=len(a) // 10) * 10
-                return torch.empty(u, a.shape[1], dtype=a.dtype)
-
-            ep = export(
-                M(),
-                (torch.randn(100, 4), torch.tensor(10)),
-            )
-            foo = [node for node in ep.graph.nodes if node.name == "foo"][0]
-            unbacked_bindings = foo.meta["unbacked_bindings"]
-            self.assertEqual(len(unbacked_bindings), 1)  # check binding is {u: path}
-            u = next(iter(unbacked_bindings.keys()))
-            self.assertEqual(
-                type(u).__name__, "Symbol"
-            )  # check binding is symbol, not expr
-            path = unbacked_bindings[u]
-            self.assertEqual(len(path), 3)  # check path is [size, 0, DivideByKey(10)]
-            self.assertEqual(type(path[2]).__name__, "DivideByKey")
-            self.assertEqual(path[2].divisor, 10)
+        ep = export(
+            M(),
+            (torch.randn(100, 4), torch.tensor(10)),
+        )
+        foo = [node for node in ep.graph.nodes if node.name == "foo_unbacked"][0]
+        unbacked_bindings = foo.meta["unbacked_bindings"]
+        self.assertEqual(len(unbacked_bindings), 1)  # check binding is {u: path}
+        u = next(iter(unbacked_bindings.keys()))
+        self.assertEqual(
+            type(u).__name__, "Symbol"
+        )  # check binding is symbol, not expr
+        path = unbacked_bindings[u]
+        self.assertEqual(len(path), 3)  # check path is [size, 0, DivideByKey(10)]
+        self.assertEqual(type(path[2]).__name__, "DivideByKey")
+        self.assertEqual(path[2].divisor, 10)
 
     def test_torch_check_eq_commutativity(self):
         class M1(torch.nn.Module):
@@ -3704,8 +3944,6 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
         M = M_v3
         export(N(), (t,), strict=strict)
 
-    @testing.expectedFailureSerDer  # T195866111
-    @testing.expectedFailureSerDerNonStrict
     def test_suggested_fixes_for_data_dependent_errors_puzzlers(self):
         # suggested fixes for data-dependent errors only work in non-strict mode
         strict = False
@@ -4369,8 +4607,36 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
             ):
                 self.assertTrue("source_fn_stack" in node.meta)
 
+    @testing.expectedFailureRetraceability  # T186979579
+    def test_dynamic_shapes_dataclass(self):
+        torch.export.register_dataclass(
+            Inp2,
+            serialized_type_name="test_export_api_with_dynamic_shapes.Inp2",
+        )
+
+        class Foo(torch.nn.Module):
+            def forward(self, inputs):
+                return torch.matmul(inputs.a, inputs.b)
+
+        foo = Foo()
+        inputs = (Inp2(a=torch.randn(10, 2, 3), b=torch.randn(10, 3, 4)),)
+        batch = Dim("batch")
+        efoo = export(
+            foo,
+            inputs,
+            dynamic_shapes={"inputs": [{0: batch}, {0: batch}]},
+        )
+        self.assertEqual(
+            [
+                str(node.meta["val"].shape)
+                for node in efoo.graph_module.graph.nodes
+                if node.op == "placeholder"
+            ],
+            ["torch.Size([s0, 2, 3])", "torch.Size([s0, 3, 4])"],
+        )
+
     def test_export_api_with_dynamic_shapes(self):
-        from torch.export import Dim, dims, export
+        from torch.export import Dim, dims
 
         # pass dynamic shapes of inputs [args]
         class Foo(torch.nn.Module):
@@ -4512,43 +4778,6 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
             ["torch.Size([s0, 2, 3])", "torch.Size([s0, 3, 4])"],
         )
         self.assertEqual(efoo.module()(*inputs).shape, foo(*inputs).shape)
-
-        # pass dynamic shapes of inputs [dataclass]
-
-        # TODO(avik): This part of the test should have failed both serde and retracing
-        # but these failures are hidden because of the local import of `export` in this test.
-        # The serde failure is benign, and easily avoided by moving the dataclass definition
-        # to the top-level. OTOH the retracing failure needs further investigation.
-        @dataclass
-        class DataClass:
-            a: Tensor
-            b: Tensor
-
-        register_dataclass_as_pytree_node(
-            DataClass,
-            serialized_type_name="test_export_api_with_dynamic_shapes.DataClass",
-        )
-
-        class Foo(torch.nn.Module):
-            def forward(self, inputs):
-                return torch.matmul(inputs.a, inputs.b)
-
-        foo = Foo()
-        inputs = (DataClass(a=torch.randn(10, 2, 3), b=torch.randn(10, 3, 4)),)
-        batch = Dim("batch")
-        efoo = export(
-            foo,
-            inputs,
-            dynamic_shapes={"inputs": [{0: batch}, {0: batch}]},
-        )
-        self.assertEqual(
-            [
-                str(node.meta["val"].shape)
-                for node in efoo.graph_module.graph.nodes
-                if node.op == "placeholder"
-            ],
-            ["torch.Size([s0, 2, 3])", "torch.Size([s0, 3, 4])"],
-        )
 
         # pass dynamic shapes of inputs [pytree-registered classes]
         if HAS_TORCHREC:
@@ -4890,7 +5119,7 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
         self.assertTrue(spec, LeafSpec())
         self.assertTrue(len(flat) == 1)
 
-        register_dataclass_as_pytree_node(
+        torch.export.register_dataclass(
             MyDataClass,
             serialized_type_name="test_pytree_register_data_class.MyDataClass",
         )
@@ -4961,10 +5190,10 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
         dt = Outer(xy, ab)
         inp = {"dt1": (dt, ({},)), "dt2": ((torch.ones(1),), dt)}
 
-        register_dataclass_as_pytree_node(
+        torch.export.register_dataclass(
             Inner, serialized_type_name="test_pytree_register_nested_data_class.Inner"
         )
-        register_dataclass_as_pytree_node(
+        torch.export.register_dataclass(
             Outer, serialized_type_name="test_pytree_register_nested_data_class.Outer"
         )
 
@@ -5091,6 +5320,27 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
             RuntimeError, "cannot mutate tensors with frozen storage"
         ):
             export(Module(), (torch.tensor(1, device="cpu"),)).run_decompositions({})
+
+    def test_tensor_constant_aten_to(self):
+        class Module(torch.nn.Module):
+            def __init__(self):
+                super(Module, self).__init__()
+                self.t = torch.tensor([1.0])
+
+            def forward(self, x):
+                return x + self.t.to(torch.float64)
+
+        inputs = (torch.randn(1, 10),)
+        model = Module()
+        ep = export(model, inputs).run_decompositions({})
+        ops = []
+        for node in ep.graph.nodes:
+            if node.op == "call_function":
+                ops.append(node.target)
+        self.assertGreater(len(ops), 0)
+        self.assertIn(torch.ops.aten._to_copy.default, ops)
+
+        self.assertEqual(ep.module()(*inputs), model(*inputs))
 
     def test_float_conversion(self):
         class Module(torch.nn.Module):
@@ -5395,6 +5645,25 @@ def forward(self, x):
         ):
             test_inp = (torch.randint(1, 2, (2, 2)), torch.randint(3, 5, (2, 3)))
             _ = ep.module()(*test_inp)
+
+    def test_while_loop_simple(self):
+        class Simple(torch.nn.Module):
+            def forward(self, ci, a, b):
+                def cond_fn(i, x, y):
+                    return i > 0
+
+                def body_fn(i, x, y):
+                    return i - 1, x + y, y - x
+
+                return torch._higher_order_ops.while_loop(cond_fn, body_fn, [ci, a, b])
+
+        example_inputs = (
+            torch.tensor(1),
+            torch.randn(10, 20),
+            torch.randn(10, 20),
+        )
+        ep = export(Simple(), example_inputs)
+        self.assertEqual(ep.module()(*example_inputs), Simple()(*example_inputs))
 
     def test_constrain_size_with_various_cases(self):
         class Module1(torch.nn.Module):
@@ -5771,6 +6040,32 @@ def forward(self, x):
                 self.assertTrue(
                     torch.allclose(torch.tensor(7, dtype=torch.float), buffer)
                 )
+
+    def test_module_input(self):
+        class Foo(torch.nn.Module):
+            def forward(self, x, y, m):
+                return m(x, y) + x + y
+
+        i = InputModule()
+        f = Foo()
+        ep = export(f, (torch.randn(3), torch.randn(3), i), strict=False)
+
+        m = InputModule()
+        inputs = (torch.randn(3), torch.randn(3), m)
+        self.assertEqual(f(*inputs), ep.module()(*inputs))
+
+    def test_module_input_subclasses_parameterization_nested(self):
+        class Module(torch.nn.Module):
+            def forward(self, x, m):
+                return m(x) * 2
+
+        mod = InputModuleWithNestedSubclass()
+        f = Module()
+        ref_x = torch.randn(2, 2)
+        ref_out = f(ref_x, mod)
+
+        ep = torch.export.export_for_training(f, (torch.randn(2, 2), mod), strict=False)
+        self.assertEqual(ref_out, ep.module()(ref_x, mod))
 
     def test_runtime_assert_for_prim(self):
         class Foo(torch.nn.Module):
@@ -6172,24 +6467,20 @@ def forward(self, b_a_buffer, x):
         ep = export(m, ())
         self.assertEqual(ep.graph_signature.lifted_tensor_constants, ["x"])
 
+    @testing.expectedFailureRetraceability  # T186979579
     def test_preserve_shape_dynamism_for_unused_inputs(self):
-        @dataclass
-        class Input:
-            f: torch.Tensor
-            p: torch.Tensor
-
-        torch._export.utils.register_dataclass_as_pytree_node(
-            Input,
-            serialized_type_name="test_preserve_shape_dynamism_for_unused_inputs.Input",
+        torch.export.register_dataclass(
+            Inp3,
+            serialized_type_name="test_preserve_shape_dynamism_for_unused_inputs.Inp3",
         )
 
         class Module(torch.nn.Module):
-            def forward(self, x: Input):
+            def forward(self, x: Inp3):
                 return x.f + 1
 
         mod = Module()
-        example_inputs = (Input(f=torch.ones(10, 4), p=torch.zeros(10, 4)),)
-        ep_static = torch.export.export(mod, example_inputs)
+        example_inputs = (Inp3(f=torch.ones(10, 4), p=torch.zeros(10, 4)),)
+        ep_static = export(mod, example_inputs)
         for node in ep_static.graph.nodes:
             if node.op == "placeholder":
                 for s in node.meta["val"].shape:
@@ -6197,9 +6488,7 @@ def forward(self, b_a_buffer, x):
 
         dim0_x_f, dim0_x_p = torch.export.dims("dim0_x_f", "dim0_x_p")
         dynamic_shapes = {"x": [{0: dim0_x_f}, {0: dim0_x_p}]}
-        ep_dynamic = torch.export.export(
-            mod, example_inputs, dynamic_shapes=dynamic_shapes
-        )
+        ep_dynamic = export(mod, example_inputs, dynamic_shapes=dynamic_shapes)
         for node in ep_dynamic.graph.nodes:
             if node.op == "placeholder":
                 for i, s in enumerate(node.meta["val"].shape):
@@ -7358,8 +7647,8 @@ graph():
 
         inp = (torch.randn(4, 4),)
         mod = Foo()
-        ep_strict = torch.export.export(mod, inp)
-        ep_non_strict = torch.export.export(mod, inp, strict=False)
+        ep_strict = export(mod, inp)
+        ep_non_strict = export(mod, inp, strict=False)
 
         gm_unflat_non_strict = unflatten(ep_non_strict)
         self.assertTrue(hasattr(gm_unflat_non_strict, "bar"))
@@ -9254,6 +9543,30 @@ def forward(self, p_bar_linear_weight, p_bar_linear_bias, x):
             "torch.ops.profiler._record_function_enter_new.default", 0, exactly=True
         ).run(ep.graph_module.code)
 
+    @testing.expectedFailureSerDerNonStrict
+    def test_replace_unbacked_with_very_large_upperbound(self):
+        # beyond 2^53 where python floats lose precision
+        VERY_LARGE_INT = 1000000007999999992
+
+        class Model(torch.nn.Module):
+            def forward(self, x, t):
+                unbacked = t.item()
+                torch._check(unbacked <= VERY_LARGE_INT)
+
+                y = torch.ones(unbacked)
+                return x.reshape([-1]) + y
+
+        inp = (
+            torch.randn(6, 2),
+            torch.tensor([12]),
+        )
+        spec = {
+            "x": (Dim.AUTO, Dim.STATIC),
+            "t": (Dim.STATIC,),
+        }
+        ep = export(Model(), inp, dynamic_shapes=spec)
+        self.assertTrue(torch.allclose(Model()(*inp), ep.module()(*inp)))
+
     def test_predispatch_cond(self):
         class Model(torch.nn.Module):
             def __init__(self) -> None:
@@ -10235,6 +10548,13 @@ def forward(self, x, y):
             ep.module()(torch.randn(400, 20, 16))
         ep.module()(torch.randn(42, 20, 16))
 
+    def test_full_on_scalar_tensor(self):
+        class Foo(torch.nn.Module):
+            def forward(self, val):
+                return torch.full((80, 2), val, dtype=torch.float32)
+
+        export(Foo(), args=(torch.tensor(1),))
+
     def test_allow_explicit_guards_as_runtime_asserts(self):
         # check that explicit guards are treated as runtime assertions
         class Foo(torch.nn.Module):
@@ -10508,42 +10828,6 @@ def forward(self, x, y):
         FileCheck().check_count("torch.ops.aten.sym_size.int", 2, exactly=True).run(
             ep.graph_module.code
         )
-
-    @testing.expectedFailureCppSerDes
-    @testing.expectedFailureLegacyExportNonStrict
-    @testing.expectedFailureLegacyExportStrict
-    def test_slice_with_floordiv(self):
-        # slice operation emits runtime assert s0//2 <= s1
-        class M1(torch.nn.Module):
-            def forward(self, x, y):
-                d = x.size(0) // 2
-                return y[d:]
-
-        class M(torch.nn.Module):
-            def __init__(self) -> None:
-                super().__init__()
-                self.m1 = M1()
-
-            def forward(self, x, y):
-                d = x.size(0) // 2
-                m1_res = self.m1(x, y)
-                return y[d:] + m1_res
-
-        inputs = (torch.ones(10), torch.ones(10))
-        d0 = torch.export.Dim("d0", max=2048)
-        d1 = torch.export.Dim("d1", max=2048)
-        ep = export(
-            M(),
-            inputs,
-            dynamic_shapes=((d0,), (d1,)),
-        )
-        ep.module()(torch.ones(8), torch.ones(4))
-        ep.module()(torch.ones(8), torch.ones(5))
-        with self.assertRaisesRegex(
-            RuntimeError,
-            r"Runtime assertion failed for expression \(s0//2\) \<\= s1",
-        ):
-            ep.module()(torch.ones(10), torch.ones(4))
 
     def test_split_const_gm_with_lifted_constants(self):
         class Model(torch.nn.Module):
@@ -10944,7 +11228,7 @@ def forward(self, x):
             a: Tensor
             b: Tensor
 
-        register_dataclass_as_pytree_node(
+        torch.export.register_dataclass(
             Input,
             serialized_type_name="test_dynamic_shapes_serdes_various.Input",
         )
@@ -11393,6 +11677,24 @@ class GraphModule(torch.nn.Module):
             export_res = ep.module()(*dyn_inp)
             ref_res = module(*dyn_inp)
             self.assertEqual(export_res, ref_res)
+
+    @testing.expectedFailureSerDer
+    @testing.expectedFailureSerDerNonStrict
+    def test_dynamic_lr_shift(self):
+        class Module(torch.nn.Module):
+            def forward(self, x):
+                rshift = x.shape[0] >> 1
+                lshift = x.shape[0] << 1
+                return x[:rshift], x[:lshift]
+
+        dynamic_shapes = {"x": {0: Dim("N", min=5, max=10)}}
+        inp = (torch.randn(8),)
+        ep = export(Module(), inp, dynamic_shapes=dynamic_shapes)
+        for op in (operator.lshift, operator.rshift):
+            shift_op = [
+                n for n in ep.graph.nodes if n.op == "call_function" and n.target == op
+            ]
+            self.assertEqual(len(shift_op), 1)
 
 
 @unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo isn't support")
@@ -11964,6 +12266,39 @@ class TestExportCustomClass(TorchTestCase):
         FileCheck().check_count("torch.ops.aten.elu.default", 1, exactly=True).run(
             ep.graph_module.code
         )
+
+    @unittest.skipIf(IS_MACOS, "Distributed not packaged in macos")
+    @testing.expectedFailureSerDerNonStrict  # nonstrict doesn't support allreduce
+    @testing.expectedFailureNonStrict
+    @testing.expectedFailureTrainingIRToRunDecompNonStrict  # source_fn_stack failure
+    @testing.expectedFailureRetraceabilityNonStrict
+    @testing.expectedFailureLegacyExportNonStrict
+    def test_distributed_all_reduce(self):
+        class Foo(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(4, 3)
+
+            def forward(self, x):
+                y = self.linear(x).abs().clamp(max=1.0) * 2
+                torch.distributed.all_reduce(y)
+                return y
+
+        try:
+            torch.distributed.init_process_group(
+                backend="fake",
+                world_size=2,
+                rank=0,
+                store=FakeStore(),
+            )
+
+            m = Foo()
+            ep = export(m, (torch.randn(4, 4),))
+            inp = (torch.randn(4, 4),)
+            self.assertTrue(torch.allclose(ep.module()(*inp), m(*inp)))
+
+        finally:
+            torch.distributed.destroy_process_group()
 
     def test_preserve_cia_op(self):
         class StaticResizeBilinear2dModule(torch.nn.Module):
