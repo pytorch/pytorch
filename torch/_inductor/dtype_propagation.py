@@ -344,7 +344,7 @@ class DtypePropagationOpsHandler:
         return promote_types([x, y])
 
     @staticmethod
-    def _halide_clamp(value, size, check):
+    def halide_clamp(value, size, check):
         # TODO - way of registering dtype for op in backend
         return torch.int32
 

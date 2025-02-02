@@ -525,12 +525,12 @@ class HalideOverrides(OpOverrides):
     def indirect_indexing(cls, index_var, size, check=True, wrap_neg=True):
         # TODO(jansel): Halide only supports 32-bit indexing, we should error on overflow
         index_var = ops.to_dtype(index_var, torch.int32)
-        index_var = ops._halide_clamp(index_var, size, check)
+        index_var = ops.halide_clamp(index_var, size, check)
         index_var.indirect_indexing_size = size
         return sympy_index_symbol(str(index_var))
 
     @classmethod
-    def _halide_clamp(cls, value, size, check):
+    def halide_clamp(cls, value, size, check):
         end = V.kernel.kexpr(V.kernel.rename_indexing(size) - 1)
         if not isinstance(size, (int, sympy.Integer)):
             end = f"hl.cast({value.name}.type(), {end})"
