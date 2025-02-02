@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import itertools
 import re
-from types import NoneType
 from typing import Any, Callable, Generic, Literal, NamedTuple, Optional, TypeVar, Union
 from unittest.mock import patch
 
@@ -1000,7 +999,7 @@ class WrapperHandler(DefaultHandler):
 class AddParenHandler(WrapperHandler):
     def _default(self, name: str, args: tuple[Any, ...], kwargs: dict[str, Any]) -> Any:
         val = getattr(self._inner, name)(*args, **kwargs)
-        if isinstance(val, (sympy.Expr, tuple, list, NoneType)):
+        if not val or isinstance(val, (sympy.Expr, tuple, list)):
             return val
         return f"({val})"
 
