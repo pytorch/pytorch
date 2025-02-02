@@ -394,6 +394,84 @@ class TestCuda(TestCase):
         c.copy_(b, non_blocking=True)
         self.assertEqual(a, c, exact_dtype=False)
 
+    def test_copy_2d(self):
+        def _test_copy(a, b, non_blocking):
+            event = torch.cuda.Event()
+            a.copy_(b, non_blocking=non_blocking)
+            if non_blocking:
+                event.record()
+                event.synchronize()
+            self.assertEqual(a, b, atol=0, rtol=0)
+
+        # 1d
+        def _test_copy_shape(shape, slice):
+            for dst_device, non_blocking in product(("cuda", "cpu"), (True, False)):
+                src_device = "cpu" if dst_device == "cuda" else "cuda"
+                src = torch.randint(8, shape, device=src_device).__getitem__(slice)
+                dst = torch.empty_like(src, device=dst_device)
+                if non_blocking:
+                    if src_device == "cpu":
+                        src = src.pin_memory()
+                    else:
+                        dst = dst.pin_memory()
+                _test_copy(dst, src, non_blocking)
+                dst = torch.empty(shape, device=dst_device).__getitem__(slice)
+                src = torch.randint_like(dst, 8, device=src_device)
+                if non_blocking:
+                    if src_device == "cpu":
+                        src = src.pin_memory()
+                    else:
+                        dst = dst.pin_memory()
+                _test_copy(dst, src, non_blocking)
+
+        _test_copy_shape((12800000,), slice(None, None, 2))
+        _test_copy_shape((4, 5), (slice(None, None, None), slice(None, 4, None)))
+        _test_copy_shape(
+            (4, 5, 6),
+            (slice(None, None, None), slice(None, 4, None), slice(None, None, None)),
+        )
+        _test_copy_shape(
+            (4, 5, 6),
+            (slice(None, None, None), slice(None, None, None), slice(None, 4, None)),
+        )
+
+    def test_copy_2d_complex(self):
+        def _test_copy(a, b, non_blocking):
+            event = torch.cuda.Event()
+            a.copy_(b, non_blocking=non_blocking)
+            if non_blocking:
+                event.record()
+                event.synchronize()
+            self.assertEqual(a, b, atol=0, rtol=0)
+
+        for dst_device, non_blocking, conj in product(
+            ("cuda", "cpu"), (True, False), (True, False)
+        ):
+            src_device = "cpu" if dst_device == "cuda" else "cuda"
+            if dst_device == "cpu" and non_blocking and conj:
+                continue  # FiXME this is also broken for contiguous tensors
+            src = torch.randn((8,), dtype=torch.complex64, device=src_device)[::2]
+            dst = torch.zeros_like(src, device=dst_device)
+            if non_blocking:
+                if src_device == "cpu":
+                    src = src.pin_memory()
+                else:
+                    dst = dst.pin_memory()
+            if conj:
+                src = src.conj()
+            _test_copy(dst, src, non_blocking)
+            dst = torch.empty((8,), dtype=torch.complex64, device=dst_device)[::2]
+            src = torch.randn_like(dst, device=src_device)
+            if non_blocking:
+                if src_device == "cpu":
+                    src = src.pin_memory()
+                else:
+                    dst = dst.pin_memory()
+            if conj:
+                src = src.conj()
+
+            _test_copy(dst, src, non_blocking)
+
     @serialTest()
     def test_to_non_blocking(self):
         stream = torch.cuda.current_stream()
