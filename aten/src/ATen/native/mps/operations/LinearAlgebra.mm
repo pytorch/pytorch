@@ -134,12 +134,7 @@ static void linalg_lu_factor_ex_out_mps_impl(const Tensor& A,
               "linalg.lu_factor(): MPS doesn't support complex types.");
   TORCH_CHECK(pivot, "linalg.lu_factor(): MPS doesn't allow pivot == False.");
 
-  Tensor A_t;
-  if (!A.is_contiguous()) {
-    A_t = A.contiguous();
-  } else {
-    A_t = A;
-  }
+  Tensor A_t = !A.is_contiguous() ? A.contiguous() : A;
   uint64_t aRows = A_t.size(-2);
   uint64_t aCols = A_t.size(-1);
   uint64_t aElemSize = A_t.element_size();
