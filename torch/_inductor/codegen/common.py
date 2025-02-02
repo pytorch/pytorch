@@ -929,6 +929,11 @@ class OpOverrides(BasicMathOps, OpDecompositions):
             f"{type(self).__name__}: bucketize should be handled by CSEProxy"
         )
 
+    def halide_clamp(self, value: OpVarT, size: sympy.Expr, check: bool) -> OpVarT:
+        raise NotImplementedError(
+            f"{type(self).__name__}: inline_asm_elementwise only implemented for Halide backend"
+        )
+
     def inline_asm_elementwise(
         self,
         *inputs: OpVarT,
