@@ -904,21 +904,21 @@ def map_aggregate(a: ArgumentT, fn: Callable[[Argument], Argument]) -> ArgumentT
     """
     Apply fn to each object appearing in arg. arg may be a list, tuple, slice, or dict with string keys.
     """
-    ret: Argument
+    result: Argument
 
     if isinstance(a, tuple):
-        ret = type(a)(map_aggregate(elem, fn) for elem in a)
+        result = type(a)(map_aggregate(elem, fn) for elem in a)
     elif isinstance(a, list):
-        ret = immutable_list(map_aggregate(elem, fn) for elem in a)
+        result = immutable_list(map_aggregate(elem, fn) for elem in a)
     elif isinstance(a, dict):
-        ret = immutable_dict((k, map_aggregate(v, fn)) for k, v in a.items())
+        result = immutable_dict((k, map_aggregate(v, fn)) for k, v in a.items())
     elif isinstance(a, slice):
-        ret = slice(
+        result = slice(
             map_aggregate(a.start, fn),
             map_aggregate(a.stop, fn),
             map_aggregate(a.step, fn),
         )
     else:
-        ret = fn(a)
+        result = fn(a)
 
-    return cast(ArgumentT, ret)
+    return cast(ArgumentT, result)
