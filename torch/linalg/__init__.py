@@ -2017,8 +2017,7 @@ Returns:
 Raises:
     RuntimeError:
         if :attr:`p` is one of `('fro', 'nuc', inf, -inf, 1, -1)`
-        and the :attr:`A` matrix or any matrix in the batch :attr:`A` is not square
-        or invertible.
+        and the :attr:`A` matrix or any matrix in the batch :attr:`A` is not square.
 
 Examples::
 
