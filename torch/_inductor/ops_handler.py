@@ -67,7 +67,7 @@ class OpsHandler(Generic[T]):
     ops handlers.
 
     Handlers are often defined using metaprogramming (e.g. _initialize_pointwise_overrides),
-    which means you will get type errors for those methods.  We have tests in
+    which means you will not get type errors for those methods.  We have tests in
     test/inductor/test_op_completeness.py which check that all operators are implemented after
     all the metaprogramming has run.
     """
