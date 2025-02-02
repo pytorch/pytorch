@@ -12,30 +12,34 @@ architectures:
 """
 
 import os
-from typing import Dict, List, Optional, Tuple
+from typing import Optional
 
 
-CUDA_ARCHES = ["11.8", "12.4", "12.6"]
+# NOTE: Also update the CUDA sources in tools/nightly.py when changing this list
+CUDA_ARCHES = ["11.8", "12.4", "12.6", "12.8"]
+CUDA_ARCHES_FULL_VERSION = {
+    "11.8": "11.8.0",
+    "12.4": "12.4.1",
+    "12.6": "12.6.3",
+    "12.8": "12.8.0",
+}
+CUDA_ARCHES_CUDNN_VERSION = {
+    "11.8": "9",
+    "12.4": "9",
+    "12.6": "9",
+    "12.8": "9",
+}
 
-
-CUDA_ARCHES_FULL_VERSION = {"11.8": "11.8.0", "12.4": "12.4.1", "12.6": "12.6.2"}
-
-
-CUDA_ARCHES_CUDNN_VERSION = {"11.8": "9", "12.4": "9", "12.6": "9"}
-
-
-ROCM_ARCHES = ["6.1", "6.2"]
+# NOTE: Also update the ROCm sources in tools/nightly.py when changing this list
+ROCM_ARCHES = ["6.2.4", "6.3"]
 
 XPU_ARCHES = ["xpu"]
 
 CPU_CXX11_ABI_ARCH = ["cpu-cxx11-abi"]
 
-
 CPU_AARCH64_ARCH = ["cpu-aarch64"]
 
-
 CPU_S390X_ARCH = ["cpu-s390x"]
-
 
 CUDA_AARCH64_ARCH = ["cuda-aarch64"]
 
@@ -74,7 +78,7 @@ PYTORCH_EXTRA_INSTALL_REQUIREMENTS = {
         "nvidia-cuda-runtime-cu12==12.6.77; platform_system == 'Linux' and platform_machine == 'x86_64' | "
         "nvidia-cuda-cupti-cu12==12.6.80; platform_system == 'Linux' and platform_machine == 'x86_64' | "
         "nvidia-cudnn-cu12==9.5.1.17; platform_system == 'Linux' and platform_machine == 'x86_64' | "
-        "nvidia-cublas-cu12==12.6.3.3; platform_system == 'Linux' and platform_machine == 'x86_64' | "
+        "nvidia-cublas-cu12==12.6.4.1; platform_system == 'Linux' and platform_machine == 'x86_64' | "
         "nvidia-cufft-cu12==11.3.0.4; platform_system == 'Linux' and platform_machine == 'x86_64' | "
         "nvidia-curand-cu12==10.3.7.77; platform_system == 'Linux' and platform_machine == 'x86_64' | "
         "nvidia-cusolver-cu12==11.7.1.2; platform_system == 'Linux' and platform_machine == 'x86_64' | "
@@ -82,7 +86,31 @@ PYTORCH_EXTRA_INSTALL_REQUIREMENTS = {
         "nvidia-cusparselt-cu12==0.6.3; platform_system == 'Linux' and platform_machine == 'x86_64' | "
         "nvidia-nccl-cu12==2.21.5; platform_system == 'Linux' and platform_machine == 'x86_64' | "
         "nvidia-nvtx-cu12==12.6.77; platform_system == 'Linux' and platform_machine == 'x86_64' | "
-        "nvidia-nvjitlink-cu12==12.6.77; platform_system == 'Linux' and platform_machine == 'x86_64'"
+        "nvidia-nvjitlink-cu12==12.6.85; platform_system == 'Linux' and platform_machine == 'x86_64'"
+    ),
+    "12.8": (
+        "nvidia-cuda-nvrtc-cu12==12.8.61; platform_system == 'Linux' and platform_machine == 'x86_64' | "
+        "nvidia-cuda-runtime-cu12==12.8.57; platform_system == 'Linux' and platform_machine == 'x86_64' | "
+        "nvidia-cuda-cupti-cu12==12.8.57; platform_system == 'Linux' and platform_machine == 'x86_64' | "
+        "nvidia-cudnn-cu12==9.7.0.66; platform_system == 'Linux' and platform_machine == 'x86_64' | "
+        "nvidia-cublas-cu12==12.8.3.14; platform_system == 'Linux' and platform_machine == 'x86_64' | "
+        "nvidia-cufft-cu12==11.3.3.41; platform_system == 'Linux' and platform_machine == 'x86_64' | "
+        "nvidia-curand-cu12==10.3.9.55; platform_system == 'Linux' and platform_machine == 'x86_64' | "
+        "nvidia-cusolver-cu12==11.7.2.55; platform_system == 'Linux' and platform_machine == 'x86_64' | "
+        "nvidia-cusparse-cu12==12.5.7.53; platform_system == 'Linux' and platform_machine == 'x86_64' | "
+        "nvidia-cusparselt-cu12==0.6.3; platform_system == 'Linux' and platform_machine == 'x86_64' | "
+        "nvidia-nccl-cu12==2.21.5; platform_system == 'Linux' and platform_machine == 'x86_64' | "
+        "nvidia-nvtx-cu12==12.8.55; platform_system == 'Linux' and platform_machine == 'x86_64' | "
+        "nvidia-nvjitlink-cu12==12.8.61; platform_system == 'Linux' and platform_machine == 'x86_64'"
+    ),
+    "xpu": (
+        "intel-cmplr-lib-rt==2025.0.2 | "
+        "intel-cmplr-lib-ur==2025.0.2 | "
+        "intel-cmplr-lic-rt==2025.0.2 | "
+        "intel-sycl-rt==2025.0.2 | "
+        "tcmlib==1.2.0 | "
+        "umf==0.9.1 | "
+        "intel-pti==0.10.0"
     ),
 }
 
@@ -91,7 +119,7 @@ def get_nccl_submodule_version() -> str:
     from pathlib import Path
 
     nccl_version_mk = (
-        Path(__file__).absolute().parent.parent.parent
+        Path(__file__).absolute().parents[2]
         / "third_party"
         / "nccl"
         / "nccl"
@@ -161,7 +189,7 @@ WHEEL_CONTAINER_IMAGES = {
         for gpu_arch in CUDA_ARCHES
     },
     **{
-        gpu_arch: f"pytorch/manylinux-builder:rocm{gpu_arch}-{DEFAULT_TAG}"
+        gpu_arch: f"pytorch/manylinux2_28-builder:rocm{gpu_arch}-{DEFAULT_TAG}"
         for gpu_arch in ROCM_ARCHES
     },
     "xpu": f"pytorch/manylinux2_28-builder:xpu-{DEFAULT_TAG}",
@@ -169,23 +197,14 @@ WHEEL_CONTAINER_IMAGES = {
     "cpu-cxx11-abi": f"pytorch/manylinuxcxx11-abi-builder:cpu-cxx11-abi-{DEFAULT_TAG}",
     "cpu-aarch64": f"pytorch/manylinux2_28_aarch64-builder:cpu-aarch64-{DEFAULT_TAG}",
     "cpu-s390x": f"pytorch/manylinuxs390x-builder:cpu-s390x-{DEFAULT_TAG}",
-    "cuda-aarch64": f"pytorch/manylinuxaarch64-builder:cuda12.4-{DEFAULT_TAG}",
+    "cuda-aarch64": f"pytorch/manylinuxaarch64-builder:cuda12.6-{DEFAULT_TAG}",
 }
 
-
-PRE_CXX11_ABI = "pre-cxx11"
 CXX11_ABI = "cxx11-abi"
 RELEASE = "release"
 DEBUG = "debug"
 
-LIBTORCH_CONTAINER_IMAGES: Dict[Tuple[str, str], str] = {
-    **{
-        (
-            gpu_arch,
-            PRE_CXX11_ABI,
-        ): f"pytorch/manylinux-builder:cuda{gpu_arch}-{DEFAULT_TAG}"
-        for gpu_arch in CUDA_ARCHES
-    },
+LIBTORCH_CONTAINER_IMAGES: dict[tuple[str, str], str] = {
     **{
         (
             gpu_arch,
@@ -196,22 +215,14 @@ LIBTORCH_CONTAINER_IMAGES: Dict[Tuple[str, str], str] = {
     **{
         (
             gpu_arch,
-            PRE_CXX11_ABI,
-        ): f"pytorch/manylinux-builder:rocm{gpu_arch}-{DEFAULT_TAG}"
-        for gpu_arch in ROCM_ARCHES
-    },
-    **{
-        (
-            gpu_arch,
             CXX11_ABI,
         ): f"pytorch/libtorch-cxx11-builder:rocm{gpu_arch}-{DEFAULT_TAG}"
         for gpu_arch in ROCM_ARCHES
     },
-    ("cpu", PRE_CXX11_ABI): f"pytorch/manylinux-builder:cpu-{DEFAULT_TAG}",
     ("cpu", CXX11_ABI): f"pytorch/libtorch-cxx11-builder:cpu-{DEFAULT_TAG}",
 }
 
-FULL_PYTHON_VERSIONS = ["3.9", "3.10", "3.11", "3.12"]
+FULL_PYTHON_VERSIONS = ["3.9", "3.10", "3.11", "3.12", "3.13", "3.13t"]
 
 
 def translate_desired_cuda(gpu_arch_type: str, gpu_arch_version: str) -> str:
@@ -221,32 +232,35 @@ def translate_desired_cuda(gpu_arch_type: str, gpu_arch_version: str) -> str:
         "cpu-cxx11-abi": "cpu-cxx11-abi",
         "cpu-s390x": "cpu",
         "cuda": f"cu{gpu_arch_version.replace('.', '')}",
-        "cuda-aarch64": "cu124",
+        "cuda-aarch64": "cu126",
         "rocm": f"rocm{gpu_arch_version}",
         "xpu": "xpu",
     }.get(gpu_arch_type, gpu_arch_version)
 
 
-def list_without(in_list: List[str], without: List[str]) -> List[str]:
+def list_without(in_list: list[str], without: list[str]) -> list[str]:
     return [item for item in in_list if item not in without]
 
 
 def generate_libtorch_matrix(
     os: str,
     abi_version: str,
-    arches: Optional[List[str]] = None,
-    libtorch_variants: Optional[List[str]] = None,
-) -> List[Dict[str, str]]:
+    arches: Optional[list[str]] = None,
+    libtorch_variants: Optional[list[str]] = None,
+) -> list[dict[str, str]]:
     if arches is None:
         arches = ["cpu"]
         if os == "linux":
             arches += CUDA_ARCHES
             arches += ROCM_ARCHES
+            # skip CUDA 12.8 builds for libtorch
+            if "12.8" in arches:
+                arches.remove("12.8")
         elif os == "windows":
             arches += CUDA_ARCHES
-            # skip CUDA 12.6 builds on Windows
-            if "12.6" in arches:
-                arches.remove("12.6")
+            # skip CUDA 12.8 builds on Windows
+            if "12.8" in arches:
+                arches.remove("12.8")
     if libtorch_variants is None:
         libtorch_variants = [
             "shared-with-deps",
@@ -255,7 +269,7 @@ def generate_libtorch_matrix(
             "static-without-deps",
         ]
 
-    ret: List[Dict[str, str]] = []
+    ret: list[dict[str, str]] = []
     for arch_version in arches:
         for libtorch_variant in libtorch_variants:
             # one of the values in the following list must be exactly
@@ -264,7 +278,7 @@ def generate_libtorch_matrix(
             gpu_arch_type = arch_type(arch_version)
             gpu_arch_version = "" if arch_version == "cpu" else arch_version
             # ROCm builds without-deps failed even in ROCm runners; skip for now
-            if gpu_arch_type == "rocm" and "without-deps" in libtorch_variant:
+            if gpu_arch_type == "rocm" and ("without-deps" in libtorch_variant):
                 continue
             ret.append(
                 {
@@ -292,17 +306,17 @@ def generate_libtorch_matrix(
 
 def generate_wheels_matrix(
     os: str,
-    arches: Optional[List[str]] = None,
-    python_versions: Optional[List[str]] = None,
+    arches: Optional[list[str]] = None,
+    python_versions: Optional[list[str]] = None,
     use_split_build: bool = False,
-) -> List[Dict[str, str]]:
+) -> list[dict[str, str]]:
     package_type = "wheel"
     if os == "linux" or os == "linux-aarch64" or os == "linux-s390x":
         # NOTE: We only build manywheel packages for x86_64 and aarch64 and s390x linux
         package_type = "manywheel"
 
     if python_versions is None:
-        python_versions = FULL_PYTHON_VERSIONS + ["3.13", "3.13t"]
+        python_versions = FULL_PYTHON_VERSIONS
 
     if arches is None:
         # Define default compute archivectures
@@ -311,9 +325,9 @@ def generate_wheels_matrix(
             arches += CPU_CXX11_ABI_ARCH + CUDA_ARCHES + ROCM_ARCHES + XPU_ARCHES
         elif os == "windows":
             arches += CUDA_ARCHES + XPU_ARCHES
-            # skip CUDA 12.6 builds on Windows
-            if "12.6" in arches:
-                arches.remove("12.6")
+            # skip CUDA 12.8 builds on Windows until available
+            if "12.8" in arches:
+                arches.remove("12.8")
         elif os == "linux-aarch64":
             # Only want the one arch as the CPU type is different and
             # uses different build/test scripts
@@ -323,7 +337,7 @@ def generate_wheels_matrix(
             # uses different build/test scripts
             arches = ["cpu-s390x"]
 
-    ret: List[Dict[str, str]] = []
+    ret: list[dict[str, str]] = []
     for python_version in python_versions:
         for arch_version in arches:
             gpu_arch_type = arch_type(arch_version)
@@ -338,34 +352,15 @@ def generate_wheels_matrix(
                 else arch_version
             )
 
-            # TODO: Enable python 3.13 on rocm, aarch64, windows
-            if (
-                gpu_arch_type == "rocm"
-                or os
-                not in [
-                    "linux",
-                    "linux-s390x",
-                    "linux-aarch64",
-                    "macos-arm64",
-                    "windows",
-                ]
-            ) and python_version in ["3.13", "3.13t"]:
-                continue
-
             # TODO: Enable python 3.13t on xpu and cpu-s390x or MacOS or Windows
-            if (
-                gpu_arch_type in ["xpu", "cpu-s390x"]
-                or os == "macos-arm64"
-                or os == "linux-aarch64"
-                or os == "windows"
-            ) and python_version == "3.13t":
+            if (gpu_arch_type in ["xpu", "cpu-s390x"]) and python_version == "3.13t":
                 continue
 
             if use_split_build and (
                 arch_version not in ["12.6", "12.4", "11.8", "cpu"] or os != "linux"
             ):
                 raise RuntimeError(
-                    "Split build is only supported on linux with cuda 12.6, 12.4, 11.8, and cpu.\n"
+                    "Split build is only supported on linux with cuda 12*, 11.8, and cpu.\n"
                     f"Currently attempting to build on arch version {arch_version} and os {os}.\n"
                     "Please modify the matrix generation to exclude this combination."
                 )
@@ -373,7 +368,7 @@ def generate_wheels_matrix(
             # cuda linux wheels require PYTORCH_EXTRA_INSTALL_REQUIREMENTS to install
 
             if (
-                arch_version in ["12.6", "12.4", "11.8"]
+                arch_version in ["12.8", "12.6", "12.4", "11.8"]
                 and os == "linux"
                 or arch_version == "cuda-aarch64"
             ):
@@ -386,9 +381,7 @@ def generate_wheels_matrix(
                             gpu_arch_type, gpu_arch_version
                         ),
                         "use_split_build": "True" if use_split_build else "False",
-                        "devtoolset": (
-                            "cxx11-abi" if arch_version == "cuda-aarch64" else ""
-                        ),
+                        "devtoolset": "cxx11-abi",
                         "container_image": WHEEL_CONTAINER_IMAGES[arch_version],
                         "package_type": package_type,
                         "pytorch_extra_install_requirements": (
@@ -433,7 +426,8 @@ def generate_wheels_matrix(
                         "use_split_build": "True" if use_split_build else "False",
                         "devtoolset": (
                             "cxx11-abi"
-                            if arch_version in ["cpu-cxx11-abi", "cpu-aarch64"]
+                            if (arch_version in ["cpu-cxx11-abi", "cpu-aarch64"])
+                            or os == "linux"
                             else ""
                         ),
                         "container_image": WHEEL_CONTAINER_IMAGES[arch_version],
@@ -442,8 +436,10 @@ def generate_wheels_matrix(
                             ".", "_"
                         ),
                         "pytorch_extra_install_requirements": (
-                            PYTORCH_EXTRA_INSTALL_REQUIREMENTS["12.4"]
-                            if os != "linux" and gpu_arch_type != "xpu"
+                            PYTORCH_EXTRA_INSTALL_REQUIREMENTS["xpu"]
+                            if gpu_arch_type == "xpu"
+                            else PYTORCH_EXTRA_INSTALL_REQUIREMENTS["12.4"]
+                            if os != "linux"
                             else ""
                         ),
                     }
@@ -452,6 +448,7 @@ def generate_wheels_matrix(
     return ret
 
 
+validate_nccl_dep_consistency("12.8")
 validate_nccl_dep_consistency("12.6")
 validate_nccl_dep_consistency("12.4")
 validate_nccl_dep_consistency("11.8")

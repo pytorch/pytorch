@@ -110,8 +110,8 @@ def print_seen():
         return "{" + r + "}"
 
     def sort_key(kv):
-        k, v = kv
-        device_type, op = k
+        k, _ = kv
+        _, op = k
         if isinstance(op, tuple):
             return op
         else:
@@ -223,10 +223,6 @@ inductor_expected_failures_single_sample["cpu"] = {
     "resize_as_": {b8, f16, f32, f64, i32, i64},
     "histc": {f16},
     "multinomial": {f16, f32, f64},
-    "nn.functional.avg_pool1d": {i64},
-    "nn.functional.avg_pool2d": {i64},
-    "nn.functional.avg_pool3d": {i64},
-    "nn.functional.local_response_norm": {i64},
     "nonzero_static": {b8, f16, f32, f64, i32, i64},
     ("normal", "in_place"): {f16, f32, f64},
     ("normal", "number_mean"): {f16, f32, f64},
@@ -269,7 +265,7 @@ inductor_expected_failures_single_sample["xpu"] = {
     "tan": {f16},
     "torch.ops.aten._flash_attention_forward": {f16},
     "torch.ops.aten._efficient_attention_forward": {f16, f32},
-    "to_sparse": {f16, f32, f64, b8, i32, i64},
+    "to_sparse": {f32, f64},
     "linalg.eig": {f32, f64},
     "linalg.eigvals": {f32, f64},
     # Double and complex datatype matmul is not supported in oneDNN
@@ -286,7 +282,6 @@ inductor_expected_failures_single_sample["xpu"] = {
     "inner": {f64},
     "linalg.cholesky_ex": {f64},
     "linalg.cholesky": {f64},
-    ("linalg.det", "singular"): {f64},
     "linalg.ldl_factor_ex": {f64},
     "linalg.ldl_factor": {f64},
     "linalg.ldl_solve": {f64},
@@ -320,6 +315,7 @@ inductor_expected_failures_single_sample["xpu"] = {
     "linalg.qr": {f64},
     "linalg.pinv": {f64},
     ("linalg.pinv", "hermitian"): {f64},
+    ("linalg.pinv", "singular"): {f64},
     "linalg.norm": {f64},
     ("linalg.norm", "subgradients_at_zero"): {f64},
     "linalg.matrix_rank": {f64},
@@ -349,8 +345,6 @@ inductor_expected_failures_single_sample["xpu"] = {
     # a deconvolution forward propagation primitive
     "nn.functional.conv_transpose2d": {f32, f64},
     "nn.functional.conv_transpose3d": {f32, f64},
-    # frexp not supported on XPU now
-    "frexp": {f16, f32, f64},
     # not implemented for 'Half'
     "sort": {b8},
     "argsort": {b8},
@@ -464,9 +458,6 @@ inductor_override_kwargs["cpu"] = {
     ("nn.functional.interpolate.bicubic", u8): {"atol": 1, "rtol": 0},
     # High atol due to precision loss
     ("nn.functional.interpolate.bicubic", f32): {"atol": 5e-3, "rtol": 0},
-    # reference_in_float can cause erroneous failures in sorting tests
-    "argsort": {"reference_in_float": False},
-    "sort": {"reference_in_float": False},
 }
 
 inductor_override_kwargs["cuda"] = {
@@ -537,9 +528,6 @@ inductor_override_kwargs["cuda"] = {
     ("index_reduce.amax", f32): {"check_gradient": False},
     ("index_reduce.amax", f16): {"check_gradient": False},
     ("tanh", f16): {"atol": 1e-4, "rtol": 1e-2},
-    # reference_in_float can cause erroneous failures in sorting tests
-    "argsort": {"reference_in_float": False},
-    "sort": {"reference_in_float": False},
 }
 
 inductor_override_kwargs["xpu"] = {
@@ -664,9 +652,6 @@ inductor_override_kwargs["xpu"] = {
     ("nn.functional.embedding_bag", f64): {"check_gradient": False},
     ("_unsafe_masked_index", f16): {"atol": 1e-5, "rtol": 2e-3},
     ("_unsafe_masked_index_put_accumulate", f16): {"atol": 1e-5, "rtol": 5e-3},
-    # reference_in_float can cause erroneous failures in sorting tests
-    "argsort": {"reference_in_float": False},
-    "sort": {"reference_in_float": False},
 }
 
 # Test with one sample only for following ops
@@ -990,6 +975,7 @@ class TestInductorOpInfo(TestCase):
     @torch._inductor.config.patch(
         {"implicit_fallbacks": False, "triton.autotune_pointwise": False}
     )
+    @torch._inductor.config.patch("test_configs.runtime_triton_dtype_assert", True)
     @collection_decorator
     def test_comprehensive(self, device, dtype, op):
         device_type = torch.device(device).type
@@ -1024,7 +1010,7 @@ class TestInductorOpInfo(TestCase):
         #     print(f"CONSIDERING OP {op_name} on {device_type} with {dtype} |
         # {inductor_skips[device_type].get(op_name, set())}", flush=True)
         if dtype in inductor_skips[device_type].get(op_name, set()):
-            test_expect = ExpectedTestResult.SKIP
+            test_expect = ExpectedTestResult.SKIP  # noqa: F841
             # with open("test_output.txt", "a") as f:
             #     print(f"SKIPPING OP {op_name} on {device_type}", flush=True, file=f)
             #     print(f"SKIPPING OP {op_name} on {device_type}", flush=True)
@@ -1035,9 +1021,9 @@ class TestInductorOpInfo(TestCase):
         ].get(
             op_name, set()
         ):
-            test_expect = ExpectedTestResult.XFAILURE
+            test_expect = ExpectedTestResult.XFAILURE  # noqa: F841
         else:
-            test_expect = ExpectedTestResult.SUCCESS
+            test_expect = ExpectedTestResult.SUCCESS  # noqa: F841
 
         overridden_kwargs = {}
         overridden_kwargs.update(

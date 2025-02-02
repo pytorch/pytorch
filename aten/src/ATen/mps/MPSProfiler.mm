@@ -31,6 +31,23 @@ const std::string BaseInfo::toString(double gpuTime, double schedulingTime) cons
                      schedulingTime > 0.0 ? fmt::format(", cpu={:.3f} ms", schedulingTime) : "");
 }
 
+std::string BaseInfo::buildTensorString(const Tensor& tensor, bool includeBufferId) {
+  if (tensor.defined()) {
+    std::stringstream tensorStr;
+    auto deviceType = tensor.device().type();
+    tensorStr << c10::DeviceTypeName(deviceType);
+    // see comments for INCLUDE_BUFFER_ID
+    if (includeBufferId && deviceType == at::kMPS) {
+      id<MTLBuffer> buffer = __builtin_bit_cast(id<MTLBuffer>, tensor.storage().data());
+      tensorStr << "(buf#" << (getIMPSAllocator()->getBufferId(buffer)) << ":" << buffer.retainCount << ")";
+    }
+    tensorStr << ":" << tensor.scalar_type() << tensor.sizes();
+    return tensorStr.str();
+  } else {
+    return "undefined";
+  }
+}
+
 const std::string OperationInfo::toString(double gpuTime, double schedulingTime) const {
   return fmt::format("aten::{} (id={}{}, run={}{})",
                      strKey,
@@ -76,10 +93,10 @@ std::string CopyInfo::buildTensorString(const void* buffer, const OptionalTensor
 MPSProfiler::MPSProfiler() : m_os_log_events(nullptr), m_os_log_intervals(nullptr) {
   // see enum LogOptions for the description.
   static const auto log_options_str = c10::utils::get_env(kEVLogProfileInfoStr);
-  m_log_options = log_options_str ? std::stoul(log_options_str.value()) : 0;
+  m_log_options = log_options_str ? strtol(log_options_str->c_str(), nullptr, 0) : 0;
   // see enums profilerOptions and SignpostTypes for the description.
   static const auto trace_signpost_str = c10::utils::get_env(kEVTraceSignpostsStr);
-  uint32_t trace_signposts = trace_signpost_str ? std::stoul(trace_signpost_str.value()) : 0;
+  uint32_t trace_signposts = trace_signpost_str ? strtol(trace_signpost_str->c_str(), nullptr, 0) : 0;
 
   TORCH_CHECK(m_log_options <= LogOptions::LOG_COUNT,
               "invalid log options ",

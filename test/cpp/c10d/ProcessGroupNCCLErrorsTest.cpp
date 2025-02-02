@@ -6,6 +6,7 @@
 #include <c10/util/irange.h>
 #include <torch/csrc/cuda/nccl.h>
 #include <torch/csrc/distributed/c10d/FileStore.hpp>
+#include <torch/csrc/distributed/c10d/FlightRecorder.hpp>
 #include <torch/csrc/distributed/c10d/NCCLUtils.hpp>
 #include <torch/csrc/distributed/c10d/ProcessGroupNCCL.hpp>
 #include <utility>
@@ -305,10 +306,11 @@ TEST_F(ProcessGroupNCCLErrorsTest, testNCCLTimedoutErrorsBlocking) {
 }
 
 TEST_F(ProcessGroupNCCLErrorsTest, testNCCLErrorsNonBlocking) {
-  // Avoid watchdog thread to throw the exception first to test the barrier
-  // throw behavior.
+  // Avoid watchdog thread to throw the exception and FR dumps to test the
+  // barrier throw behavior.
   ASSERT_TRUE(
       setenv(c10d::TORCH_NCCL_ASYNC_ERROR_HANDLING[0].c_str(), "0", 1) == 0);
+  ASSERT_TRUE(setenv(c10d::TORCH_NCCL_PROPAGATE_ERROR[0].c_str(), "1", 1) == 0);
   auto options = c10d::ProcessGroupNCCL::Options::create();
   options->timeout = std::chrono::milliseconds(3000);
   ProcessGroupNCCLSimulateErrors pg(store_, 0, 1, options);

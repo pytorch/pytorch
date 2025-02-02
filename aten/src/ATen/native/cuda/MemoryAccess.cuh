@@ -1,12 +1,12 @@
 #pragma once
 
+#include <array>
 #include <cstdint>
 #include <type_traits>
 #include <c10/core/DynamicCast.h>
 #include <c10/util/Exception.h>
 #include <c10/util/TypeCast.h>
 #include <c10/macros/Macros.h>
-#include <ATen/core/Array.h>
 #include <ATen/detail/FunctionTraits.h>
 #include <ATen/cuda/detail/OffsetCalculator.cuh>
 #include <ATen/native/cuda/thread_constants.h>
@@ -80,10 +80,10 @@ struct unroll_load_helper {
 
 template <int current>
 struct multi_outputs_store_helper {
-  template<int ntensors, int num_outputs, typename ...Args>
+  template<typename data_t, typename offsets_t, typename ...Args>
   C10_HOST_DEVICE static void apply(
-      at::detail::Array<char*, ntensors> data,
-      at::detail::Array<uint32_t, num_outputs> offsets,
+      const data_t& data,
+      const offsets_t& offsets,
       thrust::tuple<Args...> ret) {
     using T = typename thrust::tuple_element<current, thrust::tuple<Args...>>::type;
     T *to = reinterpret_cast<T *>(data[current]) + offsets[current];
@@ -102,8 +102,8 @@ struct LoadWithoutCast {
 
 template <int N>
 struct LoadWithCast {
-  using array_t = at::detail::Array<at::ScalarType, std::max<int>(N, 1)>;
-  using size_array_t = at::detail::Array<uint32_t, std::max<int>(N, 1)>;
+  using array_t = std::array<at::ScalarType, std::max<int>(N, 1)>;
+  using size_array_t = std::array<uint32_t, std::max<int>(N, 1)>;
 
   array_t dtypes;
   size_array_t element_sizes;
@@ -133,8 +133,8 @@ struct StoreWithoutCast {
 
 template <int N = 1>
 struct StoreWithCast {
-  using array_t = at::detail::Array<at::ScalarType, std::max<int>(N, 1)>;
-  using size_array_t = at::detail::Array<uint32_t, std::max<int>(N, 1)>;
+  using array_t = std::array<at::ScalarType, std::max<int>(N, 1)>;
+  using size_array_t = std::array<uint32_t, std::max<int>(N, 1)>;
 
   array_t dtypes;
   size_array_t element_sizes;
@@ -351,6 +351,20 @@ inline C10_HOST_DEVICE int can_vectorize_up_to(const char *pointer) {
   uint64_t address = reinterpret_cast<uint64_t>(pointer);
   constexpr int vec2_alignment = std::alignment_of_v<aligned_vector<scalar_t, 2>>;
   constexpr int vec4_alignment = std::alignment_of_v<aligned_vector<scalar_t, 4>>;
+  constexpr int vec8_alignment = std::alignment_of_v<aligned_vector<scalar_t, 8>>;
+#ifdef USE_ROCM
+  constexpr int vec16_alignment = std::alignment_of_v<aligned_vector<scalar_t, 16>>;
+  constexpr int type_size = sizeof(scalar_t);
+  if (type_size == 1 && (address % vec16_alignment == 0)) {
+    return 16;
+  } else if (type_size <= 2 && (address % vec8_alignment == 0)) {
+    return 8;
+  } else
+#else
+  if (address % vec8_alignment == 0) {
+   return 8;
+  } else
+#endif
   if (address % vec4_alignment == 0) {
     return 4;
   } else if (address % vec2_alignment == 0) {

@@ -3,7 +3,6 @@ import copy
 import functools
 import os
 import unittest
-from typing import Tuple
 
 import torch
 from torch import nn, Tensor
@@ -487,7 +486,7 @@ class PaddingTest(TestCaseBase):
 
         # make sure the load for softmax is aligned
         self.assertTrue(
-            "tl.load(in_ptr0 + (r1 + (30528*x0))" in forward_wrapper,
+            "tl.load(in_ptr0 + (r0_1 + 30528*x0)" in forward_wrapper,
             f"forward_wrapper: {forward_wrapper}",
         )
 
@@ -666,7 +665,7 @@ class PaddingTest(TestCaseBase):
     @parametrize("shape", [(21, 19), (3, 5, 71)])
     @parametrize("dtype", (torch.float16, torch.float32))
     def test_pad_outputs(
-        self, dtype: torch.dtype, shape: Tuple[int], alignment_bytes: int
+        self, dtype: torch.dtype, shape: tuple[int], alignment_bytes: int
     ):
         """
         Tests padding output tensors to a specific alignment.

@@ -94,7 +94,7 @@ inline bool THPUtils_checkScalar(PyObject* obj) {
 
 namespace torch {
 
-bool should_allow_numbers_as_tensors(const std::string& name);
+TORCH_PYTHON_API bool should_allow_numbers_as_tensors(const std::string& name);
 
 enum class ParameterType {
   TENSOR,
@@ -1068,9 +1068,9 @@ inline c10::complex<double> PythonArgs::toComplex(int i) {
 
 inline c10::complex<double> PythonArgs::toComplexWithDefault(
     int i,
-    c10::complex<double> default_value) {
+    c10::complex<double> default_complex) {
   if (!args[i])
-    return default_value;
+    return default_complex;
   return toComplex(i);
 }
 

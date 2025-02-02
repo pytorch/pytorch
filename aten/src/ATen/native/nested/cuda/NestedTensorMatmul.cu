@@ -17,12 +17,15 @@
 #include <ATen/native/nested/NestedTensorTransformerFunctions.h>
 #include <ATen/native/nested/NestedTensorUtils.h>
 
-#ifndef USE_ROCM
-#ifndef _WIN32
+#if !defined(USE_ROCM) && !defined(_WIN32) && (defined(CUDA_VERSION) && CUDA_VERSION > 12000)
+#define build_grouped_gemm
+#endif
+
+
+#ifdef build_grouped_gemm
 #include <cutlass/gemm/device/default_gemm_configuration.h>
 #include <cutlass/gemm/device/gemm_grouped.h>
 #include <cutlass/gemm/kernel/default_gemm_grouped.h>
-#endif
 #endif
 
 #include <ATen/NestedTensorImpl.h>
@@ -33,8 +36,7 @@
 namespace at {
 namespace native {
 
-#ifndef USE_ROCM
-#ifndef _WIN32
+#ifdef build_grouped_gemm
 namespace {
 
 template <
@@ -280,9 +282,74 @@ bool group_gemm_dispatch(
   return false;
 }
 
+template <>
+bool group_gemm_dispatch(
+    at::Device device,
+    const std::vector<c10::BFloat16*>& aptr_,
+    const std::vector<c10::BFloat16*>& bptr_,
+    const std::vector<c10::BFloat16*>& dptr_,
+    const std::vector<int64_t>& lda,
+    const std::vector<int64_t>& ldb,
+    const std::vector<int64_t>& ldd,
+    const std::vector<cutlass::gemm::GemmCoord>& gemm_sizes,
+    int64_t ntensors) {
+
+  // Check alignment
+  bool all_pad_8 = true;
+  for (int i = 0; i < ntensors; i++) {
+    all_pad_8 = all_pad_8 && (gemm_sizes[i].n() % 8 == 0);
+    all_pad_8 = all_pad_8 && (gemm_sizes[i].k() % 8 == 0);
+
+    // Not sure if this is a requirement, on the safe side
+    all_pad_8 = all_pad_8 && (lda[i] % 8 == 0);
+    all_pad_8 = all_pad_8 && (ldb[i] % 8 == 0);
+    all_pad_8 = all_pad_8 && (ldd[i] % 8 == 0);
+  }
+
+  std::vector<cutlass::bfloat16_t*> aptr;
+  aptr.reserve(ntensors);
+  std::vector<cutlass::bfloat16_t*> bptr;
+  bptr.reserve(ntensors);
+  std::vector<cutlass::bfloat16_t*> dptr;
+  dptr.reserve(ntensors);
+  for (int64_t i = 0; i < ntensors; i++) {
+    aptr.push_back(reinterpret_cast<cutlass::bfloat16_t*>(aptr_[i]));
+    bptr.push_back(reinterpret_cast<cutlass::bfloat16_t*>(bptr_[i]));
+    dptr.push_back(reinterpret_cast<cutlass::bfloat16_t*>(dptr_[i]));
+  }
+  if (all_pad_8) {
+    gemm_grouped_cuda_internal<
+        cutlass::bfloat16_t,
+        8,
+        cutlass::layout::RowMajor,
+        cutlass::layout::RowMajor,
+        cutlass::arch::OpClassTensorOp,
+        cutlass::arch::Sm80,
+        cutlass::gemm::GemmShape<128, 128, 32>,
+        cutlass::gemm::GemmShape<64, 64, 32>,
+        cutlass::gemm::GemmShape<16, 8, 16>>(
+        lda, ldb, ldd, aptr, bptr, dptr, gemm_sizes, ntensors, device);
+    return true;
+  } else {
+    gemm_grouped_cuda_internal<
+        cutlass::bfloat16_t,
+        1,
+        cutlass::layout::RowMajor,
+        cutlass::layout::RowMajor,
+        cutlass::arch::OpClassSimt,
+        cutlass::arch::Sm80,
+        cutlass::gemm::GemmShape<128, 128, 8>,
+        cutlass::gemm::GemmShape<64, 32, 8>,
+        cutlass::gemm::GemmShape<1, 1, 1>>(
+        lda, ldb, ldd, aptr, bptr, dptr, gemm_sizes, ntensors, device);
+    return true;
+  }
+  // Did not perform GEMM
+  return false;
+}
+
 } // namespace
 
-#endif
 #endif
 
 Tensor bmm_nested_cuda(const Tensor& self, const Tensor& mat2) {
@@ -340,10 +407,9 @@ Tensor bmm_nested_cuda(const Tensor& self, const Tensor& mat2) {
 
   const int64_t *out_offsets_ptr = out_ptr->get_storage_offsets().const_data_ptr<int64_t>();
 
-#ifndef USE_ROCM
-#ifndef _WIN32
+#ifdef build_grouped_gemm
   bool success = false;
-  AT_DISPATCH_FLOATING_TYPES_AND_HALF(
+  AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16,
       self.scalar_type(), "group_gemm_dispatch", [&] {
         std::vector<scalar_t*> aptr(ntensors);
         std::vector<scalar_t*> bptr(ntensors);
@@ -394,7 +460,6 @@ Tensor bmm_nested_cuda(const Tensor& self, const Tensor& mat2) {
   if (success) {
     return output;
   }
-#endif
 #endif
 
   std::vector<Tensor> output_unbind = output.unbind();

@@ -819,6 +819,8 @@ c10::intrusive_ptr<SymmetricMemory> CUDASymmetricMemoryAllocator::rendezvous(
     return it->second;
   }
 
+  c10::cuda::CUDAGuard guard(block->device_idx);
+
   IpcChannel ipc_channel;
   auto group_info = get_group_info(group_name_);
   auto store = group_info.store;

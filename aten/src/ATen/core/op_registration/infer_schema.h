@@ -9,9 +9,7 @@
 #include <c10/util/Metaprogramming.h>
 
 namespace c10 {
-namespace detail {
-
-namespace infer_schema {
+namespace detail::infer_schema {
 
 /// The templated inference code creates `ArgumentDef` instead of `Argument`,
 /// because that can be constructed at compile time and has a much smaller
@@ -36,12 +34,12 @@ template <class... Types>
 constexpr int checkStaticTypes() {
  // Give nice error messages for some of the common error cases.
  // Use a LOUD ERROR MESSAGE SO USERS SEE THE STATIC_ASSERT
- static_assert(std::conjunction<
+ static_assert(std::conjunction_v<
      bool_t<!std::is_integral_v<Types> || std::is_same_v<Types, int8_t> || std::is_same_v<Types, int64_t> || std::is_same_v<Types, bool>>...
-   >::value, "INVALID TYPE: Only int8_t, int64_t and bool are supported as an integral argument type");
- static_assert(std::conjunction<
+   >, "INVALID TYPE: Only int8_t, int64_t and bool are supported as an integral argument type");
+ static_assert(std::conjunction_v<
      bool_t<!std::is_same_v<Types, float>>...
-   >::value, "INVALID TYPE: float is not supported as an argument type, use double instead");
+   >, "INVALID TYPE: float is not supported as an argument type, use double instead");
  return 0;
 }
 
@@ -142,7 +140,6 @@ FunctionSchema createFunctionSchemaFromTraitsSingleReturn(std::string&& name, st
  return make_function_schema(std::move(name), std::move(overload_name), arguments, returns);
 }
 
-}
 }
 
 template<class FuncType>

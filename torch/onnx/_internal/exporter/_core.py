@@ -12,7 +12,8 @@ import pathlib
 import textwrap
 import traceback
 import typing
-from typing import Any, Callable, Literal, Mapping, Sequence
+from collections.abc import Mapping, Sequence
+from typing import Any, Callable, Literal
 
 import onnxscript
 import onnxscript.evaluator
@@ -44,6 +45,9 @@ if typing.TYPE_CHECKING:
 
     import numpy.typing as npt
 
+
+# ir_version used for the ONNX file. See https://github.com/onnx/onnx/blob/main/docs/IR.md#onnx-versioning
+_ONNX_IR_VERSION = 10
 
 # Define utilities to convert PyTorch data types so users do not need to specify manually
 _TORCH_DTYPE_TO_ONNX: dict[torch.dtype, ir.DataType] = {
@@ -641,15 +645,18 @@ def _handle_output_node(
         node_name_to_values: A mapping of FX node names to their produced ONNX ``Value``.
         graph_like: The ONNX graph at construction.
     """
-    output_value_name = node.args[0][0].name  # type: ignore[index,union-attr]
-    assert isinstance(
-        output_value_name, str
-    ), f"Bug: Expected {output_value_name!r} to be a string"
-    values = node_name_to_values[output_value_name]
-    if isinstance(values, Sequence):
-        graph_like.outputs.extend(values)
-        return
-    graph_like.outputs.append(values)
+    # node.args[0] can be a tuple with more than one elements. This happens when,
+    # for example, a subgraph has multiple outputs. We flatten them all as ONNX graph outputs
+    for output in node.args[0]:  # type: ignore[index,union-attr]
+        output_value_name = output.name  # type: ignore[union-attr]
+        assert isinstance(
+            output_value_name, str
+        ), f"Bug: Expected {output_value_name!r} to be a string"
+        values = node_name_to_values[output_value_name]
+        if isinstance(values, Sequence):
+            graph_like.outputs.extend(values)
+            return
+        graph_like.outputs.append(values)
 
 
 def _translate_fx_graph(
@@ -961,7 +968,7 @@ def _exported_program_to_onnx_program(
                 ),
             },
         ),
-        ir_version=9,
+        ir_version=_ONNX_IR_VERSION,
         producer_name="pytorch",
         producer_version=torch.__version__,
     )

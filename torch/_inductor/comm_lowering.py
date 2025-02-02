@@ -1,6 +1,6 @@
 # mypy: allow-untyped-defs
 import logging
-from typing import cast, Tuple
+from typing import cast
 
 import torch
 import torch.utils._pytree as pytree
@@ -65,7 +65,7 @@ def can_realize_as_comm_buffer(
     if isinstance(data, ir.Loops):
         return True
 
-    layout = data.get_layout()
+    layout = data.get_output_spec()
     if isinstance(layout, ir.CommBufferLayout):
         return True
 
@@ -88,7 +88,7 @@ def realize_as_comm_buffer(
     buffer = _get_data(x)
     assert isinstance(buffer, ir.Buffer)
 
-    layout = buffer.get_layout()
+    layout = buffer.get_output_spec()
     if isinstance(layout, ir.CommBufferLayout):
         return
 
@@ -125,7 +125,7 @@ def _get_data(x: ir.TensorBox) -> ir.IRNode:
         )
 
 
-_bufs_to_skip_wait: OrderedSet[Tuple[int, str]] = OrderedSet()
+_bufs_to_skip_wait = OrderedSet[tuple[int, str]]()
 
 
 def mark_as_skip_wait(x: ir.IRNode) -> None:

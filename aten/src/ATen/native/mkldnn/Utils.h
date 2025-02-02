@@ -74,13 +74,13 @@ inline Tensor may_convert_to_default_contiguous_strides(const Tensor& input) {
 
 using AttrFunction = std::function<ideep::attr_t(
     torch::List<std::optional<at::Scalar>>,
-    std::optional<c10::string_view>)>;
+    std::optional<std::string_view>)>;
 
-const std::map<c10::string_view, AttrFunction>& fusion_unary_attr_map();
+const std::map<std::string_view, AttrFunction>& fusion_unary_attr_map();
 
-const std::map<c10::string_view, ideep::algorithm>& fusion_unary_alg_map();
+const std::map<std::string_view, ideep::algorithm>& fusion_unary_alg_map();
 
-const std::map<c10::string_view, ideep::algorithm>& fusion_binary_alg_map();
+const std::map<std::string_view, ideep::algorithm>& fusion_binary_alg_map();
 
 #endif // AT_MKLDNN_ENABLED()
 }
@@ -88,6 +88,10 @@ const std::map<c10::string_view, ideep::algorithm>& fusion_binary_alg_map();
 #if defined(__aarch64__)
 inline bool mkldnn_bf16_device_check_arm() {
   return cpuinfo_initialize() && cpuinfo_has_arm_bf16();
+}
+
+inline bool mkldnn_fp16_device_check_arm() {
+  return cpuinfo_initialize() && cpuinfo_has_arm_neon_fp16();
 }
 
 inline bool is_arm_neoverse() {
@@ -99,6 +103,10 @@ inline bool is_arm_neoverse() {
 }
 #else
 constexpr bool mkldnn_bf16_device_check_arm() {
+  return false;
+}
+
+inline bool mkldnn_fp16_device_check_arm() {
   return false;
 }
 
@@ -121,7 +129,7 @@ inline bool mkldnn_fp16_device_check() {
 #if defined(__x86_64__) || (defined(_M_X64) && !defined(_M_ARM64EC))
   return ideep::has_fp16_type_support();
 #else
-  return false;
+  return mkldnn_fp16_device_check_arm();
 #endif
 }
 

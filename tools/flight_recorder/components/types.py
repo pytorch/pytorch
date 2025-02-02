@@ -10,14 +10,9 @@ from enum import auto, Enum
 from typing import (  # type: ignore[attr-defined]
     _eval_type,
     Any,
-    Dict,
     Generic,
-    List,
     NamedTuple,
     Optional,
-    Set,
-    Tuple,
-    Type,
     TypeVar,
 )
 
@@ -33,7 +28,7 @@ class Ref(Generic[T]):
 
 class TypeInfo(NamedTuple):
     name: str
-    fields: List[Tuple[str, Type]]  # type: ignore[type-arg]
+    fields: list[tuple[str, type]]  # type: ignore[type-arg]
 
     @classmethod
     def from_type(cls, c: T) -> "TypeInfo":
@@ -74,7 +69,7 @@ class MatchState(Enum):
         return self
 
     def __str__(self) -> str:
-        details = f", {self.culprit}" if self.culprit else ""
+        details = f", {self.culprit}" if getattr(self, "culprit", None) else ""
         return f"Error type: {self.name}{details}"
 
 
@@ -126,15 +121,15 @@ class Collective(NamedTuple):
     record_id: int
     pg_desc: str
     collective_name: str
-    input_sizes: List[List[int]]
-    output_sizes: List[List[int]]
-    expected_ranks: Set[int]
+    input_sizes: list[list[int]]
+    output_sizes: list[list[int]]
+    expected_ranks: set[int]
     collective_state: str
-    collective_frames: List[Dict[str, str]]
+    collective_frames: list[dict[str, str]]
     input_numel: Optional[int] = None
     output_numel: Optional[int] = None
-    missing_ranks: Optional[Set[int]] = None
-    mismatch_collectives: Optional[List["Collective"]] = None
+    missing_ranks: Optional[set[int]] = None
+    mismatch_collectives: Optional[dict[int, "Collective"]] = None
     type_of_mismatch: Optional[MatchState] = None
 
 
@@ -145,15 +140,15 @@ class NCCLCall(NamedTuple):
     global_rank: int  # technically Ref[Process] once we have it
     traceback_id: Ref[Traceback]
     collective_type: str
-    sizes: List[List[int]]
+    sizes: list[list[int]]
 
 
 class Database(NamedTuple):
-    groups: List[Group]
-    memberships: List[Membership]
-    tracebacks: List[Traceback]
-    collectives: List[Collective]
-    ncclcalls: List[NCCLCall]
+    groups: list[Group]
+    memberships: list[Membership]
+    tracebacks: list[Traceback]
+    collectives: list[Collective]
+    ncclcalls: list[NCCLCall]
 
 
 # TODO: We need to add a schema for the following
@@ -191,6 +186,7 @@ COLLECTIVES = {
     "gather",
     "scatter",
     "all_to_all",
+    "all_reduce_barrier",
 }
 
 P2P = {
@@ -205,7 +201,7 @@ class EntryState:
     log the error info during analysis.
     """
 
-    def __init__(self, entry: Dict[str, Any], expected_ranks: Set[int]) -> None:
+    def __init__(self, entry: dict[str, Any], expected_ranks: set[int]) -> None:
         self.pg_name = entry["process_group"][0]
         self.desc = entry["process_group"][1]
         self.pg_desc = (
@@ -220,19 +216,19 @@ class EntryState:
         self.collective_state = entry["state"]
         self.collective_frames = entry["frames"]
         self.expected_ranks = expected_ranks
-        self.missing_ranks: Set[int]
+        self.missing_ranks: set[int]
         self.input_numel: int
         self.output_numel: int
-        self.errors: Set[Tuple[int, MatchState]]
+        self.errors: set[tuple[int, MatchState]]
 
     def log(
         self,
         logger: FlightRecorderLogger,
         logger_msg: str,
         frame_formatter: Any,
-        total_numel: Optional[Tuple[int, int]] = None,
-        errors: Optional[Set[Tuple[int, MatchState]]] = None,
-        missing_ranks: Optional[Set[int]] = None,
+        total_numel: Optional[tuple[int, int]] = None,
+        errors: Optional[set[tuple[int, MatchState]]] = None,
+        missing_ranks: Optional[set[int]] = None,
     ) -> None:
         logger.info(
             logger_msg,
@@ -267,9 +263,9 @@ class EntryState:
     def to_collective(
         self,
         id: int,
-        errors: Optional[Set[Tuple[int, MatchState]]] = None,
-        idx_map: Optional[Dict[int, int]] = None,
-        all_entries: Optional[Dict[int, List[Dict[str, Any]]]] = None,
+        errors: Optional[set[tuple[int, MatchState]]] = None,
+        idx_map: Optional[dict[int, int]] = None,
+        all_entries: Optional[dict[int, list[dict[str, Any]]]] = None,
     ) -> Collective:
         if not errors:
             return Collective(
@@ -286,33 +282,32 @@ class EntryState:
                 expected_ranks=self.expected_ranks,
                 collective_state=self.collective_state,
                 collective_frames=self.collective_frames,
+                missing_ranks=getattr(self, "missing_ranks", None),
             )
         else:
             assert idx_map is not None, "idx_map is None"
             assert all_entries is not None, "all_entries is None"
-            mismatch_collectives = []
+            mismatch_collectives = {}
             for rank, error in errors:
                 idx = idx_map[rank]
                 entry = all_entries[rank][idx]
                 desc = entry["process_group"][1]
                 pg_name = entry["process_group"][0]
-                mismatch_collectives.append(
-                    Collective(
-                        id=id,
-                        group_id=entry["process_group"][0],
-                        record_id=entry["record_id"],
-                        pg_desc=f"{pg_name}:{desc}" if desc != "undefined" else pg_name,
-                        pass_check=False,
-                        collective_seq_id=entry["collective_seq_id"],
-                        p2p_seq_id=entry["p2p_seq_id"],
-                        collective_name=entry["profiling_name"],
-                        input_sizes=entry["input_sizes"],
-                        output_sizes=entry["output_sizes"],
-                        expected_ranks=self.expected_ranks,
-                        collective_state=entry["state"],
-                        collective_frames=entry["frames"],
-                        type_of_mismatch=error,
-                    )
+                mismatch_collectives[rank] = Collective(
+                    id=id,
+                    group_id=entry["process_group"][0],
+                    record_id=entry["record_id"],
+                    pg_desc=f"{pg_name}:{desc}" if desc != "undefined" else pg_name,
+                    pass_check=False,
+                    collective_seq_id=entry["collective_seq_id"],
+                    p2p_seq_id=entry["p2p_seq_id"],
+                    collective_name=entry["profiling_name"],
+                    input_sizes=entry["input_sizes"],
+                    output_sizes=entry["output_sizes"],
+                    expected_ranks=self.expected_ranks,
+                    collective_state=entry["state"],
+                    collective_frames=entry["frames"],
+                    type_of_mismatch=error,
                 )
             return Collective(
                 id=id,
@@ -340,11 +335,11 @@ class EntryState:
 
     def to_nccl_call(
         self,
-        all_entries: Dict[int, List[Dict[str, Any]]],
-        idx_map: Dict[int, int],
+        all_entries: dict[int, list[dict[str, Any]]],
+        idx_map: dict[int, int],
         nccl_call_id: int,
         collective_id: Any,
-    ) -> List[NCCLCall]:
+    ) -> list[NCCLCall]:
         result = []
         for i, k in idx_map.items():
             all_entries[i].pop(k)
@@ -373,7 +368,7 @@ class Op:
     """
 
     def __init__(
-        self, event: Dict[Any, Any], memberships: Dict[str, Set[Any]], pg_name: str
+        self, event: dict[Any, Any], memberships: dict[str, set[Any]], pg_name: str
     ):
         self.profiling_name = event["profiling_name"]
         nccl, name = self.profiling_name.split(":")
@@ -388,9 +383,11 @@ class Op:
         }, f"{type} is not a supported operation"
         self.type = type
         if type == "send":
+            assert isinstance(meta, str)
             s, d = meta.split("->")
             self._src, self._dst = int(s), int(d)
         elif type == "recv":
+            assert isinstance(meta, str)
             d, s = meta.split("<-")
             self._dst, self._src = int(d), int(s)
         else:
@@ -410,7 +407,7 @@ class Op:
         self.collective_frames = event["frames"]
         self.is_verbose = os.getenv("FR_TRACE_VERBOSE_OUTPUT", "0") == "1"
 
-    def _init_global_src_dst(self, pg_ranks: Set[Any]) -> None:
+    def _init_global_src_dst(self, pg_ranks: set[Any]) -> None:
         pg_ranks = sorted(pg_ranks)
         self._src_g = pg_ranks[self._src] if self._src is not None else None
         self._dst_g = pg_ranks[self._dst] if self._dst is not None else None

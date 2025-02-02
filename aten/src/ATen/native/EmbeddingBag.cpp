@@ -52,7 +52,7 @@
 namespace at::native {
 
 template<typename scalar_t>
-scalar_t dot_impl(int64_t n, scalar_t *x, int64_t incx, scalar_t *y, int64_t incy);
+scalar_t dot_impl(int64_t n, const scalar_t *x, int64_t incx, const scalar_t *y, int64_t incy);
 
 static void make_offset2bag(const Tensor &offsets, Tensor& offset2bag) {
   offset2bag.index_add_(
@@ -1241,7 +1241,13 @@ embedding_bag(const Tensor &weight, const Tensor &indices,
     padding_idx = maybe_wrap_dim(padding_idx, weight.size(0));
   }
   std::tuple<Tensor, Tensor, Tensor, Tensor> out;
-  if (!weight.requires_grad() && !weight._fw_grad(/*level=*/0).defined()) {
+  bool needs_grad_path = weight.requires_grad() ||
+                      weight._fw_grad(/*level=*/0).defined() ||
+                      (per_sample_weights_opt.has_value() &&
+                       per_sample_weights_opt.value().defined() &&
+                       per_sample_weights_opt.value().requires_grad());
+
+  if (!needs_grad_path) {
     out = at::_embedding_bag_forward_only(
       weight, indices.contiguous(), offsets.contiguous(), scale_grad_by_freq,
       mode, sparse, per_sample_weights, include_last_offset, padding_idx);
@@ -1502,7 +1508,7 @@ template <typename scalar_t>
 void _embedding_bag_dense_backward_cpu_sum_mean(
     const Tensor& grad,
     const Tensor& indices_,
-    const Tensor& offset2bag__,
+    const Tensor& offset2bag_,
     const Tensor& bag_size_,
     int64_t num_weights,
     bool scale_grad_by_freq,
@@ -1511,17 +1517,13 @@ void _embedding_bag_dense_backward_cpu_sum_mean(
     Tensor& index_grad_weight,
     int64_t padding_idx) {
 
-  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
-  Tensor &offset2bag_ = const_cast<Tensor &>(offset2bag__);
-
   auto ind_sort_ = indices_.sort();
-  auto indices = std::get<0>(ind_sort_);
-  auto ind_sort = std::get<1>(ind_sort_);
+  auto const& indices = std::get<0>(ind_sort_);
+  auto const& ind_sort = std::get<1>(ind_sort_);
   auto offset2bag = offset2bag_.index_select(0, ind_sort);
 
   std::optional<Tensor> per_sample_weights;
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  const scalar_t* per_sample_weights_data;
+  const scalar_t* per_sample_weights_data = nullptr;
   std::optional<int64_t> per_sample_weights_stride;
   if (per_sample_weights_.defined()) {
     per_sample_weights = per_sample_weights_.index_select(0, ind_sort);
@@ -1715,9 +1717,8 @@ Tensor _embedding_bag_per_sample_weights_backward_cpu_template(
 
         if (embedding_idx != static_cast<index_t>(padding_idx)) {
           output_data[sample_idx] = dot_impl<scalar_t>(
-              embedding_features,
-              const_cast<scalar_t*>(grad_data + grad_stride0 * bag_idx), grad_stride1,
-              const_cast<scalar_t*>(weight_data + weight_stride0 * embedding_idx), weight_stride1);
+              embedding_features, grad_data + grad_stride0 * bag_idx, grad_stride1,
+                 weight_data + weight_stride0 * embedding_idx, weight_stride1);
         }
       }
     });
@@ -1759,8 +1760,6 @@ Tensor _embedding_bag_sparse_backward_symint(
   // Also see NOTE [ embedding_bag Native Functions ] in native_functions.yaml
   // for more details.
 
-  // NOLINTNEXTLINE(performance-unnecessary-copy-initialization)
-  Tensor grad = grad_;
   Tensor index_grad = grad_.index_select(0, offset2bag);
 
   index_grad = apply_bag_size_backward(mode, index_grad, offset2bag, bag_size_);

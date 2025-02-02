@@ -2,7 +2,8 @@
 import functools
 import itertools
 import logging
-from typing import List, Optional
+from collections.abc import Sequence
+from typing import Optional
 from unittest.mock import patch
 
 from ...autotune_process import TensorMeta
@@ -24,9 +25,9 @@ class ROCmTemplate(KernelTemplate):
     def __init__(
         self,
         name: str,
-        input_nodes: List[Buffer],
+        input_nodes: list[Buffer],
         layout: Layout,
-        input_reorder: Optional[List[int]] = None,
+        input_reorder: Optional[list[int]] = None,
     ) -> None:
         """
 
@@ -105,7 +106,7 @@ class ROCmTemplate(KernelTemplate):
 
         def make_kernel_render(
             template_node: ROCmTemplateBuffer,
-            epilogue_nodes: Optional[List[IRNode]] = None,
+            epilogue_nodes: Optional[Sequence[IRNode]] = None,
         ):
             kernel = ROCmTemplateKernel(
                 kernel_name="KERNEL_NAME",

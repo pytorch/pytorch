@@ -3,7 +3,7 @@ import unittest
 from pathlib import Path
 
 
-REPO_ROOT = Path(__file__).resolve().parent.parent.parent
+REPO_ROOT = Path(__file__).resolve().parents[2]
 try:
     # using tools/ to optimize test run.
     sys.path.append(str(REPO_ROOT))

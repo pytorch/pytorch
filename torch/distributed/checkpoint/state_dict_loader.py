@@ -2,7 +2,7 @@
 # mypy: allow-untyped-defs
 import os
 import warnings
-from typing import Any, cast, Dict, Optional, Set, Union
+from typing import Any, cast, Optional, Union
 from typing_extensions import deprecated
 
 import torch
@@ -27,7 +27,7 @@ __all__ = ["load_state_dict", "load"]
     category=FutureWarning,
 )
 def load_state_dict(
-    state_dict: Dict[str, Any],
+    state_dict: dict[str, Any],
     storage_reader: StorageReader,
     process_group: Optional[dist.ProcessGroup] = None,
     coordinator_rank: int = 0,
@@ -51,12 +51,13 @@ def load_state_dict(
 @_dcp_method_logger(log_exceptions=True)
 @_api_bc_check
 def load(
-    state_dict: Dict[str, Any],
+    state_dict: dict[str, Any],
     *,
     checkpoint_id: Union[str, os.PathLike, None] = None,
     storage_reader: Optional[StorageReader] = None,
     planner: Optional[LoadPlanner] = None,
     process_group: Optional[dist.ProcessGroup] = None,
+    no_dist: bool = False,
 ) -> None:
     """
     Load a distributed ``state_dict`` in SPMD style.
@@ -109,7 +110,8 @@ def load(
         process_group (Optional[ProcessGroup]):
             ProcessGroup to be used for cross-rank synchronization.
             (Default: ``None``)
-
+        no_dist (bool): If ``True``, this function will assume the intent is to load
+            a checkpoint without using cross-rank synchronization. (Default: ``False``)
     Returns:
         None.
 
@@ -139,10 +141,10 @@ def load(
         rank has an individual GPU, via ``torch.cuda.set_device()``.
     """
 
-    no_dist = not (dist.is_available() and dist.is_initialized())
+    no_dist = no_dist or (not dist.is_available()) or (not dist.is_initialized())
     if no_dist:
         warnings.warn(
-            "torch.distributed is unavailable or uninitialized, assuming the intent is to load in a single process."
+            "torch.distributed is disabled, unavailable or uninitialized, assuming the intent is to load in a single process."
         )
 
     with _profile():
@@ -190,7 +192,7 @@ def load(
 
 
 def _load_state_dict(
-    state_dict: Dict[str, Any],
+    state_dict: dict[str, Any],
     storage_reader: StorageReader,
     process_group: Optional[dist.ProcessGroup] = None,
     coordinator_rank: int = 0,
@@ -241,12 +243,12 @@ def _load_state_dict(
 
 
 def _load_state_dict_from_keys(
-    keys: Optional[Union[Set[str], str]] = None,
+    keys: Optional[Union[set[str], str]] = None,
     *,
     checkpoint_id: Union[str, os.PathLike, None] = None,
     storage_reader: Optional[StorageReader] = None,
     process_group: Optional[dist.ProcessGroup] = None,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """
     Load only the specified keys from the checkpoint, if no keys are specified, the entire
     checkpoint will be loaded. Note, this method completely loads the checkpoint into the
@@ -311,7 +313,7 @@ def _load_state_dict_from_keys(
     if isinstance(keys, str):
         keys = {keys}
 
-    sd: Dict[str, Any] = {}
+    sd: dict[str, Any] = {}
     _load_state_dict(
         state_dict=sd,
         storage_reader=storage_reader,

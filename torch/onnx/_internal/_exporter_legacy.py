@@ -20,14 +20,15 @@ import dataclasses
 import logging
 import warnings
 from collections import defaultdict
-from typing import Any, Callable, Final, Mapping, Sequence, TYPE_CHECKING, TypeVar
+from typing import Any, Callable, TYPE_CHECKING, TypeVar
+from typing_extensions import deprecated
 
 import torch
 import torch._ops
 import torch.utils._pytree as pytree
 from torch.onnx import errors
 from torch.onnx._internal import io_adapter
-from torch.onnx._internal._lazy_import import onnxscript_ir as ir
+from torch.onnx._internal._lazy_import import onnxscript_apis, onnxscript_ir as ir
 from torch.onnx._internal.diagnostics import infra
 from torch.onnx._internal.exporter import _onnx_program
 from torch.onnx._internal.fx import (
@@ -42,17 +43,13 @@ from torch.onnx._internal.fx import (
 # 'import onnx' inside of dynamo_export (by way of _assert_dependencies).
 if TYPE_CHECKING:
     import io
+    from collections.abc import Mapping, Sequence
 
     import onnxruntime
     import onnxscript
 
     from torch._subclasses import fake_tensor
     from torch.onnx._internal.fx import diagnostics
-
-_DEFAULT_OPSET_VERSION: Final[int] = 18
-"""The default ONNX opset version the exporter will use if one is not specified explicitly
-through :class:`ExportOptions`. This should NEVER be accessed outside of this module! Users
-should reference :attr:`ExportOptions.opset_version`."""
 
 _PYTORCH_GITHUB_ISSUES_URL = "https://github.com/pytorch/pytorch/issues"
 """The URL to the PyTorch GitHub issues page."""
@@ -83,6 +80,10 @@ class ONNXFakeContext:
     """List of paths of files that contain the model :meth:`state_dict`"""
 
 
+@deprecated(
+    "torch.onnx.dynamo_export is deprecated since 2.6.0. Please use torch.onnx.export(..., dynamo=True) instead.",
+    category=DeprecationWarning,
+)
 class OnnxRegistry:
     """Registry for ONNX functions.
 
@@ -102,9 +103,7 @@ class OnnxRegistry:
             defaultdict(list)
         )
 
-        # opset_version is unused for now, since torchlib only supports opset18.
-        # TODO: get opset version from torchlib
-        self._opset_version = _DEFAULT_OPSET_VERSION
+        self._opset_version = onnxscript_apis.torchlib_opset_version()
         warnings.warn(
             f"torch.onnx.dynamo_export only implements opset version {self._opset_version} for now. If you need to use a "
             "different opset version, please register them with register_custom_op."
@@ -114,9 +113,7 @@ class OnnxRegistry:
 
     @property
     def opset_version(self) -> int:
-        """The ONNX opset version the exporter should target. Defaults to the latest
-        supported ONNX opset version: 18. The default version will increment over time as
-        ONNX continues to evolve."""
+        """The ONNX opset version the exporter should target."""
 
         return self._opset_version
 
@@ -126,8 +123,6 @@ class OnnxRegistry:
         Args:
             torchlib_registry: The torchlib registry to use for populating the registry.
         """
-        import onnxscript._framework_apis.torch_2_6 as onnxscript_apis
-
         for meta in onnxscript_apis.get_torchlib_ops():
             internal_name_instance = registration.OpName.from_qualified_name(
                 meta.qualified_name
@@ -233,6 +228,10 @@ class OnnxRegistry:
         }
 
 
+@deprecated(
+    "torch.onnx.dynamo_export is deprecated since 2.6.0. Please use torch.onnx.export(..., dynamo=True) instead.",
+    category=DeprecationWarning,
+)
 class ExportOptions:
     """Options to influence the TorchDynamo ONNX exporter.
 
@@ -440,6 +439,10 @@ def enable_fake_mode():
     )  # type: ignore[assignment]
 
 
+@deprecated(
+    "torch.onnx.dynamo_export is deprecated since 2.6.0. Please use torch.onnx.export(..., dynamo=True) instead.",
+    category=DeprecationWarning,
+)
 class ONNXRuntimeOptions:
     """Options to influence the execution of the ONNX model through ONNX Runtime.
 
@@ -587,16 +590,10 @@ class Exporter:
             onnx_model = onnxscript_graph.to_model_proto(
                 self.options.onnx_registry.opset_version,
             )
+            ir_model = ir.serde.deserialize_model(onnx_model)
 
             try:
-                from onnxscript import optimizer
-
-                onnx_model = optimizer.optimize(onnx_model)
-            except ImportError:
-                warnings.warn(
-                    "ONNXScript optimizer is not available. Skipping optimization. "
-                    "Please `pip install onnxscript -U` to enable post-export optimization."
-                )
+                ir_model = onnxscript_apis.optimize(ir_model)
             except Exception as e:
                 warnings.warn(
                     "ONNXScript optimizer failed. Skipping optimization. "
@@ -604,9 +601,7 @@ class Exporter:
                     f"\n\nDetail:\n{e}"
                 )
 
-            return _onnx_program.ONNXProgram(
-                ir.serde.deserialize_model(onnx_model), None
-            )
+            return _onnx_program.ONNXProgram(ir_model, None)
 
     def _assert_fake_tensor_mode(self):
         """Asserts that the model and its input do not contain fake tensors."""
@@ -702,6 +697,10 @@ def _assert_dependencies(export_options: ResolvedExportOptions):
         raise missing_opset("onnxscript")
 
 
+@deprecated(
+    "torch.onnx.dynamo_export is deprecated since 2.6.0. Please use torch.onnx.export(..., dynamo=True) instead.",
+    category=DeprecationWarning,
+)
 def dynamo_export(
     model: torch.nn.Module | Callable,
     /,

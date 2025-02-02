@@ -30,7 +30,27 @@ using DeviceStreamType = cudaStream_t;
 
 } // namespace torch::aot_inductor
 
-#else // !USE_CUDA
+#elif defined(USE_XPU)
+#include <level_zero/ze_api.h>
+#include <sycl/sycl.hpp>
+#include <sstream>
+#define AOTI_RUNTIME_DEVICE_CHECK(EXPR)                                   \
+  do {                                                                    \
+    const ze_result_t status = EXPR;                                      \
+    if (status != ZE_RESULT_SUCCESS) {                                    \
+      std::stringstream ss;                                               \
+      ss << "L0 runtime error: " << std::hex << std::uppercase << status; \
+      throw std::runtime_error(ss.str());                                 \
+    }                                                                     \
+  } while (0)
+
+namespace torch::aot_inductor {
+
+using DeviceStreamType = sycl::queue*;
+
+} // namespace torch::aot_inductor
+
+#else
 
 #define AOTI_RUNTIME_DEVICE_CHECK(EXPR)            \
   bool ok = EXPR;                                  \
