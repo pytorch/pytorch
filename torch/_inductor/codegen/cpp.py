@@ -1813,10 +1813,7 @@ class CppVecOverrides(CppOverrides):
     def _initialize_scalarize(cls):
         vec_vars = vars(CppVecOverrides)
         for name, method in vars(CppOverrides).items():
-            if (
-                isinstance(method, staticmethod)
-                and name not in vec_vars
-            ):
+            if isinstance(method, staticmethod) and name not in vec_vars:
                 func = cls._scalarize(method.__func__)
                 func.__name__ = name
                 setattr(cls, name, staticmethod(func))
