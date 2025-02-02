@@ -40,11 +40,6 @@ constexpr const char* const kNCCLAbortedCommStoreKey = "NCCLABORTEDCOMM";
 
 namespace {
 
-#if defined(NCCL_MAJOR) && \
-    ((NCCL_MAJOR > 2) || (NCCL_MAJOR == 2) && (NCCL_MINOR >= 10))
-#define NCCL_HAS_AVG 1
-#endif // NCCL version >= 2.10
-
 // NCCL op mapping
 const std::map<ReduceOp::RedOpType, ncclRedOp_t> ncclOp = {
     {ReduceOp::MIN, ncclMin},
@@ -70,9 +65,9 @@ std::map<at::ScalarType, ncclDataType_t> ncclDataType = {
     {at::kFloat8_e4m3fn, ncclUint8},
     {at::kFloat8_e4m3fnuz, ncclUint8},
     {at::kFloat8_e5m2fnuz, ncclUint8},
-#if HAS_NCCL_BF16_DATATYPE
+#ifdef NCCL_HAS_BF16_DATATYPE
     {at::kBFloat16, ncclBfloat16},
-#endif // HAS_NCCL_BF16_DATATYPE
+#endif // NCCL_HAS_BF16_DATATYPE
 };
 
 // Helper function that gets the data type and issues error if not supported
@@ -931,10 +926,8 @@ ProcessGroupNCCL::ProcessGroupNCCL(
   PrefixStore* prefixStore = dynamic_cast<PrefixStore*>(store_.get());
   globalStore_ =
       prefixStore ? prefixStore->getUnderlyingNonPrefixStore() : store_;
-#ifdef ENABLE_NCCL_ERROR_CHECKING
   enableTiming_.store(
       getCvarBool(TORCH_NCCL_ENABLE_TIMING, false) || desyncDebug_);
-#endif // ENABLE_NCCL_ERROR_CHECKING
   avoidRecordStreams_ = getCvarBool(TORCH_NCCL_AVOID_RECORD_STREAMS, false);
 #ifdef NCCL_HAS_COMM_REGISTER
   useTensorRegisterAllocatorHook_ =
@@ -963,7 +956,6 @@ ProcessGroupNCCL::ProcessGroupNCCL(
     }
   }
 
-#ifdef ENABLE_NCCL_ERROR_CHECKING
   // in blockingWait mode, we don't need to enable the watchdog thread to check
   // the timeout or nccl error because the main thread would throw an exception
   // and it is the user's responsibility to handle the exception.
@@ -971,7 +963,6 @@ ProcessGroupNCCL::ProcessGroupNCCL(
     ncclCommWatchdogThread_ =
         std::thread(&ProcessGroupNCCL::ncclCommWatchdog, this);
   }
-#endif // ENABLE_NCCL_ERROR_CHECKING
 
   init();
   const std::string OFF = "OFF";
@@ -1078,7 +1069,7 @@ void ProcessGroupNCCL::eagerConnectSingleDevice(at::Device device) {
 bool ProcessGroupNCCL::useNonblocking() {
 #ifndef NCCL_HAS_COMM_NONBLOCKING
   return false;
-#endif // NCCL_HAS_COMM_NONBLOCKING
+#else
   // Already parsed, return the cached value
   if (useNonblocking_.has_value()) {
     return useNonblocking_.value();
@@ -1106,6 +1097,7 @@ bool ProcessGroupNCCL::useNonblocking() {
   LOG(INFO) << logPrefix()
             << "Using non-blocking mode: " << useNonblocking_.value();
   return useNonblocking_.value();
+#endif // NCCL_HAS_COMM_NONBLOCKING
 }
 
 void ProcessGroupNCCL::performNocolorSplit(at::Device device) {
@@ -1450,6 +1442,7 @@ void ProcessGroupNCCL::shutdown() {
       ncclComm->finalize();
     }
   }
+#ifdef NCCL_HAS_COMM_NONBLOCKING
   // Wait for all operations to complete.  If NCCL comm is non-blocking and
   // timeout is reach, this will throw an exception.
   for (auto& it : devNCCLCommMap_) {
@@ -1457,6 +1450,7 @@ void ProcessGroupNCCL::shutdown() {
     // Use long interval to avoid acquiring CPU too frequently
     ncclComm->waitReady(true);
   }
+#endif
   // Tell watchdog to (1) flush its queue and (2) do not use comm objects
   // anymore because I am going to destroy them now
   LOG(INFO) << logPrefix() << "Operations flushed, joining watchdog thread.";
@@ -5386,27 +5380,28 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::_allgather_base(
 
 // Allocate function
 static void* _ncclMemAlloc(size_t size, int device, void* stream) {
-#ifndef NCCL_HAS_MEM_ALLOC
-  TORCH_CHECK(
-      false, "NCCL mem allocator is not supported in this NCCL version");
-#else
+#ifdef NCCL_HAS_MEM_ALLOC
   LOG(INFO) << "NCCL mem allocator: allocating " << size << " bytes";
   at::cuda::OptionalCUDAGuard gpuGuard(device);
   void* ptr = nullptr;
   TORCH_CHECK(ncclMemAlloc(&ptr, size) == ncclSuccess, "ncclMemAlloc failed");
   return ptr;
+#else
+  TORCH_CHECK(
+      false, "NCCL mem allocator is not supported in this NCCL version");
+  return nullptr;
 #endif // NCCL_HAS_MEM_ALLOC
 }
 
 // Free function
 static void _ncclMemFree(void* ptr, size_t size, int device, void* stream) {
-#ifndef NCCL_HAS_MEM_ALLOC
-  TORCH_CHECK(
-      false, "NCCL mem allocator is not supported in this NCCL version");
-#else
+#ifdef NCCL_HAS_MEM_ALLOC
   LOG(INFO) << "NCCL mem allocator: freeing " << size << " bytes";
   at::cuda::OptionalCUDAGuard gpuGuard(device);
   TORCH_CHECK(ncclMemFree(ptr) == ncclSuccess, "ncclMemFree failed");
+#else
+  TORCH_CHECK(
+      false, "NCCL mem allocator is not supported in this NCCL version");
 #endif // NCCL_HAS_MEM_ALLOC
 }
 
