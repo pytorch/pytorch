@@ -3796,35 +3796,32 @@ class TestCudaMallocAsync(TestCase):
 
     @serialTest
     def test_garbage_collect_expandable(self):
-        try:
-            torch.cuda.memory.empty_cache()
-            mb = 1024 * 1024
-            _, all_memory = torch.cuda.memory.mem_get_info()
-            pre_reserved = torch.cuda.memory_reserved()
-            total_allowed = 120 * mb + pre_reserved
-            fraction_allowed = total_allowed / all_memory
-            self.assertEqual((fraction_allowed * all_memory), total_allowed)
-            torch.cuda.get_per_process_memory_fraction(0)
-            torch.cuda.memory.set_per_process_memory_fraction(fraction_allowed)
+        torch.cuda.memory.empty_cache()
+        mb = 1024 * 1024
+        _, all_memory = torch.cuda.memory.mem_get_info()
+        pre_reserved = torch.cuda.memory_reserved()
+        total_allowed = 120 * mb + pre_reserved
+        fraction_allowed = total_allowed / all_memory
+        self.assertEqual((fraction_allowed * all_memory), total_allowed)
+        torch.cuda.get_per_process_memory_fraction(0)
+        torch.cuda.memory.set_per_process_memory_fraction(fraction_allowed)
 
-            def alloc(n):
-                return torch.ones(n * mb, dtype=torch.int8, device="cuda")
+        def alloc(n):
+            return torch.ones(n * mb, dtype=torch.int8, device="cuda")
 
-            torch.cuda.memory._set_allocator_settings(
-                "expandable_segments:False,garbage_collection_threshold:0.5"
-            )
-            a = alloc(40)
-            torch.cuda.memory._set_allocator_settings(
-                "expandable_segments:True,garbage_collection_threshold:0.5"
-            )
-            b = alloc(40)
-            del a, b
-            # causes GC to run. The expandable segment block will be split
-            # so GC would not attempt to free it anyway, but this at least makes sure
-            # expandable_segment blocks can be in the free list when this is called.
-            alloc(80)
-        finally:
-            torch.cuda.get_per_process_memory_fraction(0)
+        torch.cuda.memory._set_allocator_settings(
+            "expandable_segments:False,garbage_collection_threshold:0.5"
+        )
+        a = alloc(40)
+        torch.cuda.memory._set_allocator_settings(
+            "expandable_segments:True,garbage_collection_threshold:0.5"
+        )
+        b = alloc(40)
+        del a, b
+        # causes GC to run. The expandable segment block will be split
+        # so GC would not attempt to free it anyway, but this at least makes sure
+        # expandable_segment blocks can be in the free list when this is called.
+        alloc(80)
 
     def test_allocator_settings(self):
         def power2_div(size, div_factor):
