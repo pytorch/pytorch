@@ -345,6 +345,9 @@ class MetalOverrides(OpOverrides):
         return f"metal::pow({cast_a}, {cast_b})"
 
 
+MetalOverrides._initialize_pointwise_overrides("mps")
+
+
 class MetalKernel(SIMDKernel):
     overrides = MetalOverrides  # type: ignore[assignment]
     suffix = ";"
