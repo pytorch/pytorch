@@ -956,7 +956,8 @@ class OpOverrides(BasicMathOps, OpDecompositions):
     @classmethod
     def _is_unimplemented(cls, name: str) -> bool:
         fn = getattr(cls, name, None)
-        return not fn or getattr(fn, "is_unimplemented", False)
+        default_fn = getattr(OpsHandler, name, None)
+        return not fn or fn == default_fn or getattr(fn, "is_unimplemented", False)
 
     @classmethod
     def _initialize_pointwise_overrides(cls, target: str) -> None:
@@ -965,8 +966,13 @@ class OpOverrides(BasicMathOps, OpDecompositions):
         for funcname, data in pointwise_overrides_data.items():
             impl = getattr(data, target)
             if impl is None:
-                setattr(cls, funcname, cls._unimplemented(funcname))
+                if cls._is_unimplemented(funcname):
+                    setattr(cls, funcname, cls._unimplemented(funcname))
             else:
+                assert (
+                    funcname not in cls.__dict__
+                ), f"multiple definitions of {funcname} on {cls.__name__}"
+                impl.__name__ = funcname
                 setattr(cls, funcname, staticmethod(impl))
 
 
