@@ -26,6 +26,8 @@ from torch.testing._internal.common_utils import (
     IS_CI,
     IS_JETSON,
     IS_MACOS,
+    IS_ARM64,
+    IS_LINUX,
     IS_SANDCASTLE,
     IS_WINDOWS,
     load_tests,
@@ -34,15 +36,15 @@ from torch.testing._internal.common_utils import (
     run_tests,
     skipIfNoDill,
     skipIfRocm,
-    skipIfXpu,
     slowTest,
+    xfailIf,
     TEST_CUDA,
     TEST_NUMPY,
     TEST_WITH_ASAN,
     TEST_WITH_ROCM,
     TEST_WITH_TSAN,
-    TestCase,
-    xfailIfLinux,
+    TEST_XPU,
+    TestCase
 )
 from torch.utils.data import (
     _utils,
@@ -1384,11 +1386,9 @@ except RuntimeError as e:
             del loader1_it
             del loader2_it
 
-    # This case pass on Intel GPU, but currently expected failure on other device,
-    # please don't forget to remove this skip when remove the xfailIfLinux.
-    @skipIfXpu
+    # This case pass on Intel GPU and Linux Aarch64, so xfail on all other devices.
     # https://github.com/pytorch/pytorch/issues/128551
-    @xfailIfLinux
+    @xfailIf(not ( IS_ARM64 and IS_LINUX ) and not TEST_XPU )
     def test_segfault(self):
         p = ErrorTrackingProcess(target=_test_segfault)
         p.start()
