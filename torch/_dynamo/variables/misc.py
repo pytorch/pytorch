@@ -1579,7 +1579,10 @@ class ConstantLikeVariable(VariableTracker):
         except NotImplementedError:
             unimplemented(f"{self._error_prefix}.{name}(*{args}, **{kwargs})")
 
-        result = getattr(self.value, name)(*cargs, **ckwargs)
+        try:
+            result = getattr(self.value, name)(*cargs, **ckwargs)
+        except Exception as e:
+            raise_observed_exception(type(e), tx)
 
         if variables.ConstantVariable.is_literal(result):
             return variables.ConstantVariable.create(result)
