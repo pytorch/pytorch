@@ -442,7 +442,7 @@ Tensor& set_storage_meta__symint(
   c10::SymDimVector contiguous_strides;
   if (stride.data() == nullptr) {
     // TODO: dedupe this with empty() symbolic logic
-    auto dim = size.size();
+    int64_t dim = static_cast<int64_t>(size.size());
     contiguous_strides.resize(dim);
     if (dim > 0) {
       const auto last_idx = dim - 1;
@@ -470,7 +470,7 @@ Tensor& set_storage_meta__symint(
     // All meta data pointers are the same, so we don't have to "re" allocate
     // it.  TODO: Actually this might not quite be correct if we use special
     // pointers to track whether or not fake cuda tensors are pinned or not
-    const auto itemsize = static_cast<int64_t>(result.dtype().itemsize());
+    const int64_t itemsize = static_cast<int64_t>(result.dtype().itemsize());
     c10::SymInt new_size_bytes = result.is_contiguous()
         ? at::detail::computeStorageNbytesContiguous(
               size, itemsize, storage_offset)
@@ -4350,7 +4350,7 @@ std::vector<Tensor> meshgrid(TensorList tensors) {
 }
 
 std::vector<Tensor> meshgrid(TensorList tensors, std::string_view indexing) {
-  auto size = tensors.size();
+  size_t size = tensors.size();
   TORCH_CHECK(size > 0, "meshgrid expects a non-empty TensorList");
 
   for (const auto i : c10::irange(size - 1)) {
