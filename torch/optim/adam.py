@@ -640,11 +640,14 @@ def _multi_tensor_adam(
                     device_exp_avg_sqs,
                     device_max_exp_avg_sqs,
                 )
-            else:
+            elif use_exp_avg:
                 _view_as_real(
                     device_params, device_grads, device_exp_avgs, device_exp_avg_sqs
                 )
-
+            else:
+                _view_as_real(
+                    device_params, device_grads, device_exp_avg_sqs
+                )
         if maximize:
             device_grads = torch._foreach_neg(device_grads)  # type: ignore[assignment]
 
