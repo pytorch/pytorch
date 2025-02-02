@@ -73,7 +73,11 @@ C10_CUDA_API __inline__ WarningState& warning_state() {
   return warning_state_;
 }
 // the subsequent functions are defined in the header because for performance
-// reasons we want them to be inline
+// reasons we want them to be inline.
+// performs contiguous or 2D cudaMemcpy and synchronizes afterwards
+// if width_in_bytes is not -1, 2d copy is performed and all 2d params are
+// expected to be set to valid values, no additional checks are performed other
+// than by cuda call itself
 C10_CUDA_API void __inline__ memcpy_and_sync(
     void* dst,
     const void* src,

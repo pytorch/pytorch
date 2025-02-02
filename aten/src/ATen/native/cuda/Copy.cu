@@ -275,14 +275,12 @@ void copy_device_to_device(TensorIterator& iter,
 inline std::tuple<size_t, size_t, size_t, size_t> getCopyParameters(const TensorIteratorBase& iter) {
   size_t element_size = iter.tensor(0).element_size();
   if (iter.ndim() == 1) {
-    TORCH_INTERNAL_ASSERT(!iter.has_contiguous_first_dim(), "Unextected contiguous iterator");
     size_t width_in_bytes = element_size;
     size_t src_pitch = iter.strides(1)[0];
     size_t dst_pitch = iter.strides(0)[0];
     size_t height = iter.shape()[0];
     return std::make_tuple(width_in_bytes, src_pitch, dst_pitch, height);
   } else {
-    TORCH_INTERNAL_ASSERT(iter.has_contiguous_first_dim(), "Unexpected discontiguous first dim")
     size_t width_in_bytes = iter.shape()[0] * element_size;
     size_t src_pitch = iter.strides(1)[1];
     size_t dst_pitch = iter.strides(0)[1];
@@ -316,9 +314,7 @@ static bool copy_requires_temporaries(TensorIterator& iter, bool p2p_enabled) {
   if (dst_device.is_cuda() != src_device.is_cuda() && same_dtype && iter.ndim() <= 2) {
     // TensorIterator reorders strides so that the first one is the smallest
 
-    if (iter.ndim() == 2 && !iter.has_contiguous_first_dim()) {
-      return true;
-    } else {
+    if (iter.ndim() == 1 || iter.has_contiguous_first_dim()) {
       auto [width_in_bytes, src_pitch, dst_pitch, height] = getCopyParameters(iter);
       if (src_pitch >= width_in_bytes && dst_pitch >= width_in_bytes) {
           return false; // No need for temporaries
@@ -416,18 +412,16 @@ static void copy_kernel_cuda(TensorIterator& iter, bool non_blocking) {
   int64_t src_pitch = -1;
   int64_t dst_pitch = -1;
   int64_t height = -1;
-  bool copy2d = false;
   if (iter.is_contiguous()) {
     nbytes = iter.numel() * iter.element_size(0);
   } else {
     // the only non-contiguous iter situation that can happen here is
     // acceptable for 2d copy, this has been vetted in requires_temporaries
     std::tie(width_in_bytes, src_pitch, dst_pitch, height) = getCopyParameters(iter);
-    copy2d = true;
   }
 
   if (non_blocking) {
-    if (!copy2d) {
+    if (width_in_bytes == -1) {
       AT_CUDA_CHECK(cudaMemcpyAsync(dst, src, nbytes, kind, stream));
     } else {
       AT_CUDA_CHECK(cudaMemcpy2DAsync(dst, dst_pitch, src, src_pitch, width_in_bytes, height, kind, stream));
