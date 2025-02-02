@@ -1440,11 +1440,13 @@ def merge_view_inputs(
         # Map each argument into its old index.
         # There may be some repeated arguments, so we collect their indices in a list.
         arg_to_old_idx_map = collections.defaultdict(list)
-        for (i, arg) in enumerate(fwd_inputs):
+        for i, arg in enumerate(fwd_inputs):
             arg_to_old_idx_map[make_hashable(arg)].append(i)
         # Reverse the list of each argument, so that we can easily pop them one-after-the-other in order.
         for hashable_arg in arg_to_old_idx_map:
-            arg_to_old_idx_map[hashable_arg] = list(reversed(arg_to_old_idx_map[hashable_arg]))
+            arg_to_old_idx_map[hashable_arg] = list(
+                reversed(arg_to_old_idx_map[hashable_arg])
+            )
 
         for i, other_arg in enumerate(other_args):
             new_idx = len(base_args) + i
