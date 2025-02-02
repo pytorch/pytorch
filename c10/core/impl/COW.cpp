@@ -119,6 +119,7 @@ C10_API void materialize_cow_storage(StorageImpl& storage) {
   auto* ctx = data_ptr.cast_context<cow::COWDeleterContext>(cow::cow_deleter);
   TORCH_INTERNAL_ASSERT(ctx != nullptr);
 
+  // COW context might get deleted after the below line.
   auto result = ctx->decrement_refcount();
 
   // This must be set by each branch below.
@@ -129,9 +130,34 @@ C10_API void materialize_cow_storage(StorageImpl& storage) {
     // the context ensured they finished before giving us the result.
     std::unique_ptr<void, DeleterFnPtr> data =
         std::get<cow::COWDeleterContext::LastReference>(std::move(result));
-    TORCH_INTERNAL_ASSERT(data.get() == data_ptr.get());
-    new_data_ptr = DataPtr(
+    // data is a UnifiedMemoryDataPtrContext.
+    if (data.get_deleter() == c10::impl::cow::unified_memory_data_ptr_ctx_deleter) {
+      auto* unified_data_ptr_ctx =
+        reinterpret_cast<c10::impl::cow::UnifiedMemoryDataPtrContext*>(data.get());
+
+      // Same device, owning the pointer.
+      if (data_ptr.get() == unified_data_ptr_ctx->get_original_data_ctx()) {
+        auto original_data = unified_data_ptr_ctx->move_original_data_ctx();
+        new_data_ptr = DataPtr(
+          data_ptr.get(), original_data.release(), original_data.get_deleter(), data_ptr.device());
+      } else {
+        // Different devices copy
+        // TODO(Frank): Technically, it's possible to have CPUTensor owns
+        // MPS buffer, but it will be troublesome if we want to do other things.
+        // Eg. COW-again with the CPUTensor owning the MPS buffer, which means
+        // we will have logic to determine whether the data owned by the Tensor
+        // is created by the device it's on. It's possible, but will be
+        // much complicated, since the current assumption is, if the device
+        // is not COW'ed, data_ptr.get() == data.get().
+        // For now we will perform a copy.
+        new_data_ptr = storage.allocator()->clone(data_ptr.get(), storage.nbytes());
+      }
+    // data is not a UnifiedMemoryDataPtrContext.
+    } else {
+      TORCH_INTERNAL_ASSERT(data.get() == data_ptr.get());
+      new_data_ptr = DataPtr(
         data.release(), data_ptr.get(), data.get_deleter(), data_ptr.device());
+    }
   } else {
     TORCH_INTERNAL_ASSERT(
         std::holds_alternative<cow::COWDeleterContext::NotLastReference>(
