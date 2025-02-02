@@ -1286,6 +1286,10 @@ class Identity(sympy.Function):
     def _eval_is_integer(self):
         return self.args[0].is_integer  # type: ignore[attr-defined]
 
+    def _eval_expand_identity(self, **hints):
+        # Removes the identity op.
+        return self.args[0]
+
 
 def make_opaque_unary_fn(name):
     class OpaqueUnaryFn(sympy.Function):
