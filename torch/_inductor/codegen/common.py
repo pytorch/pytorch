@@ -931,7 +931,7 @@ class OpOverrides(BasicMathOps, OpDecompositions):
 
     def halide_clamp(self, value: OpVarT, size: sympy.Expr, check: bool) -> OpVarT:
         raise NotImplementedError(
-            f"{type(self).__name__}: inline_asm_elementwise only implemented for Halide backend"
+            f"{type(self).__name__}: halide_clamp only implemented for Halide backend"
         )
 
     def inline_asm_elementwise(
