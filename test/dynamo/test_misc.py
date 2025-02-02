@@ -7638,6 +7638,19 @@ utils_device.CURRENT_DEVICE == None""".split(
 """,
         )
 
+    def test_float_speculation_log_divergence(self):
+        def fn(x, y, z):
+            a = F.interpolate(x, scale_factor=z, mode="bilinear", align_corners=False)
+            b = F.interpolate(y, scale_factor=z, mode="bilinear", align_corners=False)
+            return a * b
+
+        cnt = CompileCounterWithBackend("inductor")
+        fn_opt = torch.compile(fn, backend=cnt)
+        y = torch.randn(3, 3, 3, 4)
+
+        self.assertEqual(fn(y, y, 1.0), fn_opt(y, y, 1.0))
+        self.assertEqual(fn(y, y, 2.0), fn_opt(y, y, 2.0))
+
     def test_raise_guard_full_constraint(self):
         y = torch.randn([3, 3, 3])
 
@@ -9382,7 +9395,6 @@ def ___make_guard_fn():
         self.assertEqual(counter.frame_count, 0)
 
     # just to be sure in case anyone tries to run this in older versions of Python
-    @unittest.skipIf(sys.version_info < (3, 7), "Made default on Python 3.7")
     def test_pep0479_convert_stopiteration(self):
         # https://peps.python.org/pep-0479/
         def generator_with_stop_iteration():
