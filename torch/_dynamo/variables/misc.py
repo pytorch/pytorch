@@ -994,6 +994,10 @@ class TypingVariable(VariableTracker):
 
 @functools.lru_cache(maxsize=1)
 def get_np_to_tnp_map():
+    """
+    This generates a mapping from numpy modules to their torch._numpy
+    modules equivalents.
+    """
     from ..utils import NP_TO_TNP_MODULE
 
     np_fn_to_tnp_fn = {}
@@ -1007,6 +1011,16 @@ def get_np_to_tnp_map():
                     np_fn_to_tnp_fn[np_fn] = tnp_fn
 
     return np_fn_to_tnp_fn
+
+
+@functools.lru_cache(maxsize=1)
+def get_tnp_to_np_map():
+    """
+    This is just the reverse mapping of get_np_to_tnp_map() - mapping from
+    torch._numpy modules to numpy equivalents.
+    """
+    m = get_np_to_tnp_map()
+    return {v: k for k, v in m.items()}
 
 
 class NumpyVariable(VariableTracker):
