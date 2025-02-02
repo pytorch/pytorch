@@ -736,6 +736,10 @@ class OpsHandler(Protocol[T]):
     def libdevice_log(self, x0: T) -> T:
         ...
 
+    # halide-only
+    def halide_clamp(self, value: T, size: sympy.Expr, check: bool) -> T:
+        raise NotImplementedError
+
     # triton-only
     def inline_asm_elementwise(
         self,
