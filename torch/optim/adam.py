@@ -52,9 +52,9 @@ class Adam(Optimizer):
                 raise ValueError(
                     "lr as a Tensor is not supported for capturable=False and foreach=True"
                 )
-            if fused:
+            if foreach or fused:
                 if lr.numel() != 1:
-                    raise ValueError("Tensor lr must be 1-element for fused=True")
+                    raise ValueError("Tensor lr must be 1-element for foreach=True or fused=True")
             elif differentiable:
                 if lr.dim() > 1 or lr.numel() != 1:
                     raise ValueError(
