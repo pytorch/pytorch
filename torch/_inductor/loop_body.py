@@ -17,7 +17,7 @@ from torch.utils._sympy.symbol import SymT
 
 from . import config, dependencies
 from .codegen.common import index_prevent_reordering
-from .ops_handler import DefaultHandler
+from .ops_handler import DefaultHandler, OpsHandler
 from .utils import cache_on_self, sympy_index_symbol_with_prefix, sympy_subs
 from .virtualized import ops, V
 
@@ -655,7 +655,7 @@ class LoopBodyBlock:
 
 
 class CountOps(DefaultHandler):
-    def __init__(self, inner: Any, counts: collections.Counter[str]):
+    def __init__(self, inner: OpsHandler[Any], counts: collections.Counter[str]):
         self._inner = inner
         self._counts = counts
 

@@ -5,19 +5,23 @@ from torch._inductor.codegen.cpp import CppOverrides, CppVecOverrides
 from torch._inductor.codegen.halide import HalideOverrides
 from torch._inductor.codegen.mps import MetalOverrides
 from torch._inductor.codegen.triton import TritonKernelOverrides
-from torch._inductor.ops_handler import list_ops, OP_NAMES
+from torch._inductor.ops_handler import list_ops, OP_NAMES, OpsHandler
 from torch._inductor.test_case import TestCase
 
 
 class TestOpCompleteness(TestCase):
     def verify_ops_handler_completeness(self, handler):
-        op_names = list_ops(handler)
-        if OP_NAMES == op_names:
-            return
-        print(f"Missing ops: {OP_NAMES - op_names}")
-        print(f"Extra ops: {op_names - OP_NAMES}")
-        self.assertEqual(", ".join(OP_NAMES - op_names), "")
-        self.assertEqual(", ".join(op_names - OP_NAMES), "")
+        for op in OP_NAMES:
+            self.assertIsNot(
+                getattr(handler, op),
+                getattr(OpsHandler, op),
+                msg=f"{handler} must implement {op}",
+            )
+        extra_ops = list_ops(handler) - OP_NAMES
+        if extra_ops:
+            raise AssertionError(
+                f"{handler} has an extra ops: {extra_ops}, add them to OpHandler class or prefix with `_`"
+            )
 
     def test_triton_overrides(self):
         self.verify_ops_handler_completeness(TritonKernelOverrides)

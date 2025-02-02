@@ -149,8 +149,8 @@ class TracingOpsHandler(WrapperHandler):
     def placeholder(self, idx: int) -> torch.fx.Proxy:
         return self.placeholders[idx]
 
-    def output(self, *args: tuple[object]) -> torch.fx.Node:
-        return self.tracer.create_node(
+    def output(self, *args: tuple[object]) -> None:
+        self.tracer.create_node(
             "output", "output", (tuple(self.tracer.create_arg(a) for a in args),), {}
         )
 
