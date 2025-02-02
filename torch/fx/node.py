@@ -5,7 +5,7 @@ import operator
 import types
 import warnings
 from collections.abc import Mapping, Sequence
-from typing import Any, Callable, Optional, TYPE_CHECKING, TypeVar, Union
+from typing import Any, Callable, cast, Optional, TYPE_CHECKING, TypeVar, Union
 
 import torch
 from torch._C import _NodeBase
@@ -56,7 +56,7 @@ Argument = Optional[
         BaseArgumentTypes,
     ]
 ]
-ArgT = TypeVar("ArgT", bound=Argument)
+ArgumentT = TypeVar("ArgumentT", bound=Argument)
 
 _legal_ops = dict.fromkeys(
     [
@@ -891,7 +891,7 @@ class Node(_NodeBase):
 
 
 @compatibility(is_backward_compatible=True)
-def map_arg(a: ArgT, fn: Callable[[Node], Argument]) -> ArgT:
+def map_arg(a: ArgumentT, fn: Callable[[Node], Argument]) -> ArgumentT:
     """
     Apply fn to each Node appearing in arg. arg may be a list, tuple, slice, or dict with string keys.
     """
@@ -900,26 +900,25 @@ def map_arg(a: ArgT, fn: Callable[[Node], Argument]) -> ArgT:
 
 
 @compatibility(is_backward_compatible=True)
-def map_aggregate(a: ArgT, fn: Callable[[Argument], Argument]) -> ArgT:
+def map_aggregate(a: ArgumentT, fn: Callable[[Argument], Argument]) -> ArgumentT:
     """
     Apply fn to each object appearing in arg. arg may be a list, tuple, slice, or dict with string keys.
     """
+    ret: Argument
+
     if isinstance(a, tuple):
-        t = tuple([map_aggregate(elem, fn) for elem in a])
-        # Support NamedTuple (if it has `_fields`) by repacking into original type.
-        return t if not hasattr(a, "_fields") else type(a)(*t)  # type: ignore[arg-type, return-value]
+        ret = type(a)(map_aggregate(elem, fn) for elem in a)
     elif isinstance(a, list):
-        return immutable_list([map_aggregate(elem, fn) for elem in a])
+        ret = immutable_list(map_aggregate(elem, fn) for elem in a)
     elif isinstance(a, dict):
-        rv = immutable_dict()
-        for k, v in a.items():
-            dict.__setitem__(rv, k, map_aggregate(v, fn))
-        return rv
+        ret = immutable_dict((k, map_aggregate(v, fn)) for k, v in a.items())
     elif isinstance(a, slice):
-        return slice(  # type: ignore[return-value]
+        ret = slice(
             map_aggregate(a.start, fn),
             map_aggregate(a.stop, fn),
             map_aggregate(a.step, fn),
         )
     else:
-        return fn(a)  # type: ignore[return-value]
+        ret = fn(a)
+
+    return cast(ArgumentT, ret)
