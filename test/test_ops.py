@@ -31,6 +31,7 @@ from torch.testing._internal.common_device_type import (
     OpDTypes,
     ops,
     skipMeta,
+    skipMPS,
 )
 from torch.testing._internal.common_dtype import (
     all_types_and_complex_and,
@@ -56,6 +57,7 @@ from torch.testing._internal.common_utils import (
     IS_CI,
     IS_FBCODE,
     is_iterable_of_tensors,
+    IS_MACOS,
     IS_SANDCASTLE,
     noncontiguous_like,
     parametrize,
@@ -72,6 +74,7 @@ from torch.testing._internal.common_utils import (
     TestCase,
     unMarkDynamoStrictTest,
 )
+from torch.testing._internal.mps_utils import mps_op_db
 from torch.utils._python_dispatch import TorchDispatchMode
 from torch.utils._pytree import tree_map
 
@@ -98,6 +101,12 @@ _ref_test_ops = tuple(
         op_db,
     )
 )
+
+# Apply mps-specific xfails to the op_db
+# Only done on MacOS to avoid unnecessary overhead
+if IS_MACOS:
+    op_db = mps_op_db(op_db)
+    python_ref_db = mps_op_db(python_ref_db)
 
 
 def reduction_dtype_filter(op):
@@ -719,7 +728,7 @@ class TestCommon(TestCase):
     # Tests that the function produces the same result when called with
     #   noncontiguous tensors.
     @with_tf32_off
-    @onlyNativeDeviceTypesAnd(["hpu"])
+    @onlyNativeDeviceTypesAnd(["hpu", "mps"])
     @suppress_warnings
     @ops(op_db, allowed_dtypes=(torch.float32, torch.long, torch.complex64))
     def test_noncontiguous_samples(self, device, dtype, op):
@@ -810,6 +819,7 @@ class TestCommon(TestCase):
     #   incorrectly sized out parameter warning properly yet
     # Cases test here:
     #   - out= with the correct dtype and device, but the wrong shape
+    @skipMPS
     @ops(ops_and_refs, dtypes=OpDTypes.none)
     def test_out_warning(self, device, op):
         if TEST_WITH_TORCHDYNAMO and op.name == "_refs.clamp":
@@ -1136,6 +1146,7 @@ class TestCommon(TestCase):
                     with self.assertRaises(RuntimeError, msg=msg_fail):
                         op_out(out=out)
 
+    @skipMPS
     @ops(
         [
             op
@@ -1216,6 +1227,7 @@ class TestCommon(TestCase):
     # Tests that the forward and backward passes of operations produce the
     #   same values for the cross-product of op variants (method, inplace)
     #   against eager's gold standard op function variant
+    @skipMPS
     @_variant_ops(op_db)
     def test_variant_consistency_eager(self, device, dtype, op):
         # Acquires variants (method variant, inplace variant, operator variant, inplace_operator variant, aliases)
@@ -1397,6 +1409,7 @@ class TestCommon(TestCase):
     # Reference testing for operations in complex32 against complex64.
     # NOTE: We test against complex64 as NumPy doesn't have a complex32 equivalent dtype.
     @ops(op_db, allowed_dtypes=(torch.complex32,))
+    @skipMPS
     def test_complex_half_reference_testing(self, device, dtype, op):
         if not op.supports_dtype(torch.complex32, device):
             unittest.skip("Does not support complex32")
@@ -1432,6 +1445,7 @@ class TestCommon(TestCase):
             self.assertEqual(actual, expected, exact_dtype=False)
 
     @ops(op_db, allowed_dtypes=(torch.bool,))
+    @skipMPS
     def test_non_standard_bool_values(self, device, dtype, op):
         # Test boolean values other than 0x00 and 0x01 (gh-54789)
         def convert_boolean_tensors(x):
@@ -2821,7 +2835,7 @@ class TestFakeTensor(TestCase):
             self.assertEqual(strided_result.layout, torch.strided)
 
 
-instantiate_device_type_tests(TestCommon, globals())
+instantiate_device_type_tests(TestCommon, globals(), allow_mps=True)
 instantiate_device_type_tests(TestCompositeCompliance, globals())
 instantiate_device_type_tests(TestMathBits, globals())
 instantiate_device_type_tests(TestRefsOpsInfo, globals(), only_for="cpu")

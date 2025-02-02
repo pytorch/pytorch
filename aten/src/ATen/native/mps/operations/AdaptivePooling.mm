@@ -37,7 +37,7 @@ static void set_kernel_params(int64_t isizeH,
 
   if (isizeH >= osizeH) {
     if (check_avg_pooling) {
-      TORCH_CHECK(
+      TORCH_CHECK_NOT_IMPLEMENTED(
           (isizeH % osizeH == 0 && isizeW % osizeW == 0),
           "Adaptive pool MPS: input sizes must be divisible by output sizes. Non-divisible input sizes are not implemented on MPS device yet. For now, you can manually transfer tensor to cpu in this case. Please refer to [this issue](https://github.com/pytorch/pytorch/issues/96056)");
     }
@@ -47,7 +47,7 @@ static void set_kernel_params(int64_t isizeH,
     kernel_sizeW = isizeW - (osizeW - 1) * strideW;
   } else {
     if (check_avg_pooling) {
-      TORCH_CHECK(
+      TORCH_CHECK_NOT_IMPLEMENTED(
           (osizeH % isizeH == 0 && osizeW % isizeW == 0),
           "Adaptive pool MPS: output sizes must be divisible by input sizes. Non-divisible input sizes are not implemented on MPS device yet. For now, you can manually transfer tensor to cpu in this case. Please refer to [this issue](https://github.com/pytorch/pytorch/issues/96056)");
     }
