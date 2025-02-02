@@ -454,8 +454,7 @@ inline void {{kernel_name}}_kernel(
 {%- endif %}
         }
 
-        constexpr int idx = row * COLS + col;
-        vc[idx] = at::vec::fmadd(va, vb[col], vc[idx]);
+        vc[i] = at::vec::fmadd(va, vb[col], vc[idx]);
     };
 
     for (int k = 0; k < K; ++k) {
