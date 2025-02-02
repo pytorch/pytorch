@@ -104,6 +104,34 @@ def _create_nested_fn(
     return func
 
 
+fn_known_dunder_attrs = {
+    "__annotations__",
+    "__defaults__",
+    "__kwdefaults__",
+    "__code__",
+    "__globals__",
+    "__closure__",
+    "__doc__",
+}
+
+
+def fn_var_getattr(tx, fn, source, name):
+    source = source and AttrSource(source, name)
+    try:
+        subobj = inspect.getattr_static(fn, name)
+    except AttributeError:
+        # function does not have a __getattr__ or __getattribute__ method,
+        # so we can safely assume that this attribute is absent
+        raise_observed_exception(AttributeError, tx)
+
+    # Special handling for known dunder attributes
+    if name in fn_known_dunder_attrs:
+        subobj = getattr(fn, name)
+    if source:
+        return variables.LazyVariableTracker.create(subobj, source)
+    return VariableTracker.build(tx, subobj)
+
+
 class BaseUserFunctionVariable(VariableTracker):
     def get_filename(self):
         return self.get_code().co_filename
@@ -168,14 +196,6 @@ class UserFunctionVariable(BaseUserFunctionVariable):
         # unpack @torch._dynamo.optimize()(fn) wrapped function
         fn = inspect.getattr_static(fn, "_torchdynamo_inline", fn)
         self.fn: types.FunctionType = fn
-        self._known_dunder_attrs = {
-            "__annotations__",
-            "__defaults__",
-            "__kwdefaults__",
-            "__code__",
-            "__globals__",
-            "__closure__",
-        }
 
     def as_python_constant(self):
         if istype(self, UserFunctionVariable):
@@ -289,20 +309,7 @@ class UserFunctionVariable(BaseUserFunctionVariable):
         return result
 
     def var_getattr(self, tx: "InstructionTranslator", name: str):
-        source = self.source and AttrSource(self.source, name)
-        try:
-            subobj = inspect.getattr_static(self.fn, name)
-        except AttributeError:
-            # function does not have a __getattr__ or __getattribute__ method,
-            # so we can safely assume that this attribute is absent
-            raise_observed_exception(AttributeError, tx)
-
-        # Special handling for known dunder attributes
-        if name in self._known_dunder_attrs:
-            subobj = getattr(self.fn, name)
-        if source:
-            return variables.LazyVariableTracker.create(subobj, source)
-        return VariableTracker.build(tx, subobj)
+        return fn_var_getattr(tx, self.fn, self.source, name)
 
     def call_obj_hasattr(
         self, tx: "InstructionTranslator", name: str
@@ -706,14 +713,6 @@ class SkipFunctionVariable(VariableTracker):
         super().__init__(**kwargs)
         self.value = value
         self.reason = reason
-        self._known_dunder_attrs = {
-            "__annotations__",
-            "__defaults__",
-            "__kwdefaults__",
-            "__code__",
-            "__globals__",
-            "__closure__",
-        }
 
     def as_python_constant(self):
         return self.value
@@ -793,20 +792,7 @@ class SkipFunctionVariable(VariableTracker):
         return variables.ConstantVariable.create(hasattr(self.value, name))
 
     def var_getattr(self, tx: "InstructionTranslator", name: str):
-        source = self.source and AttrSource(self.source, name)
-        try:
-            subobj = inspect.getattr_static(self.value, name)
-        except AttributeError:
-            # function does not have a __getattr__ or __getattribute__ method,
-            # so we can safely assume that this attribute is absent
-            raise_observed_exception(AttributeError, tx)
-
-        # Special handling for known dunder attributes
-        if name in self._known_dunder_attrs:
-            subobj = getattr(self.value, name)
-        if source:
-            return variables.LazyVariableTracker.create(subobj, source)
-        return VariableTracker.build(tx, subobj)
+        return fn_var_getattr(tx, self.value, self.source, name)
 
 
 class WrapperUserFunctionVariable(VariableTracker):
