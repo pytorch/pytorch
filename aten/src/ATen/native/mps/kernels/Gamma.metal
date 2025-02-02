@@ -57,7 +57,7 @@ kernel void lgamma(
 }
 
 float calc_digamma_positive_domain(float x) {
-  const float DIGAMMA_COEF[7] = {
+  constexpr float DIGAMMA_COEF[7] = {
       8.33333333333333333333E-2,
       -2.10927960927960927961E-2,
       7.57575757575757575758E-3,
