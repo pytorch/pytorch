@@ -3912,6 +3912,20 @@ def forward(self, tangents_1):
             str(out2.grad_fn.__class__), """<class 'ViewBackward0'>"""
         )
 
+    def test_duplicated_arguments_on_tensor_overlap(self):
+        # Test whether we correctly handle duplicated arguments when changing the
+        # parameters, so that we take the base tensor as argument.
+        #
+        # - t0 and t1 must have storage overlap: triggers the target execution flow.
+        # - s0 and s1 must be equal: triggers the error in the target execution flow.
+
+        @torch.compile(dynamic=True)
+        def foo(t0, t1, s0, s1):
+            return t0.add_(s0), t1.add_(s1)
+
+        tensor = torch.rand(10)
+        foo(tensor, tensor[1:-1], 2, 2)
+
 
 def extract_graph(fx_g, _, graph_cell):
     graph_cell[0] = fx_g

@@ -1436,13 +1436,21 @@ def merge_view_inputs(
         # (2) Metadata telling functionalization how to generate the inner argument list given the outer calling convention.
         #     We post-process it into a list, where meta[i] tells you info about the i'th argument in the inner calling convention.
         args_to_functionalization = base_args + other_args
-        arg_to_old_idx_map = {
-            make_hashable(arg): i for (i, arg) in enumerate(fwd_inputs)
-        }
+
+        # Map each argument into its old index.
+        # There may be some repeated arguments, so we collect their indices in a list.
+        arg_to_old_idx_map = collections.defaultdict(list)
+        for (i, arg) in enumerate(fwd_inputs):
+            arg_to_old_idx_map[make_hashable(arg)].append(i)
+        # Reverse the list of each argument, so that we can easily pop them one-after-the-other in order.
+        for hashable_arg in arg_to_old_idx_map:
+            arg_to_old_idx_map[hashable_arg] = list(reversed(arg_to_old_idx_map[hashable_arg]))
+
         for i, other_arg in enumerate(other_args):
             new_idx = len(base_args) + i
-            old_idx = arg_to_old_idx_map[make_hashable(other_arg)]
+            old_idx = arg_to_old_idx_map[make_hashable(other_arg)].pop()
             inner_calling_convention_meta[old_idx] = new_idx
+
         # post process into a list
         post_processed_calling_convention_meta: list[
             Union[int, tuple[int, torch.Tensor]]
