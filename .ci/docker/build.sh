@@ -81,8 +81,7 @@ elif [[ "$image" == *linter* ]]; then
   DOCKERFILE="linter/Dockerfile"
 fi
 
-# CMake 3.18 is needed to support CUDA17 language variant
-CMAKE_VERSION=3.18.5
+CMAKE_VERSION=3.25.3
 
 _UCX_COMMIT=7bb2722ff2187a0cad557ae4a6afa090569f83fb
 _UCC_COMMIT=20eae37090a4ce1b32bcce6144ccad0b49943e0b
