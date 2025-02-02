@@ -1,4 +1,5 @@
 import builtins
+import contextlib
 import copy
 import dataclasses
 import inspect
@@ -463,6 +464,23 @@ def save(
                 zipf.writestr(f"extra_files/{extra_file_name}", encoded_content)
 
 
+_UNSAFE_SKIP_VERSION_CHECK: bool = False
+
+
+@contextlib.contextmanager
+def _unsafe_skip_version_check():
+    """
+    This context manager is used to skip the version check when loading an ExportedProgram.
+    It is intended to be used only for testing purposes.
+    """
+    global _UNSAFE_SKIP_VERSION_CHECK
+    prev, _UNSAFE_SKIP_VERSION_CHECK = _UNSAFE_SKIP_VERSION_CHECK, True
+    try:
+        yield
+    finally:
+        _UNSAFE_SKIP_VERSION_CHECK = prev
+
+
 def load(
     f: FileLike,
     *,
@@ -523,11 +541,6 @@ def load(
         from torch._export.serde.schema import SCHEMA_VERSION
 
         assert len(version) == len(SCHEMA_VERSION)
-        if version[0] != str(SCHEMA_VERSION[0]):
-            raise RuntimeError(
-                f"Serialized version {version} does not match our current "
-                f"schema version {SCHEMA_VERSION}."
-            )
 
         from torch._export.serde.serialize import deserialize, SerializedArtifact
 
@@ -571,7 +584,11 @@ def load(
         )
 
         # Deserialize ExportedProgram
-        ep = deserialize(artifact, expected_opset_version)
+        ep = deserialize(
+            artifact,
+            expected_opset_version,
+            _unsafe_skip_version_check=_UNSAFE_SKIP_VERSION_CHECK,
+        )
 
         return ep
 
