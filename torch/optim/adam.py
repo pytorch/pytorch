@@ -176,8 +176,10 @@ class Adam(Optimizer):
                     # Exponential moving average of gradient values
                     # case beta1 == 0, we don't need exp_avg
 
-                    if beta1 > 0: 
-                        state["exp_avg"] = torch.zeros_like(p, memory_format=torch.preserve_format)
+                    if beta1 > 0:
+                        state["exp_avg"] = torch.zeros_like(
+                            p, memory_format=torch.preserve_format
+                        )
                     # Exponential moving average of squared gradient values
                     state["exp_avg_sq"] = torch.zeros_like(
                         p, memory_format=torch.preserve_format
@@ -244,11 +246,11 @@ class Adam(Optimizer):
                 max_exp_avg_sqs,
                 state_steps,
             )
-            
+
             adam(
                 params_with_grad,
                 grads,
-                exp_avgs, 
+                exp_avgs,
                 exp_avg_sqs,
                 max_exp_avg_sqs,
                 state_steps,
@@ -384,7 +386,7 @@ def _single_tensor_adam(
     else:
         beta1_dict = None
 
-    use_exp_avg = len(exp_avgs) > 0 
+    use_exp_avg = len(exp_avgs) > 0
     for i, param in enumerate(params):
         grad = grads[i] if not maximize else -grads[i]
         exp_avg = exp_avgs[i] if use_exp_avg else grads[i]
@@ -439,9 +441,9 @@ def _single_tensor_adam(
             device_beta1 = beta1
 
         # Decay the first and second moment running average coefficient
-        if use_exp_avg: 
+        if use_exp_avg:
             exp_avg.lerp_(grad, 1 - device_beta1)
-        
+
         # Nested if is necessary to bypass jitscript rules
         if differentiable and isinstance(beta2, Tensor):
             if beta2.requires_grad:
@@ -619,7 +621,9 @@ def _multi_tensor_adam(
     ), _ in grouped_tensors.values():
         device_params = cast(list[Tensor], device_params_)
         device_grads = cast(list[Tensor], device_grads_)
-        device_exp_avgs = cast(list[Tensor], device_exp_avgs_) if use_exp_avg else device_grads 
+        device_exp_avgs = (
+            cast(list[Tensor], device_exp_avgs_) if use_exp_avg else device_grads
+        )
         device_exp_avg_sqs = cast(list[Tensor], device_exp_avg_sqs_)
         device_state_steps = cast(list[Tensor], device_state_steps_)
 
@@ -645,9 +649,7 @@ def _multi_tensor_adam(
                     device_params, device_grads, device_exp_avgs, device_exp_avg_sqs
                 )
             else:
-                _view_as_real(
-                    device_params, device_grads, device_exp_avg_sqs
-                )
+                _view_as_real(device_params, device_grads, device_exp_avg_sqs)
         if maximize:
             device_grads = torch._foreach_neg(device_grads)  # type: ignore[assignment]
 
@@ -678,7 +680,7 @@ def _multi_tensor_adam(
         # Decay the first and second moment running average coefficient
         # Use device beta1 if beta1 is a tensor to ensure all
         # tensors are on the same device
-        if use_exp_avg: 
+        if use_exp_avg:
             torch._foreach_lerp_(device_exp_avgs, device_grads, 1 - device_beta1)
 
         torch._foreach_mul_(device_exp_avg_sqs, beta2)
@@ -814,7 +816,7 @@ def _fused_adam(
     grouped_tensors = Optimizer._group_tensors_by_device_and_dtype(
         [params, grads, exp_avgs, exp_avg_sqs, max_exp_avg_sqs, state_steps]  # type: ignore[list-item]
     )
-    use_exp_avg = len(exp_avgs) > 0 
+    use_exp_avg = len(exp_avgs) > 0
     for (device, _), (
         (
             device_params_,
@@ -828,7 +830,9 @@ def _fused_adam(
     ) in grouped_tensors.items():
         device_params = cast(list[Tensor], device_params_)
         device_grads = cast(list[Tensor], device_grads_)
-        device_exp_avgs = cast(list[Tensor], device_exp_avgs_) if use_exp_avg else device_grads
+        device_exp_avgs = (
+            cast(list[Tensor], device_exp_avgs_) if use_exp_avg else device_grads
+        )
         device_exp_avg_sqs = cast(list[Tensor], device_exp_avg_sqs_)
         device_state_steps = cast(list[Tensor], device_state_steps_)
 
