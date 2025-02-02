@@ -37,7 +37,7 @@ from torch.utils._ordered_set import OrderedSet
 from torch.utils._sympy.numbers import int_oo
 from torch.utils._sympy.printers import PythonPrinter as _PythonPrinter
 from torch.utils._sympy.symbol import free_symbol_is_type, symbol_is_type, SymT
-from torch.utils._sympy.value_ranges import bound_sympy, ValueRangeAnalysis, ValueRanges
+from torch.utils._sympy.value_ranges import bound_sympy, ValueRanges
 
 from .. import config, metrics
 from ..dtype_propagation import DtypePropagationOpsHandler
@@ -927,6 +927,11 @@ class OpOverrides(BasicMathOpsMixin, OpDecompositions, OpsHandler[Any]):
     ) -> OpVarT:
         raise NotImplementedError(
             f"{type(self).__name__}: bucketize should be handled by CSEProxy"
+        )
+
+    def halide_clamp(self, value: OpVarT, size: sympy.Expr, check: bool) -> OpVarT:
+        raise NotImplementedError(
+            f"{type(self).__name__}: inline_asm_elementwise only implemented for Halide backend"
         )
 
     def inline_asm_elementwise(
@@ -2242,6 +2247,8 @@ class CSEProxy(DefaultHandler):
 
     def __init__(self, kernel: Kernel[Any], parent_handler: OpsHandler[Any]):
         super().__init__()
+        from ..bounds import ValueRangeAnalysis
+
         self.vr_analysis = ValueRangeAnalysis()
         self.kernel = kernel
         self.parent_handler = parent_handler
@@ -2312,6 +2319,7 @@ class CSEProxy(DefaultHandler):
         If the variable comes from an FX node, we forward the bound we have already computed
         Else, if the variable when codegen'ing another op, we try to compute its bounds
         """
+        from ..bounds import ValueRangeAnalysis
         from ..select_algorithm import TritonTemplateKernel
 
         if isinstance(V.kernel, TritonTemplateKernel):
