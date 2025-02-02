@@ -49,8 +49,8 @@ struct JittedVecKernelCache {
   at::cuda::jit::NvrtcFunction vec1;
   at::cuda::jit::NvrtcFunction vec2;
   at::cuda::jit::NvrtcFunction vec4;
-#ifdef USE_ROCM
   at::cuda::jit::NvrtcFunction vec8;
+#ifdef USE_ROCM
   at::cuda::jit::NvrtcFunction vec16;
 #endif
 
@@ -131,6 +131,18 @@ void launch_jitted_vectorized_kernel(
   int vec_size = at::cuda::jit::can_vectorize_up_to(
       desc, c10::ArrayRef<char*>(data.data(), data.size()));
 
+#ifndef USE_ROCM
+  const auto input_size = c10::scalarTypeToTypeMeta(desc.f_inputs_type).itemsize();
+  const int optimal_vec_size = 16 / static_cast<int>(input_size);
+  vec_size = std::min<int>(optimal_vec_size, vec_size);
+  // Here we purposely omit vec8 for 1-byte data because of a bug in NVCC
+  // that causes some numerical mismatches with uint8 on sm80 and sm90.
+  // TODO: Revisit this after CUDA 12.8 update.
+  if (input_size < 2) {
+    vec_size = std::min<int>(vec_size, 4);
+  }
+#endif
+
   // Different kernels are compiled depending on what we're vectorizing up to (1, 2 or 4 elements)
   //   fn_ptr is set to the appropriate function based on the vec size and GPU used
   at::cuda::jit::NvrtcFunction* fn_ptr = nullptr;
@@ -138,11 +150,11 @@ void launch_jitted_vectorized_kernel(
 #ifdef USE_ROCM
   if (vec_size == 16) {
     fn_ptr = &fn_cache.vec16;
-  } else if (vec_size == 8) {
-    fn_ptr = &fn_cache.vec8;
   } else
 #endif
-  if (vec_size == 4) {
+  if (vec_size == 8) {
+    fn_ptr = &fn_cache.vec8;
+  } else if (vec_size == 4) {
     fn_ptr = &fn_cache.vec4;
   } else if (vec_size == 2) {
     fn_ptr = &fn_cache.vec2;
