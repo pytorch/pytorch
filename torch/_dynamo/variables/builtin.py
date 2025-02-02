@@ -1103,6 +1103,9 @@ class BuiltinVariable(VariableTracker):
             return tx.output.side_effects.track_object_new_from_user_defined_class(
                 args[0]
             )
+        if self.fn is object and name == "__init__":
+            # object.__init__ is a no-op
+            return variables.ConstantVariable(None)
         if self.fn is dict and name == "__new__":
             assert len(args) == 1
             assert len(kwargs) == 0
