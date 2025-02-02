@@ -893,7 +893,10 @@ class Node(_NodeBase):
 @compatibility(is_backward_compatible=True)
 def map_arg(a: ArgumentT, fn: Callable[[Node], Argument]) -> ArgumentT:
     """
-    Apply fn to each Node appearing in arg. arg may be a list, tuple, slice, or dict with string keys.
+    Apply fn recursively to each Node appearing in arg.
+
+    arg may be a list, tuple, slice, or dict: the return value will have
+    the same type and structure.
     """
     assert callable(fn), "torch.fx.map_arg(a, fn): fn must be a callable"
     return map_aggregate(a, lambda x: fn(x) if isinstance(x, Node) else x)
@@ -902,7 +905,10 @@ def map_arg(a: ArgumentT, fn: Callable[[Node], Argument]) -> ArgumentT:
 @compatibility(is_backward_compatible=True)
 def map_aggregate(a: ArgumentT, fn: Callable[[Argument], Argument]) -> ArgumentT:
     """
-    Apply fn to each object appearing in arg. arg may be a list, tuple, slice, or dict with string keys.
+    Apply fn recursively to each object appearing in arg.
+
+    arg may be a list, tuple, slice, or dict: the return value will have
+    the same type and structure.
     """
     result: Argument
 
