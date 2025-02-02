@@ -8,7 +8,7 @@ import logging
 import re
 from collections import defaultdict
 from math import inf
-from typing import Any, Callable, Dict, List, Optional, Sequence, TYPE_CHECKING, Union
+from typing import Any, Callable, cast, Optional, TYPE_CHECKING, Union
 
 import sympy
 
@@ -39,6 +39,7 @@ from .common import (
     CSEVariable,
     DeferredLine,
     IndentedBuffer,
+    KernelArgType,
     OpOverrides,
     PythonPrinter,
     SizeArg,
@@ -50,6 +51,8 @@ from .simd import constant_repr, SIMDKernel, SIMDScheduling
 
 
 if TYPE_CHECKING:
+    from collections.abc import Sequence
+
     from ..ops_handler import ReductionType, StoreMode
 
 log = logging.getLogger(__name__)
@@ -568,7 +571,7 @@ class HalideCSEVariable(CSEVariable):
         dtype: Optional[torch.dtype] = None,
     ) -> None:
         super().__init__(name, bounds, dtype)
-        self.used_dims: Optional[List[sympy.Symbol]] = None
+        self.used_dims: Optional[list[sympy.Symbol]] = None
 
     def update_on_args(self, name, args, kwargs):
         used = OrderedSet(self.used_dims or ())
@@ -664,7 +667,7 @@ class HalideKernel(SIMDKernel):
 
     def __init__(
         self,
-        tiling: Dict[str, sympy.Expr],
+        tiling: dict[str, sympy.Expr],
         **kwargs,
     ) -> None:
         super().__init__(tiling, **kwargs)
@@ -675,18 +678,18 @@ class HalideKernel(SIMDKernel):
         self.indexing_code_dom = IndentedBuffer()
         self.needs_dom_indexing = self.inside_reduction
         self.has_reduction = self.inside_reduction
-        self.buffer_dimensions: Dict[str, List[DimensionInfo]] = {}
-        self.buffer_offsets: Dict[str, sympy.Expr] = {}
+        self.buffer_dimensions: dict[str, list[DimensionInfo]] = {}
+        self.buffer_offsets: dict[str, sympy.Expr] = {}
         # {h0: size1, h1: size2, ...}
-        self.halide_vars: Dict[sympy.Symbol, sympy.Expr] = {}
+        self.halide_vars: dict[sympy.Symbol, sympy.Expr] = {}
         # {x0: h0, x1: h1+10*h2, ...}
-        self.index_replacements: Dict[sympy.Expr, sympy.Expr] = {}
+        self.index_replacements: dict[sympy.Expr, sympy.Expr] = {}
         # {h1: hr1, ...}
-        self.reduction_renames: Dict[sympy.Symbol, sympy.Symbol] = {}
+        self.reduction_renames: dict[sympy.Symbol, sympy.Symbol] = {}
         # {"i": {h0: hi0}, "o": ...}
-        self.dom_renames: Dict[str, Dict[sympy.Symbol, sympy.Symbol]] = {}
+        self.dom_renames: dict[str, dict[sympy.Symbol, sympy.Symbol]] = {}
         # {"in_ptr0": ["in_ptr0_view0"], ...}
-        self.buffer_aliases: Dict[str, List[str]] = defaultdict(list)
+        self.buffer_aliases: dict[str, list[str]] = defaultdict(list)
         self.has_indirect_indexing = False
 
     def dtype_to_str(self, dtype: torch.dtype) -> str:
@@ -930,7 +933,7 @@ class HalideKernel(SIMDKernel):
         # group the expression by variables used
         offset = sympy.S.Zero
         split_expr = {s: sympy.S.Zero for s in symbols}
-        split_failed: List[tuple[List[sympy.Symbol], sympy.Expr]] = []
+        split_failed: list[tuple[list[sympy.Symbol], sympy.Expr]] = []
         index = sympy.expand(self.rename_indexing(index))
         for part in index.args if isinstance(index, sympy.Add) else [index]:
             part_vars = [v for v in part.free_symbols if v in split_expr]
@@ -1271,7 +1274,7 @@ class HalideKernel(SIMDKernel):
     ) -> tuple[CSEVariable, ...]:
         assert self.inside_reduction
         assert len(dtypes) == len(values_orig)
-        values: List[HalideCSEVariable] = []
+        values: list[HalideCSEVariable] = []
         all_used_dims = OrderedSet[sympy.Symbol]()
 
         for value in values_orig:
@@ -1381,7 +1384,7 @@ class HalideKernel(SIMDKernel):
                 assert "in_ptr" in arg.name
                 return 0
 
-        result = []
+        result: list[tuple[Optional[str], KernelArgType]] = []
         _, a, b, _ = self.args.python_argdefs()
         for call_str, arg in sorted(zip(a, b), key=arg_order):
             result.append((call_str, arg))
@@ -1525,7 +1528,7 @@ class HalideKernel(SIMDKernel):
         code.splice(self.indexing_code)
 
         def update_index(m):
-            var = self.cse.varname_map[m.group(1)]
+            var = cast(HalideCSEVariable, self.cse.varname_map[m.group(1)])
             assert var.used_dims is not None, var
             return str(var)
 
@@ -1645,8 +1648,8 @@ class HalideScheduling(SIMDScheduling):
     kernel_type = HalideKernel  # type: ignore[arg-type,assignment]
 
     @classmethod
-    def get_backend_features(cls, device: torch.device):
-        result = dict.fromkeys(
+    def get_backend_features(cls, device: torch.device) -> OrderedSet[BackendFeature]:
+        result = OrderedSet(
             [
                 BackendFeature.TUPLE_REDUCTION,
                 BackendFeature.PREFER_STORE_LOOP_ORDER,
@@ -1654,7 +1657,7 @@ class HalideScheduling(SIMDScheduling):
             ]
         )
         if config.halide.scan_kernels:
-            result[BackendFeature.SCAN] = None
+            result.add(BackendFeature.SCAN)
         return result
 
     def define_kernel(self, src_code, node_schedule, kernel):
