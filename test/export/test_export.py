@@ -90,6 +90,9 @@ from torch.utils._pytree import (
 )
 
 
+if not IS_MACOS:
+    from torch.testing._internal.distributed.fake_pg import FakeStore
+
 if HAS_GPU:
     import triton
     import triton.language as tl
@@ -5318,6 +5321,27 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
         ):
             export(Module(), (torch.tensor(1, device="cpu"),)).run_decompositions({})
 
+    def test_tensor_constant_aten_to(self):
+        class Module(torch.nn.Module):
+            def __init__(self):
+                super(Module, self).__init__()
+                self.t = torch.tensor([1.0])
+
+            def forward(self, x):
+                return x + self.t.to(torch.float64)
+
+        inputs = (torch.randn(1, 10),)
+        model = Module()
+        ep = export(model, inputs).run_decompositions({})
+        ops = []
+        for node in ep.graph.nodes:
+            if node.op == "call_function":
+                ops.append(node.target)
+        self.assertGreater(len(ops), 0)
+        self.assertIn(torch.ops.aten._to_copy.default, ops)
+
+        self.assertEqual(ep.module()(*inputs), model(*inputs))
+
     def test_float_conversion(self):
         class Module(torch.nn.Module):
             def forward(self, x):
@@ -10524,6 +10548,13 @@ def forward(self, x, y):
             ep.module()(torch.randn(400, 20, 16))
         ep.module()(torch.randn(42, 20, 16))
 
+    def test_full_on_scalar_tensor(self):
+        class Foo(torch.nn.Module):
+            def forward(self, val):
+                return torch.full((80, 2), val, dtype=torch.float32)
+
+        export(Foo(), args=(torch.tensor(1),))
+
     def test_allow_explicit_guards_as_runtime_asserts(self):
         # check that explicit guards are treated as runtime assertions
         class Foo(torch.nn.Module):
@@ -12235,6 +12266,39 @@ class TestExportCustomClass(TorchTestCase):
         FileCheck().check_count("torch.ops.aten.elu.default", 1, exactly=True).run(
             ep.graph_module.code
         )
+
+    @unittest.skipIf(IS_MACOS, "Distributed not packaged in macos")
+    @testing.expectedFailureSerDerNonStrict  # nonstrict doesn't support allreduce
+    @testing.expectedFailureNonStrict
+    @testing.expectedFailureTrainingIRToRunDecompNonStrict  # source_fn_stack failure
+    @testing.expectedFailureRetraceabilityNonStrict
+    @testing.expectedFailureLegacyExportNonStrict
+    def test_distributed_all_reduce(self):
+        class Foo(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(4, 3)
+
+            def forward(self, x):
+                y = self.linear(x).abs().clamp(max=1.0) * 2
+                torch.distributed.all_reduce(y)
+                return y
+
+        try:
+            torch.distributed.init_process_group(
+                backend="fake",
+                world_size=2,
+                rank=0,
+                store=FakeStore(),
+            )
+
+            m = Foo()
+            ep = export(m, (torch.randn(4, 4),))
+            inp = (torch.randn(4, 4),)
+            self.assertTrue(torch.allclose(ep.module()(*inp), m(*inp)))
+
+        finally:
+            torch.distributed.destroy_process_group()
 
     def test_preserve_cia_op(self):
         class StaticResizeBilinear2dModule(torch.nn.Module):
