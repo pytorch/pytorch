@@ -274,6 +274,7 @@ class FlatArgsAdapter(abc.ABC):
         target_spec: pytree.TreeSpec,
         input_spec: pytree.TreeSpec,
         input_args: list[Any],
+        metadata: Optional[dict[str, Any]] = None,
     ) -> list[Any]:
         """NOTE: This adapter may mutate given ``input_args_with_path``."""
         ...
