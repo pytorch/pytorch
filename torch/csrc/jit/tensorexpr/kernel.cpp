@@ -483,7 +483,11 @@ ExprHandle TensorExprKernel::getVarForShape(const c10::ShapeSymbol& ss) {
   if (it == shapeSymbolToVar_.end()) {
     VarHandle var("ss" + std::to_string(-value), kLong);
     shapeSymbolToVar_.emplace(value, var);
+#if __cplusplus >= 202002L
+    return var;
+#else
     return std::move(var);
+#endif
   }
   return it->second;
 }
@@ -1020,7 +1024,11 @@ ExprHandle TensorExprKernel::getStrideArg(
         kLong);
     strideArgToVar_[std::pair<size_t, size_t>(
         tensor_input_index, stride_index)] = var;
+#if __cplusplus >= 202002L
+    return var;
+#else
     return std::move(var);
+#endif
   }
   return it->second;
 }

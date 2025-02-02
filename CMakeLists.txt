@@ -43,7 +43,7 @@ if(env_cxx_standard GREATER -1)
   )
 endif()
 set(CMAKE_CXX_STANDARD
-    17
+    20
     CACHE STRING
           "The C++ standard whose features are requested to build this target.")
 set(CMAKE_C_STANDARD
@@ -1009,6 +1009,8 @@ if(NOT MSVC)
   append_cxx_flag_if_supported("-Wno-strict-overflow" CMAKE_CXX_FLAGS)
   append_cxx_flag_if_supported("-Wno-strict-aliasing" CMAKE_CXX_FLAGS)
   append_cxx_flag_if_supported("-Wno-stringop-overflow" CMAKE_CXX_FLAGS)
+  append_cxx_flag_if_supported("-Wno-deprecated-enum-enum-conversion" CMAKE_CXX_FLAGS)
+  append_cxx_flag_if_supported("-Wno-error=deprecated-enum-enum-conversion" CMAKE_CXX_FLAGS)
   append_cxx_flag_if_supported("-Wvla-extension" CMAKE_CXX_FLAGS)
   append_cxx_flag_if_supported("-Wsuggest-override" CMAKE_CXX_FLAGS)
   append_cxx_flag_if_supported("-Wnewline-eof" CMAKE_CXX_FLAGS)
