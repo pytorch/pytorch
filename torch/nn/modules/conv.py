@@ -35,18 +35,18 @@ convolution_notes = {
       :attr:`in_channels` and :attr:`out_channels` must both be divisible by
       :attr:`groups`. For example,
 
-        * At groups=1, all inputs are convolved to all outputs.
-        * At groups=2, the operation becomes equivalent to having two conv
+        * At :attr:`groups` equals to ``1``, all inputs are convolved to all outputs.
+        * At :attr:`groups` equals to ``2``, the operation becomes equivalent to having two conv
           layers side by side, each seeing half the input channels
           and producing half the output channels, and both subsequently
           concatenated.
-        * At groups= :attr:`in_channels`, each input channel is convolved with
+        * At :attr:`groups` equals to :attr:`in_channels`, each input channel is convolved with
           its own set of filters (of size
           :math:`\frac{\text{out\_channels}}{\text{in\_channels}}`).""",
     "depthwise_separable_note": r"""When `groups == in_channels` and `out_channels == K * in_channels`,
         where `K` is a positive integer, this operation is also known as a "depthwise convolution".
 
-        In other words, for an input of size :math:`(N, C_{in}, L_{in})`,
+        In other words, for an input of size :math:`(N, C_\text{in}, L_\text{in})`,
         a depthwise convolution with a depthwise multiplier `K` can be performed with the arguments
         :math:`(C_\text{in}=C_\text{in}, C_\text{out}=C_\text{in} \times \text{K}, ..., \text{groups}=C_\text{in})`.""",
 }  # noqa: B950
@@ -222,7 +222,7 @@ class Conv1d(_ConvNd):
 
     .. math::
         \text{out}(N_i, C_{\text{out}_j}) = \text{bias}(C_{\text{out}_j}) +
-        \sum_{k = 0}^{C_{in} - 1} \text{weight}(C_{\text{out}_j}, k)
+        \sum_{k = 0}^{C_\text{in} - 1} \text{weight}(C_{\text{out}_j}, k)
         \star \text{input}(N_i, k)
 
     where :math:`\star` is the valid `cross-correlation`_ operator,
@@ -267,13 +267,13 @@ class Conv1d(_ConvNd):
         in_channels (int): Number of channels in the input image
         out_channels (int): Number of channels produced by the convolution
         kernel_size (int or tuple): Size of the convolving kernel
-        stride (int or tuple, optional): Stride of the convolution. Default: 1
+        stride (int or tuple, optional): Stride of the convolution. Default: ``1``
         padding (int, tuple or str, optional): Padding added to both sides of
-            the input. Default: 0
+            the input. Default: ``0``
         dilation (int or tuple, optional): Spacing between kernel
-            elements. Default: 1
+            elements. Default: ``1``
         groups (int, optional): Number of blocked connections from input
-            channels to output channels. Default: 1
+            channels to output channels. Default: ``1``
         bias (bool, optional): If ``True``, adds a learnable bias to the
             output. Default: ``True``
         padding_mode (str, optional): ``'zeros'``, ``'reflect'``,
@@ -285,11 +285,11 @@ class Conv1d(_ConvNd):
         + r"""
 
     Shape:
-        - Input: :math:`(N, C_{in}, L_{in})` or :math:`(C_{in}, L_{in})`
-        - Output: :math:`(N, C_{out}, L_{out})` or :math:`(C_{out}, L_{out})`, where
+        - Input: :math:`(N, C_\text{in}, L_\text{in})` or :math:`(C_\text{in}, L_\text{in})`
+        - Output: :math:`(N, C_\text{out}, L_\text{out})` or :math:`(C_\text{out}, L_\text{out})`, where
 
           .. math::
-              L_{out} = \left\lfloor\frac{L_{in} + 2 \times \text{padding} - \text{dilation}
+              L_\text{out} = \left\lfloor\frac{L_\text{in} + 2 \times \text{padding} - \text{dilation}
                         \times (\text{kernel\_size} - 1) - 1}{\text{stride}} + 1\right\rfloor
 
     Attributes:
@@ -298,11 +298,11 @@ class Conv1d(_ConvNd):
             \frac{\text{in\_channels}}{\text{groups}}, \text{kernel\_size})`.
             The values of these weights are sampled from
             :math:`\mathcal{U}(-\sqrt{k}, \sqrt{k})` where
-            :math:`k = \frac{groups}{C_\text{in} * \text{kernel\_size}}`
+            :math:`k = \frac{\text{groups}}{C_\text{in} * \text{kernel\_size}}`
         bias (Tensor):   the learnable bias of the module of shape
-            (out_channels). If :attr:`bias` is ``True``, then the values of these weights are
+            (:attr:`out_channels`). If :attr:`bias` is ``True``, then the values of these weights are
             sampled from :math:`\mathcal{U}(-\sqrt{k}, \sqrt{k})` where
-            :math:`k = \frac{groups}{C_\text{in} * \text{kernel\_size}}`
+            :math:`k = \frac{\text{groups}}{C_\text{in} * \text{kernel\_size}}`
 
     Examples::
 
@@ -440,12 +440,12 @@ class Conv2d(_ConvNd):
         in_channels (int): Number of channels in the input image
         out_channels (int): Number of channels produced by the convolution
         kernel_size (int or tuple): Size of the convolving kernel
-        stride (int or tuple, optional): Stride of the convolution. Default: 1
+        stride (int or tuple, optional): Stride of the convolution. Default: ``1``
         padding (int, tuple or str, optional): Padding added to all four sides of
-            the input. Default: 0
-        dilation (int or tuple, optional): Spacing between kernel elements. Default: 1
+            the input. Default: ``0``
+        dilation (int or tuple, optional): Spacing between kernel elements. Default: ``1``
         groups (int, optional): Number of blocked connections from input
-            channels to output channels. Default: 1
+            channels to output channels. Default: ``1``
         bias (bool, optional): If ``True``, adds a learnable bias to the
             output. Default: ``True``
         padding_mode (str, optional): ``'zeros'``, ``'reflect'``,
@@ -456,15 +456,15 @@ class Conv2d(_ConvNd):
         + r"""
 
     Shape:
-        - Input: :math:`(N, C_{in}, H_{in}, W_{in})` or :math:`(C_{in}, H_{in}, W_{in})`
-        - Output: :math:`(N, C_{out}, H_{out}, W_{out})` or :math:`(C_{out}, H_{out}, W_{out})`, where
+        - Input: :math:`(N, C_\text{in}, H_\text{in}, W_\text{in})` or :math:`(C_\text{in}, H_\text{in}, W_\text{in})`
+        - Output: :math:`(N, C_\text{out}, H_\text{out}, W_\text{out})` or :math:`(C_\text{out}, H_\text{out}, W_\text{out})`, where
 
           .. math::
-              H_{out} = \left\lfloor\frac{H_{in}  + 2 \times \text{padding}[0] - \text{dilation}[0]
+              H_\text{out} = \left\lfloor\frac{H_\text{in}  + 2 \times \text{padding}[0] - \text{dilation}[0]
                         \times (\text{kernel\_size}[0] - 1) - 1}{\text{stride}[0]} + 1\right\rfloor
 
           .. math::
-              W_{out} = \left\lfloor\frac{W_{in}  + 2 \times \text{padding}[1] - \text{dilation}[1]
+              W_\text{out} = \left\lfloor\frac{W_\text{in}  + 2 \times \text{padding}[1] - \text{dilation}[1]
                         \times (\text{kernel\_size}[1] - 1) - 1}{\text{stride}[1]} + 1\right\rfloor
 
     Attributes:
@@ -473,12 +473,12 @@ class Conv2d(_ConvNd):
             :math:`\text{kernel\_size[0]}, \text{kernel\_size[1]})`.
             The values of these weights are sampled from
             :math:`\mathcal{U}(-\sqrt{k}, \sqrt{k})` where
-            :math:`k = \frac{groups}{C_\text{in} * \prod_{i=0}^{1}\text{kernel\_size}[i]}`
+            :math:`k = \frac{\text{groups}}{C_\text{in} * \prod_{i=0}^{1}\text{kernel\_size}[i]}`
         bias (Tensor):   the learnable bias of the module of shape
-            (out_channels). If :attr:`bias` is ``True``,
+            (:attr:`out_channels`). If :attr:`bias` is ``True``,
             then the values of these weights are
             sampled from :math:`\mathcal{U}(-\sqrt{k}, \sqrt{k})` where
-            :math:`k = \frac{groups}{C_\text{in} * \prod_{i=0}^{1}\text{kernel\_size}[i]}`
+            :math:`k = \frac{\text{groups}}{C_\text{in} * \prod_{i=0}^{1}\text{kernel\_size}[i]}`
 
     Examples:
 
@@ -559,12 +559,12 @@ class Conv3d(_ConvNd):
         r"""Applies a 3D convolution over an input signal composed of several input
     planes.
 
-    In the simplest case, the output value of the layer with input size :math:`(N, C_{in}, D, H, W)`
-    and output :math:`(N, C_{out}, D_{out}, H_{out}, W_{out})` can be precisely described as:
+    In the simplest case, the output value of the layer with input size :math:`(N, C_\text{in}, D, H, W)`
+    and output :math:`(N, C_\text{out}, D_\text{out}, H_\text{out}, W_\text{out})` can be precisely described as:
 
     .. math::
-        out(N_i, C_{out_j}) = bias(C_{out_j}) +
-                                \sum_{k = 0}^{C_{in} - 1} weight(C_{out_j}, k) \star input(N_i, k)
+        \text{output}(N_i, C_{\text{out}_j}) = bias(C_{\text{out}_j}) +
+                                \sum_{k = 0}^{C_\text{in} - 1} \text{weight}(C_{\text{out}_j}, k) \star \text{input}(N_i, k)
 
     where :math:`\star` is the valid 3D `cross-correlation`_ operator
     """
@@ -612,11 +612,11 @@ class Conv3d(_ConvNd):
         in_channels (int): Number of channels in the input image
         out_channels (int): Number of channels produced by the convolution
         kernel_size (int or tuple): Size of the convolving kernel
-        stride (int or tuple, optional): Stride of the convolution. Default: 1
+        stride (int or tuple, optional): Stride of the convolution. Default: ``1``
         padding (int, tuple or str, optional): Padding added to all six sides of
-            the input. Default: 0
-        dilation (int or tuple, optional): Spacing between kernel elements. Default: 1
-        groups (int, optional): Number of blocked connections from input channels to output channels. Default: 1
+            the input. Default: ``0``
+        dilation (int or tuple, optional): Spacing between kernel elements. Default: ``1``
+        groups (int, optional): Number of blocked connections from input channels to output channels. Default: ``1``
         bias (bool, optional): If ``True``, adds a learnable bias to the output. Default: ``True``
         padding_mode (str, optional): ``'zeros'``, ``'reflect'``, ``'replicate'`` or ``'circular'``. Default: ``'zeros'``
     """.format(
@@ -625,20 +625,20 @@ class Conv3d(_ConvNd):
         + r"""
 
     Shape:
-        - Input: :math:`(N, C_{in}, D_{in}, H_{in}, W_{in})` or :math:`(C_{in}, D_{in}, H_{in}, W_{in})`
-        - Output: :math:`(N, C_{out}, D_{out}, H_{out}, W_{out})` or :math:`(C_{out}, D_{out}, H_{out}, W_{out})`,
+        - Input: :math:`(N, C_\text{in}, D_\text{in}, H_\text{in}, W_\text{in})` or :math:`(C_\text{in}, D_\text{in}, H_\text{in}, W_\text{in})`
+        - Output: :math:`(N, C_\text{out}, D_\text{out}, H_\text{out}, W_\text{out})` or :math:`(C_\text{out}, D_\text{out}, H_\text{out}, W_\text{out})`,
           where
 
           .. math::
-              D_{out} = \left\lfloor\frac{D_{in} + 2 \times \text{padding}[0] - \text{dilation}[0]
+              D_\text{out} = \left\lfloor\frac{D_\text{in} + 2 \times \text{padding}[0] - \text{dilation}[0]
                     \times (\text{kernel\_size}[0] - 1) - 1}{\text{stride}[0]} + 1\right\rfloor
 
           .. math::
-              H_{out} = \left\lfloor\frac{H_{in} + 2 \times \text{padding}[1] - \text{dilation}[1]
+              H_\text{out} = \left\lfloor\frac{H_\text{in} + 2 \times \text{padding}[1] - \text{dilation}[1]
                     \times (\text{kernel\_size}[1] - 1) - 1}{\text{stride}[1]} + 1\right\rfloor
 
           .. math::
-              W_{out} = \left\lfloor\frac{W_{in} + 2 \times \text{padding}[2] - \text{dilation}[2]
+              W_\text{out} = \left\lfloor\frac{W_\text{in} + 2 \times \text{padding}[2] - \text{dilation}[2]
                     \times (\text{kernel\_size}[2] - 1) - 1}{\text{stride}[2]} + 1\right\rfloor
 
     Attributes:
@@ -647,11 +647,11 @@ class Conv3d(_ConvNd):
                          :math:`\text{kernel\_size[0]}, \text{kernel\_size[1]}, \text{kernel\_size[2]})`.
                          The values of these weights are sampled from
                          :math:`\mathcal{U}(-\sqrt{k}, \sqrt{k})` where
-                         :math:`k = \frac{groups}{C_\text{in} * \prod_{i=0}^{2}\text{kernel\_size}[i]}`
-        bias (Tensor):   the learnable bias of the module of shape (out_channels). If :attr:`bias` is ``True``,
+                         :math:`k = \frac{\text{groups}}{C_\text{in} * \prod_{i=0}^{2}\text{kernel\_size}[i]}`
+        bias (Tensor):   the learnable bias of the module of shape (:attr:`out_channels`). If :attr:`bias` is ``True``,
                          then the values of these weights are
                          sampled from :math:`\mathcal{U}(-\sqrt{k}, \sqrt{k})` where
-                         :math:`k = \frac{groups}{C_\text{in} * \prod_{i=0}^{2}\text{kernel\_size}[i]}`
+                         :math:`k = \frac{\text{groups}}{C_\text{in} * \prod_{i=0}^{2}\text{kernel\_size}[i]}`
 
     Examples::
 
@@ -875,25 +875,25 @@ class ConvTranspose1d(_ConvTransposeNd):
         in_channels (int): Number of channels in the input image
         out_channels (int): Number of channels produced by the convolution
         kernel_size (int or tuple): Size of the convolving kernel
-        stride (int or tuple, optional): Stride of the convolution. Default: 1
+        stride (int or tuple, optional): Stride of the convolution. Default: ``1``
         padding (int or tuple, optional): ``dilation * (kernel_size - 1) - padding`` zero-padding
-            will be added to both sides of the input. Default: 0
+            will be added to both sides of the input. Default: ``0``
         output_padding (int or tuple, optional): Additional size added to one side
-            of the output shape. Default: 0
-        groups (int, optional): Number of blocked connections from input channels to output channels. Default: 1
+            of the output shape. Default: ``0``
+        groups (int, optional): Number of blocked connections from input channels to output channels. Default: ``1``
         bias (bool, optional): If ``True``, adds a learnable bias to the output. Default: ``True``
-        dilation (int or tuple, optional): Spacing between kernel elements. Default: 1
+        dilation (int or tuple, optional): Spacing between kernel elements. Default: ``1``
     """.format(
             **reproducibility_notes, **convolution_notes
         )
         + r"""
 
     Shape:
-        - Input: :math:`(N, C_{in}, L_{in})` or :math:`(C_{in}, L_{in})`
-        - Output: :math:`(N, C_{out}, L_{out})` or :math:`(C_{out}, L_{out})`, where
+        - Input: :math:`(N, C_\text{in}, L_\text{in})` or :math:`(C_\text{in}, L_\text{in})`
+        - Output: :math:`(N, C_\text{out}, L_\text{out})` or :math:`(C_\text{out}, L_\text{out})`, where
 
           .. math::
-              L_{out} = (L_{in} - 1) \times \text{stride} - 2 \times \text{padding} + \text{dilation}
+              L_\text{out} = (L_\text{in} - 1) \times \text{stride} - 2 \times \text{padding} + \text{dilation}
                         \times (\text{kernel\_size} - 1) + \text{output\_padding} + 1
 
     Attributes:
@@ -902,11 +902,11 @@ class ConvTranspose1d(_ConvTransposeNd):
                          :math:`\text{kernel\_size})`.
                          The values of these weights are sampled from
                          :math:`\mathcal{U}(-\sqrt{k}, \sqrt{k})` where
-                         :math:`k = \frac{groups}{C_\text{out} * \text{kernel\_size}}`
-        bias (Tensor):   the learnable bias of the module of shape (out_channels).
+                         :math:`k = \frac{\text{groups}}{C_\text{out} * \text{kernel\_size}}`
+        bias (Tensor):   the learnable bias of the module of shape (:attr:`out_channels`).
                          If :attr:`bias` is ``True``, then the values of these weights are
                          sampled from :math:`\mathcal{U}(-\sqrt{k}, \sqrt{k})` where
-                         :math:`k = \frac{groups}{C_\text{out} * \text{kernel\_size}}`
+                         :math:`k = \frac{\text{groups}}{C_\text{out} * \text{kernel\_size}}`
 
     .. _`here`:
         https://github.com/vdumoulin/conv_arithmetic/blob/master/README.md
@@ -1040,28 +1040,28 @@ class ConvTranspose2d(_ConvTransposeNd):
         in_channels (int): Number of channels in the input image
         out_channels (int): Number of channels produced by the convolution
         kernel_size (int or tuple): Size of the convolving kernel
-        stride (int or tuple, optional): Stride of the convolution. Default: 1
+        stride (int or tuple, optional): Stride of the convolution. Default: ``1``
         padding (int or tuple, optional): ``dilation * (kernel_size - 1) - padding`` zero-padding
-            will be added to both sides of each dimension in the input. Default: 0
+            will be added to both sides of each dimension in the input. Default: ``0``
         output_padding (int or tuple, optional): Additional size added to one side
-            of each dimension in the output shape. Default: 0
-        groups (int, optional): Number of blocked connections from input channels to output channels. Default: 1
+            of each dimension in the output shape. Default: ``0``
+        groups (int, optional): Number of blocked connections from input channels to output channels. Default: ``1``
         bias (bool, optional): If ``True``, adds a learnable bias to the output. Default: ``True``
-        dilation (int or tuple, optional): Spacing between kernel elements. Default: 1
+        dilation (int or tuple, optional): Spacing between kernel elements. Default: ``1``
     """.format(
             **reproducibility_notes, **convolution_notes
         )
         + r"""
 
     Shape:
-        - Input: :math:`(N, C_{in}, H_{in}, W_{in})` or :math:`(C_{in}, H_{in}, W_{in})`
-        - Output: :math:`(N, C_{out}, H_{out}, W_{out})` or :math:`(C_{out}, H_{out}, W_{out})`, where
+        - Input: :math:`(N, C_\text{in}, H_\text{in}, W_\text{in})` or :math:`(C_\text{in}, H_\text{in}, W_\text{in})`
+        - Output: :math:`(N, C_\text{out}, H_\text{out}, W_\text{out})` or :math:`(C_\text{out}, H_\text{out}, W_\text{out})`, where
 
         .. math::
-              H_{out} = (H_{in} - 1) \times \text{stride}[0] - 2 \times \text{padding}[0] + \text{dilation}[0]
+              H_\text{out} = (H_\text{in} - 1) \times \text{stride}[0] - 2 \times \text{padding}[0] + \text{dilation}[0]
                         \times (\text{kernel\_size}[0] - 1) + \text{output\_padding}[0] + 1
         .. math::
-              W_{out} = (W_{in} - 1) \times \text{stride}[1] - 2 \times \text{padding}[1] + \text{dilation}[1]
+              W_\text{out} = (W_\text{in} - 1) \times \text{stride}[1] - 2 \times \text{padding}[1] + \text{dilation}[1]
                         \times (\text{kernel\_size}[1] - 1) + \text{output\_padding}[1] + 1
 
     Attributes:
@@ -1070,11 +1070,11 @@ class ConvTranspose2d(_ConvTransposeNd):
                          :math:`\text{kernel\_size[0]}, \text{kernel\_size[1]})`.
                          The values of these weights are sampled from
                          :math:`\mathcal{U}(-\sqrt{k}, \sqrt{k})` where
-                         :math:`k = \frac{groups}{C_\text{out} * \prod_{i=0}^{1}\text{kernel\_size}[i]}`
-        bias (Tensor):   the learnable bias of the module of shape (out_channels)
+                         :math:`k = \frac{\text{groups}}{C_\text{out} * \prod_{i=0}^{1}\text{kernel\_size}[i]}`
+        bias (Tensor):   the learnable bias of the module of shape (:attr:`out_channels`)
                          If :attr:`bias` is ``True``, then the values of these weights are
                          sampled from :math:`\mathcal{U}(-\sqrt{k}, \sqrt{k})` where
-                         :math:`k = \frac{groups}{C_\text{out} * \prod_{i=0}^{1}\text{kernel\_size}[i]}`
+                         :math:`k = \frac{\text{groups}}{C_\text{out} * \prod_{i=0}^{1}\text{kernel\_size}[i]}`
 
     Examples::
 
@@ -1230,32 +1230,32 @@ class ConvTranspose3d(_ConvTransposeNd):
         in_channels (int): Number of channels in the input image
         out_channels (int): Number of channels produced by the convolution
         kernel_size (int or tuple): Size of the convolving kernel
-        stride (int or tuple, optional): Stride of the convolution. Default: 1
+        stride (int or tuple, optional): Stride of the convolution. Default: ``1``
         padding (int or tuple, optional): ``dilation * (kernel_size - 1) - padding`` zero-padding
-            will be added to both sides of each dimension in the input. Default: 0
+            will be added to both sides of each dimension in the input. Default: ``0``
         output_padding (int or tuple, optional): Additional size added to one side
-            of each dimension in the output shape. Default: 0
-        groups (int, optional): Number of blocked connections from input channels to output channels. Default: 1
+            of each dimension in the output shape. Default: ``0``
+        groups (int, optional): Number of blocked connections from input channels to output channels. Default: ``1``
         bias (bool, optional): If ``True``, adds a learnable bias to the output. Default: ``True``
-        dilation (int or tuple, optional): Spacing between kernel elements. Default: 1
+        dilation (int or tuple, optional): Spacing between kernel elements. Default: ``1``
     """.format(
             **reproducibility_notes, **convolution_notes
         )
         + r"""
 
     Shape:
-        - Input: :math:`(N, C_{in}, D_{in}, H_{in}, W_{in})` or :math:`(C_{in}, D_{in}, H_{in}, W_{in})`
-        - Output: :math:`(N, C_{out}, D_{out}, H_{out}, W_{out})` or
-          :math:`(C_{out}, D_{out}, H_{out}, W_{out})`, where
+        - Input: :math:`(N, C_\text{in}, D_\text{in}, H_\text{in}, W_\text{in})` or :math:`(C_\text{in}, D_\text{in}, H_\text{in}, W_\text{in})`
+        - Output: :math:`(N, C_\text{out}, D_\text{out}, H_\text{out}, W_\text{out})` or
+          :math:`(C_\text{out}, D_\text{out}, H_\text{out}, W_\text{out})`, where
 
         .. math::
-              D_{out} = (D_{in} - 1) \times \text{stride}[0] - 2 \times \text{padding}[0] + \text{dilation}[0]
+              D_\text{out} = (D_\text{in} - 1) \times \text{stride}[0] - 2 \times \text{padding}[0] + \text{dilation}[0]
                         \times (\text{kernel\_size}[0] - 1) + \text{output\_padding}[0] + 1
         .. math::
-              H_{out} = (H_{in} - 1) \times \text{stride}[1] - 2 \times \text{padding}[1] + \text{dilation}[1]
+              H_\text{out} = (H_\text{in} - 1) \times \text{stride}[1] - 2 \times \text{padding}[1] + \text{dilation}[1]
                         \times (\text{kernel\_size}[1] - 1) + \text{output\_padding}[1] + 1
         .. math::
-              W_{out} = (W_{in} - 1) \times \text{stride}[2] - 2 \times \text{padding}[2] + \text{dilation}[2]
+              W_\text{out} = (W_\text{in} - 1) \times \text{stride}[2] - 2 \times \text{padding}[2] + \text{dilation}[2]
                         \times (\text{kernel\_size}[2] - 1) + \text{output\_padding}[2] + 1
 
 
@@ -1265,11 +1265,11 @@ class ConvTranspose3d(_ConvTransposeNd):
                          :math:`\text{kernel\_size[0]}, \text{kernel\_size[1]}, \text{kernel\_size[2]})`.
                          The values of these weights are sampled from
                          :math:`\mathcal{U}(-\sqrt{k}, \sqrt{k})` where
-                         :math:`k = \frac{groups}{C_\text{out} * \prod_{i=0}^{2}\text{kernel\_size}[i]}`
-        bias (Tensor):   the learnable bias of the module of shape (out_channels)
+                         :math:`k = \frac{\text{groups}}{C_\text{out} * \prod_{i=0}^{2}\text{kernel\_size}[i]}`
+        bias (Tensor):   the learnable bias of the module of shape (:attr:`out_channels`)
                          If :attr:`bias` is ``True``, then the values of these weights are
                          sampled from :math:`\mathcal{U}(-\sqrt{k}, \sqrt{k})` where
-                         :math:`k = \frac{groups}{C_\text{out} * \prod_{i=0}^{2}\text{kernel\_size}[i]}`
+                         :math:`k = \frac{\text{groups}}{C_\text{out} * \prod_{i=0}^{2}\text{kernel\_size}[i]}`
 
     Examples::
 
@@ -1464,13 +1464,13 @@ class LazyConv1d(_LazyConvXdMixin, Conv1d):  # type: ignore[misc]
     Args:
         out_channels (int): Number of channels produced by the convolution
         kernel_size (int or tuple): Size of the convolving kernel
-        stride (int or tuple, optional): Stride of the convolution. Default: 1
+        stride (int or tuple, optional): Stride of the convolution. Default: ``1``
         padding (int or tuple, optional): Zero-padding added to both sides of
-            the input. Default: 0
+            the input. Default: ``0``
         dilation (int or tuple, optional): Spacing between kernel
-            elements. Default: 1
+            elements. Default: ``1``
         groups (int, optional): Number of blocked connections from input
-            channels to output channels. Default: 1
+            channels to output channels. Default: ``1``
         bias (bool, optional): If ``True``, adds a learnable bias to the
             output. Default: ``True``
         padding_mode (str, optional): ``'zeros'``, ``'reflect'``,
@@ -1533,13 +1533,13 @@ class LazyConv2d(_LazyConvXdMixin, Conv2d):  # type: ignore[misc]
     Args:
         out_channels (int): Number of channels produced by the convolution
         kernel_size (int or tuple): Size of the convolving kernel
-        stride (int or tuple, optional): Stride of the convolution. Default: 1
+        stride (int or tuple, optional): Stride of the convolution. Default: ``1``
         padding (int or tuple, optional): Zero-padding added to both sides of
-            the input. Default: 0
+            the input. Default: ``0``
         dilation (int or tuple, optional): Spacing between kernel
-            elements. Default: 1
+            elements. Default: ``1``
         groups (int, optional): Number of blocked connections from input
-            channels to output channels. Default: 1
+            channels to output channels. Default: ``1``
         bias (bool, optional): If ``True``, adds a learnable bias to the
             output. Default: ``True``
         padding_mode (str, optional): ``'zeros'``, ``'reflect'``,
@@ -1603,13 +1603,13 @@ class LazyConv3d(_LazyConvXdMixin, Conv3d):  # type: ignore[misc]
     Args:
         out_channels (int): Number of channels produced by the convolution
         kernel_size (int or tuple): Size of the convolving kernel
-        stride (int or tuple, optional): Stride of the convolution. Default: 1
+        stride (int or tuple, optional): Stride of the convolution. Default: ``1``
         padding (int or tuple, optional): Zero-padding added to both sides of
-            the input. Default: 0
+            the input. Default: ``0``
         dilation (int or tuple, optional): Spacing between kernel
-            elements. Default: 1
+            elements. Default: ``1``
         groups (int, optional): Number of blocked connections from input
-            channels to output channels. Default: 1
+            channels to output channels. Default: ``1``
         bias (bool, optional): If ``True``, adds a learnable bias to the
             output. Default: ``True``
         padding_mode (str, optional): ``'zeros'``, ``'reflect'``,
@@ -1673,14 +1673,14 @@ class LazyConvTranspose1d(_LazyConvXdMixin, ConvTranspose1d):  # type: ignore[mi
     Args:
         out_channels (int): Number of channels produced by the convolution
         kernel_size (int or tuple): Size of the convolving kernel
-        stride (int or tuple, optional): Stride of the convolution. Default: 1
+        stride (int or tuple, optional): Stride of the convolution. Default: ``1``
         padding (int or tuple, optional): ``dilation * (kernel_size - 1) - padding`` zero-padding
-            will be added to both sides of the input. Default: 0
+            will be added to both sides of the input. Default: ``0``
         output_padding (int or tuple, optional): Additional size added to one side
-            of the output shape. Default: 0
-        groups (int, optional): Number of blocked connections from input channels to output channels. Default: 1
+            of the output shape. Default: ``0``
+        groups (int, optional): Number of blocked connections from input channels to output channels. Default: ``1``
         bias (bool, optional): If ``True``, adds a learnable bias to the output. Default: ``True``
-        dilation (int or tuple, optional): Spacing between kernel elements. Default: 1
+        dilation (int or tuple, optional): Spacing between kernel elements. Default: ``1``
 
     .. seealso:: :class:`torch.nn.ConvTranspose1d` and :class:`torch.nn.modules.lazy.LazyModuleMixin`
     """
@@ -1742,14 +1742,14 @@ class LazyConvTranspose2d(_LazyConvXdMixin, ConvTranspose2d):  # type: ignore[mi
     Args:
         out_channels (int): Number of channels produced by the convolution
         kernel_size (int or tuple): Size of the convolving kernel
-        stride (int or tuple, optional): Stride of the convolution. Default: 1
+        stride (int or tuple, optional): Stride of the convolution. Default: ``1``
         padding (int or tuple, optional): ``dilation * (kernel_size - 1) - padding`` zero-padding
-            will be added to both sides of each dimension in the input. Default: 0
+            will be added to both sides of each dimension in the input. Default: ``0``
         output_padding (int or tuple, optional): Additional size added to one side
-            of each dimension in the output shape. Default: 0
-        groups (int, optional): Number of blocked connections from input channels to output channels. Default: 1
+            of each dimension in the output shape. Default: ``0``
+        groups (int, optional): Number of blocked connections from input channels to output channels. Default: ``1``
         bias (bool, optional): If ``True``, adds a learnable bias to the output. Default: ``True``
-        dilation (int or tuple, optional): Spacing between kernel elements. Default: 1
+        dilation (int or tuple, optional): Spacing between kernel elements. Default: ``1``
 
     .. seealso:: :class:`torch.nn.ConvTranspose2d` and :class:`torch.nn.modules.lazy.LazyModuleMixin`
     """
@@ -1811,14 +1811,14 @@ class LazyConvTranspose3d(_LazyConvXdMixin, ConvTranspose3d):  # type: ignore[mi
     Args:
         out_channels (int): Number of channels produced by the convolution
         kernel_size (int or tuple): Size of the convolving kernel
-        stride (int or tuple, optional): Stride of the convolution. Default: 1
+        stride (int or tuple, optional): Stride of the convolution. Default: ``1``
         padding (int or tuple, optional): ``dilation * (kernel_size - 1) - padding`` zero-padding
-            will be added to both sides of each dimension in the input. Default: 0
+            will be added to both sides of each dimension in the input. Default: ``0``
         output_padding (int or tuple, optional): Additional size added to one side
-            of each dimension in the output shape. Default: 0
-        groups (int, optional): Number of blocked connections from input channels to output channels. Default: 1
+            of each dimension in the output shape. Default: ``0``
+        groups (int, optional): Number of blocked connections from input channels to output channels. Default: ``1``
         bias (bool, optional): If ``True``, adds a learnable bias to the output. Default: ``True``
-        dilation (int or tuple, optional): Spacing between kernel elements. Default: 1
+        dilation (int or tuple, optional): Spacing between kernel elements. Default: ``1``
 
     .. seealso:: :class:`torch.nn.ConvTranspose3d` and :class:`torch.nn.modules.lazy.LazyModuleMixin`
     """
