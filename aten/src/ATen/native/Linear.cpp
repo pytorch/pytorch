@@ -19,6 +19,7 @@
 #include <ATen/ops/addmm.h>
 #include <ATen/ops/bilinear_native.h>
 #include <ATen/ops/bmm.h>
+#include <ATen/ops/dot.h>
 #include <ATen/ops/einsum_native.h>
 #include <ATen/ops/linear_native.h>
 #include <ATen/ops/matmul.h>
@@ -817,11 +818,31 @@ Tensor tensordot(const Tensor& input1, const Tensor& input2, IntArrayRef dims1, 
       rsizes.emplace_back(t2.sym_size(i));
     }
   }
-  // permute and reshape for matrix multiplication
-  t1 = t1.permute(p1).reshape_symint({size1, csize});
-  t2 = t2.permute(p2).reshape_symint({csize, size2});
-  // multiply and reshape to target size
-  return at::mm(t1, t2).reshape_symint(rsizes);
+
+  // permute to align for contraction
+  t1 = t1.permute(p1);
+  t2 = t2.permute(p2);
+
+  // Full contraction (size1 == 1 and size2 == 1) is much faster when done with dot ...
+  // TODO(@nikitaved): there are other cases where dot outperforms gemms,
+  // like, for example, when the non-contacted dims are relatively small.
+  if (size1 == 1 && size2 == 1) {
+    if (t1.is_contiguous() && t2.is_contiguous()) {
+      // If t1 and t2 are both contiguous, then flatten is a view,
+      // then dot is the method of choice
+      return at::dot(t1.flatten(), t2.flatten());
+    } else {
+      // Otherwise mul + sum can be faster as it avoids at most 2x contiguous() calls
+      return (t1 * t2).sum();
+    }
+  } else {
+    // ... otherwise contract with a GEMM
+    // reshape for matrix multiplication
+    t1 = t1.reshape_symint({size1, csize});
+    t2 = t2.reshape_symint({csize, size2});
+    // multiply and reshape to target size
+    return at::mm(t1, t2).reshape_symint(rsizes);
+  }
 }
 
 Tensor &tensordot_out(const Tensor& input1, const Tensor& input2, IntArrayRef dims1, IntArrayRef dims2, Tensor& result) {
