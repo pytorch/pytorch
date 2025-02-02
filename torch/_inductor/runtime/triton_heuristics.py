@@ -899,16 +899,25 @@ class CachingAutotuner(KernelInterface):
             else:
                 grid_info = getattr(grid, "grid_fn_str", "")
 
+            kernel_kwargs_str = ",".join(
+                f"{k}={v}" for (k, v) in launcher.config.kwargs.items()
+            )
+
+            profiler_kwargs = {
+                "kernel_file": (self.filename or ""),
+                "kernel_hash": self.kernel_hash,
+                "kernel_backend": "triton",
+                "grid": grid_info,
+                "stream": stream,
+                "num_warps": launcher.config.num_warps,
+                "num_stages": launcher.config.num_stages,
+                "kernel_kwargs": kernel_kwargs_str,
+            }
+
             with torch._C._profiler._RecordFunctionFast(
                 self.inductor_meta.get("kernel_name", "triton kernel"),
                 args,
-                {
-                    "kernel_file": (self.filename or ""),
-                    "kernel_hash": self.kernel_hash,
-                    "kernel_backend": "triton",
-                    "grid": grid_info,
-                    "stream": stream,
-                },
+                profiler_kwargs,
             ):
                 return launcher(
                     *args,
