@@ -5,7 +5,9 @@
 #include <ATen/Tensor.h>
 #include <ATen/native/quantized/PackedParams.h>
 #include <ideep.hpp>
+#if !defined(__powerpc__)
 #include <cpuinfo.h>
+#endif
 
 #include <c10/util/CallOnce.h>
 
@@ -431,14 +433,16 @@ inline bool should_use_onednn_quant(
   // TODO Support more OSs.
 #if !defined(__linux__)
   return false;
+#elif defined(__powerpc__)
+  bool vnni_available = true;
 #else
   bool vnni_available = cpuinfo_has_x86_avx512vnni();
+#endif
   bool w_sym_quant =
       is_weight_symmetric_quant(weight, is_transposed_conv);
   bool opad_all_zero =
       std::all_of(output_padding.begin(), output_padding.end(), [](int i) { return i==0; });
   return vnni_available && (groups <= 100) && w_sym_quant && opad_all_zero;
-#endif
 }
 
 } // onednn_utils

@@ -348,6 +348,8 @@ void gemm(
    // MKLDNN also supports ARM for bf16, and the bypass is only
    // currently intended for x86/x86_64.
    const bool use_bf16_gemv_trans = false;
+#elif defined(__powerpc__)
+   const bool use_bf16_gemv_trans = false;
 #else
    const bool bf16_gemv_trans_would_be_faster = cpuinfo_initialize() &&
      !cpuinfo_has_x86_avx512bf16();
@@ -378,8 +380,12 @@ void gemm(
    // we should not bother checking for !cpuinfo_has_x86_avx512fp16() here,
    // because "onednn (mkldnn) won't use avx512fp16 to compute gemms by default
    // because the avx512fp16 fma would incur accuracy loss".
+#if defined(__powerpc__)
+   const bool fp16_gemv_trans_would_be_faster = false;
+#else
    const bool fp16_gemv_trans_would_be_faster = cpuinfo_initialize() &&
      cpuinfo_has_x86_f16c();
+#endif
    const bool use_fp16_gemv_trans = fp16_gemv_trans_would_be_faster &&
      transa == TransposeType::Transpose &&
      transb == TransposeType::NoTranspose && n == 1 && alpha == 1.0;
