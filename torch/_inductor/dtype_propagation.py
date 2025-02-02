@@ -372,7 +372,6 @@ class DtypePropagationOpsHandler:
         raise AssertionError(
             f"{type(self).__name__}: ops.output should not appear here"
         )
-        return None
 
     def placeholder(self, index: int) -> torch.dtype:
         raise AssertionError(
