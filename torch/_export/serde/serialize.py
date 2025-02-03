@@ -1716,6 +1716,7 @@ class GraphModuleDeserializer(metaclass=Final):
                     tuple(self.deserialize_sym_int(val) for val in tensor_meta.strides),  # type: ignore[misc]
                     device=deserialize_device(tensor_meta.device),
                     dtype=_SERIALIZE_TO_TORCH_DTYPE[tensor_meta.dtype],
+                    requires_grad=tensor_meta.requires_grad,
                 ),
             )
 
