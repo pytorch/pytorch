@@ -230,7 +230,8 @@ __forceinline__ __device__
 scalar_t get_value_bounded(
     const scalar_t *data, scalar_t x, scalar_t y, int W, int H, int sW, int sH,
     GridSamplerPadding padding_mode,
-    bool align_corners) {
+    bool align_corners,
+    const double value) {
 
   x = compute_coordinates(x, W, padding_mode, align_corners);
   y = compute_coordinates(y, H, padding_mode, align_corners);
@@ -241,7 +242,7 @@ scalar_t get_value_bounded(
   if (within_bounds_2d(iy, ix, H, W)) {
     return data[iy * sH + ix * sW];
   }
-  return static_cast<scalar_t>(0);
+  return static_cast<scalar_t>(value);
 }
 
 template<typename scalar_t, typename index_t>
