@@ -838,7 +838,7 @@ class Tracer(TracerBase):
                         {},
                         type_expr=fn.__annotations__.get("return", None),
                     )
-            except Exception as e:
+            except RuntimeError as e:
                 if (
                     isinstance(e.args[0], str)
                     and "Could not guard on data-dependent" in e.args[0]
