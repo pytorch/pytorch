@@ -602,8 +602,8 @@ class LoopBodyBlock:
                 return var
 
             @staticmethod
-            def output(result):
-                tracer.create_proxy("output", "output", (result,), {})
+            def output(*result):
+                tracer.create_proxy("output", "output", result, {})
 
         tracer = LightTracer()
         proxy_ops = tracer.create_proxy("placeholder", "ops", (), {})
