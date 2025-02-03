@@ -996,7 +996,10 @@ class _InProcessFxCompile(FxCompile):
                             "name": "inductor_post_to_pre_grad_nodes",
                             "encoding": "json",
                         },
-                        payload_fn=lambda: provenance_tracking_json,
+                        payload_fn=lambda: json.dumps(provenance_tracking_json),
+                    )
+                    torch._inductor.debug._inductor_post_to_pre_grad_nodes = (
+                        provenance_tracking_json
                     )
                 if config.is_fbcode():
                     log_optimus_to_scuba(
@@ -1925,6 +1928,7 @@ def compile_fx(
                     colored=True,
                 ),
             )
+            torch._inductor.debug._pre_grad_graph_id = id(model_.graph)
 
             model_ = _recursive_pre_grad_passes(model_, example_inputs_)
 

@@ -3,7 +3,12 @@ import unittest
 
 import torch
 import torch._dynamo.test_case
-from torch._dynamo.testing import CompileCounter, EagerAndRecordGraphs, normalize_gm
+from torch._dynamo.testing import (
+    CompileCounter,
+    CompileCounterWithBackend,
+    EagerAndRecordGraphs,
+    normalize_gm,
+)
 from torch.testing._internal.common_cuda import TEST_CUDA
 
 
@@ -253,6 +258,8 @@ class GraphModule(torch.nn.Module):
         )
 
     def test_vmapped_autograd_function_fwd_and_bwd(self):
+        cnt = CompileCounterWithBackend("aot_eager")
+
         class LinearFunction(torch.autograd.Function):
             generate_vmap_rule = True
 
@@ -291,7 +298,7 @@ class GraphModule(torch.nn.Module):
         bias1 = torch.randn(4, 3, dtype=torch.double, requires_grad=True)
         bias2 = bias1.clone().detach().requires_grad_(True)
 
-        compiled_fn = torch.compile(backend="aot_eager", fullgraph=True)(fn)
+        compiled_fn = torch.compile(backend=cnt, fullgraph=True)(fn)
 
         output1 = fn(input1, weight1, bias1)
         output1.sum().backward()
@@ -303,6 +310,8 @@ class GraphModule(torch.nn.Module):
         self.assertEqual(input1.grad, input2.grad)
         self.assertEqual(weight1.grad, weight2.grad)
         self.assertEqual(bias1.grad, bias2.grad)
+        self.assertEqual(cnt.frame_count, 1)
+        self.assertEqual(cnt.op_count, 25)
 
 
 if __name__ == "__main__":
