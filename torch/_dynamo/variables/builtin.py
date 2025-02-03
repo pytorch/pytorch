@@ -1103,6 +1103,9 @@ class BuiltinVariable(VariableTracker):
             return tx.output.side_effects.track_object_new_from_user_defined_class(
                 args[0]
             )
+        if self.fn is object and name == "__init__":
+            # object.__init__ is a no-op
+            return variables.ConstantVariable(None)
         if self.fn is dict and name == "__new__":
             assert len(args) == 1
             assert len(kwargs) == 0
@@ -1989,9 +1992,11 @@ class BuiltinVariable(VariableTracker):
             mod = tx.output.get_submodule(nn_mod_variable.module_key)
             return variables.ConstantVariable.create(id(mod))
         elif len(args) == 1 and isinstance(
-            args[0], variables.UserDefinedObjectVariable
+            args[0],
+            (variables.UserDefinedClassVariable, variables.UserDefinedObjectVariable),
         ):
-            install_guard(args[0].source.make_guard(GuardBuilder.ID_MATCH))
+            if args[0].source:
+                install_guard(args[0].source.make_guard(GuardBuilder.ID_MATCH))
             constant_result = id(args[0].value)
             return variables.ConstantVariable.create(constant_result)
         elif len(args) == 1 and isinstance(args[0], TensorVariable):
