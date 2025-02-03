@@ -337,8 +337,9 @@ class TunableOp {
         s = ProfileStats(candidate, reusable_params, tuning_iter, offset);
         auto s_stddev = s.stddev();
         // Assume normal distribution.
-        // Solution with smallest mean + 2*sigma will be a better solution
-        if ((s._mean + 2*s_stddev) < (min_duration_ms + 2*min_stddev_ms)) {
+        // Solution with smallest mean + 2*sigma will be a better solution?
+        // if ((s._mean + 2*s_stddev) < (min_duration_ms + 2*min_stddev_ms)) {
+        if (s._mean < min_duration_ms) {
           TUNABLE_LOG3("├──found better instance id=", i, ". " , s._mean, "ms. ", op_names_[i],
                 " min ", s._min,
                 " max ", s._max,
