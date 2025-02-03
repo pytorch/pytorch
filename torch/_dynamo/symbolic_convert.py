@@ -1087,10 +1087,7 @@ class InstructionTranslatorBase(
                 raise
             except BackendCompilerFailed:
                 raise
-            except Exception as e:
-                if self.exec_recorder:
-                    e.exec_record = self.exec_recorder.get_record()  # type: ignore[attr-defined]
-
+            except RuntimeError as e:
                 if hasattr(e, "msg") and "Could not guard on data-dependent" in e.msg:
                     print(
                         "\n"
@@ -1099,6 +1096,11 @@ class InstructionTranslatorBase(
                         ),
                         file=sys.stderr,
                     )
+
+                raise
+            except Exception as e:
+                if self.exec_recorder:
+                    e.exec_record = self.exec_recorder.get_record()  # type: ignore[attr-defined]
 
                 raise
             finally:
