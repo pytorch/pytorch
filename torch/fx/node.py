@@ -913,7 +913,8 @@ def map_aggregate(a: ArgumentT, fn: Callable[[Argument], Argument]) -> ArgumentT
     result: Argument
 
     if isinstance(a, tuple):
-        result = type(a)(map_aggregate(elem, fn) for elem in a)
+        it = (map_aggregate(elem, fn) for elem in a)
+        result = type(a)(*it) if torch._dynamo.utils.is_namedtuple(a) else type(a)(it)
     elif isinstance(a, list):
         result = immutable_list(map_aggregate(elem, fn) for elem in a)
     elif isinstance(a, dict):
