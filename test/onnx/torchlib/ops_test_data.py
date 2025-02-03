@@ -724,7 +724,7 @@ TESTED_TORCHLIB_OPS: tuple[TorchLibOpInfo, ...] = (
     TorchLibOpInfo("cos", core_ops.aten_cos),
     TorchLibOpInfo("cosh", core_ops.aten_cosh),
     TorchLibOpInfo(
-        "cross", core_ops.aten_cross, tolerance={torch.float16: (6e-3, 3e-3)}
+        "cross", core_ops.aten_cross, tolerance={torch.float16: (1e-3, 2e-3)}
     ),
     TorchLibOpInfo("deg2rad", core_ops.aten_deg2rad),
     # TorchLibOpInfo("detach", core_ops.aten_detach),  # detach is not in OP-TEST-DB
@@ -856,6 +856,10 @@ TESTED_TORCHLIB_OPS: tuple[TorchLibOpInfo, ...] = (
         core_ops.aten_linspace,
         tolerance={torch.float16: (2e-2, 2e-3)},
     ).xfail(
+        dtypes=(torch.int64, torch.int32),
+        reason="fixme: Results do not match with PyTorch. https://github.com/microsoft/onnxscript/issues/854",
+    ).xfail(
+        variant_name="tensor_overload",
         dtypes=(torch.int64, torch.int32),
         reason="fixme: Results do not match with PyTorch. https://github.com/microsoft/onnxscript/issues/854",
     ),
