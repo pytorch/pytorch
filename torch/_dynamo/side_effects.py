@@ -206,6 +206,8 @@ class SideEffects:
         return inspect.getattr_static(cls, "__getattribute__", None) in (
             object.__getattribute__,
             dict.__getattribute__,
+            int.__getattribute__,
+            str.__getattribute__,
         )
 
     def is_attribute_mutation(self, item):
