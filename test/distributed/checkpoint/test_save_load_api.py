@@ -66,11 +66,11 @@ class TestSaveAndLoadAPI(DTensorTestBase):
     @with_comms
     @skip_if_lt_x_gpu(2)
     def test_assert_same_keys(self):
-        """Test the assert_same_keys function."""
+        """Test the `_assert_same_keys` function."""
         model = MyTestModule()
         state_dict = model.state_dict()
         # Check across ranks; expect true
-        dcp.utils.assert_same_keys(state_dict)
+        dcp.utils._assert_same_keys(state_dict)
 
         # Introduces difference; expect false
         if self.rank == 0:
@@ -79,7 +79,7 @@ class TestSaveAndLoadAPI(DTensorTestBase):
             state_dict["def"] = torch.rand(1)
 
         with self.assertRaises(AssertionError):
-            dcp.utils.assert_same_keys(state_dict)
+            dcp.utils._assert_same_keys(state_dict)
 
 
 if __name__ == "__main__":

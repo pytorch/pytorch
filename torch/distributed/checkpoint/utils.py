@@ -9,7 +9,7 @@ from collections.abc import Sequence
 from contextlib import contextmanager
 from functools import wraps
 from pstats import Stats
-from typing import Any, Callable, cast, Optional, Set, TypeVar, Union
+from typing import Any, Callable, cast, Optional, TypeVar, Union
 
 import torch
 import torch.distributed as dist
@@ -25,7 +25,7 @@ from .api import (
 from .metadata import MetadataIndex, STATE_DICT_TYPE
 
 
-__all__ = ["find_tensor_shard", "find_state_dict_object", "assert_same_keys"]
+__all__ = ["find_tensor_shard", "find_state_dict_object"]
 
 T = TypeVar("T")
 R = TypeVar("R")
@@ -42,7 +42,7 @@ def _get_failure_dict(
 
 def _all_gather_keys(
     local_dict: dict[str, Any], group: Optional[dist.ProcessGroup] = None
-) -> Set[str]:
+) -> set[str]:
     """Gathers all keys, and returns them sorted."""
     keys = list(local_dict.keys())
     gathered_keys: list[list[str]] = [None] * dist.get_world_size(group)  # type: ignore[list-item]
@@ -51,7 +51,7 @@ def _all_gather_keys(
     return set(itertools.chain.from_iterable(gathered_keys))
 
 
-def assert_same_keys(
+def _assert_same_keys(
     state_dict: dict[str, Any], process_group: Optional[dist.ProcessGroup] = None
 ) -> None:
     """
@@ -67,7 +67,9 @@ def assert_same_keys(
     my_keys = set(state_dict.keys())
     diff = all_keys - my_keys
     if len(diff) > 0:
-        raise AssertionError(f"Keys mismatch between ranks, difference: {diff}")
+        raise AssertionError(
+            f"Key(s) present in other ranks but not this one, difference: {diff}"
+        )
 
 
 class _DistWrapper:
