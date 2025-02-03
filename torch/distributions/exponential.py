@@ -1,11 +1,12 @@
 # mypy: allow-untyped-defs
+from typing import Optional
+
 import torch
-from torch import Tensor
+from torch import Tensor, Generator
 from torch.distributions import constraints
 from torch.distributions.exp_family import ExponentialFamily
 from torch.distributions.utils import broadcast_all
 from torch.types import _Number, _size
-
 
 __all__ = ["Exponential"]
 
@@ -58,9 +59,9 @@ class Exponential(ExponentialFamily):
         new._validate_args = self._validate_args
         return new
 
-    def rsample(self, sample_shape: _size = torch.Size()) -> Tensor:
+    def rsample(self, sample_shape: _size = torch.Size(), generator: Optional[Generator] = None) -> Tensor:
         shape = self._extended_shape(sample_shape)
-        return self.rate.new(shape).exponential_() / self.rate
+        return self.rate.new(shape).exponential_(generator=generator) / self.rate
 
     def log_prob(self, value):
         if self._validate_args:

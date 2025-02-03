@@ -1,12 +1,13 @@
 # mypy: allow-untyped-defs
+from typing import Optional
+
 import torch
-from torch import Tensor
+from torch import Tensor, Generator
 from torch.autograd import Function
 from torch.autograd.function import once_differentiable
 from torch.distributions import constraints
 from torch.distributions.exp_family import ExponentialFamily
 from torch.types import _size
-
 
 __all__ = ["Dirichlet"]
 
@@ -20,8 +21,8 @@ def _Dirichlet_backward(x, concentration, grad_output):
 
 class _Dirichlet(Function):
     @staticmethod
-    def forward(ctx, concentration):
-        x = torch._sample_dirichlet(concentration)
+    def forward(ctx, concentration, generator: Optional[Generator] = None):
+        x = torch._sample_dirichlet(concentration, generator)
         ctx.save_for_backward(x, concentration)
         return x
 
@@ -72,10 +73,10 @@ class Dirichlet(ExponentialFamily):
         new._validate_args = self._validate_args
         return new
 
-    def rsample(self, sample_shape: _size = ()) -> Tensor:
+    def rsample(self, sample_shape: _size = (), generator: Optional[Generator] = None) -> Tensor:
         shape = self._extended_shape(sample_shape)
         concentration = self.concentration.expand(shape)
-        return _Dirichlet.apply(concentration)
+        return _Dirichlet.apply(concentration, generator)
 
     def log_prob(self, value):
         if self._validate_args:

@@ -4,13 +4,12 @@ import warnings
 from typing import Optional, Union
 
 import torch
-from torch import nan, Tensor
+from torch import nan, Tensor, Generator
 from torch.distributions import constraints
 from torch.distributions.exp_family import ExponentialFamily
 from torch.distributions.multivariate_normal import _precision_to_scale_tril
 from torch.distributions.utils import lazy_property
 from torch.types import _Number, _size, Number
-
 
 __all__ = ["Wishart"]
 
@@ -218,12 +217,12 @@ class Wishart(ExponentialFamily):
             V.pow(2) + torch.einsum("...i,...j->...ij", diag_V, diag_V)
         )
 
-    def _bartlett_sampling(self, sample_shape=torch.Size()):
+    def _bartlett_sampling(self, sample_shape=torch.Size(), generator: Optional[Generator] = None):
         p = self._event_shape[-1]  # has singleton shape
 
         # Implemented Sampling using Bartlett decomposition
         noise = _clamp_above_eps(
-            self._dist_chi2.rsample(sample_shape).sqrt()
+            self._dist_chi2.rsample(sample_shape, generator).sqrt()
         ).diag_embed(dim1=-2, dim2=-1)
 
         i, j = torch.tril_indices(p, p, offset=-1)
@@ -231,12 +230,13 @@ class Wishart(ExponentialFamily):
             torch.Size(sample_shape) + self._batch_shape + (int(p * (p - 1) / 2),),
             dtype=noise.dtype,
             device=noise.device,
+            generator=generator,
         )
         chol = self._unbroadcasted_scale_tril @ noise
         return chol @ chol.transpose(-2, -1)
 
     def rsample(
-        self, sample_shape: _size = torch.Size(), max_try_correction=None
+        self, sample_shape: _size = torch.Size(), max_try_correction=None, generator: Optional[Generator] = None
     ) -> Tensor:
         r"""
         .. warning::
@@ -251,7 +251,7 @@ class Wishart(ExponentialFamily):
             max_try_correction = 3 if torch._C._get_tracing_state() else 10
 
         sample_shape = torch.Size(sample_shape)
-        sample = self._bartlett_sampling(sample_shape)
+        sample = self._bartlett_sampling(sample_shape, generator)
 
         # Below part is to improve numerical stability temporally and should be removed in the future
         is_singular = self.support.check(sample)
@@ -261,7 +261,7 @@ class Wishart(ExponentialFamily):
         if torch._C._get_tracing_state():
             # Less optimized version for JIT
             for _ in range(max_try_correction):
-                sample_new = self._bartlett_sampling(sample_shape)
+                sample_new = self._bartlett_sampling(sample_shape, generator)
                 sample = torch.where(is_singular, sample_new, sample)
 
                 is_singular = ~self.support.check(sample)
@@ -274,7 +274,7 @@ class Wishart(ExponentialFamily):
                 warnings.warn("Singular sample detected.")
 
                 for _ in range(max_try_correction):
-                    sample_new = self._bartlett_sampling(is_singular[is_singular].shape)
+                    sample_new = self._bartlett_sampling(is_singular[is_singular].shape, generator)
                     sample[is_singular] = sample_new
 
                     is_singular_new = ~self.support.check(sample_new)

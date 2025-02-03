@@ -1,6 +1,8 @@
 # mypy: allow-untyped-defs
+from typing import Optional
+
 import torch
-from torch import Tensor
+from torch import Tensor, Generator
 from torch.distributions import constraints
 from torch.distributions.distribution import Distribution
 from torch.distributions.utils import (
@@ -11,7 +13,6 @@ from torch.distributions.utils import (
 )
 from torch.nn.functional import binary_cross_entropy_with_logits
 from torch.types import _Number
-
 
 __all__ = ["Geometric"]
 
@@ -103,16 +104,16 @@ class Geometric(Distribution):
     def probs(self) -> Tensor:
         return logits_to_probs(self.logits, is_binary=True)
 
-    def sample(self, sample_shape=torch.Size()):
+    def sample(self, sample_shape=torch.Size(), generator: Optional[Generator] = None):
         shape = self._extended_shape(sample_shape)
         tiny = torch.finfo(self.probs.dtype).tiny
         with torch.no_grad():
             if torch._C._get_tracing_state():
                 # [JIT WORKAROUND] lack of support for .uniform_()
-                u = torch.rand(shape, dtype=self.probs.dtype, device=self.probs.device)
+                u = torch.rand(shape, dtype=self.probs.dtype, device=self.probs.device, generator=generator)
                 u = u.clamp(min=tiny)
             else:
-                u = self.probs.new(shape).uniform_(tiny, 1)
+                u = self.probs.new(shape).uniform_(tiny, 1, generator=generator)
             return (u.log() / (-self.probs).log1p()).floor()
 
     def log_prob(self, value):

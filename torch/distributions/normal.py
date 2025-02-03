@@ -1,13 +1,13 @@
 # mypy: allow-untyped-defs
 import math
+from typing import Optional
 
 import torch
-from torch import Tensor
+from torch import Tensor, Generator
 from torch.distributions import constraints
 from torch.distributions.exp_family import ExponentialFamily
 from torch.distributions.utils import _standard_normal, broadcast_all
 from torch.types import _Number, _size
-
 
 __all__ = ["Normal"]
 
@@ -72,9 +72,9 @@ class Normal(ExponentialFamily):
         with torch.no_grad():
             return torch.normal(self.loc.expand(shape), self.scale.expand(shape))
 
-    def rsample(self, sample_shape: _size = torch.Size()) -> Tensor:
+    def rsample(self, sample_shape: _size = torch.Size(), generator: Optional[Generator] = None) -> Tensor:
         shape = self._extended_shape(sample_shape)
-        eps = _standard_normal(shape, dtype=self.loc.dtype, device=self.loc.device)
+        eps = _standard_normal(shape, dtype=self.loc.dtype, device=self.loc.device, generator=generator)
         return self.loc + eps * self.scale
 
     def log_prob(self, value):

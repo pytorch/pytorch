@@ -4,7 +4,7 @@ from typing import Optional
 from typing_extensions import deprecated
 
 import torch
-from torch import Tensor
+from torch import Tensor, Generator
 from torch.distributions import constraints
 from torch.distributions.utils import lazy_property
 from torch.types import _size
@@ -159,7 +159,7 @@ class Distribution:
         """
         return self.variance.sqrt()
 
-    def sample(self, sample_shape: _size = torch.Size()) -> Tensor:
+    def sample(self, sample_shape: _size = torch.Size(), generator: Optional[Generator] = None) -> Tensor:
         """
         Generates a sample_shape shaped sample or sample_shape shaped batch of
         samples if the distribution parameters are batched.
@@ -167,7 +167,7 @@ class Distribution:
         with torch.no_grad():
             return self.rsample(sample_shape)
 
-    def rsample(self, sample_shape: _size = torch.Size()) -> Tensor:
+    def rsample(self, sample_shape: _size = torch.Size(), generator: Optional[Generator] = None) -> Tensor:
         """
         Generates a sample_shape shaped reparameterized sample or sample_shape
         shaped batch of reparameterized samples if the distribution parameters

@@ -1,11 +1,12 @@
 # mypy: allow-untyped-defs
+from typing import Optional
+
 import torch
-from torch import inf, Tensor
+from torch import inf, Tensor, Generator
 from torch.distributions import Categorical, constraints
 from torch.distributions.binomial import Binomial
 from torch.distributions.distribution import Distribution
 from torch.distributions.utils import broadcast_all
-
 
 __all__ = ["Multinomial"]
 
@@ -98,10 +99,10 @@ class Multinomial(Distribution):
     def param_shape(self) -> torch.Size:
         return self._categorical.param_shape
 
-    def sample(self, sample_shape=torch.Size()):
+    def sample(self, sample_shape=torch.Size(), generator: Optional[Generator] = None):
         sample_shape = torch.Size(sample_shape)
         samples = self._categorical.sample(
-            torch.Size((self.total_count,)) + sample_shape
+            torch.Size((self.total_count,)) + sample_shape, generator
         )
         # samples.shape is (total_count, sample_shape, batch_shape), need to change it to
         # (sample_shape, batch_shape, total_count)

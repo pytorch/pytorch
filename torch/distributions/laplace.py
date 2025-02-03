@@ -1,11 +1,12 @@
 # mypy: allow-untyped-defs
+from typing import Optional
+
 import torch
-from torch import Tensor
+from torch import Tensor, Generator
 from torch.distributions import constraints
 from torch.distributions.distribution import Distribution
 from torch.distributions.utils import broadcast_all
 from torch.types import _Number, _size
-
 
 __all__ = ["Laplace"]
 
@@ -62,12 +63,13 @@ class Laplace(Distribution):
         new._validate_args = self._validate_args
         return new
 
-    def rsample(self, sample_shape: _size = torch.Size()) -> Tensor:
+    def rsample(self, sample_shape: _size = torch.Size(), generator: Optional[Generator] = None) -> Tensor:
         shape = self._extended_shape(sample_shape)
         finfo = torch.finfo(self.loc.dtype)
         if torch._C._get_tracing_state():
             # [JIT WORKAROUND] lack of support for .uniform_()
-            u = torch.rand(shape, dtype=self.loc.dtype, device=self.loc.device) * 2 - 1
+            u = torch.rand(
+                shape, dtype=self.loc.dtype, device=self.loc.device, generator=generator) * 2 - 1
             return self.loc - self.scale * u.sign() * torch.log1p(
                 -u.abs().clamp(min=finfo.tiny)
             )

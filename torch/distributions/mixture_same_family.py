@@ -1,10 +1,10 @@
 # mypy: allow-untyped-defs
+from typing import Optional
 
 import torch
-from torch import Tensor
+from torch import Tensor, Generator
 from torch.distributions import Categorical, constraints
 from torch.distributions.distribution import Distribution
-
 
 __all__ = ["MixtureSameFamily"]
 
@@ -171,7 +171,7 @@ class MixtureSameFamily(Distribution):
         )  # [B, k]
         return torch.logsumexp(log_prob_x + log_mix_prob, dim=-1)  # [S, B]
 
-    def sample(self, sample_shape=torch.Size()):
+    def sample(self, sample_shape=torch.Size(), generator: Optional[Generator] = None):
         with torch.no_grad():
             sample_len = len(sample_shape)
             batch_len = len(self.batch_shape)
@@ -179,11 +179,11 @@ class MixtureSameFamily(Distribution):
             es = self.event_shape
 
             # mixture samples [n, B]
-            mix_sample = self.mixture_distribution.sample(sample_shape)
+            mix_sample = self.mixture_distribution.sample(sample_shape, generator)
             mix_shape = mix_sample.shape
 
             # component samples [n, B, k, E]
-            comp_samples = self.component_distribution.sample(sample_shape)
+            comp_samples = self.component_distribution.sample(sample_shape, generator)
 
             # Gather along the k dimension
             mix_sample_r = mix_sample.reshape(

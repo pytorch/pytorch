@@ -1,12 +1,12 @@
 # mypy: allow-untyped-defs
+from typing import Optional
 
 import torch
-from torch import Tensor
+from torch import Tensor, Generator
 from torch.distributions import constraints
 from torch.distributions.distribution import Distribution
 from torch.distributions.utils import _sum_rightmost
 from torch.types import _size
-
 
 __all__ = ["Independent"]
 
@@ -100,11 +100,11 @@ class Independent(Distribution):
     def variance(self) -> Tensor:
         return self.base_dist.variance
 
-    def sample(self, sample_shape=torch.Size()) -> Tensor:
-        return self.base_dist.sample(sample_shape)
+    def sample(self, sample_shape=torch.Size(), generator: Optional[Generator] = None) -> Tensor:
+        return self.base_dist.sample(sample_shape, generator)
 
-    def rsample(self, sample_shape: _size = torch.Size()) -> Tensor:
-        return self.base_dist.rsample(sample_shape)
+    def rsample(self, sample_shape: _size = torch.Size(), generator: Optional[Generator] = None) -> Tensor:
+        return self.base_dist.rsample(sample_shape, generator)
 
     def log_prob(self, value):
         log_prob = self.base_dist.log_prob(value)

@@ -1,8 +1,9 @@
 # mypy: allow-untyped-defs
 import math
+from typing import Optional
 
 import torch
-from torch import Tensor
+from torch import Tensor, Generator
 from torch.distributions import constraints
 from torch.distributions.exp_family import ExponentialFamily
 from torch.distributions.utils import (
@@ -14,7 +15,6 @@ from torch.distributions.utils import (
 )
 from torch.nn.functional import binary_cross_entropy_with_logits
 from torch.types import _Number, _size
-
 
 __all__ = ["ContinuousBernoulli"]
 
@@ -168,9 +168,10 @@ class ContinuousBernoulli(ExponentialFamily):
         with torch.no_grad():
             return self.icdf(u)
 
-    def rsample(self, sample_shape: _size = torch.Size()) -> Tensor:
+    def rsample(self, sample_shape: _size = torch.Size(), generator: Optional[Generator] = None) -> Tensor:
         shape = self._extended_shape(sample_shape)
-        u = torch.rand(shape, dtype=self.probs.dtype, device=self.probs.device)
+        u = torch.rand(
+            shape, dtype=self.probs.dtype, device=self.probs.device, generator=generator)
         return self.icdf(u)
 
     def log_prob(self, value):

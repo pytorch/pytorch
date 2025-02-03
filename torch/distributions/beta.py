@@ -1,12 +1,13 @@
 # mypy: allow-untyped-defs
+from typing import Optional
+
 import torch
-from torch import Tensor
+from torch import Tensor, Generator
 from torch.distributions import constraints
 from torch.distributions.dirichlet import Dirichlet
 from torch.distributions.exp_family import ExponentialFamily
 from torch.distributions.utils import broadcast_all
 from torch.types import _Number, _size
-
 
 __all__ = ["Beta"]
 
@@ -73,8 +74,8 @@ class Beta(ExponentialFamily):
         total = self.concentration1 + self.concentration0
         return self.concentration1 * self.concentration0 / (total.pow(2) * (total + 1))
 
-    def rsample(self, sample_shape: _size = ()) -> Tensor:
-        return self._dirichlet.rsample(sample_shape).select(-1, 0)
+    def rsample(self, sample_shape: _size = (), generator: Optional[Generator] = None) -> Tensor:
+        return self._dirichlet.rsample(sample_shape, generator).select(-1, 0)
 
     def log_prob(self, value):
         if self._validate_args:

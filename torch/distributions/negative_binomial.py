@@ -1,7 +1,9 @@
 # mypy: allow-untyped-defs
+from typing import Optional
+
 import torch
 import torch.nn.functional as F
-from torch import Tensor
+from torch import Tensor, Generator
 from torch.distributions import constraints
 from torch.distributions.distribution import Distribution
 from torch.distributions.gamma import Gamma
@@ -11,7 +13,6 @@ from torch.distributions.utils import (
     logits_to_probs,
     probs_to_logits,
 )
-
 
 __all__ = ["NegativeBinomial"]
 
@@ -109,10 +110,10 @@ class NegativeBinomial(Distribution):
             validate_args=False,
         )
 
-    def sample(self, sample_shape=torch.Size()):
+    def sample(self, sample_shape=torch.Size(), generator: Optional[Generator] = None):
         with torch.no_grad():
-            rate = self._gamma.sample(sample_shape=sample_shape)
-            return torch.poisson(rate)
+            rate = self._gamma.sample(sample_shape=sample_shape, generator=generator)
+            return torch.poisson(rate, generator)
 
     def log_prob(self, value):
         if self._validate_args:

@@ -1,6 +1,8 @@
 # mypy: allow-untyped-defs
+from typing import Optional
+
 import torch
-from torch import nan, Tensor
+from torch import nan, Tensor, Generator
 from torch.distributions import constraints
 from torch.distributions.exp_family import ExponentialFamily
 from torch.distributions.utils import (
@@ -11,7 +13,6 @@ from torch.distributions.utils import (
 )
 from torch.nn.functional import binary_cross_entropy_with_logits
 from torch.types import _Number
-
 
 __all__ = ["Bernoulli"]
 
@@ -100,10 +101,10 @@ class Bernoulli(ExponentialFamily):
     def param_shape(self) -> torch.Size:
         return self._param.size()
 
-    def sample(self, sample_shape=torch.Size()):
+    def sample(self, sample_shape=torch.Size(), generator: Optional[Generator] = None):
         shape = self._extended_shape(sample_shape)
         with torch.no_grad():
-            return torch.bernoulli(self.probs.expand(shape))
+            return torch.bernoulli(self.probs.expand(shape), generator)
 
     def log_prob(self, value):
         if self._validate_args:

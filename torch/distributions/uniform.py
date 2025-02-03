@@ -1,11 +1,12 @@
 # mypy: allow-untyped-defs
+from typing import Optional
+
 import torch
-from torch import nan, Tensor
+from torch import nan, Tensor, Generator
 from torch.distributions import constraints
 from torch.distributions.distribution import Distribution
 from torch.distributions.utils import broadcast_all
 from torch.types import _Number, _size
-
 
 __all__ = ["Uniform"]
 
@@ -74,9 +75,9 @@ class Uniform(Distribution):
     def support(self):
         return constraints.interval(self.low, self.high)
 
-    def rsample(self, sample_shape: _size = torch.Size()) -> Tensor:
+    def rsample(self, sample_shape: _size = torch.Size(), generator: Optional[Generator] = None) -> Tensor:
         shape = self._extended_shape(sample_shape)
-        rand = torch.rand(shape, dtype=self.low.dtype, device=self.low.device)
+        rand = torch.rand(shape, dtype=self.low.dtype, device=self.low.device, generator=generator)
         return self.low + rand * (self.high - self.low)
 
     def log_prob(self, value):

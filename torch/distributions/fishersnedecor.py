@@ -1,12 +1,13 @@
 # mypy: allow-untyped-defs
+from typing import Optional
+
 import torch
-from torch import nan, Tensor
+from torch import nan, Tensor, Generator
 from torch.distributions import constraints
 from torch.distributions.distribution import Distribution
 from torch.distributions.gamma import Gamma
 from torch.distributions.utils import broadcast_all
 from torch.types import _Number, _size
-
 
 __all__ = ["FisherSnedecor"]
 
@@ -75,12 +76,12 @@ class FisherSnedecor(Distribution):
             / (self.df1 * (df2 - 2).pow(2) * (df2 - 4))
         )
 
-    def rsample(self, sample_shape: _size = torch.Size(())) -> Tensor:
+    def rsample(self, sample_shape: _size = torch.Size(()), generator: Optional[Generator] = None) -> Tensor:
         shape = self._extended_shape(sample_shape)
         #   X1 ~ Gamma(df1 / 2, 1 / df1), X2 ~ Gamma(df2 / 2, 1 / df2)
         #   Y = df2 * df1 * X1 / (df1 * df2 * X2) = X1 / X2 ~ F(df1, df2)
-        X1 = self._gamma1.rsample(sample_shape).view(shape)
-        X2 = self._gamma2.rsample(sample_shape).view(shape)
+        X1 = self._gamma1.rsample(sample_shape, generator).view(shape)
+        X2 = self._gamma2.rsample(sample_shape, generator).view(shape)
         tiny = torch.finfo(X2.dtype).tiny
         X2.clamp_(min=tiny)
         Y = X1 / X2

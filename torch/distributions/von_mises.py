@@ -1,13 +1,13 @@
 # mypy: allow-untyped-defs
 import math
+from typing import Optional
 
 import torch
 import torch.jit
-from torch import Tensor
+from torch import Tensor, Generator
 from torch.distributions import constraints
 from torch.distributions.distribution import Distribution
 from torch.distributions.utils import broadcast_all, lazy_property
-
 
 __all__ = ["VonMises"]
 
@@ -89,10 +89,10 @@ def _log_modified_bessel_fn(x, order=0):
 
 
 @torch.jit.script_if_tracing
-def _rejection_sample(loc, concentration, proposal_r, x):
+def _rejection_sample(loc, concentration, proposal_r, x, generator):
     done = torch.zeros(x.shape, dtype=torch.bool, device=loc.device)
     while not done.all():
-        u = torch.rand((3,) + x.shape, dtype=loc.dtype, device=loc.device)
+        u = torch.rand((3,) + x.shape, dtype=loc.dtype, device=loc.device, generator=generator)
         u1, u2, u3 = u.unbind()
         z = torch.cos(math.pi * u1)
         f = (1 + proposal_r * z) / (proposal_r + z)
@@ -162,7 +162,7 @@ class VonMises(Distribution):
         return torch.where(kappa < 1e-5, _proposal_r_taylor, _proposal_r)
 
     @torch.no_grad()
-    def sample(self, sample_shape=torch.Size()):
+    def sample(self, sample_shape=torch.Size(), generator: Optional[Generator] = None):
         """
         The sampling algorithm for the von Mises distribution is based on the
         following paper: D.J. Best and N.I. Fisher, "Efficient simulation of the
@@ -175,7 +175,7 @@ class VonMises(Distribution):
         shape = self._extended_shape(sample_shape)
         x = torch.empty(shape, dtype=self._loc.dtype, device=self.loc.device)
         return _rejection_sample(
-            self._loc, self._concentration, self._proposal_r, x
+            self._loc, self._concentration, self._proposal_r, x, generator
         ).to(self.loc.dtype)
 
     def expand(self, batch_shape, _instance=None):

@@ -1,13 +1,13 @@
 # mypy: allow-untyped-defs
 import math
+from typing import Optional
 
 import torch
-from torch import inf, nan, Tensor
+from torch import inf, nan, Tensor, Generator
 from torch.distributions import constraints
 from torch.distributions.distribution import Distribution
 from torch.distributions.utils import broadcast_all
 from torch.types import _Number, _size
-
 
 __all__ = ["Cauchy"]
 
@@ -66,9 +66,9 @@ class Cauchy(Distribution):
             self._extended_shape(), inf, dtype=self.loc.dtype, device=self.loc.device
         )
 
-    def rsample(self, sample_shape: _size = torch.Size()) -> Tensor:
+    def rsample(self, sample_shape: _size = torch.Size(), generator: Optional[Generator] = None) -> Tensor:
         shape = self._extended_shape(sample_shape)
-        eps = self.loc.new(shape).cauchy_()
+        eps = self.loc.new(shape).cauchy_(generator=generator)
         return self.loc + eps * self.scale
 
     def log_prob(self, value):

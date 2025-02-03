@@ -1,6 +1,8 @@
 # mypy: allow-untyped-defs
+from typing import Optional
+
 import torch
-from torch import Tensor
+from torch import Tensor, Generator
 from torch.distributions import constraints
 from torch.distributions.distribution import Distribution
 from torch.distributions.transformed_distribution import TransformedDistribution
@@ -13,7 +15,6 @@ from torch.distributions.utils import (
     probs_to_logits,
 )
 from torch.types import _Number, _size
-
 
 __all__ = ["LogitRelaxedBernoulli", "RelaxedBernoulli"]
 
@@ -88,11 +89,11 @@ class LogitRelaxedBernoulli(Distribution):
     def param_shape(self) -> torch.Size:
         return self._param.size()
 
-    def rsample(self, sample_shape: _size = torch.Size()) -> Tensor:
+    def rsample(self, sample_shape: _size = torch.Size(), generator: Optional[Generator] = None) -> Tensor:
         shape = self._extended_shape(sample_shape)
         probs = clamp_probs(self.probs.expand(shape))
         uniforms = clamp_probs(
-            torch.rand(shape, dtype=probs.dtype, device=probs.device)
+            torch.rand(shape, dtype=probs.dtype, device=probs.device, generator=generator)
         )
         return (
             uniforms.log() - (-uniforms).log1p() + probs.log() - (-probs).log1p()

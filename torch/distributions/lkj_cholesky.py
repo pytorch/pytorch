@@ -9,12 +9,13 @@ Original copyright notice:
 """
 
 import math
+from typing import Optional
 
 import torch
+from torch import Generator
 from torch.distributions import Beta, constraints
 from torch.distributions.distribution import Distribution
 from torch.distributions.utils import broadcast_all
-
 
 __all__ = ["LKJCholesky"]
 
@@ -94,16 +95,16 @@ class LKJCholesky(Distribution):
         new._validate_args = self._validate_args
         return new
 
-    def sample(self, sample_shape=torch.Size()):
+    def sample(self, sample_shape=torch.Size(), generator: Optional[Generator] = None):
         # This uses the Onion method, but there are a few differences from [1] Sec. 3.2:
         # - This vectorizes the for loop and also works for heterogeneous eta.
         # - Same algorithm generalizes to n=1.
         # - The procedure is simplified since we are sampling the cholesky factor of
         #   the correlation matrix instead of the correlation matrix itself. As such,
         #   we only need to generate `w`.
-        y = self._beta.sample(sample_shape).unsqueeze(-1)
+        y = self._beta.sample(sample_shape, generator).unsqueeze(-1)
         u_normal = torch.randn(
-            self._extended_shape(sample_shape), dtype=y.dtype, device=y.device
+            self._extended_shape(sample_shape), dtype=y.dtype, device=y.device, generator=generator
         ).tril(-1)
         u_hypersphere = u_normal / u_normal.norm(dim=-1, keepdim=True)
         # Replace NaNs in first row
