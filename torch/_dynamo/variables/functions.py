@@ -741,6 +741,7 @@ class SkipFunctionVariable(VariableTracker):
                 f"so the PyTorch team can add support for it. "
             )
             torch._dynamo.utils.warn_once(msg)
+            unimplemented(msg)
         else:
             try:
                 path = inspect.getfile(self.value)
