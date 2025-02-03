@@ -367,7 +367,7 @@ class ProcessGroupUCCTest(MultiProcessTestCase):
         pg = self._create_process_group_ucc()
 
         pg._start_coalescing()
-        if (self.rank == 0):
+        if self.rank == 0:
             for i in range(self.world_size):
                 send_buf = fn(torch.full((1,), float(i)))
                 pg.send([send_buf], i, 0)
