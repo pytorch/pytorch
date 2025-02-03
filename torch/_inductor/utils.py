@@ -82,7 +82,7 @@ T = TypeVar("T")
 
 # defines here before import torch._dynamo is for avoiding circular import
 # when get_gpu_type is imported from dynamo
-@functools.lru_cache(None)
+@functools.cache
 def get_gpu_type() -> str:
     avail_gpus = [x for x in GPU_TYPES if getattr(torch, x).is_available()]
     assert len(avail_gpus) <= 1
@@ -240,7 +240,7 @@ def do_bench_using_profiling(
     return res
 
 
-@functools.lru_cache(None)
+@functools.cache
 def has_torchvision_roi_align() -> bool:
     try:
         from torchvision.ops import roi_align  # noqa: F401
@@ -543,8 +543,8 @@ def cache_on_self(fn: Callable[Concatenate[Any, P], RV]) -> CachedMethod[P, RV]:
     return wrapper  # type: ignore[return-value]
 
 
-def aggregate_origins(
-    node_schedule: Union[Sequence[BaseSchedulerNode], ExternKernel],
+def _aggregate_origins(
+    node_schedule: Sequence[BaseSchedulerNode] | ExternKernel,
 ) -> OrderedSet[Node]:
     from . import ir
 
@@ -566,9 +566,12 @@ def aggregate_origins(
 
 def get_fused_kernel_name(
     node_schedule: Sequence[BaseSchedulerNode],
-    descriptive_names: Literal[True, "torch", "original_aten", "inductor_node"],
+    descriptive_names: Literal["torch", "original_aten", "inductor_node"] | None,
 ) -> str:
-    all_origins = aggregate_origins(node_schedule)
+    if descriptive_names is None:
+        return ""
+
+    all_origins = _aggregate_origins(node_schedule)
     if descriptive_names == "original_aten":
         # Bases the kernel name off of the top-level aten operator (i.e. pre-decompositions)
         sources = [
@@ -604,7 +607,7 @@ def get_kernel_metadata(
     node_schedule: Union[Sequence[BaseSchedulerNode], ExternKernel],
     wrapper: PythonWrapperCodegen,
 ) -> tuple[str, str]:
-    all_origins = aggregate_origins(node_schedule)
+    all_origins = _aggregate_origins(node_schedule)
     inductor_nodes = [origin for origin in all_origins if origin.op == "call_function"]
 
     from_node_dict = collections.defaultdict(list)
@@ -619,14 +622,12 @@ def get_kernel_metadata(
         if len(unique_graphs) == 1:
             single_graph = inductor_nodes[0].graph
             # create a map of idx -> node and cache it
-            if not hasattr(single_graph, "_inductor_kernel_metadata_node_to_idx_map"):
-                node_to_idx_map = {}
-                for idx, n in enumerate(single_graph.nodes):
-                    node_to_idx_map[n] = idx
-                single_graph._inductor_kernel_metadata_node_to_idx_map = node_to_idx_map  # type: ignore[attr-defined]
-            inductor_nodes.sort(
-                key=lambda n: single_graph._inductor_kernel_metadata_node_to_idx_map[n]  # type: ignore[attr-defined]
-            )
+            attr = "_inductor_kernel_metadata_node_to_idx_map"
+            node_to_idx_map = getattr(single_graph, attr, None)
+            if node_to_idx_map is None:
+                node_to_idx_map = {n: i for i, n in enumerate(single_graph.nodes)}
+                setattr(single_graph, attr, node_to_idx_map)
+            inductor_nodes.sort(key=lambda n: node_to_idx_map[n])
 
     for node in inductor_nodes:
         if "original_aten" in node.meta and node.meta["original_aten"] is not None:
@@ -691,7 +692,7 @@ def gather_origins(
             return is_unrealized_node(n.data)
         if isinstance(n, ir.StorageBox):
             return is_unrealized_node(n.data)
-        return isinstance(n, ir.IRNode) and isinstance(n, ir.Pointwise)
+        return isinstance(n, ir.Pointwise)
 
     kwarg_origins = [val.origins for val in kwargs.values() if is_unrealized_node(val)]
     arg_origins = [arg.origins for arg in args if is_unrealized_node(arg)]
@@ -991,20 +992,14 @@ class IndentedBuffer:
         buf = StringIO()
         p = 1
         linemap = []
-        for li in self._lines:
-            if isinstance(li, DeferredLineBase):
-                line = li()
-                if line is None:
-                    continue
-            elif isinstance(li, LineContext):
-                linemap.append((p, li.context))
-                continue
-            else:
-                line = li
-            assert isinstance(line, str)
-            buf.write(line)
-            buf.write("\n")
-            p += 1 + line.count("\n")
+        for line in self._lines:
+            if (s := _line_to_str(line)) is not None:
+                buf.write(s)
+                buf.write("\n")
+                p += 1 + s.count("\n")
+            elif isinstance(line, LineContext):
+                linemap.append((p, line.context))
+
         return buf.getvalue(), linemap
 
     def getvalue(self) -> str:
@@ -1013,22 +1008,14 @@ class IndentedBuffer:
 
     def getrawvalue(self) -> str:
         buf = StringIO()
-        for li in self._lines:
-            if isinstance(li, DeferredLineBase):
-                line = li()
-                if line is None:
-                    continue
-            elif isinstance(li, LineContext):
-                continue
-            else:
-                line = li
-            assert isinstance(line, str)
-            # backslash implies line continuation
-            if line.endswith("\\"):
-                buf.write(line[:-1])
-            else:
-                buf.write(line)
-                buf.write("\n")
+        for line in self._lines:
+            if (s := _line_to_str(line)) is not None:
+                # backslash implies line continuation
+                if s.endswith("\\"):
+                    buf.write(s[:-1])
+                else:
+                    buf.write(s)
+                    buf.write("\n")
         return buf.getvalue()
 
     def clear(self) -> None:
@@ -1118,6 +1105,14 @@ class IndentedBuffer:
         return res
 
 
+def _line_to_str(line: DeferredLineBase | LineContext | str) -> str | None:
+    if isinstance(line, str):
+        return line
+    if isinstance(line, DeferredLineBase):
+        return line()
+    return None
+
+
 class FakeIndentedBuffer(IndentedBuffer):
     def __init__(self) -> None:
         super().__init__()
@@ -1189,7 +1184,7 @@ class DelayReplaceLine(DeferredLineBase):
         return DelayReplaceLine(self.key, self.value_fn, line)
 
 
-@functools.lru_cache(None)
+@functools.cache
 def is_big_gpu(index_or_device: Union[int, torch.device] = 0) -> bool:
     if isinstance(index_or_device, torch.device):
         device = index_or_device
@@ -1353,12 +1348,12 @@ def use_cutlass_template(layout: Layout, m: int, n: int, k: int) -> bool:
     return res
 
 
-@functools.lru_cache(None)
+@functools.cache
 def _rocm_native_device_arch_name(device: str) -> str:
     return torch.cuda.get_device_properties(device).gcnArchName
 
 
-@functools.lru_cache(None)
+@functools.cache
 def try_import_ck_lib() -> (
     tuple[Optional[str], Callable[[], list[Any]], Callable[[], list[Any]], Type[Any]]
 ):
@@ -1654,9 +1649,7 @@ def run_and_get_graph_lowering(
         graph_lowerings.append(graph)
 
     with mock.patch.object(CompiledFxGraph, "__init__", fake_init):
-        result = fn(*args, **kwargs)
-
-    return result, graph_lowerings
+        return fn(*args, **kwargs), graph_lowerings
 
 
 @contextlib.contextmanager
@@ -1675,27 +1668,6 @@ def override_lowering(
         yield
     finally:
         lowering.lowerings[aten_op] = orig_fn
-
-
-def add_scheduler_init_hook(
-    pre_fn: Callable[..., Any], post_fn: Optional[Callable[..., Any]] = None
-) -> Any:
-    """
-    Add hook functions to be called at the beginning and end of Scheduler.__init__.
-    Used for unit tests.
-    """
-    from torch._inductor.scheduler import Scheduler
-
-    orig_fn = Scheduler.__init__
-
-    def wrapper(scheduler: Any, nodes: Any) -> Any:
-        pre_fn(scheduler, nodes)
-        out = orig_fn(scheduler, nodes)
-        if post_fn:
-            post_fn(scheduler, nodes)
-        return out
-
-    return unittest.mock.patch.object(Scheduler, "__init__", wrapper)
 
 
 def developer_warning(msg: str) -> None:
@@ -1785,7 +1757,7 @@ def parallel_num_threads() -> int:
     return threads
 
 
-@functools.lru_cache(None)
+@functools.cache
 def get_backend_num_stages() -> int:
     from .runtime.triton_helpers import get_backend_options
 
@@ -1793,7 +1765,7 @@ def get_backend_num_stages() -> int:
     return options.get("num_stages", 2 if torch.version.hip else 3)
 
 
-@functools.lru_cache(None)
+@functools.cache
 def get_device_tflops(dtype: torch.dtype) -> int:
     from triton.testing import get_max_simd_tflops, get_max_tensorcore_tflops
 
@@ -1821,7 +1793,7 @@ def get_device_tflops(dtype: torch.dtype) -> int:
             return get_max_simd_tflops(torch.float32)
 
 
-@functools.lru_cache(None)
+@functools.cache
 def get_gpu_dram_gbps() -> int:
     from triton.testing import get_dram_gbps
 
@@ -1885,7 +1857,7 @@ class Placeholder(enum.Enum):
 
 
 def pass_execution_and_save(
-    func: Callable[..., Any], gm: GraphModule, inp: Sequence[Any], msg: str
+    func: Callable[..., Any], gm: GraphModule, example_inputs: Sequence[Any], msg: str
 ) -> None:
     from .pattern_matcher import stable_topological_sort
 
@@ -1896,7 +1868,8 @@ def pass_execution_and_save(
     ) as f:
         before_io = io.StringIO()
         after_io = io.StringIO()
-        ShapeProp(gm=gm, fake_mode=detect_fake_mode(inp)).propagate(*inp)
+        sp = ShapeProp(gm=gm, fake_mode=detect_fake_mode(example_inputs))
+        sp.propagate(*example_inputs)
         print(f"Before:\n{gm.graph}", file=f)
         print(gm.graph, file=before_io)
         start_time = datetime.now()
@@ -2506,7 +2479,7 @@ def is_same_mkldnn_tensor(data: torch.Tensor, value: torch.Tensor) -> bool:
     )
 
 
-@functools.lru_cache(None)
+@functools.cache
 def boolean_ops() -> tuple[str, ...]:
     return (
         "isinf",

@@ -4263,13 +4263,6 @@ def should_fallback_max_pool2d_with_indices(kernel_size, dilation):
 def max_pool2d_checks(
     x, kernel_size, stride, padding, dilation, *, assert_fallback=None
 ):
-    if padding == 0:
-        padding = [0, 0]
-    if dilation == 1:
-        dilation = [1, 1]
-    if not stride:
-        stride = kernel_size
-
     kernel_size = pad_listlike(kernel_size, 2)
     stride = pad_listlike(stride, 2)
     padding = pad_listlike(padding, 2)

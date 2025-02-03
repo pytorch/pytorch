@@ -671,7 +671,7 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
         self.assertTrue(same(out, correct))
 
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
-    @torch._inductor.config.patch({"debug": True, "triton.descriptive_names": False})
+    @torch._inductor.config.patch({"debug": True, "triton.descriptive_names": None})
     def test_inductor_doesnt_mutate_shared(self):
         """
         make sure that an intermediate that's going to be reuse isn't mutated unless copied
@@ -1119,7 +1119,7 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
         self.assertEqual(x.size(), out.size())
 
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
-    @torch._inductor.config.patch({"debug": True, "triton.descriptive_names": False})
+    @torch._inductor.config.patch({"debug": True, "triton.descriptive_names": None})
     def test_inductor_all_gather_coalesced(self):
         """
         make sure that an intermediate that's going to be reuse isn't mutated unless copied
@@ -1165,7 +1165,7 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
         assert same(out, correct), f"{out} va {correct}"
 
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
-    @torch._inductor.config.patch({"debug": True, "triton.descriptive_names": False})
+    @torch._inductor.config.patch({"debug": True, "triton.descriptive_names": None})
     def test_inductor_reduce_scatter_coalesced(self):
         """
         make sure that an intermediate that's going to be reuse isn't mutated unless copied
