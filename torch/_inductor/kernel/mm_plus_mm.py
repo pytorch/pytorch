@@ -1,5 +1,4 @@
 # mypy: allow-untyped-defs
-import functools
 
 import torch
 
@@ -112,95 +111,6 @@ mm_plus_mm_template = TritonTemplate(
 )
 
 
-@functools.lru_cache(None)
-def mm_configs():
-    import triton
-
-    # List of dictionaries to store the kernel configs. Configs that evaluate to true
-    # will be utilised on the target platform
-    mm_triton_configs = [
-        {
-            "config": {"BLOCK_M": 64, "BLOCK_N": 64, "BLOCK_K": 32},
-            "num_stages": 2,
-            "num_warps": 4,
-            "cond": True,
-        },
-        {
-            "config": {"BLOCK_M": 64, "BLOCK_N": 64, "BLOCK_K": 32},
-            "num_stages": 3,
-            "num_warps": 8,
-            "cond": True,
-        },
-        {
-            "config": {"BLOCK_M": 64, "BLOCK_N": 64, "BLOCK_K": 32},
-            "num_stages": 4,
-            "num_warps": 16,
-            "cond": True,
-        },
-        {
-            "config": {"BLOCK_M": 64, "BLOCK_N": 32, "BLOCK_K": 32},
-            "num_stages": 4,
-            "num_warps": 8,
-            "cond": True,
-        },
-        {
-            "config": {"BLOCK_M": 32, "BLOCK_N": 64, "BLOCK_K": 32},
-            "num_stages": 4,
-            "num_warps": 8,
-            "cond": True,
-        },
-        {
-            "config": {"BLOCK_M": 128, "BLOCK_N": 128, "BLOCK_K": 32},
-            "num_stages": 1,
-            "num_warps": 8,
-            "cond": True,
-        },
-        {
-            "config": {"BLOCK_M": 64, "BLOCK_N": 64, "BLOCK_K": 64},
-            "num_stages": 1,
-            "num_warps": 8,
-            "cond": True,
-        },
-        {
-            "config": {"BLOCK_M": 32, "BLOCK_N": 32, "BLOCK_K": 128},
-            "num_stages": 1,
-            "num_warps": 8,
-            "cond": torch.version.hip is None,
-        },
-        {
-            "config": {"BLOCK_M": 64, "BLOCK_N": 64, "BLOCK_K": 16},
-            "num_stages": 2,
-            "num_warps": 4,
-            "cond": True,
-        },
-        {
-            "config": {"BLOCK_M": 32, "BLOCK_N": 32, "BLOCK_K": 16},
-            "num_stages": 1,
-            "num_warps": 2,
-            "cond": True,
-        },
-    ]
-
-    # Filter out configs in which cond evaluates to true
-    # On ROCm convert num_stages to 1 as pipelining provides no benefit
-    if torch.version.hip:
-        filtered_configs = [
-            triton.Config(c["config"], num_stages=1, num_warps=c["num_warps"])
-            for c in mm_triton_configs
-            if c["cond"]
-        ]
-    else:
-        filtered_configs = [
-            triton.Config(
-                c["config"], num_stages=c["num_stages"], num_warps=c["num_warps"]
-            )
-            for c in mm_triton_configs
-            if c["cond"]
-        ]
-
-    return filtered_configs
-
-
 def tuned_mm_plus_mm(mat1, mat2, mat3, mat4, *, layout=None):
     """
     Computes mm(mat1, mat2) + mm(mat3, mat4)
@@ -231,6 +141,9 @@ def tuned_mm_plus_mm(mat1, mat2, mat3, mat4, *, layout=None):
         if use_aten_gemm_kernels()
         else []
     )
+
+    mm_configs = V.choices.get_mm_plus_mm_configs()
+
     if use_triton_template(layout1):
         for config in mm_configs():
             # see https://github.com/openai/triton/issues/1298

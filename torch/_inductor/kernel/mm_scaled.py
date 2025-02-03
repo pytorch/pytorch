@@ -27,14 +27,8 @@ from ..utils import (
     use_ck_gemm_template,
     use_triton_template,
 )
-from .mm_common import (
-    _is_static_problem,
-    mm_args,
-    mm_grid,
-    persistent_mm_grid,
-    scaled_mm_configs,
-    scaled_persistent_mm_configs,
-)
+from ..virtualized import V
+from .mm_common import _is_static_problem, mm_args, mm_grid, persistent_mm_grid
 
 
 log = logging.getLogger(__name__)
@@ -539,6 +533,9 @@ def tuned_scaled_mm(
         choices.append(aten_choice)
 
     _, is_nonzero = _is_static_problem(layout)
+
+    scaled_mm_configs = V.choices.get_scaled_mm_configs()
+    scaled_persistent_mm_configs = V.choices.get_scaled_persistent_mm_configs()
 
     if is_nonzero and use_triton_template(layout, enable_float8=True):
         if use_persistent_tma(k, bias is not None):

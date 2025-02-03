@@ -32,7 +32,6 @@ def set_driver_to_gpu():
 
 
 def get_backend_options():
-    driver = triton.runtime.driver
     target = driver.active.get_current_target()
     backend = triton.compiler.compiler.make_backend(target)
     options = backend.parse_options(dict())
