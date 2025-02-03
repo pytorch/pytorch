@@ -7,6 +7,7 @@ from torch._higher_order_ops.auto_functionalize import (
 from torch._higher_order_ops.cond import cond
 from torch._higher_order_ops.effects import with_effects
 from torch._higher_order_ops.executorch_call_delegate import executorch_call_delegate
+from torch._higher_order_ops.flat_apply import flat_apply
 from torch._higher_order_ops.flex_attention import (
     flex_attention,
     flex_attention_backward,
@@ -38,6 +39,7 @@ __all__ = [
     "flex_attention_backward",
     "hints_wrapper",
     "PrimHOPBase",
+    "flat_apply",
     "foreach_map",
     "_foreach_map",
     "with_effects",

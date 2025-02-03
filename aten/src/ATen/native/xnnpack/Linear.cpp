@@ -208,7 +208,6 @@ bool use_linear(
             ContextLinear::kMin,
             ContextLinear::kMax) &&
          internal::linear::usable(input);
-      internal::linear::usable(input);
 }
 
 Tensor linear(
