@@ -70,8 +70,8 @@ static std::vector<std::optional<at::cuda::CUDAStream>> unpack_streams(
   return streams;
 }
 
-static inline at::Tensor extract_tensor(PyObject* obj);
-static inline std::vector<at::Tensor> extract_tensors(PyObject* obj);
+static at::Tensor extract_tensor(PyObject* obj);
+static std::vector<at::Tensor> extract_tensors(PyObject* obj);
 
 static std::vector<ncclComm_t> unpack_comms(PyObject* obj, size_t size) {
   if (obj == Py_None) {
@@ -289,7 +289,7 @@ PyObject* THCPModule_nccl_reduce_scatter(PyObject* self, PyObject* args) {
   END_HANDLE_TH_ERRORS
 }
 
-static inline at::Tensor extract_tensor(PyObject* obj) {
+static at::Tensor extract_tensor(PyObject* obj) {
   TORCH_CHECK_TYPE(
       THPVariable_Check(obj),
       "expected Tensor (got ",
@@ -298,7 +298,7 @@ static inline at::Tensor extract_tensor(PyObject* obj) {
   return THPVariable_Unpack(obj);
 }
 
-static inline std::vector<at::Tensor> extract_tensors(PyObject* obj) {
+static std::vector<at::Tensor> extract_tensors(PyObject* obj) {
   auto seq = THPObjectPtr(PySequence_Fast(obj, "expected a sequence"));
   if (!seq)
     throw python_error();

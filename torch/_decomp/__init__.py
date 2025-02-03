@@ -1,6 +1,7 @@
 # mypy: allow-untyped-defs
 import inspect
 from collections import defaultdict
+from collections.abc import Sequence
 from functools import lru_cache, partial, wraps
 from itertools import chain
 from typing import (
@@ -9,12 +10,16 @@ from typing import (
     FrozenSet,
     List,
     Optional,
-    Sequence,
     Set,
+    TYPE_CHECKING,
     TypeVar,
     Union,
 )
 from typing_extensions import ParamSpec
+
+
+if TYPE_CHECKING:
+    from torch.export.decomp_utils import CustomDecompTable
 
 import torch
 import torch.library
@@ -31,8 +36,7 @@ __all__ = [
     "register_decomposition",
     "get_decompositions",
     "core_aten_decompositions",
-    "_decomp_table_to_post_autograd_aten",
-    "_special_op_to_preserve_cia",
+    "_should_decompose_because_unsafe_op",
 ]
 
 _T = TypeVar("_T")
@@ -40,13 +44,31 @@ _P = ParamSpec("_P")
 
 # TODO: relax key type here; torch registrations should be possible to; but
 # right now this type is accurate
-global_decomposition_table: Dict[
-    str, Dict[torch._ops.OperatorBase, Callable]
+global_decomposition_table: dict[
+    str, dict[torch._ops.OperatorBase, Callable]
 ] = defaultdict(dict)
 
 decomposition_table = global_decomposition_table["post_autograd"]
 pre_autograd_decomposition_table = global_decomposition_table["pre_autograd"]
 meta_table = global_decomposition_table["meta"]
+
+
+def _should_decompose_because_unsafe_op(op: torch._ops.OperatorBase) -> bool:
+    """
+    Returns True if the op must always decompose in export/compile tracing system
+
+    In export, we always decompose certain CIA ops that are tagged with
+    maybe_aliasing_or_mutating because we statically need to know if the op is
+    mutating or not. But these CIA ops could have different behaviour in runtime.
+
+    native_batch_norm is a prim op which has a wrong schema and it needs to be replaced
+    with correct schema. But until then, we will force decompose it via this tag.
+    """
+    if not isinstance(op, torch._ops.OpOverload):
+        return False
+    if torch.Tag.maybe_aliasing_or_mutating in op.tags:
+        return True
+    return op == torch.ops.aten.native_batch_norm.default
 
 
 def _add_op_to_registry(registry, op, fn):
@@ -56,7 +78,7 @@ def _add_op_to_registry(registry, op, fn):
     If op is OpOverload, it will be added to the registry directly.
     If op is OpOverloadPacket, all the valid op_overloads in the packet will be added to the registry.
     """
-    overloads: List[Union[torch._ops.OperatorBase]] = []
+    overloads: list[Union[torch._ops.OperatorBase]] = []
     if isinstance(op, HigherOrderOperator):
         # There's no concept of overloads for HigherOrderOperator
         registry[op] = fn
@@ -210,7 +232,7 @@ def register_decomposition(
 def get_decompositions(
     aten_ops: Sequence[Union[torch._ops.OperatorBase, OpOverloadPacket]],
     type: str = "post_autograd",
-) -> Dict[torch._ops.OperatorBase, Callable]:
+) -> dict[torch._ops.OperatorBase, Callable]:
     """
     Retrieve a dictionary of decompositions corresponding to the list of
     operator overloads and overload packets passed as input.  Overload
@@ -229,7 +251,7 @@ def get_decompositions(
     for opo in registry:
         if isinstance(opo, (OpOverload, OpOverloadPacket)):
             packets_to_overloads[opo.overloadpacket].append(opo)
-    decompositions: Dict[torch._ops.OperatorBase, Callable] = {}
+    decompositions: dict[torch._ops.OperatorBase, Callable] = {}
     for op in aten_ops:
         if isinstance(op, OpOverloadPacket) and op in packets_to_overloads:
             for op_overload in packets_to_overloads[op]:
@@ -240,7 +262,7 @@ def get_decompositions(
 
 
 def remove_decompositions(
-    decompositions: Dict[torch._ops.OperatorBase, Callable],
+    decompositions: dict[torch._ops.OperatorBase, Callable],
     aten_ops: Sequence[Union[OpOverload, OpOverloadPacket]],
 ) -> None:
     """
@@ -263,121 +285,10 @@ import torch._decomp.decompositions
 import torch._refs
 
 
-# Our strategy for deciding if we can preserve a op is following:
-# 1. The op should be known statically that it is functional
-# 2. If it is maybe aliasing, we decompose because we must know if an op
-#    is mutating or aliasing.
-# TODO (tmanlaibaatar) make this utility function and share it with functional_tensor
-# decomp part. (https://github.com/pytorch/pytorch/issues/129431)
-def _check_valid_to_preserve(op_overload: "OperatorBase"):
-    if op_overload in FunctionalTensor.maybe_aliasing_or_mutating_ops:
-        return False
-    if op_overload in FunctionalTensor.metadata_fns:
-        return False
+def core_aten_decompositions() -> "CustomDecompTable":
+    from torch.export.exported_program import default_decompositions
 
-    if not hasattr(op_overload, "_schema"):
-        return False
-
-    alias_info = len(
-        [i for i in op_overload._schema.arguments if i.alias_info is not None]
-    )
-
-    is_mutating_or_aliasing = alias_info != 0 or op_overload._schema.is_mutable
-
-    if is_mutating_or_aliasing:
-        return False
-
-    if not torch._C._dispatch_has_kernel(op_overload.name()):
-        return False
-
-    return True
-
-
-def _is_cia_op(op: "OperatorBase") -> bool:
-    return (
-        torch._C._dispatch_has_kernel_for_dispatch_key(
-            op.name(), torch._C.DispatchKey.CompositeImplicitAutograd
-        )
-        or torch._C.DispatchKey.CompositeImplicitAutograd in op.py_kernels
-    )
-
-
-def _is_preservable_cia_op(op: "OperatorBase") -> bool:
-    return _check_valid_to_preserve(op) and _is_cia_op(op)
-
-
-@lru_cache(maxsize=1)
-def _collect_all_valid_cia_ops() -> Set["OperatorBase"]:
-    """
-    This is an util function that gets the all CIA functional ops.
-
-    The algorithm is in 2 steps:
-      1. We first query C++ dispatcher to get the list of CIA ops
-         and then we call getattr on torch.ops.aten to lazily populate
-         them.
-
-      2. Sometimes, handful of ops have CIA registered in python dispatcher
-         but not on the C++ side, these can't be caught at the first step.
-         So we walk again to get the final list.
-
-    Note that the output of this function should never be modified
-    """
-    # First step to lazily populate torch.ops.aten
-    cia_ops = torch._C._dispatch_get_registrations_for_dispatch_key(
-        "CompositeImplicitAutograd"
-    )
-    # Ignore quantized namespace ops
-    cia_ops = [name[6:] for name in cia_ops if name.startswith("aten::")]
-    # Materialize all CIA ops first
-    for op in cia_ops:
-        split_list = op.split(".")
-        # Sometime overload could be missing
-        assert len(split_list) == 1 or len(split_list) == 2
-        op_name = split_list[0]
-        op_overload_name = "default"
-        if len(split_list) == 2:
-            op_overload_name = split_list[1]
-
-        _ = getattr(getattr(torch.ops.aten, op_name), op_overload_name)
-
-    # Second step to finally compile the list of all valid ops
-    cia_ops = set()
-    for op in torch.ops.aten:
-        op_packet = getattr(torch.ops.aten, op)
-        for overload in op_packet.overloads():
-            op_overload = getattr(op_packet, overload)
-            if _is_preservable_cia_op(op_overload):
-                cia_ops.add(op_overload)
-    return cia_ops
-
-
-def _get_decomp_for_cia(op):
-    # [NOTE] Seperating out func.decompose
-    # Ideally we should be able to just register func.decompose but
-    # we can't as this decomp is gonna be registered to the py_impl.
-    # As a result it will infinitely recurse. So we first check if the op
-    # has py_impl entry for CIA and if it is we use that first. If not,
-    # we register C++ query to py_impl.
-    dk = torch._C.DispatchKey.CompositeImplicitAutograd
-    if dk in op.py_kernels and not isinstance(op.py_kernels[dk], torch._C.DispatchKey):
-        return op.py_kernels[dk]
-
-    def _special_op_to_decompose_cia(*args, **kwargs):
-        kernel = kwargs["kernel"]
-        del kwargs["kernel"]
-        # Can't call kernel.decompose due to infinite recursion as
-        # we register this kernel to py_impl directly
-        dk = torch._C.DispatchKey.CompositeImplicitAutograd
-        if torch._C._dispatch_has_kernel_for_dispatch_key(
-            kernel.name(), torch._C.DispatchKey.CompositeImplicitAutograd
-        ):
-            return kernel._op_dk(dk, *args, **kwargs)
-        else:
-            raise AssertionError(
-                f"Expected {kernel} to have CompositeImplicitAutograd kernel"
-            )
-
-    return partial(_special_op_to_decompose_cia, kernel=op)
+    return default_decompositions()
 
 
 # See NOTE [Core ATen Ops]
@@ -385,69 +296,10 @@ def _get_decomp_for_cia(op):
 # list was copied from torch/_inductor/decomposition.py
 # excluding decompositions that results in prim ops
 # Resulting opset of decomposition is core aten ops
-def core_aten_decompositions() -> Dict[torch._ops.OperatorBase, Callable]:
-    decomp_table = _core_aten_decompositions_post_autograd()
-
-    # If it is fbcode change, we return the old decomposition list
-    from torch._inductor import config
-
-    if config.is_fbcode():
-        return decomp_table
-
-    aten = torch.ops.aten
-
-    # We are deleting custom decomp in core_aten_decomp
-    # for CIA ops but it should be fine technically
-    # because this table is only meant to be used in export context
-    # in which we really carefully control the decomp behaviour
-    # In any case, C++ decomps should be preferred
-    cia_ops_that_should_be_removed = [
-        aten.all.dimname,
-        aten.index_add.dimname,
-        aten.index_copy.dimname,
-        aten.index_fill.Dimname_Scalar,
-        aten.index_fill.Dimname_Tensor,
-        aten.norm.names_ScalarOpt_dim_dtype,
-        aten.norm.names_ScalarOpt_dim,
-        aten.silu_backward.default,
-        aten.std.default,
-        aten.std.dim,
-        aten.std.names_dim,
-        aten.std.correction_names,
-        aten.std_mean.default,
-        aten.std_mean.dim,
-        aten.std_mean.names_dim,
-        aten.std_mean.correction_names,
-        aten.upsample_bilinear2d.vec,
-        aten.upsample_trilinear3d.vec,
-    ]
-
-    for k in list(decomp_table.keys()):
-        if k in cia_ops_that_should_be_removed:
-            del decomp_table[k]
-
-    for op in _collect_all_valid_cia_ops():
-        decomp_table[op] = _get_decomp_for_cia(op)
-    return decomp_table
-
-
-# This table is a stop-gap table which replicates
-# the old behaviour of post-dispatch IR.
-# This table contains all functional CIA ops mapping
-# to their default decomp. In old export, this will
-# be decomposed implicitly.
-def _decomp_table_to_post_autograd_aten():
-    decomp_table = {}
-    for k in _collect_all_valid_cia_ops():
-        decomp_table[k] = _get_decomp_for_cia(k)
-    return decomp_table
-
-
 def _core_aten_decompositions_post_autograd() -> (
-    Dict[torch._ops.OperatorBase, Callable]
+    dict[torch._ops.OperatorBase, Callable]
 ):
     aten = torch.ops.aten
-    # TODO Delete all mutating or CIA ops from this list
     return get_decompositions(
         [
             aten.addcdiv,
@@ -467,6 +319,8 @@ def _core_aten_decompositions_post_autograd() -> (
             aten.binary_cross_entropy_backward,
             aten.binary_cross_entropy_with_logits,
             aten.block_diag,
+            aten.bernoulli.p,
+            aten.bernoulli.default,
             aten.celu,
             aten.celu_,
             aten.channel_shuffle,
@@ -483,6 +337,7 @@ def _core_aten_decompositions_post_autograd() -> (
             aten.detach,
             aten.diag_embed,
             aten.diagonal_backward,
+            aten.diagonal_copy,
             aten.dot,
             aten.vdot,
             aten.elu,
@@ -519,11 +374,16 @@ def _core_aten_decompositions_post_autograd() -> (
             aten.huber_loss,
             aten.huber_loss_backward,
             aten.im2col,
-            aten.index_add,
+            aten.index_add.out,
+            aten.index_add.default,
             aten.index_add_,
-            aten.index_copy,
+            aten.index_copy.out,
+            aten.index_copy.default,
             aten.index_copy_,
-            aten.index_fill,
+            aten.index_fill.int_Scalar,
+            aten.index_fill.int_Tensor,
+            aten.index_fill.int_Scalar_out,
+            aten.index_fill.int_Tensor_out,
             aten.index_fill_,
             aten.isin,
             aten.isneginf,
@@ -575,10 +435,18 @@ def _core_aten_decompositions_post_autograd() -> (
             aten.nll_loss2d_backward,
             aten.nll_loss_backward,
             aten.nll_loss_forward,
-            aten.norm,
+            aten.norm.ScalarOpt_dtype,
+            aten.norm.Scalar,
+            aten.norm.ScalarOpt_dim_dtype,
+            aten.norm.ScalarOpt_dim,
+            aten.norm.dtype_out,
+            aten.norm.out,
+            aten.norm.names_dtype_out,
+            aten.norm.names_out,
+            aten.norm.ScalarOpt_dtype_out,
+            aten.norm.Scalar_out,
             aten.ones,
             aten.ones_like,
-            aten.permute_copy,
             aten.pixel_shuffle,
             aten.pixel_unshuffle,
             aten._prelu_kernel,
@@ -613,7 +481,7 @@ def _core_aten_decompositions_post_autograd() -> (
             aten.sigmoid_backward,
             aten.silu,
             aten.silu_,
-            aten.silu_backward,
+            aten.silu_backward.grad_input,
             aten.sinc,
             aten.sinc_,
             aten.slice_backward,
@@ -633,8 +501,13 @@ def _core_aten_decompositions_post_autograd() -> (
             aten.squeeze_copy,
             aten.squeeze.default,
             aten.squeeze.dim,
-            aten.std,
-            aten.std_mean,
+            aten.std.correction,
+            aten.std.out,
+            aten.std.correction_out,
+            aten.std.names_out,
+            aten.std.correction_names_out,
+            aten.std_mean.correction,
+            aten.std_mean.correction_out,
             aten.stack,
             aten.sum.default,
             aten.sum.out,
@@ -664,8 +537,8 @@ def _core_aten_decompositions_post_autograd() -> (
             aten.unsqueeze_copy,
             aten._unsafe_view,
             aten.upsample_linear1d,
-            aten.upsample_bilinear2d,
-            aten.upsample_trilinear3d,
+            aten.upsample_bilinear2d.out,
+            aten.upsample_trilinear3d.out,
             aten.upsample_nearest2d_backward,
             aten.view_as_complex,
             aten.xlogy,

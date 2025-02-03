@@ -5,7 +5,7 @@ import math
 import threading
 from functools import reduce
 from itertools import chain
-from typing import Dict, List, Optional, Tuple, TYPE_CHECKING, Union
+from typing import Optional, TYPE_CHECKING, Union
 
 import torch
 from torch.distributed import is_available
@@ -49,6 +49,7 @@ else:
         is_initialized,
         new_group,
         ProcessGroup,
+        split_group,
     )
 
     logger = logging.getLogger(__name__)
@@ -64,15 +65,15 @@ else:
 
     class _MeshEnv(threading.local):
         def __init__(self) -> None:
-            self.mesh_stack: List[DeviceMesh] = []
-            self.child_to_root_mapping: Dict[DeviceMesh, DeviceMesh] = {}
-            self.mesh_dim_group_options: Dict[
-                int, Tuple[str, Optional[C10dBackend.Options]]
+            self.mesh_stack: list[DeviceMesh] = []
+            self.child_to_root_mapping: dict[DeviceMesh, DeviceMesh] = {}
+            self.mesh_dim_group_options: dict[
+                int, tuple[str, Optional[C10dBackend.Options]]
             ] = {}
-            self.root_to_flatten_mapping: Dict[DeviceMesh, Dict[str, DeviceMesh]] = {}
+            self.root_to_flatten_mapping: dict[DeviceMesh, dict[str, DeviceMesh]] = {}
             # Record flatten mesh name to its mesh dim index in root mesh.
-            self.flatten_name_to_root_dims: Dict[
-                DeviceMesh, Dict[str, Tuple[int, ...]]
+            self.flatten_name_to_root_dims: dict[
+                DeviceMesh, dict[str, tuple[int, ...]]
             ] = {}
 
         def get_current_mesh(self) -> "DeviceMesh":
@@ -83,8 +84,8 @@ else:
         def create_sub_mesh(
             self,
             device_mesh: "DeviceMesh",
-            submesh_dim_names: Tuple[str, ...],
-            submesh_dims: List[Tuple[int, ...]],
+            submesh_dim_names: tuple[str, ...],
+            submesh_dims: list[tuple[int, ...]],
         ) -> "DeviceMesh":
             # Get the submesh dim size from the submesh_dims.
             # For example, if we have a 3D mesh with mesh_shape (2, 2, 2) mesh_dim_names ("dp", "cp", "tp") and we want
@@ -92,11 +93,10 @@ else:
             # If we want to slice out mesh["dp", "cp"], then submesh_dims = [(0,), (1,)] and submesh_dim_size = [2, 2].
             slice_dim_size = [
                 reduce(
-                    lambda x, y: device_mesh.mesh.size(x) * device_mesh.mesh.size(y),
+                    lambda x, y: x * device_mesh.mesh.size(y),
                     mesh_dim,
+                    1,
                 )
-                if len(mesh_dim) > 1
-                else device_mesh.mesh.size(mesh_dim[0])
                 for mesh_dim in submesh_dims
             ]
 
@@ -286,7 +286,7 @@ else:
 
         def _get_slice_mesh_dims(
             self, device_mesh, mesh_dim_names
-        ) -> List[Tuple[int, ...]]:
+        ) -> list[tuple[int, ...]]:
             """
             Validate whether the mesh_dim_names is valid for slicing the given device_mesh.
             If valid, return dim indexes of the slice mesh in the device mesh.
@@ -338,7 +338,7 @@ else:
 
         def _get_all_submeshes(
             self, device_mesh: "DeviceMesh", mesh_dim_name: str
-        ) -> List["DeviceMesh"]:
+        ) -> list["DeviceMesh"]:
             """
             Return all the submeshes of a given mesh dimension of the device mesh.
             """
@@ -418,14 +418,14 @@ else:
 
         device_type: str
         mesh: torch.Tensor
-        mesh_dim_names: Optional[Tuple[str, ...]]
+        mesh_dim_names: Optional[tuple[str, ...]]
 
         def __init__(
             self,
             device_type: str,
             mesh: Union[torch.Tensor, "ArrayLike"],
             *,
-            mesh_dim_names: Optional[Tuple[str, ...]] = None,
+            mesh_dim_names: Optional[tuple[str, ...]] = None,
             _init_backend: bool = True,
         ) -> None:
             self.device_type = device_type
@@ -458,7 +458,7 @@ else:
                 # calculate the coordinates of the current global rank on the mesh
                 rank_coords = (self.mesh == get_rank()).nonzero()
                 assert rank_coords.size(0) in (0, 1)
-                self._coordinate_on_dim: Optional[List[int]] = (
+                self._coordinate_on_dim: Optional[list[int]] = (
                     rank_coords[0].tolist() if rank_coords.size(0) > 0 else None
                 )
 
@@ -498,12 +498,12 @@ else:
             # TODO(yifu): remove tag and ranks once we fully migrate to native
             # functional collectives. See details in:
             # https://github.com/pytorch/pytorch/issues/93173#issuecomment-1907095208
-            dim_group_infos: List[Tuple[str, List[int], str]] = []
+            dim_group_infos: list[tuple[str, list[int], str]] = []
+            default_group = _get_default_group()
 
             if self.mesh.ndim == 1 and self.mesh.numel() == get_world_size():
                 # Append the default pg to the first dim groups only if the default pg is compatible with `self.device_type`.
                 # Otherwise, create new pg.
-                default_group = _get_default_group()
                 ranks = list(range(get_world_size()))
                 dim_group = (
                     new_group(
@@ -530,35 +530,68 @@ else:
                     pg_ranks_by_dim = self.mesh.swapdims(-1, dim).reshape(
                         -1, self.mesh.size(dim)
                     )
-                    # multi-dim mesh, create subgroups by looping over the pg_ranks
-                    # for each dim and append the groups
+
+                    # Respect dim group options specified via _MeshEnv.set_dim_group_options().
+                    # Inherit from the parent group if no options are specified for the group.
+                    if dim in _mesh_resources.mesh_dim_group_options:
+                        (
+                            backend,
+                            pg_options,
+                        ) = _mesh_resources.mesh_dim_group_options[dim]
+                    else:
+                        backend, pg_options = None, None
+
+                    # If we have a 2D mesh with mesh_dim_names ("dp", "tp"), the group description
+                    # of the subgroups would be `mesh_dim_dp` and `mesh_name_tp`.
+                    # If the mesh doesn't not have a mesh_dim_names, then the group description of the
+                    # subgroup would be `mesh_dim_0` and `mesh_dim_1`.
+                    group_desc = (
+                        f"mesh_{self.mesh_dim_names[dim]}"
+                        if self.mesh_dim_names
+                        else f"mesh_dim_{dim}"
+                    )
+
+                    # If bound_device_id exists, it means the nccl communicator has been eagerly initialized
+                    # so that we can use `split_group` to create subgroups through `ncclCommSplit`.
+                    # In this case, we only need to make one API call (`split_group``) for the subgroup creation
+                    # for each mesh dimension. In a 2 * 4 mesh, we only need to make 2 API calls per ranks to create
+                    # all the subgroups.
+                    # Otherwise, we need to make more than one API call (`new_group`) for subgroup creations. The
+                    # numbers of API calls are equal to the number of subgroups for each mesh dimension. In a 2 * 4
+                    # mesh, we need to make 2 + 4 = 6 API calls per ranks to create all the subgroups.
+                    dim_group = None
+                    has_split_group = False
+                    if (
+                        bound_device_id := getattr(
+                            default_group, "bound_device_id", None
+                        )
+                    ) is not None and torch.cuda.is_available():
+                        dim_group = split_group(
+                            parent_pg=default_group,
+                            pg_options=pg_options,
+                            split_ranks=pg_ranks_by_dim.tolist(),
+                            group_desc=group_desc,
+                        )
+                        has_split_group = True
+
+                    # If the subgroup has been already created through `split_group`, we simply loop over `pg_ranks_by_dim`
+                    # and append the `(group_tag, subgroup_ranks, and group_name)` tuple to the `dim_group_infos` list when
+                    # the current rank is in the subgroup.
+                    # Otherwise, we use `new_group` instead of `split_group` to create subgroups by looping over `pg_ranks_by_dim`
+                    # along with appending information to the `dim_group_infos` list whenever necessary.
                     for dim_mesh in pg_ranks_by_dim:
                         subgroup_ranks = dim_mesh.tolist()
-
-                        # Respect dim group options specified via _MeshEnv.set_dim_group_options().
-                        # Inherit from the parent group if no options are specified for the group.
-                        if dim in _mesh_resources.mesh_dim_group_options:
-                            (
-                                backend,
-                                pg_options,
-                            ) = _mesh_resources.mesh_dim_group_options[dim]
-                        else:
-                            backend, pg_options = None, None
 
                         # We temporarily revert the re-use subgroup, since it breaks two internal tests.
                         # Temporarily reverting to resolve test timeout while root-causing.
                         # TODO: Add two tests to cover internal tests scenarios and re-enable reuse subgroup if exists.
-                        group_desc = (
-                            f"mesh_{self.mesh_dim_names[dim]}"
-                            if self.mesh_dim_names
-                            else f"mesh_dim_{dim}"
-                        )
-                        dim_group = new_group(
-                            ranks=subgroup_ranks,
-                            backend=backend,
-                            pg_options=pg_options,
-                            group_desc=group_desc,
-                        )
+                        if bound_device_id is None or not has_split_group:
+                            dim_group = new_group(
+                                ranks=subgroup_ranks,
+                                backend=backend,
+                                pg_options=pg_options,
+                                group_desc=group_desc,
+                            )
 
                         # only add to dim_groups if the current rank in the subgroup
                         if self.get_rank() in subgroup_ranks:
@@ -624,7 +657,7 @@ else:
                 )
 
         def __getitem__(
-            self, mesh_dim_names: Union[str, Tuple[str, ...]]
+            self, mesh_dim_names: Union[str, tuple[str, ...]]
         ) -> "DeviceMesh":
             """
             Slice the current DeviceMesh based on the mesh_dim_names given to create a submesh.
@@ -681,9 +714,19 @@ else:
                 slice_mesh_dims = _mesh_resources._get_slice_mesh_dims(
                     self, mesh_dim_names
                 )
-                submesh = _mesh_resources.create_sub_mesh(
-                    self, mesh_dim_names, slice_mesh_dims
-                )
+                # When using FakeTensorMode to trace the model, `create_sub_mesh()` will
+                # fail as it will require a real tensor to manipulate.
+                # `unset_fake_temporarily()` will allow us to materialize the tensors
+                # within `_mesh_resources`, which should not affect modling.
+                #
+                # Note that this should be orthogonal to torch.compile(). But whether
+                # we can compile device_mesh `slicing` (no graph break) is not verified
+                # yet and need a follow-up,
+                # TODO: compiler + device_mesh slicing.
+                with torch._subclasses.fake_tensor.unset_fake_temporarily():
+                    submesh = _mesh_resources.create_sub_mesh(
+                        self, mesh_dim_names, slice_mesh_dims
+                    )
                 return submesh
 
         def get_group(self, mesh_dim: Optional[Union[int, str]] = None) -> ProcessGroup:
@@ -732,7 +775,7 @@ else:
                     _find_pg_by_ranks_and_tag(*self._dim_group_infos[mesh_dim][:2])  # type: ignore[index]
                 )
 
-        def get_all_groups(self) -> List[ProcessGroup]:
+        def get_all_groups(self) -> list[ProcessGroup]:
             """
             Returns a list of ProcessGroups for all mesh dimensions.
 
@@ -743,11 +786,11 @@ else:
 
         @staticmethod
         def from_group(
-            group: Union[ProcessGroup, List[ProcessGroup]],
+            group: Union[ProcessGroup, list[ProcessGroup]],
             device_type: str,
             mesh: Optional[Union[torch.Tensor, "ArrayLike"]] = None,
             *,
-            mesh_dim_names: Optional[Tuple[str, ...]] = None,
+            mesh_dim_names: Optional[tuple[str, ...]] = None,
         ) -> "DeviceMesh":
             """
             Constructs a :class:`DeviceMesh` with ``device_type`` from an
@@ -816,7 +859,7 @@ else:
             return self.mesh.ndim
 
         @property
-        def shape(self) -> Tuple[int, ...]:
+        def shape(self) -> tuple[int, ...]:
             return tuple(self.mesh.shape)
 
         def get_rank(self) -> int:
@@ -867,7 +910,7 @@ else:
             ), "We expect ProcessGroup before calling `get_rank`!"
             return not_none(get_rank(mesh_dim_group))
 
-        def get_coordinate(self) -> Optional[List[int]]:
+        def get_coordinate(self) -> Optional[list[int]]:
             """
             Return the relative indices of this rank relative to all
             dimensions of the mesh. If this rank is not part of the mesh, return None.
@@ -896,9 +939,9 @@ else:
 
     def init_device_mesh(
         device_type: str,
-        mesh_shape: Tuple[int, ...],
+        mesh_shape: tuple[int, ...],
         *,
-        mesh_dim_names: Optional[Tuple[str, ...]] = None,
+        mesh_dim_names: Optional[tuple[str, ...]] = None,
     ) -> DeviceMesh:
         """
         Initializes a `DeviceMesh` based on `device_type`, `mesh_shape`, and `mesh_dim_names` parameters.
@@ -951,7 +994,7 @@ else:
         # assume valid device types are all letters
         if device_type and not device_type.isalpha():
             raise RuntimeError(
-                f"Device type with GPU index is not supported but got {device_type}. ",
+                f"Device type with index is not supported but got {device_type}. ",
                 "If you maintained a 'torch.device' object, it's recommended to pass in 'device.type'.",
             )
 

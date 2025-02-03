@@ -22,9 +22,11 @@ Submodules
 
     flex_attention
     bias
+    experimental
 
 .. toctree::
     :hidden:
 
     nn.attention.flex_attention
     nn.attention.bias
+    nn.attention.experimental

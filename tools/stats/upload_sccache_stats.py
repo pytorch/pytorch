@@ -31,7 +31,7 @@ def get_sccache_stats(
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Upload test stats to Rockset")
+    parser = argparse.ArgumentParser(description="Upload test stats to s3")
     parser.add_argument(
         "--workflow-run-id",
         type=int,

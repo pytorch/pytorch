@@ -1,9 +1,9 @@
 # mypy: allow-untyped-defs
 import functools
 from collections import deque
-from typing import Dict, List, Set, Tuple
 
 import torch
+from torch.utils._ordered_set import OrderedSet
 from torch.utils._pytree import tree_map
 
 from ..._dynamo.utils import counters
@@ -369,12 +369,20 @@ def is_b2b_gemm_good_on(
     # basic checks
     if not all(["val" in A_node.meta, "val" in B_node.meta, "val" in C_node.meta]):
         return False
-    A, B, C = (
+    fake_tensors = (
         A_node.meta["val"],
         B_node.meta["val"],
         C_node.meta["val"],
     )  # torch._subclasses.fake_tensor.FakeTensor
-    if not all([A.is_cuda, B.is_cuda, C.is_cuda]):
+
+    A, B, C = fake_tensors
+
+    def check_all_attr_true(objects, attr):
+        return all(hasattr(obj, attr) and getattr(obj, attr) for obj in objects)
+
+    if not check_all_attr_true(fake_tensors, "is_cuda") and not check_all_attr_true(
+        fake_tensors, "is_xpu"
+    ):
         return False
     if not all([len(A.shape) == 2, len(B.shape) == 2, len(C.shape) == 2]):
         return False
@@ -443,7 +451,7 @@ unoptimized_choice = ExternKernelChoice(unoptimized_b2b_gemm)
 
 
 def build_subgraph_buffer(
-    args: List[TensorBox],
+    args: list[TensorBox],
     subgraph: Subgraph,
 ):
     """
@@ -523,9 +531,9 @@ def tuned_b2b_gemm(
     A.realize()
     B.realize()
     C.realize()
-    layout = FixedLayout(A.get_device(), A.get_dtype(), [A.shape[0], C.shape[1]])
+    layout = FixedLayout(A.get_device_or_error(), A.get_dtype(), [A.shape[0], C.shape[1]])  # type: ignore[index]
     subgraph_buffer = build_subgraph_buffer(
-        [create_placeholder("inner_mm", A.get_dtype(), A.get_device())],
+        [create_placeholder("inner_mm", A.get_dtype(), A.get_device_or_error())],
         subgraph,
     )
     choices: list[TritonTemplateCaller] = []
@@ -603,7 +611,7 @@ def b2b_gemm_handler(match: Match, mat1: torch.fx.Node, mat2: torch.fx.Node) -> 
     def all_reach_via_pointwise_with_no_other_inputs(
         src: torch.fx.Node,
         dst: torch.fx.Node,
-    ) -> Tuple[bool, Set[torch.fx.Node]]:
+    ) -> tuple[bool, OrderedSet[torch.fx.Node]]:
         """
         check whether every user path from src reaches dst via pointwise nodes,
         with no other input nodes for the intermediates and dst;
@@ -611,8 +619,8 @@ def b2b_gemm_handler(match: Match, mat1: torch.fx.Node, mat2: torch.fx.Node) -> 
         (1) the Boolean value
         (2) the subgraph node set including src and dst (which only makes sense when the Boolean value is True)
         """
-        visited: Set[torch.fx.Node] = set()
-        input_counter: Dict[torch.fx.Node, int] = {}
+        visited = OrderedSet[torch.fx.Node]()
+        input_counter: dict[torch.fx.Node, int] = {}
 
         all_reachable = True
         queue = deque([src])
@@ -658,11 +666,11 @@ def b2b_gemm_handler(match: Match, mat1: torch.fx.Node, mat2: torch.fx.Node) -> 
     graph, module = inner_mm.graph, inner_mm.graph.owning_module
 
     # construct the new (sub)graph
-    subgraph_node_list: List[
+    subgraph_node_list: list[
         torch.fx.Node
     ] = []  # ordered list of nodes used for node removal later
     new_graph: torch.fx.Graph = torch.fx.Graph()
-    node_remapping: Dict[torch.fx.Node, torch.fx.Node] = {}
+    node_remapping: dict[torch.fx.Node, torch.fx.Node] = {}
     new_input_anchor: torch.fx.Node  # inner_mm, to be changed to an input node
     new_output_anchor: torch.fx.Node  # f_node, to be used to construct an output node
     new_input_node: torch.fx.Node

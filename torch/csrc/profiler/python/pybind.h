@@ -14,7 +14,7 @@ template <typename T>
 struct strong_pointer_type_caster {
   template <typename T_>
   static handle cast(
-      T_&& src,
+      const T_& src,
       return_value_policy /*policy*/,
       handle /*parent*/) {
     const auto* ptr = reinterpret_cast<const void*>(src.value_of());
@@ -33,7 +33,7 @@ template <typename T>
 struct strong_uint_type_caster {
   template <typename T_>
   static handle cast(
-      T_&& src,
+      const T_& src,
       return_value_policy /*policy*/,
       handle /*parent*/) {
     return handle(THPUtils_packUInt64(src.value_of()));

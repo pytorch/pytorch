@@ -1,7 +1,7 @@
 # mypy: allow-untyped-defs
 import functools
 import itertools
-from typing import Callable, List
+from typing import Any, Callable
 
 import torch
 import torch._prims_common as utils
@@ -12,10 +12,10 @@ from torch._higher_order_ops.utils import (
     _maybe_run_with_interpreter,
     _set_compilation_env,
     autograd_not_implemented,
+    first_slice_copy,
     reenter_make_fx,
     unique_graph_id,
 )
-from torch._inductor.utils import is_pointwise_use
 from torch._ops import HigherOrderOperator
 from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.fx.experimental.proxy_tensor import (
@@ -38,7 +38,7 @@ def wrap_combine_fn_flat(*args, combine_fn, spec, num_leaves):
     return combined_leaves
 
 
-def _interleave(a, b, dim):
+def _interleave(a, b, dim=0):
     # https://stackoverflow.com/questions/60869537/how-can-i-interleave-5-pytorch-tensors
     if b_trunc := (a.shape[dim] == b.shape[dim] + 1):
         pad = (
@@ -73,8 +73,8 @@ class AssociativeScanOp(HigherOrderOperator):
     def __init__(self):
         super().__init__("associative_scan")
 
-    def __call__(self, combine_fn, xs, dim):
-        return super().__call__(combine_fn, xs, dim)
+    def __call__(self, combine_fn, xs):
+        return super().__call__(combine_fn, xs)
 
 
 associative_scan_op = AssociativeScanOp()
@@ -124,11 +124,11 @@ def associative_scan(
 
     """
     if not callable(combine_fn):
-        raise RuntimeError("Combine_fn must be a callable, but got {combine_fn}")
+        raise ValueError("Combine_fn must be a callable, but got {combine_fn}")
     if not isinstance(dim, int):
-        raise RuntimeError("Dim must be an int, but got " + str(type(dim)))
+        raise ValueError("Dim must be an int, but got " + str(type(dim)))
     if combine_mode not in ["pointwise", "generic"]:
-        raise RuntimeError(
+        raise ValueError(
             "Combine_mode must either 'pointwise' or 'generic', but got {combine_mode}"
         )
 
@@ -146,53 +146,106 @@ def associative_scan(
         )
 
     if len(leaves) == 0:
-        raise RuntimeError("Expected at least 1 xs leaf")
+        raise ValueError("Expected at least 1 xs leaf")
     if any(not isinstance(x, torch.Tensor) for x in leaves):
-        raise RuntimeError("xs leaves must be a Tensor")
+        raise ValueError("xs leaves must be a Tensor")
+    if any(x.is_sparse for x in leaves):
+        raise ValueError("xs leaves must dense Tensors, consider using `to_dense()`")
+    if any(x.ndim <= dim for x in leaves):
+        raise ValueError(
+            "All xs leaves must at least have 'dim' number of dimensions and scan dimension > 0"
+        )
+    if any(x.shape[dim] == 0 for x in leaves):
+        raise ValueError(
+            "All xs leaves must at least have 'dim' number of dimensions and scan dimension > 0"
+        )
 
     if reverse:
         leaves = [torch.flip(elem, [dim]) for elem in leaves]
 
-    shape = leaves[0].shape
-    ndim = len(shape)
-    dim = utils.canonicalize_dim(ndim, dim)
+    ndim = leaves[0].ndim
+    orig_scan_dim = utils.canonicalize_dim(ndim, dim)
+    # leaves = [torch.movedim(elem, dim, 0) for elem in leaves]
+    leaves = [torch.movedim(elem, dim, 0) for elem in leaves]
 
-    for x in leaves[1:]:
-        assert x.shape == shape, "All xs tensors must have the same shape"
+    # Call the combine_fn with only a slice along the scan dim
+    # and check whether the output leaves have the same slice dimensions
+    sliced_leaves = [first_slice_copy(leaf) for leaf in leaves]
 
     out = combine_fn(
-        pytree.tree_unflatten(leaves, spec),
-        pytree.tree_unflatten(leaves, spec),
+        pytree.tree_unflatten(sliced_leaves, spec),
+        pytree.tree_unflatten(sliced_leaves, spec),
     )
-    out_leaves, tree_out = pytree.tree_flatten(out)
+    out_leaves = pytree.tree_leaves(out)
     if len(leaves) != len(out_leaves):
         raise RuntimeError(
             "The number of leaves of the pytree of the output of the operator needs to match the length of the pytree of the input"
         )
-    if any(x.shape != shape for x in out_leaves):
+    if any(
+        x.shape != x_sliced.shape
+        or x.dtype != x_sliced.dtype
+        or x.device != x_sliced.device
+        or x.stride() != x_sliced.stride()
+        for x, x_sliced in zip(out_leaves, sliced_leaves)
+    ):
         raise RuntimeError(
-            "The pytree of the output of the operator needs to match the xs pytree"
+            f"The metadata of the output of the operator needs to match the meta data of the xs pytree"
+            f"\n  xs metadata             : {[(x.shape, x.dtype, x.device, x.stride()) for x in sliced_leaves]}"
+            f"\n  operator output metadata: {[(x.shape, x.dtype, x.device, x.stride()) for x in out_leaves]}"
         )
 
-    combine_fn = functools.partial(
-        wrap_combine_fn_flat, combine_fn=combine_fn, spec=spec, num_leaves=len(leaves)
-    )
-
     if combine_mode == "generic":
-        result_flat = generic_associative_scan(combine_fn, leaves, dim)
+        # The generic_associative_scan implementation calls the combine_fn with a `batch` along the scan dimension
+        # For example, consider:
+        # def add(x: torch.Tensor, y: torch.Tensor):
+        #     return x + y
+        # leaves = torch.tensor([[0.0, 1.0, 2.0, 3.0]
+        #                        [0.0, 1.0, 2.0, 3.0]])
+        # which has shape 2 x 4;
+        # dim = 1;
+        # In the first iteration of `_scan` the combine_fn gets invoked with
+        # combine_fn([torch.tensor([[0.0, 2.0],
+        #                           [0.0, 2.0]])],
+        #            [torch.tensor([[1.0, 3.0],
+        #                           [1.0, 3.0]])])
+        # The arguments are of shape 2 x 2, but can be evaluated in parallel along the scan dimension.
+        # TODO: In case of the additional inputs, we the in_dims should be set to None
+        combine_fn = functools.partial(
+            wrap_combine_fn_flat,
+            combine_fn=torch.vmap(
+                combine_fn,
+                in_dims=(
+                    pytree.tree_unflatten([0] * len(leaves), spec),
+                    pytree.tree_unflatten([0] * len(leaves), spec),
+                ),
+                out_dims=0,
+            ),
+            spec=spec,
+            num_leaves=len(leaves),
+        )
+        result_flat = generic_associative_scan(combine_fn, leaves)
     else:
-        result_flat = associative_scan_op(combine_fn, leaves, dim)
+        combine_fn = functools.partial(
+            wrap_combine_fn_flat,
+            combine_fn=combine_fn,
+            spec=spec,
+            num_leaves=len(leaves),
+        )
+        result_flat = associative_scan_op(combine_fn, leaves)
 
     if reverse:
-        result_flat = [torch.flip(elem, [dim]) for elem in result_flat]
+        result_flat = [torch.flip(elem, [0]) for elem in result_flat]
+
+    # result_flat = [torch.movedim(elem, 0, orig_scan_dim) for elem in result_flat]
+    result_flat = [torch.movedim(elem, 0, orig_scan_dim) for elem in result_flat]
 
     return pytree.tree_unflatten(result_flat, spec)
 
 
-def generic_associative_scan(operator, elems_flat, dim=0):
+def generic_associative_scan(operator, leaves, dim=0):
     r"""
     This function performs the associative_scan operation.
-    The algorithm works by recursively collecting neighbours of ``elems_flat`` and subsequently
+    The algorithm works by recursively collecting neighbours of ``leaves`` and subsequently
     applying the ``operator`` on all pairs in parallel along ``dim``.
     The results of the recursive calls are later combined.
 
@@ -200,7 +253,7 @@ def generic_associative_scan(operator, elems_flat, dim=0):
         operator (Callable): A binary callable with type ``(Tensor, Tensor) -> Tensor``,
             or if input is a pytree ``(pytree, pytree) -> pytree``.
             This function must be pure, pointwise, and satisfy the associative property.
-        elems_flat (torch.Tensor): A list of torch.Tensors converted from the pytree of
+        leaves (torch.Tensor): A list of torch.Tensors converted from the pytree of
             ``xs`` provided to ``associative_scan``.
             All inputs are expected to have the same shape.
         dim (int): the dimension to scan over
@@ -211,7 +264,7 @@ def generic_associative_scan(operator, elems_flat, dim=0):
         def add(x: torch.Tensor, y: torch.Tensor):
             return x + y
 
-        elems_flat = torch.tensor([0.0, 1.0, 2.0, 3.0])
+        leaves = torch.tensor([0.0, 1.0, 2.0, 3.0])
 
         First iteration of _scan ->
             # odd_elems -> apply operator on all neighbours
@@ -280,24 +333,18 @@ def generic_associative_scan(operator, elems_flat, dim=0):
             safe_map(functools.partial(_interleave, dim=dim), even_elems, odd_elems)
         )
 
-    scans = _scan(elems_flat)
+    scans = _scan(leaves)
 
     return scans
 
 
 def trace_associative_scan(
-    proxy_mode, func_overload, combine_fn: Callable, xs: List[torch.Tensor], dim: int
+    proxy_mode, func_overload, combine_fn: Callable, xs: list[torch.Tensor]
 ):
+    from torch._inductor.utils import is_pointwise_use
+
     with disable_proxy_modes_tracing():
-        sample_xs = [
-            torch.empty_like(
-                x,
-                dtype=x.dtype,
-                device=x.device,
-                requires_grad=x.requires_grad,
-            )
-            for x in itertools.chain(xs, xs)
-        ]
+        sample_xs = [first_slice_copy(x) for x in itertools.chain(xs, xs)]
         combine_graph = reenter_make_fx(combine_fn)(*sample_xs)
 
     outputs = None
@@ -328,7 +375,7 @@ def trace_associative_scan(
 
     proxy_mode.tracer.root.register_module(combine_graph_name, combine_graph)
 
-    args = (combine_graph, xs, dim)
+    args = (combine_graph, xs)
     proxy_args = pytree.tree_map(proxy_mode.tracer.unwrap_proxy, args)
     out_proxy = proxy_mode.tracer.create_proxy(
         "call_function", func_overload, proxy_args, {}, name="associative_scan"
@@ -341,8 +388,8 @@ def trace_associative_scan(
 
 
 @associative_scan_op.py_impl(DispatchKey.CompositeExplicitAutograd)
-def associative_scan_op_dense(combine_fn, xs, dim):
-    raise NotImplementedError("associative_scan is not implemented for eager")
+def associative_scan_op_dense(combine_fn, xs):
+    return generic_associative_scan(combine_fn, xs)
 
 
 associative_scan_op.py_impl(DispatchKey.Autograd)(
@@ -351,22 +398,50 @@ associative_scan_op.py_impl(DispatchKey.Autograd)(
 
 
 @associative_scan_op.py_impl(ProxyTorchDispatchMode)
-def associative_scan_proxy_mode(mode, combine_fn, xs, dim):
-    return trace_associative_scan(mode, associative_scan_op, combine_fn, xs, dim)
+def associative_scan_proxy_mode(mode, combine_fn, xs):
+    return trace_associative_scan(mode, associative_scan_op, combine_fn, xs)
 
 
 @associative_scan_op.py_impl(FakeTensorMode)
-def assoiciative_scan_fake_tensor_mode(mode, combine_fn, xs, dim):
+def assoiciative_scan_fake_tensor_mode(mode, combine_fn, xs):
     with mode:
         return [x.clone() for x in xs]
 
 
 @associative_scan_op.py_functionalize_impl
-def associative_scan_functionalize(ctx, combine_fn, xs, dim):
+def associative_scan_functionalize(ctx, combine_fn, xs):
     unwrapped_xs = ctx.unwrap_tensors(xs)
-    with ctx.redispatch_to_next() as m:
+    with ctx.redispatch_to_next():
         functional_combine_fn = ctx.functionalize(
             _maybe_run_with_interpreter(combine_fn)
         )
-        ret = associative_scan_op(functional_combine_fn, unwrapped_xs, dim)
+        ret = associative_scan_op(functional_combine_fn, unwrapped_xs)
     return ctx.wrap_tensors(ret)
+
+
+def _fake_associative_scan(combine_fn, xs, dim, reverse=False):
+    inp_leaves, spec = pytree.tree_flatten(xs)
+    result_flat: list[Any] = []
+    num_leaves = len(inp_leaves)
+    op = reversed if reverse else lambda x: x
+
+    for ind in op(range(inp_leaves[0].size(dim))):
+        r = [
+            inp_leaves[leave_ind][(slice(None),) * dim + (ind,)]
+            for leave_ind in range(num_leaves)
+        ]
+        if (ind > 0 and not reverse) or (
+            ind < (inp_leaves[0].size(dim) - 1) and reverse
+        ):
+            r = combine_fn(
+                pytree.tree_unflatten(result_flat[-1], spec),
+                pytree.tree_unflatten(r, spec),
+            )
+        r_flat, _ = pytree.tree_flatten(r)
+        result_flat.append(r_flat)
+
+    results = [
+        torch.stack([e[leave_ind] for e in op(result_flat)], dim)
+        for leave_ind in range(num_leaves)
+    ]
+    return pytree.tree_unflatten(results, spec)

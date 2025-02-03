@@ -307,25 +307,29 @@ void pytorch_q8gemm_ukernel_4x4c2__sse2(
       vout,
       _mm_load_si128((const __m128i*)quantization_params->sse2.output_min));
 
-  uint8_t* c0 = c;
-  uint8_t* c1 = (uint8_t*)((uintptr_t)c0 + c_stride);
+  typedef PYTORCH_QNNP_UNALIGNED uint8_t unaligned_uint8_t;
+  typedef PYTORCH_QNNP_UNALIGNED uint32_t unaligned_uint32_t;
+  unaligned_uint8_t* c0 = c;
+  unaligned_uint8_t* c1 = (unaligned_uint8_t*)((uintptr_t)c0 + c_stride);
   if (mr < 2) {
     c1 = c0;
   }
-  uint8_t* c2 = (uint8_t*)((uintptr_t)c1 + c_stride);
+  unaligned_uint8_t* c2 = (unaligned_uint8_t*)((uintptr_t)c1 + c_stride);
   if (mr <= 2) {
     c2 = c1;
   }
-  uint8_t* c3 = (uint8_t*)((uintptr_t)c2 + c_stride);
+  unaligned_uint8_t* c3 = (unaligned_uint8_t*)((uintptr_t)c2 + c_stride);
   if (mr != 4) {
     c3 = c2;
   }
   if (nr == 4) {
-    *((uint32_t*)c0) = (uint32_t)_mm_cvtsi128_si32(vout);
-    *((uint32_t*)c1) = (uint32_t)_mm_cvtsi128_si32(_mm_srli_epi64(vout, 32));
-    *((uint32_t*)c2) =
-        (uint32_t)_mm_cvtsi128_si32(_mm_unpackhi_epi32(vout, vout));
-    *((uint32_t*)c3) = (uint32_t)_mm_cvtsi128_si32(_mm_srli_si128(vout, 12));
+    *((unaligned_uint32_t*)c0) = (unaligned_uint32_t)_mm_cvtsi128_si32(vout);
+    *((unaligned_uint32_t*)c1) =
+        (unaligned_uint32_t)_mm_cvtsi128_si32(_mm_srli_epi64(vout, 32));
+    *((unaligned_uint32_t*)c2) =
+        (unaligned_uint32_t)_mm_cvtsi128_si32(_mm_unpackhi_epi32(vout, vout));
+    *((unaligned_uint32_t*)c3) =
+        (unaligned_uint32_t)_mm_cvtsi128_si32(_mm_srli_si128(vout, 12));
   } else {
     typedef PYTORCH_QNNP_UNALIGNED uint16_t unaligned_uint16_t;
     if (nr >= 2) {

@@ -25,7 +25,8 @@ if [ -n "$ANACONDA_PYTHON_VERSION" ]; then
   mkdir -p /opt/conda
   chown jenkins:jenkins /opt/conda
 
-  source "$(dirname "${BASH_SOURCE[0]}")/common_utils.sh"
+  SCRIPT_FOLDER="$( cd "$(dirname "$0")" ; pwd -P )"
+  source "${SCRIPT_FOLDER}/common_utils.sh"
 
   pushd /tmp
   wget -q "${BASE_URL}/${CONDA_FILE}"
@@ -65,11 +66,10 @@ if [ -n "$ANACONDA_PYTHON_VERSION" ]; then
 
   # Install PyTorch conda deps, as per https://github.com/pytorch/pytorch README
   if [[ $(uname -m) == "aarch64" ]]; then
-    CONDA_COMMON_DEPS="astunparse pyyaml setuptools openblas==0.3.25=*openmp* ninja==1.11.1 scons==4.5.2"
+    conda_install "openblas==0.3.28=*openmp*"
   else
-    CONDA_COMMON_DEPS="astunparse pyyaml mkl=2021.4.0 mkl-include=2021.4.0 setuptools"
+    conda_install "mkl=2021.4.0 mkl-include=2021.4.0"
   fi
-  conda_install ${CONDA_COMMON_DEPS}
 
   # Install llvm-8 as it is required to compile llvmlite-0.30.0 from source
   # and libpython-static for torch deploy
@@ -85,8 +85,9 @@ if [ -n "$ANACONDA_PYTHON_VERSION" ]; then
 
   # Magma package names are concatenation of CUDA major and minor ignoring revision
   # I.e. magma-cuda102 package corresponds to CUDA_VERSION=10.2 and CUDA_VERSION=10.2.89
+  # Magma is installed from a tarball in the ossci-linux bucket into the conda env
   if [ -n "$CUDA_VERSION" ]; then
-    conda_install magma-cuda$(TMP=${CUDA_VERSION/./};echo ${TMP%.*[0-9]}) -c pytorch
+    ${SCRIPT_FOLDER}/install_magma_conda.sh $(cut -f1-2 -d'.' <<< ${CUDA_VERSION}) ${ANACONDA_PYTHON_VERSION}
   fi
 
   # Install some other packages, including those needed for Python test reporting

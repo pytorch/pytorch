@@ -89,6 +89,7 @@ class MaybeRef {
 
  private:
   std::optional<T> storage_;
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-const-or-ref-data-members)
   const T& ref_;
 };
 

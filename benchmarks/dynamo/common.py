@@ -23,19 +23,7 @@ import time
 import weakref
 from contextlib import contextmanager
 from pathlib import Path
-from typing import (
-    Any,
-    Callable,
-    Generator,
-    List,
-    Mapping,
-    NamedTuple,
-    Optional,
-    Sequence,
-    Tuple,
-    Type,
-    TYPE_CHECKING,
-)
+from typing import Any, Callable, NamedTuple, Optional, TYPE_CHECKING
 from typing_extensions import Self
 from unittest.mock import MagicMock
 
@@ -98,6 +86,8 @@ except ImportError:
 
 
 if TYPE_CHECKING:
+    from collections.abc import Generator, Mapping, Sequence
+
     from torch.onnx._internal.fx import diagnostics
 
 
@@ -111,6 +101,11 @@ os.environ["KINETO_LOG_LEVEL"] = "5"
 
 current_name = ""
 current_device = ""
+current_backend = ""
+current_mode = ""
+current_dtype = ""
+current_quantization = ""
+current_settings = None
 current_onnx_compiler = ""
 current_batch_size = None
 output_filename = None
@@ -141,6 +136,12 @@ try:
     from .fb.common import INTERNAL_CI_SKIP_DYNAMIC_BATCH_ONLY
 except ImportError:
     INTERNAL_CI_SKIP_DYNAMIC_BATCH_ONLY = set()
+
+try:
+    from pytorch.benchmark.fb.run_utils import trace_handler
+except ImportError:
+    trace_handler = None
+
 
 CI_SKIP_DYNAMIC_BATCH_ONLY = {
     "sam",
@@ -188,7 +189,7 @@ BENCHMARK_USE_SGD = {
     "stable_diffusion_text_encoder",
     "timm_efficientdet",
     "timm_nfnet",
-    "timm_regnet",
+    "timm_resnest",
     "timm_vision_transformer",
     "timm_vovnet",
     "vgg16",
@@ -356,10 +357,19 @@ def load_model_from_path(path_and_class_str):
     return model, inputs
 
 
-def output_csv(filename, headers, row):
+def write_outputs(filename, headers, row):
+    """
+    Write both CSV and JSON outputs using the original CSV output interface
+    """
     global disable_output
     if disable_output:
         return
+
+    output_csv(filename, headers, row)
+    output_json(filename, headers, row)
+
+
+def output_csv(filename, headers, row):
     if os.path.exists(filename):
         with open(filename) as fd:
             lines = list(csv.reader(fd)) or [[]]
@@ -375,6 +385,73 @@ def output_csv(filename, headers, row):
         writer = csv.writer(fd, lineterminator="\n")
         for line in lines:
             writer.writerow(list(line) + ["0"] * (len(headers) - len(line)))
+
+
+def output_json(filename, headers, row):
+    """
+    Write the result into JSON format, so that it can be uploaded to the benchmark database
+    to be displayed on OSS dashboard. The JSON format is defined at
+    https://github.com/pytorch/pytorch/wiki/How-to-integrate-with-PyTorch-OSS-benchmark-database
+    """
+    origin = ""
+    if "torchbench" in filename:
+        origin = "torchbench"
+    elif "huggingface" in filename:
+        origin = "huggingface"
+    elif "timm_models" in filename:
+        origin = "timm_models"
+
+    extra_info = {
+        "device": current_device,
+        "quantization": current_quantization,
+        "batch_size": current_batch_size,
+    }
+    if current_settings:
+        extra_info.update(current_settings)
+
+    mapping_headers = {headers[i]: v for i, v in enumerate(row)}
+    with open(f"{os.path.splitext(filename)[0]}.json", "a") as f:
+        for header, value in mapping_headers.items():
+            # These headers are not metric names
+            if header in ("dev", "name", "batch_size"):
+                continue
+
+            # Make sure that the record is valid
+            if not current_name:
+                continue
+
+            record = {
+                "benchmark": {
+                    "name": "TorchInductor",
+                    "mode": current_mode,
+                    "dtype": current_dtype,
+                    "extra_info": extra_info,
+                },
+                "model": {
+                    "name": current_name,
+                    "type": "OSS model",
+                    "backend": current_backend,
+                    "origins": [origin],
+                },
+            }
+
+            # NB: When the metric is accuracy, its value is actually a string, i.e. pass, and
+            # not a number. ClickHouse doesn't support mix types atm. It has a Variant type
+            # https://clickhouse.com/docs/en/sql-reference/data-types/variant, but this isn't
+            # recommended by CH team themselves. The workaround here is to store that value
+            # in the extra_info field instead.
+            if isinstance(value, str):
+                record["metric"] = {
+                    "name": header,
+                    "extra_info": {"benchmark_values": [value]},
+                }
+            else:
+                record["metric"] = {
+                    "name": header,
+                    "benchmark_values": [value],
+                }
+
+            print(json.dumps(record), file=f)
 
 
 def get_suite_from_model_iter_fn(model_iter_fn):
@@ -461,6 +538,8 @@ def output_signpost(data, args, suite, error=None):
 
     from torch._dynamo.utils import calculate_time_spent, compilation_time_metrics
 
+    wall_time_by_phase = calculate_time_spent()
+
     open_source_signpost(
         subsystem="dynamo_benchmark",
         name=event_name,
@@ -473,7 +552,7 @@ def output_signpost(data, args, suite, error=None):
                 # NB: Externally, compilation_metrics colloquially refers to
                 # the coarse-grained phase timings, even though internally
                 # they are called something else
-                "compilation_metrics": calculate_time_spent(),
+                "compilation_metrics": wall_time_by_phase,
                 "agg_compilation_metrics": {
                     k: sum(v) for k, v in compilation_time_metrics.items()
                 },
@@ -485,6 +564,8 @@ def output_signpost(data, args, suite, error=None):
             }
         ),
     )
+
+    return wall_time_by_phase["total_wall_time"]
 
 
 def nothing(f):
@@ -596,14 +677,14 @@ def print_summary_table(data, print_dataframe=False):
                 print(col.ljust(width), f"mean={data[col].mean():.3f}x")
             elif col in ("accuracy"):
                 pass_rate = (data[col] == "pass").mean()
-                print(col.ljust(width), f"pass_rate={100*pass_rate:.2f}%")
+                print(col.ljust(width), f"pass_rate={100 * pass_rate:.2f}%")
             else:
                 cdata = data[col]
                 print(
                     col.ljust(width),
                     f"gmean={gmean(cdata):.2f}x mean={cdata.mean():.3f}x",
                 )
-        except Exception as e:
+        except Exception:
             pass
 
 
@@ -665,7 +746,7 @@ def timed(
     return (time_total, result) if return_result else time_total
 
 
-def _normalize_bench_inputs(example_inputs) -> Tuple[Tuple[Any], Mapping[str, Any]]:
+def _normalize_bench_inputs(example_inputs) -> tuple[tuple[Any], Mapping[str, Any]]:
     # NOTE(bowbao): For huggingface benchmark, example_inputs are formatted as dictionary,
     # and consumed like `model(**example_inputs)`.
     # For other benchmarks, example_inputs are formatted as tuple and consumed
@@ -729,7 +810,7 @@ def coverage_experiment(args, model_iter_fn, model, example_inputs):
     with profiler.prof:
         frozen_model_iter_fn(model, example_inputs)
     coverage_result = profiler.results()
-    output_csv(
+    write_outputs(
         output_filename,
         (
             "dev",
@@ -768,7 +849,7 @@ def recompile_profiler_experiment(args, model_iter_fn, model, example_inputs):
         model_iter_fn
     )
     opt_model_iter_fn(model, example_inputs)
-    output_csv(
+    write_outputs(
         output_filename, ["model", "profiler report"], [current_name, prof.report()]
     )
     met = prof.get_metrics()
@@ -830,7 +911,7 @@ def latency_experiment(args, model_iter_fn, model, example_inputs, mark, **kwarg
 
     times = args.iterations_per_run
 
-    with maybe_profile(args.export_profiler_trace) as p:
+    with maybe_profile(args.export_profiler_trace, **args.profile_details) as p:
         for rep in trange(args.repeat, desc="running benchmark"):
             inputs = (
                 randomize_input(copy.deepcopy(example_inputs))
@@ -923,7 +1004,7 @@ def latency_experiment_summary(suite_name, args, model, timings, **kwargs):
         for k, v in kwargs["dynamo_stats"].items():
             headers.append(k)
             row.append(v)
-    output_csv(
+    write_outputs(
         output_filename,
         headers,
         row,
@@ -932,7 +1013,7 @@ def latency_experiment_summary(suite_name, args, model, timings, **kwargs):
     assert (
         output_filename.find(".csv") > 0
     ), f"expected output_filename to be a .csv, but got {output_filename}"
-    output_csv(
+    write_outputs(
         output_filename[:-4] + "_compilation_metrics.csv",
         first_headers + c_headers,
         first_fields + c_data,
@@ -985,11 +1066,9 @@ def speedup_experiment(args, model_iter_fn, model, example_inputs, **kwargs):
     tolerance = args.xla_tolerance if args.trace_on_xla else 1e-4
     torch._dynamo.config.repro_tolerance = tolerance
 
-    with maybe_profile(args.export_profiler_trace) as p:
+    with maybe_profile(args.export_profiler_trace, **args.profile_details) as p:
         if args.export_aot_inductor:
-            frozen_model_iter_fn = export_aot_inductor(
-                model, example_inputs, args.devices[0]
-            )
+            frozen_model_iter_fn = export_aot_inductor(model, example_inputs)
         else:
             frozen_model_iter_fn = torch._dynamo.run(model_iter_fn)
 
@@ -1036,9 +1115,13 @@ def speedup_experiment(args, model_iter_fn, model, example_inputs, **kwargs):
         name = args.profiler_trace_name + "_" + model.name
         if hasattr(args, "rank"):
             name += f"_rank_{args.rank}"
-        name += ".json"
-        name = os.path.join(torch._dynamo.config.base_dir, name)
-        p.export_chrome_trace(name)
+        if args.export_perfdoctor and trace_handler:
+            trace_handler(name, p)
+        else:
+            name += ".json"
+            name = os.path.join(torch._dynamo.config.base_dir, name)
+            p.export_chrome_trace(name)
+
     median = np.median(timings, axis=0)
     speedup = median[0] / median[1]
     if args.dump_raw_metrics:
@@ -1094,7 +1177,7 @@ def speedup_experiment(args, model_iter_fn, model, example_inputs, **kwargs):
         for k, v in kwargs["dynamo_stats"].items():
             headers.append(k)
             row.append(v)
-    output_csv(
+    write_outputs(
         output_filename,
         headers,
         row,
@@ -1103,7 +1186,7 @@ def speedup_experiment(args, model_iter_fn, model, example_inputs, **kwargs):
     assert (
         output_filename.find(".csv") > 0
     ), f"expected output_filename to be a .csv, but got {output_filename}"
-    output_csv(
+    write_outputs(
         output_filename[:-4] + "_compilation_metrics.csv",
         first_headers + c_headers,
         first_fields + c_data,
@@ -1179,7 +1262,7 @@ def speedup_experiment_ds(args, model_iter_fn, model, example_inputs):
             ]
         )
     )
-    output_csv(
+    write_outputs(
         output_filename,
         ("dev", "name", "batch_size", "speedup mean", "speedup median", "speedup var"),
         [
@@ -1341,7 +1424,7 @@ def speedup_experiment_onnx(
         row.append(kwargs["compilation_latency"])
         row.append(kwargs["compression_ratio"])
 
-    output_csv(
+    write_outputs(
         output_filename,
         headers,
         row,
@@ -1350,7 +1433,7 @@ def speedup_experiment_onnx(
     assert (
         output_filename.find(".csv") > 0
     ), f"expected output_filename to be a .csv, but got {output_filename}"
-    output_csv(
+    write_outputs(
         output_filename[:-4] + "_compilation_metrics.csv",
         ["dev", "name", "batch_size"] + headers,
         [current_device, current_name, current_batch_size] + data,
@@ -1424,7 +1507,7 @@ def baselines(models, model_iter_fn, example_inputs, args):
             for s, p, m in zip(speedup, pvalue, [m for n, m in models[1:]])
         ]
     )
-    output_csv(
+    write_outputs(
         output_filename,
         ("dev", "name", "batch_size") + tuple(n for n, m in models[1:]),
         [current_device, current_name, current_batch_size]
@@ -1451,7 +1534,7 @@ def xla(args, model_iter_fn, model, example_inputs):
     pvalue = ttest_ind(timings[:, 0], timings[:, 1]).pvalue
     time_baseline, time_xla = np.median(timings, axis=0)
     speedup = time_baseline / time_xla
-    output_csv(
+    write_outputs(
         output_filename,
         ("dev", "name", "batch_size", "speedup", "time_baseline", "time_xla"),
         [
@@ -1487,7 +1570,7 @@ class AOTInductorModelCache:
     cache = {}
 
     @classmethod
-    def load(cls, model, example_inputs, device):
+    def load(cls, model, example_inputs):
         import torch._inductor
         import torch.export._trace
         from torch.export.dynamic_shapes import _tree_map_with_path
@@ -1515,18 +1598,17 @@ class AOTInductorModelCache:
                 _produce_dynamic_shapes_for_export, combined_args
             )
 
-            gm = torch.export._trace._export(
+            ep = torch.export.export(
                 model,
                 example_args,
                 example_kwargs,
                 dynamic_shapes=dynamic_shapes,
-                pre_dispatch=True,
                 strict=False,
-            ).module()
+            )
             with torch.no_grad():
-                so_path = torch._inductor.aot_compile(gm, example_args, example_kwargs)  # type: ignore[arg-type]
+                package_path = torch._inductor.aoti_compile_and_package(ep)  # type: ignore[arg-type]
 
-            cls.cache[key] = torch._export.aot_load(so_path, device)
+            cls.cache[key] = torch._inductor.aoti_load_package(package_path)
 
         return cls.cache[key]
 
@@ -1544,7 +1626,7 @@ def export(model, example_inputs):
     )
 
     ep = torch.export.export(
-        model, example_args, example_kwargs, dynamic_shapes=dynamic_shapes
+        model, example_args, example_kwargs, dynamic_shapes=dynamic_shapes, strict=True
     )
 
     def opt_export(_, example_inputs):
@@ -1554,8 +1636,8 @@ def export(model, example_inputs):
     return opt_export
 
 
-def export_aot_inductor(model, example_inputs, device):
-    optimized = AOTInductorModelCache.load(model, example_inputs, device)
+def export_aot_inductor(model, example_inputs):
+    optimized = AOTInductorModelCache.load(model, example_inputs)
 
     def opt_aot_inductor(_, example_inputs, collect_outputs=False):
         example_args, example_kwargs = _normalize_bench_inputs(example_inputs)
@@ -1702,7 +1784,7 @@ class OnnxModel(abc.ABC):
             for ort_input, pt_input in zip(self.onnx_session.get_inputs(), pt_inputs)
         }
 
-    def adapt_onnx_outputs_to_pt(self, onnx_outputs: List[npt.NDArray]) -> Any:
+    def adapt_onnx_outputs_to_pt(self, onnx_outputs: list[npt.NDArray]) -> Any:
         pt_outputs = [
             torch.from_numpy(onnx_output).to(current_device)
             for onnx_output in onnx_outputs
@@ -2140,11 +2222,11 @@ class OnnxExportErrorRow:
         )
 
     @property
-    def headers(self) -> List[str]:
+    def headers(self) -> list[str]:
         return [field.name for field in dataclasses.fields(self)]
 
     @property
-    def row(self) -> List[str]:
+    def row(self) -> list[str]:
         return [getattr(self, field.name) for field in dataclasses.fields(self)]
 
 
@@ -2194,7 +2276,7 @@ class OnnxContext:
 
 def optimize_onnx_ctx(
     output_directory: str,
-    onnx_model_cls: Type[OnnxModel],
+    onnx_model_cls: type[OnnxModel],
     run_n_iterations: Callable,
     dynamic_shapes: bool = False,
     copy_before_export: bool = False,
@@ -2248,7 +2330,7 @@ def optimize_onnx_ctx(
             # `torch.onnx.dynamo_export` raises error that encloses diagnostics.
             diagnostic_context = e.onnx_program.diagnostic_context
             for parsed_error in parser.parse_diagnostic_context(diagnostic_context):
-                output_csv(
+                write_outputs(
                     output_error_filename, parsed_error.headers, parsed_error.row
                 )
             if context.onnx_model is not None:
@@ -2264,7 +2346,7 @@ def optimize_onnx_ctx(
                 cause_of_exception, diagnostics.RuntimeErrorWithDiagnostic
             ):
                 parsed_error = parser.parse_exception(cause_of_exception)
-                output_csv(
+                write_outputs(
                     output_error_filename, parsed_error.headers, parsed_error.row
                 )
             raise
@@ -2272,7 +2354,7 @@ def optimize_onnx_ctx(
             # `torch.onnx.export` errors.
             # ORT errors.
             parsed_error = parser.parse_exception(e)
-            output_csv(output_error_filename, parsed_error.headers, parsed_error.row)
+            write_outputs(output_error_filename, parsed_error.headers, parsed_error.row)
             raise
 
     run_n_iterations_onnx.context = context
@@ -2699,11 +2781,11 @@ class BenchmarkRunner:
             batch_size = self.decay_batch_exp(batch_size)
         return 1
 
-    def run_n_iterations(self, mod, inputs):
+    def run_n_iterations(self, mod, inputs, model_iter_fn):
         n = self.args.iterations
         for _ in range(n - 1):
-            self.model_iter_fn(mod, inputs, collect_outputs=False)
-        return self.model_iter_fn(mod, inputs, collect_outputs=True)
+            model_iter_fn(mod, inputs, collect_outputs=False)
+        return model_iter_fn(mod, inputs, collect_outputs=True)
 
     @torch._disable_dynamo(recursive=True)
     def optimizer_zero_grad(self, mod):
@@ -2839,13 +2921,17 @@ class BenchmarkRunner:
                 headers.append(k)
                 fields.append(v)
 
-            output_csv(output_filename, headers, fields)
-
-            output_signpost(
+            total_wall_time = output_signpost(
                 dict(zip(o_headers, o_fields)),
                 self.args,
                 self.suite_name,
             )
+            headers.append("compilation_latency")
+            fields.append(total_wall_time)
+            write_outputs(output_filename, headers, fields)
+
+            if self.args.print_compilation_time:
+                print(f"Compilation time (from dynamo_timed): {total_wall_time}")
 
             return accuracy_status
 
@@ -2867,7 +2953,9 @@ class BenchmarkRunner:
                     clone_inputs(example_inputs),
                 )
                 self.init_optimizer(name, current_device, model_fp64.parameters())
-                fp64_outputs = self.run_n_iterations(model_fp64, inputs_fp64)
+                fp64_outputs = self.run_n_iterations(
+                    model_fp64, inputs_fp64, self.model_iter_fn
+                )
                 fp64_outputs = tree_map(
                     lambda x: x.to(torch.float64)
                     if isinstance(x, torch.Tensor) and x.is_floating_point()
@@ -2900,7 +2988,7 @@ class BenchmarkRunner:
                 model_copy = self.deepcopy_and_maybe_parallelize(model)
                 self.init_optimizer(name, current_device, model_copy.parameters())
                 correct_result = self.run_n_iterations(
-                    model_copy, clone_inputs(example_inputs)
+                    model_copy, clone_inputs(example_inputs), self.model_iter_fn
                 )
             except Exception as e:
                 accuracy_status = (
@@ -2921,7 +3009,7 @@ class BenchmarkRunner:
                 model_copy = self.deepcopy_and_maybe_parallelize(model)
                 self.init_optimizer(name, current_device, model_copy.parameters())
                 correct_rerun_result = self.run_n_iterations(
-                    model_copy, clone_inputs(example_inputs)
+                    model_copy, clone_inputs(example_inputs), self.model_iter_fn
                 )
             except Exception as e:
                 accuracy_status = (
@@ -2953,7 +3041,7 @@ class BenchmarkRunner:
                     )
                 ):
                     is_same = False
-            except Exception as e:
+            except Exception:
                 # Sometimes torch.allclose may throw RuntimeError
                 is_same = False
 
@@ -2966,6 +3054,7 @@ class BenchmarkRunner:
             # Run with Dynamo
             reset_rng_state()
             torch._dynamo.reset()
+            torch._dynamo.utils.counters.clear()
             model_copy = None
             try:
                 model_copy = self.deepcopy_and_maybe_parallelize(model)
@@ -2980,13 +3069,15 @@ class BenchmarkRunner:
                         )
                         new_result = optimized_model_iter_fn(model_copy, example_inputs)
                 else:
-                    optimized_model_iter_fn = optimize_ctx(self.run_n_iterations)
+                    optimized_model_iter_fn = optimize_ctx(self.model_iter_fn)
                     with maybe_enable_compiled_autograd(
                         self.args.compiled_autograd,
                         fullgraph=self.args.nopython,
                         dynamic=self.args.dynamic_shapes,
                     ):
-                        new_result = optimized_model_iter_fn(model_copy, example_inputs)
+                        new_result = self.run_n_iterations(
+                            model_copy, example_inputs, optimized_model_iter_fn
+                        )
             except Exception as e:
                 log.exception("")
                 print(
@@ -3024,6 +3115,14 @@ class BenchmarkRunner:
                 # The downside and potential problem, is that the output formats may be different.
                 # E.g., the output order might not match, None might be part of output, etc.
 
+            force_max_multiplier = False
+            if (
+                self.args.freezing
+                and self.args.bfloat16
+                and torch._dynamo.utils.counters["inductor"]["binary_folding_conv"] > 0
+            ):
+                force_max_multiplier = True
+
             try:
                 if self.args.training and self.args.amp:
                     if process_fn := self.get_output_amp_train_process_func.get(
@@ -3043,9 +3142,10 @@ class BenchmarkRunner:
                     ),
                     cos_similarity=cos_similarity,
                     tol=tolerance,
+                    force_max_multiplier=force_max_multiplier,
                 ):
                     is_same = False
-            except Exception as e:
+            except Exception:
                 # Sometimes torch.allclose may throw RuntimeError
                 is_same = False
 
@@ -3081,7 +3181,9 @@ class BenchmarkRunner:
                 lambda x: x.to(base_device), example_inputs_copy
             )
             self.init_optimizer(name, base_device, model_copy.parameters())
-            correct_result = self.run_n_iterations(model_copy, example_inputs_copy)
+            correct_result = self.run_n_iterations(
+                model_copy, example_inputs_copy, self.model_iter_fn
+            )
 
             # Run with Dynamo
             # Sometime CI fails with random triton compilation failure which will be skipped for now
@@ -3090,9 +3192,11 @@ class BenchmarkRunner:
             torch._dynamo.reset()
             try:
                 self.init_optimizer(name, current_device, model.parameters())
-                optimized_model_iter_fn = optimize_ctx(self.run_n_iterations)
-                new_result = optimized_model_iter_fn(model, example_inputs)
-            except Exception as e:
+                optimized_model_iter_fn = optimize_ctx(self.model_iter_fn)
+                new_result = self.run_n_iterations(
+                    model_copy, example_inputs, optimized_model_iter_fn
+                )
+            except Exception:
                 log.exception("")
                 print(
                     "TorchDynamo optimized model failed to run because of following error"
@@ -3128,7 +3232,7 @@ class BenchmarkRunner:
                 mean.item(),
                 div.item(),
             ]
-            output_csv(output_filename, headers, fields)
+            write_outputs(output_filename, headers, fields)
         return tolerance_status
 
     def run_performance_test_non_alternate(
@@ -3207,13 +3311,9 @@ class BenchmarkRunner:
             )
 
             if self.args.export_aot_inductor:
-                t_0 = time.perf_counter()
                 optimized_model_iter_fn = optimize_ctx
-                t_1 = time.perf_counter()
-                aot_compilation_time = t_1 - t_0
             else:
                 optimized_model_iter_fn = optimize_ctx(self.model_iter_fn)
-                aot_compilation_time = 0
 
             with maybe_enable_compiled_autograd(
                 self.args.compiled_autograd,
@@ -3253,7 +3353,7 @@ class BenchmarkRunner:
                 )
                 dynamo_cache_lookup_latency = events[0].self_cpu_time_total
 
-            compilation_time = dynamo_latency - eager_latency + aot_compilation_time
+            compilation_time = dynamo_latency - eager_latency
             compression_ratio = (
                 eager_peak_mem / dynamo_peak_mem if dynamo_peak_mem else 0.0
             )
@@ -3356,21 +3456,21 @@ class BenchmarkRunner:
                 self.args.snapshot_memory, f"eager_{self.args.only}"
             ):
                 eager_latency, eager_peak_mem, _ = warmup(
-                    self.model_iter_fn, model, example_inputs, "eager"
+                    self.model_iter_fn, copy.deepcopy(model), example_inputs, "eager"
                 )
                 if self.args.use_warm_peak_memory:
                     _, eager_peak_mem, _ = warmup(
-                        self.model_iter_fn, model, example_inputs, "eager", niters=1
+                        self.model_iter_fn,
+                        copy.deepcopy(model),
+                        example_inputs,
+                        "eager",
+                        niters=1,
                     )
 
             if self.args.export_aot_inductor:
-                t_0 = time.perf_counter()
                 optimized_model_iter_fn = optimize_ctx
-                t_1 = time.perf_counter()
-                aot_compilation_time = t_1 - t_0
             else:
                 optimized_model_iter_fn = optimize_ctx(self.model_iter_fn)
-                aot_compilation_time = 0
 
             with maybe_enable_compiled_autograd(
                 self.args.compiled_autograd,
@@ -3410,7 +3510,7 @@ class BenchmarkRunner:
                 )
                 dynamo_cache_lookup_latency = events[0].self_cpu_time_total
 
-            compilation_time = dynamo_latency - eager_latency + aot_compilation_time
+            compilation_time = dynamo_latency - eager_latency
             compression_ratio = (
                 eager_peak_mem / dynamo_peak_mem if dynamo_peak_mem else 0.0
             )
@@ -3485,7 +3585,7 @@ class BenchmarkRunner:
 
         try:
             shutil.move("repro.py", f"{repro_dir}/{name}_repro.py")
-        except OSError as e:
+        except OSError:
             logging.error("Could not find repro script for model %s", name)
         else:
             logging.info(
@@ -3591,7 +3691,7 @@ class BenchmarkRunner:
                 user_stack = add_double_quotes(
                     ", ".join([str(x) for x in graph_break.user_stack])
                 )
-                output_csv(
+                write_outputs(
                     filename,
                     ["model", "reason", "user_stack"],
                     [current_name, reason, user_stack],
@@ -3848,6 +3948,14 @@ def parse_args(args=None):
         "--profiler-trace-name",
         "--profiler_trace_name",
         help="Overwrites exported trace name",
+    )
+    parser.add_argument(
+        "--profile-details", action="store_true", help="More detailed profiler trace."
+    )
+    parser.add_argument(
+        "--export-perfdoctor",
+        action="store_true",
+        help="Export Chrome trace to perf doctor. (internal only)",
     )
     parser.add_argument(
         "--diff-branch",
@@ -4274,7 +4382,7 @@ def write_csv_when_exception(args, name: str, status: str, device=None):
         rows = [[device, name, placeholder_batch_size, 0.0] for device in devices]
 
     for row in rows:
-        output_csv(output_filename, headers, row)
+        write_outputs(output_filename, headers, row)
 
 
 def run(runner, args, original_dir=None):
@@ -4312,9 +4420,6 @@ def run(runner, args, original_dir=None):
             # Set translation validation on by default on CI accuracy runs.
             torch.fx.experimental._config.translation_validation = True
 
-        ci = functools.partial(
-            CI, args.backend, training=args.training, dynamic=args.dynamic_shapes
-        )
     if args.ddp:
         assert args.training, "DDP benchmark requires --training mode"
         torch._dynamo.config.optimize_ddp = args.optimize_ddp_mode
@@ -4376,6 +4481,16 @@ def run(runner, args, original_dir=None):
 
         # Stricter check to disable fallbacks
         args.suppress_errors = False
+
+        if not args.disable_cudagraphs:
+            runner.skip_models.update(
+                {
+                    # xfail: https://github.com/pytorch/pytorch/issues/145773
+                    "convit_base",
+                    "llama",
+                    "cm3leon_generate",
+                }
+            )
 
     if args.device_index is not None:
         if args.multiprocess:
@@ -4469,6 +4584,11 @@ def run(runner, args, original_dir=None):
         current_name, \
         current_device, \
         current_batch_size, \
+        current_backend, \
+        current_mode, \
+        current_dtype, \
+        current_quantization, \
+        current_settings, \
         output_filename, \
         disable_output, \
         optimize_ctx, \
@@ -4585,9 +4705,7 @@ def run(runner, args, original_dir=None):
     elif args.backend or args.export_aot_inductor:
         if args.export_aot_inductor:
             assert not args.training, "AOTInductor only supports inference"
-            optimize_ctx = functools.partial(
-                export_aot_inductor, device=args.devices[0]
-            )
+            optimize_ctx = functools.partial(export_aot_inductor)
 
             # AOTInductor doesn't support control flow yet
             runner.skip_models.update(runner.skip_models_due_to_control_flow)
@@ -4682,10 +4800,19 @@ def run(runner, args, original_dir=None):
         for device in args.devices:
             batch_size = runner.batch_size_finder(device, args.only)
             print(args.only, batch_size)
-            output_csv(output_filename, [], [args.only, batch_size])
+            write_outputs(output_filename, [], [args.only, batch_size])
         return
 
+    args.profile_details = {}
     if args.export_profiler_trace:
+        if args.profile_details:
+            args.profile_details = {
+                "record_shapes": True,
+                "profile_memory": True,
+                "with_stack": True,
+                "with_modules": True,
+            }
+
         if args.profiler_trace_name is None:
             if args.backend:
                 args.profiler_trace_name = args.backend
@@ -4823,6 +4950,23 @@ def run(runner, args, original_dir=None):
             current_name = name
             current_device = device
             current_batch_size = batch_size
+            current_backend = args.backend
+            current_mode = (
+                "training" if args.training else "inference" if args.inference else ""
+            )
+            if args.float16:
+                current_dtype = "float16"
+            elif args.bfloat16:
+                current_dtype = "bfloat16"
+            elif args.float32:
+                current_dtype = "float32"
+            elif args.amp:
+                current_dtype = "amp"
+            else:
+                current_dtype = ""
+            current_quantization = args.quantization
+            # Keep the remaining of the settings
+            current_settings = vars(args)
             set_model_name(name)
 
             # Look for stuff that looks like batch size, and mark it dynamic.
@@ -4886,7 +5030,7 @@ def run(runner, args, original_dir=None):
                     )
         if args.generate_aot_autograd_stats:
             stats_file = output_filename.split(".csv")[0] + "_stats.csv"
-            output_csv(
+            write_outputs(
                 stats_file,
                 ("dev", "name", "batch_size", "total_aot_graphs", "ok_aot_graphs"),
                 [
@@ -4907,7 +5051,7 @@ def run(runner, args, original_dir=None):
         for i, name in enumerate(model_names):
             current_name = name
             if args.progress:
-                print(f"Running model {i+1}/{nmodels}", flush=True)
+                print(f"Running model {i + 1}/{nmodels}", flush=True)
 
             try:
                 timeout = args.timeout

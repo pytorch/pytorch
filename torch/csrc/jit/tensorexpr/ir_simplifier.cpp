@@ -1293,7 +1293,7 @@ bool isOperandInMinMaxTerm(
     return true;
   }
   return false;
-};
+}
 
 // Simplifies the nested min-max pattern like:
 //   * Max(Min(x, y), Min(x, z)) => Min(x, Max(y, z))

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import NoReturn, Sequence
+from typing import NoReturn, TYPE_CHECKING
 
 from torchgen.api.types import (
     ArrayRefCType,
@@ -34,6 +34,10 @@ from torchgen.api.types import (
     tensorT,
     VectorCType,
 )
+
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
 
 
 # This file implements a small program synthesis engine that implements

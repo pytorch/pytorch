@@ -17,11 +17,11 @@ namespace c10 {
 // NB: this is actually double precision; we're using the Python naming here
 class C10_API SymFloat {
  public:
-  /*implicit*/ SymFloat(double d) : data_(d){};
+  /*implicit*/ SymFloat(double d) : data_(d) {}
   SymFloat(SymNode ptr)
       : data_(std::numeric_limits<double>::quiet_NaN()), ptr_(std::move(ptr)) {
     TORCH_CHECK(ptr_->is_float());
-  };
+  }
   SymFloat() : data_(0.0) {}
 
   SymNodeImpl* toSymNodeImplUnowned() const {
@@ -99,7 +99,12 @@ class C10_API SymFloat {
     return ptr_;
   }
 
+  // UNSAFELY coerce this SymFloat into a double.  You MUST have
+  // established that this is a non-symbolic by some other means,
+  // typically by having tested is_symbolic().  You will get garbage
+  // from this function if is_symbolic()
   double as_float_unchecked() const {
+    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(!is_symbolic());
     return data_;
   }
 

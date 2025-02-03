@@ -8,23 +8,17 @@ import operator
 import types
 import warnings
 from collections import namedtuple
+from collections.abc import Iterator
 from contextlib import contextmanager
-from typing import (
-    Any,
-    Callable,
-    Dict,
-    final,
-    Iterator,
-    List,
-    Optional,
-    Tuple,
-    Type,
-    TYPE_CHECKING,
-    Union,
-)
+from typing import Any, Callable, final, Optional, TYPE_CHECKING, Union
 
 from torch._higher_order_ops.utils import autograd_not_implemented
 from torch._library.fake_class_registry import FakeScriptObject
+from torch._subclasses.fake_impls import (
+    _deregister_op_impl,
+    _is_op_registered_to_fake_rule,
+    register_op_impl,
+)
 from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.fx._utils import first_call_function_nn_module_stack
 from torch.fx.graph import _PyTreeCodeGen, _PyTreeInfo
@@ -44,18 +38,23 @@ if TYPE_CHECKING:
 import torch
 import torch.utils._pytree as pytree
 from torch._export.utils import (
+    _collect_all_valid_cia_ops,
     _collect_and_set_constant_attrs,
     _collect_param_buffer_metadata,
     _detect_fake_mode_from_gm,
+    _get_decomp_for_cia,
+    _is_preservable_cia_op,
     _name_hoo_subgraph_placeholders,
     _overwrite_signature_for_non_persistent_buffers,
     _populate_param_buffer_metadata_to_new_gm,
     _rename_without_collisions,
+    _special_op_to_preserve_cia,
 )
 from torch._export.verifier import Verifier
 from torch._guards import detect_fake_mode
 from torch._subclasses.fake_tensor import unset_fake_temporarily
 from torch.export._tree_utils import is_equivalent, reorder_kwargs
+from torch.export.decomp_utils import CustomDecompTable
 from torch.fx._compatibility import compatibility
 from torch.fx.passes.infra.pass_base import PassResult
 from torch.fx.passes.infra.pass_manager import PassManager
@@ -69,6 +68,8 @@ from .graph_signature import (  # noqa: F401
     InputSpec,
     OutputKind,
     OutputSpec,
+    SymBoolArgument,
+    SymFloatArgument,
     SymIntArgument,
     TensorArgument,
     TokenArgument,
@@ -79,7 +80,7 @@ __all__ = [
     "ExportedProgram",
     "ModuleCallEntry",
     "ModuleCallSignature",
-    "core_aten_decompositions",
+    "default_decompositions",
 ]
 
 
@@ -88,11 +89,11 @@ PassType = Callable[[torch.fx.GraphModule], Optional[PassResult]]
 
 @dataclasses.dataclass
 class ModuleCallSignature:
-    inputs: List[ArgumentSpec]
-    outputs: List[ArgumentSpec]
+    inputs: list[ArgumentSpec]
+    outputs: list[ArgumentSpec]
     in_spec: pytree.TreeSpec
     out_spec: pytree.TreeSpec
-    forward_arg_names: Optional[List[str]] = None
+    forward_arg_names: Optional[list[str]] = None
 
     def replace_all_uses_with(self, original_node, new_node):
         for i in self.inputs:
@@ -196,8 +197,6 @@ def _override_composite_implicit_decomp(cia_ops_to_callable, safe=True):
     # replace their CompositeImplicitAutograd kernels with NotImplemented.
     # The only current users of this mode are variants of aten::to that we will
     # replace with aten::_to_copy in FunctionalTensorMode.__torch_dispatch__.
-    from torch._decomp import _get_decomp_for_cia
-
     saved_tables = {}
     patched_ops = set()
     for op_overload, decomp_callable in cia_ops_to_callable.items():
@@ -218,6 +217,31 @@ def _override_composite_implicit_decomp(cia_ops_to_callable, safe=True):
         if safe:
             op_overload.py_impl(torch._C.DispatchKey.CompositeImplicitAutograd)(
                 decomp_callable
+            )
+
+        # [NOTE] Directly registering fake tensor rule to CIA ops
+        # The problem we are facing here is if your CIA custom rule
+        # says we want to preserve the op, we will return NotImplemented.
+        # Unfortunately, this will invoke meta device tracing in fake tensor
+        # resulting in divergent behaviour for CIA kernels that has device based
+        # branching (one case is torch.ops.aten.scaled_dot_product.attention)
+        # To get around this issue, we register direct fake impl so that we
+        # run the kernel before we actually try to decompose the op in FakeTensorMode.
+        # Note that is a no-op in most cases, because:
+        #   1) In post dispatch tracing, CIA would have already decomposed
+        #   2) Most CIA impl are device agnostic.
+        def _force_dispatch_to_orig_cia_callable(fake_tensor_mode, op, *args, **kwargs):
+            orig_cia_callable = kwargs["original_callable"]
+            del kwargs["original_callable"]
+            with fake_tensor_mode:
+                return orig_cia_callable(*args, **kwargs)
+
+        if not _is_op_registered_to_fake_rule(op_overload):
+            register_op_impl(op_overload)(
+                functools.partial(
+                    _force_dispatch_to_orig_cia_callable,
+                    original_callable=orig_cia_callable,
+                )
             )
 
         for key in _BACKEND_KEYS_TO_OVERRIDE:
@@ -246,13 +270,7 @@ def _override_composite_implicit_decomp(cia_ops_to_callable, safe=True):
             op.py_kernels.clear()
             op.py_kernels.update(saved_tables[op])
             op._dispatch_cache.clear()
-
-
-def _special_op_to_preserve_cia(*args, **kwargs):
-    """
-    This is an special marker that tells our infra that we shouldn't decompose this op.
-    """
-    return NotImplemented
+            _deregister_op_impl(op)
 
 
 @contextmanager
@@ -271,10 +289,8 @@ def _override_decomp_aten_to_variants():
 
 
 def _split_decomp_table_to_cia_and_python_decomp(
-    decomp_table: Dict[torch._ops.OperatorBase, Callable]
-) -> Tuple[Dict[torch._ops.OperatorBase, Callable], ...]:
-    from torch._decomp import _collect_all_valid_cia_ops, _is_preservable_cia_op
-
+    decomp_table: dict[torch._ops.OperatorBase, Callable]
+) -> tuple[dict[torch._ops.OperatorBase, Callable], ...]:
     all_preservable_cia_ops = set(_collect_all_valid_cia_ops())
     cia_ops_to_callable = {}
 
@@ -316,28 +332,28 @@ def _split_decomp_table_to_cia_and_python_decomp(
     return cia_ops_to_callable, decomp_table
 
 
-def core_aten_decompositions() -> Dict[torch._ops.OperatorBase, Callable]:
+def default_decompositions() -> "CustomDecompTable":
     """
     This is the default decomposition table which contains decomposition of
     all ATEN operators to core aten opset. Use this API together with
     :func:`run_decompositions()`
     """
-    from torch._decomp import core_aten_decompositions
-
-    return core_aten_decompositions()
+    return CustomDecompTable()
 
 
 def _decompose_and_get_gm_with_new_signature_constants(
     ep,
     *,
-    cia_to_decomp: Dict[torch._ops.OperatorBase, Callable],
-    python_decomp_table: Dict[torch._ops.OperatorBase, Callable],
+    cia_to_decomp: dict[torch._ops.OperatorBase, Callable],
+    python_decomp_table: dict[torch._ops.OperatorBase, Callable],
     joint_loss_index: Optional[int],
+    decompose_custom_triton_ops,
 ):
+    from torch._export.utils import _fakify_params_buffers
     from torch._functorch.aot_autograd import aot_export_module
     from torch.export._trace import (
+        _disable_custom_triton_op_functional_decomposition,
         _export_to_aten_ir,
-        _fakify_params_buffers,
         _ignore_backend_decomps,
         _verify_nn_module_stack,
         _verify_placeholder_names,
@@ -354,12 +370,29 @@ def _decompose_and_get_gm_with_new_signature_constants(
     if not _is_joint_ir_decomp(ep, joint_loss_index):
         mod = ep.module()
 
-        fake_args = []
-        for node in mod.graph.nodes:
-            if node.op == "placeholder":
-                fake_args.append(node.meta["val"])
+        wrapped_params_buffers = {
+            **dict(mod.named_parameters(remove_duplicate=False)),
+            **dict(mod.named_buffers(remove_duplicate=False)),
+        }
 
-        fake_args_unwrapped = pytree.tree_unflatten(fake_args, mod._in_spec)
+        from torch._functorch._aot_autograd.subclass_parametrization import (
+            unwrap_tensor_subclass_parameters,
+        )
+
+        # [NOTE] Unwrapping subclasses AOT
+        # In torch.compile, the subclass unwrapping/wrapping happen at runtime
+        # but at export, this is impossible as it is intented to be run on
+        # C++ environment. As a result, we unwrap subclass parameters AOT. After this,
+        # ExportedProgram state_dict won't be same as eager model because eager model
+        # could have subclass weights while ExportedProgram will have desugared versions.
+        # This is fine because run_decompositions is supposed to specialize to post-autograd
+        # graph where the subclass desugaring is supposed to happen.
+        unwrap_tensor_subclass_parameters(mod)
+        unwrapped_params_buffers = {
+            **dict(mod.named_parameters(remove_duplicate=False)),
+            **dict(mod.named_buffers(remove_duplicate=False)),
+        }
+
         # TODO T204030333
         fake_mode = _detect_fake_mode_from_gm(ep.graph_module)
         if fake_mode is None:
@@ -368,7 +401,7 @@ def _decompose_and_get_gm_with_new_signature_constants(
         # Fix the graph output signature to be tuple if scalar
         out_spec = mod._out_spec
 
-        orig_arg_names = mod.graph._codegen.pytree_info.orig_args  # type: ignore[attr-defined]
+        orig_arg_names = mod.graph._codegen.pytree_info.orig_args
 
         # aot_export expect the return type to always be a tuple.
         if out_spec.type not in (list, tuple):
@@ -387,33 +420,78 @@ def _decompose_and_get_gm_with_new_signature_constants(
         # the exported module will store constants & non-persistent buffers such that
         # retracing treats them as persistent buffers, so we inform the constants lifting pass
         # and overwrite the new graph signature using the previous program.
-        constant_attrs = _collect_and_set_constant_attrs(
-            ep.graph_signature, ep.constants, mod
-        )
+        _collect_and_set_constant_attrs(ep.graph_signature, ep.constants, mod)
 
         # get params & buffers after excluding constants
         fake_params_buffers = _fakify_params_buffers(fake_mode, mod)
 
         params_buffers_to_node_meta = _collect_param_buffer_metadata(mod)
 
-        with _ignore_backend_decomps(), (
+        # TODO (tmanlaibaatar) Ideally run_decomp should just call _non_strict_export
+        # but due to special handling of constants as non-persistent buffers make it little
+        # diffucult. But we should unify this code path together. T206837815
+        from torch._export.non_strict_utils import (
+            _enable_graph_inputs_of_type_nn_module,
+            _fakify_script_objects,
+        )
+
+        retracing_args = []
+        for node in mod.graph.nodes:
+            if node.op == "placeholder":
+                if isinstance(node.meta["val"], CustomObjArgument):
+                    real_script_obj = None
+                    if node.meta["val"].fake_val is None:
+                        real_script_obj = ep.constants[node.meta["val"].name]
+                    else:
+                        real_script_obj = node.meta["val"].fake_val.real_obj
+                    retracing_args.append(real_script_obj)
+                else:
+                    retracing_args.append(node.meta["val"])
+
+        with (
             fake_mode
         ), _override_decomp_aten_to_variants(), _override_composite_implicit_decomp(
             cia_to_decomp,
+        ), _enable_graph_inputs_of_type_nn_module(
+            ep.example_inputs
         ):
-            aten_export_artifact = _export_to_aten_ir(
+            retracing_args_unwrapped = pytree.tree_unflatten(
+                retracing_args, mod._in_spec
+            )
+            # this requires empty kwargs, but not in pytree.flattened format
+            with _fakify_script_objects(
                 mod,
-                # this requires empty kwargs, but not in pytree.flattened format
                 (
-                    *fake_args_unwrapped[0],
-                    *fake_args_unwrapped[1].values(),
+                    *retracing_args_unwrapped[0],
+                    *retracing_args_unwrapped[1].values(),
                 ),
                 {},
-                fake_params_buffers,
-                constant_attrs,
-                decomp_table=python_decomp_table,
-                _check_autograd_state=False,
-            )
+                fake_mode,
+            ) as (
+                patched_mod,
+                new_fake_args,
+                new_fake_kwargs,
+                new_fake_constant_attrs,
+                map_fake_to_real,
+            ):
+                aten_export_artifact = _export_to_aten_ir(
+                    patched_mod,
+                    new_fake_args,
+                    new_fake_kwargs,
+                    fake_params_buffers,
+                    new_fake_constant_attrs,
+                    decomp_table=python_decomp_table,
+                    _check_autograd_state=False,
+                    decompose_custom_triton_ops=decompose_custom_triton_ops,
+                )
+
+                # aten_export_artifact.constants contains only fake script objects, we need to map them back
+                aten_export_artifact.constants = {
+                    fqn: map_fake_to_real[obj]
+                    if isinstance(obj, FakeScriptObject)
+                    else obj
+                    for fqn, obj in aten_export_artifact.constants.items()
+                }
 
         gm = aten_export_artifact.gm
         new_graph_signature = aten_export_artifact.sig
@@ -431,7 +509,31 @@ def _decompose_and_get_gm_with_new_signature_constants(
         _verify_stack_trace(gm)
         _verify_placeholder_names(gm, new_graph_signature)
 
-        return _remove_unneccessary_copy_op_pass(gm, new_graph_signature)
+        gm, new_graph_signature = _remove_unneccessary_copy_op_pass(
+            gm, new_graph_signature
+        )
+
+        # When we apply parameterixzation rule to unwrap
+        # subclasses, the state dict will now have different
+        # desugared parameters. We need to manually filter those
+        # and update the ep.state_dict. Ideally, we should just return
+        # the state dict of ep.module but ep.module only stores params
+        # buffers that participate in forward. If we undo this behaviour,
+        # it would break some downstream users.
+        for name, p in unwrapped_params_buffers.items():
+            if name not in wrapped_params_buffers:
+                ep.state_dict[name] = p
+
+        for name, p in wrapped_params_buffers.items():
+            # Buffers can be persistent/non-persistent
+            if name not in ep.state_dict:
+                assert not isinstance(p, torch.nn.Parameter)
+
+            if name in ep.state_dict:
+                if name not in unwrapped_params_buffers:
+                    ep.state_dict.pop(name)
+
+        return gm, new_graph_signature, ep.state_dict
 
     old_placeholders = [
         node for node in ep.graph_module.graph.nodes if node.op == "placeholder"
@@ -445,9 +547,14 @@ def _decompose_and_get_gm_with_new_signature_constants(
     # TODO(zhxhchen17) Return the new graph_signature directly.
     fake_mode = detect_fake_mode(fake_args)
     fake_mode = contextlib.nullcontext() if fake_mode is None else fake_mode
+    custom_triton_ops_decomposition_ctx = (
+        contextlib.nullcontext
+        if decompose_custom_triton_ops
+        else _disable_custom_triton_op_functional_decomposition
+    )
     with _ignore_backend_decomps(), fake_mode, _override_composite_implicit_decomp(
         cia_to_decomp
-    ):
+    ), custom_triton_ops_decomposition_ctx():
         gm, graph_signature = aot_export_module(
             ep.graph_module,
             fake_args,
@@ -468,6 +575,10 @@ def _decompose_and_get_gm_with_new_signature_constants(
             return TensorArgument(name=new_ph.name)
         elif isinstance(old_arg, SymIntArgument):
             return SymIntArgument(name=new_ph.name)
+        elif isinstance(old_arg, SymFloatArgument):
+            return SymFloatArgument(name=new_ph.name)
+        elif isinstance(old_arg, SymBoolArgument):
+            return SymBoolArgument(name=new_ph.name)
         raise RuntimeError(f"Type of old_arg not supported: {type(old_arg)}")
 
     new_placeholders = [node for node in gm.graph.nodes if node.op == "placeholder"]
@@ -537,14 +648,47 @@ def _decompose_and_get_gm_with_new_signature_constants(
         for i, spec in enumerate(ep.graph_signature.input_specs)
     ]
 
-    output_specs = [
-        OutputSpec(
-            OutputKind.LOSS_OUTPUT if joint_loss_index is not None else spec.kind,
-            update_arg(spec.arg, new_outputs[i]),
-            old_new_placeholder_map.get(spec.target, spec.target),
+    output_specs = []
+
+    # handle buffer & input mutations; these appear before loss output & gradients
+    # (1) ep.graph_signature.input_specs tells us types of inputs
+    # (2) graph_signature.user_inputs tells us node input names in order
+    # (3) graph_signature.user_inputs_to_mutate tells us buffer & input mutations
+    # map (3) -> (2) for input order, -> (1) for input type
+    user_inputs_index = {name: i for i, name in enumerate(graph_signature.user_inputs)}
+    mutation_names = list(graph_signature.user_inputs_to_mutate.keys())
+    assert mutation_names == [node.name for node in new_outputs[: len(mutation_names)]]
+    for output_name, input_name in graph_signature.user_inputs_to_mutate.items():
+        i = user_inputs_index[input_name]
+        input_spec = ep.graph_signature.input_specs[i]
+        assert input_spec.kind in (InputKind.USER_INPUT, InputKind.BUFFER)
+        output_kind = (
+            OutputKind.BUFFER_MUTATION
+            if input_spec.kind == InputKind.BUFFER
+            else OutputKind.USER_INPUT_MUTATION
         )
-        for i, spec in enumerate(ep.graph_signature.output_specs)
-    ]
+        target = (
+            input_spec.target
+            if input_spec.kind == InputKind.BUFFER
+            else input_spec.arg.name
+        )
+        output_specs.append(
+            OutputSpec(
+                kind=output_kind,
+                arg=TensorArgument(name=output_name),
+                target=target,
+            )
+        )
+
+    # handle actual user outputs
+    for i, spec in enumerate(ep.graph_signature.output_specs):
+        output_specs.append(
+            OutputSpec(
+                OutputKind.LOSS_OUTPUT if i == joint_loss_index else spec.kind,
+                update_arg(spec.arg, new_outputs[len(mutation_names) + i]),
+                old_new_placeholder_map.get(spec.target, spec.target),
+            )
+        )
 
     if joint_loss_index is not None:
         assert graph_signature.backward_signature is not None
@@ -593,12 +737,12 @@ def _decompose_and_get_gm_with_new_signature_constants(
         ):
             for k, v in old_node.meta.items():
                 new_node.meta[k] = v
-    return gm, new_graph_signature
+    return gm, new_graph_signature, ep.state_dict
 
 
 def _remove_unneccessary_copy_op_pass(
     gm: torch.fx.GraphModule, new_graph_signature: ExportGraphSignature
-) -> Tuple[torch.fx.GraphModule, ExportGraphSignature]:
+) -> tuple[torch.fx.GraphModule, ExportGraphSignature]:
     """
     Removes redundant copy_ node that was introduced due to mutated buffer.
     """
@@ -629,8 +773,8 @@ def _common_getitem_elimination_pass(
             if not isinstance(module, torch.fx.GraphModule):
                 continue
 
-            node_id: Dict[torch.fx.Node, str] = {}
-            getitems: Dict[str, torch.fx.Node] = {}
+            node_id: dict[torch.fx.Node, str] = {}
+            getitems: dict[str, torch.fx.Node] = {}
             for node in list(module.graph.nodes):
                 if node.op == "call_function" and node.target == operator.getitem:
                     source, idx = node.args
@@ -650,18 +794,57 @@ def _common_getitem_elimination_pass(
                     node_id[node] = node.name
 
 
+def _get_updated_module_call_graph(
+    gm: torch.fx.GraphModule,
+    old_module_call_graph: list[ModuleCallEntry],
+):
+    new_module_call_graph = copy.deepcopy(old_module_call_graph)
+
+    # use node-level provenance metadata to create a map
+    # from old node names to new node names
+    provenance: dict[str, str] = {}
+    for node in gm.graph.nodes:
+        if history := node.meta.get("from_node", []):
+            provenance[history[-1].name] = node.name
+
+    # map old names to new names in module call signatures
+    for entry in new_module_call_graph:
+        signature = entry.signature
+        if signature is None:
+            continue
+        for x in [*signature.inputs, *signature.outputs]:
+            x.name = provenance.get(x.name, x.name)
+
+    return new_module_call_graph
+
+
 def _decompose_exported_program(
     ep,
     *,
-    cia_to_decomp: Dict[torch._ops.OperatorBase, Callable],
-    python_decomp_table: Dict[torch._ops.OperatorBase, Callable],
+    cia_to_decomp: dict[torch._ops.OperatorBase, Callable],
+    python_decomp_table: dict[torch._ops.OperatorBase, Callable],
     joint_loss_index: Optional[int],
+    decompose_custom_triton_ops: bool,
 ):
-    gm, new_graph_signature = _decompose_and_get_gm_with_new_signature_constants(
+    (
+        gm,
+        new_graph_signature,
+        state_dict,
+    ) = _decompose_and_get_gm_with_new_signature_constants(
         ep,
         cia_to_decomp=cia_to_decomp,
         python_decomp_table=python_decomp_table,
         joint_loss_index=joint_loss_index,
+        decompose_custom_triton_ops=decompose_custom_triton_ops,
+    )
+
+    # The signatures of ep.module_call_graph refer to input / output nodes of
+    # the original graph module. However, the new graph module may have
+    # new nodes due to decompositions. So we need to update these signatures
+    # in the decomposed exported program's module_call_graph.
+    new_module_call_graph = _get_updated_module_call_graph(
+        gm,
+        ep.module_call_graph,
     )
 
     # TODO unfortunately preserving graph-level metadata is not
@@ -678,9 +861,9 @@ def _decompose_exported_program(
         root=gm,
         graph=gm.graph,
         graph_signature=new_graph_signature,
-        state_dict=ep.state_dict,
+        state_dict=state_dict,
         range_constraints=new_range_constraints,
-        module_call_graph=copy.deepcopy(ep.module_call_graph),
+        module_call_graph=new_module_call_graph,
         example_inputs=ep.example_inputs,
         constants=ep.constants,
     )
@@ -705,18 +888,18 @@ class ExportedProgram:
 
     def __init__(
         self,
-        root: Union[torch.nn.Module, Dict[str, Any]],
+        root: Union[torch.nn.Module, dict[str, Any]],
         graph: torch.fx.Graph,
         graph_signature: ExportGraphSignature,
-        state_dict: Dict[str, Union[torch.Tensor, torch.nn.Parameter]],
-        range_constraints: "Dict[sympy.Symbol, Any]",
-        module_call_graph: List[ModuleCallEntry],
-        example_inputs: Optional[Tuple[Tuple[Any, ...], Dict[str, Any]]] = None,
+        state_dict: dict[str, Union[torch.Tensor, torch.nn.Parameter]],
+        range_constraints: "dict[sympy.Symbol, Any]",
+        module_call_graph: list[ModuleCallEntry],
+        example_inputs: Optional[tuple[tuple[Any, ...], dict[str, Any]]] = None,
         constants: Optional[
-            Dict[str, Union[torch.Tensor, FakeScriptObject, torch._C.ScriptObject]]
+            dict[str, Union[torch.Tensor, FakeScriptObject, torch._C.ScriptObject]]
         ] = None,
         *,
-        verifiers: Optional[List[Type[Verifier]]] = None,
+        verifiers: Optional[list[type[Verifier]]] = None,
     ):
         # Remove codegen related things from the graph. It should just be a flat graph.
         graph._codegen = torch.fx.graph.CodeGen()
@@ -728,10 +911,10 @@ class ExportedProgram:
             self._graph_module, graph_signature, module_call_graph
         )
         self._graph_signature: ExportGraphSignature = graph_signature
-        self._state_dict: Dict[str, Any] = state_dict
-        self._range_constraints: Dict[sympy.Symbol, ValueRanges] = range_constraints
+        self._state_dict: dict[str, Any] = state_dict
+        self._range_constraints: dict[sympy.Symbol, ValueRanges] = range_constraints
         assert module_call_graph is not None
-        self._module_call_graph: List[ModuleCallEntry] = module_call_graph
+        self._module_call_graph: list[ModuleCallEntry] = module_call_graph
         self._example_inputs = example_inputs
 
         self._constants = constants or {}
@@ -747,20 +930,40 @@ class ExportedProgram:
     def graph_module(self):
         return self._graph_module
 
+    @graph_module.setter
+    @compatibility(is_backward_compatible=False)
+    def graph_module(self, value):
+        raise RuntimeError("Unable to set ExportedProgram's graph_module attribute.")
+
     @property
     @compatibility(is_backward_compatible=False)
     def graph(self):
         return self.graph_module.graph
+
+    @graph.setter
+    @compatibility(is_backward_compatible=False)
+    def graph(self, value):
+        raise RuntimeError("Unable to set ExportedProgram's graph attribute.")
 
     @property
     @compatibility(is_backward_compatible=False)
     def graph_signature(self):
         return self._graph_signature
 
+    @graph_signature.setter
+    @compatibility(is_backward_compatible=False)
+    def graph_signature(self, value):
+        raise RuntimeError("Unable to set ExportedProgram's graph_signature attribute.")
+
     @property
     @compatibility(is_backward_compatible=False)
     def state_dict(self):
         return self._state_dict
+
+    @state_dict.setter
+    @compatibility(is_backward_compatible=False)
+    def state_dict(self, value):
+        raise RuntimeError("Unable to set ExportedProgram's state_dict attribute.")
 
     @compatibility(is_backward_compatible=False)
     def parameters(self) -> Iterator[torch.nn.Parameter]:
@@ -771,7 +974,7 @@ class ExportedProgram:
             yield param
 
     @compatibility(is_backward_compatible=False)
-    def named_parameters(self) -> Iterator[Tuple[str, torch.nn.Parameter]]:
+    def named_parameters(self) -> Iterator[tuple[str, torch.nn.Parameter]]:
         """
         Returns an iterator over original module parameters, yielding
         both the name of the parameter as well as the parameter itself.
@@ -788,7 +991,7 @@ class ExportedProgram:
             yield buf
 
     @compatibility(is_backward_compatible=False)
-    def named_buffers(self) -> Iterator[Tuple[str, torch.Tensor]]:
+    def named_buffers(self) -> Iterator[tuple[str, torch.Tensor]]:
         """
         Returns an iterator over original module buffers, yielding
         both the name of the buffer as well as the buffer itself.
@@ -805,15 +1008,51 @@ class ExportedProgram:
     def range_constraints(self):
         return self._range_constraints
 
+    @range_constraints.setter
+    @compatibility(is_backward_compatible=False)
+    def range_constraints(self, value):
+        raise RuntimeError(
+            "Unable to set ExportedProgram's range_constraints attribute."
+        )
+
     @property
     @compatibility(is_backward_compatible=False)
     def module_call_graph(self):
         return self._module_call_graph
 
+    @module_call_graph.setter
+    @compatibility(is_backward_compatible=False)
+    def module_call_graph(self, value):
+        raise RuntimeError(
+            "Unable to set ExportedProgram's module_call_graph attribute."
+        )
+
     @property
     @compatibility(is_backward_compatible=False)
     def example_inputs(self):
         return self._example_inputs
+
+    @example_inputs.setter
+    @compatibility(is_backward_compatible=False)
+    def example_inputs(self, value):
+        # This is allowed
+        if not (
+            isinstance(value, tuple)
+            and len(value) == 2
+            and isinstance(value[0], tuple)
+            and isinstance(value[1], dict)
+        ):
+            raise ValueError(
+                "Example inputs should be a tuple containing example arguments (as "
+                "a tuple), and example kwargs (as a dictionary)."
+            )
+
+        args, kwargs = value
+        from ._unlift import _check_inputs_match
+
+        _check_inputs_match(args, kwargs, self.call_spec.in_spec)
+
+        self._example_inputs = value
 
     @property
     @compatibility(is_backward_compatible=False)
@@ -828,10 +1067,20 @@ class ExportedProgram:
             out_spec=self.module_call_graph[0].signature.out_spec,
         )
 
+    @call_spec.setter
+    @compatibility(is_backward_compatible=False)
+    def call_spec(self, value):
+        raise RuntimeError("Unable to set ExportedProgram's call_spec attribute.")
+
     @property
     @compatibility(is_backward_compatible=False)
     def verifier(self) -> Any:
         return self._verifiers[0]
+
+    @verifier.setter
+    @compatibility(is_backward_compatible=False)
+    def verifier(self, value):
+        raise RuntimeError("Unable to set ExportedProgram's verifier attribute.")
 
     @property
     @compatibility(is_backward_compatible=False)
@@ -839,20 +1088,42 @@ class ExportedProgram:
         assert self._verifiers is not None
         return self._verifiers[0].dialect
 
+    @dialect.setter
+    @compatibility(is_backward_compatible=False)
+    def dialect(self, value):
+        raise RuntimeError("Unable to set ExportedProgram's dialect attribute.")
+
     @property
     @compatibility(is_backward_compatible=False)
     def verifiers(self):
         return self._verifiers
+
+    @verifiers.setter
+    @compatibility(is_backward_compatible=False)
+    def verifiers(self, value):
+        raise RuntimeError("Unable to set ExportedProgram's verifiers attribute.")
 
     @property
     @compatibility(is_backward_compatible=False)
     def tensor_constants(self):
         return self._constants
 
+    @tensor_constants.setter
+    @compatibility(is_backward_compatible=False)
+    def tensor_constants(self, value):
+        raise RuntimeError(
+            "Unable to set ExportedProgram's tensor_constants attribute."
+        )
+
     @property
     @compatibility(is_backward_compatible=False)
     def constants(self):
         return self._constants
+
+    @constants.setter
+    @compatibility(is_backward_compatible=False)
+    def constants(self, value):
+        raise RuntimeError("Unable to set ExportedProgram's constants attribute.")
 
     def _get_flat_args_with_check(self, args, kwargs):
         """Flatten args, kwargs using pytree, then, check specs.
@@ -872,7 +1143,7 @@ class ExportedProgram:
             kwargs = reorder_kwargs(kwargs, in_spec)
         flat_args_with_path, received_spec = pytree.tree_flatten_with_path(
             (args, kwargs)
-        )  # type: ignore[possibly-undefined]
+        )
         self._check_input_constraints(flat_args_with_path)
         flat_args = tuple(x[1] for x in flat_args_with_path)
         return flat_args, received_spec
@@ -1027,8 +1298,8 @@ class ExportedProgram:
     @_disable_prexisiting_fake_mode
     def run_decompositions(
         self,
-        decomp_table: Optional[Dict[torch._ops.OperatorBase, Callable]] = None,
-        _preserve_ops: Tuple[torch._ops.OpOverload, ...] = (),
+        decomp_table: Optional[dict[torch._ops.OperatorBase, Callable]] = None,
+        decompose_custom_triton_ops: bool = False,
     ) -> "ExportedProgram":
         """
         Run a set of decompositions on the exported program and returns a new
@@ -1059,43 +1330,16 @@ class ExportedProgram:
         .. code-block:: python
 
             ep = torch.export.export(model, ...)
-            decomp_table = torch.export.core_aten_decompositions()
+            decomp_table = torch.export.default_decompositions()
             decomp_table[your_op] = your_custom_decomp
             ep = ep.run_decompositions(decomp_table=decomp_table)
         """
-        from torch._decomp import (
-            _decomp_table_to_post_autograd_aten,
-            _is_preservable_cia_op,
-            core_aten_decompositions,
-        )
-        from torch._inductor import config
-
-        # FIXME delete this option after PTC, Executorch syncing is
-        # bit annoying so can't get rid of it easily
-        if _preserve_ops != ():
-            warnings.warn(
-                "This API is deprecated and soon will be removed. "
-                "Please look at the docstring to see how to preserve "
-                "an operator."
-            )
-
         _decomp_table = (
-            core_aten_decompositions() if decomp_table is None else dict(decomp_table)
+            default_decompositions() if decomp_table is None else dict(decomp_table)
         )
 
-        if config.is_fbcode():
-            # This means the decomp_table would only be containing post-autograd ops
-            # We should manually add CIA decomps
-            for k, v in _decomp_table_to_post_autograd_aten().items():
-                _decomp_table[k] = v
-
-        for op in _preserve_ops:
-            if op in _decomp_table:
-                del _decomp_table[op]
-            # This is needed when the op they want to preserve is a
-            # CIA op.
-            elif _is_preservable_cia_op(op):
-                _decomp_table[op] = _special_op_to_preserve_cia
+        if isinstance(_decomp_table, CustomDecompTable):
+            _decomp_table = _decomp_table.materialize()
 
         # Note [Seperating decomp_table into CIA decomps and non-CIA decomps]
         # At this point, we have a decomp_table that contains decomp behaviour for
@@ -1119,6 +1363,7 @@ class ExportedProgram:
             cia_to_decomp=cia_to_decomp,
             python_decomp_table=python_decomp_table,
             joint_loss_index=None,
+            decompose_custom_triton_ops=decompose_custom_triton_ops,
         )
 
     def _transform_do_not_use(self, *passes: PassType) -> "ExportedProgram":
@@ -1274,8 +1519,8 @@ def _get_shape_env(gm):
 
 def _get_updated_range_constraints(
     gm: torch.fx.GraphModule,
-    old_range_constraints: "Optional[Dict[sympy.Symbol, Any]]" = None,
-) -> "Dict[sympy.Symbol, Any]":
+    old_range_constraints: "Optional[dict[sympy.Symbol, Any]]" = None,
+) -> "dict[sympy.Symbol, Any]":
     assert old_range_constraints is not None
 
     shape_env = _get_shape_env(gm)
