@@ -637,13 +637,10 @@ class LocalGeneratorObjectVariable(VariableTracker):
             # proceed to the next instruction, it would follow the control flow where
             # the exception raised by `throw()` was handled and swallowed, potentially
             # leading to incorrect behavior.
-            if type(args[0]) is variables.BuiltinVariable:
-                exc_type = args[0].fn
-            else:
-                exc_type = args[0].exc_type
+            exc_type = type("__InternalThrowException", (Exception,), {})
 
             try:
-                self._setup_exception(tx, args[0])
+                self._setup_exception(tx, variables.ExceptionVariable(exc_type, ()))
                 self.next_variable(tx)
             except get_dynamo_observed_exception(exc_type):
                 # We should get back the exception raised before.
@@ -653,7 +650,6 @@ class LocalGeneratorObjectVariable(VariableTracker):
                 tx.exn_vt_stack.extend(tracer.exn_vt_stack)
             else:
                 raise_observed_exception(RuntimeError, tracer)
-
             return retval
 
         super().call_method(tx, name, args, kwargs)
