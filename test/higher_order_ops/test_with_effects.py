@@ -1,6 +1,4 @@
 # Owner(s): ["module: functorch"]
-# ruff: noqa: F841
-# flake8: noqa: B950
 import unittest
 from collections import deque
 from functools import partial

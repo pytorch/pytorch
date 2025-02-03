@@ -219,9 +219,7 @@ class TestFullyShardCompile(FSDPTest):
             ):
                 unsharded_param_graph_inputs.add(node.args[0])
         assert len(unsharded_param_graph_inputs) > 0
-        assert len(unsharded_param_graph_inputs) == len(
-            list(model.parameters())
-        ), """\
+        assert len(unsharded_param_graph_inputs) == len(list(model.parameters())), """\
 Expected all model parameters to be wrapped by FSDP2 and
 have their unsharded version as graph input, but it's not true!
 """

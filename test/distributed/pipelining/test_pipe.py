@@ -109,9 +109,7 @@ class PipeTests(TestCase):
             new_names.update(stage_fqns)
 
         if CHECK_FQN_SET_EQUALITY:
-            assert (
-                old_names == new_names
-            ), f"""
+            assert old_names == new_names, f"""
             old names {old_names}
             new names {new_names}
             """
