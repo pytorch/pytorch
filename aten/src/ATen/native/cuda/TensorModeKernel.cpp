@@ -98,5 +98,5 @@ void mode_kernel_impl(
   }
 }
 
-REGISTER_CUDA_DISPATCH(mode_stub, &mode_kernel_impl);
+REGISTER_CUDA_DISPATCH(mode_stub, &mode_kernel_impl)
 } // namespace at::native

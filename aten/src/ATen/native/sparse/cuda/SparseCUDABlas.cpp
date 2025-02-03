@@ -88,7 +88,7 @@ cusparseOperation_t convertTransToCusparseOperation(char trans) {
   else if (trans == 'n') return CUSPARSE_OPERATION_NON_TRANSPOSE;
   else if (trans == 'c') return CUSPARSE_OPERATION_CONJUGATE_TRANSPOSE;
   else {
-    AT_ERROR("trans must be one of: t, n, c");
+    TORCH_CHECK(false, "trans must be one of: t, n, c");
   }
 }
 
@@ -154,9 +154,9 @@ void _csrmm2(
 
 
   auto handle = at::cuda::getCurrentCUDASparseHandle();
-  cudaDeviceProp* prop = at::cuda::getCurrentDeviceProperties();
   // ALG1 is broken on SM89 as of CUDA 11.8+
 #if !defined(USE_ROCM)
+  cudaDeviceProp* prop = at::cuda::getCurrentDeviceProperties();
   auto default_alg = prop->major == 8 && prop->minor == 9 ? CUSPARSE_SPMM_CSR_ALG2 : CUSPARSE_SPMM_CSR_ALG1;
 #else
   auto default_alg = CUSPARSE_SPMM_CSR_ALG1;

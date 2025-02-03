@@ -10,8 +10,7 @@
 #include <ATen/ops/_empty_affine_quantized.h>
 #endif
 
-namespace at {
-namespace native {
+namespace at::native {
 
 DEFINE_DISPATCH(qelu_stub);
 
@@ -34,4 +33,4 @@ TORCH_LIBRARY_IMPL(quantized, QuantizedCPU, m) {
   m.impl(TORCH_SELECTIVE_NAME("quantized::celu"), quantized_celu);
 }
 
-}}  // namespace at::native
+}  // namespace at::native

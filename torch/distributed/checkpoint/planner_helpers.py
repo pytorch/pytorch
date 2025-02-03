@@ -1,6 +1,6 @@
 # mypy: allow-untyped-defs
 import io
-from typing import Any, Callable, cast, Dict, List
+from typing import Any, Callable, cast
 
 import torch
 import torch.distributed as dist
@@ -33,7 +33,7 @@ from .resharding import (
 )
 
 
-__all__: List[str] = ["create_read_items_for_chunk_list"]
+__all__: list[str] = ["create_read_items_for_chunk_list"]
 
 
 def _create_chunk_from_tensor(tensor: torch.Tensor) -> ChunkStorageMetadata:
@@ -149,8 +149,8 @@ def _create_read_item_for_tensor(
 def create_read_items_for_chunk_list(
     fqn: str,
     checkpoint_md: TensorStorageMetadata,
-    local_chunks: List[ChunkStorageMetadata],
-) -> List[ReadItem]:
+    local_chunks: list[ChunkStorageMetadata],
+) -> list[ReadItem]:
     """
     Create a list of ``ReadItem`` based on the checkpoint and local chunks.
 
@@ -178,7 +178,7 @@ def create_read_items_for_chunk_list(
             dest_offsets = []
             lengths = []
             for (
-                dim,
+                _dim,
                 offset_for_saved_tensor,
                 offset_for_current_tensor,
                 length,
@@ -207,8 +207,10 @@ def _create_default_metadata_only_plan(state_dict: STATE_DICT_TYPE) -> SavePlan:
         if isinstance(obj, DTensor):
             requests.append(_create_write_items_for_dtensor(fqn, obj))
         elif isinstance(obj, ShardedTensor):
-            for shard_md in obj.metadata().shards_metadata:
-                requests.append(_create_write_item_for_shard(fqn, obj, shard_md))
+            requests.extend(
+                _create_write_item_for_shard(fqn, obj, shard_md)
+                for shard_md in obj.metadata().shards_metadata
+            )
         elif isinstance(obj, torch.Tensor):
             requests.append(_create_write_item_for_tensor(fqn, obj))
         else:
@@ -216,7 +218,7 @@ def _create_default_metadata_only_plan(state_dict: STATE_DICT_TYPE) -> SavePlan:
     return SavePlan(requests)
 
 
-def _create_write_items(fqn: str, object: Any) -> List[WriteItem]:
+def _create_write_items(fqn: str, object: Any) -> list[WriteItem]:
     if hasattr(object, "__create_write_items__"):
         # DTensor implements _Checkpointable
         return object.__create_write_items__(fqn, object)
@@ -242,7 +244,7 @@ def _create_chunk_from_dtensor(tensor: DTensor) -> ChunkStorageMetadata:
     )
 
 
-def _create_chunk_list(tensor: torch.Tensor) -> List[ChunkStorageMetadata]:
+def _create_chunk_list(tensor: torch.Tensor) -> list[ChunkStorageMetadata]:
     if hasattr(tensor, "__create_chunk_list__"):
         # DTensor implements _Checkpointable
         local_chunks = tensor.__create_chunk_list__()  # type: ignore[attr-defined]
@@ -261,7 +263,7 @@ def _create_chunk_list(tensor: torch.Tensor) -> List[ChunkStorageMetadata]:
     return local_chunks
 
 
-def _create_read_items(fqn: str, md: STORAGE_TYPES, obj: Any) -> List[ReadItem]:
+def _create_read_items(fqn: str, md: STORAGE_TYPES, obj: Any) -> list[ReadItem]:
     if not isinstance(md, BytesStorageMetadata):
         try:
             local_chunks = _create_chunk_list(obj)
@@ -284,7 +286,7 @@ def _create_read_items(fqn: str, md: STORAGE_TYPES, obj: Any) -> List[ReadItem]:
         ]
 
 
-def _init_state_dict(state_dict: Dict[str, Any]) -> Any:
+def _init_state_dict(state_dict: dict[str, Any]) -> Any:
     """
     Initializes meta tensor if the meta tensor is DTensor or torch.Tensor.
     """

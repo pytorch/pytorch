@@ -410,6 +410,11 @@
   self: cholesky_backward(grad, upper, L)
   L: cholesky_jvp(self_t, L, upper)
 
+# temporarily here before linalg_cholesky dispatches to linalg_cholesky_ex on MPS device
+- name: linalg_cholesky(Tensor self, *, bool upper=False) -> Tensor
+  self: cholesky_backward(grad, upper, result)
+  result: cholesky_jvp(self_t, result, upper)
+
 - name: cholesky_solve(Tensor self, Tensor input2, bool upper=False) -> Tensor
   self, input2: cholesky_solve_backward(grad, self, input2, result, upper, grad_input_mask)
   result: cholesky_solve_jvp(result, input2_p, input2_t, self_t, upper)
@@ -1131,8 +1136,14 @@
   result: other_t + (self_p > other_p).logical_or_(other_p.isnan()) * (self_t - other_t)
 
 - name: mean(Tensor self, *, ScalarType? dtype=None) -> Tensor
-  self: grad.expand_symint(self.sym_sizes()) / self.sym_numel()
-  result: auto_linear
+  dispatch:
+    Default:
+      self: grad.expand_symint(self.sym_sizes()) / self.sym_numel()
+      result: auto_linear
+    AutogradNestedTensor:
+      # TODO: replace this with grad.expand_as(self) / self.sym_numel() when that is supported
+      self: (ones_like(self) * grad) / self.sym_numel()
+      result: auto_linear
 
 - name: mean.dim(Tensor self, int[1]? dim, bool keepdim=False, *, ScalarType? dtype=None) -> Tensor
   self: mean_backward(grad, self.sym_sizes(), dim, self.sym_numel(), keepdim)
@@ -1669,8 +1680,14 @@
   result: auto_element_wise
 
 - name: sum(Tensor self, *, ScalarType? dtype=None) -> Tensor
-  self: grad.expand_symint(self.sym_sizes())
-  result: auto_linear
+  dispatch:
+    Default:
+      self: grad.expand_symint(self.sym_sizes())
+      result: auto_linear
+    AutogradNestedTensor:
+      # TODO: replace this with grad.expand_as(self) when that is supported
+      self: ones_like(self) * grad
+      result: auto_linear
 
 - name: sum.dim_IntList(Tensor self, int[1]? dim, bool keepdim=False, *, ScalarType? dtype=None) -> Tensor
   dispatch:
@@ -2170,12 +2187,16 @@
   result0: at::where(self_p >= 0, grad_output_t, grad_output_t * weight_p + grad_output_p * weight_t)
   result1: at::where(self_p >= 0, at::zeros({}, self_p.options()), grad_output_p * self_t + grad_output_t * self_p)
 
-- name: rrelu_with_noise(Tensor self, Tensor noise, Scalar lower=0.125, Scalar upper=0.3333333333333333, bool training=False, Generator? generator=None) -> Tensor
+- name: rrelu_with_noise(Tensor self, Tensor(b!) noise, Scalar lower=0.125, Scalar upper=0.3333333333333333, bool training=False, Generator? generator=None) -> Tensor
   self: rrelu_with_noise_backward(grad, self, noise, lower, upper, training, false)
   result: auto_element_wise
 
-- name: rrelu_with_noise_(Tensor(a!) self, Tensor noise, Scalar lower=0.125, Scalar upper=0.3333333333333333, bool training=False, Generator? generator=None) -> Tensor(a!)
+- name: rrelu_with_noise_(Tensor(a!) self, Tensor(b!) noise, Scalar lower=0.125, Scalar upper=0.3333333333333333, bool training=False, Generator? generator=None) -> Tensor(a!)
   self: rrelu_with_noise_backward(grad, result, noise, lower, upper, training, true)
+
+- name: rrelu_with_noise_functional(Tensor self, Tensor noise, Scalar lower=0.125, Scalar upper=0.3333333333333333, bool training=False, Generator? generator=None) -> (Tensor, Tensor noise_out)
+  noise: non_differentiable
+  self: rrelu_with_noise_backward(grad, self, noise, lower, upper, training, false)
 
 - name: _softmax(Tensor self, int dim, bool half_to_float) -> Tensor
   self: _softmax_backward_data(grad, result, dim, self.scalar_type())

@@ -358,6 +358,19 @@ class TestLoadPlanner(TestCase):
                 planner=DefaultLoadPlanner(allow_partial_load=False),
             )
 
+    @with_temp_dir
+    def test_load_different_sizes_throws(self):
+        original_module = nn.Linear(2, 2)
+        dcp.save(state_dict={"module": original_module}, checkpoint_id=self.temp_dir)
+
+        new_module = nn.Linear(3, 2)
+        with self.assertRaisesRegex(CheckpointException, "Size mismatch"):
+            dcp.load(
+                state_dict={"module": new_module},
+                checkpoint_id=self.temp_dir,
+                planner=DefaultLoadPlanner(),
+            )
+
 
 if __name__ == "__main__":
     run_tests()

@@ -9,11 +9,10 @@ import time
 import zipfile
 from functools import lru_cache
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Callable, Optional
 
 import boto3  # type: ignore[import]
 import requests
-import rockset  # type: ignore[import]
 
 
 PYTORCH_REPO = "https://api.github.com/repos/pytorch/pytorch"
@@ -24,11 +23,12 @@ def get_s3_resource() -> Any:
     return boto3.resource("s3")
 
 
+GHA_ARTIFACTS_BUCKET = "gha-artifacts"
+
+
 # NB: In CI, a flaky test is usually retried 3 times, then the test file would be rerun
 # 2 more times
 MAX_RETRY_IN_NON_DISABLED_MODE = 3 * 3
-# NB: Rockset has an upper limit of 5000 documents in one request
-BATCH_SIZE = 5000
 
 
 def _get_request_headers() -> dict[str, str]:
@@ -87,16 +87,22 @@ def _download_artifact(
 
 
 def download_s3_artifacts(
-    prefix: str, workflow_run_id: int, workflow_run_attempt: int
+    prefix: str,
+    workflow_run_id: int,
+    workflow_run_attempt: int,
+    job_id: Optional[int] = None,
 ) -> list[Path]:
-    bucket = get_s3_resource().Bucket("gha-artifacts")
+    bucket = get_s3_resource().Bucket(GHA_ARTIFACTS_BUCKET)
     objs = bucket.objects.filter(
         Prefix=f"pytorch/pytorch/{workflow_run_id}/{workflow_run_attempt}/artifact/{prefix}"
     )
-
     found_one = False
     paths = []
     for obj in objs:
+        object_name = Path(obj.key).name
+        # target an artifact for a specific job_id if provided, otherwise skip the download.
+        if job_id is not None and str(job_id) not in object_name:
+            continue
         found_one = True
         p = Path(Path(obj.key).name)
         print(f"Downloading {p}")
@@ -122,38 +128,11 @@ def download_gha_artifacts(
     return paths
 
 
-def upload_to_rockset(
-    collection: str,
-    docs: list[Any],
-    workspace: str = "commons",
-    client: Any = None,
-) -> None:
-    if not client:
-        client = rockset.RocksetClient(
-            host="api.usw2a1.rockset.com", api_key=os.environ["ROCKSET_API_KEY"]
-        )
-
-    index = 0
-    while index < len(docs):
-        from_index = index
-        to_index = min(from_index + BATCH_SIZE, len(docs))
-        print(f"Writing {to_index - from_index} documents to Rockset")
-
-        client.Documents.add_documents(
-            collection=collection,
-            data=docs[from_index:to_index],
-            workspace=workspace,
-        )
-        index += BATCH_SIZE
-
-    print("Done!")
-
-
 def upload_to_dynamodb(
     dynamodb_table: str,
     repo: str,
-    docs: List[Any],
-    generate_partition_key: Optional[Callable[[str, Dict[str, Any]], str]],
+    docs: list[Any],
+    generate_partition_key: Optional[Callable[[str, dict[str, Any]], str]],
 ) -> None:
     print(f"Writing {len(docs)} documents to DynamoDB {dynamodb_table}")
     # https://boto3.amazonaws.com/v1/documentation/api/latest/guide/dynamodb.html#batch-writing

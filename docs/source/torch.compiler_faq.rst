@@ -126,7 +126,7 @@ Why is compilation slow?
   optimizations, and expresses these assumptions as guards that check
   particular values at runtime. If any of these guards fail, Dynamo will
   recompile that function (or part) up to
-  ``torch._dynamo.config.cache_size_limit`` times. If your program is
+  ``torch._dynamo.config.recompile_limit`` times. If your program is
   hitting the cache limit, you will first need to determine which guard is
   failing and what part of your program is triggering it. The
   `recompilation profiler <#recompilation-profiler>`__ automates the
@@ -591,7 +591,7 @@ How do I debug NumPy code under ``torch.compile``?
 
 Debugging JIT compiled code is challenging, given the complexity of modern
 compilers and the daunting errors that they raise.
-`The tutorial on how to diagnose runtime errors within torch.compile <https://pytorch.org/docs/main/torch.compiler_troubleshooting.html#diagnosing-runtime-errors>`__
+:ref:`The torch.compile troubleshooting doc <torch.compiler_troubleshooting>`
 contains a few tips and tricks on how to tackle this task.
 
 If the above is not enough to pinpoint the origin of the issue, there are still
@@ -616,7 +616,7 @@ an issue.
 
 If the program does work when importing ``torch._numpy as np``, chances are
 that the bug is in TorchDynamo. If this is the case, please feel open an issue
-with a `minimal reproducer <https://pytorch.org/docs/2.1/torch.compiler_troubleshooting.html>`__.
+with a :ref:`minimal reproducer <torch.compiler_troubleshooting>`.
 
 I ``torch.compile`` some NumPy code and I did not see any speed-up.
 -------------------------------------------------------------------

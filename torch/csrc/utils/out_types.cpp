@@ -14,18 +14,18 @@ void check_out_type_matches(
   if (scalarType_is_none && !layout && device_is_none) { // common case
     return;
   }
-  // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
-  if (!scalarType_is_none && result.scalar_type() != scalarType.value()) {
-    AT_ERROR(
+  if (!scalarType_is_none && result.scalar_type() != scalarType) {
+    TORCH_CHECK(
+        false,
         "dtype ",
-        // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
-        *scalarType,
+        scalarType,
         " does not match dtype of out parameter (",
         result.scalar_type(),
         ")");
   }
   if (layout && result.layout() != *layout) {
-    AT_ERROR(
+    TORCH_CHECK(
+        false,
         "layout ",
         *layout,
         " does not match layout of out parameter (",
@@ -34,7 +34,8 @@ void check_out_type_matches(
   }
   // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
   if (!device_is_none && result.device().type() != device.value().type()) {
-    AT_ERROR(
+    TORCH_CHECK(
+        false,
         "device type ",
         // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
         device->type(),

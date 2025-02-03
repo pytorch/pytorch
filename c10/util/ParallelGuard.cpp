@@ -2,7 +2,7 @@
 
 namespace c10 {
 
-thread_local bool in_at_parallel = false;
+thread_local static bool in_at_parallel = false;
 
 bool ParallelGuard::is_enabled() {
   return in_at_parallel;

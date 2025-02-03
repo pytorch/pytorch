@@ -1,10 +1,10 @@
 import random
-from typing import Any, Tuple
+from typing import Any
 
 import torch
 
 
-def transpose_tensors(p_transpose_both: float = 0.05) -> Tuple[bool, bool]:
+def transpose_tensors(p_transpose_both: float = 0.05) -> tuple[bool, bool]:
     transpose_both = random.choices(
         [True, False], [p_transpose_both, 1 - p_transpose_both]
     )[0]
@@ -31,7 +31,7 @@ def get_mm_tensors(
     transpose_right: bool,
     dtype_left: Any,
     dtype_right: Any,
-) -> Tuple[Any, Any]:
+) -> tuple[Any, Any]:
     if transpose_left:
         a = torch.randn(k, m, dtype=dtype_left).t()
     else:

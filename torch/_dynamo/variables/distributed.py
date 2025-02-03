@@ -1,7 +1,7 @@
 # mypy: ignore-errors
 import functools
 import inspect
-from typing import Dict, List, TYPE_CHECKING
+from typing import TYPE_CHECKING
 
 import torch
 from torch.fx.experimental._backward_state import BackwardState
@@ -14,7 +14,7 @@ from ..guards import GuardBuilder, install_guard
 from ..source import AttrSource
 from ..utils import istype
 from .base import VariableTracker
-from .constant import ConstantVariable
+from .constant import ConstantVariable, EnumVariable
 
 
 if TYPE_CHECKING:
@@ -98,6 +98,10 @@ class WorldMetaClassVariable(DistributedVariable):
             source = AttrSource(base=self.source, member="WORLD")
             install_guard(source.make_guard(GuardBuilder.ID_MATCH))
             return ProcessGroupVariable(self.value.WORLD)
+        elif name == "NON_GROUP_MEMBER":
+            source = AttrSource(base=self.source, member="NON_GROUP_MEMBER")
+            install_guard(source.make_guard(GuardBuilder.ID_MATCH))
+            return EnumVariable(self.value.NON_GROUP_MEMBER)
         return super().var_getattr(tx, name)
 
 
@@ -118,8 +122,8 @@ class PlacementClassVariable(DistributedVariable):
     def call_function(
         self,
         tx: "InstructionTranslator",
-        args: "List[VariableTracker]",
-        kwargs: "Dict[str, VariableTracker]",
+        args: "list[VariableTracker]",
+        kwargs: "dict[str, VariableTracker]",
     ) -> "VariableTracker":
         if (
             inspect.getattr_static(self.value, "__new__", None) in (object.__new__,)
@@ -159,8 +163,8 @@ class PlacementVariable(DistributedVariable):
         self,
         tx,
         name,
-        args: "List[VariableTracker]",
-        kwargs: "Dict[str, VariableTracker]",
+        args: "list[VariableTracker]",
+        kwargs: "dict[str, VariableTracker]",
     ) -> "VariableTracker":
         from . import ConstantVariable
 
@@ -225,8 +229,8 @@ class DeviceMeshVariable(DistributedVariable):
         self,
         tx,
         name,
-        args: "List[VariableTracker]",
-        kwargs: "Dict[str, VariableTracker]",
+        args: "list[VariableTracker]",
+        kwargs: "dict[str, VariableTracker]",
     ) -> "VariableTracker":
         if name == "size":
             const_args = [x.as_python_constant() for x in args]
@@ -235,7 +239,7 @@ class DeviceMeshVariable(DistributedVariable):
         if name == "get_coordinate":
             return ConstantVariable.create(self.value.get_coordinate())
         if name == "get_group":
-            return ConstantVariable.create(self.value.get_group())
+            return ProcessGroupVariable(self.value.get_group())
         if name == "_get_or_create_default_group":
             return ProcessGroupVariable(self.value._get_or_create_default_group())
         return super().call_method(tx, name, args, kwargs)
@@ -267,8 +271,8 @@ class ProcessGroupVariable(DistributedVariable):
         self,
         tx,
         name,
-        args: "List[VariableTracker]",
-        kwargs: "Dict[str, VariableTracker]",
+        args: "list[VariableTracker]",
+        kwargs: "dict[str, VariableTracker]",
     ) -> "VariableTracker":
         if name == "rank":
             return variables.ConstantVariable.create(self.value.rank())
@@ -313,7 +317,7 @@ class BackwardHookVariable(VariableTracker):
         user_hooks: VariableTracker,
         user_pre_hooks: VariableTracker,
     ):
-        if not compiled_autograd.local.enabled():
+        if not compiled_autograd.compiled_autograd_enabled:
             unimplemented("module-level backwards hooks require compiled autograd")
 
         def _in_graph_bw_hooks(bw_state: BackwardState):
@@ -378,8 +382,8 @@ class BackwardHookVariable(VariableTracker):
         self,
         tx,
         name,
-        args: List[VariableTracker],
-        kwargs: Dict[str, VariableTracker],
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
         if name in ("setup_input_hook", "setup_output_hook"):
             return self._setup_hook(tx, name, *args, **kwargs)

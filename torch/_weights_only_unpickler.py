@@ -68,7 +68,7 @@ from pickle import (
 )
 from struct import unpack
 from sys import maxsize
-from typing import Any, Dict, List
+from typing import Any, Callable, Union
 
 import torch
 from torch._utils import IMPORT_MAPPING, NAME_MAPPING
@@ -83,33 +83,33 @@ _blocklisted_modules = [
     "nt",
 ]
 
-_marked_safe_globals_list: List[Any] = []
+_marked_safe_globals_set: set[Union[Callable, tuple[Callable, str]]] = set()
 
 
-def _add_safe_globals(safe_globals: List[Any]):
-    global _marked_safe_globals_list
-    _marked_safe_globals_list += safe_globals
+def _add_safe_globals(safe_globals: list[Union[Callable, tuple[Callable, str]]]):
+    global _marked_safe_globals_set
+    _marked_safe_globals_set = _marked_safe_globals_set.union(set(safe_globals))
 
 
-def _get_safe_globals() -> List[Any]:
-    global _marked_safe_globals_list
-    return _marked_safe_globals_list
+def _get_safe_globals() -> list[Union[Callable, tuple[Callable, str]]]:
+    global _marked_safe_globals_set
+    return list(_marked_safe_globals_set)
 
 
 def _clear_safe_globals():
-    global _marked_safe_globals_list
-    _marked_safe_globals_list = []
+    global _marked_safe_globals_set
+    _marked_safe_globals_set = set()
 
 
-def _remove_safe_globals(globals_to_remove: List[Any]):
-    global _marked_safe_globals_list
-    _marked_safe_globals_list = list(
-        set(_marked_safe_globals_list) - set(globals_to_remove)
-    )
+def _remove_safe_globals(
+    globals_to_remove: list[Union[Callable, tuple[Callable, str]]],
+):
+    global _marked_safe_globals_set
+    _marked_safe_globals_set = _marked_safe_globals_set - set(globals_to_remove)
 
 
 class _safe_globals:
-    def __init__(self, safe_globals: List[Any]):
+    def __init__(self, safe_globals: list[Union[Callable, tuple[Callable, str]]]):
         self.safe_globals = safe_globals
 
     def __enter__(self):
@@ -127,10 +127,22 @@ class _safe_globals:
 # the dynamic additions to safe_globals would not be picked up by
 # _get_allowed_globals due to the lru_cache
 def _get_user_allowed_globals():
-    rc: Dict[str, Any] = {}
-    for f in _marked_safe_globals_list:
-        module, name = f.__module__, f.__name__
-        rc[f"{module}.{name}"] = f
+    rc: dict[str, Any] = {}
+    for f in _marked_safe_globals_set:
+        if isinstance(f, tuple):
+            if len(f) != 2:
+                raise ValueError(
+                    f"Expected tuple of length 2 (global, str of callable full path), but got tuple of length: {len(f)}"
+                )
+            if type(f[1]) is not str:
+                raise TypeError(
+                    f"Expected second item in tuple to be str of callable full path, but got: {type(f[1])}"
+                )
+            f, name = f
+            rc[name] = f
+        else:
+            module, name = f.__module__, f.__name__
+            rc[f"{module}.{name}"] = f
     return rc
 
 
@@ -159,7 +171,7 @@ def _tensor_rebuild_functions():
 # Unpickling machinery
 @_functools.lru_cache(maxsize=1)
 def _get_allowed_globals():
-    rc: Dict[str, Any] = {
+    rc: dict[str, Any] = {
         "collections.OrderedDict": OrderedDict,
         "collections.Counter": Counter,
         "torch.nn.parameter.Parameter": torch.nn.Parameter,
@@ -169,7 +181,10 @@ def _get_allowed_globals():
         "torch.device": torch.device,
         "_codecs.encode": encode,  # for bytes
         "builtins.bytearray": bytearray,  # for bytearray
+        "builtins.set": set,  # for set
+        "builtins.complex": complex,  # for complex
     }
+
     # dtype
     for t in torch.storage._dtype_to_storage_type_map().keys():
         rc[str(t)] = t
@@ -206,12 +221,88 @@ def _get_allowed_globals():
     return rc
 
 
+def _read_global_instruction(readline: Callable) -> tuple[str, str]:
+    module = readline()[:-1].decode("utf-8")
+    name = readline()[:-1].decode("utf-8")
+    # Patch since torch.save default protocol is 2
+    # users will be running this code in python > 3
+    if (module, name) in NAME_MAPPING:
+        module, name = NAME_MAPPING[(module, name)]
+    elif module in IMPORT_MAPPING:
+        module = IMPORT_MAPPING[module]
+    return module, name
+
+
+def get_globals_in_pkl(file) -> set[str]:
+    globals_in_checkpoint = set()
+    read = file.read
+    readline = file.readline
+    op_to_bytes_to_read = {
+        NEWOBJ[0]: 0,
+        REDUCE[0]: 0,
+        BUILD[0]: 0,
+        APPEND[0]: 0,
+        APPENDS[0]: 0,
+        SETITEM[0]: 0,
+        SETITEMS[0]: 0,
+        MARK[0]: 0,
+        TUPLE[0]: 0,
+        TUPLE1[0]: 0,
+        TUPLE2[0]: 0,
+        TUPLE3[0]: 0,
+        NONE[0]: 0,
+        NEWFALSE[0]: 0,
+        NEWTRUE[0]: 0,
+        EMPTY_TUPLE[0]: 0,
+        EMPTY_LIST[0]: 0,
+        EMPTY_DICT[0]: 0,
+        EMPTY_SET[0]: 0,
+        BINPERSID[0]: 0,
+        BININT[0]: 4,
+        BININT1[0]: 1,
+        BININT2[0]: 2,
+        BINFLOAT[0]: 8,
+        BINGET[0]: 1,
+        LONG_BINGET[0]: 4,
+        BINPUT[0]: 1,
+        LONG_BINPUT[0]: 4,
+    }
+    while True:
+        key = read(1)
+        if not key:
+            raise EOFError
+        assert isinstance(key, bytes_types)
+        if key[0] == GLOBAL[0]:
+            module, name = _read_global_instruction(readline)
+            globals_in_checkpoint.add(f"{module}.{name}")
+        elif key[0] in op_to_bytes_to_read:
+            bytes_to_read = op_to_bytes_to_read[key[0]]
+            if bytes_to_read:
+                read(bytes_to_read)
+        # ops where bytes to read depends on the data
+        elif key[0] == BINUNICODE[0]:
+            strlen = unpack("<I", read(4))[0]
+            if strlen > maxsize:
+                raise UnpicklingError("String is too long")
+            read(strlen)
+        elif key[0] in {SHORT_BINSTRING[0], LONG1[0]}:
+            strlen = read(1)[0]
+            read(strlen)
+        # first and last op
+        elif key[0] == PROTO[0]:
+            read(1)[0]
+        elif key[0] == STOP[0]:
+            return globals_in_checkpoint
+        else:
+            raise UnpicklingError(f"Unsupported operand {key[0]}")
+
+
 class Unpickler:
     def __init__(self, file, *, encoding: str = "bytes"):
         self.encoding = encoding
         self.readline = file.readline
         self.read = file.read
-        self.memo: Dict[int, Any] = {}
+        self.memo: dict[int, Any] = {}
         self.proto: int = -1
 
     def load(self):
@@ -220,10 +311,9 @@ class Unpickler:
         Return the reconstituted object hierarchy specified in the file.
         """
         self.metastack = []
-        self.stack: List[Any] = []
+        self.stack: list[Any] = []
         self.append = self.stack.append
         read = self.read
-        readline = self.readline
         while True:
             key = read(1)
             if not key:
@@ -231,15 +321,7 @@ class Unpickler:
             assert isinstance(key, bytes_types)
             # Risky operators
             if key[0] == GLOBAL[0]:
-                module = readline()[:-1].decode("utf-8")
-                name = readline()[:-1].decode("utf-8")
-                # Patch since torch.save default protocol is 2
-                # users will be running this code in python > 3
-                if self.proto == 2:
-                    if (module, name) in NAME_MAPPING:
-                        module, name = NAME_MAPPING[(module, name)]
-                    elif module in IMPORT_MAPPING:
-                        module = IMPORT_MAPPING[module]
+                module, name = _read_global_instruction(self.readline)
                 full_path = f"{module}.{name}"
                 if module in _blocklisted_modules:
                     raise UnpicklingError(
@@ -249,18 +331,46 @@ class Unpickler:
                     self.append(_get_allowed_globals()[full_path])
                 elif full_path in _get_user_allowed_globals():
                     self.append(_get_user_allowed_globals()[full_path])
+                elif full_path in (
+                    [
+                        "torch.nested._internal.nested_tensor.NestedTensor",
+                        "torch.nested._internal.nested_tensor._rebuild_njt",
+                        "torch._dynamo.decorators._DimRange",
+                    ]
+                ):
+                    raise UnpicklingError(
+                        "``torch.nested`` and ``torch._dynamo`` must be imported to load nested jagged tensors (NJTs)"
+                    )
+                elif full_path in (
+                    [
+                        "torch.distributed.device_mesh.DeviceMesh",
+                        "torch.distributed.tensor._dtensor_spec.DTensorSpec",
+                        "torch.distributed.tensor._dtensor_spec.TensorMeta",
+                        "torch.distributed.tensor.DTensor",
+                        "torch.distributed.tensor.placement_types.Partial",
+                        "torch.distributed.tensor.placement_types.Replicate",
+                        "torch.distributed.tensor.placement_types.Shard",
+                    ]
+                ):
+                    raise UnpicklingError(
+                        "``torch.distributed.tensor`` must be imported to load DTensors"
+                    )
                 else:
                     raise UnpicklingError(
                         f"Unsupported global: GLOBAL {full_path} was not an allowed global by default. "
-                        f"Please use `torch.serialization.add_safe_globals([{name}])` to allowlist "
-                        "this global if you trust this class/function."
+                        f"Please use `torch.serialization.add_safe_globals([{name}])` or the "
+                        f"`torch.serialization.safe_globals([{name}])` context manager to allowlist this global "
+                        "if you trust this class/function."
                     )
             elif key[0] == NEWOBJ[0]:
                 args = self.stack.pop()
                 cls = self.stack.pop()
                 if cls is torch.nn.Parameter:
                     self.append(torch.nn.Parameter(*args))
-                elif cls in _get_user_allowed_globals().values():
+                elif (
+                    cls in _get_user_allowed_globals().values()
+                    or cls in _get_allowed_globals().values()
+                ):
                     self.append(cls.__new__(cls, *args))
                 else:
                     raise UnpicklingError(
@@ -288,11 +398,23 @@ class Unpickler:
                     inst.__setstate__(state)
                 elif type(inst) is OrderedDict:
                     inst.__dict__.update(state)
-                elif type(inst) in _get_user_allowed_globals().values():
+                elif (
+                    type(inst) in _get_user_allowed_globals().values()
+                    or type(inst) in _get_allowed_globals().values()
+                ):
                     if hasattr(inst, "__setstate__"):
                         inst.__setstate__(state)
                     else:
-                        inst.__dict__.update(state)
+                        # mimics load_build in pickle
+                        # https://github.com/python/cpython/blob/f0c6fccd08904787a39269367f09f263d496114c/Lib/pickle.py#L1854-L1867
+                        slotstate = None
+                        if isinstance(state, tuple) and len(state) == 2:
+                            state, slotstate = state
+                        if state:
+                            inst.__dict__.update(state)
+                        if slotstate:
+                            for k, v in slotstate.items():
+                                setattr(inst, k, v)
                 else:
                     raise UnpicklingError(
                         "Can only build Tensor, Parameter, OrderedDict or types allowlisted "

@@ -16,18 +16,20 @@ AOTIModelContainerRunnerCuda::AOTIModelContainerRunnerCuda(
 
 AOTIModelContainerRunnerCuda::~AOTIModelContainerRunnerCuda() = default;
 
-std::vector<at::Tensor> AOTIModelContainerRunnerCuda::run(
-    std::vector<at::Tensor>& inputs) {
-  at::cuda::CUDAStream cuda_stream = c10::cuda::getCurrentCUDAStream();
-  return AOTIModelContainerRunner::run(
-      inputs, reinterpret_cast<AOTInductorStreamHandle>(cuda_stream.stream()));
+std::vector<at::Tensor> AOTIModelContainerRunnerCuda::run_impl(
+    std::vector<AtenTensorHandle>& input_handles,
+    void* stream_handle) {
+  if (stream_handle == nullptr) {
+    at::cuda::CUDAStream cuda_stream = c10::cuda::getCurrentCUDAStream();
+    stream_handle = reinterpret_cast<void*>(cuda_stream.stream());
+  }
+  return AOTIModelContainerRunner::run_impl(input_handles, stream_handle);
 }
 
 std::vector<at::Tensor> AOTIModelContainerRunnerCuda::run_with_cuda_stream(
-    std::vector<at::Tensor>& inputs,
-    at::cuda::CUDAStream cuda_stream) {
-  return AOTIModelContainerRunner::run(
-      inputs, reinterpret_cast<AOTInductorStreamHandle>(cuda_stream.stream()));
+    const std::vector<at::Tensor>& inputs,
+    const at::cuda::CUDAStream& cuda_stream) {
+  return run(inputs, reinterpret_cast<void*>(cuda_stream.stream()));
 }
 
 namespace {

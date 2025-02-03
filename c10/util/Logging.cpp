@@ -1,5 +1,4 @@
 #include <c10/util/Backtrace.h>
-#include <c10/util/CallOnce.h>
 #include <c10/util/Flags.h>
 #include <c10/util/Lazy.h>
 #include <c10/util/Logging.h>
@@ -161,8 +160,7 @@ void InitEventSampledHandlers(
     std::vector<
         std::pair<std::string_view, std::unique_ptr<EventSampledHandler>>>
         handlers) {
-  static c10::once_flag flag;
-  c10::call_once(flag, [&]() {
+  static bool flag [[maybe_unused]] = [&]() {
     auto& registry = EventSampledHandlerRegistry();
     for (auto& [event, handler] : handlers) {
       auto entry = registry.find(std::string{event});
@@ -171,7 +169,8 @@ void InitEventSampledHandlers(
       }
       entry->second = std::move(handler);
     }
-  });
+    return true;
+  }();
 }
 
 const std::unique_ptr<EventSampledHandler>& GetEventSampledHandler(
@@ -209,10 +208,6 @@ void SetPyTorchDDPUsageLogger(
 
 static int64_t GLOBAL_RANK = -1;
 
-int64_t GetGlobalRank() {
-  return GLOBAL_RANK;
-}
-
 void SetGlobalRank(int64_t rank) {
   GLOBAL_RANK = rank;
 }
@@ -220,6 +215,7 @@ void SetGlobalRank(int64_t rank) {
 void LogAPIUsage(const std::string& event) try {
   if (auto logger = GetAPIUsageLogger())
     (*logger)(event);
+  // NOLINTNEXTLINE(bugprone-empty-catch)
 } catch (std::bad_function_call&) {
   // static destructor race
 }
@@ -229,6 +225,7 @@ void LogAPIUsageMetadata(
     const std::map<std::string, std::string>& metadata_map) try {
   if (auto logger = GetAPIUsageMetadataLogger())
     (*logger)(context, metadata_map);
+  // NOLINTNEXTLINE(bugprone-empty-catch)
 } catch (std::bad_function_call&) {
   // static destructor race
 }
@@ -236,6 +233,7 @@ void LogAPIUsageMetadata(
 void LogPyTorchDDPUsage(const DDPLoggingData& ddpData) try {
   if (auto logger = GetDDPUsageLogger())
     (*logger)(ddpData);
+  // NOLINTNEXTLINE(bugprone-empty-catch)
 } catch (std::bad_function_call&) {
   // static destructor race
 }
@@ -245,6 +243,7 @@ bool LogAPIUsageFakeReturn(const std::string& event) try {
   if (auto logger = GetAPIUsageLogger())
     (*logger)(event);
   return true;
+  // NOLINTNEXTLINE(bugprone-empty-catch)
 } catch (std::bad_function_call&) {
   // static destructor race
   return true;

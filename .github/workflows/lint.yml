@@ -1,4 +1,5 @@
 name: Lint
+# Workflow that runs lint checks and also unittests for tools, and scripts.
 
 on:
   pull_request:
@@ -16,6 +17,7 @@ permissions: read-all
 # When any other step fails, it's job will be retried once by retryBot.
 jobs:
   get-label-type:
+    if: github.repository_owner == 'pytorch'
     name: get-label-type
     uses: pytorch/pytorch/.github/workflows/_runner-determinator.yml@main
     with:
@@ -60,6 +62,7 @@ jobs:
     uses: pytorch/test-infra/.github/workflows/linux_job.yml@main
     needs: get-label-type
     with:
+      timeout: 120
       runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge"
       docker-image: pytorch-linux-focal-linter
       fetch-depth: 0
@@ -116,6 +119,7 @@ jobs:
     uses: pytorch/test-infra/.github/workflows/linux_job.yml@main
     needs: get-label-type
     with:
+      timeout: 120
       runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge"
       docker-image: pytorch-linux-focal-linter
       fetch-depth: -1
@@ -153,6 +157,7 @@ jobs:
     uses: pytorch/test-infra/.github/workflows/linux_job.yml@main
     needs: get-label-type
     with:
+      timeout: 120
       runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge"
       docker-image: pytorch-linux-focal-linter
       fetch-depth: 0
@@ -192,6 +197,7 @@ jobs:
     uses: pytorch/test-infra/.github/workflows/linux_job.yml@main
     needs: get-label-type
     with:
+      timeout: 120
       runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge"
       docker-image: pytorch-linux-focal-linter
       fetch-depth: 0
@@ -202,11 +208,12 @@ jobs:
         conda activate "${CONDA_ENV}"
 
         # Test tools
-        python3 -m unittest discover -vs tools/test -p 'test_*.py'
-        python3 -m unittest discover -vs .github/scripts -p 'test_*.py'
+        PYTHONPATH=$(pwd) pytest tools/stats
+        PYTHONPATH=$(pwd) pytest tools/test -o "python_files=test*.py"
+        PYTHONPATH=$(pwd) pytest .github/scripts -o "python_files=test*.py"
 
   test_run_test:
-    name: Test `run_test.py` is usable without boto3/rockset
+    name: Test `run_test.py` is usable without boto3
     if: ${{ github.repository == 'pytorch/pytorch' }}
     runs-on: linux.20_04.4x
     steps:
@@ -224,7 +231,7 @@ jobs:
       - name: Install dependencies
         run: |
           python3 -m pip install --upgrade pip
-          pip install pytest-rerunfailures==11.1.* pytest-flakefinder==1.1.* pytest-xdist==3.3.* expecttest==0.2.* fbscribelogger==0.1.* numpy==1.24.*
+          pip install pytest-rerunfailures==11.1.* pytest-flakefinder==1.1.* pytest-xdist==3.3.* expecttest==0.3.* fbscribelogger==0.1.* numpy==1.24.*
           pip install torch --pre --index-url https://download.pytorch.org/whl/nightly/cpu/
       - name: Run run_test.py (nonretryable)
         run: |
@@ -256,11 +263,11 @@ jobs:
           cache: pip
           cache-dependency-path: |
             **/requirements.txt
-      - name: Setup Python 3.8
+      - name: Setup Python 3.9
         if: matrix.test_type != 'older_python_version'
         uses: actions/setup-python@v4
         with:
-          python-version: '3.8'
+          python-version: '3.9'
           architecture: x64
           check-latest: false
           cache: pip
@@ -271,7 +278,7 @@ jobs:
         run: |
           pip install -r requirements.txt
           # Doesn't really matter what torch version, we just need ANY torch installed
-          pip install 'torch==1.*'
+          pip install 'torch==2.*'
       - name: Run collect_env.py (nonretryable)
         run: |
           # All we need to see is that it passes

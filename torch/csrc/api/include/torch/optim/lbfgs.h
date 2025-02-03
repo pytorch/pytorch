@@ -8,10 +8,10 @@
 #include <deque>
 #include <functional>
 #include <memory>
+#include <utility>
 #include <vector>
 
-namespace torch {
-namespace optim {
+namespace torch::optim {
 
 struct TORCH_API LBFGSOptions : public OptimizerCloneableOptions<LBFGSOptions> {
   LBFGSOptions(double lr = 1);
@@ -58,11 +58,9 @@ struct TORCH_API LBFGSParamState
 class TORCH_API LBFGS : public Optimizer {
  public:
   explicit LBFGS(
-      std::vector<OptimizerParamGroup> param_groups,
+      const std::vector<OptimizerParamGroup>& param_groups,
       LBFGSOptions defaults = {})
-      : Optimizer(
-            std::move(param_groups),
-            std::make_unique<LBFGSOptions>(defaults)) {
+      : Optimizer(param_groups, std::make_unique<LBFGSOptions>(defaults)) {
     TORCH_CHECK(
         param_groups_.size() == 1,
         "LBFGS doesn't support per-parameter options (parameter groups)");
@@ -70,12 +68,12 @@ class TORCH_API LBFGS : public Optimizer {
       auto max_eval_val = (defaults.max_iter() * 5) / 4;
       static_cast<LBFGSOptions&>(param_groups_[0].options())
           .max_eval(max_eval_val);
-      static_cast<LBFGSOptions&>(*defaults_.get()).max_eval(max_eval_val);
+      static_cast<LBFGSOptions&>(*defaults_).max_eval(max_eval_val);
     }
     _numel_cache = std::nullopt;
   }
   explicit LBFGS(std::vector<Tensor> params, LBFGSOptions defaults = {})
-      : LBFGS({OptimizerParamGroup(std::move(params))}, defaults) {}
+      : LBFGS({OptimizerParamGroup(std::move(params))}, std::move(defaults)) {}
 
   Tensor step(LossClosure closure) override;
   void save(serialize::OutputArchive& archive) const override;
@@ -99,5 +97,4 @@ class TORCH_API LBFGS : public Optimizer {
     _TORCH_OPTIM_SERIALIZE_WITH_TEMPLATE_ARG(LBFGS);
   }
 };
-} // namespace optim
-} // namespace torch
+} // namespace torch::optim

@@ -79,6 +79,7 @@ c10::MaybeOwned<Tensor> inline prepare_matrix_for_cublas(const Tensor& tensor, b
       transpose_tensor = tensor.is_contiguous();
       return resolve_conj_if_indicated(tensor, true);
   }
+
   IntArrayRef tensor_strides = tensor.strides();
   IntArrayRef tensor_sizes = tensor.sizes();
   if ((tensor_strides[0] == 1) && (tensor_strides[1] >= std::max<int64_t>(1, tensor_sizes[0]))) {
@@ -201,7 +202,6 @@ static bool isSupportedHipLtROCmArch(int index) {
             return true;
         }
     }
-    TORCH_CHECK(false, "Attempting to use hipBLASLt on a unsupported architecture!");
     return false;
 }
 #endif
@@ -264,7 +264,14 @@ Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& ma
   IntArrayRef mat2_sizes = mat2.sizes();
   IntArrayRef self__sizes;
   bool useLtInterface = false;
+#if defined(USE_ROCM)
+  // When hipBLASLt is not supported on the architecture,
+  // disable_addmm_cuda_lt will always be to set to true
+  static bool disable_addmm_cuda_lt =
+    !isSupportedHipLtROCmArch(self.device().index()) || getDisableAddmmCudaLt();
+#else
   static bool disable_addmm_cuda_lt = getDisableAddmmCudaLt();
+#endif
   at::ScalarType scalar_type = self.scalar_type();
   c10::MaybeOwned<Tensor> self_;
   if (&result != &self) {
@@ -282,7 +289,6 @@ Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& ma
           result.dim() == 2 && self.sizes()[0] == mat2_sizes[1] &&
           self.is_contiguous() && result.is_contiguous() &&
 #ifdef USE_ROCM
-          isSupportedHipLtROCmArch(self.device().index()) &&
           (scalar_type == at::ScalarType::Float ||
            scalar_type == at::ScalarType::Half ||
            scalar_type == at::ScalarType::BFloat16) &&
@@ -292,7 +298,7 @@ Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& ma
            scalar_type == at::ScalarType::Half ||
            scalar_type == at::ScalarType::BFloat16) &&
 #endif
-#if (defined(CUDA_VERSION) && CUDA_VERSION >= 12010 && !defined(USE_ROCM))
+#if (defined(CUDA_VERSION) && CUDA_VERSION >= 12010 || defined(USE_ROCM))
           mat2_sizes[0] > 1 && mat2_sizes[1] > 1;
 #else
           mat2_sizes[0] > 1 && mat2_sizes[1] > 1 &&
@@ -869,6 +875,21 @@ static bool _scaled_mm_allowed_device() {
 #endif
 }
 
+#ifdef USE_ROCM
+static bool _scaled_mm_is_fnuz() {
+    auto dprops = at::cuda::getCurrentDeviceProperties();
+    std::string device_arch = dprops->gcnArchName;
+    static const std::vector<std::string> archs = {"gfx940", "gfx941", "gfx942"};
+    for (std::string arch : archs) {
+        size_t substring = device_arch.find(arch);
+        if (substring != std::string::npos) {
+            return true;
+        }
+    }
+    return false;
+}
+#endif
+
 namespace{
 
 enum class ScalingType {
@@ -920,8 +941,8 @@ ScalingType get_scaling_type(
   // Check for RowWise scaling
   if (scale_a.size(0) == dim_m && scale_a.size(1) == 1 &&
       scale_b.size(0) == 1 && scale_b.size(1) == dim_n) {
-#if !defined(USE_ROCM) && !defined(_MSC_VER) || \
-    (defined(USE_ROCM) && ROCM_VERSION >= 60000)
+#if (!defined(USE_ROCM) && !defined(_MSC_VER)) || \
+    (defined(USE_ROCM) && defined(HIPBLASLT_VEC_EXT))
     TORCH_CHECK(
         scale_a.is_contiguous() && scale_b.is_contiguous(),
         "Both scale_a and scale_b must be contiguous for RowWise scaling.");
@@ -958,7 +979,7 @@ ScalingType get_scaling_type(
 } // namespace
 
 // Computes matrix multiply + bias while applying scaling to input and output matrices
-// Scales are only applicable when matrices are of Float8 type and assumbed to be equal to 1.0 by default.
+// Scales are only applicable when matrices are of Float8 type and assumed to be equal to 1.0 by default.
 // If output matrix type is 16 or 32-bit type, scale_result is not applied.
 // Known limitations:
 //  - Only works if mat1 is row-major and mat2 is column-major
@@ -1009,9 +1030,9 @@ _scaled_mm_out_cuda(const Tensor& mat1, const Tensor& mat2,
       mat1.sizes()[0],
       "x",
       mat1.sizes()[1],
-      ".");
+      ").");
   TORCH_CHECK(mat2.sizes()[0] % 16 == 0 && mat2.sizes()[1] % 16 == 0, "mat2 shape (", mat2.sizes()[0], "x",
-       mat2.sizes()[1], " must be divisible by 16");
+       mat2.sizes()[1], ") must be divisible by 16");
   // Check types
   TORCH_CHECK(!out_dtype || *out_dtype == out.scalar_type(), "out_dtype must match output matrix type");
   TORCH_CHECK(isFloat8Type(mat1.scalar_type()), "Expected mat1 to be Float8 matrix got ", mat1.scalar_type());
@@ -1044,6 +1065,21 @@ _scaled_mm_out_cuda(const Tensor& mat1, const Tensor& mat2,
   IntArrayRef mat2_sizes = mat2.sizes();
   at::native::resize_output(out, {mat1_sizes[0], mat2_sizes[1]});
 
+  // If any of M, K, N is 0 - return early (the tensorwise/rowwise float8 gemm kernels
+  // do not support this case).
+  if (mat1_sizes[0] == 0 || mat1_sizes[1] == 0 || mat2_sizes[1] == 0) {
+    // `out` was created with `at::empty`. In the case where we are multiplying
+    // MxK by KxN and K is the zero dim, we need to initialize here to properly
+    // return a tensor of zeros.
+    if (mat1_sizes[1] == 0) {
+      out.zero_();
+    }
+
+    return out;
+  }
+
+  // ROCm's hipblaslt supports rowwise, so skip this check that sends this to cutlass.
+#ifndef USE_ROCM
   // We are doing row-wise scaling
   if (scaling_choice == ScalingType::RowWise) {
     TORCH_CHECK(out.dtype() == kBFloat16, "Only bf16 high precsion output types are supported for row-wise scaling.");
@@ -1057,6 +1093,21 @@ _scaled_mm_out_cuda(const Tensor& mat1, const Tensor& mat2,
         out);
     return out;
   }
+#else
+  if (scaling_choice == ScalingType::RowWise) {
+    // For ROCm, match behavior of f8f8bf16_rowwise type checking, for unit test purposes.
+    Tensor b = mat2;
+    if (_scaled_mm_is_fnuz()) {
+      TORCH_CHECK(b.dtype() == at::kFloat8_e4m3fnuz);
+    }
+    else {
+      TORCH_CHECK(b.dtype() == at::kFloat8_e4m3fn);
+    }
+    // Until more than bf16 is supported.
+    TORCH_CHECK(out.scalar_type() == ScalarType::BFloat16,
+         "hipblaslt rowwise _scaled_mm only supports BFloat16 output but got ", out.scalar_type());
+  }
+#endif
 
   cublasCommonArgs args(mat1, mat2, out);
   const auto out_dtype_ = args.result->scalar_type();
@@ -1118,6 +1169,7 @@ _scaled_mm_out_cuda(const Tensor& mat1, const Tensor& mat2,
       params.ldc = args.result_ld;
       params.c_dtype = out_dtype_;
       params.use_fast_accum = use_fast_accum;
+      params.use_rowwise = scaling_choice == ScalingType::RowWise;
       if (transa_ && transb_) {
         TUNABLE_DISPATCH(at::cuda::tunable::BlasOp::T, at::cuda::tunable::BlasOp::T)
       }
@@ -1160,7 +1212,8 @@ _scaled_mm_out_cuda(const Tensor& mat1, const Tensor& mat2,
         scale_result ? scale_result->data_ptr() : nullptr,
         args.result_ld,
         out_dtype_,
-        use_fast_accum);
+        use_fast_accum,
+        scaling_choice == ScalingType::RowWise);
   }
 
   return out;

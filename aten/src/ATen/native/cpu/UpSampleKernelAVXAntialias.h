@@ -102,7 +102,7 @@ void pack_rgb(
 
   TORCH_INTERNAL_ASSERT(unpacked_increment == 3 || unpacked_increment == 4);
 
-  for (const auto i C10_UNUSED : c10::irange(num_pixels)) {
+  for ([[maybe_unused]] const auto i : c10::irange(num_pixels)) {
     for (const auto j : c10::irange(num_channels)) {
       packed[j * packed_stride] = unpacked[j];
     }

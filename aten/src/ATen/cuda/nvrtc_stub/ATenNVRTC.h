@@ -4,7 +4,7 @@
 #include <cuda.h>
 #include <nvrtc.h>
 
-namespace at { namespace cuda {
+namespace at::cuda {
 
 
 // NOTE [ USE OF NVRTC AND DRIVER API ]
@@ -132,4 +132,4 @@ extern "C" typedef struct NVRTC {
 } NVRTC;
 
 extern "C" TORCH_CUDA_CPP_API NVRTC* load_nvrtc();
-}} // at::cuda
+} // at::cuda

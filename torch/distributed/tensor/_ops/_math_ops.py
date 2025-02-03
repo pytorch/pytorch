@@ -1,10 +1,10 @@
-# mypy: allow-untyped-decorators
 # mypy: allow-untyped-defs
 # Copyright (c) Meta Platforms, Inc. and affiliates
 import math
+from collections.abc import Sequence
 from dataclasses import dataclass
 from enum import Enum
-from typing import cast, List, Optional, Sequence, Tuple, Union
+from typing import cast, Optional, Union
 
 import torch
 from torch.distributed.device_mesh import DeviceMesh
@@ -149,11 +149,11 @@ class _NormPartial(Partial):
         return 1 + hash(self.norm_type)
 
 
-def _infer_reduction_dims(dims_arg: object, ndim: int) -> Optional[List[int]]:
+def _infer_reduction_dims(dims_arg: object, ndim: int) -> Optional[list[int]]:
     if dims_arg is None:
         return None
-    dims = cast(List[int], as_list(dims_arg))
-    dims = cast(List[int], normalize_dims(dims, ndim))
+    dims = cast(list[int], as_list(dims_arg))
+    dims = cast(list[int], normalize_dims(dims, ndim))
     empty_dims = [[0], [-1], []]
     if ndim == 0 and dims_arg in empty_dims:
         return None
@@ -161,8 +161,8 @@ def _infer_reduction_dims(dims_arg: object, ndim: int) -> Optional[List[int]]:
 
 
 def _infer_reduce_dims_map(
-    reduction_dims: List[int], input_ndim: int, keep_dim=False
-) -> List[int]:
+    reduction_dims: list[int], input_ndim: int, keep_dim=False
+) -> list[int]:
     reduction_dims_map = []
     new_dim_count = 0
     for input_dim in range(input_ndim):
@@ -179,8 +179,8 @@ def _infer_reduce_dims_map(
 
 def _replicate_dims_start_at(
     placements: Sequence[Placement], start_dim: int = 0
-) -> Tuple[Placement, ...]:
-    new_placements: List[Placement] = []
+) -> tuple[Placement, ...]:
+    new_placements: list[Placement] = []
     for p in placements:
         if p.is_partial() or (isinstance(p, Shard) and p.dim >= start_dim):
             new_placements.append(Replicate())  # make it replicate
@@ -191,9 +191,9 @@ def _replicate_dims_start_at(
 
 # return new_placements which align with placements but skip the skipped_dim
 def _skip_dim(
-    placements: Tuple[Placement, ...], skipped_dim: int
-) -> Tuple[Placement, ...]:
-    new_placements: List[Placement] = []
+    placements: tuple[Placement, ...], skipped_dim: int
+) -> tuple[Placement, ...]:
+    new_placements: list[Placement] = []
     for p in placements:
         if isinstance(p, Shard) and p.dim >= skipped_dim:
             new_placements.append(Shard(p.dim - 1))
@@ -203,10 +203,10 @@ def _skip_dim(
 
 
 def replicate_reduction_dims(
-    placements: Tuple[Placement, ...], reduction_dims: List[int]
-) -> Tuple[Placement, ...]:
+    placements: tuple[Placement, ...], reduction_dims: list[int]
+) -> tuple[Placement, ...]:
     # replicate the reduction dims if not reduction_linear
-    new_placements: List[Placement] = []
+    new_placements: list[Placement] = []
 
     for p in placements:
         if p.is_partial():
@@ -220,15 +220,15 @@ def replicate_reduction_dims(
 
 
 def map_placements_after_reduction(
-    placements: Tuple[Placement, ...],
-    reduction_dims: List[int],
-    reduction_dims_map: List[int],
+    placements: tuple[Placement, ...],
+    reduction_dims: list[int],
+    reduction_dims_map: list[int],
     reduction_op: ReductionOpType,
-) -> Tuple[Placement, ...]:
+) -> tuple[Placement, ...]:
     """
     Map each placement based on the output shape after reduction.
     """
-    new_placements: List[Placement] = []
+    new_placements: list[Placement] = []
     for placement in placements:
         if isinstance(placement, (Replicate, Partial)):
             new_placements.append(placement)
@@ -254,7 +254,7 @@ def get_placement_from_reduction_op(reduction_op: ReductionOpType) -> Placement:
 def common_reduction_strategy(
     mesh: DeviceMesh,
     input_strategy: OpStrategy,
-    reduce_dims: List[int],
+    reduce_dims: list[int],
     keep_dim: bool = False,
     reduction_linear: bool = True,
     reduction_op: ReductionOpType = "sum",
@@ -323,6 +323,10 @@ LINEAR_REDUCTION_OP_MAP = {
     aten.any.default: "sum",
     aten.any.dim: "sum",
     aten.any.out: "sum",
+    aten.amax.default: "max",
+    aten.amax.out: "max",
+    aten.amin.default: "min",
+    aten.amin.out: "min",
 }
 
 
@@ -403,7 +407,7 @@ def foreach_norm_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> TupleStrateg
     assert isinstance(input_tuple_strategy, TupleStrategy)
     norm_type = args_schema[1] if len(args_schema) > 1 else 2
     assert isinstance(norm_type, (int, float, str)), f"{norm_type}"
-    output_tuple_strategy_childs: List[OpStrategy] = []
+    output_tuple_strategy_childs: list[OpStrategy] = []
     for op_strategy in input_tuple_strategy.childs:
         assert isinstance(op_strategy, OpStrategy), f"{op_strategy}"
         reduce_dims = list(range(op_strategy.ndim))
@@ -448,7 +452,7 @@ def linalg_replicate_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> OpStrate
     args_schema = op_schema.args_schema
     input_strategy = args_schema[0]
     assert isinstance(input_strategy, OpStrategy), f"{input_strategy}"
-    output_strategies: List[PlacementStrategy] = []
+    output_strategies: list[PlacementStrategy] = []
     for placement_strategy in input_strategy.strategies:
         replicate_placements = tuple(Replicate() for _ in range(mesh.ndim))
         replicate_spec = DTensorSpec(
@@ -479,7 +483,7 @@ def softmax_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> OpStrategy:
     softmax_dim = normalize_dim(softmax_dim, input_strategy.ndim)
 
     output_strategy = OpStrategy([])
-    for idx, input_placement_strategy in enumerate(input_strategy.strategies):
+    for input_placement_strategy in input_strategy.strategies:
         redistribute_costs = []
         input_src_spec = input_placement_strategy.output_spec
 
@@ -909,14 +913,14 @@ def layer_norm_bwd_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> OpStrategy
     axis = input_ndim - len(normalized_size)
     outer_dims = list(range(axis))
 
-    assert isinstance(output_mask, List) and len(output_mask) == 3
+    assert isinstance(output_mask, list) and len(output_mask) == 3
 
     # output triple: (d_input, d_weight, d_bias)
     out_tuple_strategy = OpStrategy([])
     for idx, input_placement_strategy in enumerate(input_strategy.strategies):
         # args for PlacementStrategy
-        output_specs_list: List[Optional[DTensorSpec]] = []
-        input_specs_list: List[DTensorSpec] = []
+        output_specs_list: list[Optional[DTensorSpec]] = []
+        input_specs_list: list[DTensorSpec] = []
         redistribute_costs = []
 
         input_src_spec = input_placement_strategy.output_spec
@@ -1038,8 +1042,6 @@ def layer_norm_bwd_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> OpStrategy
 )
 def topk_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> OpStrategy:
     input_strategy = cast(OpStrategy, op_schema.args_schema[0])
-    k = cast(int, op_schema.args_schema[1])
-    input_shape = input_strategy.shape
     topk_dim = (
         cast(int, op_schema.args_schema[2]) if len(op_schema.args_schema) > 2 else -1
     )
