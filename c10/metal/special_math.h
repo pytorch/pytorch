@@ -438,7 +438,8 @@ float digamma(T0 x) {
       // has a periodicity of pi, in practice the computation of pi * x is a
       // source of error (when |x| > 1).
       float r = ::metal::fract(x);
-      return calc_digamma_positive_domain(1.0f - x) - M_PI_F / ::metal::tan(M_PI_F * r);
+      return calc_digamma_positive_domain(1.0f - x) -
+          M_PI_F / ::metal::tan(M_PI_F * r);
     }
   } else if (x == 0.0f) {
     // As per C++ standard for gamma related functions and SciPy,
