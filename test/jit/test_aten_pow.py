@@ -27,6 +27,9 @@ class TestAtenPow(TestCase):
         # zero base and negative exponent case that should trigger RunTimeError
         self.assertRaises(RuntimeError, fn_int_int, 0, -2)
 
+        # the result type is expected to be int
+        self.assertEqual(type(fn_int_int(2, 2)), int)
+
         """
         2. Testing a = int, b = float
         """
