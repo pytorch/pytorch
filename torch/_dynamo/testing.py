@@ -26,7 +26,7 @@ from .bytecode_transformation import (
     transform_code_object,
 )
 from .guards import CheckFunctionManager, CompileId, GuardedCode
-from .types import DynamoFrameType
+from .types import ConvertFrameReturn, DynamoFrameType, wrap_guarded_code
 from .utils import same
 
 
@@ -174,7 +174,7 @@ def debug_dump(name: str, code: types.CodeType, extra: str = "") -> None:
 
 def debug_insert_nops(
     frame: DynamoFrameType, cache_size: int, hooks: Any, _: Any, *, skip: int = 0
-) -> Optional[GuardedCode]:
+) -> ConvertFrameReturn:
     """used to debug jump updates"""
 
     def insert_nops(instructions: list[Any], code_options: Any) -> None:
@@ -184,7 +184,7 @@ def debug_insert_nops(
     metrics_context = torch._dynamo.utils.get_metrics_context()
     with torch._dynamo.utils.dynamo_timed("debug_insert_nops"), metrics_context:
         if is_generator(frame.f_code):
-            return None
+            return ConvertFrameReturn()
 
         debug_checks(frame.f_code)
         code = transform_code_object(frame.f_code, insert_nops)
@@ -202,10 +202,12 @@ def debug_insert_nops(
             torch_function_mode_stack=[],
         )
 
-        return GuardedCode(
-            code,
-            CheckFunctionManager(frame.f_code, graph).guard_manager,  # type: ignore[arg-type]
-            CompileId(frame_id=0, frame_compile_id=0),
+        return wrap_guarded_code(
+            GuardedCode(
+                code,
+                CheckFunctionManager(frame.f_code, graph).guard_manager,  # type: ignore[arg-type]
+                CompileId(frame_id=0, frame_compile_id=0),
+            )
         )
 
 
