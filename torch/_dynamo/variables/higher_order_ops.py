@@ -757,6 +757,8 @@ class TorchHigherOrderOperatorVariable(VariableTracker):
             return InvokeSubgraphHigherOrderVariable(value, source, **kwargs)
         elif isinstance(value, PrimHOPBase):
             return PrimHOPBaseVariable(value, source, **kwargs)
+        elif value.__name__ == "custom_function_call":
+            return CustomFunctionHigherOrderOperatorVariable(value, source, **kwargs)
         else:
             unimplemented(f"HigherOrderOperator {value.__name__}")
 
@@ -767,6 +769,26 @@ class TorchHigherOrderOperatorVariable(VariableTracker):
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
         unimplemented(f"HigherOrderOperator {self.value.__name__}")
+
+
+class CustomFunctionHigherOrderOperatorVariable(TorchHigherOrderOperatorVariable):
+    """
+    Wraps torch._functorch.autograd_function.custom_function_call
+    """
+
+    def call_function(
+        self,
+        tx: "InstructionTranslator",
+        args: "list[VariableTracker]",
+        kwargs: "dict[str, VariableTracker]",
+    ) -> "VariableTracker":
+        return torch._dynamo.variables.UserMethodVariable(
+            self.value.__call__.__func__,
+            torch._dynamo.variables.UserDefinedObjectVariable(
+                self.value, source=self.source
+            ),
+            source=AttrSource(AttrSource(self.source, "__call__"), "__func__"),
+        ).call_function(tx, args, kwargs)
 
 
 class CondHigherOrderVariable(TorchHigherOrderOperatorVariable):
@@ -1070,10 +1092,15 @@ class WhileLoopHigherOrderVariable(TorchHigherOrderOperatorVariable):
                 return SymNodeVariable.create(tx, proxy, example_value)
 
             new_operands_seq = [
-                create_unbacked_sym_node_var(tx)
-                if (isinstance(carry, ConstantVariable) and carry.python_type() is int)
-                or (isinstance(carry, SymNodeVariable))
-                else carry
+                (
+                    create_unbacked_sym_node_var(tx)
+                    if (
+                        isinstance(carry, ConstantVariable)
+                        and carry.python_type() is int
+                    )
+                    or (isinstance(carry, SymNodeVariable))
+                    else carry
+                )
                 for carry in operands_seq
             ]
 
