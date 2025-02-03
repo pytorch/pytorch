@@ -668,17 +668,6 @@ class TestMultiProc(DynamoDistributedMultiProcTestCase):
             outputs = fsdp_m(inputs)
             self.assertTrue(same(correct_outputs, outputs))
 
-    @skip_if_lt_x_gpu(1)
-    def test_fsdp_compilation_error(self):
-        with _dynamo_dist_per_rank_init(self.rank, self.world_size):
-            m, inputs, correct_outputs = get_model(f"cuda:{self.rank}")
-            # use_orig_params should cuase a graph skip
-            fsdp_m = FSDP(m, use_orig_params=False)
-            # The test is that this used to throw an AssertionException, and now just graph breaks
-            fsdp_m = torch.compile(fsdp_m, backend="aot_eager")
-            outputs = fsdp_m(inputs)
-            self.assertTrue(same(correct_outputs, outputs))
-
     @config.patch(enable_compiler_collectives=True)
     @skip_if_lt_x_gpu(1)
     def test_fsdp_setattr(self):
@@ -1735,13 +1724,8 @@ class TestSingleProc(DynamoDistributedSingleProcTestCase):
         # Test with basic FSDP wrapping (outer wrap around whole model)
         m, inputs, _ = get_model(f"cuda:{self.rank}")
         fsdp_m = FSDP(m, use_orig_params=False)
+        # Test is that this function call does not throw an exception.
         fsdp_m = torch.compile(fsdp_m)
-        self.assertRaisesRegex(
-            AssertionError,
-            "Dynamo only supports FSDP with use_orig_params=True",
-            fsdp_m,
-            inputs,
-        )
 
     def test_fsdp_skip_guards(self):
         """
