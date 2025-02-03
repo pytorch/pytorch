@@ -7364,7 +7364,7 @@ def aten_rnn_tanh_cell(
 
 
 @onnx_impl(aten.roll, trace_only=True)
-def aten_roll(self: TTensor, shifts: INT64, dims: Sequence[int] = ()) -> TTensor:
+def aten_roll(self: TTensor, shifts: Sequence[int], dims: Sequence[int] = ()) -> TTensor:
     """roll(Tensor self, int[1] shifts, int[1] dims=[]) -> Tensor"""
 
     self_rank = len(self.shape)
@@ -7380,8 +7380,7 @@ def aten_roll(self: TTensor, shifts: INT64, dims: Sequence[int] = ()) -> TTensor
         else:
             # assert len(shifts) == len(dims), but shifts is a tensor, dims is a list
             result = self
-            for i in range(len(shifts)):  # pylint: disable=consider-using-enumerate
-                shift = op.Gather(shifts, i, axis=0)
+            for i, shift in enumerate(shifts):
                 dim = dims[i]
                 result = _aten_roll_shift_and_dim_onnx(result, shift, dim)
             return result
@@ -7389,7 +7388,7 @@ def aten_roll(self: TTensor, shifts: INT64, dims: Sequence[int] = ()) -> TTensor
 
 @onnx_impl(aten.roll, trace_only=True, complex=True)
 def aten_roll_complex(
-    self: TTensor, shifts: INT64, dims: Sequence[int] = ()
+    self: TTensor, shifts: Sequence[int], dims: Sequence[int] = ()
 ) -> TTensor:
     """roll(Tensor self, int[1] shifts, int[1] dims=[]) -> Tensor"""
 
