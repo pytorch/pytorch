@@ -1091,10 +1091,9 @@ class InstructionTranslatorBase(
                 if hasattr(e, "msg") and "Could not guard on data-dependent" in e.msg:
                     print(
                         "\n"
-                        + self.output.graph.python_code(
-                            root_module="self",
-                            verbose=True,
-                        ).src,
+                        + torch.fx.GraphModule({}, self.output.graph).print_readable(
+                            print_output=False, include_stride=True, include_device=True
+                        ),
                         file=sys.stderr,
                     )
 

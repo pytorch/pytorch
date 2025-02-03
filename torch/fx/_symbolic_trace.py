@@ -810,51 +810,50 @@ class Tracer(TracerBase):
                 )
                 return self.call_module(mod, forward, args, kwargs)
 
-            try:
-                with _new_patcher() as patcher:
-                    # allow duplicate patches to support the case of nested calls
-                    patcher.patch_method(
-                        torch.nn.Module,
-                        "__getattr__",
-                        module_getattr_wrapper,
-                        deduplicate=False,
+            with _new_patcher() as patcher:
+                # allow duplicate patches to support the case of nested calls
+                patcher.patch_method(
+                    torch.nn.Module,
+                    "__getattr__",
+                    module_getattr_wrapper,
+                    deduplicate=False,
+                )
+                patcher.patch_method(
+                    torch.nn.Module,
+                    "__call__",
+                    module_call_wrapper,
+                    deduplicate=False,
+                )
+                _patch_wrapped_functions(patcher)
+                _autowrap_check(patcher, fn_globals, self._autowrap_function_ids)
+                for module in self._autowrap_search:
+                    _autowrap_check(
+                        patcher, module.__dict__, self._autowrap_function_ids
                     )
-                    patcher.patch_method(
-                        torch.nn.Module,
-                        "__call__",
-                        module_call_wrapper,
-                        deduplicate=False,
-                    )
-                    _patch_wrapped_functions(patcher)
-                    _autowrap_check(patcher, fn_globals, self._autowrap_function_ids)
-                    for module in self._autowrap_search:
-                        _autowrap_check(
-                            patcher, module.__dict__, self._autowrap_function_ids
-                        )
-                    self.create_node(
-                        "output",
-                        "output",
-                        (self.create_arg(fn(*args)),),
-                        {},
-                        type_expr=fn.__annotations__.get("return", None),
-                    )
-            except RuntimeError as e:
-                if (
-                    isinstance(e.args[0], str)
-                    and "Could not guard on data-dependent" in e.args[0]
-                ):
-                    print(
-                        "\n"
-                        + self.graph.python_code(
-                            root_module="self",
-                            verbose=True,
-                        ).src,
-                        file=sys.stderr,
-                    )
-
-                raise
+                self.create_node(
+                    "output",
+                    "output",
+                    (self.create_arg(fn(*args)),),
+                    {},
+                    type_expr=fn.__annotations__.get("return", None),
+                )
 
             self.submodule_paths = None
+        except RuntimeError as e:
+            if (
+                isinstance(e.args[0], str)
+                and "Could not guard on data-dependent" in e.args[0]
+            ):
+                print(
+                    "\n"
+                    + self.graph.python_code(
+                        root_module="self",
+                        verbose=True,
+                    ).src,
+                    file=sys.stderr,
+                )
+
+            raise
         finally:
             _is_fx_tracing_flag = old_is_fx_tracing_flag
         return self.graph
