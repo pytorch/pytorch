@@ -14,12 +14,14 @@ from collections import Counter
 from typing import (
     Any,
     Callable,
+    Generic,
     Iterator,
     no_type_check,
     Optional,
     TYPE_CHECKING,
     Union,
 )
+from typing_extensions import TypeVar
 
 import sympy
 
@@ -339,7 +341,10 @@ def constant_repr(value: Union[int, float]) -> str:
     return repr(value)
 
 
-class SIMDKernel(Kernel):
+CSEVariableType = TypeVar("CSEVariableType", bound=CSEVariable, default=CSEVariable)
+
+
+class SIMDKernel(Kernel[CSEVariableType], Generic[CSEVariableType]):
     """
     Common base class for Triton/Halide codegen which both use flattened indexing rather than loop nests.
     """
@@ -456,7 +461,7 @@ class SIMDKernel(Kernel):
                     numels[prefix],
                     prefix,
                     index,
-                    self,
+                    self,  # type: ignore[arg-type]
                     pid_cache=pid_cache,
                     is_loop=is_reduction and not self.persistent_reduction,
                     tensor_dim=tensor_dim,

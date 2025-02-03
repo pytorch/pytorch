@@ -1389,7 +1389,7 @@ def _reorder_submodules(
         if child is None:
             continue
         fqn = prefix + name
-        _reorder_submodules(child, fqn_order, prefix=fqn + ".")
+        _reorder_submodules(child, fqn_order, prefix=fqn.split("@")[0] + ".")
         delattr(parent, name)
         children.append((fqn_order[fqn], name, child))
     children.sort(key=operator.itemgetter(0))
