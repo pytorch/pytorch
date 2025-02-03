@@ -4353,6 +4353,8 @@ class ShapeEnv:
         symbolic_context: Optional[StatelessSymbolicContext] = None,
     ) -> sympy.Expr:
         """Create a new symbol which is tracked by this ShapeEnv"""
+        from torch._dynamo.source import TensorProperty, TensorPropertySource
+
         # check if constraint_dim is actually static integer
         if (
             isinstance(constraint_dim, StrictMinMaxConstraint)
@@ -4365,8 +4367,6 @@ class ShapeEnv:
                     f"for {source.name()}"
                 )
             if symbolic_context:
-                from torch._dynamo.source import TensorPropertySource
-
                 assert isinstance(source, TensorPropertySource)
                 # TODO: storage_offset handling?
                 assert source.idx is not None
@@ -4447,6 +4447,11 @@ class ShapeEnv:
                 sympy_expr = make_symbol(
                     SymT.SIZE, len(self.var_to_val), positive=positive, integer=True
                 )
+                if (
+                    isinstance(source, TensorPropertySource)
+                    and source.prop == TensorProperty.SIZE
+                ):
+                    self.size_like.add(sympy_expr)
             else:
                 sympy_expr = make_symbol(
                     SymT.FLOAT, len(self.var_to_val), positive=positive, real=True
