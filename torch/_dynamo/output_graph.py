@@ -1474,7 +1474,7 @@ class OutputGraph:
                     self.compiler_fn, e, inspect.currentframe()
                 ).with_traceback(e.__traceback__) from None
             msg = (
-                "Backend compiler failed with a fake tensor exception at \n"
+                "Backend compiler failed with {str(e)} at \n"
                 f"{self.root_tx.format_frame_summary()}"
                 "Adding a graph break."
             )
