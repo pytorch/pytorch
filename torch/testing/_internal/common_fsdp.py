@@ -68,21 +68,15 @@ DEVICE_COUNT = 4  # default
 
 if TEST_CUDA:
     DEVICE_TYPE = "cuda"
-    DISTRIBUTED_BACKEND = "nccl"
-    DEVICE_COUNT = torch.cuda.device_count()
 elif TEST_HPU:
     DEVICE_TYPE = "hpu:0"
-    DISTRIBUTED_BACKEND = "hccl"
 elif TEST_XPU:
     DEVICE_TYPE = "xpu"
-    DISTRIBUTED_BACKEND = "xccl"
-    DEVICE_COUNT = torch.xpu.device_count()
 else:
     DEVICE_TYPE = "cpu"
-    DISTRIBUTED_BACKEND = "gloo"
-    DEVICE_COUNT = 1
 
-
+DISTRIBUTED_BACKEND = dist.get_default_backend_for_device(DEVICE_TYPE)
+DEVICE_COUNT = torch.get_device_module(DEVICE_TYPE).device_count()
 class FSDPInitMode(Enum):
     # No FSDP wrapping
     NO_FSDP = auto()
@@ -938,9 +932,11 @@ class MLPStack(nn.Sequential):
             "1.in_proj": ColwiseParallel(use_local_output=False),
             "1.out_proj": RowwiseParallel(use_local_output=False),
             "2.in_proj": ColwiseParallel(use_local_output=False),
-            "2.out_proj": RowwiseParallel(output_layouts=Shard(1))
-            if self.with_seq_parallel
-            else RowwiseParallel(),
+            "2.out_proj": (
+                RowwiseParallel(output_layouts=Shard(1))
+                if self.with_seq_parallel
+                else RowwiseParallel()
+            ),
         }
         if self.with_seq_parallel:
             parallelize_plan["3"] = SequenceParallel(sequence_dim=1)
