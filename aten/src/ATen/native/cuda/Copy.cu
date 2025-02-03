@@ -289,8 +289,6 @@ inline std::tuple<size_t, size_t, size_t, size_t> getCopyParameters(const Tensor
   }
 }
 
-
-
 static bool copy_requires_temporaries(TensorIterator& iter, bool p2p_enabled) {
   Device dst_device = iter.device(0);
   Device src_device = iter.device(1);
