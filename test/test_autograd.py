@@ -66,7 +66,6 @@ from torch.testing._internal.common_utils import (
     gradcheck,
     gradgradcheck,
     instantiate_parametrized_tests,
-    IS_MACOS,
     IS_WINDOWS,
     parametrize,
     run_tests,
@@ -6829,10 +6828,6 @@ for shape in [(1,), ()]:
         else:
             self.assertNotRegex(s, "PYTORCH_API_USAGE torch.autograd.thread_shutdown")
 
-    @unittest.skipIf(
-        IS_MACOS,
-        "Fails with SIGBUS on macOS; https://github.com/pytorch/pytorch/issues/25941",
-    )
     def test_deep_reentrant(self):
         class DeepReentrant(Function):
             @staticmethod
