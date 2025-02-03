@@ -89,11 +89,16 @@ __global__ void _scatter_gather_elementwise_kernel(int N, func_t f) {
   constexpr int nv = nt * vt;
   int idx = nv * blockIdx.x + threadIdx.x;
 
-  #pragma unroll
-  for (int i = 0; i < vt; ++i) {
-    if (idx < N) {
-      f(idx);
-      idx += nt;
+  if ((idx + nt*(vt-1)) < N) {
+    f(idx, true);
+    idx += nt;
+  } else {
+    #pragma unroll
+    for (int i = 0; i < vt; ++i) {
+      if (idx < N) {
+        f(idx, false);
+        idx += nt;
+      }
     }
   }
 }
@@ -137,19 +142,63 @@ struct _cuda_scatter_gather_internal_kernel {
     char* index_ptr = (char*)iter.data_ptr(2);
 
     auto offset_calc = make_offset_calculator<3>(iter);
-    auto loop = [=]C10_DEVICE(int i) {
-      auto offsets = offset_calc.get(i);
+    auto loop = [=]C10_DEVICE(int i, bool unrl4x) {
+      if (unrl4x) {
+        auto offset0 = offset_calc.get(i);
+        auto offset1 = offset_calc.get(i + num_threads());
+        auto offset2 = offset_calc.get(i + num_threads() * 2);
+        auto offset3 = offset_calc.get(i + num_threads() * 3);
 
-      int64_t idx_dim = *(int64_t*)(index_ptr + offsets[2]);
-      CUDA_KERNEL_ASSERT(idx_dim >= 0 && idx_dim < index_size
-        && "index out of bounds");
+        int64_t idx_dim0 = *(int64_t*)(index_ptr + offset0[2]);
+        int64_t idx_dim1 = *(int64_t*)(index_ptr + offset1[2]);
+        int64_t idx_dim2 = *(int64_t*)(index_ptr + offset2[2]);
+        int64_t idx_dim3 = *(int64_t*)(index_ptr + offset3[2]);
 
-      f(
-        (scalar_t*)(self_ptr + offsets[0]),
-        is_scatter_like ? idx_dim * index_stride : 0,
-        numel,
-        (scalar_t*)(src_ptr + offsets[1]) + (is_scatter_like ? 0 : idx_dim * index_stride)
-      );
+        CUDA_KERNEL_ASSERT(idx_dim0 >= 0 && idx_dim0 < index_size && "index out of bounds");
+        CUDA_KERNEL_ASSERT(idx_dim1 >= 0 && idx_dim1 < index_size && "index out of bounds");
+        CUDA_KERNEL_ASSERT(idx_dim2 >= 0 && idx_dim2 < index_size && "index out of bounds");
+        CUDA_KERNEL_ASSERT(idx_dim3 >= 0 && idx_dim3 < index_size && "index out of bounds");
+        f(
+          (scalar_t*)(self_ptr + offset0[0]),
+          is_scatter_like ? idx_dim0 * index_stride : 0,
+          numel,
+          (scalar_t*)(src_ptr + offset0[1]) + (is_scatter_like ? 0 : idx_dim0 * index_stride)
+        );
+
+        f(
+          (scalar_t*)(self_ptr + offset1[0]),
+          is_scatter_like ? idx_dim1 * index_stride : 0,
+          numel,
+          (scalar_t*)(src_ptr + offset1[1]) + (is_scatter_like ? 0 : idx_dim1 * index_stride)
+        );
+
+        f(
+          (scalar_t*)(self_ptr + offset2[0]),
+          is_scatter_like ? idx_dim2 * index_stride : 0,
+          numel,
+          (scalar_t*)(src_ptr + offset2[1]) + (is_scatter_like ? 0 : idx_dim2 * index_stride)
+        );
+
+        f(
+          (scalar_t*)(self_ptr + offset3[0]),
+          is_scatter_like ? idx_dim3 * index_stride : 0,
+          numel,
+          (scalar_t*)(src_ptr + offset3[1]) + (is_scatter_like ? 0 : idx_dim3 * index_stride)
+        );
+      } else {
+        auto offsets = offset_calc.get(i);
+
+        int64_t idx_dim = *(int64_t*)(index_ptr + offsets[2]);
+        CUDA_KERNEL_ASSERT(idx_dim >= 0 && idx_dim < index_size
+          && "index out of bounds");
+
+        f(
+          (scalar_t*)(self_ptr + offsets[0]),
+          is_scatter_like ? idx_dim * index_stride : 0,
+          numel,
+          (scalar_t*)(src_ptr + offsets[1]) + (is_scatter_like ? 0 : idx_dim * index_stride)
+        );
+      }
     };
 
     _launch_scatter_gather_kernel<num_threads(), thread_work_size()>(iter.numel(), loop);
@@ -358,20 +407,65 @@ struct _cuda_scatter_fill_internal_kernel {
     char* index_ptr = (char*)iter.data_ptr(1);
 
     auto offset_calc = make_offset_calculator<2>(iter);
-    auto loop = [=]C10_DEVICE(int i) {
-      auto offsets = offset_calc.get(i);
+    auto loop = [=]C10_DEVICE(int i, bool unrl4x) {
+      if (unrl4x) {
+        auto offset0 = offset_calc.get(i);
+        auto offset1 = offset_calc.get(i + num_threads());
+        auto offset2 = offset_calc.get(i + num_threads() * 2);
+        auto offset3 = offset_calc.get(i + num_threads() * 3);
 
-      int64_t idx_dim = *(int64_t*)(index_ptr + offsets[1]);
-      CUDA_KERNEL_ASSERT(idx_dim >= 0 && idx_dim < index_size
-        && "index out of bounds"
-      );
+        int64_t idx_dim0 = *(int64_t*)(index_ptr + offset0[1]);
+        int64_t idx_dim1 = *(int64_t*)(index_ptr + offset1[1]);
+        int64_t idx_dim2 = *(int64_t*)(index_ptr + offset2[1]);
+        int64_t idx_dim3 = *(int64_t*)(index_ptr + offset3[1]);
 
-      f(
-        (scalar_t*)(self_ptr + offsets[0]),
-        idx_dim * index_stride,
-        numel,
-        (scalar_t*)&src_val
-      );
+        CUDA_KERNEL_ASSERT(idx_dim0 >= 0 && idx_dim0 < index_size && "index out of bounds");
+        CUDA_KERNEL_ASSERT(idx_dim1 >= 0 && idx_dim1 < index_size && "index out of bounds");
+        CUDA_KERNEL_ASSERT(idx_dim2 >= 0 && idx_dim2 < index_size && "index out of bounds");
+        CUDA_KERNEL_ASSERT(idx_dim3 >= 0 && idx_dim3 < index_size && "index out of bounds");
+
+        f(
+          (scalar_t*)(self_ptr + offset0[0]),
+          idx_dim0 * index_stride,
+          numel,
+          (scalar_t*)&src_val
+        );
+
+        f(
+          (scalar_t*)(self_ptr + offset1[0]),
+          idx_dim1 * index_stride,
+          numel,
+          (scalar_t*)&src_val
+        );
+
+        f(
+          (scalar_t*)(self_ptr + offset2[0]),
+          idx_dim2 * index_stride,
+          numel,
+          (scalar_t*)&src_val
+        );
+
+        f(
+          (scalar_t*)(self_ptr + offset3[0]),
+          idx_dim3 * index_stride,
+          numel,
+          (scalar_t*)&src_val
+        );
+      } else {
+        auto offsets = offset_calc.get(i);
+
+        int64_t idx_dim = *(int64_t*)(index_ptr + offsets[1]);
+        CUDA_KERNEL_ASSERT(idx_dim >= 0 && idx_dim < index_size
+          && "index out of bounds"
+        );
+
+        f(
+          (scalar_t*)(self_ptr + offsets[0]),
+          idx_dim * index_stride,
+          numel,
+          (scalar_t*)&src_val
+        );
+      }
     };
 
     _launch_scatter_gather_kernel<num_threads(), thread_work_size()>(iter.numel(), loop);
