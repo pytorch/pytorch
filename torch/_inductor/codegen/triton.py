@@ -13,6 +13,7 @@ from collections.abc import Iterable, Sequence
 from functools import lru_cache
 from typing import Any, Callable, cast, Optional, TYPE_CHECKING, Union
 
+
 import sympy
 from sympy.printing.precedence import PRECEDENCE
 
@@ -20,12 +21,11 @@ import torch
 import torch._logging
 import torch.utils._pytree as pytree
 from torch._dynamo.device_interface import get_interface_for_device
-from torch._dynamo.utils import identity, preserve_rng_state
+from torch._dynamo.utils import identity, preserve_rng_state, dynamo_timed
 from torch._prims_common import is_integer_dtype
 from torch.utils._ordered_set import OrderedSet
 from torch.utils._sympy.functions import CeilDiv, FloorDiv, ModularIndexing
 from torch.utils._triton import has_triton_package
-
 from ...utils._sympy.symbol import free_symbol_is_type, prefix_str, symbol_is_type, SymT
 from ...utils._sympy.value_ranges import ValueRanges
 from .. import config, ir, metrics
@@ -95,6 +95,7 @@ from .triton_utils import (
     should_unwrap_unspec_arg,
     signature_to_meta,
 )
+from ..async_compile import AsyncCompile
 
 
 if TYPE_CHECKING:
@@ -110,7 +111,7 @@ log = logging.getLogger(__name__)
 perf_hint_log = torch._logging.getArtifactLogger(__name__, "perf_hints")
 schedule_log = torch._logging.getArtifactLogger(__name__, "schedule")
 fusion_log = torch._logging.getArtifactLogger(__name__, "fusion")
-
+async_compile = AsyncCompile()
 
 class OpDtypeSupport:
     """
@@ -3843,7 +3844,6 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         else:
             code.writeline(f"{x}mask = {entry.name} < {x}numel")
 
-
 class TritonScheduling(SIMDScheduling):
     kernel_type: type[Any] = TritonKernel
     backend_features = OrderedSet(
@@ -3939,9 +3939,20 @@ class TritonScheduling(SIMDScheduling):
             src_code = src_code.replace("#pragma CMT", "#")
 
             _basename, _, kernel_path = get_path(code_hash(src_code.strip()), "py")
-
             compile_wrapper = IndentedBuffer()
+            # TODO: Refactor this code so that instead of calling async_compile.triton after the entire code has been generated, we
+            # kick off the worker process here to start compiling the code, and save the Future object to await later.
+
+            # If it's a TritonBundler cache hit, we can avoid that altogether and return the compiled kernel directly.
+            if async_compile.use_process_pool():
+                # The process pool is warm, we can shell out to workers right away. This
+                # allows us to save the result in async_compile.CompiledTritonKernels,
+                # so that the second time we call async_compile.triton, we do no work.
+                async_compile.triton(subs_name, src_code)
+
             compile_wrapper.writeline(f"async_compile.triton({subs_name!r}, '''")
+
+
             compile_wrapper.splice(src_code, strip=True)
             current_device = V.graph.get_current_device_or_throw()
             compile_wrapper.writeline(f"''', device_str='{current_device.type}')")
