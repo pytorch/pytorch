@@ -1942,6 +1942,12 @@ class BuiltinVariable(VariableTracker):
             ) from None
 
         source = obj.source and TypeSource(obj.source)
+        if (
+            source is None
+            and isinstance(obj, variables.UserDefinedObjectVariable)
+            and obj.cls_source
+        ):
+            source = obj.cls_source
         if py_type is torch.Tensor:
             # In some cases torch isn't available in globals
             name = tx.output.install_global_by_id("", torch)
@@ -1992,9 +1998,11 @@ class BuiltinVariable(VariableTracker):
             mod = tx.output.get_submodule(nn_mod_variable.module_key)
             return variables.ConstantVariable.create(id(mod))
         elif len(args) == 1 and isinstance(
-            args[0], variables.UserDefinedObjectVariable
+            args[0],
+            (variables.UserDefinedClassVariable, variables.UserDefinedObjectVariable),
         ):
-            install_guard(args[0].source.make_guard(GuardBuilder.ID_MATCH))
+            if args[0].source:
+                install_guard(args[0].source.make_guard(GuardBuilder.ID_MATCH))
             constant_result = id(args[0].value)
             return variables.ConstantVariable.create(constant_result)
         elif len(args) == 1 and isinstance(args[0], TensorVariable):
@@ -2002,6 +2010,8 @@ class BuiltinVariable(VariableTracker):
             return tensor_variable.call_id(tx)
         elif istype(args[0], variables.UserFunctionVariable):
             return variables.ConstantVariable.create(id(args[0].fn))
+        elif istype(args[0], variables.SkipFunctionVariable):
+            return variables.ConstantVariable.create(id(args[0].value))
         else:
             unimplemented(f"call_id with args {args}")
 
