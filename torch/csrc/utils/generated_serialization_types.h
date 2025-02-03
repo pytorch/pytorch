@@ -58,6 +58,7 @@ class ForwardRef {
   ForwardRef<T>& operator=(ForwardRef<T>&&) = default;
   ForwardRef<T>& operator=(const ForwardRef<T>& other) {
     ptr_ = std::make_unique<T>(*other.ptr_);
+    return *this;
   }
   const T& operator*() const {
     return *ptr_;
