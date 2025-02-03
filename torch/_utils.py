@@ -696,6 +696,8 @@ def render_call(fn, args, kwargs):
 class KeyErrorMessage(str):
     r"""str subclass that returns itself in repr"""
 
+    __slots__ = ()
+
     def __repr__(self):
         return self
 

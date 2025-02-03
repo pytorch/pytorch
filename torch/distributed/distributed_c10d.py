@@ -231,7 +231,8 @@ def supports_complex(reduceOp: ReduceOp) -> bool:
     return reduceOp not in denyList
 
 
-class Backend(str):
+# TODO refactor into enum/strenum
+class Backend(str):  # noqa: SLOT000
     """
     An enum-like class for backends.
 

@@ -5,6 +5,7 @@ from dataclasses import fields
 
 
 class _UnionTag(str):
+    __slots__ = ("_cls",)
     _cls: Hashable
 
     @staticmethod
