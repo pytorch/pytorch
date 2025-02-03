@@ -42,7 +42,6 @@ class ScheduleVShaped(PipelineScheduleMulti):
             n_microbatches=n_microbatches,
             loss_fn=loss_fn,
             scale_grads=scale_grads,
-            loop_style="v",
         )
 
         # Go through one microbatch
@@ -70,6 +69,7 @@ class ScheduleVShaped(PipelineScheduleMulti):
                 None,
             ],
         }
+        self._validate_and_set_stage_mapping(self.pipeline_order)
 
 
 class ScheduleUnbalanced(PipelineScheduleMulti):

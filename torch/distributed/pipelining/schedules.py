@@ -1116,7 +1116,6 @@ class PipelineScheduleMulti(_PipelineSchedule):
         output_merge_spec: Optional[Union[dict[str, Any], tuple[Any]]] = None,
         use_full_backward: Optional[bool] = None,
         scale_grads: bool = True,
-        loop_style: Optional[str] = None,
     ):
         # Init parent
         super().__init__(
@@ -1133,9 +1132,8 @@ class PipelineScheduleMulti(_PipelineSchedule):
         self.pp_group_size = stages[0].group_size
         self.rank = stages[0].group_rank
         # Set the pipeline stage states
-        style = loop_style if loop_style else "loop"
         self.stage_index_to_group_rank = generate_stage_to_rank_mapping(
-            self.pp_group_size, self._num_stages, style=style
+            self.pp_group_size, self._num_stages
         )
         for stage in self._stages:
             stage.stage_index_to_group_rank = self.stage_index_to_group_rank
@@ -2300,8 +2298,12 @@ class ScheduleZBVZeroBubble(PipelineScheduleMulti):
             kwargs_chunk_spec=kwargs_chunk_spec,
             output_merge_spec=output_merge_spec,
             scale_grads=scale_grads,
-            loop_style="v",
         )
+        self.stage_index_to_group_rank = generate_stage_to_rank_mapping(
+            self.pp_group_size, self._num_stages, style="v"
+        )
+        for stage in self._stages:
+            stage.stage_index_to_group_rank = self.stage_index_to_group_rank
 
         self.n_local_stages = len(stages)
         if self.n_local_stages != 2:
