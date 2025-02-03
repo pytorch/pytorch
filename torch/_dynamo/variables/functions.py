@@ -456,7 +456,8 @@ class UserMethodVariable(UserFunctionVariable):
                 tx, (self.obj, *args), kwargs
             )
         if self.is_constant:
-            fn = getattr(self.obj.value, self.fn.__name__)
+            obj = convert_to_python_constant(tx, self.obj)
+            fn = getattr(obj, self.fn.__name__)
             return invoke_and_store_as_constant(tx, fn, self.get_name(), args, kwargs)
         return super().call_function(tx, args, kwargs)
 
@@ -504,14 +505,28 @@ class WrappedUserFunctionVariable(UserFunctionVariable):
         return result
 
 
-def invoke_and_store_as_constant(tx: "InstructionTranslator", fn, name, args, kwargs):
-    def convert(x):
-        if isinstance(x, variables.TensorVariable):
-            return x.get_real_value()
-        return x.as_python_constant()
+def convert_to_python_constant(tx, x):
+    if isinstance(x, variables.TensorVariable):
+        ret = x.get_real_value()
+    elif isinstance(x, variables.NNModuleVariable):
+        ret = x.module
+    elif isinstance(x, variables.UserDefinedObjectVariable):
+        ret = x.value
+    elif isinstance(x, variables.ListVariable):
+        ret = [convert_to_python_constant(tx, y) for y in x.items]
+    else:
+        # NOTE: can add support for more types as needed
+        ret = x.as_python_constant()
+    if tx.output.side_effects.has_pending_mutation(x):
+        # this should be hidden behind some API in the side_effects or something....
+        for key, value in tx.output.side_effects.store_attr_mutations[x].items():
+            object.__setattr__(ret, key, convert_to_python_constant(tx, value))
+    return ret
 
-    args = [convert(x) for x in args]
-    kwargs = {k: convert(v) for k, v in kwargs.items()}
+
+def invoke_and_store_as_constant(tx: "InstructionTranslator", fn, name, args, kwargs):
+    args = [convert_to_python_constant(tx, x) for x in args]
+    kwargs = {k: convert_to_python_constant(tx, v) for k, v in kwargs.items()}
     res = fn(*args, **kwargs)
     return tx.output.register_attr_or_module(
         res,
