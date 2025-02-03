@@ -18,6 +18,7 @@ from .ctx_manager import (
     SetFwdGradEnabledContextManager,
     StreamContextVariable,
     StreamVariable,
+    TemporarilyPopInterpreterStackCtxManagerVariable,
     VmapIncrementNestingCtxManagerVariable,
     WithExitFunctionVariable,
 )
@@ -175,6 +176,7 @@ __all__ = [
     "SliceVariable",
     "StringFormatVariable",
     "SuperVariable",
+    "TemporarilyPopInterpreterStackCtxManagerVariable",
     "TensorVariable",
     "TMADescriptorVariable",
     "TorchCtxManagerClassVariable",

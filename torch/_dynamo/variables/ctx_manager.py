@@ -236,6 +236,42 @@ class GradInplaceRequiresGradCtxManagerVariable(ContextWrappingVariable):
         return variables.ConstantVariable.create(None)
 
 
+class TemporarilyPopInterpreterStackCtxManagerVariable(ContextWrappingVariable):
+    """represents torch._functorch.pyfunction.temporarily_pop_interpreter_stack()"""
+
+    @staticmethod
+    def create(tx: "InstructionTranslator", target_values, **kwargs):
+        return TemporarilyPopInterpreterStackCtxManagerVariable(
+            target_values=target_values,
+            initial_values=None,
+            **kwargs,
+        )
+
+    def enter(self, tx):
+        self.saved = torch._C._functorch.pop_dynamic_layer_stack()
+        self.set_cleanup_hook(
+            tx,
+            lambda: torch._C._functorch.push_dynamic_layer_stack(self.saved),
+        )
+        self.state.proxy = tx.output.create_node(
+            "call_function",
+            torch._C._functorch.pop_dynamic_layer_stack,
+            (),
+            {},
+        )
+        return variables.ConstantVariable.create(None)
+
+    def exit(self, tx: "InstructionTranslator", *args):
+        self.state.cleanup()
+        tx.output.create_node(
+            "call_function",
+            torch._C._functorch.push_dynamic_layer_stack,
+            (self.state.proxy,),
+            {},
+        )
+        return variables.ConstantVariable.create(None)
+
+
 class JvpIncrementNestingCtxManagerVariable(ContextWrappingVariable):
     """represents torch.func.jvp increment/decrement nesting"""
 
