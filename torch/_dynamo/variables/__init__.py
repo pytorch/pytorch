@@ -26,11 +26,14 @@ from .dicts import (
     DefaultDictVariable,
     DictKeySetVariable,
     FrozensetVariable,
+    MappingProxyVariable,
     NNModuleHooksDictVariable,
     SetVariable,
 )
 from .distributed import BackwardHookVariable, DistributedVariable, PlacementVariable
 from .functions import (
+    BuiltinMethodVariable,
+    CollectionsNamedTupleFunction,
     CreateTMADescriptorVariable,
     FunctionDecoratedByContextlibContextManagerVariable,
     FunctoolsPartialVariable,
@@ -117,6 +120,7 @@ from .user_defined import (
     UserDefinedClassVariable,
     UserDefinedDictVariable,
     UserDefinedObjectVariable,
+    UserDefinedTupleVariable,
 )
 
 
@@ -182,9 +186,11 @@ __all__ = [
     "UnspecializedPythonVariable",
     "UntypedStorageVariable",
     "UserDefinedClassVariable",
+    "UserDefinedTupleVariable",
     "UserDefinedObjectVariable",
     "UserFunctionVariable",
     "UserMethodVariable",
     "VariableTracker",
     "WithExitFunctionVariable",
+    "MappingProxyVariable",
 ]

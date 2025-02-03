@@ -289,8 +289,10 @@ void Engine::stop() {
   stopped_ = true;
   // Under some conditions, autograd threads can hang on shutdown
   // Do not wait for them to shutdown indefinitely but rely on timeout
-  auto wait_duration_str = getenv("TORCH_AUTOGRAD_SHUTDOWN_WAIT_LIMIT");
-  auto wait_duration = wait_duration_str ? std::atof(wait_duration_str) : 10.0;
+  auto wait_duration_str =
+      c10::utils::get_env("TORCH_AUTOGRAD_SHUTDOWN_WAIT_LIMIT");
+  auto wait_duration =
+      wait_duration_str ? std::atof(wait_duration_str->c_str()) : 10.0;
   bool noBackward = true;
   for (auto& queue : device_ready_queues_) {
     noBackward = noBackward && queue->empty();
@@ -895,6 +897,19 @@ bool has_input_metadata<std::optional<InputMetadata>>(
 template <>
 bool has_input_metadata<Edge>(const Edge& thing) {
   return thing.is_valid();
+}
+
+std::vector<std::optional<InputMetadata>> collect_input_metadata(
+    const edge_list& edges) {
+  std::vector<std::optional<InputMetadata>> input_metadata;
+  for (const auto& edge : edges) {
+    if (!edge.is_valid()) {
+      input_metadata.emplace_back(std::nullopt);
+      continue;
+    }
+    input_metadata.emplace_back(edge.function->input_metadata(edge.input_nr));
+  }
+  return input_metadata;
 }
 
 // Given an vector<Edge> or vector<optional<InputMetdata>>, validate the

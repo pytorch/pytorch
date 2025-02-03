@@ -21,7 +21,7 @@ from torch.utils._triton import has_triton_tma_device
 torch.set_float32_matmul_precision("high")
 
 
-f8_msg = "FP8 is only supported on H100+ and sm_89 and MI300+ devices"
+f8_msg = "FP8 is only supported on H100+, SM 8.9 and MI300+ devices"
 
 # define the e4m3/e5m2 constants
 E4M3_MAX_POS = torch.finfo(torch.float8_e4m3fn).max
