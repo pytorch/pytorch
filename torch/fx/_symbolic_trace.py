@@ -845,9 +845,10 @@ class Tracer(TracerBase):
                 ):
                     print(
                         "\n"
-                        + torch.fx.GraphModule({}, self.graph).print_readable(
-                            print_output=False, include_stride=True, include_device=True
-                        ),
+                        + self.graph.python_code(
+                            root_module="self",
+                            verbose=True,
+                        ).src,
                         file=sys.stderr,
                     )
 
