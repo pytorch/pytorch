@@ -277,7 +277,7 @@ def get_error_inputs_for_all_optims(device, dtype):
             ),
             ErrorOptimizerInput(
                 OptimizerInput(
-                    params=None,
+                    params=[sample_param],
                     kwargs=dict(lr=torch.tensor([0.001])),
                     desc="Tensor lr must be 0-dimension",
                 ),
@@ -587,6 +587,10 @@ def optim_inputs_func_adam(device, dtype=None):
 
 def optim_error_inputs_func_adam(device, dtype):
     error_inputs = get_error_inputs_for_all_optims(device, dtype)
+    error_inputs = [
+        x for x in error_inputs
+        if x.error_regex != "Tensor lr must be 0-dimension"
+    ]
     if _get_device_type(device) == "cpu":
         error_inputs += [
             ErrorOptimizerInput(
@@ -615,6 +619,15 @@ def optim_error_inputs_func_adam(device, dtype):
                 ),
                 error_type=ValueError,
                 error_regex="lr as a Tensor is not supported for capturable=False and foreach=True",
+            ),
+            ErrorOptimizerInput(
+                OptimizerInput(
+                    params=None,
+                    kwargs=dict(lr=torch.tensor([0.001, 0.001])),
+                    desc="Tensor lr must be 1-element",
+                ),
+                error_type=ValueError,
+                error_regex="Tensor lr must be 1-element",
             ),
             ErrorOptimizerInput(
                 OptimizerInput(
