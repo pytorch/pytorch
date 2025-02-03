@@ -35,22 +35,6 @@ class GeneratorTestsBase(torch._dynamo.test_case.TestCase):
 
 
 class GeneratorTests(GeneratorTestsBase):
-    expected_failures = []
-
-    def run(self, result=None):
-        # Override the run method to inject the "expectingFailure" marker
-        # when the test case runs.
-        marker = "__unittest_expecting_failure__"
-        for test_name in dir(self):
-            test_method = getattr(self, test_name)
-            if test_name.startswith("test_") and not getattr(
-                test_method, marker, False
-            ):
-                getattr(self, test_name).__dict__[marker] = (
-                    test_name in self.expected_failures
-                )
-        return super().run(result=result)
-
     def test_generator_simple(self):
         def whoo():
             yield 1
@@ -1001,7 +985,6 @@ class TestGeneratorThrow(GeneratorTestsBase):
             except RuntimeError:
                 yield t.cos()
 
-        @torch.compile(backend="eager", fullgraph=True)
         def fn(t):
             gen = whoo(t)
             a = next(gen)
@@ -1009,7 +992,7 @@ class TestGeneratorThrow(GeneratorTestsBase):
             return a + b
 
         t = torch.randn(2)
-        y = fn(t)
+        y = self._compile_check(fn, (t,))
         self.assertEqual(y, t.sin() + t.cos())
 
     def test_throw_with_finally(self):
@@ -1026,20 +1009,19 @@ class TestGeneratorThrow(GeneratorTestsBase):
                 finally:
                     z += 2
             except ValueError:
-                z += 3
+                z += 33
                 yield 4
             finally:
                 z += 1
             z += 10
 
-        @torch.compile(fullgraph=True, backend="eager")
         def f(x):
             gen = whoo()
             next(gen)
             gen.throw(ValueError)
             return x.sin()
 
-        f(torch.randn(3))
+        self._compile_check(f)
         self.assertEqual(z, 3)
 
     def test_throw_without_finally(self):
@@ -1047,6 +1029,7 @@ class TestGeneratorThrow(GeneratorTestsBase):
 
         def whoo(t):
             nonlocal z
+            z = 0
             try:
                 z += 1
                 yield t.sin()
@@ -1057,7 +1040,6 @@ class TestGeneratorThrow(GeneratorTestsBase):
                 z += 1_000
             z += 10_000
 
-        @torch.compile(backend="eager", fullgraph=True)
         def fn(t):
             gen = whoo(t)
             a = next(gen)
@@ -1065,7 +1047,7 @@ class TestGeneratorThrow(GeneratorTestsBase):
             return a + b
 
         t = torch.randn(2)
-        y = fn(t)
+        y = self._compile_check(fn, (t,))
         self.assertEqual(y, t.sin() + t.cos())
         self.assertEqual(z, 101)
 
@@ -1092,6 +1074,7 @@ class TestGeneratorThrow(GeneratorTestsBase):
 
         def whoo(t):
             nonlocal z
+            z = 0
             try:
                 z += 1
                 yield t.sin()
@@ -1100,7 +1083,6 @@ class TestGeneratorThrow(GeneratorTestsBase):
             finally:
                 z += 100
 
-        @torch.compile(backend="eager", fullgraph=True)
         def fn(t):
             gen = whoo(t)
             a = next(gen)
@@ -1110,7 +1092,7 @@ class TestGeneratorThrow(GeneratorTestsBase):
                 return a
 
         t = torch.randn(2)
-        y = fn(t)
+        y = self._compile_check(fn, (t,))
         self.assertEqual(z, 111)
         self.assertEqual(y, t.sin())
 
@@ -1119,6 +1101,7 @@ class TestGeneratorThrow(GeneratorTestsBase):
 
         def whoo(t):
             nonlocal z
+            z = 0
             try:
                 z += 1
                 yield t.sin()
@@ -1144,6 +1127,7 @@ class TestGeneratorThrow(GeneratorTestsBase):
 
         def whoo(t):
             nonlocal z
+            z = 0
             try:
                 z += 1
                 yield t.sin()
@@ -1169,6 +1153,7 @@ class TestGeneratorThrow(GeneratorTestsBase):
 
         def whoo(t):
             nonlocal z
+            z = 0
             try:
                 z += 1
                 yield t.sin()
@@ -1195,6 +1180,7 @@ class TestGeneratorThrow(GeneratorTestsBase):
 
         def whoo(t):
             nonlocal z
+            z = 0
             try:
                 z += 1
                 yield t.sin()
@@ -1208,7 +1194,6 @@ class TestGeneratorThrow(GeneratorTestsBase):
                 z += 1000
             z += 10_000
 
-        @torch.compile(backend="eager", fullgraph=True)
         def fn(t):
             gen = whoo(t)
             a = next(gen)
@@ -1216,7 +1201,7 @@ class TestGeneratorThrow(GeneratorTestsBase):
             return a + b
 
         t = torch.randn(2)
-        y = fn(t)
+        y = self._compile_check(fn, (t,))
         self.assertEqual(y, t.sin() + t.tan())
         self.assertEqual(z, 1 + 100 + 1000)
 
