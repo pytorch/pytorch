@@ -839,19 +839,15 @@ class Tracer(TracerBase):
                 )
 
             self.submodule_paths = None
-        except RuntimeError as e:
-            if (
-                isinstance(e.args[0], str)
-                and "Could not guard on data-dependent" in e.args[0]
-            ):
-                print(
-                    "\n"
-                    + self.graph.python_code(
-                        root_module="self",
-                        verbose=True,
-                    ).src,
-                    file=sys.stderr,
-                )
+        except RuntimeError:
+            print(
+                "\n"
+                + self.graph.python_code(
+                    root_module="self",
+                    verbose=True,
+                ).src,
+                file=sys.stderr,
+            )
 
             raise
         finally:
