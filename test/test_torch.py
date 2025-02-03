@@ -1225,9 +1225,7 @@ class TestTorchDeviceType(TestCase):
             (':16:8', True)]
 
         cublas_var_name = 'CUBLAS_WORKSPACE_CONFIG'
-        is_cuda10_2_or_higher = (
-            (torch.version.cuda is not None)
-            and ([int(x) for x in torch.version.cuda.split(".")] >= [10, 2]))
+        is_cuda10_2_or_higher = (torch.version.cuda is not None)
 
         def test_case_info(fn_name, config):
             return f'function "{fn_name}" with config "{"" if config is None else config}"'
@@ -9434,9 +9432,7 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
 
     def test_to(self):
         self._test_to_with_layout(torch.strided)
-        is_cuda10_2_or_higher = (
-            (torch.version.cuda is not None)
-            and ([int(x) for x in torch.version.cuda.split(".")] >= [10, 2]))
+        is_cuda10_2_or_higher = (torch.version.cuda is not None)
         if is_cuda10_2_or_higher:  # in cuda10_1 sparse_csr is beta
             self._test_to_with_layout(torch.sparse_csr)
 
