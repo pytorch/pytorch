@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from textwrap import dedent
 
 from .common import DeviceOpOverrides, register_device_op_overrides
