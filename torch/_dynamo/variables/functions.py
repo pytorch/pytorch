@@ -331,8 +331,15 @@ class BuiltinMethodVariable(BaseUserFunctionVariable):
 
     @staticmethod
     @functools.lru_cache(None)
-    def supported_methods():
-        return {tuple.__new__}
+    def is_supported_builtin_method(obj):
+        method_self = obj.__self__
+        method_name = obj.__name__
+
+        # TODO(anijain2305) - Add support for more builtin methods
+        # Supports tuple.__new__ and frozenset({....}).__contains__
+        return (method_self is tuple and method_name == "__new__") or (
+            type(method_self) is frozenset and method_name == "__contains__"
+        )
 
     def call_function(
         self,
@@ -342,9 +349,9 @@ class BuiltinMethodVariable(BaseUserFunctionVariable):
     ) -> "VariableTracker":
         method_self = self.fn.__self__
         name = self.fn.__name__
-        return variables.BuiltinVariable(method_self).call_method(
-            tx, name, args, kwargs
-        )
+        obj_source = self.source and AttrSource(self.source, "__self__")
+        obj_vt = VariableTracker.build(tx, method_self, obj_source)
+        return obj_vt.call_method(tx, name, args, kwargs)
 
 
 class FunctionDecoratedByContextlibContextManagerVariable(BaseUserFunctionVariable):
