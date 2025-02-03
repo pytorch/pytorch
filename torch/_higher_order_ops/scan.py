@@ -232,9 +232,14 @@ class ScanOp(HigherOrderOperator):
         super().__init__("scan")
 
     def __call__(self, combine_fn, init, xs, reverse, additional_inputs):
+        # There is currently an issue that the ScanOp is sometimes called with
+        # the additional_inputs being a list. See https://github.com/pytorch/pytorch/issues/145785
+        # Once this issue is resolved, the assertion should only allow tuples
+        # and the tuple cast should be removed
         assert isinstance(
-            additional_inputs, tuple
+            additional_inputs, (tuple, list)
         ), "additional_inputs must be a tuple."
+        additional_inputs = tuple(additional_inputs)
         validate_subgraph_args_types(additional_inputs)
         return super().__call__(combine_fn, init, xs, reverse, additional_inputs)
 
