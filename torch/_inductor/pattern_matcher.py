@@ -1594,9 +1594,10 @@ def gen_register_replacement(
         else:
             modu_path = TORCHINDUCTOR_SERIALIZED_PATTERN_PATH / f"{pattern_name}.py"
             modu_spec = importlib.util.spec_from_file_location(pattern_name, modu_path)
-            m = importlib.util.module_from_spec(modu_spec)
-            sys.modules[pattern_name] = m
-            modu_spec.loader.exec_module(m)
+            if modu_spec is not None:
+                m = importlib.util.module_from_spec(modu_spec)
+                sys.modules[pattern_name] = m
+                modu_spec.loader.exec_module(m)
 
         if not m or not hasattr(m, unique_name):
             log.warning(
