@@ -787,7 +787,9 @@ class VariableBuilder:
             and value == getattr(value.__self__, "apply", None)
         ):
             # handle aliased autograd function `apply` calls
-            self.install_guards(GuardBuilder.FUNCTION_MATCH)
+            self.install_guards(GuardBuilder.TYPE_MATCH)
+            func_source = AttrSource(self.source, "__func__")
+            install_guard(func_source.make_guard(GuardBuilder.ID_MATCH))
             return GetAttrVariable(
                 AutogradFunctionVariable(
                     value.__self__, source=AttrSource(self.source, member="__self__")

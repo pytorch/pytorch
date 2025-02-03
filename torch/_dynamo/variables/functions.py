@@ -320,6 +320,17 @@ class UserFunctionVariable(BaseUserFunctionVariable):
             ]:
                 with torch._dynamo.side_effects.allow_side_effects_under_checkpoint(tx):
                     return super().call_function(tx, args, kwargs)
+        elif self.fn is torch._functorch.autograd_function.vmapify_autograd_function:
+            assert isinstance(args[0], variables.AutogradFunctionVariable)
+            new_autograd_fn = (
+                torch._functorch.autograd_function.vmapify_autograd_function(
+                    args[0].fn_cls,
+                    args[1].as_python_constant(),
+                    args[2].as_python_constant(),
+                    args[3].as_python_constant(),
+                )
+            )
+            return variables.AutogradFunctionVariable(new_autograd_fn)
         return super().call_function(tx, args, kwargs)
 
 
