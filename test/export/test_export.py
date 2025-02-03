@@ -3,7 +3,6 @@
 # flake8: noqa
 import copy
 import dataclasses
-import io
 import logging
 import operator
 import re
@@ -19,7 +18,7 @@ import torch._dynamo as torchdynamo
 import torch.nn.functional as F
 from functorch.experimental.control_flow import cond, map
 from torch import Tensor
-from torch._decomp import decomposition_table, get_decompositions
+from torch._decomp import decomposition_table
 from torch._dynamo.test_case import TestCase
 from torch._dynamo.testing import normalize_gm
 from torch._export.pass_base import _ExportPassBaseDeprecatedDoNotUse
@@ -59,7 +58,6 @@ from torch.testing._internal.common_cuda import (
     PLATFORM_SUPPORTS_FLASH_ATTENTION,
     SM90OrLater,
 )
-from torch.testing._internal.common_device_type import onlyCPU, onlyCUDA
 from torch.testing._internal.common_utils import (
     find_library_location,
     IS_FBCODE,
@@ -951,6 +949,44 @@ graph():
                 index = torch.nonzero_static(mask, size=exp.shape[0])
                 chunked_index = index.chunk(chunks=mask.dim(), dim=1)
                 output = seq_embeddings[chunked_index].squeeze()
+                final_output = output * 2
+                return final_output
+
+        m = TestModule()
+
+        seq_embeddings = torch.randn(5, 5)
+        mask = torch.ones(5, 5, dtype=torch.bool)
+        exp = torch.randn(25)
+        output = m(seq_embeddings, mask, exp)
+
+        batch = torch.export.Dim("batch")
+        exp_size = torch.export.Dim("exp_size", max=100)
+        ep = export(
+            m,
+            (seq_embeddings, mask, exp),
+            dynamic_shapes={
+                "seq_embeddings": (batch, None),
+                "mask": (batch, None),
+                "exp": (exp_size,),
+            },
+        )
+        ep_output = ep.module()(seq_embeddings, mask, exp)
+        self.assertTrue(torch.allclose(output, ep_output))
+
+        seq_embeddings = torch.randn(6, 5)
+        mask = torch.ones(6, 5, dtype=torch.bool)
+        exp = torch.randn(30)
+        output = m(seq_embeddings, mask, exp)
+        ep_output = ep.module()(seq_embeddings, mask, exp)
+        self.assertTrue(torch.allclose(output, ep_output))
+
+    def test_mask_torch_check(self):
+        class TestModule(torch.nn.Module):
+            def forward(self, seq_embeddings, mask, exp):
+                output = seq_embeddings[mask]
+                # output.shape has unbacked symint, assert side knowledge of
+                # output.shape as exp.shape to force it to have backed symint
+                torch._check(output.size(0) == exp.size(0))
                 final_output = output * 2
                 return final_output
 
@@ -1945,9 +1981,15 @@ graph():
                         TwoTensor(torch.ones(3, 4), torch.ones(3, 4)),
                     )
                 )
+                self.b1 = torch.nn.Buffer(
+                    TwoTensor(
+                        TwoTensor(torch.ones(3, 4), torch.ones(3, 4)),
+                        TwoTensor(torch.ones(3, 4), torch.ones(3, 4)),
+                    )
+                )
 
             def forward(self, x):
-                res = (2 * self.p1 + self.p2).sum()
+                res = (2 * self.p1 + self.p2 + self.b1).sum()
                 return x + res.get_elem_a().b
 
         m = Foo()
@@ -1960,14 +2002,74 @@ graph():
 graph():
     %p_p1 : [num_users=1] = placeholder[target=p_p1]
     %p_p2 : [num_users=1] = placeholder[target=p_p2]
+    %b_b1 : [num_users=1] = placeholder[target=b_b1]
     %x : [num_users=1] = placeholder[target=x]
     %mul : [num_users=1] = call_function[target=torch.ops.aten.mul.Tensor](args = (%p_p1, 2), kwargs = {})
     %add : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%mul, %p_p2), kwargs = {})
-    %sum_1 : [num_users=1] = call_function[target=torch.ops.aten.sum.default](args = (%add,), kwargs = {})
-    %getattr_33 : [num_users=1] = call_function[target=builtins.getattr](args = (%sum_1, a), kwargs = {})
-    %getattr_38 : [num_users=1] = call_function[target=builtins.getattr](args = (%getattr_33, b), kwargs = {})
-    %add_1 : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%x, %getattr_38), kwargs = {})
-    return (add_1,)""",
+    %add_1 : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%add, %b_b1), kwargs = {})
+    %sum_1 : [num_users=1] = call_function[target=torch.ops.aten.sum.default](args = (%add_1,), kwargs = {})
+    %getattr_65 : [num_users=1] = call_function[target=builtins.getattr](args = (%sum_1, a), kwargs = {})
+    %getattr_70 : [num_users=1] = call_function[target=builtins.getattr](args = (%getattr_65, b), kwargs = {})
+    %add_2 : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%x, %getattr_70), kwargs = {})
+    return (add_2,)""",
+        )
+        ep = export(m, (ref_x,))
+        self.assertTrue(torch.allclose(ep.module()(ref_x), ref_out))
+
+    @testing.expectedFailureLegacyExportNonStrict  # Old export doesn't work with subclasses
+    @testing.expectedFailureLegacyExportStrict  # Old export doesn't work with subclasses
+    @testing.expectedFailureSerDerNonStrict  # builtins.getattr is not supported  T211130564
+    @testing.expectedFailureSerDer  # builtins.getattr is not supported  T211130564
+    def test_subclass_nested_attr_access_submodule(self):
+        class Bar(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.p1 = torch.nn.Parameter(torch.ones(3, 4))
+                self.p2 = torch.nn.Parameter(
+                    TwoTensor(
+                        TwoTensor(torch.ones(3, 4), torch.ones(3, 4)),
+                        TwoTensor(torch.ones(3, 4), torch.ones(3, 4)),
+                    )
+                )
+                self.b1 = torch.nn.Buffer(
+                    TwoTensor(
+                        TwoTensor(torch.ones(3, 4), torch.ones(3, 4)),
+                        TwoTensor(torch.ones(3, 4), torch.ones(3, 4)),
+                    )
+                )
+
+            def forward(self, x):
+                return x
+
+        class Foo(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.bar = Bar()
+
+            def forward(self, x):
+                res = (2 * self.bar.p1 + self.bar.p2 + self.bar.b1).sum()
+                return x + res.get_elem_a().b
+
+        m = Foo()
+        ref_x = torch.randn(3, 4)
+        ref_out = m(ref_x)
+        ep_training = torch.export.export_for_training(m, (ref_x,), strict=False)
+        self.assertExpectedInline(
+            str(ep_training.graph).strip(),
+            """\
+graph():
+    %p_bar_p1 : [num_users=1] = placeholder[target=p_bar_p1]
+    %p_bar_p2 : [num_users=1] = placeholder[target=p_bar_p2]
+    %b_bar_b1 : [num_users=1] = placeholder[target=b_bar_b1]
+    %x : [num_users=1] = placeholder[target=x]
+    %mul : [num_users=1] = call_function[target=torch.ops.aten.mul.Tensor](args = (%p_bar_p1, 2), kwargs = {})
+    %add : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%mul, %p_bar_p2), kwargs = {})
+    %add_1 : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%add, %b_bar_b1), kwargs = {})
+    %sum_1 : [num_users=1] = call_function[target=torch.ops.aten.sum.default](args = (%add_1,), kwargs = {})
+    %getattr_65 : [num_users=1] = call_function[target=builtins.getattr](args = (%sum_1, a), kwargs = {})
+    %getattr_70 : [num_users=1] = call_function[target=builtins.getattr](args = (%getattr_65, b), kwargs = {})
+    %add_2 : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%x, %getattr_70), kwargs = {})
+    return (add_2,)""",
         )
         ep = export(m, (ref_x,))
         self.assertTrue(torch.allclose(ep.module()(ref_x), ref_out))
@@ -5320,6 +5422,27 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
             RuntimeError, "cannot mutate tensors with frozen storage"
         ):
             export(Module(), (torch.tensor(1, device="cpu"),)).run_decompositions({})
+
+    def test_tensor_constant_aten_to(self):
+        class Module(torch.nn.Module):
+            def __init__(self):
+                super(Module, self).__init__()
+                self.t = torch.tensor([1.0])
+
+            def forward(self, x):
+                return x + self.t.to(torch.float64)
+
+        inputs = (torch.randn(1, 10),)
+        model = Module()
+        ep = export(model, inputs).run_decompositions({})
+        ops = []
+        for node in ep.graph.nodes:
+            if node.op == "call_function":
+                ops.append(node.target)
+        self.assertGreater(len(ops), 0)
+        self.assertIn(torch.ops.aten._to_copy.default, ops)
+
+        self.assertEqual(ep.module()(*inputs), model(*inputs))
 
     def test_float_conversion(self):
         class Module(torch.nn.Module):
@@ -9522,7 +9645,6 @@ def forward(self, p_bar_linear_weight, p_bar_linear_bias, x):
             "torch.ops.profiler._record_function_enter_new.default", 0, exactly=True
         ).run(ep.graph_module.code)
 
-    @testing.expectedFailureSerDerNonStrict
     def test_replace_unbacked_with_very_large_upperbound(self):
         # beyond 2^53 where python floats lose precision
         VERY_LARGE_INT = 1000000007999999992
