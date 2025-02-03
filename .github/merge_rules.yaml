@@ -79,7 +79,6 @@
   - .ci/docker/ci_commit_pins/triton.txt
   approved_by:
   - pytorchbot
-  ignore_flaky_failures: false
   mandatory_checks_name:
   - EasyCLA
   - Lint
@@ -91,7 +90,6 @@
   - test/slow_tests.json
   approved_by:
   - pytorchbot
-  ignore_flaky_failures: false
   mandatory_checks_name:
   - EasyCLA
   - Lint
@@ -103,7 +101,6 @@
   - .ci/docker/ci_commit_pins/executorch.txt
   approved_by:
   - pytorchbot
-  ignore_flaky_failures: false
   mandatory_checks_name:
   - EasyCLA
   - Lint
@@ -114,7 +111,6 @@
   - .github/ci_commit_pins/xla.txt
   approved_by:
   - pytorchbot
-  ignore_flaky_failures: false
   mandatory_checks_name:
   - EasyCLA
   - Lint
