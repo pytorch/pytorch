@@ -953,10 +953,16 @@ TESTED_TORCHLIB_OPS: tuple[TorchLibOpInfo, ...] = (
     ),
     TorchLibOpInfo("mH", core_ops.aten_mH),
     TorchLibOpInfo("mH", core_ops.aten_mH_complex, complex=True),
-    TorchLibOpInfo("min_dim", core_ops.aten_min_dim).xfail(
+    TorchLibOpInfo("min_dim", core_ops.aten_min_dim)
+    .xfail(
         matcher=lambda sample: len(sample.args) == 0
         or (len(sample.args) > 0 and not isinstance(sample.args[0], int)),
         reason="this ATen overload only support one tensor as input and another int as args",
+    )
+    .xfail(
+        variant_name="reduction_with_dim",
+        dtypes=(torch.int64,),
+        reason="fixme: ORT 1.18 does not support int64",
     ),
     TorchLibOpInfo(
         "min",
@@ -1579,10 +1585,16 @@ TESTED_TORCHLIB_OPS: tuple[TorchLibOpInfo, ...] = (
     TorchLibOpInfo(
         "logit", core_ops.aten_logit, tolerance={torch.float16: (1e-1, 7e-4)}
     ),
-    TorchLibOpInfo("max_dim", core_ops.aten_max_dim).xfail(
+    TorchLibOpInfo("max_dim", core_ops.aten_max_dim)
+    .xfail(
         matcher=lambda sample: len(sample.args) == 0
         or (len(sample.args) > 0 and not isinstance(sample.args[0], int)),
         reason="this ATen overload only support one tensor as input and another int as args",
+    )
+    .xfail(
+        variant_name="reduction_with_dim",
+        dtypes=(torch.int64,),
+        reason="fixme: ORT 1.18 does not support int64",
     ),
     TorchLibOpInfo(
         "max",
@@ -2267,6 +2279,6 @@ OP_WITH_SKIPPED_XFAIL_SUBTESTS = frozenset(meta.op_name for meta in SKIP_XFAIL_S
 ALL_OPS_IN_DB = frozenset(op_info.name for op_info in OPS_DB)
 # Assert all ops in OPINFO_FUNCTION_MAPPING are in the OPS_DB
 assert TESTED_OPS.issubset(ALL_OPS_IN_DB), f"{TESTED_OPS - ALL_OPS_IN_DB} not in OPS_DB"
-assert NONDETERMINISTIC_OPS.issubset(TESTED_OPS), (
-    f"{NONDETERMINISTIC_OPS - TESTED_OPS} not in TESTED_OPS"
-)
+assert NONDETERMINISTIC_OPS.issubset(
+    TESTED_OPS
+), f"{NONDETERMINISTIC_OPS - TESTED_OPS} not in TESTED_OPS"
