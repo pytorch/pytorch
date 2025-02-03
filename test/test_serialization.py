@@ -522,6 +522,7 @@ class SerializationMixin:
     def test_serialization_backwards_compat_safe(self):
         self._test_serialization_backwards_compat(True)
 
+    @skipIfTorchDynamo("graph breaks messages collide with warnings")
     def test_serialization_save_warnings(self):
         with warnings.catch_warnings(record=True) as warns:
             with tempfile.NamedTemporaryFile() as checkpoint:
