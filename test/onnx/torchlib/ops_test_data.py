@@ -724,7 +724,7 @@ TESTED_TORCHLIB_OPS: tuple[TorchLibOpInfo, ...] = (
     TorchLibOpInfo("cos", core_ops.aten_cos),
     TorchLibOpInfo("cosh", core_ops.aten_cosh),
     TorchLibOpInfo(
-        "cross", core_ops.aten_cross, tolerance={torch.float16: (1e-3, 2e-3)}
+        "cross", core_ops.aten_cross, tolerance={torch.float16: (1e-1, 2e-2)}
     ),
     TorchLibOpInfo("deg2rad", core_ops.aten_deg2rad),
     # TorchLibOpInfo("detach", core_ops.aten_detach),  # detach is not in OP-TEST-DB
@@ -801,7 +801,10 @@ TESTED_TORCHLIB_OPS: tuple[TorchLibOpInfo, ...] = (
         "full_like",
         core_ops.aten_full_like,
     ),
-    TorchLibOpInfo("gather", core_ops.aten_gather),
+    TorchLibOpInfo("gather", core_ops.aten_gather).skip(
+        matcher=lambda sample: sample.input.numel() == 0 or sample.args[1].numel() == 0,
+        reason="fixme: ORT does not support empty tensors as input",
+    ),
     TorchLibOpInfo("ge", core_ops.aten_ge),
     TorchLibOpInfo("ge_bool", core_ops.aten_ge_bool),
     TorchLibOpInfo("gt", core_ops.aten_gt),

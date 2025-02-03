@@ -1739,7 +1739,7 @@ def aten_clamp_max(self: TReal, max_: TReal) -> TReal:
     """clamp_max(Tensor self, Tensor max) -> Tensor"""
 
     # This implementation does not intent to handle when self is an empty tensor
-    max_rank = Rank(max_)
+    max_rank = len(max_.shape)
     if max_rank == 0:
         max_ = op.CastLike(max_, self)
         result = op.Clip(self, None, max_)
@@ -1754,7 +1754,7 @@ def aten_clamp_min(self: TReal, min_: TReal) -> TReal:
     """clamp_min(Tensor self, Tensor min) -> Tensor"""
 
     # This implementation does not intent to handle when self is an empty tensor
-    min_rank = Rank(min_)
+    min_rank = len(min_.shape)
     if min_rank == 0:
         min_ = op.CastLike(min_, self)
         result = op.Clip(self, min_, None)
@@ -3571,9 +3571,9 @@ def aten_fix(self: TensorType) -> TensorType:
 @onnx_impl(aten.flatten.using_ints, trace_only=True)
 def aten_flatten(self: TTensor, start_dim: int = 0, end_dim: int = -1) -> TTensor:
     """flatten.using_ints(Tensor(a) self, int start_dim=0, int end_dim=-1) -> Tensor(a)"""
-    dim = Rank(self)
+    dim = len(self.shape)
     if dim == 1:
-        return self
+        return op.Identity(self)
     # use ONNX's Flatten operator for cases where the output shape is 2D
     if start_dim == 1:
         if end_dim in (-1, dim - 1):
@@ -3786,16 +3786,17 @@ def aten_gather(
 ) -> TReal:
     """gather(Tensor self, int dim, Tensor index, *, bool sparse_grad=False) -> Tensor"""
 
-    if IsScalar(index):  # When (index) is empty, return (self)
-        result = self
-    else:
-        if IsScalar(self):  # Unsqueeze for GatherElements op
-            self = op.Reshape(self, op.Constant(value_ints=[-1]))
-        if op.Size(index) == 0:  # Return empty array
-            result = op.CastLike(index, self)
+    if len(self.shape) == 0:
+        if len(index.shape) == 0:
+            return op.Identity(self)
         else:
-            index = op.Cast(index, to=INT64.dtype)
-            result = op.GatherElements(self, index, axis=dim)
+            return op.Expand(self, op.Shape(index))
+
+    if len(index.shape) == 0:
+        return op.Identity(self)
+
+    index = op.Cast(index, to=INT64.dtype)
+    result = op.GatherElements(self, index, axis=dim)
     return result
 
 
@@ -5754,7 +5755,7 @@ def aten_mul_complex(self: TReal, other: TReal) -> TReal:
     return op.Concat(real, imag, axis=-1)
 
 
-@onnx_impl(aten.multinomial)
+@onnx_impl(aten.multinomial, trace_only=True)
 def aten_multinomial(
     self: TFloat,
     num_samples: int,
@@ -5762,14 +5763,14 @@ def aten_multinomial(
 ) -> TInt:
     """multinomial(Tensor self, int num_samples, bool replacement=False, *, Generator? generator=None) -> Tensor"""
     # ONNX Multinomial doesn't support 1D input
-    if Rank(self) == 1:
+    if len(self.shape) == 1:
         unsqueezed_input = op.Unsqueeze(self, axes=0)
     else:
         unsqueezed_input = self
     # ONNX multinomial expects log probability
     log_input = op.Log(unsqueezed_input)
     result = op.Multinomial(log_input, dtype=INT64.dtype, sample_size=num_samples)
-    if Rank(self) == 1:
+    if len(self.shape) == 1:
         result = op.Squeeze(result)
     return result
 
@@ -7989,18 +7990,11 @@ def aten_squeeze(self: TTensor) -> TTensor:
     return op.Squeeze(self)
 
 
-@onnx_impl(aten.squeeze.dim)
+@onnx_impl(aten.squeeze.dim, trace_only=True)
 def aten_squeeze_dim(self: TTensor, dim: int) -> TTensor:
-    result = self
-    if Rank(self) > 0:  # type: ignore[operator]
-        # check if specified dimension is 1, do squeeze
-        shape = op.Shape(self)
-        dim_size = op.Gather(shape, dim, axis=0)
-        if dim_size == 1:
-            dims = op.Reshape(dim, op.Constant(value_ints=[-1]))
-            result = op.Squeeze(self, dims)
-
-    return result
+    if len(self.shape) == 0:
+        return op.Identity(self)
+    return op.Squeeze(self, [dim])
 
 
 @onnx_impl(aten.squeeze.dim, complex=True, trace_only=True)
@@ -8009,6 +8003,9 @@ def aten_squeeze_dim_complex(self: TTensor, dim: int) -> TTensor:
         # Account for the complex dimension in ONNX
         dim = dim - 1
 
+    if len(self.shape) == 1:
+        # The single dimension is the complex dimension
+        return op.Identity(self)
     return aten_squeeze_dim(self, dim)
 
 

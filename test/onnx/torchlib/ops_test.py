@@ -273,7 +273,7 @@ def run_test_output_match(
                             check_device=False,
                         )
                     except AssertionError as e:
-                        if os.environ.get("CREATE_REPRODUCTION_REPORT") == "1":
+                        if os.environ.get("CREATE_REPRODUCTION_REPORT") == "1" and test_behavior is None:
                             error_reproduction.create_mismatch_report(
                                 test_name,
                                 i,
