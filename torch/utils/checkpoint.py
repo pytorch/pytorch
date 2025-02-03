@@ -1108,7 +1108,7 @@ class _checkpoint_hook(torch.autograd.graph.saved_tensors_hooks):
             return holder
 
         def unpack_hook(holder):
-            gid = torch._C._current_graph_task_id()
+            gid = 0 # torch._C._current_graph_task_id()
             if gid == -1:
                 # generate a temporary id if we trigger unpack outside of a backward call
                 gid = int(uuid.uuid4())
@@ -1137,7 +1137,7 @@ class _checkpoint_hook(torch.autograd.graph.saved_tensors_hooks):
                 )
             _internal_assert(holder.handles[gid] in frame.recomputed[gid])
             ret = frame.recomputed[gid][holder.handles[gid]]
-            holder.handles[gid] = None
+            # holder.handles[gid] = None
             return ret
 
         if frame.unpack_error_cb is not None:
