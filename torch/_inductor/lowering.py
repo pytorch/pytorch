@@ -9,7 +9,7 @@ import os
 import warnings
 from collections import defaultdict
 from collections.abc import Iterable, Sequence
-from typing import Any, Callable, Optional, TypeVar, Union
+from typing import Any, Callable, cast, Optional, TypeVar, Union
 from typing_extensions import ParamSpec
 from unittest.mock import patch
 
@@ -3745,7 +3745,7 @@ def scatter_fallback(
         op_overload,
         reduce,
         self.get_dtype(),
-        src.get_dtype() if src_is_tensor else type(src),
+        cast(torch.dtype, src.get_dtype() if src_is_tensor else type(src)),
         src.get_device().type if src_is_tensor else "not impl",
         src_is_tensor,
     ):

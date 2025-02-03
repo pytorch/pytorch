@@ -1484,7 +1484,7 @@ class HalideKernel(SIMDKernel):
             argtypes,
             target="-".join(target),
             scheduler=schduler,
-            scheduler_flags=scheduler_flags,
+            scheduler_flags=scheduler_flags,  # type: ignore[arg-type]
             cuda_device=cuda_device,
         )
 
