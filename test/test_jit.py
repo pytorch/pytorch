@@ -13617,7 +13617,7 @@ dedent """
             self.checkScript(test_oct, (n,))
             self.checkScript(test_hex, (n,))
 
-    @unittest.skipIf(IS_WINDOWS or IS_SANDCASTLE, "NYI: TemporaryFileName support for Windows or Sandcastle")
+    @unittest.skipIf(IS_SANDCASTLE, "NYI: TemporaryFileName support for Sandcastle")
     def test_get_set_state(self):
         class Root(torch.jit.ScriptModule):
             __constants__ = ['number']
@@ -15345,7 +15345,7 @@ dedent """
             return 1
         self.assertEqual(fun(), 1)
 
-    @unittest.skipIf(IS_WINDOWS or IS_SANDCASTLE, "NYI: TemporaryFileName support for Windows or Sandcastle")
+    @unittest.skipIf(IS_SANDCASTLE, "NYI: TemporaryFileName support for Sandcastle")
     def test_attribute_unpickling(self):
         tensor = torch.randn(2, 2)
         tester = self
