@@ -412,7 +412,7 @@ class TorchBenchmarkRunner(BenchmarkRunner):
         tolerance = 1e-4
         cosine = self.args.cosine
         # Increase the tolerance for torch allclose
-        if self.args.float16 or self.args.amp:
+        if self.args.amp:
             if self.args.freezing and (freezing := self._tolerance["freezing"]):
                 higher_fp16 = freezing.get("higher_fp16", None)
                 even_higher = freezing.get("even_higher", None)
@@ -420,6 +420,13 @@ class TorchBenchmarkRunner(BenchmarkRunner):
                     return 1e-2, cosine
                 elif even_higher and name in even_higher:
                     return 8 * 1e-2, cosine
+            if name in self._tolerance["higher_fp16"] or name in self._tolerance["higher_bf16"]:
+                return 1e-2, cosine
+            elif name in self._tolerance["even_higher"]:
+                return 8 * 1e-2, cosine
+            return 1e-3, cosine
+
+        if self.args.float16:
             if name in self._tolerance["higher_fp16"]:
                 return 1e-2, cosine
             elif name in self._tolerance["even_higher"]:
