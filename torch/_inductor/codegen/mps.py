@@ -260,6 +260,10 @@ class MetalOverrides(OpOverrides):
         return f"c10::metal::polygamma({x}, {n})"
 
     @staticmethod
+    def digamma(x: CSEVariable) -> str:
+        return f"c10::metal::digamma({x})"
+
+    @staticmethod
     def tan(x: CSEVariable) -> str:
         return f"metal::tan({x})"
 
