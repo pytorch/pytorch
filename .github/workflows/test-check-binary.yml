@@ -1,0 +1,40 @@
+name: Test check_binary
+
+on:
+  pull_request:
+    paths:
+      - .github/workflows/test-check-binary.yml
+      - .ci/pytorch/check_binary.sh
+      - .ci/pytorch//smoke_test/smoke_test.py
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
+  cancel-in-progress: true
+
+jobs:
+  check_binary_linux_cpu:
+    if: github.repository_owner == 'pytorch'
+    name: Test check_binary.sh for Linux CPU
+    uses: pytorch/test-infra/.github/workflows/linux_job.yml@main
+    with:
+      docker-image: python:3.11
+      docker-build-dir: "skip-docker-build"
+      script: |
+          pushd .ci/pytorch/
+          pip install --pre torch --index-url https://download.pytorch.org/whl/nightly/cpu
+          DESIRED_PYTHON=3.11 DESIRED_CUDA=cpu PACKAGE_TYPE=manywheel ./check_binary.sh
+          popd
+
+  check_binary_linux_cuda:
+    if: github.repository_owner == 'pytorch'
+    name: Test check_binary.sh for Linux CUDA
+    uses: pytorch/test-infra/.github/workflows/linux_job.yml@main
+    with:
+      runner: linux.4xlarge.nvidia.gpu
+      docker-image: python:3.11
+      docker-build-dir: "skip-docker-build"
+      script: |
+          pushd .ci/pytorch/
+          pip install --pre torch --index-url https://download.pytorch.org/whl/nightly/cu124
+          DESIRED_PYTHON=3.11 DESIRED_CUDA=cu124 PACKAGE_TYPE=manywheel ./check_binary.sh
+          popd

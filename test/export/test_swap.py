@@ -1,51 +1,18 @@
 # Owner(s): ["oncall: export"]
 # flake8: noqa
-import copy
-import dataclasses
 import unittest
-from contextlib import contextmanager
 from dataclasses import dataclass
-from re import escape
 from typing import Any, List
 
 from parameterized import parameterized_class
 
 import torch
 import torch._dynamo as torchdynamo
-from functorch.experimental.control_flow import cond, map
 from torch import Tensor
-from torch._export.utils import (
-    get_buffer,
-    get_param,
-    is_buffer,
-    is_param,
-    register_dataclass_as_pytree_node,
-)
-from torch._higher_order_ops.torchbind import enable_torchbind_tracing
-from torch.export import Constraint, Dim, export, FlatArgsAdapter, unflatten
+from torch._export.utils import register_dataclass_as_pytree_node
+from torch.export import export
 from torch.export._swap import _swap_modules
-from torch.export._trace import DEFAULT_EXPORT_DYNAMO_CONFIG
-from torch.fx.experimental.proxy_tensor import make_fx
-from torch.testing import FileCheck
-from torch.testing._internal.common_utils import (
-    find_library_location,
-    IS_FBCODE,
-    IS_MACOS,
-    IS_SANDCASTLE,
-    IS_WINDOWS,
-    run_tests,
-    skipIfTorchDynamo,
-    TestCase,
-)
-from torch.testing._internal.torchbind_impls import init_torchbind_implementations
-from torch.utils._pytree import (
-    LeafSpec,
-    tree_flatten,
-    tree_unflatten,
-    TreeSpec,
-    treespec_dumps,
-    treespec_loads,
-)
+from torch.testing._internal.common_utils import IS_WINDOWS, run_tests, TestCase
 
 
 @unittest.skipIf(IS_WINDOWS, "Windows not supported for this test")
@@ -274,17 +241,25 @@ class TestSwap(TestCase):
             swapped_gm.code.strip(),
             """\
 def forward(self, x, y):
+    x_1 = x
+    y_1 = y
     _spec_0 = self._spec_0
-    _spec_3 = self._spec_3
-    tree_unflatten = torch.utils._pytree.tree_unflatten([x, y], _spec_0);  x = y = _spec_0 = None
-    getitem = tree_unflatten[0];  tree_unflatten = None
-    getitem_1 = getitem[0]
-    getitem_2 = getitem[1];  getitem = None
-    foo = self.foo(getitem_1, getitem_2);  getitem_1 = getitem_2 = None
+    _spec_1 = self._spec_1
+    _spec_4 = self._spec_4
+    tree_flatten = torch.utils._pytree.tree_flatten((x_1, y_1));  x_1 = y_1 = None
+    getitem = tree_flatten[0];  tree_flatten = None
+    x = getitem[0]
+    y = getitem[1];  getitem = None
+    tree_unflatten_1 = torch.utils._pytree.tree_unflatten([x, y], _spec_1);  x = y = _spec_1 = None
+    getitem_1 = tree_unflatten_1[0];  tree_unflatten_1 = None
+    getitem_2 = getitem_1[0]
+    getitem_3 = getitem_1[1];  getitem_1 = None
+    foo = self.foo(getitem_2, getitem_3);  getitem_2 = getitem_3 = None
     bar = self.bar(foo);  foo = None
-    tree_flatten_spec_1 = torch.fx._pytree.tree_flatten_spec(bar, _spec_3);  bar = _spec_3 = None
-    getitem_9 = tree_flatten_spec_1[0];  tree_flatten_spec_1 = None
-    return (getitem_9,)""",
+    tree_flatten_spec_1 = torch.fx._pytree.tree_flatten_spec(bar, _spec_4);  bar = _spec_4 = None
+    getitem_10 = tree_flatten_spec_1[0];  tree_flatten_spec_1 = None
+    tree_unflatten = torch.utils._pytree.tree_unflatten((getitem_10,), _spec_0);  getitem_10 = _spec_0 = None
+    return tree_unflatten""",
         )
 
     @unittest.expectedFailure
@@ -358,6 +333,85 @@ def forward(self, x, y):
     getitem_9 = tree_flatten_spec_1[0];  tree_flatten_spec_1 = None
     return pytree.tree_unflatten((getitem_9,), self._out_spec)""",
         )
+
+    def test_custom_input_args(self):
+        @dataclass
+        class CustomInput:
+            a: Tensor
+            b: Tensor
+
+        register_dataclass_as_pytree_node(
+            CustomInput,
+            serialized_type_name="test_swap.test_custom_input.CustomInput",
+        )
+
+        class Foo(torch.nn.Module):
+            def forward(self, inputs):
+                return torch.matmul(inputs.a, inputs.b)
+
+        ep = export(
+            Foo(),
+            (CustomInput(torch.randn(2, 3), torch.randn(3, 2)),),
+            strict=self.strict,
+        )
+        swapped = _swap_modules(ep, {})
+        inp = (CustomInput(torch.randn(2, 3), torch.randn(3, 2)),)
+        res1 = torch.fx.Interpreter(swapped).run(*inp)
+        res2 = swapped(*inp)
+        self.assertTrue(torch.allclose(res1, res2))
+
+    def test_custom_input_kwargs(self):
+        @dataclass
+        class CustomInput:
+            a: Tensor
+            b: Tensor
+
+        register_dataclass_as_pytree_node(
+            CustomInput,
+            serialized_type_name="test_swap.test_custom_input.CustomInput",
+        )
+
+        class Foo(torch.nn.Module):
+            def forward(self, x, *, inputs):
+                return x + torch.matmul(inputs.a, inputs.b)
+
+        ep = export(
+            Foo(),
+            (torch.randn(2, 2),),
+            {"inputs": CustomInput(torch.randn(2, 3), torch.randn(3, 2))},
+            strict=self.strict,
+        )
+        swapped = _swap_modules(ep, {})
+        inp_args = (torch.randn(2, 2),)
+        inp_kwargs = {"inputs": CustomInput(torch.randn(2, 3), torch.randn(3, 2))}
+        res1 = torch.fx.Interpreter(swapped).run(*(*inp_args, *inp_kwargs.values()))
+        res2 = swapped(*inp_args, **inp_kwargs)
+        self.assertTrue(torch.allclose(res1, res2))
+
+    def test_custom_output(self):
+        @dataclass
+        class CustomOutput:
+            a: Tensor
+            b: Tensor
+
+        register_dataclass_as_pytree_node(
+            CustomOutput,
+            serialized_type_name="test_swap.test_custom_input.CustomInput",
+        )
+
+        class Foo(torch.nn.Module):
+            def forward(self, a, b):
+                return (CustomOutput(a * a, b * b), CustomOutput(a * b.T, a + b.T))
+
+        ep = export(Foo(), (torch.randn(2, 3), torch.randn(3, 2)), strict=True)
+        swapped = _swap_modules(ep, {})
+        inp = (torch.randn(2, 3), torch.randn(3, 2))
+        res1 = torch.fx.Interpreter(swapped).run(*inp)
+        res2 = swapped(*inp)
+        self.assertTrue(torch.allclose(res1[0].a, res2[0].a))
+        self.assertTrue(torch.allclose(res1[0].b, res2[0].b))
+        self.assertTrue(torch.allclose(res1[1].a, res2[1].a))
+        self.assertTrue(torch.allclose(res1[1].b, res2[1].b))
 
 
 if __name__ == "__main__":

@@ -3,7 +3,7 @@ import torch
 from collections import OrderedDict
 import weakref
 import warnings
-from typing import Any, Tuple
+from typing import Any
 
 __all__ = ["RemovableHandle", "unserializable_hook", "warn_if_has_hooks", "BackwardHook"]
 
@@ -26,7 +26,7 @@ class RemovableHandle:
         self.id = RemovableHandle.next_id
         RemovableHandle.next_id += 1
 
-        self.extra_dict_ref: Tuple = ()
+        self.extra_dict_ref: tuple = ()
         if isinstance(extra_dict, dict):
             self.extra_dict_ref = (weakref.ref(extra_dict),)
         elif isinstance(extra_dict, list):
@@ -120,9 +120,7 @@ class BackwardHook:
         return tuple(res)
 
     def _unpack_none(self, indices, values):
-        res = []
-        for idx in indices:
-            res.append(values[idx])
+        res = [values[idx] for idx in indices]
 
         return tuple(res)
 

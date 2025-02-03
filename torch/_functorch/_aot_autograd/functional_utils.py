@@ -9,7 +9,7 @@ This file contains utilities related to functionalization in AOTAutograd:
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Optional, Tuple
+from typing import Optional
 
 import torch
 from torch import Tensor
@@ -50,7 +50,7 @@ def to_fun(t):
 
 def sync_functional_tensor(t):
     if is_traceable_wrapper_subclass(t):
-        attrs, ctx = t.__tensor_flatten__()  # type: ignore[attr-defined]
+        attrs, _ctx = t.__tensor_flatten__()  # type: ignore[attr-defined]
         for attr in attrs:
             sync_functional_tensor(getattr(t, attr))
     else:
@@ -337,11 +337,11 @@ class MetadataKey:
     This should be equal whenever has_same_metadata would return True
     """
 
-    size: Tuple[SymIntEqByExpr, ...]
+    size: tuple[SymIntEqByExpr, ...]
     layout: torch.layout
     is_sparse: bool
     # these are empty when is_sparse
-    stride: Optional[Tuple[SymIntEqByExpr, ...]]
+    stride: Optional[tuple[SymIntEqByExpr, ...]]
     storage_offset: Optional[SymIntEqByExpr]
     is_conj: bool
     is_neg: bool
@@ -452,7 +452,6 @@ def assert_functional_graph(fx_g: torch.fx.Graph) -> int:
             placeholders.add(n)
         if isinstance(n.target, torch._ops.OpOverload):
             if n.target in allowed_mutation_ops:
-                suffix = True
                 # Can only copy_/set_ into an input
                 # this is mostly a hack to avoid failing XLA tests.
                 # See https://github.com/pytorch/pytorch/pull/122434#issuecomment-2101012113

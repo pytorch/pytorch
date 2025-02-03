@@ -75,7 +75,7 @@ class NCCLTest : public NCCLTestBase {
       int inputDim = 3)
       : NCCLTestBase(path, pgTimeout), rank_(rank), worldSize_(worldSize) {
     // Each device has a single tensor to perf the NCCL op
-    ::at::globalContext().lazyInitCUDA();
+    ::at::globalContext().lazyInitDevice(c10::DeviceType::CUDA);
     tensors_.resize(numDevices_);
     inputs_.resize(numDevices_);
     outputs_.resize(numDevices_);
@@ -760,6 +760,38 @@ class ProcessGroupNCCLTest : public ::testing::Test {
 
   int size_{1};
 };
+
+TEST_F(ProcessGroupNCCLTest, CUDAEventCache) {
+  if (skipTest()) {
+    return;
+  }
+
+  // Test that the CUDAEventCache can be used to create CUDA events and reuse.
+  auto event1 = c10d::ProcessGroupNCCL::CUDAEventCache::get(1)->create(true);
+  auto event2 = c10d::ProcessGroupNCCL::CUDAEventCache::get(1)->create(false);
+
+  auto event1_ptr = event1.get();
+  auto event2_ptr = event2.get();
+  // Mimic the behavior of the destroy of events.
+  event1 = nullptr;
+  event2 = nullptr;
+
+  // Test that the CUDAEventCache is indeed reused.
+  auto event3 = c10d::ProcessGroupNCCL::CUDAEventCache::get(2)->create(true);
+  auto event4 = c10d::ProcessGroupNCCL::CUDAEventCache::get(2)->create(false);
+  // The cache has been used up, new events should be created.
+  auto event5 = c10d::ProcessGroupNCCL::CUDAEventCache::get(1)->create(true);
+  auto event6 = c10d::ProcessGroupNCCL::CUDAEventCache::get(1)->create(false);
+  // The cache has been used up, new events should be created.
+  auto event7 = c10d::ProcessGroupNCCL::CUDAEventCache::get(1)->create(true);
+  auto event8 = c10d::ProcessGroupNCCL::CUDAEventCache::get(1)->create(false);
+  EXPECT_NE(event1_ptr, event3.get());
+  EXPECT_NE(event2_ptr, event4.get());
+  EXPECT_EQ(event1_ptr, event5.get());
+  EXPECT_EQ(event2_ptr, event6.get());
+  EXPECT_NE(event1_ptr, event7.get());
+  EXPECT_NE(event2_ptr, event8.get());
+}
 
 TEST_F(ProcessGroupNCCLTest, testAllreduce) {
   if (skipTest()) {

@@ -259,6 +259,7 @@ struct DebugInfo {
     }
   }
 
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-const-or-ref-data-members)
   Sections& s_;
   std::optional<uint64_t> line_number_program_offset_;
   uint64_t offset_ = 0;

@@ -1,21 +1,13 @@
 # Owner(s): ["module: inductor"]
 from torch._inductor import config
 from torch._inductor.test_case import run_tests
-from torch.testing._internal.inductor_utils import HAS_CPU
-from torch.utils._triton import has_triton
+from torch.testing._internal.inductor_utils import HAS_CPU, TRITON_HAS_CPU
 
 
 try:
     from . import test_torchinductor
 except ImportError:
     import test_torchinductor
-
-if has_triton():
-    import triton
-
-    TRITON_HAS_CPU = "cpu" in triton.backends.backends
-else:
-    TRITON_HAS_CPU = False
 
 
 if HAS_CPU and TRITON_HAS_CPU:

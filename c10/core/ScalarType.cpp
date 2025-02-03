@@ -154,6 +154,20 @@ std::pair<std::string, std::string> getDtypeNames(c10::ScalarType scalarType) {
       return std::make_pair("uint32", "");
     case c10::ScalarType::UInt64:
       return std::make_pair("uint64", "");
+    case c10::ScalarType::Int1:
+      return std::make_pair("int1", "");
+    case c10::ScalarType::Int2:
+      return std::make_pair("int2", "");
+    case c10::ScalarType::Int3:
+      return std::make_pair("int3", "");
+    case c10::ScalarType::Int4:
+      return std::make_pair("int4", "");
+    case c10::ScalarType::Int5:
+      return std::make_pair("int5", "");
+    case c10::ScalarType::Int6:
+      return std::make_pair("int6", "");
+    case c10::ScalarType::Int7:
+      return std::make_pair("int7", "");
     case c10::ScalarType::Char:
       // no "char" because it is not consistently signed or unsigned; we want
       // to move to int8

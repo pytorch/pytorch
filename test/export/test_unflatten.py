@@ -1,49 +1,23 @@
 # Owner(s): ["oncall: export"]
 # flake8: noqa
 import copy
-import dataclasses
 import unittest
-from contextlib import contextmanager
-from dataclasses import dataclass
 from re import escape
 from typing import Any, List
 
 import torch
 import torch._dynamo as torchdynamo
-from functorch.experimental.control_flow import cond, map
-from torch import Tensor
-from torch._export.utils import (
-    get_buffer,
-    get_param,
-    is_buffer,
-    is_param,
-    register_dataclass_as_pytree_node,
-)
 from torch._higher_order_ops.torchbind import enable_torchbind_tracing
-from torch.export import Constraint, Dim, export, FlatArgsAdapter, unflatten
-from torch.export._trace import DEFAULT_EXPORT_DYNAMO_CONFIG
+from torch.export import export, FlatArgsAdapter, unflatten
 from torch.export.unflatten import _disable_interpreter
-from torch.fx.experimental.proxy_tensor import make_fx
-from torch.testing import FileCheck
 from torch.testing._internal.common_utils import (
-    find_library_location,
-    IS_FBCODE,
-    IS_MACOS,
-    IS_SANDCASTLE,
     IS_WINDOWS,
     run_tests,
     skipIfTorchDynamo,
     TestCase,
 )
 from torch.testing._internal.torchbind_impls import init_torchbind_implementations
-from torch.utils._pytree import (
-    LeafSpec,
-    tree_flatten,
-    tree_unflatten,
-    TreeSpec,
-    treespec_dumps,
-    treespec_loads,
-)
+from torch.utils._pytree import TreeSpec
 
 
 @unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo isn't support")
@@ -94,7 +68,7 @@ class TestUnflatten(TestCase):
                 return x
 
         orig_eager = MyModule()
-        export_module = export(orig_eager, (torch.rand(2, 3),), {})
+        export_module = export(orig_eager, (torch.rand(2, 3),), {}, strict=True)
         unflattened = unflatten(export_module)
 
         inputs = (torch.rand(2, 3),)
@@ -134,7 +108,7 @@ class TestUnflatten(TestCase):
                 return x * self.rootparam
 
         eager_module = MyModule()
-        export_module = export(eager_module, (torch.rand(2, 3),), {})
+        export_module = export(eager_module, (torch.rand(2, 3),), {}, strict=True)
         unflattened_module = unflatten(export_module)
 
         # Buffer should look the same before and after one run
@@ -170,7 +144,7 @@ class TestUnflatten(TestCase):
                 return x
 
         eager_module = MyModule()
-        export_module = export(eager_module, (torch.rand(2, 3),), {})
+        export_module = export(eager_module, (torch.rand(2, 3),), {}, strict=True)
         unflattened_module = unflatten(export_module)
 
         inputs = (torch.rand(2, 3),)
@@ -193,7 +167,7 @@ class TestUnflatten(TestCase):
 
         eager_module = Shared()
         inps = (torch.rand(10),)
-        export_module = export(eager_module, inps, {})
+        export_module = export(eager_module, inps, {}, strict=True)
         unflattened_module = unflatten(export_module)
         self.compare_outputs(eager_module, unflattened_module, inps)
         self.assertTrue(hasattr(unflattened_module, "sub_net"))
@@ -297,7 +271,7 @@ class TestUnflatten(TestCase):
                     x = x + self.param_dict[f"key_{i}"]
                 return x
 
-        export_module = torch.export.export(Mod(), (torch.randn((2, 3)),))
+        export_module = torch.export.export(Mod(), (torch.randn((2, 3)),), strict=True)
         unflattened = unflatten(export_module)
 
         self.compare_outputs(
@@ -348,7 +322,7 @@ class TestUnflatten(TestCase):
                     a = a + self.param_dict[f"key_{i}"].sum()
                 return a
 
-        export_module = torch.export.export(Mod(), (torch.randn((2, 3)),))
+        export_module = torch.export.export(Mod(), (torch.randn((2, 3)),), strict=True)
         with self.assertRaisesRegex(
             RuntimeError,
             escape("Expected input at *args[0].shape[0] to be equal to 2, but got 6"),
@@ -404,7 +378,9 @@ class TestUnflatten(TestCase):
                 return x
 
         orig_eager = MyModule()
-        export_module = torch.export.export(orig_eager, (torch.rand(2, 3),), {})
+        export_module = torch.export.export(
+            orig_eager, (torch.rand(2, 3),), {}, strict=True
+        )
         unflattened = unflatten(export_module)
 
         # in-place compilation should work. Pass fullgraph to ensure no graph breaks.
@@ -415,6 +391,9 @@ class TestUnflatten(TestCase):
         inputs = (torch.randn(2, 3),)
         self.compare_outputs(orig_eager, unflattened, inputs)
         self.assertEqual(len(eb.graphs), 1)
+
+        unflattened.compile()
+        self.compare_outputs(orig_eager, unflattened, inputs)
 
     def test_fx_trace(self):
         class MyModule(torch.nn.Module):
@@ -428,7 +407,7 @@ class TestUnflatten(TestCase):
 
         orig_eager = MyModule()
         inputs = ((torch.rand(2, 3), torch.rand(2, 3)), {"foo": torch.rand(2, 3)})
-        export_module = export(orig_eager, inputs, {})
+        export_module = export(orig_eager, inputs, {}, strict=True)
 
         unflattened = unflatten(export_module)
         torch.fx.symbolic_trace(
@@ -460,7 +439,9 @@ class TestUnflatten(TestCase):
                 return x + self.submod.subsubmod(x)
 
         orig_eager = MyModule()
-        export_module = torch.export.export(orig_eager, (torch.rand(2, 3),), {})
+        export_module = torch.export.export(
+            orig_eager, (torch.rand(2, 3),), {}, strict=True
+        )
         unflattened = unflatten(export_module)
 
         inputs = (torch.rand(2, 3),)
@@ -495,7 +476,8 @@ class TestUnflatten(TestCase):
 
         inp = (torch.randn(4, 4), [torch.randn(4, 4), torch.randn(4, 4)])
         mod = Foo()
-        ep_strict = torch.export.export(mod, inp)
+
+        ep_strict = torch.export.export(mod, inp, strict=True)  # noqa: F841
         ep_non_strict = torch.export.export(mod, inp, strict=False)
 
         gm_unflat_non_strict = unflatten(ep_non_strict)
@@ -519,7 +501,9 @@ class TestUnflatten(TestCase):
                 return x + sum(self.submod(x))
 
         orig_eager = MyModule()
-        export_module = torch.export.export(orig_eager, (torch.rand(2, 3),), {})
+        export_module = torch.export.export(
+            orig_eager, (torch.rand(2, 3),), {}, strict=True
+        )
         unflattened = unflatten(export_module)
 
         inputs = (torch.rand(2, 3),)
@@ -547,7 +531,7 @@ class TestUnflatten(TestCase):
             mod = M()
 
         inputs = (torch.randn(3, 3, device="meta"),)
-        ep = export(mod, inputs)
+        ep = export(mod, inputs, strict=True)
         unflattened = unflatten(ep)
         self.assertTrue(unflattened.state_dict()["p"].requires_grad is False)
         self.assertTrue(unflattened.p.requires_grad is False)
@@ -563,7 +547,7 @@ class TestUnflatten(TestCase):
                 return x.transpose(0, 1)
 
         x = torch.randn(32, 3, 64, 64)
-        exported_program = export(TransposeModule(), args=(x,))
+        exported_program = export(TransposeModule(), args=(x,), strict=True)
         unflattened_module = unflatten(exported_program)
 
         # Check the inputs of the created call_module node are in order
@@ -595,7 +579,7 @@ class TestUnflatten(TestCase):
             def forward(self, x):
                 return x + self.submod(x)
 
-        export_module = torch.export.export(Mod(), (torch.randn((2, 3)),))
+        export_module = torch.export.export(Mod(), (torch.randn((2, 3)),), strict=True)
         unflattened = unflatten(export_module)
 
         self.compare_outputs(
@@ -607,7 +591,7 @@ class TestUnflatten(TestCase):
         init_torchbind_implementations()
 
         @torch._library.register_fake_class("_TorchScriptTesting::_Foo")
-        class FakeFoo:
+        class FakeFoo:  # noqa: F841
             def __init__(self, x: int, y: int):
                 self.x = x
                 self.y = y
@@ -684,7 +668,7 @@ class TestUnflatten(TestCase):
         # The call chain looks like this:
         # A -> B -> C -> A.d
         ep = torch.export.export(a, (torch.randn(3),), strict=False)
-        unflattened = unflatten(ep)
+        unflatten(ep)
 
     def test_nested_leaf_non_strict(self):
         class Leaf(torch.nn.Module):
@@ -747,7 +731,7 @@ class TestUnflatten(TestCase):
 
         mod = Module()
 
-        ep = torch.export.export(mod, (torch.randn(3, 4),))
+        ep = torch.export.export(mod, (torch.randn(3, 4),), strict=True)
 
         unflattened = torch.export.unflatten(ep)
         fqn_list = [x for x, _ in unflattened.named_modules(remove_duplicate=False)]
@@ -804,7 +788,7 @@ class TestUnflatten(TestCase):
 
         m = Foo()
         inps = (torch.randn(4, 4),)
-        ep = export(m, inps)
+        ep = export(m, inps, strict=True)
         unep = unflatten(ep)
         self.assertTrue(id(unep.m.bias) == id(unep.bias))
 
@@ -823,7 +807,7 @@ class TestUnflatten(TestCase):
 
         m = Foo()
         inps = (torch.randn(4, 4),)
-        ep = export(m, inps)
+        ep = export(m, inps, strict=True)
         unep = unflatten(ep)
         self.assertTrue(torch.allclose(unep(*inps), m(*inps)))
 
@@ -845,7 +829,7 @@ class TestUnflatten(TestCase):
 
         mod = M()
         x = torch.randn(4, 8)
-        ep = export(mod, (x,))
+        ep = export(mod, (x,), strict=True)
         unflattened = unflatten(ep)
         torch.testing.assert_close(unflattened(x), mod(x))
 
@@ -938,12 +922,12 @@ class TestUnflatten(TestCase):
                 return x
 
         orig_eager = MyModule()
-        export_module = export(orig_eager, (torch.rand(2, 3),), {})
+        export_module = export(orig_eager, (torch.rand(2, 3),), {}, strict=True)
         with _disable_interpreter():
             unflattened = unflatten(export_module)
 
-        self.assertEqual(unflattened._run_with_interpeter, False)
-        self.assertEqual(unflattened.foo._run_with_interpeter, False)
+        self.assertEqual(unflattened._run_with_interpreter, False)
+        self.assertEqual(unflattened.foo._run_with_interpreter, False)
 
         inputs = (torch.rand(2, 3),)
 

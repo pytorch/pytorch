@@ -7,7 +7,12 @@ import sys
 import tempfile
 
 from model_registry import ModelWithKwargs, MultiMLP, MultiMLPWithDw
-from schedule_registry import ScheduleUnbalanced, ScheduleVShaped, ScheduleWithW
+from schedule_registry import (
+    ScheduleUnbalanced,
+    ScheduleVShaped,
+    ScheduleWithReorderedB,
+    ScheduleWithW,
+)
 
 import torch
 import torch.distributed as dist
@@ -20,6 +25,7 @@ from torch.distributed.pipelining import (
     ScheduleInterleaved1F1B,
     ScheduleInterleavedZeroBubble,
     ScheduleLoopedBFS,
+    ScheduleZBVZeroBubble,
 )
 from torch.distributed.pipelining.schedules import _PipelineScheduleRuntime
 from torch.testing._internal.common_cuda import TEST_MULTIGPU
@@ -88,7 +94,7 @@ class ScheduleTest(MultiProcContinousTest):
         )
 
         # Attach to a schedule
-        schedule = ScheduleClass(stage, num_microbatches)
+        schedule = ScheduleClass(stage, num_microbatches, scale_grads=False)
 
         # Run
         num_iters = 20
@@ -137,7 +143,7 @@ class ScheduleTest(MultiProcContinousTest):
         )
 
         # Attach to a schedule
-        schedule = ScheduleClass(stage, chunks, loss_fn=loss_fn)
+        schedule = ScheduleClass(stage, chunks, loss_fn=loss_fn, scale_grads=False)
 
         # Run
         for _ in range(20):
@@ -145,7 +151,7 @@ class ScheduleTest(MultiProcContinousTest):
                 schedule.step(x)
             elif self.rank == self.world_size - 1:
                 losses = []
-                out = schedule.step(target=target, losses=losses)
+                schedule.step(target=target, losses=losses)
             else:
                 schedule.step()
 
@@ -177,7 +183,7 @@ class ScheduleTest(MultiProcContinousTest):
         )
 
         # Attach to a schedule
-        schedule = ScheduleClass(stage, chunks, loss_fn=loss_fn)
+        schedule = ScheduleClass(stage, chunks, loss_fn=loss_fn, scale_grads=False)
 
         # Run
         if self.rank == 0:
@@ -238,7 +244,7 @@ class ScheduleTest(MultiProcContinousTest):
         )
 
         # Attach to a schedule
-        schedule = ScheduleClass(stage, chunks, loss_fn=loss_fn)
+        schedule = ScheduleClass(stage, chunks, loss_fn=loss_fn, scale_grads=False)
 
         # Run
         stage_module = pipe.get_stage_module(self.rank)
@@ -322,7 +328,7 @@ class ScheduleTest(MultiProcContinousTest):
         )
 
         # Attach to a schedule
-        schedule = ScheduleClass(stage, chunks, loss_fn=loss_fn)
+        schedule = ScheduleClass(stage, chunks, loss_fn=loss_fn, scale_grads=False)
 
         # Run
         for _ in range(2):
@@ -362,7 +368,11 @@ class ScheduleTest(MultiProcContinousTest):
     @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
     @parametrize(
         "ScheduleClass",
-        [ScheduleInterleaved1F1B, ScheduleLoopedBFS, ScheduleInterleavedZeroBubble],
+        [
+            ScheduleInterleaved1F1B,
+            ScheduleLoopedBFS,
+            ScheduleInterleavedZeroBubble,
+        ],
     )
     @parametrize("use_new_runtime", [False, True])
     def test_grad_with_manual_interleaved(self, ScheduleClass, use_new_runtime):
@@ -402,7 +412,6 @@ class ScheduleTest(MultiProcContinousTest):
             if hasattr(ScheduleClass, "num_microbatches")
             else 8
         )
-        input_args = x.chunk(num_microbatches)[0]
         stages = [
             PipelineStage(
                 stage_module,
@@ -414,7 +423,9 @@ class ScheduleTest(MultiProcContinousTest):
         ]
 
         # Attach to a schedule
-        schedule = ScheduleClass(stages, num_microbatches, loss_fn=loss_fn)
+        schedule = ScheduleClass(
+            stages, num_microbatches, loss_fn=loss_fn, scale_grads=False
+        )
         if use_new_runtime:
             old_schedule = schedule
             tmp_schedule = _PipelineScheduleRuntime(
@@ -422,7 +433,7 @@ class ScheduleTest(MultiProcContinousTest):
                 num_microbatches,
                 loss_fn=loss_fn,
                 stage_index_to_group_rank=old_schedule.stage_index_to_group_rank,
-                use_full_backward=old_schedule.use_full_backward,
+                scale_grads=False,
             )
             tmp_schedule._load_actions(old_schedule.pipeline_order)
             # test that csv round-trip works for compute_comms schedule
@@ -431,7 +442,7 @@ class ScheduleTest(MultiProcContinousTest):
                 num_microbatches,
                 loss_fn=loss_fn,
                 stage_index_to_group_rank=old_schedule.stage_index_to_group_rank,
-                use_full_backward=old_schedule.use_full_backward,
+                scale_grads=False,
             )
             with tempfile.NamedTemporaryFile() as f:
                 tmp_schedule._dump_csv(f.name)
@@ -442,7 +453,7 @@ class ScheduleTest(MultiProcContinousTest):
                 num_microbatches,
                 loss_fn=loss_fn,
                 stage_index_to_group_rank=old_schedule.stage_index_to_group_rank,
-                use_full_backward=old_schedule.use_full_backward,
+                scale_grads=False,
             )
             one_more_schedule._load_actions(
                 schedule.pipeline_order_with_comms, format="compute_comms"
@@ -541,7 +552,6 @@ class ScheduleTest(MultiProcContinousTest):
         loss_fn = torch.nn.MSELoss(reduction="sum")
 
         # Create a pipeline stage to wrap that submodule
-        input_args = x.chunk(num_microbatches)[0]
         stage_indices = rank_stages[self.rank]
         print(f"Rank {self.rank} stages: {stage_indices}")
         submod_names = [f"layers.{i}" for i in stage_indices]
@@ -558,10 +568,15 @@ class ScheduleTest(MultiProcContinousTest):
             for stage_module, stage_idx in zip(stage_modules, rank_stages[self.rank])
         ]
 
-        schedule = ScheduleClass(stages, num_microbatches, loss_fn=loss_fn)
+        # We set scale_grads=False since we use a loss function that sums instead of mean-reduces
+        # (note: normally we recommend using mean-reduce loss functions, but we preserve at least one test case
+        #        using sum scaling for completeness)
+        schedule = ScheduleClass(
+            stages, num_microbatches, loss_fn=loss_fn, scale_grads=False
+        )
 
         # Run reference
-        ref_x = x.clone().detach().requires_grad_(x.requires_grad)
+        ref_x = x.detach().clone().requires_grad_(x.requires_grad)
         torch.testing.assert_close(x, ref_x)
         for _ in range(num_steps):
             ref_out = ref_mod(ref_x)
@@ -575,7 +590,7 @@ class ScheduleTest(MultiProcContinousTest):
                     schedule.step(x)
                 elif self.rank == self.world_size - 1:
                     losses = []
-                    out = schedule.step(target=target, losses=losses)
+                    schedule.step(target=target, losses=losses)
                 else:
                     schedule.step()
         self.assertEqual(
@@ -601,9 +616,125 @@ class ScheduleTest(MultiProcContinousTest):
 
     @requires_nccl()
     @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
-    @parametrize("ScheduleClass", [ScheduleVShaped, ScheduleUnbalanced])
-    def test_non_symmetric_stage_ids(self, ScheduleClass):
-        n_stages = ScheduleClass.n_stages
+    @parametrize(
+        "ScheduleClass",
+        [
+            ScheduleWithReorderedB,
+        ],
+    )
+    def test_pipeline_schedule_runtime_custom_sched(self, ScheduleClass):
+        n_stages = 2
+        num_microbatches = 2
+        stages_per_rank = 1
+        full_mod = MultiMLP(d_hid, n_layers=n_stages)
+        full_mod.to(self.device)
+
+        ref_mod = copy.deepcopy(full_mod)
+        x = torch.randn(batch_size, d_hid, device=self.device)
+        with torch.no_grad():
+            y = ref_mod(x)
+            # Add a small perturbation
+            target = y + torch.randn(batch_size, d_hid, device=self.device)
+
+        loss_fn = torch.nn.MSELoss(reduction="sum")
+
+        # Run reference
+        for _ in range(2):
+            ref_mod.zero_grad()
+            ref_out = ref_mod(x)
+            ref_loss = loss_fn(ref_out, target)
+            ref_loss.backward()
+
+        # Get a submodule, e.g. `layers.0` or `layers.1`
+        stage_indices = [
+            self.rank + i * self.world_size for i in range(stages_per_rank)
+        ]
+        print(f"Rank {self.rank} stages: {stage_indices}")
+        submod_names = [f"layers.{i}" for i in stage_indices]
+        stage_modules = [
+            full_mod.get_submodule(submod_name) for submod_name in submod_names
+        ]
+        # Create a pipeline stage to wrap that submodule
+        num_microbatches = (
+            ScheduleClass.num_microbatches
+            if hasattr(ScheduleClass, "num_microbatches")
+            else 8
+        )
+        stages = [
+            PipelineStage(
+                stage_module,
+                stage_idx,
+                n_stages,
+                self.device,
+            )
+            for stage_module, stage_idx in zip(stage_modules, stage_indices)
+        ]
+
+        # Attach to a schedule
+        schedule = ScheduleClass(
+            stages, num_microbatches, loss_fn=loss_fn, scale_grads=False
+        )
+        assert isinstance(schedule, _PipelineScheduleRuntime)
+
+        # Run
+        with check_leaked_tensors() as garbage_tensors:
+            for _ in range(2):
+                # Zero gradients
+                for stage_module in stage_modules:
+                    stage_module.zero_grad()
+                if self.rank == 0:
+                    schedule.step(x)
+                elif self.rank == self.world_size - 1:
+                    losses = []
+                    out = schedule.step(target=target, losses=losses)
+                else:
+                    schedule.step()
+        self.assertEqual(
+            len(garbage_tensors),
+            0,
+            "Found leaked tensors, check logs above for debug info",
+        )
+        dist.barrier()
+
+        # Last rank checks result
+        if self.rank == self.world_size - 1:
+            # Check output
+            torch.testing.assert_close(out, ref_out)
+            # Check loss
+            # Since the reduction used in the loss function above is "sum", we use
+            # "sum" here to reduce microbatch losses into a single value too.
+            pipe_loss = sum(losses)
+            torch.testing.assert_close(pipe_loss, ref_loss)
+
+        # Every rank checks gradients
+        for stage_module, submod_name in zip(stage_modules, submod_names):
+            # Get corresponding submodule from reference model
+            ref_submod = ref_mod.get_submodule(submod_name)
+            # Check gradients per parameter
+            for name, p in stage_module.named_parameters():
+                ref_p = ref_submod.get_parameter(name)
+                try:
+                    torch.testing.assert_close(p.grad, ref_p.grad, rtol=1e-5, atol=4e-5)
+                except AssertionError:
+                    print(f"Gradient test failed for {name}: {p.grad} vs {ref_p.grad}")
+                    raise
+
+    @requires_nccl()
+    @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
+    @parametrize(
+        "schedule_class", [ScheduleVShaped, ScheduleUnbalanced, ScheduleZBVZeroBubble]
+    )
+    @parametrize("use_new_runtime", [False, True])
+    def test_non_symmetric_stage_ids(self, schedule_class, use_new_runtime):
+        if schedule_class is ScheduleZBVZeroBubble:
+            n_stages = 4
+            rank_stages = {
+                0: [0, 3],
+                1: [1, 2],
+            }
+        else:
+            n_stages = schedule_class.n_stages
+            rank_stages = schedule_class.rank_stages
         full_mod = MultiMLP(d_hid, n_layers=n_stages)
         full_mod.to(self.device)
 
@@ -624,9 +755,7 @@ class ScheduleTest(MultiProcContinousTest):
             ref_loss.backward()
 
         # Create a pipeline stage to wrap that submodule
-        chunks = 1
-        input_args = x.chunk(chunks)[0]
-        rank_stages = ScheduleClass.rank_stages
+        num_microbatches = 1
         stage_indices = rank_stages[self.rank]
         print(f"Rank {self.rank} stages: {stage_indices}")
         submod_names = [f"layers.{i}" for i in stage_indices]
@@ -647,9 +776,23 @@ class ScheduleTest(MultiProcContinousTest):
         stage_index_to_group_rank = {
             value: key for key, values in rank_stages.items() for value in values
         }
-        schedule = ScheduleClass(
-            stages, chunks, stage_index_to_group_rank, loss_fn=loss_fn
+        schedule = schedule_class(
+            stages,
+            num_microbatches,
+            stage_index_to_group_rank=stage_index_to_group_rank,
+            loss_fn=loss_fn,
+            scale_grads=False,
         )
+
+        if use_new_runtime:
+            old_schedule = schedule
+            schedule = _PipelineScheduleRuntime(
+                stages,
+                num_microbatches,
+                loss_fn=loss_fn,
+                stage_index_to_group_rank=old_schedule.stage_index_to_group_rank,
+            )
+            schedule._load_actions(old_schedule.pipeline_order)
 
         # Run
         # TODO how to better specify .step() when first and last stage are on rank 0...
@@ -755,7 +898,6 @@ class ScheduleTest(MultiProcContinousTest):
 
         # Create a pipeline stage to wrap that submodule
         chunks = 2
-        input_args = x.chunk(chunks)[0]
         stages = [
             PipelineStage(
                 stage_module,
@@ -768,7 +910,9 @@ class ScheduleTest(MultiProcContinousTest):
         ]
 
         # Attach to a schedule
-        schedule = ScheduleClass(stages, chunks, loss_fn=full_loss_fn)
+        schedule = ScheduleClass(
+            stages, chunks, loss_fn=full_loss_fn, scale_grads=False
+        )
 
         for _ in range(2):
             # Zero gradients

@@ -4,8 +4,10 @@
 #include <c10/util/Flags.h>
 #include <c10/util/Logging.h>
 #include <c10/util/env.h>
+#include <c10/util/error.h>
 #include <c10/util/irange.h>
 #include <c10/util/numa.h>
+#include <cstring>
 
 #ifdef USE_MIMALLOC
 #include <mimalloc.h>
@@ -72,11 +74,11 @@ inline bool is_thp_alloc(size_t nbytes) {
   return (is_thp_alloc_enabled() && (nbytes >= gAlloc_threshold_thp));
 }
 #elif !defined(__ANDROID__) && !defined(_MSC_VER)
-constexpr size_t c10_compute_alignment(C10_UNUSED size_t nbytes) {
+constexpr size_t c10_compute_alignment([[maybe_unused]] size_t nbytes) {
   return gAlignment;
 }
 
-constexpr bool is_thp_alloc(C10_UNUSED size_t nbytes) {
+constexpr bool is_thp_alloc([[maybe_unused]] size_t nbytes) {
   return false;
 }
 #endif
@@ -121,7 +123,7 @@ void* alloc_cpu(size_t nbytes) {
       " bytes. Error code ",
       err,
       " (",
-      strerror(err),
+      c10::utils::str_error(err),
       ")");
   if (is_thp_alloc(nbytes)) {
 #ifdef __linux__
@@ -129,7 +131,9 @@ void* alloc_cpu(size_t nbytes) {
     // general posix compliant systems can check POSIX_MADV_SEQUENTIAL advise.
     int ret = madvise(data, nbytes, MADV_HUGEPAGE);
     if (ret != 0) {
-      TORCH_WARN_ONCE("thp madvise for HUGEPAGE failed with ", strerror(errno));
+      TORCH_WARN_ONCE(
+          "thp madvise for HUGEPAGE failed with ",
+          c10::utils::str_error(errno));
     }
 #endif
   }
@@ -163,4 +167,27 @@ void free_cpu(void* data) {
 #endif
 }
 
+#ifdef USE_MIMALLOC_ON_MKL
+namespace mi_malloc_wrapper {
+void* c10_mi_malloc(size_t size) {
+  return mi_malloc(size);
+}
+
+void* c10_mi_calloc(size_t count, size_t size) {
+  return mi_calloc(count, size);
+}
+
+void* c10_mi_realloc(void* p, size_t newsize) {
+  return mi_realloc(p, newsize);
+}
+
+void* c10_mi_malloc_aligned(size_t size, size_t alignment) {
+  return mi_malloc_aligned(size, alignment);
+}
+
+void c10_mi_free(void* p) {
+  mi_free(p);
+}
+} // namespace mi_malloc_wrapper
+#endif
 } // namespace c10

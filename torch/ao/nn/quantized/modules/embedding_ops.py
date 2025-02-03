@@ -204,7 +204,6 @@ class Embedding(torch.nn.Module):
                 + torch.ao.nn.qat.Embedding.__name__
             )
             weight_observer = mod.weight_fake_quant
-            activation_post_process = mod.activation_post_process
         else:
             assert type(mod) == nn.Embedding, (
                 "nnq."
@@ -383,7 +382,15 @@ class EmbeddingBag(Embedding):
 
         # Create quantized EmbeddingBag module and pass in the quantized weight
         qembedding_bag = EmbeddingBag(
-            mod.num_embeddings, mod.embedding_dim, dtype=dtype
+            mod.num_embeddings,
+            mod.embedding_dim,
+            max_norm=mod.max_norm,
+            norm_type=mod.norm_type,
+            scale_grad_by_freq=mod.scale_grad_by_freq,
+            mode=mod.mode,
+            sparse=mod.sparse,
+            include_last_offset=mod.include_last_offset,
+            dtype=dtype,
         )
         qembedding_bag.set_weight(qweight)
         return qembedding_bag

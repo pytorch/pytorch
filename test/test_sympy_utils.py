@@ -3,8 +3,9 @@
 import functools
 import itertools
 import math
+import pickle
 import sys
-from typing import Callable, List, Tuple, Type
+from typing import Callable
 
 import sympy
 
@@ -19,7 +20,11 @@ from torch.testing._internal.common_utils import (
     TEST_Z3,
     TestCase,
 )
-from torch.utils._sympy.functions import FloorDiv, simple_floordiv_gcd
+from torch.utils._sympy.functions import (
+    FloorDiv,
+    OpaqueUnaryFn_cos,
+    simple_floordiv_gcd,
+)
 from torch.utils._sympy.interp import sympy_interp
 from torch.utils._sympy.numbers import int_oo, IntInfinity, NegativeIntInfinity
 from torch.utils._sympy.reference import (
@@ -56,6 +61,12 @@ BINARY_OPS = [
     "minimum",
     "maximum",
     "mod",
+    "bitwise_and",
+    "bitwise_or",
+]
+BITWISE_OPS = [
+    "bitwise_and",
+    "bitwise_or",
 ]
 
 UNARY_BOOL_OPS = ["not_"]
@@ -229,6 +240,10 @@ class TestValueRanges(TestCase):
     @parametrize("dtype", ("int", "float"))
     def test_binary_ref(self, fn, dtype):
         to_dtype = {"int": sympy.Integer, "float": sympy.Float}
+        # Don't test bitwise methods since value range analysis on a singleton
+        # range may not return a singleton result.
+        if fn in BITWISE_OPS:
+            return
         # Don't test float on int only methods
         if dtype == "float" and fn in ["pow_by_natural", "mod"]:
             return
@@ -278,7 +293,7 @@ class TestValueRanges(TestCase):
                 else:
                     self.assertEqual(len(unique), 2)
 
-    @parametrize("fn", BINARY_BOOL_OPS)
+    @parametrize("fn", BINARY_BOOL_OPS + BITWISE_OPS)
     def test_binary_bool_ref_range(self, fn):
         vals = [sympy.false, sympy.true]
         for a, b in itertools.product(generate_range(vals), repeat=2):
@@ -336,6 +351,38 @@ class TestValueRanges(TestCase):
                         if r.is_finite:
                             self.assertIn(r, ref_r)
 
+    # stronger test specially for bitwise ops
+    @parametrize("fn", BITWISE_OPS)
+    def test_bitwise_ref_range(self, fn):
+        # N^4 complexity
+        vals = range(-4, 5)
+        for a, b in itertools.product(generate_range(vals), repeat=2):
+            with self.subTest(a=a, b=b):
+                for a0, b0 in itertools.product(vals, repeat=2):
+                    if a0 not in a or b0 not in b:
+                        continue
+                    with self.subTest(a0=a0, b0=b0):
+                        ref_r = getattr(ValueRangeAnalysis, fn)(a, b)
+                        r = getattr(ReferenceAnalysis, fn)(a0, b0)
+                        self.assertIn(r, ref_r)
+
+        # test that bitwise ops can take bool arguments
+        bool_vals = [
+            (3, sympy.true),
+            (3, sympy.false),
+            (sympy.true, 3),
+            (sympy.false, 3),
+            (sympy.true, sympy.true),
+            (sympy.true, sympy.false),
+            (sympy.false, sympy.true),
+            (sympy.false, sympy.false),
+        ]
+        for a, b in bool_vals:
+            with self.subTest(a=a, b=b):
+                ref_r = getattr(ValueRangeAnalysis, fn)(a, b)
+                r = getattr(ReferenceAnalysis, fn)(a, b)
+                self.assertIn(r, ref_r)
+
 
 class TestSympyInterp(TestCase):
     @parametrize(
@@ -356,6 +403,8 @@ class TestSympyInterp(TestCase):
         vals = CONSTANTS
         if fn in {*UNARY_BOOL_OPS, *BINARY_BOOL_OPS}:
             vals = [True, False]
+        elif fn in BITWISE_OPS:
+            vals = vals + [True, False]
         arity = 1
         if fn in {*BINARY_OPS, *BINARY_BOOL_OPS, *COMPARE_OPS}:
             arity = 2
@@ -393,6 +442,8 @@ class TestSympyInterp(TestCase):
         vals = CONSTANTS
         if fn in {*UNARY_BOOL_OPS, *BINARY_BOOL_OPS}:
             vals = [True, False]
+        elif fn in BITWISE_OPS:
+            vals = vals + [True, False]
 
         arity = 1
         if fn in {*BINARY_OPS, *BINARY_BOOL_OPS, *COMPARE_OPS}:
@@ -470,6 +521,8 @@ class TestSympyInterp(TestCase):
         vals = CONSTANTS
         if fn in {*UNARY_BOOL_OPS, *BINARY_BOOL_OPS}:
             vals = [True, False]
+        elif fn in BITWISE_OPS:
+            vals = vals + [True, False]
 
         arity = 1
         if fn in {*BINARY_OPS, *BINARY_BOOL_OPS, *COMPARE_OPS}:
@@ -541,7 +594,7 @@ class TestSympyInterp(TestCase):
                     self.fail(f"Unexpected error for {fn}{args}: {str(e)}")
 
 
-def type_name_fn(type: Type) -> str:
+def type_name_fn(type: type) -> str:
     return type.__name__
 
 
@@ -553,7 +606,7 @@ def parametrize_relational_types(*types):
 
 
 class TestSympySolve(TestCase):
-    def _create_integer_symbols(self) -> List[sympy.Symbol]:
+    def _create_integer_symbols(self) -> list[sympy.Symbol]:
         return sympy.symbols("a b c", integer=True)
 
     def test_give_up(self):
@@ -612,9 +665,9 @@ class TestSympySolve(TestCase):
 
     def _test_cases(
         self,
-        cases: List[Tuple[sympy.Basic, sympy.Basic]],
+        cases: list[tuple[sympy.Basic, sympy.Basic]],
         thing: sympy.Basic,
-        op: Type[sympy.Rel],
+        op: type[sympy.Rel],
         **kwargs,
     ):
         for source, expected in cases:
@@ -708,7 +761,7 @@ class TestSympySolve(TestCase):
             Le: (Le(FloorDiv(a, pos), integer), (integer + 1) * pos),
         }[op]
 
-        cases: List[Tuple[sympy.Basic, sympy.Basic]] = [
+        cases: list[tuple[sympy.Basic, sympy.Basic]] = [
             # 'b' is not strictly positive
             (op(FloorDiv(a, b), integer), None),
             # 'c' is not strictly positive
@@ -809,6 +862,13 @@ class TestSympySolve(TestCase):
 
         # negative tests
         self.assertEqual(simple_floordiv_gcd(x * y + x + y + 1, x + 1), 1)
+
+
+class TestSympyFunctions(TestCase):
+    def test_pickle(self):
+        x = OpaqueUnaryFn_cos(sympy.Symbol("a"))
+        r = pickle.loads(pickle.dumps(x))
+        self.assertEqual(x, r)
 
 
 class TestSingletonInt(TestCase):

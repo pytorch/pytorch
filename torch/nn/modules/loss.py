@@ -1,5 +1,5 @@
 # mypy: allow-untyped-defs
-from typing import Callable, Optional
+from typing import Callable, Optional, Union
 from typing_extensions import deprecated
 
 from torch import Tensor
@@ -397,7 +397,7 @@ class GaussianNLLLoss(_Loss):
           but with one dimension equal to 1 (to allow for broadcasting)
         - Var: :math:`(N, *)` or :math:`(*)`, same shape as the input, or same shape as the input but
           with one dimension equal to 1, or same shape as the input but with one fewer
-          dimension (to allow for broadcasting)
+          dimension (to allow for broadcasting), or a scalar value
         - Output: scalar if :attr:`reduction` is ``'mean'`` (default) or
           ``'sum'``. If :attr:`reduction` is ``'none'``, then :math:`(N, *)`, same
           shape as the input
@@ -438,7 +438,9 @@ class GaussianNLLLoss(_Loss):
         self.full = full
         self.eps = eps
 
-    def forward(self, input: Tensor, target: Tensor, var: Tensor) -> Tensor:
+    def forward(
+        self, input: Tensor, target: Tensor, var: Union[Tensor, float]
+    ) -> Tensor:
         return F.gaussian_nll_loss(
             input, target, var, full=self.full, eps=self.eps, reduction=self.reduction
         )
@@ -1243,8 +1245,10 @@ class CrossEntropyLoss(_WeightedLoss):
         - Input: Shape :math:`(C)`, :math:`(N, C)` or :math:`(N, C, d_1, d_2, ..., d_K)` with :math:`K \geq 1`
           in the case of `K`-dimensional loss.
         - Target: If containing class indices, shape :math:`()`, :math:`(N)` or :math:`(N, d_1, d_2, ..., d_K)` with
-          :math:`K \geq 1` in the case of K-dimensional loss where each value should be between :math:`[0, C)`.
-          If containing class probabilities, same shape as the input and each value should be between :math:`[0, 1]`.
+          :math:`K \geq 1` in the case of K-dimensional loss where each value should be between :math:`[0, C)`. The
+          target data type is required to be long when using class indices. If containing class probabilities, the
+          target must be the same shape input, and each value should be between :math:`[0, 1]`. This means the target
+          data type is required to be float when using class probabilities.
         - Output: If reduction is 'none', shape :math:`()`, :math:`(N)` or :math:`(N, d_1, d_2, ..., d_K)` with :math:`K \geq 1`
           in the case of K-dimensional loss, depending on the shape of the input. Otherwise, scalar.
 
@@ -1651,7 +1655,7 @@ class TripletMarginLoss(_Loss):
     >>> output.backward()
 
     .. _Learning shallow convolutional feature descriptors with triplet losses:
-        http://www.bmva.org/bmvc/2016/papers/paper119/index.html
+        https://bmva-archive.org.uk/bmvc/2016/papers/paper119/index.html
     """
     __constants__ = ["margin", "p", "eps", "swap", "reduction"]
     margin: float
@@ -1788,7 +1792,7 @@ class TripletMarginWithDistanceLoss(_Loss):
 
     Reference:
         V. Balntas, et al.: Learning shallow convolutional feature descriptors with triplet losses:
-        http://www.bmva.org/bmvc/2016/papers/paper119/index.html
+        https://bmva-archive.org.uk/bmvc/2016/papers/paper119/index.html
     """
     __constants__ = ["margin", "swap", "reduction"]
     margin: float
