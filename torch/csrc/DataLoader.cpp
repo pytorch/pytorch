@@ -76,6 +76,10 @@ SIGNAL_HANDLER(
     handler_SIGSEGV,
     "ERROR: Unexpected segmentation fault encountered in worker.\n")
 SIGNAL_HANDLER(
+    SIGKILL,
+    handler_SIGKILL,
+    "ERROR: Unexpected fault encountered in worker.\n")
+SIGNAL_HANDLER(
     SIGFPE,
     handler_SIGFPE,
     "ERROR: Unexpected floating-point exception encountered in worker.\n")
@@ -110,6 +114,7 @@ static PyObject* THPModule_setWorkerSignalHandlers(
   HANDLE_TH_ERRORS
   setSignalHandler(SIGBUS, &handler_SIGBUS, nullptr);
   setSignalHandler(SIGSEGV, &handler_SIGSEGV, nullptr);
+  setSignalHandler(SIGKILL, &handler_SIGKILL, nullptr);
   setSignalHandler(SIGTERM, &handler_SIGTERM, nullptr);
   setSignalHandler(SIGFPE, &handler_SIGFPE, nullptr);
   setDataLoaderSignalHandlers();
