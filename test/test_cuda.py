@@ -138,7 +138,7 @@ class TestCuda(TestCase):
                 self.assertTrue(pinned_t.is_pinned())
                 pinned_t = torch.ones(1 << 24).pin_memory()
                 self.assertTrue(pinned_t.is_pinned())
-            except RuntimeError as e:
+            except RuntimeError:
                 # Some GPUs don't support same address space on host and device side
                 pass
         finally:
@@ -168,7 +168,7 @@ class TestCuda(TestCase):
                     self.assertTrue(t.is_pinned())
                     del t
                     torch._C._host_emptyCache()
-                except RuntimeError as e:
+                except RuntimeError:
                     # Some GPUs don't support same address space on host and device side
                     pass
         finally:
@@ -3471,6 +3471,7 @@ print(ret)
             .strip()
         )
         self.assertEqual(r, "1.0")
+
     def _test_copy(self, x, non_blocking):
         # Perform the copy operation, either blocking or non-blocking
         event = torch.cuda.Event()
