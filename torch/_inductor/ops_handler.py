@@ -734,7 +734,7 @@ class OpsHandler(Generic[T]):
     ) -> T:
         raise NotImplementedError
 
-    def output(self, x0: T) -> None:
+    def output(self, *args: T) -> None:
         """This is a fake op used in analysis but not codegen"""
         raise NotImplementedError
 
