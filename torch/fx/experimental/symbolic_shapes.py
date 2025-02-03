@@ -6036,7 +6036,9 @@ class ShapeEnv:
                     )
                     self._update_var_to_range(b, b_bound, self.var_to_range_sloc[a])
                     tgt_bound = self.bound_sympy(tgt)
-                    assert tgt_bound.issubset(src_bound)
+                    assert tgt_bound.issubset(
+                        src_bound
+                    ), f"{tgt_bound=} not a subset of {src_bound=}"
 
             # TODO: Should we propagate size-like-ness?
             #
@@ -6575,7 +6577,11 @@ class ShapeEnv:
             )
             if static_expr is not None:
                 self.log.debug(
-                    "eval %s == %s [statically known]", orig_expr, static_expr
+                    "eval %s == %s [statically known]",
+                    f"size_oblivious({orig_expr})"
+                    if size_oblivious
+                    else size_oblivious,
+                    static_expr,
                 )
                 if hint is not None:
                     assert static_expr == hint, f"{static_expr} != {hint}"
