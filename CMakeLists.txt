@@ -1250,6 +1250,18 @@ if(USE_MIMALLOC)
   include_directories(third_party/mimalloc/include)
 endif()
 
+if(USE_MKLDNN_ACL)
+    find_package(ACL REQUIRED)
+    if(ACL_FOUND)
+        include_directories(${ACL_INCLUDE_DIRS})
+        message(STATUS "ACL Include: ${ACL_INCLUDE_DIRS}")
+        message(STATUS "ACL Library: ${ACL_LIBRARIES}")
+    else()
+        message(FATAL_ERROR "ACL not found")
+    endif()
+endif()
+
+
 if(USE_MIMALLOC AND USE_MIMALLOC_ON_MKL)
   add_definitions(-DUSE_MIMALLOC_ON_MKL)
 endif()
