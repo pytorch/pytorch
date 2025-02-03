@@ -4723,6 +4723,35 @@ utils_device.CURRENT_DEVICE == None""".split(
         opt_fn(x)
         self.assertEqual(cnts.frame_count, 2)
 
+    def test_id_guarded_class(self):
+        class MyClass1:
+            pass
+
+        class MyClass2:
+            pass
+
+        def fn(x, y):
+            return x + id(y) // 100000
+
+        cnts = torch._dynamo.testing.CompileCounter()
+        compiled_fn = torch.compile(backend=cnts, fullgraph=True)(fn)
+        x = torch.randn(3)
+        y = MyClass1
+        self.assertEqual(fn(x, y), compiled_fn(x, y))
+        self.assertEqual(cnts.frame_count, 1)
+
+        # No recompile if still pass in the original class (MyClass1)
+        x = torch.randn(3)
+        y = MyClass1
+        self.assertEqual(fn(x, y), compiled_fn(x, y))
+        self.assertEqual(cnts.frame_count, 1)
+
+        # Have to recompile if pass in new class (MyClass2)
+        x = torch.randn(3)
+        y = MyClass2
+        self.assertEqual(fn(x, y), compiled_fn(x, y))
+        self.assertEqual(cnts.frame_count, 2)
+
     def test_id_guarded_object(self):
         class UDO:
             @torch.compile(backend="eager")
@@ -7945,9 +7974,9 @@ utils_device.CURRENT_DEVICE == None""".split(
             ]
 
         def write_state(state):
-            torch.set_grad_enabled(state[0]),
+            torch.set_grad_enabled(state[0])
             torch.use_deterministic_algorithms(state[1])
-            torch._C._set_cublas_allow_tf32(state[2]),
+            torch._C._set_cublas_allow_tf32(state[2])
 
         @torch.compile(backend=my_compiler)
         def fn(x):
