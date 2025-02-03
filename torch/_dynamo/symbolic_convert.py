@@ -1091,7 +1091,7 @@ class InstructionTranslatorBase(
                 if self.exec_recorder:
                     e.exec_record = self.exec_recorder.get_record()  # type: ignore[attr-defined]
 
-                if "Could not guard on data-dependent" in e.msg: # type: ignore[attr-defined]
+                if hasattr(e, "msg") and "Could not guard on data-dependent" in e.msg:
                     print(
                         "\n"
                         + torch.fx.GraphModule({}, self.output.graph).print_readable(
