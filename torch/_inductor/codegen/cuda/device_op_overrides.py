@@ -1,38 +1,39 @@
-# mypy: allow-untyped-defs
+from __future__ import annotations
+
 import torch
 
 from ..common import DeviceOpOverrides, register_device_op_overrides
 
 
 class CUDADeviceOpOverrides(DeviceOpOverrides):
-    def import_get_raw_stream_as(self, name):
+    def import_get_raw_stream_as(self, name: str) -> str:
         return f"from torch._C import _cuda_getCurrentRawStream as {name}"
 
-    def set_device(self, device_idx):
+    def set_device(self, device_idx: int) -> str:
         return f"torch.cuda.set_device({device_idx})"
 
-    def synchronize(self):
+    def synchronize(self) -> str:
         return "torch.cuda.synchronize()"
 
-    def device_guard(self, device_idx):
+    def device_guard(self, device_idx: int) -> str:
         return f"torch.cuda._DeviceGuard({device_idx})"
 
-    def cpp_device_guard(self):
+    def cpp_device_guard(self) -> str:
         return "at::cuda::CUDAGuard"
 
-    def cpp_aoti_device_guard(self):
+    def cpp_aoti_device_guard(self) -> str:
         return "AOTICudaGuard"
 
-    def cpp_stream_guard(self):
+    def cpp_stream_guard(self) -> str:
         return "at::cuda::CUDAStreamGuard"
 
-    def cpp_aoti_stream_guard(self):
+    def cpp_aoti_stream_guard(self) -> str:
         return "AOTICudaStreamGuard"
 
-    def cpp_getStreamFromExternal(self):
+    def cpp_getStreamFromExternal(self) -> str:
         return "at::cuda::getStreamFromExternal"
 
-    def kernel_header(self):
+    def kernel_header(self) -> str:
         source_codes = """
         #include <c10/cuda/CUDAGuard.h>
         #include <c10/cuda/CUDAStream.h>
@@ -40,7 +41,7 @@ class CUDADeviceOpOverrides(DeviceOpOverrides):
         """
         return source_codes
 
-    def kernel_driver(self):
+    def kernel_driver(self) -> str:
         source_codes = """
             #define CUDA_DRIVER_CHECK(EXPR)                    \\
             do {                                               \\
@@ -122,19 +123,119 @@ class CUDADeviceOpOverrides(DeviceOpOverrides):
             )
         return source_codes
 
-    def abi_compatible_header(self):
-        return "#include <torch/csrc/inductor/aoti_runtime/utils_cuda.h>"
+    def tma_descriptor_helpers(self) -> str:
+        if torch.version.hip is not None:
+            raise RuntimeError("Host-side TMA descriptors not supported on HIP.")
 
-    def cpp_stream_type(self):
+        # helper functions for initializing 1D and 2D TMA descriptors in C++. borrowed from the Triton code here:
+        # https://github.com/triton-lang/triton/blob/6af4f88591c85de079d8a36a4d7dba67918e2b39/third_party/nvidia/backend/driver.c#L283
+        return """
+            #if !defined(USE_ROCM) && defined(CUDA_VERSION) && CUDA_VERSION >= 12000
+            [[maybe_unused]] static void init1DTMADescriptor(
+                    CUtensorMap* m,
+                    void* globalAddress,
+                    uint64_t dim,
+                    uint32_t blockDim,
+                    uint32_t elementSize) {
+                uint64_t dims[1] = {dim};
+                uint64_t globalStrides[1] = {dim * elementSize};
+                uint32_t tensorDims[1] = {blockDim};
+                uint32_t elementStrides[1] = {1};
+
+                CUtensorMapDataType type;
+                switch (elementSize) {
+                case 1:
+                    type = CU_TENSOR_MAP_DATA_TYPE_UINT8;
+                    break;
+                case 2:
+                    type = CU_TENSOR_MAP_DATA_TYPE_UINT16;
+                    break;
+                case 4:
+                    type = CU_TENSOR_MAP_DATA_TYPE_UINT32;
+                    break;
+                default:
+                    throw std::runtime_error("elementSize must be 1, 2, or 4");
+                }
+
+                if (elementSize * blockDim < 32) {
+                    throw std::runtime_error("block size too small");
+                }
+
+                int rank = 1;
+
+                CUDA_DRIVER_CHECK(cuTensorMapEncodeTiled(
+                    m, type, rank, globalAddress, dims,
+                    globalStrides, tensorDims, elementStrides, CU_TENSOR_MAP_INTERLEAVE_NONE,
+                    CU_TENSOR_MAP_SWIZZLE_NONE, CU_TENSOR_MAP_L2_PROMOTION_NONE,
+                    CU_TENSOR_MAP_FLOAT_OOB_FILL_NONE));
+            }
+
+            [[maybe_unused]] static void init2DTMADescriptor(
+                    CUtensorMap* m,
+                    void* globalAddress,
+                    uint64_t dim1,
+                    uint64_t dim0,
+                    uint32_t blockDim1,
+                    uint32_t blockDim0,
+                    uint32_t elementSize) {
+                uint64_t dims[2] = {dim0, dim1};
+                uint32_t tensorDims[2] = {blockDim0, blockDim1};
+                uint64_t globalStrides[2] = {dims[0] * elementSize,
+                                             dims[0] * dims[1] * elementSize};
+                uint32_t elementStrides[2] = {1, 1};
+
+                CUtensorMapDataType type;
+                switch (elementSize) {
+                case 1:
+                    type = CU_TENSOR_MAP_DATA_TYPE_UINT8;
+                    break;
+                case 2:
+                    type = CU_TENSOR_MAP_DATA_TYPE_UINT16;
+                    break;
+                case 4:
+                    type = CU_TENSOR_MAP_DATA_TYPE_UINT32;
+                    break;
+                default:
+                    throw std::runtime_error("elementSize must be 1, 2, or 4");
+                }
+
+                int rank = 2;
+
+                CUtensorMapSwizzle swizzle = CU_TENSOR_MAP_SWIZZLE_128B;
+                uint32_t contigDimSizeInByte = elementSize * tensorDims[0];
+                if (contigDimSizeInByte >= 128) {
+                    swizzle = CU_TENSOR_MAP_SWIZZLE_128B;
+                } else if (contigDimSizeInByte >= 64) {
+                    swizzle = CU_TENSOR_MAP_SWIZZLE_64B;
+                } else if (contigDimSizeInByte >= 32) {
+                    swizzle = CU_TENSOR_MAP_SWIZZLE_32B;
+                } else {
+                    throw std::runtime_error("block size too small");
+                }
+
+                if (contigDimSizeInByte > 128) {
+                    tensorDims[0] = 128 / elementSize;
+                }
+
+                CUDA_DRIVER_CHECK(cuTensorMapEncodeTiled(
+                    m, type, rank, globalAddress, dims,
+                    globalStrides, tensorDims, elementStrides, CU_TENSOR_MAP_INTERLEAVE_NONE,
+                    swizzle, CU_TENSOR_MAP_L2_PROMOTION_L2_128B,
+                    CU_TENSOR_MAP_FLOAT_OOB_FILL_NONE));
+            }
+            #endif
+        """
+
+    def cpp_stream_type(self) -> str:
         return "cudaStream_t"
 
-    def aoti_get_stream(self):
+    def aoti_get_stream(self) -> str:
         return "aoti_torch_get_current_cuda_stream"
 
-    def cpp_kernel_type(self):
+    def cpp_kernel_type(self) -> str:
         return "CUfunction"
 
-    def cpp_device_ptr(self):
+    def cpp_device_ptr(self) -> str:
         return "CUdeviceptr"
 
 

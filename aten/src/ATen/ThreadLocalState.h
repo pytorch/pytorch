@@ -96,6 +96,10 @@ class TORCH_API ThreadLocalStateGuard {
     // set the given state across the thread boundary
     ThreadLocalState::setThreadLocalState(state);
   }
+  ThreadLocalStateGuard(ThreadLocalStateGuard&& other) = delete;
+  ThreadLocalStateGuard(const ThreadLocalStateGuard&) = delete;
+  ThreadLocalStateGuard& operator=(const ThreadLocalStateGuard&) = delete;
+  ThreadLocalStateGuard& operator=(ThreadLocalStateGuard&&) = delete;
 
   ~ThreadLocalStateGuard() {
     // restore previously set variables

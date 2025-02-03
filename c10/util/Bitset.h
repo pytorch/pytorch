@@ -37,6 +37,7 @@ struct bitset final {
   // see https://gcc.gnu.org/bugzilla/show_bug.cgi?id=68754.
   bitset& operator=(const bitset&) noexcept = default;
   bitset& operator=(bitset&&) noexcept = default;
+  ~bitset() = default;
 
   constexpr void set(size_t index) noexcept {
     bitset_ |= (static_cast<long long int>(1) << index);
@@ -56,6 +57,7 @@ struct bitset final {
 
   // Call the given functor with the index of each bit that is set
   template <class Func>
+  // NOLINTNEXTLINE(cppcoreguidelines-missing-std-forward)
   void for_each_set_bit(Func&& func) const {
     bitset cur = *this;
     size_t index = cur.find_first_set();

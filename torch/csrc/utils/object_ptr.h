@@ -7,18 +7,32 @@
 template <class T>
 class TORCH_PYTHON_API THPPointer {
  public:
-  THPPointer() : ptr(nullptr){};
-  explicit THPPointer(T* ptr) noexcept : ptr(ptr){};
+  THPPointer() : ptr(nullptr) {}
+  explicit THPPointer(T* ptr) noexcept : ptr(ptr) {}
   THPPointer(THPPointer&& p) noexcept : ptr(std::exchange(p.ptr, nullptr)) {}
+  THPPointer(const THPPointer& p) = delete;
+  THPPointer& operator=(const THPPointer&) = delete;
 
   ~THPPointer() {
     free();
-  };
+  }
   T* get() {
     return ptr;
   }
   const T* get() const {
     return ptr;
+  }
+  THPPointer dup() const {
+    return dup(ptr);
+  }
+  static THPPointer dup(const T* ptr) {
+    Py_XINCREF(ptr);
+    return THPPointer(
+        const_cast<T*>(ptr)); // NOLINT(cppcoreguidelines-pro-type-const-cast)
+  }
+  static THPPointer none() {
+    Py_INCREF(Py_None);
+    return THPPointer(reinterpret_cast<T*>(Py_None));
   }
   T* release() {
     T* tmp = ptr;

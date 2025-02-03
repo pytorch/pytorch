@@ -47,10 +47,11 @@
 #endif
 
 // used in test only
+// clang-format off
 C10_DEFINE_bool(
     static_runtime_disable_debug_memory_overlap_check,
     false,
-    "If true, disable the memory overlap check in debug mode in ProcessedNode::run()");
+    "If true, disable the memory overlap check in debug mode in ProcessedNode::run()")
 
 namespace torch::jit {
 
@@ -1581,7 +1582,7 @@ float BlockRunner::benchmark_model(
 
   const bool is_kwargs_empty = kwargs_list.empty();
   const KeywordArgs empty_kwargs;
-  for (C10_UNUSED const auto _n_run : c10::irange(warmup_runs)) {
+  for ([[maybe_unused]] const auto _n_run : c10::irange(warmup_runs)) {
     const auto num_args = static_cast<uint32_t>(args_list.size());
     for (const auto j : c10::irange(num_args)) {
       operator()(args_list[j], is_kwargs_empty ? empty_kwargs : kwargs_list[j]);
@@ -1591,7 +1592,7 @@ float BlockRunner::benchmark_model(
     }
   }
   caffe2::Timer timer;
-  for (C10_UNUSED const auto _n_run : c10::irange(main_runs)) {
+  for ([[maybe_unused]] const auto _n_run : c10::irange(main_runs)) {
     const auto num_args = static_cast<uint32_t>(args_list.size());
     for (const auto j : c10::irange(num_args)) {
       operator()(args_list[j], is_kwargs_empty ? empty_kwargs : kwargs_list[j]);
@@ -1743,7 +1744,7 @@ BlockRunner::IndividualMetrics BlockRunner::benchmark_individual_ops(
   results.first_iter_time = timer.MilliSeconds();
 
   // warmup runs
-  for (C10_UNUSED const auto _n_run : c10::irange(warmup_runs)) {
+  for ([[maybe_unused]] const auto _n_run : c10::irange(warmup_runs)) {
     const auto num_args = static_cast<uint32_t>(args_list.size());
     for (const auto j : c10::irange(num_args)) {
       operator()(args_list[j], is_kwargs_empty ? empty_kwargs : kwargs_list[j]);
@@ -1754,7 +1755,7 @@ BlockRunner::IndividualMetrics BlockRunner::benchmark_individual_ops(
   }
 
   // main runs
-  for (C10_UNUSED const auto i : c10::irange(main_runs)) {
+  for ([[maybe_unused]] const auto i : c10::irange(main_runs)) {
     const auto num_args = static_cast<uint32_t>(args_list.size());
     for (const auto j : c10::irange(num_args)) {
       set_inputs(args_list[j], is_kwargs_empty ? empty_kwargs : kwargs_list[j]);

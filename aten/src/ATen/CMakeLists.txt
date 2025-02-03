@@ -54,7 +54,7 @@ if(NOT BUILD_LITE_INTERPRETER)
 endif()
 EXCLUDE(ATen_CORE_SRCS "${ATen_CORE_SRCS}" ${ATen_CORE_TEST_SRCS})
 
-file(GLOB base_h "*.h" "detail/*.h" "cpu/*.h" "cpu/vec/vec512/*.h" "cpu/vec/vec256/*.h" "cpu/vec/vec256/vsx/*.h" "cpu/vec/vec256/zarch/*.h" "cpu/vec/sve/*.h" "cpu/vec/*.h" "quantized/*.h" "functorch/*.h")
+file(GLOB base_h "*.h" "detail/*.h" "cpu/*.h" "cpu/vec/vec512/*.h" "cpu/vec/vec128/*.h" "cpu/vec/vec256/*.h" "cpu/vec/vec256/vsx/*.h" "cpu/vec/vec256/zarch/*.h" "cpu/vec/sve/*.h" "cpu/vec/*.h" "quantized/*.h" "functorch/*.h")
 file(GLOB base_cpp "*.cpp" "detail/*.cpp" "cpu/*.cpp" "functorch/*.cpp")
 file(GLOB cuda_h "cuda/*.h" "cuda/detail/*.h" "cuda/*.cuh" "cuda/detail/*.cuh" "cuda/tunable/*.cuh" "cuda/tunable/*.h")
 file(GLOB cuda_cpp "cuda/*.cpp" "cuda/detail/*.cpp" "cuda/tunable/*.cpp")
@@ -80,6 +80,7 @@ file(GLOB miopen_cpp "miopen/*.cpp")
 file(GLOB mkl_cpp "mkl/*.cpp")
 file(GLOB mkldnn_cpp "mkldnn/*.cpp")
 
+file(GLOB mkldnn_xpu_h "native/mkldnn/xpu/*.h" "native/mkldnn/xpu/detail/*.h")
 file(GLOB mkldnn_xpu_cpp "native/mkldnn/xpu/*.cpp" "native/mkldnn/xpu/detail/*.cpp")
 
 file(GLOB native_cpp "native/*.cpp")
@@ -109,6 +110,7 @@ file(GLOB mps_mm "mps/*.mm")
 file(GLOB mps_h "mps/*.h")
 file(GLOB_RECURSE native_mps_cpp "native/mps/*.cpp")
 file(GLOB_RECURSE native_mps_mm "native/mps/*.mm")
+file(GLOB_RECURSE native_mps_metal "native/mps/*.metal")
 file(GLOB_RECURSE native_mps_h "native/mps/*.h")
 
 file(GLOB native_sparse_cpp "native/sparse/*.cpp")
@@ -132,7 +134,7 @@ file(GLOB native_cuda_cu "native/cuda/*.cu")
 file(GLOB native_cuda_cpp "native/cuda/*.cpp")
 file(GLOB native_cuda_h "native/cuda/*.h" "native/cuda/*.cuh")
 file(GLOB native_cuda_linalg_cpp "native/cuda/linalg/*.cpp")
-file(GLOB native_hip_h "native/hip/*.h" "native/hip/*.cuh")
+file(GLOB native_hip_h "native/hip/*.h" "native/hip/*.cuh" "native/hip/bgemm_kernels/*.h")
 file(GLOB native_cudnn_cpp "native/cudnn/*.cpp")
 file(GLOB native_sparse_cuda_cu "native/sparse/cuda/*.cu")
 file(GLOB native_sparse_cuda_cpp "native/sparse/cuda/*.cpp")
@@ -143,7 +145,7 @@ file(GLOB native_nested_h "native/nested/*.h")
 file(GLOB native_nested_cuda_cu "native/nested/cuda/*.cu")
 file(GLOB native_nested_cuda_cpp "native/nested/cuda/*.cpp")
 
-file(GLOB native_hip_hip "native/hip/*.hip")
+file(GLOB native_hip_hip "native/hip/*.hip" "native/hip/bgemm_kernels/*.hip")
 file(GLOB native_hip_cpp "native/hip/*.cpp")
 file(GLOB native_hip_linalg_cpp "native/hip/linalg/*.cpp")
 file(GLOB native_miopen_cpp "native/miopen/*.cpp")
@@ -166,9 +168,28 @@ file(GLOB flash_attention_cuda_cu "native/transformers/cuda/flash_attn/*.cu")
 file(GLOB flash_attention_cuda_kernels_cu "native/transformers/cuda/flash_attn/kernels/*.cu")
 file(GLOB flash_attention_cuda_cpp "native/transformers/cuda/flash_attn/*.cpp")
 
-# flash_attention sources
+# flash_attention hip sources
 file(GLOB flash_attention_hip_hip "native/transformers/hip/flash_attn/*.hip")
-file(GLOB flash_attention_src_hip_hip "native/transformers/hip/flash_attn/src/*.hip")
+# if USE_FLASH_ATTENTION is set, ensure CK instances get generated
+if(USE_FLASH_ATTENTION)
+  if(DEFINED ENV{USE_CK_FLASH_ATTENTION})
+    set(USE_CK_FLASH_ATTENTION $ENV{USE_CK_FLASH_ATTENTION})
+      if(USE_CK_FLASH_ATTENTION STREQUAL "1")
+        if(DEFINED ENV{PYTORCH_ROCM_ARCH})
+          list(LENGTH PYTORCH_ROCM_ARCH NUM_ARCHS)
+          if(NUM_ARCHS GREATER 1)
+            message(WARNING "Building CK for multiple archs can increase build time considerably!
+            Consider setting PYTORCH_ROCM_ARCH env var value as the gfx arch you need to build for")
+          endif()
+        endif()
+        message(STATUS "USE_CK_FLASH_ATTENTION is set; building PyTorch with CK Flash Attention enabled")
+        file(GLOB flash_attention_hip_ck_hip "native/transformers/hip/flash_attn/ck/*.hip")
+        list(APPEND native_transformers_hip_hip ${flash_attention_hip_ck_hip})
+      endif()
+  endif()
+  file(GLOB flash_attention_hip_aot_hip "native/transformers/hip/flash_attn/aot/*.hip")
+  file(GLOB flash_attention_src_hip_hip "native/transformers/hip/flash_attn/src/*.hip")
+endif()
 
 #Mem_eff attention sources
 file(GLOB mem_eff_attention_cuda_cu "native/transformers/cuda/mem_eff_attention/*.cu")
@@ -183,6 +204,7 @@ if(USE_FLASH_ATTENTION)
   list(APPEND ATen_ATTENTION_KERNEL_SRCS ${flash_attention_cuda_kernels_cu})
 
   list(APPEND native_transformers_hip_hip ${flash_attention_hip_hip})
+  list(APPEND native_transformers_hip_hip ${flash_attention_hip_aot_hip})
   list(APPEND native_transformers_src_hip_hip ${flash_attention_src_hip_hip})
 endif()
 
@@ -196,6 +218,10 @@ endif()
 
 # XNNPACK
 file(GLOB native_xnnpack "native/xnnpack/*.cpp")
+
+# KLEIDIAI
+file(GLOB native_kleidiai "native/kleidiai/*.cpp")
+file(GLOB native_kleidiai_h "native/kleidiai/*.h")
 
 # Add files needed from jit folders
 append_filelist("jit_core_headers" ATen_CORE_HEADERS)
@@ -225,6 +251,10 @@ if(USE_LIGHTWEIGHT_DISPATCH)
 endif()
 if(AT_MKL_ENABLED)
   set(all_cpu_cpp ${all_cpu_cpp} ${mkl_cpp})
+endif()
+if(AT_KLEIDIAI_ENABLED)
+  set(all_cpu_cpp ${all_cpu_cpp} ${native_kleidiai})
+  include_directories(SYSTEM INTERFACE ${KLEIDIAI_INCLUDE_DIRS})
 endif()
 if(AT_MKLDNN_ENABLED)
   set(all_cpu_cpp ${all_cpu_cpp} ${mkldnn_cpp})
@@ -315,6 +345,9 @@ if(USE_ROCM)
   # Next two lines are needed because TunableOp uses third-party/fmt
   list(APPEND ATen_HIP_INCLUDE $<TARGET_PROPERTY:fmt::fmt-header-only,INTERFACE_INCLUDE_DIRECTORIES>)
   list(APPEND ATen_HIP_DEPENDENCY_LIBS fmt::fmt-header-only)
+if(USE_FLASH_ATTENTION)
+  list(APPEND ATen_HIP_INCLUDE ${CMAKE_CURRENT_SOURCE_DIR}/native/transformers/hip/flash_attn/ck)
+endif()
   list(APPEND ATen_HIP_SRCS
     ${ATen_HIP_SRCS}
     ${hip_hip}
@@ -346,6 +379,7 @@ endif()
 if(USE_XPU)
   list(APPEND ATen_XPU_INCLUDE ${CMAKE_CURRENT_SOURCE_DIR}/xpu)
   list(APPEND ATen_XPU_SRCS ${xpu_cpp})
+  list(APPEND ATen_XPU_SRCS ${xpu_generated_sources})
 endif()
 
 list(APPEND ATen_CPU_INCLUDE ${CMAKE_CURRENT_SOURCE_DIR}/..)
@@ -439,6 +473,8 @@ if(NOT EMSCRIPTEN AND NOT INTERN_BUILD_MOBILE)
     else()
       set(CMAKE_C_FLAGS_DEBUG "${CMAKE_C_FLAGS_DEBUG} -O1")
     endif()
+  elseif(CMAKE_SYSTEM_PROCESSOR STREQUAL "ARM64")
+    set(SLEEF_ARCH_AARCH64 ON)
   endif()
 
   if(NOT USE_SYSTEM_SLEEF)
@@ -447,6 +483,9 @@ if(NOT EMSCRIPTEN AND NOT INTERN_BUILD_MOBILE)
     set(SLEEF_BUILD_GNUABI_LIBS OFF CACHE BOOL "Don't build sleef gnuabi libs" FORCE)
     set(SLEEF_BUILD_TESTS OFF CACHE BOOL "Don't build sleef tests" FORCE)
     set(SLEEF_BUILD_SCALAR_LIB OFF CACHE BOOL "libsleefscalar will be built." FORCE)
+    if(WIN32)
+      set(SLEEF_BUILD_WITH_LIBM OFF CACHE BOOL "Don't build sleef with libm for Windows." FORCE)
+    endif()
     if(CMAKE_SYSTEM_NAME STREQUAL "Darwin")
       if(CMAKE_SYSTEM_PROCESSOR STREQUAL "arm64" OR CMAKE_OSX_ARCHITECTURES MATCHES "arm64")
         set(DISABLE_SVE ON CACHE BOOL "Xcode's clang-12.5 crashes while trying to compile SVE code" FORCE)
@@ -559,7 +598,36 @@ if(USE_CUDA)
 endif()
 
 if(USE_MPS)
+    include(../../../cmake/Metal.cmake)
+
     set(ATen_MPS_SRCS ${ATen_MPS_SRCS} ${mps_cpp} ${mps_mm} ${mps_h} ${native_mps_cpp} ${native_mps_mm} ${native_mps_h})
+
+    if(CAN_COMPILE_METAL)
+        foreach(SHADER ${native_mps_metal})
+            cmake_path(GET SHADER STEM TGT_STEM)
+            string(CONCAT TGT_BASIC ${TGT_STEM} "_30.air")
+            string(CONCAT TGT_BFLOAT ${TGT_STEM} "_31.air")
+            list(APPEND AIR_BASIC ${TGT_BASIC})
+            list(APPEND AIR_BFLOAT ${TGT_BFLOAT})
+            metal_to_air(${SHADER} ${TGT_BASIC} "-std=metal3.0")
+            metal_to_air(${SHADER} ${TGT_BFLOAT} "-std=metal3.1")
+        endforeach()
+        air_to_metallib(kernels_basic.metallib ${AIR_BASIC})
+        air_to_metallib(kernels_bfloat.metallib ${AIR_BFLOAT})
+        add_custom_command(
+                          COMMAND echo "// $$(date)" > metallib_dummy.cpp
+                          DEPENDS kernels_basic.metallib kernels_bfloat.metallib
+                          OUTPUT metallib_dummy.cpp
+                          COMMENT "Updating metallibs timestamp")
+        add_custom_target(metallibs DEPENDS kernels_basic.metallib kernels_bfloat.metallib metallib_dummy.cpp)
+    else()
+        file(MAKE_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/native/mps")
+        foreach(SHADER ${native_mps_metal})
+            cmake_path(GET SHADER STEM TGT_STEM)
+            string(CONCAT SHADER_HDR_NAME  "${CMAKE_CURRENT_BINARY_DIR}" /native/mps/ ${TGT_STEM} "_metallib.h")
+            metal_to_metallib_h(${SHADER} ${SHADER_HDR_NAME})
+        endforeach()
+    endif()
 endif()
 
 if(USE_ROCM)
@@ -579,7 +647,7 @@ install(FILES "${CMAKE_CURRENT_BINARY_DIR}/cmake-exports/ATenConfig.cmake"
 
 set(INSTALL_HEADERS ${base_h} ${ATen_CORE_HEADERS} ${native_nested_h} ${ATen_TRANSFORMER_HEADERS})
 if(NOT INTERN_BUILD_MOBILE)
-  list(APPEND INSTALL_HEADERS ${native_h} ${native_cpu_h} ${native_ao_sparse_h} ${native_quantized_h} ${cuda_h} ${native_cuda_h} ${native_hip_h} ${cudnn_h} ${hip_h} ${xpu_h} ${mps_h} ${native_mps_h} ${native_utils_h} ${miopen_h})
+  list(APPEND INSTALL_HEADERS ${native_h} ${native_cpu_h} ${native_ao_sparse_h} ${native_quantized_h} ${cuda_h} ${native_cuda_h} ${native_hip_h} ${cudnn_h} ${hip_h} ${xpu_h} ${mps_h} ${native_kleidiai_h} ${native_mps_h} ${native_utils_h} ${miopen_h} ${mkldnn_xpu_h})
   # Metal
   if(USE_PYTORCH_METAL_EXPORT)
     # Add files needed from exporting metal models(optimized_for_mobile)

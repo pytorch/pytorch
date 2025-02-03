@@ -20,14 +20,14 @@ import dataclasses
 import logging
 import warnings
 from collections import defaultdict
-from typing import Any, Callable, Final, Mapping, Sequence, TYPE_CHECKING, TypeVar
+from typing import Any, Callable, TYPE_CHECKING, TypeVar
 
 import torch
 import torch._ops
 import torch.utils._pytree as pytree
 from torch.onnx import errors
 from torch.onnx._internal import io_adapter
-from torch.onnx._internal._lazy_import import onnxscript_ir as ir
+from torch.onnx._internal._lazy_import import onnxscript_apis, onnxscript_ir as ir
 from torch.onnx._internal.diagnostics import infra
 from torch.onnx._internal.exporter import _onnx_program
 from torch.onnx._internal.fx import (
@@ -42,17 +42,13 @@ from torch.onnx._internal.fx import (
 # 'import onnx' inside of dynamo_export (by way of _assert_dependencies).
 if TYPE_CHECKING:
     import io
+    from collections.abc import Mapping, Sequence
 
     import onnxruntime
     import onnxscript
 
     from torch._subclasses import fake_tensor
     from torch.onnx._internal.fx import diagnostics
-
-_DEFAULT_OPSET_VERSION: Final[int] = 18
-"""The default ONNX opset version the exporter will use if one is not specified explicitly
-through :class:`ExportOptions`. This should NEVER be accessed outside of this module! Users
-should reference :attr:`ExportOptions.opset_version`."""
 
 _PYTORCH_GITHUB_ISSUES_URL = "https://github.com/pytorch/pytorch/issues"
 """The URL to the PyTorch GitHub issues page."""
@@ -102,9 +98,7 @@ class OnnxRegistry:
             defaultdict(list)
         )
 
-        # opset_version is unused for now, since torchlib only supports opset18.
-        # TODO: get opset version from torchlib
-        self._opset_version = _DEFAULT_OPSET_VERSION
+        self._opset_version = onnxscript_apis.torchlib_opset_version()
         warnings.warn(
             f"torch.onnx.dynamo_export only implements opset version {self._opset_version} for now. If you need to use a "
             "different opset version, please register them with register_custom_op."
@@ -114,9 +108,7 @@ class OnnxRegistry:
 
     @property
     def opset_version(self) -> int:
-        """The ONNX opset version the exporter should target. Defaults to the latest
-        supported ONNX opset version: 18. The default version will increment over time as
-        ONNX continues to evolve."""
+        """The ONNX opset version the exporter should target."""
 
         return self._opset_version
 
@@ -126,8 +118,6 @@ class OnnxRegistry:
         Args:
             torchlib_registry: The torchlib registry to use for populating the registry.
         """
-        import onnxscript._framework_apis.torch_2_6 as onnxscript_apis
-
         for meta in onnxscript_apis.get_torchlib_ops():
             internal_name_instance = registration.OpName.from_qualified_name(
                 meta.qualified_name
@@ -381,38 +371,35 @@ def enable_fake_mode():
     is a :class:`torch.Tensor` with the ability to run PyTorch code without having to
     actually do computation through tensors allocated on a ``meta`` device. Because
     there is no actual data being allocated on the device, this API allows for
-    exporting large models without the actual memory footprint needed for executing it.
+    initializing and exporting large models without the actual memory footprint needed for executing it.
 
-    It is highly recommended to enable fake mode when exporting models that
+    It is highly recommended to initialize the model in fake mode when exporting models that
     are too large to fit into memory.
-
-    Returns:
-        A :class:`ONNXFakeContext` object.
 
     Example::
 
         # xdoctest: +REQUIRES(env:TORCH_DOCTEST_ONNX)
         >>> import torch
-        >>> import torch.onnx
-        >>> class MyModel(torch.nn.Module):  # Dummy model
+        >>> class MyModel(torch.nn.Module):  # Model with a parameter
         ...     def __init__(self) -> None:
         ...         super().__init__()
-        ...         self.linear = torch.nn.Linear(2, 2)
+        ...         self.weight = torch.nn.Parameter(torch.tensor(42.0))
         ...     def forward(self, x):
-        ...         out = self.linear(x)
-        ...         return out
+        ...         return self.weight + x
         >>> with torch.onnx.enable_fake_mode():
+        ...     # When initialized in fake mode, the model's parameters are fake tensors
+        ...     # They do not take up memory so we can initialize large models
         ...     my_nn_module = MyModel()
-        ...     arg1 = torch.randn(2, 2, 2)  # positional input 1
+        ...     arg1 = torch.randn(2, 2, 2)
         >>> onnx_program = torch.onnx.export(my_nn_module, (arg1,), dynamo=True)
-        >>> # Saving model WITHOUT initializers
+        >>> # Saving model WITHOUT initializers (only the architecture)
         >>> onnx_program.save(
         ...     "my_model_without_initializers.onnx",
         ...     include_initializers=False,
         ...     keep_initializers_as_inputs=True,
         ... )
-        >>> # Saving model WITH initializers
-        >>> onnx_program.apply_weights(MyModel().state_dict())
+        >>> # Saving model WITH initializers after applying concrete weights
+        >>> onnx_program.apply_weights({"weight": torch.tensor(42.0)})
         >>> onnx_program.save("my_model_with_initializers.onnx")
 
     .. warning::
@@ -590,16 +577,10 @@ class Exporter:
             onnx_model = onnxscript_graph.to_model_proto(
                 self.options.onnx_registry.opset_version,
             )
+            ir_model = ir.serde.deserialize_model(onnx_model)
 
             try:
-                from onnxscript import optimizer
-
-                onnx_model = optimizer.optimize(onnx_model)
-            except ImportError:
-                warnings.warn(
-                    "ONNXScript optimizer is not available. Skipping optimization. "
-                    "Please `pip install onnxscript -U` to enable post-export optimization."
-                )
+                ir_model = onnxscript_apis.optimize(ir_model)
             except Exception as e:
                 warnings.warn(
                     "ONNXScript optimizer failed. Skipping optimization. "
@@ -607,9 +588,7 @@ class Exporter:
                     f"\n\nDetail:\n{e}"
                 )
 
-            return _onnx_program.ONNXProgram(
-                ir.serde.deserialize_model(onnx_model), None
-            )
+            return _onnx_program.ONNXProgram(ir_model, None)
 
     def _assert_fake_tensor_mode(self):
         """Asserts that the model and its input do not contain fake tensors."""

@@ -1,7 +1,12 @@
 # mypy: allow-untyped-defs
-from typing import Any, Callable, List, TypeVar
+from typing import Any, Callable, List, Optional, Tuple, TYPE_CHECKING, TypeVar
+from typing_extensions import ParamSpec
 
 import torch
+
+
+if TYPE_CHECKING:
+    from ._cache import CacheInfo
 
 
 __all__ = [
@@ -12,14 +17,19 @@ __all__ = [
     "substitute_in_graph",
     "list_backends",
     "disable",
+    "set_stance",
     "cudagraph_mark_step_begin",
     "wrap_numpy",
     "is_compiling",
     "is_dynamo_compiling",
+    "is_exporting",
+    "save_cache_artifacts",
+    "load_cache_artifacts",
 ]
 
 
-_F = TypeVar("_F", bound=Callable[..., Any])
+_P = ParamSpec("_P")
+_R = TypeVar("_R")
 
 
 def compile(*args, **kwargs):
@@ -105,7 +115,7 @@ def allow_in_graph(fn):
         torch.compiler.allow_in_graph(my_custom_function)
 
         @torch.compile(...)
-        def fn(a):
+        def fn(x):
             x = torch.add(x, 1)
             x = my_custom_function(x)
             x = torch.add(x, 1)
@@ -122,11 +132,11 @@ def allow_in_graph(fn):
 
 
 def substitute_in_graph(
-    original_fn: _F,
+    original_fn: Callable[_P, _R],
     *,
     can_constant_fold_through: bool = False,
     skip_signature_check: bool = False,
-) -> Callable[[_F], _F]:
+) -> Callable[[Callable[_P, _R]], Callable[_P, _R]]:
     """
     Register a polyfill handler for a function, usually a C function from the C extension, to be
     used in place of the original function when inlining the original function in the graph.
@@ -184,7 +194,7 @@ def substitute_in_graph(
     )
 
 
-def list_backends(exclude_tags=("debug", "experimental")) -> List[str]:
+def list_backends(exclude_tags=("debug", "experimental")) -> list[str]:
     """
     Return valid strings that can be passed to `torch.compile(..., backend="name")`.
 
@@ -199,7 +209,7 @@ def list_backends(exclude_tags=("debug", "experimental")) -> List[str]:
 def assume_constant_result(fn):
     """
     This function is used to mark a function `fn` as having a constant result.
-    This allows the compiler to optimize away your function
+    This allows the compiler to optimize away your function.
     Returns The same function `fn`
 
     Args:
@@ -217,8 +227,8 @@ def assume_constant_result(fn):
 
 def disable(fn=None, recursive=True):
     """
-    This function provides both a decorator and a context manager to disable compilation on a function
-    It also provides the option of recursively disabling called functions
+    This function provides a decorator to disable compilation on a function.
+    It also provides the option of recursively disabling called functions.
 
     Args:
         fn (optional): The function to disable
@@ -227,6 +237,79 @@ def disable(fn=None, recursive=True):
     import torch._dynamo
 
     return torch._dynamo.disable(fn, recursive)
+
+
+def set_stance(
+    stance: str = "default", *, skip_guard_eval_unsafe=False, force_backend=None
+):
+    """
+    Set the current stance of the compiler.
+    Can be used as a function, context manager, or decorator.
+    Do not use this function inside a `torch.compile` region - an error will be raised otherwise.
+
+    .. code-block:: python
+
+        @torch.compile
+        def foo(x):
+            ...
+
+        @torch.compiler.set_stance("force_eager")
+        def bar():
+            # will not be compiled
+            foo(...)
+
+        bar()
+
+        with torch.compiler.set_stance("force_eager"):
+            # will also not be compiled
+            foo(...)
+
+        torch.compiler.set_stance("force_eager")
+        # will also not be compiled
+        foo(...)
+        torch.compiler.set_stance("default")
+
+        # will be compiled
+        foo(...)
+
+    Args:
+        stance: The stance to set the compiler to. Valid values are:
+
+            - "default": The default stance, used for normal compilation.
+            - "force_eager": Ignore all `torch.compile` directives.
+            - "eager_on_recompile": Run code eagerly when a recompile is necessary.
+              If there is cached compiled code valid for the input, it will still be used.
+            - "fail_on_recompile": Raise an error when recompiling a function.
+
+        skip_guard_eval_unsafe: A flag to run only differentiating guards.
+            CAUTION - This flag is unsafe and should only be used if your setup
+            meets the following conditions.
+
+            torch.compile uses a guard system to support recompilations and
+            choose which compiled artifact to run at runtime.  These guards,
+            though efficient, add some overhead, which may impact performance in
+            scenarios where you need to optimize for minimal guard processing
+            time.  This API enables you to disable guard evaluation, assuming
+            that you have warmed up the compiled model with a sufficient variety
+            of inputs. This assumption means that, after the warmup phase, no
+            further recompilations will be necessary.  If this assumption fails,
+            there is a risk of silently producing incorrect results (hence the
+            term "unsafe" in the API name).
+
+        force_backend: If `stance` is "default", this argument can be used to force `torch.compile`
+            to use a specific backend. Otherwise, an error is raised.
+    """
+    import torch._dynamo
+
+    return torch._dynamo.set_stance(
+        stance,
+        skip_guard_eval_unsafe=skip_guard_eval_unsafe,
+        force_backend=force_backend,
+    )
+
+
+# forbid in graph
+set_stance._dynamo_forbidden = True  # type: ignore[attr-defined]
 
 
 def cudagraph_mark_step_begin():
@@ -288,6 +371,7 @@ def wrap_numpy(fn):
 
 
 _is_compiling_flag: bool = False
+_is_exporting_flag: bool = False
 
 
 def is_compiling() -> bool:
@@ -328,3 +412,52 @@ def is_dynamo_compiling() -> bool:
         >>>     # ...rest of the function...
     """
     return False
+
+
+def is_exporting() -> bool:
+    """
+    Indicated whether we're under exporting.
+
+    It's stricter than is_compiling() flag, as it would only be set to True when
+    torch.export is used.
+
+    Example::
+
+        >>> def forward(self, x):
+        >>>     if not torch.compiler.is_exporting():
+        >>>        pass # ...logic that is not needed in export...
+        >>>
+        >>>     # ...rest of the function...
+    """
+    return _is_exporting_flag
+
+
+def save_cache_artifacts() -> Optional[tuple[bytes, "CacheInfo"]]:
+    """
+    Serializes all the cache artifacts that were created during the compilation
+
+    Example:
+
+    - Execute torch.compile
+    - Call torch.compiler.save_cache_artifacts()
+    """
+    from ._cache import CacheArtifactManager, CacheInfo
+
+    return CacheArtifactManager.serialize()
+
+
+def load_cache_artifacts(serialized_artifacts: bytes) -> Optional["CacheInfo"]:
+    """
+    Hot loads cache artifacts that were previously serialized via
+    save_cache_artifacts
+
+    Example:
+
+    # From a previous invocation
+    artifacts = torch.compiler.save_cache_artifacts()
+
+    torch.compiler.load_cache_artifacts(artifacts[0])
+    """
+    from ._cache import CacheArtifactManager, CacheInfo
+
+    return CacheArtifactManager.deserialize(serialized_artifacts)

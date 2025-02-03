@@ -1,8 +1,7 @@
 #pragma once
 #include <ATen/core/Tensor.h>
 
-namespace at {
-namespace native {
+namespace at::native {
 
 void run_cudnn_SDP_fprop(
     int64_t b,
@@ -47,5 +46,4 @@ void run_cudnn_SDP_bprop(
     const Tensor& dropoutseed,
     const Tensor& dropoutoffset);
 
-} // namespace native
-} // namespace at
+} // namespace at::native

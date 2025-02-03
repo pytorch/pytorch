@@ -181,7 +181,7 @@ def is_lazy(param):
 class UninitializedParameter(UninitializedTensorMixin, Parameter):
     r"""A parameter that is not initialized.
 
-    Uninitialized Parameters are a a special case of :class:`torch.nn.Parameter`
+    Uninitialized Parameters are a special case of :class:`torch.nn.Parameter`
     where the shape of the data is still unknown.
 
     Unlike a :class:`torch.nn.Parameter`, uninitialized parameters

@@ -29,7 +29,7 @@ class OptimisticLazy {
   }
 
   template <class Factory>
-  T& ensure(Factory&& factory) {
+  T& ensure(const Factory& factory) {
     if (T* value = value_.load(std::memory_order_acquire)) {
       return *value;
     }

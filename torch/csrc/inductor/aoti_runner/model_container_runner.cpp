@@ -74,6 +74,8 @@ AOTIModelContainerRunner::AOTIModelContainerRunner(
         json_filename, device_str == "cpu");
     proxy_executor_handle_ =
         reinterpret_cast<AOTIProxyExecutorHandle>(proxy_executor_.get());
+  } else {
+    proxy_executor_handle_ = nullptr;
   }
 
   AOTI_RUNTIME_ERROR_CODE_CHECK(create_func_(
@@ -89,12 +91,9 @@ AOTIModelContainerRunner::~AOTIModelContainerRunner() {
       result == AOTI_RUNTIME_SUCCESS, "AOTInductorModelContainerDelete failed");
 }
 
-std::vector<at::Tensor> AOTIModelContainerRunner::run(
-    std::vector<at::Tensor>& inputs,
-    AOTInductorStreamHandle cuda_stream_handle) {
-  auto input_handles =
-      torch::aot_inductor::unsafe_alloc_new_handles_from_tensors(inputs);
-
+std::vector<at::Tensor> AOTIModelContainerRunner::run_impl(
+    std::vector<AtenTensorHandle>& input_handles,
+    void* stream_handle) {
   // For outputs, we only allocate a vector to hold returned tensor handles,
   // not allocating the actual output tensor storage here
   size_t num_outputs = 0;
@@ -108,11 +107,28 @@ std::vector<at::Tensor> AOTIModelContainerRunner::run(
       input_handles.size(),
       output_handles.data(),
       output_handles.size(),
-      cuda_stream_handle,
+      reinterpret_cast<AOTInductorStreamHandle>(stream_handle),
       proxy_executor_handle_));
 
   return torch::aot_inductor::alloc_tensors_by_stealing_from_handles(
       output_handles.data(), output_handles.size());
+}
+
+std::vector<at::Tensor> AOTIModelContainerRunner::run(
+    const std::vector<at::Tensor>& inputs,
+    void* stream_handle) {
+  std::vector<AtenTensorHandle> input_handles =
+      torch::aot_inductor::unsafe_alloc_new_handles_from_tensors(inputs);
+  return run_impl(input_handles, stream_handle);
+}
+
+std::vector<at::Tensor> AOTIModelContainerRunner::boxed_run(
+    std::vector<at::Tensor>&& inputs,
+    void* stream_handle) {
+  std::vector<AtenTensorHandle> input_handles =
+      torch::aot_inductor::unsafe_alloc_new_handles_from_tensors(inputs);
+  std::move(inputs).clear();
+  return run_impl(input_handles, stream_handle);
 }
 
 std::unordered_map<std::string, std::string> AOTIModelContainerRunner::
@@ -155,6 +171,21 @@ void AOTIModelContainerRunner::update_constant_buffer(
     const TensorConstantMap& const_map,
     bool use_inactive,
     bool check_full_update) {
+  AOTI_RUNTIME_ERROR_CODE_CHECK(update_constant_buffer_func_(
+      container_handle_,
+      (AOTInductorConstantMapHandle)&const_map,
+      use_inactive,
+      check_full_update));
+}
+
+void AOTIModelContainerRunner::update_constant_buffer(
+    std::unordered_map<std::string, at::Tensor>& tensor_map,
+    bool use_inactive,
+    bool check_full_update) {
+  TensorConstantMap const_map;
+  for (auto& [k, v] : tensor_map) {
+    const_map.emplace(k, &v);
+  }
   AOTI_RUNTIME_ERROR_CODE_CHECK(update_constant_buffer_func_(
       container_handle_,
       (AOTInductorConstantMapHandle)&const_map,

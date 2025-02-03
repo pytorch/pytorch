@@ -24,10 +24,10 @@ namespace py = pybind11;
 // This makes intrusive_ptr to be available as a custom pybind11 holder type,
 // see
 // https://pybind11.readthedocs.io/en/stable/advanced/smart_ptrs.html#custom-smart-pointers
-PYBIND11_DECLARE_HOLDER_TYPE(T, c10::intrusive_ptr<T>, true);
+PYBIND11_DECLARE_HOLDER_TYPE(T, c10::intrusive_ptr<T>, true)
 
-PYBIND11_DECLARE_HOLDER_TYPE(T, c10::SingletonOrSharedTypePtr<T>);
-PYBIND11_DECLARE_HOLDER_TYPE(T, c10::SingletonTypePtr<T>, true);
+PYBIND11_DECLARE_HOLDER_TYPE(T, c10::SingletonOrSharedTypePtr<T>)
+PYBIND11_DECLARE_HOLDER_TYPE(T, c10::SingletonTypePtr<T>, true)
 
 namespace pybind11::detail {
 

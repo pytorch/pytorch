@@ -7,8 +7,7 @@
 #include <torch/csrc/jit/python/pybind_utils.h>
 #include <torch/csrc/utils/pybind.h>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 // Get all types that are shared in the module hierarchy rooted at \p mod.
 std::unordered_set<TypePtr> getSharedModuleTypes(Module& mod) {
@@ -189,5 +188,4 @@ void initJitBackendBindings(PyObject* module) {
             "Object ", py::str(orig_module), " is not a ScriptModule"));
       });
 }
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

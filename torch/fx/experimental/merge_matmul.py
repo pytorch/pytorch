@@ -1,18 +1,16 @@
 # mypy: allow-untyped-defs
-import torch
-
-from torch.fx.node import Node
-from torch.fx._symbolic_trace import symbolic_trace
-from torch.fx.passes.tools_common import legalize_graph
 import itertools
 import operator
 
-from typing import Dict, List, Tuple
+import torch
+from torch.fx._symbolic_trace import symbolic_trace
+from torch.fx.node import Node
+from torch.fx.passes.tools_common import legalize_graph
 
 
 def split_result_tensors(
-    result: torch.Tensor, inputs: List[torch.Tensor]
-) -> Tuple[torch.Tensor, ...]:
+    result: torch.Tensor, inputs: list[torch.Tensor]
+) -> tuple[torch.Tensor, ...]:
     """
     A free function for use in the merge_matmul graph transformation below that
     splits the output from a merged matmul into the individual results for each
@@ -72,7 +70,7 @@ def may_depend_on(a: Node, b: Node, search_depth: int = 6):
     return False
 
 
-def are_nodes_independent(nodes: List[Node]):
+def are_nodes_independent(nodes: list[Node]):
     """
     Check if all of the given nodes are pairwise-data independent.
 
@@ -103,8 +101,8 @@ def merge_matmul(in_mod: torch.nn.Module):
     """
     gm = symbolic_trace(in_mod)
 
-    rhs_users: Dict[Node, List[Node]] = {}
-    lhs_users: Dict[Node, List[Node]] = {}
+    rhs_users: dict[Node, list[Node]] = {}
+    lhs_users: dict[Node, list[Node]] = {}
 
     # Populate rhs_users and lhs_users - maps from LHS/RHS matrix multiply operands to
     # the matmul of which they are the LHS/RHS.
@@ -146,7 +144,14 @@ def merge_matmul(in_mod: torch.nn.Module):
         # Multiply the concatenated LHS operands with the one RHS. This will produce
         # the same results as all the individual matmuls involving rhs in the original graph,
         # but they will all be concatenated together.
-        merge_mm = gm.graph.call_function(torch.matmul, (merge_mm_cat, rhs,), {})
+        merge_mm = gm.graph.call_function(
+            torch.matmul,
+            (
+                merge_mm_cat,
+                rhs,
+            ),
+            {},
+        )
 
         # Split the result of the merged matmul using the shapes of the LHS operands
         # to ascertain how large each chunk should be.

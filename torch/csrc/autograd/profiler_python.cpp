@@ -77,7 +77,7 @@ PyCodeObject* getCode<CallType::PyModuleCall>() {
     return (PyCodeObject*)res;
   }();
   return module_call_code;
-};
+}
 
 template <>
 PyCodeObject* getCode<CallType::PyOptimizerCall>() {
@@ -92,7 +92,7 @@ PyCodeObject* getCode<CallType::PyOptimizerCall>() {
     return (PyCodeObject*)res;
   }();
   return optimizer_step_code;
-};
+}
 
 } // namespace
 } // namespace torch::profiler::impl
@@ -277,6 +277,10 @@ class ValueCache {
  public:
   ValueCache() = default;
   ValueCache(const ValueCache&) = delete;
+  ValueCache& operator==(const ValueCache&) = delete;
+  ValueCache(ValueCache&&) = default;
+  ValueCache& operator==(ValueCache&&) = delete;
+  ~ValueCache() = default;
 
   template <CallType C>
   void store(const typename Config<C>::key_t&, typename Config<C>::ephemeral_t);
@@ -457,8 +461,9 @@ ExtraFields<EventType::PyCall>::args_t ValueCache::load<
   OptimizerInfo info{
       key, cls, cache.cls_names_.at(cls), cls_and_parameters.parameters_};
   return {
-      // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
-      /*frame_state_=*/std::get<CallType::PyCall>(state_).at(*cache.location_),
+      /*frame_state_=*/std::get<CallType::PyCall>(state_).at(
+          // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
+          cache.location_.value()),
       /*module_info_=*/std::nullopt,
       /*optimizer_info_=*/std::move(info)};
 }
@@ -548,7 +553,7 @@ struct TraceKeyCacheState {
 // `PyEval_SetProfile`.
 struct ThreadLocalResults;
 struct TraceContext {
-  PyObject_HEAD;
+  PyObject_HEAD
   ThreadLocalResults* thread_local_results_;
 };
 
@@ -598,8 +603,7 @@ static PyTypeObject TraceContextType = {
 
 class gil_and_restore_thread {
  public:
-  gil_and_restore_thread()
-      : gil_(), initial_thread_state_{PyThreadState_Get()} {}
+  gil_and_restore_thread() : initial_thread_state_{PyThreadState_Get()} {}
   ~gil_and_restore_thread() {
     PyThreadState_Swap(initial_thread_state_);
 
@@ -795,7 +799,7 @@ PythonTracer::PythonTracer(torch::profiler::impl::RecordQueue* queue)
     //   cannot be round tripped via `sys.settrace(sys.gettrace())`
     PyEval_SetProfile(PythonTracer::pyProfileFn, (PyObject*)ctx);
   }
-};
+}
 
 void PythonTracer::stop() {
   gil_and_restore_thread gil;
@@ -986,13 +990,17 @@ class PostProcess {
 
     ska::flat_hash_map<size_t, stack_t> stacks;
     auto& state = get_state<E>();
+    // We already own the GIL at this point
     for (const auto& enter : enters) {
       auto fields_it = state.fields_.find(enter.key_);
       if (fields_it != state.fields_.end()) {
         while (!state.exits_.empty() &&
                state.exits_.top().t_ < enter.enter_t_) {
           auto& exit = state.exits_.top();
-          pop(stacks[exit.python_tid_], exit.t_);
+          auto& tstack = stacks[exit.python_tid_];
+          if (!tstack.empty()) {
+            pop(tstack, exit.t_);
+          }
           state.exits_.pop();
         }
         out.push_back(Result::create(
@@ -1017,7 +1025,7 @@ class PostProcess {
     ska::flat_hash_map<size_t, std::pair<size_t, kineto::DeviceAndResource>>
         tid_map;
     auto it = out.rbegin();
-    for (C10_UNUSED auto _ : c10::irange(initial_size, out.size())) {
+    for ([[maybe_unused]] auto _ : c10::irange(initial_size, out.size())) {
       const auto python_tid =
           std::get<ExtraFields<E>>((*it)->extra_fields_).python_tid_;
       if ((*it)->start_tid_ == NoTID && SOFT_ASSERT(E == EventType::PyCall)) {

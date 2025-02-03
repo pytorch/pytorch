@@ -45,6 +45,22 @@ __all__ = [
     "zeros",
 ]
 
+# For weights_only torch.load
+from ._dtensor_spec import DTensorSpec as _DTensorSpec, TensorMeta as _TensorMeta
+
+
+torch.serialization.add_safe_globals(
+    [
+        DeviceMesh,
+        _DTensorSpec,
+        _TensorMeta,
+        DTensor,
+        Partial,
+        Replicate,
+        Shard,
+    ]
+)
+
 
 # Append DTensor to the list of supported types for foreach implementation for optimizer
 # and clip_grad_norm_ so that we will try to use foreach over the for-loop implementation on CUDA.
@@ -52,7 +68,7 @@ if DTensor not in _optim_foreach_supported_types:
     _optim_foreach_supported_types.append(DTensor)
 
 if DTensor not in _util_foreach_supported_types:
-    _util_foreach_supported_types.append(DTensor)
+    _util_foreach_supported_types.append(DTensor)  # type: ignore[arg-type]
 
 
 # Set namespace for exposed private names

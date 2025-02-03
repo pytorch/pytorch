@@ -6,7 +6,8 @@ import platform
 import re
 import subprocess
 import sys
-from typing import Any, Callable, Dict, List
+import warnings
+from typing import Any, Callable, Union
 
 import torch
 from torch._inductor import config
@@ -32,9 +33,9 @@ def _get_isa_dry_compile_fingerprint(isa_flags: str) -> str:
 
 class VecISA:
     _bit_width: int
-    _macro: List[str]
+    _macro: list[str]
     _arch_flags: str
-    _dtype_nelements: Dict[torch.dtype, int]
+    _dtype_nelements: dict[torch.dtype, int]
 
     # Note [Checking for Vectorized Support in Inductor]
     # TorchInductor CPU vectorization reuses PyTorch vectorization utility functions
@@ -78,7 +79,7 @@ cdll.LoadLibrary("__lib_path__")
     def nelements(self, dtype: torch.dtype = torch.float) -> int:
         return self._dtype_nelements[dtype]
 
-    def build_macro(self) -> List[str]:
+    def build_macro(self) -> list[str]:
         return self._macro
 
     def build_arch_flags(self) -> str:
@@ -100,7 +101,7 @@ cdll.LoadLibrary("__lib_path__")
             "cpp",
             extra=_get_isa_dry_compile_fingerprint(self._arch_flags),
         )
-        from filelock import FileLock
+        from torch.utils._filelock import FileLock
 
         lock_dir = get_lock_dir()
         lock = FileLock(os.path.join(lock_dir, key + ".lock"), timeout=LOCK_TIMEOUT)
@@ -119,7 +120,7 @@ cdll.LoadLibrary("__lib_path__")
                     x86_isa_help_builder.get_target_file_path()
                 )
                 if not os.path.isfile(output_path):
-                    status, target_file = x86_isa_help_builder.build()
+                    x86_isa_help_builder.build()
 
                 # Check build result
                 subprocess.check_call(
@@ -132,15 +133,18 @@ cdll.LoadLibrary("__lib_path__")
                     stderr=subprocess.DEVNULL,
                     env={**os.environ, "PYTHONPATH": ":".join(sys.path)},
                 )
-            except Exception as e:
+            except Exception:
                 return False
 
             return True
 
-    @functools.lru_cache(None)  # noqa: B019
     def __bool__(self) -> bool:
-        if config.cpp.vec_isa_ok is not None:
-            return config.cpp.vec_isa_ok
+        return self.__bool__impl(config.cpp.vec_isa_ok)
+
+    @functools.lru_cache(None)  # noqa: B019
+    def __bool__impl(self, vec_isa_ok) -> bool:
+        if vec_isa_ok is not None:
+            return vec_isa_ok
 
         if config.is_fbcode():
             return True
@@ -150,10 +154,10 @@ cdll.LoadLibrary("__lib_path__")
 
 @dataclasses.dataclass
 class VecNEON(VecISA):
-    _bit_width = 256  # This is required to leverage the compute implemented in aten/src/ATen/cpu/vec/vec256/vec256_float_neon.h
+    _bit_width = 128  # This is required to leverage the compute implemented in aten/src/ATen/cpu/vec/vec128/vec128_float_neon.h
     _macro = ["CPU_CAPABILITY_NEON", "AT_BUILD_ARM_VEC256_WITH_SLEEF"]
     _arch_flags = ""  # Unused
-    _dtype_nelements = {torch.float: 8, torch.bfloat16: 16, torch.float16: 16}
+    _dtype_nelements = {torch.float: 4, torch.bfloat16: 8, torch.float16: 8}
 
     def __str__(self) -> str:
         return "asimd"  # detects the presence of advanced SIMD on armv8-a kernels
@@ -162,7 +166,7 @@ class VecNEON(VecISA):
 
 
 @dataclasses.dataclass
-class VecSVE(VecISA):
+class VecSVE256(VecISA):
     # this function can be repurposed for SVE with variable vec length
     _bit_width = 256
     _macro = [
@@ -296,11 +300,11 @@ class InvalidVecISA(VecISA):
     __hash__: Callable[[VecISA], Any] = VecISA.__hash__
 
 
-def x86_isa_checker() -> List[str]:
-    supported_isa: List[str] = []
+def x86_isa_checker() -> list[str]:
+    supported_isa: list[str] = []
 
     def _check_and_append_supported_isa(
-        dest: List[str], isa_supported: bool, isa_name: str
+        dest: list[str], isa_supported: bool, isa_name: str
     ) -> None:
         if isa_supported:
             dest.append(isa_name)
@@ -324,15 +328,44 @@ def x86_isa_checker() -> List[str]:
 
 
 invalid_vec_isa = InvalidVecISA()
-supported_vec_isa_list = [VecAMX(), VecAVX512(), VecAVX2(), VecNEON(), VecSVE()]
+supported_vec_isa_list = [VecAMX(), VecAVX512(), VecAVX2(), VecNEON(), VecSVE256()]
+
+
+def get_isa_from_cpu_capability(
+    capability: Union[str, None],
+    vec_isa_list: list[VecISA],
+    invalid_vec_isa: InvalidVecISA,
+):
+    # AMX setting is not supported in eager
+    # VecAMX will be prioritized for selection when setting ATEN_CPU_CAPABILITY to avx512
+    # TODO add sve256 support
+    capability_to_isa_str = {
+        "default": "INVALID_VEC_ISA",
+        "zvector": "zvector",
+        "vsx": "vsx",
+        "avx2": "avx2",
+        "avx512": "avx512",
+    }
+    if capability in capability_to_isa_str.keys():
+        isa_str = capability_to_isa_str[capability]
+        if isa_str == "INVALID_VEC_ISA":
+            return invalid_vec_isa
+        for vec_isa in vec_isa_list:
+            if isa_str in str(vec_isa):
+                return vec_isa
+
+    if capability:
+        warnings.warn(f"ignoring invalid value for ATEN_CPU_CAPABILITY {capability}")
+
+    return vec_isa_list[0]
 
 
 # Cache the cpuinfo to avoid I/O overhead. Meanwhile, the cpuinfo content
 # might have too much redundant content that is useless for ISA check. Hence,
 # we only cache some key isa information.
 @functools.lru_cache(None)
-def valid_vec_isa_list() -> List[VecISA]:
-    isa_list: List[VecISA] = []
+def valid_vec_isa_list() -> list[VecISA]:
+    isa_list: list[VecISA] = []
     if sys.platform == "darwin" and platform.processor() == "arm":
         isa_list.append(VecNEON())
 
@@ -356,8 +389,8 @@ def valid_vec_isa_list() -> List[VecISA]:
     elif arch == "ppc64le":
         isa_list.append(VecVSX())
     elif arch == "aarch64":
-        if torch.cpu._is_arm_sve_supported():
-            isa_list.append(VecSVE())
+        if torch.backends.cpu.get_cpu_capability() == "SVE256":
+            isa_list.append(VecSVE256())
         else:
             isa_list.append(VecNEON())
     elif arch in ["x86_64", "AMD64"]:
@@ -365,9 +398,11 @@ def valid_vec_isa_list() -> List[VecISA]:
         arch value is x86_64 on Linux, and the value is AMD64 on Windows.
         """
         _cpu_supported_x86_isa = x86_isa_checker()
-        for isa in supported_vec_isa_list:
-            if all(flag in _cpu_supported_x86_isa for flag in str(isa).split()) and isa:
-                isa_list.append(isa)
+        isa_list.extend(
+            isa
+            for isa in supported_vec_isa_list
+            if all(flag in _cpu_supported_x86_isa for flag in str(isa).split()) and isa
+        )
 
     return isa_list
 
@@ -376,14 +411,16 @@ def pick_vec_isa() -> VecISA:
     if config.is_fbcode() and (platform.machine() in ["x86_64", "AMD64"]):
         return VecAVX2()
 
-    _valid_vec_isa_list: List[VecISA] = valid_vec_isa_list()
+    _valid_vec_isa_list: list[VecISA] = valid_vec_isa_list()
     if not _valid_vec_isa_list:
         return invalid_vec_isa
 
-    # If the simdlen is None, it indicates determine the vectorization length automatically
+    # If the simdlen is None, set simdlen based on the environment ATEN_CPU_CAPABILITY
+    # to control CPU vec ISA
     if config.cpp.simdlen is None:
-        assert _valid_vec_isa_list
-        return _valid_vec_isa_list[0]
+        return get_isa_from_cpu_capability(
+            os.getenv("ATEN_CPU_CAPABILITY"), _valid_vec_isa_list, invalid_vec_isa
+        )
 
     for isa in _valid_vec_isa_list:
         if config.cpp.simdlen == isa.bit_width():

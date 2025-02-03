@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import os
 from collections import defaultdict
-from typing import Any, cast, Dict
+from typing import Any, cast
 from warnings import warn
 
 from tools.stats.import_test_stats import (
@@ -45,7 +45,7 @@ def _get_historical_test_class_correlations() -> dict[str, dict[str, float]]:
         print(f"could not find path {path}")
         return {}
     with open(path) as f:
-        test_class_correlations = cast(Dict[str, Dict[str, float]], json.load(f))
+        test_class_correlations = cast(dict[str, dict[str, float]], json.load(f))
         return test_class_correlations
 
 

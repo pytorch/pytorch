@@ -1,0 +1,60 @@
+name: perf-nightly-macos
+# Technically not an inductor test, but uses it as a template for tracking macos performance
+
+on:
+  schedule:
+    - cron: 0 7 * * *
+  workflow_dispatch:
+    inputs:
+      training:
+        description: Run training (on by default)?
+        required: false
+        type: boolean
+        default: true
+      inference:
+        description: Run inference (on by default)?
+        required: false
+        type: boolean
+        default: true
+      benchmark_configs:
+        description: The list of configs used the benchmark
+        required: false
+        type: string
+        default: torchbench_perf_mps
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref_name }}-${{ github.ref_type == 'branch' && github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
+  cancel-in-progress: true
+
+permissions: read-all
+
+jobs:
+  macos-perf-py3-arm64-build:
+    if: github.repository_owner == 'pytorch'
+    name: macos-perf-py3-arm64
+    uses: ./.github/workflows/_mac-build.yml
+    with:
+      sync-tag: macos-perf-py3-arm64-build
+      build-environment: macos-py3-arm64
+      runner-type: macos-m1-stable
+      build-generates-artifacts: true
+      # To match the one pre-installed in the m1 runners
+      python-version: 3.9.12
+      test-matrix: |
+        { include: [
+          { config: "perf_smoketest", shard: 1, num_shards: 1, runner: "macos-m1-14" },
+        ]}
+    secrets: inherit
+
+  macos-perf-py3-arm64-test:
+    name: macos-perf-py3-arm64-mps
+    uses: ./.github/workflows/_mac-test.yml
+    needs: macos-perf-py3-arm64-build
+    with:
+      build-environment: macos-py3-arm64
+      # Same as the build job
+      python-version: 3.9.12
+      test-matrix: ${{ needs.macos-perf-py3-arm64-build.outputs.test-matrix }}
+      # disable monitor in perf tests for more investigation
+      disable-monitor: true
+    secrets: inherit

@@ -1,4 +1,4 @@
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Optional
 
 import torch
 import torch.utils._pytree as pytree
@@ -52,10 +52,10 @@ __all__ = ["trace_wrapped"]
 if not torch._running_with_deploy():
     # torch.library.custom_op does not work with torch.deploy/multipy
 
-    @torch.library.custom_op("FlexAttentionLib::zeros_and_scatter", mutates_args=())  # type: ignore[misc]
+    @torch.library.custom_op("flex_lib::zeros_and_scatter", mutates_args=())  # type: ignore[misc]
     def zeros_and_scatter(
-        shape: List[int],
-        indices: List[Tensor],
+        shape: list[int],
+        indices: list[Tensor],
         vals: Tensor,
     ) -> Tensor:
         """Custom Op so that we can register a custom lowering for the new_output + scatter in the backwards pass"""
@@ -64,8 +64,8 @@ if not torch._running_with_deploy():
 
     @zeros_and_scatter.register_fake  # type: ignore[misc]
     def _(
-        shape: List[int],
-        indices: List[Tensor],
+        shape: list[int],
+        indices: list[Tensor],
         vals: Tensor,
     ) -> Tensor:
         return vals.new_empty(shape)
@@ -84,7 +84,7 @@ if not torch._running_with_deploy():
                 assert idx.shape == value.shape
                 expanded_indices.append(idx)
 
-        out = torch.ops.FlexAttentionLib.zeros_and_scatter(
+        out = torch.ops.flex_lib.zeros_and_scatter(
             shape,
             expanded_indices,
             value,
@@ -96,11 +96,11 @@ class ModIndex(torch.autograd.Function):
     generate_vmap_rule = True
 
     @staticmethod
-    def forward(x: Tensor, indices: List[Tensor]) -> Tensor:
+    def forward(x: Tensor, indices: list[Tensor]) -> Tensor:
         return torch.ops.aten.index(x, indices)
 
     @staticmethod
-    def setup_context(ctx: Any, inputs: Tuple[Any, ...], output: Any) -> None:
+    def setup_context(ctx: Any, inputs: tuple[Any, ...], output: Any) -> None:
         x, indices = inputs
         ctx.save_for_backward(*indices)
         ctx.input_shape = x.shape
@@ -109,7 +109,7 @@ class ModIndex(torch.autograd.Function):
     def backward(ctx, gradOut):  # type: ignore[no-untyped-def]
         indices = ctx.saved_tensors
         return (
-            torch.ops.FlexAttentionLib.zeros_and_scatter(
+            torch.ops.flex_lib.zeros_and_scatter(
                 ctx.input_shape,
                 indices,
                 gradOut,
@@ -131,9 +131,9 @@ class TransformGetItemToIndex(TorchFunctionMode):
     def __torch_function__(
         self,
         func: OpOverload,
-        types: Tuple[torch._C._TensorMeta, ...],
-        args: Tuple[object, ...] = (),
-        kwargs: Optional[Dict[str, object]] = None,
+        types: tuple[torch._C._TensorMeta, ...],
+        args: tuple[object, ...] = (),
+        kwargs: Optional[dict[str, object]] = None,
     ) -> object:
         if func == torch.Tensor.__getitem__:
             index_args = pytree.tree_leaves(args[1])
@@ -161,8 +161,8 @@ _trace_wrapped_op = TraceWrapped()
 
 def _assert_meta(
     grad: torch.Tensor,
-    size: Tuple[int, ...],
-    stride: Tuple[int, ...],
+    size: tuple[int, ...],
+    stride: tuple[int, ...],
     dtype: torch.dtype,
 ) -> torch.Tensor:
     assert grad.size() == size, "size mismatch"

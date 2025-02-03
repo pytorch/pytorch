@@ -16,8 +16,7 @@
 
 #include <algorithm>
 
-namespace at {
-namespace native {
+namespace at::native {
 
 DEFINE_DISPATCH(qbatch_norm_stub);
 DEFINE_DISPATCH(qbatch_norm_relu_stub);
@@ -386,19 +385,15 @@ Tensor quantized_batch_norm(
     double eps,
     double output_scale,
     int64_t output_zero_point) {
-  // See [Note: hacky wrapper removal for optional tensor]
-  c10::MaybeOwned<Tensor> weight_maybe_owned = at::borrow_from_optional_tensor(weight_opt);
-  const Tensor& weight = *weight_maybe_owned;
-  const Tensor& bias = c10::value_or_else(bias_opt, [] {return Tensor();});
-
-  Tensor qy;
-  // TODO: this should arguably support 3d as well
-  qy = q_batch_norm2d_impl<false>(
+  return q_batch_norm_impl<false>(
       qx,
-      weight.defined() ? std::make_optional(weight) : std::nullopt,
-      bias.defined() ? std::make_optional(bias) : std::nullopt,
-      mean, var, eps, output_scale, output_zero_point);
-  return qy;
+      weight_opt,
+      bias_opt,
+      mean,
+      var,
+      eps,
+      output_scale,
+      output_zero_point);
 }
 
 TORCH_LIBRARY_IMPL(quantized, QuantizedCPU, m) {
@@ -412,5 +407,4 @@ TORCH_LIBRARY_IMPL(quantized, QuantizedCPU, m) {
   m.impl(TORCH_SELECTIVE_NAME("quantized::batch_norm3d_relu"), TORCH_FN(q_batch_norm3d_impl<true>));
 }
 
-} // namespace native
-} // namespace at
+} // namespace at::native

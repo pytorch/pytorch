@@ -5,9 +5,7 @@
 
 #include <vector>
 
-namespace torch {
-namespace data {
-namespace transforms {
+namespace torch::data::transforms {
 
 /// A `Collation` is a transform that reduces a batch into a single value.
 /// The result is a `BatchDataset` that has the type of the single value as its
@@ -30,6 +28,4 @@ using Collation = BatchTransform<BatchType, T>;
 /// \endrst
 template <typename T, typename BatchType = std::vector<T>>
 using Collate = BatchLambda<BatchType, T>;
-} // namespace transforms
-} // namespace data
-} // namespace torch
+} // namespace torch::data::transforms

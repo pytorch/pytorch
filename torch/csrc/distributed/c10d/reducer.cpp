@@ -43,7 +43,7 @@ C10_DEFINE_TYPED_REGISTRY( // NOLINT
     c10::DeviceType,
     Timer,
     std::unique_ptr,
-    c10::Device);
+    c10::Device)
 
 namespace {
 
@@ -67,7 +67,7 @@ class CpuTimer : public Timer {
   }
 };
 
-C10_REGISTER_TYPED_CLASS(TimerRegistry, c10::kCPU, CpuTimer);
+C10_REGISTER_TYPED_CLASS(TimerRegistry, c10::kCPU, CpuTimer)
 
 std::vector<at::Tensor> extractTensors(const c10::IValue& result) {
   if (result.isPyObject()) {
@@ -90,7 +90,6 @@ std::vector<at::Tensor> extractTensors(const c10::IValue& result) {
 Reducer::Reducer(
     std::vector<at::Tensor> params,
     std::vector<std::vector<size_t>> bucket_indices,
-    const std::vector<size_t>& per_bucket_size_limits,
     c10::intrusive_ptr<c10d::ProcessGroup> process_group,
     std::vector<bool> expect_sparse_gradients,
     int64_t bucket_bytes_cap,
@@ -1044,11 +1043,11 @@ void Reducer::mark_bucket_ready(size_t bucket_index) {
 }
 
 void Reducer::install_futures(
-    c10::List<c10::intrusive_ptr<c10::ivalue::Future>> futs) {
+    const c10::List<c10::intrusive_ptr<c10::ivalue::Future>>& futs) {
   // Append instead of overwrite so that this method can be called multiple
   // times in one iteration.
   if (!installed_futures_) {
-    installed_futures_ = std::move(futs);
+    installed_futures_ = futs;
   } else {
     installed_futures_->append(futs);
   }
@@ -1162,8 +1161,8 @@ void Reducer::initialize_buckets(
       // Make gradient type in the reduced precision if mixed precision is
       // enabled. This ensures that the type is correct when e.g. rebuilding
       // buckets.
-      if (mixed_precision_param_dtype_) {
-        options = options.dtype(*mixed_precision_param_dtype_);
+      if (mixed_precision_param_dtype_.has_value()) {
+        options = options.dtype(mixed_precision_param_dtype_);
       }
       bucket.gradients = at::empty({static_cast<long>(offset)}, options);
 
@@ -1625,8 +1624,9 @@ void Reducer::finalize_backward() {
       // sparse metadata is set so the bucket should have sparse_tensor_indices
       if (sparse_metadata_) {
         REDUCER_CHECK(
-            bucket.sparse_tensor_indices.value().numel() ==
-                bucket.gradients.sizes()[0],
+            bucket.sparse_tensor_indices.has_value() &&
+                bucket.sparse_tensor_indices.value().numel() ==
+                    bucket.gradients.sizes()[0],
             logger_,
             "Sparse metadata and gradient size mismatch");
         auto sparse_result = at::sparse_coo_tensor(
@@ -1689,7 +1689,7 @@ void Reducer::finalize_backward() {
 
 void Reducer::runGradCallbackForVariable(
     at::Tensor& variable,
-    GradCallback&& cb) {
+    const GradCallback& cb) {
 #ifdef _WIN32
   cb(variable.mutable_grad());
 #else
@@ -1698,7 +1698,7 @@ void Reducer::runGradCallbackForVariable(
     cb(variable.mutable_grad());
   } else {
     // Under distributed autograd
-    context_ptr->runGradCallbackForVariable(variable, std::move(cb));
+    context_ptr->runGradCallbackForVariable(variable, cb);
   }
 #endif
 }
@@ -1759,15 +1759,17 @@ void Reducer::sync_bucket_indices(
   num_buckets = indices_accessor[indices_accessor_Index];
 
   // Broadcast bucket_sizes
-  auto bucket_sizes_tensor = at::empty({(int64_t)num_buckets}, at::kInt);
+  auto bucket_sizes_tensor =
+      at::empty({static_cast<int64_t>(num_buckets)}, at::kInt);
   auto bucket_sizes_accessor = bucket_sizes_tensor.accessor<int, 1>();
   for (const auto i : c10::irange(num_buckets)) {
     // For rank != 0, it is possible that local num buckets bucket_sizes.size()
     // is smaller than broadcasted num_buckets
-    bucket_sizes_accessor[i] =
-        bucket_sizes.at(std::min(i, (bucket_sizes.size() - 1)));
+    bucket_sizes_accessor[static_cast<int64_t>(i)] = static_cast<int>(
+        bucket_sizes.at(std::min(i, (bucket_sizes.size() - 1))));
   }
-  auto bucket_sizes_tensor_device = at::empty({(int64_t)num_buckets}, options);
+  auto bucket_sizes_tensor_device =
+      at::empty({static_cast<int64_t>(num_buckets)}, options);
   bucket_sizes_tensor_device.copy_(bucket_sizes_tensor, /*non_blocking=*/true);
   std::vector<at::Tensor> bucket_sizes_tensor_list = {
       bucket_sizes_tensor_device};
@@ -2193,8 +2195,8 @@ compute_bucket_assignment_by_size(
         result.end(),
         [](const std::tuple<std::vector<size_t>, size_t>& a,
            const std::tuple<std::vector<size_t>, size_t>& b) {
-          auto indices_a = std::get<0>(a);
-          auto indices_b = std::get<0>(b);
+          const auto& indices_a = std::get<0>(a);
+          const auto& indices_b = std::get<0>(b);
           const auto amin =
               std::min_element(indices_a.begin(), indices_a.end());
           const auto bmin =
@@ -2238,7 +2240,7 @@ void verify_params_across_processes(
   std::vector<std::vector<at::Tensor>> param_size_output_tensors;
   param_size_output_tensors.emplace_back();
   auto world_size = process_group->getSize();
-  for (C10_UNUSED const auto i : c10::irange(world_size)) {
+  for ([[maybe_unused]] const auto i : c10::irange(world_size)) {
     param_size_output_tensors.front().emplace_back(
         at::empty_like(param_size_tensor));
   }

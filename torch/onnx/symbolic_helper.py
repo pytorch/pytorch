@@ -7,7 +7,7 @@ import math
 import sys
 import typing
 import warnings
-from typing import Any, Callable, Literal, NoReturn, Sequence, TypeVar as _TypeVar
+from typing import Any, Callable, Literal, NoReturn, TypeVar as _TypeVar
 from typing_extensions import Concatenate as _Concatenate, ParamSpec as _ParamSpec
 
 import torch
@@ -21,6 +21,8 @@ from torch.onnx._internal import jit_utils
 
 
 if typing.TYPE_CHECKING:
+    from collections.abc import Sequence
+
     from torch.types import Number
 
 _T = _TypeVar("_T")
@@ -356,12 +358,14 @@ def quantized_args(
                 return descriptor and _is_value(arg) and _is_tuple_construct(arg)
 
             # Run regular symbolic function if none of the argument is QTensor.
-            is_quantized = []
+            is_quantized: list[bool] = []
             for descriptor, arg in descriptor_args:
                 # ListConstruct
                 if _is_packed_list(arg):
-                    for arg_input in arg.node().inputs():
-                        is_quantized.append(_is_arg_quantized(descriptor, arg_input))
+                    is_quantized.extend(
+                        _is_arg_quantized(descriptor, arg_input)
+                        for arg_input in arg.node().inputs()
+                    )
                 else:
                     is_quantized.append(_is_arg_quantized(descriptor, arg))
 
@@ -806,7 +810,10 @@ def _interpolate_warning(interpolate_mode):
 
 
 def _unsqueeze_helper(g: jit_utils.GraphContext, input, axes_i):
-    if _is_constant(axes_i[0]):
+    if len(axes_i) == 0:
+        # unnecessary unsqueeze if axes length==0
+        return input
+    elif _is_constant(axes_i[0]):
         if g.opset >= 13:
             axes = g.op("Constant", value_t=torch.tensor(axes_i, dtype=torch.long))
             return g.op("Unsqueeze", input, axes)
@@ -1988,7 +1995,7 @@ def _embedding_bag_helper(
 
     # FIXME(justinchuby): We need to handle what happens when we call b.op on a node return
     block_input_iter = utils._add_input_to_block(loop_block)
-    cond = utils._add_input_to_block(loop_block)
+    utils._add_input_to_block(loop_block)
 
     indices_start = loop_context.op(
         "Gather", offsets_starts, block_input_iter, axis_i=0

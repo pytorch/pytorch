@@ -1,18 +1,24 @@
 # mypy: allow-untyped-defs
+import functools
 import logging
 import os
 import pathlib
-from typing import Any, List
+from typing import Any
 
 from torch._inductor.metrics import get_metric_table, is_metric_table_enabled
 from torch.utils._ordered_set import OrderedSet
 
 from .. import config
-from ..codecache import get_path, TritonFuture
+from ..codecache import code_hash, CodeCacheFuture, get_path
 from ..runtime.benchmarking import benchmarker
+from ..runtime.triton_heuristics import (
+    cooperative_reduction_grid,
+    grid,
+    maybe_cooperative_reduction_grid,
+)
 from ..utils import cache_on_self, IndentedBuffer
 from ..virtualized import V
-from .common import TensorArg
+from .common import TensorArg, WorkspaceArg
 
 
 log = logging.getLogger(__name__)
@@ -20,14 +26,16 @@ log = logging.getLogger(__name__)
 
 def get_kernel_argdefs(kernel):
     arg_defs, _, _, _ = kernel.args.python_argdefs()
-    return arg_defs
+    return [x.name for x in arg_defs]
 
 
 def _get_all_args(args_list, arg_types_list=None):
     all_args = max(args_list, key=len)[:]
     arg_types = max(arg_types_list, key=len)[:] if arg_types_list is not None else None
     for args in args_list:
-        assert set(args).issubset(set(all_args)), f"{args} v.s. {all_args}"
+        assert OrderedSet(args).issubset(
+            OrderedSet(all_args)
+        ), f"{args} v.s. {all_args}"
 
     return all_args, arg_types
 
@@ -66,10 +74,11 @@ def get_all_call_args(call_args_list, arg_types_list):
 
 
 def get_numel_argdefs(kernel):
-    numel_argdefs = []
-    for tree in kernel.range_trees:
-        if tree.prefix != "r" or kernel.inside_reduction:
-            numel_argdefs.append(f"{tree.prefix}numel")
+    numel_argdefs = [
+        f"{tree.prefix}numel"
+        for tree in kernel.range_trees
+        if not tree.is_reduction or kernel.inside_reduction
+    ]
 
     return numel_argdefs
 
@@ -108,12 +117,13 @@ class MultiKernelState:
         multi_kernel_name = f"multi_kernel_{len(self.subkernel_to_kernel_name)}"
         self.subkernel_to_kernel_name[kernel_names] = multi_kernel_name
 
-        if V.graph.cpp_wrapper:
+        if V.graph.cpp_wrapper and not config.triton.autotune_at_compile_time:
             # we should not generate any python code for multi-kernel during
             # the second pass of cpp-wrapper.
             return multi_kernel_name
 
         buf = IndentedBuffer()
+        buf.writeline("")
         buf.writeline(
             f"{multi_kernel_name} = async_compile.multi_kernel({multi_kernel_name!r}, ["
         )
@@ -123,9 +133,11 @@ class MultiKernelState:
         buf.writeline("])")
 
         wrapper = V.graph.wrapper_code
-        wrapper.header.splice(buf)
         if config.triton.autotune_at_compile_time:
             wrapper.kernel_autotune_defs.splice(buf)
+            wrapper.src_to_kernel["\n".join(kernel_names)] = multi_kernel_name
+        else:
+            wrapper.header.splice(buf)
 
         return multi_kernel_name
 
@@ -155,6 +167,46 @@ class MultiKernel:
         # attribute to decide if it's a non-null kernel.
         self.args = object()
 
+    @staticmethod
+    def _merge_workspace_args(left: list[WorkspaceArg], right: list[WorkspaceArg]):
+        if left == right:
+            return left
+        result = {x.inner_name: x for x in left}
+        for arg in right:
+            if arg.inner_name in result:
+                result[arg.inner_name] = WorkspaceArg.maximum(
+                    result[arg.inner_name], arg
+                )
+            else:
+                result[arg.inner_name] = arg
+        return [*result.values()]
+
+    @staticmethod
+    def merge_workspaces_inplace(kernels):
+        if len(kernels) < 2:
+            return
+        # All kernels must share the same workspace
+        workspace_args = functools.reduce(
+            MultiKernel._merge_workspace_args,
+            [kernel.args.workspace_args for kernel in kernels],
+        )
+        for kernel in kernels:
+            kernel.args.workspace_args = workspace_args
+        return workspace_args
+
+    def get_grid_fn(self):
+        fns = OrderedSet(kernel._get_grid_fn() for kernel in self.kernels)
+        if len(fns) == 1:
+            return fns.pop()
+        elif len(fns) == 2:
+            assert fns == OrderedSet([cooperative_reduction_grid, grid])
+            V.graph.wrapper_code.add_import_once(
+                f"from {maybe_cooperative_reduction_grid.__module__} import maybe_cooperative_reduction_grid"
+            )
+            return maybe_cooperative_reduction_grid
+        else:
+            raise NotImplementedError(fns)
+
     def call_kernel(self, kernel_name):
         """
         Collect the union of arguments from all subkernels as the arguments
@@ -165,33 +217,42 @@ class MultiKernel:
         _, call_args, _, arg_types = self.kernels[0].args.python_argdefs()
         for kernel in self.kernels[1:]:
             _, other_call_args, _, other_arg_types = kernel.args.python_argdefs()
-            assert call_args == other_call_args
+            assert call_args == other_call_args, (call_args, other_call_args)
             assert arg_types == other_arg_types
 
-        grid: List[Any] = []
+        grid: list[Any] = []
 
-        if V.graph.cpp_wrapper:
+        if V.graph.cpp_wrapper and not config.triton.autotune_at_compile_time:
             # for the second pass of cpp-wrapper codegen, we should call
             # the fast kernel directly
-            picked_kernel = MultiKernelCall.lookup_choice(kernel_name)
-            kernel_name = self.kernels[picked_kernel].kernel_name
+            kernel_name = MultiKernelCall.lookup_choice(self.kernel_name)
 
         # numels for all subkernels should be the same. Use kernels[0] here
         self.kernels[0].add_numel_to_call_args_and_grid(
             kernel_name, call_args, arg_types, grid
         )
 
-        grid = V.graph.wrapper_code.generate_default_grid(kernel_name, grid)
+        for ws in self.kernels[0].args.workspace_args:
+            V.graph.wrapper_code.generate_workspace_allocation(ws)
+
+        grid_fn = self.get_grid_fn()
+        grid = V.graph.wrapper_code.generate_default_grid(
+            kernel_name, grid, grid_callable=grid_fn
+        )
         V.graph.wrapper_code.generate_kernel_call(
             kernel_name,
             call_args,
             grid,
             arg_types=arg_types,
+            grid_fn=grid_fn.__name__,
         )
+
+        for ws in reversed(self.kernels[0].args.workspace_args):
+            V.graph.wrapper_code.generate_workspace_deallocation(ws)
 
     def codegen_nan_check(self):
         wrapper = V.graph.wrapper_code
-        seen = set()
+        seen = OrderedSet[str]()
         for k in self.kernels:
             _, call_args, precompile_args, _ = k.args.python_argdefs()
             for arg, precompile_arg in zip(call_args, precompile_args):
@@ -252,7 +313,15 @@ class MultiKernelCall:
         self._recorded = False
 
     def cache_file_path(self):
-        _, _, path = get_path(self.kernels[0].fn.cache_key, "picked_kernel")
+        key = code_hash(
+            ",".join(
+                [
+                    f"{k.fn.cache_key}{k.size_hints!r}{k.triton_meta!r}"
+                    for k in self.kernels
+                ]
+            )
+        )
+        _, _, path = get_path(key, "picked_kernel")
         return pathlib.Path(path)
 
     def load_cache(self):
@@ -287,7 +356,7 @@ class MultiKernelCall:
         it may slow down the parallel compilation.
         """
         for i, kernel in enumerate(self._kernels):
-            if isinstance(kernel, TritonFuture):
+            if isinstance(kernel, CodeCacheFuture):
                 self._kernels[i] = kernel.result()
 
         return self._kernels
@@ -322,10 +391,9 @@ class MultiKernelCall:
     # path for the cache file. Also reading the cache file need do some IO
     # which can be slower.
     @staticmethod
-    def record_choice(multi_kernel_name, choice):
+    def record_choice(multi_kernel_name: str, picked_kernel_name: str):
         """
-        Record the multi-kernel choice for cpp-wrapper first pass codegen
-        for the second pass.
+        Record the multi-kernel choice for cpp-wrapper after autotuning
 
         We should do nothing if this function is not called during codegen.
         """
@@ -337,12 +405,15 @@ class MultiKernelCall:
         if not V.graph.record_multi_kernel_choice:
             return
 
-        V.graph.multi_kernel_to_choice[multi_kernel_name] = choice
+        V.graph.multi_kernel_to_choice[multi_kernel_name] = picked_kernel_name
 
     @staticmethod
-    def lookup_choice(multi_kernel_name):
+    def lookup_choice(multi_kernel_name: str) -> str:
         # this should always been done during cpp-wrapper codegen
-        assert V.graph.record_multi_kernel_choice
+        assert (
+            V.graph.record_multi_kernel_choice
+            and multi_kernel_name in V.graph.multi_kernel_to_choice
+        )
         # there should be no miss
         return V.graph.multi_kernel_to_choice[multi_kernel_name]
 
@@ -359,27 +430,38 @@ class MultiKernelCall:
                 k0.inductor_meta.get("reduction_hint"),
                 timings,
             )
-
-            def get_kernel_path(k):
-                return k.fn.fn.__code__.co_filename
-
             get_metric_table("persistent_red_perf").add_row(
-                lambda: {
-                    "kernel1_name": get_kernel_path(self.kernels[0]),
-                    "kernel2_name": get_kernel_path(self.kernels[1]),
-                    "kernel1_latency": timings[0],
-                    "kernel2_latency": timings[1],
-                    "size_hints": k0.size_hints,
-                    "reduction_hint": k0.inductor_meta.get("reduction_hint"),
-                    "speedup": timings[1] / timings[0],
-                }
+                functools.partial(self._metrics_table_row, timings)
             )
-
             if not self.disable_cache:
                 self.store_cache()
 
         if not self._recorded:
             self._recorded = True
-            self.record_choice(self.multi_kernel_name, self.picked_kernel)
+            picked_kernel_name = self.kernels[self.picked_kernel].inductor_meta.get(
+                "kernel_name"
+            )
+            assert picked_kernel_name is not None
+            self.record_choice(self.multi_kernel_name, picked_kernel_name)
         self.run = self.kernels[self.picked_kernel].run  # type: ignore[method-assign]
         self.run(*args, **kwargs)
+
+    def _metrics_table_row(self, timings):
+        def get_kernel_path(k):
+            return k.fn.fn.__code__.co_filename
+
+        k0 = self.kernels[0]
+        row = {
+            "size_hints": k0.size_hints,
+            "reduction_hint": k0.inductor_meta.get("reduction_hint"),
+        }
+        max_kernels = 4
+        assert len(timings) <= max_kernels
+        for i in range(max_kernels):
+            if i < len(self.kernels):
+                row[f"kernel{i}_path"] = get_kernel_path(self.kernels[i])
+                row[f"kernel{i}_latency"] = timings[i]
+            else:
+                row[f"kernel{i}_path"] = ""
+                row[f"kernel{i}_latency"] = ""
+        return row

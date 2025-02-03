@@ -3,7 +3,7 @@ import dataclasses
 import inspect
 import sys
 import warnings
-from typing import Callable, Dict, List, Optional, TYPE_CHECKING, Union
+from typing import Callable, Optional, TYPE_CHECKING, Union
 
 import torch._C
 from torch._guards import Guard
@@ -111,8 +111,8 @@ class ContextWrappingVariable(VariableTracker):
     def call_function(
         self,
         tx: "InstructionTranslator",
-        args: "List[VariableTracker]",
-        kwargs: "Dict[str, VariableTracker]",
+        args: "list[VariableTracker]",
+        kwargs: "dict[str, VariableTracker]",
     ) -> "VariableTracker":
         assert len(args) == 1
         if isinstance(args[0], NestedUserFunctionVariable):
@@ -507,8 +507,8 @@ class GradModeVariable(ContextWrappingVariable):
     def call_function(
         self,
         tx: "InstructionTranslator",
-        args: "List[VariableTracker]",
-        kwargs: "Dict[str, VariableTracker]",
+        args: "list[VariableTracker]",
+        kwargs: "dict[str, VariableTracker]",
     ):
         self._call_func(tx, self.initial_values)  # undo eager initialization
         return super().call_function(tx, args, kwargs)
@@ -819,8 +819,6 @@ class AutocastModeVariable(ContextWrappingVariable):
 class NullContextVariable(ContextWrappingVariable):
     """
     This class represents Python contextlib.nullcontext.
-    It's used as a placeholder for other context managers that Dynamo doesn't
-    support yet, e.g, torch.autograd.profiler.record_function.
     """
 
     def __init__(self, target_values=None, **kwargs) -> None:
@@ -837,6 +835,39 @@ class NullContextVariable(ContextWrappingVariable):
 
     def fn_name(self):
         return "nullcontext"
+
+
+class ProfilerContextVariable(ContextWrappingVariable):
+    """
+    This class represents a set of torch profiler context objects, where Dynamo
+    ignores all the side-effects in the __init__, __enter__ and __exit__ methods
+    by treating the object mostly as a `contextlib.nullcontext`, except for edge
+    cases like the `__enter__` method which returns the object itself rather
+    than `None`, per implementation of the torch objects.
+    """
+
+    def __init__(self, **kwargs) -> None:
+        super().__init__(target_values=None, **kwargs)
+
+    def enter(self, tx):
+        return self
+
+    def exit(self, tx: "InstructionTranslator", *args):
+        return variables.ConstantVariable.create(None)
+
+    def module_name(self):
+        return "contextlib"
+
+    def fn_name(self):
+        return "nullcontext"
+
+    def reconstruct(self, cg):
+        unimplemented(
+            """
+Dynamo doesn't support compiling a region that leaks torch profiler context
+objects which will be used outside the region
+"""
+        )
 
 
 class StreamContextVariable(ContextWrappingVariable):
@@ -979,8 +1010,8 @@ class FSDPParamGroupUseTrainingStateVariable(ContextWrappingVariable):
     def call_function(
         self,
         tx: "InstructionTranslator",
-        args: "List[VariableTracker]",
-        kwargs: "Dict[str, VariableTracker]",
+        args: "list[VariableTracker]",
+        kwargs: "dict[str, VariableTracker]",
     ):
         self._call_func(tx, self.initial_values)  # undo eager initialization
         return super().call_function(tx, args, kwargs)
@@ -1001,7 +1032,7 @@ class FSDPParamGroupUseTrainingStateVariable(ContextWrappingVariable):
             self.param_group_var.value._training_state = value
 
     def module_name(self):
-        return "torch.distributed._composable.fsdp._fsdp_param_group.FSDPParamGroup"
+        return "torch.distributed.fsdp._fully_shard._fsdp_param_group.FSDPParamGroup"
 
     def fn_name(self):
         return "use_training_state"
@@ -1023,7 +1054,7 @@ class SDPAKernelVariable(ContextWrappingVariable):
 
     def __init__(
         self,
-        target_values: List[torch.nn.attention.SDPBackend],
+        target_values: list[torch.nn.attention.SDPBackend],
         initial_values=None,
         **kwargs,
     ) -> None:
@@ -1033,17 +1064,16 @@ class SDPAKernelVariable(ContextWrappingVariable):
 
     @staticmethod
     def _backends_to_nodes(tx, backends):
-        nodes = []
-        for backend in backends:
-            # convert to/from string in order to bake the backend into FX graph
-            nodes.append(
-                tx.output.create_node(
-                    "call_function",
-                    torch.nn.attention._backend_from_string,
-                    (backend.name,),
-                    {},
-                )
+        # convert to/from string in order to bake the backend into FX graph
+        nodes = [
+            tx.output.create_node(
+                "call_function",
+                torch.nn.attention._backend_from_string,
+                (backend.name,),
+                {},
             )
+            for backend in backends
+        ]
         return nodes
 
     def enter(self, tx):
@@ -1097,8 +1127,8 @@ class StreamVariable(VariableTracker):
         self,
         tx,
         name,
-        args: "List[VariableTracker]",
-        kwargs: "Dict[str, VariableTracker]",
+        args: "list[VariableTracker]",
+        kwargs: "dict[str, VariableTracker]",
     ) -> "VariableTracker":
         assert hasattr(self.value, name), f"no stream method found named {name}"
         assert name in [
@@ -1166,8 +1196,8 @@ class EventVariable(VariableTracker):
         self,
         tx,
         name,
-        args: "List[VariableTracker]",
-        kwargs: "Dict[str, VariableTracker]",
+        args: "list[VariableTracker]",
+        kwargs: "dict[str, VariableTracker]",
     ) -> "VariableTracker":
         from ..utils import proxy_args_kwargs
         from .builder import wrap_fx_proxy_cls
@@ -1223,8 +1253,8 @@ class WithExitFunctionVariable(VariableTracker):
     def call_function(
         self,
         tx: "InstructionTranslator",
-        args: "List[VariableTracker]",
-        kwargs: "Dict[str, VariableTracker]",
+        args: "list[VariableTracker]",
+        kwargs: "dict[str, VariableTracker]",
     ) -> "VariableTracker":
         assert not kwargs
         return self.ctx.exit(tx, *args)

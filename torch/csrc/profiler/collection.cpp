@@ -195,7 +195,8 @@ auto InputOutputEncoder::getIValueGenerator(const IOType& io_type) {
         return {RawTensorMetadata(), sizes, strides};
       }
       const auto& raw_metadata = *tensor_metadata_it++;
-      for (C10_UNUSED const auto _ : c10::irange(raw_metadata.size_dim_)) {
+      for ([[maybe_unused]] const auto _ :
+           c10::irange(raw_metadata.size_dim_)) {
         if (tensor_size_strides_it.exhausted()) {
           LOG(WARNING)
               << "Expected Tensor Size mismatch with raw Tensor metadata. Reported shapes may be inaccurate!";
@@ -204,7 +205,8 @@ auto InputOutputEncoder::getIValueGenerator(const IOType& io_type) {
         sizes.push_back(*tensor_size_strides_it++);
       }
       if (raw_metadata.layout_ == at::kStrided) {
-        for (C10_UNUSED const auto _ : c10::irange(raw_metadata.size_dim_)) {
+        for ([[maybe_unused]] const auto _ :
+             c10::irange(raw_metadata.size_dim_)) {
           if (tensor_size_strides_it.exhausted()) {
             LOG(WARNING)
                 << "Expected Tensor Strides mismatch with raw Tensor metadata. Reported shapes may be inaccurate!";
@@ -337,10 +339,12 @@ std::unique_ptr<KinetoObserverContext> ThreadLocalSubqueue::begin_op(
     torch_ops_.inputs_outputs_.push(fn.inputs());
     torch_ops_.kwinputs_.emplace_back(fn.kwinputs());
   }
-  if (fn.scope() == at::RecordScope::USER_SCOPE) {
-    torch::profiler::impl::kineto::pushUserCorrelationId(corr_id);
-  } else {
-    torch::profiler::impl::kineto::pushCorrelationId(corr_id);
+  if (!config_.experimental_config.disable_external_correlation) {
+    if (fn.scope() == at::RecordScope::USER_SCOPE) {
+      torch::profiler::impl::kineto::pushUserCorrelationId(corr_id);
+    } else {
+      torch::profiler::impl::kineto::pushCorrelationId(corr_id);
+    }
   }
 
 #if !defined BUILD_LITE_INTERPRETER && !defined C10_MOBILE
@@ -360,12 +364,18 @@ std::unique_ptr<KinetoObserverContext> ThreadLocalSubqueue::begin_op(
         torch::profiler::impl::saveExtraArgs(fn));
   }
 
-  // Record NCCL metadata for specific CPU ops
-  fn.isNcclMeta() ? torch_ops_.extra_meta_.emplace_back(
-                        torch::profiler::impl::saveNcclMeta(fn))
-                  : torch_ops_.extra_meta_.emplace_back();
-
   auto out = std::make_unique<KinetoObserverContext>(event);
+  if (fn.isNcclMeta()) {
+    // Record NCCL metadata for specific CPU ops, switch off output
+    // introspection in this begin_op callback, we will do that in exit callback
+    // if needed.
+    torch::profiler::impl::SaveNcclMetaConfig ncclMetaConfig{
+        true, true, true, false};
+    out->event_->extra_nccl_meta_ = torch_ops_.extra_meta_.emplace_back(
+        torch::profiler::impl::saveNcclMeta(fn, ncclMetaConfig));
+  } else {
+    out->event_->extra_nccl_meta_ = torch_ops_.extra_meta_.emplace_back();
+  }
 
   if (config_.state == ProfilerState::KINETO_GPU_FALLBACK) {
     try {
@@ -397,9 +407,13 @@ std::unique_ptr<KinetoObserverContext> ThreadLocalSubqueue::begin_op(
 namespace {
 template <typename T>
 struct StealOrDefault {
-  StealOrDefault(T& container)
+  explicit StealOrDefault(T& container)
       : container_{container}, it_{container.begin()} {}
 
+  StealOrDefault(const StealOrDefault&) = delete;
+  StealOrDefault(StealOrDefault&&) = delete;
+  StealOrDefault& operator=(const StealOrDefault&) = delete;
+  StealOrDefault& operator=(StealOrDefault&&) = delete;
   ~StealOrDefault() {
     container_.get().clear();
   }
@@ -419,7 +433,7 @@ struct StealOrDefault {
 };
 } // namespace
 
-std::string profilerStepString = "ProfilerStep#";
+static constexpr std::string_view profilerStepString = "ProfilerStep#";
 
 void ThreadLocalSubqueue::TorchOpStorage::materialize(
     std::vector<std::shared_ptr<Result>>& out,
@@ -429,7 +443,7 @@ void ThreadLocalSubqueue::TorchOpStorage::materialize(
     const kineto::DeviceAndResource& kineto_info) {
   // Plumb Autograd info to the top level annotation.
   auto it = op_events_.begin();
-  for (C10_UNUSED const auto _ :
+  for ([[maybe_unused]] const auto _ :
        c10::irange(static_cast<int64_t>(op_events_.size()) - 1)) {
     auto& first = it->basic_fields_;
     auto& second = (++it)->basic_fields_;
@@ -497,7 +511,7 @@ void ThreadLocalSubqueue::TorchOpStorage::materialize(
 }
 
 template <size_t BlockSize>
-void materialize_vulkan(
+static void materialize_vulkan(
     std::vector<std::shared_ptr<Result>>& out,
     AppendOnlyList<ExtraFields<EventType::Vulkan>::raw_event_t, BlockSize>&
         raw_events,
@@ -730,7 +744,7 @@ void mark_finished(std::shared_ptr<Result>& r) {
 #ifdef USE_KINETO
 // Assumption: Total threads number will not exceed 2^16-1, and total ops will
 // not exceed 2^48 -1.
-static inline uint64_t getForwardThreadKey(uint64_t tid, uint64_t seqNr) {
+static uint64_t getForwardThreadKey(uint64_t tid, uint64_t seqNr) {
   return (((tid) << 48) | ((seqNr) & (((uint64_t)1 << 48) - 1)));
 }
 
@@ -1060,7 +1074,7 @@ class TransferEvents {
       std::shared_ptr<Result>& r,
       std::shared_ptr<Result> parent) {
     r->visit(c10::overloaded(
-        [&](ExtraFields<EventType::Kineto>& i) {
+        [&]([[maybe_unused]] ExtraFields<EventType::Kineto>& i) {
           TORCH_INTERNAL_ASSERT(r->start_tid_ == noTID);
           r->start_tid_ = parent ? parent->start_tid_
                                  : at::RecordFunction::currentThreadId();
@@ -1297,7 +1311,7 @@ int64_t adjust_durations_dfs(std::shared_ptr<Result>& r) {
           [&children_total_duration](ExtraFields<EventType::Vulkan>& i) {
             i.duration_ns_ = children_total_duration;
           },
-          [](ExtraFields<EventType::Allocation>& _) {
+          []([[maybe_unused]] ExtraFields<EventType::Allocation>& _) {
             // Pass- Allocation events can't have children
           },
           [&](auto&) {
@@ -1333,10 +1347,10 @@ int64_t adjust_timestamps_dfs(
             i.end_time_ns_ =
                 new_start_time + (i.end_time_ns_ - r->start_time_ns_);
           },
-          [](ExtraFields<EventType::Vulkan>& i) {
+          []([[maybe_unused]] ExtraFields<EventType::Vulkan>& i) {
             // Pass- We don't need to manually adjust end time for Vulkan events
           },
-          [](ExtraFields<EventType::Allocation>& _) {
+          []([[maybe_unused]] ExtraFields<EventType::Allocation>& _) {
             // Pass- No duration or end time to adjust
           },
           [&](auto&) {
@@ -1462,7 +1476,7 @@ RecordQueue::getRecords(
     try {
       ev = python_tracer_->getEvents(
           converter, python_enters, static_cast<c10::time_t>(end_time_ns));
-    } catch (std::exception& e) {
+    } catch (std::exception&) {
       // Normally addKinetoEvents() below will stop the trace - but if an
       // exception happens here then the events will never be stopped and future
       // runs will be broken - so make sure to stopTrace() if we see an
@@ -1488,7 +1502,8 @@ RecordQueue::getRecords(
         // with intersection then we move the lefthand side of the step
         // annotation to the event start time
         if (right_intersection_only(step, i->start_time_ns_, i->endTimeNS())) {
-          auto currStepRes = out[step.out_idx];
+          // NOLINTNEXTLINE(facebook-hte-LocalUncheckedArrayBounds)
+          auto const& currStepRes = out[step.out_idx];
           currStepRes->start_time_ns_ = i->start_time_ns_ + 1;
           step_idx++;
           step =
@@ -1585,4 +1600,26 @@ void set_cuda_sync_enabled_val(bool val) {
   cuda_sync_enabled_fn() = [val]() { return val; };
 }
 
+namespace {
+std::function<bool()>& record_tensor_addrs_enabled() {
+  static std::function<bool()> fn = []() { return false; };
+  return fn;
+}
+} // namespace
+
+bool get_record_tensor_addrs_enabled() {
+  static std::optional<bool> cached_record_tensor_addrs_enabled;
+  if (!cached_record_tensor_addrs_enabled.has_value()) {
+    cached_record_tensor_addrs_enabled = record_tensor_addrs_enabled()();
+  }
+  return cached_record_tensor_addrs_enabled.value();
+}
+
+void set_record_tensor_addrs_enabled_fn(std::function<bool()> fn) {
+  record_tensor_addrs_enabled() = std::move(fn);
+}
+
+void set_record_tensor_addrs_enabled_val(bool val) {
+  record_tensor_addrs_enabled() = [val]() { return val; };
+}
 } // namespace torch::profiler::impl

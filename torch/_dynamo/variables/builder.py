@@ -3,6 +3,7 @@
 import abc
 import collections
 import contextlib
+import copy
 import dataclasses
 import enum
 import functools
@@ -13,29 +14,22 @@ import math
 import operator
 import random
 import re
-import sys
-import time
 import types
 import warnings
 import weakref
-from typing import (
-    Any,
-    Callable,
-    Dict,
-    FrozenSet,
-    List,
-    MutableMapping,
-    NamedTuple,
-    Optional,
-    Set,
-    TYPE_CHECKING,
-    Union,
-)
+from collections.abc import MutableMapping
+from typing import Any, Callable, NamedTuple, Optional, TYPE_CHECKING, Union
+
+import sympy
 
 import torch
 from torch import SymInt
-from torch._dynamo.utils import get_chromium_event_logger
-from torch._guards import GuardSource, TracingContext
+from torch._dynamo.utils import (
+    get_metrics_context,
+    is_int_specialization_case,
+    is_torch_sym,
+)
+from torch._guards import TracingContext
 from torch._higher_order_ops.torchbind import call_torchbind
 from torch._ops import HigherOrderOperator
 from torch._subclasses.fake_tensor import FakeTensor, is_fake, maybe_get_fake_mode
@@ -44,6 +38,7 @@ from torch._utils_internal import justknobs_check
 from torch.fx.experimental._backward_state import BackwardState
 from torch.fx.experimental.symbolic_shapes import (
     _constrain_range_for_size,
+    _nested_int_aware_sort,
     DimDynamic,
     RelaxedUnspecConstraint,
     StatefulSymbolicContext,
@@ -59,19 +54,25 @@ from .. import config, mutation_guard, replay_record, trace_rules
 from ..device_interface import get_registered_device_interfaces
 from ..exc import InternalTorchDynamoError, unimplemented
 from ..guards import GuardBuilder, install_guard, make_dupe_guard
+from ..pgo import (
+    auto_dynamic,
+    auto_unset,
+    FrameStateSizeEntry,
+    InferStride,
+    process_automatic_dynamic,
+)
 from ..side_effects import SideEffects
 from ..source import (
     AttrProxySource,
     AttrSource,
     CallMethodItemSource,
-    ConstantSource,
     ConstDictKeySource,
     ConvertIntSource,
+    DictGetItemSource,
     FloatTensorSource,
     GetItemSource,
     GradSource,
     is_constant_source,
-    is_from_defaults,
     is_from_optimizer_source,
     LocalSource,
     NumpyTensorSource,
@@ -81,22 +82,20 @@ from ..source import (
     SubclassAttrListSource,
     TupleIteratorGetItemSource,
 )
-from ..trace_rules import (
-    is_callable_allowed,
-    is_numpy,
-    is_numpy_dtype,
-    is_numpy_type_info,
-)
 from ..utils import (
     _extract_tensor_dict,
     build_checkpoint_variable,
+    build_invoke_subgraph_variable,
     clone_input,
     common_constant_types,
+    dict_keys,
     get_fake_value,
+    get_items_from_dict,
     get_locals_to_steal,
     get_static_address_type,
     is_frozen_dataclass,
     is_function_or_wrapper,
+    is_invoke_subgraph,
     is_lru_cache_wrapped_function,
     is_namedtuple,
     is_parameter_freezing,
@@ -104,8 +103,10 @@ from ..utils import (
     is_utils_checkpoint,
     is_wrapper_or_member_descriptor,
     istype,
+    namedtuple_fields,
     odict_values,
     proxy_args_kwargs,
+    range_iterator,
     set_example_value,
     tensor_always_has_static_shape,
     tuple_iterator,
@@ -114,7 +115,7 @@ from ..utils import (
     unwrap_with_attr_name_if_wrapper,
     wrap_fake_exception,
 )
-from .base import MutableLocal, typestr, VariableTracker, VariableTrackerMeta
+from .base import typestr, ValueMutationNew, VariableTracker, VariableTrackerMeta
 from .constant import ConstantVariable, EnumVariable
 from .ctx_manager import (
     AutocastModeVariable,
@@ -126,10 +127,9 @@ from .ctx_manager import (
 )
 from .dicts import (
     ConstDictVariable,
-    CustomizedDictVariable,
     DefaultDictVariable,
-    HFPretrainedConfigVariable,
-    PythonSysModulesVariable,
+    DictKeySetVariable,
+    FrozensetVariable,
     SetVariable,
 )
 from .distributed import (
@@ -140,9 +140,12 @@ from .distributed import (
     WorldMetaClassVariable,
 )
 from .functions import (
+    BuiltinMethodVariable,
+    CollectionsNamedTupleFunction,
     CollectiveFunctionRewriteVariable,
     CreateTMADescriptorVariable,
     FunctoolsPartialVariable,
+    FunctoolsWrapsVariable,
     TritonKernelVariable,
     UserFunctionVariable,
     UserMethodVariable,
@@ -153,6 +156,7 @@ from .iter import ItertoolsVariable
 from .lazy import LazyVariableTracker
 from .lists import (
     BaseListVariable,
+    ListIteratorVariable,
     ListVariable,
     NamedTupleVariable,
     RangeVariable,
@@ -185,6 +189,7 @@ from .misc import (
     SavedTensorBox,
     TorchVersionVariable,
     TypingVariable,
+    WeakRefVariable,
 )
 from .nn_module import (
     FSDPManagedNNModuleVariable,
@@ -196,12 +201,18 @@ from .script_object import TorchScriptObjectVariable
 from .sdpa import SDPAParamsVariable
 from .tensor import (
     NumpyNdarrayVariable,
+    supported_const_comparison_op_values,
     SymNodeVariable,
     TensorSubclassVariable,
     TensorVariable,
     UnspecializedPythonVariable,
 )
-from .torch import TorchCtxManagerClassVariable, TorchInGraphFunctionVariable
+from .torch import (
+    DispatchKeySetVariable,
+    FuncTorchInterpreterVariable,
+    TorchCtxManagerClassVariable,
+    TorchInGraphFunctionVariable,
+)
 from .torch_function import (
     build_torch_function_fn,
     TensorWithTFOverrideVariable,
@@ -214,8 +225,9 @@ from .user_defined import (
     MutableMappingVariable,
     SourcelessGraphModuleVariable,
     UserDefinedClassVariable,
+    UserDefinedDictVariable,
     UserDefinedObjectVariable,
-    WeakRefVariable,
+    UserDefinedTupleVariable,
 )
 
 
@@ -235,7 +247,7 @@ static_inputs_log = torch._logging.getArtifactLogger(
 )
 
 
-DimList = List
+DimList = list
 
 
 def safe_has_grad(t):
@@ -329,22 +341,15 @@ class BackwardStateGraphArg(GraphArg):
         codegen.store(codegen.tx.output.backward_state_var)
 
 
-@dataclasses.dataclass
-class FrameStateSizeEntry:
-    scalar: Optional[int]
-    size: Optional[List[int]]
-    stride: Optional[List[int]]
-
-
 # All class-based iterators in itertools
 # NOTE: use id() because some objects are not hashable, it will raise error during lookup
-ITERTOOLS_TYPE_IDS: FrozenSet[int] = frozenset(
+ITERTOOLS_TYPE_IDS: frozenset[int] = frozenset(
     id(member)
     for name, member in vars(itertools).items()
     if not name.startswith("_") and inspect.isclass(member)
 )
 # Will be updated later in substitute_in_graph in torch/_dynamo/polyfills/itertools.py
-ITERTOOLS_POLYFILLED_TYPE_IDS: Set[int] = set()
+ITERTOOLS_POLYFILLED_TYPE_IDS: set[int] = set()
 
 
 class VariableBuilder:
@@ -396,41 +401,25 @@ class VariableBuilder:
             NumpyNdarrayVariable,
         }
 
-    @staticmethod
-    @functools.lru_cache(None)
-    def _common_constants():
-        return {
-            # We zero-one specialize shapes, so specialize these constants
-            # too
-            0,
-            1,
-            # NB: There used to be more constants here, but honestly it was
-            # pretty confusing.  Note we specialize floats by default, and
-            # DON'T specialize ints by default.  This all only matters with
-            # dynamic_shapes
-        }
-
     def get_source(self):
         return self.source
 
     def install_guards(self, *guards):
         source = self.get_source()
-        if (
-            isinstance(source, ConstantSource)
-            or source.guard_source() == GuardSource.CONSTANT
-        ):
+        try:
+            tmp = [source.make_guard(guard) for guard in guards]
+        except NotImplementedError:
             return None
-        install_guard(*[source.make_guard(guard) for guard in guards], skip=1)
+        install_guard(*tmp, skip=1)
         return {}
 
-    def set_source_and_track_mutable(self, value, var):
-        assert isinstance(var, VariableTracker)
-        var.source = self.source
-        return self.tx.output.side_effects.track_mutable(value, var)
+    @classmethod
+    def _type_dispatch(cls):
+        return cls._type_dispatch_impl(config.trace_numpy)
 
     @classmethod
     @functools.lru_cache(None)
-    def _type_dispatch(cls):
+    def _type_dispatch_impl(cls, trace_numpy):
         # NB: Careful not to close over self to avoid ref cycle from lru_cache
         entries = [
             (
@@ -447,6 +436,7 @@ class VariableBuilder:
                 cls.wrap_listlike,
             ),
             (tuple_iterator, cls.wrap_tuple_iterator),
+            (range_iterator, cls.wrap_range_iterator),
             ((slice, range), cls.wrap_slice_range),
             (tuple(common_constant_types), cls.wrap_literal),
             (re.Pattern, cls.wrap_regex_pattern),
@@ -455,7 +445,7 @@ class VariableBuilder:
             (torch.jit.ScriptFunction, cls.wrap_jit_function),
         ]
 
-        if config.trace_numpy and np:
+        if trace_numpy and np:
             entries.append((np.ndarray, cls.wrap_numpy_ndarray))
 
         result = {}
@@ -473,7 +463,7 @@ class VariableBuilder:
 
     def wrap_weakref(self, value: weakref.ReferenceType):
         self.install_guards(GuardBuilder.TYPE_MATCH)
-        return WeakRefVariable(value, source=self.source)
+        return WeakRefVariable.build(self.tx, value, source=self.source)
 
     def wrap_removable_handle(self, value):
         # This means that the removable handle was created in some other frame.
@@ -492,7 +482,7 @@ class VariableBuilder:
     @functools.lru_cache(None)
     def _id_dispatch(
         cls,
-    ) -> Dict[int, Callable[["VariableBuilder", Any], VariableTracker]]:
+    ) -> dict[int, Callable[["VariableBuilder", Any], VariableTracker]]:
         from ..comptime import comptime
 
         entries = [
@@ -568,44 +558,27 @@ class VariableBuilder:
         ):
             return self.wrap_tensor(value)
         elif is_namedtuple(value):
-            return self.wrap_listlike(value)
-
-        elif value is torch.utils._pytree.SUPPORTED_NODES:
-            # For SUPPORTED_NODES, we guard on the dictionary version (PEP509)
-            # under the assumption that the values themselves don't change.
-            self.install_guards(GuardBuilder.DICT_VERSION)
-
-            # The keys on the SUPPORTED_NODES can be arbitrary, so save on the
-            # key order.
-            self.tx.output.guard_on_key_order.add(self.source.name())
-            result = {
-                ConstantVariable.create(k): UserDefinedObjectVariable(
-                    v,
-                    source=GetItemSource(
-                        self.get_source(), ConstDictKeySource(self.get_source(), i)
-                    ),
-                )
-                for i, (k, v) in enumerate(value.items())
-            }
-            return ConstDictVariable(result, type(value))
-        elif value is sys.modules:
-            self.install_guards(GuardBuilder.FUNCTION_MATCH)
-            return PythonSysModulesVariable(source=self.source)
-        elif CustomizedDictVariable.is_matching_cls_hf(type(value)):
-            self.install_guards(GuardBuilder.TYPE_MATCH)
-            result = CustomizedDictVariable.wrap(self, value)
-            result.source = self.source
-            return self.tx.output.side_effects.track_object_existing(value, result)
-        elif istype(value, (dict, collections.defaultdict, collections.OrderedDict)):
             self.install_guards(GuardBuilder.SEQUENCE_LENGTH)
-
-            # Optimisation for the common case strings, ints, etc
+            output = [
+                LazyVariableTracker.create(
+                    getattr(value, name),
+                    source=AttrSource(self.source, name),
+                )
+                for name in namedtuple_fields(type(value))
+            ]
+            result = NamedTupleVariable(
+                output, tuple_cls=type(value), source=self.source
+            )
+            return result
+        elif istype(value, (dict, collections.defaultdict, collections.OrderedDict)):
+            self.install_guards(GuardBuilder.TYPE_MATCH)
             all_const = all(ConstantVariable.is_literal(k) for k in value.keys())
-            if all_const:
-                # TODO(anijain2305) - Do we have to guard on all the keys? Can
-                # keys be guarded lazily, similar to values?
-                self.install_guards(GuardBuilder.DICT_CONST_KEYS)
-            else:
+
+            # For all_const, we dont have to guard on anything yet. We guard on
+            # keys lazily by adding a dict_getitem entry for each accessed key.
+            # For cases where we need to guard on all keys, we lazily put guards
+            # during the dict call_method (check dicts.py)
+            if not all_const:
                 # Guard on the key order
                 # This is not ideal, i.e., there is no need to guard on the key
                 # order. But we guard on the key order because of the complexity
@@ -634,13 +607,18 @@ class VariableBuilder:
                     source_key = ConstDictKeySource(self.get_source(), i)
                     key = LazyVariableTracker.create(k, source_key)
 
-                source_value = GetItemSource(self.get_source(), source_key)
+                source_value = DictGetItemSource(self.get_source(), source_key)
                 value = LazyVariableTracker.create(v, source_value)
 
                 return key, value
 
+            # Ensure that we call dict.keys and not value.keys (which can call
+            # overridden keys method). In the C++ guards, we relied on
+            # PyDict_Next to traverse the dictionary, which uses the internal
+            # data structure and does not call the overridden keys method.
             result = dict(
-                build_key_value(i, k, v) for i, (k, v) in enumerate(value.items())
+                build_key_value(i, k, v)
+                for i, (k, v) in enumerate(get_items_from_dict(value))
             )
 
             if istype(value, collections.defaultdict):
@@ -658,7 +636,7 @@ class VariableBuilder:
                     result, user_cls=type(value), source=self.source
                 )
 
-            return self.set_source_and_track_mutable(value, result)
+            return self.tx.output.side_effects.track_mutable(value, result)
         elif isinstance(value, torch.nn.Module):
             return self.wrap_module(value)
         elif ConstantVariable.is_literal(value):  # non-atomic literals
@@ -667,14 +645,26 @@ class VariableBuilder:
             var = TorchFunctionModeVariable(value, source=self.source)
             self.tx.output.side_effects.track_object_existing(value, var)
             return var
-        elif istype(value, frozenset) and (
-            ConstantVariable.is_literal(x) for x in value
+        elif istype(value, frozenset) and all(
+            (
+                # For DBR quantization, we could get a frozenset of torch funcs.
+                (type(x) is types.BuiltinMethodType and x.__module__ == "torch")
+                or
+                # Another commonly used frozenset of types.
+                x in torch.utils._pytree.BUILTIN_TYPES
+            )
+            for x in value
         ):
-            # For frozenset, we can guard by object ID instead of value
-            # equality, this allows us to handle non-literal values
+            # For the limited cases of frozenset here, we know the items won't
+            # change across runs, so we can safely create sourceless VTs for
+            # them and only guard on the frozenset id.
+            # TODO support source for sets and remove the special logics here.
+            items = [SourcelessBuilder.create(self.tx, v) for v in value]
             self.install_guards(GuardBuilder.ID_MATCH)
-            return ConstantVariable.create(value=value, source=self.source)
-        elif isinstance(value, enum.Enum):
+            return FrozensetVariable(items, source=self.source)
+        elif isinstance(
+            value, (enum.Enum, torch.DispatchKey, torch._C._functorch.TransformType)
+        ):
             self.install_guards(GuardBuilder.ID_MATCH)
             return EnumVariable(value=value, source=self.source)
         elif DebuggingVariable.is_reorderable_logging_function(value):
@@ -687,6 +677,8 @@ class VariableBuilder:
             return LoggingLoggerVariable(value, source=self.source)
         elif is_utils_checkpoint(value):
             return build_checkpoint_variable(source=self.source)
+        elif is_invoke_subgraph(value):
+            return build_invoke_subgraph_variable(source=self.source)
         elif isinstance(value, functools.partial):
             func_src = AttrSource(self.get_source(), "func")
             func_obj = VariableBuilder(self.tx, func_src)(value.func)
@@ -704,12 +696,12 @@ class VariableBuilder:
                 if not ConstantVariable.is_literal(k):
                     unimplemented("functools.partial with non-literal keyword")
                 keywords[k] = VariableBuilder(
-                    self.tx, GetItemSource(keywords_source, k)
+                    self.tx, DictGetItemSource(keywords_source, k)
                 )(v)
 
             install_guard(
                 self.get_source().make_guard(GuardBuilder.TYPE_MATCH),
-                keywords_source.make_guard(GuardBuilder.DICT_KEYS),
+                keywords_source.make_guard(GuardBuilder.DICT_KEYS_MATCH),
                 args_source.make_guard(GuardBuilder.SEQUENCE_LENGTH),
             )
             return FunctoolsPartialVariable(func_obj, args, keywords)
@@ -723,7 +715,7 @@ class VariableBuilder:
         elif np is not None and isinstance(value, np.generic):
             # numpy array scalars: convert to 0D arrays
             return self.wrap_numpy_ndarray(np.asarray(value))
-        elif is_numpy(value):
+        elif trace_rules.is_numpy(value):
             assert np
             self.install_guards(
                 GuardBuilder.FUNCTION_MATCH
@@ -731,10 +723,10 @@ class VariableBuilder:
                 else GuardBuilder.TYPE_MATCH
             )
             return NumpyVariable(value, source=self.source)
-        elif is_numpy_dtype(value):
+        elif trace_rules.is_numpy_dtype(value):
             self.install_guards(GuardBuilder.ID_MATCH)
             return NumpyDTypeVariable(value, source=self.source)
-        elif is_numpy_type_info(value):
+        elif trace_rules.is_numpy_type_info(value):
             if isinstance(value, np.iinfo):
                 self.install_guards(GuardBuilder.TYPE_MATCH)
                 dt_source = AttrSource(self.source, "dtype")
@@ -820,17 +812,18 @@ class VariableBuilder:
                 )
             )
         elif callable(value) and trace_rules.lookup_callable(value) is not None:
-            if is_callable_allowed(value):
+            if trace_rules.is_callable_allowed(value):
                 self.tx.output.has_user_defined_allowed_in_graph = True
             return trace_rules.lookup_callable(value).create_with_source(
                 value, source=self.source
             )
         elif np and isinstance(value, np.number):
             return self.wrap_unspecialized_primitive(value)
-        elif HFPretrainedConfigVariable.is_matching_object(value):
-            self.install_guards(GuardBuilder.TYPE_MATCH)
-            return HFPretrainedConfigVariable(value)
         elif isinstance(value, HigherOrderOperator):
+            if value is torch._higher_order_ops.invoke_subgraph:
+                unimplemented(
+                    "Directly using invoke_subgraph is not supported. Use mark_compile_region"
+                )
             self.install_guards(GuardBuilder.TYPE_MATCH, GuardBuilder.NAME_MATCH)
             return TorchHigherOrderOperatorVariable.make(value, source=self.source)
         elif isinstance(value, torch.cuda.StreamContext):
@@ -860,9 +853,9 @@ class VariableBuilder:
         elif isinstance(value, (torch._C._SDPAParams)):
             self.install_guards(GuardBuilder.TYPE_MATCH)
             return SDPAParamsVariable.create(self.tx, value, self.source)
-        elif isinstance(value, torch._C._SDPBackend):
+        elif isinstance(value, torch._functorch.pyfunctorch.FuncTorchInterpreter):
             self.install_guards(GuardBuilder.ID_MATCH)
-            return ConstantVariable(value)
+            return FuncTorchInterpreterVariable(value)
         elif isinstance(value, torch.Event):
             self.install_guards(GuardBuilder.ID_MATCH)
             torch._dynamo.utils.store_user_object_weakref(value)
@@ -898,6 +891,9 @@ class VariableBuilder:
             self.install_guards(GuardBuilder.ID_MATCH)
             self.source = OptimizerSource(self.source)
             return OptimizerVariable(value, source=self.source)
+        elif isinstance(value, torch.DispatchKeySet):
+            self.install_guards(GuardBuilder.DISPATCH_KEY_SET_MATCH)
+            return DispatchKeySetVariable(value)
         elif WorldMetaClassVariable.is_group_member_type(value):
             return WorldMetaClassVariable(value, source=self.source)
         elif ProcessGroupVariable.is_process_group(value):
@@ -924,39 +920,51 @@ class VariableBuilder:
         ):
             self.install_guards(GuardBuilder.FUNCTION_MATCH)
             return ItertoolsVariable(value, source=self.source)
-        elif isinstance(value, torch.SymBool):
-            # Note: the idea here is to re-use the infra we've built for SymInt by simulating the
-            # user provided SymBool with a SymInt in dynamo.
+        elif is_torch_sym(value):
+            # Note: this doesn't handle nested symints.
+            # For SymBool input, we re-use the infra for SymInt by simulating SymBool with a SymInt in dynamo.
 
             # Concretely,
             # 1. We create a SymInt in dynamo's shape_env, whose source is constructed as ConvertIntSource(self.source).
             # so that guards on the SymInts can be effectively applied on the original SymBool in user program.
             # 2. We create a SymBool based on the SymInt in dynamo's ShapeEnv. Because the original user program
             # depends on the value being a SymBool. This allows dynamo to interpret the user's program correctly.
-
-            new_source = ConvertIntSource(self.source)
+            source = (
+                self.source
+                if isinstance(value, torch.SymInt)
+                else ConvertIntSource(self.source)
+            )
             if value.node.has_hint():
-                value_hint = value.node.require_hint()
-
                 new_symint = (
                     self.tx.output.shape_env.create_unspecified_symint_and_symbol(
-                        int(value_hint),
-                        new_source,
+                        int(value.node.hint),
+                        source,
                         dynamic_dim=DimDynamic.DYNAMIC,
                     )
                 )
             else:
-                # We need to create an unbacked symint to replace the unbacked symbool.
-                new_symint = self.tx.output.shape_env.create_unbacked_symint()
+                if isinstance(value, torch.SymBool):
+                    # We need to create an unbacked symint to replace the unbacked symbool.
+                    new_symint = self.tx.output.shape_env.create_unbacked_symint()
+                else:
+                    # TODO (yidi): we need to figure out a way to propagate the guards
+                    # we accumulated when tracing the subggraph to outer shape_env. For normal symints,
+                    # this is automatically done by evaluating the guards once but this
+                    # will cause data-dependent error when we evaluate the outer unbacked symints.
+                    # The test case that triggers this graph break is test_cond_unbacked_symint_closure
+                    unimplemented(
+                        "unbacked symint input is not supported yet. If you need this feature, please file a github issue."
+                    )
 
             sym_node_proxy = self.tx.output.root_tracer.create_graph_input(
                 re.sub(r"[^a-zA-Z0-9]+", "_", self.name),
                 type(new_symint),
-                source=new_source,
+                new_symint,
+                source=source,
             )
 
             sym_node_proxy.node.meta["grapharg"] = GraphArg(
-                new_source,
+                source,
                 new_symint,
                 False,
                 None,
@@ -964,15 +972,17 @@ class VariableBuilder:
                 example_strong_ref=new_symint,
             )
             # We bind the new_symint to graph input.
-            set_example_value(sym_node_proxy.node, new_symint)
-            self.tx.output.bound_symbols.add(new_symint.node.expr)
-            self.tx.output.tracked_fakes.append(
-                TrackedFake(new_symint, new_source, None)
-            )
-            return SymNodeVariable(
-                sym_node_proxy,
-                new_symint == 1,
-            )
+            sym_expr = new_symint.node.expr
+            assert isinstance(
+                sym_expr, sympy.Symbol
+            ), f"{sym_expr} is not a basic Symbol."
+            self.tx.output.tracked_fakes.append(TrackedFake(new_symint, source, None))
+
+            tracing_symint = (
+                new_symint if isinstance(value, torch.SymInt) else new_symint == 1
+            )  # cast it back to symbool for tracing
+            return SymNodeVariable(sym_node_proxy, tracing_symint)
+
         elif isinstance(value, (JITFunction, Autotuner)):
             self.install_guards(GuardBuilder.ID_MATCH)
             return TritonKernelVariable(
@@ -1014,6 +1024,17 @@ class VariableBuilder:
             return WrapperUserFunctionVariable(
                 value, "_torchdynamo_inline", source=self.source
             )
+        elif value is functools.wraps:
+            self.install_guards(GuardBuilder.ID_MATCH)
+            return FunctoolsWrapsVariable(value, source=self.source)
+        elif value is collections.namedtuple:
+            self.install_guards(GuardBuilder.ID_MATCH)
+            return CollectionsNamedTupleFunction(value, source=self.source)
+        elif isinstance(
+            value, types.BuiltinMethodType
+        ) and BuiltinMethodVariable.is_supported_builtin_method(value):
+            self.install_guards(GuardBuilder.ID_MATCH)
+            return BuiltinMethodVariable(value, source=self.source)
         elif is_function_or_wrapper(value):
             value, attr_name = unwrap_with_attr_name_if_wrapper(value)
             # For these wrappers, Dynamo points to the wrapped function,
@@ -1106,7 +1127,7 @@ class VariableBuilder:
             )
         elif RestrictedListSubclassVariable.is_matching_cls(type(value)):
             self.install_guards(GuardBuilder.SEQUENCE_LENGTH)
-            return self.set_source_and_track_mutable(
+            return self.tx.output.side_effects.track_mutable(
                 value,
                 RestrictedListSubclassVariable(
                     [
@@ -1117,6 +1138,7 @@ class VariableBuilder:
                     ],
                     user_cls=type(value),
                     user_cls_source=AttrSource(self.source, "__class__"),
+                    source=self.source,
                 ),
             )
         elif TorchScriptObjectVariable.is_matching_cls(type(value)):
@@ -1129,6 +1151,7 @@ class VariableBuilder:
                 proxy = self.tx.output.root_tracer.create_graph_input(
                     re.sub(r"[^a-zA-Z0-9]+", "_", self.name),
                     type(value),
+                    value,
                     source=self.source,
                 )
 
@@ -1173,6 +1196,7 @@ class VariableBuilder:
             proxy = self.tx.output.root_tracer.create_graph_input(
                 re.sub(r"[^a-zA-Z0-9]+", "_", self.name),
                 type(value),
+                fake_script_obj,
                 source=self.source,
             )
 
@@ -1187,6 +1211,72 @@ class VariableBuilder:
                 fake_script_obj,
                 source=self.source,
             )
+        elif (
+            isinstance(value, (dict, collections.OrderedDict))
+            and type(value).__new__ is dict.__new__
+        ):
+            # Construct a dict_vt that will reside inside the UserDefinedDictVariable
+            self.install_guards(GuardBuilder.TYPE_MATCH)
+            self.install_guards(GuardBuilder.SEQUENCE_LENGTH)
+
+            # Guard on the key order
+            self.tx.output.guard_on_key_order.add(self.source.name())
+
+            # We need all the keys to be hashable. We do this within the
+            # _HashableTracker class in dicts.py
+            def build_key_value(i, k, v):
+                source_key = ConstDictKeySource(self.get_source(), i)
+                key = LazyVariableTracker.create(k, source_key)
+
+                source_value = DictGetItemSource(self.get_source(), source_key)
+                value = LazyVariableTracker.create(v, source_value)
+
+                return key, value
+
+            # Ensure that we call dict.keys and not value.keys (which can call
+            # overridden keys method). In the C++ guards, we relied on
+            # PyDict_Next to traverse the dictionary, which uses the internal
+            # data structure and does not call the overridden keys method.
+            result = dict(
+                build_key_value(i, k, v)
+                for i, (k, v) in enumerate(get_items_from_dict(value))
+            )
+
+            # NB: This is deliberately kept ValueMutationNew because dict_vt is
+            # an internal representation. dict_vt tracks the mutation on the
+            # dict side. side_effects infra uses the UserDefinedDictVariable to
+            # apply side-effects of this dict_vt.
+            dict_vt = ConstDictVariable(
+                result,
+                user_cls=(
+                    collections.OrderedDict
+                    if isinstance(value, collections.OrderedDict)
+                    else dict
+                ),
+                mutation_type=ValueMutationNew(),
+            )
+
+            result = UserDefinedDictVariable(value, dict_vt=dict_vt, source=self.source)
+            return self.tx.output.side_effects.track_object_existing(value, result)
+        elif isinstance(value, tuple) and type(value).__new__ is tuple.__new__:
+            self.install_guards(GuardBuilder.TYPE_MATCH)
+            self.install_guards(GuardBuilder.SEQUENCE_LENGTH)
+
+            # NB - Be careful in not triggering user code. Guards also work on
+            # the underlying tuple data structure.
+            output = [
+                LazyVariableTracker.create(
+                    tuple.__getitem__(value, i),
+                    source=GetItemSource(self.get_source(), i),
+                )
+                for i in range(tuple.__len__(value))
+            ]
+
+            tuple_vt = TupleVariable(output, mutation_type=ValueMutationNew())
+            result = UserDefinedTupleVariable.create(
+                value, tuple_vt=tuple_vt, source=self.source
+            )
+            return self.tx.output.side_effects.track_object_existing(value, result)
         elif issubclass(type(value), MutableMapping):
             self.install_guards(GuardBuilder.TYPE_MATCH)
             return MutableMappingVariable(value, source=self.source)
@@ -1194,6 +1284,21 @@ class VariableBuilder:
             self.install_guards(GuardBuilder.TYPE_MATCH)
             result = FrozenDataClassVariable.create(self.tx, value, source=self.source)
             return self.tx.output.side_effects.track_object_existing(value, result)
+        elif isinstance(value, dict_keys):
+            if all(ConstantVariable.is_literal(k) for k in value):
+                # If the dict_keys object is passed from outside the compile region, it must either be passed along with
+                # the corresponding dict object or treated as a set (when only the keys are passed into the compiled region).
+                # - If it is passed along with the dict, the dict object itself is already guarded.
+                # - If only the dict_keys object is passed, we add EQUALS_MATCH and SEQUENCE_LENGTH guards
+                #   to ensure it remains unchanged across multiple runs.
+                items = [SourcelessBuilder.create(self.tx, v) for v in value]
+                install_guard(
+                    self.get_source().make_guard(GuardBuilder.SEQUENCE_LENGTH),
+                    self.get_source().make_guard(GuardBuilder.EQUALS_MATCH),
+                )
+                return DictKeySetVariable(items, source=self.source)
+            else:
+                unimplemented("dict_keys with non-constant keys are not supported")
         else:
             return self.wrap_user_defined(value)
 
@@ -1213,10 +1318,6 @@ class VariableBuilder:
         # One can index a tensor with a list/tuple. Therefore, we need to
         # have a stricter match.
         self.install_guards(GuardBuilder.SEQUENCE_LENGTH)
-
-        for item in value:
-            if item is value:
-                unimplemented("list elements are pointing to the list itself")
 
         # Tuples are immutable objects, so we should mark its items static. This
         # avoids wrapping of tuple items as symints. This helps for nn module
@@ -1252,7 +1353,10 @@ class VariableBuilder:
             source = self.source
             assert isinstance(value, list)
             tensor_list_proxy = self.tx.output.root_tracer.create_graph_input(
-                re.sub(r"[^a-zA-Z0-9]+", "_", self.name), type(value), source=source
+                re.sub(r"[^a-zA-Z0-9]+", "_", self.name),
+                type(value),
+                value,
+                source=source,
             )
             tensor_list_proxy.node.meta["steal_arg"] = True
 
@@ -1290,11 +1394,9 @@ class VariableBuilder:
             )
             tensor_list_proxy.node.meta["grapharg"] = grapharg
 
-        result = BaseListVariable.cls_for_instance(value)(
-            output, mutable_local=MutableLocal()
-        )
-        if istype(value, list):
-            return self.set_source_and_track_mutable(value, result)
+        result = BaseListVariable.cls_for_instance(value)(output, source=self.source)
+        if istype(value, (list, collections.deque)):
+            return self.tx.output.side_effects.track_mutable(value, result)
         return result
 
     def wrap_tuple_iterator(self, value: tuple_iterator):
@@ -1305,11 +1407,16 @@ class VariableBuilder:
             )
             for i in range(tuple_iterator_len(value))
         ]
-        result = TupleIteratorVariable(
-            output, mutable_local=MutableLocal(), source=self.source
-        )
+        result = TupleIteratorVariable(output, source=self.source)
+        return self.tx.output.side_effects.track_mutable(value, result)
 
-        return self.set_source_and_track_mutable(value, result)
+    def wrap_range_iterator(self, value: range_iterator):
+        self.install_guards(GuardBuilder.RANGE_ITERATOR_MATCH)
+        # Get all the values from the range iterator; no need to install guards
+        # on items since `RANGE_ITERATOR_MATCH` guarantees the same items.
+        items = [ConstantVariable.create(v) for v in copy.deepcopy(value)]
+        result = ListIteratorVariable(items, source=self.source)
+        return self.tx.output.side_effects.track_mutable(value, result)
 
     def wrap_slice_range(self, value: Union[slice, range]):
         items = [
@@ -1442,24 +1549,7 @@ class VariableBuilder:
         if not config.specialize_int and type(value) is int:
             # unspecializing int by default, but still
             # specialize for the following conditions
-            if not TracingContext.get().force_unspec_int_unbacked_size_like and (
-                # Assume integers from global variables want to be specialized
-                not self.source.guard_source().is_local()
-                # Assume that integers that came from NN modules want to be
-                # specialized (as we don't expect users to be changing the
-                # NN modules on the fly)
-                or self.source.guard_source().is_specialized_nn_module()
-                or self.source.guard_source().is_unspecialized_builtin_nn_module()
-                or is_from_defaults(self.source)
-                # TODO: Delete this condition when rollout is done.  NB: this
-                # condition never evaluates True in open source
-                or (
-                    not justknobs_check(
-                        "pytorch/dynamo:enable_unspecialize_zero_one_plain_int"
-                    )
-                    and value in self._common_constants()
-                )
-            ):
+            if is_int_specialization_case(value, self.source):
                 self.install_guards(GuardBuilder.CONSTANT_MATCH)
                 return ConstantVariable.create(value=value, source=self.source)
             else:
@@ -1470,7 +1560,7 @@ class VariableBuilder:
             self.install_guards(GuardBuilder.CONSTANT_MATCH)
             result = ConstantVariable.create(value=value, source=self.source)
             if isinstance(value, (list, set)):
-                return self.set_source_and_track_mutable(value, result)
+                return self.tx.output.side_effects.track_mutable(value, result)
             return result
 
     def assert_not_wrapped_by_this_graph(self, value: torch.Tensor):
@@ -1503,7 +1593,9 @@ class VariableBuilder:
             is_static_input = True
 
         make_graph_attribute = is_static_input and (
-            not config.inline_inbuilt_nn_modules or is_parameter_freezing()
+            not config.inline_inbuilt_nn_modules
+            or is_parameter_freezing()
+            or torch._dynamo.config.prepare_freezing
         )
 
         if (
@@ -1566,18 +1658,6 @@ class VariableBuilder:
         # By this point, we should have deduplicated all tensors
         self.assert_not_wrapped_by_this_graph(value)
 
-        # tx.output has multiple tracers if we're introspecting HigherOrderOperator.
-        # When we've discovered an untracked tensor, then we actually need
-        # to get Dynamo to track the tensor (which is what this function does)
-        # and put it as a graph input on the root tracer. Later on,
-        # if the input is actually used in the body of the HigherOrderOperator,
-        # then the relevant SubgraphTracer will lift it to being an input of
-        # the subgraph.
-        # See NOTE [HigherOrderOperator tracing design] for more details.
-
-        tensor_proxy = self.tx.output.root_tracer.create_graph_input(
-            re.sub(r"[^a-zA-Z0-9]+", "_", self.name), type(value), source=source
-        )
         options = {}
         if type(value) in config.traceable_tensor_subclasses:
             options["torch_function_fn"] = build_torch_function_fn(
@@ -1615,14 +1695,45 @@ class VariableBuilder:
                 "requires some design around FSDP + torch.compile."
             )
 
+        # tx.output has multiple tracers if we're introspecting HigherOrderOperator.
+        # When we've discovered an untracked tensor, then we actually need
+        # to get Dynamo to track the tensor (which is what this function does)
+        # and put it as a graph input on the root tracer. Later on,
+        # if the input is actually used in the body of the HigherOrderOperator,
+        # then the relevant SubgraphTracer will lift it to being an input of
+        # the subgraph.
+        # See NOTE [HigherOrderOperator tracing design] for more details.
+
+        example_value = wrap_to_fake_tensor_and_record(
+            value, tx=self.tx, is_tensor=True, source=source
+        )
+        tensor_proxy = self.tx.output.root_tracer.create_graph_input(
+            re.sub(r"[^a-zA-Z0-9]+", "_", self.name),
+            type(value),
+            example_value,
+            source=source,
+        )
+        cache_real_value_when_export(self.tx, tensor_proxy, value)
+
         tensor_variable = wrap_fx_proxy(
             tx=self.tx,
             proxy=tensor_proxy,
-            example_value=value,
+            example_value=example_value,
             subclass_type=subclass_type,
             source=source,
             **options,
         )
+
+        if value._is_view():
+            # If value is a view, add its base tensor to the tracked fakes list.
+            # This is so we are able to access the correct source for its symbolic
+            # shape values, in case we need them.
+            wrap_to_fake_tensor_and_record(
+                value._base,
+                tx=self.tx,
+                source=AttrSource(source, "_base"),
+                is_tensor=True,
+            )
 
         guard_type = GuardBuilder.TENSOR_MATCH
 
@@ -1668,7 +1779,6 @@ class VariableBuilder:
 
         grapharg = GraphArg(source, value, False, fake_tensor_value)
         tensor_proxy.node.meta["grapharg"] = grapharg
-        self.tx.output.add_symbol_bindings(grapharg)
         return tensor_variable
 
     def wrap_numpy_ndarray(self, value):
@@ -1704,15 +1814,25 @@ class VariableBuilder:
         # that there's not another great way to do this atm.
         # This creates the right graphargs, as well as registration for guards in tensor names and shape env.
         LazyVariableTracker.realize_all(VariableBuilder(self.tx, source)(tensor_value))
-        proxy = self.tx.output.root_tracer.create_graph_input(
-            re.sub(r"[^a-zA-Z0-9]+", "_", self.name), type(tensor_value), source=source
+        example_value = wrap_to_fake_tensor_and_record(
+            tensor_value,
+            tx=self.tx,
+            is_tensor=False,
+            source=source,
         )
+        proxy = self.tx.output.root_tracer.create_graph_input(
+            re.sub(r"[^a-zA-Z0-9]+", "_", self.name),
+            type(tensor_value),
+            example_value,
+            source=source,
+        )
+        cache_real_value_when_export(self.tx, proxy, tensor_value)
         options = {"source": source}
         numpy_ndarray_variable = wrap_fx_proxy_cls(
             target_cls=NumpyNdarrayVariable,
             tx=self.tx,
             proxy=proxy,
-            example_value=tensor_value,
+            example_value=example_value,
             **options,
         )
 
@@ -1743,7 +1863,6 @@ class VariableBuilder:
         if TracingContext.get().force_unspec_int_unbacked_size_like:
             wrapped_value = shape_env.create_unbacked_symint()
             _constrain_range_for_size(wrapped_value)
-            self.tx.output.bound_symbols.add(wrapped_value.node.expr)
             self.tx.output.tracked_fakes.append(
                 TrackedFake(wrapped_value, self.source, None)
             )
@@ -1762,70 +1881,23 @@ class VariableBuilder:
 
             name = self.source.name()
 
-            def update_frame_state(value):
-                if name not in self.tx.output.frame_state:
-                    # Note - this essentially means that if this name gets reused as a tensor,
-                    # it will start fully dynamic. That should always be a safe option, and not awfully inefficient.
-                    # Alternatively, if we want to improve pef here, we can add a third state of unset, but I am not
-                    # sure that is necessary for now.
-                    frame_state_entry = FrameStateSizeEntry(
-                        scalar=value, size=None, stride=None
-                    )
-                else:
-                    frame_state_entry = self.tx.output.frame_state[name]
-                    if frame_state_entry.scalar != value:
-                        log.debug(
-                            "automatic dynamic int %s val %s != %s",
-                            name,
-                            value,
-                            frame_state_entry.scalar,
-                        )
-                        get_chromium_event_logger().log_instant_event(
-                            "automatic_dynamic",
-                            time.time_ns(),
-                            {
-                                "name": name,
-                                "dim_changed": "scalar",
-                                "reason": "scalar change",
-                                "cached": str(frame_state_entry.scalar),
-                                "new": str(value),
-                            },
-                        )
-                        if self.source.guard_source().is_unspecialized_nn_module():
-                            log.info(
-                                "%s",
-                                (
-                                    f"{name} is converted to a symbolic integer. It is an attribute of a "
-                                    "user defined nn module class. If you wish to keep it static, you can "
-                                    "mark the nn module class as `torch._dynamo.mark_static`."
-                                ),
-                            )
-                        frame_state_entry.scalar = None
-                self.tx.output.frame_state[name] = frame_state_entry
-
-            if (st := self.tx.distributed_state) is None:
-                update_frame_state(value)
-                frame_state_entry = self.tx.output.frame_state[name]
-            elif st.all_states is None:
-                # Preflight, always pretend as if it's static
-                frame_state_entry = FrameStateSizeEntry(
-                    size=None, scalar=value, stride=None
-                )
-                st.local_state.input_sizes[name] = value
-            else:
-                # Apply the updates
-                for sub_state in st.all_states:
-                    if name in sub_state.input_sizes:
-                        update_frame_state(sub_state.input_sizes[name])
-                frame_state_entry = self.tx.output.frame_state[name]
+            frame_state_entry = process_automatic_dynamic(
+                self.tx,
+                name,
+                FrameStateSizeEntry.make_scalar(value),
+                is_unspecialized_nn_module=self.source.guard_source().is_unspecialized_nn_module(),
+            )
 
             # TODO: This should be dynamic, as we in general do not
             # know if bare integers are actually going to be sizevars
             # and it is inappropriate to eagerly duck size them with
             # real sizevars
             if (
-                config.automatic_dynamic_shapes and frame_state_entry.scalar is None
-            ) or not config.assume_static_by_default:
+                config.automatic_dynamic_shapes
+                and frame_state_entry.scalar is auto_dynamic
+            ):
+                dynamic_dim = get_automatic_dynamic_shapes_mark_as()
+            elif not config.assume_static_by_default:
                 dynamic_dim = DimDynamic.DYNAMIC
             else:  # assume_static_by_default
                 # TODO: dynamic_dim = DimDynamic.STATIC should work but
@@ -1838,7 +1910,6 @@ class VariableBuilder:
                 source=self.source,
                 dynamic_dim=dynamic_dim,
             )
-            self.tx.output.bound_symbols.add(wrapped_value.node.expr)
 
             self.tx.output.tracked_fakes.append(
                 TrackedFake(wrapped_value, self.source, None)
@@ -1857,10 +1928,13 @@ class VariableBuilder:
         proxy = self.tx.output.root_tracer.create_graph_input(
             re.sub(r"[^a-zA-Z0-9]+", "_", self.name),
             type(wrapped_value),
+            wrapped_value,
             source=self.get_source(),
         )
 
-        set_example_value(proxy.node, wrapped_value)
+        sym_expr = wrapped_value.node.expr
+        assert isinstance(sym_expr, sympy.Symbol), f"{sym_expr} is not a basic Symbol."
+        self.tx.output.root_tracer.bound_symbols[sym_expr] = proxy
         unspec_var = SymNodeVariable(proxy, wrapped_value, **options)
         self.tx.output.unspec_variable_map[self.name] = unspec_var
 
@@ -1869,8 +1943,6 @@ class VariableBuilder:
                 raise AssertionError(
                     f"Dynamo attempts to add additional input during export: value={wrapped_value}, source={self.get_source()}"
                 )
-
-            example_value = unspec_var.proxy.node.meta["example_value"]
 
             proxy.node.meta["grapharg"] = GraphArg(
                 self.get_source(),
@@ -1893,12 +1965,28 @@ class VariableBuilder:
         if self.name in self.tx.output.unspec_variable_map:
             return self.tx.output.unspec_variable_map[self.name]
 
+        frame_state_entry = process_automatic_dynamic(
+            self.tx,
+            self.source.name(),
+            FrameStateSizeEntry.make_scalar(value),
+            is_unspecialized_nn_module=self.source.guard_source().is_unspecialized_nn_module(),
+        )
+
         # NB: we specialize on nan input, because our guard modeling in
         # ShapeEnv cannot deal with nan
         if (
             torch._dynamo.config.specialize_float
             or is_constant_source(self.get_source())
             or math.isnan(value)
+            or math.isinf(value)
+            # We don't support cudagraphs for now. Without this cudagraphs
+            # break because they expect all cuda inputs but our tensorified
+            # float will be a f64[] cpu tensor. Fixes the following test
+            # when specialize_float=False
+            # python test/inductor/test_compiled_optimizers.py CompiledOptimizerTests.test_rmsprop_weight_decay_maximize_capturable_cuda # noqa: B950
+            or torch._inductor.config.triton.cudagraphs
+            or justknobs_check("pytorch/compiler:unspecialize_float_killswitch", False)
+            or frame_state_entry.scalar is not auto_dynamic
         ):
             self.install_guards(GuardBuilder.CONSTANT_MATCH)
             return ConstantVariable.create(value=value, source=self.source)
@@ -1910,6 +1998,14 @@ class VariableBuilder:
         # time.
 
         wrapped_value = torch.tensor(value, dtype=torch.float64)
+
+        # We don't support specializing floats for grad checking tensors
+        # See https://github.com/pytorch/pytorch/pull/140828 for more
+        # context.
+        if torch._C._functorch.is_gradtrackingtensor(wrapped_value):
+            self.install_guards(GuardBuilder.CONSTANT_MATCH)
+            return ConstantVariable.create(value=value, source=self.source)
+
         # TODO: Switch RandomValueSource over to use this, this is more
         # accurate
         assert not isinstance(self.get_source(), RandomValueSource)
@@ -1921,21 +2017,27 @@ class VariableBuilder:
         # Tensor.  However, we never let the UnspecializedPythonVariable escape
         # here, so there should never actually be any guards against this
         # source.
-        options = {"source": FloatTensorSource(self.get_source()), "raw_value": value}
+        source = FloatTensorSource(self.get_source())
+        options = {"source": source, "raw_value": value}
 
         # TODO: Maybe the tensor-ification should be built into the source,
         # rather than by special pattern match
+        example_value = wrap_to_fake_tensor_and_record(
+            wrapped_value, tx=self.tx, is_tensor=False, source=source
+        )
         proxy = self.tx.output.root_tracer.create_graph_input(
             re.sub(r"[^a-zA-Z0-9]+", "_", self.name),
             type(wrapped_value),
-            source=self.get_source(),
+            example_value,
+            source=source,
         )
+        cache_real_value_when_export(self.tx, proxy, wrapped_value)
 
         unspec_var = wrap_fx_proxy_cls(
             UnspecializedPythonVariable,
             tx=self.tx,
             proxy=proxy,
-            example_value=wrapped_value,
+            example_value=example_value,
             **options,
         )
         assert isinstance(unspec_var, UnspecializedPythonVariable)
@@ -1986,6 +2088,8 @@ class VariableBuilder:
         )
         self.tx.output.tracked_fakes.append(TrackedFake(r.sym_num, self.source, None))
 
+        get_metrics_context().set("tensorify_float_attempt", True, overwrite=True)
+
         return r
 
     def wrap_unspecialized_primitive(self, value):
@@ -1999,17 +2103,22 @@ class VariableBuilder:
         options = {"source": self.get_source()}
         options.update({"raw_value": value})
 
+        example_value = wrap_to_fake_tensor_and_record(
+            wrapped_value, tx=self.tx, is_tensor=False, source=self.get_source()
+        )
         proxy = self.tx.output.root_tracer.create_graph_input(
             re.sub(r"[^a-zA-Z0-9]+", "_", self.name),
             type(wrapped_value),
+            example_value,
             source=self.get_source(),
         )
+        cache_real_value_when_export(self.tx, proxy, wrapped_value)
 
         unspec_var = wrap_fx_proxy_cls(
             UnspecializedPythonVariable,
             tx=self.tx,
             proxy=proxy,
-            example_value=wrapped_value,
+            example_value=example_value,
             **options,
         )
         self.tx.output.unspec_variable_map[self.name] = unspec_var
@@ -2046,19 +2155,35 @@ class VariableBuilder:
 def _dataclasses_fields_lambda(obj):
     if isinstance(obj, UserDefinedObjectVariable):
         value = obj.value
-    elif isinstance(obj, CustomizedDictVariable):
-        value = obj.user_cls
     else:
         unimplemented(f"Dataclass fields handling fails for type {obj}")
     items = []
     for field in dataclasses.fields(value):
         source = None
         if obj.source:
-            source = GetItemSource(
+            source = DictGetItemSource(
                 AttrSource(obj.source, "__dataclass_fields__"), field.name
             )
         items.append(UserDefinedObjectVariable(field, source=source))
     return TupleVariable(items)
+
+
+def _clone_input(value, fake_mode):
+    if isinstance(value, torch.Tensor):
+        # tensor subclasses will not be converted to FakeTensors and need to be cloned
+        if not (
+            isinstance(value, FakeTensor)
+            or (
+                # Is functional tensor fakeified by this instance of Dynamo
+                torch._is_functional_tensor(value)
+                and maybe_get_fake_mode(value) is fake_mode
+            )
+            or value.is_nested
+        ):
+            # NB: ensure strides are preserved
+            value = clone_input(value)
+
+    return value
 
 
 def wrap_fx_proxy(
@@ -2077,6 +2202,17 @@ def wrap_fx_proxy(
         result = wrap_fx_proxy_cls(target_cls=TensorWithTFOverrideVariable, **kwargs)
         result.install_global(tx)
         return result
+
+
+def cache_real_value_when_export(tx, proxy, example_value):
+    if tx.export:
+        # The legacy behavior for real value cache with subclasses was
+        # to perform a clone WITHOUT preserving the subclass.  It's
+        # not entirely clear this is what you actually want though.
+        with torch._C.DisableTorchFunctionSubclass():
+            proxy.tracer.real_value_cache[proxy.node] = _clone_input(
+                example_value, tx.fake_mode
+            )
 
 
 # Note: Unfortunate split due to some gross classes existing that subclass TensorVariable
@@ -2106,7 +2242,7 @@ def wrap_fx_proxy(
 # instance of Dynamo.
 #
 # Upon closer inspection, you may notice that there are a slurry of non-Tensor
-# output cases.  What gives?  Well, we sometimes trace operations into the
+# output cases in handle_traced_output.  What gives?  Well, we sometimes trace operations into the
 # graph that don't involve tensors.
 #
 #   * Some operators return tuples; we need to recursively handle their
@@ -2126,53 +2262,62 @@ def wrap_fx_proxy(
 def wrap_fx_proxy_cls(
     target_cls, tx, proxy, example_value=None, subclass_type=None, **options
 ):
+    if example_value is None:
+        return _wrap_fx_proxy(
+            target_cls, tx, proxy, example_value, subclass_type, **options
+        )
+    elif isinstance(example_value, torch.Tensor):
+        return _wrap_fx_preexisting_tensor(
+            target_cls, tx, proxy, example_value, subclass_type, **options
+        )
+    else:
+        # This will skip tracing an op and recursively reinvoke wrap_fx_proxy_cls on supported
+        # data structures. In essence this just handles tracing some other value which may
+        # contain Fake Tensors or is otherwise proxyable.
+        return handle_traced_output(
+            example_value, tx, proxy, options, subclass_type, target_cls
+        )
+
+
+# This is 1 above (wrapping a preexisting tensor)
+def _wrap_fx_preexisting_tensor(
+    target_cls, tx, proxy, tensor, subclass_type=None, **options
+):
     from ..symbolic_convert import InstructionTranslatorBase
+
+    assert isinstance(
+        tensor, torch.Tensor
+    ), f"_wrap_fx_preexisting_tensor expected tensor, got {type(tensor)}"
 
     assert isinstance(tx, InstructionTranslatorBase)
     if "guards" in options and options["guards"] is not None:
         tx.output.guards.update(options["guards"])
 
-    assert "example_value" not in proxy.node.meta, f"{proxy.node.meta['example_value']}"
-
-    initial_example_value = example_value
-
-    def _clone_input(value):
-        if isinstance(value, torch.Tensor):
-            # tensor subclasses will not be converted to FakeTensors and need to be cloned
-            if not (
-                isinstance(value, FakeTensor)
-                or (
-                    # Is functional tensor fakeified by this instance of Dynamo
-                    torch._is_functional_tensor(value)
-                    and maybe_get_fake_mode(value) is tx.fake_mode
-                )
-                or value.is_nested
-            ):
-                # NB: ensure strides are preserved
-                value = clone_input(value)
-
-        return value
+    # Placeholders always carry example_value in node.meta.
+    # non-placeholders always have no example_value in node.meta
+    if proxy.node.op == "placeholder":
+        assert (
+            "example_value" in proxy.node.meta
+        ), f"placeholder {proxy} doesn't have 'example_value' in node.meta"
+    else:
+        assert (
+            "example_value" not in proxy.node.meta
+        ), f"{proxy.node.meta['example_value']}"
 
     # See NOTE: [Deferring tensor pack/unpack hooks until runtime]
     with torch._dynamo.utils._disable_saved_tensors_hooks_during_tracing():
-        # with preserve_rng_state():
-        if example_value is None:
-            # only allow_non_graph_fake in this instance because we handle the non-fake
-            # cases properly below.
-            example_value = get_fake_value(proxy.node, tx, allow_non_graph_fake=True)
-
         # Handle recursive calls here
-        elif maybe_get_fake_mode(example_value) is tx.fake_mode:
+        if maybe_get_fake_mode(tensor) is tx.fake_mode:
             pass
-
-        elif isinstance(example_value, torch.Tensor):
+        else:
+            cache_real_value_when_export(tx, proxy, tensor)
             if tx.export:
                 # The legacy behavior for real value cache with subclasses was
                 # to perform a clone WITHOUT preserving the subclass.  It's
                 # not entirely clear this is what you actually want though.
                 with torch._C.DisableTorchFunctionSubclass():
                     proxy.tracer.real_value_cache[proxy.node] = _clone_input(
-                        example_value
+                        tensor, tx.fake_mode
                     )
             # NB: If we're ignoring subclass, then the expectation is you will
             # take the returned TensorVariable and wrap it into a more
@@ -2184,18 +2329,48 @@ def wrap_fx_proxy_cls(
             }
             assert "source" in options and options["source"] is not None
             kwargs["source"] = options["source"]
-            example_value = wrap_to_fake_tensor_and_record(
-                example_value, tx=tx, **kwargs
-            )
-        if (
-            isinstance(example_value, torch.Tensor)
-            and example_value.device.type != "meta"
-            and (maybe_get_fake_mode(example_value) is not tx.fake_mode)
+            tensor = wrap_to_fake_tensor_and_record(tensor, tx=tx, **kwargs)
+
+        if tensor.device.type != "meta" and (
+            maybe_get_fake_mode(tensor) is not tx.fake_mode
         ):
             raise InternalTorchDynamoError(
-                "`example_value` needs to be a `FakeTensor`"
-                f"wrapped by this instance of Dynamo. Found: {example_value}"
+                "`tensor` needs to be a `FakeTensor`"
+                f"wrapped by this instance of Dynamo. Found: {tensor}"
             )
+
+    return handle_traced_output(tensor, tx, proxy, options, subclass_type, target_cls)
+
+
+# This is 2 in the above comment (wrapping the output of a traced op)
+def _wrap_fx_proxy(
+    target_cls, tx, proxy, example_value=None, subclass_type=None, **options
+):
+    from ..symbolic_convert import InstructionTranslatorBase
+
+    assert isinstance(tx, InstructionTranslatorBase)
+    if "guards" in options and options["guards"] is not None:
+        tx.output.guards.update(options["guards"])
+
+    assert "example_value" not in proxy.node.meta, f"{proxy.node.meta['example_value']}"
+
+    # See NOTE: [Deferring tensor pack/unpack hooks until runtime]
+    with torch._dynamo.utils._disable_saved_tensors_hooks_during_tracing():
+        # with preserve_rng_state():
+        # only allow_non_graph_fake in this instance because we handle the non-fake
+        # cases properly below.
+        example_value = get_fake_value(proxy.node, tx, allow_non_graph_fake=True)
+
+    return handle_traced_output(
+        example_value, tx, proxy, options, subclass_type, target_cls
+    )
+
+
+# This handles wrapping of the output of an op traced into the graph
+def handle_traced_output(example_value, tx, proxy, options, subclass_type, target_cls):
+    import torch._functorch.vmap
+    import torch._subclasses.fake_tensor
+    import torch._utils
 
     if isinstance(example_value, torch.Tensor):
         is_parameter = isinstance(example_value, torch.nn.Parameter)
@@ -2204,8 +2379,13 @@ def wrap_fx_proxy_cls(
         # NB: In most (all?) cases, this does not actually do a clone.
         # (WARNING: this means that if we mutate metadata on the fake
         # tensor, the stored example value will update too!)
-        example_value = _clone_input(example_value)
+        example_value = _clone_input(example_value, tx.fake_mode)
         set_example_value(proxy.node, example_value)
+        # We bind the unbacked symints in sizes/trdies of tensor lazily.
+        # So that subgraphs can access the unbacked symbol's proxy in parent graph
+        # when lifting unbacked symbols of input tensors to subgraph inputs.
+        # We do it lazily because the tensor may not be used in subgraphs.
+        tx.output.current_tracer.track_unbacked_symbols(example_value, proxy)
         specialized_props = target_cls.specialize(example_value)
         # TODO: not sure about this fake mode test
         if (
@@ -2258,6 +2438,9 @@ def wrap_fx_proxy_cls(
                 )
 
                 if "source" in options:
+                    # This path should only trigger for list stealing, so it's
+                    # safe to use `GetItemSource`.
+                    assert isinstance(example_value, list)
                     source = options["source"]
                     options_i = options.copy()
                     options_i["source"] = GetItemSource(
@@ -2284,7 +2467,7 @@ def wrap_fx_proxy_cls(
         elif istype(example_value, tuple):
             return TupleVariable(unpacked, **options)
         elif istype(example_value, (list, immutable_list)):
-            return ListVariable(unpacked, mutable_local=MutableLocal(), **options)
+            return ListVariable(unpacked, **options)
         else:
             assert example_value.__class__.__module__ == "torch.return_types" or hasattr(
                 example_value, "_fields"
@@ -2293,6 +2476,7 @@ def wrap_fx_proxy_cls(
     elif example_value is None or proxy.node.target is torch.manual_seed:
         return ConstantVariable.create(None, **options)
     elif isinstance(example_value, (torch.SymInt, torch.SymFloat, torch.SymBool)):
+        tx.output.current_tracer.track_unbacked_symbols(example_value, proxy)
         set_example_value(proxy.node, example_value)
         return SymNodeVariable(proxy, example_value, **options)
     elif (
@@ -2354,12 +2538,17 @@ def wrap_fx_proxy_cls(
 
         set_example_value(proxy.node, example_value)
         return SDPAParamsVariable(proxy, **options)
-    elif isinstance(example_value, bool) and proxy.node.target in [
-        torch._C._are_functorch_transforms_active,
-        torch.backends.cuda.is_flash_attention_available,
-        torch.backends.cuda.can_use_flash_attention,
-        torch.backends.cuda.can_use_efficient_attention,
-    ]:
+    elif isinstance(example_value, bool) and (
+        proxy.node.target
+        in [
+            torch._C._are_functorch_transforms_active,
+            torch.backends.cuda.is_flash_attention_available,
+            torch.backends.cuda.can_use_flash_attention,
+            torch.backends.cuda.can_use_efficient_attention,
+            "is_integer",
+        ]
+        + list(supported_const_comparison_op_values.keys())
+    ):
         set_example_value(proxy.node, example_value)
         return ConstantVariable.create(example_value, **options)
     elif (
@@ -2368,11 +2557,27 @@ def wrap_fx_proxy_cls(
     ):
         set_example_value(proxy.node, example_value)
         return ConstantVariable.create(example_value, **options)
+    elif isinstance(example_value, float) or proxy.node.target in ["hex", "__round__"]:
+        set_example_value(proxy.node, example_value)
+        return ConstantVariable.create(example_value, **options)
     else:
         unimplemented(
             "torch.* op returned non-Tensor "
             + f"{typestr(example_value)} {proxy.node.op} {proxy.node.target}",
             case_name="unsupported_operator",
+        )
+
+
+def get_automatic_dynamic_shapes_mark_as():
+    if config.automatic_dynamic_shapes_mark_as == "dynamic":
+        return DimDynamic.DYNAMIC
+    elif config.automatic_dynamic_shapes_mark_as == "unbacked":
+        return DimDynamic.SIZE_LIKE_UNBACKED
+    elif config.automatic_dynamic_shapes_mark_as == "oblivious":
+        return DimDynamic.OBLIVIOUS_SIZE
+    else:
+        raise ValueError(
+            f"invalid automatic_dynamic_shapes_mark_as = {config.automatic_dynamic_shapes_mark_as}"
         )
 
 
@@ -2474,132 +2679,27 @@ def _automatic_dynamic(
         )
 
     # Prep for automatic dynamic
-    def update_frame_state(size, stride):
-        # Intentionally shadow e from parent scope so it is not accidentally
-        # called
-        e = None
-        frame_state_entry = None
-        if name not in tx.output.frame_state:
-            # If there is no entry for this source, add the tensor to frame state with its current static size.
-            # E.g., {} -> {"x": [2, 4]}
-            frame_state_entry = FrameStateSizeEntry(None, None, None)
-            frame_state_entry.size = list(size)
-            frame_state_entry.stride = list(stride)
-        else:
-            frame_state_entry = tx.output.frame_state[name]
-            if frame_state_entry.size is not None:
-                if len(size) != len(frame_state_entry.size):
-                    # If there is already an entry, and the dim mismatches, replace the frame state entry with None.
-                    # E.g. {"x": [2, 3, 4]} -> {"x": None}
-                    log.debug(
-                        "automatic dynamic %s dim %s != %s",
-                        name,
-                        len(size),
-                        frame_state_entry.size,
-                    )
-                    get_chromium_event_logger().log_instant_event(
-                        "automatic_dynamic",
-                        time.time_ns(),
-                        {
-                            "name": name,
-                            "dim_changed": "all",
-                            "reason": "dimensionality change",
-                            "cached": str(frame_state_entry.size),
-                            "new": str(size),
-                        },
-                    )
-                    frame_state_entry.size = None
-                    frame_state_entry.stride = None
-                else:
-                    # If there is already an entry, and the dim matches, for every size/stride in the frame state which
-                    # disagrees with the current static size/stride, replace it with None.
-                    # E.g., {"x": [2, 3]} -> {"x": [2, # None]}
 
-                    has_size_changed = False
-                    for i, dim in enumerate(frame_state_entry.size):
-                        if dim is not None and size[i] != dim:
-                            log.debug(
-                                "automatic dynamic %s size(%s) %s != %s",
-                                name,
-                                i,
-                                size[i],
-                                dim,
-                            )
-                            get_chromium_event_logger().log_instant_event(
-                                "automatic_dynamic",
-                                time.time_ns(),
-                                {
-                                    "name": name,
-                                    "dim_changed": i,
-                                    "reason": "size change",
-                                    "cached": str(dim),
-                                    "new": str(size[i]),
-                                },
-                            )
-                            frame_state_entry.size[i] = None
-                        has_size_changed = (
-                            has_size_changed or frame_state_entry.size[i] is None
-                        )
+    # This mimics stride inference algorithm in _create_symbolic_sizes_strides_storage_offset
+    ex_size = e.size()
+    if not is_sparse_any(e):
+        ex_stride = e.stride()
+        dim = e.dim()
 
-                    # We want to trigger automatic dynamism when strides change, but we have to think whether stride should
-                    # be INFER_STRIDE or DYNAMIC.
-                    #
-                    # Case 1: if strides change because of size changes, we might not want to allocate a new symbol for
-                    # stride. Lets say we have a tensor (10, 20) and we mark the dim=1 dynamic for size. Resulting size will
-                    # be (10, s0) and stride can be either (s0, 1) or (s1, 1). In most cases, (s0, 1) is preferred because
-                    # users are not changing both size and stride.
-                    #
-                    # Case 2: But for another case, lets suppose the size remains same between the two invocations but stride
-                    # change. In this case, we definitely want to mark the changing stride to be DYNAMIC.
-
-                    # Here, we use a hueristic to simplify determination of dynamic stride. For case 1, we will always
-                    # assume that stride will be inferred (INFER_STRIDE). This might be suboptimal, where user is doing something
-                    # arbitrary size and stride resizing, and we fail to trigger dynamism, but we have not seen any cases
-                    # yet. For case 2, we will mark the changing dimensions DYNAMIC.
-                    if not has_size_changed:
-                        for i, dim in enumerate(frame_state_entry.stride):
-                            if dim is not None and stride[i] != dim:
-                                log.debug(
-                                    "automatic dynamic %s stride(%s) %s != %s",
-                                    name,
-                                    i,
-                                    stride[i],
-                                    dim,
-                                )
-                                get_chromium_event_logger().log_instant_event(
-                                    "automatic_dynamic",
-                                    time.time_ns(),
-                                    {
-                                        "name": name,
-                                        "dim_changed": i,
-                                        "reason": "stride change",
-                                        "cached": str(dim),
-                                        "new": str(stride[i]),
-                                    },
-                                )
-                                frame_state_entry.stride[i] = None
-        tx.output.frame_state[name] = frame_state_entry
-
-    if (st := tx.distributed_state) is None:
-        stride = e.stride() if not is_sparse_any(e) else ()
-        update_frame_state(e.size(), stride)
-        frame_state_entry = tx.output.frame_state[name]
-    elif st.all_states is None:
-        # Preflight, always pretend as if it's static
-        frame_state_entry = FrameStateSizeEntry(
-            size=e.size(), scalar=None, stride=e.stride()
-        )
-        st.local_state.input_sizes[name] = list(e.size())
-        st.local_state.input_strides[name] = list(e.stride())
+        stride = [None] * dim
+        pending = [(ex_stride[i], -i) for i in range(dim)]
+        pending.sort(key=_nested_int_aware_sort)
+        candidates = {}
+        for i_stride, neg_i in pending:
+            i = -neg_i
+            stride[i] = candidates.get(i_stride, i_stride)
+            candidates.setdefault(i_stride * ex_size[i], InferStride(i))
     else:
-        # Apply the updates
-        for sub_state in st.all_states:
-            # Not all inputs are necessarily present on all ranks
-            if name in sub_state.input_sizes and name in sub_state.input_strides:
-                update_frame_state(
-                    sub_state.input_sizes[name], sub_state.input_strides[name]
-                )
-        frame_state_entry = tx.output.frame_state[name]
+        stride = []
+
+    frame_state_entry = process_automatic_dynamic(
+        tx, name, FrameStateSizeEntry.make_tensor(tuple(ex_size), tuple(stride))
+    )
 
     # TODO: index export_constraints ahead of time so we don't have to
     # do a linear scan every time here
@@ -2622,8 +2722,12 @@ def _automatic_dynamic(
         else:
             dim2constraint[dim] = constraint_range, name
 
+    from torch.export.dynamic_shapes import _RelaxedConstraint
+
     if tx.output.export_constraints:
         for constraint in tx.output.export_constraints:
+            if isinstance(constraint, _RelaxedConstraint):
+                continue
             if constraint.t_id == t_id:
                 update_dim2constraint(
                     constraint.dim, constraint.constraint_range, constraint.name
@@ -2640,27 +2744,30 @@ def _automatic_dynamic(
         marked_weak_dynamic = i in getattr(e, "_dynamo_weak_dynamic_indices", set())
         marked_static = i in getattr(e, "_dynamo_static_indices", set())
 
-        # NB: both static and dynamic have precedence over
-        automatic_dynamic_size = config.automatic_dynamic_shapes and (
-            frame_state_entry.size is None or frame_state_entry.size[i] is None
-        )
+        # Reflect the user directive in the frame_state
+        # For dynamic, apply None always
+        if marked_dynamic:
+            # TODO: This can be batched
+            # TODO: Doing this here is kind of sus, maybe better to set this
+            # up when we initially created the FrameStateSizeEntry to bong
+            # into the mutable state
+            log.debug("automatic dynamic %s marked dynamic", name)
+            mark_size = [auto_unset] * e.dim()
+            mark_size[i] = auto_dynamic
+            frame_state_entry |= FrameStateSizeEntry.make_size(size=mark_size)
 
-        # if size is None, no need to make stride dynamic
-        automatic_dynamic_stride = config.automatic_dynamic_shapes and (
-            frame_state_entry.size is not None
-            and (
-                frame_state_entry.stride is None or frame_state_entry.stride[i] is None
-            )
+        # NB: both static and dynamic have precedence over
+        automatic_dynamic_size = (
+            config.automatic_dynamic_shapes and frame_state_entry.is_size_dynamic(i)
+        )
+        # NB: previously, if size was dynamic, we wouldn't make its stride
+        # dynamic.  But now, because of InferStride concept, we will properly
+        # not make stride dynamic even if it's wobbling
+        automatic_dynamic_stride = (
+            config.automatic_dynamic_shapes and frame_state_entry.is_stride_dynamic(i)
         )
 
         automatic_dynamic = automatic_dynamic_size or automatic_dynamic_stride
-
-        # Reflect the user directive in the frame_state
-        # For dynamic, apply None always
-        if frame_state_entry.size and marked_dynamic:
-            log.debug("automatic dynamic %s marked dynamic", name)
-            frame_state_entry.size[i] = None
-            frame_state_entry.stride[i] = None
 
         # We will process constraints first, as they will imply that we
         # have a dynamic dimension
@@ -2716,10 +2823,14 @@ def _automatic_dynamic(
             # NB: We could assert static_shapes is False here, but it
             # seems better to allow the user to override symbolic_context in this
             # case
-            dynamic_size = DimDynamic.DYNAMIC
+            if automatic_dynamic:
+                dynamic_size = get_automatic_dynamic_shapes_mark_as()
+            else:
+                dynamic_size = DimDynamic.DYNAMIC
         elif static_shapes or config.assume_static_by_default or marked_static:
             dynamic_size = DimDynamic.STATIC
         else:
+            # TODO: When does this show up?
             dynamic_size = DimDynamic.DUCK
 
         if constraint_stride is not None:
@@ -2751,7 +2862,7 @@ def wrap_to_fake_tensor_and_record(
         or is_traceable_wrapper_subclass(e)
     ):
         assert source is not None
-        static_shapes, reason = tensor_always_has_static_shape(
+        static_shapes, _reason = tensor_always_has_static_shape(
             e,
             is_tensor,
             tensor_source=source,
@@ -2873,12 +2984,14 @@ class SourcelessBuilder:
         elif ConstantVariable.is_literal(value):
             return ConstantVariable.create(value)
         elif callable(value) and trace_rules.lookup_callable(value) is not None:
-            if is_callable_allowed(value):
+            if trace_rules.is_callable_allowed(value):
                 tx.output.has_user_defined_allowed_in_graph = True
             return trace_rules.lookup_callable(value)(value)
         elif is_function_or_wrapper(value):
             return trace_rules.lookup(value)(value)
-        elif isinstance(value, enum.Enum):
+        elif isinstance(
+            value, (enum.Enum, torch.DispatchKey, torch._C._functorch.TransformType)
+        ):
             return EnumVariable(value)
         elif isinstance(value, (type, abc.ABCMeta)):
             return UserDefinedClassVariable(value)
@@ -2894,10 +3007,18 @@ class SourcelessBuilder:
             return PlacementVariable(value)
         elif DeviceMeshVariable.is_device_mesh(value):
             return DeviceMeshVariable(value)
+        elif value is functools.wraps:
+            return FunctoolsWrapsVariable(value)
         elif isinstance(value, re.Pattern):
             return RegexPatternVariable(value)
         elif isinstance(value, torch._dynamo.variables.lazy.LazySymNodeFormatString):
             return ConstantVariable.create(str(value))
+        elif isinstance(value, type(torch._higher_order_ops.flex_attention_backward)):
+            return torch._dynamo.variables.higher_order_ops.FlexAttentionBackwardHighOrderVariable(
+                value
+            )
+        elif isinstance(value, types.GenericAlias):
+            return TypingVariable(value)
         unimplemented(
             f"Unexpected type in sourceless builder {value_type.__module__}.{value_type.__qualname__}"
         )
@@ -2914,15 +3035,15 @@ class SourcelessBuilder:
         for t in common_constant_types:
             handlers[t] = lambda tx, value: ConstantVariable(value)
         handlers[set] = lambda tx, value: SetVariable(
-            [create(tx, x) for x in value], mutable_local=MutableLocal()
+            [create(tx, x) for x in value], mutation_type=ValueMutationNew()
         )
         handlers[dict] = lambda tx, value: ConstDictVariable(
             {create(tx, k): create(tx, v) for k, v in value.items()},
             type(value),
-            mutable_local=MutableLocal(),
+            mutation_type=ValueMutationNew(),
         )
         handlers[list] = lambda tx, value: ListVariable(
-            [create(tx, x) for x in value], mutable_local=MutableLocal()
+            [create(tx, x) for x in value], mutation_type=ValueMutationNew()
         )
         handlers[tuple] = lambda tx, value: TupleVariable(
             [create(tx, x) for x in value]
@@ -2936,20 +3057,29 @@ class SourcelessBuilder:
         handlers[random.Random] = lambda tx, value: RandomClassVariable()
         handlers[types.ModuleType] = lambda tx, value: PythonModuleVariable(value)
 
+        handlers[torch.DispatchKeySet] = lambda tx, value: DispatchKeySetVariable(
+            value, mutation_type=ValueMutationNew()
+        )
+        handlers[
+            torch._functorch.pyfunctorch.FuncTorchInterpreter
+        ] = lambda tx, value: FuncTorchInterpreterVariable(
+            value, mutation_type=ValueMutationNew()
+        )
+
         handlers[
             torch.distributions.constraints._Real
         ] = lambda tx, value: UserDefinedObjectVariable(
-            value, mutable_local=MutableLocal()
+            value, mutation_type=ValueMutationNew()
         )
         handlers[
             torch.distributions.constraints._Interval
         ] = lambda tx, value: UserDefinedObjectVariable(
-            value, mutable_local=MutableLocal()
+            value, mutation_type=ValueMutationNew()
         )
         handlers[
             torch.distributions.constraints.Constraint
         ] = lambda tx, value: UserDefinedObjectVariable(
-            value, mutable_local=MutableLocal()
+            value, mutation_type=ValueMutationNew()
         )
 
         def passthrough(tx: "InstructionTranslator", value):
@@ -2961,3 +3091,26 @@ class SourcelessBuilder:
 
 
 SourcelessBuilder._type_handlers = SourcelessBuilder.make_type_handlers()
+
+
+class SourcelessUserDefinedObjectBuilder:
+    """
+    SourceLessBuilder does not return a UserDefinedObjectVariable, but in some
+    cases it might be ok to return UserDefinedObjects. In such case, use this
+    builder.
+    """
+
+    def __init__(self) -> None:
+        raise AssertionError("Use SourcelessUserDefinedObjectBuilder.create()")
+
+    @staticmethod
+    def create(tx: "InstructionTranslator", value) -> VariableTracker:
+        value_type = type(value)
+        if issubclass(value_type, MutableMapping):
+            return MutableMappingVariable(value, mutation_type=ValueMutationNew())
+        elif isinstance(value, torch.nn.Module):
+            return UnspecializedNNModuleVariable(
+                value, mutation_type=ValueMutationNew()
+            )
+        else:
+            return UserDefinedObjectVariable(value, mutation_type=ValueMutationNew())
