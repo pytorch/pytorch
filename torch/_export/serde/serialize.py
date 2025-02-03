@@ -11,7 +11,6 @@ import keyword
 import logging
 import math
 import operator
-import re
 import traceback
 import typing
 
@@ -42,7 +41,7 @@ from torch.fx.experimental import symbolic_shapes
 from torch.utils import _pytree as pytree
 from torch.utils._pytree import treespec_dumps, treespec_loads
 from torch.utils._sympy.numbers import int_oo
-from torch.utils._sympy.symbol import symbol_is_type, SymT
+from torch.utils._sympy.symbol import prefix_str, SymT
 from torch.utils._sympy.value_ranges import ValueRanges
 
 from ..utils import remove_proxy_from_state_dict
@@ -548,13 +547,44 @@ class GraphModuleSerializer(metaclass=Final):
                 meta_val = node.meta.get("val", None)
                 return meta_val is not None and isinstance(meta_val, torch.Tensor)
 
-            ex_node = Node(
-                target=self.serialize_operator(node.target),
-                inputs=self.serialize_hoo_inputs(node.args, node.kwargs),
-                outputs=self.serialize_hoo_outputs(node),
-                metadata=self.serialize_metadata(node),
-                is_hop_single_tensor_return=_is_hop_single_tensor_return(node),
-            )
+            # Special handle serialization for aoti_call_delegate
+            if node.target is torch._higher_order_ops.aoti_call_delegate:
+                serializable_args = list(node.args)
+
+                # AOTI lowered module is not serializable, serialize the aoti_path instead
+                lowered_module_name: str = node.args[0].name  # type: ignore[assignment, no-untyped-def, union-attr]
+                assert hasattr(node.graph.owning_module, lowered_module_name)
+                lowered_module = getattr(node.graph.owning_module, lowered_module_name)  # type: ignore[no-untyped-def]
+                serializable_args[0] = lowered_module.aoti_path
+
+                # AOTI compiled graph module in node.args[0] is stateful, and will fail the verifier check
+                # Skip serializing original_gm as a workaround
+                serializable_args[1] = None
+
+                def serialize_tensor_list_output(node):
+                    meta_val = node.meta.get("val", None)
+                    tensor_args = []
+                    for idx, meta in enumerate(meta_val):
+                        name = self._output_node_name_at_index(node, idx)
+                        tensor_args.append(self.serialize_tensor_output(name, meta))
+                    return [Argument.create(as_tensors=tensor_args)]
+
+
+                ex_node = Node(
+                    target=self.serialize_operator(node.target),
+                    inputs=self.serialize_hoo_inputs(serializable_args, node.kwargs),
+                    outputs=serialize_tensor_list_output(node),
+                    metadata=self.serialize_metadata(node),
+                    is_hop_single_tensor_return=False,
+                )
+            else:
+                ex_node = Node(
+                    target=self.serialize_operator(node.target),
+                    inputs=self.serialize_hoo_inputs(node.args, node.kwargs),
+                    outputs=self.serialize_hoo_outputs(node),
+                    metadata=self.serialize_metadata(node),
+                    is_hop_single_tensor_return=_is_hop_single_tensor_return(node),
+                )
         elif type(node.target) in _serialization_registry:
             # Sanity check for unhandled serialization.
             assert type(node.target) in _serialization_registry, f"{type(node.target)} is not supported in export serialization."
@@ -603,9 +633,19 @@ class GraphModuleSerializer(metaclass=Final):
         if unbacked_bindings := node.meta.get("unbacked_bindings"):
             # serialize the symbol names of unbacked bindings;
             # reconstruct the key paths to those symbols when deserializing
-            ret["unbacked_bindings"] = ",".join(
-                u.name for u in unbacked_bindings.keys()
-            )
+            val = node.meta["val"]
+            new_unbacked_bindings = {}
+            for key in unbacked_bindings.values():
+                expr = pytree.key_get(val, key).node.expr
+                if expr.is_symbol and (
+                    expr.name.startswith(prefix_str[SymT.UNBACKED_FLOAT])
+                    or expr.name.startswith(prefix_str[SymT.UNBACKED_INT])
+                ):
+                    new_unbacked_bindings[expr] = key
+            if new_unbacked_bindings:
+                ret["unbacked_bindings"] = ",".join(
+                    u.name for u in new_unbacked_bindings.keys()
+                )
 
         if stack_trace := node.meta.get("stack_trace"):
             ret["stack_trace"] = stack_trace
@@ -1166,7 +1206,7 @@ class GraphModuleSerializer(metaclass=Final):
         elif isinstance(x, ep.SymIntArgument):
             return Argument.create(as_sym_int=SymIntArgument.create(as_name=x.name))
         elif isinstance(x, ep.SymFloatArgument):
-            return Argument.create(as_sym_Float=SymFloatArgument.create(as_name=x.name))
+            return Argument.create(as_sym_float=SymFloatArgument.create(as_name=x.name))
         elif isinstance(x, ep.ConstantArgument):
             return self.serialize_input(x.value)
         elif isinstance(x, ep.CustomObjArgument):
@@ -1890,20 +1930,6 @@ class GraphModuleDeserializer(metaclass=Final):
             for u_name in serialized_node.metadata["unbacked_bindings"].split(","):
                 u = self.symbol_name_to_symbol[u_name]
                 # these are pending fresh unbacked symbols, so update shape env
-                if symbol_is_type(u, SymT.UNBACKED_FLOAT):
-                    suffix = str(next(self.shape_env.unbacked_symfloat_counter))
-                    if not u.name.endswith(suffix):
-                        log.warning(
-                            "Expected symbol %s to end with suffix %s", u.name, suffix
-                        )
-                elif symbol_is_type(u, SymT.UNBACKED_INT):
-                    suffix = str(next(self.shape_env.unbacked_symint_counter))
-                    if not u.name.endswith(suffix):
-                        log.warning(
-                            "Expected symbol %s to end with suffix %s", u.name, suffix
-                        )
-                else:
-                    raise AssertionError(f"Illegal unbacked symbol {u}")
                 self.shape_env.pending_fresh_unbacked_symbols.append(u)
             # consume pending fresh unbacked symbols and reconstruct key paths to them
             unbacked_bindings = symbolic_shapes.compute_unbacked_bindings(
@@ -2074,12 +2100,29 @@ class GraphModuleDeserializer(metaclass=Final):
             # deserialization does analysis with checks on 0/1, so we create fake range constraints and
             # restore the original range constraints afterwards
             self.symbol_name_to_range = {}
+            # we also need to bump unbacked sym[float,int] counters in the
+            # shape env to accommodate unbacked symbols in the exported program
+            count_unbacked_symfloat, count_unbacked_symint = -1, -1
+            unbacked_symfloat_prefix, unbacked_symint_prefix = (
+                prefix_str[t] for t in [SymT.UNBACKED_FLOAT, SymT.UNBACKED_INT]
+            )
             if symbol_name_to_range:
                 for k, vr in symbol_name_to_range.items():
                     lower = vr.lower
                     if vr.upper >= 2:  # max is >= 2, not sym bool range
                         lower = max(2, lower)
                     self.symbol_name_to_range[k] = symbolic_shapes.ValueRanges(_int_to_sympy_int(lower, -int_oo), vr.upper)
+                    if k.startswith(unbacked_symfloat_prefix):
+                        i = int(k[len(unbacked_symfloat_prefix):])
+                        count_unbacked_symfloat = max(count_unbacked_symfloat, i)
+                    elif k.startswith(unbacked_symint_prefix):
+                        i = int(k[len(unbacked_symint_prefix):])
+                        count_unbacked_symint = max(count_unbacked_symint, i)
+
+            for _ in range(count_unbacked_symfloat + 1):
+                next(self.shape_env.unbacked_symfloat_counter)
+            for _ in range(count_unbacked_symint + 1):
+                next(self.shape_env.unbacked_symint_counter)
 
             if example_inputs is not None and len(example_inputs) > 0:
                 self.example_inputs = deserialize_torch_artifact(example_inputs)
@@ -2455,17 +2498,22 @@ class GraphModuleDeserializer(metaclass=Final):
             def import_nn_module_stack(key, path, ty):
                 return key, (path, ty)
 
-            # Helper function that splits strings by commas except for those
-            # encapsulated by parens, which are valid traces.
-            # TODO: Currently this is needed due to indexing Sequential
-            # layers introducing names in the form "layer.slice(1, None, None)".
-            # If that naming is improved, this fancier splitting can probably be
-            # reverted to a simple split by comma.
+            # Helper function to split string by commas, accounting for nested parentheses/brackets
             def metadata_split(metadata):
-                # Remove the parentheses and commas inside them
-                metadata = re.sub(r'\(.*?\)', '', metadata)
-                # Split the string by comma, except for those inside parentheses
-                return re.split(r'(?<!\()\s*,\s*(?!\()', metadata)
+                out = []
+                start, n = 0, 0
+                a, b = "[(", ")]"
+                for end, c in enumerate(metadata):
+                    if c in a:
+                        n += 1
+                    elif c in b:
+                        n -= 1
+                    elif c == "," and n == 0:
+                        out.append(metadata[start : end])
+                        start = end + 1
+                out.append(metadata[start:])
+                assert len(out) == 3
+                return out
 
             nn_module_stack = dict(
                 import_nn_module_stack(*metadata_split(item))

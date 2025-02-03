@@ -175,7 +175,8 @@ static int nccl_nonblocking_timeout() {
   if (timeout == -2) {
     const auto val = c10::utils::get_env("TORCH_NCCL_NONBLOCKING_TIMEOUT");
     if (val && !val.value().empty()) {
-      timeout = std::stoi(val.value());
+      // NOLINTNEXTLINE(*-narrowing-conversions)
+      timeout = strtol(val->c_str(), nullptr, 0);
     } else {
       // Default value consistent with kBackendDefaultTimeout
       timeout = 30 * 60;

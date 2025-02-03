@@ -30,6 +30,11 @@ on:
         required: false
         type: boolean
         default: false
+      cppwrapper:
+        description: Run inductor_cpp_wrapper?
+        required: false
+        type: boolean
+        default: false
       aotinductor:
         description: Run aot_inductor for inference?
         required: false
@@ -92,7 +97,7 @@ jobs:
     if: github.event.schedule == '0 7 * * *'
     with:
       build-environment: linux-jammy-py3.9-gcc11-build
-      dashboard-tag: training-false-inference-true-default-true-dynamic-true-aotinductor-true
+      dashboard-tag: training-false-inference-true-default-true-dynamic-true-cppwrapper-true-aotinductor-true
       docker-image: ${{ needs.linux-jammy-cpu-py3_9-gcc11-inductor-build.outputs.docker-image }}
       test-matrix: ${{ needs.linux-jammy-cpu-py3_9-gcc11-inductor-build.outputs.test-matrix }}
       timeout-minutes: 720
@@ -108,7 +113,7 @@ jobs:
     if: github.event_name == 'workflow_dispatch'
     with:
       build-environment: linux-jammy-py3.9-gcc11-build
-      dashboard-tag: training-${{ inputs.training }}-inference-${{ inputs.inference }}-default-${{ inputs.default }}-dynamic-${{ inputs.dynamic }}-aotinductor-${{ inputs.aotinductor }}
+      dashboard-tag: training-${{ inputs.training }}-inference-${{ inputs.inference }}-default-${{ inputs.default }}-dynamic-${{ inputs.dynamic }}-cppwrapper-${{ inputs.cppwrapper }}-aotinductor-${{ inputs.aotinductor }}
       docker-image: ${{ needs.linux-jammy-cpu-py3_9-gcc11-inductor-build.outputs.docker-image }}
       test-matrix: ${{ needs.linux-jammy-cpu-py3_9-gcc11-inductor-build.outputs.test-matrix }}
       timeout-minutes: 720
