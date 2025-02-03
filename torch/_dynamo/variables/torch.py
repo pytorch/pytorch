@@ -1234,6 +1234,10 @@ Either create the tensor outside the compiled region, or do not set the tensor t
         return result
 
     def call_tensor_method(self, tx, args, kwargs):
+        if self.get_function().__name__ == "__eq__" and isinstance(
+            args[1], variables.UserDefinedClassVariable
+        ):
+            return variables.ConstantVariable(False)
         return args[0].call_method(tx, self.get_function().__name__, args[1:], kwargs)
 
     def is_tensor_method(self):
