@@ -1,4 +1,4 @@
-from . import parametrizations, rnn, stateless
+from . import pack_linear, parametrizations, rnn, stateless
 from .clip_grad import (
     _clip_grads_with_norm_ as clip_grads_with_norm_,
     _get_total_norm as get_total_norm,
@@ -38,6 +38,7 @@ __all__ = [
     "parametrizations",
     "remove_spectral_norm",
     "remove_weight_norm",
+    "pack_linear",
     "rnn",
     "skip_init",
     "spectral_norm",
