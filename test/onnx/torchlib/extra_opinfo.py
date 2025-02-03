@@ -832,7 +832,7 @@ def sample_inputs_index_put(op_info, device, dtype, requires_grad, **kwargs):
         dtype=dtype,
         requires_grad=requires_grad,
     )
-    indices = (torch.arange(8, dtype=torch.int64, device=device).reshape((-1, 4)),)
+    indices = [torch.arange(8, dtype=torch.int64, device=device).reshape((-1, 4))]
     values = torch_testing.make_tensor(
         (2, 4, 3),
         device=device,
