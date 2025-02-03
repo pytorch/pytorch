@@ -510,9 +510,6 @@ class CaptureIndexing(WrapperHandler):
         super().__init__(inner)
         self.body = body
         self.tracer = tracer
-        self._simplify: Callable[[sympy.Expr], sympy.Expr] = functools.partial(  # type: ignore[call-arg]
-            V.graph.sizevars.simplify_with_ranges, var_ranges=self.body.var_ranges
-        )
 
     def _add_index(self, expr: sympy.Expr, mtype: MemoryUsageType, **kwargs: Any):
         return self.tracer.create_proxy(
@@ -521,6 +518,9 @@ class CaptureIndexing(WrapperHandler):
             (self.body.add_index_expr(expr, mtype, **kwargs),),
             {},
         )
+
+    def _simplify(self, expr: sympy.Expr) -> sympy.Expr:
+        return V.graph.sizevars.simplify_with_ranges(expr, self.body.var_ranges)
 
     def load(self, name: str, index: sympy.Expr):
         index = self._simplify(index)
