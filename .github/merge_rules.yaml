@@ -111,6 +111,7 @@
   - .github/ci_commit_pins/xla.txt
   approved_by:
   - pytorchbot
+  ignore_flaky_failures: false
   mandatory_checks_name:
   - EasyCLA
   - Lint
