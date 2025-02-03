@@ -304,7 +304,7 @@ def _split_by_size_and_type(bins: int, items: list[WriteItem]) -> list[list[Writ
     return buckets
 
 
-def _get_write_items_by_type(item: list[Writeitem]) -> tuple[list[WriteItem], list[WriteItem]]:
+def _get_write_items_by_type(item: list[WriteItem]) -> tuple[list[WriteItem], list[WriteItem]]:
     bytes_w = []
     tensor_w = []
     for wi in items:
