@@ -19,7 +19,6 @@ from torch.onnx._internal.exporter._torchlib.ops import common as common_ops
 
 
 _MATH_PI = math.pi
-IsScalar = common_ops.IsScalar
 
 aten = torch.ops.aten
 
@@ -218,7 +217,7 @@ def aten_special_log_ndtr(self: TensorType) -> TensorType:
 def aten_special_log_softmax(self: TFloat, dim: int, dtype: int = -1) -> TFloat:
     """special_log_softmax(Tensor self, int dim, *, ScalarType? dtype=None) -> Tensor"""
 
-    self_is_scalar = IsScalar(self)
+    self_is_scalar = len(self.shape) == 0
     if self_is_scalar:
         self = op.Unsqueeze(self, op.Constant(value_ints=[0]))
     result = op.LogSoftmax(self, axis=dim)

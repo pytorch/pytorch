@@ -52,7 +52,6 @@ from torch.onnx._internal.exporter._torchlib.ops import common as common_ops
 _INT64_MAX = 9223372036854775807
 _INT64_MIN = -9223372036854775808
 _MATH_PI = math.pi
-IsScalar = common_ops.IsScalar
 Rank = common_ops.Rank
 
 aten = torch.ops.aten
@@ -80,7 +79,7 @@ def aten__log_softmax_half(
 ) -> FLOAT:
     """_log_softmax(Tensor self, int dim, bool half_to_float) -> Tensor"""
 
-    self_is_scalar = IsScalar(self)
+    self_is_scalar = len(self.shape) == 0
     if half_to_float:
         self = op.Cast(self, to=FLOAT.dtype)
     if self_is_scalar:
@@ -99,7 +98,7 @@ def aten__log_softmax(
 ) -> TFloatHighPrecision:
     """_log_softmax(Tensor self, int dim, bool half_to_float) -> Tensor"""
 
-    self_is_scalar = IsScalar(self)
+    self_is_scalar = len(self.shape) == 0
     if self_is_scalar:
         self = op.Unsqueeze(self, op.Constant(value_ints=[0]))
     result = op.LogSoftmax(self, axis=dim)
@@ -342,7 +341,7 @@ def aten_align_to(self: TensorType, names: Sequence[str]) -> TensorType:
 def aten_all(self: TTensor) -> BOOL:
     """all(Tensor self) -> Tensor"""
 
-    if IsScalar(self):
+    if len(self.shape) == 0:
         result = op.Cast(self, to=BOOL.dtype)
     else:
         self_bool = op.Cast(self, to=BOOL.dtype)
@@ -356,7 +355,7 @@ def aten_all(self: TTensor) -> BOOL:
 def aten_all_dim(self: TTensor, dim: int, keepdim: bool = False) -> BOOL:
     """all.dim(Tensor self, int dim, bool keepdim=False) -> Tensor"""
 
-    if IsScalar(self):
+    if len(self.shape) == 0:
         result = op.Cast(self, to=BOOL.dtype)
     else:
         self_bool = op.Cast(self, to=BOOL.dtype)
@@ -388,7 +387,7 @@ def aten_all_dims_no_dim(self: TTensor, keepdims: bool) -> BOOL:
 
     # dim is None and thus not supplied
 
-    if IsScalar(self):
+    if len(self.shape) == 0:
         result = op.Cast(self, to=BOOL.dtype)
     else:
         self_bool = op.Cast(self, to=BOOL.dtype)
@@ -466,7 +465,7 @@ def aten_angle(self: TensorType) -> TensorType:
 def aten_any(self: TTensor) -> BOOL:
     """any(Tensor self) -> Tensor"""
 
-    if IsScalar(self):
+    if len(self.shape) == 0:
         result = op.Cast(self, to=BOOL.dtype)
     else:
         self_bool = op.Cast(self, to=BOOL.dtype)
@@ -481,7 +480,7 @@ def aten_any(self: TTensor) -> BOOL:
 def aten_any_dim(self: TTensor, dim: int, keepdim: bool = False) -> BOOL:
     """any.dim(Tensor self, int dim, bool keepdim=False) -> Tensor"""
 
-    if IsScalar(self):
+    if len(self.shape) == 0:
         result = op.Cast(self, to=BOOL.dtype)
     else:
         self_bool = op.Cast(self, to=BOOL.dtype)
@@ -515,7 +514,7 @@ def aten_any_dims_no_dim(self: TTensor, keepdims: bool) -> BOOL:
 
     # dim is None and thus not supplied
 
-    if IsScalar(self):
+    if len(self.shape) == 0:
         result = op.Cast(self, to=BOOL.dtype)
     else:
         self_bool = op.Cast(self, to=BOOL.dtype)
@@ -757,7 +756,7 @@ def aten_argmax(
 def _aten_argmax(self: Union[RealType, UINT8], keepdim: bool = False) -> INT64:
     """argmax(Tensor self, int? dim=None, bool keepdim=False) -> Tensor"""
 
-    self_is_scaler = IsScalar(self)
+    self_is_scaler = len(self.shape) == 0
     self = op.Reshape(self, op.Constant(value_ints=[-1]))
     result = op.ArgMax(self, keepdims=keepdim)
     if self_is_scaler:
@@ -772,7 +771,7 @@ def _aten_argmax_dim(
 ) -> INT64:
     """argmax(Tensor self, int? dim=None, bool keepdim=False) -> Tensor"""
 
-    self_is_scaler = IsScalar(self)
+    self_is_scaler = len(self.shape) == 0
     if self_is_scaler:
         self = op.Reshape(self, op.Constant(value_ints=[-1]))
 
@@ -800,7 +799,7 @@ def aten_argmin(
 def _aten_argmin(self: Union[RealType, UINT8], keepdim: bool = False) -> INT64:
     """argmin(Tensor self, int? dim=None, bool keepdim=False) -> Tensor"""
 
-    self_is_scaler = IsScalar(self)
+    self_is_scaler = len(self.shape) == 0
     self = op.Reshape(self, op.Constant(value_ints=[-1]))
     result = op.ArgMin(self, keepdims=keepdim)
     if self_is_scaler:
@@ -815,7 +814,7 @@ def _aten_argmin_dim(
 ) -> INT64:
     """argmin(Tensor self, int? dim=None, bool keepdim=False) -> Tensor"""
 
-    self_is_scaler = IsScalar(self)
+    self_is_scaler = len(self.shape) == 0
     if self_is_scaler:
         self = op.Reshape(self, op.Constant(value_ints=[-1]))
 
@@ -976,7 +975,7 @@ def aten_atanh(self: TFloat) -> TFloat:
 def aten_atleast_1d(self: TTensor) -> TTensor:
     """atleast_1d(Tensor self) -> Tensor"""
 
-    if IsScalar(self):
+    if len(self.shape) == 0:
         self = op.Reshape(self, op.Constant(value_ints=[1]))
     return op.Identity(self)
 
@@ -2883,7 +2882,7 @@ def aten_dot(self: TFloat, tensor: TFloat) -> TFloat:
 def aten_dropout(input: TFloat, p: FLOAT, train: BOOL) -> TFloat:
     """dropout(Tensor input, float p, bool train) -> Tensor"""
 
-    if IsScalar(input):
+    if len(input.shape) == 0:
         input = op.Reshape(input, op.Constant(value_ints=[-1]))
         result, _ = op.Dropout(input, p, train)
         result = op.Squeeze(result)
@@ -4390,7 +4389,7 @@ def aten_index_reduce(
 def aten_index_select(self: TTensor, dim: int, index: IntType) -> TTensor:
     """index_select(Tensor self, int dim, Tensor index) -> Tensor"""
 
-    self_is_scalar = IsScalar(self)
+    self_is_scalar = len(self.shape) == 0
     if self_is_scalar:
         self = op.Reshape(self, op.Constant(value_ints=[-1]))
 
@@ -4932,7 +4931,7 @@ def aten_logaddexp2(self: TFloat, other: TFloat) -> TFloat:
 def aten_logcumsumexp(self: TFloat, dim: int) -> TFloat:
     """logcumsumexp(Tensor self, int dim) -> Tensor"""
 
-    if IsScalar(self):
+    if len(self.shape) == 0:
         result = self
     else:
         # Make dim 1-d
@@ -5048,7 +5047,7 @@ def aten_logspace(
 def aten_logsumexp(self: TFloat, dim: INT64, keepdim: int = False) -> TFloat:
     """logsumexp(Tensor self, int[1] dim, bool keepdim=False) -> Tensor"""
 
-    if IsScalar(self):
+    if len(self.shape) == 0:
         # A scalar
         result = self
     else:
@@ -5254,27 +5253,18 @@ def aten_matrix_power(self: TensorType, n: int) -> TensorType:
     raise NotImplementedError
 
 
-@onnx_impl(aten.max)
+@onnx_impl(aten.max, trace_only=True)
 def aten_max(self: TReal) -> TReal:
     """max(Tensor self) -> Tensor"""
 
-    self_is_scalar = IsScalar(self)
-    if self_is_scalar:
-        self = op.Reshape(self, op.Constant(value_ints=[-1]))
-
-    result = op.ReduceMax(self, keepdims=False)
-
-    if self_is_scalar:
-        result = op.Squeeze(result)
-
-    return result
+    return op.ReduceMax(self, keepdims=False)
 
 
 @onnx_impl(aten.max.dim, trace_only=True)
 def aten_max_dim(self: TReal, dim: int, keepdim: bool = False) -> Tuple[TReal, INT64]:
     """max.dim(Tensor self, int dim, bool keepdim=False) -> (Tensor values, Tensor indices)"""
 
-    if IsScalar(self):
+    if len(self.shape) == 0:
         result = self
         indices = op.Constant(value_int=0)
     else:
@@ -5284,14 +5274,14 @@ def aten_max_dim(self: TReal, dim: int, keepdim: bool = False) -> Tuple[TReal, I
     return result, indices
 
 
-@onnx_impl((aten.maximum, aten.max.other))
+@onnx_impl((aten.maximum, aten.max.other), trace_only=True)
 def aten_maximum(self: TReal, other: TReal) -> TReal:
     """maximum(Tensor self, Tensor other) -> Tensor"""
 
     return op.Max(self, other)
 
 
-@onnx_impl((aten.maximum, aten.max.other))
+@onnx_impl((aten.maximum, aten.max.other), trace_only=True)
 def aten_maximum_bool(self: BOOL, other: BOOL) -> BOOL:
     """maximum(Tensor self, Tensor other) -> Tensor"""
 
@@ -5310,7 +5300,7 @@ def aten_mean(self: TReal) -> TReal:
 def aten_mean_dim(self: TReal, dim: INT64, keepdim: bool = False) -> TReal:
     """mean.dim(Tensor self, int[1]? dim, bool keepdim=False, *, ScalarType? dtype=None) -> Tensor"""
 
-    if IsScalar(self):
+    if len(self.shape) == 0:
         result = self
     else:
         dims = op.Reshape(dim, op.Constant(value_ints=[-1]))
@@ -5330,7 +5320,7 @@ def aten_meshgrid(tensors: Sequence[TensorType]) -> TensorType:
     raise NotImplementedError
 
 
-@onnx_impl(aten.min)
+@onnx_impl(aten.min, trace_only=True)
 def aten_min(self: TReal) -> TReal:
     """min(Tensor self) -> Tensor"""
 
@@ -5340,7 +5330,7 @@ def aten_min(self: TReal) -> TReal:
 @onnx_impl(aten.min.dim, trace_only=True)
 def aten_min_dim(self: TReal, dim: int, keepdim: bool = False) -> Tuple[TReal, TInt]:
     """min.dim(Tensor self, int dim, bool keepdim=False) -> (Tensor values, Tensor indices)"""
-    if IsScalar(self):
+    if len(self.shape) == 0:
         result = self
         indices = op.Constant(value_int=0)
     else:
@@ -5351,14 +5341,14 @@ def aten_min_dim(self: TReal, dim: int, keepdim: bool = False) -> Tuple[TReal, T
     return result, indices
 
 
-@onnx_impl((aten.minimum, aten.min.other))
+@onnx_impl((aten.minimum, aten.min.other), trace_only=True)
 def aten_minimum(self: TReal, other: TReal) -> TReal:
     """minimum(Tensor self, Tensor other) -> Tensor"""
 
     return op.Min(self, other)
 
 
-@onnx_impl((aten.minimum, aten.min.other))
+@onnx_impl((aten.minimum, aten.min.other), trace_only=True)
 def aten_minimum_bool(self: BOOL, other: BOOL) -> BOOL:
     """minimum(Tensor self, Tensor other) -> Tensor"""
 
@@ -6484,7 +6474,7 @@ def aten_normal(
 ) -> TFloat:  # type: ignore[type-var]
     """normal_functional(Tensor self, float mean=0, float std=1, *, Generator? generator=None) -> Tensor"""
 
-    if IsScalar(self):
+    if len(self.shape) == 0:
         self = op.Reshape(self, op.Constant(value_ints=[-1]))
 
     result = op.RandomNormalLike(self, mean=mean, scale=std)
@@ -7364,7 +7354,9 @@ def aten_rnn_tanh_cell(
 
 
 @onnx_impl(aten.roll, trace_only=True)
-def aten_roll(self: TTensor, shifts: Sequence[int], dims: Sequence[int] = ()) -> TTensor:
+def aten_roll(
+    self: TTensor, shifts: Sequence[int], dims: Sequence[int] = ()
+) -> TTensor:
     """roll(Tensor self, int[1] shifts, int[1] dims=[]) -> Tensor"""
 
     self_rank = len(self.shape)
@@ -7887,7 +7879,7 @@ def aten_smm(self: TensorType, mat2: TensorType) -> TensorType:
 def aten_softmax(self: TFloat, dim: int, dtype: int = -1) -> TFloat:
     """softmax(Tensor self, int dim, ScalarType? dtype=None) -> Tensor"""
 
-    self_is_scalar = IsScalar(self)
+    self_is_scalar = len(self.shape) == 0
     if self_is_scalar:
         self = op.Unsqueeze(self, op.Constant(value_ints=[0]))
     result = op.Softmax(self, axis=dim)
@@ -7904,7 +7896,7 @@ def aten_softmax(self: TFloat, dim: int, dtype: int = -1) -> TFloat:
 def aten_softmax_no_dtype(self: TFloat, dim: int) -> TFloat:
     """softmax(Tensor self, int dim, ScalarType? dtype=None) -> Tensor"""
 
-    self_is_scalar = IsScalar(self)
+    self_is_scalar = len(self.shape) == 0
     if self_is_scalar:
         self = op.Unsqueeze(self, op.Constant(value_ints=[0]))
     result = op.Softmax(self, axis=dim)
@@ -7921,7 +7913,7 @@ def aten_sort(
 ) -> tuple[TReal, INT64]:
     """sort(Tensor self, int dim=-1, bool descending=False, bool stable=False) -> (Tensor values, Tensor indices)"""
 
-    self_is_scalar = IsScalar(self)
+    self_is_scalar = len(self.shape) == 0
     if self_is_scalar:
         return op.Identity(self), op.Constant(value_int=0)
     shape = op.Shape(self)
