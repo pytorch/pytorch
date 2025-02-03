@@ -56,7 +56,10 @@ def check_graph_breaks(actual_csv, expected_csv, expected_filename):
         expected_graph_breaks = get_field(expected_csv, model, "graph_breaks")
         flaky = model in flaky_models
 
-        if graph_breaks == expected_graph_breaks:
+        if expected_graph_breaks is None:
+            status = "MISSING:"
+            improved.append(model)
+        elif graph_breaks == expected_graph_breaks:
             status = "PASS_BUT_FLAKY" if flaky else "PASS"
             print(f"{model:34}  {status}")
             continue
