@@ -1381,7 +1381,7 @@ def get_default_backend_for_device(device: Union[str, torch.device]) -> str:
     if isinstance(device, torch.device):
         device_str = device.type
     else:
-        device_str = device.split(":")[0]
+        device_str = torch.device(device).type
 
     backend = Backend.default_device_backend_map.get(device_str)
     if backend is None:
