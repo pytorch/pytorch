@@ -846,7 +846,7 @@ def aten_as_strided(
 ) -> TTensor:
     """as_strided(Tensor(a) self, SymInt[] size, SymInt[] stride, SymInt? storage_offset=None) -> Tensor(a)"""
 
-    rank = len(stride)
+    rank = len(stride.shape)
     return _aten_as_strided_onnx(self, size, stride, storage_offset, rank)
 
 

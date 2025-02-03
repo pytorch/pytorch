@@ -1032,6 +1032,8 @@ TESTED_TORCHLIB_OPS: tuple[TorchLibOpInfo, ...] = (
         core_ops.aten_embedding_bag,
         tolerance={torch.float16: (1e-2, 5e-2)},
         compare_shape_only_for_output=(1, 2, 3),
+    ).skip(
+        reason="fixme: https://github.com/pytorch/pytorch/issues/146336",
     ),
     TorchLibOpInfo(
         "ops.aten.embedding_bag.padding_idx",

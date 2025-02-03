@@ -36,7 +36,7 @@ import pytest
 from onnxscript import ir
 
 import torch
-from torch.onnx._internal.exporter import _building, _ir_passes
+from torch.onnx._internal.exporter import _building, _ir_passes, _tensors
 from torch.testing._internal.opinfo import core as opinfo_core
 
 
@@ -503,17 +503,19 @@ def graph_executor(
             opset_imports={"": 18, "pkg.torch.onnx": 1},
             name="main_graph",
         )
-        tracer = _building.OpRecorder(onnxscript.opset18, {})
+        opset = onnxscript.opset18
+        tracer = _building.OpRecorder(opset, {})
         ort_inputs = {}
         onnxscript_args: list[Any] = []
         onnxscript_kwargs = {}
         for i, arg in enumerate(args):
             if isinstance(arg, np.ndarray):
                 input_name = f"input_{i}"
-                input = ir.Input(
-                    input_name,
-                    ir.Shape(torch.tensor(arg).shape),
-                    ir.TensorType(_TORCH_DTYPE_TO_ONNX[torch.tensor(arg).dtype]),
+                input = _tensors.SymbolicTensor(
+                    opset=opset,
+                    name=input_name,
+                    shape=ir.Shape(torch.tensor(arg).shape),
+                    type=ir.TensorType(_TORCH_DTYPE_TO_ONNX[torch.tensor(arg).dtype]),
                 )
                 graph.inputs.append(input)
                 onnxscript_args.append(input)
@@ -525,10 +527,11 @@ def graph_executor(
                     if isinstance(subarg, np.ndarray):
                         input_name = f"input_{i}_{j}"
                         tensor = torch.tensor(subarg)
-                        input = ir.Input(
-                            input_name,
-                            ir.Shape(tensor.shape),
-                            ir.TensorType(_TORCH_DTYPE_TO_ONNX[tensor.dtype]),
+                        input = _tensors.SymbolicTensor(
+                            opset=opset,
+                            name=input_name,
+                            shape=ir.Shape(tensor.shape),
+                            type=ir.TensorType(_TORCH_DTYPE_TO_ONNX[tensor.dtype]),
                         )
                         graph.inputs.append(input)
                         sequence_input.append(input)
@@ -542,10 +545,11 @@ def graph_executor(
                 onnxscript_args.append(arg)
         for key, value in kwargs.items():
             if isinstance(value, np.ndarray):
-                input = ir.Input(
-                    key,
-                    ir.Shape(torch.tensor(value).shape),
-                    ir.TensorType(_TORCH_DTYPE_TO_ONNX[torch.tensor(value).dtype]),
+                input = _tensors.SymbolicTensor(
+                    opset=opset,
+                    name=key,
+                    shape=ir.Shape(torch.tensor(value).shape),
+                    type=ir.TensorType(_TORCH_DTYPE_TO_ONNX[torch.tensor(value).dtype]),
                 )
                 graph.inputs.append(input)
                 ort_inputs[key] = value
