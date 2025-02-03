@@ -6635,6 +6635,19 @@ class ReproTestsDevice(torch._dynamo.test_case.TestCase):
         mem_after = torch.cuda.memory_allocated()
         self.assertEqual(mem_before, mem_after)
 
+    def test_udf_class_source(self):
+        class Foo:
+            pass
+
+        def fn(x):
+            foo = Foo()
+            bar = type(foo)()  # noqa: F841
+            return torch.cos(x)
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        x = torch.randn(4)
+        self.assertEqual(fn(x), opt_fn(x))
+
     @requires_cuda
     def test_sdpa_dynamic_shapes(self, device):
         def f(x, s0, s1, s2):
