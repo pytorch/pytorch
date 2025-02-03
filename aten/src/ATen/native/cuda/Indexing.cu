@@ -191,26 +191,26 @@ __global__ void indexing_backward_kernel_stride_1(
   // Number of values processed by each thread (grain size)
 #ifdef USE_ROCM
   // This path avoid serilized loads by fetching 2 at a time.
-  union x2lng { int64_t l[2]; long2 l2; } tmpl2; 
+  union x2lng { int64_t l[2]; long2 l2; } tmpl2;
   for (int64_t z = blockIdx.z; z < outer_dim; z += gridDim.z)
   for (int64_t _y = 0; _y < 4; _y++) { // unroll indices_per_block here
-    int64_t idx = blockIdx.x * 4 + _y; 
+    int64_t idx = blockIdx.x * 4 + _y;
     bool oneDup = false;
     if (idx >= numel) continue;
-    if (_y > 0) { 
+    if (_y > 0) {
       tmpl2.l[0] = tmpl2.l[1]; // old current is new prior
       if ((idx + 1) < numel) {
         x2lng tm; tm.l2 = *((long2*)(&sorted_indices[idx]));
         tmpl2.l[1] = tm.l[0];
         oneDup = (tm.l[0] != tm.l[1]);
       } else {
-        tmpl2.l[1] = sorted_indices[idx]; 
+        tmpl2.l[1] = sorted_indices[idx];
       }
     } else {
       if (idx != 0 ) {
         tmpl2.l2   = *((long2*)(&sorted_indices[idx - 1]));
       } else {
-        tmpl2.l[1] = sorted_indices[idx]; tmpl2.l[0] = tmpl2.l[1]-1; 
+        tmpl2.l[1] = sorted_indices[idx]; tmpl2.l[0] = tmpl2.l[1]-1;
       }
     }
 
@@ -224,7 +224,7 @@ __global__ void indexing_backward_kernel_stride_1(
         gradient += static_cast<opmath_t>(grad_output[grad_row]) * scale;
         const int64_t weight_row = crnt_sorted_idx * stride + z * stride_before;
         grad_weight[weight_row] = static_cast<scalar_t>(static_cast<opmath_t>(grad_weight[weight_row]) + gradient);
-	continue;
+        continue;
     }
     if (crnt_sorted_idx != tmpl2.l[0])
 #else
