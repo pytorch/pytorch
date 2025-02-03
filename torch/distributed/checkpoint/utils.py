@@ -25,7 +25,7 @@ from .api import (
 from .metadata import MetadataIndex, STATE_DICT_TYPE
 
 
-__all__ = ["find_tensor_shard", "find_state_dict_object"]
+__all__ = ["find_tensor_shard", "find_state_dict_object", "assert_same_keys"]
 
 T = TypeVar("T")
 R = TypeVar("R")
