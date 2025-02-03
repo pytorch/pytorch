@@ -15,6 +15,9 @@
 #include <ATen/cuda/Atomic.cuh>
 #include <ATen/cuda/CUDAContext.h>
 
+#if defined(USE_ROCM)
+#include <device_functions.h>
+#endif
 namespace at::native {
 
 // Implement as functors since lambdas don't get optimized.
@@ -154,7 +157,107 @@ struct _cuda_scatter_gather_internal_kernel {
 
     _launch_scatter_gather_kernel<num_threads(), thread_work_size()>(iter.numel(), loop);
   }
-}; // struct _cuda_scatter_fill_internal_kernel
+  void operator() (
+    TensorIterator& iter,
+    int64_t index_size,
+    int64_t index_stride,
+    int64_t numel,  // Do not use `const` qualifier here as it may cause issue in cuda 11.6.x. See #75434, #75545
+    const ReduceAdd& f
+  ) {
+    if (!iter.can_use_32bit_indexing()) {
+      for (auto& sub_iter : iter.with_32bit_indexing()) {
+        _cuda_scatter_gather_internal_kernel<is_scatter_like, scalar_t>()(
+          sub_iter, index_size, index_stride, numel, f
+        );
+      }
+      return;
+    }
+
+    char* self_ptr = (char*)iter.data_ptr(0);
+    char* src_ptr = (char*)iter.data_ptr(1);
+    char* index_ptr = (char*)iter.data_ptr(2);
+
+    auto offset_calc = make_offset_calculator<3>(iter);
+    auto loop = [=]C10_DEVICE(int i) {
+      auto offsets = offset_calc.get(i);
+      int64_t idx_dim = *(int64_t*)(index_ptr + offsets[2]);
+      CUDA_KERNEL_ASSERT(idx_dim >= 0 && idx_dim < index_size
+        && "index out of bounds");
+#if !defined(USE_ROCM)
+      f(
+        (scalar_t*)(self_ptr + offsets[0]),
+        is_scatter_like ? idx_dim * index_stride : 0,
+        numel,
+        (scalar_t*)(src_ptr + offsets[1]) + (is_scatter_like ? 0 : idx_dim * index_stride)
+      );
+#else
+    scalar_t val = *((scalar_t*)((src_ptr + offsets[1]) + (is_scatter_like ? 0 : idx_dim * index_stride)));
+    scalar_t* dst = (scalar_t*)(self_ptr + offsets[0] + sizeof(scalar_t) * (is_scatter_like ? idx_dim * index_stride : 0));
+
+    int64_t idx = (is_scatter_like ? idx_dim * index_stride : 0);
+
+    //Try to pack coalseced bf16...
+    if constexpr (std::is_same<scalar_t, c10::BFloat16>::value) //TODO: add same for fp16
+    {
+        typedef unsigned short __attribute__((ext_vector_type(2))) vec_short2;
+        union ill { unsigned int i[2]; int64_t il; } iil_ = { .il = (int64_t)dst }; ill ill_oneUpDst;
+        int oneUpDst = __builtin_amdgcn_mov_dpp(idx, 0x130, 0xf, 0xf, 0);
+        int oneDnDst = __builtin_amdgcn_mov_dpp(idx, 0x138, 0xf, 0xf, 0);
+        union bfi { __hip_bfloat16 bf; short s; } bfi_ = { .bf = (__hip_bfloat16)val }; bfi bfi_oneUpVal;
+        bfi_oneUpVal.s = __builtin_amdgcn_mov_dpp(bfi_.s, 0x130, 0xf, 0xf, 0);
+        auto oneUpVal = bfi_oneUpVal.bf;
+        if (oneUpDst - (int64_t)dst == 1) {
+            union bfvs { __hip_bfloat16 bf[2]; vec_short2 vs2; } bfvs_;
+     bfvs_.bf[0] = (__hip_bfloat16)val;
+     bfvs_.bf[1] = (__hip_bfloat16)oneUpVal;
+     __builtin_amdgcn_flat_atomic_fadd_v2bf16((vec_short2*)dst, bfvs_.vs2);
+     return;
+	 }
+	 else if ((int64_t)dst - oneDnDst == 1) {
+			 return;
+	 }
+    }
+
+    // not coalsced, so now let try to capture lane-matches...
+
+    //auto mask = __match_any_sync(__activemask(), (int64_t)dst);
+    //dpp implementation of match_any()
+    //TODO: is this better than above __match_any?
+    unsigned long long mask = 1;
+    union dill { unsigned int i[2]; int64_t il; } dill_ = { .il = (int64_t)dst };
+    unsigned long long nask = 2;
+    for (int i = 0; i < 64 - 1; i++) {
+        dill_.i[0] = __builtin_amdgcn_mov_dpp(dill_.i[0], 0x134, 0xf, 0xf, 0); //wave_rol1
+        dill_.i[1] = __builtin_amdgcn_mov_dpp(dill_.i[1], 0x134, 0xf, 0xf, 0);
+        if (dill_.il == (int64_t)dst) mask |= nask;
+        nask = nask << 1;
+    }
+    int rotv = __lane_id();
+    mask = (mask << rotv) | (mask >> (64 - rotv));
+
+    int leader = __ffsll(mask) - 1;    // select a leader
+    union punner { int l; scalar_t s; } pnr = { .s = val };
+    scalar_t crnt_val = (scalar_t)0;
+    auto crnt_msk = mask >> (leader);
+    int crnt_idx = leader;
+    while (crnt_msk != 0) {
+        if (crnt_msk & 1) {
+            punner add_val = { .l = __shfl(pnr.l ,crnt_idx) };
+            crnt_val += add_val.s;
+        }
+        crnt_idx++;
+        crnt_msk = crnt_msk >> 1;
+    }
+    if (__lane_id() == leader) {  // only leader-lane does the update
+        f((scalar_t*)(self_ptr), idx+offsets[0]/sizeof(scalar_t), numel+offsets[0]/sizeof(scalar_t), &crnt_val);
+    }
+
+#endif
+    };
+
+    _launch_scatter_gather_kernel<num_threads(), thread_work_size()>(iter.numel(), loop);
+  }
+}; // struct _cuda_scatter_gather_internal_kernel
 
 template <bool is_scatter_like = true, bool cast_to_opaque = true>
 struct cuda_scatter_gather_base_kernel {
