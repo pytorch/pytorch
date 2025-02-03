@@ -46,6 +46,7 @@ def check_accuracy(actual_csv, expected_csv, expected_filename):
                 "stable_diffusion_unet",
                 "timm_efficientdet",
                 "timm_nfnet",
+                "torchrec_dlrm",
                 "vgg16",
             }
         )
