@@ -4,6 +4,7 @@
 import contextlib
 import ctypes
 import gc
+import importlib.util
 import json
 import os
 import pickle
@@ -87,13 +88,7 @@ from torch.utils.viz._cycles import observe_tensor_cycles
 # sharding on sandcastle. This line silences flake warnings
 load_tests = load_tests
 
-try:
-    import torchvision.models  # noqa: F401
-    from torchvision.models import resnet18  # noqa: F401
-
-    HAS_TORCHVISION = True
-except ImportError:
-    HAS_TORCHVISION = False
+HAS_TORCHVISION: bool = importlib.util.find_spec("torchvision") is not None
 skipIfNoTorchVision = unittest.skipIf(not HAS_TORCHVISION, "no torchvision")
 
 TEST_CUDAMALLOCASYNC = TEST_CUDA and (
@@ -140,7 +135,7 @@ class TestCuda(TestCase):
                 self.assertTrue(pinned_t.is_pinned())
                 pinned_t = torch.ones(1 << 24).pin_memory()
                 self.assertTrue(pinned_t.is_pinned())
-            except RuntimeError as e:
+            except RuntimeError:
                 # Some GPUs don't support same address space on host and device side
                 pass
         finally:
@@ -170,7 +165,7 @@ class TestCuda(TestCase):
                     self.assertTrue(t.is_pinned())
                     del t
                     torch._C._host_emptyCache()
-                except RuntimeError as e:
+                except RuntimeError:
                     # Some GPUs don't support same address space on host and device side
                     pass
         finally:
@@ -701,7 +696,7 @@ class TestCuda(TestCase):
         with torch.cuda.stream(user_stream):
             self.assertEqual(torch.cuda.current_stream(), user_stream)
         self.assertTrue(user_stream.query())
-        tensor1 = torch.ByteTensor(5).pin_memory()
+        torch.ByteTensor(5).pin_memory()
         default_stream.synchronize()
         self.assertTrue(default_stream.query())
 
@@ -1040,7 +1035,7 @@ try:
         torch.multinomial(torch.tensor({probs}).to('cuda'), 2, replacement=True)
         torch.cuda.synchronize()
     sys.exit(-1) # Should not be reached
-except RuntimeError as e:
+except RuntimeError:
     sys.exit(-2)
 """,
                 ],
@@ -2287,6 +2282,7 @@ exit(2)
 
         s = torch.cuda.Stream()
 
+        reserved_no_sharing = None
         for share_mem in ("Don't share", "via pool()", "via graph_pool_handle()"):
             g0 = torch.cuda.CUDAGraph()
             g1 = torch.cuda.CUDAGraph()
@@ -3188,7 +3184,7 @@ exit(2)
                 with torch.cuda.graph(
                     graph, stream=stream, capture_error_mode=capture_error_mode
                 ):
-                    out = fn()
+                    fn()
                     thread = threading.Thread(target=raw_malloc)
                     thread.start()
                     thread.join()
@@ -3800,35 +3796,32 @@ class TestCudaMallocAsync(TestCase):
 
     @serialTest
     def test_garbage_collect_expandable(self):
-        try:
-            torch.cuda.memory.empty_cache()
-            mb = 1024 * 1024
-            _, all_memory = torch.cuda.memory.mem_get_info()
-            pre_reserved = torch.cuda.memory_reserved()
-            total_allowed = 120 * mb + pre_reserved
-            fraction_allowed = total_allowed / all_memory
-            self.assertEqual((fraction_allowed * all_memory), total_allowed)
-            orig = torch.cuda.get_per_process_memory_fraction(0)
-            torch.cuda.memory.set_per_process_memory_fraction(fraction_allowed)
+        torch.cuda.memory.empty_cache()
+        mb = 1024 * 1024
+        _, all_memory = torch.cuda.memory.mem_get_info()
+        pre_reserved = torch.cuda.memory_reserved()
+        total_allowed = 120 * mb + pre_reserved
+        fraction_allowed = total_allowed / all_memory
+        self.assertEqual((fraction_allowed * all_memory), total_allowed)
+        torch.cuda.get_per_process_memory_fraction(0)
+        torch.cuda.memory.set_per_process_memory_fraction(fraction_allowed)
 
-            def alloc(n):
-                return torch.ones(n * mb, dtype=torch.int8, device="cuda")
+        def alloc(n):
+            return torch.ones(n * mb, dtype=torch.int8, device="cuda")
 
-            torch.cuda.memory._set_allocator_settings(
-                "expandable_segments:False,garbage_collection_threshold:0.5"
-            )
-            a = alloc(40)
-            torch.cuda.memory._set_allocator_settings(
-                "expandable_segments:True,garbage_collection_threshold:0.5"
-            )
-            b = alloc(40)
-            del a, b
-            # causes GC to run. The expandable segment block will be split
-            # so GC would not attempt to free it anyway, but this at least makes sure
-            # expandable_segment blocks can be in the free list when this is called.
-            alloc(80)
-        finally:
-            orig = torch.cuda.get_per_process_memory_fraction(0)
+        torch.cuda.memory._set_allocator_settings(
+            "expandable_segments:False,garbage_collection_threshold:0.5"
+        )
+        a = alloc(40)
+        torch.cuda.memory._set_allocator_settings(
+            "expandable_segments:True,garbage_collection_threshold:0.5"
+        )
+        b = alloc(40)
+        del a, b
+        # causes GC to run. The expandable segment block will be split
+        # so GC would not attempt to free it anyway, but this at least makes sure
+        # expandable_segment blocks can be in the free list when this is called.
+        alloc(80)
 
     def test_allocator_settings(self):
         def power2_div(size, div_factor):
@@ -4455,7 +4448,6 @@ class TestBlockStateAbsorption(TestCase):
         pool_id = graph.pool()
         device = outputs[0].device.index
 
-        segments_before_checkpoint = get_cudagraph_segments(pool_id)
         state = torch._C._cuda_getCheckpointState(outputs[0].device.index, pool_id)
 
         output_data_ptrs = [output.data_ptr() for output in outputs]
@@ -4593,7 +4585,7 @@ class TestBlockStateAbsorption(TestCase):
                 stream_context.__exit__(None, None, None)
 
         segments = get_cudagraph_segments(pool)
-        self.assertEqual(len(get_cudagraph_segments(pool)), 1)
+        self.assertEqual(len(segments), 1)
 
         def use_pool():
             def alloc_three():
@@ -5129,7 +5121,6 @@ class TestCudaOptims(TestCase):
         weight = torch.ones((100,), device="cuda", requires_grad=True)
         opt = optim_info.optim_cls([weight], lr=0.1, foreach=foreach, fused=fused)
         static_input = torch.ones_like(weight)
-        static_grad = torch.ones_like(weight)
 
         # warmup
         s = torch.cuda.Stream()
