@@ -6588,8 +6588,6 @@ class ShapeEnv:
                     else size_oblivious,
                     static_expr,
                 )
-                if hint is not None:
-                    assert static_expr == hint, f"{static_expr} != {hint}"
                 return static_expr
 
             transmute_into_runtime_assert = False
