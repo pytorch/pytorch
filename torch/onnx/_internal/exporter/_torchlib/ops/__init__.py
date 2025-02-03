@@ -1,6 +1,28 @@
 from __future__ import annotations
 
 
-__all__ = ["hop"]
+__all__ = [
+    "common",
+    "core",
+    "fft",
+    "hop",
+    "linalg",
+    "nn",
+    "prims",
+    "quantized_decomposed",
+    "sparse",
+    "special",
+]
 
-from torch.onnx._internal.exporter._torchlib.ops import hop
+from torch.onnx._internal.exporter._torchlib.ops import (
+    common,
+    core,
+    fft,
+    hop,
+    linalg,
+    nn,
+    prims,
+    quantized_decomposed,
+    sparse,
+    special,
+)
