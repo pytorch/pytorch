@@ -506,7 +506,7 @@ void TuningContext::EnableNumericsCheck(bool value) {
 }
 
 bool TuningContext::IsNumericsCheckEnabled() const {
-  const auto env = c10::utils::get_env("PYTORCH_TUNABLEOP_ENABLED");
+  const auto env = c10::utils::get_env("PYTORCH_TUNABLEOP_NUMERICAL_CHECK");
   if (env == "1") {
     return true;
   }

@@ -292,7 +292,7 @@ void Engine::stop() {
   auto wait_duration_str =
       c10::utils::get_env("TORCH_AUTOGRAD_SHUTDOWN_WAIT_LIMIT");
   auto wait_duration =
-      wait_duration_str ? std::stof(wait_duration_str.value()) : 10.0;
+      wait_duration_str ? std::atof(wait_duration_str->c_str()) : 10.0;
   bool noBackward = true;
   for (auto& queue : device_ready_queues_) {
     noBackward = noBackward && queue->empty();
