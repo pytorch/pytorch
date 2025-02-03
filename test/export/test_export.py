@@ -7258,6 +7258,22 @@ graph():
         self.assertEqual(a.size(), torch.Size([11]))
         self.assertEqual(a, torch.zeros(11))
 
+    def test_backed_symint_endofbounds(self):
+        class Foo(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.register_buffer("cache", torch.zeros(10))
+
+            def forward(self, x):
+                self.cache[0 : x.shape[0]] = x
+                return x
+
+        max_size = 10
+        min_size = 1
+        dim = Dim(name="dim", min=min_size, max=max_size)
+        ep = export(Foo(), (torch.randn(10),), dynamic_shapes={"x": {0: dim}})
+        print(ep)
+
     def test_pad_sequence(self):
         class Module(torch.nn.Module):
             def forward(self, x):

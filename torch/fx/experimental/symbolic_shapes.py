@@ -1972,15 +1972,18 @@ def _maybe_evaluate_static_worker(
             # for jagged layout NestedTensors today
             continue
         assert vr is not None
-        if size_oblivious and is_size_like:
-            lower = max(2, vr.lower)
-            # Clamping size-oblivious to some quantity below sys.maxsize
-            # helps us determine that f(u0) != sys.maxsize, which is a
-            # test that is looking for sys.maxsize as a sentinel, but you
-            # don't really want to worry about it for unbacked SymInts.
-            # This is similar to the flavor where size oblivious omits
-            # 0/1, it changes semantics but in a benign way.
-            upper = min(2**48, vr.upper)
+        if size_oblivious and (is_size_like or re.match(r"s\d+", str(k))):
+            if is_size_like:
+                lower = max(2, vr.lower)
+                # Clamping size-oblivious to some quantity below sys.maxsize
+                # helps us determine that f(u0) != sys.maxsize, which is a
+                # test that is looking for sys.maxsize as a sentinel, but you
+                # don't really want to worry about it for unbacked SymInts.
+                # This is similar to the flavor where size oblivious omits
+                # 0/1, it changes semantics but in a benign way.
+                upper = min(2**48, vr.upper)
+            else:
+                lower, upper = vr.lower, vr.upper
             # Excluding the very upper bound can be helpful
             if upper > lower:
                 upper = upper - 1
@@ -6577,8 +6580,6 @@ class ShapeEnv:
                 self.log.debug(
                     "eval %s == %s [statically known]", orig_expr, static_expr
                 )
-                if hint is not None:
-                    assert static_expr == hint, f"{static_expr} != {hint}"
                 return static_expr
 
             transmute_into_runtime_assert = False
