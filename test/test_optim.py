@@ -2297,7 +2297,7 @@ class TestOptimRenewed(TestCase):
     def test_loadstate_with_diff_beta1_adam(self, device, dtype, optim_info):
         # the test takes form of two tests.
         # 1st test.
-        # model_beta1_zero: 1.train for n_iters, 2.load state, 3.train for n_iters
+        # model_beta1_zero: 1.train for n_iters, 2.load state of default, 3.train for n_iters
         # model_default: 4.train for n_iters
         # 2nd test.
         # model_default: 1.train for n_iters, 2.load state (beta1=0.0), 3.train for n_iters
