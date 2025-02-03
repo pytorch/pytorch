@@ -188,9 +188,7 @@ def foreach_map_fn(*args):
     if not at_least_one_list:
         return op(*args[1:])
 
-    out = []
-    for unpacked in zip(*new_args):
-        out.append(op(*unpacked))
+    out = [op(*unpacked) for unpacked in zip(*new_args)]
 
     return out
 

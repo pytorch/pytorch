@@ -1422,10 +1422,11 @@ class TritonHOPifier:
             return self.call_triton_kernel(new_var, args, kwargs, tx)
 
         if isinstance(variable.kernel, Autotuner):
-            special_param_names = []
-            for name in SPECIAL_CONFIG_NAMES:
-                if name in variable.kernel.fn.arg_names:
-                    special_param_names.append(name)
+            special_param_names = [
+                name
+                for name in SPECIAL_CONFIG_NAMES
+                if name in variable.kernel.fn.arg_names
+            ]
 
             if special_param_names:
                 # If the Triton kernel has SPECIAL_CONFIG_NAMES in parameters, those should

@@ -1741,10 +1741,12 @@ class PythonWrapperCodegen(CodeGen):
         # Distinguish between different functions using function id
         cache_key: list[Any] = [id(kernel.fn)]
         if len(configs) > 0:
-            for arg in kwargs.values():
-                # We need to key on non tensor arg only in autotune mode
-                if not isinstance(arg, (ir.Buffer, ir.ReinterpretView)):
-                    cache_key.append(arg)
+            # We need to key on non tensor arg only in autotune mode
+            cache_key.extend(
+                arg
+                for arg in kwargs.values()
+                if not isinstance(arg, (ir.Buffer, ir.ReinterpretView))
+            )
         cache_key.append(str(triton_meta))
         cache_key = tuple(cache_key)
 

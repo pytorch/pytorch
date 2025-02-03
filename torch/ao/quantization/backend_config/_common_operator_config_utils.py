@@ -714,14 +714,14 @@ def _get_bn_configs(dtype_configs: list[DTypeConfig]) -> list[BackendPatternConf
         )
 
     # fused bn configs
-    for fused_bn in bn_to_fused_bn.values():
-        bn_configs.append(
-            BackendPatternConfig(fused_bn)
-            .set_observation_type(
-                ObservationType.OUTPUT_USE_DIFFERENT_OBSERVER_AS_INPUT
-            )  # noqa: E131
-            .set_dtype_configs(dtype_configs)
-        )
+    bn_configs.extend(
+        BackendPatternConfig(fused_bn)
+        .set_observation_type(
+            ObservationType.OUTPUT_USE_DIFFERENT_OBSERVER_AS_INPUT
+        )  # noqa: E131
+        .set_dtype_configs(dtype_configs)
+        for fused_bn in bn_to_fused_bn.values()
+    )
     return bn_configs
 
 

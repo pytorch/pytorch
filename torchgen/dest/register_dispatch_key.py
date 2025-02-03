@@ -955,10 +955,10 @@ return {sig.name()}({', '.join(e.expr for e in translate(cpp_sig.arguments(), si
             # Go over each output, and check if there is a proxy created for it.
             # If so, copy it over to the original output.
             if k is SchemaKind.out or k is SchemaKind.inplace:
-                for i in range(len(f.func.returns)):
-                    sig_body.append(
-                        f"if (op.proxy_outputs_[{i}].has_value()) op.outputs_[{i}].get().copy_(*op.proxy_outputs_[{i}]);"
-                    )
+                sig_body.extend(
+                    f"if (op.proxy_outputs_[{i}].has_value()) op.outputs_[{i}].get().copy_(*op.proxy_outputs_[{i}]);"
+                    for i in range(len(f.func.returns))
+                )
 
             # Destructively return the final tensors
             # TODO: Do this in translate instead

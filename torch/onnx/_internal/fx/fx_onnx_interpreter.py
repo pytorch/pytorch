@@ -185,11 +185,10 @@ def _retrieve_or_adapt_input_to_graph_set(
             onnxscript_graph_building.TorchScriptTensor
             | None
             | tuple[onnxscript_graph_building.TorchScriptTensor, ...]
-        ] = []
-        for tensor in onnx_tensor:
-            sequence_elements.append(
-                fx_name_to_onnxscript_value[tensor.name] if tensor is not None else None  # type: ignore[index, union-attr]
-            )
+        ] = [
+            fx_name_to_onnxscript_value[tensor.name] if tensor is not None else None  # type: ignore[index, union-attr]
+            for tensor in onnx_tensor
+        ]
         return sequence_elements
     if isinstance(onnx_tensor, torch.dtype):
         onnx_tensor = int(  # type: ignore[call-overload]

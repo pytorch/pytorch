@@ -156,11 +156,10 @@ def reduce_add_coalesced(inputs, destination=None, buffer_size=10485760):
             _flatten_dense_tensors(chunk) for chunk in chunks
         ]  # (num_gpus,)
         flat_result = reduce_add(flat_tensors, destination)
-        for t in _unflatten_dense_tensors(flat_result, chunks[0]):
-            # The unflattened tensors do not share storage, and we don't expose
-            # base flat tensor anyways, so give them different version counters.
-            # See NOTE [ Version Counter in comm.*_coalesced ]
-            output.append(t.data)
+        # The unflattened tensors do not share storage, and we don't expose
+        # base flat tensor anyways, so give them different version counters.
+        # See NOTE [ Version Counter in comm.*_coalesced ]
+        output.extend(t.data for t in _unflatten_dense_tensors(flat_result, chunks[0]))
     return tuple(_reorder_tensors_as(output, ref_order))
 
 
