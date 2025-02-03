@@ -420,7 +420,9 @@ def test_subclasses(gm, inputs, **kwargs):
     ]
     NUM_TENSOR_INPUTS = len(TENSOR_INPUTS_IDXS)
 
-    MAX_NUM_TENSOR_INPUTS_TRANSFORM = 8
+    MAX_NUM_TENSOR_INPUTS_TRANSFORM = int(
+        os.getenv("PYTORCH_TEST_WITH_SUBCLASSES_MAX_NUM_TENSOR_INPUTS_TRANSFORM", default=4)
+    )
 
     TENSOR_INPUTS_TRANSFORM_SEQS = []
     if NUM_TENSOR_INPUTS < MAX_NUM_TENSOR_INPUTS_TRANSFORM:
@@ -428,9 +430,9 @@ def test_subclasses(gm, inputs, **kwargs):
             itertools.product(TRANSFORM_SEQS, repeat=NUM_TENSOR_INPUTS)
         )
     else:
-        seqs = list(itertools.product(TRANSFORM_SEQS, repeat=MAX_NUM_TENSOR_INPUTS))
+        seqs = list(itertools.product(TRANSFORM_SEQS, repeat=MAX_NUM_TENSOR_INPUTS_TRANSFORM))
         TENSOR_INPUTS_TRANSFORM_SEQS = [
-            s
+            list(s)
             + [
                 (),
             ]

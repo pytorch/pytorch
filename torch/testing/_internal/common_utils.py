@@ -1618,7 +1618,7 @@ def skipIfTorchDynamo(msg="test doesn't currently work with dynamo"):
         if not isinstance(fn, type):
             @wraps(fn)
             def wrapper(*args, **kwargs):
-                if TEST_WITH_TORCHDYNAMO:
+                if TEST_WITH_TORCHDYNAMO or TEST_WITH_SUBCLASSES:
                     raise unittest.SkipTest(msg)
                 else:
                     fn(*args, **kwargs)
@@ -1647,6 +1647,26 @@ def skipIfTorchInductor(msg="test doesn't currently work with torchinductor",
 
         assert isinstance(fn, type)
         if condition:
+            fn.__unittest_skip__ = True  # type: ignore[attr-defined]
+            fn.__unittest_skip_why__ = msg  # type: ignore[attr-defined]
+
+        return fn
+
+    return decorator
+
+def skipIfTorchSubclasses(msg="test doesn't currently work with subclasses", condition=TEST_WITH_SUBCLASSES):
+    def decorator(fn):
+        if not isinstance(fn, type):
+            @wraps(fn)
+            def wrapper(*args, **kwargs):
+                if TEST_WITH_SUBCLASSES:
+                    raise unittest.SkipTest(msg)
+                else:
+                    fn(*args, **kwargs)
+            return wrapper
+
+        assert isinstance(fn, type)
+        if TEST_WITH_SUBCLASSES:
             fn.__unittest_skip__ = True  # type: ignore[attr-defined]
             fn.__unittest_skip_why__ = msg  # type: ignore[attr-defined]
 
@@ -3212,6 +3232,9 @@ class TestCase(expecttest.TestCase):
             if TEST_WITH_TORCHINDUCTOR:
                 subdir = "test/inductor_expected_failures"
                 from .dynamo_test_failures import inductor_expected_failures as expected_failures
+            elif TEST_WITH_SUBCLASSES:
+                subdir = "test/subclasses_expected_failures"
+                from .dynamo_test_failures import subclasses_expected_failures as expected_failures
             else:
                 subdir = "test/dynamo_expected_failures"
                 from .dynamo_test_failures import dynamo_expected_failures as expected_failures
@@ -3238,6 +3261,9 @@ class TestCase(expecttest.TestCase):
             if TEST_WITH_TORCHINDUCTOR:
                 subdir = "test/inductor_skips"
                 from .dynamo_test_failures import inductor_skips as skips
+            elif TEST_WITH_SUBCLASSES:
+                subdir = "test/subclasses_skips"
+                from .dynamo_test_failures import subclasses_skips as skips
             else:
                 subdir = "test/dynamo_skips"
                 from .dynamo_test_failures import dynamo_skips as skips
