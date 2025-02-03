@@ -200,20 +200,11 @@ WHEEL_CONTAINER_IMAGES = {
     "cuda-aarch64": f"pytorch/manylinuxaarch64-builder:cuda12.6-{DEFAULT_TAG}",
 }
 
-
-PRE_CXX11_ABI = "pre-cxx11"
 CXX11_ABI = "cxx11-abi"
 RELEASE = "release"
 DEBUG = "debug"
 
 LIBTORCH_CONTAINER_IMAGES: dict[tuple[str, str], str] = {
-    **{
-        (
-            gpu_arch,
-            PRE_CXX11_ABI,
-        ): f"pytorch/manylinux-builder:cuda{gpu_arch}-{DEFAULT_TAG}"
-        for gpu_arch in CUDA_ARCHES
-    },
     **{
         (
             gpu_arch,
@@ -228,7 +219,6 @@ LIBTORCH_CONTAINER_IMAGES: dict[tuple[str, str], str] = {
         ): f"pytorch/libtorch-cxx11-builder:rocm{gpu_arch}-{DEFAULT_TAG}"
         for gpu_arch in ROCM_ARCHES
     },
-    ("cpu", PRE_CXX11_ABI): f"pytorch/manylinux-builder:cpu-{DEFAULT_TAG}",
     ("cpu", CXX11_ABI): f"pytorch/libtorch-cxx11-builder:cpu-{DEFAULT_TAG}",
 }
 
@@ -288,9 +278,7 @@ def generate_libtorch_matrix(
             gpu_arch_type = arch_type(arch_version)
             gpu_arch_version = "" if arch_version == "cpu" else arch_version
             # ROCm builds without-deps failed even in ROCm runners; skip for now
-            if gpu_arch_type == "rocm" and (
-                "without-deps" in libtorch_variant or "pre-cxx11" in abi_version
-            ):
+            if gpu_arch_type == "rocm" and ("without-deps" in libtorch_variant):
                 continue
             ret.append(
                 {
