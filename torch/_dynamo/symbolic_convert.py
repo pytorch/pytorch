@@ -1090,6 +1090,16 @@ class InstructionTranslatorBase(
             except Exception as e:
                 if self.exec_recorder:
                     e.exec_record = self.exec_recorder.get_record()  # type: ignore[attr-defined]
+
+                if "Could not guard on data-dependent" in e.msg:
+                    print(
+                        "\n"
+                        + torch.fx.GraphModule({}, self.output.graph).print_readable(
+                            print_output=False, include_stride=True, include_device=True
+                        ),
+                        file=sys.stderr,
+                    )
+
                 raise
             finally:
                 self.output.pop_tx()
