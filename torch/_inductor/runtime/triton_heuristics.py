@@ -268,6 +268,10 @@ class CachingAutotuner(KernelInterface):
 
     def _precompile_worker(self):
         if self.compile_results:
+            for result in self.compile_results:
+                TritonBundler.put(
+                        triton_hash_to_path_key(result.kernel.hash), self.triton_meta.get("device", 0)
+                    )
             return
         assert not self.launchers
         if not self.configs:
@@ -415,6 +419,7 @@ class CachingAutotuner(KernelInterface):
             for result in self.compile_results:
                 try:
                     launchers.append(result.make_launcher())
+
                 except (OutOfResources, PTXASError) as e:
                     exc = e
         if len(launchers) == 0:
@@ -519,10 +524,7 @@ class CachingAutotuner(KernelInterface):
                 compile_meta,
             )
             raise
-
-        TritonBundler.put(
-            triton_hash_to_path_key(binary.hash), self.triton_meta.get("device", 0)
-        )
+        TritonBundler.put(triton_hash_to_path_key(binary.hash), self.triton_meta.get("device", 0))
         return TritonCompileResult(binary, cfg, compile_meta, self.inductor_meta)
 
     def _get_args_with_constexprs(self, args, launcher):
