@@ -870,7 +870,6 @@ class ClassThatUsesBuildInstructionSomeSlots(ClassThatUsesBuildInstructionAllSlo
     y: int
     c: str
 
-@unittest.skipIf(IS_WINDOWS, "NamedTemporaryFile on windows")
 class TestBothSerialization(TestCase):
     @parametrize("weights_only", (True, False))
     def test_serialization_new_format_old_format_compat(self, device, weights_only):
@@ -4114,7 +4113,6 @@ class TestSerialization(TestCase, SerializationMixin):
 
     @parametrize('path_type', (str, Path))
     @parametrize('weights_only', (True, False))
-    @unittest.skipIf(IS_WINDOWS, "NamedTemporaryFile on windows")
     def test_serialization_mmap_loading_options(self, weights_only, path_type):
         class DummyModel(torch.nn.Module):
             def __init__(self) -> None:
@@ -4139,8 +4137,8 @@ class TestSerialization(TestCase, SerializationMixin):
         input = torch.randn(4, 3)
         self.assertEqual(model_mmap_state_dict(input), model_non_mmap_state_dict(input.clone()))
 
-    @unittest.skipIf(not torch.cuda.is_available() or IS_WINDOWS,
-                     "CUDA is unavailable or NamedTemporaryFile on Windows")
+    @unittest.skipIf(not torch.cuda.is_available(),
+                     "CUDA is unavailable")
     def test_serialization_mmap_loading_with_map_location(self):
         class DummyModel(torch.nn.Module):
             def __init__(self) -> None:
@@ -4236,7 +4234,6 @@ class TestSerialization(TestCase, SerializationMixin):
             self.assertEqual(y, byte_literals)
 
     @parametrize('filename', (True, False))
-    @unittest.skipIf(IS_WINDOWS, "NamedTemporaryFile on windows")
     @unittest.skipIf(IS_FBCODE, "miniz version differs between fbcode and oss")
     def test_filewriter_metadata_writing(self, filename):
         sd = torch.nn.Linear(3, 5).state_dict()
@@ -4464,7 +4461,6 @@ class TestSerialization(TestCase, SerializationMixin):
                 torch._weights_only_unpickler._get_allowed_globals = old_get_allowed_globals
 
     @parametrize("should_import", [False, True])
-    @unittest.skipIf(IS_WINDOWS, "NamedTemporaryFile on windows")
     def test_load_njt_weights_only(self, should_import):
         with tempfile.NamedTemporaryFile() as f:
             njt = torch.nested.nested_tensor([[1, 2, 3], [4, 5]], layout=torch.jagged)
@@ -4554,7 +4550,6 @@ class TestSerialization(TestCase, SerializationMixin):
                     self.assertEqual(opened_zipfile.get_record(".format_version"), b'1')
 
     @parametrize('path_type', (str, Path))
-    @unittest.skipIf(IS_WINDOWS, "TemporaryFileName on windows")
     def test_mmap_load_offset_calculation(self, path_type):
         calculate_offsets_before = serialization_config.load.calculate_storage_offsets
         try:
