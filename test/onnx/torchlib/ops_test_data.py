@@ -368,16 +368,6 @@ def _nonzero_input_wrangler(
     return args, kwargs
 
 
-def _permute_input_wrangler(
-    args: list[Any], kwargs: dict[str, Any]
-) -> tuple[list[Any], dict[str, Any]]:
-    # Change the dims argument back to a list because ONNX Transpose does not
-    # support dynamic perms
-    kwargs["dims"] = args.pop()
-    kwargs["dims"] = kwargs["dims"].tolist()
-    return args, kwargs
-
-
 def _reflection_pad2d_input_wrangler(
     args: list[Any], kwargs: dict[str, Any]
 ) -> tuple[list[Any], dict[str, Any]]:
@@ -814,7 +804,6 @@ TESTED_TORCHLIB_OPS: tuple[TorchLibOpInfo, ...] = (
     TorchLibOpInfo("ge_bool", core_ops.aten_ge_bool),
     TorchLibOpInfo("gt", core_ops.aten_gt),
     TorchLibOpInfo("gt_bool", core_ops.aten_gt_bool),
-    # TorchLibOpInfo("is_same_size", core_ops.aten_is_same_size),  # no test case in OPS_DB
     # TorchLibOpInfo("is_nonzero", core_ops.aten_is_nonzero),  # no test case in OPS_DB
     TorchLibOpInfo("ops.aten.index.Tensor", core_ops.aten_index),
     TorchLibOpInfo("ops.aten.index.Tensor.bool", core_ops.aten_index_bool),
@@ -1190,11 +1179,7 @@ TESTED_TORCHLIB_OPS: tuple[TorchLibOpInfo, ...] = (
         nondeterministic=True,
     ),
     TorchLibOpInfo("ones", core_ops.aten_ones),
-    TorchLibOpInfo(
-        "permute",
-        core_ops.aten_permute,
-        input_wrangler=_permute_input_wrangler,
-    ),
+    TorchLibOpInfo("permute", core_ops.aten_permute),
     TorchLibOpInfo("polar", core_ops.aten_polar),
     TorchLibOpInfo("pow", core_ops.aten_pow),
     TorchLibOpInfo("prod", core_ops.aten_prod).skip(
@@ -1501,8 +1486,14 @@ TESTED_TORCHLIB_OPS: tuple[TorchLibOpInfo, ...] = (
         reason="dtype needs to be specified for non-float tensors",
         dtypes=(torch.float16, torch.int64, torch.int32),
     ),
-    TorchLibOpInfo("argmax", core_ops.aten_argmax),
-    TorchLibOpInfo("argmin", core_ops.aten_argmin),
+    TorchLibOpInfo("argmax", core_ops.aten_argmax).xfail(
+        reason="ORT did not implement argmax for int64",
+        dtypes=(torch.int64,),
+    ),
+    TorchLibOpInfo("argmin", core_ops.aten_argmin).xfail(
+        reason="ORT did not implement argmax for int64",
+        dtypes=(torch.int64,),
+    ),
     TorchLibOpInfo(
         "as_strided",
         core_ops.aten_as_strided,
@@ -2267,6 +2258,6 @@ OP_WITH_SKIPPED_XFAIL_SUBTESTS = frozenset(meta.op_name for meta in SKIP_XFAIL_S
 ALL_OPS_IN_DB = frozenset(op_info.name for op_info in OPS_DB)
 # Assert all ops in OPINFO_FUNCTION_MAPPING are in the OPS_DB
 assert TESTED_OPS.issubset(ALL_OPS_IN_DB), f"{TESTED_OPS - ALL_OPS_IN_DB} not in OPS_DB"
-assert NONDETERMINISTIC_OPS.issubset(
-    TESTED_OPS
-), f"{NONDETERMINISTIC_OPS - TESTED_OPS} not in TESTED_OPS"
+assert NONDETERMINISTIC_OPS.issubset(TESTED_OPS), (
+    f"{NONDETERMINISTIC_OPS - TESTED_OPS} not in TESTED_OPS"
+)

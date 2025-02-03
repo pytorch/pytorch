@@ -283,7 +283,7 @@ def convert_tensor_to_numpy(input: Any) -> Any:
         return input.detach().cpu().numpy()
     if isinstance(input, complex):
         return torch.view_as_real(torch.tensor(input)).detach().cpu().numpy()
-    if isinstance(input, (tuple, list)):
+    if isinstance(input, list):
         if len(input) == 0:
             return np.array((), dtype=np.int64)
         if any(isinstance(x, torch.Tensor) for x in input):
@@ -514,7 +514,7 @@ def graph_executor(
                 input = _tensors.SymbolicTensor(
                     opset=opset,
                     name=input_name,
-                    shape=ir.Shape(torch.tensor(arg).shape),
+                    shape=ir.Shape(arg.shape),
                     type=ir.TensorType(_TORCH_DTYPE_TO_ONNX[torch.tensor(arg).dtype]),
                 )
                 graph.inputs.append(input)
