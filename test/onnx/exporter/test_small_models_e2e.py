@@ -11,6 +11,7 @@ import transformers
 import torch
 from torch.onnx._internal.exporter import _testing as onnx_testing
 from torch.testing._internal import common_utils
+from torch.utils import _pytree as torch_pytree
 
 
 @common_utils.instantiate_parametrized_tests
@@ -125,6 +126,33 @@ class DynamoExporterTest(common_utils.TestCase):
         onnx_testing.assert_onnx_program(onnx_program, args=(torch.tensor([0, 0]),))
         onnx_testing.assert_onnx_program(onnx_program, args=(torch.tensor([43, 43]),))
 
+    def test_onnx_export_control_flow_multi_outputs(self):
+        class CondModel(torch.nn.Module):
+            def forward(self, x):
+                z = torch.ones_like(x)
+
+                def true_fn(x, z):
+                    x = x + 1.0
+                    z = z * 1.0
+                    return x, z
+
+                def false_fn(x, z):
+                    x = x - 1.0
+                    z = z * 0.0
+                    return x, z
+
+                x = torch.cond(x.sum() > 0, true_fn, false_fn, (x, z))
+                return x, z
+
+        onnx_program = torch.onnx.export(
+            CondModel(),
+            (torch.tensor([1, 2]),),
+            dynamo=True,
+            fallback=False,
+        )
+        onnx_testing.assert_onnx_program(onnx_program)
+        onnx_testing.assert_onnx_program(onnx_program, args=(torch.tensor([-1, -2]),))
+
     def test_onnx_export_torchvision_ops(self):
         class VisionModel(torch.nn.Module):
             def __init__(self):
@@ -141,8 +169,6 @@ class DynamoExporterTest(common_utils.TestCase):
         )
         onnx_program = self.export(VisionModel(), args)
         onnx_testing.assert_onnx_program(onnx_program)
-
-    # TODO(justinchuby): Test multi-output HOPs
 
     def test_empty(self):
         def func(x):
@@ -237,6 +263,178 @@ class DynamoExporterTest(common_utils.TestCase):
 
         onnx_program = self.export(PrintModule(), (torch.tensor(1),))
         onnx_testing.assert_onnx_program(onnx_program)
+
+    def test_export_with_dynamic_input(self):
+        class Model(torch.nn.Module):
+            def forward(self, x):
+                return x + 1.0
+
+        dim0 = torch.export.Dim("dim0")
+        onnx_program = self.export(
+            Model(),
+            (torch.randn(2, 3, 4, dtype=torch.float),),
+            dynamic_shapes=({0: dim0},),
+        )
+
+        onnx_testing.assert_onnx_program(
+            onnx_program, args=(torch.randn(3, 3, 4, dtype=torch.float),)
+        )
+
+    def test_export_with_specialized_input_during_tracing(self):
+        class Model(torch.nn.Module):
+            def forward(self, x, y):
+                return x + y
+
+        dim0_x = torch.export.Dim("dim0_x", min=6)
+        dynamic_shapes = {"x": {0: dim0_x}, "y": None}
+        # specialized input y to 5 during tracing
+        onnx_program = self.export(
+            Model(),
+            (
+                torch.ones(7, 5),
+                5,
+            ),
+            dynamic_shapes=dynamic_shapes,
+        )
+
+        onnx_testing.assert_onnx_program(onnx_program, args=(torch.ones(8, 5), 5))
+
+    def test_export_with_none_arg_name_in_dynamic(self):
+        class Model(torch.nn.Module):
+            def forward(self, a, b):
+                return a.sum() + b.sum()
+
+        dim = torch.export.Dim("dim")
+        onnx_program = self.export(
+            Model(),
+            (
+                torch.randn(4, 4),
+                torch.randn(4, 4),
+            ),
+            dynamic_shapes=(None, {0: dim}),
+        )
+
+        test_inputs = (
+            torch.randn(4, 4),
+            torch.randn(7, 4),
+        )
+        onnx_testing.assert_onnx_program(onnx_program, args=test_inputs)
+
+    def test_export_with_non_arg_name_with_kwarg(self):
+        class Model(torch.nn.Module):
+            def forward(self, a, b, kw1, kw2):
+                return a.sum() + b.sum() + kw1.sum() - kw2.sum()
+
+        dim = torch.export.Dim("dim")
+        dim_for_kw1 = torch.export.Dim("dim_for_kw1")
+        onnx_program = self.export(
+            Model(),
+            (torch.randn(4, 4), torch.randn(4, 4)),
+            {"kw2": torch.ones(4, 4), "kw1": torch.zeros(4, 4)},
+            # We are specifying dynamism on the first kwarg even though user passed in
+            # different order
+            dynamic_shapes=(None, {0: dim}, {0: dim_for_kw1}, None),
+        )
+
+        # This should work even if the kwarg order are flipped.
+        onnx_testing.assert_onnx_program(
+            onnx_program,
+            args=(torch.randn(4, 4), torch.randn(7, 4)),
+            kwargs={"kw2": torch.ones(4, 4), "kw1": torch.zeros(9, 4)},
+        )
+
+    def test_export_with_input_lifting_buffers_mutation(self):
+        for persistent in (True, False):
+
+            class CustomModule(torch.nn.Module):
+                def __init__(self) -> None:
+                    super().__init__()
+                    self.register_buffer(
+                        "my_buffer", torch.tensor(4.0), persistent=persistent
+                    )
+
+                def forward(self, x, b):
+                    output = x + b
+                    (
+                        self.my_buffer.add_(1.0) + 3.0
+                    )  # Mutate buffer through in-place addition
+                    return output
+
+            dim = torch.export.Dim("dim")
+            onnx_program = self.export(
+                CustomModule(),
+                (
+                    torch.rand((3, 3), dtype=torch.float32),
+                    torch.randn(3, 3),
+                ),
+                dynamic_shapes=({0: dim}, {0: dim}),
+            )
+
+            onnx_testing.assert_onnx_program(
+                onnx_program,
+                args=(torch.rand((4, 3), dtype=torch.float32), torch.randn(4, 3)),
+            )
+
+    def test_export_with_non_arg_name_with_container_type(self):
+        class Model(torch.nn.Module):
+            def forward(self, a, b):
+                return a[0].sum() + a[1].sum() + b.sum()
+
+        count = 0
+
+        def dynamify_inp(x):
+            # Mark the second input a[1] dynamic
+            nonlocal count
+            if count == 1:
+                dim = torch.export.Dim("dim", min=3)
+                count += 1
+                return {0: dim}
+            count += 1
+            return None
+
+        dynamic_shapes = torch_pytree.tree_map(
+            dynamify_inp,
+            (
+                (torch.randn(4, 4), torch.randn(4, 4)),
+                torch.randn(4, 4),
+            ),
+        )
+        onnx_program = self.export(
+            Model(),
+            (
+                (torch.randn(4, 4), torch.randn(4, 4)),
+                torch.randn(4, 4),
+            ),
+            dynamic_shapes=dynamic_shapes,
+        )
+
+        # NOTE: Careful with the input format. The input format should be
+        # consistent with how the model is exported.
+        onnx_testing.assert_onnx_program(
+            onnx_program,
+            args=((torch.randn(4, 4), torch.randn(6, 4)), torch.randn(4, 4)),
+        )
+
+    def test_export_with_lazy_module_kwargs(self):
+        class LazyModule(torch.nn.modules.lazy.LazyModuleMixin, torch.nn.Module):
+            def initialize_parameters(self, *args, **kwargs):
+                pass
+
+            def forward(self, x, y):
+                return x + y
+
+        m = LazyModule()
+        dim = torch.export.Dim("dim")
+        dynamic_shapes = ({0: dim}, {0: dim})
+        onnx_program = self.export(
+            m,
+            (),
+            {"x": torch.randn(3, 3), "y": torch.randn(3, 3)},
+            dynamic_shapes=dynamic_shapes,
+        )
+
+        inputs = {"x": torch.randn(6, 3), "y": torch.randn(6, 3)}
+        onnx_testing.assert_onnx_program(onnx_program, kwargs=inputs)
 
 
 if __name__ == "__main__":

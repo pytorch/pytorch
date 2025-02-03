@@ -681,12 +681,6 @@ def _use_fb_internal_macros() -> list[str]:
                 "C10_USE_MINIMAL_GLOG",
                 "C10_DISABLE_TENSORIMPL_EXTENSIBILITY",
             ]
-            # TODO: this is to avoid FC breakage for fbcode. When using newly
-            # generated model.so on an older verion of PyTorch, need to use
-            # the v1 version for aoti_torch_create_tensor_from_blob
-            create_tensor_from_blob_v1 = "AOTI_USE_CREATE_TENSOR_FROM_BLOB_V1"
-
-            fb_internal_macros.append(create_tensor_from_blob_v1)
             return fb_internal_macros
         else:
             return []

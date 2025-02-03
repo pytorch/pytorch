@@ -2407,31 +2407,6 @@ def require_channels_last(_, *args, **kwargs):
     return args, kwargs
 
 
-def constrain_to_fake_tensors(args, kwargs, fake_args, fake_kwargs):
-    def apply_constraint(arg, fake_arg):
-        if isinstance(arg, ir.IRNode):
-            meta_stride_expr = [
-                s.node.expr if isinstance(s, torch.SymInt) else s
-                for s in fake_arg.stride()
-            ]
-            return ir.ExternKernel.require_exact_strides(arg, meta_stride_expr)
-        if isinstance(arg, dict):
-            return {
-                key: apply_constraint(arg[key], fake_arg[key]) for key in arg.keys()
-            }
-        elif isinstance(arg, (tuple, list)):
-            return type(arg)(
-                apply_constraint(a, f_a) for (a, f_a) in zip(arg, fake_arg)
-            )
-        return arg
-
-    args = tuple(
-        apply_constraint(arg, fake_arg) for arg, fake_arg in zip(args, fake_args)
-    )
-    kwargs = {k: apply_constraint(v, fake_kwargs[k]) for k, v in kwargs.items()}
-    return args, kwargs
-
-
 def constrain_to_fx_strides(fx_node, *args, **kwargs):
     def apply_constraint(arg, fx_arg):
         if isinstance(arg, ir.IRNode):
@@ -6749,7 +6724,7 @@ def invoke_subgraph(subgraph_fn: ir.Subgraph, identifier: str, operands):
 
 
 @register_lowering(associative_scan_op, type_promotion_kind=None)
-def associative_scan(combine_fn: ir.Subgraph, xs, dim: int):
+def associative_scan(combine_fn: ir.Subgraph, xs):
     from .subgraph_lowering import InputDescriptor, lower_pointwise_subgraph
 
     subgraph_inputs = [
@@ -6764,7 +6739,7 @@ def associative_scan(combine_fn: ir.Subgraph, xs, dim: int):
             *pytree.tree_leaves(rhs),
         )
 
-    kwargs = _make_scan_inner(xs[0], axis=dim, dtype=None)
+    kwargs = _make_scan_inner(xs[0], axis=0, dtype=None)
     kwargs["dtypes"] = tuple(x.get_dtype() for x in xs)
     kwargs["inner_fns"] = tuple(x.make_loader() for x in xs)
     result = ir.Scan.create(
