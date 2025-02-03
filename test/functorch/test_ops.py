@@ -27,6 +27,7 @@ from common_utils import (
     tol1,
     tol2,
     xfail,
+    skipIfTorchSubclasses,
 )
 from functorch_additional_op_db import additional_op_db
 
@@ -2172,6 +2173,7 @@ class TestOperators(TestCase):
                 cotangents = torch.randn_like(result, device=device)
                 self._compare_jacobians_of_vjp(fn, (cotangents, input))
 
+    @skipIfTorchSubclasses("TBD")
     def test_extremal_numerics_l1_loss(self, device):
         N, C, H, W = 3, 4, 5, 6
         shapes = ((N, C), (N, C, H), (N, C, H, W))
@@ -2234,6 +2236,7 @@ class TestOperators(TestCase):
                     torch.nn.functional.log_softmax, (cotangents, input)
                 )
 
+    @skipIfTorchSubclasses("TBD")
     def test_extremal_numerics_cross_entropy(self, device):
         N, C = 3, 4
         d1, d2, d3 = 5, 6, 7
@@ -2286,6 +2289,7 @@ class TestOperators(TestCase):
                     fn, (cotangents, input), atol_rtol=(1e-4, 1e-5)
                 )
 
+    @skipIfTorchSubclasses("TBD")
     def test_extremal_numerics_binary_cross_entropy(self, device):
         N, C, H, W = 3, 4, 5, 6
         shapes = ((N, C), (N, C, H), (N, C, H, W))
