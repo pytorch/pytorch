@@ -625,9 +625,6 @@ class UserDefinedClassVariable(UserDefinedVariable):
             )
 
             return tensor_variable
-        elif issubclass(self.value, enum.Enum) and len(args) == 1 and not kwargs:
-            options = {"mutation_type": ValueMutationNew()}
-            return variables.EnumVariable.create(self.value, args[0], options)
         elif self.value is random.Random:
             if len(args) == 1 and isinstance(args[0], variables.ConstantVariable):
                 seed = args[0].value
