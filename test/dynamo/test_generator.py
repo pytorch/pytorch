@@ -35,22 +35,6 @@ class GeneratorTestsBase(torch._dynamo.test_case.TestCase):
 
 
 class GeneratorTests(GeneratorTestsBase):
-    expected_failures = []
-
-    def run(self, result=None):
-        # Override the run method to inject the "expectingFailure" marker
-        # when the test case runs.
-        marker = "__unittest_expecting_failure__"
-        for test_name in dir(self):
-            test_method = getattr(self, test_name)
-            if test_name.startswith("test_") and not getattr(
-                test_method, marker, False
-            ):
-                getattr(self, test_name).__dict__[marker] = (
-                    test_name in self.expected_failures
-                )
-        return super().run(result=result)
-
     def test_generator_simple(self):
         def whoo():
             yield 1
