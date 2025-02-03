@@ -565,8 +565,9 @@ def graph_executor(
         # We need to set the size of the output tensors for the ONNX model to be valid
         for output, symbolic_output in zip(outputs, symbolic_outputs):
             if isinstance(output, Sequence):
-                # Output is a sequence, skip setting the type and leave it
-                # for ONNX shape_inference to handle
+                # Output is a sequence
+                elem_dtype = _TORCH_DTYPE_TO_ONNX[output[0].dtype]
+                symbolic_output.type = ir.SequenceType(ir.TensorType(elem_dtype))
                 continue
             output = (
                 output

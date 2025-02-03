@@ -7242,7 +7242,9 @@ def aten_remainder(self: TFloat, other: TFloat) -> TFloat:
     return op.Sub(self, op.Mul(rounded_quotient, other))
 
 
-@onnx_impl((aten.remainder.Tensor, aten.remainder.Scalar, operator.mod), trace_only=True)
+@onnx_impl(
+    (aten.remainder.Tensor, aten.remainder.Scalar, operator.mod), trace_only=True
+)
 def aten_remainder_int(self: TInt, other: TInt) -> TInt:
     """remainder.Tensor(Tensor self, Tensor other) -> Tensor"""
 
