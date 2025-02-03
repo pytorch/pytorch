@@ -597,6 +597,20 @@ class DecoratorTests(torch._dynamo.test_case.TestCase):
 
         self.assertEqual(fn(x, y), torch.compile(fn)(x, y))
 
+    def test_assume_constant_result_on_class_method(self):
+        class A:
+            def __init__(self):
+                self.value = 123
+
+            @torch._dynamo.assume_constant_result
+            def b(self):
+                return self.value
+
+        def fn():
+            return A().b()
+
+        self.assertEqual(fn(), torch.compile(fn)())
+
     @torch._dynamo.config.patch("inline_inbuilt_nn_modules", True)
     def test_mark_static_nn_module(self):
         @torch._dynamo.mark_static
