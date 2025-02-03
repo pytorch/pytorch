@@ -975,6 +975,10 @@ class FunctoolsPartialVariable(VariableTracker):
         self.args = args
         assert isinstance(keywords, dict)
         self.keywords = keywords
+        self.attrs_via_dict = set()
+
+    def python_type(self):
+        return functools.partial
 
     def reconstruct(self, codegen):
         codegen.add_push_null(lambda: codegen.load_import_from("functools", "partial"))
@@ -1011,6 +1015,36 @@ class FunctoolsPartialVariable(VariableTracker):
         return variables.ConstantVariable.create(
             hasattr(functools.partial(identity), name)
         )
+
+    # def call_method(
+    #     self,
+    #     tx: "InstructionTranslator",
+    #     name: str,
+    #     args: "list[VariableTracker]",
+    #     kwargs: "dict[str, VariableTracker]",
+    # ) -> "VariableTracker":
+    #     if name == "__setitem__":
+    #         breakpoint()
+    #     return super().call_method(tx, name, args, kwargs)
+
+    def var_getattr(self, tx: "InstructionTranslator", name: str):
+        # functools.partial uses __slots__ where one of the item is a __dict__.
+        # So, we look into __slots__ first, and then __dict__.
+
+        source = self.source and AttrSource(self.source, name)
+        # Handle __slots__
+        if name == "func":
+            return self.func
+        if name == "args":
+            return variables.ListVariable(self.args, source=source)
+        if name == "keywords":
+            items = {ConstantVariable.create(k): v for k, v in self.keywords.items()}
+            return variables.ConstDictVariable(items, source=source)
+
+        if name in self.attrs_via_dict:
+            return VariableTracker.build(tx, getattr(functools.partial, name), source)
+
+        raise_observed_exception(AttributeError, tx)
 
     def as_python_constant(self):
         return functools.partial(
