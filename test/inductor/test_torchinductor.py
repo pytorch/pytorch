@@ -9286,18 +9286,13 @@ class CommonTemplate:
             # the triton signature specializes on 1 vs non-1, you might get 1
             # or 2 kernels. In newer versions of triton, there's no specialization
             # so we get only 1 kernel.
-            from torch._inductor.utils import triton_version_uses_attrs_dict
-
-            expected_kernels = 1 if triton_version_uses_attrs_dict() else 2
-            self.assertEqual(fw_code.count("tl.rand"), expected_kernels)
+            self.assertEqual(fw_code.count("tl.rand"), 2)
             self.assertEqual(bw_code.count("tl.rand"), 0)
         self.assertEqual(torch._inductor.metrics.generated_kernel_count, 4)
 
     def test_randint_kernel_count(self):
         if self.device != GPU_TYPE:
             raise unittest.SkipTest("Only valid for GPU!")
-
-        from torch._inductor.utils import triton_version_uses_attrs_dict
 
         @torch._dynamo.optimize_assert("inductor")
         def fn1():
@@ -9314,10 +9309,7 @@ class CommonTemplate:
         # the triton signature specializes on 1 vs non-1, you might get 1
         # or 2 kernels. In newer versions of triton, there's no specialization
         # so we get only 1 kernel.
-        expected_kernels = 1 if triton_version_uses_attrs_dict() else 2
-        self.assertEqual(
-            source_codes[0].count("async_compile.triton"), expected_kernels
-        )
+        self.assertEqual(source_codes[0].count("async_compile.triton"), 2)
 
     def test_roll(self):
         def fn(a):
@@ -12370,7 +12362,7 @@ def copy_tests(
                 new_test = unittest.expectedFailure(new_test)
 
             tf = test_failures and test_failures.get(name)
-            if tf is not None and suffix in tf.suffixes:
+            if tf and suffix in tf.suffixes:
                 skip_func = (
                     unittest.skip("Skipped!")
                     if tf.is_skip

@@ -3428,6 +3428,52 @@ print(f"{{r1}}, {{r2}}")
             with self.assertRaisesRegex(RuntimeError, error_msg):
                 torch.cuda.gds._GdsFile(f, os.O_CREAT | os.O_RDWR)
 
+    def test_is_pinned_no_context(self):
+        test_script = """\
+import torch
+import multiprocessing
+
+
+def fork_and_check_is_pinned():
+    # Create a pipe to communicate between parent and child processes
+    parent_conn, child_conn = multiprocessing.Pipe()
+
+    def worker(conn):
+        try:
+            x = torch.randn(10)
+            x.is_pinned(device="cuda")
+            x = torch.ones(10, device="cuda")[0].item()
+            conn.send(x)
+        except Exception as e:
+            conn.send(str(e))
+        finally:
+            conn.close()
+    # Fork a new process
+    p = multiprocessing.Process(target=worker, args=(child_conn,))
+    p.start()
+    # Receive the result from the child process
+    result = parent_conn.recv()
+    parent_conn.close()
+    # Wait for the child process to finish
+    p.join()
+    if isinstance(result, str) and result.startswith("Error"):
+        raise RuntimeError(result)
+    return result
+
+x = torch.randn(10)
+# check that is_pinned won't poison future fork
+x.is_pinned(device="cuda")
+ret = fork_and_check_is_pinned()
+print(ret)
+
+"""
+        r = (
+            subprocess.check_output([sys.executable, "-c", test_script])
+            .decode("ascii")
+            .strip()
+        )
+        self.assertEqual(r, "1.0")
+
 
 @unittest.skipIf(not TEST_CUDA, "CUDA not available, skipping tests")
 @torch.testing._internal.common_utils.markDynamoStrictTest

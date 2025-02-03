@@ -48,6 +48,23 @@ class TestSplitCat(torch.nn.Module):
         return cat_1
 
 
+class TestSelectCat(torch.nn.Module):
+    def __init__(self) -> None:
+        super().__init__()
+
+    def forward(self, x: torch.Tensor):
+        select = torch.ops.aten.select.int(x, 1, 0)
+        select_1 = torch.ops.aten.select.int(x, 1, 1)
+        select_2 = torch.ops.aten.select.int(x, 1, 2)
+        select_3 = torch.ops.aten.select.int(x, 1, 3)
+        select_4 = torch.ops.aten.select.int(x, 1, 4)
+        select_5 = torch.ops.aten.select.int(x, 1, 5)
+        cat = torch.ops.aten.cat.default(
+            [select, select_1, select_2, select_3, select_4, select_5], 1
+        )
+        return cat
+
+
 class TestSplitCatAten(TestCase):
     def compare_dict_tensors(self, ref_dict, res_dict, rtol=1e-3, atol=1e-3):
         if len(set(ref_dict.keys())) != len(set(res_dict.keys())):
@@ -97,6 +114,30 @@ class TestSplitCatAten(TestCase):
         self.compare_pred(module, traced, inputs)
         self.assertEqual(counters["inductor"]["normalization_aten_pass"], 3)
         self.assertEqual(counters["inductor"]["split_cat_aten_pass"], 1)
+        self.assertEqual(ref, res, rtol=1e-8, atol=1e-8)
+        self.compare_parameters(module, traced, rtol=1e-8, atol=1e-8)
+        counters.clear()
+
+    @requires_cuda
+    @torch._inductor.config.patch(
+        pre_grad_fusion_options={},
+        post_grad_fusion_options={
+            "normalization_aten_pass": {},
+            "select_cat_aten_pass": {},
+        },
+    )
+    def test_select_cat_post_grad(self):
+        counters.clear()
+        inputs = [
+            torch.randn(1024, 6, 128, device=torch.device(device=GPU_TYPE)),
+        ]
+        module = TestSelectCat()
+        traced = torch.compile(module)
+        ref = module(*inputs)
+        res = traced(*inputs)
+        self.compare_pred(module, traced, inputs)
+        self.assertEqual(counters["inductor"]["normalization_aten_pass"], 1)
+        self.assertEqual(counters["inductor"]["select_cat_aten_pass"], 1)
         self.assertEqual(ref, res, rtol=1e-8, atol=1e-8)
         self.compare_parameters(module, traced, rtol=1e-8, atol=1e-8)
         counters.clear()

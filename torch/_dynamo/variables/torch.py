@@ -5,6 +5,7 @@ import inspect
 import logging
 import math
 import re
+from collections.abc import Sequence
 from typing import TYPE_CHECKING
 
 import torch._C
@@ -207,7 +208,7 @@ class BaseTorchVariable(VariableTracker):
     def as_python_constant(self):
         return self.value
 
-    def call_hasattr(self, tx: "InstructionTranslator", name):
+    def call_obj_hasattr(self, tx: "InstructionTranslator", name):
         result = hasattr(self.value, name)
         return variables.ConstantVariable.create(result)
 
@@ -242,7 +243,7 @@ class TorchCtxManagerClassVariable(BaseTorchVariable):
     def call_function(
         self,
         tx: "InstructionTranslator",
-        args: "list[VariableTracker]",
+        args: Sequence[VariableTracker],
         kwargs: "dict[str, VariableTracker]",
     ) -> "VariableTracker":
         from . import (
@@ -654,6 +655,16 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                     tx, [args[0], result], {}
                 )
 
+        @register(torch.full)
+        def handle_full(self, tx, size, fill_value, **kwargs):
+            if isinstance(fill_value, TensorVariable):
+                result = TorchInGraphFunctionVariable(
+                    torch.ops.aten._local_scalar_dense
+                ).call_function(tx, [fill_value], {})
+                return TorchInGraphFunctionVariable(torch.full).call_function(
+                    tx, [size, result], kwargs
+                )
+
         @register(torch._foreach_lerp_)
         def handle_inplace_foreach_lerp_scalar(
             _, tx: "InstructionTranslator", *args, **kwargs
@@ -931,7 +942,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
     def call_function(
         self,
         tx: "InstructionTranslator",
-        args: "list[VariableTracker]",
+        args: Sequence[VariableTracker],
         kwargs: "dict[str, VariableTracker]",
     ) -> "VariableTracker":
         from . import ConstantVariable, SymNodeVariable, TensorVariable
