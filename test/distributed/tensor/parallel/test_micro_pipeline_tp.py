@@ -46,7 +46,9 @@ def _make_post_grad_fx(f, *inps):
     return gm
 
 
-def _fp8_all_gather(tensor: torch.Tensor, gather_dim: int, group_name: str):
+def _fp8_all_gather(
+    tensor: torch.Tensor, gather_dim: int, group_name: str
+) -> torch.Tensor:
     # We don't yet have a canonical pattern for fp8 all-gather. This is a
     # pattern observed in DTensor + float8_experimental.
     ag = all_gather_tensor(tensor, gather_dim=0, group=group_name)
@@ -82,14 +84,14 @@ class MicroPipelineTPTest(TestCase):
     def test_find_all_gather_patterns(self):
         group = dist.group.WORLD
 
-        def func(inp: torch.Tensor) -> torch.Tensor:
+        def func(
+            inp: torch.Tensor,
+        ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
             a = all_gather_tensor(inp, gather_dim=0, group=group.group_name)
             b = all_gather_tensor(inp, gather_dim=1, group=group.group_name)
             c = _fp8_all_gather(inp, gather_dim=0, group_name=group.group_name)
-            d = _fp8_all_gather(  # noqa: F841
-                inp, gather_dim=1, group_name=group.group_name
-            )
-            return a, b, c
+            d = _fp8_all_gather(inp, gather_dim=1, group_name=group.group_name)
+            return a, b, c, d
 
         inp = torch.rand(64, 32, device="cuda")
 
@@ -401,7 +403,7 @@ class MicroPipelineTPTest(TestCase):
     @parametrize("shard_dim", [0, 1])
     @fresh_inductor_cache()
     def test_dtensor_seq_par(self, shard_dim: int):
-        model = MLPModule(device="cuda", bias=False)
+        model: torch.nn.Module = MLPModule(device="cuda", bias=False)
         device_mesh = DeviceMesh(
             "cuda",
             torch.arange(0, self.world_size),

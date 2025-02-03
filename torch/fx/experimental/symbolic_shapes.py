@@ -6577,7 +6577,11 @@ class ShapeEnv:
             )
             if static_expr is not None:
                 self.log.debug(
-                    "eval %s == %s [statically known]", orig_expr, static_expr
+                    "eval %s == %s [statically known]",
+                    f"size_oblivious({orig_expr})"
+                    if size_oblivious
+                    else size_oblivious,
+                    static_expr,
                 )
                 if hint is not None:
                     assert static_expr == hint, f"{static_expr} != {hint}"
