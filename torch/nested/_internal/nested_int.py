@@ -248,6 +248,8 @@ def _nested_assert_metadata_equal(
         return _DEVICE_PAIR_SCORES[(candidate[0][0], candidate[1][0])]
 
     candidates = sorted(candidates, key=score)
+    if len(candidates) == 0:
+        raise RuntimeError(msg)
     pair = candidates[0]
 
     _lhs = getattr(lhs, src_field_name(pair[0][0], pair[0][1]))
