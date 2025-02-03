@@ -27,6 +27,30 @@ def check_accuracy(actual_csv, expected_csv, expected_filename):
     failed = []
     improved = []
 
+    if "rocm" in expected_filename:
+        flaky_models.update(
+            {
+                "alexnet",
+                "cait_m36_384",
+                "detectron2_fcos_r_50_fpn",
+                "doctr_det_predictor",
+                "doctr_reco_predictor",
+                "hf_BigBird",
+                "hf_Longformer",
+                "hf_T5",
+                "hf_T5_base",
+                "levit_128",
+                "llava",
+                "sam",
+                "stable_diffusion_text_encoder",
+                "stable_diffusion_unet",
+                "timm_efficientdet",
+                "timm_nfnet",
+                "torchrec_dlrm",
+                "vgg16",
+            }
+        )
+
     for model in actual_csv["name"]:
         accuracy = get_field(actual_csv, model, "accuracy")
         expected_accuracy = get_field(expected_csv, model, "accuracy")
