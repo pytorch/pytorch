@@ -15,7 +15,7 @@ from torch._higher_order_ops.triton_kernel_wrap import (
     triton_kernel_wrapper_mutation,
 )
 from torch._inductor import metrics
-from torch._inductor.utils import run_and_get_code
+from torch._inductor.utils import run_and_get_code, triton_version_uses_attrs_dict
 from torch._library import capture_triton
 from torch.testing import FileCheck
 from torch.testing._internal import common_utils
@@ -1231,8 +1231,6 @@ def forward(self, x_1, output_1):
     @requires_gpu
     @common_utils.parametrize("dynamic", [False, True])
     def test_triton_kernel_equal_to_1_arg(self, dynamic):
-        from torch._inductor.utils import triton_version_uses_attrs_dict
-
         @triton.jit
         def add_kernel_half_n_elements(
             in_ptr0,
@@ -1282,8 +1280,6 @@ def forward(self, x_1, output_1):
     @requires_gpu
     @common_utils.parametrize("dynamic", [False, True])
     def test_triton_kernel_equal_to_1_float_arg(self, dynamic):
-        from torch._inductor.utils import triton_version_uses_attrs_dict
-
         def f(x, y):
             out = torch.empty_like(x)
             n_elements = x.numel()
@@ -2262,6 +2258,55 @@ def forward(self, arg0_1, arg1_1):
         expected = x + 3.14
         actual = torch.compile(fn)(x)
         self.assertEqual(expected, actual)
+
+    @requires_gpu
+    @unittest.skipIf(
+        not triton_version_uses_attrs_dict(),
+        "Test is only valid for new triton versions where attrs is represented by a raw dict",
+    )
+    def test_triton_attrs_dict_equal_1_None_format(self):
+        @triton.jit
+        def triton_(in_ptr, out_ptr, numel, add_amount, BLOCK_SIZE: tl.constexpr):
+            offsets = tl.arange(0, BLOCK_SIZE)
+            x = tl.load(in_ptr + offsets, mask=(offsets < numel))
+            output = x * x
+            if add_amount is not None:
+                output = output + add_amount
+            tl.store(out_ptr + offsets, output, mask=(offsets < numel))
+
+        def fn(x):
+            y = torch.empty_like(x)
+            BLOCK_SIZE = 256
+            grid = (1,)
+            triton_[grid](x, y, x.numel(), None, BLOCK_SIZE)
+            return y
+
+        x = torch.full((1,), 2.5, device=GPU_TYPE)
+        expected = fn(x)
+
+        fn_c = torch.compile(fn)
+        res, code = run_and_get_code(fn_c, x)
+        self.assertEqual(expected, res)
+
+        FileCheck().check("triton_meta=").check("'constants':").check("'numel': 1").run(
+            code[0]
+        )
+        FileCheck().check("triton_meta=").check("'constants':").check(
+            "'add_amount': None"
+        ).run(code[0])
+        FileCheck().check("triton_meta=").check("'constants':").check(
+            "'BLOCK_SIZE': 256"
+        ).run(code[0])
+
+        FileCheck().check("triton_meta=").check("'signature':").check(
+            "'numel': 'constexpr'"
+        ).run(code[0])
+        FileCheck().check("triton_meta=").check("'signature':").check(
+            "'add_amount': 'constexpr'"
+        ).run(code[0])
+        FileCheck().check("triton_meta=").check("'signature':").check(
+            "'BLOCK_SIZE': 'constexpr'"
+        ).run(code[0])
 
 
 def make_mutation_test(fn):
