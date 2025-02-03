@@ -25,7 +25,7 @@ from torch.testing._internal.common_device_type import (
     largeTensorTest,
     onlyCPU,
     onlyCUDA,
-    onlyNativeDeviceTypes,
+    onlyNativeDeviceTypesAnd,
     skipMPS,
     TEST_WITH_ROCM,
 )
@@ -52,17 +52,17 @@ FP16_REDUCED_PRECISION = {"atol": 1e-5, "rtol": 1e-4}
 
 
 def rosenbrock(tensor):
-    assert tensor.size() == torch.Size(
-        [2]
-    ), f"Requires tensor with 2 scalars but got {tensor.size()}"
+    assert tensor.size() == torch.Size([2]), (
+        f"Requires tensor with 2 scalars but got {tensor.size()}"
+    )
     x, y = tensor
     return (1 - x) ** 2 + 100 * (y - x**2) ** 2
 
 
 def drosenbrock(tensor):
-    assert tensor.size() == torch.Size(
-        [2]
-    ), f"Requires tensor with 2 scalars but got {tensor.size()}"
+    assert tensor.size() == torch.Size([2]), (
+        f"Requires tensor with 2 scalars but got {tensor.size()}"
+    )
     x, y = tensor
     return torch.stack((-400 * x * (y - x**2) - 2 * (1 - x), 200 * (y - x**2)))
 
@@ -1099,7 +1099,7 @@ class TestOptimRenewed(TestCase):
             p.grad = torch.rand_like(p)
         optimizer.step()
 
-    @onlyNativeDeviceTypes
+    @onlyNativeDeviceTypesAnd(["hpu"])
     @largeTensorTest("64GB")
     @optims(
         [optim for optim in optim_db if "fused" in optim.supported_impls],
