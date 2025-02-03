@@ -205,7 +205,7 @@ mkldnn_gemm(
 // introduce heuristic to validate dispatch to MKLDNN
 // (m * n * k <= 16 * 16 * 16)
   bool bf16_usable = std::is_same_v<scalar_t, c10::BFloat16> && use_mkldnn_bf16_matmul();
-  if ( !(bf16_usable) ) {
+  if (!bf16_usable) {
     return false;
   }
 
