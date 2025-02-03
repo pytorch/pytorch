@@ -175,7 +175,6 @@ from .misc import (
     DelayGraphBreakVariable,
     GetAttrVariable,
     GetSetDescriptorVariable,
-    InspectSignatureVariable,
     LambdaVariable,
     LoggingLoggerVariable,
     MethodWrapperVariable,
@@ -486,14 +485,6 @@ class VariableBuilder:
         from ..comptime import comptime
 
         entries = [
-            (
-                inspect.signature,
-                lambda self, value: LambdaVariable(
-                    InspectSignatureVariable.create,
-                    source=self.source,
-                    **self.install_guards(GuardBuilder.CLOSURE_MATCH),
-                ),
-            ),
             (comptime, lambda self, value: ComptimeVariable()),
             (
                 dataclasses.fields,

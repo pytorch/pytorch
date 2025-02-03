@@ -3145,7 +3145,6 @@ BUILTIN_SKIPLIST = (
     abc,
     collections,
     copy,
-    inspect,
     random,
     traceback,
     linecache,
