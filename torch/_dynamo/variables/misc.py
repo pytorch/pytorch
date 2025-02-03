@@ -669,8 +669,13 @@ class AutogradFunctionVariable(VariableTracker):
         # General case.
         try:
             attr_value = getattr(self.fn_cls, name)
-            if self.source:
-                attr_source = AttrSource(self.source, name)
+            source = self.source
+            if source is None:
+                source = AttrSource(
+                    tx.import_source(self.fn_cls.__module__), self.fn_cls.__name__
+                )
+            if source:
+                attr_source = AttrSource(source, name)
                 return VariableBuilder(tx, attr_source)(attr_value)
             else:
                 return SourcelessBuilder.create(tx, attr_value)
