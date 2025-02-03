@@ -324,16 +324,16 @@ static bool copy_requires_temporaries(TensorIterator& iter, bool p2p_enabled) {
   bool broadcast =  broadcast_required(iter.tensor(0), iter.tensor(1));
 
   if (iter.ndim() == 2 && same_dtype && !broadcast && !is_complex) {
-    
+
     size_t element_size = iter.tensor(1).element_size();
-    int64_t dim0 = iter.shape()[0];           
-    int64_t dim1 = iter.ndim() > 1 ? iter.shape()[1] : 1; 
+    int64_t dim0 = iter.shape()[0];
+    int64_t dim1 = iter.ndim() > 1 ? iter.shape()[1] : 1;
 
-    int64_t src_stride0 = iter.strides(1)[0];   
-    int64_t src_stride1 = iter.ndim() > 1 ? iter.strides(1)[1] : 1;  
+    int64_t src_stride0 = iter.strides(1)[0];
+    int64_t src_stride1 = iter.ndim() > 1 ? iter.strides(1)[1] : 1;
 
-    int64_t dst_stride0 = iter.strides(0)[0];   
-    int64_t dst_stride1 = iter.ndim() > 1 ? iter.strides(0)[1] : 1;  
+    int64_t dst_stride0 = iter.strides(0)[0];
+    int64_t dst_stride1 = iter.ndim() > 1 ? iter.strides(0)[1] : 1;
 
     // Check for row-major contiguous data
     bool src_row_contiguous = (src_stride1 == 1);
