@@ -842,7 +842,7 @@ class Tracer(TracerBase):
         except RuntimeError as e:
             if (
                 isinstance(e.args[0], str)
-                and "Could not guard on data-dependent" in e.args[0]
+                and "data-dependent" in e.args[0]
             ):
                 print(
                     "\n"

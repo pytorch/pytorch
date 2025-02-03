@@ -1088,7 +1088,7 @@ class InstructionTranslatorBase(
             except BackendCompilerFailed:
                 raise
             except RuntimeError as e:
-                if hasattr(e, "msg") and "Could not guard on data-dependent" in e.msg:
+                if hasattr(e, "msg") and "data-dependent" in e.msg:
                     print(
                         "\n"
                         + torch.fx.GraphModule({}, self.output.graph).print_readable(
