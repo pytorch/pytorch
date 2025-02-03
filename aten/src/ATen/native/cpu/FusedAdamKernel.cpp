@@ -209,7 +209,7 @@ std::enable_if_t<
         Vec(scalar_t(exp_avg_sq_grad_coefficient)) * grad_vec * grad_vec;
     if (exp_avg_grad_coefficient < 1){
       exp_avg_vec.store(exp_avg_ptr + d);
-    } 
+    }
     exp_avg_sq_vec.store(exp_avg_sq_ptr + d);
 
     Vec denom_vec;
