@@ -4724,6 +4724,25 @@ def sample_inputs_glu(self, device, dtype, requires_grad, **kwargs):
             if dim_size > 0 and dim_size % 2 == 0:
                 yield SampleInput(input_tensor, dim)
 
+def sample_inputs_swiglu(self, device, dtype, requires_grad, **kwargs):
+    features_options = [[2], [2, 4], [8, 8], [8, 6, 8], [4, 4, 6, 10]]
+    batch_options: list[list[int]] = [
+        [],  # no batch
+        [0],
+        [8],
+        [2, 4],
+    ]
+    create_tensor = partial(make_tensor, device=device, dtype=dtype,
+                            requires_grad=requires_grad, low=-2, high=2)
+
+    for features, batch_shape in itertools.product(features_options, batch_options):
+        ndim = len(features) + len(batch_shape)
+        for dim in range(ndim):
+            input_tensor = create_tensor(batch_shape + features)
+            dim_size = input_tensor.size(dim)
+            if dim_size > 0 and dim_size % 2 == 0:
+                yield SampleInput(input_tensor, dim)
+
 def sample_inputs_interpolate(mode, self, device, dtype, requires_grad, **kwargs):
     N, C = 2, 3
     D = 4
@@ -16059,6 +16078,15 @@ op_db: list[OpInfo] = [
            # Runs very slowly on slow gradcheck - alternatively reduce input sizes
            gradcheck_fast_mode=True,
            sample_inputs_func=sample_inputs_glu,
+           dtypes=floating_types_and(torch.bfloat16, torch.float16),
+           supports_forward_ad=True,
+           supports_fwgrad_bwgrad=True,
+           supports_out=False),
+    OpInfo('nn.functional.swiglu',
+           aten_name='swiglu',
+           # Runs very slowly on slow gradcheck - alternatively reduce input sizes
+           gradcheck_fast_mode=True,
+           sample_inputs_func=sample_inputs_swiglu,
            dtypes=floating_types_and(torch.bfloat16, torch.float16),
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
