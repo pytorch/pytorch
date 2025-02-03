@@ -79,12 +79,14 @@ FrameState* extract_frame_state(ExtraState* extra_state) {
   return (FrameState*)extra_state->frame_state.ptr();
 }
 
-Action extra_state_get_action(ExtraState* extra_state) {
-  return extra_state->action;
+FrameExecStrategy extra_state_get_exec_strategy(ExtraState* extra_state) {
+  return extra_state->strategy;
 }
 
-void extra_state_set_action(ExtraState* extra_state, Action action) {
-  extra_state->action = action;
+void extra_state_set_exec_strategy(
+    ExtraState* extra_state,
+    FrameExecStrategy strategy) {
+  extra_state->strategy = strategy;
 }
 
 ExtraState* get_extra_state(PyCodeObject* code) {

@@ -692,7 +692,7 @@ static PyObject* skip_code(PyObject* dummy, PyObject* obj) {
   if (extra == NULL) {
     extra = init_and_set_extra_state(code);
   }
-  extra_state_set_action(extra, (Action){SKIP, DEFAULT});
+  extra_state_set_exec_strategy(extra, (FrameExecStrategy){SKIP, DEFAULT});
   Py_RETURN_NONE;
 }
 

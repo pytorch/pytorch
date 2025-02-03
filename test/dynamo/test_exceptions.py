@@ -411,6 +411,46 @@ class ExceptionTests(torch._dynamo.test_case.TestCase):
         with self.assertRaises(SpeculationLogDivergence):
             log.next("bad", 58, "bad", Instruction(2, "different", 2, 2))
 
+    def test_dict_pop(self):
+        # Pattern from inspect.bind
+        def fn(dt, x):
+            try:
+                dt.pop("b")
+            except KeyError:
+                return torch.sin(x)
+            else:
+                return torch.cos(x)
+
+        d = {"a": 1}
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+
+        x = torch.randn(4)
+        self.assertEqual(fn(d, x), opt_fn(d, x))
+        self.assertEqual(fn({"a": 1, "b": 2}, x), opt_fn({"a": 1, "b": 2}, x))
+
+    def test_block_stack_cleanup(self):
+        params = {
+            "a": 3,
+            "b": 4,
+            "c": 5,
+        }
+
+        dt = {
+            "c": 5,
+        }
+
+        def fn(x):
+            for name in params:
+                try:
+                    x = x * dt[name]
+                except KeyError:
+                    x = x * torch.sin(x)
+            return x
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        x = torch.randn(4)
+        self.assertEqual(fn(x), opt_fn(x))
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests

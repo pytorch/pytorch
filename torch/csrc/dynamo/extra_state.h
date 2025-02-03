@@ -21,15 +21,15 @@ extern "C" {
 #endif
 
 enum FrameAction {
-  DEFAULT,
-  SKIP,
-  RUN_ONLY,
+  DEFAULT, // look through the cache, compile if not found
+  SKIP, // eager
+  RUN_ONLY, // look through the cache, run eager if not found
 };
 
-typedef struct Action {
-  enum FrameAction frame_action;
-  enum FrameAction recursive_action;
-} Action;
+typedef struct FrameExecStrategy {
+  enum FrameAction cur_action; // action to take for current frame
+  enum FrameAction recursive_action; // action to take for recursive frames
+} FrameExecStrategy;
 
 // Points to the extra scratch space on the code object
 extern Py_ssize_t extra_index;
@@ -55,7 +55,8 @@ typedef struct VISIBILITY_HIDDEN ExtraState {
   std::list<CacheEntry> cache_entry_list;
   // Frame state to detect dynamic shape dims
   py::dict frame_state;
-  Action action{DEFAULT, DEFAULT};
+  // Actions to apply to all frames with this code object
+  FrameExecStrategy strategy{DEFAULT, DEFAULT};
 
   ExtraState(PyCodeObject* orig_code_arg);
   CacheEntry* get_first_entry();
@@ -86,17 +87,18 @@ CacheEntry* extract_cache_entry(ExtraState* extra_state);
 //  - extra_state->frame_state: Borrowed.
 FrameState* extract_frame_state(ExtraState* extra_state);
 
-// Returns the Action stored in extra_state.
+// Returns the FrameExecStrategy stored in extra_state.
 // Ownership contract
 // args
 //  - extra_state: Borrowed
-Action extra_state_get_action(ExtraState* extra_state);
+FrameExecStrategy extra_state_get_exec_strategy(ExtraState* extra_state);
 
-// Set the Action to be done to all frames with code object corresponding
-// to this extra_state.
-// Ownership contract
+// Set the FrameExecStrategy to be done to all frames with code object
+// corresponding to this extra_state. Ownership contract
 // - extra_state: Borrowed
-void extra_state_set_action(ExtraState* extra_state, Action action);
+void extra_state_set_exec_strategy(
+    ExtraState* extra_state,
+    FrameExecStrategy strategy);
 
 // Ownership contract
 // args

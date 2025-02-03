@@ -107,17 +107,17 @@ PyObject* dynamo__custom_eval_frame(
   }
 
   // Get recursive action
-  Action action = extra_state_get_action(extra);
-  if (action.frame_action != DEFAULT) {
-    if (action.recursive_action == SKIP) {
+  FrameExecStrategy strategy = extra_state_get_exec_strategy(extra);
+  if (strategy.cur_action != DEFAULT) {
+    if (strategy.recursive_action == SKIP) {
       recursive_callback = Py_None;
-    } else if (action.recursive_action == RUN_ONLY) {
+    } else if (strategy.recursive_action == RUN_ONLY) {
       recursive_callback = Py_False;
     }
   }
 
   // Skip this frame
-  if (action.frame_action == SKIP) {
+  if (strategy.cur_action == SKIP) {
     DEBUG_TRACE("skip %s", get_frame_name(frame));
     eval_default();
     return eval_result;
@@ -150,7 +150,7 @@ PyObject* dynamo__custom_eval_frame(
 
   // A callback of Py_False indicates "run only" mode, the cache is checked,
   // but we never compile.
-  bool run_only = action.frame_action == RUN_ONLY || callback == Py_False;
+  bool run_only = strategy.cur_action == RUN_ONLY || callback == Py_False;
   if (run_only) {
     DEBUG_TRACE("In run only mode %s", get_frame_name(frame));
   }
@@ -203,8 +203,10 @@ PyObject* dynamo__custom_eval_frame(
     // Dynamo returned skip_code_recursive_flag, so we should recursively skip
     // code.
     DEBUG_TRACE("create skip recursive %s", get_frame_name(frame));
-    extra_state_set_action(extra, Action{SKIP, SKIP});
-    if (action.recursive_action == DEFAULT) {
+    extra_state_set_exec_strategy(extra, FrameExecStrategy{SKIP, SKIP});
+    // Also apply recursive action to current frame, only if a recursive
+    // action is not DEFAULT.
+    if (strategy.recursive_action == DEFAULT) {
       recursive_callback = Py_None;
     }
     eval_default();
@@ -212,8 +214,8 @@ PyObject* dynamo__custom_eval_frame(
     // Dynamo returned cache_limit_hit_flag, so we should recursively skip
     // code.
     DEBUG_TRACE("create cache limit hit %s", get_frame_name(frame));
-    extra_state_set_action(extra, Action{RUN_ONLY, RUN_ONLY});
-    if (action.recursive_action == DEFAULT) {
+    extra_state_set_exec_strategy(extra, FrameExecStrategy{RUN_ONLY, RUN_ONLY});
+    if (strategy.recursive_action == DEFAULT) {
       recursive_callback = Py_False;
     }
     eval_default();
@@ -237,7 +239,7 @@ PyObject* dynamo__custom_eval_frame(
     eval_custom();
   } else {
     DEBUG_TRACE("create skip %s", get_frame_name(frame));
-    extra_state_set_action(extra, Action{SKIP, DEFAULT});
+    extra_state_set_exec_strategy(extra, FrameExecStrategy{SKIP, DEFAULT});
     eval_default();
   }
   Py_XDECREF(callback_result);
