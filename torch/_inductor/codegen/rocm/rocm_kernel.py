@@ -1,7 +1,7 @@
 # mypy: allow-untyped-defs
 import logging
 from collections.abc import Sequence
-from typing import Callable, Optional, TYPE_CHECKING, Union
+from typing import Any, Callable, Optional, TYPE_CHECKING, Union
 
 from torch._inductor.codegen.cpp_wrapper_cpu import CppWrapperCpu
 
@@ -51,16 +51,6 @@ class ROCmTemplateKernel(ROCmKernel):
         self.kernel_name = kernel_name
         # Mapping from arg name to IRNode.
         self.named_nodes: dict[str, IRNode] = {}
-
-    def arg_name(self, node: IRNode) -> Optional[str]:
-        """
-        Returns arg name of a given input or output node.
-        """
-        if node is None:
-            return None
-        return {**self.args.input_buffers, **self.args.output_buffers}.get(
-            node.get_name(), None
-        )
 
     def get_signature(self):
         return self.signature
@@ -133,6 +123,7 @@ class ROCmTemplateKernel(ROCmKernel):
         """
         wrapper = V.graph.wrapper_code
 
+        arg_types: list[Any]
         if V.graph.cpp_wrapper:
             # Make sure we initialize these kernels since they're exported as
             # C-style symbol names.
