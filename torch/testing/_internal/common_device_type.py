@@ -51,6 +51,7 @@ from torch.testing._internal.common_utils import (
     TEST_XPU,
     TestCase,
 )
+from torch.testing._internal.inductor_utils import HAS_CUDA_TRITON
 
 
 _T = TypeVar("_T")
@@ -1963,8 +1964,6 @@ def get_all_device_types() -> list[str]:
 
 
 flex_attention_supported_platform = unittest.skipUnless(
-    torch.cuda.is_available()
-    and torch.utils._triton.has_triton()
-    and torch.cuda.get_device_capability() >= (8, 0),
-    "Requires CUDA and Triton",
+    HAS_CUDA_TRITON and torch.cuda.get_device_capability() >= (8, 0),
+    "Requires Triton and a CUDA device with a compute capability of 8.0 or higher",
 )

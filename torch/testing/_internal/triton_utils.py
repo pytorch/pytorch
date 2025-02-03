@@ -1,15 +1,17 @@
 # mypy: ignore-errors
 
-import unittest
+# Re-exports to avoid touching large numbers of tests.
+from torch.testing._internal.inductor_utils import (  # noqa: F401 unused-import
+    HAS_CUDA,
+    HAS_GPU,
+    HAS_TRITON,
+    requires_cuda,
+    requires_gpu,
+    requires_gpu_triton,
+)
 
-from torch.testing._internal.inductor_utils import HAS_CUDA, HAS_GPU
-from torch.utils._triton import has_triton
 
-
-requires_cuda = unittest.skipUnless(HAS_CUDA, "requires cuda")
-requires_gpu = unittest.skipUnless(HAS_GPU, "requires gpu")
-
-if has_triton():
+if HAS_TRITON:
     import triton
     from triton import language as tl
 

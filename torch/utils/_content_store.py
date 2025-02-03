@@ -98,7 +98,10 @@ def hash_storage(storage: torch.UntypedStorage, *, stable_hash: bool = False) ->
     from torch._dynamo.utils import is_compile_supported
 
     device_type = storage.device.type
-    if stable_hash or not is_compile_supported(device_type):
+    # FIXME: XPU supports Inductor (and Triton), but is not handled below, so
+    # use the same fallback as other device types not supported by Inductor for
+    # now.
+    if stable_hash or not is_compile_supported(device_type) or device_type == "xpu":
         cpu_storage = storage.cpu()
         # TODO: make storage support buffer protocol so this isn't
         # necessary

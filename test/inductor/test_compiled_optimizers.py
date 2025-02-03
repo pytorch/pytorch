@@ -58,8 +58,9 @@ from torch.testing._internal.common_utils import parametrize
 from torch.testing._internal.inductor_utils import (
     GPU_TYPE,
     HAS_CPU,
+    HAS_CUDA_TRITON,
     HAS_GPU,
-    has_triton,
+    HAS_XPU_TRITON,
 )
 from torch.testing._internal.triton_utils import requires_cuda, requires_gpu
 
@@ -572,8 +573,8 @@ def make_recompile_test(optim_cls, closure=None, kernel_count=2, **kwargs):
 
 
 class CompiledOptimizerParityTests(TestCase):
-    @skipCUDAIf(not has_triton(), "torch.compile with cuda requires triton")
-    @skipXPUIf(not has_triton(), "torch.compile with xpu requires triton")
+    @skipCUDAIf(not HAS_CUDA_TRITON, "torch.compile with cuda requires triton")
+    @skipXPUIf(not HAS_XPU_TRITON, "torch.compile with xpu requires triton")
     @optims(optim_db, dtypes=[torch.float32])
     @parametrize("use_closure", [True, False])
     def test_correctness(self, device, dtype, optim_info, use_closure):
