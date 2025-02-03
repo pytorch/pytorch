@@ -1047,7 +1047,10 @@ class TestSparseSemiStructuredCUSPARSELT(TestCase):
         if "cusparselt" not in SEMI_STRUCTURED_SUPPORTED_BACKENDS:
             self.skipTest('cuSPARSELt not enabled')
 
-    @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, "FP8 is only supported on H100+ and sm_89 and MI300+ devices")
+    @unittest.skipIf(
+        not PLATFORM_SUPPORTS_FP8,
+        "FP8 is only supported on H100+, SM 8.9 and MI300+ devices",
+    )
     @xfailIfSM89
     @parametrize("dense_input_shape", [(256, 128)])
     def test_sparse_fp8fp8_mm(self, dense_input_shape, device):
@@ -1067,7 +1070,10 @@ class TestSparseSemiStructuredCUSPARSELT(TestCase):
         ):
             dense_result = torch.mm(A_fp8_sparse, B_fp8)
 
-    @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, "FP8 is only supported on H100+ and sm_89 and MI300+ devices")
+    @unittest.skipIf(
+        not PLATFORM_SUPPORTS_FP8,
+        "FP8 is only supported on H100+, SM 8.9 and MI300+ devices",
+    )
     @xfailIfSM89
     def test_sparse_semi_structured_scaled_mm_fp8(self, device) -> None:
         (k, l, m) = (32, 64, 32)
@@ -1084,7 +1090,10 @@ class TestSparseSemiStructuredCUSPARSELT(TestCase):
         out_fp32_sparse = out_fp8_sparse.to(torch.float32)
         torch.testing.assert_close(out_fp32, out_fp32_sparse, rtol=1e-1, atol=1e-1)
 
-    @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, "FP8 is only supported on H100+ and sm_89 and MI300+ devices")
+    @unittest.skipIf(
+        not PLATFORM_SUPPORTS_FP8,
+        "FP8 is only supported on H100+, SM 8.9 and MI300+ devices",
+    )
     @xfailIfSM89
     @parametrize("out_dtype", [torch.float16, torch.bfloat16, torch.float32])
     @parametrize("dense_input_shape", [(256, 128)])
