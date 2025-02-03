@@ -9048,7 +9048,7 @@ class TestNestedInt(torch.testing._internal.common_utils.TestCase):
         dict_tensor1 = DictTensor(metadata1)
         dict_tensor2 = DictTensor(metadata2)
 
-        with self.assertRaises(AssertionError):
+        with self.assertRaises(RuntimeError):
             _nested_assert_metadata_equal(dict_tensor1, dict_tensor2, "hello")
 
 

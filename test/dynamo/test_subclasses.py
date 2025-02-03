@@ -25,6 +25,7 @@ from torch.nested._internal.nested_tensor import (
     jagged_from_tensor_and_lengths,
     nested_view_from_values_offsets,
 )
+from torch.testing._internal.common_cuda import TEST_CUDA
 from torch.testing._internal.common_utils import (
     fresh_tensor_registry,
     fresh_tensor_registry_ctx,
@@ -3260,6 +3261,37 @@ Eq(s0, s8)""",
             return n * 2
 
         torch.compile(fn, backend="eager")(nt)
+
+    def test_zeros(self):
+        dtypes = (torch.float, torch.double, torch.half)
+        devices = ("cpu", "cuda")
+        for dtype, device in itertools.product(dtypes, devices):
+            if device == "cuda" and not TEST_CUDA:
+                continue
+
+            kwargs = {
+                "device": device,
+                "dtype": dtype,
+            }
+            x, _ = self._get_jagged_tensor(((2, 3, 4), 3), None, requires_grad=True)
+
+            def fn1(nt):
+                out = torch.zeros(nt.shape, **kwargs)
+                return out
+
+            def fn2(nt):
+                out = torch.zeros(nt.shape[:2] + (2, 3), **kwargs)
+                return out
+
+            def do_check(fn):
+                compile_fn = torch.compile(
+                    fn, fullgraph=True, backend="aot_eager", dynamic=True
+                )
+                out = compile_fn(x)
+                self.assertEqual(out, fn(x))
+
+            do_check(fn1)
+            do_check(fn2)
 
     # TODO: cannot parametrize this test class with device for some reason
     def _test_autograd(self, backend):

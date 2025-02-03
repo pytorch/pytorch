@@ -201,7 +201,7 @@ def assert_raggedness_matches(nt, size, msg):
     if not len(nt_ragged) == len(size_ragged):
         raise RuntimeError(msg)
     for ns, s in zip(nt_ragged, size_ragged):
-        if s == -1:
+        if not is_nested_int(s) and s == -1:
             continue
         if ns != s:
             if not (is_nested_int(ns) and is_nested_int(s)):
@@ -2444,7 +2444,8 @@ def _nested_assert_expandable_to(func, *args, **kwargs):
     for i in range(len(shape)):
         src_s = shape[-i - 1]
         tgt_s = desired[-i - 1]
-        if src_s == 1:
+        if not is_nested_int(src_s) and src_s == 1:
+            # Avoid comparing nested int with 1
             continue
         if src_s != tgt_s:
             if not (is_nested_int(src_s) and is_nested_int(tgt_s)):
