@@ -7,6 +7,7 @@ import functools
 import inspect
 import math
 import os
+import sys
 import warnings
 from itertools import chain
 from types import CodeType, FunctionType, ModuleType
@@ -809,30 +810,45 @@ class Tracer(TracerBase):
                 )
                 return self.call_module(mod, forward, args, kwargs)
 
-            with _new_patcher() as patcher:
-                # allow duplicate patches to support the case of nested calls
-                patcher.patch_method(
-                    torch.nn.Module,
-                    "__getattr__",
-                    module_getattr_wrapper,
-                    deduplicate=False,
-                )
-                patcher.patch_method(
-                    torch.nn.Module, "__call__", module_call_wrapper, deduplicate=False
-                )
-                _patch_wrapped_functions(patcher)
-                _autowrap_check(patcher, fn_globals, self._autowrap_function_ids)
-                for module in self._autowrap_search:
-                    _autowrap_check(
-                        patcher, module.__dict__, self._autowrap_function_ids
+            try:
+                with _new_patcher() as patcher:
+                    # allow duplicate patches to support the case of nested calls
+                    patcher.patch_method(
+                        torch.nn.Module,
+                        "__getattr__",
+                        module_getattr_wrapper,
+                        deduplicate=False,
                     )
-                self.create_node(
-                    "output",
-                    "output",
-                    (self.create_arg(fn(*args)),),
-                    {},
-                    type_expr=fn.__annotations__.get("return", None),
-                )
+                    patcher.patch_method(
+                        torch.nn.Module,
+                        "__call__",
+                        module_call_wrapper,
+                        deduplicate=False,
+                    )
+                    _patch_wrapped_functions(patcher)
+                    _autowrap_check(patcher, fn_globals, self._autowrap_function_ids)
+                    for module in self._autowrap_search:
+                        _autowrap_check(
+                            patcher, module.__dict__, self._autowrap_function_ids
+                        )
+                    self.create_node(
+                        "output",
+                        "output",
+                        (self.create_arg(fn(*args)),),
+                        {},
+                        type_expr=fn.__annotations__.get("return", None),
+                    )
+            except Exception as e:
+                if "Could not guard on data-dependent" in e.args[0]:
+                    print(
+                        "\n"
+                        + torch.fx.GraphModule({}, self.graph).print_readable(
+                            print_output=False, include_stride=True, include_device=True
+                        ),
+                        file=sys.stderr,
+                    )
+
+                raise
 
             self.submodule_paths = None
         finally:
