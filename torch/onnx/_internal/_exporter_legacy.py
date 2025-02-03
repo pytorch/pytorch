@@ -21,7 +21,6 @@ import logging
 import warnings
 from collections import defaultdict
 from typing import Any, Callable, TYPE_CHECKING, TypeVar
-from typing_extensions import deprecated
 
 import torch
 import torch._ops
@@ -80,10 +79,6 @@ class ONNXFakeContext:
     """List of paths of files that contain the model :meth:`state_dict`"""
 
 
-@deprecated(
-    "torch.onnx.dynamo_export is deprecated since 2.6.0. Please use torch.onnx.export(..., dynamo=True) instead.",
-    category=DeprecationWarning,
-)
 class OnnxRegistry:
     """Registry for ONNX functions.
 
@@ -228,10 +223,6 @@ class OnnxRegistry:
         }
 
 
-@deprecated(
-    "torch.onnx.dynamo_export is deprecated since 2.6.0. Please use torch.onnx.export(..., dynamo=True) instead.",
-    category=DeprecationWarning,
-)
 class ExportOptions:
     """Options to influence the TorchDynamo ONNX exporter.
 
@@ -439,10 +430,6 @@ def enable_fake_mode():
     )  # type: ignore[assignment]
 
 
-@deprecated(
-    "torch.onnx.dynamo_export is deprecated since 2.6.0. Please use torch.onnx.export(..., dynamo=True) instead.",
-    category=DeprecationWarning,
-)
 class ONNXRuntimeOptions:
     """Options to influence the execution of the ONNX model through ONNX Runtime.
 
@@ -697,10 +684,6 @@ def _assert_dependencies(export_options: ResolvedExportOptions):
         raise missing_opset("onnxscript")
 
 
-@deprecated(
-    "torch.onnx.dynamo_export is deprecated since 2.6.0. Please use torch.onnx.export(..., dynamo=True) instead.",
-    category=DeprecationWarning,
-)
 def dynamo_export(
     model: torch.nn.Module | Callable,
     /,
