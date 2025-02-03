@@ -437,7 +437,7 @@ def shape_env_check_state_equal(env1, env2, non_state_variable_names, map_value)
                 + "}"
             )
         if isinstance(value, set):
-            return "{" + ", ".join(f"{v}" for v in sorted(value)) + "}"
+            return "{" + ", ".join(f"{v}" for v in sorted(value, key=str)) + "}"
         return str(value)
 
     # Compares env1_vars with env2_vars.
