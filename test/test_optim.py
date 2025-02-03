@@ -2325,20 +2325,24 @@ class TestOptimRenewed(TestCase):
         for i in range(2):
             # model and optimizer corresponding to beta1 = 0.0
             model_beta1_zero, optim_beta1_zero = init_model_and_optim(
-                [
-                    optim_input
-                    for optim_input in optim_inputs
-                    if "betas" in optim_input.kwargs
-                    and optim_input.kwargs["betas"][0] == 0.0
-                ][0]
+                next(
+                    [
+                        optim_input
+                        for optim_input in optim_inputs
+                        if "betas" in optim_input.kwargs
+                        and optim_input.kwargs["betas"][0] == 0.0
+                    ]
+                )
             )
             # model and optimizer corresponding to default params
             model_default, optim_default = init_model_and_optim(
-                [
-                    optim_input
-                    for optim_input in optim_inputs
-                    if optim_input.desc == "default"
-                ][0]
+                next(
+                    [
+                        optim_input
+                        for optim_input in optim_inputs
+                        if optim_input.desc == "default"
+                    ]
+                )
             )
 
             model1 = model_beta1_zero if i == 0 else model_default

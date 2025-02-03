@@ -389,7 +389,7 @@ def _single_tensor_adam(
     use_exp_avg = len(exp_avgs) > 0
     for i, param in enumerate(params):
         grad = grads[i] if not maximize else -grads[i]
-        exp_avg = exp_avgs[i] if use_exp_avg else grads[i]
+        exp_avg = exp_avgs[i] if use_exp_avg else grad
         exp_avg_sq = exp_avg_sqs[i]
         step_t = state_steps[i]
 
@@ -609,7 +609,7 @@ def _multi_tensor_adam(
         if isinstance(beta1, Tensor) and str(beta1.device) != "cpu"
         else None
     )
-    
+
     use_exp_avg = len(exp_avgs) > 0
     for (
         device_params_,
