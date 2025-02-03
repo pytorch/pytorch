@@ -6,6 +6,7 @@
 #include <thrust/tuple.h>
 
 #include <ATen/core/Tensor.h>
+#include <ATen/cuda/CUDAConfig.h> // for the definition of AT_CUDNN_ENABLED
 #include <ATen/AccumulateType.h>
 #include <ATen/Dispatch.h>
 #include <ATen/cuda/CUDAContext.h>
@@ -13,10 +14,17 @@
 #include <ATen/native/cuda/block_reduce.cuh>
 #include <ATen/native/cuda/thread_constants.h>
 
+
+#ifdef AT_CUDNN_ENABLED
+#include <ATen/native/cudnn/RMSNorm_v8.h>
+#endif
+
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
 #include <ATen/NativeFunctions.h>
 #else
+#include <ATen/ops/cudnn_rms_norm_native.h>
+#include <ATen/ops/cudnn_rms_norm_backward_native.h>
 #include <ATen/ops/empty.h>
 #include <ATen/ops/empty_like_native.h>
 #include <ATen/ops/native_layer_norm_native.h>
@@ -1495,6 +1503,45 @@ std::tuple<Tensor, Tensor, Tensor> layer_norm_backward_cuda(
   }
   return std::make_tuple(std::move(dX), std::move(dgamma), std::move(dbeta));
 }
+
+std::tuple<Tensor, Tensor> cudnn_rms_norm(at::Tensor const& input, std::optional<at::Tensor> const& weight, /*std::optional<at::Tensor> const& bias,*/ double epsilon, c10::ArrayRef<long> normalized_shape) {
+  const auto input_shape = input.sizes();
+  const auto input_ndim = input.dim();
+  const int normalized_ndim = normalized_shape.size();
+  const int axis = input_ndim - normalized_ndim;
+  const int64_t M =
+      c10::multiply_integers(input_shape.cbegin(), input_shape.cbegin() + axis);
+  const int64_t N =
+      c10::multiply_integers(input_shape.cbegin() + axis, input_shape.cend());
+  auto result = at::empty(normalized_shape, input.options());
+  DimVector stat_shape;
+  for (const auto idx : c10::irange(axis)) {
+    stat_shape.emplace_back(input_shape[idx]);
+  }
+  for ([[maybe_unused]] const auto idx : c10::irange(axis, input.dim())) {
+    stat_shape.emplace_back(1);
+  }
+  Tensor rstd;
+  if (input.requires_grad() || (weight.has_value() && weight.value().requires_grad())) {
+    rstd = at::empty(stat_shape, input.options());
+  }
+
+  raw_cudnn_rmsnorm_forward_out(input,
+                                weight.has_value() ? weight.value() : Tensor(),
+                                Tensor(), /* bias */
+                                epsilon,
+                                &rstd,
+                                &result,
+                                M,
+                                N);
+
+  return std::make_tuple(std::move(result), std::move(rstd));
+}
+
+std::tuple<Tensor, Tensor, Tensor> cudnn_rms_norm_backward(at::Tensor const& input, at::Tensor const& grad_output, at::Tensor const& save_rstd, std::optional<at::Tensor> const&) {
+  return std::make_tuple(Tensor(), Tensor(), Tensor());
+}
+
 
 REGISTER_DISPATCH(LayerNormKernel, &LayerNormKernelImpl)
 REGISTER_DISPATCH(LayerNormBackwardKernel, &LayerNormBackwardKernelImpl)
