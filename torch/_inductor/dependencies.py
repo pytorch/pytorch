@@ -4,17 +4,7 @@ import itertools
 import logging
 import re
 from collections.abc import Sequence
-from typing import (
-    Any,
-    Callable,
-    Iterable,
-    List,
-    Optional,
-    Tuple,
-    TYPE_CHECKING,
-    TypeVar,
-    Union,
-)
+from typing import Any, Callable, Iterable, List, Optional, Tuple, TypeVar, Union
 from unittest.mock import patch
 
 import sympy
@@ -34,7 +24,7 @@ from .utils import (
     sympy_subs,
     VarRanges,
 )
-from .virtualized import OpsHandler, ReductionType, V
+from .virtualized import ReductionType, V
 
 
 T = TypeVar("T")
@@ -797,14 +787,6 @@ class FreeUnbackedSymbolsOpsHandler(DefaultHandler):
         assert callable(body), "masked body must always be callable."
         # The body can make additional calls, for e.g. ops.indirect_indexing
         body()
-
-
-if TYPE_CHECKING:
-
-    class _typecheck_FreeUnbackedSymbolsOpsHandler(
-        FreeUnbackedSymbolsOpsHandler, OpsHandler[None]
-    ):
-        pass
 
 
 def extract_free_unbacked_symbols(

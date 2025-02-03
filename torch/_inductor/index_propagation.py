@@ -23,7 +23,7 @@ SymPy expressions yet, despite sympy.Min and sympy.Max existing.
 import itertools
 from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import Any, Literal, Optional, overload, TYPE_CHECKING, Union
+from typing import Any, Literal, Optional, overload, Union
 from typing_extensions import TypeAlias
 
 import sympy
@@ -33,7 +33,7 @@ from torch._prims_common import dtype_to_type, is_integer_dtype
 from torch.utils._sympy.functions import FloorDiv, ModularIndexing, Where
 from torch.utils._sympy.value_ranges import bound_sympy, ValueRanges
 
-from .ops_handler import DefaultHandler, OpsHandler
+from .ops_handler import DefaultHandler
 from .sizevars import evaluate_expr
 from .utils import generate_assert
 from .virtualized import V
@@ -370,9 +370,3 @@ class IndexPropagation(DefaultHandler):
             "indirect_indexing", (index, size, check, wrap_neg), {}
         ).value
         return indirect_var
-
-
-if TYPE_CHECKING:
-
-    class _typecheck_IndexPropagation(IndexPropagation, OpsHandler[Any]):
-        pass
