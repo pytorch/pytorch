@@ -381,6 +381,24 @@ jobs:
         ]}
     secrets: inherit
 
+  win-arm64-vs2022-cpu-py3-build:
+    if: github.event_name == 'pull_request'
+    name: win-arm64-vs2022-cpu-py3
+    uses: ./.github/workflows/_win-arm64-build.yml
+    needs: get-label-type
+    with:
+      build-environment: win-arm64-vs2022-cpu-py3
+      cuda-version: cpu
+      sync-tag: win-arm64-cpu-build
+      runner: "windows-11-arm64"
+      test-matrix: |
+        { include: [
+          { config: "default", shard: 1, num_shards: 3, runner: "windows-11-arm64" },
+          { config: "default", shard: 2, num_shards: 3, runner: "windows-11-arm64" },
+          { config: "default", shard: 3, num_shards: 3, runner: "windows-11-arm64" },
+        ]}
+    secrets: inherit
+
   linux-focal-cpu-py3_10-gcc9-bazel-test:
     name: linux-focal-cpu-py3.10-gcc9-bazel-test
     uses: ./.github/workflows/_bazel-build-test.yml
