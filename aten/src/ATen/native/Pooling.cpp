@@ -38,6 +38,11 @@ static void check1d(
       x.size() == 1,
       function_name, "() argument '", argument_name,
       "' should contain one int (got ", x.size(), ")");
+
+  TORCH_CHECK(
+      x[0] > 0,
+      function_name, "() argument '", argument_name,
+      "' must be > 0 but got ", x[0]);
 }
 
 Tensor adaptive_avg_pool1d(const Tensor & self, IntArrayRef output_size) {
