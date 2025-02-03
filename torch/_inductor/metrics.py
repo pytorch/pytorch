@@ -143,7 +143,7 @@ class MetricTable:
         ), f"{len(self.column_names)} v.s. {len(row_dict)}"
         assert OrderedSet(self.column_names) == OrderedSet(
             row_dict.keys()
-        ), f"{set(self.column_names)} v.s. {set(row_dict.keys())}"
+        ), f"{OrderedSet(self.column_names)} v.s. {OrderedSet(row_dict.keys())}"
 
         bn = get_benchmark_name()
         # assert bn is not None

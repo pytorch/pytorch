@@ -31,6 +31,8 @@ from typing import (
     Generic,
     Iterator,
     Literal,
+    Mapping,
+    MutableMapping,
     MutableSet,
     NamedTuple,
     Optional,
@@ -1543,8 +1545,10 @@ class DebugDirManager:
 
 
 def run_and_get_code(
-    fn: Callable[..., Any], *args: Any, **kwargs: Any
-) -> tuple[Any, list[str]]:
+    fn: Callable[P, _T],
+    *args: P.args,
+    **kwargs: P.kwargs,
+) -> tuple[_T, list[str]]:
     from .graph import GraphLowering
 
     source_codes: list[str] = []
@@ -2548,6 +2552,58 @@ def upcast_compute_type(dtype: torch.dtype) -> torch.dtype:
     ):
         return torch.float32
     return dtype
+
+
+KeyType = TypeVar("KeyType")
+ValType = TypeVar("ValType")
+
+
+class ScopedDict(MutableMapping[KeyType, ValType]):
+    """
+    A dictionary-like object that allows for scoped updates. It maintains
+    an original dictionary and a set of new items that can override
+    the original items within the scope.  The original dictionary is
+    unmodified.
+    """
+
+    def __init__(self, original_dict: Mapping[KeyType, ValType]):
+        self.original_dict = original_dict
+        self.new_items: dict[KeyType, ValType] = {}
+
+    def __getitem__(self, key: KeyType) -> ValType:
+        if key in self.new_items:
+            return self.new_items[key]
+        return self.original_dict[key]
+
+    def __setitem__(self, key: KeyType, value: ValType) -> None:
+        self.new_items[key] = value
+
+    def __contains__(self, key: object) -> bool:
+        return key in self.new_items or key in self.original_dict
+
+    def get(self, key: KeyType, default: Optional[ValType] = None) -> Optional[ValType]:  # type: ignore[override]
+        if key in self.new_items:
+            return self.new_items[key]
+        return self.original_dict.get(key, default)
+
+    def __len__(self) -> int:
+        n = len(self.original_dict)
+        for k in self.new_items:
+            if k not in self.original_dict:
+                n += 1
+        return n
+
+    def __iter__(self) -> Iterator[KeyType]:
+        yield from self.original_dict
+        for k in self.new_items:
+            if k not in self.original_dict:
+                yield k
+
+    def __bool__(self) -> bool:
+        return bool(self.original_dict or self.new_items)
+
+    def __delitem__(self, key: KeyType) -> None:
+        raise NotImplementedError
 
 
 @dataclass_transform(frozen_default=True)

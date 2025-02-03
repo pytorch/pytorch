@@ -1,15 +1,14 @@
 # This is not a feature-complete compiler backend
 # Just an early prototype that shows that one can compile elementwise ops into a Metal shader
-from typing import Any, Optional
+from __future__ import annotations
 
-import sympy
+from typing import Any, Optional, TYPE_CHECKING
+
 from sympy.printing.precedence import PRECEDENCE
 
 import torch
 from torch.utils._sympy.printers import ExprPrinter as ExprPrinter_
 
-from ..ops_handler import StoreMode
-from ..scheduler import Scheduler, SchedulerNode
 from ..utils import get_bounds_index_expr, get_kernel_metadata
 from ..virtualized import ops, V
 from .common import (
@@ -20,6 +19,16 @@ from .common import (
     PythonPrinter,
 )
 from .simd import IterationRangesEntry, SIMDKernel, SIMDScheduling
+
+
+if TYPE_CHECKING:
+    from typing import Union
+
+    import sympy
+
+    from ..ops_handler import StoreMode
+    from ..scheduler import Scheduler, SchedulerNode
+    from .common import OpVarT
 
 
 DTYPE_TO_METAL = {
@@ -35,7 +44,7 @@ DTYPE_TO_METAL = {
 }
 
 
-def value_to_metal(val: CSEVariable) -> str:
+def value_to_metal(val: Union[float, int, bool, str, CSEVariable]) -> str:
     if isinstance(val, float):
         if val == torch.inf:
             return "HUGE_VALF"
@@ -123,7 +132,7 @@ class MetalOverrides(OpOverrides):
         return f"*reinterpret_cast<thread {DTYPE_TO_METAL[dtype]}*>(&{x})"
 
     @staticmethod
-    def constant(val: CSEVariable, dtype: torch.dtype) -> str:
+    def constant(val: Union[bool, float, int], dtype: torch.dtype) -> str:
         return value_to_metal(val)
 
     @staticmethod
@@ -146,16 +155,28 @@ class MetalOverrides(OpOverrides):
         return ops.where(new_mask, result, other)
 
     @staticmethod
-    def where(a: CSEVariable, b: CSEVariable, c: CSEVariable) -> str:
+    def where(a: OpVarT, b: OpVarT, c: OpVarT) -> str:
         return f"{a} ? {b} : {value_to_metal(c)}"
 
     @staticmethod
-    def remainder(a: CSEVariable, b: CSEVariable) -> str:
-        if b.dtype is not None and not b.dtype.is_floating_point:
+    def remainder(a: OpVarT, b: OpVarT) -> str:
+        if (
+            isinstance(b, CSEVariable)
+            and b.dtype is not None
+            and not b.dtype.is_floating_point
+        ):
             return f"{a} % {b}"
         # Upcast to float otherwise results of remainder op are wrong for half
-        float_a = f"static_cast<float>({a})" if a.dtype != torch.float else a
-        float_b = f"static_cast<float>({b})" if b.dtype != torch.float else b
+        float_a = (
+            f"static_cast<float>({a})"
+            if isinstance(a, CSEVariable) and a.dtype != torch.float
+            else a
+        )
+        float_b = (
+            f"static_cast<float>({b})"
+            if isinstance(b, CSEVariable) and b.dtype != torch.float
+            else b
+        )
         return f"{float_a} - {float_b} * metal::floor({float_a} / {float_b})"
 
     @staticmethod
@@ -223,8 +244,20 @@ class MetalOverrides(OpOverrides):
         return f"c10::metal::erf({x})"
 
     @staticmethod
+    def erfinv(x: CSEVariable) -> str:
+        return f"c10::metal::erfinv({x})"
+
+    @staticmethod
     def lgamma(x: CSEVariable) -> str:
         return f"c10::metal::log_gamma({x})"
+
+    @staticmethod
+    def polygamma(n: CSEVariable, x: CSEVariable) -> str:
+        # polygamma's API takes order as first argument
+        # and the input tensor as second, while the
+        # metal shader has these inverted.
+        # TODO (dcci): make this more uniform.
+        return f"c10::metal::polygamma({x}, {n})"
 
     @staticmethod
     def tan(x: CSEVariable) -> str:
@@ -296,6 +329,20 @@ class MetalOverrides(OpOverrides):
         return f"metal::ceil({x})"
 
     @staticmethod
+    def rand(seed: CSEVariable, offset: CSEVariable) -> str:
+        return f"c10::metal::rand({seed}, {offset})"
+
+    @staticmethod
+    def randn(seed: CSEVariable, offset: CSEVariable) -> str:
+        return f"c10::metal::randn({seed}, {offset})"
+
+    @staticmethod
+    def randint64(
+        seed: CSEVariable, offset: CSEVariable, low: CSEVariable, high: CSEVariable
+    ) -> str:
+        return f"c10::metal::randint64({seed}, {offset}, {low}, {high})"
+
+    @staticmethod
     def round(x: CSEVariable) -> str:
         return f"metal::round({x})"
 
@@ -356,6 +403,7 @@ class MetalKernel(SIMDKernel):
         with code.indent():
             code.splice(
                 """
+            #include <c10/metal/random.h>
             #include <c10/metal/special_math.h>
             #include <c10/metal/utils.h>
             """,
@@ -433,7 +481,7 @@ class MetalKernel(SIMDKernel):
 class MetalScheduling(SIMDScheduling):
     kernel_type = MetalKernel  # type: ignore[assignment]
 
-    def __init__(self, scheduler: Scheduler) -> None:
+    def __init__(self, scheduler: Optional[Scheduler]) -> None:
         super().__init__(scheduler)
         wrapper = V.graph.wrapper_code
         if wrapper is not None:
