@@ -80,6 +80,7 @@ from .exc import (
     FailOnRecompileLimitHit,
     format_error_msg,
     InternalTorchDynamoError,
+    NoGraphError,
     RecompileLimitExceeded,
     ShortenTraceback,
     SkipCodeRecursiveException,
@@ -436,6 +437,10 @@ def cprofile_wrapper(func: Callable[_P, _T]) -> Callable[_P, _T]:
     return profile_wrapper
 
 
+def frame_info(frame: DynamoFrameType) -> str:
+    return f"{frame.f_code.co_name!r} at {frame.f_code.co_filename}:{frame.f_code.co_firstlineno}"
+
+
 class ConvertFrameAssert:
     def __init__(
         self,
@@ -451,6 +456,20 @@ class ConvertFrameAssert:
         self._export = export
         self._export_constraints = export_constraints
 
+        # Raises an exception when `fullgraph=True` and no graph is extracted.
+        #
+        # Key considerations:
+        #
+        # 1) This class instance is stored within `_TorchDynamoContext`
+        #    through a nested wrapper structure. As a result, the `callback`
+        #    is the only object that can persist information across
+        #    multiple compilations.
+        #
+        # 2) Dynamo may retrigger on reconstructed bytecode and decide to skip
+        #    a frame. In such cases, `_has_extracted_graph` is checked to
+        #    prevent raising an exception when the graph has already been extracted.
+        self._has_extracted_graph = False
+
     @property
     def _clone_with_backend(self) -> Callable[[CompilerFn], ConvertFrameAssert]:
         return lambda backend: convert_frame_assert(
@@ -458,6 +477,24 @@ class ConvertFrameAssert:
         )
 
     def __call__(
+        self,
+        frame: DynamoFrameType,
+        cache_entry: Optional[CacheEntry],
+        hooks: Hooks,
+        frame_state: dict[str, Union[int, FrameStateSizeEntry]],
+        *,
+        skip: int = 0,
+    ) -> Optional[GuardedCode]:
+        compiled = self.call_inner(frame, cache_entry, hooks, frame_state, skip=skip)
+        if compiled is not None:
+            self._has_extracted_graph = True
+        if self._one_graph and compiled is None and not self._has_extracted_graph:
+            msg = f"Failed to compile {frame_info(frame)} because no graph was generated with fullgraph=True."
+            raise NoGraphError(msg)
+
+        return compiled
+
+    def call_inner(
         self,
         frame: DynamoFrameType,
         cache_entry: Optional[CacheEntry],

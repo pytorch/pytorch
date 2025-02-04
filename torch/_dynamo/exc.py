@@ -148,6 +148,15 @@ class Unsupported(TorchDynamoException):
         counters[category][self.msg] += 1
 
 
+class NoGraphError(TorchDynamoException):
+    """
+    Used to trigger an exception when there is no graph with fullgraph=True
+    """
+
+    def __init__(self, msg: str) -> None:
+        super().__init__(msg)
+
+
 class RecompileError(TorchDynamoException):
     pass
 
