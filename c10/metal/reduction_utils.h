@@ -51,5 +51,31 @@ T threadgroup_min(threadgroup T* data, unsigned size) {
   return rc;
 }
 
+template <typename T>
+long threadgroup_argmax(threadgroup T* data, unsigned size) {
+  // TODO: This should be moved to the callee
+  ::metal::threadgroup_barrier(::metal::mem_flags::mem_threadgroup);
+  long rc = 0;
+  for (auto idx = 1; idx < size; ++idx) {
+    if (data[idx] > data[rc]) {
+      rc = idx;
+    }
+  }
+  return rc;
+}
+
+template <typename T>
+T threadgroup_argmin(threadgroup T* data, unsigned size) {
+  // TODO: This should be moved to the callee
+  ::metal::threadgroup_barrier(::metal::mem_flags::mem_threadgroup);
+  long rc = 0;
+  for (auto idx = 1; idx < size; ++idx) {
+    if (data[idx] < data[rc]) {
+      rc = idx;
+    }
+  }
+  return rc;
+}
+
 } // namespace metal
 } // namespace c10
