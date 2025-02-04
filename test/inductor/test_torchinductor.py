@@ -57,6 +57,7 @@ from torch._inductor.utils import (
     run_and_get_kernels,
     run_and_get_triton_code,
     run_fw_bw_and_get_code,
+    triton_version_uses_attrs_dict,
 )
 from torch._inductor.virtualized import V
 from torch._prims_common import is_integer_dtype
@@ -123,11 +124,11 @@ from torch.testing._internal.inductor_utils import (
     HAS_CPU,
     HAS_GPU,
     HAS_MULTIGPU,
-    requires_cuda_with_enough_memory,
     requires_gpu,
     skipCPUIf,
     skipCUDAIf,
 )
+from torch.testing._internal.triton_utils import requires_cuda
 
 
 HAS_AVX2 = "fbgemm" in torch.backends.quantized.supported_engines
@@ -9286,18 +9287,13 @@ class CommonTemplate:
             # the triton signature specializes on 1 vs non-1, you might get 1
             # or 2 kernels. In newer versions of triton, there's no specialization
             # so we get only 1 kernel.
-            from torch._inductor.utils import triton_version_uses_attrs_dict
-
-            expected_kernels = 1 if triton_version_uses_attrs_dict() else 2
-            self.assertEqual(fw_code.count("tl.rand"), expected_kernels)
+            self.assertEqual(fw_code.count("tl.rand"), 2)
             self.assertEqual(bw_code.count("tl.rand"), 0)
         self.assertEqual(torch._inductor.metrics.generated_kernel_count, 4)
 
     def test_randint_kernel_count(self):
         if self.device != GPU_TYPE:
             raise unittest.SkipTest("Only valid for GPU!")
-
-        from torch._inductor.utils import triton_version_uses_attrs_dict
 
         @torch._dynamo.optimize_assert("inductor")
         def fn1():
@@ -9314,10 +9310,7 @@ class CommonTemplate:
         # the triton signature specializes on 1 vs non-1, you might get 1
         # or 2 kernels. In newer versions of triton, there's no specialization
         # so we get only 1 kernel.
-        expected_kernels = 1 if triton_version_uses_attrs_dict() else 2
-        self.assertEqual(
-            source_codes[0].count("async_compile.triton"), expected_kernels
-        )
+        self.assertEqual(source_codes[0].count("async_compile.triton"), 2)
 
     def test_roll(self):
         def fn(a):
@@ -12340,14 +12333,19 @@ class CommonTemplate:
 
         torch.testing.assert_close(ref, act, atol=1e-3, rtol=1e-3)
 
-    @requires_cuda_with_enough_memory(10 * 2**30)
+    @requires_cuda
     @config.patch(use_fast_math=True)
     def test_prepare_softmax_with_fast_math(self):
         """
         Measure on a A100, perf is 3.487ms v.s. 3.358ms without or with flushing to zero. A 4% speedup.
         """
-        M = 32768
-        N = 50304
+        if DO_PERF_TEST:
+            M = 32768
+            N = 50304
+        else:
+            # Use small shapes if not doing perf test
+            M = 128
+            N = 128
         x = torch.randn(M, N, dtype=torch.bfloat16, device=GPU_TYPE)
 
         def f(x):
@@ -12409,7 +12407,7 @@ def copy_tests(
                 new_test = unittest.expectedFailure(new_test)
 
             tf = test_failures and test_failures.get(name)
-            if tf is not None and suffix in tf.suffixes:
+            if tf and suffix in tf.suffixes:
                 skip_func = (
                     unittest.skip("Skipped!")
                     if tf.is_skip
@@ -13640,6 +13638,23 @@ if HAS_GPU and not TEST_WITH_ASAN:
                 FileCheck().check_regex(
                     r"reinterpret_tensor\(.*, \(1024, 50257\).*# reuse"
                 ).run(code[1])
+
+        @unittest.skipIf(
+            not triton_version_uses_attrs_dict(),
+            "Test only applies to newer triton versions",
+        )
+        def test_triton_attrs_dict_constexpr_signature(self):
+            def fn(x):
+                return x.sin()
+
+            fn_c = torch.compile(fn)
+            x = torch.rand(16, device="cuda")
+
+            _, code = run_and_get_code(fn_c, x)
+
+            FileCheck().check("triton_meta").check("'signature':").check(
+                "'XBLOCK': 'constexpr'"
+            ).run(code[0])
 
     class RNNTest(TestCase):
         device_type = GPU_TYPE
