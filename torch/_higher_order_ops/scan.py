@@ -135,9 +135,7 @@ def scan(
     dim = utils.canonicalize_dim(ndim, dim)
 
     # Move scan dim to 0 and always perform scan on dim 0
-    leaves_xs = []
-    for elem in leaves_xs_orig:
-        leaves_xs.append(torch.movedim(elem, dim, 0))
+    leaves_xs = [torch.movedim(elem, dim, 0) for elem in leaves_xs_orig]
 
     out = combine_fn(
         pytree.tree_unflatten(leaves_init, spec_init),

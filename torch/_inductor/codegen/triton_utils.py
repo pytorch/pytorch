@@ -97,10 +97,7 @@ def signature_of(arg: KernelArgType, *, size_dtype: Optional[str]) -> str:
 
 
 def non_constexpr_signature(signature):
-    new_signature = []
-    for arg in signature:
-        if not isinstance(arg, ConstexprArg):
-            new_signature.append(arg)
+    new_signature = [arg for arg in signature if not isinstance(arg, ConstexprArg)]
 
     return new_signature
 
