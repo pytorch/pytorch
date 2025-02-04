@@ -3,7 +3,6 @@ PYTEST_DONT_REWRITE (prevents pytest from rewriting assertions, which interferes
 with test_sym_bool)
 """
 
-
 # Owner(s): ["oncall: export"]
 import copy
 import io
@@ -221,6 +220,47 @@ def forward(self, x):
         # Module will only be able to roundtrip if metadata
         # can be correctly parsed.
         ep = export_for_training(MyModule(), inp)
+        buffer = io.BytesIO()
+        save(ep, buffer)
+        loaded_ep = load(buffer)
+
+        # Check that both modules run to confirm load was successful.
+        exp_out = ep.module()(*inp)
+        actual_out = loaded_ep.module()(*inp)
+        self.assertEqual(exp_out, actual_out)
+
+    def test_nested_layer_split(self):
+        class Bar(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.layers = torch.nn.Sequential(
+                    torch.nn.SiLU(),
+                    torch.nn.SiLU(),
+                    torch.nn.SiLU(),
+                )
+
+            def forward(self, x):
+                out_start, out_rest = self.layers[0], self.layers[1:]
+                h = out_start(x)
+                h = out_rest(h) + 2
+                return h
+
+        class Foo(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.register_module("a[(1)]", Bar())
+                self.register_module("b[(2)]", Bar())
+                self.register_buffer("c:[22]", torch.randn(1))
+
+            def forward(self, x):
+                out_a, out_b = getattr(self, "a[(1)]"), getattr(self, "b[(2)]")
+                out_c = getattr(self, "c:[22]")
+                h = out_a(x)
+                h = out_b(h)
+                return h + out_c
+
+        inp = (torch.ones(10),)
+        ep = export_for_training(Foo(), inp, strict=True)
         buffer = io.BytesIO()
         save(ep, buffer)
         loaded_ep = load(buffer)
@@ -949,6 +989,14 @@ class TestDeserialize(TestCase):
                 return cond(x[0][0] > 4, t, f, [x, y])
 
         self.check_graph(M(), inputs)
+
+    def test_sym_float(self):
+        class M(torch.nn.Module):
+            def forward(self, x):
+                b = x.item()
+                return b * 0.1
+
+        self.check_graph(M(), (torch.tensor(1.0),))
 
     def test_arg_from(self):
         class M(torch.nn.Module):
