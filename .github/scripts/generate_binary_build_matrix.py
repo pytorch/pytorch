@@ -392,9 +392,8 @@ def generate_wheels_matrix(
                             else ""
                         ),
                         "build_name": f"{package_type}-py{python_version}-{gpu_arch_type}"
-                        f"{'-' + gpu_arch_version.replace('-aarch64', '') if gpu_arch_type == 'cuda-aarch64' else gpu_arch_version}".replace(
-                            ".", "_"
-                        ),
+                        f"{'-' + gpu_arch_version.replace('-aarch64', '') if gpu_arch_type == 'cuda-aarch64' else gpu_arch_version}"
+                        .replace(".", "_"),
                     }
                 )
                 # Special build building to use on Colab. Python 3.11 for 12.4 CUDA
