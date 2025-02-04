@@ -703,7 +703,8 @@ def stft(
         )
     if center and align_to_window is not None:
         raise RuntimeError(
-            "stft align_to_window should only be set when center = false")
+            "stft align_to_window should only be set when center = false"
+        )
     # NOTE: Do not edit. This code will be removed once the forward-compatibility
     #       period is over for PR #73432
     if center:
