@@ -25,7 +25,7 @@ def _tensor_version_fake(fake_mode, self_tensor):
 
 
 _unsafe_set_version_counter = _make_prim(
-    schema="_unsafe_set_version_counter(Tensor self, SymInt version) -> ()",
+    schema="_unsafe_set_version_counter(Tensor[] tensors, SymInt[] versions) -> ()",
     return_type=RETURN_TYPE.NEW,
     meta=lambda self, version: None,
     impl_aten=torch._C._autograd._unsafe_set_version_counter,
@@ -55,5 +55,5 @@ def _tensor_version_functional(mode, self):
 
 
 @_unsafe_set_version_counter.py_impl(FunctionalTensorMode)
-def _unsafe_set_version_counter_functional(ctx, self, version):
-    torch._C._autograd._unsafe_set_version_counter(self, version)
+def _unsafe_set_version_counter_functional(ctx, tensors, versions):
+    torch._C._autograd._unsafe_set_version_counter(tensors, versions)
