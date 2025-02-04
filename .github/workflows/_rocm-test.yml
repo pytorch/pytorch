@@ -67,6 +67,7 @@ jobs:
       fail-fast: false
     timeout-minutes: ${{ matrix.mem_leak_check == 'mem_leak_check' && 600 || inputs.timeout-minutes }}
     runs-on: ${{ matrix.runner }}
+    environment: upload-benchmark-results
     steps:
       # [see note: pytorch repo ref]
       - name: Checkout PyTorch

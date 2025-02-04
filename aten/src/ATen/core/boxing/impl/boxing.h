@@ -195,7 +195,7 @@ struct PopResult<std::tuple<Types...>> final {
   static Result pop_to_tuple_impl(
       Stack& stack,
       std::index_sequence<indices...>) {
-    return std::make_tuple((std::move(stack[indices]).template to<Types>())...);
+    return std::make_tuple((std::move(stack[indices]).to<Types>())...);
   }
 };
 

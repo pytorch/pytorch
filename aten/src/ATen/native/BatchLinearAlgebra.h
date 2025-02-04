@@ -1,7 +1,7 @@
 #pragma once
 
 #include <optional>
-#include <string_view>
+#include <c10/util/string_view.h>
 #include <ATen/Config.h>
 #include <ATen/native/DispatchStub.h>
 

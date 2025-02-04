@@ -118,10 +118,6 @@ def check_mypy_installed(code: str) -> list[LintMessage]:
         ]
 
 
-def in_github_actions() -> bool:
-    return bool(os.getenv("GITHUB_ACTIONS"))
-
-
 def check_files(
     filenames: list[str],
     config: str,
@@ -132,11 +128,8 @@ def check_files(
     # file names, see https://github.com/python/mypy/issues/16768
     filenames = [os.path.relpath(f) for f in filenames]
     try:
-        mypy_commands = ["dmypy", "run", "--"]
-        if in_github_actions():
-            mypy_commands = ["mypy"]
         proc = run_command(
-            [*mypy_commands, f"--config={config}"] + filenames,
+            ["dmypy", "run", "--", f"--config={config}"] + filenames,
             extra_env={},
             retries=retries,
         )

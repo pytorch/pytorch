@@ -58,10 +58,8 @@ class FileSystem(FileSystemBase):
     ) -> Union[str, os.PathLike]:
         return os.path.join(path, suffix)
 
-    def init_path(
-        self, path: Union[str, os.PathLike], **kwargs
-    ) -> Union[str, os.PathLike]:
-        self.fs, _ = url_to_fs(path, **kwargs)
+    def init_path(self, path: Union[str, os.PathLike]) -> Union[str, os.PathLike]:
+        self.fs, _ = url_to_fs(path)
         return path
 
     def rename(
@@ -115,7 +113,6 @@ class FsspecWriter(FileSystemWriter):
         per_thread_copy_ahead: int = 10_000_000,
         overwrite: bool = True,
         _extensions: Optional[Sequence[StreamTransformExtension]] = None,
-        **kwargs,
     ) -> None:
         """
         Initialize the writer pointing to `path`.
@@ -141,7 +138,7 @@ class FsspecWriter(FileSystemWriter):
             _extensions=_extensions,
         )
         self.fs = FileSystem()
-        self.path = self.fs.init_path(path, **kwargs)
+        self.path = self.fs.init_path(path)
 
     @classmethod
     def validate_checkpoint_id(cls, checkpoint_id: Union[str, os.PathLike]) -> bool:
@@ -149,10 +146,10 @@ class FsspecWriter(FileSystemWriter):
 
 
 class FsspecReader(FileSystemReader):
-    def __init__(self, path: Union[str, os.PathLike], **kwargs) -> None:
+    def __init__(self, path: Union[str, os.PathLike]) -> None:
         super().__init__(path)
         self.fs = FileSystem()
-        self.path = self.fs.init_path(path, **kwargs)
+        self.path = self.fs.init_path(path)
 
     @classmethod
     def validate_checkpoint_id(cls, checkpoint_id: Union[str, os.PathLike]) -> bool:

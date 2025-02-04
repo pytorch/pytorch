@@ -161,8 +161,7 @@ init_command = [
     'rich==10.9.0',
     'pyyaml==6.0.1',
     'optree==0.13.0',
-    'dataclasses_json==0.6.7',
-    'pandas==2.2.3',
+    'dataclasses_json==0.6.7'
 ]
 
 [[linter]]
@@ -558,7 +557,7 @@ exclude_patterns = [
 command = [
     'python3',
     'tools/linter/adapters/grep_linter.py',
-    '--pattern=#include <pybind11\/(^|[^(gil\.h)])',
+    '--pattern=#include <pybind11\/',
     '--allowlist-pattern=#include <torch\/csrc\/utils\/pybind.h>',
     '--linter-name=PYBIND11_INCLUDE',
     '--match-first-only',

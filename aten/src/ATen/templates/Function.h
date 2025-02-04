@@ -14,7 +14,6 @@
 #include <c10/core/TensorOptions.h>
 #include <c10/util/Deprecated.h>
 #include <optional>
-#include <string_view>
 
 ${static_dispatch_ops_headers}
 

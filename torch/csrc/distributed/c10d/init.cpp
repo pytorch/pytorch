@@ -2765,9 +2765,7 @@ Arguments:
           .def(
               "_end_coalescing",
               &::c10d::Backend::endCoalescing,
-              py::call_guard<py::gil_scoped_release>())
-          .def_property_readonly(
-              "mem_allocator", &::c10d::Backend::getMemAllocator);
+              py::call_guard<py::gil_scoped_release>());
 
   // base Backend::Options binding
   // TODO: Maybe we can consider how to merge this with
@@ -3038,7 +3036,7 @@ options :class:`~torch.distributed.ProcessGroupNCCL.Options`).
       "_get_intra_node_comm_usage_counter",
       &::c10d::intra_node_comm::getIntraNodeCommUsageCounter);
 
-#ifdef NCCL_HAS_CONFIG
+#ifdef NCCL_HAS_COMM_CTA_CGA
   py::class_<ncclConfig_t>(
       processGroupNCCL,
       "NCCLConfig",
@@ -3064,7 +3062,7 @@ for details.
           [](ncclConfig_t& self, const char* tmp) {
             self.netName = strdup(tmp);
           });
-#endif // NCCL_HAS_CONFIG
+#endif
 
   intrusive_ptr_class_<::c10d::ProcessGroupNCCL::Options>(
       processGroupNCCL,
@@ -3100,7 +3098,7 @@ Example::
     >>> dist.init_process_group("nccl", pg_options=nccl_options)
       )")
       .def(py::init<bool>(), py::arg("is_high_priority_stream") = false)
-#ifdef NCCL_HAS_CONFIG
+#ifdef NCCL_HAS_COMM_CTA_CGA
       .def_readwrite("config", &::c10d::ProcessGroupNCCL::Options::config)
 #endif
       .def_readwrite(

@@ -23,6 +23,7 @@
 #endif
 
 #include <c10/core/SymInt.h>
+#include <c10/util/string_view.h>
 
 #if USE_ROCM
 #if defined(USE_FLASH_ATTENTION) || defined(USE_MEM_EFF_ATTENTION)

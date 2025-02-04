@@ -108,7 +108,8 @@ TEST(BFloat16Math, Addition) {
   // 0 | 10000001 | 10010000000000000000000 = 6.25
   float expected = float_from_bytes(0, 0, 0x40c80000);
 
-  c10::BFloat16 b{};
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
+  c10::BFloat16 b;
   b.x = c10::detail::bits_from_f32(input);
   b = b + b;
 
@@ -130,7 +131,8 @@ TEST(BFloat16Math, Subtraction) {
   // 0 | 10000000 | 01010000000000000000000 = 2.625
   float expected = float_from_bytes(0, 0, 0x40280000);
 
-  c10::BFloat16 b{};
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
+  c10::BFloat16 b;
   b.x = c10::detail::bits_from_f32(input);
   b = b - 5;
 
@@ -138,6 +140,7 @@ TEST(BFloat16Math, Subtraction) {
   EXPECT_EQ(res, expected);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(BFloat16Math, NextAfterZero) {
   const c10::BFloat16 zero{0};
 

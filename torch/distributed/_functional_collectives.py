@@ -2,7 +2,7 @@
 import contextlib
 import sys
 import warnings
-from typing import Any, cast, Optional, TYPE_CHECKING, Union
+from typing import Any, cast, List, Optional, TYPE_CHECKING, Union
 
 import torch
 import torch.distributed as dist
@@ -787,7 +787,7 @@ def _resolve_group_name(group: RANK_TYPES, tag: str = "") -> str:
                 FutureWarning,
                 stacklevel=3,
             )
-        return c10d._resolve_group_name_by_ranks_and_tag(cast(list[int], group), tag)
+        return c10d._resolve_group_name_by_ranks_and_tag(cast(List[int], group), tag)
     else:
         raise ValueError(f"Unsupported group type: {type(group)}, {group}")
 

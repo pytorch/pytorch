@@ -578,7 +578,7 @@ class RShift(sympy.Function):
     def eval(cls, base, shift):
         if shift < 0:
             raise ValueError("negative shift count")
-        return FloorDiv(base, 2**shift)
+        return base // 2**shift
 
 
 class MinMaxBase(Expr, LatticeOp):  # type: ignore[misc]
