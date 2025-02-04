@@ -446,9 +446,6 @@ class AOTInductorTestsTemplate:
                 self.check_model(LinearModel(self.device), example_inputs)
 
     def test_linear_dynamic_maxautotune(self):
-        if self.device != "cuda":
-            raise unittest.SkipTest("CUDA test only")
-
         class Model(torch.nn.Module):
             def __init__(self) -> None:
                 super().__init__()
