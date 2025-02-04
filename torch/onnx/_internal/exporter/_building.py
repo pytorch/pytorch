@@ -638,23 +638,7 @@ class OpRecorder(evaluator.Evaluator):
         kwargs: Mapping[str, AllowedArgType],
     ) -> _tensors.SymbolicTensor | Sequence[_tensors.SymbolicTensor] | bool | int:
         try:
-            # Special cases for handling IsScalar and Rank
-            if function.name == "IsScalar":
-                if len(args) != 1:
-                    raise TypeError(
-                        f"Expected 1 positional argument for function '{function}', got {len(args)}."
-                    )
-                if isinstance(args[0], _tensors.SymbolicTensor):
-                    if args[0].rank is not None:
-                        return args[0].rank == 0
-                    else:
-                        # Fall to call add_function_call
-                        pass
-                elif isinstance(args[0], Sequence):
-                    return False
-                else:
-                    # Python constants are scalars
-                    return True
+            # Special cases for handling Rank
             if function.name == "Rank":
                 if len(args) != 1:
                     raise TypeError(

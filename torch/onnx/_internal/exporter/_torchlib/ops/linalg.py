@@ -8,19 +8,16 @@ from __future__ import annotations
 import math
 from typing import Optional, Sequence
 
-from onnxscript import BOOL, FLOAT, INT64
+from onnxscript import BOOL
 from onnxscript.onnx_opset import opset18 as op
 from onnxscript.onnx_types import TensorType
 
 import torch
 from torch.onnx._internal.exporter._torchlib._tensor_typing import TFloat, TTensor
 from torch.onnx._internal.exporter._torchlib._torchlib_registry import onnx_impl
-from torch.onnx._internal.exporter._torchlib.ops import common as common_ops
 
 
 aten = torch.ops.aten
-
-IsScalar = common_ops.IsScalar
 
 
 def aten_linalg_cholesky(self: TensorType, upper: bool = False) -> TensorType:
