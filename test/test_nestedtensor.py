@@ -3160,14 +3160,18 @@ class TestNestedTensorAutograd(NestedTensorTestCase):
         assert torch.autograd.gradcheck(grad_test_func, inputs=data)
 
     def test_njt_dense_matmul_backward(self, device):
+        a = torch.randn(2, 6, dtype=torch.float64, device=device)
+        b = torch.randn(3, 6, dtype=torch.float64, device=device)
+        c = torch.randn(2, 6, dtype=torch.float64, device=device)
+        d = torch.randn(3, 6, dtype=torch.float64, device=device)
         nt0 = torch.nested.nested_tensor(
-            [torch.randn((2, 6)), torch.randn((3, 6))],
+            [a, b],
             requires_grad=True,
             device=device,
             layout=torch.jagged,
         )
         nt1 = torch.nested.nested_tensor_from_jagged(
-            torch.cat([torch.randn((2, 6)), torch.randn((3, 6))]),
+            torch.cat([c, d]),
             offsets=nt0.offsets(),
         ).requires_grad_(True)
 
