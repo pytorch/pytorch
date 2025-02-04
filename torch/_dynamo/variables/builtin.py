@@ -2014,8 +2014,7 @@ class BuiltinVariable(VariableTracker):
         elif istype(args[0], variables.SkipFunctionVariable):
             return variables.ConstantVariable.create(id(args[0].value))
         elif istype(args[0], variables.FunctoolsPartialVariable):
-            # THIS IS WRONG, unblock for now
-            return variables.ConstantVariable.create(id(args[0].func))
+            return variables.ConstantVariable.create(id(args[0].fake_value))
         else:
             unimplemented(f"call_id with args {args}")
 

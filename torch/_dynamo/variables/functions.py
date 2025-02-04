@@ -975,7 +975,9 @@ class FunctoolsPartialVariable(VariableTracker):
         self.args = args
         assert isinstance(keywords, dict)
         self.keywords = keywords
-        self.attrs_via_dict = set()
+        # fake_value is used for id calculation. Creating this value and id'ng
+        # on it is sufficient for the tracing purposes.
+        self.fake_value = functools.partial(identity)
 
     def python_type(self):
         return functools.partial
@@ -1016,21 +1018,7 @@ class FunctoolsPartialVariable(VariableTracker):
             hasattr(functools.partial(identity), name)
         )
 
-    # def call_method(
-    #     self,
-    #     tx: "InstructionTranslator",
-    #     name: str,
-    #     args: "list[VariableTracker]",
-    #     kwargs: "dict[str, VariableTracker]",
-    # ) -> "VariableTracker":
-    #     if name == "__setitem__":
-    #         breakpoint()
-    #     return super().call_method(tx, name, args, kwargs)
-
     def var_getattr(self, tx: "InstructionTranslator", name: str):
-        # functools.partial uses __slots__ where one of the item is a __dict__.
-        # So, we look into __slots__ first, and then __dict__.
-
         source = self.source and AttrSource(self.source, name)
         # Handle __slots__
         if name == "func":
@@ -1040,10 +1028,6 @@ class FunctoolsPartialVariable(VariableTracker):
         if name == "keywords":
             items = {ConstantVariable.create(k): v for k, v in self.keywords.items()}
             return variables.ConstDictVariable(items, source=source)
-
-        if name in self.attrs_via_dict:
-            return VariableTracker.build(tx, getattr(functools.partial, name), source)
-
         raise_observed_exception(AttributeError, tx)
 
     def as_python_constant(self):
