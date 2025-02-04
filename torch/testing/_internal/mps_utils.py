@@ -273,9 +273,9 @@ UNIMPLEMENTED_XFAILIST = {
     "nn.functional.adaptive_avg_pool1d": MPSSkipInfo(UNIMPLEMENTED),
     "nn.functional.adaptive_avg_pool2d": MPSSkipInfo(UNIMPLEMENTED),
     # Unsupported dtypes
-    'linalg.lu_factor': MPSSkipInfo(
+    "linalg.lu_factor": MPSSkipInfo(
         UNIMPLEMENTED,
-        dtypes=[torch.float16, torch.float32],  # missing `aten::lu_unpack`.
+        dtypes=[torch.float16],  # missing `aten::lu_unpack`.
     ),
     "ones_like": MPSSkipInfo(UNIMPLEMENTED),
     "zeros_like": MPSSkipInfo(UNIMPLEMENTED),
@@ -434,6 +434,10 @@ XFAILLIST_GRAD = {
     "equal": MPSSkipInfo(TEST_OUTPUT_GRAD_MATCH, dtypes=[torch.float16, torch.float32]),
     # 'float' object is not iterable
     "item": MPSSkipInfo(TEST_OUTPUT_GRAD_MATCH, dtypes=[torch.float16, torch.float32]),
+    "linalg.lu_factor_ex": MPSSkipInfo(
+        TEST_OUTPUT_GRAD_MATCH,
+        dtypes=[torch.float32],  # missing `aten::lu_unpack`.
+    ),
     "lu": MPSSkipInfo(TEST_OUTPUT_GRAD_MATCH, dtypes=[torch.float32]),
     # "mse_backward_cpu_out" not implemented for 'Half'
     "nn.functional.mse_loss": MPSSkipInfo(
@@ -806,6 +810,7 @@ COMPLEX_XFAILLIST = {
     "linalg.inv": MPSSkipInfo(dtypes=COMPLEX_DTYPES),
     "linalg.inv_ex": MPSSkipInfo(dtypes=COMPLEX_DTYPES),
     "linalg.lu_factor": MPSSkipInfo(dtypes=COMPLEX_DTYPES),
+    "linalg.lu_factor_ex": MPSSkipInfo(dtypes=COMPLEX_DTYPES),
     "linalg.matrix_norm": MPSSkipInfo(dtypes=COMPLEX_DTYPES),
     "linalg.matrix_power": MPSSkipInfo(dtypes=COMPLEX_DTYPES),
     "linalg.multi_dot": MPSSkipInfo(
