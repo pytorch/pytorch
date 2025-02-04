@@ -186,7 +186,7 @@ PyTorchStreamReader::PyTorchStreamReader(
   std::string version(
       static_cast<const char*>(version_ptr.get()), version_size);
   try {
-    version_ = std::stoll(version);
+    version_ = std::stoull(version);
   } catch (const std::invalid_argument& e) {
     CAFFE_THROW("Couldn't parse the version ", version, " as Long Long.");
   }
