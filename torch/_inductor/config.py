@@ -1277,6 +1277,16 @@ class cuda:
     # pattern used by some Cutlass Kernels.
     cutlass_op_denylist_regex: Optional[str] = None
 
+    # Non-negative integer which determines how many kernels are instantiated.
+    # 0 = 0000 generates the fewest kernels, 9999 generates all possible combinations.
+    # increasing first digit reduces schedule / mixed type pruning,
+    # increasing second digit generates more cluster sizes,
+    # increasing third digit generates more MMA multipliers,
+    # increasing fourth digit generates more instruction shapes.
+    cutlass_instantiation_level: str = os.environ.get(
+        "TORCHINDUCTOR_CUTLASS_INSTANTIATION_LEVEL", "0"
+    )
+
 
 class rocm:
     # Offload arch list for device code compilation, e.g. ["gfx941", "gfx942"].
