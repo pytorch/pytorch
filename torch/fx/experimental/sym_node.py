@@ -20,7 +20,7 @@ import math
 import operator
 import sys
 from functools import lru_cache, update_wrapper
-from typing import Optional, TYPE_CHECKING, Union
+from typing import Dict, Optional, TYPE_CHECKING, Union
 
 import torch
 
@@ -47,27 +47,34 @@ sym_node_log = torch._logging.getArtifactLogger(__name__, "sym_node")
 __all__ = ["SymNode", "method_to_operator", "magic_methods"]
 
 
-from torch.types import py_sym_types as SymTypes
-
 import functools
+import json
+import os
+
+from torch._guards import TracingContext
+from torch.types import py_sym_types as SymTypes
+from torch.utils._traceback import CapturedTraceback
+
+
 def capture_specialization(fn):
     @functools.wraps(fn)
     def wrapper(self, file, line):
-        from torch._guards import ShapeGuard, SLoc, Source, TracingContext
-        from torch.utils._traceback import CapturedTraceback, format_frame
-        from torch._logging import dtrace_structured, LazyString, structured, trace_structured
-        import json
-        out: Dict[str, object] = {
-            "guard": fn.__name__,
-            "self": str(self),
-            "expr": str(self.expr),
-            "hint": str(self.hint),
-            "file": file,
-            "line": line,
-            "framework_stack": "".join(CapturedTraceback.extract(cpp=True).format()),
-            "user_stack": "".join(TracingContext.extract_stack().format())
-        }
-        print(json.dumps(out))
+        if (symbol := os.environ.get("CAPTURE_SPECIALIZATION", None)) and symbol == str(
+            self
+        ):
+            out: Dict[str, object] = {
+                "guard": fn.__name__,
+                "self": str(self),
+                "expr": str(self.expr),
+                "hint": str(self.hint),
+                "file": file,
+                "line": line,
+                "framework_stack": "".join(
+                    CapturedTraceback.extract(cpp=True).format()
+                ),
+                "user_stack": "".join(TracingContext.extract_stack().format()),
+            }
+            print(json.dumps(out))
 
         fn(self, file, line)
 
@@ -545,6 +552,8 @@ class SymNode:
 
     @capture_specialization
     def expect_true(self, file, line):
+        from torch.fx.experimental.symbolic_shapes import free_unbacked_symbols
+
         if (
             self.has_hint()
             and not free_unbacked_symbols(self.expr)
@@ -562,6 +571,8 @@ class SymNode:
 
     @capture_specialization
     def expect_size(self, file, line):
+        from torch.fx.experimental.symbolic_shapes import _advise_is_size
+
         b = self.ge(self.wrap_int(0))
         # Generate a deferred runtime assert
         r = b.expect_true(file, line)
