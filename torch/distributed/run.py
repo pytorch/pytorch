@@ -380,6 +380,7 @@ from torch.distributed.elastic.utils import macros
 from torch.distributed.elastic.utils.logging import get_logger
 from torch.distributed.launcher.api import elastic_launch, LaunchConfig
 from torch.utils.backend_registration import _get_custom_mod_func
+from torch._environment import is_fbcode
 
 
 logger = get_logger(__name__)
@@ -773,6 +774,8 @@ def config_from_args(args) -> tuple[LaunchConfig, Union[Callable, str], list[str
         os.environ["OMP_NUM_THREADS"] = str(omp_num_threads)
 
     log_line_prefix_template = os.getenv("TORCHELASTIC_LOG_LINE_PREFIX_TEMPLATE")
+    if is_fbcode() and not log_line_prefix_template:
+        log_line_prefix_tempatte = "[${role_name}${rank}|${local_rank}]:"
 
     rdzv_configs = _parse_rendezvous_config(args.rdzv_conf)
 

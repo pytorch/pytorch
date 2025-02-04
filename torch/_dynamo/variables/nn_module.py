@@ -16,6 +16,7 @@ from ..exc import (
     UnspecializeRestartAnalysis,
     Unsupported,
     UnsupportedAttribute,
+    ObservedAttributeError,
 )
 from ..guards import GuardBuilder, install_guard
 from ..mutation_guard import GenerationTracker
@@ -290,9 +291,10 @@ class NNModuleVariable(VariableTracker):
                 if result is not None:
                     return result
                 # if we can't find a __getattr__, we can't parse this, raise unimplemented
+                raise ObservedAttributeError("foo")
                 unimplemented(
                     f"missing attribute {name} - {typestr(base)}",
-                    exc_class=UnsupportedAttribute,
+                    exc_class=ObservedAttributeError,
                 )
 
         if name == "forward":
