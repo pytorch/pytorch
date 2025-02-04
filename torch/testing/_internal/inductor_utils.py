@@ -149,10 +149,13 @@ def maybe_skip_size_asserts(op):
         op.aten_name
         in (
             "fft_hfftn",
+            "fft_hfft",
             "fft_ihfftn",
             "fft_fft",
+            "fft_fft2",
             "fft_fftn",
             "fft_ifft",
+            "fft_ifftn",
             "fft_irfft",
             "fft_irfftn",
             "fft_ihfft",
