@@ -1,4 +1,5 @@
 // Implementation of specal math functions for Metal
+#pragma once
 #include <metal_stdlib>
 
 namespace c10 {
@@ -383,7 +384,7 @@ inline float zeta(float x, float q) {
 }
 
 template <typename T0>
-inline float polygamma(const T0 input, const int64_t order) {
+inline float polygamma(const int64_t order, const T0 input) {
   float x = input;
   float n = order;
   float sgn = ((order % 2) ? 1 : -1);
@@ -444,7 +445,7 @@ inline float digamma(T0 x) {
   } else if (x == 0.0f) {
     // As per C++ standard for gamma related functions and SciPy,
     // If the argument is ±0, ±∞ is returned
-    return ::metal::copysign(INFINITY, -x);
+    return ::metal::copysign(INFINITY, static_cast<float>(-x));
   } else {
     return calc_digamma_positive_domain(x);
   }

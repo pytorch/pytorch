@@ -135,6 +135,7 @@ class CUTLASSArgs:
 
     architectures: Optional[str] = None
     cuda_version: Optional[str] = None
+    instantiation_level: Optional[str] = None
 
     operations = "all"
     build_dir = ""
@@ -143,7 +144,6 @@ class CUTLASSArgs:
     kernels = "all"
     ignore_kernels = ""
     exclude_kernels = ""
-    instantiation_level = ""
     # TODO: these three look dead?
     kernel_filter_file: None = None
     selected_kernel_list: None = None
@@ -178,7 +178,12 @@ def _gen_ops_cached(arch, version) -> list[Any]:
         )
         return []
     arch = _normalize_cuda_arch(arch)
-    args = CUTLASSArgs(architectures=arch, cuda_version=version)
+    instantiation_level: str = config.cuda.cutlass_instantiation_level
+    args = CUTLASSArgs(
+        architectures=arch,
+        cuda_version=version,
+        instantiation_level=instantiation_level,
+    )
     manifest = cutlass_manifest.Manifest(args)
 
     if arch == "90":
@@ -274,11 +279,6 @@ def get_accumulator_dtype(
         ]:
             torch_dtype = dtype0
 
-    if torch_dtype == torch.half:
-        if torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction:
-            return torch_dtype
-        else:
-            return torch.float
     if torch_dtype in (torch.float16, torch.bfloat16, torch.float):
         return torch.float
     if torch_dtype == torch.int8:
