@@ -246,13 +246,10 @@ class TestFloat8Dtype(TestCase):
         self.assertEqual(x8_simulated, x8.float())
 
     def test_float8_e8m0fnu_rounding(self, device):
-        # TODO(next): rounding tests for e8m0 here
-        print()
+        # TODO(before land): clean up this function
 
         def _round_rne(unbiased_exponent, lsb, g, r, s):
             round_up = False
-
-            # print('g', g, 'r', r, 's', s)
 
             if g == 1:
                 round_up = True
@@ -265,23 +262,16 @@ class TestFloat8Dtype(TestCase):
 
             return unbiased_exponent
 
-        # TODO full range
-        # for unbiased_exponent in range(-1, 1):
-        for biased_exponent in range(1, 2):
-            print('biased_exponent', biased_exponent)
+        for biased_exponent in range(0, 256):
 
             # iterate through all the possible options of guard, round, sticky bits
             # for the current exponent
             for grs in range(8):
-                print('grs', grs)
 
                 # create a positive floating point number with the specified exponent
                 # and mantissa guard, round, sticky bits
-
                 fp32_as_uint32_t_ref = (biased_exponent << 23) + (grs << 20)
-                # print(fp32_as_uint32_t_ref)
                 fp32_ref = _int_bits_to_float(fp32_as_uint32_t_ref)
-                print(fp32_ref)
 
                 # create an RNE rounded version of the exponent
                 if biased_exponent == 255:
@@ -300,14 +290,19 @@ class TestFloat8Dtype(TestCase):
                 fp32_pytorch_unrounded = torch.full((1,), fp32_ref, device=device, dtype=torch.float)
                 fp32_pytorch_e8m0 = fp32_pytorch_unrounded.to(torch.float8_e8m0fnu)
                 fp32_pytorch_e8m0_fp32 = fp32_pytorch_e8m0.to(torch.float)
-                print(fp32_pytorch_e8m0_fp32)
 
-                print('expected', fp32_new, 'actual', fp32_pytorch_e8m0_fp32.item())
+                expected = fp32_new
+                if biased_exponent == 254 and grs >= 4:
+                    # special case rounding up from the largest representable float32 exponent, which
+                    # saturates to nan
+                    expected = float('nan')
+                elif biased_exponent == 255:
+                    # special case inf and nan, which becomes nan
+                    expected = float('nan')
 
+                actual = fp32_pytorch_e8m0_fp32.item()
 
-
-
-                
+                self.assertEqual(expected, actual, f"expected: {expected}, actual: {actual}")
             
 
     @dtypes(*FLOAT8_DTYPES)
