@@ -5,12 +5,25 @@ import os
 import re
 import subprocess
 from pathlib import Path
+from uuid import uuid4
 
 from setuptools import distutils  # type: ignore[import]
 
 
 UNKNOWN = "Unknown"
 RELEASE_PATTERN = re.compile(r"/v[0-9]+(\.[0-9]+)*(-rc[0-9]+)?/")
+
+
+def git_worktree_dirty(pytorch_root: str | Path) -> bool:
+    if not os.path.exists(os.path.join(pytorch_root, ".git")):
+        return False
+
+    return (
+        subprocess.run(
+            ["git", "diff-index", "--quiet", "HEAD", "--"], cwd=pytorch_root
+        ).returncode
+        != 0
+    )
 
 
 def get_sha(pytorch_root: str | Path) -> str:
@@ -97,13 +110,19 @@ if __name__ == "__main__":
 
     with open(version_path, "w") as f:
         f.write("from typing import Optional\n\n")
-        f.write("__all__ = ['__version__', 'debug', 'cuda', 'git_version', 'hip']\n")
+        f.write(
+            "__all__ = ['__version__', 'build_uuid', 'debug', 'cuda', 'git_version', 'hip', 'xpu']\n"
+        )
         f.write(f"__version__ = '{version}'\n")
+        # For builds using a git worktree with changes, add a guaranteed-unique build
+        # number that can be used to invalidate caches.
+        build_uuid = str(uuid4()) if git_worktree_dirty(pytorch_root) else None
+        f.write(f"build_uuid: Optional[str] = {build_uuid!r}\n")
         # NB: This is not 100% accurate, because you could have built the
         # library code with DEBUG, but csrc without DEBUG (in which case
         # this would claim to be a release build when it's not.)
-        f.write(f"debug = {repr(bool(args.is_debug))}\n")
-        f.write(f"cuda: Optional[str] = {repr(args.cuda_version)}\n")
-        f.write(f"git_version = {repr(sha)}\n")
-        f.write(f"hip: Optional[str] = {repr(args.hip_version)}\n")
-        f.write(f"xpu: Optional[str] = {repr(args.xpu_version)}\n")
+        f.write(f"debug = {bool(args.is_debug)!r}\n")
+        f.write(f"cuda: Optional[str] = {args.cuda_version!r}\n")
+        f.write(f"git_version = {sha!r}\n")
+        f.write(f"hip: Optional[str] = {args.hip_version!r}\n")
+        f.write(f"xpu: Optional[str] = {args.xpu_version!r}\n")
