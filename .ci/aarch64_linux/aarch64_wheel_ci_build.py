@@ -224,6 +224,6 @@ if __name__ == "__main__":
         print("Updating Cuda Dependency")
         filename = os.listdir("/pytorch/dist/")
         wheel_path = f"/pytorch/dist/{filename[0]}"
-        update_wheel(wheel_path)
+        update_wheel(wheel_path, desired_cuda)
     pytorch_wheel_name = complete_wheel("/pytorch/")
     print(f"Build Complete. Created {pytorch_wheel_name}..")
