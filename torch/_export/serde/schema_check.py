@@ -203,10 +203,18 @@ enum {name} {{
   {type_name} get_{name}() const {{
     return static_cast<{type_name}>({name});
   }}
+
+  void set_{name}({type_name} def) {{
+    {name} = static_cast<int64_t>(def);
+  }}
 """
             return f"""
   const {ty}& get_{name}() const {{
     return {name};
+  }}
+
+  void set_{name}({ty} def) {{
+    {name} = std::move(def);
   }}
 """
 
@@ -256,6 +264,10 @@ struct {name} {{
             return f"""
   const {ty}& get_{name}() const {{
     return std::get<{idx + 1}>(variant_);
+  }}
+
+  void set_{name}({ty} def) {{
+    variant_.emplace<{idx + 1}>(std::move(def));
   }}
 """
 
@@ -410,6 +422,7 @@ class ForwardRef {{
   ForwardRef<T>& operator=(ForwardRef<T>&&) = default;
   ForwardRef<T>& operator=(const ForwardRef<T>& other) {{
     ptr_ = std::make_unique<T>(*other.ptr_);
+    return *this;
   }}
   const T& operator*() const {{
     return *ptr_;
