@@ -2421,13 +2421,9 @@ class DimConstraints:
             base, divisor = self.rewrite_with_congruences(
                 s, base
             ), self.rewrite_with_congruences(s, divisor)
-            mod_reduced = base.xreplace(self._var_to_val) % divisor.xreplace(
+            return base.xreplace(self._var_to_val) % divisor.xreplace(
                 self._var_to_val
             )
-            congruence = (base - mod_reduced) % divisor
-            if congruence != 0:
-                self._congruences[s].add(congruence)
-            return mod_reduced
 
         def floor_div_handler(*args: sympy.Expr) -> sympy.Expr:
             # Suppose that we have an expression of the form b // d with free variable s.
@@ -2443,9 +2439,6 @@ class DimConstraints:
             mod_reduced = base.xreplace(self._var_to_val) % divisor.xreplace(
                 self._var_to_val
             )
-            congruence = (base - mod_reduced) % divisor
-            if congruence != 0:
-                self._congruences[s].add(congruence)
             # NB: Must not be CleanDiv, it needs to be regular sympy division
             # so inequality solver works.  This is sort of problematic for
             # is_integer tests though haha
@@ -2551,6 +2544,9 @@ class DimConstraints:
                     if isinstance(modulus, sympy.Integer) and isinstance(
                         remainder, sympy.Integer
                     ):
+                        # Make sure modulus is non-negative
+                        if modulus < 0:
+                            modulus *= -1
                         # Make sure 0 <= remainder <= modulus.
                         remainder = remainder % modulus
                         remainder_modulus_pairs.append((remainder, modulus))
