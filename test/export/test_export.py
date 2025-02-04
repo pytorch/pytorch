@@ -10603,6 +10603,45 @@ def forward(self, x, y):
         self.assertTrue(torch.allclose(a, torch.ones(4, 4)))
         self.assertTrue(torch.allclose(b, torch.ones(4, 4)))
 
+    def test_constant_tensor_mutation(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.foo = torch.randn(2, 2)
+
+            def forward(self, x):
+                self.foo.add_(5)
+                return self.foo + x
+
+        with self.assertRaisesRegex(RuntimeError, "Constant foo is"):
+            _ = (
+                export(M(), (torch.ones(2, 2),), strict=False)
+                .run_decompositions()
+                .graph
+            )
+
+    def test_constant_return(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.foo = torch.randn(2, 2)
+
+            def forward(self, x):
+                return self.foo, self.foo + x
+
+        graph = (
+            export(M(), (torch.ones(2, 2),), strict=False).run_decompositions().graph
+        )
+        self.assertExpectedInline(
+            str(graph).strip(),
+            """\
+graph():
+    %c_foo : [num_users=2] = placeholder[target=c_foo]
+    %x : [num_users=1] = placeholder[target=x]
+    %add : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%c_foo, %x), kwargs = {})
+    return (c_foo, add)""",
+        )
+
     def test_constant_requires_grad_const(self):
         class M(torch.nn.Module):
             def __init__(self):

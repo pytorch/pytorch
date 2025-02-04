@@ -42,6 +42,7 @@ from torch._export.utils import (
     _collect_and_set_constant_attrs,
     _collect_param_buffer_metadata,
     _detect_fake_mode_from_gm,
+    _fakify_params_buffers,
     _get_decomp_for_cia,
     _is_preservable_cia_op,
     _name_hoo_subgraph_placeholders,
@@ -51,6 +52,7 @@ from torch._export.utils import (
     _register_constants_as_buffers,
     _rename_without_collisions,
     _special_op_to_preserve_cia,
+    placeholder_naming_pass,
 )
 from torch._export.verifier import Verifier
 from torch._guards import detect_fake_mode
@@ -351,7 +353,7 @@ def _decompose_and_get_gm_with_new_signature_constants(
     joint_loss_index: Optional[int],
     decompose_custom_triton_ops,
 ):
-    from torch._export.utils import _fakify_params_buffers
+    from torch._export.passes.lift_constants_pass import _materialize_and_lift_constants
     from torch._functorch.aot_autograd import aot_export_module
     from torch.export._trace import (
         _disable_custom_triton_op_functional_decomposition,
@@ -488,6 +490,7 @@ def _decompose_and_get_gm_with_new_signature_constants(
                     new_fake_constant_attrs,
                     decomp_table=python_decomp_table,
                     _check_autograd_state=False,
+                    _prettify_placeholder_names=False,
                     decompose_custom_triton_ops=decompose_custom_triton_ops,
                 )
 
@@ -499,26 +502,39 @@ def _decompose_and_get_gm_with_new_signature_constants(
                     for fqn, obj in aten_export_artifact.constants.items()
                 }
 
-        gm = aten_export_artifact.gm
-        new_graph_signature = aten_export_artifact.sig
+                gm = aten_export_artifact.gm
+                new_graph_signature = aten_export_artifact.sig
 
-        # In the previous step, we assume constants as buffers for AOTDispatcher to
-        # functianalize properly, so undo that here.
-        (
-            gm,
-            new_graph_signature,
-        ) = _override_graph_signature_for_temp_registered_constants(
-            new_graph_signature, gm, temp_registered_constants
-        )
+                # In the previous step, we assume constants as buffers for AOTDispatcher to
+                # functianalize properly, so undo that here
+                new_graph_signature = (
+                    _override_graph_signature_for_temp_registered_constants(
+                        new_graph_signature, temp_registered_constants
+                    )
+                )
 
-        _populate_param_buffer_metadata_to_new_gm(
-            params_buffers_to_node_meta, gm, new_graph_signature
-        )
+                _populate_param_buffer_metadata_to_new_gm(
+                    params_buffers_to_node_meta, gm, new_graph_signature
+                )
 
-        # overwrite signature for non-persistent buffers
-        new_graph_signature = _overwrite_signature_for_non_persistent_buffers(
-            ep.graph_signature, new_graph_signature
-        )
+                # overwrite signature for non-persistent buffers
+                new_graph_signature = _overwrite_signature_for_non_persistent_buffers(
+                    ep.graph_signature, new_graph_signature
+                )
+
+                constants = _materialize_and_lift_constants(
+                    gm, new_graph_signature, new_fake_constant_attrs
+                )
+
+                placeholder_naming_pass(
+                    gm,
+                    new_graph_signature,
+                    patched_mod,
+                    new_fake_args,
+                    new_fake_kwargs,
+                    fake_params_buffers,
+                    constants,
+                )
 
         _verify_nn_module_stack(gm)
         _verify_stack_trace(gm)

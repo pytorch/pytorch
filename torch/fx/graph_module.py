@@ -272,14 +272,9 @@ def _get_attr(model: torch.nn.Module, attr_name: str):
 
 
 def _del_attr(model: torch.nn.Module, attr_name: str):
-    *prefix, field = attr_name.split(".")
-    t = model
-    for item in prefix:
-        t = getattr(t, item, None)  # type: ignore[assignment]
-        if t is None:
-            raise RuntimeError(f"{attr_name} doesn't exist in {model}")
-
-    return delattr(t, field)
+    attr_names = attr_name.split(".")
+    t = _get_attr_via_attr_list(model, attr_names[:-1])
+    return delattr(t, attr_names[-1])
 
 
 def _get_attr_via_attr_list(model: torch.nn.Module, attr_list: list[str]):
