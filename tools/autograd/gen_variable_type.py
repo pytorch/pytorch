@@ -1060,6 +1060,7 @@ def emit_body(
 
     name = cpp.name(f.func)
     inplace = f.func.kind() == SchemaKind.inplace
+    is_mutable = f.func.kind() == SchemaKind.mutable
     is_out_fn = f.func.kind() == SchemaKind.out
     returns_void = len(f.func.returns) == 0
     base_name = get_base_name(f)
@@ -1393,7 +1394,7 @@ def emit_body(
 
     def emit_original_self_definition() -> list[str]:
         body: list[str] = []
-        if inplace:
+        if inplace or is_mutable:
             if is_inplace_foreach:
                 body.append(
                     "std::vector<::std::optional<at::Tensor>> original_selfs(self.size());"
@@ -1471,7 +1472,7 @@ def emit_body(
                 # note(crcrpar): Here `expr` is generated from scratch, `arg.expr` is ignored.
                 var = name
                 name += "_"
-                if var == "self" and inplace:
+                if var == "self" and (inplace or is_mutable):
                     original_self_var = (
                         "original_self"
                         if not is_inplace_foreach
