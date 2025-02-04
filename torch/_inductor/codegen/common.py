@@ -947,7 +947,7 @@ class OpOverrides(BasicMathOpsMixin, OpDecompositions, OpsHandler[Any]):
             f"{type(self).__name__}: inline_asm_elementwise only implemented for Triton backend"
         )
 
-    def output(self, x0: OpVarT) -> None:
+    def output(self, *args: OpVarT) -> None:
         raise AssertionError(
             f"{type(self).__name__}: ops.output should not appear at codegen time"
         )
