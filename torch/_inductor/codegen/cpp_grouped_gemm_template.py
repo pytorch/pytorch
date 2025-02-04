@@ -188,6 +188,18 @@ class CppGroupedGemmTemplate(CppGemmTemplate):
             for idx in range(gemm_grouped_num)
         ]
 
+    @staticmethod
+    def _fake_get_dtype(fake_outs: list[ir.Buffer]) -> Callable[[str], torch.dtype]:
+        _get_dtype_real = V.graph.get_dtype
+
+        def get_dtype(name: str) -> torch.dtype:
+            for fake_out in fake_outs:
+                if name == fake_out.get_name():
+                    return fake_out.get_dtype()
+            return _get_dtype_real(name)
+
+        return get_dtype
+
     @classmethod
     def add_choices(
         cls,

@@ -70,10 +70,8 @@ from .common import (
     CSEVariable,
     DeferredLine,
     IndentedBuffer,
-    InplacedBuffer,
     OpOverrides,
     PythonPrinter,
-    RemovedArg,
     SizeArg,
     TensorArg,
     WorkspaceArg,
@@ -102,7 +100,6 @@ if TYPE_CHECKING:
     from typing import TypeVar
 
     from ..ir import IRNode
-    from .simd_kernel_features import SIMDKernelFeatures
 
     _T = TypeVar("_T")
 
@@ -1523,20 +1520,20 @@ class FixedTritonConfig:
         return item in self.config
 
 
-class TritonCSE(CSE[TritonCSEVariable, Union[str, tuple[str, str]]]):
+class TritonCSE(CSE):
     """
     Subclasses CSE to apply the current load mask to the cache key to avoid CSEing
     variables across separate masked blocks.
     """
 
-    def augment_key(self, cache_key: str) -> Union[str, tuple[str, str]]:
+    def augment_key(self, cache_key: object) -> object:
         if mask := V.kernel._load_mask:
             return (cache_key, mask.name)
         else:
             return cache_key
 
 
-class TritonKernel(SIMDKernel[TritonCSEVariable]):
+class TritonKernel(SIMDKernel):
     overrides = TritonKernelOverrides  # type: ignore[assignment]
     helper_functions: HelperFunctions
     kexpr: Callable[[sympy.Expr], str] = texpr
@@ -2803,7 +2800,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         # in the global namespace
         helper = IndentedBuffer()
         helper.writeline("@triton.jit")
-        cse = CSE()
+        cse = CSE(prefix="", suffix="")
 
         args = [
             tuple(cse.namedvar(f"arg{i}_{n}", dtype=dtypes[n]) for n in range(num_args))
@@ -2955,8 +2952,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             result_vars = partial_scan_vars
 
         for result_var in result_vars:
-            assert isinstance(result_var, TritonCSEVariable)
-            result_var.mask_vars = OrderedSet(masks)
+            result_var.mask_vars = masks  # type: ignore[attr-defined]
 
         return tuple(result_vars)
 
@@ -3347,13 +3343,9 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 and mutation not in V.graph.removed_buffers
                 and mutation not in self.removed_buffers
             ):
-                mutated_args.add(
-                    cast(InplacedBuffer, self.args.inplace_buffers[mutation]).inner_name
-                )
+                mutated_args.add(self.args.inplace_buffers[mutation].inner_name)
             if mutation in self.args.output_buffers:
-                mutation_arg = self.args.output_buffers[mutation]
-                assert not isinstance(mutation_arg, RemovedArg)
-                mutated_args.add(mutation_arg)
+                mutated_args.add(self.args.output_buffers[mutation])
 
         # Note: [Workspace Mutation]
         # workspace arguments are mutated, but are not marked as mutations in self.mutations
@@ -4056,12 +4048,9 @@ class TritonScheduling(SIMDScheduling):
             store_cache()
             return ms, mod.__file__
 
-    def create_kernel_choices(  # type: ignore[override]
-        self,
-        kernel_features: SIMDKernelFeatures,
-        kernel_args: list[Any],
-        kernel_kwargs: dict[str, Any],
-    ) -> list[TritonKernel]:
+    def create_kernel_choices(
+        self, kernel_features, kernel_args, kernel_kwargs
+    ) -> list[SIMDKernel]:
         is_scan = kernel_features.contains_op("scan")
         is_split_scan = is_scan and any(
             node.is_split_scan() for node in kernel_features.scheduler_nodes()
@@ -4095,11 +4084,11 @@ class TritonScheduling(SIMDScheduling):
 
     def add_multi_kernel_choices(
         self,
-        kernel: TritonKernel,
+        kernel: SIMDKernel,
         kernel_args: list[Any],
         kernel_kwargs: dict[str, Any],
-    ) -> list[TritonKernel]:
-        kernels: list[TritonKernel] = [kernel]
+    ) -> list[SIMDKernel]:
+        kernels: list[SIMDKernel] = [kernel]
         if not config.triton.multi_kernel:
             return kernels
 
