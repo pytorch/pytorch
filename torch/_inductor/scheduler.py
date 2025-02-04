@@ -36,7 +36,7 @@ import sympy
 import torch
 import torch._inductor.async_compile  # noqa: F401 required to warm up AsyncCompile pools
 from torch._dynamo.utils import counters, dynamo_timed
-from torch._inductor.codecache import PyCodeCache, TritonFuture
+from torch._inductor.codecache import LambdaFuture, PyCodeCache
 from torch._inductor.metrics import get_metric_table, is_metric_table_enabled
 from torch.fx.experimental.symbolic_shapes import free_unbacked_symbols
 from torch.utils._ordered_set import OrderedSet
@@ -2734,7 +2734,7 @@ class Scheduler:
 
         def compile_kernel(
             nodes: Sequence[BaseSchedulerNode],
-        ) -> tuple[Optional[TritonFuture], ModuleType]:
+        ) -> tuple[Optional[LambdaFuture], ModuleType]:
             src_code = self.generate_kernel_code_from_nodes(
                 nodes, benchmark_kernel=True
             )
@@ -2743,7 +2743,7 @@ class Scheduler:
                 fut = None
             else:
                 fut = async_compile.triton(kernel_name="triton_", source_code=src_code)
-                assert isinstance(fut, TritonFuture)
+                assert isinstance(fut, LambdaFuture)
 
             return (fut, mod)
 
@@ -2772,7 +2772,7 @@ class Scheduler:
             )
 
             # Start compiling choices in parallel
-            future_choices: List[tuple[Any, Optional[TritonFuture], ModuleType]] = []
+            future_choices: List[tuple[Any, Optional[LambdaFuture], ModuleType]] = []
             triton_choices = 0
             for choice, unfused_time in sorted(
                 choice_timings.items(), key=lambda x: x[1]
