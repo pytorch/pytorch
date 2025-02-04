@@ -78,12 +78,12 @@ from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
 from torch.testing._internal.triton_utils import requires_gpu
 from torch.testing._internal.two_tensor import TwoTensor
 from torch.utils._pytree import (
-    LeafSpec,
     tree_flatten,
     tree_map,
     tree_unflatten,
     TreeSpec,
     treespec_dumps,
+    treespec_leaf,
     treespec_loads,
 )
 
@@ -5218,7 +5218,7 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
 
         dt = MyDataClass(x=3, y=4)
         flat, spec = tree_flatten(dt)
-        self.assertTrue(spec, LeafSpec())
+        self.assertTrue(spec, treespec_leaf())
         self.assertTrue(len(flat) == 1)
 
         torch.export.register_dataclass(
@@ -5229,7 +5229,9 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
         flat, spec = tree_flatten(dt)
         self.assertEqual(
             spec,
-            TreeSpec(MyDataClass, [["x", "y"], ["z"]], [LeafSpec(), LeafSpec()]),
+            TreeSpec(
+                MyDataClass, [["x", "y"], ["z"]], [treespec_leaf(), treespec_leaf()]
+            ),
         )
         self.assertEqual(flat, [3, 4])
 
@@ -5262,7 +5264,7 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
             TreeSpec(
                 MyOtherDataClass,
                 [["x", "y", "z"], []],
-                [LeafSpec(), LeafSpec(), LeafSpec()],
+                [treespec_leaf(), treespec_leaf(), treespec_leaf()],
             ),
         )
         self.assertEqual(flat, [3, 4, None])
