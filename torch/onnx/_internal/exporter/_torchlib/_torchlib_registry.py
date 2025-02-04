@@ -68,7 +68,7 @@ def onnx_impl(
                 getattr(processed_func, "name", func.__name__),
                 opset_version=opset_version,
             )
-            processed_func.signature = signature  # type: ignore[assignment]
+            processed_func.__pt_signature = signature  # type: ignore[assignment]
 
         if not private:
             # Skip registration if private

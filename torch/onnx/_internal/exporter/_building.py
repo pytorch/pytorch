@@ -677,8 +677,8 @@ class OpRecorder(evaluator.Evaluator):
                     return 0
 
             # NOTE: signature is written to function in the registration process
-            if hasattr(function, "signature"):
-                op_signature = function.signature
+            if hasattr(function, "__pt_signature"):
+                op_signature = function.__pt_signature
             else:
                 op_signature = _schemas.OpSignature.from_function(
                     function,
@@ -686,6 +686,7 @@ class OpRecorder(evaluator.Evaluator):
                     function.name,
                     opset_version=function.opset.version,
                 )
+                function.__pt_signature = op_signature  # type: ignore[assignment]
 
             named_inputs, named_attrs = _construct_named_inputs_and_attrs(
                 op_signature, args, kwargs
