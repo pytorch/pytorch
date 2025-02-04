@@ -52,7 +52,6 @@ from .ir import ComputedBuffer, get_device_type, MultiOutput, MultiOutputLayout
 from .loop_body import LoopBody
 from .memory import MemoryPlanningInfoForBuffer, MemoryPlanningInfoForNode
 from .runtime.runtime_utils import green_text, red_text
-from .sizevars import SimplifyIndexing
 from .utils import (
     cache_on_self,
     cmp,
@@ -1140,11 +1139,8 @@ class SchedulerNode(BaseSchedulerNode):
         return var_ranges
 
     def codegen(self, index_vars: Sequence[Sequence[sympy.Expr]]) -> None:
-        var_ranges = self.ranges_from_index_vars(index_vars)
         try:
-            with V.set_ops_handler(
-                SimplifyIndexing(V.get_ops_handler(), var_ranges)
-            ), V.kernel.set_current_node(self):
+            with V.kernel.set_current_node(self):
                 self._body(*index_vars)
         except Exception:
             log.fatal("Error in codegen for %s", self.node)
