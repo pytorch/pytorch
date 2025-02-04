@@ -83,6 +83,7 @@ FIXME_hop_that_doesnt_have_opinfo_test_allowlist = [
     'wrap_with_set_grad_enabled',
     'auto_functionalized_v2',
     'associative_scan',
+    'flat_apply',  # is WIP, doesn't pass any of the tests yet
     'wrap_with_autocast',
     'wrap_activation_checkpoint',
     'run_const_graph',
@@ -97,6 +98,7 @@ FIXME_hop_that_doesnt_have_opinfo_test_allowlist = [
     "triton_kernel_wrapper_functional",
     "hints_wrapper",
     "foreach_map",
+    "aoti_call_delegate",
 ]
 
 torch.library.define(
