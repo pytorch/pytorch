@@ -70,10 +70,8 @@ from .common import (
     CSEVariable,
     DeferredLine,
     IndentedBuffer,
-    InplacedBuffer,
     OpOverrides,
     PythonPrinter,
-    RemovedArg,
     SizeArg,
     TensorArg,
     WorkspaceArg,
@@ -3345,13 +3343,9 @@ class TritonKernel(SIMDKernel):
                 and mutation not in V.graph.removed_buffers
                 and mutation not in self.removed_buffers
             ):
-                mutated_args.add(
-                    cast(InplacedBuffer, self.args.inplace_buffers[mutation]).inner_name
-                )
+                mutated_args.add(self.args.inplace_buffers[mutation].inner_name)
             if mutation in self.args.output_buffers:
-                mutation_arg = self.args.output_buffers[mutation]
-                assert not isinstance(mutation_arg, RemovedArg)
-                mutated_args.add(mutation_arg)
+                mutated_args.add(self.args.output_buffers[mutation])
 
         # Note: [Workspace Mutation]
         # workspace arguments are mutated, but are not marked as mutations in self.mutations

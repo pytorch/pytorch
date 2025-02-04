@@ -286,7 +286,7 @@ class CUDATemplateKernel(CUDAKernel):
             _, call_args, _, arg_types = self.args.python_argdefs()
 
         layout_args = self.get_layout_args()
-        call_args.extend(map(str, layout_args))
+        call_args.extend(layout_args)
         arg_types.extend("int" for a in layout_args)
         # dynamo wraps unspec variable as 0d CPU tensor, need convert to scalar
         for i in range(len(call_args)):
