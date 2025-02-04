@@ -20,6 +20,7 @@
 #include <ATen/ops/bmm_native.h>
 #include <ATen/ops/cholesky_native.h>
 #include <ATen/ops/linalg_cholesky_native.h>
+#include <ATen/ops/linalg_lu_factor_ex_native.h>
 #include <ATen/ops/linalg_lu_factor_native.h>
 #include <ATen/ops/linalg_solve_triangular_native.h>
 #include <ATen/ops/mm_native.h>
@@ -120,19 +121,25 @@ bool use_metal_mm(const Tensor& self, const Tensor& other, const Tensor& output)
 
 } // anonymous namespace
 
-static void linalg_lu_factor_out_mps_impl(const Tensor& A, bool pivot, Tensor& LU, Tensor& pivots) {
+static void linalg_lu_factor_ex_out_mps_impl(const Tensor& A,
+                                             bool pivot,
+                                             const Tensor& LU,
+                                             const Tensor& pivots,
+                                             const Tensor& info,
+                                             bool check_errors) {
   using namespace mps;
 
   TORCH_CHECK(!c10::isComplexType(A.scalar_type()) && !c10::isComplexType(LU.scalar_type()),
               "linalg.lu_factor(): MPS doesn't support complex types.");
   TORCH_CHECK(pivot, "linalg.lu_factor(): MPS doesn't allow pivot == False.");
 
-  Tensor A_t = A;
+  Tensor A_t = A.contiguous();
   uint64_t aRows = A_t.size(-2);
   uint64_t aCols = A_t.size(-1);
   uint64_t aElemSize = A_t.element_size();
   uint64_t numPivots = std::min(aRows, aCols);
   std::vector<int64_t> pivot_sizes(A_t.sizes().begin(), A_t.sizes().end() - 2);
+  resize_output(info, pivot_sizes);
   pivot_sizes.push_back(numPivots);
   resize_output(pivots, pivot_sizes);
 
@@ -210,23 +217,27 @@ static void linalg_lu_factor_out_mps_impl(const Tensor& A, bool pivot, Tensor& L
     }
   });
   auto stacked_pivots = A_.dim() > 2 ? at::stack(pivots_list) : pivots_list[0];
+  auto stacked_status = A_.dim() > 2 ? at::stack(status_tensors) : status_tensors[0];
   if (A_t.dim() > 3) {
     resize_output(LU, A_t.sizes());
     pivots.copy_(stacked_pivots.view(pivot_sizes));
   } else {
     pivots.copy_(stacked_pivots);
   }
-  pivots += 1; // PyTorch's `pivots` is 1-index.
-
-  for (const auto i : c10::irange(status_tensors.size())) {
-    int status = status_tensors[i].item<int>();
-    TORCH_CHECK(
-        status == 0,
-        "lu_factor(): LU factorization failure at the ",
-        i + 1,
-        " sample with status: ",
-        status,
-        ". See https://developer.apple.com/documentation/metalperformanceshaders/mpsmatrixdecompositionstatus for details.");
+  pivot_sizes.pop_back();
+  info.copy_(stacked_status.view(pivot_sizes));
+  pivots.add_(1); // PyTorch's `pivots` is 1-index.
+  if (check_errors) {
+    for (const auto i : c10::irange(status_tensors.size())) {
+      int status = status_tensors[i].item<int>();
+      TORCH_CHECK(
+          status == 0,
+          "lu_factor(): LU factorization failure at the ",
+          i + 1,
+          " sample with status: ",
+          status,
+          ". See https://developer.apple.com/documentation/metalperformanceshaders/mpsmatrixdecompositionstatus for details.");
+    }
   }
 }
 
@@ -1109,15 +1120,21 @@ TORCH_IMPL_FUNC(triangular_solve_mps_out)
 }
 
 std::tuple<Tensor&, Tensor&> linalg_lu_factor_out_mps(const Tensor& A, bool pivot, Tensor& LU, Tensor& pivots) {
-  mps::linalg_lu_factor_out_mps_impl(A, pivot, LU, pivots);
+  Tensor info = at::empty({}, A.options().dtype(kInt));
+  mps::linalg_lu_factor_ex_out_mps_impl(A, pivot, LU, pivots, info, false);
   return std::tie(LU, pivots);
 }
 
 std::tuple<Tensor, Tensor> linalg_lu_factor_mps(const Tensor& A, bool pivot) {
   Tensor LU = at::empty({0}, A.options());
   Tensor pivots = at::empty({0}, A.options().dtype(kInt));
-  mps::linalg_lu_factor_out_mps_impl(A, pivot, LU, pivots);
+  Tensor info = at::empty({}, A.options().dtype(kInt));
+  mps::linalg_lu_factor_ex_out_mps_impl(A, pivot, LU, pivots, info, false);
   return std::make_tuple(std::move(LU), std::move(pivots));
 }
 
+TORCH_IMPL_FUNC(linalg_lu_factor_ex_out_mps)
+(const Tensor& A, bool pivot, bool check_errors, const Tensor& LU, const Tensor& pivots, const Tensor& info) {
+  mps::linalg_lu_factor_ex_out_mps_impl(A, pivot, LU, pivots, info, check_errors);
+}
 } // namespace at::native
