@@ -5,7 +5,7 @@ import inspect
 import itertools
 import types
 from contextlib import contextmanager, nullcontext
-from typing import Dict, List, TYPE_CHECKING
+from typing import TYPE_CHECKING
 
 import torch.nn
 
@@ -193,7 +193,9 @@ class NNModuleVariable(VariableTracker):
             )
         return result
 
-    def call_hasattr(self, tx: "InstructionTranslator", name: str) -> "VariableTracker":
+    def call_obj_hasattr(
+        self, tx: "InstructionTranslator", name: str
+    ) -> "VariableTracker":
         mod = tx.output.get_submodule(self.module_key)
         result = hasattr(mod, name)
         install_guard(
@@ -343,8 +345,8 @@ class NNModuleVariable(VariableTracker):
     def call_function(
         self,
         tx,
-        args: "List[VariableTracker]",
-        kwargs: "Dict[str, VariableTracker]",
+        args: "list[VariableTracker]",
+        kwargs: "dict[str, VariableTracker]",
     ) -> "VariableTracker":
         mod = tx.output.get_submodule(self.module_key)
 
@@ -451,8 +453,8 @@ class NNModuleVariable(VariableTracker):
         self,
         tx,
         name,
-        args: "List[VariableTracker]",
-        kwargs: "Dict[str, VariableTracker]",
+        args: "list[VariableTracker]",
+        kwargs: "dict[str, VariableTracker]",
         constant=False,
     ) -> "VariableTracker":
         from . import ConstantVariable, ListIteratorVariable, TupleVariable
@@ -852,8 +854,8 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
     def call_function(
         self,
         tx: "InstructionTranslator",
-        args: "List[VariableTracker]",
-        kwargs: "Dict[str, VariableTracker]",
+        args: "list[VariableTracker]",
+        kwargs: "dict[str, VariableTracker]",
     ) -> "VariableTracker":
         mod = self.value
         # see comment on lazy module handling in NNModuleVariable.call_function for context
@@ -920,8 +922,8 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
         self,
         tx,
         name,
-        args: "List[VariableTracker]",
-        kwargs: "Dict[str, VariableTracker]",
+        args: "list[VariableTracker]",
+        kwargs: "dict[str, VariableTracker]",
     ) -> "VariableTracker":
         if name in ["_call_impl", "_wrapped_call_impl"]:
             fn = getattr(self.value_type, name)

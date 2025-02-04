@@ -7,7 +7,8 @@ from __future__ import annotations
 import inspect
 import logging
 import warnings
-from typing import Any, Callable, Mapping, Sequence, TYPE_CHECKING
+from collections.abc import Mapping, Sequence
+from typing import Any, Callable, TYPE_CHECKING
 
 import torch
 import torch.utils.pytree.python as pytree
@@ -26,44 +27,6 @@ def _signature(model) -> inspect.Signature:
     if callable(should_be_callable):
         return inspect.signature(should_be_callable)
     raise ValueError("model has no forward method and is not callable")
-
-
-def _rename_dynamic_shapes_with_model_inputs(
-    model,
-    *,
-    dynamic_shapes: dict[str, Any] | tuple[Any] | list[Any],
-    input_names: Sequence[str],
-) -> dict[str, Any] | tuple[Any] | list[Any]:
-    """
-
-    This function renames the dynamic_shapes with the parameters of the model, since
-    torch.export.export requires the dynamic_shapes to be named with the model's input names.
-
-    NOTE: If the model input is nested, this function does nothing, and the users are responsible
-    for providing the correct dynamic_shapes with the correct model parameters as keys. However,
-    dynamic_shapes is usually defined as a tuple when the input is nested.
-
-    """
-    if isinstance(dynamic_shapes, (tuple, list)):
-        # It doesn not specify input names if it's a tuple
-        return dynamic_shapes
-
-    sig = _signature(model)
-
-    # This indicates that inputs are nested, and users specify
-    # flattened input names, so we don't rename accordingly.
-    # If users really assign customized names to the nested inputs, they
-    # get errors from torch.export.export
-    if len(input_names) != len(sig.parameters):
-        return dynamic_shapes
-
-    renamed_dynamic_shapes = {}
-    for idx, param_name in enumerate(sig.parameters):
-        input_name = input_names[idx]
-        if input_name in dynamic_shapes:
-            renamed_dynamic_shapes[param_name] = dynamic_shapes[input_name]
-
-    return renamed_dynamic_shapes
 
 
 def _from_dynamic_axes_to_dynamic_shapes(
@@ -288,15 +251,6 @@ def export_compat(
                     "Please provide 'dynamic_shapes' directly. "
                     "Refer to the documentation for 'torch.export.export' for more information on dynamic shapes."
                 ) from e
-        elif dynamic_shapes is not None and input_names is not None:
-            # NOTE: If dynamic_shapes and input_names are both provided, we need to check
-            # if dynamic_shapes is using input_names. If so, we need to internally change it to
-            # model inputs to be compatible with torch.export.export
-            dynamic_shapes = _rename_dynamic_shapes_with_model_inputs(
-                model,
-                dynamic_shapes=dynamic_shapes,
-                input_names=input_names,
-            )
 
     registry = _registration.ONNXRegistry.from_torchlib()
     if custom_translation_table is not None:

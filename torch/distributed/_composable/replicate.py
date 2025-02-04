@@ -1,6 +1,7 @@
 # mypy: allow-untyped-defs
 import weakref
-from typing import Any, Dict, Iterable, List, NoReturn, Optional, Set
+from collections.abc import Iterable
+from typing import Any, NoReturn, Optional
 
 import torch
 import torch.nn as nn
@@ -24,17 +25,17 @@ class _ReplicateState(_State):
         # TODO(@fegin): this variable is originally create for testing, we
         # should remove this if possible.
         self._orig_module = self.module
-        self._param_names: List[str] = []
+        self._param_names: list[str] = []
         self._no_sync: bool = False
         self._init_args: Optional[tuple[Any, ...]] = None
-        self._init_kwargs: Dict[str, Any] = {}
-        self._comm_hook_args: List[Any] = []
+        self._init_kwargs: dict[str, Any] = {}
+        self._comm_hook_args: list[Any] = []
 
     def _collect_params(
         self,
         module: nn.Module,
-        ignored_modules: Set[nn.Module],
-        ignored_params: Set[nn.Parameter],
+        ignored_modules: set[nn.Module],
+        ignored_params: set[nn.Parameter],
         prefix: str = _ROOT_MODULE_PREFIX,
     ) -> None:
         # skip if managed by fully_sharded API
@@ -76,7 +77,7 @@ class _ReplicateState(_State):
     def init(
         self,
         module: nn.Module,
-        ignored_modules: Set[nn.Module],
+        ignored_modules: set[nn.Module],
         **kwargs,
     ) -> None:
         if self.has_initialized:
@@ -125,7 +126,7 @@ class _ReplicateState(_State):
         self._init_kwargs = kwargs
 
     def forward_pre_hook(
-        self, module: nn.Module, args: tuple[Any, ...], kwargs: Dict[str, Any]
+        self, module: nn.Module, args: tuple[Any, ...], kwargs: dict[str, Any]
     ) -> Any:
         if self._init_args or self._init_kwargs:
             self.lazy_init()
