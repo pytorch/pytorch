@@ -1283,11 +1283,6 @@ class TritonOverrides(OpOverrides):
 TritonOverrides._initialize_pointwise_overrides("triton")
 
 
-# Use mypy to check protocol implemented correctly
-def _typecheck_TritonOverrides(h: TritonOverrides) -> OpsHandler[str]:
-    return h
-
-
 class TritonKernelOverrides(TritonOverrides):
     """Map element-wise ops to Triton within a TritonKernel
 
@@ -1412,9 +1407,10 @@ class TritonKernelOverrides(TritonOverrides):
         return (mantissa, exponent)
 
 
-# Use mypy to check protocol implemented correctly
-def _typecheck_TritonKernelOverrides(h: TritonKernelOverrides) -> OpsHandler[str]:
-    return h
+if TYPE_CHECKING:
+
+    class _typecheck_TritonKernelOverrides(TritonKernelOverrides, OpsHandler[str]):
+        pass  # mypy will error if we got any of the signatures wrong
 
 
 class HelperFunctions:
@@ -2812,7 +2808,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         signature = ", ".join(str(x) for x in itertools.chain.from_iterable(args))
         helper.writeline(f"def {{name}}({signature}):")
 
-        overrides = TritonOverrides(V.MockHandler())
+        overrides = TritonOverrides()
 
         # Build a name that changes depending on fn to workaround a triton bug
         # where the combine_fn to reduce and scan is not hashed, and so different
