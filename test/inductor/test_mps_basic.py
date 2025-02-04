@@ -158,6 +158,7 @@ for test_name in [
     "test_silu",
     "test_slice_scatter4",
     "test_sort",
+    "test_sum_keepdims",
     "test_tanh",
     "test_view_as_complex",
     "test_view_on_aliased",

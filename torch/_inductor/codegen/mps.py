@@ -16,6 +16,7 @@ from ..virtualized import ops, V
 from .common import (
     CSEVariable,
     DeferredLine,
+    DTYPE_TO_COMPUTATION_DTYPE,
     IndentedBuffer,
     OpOverrides,
     PythonPrinter,
@@ -422,6 +423,24 @@ class MetalKernel(SIMDKernel):
                 f"""
                 if ({value}) {{
                     {acc} = true;
+                }}
+            """
+            )
+            return acc
+        if reduction_type == "sum":
+            dtype = DTYPE_TO_COMPUTATION_DTYPE[dtype]
+            reduction_dim = next(t for t in self.range_trees if t.is_reduction)
+            acc_buf = self._new_accvar(dtype, reduction_dim.numel)
+            self.body.splice(f"{acc_buf}[{reduction_dim.name}] = {value};")
+            line = DeferredLine(
+                acc_buf.name, f"static_cast<{self.dtype_to_str(dtype)}>(0)"
+            )
+            acc = self.cse.generate(self.stores, line, dtype=dtype)
+            # TODO: Move to reduction_utils.h and use `simd_shuffle_down
+            self.stores.splice(
+                f"""
+                for(auto idx = 0; idx < {reduction_dim.numel}; ++idx) {{
+                    {acc} += {acc_buf}[idx];
                 }}
             """
             )
