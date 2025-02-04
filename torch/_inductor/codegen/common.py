@@ -1218,7 +1218,7 @@ class KernelArgs:
         # this function is needed by MTIA
         return isinstance(name, RemovedArg)
 
-    def input(self, name):
+    def input(self, name: str) -> str:
         if V.graph.scheduler:
             name = V.graph.scheduler.mutation_real_name.get(name, name)
         assert name not in V.graph.removed_buffers, name
