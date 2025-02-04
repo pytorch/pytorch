@@ -7,7 +7,9 @@ from typing import Any, Optional, TYPE_CHECKING
 from sympy.printing.precedence import PRECEDENCE
 
 import torch
+import itertools
 from torch.utils._sympy.printers import ExprPrinter as ExprPrinter_
+from torch.utils._sympy.value_ranges import ValueRanges
 
 from ..utils import get_bounds_index_expr, get_kernel_metadata
 from ..virtualized import ops, V
@@ -26,7 +28,7 @@ if TYPE_CHECKING:
 
     import sympy
 
-    from ..ops_handler import StoreMode
+    from ..ops_handler import StoreMode, ReductionType
     from ..scheduler import Scheduler, SchedulerNode
     from .common import OpVarT
 
@@ -368,6 +370,7 @@ class MetalKernel(SIMDKernel):
     ) -> None:
         super().__init__(tiling, **kwargs)
         self.compute = self.body
+        self.acc_var_ids = itertools.count()
 
     def dtype_to_str(self, dtype: torch.dtype) -> str:
         return DTYPE_TO_METAL[dtype]
@@ -387,6 +390,37 @@ class MetalKernel(SIMDKernel):
         dtype_str = self.dtype_to_str(V.graph.get_dtype(name))
         line = f"{var}[{self.index_to_str(index)}] = static_cast<{dtype_str}>({value});"
         self.stores.writeline(DeferredLine(name, line))
+
+    def _new_accvar(
+        self,
+        dtype: torch.dtype,
+        value: str,
+        bounds: ValueRanges[Any] = ValueRanges.unknown(),
+    ) -> CSEVariable:
+        var_name = f"tmp_acc_{next(self.acc_var_ids)}"
+        var = V.kernel.create_cse_var(var_name, bounds, dtype)
+        self.loads.writeline(f"threadgroup {self.dtype_to_str(dtype)} {var_name};")
+        self.loads.writeline(f"{var_name} = {value};")
+
+        return var
+
+    def reduction(
+        self,
+        dtype: torch.dtype,
+        src_dtype: torch.dtype,
+        reduction_type: ReductionType,
+        value: Union[CSEVariable, tuple[CSEVariable, ...]],
+    ) -> Union[CSEVariable, tuple[CSEVariable, ...]]:
+        """Codegen a reduction operation"""
+        if reduction_type == "any":
+            acc = self._new_accvar(dtype, "false")
+            self.body.splice(f"""
+                if ({value}) {{
+                    {acc} = true;
+                }}
+            """)
+            return acc
+        raise NotImplementedError
 
     def codegen_iteration_ranges_entry(self, entry: IterationRangesEntry) -> None:
         index_expr = self.rename_indexing(entry.expr)
