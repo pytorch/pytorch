@@ -254,19 +254,7 @@ __device__ __forceinline__ void opportunistic_fastAtomicAdd(
     }
     // not coalsced, so now let try to capture lane-matches...
 
-    //auto mask = __match_any_sync(__activemask(), (int64_t)dst);
-    //dpp implementation of match_any()
-    //TODO: is this better than above __match_any?
-    unsigned long long mask = 1;
-    union dill { unsigned int i[2]; int64_t il; } dill_ = { .il = (int64_t)dst };
-    unsigned long long nask = 2;
-    for (int i = 0; i < 64 - 1; i++) {
-        dill_.i[0] = __builtin_amdgcn_mov_dpp(dill_.i[0], 0x134, 0xf, 0xf, 0); //wave_rol1
-        dill_.i[1] = __builtin_amdgcn_mov_dpp(dill_.i[1], 0x134, 0xf, 0xf, 0);
-        if (dill_.il == (int64_t)dst) mask |= nask;
-        nask = nask << 1;
-    }
-    int rotv = __lane_id();
+    auto mask = __match_any_sync(__activemask(), (int64_t)dst);
     mask = (mask << rotv) | (mask >> (64 - rotv));
 
     int leader = __ffsll(mask) - 1;    // select a leader
