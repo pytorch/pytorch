@@ -252,12 +252,12 @@ class MetalOverrides(OpOverrides):
         return f"c10::metal::log_gamma({x})"
 
     @staticmethod
-    def polygamma(n: CSEVariable, x: CSEVariable) -> str:
+    def polygamma(x: CSEVariable, y: CSEVariable) -> str:
         # polygamma's API takes order as first argument
         # and the input tensor as second, while the
         # metal shader has these inverted.
         # TODO (dcci): make this more uniform.
-        return f"c10::metal::polygamma({x}, {n})"
+        return f"c10::metal::polygamma({y}, {x})"
 
     @staticmethod
     def digamma(x: CSEVariable) -> str:
@@ -355,6 +355,9 @@ class MetalOverrides(OpOverrides):
         cast_a = f"static_cast<decltype({a}+{b})>({a})"
         cast_b = f"static_cast<decltype({a}+{b})>({b})"
         return f"metal::pow({cast_a}, {cast_b})"
+
+
+MetalOverrides._initialize_pointwise_overrides("mps")
 
 
 class MetalKernel(SIMDKernel):
