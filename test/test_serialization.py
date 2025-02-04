@@ -45,6 +45,7 @@ from torch.testing._internal.common_utils import (
     BytesIOContext,
     download_file,
     instantiate_parametrized_tests,
+    IS_CI,
     IS_FBCODE,
     IS_FILESYSTEM_UTF8_ENCODING,
     IS_WINDOWS,
@@ -521,6 +522,7 @@ class SerializationMixin:
     def test_serialization_backwards_compat_safe(self):
         self._test_serialization_backwards_compat(True)
 
+    @skipIfTorchDynamo("graph breaks messages collide with warnings")
     def test_serialization_save_warnings(self):
         with warnings.catch_warnings(record=True) as warns:
             with tempfile.NamedTemporaryFile() as checkpoint:
@@ -610,7 +612,6 @@ class SerializationMixin:
         with self.assertRaisesRegex(RuntimeError, error_msg):
             _ = torch.load(buf)
 
-    @unittest.skipIf((3, 8, 0) <= sys.version_info < (3, 8, 2), "See https://bugs.python.org/issue39681")
     def test_serialization_filelike_api_requirements(self):
         filemock = FilelikeMock(b'', has_readinto=False)
         tensor = torch.randn(3, 5)
@@ -637,7 +638,6 @@ class SerializationMixin:
         b = torch.load(data)
         self.assertTrue(torch.equal(tensor, b), msg.format(desc))
 
-    @unittest.skipIf((3, 8, 0) <= sys.version_info < (3, 8, 2), "See https://bugs.python.org/issue39681")
     def test_serialization_filelike_missing_attrs(self):
         # Test edge cases where filelike objects are missing attributes.
         # The Python io docs suggests that these attributes should really exist
@@ -652,7 +652,6 @@ class SerializationMixin:
         for desc, mock in mocks:
             self._test_serialization_filelike(to_serialize, mock, desc)
 
-    @unittest.skipIf((3, 8, 0) <= sys.version_info < (3, 8, 2), "See https://bugs.python.org/issue39681")
     def test_serialization_filelike_stress(self):
         a = torch.randn(11 * (2 ** 9) + 1, 5 * (2 ** 9))
 
@@ -826,6 +825,11 @@ class SerializationMixin:
             f.seek(0)
             loaded_data = torch.load(f, weights_only=True)
             self.assertEqual(data, loaded_data)
+
+    @unittest.skipIf(not IS_CI, "only check debug var is set in CI")
+    def test_debug_set_in_ci(self):
+        # This test is to make sure that the serialization debug flag is set in CI
+        self.assertTrue(os.environ.get("TORCH_SERIALIZATION_DEBUG", "0") == "1")
 
 
 class serialization_method:
@@ -1040,6 +1044,23 @@ class TestSerialization(TestCase, SerializationMixin):
             torch.save(big_model.state_dict(), f)
             f.seek(0)
             state = torch.load(f)
+
+    @serialTest()
+    def test_serialization_4gb_file(self):
+        '''
+        This is a specially engineered testcase that would fail if the data_descriptor size
+        had been incorrectly set as data_descriptor_size32 when it should be data_descriptor_size64
+        '''
+        # Run GC to clear up as much memory as possible before running this test
+        gc.collect()
+        big_model = torch.nn.ModuleList([torch.nn.Linear(1, int(1024 * 1024 * 1024) + 12, bias=False),
+                                         torch.nn.Linear(1, 1, bias=False).to(torch.float8_e4m3fn),
+                                         torch.nn.Linear(1, 2, bias=False).to(torch.float8_e4m3fn)])
+
+        with BytesIOContext() as f:
+            torch.save(big_model.state_dict(), f)
+            f.seek(0)
+            torch.load(f)
 
     @parametrize('weights_only', (True, False))
     def test_pathlike_serialization(self, weights_only):
@@ -4523,6 +4544,40 @@ class TestSerialization(TestCase, SerializationMixin):
             finally:
                 serialization_config.save.use_pinned_memory_for_d2h = pinned_before
 
+    def test_has_format_version(self):
+        sd = torch.nn.Linear(2, 3).state_dict()
+        with tempfile.NamedTemporaryFile() as f:
+            torch.save(sd, f)
+            f.seek(0)
+            with torch.serialization._open_file_like(f, "rb") as opened_file:
+                with torch.serialization._open_zipfile_reader(opened_file) as opened_zipfile:
+                    self.assertTrue(opened_zipfile.has_record(".format_version"))
+                    self.assertEqual(opened_zipfile.get_record(".format_version"), b'1')
+
+    @parametrize('path_type', (str, Path))
+    @unittest.skipIf(IS_WINDOWS, "TemporaryFileName on windows")
+    def test_mmap_load_offset_calculation(self, path_type):
+        calculate_offsets_before = serialization_config.load.calculate_storage_offsets
+        try:
+            serialization_config.load.calculate_storage_offsets = True
+            m = torch.nn.Sequential(*[torch.nn.Linear(4, 4) for _ in range(20)])
+
+            with TemporaryFileName() as f:
+                f = path_type(f)
+                state_dict = m.state_dict()
+                torch.save(state_dict, f)
+                result = torch.load(f, mmap=True)
+                result_non_mmap = torch.load(f, mmap=False)
+
+            with torch.device("meta"):
+                model_mmap_state_dict = torch.nn.Sequential(*[torch.nn.Linear(4, 4) for _ in range(20)])
+                model_non_mmap_state_dict = torch.nn.Sequential(*[torch.nn.Linear(4, 4) for _ in range(20)])
+            model_mmap_state_dict.load_state_dict(result, assign=True)
+            model_non_mmap_state_dict.load_state_dict(result_non_mmap, assign=True)
+            inp = torch.randn(4, 4)
+            self.assertEqual(model_mmap_state_dict(inp), model_non_mmap_state_dict(inp.clone()))
+        finally:
+            serialization_config.load.calculate_storage_offsets = calculate_offsets_before
 
     def run(self, *args, **kwargs):
         with serialization_method(use_zip=True):
