@@ -1,12 +1,8 @@
 # mypy: allow-untyped-defs
 import logging
-import os
 import threading
-import warnings
 from collections.abc import Generator
 from datetime import timedelta
-from typing import Tuple
-from urllib.parse import urlparse
 
 import torch
 import torch.distributed as dist

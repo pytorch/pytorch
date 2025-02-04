@@ -17,7 +17,7 @@ import threading
 import traceback
 import warnings
 from functools import lru_cache
-from typing import Any, Callable, cast, List, Optional, Tuple, Union
+from typing import Any, Callable, cast, Optional, Union
 
 import torch
 import torch._C
@@ -187,8 +187,7 @@ def _sleep(cycles):
 def _extract_arch_version(arch_string: str):
     """Extracts the architecture string from a CUDA version"""
     base = arch_string.split("_")[1]
-    if base.endswith("a"):
-        base = base[:-1]
+    base = base.removesuffix("a")
     return int(base)
 
 

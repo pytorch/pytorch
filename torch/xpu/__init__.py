@@ -9,7 +9,7 @@ This package is lazily initialized, so you can always import it, and use
 import threading
 import traceback
 from functools import lru_cache
-from typing import Any, Callable, Dict, List, Optional, Tuple, Union
+from typing import Any, Callable, Optional, Union
 
 import torch
 import torch._C
@@ -227,7 +227,7 @@ def get_device_capability(device: Optional[_device_t] = None) -> dict[str, Any]:
             (default).
 
     Returns:
-        Dict[str, Any]: the xpu capability dictionary of the device
+        dict[str, Any]: the xpu capability dictionary of the device
     """
     props = get_device_properties(device)
     # pybind service attributes are no longer needed and their presence breaks
