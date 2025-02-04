@@ -13,7 +13,7 @@ import threading
 import types
 import warnings
 import weakref
-from typing import Dict, Generic, List, TYPE_CHECKING
+from typing import Generic, TYPE_CHECKING
 from typing_extensions import is_typeddict
 
 import torch._dynamo.config
@@ -54,6 +54,7 @@ from ..utils import (
     object_has_getattribute,
     proxy_args_kwargs,
     tensortype_to_dtype,
+    tuple_methods,
     unpatched_nn_module_getattr,
 )
 from .base import AttributeMutationExisting, ValueMutationNew, VariableTracker
@@ -98,10 +99,12 @@ def is_forbidden_context_manager(ctx):
 
 
 class UserDefinedVariable(VariableTracker):
-    pass
+    value: object
 
 
 class UserDefinedClassVariable(UserDefinedVariable):
+    value: type[object]
+
     def __init__(self, value, **kwargs) -> None:
         super().__init__(**kwargs)
         self.value = value
@@ -217,6 +220,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
             source
             and not inspect.ismethoddescriptor(obj)
             and not is_wrapper_or_member_descriptor(obj)
+            and obj is not dict.__new__
         ):
             return VariableTracker.build(tx, obj, source)
 
@@ -290,8 +294,8 @@ class UserDefinedClassVariable(UserDefinedVariable):
         self,
         tx,
         name,
-        args: "List[VariableTracker]",
-        kwargs: "Dict[str, VariableTracker]",
+        args: "list[VariableTracker]",
+        kwargs: "dict[str, VariableTracker]",
     ) -> "VariableTracker":
         if (
             name == "__subclasses__"
@@ -300,7 +304,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
             and "__subclasses__" not in self.value.__dict__
         ):
             options = {"mutation_type": ValueMutationNew()}
-            subs_as_vars: List[VariableTracker] = []
+            subs_as_vars: list[VariableTracker] = []
             for sub in self.value.__subclasses__():
                 source = AttrSource(tx.import_source(sub.__module__), sub.__name__)
                 subs_as_vars.append(
@@ -321,18 +325,23 @@ class UserDefinedClassVariable(UserDefinedVariable):
             return variables.ConstantVariable(self.value == args[0].value)
         elif name == "__ne__" and len(args) == 1 and hasattr(args[0], "value"):
             return variables.ConstantVariable(self.value != args[0].value)
+        elif name == "__new__" and self.value is collections.OrderedDict:
+            assert len(args) == 1
+            assert len(kwargs) == 0
+            return variables.ConstDictVariable(
+                {}, collections.OrderedDict, mutation_type=ValueMutationNew()
+            )
 
         return super().call_method(tx, name, args, kwargs)
 
     def call_function(
         self,
         tx: "InstructionTranslator",
-        args: "List[VariableTracker]",
-        kwargs: "Dict[str, VariableTracker]",
+        args: "list[VariableTracker]",
+        kwargs: "dict[str, VariableTracker]",
     ) -> "VariableTracker":
         from ..side_effects import SideEffects
         from .builder import wrap_fx_proxy
-        from .builtin import BuiltinVariable
 
         constant_args = check_constant_args(args, kwargs)
 
@@ -352,8 +361,10 @@ class UserDefinedClassVariable(UserDefinedVariable):
 
             return NullContextVariable()
         elif self.value is collections.OrderedDict:
-            return BuiltinVariable.call_custom_dict(
-                tx, collections.OrderedDict, *args, **kwargs
+            return tx.inline_user_function_return(
+                VariableTracker.build(tx, polyfills.construct_dict),
+                [self, *args],
+                kwargs,
             )
         elif (
             self.value is collections.defaultdict
@@ -413,6 +424,18 @@ class UserDefinedClassVariable(UserDefinedVariable):
         elif self.value is torch.cuda.device and not kwargs and len(args) == 1:
             assert args[0].is_python_constant()
             return variables.CUDADeviceVariable.create(tx, args[0].as_python_constant())
+        elif (
+            self.value is torch.fx.immutable_collections.immutable_list
+            and len(args) == 1
+            and isinstance(args[0], variables.ListVariable)
+        ):
+            arg = args[0]
+            if arg.source:
+                install_guard(arg.source.make_guard(GuardBuilder.SEQUENCE_LENGTH))
+            return variables.FxImmutableListVariable(
+                list(arg.unpack_var_sequence(tx)),
+                mutation_type=ValueMutationNew(),
+            )
         elif (
             issubclass(type(self.value), type)
             and hasattr(
@@ -602,9 +625,6 @@ class UserDefinedClassVariable(UserDefinedVariable):
             )
 
             return tensor_variable
-        elif issubclass(self.value, enum.Enum) and len(args) == 1 and not kwargs:
-            options = {"mutation_type": ValueMutationNew()}
-            return variables.EnumVariable.create(self.value, args[0], options)
         elif self.value is random.Random:
             if len(args) == 1 and isinstance(args[0], variables.ConstantVariable):
                 seed = args[0].value
@@ -612,6 +632,14 @@ class UserDefinedClassVariable(UserDefinedVariable):
                 seed = None
             random_object = random.Random(seed)
             return RandomVariable(random_object)
+        elif (
+            self.value is types.MappingProxyType
+            and len(args) == 1
+            and isinstance(args[0], variables.ConstDictVariable)
+        ):
+            # types.MappingProxyType is a read-only proxy of the dict. If the
+            # original dict changes, the changes are reflected in proxy as well.
+            return variables.MappingProxyVariable(args[0])
         elif (
             not self.is_standard_new()
             and SideEffects.cls_supports_mutation_side_effects(self.value)
@@ -624,7 +652,6 @@ class UserDefinedClassVariable(UserDefinedVariable):
                 [self, *args],
                 kwargs,
             )
-
         return super().call_function(tx, args, kwargs)
 
     def is_standard_new(self):
@@ -634,12 +661,14 @@ class UserDefinedClassVariable(UserDefinedVariable):
             new_fn = new_fn.__func__
         return new_fn in (object.__new__, Generic.__new__, dict.__new__)
 
-    def call_hasattr(self, tx: "InstructionTranslator", name: str) -> "VariableTracker":
+    def call_obj_hasattr(
+        self, tx: "InstructionTranslator", name: str
+    ) -> "VariableTracker":
         if self.source:
             source = AttrSource(self.source, name)
             install_guard(source.make_guard(GuardBuilder.HASATTR))
             return variables.ConstantVariable(hasattr(self.value, name))
-        return super().call_hasattr(tx, name)
+        return super().call_obj_hasattr(tx, name)
 
     def const_getattr(self, tx: "InstructionTranslator", name):
         if name == "__name__":
@@ -753,8 +782,8 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         self,
         tx,
         name,
-        args: "List[VariableTracker]",
-        kwargs: "Dict[str, VariableTracker]",
+        args: "list[VariableTracker]",
+        kwargs: "dict[str, VariableTracker]",
     ) -> "VariableTracker":
         from . import ConstantVariable, UserMethodVariable
 
@@ -843,8 +872,8 @@ class UserDefinedObjectVariable(UserDefinedVariable):
     def call_function(
         self,
         tx: "InstructionTranslator",
-        args: "List[VariableTracker]",
-        kwargs: "Dict[str, VariableTracker]",
+        args: "list[VariableTracker]",
+        kwargs: "dict[str, VariableTracker]",
     ) -> "VariableTracker":
         from .. import trace_rules
 
@@ -1227,7 +1256,9 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         # Earlier we were returning GetAttrVariable but its incorrect. In absence of attr, Python raises AttributeError.
         raise_observed_exception(AttributeError, tx)
 
-    def call_hasattr(self, tx: "InstructionTranslator", name: str) -> "VariableTracker":
+    def call_obj_hasattr(
+        self, tx: "InstructionTranslator", name: str
+    ) -> "VariableTracker":
         if self.source:
             install_guard(
                 AttrSource(self.source, name).make_guard(GuardBuilder.HASATTR)
@@ -1303,8 +1334,8 @@ class SourcelessGraphModuleVariable(UserDefinedObjectVariable):
         self,
         tx,
         name,
-        args: "List[VariableTracker]",
-        kwargs: "Dict[str, VariableTracker]",
+        args: "list[VariableTracker]",
+        kwargs: "dict[str, VariableTracker]",
     ) -> "VariableTracker":
         fn_variable = variables.UserFunctionVariable(self.value.forward.__func__)
         args = [self] + args
@@ -1410,13 +1441,73 @@ class UserDefinedDictVariable(UserDefinedObjectVariable):
         self,
         tx,
         name,
-        args: "List[VariableTracker]",
-        kwargs: "Dict[str, VariableTracker]",
+        args: "list[VariableTracker]",
+        kwargs: "dict[str, VariableTracker]",
     ) -> "VariableTracker":
         method = self._maybe_get_baseclass_method(name)
         if method in self._dict_methods:
             return self._dict_vt.call_method(tx, name, args, kwargs)
         return super().call_method(tx, name, args, kwargs)
+
+    def unpack_var_sequence(self, tx):
+        if type(self.value).__iter__ in (
+            dict.__iter__,
+            collections.OrderedDict.__iter__,
+        ):
+            return self._dict_vt.unpack_var_sequence(tx)
+        raise NotImplementedError
+
+
+class UserDefinedTupleVariable(UserDefinedObjectVariable):
+    """
+    Represents user defined objects that are subclasses of tuple.
+
+    Internally, it uses a TupleVariable to represent the tuple part of the
+    variable tracker. For everything else, it falls back to
+    UserDefinedObjectVariable.
+    """
+
+    _nonvar_fields = UserDefinedObjectVariable._nonvar_fields
+
+    def __init__(self, value, **kwargs):
+        super().__init__(value, **kwargs)
+        self._tuple_vt = None
+        # tuple.__new__ (tuple being immutable) inits the tuple elements. This
+        # behavior is different from object.__new__ or dict.__new__ where
+        # reconstructing object/dict does not need to consider __new__ args.
+        # These args are stored in the new_args field.
+        self.new_args = None
+
+    def set_underlying_tuple_vt(self, tuple_vt):
+        self._tuple_vt = tuple_vt
+
+    @staticmethod
+    def create(value, tuple_vt, **kwargs):
+        result = UserDefinedTupleVariable(value, **kwargs)
+        result.set_underlying_tuple_vt(tuple_vt)
+        return result
+
+    def set_new_args(self, new_args):
+        self.new_args = new_args
+
+    def call_method(
+        self,
+        tx,
+        name,
+        args: "list[VariableTracker]",
+        kwargs: "dict[str, VariableTracker]",
+    ) -> "VariableTracker":
+        assert self._tuple_vt is not None
+        method = self._maybe_get_baseclass_method(name)
+        if method in tuple_methods:
+            return self._tuple_vt.call_method(tx, name, args, kwargs)
+        return super().call_method(tx, name, args, kwargs)
+
+    def unpack_var_sequence(self, tx):
+        assert self._tuple_vt is not None
+        if type(self.value).__iter__ is tuple.__iter__:
+            return self._tuple_vt.unpack_var_sequence(tx)
+        raise NotImplementedError
 
 
 class MutableMappingVariable(UserDefinedObjectVariable):
