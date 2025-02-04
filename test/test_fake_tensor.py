@@ -1931,6 +1931,24 @@ class FakeTensorDispatchCache(TestCase):
             self.assertTrue(y._is_zerotensor())
             self.assertBypasses("dispatch_key_set mismatch", 2)
 
+    def test_fft_hfft2_issue145522(self):
+        with FakeTensorMode():
+            s0 = 5
+            s1 = 6
+            s2 = 7
+            s3 = 3
+            s4 = 10
+            s5 = 2
+            x = torch.randn(s0, s1, s2)
+            out = torch.randn(s0, s3, s4)
+            kwargs = {
+                's': (s3, s4),
+                'dim': (1, s5),
+                'norm': 'ortho',
+            }
+            r = torch._C._fft.fft_hfft2(x, **kwargs, out=out)
+            self.assertEqual(r.shape, out.shape)
+
     def test_inference_mode(self):
         """
         Test that caching handles inference mode correctly.
