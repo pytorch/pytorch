@@ -214,7 +214,7 @@ If you want to disable ROCm support, export the environment variable `USE_ROCM=0
 Other potentially useful environment variables may be found in `setup.py`.
 
 ##### Intel GPU Support
-If you want to compile with Intel GPU support, follow these
+If you want to compile with Intel GPU(XPU) support, follow these
 - [PyTorch Prerequisites for Intel GPUs](https://www.intel.com/content/www/us/en/developer/articles/tool/pytorch-prerequisites-for-intel-gpus.html) instructions.
 - Intel GPU is supported for Linux and Windows.
 
