@@ -34,12 +34,15 @@ tolerance:
     - vgg16
     - mobilenet_v3_large
     - nvidia_deeprecommender
-    - timm_efficientdet
 
   # These models need >1e-3 tolerance
   even_higher:
     - soft_actor_critic
     - tacotron2
+    - yolov3
+    - timm_efficientdet
+    - timm_efficientnet
+    - squeezenet1_1
 
   higher_fp16:
     - doctr_reco_predictor
@@ -51,8 +54,19 @@ tolerance:
     - drq
     - hf_Whisper
 
+  freezing:
+    # Similar logic to timm_models.py:get_tolerance_and_cosine_flag
+    # the conv-batchnorm fusion used under freezing may cause relatively
+    # large numerical difference. We need are larger tolerance.
+    # Check https://github.com/pytorch/pytorch/issues/120545 for context
+    even_higher:
+      - mobilenet_v2
+
   cosine: []
 
+require_larger_multiplier_for_smaller_tensor:
+  - yolov3
+  - timm_efficientnet
 
 # These benchmarks took >600s on an i9-11900K CPU
 very_slow: &VERY_SLOW_MODELS
@@ -186,6 +200,7 @@ skip:
       - hf_Whisper
       - stable_diffusion_text_encoder
       - llava
+      - moco
 
     cuda: []
 
@@ -227,10 +242,13 @@ skip:
 
   # for these models, conv-batchnorm fusing causes big numerical churn.
   # Skip them
+  # mnasnet1_0 and shufflenet_v2_x1_0 can pass on cpu, moco cuda only.
   freezing:
-    - mnasnet1_0
-    - moco
-    - shufflenet_v2_x1_0
+    cuda:
+      - mnasnet1_0
+      - moco
+      - shufflenet_v2_x1_0
+    cpu: []
 
 
 

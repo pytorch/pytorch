@@ -9,7 +9,6 @@ import numpy as np
 
 import torch
 import torch.ao.quantization as tq
-
 from torch import nn
 from torch.ao.pruning.sparsifier.utils import fqn_to_module
 from torch.testing._internal.common_quantized import (
@@ -20,8 +19,8 @@ from torch.testing._internal.common_quantized import (
     qengine_is_qnnpack,
     qengine_is_x86,
 )
-
 from torch.testing._internal.common_utils import run_tests, skipIfTorchDynamo, TestCase
+
 
 # TODO: Once more test files are created, move the contents to a ao folder.
 
@@ -148,7 +147,6 @@ def _sparse_layer_test_helper(
     W_zp = 0
 
     X_fp32 = torch.randn(batch_size, input_channels, dtype=torch.float32)
-    float_bias = torch.randn(output_channels, dtype=torch.float32)
 
     # generate a weight which we'll insert into the model
     W_fp32 = torch.randn(output_channels, input_channels, dtype=torch.float32)
@@ -262,7 +260,6 @@ class SparseQuantizedModel(nn.Module):
 
 class TestQuantizedSparseLayers(TestCase):
     @override_qengines
-    @skipIfTorchDynamo("https://github.com/pytorch/torchdynamo/issues/1991")
     def test_sparse_qlinear(self):
         # Note: At the moment, for sparse kernels
         # fbgemm supports only static quantized sparse linear
@@ -295,7 +292,6 @@ class TestQuantizedSparseLayers(TestCase):
         )
 
     @override_qengines
-    @skipIfTorchDynamo("https://github.com/pytorch/torchdynamo/issues/1991")
     def test_sparse_qlinear_serdes(self):
         # Note: At the moment, for sparse kernels
         # fbgemm supports only static quantized sparse linear

@@ -45,7 +45,7 @@ TORCH_API c10::intrusive_ptr<ConstantString> ConstantString::create(
 }
 
 TORCH_API c10::intrusive_ptr<ConstantString> ConstantString::create(
-    c10::string_view str_) {
+    std::string_view str_) {
   return c10::make_intrusive<ConstantString>(std::string(str_));
 }
 
@@ -569,12 +569,7 @@ static std::ostream& printMaybeAnnotatedDict(
 static std::ostream& printComplex(std::ostream & out, const IValue & v) {
   c10::complex<double> d = v.toComplexDouble();
   IValue real(d.real()), imag(std::abs(d.imag()));
-  auto sign = "";
-  if (d.imag() >= 0) {
-    sign = "+";
-  } else {
-    sign = "-";
-  }
+  auto sign = d.imag() >= 0 ? '+' : '-';
   return out << real << sign << imag << "j";
 }
 
@@ -756,7 +751,7 @@ IValueComparator getLessThanComparator(const IValue& v) {
     torch::jit::Function* lt_func =
         checkObjectSortSchema(v.type()->expect<ClassType>(), why_not);
     if (!lt_func) {
-      AT_ERROR(why_not.str());
+      TORCH_CHECK(false, why_not.str());
     }
 
     return [lt_func](const IValue& a, const IValue& b) {
@@ -772,7 +767,7 @@ IValueComparator getLessThanComparator(const IValue& v) {
     };
   }
 
-  AT_ERROR("IValues of type: ", v.tagKind(), " are not comparable");
+  TORCH_CHECK(false, "IValues of type: ", v.tagKind(), " are not comparable");
 }
 
 IValueComparator getGreaterThanComparator(const IValue& v) {
@@ -967,7 +962,7 @@ IValue IValue::deepcopy(
       copy = *this;
     } break;
     default: {
-      AT_ERROR("Can't deepcopy IValue with tag: ", tagKind());
+      TORCH_CHECK(false, "Can't deepcopy IValue with tag: ", tagKind());
     }
   }
   // NB: this doesn't work if an object contains itself, and it may
@@ -1050,7 +1045,7 @@ c10::intrusive_ptr<ivalue::Object> ivalue::Object::deepcopy(
       }
       err << ". Please define serialization methods via def_pickle() for "
             "this class.";
-      AT_ERROR(err.str());
+      TORCH_CHECK(false, err.str());
     }
     object->setSlot(i, slots_[i].deepcopy(memo, device));
   }
@@ -1178,6 +1173,7 @@ TORCH_API intrusive_ptr<ivalue::Future> collectAll(
 
 namespace {
 
+#ifndef STRIP_ERROR_MESSAGES
 std::string formatSetOfDevices(const std::vector<c10::Device>& devices) {
   std::ostringstream oss;
   std::copy(
@@ -1186,6 +1182,7 @@ std::string formatSetOfDevices(const std::vector<c10::Device>& devices) {
       std::ostream_iterator<c10::Device>(oss, ", "));
   return oss.str();
 }
+#endif
 
 }
 

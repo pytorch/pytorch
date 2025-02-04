@@ -3,11 +3,10 @@
 import io
 import unittest
 from collections import namedtuple
-from typing import Dict, List, NamedTuple
+from typing import NamedTuple
 
 import torch
 import torch.utils.bundled_inputs
-
 from torch.jit.mobile import _load_for_lite_interpreter
 from torch.testing._internal.common_utils import run_tests, TestCase
 
@@ -15,7 +14,7 @@ from torch.testing._internal.common_utils import run_tests, TestCase
 class TestLiteScriptModule(TestCase):
     def test_typing_namedtuple(self):
         myNamedTuple = NamedTuple(  # noqa: UP014
-            "myNamedTuple", [("a", List[torch.Tensor])]
+            "myNamedTuple", [("a", list[torch.Tensor])]
         )
 
         class MyTestModule(torch.nn.Module):
@@ -43,13 +42,13 @@ class TestLiteScriptModule(TestCase):
             id: torch.Tensor
 
         class Bar(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.foo = Foo(torch.tensor(1))
 
             def forward(self, a: torch.Tensor):
                 self.foo = Foo(a)
-                re: Dict[str, Foo] = {}
+                re: dict[str, Foo] = {}
                 re["test"] = Foo(a)
                 return self.foo, re["test"]
 
@@ -102,7 +101,7 @@ class TestLiteScriptModule(TestCase):
             id: torch.Tensor
 
         class Bar(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.foo = Foo(torch.tensor(1))
 
@@ -145,7 +144,7 @@ class TestLiteScriptModule(TestCase):
             baz: Baz
 
         class Bar(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.foo = Foo(torch.tensor(1), Baz(torch.tensor(1)))
 

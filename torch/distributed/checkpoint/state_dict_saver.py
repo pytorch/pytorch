@@ -1,13 +1,15 @@
+# mypy: allow-untyped-decorators
+# mypy: allow-untyped-defs
 import inspect
 import os
 import warnings
 from concurrent.futures import Future, ThreadPoolExecutor
 from typing import cast, Optional, Union
+from typing_extensions import deprecated
 
 import torch
 import torch.distributed as dist
-from torch.distributed._state_dict_utils import _offload_state_dict_to_cpu
-
+from torch.distributed._state_dict_utils import _copy_state_dict, _create_cpu_state_dict
 from torch.distributed.checkpoint._storage_utils import _storage_setup
 from torch.distributed.checkpoint.default_planner import DefaultSavePlanner
 from torch.distributed.checkpoint.logger import _dcp_method_logger
@@ -24,6 +26,11 @@ from .utils import _api_bc_check, _DistWrapper, _profile
 __all__ = ["save_state_dict", "save", "async_save"]
 
 
+@deprecated(
+    "`save_state_dict` is deprecated and will be removed in future versions."
+    "Please use `save` instead.",
+    category=FutureWarning,
+)
 def save_state_dict(
     state_dict: STATE_DICT_TYPE,
     storage_writer: StorageWriter,
@@ -33,11 +40,6 @@ def save_state_dict(
     planner: Optional[SavePlanner] = None,
 ) -> Metadata:
     """This method is deprecated. Please switch to 'save'."""
-    warnings.warn(
-        "'save_state_dict' is deprecated and will be removed in future versions."
-        "Please use 'save' instead."
-    )
-
     storage_writer.reset()
 
     # TODO: test returning `save` here instead.
@@ -61,6 +63,7 @@ def save(
     storage_writer: Optional[StorageWriter] = None,
     planner: Optional[SavePlanner] = None,
     process_group: Optional[dist.ProcessGroup] = None,
+    no_dist: bool = False,
 ) -> Metadata:
     """
     Save a distributed model in SPMD style.
@@ -110,6 +113,10 @@ def save(
         process_group (Optional[ProcessGroup]):
             ProcessGroup to be used for cross-rank synchronization.
             (Default: ``None``)
+        no_dist (bool):
+            If ``True``, this function will assume the intent is to load
+            a checkpoint without using cross-rank synchronization.
+            (Default: ``False``)
 
     Returns:
         Metadata: Metadata object for the saved checkpoint.
@@ -136,10 +143,10 @@ def save(
     """
     torch._C._log_api_usage_once("torch.distributed.checkpoint.save")
 
-    no_dist = not (dist.is_available() and dist.is_initialized())
+    no_dist = no_dist or (not dist.is_available()) or (not dist.is_initialized())
     if no_dist:
         warnings.warn(
-            "torch.distributed is unavailable or uninitialized, assuming the intent is to save in a single process."
+            "torch.distributed is disabled, unavailable or uninitialized, assuming the intent is to save in a single process."
         )
 
     with _profile():
@@ -165,8 +172,8 @@ def async_save(
     planner: Optional[SavePlanner] = None,
     process_group: Optional[dist.ProcessGroup] = None,
 ) -> Future:
-    """Asynchronous version of ``save``. This code first de-stages the state_dict on CPU, and then calls
-    `save` in a separate thread.
+    """Asynchronous version of ``save``. This code first de-stages the state_dict on to the
+    staging storage (defaults to CPU memory), and then calls the `save` in a separate thread.
 
     .. warning::
         This feature is experimental and subject to change.
@@ -179,8 +186,8 @@ def async_save(
             It can also be a key if the storage is a key-value store.
             (Default: ``None``)
         storage_writer (Optional[StorageWriter]):
-            Instance of StorageWriter used to perform writes. If this is not
-            specified, DCP will automatically infer the writer based on the
+            Instance of StorageWriter used to perform 'stage' and  'save'. If
+            this is not specified, DCP will automatically infer the writer based on the
             checkpoint_id. If checkpoint_id is also None, an exception will
             be raised. (Default: ``None``)
         planner (Optional[SavePlanner]):
@@ -226,7 +233,8 @@ def async_save(
     if isinstance(storage_writer, AsyncStager):
         staged_state_dict = storage_writer.stage(state_dict)
     else:  # provides bwc for storage_writers not implementing AsyncStager
-        staged_state_dict = _offload_state_dict_to_cpu(state_dict, type_check=False)
+        staged_state_dict = _create_cpu_state_dict(state_dict)
+        _copy_state_dict(state_dict, staged_state_dict, type_check=False)
 
     executor = ThreadPoolExecutor(max_workers=1)
     f: Future = executor.submit(
@@ -273,11 +281,12 @@ def _save_state_dict(
         planner = DefaultSavePlanner()
     assert planner is not None
 
-    global_metatadata = None
+    global_metadata = None
 
     ckpt_kwargs = {}
     if (ckpt_id := getattr(storage_writer, "checkpoint_id", None)) is not None:
         ckpt_kwargs["checkpoint_id"] = ckpt_id
+        ckpt_kwargs["process_group"] = distW.group
 
     @_dcp_method_logger(**ckpt_kwargs)
     def local_step():
@@ -304,10 +313,10 @@ def _save_state_dict(
 
     @_dcp_method_logger(**ckpt_kwargs)
     def global_step(all_local_plans):
-        nonlocal global_metatadata
+        nonlocal global_metadata
 
         assert planner is not None
-        all_local_plans, global_metatadata = planner.create_global_plan(all_local_plans)
+        all_local_plans, global_metadata = planner.create_global_plan(all_local_plans)
         all_local_plans = storage_writer.prepare_global_plan(all_local_plans)
         return all_local_plans
 
@@ -324,8 +333,8 @@ def _save_state_dict(
 
     @_dcp_method_logger(**ckpt_kwargs)
     def finish_checkpoint(all_results):
-        assert global_metatadata is not None
-        storage_writer.finish(metadata=global_metatadata, results=all_results)
-        return global_metatadata
+        assert global_metadata is not None
+        storage_writer.finish(metadata=global_metadata, results=all_results)
+        return global_metadata
 
     return distW.all_reduce("write", write_data, finish_checkpoint)

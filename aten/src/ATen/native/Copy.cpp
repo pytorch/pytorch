@@ -71,8 +71,7 @@ bool copy_transpose_valid(const Tensor& self, const Tensor& src) {
 // special case copy where tensor is contiguous and src is a transposed matrix
 // This can be generalized to most copies, but it's trickier
 void copy_same_type_transpose_(Tensor& self, const Tensor& src) {
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  int64_t BLOCK_SZ;
+  int64_t BLOCK_SZ = 0;
   if (self.scalar_type() == kByte) {
     // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     BLOCK_SZ = 120;
@@ -130,7 +129,7 @@ void copy_same_type_transpose_(Tensor& self, const Tensor& src) {
 // (e.g. XLA) may be supported by overriding copy_ and _copy_from.
 bool is_supported_device(Device device) {
   DeviceType device_type = device.type();
-  return device_type == kCPU || device_type == kCUDA || device_type == kHIP || device_type == kVulkan || device_type == kMetal || device_type == kMPS;
+  return device_type == kCPU || device_type == kCUDA || device_type == kHIP || device_type == kVulkan || device_type == kMetal || device_type == kMPS || device_type == kXPU;
 }
 
 } // namespace
@@ -221,6 +220,7 @@ static Tensor & copy_impl(Tensor & self, const Tensor & src, bool non_blocking) 
   //   cpu_tensor.copy_(xla_tensor) => xla_tensor._copy_from(cpu_tensor)
   //   xla_tensor.copy_(cpu_tensor) => cpu_tensor._copy_from(xla_tensor)
   // Both the _copy_from calls above will be dispatched to XLA's _copy_from kernels.
+
   if (!is_supported_device(src.device()) || !is_supported_device(self.device())) {
     at::_copy_from(src, self, non_blocking);
     return self;
@@ -287,6 +287,8 @@ static Tensor & copy_impl(Tensor & self, const Tensor & src, bool non_blocking) 
     device_type = kHIP;
   } else if (iter.device_type(1) == kMPS) {
     device_type = kMPS;
+  } else if (iter.device_type(1) == kXPU){
+    device_type = kXPU;
   }
 
   // TODO: if we need to, we can also enable this path for quantized tensor
@@ -340,8 +342,8 @@ Tensor copy(const Tensor& self, const Tensor& src, bool non_blocking) {
   // when self has zero storage.
   // This kernel should never really be run, except with debugging using compile(backend="aot_eager")
   for (const auto i : c10::irange(src.size())) {
-    auto curr_src = src[i];
-    auto curr_self = self[i];
+    const auto& curr_src = src[i];
+    const auto& curr_self = self[i];
     outs.push_back(at::copy(curr_self, curr_src, non_blocking));
   }
   return outs;

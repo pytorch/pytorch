@@ -22,6 +22,13 @@ DLDataType getDLDataType(const Tensor& t) {
     case ScalarType::UInt64:
       dtype.code = DLDataTypeCode::kDLUInt;
       break;
+    case ScalarType::Int1:
+    case ScalarType::Int2:
+    case ScalarType::Int3:
+    case ScalarType::Int4:
+    case ScalarType::Int5:
+    case ScalarType::Int6:
+    case ScalarType::Int7:
     case ScalarType::Char:
       dtype.code = DLDataTypeCode::kDLInt;
       break;
@@ -49,11 +56,7 @@ DLDataType getDLDataType(const Tensor& t) {
       dtype.code = DLDataTypeCode::kDLBool;
       break;
     case ScalarType::ComplexHalf:
-      dtype.code = DLDataTypeCode::kDLComplex;
-      break;
     case ScalarType::ComplexFloat:
-      dtype.code = DLDataTypeCode::kDLComplex;
-      break;
     case ScalarType::ComplexDouble:
       dtype.code = DLDataTypeCode::kDLComplex;
       break;
@@ -90,7 +93,7 @@ DLDataType getDLDataType(const Tensor& t) {
 
 static DLDevice getDLDevice(const Tensor& tensor, c10::DeviceIndex device_id) {
   DLDevice ctx;
-  ctx.device_id = static_cast<int32_t>(device_id);
+  ctx.device_id = static_cast<int32_t>(static_cast<unsigned char>(device_id));
   switch (tensor.device().type()) {
     case DeviceType::CPU:
       ctx.device_type = DLDeviceType::kDLCPU;
@@ -115,6 +118,12 @@ static DLDevice getDLDevice(const Tensor& tensor, c10::DeviceIndex device_id) {
       ctx.device_id =
           at::detail::getXPUHooks().getGlobalIdxFromDevice(tensor.device());
       break;
+    case DeviceType::MAIA:
+      ctx.device_type = DLDeviceType::kDLMAIA;
+      break;
+    case DeviceType::PrivateUse1:
+      ctx.device_type = DLDeviceType::kDLExtDev;
+      break;
     default:
       TORCH_CHECK(false, "Cannot pack tensors on " + tensor.device().str());
   }
@@ -128,22 +137,26 @@ static Device getATenDevice(const DLDevice& ctx, void* data) {
 #ifndef USE_ROCM
     // if we are compiled under HIP, we cannot do cuda
     case DLDeviceType::kDLCUDA:
-      return at::Device(DeviceType::CUDA, ctx.device_id);
+      return at::Device(DeviceType::CUDA, static_cast<c10::DeviceIndex>(ctx.device_id));
 #endif
     case DLDeviceType::kDLOpenCL:
-      return at::Device(DeviceType::OPENCL, ctx.device_id);
+      return at::Device(DeviceType::OPENCL, static_cast<c10::DeviceIndex>(ctx.device_id));
     case DLDeviceType::kDLROCM:
 #ifdef USE_ROCM
       // this looks funny, we need to return CUDA here to masquerade
-      return at::Device(DeviceType::CUDA, ctx.device_id);
+      return at::Device(DeviceType::CUDA, static_cast<c10::DeviceIndex>(ctx.device_id));
 #else
-      return at::Device(DeviceType::HIP, ctx.device_id);
+      return at::Device(DeviceType::HIP, static_cast<c10::DeviceIndex>(ctx.device_id));
 #endif
     case DLDeviceType::kDLOneAPI:
       return at::detail::getXPUHooks().getDeviceFromPtr(data);
+    case DLDeviceType::kDLMAIA:
+      return at::Device(DeviceType::MAIA, static_cast<c10::DeviceIndex>(ctx.device_id));
+    case DLDeviceType::kDLExtDev:
+      return at::Device(DeviceType::PrivateUse1, static_cast<c10::DeviceIndex>(ctx.device_id));
     default:
       TORCH_CHECK(
-          false, "Unsupported device_type: " + c10::to_string(ctx.device_type));
+          false, "Unsupported device_type: ", std::to_string(ctx.device_type));
   }
 }
 
@@ -167,7 +180,7 @@ ScalarType toScalarType(const DLDataType& dtype) {
           break;
         default:
           TORCH_CHECK(
-              false, "Unsupported kUInt bits " + c10::to_string(dtype.bits));
+              false, "Unsupported kUInt bits ", std::to_string(dtype.bits));
       }
       break;
     case DLDataTypeCode::kDLInt:
@@ -186,7 +199,7 @@ ScalarType toScalarType(const DLDataType& dtype) {
           break;
         default:
           TORCH_CHECK(
-              false, "Unsupported kInt bits " + c10::to_string(dtype.bits));
+              false, "Unsupported kInt bits ", std::to_string(dtype.bits));
       }
       break;
     case DLDataTypeCode::kDLFloat:
@@ -202,7 +215,7 @@ ScalarType toScalarType(const DLDataType& dtype) {
           break;
         default:
           TORCH_CHECK(
-              false, "Unsupported kFloat bits " + c10::to_string(dtype.bits));
+              false, "Unsupported kFloat bits ", std::to_string(dtype.bits));
       }
       break;
     case DLDataTypeCode::kDLBfloat:
@@ -212,7 +225,7 @@ ScalarType toScalarType(const DLDataType& dtype) {
           break;
         default:
           TORCH_CHECK(
-              false, "Unsupported kFloat bits " + c10::to_string(dtype.bits));
+              false, "Unsupported kFloat bits ", std::to_string(dtype.bits));
       }
       break;
     case DLDataTypeCode::kDLComplex:
@@ -228,7 +241,7 @@ ScalarType toScalarType(const DLDataType& dtype) {
           break;
         default:
           TORCH_CHECK(
-              false, "Unsupported kFloat bits " + c10::to_string(dtype.bits));
+              false, "Unsupported kFloat bits ", std::to_string(dtype.bits));
       }
       break;
     case DLDataTypeCode::kDLBool:
@@ -238,20 +251,21 @@ ScalarType toScalarType(const DLDataType& dtype) {
           break;
         default:
           TORCH_CHECK(
-              false, "Unsupported kDLBool bits " + c10::to_string(dtype.bits));
+              false, "Unsupported kDLBool bits ", std::to_string(dtype.bits));
       }
       break;
     default:
-      TORCH_CHECK(false, "Unsupported code " + c10::to_string(dtype.code));
+      TORCH_CHECK(false, "Unsupported code ", std::to_string(dtype.code));
   }
   return stype;
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
+namespace {
 struct ATenDLMTensor {
   Tensor handle;
-  DLManagedTensor tensor;
+  DLManagedTensor tensor{};
 };
+} // namespace
 
 static void deleter(DLManagedTensor* arg) {
   delete static_cast<ATenDLMTensor*>(arg->manager_ctx);
@@ -277,11 +291,11 @@ DLManagedTensor* toDLPack(const Tensor& src) {
   atDLMTensor->tensor.deleter = &deleter;
   atDLMTensor->tensor.dl_tensor.data = view.data_ptr();
   c10::DeviceIndex device_id = 0;
-  if (src.is_cuda()) {
+  if (src.is_cuda() || src.is_privateuseone()) {
     device_id = src.get_device();
   }
   atDLMTensor->tensor.dl_tensor.device = getDLDevice(src, device_id);
-  atDLMTensor->tensor.dl_tensor.ndim = src.dim();
+  atDLMTensor->tensor.dl_tensor.ndim = static_cast<int32_t>(src.dim());
   atDLMTensor->tensor.dl_tensor.dtype = getDLDataType(src);
   atDLMTensor->tensor.dl_tensor.shape = view.sizes().data();
   atDLMTensor->tensor.dl_tensor.strides = view.strides().data();
@@ -290,7 +304,7 @@ DLManagedTensor* toDLPack(const Tensor& src) {
 }
 
 Tensor fromDLPack(DLManagedTensor* src) {
-  auto deleter = [src](void* self) {
+  auto deleter = [src](void* self [[maybe_unused]]) {
     if (src->deleter) {
       src->deleter(src);
     }
@@ -298,9 +312,7 @@ Tensor fromDLPack(DLManagedTensor* src) {
   return fromDLPack(src, std::move(deleter));
 }
 
-Tensor fromDLPack(
-    DLManagedTensor* src,
-    std::function<void(void*)> deleter) {
+Tensor fromDLPack(DLManagedTensor* src, std::function<void(void*)> deleter) {
   Device device = getATenDevice(src->dl_tensor.device, src->dl_tensor.data);
   ScalarType stype = toScalarType(src->dl_tensor.dtype);
   if (!src->dl_tensor.strides) {

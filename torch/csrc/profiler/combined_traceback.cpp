@@ -91,8 +91,10 @@ SymbolizedTracebacks symbolize(
   for (const auto& e : to_symbolize) {
     if (e->python_) {
       if (cur_python != e->python_ && !cur_py_frames.empty()) {
-        // NOLINTNEXTLINE(clang-analyzer-core.CallAndMessage)
-        cur_python->appendSymbolized(cur_py_frames, r);
+        if (cur_python) {
+          // NOLINTNEXTLINE(clang-analyzer-core.CallAndMessage)
+          cur_python->appendSymbolized(cur_py_frames, r);
+        }
         cur_py_frames.clear();
       }
       cur_python = e->python_;
@@ -105,8 +107,10 @@ SymbolizedTracebacks symbolize(
     }
   }
   if (!cur_py_frames.empty()) {
-    // NOLINTNEXTLINE(clang-analyzer-core.CallAndMessage)
-    cur_python->appendSymbolized(cur_py_frames, r);
+    if (cur_python) {
+      // NOLINTNEXTLINE(clang-analyzer-core.CallAndMessage)
+      cur_python->appendSymbolized(cur_py_frames, r);
+    }
     cur_py_frames.clear();
   }
   std::vector<std::vector<uint64_t>> python_frame_fragments =

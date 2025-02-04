@@ -1,0 +1,6 @@
+[project]
+name = "testbackend"
+version = "0.0.1"
+
+[project.entry-points.'torchrun.handlers']
+testbackend = 'testbackend:test_handler'

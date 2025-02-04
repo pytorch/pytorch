@@ -12,21 +12,18 @@ import json
 import os
 import warnings
 from hashlib import sha256
-from typing import Any, Dict, List, Optional
+from typing import Any, Optional
 from unittest import main, mock, skip, TestCase
 from urllib.error import HTTPError
 
 from github_utils import gh_graphql
-
 from gitutils import get_git_remote_name, get_git_repo_dir, GitRepo
-
 from trymerge import (
     categorize_checks,
     DRCI_CHECKRUN_NAME,
     find_matching_merge_rule,
     get_classifications,
     get_drci_classifications,
-    get_rockset_results,
     gh_get_team_members,
     GitHubPR,
     JobCheckState,
@@ -39,11 +36,11 @@ from trymerge import (
     validate_revert,
 )
 
+
 if "GIT_REMOTE_URL" not in os.environ:
     os.environ["GIT_REMOTE_URL"] = "https://github.com/pytorch/pytorch"
 
 GQL_MOCKS = "gql_mocks.json.gz"
-ROCKSET_MOCKS = "rockset_mocks.json.gz"
 DRCI_MOCKS = "drci_mocks.json.gz"
 
 
@@ -78,16 +75,11 @@ def mock_query(
         if err.code == 401 or err.code == 403:
             err_msg = f"If you are seeing this message during workflow run, please make sure to update {file_name}"
             err_msg += f" locally, by deleting it and running {os.path.basename(__file__)} with"
-            err_msg += " GitHub Personal Access Token passed via GITHUB_TOKEN,"
-            err_msg += " the rockset api key passed via ROCKSET_API_KEY,"
+            err_msg += " GitHub Personal Access Token passed via GITHUB_TOKEN"
             err_msg += " and drci api key passed via DRCI_BOT_KEY environment variables"
-            if (
-                os.getenv("GITHUB_TOKEN") is None
-                or os.getenv("ROCKSET_API_KEY") is None
-                or os.getenv("DRCI_BOT_KEY") is None
-            ):
+            if os.getenv("GITHUB_TOKEN") is None or os.getenv("DRCI_BOT_KEY") is None:
                 err_msg = (
-                    "Failed to update cached queries as GITHUB_TOKEN or ROCKSET_API_KEY or DRCI_BOT_KEY "
+                    "Failed to update cached queries as GITHUB_TOKEN or DRCI_BOT_KEY "
                     + "is not defined. "
                     + err_msg
                 )
@@ -109,16 +101,6 @@ def mocked_gh_graphql(query: str, **kwargs: Any) -> Any:
         return gh_graphql(query, **kwargs)
 
     return mock_query(gh_graphql_wrapper, GQL_MOCKS, key_function, query, kwargs)
-
-
-def mocked_rockset_results(head_sha: str, merge_base: str, num_retries: int = 3) -> Any:
-    return mock_query(
-        get_rockset_results,
-        ROCKSET_MOCKS,
-        lambda x, y: f"{x} {y}",
-        head_sha,
-        merge_base,
-    )
 
 
 def mocked_drci_classifications(pr_num: int, project: str, num_retries: int = 3) -> Any:
@@ -180,12 +162,15 @@ def mock_gh_get_info() -> Any:
     return {
         "closed": False,
         "isCrossRepository": False,
+        "headRefName": "foo",
+        "baseRefName": "bar",
+        "baseRepository": {"defaultBranchRef": {"name": "bar"}},
         "files": {"nodes": [], "pageInfo": {"hasNextPage": False}},
         "changedFiles": 0,
     }
 
 
-def mocked_read_merge_rules_NE(repo: Any, org: str, project: str) -> List[MergeRule]:
+def mocked_read_merge_rules_NE(repo: Any, org: str, project: str) -> list[MergeRule]:
     return [
         MergeRule(
             name="mock with nonexistent check",
@@ -197,7 +182,7 @@ def mocked_read_merge_rules_NE(repo: Any, org: str, project: str) -> List[MergeR
     ]
 
 
-def mocked_read_merge_rules(repo: Any, org: str, project: str) -> List[MergeRule]:
+def mocked_read_merge_rules(repo: Any, org: str, project: str) -> list[MergeRule]:
     return [
         MergeRule(
             name="super",
@@ -226,7 +211,7 @@ def mocked_read_merge_rules(repo: Any, org: str, project: str) -> List[MergeRule
 
 def mocked_read_merge_rules_approvers(
     repo: Any, org: str, project: str
-) -> List[MergeRule]:
+) -> list[MergeRule]:
     return [
         MergeRule(
             name="Core Reviewers",
@@ -249,11 +234,11 @@ def mocked_read_merge_rules_approvers(
     ]
 
 
-def mocked_read_merge_rules_raise(repo: Any, org: str, project: str) -> List[MergeRule]:
+def mocked_read_merge_rules_raise(repo: Any, org: str, project: str) -> list[MergeRule]:
     raise RuntimeError("testing")
 
 
-def xla_merge_rules(repo: Any, org: str, project: str) -> List[MergeRule]:
+def xla_merge_rules(repo: Any, org: str, project: str) -> list[MergeRule]:
     return [
         MergeRule(
             name=" OSS CI / pytorchbot / XLA",
@@ -271,22 +256,17 @@ def xla_merge_rules(repo: Any, org: str, project: str) -> List[MergeRule]:
     ]
 
 
-def empty_rockset_results(head_sha: str, merge_base: str) -> List[Dict[str, Any]]:
-    return []
-
-
 class DummyGitRepo(GitRepo):
     def __init__(self) -> None:
         super().__init__(get_git_repo_dir(), get_git_remote_name())
 
-    def commits_resolving_gh_pr(self, pr_num: int) -> List[str]:
+    def commits_resolving_gh_pr(self, pr_num: int) -> list[str]:
         return ["FakeCommitSha"]
 
     def commit_message(self, ref: str) -> str:
         return "super awsome commit message"
 
 
-@mock.patch("trymerge.get_rockset_results", side_effect=empty_rockset_results)
 @mock.patch("trymerge.gh_graphql", side_effect=mocked_gh_graphql)
 @mock.patch(
     "trymerge.get_drci_classifications", side_effect=mocked_drci_classifications
@@ -394,6 +374,7 @@ class TestTryMerge(TestCase):
         # self.assertGreater(len(pr.get_checkrun_conclusions()), 3)
         self.assertGreater(pr.get_commit_count(), 60)
 
+    @skip("GitHub doesn't keep this data anymore")
     def test_gql_retrieve_checksuites(self, *args: Any) -> None:
         "Fetch comments and conclusions for PR with 60 commits"
         pr = GitHubPR("pytorch", "pytorch", 94787)
@@ -554,8 +535,8 @@ class TestTryMerge(TestCase):
     def test_remove_job_name_suffix(self, *args: Any) -> None:
         test_cases = [
             {
-                "name": "linux-bionic-cuda12.1-py3.10-gcc9-sm86 / test (default, 1, 5, linux.g5.4xlarge.nvidia.gpu)",
-                "expected": "linux-bionic-cuda12.1-py3.10-gcc9-sm86 / test (default)",
+                "name": "linux-bionic-cuda12.6-py3.10-gcc9-sm86 / test (default, 1, 5, linux.g5.4xlarge.nvidia.gpu)",
+                "expected": "linux-bionic-cuda12.6-py3.10-gcc9-sm86 / test (default)",
             },
             {
                 "name": "android-emulator-build-test / build-and-test (default, 1, 1, ubuntu-20.04-16x)",
@@ -578,8 +559,8 @@ class TestTryMerge(TestCase):
                 "expected": "lintrunner / linux-job",
             },
             {
-                "name": "Test `run_test.py` is usable without boto3/rockset",
-                "expected": "Test `run_test.py` is usable without boto3/rockset",
+                "name": "Test `run_test.py` is usable without boto3",
+                "expected": "Test `run_test.py` is usable without boto3",
             },
         ]
 
@@ -601,7 +582,6 @@ class TestTryMerge(TestCase):
             mocked_gh_fetch_merge_base.assert_called_once()
 
 
-@mock.patch("trymerge.get_rockset_results", side_effect=mocked_rockset_results)
 @mock.patch("trymerge.gh_graphql", side_effect=mocked_gh_graphql)
 @mock.patch("trymerge.gh_fetch_merge_base", return_value="")
 @mock.patch(
@@ -773,13 +753,13 @@ class TestBypassFailures(TestCase):
                 # than the one on the base commit. This should still count as broken trunk
                 "pr_num": 104214,
                 "related_failure_count": 0,
-                "unrelated_failure_count": 1,
+                "flaky_or_broken_trunk": 1,
             },
             {
                 # This PR had one broken trunk failure and it used ghstack
                 "pr_num": 105145,
                 "related_failure_count": 0,
-                "unrelated_failure_count": 1,
+                "flaky_or_broken_trunk": 1,
             },
             {
                 # The failure on the merge base was retried successfully and
@@ -788,20 +768,20 @@ class TestBypassFailures(TestCase):
                 # be used to detect broken trunk
                 "pr_num": 107160,
                 "related_failure_count": 0,
-                "unrelated_failure_count": 4,
+                "flaky_or_broken_trunk": 1,
             },
             {
                 # This PR used Dr.CI broken trunk classification
                 "pr_num": 111253,
                 "related_failure_count": 1,
-                "unrelated_failure_count": 2,
+                "flaky_or_broken_trunk": 1,
             },
         ]
 
         for case in test_cases:
             pr_num = case["pr_num"]
             related_failure_count = case["related_failure_count"]
-            unrelated_failure_count = case["unrelated_failure_count"]
+            flaky_or_broken_trunk = case["flaky_or_broken_trunk"]
 
             pr = GitHubPR("pytorch", "pytorch", pr_num)
             checks = pr.get_checkrun_conclusions()
@@ -823,7 +803,7 @@ class TestBypassFailures(TestCase):
             )
             self.assertTrue(len(pending) == 0)
             self.assertTrue(
-                len(failed) == unrelated_failure_count + related_failure_count
+                len(failed) == flaky_or_broken_trunk + related_failure_count
             )
 
     def test_ignore_current(self, *args: Any) -> None:
@@ -840,7 +820,7 @@ class TestBypassFailures(TestCase):
         checks = pr.get_checkrun_conclusions()
 
         # Known flaky failure takes precedence over ignore current (need to set the
-        # merge base here to get the results from Rockset, and that categorize the
+        # merge base here to get the results from Dr. CI, and that categorize the
         # broken trunk failure too
         checks = get_classifications(
             pr.pr_num,
@@ -891,6 +871,24 @@ class TestBypassFailures(TestCase):
         self.assertTrue(len(ignorable["FLAKY"]) == 1)
         self.assertTrue(len(ignorable["BROKEN_TRUNK"]) == 0)
 
+    def test_ignore_failures_older_run_same_workflow(self, *args: Any) -> None:
+        pr = GitHubPR("pytorch", "pytorch", 129013)
+        checks = pr.get_checkrun_conclusions()
+        checks = get_classifications(
+            pr.pr_num,
+            pr.project,
+            checks,
+            [],
+        )
+        pending, failed, ignorable = categorize_checks(
+            checks,
+            list(checks.keys()),
+        )
+        self.assertTrue(len(pending) == 0)
+        self.assertTrue(len(failed) == 0)
+        self.assertTrue(len(ignorable["FLAKY"]) == 2)
+        self.assertTrue(len(ignorable["UNSTABLE"]) == 13)
+
     @mock.patch("trymerge.read_merge_rules", side_effect=xla_merge_rules)
     def test_dont_ignore_flaky_failures(self, *args: Any) -> None:
         """
@@ -900,7 +898,7 @@ class TestBypassFailures(TestCase):
         repo = DummyGitRepo()
         # Check that failure is classified as flaky but still raises exception
         with warnings.catch_warnings(record=True) as w, self.assertRaises(RuntimeError):
-            rule = find_matching_merge_rule(pr, repo)
+            find_matching_merge_rule(pr, repo)
         self.assertEqual(len(w), 1)
         self.assertIn(
             "1 checks failed but were likely due flakiness or broken trunk",
@@ -908,7 +906,6 @@ class TestBypassFailures(TestCase):
         )
 
 
-@mock.patch("trymerge.get_rockset_results", side_effect=mocked_rockset_results)
 @mock.patch("trymerge.gh_graphql", side_effect=mocked_gh_graphql)
 @mock.patch("trymerge.gh_fetch_merge_base", return_value="")
 @mock.patch("trymerge.get_drci_classifications", return_value={})
@@ -987,7 +984,6 @@ class TestBypassFailuresOnSandCastle(TestCase):
         self.assertTrue(len(failed) == 2)
 
 
-@mock.patch("trymerge.get_rockset_results", side_effect=mocked_rockset_results)
 @mock.patch("trymerge.gh_graphql", side_effect=mocked_gh_graphql)
 @mock.patch("trymerge.gh_fetch_merge_base", return_value="")
 @mock.patch(
@@ -1019,7 +1015,7 @@ class TestGitHubPRGhstackDependencies(TestCase):
         )
 
     @skip(
-        reason="This test is run against a mutalbe PR that has changed, so it no longer works. The test should be changed"
+        reason="This test is run against a mutable PR that has changed, so it no longer works. The test should be changed"
     )
     @mock.patch("trymerge.read_merge_rules")
     @mock.patch("trymerge.GitRepo")

@@ -2,15 +2,15 @@
 
 
 import functools
-
 from unittest import expectedFailure as xfail, skipIf as skipif
 
 from pytest import raises as assert_raises
+
 from torch.testing._internal.common_utils import (
     run_tests,
     TEST_WITH_TORCHDYNAMO,
     TestCase,
-    xpassIfTorchDynamo,
+    xpassIfTorchDynamo_np,
 )
 
 
@@ -51,7 +51,7 @@ def assert_all(x):
     assert_(np.all(x), x)
 
 
-@xpassIfTorchDynamo  # (reason="common_type not implemented")
+@xpassIfTorchDynamo_np  # (reason="common_type not implemented")
 class TestCommonType(TestCase):
     def test_basic(self):
         ai32 = np.array([[1, 2], [3, 4]], dtype=np.int32)
@@ -118,7 +118,7 @@ class TestMintypecode(TestCase):
         assert_equal(mintypecode("idD"), "D")
 
 
-@xpassIfTorchDynamo  # (reason="TODO: decide on if [1] is a scalar or not")
+@xpassIfTorchDynamo_np  # (reason="TODO: decide on if [1] is a scalar or not")
 class TestIsscalar(TestCase):
     def test_basic(self):
         assert_(np.isscalar(3))
@@ -204,7 +204,7 @@ class TestIscomplex(TestCase):
     def test_fail(self):
         z = np.array([-1, 0, 1])
         res = iscomplex(z)
-        assert_(not np.sometrue(res, axis=0))
+        assert_(not np.any(res, axis=0))
 
     def test_pass(self):
         z = np.array([-1j, 1, 0])
@@ -389,19 +389,19 @@ class TestNanToNum(TestCase):
     def test_float(self):
         vals = nan_to_num(1.0)
         assert_all(vals == 1.0)
-        assert_equal(type(vals), np.float_)
+        assert_equal(type(vals), np.float64)
         vals = nan_to_num(1.1, nan=10, posinf=20, neginf=30)
         assert_all(vals == 1.1)
-        assert_equal(type(vals), np.float_)
+        assert_equal(type(vals), np.float64)
 
     @skip(reason="we return OD arrays not scalars")
     def test_complex_good(self):
         vals = nan_to_num(1 + 1j)
         assert_all(vals == 1 + 1j)
-        assert isinstance(vals, np.complex_)
+        assert isinstance(vals, np.complex128)
         vals = nan_to_num(1 + 1j, nan=10, posinf=20, neginf=30)
         assert_all(vals == 1 + 1j)
-        assert_equal(type(vals), np.complex_)
+        assert_equal(type(vals), np.complex128)
 
     @skip(reason="we return OD arrays not scalars")
     def test_complex_bad(self):
@@ -410,7 +410,7 @@ class TestNanToNum(TestCase):
         vals = nan_to_num(v)
         # !! This is actually (unexpectedly) zero
         assert_all(np.isfinite(vals))
-        assert_equal(type(vals), np.complex_)
+        assert_equal(type(vals), np.complex128)
 
     @skip(reason="we return OD arrays not scalars")
     def test_complex_bad2(self):
@@ -418,7 +418,7 @@ class TestNanToNum(TestCase):
         v += np.array(-1 + 1.0j) / 0.0
         vals = nan_to_num(v)
         assert_all(np.isfinite(vals))
-        assert_equal(type(vals), np.complex_)
+        assert_equal(type(vals), np.complex128)
         # Fixme
         # assert_all(vals.imag > 1e10)  and assert_all(np.isfinite(vals))
         # !! This is actually (unexpectedly) positive

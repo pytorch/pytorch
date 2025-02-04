@@ -14,6 +14,7 @@ from torch._inductor.fx_passes.pre_grad import (
 from torch._inductor.test_case import run_tests, TestCase
 from torch.fx.passes.shape_prop import ShapeProp
 
+
 PassFunc = Callable[[torch.fx.GraphModule, Any], torch.fx.GraphModule]
 
 
@@ -66,7 +67,7 @@ class TestFxFusion(TestCase):
         ]
         for f in [test_kwarg, test_arg, test_arg2, test_kwarg2, test_kwarg3]:
             traced = trace_func(f, inputs)
-            self.assertTrue(torch.allclose(f(*inputs), traced(*inputs)))
+            torch.testing.assert_close(f(*inputs), traced(*inputs))
             self.assertEqual(count_call_method(traced, "tanh"), 2)
 
     def test_linear_permute_fusion(self):
@@ -97,7 +98,7 @@ class TestFxFusion(TestCase):
             self.assertEqual(num_linear, 0)
             self.assertEqual(num_linear_transpose, 1)
 
-            self.assertTrue(torch.allclose(module(input), traced(input)))
+            torch.testing.assert_close(module(input), traced(input))
 
     def test_permute_linear_fusion(self):
         class TestModule(torch.nn.Module):
@@ -126,7 +127,7 @@ class TestFxFusion(TestCase):
             self.assertEqual(num_linear, 0)
             self.assertEqual(num_transpose_linear, 1)
 
-            self.assertTrue(torch.allclose(module(input), traced(input)))
+            torch.testing.assert_close(module(input), traced(input))
 
     def test_permute_bmm_fusion(self):
         class TestModule(torch.nn.Module):
@@ -150,7 +151,7 @@ class TestFxFusion(TestCase):
         self.assertEqual(num_bmm, 0)
         self.assertEqual(num_transpose_matmul, 1)
 
-        self.assertTrue(torch.allclose(module(input), traced(input)))
+        torch.testing.assert_close(module(input), traced(input))
 
 
 if __name__ == "__main__":

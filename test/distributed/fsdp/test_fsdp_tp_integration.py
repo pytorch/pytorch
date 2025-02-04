@@ -2,7 +2,7 @@
 import copy
 import sys
 from collections import OrderedDict
-from typing import Dict, List, Optional, Tuple
+from typing import Optional
 
 import torch
 from torch import distributed as dist
@@ -14,12 +14,12 @@ from torch.distributed._tensor import (
     Replicate,
     Shard,
 )
-from torch.distributed._tensor.debug import CommDebugMode
 from torch.distributed.fsdp.fully_sharded_data_parallel import (
     CPUOffload,
     FullyShardedDataParallel as FSDP,
     ShardingStrategy,
 )
+from torch.distributed.tensor.debug import CommDebugMode
 from torch.distributed.tensor.parallel import (
     ColwiseParallel,
     parallelize_module,
@@ -37,6 +37,7 @@ from torch.testing._internal.distributed._tensor.common_dtensor import (
     RMSNormPython,
 )
 
+
 if not dist.is_available():
     print("Distributed not available, skipping tests", file=sys.stderr)
     sys.exit(0)
@@ -50,7 +51,7 @@ if TEST_WITH_DEV_DBG_ASAN:
 
 
 class SimpleModel(torch.nn.Module):
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
         self.net1 = torch.nn.Linear(5, 8)
         self.relu = torch.nn.ReLU()
@@ -61,11 +62,11 @@ class SimpleModel(torch.nn.Module):
         return self.net3(self.net2(self.relu(self.net1(x))))
 
     @staticmethod
-    def get_sharded_param_names() -> List[str]:
+    def get_sharded_param_names() -> list[str]:
         return ["net1.weight", "net1.bias", "net2.weight"]
 
     @staticmethod
-    def get_non_sharded_param_names() -> List[str]:
+    def get_non_sharded_param_names() -> list[str]:
         return ["net3.weight", "net3.bias"]
 
 
@@ -86,9 +87,9 @@ class TestTPFSDPIntegration(FSDPTest):
     def _get_params_and_sharding_info(
         self,
         model: SimpleModel,
-        sharded_param_names: List[str],
+        sharded_param_names: list[str],
         tensor_parallel_size: int,
-    ) -> Tuple[Dict[str, int], Dict[str, Tuple[torch.Size, int]]]:
+    ) -> tuple[dict[str, int], dict[str, tuple[torch.Size, int]]]:
         """ """
         assert (
             type(model) is SimpleModel
@@ -130,8 +131,8 @@ class TestTPFSDPIntegration(FSDPTest):
         self,
         tp_fsdp_model: FSDP,
         tp_pg: dist.ProcessGroup,
-        param_name_to_numel: Dict[str, int],
-        non_sharded_param_names: List[str],
+        param_name_to_numel: dict[str, int],
+        non_sharded_param_names: list[str],
     ) -> None:
         """
         Syncs the tensor parallel parameters' gradients following the data
@@ -176,11 +177,11 @@ class TestTPFSDPIntegration(FSDPTest):
         self,
         model: FSDP,
         uses_tp: bool,
-        param_name_to_numel: Dict[str, int],
-        param_name_to_sharding_info: Dict[str, Tuple[torch.Size, int]],
+        param_name_to_numel: dict[str, int],
+        param_name_to_sharding_info: dict[str, tuple[torch.Size, int]],
         tp_pg: Optional[dist.ProcessGroup],
         fsdp_pg: Optional[dist.ProcessGroup],
-        sharded_param_names: Optional[List[str]],
+        sharded_param_names: Optional[list[str]],
     ) -> torch.Tensor:
         """
         Returns all unsharded gradients as a single flattened tensor. This
@@ -358,7 +359,7 @@ class TestTPFSDPIntegration(FSDPTest):
         )
 
         class TestModel(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.mlp = MLPModule("cuda")
                 self.mlp_norm = RMSNormPython(10)
@@ -415,7 +416,7 @@ class TestTPFSDPIntegration(FSDPTest):
         torch.manual_seed(mesh_2d.get_rank())
 
         class TestModel(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 replicated_dt = DTensor.from_local(
                     torch.randn(8, 8), tp_mesh, [Replicate()], run_check=False
@@ -424,7 +425,7 @@ class TestTPFSDPIntegration(FSDPTest):
                     torch.randn(8, 8), tp_mesh, [Replicate()], run_check=False
                 )
                 self.param = torch.nn.Parameter(replicated_dt)
-                self.register_buffer("buf", replicated_buffer_dt)
+                self.buf = torch.nn.Buffer(replicated_buffer_dt)
 
             def forward(self, x):
                 return self.param + self.buffer + 1

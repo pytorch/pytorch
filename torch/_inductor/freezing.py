@@ -1,10 +1,10 @@
+# mypy: allow-untyped-defs
 from __future__ import annotations
 
 import itertools
 import logging
-
 import weakref
-from typing import Any, List, Optional, Tuple
+from typing import Any, Optional
 
 import torch
 import torch.utils._pytree as pytree
@@ -12,11 +12,12 @@ from torch._dynamo.utils import dynamo_timed, lazy_format_graph_code
 from torch._functorch.aot_autograd import MutationType
 from torch._functorch.compile_utils import fx_graph_cse
 from torch._inductor.constant_folding import constant_fold, replace_node_with_constant
-
+from torch._inductor.freezing_utils import enter_freezing, record_has_frozen_params
 from torch._inductor.fx_passes.freezing_patterns import freezing_passes
 from torch._inductor.fx_passes.post_grad import view_to_reshape
 
 from . import config
+
 
 aten = torch.ops.aten
 prims = torch.ops.prims
@@ -28,7 +29,7 @@ def replace_params_with_constants(
     gm: torch.fx.GraphModule,
     flat_params: list[Any],
     fw_metadata: torch._functorch.aot_autograd.ViewAndMutationMeta,
-) -> List[int]:
+) -> list[int]:
     """
     Replaces the parameters of a PyTorch GraphModule with constants wherever possible.
     Returns a list of indices representing the input parameters that were not converted to constants.
@@ -66,8 +67,8 @@ def replace_params_with_constants(
 def freeze(
     dynamo_gm: torch.fx.GraphModule,
     aot_autograd_gm: torch.fx.GraphModule,
-    example_inputs: List[torch._subclasses.FakeTensor],
-) -> Tuple[torch.fx.GraphModule, List[int]]:
+    example_inputs: list[torch._subclasses.FakeTensor],
+) -> tuple[torch.fx.GraphModule, list[int]]:
     """
     Inlines parameters that are not mutated into constants and optimizes the graph through constant propagation
     and other techniques. If enabled, the function also discards the original parameters of the module for memory efficiency.
@@ -83,6 +84,15 @@ def freeze(
         Tuple[torch.fx.GraphModule, List[int]]: A tuple containing the frozen GraphModule and a list of indices
         of the inputs that were preserved (not turned into constants).
     """
+    with enter_freezing():
+        return _freeze(dynamo_gm, aot_autograd_gm, example_inputs)
+
+
+def _freeze(
+    dynamo_gm: torch.fx.GraphModule,
+    aot_autograd_gm: torch.fx.GraphModule,
+    example_inputs: list[torch._subclasses.FakeTensor],
+) -> tuple[torch.fx.GraphModule, list[int]]:
     # We have convert conv's weight to channels last which may meet error for .view
     # when doing fake_tensor_prop. So we need to convert view to reshape first.
     # See the details in fx_codegen_and_compile of compile_fx.py.
@@ -90,7 +100,8 @@ def freeze(
 
     if tracing_context := torch._guards.TracingContext.try_get():
         fw_metadata = tracing_context.fw_metadata
-        params_flat = tracing_context.params_flat
+        assert tracing_context.params_flat_unwrap_subclasses is not None
+        params_flat = tracing_context.params_flat_unwrap_subclasses
         assert fw_metadata is not None and params_flat is not None
 
         preserved_arg_indices = replace_params_with_constants(
@@ -114,8 +125,11 @@ def freeze(
         invalidate_eager_modules()
         discard_traced_gm_params(dynamo_gm)
 
-    log.debug("%s", lazy_format_graph_code("FROZEN GRAPH", aot_autograd_gm))
+    log.debug(
+        "%s", lazy_format_graph_code("FROZEN GRAPH", aot_autograd_gm, colored=True)
+    )
 
+    record_has_frozen_params(aot_autograd_gm)
     return aot_autograd_gm, preserved_arg_indices
 
 
@@ -124,7 +138,7 @@ class ErasedTensor(torch.Tensor):
     def __new__(cls, elem, name, owning_mod):
         return super().__new__(cls, elem.to(device="meta"))
 
-    def __init__(self, elem, name: Optional[str], mod):
+    def __init__(self, elem, name: Optional[str], mod) -> None:
         self.erased_name = name
         self.owning_mod_ref = weakref.ref(mod)
 
@@ -145,12 +159,30 @@ class ErasedTensor(torch.Tensor):
         )
 
 
-@torch.utils._python_dispatch._disable_current_modes()
 def invalidate_eager_modules():
-    for mod in torch._guards.TracingContext.get().module_context.nn_modules.values():
-        if not isinstance(mod, torch.nn.Module):
-            continue
+    with torch.utils._python_dispatch._disable_current_modes():
+        for (
+            mod
+        ) in torch._guards.TracingContext.get().module_context.nn_modules.values():
+            if not isinstance(mod, torch.nn.Module):
+                continue
 
+            for attr_name, tensor in list(
+                itertools.chain(
+                    mod.named_parameters(recurse=False),
+                    mod.named_buffers(recurse=False),
+                )
+            ):
+                with torch._dispatch.python.no_python_dispatcher():
+                    e_t = ErasedTensor(tensor, attr_name, mod)
+                if isinstance(tensor, torch.nn.Parameter):
+                    e_t.requires_grad_(True)
+                    e_t._is_param = True
+                setattr(mod, attr_name, e_t)
+
+
+def discard_traced_gm_params(mod: torch.fx.GraphModule):
+    with torch.utils._python_dispatch._disable_current_modes():
         for attr_name, tensor in list(
             itertools.chain(
                 mod.named_parameters(recurse=False), mod.named_buffers(recurse=False)
@@ -160,23 +192,8 @@ def invalidate_eager_modules():
                 e_t = ErasedTensor(tensor, attr_name, mod)
             if isinstance(tensor, torch.nn.Parameter):
                 e_t.requires_grad_(True)
-                e_t._is_param = True  # type: ignore[attr-defined]
+                e_t._is_param = True
             setattr(mod, attr_name, e_t)
-
-
-@torch.utils._python_dispatch._disable_current_modes()
-def discard_traced_gm_params(mod: torch.fx.GraphModule):
-    for attr_name, tensor in list(
-        itertools.chain(
-            mod.named_parameters(recurse=False), mod.named_buffers(recurse=False)
-        )
-    ):
-        with torch._dispatch.python.no_python_dispatcher():
-            e_t = ErasedTensor(tensor, attr_name, mod)
-        if isinstance(tensor, torch.nn.Parameter):
-            e_t.requires_grad_(True)
-            e_t._is_param = True  # type: ignore[attr-defined]
-        setattr(mod, attr_name, e_t)
 
 
 def enforce_output_layout(gm: torch.fx.GraphModule):
@@ -235,7 +252,6 @@ def enforce_as_strided_input_layout(gm: torch.fx.GraphModule):
     gm.recompile()
 
 
-@dynamo_timed
 def convert_conv_weights_to_channels_last(gm: torch.fx.GraphModule):
     """
     Convert 4d convolution weight tensor to channels last format.
@@ -243,22 +259,23 @@ def convert_conv_weights_to_channels_last(gm: torch.fx.GraphModule):
     This pass is performed before freezing so the added nodes can be constant
     folded by freezing.
     """
-    convs = [n for n in gm.graph.nodes if n.target == aten.convolution.default]
-    for conv in convs:
-        weight_node = conv.args[1]
-        if len(weight_node.meta["val"].size()) != 4 or weight_node.meta[
-            "val"
-        ].is_contiguous(memory_format=torch.channels_last):
-            # not a 4d tensor or already channels last, skip
-            continue
+    with dynamo_timed("convert_conv_weights_to_channels_last"):
+        convs = [n for n in gm.graph.nodes if n.target == aten.convolution.default]
+        for conv in convs:
+            weight_node = conv.args[1]
+            if len(weight_node.meta["val"].size()) != 4 or weight_node.meta[
+                "val"
+            ].is_contiguous(memory_format=torch.channels_last):
+                # not a 4d tensor or already channels last, skip
+                continue
 
-        with gm.graph.inserting_before(conv):
-            new_node = gm.graph.call_function(
-                aten.clone.default,
-                (weight_node,),
-                {"memory_format": torch.channels_last},
-            )
-            conv.replace_input_with(weight_node, new_node)
+            with gm.graph.inserting_before(conv):
+                new_node = gm.graph.call_function(
+                    aten.clone.default,
+                    (weight_node,),
+                    {"memory_format": torch.channels_last},
+                )
+                conv.replace_input_with(weight_node, new_node)
 
-    enforce_as_strided_input_layout(gm)
-    enforce_output_layout(gm)
+        enforce_as_strided_input_layout(gm)
+        enforce_output_layout(gm)

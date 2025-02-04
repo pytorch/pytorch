@@ -1,11 +1,16 @@
-from typing import Dict, List, Optional
+# mypy: allow-untyped-defs
+from typing import Optional
 
 import torch
 import torch.optim._functional as F
-
 from torch import Tensor
+from torch.distributed.optim._deprecation_warning import (
+    _scripted_functional_optimizer_deprecation_warning,
+)
 
-__all__: List[str] = []
+
+__all__: list[str] = []
+
 
 # Define a TorchScript compatible Functional Adadelta Optimizer
 # where we use these optimizer in a functional way.
@@ -20,7 +25,7 @@ __all__: List[str] = []
 class _FunctionalAdadelta:
     def __init__(
         self,
-        params: List[Tensor],
+        params: list[Tensor],
         lr: float = 1.0,
         rho: float = 0.9,
         eps: float = 1e-6,
@@ -29,6 +34,7 @@ class _FunctionalAdadelta:
         maximize: bool = False,
         _allow_empty_param_list: bool = False,
     ):
+        _scripted_functional_optimizer_deprecation_warning(stacklevel=2)
         self.defaults = {
             "lr": lr,
             "rho": rho,
@@ -45,9 +51,9 @@ class _FunctionalAdadelta:
         # param group as it's not a common use case.
         self.param_group = {"params": params}
 
-        self.state = torch.jit.annotate(Dict[torch.Tensor, Dict[str, torch.Tensor]], {})
+        self.state = torch.jit.annotate(dict[torch.Tensor, dict[str, torch.Tensor]], {})
 
-    def step(self, gradients: List[Optional[Tensor]]):
+    def step(self, gradients: list[Optional[Tensor]]):
         params = self.param_group["params"]
         params_with_grad = []
         grads = []
@@ -101,5 +107,5 @@ class _FunctionalAdadelta:
                 weight_decay=weight_decay,
                 foreach=self.foreach,
                 maximize=self.maximize,
-                has_complex=has_complex
+                has_complex=has_complex,
             )

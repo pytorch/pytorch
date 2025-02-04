@@ -2,6 +2,7 @@
 #include <torch/csrc/jit/frontend/source_range.h>
 #include <torch/csrc/jit/serialization/source_range_serialization.h>
 #include <iostream>
+#include <regex>
 
 namespace torch::jit {
 
@@ -13,7 +14,7 @@ StringCordView::StringCordView() {
 }
 
 StringCordView::StringCordView(
-    std::vector<c10::string_view> inputs,
+    std::vector<std::string_view> inputs,
     std::vector<std::shared_ptr<std::string>> ownerships)
     : pieces_(std::move(inputs)), owned_strings_(std::move(ownerships)) {
   accumulated_sizes_.push_back(0);
@@ -69,7 +70,7 @@ size_t StringCordView::find_regex(const std::string& tok, size_t start) const {
 }
 
 StringCordView StringCordView::substr(size_t start, size_t size) const {
-  std::vector<c10::string_view> pieces;
+  std::vector<std::string_view> pieces;
   std::vector<std::shared_ptr<std::string>> ownerships;
   if (start >= this->size()) {
     // out of bounds
@@ -154,7 +155,7 @@ size_t SourceRangeHasher::operator()(const torch::jit::SourceRange& key) const {
 std::optional<SourceRange> Source::findSourceRangeThatGenerated(
     const SourceRange& range) {
   if (!gen_ranges_) {
-    return c10::nullopt;
+    return std::nullopt;
   }
   return gen_ranges_->findSourceRangeThatGenerated(range);
 }

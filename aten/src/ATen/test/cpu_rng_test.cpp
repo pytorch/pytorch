@@ -6,7 +6,7 @@
 #include <ATen/native/DistributionTemplates.h>
 #include <ATen/native/cpu/DistributionTemplates.h>
 #include <torch/library.h>
-#include <c10/util/Optional.h>
+#include <optional>
 #include <torch/all.h>
 #include <stdexcept>
 
@@ -48,7 +48,7 @@ Tensor& random_(Tensor& self, std::optional<Generator> generator) {
   return at::native::templates::random_impl<native::templates::cpu::RandomKernel, TestCPUGenerator>(self, generator);
 }
 
-Tensor& random_from_to(Tensor& self, int64_t from, optional<int64_t> to, std::optional<Generator> generator) {
+Tensor& random_from_to(Tensor& self, int64_t from, std::optional<int64_t> to, std::optional<Generator> generator) {
   return at::native::templates::random_from_to_impl<native::templates::cpu::RandomFromToKernel, TestCPUGenerator>(self, from, to, generator);
 }
 
@@ -194,7 +194,7 @@ TEST_F(RNGTest, Random) {
 TEST_F(RNGTest, Random64bits) {
   auto gen = at::make_generator<TestCPUGenerator>(std::numeric_limits<uint64_t>::max());
   auto actual = torch::empty({1}, torch::kInt64);
-  actual.random_(std::numeric_limits<int64_t>::min(), c10::nullopt, gen);
+  actual.random_(std::numeric_limits<int64_t>::min(), std::nullopt, gen);
   ASSERT_EQ(static_cast<uint64_t>(actual[0].item<int64_t>()), std::numeric_limits<uint64_t>::max());
 }
 

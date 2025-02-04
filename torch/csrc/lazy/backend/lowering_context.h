@@ -2,8 +2,6 @@
 
 #include <memory>
 #include <string>
-#include <unordered_map>
-#include <utility>
 #include <vector>
 
 #include <torch/csrc/lazy/backend/backend_data.h>
@@ -11,8 +9,7 @@
 #include <torch/csrc/lazy/core/ir.h>
 #include <torch/csrc/lazy/core/ir_util.h>
 
-namespace torch {
-namespace lazy {
+namespace torch::lazy {
 
 class TORCH_API Computation {
  public:
@@ -59,7 +56,7 @@ class TORCH_API LoweringContext {
 
   const BackendDevice& device() const {
     return device_;
-  };
+  }
 
   // Retrieves the vector holding all the tensors associated with the parameter
   // instructions which have been created.
@@ -110,5 +107,4 @@ class TORCH_API LoweringContext {
   Util::EmissionMap emit_status_;
 };
 
-} // namespace lazy
-} // namespace torch
+} // namespace torch::lazy

@@ -5,7 +5,6 @@ from copy import deepcopy
 
 import torch
 import torch.nn as nn
-
 from torch.distributed._tensor import (
     distribute_tensor,
     DTensor,
@@ -13,8 +12,7 @@ from torch.distributed._tensor import (
     Replicate,
     Shard,
 )
-from torch.distributed._tensor.debug import CommDebugMode
-from torch.distributed._tensor.placement_types import _Partial
+from torch.distributed.tensor.debug import CommDebugMode
 from torch.distributed.tensor.parallel import parallelize_module
 from torch.distributed.tensor.parallel.style import (
     ColwiseParallel,
@@ -23,6 +21,7 @@ from torch.distributed.tensor.parallel.style import (
     RowwiseParallel,
     SequenceParallel,
 )
+from torch.distributed.tensor.placement_types import _Partial
 from torch.testing._internal.common_utils import run_tests
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorTestBase,
@@ -211,7 +210,7 @@ class TensorParallelStyleTest(DTensorTestBase):
         mesh = init_device_mesh(self.device_type, (self.world_size,))
 
         class TestModule(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.linear = torch.nn.Linear(8, 8)
 
@@ -224,7 +223,7 @@ class TensorParallelStyleTest(DTensorTestBase):
             AssertionError,
             "input_layouts and desired_input_layouts should have same length!",
         ):
-            prepare_inps_dimension_mismatch = PrepareModuleInput(
+            PrepareModuleInput(
                 input_layouts=Shard(0), desired_input_layouts=(Replicate(), None)
             )
         # Raise assertion error if module inputs and input_layouts do not have same length.
@@ -263,7 +262,7 @@ class TensorParallelStyleTest(DTensorTestBase):
         mesh = init_device_mesh(self.device_type, (self.world_size,))
 
         class TestKwargModule(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.linear = torch.nn.Linear(8, 8)
 
@@ -291,7 +290,7 @@ class TensorParallelStyleTest(DTensorTestBase):
         self.assertEqual(output.shape, (1 * self.world_size, 8))
 
         class TestKwargOnlyModule(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.linear = torch.nn.Linear(8, 8)
 
@@ -312,6 +311,18 @@ class TensorParallelStyleTest(DTensorTestBase):
             output = test_kwonly_mod(
                 x=torch.randn(1, 8, device=self.device_type),
                 z=torch.ones(1, 8, device=self.device_type),
+            )
+
+        self.assertEqual(comm_mode.get_total_counts(), 2)
+        self.assertEqual(output.shape, (1 * self.world_size, 8))
+
+        # test the case where x is a DTensor
+        x_dt = DTensor.from_local(
+            torch.randn(1, 8, device=self.device_type), mesh, [Shard(0)]
+        )
+        with comm_mode:
+            output = test_kwonly_mod(
+                x=x_dt, z=torch.ones(1, 8, device=self.device_type)
             )
 
         self.assertEqual(comm_mode.get_total_counts(), 2)
@@ -408,6 +419,22 @@ class TensorParallelStyleTest(DTensorTestBase):
             self.assertIsInstance(sharded_out, DTensor)
             self.assertEqual(sharded_out.placements, (Shard(1),))
             self.assertEqual(comm_mode.get_total_counts(), 0)
+
+        # test sharded on non-sequence dim input
+        sharded_batch_input = distribute_tensor(global_input, mesh, [Shard(0)])
+        rmsnorm = RMSNormPython(embedding_dim).to(self.device_type)
+        sp_rmsnorm = parallelize_module(deepcopy(rmsnorm), mesh, SequenceParallel())
+
+        with comm_mode:
+            sharded_out = sp_rmsnorm(sharded_batch_input)
+            grad_out = torch.ones_like(sharded_out)
+            sharded_out.backward(grad_out)
+            self.assertIsInstance(sharded_out, DTensor)
+            # output still sharded on sequence dimension
+            self.assertEqual(sharded_out.placements, (Shard(1),))
+            self.assertEqual(sp_rmsnorm.weight.grad.placements, (_Partial(),))
+            # communication happens in both fwd/bwd to redistribute input
+            self.assertEqual(comm_mode.get_total_counts(), 2)
 
 
 if __name__ == "__main__":

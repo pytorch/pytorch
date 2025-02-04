@@ -25,11 +25,12 @@ ENV PATH /opt/conda/envs/py_$ANACONDA_PYTHON_VERSION/bin:/opt/conda/bin:$PATH
 COPY requirements-ci.txt /opt/conda/requirements-ci.txt
 COPY ./common/install_conda.sh install_conda.sh
 COPY ./common/common_utils.sh common_utils.sh
-RUN bash ./install_conda.sh && rm install_conda.sh common_utils.sh /opt/conda/requirements-ci.txt
+COPY ./common/install_magma_conda.sh install_magma_conda.sh
+RUN bash ./install_conda.sh && rm install_conda.sh install_magma_conda.sh common_utils.sh /opt/conda/requirements-ci.txt
 
 # Install cuda and cudnn
 ARG CUDA_VERSION
-RUN wget -q https://raw.githubusercontent.com/pytorch/builder/main/common/install_cuda.sh -O install_cuda.sh
+COPY ./common/install_cuda.sh install_cuda.sh
 RUN bash ./install_cuda.sh ${CUDA_VERSION} && rm install_cuda.sh
 ENV DESIRED_CUDA ${CUDA_VERSION}
 ENV PATH /usr/local/nvidia/bin:/usr/local/cuda/bin:$PATH

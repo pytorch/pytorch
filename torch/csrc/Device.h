@@ -7,7 +7,8 @@
 
 // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
 struct TORCH_API THPDevice {
-  PyObject_HEAD at::Device device;
+  PyObject_HEAD
+  at::Device device;
 };
 
 TORCH_API extern PyTypeObject THPDeviceType;

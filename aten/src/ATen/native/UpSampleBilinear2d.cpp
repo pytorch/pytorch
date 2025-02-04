@@ -24,7 +24,7 @@
 namespace at::meta {
 
 TORCH_META_FUNC(upsample_bilinear2d) (
-  const Tensor& input, IntArrayRef output_size, bool align_corners, std::optional<double> scales_h, c10::optional<double> scales_w
+  const Tensor& input, IntArrayRef output_size, bool align_corners, std::optional<double> scales_h, std::optional<double> scales_w
 ) {
   auto full_output_size = native::upsample_2d_common_check(input.sizes(), output_size);
 
@@ -63,7 +63,7 @@ TORCH_META_FUNC(upsample_bilinear2d_backward) (
 }
 
 TORCH_META_FUNC(_upsample_bilinear2d_aa) (
-  const Tensor& input, IntArrayRef output_size, bool align_corners, std::optional<double> scales_h, c10::optional<double> scales_w
+  const Tensor& input, IntArrayRef output_size, bool align_corners, std::optional<double> scales_h, std::optional<double> scales_w
 ) {
   auto full_output_size = native::upsample_2d_common_check(input.sizes(), output_size);
 

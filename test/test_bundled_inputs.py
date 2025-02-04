@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 # Owner(s): ["oncall: mobile"]
+# mypy: allow-untyped-defs
 
 import io
 import textwrap
-from typing import Dict, List, Optional
+from typing import Optional
 
 import torch
 import torch.utils.bundled_inputs
@@ -31,7 +32,7 @@ class TestBundledInputs(TestCase):
 
         sm = torch.jit.script(SingleTensorModel())
         original_size = model_size(sm)
-        get_expr: List[str] = []
+        get_expr: list[str] = []
         samples = [
             # Tensor with small numel and small storage.
             (torch.tensor([1]),),
@@ -265,7 +266,8 @@ class TestBundledInputs(TestCase):
         with self.assertRaises(TypeError):
             m = torch.jit.script(SingleTensorModel())
             torch.utils.bundled_inputs.augment_model_with_bundled_inputs(
-                m, inputs="foo"  # type: ignore[arg-type]
+                m,
+                inputs="foo",  # type: ignore[arg-type]
             )
 
         # List of non tuples. Most common error using the api.
@@ -273,9 +275,7 @@ class TestBundledInputs(TestCase):
             m = torch.jit.script(SingleTensorModel())
             torch.utils.bundled_inputs.augment_model_with_bundled_inputs(
                 m,
-                inputs=[
-                    torch.ones(1, 2),  # type: ignore[list-item]
-                ],
+                inputs=[torch.ones(1, 2)],  # type: ignore[list-item]
             )
 
     def test_double_augment_fail(self):
@@ -328,8 +328,8 @@ class TestBundledInputs(TestCase):
         class MyModel(torch.nn.Module):
             def forward(
                 self,
-                arg1: Optional[Dict[str, torch.Tensor]],
-                arg2: Optional[List[torch.Tensor]],
+                arg1: Optional[dict[str, torch.Tensor]],
+                arg2: Optional[list[torch.Tensor]],
                 arg3: torch.Tensor,
             ):
                 if arg1 is None:
@@ -393,7 +393,7 @@ class TestBundledInputs(TestCase):
                 """,
             )
 
-        out: List[str] = []
+        out: list[str] = []
         sm = torch.jit.script(MyModel())
         original_size = model_size(sm)
         small_inputs = (
@@ -409,10 +409,7 @@ class TestBundledInputs(TestCase):
 
         torch.utils.bundled_inputs.augment_model_with_bundled_inputs(
             sm,
-            [
-                big_inputs,
-                small_inputs,
-            ],
+            [big_inputs, small_inputs],
             _receive_inflate_expr=out,
         )
         augmented_size = model_size(sm)
@@ -423,11 +420,10 @@ class TestBundledInputs(TestCase):
         inflated = loaded.get_all_bundled_inputs()
         self.assertEqual(len(inflated[0]), len(small_inputs))
 
-        (
-            methods,
-            _,
-        ) = torch.utils.bundled_inputs._get_bundled_inputs_attributes_and_methods(
-            loaded
+        methods, _ = (
+            torch.utils.bundled_inputs._get_bundled_inputs_attributes_and_methods(
+                loaded
+            )
         )
 
         # One Function (forward)

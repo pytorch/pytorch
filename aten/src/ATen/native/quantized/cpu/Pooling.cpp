@@ -29,8 +29,7 @@
 #include <algorithm>
 #include <vector>
 
-namespace at {
-namespace native {
+namespace at::native {
 
 DEFINE_DISPATCH(qmaxpool_2d_nhwc_stub);
 DEFINE_DISPATCH(qmaxpool_3d_nthwc_stub);
@@ -60,11 +59,9 @@ void spatial_dilated_max_pooling(
     T* oData) { // output arrays (data and max-index)
   at::parallel_for(0, iC, 0, [&](int64_t start, int64_t end) {
     for (const auto p : c10::irange(start, end)) {
-      // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-      int64_t row, col;
       const T* i_p = iData + p * iW * iH;
-      for (row = 0; row < oH; ++row) {
-        for (col = 0; col < oW; ++col) {
+      for (int64_t row = 0; row < oH; ++row) {
+        for (int64_t col = 0; col < oW; ++col) {
           int64_t h_start = row * sH - pH;
           int64_t w_start = col * sW - pW;
           int64_t h_end = std::min(h_start + (kH - 1) * dH + 1, iH);
@@ -80,10 +77,8 @@ void spatial_dilated_max_pooling(
           // local max
           auto max_val = std::numeric_limits<typename T::underlying>::lowest();
           int64_t tcntr = 0; // center point
-          // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-          int64_t x, y;
-          for (y = h_start; y < h_end; y += dH) {
-            for (x = w_start; x < w_end; x += dW) {
+          for (int64_t y = h_start; y < h_end; y += dH) {
+            for (int64_t x = w_start; x < w_end; x += dW) {
               tcntr = y * iW + x;
               auto val = (i_p + tcntr)->val_;
               if (val > max_val) {
@@ -162,11 +157,9 @@ void spatial_dilated_max_pooling3d(
             // local max
             auto max_val = std::numeric_limits<typename T::underlying>::lowest();
             int64_t tcntr = 0; // center point
-            // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-            int64_t t, x, y;
-            for (t = t_start; t < t_end; t += dT) {
-              for (y = h_start; y < h_end; y += dH) {
-                for (x = w_start; x < w_end; x += dW) {
+            for (int64_t t = t_start; t < t_end; t += dT) {
+              for (int64_t y = h_start; y < h_end; y += dH) {
+                for (int64_t x = w_start; x < w_end; x += dW) {
                   tcntr = t * iH * iW + y * iW + x;
                   auto val = (i_p + tcntr)->val_;
                   if (val > max_val) {
@@ -272,7 +265,7 @@ Tensor q_maxpool_2d(
             .memory_format(qx.suggest_memory_format()),
           qx.q_scale(),
           qx.q_zero_point(),
-          c10::nullopt);
+          std::nullopt);
     }
     qmaxpool_2d_nhwc_stub(qx.device().type(), qx, iC, iH, iW, oH, oW, kH, kW, sH, sW, pH, pW, dH, dW, qy);
     return qy;
@@ -422,7 +415,7 @@ Tensor q_maxpool_3d(
           .memory_format(qx.suggest_memory_format()),
         qx.q_scale(),
         qx.q_zero_point(),
-        c10::nullopt);
+        std::nullopt);
     qmaxpool_3d_nthwc_stub(qx.device().type(), qx, iC, iT, iH, iW, oT, oH, oW, kT, kH, kW, sT, sH, sW, pT, pH, pW, dT, dH, dW, qy);
     return qy;
   } else {
@@ -478,6 +471,8 @@ void check_maxpool2d_params(
               "Expected 1d or 2d padding, got ", padding.size());
   TORCH_CHECK(dilation.size() == 1 || dilation.size() == 2,
               "Expected 1d or 2d dilation, got ", dilation.size());
+  TORCH_CHECK(dilation.allMatch([](const auto& ele) { return ele >= 1L; }),
+              "Expected dilation >= 1");
 }
 
 void check_maxpool3d_params(
@@ -490,6 +485,8 @@ void check_maxpool3d_params(
               "Expected no strides or 3d strides, got", stride.size());
   TORCH_CHECK(padding.size() == 3, "Expected 3d padding, got ", padding.size());
   TORCH_CHECK(dilation.size() == 3, "Expected 1d or 3d dilation, got ", dilation.size());
+  TORCH_CHECK(dilation.allMatch([](const auto& ele) { return ele >= 1L; }),
+              "Expected dilation >= 1");
 }
 
 #ifdef USE_PYTORCH_QNNPACK
@@ -759,5 +756,4 @@ TORCH_LIBRARY_IMPL(quantized, CPU, m) {
 }
 
 } // namespace
-} // namespace native
-} // namespace at
+} // namespace at::native

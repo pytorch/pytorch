@@ -20,7 +20,7 @@ class Block(torch.nn.Module):
         x = self.conv(x)
         x = self.lin0(x)
         pipe_split()
-        x.add_(constant)
+        x.add(constant)
         x = self.lin1(x)
         return self.relu(x)
 
@@ -48,7 +48,6 @@ class UnflattenTests(TestCase):
 
         pipe = pipeline(
             mod,
-            1,
             (x,),
             {"constant": constant},
         )
@@ -59,7 +58,7 @@ class UnflattenTests(TestCase):
         # Check qualnames
         for stage_idx in range(pipe.num_stages):
             stage_mod = pipe.get_stage_module(stage_idx)
-            for param_name, param in stage_mod.named_parameters():
+            for param_name, _ in stage_mod.named_parameters():
                 assert (
                     param_name in orig_state_dict
                 ), f"{param_name} not in original state dict"

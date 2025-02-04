@@ -11,14 +11,13 @@
 #include <c10/core/DeviceGuard.h>
 #include <c10/core/Event.h>
 #include <c10/core/StreamGuard.h>
-#include <c10/util/Optional.h>
+#include <optional>
 
 #include <cstddef>
 #include <utility>
 #include <vector>
 
-namespace torch {
-namespace autograd {
+namespace torch::autograd {
 
 namespace {
 // look what you made me do >.<
@@ -28,6 +27,7 @@ namespace {
 // TODO: clean this up when https://github.com/pytorch/pytorch/issues/60306 is
 // improved
 void record_stream_any_impl(Variable& var, c10::Stream& stream) {
+  // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
   const auto guard = c10::impl::VirtualGuardImpl(device_of(var).value().type());
 
   if (C10_UNLIKELY(at::isBatchedTensor(var))) {
@@ -158,15 +158,15 @@ void InputBuffer::add(
   //  the consumer or producer.
   //      Accumulation happens on the var device's default stream.
 
-  TORCH_INTERNAL_ASSERT(device_of(var));
-  std::optional<c10::Stream> opt_accumulate_stream = c10::nullopt;
-  const auto device_type = device_of(var).value().type();
-  // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
-  if (device_of(var)->is_cuda() || device_of(var)->is_privateuseone()) {
+  auto const device = device_of(var);
+  TORCH_INTERNAL_ASSERT(device.has_value());
+  std::optional<c10::Stream> opt_accumulate_stream = std::nullopt;
+  const auto device_type = device->type();
+  if (device->is_cuda() || device->is_privateuseone()) {
     const auto on_producer =
-        opt_producer_stream && device_of(var) == opt_producer_stream->device();
+        opt_producer_stream && device == opt_producer_stream->device();
     const auto on_consumer =
-        opt_consumer_stream && device_of(var) == opt_consumer_stream->device();
+        opt_consumer_stream && device == opt_consumer_stream->device();
 
     if (on_producer && on_consumer) {
       // (2a)
@@ -179,7 +179,7 @@ void InputBuffer::add(
         record_stream_any_impl(var, *opt_accumulate_stream);
       }
     } else {
-      std::optional<c10::Stream> opt_sync_stream = c10::nullopt;
+      std::optional<c10::Stream> opt_sync_stream = std::nullopt;
       const auto guard = c10::impl::VirtualGuardImpl{device_type};
       if (on_consumer && !on_producer) {
         // (3a)
@@ -192,8 +192,7 @@ void InputBuffer::add(
         opt_sync_stream = opt_producer_stream;
       } else {
         // (5)
-        // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
-        opt_accumulate_stream = guard.getDefaultStream(*device_of(var));
+        opt_accumulate_stream = guard.getDefaultStream(*device);
       }
       if (opt_sync_stream && (opt_accumulate_stream != opt_sync_stream)) {
         // (3b), (4b)
@@ -217,28 +216,10 @@ void InputBuffer::add(
     } else {
       // (1) non-CUDA/privateuse1 variable
       //     Accumulation happens on variable's device
-      c10::OptionalDeviceGuard device_guard{device_of(var)};
+      c10::OptionalDeviceGuard device_guard{device};
       accumulate(buffer, pos, std::move(var));
     }
   }
-}
-
-auto InputBuffer::device() const -> at::Device {
-  // Since we pick the first non-CPU tensor, this won't work with
-  // mixed device-type operations (e.g., an op that is both CUDA
-  // and XLA).  This is *incredibly* unlikely, so we don't worry
-  // about it.
-  for (auto& var : buffer) {
-    if (var.defined()) {
-      auto device = var.device();
-      if (device.type() != at::kCPU) {
-        return device;
-      }
-    }
-  }
-  // Only report to the CPU thread if there really were no tensors
-  // from other devices.
-  return at::kCPU;
 }
 
 auto InputBuffer::variables(InputBuffer&& g) -> std::vector<Variable> {
@@ -246,5 +227,4 @@ auto InputBuffer::variables(InputBuffer&& g) -> std::vector<Variable> {
   return result;
 }
 
-} // namespace autograd
-} // namespace torch
+} // namespace torch::autograd

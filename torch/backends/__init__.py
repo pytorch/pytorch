@@ -1,5 +1,7 @@
+# mypy: allow-untyped-defs
 import types
 from contextlib import contextmanager
+
 
 # The idea for this parameter is that we forbid bare assignment
 # to torch.backends.<cudnn|mkldnn>.enabled and friends when running our
@@ -59,6 +61,8 @@ from torch.backends import (
     cpu as cpu,
     cuda as cuda,
     cudnn as cudnn,
+    cusparselt as cusparselt,
+    kleidiai as kleidiai,
     mha as mha,
     mkl as mkl,
     mkldnn as mkldnn,

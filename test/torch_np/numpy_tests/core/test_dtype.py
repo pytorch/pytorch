@@ -2,17 +2,16 @@
 
 import functools
 import operator
-
 import pickle
 import sys
 import types
 from itertools import permutations
 from typing import Any
-
 from unittest import skipIf as skipif
 
 import pytest
 from pytest import raises as assert_raises
+
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
@@ -20,8 +19,10 @@ from torch.testing._internal.common_utils import (
     subtest,
     TEST_WITH_TORCHDYNAMO,
     TestCase,
-    xpassIfTorchDynamo,
+    xfailIfTorchDynamo,
+    xpassIfTorchDynamo_np,
 )
+
 
 skip = functools.partial(skipif, True)
 
@@ -67,6 +68,7 @@ class TestBuiltin(TestCase):
         assert_(left == right)
         assert_(hash(left) == hash(right))
 
+    @xfailIfTorchDynamo  # TypeError -> InternalTorchDynamoError
     def test_invalid_types(self):
         # Make sure invalid type strings raise an error
 
@@ -318,15 +320,14 @@ class TestMisc(TestCase):
         assert bool(np.dtype("f8"))
         assert bool(np.dtype("i8"))
 
-    @xpassIfTorchDynamo  # (reason="No keyword arg for dtype ctor.")
+    @xpassIfTorchDynamo_np  # (reason="No keyword arg for dtype ctor.")
     def test_keyword_argument(self):
         # test for https://github.com/numpy/numpy/pull/16574#issuecomment-642660971
         assert np.dtype(dtype=np.float64) == np.dtype(np.float64)
 
     @skipif(sys.version_info >= (3, 9), reason="Requires python 3.9")
     def test_class_getitem_38(self) -> None:
-        match = "Type subscription requires python >= 3.9"
-        with pytest.raises(TypeError):  # , match=match):
+        with pytest.raises(TypeError):
             np.dtype[Any]
 
 
@@ -357,7 +358,6 @@ class TestFromDTypeAttribute(TestCase):
 
 
 @skip(reason="Parameteric dtypes, our stuff is simpler.")
-@skipif(sys.version_info < (3, 9), reason="Requires python 3.9")
 @instantiate_parametrized_tests
 class TestClassGetItem(TestCase):
     def test_dtype(self) -> None:

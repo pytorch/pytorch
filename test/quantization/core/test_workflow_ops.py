@@ -1,8 +1,8 @@
 # Owner(s): ["oncall: quantization"]
+# ruff: noqa: F841
 
 import torch
 import math
-from typing import Tuple
 from torch.ao.quantization import (
     FakeQuantize,
     MovingAverageMinMaxObserver,
@@ -157,7 +157,7 @@ def _get_tensor_min_max(
         X: torch.Tensor,
         running_min: float = float("inf"),
         running_max: float = float("-inf"),
-        averaging_const: float = 0.01) -> Tuple[float, float]:
+        averaging_const: float = 0.01) -> tuple[float, float]:
     min_val = X.min().to(dtype=torch.float32).item()
     max_val = X.max().to(dtype=torch.float32).item()
 
@@ -173,7 +173,7 @@ def _get_per_row_min_max(
         min_vals: torch.Tensor,
         max_vals: torch.Tensor,
         axis: int = 0,
-        averaging_const: float = 0.01) -> Tuple[torch.Tensor, torch.Tensor]:
+        averaging_const: float = 0.01) -> tuple[torch.Tensor, torch.Tensor]:
     x_dim = x.size()
     new_axis_list = [i for i in range(len(x_dim))]  # noqa: C416
     new_axis_list[axis] = 0
@@ -195,7 +195,7 @@ def _get_scale_zp(
         max_val: float,
         dtype: torch.dtype,
         reduce_range: bool = False,
-        preserve_sparsity: bool = False) -> Tuple[float, int]:
+        preserve_sparsity: bool = False) -> tuple[float, int]:
     """
     Calculate the quantization parameters (scale, zero_point)
     based on the min and max element of the tensor
@@ -331,7 +331,7 @@ class TestFakeQuantizeOps(TestCase):
         self.assertEqual(Y3, Y3r, rtol=tolerance, atol=tolerance)
 
     def _test_forward_per_tensor_cachemask_impl(self, device):
-        float_types = (torch.float32, torch.float16, torch.float64)
+        float_types = (torch.float32, torch.float16, torch.float64, torch.bfloat16)
         torch_types = (torch.qint8, torch.quint8)
         Xs = (torch.randn(4, 8, device=device), torch.randn(4, 16, device=device)[:, ::2])
         tensor_qparam = (True, False)
@@ -602,8 +602,8 @@ class TestFakeQuantizeOps(TestCase):
 
             # Explicit copy at this point in time, because FakeQuant keeps internal
             # state in mutable buffers.
-            scale = fq_module.scale.clone().detach()
-            zero_point = fq_module.zero_point.clone().detach()
+            scale = fq_module.scale.detach().clone()
+            zero_point = fq_module.zero_point.detach().clone()
 
             if type(fq_module) == _LearnableFakeQuantize:
                 fq_module.toggle_observer_update(False)
@@ -629,7 +629,7 @@ class TestFakeQuantizeOps(TestCase):
 
     def test_fake_quant_preserves_qparam_shapes_for_activations(self):
         class Model(nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.linear = nn.Linear(4, 4)
 
@@ -698,7 +698,7 @@ class TestFakeQuantizeOps(TestCase):
 
     def _test_forward_per_channel_cachemask_impl(self, device):
         torch_types = (torch.qint8, torch.quint8)
-        float_types = (torch.float32, torch.float16, torch.float64)
+        float_types = (torch.float32, torch.float16, torch.float64, torch.bfloat16)
         zero_point_types = (torch.int, torch.float32, torch.float16)
 
         for torch_type, float_type, zero_point_type in itertools.product(torch_types, float_types, zero_point_types):
@@ -716,7 +716,7 @@ class TestFakeQuantizeOps(TestCase):
                 X.cpu(), scale.cpu(), zero_point.cpu(), axis, quant_min, quant_max)
             Y_prime = torch.fake_quantize_per_channel_affine(
                 X, scale, zero_point, axis, quant_min, quant_max)
-            np.testing.assert_allclose(Y, Y_prime.cpu(), rtol=tolerance, atol=tolerance)
+            torch.testing.assert_allclose(Y, Y_prime.cpu(), rtol=tolerance, atol=tolerance)
             self.assertTrue(Y.dtype == float_type)
 
     def test_forward_per_channel_cachemask_cpu(self):

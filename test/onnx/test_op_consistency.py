@@ -25,20 +25,21 @@ Note:
 from __future__ import annotations
 
 import copy
-from typing import Optional, Tuple
+from typing import Optional
 
 import onnx_test_common
 import parameterized
 
-import torch
-
 # For readability, these two are allowed to be imported as function
 from onnx_test_common import skip, xfail
+
+import torch
 from torch.testing._internal import (
     common_device_type,
     common_methods_invocations,
     common_utils,
 )
+
 
 OPS_DB = copy.deepcopy(common_methods_invocations.op_db)
 
@@ -91,7 +92,7 @@ TESTED_OPS: frozenset[str] = frozenset(
 #     2a. If a test is now failing because of xpass, because some previous errors
 #     are now fixed, removed the corresponding xfail.
 #     2b. If a test is not failing consistently, use skip.
-EXPECTED_SKIPS_OR_FAILS: Tuple[onnx_test_common.DecorateMeta, ...] = (
+EXPECTED_SKIPS_OR_FAILS: tuple[onnx_test_common.DecorateMeta, ...] = (
     skip(
         "atan", dtypes=onnx_test_common.BOOL_TYPES + onnx_test_common.INT_TYPES,
         reason=onnx_test_common.reason_onnx_does_not_support("Atan")
@@ -234,7 +235,7 @@ class SingleOpModel(torch.nn.Module):
 
 def _should_skip_xfail_test_sample(
     op_name: str, sample
-) -> Tuple[Optional[str], Optional[str]]:
+) -> tuple[Optional[str], Optional[str]]:
     """Returns a reason if a test sample should be skipped."""
     if op_name not in OP_WITH_SKIPPED_XFAIL_SUBTESTS:
         return None, None

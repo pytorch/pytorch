@@ -12,8 +12,7 @@
 #include <memory>
 #include <sstream>
 
-namespace torch {
-namespace autograd {
+namespace torch::autograd {
 
 SavedVariable::SavedVariable(
     const Variable& variable,
@@ -44,8 +43,7 @@ SavedVariable::SavedVariable(
         "you can make a clone to get a normal tensor and use it in autograd.")
 
     was_default_constructed_ = false;
-    const auto& version_counter = impl::version_counter(variable);
-    saved_version_ = version_counter.current_version();
+    saved_version_ = variable._version();
     is_leaf_ = variable.is_leaf();
     is_output_ = is_output;
     is_inplace_on_view_ = is_inplace_on_view;
@@ -89,7 +87,6 @@ void SavedVariable::save_metadata(const Variable& data) {
   // Save output number, version counter and fw_grad if needed
 
   output_nr_ = data.output_nr();
-  version_counter_ = impl::version_counter(data);
 
   if (is_leaf_) {
     grad_accumulator_ = impl::grad_accumulator(data);
@@ -158,9 +155,7 @@ Variable SavedVariable::unpack(std::shared_ptr<Node> saved_for) const {
   // Only check version counter in the case without hooks
   // If user provides hooks, we can't track versions through the hooks
   if (!hooks_) {
-    auto current_version = saved_original_
-        ? impl::version_counter(data_).current_version()
-        : version_counter_.current_version();
+    auto current_version = impl::version_counter(data_).current_version();
 
     if (saved_version_ != current_version) {
       std::stringstream message;
@@ -202,7 +197,13 @@ Variable SavedVariable::unpack(std::shared_ptr<Node> saved_for) const {
     return data_;
   }
 
-  const auto data = hooks_ ? hooks_->call_unpack_hook() : data_;
+  auto data = hooks_ ? hooks_->call_unpack_hook() : data_;
+
+  if (!grad_fn && !requires_grad_ && !data.requires_grad() &&
+      !(fw_grad_ && !fw_grad_->empty())) {
+    // Avoid detaching if we don't need to.
+    return data;
+  }
 
   // NB: saved views are unpacked as normal Variables (not views) even though
   // they still share the same storage. This works only because we never call
@@ -214,8 +215,8 @@ Variable SavedVariable::unpack(std::shared_ptr<Node> saved_for) const {
     var = make_variable(data, requires_grad_);
   }
 
-  impl::set_version_counter(var, version_counter_);
   impl::set_grad_accumulator(var, grad_accumulator_);
+  impl::set_version_counter(var, impl::version_counter(data));
 
   // NB: var here is never a view so there is no need to make anything special
   // for the case where the saved Tensor was a view. This whole argument relies
@@ -283,5 +284,4 @@ const char* ERR_BACKWARD_TWICE =
     "retain_graph=True if you need to backward through the graph a second time or "
     "if you need to access saved tensors after calling backward.";
 
-} // namespace autograd
-} // namespace torch
+} // namespace torch::autograd

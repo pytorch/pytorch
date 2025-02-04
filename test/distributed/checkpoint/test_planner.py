@@ -34,14 +34,12 @@ from torch.distributed.checkpoint.planner import LoadItemType, WriteItemType
 from torch.distributed.checkpoint.planner_helpers import (
     create_read_items_for_chunk_list,
 )
-
 from torch.testing._internal.common_utils import (
     run_tests,
     TEST_WITH_DEV_DBG_ASAN,
     TestCase,
 )
 from torch.testing._internal.distributed.checkpoint_utils import with_temp_dir
-
 from torch.testing._internal.distributed.distributed_utils import (
     with_dist,
     with_fake_comms,
@@ -358,6 +356,19 @@ class TestLoadPlanner(TestCase):
                 state_dict={"module": new_module},
                 checkpoint_id=self.temp_dir,
                 planner=DefaultLoadPlanner(allow_partial_load=False),
+            )
+
+    @with_temp_dir
+    def test_load_different_sizes_throws(self):
+        original_module = nn.Linear(2, 2)
+        dcp.save(state_dict={"module": original_module}, checkpoint_id=self.temp_dir)
+
+        new_module = nn.Linear(3, 2)
+        with self.assertRaisesRegex(CheckpointException, "Size mismatch"):
+            dcp.load(
+                state_dict={"module": new_module},
+                checkpoint_id=self.temp_dir,
+                planner=DefaultLoadPlanner(),
             )
 
 

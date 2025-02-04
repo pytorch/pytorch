@@ -2,13 +2,14 @@
 
 import io
 import os
-import pathlib
 import sys
+from pathlib import Path
 from typing import NamedTuple, Optional
 
 import torch
 from torch import Tensor
 from torch.testing._internal.common_utils import skipIfTorchDynamo, TemporaryFileName
+
 
 # Make the helper files in test/ importable
 pytorch_test_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
@@ -32,7 +33,7 @@ class TestSaveLoad(JitTestCase):
         """
 
         class Foo(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.foo = torch.nn.Linear(2, 2)
                 self.bar = torch.nn.Linear(2, 2)
@@ -50,7 +51,7 @@ class TestSaveLoad(JitTestCase):
         clear_class_registry()
 
         class Foo(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.foo = torch.nn.Linear(2, 2)
 
@@ -71,7 +72,7 @@ class TestSaveLoad(JitTestCase):
         )
 
         class ContainsBoth(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.add_module("second", torch.jit.load(second_saved_module))
                 self.add_module("first", torch.jit.load(first_saved_module))
@@ -127,7 +128,7 @@ class TestSaveLoad(JitTestCase):
         )
 
         class ContainsBoth(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.add_module("second", torch.jit.load(second_saved_module))
                 self.add_module("first", torch.jit.load(first_saved_module))
@@ -156,7 +157,7 @@ class TestSaveLoad(JitTestCase):
 
         @torch.jit.script
         class ImplementInterface:
-            def __init__(self):
+            def __init__(self) -> None:
                 pass
 
             def bar(self, x):
@@ -165,7 +166,7 @@ class TestSaveLoad(JitTestCase):
         class Foo(torch.nn.Module):
             __annotations__ = {"interface": MyInterface}
 
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.interface = ImplementInterface()
 
@@ -186,7 +187,7 @@ class TestSaveLoad(JitTestCase):
 
         @torch.jit.script  # noqa: F811
         class ImplementInterface:  # noqa: F811
-            def __init__(self):
+            def __init__(self) -> None:
                 pass
 
             def not_bar(self, x):
@@ -195,7 +196,7 @@ class TestSaveLoad(JitTestCase):
         class Foo(torch.nn.Module):
             __annotations__ = {"interface": MyInterface}
 
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.interface = ImplementInterface()
 
@@ -215,7 +216,7 @@ class TestSaveLoad(JitTestCase):
         )
 
         class ContainsBoth(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.add_module("second", torch.jit.load(second_saved_module))
                 self.add_module("first", torch.jit.load(first_saved_module))
@@ -242,7 +243,7 @@ class TestSaveLoad(JitTestCase):
 
         @torch.jit.script
         class ImplementInterface:
-            def __init__(self):
+            def __init__(self) -> None:
                 pass
 
             def bar(self, x):
@@ -254,7 +255,7 @@ class TestSaveLoad(JitTestCase):
         class Foo(torch.nn.Module):
             interface: MyInterface
 
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.foo = torch.nn.Linear(2, 2)
                 self.bar = torch.nn.Linear(2, 2)
@@ -282,7 +283,7 @@ class TestSaveLoad(JitTestCase):
 
         @torch.jit.script  # noqa: F811
         class ImplementInterface:  # noqa: F811
-            def __init__(self):
+            def __init__(self) -> None:
                 pass
 
             def not_bar(self, x):
@@ -297,7 +298,7 @@ class TestSaveLoad(JitTestCase):
         class Foo(torch.nn.Module):
             interface: MyInterface
 
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.foo = torch.nn.Linear(2, 2)
                 self.interface = ImplementInterface()
@@ -321,7 +322,7 @@ class TestSaveLoad(JitTestCase):
         )
 
         class ContainsBoth(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.add_module("second", torch.jit.load(second_saved_module))
                 self.add_module("first", torch.jit.load(first_saved_module))
@@ -397,7 +398,7 @@ class TestSaveLoad(JitTestCase):
 
         # Save then load.
         with TemporaryFileName() as fname:
-            path = pathlib.Path(fname)
+            path = Path(fname)
             m.save(path)
             m2 = torch.jit.load(path)
 
@@ -476,17 +477,18 @@ class TestSaveLoad(JitTestCase):
             pass
 
         class TestModule(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.add_module("submodule_a", Submodule())
                 self.register_parameter(
                     "parameter_a", torch.nn.Parameter(torch.randn(4))
                 )
-                self.register_buffer("buffer", torch.randn(4))
+                self.buffer = torch.nn.Buffer(torch.randn(4))
                 self.t = torch.rand(4)  # not buffer
 
                 self.parameter_b = torch.nn.Parameter(torch.randn(4))
                 self.submodule_b = Submodule()
+                self.buffer_b = torch.nn.Buffer(torch.randn(4))
 
         m = TestModule()
         m_loaded = self.getExportImportCopy(torch.jit.script(m))
@@ -522,11 +524,11 @@ class TestSaveLoad(JitTestCase):
         """
 
         class Foo(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.foo = torch.nn.Linear(2, 3, device="meta")
                 self.bar = torch.nn.Linear(3, 4)
-                self.register_buffer("buffer", torch.randn(4, device="meta"))
+                self.buffer = torch.nn.Buffer(torch.randn(4, device="meta"))
 
             def forward(self, x):
                 x = self.foo(x)
@@ -572,7 +574,7 @@ class TestSaveLoad(JitTestCase):
         """
 
         class Foo(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.foo = torch.nn.Linear(2, 3, device="meta")
                 self.bar = torch.nn.Linear(3, 4)
@@ -614,7 +616,7 @@ class TestSaveLoad(JitTestCase):
         """
 
         class Module(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
 
             def forward(self, x):
@@ -624,7 +626,7 @@ class TestSaveLoad(JitTestCase):
             traced_module = torch.jit.trace(module, input1)
             traced_inputs = list(traced_module.graph.inputs())
             with TemporaryFileName() as fname:
-                path = pathlib.Path(fname)
+                path = Path(fname)
                 traced_module.save(path)
                 print(traced_module.graph)
                 loaded_module = torch.jit.load(path, _restore_shapes=True)
@@ -640,7 +642,7 @@ class TestSaveLoad(JitTestCase):
             traced_module._c._retrieve_traced_inputs()["forward"], [input_tensor]
         )
         with TemporaryFileName() as fname:
-            path = pathlib.Path(fname)
+            path = Path(fname)
             traced_module.save(path)
             loaded_module = torch.jit.load(path, _restore_shapes=True)
             loaded_inputs = list(loaded_module.graph.inputs())
@@ -659,7 +661,7 @@ class TestSaveLoad(JitTestCase):
         self.assertEqual(len(traced_module._c._retrieve_traced_inputs()), 0)
 
         with TemporaryFileName() as fname:
-            path = pathlib.Path(fname)
+            path = Path(fname)
             traced_module.save(path)
             loaded_module = torch.jit.load(path, _restore_shapes=True)
             loaded_inputs = list(loaded_module.graph.inputs())
@@ -730,7 +732,7 @@ class TestSaveLoad(JitTestCase):
             )
 
         class Model(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.x = "x" * (2**32 + 1)
 
@@ -766,7 +768,7 @@ class TestSaveLoadFlatbuffer(JitTestCase):
         """
 
         class Foo(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.foo = torch.nn.Linear(2, 2)
                 self.bar = torch.nn.Linear(2, 2)
@@ -782,7 +784,7 @@ class TestSaveLoadFlatbuffer(JitTestCase):
         clear_class_registry()
 
         class Foo(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.foo = torch.nn.Linear(2, 2)
 
@@ -801,7 +803,7 @@ class TestSaveLoadFlatbuffer(JitTestCase):
         )
 
         class ContainsBoth(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.add_module("second", torch.jit.load(second_saved_module))
                 self.add_module("first", torch.jit.load(first_saved_module))
@@ -850,7 +852,7 @@ class TestSaveLoadFlatbuffer(JitTestCase):
         )
 
         class ContainsBoth(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.add_module("second", torch.jit.load(second_saved_module))
                 self.add_module("first", torch.jit.load(first_saved_module))
@@ -877,7 +879,7 @@ class TestSaveLoadFlatbuffer(JitTestCase):
 
         @torch.jit.script
         class ImplementInterface:
-            def __init__(self):
+            def __init__(self) -> None:
                 pass
 
             def bar(self, x):
@@ -886,7 +888,7 @@ class TestSaveLoadFlatbuffer(JitTestCase):
         class Foo(torch.nn.Module):
             __annotations__ = {"interface": MyInterface}
 
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.interface = ImplementInterface()
 
@@ -904,7 +906,7 @@ class TestSaveLoadFlatbuffer(JitTestCase):
 
         @torch.jit.script  # noqa: F811
         class ImplementInterface:  # noqa: F811
-            def __init__(self):
+            def __init__(self) -> None:
                 pass
 
             def not_bar(self, x):
@@ -913,7 +915,7 @@ class TestSaveLoadFlatbuffer(JitTestCase):
         class Foo(torch.nn.Module):
             __annotations__ = {"interface": MyInterface}
 
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.interface = ImplementInterface()
 
@@ -931,7 +933,7 @@ class TestSaveLoadFlatbuffer(JitTestCase):
         )
 
         class ContainsBoth(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.add_module("second", torch.jit.load(second_saved_module))
                 self.add_module("first", torch.jit.load(first_saved_module))
@@ -956,7 +958,7 @@ class TestSaveLoadFlatbuffer(JitTestCase):
 
         @torch.jit.script
         class ImplementInterface:
-            def __init__(self):
+            def __init__(self) -> None:
                 pass
 
             def bar(self, x):
@@ -968,7 +970,7 @@ class TestSaveLoadFlatbuffer(JitTestCase):
         class Foo(torch.nn.Module):
             interface: MyInterface
 
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.foo = torch.nn.Linear(2, 2)
                 self.bar = torch.nn.Linear(2, 2)
@@ -994,7 +996,7 @@ class TestSaveLoadFlatbuffer(JitTestCase):
 
         @torch.jit.script  # noqa: F811
         class ImplementInterface:  # noqa: F811
-            def __init__(self):
+            def __init__(self) -> None:
                 pass
 
             def not_bar(self, x):
@@ -1009,7 +1011,7 @@ class TestSaveLoadFlatbuffer(JitTestCase):
         class Foo(torch.nn.Module):
             interface: MyInterface
 
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.foo = torch.nn.Linear(2, 2)
                 self.interface = ImplementInterface()
@@ -1031,7 +1033,7 @@ class TestSaveLoadFlatbuffer(JitTestCase):
         )
 
         class ContainsBoth(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.add_module("second", torch.jit.load(second_saved_module))
                 self.add_module("first", torch.jit.load(first_saved_module))
@@ -1055,7 +1057,7 @@ class TestSaveLoadFlatbuffer(JitTestCase):
 
         # Save then load.
         with TemporaryFileName() as fname:
-            path = pathlib.Path(fname)
+            path = Path(fname)
             torch.jit.save_jit_module_to_flatbuffer(m, path)
             m2 = torch.jit.load(path)
 
@@ -1100,7 +1102,7 @@ class TestSaveLoadFlatbuffer(JitTestCase):
 
     def test_module_info_flatbuffer(self):
         class Foo(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.foo = torch.nn.Linear(2, 2)
                 self.bar = torch.nn.Linear(2, 2)
@@ -1134,17 +1136,18 @@ class TestSaveLoadFlatbuffer(JitTestCase):
             pass
 
         class TestModule(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.add_module("submodule_a", Submodule())
                 self.register_parameter(
                     "parameter_a", torch.nn.Parameter(torch.randn(4))
                 )
-                self.register_buffer("buffer", torch.randn(4))
+                self.buffer = torch.nn.Buffer(torch.randn(4))
                 self.t = torch.rand(4)  # not buffer
 
                 self.parameter_b = torch.nn.Parameter(torch.randn(4))
                 self.submodule_b = Submodule()
+                self.buffer_b = torch.nn.Buffer(torch.randn(4))
 
         m = TestModule()
         m_loaded = self.getExportImportCopy(torch.jit.script(m))

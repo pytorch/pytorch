@@ -1,7 +1,8 @@
 import traceback as tb
-from typing import Any, Dict, Tuple
+from typing import Any
 
-WRAPPED_EXCEPTION = Tuple[BaseException, tb.StackSummary]
+
+WRAPPED_EXCEPTION = tuple[BaseException, tb.StackSummary]
 
 __all__ = ["CheckpointException"]
 
@@ -21,16 +22,16 @@ def _is_wrapped_exception(obj: Any) -> bool:
 class CheckpointException(BaseException):
     """Exception raised if failure was detected as part of a checkpoint load or save."""
 
-    def __init__(self, msg: str, failures: Dict[int, WRAPPED_EXCEPTION]):
+    def __init__(self, msg: str, failures: dict[int, WRAPPED_EXCEPTION]):
         super().__init__(msg, failures)
         self._failures = failures
 
     @property
-    def failures(self) -> Dict[int, WRAPPED_EXCEPTION]:
+    def failures(self) -> dict[int, WRAPPED_EXCEPTION]:
         """Return a dictionary mapping node ranks to their associated exceptions in case of failure."""
         return self._failures
 
-    def __str__(self):
+    def __str__(self) -> str:
         str = f"CheckpointException ranks:{self._failures.keys()}\n"
         for rank, exc_pair in self._failures.items():
             exc, trace = exc_pair

@@ -1,7 +1,7 @@
 # Owner(s): ["module: onnx"]
 """Unit tests for the internal registration wrapper module."""
 
-from typing import Sequence
+from collections.abc import Sequence
 
 from torch.onnx import errors
 from torch.onnx._internal import registration
@@ -49,9 +49,9 @@ class TestGlobalHelpers(common_utils.TestCase):
 
 class TestOverrideDict(common_utils.TestCase):
     def setUp(self):
-        self.override_dict: registration.OverrideDict[
-            str, int
-        ] = registration.OverrideDict()
+        self.override_dict: registration.OverrideDict[str, int] = (
+            registration.OverrideDict()
+        )
 
     def test_get_item_returns_base_value_when_no_override(self):
         self.override_dict.set_base("a", 42)

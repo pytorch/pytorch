@@ -2,9 +2,9 @@
 // Licensed under the BSD-3-Clause license
 // This is the CPU implementation of the Connectionist Temporal Loss.
 // We mostly follow Graves.
-// 1. Graves et al: http://www.cs.toronto.edu/~graves/icml_2006.pdf
+// 1. Graves et al.: http://www.cs.toronto.edu/~graves/icml_2006.pdf
 // We use the equations from above link, but note that [1] has 1-based indexing and we (of course) use 0-based.
-// Graves et al call the probabilities y, we use log_probs (also calling them inputs)
+// Graves et al. call the probabilities y, we use log_probs (also calling them inputs)
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 
 #include <ATen/core/Tensor.h>
@@ -70,8 +70,7 @@ std::tuple<Tensor, Tensor, size_t, std::vector<int64_t>> ctc_loss_allocate_outpu
   TORCH_CHECK((int64_t) input_lengths.size() == batch_size, "input_lengths must be of size batch_size");
   TORCH_CHECK((int64_t) target_lengths.size() == batch_size, "target_lengths must be of size batch_size");
 
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  size_t tg_target_stride;
+  size_t tg_target_stride = 0;
   int64_t max_target_length = 0;
   std::vector<int64_t> tg_batch_offsets(batch_size);
   if (targets.dim() == 1) { // concatenated targets
@@ -130,7 +129,7 @@ std::tuple<Tensor, Tensor> ctc_loss_cpu_template(const Tensor& log_probs, const 
   // log_probs: input_len x batch_size x num_labels
   // targets [int64]: batch_size x target_length OR sum(target_lengths)
   constexpr scalar_t neginf = -std::numeric_limits<scalar_t>::infinity();
-  using target_t = typename std::conditional<target_scalar_type == kInt, int, int64_t>::type;
+  using target_t = typename std::conditional_t<target_scalar_type == kInt, int, int64_t>;
 
   Tensor neg_log_likelihood, log_alpha;
   size_t tg_target_stride;
@@ -233,17 +232,15 @@ template<typename scalar_t, ScalarType target_scalar_type>
 Tensor ctc_loss_backward_cpu_template(const Tensor& grad_out, const Tensor& log_probs, const Tensor& targets, IntArrayRef input_lengths, IntArrayRef target_lengths,
                                       const Tensor& neg_log_likelihood, const Tensor& log_alpha, int64_t BLANK, bool zero_infinity) {
   constexpr scalar_t neginf = -std::numeric_limits<scalar_t>::infinity();
-  using target_t = typename std::conditional<target_scalar_type == kInt, int, int64_t>::type;
+  using target_t = typename std::conditional_t<target_scalar_type == kInt, int, int64_t>;
   int64_t max_input_length = log_probs.size(0);
   int64_t batch_size = log_probs.size(1);
   int64_t num_labels = log_probs.size(2);
   Tensor grad = at::full_like(log_probs, neginf, LEGACY_CONTIGUOUS_MEMORY_FORMAT); // at this point, this is log of empty sum
 
   // The admin bits. We don't do much checking and assume that the forward did.
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  int64_t tg_target_stride;
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  int64_t max_target_length;
+  int64_t tg_target_stride = 0;
+  int64_t max_target_length = 0;
   std::vector<int64_t> tg_batch_offsets(batch_size);
 
   if (targets.dim() == 1) { // concatenated targets
@@ -539,12 +536,16 @@ Tensor ctc_loss(const Tensor& log_probs_, const Tensor& targets, IntArrayRef inp
 
 // Convenience function accepting Tensors
 Tensor ctc_loss(const Tensor& log_probs, const Tensor& targets, const Tensor& input_lengths, const Tensor& target_lengths, int64_t BLANK, int64_t reduction, bool zero_infinity) {
+  // we don't want to convert to IntArrayRef if we can dispatch to cuDNN (this allows graph-capturable ctc_loss)
+  bool use_cudnn =
+      (log_probs.device().type() == at::kCUDA) &&
+      at::_use_cudnn_ctc_loss(
+          log_probs, targets, input_lengths, target_lengths, BLANK);
   if (at::areAnyTensorSubclassLike(
-          {log_probs, targets, input_lengths, target_lengths})) {
+          {log_probs, targets, input_lengths, target_lengths}) || use_cudnn) {
     // Composite Compliant path for TensorSubclasses
     return ctc_loss_impl(log_probs, targets, input_lengths, target_lengths, BLANK, reduction, zero_infinity);
   }
-
   // Fast path (which accesses data_ptr) and less operator dispatches for
   // regular tensors
   TORCH_CHECK(isIntegralType(input_lengths.scalar_type(), /*includeBool=*/false), "input_lengths must be integral");

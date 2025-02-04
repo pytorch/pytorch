@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 """
 This file provides a number of "global" variables/handlers that are actually
 thread local and dynamically scoped, with Inductor patching them to various
@@ -58,7 +59,9 @@ from __future__ import annotations
 
 from contextlib import AbstractContextManager, contextmanager
 from threading import local
-from typing import Any, Callable, Generic, List, Type, TYPE_CHECKING, TypeVar, Union
+from typing import Any, Callable, Generic, TYPE_CHECKING, TypeVar, Union
+
+from torch.utils._ordered_set import OrderedSet
 
 from .ops_handler import (  # noqa: F401
     KernelFormatterHandler,
@@ -69,11 +72,14 @@ from .ops_handler import (  # noqa: F401
     WrapperHandler,
 )
 
+
 if TYPE_CHECKING:
     import torch
+    from torch._inductor.choices import InductorChoices
+    from torch._inductor.codegen.cpp_utils import LocalBufferContext
     from torch._inductor.debug import DebugContext
     from torch._inductor.graph import GraphLowering
-    from torch._inductor.ir import InterpreterShim
+    from torch._inductor.loop_body import InterpreterShim
     from torch._subclasses import FakeTensorMode
 
 threadlocal = local()
@@ -87,8 +93,6 @@ class NullHandler:
     attempting to access the global variable before it's set is an error, but with
     NullHandler it won't fail until you try to access an attribute on it.
     """
-
-    pass
 
 
 class Virtualized(Generic[T]):
@@ -104,7 +108,7 @@ class Virtualized(Generic[T]):
     store other things, like booleans.
     """
 
-    def __init__(self, vname: str, default: Union[Callable[[], T], Type[NullHandler]]):
+    def __init__(self, vname: str, default: Union[Callable[[], T], type[NullHandler]]):
         self._key: str = f"__torchinductor_{vname}"
         self._default = default
 
@@ -145,14 +149,14 @@ class NullKernelHandler(NullHandler):
 
     def __init__(self):
         super().__init__()
-        self.removed_buffers = set()
-        self.inplaced_to_remove = set()
+        self.removed_buffers = OrderedSet[Any]()
+        self.inplaced_to_remove = OrderedSet[Any]()
         self.index_dtype = "tl.int64"
 
 
 _ops: Virtualized[OpsHandler[Any]] = Virtualized("ops", MockHandler)
 _graph: Virtualized[GraphLowering] = Virtualized("graph", NullHandler)
-_real_inputs: Virtualized[List[torch.Tensor]] = Virtualized("real_inputs", NullHandler)
+_real_inputs: Virtualized[list[torch.Tensor]] = Virtualized("real_inputs", NullHandler)
 _fake_mode: Virtualized[FakeTensorMode] = Virtualized("fake_mode", NullHandler)
 _kernel: Virtualized[NullKernelHandler] = Virtualized(
     "kernel", NullKernelHandler
@@ -161,6 +165,25 @@ _debug: Virtualized[DebugContext] = Virtualized("debug", NullHandler)
 _interpreter: Virtualized[InterpreterShim] = Virtualized("interpreter", NullHandler)
 _aot_compilation: Virtualized[bool] = Virtualized("aot_compilation", NullHandler)
 _current_node: Virtualized[torch.fx.Node] = Virtualized("current_node", NullHandler)
+_local_buffer_context: Virtualized[LocalBufferContext] = Virtualized(
+    "local_buffer_context", NullHandler
+)
+
+
+def _choices_default():
+    """
+    Lazy init the global choices handler
+
+    We virtualize InductorChoices to allow changing inductor heuristics from out of tree.
+    """
+    from torch._inductor.choices import InductorChoices
+
+    rv = InductorChoices()
+    setattr(threadlocal, _choices._key, rv)
+    return rv
+
+
+_choices: Virtualized[InductorChoices] = Virtualized("choices", _choices_default)
 
 
 class OpsValue:
@@ -277,10 +300,10 @@ class OpsWrapper:
         return OpsValue(x)
 
     @staticmethod
-    def indirect_indexing(index, size, check=True):
+    def indirect_indexing(index, size, check=True, wrap_neg=True):
         # Returns a sympy value, not IR value
         index = OpsWrapper._unwrap(index)
-        return _ops.indirect_indexing(index, size, check)
+        return _ops.indirect_indexing(index, size, check, wrap_neg)
 
 
 ops = OpsWrapper()
@@ -305,6 +328,9 @@ class _V:
     get_aot_compilation: Callable[[], Any] = _aot_compilation._get_handler
     set_current_node: Callable[[Any], Any] = _current_node._set_handler
     get_current_node: Callable[[], Any] = _current_node._get_handler
+    set_local_buffer_context: Callable[[Any], Any] = _local_buffer_context._set_handler
+    get_local_buffer_context: Callable[[], Any] = _local_buffer_context._get_handler
+    set_choices_handler: Callable[[Any], Any] = _choices._set_handler
 
     @property
     def ops(self) -> OpsHandler[Any]:
@@ -341,11 +367,19 @@ class _V:
 
     @property
     def aot_compilation(self):
-        return _aot_compilation._get_handler()
+        return _aot_compilation._get_handler() is True
 
     @property
     def current_node(self):
         return _current_node._get_handler()
+
+    @property
+    def local_buffer_context(self):
+        return _local_buffer_context._get_handler()
+
+    @property
+    def choices(self) -> InductorChoices:
+        return _choices._get_handler()
 
 
 V = _V()

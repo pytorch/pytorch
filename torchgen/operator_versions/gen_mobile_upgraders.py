@@ -1,13 +1,15 @@
 #!/usr/bin/env python3
+
+from __future__ import annotations
+
 import os
 from enum import Enum
 from operator import itemgetter
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any
 
 import torch
 from torch.jit.generate_bytecode import generate_upgraders_bytecode
-
 from torchgen.code_template import CodeTemplate
 from torchgen.operator_versions.gen_mobile_upgraders_constant import (
     MOBILE_UPGRADERS_HEADER_DESCRIPTION,
@@ -186,22 +188,21 @@ PER_OPERATOR_UPGRADER_LIST = CodeTemplate(
 )
 
 
-def construct_instruction(instruction_list_from_yaml: List[Any]) -> str:
-    instruction_list_part = []
-    for instruction in instruction_list_from_yaml:
-        instruction_list_part.append(
-            ONE_INSTRUCTION.substitute(
-                operator_name=instruction[0],
-                X=instruction[1],
-                N=instruction[2],
-            )
+def construct_instruction(instruction_list_from_yaml: list[Any]) -> str:
+    instruction_list_part = [
+        ONE_INSTRUCTION.substitute(
+            operator_name=instruction[0],
+            X=instruction[1],
+            N=instruction[2],
         )
+        for instruction in instruction_list_from_yaml
+    ]
     return INSTRUCTION_LIST.substitute(
         instruction_list="".join(instruction_list_part).lstrip("\n")
     )
 
 
-def construct_constants(constants_list_from_yaml: List[Any]) -> str:
+def construct_constants(constants_list_from_yaml: list[Any]) -> str:
     constants_list_part = []
     for constant_from_yaml in constants_list_from_yaml:
         convert_constant = None
@@ -227,25 +228,24 @@ def construct_constants(constants_list_from_yaml: List[Any]) -> str:
     )
 
 
-def construct_operators(operator_list_from_yaml: List[Any]) -> str:
-    operator_list_part = []
-    for operator in operator_list_from_yaml:
-        operator_list_part.append(
-            ONE_OPERATOTR_STRING.substitute(
-                operator_name=operator[0],
-                overload_name=operator[1],
-                num_of_args=operator[2],
-            )
+def construct_operators(operator_list_from_yaml: list[Any]) -> str:
+    operator_list_part = [
+        ONE_OPERATOTR_STRING.substitute(
+            operator_name=operator[0],
+            overload_name=operator[1],
+            num_of_args=operator[2],
         )
+        for operator in operator_list_from_yaml
+    ]
     return OPERATOR_STRING_LIST.substitute(
         operator_string_list="".join(operator_list_part).lstrip("\n")
     )
 
 
-def construct_types(types_tr_list_from_yaml: List[Any]) -> str:
-    types_tr_list_part = []
-    for types_tr in types_tr_list_from_yaml:
-        types_tr_list_part.append(ONE_TYPE.substitute(type_str=types_tr))
+def construct_types(types_tr_list_from_yaml: list[Any]) -> str:
+    types_tr_list_part = [
+        ONE_TYPE.substitute(type_str=types_tr) for types_tr in types_tr_list_from_yaml
+    ]
     if len(types_tr_list_part) == 0:
         return TYPE_LIST_EMPTY
     return TYPE_LIST.substitute(type_list="".join(types_tr_list_part).lstrip("\n"))
@@ -261,7 +261,7 @@ def construct_register_size(register_size_from_yaml: int) -> str:
 
 
 def construct_version_maps(
-    upgrader_bytecode_function_to_index_map: Dict[str, Any]
+    upgrader_bytecode_function_to_index_map: dict[str, Any],
 ) -> str:
     version_map = torch._C._get_operator_version_map()
     sorted_version_map_ = sorted(version_map.items(), key=itemgetter(0))  # type: ignore[no-any-return]
@@ -303,8 +303,8 @@ def construct_version_maps(
 
 
 def get_upgrader_bytecode_function_to_index_map(
-    upgrader_dict: List[Dict[str, Any]]
-) -> Dict[str, Any]:
+    upgrader_dict: list[dict[str, Any]],
+) -> dict[str, Any]:
     upgrader_bytecode_function_to_index_map = {}
     index = 0
     for upgrader_bytecode in upgrader_dict:
@@ -316,8 +316,7 @@ def get_upgrader_bytecode_function_to_index_map(
     return upgrader_bytecode_function_to_index_map
 
 
-def write_cpp(cpp_path: str, upgrader_dict: List[Dict[str, Any]]) -> None:
-    body_parts = []
+def write_cpp(cpp_path: str, upgrader_dict: list[dict[str, Any]]) -> None:
     upgrader_bytecode_function_to_index_map = (
         get_upgrader_bytecode_function_to_index_map(upgrader_dict)
     )
@@ -335,7 +334,6 @@ def write_cpp(cpp_path: str, upgrader_dict: List[Dict[str, Any]]) -> None:
             operator_list_str = ""
             for table_name, contents in bytecode.items():
                 element = ByteCode[table_name]
-                body_string = ""
                 if element is ByteCode.instructions:
                     instruction_list_str = construct_instruction(contents)
                 elif element is ByteCode.constants:
@@ -364,14 +362,12 @@ def write_cpp(cpp_path: str, upgrader_dict: List[Dict[str, Any]]) -> None:
         operator_version_map=version_map_src,
         upgrader_bytecode="".join(all_upgrader_src_string).lstrip("\n"),
     )
-    body_parts.append(upgrader_file_content)
     print("writing file to : ", cpp_path + "/" + UPGRADER_MOBILE_FILE_NAME)
     with open(os.path.join(cpp_path, UPGRADER_MOBILE_FILE_NAME), "wb") as out_file:
-        final_output = "".join(body_parts)
         out_file.write(upgrader_file_content.encode("utf-8"))
 
 
-def sort_upgrader(upgrader_list: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+def sort_upgrader(upgrader_list: list[dict[str, Any]]) -> list[dict[str, Any]]:
     sorted_upgrader_list = sorted(
         upgrader_list, key=lambda one_upgrader: next(iter(one_upgrader))
     )

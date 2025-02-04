@@ -42,7 +42,7 @@ std::tuple<at::Tensor, std::optional<at::Tensor>> PackedConvWeight<
                   .memory_format(c10::MemoryFormat::ChannelsLast),
               w_scale[0],
               w_zp[0],
-              c10::nullopt)
+              std::nullopt)
         : at::native::fbgemm_utils::
               MakeEmptyAffineQuantizedChannelsLast3dTensor(
                   output_channels,

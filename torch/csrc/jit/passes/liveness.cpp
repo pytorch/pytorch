@@ -6,14 +6,13 @@
 #include <iostream>
 #include <memory>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 // LivenessAnalyzer computes "bailout" liveness which is equivalent to
 // "{LIVE_IN} or {GEN}" or "{LIVE_OUT} - {KILL}"
 struct LivenessAnalyzer {
   explicit LivenessAnalyzer(std::shared_ptr<Graph> graph)
-      : graph_(std::move(graph)), changed_(false) {}
+      : graph_(std::move(graph)) {}
 
   std::unordered_map<Node*, std::vector<Value*>> run() {
     std::vector<Node*> counters;
@@ -76,7 +75,7 @@ struct LivenessAnalyzer {
       std::cout << " " << e.first->kind().toQualString();
       std::cout << " = ";
       dump(e.second);
-      std::cout << std::endl;
+      std::cout << '\n';
     }
     std::cout << "graph :\n";
     graph_->dump();
@@ -149,7 +148,7 @@ struct LivenessAnalyzer {
   }
 
   std::shared_ptr<Graph> graph_;
-  bool changed_;
+  bool changed_{false};
   std::map<Node*, SparseBitVector> liveness_sets_;
   std::map<size_t, Value*> ids_to_values_;
 };
@@ -160,5 +159,4 @@ std::unordered_map<Node*, std::vector<Value*>> BuildLivenessSets(
   return la.run();
 }
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

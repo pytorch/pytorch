@@ -17,8 +17,7 @@
 #include <string>
 #include <utility>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 using ModuleQConfigMap = std::unordered_map<ModulePtr, std::optional<QConfig>>;
 
@@ -49,7 +48,7 @@ void fillQConfigMap(
     const QConfigDict& qconfig_dict,
     ModuleQConfigMap& map,
     const std::string& key = "",
-    const std::optional<QConfig>& parent_qconfig = c10::nullopt) {
+    const std::optional<QConfig>& parent_qconfig = std::nullopt) {
   std::optional<QConfig> qconfig;
   if (qconfig_dict.find(key) != qconfig_dict.end()) {
     GRAPH_DEBUG("Got module config for key:", key);
@@ -953,9 +952,9 @@ void InsertObserversHelper::insertObserverFor(
   }
   GRAPH_DEBUG("Inserting observer for:", v->debugName());
   Module observer = observer_module.deepcopy();
-  std::string observer_name = "_observer_" + c10::to_string(uid_++);
+  std::string observer_name = "_observer_" + std::to_string(uid_++);
   while (module.hasattr(observer_name)) {
-    observer_name = "_observer_" + c10::to_string(uid_++);
+    observer_name = "_observer_" + std::to_string(uid_++);
   }
   module.register_module(observer_name, observer);
   observer_name_and_modules.emplace_back(observer_name, observer);
@@ -1120,8 +1119,7 @@ void InsertObserversHelper::fillBoundaryValueMap(
         // offset of input for the caller node, since the first
         // input of CallFunction is the function node and the graph
         // for CallFunction start with actual input
-        // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-        size_t input_offset;
+        size_t input_offset = 0;
         if (n->kind() == prim::CallMethod) {
           auto m_opt = getInvokedModuleOpt(module, n, self);
           if (!m_opt.has_value()) {
@@ -1414,7 +1412,7 @@ InsertObserversHelper::insertObserversFor(
       if (!isObserved(v, block_observed_values)) {
         block_output_observers.emplace_back(getObserverFor(v));
       } else {
-        block_output_observers.emplace_back(c10::nullopt);
+        block_output_observers.emplace_back(std::nullopt);
       }
     }
   }
@@ -1469,8 +1467,7 @@ InsertObserversHelper::insertObserversFor(
       if (n->kind() == prim::CallMethod || userDefinedCallFunction(n)) {
         script::Module m;
         std::shared_ptr<Graph> g;
-        // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-        size_t input_offset;
+        size_t input_offset = 0;
         bool is_udf_for_subblock = is_user_defined_function;
         if (n->kind() == prim::CallMethod) {
           auto m_opt = getInvokedModuleOpt(module, n, self);
@@ -1722,5 +1719,4 @@ Module InsertObserversForOnDevicePTQ(
       cloned_module, observer_method_name, /* is_entry_point */ true);
   return cloned_module;
 }
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

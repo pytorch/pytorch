@@ -1,6 +1,5 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
 from torch.distributed.tensor.parallel.api import parallelize_module
-
 from torch.distributed.tensor.parallel.loss import loss_parallel
 from torch.distributed.tensor.parallel.style import (
     ColwiseParallel,
@@ -11,6 +10,7 @@ from torch.distributed.tensor.parallel.style import (
     SequenceParallel,
 )
 
+
 __all__ = [
     "ColwiseParallel",
     "ParallelStyle",
@@ -19,5 +19,5 @@ __all__ = [
     "RowwiseParallel",
     "SequenceParallel",
     "parallelize_module",
-    "loss_parallel"
+    "loss_parallel",
 ]

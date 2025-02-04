@@ -5,20 +5,21 @@
 """
 import functools
 import warnings
-
-# from numpy.core.getlimits import _discovered_machar, _float_ma
-
-from unittest import skipIf
+from unittest import expectedFailure as xfail, skipIf
 
 import numpy
-
 from pytest import raises as assert_raises
+
 from torch.testing._internal.common_utils import (
+    instantiate_parametrized_tests,
+    parametrize,
     run_tests,
+    subtest,
     TEST_WITH_TORCHDYNAMO,
     TestCase,
-    xpassIfTorchDynamo,
+    xpassIfTorchDynamo_np,
 )
+
 
 if TEST_WITH_TORCHDYNAMO:
     import numpy as np
@@ -108,6 +109,7 @@ class TestFinfo(TestCase):
             getattr(finfo(dt), attr)
 
 
+@instantiate_parametrized_tests
 class TestIinfo(TestCase):
     def test_basic(self):
         dts = list(
@@ -128,11 +130,19 @@ class TestIinfo(TestCase):
         with assert_raises((TypeError, ValueError)):
             iinfo("f4")
 
-    def test_unsigned_max(self):
-        types = np.sctypes["uint"]
-        for T in types:
-            max_calculated = T(0) - T(1)
-            assert_equal(iinfo(T).max, max_calculated)
+    @parametrize(
+        "T",
+        [
+            np.uint8,
+            # xfail: unsupported add (uint[16,32,64])
+            subtest(np.uint16, decorators=[xfail]),
+            subtest(np.uint32, decorators=[xfail]),
+            subtest(np.uint64, decorators=[xfail]),
+        ],
+    )
+    def test_unsigned_max(self, T):
+        max_calculated = T(0) - T(1)
+        assert_equal(iinfo(T).max, max_calculated)
 
 
 class TestRepr(TestCase):
@@ -202,10 +212,18 @@ class TestMisc(TestCase):
                 # This test may fail on some platforms
                 assert len(w) == 0
 
-    @xpassIfTorchDynamo  # (reason="None of nmant, minexp, maxexp is implemented.")
+    @xpassIfTorchDynamo_np  # (reason="None of nmant, minexp, maxexp is implemented.")
     def test_plausible_finfo(self):
         # Assert that finfo returns reasonable results for all types
-        for ftype in np.sctypes["float"] + np.sctypes["complex"]:
+        for ftype in (
+            [np.float16, np.float32, np.float64, np.longdouble]
+            + [
+                np.complex64,
+                np.complex128,
+            ]
+            # no complex256 in torch._numpy
+            + ([np.clongdouble] if hasattr(np, "clongdouble") else [])
+        ):
             info = np.finfo(ftype)
             assert_(info.nmant > 1)
             assert_(info.minexp < -1)

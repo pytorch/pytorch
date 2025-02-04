@@ -36,21 +36,24 @@ install_conda_dependencies() {
 }
 
 install_pip_dependencies() {
-  pushd executorch/.ci/docker
-  # Install all Python dependencies
-  pip_install -r requirements-ci.txt
+  pushd executorch
+  as_jenkins bash install_requirements.sh --pybind xnnpack
+
+  # A workaround, ExecuTorch has moved to numpy 2.0 which is not compatible with the current
+  # numba and scipy version used in PyTorch CI
+  conda_run pip uninstall -y numba scipy
+
   popd
 }
 
 setup_executorch() {
   pushd executorch
-  source .ci/scripts/utils.sh
 
-  install_flatc_from_source
-  pip_install .
+  export PYTHON_EXECUTABLE=python
+  export EXECUTORCH_BUILD_PYBIND=ON
+  export CMAKE_ARGS="-DEXECUTORCH_BUILD_XNNPACK=ON -DEXECUTORCH_BUILD_KERNELS_QUANTIZED=ON"
 
-  # Make sure that all the newly generate files are owned by Jenkins
-  chown -R jenkins .
+  as_jenkins .ci/scripts/setup-linux.sh cmake || true
   popd
 }
 

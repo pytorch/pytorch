@@ -9,11 +9,11 @@
  * [Note: hacky wrapper removal for optional tensor]
  *
  * The kernel implementation takes an optional tensor marked in the schema as
- * Tensor? but the C++ function takes Tensor instead of the optional<Tensor>
+ * Tensor? but the C++ function takes Tensor instead of the std::optional<Tensor>
  * expected by the dispatcher.
  *
  * To remove the hacky wrapper, the C++ function is changed to take
- * optional<Tensor> and unwrap the Tensor value at the beginning of
+ * std::optional<Tensor> and unwrap the Tensor value at the beginning of
  * the function, e.g.:
  *   > c10::MaybeOwned<Tensor> weight_maybe_owned =
  *   >     at::borrow_from_optional_tensor(weight_opt);
@@ -40,12 +40,11 @@
  * through the creation of a TensorOptions value.
  */
 
-namespace c10 {
-namespace impl {
+namespace c10::impl {
 
 TORCH_API void common_device_check_failure(Device common_device, const at::Tensor& tensor, at::CheckedFrom methodName, at::CheckedFrom argName);
 
-inline void check_and_update_common_device(optional<Device>& common_device, const at::Tensor& tensor, at::CheckedFrom methodName, at::CheckedFrom argName) {
+inline void check_and_update_common_device(std::optional<Device>& common_device, const at::Tensor& tensor, at::CheckedFrom methodName, at::CheckedFrom argName) {
   // TODO: Remove this once the following issue is addressed:
   // https://github.com/pytorch/pytorch/issues/57380
   if (!tensor.defined()) {
@@ -62,22 +61,21 @@ inline void check_and_update_common_device(optional<Device>& common_device, cons
   }
 }
 
-inline void check_and_update_common_device(optional<Device>& common_device, const optional<at::Tensor>& tensor, at::CheckedFrom methodName, at::CheckedFrom argName) {
+inline void check_and_update_common_device(std::optional<Device>& common_device, const std::optional<at::Tensor>& tensor, at::CheckedFrom methodName, at::CheckedFrom argName) {
   if (tensor.has_value()) {
     check_and_update_common_device(common_device, tensor.value(), methodName, argName);
   }
 }
 
-inline void check_and_update_common_device(optional<Device>& common_device, at::ITensorListRef tensors, at::CheckedFrom methodName, at::CheckedFrom argName) {
+inline void check_and_update_common_device(std::optional<Device>& common_device, at::ITensorListRef tensors, at::CheckedFrom methodName, at::CheckedFrom argName) {
   for (const auto& tensor : tensors) {
     check_and_update_common_device(common_device, tensor, methodName, argName);
   }
 }
 
-inline void check_and_update_common_device(optional<Device>& common_device, const List<optional<at::Tensor>>& tensors, at::CheckedFrom methodName, at::CheckedFrom argName) {
+inline void check_and_update_common_device(std::optional<Device>& common_device, const List<std::optional<at::Tensor>>& tensors, at::CheckedFrom methodName, at::CheckedFrom argName) {
   for (const auto& tensor : tensors) {
     check_and_update_common_device(common_device, tensor, methodName, argName);
   }
 }
-} // namespace impl
-} // namespace c10
+} // namespace c10::impl

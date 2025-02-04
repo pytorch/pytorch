@@ -15,6 +15,8 @@
 #include <ATen/ops/_resize_output_native.h>
 #endif
 
+#include <c10/util/overflows.h>
+
 namespace at::native {
 
 // Returns true if resize is necessary
@@ -231,14 +233,6 @@ TensorImpl* resize_impl_cpu_(
   return _resize_impl_(self, size, stride, resize_storage);
 }
 
-static TensorImpl* resize_impl_meta_(
-    TensorImpl* self,
-    c10::SymIntArrayRef size,
-    at::OptionalSymIntArrayRef stride,
-    bool resize_storage = true) {
-  return _resize_impl_(self, size, stride, resize_storage);
-}
-
 template <typename T>
 const Tensor& _resize_(
     const Tensor& self,
@@ -246,8 +240,7 @@ const Tensor& _resize_(
     std::optional<MemoryFormat> optional_memory_format) {
   auto* self_ = self.unsafeGetTensorImpl();
   int64_t old_storage_nbytes = self_->unsafe_storage() ? self_->unsafe_storage().sym_nbytes().maybe_as_int().value_or(-1) : 0;
-  // NOLINTNEXTLINE(bugprone-argument-comment)
-  _resize_impl_<T>(self_, size, /*strides=*/c10::nullopt, true);
+  _resize_impl_<T>(self_, size, /*stride=*/std::nullopt, true);
   if (optional_memory_format.has_value()) {
     auto memory_format =
         optional_memory_format.value();
@@ -282,7 +275,7 @@ const Tensor& resize__symint(
   return _resize_(self, size, optional_memory_format);
 }
 
-void resize_bytes_nocuda(const Storage& storage, c10::SymInt newsize) {
+void resize_bytes_nocuda(const Storage& storage, const c10::SymInt& newsize) {
   // handles all devices except cuda (which needs to be in a different .so)
   c10::DeviceType device_type = storage.device_type();
   if (device_type == at::kCPU) {
@@ -290,9 +283,9 @@ void resize_bytes_nocuda(const Storage& storage, c10::SymInt newsize) {
   } else if (device_type == at::kMeta) {
     at::native::resize_bytes_meta(storage.unsafeGetStorageImpl(), newsize);
   } else if (device_type == at::kPrivateUse1) {
-    at::GetPrivateUse1HooksInterface()->resizePrivateUse1Bytes(
+    at::detail::getPrivateUse1Hooks().resizePrivateUse1Bytes(
         storage, newsize.expect_int());
-  } else if (device_type == at::kXPU || device_type == at::kHPU) {
+  } else if (device_type == at::kXPU || device_type == at::kHPU || device_type == at::kMTIA) {
     ptrdiff_t size_bytes_i = newsize.expect_int();
     TORCH_CHECK(
         !c10::overflows<int64_t>(size_bytes_i),

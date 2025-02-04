@@ -1,5 +1,6 @@
-from collections import Counter
-from typing import Any, Dict, List, Optional, Sequence, Tuple, Union
+# mypy: allow-untyped-defs
+from collections.abc import Sequence
+from typing import Any, Optional, Union
 
 import torch
 import torch.nn as nn
@@ -10,9 +11,9 @@ from torch._functorch.utils import exposed_in
 @exposed_in("torch.func")
 def functional_call(
     module: "torch.nn.Module",
-    parameter_and_buffer_dicts: Union[Dict[str, Tensor], Sequence[Dict[str, Tensor]]],
-    args: Union[Any, Tuple],
-    kwargs: Optional[Dict[str, Any]] = None,
+    parameter_and_buffer_dicts: Union[dict[str, Tensor], Sequence[dict[str, Tensor]]],
+    args: Optional[Union[Any, tuple]] = None,
+    kwargs: Optional[dict[str, Any]] = None,
     *,
     tie_weights: bool = True,
     strict: bool = False,
@@ -126,7 +127,11 @@ def functional_call(
                 "Expected all elements of parameter_and_buffer_dicts to be dictionaries"
             )
         all_keys = [k for d in parameter_and_buffer_dicts for k in d.keys()]
-        repeated_keys = [key for key, n in Counter(all_keys).items() if n > 1]
+        all_keys_counter: dict[str, int] = {}
+        for k in all_keys:
+            v = all_keys_counter.get(k, 0)
+            all_keys_counter[k] = v + 1
+        repeated_keys = [key for key, n in all_keys_counter.items() if n > 1]
         if len(repeated_keys) > 0:
             raise ValueError(
                 f"{repeated_keys} appeared in multiple dictionaries; behavior of functional call is ambiguous"
@@ -152,8 +157,8 @@ def functional_call(
 
 @exposed_in("torch.func")
 def stack_module_state(
-    models: List[nn.Module],
-) -> Tuple[Dict[str, Any], Dict[str, Any]]:
+    models: Union[Sequence[nn.Module], nn.ModuleList],
+) -> tuple[dict[str, Any], dict[str, Any]]:
     """stack_module_state(models) -> params, buffers
 
     Prepares a list of torch.nn.Modules for ensembling with :func:`vmap`.
@@ -175,7 +180,7 @@ def stack_module_state(
         data = torch.randn(batch_size, 3)
 
         def wrapper(params, buffers, data):
-            return torch.func.functional_call(model[0], (params, buffers), data)
+            return torch.func.functional_call(models[0], (params, buffers), data)
 
         params, buffers = stack_module_state(models)
         output = vmap(wrapper, (0, 0, None))(params, buffers, data)
@@ -234,7 +239,7 @@ def stack_module_state(
 
 
 def construct_stacked_leaf(
-    tensors: Union[Tuple[Tensor, ...], List[Tensor]], name: str
+    tensors: Union[tuple[Tensor, ...], list[Tensor]], name: str
 ) -> Tensor:
     all_requires_grad = all(t.requires_grad for t in tensors)
     none_requires_grad = all(not t.requires_grad for t in tensors)

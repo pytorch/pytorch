@@ -3,7 +3,7 @@
 #include <ATen/Tensor.h>
 #include <ATen/native/TensorIterator.h>
 #include <torch/library.h>
-#include <c10/util/Optional.h>
+#include <optional>
 #include <torch/all.h>
 #include <stdexcept>
 
@@ -75,7 +75,7 @@ void test_random_from_to(const at::Device& device) {
     };
     tos = {
       1L,
-      static_cast<::std::optional<int64_t>>(c10::nullopt)
+      static_cast<::std::optional<int64_t>>(::std::nullopt)
     };
   } else if constexpr (::std::is_signed_v<T>) {
     constexpr int64_t min_from = _min_from<T>();
@@ -90,7 +90,7 @@ void test_random_from_to(const at::Device& device) {
       ::std::optional<int64_t>(0L),
       ::std::optional<int64_t>(42L),
       ::std::optional<int64_t>(max_to),
-      static_cast<::std::optional<int64_t>>(c10::nullopt)
+      static_cast<::std::optional<int64_t>>(::std::nullopt)
     };
   } else {
     froms = {
@@ -100,7 +100,7 @@ void test_random_from_to(const at::Device& device) {
     tos = {
       ::std::optional<int64_t>(42L),
       ::std::optional<int64_t>(max_to),
-      static_cast<::std::optional<int64_t>>(c10::nullopt)
+      static_cast<::std::optional<int64_t>>(::std::nullopt)
     };
   }
 
@@ -116,7 +116,7 @@ void test_random_from_to(const at::Device& device) {
   bool from_to_case_covered = false;
   bool from_case_covered = false;
   for (const int64_t from : froms) {
-    for (const ::std::optional<int64_t> to : tos) {
+    for (const ::std::optional<int64_t> & to : tos) {
       if (!to.has_value() || from < *to) {
         for (const uint64_t val : vals) {
           auto gen = at::make_generator<RNG>(val);
@@ -137,7 +137,13 @@ void test_random_from_to(const at::Device& device) {
               range = static_cast<uint64_t>(max_to) - static_cast<uint64_t>(from) + 1;
               from_case_covered = true;
             }
+#ifdef FBCODE_CAFFE2
             if (range < (1ULL << 32)) {
+#else
+            // this is leaking details of implementation into test
+            // we are starting to use random64() at 2^28 to minimize skew due to %
+            if (range < (1ULL << 28)) {
+#endif
               exp = static_cast<T>(static_cast<int64_t>((static_cast<uint32_t>(val) % range + from)));
             } else {
               exp = static_cast<T>(static_cast<int64_t>((val % range + from)));

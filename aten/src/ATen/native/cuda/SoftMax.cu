@@ -465,10 +465,10 @@ ilpReduce(index_t shift,
   if(shift > 0){
     data -= shift;
     size += shift;
-    if(threadIdx.x >= shift){
+    if (offset >= shift && offset < size) {
       threadVal = r(threadVal, data[offset]);
     }
-    size -= blockDim.x;
+    size -= blockDim.x > size ? size : blockDim.x;
     data += blockDim.x;
   }
   index_t last = size % (ILP * blockDim.x);
@@ -493,6 +493,12 @@ ilpReduce(index_t shift,
   return threadVal;
 }
 
+int32_t potential_register_count(int32_t dim_size, int32_t thread_count){
+  // This method calculate the potential register count for ilpReduce method (it's just a rough number).
+  int reg_cnt = (dim_size + thread_count - 1) / thread_count;
+  return reg_cnt;
+}
+
 /**
  * This will apply the Epilogue with vectorized reads & writes when input & output have the same shift
  */
@@ -515,10 +521,10 @@ WriteFpropResultsVectorized(
     output -= shift;
     size += shift;
 
-    if (threadIdx.x >= shift) {
+    if (offset >= shift && offset < size) {
       output[offset] = epilogue(input[offset]);
     }
-    size -= blockDim.x;
+    size -= blockDim.x > size ? size : blockDim.x;
     input += blockDim.x;
     output += blockDim.x;
   }
@@ -694,6 +700,61 @@ cunn_SoftMaxForward(outscalar_t *output, const scalar_t *input, int classes)
   }
 }
 
+template <typename scalar_t, typename accscalar_t, typename outscalar_t, template <typename, typename, typename> class Epilogue, typename index_t, int32_t reg_cnt>
+__global__ void
+cunn_SoftMaxForwardReg(outscalar_t *output, const scalar_t *input, index_t classes)
+{
+  extern __shared__ unsigned char smem[];
+  auto sdata = reinterpret_cast<accscalar_t*>(smem);
+
+  scalar_t reg[reg_cnt];
+
+  input += static_cast<int64_t>(blockIdx.x) * classes;
+  output += static_cast<int64_t>(blockIdx.x) * classes;
+
+  accscalar_t threadMax = -at::numeric_limits<accscalar_t>::max();
+  accscalar_t threadExp = static_cast<accscalar_t>(0);
+
+  // Load the elements from gmem into reg, and get the max for current thread.
+  MaxFloat<scalar_t, accscalar_t> maxFunc;
+
+  #pragma unroll
+  for(int reg_idx = 0; reg_idx < reg_cnt; reg_idx ++){
+    int offset = threadIdx.x + reg_idx * blockDim.x;
+    if(offset < classes) {
+      reg[reg_idx] = input[offset];
+      threadMax = maxFunc(threadMax, reg[reg_idx]);
+    }
+  }
+
+  // Reduce to the max for block
+  accscalar_t max_k = blockReduceWarp<Max, accscalar_t>(sdata, threadMax,
+    Max<accscalar_t>(), -at::numeric_limits<accscalar_t>::max());
+
+  SumExpFloat<scalar_t, accscalar_t> sumExpFunc(max_k);
+  // reduce all values
+  #pragma unroll
+  for(int reg_idx = 0; reg_idx < reg_cnt; reg_idx ++){
+    int offset = threadIdx.x + reg_idx * blockDim.x;
+    if(offset < classes) {
+      threadExp = sumExpFunc(threadExp, reg[reg_idx]);
+    }
+  }
+  accscalar_t sumAll = blockReduceWarp<Add, accscalar_t>(sdata, threadExp,
+    Add<accscalar_t>(), static_cast<accscalar_t>(0));
+
+  Epilogue<scalar_t, accscalar_t, outscalar_t> epilogue(max_k, sumAll);
+
+  // Write back the value
+  #pragma unroll
+  for(int reg_idx = 0; reg_idx < reg_cnt; reg_idx ++){
+    int offset = threadIdx.x + reg_idx * blockDim.x;
+    if(offset < classes) {
+      output[offset] = epilogue(reg[reg_idx]);
+    }
+  }
+}
+
 template <int ILP, typename scalar_t, typename accscalar_t, typename outscalar_t,
   template <typename, typename, typename> class Epilogue, typename index_t = int32_t>
 __global__ void
@@ -822,7 +883,7 @@ Tensor host_softmax(const Tensor & input_, const int64_t dim_, const bool half_t
     TORCH_CHECK(input_.scalar_type() == ScalarType::Half, "conversion is supported for Half type only");
   }
   auto input = input_.contiguous();
-  static_assert(std::is_same<acc_type<at::Half, true>, float>::value, "accscalar_t for half should be float");
+  static_assert(std::is_same_v<acc_type<at::Half, true>, float>, "accscalar_t for half should be float");
   if (input.dim() == 0) input = input.view(1);
   int64_t dim = maybe_wrap_dim(dim_, input.dim());
   TORCH_CHECK(dim >=0 && dim < input.dim(), "dim must be non-negative and less than input dimensions");
@@ -846,7 +907,7 @@ Tensor host_softmax(const Tensor & input_, const int64_t dim_, const bool half_t
         if (!half_to_float) {
           auto output_ptr = output.mutable_data_ptr<scalar_t>();
           auto input_ptr = input.const_data_ptr<scalar_t>();
-          if (dim_size <= 1024 && dim_size*sizeof(scalar_t) <= 4096) {
+          if (dim_size <= 2048 && dim_size*sizeof(scalar_t) <= 8192) {
             int64_t remaining = outer_size;
             int64_t chunk_size = (1L << 30L) / dim_size;
             while(remaining > 0) {
@@ -863,12 +924,55 @@ Tensor host_softmax(const Tensor & input_, const int64_t dim_, const bool half_t
             auto max_elements_per_smem = (at::cuda::getCurrentDeviceProperties()->sharedMemPerBlock -
               smem_reduction_sz) / sizeof(scalar_t);
 
-            bool can_use_smem = dim_size < max_elements_per_smem;
-            can_use_smem &= !(reinterpret_cast<const uintptr_t>(input_ptr) % ALIGN_BYTES);
+            bool can_use_smem = (size_t) dim_size < max_elements_per_smem;
+            can_use_smem &= !(reinterpret_cast<uintptr_t>(input_ptr) % ALIGN_BYTES);
             can_use_smem &= (!(reinterpret_cast<uintptr_t>(output_ptr) % ALIGN_BYTES));
             can_use_smem &= !(dim_size % ILP);
 
-            if (can_use_smem) {
+            int32_t potential_reg_cnt = potential_register_count(dim_size, block.x);
+            if(potential_reg_cnt < 10){
+              TORCH_INTERNAL_ASSERT(potential_reg_cnt > 0, "potential_reg_cnt for softmax with register should be greater than 0.");
+              switch (potential_reg_cnt) {
+                // TODO(Wenqin): try to investigate why we couldn't use macro for below code,
+                // because it seems on MSVS, it seems the macro way didn't expand correct.
+                case 1:
+                  cunn_SoftMaxForwardReg<scalar_t, accscalar_t, scalar_t, Epilogue, int64_t, 1>
+                    <<<grid, block, smem_reduction_sz, stream>>>(output_ptr, input_ptr, dim_size);
+                  break;
+                case 2:
+                  cunn_SoftMaxForwardReg<scalar_t, accscalar_t, scalar_t, Epilogue, int64_t, 2>
+                    <<<grid, block, smem_reduction_sz, stream>>>(output_ptr, input_ptr, dim_size);
+                  break;
+                case 3:
+                  cunn_SoftMaxForwardReg<scalar_t, accscalar_t, scalar_t, Epilogue, int64_t, 3>
+                    <<<grid, block, smem_reduction_sz, stream>>>(output_ptr, input_ptr, dim_size);
+                  break;
+                case 4:
+                  cunn_SoftMaxForwardReg<scalar_t, accscalar_t, scalar_t, Epilogue, int64_t, 4>
+                    <<<grid, block, smem_reduction_sz, stream>>>(output_ptr, input_ptr, dim_size);
+                  break;
+                case 5:
+                  cunn_SoftMaxForwardReg<scalar_t, accscalar_t, scalar_t, Epilogue, int64_t, 5>
+                    <<<grid, block, smem_reduction_sz, stream>>>(output_ptr, input_ptr, dim_size);
+                  break;
+                case 6:
+                  cunn_SoftMaxForwardReg<scalar_t, accscalar_t, scalar_t, Epilogue, int64_t, 6>
+                    <<<grid, block, smem_reduction_sz, stream>>>(output_ptr, input_ptr, dim_size);
+                  break;
+                case 7:
+                  cunn_SoftMaxForwardReg<scalar_t, accscalar_t, scalar_t, Epilogue, int64_t, 7>
+                    <<<grid, block, smem_reduction_sz, stream>>>(output_ptr, input_ptr, dim_size);
+                  break;
+                case 8:
+                  cunn_SoftMaxForwardReg<scalar_t, accscalar_t, scalar_t, Epilogue, int64_t, 8>
+                    <<<grid, block, smem_reduction_sz, stream>>>(output_ptr, input_ptr, dim_size);
+                  break;
+                case 9:
+                  cunn_SoftMaxForwardReg<scalar_t, accscalar_t, scalar_t, Epilogue, int64_t, 9>
+                    <<<grid, block, smem_reduction_sz, stream>>>(output_ptr, input_ptr, dim_size);
+                  break;
+              }
+            } else if (can_use_smem) {
               size_t smem_sz = dim_size * sizeof(scalar_t) + smem_reduction_sz;
               cunn_SoftMaxForwardSmem<ILP, scalar_t, accscalar_t, scalar_t, Epilogue>
                 <<<grid, block, smem_sz, stream>>>(output_ptr, input_ptr, dim_size);
@@ -899,8 +1003,8 @@ Tensor host_softmax(const Tensor & input_, const int64_t dim_, const bool half_t
             auto max_elements_per_smem = (at::cuda::getCurrentDeviceProperties()->sharedMemPerBlock -
               smem_reduction_sz) / sizeof(scalar_t);
 
-            bool can_use_smem = dim_size < max_elements_per_smem;
-            can_use_smem &= !(reinterpret_cast<const uintptr_t>(input_ptr) % ALIGN_BYTES);
+            bool can_use_smem = (size_t) dim_size < max_elements_per_smem;
+            can_use_smem &= !(reinterpret_cast<uintptr_t>(input_ptr) % ALIGN_BYTES);
             can_use_smem &= (!(reinterpret_cast<uintptr_t>(output_ptr) % ALIGN_BYTES));
             can_use_smem &= !(dim_size % ILP);
 
@@ -961,7 +1065,7 @@ void host_softmax_backward(const Tensor &grad_, const Tensor &output_, int64_t d
     return;
   }
   auto grad = grad_.contiguous();
-  static_assert(std::is_same<acc_type<at::Half, true>, float>::value, "accscalar_t for half should be float");
+  static_assert(std::is_same_v<acc_type<at::Half, true>, float>, "accscalar_t for half should be float");
   if (grad.dim() == 0) grad = grad.view(1);
   TORCH_CHECK(dim >=0 && dim < grad.dim(), "dim must be non-negative and less than input dimensions");
   auto output = output_.contiguous();
@@ -1113,7 +1217,7 @@ TORCH_IMPL_FUNC(softmax_backward_cuda_out)
   host_softmax_backward<SoftMaxBackwardEpilogue, false>(tmp, output, dim, half_to_float, grad_input);
 }
 
-Tensor masked_softmax_cuda(const Tensor& input_, const Tensor& mask_, const std::optional<int64_t> dim_, const c10::optional<int64_t> mask_type_) {
+Tensor masked_softmax_cuda(const Tensor& input_, const Tensor& mask_, const std::optional<int64_t> dim_, const std::optional<int64_t> mask_type_) {
   Tensor output = at::empty_like(input_, input_.options());
   TORCH_CHECK(mask_.scalar_type() == ScalarType::Bool, "Mask should be a boolean tensor");
 

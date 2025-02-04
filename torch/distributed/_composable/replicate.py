@@ -1,7 +1,7 @@
+# mypy: allow-untyped-defs
 import weakref
-from typing import Any, cast, Dict, Iterable, List, Optional, Set, Tuple
-
-import typing_extensions
+from collections.abc import Iterable
+from typing import Any, NoReturn, Optional
 
 import torch
 import torch.nn as nn
@@ -10,10 +10,13 @@ from torch.nn.parallel import DistributedDataParallel
 
 from .contract import _get_registry, contract
 
+
 _ROOT_MODULE_PREFIX = ""
 
 
 class _ReplicateState(_State):
+    _ddp_weakref: weakref.ref
+
     def __init__(self) -> None:
         super().__init__()
         self.module: nn.Module = nn.ParameterList()
@@ -22,17 +25,17 @@ class _ReplicateState(_State):
         # TODO(@fegin): this variable is originally create for testing, we
         # should remove this if possible.
         self._orig_module = self.module
-        self._param_names: List[str] = []
+        self._param_names: list[str] = []
         self._no_sync: bool = False
-        self._init_args: Optional[Tuple[Any, ...]] = None
-        self._init_kwargs: Dict[str, Any] = {}
-        self._comm_hook_args: List[Any] = []
+        self._init_args: Optional[tuple[Any, ...]] = None
+        self._init_kwargs: dict[str, Any] = {}
+        self._comm_hook_args: list[Any] = []
 
     def _collect_params(
         self,
         module: nn.Module,
-        ignored_modules: Set[nn.Module],
-        ignored_params: Set[nn.Parameter],
+        ignored_modules: set[nn.Module],
+        ignored_params: set[nn.Parameter],
         prefix: str = _ROOT_MODULE_PREFIX,
     ) -> None:
         # skip if managed by fully_sharded API
@@ -66,7 +69,7 @@ class _ReplicateState(_State):
             assert self._init_args is not None
             self.init(*self._init_args, **self._init_kwargs)
             self.register_comm_hook()
-            self._init_args = tuple()
+            self._init_args = ()
             self._init_kwargs = {}
 
         _lazy_init()
@@ -74,20 +77,21 @@ class _ReplicateState(_State):
     def init(
         self,
         module: nn.Module,
-        ignored_modules: Set[nn.Module],
+        ignored_modules: set[nn.Module],
         **kwargs,
     ) -> None:
         if self.has_initialized:
             return
 
         self.has_initialized = True
-
-        device_mesh = kwargs.get("device_mesh", None)
         self.module = module
         ignored_params = {p for m in ignored_modules for p in m.parameters()}
+        for submodule in module.modules():
+            if _is_fully_sharded(submodule):
+                ignored_params.update(submodule.parameters())
         from torch.distributed.tensor.parallel.ddp import _localize_dtensor
 
-        _localize_dtensor(module)
+        _localize_dtensor(module, ignored_params=ignored_params)
         self._collect_params(module, ignored_modules, ignored_params)
 
         if "device_id" in kwargs:
@@ -122,7 +126,7 @@ class _ReplicateState(_State):
         self._init_kwargs = kwargs
 
     def forward_pre_hook(
-        self, module: nn.Module, args: Tuple[Any, ...], kwargs: Dict[str, Any]
+        self, module: nn.Module, args: tuple[Any, ...], kwargs: dict[str, Any]
     ) -> Any:
         if self._init_args or self._init_kwargs:
             self.lazy_init()
@@ -132,13 +136,13 @@ class _ReplicateState(_State):
     def forward_post_hook(
         self,
         module: nn.Module,
-        input: Tuple[torch.Tensor],
+        input: tuple[torch.Tensor],
         output: torch.Tensor,
     ) -> torch.Tensor:
         return self._ddp._post_forward(output)
 
 
-def unimplemented_deepcopy(*args: Any, **kwargs: Any) -> typing_extensions.Never:
+def unimplemented_deepcopy(*args: Any, **kwargs: Any) -> NoReturn:
     raise AssertionError(
         "DDP does not support deepcopy. Please use state dict for serialization."
     )
@@ -165,10 +169,10 @@ class DDP:
             requires_gradient_sync (bool): Whether to reduce gradients for the
                 module's parameters.
         """
-        replicate.state(self)._no_sync = not requires_gradient_sync
+        replicate.state(self)._no_sync = not requires_gradient_sync  # type: ignore[arg-type]
 
     def register_comm_hook(self, *args, **kwargs) -> None:
-        replicate.state(self)._comm_hook_args.append((args, kwargs))
+        replicate.state(self)._comm_hook_args.append((args, kwargs))  # type: ignore[arg-type]
 
 
 @contract(state_cls=_ReplicateState)
@@ -208,13 +212,16 @@ def replicate(
     else:
         ignored_modules = set(ignored_modules)
 
-    state = cast(_ReplicateState, replicate.state(module))
+    state = replicate.state(module)
     module.register_forward_pre_hook(state.forward_pre_hook, with_kwargs=True)
     device_mesh = kwargs.get("device_mesh", None)
     if device_mesh is not None:
         from torch.distributed.device_mesh import _mesh_resources
 
-        if _mesh_resources.get_parent_mesh(device_mesh) is not None:
+        root_mesh = _mesh_resources.get_root_mesh(device_mesh)
+        # if a root mesh is not the same as device_mesh,
+        # meaning the device_mesh is sliced out from the root mesh.
+        if root_mesh != device_mesh:
             # TODO: This is a temporary work around to enable DDP + TP.
             # We should do the logic in DDP so that the 2D implementation is
             # sound and the state_dict works out of the box.

@@ -2,6 +2,7 @@ import timeit
 
 import torch.fx
 
+
 N = 100000
 K = 1000
 
@@ -23,7 +24,7 @@ def main():
             pass
 
     t = min(timeit.repeat(fn, number=K, repeat=3))
-    print(f"iterating over {N*K} FX nodes took {t:.1f}s ({N*K/t:.0f} nodes/s)")
+    print(f"iterating over {N * K} FX nodes took {t:.1f}s ({N * K / t:.0f} nodes/s)")
 
 
 if __name__ == "__main__":

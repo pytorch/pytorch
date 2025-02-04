@@ -10,9 +10,8 @@ import sys
 import tempfile
 import threading
 import unittest
-
 from itertools import chain, repeat
-from typing import NamedTuple
+from typing import NamedTuple, Union
 
 import torch
 import torch.cuda.comm as comm
@@ -36,6 +35,7 @@ from torch.testing._internal.common_utils import (
     TEST_CUDA,
     TestCase,
 )
+
 
 TEST_CUDAMALLOCASYNC = TEST_CUDA and (
     torch.cuda.get_allocator_backend() == "cudaMallocAsync"
@@ -950,12 +950,18 @@ class TestCudaMultiGPU(TestCase):
             ext_stream = torch.cuda.ExternalStream(stream_v)
             self.assertEqual(stream_v, ext_stream.cuda_stream)
             self.assertEqual(ext_stream.device.index, device.idx)
+            ext_stream = torch.cuda.get_stream_from_external(stream_v, device)
+            self.assertEqual(stream_v, ext_stream.cuda_stream)
+            self.assertEqual(ext_stream.device.index, device.idx)
 
     @unittest.skipIf(not TEST_MULTIGPU, "detected only one GPU")
     def test_external_streams_multi_device(self):
         device = torch.cuda.device(1)
         with self._get_external_stream(device) as stream_v:
             ext_stream = torch.cuda.ExternalStream(stream_v, device=device)
+            self.assertEqual(stream_v, ext_stream.cuda_stream)
+            self.assertEqual(ext_stream.device.index, device.idx)
+            ext_stream = torch.cuda.get_stream_from_external(stream_v, device)
             self.assertEqual(stream_v, ext_stream.cuda_stream)
             self.assertEqual(ext_stream.device.index, device.idx)
 
@@ -1005,22 +1011,33 @@ class TestCudaMultiGPU(TestCase):
 
     # Verifies that mem_get_info works, including when called for a different device
     def test_mem_get_info(self):
-        def _test(idx):
-            before_free_bytes, before_available_bytes = torch.cuda.mem_get_info(idx)
+        def _test(device: Union[str, int, torch.device]):
+            # Prevent PyTorch from reusing the allocated memory
+            torch.cuda.empty_cache()
+            torch.cuda.synchronize()
+            before_free_bytes, before_available_bytes = torch.cuda.mem_get_info(device)
             # increasing to 8MB to force acquiring a new block and overcome blocksize differences across platforms
-            t = torch.randn(1024 * 1024 * 8, device="cuda:" + str(idx))
+            t = torch.randn(1024 * 1024 * 8, device=device)  # noqa: F841
+
             if IS_JETSON:
                 # w/o syncing, mem_get_info will run before memory allocated has actually increased.
                 # This race condition causes consistent failure
                 torch.cuda.synchronize()
-            after_free_bytes, after_available_bytes = torch.cuda.mem_get_info(idx)
+            after_free_bytes, after_available_bytes = torch.cuda.mem_get_info(device)
 
             self.assertLess(after_free_bytes, before_free_bytes)
             self.assertEqual(before_available_bytes, after_available_bytes)
 
+        # Test calls with different device representations
         _test(0)
+        _test(torch.device("cuda"))
+        _test(torch.device("cuda:0"))
+        _test("cuda")
+        _test("cuda:0")
         if TEST_MULTIGPU:
             _test(1)
+            _test(torch.device("cuda:1"))
+            _test("cuda:1")
 
     # Test that wrap_with_cuda_memory_check successfully detects leak
     def test_cuda_memory_leak_detection(self):
@@ -1159,7 +1176,7 @@ t2.start()
 
     @unittest.skipIf(not TEST_MULTIGPU, "only one GPU detected")
     def test_grad_scaling_scale(self):
-        scaler = torch.cuda.amp.GradScaler(init_scale=2.0)
+        scaler = torch.amp.GradScaler(device="cuda", init_scale=2.0)
         t0 = torch.full((1,), 4.0, dtype=torch.float32, device="cuda:0")
         t1 = torch.full((1,), 4.0, dtype=torch.float32, device="cuda:1")
         # Create some nested iterables of tensors on different devices.
@@ -1205,8 +1222,12 @@ t2.start()
                 opt_scaling1,
             ) = _create_scaling_models_optimizers(device=dev1)
 
-            scaler = torch.cuda.amp.GradScaler(
-                init_scale=128.0, growth_factor=2.0, enabled=enabled, growth_interval=1
+            scaler = torch.amp.GradScaler(
+                device="cuda",
+                init_scale=128.0,
+                growth_factor=2.0,
+                enabled=enabled,
+                growth_interval=1,
             )
 
             def run(model0, model1, optimizer0, optimizer1, try_scaling_api):
@@ -1288,7 +1309,7 @@ t2.start()
 
         device_count = torch.cuda.device_count()
         current_alloc = [memory_allocated(idx) for idx in range(device_count)]
-        x = torch.ones(10, device="cuda:0")
+        _x = torch.ones(10, device="cuda:0")
         self.assertGreater(memory_allocated(0), current_alloc[0])
         self.assertTrue(
             all(

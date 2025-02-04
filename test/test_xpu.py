@@ -1,26 +1,35 @@
 # Owner(s): ["module: intel"]
 
+import subprocess
 import sys
 import tempfile
+import time
 import unittest
 
 import torch
 import torch.xpu._gpu_trace as gpu_trace
+from torch.testing import make_tensor
+from torch.testing._internal.autocast_test_lists import AutocastTestLists, TestAutocast
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     onlyXPU,
     OpDTypes,
     ops,
+    skipXPUIf,
 )
 from torch.testing._internal.common_methods_invocations import ops_and_refs
 from torch.testing._internal.common_utils import (
+    find_library_location,
+    IS_LINUX,
+    IS_WINDOWS,
     NoTest,
     run_tests,
     suppress_warnings,
-    TEST_WITH_UBSAN,
     TEST_XPU,
     TestCase,
 )
+from torch.utils.checkpoint import checkpoint_sequential
+
 
 if not TEST_XPU:
     print("XPU not available, skipping tests", file=sys.stderr)
@@ -105,6 +114,27 @@ class TestXpu(TestCase):
         self.assertEqual(
             device_properties.has_atomic64, device_capability["has_atomic64"]
         )
+        self.assertEqual(
+            device_properties.has_bfloat16_conversions,
+            device_capability["has_bfloat16_conversions"],
+        )
+        self.assertEqual(
+            device_properties.has_subgroup_matrix_multiply_accumulate,
+            device_capability["has_subgroup_matrix_multiply_accumulate"],
+        )
+        self.assertEqual(
+            device_properties.has_subgroup_matrix_multiply_accumulate_tensor_float32,
+            device_capability["has_subgroup_matrix_multiply_accumulate_tensor_float32"],
+        )
+        self.assertEqual(
+            device_properties.has_subgroup_2d_block_io,
+            device_capability["has_subgroup_2d_block_io"],
+        )
+        if int(torch.version.xpu) >= 20250000:
+            self.assertEqual(
+                device_properties.architecture,
+                device_capability["architecture"],
+            )
 
     def test_wrong_xpu_fork(self):
         stderr = TestCase.runWithPytorchAPIUsageStderr(
@@ -127,6 +157,47 @@ if __name__ == "__main__":
 """
         )
         self.assertRegex(stderr, "Cannot re-initialize XPU in forked subprocess.")
+
+    def test_lazy_init(self):
+        """Validate that no XPU calls are made during `import torch` call"""
+
+        def check_output(script: str) -> str:
+            return (
+                subprocess.check_output([sys.executable, "-c", script])
+                .decode("ascii")
+                .strip()
+            )
+
+        test_script = """\
+import torch
+from torch.multiprocessing import Process
+import copy
+
+def run_model(model, input):
+    input_xpu = input.clone().to('xpu')
+    model_xpu = copy.deepcopy(model).to('xpu')
+    loss_xpu = model_xpu(input_xpu).sum()
+    loss = model(input).sum()
+    torch.testing.assert_close(loss_xpu.cpu(), loss)
+
+def test_multi_process(model, input):
+    p = Process(target=run_model, args=(model, input))
+    p.start()
+    p.join()
+    assert p.exitcode == 0
+
+input = torch.rand(32, 3, 224, 224)
+model = torch.nn.Sequential(
+    torch.nn.Conv2d(3, 64, 3, stride=2),
+    torch.nn.ReLU(),
+    torch.nn.MaxPool2d(2, 2),
+)
+test_multi_process(model, input)
+test_multi_process(model, input)
+print(torch.xpu.device_count())
+"""
+        rc = check_output(test_script)
+        self.assertEqual(rc, str(torch.xpu.device_count()))
 
     def test_streams(self):
         s0 = torch.xpu.Stream()
@@ -167,6 +238,20 @@ if __name__ == "__main__":
         stream.record_event(event)
         event.synchronize()
         self.assertTrue(event.query())
+        start_event = torch.xpu.Event(enable_timing=True)
+        end_event = torch.xpu.Event(enable_timing=True)
+        stream.record_event(start_event)
+        time.sleep(0.1)
+        stream.record_event(end_event)
+        torch.xpu.synchronize()
+        if int(torch.version.xpu) >= 20250000:
+            start_event.elapsed_time(end_event)
+        else:
+            with self.assertRaisesRegex(
+                NotImplementedError,
+                "elapsed_time of XPUEvent requires PyTorch to be built with SYCL compiler version 2025.0.0 or newer.",
+            ):
+                start_event.elapsed_time(end_event)
 
     def test_generic_stream_event(self):
         stream = torch.Stream("xpu")
@@ -176,11 +261,14 @@ if __name__ == "__main__":
             device_index=stream.device_index,
             device_type=stream.device_type,
         )
+        self.assertIsInstance(xpu_stream, torch.Stream)
+        self.assertTrue(issubclass(type(xpu_stream), torch.Stream))
+        self.assertTrue(torch.Stream in type(xpu_stream).mro())
         self.assertEqual(stream.stream_id, xpu_stream.stream_id)
         self.assertNotEqual(stream.stream_id, torch.xpu.current_stream().stream_id)
 
-        event1 = torch.Event("xpu")
-        event2 = torch.Event("xpu")
+        event1 = torch.Event("xpu", enable_timing=True)
+        event2 = torch.Event("xpu", enable_timing=True)
         self.assertEqual(event1.event_id, 0)
         a = torch.randn(1000)
         b = torch.randn(1000)
@@ -192,15 +280,55 @@ if __name__ == "__main__":
         event1.synchronize()
         self.assertTrue(event1.query())
         c_xpu = a_xpu + b_xpu
+        # Here intendionly records another stream.
         event2.record()
         event2.synchronize()
         self.assertTrue(event2.query())
         self.assertNotEqual(event1.event_id, event2.event_id)
         self.assertEqual(c_xpu.cpu(), a + b)
-        with self.assertRaisesRegex(
-            NotImplementedError, "elapsedTime is not supported by XPU backend."
-        ):
+        if int(torch.version.xpu) >= 20250000:
             event1.elapsed_time(event2)
+        else:
+            with self.assertRaisesRegex(
+                NotImplementedError,
+                "elapsedTime requires PyTorch to be built with SYCL compiler version 2025.0.0 or newer.",
+            ):
+                event1.elapsed_time(event2)
+        xpu_event = torch.xpu.Event()
+        self.assertIsInstance(xpu_event, torch.Event)
+        self.assertTrue(issubclass(type(xpu_event), torch.Event))
+        self.assertTrue(torch.Event in type(xpu_event).mro())
+
+    def test_stream_compatibility(self):
+        s1 = torch.xpu.Stream()
+        s2 = torch.xpu.Stream()
+        torch.accelerator.set_stream(s1)
+        self.assertEqual(torch.accelerator.current_stream().stream_id, s1.stream_id)
+        torch.accelerator.set_stream(s2)
+        self.assertEqual(torch.accelerator.current_stream().stream_id, s2.stream_id)
+        with self.assertRaisesRegex(RuntimeError, "The device index is out of range"):
+            torch.accelerator.current_stream(torch.accelerator.device_count())
+
+    def test_stream_context_manager(self):
+        prev_stream = torch.xpu.current_stream()
+        with torch.xpu.Stream() as stream:
+            self.assertEqual(stream, torch.xpu.current_stream())
+        self.assertEqual(prev_stream, torch.xpu.current_stream())
+
+    @unittest.skipIf(not TEST_MULTIXPU, "only one GPU detected")
+    def test_multi_device_stream_context_manager(self):
+        src_device = 0
+        dst_device = 1
+        torch.xpu.set_device(src_device)
+        src_prev_stream = torch.xpu.current_stream(src_device)
+        dst_prev_stream = torch.xpu.current_stream(dst_device)
+        with torch.xpu.Stream(dst_device) as dst_stream:
+            self.assertEqual(dst_device, torch.xpu.current_device())
+            self.assertEqual(dst_stream, torch.xpu.current_stream())
+            self.assertEqual(src_prev_stream, torch.xpu.current_stream(src_device))
+        self.assertEqual(src_device, torch.xpu.current_device())
+        self.assertEqual(src_prev_stream, torch.xpu.current_stream())
+        self.assertEqual(dst_prev_stream, torch.xpu.current_stream(dst_device))
 
     def test_generator(self):
         torch.manual_seed(2024)
@@ -245,7 +373,6 @@ if __name__ == "__main__":
 
     @onlyXPU
     @ops(_xpu_computation_ops, allowed_dtypes=(torch.bool,))
-    @unittest.skipIf(TEST_WITH_UBSAN, "Test uses undefined behavior")
     def test_non_standard_bool_values(self, device, dtype, op):
         # Test boolean values other than 0x00 and 0x01 (gh-54789)
         def convert_boolean_tensors(x):
@@ -305,8 +432,199 @@ if __name__ == "__main__":
             self.assertIs(type(copy), type(original))
             self.assertEqual(copy.get_device(), original.get_device())
 
+    def test_out_of_memory(self):
+        tensor = torch.zeros(1024, device="xpu")  # noqa: F841
 
-instantiate_device_type_tests(TestXpu, globals(), only_for="xpu")
+        with self.assertRaisesRegex(RuntimeError, "Tried to allocate 800000000.00 GiB"):
+            torch.empty(1024 * 1024 * 1024 * 800000000, dtype=torch.int8, device="xpu")
+
+        with self.assertRaisesRegex(RuntimeError, "XPU out of memory."):
+            torch.empty(1024 * 1024 * 1024 * 8000000000, dtype=torch.int8, device="xpu")
+
+    def test_raises_oom(self):
+        torch.xpu.memory.empty_cache()
+        with self.assertRaises(torch.OutOfMemoryError):
+            torch.empty(1024 * 1024 * 1024 * 1024, device="xpu")
+
+    def test_memory_allocation(self):
+        torch.xpu.empty_cache()
+        prev_allocated = torch.xpu.memory_allocated()
+        prev_reserved = torch.xpu.memory_reserved()
+        self.assertGreaterEqual(prev_allocated, 0)
+        self.assertGreaterEqual(prev_reserved, 0)
+        a = torch.ones(10, device="xpu")
+        self.assertGreater(torch.xpu.memory_allocated(), prev_allocated)
+        self.assertGreaterEqual(torch.xpu.memory_reserved(), prev_reserved)
+        del a
+        self.assertEqual(torch.xpu.memory_allocated(), prev_allocated)
+        torch.xpu.empty_cache()
+        self.assertLessEqual(torch.xpu.memory_reserved(), prev_reserved)
+        torch.xpu.reset_accumulated_memory_stats()
+        # Activate 1kB memory
+        prev_active_current = torch.xpu.memory_stats()["active_bytes.all.current"]
+        a = torch.randn(256, device="xpu")
+        # Detect if the current active memory is 1kB
+        self.assertEqual(
+            torch.xpu.memory_stats()["active_bytes.all.current"],
+            1024 + prev_active_current,
+        )
+        self.assertEqual(torch.xpu.memory_stats()["active_bytes.all.freed"], 0)
+        del a
+        self.assertEqual(
+            torch.xpu.memory_stats()["active_bytes.all.current"], prev_active_current
+        )
+        self.assertEqual(torch.xpu.memory_stats()["active_bytes.all.freed"], 1024)
+
+    @unittest.skipIf(not TEST_MULTIXPU, "only one GPU detected")
+    def test_device_memory_allocated(self):
+        device_count = torch.xpu.device_count()
+        current_alloc = [torch.xpu.memory_allocated(idx) for idx in range(device_count)]
+        torch.ones(10, device="xpu:0")
+        self.assertGreater(torch.xpu.memory_allocated(0), current_alloc[0])
+        self.assertTrue(
+            all(
+                torch.xpu.memory_allocated(idx) == current_alloc[idx]
+                for idx in range(1, device_count)
+            )
+        )
+
+    @skipXPUIf(
+        int(torch.version.xpu) < 20250000,
+        "Test requires SYCL compiler version 2025.0.0 or newer.",
+    )
+    def test_mem_get_info(self):
+        torch.xpu.synchronize()
+        torch.xpu.empty_cache()
+        before_free_bytes, before_total_bytes = torch.xpu.mem_get_info()
+        # increasing to 1MB to force acquiring a new block.
+        torch.randn(1024 * 256, device="xpu")
+        torch.xpu.synchronize()
+        after_free_bytes, after_total_bytes = torch.xpu.mem_get_info()
+
+        self.assertGreaterEqual(before_free_bytes, after_free_bytes)
+        self.assertEqual(before_total_bytes, after_total_bytes)
+
+    def test_get_arch_list(self):
+        arch_list = torch.xpu.get_arch_list()
+        if not arch_list:
+            return
+        flags = torch.xpu.get_gencode_flags()
+        for arch in arch_list:
+            self.assertTrue(arch in flags)
+
+    def test_torch_version_xpu(self):
+        self.assertEqual(len(torch.version.xpu), 8)
+        compiler_version = int(torch.version.xpu)
+        self.assertGreater(compiler_version, 20230000)
+        if IS_LINUX:
+            library = find_library_location("libtorch_xpu.so")
+            cmd = f"ldd {library} | grep libsycl"
+            results = subprocess.check_output(cmd, shell=True).strip().split(b"\n")
+            # There should be only one libsycl.so or libsycl-preview.so
+            self.assertEqual(len(results), 1)
+            for result in results:
+                if b"libsycl.so" in result:
+                    self.assertGreaterEqual(compiler_version, 20250000)
+                elif b"libsycl-preview.so" in result:
+                    self.assertLess(compiler_version, 20250000)
+                else:
+                    self.fail("Unexpected libsycl library")
+
+    def test_dlpack_conversion(self):
+        x = make_tensor((5,), dtype=torch.float32, device="xpu")
+        if IS_WINDOWS and int(torch.version.xpu) < 20250000:
+            with self.assertRaisesRegex(
+                NotImplementedError,
+                "Default context is not supported on XPU by default on Windows for SYCL compiler versions earlier than 2025.0.0.",
+            ):
+                torch.to_dlpack(x)
+        else:
+            z = torch.from_dlpack(torch.to_dlpack(x))
+            z[0] = z[0] + 1.0
+            self.assertEqual(z, x)
+
+
+instantiate_device_type_tests(TestXpu, globals(), only_for="xpu", allow_xpu=True)
+
+
+class TestXpuAutocast(TestAutocast):
+    # These operators are not implemented on XPU backend and we can NOT fall back
+    # them to CPU. So we have to skip them at this moment.
+    # TODO: remove these operators from skip list when they are implemented on XPU backend.
+    # lstm_cell: The operator 'aten::_thnn_fused_lstm_cell' is not currently implemented for the XPU device
+    skip_list = ["gru_cell", "lstm_cell"]
+
+    def setUp(self):
+        super().setUp()
+        self.autocast_lists = AutocastTestLists(torch.device("xpu"))
+
+    def tearDown(self):
+        del self.autocast_lists
+        super().tearDown()
+
+    def test_autocast_torch_fp16(self):
+        for op_with_args in self.autocast_lists.torch_fp16:
+            skip_test = False
+            op, args = op_with_args[0], op_with_args[1]
+            if op in self.skip_list:
+                skip_test = True  # skip unimplemented op
+            if len(op_with_args) == 3:
+                skip_test = True  # skip cudnn op
+            if not skip_test:
+                self._run_autocast_outofplace(
+                    op, args, torch.float16, device="xpu", amp_dtype=torch.float16
+                )
+
+    def test_autocast_torch_bf16(self):
+        for op_with_args in self.autocast_lists.torch_fp16:
+            skip_test = False
+            op, args = op_with_args[0], op_with_args[1]
+            if op in self.skip_list:
+                skip_test = True  # skip unimplemented op
+            if len(op_with_args) == 3:
+                skip_test = True  # skip cudnn op
+            if not skip_test:
+                self._run_autocast_outofplace(op, args, torch.bfloat16, device="xpu")
+
+    def test_autocast_torch_need_autocast_promote(self):
+        for op, args in self.autocast_lists.torch_need_autocast_promote:
+            self._run_autocast_outofplace(
+                op, args, torch.float32, device="xpu", amp_dtype=torch.float16
+            )
+
+    def test_autocast_torch_expect_builtin_promote(self):
+        for op, args, out_type in self.autocast_lists.torch_expect_builtin_promote:
+            self._run_autocast_outofplace(
+                op,
+                args,
+                torch.float32,
+                device="xpu",
+                out_type=out_type,
+                amp_dtype=torch.float16,
+            )
+
+    def test_autocast_checkpointing(self):
+        model = torch.nn.Sequential(
+            torch.nn.Linear(8, 8), torch.nn.Linear(8, 8), torch.nn.Linear(8, 8)
+        ).xpu()
+        input = torch.rand(
+            (8, 8), device="xpu", dtype=torch.float16, requires_grad=True
+        )
+        for reentrant in (True, False):
+            with torch.autocast("xpu"):
+                output = checkpoint_sequential(model, 2, input, use_reentrant=reentrant)
+            self.assertTrue(output.requires_grad)
+            self.assertTrue(output.dtype is torch.float16)
+            output.sum().backward()
+
+    def test_xpu_autocast_dtype(self):
+        dtype = torch.get_autocast_dtype("xpu")
+        self.assertEqual(dtype, torch.float16)
+        mat0_fp32 = torch.randn((10, 10), dtype=torch.float32, device="xpu")
+        mat1_fp32 = torch.randn((10, 10), dtype=torch.float32, device="xpu")
+        with torch.amp.autocast("xpu"):
+            result = torch.mm(mat0_fp32, mat1_fp32)
+            self.assertEqual(result.dtype, torch.float16)
 
 
 class TestXpuTrace(TestCase):

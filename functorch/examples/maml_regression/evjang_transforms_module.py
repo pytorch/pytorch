@@ -7,16 +7,18 @@ import math
 import matplotlib as mpl
 import matplotlib.pyplot as plt
 import numpy as np
+
 import torch
 from functorch import grad, make_functional, vmap
 from torch import nn
 from torch.nn import functional as F
 
+
 mpl.use("Agg")
 
 
 class ThreeLayerNet(nn.Module):
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
         self.fc1 = nn.Linear(1, 40)
         self.relu1 = nn.ReLU()
@@ -95,7 +97,7 @@ for it in range(20000):
     opt.step()
 
     if it % 100 == 0:
-        print("Iteration %d -- Outer Loss: %.4f" % (it, loss2))
+        print(f"Iteration {it:d} -- Outer Loss: {loss2:.4f}")
     losses.append(loss2.detach())
 
 t_A = torch.tensor(0.0).uniform_(0.1, 0.5)

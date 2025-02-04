@@ -15,9 +15,7 @@
 /// and inspired by Half implementation from pytorch/c10/util/Half.h
 
 #include <c10/macros/Macros.h>
-#include <c10/util/TypeSafeSignMath.h>
 #include <c10/util/floating_point_utils.h>
-#include <type_traits>
 
 #if defined(__cplusplus)
 #include <cmath>
@@ -32,16 +30,7 @@
 #endif
 
 #include <climits>
-#include <cstdint>
-#include <cstring>
-#include <iosfwd>
-#include <limits>
-#include <sstream>
-#include <stdexcept>
-#include <string>
-#include <utility>
-
-#include <typeinfo> // operator typeid
+#include <iostream>
 
 namespace c10 {
 

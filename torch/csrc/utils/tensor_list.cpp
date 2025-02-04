@@ -9,8 +9,7 @@
 
 using namespace at;
 
-namespace torch {
-namespace utils {
+namespace torch::utils {
 
 static PyObject* recursive_to_list(
     const char* data,
@@ -66,5 +65,4 @@ PyObject* tensor_to_list(const Tensor& tensor) {
       tensor.numel() == 0 ? 0 : data.dtype().itemsize());
 }
 
-} // namespace utils
-} // namespace torch
+} // namespace torch::utils

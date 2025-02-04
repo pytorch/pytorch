@@ -7,32 +7,28 @@ import os
 import re
 from dataclasses import dataclass
 from functools import lru_cache
-
-from typing import Dict, List, Set, Tuple, TYPE_CHECKING, Union
+from typing import Callable, Dict, List, Optional, TYPE_CHECKING, Union
 
 from torch._inductor import config
 from torch._inductor.utils import get_benchmark_name
+from torch.utils._ordered_set import OrderedSet
+
 
 # Prevent circular import
 if TYPE_CHECKING:
-    from torch._inductor.scheduler import (
-        BaseSchedulerNode,
-        ExternKernelSchedulerNode,
-        NopKernelSchedulerNode,
-        SchedulerNode,
-    )
+    from torch._inductor.scheduler import BaseSchedulerNode
 
 # counter for tracking how many kernels have been generated
 generated_kernel_count = 0
 generated_cpp_vec_kernel_count = 0
 num_bytes_accessed = 0
-nodes_num_elem: List[
-    Tuple[
-        Union[NopKernelSchedulerNode, SchedulerNode, ExternKernelSchedulerNode],
+nodes_num_elem: list[
+    tuple[
+        BaseSchedulerNode,
         int,
     ]
 ] = []
-node_runtimes: List[Tuple[BaseSchedulerNode, float]] = []
+node_runtimes: list[tuple[BaseSchedulerNode, float]] = []
 
 # counters for tracking fusions
 ir_nodes_pre_fusion = 0
@@ -40,15 +36,24 @@ ir_nodes_pre_fusion = 0
 # counters for tracking to_dtype inserted
 cpp_to_dtype_count = 0
 
+
+@dataclasses.dataclass
+class CppOuterLoopFusedCount:
+    inner_kernel_number: int
+    local_buffer_number: int = 0
+
+
 # The length counts the number of outer loop fusions.
-# Each element counts the number of inner kernels in each outer loop fusion.
-cpp_outer_loop_fused_inner_counts: List[int] = []
+cpp_outer_loop_fused_inner_counts: list[CppOuterLoopFusedCount] = []
 
 num_comprehensive_padding = 0
+num_matches_for_scatter_upon_const_tensor = 0
+
+num_loop_reordering = 0
 
 
 # reset all counters
-def reset():
+def reset() -> None:
     global generated_kernel_count
     global generated_cpp_vec_kernel_count
     global num_bytes_accessed, nodes_num_elem
@@ -56,6 +61,8 @@ def reset():
     global cpp_to_dtype_count
     global cpp_outer_loop_fused_inner_counts
     global num_comprehensive_padding
+    global num_matches_for_scatter_upon_const_tensor
+    global num_loop_reordering
 
     generated_kernel_count = 0
     generated_cpp_vec_kernel_count = 0
@@ -66,6 +73,8 @@ def reset():
     cpp_to_dtype_count = 0
     cpp_outer_loop_fused_inner_counts.clear()
     num_comprehensive_padding = 0
+    num_matches_for_scatter_upon_const_tensor = 0
+    num_loop_reordering = 0
 
 
 @dataclass
@@ -80,9 +89,10 @@ class CachedMetricsDeltas:
     ir_nodes_pre_fusion: int
     cpp_to_dtype_count: int
     num_bytes_accessed: int
+    num_matches_for_scatter_upon_const_tensor: int
 
 
-def get_metric_fields():
+def get_metric_fields() -> List[str]:
     return [field.name for field in dataclasses.fields(CachedMetricsDeltas)]
 
 
@@ -93,7 +103,7 @@ class CachedMetricsHelper:
     apply on a cache hit.
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
         self.cached_metrics = {}
         for metric in get_metric_fields():
             self.cached_metrics[metric] = globals()[metric]
@@ -106,22 +116,24 @@ class CachedMetricsHelper:
         return CachedMetricsDeltas(**delta_metrics)
 
     @staticmethod
-    def apply_deltas(delta: CachedMetricsDeltas):
+    def apply_deltas(delta: CachedMetricsDeltas) -> None:
         for metric in get_metric_fields():
             globals()[metric] += getattr(delta, metric)
 
 
-REGISTERED_METRIC_TABLES: Dict[str, MetricTable] = {}
+REGISTERED_METRIC_TABLES: dict[str, MetricTable] = {}
 
 
 @dataclass
 class MetricTable:
     table_name: str
-    column_names: List[str]
+    column_names: list[str]
 
     num_rows_added: int = 0
 
-    def add_row(self, row_fn):
+    def add_row(
+        self, row_fn: Callable[[], Dict[str, Optional[Union[str, float]]]]
+    ) -> None:
         if self.table_name not in enabled_metric_tables():
             return
 
@@ -129,9 +141,9 @@ class MetricTable:
         assert len(self.column_names) == len(
             row_dict
         ), f"{len(self.column_names)} v.s. {len(row_dict)}"
-        assert set(self.column_names) == set(
+        assert OrderedSet(self.column_names) == OrderedSet(
             row_dict.keys()
-        ), f"{set(self.column_names)} v.s. {set(row_dict.keys())}"
+        ), f"{OrderedSet(self.column_names)} v.s. {OrderedSet(row_dict.keys())}"
 
         row = [
             get_benchmark_name(),
@@ -139,16 +151,16 @@ class MetricTable:
         row += [row_dict[column_name] for column_name in self.column_names]
         self._write_row(row)
 
-    def output_filename(self):
+    def output_filename(self) -> str:
         return f"metric_table_{self.table_name}.csv"
 
-    def write_header(self):
+    def write_header(self) -> None:
         filename = self.output_filename()
         with open(filename, "w") as fd:
             writer = csv.writer(fd, lineterminator="\n")
             writer.writerow(["model_name"] + self.column_names)
 
-    def _write_row(self, row):
+    def _write_row(self, row: List[str]) -> None:
         filename = self.output_filename()
         if self.num_rows_added == 0 and not os.path.exists(filename):
             self.write_header()
@@ -169,7 +181,7 @@ class MetricTable:
             writer.writerow(row)
 
     @staticmethod
-    def register_table(name, column_names):
+    def register_table(name: str, column_names: List[str]) -> None:
         table = MetricTable(name, column_names)
         REGISTERED_METRIC_TABLES[name] = table
 
@@ -202,13 +214,16 @@ MetricTable.register_table(
 MetricTable.register_table(
     "persistent_red_perf",
     [
-        "kernel1_name",
-        "kernel2_name",
+        "kernel0_path",
+        "kernel1_path",
+        "kernel2_path",
+        "kernel3_path",
+        "kernel0_latency",
         "kernel1_latency",
         "kernel2_latency",
+        "kernel3_latency",
         "size_hints",
         "reduction_hint",
-        "speedup",
     ],
 )
 
@@ -255,7 +270,7 @@ MetricTable.register_table(
 )
 
 
-def _parse_kernel_fn_code(kernel_module_code):
+def _parse_kernel_fn_code(kernel_module_code: str) -> str:
     """
     The kernel_module_code is the python module that contains kernel function code.
     kernel function is the proper triton kernel function annotated with
@@ -271,14 +286,14 @@ def _parse_kernel_fn_code(kernel_module_code):
     return inspect.getsource(kernel.fn.fn)
 
 
-def _parse_kernel_line_of_code(proper_kernel_fn_code):
+def _parse_kernel_line_of_code(proper_kernel_fn_code: str) -> int:
     """
     Return the line of code for the kernel excluding the decorators.
     """
     return len(proper_kernel_fn_code.splitlines())
 
 
-def _parse_size_hints(kernel_module_code, kernel_category):
+def _parse_size_hints(kernel_module_code: str, kernel_category: str) -> Optional[str]:
     if kernel_category == "foreach":
         # foreach kernel does not have size_hints
         return None
@@ -287,7 +302,9 @@ def _parse_size_hints(kernel_module_code, kernel_category):
     return m.group(1)
 
 
-def _parse_reduction_hint(kernel_category, kernel_module_code):
+def _parse_reduction_hint(
+    kernel_category: str, kernel_module_code: str
+) -> Optional[str]:
     if kernel_category not in ("reduction", "persistent_reduction"):
         return None
     m = re.search(r"reduction_hint=ReductionHint\.(\w*),", kernel_module_code)
@@ -295,11 +312,11 @@ def _parse_reduction_hint(kernel_category, kernel_module_code):
     return m.group(1)
 
 
-def _count_pattern(proper_kernel_fn_code, pattern):
+def _count_pattern(proper_kernel_fn_code: str, pattern: str) -> int:
     return proper_kernel_fn_code.count(pattern)
 
 
-def _count_args(proper_kernel_fn_code):
+def _count_args(proper_kernel_fn_code: str) -> int:
     def_line = proper_kernel_fn_code.splitlines()[0]
     assert def_line.startswith("def ")
     start_idx = def_line.index("(")
@@ -309,7 +326,7 @@ def _count_args(proper_kernel_fn_code):
     return len(comps)
 
 
-def _parse_proper_kernel_fn_code(kernel_fn_code):
+def _parse_proper_kernel_fn_code(kernel_fn_code: str) -> str:
     """
     Skip decorators.
     """
@@ -317,7 +334,7 @@ def _parse_proper_kernel_fn_code(kernel_fn_code):
     return kernel_fn_code[start_pos:]
 
 
-def _parse_numel(proper_kernel_fn_code, numel_arg_name):
+def _parse_numel(proper_kernel_fn_code: str, numel_arg_name: str) -> Optional[int]:
     m = re.search(f"{numel_arg_name} = ([\\d]+)", proper_kernel_fn_code)
     if m:
         return int(m.group(1))
@@ -325,7 +342,9 @@ def _parse_numel(proper_kernel_fn_code, numel_arg_name):
         return None
 
 
-def _parse_kernel_args_num_gb(kernel_fn_code, kernel_category):
+def _parse_kernel_args_num_gb(
+    kernel_fn_code: str, kernel_category: str
+) -> Optional[float]:
     """
     inductor meta looks like:
         inductor_meta={... 'mutated_arg_names': [], 'no_x_dim': False, 'kernel_num_gb': 2.0},
@@ -344,7 +363,9 @@ def _parse_kernel_args_num_gb(kernel_fn_code, kernel_category):
         return None
 
 
-def log_kernel_metadata(kernel_name, kernel_path, kernel_module_code):
+def log_kernel_metadata(
+    kernel_name: str, kernel_path: str, kernel_module_code: str
+) -> None:
     """
     An utility to log kernel metadata. We may parse metadata from kernel source code here.
 
@@ -386,7 +407,7 @@ def log_kernel_metadata(kernel_name, kernel_path, kernel_module_code):
     )
 
 
-def purge_old_log_files():
+def purge_old_log_files() -> None:
     """
     Purge the old log file at the beginning when the benchmark script runs.
     Should do it in the parent process rather than the child processes running
@@ -401,11 +422,13 @@ def purge_old_log_files():
             table.write_header()
 
 
-@lru_cache
-def enabled_metric_tables() -> Set[str]:
-    config_str = config.enabled_metric_tables
+def enabled_metric_tables() -> OrderedSet[str]:
+    return enabled_metric_tables_impl(config.enabled_metric_tables)
 
-    enabled = set()
+
+@lru_cache
+def enabled_metric_tables_impl(config_str: str) -> OrderedSet[str]:
+    enabled = OrderedSet[str]()
     for name in config_str.split(","):
         name = name.strip()
         if not name:
@@ -417,10 +440,10 @@ def enabled_metric_tables() -> Set[str]:
     return enabled
 
 
-def is_metric_table_enabled(name):
+def is_metric_table_enabled(name: str) -> bool:
     return name in enabled_metric_tables()
 
 
-def get_metric_table(name):
+def get_metric_table(name: str) -> MetricTable:
     assert name in REGISTERED_METRIC_TABLES, f"Metric table {name} is not defined"
     return REGISTERED_METRIC_TABLES[name]

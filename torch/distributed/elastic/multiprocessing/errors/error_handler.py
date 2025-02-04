@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# mypy: allow-untyped-defs
 
 # Copyright (c) Facebook, Inc. and its affiliates.
 # All rights reserved.
@@ -12,9 +13,10 @@ import os
 import time
 import traceback
 import warnings
-from typing import Any, Dict, Optional
+from typing import Any, Optional
 
-__all__ = ['ErrorHandler']
+
+__all__ = ["ErrorHandler"]
 
 logger = logging.getLogger(__name__)
 
@@ -84,7 +86,7 @@ class ErrorHandler:
     def override_error_code_in_rootcause_data(
         self,
         rootcause_error_file: str,
-        rootcause_error: Dict[str, Any],
+        rootcause_error: dict[str, Any],
         error_code: int = 0,
     ):
         """Modify the rootcause_error read from the file, to correctly set the exit code."""
@@ -92,13 +94,14 @@ class ErrorHandler:
             logger.warning(
                 "child error file (%s) does not have field `message`. \n"
                 "cannot override error code: %s",
-                rootcause_error_file, error_code
+                rootcause_error_file,
+                error_code,
             )
         elif isinstance(rootcause_error["message"], str):
             logger.warning(
                 "child error file (%s) has a new message format. \n"
                 "skipping error code override",
-                rootcause_error_file
+                rootcause_error_file,
             )
         else:
             rootcause_error["message"]["errorCode"] = error_code
@@ -110,11 +113,13 @@ class ErrorHandler:
             # Override error code since the child process cannot capture the error code if it
             # is terminated by signals like SIGSEGV.
             if error_code:
-                self.override_error_code_in_rootcause_data(rootcause_error_file, rootcause_error, error_code)
+                self.override_error_code_in_rootcause_data(
+                    rootcause_error_file, rootcause_error, error_code
+                )
             logger.debug(
-                "child error file (%s) contents:\n"
-                "%s",
-                rootcause_error_file, json.dumps(rootcause_error, indent=2)
+                "child error file (%s) contents:\n" "%s",
+                rootcause_error_file,
+                json.dumps(rootcause_error, indent=2),
             )
 
         my_error_file = self._get_error_file_path()
@@ -134,7 +139,8 @@ class ErrorHandler:
             logger.info("dumped error file to parent's %s", my_error_file)
         else:
             logger.error(
-                "no error file defined for parent, to copy child error file (%s)", rootcause_error_file
+                "no error file defined for parent, to copy child error file (%s)",
+                rootcause_error_file,
             )
 
     def _rm(self, my_error_file):
@@ -147,13 +153,14 @@ class ErrorHandler:
                         "%s already exists"
                         " and will be overwritten."
                         " Original contents:\n%s",
-                        my_error_file, original
+                        my_error_file,
+                        original,
                     )
                 except json.decoder.JSONDecodeError:
                     logger.warning(
                         "%s already exists"
                         " and will be overwritten."
                         " Unable to load original contents:\n",
-                        my_error_file
+                        my_error_file,
                     )
             os.remove(my_error_file)

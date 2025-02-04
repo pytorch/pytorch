@@ -22,6 +22,7 @@ from warnings import WarningMessage
 import torch._numpy as np
 from torch._numpy import arange, asarray as asanyarray, empty, float32, intp, ndarray
 
+
 __all__ = [
     "assert_equal",
     "assert_almost_equal",
@@ -260,10 +261,6 @@ def assert_equal(actual, desired, err_msg="", verbose=True):
         if isdesnan and isactnan:
             return  # both nan, so equal
 
-        # handle signed zero specially for floats
-        array_actual = np.asarray(actual)
-        array_desired = np.asarray(desired)
-
         if desired == 0 and actual == 0:
             if not signbit(desired) == signbit(actual):
                 raise AssertionError(msg)
@@ -406,7 +403,7 @@ def assert_almost_equal(actual, desired, decimal=7, err_msg="", verbose=True):
         usecomplex = False
 
     def _build_err_msg():
-        header = "Arrays are not almost equal to %d decimals" % decimal
+        header = f"Arrays are not almost equal to {decimal:d} decimals"
         return build_err_msg([actual, desired], err_msg, verbose=verbose, header=header)
 
     if usecomplex:
@@ -529,7 +526,7 @@ def assert_approx_equal(actual, desired, significant=7, err_msg="", verbose=True
     msg = build_err_msg(
         [actual, desired],
         err_msg,
-        header="Items are not equal to %d significant digits:" % significant,
+        header=f"Items are not equal to {significant:d} significant digits:",
         verbose=verbose,
     )
     try:
@@ -947,7 +944,7 @@ def assert_array_almost_equal(x, y, decimal=6, err_msg="", verbose=True):
         y,
         err_msg=err_msg,
         verbose=verbose,
-        header=("Arrays are not almost equal to %d decimals" % decimal),
+        header=f"Arrays are not almost equal to {decimal:d} decimals",
         precision=decimal,
     )
 
@@ -1210,7 +1207,7 @@ def _assert_valid_refcount(op):
     gc.disable()
     try:
         rc = sys.getrefcount(i)
-        for j in range(15):
+        for _ in range(15):
             d = op(b, c)
         assert_(sys.getrefcount(i) >= rc)
     finally:
@@ -1362,10 +1359,10 @@ def assert_array_almost_equal_nulp(x, y, nulp=1):
     ref = nulp * np.spacing(np.where(ax > ay, ax, ay))
     if not np.all(np.abs(x - y) <= ref):
         if np.iscomplexobj(x) or np.iscomplexobj(y):
-            msg = "X and Y are not equal to %d ULP" % nulp
+            msg = f"X and Y are not equal to {nulp:d} ULP"
         else:
             max_nulp = np.max(nulp_diff(x, y))
-            msg = "X and Y are not equal to %d ULP (max is %g)" % (nulp, max_nulp)
+            msg = f"X and Y are not equal to {nulp:d} ULP (max is {max_nulp:g})"
         raise AssertionError(msg)
 
 
@@ -1966,11 +1963,11 @@ class suppress_warnings:
                 self._clear_registries()
 
             self._tmp_suppressions.append(
-                (category, message, re.compile(message, re.I), module, record)
+                (category, message, re.compile(message, re.IGNORECASE), module, record)
             )
         else:
             self._suppressions.append(
-                (category, message, re.compile(message, re.I), module, record)
+                (category, message, re.compile(message, re.IGNORECASE), module, record)
             )
 
         return record
@@ -2146,7 +2143,7 @@ def _assert_no_gc_cycles_context(name=None):
     gc.disable()
     gc_debug = gc.get_debug()
     try:
-        for i in range(100):
+        for _ in range(100):
             if gc.collect() == 0:
                 break
         else:
@@ -2277,7 +2274,7 @@ def check_free_memory(free_bytes):
             )
 
         msg = (
-            f"{free_bytes/1e9} GB memory required, but environment variable "
+            f"{free_bytes / 1e9} GB memory required, but environment variable "
             f"NPY_AVAILABLE_MEM={env_value} set"
         )
     else:
@@ -2291,9 +2288,7 @@ def check_free_memory(free_bytes):
             )
             mem_free = -1
         else:
-            msg = (
-                f"{free_bytes/1e9} GB memory required, but {mem_free/1e9} GB available"
-            )
+            msg = f"{free_bytes / 1e9} GB memory required, but {mem_free / 1e9} GB available"
 
     return msg if mem_free < free_bytes else None
 
@@ -2318,7 +2313,8 @@ def _parse_size(size_str):
     }
 
     size_re = re.compile(
-        r"^\s*(\d+|\d+\.\d+)\s*({})\s*$".format("|".join(suffixes.keys())), re.I
+        r"^\s*(\d+|\d+\.\d+)\s*({})\s*$".format("|".join(suffixes.keys())),
+        re.IGNORECASE,
     )
 
     m = size_re.match(size_str.lower())
@@ -2377,7 +2373,7 @@ def _no_tracing(func):
 def _get_glibc_version():
     try:
         ver = os.confstr("CS_GNU_LIBC_VERSION").rsplit(" ")[1]
-    except Exception as inst:
+    except Exception:
         ver = "0.0"
 
     return ver

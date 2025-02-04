@@ -1,23 +1,20 @@
+# mypy: allow-untyped-defs
 """ This module contains functions and classes that alter the behavior of torch.nn.functional.scaled_dot_product_attention """
 import contextlib
+from collections.abc import Iterable
 from typing import List, Union
 from warnings import warn
 
+import torch.backends.cuda
+from torch._C import _SDPBackend as SDPBackend
 from torch.backends.cuda import (
     can_use_efficient_attention,
     can_use_flash_attention,
-    cudnn_sdp_enabled,
-    enable_cudnn_sdp,
-    enable_flash_sdp,
-    enable_math_sdp,
-    enable_mem_efficient_sdp,
-    flash_sdp_enabled,
-    math_sdp_enabled,
-    mem_efficient_sdp_enabled,
     SDPAParams,
 )
 
-__all__: List[str] = ["SDPBackend", "sdpa_kernel", "WARN_FOR_UNFUSED_KERNELS"]
+
+__all__: list[str] = ["SDPBackend", "sdpa_kernel", "WARN_FOR_UNFUSED_KERNELS"]
 
 # Note: [SDPA warnings]
 # TODO: Consider using this for sdpa regardless of subclasses
@@ -28,8 +25,6 @@ __all__: List[str] = ["SDPBackend", "sdpa_kernel", "WARN_FOR_UNFUSED_KERNELS"]
 # torch.nn.attention.WARN_FOR_UNFUSED_KERNELS = True
 WARN_FOR_UNFUSED_KERNELS = False
 
-
-from torch._C import _SDPBackend as SDPBackend
 
 # Hacks for Sphinx documentation:
 # https://stackoverflow.com/questions/38765577/overriding-sphinx-autodoc-alias-of-for-import-of-private-class
@@ -66,15 +61,44 @@ def _raise_kernel_warnings(params: SDPAParams) -> None:
             can_use_flash_attention(params, True)
 
 
+_backend_names = {
+    "cudnn": "CUDNN_ATTENTION",
+    "flash": "FLASH_ATTENTION",
+    "mem_efficient": "EFFICIENT_ATTENTION",
+    "math": "MATH",
+}
+
+
+def _backend_from_string(name: str):
+    return getattr(SDPBackend, name)
+
+
+def _cur_sdpa_kernel_backends():
+    backends: list[SDPBackend] = []
+    for name, val in _backend_names.items():
+        if getattr(torch.backends.cuda, f"{name}_sdp_enabled")():
+            backends.append(getattr(SDPBackend, val))
+    return backends
+
+
+def _sdpa_kernel(backends: Iterable[SDPBackend]):
+    for name, val in _backend_names.items():
+        enabled = getattr(SDPBackend, val) in backends
+        getattr(torch.backends.cuda, f"enable_{name}_sdp")(enabled)
+
+
 @contextlib.contextmanager
-def sdpa_kernel(backends: Union[List[SDPBackend], SDPBackend]):
+def sdpa_kernel(
+    backends: Union[list[SDPBackend], SDPBackend], set_priority: bool = False
+):
     r"""
     Context manager to select which backend to use for scaled dot product attention.
 
     .. warning:: This function is beta and subject to change.
 
     Args:
-        backend (Union[List[SDPBackend], SDPBackend]): A backend or list of backends for scaled dot product attention.
+        backends (Union[List[SDPBackend], SDPBackend]): A backend or list of backends for scaled dot product attention.
+        set_priority_order (bool=False): Whether the ordering of the backends is interpreted as their priority order.
 
     Example:
 
@@ -100,29 +124,37 @@ def sdpa_kernel(backends: Union[List[SDPBackend], SDPBackend]):
     if isinstance(backends, SDPBackend):
         backends = [backends]
 
-    backends = set(backends)
-    previous_cudnn: bool = cudnn_sdp_enabled()
-    previous_flash: bool = flash_sdp_enabled()
-    previous_mem_efficient: bool = mem_efficient_sdp_enabled()
-    previous_math: bool = math_sdp_enabled()
-    try:
-        enable_cudnn = SDPBackend.CUDNN_ATTENTION in backends
-        enable_flash = SDPBackend.FLASH_ATTENTION in backends
-        enable_mem_efficient = SDPBackend.EFFICIENT_ATTENTION in backends
-        enable_math = SDPBackend.MATH in backends
+    backends_set = set(backends)
+    user_priority = None
+    previous_priority = None
 
-        enable_cudnn_sdp(enable_cudnn)
-        enable_flash_sdp(enable_flash)
-        enable_mem_efficient_sdp(enable_mem_efficient)
-        enable_math_sdp(enable_math)
+    if set_priority:
+        user_priority = [
+            int(x) for idx, x in enumerate(backends) if backends.index(x) == idx  # type: ignore[call-overload]
+        ]
+        previous_priority = torch._C._get_sdp_priority_order()
+        for backend in previous_priority:
+            if backend not in user_priority:
+                user_priority.append(int(backend))
+    previous_backends = _cur_sdpa_kernel_backends()
+    try:
+        if set_priority:
+            torch._C._set_sdp_priority_order(user_priority)  # type: ignore[arg-type]
+        _sdpa_kernel(backends_set)
         yield {}
     finally:
-        enable_cudnn_sdp(previous_cudnn)
-        enable_flash_sdp(previous_flash)
-        enable_mem_efficient_sdp(previous_mem_efficient)
-        enable_math_sdp(previous_math)
+        _sdpa_kernel(previous_backends)
+        if set_priority:
+            torch._C._set_sdp_priority_order(previous_priority)  # type: ignore[arg-type]
+
+
+# variadic version of sdpa_kernel for dynamo to use while reconstructing
+@contextlib.contextmanager
+def _sdpa_kernel_variadic(*backends: SDPBackend):
+    with sdpa_kernel(list(backends)):
+        yield
 
 
 def _get_flash_version() -> str:
     """This returns the closest matching tag for the flash attention backend"""
-    return "2.5.6"
+    return "2.5.7"

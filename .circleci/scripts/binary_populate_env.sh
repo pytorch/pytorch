@@ -30,12 +30,10 @@ fi
 # Pick docker image
 export DOCKER_IMAGE=${DOCKER_IMAGE:-}
 if [[ -z "$DOCKER_IMAGE" ]]; then
-  if [[ "$PACKAGE_TYPE" == conda ]]; then
-    export DOCKER_IMAGE="pytorch/conda-cuda"
-  elif [[ "$DESIRED_CUDA" == cpu ]]; then
-    export DOCKER_IMAGE="pytorch/manylinux-cpu"
+  if [[ "$DESIRED_CUDA" == cpu ]]; then
+    export DOCKER_IMAGE="pytorch/manylinux:cpu"
   else
-    export DOCKER_IMAGE="pytorch/manylinux-cuda${DESIRED_CUDA:2}"
+    export DOCKER_IMAGE="pytorch/manylinux-builder:${DESIRED_CUDA:2}"
   fi
 fi
 
@@ -63,7 +61,7 @@ if tagged_version >/dev/null; then
   # Turns tag v1.6.0-rc1 -> v1.6.0
   BASE_BUILD_VERSION="$(tagged_version | sed -e 's/^v//' -e 's/-.*$//')"
 fi
-if [[ "$(uname)" == 'Darwin' ]] || [[ "$PACKAGE_TYPE" == conda ]]; then
+if [[ "$(uname)" == 'Darwin' ]]; then
   export PYTORCH_BUILD_VERSION="${BASE_BUILD_VERSION}"
 else
   export PYTORCH_BUILD_VERSION="${BASE_BUILD_VERSION}+$DESIRED_CUDA"
@@ -75,23 +73,22 @@ export PYTORCH_BUILD_NUMBER=1
 TRITON_VERSION=$(cat $PYTORCH_ROOT/.ci/docker/triton_version.txt)
 
 # Here PYTORCH_EXTRA_INSTALL_REQUIREMENTS is already set for the all the wheel builds hence append TRITON_CONSTRAINT
-if [[ "$PACKAGE_TYPE" =~ .*wheel.* &&  -n "${PYTORCH_EXTRA_INSTALL_REQUIREMENTS:-}" ]]; then
-  # Only linux Python < 3.12 are supported wheels for triton
-  TRITON_CONSTRAINT="platform_system == 'Linux' and platform_machine == 'x86_64' and python_version < '3.12'"
+TRITON_CONSTRAINT="platform_system == 'Linux' and platform_machine == 'x86_64'"
+if [[ "$PACKAGE_TYPE" =~ .*wheel.* &&  -n "${PYTORCH_EXTRA_INSTALL_REQUIREMENTS:-}" && ! "$PYTORCH_BUILD_VERSION" =~ .*xpu.* ]]; then
   TRITON_REQUIREMENT="triton==${TRITON_VERSION}; ${TRITON_CONSTRAINT}"
   if [[ -n "$PYTORCH_BUILD_VERSION" && "$PYTORCH_BUILD_VERSION" =~ .*dev.* ]]; then
-      TRITON_SHORTHASH=$(cut -c1-10 $PYTORCH_ROOT/.ci/docker/ci_commit_pins/triton.txt)
-      TRITON_REQUIREMENT="pytorch-triton==${TRITON_VERSION}+${TRITON_SHORTHASH}; ${TRITON_CONSTRAINT}"
+      TRITON_SHORTHASH=$(cut -c1-8 $PYTORCH_ROOT/.ci/docker/ci_commit_pins/triton.txt)
+      TRITON_REQUIREMENT="pytorch-triton==${TRITON_VERSION}+git${TRITON_SHORTHASH}; ${TRITON_CONSTRAINT}"
   fi
   export PYTORCH_EXTRA_INSTALL_REQUIREMENTS="${PYTORCH_EXTRA_INSTALL_REQUIREMENTS} | ${TRITON_REQUIREMENT}"
 fi
 
 # Set triton via PYTORCH_EXTRA_INSTALL_REQUIREMENTS for triton rocm package
-if [[ "$PACKAGE_TYPE" =~ .*wheel.* && -n "$PYTORCH_BUILD_VERSION" && "$PYTORCH_BUILD_VERSION" =~ .*rocm.* && $(uname) == "Linux" && "$DESIRED_PYTHON" != "3.12" ]]; then
-    TRITON_REQUIREMENT="pytorch-triton-rocm==${TRITON_VERSION}"
+if [[ "$PACKAGE_TYPE" =~ .*wheel.* && -n "$PYTORCH_BUILD_VERSION" && "$PYTORCH_BUILD_VERSION" =~ .*rocm.* && $(uname) == "Linux" ]]; then
+    TRITON_REQUIREMENT="pytorch-triton-rocm==${TRITON_VERSION}; ${TRITON_CONSTRAINT}"
     if [[ -n "$PYTORCH_BUILD_VERSION" && "$PYTORCH_BUILD_VERSION" =~ .*dev.* ]]; then
-        TRITON_SHORTHASH=$(cut -c1-10 $PYTORCH_ROOT/.ci/docker/ci_commit_pins/triton-rocm.txt)
-        TRITON_REQUIREMENT="pytorch-triton-rocm==${TRITON_VERSION}+${TRITON_SHORTHASH}"
+        TRITON_SHORTHASH=$(cut -c1-8 $PYTORCH_ROOT/.ci/docker/ci_commit_pins/triton.txt)
+        TRITON_REQUIREMENT="pytorch-triton-rocm==${TRITON_VERSION}+git${TRITON_SHORTHASH}; ${TRITON_CONSTRAINT}"
     fi
     if [[ -z "${PYTORCH_EXTRA_INSTALL_REQUIREMENTS:-}" ]]; then
         export PYTORCH_EXTRA_INSTALL_REQUIREMENTS="${TRITON_REQUIREMENT}"
@@ -100,30 +97,24 @@ if [[ "$PACKAGE_TYPE" =~ .*wheel.* && -n "$PYTORCH_BUILD_VERSION" && "$PYTORCH_B
     fi
 fi
 
-JAVA_HOME=
-BUILD_JNI=OFF
-if [[ "$PACKAGE_TYPE" == libtorch ]]; then
-  POSSIBLE_JAVA_HOMES=()
-  POSSIBLE_JAVA_HOMES+=(/usr/local)
-  POSSIBLE_JAVA_HOMES+=(/usr/lib/jvm/java-8-openjdk-amd64)
-  POSSIBLE_JAVA_HOMES+=(/Library/Java/JavaVirtualMachines/*.jdk/Contents/Home)
-  # Add the Windows-specific JNI path
-  POSSIBLE_JAVA_HOMES+=("$PWD/pytorch/.circleci/windows-jni/")
-  for JH in "${POSSIBLE_JAVA_HOMES[@]}" ; do
-    if [[ -e "$JH/include/jni.h" ]] ; then
-      # Skip if we're not on Windows but haven't found a JAVA_HOME
-      if [[ "$JH" == "$PWD/pytorch/.circleci/windows-jni/" && "$OSTYPE" != "msys" ]] ; then
-        break
-      fi
-      echo "Found jni.h under $JH"
-      JAVA_HOME="$JH"
-      BUILD_JNI=ON
-      break
+# Set triton via PYTORCH_EXTRA_INSTALL_REQUIREMENTS for triton xpu package
+if [[ "$PACKAGE_TYPE" =~ .*wheel.* && -n "$PYTORCH_BUILD_VERSION" && "$PYTORCH_BUILD_VERSION" =~ .*xpu.* && $(uname) == "Linux" ]]; then
+    TRITON_REQUIREMENT="pytorch-triton-xpu==${TRITON_VERSION}; ${TRITON_CONSTRAINT}"
+    if [[ -n "$PYTORCH_BUILD_VERSION" && "$PYTORCH_BUILD_VERSION" =~ .*dev.* ]]; then
+        TRITON_SHORTHASH=$(cut -c1-8 $PYTORCH_ROOT/.ci/docker/ci_commit_pins/triton-xpu.txt)
+        TRITON_REQUIREMENT="pytorch-triton-xpu==${TRITON_VERSION}+git${TRITON_SHORTHASH}; ${TRITON_CONSTRAINT}"
     fi
-  done
-  if [ -z "$JAVA_HOME" ]; then
-    echo "Did not find jni.h"
-  fi
+    if [[ -z "${PYTORCH_EXTRA_INSTALL_REQUIREMENTS:-}" ]]; then
+        export PYTORCH_EXTRA_INSTALL_REQUIREMENTS="${TRITON_REQUIREMENT}"
+    else
+        export PYTORCH_EXTRA_INSTALL_REQUIREMENTS="${PYTORCH_EXTRA_INSTALL_REQUIREMENTS} | ${TRITON_REQUIREMENT}"
+    fi
+fi
+
+USE_GLOO_WITH_OPENSSL="ON"
+if [[ "$GPU_ARCH_TYPE" =~ .*aarch64.* ]]; then
+  USE_GLOO_WITH_OPENSSL="OFF"
+  USE_GOLD_LINKER="OFF"
 fi
 
 cat >"$envfile" <<EOL
@@ -136,6 +127,7 @@ export DESIRED_PYTHON="${DESIRED_PYTHON:-}"
 export DESIRED_CUDA="$DESIRED_CUDA"
 export LIBTORCH_VARIANT="${LIBTORCH_VARIANT:-}"
 export BUILD_PYTHONLESS="${BUILD_PYTHONLESS:-}"
+export USE_SPLIT_BUILD="${USE_SPLIT_BUILD:-}"
 if [[ "${OSTYPE}" == "msys" ]]; then
   export LIBTORCH_CONFIG="${LIBTORCH_CONFIG:-}"
   if [[ "${LIBTORCH_CONFIG:-}" == 'debug' ]]; then
@@ -155,18 +147,14 @@ export PYTORCH_EXTRA_INSTALL_REQUIREMENTS="${PYTORCH_EXTRA_INSTALL_REQUIREMENTS:
 
 # TODO: We don't need this anymore IIUC
 export TORCH_PACKAGE_NAME='torch'
-export TORCH_CONDA_BUILD_FOLDER='pytorch-nightly'
-export ANACONDA_USER='pytorch'
 
 export USE_FBGEMM=1
-export JAVA_HOME=$JAVA_HOME
-export BUILD_JNI=$BUILD_JNI
 export PIP_UPLOAD_FOLDER="$PIP_UPLOAD_FOLDER"
 export DOCKER_IMAGE="$DOCKER_IMAGE"
 
 
 export USE_GOLD_LINKER="${USE_GOLD_LINKER}"
-export USE_GLOO_WITH_OPENSSL="ON"
+export USE_GLOO_WITH_OPENSSL="${USE_GLOO_WITH_OPENSSL}"
 # =================== The above code will be executed inside Docker container ===================
 EOL
 

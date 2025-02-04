@@ -3,6 +3,7 @@
 import os
 
 import run_test
+
 from torch.testing._internal.common_utils import run_tests, TestCase
 
 
@@ -118,13 +119,6 @@ class DeterminationTest(TestCase):
                 "test_utils",
                 "test_determination",
             ],
-        )
-
-    def test_caffe2_file(self):
-        """Caffe2 files trigger dependent tests"""
-        self.assertEqual(self.determined_tests(["caffe2/python/brew_test.py"]), [])
-        self.assertEqual(
-            self.determined_tests(["caffe2/python/context.py"]), self.TESTS
         )
 
     def test_new_folder(self):

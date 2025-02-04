@@ -3,9 +3,11 @@
 import functools
 import itertools
 import os
-import pathlib
-from typing import Sequence
+from collections.abc import Sequence
+from pathlib import Path
 from unittest import skip
+
+import yaml
 
 import torch
 import torch._lazy
@@ -13,15 +15,14 @@ import torch._lazy.config
 import torch._lazy.ir_cache
 import torch._lazy.metrics
 import torch._lazy.ts_backend
-import yaml
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     ops,
 )
 from torch.testing._internal.common_methods_invocations import op_db
-
 from torch.testing._internal.common_utils import run_tests, TestCase
 from torch.testing._internal.jit_utils import JitTestCase
+
 
 torch._lazy.ts_backend.init()
 
@@ -35,7 +36,7 @@ def remove_suffixes(l):
 
 
 def init_lists():
-    path_to_script = pathlib.Path(os.path.abspath(os.path.dirname(__file__)))
+    path_to_script = Path(os.path.abspath(os.path.dirname(__file__)))
     TS_NATIVE_FUNCTIONS_PATH = (
         path_to_script.parent.parent / "aten/src/ATen/native/ts_native_functions.yaml"
     )
@@ -158,7 +159,7 @@ class TestLazyTensor(JitTestCase):
         def foo(x, *, mark_step):
             y = x.view(2, 2)
             y.add_(1)
-            z = x + x
+            z = x + x  # noqa: F841
 
             if mark_step:
                 torch._lazy.mark_step()
@@ -199,7 +200,7 @@ class TestLazyOpInfo(TestCase):
         allowed_dtypes=(torch.float,),
     )
     def test_dispatched_to_lazy(self, device, dtype, op):
-        def get_name(op):
+        def get_name(op):  # noqa: F841
             l = [op.name]
             if op.variant_test_name != "":
                 l.append(op.variant_test_name)
@@ -214,7 +215,7 @@ class TestLazyOpInfo(TestCase):
         torch._lazy.wait_device_ops()
         torch._lazy.metrics.reset()
 
-        r = op(*args, **kwargs)
+        op(*args, **kwargs)
         torch._lazy.mark_step()
         torch._lazy.wait_device_ops()
         prefix = "aten" if op.name in FALLBACK_LIST else "lazy"

@@ -1,31 +1,31 @@
 import copy
 import operator
+from typing import Any, Callable, Optional
+
 import torch
-from typing import Any, Callable, Optional, Tuple
 from torch.ao.quantization import (
-    default_weight_observer,
     default_weight_fake_quant,
+    default_weight_observer,
     FakeQuantizeBase,
     QConfig,
     QConfigMapping,
 )
 from torch.ao.quantization.backend_config import BackendConfig
 from torch.ao.quantization.observer import _PartialWrapper
-from torch.ao.quantization.quantize_fx import (
-    convert_to_reference_fx,
-    prepare_fx,
-)
+from torch.ao.quantization.quantize_fx import convert_to_reference_fx, prepare_fx
+
 
 # TODO: move all LSTM util functions from fx/utils.py to this file
 def _get_lstm_with_individually_observed_parts(
     float_lstm: torch.nn.LSTM,
-    example_inputs: Tuple[Any, ...],
+    example_inputs: tuple[Any, ...],
     backend_config: Optional[BackendConfig] = None,
     linear_output_obs_ctr: Optional[_PartialWrapper] = None,
     sigmoid_obs_ctr: Optional[_PartialWrapper] = None,
     tanh_obs_ctr: Optional[_PartialWrapper] = None,
     cell_state_obs_ctr: Optional[_PartialWrapper] = None,
     hidden_state_obs_ctr: Optional[_PartialWrapper] = None,
+    split_gates: bool = False,
 ) -> torch.ao.nn.quantizable.LSTM:
     """
     Return an observed `torch.ao.nn.quantizable.LSTM` created from a `torch.nn.LSTM`
@@ -57,6 +57,7 @@ def _get_lstm_with_individually_observed_parts(
         A `torch.ao.nn.quantizable.LSTM` with the specified observers or fake quantizes
         assigned to the inner ops.
     """
+
     def make_qconfig(obs_ctr: _PartialWrapper) -> QConfig:
         """
         Make a QConfig with fixed qparams observers or fake quantizes.
@@ -68,15 +69,27 @@ def _get_lstm_with_individually_observed_parts(
         return QConfig(activation=obs_ctr, weight=weight)
 
     quantizable_lstm = torch.ao.nn.quantizable.LSTM(
-        float_lstm.input_size, float_lstm.hidden_size, float_lstm.num_layers, float_lstm.bias,
-        float_lstm.batch_first, float_lstm.dropout, float_lstm.bidirectional)
+        float_lstm.input_size,
+        float_lstm.hidden_size,
+        float_lstm.num_layers,
+        float_lstm.bias,
+        float_lstm.batch_first,
+        float_lstm.dropout,
+        float_lstm.bidirectional,
+        split_gates=split_gates,
+    )
     quantizable_lstm.qconfig = float_lstm.qconfig
 
     for idx in range(float_lstm.num_layers):
-        quantizable_lstm.layers[idx] = torch.ao.nn.quantizable.modules.rnn._LSTMLayer.from_float(float_lstm,
-                                                                                                 idx,
-                                                                                                 float_lstm.qconfig,
-                                                                                                 batch_first=False)
+        quantizable_lstm.layers[
+            idx
+        ] = torch.ao.nn.quantizable.modules.rnn._LSTMLayer.from_float(
+            float_lstm,
+            idx,
+            float_lstm.qconfig,
+            batch_first=False,
+            split_gates=split_gates,
+        )
 
     # Build QConfigMapping for the LSTM cell
     # Note: FloatFunctional qconfigs will be configured separately below
@@ -98,17 +111,29 @@ def _get_lstm_with_individually_observed_parts(
         # to configure these ops in FX graph mode quantization today. This is because
         # the FloatFunctional modules simply disappear from the graph after tracing.
         # In the future, we should rewrite quantizable LSTM without FloatFunctionals.
-        op_index_to_activation_post_process_ctr = {
-            (torch.add, 0): linear_output_obs_ctr,  # gates.add
-            (torch.mul, 0): cell_state_obs_ctr,  # fgate_cx.mul
-            (torch.mul, 1): cell_state_obs_ctr,  # igate_cgate.mul
-            (torch.add, 1): cell_state_obs_ctr,  # fgate_cx_igate_cgate.add
-            (torch.mul, 2): hidden_state_obs_ctr,  # ogate_cy.mul
-        }
+        if not split_gates:
+            op_index_to_activation_post_process_ctr = {
+                (torch.add, 0): linear_output_obs_ctr,  # gates.add
+                (torch.mul, 0): cell_state_obs_ctr,  # fgate_cx.mul
+                (torch.mul, 1): cell_state_obs_ctr,  # igate_cgate.mul
+                (torch.add, 1): cell_state_obs_ctr,  # fgate_cx_igate_cgate.add
+                (torch.mul, 2): hidden_state_obs_ctr,  # ogate_cy.mul
+            }
+        else:
+            op_index_to_activation_post_process_ctr = {
+                (torch.add, 0): linear_output_obs_ctr,  # gates.add (input)
+                (torch.add, 1): linear_output_obs_ctr,  # gates.add (forget)
+                (torch.add, 2): linear_output_obs_ctr,  # gates.add (cell)
+                (torch.add, 3): linear_output_obs_ctr,  # gates.add (output)
+                (torch.mul, 0): cell_state_obs_ctr,  # fgate_cx.mul
+                (torch.mul, 1): cell_state_obs_ctr,  # igate_cgate.mul
+                (torch.add, 4): cell_state_obs_ctr,  # fgate_cx_igate_cgate.add
+                (torch.mul, 2): hidden_state_obs_ctr,  # ogate_cy.mul
+            }
         add_count = 0
         mul_count = 0
         for node in cell.graph.nodes:
-            op_index: Optional[Tuple[Callable, int]] = None  # e.g. (torch.add, 1)
+            op_index: Optional[tuple[Callable, int]] = None  # e.g. (torch.add, 1)
             if node.target == torch.add:
                 op_index = (torch.add, add_count)
                 add_count += 1
@@ -122,11 +147,16 @@ def _get_lstm_with_individually_observed_parts(
                 continue
             assert len(node.users) == 1
             activation_post_process_name = next(iter(node.users.keys())).name
-            activation_post_process_ctr = op_index_to_activation_post_process_ctr[op_index]
+            activation_post_process_ctr = op_index_to_activation_post_process_ctr[
+                op_index
+            ]
             if activation_post_process_ctr is not None:
-                setattr(cell, activation_post_process_name, activation_post_process_ctr())
+                setattr(
+                    cell, activation_post_process_name, activation_post_process_ctr()
+                )
         layer.layer_fw.cell = cell
     return quantizable_lstm
+
 
 def _get_reference_quantized_lstm_module(
     observed_lstm: torch.ao.nn.quantizable.LSTM,
@@ -148,9 +178,14 @@ def _get_reference_quantized_lstm_module(
         A reference `torch.ao.nn.quantized.LSTM` module.
     """
     quantized_lstm = torch.ao.nn.quantized.LSTM(
-        observed_lstm.input_size, observed_lstm.hidden_size, observed_lstm.num_layers,
-        observed_lstm.bias, observed_lstm.batch_first, observed_lstm.dropout,
-        observed_lstm.bidirectional)
+        observed_lstm.input_size,
+        observed_lstm.hidden_size,
+        observed_lstm.num_layers,
+        observed_lstm.bias,
+        observed_lstm.batch_first,
+        observed_lstm.dropout,
+        observed_lstm.bidirectional,
+    )
 
     for i, layer in enumerate(quantized_lstm.layers):
         cell = copy.deepcopy(observed_lstm.layers.get_submodule(str(i)).layer_fw.cell)  # type: ignore[union-attr]
@@ -168,7 +203,9 @@ def _get_reference_quantized_lstm_module(
             if node.target == torch.quantize_per_tensor:
                 arg = node.args[0]
                 # Remove quantize(x), quantize(hidden[0]), and quantize(hidden[1])
-                if arg.target == "x" or (arg.target == operator.getitem and arg.args[0].target == "hidden"):
+                if arg.target == "x" or (
+                    arg.target == operator.getitem and arg.args[0].target == "hidden"
+                ):
                     with cell.graph.inserting_before(node):
                         node.replace_all_uses_with(arg)
                         cell.graph.erase_node(node)

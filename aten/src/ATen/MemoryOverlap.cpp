@@ -12,14 +12,30 @@ MemOverlap has_internal_overlap(const TensorBase& tensor) {
 MemOverlap has_internal_overlap(TensorImpl* t) {
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(t->layout() == kStrided);
 
+  auto sizes = t->sym_sizes();
+  auto strides = t->sym_strides();
+
+  // When we have unbacked symint strides, is_non_overlapping_and_dense
+  // often results in guard on data dependent errors. For now
+  // let us bail early if there are unbacked symint strides.
+  for (const auto i : c10::irange(strides.size())) {
+    if (!strides[i].has_hint()) {
+      return MemOverlap::TooHard;
+    }
+  }
+
   if (t->is_non_overlapping_and_dense()) {
     return MemOverlap::No;
   }
 
-  auto strides = t->sym_strides();
-  auto sizes = t->sym_sizes();
   for (const auto i : c10::irange(strides.size())) {
-    if (strides[i] == 0 && sizes[i] > 1) {
+    // NB: The size oblivious test is written very carefully here.  When
+    // unbacked SymInts are involved, we should try to conservatively report
+    // if memory overlap /could/ happen under some setting of unbacked
+    // SymInts.  Thus, if I have u0 size, we should assume that this has > 1
+    // elements (first expression), but if I have a u0 stride, I should NOT
+    // assume that it is not zero (second expression)
+    if (TORCH_GUARD_SIZE_OBLIVIOUS(sizes[i].sym_gt(1)) && strides[i] == 0) {
       return MemOverlap::Yes;
     }
   }
@@ -55,7 +71,7 @@ MemOverlapStatus get_overlap_status(const TensorImpl* a, const TensorImpl* b) {
   // same pointer across multiple storages there are many
   // similar situations (e.g., storage().data() == storage().data()+1)
   // which we will miss.
-  auto a_storage = a->unsafe_storage();
+  const auto& a_storage = a->unsafe_storage();
   if (a_storage && a_storage.is_alias_of(b->unsafe_storage())) {
     const auto a_begin = static_cast<const char*>(a->data());
     const auto a_end = a_begin + a->numel() * a->itemsize();

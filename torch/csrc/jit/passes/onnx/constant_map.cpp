@@ -7,12 +7,7 @@
 #include <string>
 #include <unordered_map>
 
-namespace torch {
-namespace jit {
-
-namespace onnx {
-using namespace ::c10::onnx;
-}
+namespace torch::jit {
 
 // Meyer’s Singleton for C++ 14
 ConstantValueMap& ConstantValueMap::getInstance() {
@@ -34,17 +29,16 @@ bool ConstantValueMap::HasRank(const std::string& tensorName) {
 
 std::optional<size_t> ConstantValueMap::GetRank(const std::string& tensorName) {
   if (!HasRank(tensorName)) {
-    return c10::nullopt;
+    return std::nullopt;
   }
   return ConstantValueMap::getInstance().rankMap[tensorName];
 }
 
 void ConstantValueMap::SetAllGraphInputsStatic(bool all_static) {
-  ConstantValueMap::getInstance().allGraphInputsStatic =
-      c10::make_optional(all_static);
+  ConstantValueMap::getInstance().allGraphInputsStatic = all_static;
 }
 
-c10::optional<bool> ConstantValueMap::GetAllGraphInputsStatic() {
+std::optional<bool> ConstantValueMap::GetAllGraphInputsStatic() {
   return ConstantValueMap::getInstance().allGraphInputsStatic;
 }
 
@@ -71,7 +65,7 @@ bool ConstantValueMap::HasShape(const std::string& tensorName) {
 std::optional<c10::SymbolicShape> ConstantValueMap::GetShape(
     const std::string& tensorName) {
   if (!HasShape(tensorName)) {
-    return c10::nullopt;
+    return std::nullopt;
   }
   return ConstantValueMap::getInstance().shapeMap[tensorName];
 }
@@ -90,7 +84,7 @@ bool ConstantValueMap::HasValue(const std::string& tensorName) {
 std::optional<at::Tensor> ConstantValueMap::GetValue(
     const std::string& tensorName) {
   if (!HasValue(tensorName)) {
-    return c10::nullopt;
+    return std::nullopt;
   }
   return ConstantValueMap::getInstance().tensorValueMap[tensorName];
 }
@@ -121,7 +115,7 @@ std::optional<std::vector<int64_t>> ConstantValueMap::GetShapeInto1DInt64Vector(
       return shape_value;
     }
   }
-  return c10::nullopt;
+  return std::nullopt;
 }
 
 std::optional<std::vector<int64_t>> ConstantValueMap::
@@ -152,7 +146,7 @@ std::optional<std::vector<int64_t>> ConstantValueMap::
       }
     }
   }
-  return c10::nullopt;
+  return std::nullopt;
 }
 
 // accessor<int64_t, 1> for 1DInt64 case.
@@ -183,7 +177,7 @@ bool ConstantValueMap::HasTypeReliable(const std::string& tensorName) {
 std::optional<bool> ConstantValueMap::GetTypeReliable(
     const std::string& tensorName) {
   if (!HasTypeReliable(tensorName)) {
-    return c10::nullopt;
+    return std::nullopt;
   }
   return ConstantValueMap::getInstance().typeReliableMap[tensorName];
 }
@@ -202,7 +196,7 @@ bool ConstantValueMap::HasUseInferredType(const std::string& tensorName) {
 std::optional<bool> ConstantValueMap::GetUseInferredType(
     const std::string& tensorName) {
   if (!HasUseInferredType(tensorName)) {
-    return c10::nullopt;
+    return std::nullopt;
   }
   return ConstantValueMap::getInstance().useInferredTypeMap[tensorName];
 }
@@ -221,7 +215,7 @@ bool ConstantValueMap::HasShapeValue(const std::string& tensorName) {
 std::optional<c10::SymbolicShape> ConstantValueMap::GetShapeValue(
     const std::string& tensorName) {
   if (!HasShapeValue(tensorName)) {
-    return c10::nullopt;
+    return std::nullopt;
   }
   return ConstantValueMap::getInstance().shapeValueMap[tensorName];
 }
@@ -284,13 +278,13 @@ void ConstantValueMap::ClearMaps() {
   ConstantValueMap::getInstance().inferredShapeData.clear();
   ConstantValueMap::getInstance().symbolDimMap.clear();
   ConstantValueMap::getInstance().dimSymbolMap.clear();
-  ConstantValueMap::getInstance().allGraphInputsStatic = c10::nullopt;
+  ConstantValueMap::getInstance().allGraphInputsStatic = std::nullopt;
   ConstantValueMap::getInstance().allGraphInputsReliableComputed = false;
 }
 
 // For debug only.
 void ConstantValueMap::PrintMaps() {
-  std::cout << "Rank/Shape Map:" << std::endl;
+  std::cout << "Rank/Shape Map:" << '\n';
   for (const auto& x : ConstantValueMap::getInstance().rankMap) {
     std::stringstream ss;
     if (ConstantValueMap::getInstance().shapeMap.find(x.first) !=
@@ -308,45 +302,45 @@ void ConstantValueMap::PrintMaps() {
       }
     }
     ss << " (rank = " << x.second << ")";
-    std::cout << "node " << x.first << ": " << ss.str() << std::endl;
+    std::cout << "node " << x.first << ": " << ss.str() << '\n';
   }
-  std::cout << std::endl;
-  std::cout << "Value Map:" << std::endl;
+  std::cout << '\n';
+  std::cout << "Value Map:" << '\n';
   for (const auto& x : ConstantValueMap::getInstance().tensorValueMap) {
-    std::cout << "node " << x.first << ": " << x.second << std::endl;
+    std::cout << "node " << x.first << ": " << x.second << '\n';
   }
-  std::cout << std::endl;
-  std::cout << "TypeReliable Map:" << std::endl;
+  std::cout << '\n';
+  std::cout << "TypeReliable Map:" << '\n';
   size_t count = 0;
   for (const auto& x : ConstantValueMap::getInstance().typeReliableMap) {
     std::cout << "(node " << x.first << ": " << x.second << "), ";
     count++;
     if (count % 10 == 0) {
-      std::cout << std::endl;
+      std::cout << '\n';
     }
   }
-  std::cout << std::endl;
-  std::cout << "UseInferredType Map:" << std::endl;
+  std::cout << '\n';
+  std::cout << "UseInferredType Map:" << '\n';
   count = 0;
   for (const auto& x : ConstantValueMap::getInstance().useInferredTypeMap) {
     std::cout << "(node " << x.first << ": " << x.second << "), ";
     count++;
     if (count % 10 == 0) {
-      std::cout << std::endl;
+      std::cout << '\n';
     }
   }
-  std::cout << std::endl;
-  std::cout << "ShapeValue Map:" << std::endl;
+  std::cout << '\n';
+  std::cout << "ShapeValue Map:" << '\n';
   count = 0;
   for (const auto& x : ConstantValueMap::getInstance().shapeValueMap) {
     std::cout << "(node " << x.first << ": " << x.second << "), ";
     count++;
     if (count % 10 == 0) {
-      std::cout << std::endl;
+      std::cout << '\n';
     }
   }
-  std::cout << std::endl;
-  std::cout << "InferredShape Map:" << std::endl;
+  std::cout << '\n';
+  std::cout << "InferredShape Map:" << '\n';
   count = 0;
   for (const auto& x : ConstantValueMap::getInstance().inferredShapeData) {
     std::cout << "(node " << x.first << ": ";
@@ -360,29 +354,28 @@ void ConstantValueMap::PrintMaps() {
     std::cout << "), ";
     count++;
     if (count % 10 == 0) {
-      std::cout << std::endl;
+      std::cout << '\n';
     }
   }
-  std::cout << std::endl;
-  std::cout << "SymbolDim Map:" << std::endl;
+  std::cout << '\n';
+  std::cout << "SymbolDim Map:" << '\n';
   count = 0;
   for (const auto& x : ConstantValueMap::getInstance().symbolDimMap) {
     std::cout << "(" << x.first << ": " << x.second << "), ";
     count++;
     if (count % 10 == 0) {
-      std::cout << std::endl;
+      std::cout << '\n';
     }
   }
-  std::cout << "DimSymbol Map:" << std::endl;
+  std::cout << "DimSymbol Map:" << '\n';
   count = 0;
   for (const auto& x : ConstantValueMap::getInstance().dimSymbolMap) {
     std::cout << "(" << x.first << ": " << x.second << "), ";
     count++;
     if (count % 10 == 0) {
-      std::cout << std::endl;
+      std::cout << '\n';
     }
   }
 }
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

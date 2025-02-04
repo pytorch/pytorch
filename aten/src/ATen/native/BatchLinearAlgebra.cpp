@@ -21,6 +21,7 @@
 #include <ATen/Functions.h>
 #include <ATen/NativeFunctions.h>
 #else
+#include <ATen/ops/_spsolve.h>
 #include <ATen/ops/_cholesky_solve_helper.h>
 #include <ATen/ops/_cholesky_solve_helper_native.h>
 #include <ATen/ops/_linalg_check_errors.h>
@@ -131,10 +132,45 @@ extern "C" void dgetrf_(int *m, int *n, double *a, int *lda, int *ipiv, int *inf
 extern "C" void sgetrf_(int *m, int *n, float *a, int *lda, int *ipiv, int *info);
 
 // potrs
+#if defined(_WIN32) && defined(_M_ARM64)
+
+// The functions zpotrs, cpotrs, dpotrs, and spotrs are not directly available in LAPACKE on Windows on ARM,
+// so we need to have wrapper functions to call them.
+// The issue on ARM platform can be found below:
+// https://community.arm.com/support-forums/f/high-performance-computing-forum/56512/unable-to-use-lapack---potrs-functions
+
+#define LAPACK_COL_MAJOR 102
+#define LAPACK_ROW_MAJOR 101
+
+extern "C" int LAPACKE_zpotrs(int matrix_layout, char uplo, int n, int nrhs, const std::complex<double> *a, int lda, std::complex<double> *b, int ldb);
+extern "C" int LAPACKE_cpotrs(int matrix_layout, char uplo, int n, int nrhs, const std::complex<float> *a, int lda, std::complex<float> *b, int ldb);
+extern "C" int LAPACKE_dpotrs(int matrix_layout, char uplo, int n, int nrhs, const double *a, int lda, double *b, int ldb);
+extern "C" int LAPACKE_spotrs(int matrix_layout, char uplo, int n, int nrhs, const float *a, int lda, float *b, int ldb);
+
+static inline void zpotrs_(char *uplo, int *n, int *nrhs, std::complex<double> *a, int *lda, std::complex<double> *b, int *ldb, int *info) {
+  *info = LAPACKE_zpotrs(LAPACK_COL_MAJOR, *uplo, *n, *nrhs, a, *lda, b, *ldb);
+}
+
+static inline void cpotrs_(char *uplo, int *n, int *nrhs, std::complex<float> *a, int *lda, std::complex<float> *b, int *ldb, int *info) {
+  *info = LAPACKE_cpotrs(LAPACK_COL_MAJOR, *uplo, *n, *nrhs, a, *lda, b, *ldb);
+}
+
+static inline void dpotrs_(char *uplo, int *n, int *nrhs, double *a, int *lda, double *b, int *ldb, int *info){
+  *info = LAPACKE_dpotrs(LAPACK_COL_MAJOR, *uplo, *n, *nrhs, a, *lda, b, *ldb);
+}
+
+static inline void spotrs_(char *uplo, int *n, int *nrhs, float *a, int *lda, float *b, int *ldb, int *info) {
+  *info = LAPACKE_spotrs(LAPACK_COL_MAJOR, *uplo, *n, *nrhs, a, *lda, b, *ldb);
+}
+
+#else
+
 extern "C" void zpotrs_(char *uplo, int *n, int *nrhs, std::complex<double> *a, int *lda, std::complex<double> *b, int *ldb, int *info);
 extern "C" void cpotrs_(char *uplo, int *n, int *nrhs, std::complex<float> *a, int *lda, std::complex<float> *b, int *ldb, int *info);
 extern "C" void dpotrs_(char *uplo, int *n, int *nrhs, double *a, int *lda, double *b, int *ldb, int *info);
 extern "C" void spotrs_(char *uplo, int *n, int *nrhs, float *a, int *lda, float *b, int *ldb, int *info);
+
+#endif
 
 // potrf
 extern "C" void zpotrf_(char *uplo, int *n, std::complex<double> *a, int *lda, int *info);
@@ -283,11 +319,39 @@ extern "C" void dorgqr_(int *m, int *n, int *k, double *a, int *lda, double *tau
 extern "C" void sorgqr_(int *m, int *n, int *k, float *a, int *lda, float *tau, float *work, int *lwork, int *info);
 
 // ormqr
+#if defined(_WIN32) && defined(_M_ARM64)
+
+// The functions zunmqr, cunmqr, dormqr, and sormqr are not directly available in LAPACKE on Windows on ARM,
+// so we need to have wrapper functions to call them.
+// The issue on ARM platform can be found below:
+// https://community.arm.com/support-forums/f/high-performance-computing-forum/56512/unable-to-use-lapack---potrs-functions
+
+extern "C" int LAPACKE_zunmqr_work(int matrix_layout, char side, char trans, int m, int n, int k, const std::complex<double> *a, int lda, const std::complex<double> *tau, std::complex<double> *c, int ldc, std::complex<double> *work, int lwork);
+extern "C" int LAPACKE_cunmqr_work(int matrix_layout, char side, char trans, int m, int n, int k, const std::complex<float> *a, int lda, const std::complex<float> *tau, std::complex<float> *c, int ldc, std::complex<float> *work, int lwork);
+extern "C" int LAPACKE_dormqr_work(int matrix_layout, char side, char trans, int m, int n, int k, const double *a, int lda, const double *tau, double *c, int ldc, double *work, int lwork);
+extern "C" int LAPACKE_sormqr_work(int matrix_layout, char side, char trans, int m, int n, int k, const float *a, int lda, const float *tau, float *c, int ldc, float *work, int lwork);
+
+static inline void zunmqr_(char *side, char *trans, int *m, int *n, int *k, std::complex<double> *a, int *lda, std::complex<double> *tau, std::complex<double> *c, int *ldc, std::complex<double> *work, int *lwork, int *info) {
+    *info = LAPACKE_zunmqr_work(LAPACK_COL_MAJOR, *side, *trans, *m, *n, *k, a, *lda, tau, c, *ldc, work, *lwork);
+}
+
+static inline void cunmqr_(char *side, char *trans, int *m, int *n, int *k, std::complex<float> *a, int *lda, std::complex<float> *tau, std::complex<float> *c, int *ldc, std::complex<float> *work, int *lwork, int *info) {
+    *info = LAPACKE_cunmqr_work(LAPACK_COL_MAJOR, *side, *trans, *m, *n, *k, a, *lda, tau, c, *ldc, work, *lwork);
+}
+
+static inline void dormqr_(char *side, char *trans, int *m, int *n, int *k, double *a, int *lda, double *tau, double *c, int *ldc, double *work, int *lwork, int *info) {
+    *info = LAPACKE_dormqr_work(LAPACK_COL_MAJOR, *side, *trans, *m, *n, *k, a, *lda, tau, c, *ldc, work, *lwork);
+}
+
+static inline void sormqr_(char *side, char *trans, int *m, int *n, int *k, float *a, int *lda, float *tau, float *c, int *ldc, float *work, int *lwork, int *info) {
+    *info = LAPACKE_sormqr_work(LAPACK_COL_MAJOR, *side, *trans, *m, *n, *k, a, *lda, tau, c, *ldc, work, *lwork);
+}
+#else
 extern "C" void zunmqr_(char *side, char *trans, int *m, int *n, int *k, std::complex<double> *a, int *lda, std::complex<double> *tau, std::complex<double> *c, int *ldc, std::complex<double> *work, int *lwork, int *info);
 extern "C" void cunmqr_(char *side, char *trans, int *m, int *n, int *k, std::complex<float> *a, int *lda, std::complex<float> *tau, std::complex<float> *c, int *ldc, std::complex<float> *work, int *lwork, int *info);
 extern "C" void dormqr_(char *side, char *trans, int *m, int *n, int *k, double *a, int *lda, double *tau, double *c, int *ldc, double *work, int *lwork, int *info);
 extern "C" void sormqr_(char *side, char *trans, int *m, int *n, int *k, float *a, int *lda, float *tau, float *c, int *ldc, float *work, int *lwork, int *info);
-
+#endif
 // syevd
 extern "C" void zheevd_(char *jobz, char *uplo, int *n, std::complex<double> *a, int *lda, double *w, std::complex<double> *work, int *lwork, double *rwork, int *lrwork, int *iwork, int *liwork, int *info);
 extern "C" void cheevd_(char *jobz, char *uplo, int *n, std::complex<float> *a, int *lda, float *w, std::complex<float> *work, int *lwork, float *rwork, int *lrwork, int *iwork, int *liwork, int *info);
@@ -468,7 +532,7 @@ TORCH_META_FUNC(linalg_ldl_solve)
     auto [B_broadcast_size, _] = at::native::_linalg_broadcast_batch_dims(B, LD);
 
   // prefer column major strides
-  auto result_strides = at::native::batched_matrix_contiguous_strides(B_broadcast_size, /*column_major=*/true);
+  auto result_strides = at::native::batched_matrix_contiguous_strides(B_broadcast_size, /*f_contig=*/true);
   set_output_strided(0, B_broadcast_size, result_strides, B.options(), {});
 }
 
@@ -494,6 +558,8 @@ TORCH_META_FUNC(triangular_solve)(const Tensor& self, const Tensor& A, bool uppe
     // no broadcasting for non-strided layout
     set_output_raw_strided(0, self.sizes(), {}, self.options(), {}); // make row major strides for Sparse BLAS
     set_output_raw_strided(1, {0}, {}, self.options(), {}); // return 0-sized tensor
+  } else if (A.layout() == Layout::SparseCsc) {
+      TORCH_CHECK_VALUE(false, "triangular_solve: unsupported sparse layout.");
   } else {
     TORCH_INTERNAL_ASSERT(false, "triangular_solve: Got an unexpected layout.");
   }
@@ -524,7 +590,7 @@ TORCH_META_FUNC(_linalg_solve_ex)(const Tensor& A,
   TORCH_CHECK(left || !vector_case, "linalg.solve: Vector broadcasting of the left hand side is not supported for left=False. In this case linalg.solve is equivalent to B / A.squeeze(-1)");
   auto result_shape = vector_case ? IntArrayRef(B_broad_shape.data(), B_broad_shape.size() - 1)
                                   : B_broad_shape;
-  auto result_strides = at::native::batched_matrix_contiguous_strides(result_shape, /*column_major=*/left);
+  auto result_strides = at::native::batched_matrix_contiguous_strides(result_shape, /*f_contig=*/left);
 
   set_output_strided(0, result_shape, result_strides, B.options(), {});
 
@@ -561,8 +627,8 @@ TORCH_META_FUNC(linalg_lu_factor_ex)(const Tensor& A, bool pivot, bool check_err
   const auto m = sizes.cend()[-2];
   const auto n = sizes.cend()[-1];
 
-  // make column major strides for BLAS
-  auto LU_strides = at::native::batched_matrix_contiguous_strides(sizes, /*f-contig*=*/true);
+  // row major for MPS device, otherwise column major strides for BLAS
+  auto LU_strides = at::native::batched_matrix_contiguous_strides(sizes, /*f-contig*=*/A.device().type() != at::kMPS);
   set_output_strided(0, sizes, LU_strides, A.options(), {});
 
   // Set sizes to the size of pivots
@@ -603,7 +669,7 @@ TORCH_META_FUNC(linalg_lu_solve)(const Tensor& LU,
 
   // This one checks that B can be broadcasted to the shape of A
   auto B_broadcast_size = std::get<0>(at::native::_linalg_broadcast_batch_dims(B, LU));
-  auto result_strides = at::native::batched_matrix_contiguous_strides(B_broadcast_size, /*column_major=*/left);
+  auto result_strides = at::native::batched_matrix_contiguous_strides(B_broadcast_size, /*f_contig=*/left);
 
   set_output_strided(0, B_broadcast_size, result_strides, B.options(), {});
 }
@@ -626,7 +692,7 @@ TORCH_META_FUNC(linalg_cholesky_ex)(const Tensor& A,
 }
 
 TORCH_META_FUNC(linalg_qr)(const Tensor& A,
-                           c10::string_view mode) {
+                           std::string_view mode) {
   at::native::checkIsMatrix(A, "linalg.qr");
   at::native::checkFloatingOrComplex(A, "linalg.qr");
   auto [compute_q, reduced_mode] = at::native::_parse_qr_mode(mode);
@@ -656,7 +722,7 @@ TORCH_META_FUNC(linalg_qr)(const Tensor& A,
 TORCH_META_FUNC(_linalg_svd)(const Tensor& A,
                              bool full_matrices,
                              bool compute_uv,
-                             std::optional<c10::string_view> driver) {
+                             std::optional<std::string_view> driver) {
   at::native::checkIsMatrix(A, "linalg.svd");
   at::native::checkFloatingOrComplex(A, "linalg.svd");
 
@@ -728,7 +794,7 @@ TORCH_META_FUNC(lu_unpack)(const Tensor& LU, const Tensor& pivots, bool unpack_d
 }
 
 TORCH_META_FUNC(_linalg_eigh)(const Tensor& A,
-                              c10::string_view uplo,
+                              std::string_view uplo,
                               bool compute_v) {
   at::native::squareCheckInputs(A, "linalg.eigh");
   at::native::checkUplo(uplo);
@@ -1494,7 +1560,7 @@ template<> void blasTriangularSolve<float>(char side, char uplo, char trans, cha
 
 void _linalg_check_errors(
     const Tensor& infos,
-    const c10::string_view api_name,
+    const std::string_view api_name,
     bool is_matrix) {
   TORCH_INTERNAL_ASSERT(infos.scalar_type() == kInt);
   TORCH_INTERNAL_ASSERT(infos.is_contiguous());
@@ -1508,7 +1574,7 @@ void _linalg_check_errors(
     return;
   }
 
-  int32_t info;
+  int32_t info = 0;
   std::string batch_str;
   if (is_matrix) {
     info = infos.item<int>();
@@ -1584,6 +1650,8 @@ static bool _may_require_fw_or_bw_grad(const Tensor& input) {
           || isTensorSubclassLike(input));
 }
 
+// NOLINTBEGIN(cppcoreguidelines-pro-type-const-cast)
+
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ linalg.inv ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 TORCH_IMPL_FUNC(linalg_inv_ex_out)(const Tensor& A, bool check_errors, const Tensor& result, const Tensor& info) {
   // Fill result with the identity
@@ -1621,7 +1689,7 @@ Tensor inverse(const Tensor& A) {
 template<typename scalar_t>
 static void apply_cholesky_solve(Tensor& b, Tensor& A, bool upper, Tensor& infos) {
 #if !AT_BUILD_WITH_LAPACK()
-  AT_ERROR("cholesky_solve: LAPACK library not found in compilation");
+  TORCH_CHECK(false, "cholesky_solve: LAPACK library not found in compilation");
 #else
   char uplo = upper ? 'U' : 'L';
 
@@ -1635,11 +1703,10 @@ static void apply_cholesky_solve(Tensor& b, Tensor& A, bool upper, Tensor& infos
   auto ldab = std::max<int64_t>(1, n);
   auto nrhs = b.size(-1);
 
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  int info;
   for (const auto i : c10::irange(batch_size)) {
     const scalar_t* A_working_ptr = &A_data[i * A_mat_stride];
     scalar_t* b_working_ptr = &b_data[i * b_mat_stride];
+    int info = 0;
     lapackCholeskySolve<scalar_t>(uplo, n, nrhs, const_cast<scalar_t*>(A_working_ptr), ldab, b_working_ptr, ldab, &info);
     infos_data[i] = info;
     if (info != 0) {
@@ -1934,6 +2001,9 @@ Tensor& linalg_solve_out(const Tensor& A,
 Tensor linalg_solve(const Tensor& A,
                     const Tensor& B,
                     bool left) {
+  if (A.layout() == kSparseCsr) {
+    return at::_spsolve(A, B, left);
+  }
   auto [result, info] = at::linalg_solve_ex(A, B, left);
   at::_linalg_check_errors(info, "torch.linalg.solve", A.dim() == 2);
   return result;
@@ -2028,7 +2098,7 @@ TORCH_IMPL_FUNC(linalg_lu_out)(const Tensor& A,
                     const_cast<Tensor&>(U),
                     use_L ? L : U,
                     pivots,
-                    /*unpack_lu=*/true,
+                    /*unpack_data=*/true,
                     /*unpack_pivots=*/pivot);
 }
 
@@ -2079,7 +2149,7 @@ TORCH_IMPL_FUNC(lu_unpack_out)(const Tensor& LU,
       .set_check_mem_overlap(false)
       .check_all_same_dtype(false)
       .resize_outputs(false)
-      .declare_static_shape(pivots.sizes(), /*squash_dim=*/pivots.dim() - 1)
+      .declare_static_shape(pivots.sizes(), /*squash_dims=*/pivots.dim() - 1)
       .add_output(perm)
       .add_owned_const_input(pivots.contiguous())
       .build();
@@ -2120,7 +2190,7 @@ TORCH_IMPL_FUNC(linalg_lu_solve_out)(const Tensor& LU,
   // Make LU / pivots F-contiguous
   auto pivots_ = pivots.expect_contiguous();
   auto LU_ = at::native::borrow_else_clone(
-      LU.mT().is_contiguous(), LU, LU, /*row_major=*/false);
+      LU.mT().is_contiguous(), LU, LU, /*contig=*/false);
 
   const auto trans = !adjoint ? TransposeType::NoTranspose :
                      LU.is_complex() ? TransposeType::ConjTranspose
@@ -2356,7 +2426,7 @@ std::tuple<Tensor, Tensor> geqrf(const Tensor& input) {
   For further details, please see the LAPACK documentation for GEQRF and ORGQR.
 */
 TORCH_IMPL_FUNC(linalg_qr_out)(const Tensor& A,
-                               c10::string_view mode,
+                               std::string_view mode,
                                const Tensor & Q,
                                const Tensor & R) {
   auto m = A.size(-2);
@@ -2732,7 +2802,7 @@ DEFINE_DISPATCH(linalg_eigh_stub);
 */
 
 TORCH_IMPL_FUNC(_linalg_eigh_out)(const Tensor& A,
-                                  c10::string_view uplo,
+                                  std::string_view uplo,
                                   bool compute_v,
                                   const Tensor& L,
                                   const Tensor& V) {
@@ -2757,22 +2827,22 @@ TORCH_IMPL_FUNC(_linalg_eigh_out)(const Tensor& A,
   at::_linalg_check_errors(info, "linalg.eigh", /*is_matrix*/A.dim() == 2);
 }
 
-std::tuple<Tensor, Tensor> linalg_eigh(const Tensor& A, c10::string_view uplo) {
+std::tuple<Tensor, Tensor> linalg_eigh(const Tensor& A, std::string_view uplo) {
   // TODO (Good intro task) Implement linalg_eigh_ex_out
   return at::_linalg_eigh(A, uplo, /*compute_v*/true);
 }
 
-std::tuple<Tensor&, Tensor&> linalg_eigh_out(const Tensor& A, c10::string_view uplo, Tensor& L, Tensor& V) {
+std::tuple<Tensor&, Tensor&> linalg_eigh_out(const Tensor& A, std::string_view uplo, Tensor& L, Tensor& V) {
   return at::_linalg_eigh_out(L, V, A, uplo, /*compute_v=*/true);
 }
 
 
-Tensor linalg_eigvalsh(const Tensor& A, c10::string_view uplo) {
+Tensor linalg_eigvalsh(const Tensor& A, std::string_view uplo) {
   return std::get<0>(at::_linalg_eigh(A, uplo,
                      /*compute_v=*/_may_require_fw_or_bw_grad(A)));
 }
 
-Tensor& linalg_eigvalsh_out(const Tensor& A, c10::string_view uplo, Tensor& L) {
+Tensor& linalg_eigvalsh_out(const Tensor& A, std::string_view uplo, Tensor& L) {
   auto V = at::empty({0}, A.options());
   at::_linalg_eigh_out(L, V, A, uplo, /*compute_v=*/false);
   return L;
@@ -3128,7 +3198,7 @@ DEFINE_DISPATCH(svd_stub);
 TORCH_IMPL_FUNC(_linalg_svd_out)(const Tensor& A,
                                  const bool full_matrices,
                                  const bool compute_uv,
-                                 std::optional<c10::string_view> driver,
+                                 std::optional<std::string_view> driver,
                                  const Tensor & U,
                                  const Tensor & S,
                                  const Tensor & Vh) {
@@ -3177,7 +3247,7 @@ TORCH_IMPL_FUNC(_linalg_svd_out)(const Tensor& A,
 std::tuple<Tensor&, Tensor&, Tensor&>
 linalg_svd_out(const Tensor& A,
                bool full_matrices,
-               std::optional<c10::string_view> driver,
+               std::optional<std::string_view> driver,
                Tensor & U,
                Tensor & S,
                Tensor & Vh) {
@@ -3196,12 +3266,12 @@ linalg_svd_out(const Tensor& A,
 }
 
 std::tuple<Tensor, Tensor, Tensor> linalg_svd(const Tensor& A, bool full_matrices,
-    std::optional<c10::string_view> driver) {
+    std::optional<std::string_view> driver) {
   return at::_linalg_svd(A, full_matrices, /*compute_uv=*/true, driver);
 }
 
 // See note in linalg_svd for why this function does not have an _ex variant
-Tensor& linalg_svdvals_out(const Tensor& A, std::optional<c10::string_view> driver, Tensor & S) {
+Tensor& linalg_svdvals_out(const Tensor& A, std::optional<std::string_view> driver, Tensor & S) {
   // Dummies
   auto U = at::empty({0}, A.options());
   auto Vh = at::empty({0}, A.options());
@@ -3209,7 +3279,7 @@ Tensor& linalg_svdvals_out(const Tensor& A, std::optional<c10::string_view> driv
   return S;
 }
 
-Tensor linalg_svdvals(const Tensor& A, std::optional<c10::string_view> driver) {
+Tensor linalg_svdvals(const Tensor& A, std::optional<std::string_view> driver) {
   return std::get<1>(at::_linalg_svd(A, /*full_matrices=*/false,
                      /*compute_uv=*/_may_require_fw_or_bw_grad(A),
                      /*driver=*/driver));
@@ -3469,7 +3539,7 @@ static void linalg_lstsq_out_info(
   }
 }
 
-static std::string get_default_lstsq_driver(std::optional<c10::string_view> driver, const Tensor& input) {
+static std::string get_default_lstsq_driver(std::optional<std::string_view> driver, const Tensor& input) {
   // if `driver` is empty, we set driver_str to "gels" if working with CUDA tensors,
   // otherwise to "gelsy" driver.
   std::string driver_str;
@@ -3479,7 +3549,7 @@ static std::string get_default_lstsq_driver(std::optional<c10::string_view> driv
     // convert `driver_str` to lower case inplace.
     std::transform(driver_str.begin(), driver_str.end(), driver_str.begin(),
       [](unsigned char c) { return std::tolower(c); });
-    static std::unordered_set<c10::string_view> allowed_drivers = {
+    static std::unordered_set<std::string_view> allowed_drivers = {
       "gels", "gelsy", "gelsd", "gelss"
     };
     if (input.device() == at::kCPU) {
@@ -3506,7 +3576,7 @@ std::tuple<Tensor&, Tensor&, Tensor&, Tensor&> linalg_lstsq_out(
     const Tensor& input,
     const Tensor& other,
     std::optional<double> rcond,
-    std::optional<c10::string_view> driver,
+    std::optional<std::string_view> driver,
     Tensor& solution,
     Tensor& residuals,
     Tensor& rank,
@@ -3524,10 +3594,22 @@ std::tuple<Tensor&, Tensor&, Tensor&, Tensor&> linalg_lstsq_out(
   TORCH_CHECK(
       0 <= dim_diff && dim_diff <= 1,
       "torch.linalg.lstsq: input.dim() must be greater or equal to other.dim() and (input.dim() - other.dim()) <= 1");
-  Tensor other_2d = dim_diff ? other.unsqueeze(-1) : other;
+
+  // now check whether the provided output tensors can be used directly
+
+  // Two types of 'other' tensors are supported:
+  // - 1-dimensional (1D) tensor or batch of 1D tensors (vector case)
+  // - 2-dimensional (2D) tensor or batch of 2D tensors (matrix case)
+  // original torch.lstsq supported only the matrix case, while NumPy works for both cases
+  // for the batched input we need to be able to distinguish them
+  // auto expected_batched_rhs_shape = IntArrayRef(input.sizes().data(), input.dim() - 1); // input.shape[:-1]
+  // bool vector_case = other.dim() == 1 || (input.dim() - 1 == other.dim() && other.sizes().equals(expected_batched_rhs_shape));
+
+  bool vector_case = linalg_solve_is_vector_rhs(input, other);
+  Tensor other_2d = vector_case ? other.unsqueeze(-1) : other;
   TORCH_CHECK(
       input.size(-2) == other_2d.size(-2),
-      dim_diff ? "torch.linalg.lstsq: input.size(-2) should match other.size(-1)"
+      vector_case ? "torch.linalg.lstsq: input.size(-2) should match other.size(-1)"
                : "torch.linalg.lstsq: input.size(-2) should match other.size(-2)");
 
   checkSameDevice("torch.linalg.lstsq", other, input, "other");
@@ -3557,20 +3639,9 @@ std::tuple<Tensor&, Tensor&, Tensor&, Tensor&> linalg_lstsq_out(
   // set default rcond value
   double rcond_value = rcond.has_value()
     ? rcond.value()
-    : _get_epsilon(c10::toRealValueType(input.scalar_type())) * std::max<int64_t>(input.size(-2), input.size(-1));
+    : _get_epsilon(c10::toRealValueType(input.scalar_type())) * static_cast<double>(std::max<int64_t>(input.size(-2), input.size(-1)));
 
   auto infos = at::zeros({std::max<int64_t>(1, batchCount(input))}, input.options().dtype(kInt));
-
-  // now check whether the provided output tensors can be used directly
-
-  // Two types of 'other' tensors are supported:
-  // - 1-dimensional (1D) tensor or batch of 1D tensors (vector case)
-  // - 2-dimensional (2D) tensor or batch of 2D tensors (matrix case)
-  // original torch.lstsq supported only the matrix case, while NumPy works for both cases
-  // for the batched input we need to be able to distinguish them
-  // auto expected_batched_rhs_shape = IntArrayRef(input.sizes().data(), input.dim() - 1); // input.shape[:-1]
-  // bool vector_case = other.dim() == 1 || (input.dim() - 1 == other.dim() && other.sizes().equals(expected_batched_rhs_shape));
-  bool vector_case = linalg_solve_is_vector_rhs(input, other);
 
   // provided output tensor can be used directly if:
   // 1. the shape matches the expected shape
@@ -3669,7 +3740,7 @@ std::tuple<Tensor&, Tensor&, Tensor&, Tensor&> linalg_lstsq_out(
 std::tuple<Tensor, Tensor, Tensor, Tensor> linalg_lstsq(
     const Tensor& input, const Tensor& other,
     std::optional<double> rcond,
-    std::optional<c10::string_view> driver) {
+    std::optional<std::string_view> driver) {
   Tensor solution = at::empty({0}, input.options());
   Tensor residuals = at::empty({0}, input.options().dtype(toRealValueType(input.scalar_type())));
   Tensor rank = at::empty({0}, input.options().dtype(at::kLong));
@@ -3698,8 +3769,8 @@ TORCH_IMPL_FUNC(linalg_ldl_factor_ex_out)
   // https://github.com/pytorch/pytorch/pull/69828#issuecomment-1015143819
   // We can revisit this decision later and remove upper completely
   // also from low level functions or add it to the public API.
-  bool upper = false;
-  if (upper) {
+  constexpr bool upper = false;
+  if constexpr (upper) {
     at::triu_out(const_cast<Tensor&>(LD), self);
   } else {
     at::tril_out(const_cast<Tensor&>(LD), self);
@@ -3753,7 +3824,7 @@ TORCH_IMPL_FUNC(linalg_ldl_solve_out)
   auto pivots_ = pivots.expect_contiguous();
 
   auto LD_ = at::native::borrow_else_clone(
-      LD.mT().is_contiguous(), LD, LD, /*row_major=*/false);
+      LD.mT().is_contiguous(), LD, LD, /*contig=*/false);
   result.copy_(B);
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(batchCount(result) == batchCount(result));
 
@@ -4025,4 +4096,5 @@ Tensor linalg_vander_symint(
   auto ones =  result.new_ones_symint(shape);
   return at::cat({std::move(ones), std::move(result)}, /*dim=*/ -1);
 }
+// NOLINTEND(cppcoreguidelines-pro-type-const-cast)
 }  // namespace at::native

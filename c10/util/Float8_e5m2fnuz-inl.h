@@ -270,6 +270,11 @@ class numeric_limits<c10::Float8_e5m2fnuz> {
   static constexpr c10::Float8_e5m2fnuz infinity() {
     return c10::Float8_e5m2fnuz(0x80, c10::Float8_e5m2fnuz::from_bits());
   }
+  // TODO(future): we are mapping neg_zero to both inf and NaN, this is
+  // surprising and we should figure out what to do about it.
+  static constexpr c10::Float8_e5m2fnuz quiet_NaN() {
+    return c10::Float8_e5m2fnuz(0x80, c10::Float8_e5m2fnuz::from_bits());
+  }
   static constexpr c10::Float8_e5m2fnuz denorm_min() {
     return c10::Float8_e5m2fnuz(0x01, c10::Float8_e5m2fnuz::from_bits());
   }

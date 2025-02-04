@@ -17,8 +17,7 @@
 #include <utility>
 #include <vector>
 
-namespace torch {
-namespace autograd {
+namespace torch::autograd {
 
 namespace {
 
@@ -90,7 +89,9 @@ struct WarnNotImplemented : public Node {
   size_t num_outputs;
 };
 
+// NOLINTNEXTLINE(cppcoreguidelines-rvalue-reference-param-not-moved)
 auto WarnNotImplemented::apply(variable_list&& inputs) -> variable_list {
+  auto inputsLocal = std::move(inputs);
   warnAutogradNotImplemented(op_name);
   std::vector<at::Tensor> output(num_outputs);
   return output;
@@ -335,8 +336,8 @@ static void autogradNotImplementedFallbackImpl(
 
 #ifndef NDEBUG
   // See NOTE [ TensorImpl and Storage Pointer Sanity Checks ]
-  auto stack_args_copy =
-      std::vector<c10::IValue>(stack->begin() + stack_start, stack->end());
+  auto stack_args_copy = std::vector<c10::IValue>(
+      stack->begin() + static_cast<int64_t>(stack_start), stack->end());
   std::vector<c10::intrusive_ptr<c10::TensorImpl>> impl_saved;
   impl_saved.reserve(num_tensor_inputs);
   std::vector<std::optional<c10::Storage>> storage_saved;
@@ -345,8 +346,8 @@ static void autogradNotImplementedFallbackImpl(
       [&](size_t idx, size_t _, const at::Tensor& t) {
         storage_saved.push_back(
             t.has_storage() ? std::optional<c10::Storage>(t.storage())
-                            : c10::nullopt);
-        impl_saved.push_back(t.getIntrusivePtr());
+                            : std::nullopt);
+        impl_saved.emplace_back(t.getIntrusivePtr());
       },
       &stack_args_copy,
       0,
@@ -364,11 +365,14 @@ static void autogradNotImplementedFallbackImpl(
 #ifndef NDEBUG
   _foreach_tensor(
       [&](size_t idx_tensor, size_t _, const at::Tensor& t) {
-        if (storage_saved.at(idx_tensor).has_value())
+        // Skip next two for chunk_cat, see
+        // https://github.com/pytorch/pytorch/issues/130073
+        if (storage_saved.at(idx_tensor).has_value() &&
+            op_name != "aten::_chunk_cat")
           TORCH_INTERNAL_ASSERT(
               storage_saved.at(idx_tensor).value().is_alias_of(t.storage()),
               op_name);
-        if (impl_saved.at(idx_tensor))
+        if (impl_saved.at(idx_tensor) && op_name != "aten::_chunk_cat")
           TORCH_INTERNAL_ASSERT(
               impl_saved.at(idx_tensor) == t.getIntrusivePtr(), op_name);
       },
@@ -379,8 +383,15 @@ static void autogradNotImplementedFallbackImpl(
       [&](size_t idx_tensor, size_t idx_ret, const at::Tensor& t) {
         if (at::impl::tensor_has_dispatch(t) ||
             at::impl::dispatch_mode_enabled() ||
-            // NJT offsets are expected to be reused; skip use_count() check
-            op_name == "aten::_nested_get_offsets")
+            // NJT components are expected to be reused; skip use_count() check
+            op_name.rfind("aten::_nested_get", 0) == 0)
+          return;
+        // Skip test_parallel_materialize
+        // For details see https://github.com/pytorch/pytorch/issues/130073
+        if (op_name == "aten::_test_parallel_materialize" ||
+            op_name == "aten::_test_optional_intlist" ||
+            op_name == "aten::_test_optional_filled_intlist" ||
+            op_name == "aten::_test_optional_floatlist")
           return;
         if (!is_inplace_output[idx_ret])
           TORCH_INTERNAL_ASSERT(
@@ -392,8 +403,13 @@ static void autogradNotImplementedFallbackImpl(
         // where each element represents the norm of corresponding input Tensor,
         // here I want to return the same number of Tensors as the input
         // TensorList, see https://github.com/pytorch/pytorch/issues/93940
+        // Skip native_channel_shuffle as well as transformer_encoder
+        // For details see https://github.com/pytorch/pytorch/issues/130073
         if (!is_aliased_output[idx_ret] && t.has_storage() &&
-            op_name != "aten::_foreach_norm")
+            op_name != "aten::_foreach_norm" &&
+            op_name != "aten::_transformer_encoder_layer_fwd" &&
+            op_name != "aten::native_channel_shuffle" &&
+            op_name != "aten::_sparse_semi_structured_tile")
           TORCH_INTERNAL_ASSERT(t.storage().use_count() == 1);
       },
       stack,
@@ -413,15 +429,27 @@ static void autogradNotImplementedFallbackImpl(
     if (aliased_input.has_storage()) {
       if (aliased_output_iv.isTensor()) {
         const at::Tensor& aliased_output = aliased_input_iv.toTensor();
-        TORCH_INTERNAL_ASSERT(
-            aliased_input.storage().is_alias_of(aliased_output.storage()),
-            op_name);
-      } else {
-        const auto aliased_output_vec = aliased_output_iv.toTensorVector();
-        for (const auto& aliased_output : aliased_output_vec) {
+        // for now, skip asserts for subclasses
+        // TODO: Fix the aliasing situation involving subclasses
+        if (!at::impl::dispatch_mode_enabled() &&
+            !at::impl::tensor_has_dispatch(aliased_input) &&
+            !at::impl::tensor_has_dispatch(aliased_output)) {
           TORCH_INTERNAL_ASSERT(
               aliased_input.storage().is_alias_of(aliased_output.storage()),
               op_name);
+        }
+      } else {
+        const auto aliased_output_vec = aliased_output_iv.toTensorVector();
+        for (const auto& aliased_output : aliased_output_vec) {
+          // for now, skip asserts for subclasses
+          // TODO: Fix the aliasing situation involving subclasses
+          if (!at::impl::dispatch_mode_enabled() &&
+              !at::impl::tensor_has_dispatch(aliased_input) &&
+              !at::impl::tensor_has_dispatch(aliased_output)) {
+            TORCH_INTERNAL_ASSERT(
+                aliased_input.storage().is_alias_of(aliased_output.storage()),
+                op_name);
+          }
         }
       }
     }
@@ -604,5 +632,4 @@ torch::CppFunction autogradNotImplementedInplaceOrViewFallback() {
       &autogradNotImplementedInplaceOrViewFallbackImpl>();
 }
 
-} // namespace autograd
-} // namespace torch
+} // namespace torch::autograd

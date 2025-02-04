@@ -6,67 +6,69 @@
 #include <c10/util/env.h>
 #include <c10/util/irange.h>
 
+#include <utility>
+
 namespace at::native {
 
 using conv_depthwise2d_backward_fn = std::tuple<at::Tensor,at::Tensor>(*)(
     const at::Tensor&, const at::Tensor&, const at::Tensor&, at::IntArrayRef, at::IntArrayRef,
     at::IntArrayRef, at::IntArrayRef, std::array<bool, 2>);
-DECLARE_DISPATCH(conv_depthwise2d_backward_fn, conv_depthwise2d_backward_stub);
+DECLARE_DISPATCH(conv_depthwise2d_backward_fn, conv_depthwise2d_backward_stub)
 using conv_depthwise3d_backward_fn = std::tuple<at::Tensor,at::Tensor,at::Tensor>(*)(
     const at::Tensor&, const at::Tensor&, const at::Tensor&, at::IntArrayRef, at::IntArrayRef,
     at::IntArrayRef, at::IntArrayRef, std::array<bool, 3>);
-DECLARE_DISPATCH(conv_depthwise3d_backward_fn, conv_depthwise3d_backward_stub);
+DECLARE_DISPATCH(conv_depthwise3d_backward_fn, conv_depthwise3d_backward_stub)
 using cudnn_convolution_backward_fn = std::tuple<at::Tensor,at::Tensor>(*)(
     const at::Tensor&, const at::Tensor&, const at::Tensor&, at::IntArrayRef, at::IntArrayRef,
     at::IntArrayRef, int64_t, bool, bool, bool, std::array<bool,2>);
-DECLARE_DISPATCH(cudnn_convolution_backward_fn, cudnn_convolution_backward_stub);
+DECLARE_DISPATCH(cudnn_convolution_backward_fn, cudnn_convolution_backward_stub)
 using mps_convolution_backward_fn = std::tuple<at::Tensor,at::Tensor,at::Tensor>(*)(
     const at::Tensor&, const at::Tensor&, const at::Tensor&, at::IntArrayRef, at::IntArrayRef,
     at::IntArrayRef, int64_t, std::array<bool,3>);
-DECLARE_DISPATCH(mps_convolution_backward_fn, mps_convolution_backward_stub);
+DECLARE_DISPATCH(mps_convolution_backward_fn, mps_convolution_backward_stub)
 using cudnn_convolution_transpose_backward_fn = std::tuple<at::Tensor,at::Tensor>(*)(
     const at::Tensor&, const at::Tensor&, const at::Tensor&, at::IntArrayRef, at::IntArrayRef,
     at::IntArrayRef, at::IntArrayRef, int64_t, bool, bool, bool, std::array<bool,2>);
-DECLARE_DISPATCH(cudnn_convolution_transpose_backward_fn, cudnn_convolution_transpose_backward_stub);
+DECLARE_DISPATCH(cudnn_convolution_transpose_backward_fn, cudnn_convolution_transpose_backward_stub)
 using miopen_convolution_backward_fn = std::tuple<at::Tensor,at::Tensor,at::Tensor>(*)(
     const at::Tensor&, const at::Tensor&, const at::Tensor&, at::IntArrayRef, at::IntArrayRef,
     at::IntArrayRef, int64_t, bool, bool, std::array<bool,3>);
-DECLARE_DISPATCH(miopen_convolution_backward_fn, miopen_convolution_backward_stub);
+DECLARE_DISPATCH(miopen_convolution_backward_fn, miopen_convolution_backward_stub)
 using miopen_convolution_transpose_backward_fn = std::tuple<at::Tensor,at::Tensor,at::Tensor>(*)(
     const at::Tensor&, const at::Tensor&, const at::Tensor&, at::IntArrayRef, at::IntArrayRef,
     at::IntArrayRef, at::IntArrayRef, int64_t, bool, bool, std::array<bool,3>);
-DECLARE_DISPATCH(miopen_convolution_transpose_backward_fn, miopen_convolution_transpose_backward_stub);
+DECLARE_DISPATCH(miopen_convolution_transpose_backward_fn, miopen_convolution_transpose_backward_stub)
 using miopen_depthwise_convolution_backward_fn = std::tuple<at::Tensor,at::Tensor,at::Tensor>(*)(
     const at::Tensor&, const at::Tensor&, const at::Tensor&, at::IntArrayRef, at::IntArrayRef,
     at::IntArrayRef, int64_t, bool, bool, std::array<bool,3>);
-DECLARE_DISPATCH(miopen_depthwise_convolution_backward_fn, miopen_depthwise_convolution_backward_stub);
+DECLARE_DISPATCH(miopen_depthwise_convolution_backward_fn, miopen_depthwise_convolution_backward_stub)
 using mkldnn_convolution_backward_fn = std::tuple<at::Tensor,at::Tensor,at::Tensor>(*)(
     const at::Tensor&, const at::Tensor&, const at::Tensor&, at::IntArrayRef, at::IntArrayRef,
     at::IntArrayRef, int64_t, std::array<bool,3>);
-DECLARE_DISPATCH(mkldnn_convolution_backward_fn, mkldnn_convolution_backward_stub);
+DECLARE_DISPATCH(mkldnn_convolution_backward_fn, mkldnn_convolution_backward_stub)
 using mkldnn_convolution_transpose_fn = Tensor(*)(const Tensor&, const Tensor&, const std::optional<Tensor>&,
     IntArrayRef, IntArrayRef, IntArrayRef, IntArrayRef, int64_t);
-DECLARE_DISPATCH(mkldnn_convolution_transpose_fn, mkldnn_convolution_transpose_stub);
+DECLARE_DISPATCH(mkldnn_convolution_transpose_fn, mkldnn_convolution_transpose_stub)
 using mkldnn_convolution_transpose_backward_fn = std::tuple<at::Tensor,at::Tensor,at::Tensor>(*)(
     const at::Tensor&, const at::Tensor&, const at::Tensor&, at::IntArrayRef, at::IntArrayRef,
     at::IntArrayRef, at::IntArrayRef, int64_t, std::array<bool,3>);
-DECLARE_DISPATCH(mkldnn_convolution_transpose_backward_fn, mkldnn_convolution_transpose_backward_stub);
+DECLARE_DISPATCH(mkldnn_convolution_transpose_backward_fn, mkldnn_convolution_transpose_backward_stub)
 using slow_conv_dilated2d_backward_fn = std::tuple<at::Tensor,at::Tensor,at::Tensor>(*)(
     const at::Tensor&, const at::Tensor&, const at::Tensor&, at::IntArrayRef, at::IntArrayRef,
     at::IntArrayRef, at::IntArrayRef, std::array<bool, 3>);
-DECLARE_DISPATCH(slow_conv_dilated2d_backward_fn, slow_conv_dilated2d_backward_stub);
+DECLARE_DISPATCH(slow_conv_dilated2d_backward_fn, slow_conv_dilated2d_backward_stub)
 using slow_conv_dilated3d_backward_fn = std::tuple<at::Tensor,at::Tensor,at::Tensor>(*)(
     const at::Tensor&, const at::Tensor&, const at::Tensor&, at::IntArrayRef, at::IntArrayRef,
     at::IntArrayRef, at::IntArrayRef, std::array<bool, 3>);
-DECLARE_DISPATCH(slow_conv_dilated3d_backward_fn, slow_conv_dilated3d_backward_stub);
+DECLARE_DISPATCH(slow_conv_dilated3d_backward_fn, slow_conv_dilated3d_backward_stub)
 using slow_conv_transpose2d_backward_fn = std::tuple<at::Tensor,at::Tensor,at::Tensor>(*)(
     const at::Tensor&, const at::Tensor&, const at::Tensor&, at::IntArrayRef, at::IntArrayRef,
     at::IntArrayRef, at::IntArrayRef, at::IntArrayRef, std::array<bool,3>);
-DECLARE_DISPATCH(slow_conv_transpose2d_backward_fn, slow_conv_transpose2d_backward_stub);
+DECLARE_DISPATCH(slow_conv_transpose2d_backward_fn, slow_conv_transpose2d_backward_stub)
 using slow_conv_transpose3d_backward_fn = std::tuple<at::Tensor,at::Tensor,at::Tensor>(*)(
     const at::Tensor&, const at::Tensor&, const at::Tensor&, at::IntArrayRef, at::IntArrayRef,
     at::IntArrayRef, at::IntArrayRef, at::IntArrayRef, std::array<bool,3>);
-DECLARE_DISPATCH(slow_conv_transpose3d_backward_fn, slow_conv_transpose3d_backward_stub);
+DECLARE_DISPATCH(slow_conv_transpose3d_backward_fn, slow_conv_transpose3d_backward_stub)
 
 namespace {
   bool is_cudnnv8_heuristic_mode_b() {
@@ -75,7 +77,7 @@ namespace {
   }
 }
 
-static inline bool cudnnv8_enabled_check_debug() {
+inline bool cudnnv8_enabled_check_debug() {
   static bool cudnnv8_flag = c10::utils::check_env("TORCH_CUDNN_V8_API_DISABLED") != true;
   static bool cudnnv8_debug = c10::utils::check_env("TORCH_CUDNN_V8_API_DEBUG") == true;
   static uint8_t cudnnv8_debugcount = 0;
@@ -86,7 +88,7 @@ static inline bool cudnnv8_enabled_check_debug() {
   return cudnnv8_flag == 1;
 }
 
-static inline bool cudnnv8_use_heur_mode_b() {
+inline bool cudnnv8_use_heur_mode_b() {
   return is_cudnnv8_heuristic_mode_b();
 }
 
@@ -166,7 +168,7 @@ static void check_args(CheckedFrom c, IntArrayRef args, size_t expected_size, co
     ss << arg_name << " should be greater than zero but got (";
     std::copy(args.begin(), args.end() - 1, std::ostream_iterator<int>(ss,", "));
     ss << args.back() <<  ")" << " (while checking arguments for " << c << ")";
-    AT_ERROR(ss.str());
+    TORCH_CHECK(false, ss.str());
   }
 }
 
@@ -186,7 +188,7 @@ static void check_args(CheckedFrom c, IntArrayRef args, size_t expected_size, co
 // (which the user can change) and computed inputs (which the user can
 // only indirectly affect).  It would be an interesting exercise to
 // come up with a general framework to handle such situations.)
-static void convolution_shape_check(
+inline void convolution_shape_check(
     CheckedFrom c,
     const TensorGeometryArg& input, const TensorGeometryArg& weight, const TensorGeometryArg& output,
     IntArrayRef padding, IntArrayRef stride, IntArrayRef dilation, int64_t groups)
@@ -212,7 +214,7 @@ static void convolution_shape_check(
 // takes an extra output_padding argument to resolve the ambiguity.
 
 template <typename T>
-static inline std::vector<T> _conv_output_size(
+inline std::vector<T> _conv_output_size(
     ArrayRef<T> input_size, ArrayRef<T> weight_size,
     ArrayRef<T> padding, ArrayRef<T> stride, ArrayRef<T> dilation = ArrayRef<T>()
 ) {
@@ -231,14 +233,14 @@ static inline std::vector<T> _conv_output_size(
   return output_size;
 }
 
-static inline std::vector<int64_t> conv_output_size(
+inline std::vector<int64_t> conv_output_size(
     IntArrayRef input_size, IntArrayRef weight_size,
     IntArrayRef padding, IntArrayRef stride, IntArrayRef dilation = IntArrayRef()
 ) {
   return _conv_output_size(input_size, weight_size, padding, stride, dilation);
 }
 
-static inline std::vector<c10::SymInt> conv_output_size(
+inline std::vector<c10::SymInt> conv_output_size(
     SymIntArrayRef input_size, SymIntArrayRef weight_size,
     SymIntArrayRef padding, SymIntArrayRef stride, SymIntArrayRef dilation = SymIntArrayRef()
 ) {
@@ -264,14 +266,14 @@ std::vector<T> _conv_input_size(
   return input_size;
 }
 
-static inline std::vector<c10::SymInt> conv_input_size(
+inline std::vector<c10::SymInt> conv_input_size(
     SymIntArrayRef output_size, SymIntArrayRef weight_size,
     SymIntArrayRef padding, SymIntArrayRef output_padding, SymIntArrayRef stride, SymIntArrayRef dilation, c10::SymInt groups
 ) {
-  return _conv_input_size(output_size, weight_size, padding, output_padding, stride, dilation, groups);
+  return _conv_input_size(output_size, weight_size, padding, output_padding, stride, dilation, std::move(groups));
 }
 
-static inline std::vector<int64_t> conv_input_size(
+inline std::vector<int64_t> conv_input_size(
     IntArrayRef output_size, IntArrayRef weight_size,
     IntArrayRef padding, IntArrayRef output_padding, IntArrayRef stride, IntArrayRef dilation, int64_t groups
 ) {
@@ -295,27 +297,27 @@ std::vector<T> _conv_weight_size(
   return weight_size;
 }
 
-static inline std::vector<c10::SymInt> conv_weight_size(
+inline std::vector<c10::SymInt> conv_weight_size(
     SymIntArrayRef input_size, SymIntArrayRef output_size,
     SymIntArrayRef padding, SymIntArrayRef output_padding, IntArrayRef stride, IntArrayRef dilation, int64_t groups
 ) {
   return _conv_weight_size(input_size, output_size, padding, output_padding, stride, dilation, groups);
 }
 
-static inline std::vector<int64_t> conv_weight_size(
+inline std::vector<int64_t> conv_weight_size(
     IntArrayRef input_size, IntArrayRef output_size,
     IntArrayRef padding, IntArrayRef output_padding, IntArrayRef stride, IntArrayRef dilation, int64_t groups
 ) {
   return _conv_weight_size(input_size, output_size, padding, output_padding, stride, dilation, groups);
 }
 
-static inline Tensor reshape_bias(int64_t dim, const Tensor& bias) {
+inline Tensor reshape_bias(int64_t dim, const Tensor& bias) {
   std::vector<int64_t> shape(dim, 1);
   shape[1] = -1;
   return bias.reshape(shape);
 }
 
-static inline at::MemoryFormat cudnn_conv_suggest_memory_format(const at::Tensor& input, const at::Tensor& weight) {
+inline at::MemoryFormat cudnn_conv_suggest_memory_format(const at::Tensor& input, const at::Tensor& weight) {
   // disable NHWC for float64 input.
   if (!at::detail::getCUDAHooks().compiledWithCuDNN() ||
       input.scalar_type() == at::kDouble ||
@@ -351,7 +353,7 @@ TORCH_API void _cudnn_set_conv_benchmark_empty_cache(bool enable);
 TORCH_API bool _cudnn_get_conv_benchmark_empty_cache();
 
 
-static inline bool miopen_conv_use_channels_last(const at::Tensor& input, const at::Tensor& weight) {
+inline bool miopen_conv_use_channels_last(const at::Tensor& input, const at::Tensor& weight) {
 
   // disable NHWC for float64 input.
   if (!at::detail::getCUDAHooks().compiledWithMIOpen() ||
@@ -378,7 +380,7 @@ static inline bool miopen_conv_use_channels_last(const at::Tensor& input, const 
   return can_use_miopen_channels_last_2d || can_use_miopen_channels_last_3d;
 }
 
-static inline bool mkldnn_conv_use_channels_last(const at::Tensor& input, const at::Tensor& weight) {
+inline bool mkldnn_conv_use_channels_last(const at::Tensor& input, const at::Tensor& weight) {
 
   // disable NHWC for float64 input.
   if (input.scalar_type() == at::kDouble ||
@@ -405,7 +407,7 @@ static inline bool mkldnn_conv_use_channels_last(const at::Tensor& input, const 
   return can_use_mkldnn_channels_last_2d || can_use_mkldnn_channels_last_3d;
 }
 
-static inline bool thnn_conv_use_channels_last(const at::Tensor& input, const at::Tensor& weight) {
+inline bool thnn_conv_use_channels_last(const at::Tensor& input, const at::Tensor& weight) {
 
   auto input_memory_format = input.suggest_memory_format();
   auto weight_memory_format = weight.suggest_memory_format();
@@ -417,7 +419,7 @@ static inline bool thnn_conv_use_channels_last(const at::Tensor& input, const at
   return can_use_thnn_channels_last_2d;
 }
 
-static inline bool xpu_conv_use_channels_last(const at::Tensor& input, const at::Tensor& weight) {
+inline bool xpu_conv_use_channels_last(const at::Tensor& input, const at::Tensor& weight) {
 
   // check layout only for xpu tensor.
   if (!input.is_xpu() || !weight.is_xpu()) {

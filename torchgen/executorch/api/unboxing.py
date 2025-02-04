@@ -1,7 +1,8 @@
-from dataclasses import dataclass
-from typing import Callable, List, Sequence, Tuple
+from __future__ import annotations
 
-from torchgen.api.types import Binding, CType, NamedCType
+from dataclasses import dataclass
+from typing import Callable, TYPE_CHECKING
+
 from torchgen.model import (
     Argument,
     BaseTy,
@@ -11,6 +12,13 @@ from torchgen.model import (
     OptionalType,
     Type,
 )
+
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
+
+    from torchgen.api.types import Binding, CType, NamedCType
+
 
 connector = "\n\t"
 
@@ -51,7 +59,7 @@ class Unboxing:
     # Convert all the arguments in a NativeFunction to C++ code
     def convert_arguments(
         self, args: Sequence[Binding]
-    ) -> Tuple[List[Binding], List[str]]:
+    ) -> tuple[list[Binding], list[str]]:
         code_list = [f"EValue& {args[i].name} = *stack[{i}];" for i in range(len(args))]
         binding_list = []
         for arg in args:
@@ -71,7 +79,7 @@ class Unboxing:
 
     def argumenttype_evalue_convert(
         self, t: Type, arg_name: str, *, mutable: bool = False
-    ) -> Tuple[str, CType, List[str], List[str]]:
+    ) -> tuple[str, CType, list[str], list[str]]:
         """
         Takes in the type, name and mutability corresponding to an argument, and generates a tuple of:
         (1) the C++ code necessary to unbox the argument
@@ -106,30 +114,28 @@ class Unboxing:
 
     def _gen_code_base_type(
         self, arg_name: str, out_name: str, ctype: CType
-    ) -> Tuple[List[str], List[str]]:
+    ) -> tuple[list[str], list[str]]:
         return [
             f"{ctype.cpp_type()} {out_name} = {arg_name}.to<{ctype.cpp_type(strip_ref=True)}>();"
         ], []
 
     def _gen_code_optional_type(
         self, arg_name: str, out_name: str, t: OptionalType, ctype: CType
-    ) -> Tuple[List[str], List[str]]:
+    ) -> tuple[list[str], list[str]]:
         in_name = f"{arg_name}_opt_in"
         res_name, base_type, res_code, decl = self.argumenttype_evalue_convert(
             t.elem, in_name
         )
         return (
             f"""
-    {ctype.cpp_type(strip_ref=True)} {out_name} = {arg_name}.toOptional<{base_type.cpp_type(strip_ref=True)}>();
-            """.split(
-                "\n"
-            ),
+    auto {out_name} = {arg_name}.toOptional<{base_type.cpp_type(strip_ref=True)}>();
+            """.split("\n"),
             decl,
         )
 
     def _gen_code_list_type(
         self, arg_name: str, out_name: str, t: ListType, ctype: CType
-    ) -> Tuple[List[str], List[str]]:
+    ) -> tuple[list[str], list[str]]:
         in_name = f"{arg_name}_list_in"
         elem_name = f"{arg_name}_elem"
         code = []
@@ -140,37 +146,38 @@ class Unboxing:
         if isinstance(t.elem, BaseType) and t.elem.name == BaseTy.Tensor:
             code.extend(
                 f"""
-    {ctype.cpp_type(strip_ref=True)} {out_name} = {arg_name}.toTensorList();
-                """.split(
-                    "\n"
-                )
+    auto {out_name} = {arg_name}.toTensorList();
+                """.split("\n")
             )
         elif isinstance(t.elem, BaseType) and (
             t.elem.name == BaseTy.int or t.elem.name == BaseTy.SymInt
         ):
             code.extend(
                 f"""
-    {ctype.cpp_type(strip_ref=True)} {out_name} = {arg_name}.toIntList();
-                """.split(
-                    "\n"
-                )
+    auto {out_name} = {arg_name}.toIntList();
+                """.split("\n")
             )
         elif isinstance(t.elem, BaseType) and t.elem.name == BaseTy.float:
             code.extend(
                 f"""
-    {ctype.cpp_type(strip_ref=True)} {out_name} = {arg_name}.toDoubleList();
-                """.split(
-                    "\n"
-                )
+    auto {out_name} = {arg_name}.toDoubleList();
+                """.split("\n")
             )
         elif isinstance(t.elem, BaseType) and t.elem.name == BaseTy.bool:
             # handle list type with size, e.g., bool[4]
             code.extend(
                 f"""
-    {ctype.cpp_type(strip_ref=True)} {out_name} = {arg_name}.toBoolList();
-                """.split(
-                    "\n"
-                )
+#ifdef USE_ATEN_LIB
+std::array<bool, {t.size}> {out_name};
+auto {in_name} = {arg_name}.toBoolList();
+size_t _i = 0;
+for (auto {elem_name}: {in_name}) {{
+    {out_name}[_i++] = {elem_name};
+}}
+#else
+auto {out_name} = {arg_name}.toBoolList();
+#endif
+                """.split("\n")
             )
         # pytorch codegen:
         # we have to use c10::List for optional element. e.g., Tensor?[] -> c10::List<::std::optional<at::Tensor>>
@@ -188,11 +195,9 @@ for (auto {elem_name}: {in_name}) {{
     {out_name}.push_back({elem_name});
 }}
 #else
-torch::executor::ArrayRef<torch::executor::optional<torch::executor::Tensor>> {out_name} = {arg_name}.toListOptionalTensor();
+auto {out_name} = {arg_name}.toListOptionalTensor();
 #endif
-                """.split(
-                    "\n"
-                )
+                """.split("\n")
             )
         else:
             # use ArrayRef as default.
@@ -208,8 +213,6 @@ torch::executor::ArrayRef<torch::executor::optional<torch::executor::Tensor>> {o
         {vec_name}.push_back({res_name});
     }}
     {ctype.cpp_type(strip_ref=True)} {out_name}({vec_name});
-                """.split(
-                    "\n"
-                )
+                """.split("\n")
             )
         return code, decl

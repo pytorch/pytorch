@@ -1,10 +1,16 @@
+# mypy: allow-untyped-defs
 from __future__ import annotations
 
 import logging
-from typing import Optional, Sequence, Tuple
+from typing import Optional, Tuple, TYPE_CHECKING
 
 import torch
 from torch import _prims, Tensor
+
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
+
 
 log = logging.getLogger(__name__)
 
@@ -68,12 +74,19 @@ seeds = make_prim(
 lookup_seed = make_prim(
     # if inductor_lookup_seed changes, update partitioners.py
     "inductor_lookup_seed(Tensor seeds, int index) -> Tensor",
-    lambda seeds, index: seeds[index],
+    lambda seeds, index: seeds[index].clone(),
     doc="Extract a single seed from the result of inductor_seeds()",
 )
+# inductor_random() doesn't accept a dtype.
+# instead, its lowering always burns in float32, and conversions to a different type
+# are explicit in the graph. We therefore need this impl (used during tracing) to hardcoded
+# the dtype, so it always faithfully produces a float32 tensor during tracing,
+# even if the default dtype is set to something else.
 random = make_prim(
     "inductor_random(SymInt[] size, Tensor seed, str mode) -> Tensor",
-    lambda size, seed, mode: getattr(torch, mode)(size, device=seed.device),
+    lambda size, seed, mode: getattr(torch, mode)(
+        size, device=seed.device, dtype=torch.float32
+    ),
     doc="torch.rand()/torch.randn() using backend-specific RNG that can be fused",
 )
 randint = make_prim(
@@ -85,13 +98,6 @@ force_stride_order = make_prim(
     "inductor_force_stride_order(Tensor input, SymInt[] stride) -> Tensor",
     eager_force_stride,
     doc="Force the stride order for input tensor. No-op if the input tensor already has the stride. Do a copy otherwise",
-)
-masked_scatter_with_index = make_prim(
-    "inductor_masked_scatter_with_index(Tensor input, Tensor mask, Tensor source_idx, Tensor source) -> Tensor",
-    lambda input_tensor, mask, index, source: torch.masked_scatter(
-        input_tensor, mask, source
-    ),
-    doc="masked_scatter with precomputed indices",
 )
 _unsafe_index_put_ = make_prim(
     "_unsafe_index_put_(Tensor(a!) self, Tensor?[] indices, Tensor values, bool accumulate=False) -> Tensor(a!)",
@@ -124,7 +130,61 @@ def _low_memory_max_pool2d_with_offsets_aten(
     vals, indices = torch.ops.aten.max_pool2d_with_indices(
         self, kernel_size, stride, padding, dilation, ceil_mode
     )
-    return vals, indices.to(torch.int8)
+
+    input_width = self.shape[-1]
+    kernel_width = kernel_size[1]
+
+    bh_shape = [1] * self.ndim
+    bh_shape[-2] = -1
+    bh = torch.arange(indices.shape[-2], dtype=torch.int64, device=self.device).view(
+        bh_shape
+    )
+
+    bw_shape = [1] * self.ndim
+    bw_shape[-1] = -1
+    bw = torch.arange(indices.shape[-1], dtype=torch.int64, device=self.device).view(
+        bw_shape
+    )
+
+    hbase = bh * stride[0] - padding[0]
+    wbase = bw * stride[1] - padding[1]
+
+    ih = indices // input_width
+    iw = indices - (ih * input_width)
+
+    h_inc = ih - hbase
+    w_inc = iw - wbase
+
+    offsets = h_inc * kernel_width + w_inc
+
+    return vals, offsets.to(torch.int8)
+
+
+def _low_memory_max_pool2d_offsets_to_indices_aten(
+    offsets, kernel_width, input_width, stride, padding
+):
+    offsets = offsets.to(torch.int64)
+    h_inc = offsets // kernel_width
+    w_inc = offsets - (h_inc * kernel_width)
+
+    bh_shape = [1] * offsets.ndim
+    bh_shape[-2] = -1
+    bh = torch.arange(offsets.shape[-2], dtype=torch.int64, device=offsets.device).view(
+        bh_shape
+    )
+
+    bw_shape = [1] * offsets.ndim
+    bw_shape[-1] = -1
+    bw = torch.arange(offsets.shape[-1], dtype=torch.int64, device=offsets.device).view(
+        bw_shape
+    )
+
+    hbase = bh * stride[0] - padding[0]
+    wbase = bw * stride[1] - padding[1]
+
+    ih = hbase + h_inc
+    iw = wbase + w_inc
+    return ih * input_width + iw
 
 
 _low_memory_max_pool2d_with_offsets = make_prim(
@@ -136,6 +196,6 @@ _low_memory_max_pool2d_with_offsets = make_prim(
 
 _low_memory_max_pool2d_offsets_to_indices = make_prim(
     "_low_memory_max_pool2d_offsets_to_indices(Tensor self, SymInt kernel_w, SymInt input_w, SymInt[2] stride, SymInt[2] padding) -> Tensor",  # noqa: B950
-    lambda self, *args: self.to(torch.int64),
+    _low_memory_max_pool2d_offsets_to_indices_aten,
     doc="Convert small int offsets to regular indices.",
 )

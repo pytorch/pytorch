@@ -12,8 +12,7 @@ struct OperationTest : torch::test::SeedingFixture {
 };
 
 TEST_F(OperationTest, Lerp) {
-  for (const auto i : c10::irange(TEST_AMOUNT)) {
-    (void)i; // Suppress unused variable warning
+  for ([[maybe_unused]] const auto i : c10::irange(TEST_AMOUNT)) {
     // test lerp_kernel_scalar
     auto start = torch::rand({3, 5});
     auto end = torch::rand({3, 5});
@@ -37,8 +36,7 @@ TEST_F(OperationTest, Lerp) {
 }
 
 TEST_F(OperationTest, Cross) {
-  for (const auto i : c10::irange(TEST_AMOUNT)) {
-    (void)i; // Suppress unused variable warning
+  for ([[maybe_unused]] const auto i : c10::irange(TEST_AMOUNT)) {
     // input
     auto a = torch::rand({10, 3});
     auto b = torch::rand({10, 3});

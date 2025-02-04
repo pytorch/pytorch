@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 # This file establishes the public comptime interface to Dynamo.
 # This allows Dynamo users to execute arbitrary Python code while
 # Dynamo is symbolically evaluating their original programs.
@@ -7,6 +8,7 @@
 
 import builtins
 import dis
+import time
 import traceback
 from typing import Optional, Union
 
@@ -14,9 +16,8 @@ import torch
 from torch.fx.experimental.symbolic_shapes import free_symbols
 
 from .exc import unimplemented
-from .variables import NewCellVariable
+from .variables import CellVariable
 from .variables.constant import ConstantVariable
-from .variables.misc import ClosureVariable
 from .variables.tensor import SymNodeVariable
 
 
@@ -31,7 +32,7 @@ class ComptimeVar:
     actual data in the Tensor is.)
     """
 
-    def __init__(self, v):
+    def __init__(self, v) -> None:
         self.__variable = v
 
     def as_proxy(self):
@@ -127,7 +128,7 @@ class ComptimeVar:
         """
         return self.__variable
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         return self.__variable.debug_repr()
 
     # TODO: API for adding a custom guard
@@ -140,7 +141,7 @@ class ComptimeContext:
     file a feature request at https://github.com/pytorch/pytorch/
     """
 
-    def __init__(self, tx):
+    def __init__(self, tx) -> None:
         self.__tx = tx
 
     def get_local(self, name: str, *, stacklevel=0) -> ComptimeVar:
@@ -148,20 +149,13 @@ class ComptimeContext:
         Retrieve the compile-time known information about a local.
         """
         tx = self.__get_tx(stacklevel)
+        var = tx.symbolic_locals[name]
 
-        # This is analogous to LOAD_DEREF
-        if hasattr(tx, "closure_cells") and name in tx.closure_cells:
-            cell = tx.closure_cells[name]
-            if isinstance(cell, ClosureVariable):
-                return ComptimeVar(tx.output.root_tx.symbolic_locals[cell.name])
-            else:
-                return ComptimeVar(tx.output.side_effects.load_cell(cell))
-        else:
-            r = tx.symbolic_locals[name]
-            if isinstance(r, NewCellVariable):
-                return ComptimeVar(tx.output.side_effects.load_cell(r))
-            else:
-                return ComptimeVar(r)
+        # Auto-dereference when accessing cell locals in python.
+        if isinstance(var, CellVariable):
+            return ComptimeVar(tx.output.side_effects.load_cell(var))
+
+        return ComptimeVar(var)
 
     def graph_break(self, msg="ComptimeContext.graph_break"):
         """
@@ -231,10 +225,9 @@ class ComptimeContext:
 
         NB: Stack grows downwards in our print
         """
-        # TODO: improve printing
         tx = self.__get_tx(stacklevel)
         for s in tx.stack:
-            print(f"- {s}", file=file)
+            print(f"- {s.debug_repr()}", file=file)
 
     def print_locals(self, *, file=None, stacklevel=0):
         """
@@ -242,10 +235,9 @@ class ComptimeContext:
         By default this view is very limited; you can get more information
         about any individual local using get_local().
         """
-        # TODO: improve by improving the VariableTracker printing
         tx = self.__get_tx(stacklevel)
         for k, v in tx.symbolic_locals.items():
-            print(f"{k} = {v}", file=file)
+            print(f"{k} = {v.debug_repr()}", file=file)
 
     def print_bt(self, *, file=None, stacklevel=0):
         """
@@ -288,6 +280,9 @@ class ComptimeContext:
         you rely on it.
         """
         return self.__tx
+
+    def sleep(self, sec):
+        time.sleep(sec)
 
 
 class _Comptime:
@@ -385,10 +380,14 @@ class _Comptime:
         """
 
         def inner(inner_ctx):
-            ctx = inner_ctx.parent()
+            ctx = inner_ctx.parent()  # noqa: F841
             builtins.breakpoint()
 
         comptime(inner)
+
+    @staticmethod
+    def sleep(sec):
+        comptime(lambda ctx: ctx.sleep(ctx.get_local("sec").as_python_constant()))
 
 
 comptime = _Comptime()

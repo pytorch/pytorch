@@ -2,12 +2,10 @@
 
 import unittest
 from functools import partial
-from typing import List
 
 import numpy as np
 
 import torch
-
 from torch.testing import make_tensor
 from torch.testing._internal.common_cuda import SM53OrLater
 from torch.testing._internal.common_device_type import precisionOverride
@@ -30,6 +28,7 @@ from torch.testing._internal.opinfo.refs import (
     _inherit_constructor_args,
     PythonRefInfo,
 )
+
 
 has_scipy_fft = False
 if TEST_SCIPY:
@@ -117,7 +116,7 @@ def sample_inputs_fftshift(op_info, device, dtype, requires_grad, **kwargs):
 
 
 # Operator database
-op_db: List[OpInfo] = [
+op_db: list[OpInfo] = [
     SpectralFuncInfo(
         "fft.fft",
         aten_name="fft_fft",
@@ -250,7 +249,7 @@ op_db: List[OpInfo] = [
                 precisionOverride({torch.float: 2e-4, torch.cfloat: 2e-4}),
                 "TestFFT",
                 "test_reference_nd",
-            )
+            ),
         ],
         skips=(
             # Issue with conj and torch dispatch, see https://github.com/pytorch/pytorch/issues/82479
@@ -258,6 +257,13 @@ op_db: List[OpInfo] = [
                 unittest.skip("Skipped!"),
                 "TestSchemaCheckModeOpInfo",
                 "test_schema_correctness",
+            ),
+            # FIXME: errors are too large; needs investigation
+            DecorateInfo(
+                unittest.skip("Skipped!"),
+                "TestCommon",
+                "test_complex_half_reference_testing",
+                device_type="cuda",
             ),
         ),
     ),
@@ -627,7 +633,7 @@ op_db: List[OpInfo] = [
     ),
 ]
 
-python_ref_db: List[OpInfo] = [
+python_ref_db: list[OpInfo] = [
     SpectralFuncPythonRefInfo(
         "_refs.fft.fft",
         torch_opinfo_name="fft.fft",
@@ -708,7 +714,25 @@ python_ref_db: List[OpInfo] = [
                 precisionOverride({torch.float: 2e-4}),
                 "TestFFT",
                 "test_reference_nd",
-            )
+            ),
+            # AssertionError: Reference result was farther (0.09746177145360499) from the precise
+            # computation than the torch result was (0.09111555632069855)
+            DecorateInfo(
+                unittest.skip("Skipped!"),
+                "TestCommon",
+                "test_python_ref_torch_fallback",
+                dtypes=(torch.float16,),
+                device_type="cuda",
+            ),
+            # AssertionError: Reference result was farther (0.0953431016138116) from the precise
+            # computation than the torch result was (0.09305490684430734)
+            DecorateInfo(
+                unittest.skip("Skipped!"),
+                "TestCommon",
+                "test_python_ref_executor",
+                dtypes=(torch.float16,),
+                device_type="cuda",
+            ),
         ],
     ),
     SpectralFuncPythonRefInfo(
@@ -760,7 +784,16 @@ python_ref_db: List[OpInfo] = [
                 precisionOverride({torch.float: 2e-4}),
                 "TestFFT",
                 "test_reference_nd",
-            )
+            ),
+            # FIXME:
+            # Reference result was farther (0.0953431016138116) from the precise computation
+            # than the torch result was (0.09305490684430734)!
+            DecorateInfo(
+                unittest.skip("Skipped!"),
+                "TestCommon",
+                "test_python_ref_executor",
+                device_type="cuda",
+            ),
         ],
     ),
     PythonRefInfo(

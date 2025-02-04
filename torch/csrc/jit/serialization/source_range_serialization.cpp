@@ -6,6 +6,7 @@
 #include <torch/csrc/jit/mobile/type_parser.h>
 #include <torch/csrc/jit/serialization/pickle.h>
 #include <algorithm>
+#include <memory>
 
 namespace torch::jit {
 
@@ -42,7 +43,7 @@ class SourceRangeSerializer {
   int64_t store_text_and_get_index(const std::string& text_view);
 
   std::vector<c10::IValue> texts_;
-  std::unordered_map<c10::string_view, int64_t> text_to_idx_;
+  std::unordered_map<std::string_view, int64_t> text_to_idx_;
 };
 
 SourceRange SourceRangeDeserializer::deserialize(const c10::IValue& iv) {
@@ -68,14 +69,14 @@ std::shared_ptr<Source> SourceRangeDeserializer::deserialize_source(
     const auto& textIndex = tup_elems[0].toIntList();
     int64_t fnameIndex = tup_elems[1].toInt();
     int64_t starting_line_no_ = tup_elems[2].toInt();
-    std::optional<std::string> filename = c10::nullopt;
+    std::optional<std::string> filename = std::nullopt;
 
     TORCH_CHECK(
         (uint64_t)fnameIndex < text_table_.size(),
         "Text table index is out of range")
     filename = *text_table_[fnameIndex];
 
-    std::vector<c10::string_view> pieces;
+    std::vector<std::string_view> pieces;
     std::vector<std::shared_ptr<std::string>> strs;
 
     for (int64_t i : textIndex) {
@@ -210,15 +211,15 @@ void ConcreteSourceRangeUnpickler::unpickle() {
 
   const auto& ivalues = ivaluesTuple->elements();
   TORCH_CHECK(
-      ivalues.size(), "Invalid unpickle operation: empty ivalues tuple");
+      !ivalues.empty(), "Invalid unpickle operation: empty ivalues tuple");
   unpickled_records = std::make_shared<SourceRangeRecords>();
   IValue lines;
   if (ivalues[0].isString() &&
       kFormatWithStringTable == ivalues[0].toStringRef()) {
-    deserializer.reset(new SourceRangeDeserializer(ivalues[1]));
+    deserializer = std::make_shared<SourceRangeDeserializer>(ivalues[1]);
     lines = ivalues[2];
   } else {
-    deserializer.reset(new SourceRangeDeserializer());
+    deserializer = std::make_shared<SourceRangeDeserializer>();
     lines = ivaluesTuple;
   }
   for (auto& val : lines.toTuple()->elements()) {
@@ -248,7 +249,7 @@ std::optional<SourceRange> ConcreteSourceRangeUnpickler::
     return (entry - 1)->range;
   }
 
-  return c10::nullopt;
+  return std::nullopt;
 }
 
 TORCH_API void setShouldUseFormatWithStringTable(

@@ -1,8 +1,10 @@
-from torch._C._distributed_c10d import _DEFAULT_PG_TIMEOUT
 from datetime import timedelta
 from typing import Optional
 
-__all__ = ['default_pg_timeout', 'default_pg_nccl_timeout']
+from torch._C._distributed_c10d import _DEFAULT_PG_TIMEOUT
+
+
+__all__ = ["default_pg_timeout", "default_pg_nccl_timeout"]
 
 # Default process group wide timeout, if applicable.
 # This only applies to the non-nccl backends
@@ -16,6 +18,7 @@ default_pg_timeout: timedelta = _DEFAULT_PG_TIMEOUT
 
 try:
     from torch._C._distributed_c10d import _DEFAULT_PG_NCCL_TIMEOUT
+
     default_pg_nccl_timeout: Optional[timedelta] = _DEFAULT_PG_NCCL_TIMEOUT
 except ImportError:
     # if C++ NCCL support is not compiled, we don't have access to the default nccl value.

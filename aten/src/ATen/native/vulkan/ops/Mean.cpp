@@ -14,7 +14,7 @@ Tensor mean_dim(
     const at::Tensor& self,
     int64_t dim,
     bool keepdim,
-    const optional<ScalarType> dtype) {
+    const std::optional<ScalarType> dtype) {
   TORCH_CHECK(
       self.dim() >= 2 && self.dim() <= 4,
       "Vulkan mean_dim supports 2d, 3d, 4d tensors as input!");
@@ -102,7 +102,7 @@ Tensor mean_dim_IntList(
     const at::Tensor& self,
     const OptionalIntArrayRef opt_dim,
     bool keepdim,
-    const optional<ScalarType> dtype) {
+    const std::optional<ScalarType> dtype) {
   TORCH_CHECK(
       opt_dim.has_value(), "Vulkan mean without a dim arg is not implemented");
 

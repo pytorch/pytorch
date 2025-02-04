@@ -220,12 +220,12 @@ void _fused_sgd_with_momentum_kernel_cuda_(
   TORCH_CHECK_GT(momentum, 0);
   TORCH_CHECK(at::native::check_fast_path_restrictions(
       {params, grads, momentum_buffer_list}));
-  if (grad_scale != c10::nullopt) {
+  if (grad_scale.has_value()) {
     TORCH_CHECK(
         grad_scale->device() == params[0].device(),
         "grad_scale must be on the same GPU device as the params");
   }
-  if (found_inf != c10::nullopt) {
+  if (found_inf.has_value()) {
     TORCH_CHECK(
         found_inf->device() == params[0].device(),
         "found_inf must be on the same GPU device as the params");
@@ -391,7 +391,7 @@ void _fused_sgd_kernel_cuda_(
   }
   TORCH_CHECK(
       lr.device() == params[0].device(),
-      "found_inf must be on the same GPU device as the params");
+      "lr must be on the same GPU device as the params");
   float* grad_scale_ptr =
       grad_scale.has_value() ? grad_scale->data_ptr<float>() : nullptr;
   float* found_inf_ptr =

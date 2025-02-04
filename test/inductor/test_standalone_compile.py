@@ -9,7 +9,7 @@ from torch.testing._internal.inductor_utils import HAS_CPU
 
 
 class MyModule(torch.nn.Module):
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
         self.a = torch.nn.Linear(10, 10)
         self.b = torch.nn.Linear(10, 10)
@@ -83,7 +83,7 @@ class TestStandaloneInductor(TestCase):
         mod = MyModule3().eval()
         inp = torch.randn(10)
         correct = mod(inp)
-        gm, guards = dynamo.export(mod, inp, aten_graph=True)
+        gm, _ = dynamo.export(mod, inp, aten_graph=True)
         mod_opt = inductor.compile(gm, [inp])
         actual = mod_opt(inp)
         self.assertEqual(actual, correct)
@@ -92,7 +92,7 @@ class TestStandaloneInductor(TestCase):
         mod = MyModule2().eval()
         inp = {"key": [torch.randn(10), torch.randn(10)]}
         correct = mod(inp)
-        gm, guards = dynamo.export(mod, inp)
+        gm, _ = dynamo.export(mod, inp)
         mod_opt = inductor.compile(gm, [inp])
         actual = mod_opt(inp)
         self.assertEqual(actual, correct)

@@ -1,10 +1,14 @@
+# mypy: allow-untyped-defs
 import torch
+from torch import Tensor
 from torch.distributions import constraints
 from torch.distributions.categorical import Categorical
 from torch.distributions.distribution import Distribution
 from torch.distributions.transformed_distribution import TransformedDistribution
 from torch.distributions.transforms import ExpTransform
 from torch.distributions.utils import broadcast_all, clamp_probs
+from torch.types import _size
+
 
 __all__ = ["ExpRelaxedCategorical", "RelaxedOneHotCategorical"]
 
@@ -26,10 +30,10 @@ class ExpRelaxedCategorical(Distribution):
         logits (Tensor): unnormalized log probability for each event
 
     [1] The Concrete Distribution: A Continuous Relaxation of Discrete Random Variables
-    (Maddison et al, 2017)
+    (Maddison et al., 2017)
 
     [2] Categorical Reparametrization with Gumbel-Softmax
-    (Jang et al, 2017)
+    (Jang et al., 2017)
     """
     arg_constraints = {"probs": constraints.simplex, "logits": constraints.real_vector}
     support = (
@@ -59,18 +63,18 @@ class ExpRelaxedCategorical(Distribution):
         return self._categorical._new(*args, **kwargs)
 
     @property
-    def param_shape(self):
+    def param_shape(self) -> torch.Size:
         return self._categorical.param_shape
 
     @property
-    def logits(self):
+    def logits(self) -> Tensor:
         return self._categorical.logits
 
     @property
-    def probs(self):
+    def probs(self) -> Tensor:
         return self._categorical.probs
 
-    def rsample(self, sample_shape=torch.Size()):
+    def rsample(self, sample_shape: _size = torch.Size()) -> Tensor:
         shape = self._extended_shape(sample_shape)
         uniforms = clamp_probs(
             torch.rand(shape, dtype=self.logits.dtype, device=self.logits.device)
@@ -127,13 +131,13 @@ class RelaxedOneHotCategorical(TransformedDistribution):
         return super().expand(batch_shape, _instance=new)
 
     @property
-    def temperature(self):
+    def temperature(self) -> Tensor:
         return self.base_dist.temperature
 
     @property
-    def logits(self):
+    def logits(self) -> Tensor:
         return self.base_dist.logits
 
     @property
-    def probs(self):
+    def probs(self) -> Tensor:
         return self.base_dist.probs

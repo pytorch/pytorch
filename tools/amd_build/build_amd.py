@@ -4,16 +4,19 @@
 import argparse
 import os
 import sys
+from pathlib import Path
 
-sys.path.append(
-    os.path.realpath(
-        os.path.join(
-            __file__, os.path.pardir, os.path.pardir, os.path.pardir, "torch", "utils"
-        )
-    )
-)
+
+# NOTE: `tools/amd_build/build_amd.py` could be a symlink.
+# The behavior of `symlink / '..'` is different from `symlink.parent`.
+# Use `pardir` three times rather than using `path.parents[2]`.
+REPO_ROOT = (
+    Path(__file__).absolute() / os.path.pardir / os.path.pardir / os.path.pardir
+).resolve()
+sys.path.append(str(REPO_ROOT / "torch" / "utils"))
 
 from hipify import hipify_python  # type: ignore[import]
+
 
 parser = argparse.ArgumentParser(
     description="Top-level script for HIPifying, filling in most common parameters"
@@ -51,8 +54,9 @@ parser.add_argument(
 
 args = parser.parse_args()
 
+# NOTE: `tools/amd_build/build_amd.py` could be a symlink.
 amd_build_dir = os.path.dirname(os.path.realpath(__file__))
-proj_dir = os.path.join(os.path.dirname(os.path.dirname(amd_build_dir)))
+proj_dir = os.path.dirname(os.path.dirname(amd_build_dir))
 
 if args.project_directory:
     proj_dir = args.project_directory
@@ -97,7 +101,6 @@ includes = [
     "aten/src/ATen/native/transformers/cuda/mem_eff_attention/debug_utils.h",
     "aten/src/ATen/native/transformers/cuda/mem_eff_attention/gemm_kernel_utils.h",
     "aten/src/ATen/native/transformers/cuda/mem_eff_attention/pytorch_utils.h",
-    "aten/src/ATen/native/transformers/cuda/flash_attn/flash_api.h",
     "aten/src/THC/*",
     "aten/src/ATen/test/*",
     # CMakeLists.txt isn't processed by default, but there are a few
@@ -159,7 +162,10 @@ hip_platform_files = [
     "third_party/fbgemm/fbgemm_gpu/codegen/embedding_backward_split_host_template.cpp",
     "third_party/fbgemm/fbgemm_gpu/codegen/embedding_backward_split_template.cu",
     "third_party/fbgemm/fbgemm_gpu/codegen/embedding_forward_quantized_split_lookup.cu",
-    "third_party/fbgemm/fbgemm_gpu/include/fbgemm_gpu/fbgemm_cuda_utils.cuh",
+    "third_party/fbgemm/fbgemm_gpu/include/fbgemm_gpu/utils/cuda_prelude.cuh",
+    "third_party/fbgemm/fbgemm_gpu/include/fbgemm_gpu/utils/stochastic_rounding.cuh",
+    "third_party/fbgemm/fbgemm_gpu/include/fbgemm_gpu/utils/vec4.cuh",
+    "third_party/fbgemm/fbgemm_gpu/include/fbgemm_gpu/utils/weight_row.cuh",
     "third_party/fbgemm/fbgemm_gpu/include/fbgemm_gpu/sparse_ops.cuh",
     "third_party/fbgemm/fbgemm_gpu/src/jagged_tensor_ops.cu",
     "third_party/fbgemm/fbgemm_gpu/src/quantize_ops.cu",
@@ -195,6 +201,7 @@ for hip_platform_file in hip_platform_files:
                     sources.write(line)
             print(f"{hip_platform_file} updated")
 
+
 hipify_python.hipify(
     project_directory=proj_dir,
     output_directory=out_dir,
@@ -202,7 +209,7 @@ hipify_python.hipify(
     ignores=ignores,
     extra_files=[
         "torch/_inductor/codegen/cpp_wrapper_cpu.py",
-        "torch/_inductor/codegen/cpp_wrapper_cuda.py",
+        "torch/_inductor/codegen/cpp_wrapper_gpu.py",
         "torch/_inductor/codegen/wrapper.py",
     ],
     out_of_place_only=args.out_of_place_only,

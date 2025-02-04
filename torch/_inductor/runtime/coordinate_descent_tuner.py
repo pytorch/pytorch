@@ -1,16 +1,16 @@
+# mypy: allow-untyped-defs
 import copy
 import itertools
 import logging
-from typing import Callable, Optional
+from typing import Callable, Optional, TYPE_CHECKING
 
 from .hints import TRITON_MAX_BLOCK
-
 from .runtime_utils import red_text, triton_config_to_hashable
 
-try:
-    import triton
-except ImportError:
-    triton = None
+
+if TYPE_CHECKING:
+    from .triton_compat import triton
+
 
 log = logging.getLogger(__name__)
 
@@ -53,29 +53,10 @@ class CoordescTuner:
         self.size_hints = size_hints
         self.inductor_meta = inductor_meta or {}
 
-    def get_xmax(self):
-        xmax = TRITON_MAX_BLOCK["X"]
-        if self.size_hints and len(self.size_hints) > 0:
-            xmax = min(xmax, self.size_hints[0])
-        return xmax
-
-    def get_ymax(self):
-        ymax = TRITON_MAX_BLOCK["Y"]
-        if self.size_hints and len(self.size_hints) > 1:
-            ymax = min(ymax, self.size_hints[1])
-        return ymax
-
-    def get_zmax(self):
-        zmax = TRITON_MAX_BLOCK["Z"]
-        if self.size_hints and len(self.size_hints) > 2:
-            zmax = min(zmax, self.size_hints[2])
-        return zmax
-
-    def get_rmax(self):
-        rmax = TRITON_MAX_BLOCK["R"]
-        if self.size_hints and len(self.size_hints) > 0:
-            rmax = min(rmax, self.size_hints[-1])  # the last one is for reduction
-        return rmax
+    def get_config_max(self, prefix: str) -> int:
+        max_block = TRITON_MAX_BLOCK[prefix.upper()]
+        size_hint = self.size_hints.get(prefix) if self.size_hints is not None else None
+        return min(max_block, size_hint) if size_hint is not None else max_block
 
     def get_warpsmax(self):
         # Currently, CUDA has a maximum of 1024 threads, so 32 is the max
@@ -103,10 +84,11 @@ class CoordescTuner:
             "XBLOCK",
             "YBLOCK",
             "ZBLOCK",
-            # NOTE: we should not tune RBLOCK for persistent reduction.
+            # NOTE: we should not tune R0_BLOCK for persistent reduction.
             # We rely on the fact that persistent reduction's triton.Config
-            # does not have the RBLOCK field to guarantee that.
-            "RBLOCK",
+            # does not have the R0_BLOCK field to guarantee that.
+            "R0_BLOCK",
+            "R1_BLOCK",
             # the following 3 are for mm
             "BLOCK_M",
             "BLOCK_N",
@@ -118,15 +100,11 @@ class CoordescTuner:
 
         return out
 
-    def value_too_large(self, name, val):
-        if name == "XBLOCK":
-            return val > self.get_xmax()
-        if name == "YBLOCK":
-            return val > self.get_ymax()
-        if name == "ZBLOCK":
-            return val > self.get_zmax()
-        if name == "RBLOCK":
-            return val > self.get_rmax()
+    def value_too_large(self, name: str, val: int) -> bool:
+        block_suffix = "BLOCK"
+        if name.endswith(block_suffix):
+            prefix = name.strip(block_suffix).lower()
+            return val > self.get_config_max(prefix)
         if name == "num_warps":
             return val > self.get_warpsmax()
 
@@ -269,7 +247,7 @@ class CoordescTuner:
 
             for name in tunable_fields:
                 cur_val = get_field(best_config, name)
-                # some kernel don't have RBLOCK/YBLOCK/ZBLOCK. So cur_val may be None
+                # some kernel don't have R0_BLOCK/YBLOCK/ZBLOCK. So cur_val may be None
                 if cur_val is None:
                     continue
 

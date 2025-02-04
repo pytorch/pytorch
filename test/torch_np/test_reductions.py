@@ -3,7 +3,6 @@
 from unittest import skipIf, SkipTest
 
 import numpy
-
 import pytest
 from pytest import raises as assert_raises
 
@@ -13,7 +12,7 @@ from torch.testing._internal.common_utils import (
     run_tests,
     TEST_WITH_TORCHDYNAMO,
     TestCase,
-    xpassIfTorchDynamo,
+    xpassIfTorchDynamo_np,
 )
 
 
@@ -128,7 +127,7 @@ class TestMean(TestCase):
         # of float32.
         assert np.mean(np.ones(100000, dtype="float16")) == 1
 
-    @xpassIfTorchDynamo  # (reason="XXX: mean(..., where=...) not implemented")
+    @xpassIfTorchDynamo_np  # (reason="XXX: mean(..., where=...) not implemented")
     def test_mean_where(self):
         a = np.arange(16).reshape((4, 4))
         wh_full = np.array(
@@ -156,13 +155,13 @@ class TestMean(TestCase):
         assert_allclose(a3d.mean(axis=2, where=_wh_partial), np.array(_res))
         assert_allclose(np.mean(a3d, axis=2, where=_wh_partial), np.array(_res))
 
-        with pytest.warns(RuntimeWarning) as w:
+        with pytest.warns(RuntimeWarning):
             assert_allclose(
                 a.mean(axis=1, where=wh_partial), np.array([np.nan, 5.5, 9.5, np.nan])
             )
-        with pytest.warns(RuntimeWarning) as w:
+        with pytest.warns(RuntimeWarning):
             assert_equal(a.mean(where=False), np.nan)
-        with pytest.warns(RuntimeWarning) as w:
+        with pytest.warns(RuntimeWarning):
             assert_equal(np.mean(a, where=False), np.nan)
 
 
@@ -195,7 +194,7 @@ class TestSum(TestCase):
         assert res_float.dtype == "float64"
 
     @skipIf(numpy.__version__ < "1.24", reason="NP_VER: fails on NumPy 1.23.x")
-    @xpassIfTorchDynamo  # (reason="sum: does not warn on overflow")
+    @xpassIfTorchDynamo_np  # (reason="sum: does not warn on overflow")
     def test_sum_dtypes_warnings(self):
         for dt in (int, np.float16, np.float32, np.float64):
             for v in (0, 1, 2, 7, 8, 9, 15, 16, 19, 127, 128, 1024, 1235):
@@ -262,7 +261,7 @@ class TestSum(TestCase):
         d += d
         assert_allclose(d, 2.0 + 2j, atol=1.5e-7)
 
-    @xpassIfTorchDynamo  # (reason="initial=... need implementing")
+    @xpassIfTorchDynamo_np  # (reason="initial=... need implementing")
     def test_sum_initial(self):
         # Integer, single axis
         assert_equal(np.sum([3], initial=2), 5)
@@ -276,7 +275,7 @@ class TestSum(TestCase):
             [12, 12, 12],
         )
 
-    @xpassIfTorchDynamo  # (reason="where=... need implementing")
+    @xpassIfTorchDynamo_np  # (reason="where=... need implementing")
     def test_sum_where(self):
         # More extensive tests done in test_reduction_with_where.
         assert_equal(np.sum([[1.0, 2.0], [3.0, 4.0]], where=[True, False]), 4.0)

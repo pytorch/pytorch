@@ -1,11 +1,10 @@
 #pragma once
 #include <torch/csrc/Export.h>
 
+#include <cstddef>
 #include <cstdint>
 
-namespace torch {
-namespace jit {
-namespace fuser {
+namespace torch::jit::fuser {
 
 // Host-side view of TensorInfo
 // Note dims[0] - we need to dynamically allocate the dims.
@@ -18,12 +17,8 @@ struct TORCH_API TensorInfo {
   }
 
   void* data;
-#pragma GCC diagnostic ignored "-Wpedantic"
   // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
   uint32_t sizes_strides[0];
-#pragma GCC diagnostic pop
 };
 
-} // namespace fuser
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit::fuser

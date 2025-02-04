@@ -1,14 +1,11 @@
+# Owner(s): ["module: dynamo"]
 """
 PYTEST_DONT_REWRITE (prevents pytest from rewriting assertions, which interferes
 with test_adam in OptimizerTests)
 """
 import functools
 
-# Owner(s): ["module: dynamo"]
-
-
 import torch
-
 import torch._dynamo
 import torch._dynamo.test_case
 import torch._dynamo.testing
@@ -60,7 +57,7 @@ class End2EndTests(torch._dynamo.test_case.TestCase):
         optimizer = torch.optim.Adam([input2], lr=0.1)
 
         cnts = torch._dynamo.testing.CompileCounter()
-        opt_training_iter_fn = torch._dynamo.optimize(cnts)(training_iter_fn)
+        opt_training_iter_fn = torch.compile(training_iter_fn, backend=cnts)
         batch = {"x": input1, "y": input2}
         for _ in range(2):
             opt_training_iter_fn(batch, net, optimizer)

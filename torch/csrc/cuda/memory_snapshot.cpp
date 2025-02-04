@@ -1,4 +1,5 @@
 #include <ATen/Context.h>
+#include <ATen/record_function.h>
 #include <c10/cuda/CUDACachingAllocator.h>
 #include <torch/csrc/cuda/memory_snapshot.h>
 #include <torch/csrc/jit/runtime/interpreter.h>
@@ -96,6 +97,26 @@ CapturedTraceback* getFromContext(
       "attempting to gather stack context from the wrong StackContext type.");
 }
 
+void _initRecordAnnotations() {
+  static auto init_placeholder [[maybe_unused]] = [&] {
+    // Save user annotations to CCA memory snapshot tool
+    at::addThreadLocalCallback(
+        at::RecordFunctionCallback(
+            [](const at::RecordFunction& fn)
+                -> std::unique_ptr<at::ObserverContext> {
+              c10::cuda::CUDACachingAllocator::recordAnnotation(
+                  {{"name", fn.name()}, {"stage", "START"}});
+              return nullptr;
+            },
+            [](const at::RecordFunction& fn, at::ObserverContext* ctx_ptr) {
+              c10::cuda::CUDACachingAllocator::recordAnnotation(
+                  {{"name", fn.name()}, {"stage", "END"}});
+            })
+            .scopes({at::RecordScope::USER_SCOPE}));
+    return true;
+  }();
+}
+
 } // namespace
 
 void _record_memory_history(
@@ -105,7 +126,8 @@ void _record_memory_history(
     bool trace_alloc_record_context,
     bool record_cpp_context) {
   c10::cuda::CUDACachingAllocator::CreateContextFn recorder = gather;
-  if (enabled && record_cpp_context) {
+  if (enabled && record_cpp_context &&
+      (trace_alloc_record_context || record_context)) {
     recorder = gather_with_cpp;
     // warm up C++ stack unwinding
     unwind::unwind();
@@ -116,7 +138,8 @@ void _record_memory_history(
   } else if (record_context) {
     when = c10::cuda::CUDACachingAllocator::RecordContext::STATE;
   }
-  at::globalContext().lazyInitCUDA();
+  at::globalContext().lazyInitDevice(c10::DeviceType::CUDA);
+  _initRecordAnnotations();
   c10::cuda::CUDACachingAllocator::recordHistory(
       enabled, recorder, trace_alloc_max_entries, when);
 }
@@ -150,7 +173,7 @@ void _record_memory_history(
       stacks, {"python", "all"}, "expected stacks to be 'python', or 'all'");
 
   c10::cuda::CUDACachingAllocator::CreateContextFn recorder = gather;
-  if (enabled && stacks == "all") {
+  if (enabled && context && stacks == "all") {
     recorder = gather_with_cpp;
     // warm up C++ stack unwinding
     unwind::unwind();
@@ -166,7 +189,8 @@ void _record_memory_history(
       when = c10::cuda::CUDACachingAllocator::RecordContext::STATE;
     }
   }
-  at::globalContext().lazyInitCUDA();
+  at::globalContext().lazyInitDevice(c10::DeviceType::CUDA);
+  _initRecordAnnotations();
   c10::cuda::CUDACachingAllocator::recordHistory(
       enabled.has_value(), recorder, max_entries, when);
 }
@@ -323,6 +347,17 @@ std::string _memory_snapshot_pickled() {
     traces.push_back(trace);
   }
 
+  auto external_annotations = new_list();
+  for (const auto& ae : snapshot.external_annotations) {
+    auto annotation_entry = new_dict();
+    for (const auto& md : ae.metadata_) {
+      annotation_entry.insert((IValue)md.first, md.second);
+    }
+    annotation_entry.insert(device_s, ae.device_);
+    annotation_entry.insert(time_us_s, ae.time_.t_);
+    external_annotations.push_back(annotation_entry);
+  }
+
   auto allocator_settings = new_dict();
   IValue last_allocator_settings_s = "PYTORCH_CUDA_ALLOC_CONF";
   IValue max_split_size_s = "max_split_size";
@@ -365,6 +400,7 @@ std::string _memory_snapshot_pickled() {
   result.insert("segments", segments);
   result.insert("device_traces", traces);
   result.insert("allocator_settings", allocator_settings);
+  result.insert("external_annotations", external_annotations);
 
   auto frames = ivalue_symbolize(frame_tracebacks);
   for (auto i : c10::irange(frames.size())) {

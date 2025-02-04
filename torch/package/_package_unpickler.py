@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import _compat_pickle
 import pickle
 

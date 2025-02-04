@@ -17,7 +17,7 @@ static void checkForInvalidMutationOnCaptures(
   auto args = torch::jit::last(stack, op.schema().arguments().size());
   auto mutated_arg = unwrapIfDead(args[0].toTensor());
   auto* wrapper = maybeGetTensorWrapper(mutated_arg);
-  if (wrapper && wrapper->level().has_value() && wrapper->level().value() == cur_level && !(wrapper->is_immutable())) {
+  if (wrapper && wrapper->level() == cur_level && !(wrapper->is_immutable())) {
     return;
   }
   TORCH_CHECK(false,
@@ -42,8 +42,9 @@ static Tensor materializeGradWrappers(const Tensor& tensor, int64_t current_leve
   if (!wrapper) {
     return makeTensorWrapper(tensor, current_level, /*is_immutable=*/true);
   }
-  TORCH_INTERNAL_ASSERT(wrapper->level().value() <= current_level, "escaped?");
-  if (wrapper->level().value() == current_level) {
+  auto level = wrapper->level();
+  TORCH_INTERNAL_ASSERT(level.has_value() && level <= current_level, "escaped?");
+  if (level == current_level) {
     TORCH_INTERNAL_ASSERT(tensor.defined());
     return tensor;
   }
@@ -84,8 +85,8 @@ static void autogradBasedTransformSendToNext(
     torch::jit::Stack* stack,
     const Interpreter& interpreter,
     TransformType transform_type,
-    optional<bool> prev_grad_mode,
-    optional<bool> prev_fwd_grad_mode,
+    std::optional<bool> prev_grad_mode,
+    std::optional<bool> prev_fwd_grad_mode,
     bool grad_special_case) {
   auto current_level = interpreter.level();
   if (transform_type == TransformType::Grad) {
@@ -113,9 +114,6 @@ static void autogradBasedTransformSendToNext(
     if (!tensor.defined()) {
       return tensor;
     }
-    // if (c10::show_dispatch_trace_enabled()) {
-    //   std::cout << "wrap " << current_level << std::endl;
-    // }
     return makeTensorWrapper(tensor, interpreter, is_immutable);
   };
 
@@ -163,11 +161,11 @@ static void autogradBasedTransformSendToNext(
   foreachTensorInplace(*stack, static_cast<int64_t>(stack->size() - args_size), static_cast<int64_t>(stack->size()), unwrap);
 
   // See NOTE [grad and vjp interaction with no_grad]
-  optional<c10::AutoGradMode> grad_guard;
+  std::optional<c10::AutoGradMode> grad_guard;
   if (transform_type == TransformType::Grad && prev_grad_mode.has_value() && *prev_grad_mode == false) {
     grad_guard.emplace(*prev_grad_mode);
   }
-  optional<c10::AutoFwGradMode> fw_grad_guard;
+  std::optional<c10::AutoFwGradMode> fw_grad_guard;
   if (transform_type == TransformType::Jvp &&
       prev_fwd_grad_mode.has_value() && prev_fwd_grad_mode.value() == false) {
     fw_grad_guard.emplace(*prev_fwd_grad_mode);
@@ -217,7 +215,7 @@ void GradInterpreterPtr::sendToNextInterpreterImpl(
       op, stack, *base_,
       TransformType::Grad,
       prevGradMode(),
-      nullopt,
+      std::nullopt,
       grad_special_case);
 }
 
@@ -234,7 +232,7 @@ void JvpInterpreterPtr::sendToNextInterpreterImpl(
   autogradBasedTransformSendToNext(
       op, stack, *base_,
       TransformType::Jvp,
-      nullopt,
+      std::nullopt,
       prevFwdGradMode(),
       grad_special_case);
 }

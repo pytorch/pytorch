@@ -104,7 +104,7 @@ Tensor& fill_diagonal_(Tensor& self, const Scalar& fill_value, bool wrap) {
     int64_t dim1 = height;
     for (const auto i : c10::irange(1, nDims)) {
       if (self.size(i) != dim1) {
-        AT_ERROR("all dimensions of input must be of equal length");
+        TORCH_CHECK(false, "all dimensions of input must be of equal length");
       }
     }
   }
@@ -145,7 +145,7 @@ static Tensor& zero_cpu_(Tensor &self, int64_t nelements) {
   if (nullptr == ptr) {
     return self.fill_(0);
   }
-  int64_t size_bytes = nelements * self.dtype().itemsize();
+  auto size_bytes = nelements * self.dtype().itemsize();
   if (size_bytes > 0) {
     std::memset(ptr, 0, size_bytes);
   }

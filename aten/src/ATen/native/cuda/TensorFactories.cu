@@ -51,7 +51,7 @@ Tensor& eye_out_cuda(int64_t n, int64_t m, Tensor& result) {
   return result;
 }
 
-Tensor empty_cuda(IntArrayRef size, std::optional<ScalarType> dtype_opt, c10::optional<Layout> layout_opt, c10::optional<Device> device_opt, c10::optional<bool> pin_memory_opt, c10::optional<c10::MemoryFormat> memory_format_opt) {
+Tensor empty_cuda(IntArrayRef size, std::optional<ScalarType> dtype_opt, std::optional<Layout> layout_opt, std::optional<Device> device_opt, std::optional<bool> pin_memory_opt, std::optional<c10::MemoryFormat> memory_format_opt) {
   Tensor result = at::detail::empty_cuda(size, dtype_opt, layout_opt, device_opt, pin_memory_opt, memory_format_opt);
   // See Note [Enabling Deterministic Operations]
   if (C10_UNLIKELY(at::globalContext().deterministicAlgorithms() && at::globalContext().deterministicFillUninitializedMemory())) {
@@ -72,12 +72,12 @@ Tensor _efficientzerotensor_cuda(IntArrayRef size,
     auto allocator = at::native::ZeroTensorAllocator(device_);
     auto dtype_ = dtype_or_default(dtype);
     auto zero_ks = at::DispatchKeySet(c10::DispatchKey::CUDA) | at::DispatchKeySet(c10::DispatchKey::ZeroTensor);
-    auto out = at::detail::empty_generic(size, &allocator, zero_ks, dtype_, c10::nullopt);
+    auto out = at::detail::empty_generic(size, &allocator, zero_ks, dtype_, std::nullopt);
     return out;
 }
 
 
-Tensor empty_strided_cuda(IntArrayRef size, IntArrayRef stride, std::optional<ScalarType> dtype_opt, c10::optional<Layout> layout_opt, c10::optional<Device> device_opt, c10::optional<bool> pin_memory_opt) {
+Tensor empty_strided_cuda(IntArrayRef size, IntArrayRef stride, std::optional<ScalarType> dtype_opt, std::optional<Layout> layout_opt, std::optional<Device> device_opt, std::optional<bool> pin_memory_opt) {
   Tensor result = at::detail::empty_strided_cuda(size, stride, dtype_opt, layout_opt, device_opt, pin_memory_opt);
   // See Note [Enabling Deterministic Operations]
   if (C10_UNLIKELY(at::globalContext().deterministicAlgorithms() && at::globalContext().deterministicFillUninitializedMemory())) {
@@ -248,7 +248,7 @@ void tril_indices_kernel(scalar_t * tensor,
                          int64_t col,
                          int64_t trapezoid_size,
                          int64_t tril_size) {
-  int64_t linear_index = blockIdx.x * blockDim.x + threadIdx.x;
+  int64_t linear_index = ((int64_t) blockIdx.x) * blockDim.x + threadIdx.x;
 
   if (linear_index < tril_size) {
     int64_t r, c;
@@ -275,7 +275,7 @@ void tril_indices_kernel(scalar_t * tensor,
 // pass on your local server.
 Tensor tril_indices_cuda(
     int64_t row, int64_t col, int64_t offset, std::optional<ScalarType> dtype_opt,
-    std::optional<Layout> layout_opt, c10::optional<Device> device_opt, c10::optional<bool> pin_memory_opt) {
+    std::optional<Layout> layout_opt, std::optional<Device> device_opt, std::optional<bool> pin_memory_opt) {
   check_args(row, col, layout_opt);
 
   auto tril_size = get_tril_size(row, col, offset);
@@ -324,7 +324,7 @@ void triu_indices_kernel(scalar_t * tensor,
                          int64_t col,
                          int64_t rectangle_size,
                          int64_t triu_size) {
-  int64_t linear_index = blockIdx.x * blockDim.x + threadIdx.x;
+  int64_t linear_index = ((int64_t) blockIdx.x) * blockDim.x + threadIdx.x;
 
   if (linear_index < triu_size) {
     int64_t r, c;
@@ -351,7 +351,7 @@ void triu_indices_kernel(scalar_t * tensor,
 // pass on your local server.
 Tensor triu_indices_cuda(
     int64_t row, int64_t col, int64_t offset, std::optional<ScalarType> dtype_opt,
-    std::optional<Layout> layout_opt, c10::optional<Device> device_opt, c10::optional<bool> pin_memory_opt) {
+    std::optional<Layout> layout_opt, std::optional<Device> device_opt, std::optional<bool> pin_memory_opt) {
   check_args(row, col, layout_opt);
 
   auto triu_size = row * col - get_tril_size(row, col, offset - 1);

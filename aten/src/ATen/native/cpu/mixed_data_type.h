@@ -2,7 +2,7 @@
 
 #include <ATen/core/Tensor.h>
 
-namespace at { namespace native {
+namespace at::native {
 
 inline ScalarType first_type() {
   return ScalarType::Undefined;
@@ -38,4 +38,4 @@ inline ScalarType param_scalar_type(const Tensor& t, bool is_mixed_type) {
   return is_mixed_type ? ScalarType::Float : t.scalar_type();
 }
 
-}}  // namespace at::native
+} // namespace at::native

@@ -5,8 +5,7 @@
 #include <torch/csrc/api/include/torch/detail/TensorDataContainer.h>
 #include <algorithm>
 
-namespace torch {
-namespace nested {
+namespace torch::nested {
 
 /// Nested tensor
 ///
@@ -26,7 +25,7 @@ inline at::Tensor nested_tensor(
   auto out = at::_nested_tensor_from_tensor_list(
       nested_tensor_data,
       c10::typeMetaToScalarType(options.dtype()),
-      c10::nullopt,
+      std::nullopt,
       options.device(),
       options.pinned_memory());
   if (options.has_requires_grad() && options.requires_grad()) {
@@ -55,7 +54,7 @@ inline at::Tensor nested_tensor(
   auto out = at::_nested_tensor_from_tensor_list(
       tensor_list,
       c10::typeMetaToScalarType(options.dtype()),
-      c10::nullopt,
+      std::nullopt,
       options.device(),
       options.pinned_memory());
   if (options.has_requires_grad() && options.requires_grad()) {
@@ -72,10 +71,10 @@ inline at::Tensor nested_tensor(
 /// ```
 inline at::Tensor as_nested_tensor(
     at::TensorList list,
-    std::optional<at::ScalarType> dtype = c10::nullopt,
-    std::optional<at::Device> device = c10::nullopt) {
+    std::optional<at::ScalarType> dtype = std::nullopt,
+    std::optional<at::Device> device = std::nullopt) {
   return at::_nested_tensor_from_tensor_list(
-      list, dtype, c10::nullopt, device, c10::nullopt);
+      list, dtype, std::nullopt, device, std::nullopt);
 }
 
 /// Nested to padded tensor
@@ -87,9 +86,8 @@ inline at::Tensor as_nested_tensor(
 inline at::Tensor to_padded_tensor(
     const at::Tensor& self,
     double padding,
-    at::OptionalIntArrayRef output_size = c10::nullopt) {
+    at::OptionalIntArrayRef output_size = std::nullopt) {
   return at::nested_to_padded_tensor(self, padding, output_size);
 }
 
-} // namespace nested
-} // namespace torch
+} // namespace torch::nested

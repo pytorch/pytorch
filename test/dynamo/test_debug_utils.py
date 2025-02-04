@@ -1,13 +1,17 @@
 # Owner(s): ["module: dynamo"]
 
+import os
 import unittest
+from unittest.mock import patch
 
 import torch
 from functorch import make_fx
 from torch._dynamo import debug_utils
-from torch._dynamo.debug_utils import aot_graph_input_parser
+from torch._dynamo.debug_utils import aot_graph_input_parser, generate_env_vars_string
 from torch._dynamo.test_case import TestCase
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.inductor_utils import HAS_CUDA
+
 
 requires_cuda = unittest.skipUnless(HAS_CUDA, "requires cuda")
 
@@ -44,7 +48,7 @@ def forward(self, x_1):
     """,  # NOQA: B950
         )
 
-        fp64_model, fp64_examples = debug_utils.cast_to_fp64(fx, (x,))
+        _, fp64_examples = debug_utils.cast_to_fp64(fx, (x,))
         self.assertEqual(fp64_examples, (x.to(torch.float64),))
 
         self.assertExpectedInline(
@@ -59,10 +63,28 @@ def forward(self, x_1):
     """,  # NOQA: B950
         )
 
-    @requires_cuda
-    def test_aot_graph_parser(self):
-        from torch import device
+    @patch.dict(os.environ, {"TORCHINDUCTOR_MAX_AUTOTUNE": "1", "TEST_ENV": "1"})
+    def test_generate_env_vars_string(self):
+        env_strings = generate_env_vars_string()
+        self.assertIn(
+            """os.environ['TORCHINDUCTOR_MAX_AUTOTUNE'] = '1'
+""",
+            env_strings,
+        )
+        self.assertIn(
+            """import os
+""",
+            env_strings,
+        )
+        self.assertNotIn(
+            """TEST_ENV
+""",
+            env_strings,
+        )
 
+
+class TestDebugUtilsDevice(TestCase):
+    def test_aot_graph_parser(self, device):
         def forward(
             self,
             primals_1: "f32[1001, 6]",
@@ -78,7 +100,7 @@ def forward(self, x_1):
                 _tensor_constant0
             )
             _tensor_constant0 = None
-            index: "f32[6144, 4190]" = torch.ops.aten.index.Tensor(
+            index: "f32[6144, 4190]" = torch.ops.aten.index.Tensor(  # noqa: F841
                 primals_48, [None, lift_fresh_copy]
             )
             lift_fresh_copy = None
@@ -111,7 +133,7 @@ def forward(self, x_1):
                 1,
                 dtype=torch.int32,
                 layout=torch.strided,
-                device=device(type="cuda", index=0),
+                device=device,
                 pin_memory=False,
             )
 
@@ -120,7 +142,7 @@ def forward(self, x_1):
                 start=0,
                 step=1,
                 dtype=torch.int32,
-                device=device(type="cuda"),
+                device=device,
                 requires_grad=False,
             )
 
@@ -132,7 +154,7 @@ def forward(self, x_1):
                 start=0,
                 step=1001,
                 dtype=torch.int32,
-                device=device(type="cuda", index=0),
+                device=device,
                 requires_grad=False,
             )
             view: "i32[6150144]" = torch.ops.aten.reshape.default(mul, [-1])
@@ -145,12 +167,11 @@ def forward(self, x_1):
 
             return _embedding_bag
 
-        kwargs = aot_graph_input_parser(forward, device="cuda")
+        kwargs = aot_graph_input_parser(forward, device=device)
         # runs successfully
         forward(**kwargs)
 
-    @requires_cuda
-    def test_sym_aot_graph_parser(self):
+    def test_sym_aot_graph_parser(self, device):
         def forward(
             self,
             primals_1: "f32[1001, 6]",  # noqa: F821
@@ -162,7 +183,7 @@ def forward(self, x_1):
             _tensor_constant0: "i64[4190]" = self._tensor_constant0
 
         kwargs = aot_graph_input_parser(
-            forward, device="cuda", sym_shapes={"s0": 10}, default_sym_shape=5
+            forward, device=device, sym_shapes={"s0": 10}, default_sym_shape=5
         )
 
         self.assertEqual(list(kwargs["primals_2"].shape), [10])
@@ -171,6 +192,11 @@ def forward(self, x_1):
         self.assertEqual(list(kwargs["primals_4"].shape), [5])
         self.assertEqual(kwargs["primals_5"], 5)
 
+
+instantiate_device_type_tests(TestDebugUtils, globals())
+
+devices = ["cuda", "hpu"]
+instantiate_device_type_tests(TestDebugUtilsDevice, globals(), only_for=devices)
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests

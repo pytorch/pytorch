@@ -8,6 +8,7 @@
 namespace at::cuda::sparse {
 
 cusparseStatus_t destroyConstDnMat(const cusparseDnMatDescr* dnMatDescr) {
+  // NOLINTNEXTLINE(*const-cast)
   return cusparseDestroyDnMat(const_cast<cusparseDnMatDescr*>(dnMatDescr));
 }
 
@@ -55,7 +56,6 @@ cusparseIndexType_t getCuSparseIndexType(const c10::ScalarType& scalar_type) {
   }
 }
 
-#if AT_USE_CUSPARSE_GENERIC_API() || AT_USE_HIPSPARSE_GENERIC_API()
 cusparseDnMatDescr_t createRawDnMatDescriptor(const Tensor& input, int64_t batch_offset, bool is_const=false) {
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(input.layout() == kStrided);
   IntArrayRef input_strides = input.strides();
@@ -83,6 +83,7 @@ cusparseDnMatDescr_t createRawDnMatDescriptor(const Tensor& input, int64_t batch
 #endif
 
   auto batch_stride = ndim > 2 && batch_offset >= 0 ? input_strides[ndim - 3] : 0;
+  // NOLINTNEXTLINE(*const-cast)
   void* data_ptr = is_const ? const_cast<void*>(input.const_data_ptr()) : input.data_ptr();
   void* values_ptr = static_cast<char*>(data_ptr) +
       batch_offset * batch_stride * input.itemsize();
@@ -93,7 +94,7 @@ cusparseDnMatDescr_t createRawDnMatDescriptor(const Tensor& input, int64_t batch
   // NOTE: Ideally, in the const case, we would use cusparseConstDnMatDescr_t
   // and cusparseCreateConstDnMat, but those were introduced in CUDA 12, and we
   // still need to support CUDA 11
-  cusparseDnMatDescr_t raw_descriptor;
+  cusparseDnMatDescr_t raw_descriptor = nullptr;
   TORCH_CUDASPARSE_CHECK(cusparseCreateDnMat(
       &raw_descriptor,
       rows,
@@ -119,7 +120,6 @@ CuSparseDnMatDescriptor::CuSparseDnMatDescriptor(const Tensor& input, int64_t ba
 CuSparseConstDnMatDescriptor::CuSparseConstDnMatDescriptor(const Tensor& input, int64_t batch_offset) {
   descriptor_.reset(createRawDnMatDescriptor(input, batch_offset, /*is_const*/true));
 }
-#endif // AT_USE_CUSPARSE_GENERIC_API() || AT_USE_HIPSPARSE_GENERIC_API()
 
 CuSparseDnVecDescriptor::CuSparseDnVecDescriptor(const Tensor& input) {
   // cuSPARSE doesn't support batched vectors
@@ -132,7 +132,7 @@ CuSparseDnVecDescriptor::CuSparseDnVecDescriptor(const Tensor& input) {
   cudaDataType value_type = ScalarTypeToCudaDataType(input.scalar_type());
   check_supported_cuda_type(value_type);
 
-  cusparseDnVecDescr_t raw_descriptor;
+  cusparseDnVecDescr_t raw_descriptor = nullptr;
   TORCH_CUDASPARSE_CHECK(cusparseCreateDnVec(
       &raw_descriptor, input.numel(), input.data_ptr(), value_type));
   descriptor_.reset(raw_descriptor);
@@ -169,7 +169,7 @@ CuSparseSpMatCsrDescriptor::CuSparseSpMatCsrDescriptor(const Tensor& input, int6
   auto values_batch_stride =
       values.dim() >= 2 && batch_offset >= 0 ? values_->stride(-2) : 0;
 
-  cusparseSpMatDescr_t raw_descriptor;
+  cusparseSpMatDescr_t raw_descriptor = nullptr;
   TORCH_CUDASPARSE_CHECK(cusparseCreateCsr(
       &raw_descriptor, // output descriptor
       rows,

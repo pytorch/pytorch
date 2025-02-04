@@ -1,10 +1,13 @@
+# mypy: allow-untyped-defs
 import torch
+from torch import Tensor
 from torch.distributions import constraints
 from torch.distributions.exponential import Exponential
 from torch.distributions.gumbel import euler_constant
 from torch.distributions.transformed_distribution import TransformedDistribution
 from torch.distributions.transforms import AffineTransform, PowerTransform
 from torch.distributions.utils import broadcast_all
+
 
 __all__ = ["Weibull"]
 
@@ -57,11 +60,11 @@ class Weibull(TransformedDistribution):
         return new
 
     @property
-    def mean(self):
+    def mean(self) -> Tensor:
         return self.scale * torch.exp(torch.lgamma(1 + self.concentration_reciprocal))
 
     @property
-    def mode(self):
+    def mode(self) -> Tensor:
         return (
             self.scale
             * ((self.concentration - 1) / self.concentration)
@@ -69,7 +72,7 @@ class Weibull(TransformedDistribution):
         )
 
     @property
-    def variance(self):
+    def variance(self) -> Tensor:
         return self.scale.pow(2) * (
             torch.exp(torch.lgamma(1 + 2 * self.concentration_reciprocal))
             - torch.exp(2 * torch.lgamma(1 + self.concentration_reciprocal))

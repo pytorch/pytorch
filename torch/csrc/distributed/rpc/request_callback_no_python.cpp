@@ -16,9 +16,9 @@
 #include <torch/csrc/distributed/rpc/script_resp.h>
 #include <torch/csrc/distributed/rpc/utils.h>
 
-namespace torch {
-namespace distributed {
-namespace rpc {
+#include <utility>
+
+namespace torch::distributed::rpc {
 
 using namespace torch::distributed::autograd;
 using namespace torch::autograd::profiler;
@@ -32,6 +32,10 @@ struct DistAutogradContextGuard {
     prevCtxId_ = container.currentContextId();
     container.forceCurrentContextId(ctxId);
   }
+  DistAutogradContextGuard(const DistAutogradContextGuard&) = delete;
+  DistAutogradContextGuard(DistAutogradContextGuard&&) = delete;
+  DistAutogradContextGuard& operator=(const DistAutogradContextGuard&) = delete;
+  DistAutogradContextGuard& operator=(DistAutogradContextGuard&&) = delete;
   ~DistAutogradContextGuard() {
     auto& container = DistAutogradContainer::getInstance();
     container.forceCurrentContextId(prevCtxId_);
@@ -88,8 +92,7 @@ c10::intrusive_ptr<JitFuture> RequestCallbackNoPython::processMessage(
                     ->config());
           }
 
-          auto retFuture =
-              processRpcWithErrors(*rpc, messageType, std::move(streams));
+          auto retFuture = processRpcWithErrors(*rpc, messageType, streams);
 
           // Response message has been sent at this moment, this post-response
           // work doesn't affect RPC trip time.
@@ -125,9 +128,9 @@ c10::intrusive_ptr<JitFuture> RequestCallbackNoPython::processMessage(
 c10::intrusive_ptr<JitFuture> RequestCallbackNoPython::processRpcWithErrors(
     RpcCommandBase& rpc,
     const MessageType& messageType,
-    std::vector<c10::Stream> streams) const {
+    const std::vector<c10::Stream>& streams) const {
   try {
-    return processRpc(rpc, messageType, std::move(streams));
+    return processRpc(rpc, messageType, streams);
   } catch (std::exception& e) {
     // Pass a dummy message ID since it will be overwritten anyways.
     return asFuture(handleError(e, messageType, -1));
@@ -136,13 +139,13 @@ c10::intrusive_ptr<JitFuture> RequestCallbackNoPython::processRpcWithErrors(
 
 c10::intrusive_ptr<JitFuture> RequestCallbackNoPython::processScriptCall(
     RpcCommandBase& rpc,
-    std::vector<c10::Stream> streams) const {
+    const std::vector<c10::Stream>& streams) const {
   auto& scriptCall = static_cast<ScriptCall&>(rpc);
 
   TORCH_CHECK(
       scriptCall.hasOp(), "Only supports the case where ScriptCall has an op");
-  auto future = runJitOperator(
-      *scriptCall.op(), scriptCall.stackRef(), std::move(streams));
+  auto future =
+      runJitOperator(*scriptCall.op(), scriptCall.stackRef(), streams);
 
   return future->then(
       [](JitFuture& future) {
@@ -153,20 +156,20 @@ c10::intrusive_ptr<JitFuture> RequestCallbackNoPython::processScriptCall(
 
 c10::intrusive_ptr<JitFuture> RequestCallbackNoPython::processPythonCall(
     RpcCommandBase& rpc,
-    std::vector<c10::Stream> /* unused */) const {
+    const std::vector<c10::Stream>& /* unused */) const {
   C10_THROW_ERROR(Error, "Python call not supported!");
 }
 
 c10::intrusive_ptr<JitFuture> RequestCallbackNoPython::processPythonRemoteCall(
     RpcCommandBase& rpc,
-    std::vector<c10::Stream> /* unused */) const {
+    const std::vector<c10::Stream>& /* unused */) const {
   C10_THROW_ERROR(Error, "Python call not supported!");
 }
 
 c10::intrusive_ptr<JitFuture> RequestCallbackNoPython::assignOwnerRRef(
     const RRefId& rrefId,
     const RRefId& forkId,
-    c10::intrusive_ptr<JitFuture> valueFuture) const {
+    const c10::intrusive_ptr<JitFuture>& valueFuture) const {
   auto& ctx = RRefContext::getInstance();
 
   c10::intrusive_ptr<OwnerRRef> ownerRRef;
@@ -203,18 +206,16 @@ c10::intrusive_ptr<JitFuture> RequestCallbackNoPython::assignOwnerRRef(
 
 c10::intrusive_ptr<JitFuture> RequestCallbackNoPython::processScriptRemoteCall(
     RpcCommandBase& rpc,
-    std::vector<c10::Stream> streams) const {
+    const std::vector<c10::Stream>& streams) const {
   auto& scriptRemoteCall = static_cast<ScriptRemoteCall&>(rpc);
 
   TORCH_CHECK(
       scriptRemoteCall.hasOp(), "ScriptRemoteCall needs to have an op!");
   auto future = runJitOperator(
-      *scriptRemoteCall.op(), scriptRemoteCall.stackRef(), std::move(streams));
+      *scriptRemoteCall.op(), scriptRemoteCall.stackRef(), streams);
 
   return assignOwnerRRef(
-      scriptRemoteCall.retRRefId(),
-      scriptRemoteCall.retForkId(),
-      std::move(future));
+      scriptRemoteCall.retRRefId(), scriptRemoteCall.retForkId(), future);
 }
 
 c10::intrusive_ptr<JitFuture> RequestCallbackNoPython::retrieveOwnerRRef(
@@ -285,7 +286,7 @@ c10::intrusive_ptr<JitFuture> RequestCallbackNoPython::processRRefForkRequest(
 c10::intrusive_ptr<JitFuture> RequestCallbackNoPython::
     processForwardAutogradReq(
         RpcCommandBase& rpc,
-        std::vector<c10::Stream> streams) const {
+        const std::vector<c10::Stream>& streams) const {
   auto& rpcWithAutograd = static_cast<RpcWithAutograd&>(rpc);
 
   // Need to reverse the device map for the backward pass of distributed
@@ -316,8 +317,8 @@ c10::intrusive_ptr<JitFuture> RequestCallbackNoPython::
   auto wrappedMessageType = rpcWithAutograd.wrappedMessageType();
   // Kick off processing for the nested RPC command.
   // wrappedRpcResponseFuture will be a Future<T> to the result.
-  auto wrappedRpcResponseFuture = processRpc(
-      rpcWithAutograd.wrappedRpc(), wrappedMessageType, std::move(streams));
+  auto wrappedRpcResponseFuture =
+      processRpc(rpcWithAutograd.wrappedRpc(), wrappedMessageType, streams);
 
   auto fromWorkerId = rpcWithAutograd.fromWorkerId();
   // The original future needs to be marked as completed when the wrapped
@@ -356,7 +357,7 @@ c10::intrusive_ptr<JitFuture> RequestCallbackNoPython::
 c10::intrusive_ptr<JitFuture> RequestCallbackNoPython::
     processBackwardAutogradReq(
         RpcCommandBase& rpc,
-        std::vector<c10::Stream> streams) const {
+        const std::vector<c10::Stream>& streams) const {
   c10::MultiStreamGuard guard(streams);
   auto& gradientsCall = static_cast<PropagateGradientsReq&>(rpc);
   const auto& autogradMetadata = gradientsCall.getAutogradMetadata();
@@ -440,7 +441,7 @@ c10::intrusive_ptr<JitFuture> RequestCallbackNoPython::
       true /* cleanup TLS state */, false /* consolidate events */);
   {
     TLSLegacyProfilerGuard g(
-        profilingConfig, c10::nullopt, requestThreadOptions);
+        profilingConfig, std::nullopt, requestThreadOptions);
     TORCH_INTERNAL_ASSERT(
         profilerEnabled(), "Expected profiler to be enabled!");
     // Kick off processing for nested work and get Future<T> result in
@@ -496,7 +497,7 @@ c10::intrusive_ptr<JitFuture> RequestCallbackNoPython::processRRefBackward(
 c10::intrusive_ptr<JitFuture> RequestCallbackNoPython::processRpc(
     RpcCommandBase& rpc,
     const MessageType& messageType,
-    std::vector<c10::Stream> streams) const {
+    const std::vector<c10::Stream>& streams) const {
   // TODO: RpcCommandBase should have an abstract execute() method that we can
   // call here instead of having another switch statement here. Even better we
   // could have abstract classes RpcRequest and RpcResp which inherit from
@@ -505,16 +506,16 @@ c10::intrusive_ptr<JitFuture> RequestCallbackNoPython::processRpc(
   // to a python object.
   switch (messageType) {
     case MessageType::SCRIPT_CALL: {
-      return processScriptCall(rpc, std::move(streams));
+      return processScriptCall(rpc, streams);
     }
     case MessageType::PYTHON_CALL: {
-      return processPythonCall(rpc, std::move(streams));
+      return processPythonCall(rpc, streams);
     }
     case MessageType::SCRIPT_REMOTE_CALL: {
-      return processScriptRemoteCall(rpc, std::move(streams));
+      return processScriptRemoteCall(rpc, streams);
     }
     case MessageType::PYTHON_REMOTE_CALL: {
-      return processPythonRemoteCall(rpc, std::move(streams));
+      return processPythonRemoteCall(rpc, streams);
     }
     case MessageType::SCRIPT_RREF_FETCH_CALL: {
       return processScriptRRefFetchCall(rpc);
@@ -532,10 +533,10 @@ c10::intrusive_ptr<JitFuture> RequestCallbackNoPython::processRpc(
       return processRRefForkRequest(rpc);
     }
     case MessageType::FORWARD_AUTOGRAD_REQ: {
-      return processForwardAutogradReq(rpc, std::move(streams));
+      return processForwardAutogradReq(rpc, streams);
     }
     case MessageType::BACKWARD_AUTOGRAD_REQ: {
-      return processBackwardAutogradReq(rpc, std::move(streams));
+      return processBackwardAutogradReq(rpc, streams);
     };
     case MessageType::CLEANUP_AUTOGRAD_CONTEXT_REQ: {
       return processCleanupAutogradContextReq(rpc);
@@ -580,7 +581,7 @@ bool RequestCallbackNoPython::cudaAvailable() const {
 c10::intrusive_ptr<JitFuture> RequestCallbackNoPython::runJitOperator(
     const jit::Operator& op,
     std::vector<at::IValue>& stack,
-    std::vector<c10::Stream> streams) const {
+    const std::vector<c10::Stream>& streams) const {
   c10::MultiStreamGuard guard(streams);
   try {
     op.getOperation()(stack);
@@ -620,10 +621,8 @@ c10::intrusive_ptr<JitFuture> RequestCallbackNoPython::asFuture(
     std::exception_ptr err) const {
   auto future = c10::make_intrusive<JitFuture>(
       at::NoneType::get(), RpcAgent::getCurrentRpcAgent()->getDevices());
-  future->setError(err);
+  future->setError(std::move(err));
   return future;
 }
 
-} // namespace rpc
-} // namespace distributed
-} // namespace torch
+} // namespace torch::distributed::rpc

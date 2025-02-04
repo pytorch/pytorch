@@ -7,8 +7,8 @@
 #include <torch/csrc/profiler/unwind/sections.h>
 #include <torch/csrc/profiler/unwind/unwind.h>
 #include <torch/csrc/profiler/unwind/unwind_error.h>
-#include <cstddef>
 #include <memory>
+#include <unordered_map>
 
 namespace torch::unwind {
 
@@ -80,7 +80,7 @@ struct FastSymbolizer {
     }
     return it->second.get();
   }
-  optional<std::pair<std::string, int64_t>> findLine(
+  std::optional<std::pair<std::string, int64_t>> findLine(
       Sections* s,
       uint64_t offset) {
     if (auto idx = s->findDebugInfoOffset(offset)) {

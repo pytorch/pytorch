@@ -1,7 +1,7 @@
 import abc
 import os
 from dataclasses import dataclass
-from typing import Any, List, Optional, Union
+from typing import Any, Optional, Union
 
 from torch.distributed.checkpoint.metadata import Metadata, MetadataIndex, StorageMeta
 from torch.distributed.checkpoint.planner import (
@@ -10,8 +10,8 @@ from torch.distributed.checkpoint.planner import (
     SavePlan,
     SavePlanner,
 )
-
 from torch.futures import Future
+
 
 __all__ = ["WriteResult", "StorageWriter", "StorageReader"]
 
@@ -69,7 +69,6 @@ class StorageWriter(abc.ABC):
             is_coordinator (bool): Whether this instance is responsible for coordinating
               the checkpoint.
         """
-        pass
 
     @abc.abstractmethod
     def prepare_local_plan(self, plan: SavePlan) -> SavePlan:
@@ -85,10 +84,9 @@ class StorageWriter(abc.ABC):
         Returns:
             A transformed ``SavePlan`` after storage local planning
         """
-        pass
 
     @abc.abstractmethod
-    def prepare_global_plan(self, plans: List[SavePlan]) -> List[SavePlan]:
+    def prepare_global_plan(self, plans: list[SavePlan]) -> list[SavePlan]:
         """
         Perform centralized planning of storage.
 
@@ -103,12 +101,11 @@ class StorageWriter(abc.ABC):
         Returns:
             A list of transformed ``SavePlan`` after storage global planning
         """
-        pass
 
     @abc.abstractmethod
     def write_data(
         self, plan: SavePlan, planner: SavePlanner
-    ) -> Future[List[WriteResult]]:
+    ) -> Future[list[WriteResult]]:
         """
         Write all items from ``plan`` using ``planner`` to resolve the data.
 
@@ -128,10 +125,9 @@ class StorageWriter(abc.ABC):
         Returns:
             A future that completes to a list of WriteResult
         """
-        pass
 
     @abc.abstractmethod
-    def finish(self, metadata: Metadata, results: List[List[WriteResult]]) -> None:
+    def finish(self, metadata: Metadata, results: list[list[WriteResult]]) -> None:
         """
         Write the metadata and marks the current checkpoint as successful.
 
@@ -146,7 +142,6 @@ class StorageWriter(abc.ABC):
         Returns:
             None
         """
-        pass
 
     @classmethod
     @abc.abstractmethod
@@ -213,7 +208,6 @@ class StorageReader(abc.ABC):
             The metadata object associated with the checkpoint being loaded.
 
         """
-        pass
 
     @abc.abstractmethod
     def set_up_storage_reader(self, metadata: Metadata, is_coordinator: bool) -> None:
@@ -225,7 +219,6 @@ class StorageReader(abc.ABC):
             is_coordinator (bool): Whether this instance is responsible for coordinating
               the checkpoint.
         """
-        pass
 
     @abc.abstractmethod
     def prepare_local_plan(self, plan: LoadPlan) -> LoadPlan:
@@ -241,10 +234,9 @@ class StorageReader(abc.ABC):
         Returns:
             A transformed ``LoadPlan`` after storage local planning
         """
-        pass
 
     @abc.abstractmethod
-    def prepare_global_plan(self, plans: List[LoadPlan]) -> List[LoadPlan]:
+    def prepare_global_plan(self, plans: list[LoadPlan]) -> list[LoadPlan]:
         """
         Perform centralized planning of storage loading.
 
@@ -259,7 +251,6 @@ class StorageReader(abc.ABC):
         Returns:
             A list of transformed ``LoadPlan`` after storage global planning
         """
-        pass
 
     @abc.abstractmethod
     def read_data(self, plan: LoadPlan, planner: LoadPlanner) -> Future[None]:
@@ -282,7 +273,6 @@ class StorageReader(abc.ABC):
         Returns:
             A future that completes once all reads are finished.
         """
-        pass
 
     @classmethod
     @abc.abstractmethod

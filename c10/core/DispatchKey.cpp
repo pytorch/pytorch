@@ -1,6 +1,7 @@
 #include <c10/core/DispatchKey.h>
 #include <c10/core/DispatchKeySet.h>
 
+#include <regex>
 #include <unordered_map>
 
 namespace c10 {
@@ -84,6 +85,8 @@ const char* toString(DispatchKey t) {
 
     case DispatchKey::Quantized:
       return "Quantized";
+    case DispatchKey::QuantizedPrivateUse1:
+      return "QuantizedPrivateUse1";
     case DispatchKey::CustomRNGKeyId:
       return "CustomRNGKeyId";
     case DispatchKey::MkldnnCPU:
@@ -137,6 +140,8 @@ const char* toString(DispatchKey t) {
 
     case DispatchKey::AutocastCPU:
       return "AutocastCPU";
+    case DispatchKey::AutocastMTIA:
+      return "AutocastMTIA";
     case DispatchKey::AutocastXPU:
       return "AutocastXPU";
     case DispatchKey::AutocastIPU:
@@ -149,6 +154,8 @@ const char* toString(DispatchKey t) {
       return "AutocastXLA";
     case DispatchKey::AutocastPrivateUse1:
       return "AutocastPrivateUse1";
+    case DispatchKey::AutocastMPS:
+      return "AutocastMPS";
 
     case DispatchKey::FuncTorchBatched:
       return "FuncTorchBatched";
@@ -291,12 +298,14 @@ c10::DispatchKey parseDispatchKey(const std::string& k) {
       {"AutogradNestedTensor", c10::DispatchKey::AutogradNestedTensor},
       {"Tracer", c10::DispatchKey::Tracer},
       {"AutocastCPU", c10::DispatchKey::AutocastCPU},
+      {"AutocastMTIA", c10::DispatchKey::AutocastMTIA},
       {"AutocastXPU", c10::DispatchKey::AutocastXPU},
       {"AutocastIPU", c10::DispatchKey::AutocastIPU},
       {"AutocastHPU", c10::DispatchKey::AutocastHPU},
       {"AutocastCUDA", c10::DispatchKey::AutocastCUDA},
       {"AutocastXLA", c10::DispatchKey::AutocastXLA},
       {"AutocastPrivateUse1", c10::DispatchKey::AutocastPrivateUse1},
+      {"AutocastMPS", c10::DispatchKey::AutocastMPS},
       {"FuncTorchBatched", c10::DispatchKey::FuncTorchBatched},
       {"BatchedNestedTensor", c10::DispatchKey::BatchedNestedTensor},
       {"FuncTorchVmapMode", c10::DispatchKey::FuncTorchVmapMode},
@@ -325,6 +334,7 @@ c10::DispatchKey parseDispatchKey(const std::string& k) {
       {"NestedTensor", c10::DispatchKey::NestedTensor},
       {"NestedTensorCPU", c10::DispatchKey::NestedTensorCPU},
       {"NestedTensorCUDA", c10::DispatchKey::NestedTensorCUDA},
+      {"NestedTensorXPU", c10::DispatchKey::NestedTensorXPU},
       {"NestedTensorMeta", c10::DispatchKey::NestedTensorMeta},
       {"NestedTensorPrivateUse1", c10::DispatchKey::NestedTensorPrivateUse1},
       {"PrivateUse1", c10::DispatchKey::PrivateUse1},
@@ -378,6 +388,17 @@ c10::DispatchKey parseDispatchKey(const std::string& k) {
        c10::DispatchKey::FuncTorchBatchedDecomposition},
   };
   auto it = key_map.find(k);
+  if (it == key_map.end() && c10::get_privateuse1_backend() != "PrivateUse1") {
+    std::string pu1_backend_name = c10::get_privateuse1_backend();
+    std::transform(
+        pu1_backend_name.begin(),
+        pu1_backend_name.end(),
+        pu1_backend_name.begin(),
+        ::toupper);
+    std::string processed_k =
+        std::regex_replace(k, std::regex(pu1_backend_name), "PrivateUse1");
+    it = key_map.find(processed_k);
+  }
   TORCH_CHECK(it != key_map.end(), "could not parse dispatch key: ", k);
   return it->second;
 }

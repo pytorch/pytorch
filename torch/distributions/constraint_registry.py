@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 r"""
 PyTorch provides two global :class:`ConstraintRegistry` objects that link
 :class:`~torch.distributions.constraints.Constraint` objects to
@@ -65,9 +66,10 @@ You can create your own registry by creating a new :class:`ConstraintRegistry`
 object.
 """
 
-import numbers
 
 from torch.distributions import constraints, transforms
+from torch.types import _Number
+
 
 __all__ = [
     "ConstraintRegistry",
@@ -219,12 +221,10 @@ def _transform_to_less_than(constraint):
 def _transform_to_interval(constraint):
     # Handle the special case of the unit interval.
     lower_is_0 = (
-        isinstance(constraint.lower_bound, numbers.Number)
-        and constraint.lower_bound == 0
+        isinstance(constraint.lower_bound, _Number) and constraint.lower_bound == 0
     )
     upper_is_1 = (
-        isinstance(constraint.upper_bound, numbers.Number)
-        and constraint.upper_bound == 1
+        isinstance(constraint.upper_bound, _Number) and constraint.upper_bound == 1
     )
     if lower_is_0 and upper_is_1:
         return transforms.SigmoidTransform()

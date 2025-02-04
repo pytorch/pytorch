@@ -7,13 +7,13 @@
 
 #include <c10/macros/Macros.h>
 
-namespace at {
-namespace native {
+namespace at::native {
 
 using namespace at::cuda::detail;
 
 // Kernel for fast unfold+copy on volumes
 template <typename T>
+C10_LAUNCH_BOUNDS_1(1024)
 __global__ void vol2col_kernel(
     const int64_t n,
     const T* data_vol,
@@ -259,5 +259,4 @@ void col2vol(
   C10_CUDA_KERNEL_LAUNCH_CHECK();
 }
 
-} // namespace native
-} // namespace at
+} // namespace at::native

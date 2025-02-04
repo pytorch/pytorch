@@ -43,6 +43,7 @@ class TestTypePromotion(TestCase):
     # `int+float -> float` but `int.add_(float)` is rejected as an error.
     # Promoting inplace would require re-allocating and copying the memory of the
     # tensor data, since element size could change.
+    # https://github.com/pytorch/pytorch/issues/127049
     @float_double_default_dtype
     def test_inplace(self, device):
         int_tensor = torch.ones([4, 4, 4], dtype=torch.int32, device=device)
@@ -921,7 +922,6 @@ class TestTypePromotion(TestCase):
     def test_sparse_div_promotion(self, device, dtype):
         for op in (torch.div, torch.true_divide):
             dividend = torch.randn(5, device=device).to(dtype)
-            divisor = 2
             dividend_sparse = dividend.to_sparse()
             casting_result = dividend.to(torch.get_default_dtype()) / 2
             self.assertEqual(casting_result, op(dividend_sparse, 2).to_dense())

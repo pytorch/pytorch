@@ -9,7 +9,6 @@ from torch.distributed._shard.sharded_tensor import ShardedTensor
 from torch.distributed._shard.sharding_plan import ShardingPlan, ShardingPlanner
 from torch.distributed._shard.sharding_spec import ChunkShardingSpec
 from torch.testing._internal.common_distributed import requires_nccl, skip_if_lt_x_gpu
-
 from torch.testing._internal.common_utils import run_tests, TEST_WITH_DEV_DBG_ASAN
 from torch.testing._internal.distributed._shard.sharded_tensor import (
     ShardedTensorTestBase,
@@ -20,6 +19,7 @@ from torch.testing._internal.distributed._shard.sharded_tensor._test_ops_common 
     generate_chunk_sharding_specs_for_test,
 )
 from torch.testing._internal.distributed._shard.test_common import SimpleMegatronLM
+
 
 if TEST_WITH_DEV_DBG_ASAN:
     print(
@@ -42,7 +42,7 @@ class ChunkAllShardingPlanner(ShardingPlanner):
     def build_plan(self, module: nn.Module) -> ShardingPlan:
         named_params = module.named_parameters()
         plan = {}
-        for name, param in named_params:
+        for name, _ in named_params:
             plan[name] = ChunkShardingSpec(self.dim, placements=self.devices)
 
         return ShardingPlan(plan=plan)

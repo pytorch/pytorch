@@ -17,7 +17,11 @@ class KernelFunction;
 // no overhead to fallthrough to the next key.  See cpp file for some more
 // implementation notes; notably, this does NOT actually go through the
 // boxing/unboxing codepath.
-TORCH_API void fallthrough_kernel(OperatorKernel*, const OperatorHandle&, DispatchKeySet, Stack*);
+TORCH_API void fallthrough_kernel(
+    OperatorKernel*,
+    const OperatorHandle&,
+    DispatchKeySet,
+    Stack*);
 
 // Note [Ambiguity in AutogradOther kernel]
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -57,7 +61,11 @@ TORCH_API void fallthrough_kernel(OperatorKernel*, const OperatorHandle&, Dispat
 // but unimplemented backends would prefer CompositeImplicitAutograd.  Rather
 // than arbitrarily pick one or the other, we just register a kernel that raises
 // an error and let the user decide how to proceed.
-TORCH_API void ambiguous_autogradother_kernel(OperatorKernel*, const OperatorHandle&, DispatchKeySet, Stack*);
+TORCH_API void ambiguous_autogradother_kernel(
+    OperatorKernel*,
+    const OperatorHandle&,
+    DispatchKeySet,
+    Stack*);
 
 // Note [named_not_supported_kernel]
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -66,42 +74,57 @@ TORCH_API void ambiguous_autogradother_kernel(OperatorKernel*, const OperatorHan
 // cased in the dispatcher to be triggered before we attempt boxing (so we can
 // give a good error message in cases when boxing is not supported).  When
 // boxing is universally supported this can be removed.
-[[noreturn]] TORCH_API void named_not_supported_kernel(OperatorKernel*, const OperatorHandle&, DispatchKeySet, Stack*);
+[[noreturn]] TORCH_API void named_not_supported_kernel(
+    OperatorKernel*,
+    const OperatorHandle&,
+    DispatchKeySet,
+    Stack*);
 
 /**
  * BoxedKernel is similar to a std::function storing a boxed kernel.
  */
 class TORCH_API BoxedKernel final {
-public:
+ public:
   // This is how boxed kernels are actually stored
   //
   // Note [Plumbing Keys Through The Dispatcher]
-  // Benchmarks have shown that it is expensive for the dispatcher to read from thread-local storage (TLS)
-  // upon every dispatch call into order to compute which kernel to dispatch to.
+  // Benchmarks have shown that it is expensive for the dispatcher to read from
+  // thread-local storage (TLS) upon every dispatch call into order to compute
+  // which kernel to dispatch to.
   //
-  // To mitigate this, we've updated the calling convention inside the dispatcher to expect every kernel that it stores
-  // to have a first argument of type DispatchKeySet.
+  // To mitigate this, we've updated the calling convention inside the
+  // dispatcher to expect every kernel that it stores to have a first argument
+  // of type DispatchKeySet.
   //
-  // What are the invariants of the DispatchKeySet when it gets passed to a kernel?
+  // What are the invariants of the DispatchKeySet when it gets passed to a
+  // kernel?
   // - All keys to the left of the current dispatch key have been masked out.
-  //   (e.g. a Tracing kernel that takes in the DispatchKeySet will expect the highest bit to be DispatchKey::Tracer)
-  // - All other keys that dispatcher normally would have computed through TLS + global state + op arguments
+  //   (e.g. a Tracing kernel that takes in the DispatchKeySet will expect the
+  //   highest bit to be DispatchKey::Tracer)
+  // - All other keys that dispatcher normally would have computed through TLS +
+  // global state + op arguments
   //   are still in the set.
   //
-  // Kernels can then opt into using this keyset to save the dispatcher from doing repeated work during redispatches:
-  // recalculating the highest-priority dispatch key, which involves reading from TLS. Instead, the kernels that opt in will
-  // calculate an updated DispatchKeySet directly from the old one, and pass the updated set directly into the dispatcher
-  // upon redispatching.
+  // Kernels can then opt into using this keyset to save the dispatcher from
+  // doing repeated work during redispatches: recalculating the highest-priority
+  // dispatch key, which involves reading from TLS. Instead, the kernels that
+  // opt in will calculate an updated DispatchKeySet directly from the old one,
+  // and pass the updated set directly into the dispatcher upon redispatching.
   //
-  // This is an opt-in mechanism: Kernels can automatically opt in by setting the first argument in their signature
-  // to be of type DispatchKeySet. See the kernels in VariableTypeEverything.cpp and TraceTypeEverything.cpp for examples.
+  // This is an opt-in mechanism: Kernels can automatically opt in by setting
+  // the first argument in their signature to be of type DispatchKeySet. See the
+  // kernels in VariableTypeEverything.cpp and TraceTypeEverything.cpp for
+  // examples.
   //
-  // The mechanism for optionally passing that DispatchKeySet into the kernel lives in make_boxed_from_unboxed_functor.h.
-  // See Note [Plumbing Keys Through The Dispatcher 2] for details.
-  using InternalBoxedKernelFunction = void(OperatorKernel*, const OperatorHandle&, DispatchKeySet, Stack*);
+  // The mechanism for optionally passing that DispatchKeySet into the kernel
+  // lives in make_boxed_from_unboxed_functor.h. See Note [Plumbing Keys Through
+  // The Dispatcher 2] for details.
+  using InternalBoxedKernelFunction =
+      void(OperatorKernel*, const OperatorHandle&, DispatchKeySet, Stack*);
   // This is the public API for how boxed kernels are defined
   using BoxedKernelFunction = void(const OperatorHandle&, Stack*);
-  using BoxedKernelFunction_withDispatchKeys = void(const OperatorHandle&, DispatchKeySet, Stack*);
+  using BoxedKernelFunction_withDispatchKeys =
+      void(const OperatorHandle&, DispatchKeySet, Stack*);
 
   BoxedKernel();
 
@@ -113,7 +136,10 @@ public:
   /**
    * Call the function with boxed arguments.
    */
-  void callBoxed(const OperatorHandle& opHandle, DispatchKeySet dispatchKeySet, Stack* stack) const;
+  void callBoxed(
+      const OperatorHandle& opHandle,
+      DispatchKeySet dispatchKeySet,
+      Stack* stack) const;
 
   /**
    * Create a KernelFunction from a boxed function.
@@ -123,14 +149,15 @@ public:
    * > void boxed_func(OperatorKernel*, Stack* stack) {...}
    * > BoxedFunction func = BoxedKernel::makeFromFunction<&boxed_func>();
    */
-  template<BoxedKernelFunction* func>
+  template <BoxedKernelFunction* func>
   static BoxedKernel makeFromFunction();
 
   /**
-   * TODO: This will only be useful if we write a backend fallback that plumbs dispatch keys (currently there are none)
-   * See Note [Plumbing Keys Through The Dispatcher] for details.
+   * TODO: This will only be useful if we write a backend fallback that plumbs
+   * dispatch keys (currently there are none) See Note [Plumbing Keys Through
+   * The Dispatcher] for details.
    */
-  template<BoxedKernelFunction_withDispatchKeys* func>
+  template <BoxedKernelFunction_withDispatchKeys* func>
   static BoxedKernel makeFromFunction();
 
   /**
@@ -142,27 +169,37 @@ public:
    * >   public:
    * >     void operator()(const OperatorHandle&, DispatchKeySet, Stack*) {...}
    * > };
-   * > BoxedKernel func = BoxedKernel::makeFromFunctor(std::make_unique<MyFunctor>());
+   * > BoxedKernel func =
+   * BoxedKernel::makeFromFunctor(std::make_unique<MyFunctor>());
    */
-  template<class KernelFunctor>
-  static BoxedKernel makeFromFunctor(std::unique_ptr<KernelFunctor> kernelFunctor);
-
+  template <class KernelFunctor>
+  static BoxedKernel makeFromFunctor(
+      std::unique_ptr<KernelFunctor> kernelFunctor);
 
   static BoxedKernel makeFallthrough();
   static BoxedKernel makeAmbiguousAutogradOther();
   static BoxedKernel makeNamedNotSupported();
 
-private:
-
+ private:
   friend class KernelFunction;
 
-  template<BoxedKernelFunction* func>
-  static void make_boxed_function(OperatorKernel*, const OperatorHandle& opHandle, DispatchKeySet, Stack* stack);
+  template <BoxedKernelFunction* func>
+  static void make_boxed_function(
+      OperatorKernel*,
+      const OperatorHandle& opHandle,
+      DispatchKeySet,
+      Stack* stack);
 
-  template<BoxedKernelFunction_withDispatchKeys* func>
-  static void make_boxed_function(OperatorKernel*, const OperatorHandle& opHandle, DispatchKeySet, Stack* stack);
+  template <BoxedKernelFunction_withDispatchKeys* func>
+  static void make_boxed_function(
+      OperatorKernel*,
+      const OperatorHandle& opHandle,
+      DispatchKeySet,
+      Stack* stack);
 
-  explicit BoxedKernel(std::unique_ptr<OperatorKernel> functor, InternalBoxedKernelFunction* boxed_kernel_func);
+  explicit BoxedKernel(
+      std::unique_ptr<OperatorKernel> functor,
+      InternalBoxedKernelFunction* boxed_kernel_func);
 
   OperatorKernel* getFunctor() const;
   InternalBoxedKernelFunction* getFnPtr() const;
@@ -171,6 +208,6 @@ private:
   InternalBoxedKernelFunction* boxed_kernel_func_;
 };
 
-}  // namespace c10
+} // namespace c10
 
 #include <ATen/core/boxing/BoxedKernel_impl.h>

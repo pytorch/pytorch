@@ -4,9 +4,9 @@
 #include <ATen/DynamicLibrary.h>
 #include <stdexcept>
 
-namespace at {
-namespace cuda {
-namespace detail {
+
+
+namespace at::cuda::detail {
 namespace _stubs {
 
 at::DynamicLibrary& getCUDALibrary() {
@@ -127,8 +127,8 @@ RETTYPE NAME(ARG1 a1, ARG2 a2, ARG3 a3, ARG4 a4) {                              
 #define NVRTC_STUB2(NAME, A1, A2) _STUB_2(NVRTC, NAME, nvrtcResult, A1, A2)
 #define NVRTC_STUB3(NAME, A1, A2, A3) _STUB_3(NVRTC, NAME, nvrtcResult, A1, A2, A3)
 
-NVRTC_STUB2(nvrtcVersion, int*, int*);
-NVRTC_STUB2(nvrtcAddNameExpression, nvrtcProgram, const char * const);
+NVRTC_STUB2(nvrtcVersion, int*, int*)
+NVRTC_STUB2(nvrtcAddNameExpression, nvrtcProgram, const char * const)
 
 nvrtcResult nvrtcCreateProgram(nvrtcProgram *prog,
                                const char *src,
@@ -143,32 +143,69 @@ nvrtcResult nvrtcCreateProgram(nvrtcProgram *prog,
   return fn(prog, src, name, numHeaders, headers, includeNames);
 }
 
-NVRTC_STUB1(nvrtcDestroyProgram, nvrtcProgram *);
-NVRTC_STUB2(nvrtcGetPTXSize, nvrtcProgram, size_t *);
-NVRTC_STUB2(nvrtcGetPTX, nvrtcProgram, char *);
+NVRTC_STUB1(nvrtcDestroyProgram, nvrtcProgram *)
+NVRTC_STUB2(nvrtcGetPTXSize, nvrtcProgram, size_t *)
+NVRTC_STUB2(nvrtcGetPTX, nvrtcProgram, char *)
 #if defined(CUDA_VERSION) && CUDA_VERSION >= 11010
-NVRTC_STUB2(nvrtcGetCUBINSize, nvrtcProgram, size_t *);
-NVRTC_STUB2(nvrtcGetCUBIN, nvrtcProgram, char *);
+NVRTC_STUB2(nvrtcGetCUBINSize, nvrtcProgram, size_t *)
+NVRTC_STUB2(nvrtcGetCUBIN, nvrtcProgram, char *)
 #endif
-NVRTC_STUB3(nvrtcCompileProgram, nvrtcProgram, int, const char * const *);
-_STUB_1(NVRTC, nvrtcGetErrorString, const char *, nvrtcResult);
-NVRTC_STUB2(nvrtcGetProgramLogSize,nvrtcProgram, size_t*);
-NVRTC_STUB2(nvrtcGetProgramLog, nvrtcProgram, char *);
-NVRTC_STUB3(nvrtcGetLoweredName, nvrtcProgram, const char *, const char **);
+NVRTC_STUB3(nvrtcCompileProgram, nvrtcProgram, int, const char * const *)
+_STUB_1(NVRTC, nvrtcGetErrorString, const char *, nvrtcResult)
+NVRTC_STUB2(nvrtcGetProgramLogSize,nvrtcProgram, size_t*)
+NVRTC_STUB2(nvrtcGetProgramLog, nvrtcProgram, char *)
+NVRTC_STUB3(nvrtcGetLoweredName, nvrtcProgram, const char *, const char **)
 
-CUDA_STUB2(cuModuleLoadData, CUmodule *, const void *);
-CUDA_STUB3(cuModuleGetFunction, CUfunction *, CUmodule, const char *);
-CUDA_STUB4(cuOccupancyMaxActiveBlocksPerMultiprocessor, int *, CUfunction, int, size_t);
-CUDA_STUB2(cuGetErrorString, CUresult, const char **);
-CUDA_STUB1(cuCtxGetCurrent, CUcontext *);
-CUDA_STUB1(cuCtxSetCurrent, CUcontext);
-CUDA_STUB1(cuModuleUnload, CUmodule);
-CUDA_STUB3(cuDevicePrimaryCtxGetState, CUdevice, unsigned int *, int *);
-CUDA_STUB2(cuDevicePrimaryCtxRetain, CUcontext *, CUdevice);
-CUDA_STUB4(cuLinkCreate, unsigned int, CUjit_option *, void **, CUlinkState *);
-CUDA_STUB3(cuLinkComplete, CUlinkState, void **, size_t *);
-CUDA_STUB3(cuFuncSetAttribute, CUfunction, CUfunction_attribute, int);
-CUDA_STUB3(cuFuncGetAttribute, int*, CUfunction_attribute, CUfunction);
+CUDA_STUB2(cuModuleLoadData, CUmodule *, const void *)
+CUDA_STUB3(cuModuleGetFunction, CUfunction *, CUmodule, const char *)
+CUDA_STUB4(cuOccupancyMaxActiveBlocksPerMultiprocessor, int *, CUfunction, int, size_t)
+CUDA_STUB2(cuGetErrorString, CUresult, const char **)
+CUDA_STUB1(cuCtxGetCurrent, CUcontext *)
+CUDA_STUB1(cuCtxSetCurrent, CUcontext)
+CUDA_STUB1(cuModuleUnload, CUmodule)
+CUDA_STUB3(cuDevicePrimaryCtxGetState, CUdevice, unsigned int *, int *)
+CUDA_STUB2(cuDevicePrimaryCtxRetain, CUcontext *, CUdevice)
+CUDA_STUB4(cuLinkCreate, unsigned int, CUjit_option *, void **, CUlinkState *)
+CUDA_STUB3(cuLinkComplete, CUlinkState, void **, size_t *)
+CUDA_STUB3(cuFuncSetAttribute, CUfunction, CUfunction_attribute, int)
+CUDA_STUB3(cuFuncGetAttribute, int*, CUfunction_attribute, CUfunction)
+
+#if defined(CUDA_VERSION) && CUDA_VERSION >= 12000
+CUresult CUDAAPI
+cuTensorMapEncodeTiled(
+    CUtensorMap* tensorMap,
+    CUtensorMapDataType tensorDataType,
+    cuuint32_t tensorRank,
+    void* globalAddress,
+    const cuuint64_t* globalDim,
+    const cuuint64_t* globalStrides,
+    const cuuint32_t* boxDim,
+    const cuuint32_t* elementStrides,
+    CUtensorMapInterleave interleave,
+    CUtensorMapSwizzle swizzle,
+    CUtensorMapL2promotion l2Promotion,
+    CUtensorMapFloatOOBfill oobFill) {
+  auto fn = reinterpret_cast<decltype(&cuTensorMapEncodeTiled)>(
+      getCUDALibrary().sym(__func__));
+  if (!fn)
+    throw std::runtime_error("Can't get cuTensorMapEncodeTiled");
+  lazyNVRTC.cuTensorMapEncodeTiled = fn;
+  return fn(
+      tensorMap,
+      tensorDataType,
+      tensorRank,
+      globalAddress,
+      globalDim,
+      globalStrides,
+      boxDim,
+      elementStrides,
+      interleave,
+      swizzle,
+      l2Promotion,
+      oobFill);
+}
+
+#endif
 
 // Irregularly shaped functions
 CUresult CUDAAPI cuLaunchKernel(CUfunction f,
@@ -256,6 +293,4 @@ NVRTC lazyNVRTC = {
   AT_FORALL_NVRTC(_REFERENCE_MEMBER)
 #undef _REFERENCE_MEMBER
 };
-} // namespace detail
-} // namespace cuda
-} // namespace at
+} // namespace at::cuda::detail

@@ -7,10 +7,8 @@
 {%- macro binary_env_as_input(config, is_windows=False, include_skip_tests=False) -%}
 {%- if is_windows %}
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
-      BUILDER_ROOT: ${{ github.workspace }}/builder
 {%- else %}
       PYTORCH_ROOT: /pytorch
-      BUILDER_ROOT: /builder
 {%- endif %}
       PACKAGE_TYPE: !{{ config["package_type"] }}
       # TODO: This is a legacy variable that we eventually want to get rid of in
@@ -30,6 +28,9 @@
   {%- if config["devtoolset"] %}
       DESIRED_DEVTOOLSET: !{{ config["devtoolset"] }}
   {%- endif %}
+  {%- if config.use_split_build is defined %}
+      use_split_build: !{{ config["use_split_build"] }}
+  {%- endif %}
 {%- endif %}
 {%- if config["package_type"] == "libtorch" %}
   {%- if config["libtorch_config"] %}
@@ -42,8 +43,9 @@
   {%- if is_windows %}
       # This is a dummy value for libtorch to work correctly with our batch scripts
       # without this value pip does not get installed for some reason
-      DESIRED_PYTHON: "3.8"
+      DESIRED_PYTHON: "3.9"
   {%- endif %}
+
 {%- else %}
       DESIRED_PYTHON: "!{{ config["python_version"] }}"
 {%- endif %}
@@ -57,7 +59,11 @@
       id-token: write
       contents: read
 {%- if has_test %}
+    {%- if config["gpu_arch_type"] == "cuda-aarch64" %}
+    needs: !{{ config["build_name"] }}-build
+    {%- else %}
     needs: !{{ config["build_name"] }}-test
+    {%- endif %}
 {%- else %}
     needs: !{{ config["build_name"] }}-build
 {%- endif %}
@@ -68,7 +74,5 @@
       {%- endif %}
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
-      conda-pytorchbot-token: ${{ secrets.CONDA_PYTORCHBOT_TOKEN }}
-      conda-pytorchbot-token-test: ${{ secrets.CONDA_PYTORCHBOT_TOKEN_TEST }}
     uses: ./.github/workflows/_binary-upload.yml
 {%- endmacro %}

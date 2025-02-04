@@ -1,8 +1,7 @@
 #include <ATen/core/Tensor.h>
 #include <c10/util/Exception.h>
 
-namespace at {
-namespace native {
+namespace at::native {
 
 inline void check_pixel_shuffle_shapes(const Tensor& self, int64_t upscale_factor) {
   TORCH_CHECK(self.dim() >= 3,
@@ -44,4 +43,4 @@ inline void check_pixel_unshuffle_shapes(const Tensor& self, int64_t downscale_f
       downscale_factor);
 }
 
-}} // namespace at::native
+} // namespace at::native

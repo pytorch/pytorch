@@ -10,15 +10,13 @@
 #include <ATen/ATen.h>
 #include <torch/library.h>
 
-namespace at {
-namespace native {
-namespace metal {
+namespace at::native::metal {
 
 template <typename T>
 Tensor mpscnn_softmax(
     const Tensor& input,
     int64_t dim,
-    c10::optional<ScalarType> dtype) {
+    std::optional<ScalarType> dtype) {
   TORCH_CHECK(input.is_metal());
   // TODO: [T87180544] Implement softmax/log_softmax in metal shaders
   TORCH_CHECK(input.dim() == 2);
@@ -50,17 +48,17 @@ Tensor mpscnn_softmax(
   return output;
 }
 
-Tensor log_softmax_int(
+static Tensor log_softmax_int(
     const Tensor& input,
     int64_t dim,
-    c10::optional<ScalarType> dtype) {
+    std::optional<ScalarType> dtype) {
   return mpscnn_softmax<MPSCNNLogSoftMax>(input, dim, dtype);
 }
 
-Tensor softmax_int(
+static Tensor softmax_int(
     const Tensor& input,
     int64_t dim,
-    c10::optional<ScalarType> dtype) {
+    std::optional<ScalarType> dtype) {
   return mpscnn_softmax<MPSCNNSoftMax>(input, dim, dtype);
 }
 
@@ -69,6 +67,4 @@ TORCH_LIBRARY_IMPL(aten, Metal, m) {
   m.impl(TORCH_SELECTIVE_NAME("aten::softmax.int"), TORCH_FN(metal::softmax_int));
 };
 
-}
-}
-}
+} // namespace at::native::metal

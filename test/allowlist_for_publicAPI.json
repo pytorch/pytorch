@@ -33,7 +33,8 @@
     "torch.nn.quantizable": "torch.ao.nn.quantizable",
     "torch.nn.quantizable.modules": "torch.ao.nn.quantizable.modules",
     "torch.nn.quantizable.modules.activation": "torch.ao.nn.quantizable.modules.activation",
-    "torch.nn.quantizable.modules.rnn": "torch.ao.nn.quantizable.modules.rnn"
+    "torch.nn.quantizable.modules.rnn": "torch.ao.nn.quantizable.modules.rnn",
+    "torch.distributed.tensor.device_mesh": "torch.distributed.device_mesh"
   },
   "torch.backends": [
     "contextmanager"
@@ -211,30 +212,6 @@
   "torch.distributed.optim.utils": [
     "Type"
   ],
-  "torch.distributed.pipeline.sync.pipe": [
-    "Pipeline"
-  ],
-  "torch.distributed.pipeline.sync.skip.layout": [
-    "SkipLayout",
-    "inspect_skip_layout"
-  ],
-  "torch.distributed.pipeline.sync.skip.portal": [
-    "Context",
-    "Portal",
-    "PortalBlue",
-    "PortalCopy",
-    "PortalOrange"
-  ],
-  "torch.distributed.pipeline.sync.skip.skippable": [
-    "Skippable"
-  ],
-  "torch.distributed.pipeline.sync.skip.tracker": [
-    "SkipTracker",
-    "SkipTrackerThroughPotals",
-    "ThreadLocal",
-    "current_skip_tracker",
-    "use_skip_tracker"
-  ],
   "torch.distributed.remote_device": [
     "Optional",
     "Union"
@@ -285,7 +262,9 @@
     "Future"
   ],
   "torch.fx": [
+    "PH",
     "ProxyableClassMeta",
+    "CodeGen",
     "Tracer",
     "symbolic_trace",
     "wrap"
@@ -499,6 +478,31 @@
     "vander",
     "vecdot",
     "vector_norm"
+  ],
+  "torch.masked": [
+    "amax",
+    "amin",
+    "argmax",
+    "argmin",
+    "as_masked_tensor",
+    "cumprod",
+    "cumsum",
+    "is_masked_tensor",
+    "log_softmax",
+    "logaddexp",
+    "logsumexp",
+    "masked_tensor",
+    "MaskedTensor",
+    "mean",
+    "median",
+    "norm",
+    "normalize",
+    "prod",
+    "softmax",
+    "softmin",
+    "std",
+    "sum",
+    "var"
   ],
   "torch.multiprocessing": [
     "Array",
@@ -1024,10 +1028,10 @@
   "torch.types": [
     "Any",
     "Device",
+    "FileLike",
     "List",
     "Number",
     "Sequence",
-    "Tuple",
     "Union"
   ],
   "torch.utils.benchmark.utils.compare": [
@@ -1321,12 +1325,10 @@
     "_weight_norm_interface",
     "autocast",
     "broadcast_shapes",
-    "candidate",
     "compiled_with_cxx11_abi",
     "from_dlpack",
     "lobpcg",
     "lu",
-    "obj",
     "segment_reduce",
     "set_default_dtype",
     "set_grad_enabled",
@@ -1697,10 +1699,6 @@
     "get_args_parser",
     "run"
   ],
-  "torch.distributed.pipeline.sync": [
-    "NoChunk",
-    "WithDevice"
-  ],
   "torch.distributed.rpc.rref_proxy": [
     "Future",
     "partial",
@@ -1931,7 +1929,6 @@
     "get_torch_dispatch_modes",
     "has_proxy_slot",
     "is_sym_node",
-    "maybe_disable_fake_tensor_mode",
     "maybe_handle_decomp",
     "proxy_call",
     "set_meta",
@@ -2000,9 +1997,11 @@
     "EqualityConstraint",
     "GuardOnDataDependentSymNode",
     "LoggingShapeGuardPrinter",
+    "SymExprPrinter",
     "RelaxedUnspecConstraint",
     "RuntimeAssert",
     "ShapeGuardPrinter",
+    "ShapeGuardPythonPrinter",
     "StrictMinMaxConstraint",
     "bind_symbols",
     "cast_symbool_to_symint_guardless",
@@ -2634,31 +2633,11 @@
     "TensorPipeRpcBackendOptions"
   ],
   "torch.distributed.pipelining": [
-    "ArgsChunkSpec",
-    "KwargsChunkSpec",
     "Pipe",
     "PipelineStage",
     "SplitPoint",
-    "annotate_split_points",
     "pipe_split",
     "pipeline"
-  ],
-  "torch.distributed.pipelining.PipelineSchedule": [
-    "ABC",
-    "Any",
-    "Callable",
-    "Dict",
-    "List",
-    "Optional",
-    "Pipe",
-    "PipelineStageBase",
-    "Tuple",
-    "Union",
-    "abstractmethod",
-    "defaultdict",
-    "merge_chunks",
-    "record_function",
-    "split_args_kwargs_into_chunks"
   ],
   "torch.distributed.pipelining.microbatch": [
     "Any",

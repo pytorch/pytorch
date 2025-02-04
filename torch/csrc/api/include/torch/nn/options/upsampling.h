@@ -8,8 +8,7 @@
 
 #include <vector>
 
-namespace torch {
-namespace nn {
+namespace torch::nn {
 
 /// Options for the `Upsample` module.
 ///
@@ -20,10 +19,10 @@ namespace nn {
 /// ```
 struct TORCH_API UpsampleOptions {
   /// output spatial sizes.
-  TORCH_ARG(std::optional<std::vector<int64_t>>, size) = c10::nullopt;
+  TORCH_ARG(std::optional<std::vector<int64_t>>, size) = std::nullopt;
 
   /// multiplier for spatial size.
-  TORCH_ARG(std::optional<std::vector<double>>, scale_factor) = c10::nullopt;
+  TORCH_ARG(std::optional<std::vector<double>>, scale_factor) = std::nullopt;
 
   /// the upsampling algorithm: one of "nearest", "linear", "bilinear",
   /// "bicubic" and "trilinear". Default: "nearest"
@@ -40,7 +39,7 @@ struct TORCH_API UpsampleOptions {
   /// aligned, and thus preserving the values at those pixels. This only has
   /// effect when :attr:`mode` is "linear", "bilinear", "bicubic", or
   /// "trilinear". Default: "False"
-  TORCH_ARG(std::optional<bool>, align_corners) = c10::nullopt;
+  TORCH_ARG(std::optional<bool>, align_corners) = std::nullopt;
 };
 
 namespace functional {
@@ -65,10 +64,10 @@ struct TORCH_API InterpolateFuncOptions {
       mode_t;
 
   /// output spatial sizes.
-  TORCH_ARG(std::optional<std::vector<int64_t>>, size) = c10::nullopt;
+  TORCH_ARG(std::optional<std::vector<int64_t>>, size) = std::nullopt;
 
   /// multiplier for spatial size.
-  TORCH_ARG(std::optional<std::vector<double>>, scale_factor) = c10::nullopt;
+  TORCH_ARG(std::optional<std::vector<double>>, scale_factor) = std::nullopt;
 
   /// the upsampling algorithm: one of "nearest", "linear", "bilinear",
   /// "bicubic", "trilinear", "area", "nearest-exact". Default: "nearest"
@@ -83,7 +82,7 @@ struct TORCH_API InterpolateFuncOptions {
   /// this operation *independent* of input size when `scale_factor` is
   /// kept the same.  It is *required* when interpolating mode is "linear",
   /// "bilinear", "bicubic" or "trilinear". Default: "False"
-  TORCH_ARG(std::optional<bool>, align_corners) = c10::nullopt;
+  TORCH_ARG(std::optional<bool>, align_corners) = std::nullopt;
 
   /// recompute the scale_factor for use in the
   /// interpolation calculation.  When `scale_factor` is passed as a parameter,
@@ -95,7 +94,7 @@ struct TORCH_API InterpolateFuncOptions {
   /// used in the interpolation computation.  Note that when `scale_factor` is
   /// floating-point, the recomputed scale_factor may differ from the one passed
   /// in due to rounding and precision issues.
-  TORCH_ARG(std::optional<bool>, recompute_scale_factor) = c10::nullopt;
+  TORCH_ARG(std::optional<bool>, recompute_scale_factor) = std::nullopt;
 
   /// flag to apply anti-aliasing. Using anti-alias
   /// option together with :attr:`align_corners` equals "False", interpolation
@@ -106,5 +105,4 @@ struct TORCH_API InterpolateFuncOptions {
 
 } // namespace functional
 
-} // namespace nn
-} // namespace torch
+} // namespace torch::nn

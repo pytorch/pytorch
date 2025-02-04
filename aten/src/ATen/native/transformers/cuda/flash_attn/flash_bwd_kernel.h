@@ -443,9 +443,7 @@ inline __device__ void compute_dq_dk_dv_1colblock(const Params &params, const in
         cute::copy(smem_tiled_copy_KV, tdPsV, tdPrV_copy_view);
     }
 
-    auto seeds = at::cuda::philox::unpack(params.philox_args);
-    unsigned long long seed = std::get<0>(seeds);
-    unsigned long long offset = std::get<1>(seeds);
+    const auto [seed, offset] = at::cuda::philox::unpack(params.philox_args);
     pytorch_flash::Dropout dropout(seed, offset, params.p_dropout_in_uint8_t,
                            bidb, bidh, tidx, params.h);
 
@@ -540,7 +538,7 @@ inline __device__ void compute_dq_dk_dv_1colblock(const Params &params, const in
             : pytorch_flash::convert_type_relu<Element>(acc_s);
         // Reshape rP from (MMA=4, MMA_M, MMA_N) to ((4, 2), MMA_N, MMA_N / 2)
         // if using m16n8k16 or (4, MMA_N, MMA_N) if using m16n8k8.
-        Tensor tPrP = make_tensor(rP.data(), pytorch_flash::convert_layout_acc_Aregs<Kernel_traits::TiledMmaSdP>(rP.layout()));
+        Tensor tPrP = make_tensor(rP.data(), pytorch_flash::convert_layout_acc_Aregs<typename Kernel_traits::TiledMmaSdP>(rP.layout()));
         Tensor tPaP = smem_thr_copy_PdS.retile_S(tPrP);     // ((Atom,AtomNum), MMA_N, MMA_N)
         cute::copy(smem_tiled_copy_PdS, tPaP, tPsP);
         // if (cute::thread0()) { print(tPaP); }

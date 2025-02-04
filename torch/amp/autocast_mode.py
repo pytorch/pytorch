@@ -1,12 +1,28 @@
+# mypy: allow-untyped-defs
+import collections
 import functools
 import warnings
-
 from typing import Any, Optional
 
 import torch
 from torch.types import _dtype
 
-__all__ = ["autocast_decorator", "autocast", "is_autocast_available"]
+
+try:
+    import numpy as np
+
+    HAS_NUMPY = True
+except ModuleNotFoundError:
+    HAS_NUMPY = False
+    np = None  # type: ignore[assignment]
+
+__all__ = [
+    "autocast_decorator",
+    "autocast",
+    "is_autocast_available",
+    "custom_fwd",
+    "custom_bwd",
+]
 
 
 def is_autocast_available(device_type: str) -> bool:
@@ -14,7 +30,7 @@ def is_autocast_available(device_type: str) -> bool:
     Return a bool indicating if autocast is available on :attr:`device_type`.
 
     Args:
-        device_type(str):  Device type to use. Possible values are: 'cuda', 'cpu', 'xpu' and so on.
+        device_type(str):  Device type to use. Possible values are: 'cuda', 'cpu', 'mtia', 'xpu' and so on.
             The type is the same as the `type` attribute of a :class:`torch.device`.
             Thus, you may obtain the device type of a tensor using `Tensor.device.type`.
     """
@@ -65,7 +81,7 @@ class autocast:
             loss.backward()
             optimizer.step()
 
-    See the :ref:`CUDA Automatic Mixed Precision examples<amp-examples>` for usage (along with gradient scaling)
+    See the :ref:`Automatic Mixed Precision examples<amp-examples>` for usage (along with gradient scaling)
     in more complex scenarios (e.g., gradient penalty, multiple models/losses, custom autograd functions).
 
     :class:`autocast` can also be used as a decorator, e.g., on the ``forward`` method of your model::
@@ -186,7 +202,7 @@ class autocast:
     (see :ref:`Working with Multiple GPUs<amp-multigpu>`).
 
     Args:
-        device_type(str, required):  Device type to use. Possible values are: 'cuda', 'cpu', 'xpu' and 'hpu'.
+        device_type(str, required):  Device type to use. Possible values are: 'cuda', 'cpu', 'mtia', 'xpu', and 'hpu'.
                                      The type is the same as the `type` attribute of a :class:`torch.device`.
                                      Thus, you may obtain the device type of a tensor using `Tensor.device.type`.
         enabled(bool, optional):  Whether autocasting should be enabled in the region.
@@ -266,6 +282,13 @@ class autocast:
                 )
                 warnings.warn(error_message)
                 enabled = False
+        elif self.device == "mtia":
+            supported_dtype = [torch.bfloat16, torch.float16]
+            if self.fast_dtype not in supported_dtype:
+                error_message = "In MTIA autocast, but the target dtype is not supported. Disabling autocast.\n"
+                error_message += "MTIA Autocast only supports dtypes of torch.bfloat16 and torch.float16 currently."
+                warnings.warn(error_message)
+                enabled = False
         elif self.device == "xpu":
             supported_dtype = [torch.bfloat16, torch.float16]
             if self.fast_dtype not in supported_dtype:
@@ -306,6 +329,23 @@ class autocast:
                 raise RuntimeError(
                     "Current CUDA Device does not support bfloat16. Please switch dtype to float16."
                 )
+        elif self.device == "mps":
+            supported_dtype = [torch.bfloat16, torch.float16]
+            if self.fast_dtype not in supported_dtype:
+                error_message = (
+                    "In MPS autocast, but the target dtype is not supported. Disabling autocast.\n"
+                    "MPS Autocast only supports dtype of torch.bfloat16 and torch.float16 currently."
+                )
+                warnings.warn(error_message)
+                enabled = False
+            elif self.fast_dtype == torch.bfloat16:
+                if not torch.backends.mps.is_macos_or_newer(14, 0):
+                    error_message = (
+                        "In MPS autocast, but the target dtype torch.bfloat16 is not supported "
+                        "on macOS versions below 14. Disabling autocast."
+                    )
+                    warnings.warn(error_message)
+                    enabled = False
         elif self.device == "xla":
             supported_dtype = [torch.float16, torch.bfloat16]
             if self.fast_dtype not in supported_dtype:
@@ -330,6 +370,24 @@ class autocast:
         torch.autocast_increment_nesting()
         torch.set_autocast_cache_enabled(self._cache_enabled)
 
+        # only dispatch to PreDispatchTorchFunctionMode to avoid exposing this
+        # API to other functional modes. We only expose to PreDispatchTorchFunctionMode
+        # for preserving autocast in torch.export.export.
+        if torch._C._is_torch_function_mode_enabled():
+            stacks = torch.overrides._get_current_function_mode_stack()
+            for mode in stacks:
+                if isinstance(
+                    mode,
+                    torch.fx.experimental.proxy_tensor.PreDispatchTorchFunctionMode,
+                ):
+                    args = (
+                        self.device,
+                        self.fast_dtype,
+                        self._enabled,
+                        self._cache_enabled,
+                    )
+                    return mode.__torch_function__(torch.amp._enter_autocast, (), args)
+
     def __exit__(self, exc_type: Any, exc_val: Any, exc_tb: Any):  # type: ignore[override]
         if torch._jit_internal.is_scripting():
             return
@@ -340,6 +398,18 @@ class autocast:
         torch.set_autocast_enabled(self.device, self.prev)
         torch.set_autocast_dtype(self.device, self.prev_fastdtype)
         torch.set_autocast_cache_enabled(self.prev_cache_enabled)
+
+        # only dispatch to PreDispatchTorchFunctionMode to avoid exposing this
+        # API to other functional modes. We only expose to PreDispatchTorchFunctionMode
+        # for preserving autocast in torch.export.export.
+        if torch._C._is_torch_function_mode_enabled():
+            stacks = torch.overrides._get_current_function_mode_stack()
+            for mode in stacks:
+                if isinstance(
+                    mode,
+                    torch.fx.experimental.proxy_tensor.PreDispatchTorchFunctionMode,
+                ):
+                    return mode.__torch_function__(torch.amp._exit_autocast, (), ())
         return False
 
     def __call__(self, func):
@@ -366,3 +436,123 @@ def _exit_autocast(mode):
     if torch._C._is_torch_function_mode_enabled():
         return torch.overrides.handle_torch_function(torch.amp._exit_autocast, [], mode)
     mode.__exit__(None, None, None)
+
+
+# Casts Tensors and containers of Tensors.  Special-cases passthroughs for strings and np.ndarrays, which
+# may be falsely detected as "Iterables."
+def _cast(value, device_type: str, dtype: _dtype):
+    if isinstance(value, torch.Tensor):
+        is_eligible = (
+            value.is_floating_point()
+            and value.device.type == device_type
+            and (value.dtype is not torch.float64)
+        )
+        return value.to(dtype) if is_eligible else value
+    elif isinstance(value, (str, bytes)):
+        return value
+    elif HAS_NUMPY and isinstance(value, np.ndarray):
+        return value
+    elif isinstance(value, collections.abc.Mapping):
+        return {
+            _cast(k, device_type, dtype): _cast(v, device_type, dtype)
+            for k, v in value.items()
+        }
+    elif isinstance(value, collections.abc.Iterable):
+        iterable = (_cast(v, device_type, dtype) for v in value)
+        if isinstance(value, (list, tuple)):
+            return type(value)(iterable)
+        else:
+            return iterable
+    else:
+        return value
+
+
+def custom_fwd(
+    fwd=None,
+    *,
+    device_type: str,
+    cast_inputs: Optional[_dtype] = None,
+):
+    """
+    Create a helper decorator for ``forward`` methods of custom autograd functions.
+
+    Autograd functions are subclasses of :class:`torch.autograd.Function`.
+    See the :ref:`example page<amp-custom-examples>` for more detail.
+
+    Args:
+        device_type(str):  Device type to use. 'cuda', 'cpu', 'mtia', 'xpu' and so on.
+            The type is the same as the `type` attribute of a :class:`torch.device`.
+            Thus, you may obtain the device type of a tensor using `Tensor.device.type`.
+        cast_inputs (:class:`torch.dtype` or None, optional, default=None):  If not ``None``,
+            when ``forward`` runs in an autocast-enabled region, casts incoming
+            floating-point Tensors to the target dtype (non-floating-point Tensors are not affected),
+            then executes ``forward`` with autocast disabled.
+            If ``None``, ``forward``'s internal ops execute with the current autocast state.
+
+    .. note::
+        If the decorated ``forward`` is called outside an autocast-enabled region,
+        :func:`custom_fwd<custom_fwd>` is a no-op and ``cast_inputs`` has no effect.
+    """
+    if not isinstance(device_type, str):
+        raise ValueError(
+            f"Expected `device_type` of type `str`, got: `{type(device_type)}`"
+        )
+    if fwd is None:
+        return functools.partial(
+            custom_fwd, device_type=device_type, cast_inputs=cast_inputs
+        )
+
+    @functools.wraps(fwd)
+    def decorate_fwd(*args, **kwargs):
+        args[0]._dtype = torch.get_autocast_dtype(device_type)
+        if cast_inputs is None:
+            args[0]._fwd_used_autocast = torch.is_autocast_enabled(device_type)
+            return fwd(*args, **kwargs)
+        else:
+            autocast_context = torch.is_autocast_enabled(device_type)
+            args[0]._fwd_used_autocast = False
+            if autocast_context:
+                with autocast(device_type=device_type, enabled=False):
+                    return fwd(
+                        *_cast(args, device_type, cast_inputs),
+                        **_cast(kwargs, device_type, cast_inputs),
+                    )
+            else:
+                return fwd(*args, **kwargs)
+
+    return decorate_fwd
+
+
+# Autograd ensures incoming gradients are the same type as forward outputs.  Allowing a separate
+# cast_inputs argument on custom_bwd is unnecessary and could cause errors if it doesn't match
+# cast_inputs supplied to custom_fwd.
+def custom_bwd(bwd=None, *, device_type: str):
+    """Create a helper decorator for backward methods of custom autograd functions.
+
+    Autograd functions are subclasses of :class:`torch.autograd.Function`.
+    Ensures that ``backward`` executes with the same autocast state as ``forward``.
+    See the :ref:`example page<amp-custom-examples>` for more detail.
+
+    Args:
+        device_type(str):  Device type to use. 'cuda', 'cpu', 'mtia', 'xpu' and so on.
+            The type is the same as the `type` attribute of a :class:`torch.device`.
+            Thus, you may obtain the device type of a tensor using `Tensor.device.type`.
+    """
+
+    if not isinstance(device_type, str):
+        raise ValueError(
+            f"Expected `device_type` of type `str`, got: `{type(device_type)}`"
+        )
+    if bwd is None:
+        return functools.partial(custom_bwd, device_type=device_type)
+
+    @functools.wraps(bwd)
+    def decorate_bwd(*args, **kwargs):
+        with autocast(
+            device_type=device_type,
+            enabled=args[0]._fwd_used_autocast,
+            dtype=args[0]._dtype,
+        ):
+            return bwd(*args, **kwargs)
+
+    return decorate_bwd

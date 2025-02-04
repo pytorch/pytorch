@@ -5,8 +5,7 @@
 
 #include <ATen/core/Tensor.h>
 
-namespace torch {
-namespace utils {
+namespace torch::utils {
 
 // NOTE: [torch.tensor, lift_fresh, and device movement]
 //
@@ -31,7 +30,7 @@ TORCH_API bool only_lift_cpu_tensors();
 TORCH_API void set_only_lift_cpu_tensors(bool value);
 
 at::Tensor base_tensor_ctor(PyObject* args, PyObject* kwargs);
-at::Tensor legacy_tensor_ctor(
+TORCH_PYTHON_API at::Tensor legacy_tensor_ctor(
     c10::DispatchKey dispatch_key,
     at::ScalarType scalar_type,
     PyObject* args,
@@ -134,5 +133,4 @@ at::Tensor asarray(
     std::optional<c10::Device> device,
     std::optional<bool> copy,
     bool requires_grad);
-} // namespace utils
-} // namespace torch
+} // namespace torch::utils

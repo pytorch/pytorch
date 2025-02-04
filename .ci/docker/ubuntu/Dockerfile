@@ -36,7 +36,8 @@ ENV DOCS=$DOCS
 COPY requirements-ci.txt requirements-docs.txt /opt/conda/
 COPY ./common/install_conda.sh install_conda.sh
 COPY ./common/common_utils.sh common_utils.sh
-RUN bash ./install_conda.sh && rm install_conda.sh common_utils.sh /opt/conda/requirements-ci.txt /opt/conda/requirements-docs.txt
+COPY ./common/install_magma_conda.sh install_magma_conda.sh
+RUN bash ./install_conda.sh && rm install_conda.sh install_magma_conda.sh common_utils.sh /opt/conda/requirements-ci.txt /opt/conda/requirements-docs.txt
 RUN if [ -n "${UNINSTALL_DILL}" ]; then pip uninstall -y dill; fi
 
 # Install gcc
@@ -50,7 +51,7 @@ RUN  bash ./install_lcov.sh && rm install_lcov.sh
 
 # Install cuda and cudnn
 ARG CUDA_VERSION
-RUN wget -q https://raw.githubusercontent.com/pytorch/builder/main/common/install_cuda.sh -O install_cuda.sh
+COPY ./common/install_cuda.sh install_cuda.sh
 RUN bash ./install_cuda.sh ${CUDA_VERSION} && rm install_cuda.sh
 ENV DESIRED_CUDA ${CUDA_VERSION}
 ENV PATH /usr/local/nvidia/bin:/usr/local/cuda/bin:$PATH
@@ -86,19 +87,6 @@ COPY ./common/install_vision.sh ./common/cache_vision_models.sh ./common/common_
 RUN if [ -n "${VISION}" ]; then bash ./install_vision.sh; fi
 RUN rm install_vision.sh cache_vision_models.sh common_utils.sh
 ENV INSTALLED_VISION ${VISION}
-
-# (optional) Install Android NDK
-ARG ANDROID
-ARG ANDROID_NDK
-ARG GRADLE_VERSION
-COPY ./common/install_android.sh ./common/cache_vision_models.sh ./common/common_utils.sh ./
-COPY ./android/AndroidManifest.xml AndroidManifest.xml
-COPY ./android/build.gradle build.gradle
-RUN if [ -n "${ANDROID}" ]; then bash ./install_android.sh; fi
-RUN rm install_android.sh cache_vision_models.sh common_utils.sh
-RUN rm AndroidManifest.xml
-RUN rm build.gradle
-ENV INSTALLED_ANDROID ${ANDROID}
 
 # (optional) Install Vulkan SDK
 ARG VULKAN_SDK_VERSION
@@ -147,6 +135,13 @@ COPY ci_commit_pins/triton.txt triton.txt
 RUN if [ -n "${TRITON}" ]; then bash ./install_triton.sh; fi
 RUN rm install_triton.sh common_utils.sh triton.txt
 
+ARG TRITON_CPU
+COPY ./common/install_triton.sh install_triton.sh
+COPY ./common/common_utils.sh common_utils.sh
+COPY ci_commit_pins/triton-cpu.txt triton-cpu.txt
+RUN if [ -n "${TRITON_CPU}" ]; then bash ./install_triton.sh; fi
+RUN rm install_triton.sh common_utils.sh triton-cpu.txt
+
 ARG EXECUTORCH
 # Build and install executorch
 COPY ./common/install_executorch.sh install_executorch.sh
@@ -154,6 +149,14 @@ COPY ./common/common_utils.sh common_utils.sh
 COPY ci_commit_pins/executorch.txt executorch.txt
 RUN if [ -n "${EXECUTORCH}" ]; then bash ./install_executorch.sh; fi
 RUN rm install_executorch.sh common_utils.sh executorch.txt
+
+ARG HALIDE
+# Build and install halide
+COPY ./common/install_halide.sh install_halide.sh
+COPY ./common/common_utils.sh common_utils.sh
+COPY ci_commit_pins/halide.txt halide.txt
+RUN if [ -n "${HALIDE}" ]; then bash ./install_halide.sh; fi
+RUN rm install_halide.sh common_utils.sh halide.txt
 
 ARG ONNX
 # Install ONNX dependencies

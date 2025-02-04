@@ -1,11 +1,16 @@
-from typing import Dict, List, Optional
+# mypy: allow-untyped-defs
+from typing import Optional
 
 import torch
 import torch.optim._functional as F
-
 from torch import Tensor
+from torch.distributed.optim._deprecation_warning import (
+    _scripted_functional_optimizer_deprecation_warning,
+)
 
-__all__: List[str] = []
+
+__all__: list[str] = []
+
 
 # Define a TorchScript compatible Functional SGD Optimizer
 # where we use these optimizer in a functional way.
@@ -20,7 +25,7 @@ __all__: List[str] = []
 class _FunctionalSGD:
     def __init__(
         self,
-        params: List[Tensor],
+        params: list[Tensor],
         lr: float = 1e-2,
         momentum: float = 0.0,
         dampening: float = 0.0,
@@ -31,6 +36,7 @@ class _FunctionalSGD:
         fused: bool = False,
         _allow_empty_param_list: bool = False,
     ):
+        _scripted_functional_optimizer_deprecation_warning(stacklevel=2)
         self.defaults = {
             "lr": lr,
             "momentum": momentum,
@@ -41,7 +47,7 @@ class _FunctionalSGD:
         self.maximize = maximize
         self.foreach = foreach
         self.fused = fused
-        self.state = torch.jit.annotate(Dict[torch.Tensor, Dict[str, torch.Tensor]], {})
+        self.state = torch.jit.annotate(dict[torch.Tensor, dict[str, torch.Tensor]], {})
 
         if len(params) == 0 and not _allow_empty_param_list:
             raise ValueError("optimizer got an empty parameter list")
@@ -61,7 +67,7 @@ class _FunctionalSGD:
         dampening = self.defaults["dampening"]
         lr = self.defaults["lr"]
         params = [param]
-        momentum_buffer_list: List[Optional[Tensor]] = []
+        momentum_buffer_list: list[Optional[Tensor]] = []
         grads = []
 
         has_sparse_grad = False
@@ -100,11 +106,11 @@ class _FunctionalSGD:
         if momentum_buffer is not None:
             state["momentum_buffer"] = momentum_buffer
 
-    def step(self, gradients: List[Optional[Tensor]]):
+    def step(self, gradients: list[Optional[Tensor]]):
         params = self.param_group["params"]
         params_with_grad = []
         grads = []
-        momentum_buffer_list: List[Optional[Tensor]] = []
+        momentum_buffer_list: list[Optional[Tensor]] = []
         lr = self.defaults["lr"]
         weight_decay = self.defaults["weight_decay"]
         momentum = self.defaults["momentum"]

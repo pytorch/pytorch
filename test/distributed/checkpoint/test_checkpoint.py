@@ -2,18 +2,15 @@
 
 import os
 import sys
-from typing import cast, List, Optional, Union
+from typing import cast, Optional, Union
 
 import torch
 import torch.distributed as dist
 import torch.futures
 import torch.nn
-
 from torch.distributed._shard import sharded_tensor
-
 from torch.distributed._shard.sharded_tensor import ShardedTensor, state_dict_hook
 from torch.distributed._shard.sharding_spec import ChunkShardingSpec
-
 from torch.distributed.checkpoint import (
     CheckpointException,
     load_state_dict,
@@ -21,15 +18,12 @@ from torch.distributed.checkpoint import (
     StorageReader,
     StorageWriter,
 )
-
 from torch.distributed.checkpoint.default_planner import _create_default_local_metadata
-
 from torch.distributed.checkpoint.metadata import (
     BytesStorageMetadata,
     Metadata,
     TensorStorageMetadata,
 )
-
 from torch.distributed.checkpoint.planner import (
     LoadPlan,
     LoadPlanner,
@@ -39,12 +33,12 @@ from torch.distributed.checkpoint.planner import (
 from torch.distributed.checkpoint.storage import WriteResult
 from torch.futures import Future
 from torch.testing._internal.common_distributed import requires_nccl, skip_if_lt_x_gpu
-
 from torch.testing._internal.common_utils import run_tests, TEST_WITH_DEV_DBG_ASAN
 from torch.testing._internal.distributed._shard.sharded_tensor import (
     ShardedTensorTestBase,
     with_comms,
 )
+
 
 if TEST_WITH_DEV_DBG_ASAN:
     print(
@@ -91,11 +85,9 @@ class TestDistributedCheckpointing(ShardedTensorTestBase):
         )
 
         st = sharded_tensor.zeros(spec, 4, 4, dtype=torch.float64)
-        mapping = {}
-
         md = _create_default_local_metadata({"st": st})
-
         st_md = md.state_dict_metadata["st"]
+
         self.assertEqual(1, len(st_md.chunks))
 
     @with_comms(init_rpc=False)
@@ -185,17 +177,17 @@ class FaultyStorageWriter(TestStorageBase, StorageWriter):
         self._fail_rank("fail_prepare_local_plan")
         return plan
 
-    def prepare_global_plan(self, plans: List[SavePlan]) -> List[SavePlan]:
+    def prepare_global_plan(self, plans: list[SavePlan]) -> list[SavePlan]:
         self._fail_rank("fail_prepare_global_plan")
         return plans
 
     def write_data(
         self, plan: SavePlan, planner: SavePlanner
-    ) -> Future[List[WriteResult]]:
+    ) -> Future[list[WriteResult]]:
         self._fail_rank("fail_write_data")
         return self._fail_rank_async("fail_write_data_async", [])
 
-    def finish(self, metadata: Metadata, results: List[List[WriteResult]]) -> None:
+    def finish(self, metadata: Metadata, results: list[list[WriteResult]]) -> None:
         self._fail_rank("fail_finish")
 
     @classmethod
@@ -218,7 +210,7 @@ class FaultyStorageReader(TestStorageBase, StorageReader):
         self._fail_rank("fail_prepare_local_plan")
         return plan
 
-    def prepare_global_plan(self, plans: List[LoadPlan]) -> List[LoadPlan]:
+    def prepare_global_plan(self, plans: list[LoadPlan]) -> list[LoadPlan]:
         self._fail_rank("fail_prepare_global_plan")
         return plans
 

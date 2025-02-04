@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import time
 
+import torch
 from torch._dynamo import device_interface  # noqa: PLC2701 import-private-name
 
 
@@ -13,9 +14,7 @@ class DeviceProperties:
 
 
 class DeviceInterface(device_interface.DeviceInterface):
-    class Event(
-        device_interface._EventBase
-    ):  # pyright: ignore [reportPrivateImportUsage]
+    class Event(torch.Event):
         def __init__(
             self,
             enable_timing: bool = False,
@@ -109,9 +108,9 @@ class DeviceInterface(device_interface.DeviceInterface):
     def synchronize(device) -> None:
         pass
 
-    @staticmethod
-    def get_device_properties(device) -> DeviceProperties:
-        raise NotImplementedError
+    @classmethod
+    def get_device_properties(cls, device=None) -> DeviceProperties:
+        return cls.Worker.get_device_properties(device)
 
     # Can be mock patched by @patch decorator.
     @staticmethod
@@ -121,3 +120,7 @@ class DeviceInterface(device_interface.DeviceInterface):
     @staticmethod
     def get_compute_capability(device) -> int:
         return 0
+
+    @staticmethod
+    def triton_supported() -> bool:
+        return True

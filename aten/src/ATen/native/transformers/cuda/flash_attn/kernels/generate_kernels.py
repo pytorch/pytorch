@@ -5,7 +5,8 @@ import argparse
 import itertools
 from dataclasses import dataclass
 from pathlib import Path
-from typing import List, Optional
+from typing import Optional
+
 
 DTYPE_MAP = {
     "fp16": "cutlass::half_t",
@@ -60,7 +61,7 @@ class Kernel:
         return f"flash_{self.direction}_hdim{self.head_dim}_{self.dtype}_sm{self.sm}.cu"
 
 
-def get_all_kernels() -> List[Kernel]:
+def get_all_kernels() -> list[Kernel]:
     for dtype, head_dim, sm in itertools.product(DTYPE_MAP.keys(), HEAD_DIMENSIONS, SM):
         for direction in ["fwd", "bwd", "fwd_split"]:
             yield Kernel(sm=sm, dtype=dtype, head_dim=head_dim, direction=direction)

@@ -3,19 +3,15 @@
 import os
 import unittest
 from collections import OrderedDict
-from typing import List, Mapping, Tuple
+from collections.abc import Mapping
 
 import onnx_test_common
 import parameterized
 import PIL
 import pytorch_test_common
 import test_models
-
-import torch
 import torchvision
 from pytorch_test_common import skipIfUnsupportedMinOpsetVersion, skipScriptTest
-from torch import nn
-from torch.testing._internal import common_utils
 from torchvision import ops
 from torchvision.models.detection import (
     faster_rcnn,
@@ -26,6 +22,10 @@ from torchvision.models.detection import (
     rpn,
     transform,
 )
+
+import torch
+from torch import nn
+from torch.testing._internal import common_utils
 
 
 def exportTest(
@@ -89,7 +89,7 @@ TestModels_new_jit_API = type(
 )
 
 
-def _get_image(rel_path: str, size: Tuple[int, int]) -> torch.Tensor:
+def _get_image(rel_path: str, size: tuple[int, int]) -> torch.Tensor:
     data_dir = os.path.join(os.path.dirname(__file__), "assets")
     path = os.path.join(data_dir, *rel_path.split("/"))
     image = PIL.Image.open(path).convert("RGB").resize(size, PIL.Image.BILINEAR)
@@ -97,7 +97,7 @@ def _get_image(rel_path: str, size: Tuple[int, int]) -> torch.Tensor:
     return torchvision.transforms.ToTensor()(image)
 
 
-def _get_test_images() -> Tuple[List[torch.Tensor], List[torch.Tensor]]:
+def _get_test_images() -> tuple[list[torch.Tensor], list[torch.Tensor]]:
     return (
         [_get_image("grace_hopper_517x606.jpg", (100, 320))],
         [_get_image("rgb_pytorch.png", (250, 380))],
@@ -175,9 +175,7 @@ def _init_test_roi_heads_faster_rcnn():
 
     resolution = box_roi_pool.output_size[0]
     representation_size = 1024
-    box_head = faster_rcnn.TwoMLPHead(
-        out_channels * resolution**2, representation_size
-    )
+    box_head = faster_rcnn.TwoMLPHead(out_channels * resolution**2, representation_size)
 
     representation_size = 1024
     box_predictor = faster_rcnn.FastRCNNPredictor(representation_size, num_classes)
@@ -347,7 +345,7 @@ class TestModelsONNXRuntime(onnx_test_common._TestONNXRuntime):
     @skipScriptTest()
     def test_roi_heads(self):
         class RoIHeadsModule(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.transform = _init_test_generalized_rcnn_transform()
                 self.rpn = _init_test_rpn()

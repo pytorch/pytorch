@@ -1,3 +1,4 @@
+#include <c10/util/error.h>
 #include <torch/csrc/distributed/c10d/FileStore.hpp>
 
 #include <fcntl.h>
@@ -22,9 +23,9 @@
 
 #include <c10/util/Exception.h>
 
-#define SYSASSERT(rv, ...)                                 \
-  if ((rv) < 0) {                                          \
-    C10_THROW_ERROR(DistStoreError, std::strerror(errno)); \
+#define SYSASSERT(rv, ...)                                         \
+  if ((rv) < 0) {                                                  \
+    C10_THROW_ERROR(DistStoreError, c10::utils::str_error(errno)); \
   }
 
 #ifdef _WIN32
@@ -66,7 +67,7 @@ namespace c10d {
 namespace {
 
 template <typename F>
-typename c10::invoke_result_t<F> syscall(F fn) {
+auto syscall(F fn) {
   while (true) {
     auto rv = fn();
     if (rv == -1) {
@@ -76,6 +77,7 @@ typename c10::invoke_result_t<F> syscall(F fn) {
     }
     return rv;
   }
+  return typename std::invoke_result_t<F>{-1};
 }
 
 // For a comprehensive overview of file locking methods,
@@ -97,6 +99,7 @@ class Lock {
 
   Lock(const Lock& that) = delete;
 
+  Lock& operator=(const Lock& other) = delete;
   Lock& operator=(Lock&& other) noexcept {
     if (this != &other) {
       fd_ = other.fd_;
@@ -167,6 +170,10 @@ class File {
     }
     SYSASSERT(fd_, "open(" + path + ")");
   }
+  File(const File&) = delete;
+  File& operator=(const File&) = delete;
+  File(File&&) noexcept = delete;
+  File& operator=(File&&) noexcept = delete;
 
   ~File() {
     ::close(fd_);
@@ -280,8 +287,7 @@ off_t refresh(
 } // namespace
 
 FileStore::FileStore(std::string path, int numWorkers)
-    : Store(),
-      path_(std::move(path)),
+    : path_(std::move(path)),
 
       numWorkers_(numWorkers),
       cleanupKey_("cleanup/"),

@@ -13,6 +13,8 @@
 #include <torch/csrc/utils/python_arg_parser.h>
 
 #include <limits>
+#include <optional>
+#include <utility>
 
 namespace torch::jit {
 
@@ -31,6 +33,17 @@ ToIValueAllowNumbersAsTensors::~ToIValueAllowNumbersAsTensors() {
 // C++->Python. We need this because otherwise we may get the old Python object
 // if C++ creates a new object at the memory location of the deleted object.
 void clear_registered_instances(void* ptr) {
+#if IS_PYBIND_2_13_PLUS
+  py::detail::with_instance_map(
+      ptr, [&](py::detail::instance_map& registered_instances) {
+        auto range = registered_instances.equal_range(ptr);
+        for (auto it = range.first; it != range.second; ++it) {
+          auto vh = it->second->get_value_and_holder();
+          vh.set_instance_registered(false);
+        }
+        registered_instances.erase(ptr);
+      });
+#else
   auto& registered_instances =
       pybind11::detail::get_internals().registered_instances;
   auto range = registered_instances.equal_range(ptr);
@@ -39,6 +52,7 @@ void clear_registered_instances(void* ptr) {
     vh.set_instance_registered(false);
   }
   registered_instances.erase(ptr);
+#endif
 }
 
 // WARNING: Precondition for this function is that, e.g., you have tested if a
@@ -267,7 +281,7 @@ IValue toIValue(py::handle obj, const TypePtr& type, std::optional<int32_t> N) {
       auto thp_stream = reinterpret_cast<THPStream*>(obj.ptr());
       auto stream = c10::Stream::unpack3(
           thp_stream->stream_id,
-          thp_stream->device_index,
+          static_cast<c10::DeviceIndex>(thp_stream->device_index),
           static_cast<c10::DeviceType>(thp_stream->device_type));
       return stream;
     }
@@ -518,7 +532,7 @@ IValue toIValue(py::handle obj, const TypePtr& type, std::optional<int32_t> N) {
 #ifdef USE_RPC
       return obj.cast<torch::distributed::rpc::PyRRef>().toIValue();
 #else
-      AT_ERROR("RRef is only supported with the distributed package");
+      TORCH_CHECK(false, "RRef is only supported with the distributed package");
 #endif
     } break;
     case TypeKind::PyObjectType: {
@@ -598,7 +612,7 @@ py::object toPyObject(IValue ivalue) {
       }
     } else {
       guardAgainstNamedTensor<at::Tensor>(tensor);
-      return py::cast(autograd::Variable(std::move(tensor)));
+      return py::cast(std::move(tensor));
     }
   } else if (ivalue.isStorage()) {
     return py::cast(std::move(ivalue).toStorage());
@@ -683,7 +697,7 @@ py::object toPyObject(IValue ivalue) {
             std::move(ivalue).toRRef());
     return py::cast(torch::distributed::rpc::PyRRef(RRefPtr));
 #else
-    AT_ERROR("RRef is only supported with the distributed package");
+    TORCH_CHECK(false, "RRef is only supported with the distributed package");
 #endif
   } else if (ivalue.isObject()) {
     const auto obj = std::move(ivalue).toObject();
@@ -696,7 +710,7 @@ py::object toPyObject(IValue ivalue) {
       return py::cast(Object(obj));
     }
     const auto classType = pyCu->get_class(c10::QualifiedName(obj->name()));
-    AT_ASSERT(classType);
+    AT_ASSERT(classType, c10::str(obj->name(), " is not found."));
     auto pyClass = getScriptedClassOrError(obj->type());
     auto pyObj = pyClass.attr("__new__")(pyClass);
 
@@ -737,7 +751,8 @@ py::object toPyObject(IValue ivalue) {
   } else if (ivalue.isSymBool()) {
     return py::cast(std::move(ivalue).toSymBool());
   } else {
-    AT_ERROR(
+    TORCH_CHECK(
+        false,
         "Missing cases in 'toPyObject'! Can't convert ",
         ivalue.tagKind(),
         " to a Python object");
@@ -746,14 +761,13 @@ py::object toPyObject(IValue ivalue) {
 
 std::pair<std::shared_ptr<Operator>, Stack> getOpWithStack(
     const std::vector<std::shared_ptr<Operator>>& operations,
-    py::args args,
+    const py::args& args,
     const py::kwargs& kwargs) {
   Stack stack;
   if (operations.size() == 1) {
     std::shared_ptr<Operator> op = operations.at(0);
     // Create a stack full of the arguments and keyword arguments.
-    stack = createStackForSchema(
-        op->schema(), std::move(args), kwargs, c10::nullopt);
+    stack = createStackForSchema(op->schema(), args, kwargs, std::nullopt);
 
     return std::make_pair(std::move(op), std::move(stack));
   } else {
@@ -761,7 +775,7 @@ std::pair<std::shared_ptr<Operator>, Stack> getOpWithStack(
     std::shared_ptr<Operator> found_op = nullptr;
     for (const auto& op : operations) {
       try {
-        stack = createStackForSchema(op->schema(), args, kwargs, c10::nullopt);
+        stack = createStackForSchema(op->schema(), args, kwargs, std::nullopt);
         found_op = op;
         break;
       } catch (schema_match_error& error) {
@@ -787,11 +801,11 @@ std::pair<std::shared_ptr<Operator>, Stack> getOpWithStack(
 // schema.
 bool checkSchemaAllowFakeScriptObject(
     const FunctionSchema& schema,
-    py::args args,
+    const py::args& args,
     const py::kwargs& kwargs) {
   bool match = false;
   try {
-    match = matchSchemaAllowFakeScriptObject(schema, std::move(args), kwargs);
+    match = matchSchemaAllowFakeScriptObject(schema, args, kwargs);
   } catch (schema_match_error& error) {
     throw std::runtime_error(error.what());
   }
@@ -800,7 +814,7 @@ bool checkSchemaAllowFakeScriptObject(
 
 py::object invokeOperatorFromPython(
     const std::vector<std::shared_ptr<Operator>>& operations,
-    py::args args,
+    const py::args& args,
     const py::kwargs& kwargs,
     std::optional<c10::DispatchKey> dk) {
   auto [found_op, stack] = getOpWithStack(operations, args, kwargs);
@@ -816,12 +830,12 @@ py::object invokeOperatorFromPython(
   return createPyObjectForStack(std::move(stack));
 }
 
-py::tuple _maybe_handle_torch_function(
+std::optional<py::object> _maybe_handle_torch_function(
     const std::string& ns,
     const std::string& method_name,
     const std::string& overload_name,
     bool is_overload,
-    py::args args,
+    const py::args& args,
     const py::kwargs& kwargs) {
   std::vector<PyObject*> overloaded_args;
   size_t total_arg_num = args.size() + kwargs.size();
@@ -861,24 +875,22 @@ py::tuple _maybe_handle_torch_function(
     }
     std::string module_name("torch.ops");
     module_name.append(ns);
-    return py::make_tuple(
-        true,
-        pybind11::reinterpret_steal<py::object>(
-            handle_torch_function_no_python_arg_parser(
-                overloaded_args,
-                args.ptr(),
-                kwargs.ptr(),
-                method_name.c_str(),
-                self_func.ptr(),
-                module_name.c_str())));
+    return {pybind11::reinterpret_steal<py::object>(
+        handle_torch_function_no_python_arg_parser(
+            overloaded_args,
+            args.ptr(),
+            kwargs.ptr(),
+            method_name.c_str(),
+            self_func.ptr(),
+            module_name.c_str()))};
   }
-  return py::make_tuple(false, py::none());
+  return std::nullopt;
 }
 
 py::object _get_operation_for_overload_or_packet(
     const std::vector<std::shared_ptr<Operator>>& operations,
     Symbol symbol,
-    py::args args,
+    const py::args& args,
     const py::kwargs& kwargs,
     bool is_overload,
     std::optional<c10::DispatchKey> dk) {
@@ -887,9 +899,9 @@ py::object _get_operation_for_overload_or_packet(
   std::string overload_name = operations[0]->schema().overload_name();
   auto res = _maybe_handle_torch_function(
       ns, method_name, overload_name, is_overload, args, kwargs);
-  auto torch_function_called = py::cast<bool>(res[0]);
+  auto torch_function_called = res.has_value();
   return torch_function_called
-      ? res[1]
+      ? *res
       : invokeOperatorFromPython(operations, args, kwargs, dk);
 }
 

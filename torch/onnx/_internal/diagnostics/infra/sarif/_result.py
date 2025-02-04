@@ -38,10 +38,10 @@ class Result(object):
     attachments: Optional[List[_attachment.Attachment]] = dataclasses.field(
         default=None, metadata={"schema_property_name": "attachments"}
     )
-    baseline_state: Optional[
-        Literal["new", "unchanged", "updated", "absent"]
-    ] = dataclasses.field(
-        default=None, metadata={"schema_property_name": "baselineState"}
+    baseline_state: Optional[Literal["new", "unchanged", "updated", "absent"]] = (
+        dataclasses.field(
+            default=None, metadata={"schema_property_name": "baselineState"}
+        )
     )
     code_flows: Optional[List[_code_flow.CodeFlow]] = dataclasses.field(
         default=None, metadata={"schema_property_name": "codeFlows"}
@@ -55,10 +55,10 @@ class Result(object):
     fixes: Optional[List[_fix.Fix]] = dataclasses.field(
         default=None, metadata={"schema_property_name": "fixes"}
     )
-    graph_traversals: Optional[
-        List[_graph_traversal.GraphTraversal]
-    ] = dataclasses.field(
-        default=None, metadata={"schema_property_name": "graphTraversals"}
+    graph_traversals: Optional[List[_graph_traversal.GraphTraversal]] = (
+        dataclasses.field(
+            default=None, metadata={"schema_property_name": "graphTraversals"}
+        )
     )
     graphs: Optional[List[_graph.Graph]] = dataclasses.field(
         default=None, metadata={"schema_property_name": "graphs"}
@@ -96,9 +96,9 @@ class Result(object):
     related_locations: Optional[List[_location.Location]] = dataclasses.field(
         default=None, metadata={"schema_property_name": "relatedLocations"}
     )
-    rule: Optional[
-        _reporting_descriptor_reference.ReportingDescriptorReference
-    ] = dataclasses.field(default=None, metadata={"schema_property_name": "rule"})
+    rule: Optional[_reporting_descriptor_reference.ReportingDescriptorReference] = (
+        dataclasses.field(default=None, metadata={"schema_property_name": "rule"})
+    )
     rule_id: Optional[str] = dataclasses.field(
         default=None, metadata={"schema_property_name": "ruleId"}
     )

@@ -34,6 +34,7 @@ struct CUDAGuard {
   // Move is not allowed (there is no uninitialized state)
   CUDAGuard(CUDAGuard&& other) = delete;
   CUDAGuard& operator=(CUDAGuard&& other) = delete;
+  ~CUDAGuard() = default;
 
   /// Sets the CUDA device to the given device.  Errors if the given device
   /// is not a CUDA device.
@@ -73,15 +74,15 @@ struct CUDAGuard {
 /// CUDAGuard for when you can use this.
 struct OptionalCUDAGuard {
   /// Create an uninitialized OptionalCUDAGuard.
-  explicit OptionalCUDAGuard() : guard_() {}
+  explicit OptionalCUDAGuard() = default;
 
   /// Set the current CUDA device to the passed Device, if it is not nullopt.
-  explicit OptionalCUDAGuard(optional<Device> device_opt)
+  explicit OptionalCUDAGuard(std::optional<Device> device_opt)
       : guard_(device_opt) {}
 
   /// Set the current CUDA device to the passed device index, if it is not
   /// nullopt
-  explicit OptionalCUDAGuard(optional<DeviceIndex> device_index_opt)
+  explicit OptionalCUDAGuard(std::optional<DeviceIndex> device_index_opt)
       : guard_(device_index_opt) {}
 
   // Copy is not allowed
@@ -93,6 +94,7 @@ struct OptionalCUDAGuard {
 
   // See Note [Move assignment for RAII guards is tricky]
   OptionalCUDAGuard& operator=(OptionalCUDAGuard&& other) = delete;
+  ~OptionalCUDAGuard() = default;
 
   /// Sets the CUDA device to the given device, initializing the guard if it
   /// is not already initialized.  Errors if the given device is not a CUDA
@@ -116,14 +118,14 @@ struct OptionalCUDAGuard {
 
   /// Returns the device that was set immediately prior to initialization of the
   /// guard, or nullopt if the guard is uninitialized.
-  optional<Device> original_device() const {
+  std::optional<Device> original_device() const {
     return guard_.original_device();
   }
 
   /// Returns the most recent device that was set using this device guard,
   /// either from construction, or via set_device, if the guard is initialized,
   /// or nullopt if the guard is uninitialized.
-  optional<Device> current_device() const {
+  std::optional<Device> current_device() const {
     return guard_.current_device();
   }
 
@@ -147,6 +149,7 @@ struct CUDAStreamGuard {
   /// stream, and set the current CUDA stream on that device to the passed
   /// stream. Errors if the Stream is not a CUDA stream.
   explicit CUDAStreamGuard(Stream stream) : guard_(stream) {}
+  ~CUDAStreamGuard() = default;
 
   /// Copy is disallowed
   CUDAStreamGuard(const CUDAStreamGuard&) = delete;
@@ -205,7 +208,7 @@ struct CUDAStreamGuard {
 /// CUDAGuard for when you can use this.
 struct OptionalCUDAStreamGuard {
   /// Create an uninitialized guard.
-  explicit OptionalCUDAStreamGuard() : guard_() {}
+  explicit OptionalCUDAStreamGuard() = default;
 
   /// Set the current CUDA device to the device associated with the passed
   /// stream, and set the current CUDA stream on that device to the passed
@@ -215,7 +218,7 @@ struct OptionalCUDAStreamGuard {
   /// Set the current device to the device associated with the passed stream,
   /// and set the current stream on that device to the passed stream,
   /// if the passed stream is not nullopt.
-  explicit OptionalCUDAStreamGuard(optional<Stream> stream_opt)
+  explicit OptionalCUDAStreamGuard(std::optional<Stream> stream_opt)
       : guard_(stream_opt) {}
 
   /// Copy is disallowed
@@ -227,6 +230,7 @@ struct OptionalCUDAStreamGuard {
 
   // See Note [Move assignment for RAII guards is tricky]
   OptionalCUDAStreamGuard& operator=(OptionalCUDAStreamGuard&& other) = delete;
+  ~OptionalCUDAStreamGuard() = default;
 
   /// Resets the currently set CUDA stream to the original stream and
   /// the currently set device to the original device.  Then,
@@ -239,24 +243,24 @@ struct OptionalCUDAStreamGuard {
 
   /// Returns the CUDA stream that was set at the time the guard was most
   /// recently initialized, or nullopt if the guard is uninitialized.
-  optional<CUDAStream> original_stream() const {
+  std::optional<CUDAStream> original_stream() const {
     auto r = guard_.original_stream();
     if (r.has_value()) {
-      return make_optional(CUDAStream(CUDAStream::UNCHECKED, r.value()));
+      return CUDAStream(CUDAStream::UNCHECKED, r.value());
     } else {
-      return nullopt;
+      return std::nullopt;
     }
   }
 
   /// Returns the most recent CUDA stream that was set using this stream guard,
   /// either from construction, or via reset_stream, if the guard is
   /// initialized, or nullopt if the guard is uninitialized.
-  optional<CUDAStream> current_stream() const {
+  std::optional<CUDAStream> current_stream() const {
     auto r = guard_.current_stream();
     if (r.has_value()) {
-      return make_optional(CUDAStream(CUDAStream::UNCHECKED, r.value()));
+      return CUDAStream(CUDAStream::UNCHECKED, r.value());
     } else {
-      return nullopt;
+      return std::nullopt;
     }
   }
 
@@ -284,6 +288,7 @@ struct CUDAMultiStreamGuard {
 
   // See Note [Move assignment for RAII guards is tricky]
   CUDAMultiStreamGuard& operator=(CUDAMultiStreamGuard&& other) = delete;
+  ~CUDAMultiStreamGuard() = default;
 
  private:
   c10::impl::InlineMultiStreamGuard<impl::CUDAGuardImpl> guard_;

@@ -1,14 +1,19 @@
+import logging
 import operator
 from functools import partial
-from typing import Any, Callable, Dict
+from typing import Any, Callable, Union
 
 from sympy import Expr
 
 import torch
 from torch.utils._sympy.value_ranges import bound_sympy, ValueRangeAnalysis, ValueRanges
-from .ir import InterpreterShim, LoopBody, LoopBodyBlock
+
+from .loop_body import InterpreterShim, LoopBody, LoopBodyBlock
 from .utils import cache_on_self, dominated_nodes
 from .virtualized import V
+
+
+log = logging.getLogger(__name__)
 
 
 class BoundVars:
@@ -22,11 +27,12 @@ class BoundVars:
     """
 
     def __init__(self, loop_body: LoopBody) -> None:
+        def upper_bound(v: Union[Expr, int]) -> int:
+            return bound_sympy(v).upper if isinstance(v, Expr) else v
+
         self.loop_body = loop_body
         self.replacement_vals = {
-            k: ValueRanges[Expr](0, v - 1)
-            if (isinstance(v, int) or v.is_number)
-            else bound_sympy(v)
+            k: ValueRanges[Expr](0, upper_bound(v) - 1)
             for k, v in loop_body.var_ranges.items()
         }
         # avoid computing these values, pessimistically assume that they are unbounded
@@ -37,10 +43,19 @@ class BoundVars:
             or "masked_subblock" in node.target
         )
         # To access this variable call `get_bounds()`
-        self._bounds: Dict[torch.fx.Node, ValueRanges[Expr]] = {}
+        self._bounds: dict[torch.fx.Node, ValueRanges[Expr]] = {}
+
+    def __repr__(self) -> str:
+        return (
+            f"{self.__class__.__name__}("
+            f"loop_body={self.loop_body},\n "
+            f"replacement_vals={self.replacement_vals}, \n"
+            f"unbounded_vars={self.unbounded_vars}, \n"
+            f"_bounds={self._bounds})"
+        )
 
     @cache_on_self
-    def get_bounds(self) -> Dict[torch.fx.Node, ValueRanges[Expr]]:
+    def get_bounds(self) -> dict[torch.fx.Node, ValueRanges[Expr]]:
         submodules = self.swap_submodules(self.loop_body.submodules)
 
         # Initialize the environment with the unbounded variables
@@ -54,13 +69,14 @@ class BoundVars:
 
         with V.set_ops_handler(ValueRangeAnalysis()):
             interpreter = InterpreterShim(self.loop_body.root_block.graph, submodules)
+            log.debug("get_bounds:\n%s", self.loop_body.root_block.graph)
             interpreter.run(V.get_ops_handler(), initial_env=self._bounds)
         return self._bounds
 
     def swap_submodules(
-        self, submodules: Dict[str, Callable[..., Any]]
-    ) -> Dict[str, Callable[..., ValueRanges[Expr]]]:
-        result: Dict[str, Callable[..., ValueRanges[Expr]]] = {}
+        self, submodules: dict[str, Callable[..., Any]]
+    ) -> dict[str, Callable[..., ValueRanges[Expr]]]:
+        result: dict[str, Callable[..., ValueRanges[Expr]]] = {}
         for key in submodules.keys():
             if key == "get_index":
                 result[key] = self.get_index
@@ -73,13 +89,14 @@ class BoundVars:
                 # moving the lambda out of make_fn would close over the reference to subblock,
                 # so all lambdas would have the same subblock reference that is the final
                 # subblock in the loop
-                def make_fn(subblock):
+                def make_fn(
+                    subblock: LoopBodyBlock,
+                ) -> Callable[[Any, Any], ValueRanges[Expr]]:
                     return lambda mask, value: self.masked_subblock(
                         subblock, self._bounds, mask, value, result
                     )
 
                 result[key] = make_fn(subblock)
-
             elif "set_indirect" in key:
                 idx = int(key[len("set_indirect") :])
                 var = self.loop_body.indirect_vars[idx]
@@ -94,10 +111,10 @@ class BoundVars:
     def masked_subblock(
         self,
         subblock: LoopBodyBlock,
-        env: Dict[torch.fx.Node, ValueRanges[Expr]],
+        env: dict[torch.fx.Node, ValueRanges[Expr]],
         mask: Any,
         value: Any,
-        submodules: Dict[str, Callable[..., Any]],
+        submodules: dict[str, Callable[..., Any]],
     ) -> ValueRanges[Expr]:
         interp = InterpreterShim(subblock.graph, submodules)
         interp.run(V.get_ops_handler(), initial_env=env)
@@ -112,7 +129,7 @@ class BoundVars:
         self.replacement_vals[old] = new
         return new
 
-    def get_index(self, name: Expr) -> ValueRanges[Expr]:
+    def get_index(self, name: str) -> ValueRanges[Expr]:
         expr = self.loop_body.indexing_exprs[name]
         bound = self.replacement_vals.get(expr)
         if bound is None:

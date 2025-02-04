@@ -10,9 +10,9 @@ namespace torch::jit::tensorexpr {
 
 template <
     typename Op,
-    typename std::enable_if<std::is_same<
+    std::enable_if_t<std::is_same_v<
         decltype(detail::bin_op_deducer(std::declval<Op>())),
-        void>::value>::type* = nullptr>
+        void>>* = nullptr>
 static ExprPtr mutate_binary_op(
     NodePtr<Op> v,
     IRCloner* cloner,
@@ -50,55 +50,55 @@ static ExprPtr mutate_binary_op(
   }
 }
 
-ExprPtr IRCloner::mutate(AddPtr v) {
+ExprPtr IRCloner::mutate(const AddPtr& v) {
   return mutate_binary_op(v, this);
 }
 
-ExprPtr IRCloner::mutate(SubPtr v) {
+ExprPtr IRCloner::mutate(const SubPtr& v) {
   return mutate_binary_op(v, this);
 }
 
-ExprPtr IRCloner::mutate(MulPtr v) {
+ExprPtr IRCloner::mutate(const MulPtr& v) {
   return mutate_binary_op(v, this);
 }
 
-ExprPtr IRCloner::mutate(DivPtr v) {
+ExprPtr IRCloner::mutate(const DivPtr& v) {
   return mutate_binary_op(v, this);
 }
 
-ExprPtr IRCloner::mutate(ModPtr v) {
+ExprPtr IRCloner::mutate(const ModPtr& v) {
   return mutate_binary_op(v, this);
 }
 
-ExprPtr IRCloner::mutate(AndPtr v) {
+ExprPtr IRCloner::mutate(const AndPtr& v) {
   return mutate_binary_op(v, this);
 }
 
-ExprPtr IRCloner::mutate(OrPtr v) {
+ExprPtr IRCloner::mutate(const OrPtr& v) {
   return mutate_binary_op(v, this);
 }
 
-ExprPtr IRCloner::mutate(XorPtr v) {
+ExprPtr IRCloner::mutate(const XorPtr& v) {
   return mutate_binary_op(v, this);
 }
 
-ExprPtr IRCloner::mutate(LshiftPtr v) {
+ExprPtr IRCloner::mutate(const LshiftPtr& v) {
   return mutate_binary_op(v, this);
 }
 
-ExprPtr IRCloner::mutate(RshiftPtr v) {
+ExprPtr IRCloner::mutate(const RshiftPtr& v) {
   return mutate_binary_op(v, this);
 }
 
-ExprPtr IRCloner::mutate(MaxPtr v) {
+ExprPtr IRCloner::mutate(const MaxPtr& v) {
   return mutate_binary_op(v, this, v->propagate_nans());
 }
 
-ExprPtr IRCloner::mutate(MinPtr v) {
+ExprPtr IRCloner::mutate(const MinPtr& v) {
   return mutate_binary_op(v, this, v->propagate_nans());
 }
 
-ExprPtr IRCloner::mutate(CompareSelectPtr v) {
+ExprPtr IRCloner::mutate(const CompareSelectPtr& v) {
   ExprPtr lhs_new = v->lhs()->accept_mutator(this);
   ExprPtr rhs_new = v->rhs()->accept_mutator(this);
   ExprPtr retval1_new = v->ret_val1()->accept_mutator(this);
@@ -112,31 +112,30 @@ ExprPtr IRCloner::mutate(CompareSelectPtr v) {
       v->bias());
 }
 
-// NOLINTNEXTLINE
-#define IMM_MUTATE_DEFINE(_1, Name)          \
-  ExprPtr IRCloner::mutate(Name##ImmPtr v) { \
-    return v;                                \
+#define IMM_MUTATE_DEFINE(_1, Name)                 \
+  ExprPtr IRCloner::mutate(const Name##ImmPtr& v) { \
+    return v;                                       \
   }
-AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, IMM_MUTATE_DEFINE);
+AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, IMM_MUTATE_DEFINE)
 #undef IMM_MUTATE_DEFINE
 
-ExprPtr IRCloner::mutate(CastPtr v) {
+ExprPtr IRCloner::mutate(const CastPtr& v) {
   ExprPtr src_value_new = v->src_value()->accept_mutator(this);
   return alloc<Cast>(v->dtype(), src_value_new);
 }
 
-ExprPtr IRCloner::mutate(BitCastPtr v) {
+ExprPtr IRCloner::mutate(const BitCastPtr& v) {
   ExprPtr src_value_new = v->src_value()->accept_mutator(this);
   return alloc<BitCast>(v->dtype(), src_value_new);
 }
 
-ExprPtr IRCloner::mutate(RampPtr v) {
+ExprPtr IRCloner::mutate(const RampPtr& v) {
   ExprPtr base_new = v->base()->accept_mutator(this);
   ExprPtr stride_new = v->stride()->accept_mutator(this);
   return alloc<Ramp>(base_new, stride_new, v->lanes());
 }
 
-ExprPtr IRCloner::mutate(LoadPtr v) {
+ExprPtr IRCloner::mutate(const LoadPtr& v) {
   std::vector<ExprPtr> indices_new;
   indices_new.reserve(v->indices().size());
   for (const ExprPtr& ind : v->indices()) {
@@ -148,7 +147,7 @@ ExprPtr IRCloner::mutate(LoadPtr v) {
 
 // We do not clone Vars since the original IR and cloned IR are expected to
 // share the underlying variables.
-ExprPtr IRCloner::mutate(VarPtr v) {
+ExprPtr IRCloner::mutate(const VarPtr& v) {
   return v;
 }
 
@@ -157,17 +156,17 @@ ExprPtr IRCloner::mutate(VarPtr v) {
 // initializers, this is the expected usage of clone at this point.
 //
 // TODO: Revisit this if Bufs need to be cloned as well.
-ExprPtr IRCloner::mutate(BufPtr v) {
+ExprPtr IRCloner::mutate(const BufPtr& v) {
   return v;
 }
 
-ExprPtr IRCloner::mutate(BroadcastPtr v) {
-  int lanes = v->lanes();
+ExprPtr IRCloner::mutate(const BroadcastPtr& v) {
+  auto lanes = v->lanes();
   ExprPtr value_new = v->value()->accept_mutator(this);
   return alloc<Broadcast>(value_new, lanes);
 }
 
-ExprPtr IRCloner::mutate(IfThenElsePtr v) {
+ExprPtr IRCloner::mutate(const IfThenElsePtr& v) {
   ExprPtr condition_new = v->condition()->accept_mutator(this);
   ExprPtr true_value_new = v->true_value()->accept_mutator(this);
   ExprPtr false_value_new = v->false_value()->accept_mutator(this);
@@ -175,7 +174,7 @@ ExprPtr IRCloner::mutate(IfThenElsePtr v) {
   return alloc<IfThenElse>(condition_new, true_value_new, false_value_new);
 }
 
-ExprPtr IRCloner::mutate(IntrinsicsPtr v) {
+ExprPtr IRCloner::mutate(const IntrinsicsPtr& v) {
   std::vector<ExprPtr> params_new;
   params_new.reserve(v->nparams());
   for (const auto& param : v->params()) {
@@ -184,7 +183,7 @@ ExprPtr IRCloner::mutate(IntrinsicsPtr v) {
   return alloc<Intrinsics>(v->op_type(), v->dtype(), params_new);
 }
 
-ExprPtr IRCloner::mutate(TermPtr v) {
+ExprPtr IRCloner::mutate(const TermPtr& v) {
   ExprPtr scalar_new = v->scalar()->accept_mutator(this);
 
   std::vector<ExprPtr> variables_new;
@@ -195,7 +194,7 @@ ExprPtr IRCloner::mutate(TermPtr v) {
   return alloc<Term>(v->hasher(), scalar_new, variables_new);
 }
 
-ExprPtr IRCloner::mutate(PolynomialPtr v) {
+ExprPtr IRCloner::mutate(const PolynomialPtr& v) {
   ExprPtr scalar_new = v->scalar()->accept_mutator(this);
 
   std::vector<TermPtr> variables_new;
@@ -206,12 +205,12 @@ ExprPtr IRCloner::mutate(PolynomialPtr v) {
   return alloc<Polynomial>(v->hasher(), scalar_new, variables_new);
 }
 
-ExprPtr IRCloner::mutate(RoundOffPtr v) {
+ExprPtr IRCloner::mutate(const RoundOffPtr& v) {
   return alloc<RoundOff>(
       v->lhs()->accept_mutator(this), v->rhs()->accept_mutator(this));
 }
 
-ExprPtr IRCloner::mutate(MaxTermPtr v) {
+ExprPtr IRCloner::mutate(const MaxTermPtr& v) {
   ExprPtr scalar_new =
       v->scalar() ? v->scalar()->accept_mutator(this) : nullptr;
 
@@ -224,7 +223,7 @@ ExprPtr IRCloner::mutate(MaxTermPtr v) {
       v->hasher(), scalar_new, v->propagate_nans(), variables_new);
 }
 
-ExprPtr IRCloner::mutate(MinTermPtr v) {
+ExprPtr IRCloner::mutate(const MinTermPtr& v) {
   ExprPtr scalar_new =
       v->scalar() ? v->scalar()->accept_mutator(this) : nullptr;
 
@@ -237,7 +236,7 @@ ExprPtr IRCloner::mutate(MinTermPtr v) {
       v->hasher(), scalar_new, v->propagate_nans(), variables_new);
 }
 
-ExprPtr IRCloner::mutate(ReduceOpPtr v) {
+ExprPtr IRCloner::mutate(const ReduceOpPtr& v) {
   ExprPtr body_new = v->body()->accept_mutator(this);
 
   std::vector<VarPtr> reduce_args_new;
@@ -249,7 +248,7 @@ ExprPtr IRCloner::mutate(ReduceOpPtr v) {
   return alloc<ReduceOp>(body_new, reduce_args_new, v->reducer());
 }
 
-StmtPtr IRCloner::mutate(ForPtr v) {
+StmtPtr IRCloner::mutate(const ForPtr& v) {
   auto start_new = v->start()->accept_mutator(this);
   auto stop_new = v->stop()->accept_mutator(this);
   auto body_new = v->body()->accept_mutator(this);
@@ -257,7 +256,7 @@ StmtPtr IRCloner::mutate(ForPtr v) {
   return alloc<For>(v->var(), start_new, stop_new, body_new, v->loop_options());
 }
 
-StmtPtr IRCloner::mutate(BlockPtr v) {
+StmtPtr IRCloner::mutate(const BlockPtr& v) {
   std::vector<StmtPtr> stmts_new;
   stmts_new.reserve(v->nstmts());
   for (const StmtPtr& stmt : *v) {
@@ -266,7 +265,7 @@ StmtPtr IRCloner::mutate(BlockPtr v) {
   return alloc<Block>(stmts_new);
 }
 
-StmtPtr IRCloner::mutate(StorePtr v) {
+StmtPtr IRCloner::mutate(const StorePtr& v) {
   std::vector<ExprPtr> indices_new;
   indices_new.reserve(v->indices().size());
   for (const auto& ind : v->indices()) {
@@ -277,7 +276,7 @@ StmtPtr IRCloner::mutate(StorePtr v) {
   return alloc<Store>(buf_new, indices_new, value_new);
 }
 
-StmtPtr IRCloner::mutate(AtomicAddPtr v) {
+StmtPtr IRCloner::mutate(const AtomicAddPtr& v) {
   std::vector<ExprPtr> indices_new;
   indices_new.reserve(v->indices().size());
   for (const auto& ind : v->indices()) {
@@ -288,21 +287,21 @@ StmtPtr IRCloner::mutate(AtomicAddPtr v) {
   return alloc<AtomicAdd>(buf_new, indices_new, value_new);
 }
 
-StmtPtr IRCloner::mutate(AllocatePtr v) {
+StmtPtr IRCloner::mutate(const AllocatePtr& v) {
   BufPtr buf_new = to<Buf>(v->buf()->accept_mutator(this));
   return alloc<Allocate>(buf_new);
 }
 
-StmtPtr IRCloner::mutate(FreePtr v) {
+StmtPtr IRCloner::mutate(const FreePtr& v) {
   BufPtr buf_new = to<Buf>(v->buf()->accept_mutator(this));
   return alloc<Free>(buf_new);
 }
 
-StmtPtr IRCloner::mutate(SyncThreadsPtr v) {
+StmtPtr IRCloner::mutate(const SyncThreadsPtr& v) {
   return alloc<SyncThreads>();
 }
 
-StmtPtr IRCloner::mutate(ExternalCallPtr v) {
+StmtPtr IRCloner::mutate(const ExternalCallPtr& v) {
   BufPtr buf_new = to<Buf>(v->buf()->accept_mutator(this));
 
   std::vector<BufPtr> buf_args_new;
@@ -319,7 +318,7 @@ StmtPtr IRCloner::mutate(ExternalCallPtr v) {
   return alloc<ExternalCall>(buf_new, v->func_name(), buf_args_new, args_new);
 }
 
-StmtPtr IRCloner::mutate(ExternalCallWithAllocPtr v) {
+StmtPtr IRCloner::mutate(const ExternalCallWithAllocPtr& v) {
   std::vector<BufPtr> buf_out_args_new;
   buf_out_args_new.reserve(v->buf_out_args().size());
   for (const auto& buf_out_arg : v->buf_out_args()) {
@@ -341,12 +340,12 @@ StmtPtr IRCloner::mutate(ExternalCallWithAllocPtr v) {
       v->func_name(), buf_out_args_new, buf_args_new, args_new);
 }
 
-StmtPtr IRCloner::mutate(LetPtr v) {
+StmtPtr IRCloner::mutate(const LetPtr& v) {
   auto value_new = v->value()->accept_mutator(this);
   return alloc<Let>(v->var(), value_new);
 }
 
-StmtPtr IRCloner::mutate(CondPtr v) {
+StmtPtr IRCloner::mutate(const CondPtr& v) {
   auto condition_new = v->condition()->accept_mutator(this);
   StmtPtr true_old = v->true_stmt();
   StmtPtr false_old = v->false_stmt();
@@ -355,14 +354,14 @@ StmtPtr IRCloner::mutate(CondPtr v) {
   return alloc<Cond>(condition_new, true_new, false_new);
 }
 
-StmtPtr Stmt::clone(StmtPtr s) {
+StmtPtr Stmt::clone(const StmtPtr& s) {
   IRCloner cloner;
   StmtPtr cloned = s->accept_mutator(&cloner);
   set_parent(cloned, nullptr);
   return cloned;
 }
 
-ExprPtr Expr::clone(ExprPtr e) {
+ExprPtr Expr::clone(const ExprPtr& e) {
   IRCloner cloner;
   return e->accept_mutator(&cloner);
 }

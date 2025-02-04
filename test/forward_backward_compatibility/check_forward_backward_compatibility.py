@@ -1,13 +1,16 @@
 import argparse
 import datetime
+import logging
 import re
 import sys
-import warnings
 from collections import defaultdict
 
 import torch
-from torch._C import parse_schema
+from torch._C import parse_schema, Tag
 
+
+FORMAT = "[%(levelname)s %(asctime)s %(filename)s:%(lineno)s] %(message)s"
+logging.basicConfig(level=logging.INFO, format=FORMAT)
 
 # How to run this test locally:
 # 1 Have two virtual environments (eg conda env), one without PyTorch installed (venv_nightly)
@@ -22,7 +25,10 @@ from torch._C import parse_schema
 # 5. Run this test with
 #    `python test/forward_backward_compatibility/check_forward_backward_compatibility.py --existing-schemas nightly_schemas.txt`
 
-# The date specifies how long the allowlist exclusion should apply to.
+# The date specifies how long the allowlist exclusion should apply to. Note that core ATen opset
+# (https://pytorch.org/docs/stable/torch.compiler_ir.html#core-aten-ir) is guaranteed to be BC, based on this policy
+# (https://dev-discuss.pytorch.org/t/core-aten-opset-backward-forward-compatibility-policy/1772) and hence the
+# allowlist does not apply (or the date is always arbitrarily far for core ATen ops).
 #
 #   - If we NEVER give BC guarantee for an operator, you can put the
 #     date arbitrarily far in the future.
@@ -35,7 +41,9 @@ from torch._C import parse_schema
 # [
 #   0: function name regex
 #   1: date until which the allowlist entry is valid
-#   2: (optional) function argument regex
+#   2: (optional, default: None) function argument regex
+#   3: (optional, default: False) If True, tells us that you are NOT a core ATen op
+#                                 See Note [Op removal core ATen detection]
 # ]
 #
 # NB: function name DOES NOT include overload name!
@@ -109,46 +117,37 @@ ALLOW_LIST = [
     ("aten::mps_max_pool2d_backward.out", datetime.date(9999, 1, 1)),
     # TODO: FIXME: prims shouldn't be checked
     ("prims::.*", datetime.date(9999, 1, 1)),
-    ("aten::_flash_attention_forward", datetime.date(2023, 12, 30)),
-    ("aten::_flash_attention_backward", datetime.date(2023, 12, 30)),
     ("aten::_scaled_dot_product_cudnn_attention", datetime.date(9999, 1, 1)),
-    ("aten::_sparse_mask_helper", datetime.date(2023, 3, 15)),
     # BetterTransformer 1.0 internal operators
     ("aten::_transformer_decoder_only_layer_fwd", datetime.date(9999, 1, 1)),
     ("aten::_native_decoder_only_multi_head_attention", datetime.date(9999, 1, 1)),
-    ("c10d::_allgather_base_", datetime.date(2023, 12, 30)),
-    ("c10d::_reduce_scatter_base_", datetime.date(2023, 12, 30)),
-    ("c10d::broadcast_", datetime.date(2023, 12, 30)),
-    ("c10d::scatter_", datetime.date(2023, 12, 30)),
     # These ops were moved to python under the c10d_functional namespace
     ("aten::wait_tensor", datetime.date(9999, 1, 30)),
     ("aten::reduce_scatter_tensor", datetime.date(9999, 1, 30)),
     ("aten::all_gather_into_tensor", datetime.date(9999, 1, 30)),
     ("aten::all_reduce", datetime.date(9999, 1, 30)),
-    ("aten::to_sparse.out", datetime.date(2023, 12, 31)),
-    ("aten::to_sparse.sparse_dim_out", datetime.date(2023, 12, 31)),
-    ("aten::to_sparse_bsc.out", datetime.date(2023, 12, 31)),
-    ("aten::to_sparse_bsr.out", datetime.date(2023, 12, 31)),
-    ("aten::to_sparse_csc.out", datetime.date(2023, 12, 31)),
-    ("aten::to_sparse_csr.out", datetime.date(2023, 12, 31)),
-    ("aten::_structured_sparse_linear", datetime.date(2023, 12, 31)),
-    ("aten::batch_norm_backward_elemt.out", datetime.date(2023, 12, 31)),
-    ("aten::batch_norm_backward_elemt", datetime.date(2023, 12, 31)),
-    ("aten::sym_constrain_range", datetime.date(2023, 12, 31)),
-    ("aten::_efficient_attention_forward", datetime.date(2024, 1, 15)),
     ("onednn::qconv1d_pointwise", datetime.date(2024, 12, 31)),
     ("onednn::qconv2d_pointwise", datetime.date(2024, 12, 31)),
     ("onednn::qconv3d_pointwise", datetime.date(2024, 12, 31)),
     ("onednn::qconv2d_pointwise.binary", datetime.date(2024, 12, 31)),
-    # BC-breaking change in can_cast signature: 'from' -> 'from_'
-    ("aten::can_cast", datetime.date(2024, 5, 31)),
+    ("onednn::qlinear_pointwise.binary", datetime.date(2024, 12, 31)),
+    ("onednn::qlinear_pointwise.binary_tensor", datetime.date(2024, 12, 31)),
+    ("aten::_scaled_mm.out", datetime.date(2024, 12, 31)),
+    ("aten::_scaled_mm", datetime.date(2024, 12, 31)),
+    ("aten::wrapped_quantized_linear_prepacked", datetime.date(2024, 12, 31)),
+    ("aten::wrapped_linear_prepack", datetime.date(2024, 12, 31)),
+    ("_quantized::wrapped_linear_prepack", datetime.date(2024, 12, 31)),
+    ("_quantized::wrapped_linear_prepacked", datetime.date(2024, 12, 31)),
+    ("_quantized::wrapped_quantized_linear_prepacked", datetime.date(2024, 12, 31)),
+    ("aten::rrelu_with_noise", datetime.date(2024, 12, 31)),
 ]
 
 ALLOW_LIST_COMPILED = [
     (
         re.compile(item[0]),
         item[1],
-        re.compile(item[2]) if len(item) > 2 else None,
+        re.compile(item[2]) if (len(item) > 2 and item[2] is not None) else None,
+        item[3] if len(item) > 3 else False,
     )
     for item in ALLOW_LIST
     if item[1] >= datetime.date.today()
@@ -160,9 +159,9 @@ def allow_listed(schema):
         if item[0].search(str(schema)):
             if len(item) > 2 and item[2] is not None:
                 # if arguments regex is present, use it
-                return bool(item[2].search(str(schema)))
-            return True
-    return False
+                return bool(item[2].search(str(schema))), item[3]
+            return True, item[3]
+    return False, None
 
 
 # The nightly will fail to parse newly added syntax to schema declarations
@@ -239,19 +238,58 @@ def process_version_map(version_map):
     return output
 
 
+def is_core_aten_op(schema) -> bool:
+    # Check if the schema is a core ATen op
+    if "::" not in schema.name:
+        return False
+    res = torch._C._get_operation_overload(schema.name, schema.overload_name)
+    if res is None:
+        # Note [Op removal core ATen detection]
+        #
+        # If the core ATen op has been removed, we cannot be sure whether it
+        # was previously a core ATen op or not via checking tags this way.
+        # Conservatively assume that you are ARE a core ATen op in this case.
+        # This means that deleting a core ATen op will still be caught.
+        # But if you're deleting an operator that is not a core ATen op
+        # and add it to the allow_list, you would need to additionally specify
+        # a flag in the ALLOW_LIST to tell us you are not a core ATen op.
+        # See the comment block above ALLOW_LIST for more info.
+        #
+        # See https://github.com/pytorch/pytorch/issues/146049
+        return True
+    _, _, tags = res
+    return Tag.core in tags
+
+
 def check_bc(existing_schemas):
     new_schema_dict = load_schemas_to_dict()
     version_map = process_version_map(torch._C._get_operator_version_map())
     is_bc = True
     broken_ops = []
     for existing_schema in existing_schemas:
-        if allow_listed(existing_schema):
-            print("schema: ", str(existing_schema), " found on allowlist, skipping")
-            continue
+        is_allow_list, trust_not_core_aten = allow_listed(existing_schema)
+        if is_allow_list:
+            if trust_not_core_aten or not is_core_aten_op(existing_schema):
+                logging.info("schema: %s found on allowlist, skipping", existing_schema)
+                continue
+            else:
+                logging.info(
+                    "schema: %s found on allowlist, but is a core ATen op, checking BC. "
+                    "NOTE: If you have removed an operator we will conservatively assume that "
+                    "it is a core ATen op. If the operator you removed is not a core ATen op, "
+                    "please specify that in the ALLOW_LIST entry (see comment block on top "
+                    "of ALLOW_LIST more info)",
+                    existing_schema,
+                )
         if has_valid_upgraders(existing_schema, version_map):
-            print("schema: ", str(existing_schema), " has valid upgrader, skipping")
-            continue
-        print("processing existing schema: ", str(existing_schema))
+            if not is_core_aten_op(existing_schema):
+                logging.info("schema: %s has valid upgrader, skipping", existing_schema)
+                continue
+            else:
+                logging.info(
+                    "schema: %s has a valid upgrader, but is a core ATen op, checking BC"
+                )
+        logging.debug("processing existing schema: %s", existing_schema)
         matching_new_schemas = new_schema_dict.get(existing_schema.name, [])
         found = False
         for matching_new_schema in matching_new_schemas:
@@ -259,24 +297,24 @@ def check_bc(existing_schemas):
                 found = True
                 break
         if not found:
-            print(
+            logging.warning(
                 "Can NOT find backward compatible schemas after changes "
-                "for schema {} from the following candidates:\n[\n{}\n]".format(
-                    str(existing_schema),
-                    "\n\t".join(str(s) for s in matching_new_schemas),
-                )
+                "for schema %s from the following candidates:\n[\n%s\n]",
+                str(existing_schema),
+                "\n\t".join(str(s) for s in matching_new_schemas),
             )
             # TODO Print out more details about why candidates don't match.
             broken_ops.append(str(existing_schema))
             is_bc = False
     if is_bc:
-        print("Found backward compatible schemas for all existing schemas")
+        logging.info("Found backward compatible schemas for all existing schemas")
     else:
-        print(
+        logging.warning(
             "The PR is introducing backward incompatible changes to the "
             "operator library. Please contact PyTorch team to confirm "
             "whether this change is wanted or not. \n\nBroken ops: "
-            "[\n\t{}\n]".format("\n\t".join(broken_ops))
+            "[\n\t%s\n]",
+            "\n\t".join(broken_ops),
         )
     return is_bc
 
@@ -286,10 +324,11 @@ def check_fc(existing_schemas):
     is_fc = True
     broken_ops = []
     for existing_schema in existing_schemas:
-        if allow_listed(existing_schema):
-            print("schema: ", str(existing_schema), " found on allowlist, skipping")
+        is_allow_list, _ = allow_listed(existing_schema)
+        if is_allow_list:
+            logging.info("schema: %s found on allowlist, skipping", existing_schema)
             continue
-        print("processing existing schema: ", str(existing_schema))
+        logging.info("processing existing schema: %s", existing_schema)
         matching_new_schemas = new_schema_dict.get(existing_schema.name, [])
         found = False
         possible_failure_reasons = []
@@ -303,29 +342,28 @@ def check_fc(existing_schemas):
             if reason != "":
                 possible_failure_reasons.append(reason)
         if not found:
-            print(
+            logging.warning(
                 "Can NOT find forward compatible schemas after changes "
-                "for schema {} from the following candidates:\n[\n{}\n]".format(
-                    str(existing_schema),
-                    "\n\t".join(str(s) for s in matching_new_schemas),
-                )
+                "for schema %s from the following candidates:\n[\n\t%s\n]",
+                str(existing_schema),
+                "\n\t".join(str(s) for s in matching_new_schemas),
             )
-            print(
+            logging.warning(
                 "Refer to following reasons for failure "
-                "to find FC schema:\n[\n{}\n]".format(
-                    "\n\t".join(str(r) for r in possible_failure_reasons)
-                )
+                "to find FC schema:\n[\n%s\n]",
+                "\n\t".join(str(r) for r in possible_failure_reasons),
             )
             broken_ops.append(str(existing_schema))
             is_fc = False
     if is_fc:
-        print("Found forward compatible schemas for all existing schemas")
+        logging.info("Found forward compatible schemas for all existing schemas")
     else:
-        warnings.warn(
+        logging.warning(
             "The PR is introducing a potentially forward incompatible changes to the "
             "operator library. Please contact PyTorch team to confirm "
             "whether this change is wanted or not. \n\nBroken ops: "
-            "[\n\t{}\n]".format("\n\t".join(broken_ops))
+            "[\n\t%s\n]",
+            "\n\t".join(broken_ops),
         )
 
 
@@ -347,7 +385,7 @@ if __name__ == "__main__":
                 break
 
             if dont_parse(line.strip()):
-                print("Not parsing schema line: ", line.strip())
+                logging.info("Not parsing schema line: %s", line.strip())
                 continue
             s = parse_schema(line.strip())
             slist.append(s)

@@ -1,19 +1,20 @@
 import argparse
 import itertools
 import random
-
 import warnings
 from dataclasses import dataclass
 from pathlib import Path
 from pprint import pprint
-from typing import List, Optional
+from typing import Optional
 
 import numpy as np
+from prettytable import PrettyTable
+from tqdm import tqdm
+
 import torch
 import torch.utils.benchmark as benchmark
-from prettytable import PrettyTable
 from torch.backends.cuda import sdp_kernel
-from tqdm import tqdm
+
 
 warnings.filterwarnings("ignore")
 
@@ -31,7 +32,7 @@ class ExperimentConfig:
     enable_mem_efficient: bool
     enable_cudnn: bool
 
-    def get_entries(self) -> List:
+    def get_entries(self) -> list:
         return [
             self.batch_size,
             self.num_heads,
@@ -46,7 +47,7 @@ class ExperimentConfig:
         ]
 
     @classmethod
-    def get_entry_names(cls) -> List[str]:
+    def get_entry_names(cls) -> list[str]:
         return [
             "batch_size",
             "num_heads",
@@ -68,7 +69,7 @@ class ExperimentResults:
     composite_mha_time: float
     compiled_composite_mha_time: Optional[float]
 
-    def get_entries(self) -> List:
+    def get_entries(self) -> list:
         return [
             f"{self.nn_mha_time:2f}",
             f"{self.compiled_nn_mha_time:2f}" if self.compiled_nn_mha_time else None,
@@ -79,12 +80,12 @@ class ExperimentResults:
         ]
 
     @classmethod
-    def get_entry_names(cls) -> List[str]:
+    def get_entry_names(cls) -> list[str]:
         return [
-            "nn_mha_time (\u00B5s)",
-            "compiled_nn_mha_time (\u00B5s)",
-            "composite_mha_time (\u00B5s)",
-            "compiled_composite_mha_time (\u00B5s)",
+            "nn_mha_time (\u00b5s)",
+            "compiled_nn_mha_time (\u00b5s)",
+            "composite_mha_time (\u00b5s)",
+            "compiled_composite_mha_time (\u00b5s)",
         ]
 
 
@@ -93,7 +94,7 @@ class Experiment:
     config: ExperimentConfig
     results: ExperimentResults
 
-    def get_entries(self) -> List:
+    def get_entries(self) -> list:
         return self.config.get_entries() + self.results.get_entries()
 
 
@@ -210,7 +211,7 @@ def run_single_experiment(config: ExperimentConfig) -> ExperimentResults:
         enable_flash=config.enable_flash,
         enable_mem_efficient=config.enable_mem_efficient,
         enable_cudnn=config.enable_cudnn,
-    ) as kernel_choice, torch.inference_mode() as inference_mode:
+    ):
         dropout_p = 0.0
         mask = None
 
@@ -274,7 +275,7 @@ def run_single_experiment(config: ExperimentConfig) -> ExperimentResults:
 # Could return generator
 def generate_experiments(
     batch_sizes, num_heads, max_seq_lens, embed_dims, dtypes, pad_percentages
-) -> List[ExperimentConfig]:
+) -> list[ExperimentConfig]:
     configs = []
     for bsz, n_heads, seq_len, embed_dim, dtype, padding in itertools.product(
         batch_sizes, num_heads, max_seq_lens, embed_dims, dtypes, pad_percentages
@@ -336,7 +337,7 @@ def main(save_path: Optional[Path]):
         batch_sizes, num_heads, max_seq_lens, embed_dims, dtypes, pad_percentages
     )
 
-    experiments: List[Experiment] = []
+    experiments: list[Experiment] = []
     for experiment_config in tqdm(experiment_configs):
         experiment = run_single_experiment(experiment_config)
         experiments.append(experiment)

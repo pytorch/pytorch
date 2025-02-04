@@ -272,6 +272,38 @@ TEST(StaticRuntime, autogen_addr) {
       /*check_resize=*/true);
 }
 
+TEST(StaticRuntime, autogen__test_functorch_fallback) {
+  const std::string script = R"IR(
+    graph(%self: Tensor, %other: Tensor):
+        %bias: None = prim::Constant()
+        %ret = aten::_test_functorch_fallback(%self, %other)
+        %cloned = aten::clone(%ret, %bias)
+        return (%cloned)
+  )IR";
+
+  auto self0 = at::rand({6, 6, 6});
+  auto other0 = at::rand({6, 6, 6});
+  std::vector<IValue> args{self0, other0};
+  testStaticRuntime(
+      script,
+      args,
+      {},
+      /*use_allclose=*/false,
+      /*use_equalnan=*/false,
+      /*check_resize=*/true);
+
+  auto self1 = at::rand({22, 22, 22});
+  auto other1 = at::rand({22, 22, 22});
+  std::vector<IValue> args2{self1, other1};
+  testStaticRuntime(
+      script,
+      args,
+      args2,
+      /*use_allclose=*/false,
+      /*use_equalnan=*/false,
+      /*check_resize=*/true);
+}
+
 TEST(StaticRuntime, autogen_argmax) {
   const std::string script = R"IR(
     graph(%self: Tensor, %dim: int?, %keepdim: bool):
@@ -4440,6 +4472,40 @@ TEST(StaticRuntime, autogen_masked_select) {
       /*check_resize=*/true);
 }
 
+TEST(StaticRuntime, autogen_nonzero_static) {
+  const std::string script = R"IR(
+    graph(%self: Tensor, %size: int, %fill_value: int):
+        %bias: None = prim::Constant()
+        %ret = aten::nonzero_static(%self, %size, %fill_value)
+        %cloned = aten::clone(%ret, %bias)
+        return (%cloned)
+  )IR";
+
+  auto self0 = at::rand({6, 6, 6});
+  auto size0 = 1;
+  auto fill_value0 = 1;
+  std::vector<IValue> args{self0, size0, fill_value0};
+  testStaticRuntime(
+      script,
+      args,
+      {},
+      /*use_allclose=*/false,
+      /*use_equalnan=*/false,
+      /*check_resize=*/true);
+
+  auto self1 = at::rand({22, 22, 22});
+  auto size1 = 1;
+  auto fill_value1 = 1;
+  std::vector<IValue> args2{self1, size1, fill_value1};
+  testStaticRuntime(
+      script,
+      args,
+      args2,
+      /*use_allclose=*/false,
+      /*use_equalnan=*/false,
+      /*check_resize=*/true);
+}
+
 TEST(StaticRuntime, autogen_gather) {
   const std::string script = R"IR(
     graph(%self: Tensor, %dim: int, %index: Tensor, %sparse_grad: bool):
@@ -7097,222 +7163,6 @@ TEST(StaticRuntime, autogen_special_multigammaln) {
   auto self1 = at::rand({22, 22, 22});
   auto p1 = 1;
   std::vector<IValue> args2{self1, p1};
-  testStaticRuntime(
-      script,
-      args,
-      args2,
-      /*use_allclose=*/false,
-      /*use_equalnan=*/false,
-      /*check_resize=*/true);
-}
-
-TEST(StaticRuntime, autogen_fft_fft) {
-  const std::string script = R"IR(
-    graph(%self: Tensor, %n: int?, %dim: int, %norm: str?):
-        %bias: None = prim::Constant()
-        %ret = aten::fft_fft(%self, %n, %dim, %norm)
-        %cloned = aten::clone(%ret, %bias)
-        return (%cloned)
-  )IR";
-
-  auto self0 = at::rand({6, 6, 6});
-  auto n0 = 1;
-  auto dim0 = 1;
-  auto norm0 = "forward";
-  std::vector<IValue> args{self0, n0, dim0, norm0};
-  testStaticRuntime(
-      script,
-      args,
-      {},
-      /*use_allclose=*/false,
-      /*use_equalnan=*/false,
-      /*check_resize=*/true);
-
-  auto self1 = at::rand({22, 22, 22});
-  auto n1 = 1;
-  auto dim1 = 1;
-  auto norm1 = "forward";
-  std::vector<IValue> args2{self1, n1, dim1, norm1};
-  testStaticRuntime(
-      script,
-      args,
-      args2,
-      /*use_allclose=*/false,
-      /*use_equalnan=*/false,
-      /*check_resize=*/true);
-}
-
-TEST(StaticRuntime, autogen_fft_ifft) {
-  const std::string script = R"IR(
-    graph(%self: Tensor, %n: int?, %dim: int, %norm: str?):
-        %bias: None = prim::Constant()
-        %ret = aten::fft_ifft(%self, %n, %dim, %norm)
-        %cloned = aten::clone(%ret, %bias)
-        return (%cloned)
-  )IR";
-
-  auto self0 = at::rand({6, 6, 6});
-  auto n0 = 1;
-  auto dim0 = 1;
-  auto norm0 = "forward";
-  std::vector<IValue> args{self0, n0, dim0, norm0};
-  testStaticRuntime(
-      script,
-      args,
-      {},
-      /*use_allclose=*/false,
-      /*use_equalnan=*/false,
-      /*check_resize=*/true);
-
-  auto self1 = at::rand({22, 22, 22});
-  auto n1 = 1;
-  auto dim1 = 1;
-  auto norm1 = "forward";
-  std::vector<IValue> args2{self1, n1, dim1, norm1};
-  testStaticRuntime(
-      script,
-      args,
-      args2,
-      /*use_allclose=*/false,
-      /*use_equalnan=*/false,
-      /*check_resize=*/true);
-}
-
-TEST(StaticRuntime, autogen_fft_rfft) {
-  const std::string script = R"IR(
-    graph(%self: Tensor, %n: int?, %dim: int, %norm: str?):
-        %bias: None = prim::Constant()
-        %ret = aten::fft_rfft(%self, %n, %dim, %norm)
-        %cloned = aten::clone(%ret, %bias)
-        return (%cloned)
-  )IR";
-
-  auto self0 = at::rand({6, 6, 6});
-  auto n0 = 1;
-  auto dim0 = 1;
-  auto norm0 = "forward";
-  std::vector<IValue> args{self0, n0, dim0, norm0};
-  testStaticRuntime(
-      script,
-      args,
-      {},
-      /*use_allclose=*/false,
-      /*use_equalnan=*/false,
-      /*check_resize=*/true);
-
-  auto self1 = at::rand({22, 22, 22});
-  auto n1 = 1;
-  auto dim1 = 1;
-  auto norm1 = "forward";
-  std::vector<IValue> args2{self1, n1, dim1, norm1};
-  testStaticRuntime(
-      script,
-      args,
-      args2,
-      /*use_allclose=*/false,
-      /*use_equalnan=*/false,
-      /*check_resize=*/true);
-}
-
-TEST(StaticRuntime, autogen_fft_irfft) {
-  const std::string script = R"IR(
-    graph(%self: Tensor, %n: int?, %dim: int, %norm: str?):
-        %bias: None = prim::Constant()
-        %ret = aten::fft_irfft(%self, %n, %dim, %norm)
-        %cloned = aten::clone(%ret, %bias)
-        return (%cloned)
-  )IR";
-
-  auto self0 = at::rand({6, 6, 6});
-  auto n0 = 1;
-  auto dim0 = 1;
-  auto norm0 = "forward";
-  std::vector<IValue> args{self0, n0, dim0, norm0};
-  testStaticRuntime(
-      script,
-      args,
-      {},
-      /*use_allclose=*/false,
-      /*use_equalnan=*/false,
-      /*check_resize=*/true);
-
-  auto self1 = at::rand({22, 22, 22});
-  auto n1 = 1;
-  auto dim1 = 1;
-  auto norm1 = "forward";
-  std::vector<IValue> args2{self1, n1, dim1, norm1};
-  testStaticRuntime(
-      script,
-      args,
-      args2,
-      /*use_allclose=*/false,
-      /*use_equalnan=*/false,
-      /*check_resize=*/true);
-}
-
-TEST(StaticRuntime, autogen_fft_hfft) {
-  const std::string script = R"IR(
-    graph(%self: Tensor, %n: int?, %dim: int, %norm: str?):
-        %bias: None = prim::Constant()
-        %ret = aten::fft_hfft(%self, %n, %dim, %norm)
-        %cloned = aten::clone(%ret, %bias)
-        return (%cloned)
-  )IR";
-
-  auto self0 = at::rand({6, 6, 6});
-  auto n0 = 1;
-  auto dim0 = 1;
-  auto norm0 = "forward";
-  std::vector<IValue> args{self0, n0, dim0, norm0};
-  testStaticRuntime(
-      script,
-      args,
-      {},
-      /*use_allclose=*/false,
-      /*use_equalnan=*/false,
-      /*check_resize=*/true);
-
-  auto self1 = at::rand({22, 22, 22});
-  auto n1 = 1;
-  auto dim1 = 1;
-  auto norm1 = "forward";
-  std::vector<IValue> args2{self1, n1, dim1, norm1};
-  testStaticRuntime(
-      script,
-      args,
-      args2,
-      /*use_allclose=*/false,
-      /*use_equalnan=*/false,
-      /*check_resize=*/true);
-}
-
-TEST(StaticRuntime, autogen_fft_ihfft) {
-  const std::string script = R"IR(
-    graph(%self: Tensor, %n: int?, %dim: int, %norm: str?):
-        %bias: None = prim::Constant()
-        %ret = aten::fft_ihfft(%self, %n, %dim, %norm)
-        %cloned = aten::clone(%ret, %bias)
-        return (%cloned)
-  )IR";
-
-  auto self0 = at::rand({6, 6, 6});
-  auto n0 = 1;
-  auto dim0 = 1;
-  auto norm0 = "forward";
-  std::vector<IValue> args{self0, n0, dim0, norm0};
-  testStaticRuntime(
-      script,
-      args,
-      {},
-      /*use_allclose=*/false,
-      /*use_equalnan=*/false,
-      /*check_resize=*/true);
-
-  auto self1 = at::rand({22, 22, 22});
-  auto n1 = 1;
-  auto dim1 = 1;
-  auto norm1 = "forward";
-  std::vector<IValue> args2{self1, n1, dim1, norm1};
   testStaticRuntime(
       script,
       args,
