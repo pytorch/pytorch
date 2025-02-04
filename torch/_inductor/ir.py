@@ -4850,7 +4850,7 @@ class ExternKernel(InputsKernel):
     def codegen_comment(self, wrapper) -> None:  # type: ignore[no-untyped-def]
         origin_str, _detailed_origin_str = get_kernel_metadata(self, wrapper)
         if origin_str:
-            wrapper.writeline(origin_str)
+            wrapper.make_comment(origin_str)
 
     def codegen(self, wrapper):  # type: ignore[no-untyped-def]
         raise NotImplementedError
