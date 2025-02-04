@@ -142,7 +142,8 @@ class SideEffects:
         output_graph = self.output_graph_weakref()
 
         return (
-            output_graph and output_graph.current_tx.output.current_tracer.in_generator
+            output_graph
+            and output_graph.current_tx.output.current_tracer.is_reconstructing_generator
         )
 
     def check_allowed_side_effect(self, item):
@@ -873,9 +874,9 @@ def allow_side_effects_under_checkpoint(tx: "InstructionTranslator"):
 
 @contextlib.contextmanager
 def disallow_side_effects_in_generator(tx: "InstructionTranslator"):
-    orig_val = tx.output.current_tracer.in_generator
+    orig_val = tx.output.current_tracer.is_reconstructing_generator
     try:
-        tx.output.current_tracer.in_generator = True
+        tx.output.current_tracer.is_reconstructing_generator = True
         yield
     finally:
-        tx.output.current_tracer.in_generator = orig_val
+        tx.output.current_tracer.is_reconstructing_generator = orig_val
