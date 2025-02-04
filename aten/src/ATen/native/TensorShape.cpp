@@ -1234,8 +1234,7 @@ Tensor diagonal(
   auto outnames = namedinference::compute_diagonal_outnames(self, dim1, dim2);
   NoNamesGuard no_names_guard;
 
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  int64_t diag_size;
+  int64_t diag_size = 0;
   int64_t storage_offset = self.storage_offset();
   // compute storage offset and size for the diagonal
   // for positive values of offset (above the main diagonal)
@@ -1616,9 +1615,7 @@ Tensor& narrow_copy_dense_cpu_out(
   const int64_t num_blocks = c10::size_to_dim_(dim, self_sizes);
 
   const auto itemsize = self_contig->dtype().itemsize();
-  // NOLINTNEXTLINE(clang-analyzer-deadcode.DeadStores)
   size_t src_nbytes = itemsize * self_contig->numel();
-  // NOLINTNEXTLINE(clang-analyzer-deadcode.DeadStores)
   size_t dst_nbytes = itemsize * output.numel();
 
   size_t src_block_size = unit * self_sizes[dim];

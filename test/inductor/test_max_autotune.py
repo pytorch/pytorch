@@ -2,7 +2,7 @@
 import contextlib
 import os
 import unittest
-from typing import Callable, List, Optional
+from typing import Callable, Optional
 
 import torch
 from torch import multiprocessing as mp, nn
@@ -308,7 +308,7 @@ class TestMaxAutotune(TestCase):
 
     def test_precompilation_threads(self):
         import threading
-        from typing import Any, Dict
+        from typing import Any
         from unittest.mock import Mock, patch
 
         class FakeChoiceCaller(ChoiceCaller):
@@ -335,11 +335,11 @@ class TestMaxAutotune(TestCase):
         fake_lookup_result = dict.fromkeys(fake_choices, 0.123)
 
         def no_lookup(
-            choices: List[ChoiceCaller],
+            choices: list[ChoiceCaller],
             op: str,
             inputs: str,
-            benchmark: Callable[[Any], Dict[ChoiceCaller, float]],
-        ) -> Optional[Dict[ChoiceCaller, float]]:
+            benchmark: Callable[[Any], dict[ChoiceCaller, float]],
+        ) -> Optional[dict[ChoiceCaller, float]]:
             if benchmark is not None:
                 return benchmark(choices)
 
@@ -1259,7 +1259,7 @@ class TestPrologueFusion(TestCase):
     @unittest.skipIf(TEST_WITH_ROCM, "FP8 is not supported on ROCM")
     @unittest.skipIf(
         not PLATFORM_SUPPORTS_FP8,
-        "FP8 is only supported on H100+ and sm_89 and MI300+ devices",
+        "FP8 is only supported on H100+, SM 8.9 and MI300+ devices",
     )
     def test_low_precision(self):
         M = K = N = 128
@@ -1330,6 +1330,54 @@ class TestPrologueFusion(TestCase):
         FileCheck().check("def triton").check_count("= 1.1", 3, exactly=True).check(
             "tl.store"
         ).run(code[0])
+
+    @config.patch(
+        {
+            "max_autotune_gemm_backends": "Triton",
+            "benchmark_epilogue_fusion": True,
+            "use_mixed_mm": False,
+            "mixed_mm_choice": "default",
+            "max_epilogue_benchmarked_choices": 3,
+        }
+    )
+    def test_pending_fusions_multiple(self):
+        def multi_use(x, y):
+            return (x @ x.T) * (y @ y.T)
+
+        x = torch.rand([128, 16], device=GPU_TYPE)
+        y = torch.rand([128, 32], device=GPU_TYPE)
+
+        out, code = run_and_get_code(torch.compile(multi_use), x, y)
+
+        FileCheck().check("def call").check_count(".run(", 2, exactly=True).run(code[0])
+        self.assertEqual(out, multi_use(x, y), atol=0.05, rtol=0.05)
+
+        def resolve_pending(x):
+            return (x @ x).relu()
+
+        x = torch.rand([128, 128], device=GPU_TYPE)
+        out, code = run_and_get_code(torch.compile(resolve_pending), x)
+        FileCheck().check("def call").check_count(".run(", 1, exactly=True).run(code[0])
+        self.assertEqual(out, resolve_pending(x), atol=0.05, rtol=0.05)
+
+    @config.patch(
+        {
+            "max_autotune_gemm_backends": "Triton",
+            "benchmark_epilogue_fusion": True,
+            "use_mixed_mm": False,
+            "mixed_mm_choice": "default",
+            "max_epilogue_benchmarked_choices": 3,
+        }
+    )
+    def test_pending_fusion_pro_and_epi(self):
+        def test_multiple_fusions(x):
+            y = x.to(torch.float)
+            return (y @ y).relu()
+
+        x = torch.rand([128, 128], dtype=torch.float16, device=GPU_TYPE)
+        out, code = run_and_get_code(torch.compile(test_multiple_fusions), x)
+        FileCheck().check("def call").check_count(".run(", 1, exactly=True).run(code[0])
+        self.assertEqual(out, test_multiple_fusions(x), atol=0.05, rtol=0.05)
 
     @parametrize("sizes", ((64, 128, 256), (128, 128, 128), (63, 120, 250)))
     def test_multiple_inputs(self, sizes):

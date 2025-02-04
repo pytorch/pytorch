@@ -16,9 +16,11 @@ from ..runtime.hints import DeviceProperties
 from ..runtime.runtime_utils import next_power_of_2
 from ..runtime.triton_heuristics import grid_combo_kernels
 from ..scheduler import BaseSchedulerNode
-from ..utils import Placeholder
+from ..utils import Placeholder, triton_version_uses_attrs_dict
 from ..virtualized import V
 from .common import (
+    ArgName,
+    ConstexprArg,
     DeferredLine,
     IndentedBuffer,
     Kernel,
@@ -648,7 +650,7 @@ class ComboKernel(Kernel):
         size_hints: dict[str, int],
         selected_kernel: TritonKernel,
         signature: list[Any],
-        argdefs: list[str],
+        argdefs: list[ArgName],
         pointwise_with_reduce: bool = False,
     ) -> str:
         can_use_32bit = all(k.index_dtype == "tl.int32" for k in self.sub_kernels)
@@ -727,8 +729,12 @@ class ComboKernel(Kernel):
             code.splice(f"R0_BLOCK: tl.constexpr = {self.block_size_reduce}")
             code.splice(f"RBLOCK: tl.constexpr = {self.block_size_reduce}")
 
-    def add_blockd_to_args(self, argdefs: list[str]) -> list[str]:
-        block_args = {}
+    def get_block_args(self) -> list[ConstexprArg]:
+        """
+        Calculate blocks from sub_kernels and range_trees.
+        **Update self.block_args**
+        Return the block args
+        """
         block_names = {}
         for sub_kernel in self.sub_kernels:
             # TODO: we assume all sub_kernels have the same block size
@@ -739,22 +745,21 @@ class ComboKernel(Kernel):
                     continue
                 if tree.prefix == "x" and sub_kernel.no_x_dim:
                     continue
-                block_args[f"{tree.prefix.upper()}BLOCK : tl.constexpr"] = tree.prefix
                 block_names[f"{tree.prefix.upper()}BLOCK"] = tree.prefix
-        if self.enable_autotune:
-            argdefs.extend(block_args)
         self.block_args = list(block_names.keys())
 
-        return argdefs
+        return [ConstexprArg(x) for x in block_names.keys()]
 
-    def add_numel_to_args(self, argdefs: list[str], signature: list[Any]) -> list[str]:
+    def add_numel_to_args(
+        self, argdefs: list[ArgName], signature: list[Any]
+    ) -> list[ArgName]:
         for num, sub_kernel in enumerate(self.sub_kernels):
             for tree in sub_kernel.active_range_trees():
                 if not isinstance(tree.numel, (Integer, int)):
                     # only if it is a dynamic shape
                     sizearg = SizeArg(f"{tree.prefix}numel_{num}", tree.numel)
                     signature.append(sizearg)
-                    argdefs.append(f"{tree.prefix}numel_{num}")
+                    argdefs.append(ArgName(f"{tree.prefix}numel_{num}"))
                     self.dynamic_shape_args.append(f"{tree.prefix}numel_{num}")
         return argdefs
 
@@ -830,7 +835,12 @@ class ComboKernel(Kernel):
 
         argdefs, _, signature, _ = self.args.python_argdefs()
         argdefs = self.add_numel_to_args(argdefs, signature)
-        argdefs = self.add_blockd_to_args(argdefs)
+        block_args = self.get_block_args()
+        if self.enable_autotune:
+            argdefs.extend([ArgName(x.name, is_constexpr=True) for x in block_args])
+            if triton_version_uses_attrs_dict():
+                signature.extend(block_args)
+
         code.splice(
             self.jit_line(
                 heuristics,
@@ -842,7 +852,7 @@ class ComboKernel(Kernel):
             )
         )
         code.writeline(
-            f"def {name or str(Placeholder.KERNEL_NAME)}({', '.join(argdefs)}):"
+            f"def {name or str(Placeholder.KERNEL_NAME)}({', '.join(x.full_name() for x in argdefs)}):"
         )
 
         with code.indent():

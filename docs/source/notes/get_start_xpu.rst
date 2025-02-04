@@ -35,11 +35,11 @@ Binaries
 
 Now that we have `Intel GPU Driver <https://www.intel.com/content/www/us/en/developer/articles/tool/pytorch-prerequisites-for-intel-gpu/2-6.html#driver-installation>`_ installed, use the following commands to install ``pytorch``, ``torchvision``, ``torchaudio`` on Linux.
 
-For preview wheels
+For release wheels
 
 .. code-block::
 
-    pip3 install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/test/xpu
+    pip3 install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/xpu
 
 For nightly wheels
 
@@ -163,22 +163,22 @@ Inference with ``torch.compile``
    model = model.to("xpu")
    data = data.to("xpu")
 
-    for i in range(ITERS):
-        start = time.time()
-        with torch.no_grad():
-            model(data)
-            torch.xpu.synchronize()
-        end = time.time()
-        print(f"Inference time before torch.compile for iteration {i}: {(end-start)*1000} ms")
+   for i in range(ITERS):
+       start = time.time()
+       with torch.no_grad():
+           model(data)
+           torch.xpu.synchronize()
+       end = time.time()
+       print(f"Inference time before torch.compile for iteration {i}: {(end-start)*1000} ms")
 
-    model = torch.compile(model)
-    for i in range(ITERS):
-        start = time.time()
-        with torch.no_grad():
-            model(data)
-            torch.xpu.synchronize()
-        end = time.time()
-        print(f"Inference time after torch.compile for iteration {i}: {(end-start)*1000} ms")
+   model = torch.compile(model)
+   for i in range(ITERS):
+       start = time.time()
+       with torch.no_grad():
+           model(data)
+           torch.xpu.synchronize()
+       end = time.time()
+       print(f"Inference time after torch.compile for iteration {i}: {(end-start)*1000} ms")
 
    print("Execution finished")
 
