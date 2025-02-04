@@ -23,10 +23,8 @@ from .common import (
     ConstexprArg,
     DeferredLine,
     IndentedBuffer,
-    InplacedBuffer,
     Kernel,
     PythonPrinter,
-    RemovedArg,
     SizeArg,
     WorkspaceArg,
 )
@@ -620,14 +618,10 @@ class ComboKernel(Kernel):
                     and mutation not in sub_kernel.removed_buffers
                 ):
                     mutated_args.add(
-                        cast(
-                            InplacedBuffer, sub_kernel.args.inplace_buffers[mutation]
-                        ).inner_name
+                        sub_kernel.args.inplace_buffers[mutation].inner_name
                     )
                 if mutation in sub_kernel.args.output_buffers:
-                    arg = sub_kernel.args.output_buffers[mutation]
-                    assert not isinstance(arg, RemovedArg)
-                    mutated_args.add(arg)
+                    mutated_args.add(sub_kernel.args.output_buffers[mutation])
         return sorted(mutated_args)
 
     def select_dispatch_strategy(self) -> None:

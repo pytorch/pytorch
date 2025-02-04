@@ -51,6 +51,7 @@ from ..virtualized import NullKernelHandler, ops, OpsValue, V
 from .common import (
     BackendFeature,
     BracesBuffer,
+    CppWrapperKernelArgs,
     CSE,
     CSEVariable,
     DataTypePropagation,
@@ -5073,7 +5074,9 @@ class KernelGroup:
 
 
 class CppWrapperKernelGroup(KernelGroup):
-    pass
+    def __init__(self):
+        super().__init__()
+        self.args = CppWrapperKernelArgs()
 
 
 class WorkSharing:
