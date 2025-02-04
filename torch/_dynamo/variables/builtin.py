@@ -1463,7 +1463,7 @@ class BuiltinVariable(VariableTracker):
     call_list = _call_tuple_list
 
     def call_callable(self, tx: "InstructionTranslator", arg):
-        from .functions import BaseUserFunctionVariable
+        from .functions import BaseUserFunctionVariable, FunctoolsPartialVariable
         from .nn_module import NNModuleVariable
 
         if isinstance(
@@ -1471,6 +1471,7 @@ class BuiltinVariable(VariableTracker):
             (
                 variables.UserDefinedClassVariable,
                 BaseUserFunctionVariable,
+                FunctoolsPartialVariable,
                 NNModuleVariable,
             ),
         ):
@@ -2012,6 +2013,8 @@ class BuiltinVariable(VariableTracker):
             return variables.ConstantVariable.create(id(args[0].fn))
         elif istype(args[0], variables.SkipFunctionVariable):
             return variables.ConstantVariable.create(id(args[0].value))
+        elif istype(args[0], variables.FunctoolsPartialVariable):
+            return variables.ConstantVariable.create(id(args[0].fake_value))
         else:
             unimplemented(f"call_id with args {args}")
 
