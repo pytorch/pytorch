@@ -317,73 +317,8 @@ class JitTraceConvertStrategy(CaptureStrategy):
         )
 
 
-class LegacyDynamoStrategy(CaptureStrategy):
-    """Strategy implemented by the ONNX team using internal dynamo APIs and custom fx passes."""
-
-    def _capture(
-        self, model, args, kwargs, dynamic_shapes
-    ) -> torch.export.ExportedProgram:
-        # NOTE: Import here to prevent circular dependency
-        from torch.onnx._internal.fx import diagnostics, passes
-
-        graph_module, _ = torch._dynamo.export(
-            model,
-            tracing_mode="symbolic",
-            dynamic_shapes=dynamic_shapes,
-        )(
-            *args,
-            **kwargs,
-        )
-        torch._dynamo.reset()
-
-        diagnostic_context = diagnostics.DiagnosticContext(
-            "torch.onnx.export",
-            torch.__version__,
-        )
-
-        flattened_args, _ = pytree.tree_flatten((args, kwargs))
-        flattened_args = tuple(flattened_args)
-
-        # ONNX does not support views and mutations.
-        # Functionalize to get a semantically equivalent graph without mutations.
-        graph_module = passes.Functionalize(
-            diagnostic_context,
-            graph_module,
-            enable_dynamic_axes=bool(dynamic_shapes),
-        ).run(*flattened_args)
-
-        # Input mutations are detected and distilled after `Functionalize` pass.
-        # Remove them since ONNX inference does not need them.
-        graph_module = passes.RemoveInputMutation(diagnostic_context, graph_module).run(
-            *flattened_args
-        )
-
-        # Use torch.export to recapture the GraphModule into an ExportedProgram.
-        return torch.export.export(graph_module, flattened_args, strict=True)
-
-    def _enter(self, model) -> None:
-        model_repr = _take_first_line(repr(model))
-        self._verbose_print(
-            f"Obtain model graph for `{model_repr}` with internal Dynamo apis..."
-        )
-
-    def _success(self, model) -> None:
-        model_repr = _take_first_line(repr(model))
-        self._verbose_print(
-            f"Obtain model graph for `{model_repr}` with internal Dynamo apis... ✅"
-        )
-
-    def _failure(self, model, e) -> None:
-        del e  # Unused
-        model_repr = _take_first_line(repr(model))
-        self._verbose_print(
-            f"Obtain model graph for `{model_repr}` with internal Dynamo apis... ❌"
-        )
-
-
 CAPTURE_STRATEGIES = (
     TorchExportNonStrictStrategy,  # strict=False is preferred over strict=True because it does not have dynamo issues
     TorchExportStrategy,
     JitTraceConvertStrategy,
-    LegacyDynamoStrategy,
 )
