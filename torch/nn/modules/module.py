@@ -40,6 +40,8 @@ T = TypeVar("T", bound="Module")
 class _IncompatibleKeys(
     namedtuple("IncompatibleKeys", ["missing_keys", "unexpected_keys"]),
 ):
+    __slots__ = ()
+
     def __repr__(self):
         if not self.missing_keys and not self.unexpected_keys:
             return "<All keys matched successfully>"
@@ -706,13 +708,13 @@ class Module:
         for item in atoms:
             if not hasattr(mod, item):
                 raise AttributeError(
-                    mod._get_name() + " has no " "attribute `" + item + "`"
+                    mod._get_name() + " has no attribute `" + item + "`"
                 )
 
             mod = getattr(mod, item)
 
             if not isinstance(mod, torch.nn.Module):
-                raise AttributeError("`" + item + "` is not " "an nn.Module")
+                raise AttributeError("`" + item + "` is not an nn.Module")
 
         return mod
 
@@ -829,7 +831,7 @@ class Module:
         param: torch.nn.Parameter = getattr(mod, param_name)
 
         if not isinstance(param, torch.nn.Parameter):
-            raise AttributeError("`" + param_name + "` is not an " "nn.Parameter")
+            raise AttributeError("`" + param_name + "` is not an nn.Parameter")
 
         return param
 
