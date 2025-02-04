@@ -1,4 +1,0 @@
-# removing this file prevents the TimmRunner from dynamically skipping models
-skip:
-  all:
-    - ~

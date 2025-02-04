@@ -42,7 +42,7 @@ from torch.fx.experimental import symbolic_shapes
 from torch.utils import _pytree as pytree
 from torch.utils._pytree import treespec_dumps, treespec_loads
 from torch.utils._sympy.numbers import int_oo
-from torch.utils._sympy.symbol import prefix_str, SymT
+from torch.utils._sympy.symbol import symbol_is_type, SymT
 from torch.utils._sympy.value_ranges import ValueRanges
 
 from ..utils import remove_proxy_from_state_dict
@@ -1400,7 +1400,7 @@ class GraphModuleSerializer(metaclass=Final):
 
     def serialize_graph(self, graph_module: torch.fx.GraphModule) -> Graph:
         assert isinstance(graph_module, torch.fx.GraphModule)
-        log.debug("[serialize_graph]\n\n%s", graph_module.print_readable(print_output=False))
+        log.debug("[serialize_graph]\n\n%s", graph_module.print_readable())
 
         for node in graph_module.graph.nodes:
             try:
@@ -1890,6 +1890,14 @@ class GraphModuleDeserializer(metaclass=Final):
             for u_name in serialized_node.metadata["unbacked_bindings"].split(","):
                 u = self.symbol_name_to_symbol[u_name]
                 # these are pending fresh unbacked symbols, so update shape env
+                if symbol_is_type(u, SymT.UNBACKED_FLOAT):
+                    suffix = str(next(self.shape_env.unbacked_symfloat_counter))
+                    assert u.name.endswith(suffix)
+                elif symbol_is_type(u, SymT.UNBACKED_INT):
+                    suffix = str(next(self.shape_env.unbacked_symint_counter))
+                    assert u.name.endswith(suffix)
+                else:
+                    raise AssertionError(f"Illegal unbacked symbol {u}")
                 self.shape_env.pending_fresh_unbacked_symbols.append(u)
             # consume pending fresh unbacked symbols and reconstruct key paths to them
             unbacked_bindings = symbolic_shapes.compute_unbacked_bindings(
@@ -2060,29 +2068,12 @@ class GraphModuleDeserializer(metaclass=Final):
             # deserialization does analysis with checks on 0/1, so we create fake range constraints and
             # restore the original range constraints afterwards
             self.symbol_name_to_range = {}
-            # we also need to bump unbacked sym[float,int] counters in the
-            # shape env to accommodate unbacked symbols in the exported program
-            count_unbacked_symfloat, count_unbacked_symint = -1, -1
-            unbacked_symfloat_prefix, unbacked_symint_prefix = (
-                prefix_str[t] for t in [SymT.UNBACKED_FLOAT, SymT.UNBACKED_INT]
-            )
             if symbol_name_to_range:
                 for k, vr in symbol_name_to_range.items():
                     lower = vr.lower
                     if vr.upper >= 2:  # max is >= 2, not sym bool range
                         lower = max(2, lower)
                     self.symbol_name_to_range[k] = symbolic_shapes.ValueRanges(_int_to_sympy_int(lower, -int_oo), vr.upper)
-                    if k.startswith(unbacked_symfloat_prefix):
-                        i = int(k[len(unbacked_symfloat_prefix):])
-                        count_unbacked_symfloat = max(count_unbacked_symfloat, i)
-                    elif k.startswith(unbacked_symint_prefix):
-                        i = int(k[len(unbacked_symint_prefix):])
-                        count_unbacked_symint = max(count_unbacked_symint, i)
-
-            for _ in range(count_unbacked_symfloat + 1):
-                next(self.shape_env.unbacked_symfloat_counter)
-            for _ in range(count_unbacked_symint + 1):
-                next(self.shape_env.unbacked_symint_counter)
 
             if example_inputs is not None and len(example_inputs) > 0:
                 self.example_inputs = deserialize_torch_artifact(example_inputs)

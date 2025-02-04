@@ -37,13 +37,13 @@ class WhileLoopOp(HigherOrderOperator):
         additional_inputs: tuple[Union[torch.Tensor, torch.SymInt, int], ...],
         /,
     ):
-        if not isinstance(carried_inputs, (tuple, list)):
+        if not isinstance(carried_inputs, tuple):
             raise RuntimeError(
-                f"carried_inputs must be a tuple or list, got {type(carried_inputs)}"
+                f"carried_inputs must be a tuple, got {type(carried_inputs)}"
             )
-        if not isinstance(additional_inputs, (tuple, list)):
+        if not isinstance(additional_inputs, tuple):
             raise RuntimeError(
-                f"additional_inputs must be a tuple or list, got {type(additional_inputs)}"
+                f"additional_inputs must be a tuple, got {type(additional_inputs)}"
             )
 
         validate_subgraph_args_types(carried_inputs)
@@ -197,9 +197,9 @@ def while_loop_dense(cond_fn, body_fn, carried_inputs, additional_inputs):
                 f"cond_fn must return a boolean scalar tensor or a boolean but got {pred}"
             )
 
-    if not isinstance(carried_inputs, (tuple, list)):
+    if not isinstance(carried_inputs, tuple):
         raise RuntimeError(
-            f"carried_inputs must be a tuple or list but got {type(carried_inputs)}"
+            f"carried_inputs must be a tuple but got {type(carried_inputs)}"
         )
 
     while pred := cond_fn(*carried_vals, *additional_inputs):

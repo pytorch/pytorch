@@ -1,7 +1,7 @@
 #include <c10/core/Scalar.h>
 #include <ATen/core/TensorBody.h>
 
-#include <string_view>
+#include <c10/util/string_view.h>
 
 namespace at {
 

@@ -1,7 +1,7 @@
 #pragma once
 
 #include <c10/core/Allocator.h>
-#include <string_view>
+#include <c10/util/string_view.h>
 
 namespace at {
 

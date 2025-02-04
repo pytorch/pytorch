@@ -313,7 +313,6 @@ FLEX_ATTENTION_TEMPLATE = r"""
 extern "C"
 {{kernel.def_kernel(inputs=kernel_args, outputs={"output": output}, extra_sizevars=template.extra_sizevars)}}
 {
-  {{ kernel.maybe_codegen_profile() }}
   int64_t kvBlockSize = {{kvBlockSize}};
   kvBlockSize = kvBlockSize>{{kernel.size(key, 1)}} ? {{kernel.size(key, 1)}}
                                                     : kvBlockSize;

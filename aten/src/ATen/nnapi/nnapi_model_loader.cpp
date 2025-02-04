@@ -174,7 +174,8 @@ int load_nnapi_model(
     uint32_t len = values[i].source_length;
     const uint8_t* stored_pointer = next_pointer;
     const void* value_pointer = nullptr;
-    size_t value_length = 0;
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
+    size_t value_length;
 
     switch ((SourceType)values[i].source_type) {
       case SOURCE_IMMEDIATE:

@@ -7,7 +7,6 @@
 #include <c10/util/error.h>
 #include <c10/util/irange.h>
 #include <c10/util/numa.h>
-#include <cstring>
 
 #ifdef USE_MIMALLOC
 #include <mimalloc.h>

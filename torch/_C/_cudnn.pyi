@@ -1,13 +1,16 @@
-from enum import IntEnum
+from enum import Enum
+
+from torch.types import _bool
 
 # Defined in torch/csrc/cuda/shared/cudnn.cpp
-is_cuda: bool
+is_cuda: _bool
 
 def getRuntimeVersion() -> tuple[int, int, int]: ...
 def getCompileVersion() -> tuple[int, int, int]: ...
 def getVersionInt() -> int: ...
 
-class RNNMode(IntEnum):
+class RNNMode(int, Enum):
+    value: int
     rnn_relu = ...
     rnn_tanh = ...
     lstm = ...

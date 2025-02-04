@@ -45,10 +45,6 @@ from torch.testing._internal.custom_op_db import numpy_nonzero
 # Shadowed by `torch.testing._internal.common_utils.custom_op`
 from torch._custom_op.impl import custom_op  # usort: skip
 
-# Needed by TestTypeConversion.test_string_type:
-MyList = list
-MyTensor = torch.Tensor
-
 
 def requires_compile(fun):
     fun = unittest.skipIf(IS_WINDOWS, "torch.compile doesn't work with windows")(fun)
@@ -814,22 +810,6 @@ def _(x):
         schema = torch.library.infer_schema(foo_impl, op_name="myop", mutates_args={})
         self.assertExpectedInline(schema, "myop(Tensor x) -> Tensor")
 
-        # Ensure that a global in this file is properly found & evaluated.
-        def stringy_fn(x: torch.Tensor) -> "MyList[torch.Tensor]":
-            return [torch.randn_like(x)]
-
-        schema = infer_schema(stringy_fn, mutates_args={})
-        self.assertExpectedInline(schema, "(Tensor x) -> Tensor[]")
-
-        # Make sure that substrings are evaluated properly.
-        def substringy_fn(
-            x: torch.Tensor,
-        ) -> list["MyTensor"]:
-            return [torch.randn_like(x)]
-
-        schema = infer_schema(substringy_fn, mutates_args={})
-        self.assertExpectedInline(schema, "(Tensor x) -> Tensor[]")
-
     def test_infer_schema_unsupported(self):
         with self.assertRaisesRegex(ValueError, "varargs"):
 
@@ -865,20 +845,6 @@ def _(x):
                 raise NotImplementedError
 
             infer_schema(foo, mutates_args={"y"})
-
-        # Ensure that a global defined in infer_schema's file ISN'T found.
-        with self.assertRaisesRegex(
-            ValueError,
-            r"Unsupported type annotation list\[_TestTensor\]\. It is not a type\.",
-        ):
-
-            def stringy_bad_type(
-                x: torch.Tensor,
-            ) -> "list[_TestTensor]":
-                return [torch.randn_like(x)]
-
-            self.assertTrue(hasattr(torch._library.infer_schema, "_TestTensor"))
-            schema = infer_schema(stringy_bad_type, mutates_args={})
 
     def _generate_examples(self, typ):
         if typ is int:

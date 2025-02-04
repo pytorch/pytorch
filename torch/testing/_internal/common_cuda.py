@@ -120,6 +120,19 @@ def initialize_cuda_context_rng():
         __cuda_ctx_rng_initialized = True
 
 
+# Test whether hardware TF32 math mode enabled. It is enabled only on:
+# - CUDA >= 11
+# - arch >= Ampere
+def tf32_is_not_fp32():
+    if not torch.cuda.is_available() or torch.version.cuda is None:
+        return False
+    if torch.cuda.get_device_properties(torch.cuda.current_device()).major < 8:
+        return False
+    if int(torch.version.cuda.split('.')[0]) < 11:
+        return False
+    return True
+
+
 @contextlib.contextmanager
 def tf32_off():
     old_allow_tf32_matmul = torch.backends.cuda.matmul.allow_tf32
@@ -207,7 +220,7 @@ def tf32_on_and_off(tf32_precision=1e-5):
         def wrapped(*args, **kwargs):
             for k, v in zip(arg_names, args):
                 kwargs[k] = v
-            cond = torch.cuda.is_tf32_supported()
+            cond = tf32_is_not_fp32()
             if 'device' in kwargs:
                 cond = cond and (torch.device(kwargs['device']).type == 'cuda')
             if 'dtype' in kwargs:

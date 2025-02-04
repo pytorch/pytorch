@@ -2,7 +2,6 @@
 
 // ${generated_comment}
 
-#include <string_view>
 #include <tuple>
 #include <vector>
 

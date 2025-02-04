@@ -708,13 +708,13 @@ void dispatch_fp8_rowwise_kernel_on_sm(
     at::Tensor out) {
   cudaDeviceProp* properties = at::cuda::getCurrentDeviceProperties();
   const bool sm89 = properties != nullptr && properties->major == 8 && properties->minor == 9;
-  const bool sm9x = properties != nullptr && properties->major == 9;
-  if (!(sm89 || sm9x)) {
+  const bool sm90OrLater = properties != nullptr && properties->major >= 9;
+  if (!(sm89 || sm90OrLater)) {
     TORCH_CHECK(
         false, "Rowwise scaling is not currently supported on your device");
   }
 
-  if (sm9x) {
+  if (sm90OrLater) {
     dispatch_fp8_rowwise_kernel_on_cluster_size_and_transpose<Types...>(XQ, WQ, x_scale, w_scale, bias, out);
   } else {
     f8f8bf16_rowwise_impl_sm89<Types...>(XQ, WQ, x_scale, w_scale, bias, out);

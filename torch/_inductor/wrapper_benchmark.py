@@ -1,9 +1,8 @@
+# mypy: allow-untyped-defs
 import dataclasses
 import datetime
 import tempfile
 from collections import defaultdict
-from types import ModuleType
-from typing import Any, Dict, Optional, Protocol
 
 import torch
 from torch.autograd import DeviceType
@@ -11,11 +10,6 @@ from torch.utils._ordered_set import OrderedSet
 
 from .runtime.benchmarking import benchmarker
 from .runtime.runtime_utils import create_bandwidth_info_str, get_num_bytes
-
-
-class BenchmarkCallableType(Protocol):
-    def __call__(self, times: int, repeat: int) -> float:
-        ...
 
 
 _kernel_category_choices = [
@@ -28,7 +22,7 @@ _kernel_category_choices = [
 ]
 
 
-def get_kernel_category_by_source_code(src_code: str) -> str:
+def get_kernel_category_by_source_code(src_code):
     """
     Similar to get_kernel_category but use the source code. Call this API
     if we have not compile the src_code to module yet.
@@ -42,7 +36,7 @@ def get_kernel_category_by_source_code(src_code: str) -> str:
         return "unknown"
 
 
-def get_kernel_category(kernel_mod: ModuleType) -> str:
+def get_kernel_category(kernel_mod):
     """
     Given the module defining a triton kernel, return the category of the kernel.
     Category can be one of:
@@ -60,7 +54,7 @@ def get_kernel_category(kernel_mod: ModuleType) -> str:
         return "unknown"
 
 
-def get_triton_kernel(mod: ModuleType):  # type: ignore[no-untyped-def]
+def get_triton_kernel(mod):
     from torch._inductor.runtime.triton_heuristics import CachingAutotuner
 
     cand_list = [
@@ -72,9 +66,7 @@ def get_triton_kernel(mod: ModuleType):  # type: ignore[no-untyped-def]
     return cand_list[0]
 
 
-def benchmark_all_kernels(
-    benchmark_name: str, benchmark_all_configs: Optional[Dict[Any, Any]]
-) -> None:
+def benchmark_all_kernels(benchmark_name, benchmark_all_configs):
     """
     An experimental API used only when config.benchmark_kernel is true.
 
@@ -106,13 +98,7 @@ def benchmark_all_kernels(
         if num_gb is None:
             num_gb = get_num_bytes(*args, num_in_out_args=num_in_out_ptrs) / 1e9
 
-        def get_info_str(
-            ms: float,
-            n_regs: Optional[Any],
-            n_spills: Optional[Any],
-            shared: Optional[Any],
-            prefix: str = "",
-        ) -> str:
+        def get_info_str(ms, n_regs, n_spills, shared, prefix=""):
             if not any(x is None for x in [n_regs, n_spills, shared]):
                 kernel_detail_str = (
                     f"  {n_regs:3} regs  {n_spills:3} spills  {shared:8} shared mem"
@@ -170,31 +156,22 @@ class ProfileEvent:
 
 
 def parse_profile_event_list(
-    benchmark_name: str,
-    event_list: torch.autograd.profiler_util.EventList,
-    wall_time_ms: float,
-    nruns: int,
-    device_name: str,
-) -> None:
-    def get_self_device_time(
-        ev: torch.autograd.profiler_util.EventList,
-    ) -> float:
+    benchmark_name, event_list, wall_time_ms, nruns, device_name
+):
+    def get_self_device_time(ev):
         """
         ev.self_device_time_total is in microsecond. Convert to millisecond.
         """
-        return ev.self_device_time_total / 1000 / nruns  # type: ignore[attr-defined]
+        return ev.self_device_time_total / 1000 / nruns
 
-    all_events: Dict[str, list[ProfileEvent]] = defaultdict(list)
+    all_events = defaultdict(list)
 
-    def add_event(
-        ev: torch.autograd.profiler_util.EventList,
-        category: str,
-    ) -> None:
+    def add_event(ev, category):
         profile_ev = ProfileEvent(
             category=category,
-            key=ev.key,  # type: ignore[attr-defined]
+            key=ev.key,
             self_device_time_ms=get_self_device_time(ev),
-            count=ev.count / nruns,  # type: ignore[operator] # average across all runs
+            count=ev.count / nruns,  # average across all runs
         )
         all_events[category].append(profile_ev)
 
@@ -217,10 +194,7 @@ def parse_profile_event_list(
 
         add_event(ev, category)
 
-    def report_category(category: str, profile_events: list[ProfileEvent]) -> float:
-        if not device_name:
-            return 0.0
-
+    def report_category(category, profile_events):
         from tabulate import tabulate
 
         profile_events.sort(key=lambda ev: ev.self_device_time_ms, reverse=True)
@@ -248,7 +222,7 @@ def parse_profile_event_list(
         )
         return total_time
 
-    def report() -> None:
+    def report():
         category_list = [
             "triton_pointwise",
             "triton_reduction",
@@ -269,13 +243,9 @@ def parse_profile_event_list(
                 total_device_ms += _time
 
         device_busy_percent = f"{total_device_ms / wall_time_ms * 100:.2f}%"
-        if device_name:
-            print(
-                f"\nPercent of time when {device_name.upper()} is busy: {device_busy_percent}"
-            )
-        else:
-            print("No device detected")
-
+        print(
+            f"\nPercent of time when {device_name.upper()} is busy: {device_busy_percent}"
+        )
         print(f"Total wall time {wall_time_ms:.3f} ms")
 
         # output such a line so we can gather such line from all compiled modules from all
@@ -296,12 +266,8 @@ def parse_profile_event_list(
 
 
 def perf_profile(
-    wall_time_ms: float,
-    times: int,
-    repeat: int,
-    benchmark_name: str,
-    benchmark_compiled_module_fn: BenchmarkCallableType,
-) -> None:
+    wall_time_ms, times, repeat, benchmark_name, benchmark_compiled_module_fn
+):
     with torch.profiler.profile(record_shapes=True) as p:
         benchmark_compiled_module_fn(times=times, repeat=repeat)
 
@@ -316,9 +282,7 @@ def perf_profile(
     )
 
 
-def ncu_analyzer(
-    benchmark_name: str, benchmark_compiled_module_fn: BenchmarkCallableType
-) -> None:
+def ncu_analyzer(benchmark_name, benchmark_compiled_module_fn):
     import inspect
     import os
     import subprocess
@@ -368,9 +332,7 @@ def ncu_analyzer(
         return
 
 
-def collect_memory_snapshot(
-    benchmark_compiled_module_fn: BenchmarkCallableType,
-) -> None:
+def collect_memory_snapshot(benchmark_compiled_module_fn):
     assert torch.cuda.is_available()
 
     torch.cuda.memory._record_memory_history(max_entries=100000)
@@ -381,9 +343,7 @@ def collect_memory_snapshot(
     print(f"The collect memory snapshot has been written to {snapshot_path}")
 
 
-def compiled_module_main(
-    benchmark_name: str, benchmark_compiled_module_fn: BenchmarkCallableType
-) -> None:
+def compiled_module_main(benchmark_name, benchmark_compiled_module_fn):
     """
     This is the function called in __main__ block of a compiled module.
     """
