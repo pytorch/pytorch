@@ -16,7 +16,7 @@ from ..cpu_vec_isa import (
     VecAVX512,
     VecISA,
     VecNEON,
-    VecSVE,
+    VecSVE256,
 )
 from ..utils import IndentedBuffer, parallel_num_threads
 from ..virtualized import V
@@ -339,7 +339,7 @@ class CppMicroGemmRef(CppMicroGemm):
         compute_dtype=torch.float,
     ),
     *generate_gemm_config(
-        VecSVE,
+        VecSVE256,
         [(4, 24, 1), (4, 16, 1), (8, 8, 1)],
         input_dtype=torch.float,
         input2_dtype=torch.float,
