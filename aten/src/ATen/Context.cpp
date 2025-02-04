@@ -322,6 +322,9 @@ at::BlasBackend Context::blasPreferredBackend() {
 #if ROCM_VERSION >= 60300
           "gfx1100", "gfx1101", "gfx1200", "gfx1201"
 #endif
+#if ROCM_VERSION >= 60500
+          "gfx950"
+#endif
       };
       for (auto index: c10::irange(getNumGPUs())) {
         if (!detail::getCUDAHooks().isGPUArch(index, archs)) {
