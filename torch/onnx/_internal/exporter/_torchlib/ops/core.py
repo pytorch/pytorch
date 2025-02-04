@@ -3549,47 +3549,10 @@ def aten_fix(self: TensorType) -> TensorType:
     raise NotImplementedError
 
 
-@onnx_impl(aten.flatten.using_ints, trace_only=True)
+# aten_flatten is decomposed by PyTorch
 def aten_flatten(self: TTensor, start_dim: int = 0, end_dim: int = -1) -> TTensor:
     """flatten.using_ints(Tensor(a) self, int start_dim=0, int end_dim=-1) -> Tensor(a)"""
-    dim = len(self.shape)
-    if dim == 1:
-        return op.Identity(self)
-    # use ONNX's Flatten operator for cases where the output shape is 2D
-    if start_dim == 1:
-        if end_dim in (-1, dim - 1):
-            return op.Flatten(self, axis=start_dim)
-    elif start_dim == 0:
-        if end_dim in (-2, dim - 2):
-            return op.Flatten(self, axis=end_dim + 1)
-
-    # if end_dim is negative add dim
-    if end_dim < 0:
-        end_dim = dim + end_dim
-
-    input_size = op.Shape(self)
-    dim_head = op.Slice(
-        input_size,
-        op.Constant(value_ints=[0]),
-        op.Constant(value_ints=[start_dim]),
-        op.Constant(value_ints=[0]),
-    )
-    final_dims = [dim_head, op.Constant(value_ints=[-1])]
-    if end_dim < dim - 1:
-        dim_tail = op.Slice(
-            input_size,
-            op.Constant(value_ints=[end_dim + 1]),
-            op.Constant(value_ints=[dim]),
-            op.Constant(value_ints=[0]),
-        )
-        final_dims = [
-            dim_head,
-            op.Constant(value_ints=[-1]),
-            dim_tail,
-        ]
-
-    final_shape = op.Concat(*final_dims, axis=0)
-    return op.Reshape(self, final_shape)
+    raise NotImplementedError
 
 
 @onnx_impl(aten.flip, trace_only=True)
