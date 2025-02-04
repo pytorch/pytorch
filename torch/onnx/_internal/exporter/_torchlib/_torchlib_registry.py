@@ -48,59 +48,44 @@ def onnx_impl(
         if no_compile:
             processed_func = func
         else:
-            try:
-                # NOTE: This is heavily guarded with try-except because we don't want
-                # to fail the entire registry population if one function fails.
-                custom_opset = onnxscript.values.Opset(
-                    domain=_constants.DOMAIN, version=1
-                )
+            custom_opset = onnxscript.values.Opset(domain=_constants.DOMAIN, version=1)
 
-                if trace_only:
-                    # TODO(justinchuby): Simplify this implementation
-                    processed_func = onnxscript.values.TracedOnnxFunction(
-                        custom_opset, func
-                    )
-                else:
-                    # Compile the function
-                    processed_func = onnxscript.script(opset=custom_opset)(func)
+            if not trace_only:
+                # Compile the function
+                processed_func = onnxscript.script(opset=custom_opset)(func)
+            else:
+                processed_func = func
 
-                if not private:
-                    # Skip registration if private
-                    # TODO(justinchuby): Simplify the logic and remove the private attribute
-                    if isinstance(processed_func, onnxscript.OnnxFunction):
-                        opset_version = processed_func.opset.version
-                    else:
-                        opset_version = 1
+            # TODO(justinchuby): Simplify the logic and remove the private attribute
+            if isinstance(processed_func, onnxscript.OnnxFunction):
+                opset_version = processed_func.opset.version
+            else:
+                opset_version = 1
 
-                    signature = _schemas.OpSignature.from_function(
-                        processed_func,
-                        _constants.DOMAIN,
-                        processed_func.name,
-                        opset_version=opset_version,
-                    )
-
-            except Exception:
-                logger.exception(
-                    "Failed to register function '%s' to target '%s'. Skipped",
-                    func,
-                    target,
-                )
-                return func
-
-        if not isinstance(target, Sequence):
-            targets = (target,)
-        else:
-            targets = target  # type: ignore[assignment]
-
-        for t in targets:
-            _registry.append(
-                _registration.OnnxDecompMeta(
-                    onnx_function=processed_func,
-                    fx_target=t,
-                    signature=signature,
-                    is_complex=complex,
-                )
+            signature = _schemas.OpSignature.from_function(
+                processed_func,
+                _constants.DOMAIN,
+                getattr(processed_func, "name", func.__name__),
+                opset_version=opset_version,
             )
+            processed_func.signature = signature  # type: ignore[assignment]
+
+        if not private:
+            # Skip registration if private
+            if not isinstance(target, Sequence):
+                targets = (target,)
+            else:
+                targets = target  # type: ignore[assignment]
+
+            for t in targets:
+                _registry.append(
+                    _registration.OnnxDecompMeta(
+                        onnx_function=processed_func,
+                        fx_target=t,
+                        signature=signature,
+                        is_complex=complex,
+                    )
+                )
         return processed_func  # type: ignore[return-value]
 
     return wrapper

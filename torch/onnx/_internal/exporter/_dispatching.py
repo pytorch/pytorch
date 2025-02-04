@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Sequence
-from typing import Callable
+from typing import Any, Callable
 
 from onnxscript import ir
 
@@ -188,11 +188,11 @@ def _get_type_from_tensor(
 
 
 def _get_first_tensor_in_node_list(
-    nodes: Sequence[torch.fx.Node | None],
+    nodes: Sequence[torch.fx.Node | Any],
 ) -> torch.Tensor | None:
     for node in nodes:
         if (
-            node is not None
+            isinstance(node, torch.fx.Node)
             and "val" in node.meta
             and isinstance(node.meta["val"], torch.Tensor)
         ):
@@ -297,6 +297,8 @@ def get_matching_overload(
                 if not _attribute_type_compatible_with_arg(param, arg):  # type: ignore[arg-type]
                     fail_reason = f"Attribute type not compatible with argument: param=`{param}`, arg=`{arg}`"
                     break
+            else:
+                raise TypeError(f"Unknown parameter type: {type(param)}")
         if not fail_reason:
             return overload, "Successfully matched overload"
         else:
