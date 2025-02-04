@@ -82,8 +82,7 @@ QTensorImpl* get_qtensorimpl(const TensorBase& self) {
 }
 
 static int64_t get_sub_byte_tensor_size(IntArrayRef sizes, size_t dtype_itemsize, at::ScalarType t) {
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  int64_t element_per_byte;
+  int64_t element_per_byte = 1;
   switch(t) {
     case at::ScalarType::QUInt4x2:
       element_per_byte = 2;
