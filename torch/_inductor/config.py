@@ -148,6 +148,8 @@ allow_buffer_reuse = True
 # Enable pooled allocations for non-output tensors
 memory_planning = os.environ.get("TORCHINDUCTOR_MEMORY_PLANNING", "0") == "1"
 
+use_fast_math = os.environ.get("TORCHINDUCTOR_USE_FAST_MATH") == "1"
+
 # How to organize memory under memory_planning=True:
 # - "none": do not try to pool storage, just reuse
 # - "intermediates": all non-outputs share storage, outputs each get unique storage
