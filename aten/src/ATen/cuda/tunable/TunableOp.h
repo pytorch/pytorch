@@ -206,7 +206,6 @@ class TunableOp {
       auto params_sig = params->Signature();
       TUNABLE_LOG2("finding fastest for ", op_sig, '(', params_sig, ')', " out of ", op_names_.size(), " candidates");
       auto min_duration_ms = std::numeric_limits<double>::infinity();
-      auto min_stddev_ms = std::numeric_limits<double>::infinity();
       std::string id_name = "Default";
       ParamsT* reference_params = nullptr;
 
@@ -346,7 +345,6 @@ class TunableOp {
                 " mean ", s._mean,
                 " std ", s_stddev);
           min_duration_ms = s._mean;
-          min_stddev_ms = s_stddev;
           id_name = op_names_[i];
         }
         else {
