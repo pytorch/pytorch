@@ -337,79 +337,26 @@ def aten_linalg_vector_norm(
 
     if dtype != -1:
         self = op.Cast(self, to=dtype)
-    if dim is None or (isinstance(dim, tuple) and len(dim) == 0):
+    if dim is None:
         self = op.Reshape(self, op.Constant(value_ints=[-1]))
         keepdim = False
-        return _aten_linalg_vector_norm_no_dim_onnx(self, ord, keepdim)
     else:
-        return _aten_linalg_vector_norm_onnx(self, ord, dim, keepdim)
-
-
-@onnx_impl(aten.linalg_vector_norm, private=True)
-def _aten_linalg_vector_norm_no_dim_onnx(
-    self: TFloat, ord: float, keepdim: bool
-) -> TFloat:
-    self_is_scalar = IsScalar(self)
-    if self_is_scalar:
-        self = op.Unsqueeze(self, axes=[0])
-
+        dim = op.Reshape(dim, op.Constant(value_ints=[-1]))
     self = op.Abs(self)
-    ord = op.Cast(ord, to=FLOAT.dtype)  # Must be FLOAT, due to op.IsInf() needs FLOAT
-    # TODO(justinchuby): Evaluate IsInf in trace mode
-    if op.IsInf(ord, detect_negative=0, detect_positive=1):
-        result = op.ReduceMax(self, keepdims=keepdim)
-    elif op.IsInf(ord, detect_negative=1, detect_positive=0):
-        result = op.ReduceMin(self, keepdims=keepdim)
+    if math.isinf(ord):
+        if ord > 0:
+            return op.ReduceMax(self, dim, keepdims=keepdim)
+        else:
+            return op.ReduceMin(self, dim, keepdims=keepdim)
     elif ord == 0.0:  # sum(x!=0) means count non-zero elements
         self_bool = op.Cast(self, to=BOOL.dtype)
         self_0_1 = op.CastLike(self_bool, self)
-        result = op.ReduceSum(self_0_1, keepdims=False)
-    # TODO(microsoft/onnxruntime#18338): Use ReduceL1/L2 when ONNX Runtime is fixed
-    else:
-        ord_float = op.CastLike(ord, self)
-        self_pow = op.Pow(self, ord_float)
-        result = op.Pow(
-            op.ReduceSum(self_pow, keepdims=keepdim), op.Div(1.0, ord_float)
-        )
-
-    if self_is_scalar:
-        result = op.Squeeze(result)
-
-    return result
-
-
-@onnx_impl(aten.linalg_vector_norm, private=True)
-def _aten_linalg_vector_norm_onnx(
-    self: TFloat, ord: float, dim: INT64, keepdim: bool
-) -> TFloat:
-    self_is_scalar = IsScalar(self)
-    if self_is_scalar:
-        self = op.Unsqueeze(self, axes=[0])
-
-    dim = op.Reshape(dim, op.Constant(value_ints=[-1]))
-    self = op.Abs(self)
-    ord = op.Cast(ord, to=FLOAT.dtype)  # Must be FLOAT, due to op.IsInf() needs FLOAT
-    # TODO(justinchuby): Evaluate IsInf in trace mode
-    if op.IsInf(ord, detect_negative=0, detect_positive=1):
-        result = op.ReduceMax(self, dim, keepdims=keepdim)
-    elif op.IsInf(ord, detect_negative=1, detect_positive=0):
-        result = op.ReduceMin(self, dim, keepdims=keepdim)
-    elif ord == 0.0:  # sum(x!=0) means count non-zero elements
-        self_bool = op.Cast(self, to=BOOL.dtype)
-        self_0_1 = op.CastLike(self_bool, self)
-        result = op.ReduceSum(self_0_1, dim, keepdims=keepdim)
+        return op.ReduceSum(self_0_1, dim, keepdims=keepdim)
     elif ord == 1.0:
-        result = op.ReduceL1(self, dim, keepdims=keepdim)
+        return op.ReduceL1(self, dim, keepdims=keepdim)
     elif ord == 2.0:
-        result = op.ReduceL2(self, dim, keepdims=keepdim)
+        return op.ReduceL2(self, dim, keepdims=keepdim)
     else:
-        ord_float = op.CastLike(ord, self)
-        self_pow = op.Pow(self, ord_float)
-        result = op.Pow(
-            op.ReduceSum(self_pow, dim, keepdims=keepdim), op.Div(1.0, ord_float)
-        )
-
-    if self_is_scalar:
-        result = op.Squeeze(result)
-
-    return result
+        self_pow = op.Pow(self, ord)
+        exp = op.CastLike(1 / ord, self)
+        return op.Pow(op.ReduceSum(self_pow, dim, keepdims=keepdim), exp)

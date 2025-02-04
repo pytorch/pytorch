@@ -320,15 +320,6 @@ def _index_put_input_wrangler(
     return args, kwargs
 
 
-def _linalg_vector_norm_input_wrangler(
-    args: list[Any], kwargs: dict[str, Any]
-) -> tuple[list[Any], dict[str, Any]]:
-    # Make the dims as tensor
-    if "dim" in kwargs:
-        kwargs["dim"] = np.array(kwargs["dim"], dtype=np.int64)
-    return args, kwargs
-
-
 def _max_pool_input_wrangler(
     args: list[Any], kwargs: dict[str, Any]
 ) -> tuple[list[Any], dict[str, Any]]:
@@ -851,7 +842,6 @@ TESTED_TORCHLIB_OPS: tuple[TorchLibOpInfo, ...] = (
         "linalg.vector_norm",
         linalg_ops.aten_linalg_vector_norm,
         tolerance={torch.float16: (2e-3, 2e-3)},
-        input_wrangler=_linalg_vector_norm_input_wrangler,
     ).skip(
         matcher=lambda sample: sample.kwargs.get("ord") == 6,
         dtypes=(torch.float16,),
@@ -1247,14 +1237,9 @@ TESTED_TORCHLIB_OPS: tuple[TorchLibOpInfo, ...] = (
     TorchLibOpInfo("reshape", core_ops.aten_reshape),
     TorchLibOpInfo("resolve_conj", core_ops.aten_resolve_conj),
     TorchLibOpInfo("resolve_neg", core_ops.aten_resolve_neg),
-    TorchLibOpInfo("round", core_ops.aten_round)
-    .xfail(
-        variant_name="decimals_3",
-        reason="This variant does not accept decimals",
-    )
-    .xfail(
-        variant_name="decimals_neg_3",
-        reason="This variant does not accept decimals",
+    TorchLibOpInfo("round", core_ops.aten_round).skip(
+        matcher=lambda sample: sample.kwargs.get("decimals") is not None,
+        reason="this Aten overload only support one tensor as input and one int as args by design",
     ),
     TorchLibOpInfo("round_decimals", core_ops.aten_round_decimals),
     TorchLibOpInfo("rsqrt", core_ops.aten_rsqrt),

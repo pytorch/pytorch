@@ -824,7 +824,7 @@ def aten_argwhere(self: TensorType) -> TensorType:
 
 @onnx_impl(aten.as_strided, trace_only=True)
 def aten_as_strided(
-    self: TTensor, size: INT64, stride: INT64, storage_offset: int = 0
+    self: TTensor, size: INT64, stride: Sequence[int], storage_offset: int = 0
 ) -> TTensor:
     """as_strided(Tensor(a) self, SymInt[] size, SymInt[] stride, SymInt? storage_offset=None) -> Tensor(a)"""
 

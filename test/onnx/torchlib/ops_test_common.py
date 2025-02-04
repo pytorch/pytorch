@@ -381,7 +381,7 @@ def _format_model_and_input_information(onnx_model, inputs):
     )
 
 
-TORCH_DTYPE_TO_ONNX_STRING = {
+_TORCH_DTYPE_TO_ONNX_STRING = {
     torch.bool: "tensor(bool)",
     torch.uint8: "tensor(uint8)",
     torch.int8: "tensor(int8)",
@@ -480,7 +480,7 @@ def dtype_op_schema_compatible(dtype: torch.dtype, schema: onnx.defs.OpSchema) -
     allowed_type_strs = first_input_type_constraint.allowed_type_strs
     # Here we consider seq(tensor(float)) compatible with tensor(float) as well
     return any(
-        TORCH_DTYPE_TO_ONNX_STRING[dtype] in type_str for type_str in allowed_type_strs
+        _TORCH_DTYPE_TO_ONNX_STRING[dtype] in type_str for type_str in allowed_type_strs
     )
 
 
