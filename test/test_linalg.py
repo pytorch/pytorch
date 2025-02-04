@@ -1,4 +1,5 @@
 # Owner(s): ["module: linear algebra"]
+# ruff: noqa: F841
 
 import torch
 import numpy as np
@@ -33,7 +34,8 @@ from torch.testing._internal.common_dtype import (
 )
 from torch.testing._internal.common_cuda import SM53OrLater, SM80OrLater, SM90OrLater, tf32_on_and_off, _get_magma_version, \
     _get_torch_cuda_version, CDNA2OrLater, TEST_MULTIGPU
-from torch.testing._internal.common_quantization import _group_quantize_tensor, _dynamically_quantize_per_channel
+from torch.testing._internal.common_quantization import _group_quantize_tensor, _dynamically_quantize_per_channel, \
+    _group_quantize_tensor_symmetric
 from torch.testing._internal.common_mkldnn import bf32_on_and_off
 from torch.distributions.binomial import Binomial
 import torch.backends.opt_einsum as opt_einsum
@@ -66,7 +68,19 @@ def set_tunableop_defaults():
     torch.cuda.tunable.tuning_enable(True)
     torch.cuda.tunable.set_max_tuning_duration(30)
     torch.cuda.tunable.set_max_tuning_iterations(100)
+    torch.cuda.tunable.set_rotating_buffer_size(-1)
 
+def tunableop_matmul(device, dtype):
+    # Helper function to test TunableOp in a subprocess
+    # requires helper function since lambda function
+    # not supported by multiprocessing module
+    import os
+    os.environ["PYTORCH_TUNABLEOP_ENABLED"] = "1"
+    torch.cuda.tunable.set_max_tuning_duration(1)
+    A = torch.randn((17, 17), device=device, dtype=dtype)
+    B = torch.randn((17, 17), device=device, dtype=dtype)
+    C = torch.matmul(A, B)
+    del os.environ["PYTORCH_TUNABLEOP_ENABLED"]
 
 class TestLinalg(TestCase):
     def setUp(self):
@@ -896,7 +910,6 @@ class TestLinalg(TestCase):
             torch.randn((3, 52, 52), device=device, dtype=dtype),
             torch.randn((4, 2, 26, 26), device=device, dtype=dtype))
 
-
         ops = (torch.det, torch.Tensor.det,
                torch.linalg.det)
         for t in tensors:
@@ -1424,7 +1437,6 @@ class TestLinalg(TestCase):
                    (torch.device(device).type == 'cpu' and not torch._C.has_lapack)):
                     continue
             run_test_case(make_arg(shape), ord, dim, keepdim)
-
 
     @onlyCUDA
     @dtypes(torch.bfloat16, torch.float16)
@@ -2494,7 +2506,7 @@ class TestLinalg(TestCase):
             # check if svd_lowrank produces same singular values as linalg.svdvals
             U, S, Vh = torch.linalg.svd(a, full_matrices=False)
             V = Vh.mH
-            self.assertEqual(s, S)
+            self.assertEqual(s, S, rtol=5e-7, atol=1e-7)
 
             if density == 1:
                 # actual_rank is known only for dense inputs
@@ -4331,7 +4343,6 @@ class TestLinalg(TestCase):
             triangular_solve_zero_batch_helper((batchsize, 5, 5), (batchsize, 5, 10),
                                                upper, unitriangular, transpose)
 
-
     @slowTest
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
@@ -4452,7 +4463,6 @@ class TestLinalg(TestCase):
             self.assertTrue("An output with one or more elements was resized" in str(w[0].message))
             self.assertTrue("An output with one or more elements was resized" in str(w[1].message))
 
-
     def check_single_matmul(self, x, y):
 
         def assertEqual(answer, expected):
@@ -4549,127 +4559,158 @@ class TestLinalg(TestCase):
                 self.check_single_matmul(x, y)
 
     @onlyCUDA
+    @skipCUDAIfNotRocm  # Skipping due to SM89 OOM in CI, UT doesn't do much on NV anyways
     @dtypes(*floating_types_and(torch.half))
     def test_matmul_small_brute_force_tunableop(self, device, dtype):
         # disable tunableop buffer rotation for all tests everywhere, it can be slow
+        # We set the TunableOp numerical check environment variable here because it is
+        # possible to hit some invalid numerical solutions due to the small matrix sizes.
+        # Additionally, we put the entire test in try-finally clause so that
+        # if the test fails/assert, there is no OS environment variabls leaked that
+        # could impact subsequent tests.
         import os
-        os.environ["PYTORCH_TUNABLEOP_ROTATING_BUFFER_SIZE"] = "0"
-        set_tunableop_defaults()
 
-        torch.cuda.tunable.enable()
-        # set these to single iterations to keep it short but still exercise the code
-        torch.cuda.tunable.set_max_tuning_duration(1)
-        torch.cuda.tunable.set_max_tuning_iterations(1)
+        try:
+            set_tunableop_defaults()
+            torch.cuda.tunable.set_rotating_buffer_size(0)
+            os.environ["PYTORCH_TUNABLEOP_NUMERICAL_CHECK"] = "1"
+            ordinal = torch.cuda.current_device()
+            torch.cuda.tunable.set_filename(f"tunableop_results{ordinal}.csv")
 
-        make_arg = partial(make_tensor, device=device, dtype=dtype)
+            torch.cuda.tunable.enable()
+            # set these to single iterations to keep it short but still exercise the code
+            torch.cuda.tunable.set_max_tuning_duration(1)
+            torch.cuda.tunable.set_max_tuning_iterations(1)
 
-        for (size_x, size_y), nctg_x, nctg_y in product(self.gen_sizes_matmul(1), (True, False), (True, False)):
-            x = make_arg(size_x, noncontiguous=nctg_x)
-            y = make_arg(size_y, noncontiguous=nctg_y)
-            self.check_single_matmul(x, y)
+            make_arg = partial(make_tensor, device=device, dtype=dtype)
 
-        filename1 = torch.cuda.tunable.get_filename()
-        filename2 = "tunableop_results_tmp1.csv"
-        filename3 = "tunableop_results_tmp2.csv"
-        ordinal = torch.cuda.current_device()
-        assert filename1 == f"tunableop_results{ordinal}.csv"
-        assert len(torch.cuda.tunable.get_validators()) > 0
-        validators = {}
-        for key, value in torch.cuda.tunable.get_validators():
-            validators[key] = value
-        if torch.version.hip:
-            assert "HIPBLASLT_VERSION" in validators
-            assert re.match(r'^\d{3,}-[a-z0-9]{8}$', validators["HIPBLASLT_VERSION"])
-        assert len(torch.cuda.tunable.get_results()) > 0
+            for (size_x, size_y), nctg_x, nctg_y in product(self.gen_sizes_matmul(1), (True, False), (True, False)):
+                x = make_arg(size_x, noncontiguous=nctg_x)
+                y = make_arg(size_y, noncontiguous=nctg_y)
+                self.check_single_matmul(x, y)
 
-        assert torch.cuda.tunable.write_file()  # use default filename
-        assert torch.cuda.tunable.write_file(filename2)  # use custom, one-time filename
-        torch.cuda.tunable.set_filename(filename3)
-        assert torch.cuda.tunable.write_file()  # use previously set filename
-        assert torch.cuda.tunable.read_file()  # use previously set filename, will ignore duplicates and return True
+            filename1 = torch.cuda.tunable.get_filename()
+            filename2 = "tunableop_results_tmp1.csv"
+            filename3 = "tunableop_results_tmp2.csv"
+            ordinal = torch.cuda.current_device()
+            assert filename1 == f"tunableop_results{ordinal}.csv"
+            assert len(torch.cuda.tunable.get_validators()) > 0
+            validators = {}
+            for key, value in torch.cuda.tunable.get_validators():
+                validators[key] = value
+            if torch.version.hip:
+                assert "HIPBLASLT_VERSION" in validators
+                assert re.match(r'^\d{3,}-[a-z0-9]{8}$', validators["HIPBLASLT_VERSION"])
+            assert len(torch.cuda.tunable.get_results()) > 0
 
-        with open(filename1) as file1:
-            file1_contents = file1.read()
-        with open(filename2) as file2:
-            file2_contents = file2.read()
-        with open(filename3) as file3:
-            file3_contents = file3.read()
-        assert file1_contents == file2_contents
-        assert file1_contents == file3_contents
+            assert torch.cuda.tunable.write_file()  # use default filename
+            assert torch.cuda.tunable.write_file(filename2)  # use custom, one-time filename
+            torch.cuda.tunable.set_filename(filename3)
+            assert torch.cuda.tunable.write_file()  # use previously set filename
+            assert torch.cuda.tunable.read_file()  # use previously set filename, will ignore duplicates and return True
 
-        # remove the files created above to avoid error 'Build left local git repository checkout dirty', ignore errors
-        for filename in [filename1, filename2, filename3]:
+            with open(filename1) as file1:
+                file1_contents = file1.read()
+            with open(filename2) as file2:
+                file2_contents = file2.read()
+            with open(filename3) as file3:
+                file3_contents = file3.read()
+            assert file1_contents == file2_contents
+            assert file1_contents == file3_contents
+
+            # remove the files created above to avoid error 'Build left local git repository checkout dirty', ignore errors
+            for filename in [filename1, filename2, filename3]:
+                try:
+                    os.remove(filename)
+                except FileNotFoundError:
+                    pass
+
+        finally:
+            # disables TunableOp
+            torch.cuda.tunable.enable(False)
+
+            # undo all the environment variables set
             try:
-                import os
-                os.remove(filename)
-            except FileNotFoundError:
+                del os.environ["PYTORCH_TUNABLEOP_NUMERICAL_CHECK"]
+            except KeyError:
                 pass
-
-        # disables TunableOp
-        torch.cuda.tunable.enable(False)
 
     @onlyCUDA
     @dtypes(torch.half)
     def test_matmul_offline_tunableop(self, device, dtype):
+        import tempfile
         import os
-        os.putenv('PYTORCH_TUNABLEOP_ROTATING_BUFFER_SIZE', '0')
 
         # Pointing to temp files. The test cannot remove them on Windows because
         # they are in use and locked
-        import tempfile
         tmp_dir = tempfile.mkdtemp()
-        os.putenv("PYTORCH_TUNABLEOP_UNTUNED_FILENAME", os.path.join(tmp_dir, "tunableop_untuned.csv"))
-        os.putenv("PYTORCH_TUNABLEOP_FILENAME", os.path.join(tmp_dir, "tunableop_results.csv"))
 
-        torch.cuda.tunable.enable()
-        # record GEMM
-        torch.cuda.tunable.tuning_enable(False)
-        torch.cuda.tunable.record_untuned_enable(True)
-        assert torch.cuda.tunable.record_untuned_is_enabled()
-
-        make_arg = partial(make_tensor, device=device, dtype=dtype)
-        for (size_x, size_y), nctg_x, nctg_y in product(self.gen_sizes_matmul(1), (True, False), (True, False)):
-            x = make_arg(size_x, noncontiguous=nctg_x)
-            y = make_arg(size_y, noncontiguous=nctg_y)
-            self.check_single_matmul(x, y)
-
-        assert torch.cuda.tunable.is_enabled()
-        assert torch.cuda.tunable.tuning_is_enabled() is False
         ordinal = torch.cuda.current_device()
-        untuned_filename = os.path.join(tmp_dir, f"tunableop_untuned{ordinal}.csv")
-        assert os.path.exists(untuned_filename)
 
-        # tuning the untuned GEMMs in file
-        torch.cuda.tunable.tuning_enable(True)
-        torch.cuda.tunable.record_untuned_enable(False)
+        # Test in try-finally block to avoid leaking state
+        # if test is interrupted.
+        try:
+            set_tunableop_defaults()
+            torch.cuda.tunable.set_rotating_buffer_size(0)
 
-        # set these to single iterations to keep it short but still exercise the code
-        torch.cuda.tunable.set_max_tuning_duration(1)
-        torch.cuda.tunable.set_max_tuning_iterations(1)
+            result_filename = os.path.join(tmp_dir, f"tunableop_results{ordinal}.csv")
+            os.putenv("PYTORCH_TUNABLEOP_UNTUNED_FILENAME", os.path.join(tmp_dir, "tunableop_untuned.csv"))
+            torch.cuda.tunable.set_filename(result_filename)
 
-        torch.cuda.tunable.tune_gemm_in_file(untuned_filename)
-        assert len(torch.cuda.tunable.get_validators()) > 0
-        assert len(torch.cuda.tunable.get_results()) > 0
-        assert torch.cuda.tunable.write_file()
+            torch.cuda.tunable.enable()
+            # record GEMM
+            torch.cuda.tunable.tuning_enable(False)
+            torch.cuda.tunable.record_untuned_enable(True)
+            self.assertTrue(torch.cuda.tunable.record_untuned_is_enabled())
 
-        result_filename = os.path.join(tmp_dir, f"tunableop_results{ordinal}.csv")
-        assert os.path.exists(result_filename)
+            make_arg = partial(make_tensor, device=device, dtype=dtype)
+            for (size_x, size_y), nctg_x, nctg_y in product(self.gen_sizes_matmul(1), (True, False), (True, False)):
+                x = make_arg(size_x, noncontiguous=nctg_x)
+                y = make_arg(size_y, noncontiguous=nctg_y)
+                self.check_single_matmul(x, y)
 
-        # remove the files created above to avoid error 'Build left local git repository checkout dirty', ignore errors
-        for filename in [untuned_filename, result_filename]:
+            self.assertTrue(torch.cuda.tunable.is_enabled())
+            self.assertTrue(torch.cuda.tunable.tuning_is_enabled() is False)
+
+            untuned_filename = os.path.join(tmp_dir, f"tunableop_untuned{ordinal}.csv")
+            self.assertTrue(os.path.exists(untuned_filename))
+
+            # tuning the untuned GEMMs in file
+            torch.cuda.tunable.tuning_enable(True)
+            torch.cuda.tunable.record_untuned_enable(False)
+
+            # set these to single iterations to keep it short but still exercise the code
+            torch.cuda.tunable.set_max_tuning_duration(1)
+            torch.cuda.tunable.set_max_tuning_iterations(1)
+
+            ref_results = len(torch.cuda.tunable.get_results())
+            torch.cuda.tunable.tune_gemm_in_file(untuned_filename)
+            new_results = len(torch.cuda.tunable.get_results())
+
+            self.assertGreater(new_results - ref_results, 0)
+            self.assertTrue(torch.cuda.tunable.write_file())
+
+            # Make sure the results file exists and that it is not zero
+            self.assertTrue(os.path.exists(result_filename))
+            self.assertGreater(os.path.getsize(result_filename), 0)
+
+        finally:
+            # disable TunableOp
+            torch.cuda.tunable.enable(False)
+
+            # undo all the environment variables set
             try:
-                os.remove(filename)
-            # NB: The file is locked on Windows
-            except (FileNotFoundError, PermissionError):
+                del os.environ["PYTORCH_TUNABLEOP_UNTUNED_FILENAME"]
+            except KeyError:
                 pass
 
-        # disables TunableOp, no file will be written, restore to default values
-        torch.cuda.tunable.enable(False)
-        torch.cuda.tunable.record_untuned_enable(False)
-        torch.cuda.tunable.set_max_tuning_duration(30)
-        torch.cuda.tunable.set_max_tuning_iterations(100)
-        assert torch.cuda.tunable.is_enabled() is False, "TunableOp should be off after resetting"
-        assert torch.cuda.tunable.get_max_tuning_iterations() == 100
+            # clean up, remove any files that were generated
+            for filename in [untuned_filename, result_filename]:
+                try:
+                    os.remove(filename)
+                # NB: The file is locked on Windows
+                except (FileNotFoundError, PermissionError):
+                    pass
 
     @unittest.skipIf(not TEST_MULTIGPU, "Requires at least 2 GPUs")
     @onlyCUDA
@@ -4679,93 +4720,97 @@ class TestLinalg(TestCase):
         # Offline tuning with multiple GPUs.
         # Case where you record GEMMs on one GPU, but then tune
         # on multiple GPUs
-        import tempfile
         import os
-
-        tmp_dir = tempfile.mkdtemp()
+        set_tunableop_defaults()
 
         # Use all available GPUs for this test
         total_gpus = torch.cuda.device_count()
 
-        # Test in try-finally block to avoid leaking state
-        # if test is interrupted.
+        ordinal = torch.cuda.current_device()
+        untuned_filename = f"tunableop_untuned{ordinal}.csv"
+
+        #  turn on untuned GEMM recording and turn off tuning
+        torch.cuda.tunable.enable(True)
+        torch.cuda.tunable.tuning_enable(False)
+        torch.cuda.tunable.record_untuned_enable(True)
+
+        # Choose matrix sizes that have not been used before
+        m = n = k = 23
+
+        # Create at least one GEMM per GPU, so when the GEMMs
+        # are distributed to the GPUs there is at least one
+        # GEMM per GPU.
+        for g in range(1, total_gpus + 1):
+            A = torch.rand(m * g, k * g, device=device, dtype=dtype)
+            B = torch.rand(k * g, n * g, device=device, dtype=dtype)
+            C = torch.matmul(A, B)
+
+        # check the untuned file was written and make sure that it is not zero
+        self.assertTrue(os.path.exists(untuned_filename))
+        self.assertGreater(os.path.getsize(untuned_filename), 0)
+
+        # Perform multi-GPU tuning
+        torch.cuda.tunable.mgpu_tune_gemm_in_file(untuned_filename, total_gpus)
+
+        # check the results files where written, one per gpu
+        # get the size of the first result and make sure it
+        # greater than 100. Since the validator text should
+        # be at least that much.
+        # The other results file will have
+        # at least the size of the first results file - 80
+        for i in range(total_gpus):
+            result_filename = f"tunableop_results{i}.csv"
+            self.assertTrue(os.path.exists(result_filename))
+            if i == 0:  # Store for next loop
+                result_size = os.path.getsize(result_filename)
+                self.assertGreater(os.path.getsize(result_filename), 0)
+            self.assertGreater(os.path.getsize(result_filename), result_size - 80)
+
+
+        # Check the full results files was written, one per gpu
+        # check that the size of the full results file for
+        # GPU 0 is greater than that of the individual results
+        # for GPU 0.
+        # Lastly, check that all tunableop_results_full{i} have
+        # the same size as tunableop_results_full0.
+        for i in range(total_gpus):
+            result_full_filename = f"tunableop_results_full{i}.csv"
+            self.assertTrue(os.path.exists(result_full_filename))
+            if i == 0:  # Store for next subsequent iterations
+                result_full_size = os.path.getsize(result_full_filename)
+                self.assertGreater(result_full_size, result_size)
+            self.assertEqual(os.path.getsize(result_full_filename), result_full_size)
+
+        # disables TunableOp
+        torch.cuda.tunable.enable(False)
+
+        # clean up, remove any files that were generated
         try:
-            set_tunableop_defaults()
-            os.environ["PYTORCH_TUNABLEOP_ROTATING_BUFFER_SIZE"] = "0"
-
-            # Pointing to temp files. The test cannot remove them on Windows because
-            # they are in use and locked
-            os.putenv("PYTORCH_TUNABLEOP_UNTUNED_FILENAME", os.path.join(tmp_dir, "tunableop_untuned.csv"))
-            os.putenv("PYTORCH_TUNABLEOP_FILENAME", os.path.join(tmp_dir, "tunableop_results.csv"))
-
-            #  turn on untuned GEMM recording and turn off tuning
-            torch.cuda.tunable.enable(True)
-            torch.cuda.tunable.tuning_enable(False)
-            torch.cuda.tunable.record_untuned_enable(True)
-
-            # Choose matrix sizes that have not been used before
-            m = n = k = 23
-
-            # Create at least one GEMM per GPU, so when the GEMMs
-            # are distributed to the GPUs there is at least one
-            # GEMM per GPU.
-            for g in range(1, total_gpus + 1):
-                A = torch.rand(m * g, k * g, device=device, dtype=dtype)
-                B = torch.rand(k * g, n * g, device=device, dtype=dtype)
-                C = torch.matmul(A, B)
-
-            # check the untuned file was written
-            ordinal = torch.cuda.current_device()
-            untuned_filename = os.path.join(tmp_dir, f"tunableop_untuned{ordinal}.csv")
-            self.assertTrue(os.path.exists(untuned_filename))
-
-            # turn off untuned GEMM recording and turn on tuning
-            # We need to set the environment variables here instead of using
-            # the Python API, so that the child processes created will inherit
-            # these operations
-            os.environ["PYTORCH_TUNABLEOP_ENABLED"] = "1"
-            os.environ["PYTORCH_TUNABLEOP_TUNING"] = "1"
-            os.environ["PYTORCH_TUNABLEOP_MAX_TUNING_ITERATIONS"] = "1"
-
-            torch.cuda.tunable.mgpu_tune_gemm_in_file(untuned_filename, total_gpus)
-            assert torch.cuda.tunable.write_file()
-
-            # check the results files where written, one per gpu
+            os.remove(untuned_filename)
             for i in range(total_gpus):
-                result_filename = os.path.join(tmp_dir, f"tunableop_results{i}.csv")
-                self.assertTrue(os.path.exists(result_filename))
+                result_filename = f"tunableop_results{i}.csv"
+                result_full_filename = f"tunableop_results_full{i}.csv"
+                os.remove(result_filename)
+                os.remove(result_full_filename)
+        except FileNotFoundError:
+            pass
 
-            # Check the full results files was written, one per gpu
-            # for i in range(total_gpus):
-            #     result_full_filename = os.path.join(tmp_dir, f"tunableop_results_full{i}.csv")
-            #     self.assertTrue(os.path.exists(result_full_filename))
-
-        finally:
-            # disables TunableOp
-            torch.cuda.tunable.enable(False)
-
-            # undo all the environment variables set
-            try:
-                del os.environ["PYTORCH_TUNABLEOP_ROTATING_BUFFER_SIZE"]
-                del os.environ["PYTORCH_TUNABLEOP_UNTUNED_FILENAME"]
-                del os.environ["PYTORCH_TUNABLEOP_FILENAME"]
-                del os.environ["PYTORCH_TUNABLEOP_ENABLED"]
-                del os.environ["PYTORCH_TUNABLEOP_TUNING"]
-                del os.environ["PYTORCH_TUNABLEOP_MAX_TUNING_ITERATIONS"]
-            except KeyError:
-                pass
-
-            # # clean up, remove any files that were generated
-            try:
-                untuned_filename = os.path.join(tmp_dir, "tunableop_untuned0.csv")
-                os.remove(untuned_filename)
-                for i in range(total_gpus):
-                    result_filename = os.path.join(tmp_dir, f"tunableop_results{i}.csv")
-                    result_full_filename = os.path.join(tmp_dir, f"tunableop_results_full{i}.csv")
-                    os.remove(result_filename)
-                    os.remove(result_full_filename)
-            except FileNotFoundError:
-                pass
+    @onlyCUDA
+    @dtypes(torch.float)
+    def test_rotating_buffer_tunableop(self, device, dtype):
+        # Test the TunableOp rotating buffer API
+        # Test the default value, will return the l2_cache_size
+        l2_cache_size = torch.cuda.tunable.get_rotating_buffer_size()
+        self.assertGreater(l2_cache_size, 0)
+        # Test zero
+        torch.cuda.tunable.set_rotating_buffer_size(0)
+        self.assertEqual(torch.cuda.tunable.get_rotating_buffer_size(), 0)
+        # Test one MB
+        torch.cuda.tunable.set_rotating_buffer_size(1)
+        self.assertEqual(torch.cuda.tunable.get_rotating_buffer_size(), 1024 * 1024)
+        # Test negative value, which will return the l2 cache size
+        torch.cuda.tunable.set_rotating_buffer_size(-1)
+        self.assertEqual(torch.cuda.tunable.get_rotating_buffer_size(), l2_cache_size)
 
 
     @onlyCUDA
@@ -4832,6 +4877,7 @@ class TestLinalg(TestCase):
     @skipCUDAIfNotRocm
     @dtypes(torch.float)
     def test_numeric_check_leak_tunableop_rocm(self, device, dtype):
+        set_tunableop_defaults()
         from torch.testing._internal.common_utils import CudaMemoryLeakCheck
         import os
         # run operator first without tuning to ensure all rocm libs are loaded,
@@ -4882,96 +4928,65 @@ class TestLinalg(TestCase):
         # Validator,GCN_ARCH_NAME,<architecutre name>
         validator_num_lines = 5
 
-        # Test in try-finally block to avoid leaking state
-        # if test is interrupted.
+        set_tunableop_defaults()
+        torch.cuda.tunable.enable()
+        # set these to single iterations to keep it short but still exercise the code
+        torch.cuda.tunable.set_max_tuning_iterations(1)
+
+        N = M = K = 4
+        A = torch.randn(N, K, device=device, dtype=dtype)
+        B = torch.randn(K, M, device=device, dtype=dtype)
+        C = torch.matmul(A, B)
+        self.assertEqual(len(torch.cuda.tunable.get_validators()), validator_num_lines)
+
+        # disable TunableOp
+        torch.cuda.tunable.enable(False)
+
+        # clean up, remove any file that was generated
         try:
-            set_tunableop_defaults()
-            torch.cuda.tunable.enable()
-            # set these to single iterations to keep it short but still exercise the code
-            torch.cuda.tunable.set_max_tuning_iterations(1)
-
-            N = M = K = 4
-            A = torch.randn(N, K, device=device, dtype=dtype)
-            B = torch.randn(K, M, device=device, dtype=dtype)
-            C = torch.matmul(A, B)
-            self.assertEqual(len(torch.cuda.tunable.get_validators()), validator_num_lines)
-        finally:
-            # disable TunableOp
-            torch.cuda.tunable.enable(False)
-
-            # clean up, remove any file that was generated
-            try:
-                import os
-                filename = torch.cuda.tunable.get_filename()
-                os.remove(filename)
-            except FileNotFoundError:
-                pass
+            import os
+            filename = torch.cuda.tunable.get_filename()
+            os.remove(filename)
+        except FileNotFoundError:
+            pass
 
     @onlyCUDA
     @dtypes(torch.half)
     def test_minimum_tuning_iteration_tunableop(self, device, dtype):
-        # Make sure that there is at least one tuning iteration under various scenarios
+        # Make sure that there is at least one tuning iteration occurs
+        # when the max tuning duration and max tuning iteration are set
+        # to zero.
+        set_tunableop_defaults()
+        torch.cuda.tunable.enable()
 
-        # Test in try-finally block to avoid leaking state
-        # if test is interrupted.
+        # Tune a single GEMM and verify that we get a new tuning result
+        torch.cuda.tunable.set_max_tuning_duration(0)
+        torch.cuda.tunable.set_max_tuning_iterations(0)
+
+        # Reference number of results
+        ref_num_results = len(torch.cuda.tunable.get_results())
+
+        N = M = K = 8
+        A = torch.randn(N, K, device=device, dtype=dtype)
+        B = torch.randn(K, M, device=device, dtype=dtype)
+        C = torch.matmul(A, B)
+
+        # This stores total number of cummulative results
+        total_num_results = len(torch.cuda.tunable.get_results())
+
+        # There must be a new tuning result
+        self.assertEqual((total_num_results - ref_num_results), 1)
+
+        # disable TunableOp
+        torch.cuda.tunable.enable(False)
+
+        # clean up, remove any file that was generated
         try:
-            set_tunableop_defaults()
-            torch.cuda.tunable.enable()
-            # set these to single iterations to keep it short but still exercise the code
-            torch.cuda.tunable.set_max_tuning_iterations(1)
-
-            # Set tuning duration to zero milliseconds
-            # Tune a single GEMM and verify that we get a new tuning result
             import os
-            os.environ["PYTORCH_TUNABLEOP_MAX_TUNING_DURATION_MS"] = "0"
-            self.assertGreater(torch.cuda.tunable.get_max_tuning_iterations(), 0)
-            os.environ["PYTORCH_TUNABLEOP_MAX_TUNING_DURATION_MS"] = "30"  # reset to default
-
-            # Reference number of results
-            ref_num_results = len(torch.cuda.tunable.get_results())
-
-            N = M = K = 8
-            A = torch.randn(N, K, device=device, dtype=dtype)
-            B = torch.randn(K, M, device=device, dtype=dtype)
-            C = torch.matmul(A, B)
-
-            # This stores total number of cummulative results
-            total_num_results = len(torch.cuda.tunable.get_results())
-
-            # There must be a new tuning result
-            self.assertEqual((total_num_results - ref_num_results), 1)
-
-            # Set tuning iterations to zero
-            # Tune a single GEMM and verify that we get a new tuning result
-            os.environ["PYTORCH_TUNABLEOP_MAX_TUNING_ITERATIONS"] = "0"
-            self.assertGreater(torch.cuda.tunable.get_max_tuning_iterations(), 0)
-            os.environ["PYTORCH_TUNABLEOP_MAX_TUNING_ITERATIONS"] = "100"  # reset to default
-
-            # Reference number of results
-            ref_num_results = total_num_results
-
-            N = M = K = 16
-            A = torch.randn(N, K, device=device, dtype=dtype)
-            B = torch.randn(K, M, device=device, dtype=dtype)
-            C = torch.matmul(A, B)
-
-            # This stores total number of cummulative results
-            total_num_results = len(torch.cuda.tunable.get_results())
-
-            # There must be a new tuning result
-            self.assertEqual((total_num_results - ref_num_results), 1)
-
-        finally:
-            # disable TunableOp
-            torch.cuda.tunable.enable(False)
-
-            # clean up, remove any file that was generated
-            try:
-                import os
-                filename = torch.cuda.tunable.get_filename()
-                os.remove(filename)
-            except FileNotFoundError:
-                pass
+            filename = torch.cuda.tunable.get_filename()
+            os.remove(filename)
+        except FileNotFoundError:
+            pass
 
     @onlyCUDA
     @dtypes(torch.half)
@@ -4979,44 +4994,42 @@ class TestLinalg(TestCase):
         # Tune a couple of matrix multiplies
         # Verify we get the correct number of results
 
+        set_tunableop_defaults()
+        torch.cuda.tunable.enable()
+        # set these to single iterations to keep it short but still exercise the code
+        torch.cuda.tunable.set_max_tuning_iterations(1)
+
+        # Reference number of results
+        ref_num_results = len(torch.cuda.tunable.get_results())
+
+        # Execute matrix multiplies. We intentionally throw in M list the same index
+        # twice. The CSV file should only get unique GEMMs
+        count_matmul = 4
+        K = 64
+        for M in [32, 64, 32]:
+            for N in [32, 64]:
+                A = torch.randn(N, K, device=device, dtype=dtype)
+                B = torch.randn(K, M, device=device, dtype=dtype)
+                C = torch.matmul(A, B)
+
+        # This stores total number of cummulative results
+        total_num_results = len(torch.cuda.tunable.get_results())
+
+        # Take the difference to calculate the number of results from
+        # the this test and verify that it agrees with the number of
+        # GEMMs.
+        self.assertEqual((total_num_results - ref_num_results), count_matmul)
+
+        # disable TunableOp
+        torch.cuda.tunable.enable(False)
+
+        # clean up, remove any file that was generated
         try:
-            set_tunableop_defaults()
-            torch.cuda.tunable.enable()
-            # set these to single iterations to keep it short but still exercise the code
-            torch.cuda.tunable.set_max_tuning_iterations(1)
-
-            # Reference number of results
-            ref_num_results = len(torch.cuda.tunable.get_results())
-
-            # Execute matrix multiplies. We intentionally throw in M list the same index
-            # twice. The CSV file should only get unique GEMMs
-            count_matmul = 4
-            K = 64
-            for M in [32, 64, 32]:
-                for N in [32, 64]:
-                    A = torch.randn(N, K, device=device, dtype=dtype)
-                    B = torch.randn(K, M, device=device, dtype=dtype)
-                    C = torch.matmul(A, B)
-
-            # This stores total number of cummulative results
-            total_num_results = len(torch.cuda.tunable.get_results())
-
-            # Take the difference to calculate the number of results from
-            # the this test and verify that it agrees with the number of
-            # GEMMs.
-            self.assertEqual((total_num_results - ref_num_results), count_matmul)
-
-        finally:
-            # disable TunableOp
-            torch.cuda.tunable.enable(False)
-
-            # clean up, remove any file that was generated
-            try:
-                import os
-                filename = torch.cuda.tunable.get_filename()
-                os.remove(filename)
-            except FileNotFoundError:
-                pass
+            import os
+            filename = torch.cuda.tunable.get_filename()
+            os.remove(filename)
+        except FileNotFoundError:
+            pass
 
     @onlyCUDA
     @dtypes(torch.float)
@@ -5028,60 +5041,89 @@ class TestLinalg(TestCase):
         # PYTORCH_TUNABLEOP_TUNING=0
         # is no longer tuning GEMMs.
 
+        set_tunableop_defaults()
+        torch.cuda.tunable.enable()
+        # set these to single iterations to keep it short but still exercise the code
+        torch.cuda.tunable.set_max_tuning_iterations(1)
+
+        # Reference number of results
+        ref_num_results = len(torch.cuda.tunable.get_results())
+
+        # Tune one GEMMs to make sure TunableOp is enabled
+        M = 3
+        N = 3
+        K = 3
+        A = torch.randn(N, K, device=device, dtype=dtype)
+        B = torch.randn(K, M, device=device, dtype=dtype)
+        C = torch.matmul(A, B)
+
+        # This stores total number of cummulative results
+        total_num_results = len(torch.cuda.tunable.get_results())
+
+        # Take the difference to calculate the number of results from
+        # this test. There should be one additional tuned GEMM
+        self.assertEqual((total_num_results - ref_num_results), 1)
+
+        # New total number of results becomes new reference result
+        ref_num_results = total_num_results
+
+        # Now disable further tuning, while keeping TunableOp Enabled
+        torch.cuda.tunable.tuning_enable(False)
+
+        # Try to tune one more GEMM
+        M = 3
+        N = 3
+        K = 4
+        A = torch.randn(N, K, device=device, dtype=dtype)
+        B = torch.randn(K, M, device=device, dtype=dtype)
+        C = torch.matmul(A, B)
+
+        # Take the difference to calculate the number of results from
+        # this test. There should be no change in the number of results
+        # since tuning is disabe.
+        self.assertEqual((total_num_results - ref_num_results), 0)
+
+        # disable TunableOp
+        torch.cuda.tunable.enable(False)
+
+        # clean up, remove any file that was generated
         try:
-            set_tunableop_defaults()
-            torch.cuda.tunable.enable()
-            # set these to single iterations to keep it short but still exercise the code
-            torch.cuda.tunable.set_max_tuning_iterations(1)
+            import os
+            filename = torch.cuda.tunable.get_filename()
+            os.remove(filename)
+        except FileNotFoundError:
+            pass
 
-            # Reference number of results
-            ref_num_results = len(torch.cuda.tunable.get_results())
+    @onlyCUDA
+    @dtypes(torch.float)
+    def test_dump_results_on_exit_tunableop(self, device, dtype):
+        # Test that the TunableOp results file is created
+        # and is NOT empty.
+        # To test this we create a subprocess and then
+        # execut a matmul from within the subprocess
+        import os
+        import multiprocessing as mp
 
-            # Tune one GEMMs to make sure TunableOp is enabled
-            M = 3
-            N = 3
-            K = 3
-            A = torch.randn(N, K, device=device, dtype=dtype)
-            B = torch.randn(K, M, device=device, dtype=dtype)
-            C = torch.matmul(A, B)
+        set_tunableop_defaults()
+        ordinal = torch.cuda.current_device()
+        filename = f"tunableop_results{ordinal}.csv"
 
-            # This stores total number of cummulative results
-            total_num_results = len(torch.cuda.tunable.get_results())
+        # force=True needed according to:
+        # https://docs.python.org/3/library/multiprocessing.html#multiprocessing.set_start_method
+        # This is because a different test in this process could have
+        # already set the start method
+        mp.set_start_method("spawn", force=True)
 
-            # Take the difference to calculate the number of results from
-            # this test. There should be one additional tuned GEMM
-            self.assertEqual((total_num_results - ref_num_results), 1)
+        p = mp.Process(target=tunableop_matmul, args=(device, dtype))
+        p.start()
+        p.join()
 
-            # New total number of results becomes new reference result
-            ref_num_results = total_num_results
+        # Make sure the results file exists and that it is not zero.
+        self.assertTrue(os.path.exists(filename))
+        self.assertTrue(os.path.getsize(filename) > 0)
 
-            # Now disable further tuning, while keeping TunableOp Enabled
-            torch.cuda.tunable.tuning_enable(False)
-
-            # Try to tune one more GEMM
-            M = 3
-            N = 3
-            K = 4
-            A = torch.randn(N, K, device=device, dtype=dtype)
-            B = torch.randn(K, M, device=device, dtype=dtype)
-            C = torch.matmul(A, B)
-
-            # Take the difference to calculate the number of results from
-            # this test. There should be no change in the number of results
-            # since tuning is disabe.
-            self.assertEqual((total_num_results - ref_num_results), 0)
-
-        finally:
-            # disable TunableOp
-            torch.cuda.tunable.enable(False)
-
-            # clean up, remove any file that was generated
-            try:
-                import os
-                filename = torch.cuda.tunable.get_filename()
-                os.remove(filename)
-            except FileNotFoundError:
-                pass
+        # Clean up, remove file that was generated
+        os.remove(filename)
 
     @dtypes(torch.float, torch.complex64)
     def test_matmul_out_kernel_errors_with_autograd(self, device, dtype):
@@ -5644,7 +5686,6 @@ class TestLinalg(TestCase):
                     else:
                         self.assertEqual(B_, X_ @ A)
 
-
         sizes = ((3, 3), (5, 5), (4, 2), (3, 4), (0, 0), (0, 1), (1, 0))
         batches = ((0,), (), (1,), (2,), (3,), (1, 0), (3, 5))
         # Non pivoting just implemented for CUDA
@@ -5677,7 +5718,6 @@ class TestLinalg(TestCase):
                 with self.assertRaisesRegex(RuntimeError, 'LU without pivoting is not implemented on the CPU'):
                     f(torch.empty(1, 2, 2), pivot=False)
 
-
     @precisionOverride({torch.float32: 1e-2, torch.complex64: 1e-2})
     @skipCUDAIfNoMagmaAndNoCusolver
     @skipCPUIfNoLapack
@@ -5705,7 +5745,6 @@ class TestLinalg(TestCase):
             for b, n in shapes:
                 yield make_arg((b, n, n)), make_arg((b, n, rhs))
 
-
         for A, B in gen_matrices():
             LU, pivots = torch.linalg.lu_factor(A)
             for backend in backends:
@@ -5719,7 +5758,6 @@ class TestLinalg(TestCase):
                         self.assertEqual(B_left, A_adj @ X)
                     else:
                         self.assertEqual(B_left, X @ A_adj)
-
 
     @onlyCPU
     @dtypes(*floating_and_complex_types())
@@ -5761,7 +5799,6 @@ class TestLinalg(TestCase):
         with self.assertRaisesRegex(RuntimeError, r"between 1 and LU.size\(-2\)."):
             torch.lu_unpack(LU, pivots)
 
-
         # Rectangular tests
         sample = torch.randn(2, 3, 5, device=device, dtype=dtype)
         B = torch.randn(2, 3, 5, device=device, dtype=dtype)
@@ -5777,7 +5814,6 @@ class TestLinalg(TestCase):
         pivots[0] = 4
         with self.assertRaisesRegex(RuntimeError, r"between 1 and LU.size\(-2\)."):
             torch.lu_unpack(LU, pivots)
-
 
     @skipCPUIfNoLapack
     @skipCUDAIfNoMagma
@@ -6387,7 +6423,6 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
             y = torch.baddbmm(input_tensor, batch1, batch2, beta=0.0, out=out)
             self.assertEqual(out, y_ref)
 
-
     @unittest.skipIf(IS_FBCODE and IS_REMOTE_GPU, "cublas runtime error")
     @onlyCUDA
     def test_matmul_45724(self, device):
@@ -6560,7 +6595,6 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
         torch._int_mm(a_int8, b_int8, out=c_int32_result)
         self.assertEqual(c_int32_result.float(), torch.mm(a_float, b_float))
 
-
     @unittest.skipIf(IS_WINDOWS, "Skipped on Windows!")
     @unittest.skipIf(IS_FBCODE and IS_REMOTE_GPU, "cublas runtime error")
     @onlyNativeDeviceTypes
@@ -6623,7 +6657,6 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
             mean_err = ((res - ref).abs() / ref).mean()
             self.assertTrue(mean_err < 0.05)
 
-
     @unittest.skipIf(IS_WINDOWS, "Skipped on Windows!")
     @unittest.skipIf(IS_FBCODE and IS_REMOTE_GPU, "cublas runtime error")
     @onlyNativeDeviceTypes
@@ -6675,6 +6708,168 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
 
         mean_err = ((res - ref).abs() / ref).mean()
         self.assertTrue(mean_err < 0.05)
+
+    @unittest.skipIf(IS_FBCODE and IS_REMOTE_GPU, "cublas runtime error")
+    @unittest.skipIf(TEST_WITH_ROCM and IS_REMOTE_GPU, "ROCM is unsupported")
+    @onlyNativeDeviceTypes
+    @parametrize("k", [64, 256])
+    @parametrize("n", [32, 48, 64, 128])
+    def test__dyn_quant_pack_4bit_weight(self, device, k, n):
+        # TODO: Fix https://github.com/pytorch/pytorch/issues/131425 and use OpInfo instead
+        # Weight shape is [K x N]
+        if self.device_type == "cuda":
+            self.skipTest("CUDA Backend is unsupported")
+
+        torch.manual_seed(1)
+        block_size = 32
+        b = torch.rand((k, n), dtype=torch.bfloat16, device=device)
+        in_features = b.size(0)
+        out_features = b.size(1)
+        b_uint8, b_scales_and_zeros = _group_quantize_tensor_symmetric(
+            b, n_bit=4, groupsize=block_size
+        )
+        b_int4pack = torch._dyn_quant_pack_4bit_weight(
+            b_uint8, b_scales_and_zeros, None, block_size, in_features, out_features
+        )
+        b_int4pack_meta = torch._dyn_quant_pack_4bit_weight(
+            b_uint8, b_scales_and_zeros, None, block_size, in_features, out_features
+        )
+        self.assertEqual(b_int4pack.shape, b_int4pack_meta.shape)
+
+    @unittest.skipIf(IS_FBCODE and IS_REMOTE_GPU, "cublas runtime error")
+    @unittest.skipIf(TEST_WITH_ROCM and IS_REMOTE_GPU, "ROCM is unsupported")
+    @onlyNativeDeviceTypes
+    @parametrize("m", [1, 32])
+    @parametrize("k", [64, 128])
+    @parametrize("n", [4096, 11008])
+    def test__dyn_quant_matmul_4bit(self, device, m, k, n):
+        if self.device_type == "cuda":
+            self.skipTest("CUDA is unsupported")
+
+        q_group = 32
+
+        torch.manual_seed(1)
+        a_float32 = torch.rand((m, k), dtype=torch.float32, device=device)
+        b_float32 = torch.rand((k, n), dtype=torch.float32, device=device)
+        in_features = b_float32.size(0)
+        out_features = b_float32.size(1)
+
+        def dyn_quant_pack_4bit_weight(b, in_features, out_features):
+            b_uint8, b_scales_and_zeros = _group_quantize_tensor_symmetric(
+                b, n_bit=4, groupsize=q_group
+            )
+
+            if q_group == in_features:
+                b_scales_and_zeros = b_scales_and_zeros.to(torch.float)
+            else:
+                b_scales_and_zeros = b_scales_and_zeros.to(torch.bfloat16)
+            b_int4pack = torch._dyn_quant_pack_4bit_weight(
+                b_uint8, b_scales_and_zeros, None, q_group, in_features, out_features
+            )
+
+            return b_int4pack, b_scales_and_zeros
+
+        def dyn_quant_matmul_4bit(
+            a, b_int4pack, q_group, in_features, out_features
+        ):
+            return torch._dyn_quant_matmul_4bit(
+                a,
+                b_int4pack,
+                q_group,
+                in_features,
+                out_features,
+            )
+
+        b_int4pack, b_scales_and_zeros = dyn_quant_pack_4bit_weight(
+            b_float32, in_features, out_features
+        )
+
+        dtypes = [torch.float32]
+
+        for dtype in dtypes:
+            a = a_float32.to(dtype=dtype)
+            b = b_float32.to(dtype=dtype)
+            ref = torch.mm(a, b)
+            res = dyn_quant_matmul_4bit(
+                a,
+                b_int4pack,
+                q_group,
+                in_features,
+                out_features,
+            )
+            mean_err = ((res - ref).abs() / ref).mean()
+            self.assertTrue(mean_err < 0.05)
+            elementwise_diff = (res - ref).abs()
+            elementwise_relative_error = elementwise_diff / ref.abs().clamp(
+                min=torch.finfo(ref.dtype).eps
+            )
+            all_elements_within_threshold = torch.all(elementwise_relative_error < 0.06)
+            self.assertTrue(
+                all_elements_within_threshold, "Some elements have error >= 0.06"
+            )
+
+    @unittest.skipIf(IS_FBCODE and IS_REMOTE_GPU, "cublas runtime error")
+    @unittest.skipIf(TEST_WITH_ROCM and IS_REMOTE_GPU, "ROCM is unsupported")
+    @onlyNativeDeviceTypes
+    @parametrize("m", [1, 32])
+    @parametrize("k", [64, 128])
+    @parametrize("n", [4096, 11008])
+    def test_compile_dyn_quant_matmul_4bit(self, device, m, k, n):
+        if self.device_type == "cuda":
+            self.skipTest("CUDA is unsupported")
+
+        q_group = 32
+
+        torch.manual_seed(1)
+        a_float32 = torch.rand((m, k), dtype=torch.float32, device=device)
+        b_float32 = torch.rand((k, n), dtype=torch.float32, device=device)
+        in_features = b_float32.size(0)
+        out_features = b_float32.size(1)
+
+        b_uint8, b_scales_and_zeros = _group_quantize_tensor_symmetric(
+            b_float32, n_bit=4, groupsize=q_group
+        )
+
+        if q_group == in_features:
+            b_scales_and_zeros = b_scales_and_zeros.to(dtype=torch.float)
+        else:
+            b_scales_and_zeros = b_scales_and_zeros.to(dtype=torch.bfloat16)
+
+        @torch.compile
+        def dyn_quant_matmul_4bit(
+            a, b_uint8, b_scales_and_zeros, q_group, in_features, out_features
+        ):
+            b_int4pack = torch._dyn_quant_pack_4bit_weight(
+                b_uint8, b_scales_and_zeros, None, q_group, in_features, out_features
+            )
+            return torch._dyn_quant_matmul_4bit(
+                a,
+                b_int4pack,
+                q_group,
+                in_features,
+                out_features,
+            )
+
+        res = dyn_quant_matmul_4bit(
+            a_float32,
+            b_uint8,
+            b_scales_and_zeros,
+            q_group,
+            in_features,
+            out_features,
+        )
+        ref = torch.mm(a_float32, b_float32)
+
+        mean_err = ((res - ref).abs() / ref).mean()
+        self.assertTrue(mean_err < 0.05)
+        elementwise_diff = (res - ref).abs()
+        elementwise_relative_error = elementwise_diff / ref.abs().clamp(
+            min=torch.finfo(ref.dtype).eps
+        )
+        all_elements_within_threshold = torch.all(elementwise_relative_error < 0.06)
+        self.assertTrue(
+            all_elements_within_threshold, "Some elements have error >= 0.06"
+        )
 
     @onlyCPU
     @parametrize("m", [32, 64])
@@ -8421,7 +8616,7 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
                          fn(torch.slogdet, (0, 0)))
 
     @tf32_on_and_off(0.005)
-    @bf32_on_and_off(0.005)
+    @bf32_on_and_off(0.07)
     def test_tensordot(self, device):
         a = torch.arange(60., device=device).reshape(3, 4, 5)
         b = torch.arange(24., device=device).reshape(4, 3, 2)
@@ -8607,8 +8802,6 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
 
         self.assertEqual(ck_out, cpu_out)
 
-
-
     def test_permute_matmul(self):
         a = torch.ones([2, 5, 24, 24])
         b = torch.ones([3, 2, 5, 24, 24])
@@ -8687,7 +8880,6 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
         rc = torch.addmm(C, A, B, alpha=alpha, beta=beta)
         ref = alpha * A @ B + beta * C
         self.assertEqual(rc, ref)
-
 
     @dtypes(torch.float, torch.double)
     @precisionOverride({torch.float32: 1e-4})

@@ -1,13 +1,13 @@
 # mypy: ignore-errors
 
 import operator
-from typing import Dict, List, TYPE_CHECKING
+from typing import TYPE_CHECKING
 
 import torch
-from torch._dynamo.source import GetItemSource
+from torch._dynamo.source import AttrSource, GetItemSource
 
 from .. import variables
-from ..exc import unimplemented, UserError, UserErrorType
+from ..exc import raise_observed_exception, unimplemented
 from ..utils import common_constant_types, istype, np
 from .base import typestr, VariableTracker
 
@@ -110,13 +110,8 @@ its type to `common_constant_types`.
             raise NotImplementedError from e
 
     def const_getattr(self, tx: "InstructionTranslator", name):
-        if isinstance(self.value, type):
-            raise UserError(
-                UserErrorType.ANTI_PATTERN,
-                "Can't access members of type(obj) for a generated custom object. "
-                "Please use __class__ instead",
-                case_name="type_reflection_method",
-            )
+        if not hasattr(self.value, name):
+            raise NotImplementedError
         member = getattr(self.value, name)
         if callable(member):
             raise NotImplementedError
@@ -126,8 +121,8 @@ its type to `common_constant_types`.
         self,
         tx,
         name,
-        args: "List[VariableTracker]",
-        kwargs: "Dict[str, VariableTracker]",
+        args: "list[VariableTracker]",
+        kwargs: "dict[str, VariableTracker]",
     ) -> "VariableTracker":
         from .tensor import SymNodeVariable
 
@@ -158,7 +153,10 @@ its type to `common_constant_types`.
 
         if isinstance(self.value, str) and name in str.__dict__.keys():
             method = getattr(self.value, name)
-            return ConstantVariable.create(method(*const_args, **const_kwargs))
+            try:
+                return ConstantVariable.create(method(*const_args, **const_kwargs))
+            except Exception as e:
+                raise_observed_exception(type(e), tx)
         elif isinstance(self.value, (float, int)):
             if not (args or kwargs):
                 return ConstantVariable.create(getattr(self.value, name)())
@@ -197,7 +195,9 @@ its type to `common_constant_types`.
 
         unimplemented(f"const method call {typestr(self.value)}.{name}")
 
-    def call_hasattr(self, tx: "InstructionTranslator", name: str) -> "VariableTracker":
+    def call_obj_hasattr(
+        self, tx: "InstructionTranslator", name: str
+    ) -> "VariableTracker":
         result = hasattr(self.value, name)
         return variables.ConstantVariable.create(result)
 
@@ -226,8 +226,9 @@ class EnumVariable(VariableTracker):
     def as_python_constant(self):
         return self.value
 
-    def const_getattr(self, tx: "InstructionTranslator", name):
-        member = getattr(self.value, name)
-        if callable(member):
+    def var_getattr(self, tx: "InstructionTranslator", name):
+        if not hasattr(self.value, name):
             raise NotImplementedError
-        return member
+        member = getattr(self.value, name)
+        source = self.source and AttrSource(self.source, name)
+        return VariableTracker.build(tx, member, source=source)

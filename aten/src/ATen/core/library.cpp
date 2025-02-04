@@ -48,7 +48,6 @@ CppFunction::CppFunction(c10::KernelFunction func, std::optional<c10::impl::CppS
   : func_(std::move(func))
   , cpp_signature_(cpp_signature)
   , schema_(std::move(schema))
-  , debug_()
   {}
 
 CppFunction::~CppFunction() = default;
@@ -73,7 +72,7 @@ Library::Library(Kind kind, std::string ns, std::optional<c10::DispatchKey> k, c
         registrars_.emplace_back(
           c10::Dispatcher::singleton().registerLibrary(
             // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
-            *ns_, debugString(file_, line_)
+            ns_.value(), debugString(file_, line_)
           )
         );
         [[fallthrough]];
@@ -207,12 +206,10 @@ at::OperatorName Library::_parseNameForLib(const char* name_str) const {
   // This is a copy paste of Library::_impl
   if (ns_opt.has_value()) {
     // See Note [Redundancy in registration code is OK]
-    // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
-    TORCH_CHECK(*ns_opt == *ns_,
+    TORCH_CHECK(ns_opt == ns_,
       IMPL_PRELUDE,
-      "Explicitly provided namespace (", *ns_opt, ") in operator name "
-      // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
-      "does not match namespace of enclosing ", toString(kind_), " block (", *ns_, ").  "
+      "Explicitly provided namespace (", ns_opt, ") in operator name "
+      "does not match namespace of enclosing ", toString(kind_), " block (", ns_, ").  "
       "Move this definition to the ", toString(kind_), " block corresponding to this namespace "
       "(and consider deleting the namespace from your schema string.)  ",
       ERROR_CONTEXT

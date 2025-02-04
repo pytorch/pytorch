@@ -145,7 +145,7 @@ class TestAliasAnalysis(JitTestCase):
                 def forward(self, x):
                     return x + 2
 
-            for _, fname in enumerate(fnames):
+            for fname in fnames:
                 mod = torch.jit.script(MyModuleCUTest())
                 torch.jit.save(mod, fname)
                 loaded_mod = torch.jit.load(fname)

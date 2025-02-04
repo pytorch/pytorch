@@ -372,14 +372,14 @@ inline std::optional<ResultVec> computeStride_impl(
     // if end of tensor size chunk, check view
     if ((tensor_d == 0) ||
         (TORCH_GUARD_SIZE_OBLIVIOUS(sym_ne(oldshape[tensor_d - 1], 1)) &&
-         oldstride[tensor_d - 1] != tensor_numel * chunk_base_stride)) {
+         TORCH_GUARD_SIZE_OBLIVIOUS(sym_ne(oldstride[tensor_d - 1], tensor_numel * chunk_base_stride)))) {
       while (view_d >= 0 &&
             (TORCH_GUARD_SIZE_OBLIVIOUS(sym_lt(view_numel, tensor_numel)) || TORCH_GUARD_SIZE_OBLIVIOUS(sym_eq(newshape[view_d], 1)))) {
         newstride[view_d] = view_numel * chunk_base_stride;
         view_numel *= newshape[view_d];
         view_d--;
       }
-      if (view_numel != tensor_numel) {
+      if (TORCH_GUARD_SIZE_OBLIVIOUS(sym_ne(view_numel, tensor_numel))) {
         return std::nullopt;
       }
       if (tensor_d > 0) {

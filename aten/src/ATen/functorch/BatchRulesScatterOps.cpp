@@ -14,6 +14,7 @@
 #include <torch/library.h>
 
 
+// NOLINTBEGIN(bugprone-unchecked-optional-access)
 namespace at::functorch {
 
 namespace {
@@ -56,6 +57,7 @@ static int64_t get_max_index_logical_dim(
 }
 
 static std::vector<std::optional<Tensor>> batchIndices(
+  at::TensorOptions options,
   ArrayRef<std::optional<Tensor>> indices,
   ArrayRef<std::optional<int64_t>> indices_bdims,
   const c10::SymInt& batch_size,
@@ -88,7 +90,7 @@ static std::vector<std::optional<Tensor>> batchIndices(
   bool indices_batched = any_has_value(indices_bdims);
 
   for (size_t i = 0; i < indices.size(); i++) {
-    auto index = indices[i];
+    auto const & index = indices[i];
     if (index.has_value() && index->sym_numel() != 0) {
       const auto idx_bdim = indices_bdims[i];
       indices_.emplace_back(maybePadToLogicalRank(moveBatchDimToFront(index.value(), idx_bdim), idx_bdim, maxLogicalRank));
@@ -110,7 +112,7 @@ static std::vector<std::optional<Tensor>> batchIndices(
   } else if (indices_batched && !self_bdim.has_value()) {
     // do nothing
   } else if (indices_batched && (self_bdim.has_value() || values_bdim.has_value())) {
-    auto arange_index = at::arange(0, batch_size);
+    auto arange_index = at::arange(batch_size, options.dtype(kLong));
     while (arange_index.dim() < maxIndexDim) {
       arange_index = arange_index.unsqueeze(-1);
     }
@@ -235,7 +237,7 @@ std::tuple<Tensor, std::optional<int64_t>> index_batch_rule(
   bool advanced_indices_are_adjacent = are_advanced_indices_adjacent(indices);
 
   // Step 1
-  const auto batched_indices = batchIndices(indices, indices_bdims, self_.sym_size(0), self_bdim);
+  const auto batched_indices = batchIndices(self.options(), indices, indices_bdims, self_.sym_size(0), self_bdim);
   auto num_leading_nones = get_num_leading_nones(indices);
   auto max_index_dim = get_max_index_logical_dim(indices, indices_bdims);
 
@@ -418,7 +420,7 @@ namespace {
     TORCH_INTERNAL_ASSERT(indices.size() == indices_bdims.size());
 
     // we've already made sure that self has bdim at 0.
-    const auto indices_ = batchIndices(indices, indices_bdims, batch_size, /*self_bdim=*/0, values_bdim);
+    const auto indices_ = batchIndices(self.options(), indices, indices_bdims, batch_size, /*self_bdim=*/0, values_bdim);
 
     auto indexed_shape = get_indexed_shape(self_, List<std::optional<Tensor>>(indices_));
 
@@ -774,7 +776,7 @@ std::tuple<Tensor, std::optional<int64_t>> scatter_reduce_batch_rule(
     int64_t dim,
     const Tensor& index, std::optional<int64_t> index_bdim,
     const Tensor& src, std::optional<int64_t> src_bdim,
-    const c10::string_view reduce) {
+    const std::string_view reduce) {
   return scatter_batch_rule(ATEN_FN2(scatter, reduce),
                             self, self_bdim, dim, index, index_bdim, src, src_bdim, reduce);
 }
@@ -784,7 +786,7 @@ std::tuple<Tensor, std::optional<int64_t>> scatter_reduce_two_batch_rule(
     int64_t dim,
     const Tensor& index, std::optional<int64_t> index_bdim,
     const Tensor& src, std::optional<int64_t> src_bdim,
-    const c10::string_view reduce,
+    const std::string_view reduce,
     bool include_self) {
   return scatter_batch_rule(ATEN_FN2(scatter_reduce, two),
                             self, self_bdim, dim, index, index_bdim, src, src_bdim, reduce, include_self);
@@ -795,7 +797,7 @@ std::tuple<Tensor, std::optional<int64_t>> scatter_reduce__two_batch_rule(
     int64_t dim,
     const Tensor& index, std::optional<int64_t> index_bdim,
     const Tensor& src, std::optional<int64_t> src_bdim,
-    const c10::string_view reduce,
+    const std::string_view reduce,
     bool include_self) {
   return scatter_batch_rule(ATEN_FN2(scatter_reduce_, two),
                             self, self_bdim, dim, index, index_bdim, src, src_bdim, reduce, include_self);
@@ -806,7 +808,7 @@ std::tuple<Tensor, std::optional<int64_t>> scatter_value_reduce_batch_rule(
     int64_t dim,
     const Tensor& index, std::optional<int64_t> index_bdim,
     const Scalar& src,
-    const c10::string_view reduce) {
+    const std::string_view reduce) {
   return scatter_batch_rule(ATEN_FN2(scatter, value_reduce),
                             self, self_bdim, dim, index, index_bdim, src, reduce);
 }
@@ -1283,3 +1285,4 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {
 }
 
 } // namespace at::functorch
+// NOLINTEND(bugprone-unchecked-optional-access)

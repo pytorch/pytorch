@@ -39,7 +39,6 @@ def get_all_examples():
         "_np",
         "_InputT",
     }
-    allexamples = ""
 
     example_file_lines = [
         "# mypy: allow-untyped-defs",

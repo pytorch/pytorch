@@ -5,7 +5,7 @@ import os
 import re
 from collections import Counter, defaultdict, namedtuple
 from pathlib import Path
-from typing import Sequence
+from typing import TYPE_CHECKING
 
 import yaml
 
@@ -26,6 +26,10 @@ from torchgen.model import (
 from torchgen.selective_build.selector import SelectiveBuilder
 from torchgen.utils import concatMap, context, FileManager, NamespaceHelper, Target
 from torchgen.yaml_utils import YamlLoader
+
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
 
 
 # Parses the external backend's yaml, and adds a new BackendIndex for the backend's dispatch key.
@@ -495,6 +499,7 @@ TORCH_API void Register${backend_name}${dispatch_key}NativeFunctions() {
             "dispatch_headers": dest.gen_registration_headers(
                 backend_index, per_operator_headers=per_operator_headers, rocm=False
             ),
+            "dispatch_helpers": dest.gen_registration_helpers(backend_index),
             "dispatch_definitions": fm.substitute_with_template(
                 "RegisterDispatchDefinitions.ini",
                 lambda: {
@@ -502,7 +507,6 @@ TORCH_API void Register${backend_name}${dispatch_key}NativeFunctions() {
                     "ns_epilogue": ns_helper.epilogue,
                     "static_init_dispatch_registrations": static_init_dispatch_registrations,
                     "deferred_dispatch_registrations": deferred_dispatch_registrations,
-                    "dispatch_helpers": dest.gen_registration_helpers(backend_index),
                     "dispatch_namespace": dispatch_key.lower(),
                     "dispatch_namespaced_definitions": "",
                     "dispatch_anonymous_definitions": list(
@@ -529,7 +533,7 @@ def run(
     source_yaml: str, output_dir: str, dry_run: bool, impl_path: str | None = None
 ) -> None:
     # Assumes that this file lives at PYTORCH_ROOT/torchgen/gen_backend_stubs.py
-    pytorch_root = Path(__file__).parent.parent.absolute()
+    pytorch_root = Path(__file__).absolute().parent.parent
     template_dir = os.path.join(pytorch_root, "aten/src/ATen/templates")
 
     def make_file_manager(install_dir: str) -> FileManager:

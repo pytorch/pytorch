@@ -22,6 +22,11 @@
 #     also applies to C++ files (unless CXXFLAGS is set), in contrast to the
 #     default behavior of autogoo and cmake build systems.)
 #
+#     A specific flag that can be used is
+#     -DHAS_TORCH_SHOW_DISPATCH_TRACE
+#       build with dispatch trace that can be enabled with
+#       TORCH_SHOW_DISPATCH_TRACE=1 at runtime.
+#
 #   CC
 #     the C/C++ compiler to use
 #
@@ -567,35 +572,52 @@ class build_ext(setuptools.command.build_ext.build_ext):
                 assert rpath.startswith("path ")
                 rpaths.append(rpath.split(" ", 1)[1].rsplit("(", 1)[0][:-1])
 
-        omp_lib_name = (
-            "libomp.dylib" if os.uname().machine == "arm64" else "libiomp5.dylib"
-        )
-        omp_rpath_lib_path = os.path.join("@rpath", omp_lib_name)
-        if omp_rpath_lib_path not in libs:
+        omplib_path = get_cmake_cache_vars()["OpenMP_libomp_LIBRARY"]
+        omplib_name = get_cmake_cache_vars()["OpenMP_C_LIB_NAMES"] + ".dylib"
+        omplib_rpath_path = os.path.join("@rpath", omplib_name)
+
+        # This logic is fragile and checks only two cases:
+        # - libtorch_cpu depends on `@rpath/libomp.dylib`e (happens when built inside miniconda environment)
+        # - libtorch_cpu depends on `/abs/path/to/libomp.dylib` (happens when built with libomp from homebrew)
+        if not any(c in libs for c in [omplib_path, omplib_rpath_path]):
             return
 
         # Copy libomp/libiomp5 from rpath locations
+        target_lib = os.path.join(self.build_lib, "torch", "lib", omplib_name)
+        libomp_relocated = False
         for rpath in rpaths:
-            source_lib = os.path.join(rpath, omp_lib_name)
+            source_lib = os.path.join(rpath, omplib_name)
             if not os.path.exists(source_lib):
                 continue
-            target_lib = os.path.join(self.build_lib, "torch", "lib", omp_lib_name)
             self.copy_file(source_lib, target_lib)
             # Delete old rpath and add @loader_lib to the rpath
             # This should prevent delocate from attempting to package another instance
             # of OpenMP library in torch wheel as well as loading two libomp.dylib into
             # the address space, as libraries are cached by their unresolved names
-            subprocess.check_call(
-                [
-                    "install_name_tool",
-                    "-rpath",
-                    rpath,
-                    "@loader_path",
-                    libtorch_cpu_path,
-                ]
-            )
+            install_name_tool_args = [
+                "-rpath",
+                rpath,
+                "@loader_path",
+            ]
+            libomp_relocated = True
             break
-
+        if not libomp_relocated and os.path.exists(omplib_path):
+            self.copy_file(omplib_path, target_lib)
+            install_name_tool_args = [
+                "-change",
+                omplib_path,
+                omplib_rpath_path,
+            ]
+            if "@loader_path" not in rpaths:
+                install_name_tool_args += [
+                    "-add_rpath",
+                    "@loader_path",
+                ]
+            libomp_relocated = True
+        if libomp_relocated:
+            install_name_tool_args.insert(0, "install_name_tool")
+            install_name_tool_args.append(libtorch_cpu_path)
+            subprocess.check_call(install_name_tool_args)
         # Copy omp.h from OpenMP_C_FLAGS and copy it into include folder
         omp_cflags = get_cmake_cache_vars()["OpenMP_C_FLAGS"]
         if not omp_cflags:
@@ -699,7 +721,7 @@ class build_ext(setuptools.command.build_ext.build_ext):
         # It's an old-style class in Python 2.7...
         setuptools.command.build_ext.build_ext.run(self)
 
-        if IS_DARWIN and package_type != "conda":
+        if IS_DARWIN:
             self._embed_libomp()
 
         # Copy the essential export library to compile C++ extensions.
@@ -1166,7 +1188,7 @@ def main():
     with open(os.path.join(cwd, "README.md"), encoding="utf-8") as f:
         long_description = f.read()
 
-    version_range_max = max(sys.version_info[1], 12) + 1
+    version_range_max = max(sys.version_info[1], 13) + 1
     torch_package_data = [
         "py.typed",
         "bin/*",
@@ -1221,6 +1243,7 @@ def main():
         "include/ATen/native/cuda/*.cuh",
         "include/ATen/native/hip/*.h",
         "include/ATen/native/hip/*.cuh",
+        "include/ATen/native/kleidiai/*.h",
         "include/ATen/native/mps/*.h",
         "include/ATen/native/mkldnn/xpu/*.h",
         "include/ATen/native/mkldnn/xpu/detail/*.h",
@@ -1247,6 +1270,7 @@ def main():
         "include/c10/cuda/impl/*.h",
         "include/c10/hip/*.h",
         "include/c10/hip/impl/*.h",
+        "include/c10/metal/*.h",
         "include/c10/xpu/*.h",
         "include/c10/xpu/impl/*.h",
         "include/torch/*.h",
@@ -1283,6 +1307,7 @@ def main():
         "include/torch/csrc/distributed/autograd/rpc_messages/*.h",
         "include/torch/csrc/dynamo/*.h",
         "include/torch/csrc/inductor/*.h",
+        "include/torch/csrc/inductor/aoti_include/*.h",
         "include/torch/csrc/inductor/aoti_package/*.h",
         "include/torch/csrc/inductor/aoti_runner/*.h",
         "include/torch/csrc/inductor/aoti_runtime/*.h",
@@ -1290,6 +1315,8 @@ def main():
         "include/torch/csrc/inductor/aoti_torch/c/*.h",
         "include/torch/csrc/inductor/aoti_torch/generated/*.h",
         "include/torch/csrc/inductor/aoti_torch/generated/extend/*.h",
+        "include/torch/csrc/inductor/cpp_wrapper/*.h",
+        "include/torch/csrc/inductor/cpp_wrapper/device_internal/*.h",
         "include/torch/csrc/jit/*.h",
         "include/torch/csrc/jit/backends/*.h",
         "include/torch/csrc/jit/generated/*.h",
@@ -1338,6 +1365,7 @@ def main():
         "_inductor/codegen/*.h",
         "_inductor/codegen/aoti_runtime/*.cpp",
         "_export/serde/*.yaml",
+        "_export/serde/*.thrift",
         "share/cmake/ATen/*.cmake",
         "share/cmake/Caffe2/*.cmake",
         "share/cmake/Caffe2/public/*.cmake",
@@ -1372,6 +1400,13 @@ def main():
                 "lib/*.lib",
             ]
         )
+        aotriton_image_path = os.path.join(lib_path, "aotriton.images")
+        aks2_files = []
+        for root, dirs, files in os.walk(aotriton_image_path):
+            subpath = os.path.relpath(root, start=aotriton_image_path)
+            for fn in files:
+                aks2_files.append(os.path.join("lib/aotriton.images", subpath, fn))
+        torch_package_data += aks2_files
     if get_cmake_cache_vars()["USE_TENSORPIPE"]:
         torch_package_data.extend(
             [

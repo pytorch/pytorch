@@ -1,8 +1,7 @@
-# mypy: allow-untyped-decorators
 # mypy: allow-untyped-defs
 
 
-from typing import List, Optional, Tuple, Union
+from typing import Optional, Union
 
 import torch
 import torch.utils._pytree as pytree
@@ -43,8 +42,8 @@ class InvokeSubgraphHOP(HigherOrderOperator):
         subgraph: GraphModule,
         identifier: Optional[str],
         operands: Union[
-            List[Union[torch.Tensor, int, torch.SymInt]],
-            Tuple[Union[torch.Tensor, int, torch.SymInt]],
+            list[Union[torch.Tensor, int, torch.SymInt]],
+            tuple[Union[torch.Tensor, int, torch.SymInt]],
         ],
     ):
         assert identifier is None or isinstance(
@@ -264,7 +263,7 @@ def _(subgraph, identifier, operands):
 @invoke_subgraph.py_functionalize_impl
 def _(ctx, subgraph, identifier, operands):
     unwrapped_operands = ctx.unwrap_tensors(operands)
-    with ctx.redispatch_to_next() as m:
+    with ctx.redispatch_to_next():
         # NB: There is an assumption that subgraph does not mutate inputs and
         # there is no aliasing. Its Dynamo responsibility to prevent formation
         # of invoke_subgraph ops if input aliasing/mutation is detected.

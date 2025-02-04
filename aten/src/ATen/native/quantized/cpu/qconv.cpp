@@ -981,8 +981,7 @@ at::Tensor PackedConvWeightsQnnp<kSpatialDim>::apply_impl(
       output_zero_point,
       channels_last);
 
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  pytorch_qnnp_status run_status;
+  pytorch_qnnp_status run_status{};
   if (transpose()) {
     run_status = qnnpack::qnnpackDeConv(
         convolution_op.get(),
@@ -1404,11 +1403,11 @@ static at::Tensor _quantized_convolution_onednn(
     double accum_scale,
     int64_t accum_zero_point,
     std::optional<c10::ScalarType> output_dtype,
-    std::optional<c10::string_view> binary_attr,
+    std::optional<std::string_view> binary_attr,
     std::optional<at::Scalar> binary_alpha,
-    std::optional<c10::string_view> unary_attr,
+    std::optional<std::string_view> unary_attr,
     torch::List<std::optional<at::Scalar>> unary_scalars,
-    std::optional<c10::string_view> unary_algorithm) {
+    std::optional<std::string_view> unary_algorithm) {
   /*********************************/
   /*          Checks               */
   /*********************************/
@@ -1754,9 +1753,9 @@ namespace at::native {
       double output_scale,
       int64_t output_zero_point,
       std::optional<c10::ScalarType> output_dtype,
-      c10::string_view attr,
+      std::string_view attr,
       torch::List<std::optional<at::Scalar>> scalars,
-      std::optional<c10::string_view> algorithm) {
+      std::optional<std::string_view> algorithm) {
 #if AT_MKLDNN_ENABLED()
 
     if (act.dim() == 3 || act.dim() == 5) {
@@ -1805,9 +1804,9 @@ namespace at::native {
       double output_scale,
       int64_t output_zero_point,
       std::optional<c10::ScalarType> output_dtype,
-      c10::string_view attr,
+      std::string_view attr,
       torch::List<std::optional<at::Scalar>> scalars,
-      std::optional<c10::string_view> algorithm) {
+      std::optional<std::string_view> algorithm) {
 #if AT_MKLDNN_ENABLED()
     TORCH_CHECK(act_scale.numel() == 1 && act_zero_point.numel() == 1,
         "onednn int8 linear: act scale/zp size should be 1");
@@ -1844,11 +1843,11 @@ namespace at::native {
       std::optional<c10::ScalarType> output_dtype,
       double accum_scale,
       int64_t accum_zero_point,
-      c10::string_view binary_attr,
+      std::string_view binary_attr,
       std::optional<at::Scalar> alpha,
-      std::optional<c10::string_view> unary_attr,
+      std::optional<std::string_view> unary_attr,
       torch::List<std::optional<at::Scalar>> unary_scalars,
-      std::optional<c10::string_view> unary_algorithm) {
+      std::optional<std::string_view> unary_algorithm) {
 #if AT_MKLDNN_ENABLED()
     // Conv2D post op check
     TORCH_CHECK(
@@ -1897,11 +1896,11 @@ namespace at::native {
       std::optional<c10::ScalarType> output_dtype,
       double accum_scale,
       int64_t accum_zero_point,
-      c10::string_view binary_attr,
+      std::string_view binary_attr,
       std::optional<at::Scalar> alpha,
-      std::optional<c10::string_view> unary_attr,
+      std::optional<std::string_view> unary_attr,
       torch::List<std::optional<at::Scalar>> unary_scalars,
-      std::optional<c10::string_view> unary_algorithm) {
+      std::optional<std::string_view> unary_algorithm) {
 
     TORCH_CHECK(act_scale.numel() == 1 && act_zero_point.numel() == 1,
         "onednn int8 linear: act scale/zp size should be 1");

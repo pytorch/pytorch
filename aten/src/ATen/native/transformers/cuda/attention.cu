@@ -617,11 +617,8 @@ std::tuple<Tensor, Tensor> native_multi_head_attention_cuda(
   }
 #endif
   // shape: 3 x [B, num_head, T, dim_per_head]
-  auto q_k_v = _transform_bias_rescale_qkv(qkv, qkv_bias, num_head);
+  auto [q, k, v] = _transform_bias_rescale_qkv(qkv, qkv_bias, num_head);
   qkv = Tensor(); // Not used any more, allow free
-  auto& q = std::get<0>(q_k_v);
-  const auto& k = std::get<1>(q_k_v);
-  const auto& v = std::get<2>(q_k_v);
 #ifndef NDEBUG
   debug_assert_shape(__LINE__, q, {B, num_head, T, dim_per_head});
   debug_assert_shape(__LINE__, k, {B, num_head, T, dim_per_head});
@@ -814,7 +811,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, c10::SymInt, c10::SymInt, Tensor, Ten
                                       philox_state, static_cast<int64_t*>(cudnn_seed.data_ptr()), static_cast<int64_t*>(cudnn_offset.data_ptr()));
   }
 
-  const auto softmax_scale = sdp::calculate_scale(query, scale).as_float_unchecked();
+  const auto softmax_scale = sdp::calculate_scale(query, scale).expect_float();
   Tensor debugmask;
 
   run_cudnn_SDP_fprop(batch_size/*int64_t b*/,
@@ -913,7 +910,7 @@ _flash_attention_forward(
     ) {
 #if defined(USE_FLASH_ATTENTION)
   const auto softmax_scale =
-      sdp::calculate_scale(query, scale).as_float_unchecked();
+      sdp::calculate_scale(query, scale).expect_float();
   std::optional<Tensor> out = std::nullopt;
 
   std::optional<Tensor> seqused_k = _seqused_k;
@@ -1160,9 +1157,10 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, c10::SymInt, c10::SymInt> _efficient_
     TORCH_CHECK(false, "[_efficient_attention_forward] Unsupported mask type on ROCM, for now");
   }
 
-  const auto softmax_scale = sdp::calculate_scale(query, scale).as_float_unchecked();
+  const auto softmax_scale = sdp::calculate_scale(query, scale).expect_float();
 
   using aotriton::v2::flash::attn_fwd;
+  using aotriton::v2::flash::attn_fwd_compact_varlen;
   using sdp::aotriton_adapter::mk_aotensor;
   using sdp::aotriton_adapter::mk_aoscalartensor;
   using sdp::aotriton_adapter::mk_philoxtensor;
@@ -1175,22 +1173,46 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, c10::SymInt, c10::SymInt> _efficient_
   auto seed_output = use_philox_state ? mk_philoxtensor(seed_t.data_ptr<int64_t>()) : mk_philoxtensor(nullptr);
   auto offset_output = use_philox_state ? mk_philoxtensor(offset_t.data_ptr<int64_t>()) : mk_philoxtensor(nullptr);
   hipError_t err; // TODO: Error handling
-  err = attn_fwd(mk_aotensor(q_t, "q"),
-                 mk_aotensor(k_t, "k"),
-                 mk_aotensor(v_t, "v"),
-                 bias.has_value() ? mk_aotensor(bias.value(), "bias"): empty_t4,
-                 softmax_scale,
-                 mk_aotensor<2>(softmax_lse, "M"),
-                 mk_aotensor(output_t, "Out"),
-                 dropout_p,
-                 seed,
-                 offset1,
-                 offset2,
-                 seed_output,
-                 offset_output,
-                 mk_aotensor(softmax_fa_t, "encoded_softmax"),
-                 is_causal,
-                 stream);
+  if (seqstart_q.has_value()) {
+    // varlen aka nested tensor
+    err = attn_fwd_compact_varlen(mk_aotensor(q_t, "q"),
+                                  mk_aotensor(k_t, "k"),
+                                  mk_aotensor(v_t, "v"),
+                                  mk_aotensor<1>(seqstart_q.value(), "cu_seqlens_q"),
+                                  mk_aotensor<1>(seqstart_k.value(), "cu_seqlens_k"),
+                                  max_seqlen_q,
+                                  max_seqlen_k,
+                                  bias.has_value() ? mk_aotensor(bias.value(), "bias"): empty_t4,
+                                  softmax_scale,
+                                  mk_aotensor<2>(softmax_lse, "M"),
+                                  mk_aotensor(output_t, "Out"),
+                                  dropout_p,
+                                  seed,
+                                  offset1,
+                                  offset2,
+                                  seed_output,
+                                  offset_output,
+                                  mk_aotensor(softmax_fa_t, "encoded_softmax"),
+                                  is_causal,
+                                  stream);
+  } else {
+    err = attn_fwd(mk_aotensor(q_t, "q"),
+                   mk_aotensor(k_t, "k"),
+                   mk_aotensor(v_t, "v"),
+                   bias.has_value() ? mk_aotensor(bias.value(), "bias"): empty_t4,
+                   softmax_scale,
+                   mk_aotensor<2>(softmax_lse, "M"),
+                   mk_aotensor(output_t, "Out"),
+                   dropout_p,
+                   seed,
+                   offset1,
+                   offset2,
+                   seed_output,
+                   offset_output,
+                   mk_aotensor(softmax_fa_t, "encoded_softmax"),
+                   is_causal,
+                   stream);
+  }
   if (!compute_logsumexp) {
     // Set the tensor to empty when compute_logsumexp is false
     logsumexp = at::empty(
@@ -1293,7 +1315,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, c10::SymInt, c10::SymInt> _efficient_
     if (window_size.has_value()) {
       p.window_size = *window_size;
     }
-    p.scale = sdp::calculate_scale(query, scale).as_float_unchecked();
+    p.scale = sdp::calculate_scale(query, scale).expect_float();
 
     ASSIGN_CHECK_OVERFLOW(p.q_strideB, query.stride(0));
     ASSIGN_CHECK_OVERFLOW(p.k_strideB, key.stride(0));
@@ -1413,7 +1435,7 @@ __global__ void rand_uniform_kernel(
   const int64_t head_id = blockIdx.y;
   const int64_t query_idx = threadIdx.x;
 
-  const auto seeds = at::cuda::philox::unpack(rng_engine_inputs);
+  const auto [seed, offset] = at::cuda::philox::unpack(rng_engine_inputs);
 
   const int dropout_seq_start = batch_id * (n_heads * n_queries * n_keys) +
       head_id * (n_queries * n_keys);
@@ -1421,9 +1443,9 @@ __global__ void rand_uniform_kernel(
 
   curandStatePhilox4_32_10_t curand_state;
   curand_init(
-      std::get<0>(seeds),
+      seed,
       0,
-      std::get<1>(seeds) + dropout_seq_start + query_start_idx,
+      offset + dropout_seq_start + query_start_idx,
       &curand_state);
 
   for (int key_start_idx = 0; key_start_idx < n_keys; key_start_idx += 4) {

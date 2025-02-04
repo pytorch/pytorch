@@ -382,7 +382,10 @@ inline Tensor scalarToTensor(
     const at::Device& self_device) {
   if (self_device == at::kCPU && !v.isSymbolic()) {
     return at::detail::scalar_tensor_static(
-        v, options.dtype_opt()->toScalarType(), self_device);
+        v,
+        // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
+        options.dtype_opt()->toScalarType(),
+        self_device);
   } else {
     return impl::scalarToTensorNonNativeDeviceType(v, options);
   }

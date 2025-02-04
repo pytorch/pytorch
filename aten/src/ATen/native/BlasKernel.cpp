@@ -20,7 +20,6 @@
 #include <cpuinfo.h>
 #endif
 
-C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wunused-function")
 namespace {
 
 /// Wrapper for const_cast<T*> with type-inference.
@@ -75,11 +74,11 @@ extern "C" void sgemv_(char *trans, int *m, int *n, float *alpha, float *a, int 
   }
 
 #else
-  extern "C" ffloat sdot_(int *n, float *x, int *incx, float *y, int *incy);
-  extern "C" void cdotu_(std::complex<float> *res, int *n, std::complex<float> *x, int *incx, std::complex<float> *y, int *incy);
-  extern "C" void zdotu_(std::complex<double> *res, int *n, std::complex<double> *x, int *incx, std::complex<double> *y, int *incy);
-  extern "C" void cdotc_(std::complex<float> *res, int *n, std::complex<float> *x, int *incx, std::complex<float> *y, int *incy);
-  extern "C" void zdotc_(std::complex<double> *res, int *n, std::complex<double> *x, int *incx, std::complex<double> *y, int *incy);
+  extern "C" ffloat sdot_(int *n, const float *x, int *incx, const float *y, int *incy);
+  extern "C" void cdotu_(std::complex<float> *res, int *n, const std::complex<float> *x, int *incx, const std::complex<float> *y, int *incy);
+  extern "C" void zdotu_(std::complex<double> *res, int *n, const std::complex<double> *x, int *incx, const std::complex<double> *y, int *incy);
+  extern "C" void cdotc_(std::complex<float> *res, int *n, const std::complex<float> *x, int *incx, const std::complex<float> *y, int *incy);
+  extern "C" void zdotc_(std::complex<double> *res, int *n, const std::complex<double> *x, int *incx, const std::complex<double> *y, int *incy);
 #endif // AT_BLAS_USE_CBLAS_DOT
 #endif // AT_BUILD_WITH_BLAS
 
@@ -517,7 +516,7 @@ INSTANTIATE(c10::BFloat16)
 } // namespace blas_impl
 
 template <typename scalar_t>
-inline void scal(int64_t n, scalar_t a, scalar_t *x, int64_t incx)
+static inline void scal(int64_t n, scalar_t a, scalar_t *x, int64_t incx)
 {
   if (n == 1) incx = 1;
 #if AT_BUILD_WITH_BLAS()
@@ -616,53 +615,50 @@ AT_FORALL_COMPLEX_TYPES(INSTANTIATE)
 
 namespace blas_impl {
 #if AT_BUILD_WITH_BLAS()
-static float dot_fast_path(int n, float* x, int incx, float* y, int incy) {
-  // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
+static float dot_fast_path(int n, const float* x, int incx, const float* y, int incy) {
   return sdot_(&n, x, &incx, y, &incy);
 }
 
-static double dot_fast_path(int n, double* x, int incx, double* y, int incy) {
-  return ddot_(&n, x, &incx, y, &incy);
+static double dot_fast_path(int n, const double* x, int incx, const double* y, int incy) {
+  return ddot_(&n, const_cast<double*>(x), &incx, const_cast<double*>(y), &incy);
 }
 
-static c10::complex<float> vdot_fast_path(int n, c10::complex<float>* x, int incx, c10::complex<float>* y, int incy) {
+static c10::complex<float> vdot_fast_path(int n, const c10::complex<float>* x, int incx, const c10::complex<float>* y, int incy) {
   c10::complex<float> result;
-  cdotc_(reinterpret_cast<std::complex<float>* >(&result), &n, reinterpret_cast<std::complex<float>*>(x), &incx, reinterpret_cast<std::complex<float>*>(y), &incy);
+  cdotc_(reinterpret_cast<std::complex<float>* >(&result), &n, reinterpret_cast<const std::complex<float>*>(x), &incx, reinterpret_cast<const std::complex<float>*>(y), &incy);
   return result;
 }
 
-static c10::complex<double> vdot_fast_path(int n, c10::complex<double>* x, int incx, c10::complex<double>* y, int incy) {
+static c10::complex<double> vdot_fast_path(int n, const c10::complex<double>* x, int incx, const c10::complex<double>* y, int incy) {
   c10::complex<double> result;
-  zdotc_(reinterpret_cast<std::complex<double>* >(&result), &n, reinterpret_cast<std::complex<double>*>(x), &incx, reinterpret_cast<std::complex<double>*>(y), &incy);
+  zdotc_(reinterpret_cast<std::complex<double>* >(&result), &n, reinterpret_cast<const std::complex<double>*>(x), &incx, reinterpret_cast<const std::complex<double>*>(y), &incy);
   return result;
 }
 
-static c10::complex<double> dot_fast_path(int n, c10::complex<double>* x, int incx, c10::complex<double>* y, int incy) {
+static c10::complex<double> dot_fast_path(int n, const c10::complex<double>* x, int incx, const c10::complex<double>* y, int incy) {
   c10::complex<double> result;
-  zdotu_(reinterpret_cast<std::complex<double>* >(&result), &n, reinterpret_cast<std::complex<double>*>(x), &incx, reinterpret_cast<std::complex<double>*>(y), &incy);
+  zdotu_(reinterpret_cast<std::complex<double>* >(&result), &n, reinterpret_cast<const std::complex<double>*>(x), &incx, reinterpret_cast<const std::complex<double>*>(y), &incy);
   return result;
 }
 
-static c10::complex<float> dot_fast_path(int n, c10::complex<float>* x, int incx, c10::complex<float>* y, int incy) {
+static c10::complex<float> dot_fast_path(int n, const c10::complex<float>* x, int incx, const c10::complex<float>* y, int incy) {
   c10::complex<float> result;
-  cdotu_(reinterpret_cast<std::complex<float>* >(&result), &n, reinterpret_cast<std::complex<float>*>(x), &incx, reinterpret_cast<std::complex<float>*>(y), &incy);
+  cdotu_(reinterpret_cast<std::complex<float>* >(&result), &n, reinterpret_cast<const std::complex<float>*>(x), &incx, reinterpret_cast<const std::complex<float>*>(y), &incy);
   return result;
 }
 #endif
 
 template <typename scalar_t, typename Functor>
-scalar_t dot_naive(
+static scalar_t dot_naive(
     int64_t n,
-    scalar_t* x,
+    const scalar_t* x,
     int64_t incx,
-    scalar_t* y,
+    const scalar_t* y,
     int64_t incy,
     Functor op) {
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  int64_t i;
   using opmath_t = at::opmath_type<scalar_t>;
   opmath_t sum = 0;
-  for (i = 0; i < n; i++) {
+  for (int64_t i = 0; i < n; i++) {
     sum += op(static_cast<opmath_t>(x[i * incx]), static_cast<opmath_t>(y[i * incy]));
   }
   return static_cast<scalar_t>(sum);
@@ -671,7 +667,7 @@ scalar_t dot_naive(
 } // namespace blas_impl
 
 template <typename scalar_t>
-scalar_t dot_impl_floating(int64_t n, scalar_t* x, int64_t incx, scalar_t* y, int64_t incy)
+static scalar_t dot_impl_floating(int64_t n, const scalar_t* x, int64_t incx, const scalar_t* y, int64_t incy)
 {
   if (n == 1) {
     incx = 1;
@@ -689,7 +685,7 @@ scalar_t dot_impl_floating(int64_t n, scalar_t* x, int64_t incx, scalar_t* y, in
 }
 
 template <typename scalar_t>
-scalar_t dot_impl(int64_t n, scalar_t* x, int64_t incx, scalar_t* y, int64_t incy) {
+scalar_t dot_impl(int64_t n, const scalar_t* x, int64_t incx, const scalar_t* y, int64_t incy) {
   if (n == 1) {
     incx = 1;
     incy = 1;
@@ -698,22 +694,22 @@ scalar_t dot_impl(int64_t n, scalar_t* x, int64_t incx, scalar_t* y, int64_t inc
 }
 
 template <>
-float dot_impl(int64_t n, float* x, int64_t incx, float* y, int64_t incy) {
+float dot_impl(int64_t n, const float* x, int64_t incx, const float* y, int64_t incy) {
   return dot_impl_floating(n, x, incx, y, incy);
 }
 
 template <>
-double dot_impl(int64_t n, double* x, int64_t incx, double* y, int64_t incy) {
+double dot_impl(int64_t n, const double* x, int64_t incx, const double* y, int64_t incy) {
   return dot_impl_floating(n, x, incx, y, incy);
 }
 
 template <>
-c10::complex<double> dot_impl(int64_t n, c10::complex<double>* x, int64_t incx, c10::complex<double>* y, int64_t incy) {
+c10::complex<double> dot_impl(int64_t n, const c10::complex<double>* x, int64_t incx, const c10::complex<double>* y, int64_t incy) {
   return dot_impl_floating(n, x, incx, y, incy);
 }
 
 template <>
-c10::complex<float> dot_impl(int64_t n, c10::complex<float>* x, int64_t incx, c10::complex<float>* y, int64_t incy) {
+c10::complex<float> dot_impl(int64_t n, const c10::complex<float>* x, int64_t incx, const c10::complex<float>* y, int64_t incy) {
   return dot_impl_floating(n, x, incx, y, incy);
 }
 
@@ -727,7 +723,7 @@ struct vdot_op {
 } // anonymous namespace
 
 template <typename scalar_t>
-scalar_t vdot_impl(int64_t n, scalar_t* x, int64_t incx, scalar_t* y, int64_t incy) {
+scalar_t vdot_impl(int64_t n, const scalar_t* x, int64_t incx, const scalar_t* y, int64_t incy) {
   if (n == 1) {
     incx = 1;
     incy = 1;
@@ -746,7 +742,7 @@ scalar_t vdot_impl(int64_t n, scalar_t* x, int64_t incx, scalar_t* y, int64_t in
 // Skip reinstantiating the explicitly specialized types `float` and `double`.
 #define INSTANTIATE_DOT_IMPL(scalar_t)  \
   template scalar_t dot_impl<scalar_t>( \
-      int64_t n, scalar_t * x, int64_t incx, scalar_t * y, int64_t incy);
+      int64_t n, const scalar_t * x, int64_t incx, const scalar_t * y, int64_t incy);
 INSTANTIATE_DOT_IMPL(uint8_t)
 INSTANTIATE_DOT_IMPL(int8_t)
 INSTANTIATE_DOT_IMPL(int16_t)
@@ -757,11 +753,10 @@ INSTANTIATE_DOT_IMPL(c10::BFloat16)
 
 #define INSTANTIATE_VDOT_IMPL(scalar_t)  \
   template scalar_t vdot_impl<scalar_t>( \
-      int64_t n, scalar_t * x, int64_t incx, scalar_t * y, int64_t incy);
+      int64_t n, const scalar_t * x, int64_t incx, const scalar_t * y, int64_t incy);
 INSTANTIATE_VDOT_IMPL(c10::complex<float>)
 INSTANTIATE_VDOT_IMPL(c10::complex<double>)
 
 #undef INSTANTIATE_DOT_IMPL
 
 } // namespace at::native
-C10_DIAGNOSTIC_POP()

@@ -226,12 +226,12 @@ TORCH_META_FUNC(softshrink_backward) (
   build_borrowing_binary_op(maybe_get_output(), grad, self);
 }
 
-TORCH_META_FUNC(gelu) (const Tensor & self, c10::string_view approximate) {
+TORCH_META_FUNC(gelu) (const Tensor & self, std::string_view approximate) {
   build_unary_op(maybe_get_output(), self);
 }
 
 TORCH_META_FUNC(gelu_backward) (
-  const Tensor& grad, const Tensor& self, c10::string_view approximate
+  const Tensor& grad, const Tensor& self, std::string_view approximate
 ) {
   build_borrowing_binary_op(maybe_get_output(), grad, self);
 }
@@ -382,12 +382,13 @@ static bool use_mkldnn(const Tensor& input) {
   return (input.is_mkldnn()) || // input is mkldnn Tensor
     (input.device().is_cpu() &&
     (((input.scalar_type() == kBFloat16) && mkldnn_bf16_device_check()) ||
-    (input.scalar_type() == kFloat))); // input is dense layout and bfloat16/float32
+    ((input.scalar_type() == kHalf) && mkldnn_fp16_device_check()) ||
+    (input.scalar_type() == kFloat))); // input is dense layout and bfloat16/float16/float32
 }
 #endif
 
 TORCH_IMPL_FUNC(gelu_out_cpu) (
-  const Tensor& self, c10::string_view approximate, const Tensor& result
+  const Tensor& self, std::string_view approximate, const Tensor& result
 ) {
 auto approximate_type = get_gelutype_enum(approximate);
 #if AT_MKLDNN_ENABLED()
@@ -398,7 +399,7 @@ auto approximate_type = get_gelutype_enum(approximate);
       x, y, ideep::algorithm::eltwise_gelu_erf, ideep::prop_kind::forward_training, /*alpha*/ 0.0);
 #ifdef __aarch64__
   } else if (use_mkldnn(self) && (approximate_type == GeluType::Tanh)) {
-    const ideep::tensor& x = itensor_from_tensor(self);
+    const ideep::tensor& x = itensor_from_tensor(self, /*from_const_data_ptr*/true);
     ideep::tensor y = itensor_from_tensor(result);
     ideep::eltwise_forward::compute(
       x, y, ideep::algorithm::eltwise_gelu_tanh, ideep::prop_kind::forward_training, /*alpha*/ 0.0);
@@ -412,7 +413,7 @@ auto approximate_type = get_gelutype_enum(approximate);
 }
 
 TORCH_IMPL_FUNC(gelu_backward_out_cpu) (
-  const Tensor& grad, const Tensor& self, c10::string_view approximate, const Tensor& grad_input
+  const Tensor& grad, const Tensor& self, std::string_view approximate, const Tensor& grad_input
 ) {
 auto approximate_type = get_gelutype_enum(approximate);
 #if AT_MKLDNN_ENABLED()
@@ -573,13 +574,13 @@ Tensor math_mish_backward(
 }
 
 template <typename scalar_t>
-inline void _rrelu_with_noise_train(
+static void _rrelu_with_noise_train(
     Tensor& output,
     const Tensor& input,
-    const Tensor& noise,
+    Tensor& noise,
     const Scalar& lower_,
     const Scalar& upper_,
-    std::optional<Generator> generator) {
+    const std::optional<Generator>& generator) {
   using opmath_t = at::opmath_type<scalar_t>;
   opmath_t lower = lower_.to<opmath_t>();
   opmath_t upper = upper_.to<opmath_t>();
@@ -606,7 +607,7 @@ inline void _rrelu_with_noise_train(
 }
 
 Tensor& rrelu_with_noise_out_cpu(const Tensor& self,
-    const Tensor& noise,
+    Tensor& noise,
     const Scalar& lower,
     const Scalar& upper,
     bool training,
@@ -629,7 +630,7 @@ Tensor& rrelu_with_noise_out_cpu(const Tensor& self,
 
 Tensor rrelu_with_noise_cpu(
     const Tensor& self,
-    const Tensor& noise,
+    Tensor& noise,
     const Scalar& lower,
     const Scalar& upper,
     bool training,
@@ -641,7 +642,7 @@ Tensor rrelu_with_noise_cpu(
 
 Tensor& rrelu_with_noise_cpu_(
     Tensor& self,
-    const Tensor& noise,
+    Tensor& noise,
     const Scalar& lower,
     const Scalar& upper,
     bool training,
@@ -670,12 +671,14 @@ Tensor rrelu_with_noise_backward(
 
 Tensor rrelu(const Tensor & self, const Scalar& lower, const Scalar& upper, bool training, std::optional<Generator> generator) {
   TORCH_CHECK(lower.to<double>() <= upper.to<double>(), "Lower bound should be less than or equal to the upper bound")
-  return at::rrelu_with_noise(self, at::empty_like(self, LEGACY_CONTIGUOUS_MEMORY_FORMAT), lower, upper, training, std::move(generator));
+  auto noise = at::empty_like(self, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
+  return at::rrelu_with_noise(self, noise, lower, upper, training, std::move(generator));
 }
 
 Tensor & rrelu_(Tensor & self, const Scalar& lower, const Scalar& upper, bool training, std::optional<Generator> generator) {
   TORCH_CHECK(lower.to<double>() <= upper.to<double>(), "Lower bound should be less than or equal to the upper bound")
-  return at::rrelu_with_noise_(self, at::empty_like(self, LEGACY_CONTIGUOUS_MEMORY_FORMAT), lower, upper, training, std::move(generator));
+  auto noise = at::empty_like(self, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
+  return at::rrelu_with_noise_(self, noise, lower, upper, training, std::move(generator));
 }
 
 TORCH_IMPL_FUNC(threshold_out)(const Tensor& self, const Scalar& threshold, const Scalar& value, const Tensor& result) {

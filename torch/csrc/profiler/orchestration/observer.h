@@ -58,6 +58,8 @@ struct TORCH_API ExperimentalConfig {
       std::vector<std::string> performance_events = {},
       bool enable_cuda_sync_events = false,
       bool adjust_profiler_step = false,
+      bool disable_external_correlation = false,
+      bool profile_all_threads = false,
       bool adjust_timestamps = false);
   explicit operator bool() const;
 
@@ -81,6 +83,17 @@ struct TORCH_API ExperimentalConfig {
    * affects only the start of profiler step events.
    */
   bool adjust_profiler_step;
+  /*
+   * Controls whether or not external correlation is disabled. This is used to
+   * lower the amount of events received by CUPTI as correlation events are
+   * paired with runtime/gpu events for each kind of correlation
+   */
+  bool disable_external_correlation;
+
+  /* controls whether profiler records cpu events on threads
+   * that are not spawned from the main thread on which the
+   * profiler was enabled, similar to on_demand mode */
+  bool profile_all_threads;
 
   /*
    * Controls whether or not timestamp adjustment occurs after profiling.
@@ -108,6 +121,7 @@ struct TORCH_API ProfilerConfig {
 
   bool disabled() const;
   bool global() const;
+  bool pushGlobalCallbacks() const;
 
   ProfilerState state;
   ExperimentalConfig experimental_config;

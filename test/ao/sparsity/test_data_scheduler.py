@@ -3,7 +3,6 @@
 import copy
 import logging
 import warnings
-from typing import Tuple
 
 import torch
 from torch import nn
@@ -73,7 +72,7 @@ class TestBaseDataScheduler(TestCase):
 
     def _get_name_data_config(self, some_data, defaults):
         config = copy.deepcopy(defaults)
-        if isinstance(some_data, Tuple):
+        if isinstance(some_data, tuple):
             # dealing with data_list
             name, data = some_data
         else:

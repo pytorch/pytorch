@@ -7,6 +7,7 @@
 #include <ATen/TensorOperators.h>
 #include <ATen/mps/MPSDevice.h>
 #include <ATen/native/quantized/PackedParams.h>
+#include <ATen/native/quantized/library.h>
 #include <ATen/native/quantized/cpu/fbgemm_utils.h>
 #include <ATen/native/quantized/cpu/QnnpackUtils.h>
 #include <c10/core/GradMode.h>
@@ -61,8 +62,6 @@
 #include <ATen/ops/zeros_like_ops.h>
 #include <utility>
 #endif
-
-int register_linear_params();
 
 namespace at::native {
 
@@ -727,8 +726,7 @@ struct LSTMCell : Cell<std::tuple<Tensor, Tensor>, cell_params> {
       const hidden_type& hidden,
       const cell_params& params,
       bool pre_compute_input = false) const override {
-    const auto& hx = std::get<0>(hidden);
-    const auto& cx = std::get<1>(hidden);
+    const auto& [hx, cx] = hidden;
 
     if (input.is_cuda() || input.is_xpu() || input.is_privateuseone()) {
       TORCH_CHECK(!pre_compute_input);

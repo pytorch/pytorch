@@ -38,15 +38,7 @@ TORCH_LIBRARY(mkldnn, m) {
           },
           [](SerializationTypeConvPrePack state)
               -> c10::intrusive_ptr<ConvOpContext> { // __setstate__
-            return createConvPrePackOpContext(
-                std::move(std::get<0>(state)),
-                std::move(std::get<1>(state)),
-                std::move(std::get<2>(state)),
-                std::move(std::get<3>(state)),
-                std::move(std::get<4>(state)),
-                std::move(std::get<5>(state)),
-                std::move(std::get<6>(state)),
-                std::move(std::get<7>(state)));
+            return std::apply(createConvPrePackOpContext, std::move(state));
           });
 
   m.def(TORCH_SELECTIVE_SCHEMA(
@@ -94,7 +86,7 @@ TORCH_LIBRARY_IMPL(mkldnn_prepacked, CPU, m) {
       TORCH_SELECTIVE_NAME("mkldnn_prepacked::conv2d_run"), TORCH_FN(conv_run));
 }
 
-} // namespace at
+} // namespace at::native::mkldnn
 
 #endif // AT_MKLDNN_ENABLED()
 
@@ -109,6 +101,6 @@ TORCH_LIBRARY(mkl, m) {
       "mkl::_mkl_linear(Tensor X, Tensor MKL_W, Tensor ORI_W, Tensor? B, int batch_size) -> Tensor"));
 }
 
-} // namespace at
+} // namespace at::native::mkl
 
 #endif // AT_MKL_ENABLED && AT_MKLDNN_ENABLED

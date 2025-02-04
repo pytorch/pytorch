@@ -7,7 +7,6 @@ import os
 import sys
 import unittest
 from functools import partial
-from typing import List, Tuple
 
 import torch
 import torch.library
@@ -20,6 +19,7 @@ from torch._inductor.test_case import TestCase
 from torch._inductor.utils import run_and_get_code
 from torch._inductor.virtualized import V
 from torch.testing import FileCheck
+from torch.testing._internal.common_cuda import IS_SM89
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     onlyCPU,
@@ -58,6 +58,7 @@ test_failures = {
         ("cpu", "cuda", "xpu")
     ),
     "test_conv_inference_heuristics_dynamic_shapes": TestFailure(("cuda", "xpu")),
+    "test_randint_distribution_dynamic_shapes": TestFailure(("cuda", "xpu")),
 }
 
 if TEST_WITH_ROCM:
@@ -436,11 +437,11 @@ class TestInductorDynamic(TestCase):
     @torch._inductor.config.patch(implicit_fallbacks=True)
     def test_unbacked_save_for_backwards(self, device) -> None:
         @torch.library.custom_op("_test::_cat", mutates_args=())
-        def _cat(t: torch.Tensor, ds: List[int]) -> torch.Tensor:
+        def _cat(t: torch.Tensor, ds: list[int]) -> torch.Tensor:
             return t * t.new_ones([sum(ds)])
 
         @torch.library.register_fake("_test::_cat")
-        def _cat_fake(t: torch.Tensor, ds: List[int]) -> torch.Tensor:
+        def _cat_fake(t: torch.Tensor, ds: list[int]) -> torch.Tensor:
             [torch._check_is_size(d) for d in ds]
             return t.new_empty([sum(ds)])
 
@@ -575,13 +576,17 @@ class TestInductorDynamic(TestCase):
 
         f(torch.tensor([3], device=device))
 
+    @unittest.skipIf(
+        IS_SM89,
+        "Fails(with OOMS) on SM89, see https://github.com/pytorch/pytorch/issues/141915",
+    )
     @torch._dynamo.config.patch(
         capture_scalar_outputs=True, capture_dynamic_output_shape_ops=True
     )
     @torch._inductor.config.patch(implicit_fallbacks=True)
     def test_multi_output_unbacked_custom_op(self, device):
         @torch.library.custom_op("test::foo", mutates_args=())
-        def foo(x: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
+        def foo(x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
             return torch.empty(2, device=x.device), torch.empty(3, device=x.device)
 
         @foo.register_fake
@@ -976,7 +981,7 @@ class TestInductorDynamic(TestCase):
                     return op(x, y)
 
                 cnt = CompileCounterWithBackend("inductor")
-                fn_opt = torch._dynamo.optimize(cnt)(fn)
+                fn_opt = torch.compile(fn, backend=cnt)
 
                 x = torch.arange(3)
                 self.assertEqual(fn(x, 2.0), fn_opt(x, 2.0))
@@ -1005,7 +1010,7 @@ class TestInductorDynamic(TestCase):
             )
 
         cnt = CompileCounterWithBackend("inductor")
-        fn_opt = torch._dynamo.optimize(cnt)(fn)
+        fn_opt = torch.compile(fn, backend=cnt)
         x = torch.arange(3)
         z = 1.3
 
@@ -1016,12 +1021,31 @@ class TestInductorDynamic(TestCase):
         self.assertEqual(cnt.frame_count, 2)
 
     @torch._dynamo.config.patch(specialize_float=False)
+    def test_unspecialized_float_softshrink(self):
+        # This test is particularly interesting since it exercises
+        # both standard operator replacements ie. torch.ops.aten.mul.Tensor
+        # as well as comparison replacements ie. torch.ops.aten.ge.Scalar
+        def fn(x, y):
+            return torch._C._nn.softshrink(x, lambd=y)
+
+        cnt = CompileCounterWithBackend("inductor")
+        fn_opt = torch.compile(fn, backend=cnt)
+        x = torch.randn(5, 5)
+
+        print(fn(x, 2.0), fn_opt(x, 2.0))
+
+        self.assertEqual(fn(x, 2.0), fn_opt(x, 2.0))
+        self.assertEqual(fn(x, 3.0), fn_opt(x, 3.0))
+        self.assertEqual(fn(x, 4.0), fn_opt(x, 4.0))
+        self.assertEqual(cnt.frame_count, 2)
+
+    @torch._dynamo.config.patch(specialize_float=False)
     def test_unspecialized_float_fallback_symint_specialization(self):
         def fn(x, y):
             return math.floor(x**2) * y
 
         cnt = CompileCounterWithBackend("inductor")
-        fn_opt = torch._dynamo.optimize(cnt)(fn)
+        fn_opt = torch.compile(fn, backend=cnt)
         y = torch.arange(3)
 
         self.assertEqual(fn(2.0, y), fn_opt(2.0, y))
