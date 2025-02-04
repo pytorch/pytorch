@@ -247,7 +247,7 @@ def get_matching_overload(
                 overload,
                 "The overload does not have a signature. Assuming it is a custom op and matching it.",
             )
-        for param in overload.__pt_signature:  # type: ignore[attr-defined]
+        for param in overload._pt_onnx_signature:  # type: ignore[attr-defined]
             if param.name not in schema_args and param.required:
                 # We don't need to handle variadic inputs as there is none.
                 # A required parameter is not supplied.
