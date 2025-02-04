@@ -46,6 +46,9 @@ BUILD_BIN_DIR="$BUILD_DIR"/bin
 SHARD_NUMBER="${SHARD_NUMBER:=1}"
 NUM_TEST_SHARDS="${NUM_TEST_SHARDS:=1}"
 
+# enable debug asserts in serialization
+export TORCH_SERIALIZATION_DEBUG=1
+
 export VALGRIND=ON
 # export TORCH_INDUCTOR_INSTALL_GXX=ON
 if [[ "$BUILD_ENVIRONMENT" == *clang9* || "$BUILD_ENVIRONMENT" == *xpu* ]]; then
@@ -509,6 +512,8 @@ test_perf_for_dashboard() {
     test_inductor_set_cpu_affinity
   elif [[ "${TEST_CONFIG}" == *cuda_a10g* ]]; then
     device=cuda_a10g
+  elif [[ "${TEST_CONFIG}" == *rocm* ]]; then
+    device=rocm
   fi
 
   for mode in "${modes[@]}"; do
@@ -625,7 +630,7 @@ test_single_dynamo_benchmark() {
       TEST_CONFIG=${TEST_CONFIG//_avx512/}
     fi
     python "benchmarks/dynamo/$suite.py" \
-      --ci --accuracy --timing --explain \
+      --ci --accuracy --timing --explain --print-compilation-time \
       "${DYNAMO_BENCHMARK_FLAGS[@]}" \
       "$@" "${partition_flags[@]}" \
       --output "$TEST_REPORTS_DIR/${name}_${suite}.csv"

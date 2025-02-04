@@ -5,7 +5,6 @@
 #include <c10/cuda/CUDAException.h>
 #include <c10/cuda/CUDAFunctions.h>
 #include <c10/cuda/CUDAGuard.h>
-#include <c10/util/CallOnce.h>
 #include <c10/util/Gauge.h>
 #include <c10/util/ScopeExit.h>
 #include <c10/util/UniqueVoidPtr.h>
@@ -978,10 +977,10 @@ static std::string reportProcessMemoryInfo(c10::DeviceIndex device) {
   if (!nvml_handle) {
     return "";
   }
-  static c10::once_flag nvml_init;
-  c10::call_once(nvml_init, [] {
+  static bool nvml_init [[maybe_unused]] = []() {
     TORCH_INTERNAL_ASSERT(NVML_SUCCESS == DriverAPI::get()->nvmlInit_v2_());
-  });
+    return true;
+  }();
 
   cudaDeviceProp prop{};
   C10_CUDA_CHECK(cudaGetDeviceProperties(&prop, device));
@@ -3263,10 +3262,10 @@ class DeviceCachingAllocator {
 static bool forceUncachedAllocator() {
   // Allow either CUDA or HIP name for env var for maximum user comfort
   // the CUDA env var avoids being hipified in cuda_to_hip_mappings.py
-  static bool has_cuda_env =
-      c10::utils::has_env("PYTORCH_NO_CUDA_MEMORY_CACHING");
-  static bool has_rocm_env =
-      c10::utils::has_env("PYTORCH_NO_HIP_MEMORY_CACHING");
+  static auto has_cuda_env =
+      c10::utils::check_env("PYTORCH_NO_CUDA_MEMORY_CACHING") == true;
+  static auto has_rocm_env =
+      c10::utils::check_env("PYTORCH_NO_HIP_MEMORY_CACHING") == true;
   static bool force_uncached = has_cuda_env || has_rocm_env;
   return force_uncached;
 }

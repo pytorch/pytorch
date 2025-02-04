@@ -2,7 +2,6 @@
 import copy
 import tempfile
 import unittest
-from typing import List, Tuple
 
 import torch
 from torch.export import Dim, export
@@ -153,6 +152,44 @@ class TestDraftExport(TestCase):
                 )
                 m(*bad_dtype_inps)
 
+    def test_fake_infer_dense_in_memory_check(self):
+        with torch.library._scoped_library("mylib", "FRAGMENT"):
+
+            @torch.library.custom_op("mylib::foo5", mutates_args={})
+            def foo5_impl(a: torch.Tensor) -> torch.Tensor:
+                return a * 2
+
+            @torch.library.custom_op("mylib::foo6", mutates_args={})
+            def foo6_impl(a: torch.Tensor) -> torch.Tensor:
+                return (a * 2)[:, :-1, :-1]  # not dense in memory
+
+            @torch.library.custom_op("mylib::foo7", mutates_args={})
+            def foo7_impl(a: torch.Tensor) -> torch.Tensor:
+                return (a * 2)[:, 1:-1, :]  # non-zero storage offset
+
+            class Foo(torch.nn.Module):
+                def forward(self, x, opt):
+                    if opt == 0:
+                        return torch.ops.mylib.foo5(x)
+                    elif opt == 1:
+                        return torch.ops.mylib.foo6(x)
+                    else:
+                        return torch.ops.mylib.foo7(x)
+
+            draft_export(Foo(), (torch.randn(80, 4, 4), 0))
+            draft_export(Foo(), (torch.randn(80, 1, 4), 0))
+            draft_export(Foo(), (torch.randn(1, 4, 1, 1, 4, 1, 4), 0))
+            with self.assertRaisesRegex(
+                RuntimeError,
+                "a return was not dense in memory",
+            ):
+                draft_export(Foo(), (torch.randn(4, 6, 8), 1))
+            with self.assertRaisesRegex(
+                RuntimeError,
+                "a return has a non-zero storage offset",
+            ):
+                draft_export(Foo(), (torch.randn(4, 6, 8), 2))
+
     def test_data_dependent_failure(self):
         with torch.library._scoped_library("mylib", "FRAGMENT") as lib:
             torch.library.define(
@@ -166,12 +203,6 @@ class TestDraftExport(TestCase):
             def foo_impl(a, b):
                 return a + b
 
-            @torch.library.register_fake("mylib::foo1", lib=lib)
-            def mylib_foo_default_fake(*args, **kwargs):
-                ctx = torch.library.get_ctx()
-                fake_shape = [ctx.new_dynamic_size() for _ in range(2)]
-                return torch.empty(fake_shape, dtype=torch.float32, device="cpu")
-
             class M(torch.nn.Module):
                 def forward(self, a, b, c):
                     res = torch.ops.mylib.foo1(a, b)
@@ -184,7 +215,10 @@ class TestDraftExport(TestCase):
             ep, report = draft_export(M(), inp)
             self.assertTrue(len(report.failures) > 0)
             self.assertEqual(
-                report.failures[0].failure_type, FailureType.DATA_DEPENDENT_ERROR
+                report.failures[0].failure_type, FailureType.MISSING_FAKE_KERNEL
+            )
+            self.assertEqual(
+                report.failures[1].failure_type, FailureType.DATA_DEPENDENT_ERROR
             )
 
             inp = (torch.randn(3, 3), torch.randn(3, 3), torch.tensor(2))
@@ -325,7 +359,7 @@ class TestDraftExport(TestCase):
                 return torch.ops.mylib.foo(a)
 
         @torch.library.custom_op("mylib::foo", mutates_args={})
-        def foo(a: torch.Tensor) -> List[torch.Tensor]:
+        def foo(a: torch.Tensor) -> list[torch.Tensor]:
             x = a * 2
             y = a.repeat(2, 2)
             z = a.to(torch.bfloat16)
@@ -370,7 +404,7 @@ class TestDraftExport(TestCase):
                 return torch.ops.mylib.foo(a)
 
         @torch.library.custom_op("mylib::foo", mutates_args={})
-        def foo(a: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
+        def foo(a: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
             return a * 2, a + 2
 
         @foo.register_fake
@@ -400,6 +434,38 @@ class TestDraftExport(TestCase):
         self.assertTrue(
             "Mismatched aliasing spec between fake kernel and real kernel"
             in report.failures[0].data["reason"]
+        )
+
+    def test_override_mismatched_fake_kernel_with_unbacked_symbols(self):
+        class M(torch.nn.Module):
+            def forward(self, a, b):
+                return torch.ops.mylib.foo(a, b)
+
+        @torch.library.custom_op("mylib::foo", mutates_args={})
+        def foo(a: torch.Tensor, b: torch.Tensor) -> torch.Tensor:
+            return a[b.item()].to(torch.bfloat16)
+
+        @foo.register_fake
+        def foo_fake_impl(a, b):
+            ctx = torch.library.get_ctx()
+            u = ctx.new_dynamic_size()
+            return torch.empty(u, a.shape[1], dtype=a.dtype)
+
+        mod = M()
+        inputs = (torch.randn(100, 4), torch.tensor(10))
+
+        ep, report = draft_export(mod, inputs)
+        for ep_out, eager_out in zip(ep.module()(*inputs), mod(*inputs)):
+            self.assertTrue(torch.allclose(ep_out, eager_out))
+            self.assertEqual(ep_out.dtype, eager_out.dtype)
+
+        self.assertEqual(len(report.failures), 1)
+        self.assertEqual(
+            report.failures[0].failure_type, FailureType.MISMATCHED_FAKE_KERNEL
+        )
+        self.assertEqual(
+            report.failures[0].data["reason"],
+            "Dtypes torch.bfloat16 and torch.float32 are not equal!",
         )
 
     # https://github.com/pytorch/pytorch/issues/140625

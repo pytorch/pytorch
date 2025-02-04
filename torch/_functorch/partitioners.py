@@ -501,7 +501,7 @@ def _size_of(node: fx.Node) -> int:
             return object_nbytes(val)
 
         raise RuntimeError(f"Unknown metadata type {type(val)} on node {node}")
-    if node.op == "get_attr":
+    if node.op == "get_attr" or node.target is torch.ops.aten._assert_scalar.default:
         return 0
     raise RuntimeError(
         f"Node {node} didn't have `val` metadata; we should always have `val` metadata on the nodes."
@@ -1091,10 +1091,12 @@ def solve_min_cut(
                 if node_info.is_required_fw(user):
                     if node_info.get_fw_order(user) > max_range:
                         continue
-                    heapq.heappush(
-                        sorted_nodes,
-                        (node_info.get_fw_order(user), user, is_fusible(node, user)),
-                    )
+                    val = (node_info.get_fw_order(user), user, is_fusible(node, user))
+                    if val not in sorted_nodes:
+                        heapq.heappush(
+                            sorted_nodes,
+                            val,
+                        )
         return max_range
 
     if min_cut_options.ban_if_used_far_apart:
@@ -1782,8 +1784,7 @@ def min_cut_rematerialization_partition(
                 required_bw_nodes.add(node)
 
             if node in required_bw_nodes:
-                for user in node.users:
-                    required_bw_nodes.add(user)
+                required_bw_nodes.update(node.users)
 
         primal_inputs = list(filter(_is_primal, joint_module.graph.nodes))
         fwd_seed_offset_inputs = list(
@@ -1874,10 +1875,10 @@ def min_cut_rematerialization_partition(
 
         # Log total theoretical activations stored
         total_activations_size_gb = sum(_size_of(i) for i in saved_values) / 1e9
-        log.debug("Theoretical Activations Stored: %.2f GB", total_activations_size_gb)
+        log.info("Theoretical Activations Stored: %.2f GB", total_activations_size_gb)
 
         # Log theoretical per activation storage sizes
-        log.debug("Theoretical Per Activation Storage Sizes: %s", sorted_sizes)
+        log.info("Theoretical Per Activation Storage Sizes: %s", sorted_sizes)
         fw_module_nodes = {
             node.name for node in fw_module.graph.nodes if node.op == "call_function"
         }
@@ -1890,14 +1891,14 @@ def min_cut_rematerialization_partition(
         for node in fw_module.graph.nodes:
             if node.name in remat_nodes and hasattr(node.target, "_overloadpacket"):
                 counts[str(node.target._overloadpacket)] += 1
-        log.debug(
+        log.info(
             "# remat/fw/bw: %d/%d/%d",
             len(remat_nodes),
             len(fw_module_nodes),
             len(bw_module_nodes),
         )
         rematerialized_ops = sorted(counts.items(), key=lambda x: x[1], reverse=True)
-        log.debug("Count of Ops Rematerialized: %s", rematerialized_ops)
+        log.info("Count of Ops Rematerialized: %s", rematerialized_ops)
     return fw_module, bw_module
 
 

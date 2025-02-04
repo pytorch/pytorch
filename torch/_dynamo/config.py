@@ -411,6 +411,9 @@ use_numpy_random_stream = False
 # Use C++ guard manager (deprecated: always true)
 enable_cpp_guard_manager = True
 
+# Use C++ guard manger for symbolic shapes
+enable_cpp_symbolic_shape_guards = False
+
 # Enable tracing through contextlib.contextmanager
 enable_trace_contextlib = True
 
@@ -568,8 +571,10 @@ enable_compiler_collectives = os.environ.get("TORCH_COMPILER_COLLECTIVES", "0") 
 # will typically cause cache misses.  We continuously update the profile,
 # so if we only discover something is dynamic on the second run, we will update
 # the profile for subsequent runs.
-automatic_dynamic_local_pgo: bool = (
-    os.environ.get("TORCH_DYNAMO_AUTOMATIC_DYNAMIC_LOCAL_PGO", "0") == "1"
+automatic_dynamic_local_pgo: bool = Config(
+    justknob="pytorch/remote_cache:enable_local_automatic_dynamic_pgo",
+    env_name_force="TORCH_DYNAMO_AUTOMATIC_DYNAMIC_LOCAL_PGO",
+    default=True,
 )
 
 # Like above, but using remote cache
