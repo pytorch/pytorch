@@ -81,13 +81,19 @@ class OpNamespace:
             count = self.custom_function_name_counter[name]
             self.custom_function_name_counter[name] += 1
             name = f"{name}{count}"
-        else:
-            assert not hasattr(self, name)
 
+        assert not hasattr(self, name)
         result = Op(name, fn, is_custom_function)
         if is_traceable:
-            torch._dynamo.allow_in_graph(result)
-        setattr(self, name, result)
+            setattr(self, name, torch._dynamo.allow_in_graph(result))
+        else:
+            # C++ autograd function was not marked as traceable
+            # Dynamo can't dry run it at compile time, so must fallback to eager
+            @torch._dynamo.disable
+            def fn(*args, **kwargs):
+                return result(*args, **kwargs)
+
+            setattr(self, name, fn)
         return name
 
     def get(self, name):
