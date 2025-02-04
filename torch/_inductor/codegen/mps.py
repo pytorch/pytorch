@@ -428,12 +428,12 @@ class MetalKernel(SIMDKernel):
             """
             )
             return acc
-        if reduction_type == "sum":
+        if reduction_type in ["prod", "sum"]:
             acc_buf = self._new_accvar(src_dtype, reduction_dim.numel)
             self.body.splice(f"{acc_buf}[{reduction_dim.name}] = {value};")
             return self.cse.generate(
                 self.body,
-                f"c10::metal::threadgroup_sum({acc_buf}, {reduction_dim.numel})",
+                f"c10::metal::threadgroup_{reduction_type}({acc_buf}, {reduction_dim.numel})",
                 dtype=DTYPE_TO_COMPUTATION_DTYPE[dtype],
             )
         if reduction_type in ["max", "min"]:
