@@ -98,7 +98,7 @@ def _compute_edge_sizes(n_fft, window_size):
 
 
 @_onnx_symbolic("aten::stft")
-@symbolic_helper.parse_args("v", "i", "i", "i", "v", "b", "s", "b", "b", "b", "b")
+@symbolic_helper.parse_args("v", "i", "i", "i", "v", "b", "b", "b", "b")
 def stft(
     g: jit_utils.GraphContext,
     input: _C.Value,
@@ -106,8 +106,6 @@ def stft(
     hop_length: Optional[int] = None,
     win_length: Optional[int] = None,
     window: Optional[_C.Value] = None,
-    center: Optional[bool] = True,
-    pad_mode: str = "reflect",
     normalized: bool = False,
     onesided: Optional[bool] = True,
     return_complex: Optional[bool] = False,
@@ -139,12 +137,6 @@ def stft(
         raise errors.SymbolicValueError(
             msg="STFT does not currently support complex types", value=input
         )
-
-    if center or pad_mode != "reflect":
-        raise errors.SymbolicValueError(
-            msg='STFT does not currently support center = True or pad_mode != "reflect"',
-            value=input,
-        )  # TODO(#145943): add center functionality and tests.
 
     if align_to_window is not None:
         raise errors.SymbolicValueError(
