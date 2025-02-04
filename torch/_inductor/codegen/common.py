@@ -12,23 +12,7 @@ import operator
 import re
 from enum import auto, Enum
 from itertools import chain
-from typing import (
-    Any,
-    Callable,
-    ClassVar,
-    Dict,
-    List,
-    NamedTuple,
-    Optional,
-    TYPE_CHECKING,
-    Union,
-)
-
-from torch.utils._ordered_set import OrderedSet
-
-
-if TYPE_CHECKING:
-    from typing import Never
+from typing import Any, Callable, ClassVar, NamedTuple, Optional, TYPE_CHECKING, Union
 
 import sympy
 
@@ -37,6 +21,7 @@ import torch.fx
 from torch._inductor.dtype_propagation import DtypePropagationOpsHandler
 from torch._prims_common import ELEMENTWISE_TYPE_PROMOTION_KIND
 from torch.utils import _pytree as pytree
+from torch.utils._ordered_set import OrderedSet
 from torch.utils._sympy.numbers import int_oo
 from torch.utils._sympy.printers import PythonPrinter as _PythonPrinter
 from torch.utils._sympy.symbol import free_symbol_is_type, symbol_is_type, SymT
@@ -56,11 +41,27 @@ from ..utils import (
 from ..virtualized import ops, OpsHandler, OpsValue, ReductionType, StoreMode, V
 
 
+if TYPE_CHECKING:
+    from typing import Never
+
+    from ..ir import FixedLayout
+    from ..loop_body import LoopBody
+    from ..scheduler import BaseScheduling, Scheduler
+    from .wrapper import PythonWrapperCodegen
+
+    SchedulingConstructor = Callable[[Optional[Scheduler]], BaseScheduling]
+    WrapperConstructor = type[PythonWrapperCodegen]
+    SymbolLike = Union[str, sympy.Symbol]
+
+    # OpVarT should really be Union[CSEVariable, str], however this
+    # causes typing errors in subclasses (defined in other files).
+    OpVarT = str
+
 schedule_log = torch._logging.getArtifactLogger(__name__, "schedule")
 log = logging.getLogger(__name__)
 
 
-def data_type_logger(msg):
+def data_type_logger(msg: str) -> None:
     if schedule_log.isEnabledFor(logging.DEBUG):
         schedule_log.debug("Data type propagation: %s", msg)
 
@@ -71,7 +72,7 @@ class WorkspaceZeroMode(enum.Enum):
     ZERO_PER_GRAPH = 2  # must be re-zeroed by kernel
 
     @staticmethod
-    def combine(a, b):
+    def combine(a: WorkspaceZeroMode, b: WorkspaceZeroMode) -> WorkspaceZeroMode:
         if a == b or b == WorkspaceZeroMode.UNINITIALIZED:
             return a
         if a == WorkspaceZeroMode.UNINITIALIZED:
@@ -79,7 +80,7 @@ class WorkspaceZeroMode(enum.Enum):
         raise NotImplementedError(f"WorkspaceZeroMode.combine({a!r}, {b!r})")
 
     @staticmethod
-    def from_bool(zero_fill):
+    def from_bool(zero_fill: bool) -> WorkspaceZeroMode:
         if zero_fill:
             return WorkspaceZeroMode.ZERO_ON_CALL
         return WorkspaceZeroMode.UNINITIALIZED
@@ -106,17 +107,17 @@ class WorkspaceArg:
     dtype: torch.dtype = torch.uint8
 
     @staticmethod
-    def unique_name(prefix="workspace_"):
+    def unique_name(prefix="workspace_") -> str:
         return f"{prefix}{next(V.graph.workspace_id)}"
 
     @staticmethod
-    def can_join(a, b) -> bool:
+    def can_join(a: WorkspaceArg, b: WorkspaceArg) -> bool:
         return (
             a.inner_name == b.inner_name and a.dtype == b.dtype and a.device == b.device
         )
 
     @staticmethod
-    def join(a, b):
+    def join(a: WorkspaceArg, b: WorkspaceArg) -> WorkspaceArg:
         return WorkspaceArg(
             count=a.count + b.count,
             zero_mode=WorkspaceZeroMode.combine(a.zero_mode, b.zero_mode),
@@ -127,7 +128,7 @@ class WorkspaceArg:
         )
 
     @staticmethod
-    def maximum(a, b):
+    def maximum(a: WorkspaceArg, b: WorkspaceArg) -> WorkspaceArg:
         assert (
             a.dtype == b.dtype and a.device == b.device and a.inner_name == b.inner_name
         )
@@ -141,15 +142,15 @@ class WorkspaceArg:
         )
 
     # These methods let WorkspaceArg pretend it is a buffer to reuse allocation code
-    def get_device(self):
+    def get_device(self) -> torch.device:
         return self.device
 
     get_device_or_error = get_device
 
-    def get_dtype(self):
+    def get_dtype(self) -> torch.dtype:
         return self.dtype
 
-    def get_layout(self):
+    def get_layout(self) -> FixedLayout:
         from ..ir import FixedLayout
 
         return FixedLayout(
@@ -160,23 +161,23 @@ class WorkspaceArg:
         )
 
     @property
-    def layout(self):
+    def layout(self) -> FixedLayout:
         return self.get_layout()
 
     get_output_spec = get_layout
     maybe_get_output_spec = get_layout
     maybe_get_layout = get_layout
 
-    def get_size(self):
+    def get_size(self) -> list[sympy.Expr]:
         return [self.count]
 
-    def get_stride(self):
-        return [1]
+    def get_stride(self) -> list[sympy.Expr]:
+        return [sympy.S.One]
 
-    def get_name(self):
+    def get_name(self) -> str:
         return self.outer_name
 
-    def get_inputs_that_alias_output(self):
+    def get_inputs_that_alias_output(self) -> list[str]:
         return []
 
 
@@ -195,8 +196,13 @@ class SizeArg:
     expr: sympy.Expr
 
     @property
-    def alias_of(self):
+    def alias_of(self) -> Optional[str]:
         return None
+
+
+@dataclasses.dataclass
+class ConstexprArg:
+    name: str
 
 
 @dataclasses.dataclass
@@ -206,70 +212,67 @@ class TMADescriptorArg:
 
 @dataclasses.dataclass
 class DeviceCodegen:
-    scheduling: Any
-    wrapper_codegen: type
-    cpp_wrapper_codegen: type = type(None)
+    scheduling: SchedulingConstructor
+    wrapper_codegen: WrapperConstructor
+    cpp_wrapper_codegen: Optional[WrapperConstructor] = None
 
 
-KernelArgType = Union[WorkspaceArg, TensorArg, SizeArg, TMADescriptorArg]
+KernelArgType = Union[WorkspaceArg, TensorArg, SizeArg, TMADescriptorArg, ConstexprArg]
 
-device_codegens: Dict[str, DeviceCodegen] = {}
+device_codegens: dict[str, DeviceCodegen] = {}
 
 
 class DeviceOpOverrides:
-    def import_get_raw_stream_as(self, name):
+    def import_get_raw_stream_as(self, name: str) -> str:
         raise NotImplementedError
 
-    def set_device(self, device_idx):
+    def set_device(self, device_idx: int) -> str:
         raise NotImplementedError
 
-    def synchronize(self):
+    def synchronize(self) -> str:
         raise NotImplementedError
 
-    def device_guard(self, device_idx):
+    def device_guard(self, device_idx: int) -> str:
         raise NotImplementedError
 
-    def cpp_device_guard(self):
+    def cpp_device_guard(self) -> str:
         raise NotImplementedError
 
-    def cpp_aoti_device_guard(self):
+    def cpp_aoti_device_guard(self) -> str:
         raise NotImplementedError
 
-    def cpp_stream_guard(self):
+    def cpp_stream_guard(self) -> str:
         raise NotImplementedError
 
-    def cpp_aoti_stream_guard(self):
+    def cpp_aoti_stream_guard(self) -> str:
         raise NotImplementedError
 
-    def cpp_getStreamFromExternal(self):
+    def cpp_getStreamFromExternal(self) -> str:
         raise NotImplementedError
 
-    def kernel_header(self):
+    def kernel_header(self) -> str:
         raise NotImplementedError
 
-    def kernel_driver(self):
+    def kernel_driver(self) -> str:
         raise NotImplementedError
 
-    def abi_compatible_header(self):
+    def cpp_stream_type(self) -> str:
         raise NotImplementedError
 
-    def cpp_stream_type(self):
+    def aoti_get_stream(self) -> str:
         raise NotImplementedError
 
-    def aoti_get_stream(self):
+    def cpp_kernel_type(self) -> str:
         raise NotImplementedError
 
-    def cpp_kernel_type(self):
+    def cpp_device_ptr(self) -> str:
         raise NotImplementedError
 
-    def cpp_device_ptr(self):
-        raise NotImplementedError
-
-    def tma_descriptor_helpers(self):
+    def tma_descriptor_helpers(self) -> str:
         raise NotImplementedError
 
 
-device_op_overrides_dict: Dict[str, DeviceOpOverrides] = {}
+device_op_overrides_dict: dict[str, DeviceOpOverrides] = {}
 
 
 # The code generated by Inductor consists of two main parts: kernel code and wrapper code.
@@ -295,10 +298,10 @@ device_op_overrides_dict: Dict[str, DeviceOpOverrides] = {}
 # https://github.com/intel/intel-extension-for-pytorch/blob/5dcc9d57e5422cf295e1a1ee97896d6b6a554a85/intel_extension_for_pytorch/_inductor/__init__.py#L9
 def register_backend_for_device(
     device: str,
-    device_scheduling: Any,
-    device_wrapper_codegen: type,
-    device_cpp_wrapper_codegen: type = type(None),
-):
+    device_scheduling: SchedulingConstructor,
+    device_wrapper_codegen: WrapperConstructor,
+    device_cpp_wrapper_codegen: Optional[WrapperConstructor] = None,
+) -> None:
     device_codegens[device] = DeviceCodegen(
         device_scheduling, device_wrapper_codegen, device_cpp_wrapper_codegen
     )
@@ -317,9 +320,11 @@ class BackendFeature(Enum):
     REDUCE_TO_SINGLE_ELEMENT = auto()
 
 
-def get_backend_features(device: Union[torch.device, str, None]):
+def get_backend_features(
+    device: Union[torch.device, str, None]
+) -> OrderedSet[BackendFeature]:
     if device is None:
-        return {}
+        return OrderedSet()
     init_backend_registration()
     if isinstance(device, torch.device):
         device_type = device.type
@@ -327,21 +332,27 @@ def get_backend_features(device: Union[torch.device, str, None]):
         assert isinstance(device, str)
         device_type = device
         device = torch.device(device_type)
-    scheduling = get_scheduling_for_device(device_type)
-    return scheduling(None).get_backend_features(device)
+    scheduling_ctor = get_scheduling_for_device(device_type)
+    assert scheduling_ctor
+    scheduling = scheduling_ctor(None)
+    return scheduling.get_backend_features(device)
 
 
-def has_backend_feature(device, feature):
+def has_backend_feature(
+    device: Union[torch.device, str, None], feature: BackendFeature
+) -> bool:
     """See also V.graph.has_feature"""
     assert isinstance(feature, BackendFeature)
     return feature in get_backend_features(device)
 
 
-def get_scheduling_for_device(device: str):
+def get_scheduling_for_device(device: str) -> Optional[SchedulingConstructor]:
     return device_codegens[device].scheduling if device in device_codegens else None
 
 
-def get_wrapper_codegen_for_device(device: str, cpp_wrapper: bool = False):
+def get_wrapper_codegen_for_device(
+    device: str, cpp_wrapper: bool = False
+) -> Optional[WrapperConstructor]:
     if device in device_codegens:
         wrapper_codegen_obj: DeviceCodegen = device_codegens[device]
         return (
@@ -353,7 +364,7 @@ def get_wrapper_codegen_for_device(device: str, cpp_wrapper: bool = False):
 
 
 @functools.lru_cache(None)
-def init_backend_registration():
+def init_backend_registration() -> None:
     from .cpp import CppScheduling
     from .cpp_wrapper_cpu import CppWrapperCpu
     from .cpp_wrapper_cpu_array_ref import CppWrapperCpuArrayRef
@@ -372,7 +383,7 @@ def init_backend_registration():
         }
         register_backend_for_device(
             "cpu",
-            lambda *args, **kwargs: cpu_backends[config.cpu_backend](*args, **kwargs),
+            lambda scheduling: cpu_backends[config.cpu_backend](scheduling),
             PythonWrapperCodegen,
             CppWrapperCpuArrayRef
             if config.aot_inductor.allow_stack_allocation
@@ -381,10 +392,13 @@ def init_backend_registration():
 
     if get_scheduling_for_device("cuda") is None:
         # CUDACombinedScheduling combines Triton and CUDA C++ scheduling for CUDA devices via delegation
-        cuda_backends = {"triton": CUDACombinedScheduling, "halide": HalideScheduling}
+        cuda_backends = {
+            "triton": CUDACombinedScheduling,
+            "halide": HalideScheduling,
+        }
         register_backend_for_device(
             "cuda",
-            lambda *args, **kwargs: cuda_backends[config.cuda_backend](*args, **kwargs),
+            lambda scheduling: cuda_backends[config.cuda_backend](scheduling),
             PythonWrapperCodegen,
             CppWrapperGpu,
         )
@@ -427,30 +441,33 @@ def init_backend_registration():
             pass
 
 
-def index_prevent_reordering(index: List[sympy.Expr], index_vars, sizes):
+def index_prevent_reordering(
+    index: list[sympy.Expr], index_vars, sizes
+) -> list[sympy.Expr]:
     from ..ir import FlexibleLayout
 
     # added contiguous index prevents reordering
     return [*index, sympy_dot(index_vars, FlexibleLayout.contiguous_strides(sizes))]
 
 
-def register_device_op_overrides(device: str, device_op_overrides: DeviceOpOverrides):
+def register_device_op_overrides(
+    device: str, device_op_overrides: DeviceOpOverrides
+) -> None:
     device_op_overrides_dict[device] = device_op_overrides
 
 
-def get_device_op_overrides(device: str):
+def get_device_op_overrides(device: str) -> DeviceOpOverrides:
     assert isinstance(device, str)
 
-    if not device_op_overrides_dict.keys():
+    if not device_op_overrides_dict:
         from . import cpu_device_op_overrides, mps_device_op_overrides  # noqa: F401
         from .cuda import device_op_overrides  # noqa: F401
         from .xpu import device_op_overrides as xpu_op_overrides  # noqa: F401
 
-    if device in device_op_overrides_dict.keys():
-        return device_op_overrides_dict[device]
+    return device_op_overrides_dict[device]
 
 
-DTYPE_TO_COMPUTATION_DTYPE = {
+DTYPE_TO_COMPUTATION_DTYPE: dict[torch.dtype, torch.dtype] = {
     torch.bfloat16: torch.float,
     torch.float16: torch.float,
     **{
@@ -474,8 +491,8 @@ DTYPE_TO_COMPUTATION_DTYPE = {
 
 def deduce_output_dtype_by_name(
     op_name: str,
-    *args,
-    **kwargs,
+    *args: Any,
+    **kwargs: Any,
 ) -> Optional[torch.dtype]:
     """
     Given op name and a list of input dtypes, deduce the output dtype
@@ -516,15 +533,15 @@ def deduce_output_dtype_by_name(
 
 
 class DataTypePropagation:
-    def __init__(self, body) -> None:
+    def __init__(self, body: LoopBody) -> None:
         self.body = body
-        self.graphs: Dict[Union[Callable[..., Any], str], Any] = {
+        self.graphs: dict[Union[Callable[..., Any], str], Any] = {
             "root": body.root_block.graph
         }
         for k, v in body.subblocks.items():
             self.graphs[k] = v.graph
 
-    def deduce_node_dtype_by_inputs(self, node: torch.fx.Node):
+    def deduce_node_dtype_by_inputs(self, node: torch.fx.Node) -> Optional[torch.dtype]:
         inputs = node.all_input_nodes
         input_nodes = [
             n for n in inputs if isinstance(n, torch.fx.Node) and n.op != "placeholder"
@@ -545,13 +562,13 @@ class DataTypePropagation:
             [n.meta[OptimizationContext.key].dtype for n in input_nodes],
         )
 
-    def deduce_node_dtype_by_subgraph(self, node: torch.fx.Node):
+    def deduce_node_dtype_by_subgraph(self, node: torch.fx.Node) -> torch.dtype:
         sub_graph = self.graphs[node.target]
         dtype = self.propagate_graph(sub_graph)
         assert dtype
         return dtype
 
-    def deduce_node_dtype(self, node: torch.fx.Node):
+    def deduce_node_dtype(self, node: torch.fx.Node) -> Optional[torch.dtype]:
         if node.op == "placeholder":
             return None
 
@@ -578,9 +595,9 @@ class DataTypePropagation:
 
         return self.deduce_node_dtype_by_inputs(node)
 
-    def propagate_graph(self, graph: torch.fx.Graph):
+    def propagate_graph(self, graph: torch.fx.Graph) -> Optional[torch.dtype]:
         assert graph.nodes
-        graph_dtype = None
+        graph_dtype: Optional[torch.dtype] = None
         # For masked_subblock, we use output's dtype to represent
         # the dtype of this subgraph. For other cases, graph_dtype
         # might be None
@@ -596,25 +613,27 @@ class DataTypePropagation:
                 graph_dtype = opt_ctx.dtype
         return graph_dtype
 
-    def propagate(self):
-        self.propagate_graph(self.graphs["root"])
+    def propagate(self) -> Optional[torch.dtype]:
+        return self.propagate_graph(self.graphs["root"])
 
     @classmethod
-    def propagate_loopbody(cls, body):
+    def propagate_loopbody(cls, body) -> Optional[torch.dtype]:
         return cls(body).propagate()
 
     @classmethod
-    def propagate_scheduler_node(cls, node):
+    def propagate_scheduler_node(cls, node) -> Optional[torch.dtype]:
         from ..loop_body import LoopBody
         from ..scheduler import SchedulerNode
 
         assert isinstance(node, SchedulerNode)
         assert isinstance(node._body, LoopBody)
-        DataTypePropagation.propagate_loopbody(node._body)
+        return DataTypePropagation.propagate_loopbody(node._body)
 
 
 class PythonPrinter(_PythonPrinter):
-    def doprint(self, expr, *, simplify: bool = True, p=True):
+    def doprint(
+        self, expr: sympy.Expr, *, simplify: bool = True, p: bool = True
+    ) -> str:
         # TODO: why are people passing strings to the printer here :think:
         if simplify and isinstance(expr, sympy.Expr) and hasattr(V.graph, "sizevars"):
             expr = V.graph.sizevars.simplify(expr)
@@ -627,74 +646,74 @@ class OpDecompositions:
     """
 
     @staticmethod
-    def identity(value):
+    def identity(value: OpVarT) -> OpVarT:
         # used to trigger cse
         return value
 
     @staticmethod
-    def reciprocal(x):
+    def reciprocal(x: OpVarT) -> OpVarT:
         return ops.truediv(ops.constant(1, torch.int32), x)
 
     @staticmethod
-    def square(x):
+    def square(x: OpVarT) -> OpVarT:
         return ops.mul(x, x)
 
     @staticmethod
-    def erfc(x):
+    def erfc(x: OpVarT):
         return ops.sub(ops.constant(1, torch.float32), ops.erf(x))
 
     @staticmethod
-    def erfcx(x):
+    def erfcx(x: OpVarT) -> OpVarT:
         return ops.mul(ops.exp(ops.square(x)), ops.erfc(x))
 
     @staticmethod
-    def expm1(x):
+    def expm1(x: OpVarT) -> OpVarT:
         return ops.sub(ops.exp(x), ops.constant(1, torch.float32))
 
     @staticmethod
-    def log10(x):
+    def log10(x: OpVarT) -> OpVarT:
         return ops.mul(ops.log(x), ops.constant(1 / math.log(10), torch.float32))
 
     @staticmethod
-    def log2(x):
+    def log2(x: OpVarT) -> OpVarT:
         return ops.mul(ops.log(x), ops.constant(1 / math.log(2), torch.float32))
 
     @staticmethod
-    def exp2(x):
+    def exp2(x: OpVarT) -> OpVarT:
         return ops.exp(ops.mul(x, ops.constant(math.log(2), torch.float32)))
 
     @staticmethod
-    def log1p(x):
+    def log1p(x: OpVarT) -> OpVarT:
         return ops.log(ops.add(x, ops.constant(1, torch.int32)))
 
     @staticmethod
-    def sigmoid(x):
+    def sigmoid(x: OpVarT) -> OpVarT:
         one = ops.constant(1, torch.int32)
         return ops.truediv(one, ops.add(one, ops.exp(ops.neg(x))))
 
     @staticmethod
-    def relu(x):
+    def relu(x: OpVarT) -> OpVarT:
         return ops.maximum(x, ops.constant(0, torch.int32))
 
     @staticmethod
-    def fma(x, y, z):
+    def fma(x: OpVarT, y: OpVarT, z: OpVarT) -> OpVarT:
         # for backends that don't override this (halide)
         return ops.add(ops.mul(x, y), z)
 
     @staticmethod
-    def floor_to_int(a, dtype):
+    def floor_to_int(a: OpVarT, dtype: torch.dtype) -> OpVarT:
         return ops.to_dtype(ops.floor(a), dtype)
 
     @staticmethod
-    def ceil_to_int(a, dtype):
+    def ceil_to_int(a: OpVarT, dtype: torch.dtype) -> OpVarT:
         return ops.to_dtype(ops.ceil(a), dtype)
 
     @staticmethod
-    def trunc_to_int(a, dtype):
+    def trunc_to_int(a: OpVarT, dtype: torch.dtype) -> OpVarT:
         return ops.to_dtype(ops.trunc(a), dtype)
 
     @staticmethod
-    def remainder(a, b):
+    def remainder(a: OpVarT, b: OpVarT) -> OpVarT:
         r = ops.mod(a, b)
         cond = ops.and_(
             ops.ne(r, ops.constant(0, torch.int32)),
@@ -703,8 +722,26 @@ class OpDecompositions:
         return ops.where(cond, ops.add(r, b), r)
 
     @staticmethod
-    def round_to_int(a, dtype):
+    def round_to_int(a: OpVarT, dtype: torch.dtype) -> OpVarT:
         return ops.to_dtype(ops.round(a), dtype)
+
+
+_RE_PAREN_NOT_NEEDED = re.compile(r"[a-z0-9_.]+|\([^)]*\)|", flags=re.IGNORECASE)
+
+
+def _all_in_parens(string: str) -> bool:
+    if string[0] != "(" or len(string) < 2:
+        return False
+    count = 1
+    for i, char in enumerate(string[1:]):
+        if char == "(":
+            count += 1
+        elif char == ")":
+            count -= 1
+        if count == 0 and i != len(string) - 2:
+            return False
+    assert count == 0
+    return True
 
 
 class OpOverrides(OpDecompositions):
@@ -713,110 +750,93 @@ class OpOverrides(OpDecompositions):
         self._parent = parent
 
     @staticmethod
-    def paren(string: str) -> str:
-        def all_in_parens(string: str) -> bool:
-            if string[0] != "(" or len(string) < 2:
-                return False
-            count = 1
-            for i, char in enumerate(string[1:]):
-                if char == "(":
-                    count += 1
-                elif char == ")":
-                    count -= 1
-                if count == 0 and i != len(string) - 2:
-                    return False
-            assert count == 0
-            return True
-
+    def paren(string: OpVarT) -> OpVarT:
         if (
             isinstance(string, CSEVariable)
-            or re.match(r"^[a-z0-9_.]+$", string, re.IGNORECASE)
-            or re.match(r"^\([^)]*\)$", string, re.IGNORECASE)
-            or string == ""
+            or _RE_PAREN_NOT_NEEDED.fullmatch(string)
+            or _all_in_parens(string)
         ):
-            return string
-        # don't put extra parens for strings that are already wrapped in parens
-        if all_in_parens(string):
+            # don't put extra parens for strings that are already wrapped in parens
             return string
         return f"({string})"
 
-    def __getattr__(self, item):
+    def __getattr__(self, item: str) -> Callable[..., Any]:
         return getattr(self._parent, item)
 
     @staticmethod
-    def constant(value, dtype):
+    def constant(value: Union[bool, float, int], dtype: torch.dtype) -> OpVarT:
         return repr(value)
 
     @staticmethod
-    def libdevice_sigmoid(x):
+    def libdevice_sigmoid(x: OpVarT) -> OpVarT:
         one = ops.constant(1, torch.int32)
         return ops.truediv(one, ops.add(one, ops.libdevice_exp(ops.neg(x))))
 
     @staticmethod
-    def libdevice_abs(x):
+    def libdevice_abs(x: OpVarT) -> OpVarT:
         return ops.abs(x)
 
     @staticmethod
-    def libdevice_sqrt(x):
+    def libdevice_sqrt(x: OpVarT) -> OpVarT:
         return ops.sqrt(x)
 
     @staticmethod
-    def libdevice_cos(x):
+    def libdevice_cos(x: OpVarT) -> OpVarT:
         return ops.cos(x)
 
     @staticmethod
-    def libdevice_sin(x):
+    def libdevice_sin(x: OpVarT) -> OpVarT:
         return ops.sin(x)
 
     @staticmethod
-    def libdevice_log(x):
+    def libdevice_log(x: OpVarT) -> OpVarT:
         return ops.log(x)
 
     @staticmethod
-    def libdevice_exp(x):
+    def libdevice_exp(x: OpVarT) -> OpVarT:
         return ops.exp(x)
 
     @staticmethod
-    def bitwise_not(x):
+    def bitwise_not(x: OpVarT) -> OpVarT:
         return f"~{OpOverrides.paren(x)}"
 
     @staticmethod
-    def logical_not(a):
+    def logical_not(a: OpVarT) -> OpVarT:
         return f"{OpOverrides.paren(a)} == 0"
 
     @staticmethod
-    def bitwise_and(x, y):
+    def bitwise_and(x: OpVarT, y: OpVarT) -> OpVarT:
         return f"{OpOverrides.paren(x)} & {OpOverrides.paren(y)}"
 
     @staticmethod
-    def bitwise_or(x, y):
+    def bitwise_or(x: OpVarT, y: OpVarT) -> OpVarT:
         return f"{OpOverrides.paren(x)} | {OpOverrides.paren(y)}"
 
     @staticmethod
-    def bitwise_xor(x, y):
+    def bitwise_xor(x: OpVarT, y: OpVarT) -> OpVarT:
         return f"{OpOverrides.paren(x)} ^ {OpOverrides.paren(y)}"
 
     @staticmethod
-    def bitwise_left_shift(x, y):
+    def bitwise_left_shift(x: OpVarT, y: OpVarT) -> OpVarT:
         return f"{OpOverrides.paren(x)} << {OpOverrides.paren(y)}"
 
     @staticmethod
-    def bitwise_right_shift(x, y):
+    def bitwise_right_shift(x: OpVarT, y: OpVarT) -> OpVarT:
         return f"{OpOverrides.paren(x)} >> {OpOverrides.paren(y)}"
 
     @staticmethod
-    def int_truediv(a, b):
+    def int_truediv(a: OpVarT, b: OpVarT) -> OpVarT:
         # TODO: this is wrong
         # TODO: an easy bandaid is to generate runtime asserts that it's
         # <= 2**53, which is when this equation is correct
         return ops.truediv(a, b)
 
     @staticmethod
-    def load_seed(name, offset):
+    def load_seed(name: str, offset: OpVarT) -> OpVarT:
         return ops.load(name, sympy.Integer(offset))
 
     @classmethod
-    def _initialize_pointwise_overrides(cls, target):
+    def _initialize_pointwise_overrides(cls, target: str) -> None:
         assert target in ("triton", "cpp", "cppvec"), target
 
         for funcname, data in pointwise_overrides_data.items():
@@ -841,7 +861,7 @@ class OverridesData:
 
 # NB: if you add a new special function, don't forget to update
 # torch._inductor.ops_handler too
-pointwise_overrides_data: Dict[str, OverridesData] = dict(
+pointwise_overrides_data: dict[str, OverridesData] = dict(
     airy_ai=OverridesData(
         type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
         cpp=lambda x: f"airy_ai_forward({x})",
@@ -1068,7 +1088,7 @@ pointwise_overrides_data: Dict[str, OverridesData] = dict(
 
 
 # Use mypy to check protocol implemented correctly
-def _typecheck_OpOverrides(h: OpOverrides) -> OpsHandler[str]:
+def _typecheck_OpOverrides(h: OpOverrides) -> OpsHandler[OpVarT]:
     return h
 
 
@@ -1098,7 +1118,7 @@ class DeferredLine(DeferredLineBase):
 
 
 class BracesBuffer(IndentedBuffer):
-    def indent(self, offset=1):
+    def indent(self, offset=1) -> contextlib.AbstractContextManager[None]:
         @contextlib.contextmanager
         def ctx():
             for _ in range(offset):
@@ -1120,12 +1140,22 @@ class BracesBuffer(IndentedBuffer):
 
 class InplacedBuffer(NamedTuple):
     inner_name: str
-    other_names: List[str]
+    other_names: list[str]
+
+
+@dataclasses.dataclass
+class ArgName:
+    name: str
+    # is_constexpr=True is used to attach a " : tl.constexpr" into the argument list
+    is_constexpr: bool = False
+
+    def full_name(self):
+        return f"{self.name}{' : tl.constexpr' if self.is_constexpr else ''}"
 
 
 class KernelArgs:
     @staticmethod
-    def _lookup(prefix, odict, name):
+    def _lookup(prefix: str, odict: dict[SymbolLike, str], name: SymbolLike) -> str:
         assert isinstance(name, (str, sympy.Symbol))
         if name not in odict:
             odict[name] = f"{prefix}{len(odict)}"
@@ -1138,7 +1168,7 @@ class KernelArgs:
         self.sizevars = sizevars or {}
         self.workspace_args = []
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         return "KernelArgs({})".format(
             ", ".join(
                 map(
@@ -1190,7 +1220,7 @@ class KernelArgs:
             self.inplace_buffers[input_name] = buf
             self.inplace_buffers[output_name] = buf
 
-    def workspace(self, nbytes: sympy.Expr, zero_fill: bool):
+    def workspace(self, nbytes: sympy.Expr, zero_fill: bool) -> tuple[str, int]:
         """
         Allocate or extend a workspace buffer of nbytes bytes.
 
@@ -1231,7 +1261,7 @@ class KernelArgs:
         self.workspace_args.append(arg)
         return arg.inner_name, 0
 
-    def semaphores(self, min_size: sympy.Expr):
+    def semaphores(self, min_size: sympy.Expr) -> str:
         """
         Lazily allocate a graph-wide semaphores buffer with at least min_size.  This is a single buffer shared by
         all kernels and zero initialized once at graph start.  Each kernel must leave the buffer zeroed on exit.
@@ -1327,15 +1357,17 @@ class KernelArgs:
         assert not self.workspace_args, "Workspace not supported on CPU "
         return arg_defs, call_args, arg_types
 
-    def python_argdefs(self):
-        arg_defs: List[str] = []
-        call_args: List[str] = []
-        arg_types: List[torch.dtype] = []
-        precompile_args: List[Union[TensorArg, SizeArg, WorkspaceArg]] = []
+    def python_argdefs(
+        self,
+    ) -> tuple[list[ArgName], list[str], list[KernelArgType], list[torch.dtype]]:
+        arg_defs: list[ArgName] = []
+        call_args: list[str] = []
+        arg_types: list[torch.dtype] = []
+        precompile_args: list[KernelArgType] = []
         for inplaced in unique(self.inplace_buffers.values()):
             if self._buffer_is_marked_removed(inplaced):
                 continue
-            arg_defs.append(inplaced.inner_name)
+            arg_defs.append(ArgName(inplaced.inner_name))
             call_args.append(inplaced.other_names[-1])
             arg_types.append(V.graph.get_dtype(inplaced.other_names[-1]))
             precompile_args.append(
@@ -1350,7 +1382,7 @@ class KernelArgs:
         ):
             if outer in self.inplace_buffers or self._buffer_is_marked_removed(inner):
                 continue
-            arg_defs.append(inner)
+            arg_defs.append(ArgName(inner))
             call_args.append(outer)
             arg_types.append(V.graph.get_dtype(outer))
             precompile_args.append(
@@ -1361,14 +1393,14 @@ class KernelArgs:
                 )
             )
         for outer, inner in self.sizevars.items():
-            arg_defs.append(inner)
+            arg_defs.append(ArgName(inner))
             call_args.append(outer)
             arg_types.append(type(outer))  # type: ignore[arg-type]
             precompile_args.append(SizeArg(inner, outer))
             if V.graph.wrapper_code:
                 V.graph.wrapper_code.ensure_size_computed(outer)
         for arg in self.workspace_args:
-            arg_defs.append(arg.inner_name)
+            arg_defs.append(ArgName(arg.inner_name))
             call_args.append(arg.outer_name)
             precompile_args.append(arg)
             arg_types.append(arg.dtype)
@@ -1655,7 +1687,7 @@ class Kernel(CodeGen):
         self._load_other = None
         # OrderedSet in set_current_node
         self.current_node = None
-        self.node_to_bounds: Optional[Dict[torch.fx.Node, ValueRanges[Any]]] = None
+        self.node_to_bounds: Optional[dict[torch.fx.Node, ValueRanges[Any]]] = None
 
         self.removed_buffers = OrderedSet[str]()
         self.inplaced_to_remove = OrderedSet[str]()
@@ -2169,7 +2201,7 @@ class Kernel(CodeGen):
         if not scheduler:
             return
         fused_node_names = OrderedSet(
-            scheduler.name_to_buf[buf].defining_op.get_name()
+            scheduler.name_to_buf[buf].defining_op_name()
             for buf in self.store_buffer_names
             if buf in scheduler.name_to_buf
         )
