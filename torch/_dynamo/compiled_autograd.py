@@ -165,6 +165,7 @@ class AutogradCompilerInstance:
         sizes: list[int],
         scalars: list[Union[int, float]],
         origins: list[list[tuple[int, str]]],
+        recompile_reasons: list[str],
     ):
         counters["compiled_autograd"]["captures"] += 1
         self.id = next(COMPILE_COUNTER)
@@ -177,6 +178,16 @@ class AutogradCompilerInstance:
             {"graph_id": self.id},
             log_pt2_compile_event=True,
         )
+        if recompile_reasons:
+            # empty on first compile
+            trace_structured(
+                "artifact",
+                metadata_fn=lambda: {
+                    "name": "compiled_autograd_recompile_reasons",
+                    "encoding": "json",
+                },
+                payload_fn=lambda: recompile_reasons,
+            )
 
         self.aot_graph_cls_name: Optional[str] = None
         self.aot_graph_infos: dict[int, dict[str, Any]] = {}
