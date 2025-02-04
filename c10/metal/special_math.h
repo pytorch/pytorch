@@ -383,7 +383,7 @@ inline float zeta(float x, float q) {
 }
 
 template <typename T0>
-inline float polygamma(const T0 input, const int64_t order) {
+inline float polygamma(const int64_t order, const T0 input) {
   float x = input;
   float n = order;
   float sgn = ((order % 2) ? 1 : -1);
