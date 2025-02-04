@@ -159,6 +159,7 @@ def maybe_skip_size_asserts(op):
             "fft_ifft2",
             "fft_ifftn",
             "fft_irfft",
+            "fft_irfft2",
             "fft_irfftn",
             "fft_ihfft",
             "fft_ihfft2",
