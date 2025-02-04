@@ -25,9 +25,7 @@ T threadgroup_max(threadgroup T* data, unsigned size) {
   T rc = data[0];
   // TODO: Use `simd_shuffle_down`
   for(auto idx = 1; idx < size; ++idx) {
-    if (data[idx] > rc) {
-      rc = data[idx];
-    }
+    rc = ::c10::metal::max(rc, data[idx]);
   }
   return rc;
 }
