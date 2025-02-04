@@ -27,7 +27,6 @@ from common_utils import (
     tol1,
     tol2,
     xfail,
-    skipIfTorchSubclasses,
 )
 from functorch_additional_op_db import additional_op_db
 
@@ -57,6 +56,7 @@ from torch.testing._internal.common_utils import (
     TestCase,
     unMarkDynamoStrictTest,
     xfailIfS390X,
+    skipIfTorchSubclasses,
 )
 from torch.testing._internal.opinfo.core import SampleInput
 from torch.utils import _pytree as pytree

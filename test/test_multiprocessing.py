@@ -1042,6 +1042,7 @@ if __name__ == "__main__":
             msg=f'Failed to serialize successfully for "{device}" device!',
         )
 
+    @skipIfTorchSubclasses("TBD")
     def test_empty_shared(self):
         t = torch.tensor([])
         t.share_memory_()
