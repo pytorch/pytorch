@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 
+import math
 from typing import Optional, Sequence
 
 from onnxscript import BOOL, FLOAT, INT64
