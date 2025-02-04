@@ -106,6 +106,8 @@ def stft(
     hop_length: Optional[int] = None,
     win_length: Optional[int] = None,
     window: Optional[_C.Value] = None,
+    center: Optional[bool] = True,
+    pad_mode: str = "reflect",
     normalized: bool = False,
     onesided: Optional[bool] = True,
     return_complex: Optional[bool] = False,
