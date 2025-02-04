@@ -24,7 +24,7 @@ from .. import config, ir
 from ..codecache import HalideCodeCache
 from ..ir import get_reduction_combine_fn
 from ..metrics import is_metric_table_enabled, log_kernel_metadata
-from ..ops_handler import AddParenHandler, MockHandler
+from ..ops_handler import AddParenHandler
 from ..runtime.hints import HalideInputSpec, HalideMeta
 from ..utils import (
     get_bounds_index_expr,
@@ -33,7 +33,7 @@ from ..utils import (
     sympy_index_symbol,
     sympy_subs,
 )
-from ..virtualized import _ops as ops, OpsHandler, V
+from ..virtualized import _ops as ops, V
 from .common import (
     BackendFeature,
     CSEVariable,
@@ -555,10 +555,12 @@ class HalideOverrides(OpOverrides):
         # TODO(jansel): look into removing the where in the same places triton does
         return ops.where(new_mask, result, other)
 
+    @staticmethod
+    def frexp(x):
+        raise NotImplementedError("frexp")
 
-# Use mypy to check protocol implemented correctly
-def _typecheck_HalideOverrides(h: HalideOverrides) -> OpsHandler[str]:
-    return h
+
+HalideOverrides._initialize_pointwise_overrides("halide")
 
 
 class HalideCSEVariable(CSEVariable):
@@ -1217,7 +1219,7 @@ class HalideKernel(SIMDKernel):
             result_var = self.welford_reduce_fallback(dtype, value)
         else:
             combine_fn = get_reduction_combine_fn(reduction_type, acc_type)
-            with V.set_ops_handler(AddParenHandler(HalideOverrides(MockHandler()))):
+            with V.set_ops_handler(AddParenHandler(HalideOverrides())):
                 combine_str = combine_fn(result_var, value_str)  # type: ignore[arg-type]
             default_str = f"hl.cast({acc_type}, {halide_constant(default)})"
             self.body.writeline(f"{result_var} = {default_str}")
@@ -1333,7 +1335,7 @@ class HalideKernel(SIMDKernel):
         self.body.writeline(f"{result_var} = {maybe_tuple(initial)}")
 
         # Disable CSE for update fn
-        with V.set_ops_handler(AddParenHandler(HalideOverrides(MockHandler()))):
+        with V.set_ops_handler(AddParenHandler(HalideOverrides())):
             combine_str = combine_fn(read_left, read_right)  # type: ignore[arg-type]
         self.body.writeline(
             f"{result_var.subs_str(scan_renames_cur)} = {maybe_tuple(combine_str)}"

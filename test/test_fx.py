@@ -52,7 +52,7 @@ from fx.test_source_matcher_utils import TestSourceMatcher  # noqa: F401
 
 from fx.test_gradual_type import AnnotationsTest  # noqa: F401
 from fx.test_gradual_type import TypeCheckerTest  # noqa: F401
-from typing import Any, Callable, NamedTuple, Optional, Union, Tuple, List
+from typing import Any, Callable, NamedTuple, Optional, Union
 from torch.testing._internal.common_utils import (
     IS_FBCODE,
     IS_MACOS,

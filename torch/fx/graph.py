@@ -1,7 +1,6 @@
 # mypy: allow-untyped-defs
 import builtins
 import contextlib
-import types
 import copy
 import enum
 import functools
@@ -459,7 +458,7 @@ class CodeGen:
             if origin_type := getattr(o, "__origin__", None):
                 # list[...], typing.List[...], TensorType[...]
 
-                if isinstance(o, typing._GenericAlias):
+                if isinstance(o, typing._GenericAlias):  # type: ignore[attr-defined]
                     # This is a generic pre-PEP585 type, e.g. typing.List[torch.Tensor]
                     origin_type = _origin_type_map.get(origin_type, origin_type)
 
