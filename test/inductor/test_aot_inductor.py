@@ -445,6 +445,36 @@ class AOTInductorTestsTemplate:
             with config.patch({"freezing": True}):
                 self.check_model(LinearModel(self.device), example_inputs)
 
+    def test_linear_dynamic_maxautotune(self):
+        class Model(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.linear = torch.nn.Linear(1, 1)
+
+            def forward(self, x):
+                return self.linear(x)
+
+        model = Model().to(device=self.device)
+        compile_inputs = (torch.randn(2048, 1, device=self.device),)
+        dim0_x = Dim("dim0_x", min=2, max=2048)
+        dynamic_shapes = {"x": {0: dim0_x}}
+        ep = torch.export.export(model, compile_inputs, dynamic_shapes=dynamic_shapes)
+        optimized = torch._inductor.aoti_load_package(
+            torch._inductor.aoti_compile_and_package(
+                ep,
+                inductor_configs={
+                    "max_autotune": True,
+                    "max_autotune_gemm_backends": "TRITON",
+                },
+            )
+        )
+        runtime_input = torch.randn(10, 1, device=self.device)
+        self.assertTrue(same(optimized(runtime_input), model(runtime_input)))
+        runtime_input = torch.randn(16, 1, device=self.device)
+        self.assertTrue(same(optimized(runtime_input), model(runtime_input)))
+        runtime_input = torch.randn(100, 1, device=self.device)
+        self.assertTrue(same(optimized(runtime_input), model(runtime_input)))
+
     @torch._inductor.config.patch(
         pre_grad_fusion_options={
             "normalization_pass": {},
@@ -708,8 +738,8 @@ class AOTInductorTestsTemplate:
         self.check_model(Model(), example_inputs, dynamic_shapes=dynamic_shapes)
 
     @unittest.skipIf(
-        not torch.cuda.is_available() or torch.cuda.get_device_capability() < (9, 0),
-        "FP8 is only supported on H100+ and sm_89 and MI300+ devices",
+        not PLATFORM_SUPPORTS_FP8,
+        "FP8 is only supported on H100+, SM 8.9 and MI300+ devices",
     )
     @skipIfRocm  # _scaled_mm_out_cuda  is not compiled for ROCm platform
     @skipIfXpu
@@ -756,8 +786,8 @@ class AOTInductorTestsTemplate:
         )
 
     @unittest.skipIf(
-        not torch.cuda.is_available() or torch.cuda.get_device_capability() < (9, 0),
-        "FP8 is only supported on H100+",
+        not PLATFORM_SUPPORTS_FP8,
+        "FP8 is only supported on H100+, SM 8.9 and MI300+ devices",
     )
     @skipIfRocm  # _scaled_mm_out_cuda  is not compiled for ROCm platform
     @skipIfXpu
@@ -2151,6 +2181,33 @@ class AOTInductorTestsTemplate:
         example_inputs = (torch.randn(3, 10, device=self.device),)
         self.check_model(Model(), example_inputs)
 
+    def test_repeated_calling(self):
+        if self.device != "cuda":
+            raise unittest.SkipTest("requires CUDA")
+
+        class Model(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+
+            def forward(self, x):
+                return torch.sin(x)
+
+        example_inputs = (torch.randn(10, 10, device=self.device),)
+        optimized = torch._inductor.aoti_load_package(
+            torch._inductor.aoti_compile_and_package(
+                torch.export.export(Model(), example_inputs)
+            )
+        )
+        try:
+            torch.cuda.memory.empty_cache()
+            torch.cuda.memory._record_memory_history(context=None)
+            for _ in range(10):
+                optimized(*example_inputs)
+        finally:
+            torch.cuda.memory._record_memory_history(False)
+        segments = torch.cuda.memory._snapshot()["segments"]
+        self.assertEqual(segments[0]["requested_size"], 400)
+
     def test_view_outputs(self):
         class Model(torch.nn.Module):
             def forward(self, x):
@@ -3254,7 +3311,7 @@ class AOTInductorTestsTemplate:
     @unittest.skipIf(TEST_WITH_ROCM, "FP8 is not supported on ROCM")
     @unittest.skipIf(
         not PLATFORM_SUPPORTS_FP8,
-        "FP8 is only supported on H100+ and sm_89 and MI300+ devices",
+        "FP8 is only supported on H100+, SM 8.9 and MI300+ devices",
     )
     def test_runtime_checks_fp8(self):
         # cuda only
@@ -4342,6 +4399,19 @@ class AOTInductorTestsTemplate:
                 atol=0.1,
                 rtol=1e-3,
             )
+
+    def test_composed_dynamic_size(self):
+        class Model(torch.nn.Module):
+            def forward(self, x):
+                return x + 1
+
+        example_inputs = (torch.randn(10, device=self.device),)
+        dim = torch.export.Dim("dim_0")
+        dim_even = 2 * dim
+        dynamic_shapes = {
+            "x": {0: dim_even},
+        }
+        self.check_model(Model(), example_inputs, dynamic_shapes=dynamic_shapes)
 
 
 class AOTInductorLoggingTest(LoggingTestCase):
