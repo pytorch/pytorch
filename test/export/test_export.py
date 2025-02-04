@@ -9110,6 +9110,8 @@ graph():
         ufm = torch.export.unflatten(ep)
         self.assertTrue(torch.allclose(ufm(*inp), epm(*inp)))
 
+    @testing.expectedFailureLegacyExportNonStrict
+    @testing.expectedFailureLegacyExportStrict
     def test_constant_tensor_with_non_functional(self):
         class TestModel(torch.nn.Module):
             def __init__(self):
@@ -9146,6 +9148,8 @@ def forward(self, c_params, x):
     return (add_2,)""",
         )
 
+    @testing.expectedFailureLegacyExportNonStrict
+    @testing.expectedFailureLegacyExportStrict
     def test_constant_tensor_with_non_functional_nested(self):
         class SubMod(torch.nn.Module):
             def __init__(self):
@@ -10603,6 +10607,8 @@ def forward(self, x, y):
         self.assertTrue(torch.allclose(a, torch.ones(4, 4)))
         self.assertTrue(torch.allclose(b, torch.ones(4, 4)))
 
+    @testing.expectedFailureLegacyExportNonStrict
+    @testing.expectedFailureLegacyExportStrict
     def test_constant_tensor_mutation(self):
         class M(torch.nn.Module):
             def __init__(self):
