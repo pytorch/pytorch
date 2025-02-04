@@ -1,6 +1,4 @@
 # mypy: allow-untyped-defs
-from __future__ import annotations
-
 import itertools
 from typing import Any, Callable, Generic, Literal, NamedTuple, Optional, TypeVar, Union
 from typing_extensions import Protocol
@@ -31,7 +29,7 @@ ReductionType = Literal[
 ]
 
 
-def _arg_str(a: object) -> str:
+def _arg_str(a) -> str:
     if isinstance(a, sympy.Expr):
         return sympy_str(a)
     return str(a)
@@ -46,7 +44,7 @@ class OpsHandler(Protocol[T]):
     """
     Protocol describing the set of valid operations on ``torch._inductor.virtualized.ops``,
     as well as the contract for op handlers.  The type T signifies the domain
-    of the abstract analysis AKA what all the functions return / take as arguments
+    of the abstract analysis AKA what all of the functions return / take as arguments
     anywhere compute occurs.
 
     While these operators are typically dtype polymorphic (e.g., you can use mul
@@ -249,7 +247,7 @@ class OpsHandler(Protocol[T]):
     # TODO: in practice, this seems to actually return None, but not returning
     # a T makes common __getattr__ idioms not type correctly.  Figure out if
     # this should be returning something.
-    def store_reduction(self, name: str, index: sympy.Expr, value: T) -> None:
+    def store_reduction(self, name: str, index: sympy.Expr, value: T) -> T:
         """
         Store the fully accumulated result of 'reduction' to the memory
         location 'name' offset by 'expr'.
@@ -1048,7 +1046,7 @@ class ExtractConstantsHandler(NoopHandler):
     def __init__(self, device):
         self.device = device
 
-    def constant(self, value: Any, dtype: torch.dtype) -> torch._inductor.ir.Constant:
+    def constant(self, value: Any, dtype: torch.dtype) -> "torch._inductor.ir.Constant":
         from torch._inductor import ir
 
         return ir.Constant(value=value, dtype=dtype, device=self.device)

@@ -101,6 +101,9 @@ class MPSBasicTests(TestCase):
             check_lowp=False,
         )
 
+    def test_pointwise_digamma(self):
+        self.common(torch.special.digamma, (torch.rand(128, 128),), check_lowp=False)
+
     def test_broadcast(self):
         self.common(torch.add, (torch.rand(32, 1024), torch.rand(1024)))
 
@@ -117,6 +120,7 @@ for test_name in [
     "test_add_const_int",
     "test_add_inplace_permuted",
     "test_addmm",
+    "test_any",
     "test_arange5",
     "test_argmax_min_int32",
     "test_avg_pool2d5",
@@ -125,6 +129,10 @@ for test_name in [
     "test_builtins_round_float_ndigits_neg",
     "test_cat_empty",
     "test_cat_unbacked_empty_1d",
+    "test_consecutive_split_cumprod",
+    "test_consecutive_split_cumsum",
+    "test_constant_pad_float64",
+    "test_cumsum_inf",
     "test_custom_op_2",
     "test_div1",
     "test_div3",
@@ -138,6 +146,7 @@ for test_name in [
     "test_isinf",
     "test_isinf2",
     "test_lgamma",
+    "test_linear_float64",
     "test_log_fp64",
     "test_low_memory_max_pool",
     "test_max_min",

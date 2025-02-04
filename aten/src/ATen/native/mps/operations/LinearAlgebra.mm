@@ -28,7 +28,6 @@
 #include <ATen/ops/triangular_solve_native.h>
 #endif
 
-#include <c10/util/env.h>
 #include <algorithm>
 
 namespace at::native {
@@ -108,7 +107,7 @@ std::tuple<MPSGraphTensor*, MPSGraphTensor*, MPSGraphTensor*> do_mm(MPSGraph* gr
 }
 
 bool use_metal_mm(const Tensor& self, const Tensor& other, const Tensor& output) {
-  static bool always_use_metal = c10::utils::has_env("PYTORCH_MPS_PREFER_METAL");
+  static bool always_use_metal = std::getenv("PYTORCH_MPS_PREFER_METAL") != nullptr;
   constexpr auto max_stride_size = 32768;
   static bool is_macos_14_4_or_newer = is_macos_13_or_newer(MacOSVersion::MACOS_VER_14_4_PLUS);
   if (always_use_metal || c10::isIntegralType(self.scalar_type(), true)) {
@@ -134,7 +133,7 @@ static void linalg_lu_factor_ex_out_mps_impl(const Tensor& A,
               "linalg.lu_factor(): MPS doesn't support complex types.");
   TORCH_CHECK(pivot, "linalg.lu_factor(): MPS doesn't allow pivot == False.");
 
-  Tensor A_t = A;
+  Tensor A_t = A.contiguous();
   uint64_t aRows = A_t.size(-2);
   uint64_t aCols = A_t.size(-1);
   uint64_t aElemSize = A_t.element_size();
