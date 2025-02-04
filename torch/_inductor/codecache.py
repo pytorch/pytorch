@@ -38,7 +38,6 @@ from typing import (
     cast,
     NoReturn,
     Optional,
-    Tuple,
     TYPE_CHECKING,
     TypeVar,
     Union,
@@ -526,7 +525,7 @@ class FxGraphCachePickler(pickle.Pickler):
 
     def _reduce_tensor(
         self, t: Tensor
-    ) -> Tuple[Callable[[T], T], Tuple[Union[TensorMetadata, TensorMetadataAndValues]]]:
+    ) -> tuple[Callable[[T], T], tuple[Union[TensorMetadata, TensorMetadataAndValues]]]:
         """
         Custom reducer to pickle Tensors.  If we see tensors, we know they're constants
         stored as attributes on the GraphModule.

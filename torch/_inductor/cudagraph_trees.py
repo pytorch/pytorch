@@ -48,17 +48,9 @@ import traceback
 import warnings
 import weakref
 from collections import defaultdict
+from contextlib import AbstractContextManager
 from enum import auto, Enum
-from typing import (
-    Any,
-    Callable,
-    cast,
-    ContextManager,
-    Optional,
-    TYPE_CHECKING,
-    TypeVar,
-    Union,
-)
+from typing import Any, Callable, cast, Optional, TYPE_CHECKING, TypeVar, Union
 
 import torch.fx
 from torch import Tensor
@@ -179,7 +171,7 @@ def enable_history_recording() -> Generator[None, None, None]:
             torch.cuda.memory._record_memory_history(None)
 
 
-def get_history_recording() -> ContextManager[None]:
+def get_history_recording() -> AbstractContextManager[None]:
     # TODO - remove, prevents cleanup
     if not config.triton.cudagraph_trees_history_recording:
         return contextlib.nullcontext()

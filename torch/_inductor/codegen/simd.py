@@ -11,16 +11,7 @@ import math
 import operator
 import textwrap
 from collections import Counter
-from typing import (
-    Any,
-    Callable,
-    Generic,
-    Iterator,
-    no_type_check,
-    Optional,
-    TYPE_CHECKING,
-    Union,
-)
+from typing import Any, Callable, Generic, no_type_check, Optional, TYPE_CHECKING, Union
 from typing_extensions import TypeVar
 
 import sympy
@@ -75,7 +66,7 @@ from .simd_kernel_features import (
 
 
 if TYPE_CHECKING:
-    from collections.abc import Iterable, Sequence
+    from collections.abc import Iterable, Iterator, Sequence
 
 
 log = logging.getLogger(__name__)
