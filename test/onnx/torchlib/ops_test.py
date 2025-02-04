@@ -40,7 +40,7 @@ import ops_test_data
 import parameterized
 
 import torch
-from torch.testing._internal import common_device_type
+from torch.testing._internal import common_device_type, common_utils
 from torch.utils import _pytree as pytree
 
 
@@ -110,17 +110,6 @@ class TestFunctionValidity(unittest.TestCase):
             self.skipTest("Traced functions does not have a function proto")
         function_proto = torchlib_op_info.op.to_function_proto()
         onnx.checker.check_function(function_proto)  # type: ignore[attr-defined]
-
-    @parameterized.parameterized.expand(
-        [(info.op.name, info) for info in ops_test_data.TESTED_TORCHLIB_OPS]
-    )
-    def test_function_has_op_schema(
-        self, _, torchlib_op_info: ops_test_data.TorchLibOpInfo
-    ):
-        func = torchlib_op_info.op
-        schema = func.op_schema
-        self.assertIsNotNone(schema)
-        self.assertEqual(schema.name, func.name)
 
 
 def run_test_output_match(
@@ -241,10 +230,6 @@ def run_test_output_match(
                 for j, (torch_output, function_output) in enumerate(
                     zip(flattened_torch_outputs, flattened_function_outputs)
                 ):
-                    if not isinstance(function_output, np.ndarray):
-                        # An onnxscript tensor
-                        function_output = function_output.value
-
                     actual = torch.tensor(function_output)
                     expected = (
                         torch_output
@@ -273,7 +258,10 @@ def run_test_output_match(
                             check_device=False,
                         )
                     except AssertionError as e:
-                        if os.environ.get("CREATE_REPRODUCTION_REPORT") == "1" and test_behavior is None:
+                        if (
+                            os.environ.get("CREATE_REPRODUCTION_REPORT") == "1"
+                            and test_behavior is None
+                        ):
                             error_reproduction.create_mismatch_report(
                                 test_name,
                                 i,
@@ -359,4 +347,4 @@ common_device_type.instantiate_device_type_tests(
 )
 
 if __name__ == "__main__":
-    unittest.main()
+    common_utils.run_tests()

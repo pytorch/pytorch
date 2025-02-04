@@ -9,7 +9,6 @@ __all__ = [
     "linalg",
     "nn",
     "prims",
-    "quantized_decomposed",
     "sparse",
     "special",
 ]
@@ -22,7 +21,6 @@ from torch.onnx._internal.exporter._torchlib.ops import (
     linalg,
     nn,
     prims,
-    quantized_decomposed,
     sparse,
     special,
 )
