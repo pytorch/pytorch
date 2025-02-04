@@ -895,8 +895,8 @@ def map_arg(a: ArgumentT, fn: Callable[[Node], Argument]) -> ArgumentT:
     """
     Apply fn recursively to each Node appearing in arg.
 
-    arg may be a list, tuple, slice, or dict: the return value will have
-    the same type and structure.
+    arg may be a list, tuple, slice, or dict with string keys: the return value will
+    have the same type and structure.
     """
     assert callable(fn), "torch.fx.map_arg(a, fn): fn must be a callable"
     return map_aggregate(a, lambda x: fn(x) if isinstance(x, Node) else x)
@@ -907,8 +907,8 @@ def map_aggregate(a: ArgumentT, fn: Callable[[Argument], Argument]) -> ArgumentT
     """
     Apply fn recursively to each object appearing in arg.
 
-    arg may be a list, tuple, slice, or dict: the return value will have
-    the same type and structure.
+    arg may be a list, tuple, slice, or dict with string keys: the return value will
+    have the same type and structure.
     """
     result: Argument
 
@@ -922,14 +922,15 @@ def map_aggregate(a: ArgumentT, fn: Callable[[Argument], Argument]) -> ArgumentT
         # Using `type(a)` instead of `tuple` also breaks tests, which means that if
         # `ArgumentT` is a class derived from `tuple` that isn't a `namedtuple`
         # or `NamedTuple`, its type gets thrown away.
-
     elif isinstance(a, list):
+        # Need to create the intermediate list or dynamo can't trace it.
         result = immutable_list([map_aggregate(elem, fn) for elem in a])
-        # NOTE: the intermediate list comprehension is necessary to avoid test breakage
-        # in dynamo's test_fx_immutable_list_mutation_not_allowed
-
     elif isinstance(a, dict):
-        result = immutable_dict((k, map_aggregate(v, fn)) for k, v in a.items())
+        # Can't use a dict comprehension either.
+        d: dict[str, Any] = {}
+        for k, v in a.items():
+            d[k] = map_aggregate(v, fn)
+        result = immutable_dict(d)
     elif isinstance(a, slice):
         result = slice(
             map_aggregate(a.start, fn),
