@@ -88,18 +88,23 @@ jobs:
       cuda-arch-list: '8.0'
       test-matrix: |
         { include: [
-          { config: "inductor_huggingface_perf", shard: 1, num_shards: 3, runner: "linux.aws.a100" },
-          { config: "inductor_huggingface_perf", shard: 2, num_shards: 3, runner: "linux.aws.a100" },
-          { config: "inductor_huggingface_perf", shard: 3, num_shards: 3, runner: "linux.aws.a100" },
-          { config: "inductor_timm_perf", shard: 1, num_shards: 5, runner: "linux.aws.a100" },
-          { config: "inductor_timm_perf", shard: 2, num_shards: 5, runner: "linux.aws.a100" },
-          { config: "inductor_timm_perf", shard: 3, num_shards: 5, runner: "linux.aws.a100" },
-          { config: "inductor_timm_perf", shard: 4, num_shards: 5, runner: "linux.aws.a100" },
-          { config: "inductor_timm_perf", shard: 5, num_shards: 5, runner: "linux.aws.a100" },
-          { config: "inductor_torchbench_perf", shard: 1, num_shards: 4, runner: "linux.aws.a100" },
-          { config: "inductor_torchbench_perf", shard: 2, num_shards: 4, runner: "linux.aws.a100" },
-          { config: "inductor_torchbench_perf", shard: 3, num_shards: 4, runner: "linux.aws.a100" },
-          { config: "inductor_torchbench_perf", shard: 4, num_shards: 4, runner: "linux.aws.a100" },
+          { config: "inductor_huggingface_perf", shard: 1, num_shards: 5, runner: "linux.aws.a100" },
+          { config: "inductor_huggingface_perf", shard: 2, num_shards: 5, runner: "linux.aws.a100" },
+          { config: "inductor_huggingface_perf", shard: 3, num_shards: 5, runner: "linux.aws.a100" },
+          { config: "inductor_huggingface_perf", shard: 4, num_shards: 5, runner: "linux.aws.a100" },
+          { config: "inductor_huggingface_perf", shard: 5, num_shards: 5, runner: "linux.aws.a100" },
+          { config: "inductor_timm_perf", shard: 1, num_shards: 6, runner: "linux.aws.a100" },
+          { config: "inductor_timm_perf", shard: 2, num_shards: 6, runner: "linux.aws.a100" },
+          { config: "inductor_timm_perf", shard: 3, num_shards: 6, runner: "linux.aws.a100" },
+          { config: "inductor_timm_perf", shard: 4, num_shards: 6, runner: "linux.aws.a100" },
+          { config: "inductor_timm_perf", shard: 5, num_shards: 6, runner: "linux.aws.a100" },
+          { config: "inductor_timm_perf", shard: 6, num_shards: 6, runner: "linux.aws.a100" },
+          { config: "inductor_torchbench_perf", shard: 1, num_shards: 6, runner: "linux.aws.a100" },
+          { config: "inductor_torchbench_perf", shard: 2, num_shards: 6, runner: "linux.aws.a100" },
+          { config: "inductor_torchbench_perf", shard: 3, num_shards: 6, runner: "linux.aws.a100" },
+          { config: "inductor_torchbench_perf", shard: 4, num_shards: 6, runner: "linux.aws.a100" },
+          { config: "inductor_torchbench_perf", shard: 5, num_shards: 6, runner: "linux.aws.a100" },
+          { config: "inductor_torchbench_perf", shard: 6, num_shards: 6, runner: "linux.aws.a100" },
         ]}
       selected-test-configs: ${{ inputs.benchmark_configs }}
     secrets: inherit
@@ -114,7 +119,6 @@ jobs:
       dashboard-tag: training-true-inference-true-default-true-dynamic-true-cudagraphs-true-cppwrapper-true-aotinductor-true-freezing_cudagraphs-true-cudagraphs_low_precision-true
       docker-image: ${{ needs.linux-focal-cuda12_4-py3_10-gcc9-inductor-build.outputs.docker-image }}
       test-matrix: ${{ needs.linux-focal-cuda12_4-py3_10-gcc9-inductor-build.outputs.test-matrix }}
-      use-gha: anything-non-empty-to-use-gha
       timeout-minutes: 720
       # disable monitor in perf tests for more investigation
       disable-monitor: true
@@ -130,7 +134,6 @@ jobs:
       dashboard-tag: training-true-inference-true-default-true-dynamic-true-cudagraphs-true-cppwrapper-true-aotinductor-true-freezing_cudagraphs-true-maxautotune-true-freeze_autotune_cudagraphs-true-cudagraphs_low_precision-true
       docker-image: ${{ needs.linux-focal-cuda12_4-py3_10-gcc9-inductor-build.outputs.docker-image }}
       test-matrix: ${{ needs.linux-focal-cuda12_4-py3_10-gcc9-inductor-build.outputs.test-matrix }}
-      use-gha: anything-non-empty-to-use-gha
       timeout-minutes: 1440
       # disable monitor in perf tests for more investigation
       disable-monitor: true
@@ -146,7 +149,6 @@ jobs:
       dashboard-tag: training-${{ inputs.training }}-inference-${{ inputs.inference }}-default-${{ inputs.default }}-dynamic-${{ inputs.dynamic }}-cudagraphs-${{ inputs.cudagraphs }}-cppwrapper-${{ inputs.cppwrapper }}-aotinductor-${{ inputs.aotinductor }}-maxautotune-${{ inputs.maxautotune }}-freezing_cudagraphs-${{ inputs.freezing_cudagraphs }}-cudagraphs_low_precision-${{ inputs.cudagraphs }}
       docker-image: ${{ needs.linux-focal-cuda12_4-py3_10-gcc9-inductor-build.outputs.docker-image }}
       test-matrix: ${{ needs.linux-focal-cuda12_4-py3_10-gcc9-inductor-build.outputs.test-matrix }}
-      use-gha: anything-non-empty-to-use-gha
       timeout-minutes: 720
       # disable monitor in perf tests for more investigation
       disable-monitor: true
