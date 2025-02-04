@@ -237,18 +237,16 @@ void raw_cudnn_rmsnorm_backward_out(const Tensor& dY, const Tensor& X, const Ten
       {X_fe, X.data_ptr()},
       {DY_fe, dY.data_ptr()},
       {inv_variance_fe, rstd.data_ptr()},
+      {scale_fe, gamma.data_ptr()},
       //{dscale_fe, dgamma->data_ptr()}};
       //{dbias_fe, dbeta->data_ptr()},
       {DX_fe, dX->data_ptr()}};
     variant_pack = std::move(variant_pack_);
     rmsnorm_graph = std::move(graph);
-    if (dbeta) {
+    if (dbeta->defined()) {
       variant_pack[dbias_fe] = dbeta->data_ptr();
     }
-    if (dX) {
-      variant_pack[DX_fe] = dX->data_ptr();
-    }
-    if (dgamma) {
+    if (dgamma->defined()) {
       variant_pack[dscale_fe] = dgamma->data_ptr();
     }
   } else {
@@ -278,17 +276,19 @@ void raw_cudnn_rmsnorm_backward_out(const Tensor& dY, const Tensor& X, const Ten
                                  .set_dim({M, 1, 1, 1})
                                  .set_stride({1, 1, 1, 1})
                                  .set_data_type(get_fe_dtype(rstd)));
-    auto rmsnorm_options = fe::graph::Rmsnorm_backward_attributes().has_dbias(dbeta);
+    auto rmsnorm_options = fe::graph::Rmsnorm_backward_attributes().has_dbias(dbeta->defined());
     auto [DX_fe, dscale_fe, dbias_fe] = rmsnorm_graph->rmsnorm_backward(DY_fe, X_fe, scale_fe, inv_variance_fe, rmsnorm_options);
     DX_fe->set_output(true);
-    dscale_fe->set_output(true).set_data_type(get_fe_dtype(*dgamma));
-    if (dbias_fe) {
+    if (dgamma->defined()) {
+      dscale_fe->set_output(true).set_data_type(get_fe_dtype(*dgamma));
+    }
+    if (dbeta->defined()) {
       dbias_fe->set_output(true).set_data_type(get_fe_dtype(*dbeta));
     }
     cudnnHandle_t handle = getCudnnHandle();
     TORCH_INTERNAL_ASSERT(rmsnorm_graph->validate().is_good());
     TORCH_INTERNAL_ASSERT(rmsnorm_graph->build_operation_graph(handle).is_good());
-    TORCH_INTERNAL_ASSERT(rmsnorm_graph->create_execution_plans({fe::HeurMode_t::FALLBACK}).is_good());
+    TORCH_INTERNAL_ASSERT(rmsnorm_graph->create_execution_plans({fe::HeurMode_t::A}).is_good());
     TORCH_INTERNAL_ASSERT(rmsnorm_graph->check_support(handle).is_good(), rmsnorm_graph->check_support(handle).get_message());
     TORCH_INTERNAL_ASSERT(rmsnorm_graph->build_plans(handle).is_good());
     std::unordered_map<std::shared_ptr<fe::graph::Tensor_attributes>, void*> variant_pack_ = {
@@ -300,13 +300,10 @@ void raw_cudnn_rmsnorm_backward_out(const Tensor& dY, const Tensor& X, const Ten
       //{dbias_fe, dbeta->data_ptr()},
       {DX_fe, dX->data_ptr()}};
     variant_pack = std::move(variant_pack_);
-    if (dbeta) {
+    if (dbeta->defined()) {
       variant_pack[dbias_fe] = dbeta->data_ptr();
     }
-    if (dX) {
-      variant_pack[dbias_fe] = dX->data_ptr();
-    }
-    if (dgamma) {
+    if (dgamma->defined()) {
       variant_pack[dscale_fe] = dgamma->data_ptr();
     }
     auto result = std::make_tuple(rmsnorm_graph, X_fe, DY_fe, inv_variance_fe, scale_fe, dscale_fe, dbias_fe, DX_fe);

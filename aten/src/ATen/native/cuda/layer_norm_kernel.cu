@@ -1544,7 +1544,7 @@ std::tuple<Tensor, Tensor> cudnn_rms_norm(at::Tensor const& input, c10::ArrayRef
 
 //const Tensor& dY, const Tensor& X, const Tensor& rstd, const Tensor& gamma, int64_t M, int64_t N, Tensor* dX,  Tensor* dgamma, Tensor* dbeta) {
 
-std::tuple<Tensor, Tensor> cudnn_rms_norm_backward(at::Tensor const& input, at::SymIntArrayRef normalized_shape, at::Tensor const& grad_output, at::Tensor const& save_rstd, std::optional<at::Tensor> const& weight) {
+std::tuple<Tensor, Tensor> cudnn_rms_norm_backward_symint(at::Tensor const& input, at::SymIntArrayRef normalized_shape, at::Tensor const& grad_output, at::Tensor const& save_rstd, std::optional<at::Tensor> const& weight) {
   // potentially unused
   auto grad_input = at::native::empty_like(input);
   auto grad_weight = Tensor();
