@@ -10,6 +10,7 @@
 
 SET(APL_INCLUDE_SEARCH_PATHS $ENV{ARMPL_DIR}/include)
 SET(APL_LIB_SEARCH_PATHS $ENV{ARMPL_DIR}/lib)
+SET(APL_BIN_SEARCH_PATHS $ENV{ARMPL_DIR}/bin)
 
 SET(APL_FOUND ON)
 
@@ -21,21 +22,36 @@ IF(NOT APL_INCLUDE_DIR)
 ENDIF()
 
 # Check lib file
-FIND_PATH(APL_LIB_DIR NAMES libarmpl_lp64_mp.dll.lib libomp.dll.lib libarmpl_lp64_mp.a PATHS ${APL_LIB_SEARCH_PATHS})
+FIND_PATH(APL_LIB_DIR NAMES armpl_lp64.dll.lib libarmpl_lp64.a PATHS ${APL_LIB_SEARCH_PATHS})
 IF(NOT APL_LIB_DIR)
     SET(APL_FOUND OFF)
     MESSAGE(STATUS "Could not verify APL lib directory. Turning APL_FOUND off")
 ENDIF()
 
+# Check bin file
+FIND_PATH(APL_BIN_DIR NAMES armpl_lp64.dll libarmpl_lp64.a PATHS ${APL_BIN_SEARCH_PATHS})
+IF(NOT APL_BIN_DIR)
+    SET(APL_FOUND OFF)
+    MESSAGE(STATUS "Could not verify APL bin directory. Turning APL_FOUND off")
+ENDIF()
+
 IF (APL_FOUND)
   IF(WIN32)
     set(APL_LIBRARIES
-      "${APL_LIB_DIR}/libarmpl_lp64_mp.dll.lib"
-      "${APL_LIB_DIR}/libomp.dll.lib"
+      "${APL_LIB_DIR}/armpl_lp64.dll.lib"
     )
+    set(APL_DLLS
+      "${CMAKE_INSTALL_PREFIX}/lib/armpl_lp64.dll"
+    )
+    add_custom_command(
+      OUTPUT ${APL_DLLS}
+      COMMAND ${CMAKE_COMMAND} -E make_directory "${CMAKE_INSTALL_PREFIX}/lib"
+      COMMAND ${CMAKE_COMMAND} -E copy_if_different "${APL_BIN_DIR}/armpl_lp64.dll" "${CMAKE_INSTALL_PREFIX}/lib/armpl_lp64.dll"
+    )
+    add_custom_target(copy_apl_dlls ALL DEPENDS ${APL_DLLS})
   ELSEIF(UNIX)
     set(APL_LIBRARIES
-      "${APL_LIB_DIR}/libarmpl_lp64_mp.a"
+      "${APL_LIB_DIR}/libarmpl_lp64.a"
     )
   ENDIF()
   MESSAGE(STATUS "Found APL header: ${APL_INCLUDE_DIR}")

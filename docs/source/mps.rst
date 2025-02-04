@@ -29,6 +29,10 @@ MPS Profiler
     profiler.stop
     profiler.profile
 
+    profiler.is_capturing_metal
+    profiler.is_metal_capture_enabled
+    profiler.metal_capture
+
 MPS Event
 ------------
 .. autosummary::
