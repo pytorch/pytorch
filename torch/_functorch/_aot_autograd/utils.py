@@ -8,7 +8,7 @@ import operator
 import warnings
 from contextlib import nullcontext
 from functools import wraps
-from typing import Any, Callable, List, Optional, Tuple, Union
+from typing import Any, Callable, Optional, Union
 
 import torch
 import torch.utils.pytree.python as pytree
@@ -114,7 +114,7 @@ def make_boxed_compiler(compiler):
 
 
 def call_func_at_runtime_with_args(
-    f, args: Union[Tuple[Any], List[Any]], steal_args=False, disable_amp=False
+    f, args: Union[tuple[Any], list[Any]], steal_args=False, disable_amp=False
 ):
     if not steal_args:
         args = list(args)
@@ -156,7 +156,7 @@ class PytreeThunk:
         if self.spec.is_leaf():
             self.is_really_simple = True
 
-    def unflatten(self, x: List[Any]) -> Any:
+    def unflatten(self, x: list[Any]) -> Any:
         if self.is_really_simple:
             return x[0]
         if self.is_simple:
@@ -168,7 +168,7 @@ class PytreeThunk:
 # Creates a function that returns flattened inputs and outputs
 # Also returns the output tree spec, which is needed to recover the "unflattened"
 # output tree structure later.
-def create_tree_flattened_fn(fn, args, kwargs=None) -> Tuple[Callable, PytreeThunk]:
+def create_tree_flattened_fn(fn, args, kwargs=None) -> tuple[Callable, PytreeThunk]:
     if kwargs is None:
         kwargs = {}
     # Save the args_spec for flat_tensor_args to unflatten while tracing

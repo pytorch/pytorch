@@ -1,12 +1,24 @@
+import threading
+from collections.abc import Generator
 from contextlib import contextmanager
 from dataclasses import dataclass, field  # noqa: F811
-from typing import Any, Callable, Generator, List
+from typing import Any, Callable, Optional
+
+from torch._utils_internal import justknobs_check
 
 
 @dataclass
 class CompilationCallbackHandler:
-    start_callbacks: List[Callable[[], None]] = field(default_factory=list)
-    end_callbacks: List[Callable[[], None]] = field(default_factory=list)
+    start_callbacks: list[Callable[[], None]] = field(default_factory=list)
+    end_callbacks: list[Callable[[], None]] = field(default_factory=list)
+
+    __prevent_duplicate_callbacks: Optional[bool] = field(
+        default=None, init=False, repr=False
+    )
+    __pending_callbacks_counter: int = field(default=0, init=False, repr=False)
+    __pending_callbacks_counter_lock: threading.Lock = field(
+        default_factory=threading.Lock, init=False, repr=False
+    )
 
     def register_start_callback(
         self, callback: Callable[[], None]
@@ -62,16 +74,40 @@ class CompilationCallbackHandler:
         for callback in self.end_callbacks:
             callback()
 
+    @property
+    def prevent_duplicate_callbacks(self) -> bool:
+        if self.__prevent_duplicate_callbacks is None:
+            self.__prevent_duplicate_callbacks = justknobs_check(
+                "pytorch/dynamo:prevent_duplicate_callbacks"
+            )
+        return self.__prevent_duplicate_callbacks
+
     @contextmanager
     def install_callbacks(self) -> Generator[None, Any, Any]:
         """
         Context manager to install the callbacks and run them when the context is exited.
         """
-        try:
-            self.run_start_callbacks()
-            yield
-        finally:
-            self.run_end_callbacks()
+        if self.prevent_duplicate_callbacks:
+            try:
+                with self.__pending_callbacks_counter_lock:
+                    if self.__pending_callbacks_counter == 0:
+                        self.run_start_callbacks()
+                    self.__pending_callbacks_counter += 1
+                yield
+            finally:
+                with self.__pending_callbacks_counter_lock:
+                    assert (
+                        self.__pending_callbacks_counter > 0
+                    ), "Pending callbacks counter cannot become negative."
+                    if self.__pending_callbacks_counter == 1:
+                        self.run_end_callbacks()
+                    self.__pending_callbacks_counter -= 1
+        else:
+            try:
+                self.run_start_callbacks()
+                yield
+            finally:
+                self.run_end_callbacks()
 
     def clear(self) -> None:
         """
