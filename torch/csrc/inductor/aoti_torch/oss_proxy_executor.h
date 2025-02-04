@@ -81,7 +81,7 @@ class OSSProxyExecutor : public ProxyExecutor {
 
  private:
   void prefill_stack_with_static_arguments(
-      size_t index,
+      int index,
       const at::TypePtr& schema_arg_type,
       const nlohmann::json& serialized_arg,
       OSSOpKernel& op_kernel);

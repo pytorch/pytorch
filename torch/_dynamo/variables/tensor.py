@@ -576,6 +576,11 @@ class TensorVariable(VariableTracker):
         handler returns None (or doesn't exist) we put the method call
         in the graph.
         """
+
+        # This is seen in inspect signature where we check if the value is a default value
+        if name == "__eq__" and isinstance(args[0], variables.UserDefinedClassVariable):
+            return variables.ConstantVariable(False)
+
         try:
             handler_method = getattr(self, f"method_{name}")
         except AttributeError:
