@@ -1210,7 +1210,12 @@ class KernelArgs:
             )
         )
 
-    def input(self, name: str) -> str:
+    @staticmethod
+    def _buffer_is_marked_removed(name: Any) -> bool:
+        # this function is needed by MTIA
+        return isinstance(name, RemovedArg)
+
+    def input(self, name):
         if V.graph.scheduler:
             name = V.graph.scheduler.mutation_real_name.get(name, name)
         assert name not in V.graph.removed_buffers, name
