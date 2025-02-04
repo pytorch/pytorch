@@ -156,6 +156,126 @@ class GraphModule(torch.nn.Module):
 """,
         )
 
+    def test_reconstruct_generator_with_local_var_mutation(self):
+        def whoo(t):
+            x = 0
+            yield t.sin() + x
+            x += 1
+            yield t.cos() + x
+            x += 1
+            yield t.tan() + x
+
+        @torch.compile(backend="eager", fullgraph=False)
+        def fn(t):
+            gen = whoo(t)
+            next(gen)
+            return t.sin(), gen
+
+        t = torch.randn(2)
+        y, g = fn(t)
+        self.assertEqual(y, t.sin())
+        self.assertEqual(list(g), [t.cos() + 1, t.tan() + 2])
+
+    def test_reconstruct_generator_with_dict_mutation(self):
+        def whoo(t, d):
+            d[2] = t
+            yield t.sin()
+            yield t.cos()
+            d[3] = t + 1
+            yield t.tan()
+
+        @torch.compile(backend="eager", fullgraph=False)
+        def fn(t, d):
+            gen = whoo(t, d)
+            next(gen)
+            return t.sin(), whoo(t, d)
+
+        t = torch.randn(2)
+        d = {1: t}
+        with self.assertRaisesRegex(
+            InternalTorchDynamoError,
+            "Cannot reconstruct a generator with variable mutations",
+        ):
+            fn(t, d)
+
+    def test_reconstruct_generator_with_dict_mutation_before(self):
+        def whoo(t, d):
+            d[2] = t
+            yield t.sin()
+            yield t.cos()
+            yield t.tan()
+
+        @torch.compile(backend="eager", fullgraph=False)
+        def fn(t, d):
+            gen = whoo(t, d)
+            next(gen)
+            return t.sin(), gen
+
+        t = torch.randn(2)
+        d = {1: t}
+        y, g = fn(t, d)
+        self.assertEqual(y, t.sin())
+        self.assertEqual(list(g), [t.cos(), t.tan()])
+        self.assertEqual(d, {1: t, 2: t})
+
+    def test_reconstruct_generator_with_object_mutation(self):
+        class Counter:
+            def __init__(self):
+                self.x = 0
+
+            def incr(self):
+                self.x += 1
+
+        def whoo(t, c):
+            c.incr()
+            yield t.sin()
+            yield t.cos()
+            c.incr()
+            yield t.tan()
+
+        @torch.compile(backend="eager", fullgraph=False)
+        def fn(t, c):
+            gen = whoo(t, c)
+            next(gen)
+            return t.sin(), gen
+
+        t = torch.randn(2)
+        c = Counter()
+        with self.assertRaisesRegex(
+            InternalTorchDynamoError,
+            "Cannot reconstruct a generator with variable mutations",
+        ):
+            fn(t, c)
+
+    def test_reconstruct_generator_with_object_mutation_before(self):
+        class Counter:
+            def __init__(self):
+                self.x = 0
+
+            def incr(self):
+                self.x += 1
+
+        def whoo(t, c):
+            c.incr()
+            yield t.sin()
+            yield t.cos()
+            yield t.tan()
+
+        @torch.compile(backend="eager", fullgraph=False)
+        def fn(t, c):
+            gen = whoo(t, c)
+            next(gen)
+            # We should be able to reconstruct the generator as there's no object
+            # mutation after the first yield
+            return t.sin(), gen
+
+        t = torch.randn(2)
+        c = Counter()
+        y, g = fn(t, c)
+        self.assertEqual(c.x, 1)
+        self.assertEqual(y, t.sin())
+        self.assertEqual(list(g), [t.cos(), t.tan()])
+
     def test_graph_break_and_reconstruct_generator(self):
         def whoo(t):
             yield t.sin()
@@ -445,7 +565,7 @@ class GraphModule(torch.nn.Module):
             next(gen)
 
     @unittest.expectedFailure
-    def test_reconstruct_generator_mutate_tensor(self):
+    def test_reconstruct_generator_tensor_mutation(self):
         def whoo(t):
             yield t.sin_()
             yield t.cos_()
@@ -454,7 +574,10 @@ class GraphModule(torch.nn.Module):
             gen = whoo(t)
             return gen
 
-        with self.assertRaises(Unsupported):
+        with self.assertRaisesRegex(
+            InternalTorchDynamoError,
+            "Cannot reconstruct a generator with variable mutations",
+        ):
             self._compile_check(fn)
 
     def test_subgenerator(self):
@@ -575,7 +698,8 @@ class GraphModule(torch.nn.Module):
             return whoo(t), t.sin()
 
         with self.assertRaisesRegex(
-            Unsupported, "Generator: Mutating a variable not in the current scope"
+            InternalTorchDynamoError,
+            "Cannot reconstruct a generator with variable mutations",
         ):
             self._compile_check(fn)
 
@@ -603,8 +727,8 @@ class GraphModule(torch.nn.Module):
             return whoo(t), t.sin()
 
         with self.assertRaisesRegex(
-            Unsupported,
-            "Generator: Mutating a variable not in the current scope",
+            InternalTorchDynamoError,
+            "Cannot reconstruct a generator with variable mutations",
         ):
             self._compile_check(fn)
 
@@ -617,18 +741,17 @@ class GraphModule(torch.nn.Module):
                 i += 1
                 yield t + j
 
-        eager = EagerAndRecordGraphs()
-
-        @torch.compile(backend=eager, fullgraph=False)
         def fn(t):
             gen = whoo(t)
             torch._dynamo.graph_break()
             next(gen)
             return gen, t.sin()
 
-        t = torch.randn(2)
-        fn(t)
-        self.assertEqual(len(eager.graphs), 0)
+        with self.assertRaisesRegex(
+            InternalTorchDynamoError,
+            "Cannot reconstruct a generator with variable mutations",
+        ):
+            self._compile_check(fn, fullgraph=False)
 
     def test_generator_with_side_effects_graph_break_2(self):
         i = 0

@@ -20,11 +20,11 @@ from ..exc import (
     handle_observed_exception,
     IncorrectUsage,
     InfiniteGeneratorError,
-    MutationError,
     ObservedException,
     ObservedGeneratorExit,
     ObservedUserStopIteration,
     raise_observed_exception,
+    SideEffectsError,
     SkipFrame,
     unimplemented,
     Unsupported,
@@ -426,7 +426,7 @@ class LocalGeneratorObjectVariable(VariableTracker):
     __repr__ = __str__
 
     def reconstruct(self, codegen):
-        from torch._dynamo.side_effects import disallow_side_effects_under_generator
+        from torch._dynamo.side_effects import disallow_side_effects_in_generator
         from torch._dynamo.symbolic_convert import (
             InstructionTranslator,
             save_and_restart_speculation_log,
@@ -435,7 +435,7 @@ class LocalGeneratorObjectVariable(VariableTracker):
 
         tx = InstructionTranslator.current_tx()
         save = save_and_restart_speculation_log(tx)
-        disallow = disallow_side_effects_under_generator(tx)
+        disallow = disallow_side_effects_in_generator(tx)
         temp = temporarely_allow_writes_to_output_graph(tx)
 
         with save, disallow, temp:
@@ -480,7 +480,7 @@ class LocalGeneratorObjectVariable(VariableTracker):
         except InfiniteGeneratorError:
             # test/dynamo/test_misc.py::test_iterator_limit
             raise
-        except MutationError:
+        except SideEffectsError:
             raise
         except Unsupported as e:
             torch._C._dynamo.eval_frame.skip_code(self.get_code())
