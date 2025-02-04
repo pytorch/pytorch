@@ -19,6 +19,11 @@ struct XPUHooks : public at::XPUHooksInterface {
   DeviceIndex current_device() const override;
   void deviceSynchronize(DeviceIndex device_index) const override;
   Allocator* getPinnedMemoryAllocator() const override;
+
+  bool isBuilt() const override {
+    return true;
+  }
+  bool isAvailable() const override;
   bool isPinnedPtr(const void* data) const override;
   bool hasPrimaryContext(DeviceIndex device_index) const override;
   DeviceIndex deviceCount() const override;
