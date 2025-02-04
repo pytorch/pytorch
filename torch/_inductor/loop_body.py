@@ -17,6 +17,7 @@ from torch.utils._sympy.symbol import SymT
 
 from . import config, dependencies
 from .codegen.common import index_prevent_reordering
+from .ops_handler import DefaultHandler
 from .utils import cache_on_self, sympy_index_symbol_with_prefix, sympy_subs
 from .virtualized import ops, V
 
@@ -653,11 +654,11 @@ class LoopBodyBlock:
         return copy
 
 
-class CountOps:
+class CountOps(DefaultHandler):
     def __init__(self, inner: Any, counts: collections.Counter[str]):
         self._inner = inner
         self._counts = counts
 
-    def __getattr__(self, name):
+    def _default(self, name: str, args: tuple[Any, ...], kwargs: dict[str, Any]) -> Any:
         self._counts[name] += 1
-        return getattr(self._inner, name)
+        return getattr(self._inner, name)(*args, **kwargs)
