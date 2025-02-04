@@ -1885,13 +1885,13 @@
     CUDA: cudnn_batch_norm_backward
   autogen: cudnn_batch_norm_backward.out
 
-- func: cudnn_rms_norm(Tensor input, Tensor? weight, float epsilon, SymInt[] normalized_shape) -> (Tensor, Tensor)
+- func: cudnn_rms_norm(Tensor input, SymInt[] normalized_shape, Tensor? weight, float? epsilon=None) -> (Tensor, Tensor)
   dispatch:
     CUDA: cudnn_rms_norm
 
-- func: cudnn_rms_norm_backward(Tensor input, Tensor grad_output, Tensor save_rstd, Tensor? weight) -> (Tensor, Tensor, Tensor)
+- func: cudnn_rms_norm_backward(Tensor input, SymInt[] normalized_shape, Tensor grad_output, Tensor save_rstd, Tensor? weight) -> (Tensor, Tensor)
   dispatch:
-    CUDA: cudnn_rms_norm_backward
+    CUDA: cudnn_rms_norm_backward_symint
 
 - func: cudnn_convolution(Tensor self, Tensor weight, SymInt[] padding, SymInt[] stride, SymInt[] dilation, SymInt groups, bool benchmark, bool deterministic, bool allow_tf32) -> Tensor
   dispatch:

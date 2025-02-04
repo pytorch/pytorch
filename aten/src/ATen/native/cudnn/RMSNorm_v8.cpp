@@ -134,7 +134,8 @@ thread_local RMSNormGraphCache<graph_and_tensors_backward, RMSNormCacheKeyWrappe
 
 void raw_cudnn_rmsnorm_forward_out(const Tensor& X, const Tensor& scale, const Tensor& bias, float epsilon, Tensor* rstd, Tensor* Y, int64_t M, int64_t N) {
   namespace fe = cudnn_frontend;
-  auto key = RMSNormCacheKeyWrapper(X, M, N, X.requires_grad());
+  bool train = X.requires_grad() || (scale.defined() && scale.requires_grad());
+  auto key = RMSNormCacheKeyWrapper(X, M, N, train);
   auto graph_and_tensors_forward_ptr = rmsnorm_forward_graph_cache.find(key);
   auto rmsnorm_graph = std::make_shared<fe::graph::Graph>();
   graph_and_tensors_forward graph_and_tensors_forward_values;
@@ -143,7 +144,6 @@ void raw_cudnn_rmsnorm_forward_out(const Tensor& X, const Tensor& scale, const T
     auto [graph, X_fe, inv_variance_fe, scale_fe, bias_fe, epsilon_fe, Y_fe] = *graph_and_tensors_forward_ptr;
     std::unordered_map<std::shared_ptr<fe::graph::Tensor_attributes>, void*> variant_pack_ = {
       {X_fe, X.data_ptr()},
-      {inv_variance_fe, rstd->data_ptr()},
       {scale_fe, scale.data_ptr()},
       // {bias_fe, bias.data_ptr()},
       {epsilon_fe, &epsilon},
@@ -183,14 +183,16 @@ void raw_cudnn_rmsnorm_forward_out(const Tensor& X, const Tensor& scale, const T
                                     .set_dim({1, 1, 1, 1})
                                     .set_stride({1, 1, 1, 1})
                                     .set_data_type(fe::DataType_t::FLOAT));
-    auto phase = X.requires_grad() ? fe::NormFwdPhase_t::TRAINING : fe::NormFwdPhase_t::INFERENCE;
+    auto phase = train ? fe::NormFwdPhase_t::TRAINING : fe::NormFwdPhase_t::INFERENCE;
     auto rmsnorm_options =
         fe::graph::Rmsnorm_attributes().set_forward_phase(phase).set_epsilon(epsilon_fe);
     auto [Y_fe, inv_variance_fe] = rmsnorm_graph->rmsnorm(X_fe, scale_fe, rmsnorm_options);
     if (bias.defined()) {
       rmsnorm_options.set_bias(bias_fe);
     }
-    inv_variance_fe->set_output(true).set_data_type(get_fe_dtype(*rstd));
+    if (train) {
+      inv_variance_fe->set_output(true).set_data_type(get_fe_dtype(*rstd));
+    }
     Y_fe->set_output(true);
 
     cudnnHandle_t handle = getCudnnHandle();
@@ -235,14 +237,19 @@ void raw_cudnn_rmsnorm_backward_out(const Tensor& dY, const Tensor& X, const Ten
       {X_fe, X.data_ptr()},
       {DY_fe, dY.data_ptr()},
       {inv_variance_fe, rstd.data_ptr()},
-      {scale_fe, gamma.data_ptr()},
-      {dscale_fe, dgamma->data_ptr()},
+      //{dscale_fe, dgamma->data_ptr()}};
       //{dbias_fe, dbeta->data_ptr()},
       {DX_fe, dX->data_ptr()}};
     variant_pack = std::move(variant_pack_);
     rmsnorm_graph = std::move(graph);
     if (dbeta) {
       variant_pack[dbias_fe] = dbeta->data_ptr();
+    }
+    if (dX) {
+      variant_pack[DX_fe] = dX->data_ptr();
+    }
+    if (dgamma) {
+      variant_pack[dscale_fe] = dgamma->data_ptr();
     }
   } else {
     rmsnorm_graph->set_io_data_type(get_fe_dtype(X))
@@ -275,7 +282,9 @@ void raw_cudnn_rmsnorm_backward_out(const Tensor& dY, const Tensor& X, const Ten
     auto [DX_fe, dscale_fe, dbias_fe] = rmsnorm_graph->rmsnorm_backward(DY_fe, X_fe, scale_fe, inv_variance_fe, rmsnorm_options);
     DX_fe->set_output(true);
     dscale_fe->set_output(true).set_data_type(get_fe_dtype(*dgamma));
-    dbias_fe->set_output(true).set_data_type(get_fe_dtype(*dbeta));
+    if (dbias_fe) {
+      dbias_fe->set_output(true).set_data_type(get_fe_dtype(*dbeta));
+    }
     cudnnHandle_t handle = getCudnnHandle();
     TORCH_INTERNAL_ASSERT(rmsnorm_graph->validate().is_good());
     TORCH_INTERNAL_ASSERT(rmsnorm_graph->build_operation_graph(handle).is_good());
@@ -287,12 +296,18 @@ void raw_cudnn_rmsnorm_backward_out(const Tensor& dY, const Tensor& X, const Ten
       {DY_fe, dY.data_ptr()},
       {inv_variance_fe, rstd.data_ptr()},
       {scale_fe, gamma.data_ptr()},
-      {dscale_fe, dgamma->data_ptr()},
+      //{dscale_fe, dgamma->data_ptr()},
       //{dbias_fe, dbeta->data_ptr()},
       {DX_fe, dX->data_ptr()}};
     variant_pack = std::move(variant_pack_);
     if (dbeta) {
       variant_pack[dbias_fe] = dbeta->data_ptr();
+    }
+    if (dX) {
+      variant_pack[dbias_fe] = dX->data_ptr();
+    }
+    if (dgamma) {
+      variant_pack[dscale_fe] = dgamma->data_ptr();
     }
     auto result = std::make_tuple(rmsnorm_graph, X_fe, DY_fe, inv_variance_fe, scale_fe, dscale_fe, dbias_fe, DX_fe);
     rmsnorm_backward_graph_cache.update(key, result);
