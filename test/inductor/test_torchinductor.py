@@ -9620,7 +9620,8 @@ class CommonTemplate:
     @requires_gpu()
     @skip_if_halide  # cascading accuracy issues due rsqrt fallback
     def test_tmp_not_defined_issue3(self):
-        from torch import device
+        test_device = torch.device(type=self.device)
+        test_device_0 = torch.device(type=self.device, index=0) if self.device != "cpu" else test_device
 
         def forward(
             self,
@@ -9664,7 +9665,7 @@ class CommonTemplate:
                 1,
                 dtype=torch.int32,
                 layout=torch.strided,
-                device=device(type=self.device, index=0),
+                device=test_device_0,
                 pin_memory=False,
             )
 
@@ -9673,7 +9674,7 @@ class CommonTemplate:
                 start=0,
                 step=1,
                 dtype=torch.int32,
-                device=device(type=self.device),
+                device=test_device,
                 requires_grad=False,
             )
 
@@ -9683,7 +9684,7 @@ class CommonTemplate:
                 start=0,
                 step=1001,
                 dtype=torch.int32,
-                device=device(type=self.device, index=0),
+                device=test_device_0,
                 requires_grad=False,
             )
             view: "i32[6150144]" = torch.ops.aten.reshape.default(mul, [-1])
