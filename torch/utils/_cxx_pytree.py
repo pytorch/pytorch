@@ -15,19 +15,8 @@ collection support for PyTorch APIs.
 import functools
 import sys
 import types
-from typing import (
-    Any,
-    Callable,
-    Iterable,
-    List,
-    Optional,
-    overload,
-    Tuple,
-    Type,
-    TYPE_CHECKING,
-    TypeVar,
-    Union,
-)
+from collections.abc import Iterable
+from typing import Any, Callable, Optional, overload, TYPE_CHECKING, TypeVar, Union
 from typing_extensions import deprecated, Self, TypeAlias, TypeIs
 
 import optree
@@ -111,7 +100,7 @@ ToDumpableContextFn: TypeAlias = ToDumpableContextFunc
 FromDumpableContextFn: TypeAlias = FromDumpableContextFunc
 OpTreeFlattenFunc: TypeAlias = Callable[
     [PyTree],
-    Tuple[Iterable[Any], Context, Optional[Iterable[Any]]],
+    tuple[Iterable[Any], Context, Optional[Iterable[Any]]],
 ]
 OpTreeUnflattenFunc: TypeAlias = Callable[[Context, Iterable[Any]], PyTree]
 
@@ -121,13 +110,13 @@ def _to_optree_func(
     flatten_func: FlattenFunc,
     unflatten_func: UnflattenFunc,
     flatten_with_keys_func: Optional[FlattenWithKeysFunc] = None,
-) -> Tuple[OpTreeFlattenFunc, OpTreeUnflattenFunc]:
+) -> tuple[OpTreeFlattenFunc, OpTreeUnflattenFunc]:
     if flatten_with_keys_func is not None:
         # OpTree flattens the PyTree with extra entries. Use the flatten_with_keys_func to
         # have these extra custom information.
         def optree_flatten_func(
             tree: PyTree,
-        ) -> Tuple[Tuple[Any, ...], Context, Tuple[Any, ...]]:
+        ) -> tuple[tuple[Any, ...], Context, tuple[Any, ...]]:
             key_entries_with_children, context = flatten_with_keys_func(tree)
             if len(key_entries_with_children) == 0:
                 return (), context, ()
@@ -137,7 +126,7 @@ def _to_optree_func(
 
     else:
         # Flatten the PyTree without extra custom entry information.
-        def optree_flatten_func(tree: PyTree) -> Tuple[List[Any], Context, None]:  # type: ignore[misc]
+        def optree_flatten_func(tree: PyTree) -> tuple[list[Any], Context, None]:  # type: ignore[misc]
             children, context = flatten_func(tree)
             return children, context, None
 
@@ -148,7 +137,7 @@ def _to_optree_func(
 
 
 def register_pytree_node(
-    cls: Type[Any],
+    cls: type[Any],
     flatten_fn: FlattenFunc,
     unflatten_fn: UnflattenFunc,
     *,
@@ -215,7 +204,7 @@ def register_pytree_node(
     category=FutureWarning,
 )
 def _register_pytree_node(
-    cls: Type[Any],
+    cls: type[Any],
     flatten_fn: FlattenFunc,
     unflatten_fn: UnflattenFunc,
     *,
@@ -266,7 +255,7 @@ def _register_pytree_node(
 
 
 def _private_register_pytree_node(
-    cls: Type[Any],
+    cls: type[Any],
     flatten_fn: FlattenFunc,
     unflatten_fn: UnflattenFunc,
     *,
@@ -340,7 +329,7 @@ def tree_is_leaf(
 def tree_flatten(
     tree: PyTree,
     is_leaf: Optional[Callable[[PyTree], bool]] = None,
-) -> Tuple[List[Any], TreeSpec]:
+) -> tuple[list[Any], TreeSpec]:
     """Flatten a pytree.
 
     See also :func:`tree_unflatten`.
@@ -445,7 +434,7 @@ def tree_iter(
 def tree_leaves(
     tree: PyTree,
     is_leaf: Optional[Callable[[PyTree], bool]] = None,
-) -> List[Any]:
+) -> list[Any]:
     """Get the leaves of a pytree.
 
     See also :func:`tree_flatten`.
@@ -599,12 +588,12 @@ def tree_map_(
     )
 
 
-Type2 = Tuple[Type[T], Type[S]]
-Type3 = Tuple[Type[T], Type[S], Type[U]]
+Type2 = tuple[type[T], type[S]]
+Type3 = tuple[type[T], type[S], type[U]]
 if sys.version_info >= (3, 10):
-    TypeAny = Union[Type[Any], Tuple[Type[Any], ...], types.UnionType]
+    TypeAny = Union[type[Any], tuple[type[Any], ...], types.UnionType]
 else:
-    TypeAny = Union[Type[Any], Tuple[Type[Any], ...]]
+    TypeAny = Union[type[Any], tuple[type[Any], ...]]
 
 Fn2 = Callable[[Union[T, S]], R]
 Fn3 = Callable[[Union[T, S, U]], R]
@@ -627,7 +616,7 @@ def map_only(type_or_types_or_pred: Type3[T, S, U], /) -> MapOnlyFn[Fn3[T, S, U,
 
 
 @overload
-def map_only(type_or_types_or_pred: Type[T], /) -> MapOnlyFn[Fn[T, Any]]:
+def map_only(type_or_types_or_pred: type[T], /) -> MapOnlyFn[Fn[T, Any]]:
     ...
 
 
@@ -690,7 +679,7 @@ def map_only(
 
 @overload
 def tree_map_only(
-    type_or_types_or_pred: Type[T],
+    type_or_types_or_pred: type[T],
     /,
     func: Fn[T, Any],
     tree: PyTree,
@@ -744,7 +733,7 @@ def tree_map_only(
 
 @overload
 def tree_map_only_(
-    type_or_types_or_pred: Type[T],
+    type_or_types_or_pred: type[T],
     /,
     func: Fn[T, Any],
     tree: PyTree,
@@ -816,7 +805,7 @@ def tree_any(
 
 @overload
 def tree_all_only(
-    type_or_types: Type[T],
+    type_or_types: type[T],
     /,
     pred: Fn[T, bool],
     tree: PyTree,
@@ -860,7 +849,7 @@ def tree_all_only(
 
 @overload
 def tree_any_only(
-    type_or_types: Type[T],
+    type_or_types: type[T],
     /,
     pred: Fn[T, bool],
     tree: PyTree,
@@ -906,7 +895,7 @@ def broadcast_prefix(
     prefix_tree: PyTree,
     full_tree: PyTree,
     is_leaf: Optional[Callable[[PyTree], bool]] = None,
-) -> List[Any]:
+) -> list[Any]:
     """Return a list of broadcasted leaves in ``prefix_tree`` to match the number of leaves in ``full_tree``.
 
     If a ``prefix_tree`` is a prefix of a ``full_tree``, this means the ``full_tree`` can be
@@ -941,7 +930,7 @@ def broadcast_prefix(
     Returns:
         A list of leaves in ``prefix_tree`` broadcasted to match the number of leaves in ``full_tree``.
     """
-    result: List[Any] = []
+    result: list[Any] = []
 
     def add_leaves(x: Any, subtree: PyTree) -> None:
         subtreespec = tree_structure(subtree, is_leaf=is_leaf)
@@ -968,7 +957,7 @@ def _broadcast_to_and_flatten(
     tree: PyTree,
     treespec: TreeSpec,
     is_leaf: Optional[Callable[[PyTree], bool]] = None,
-) -> Optional[List[Any]]:
+) -> Optional[list[Any]]:
     assert _is_pytreespec_instance(treespec)
     full_tree = tree_unflatten([0] * treespec.num_leaves, treespec)
     try:
@@ -990,6 +979,7 @@ def treespec_dumps(treespec: TreeSpec, protocol: Optional[int] = None) -> str:
     return python_pytree.treespec_dumps(orig_treespec, protocol=protocol)
 
 
+@functools.lru_cache
 def treespec_loads(serialized: str) -> TreeSpec:
     """Deserialize a treespec from a JSON string."""
     orig_treespec = python_pytree.treespec_loads(serialized)
@@ -1029,7 +1019,7 @@ class LeafSpec(TreeSpec, metaclass=LeafSpecMeta):
 
 
 def _accessor_to_key_path(accessor: "PyTreeAccessor") -> KeyPath:
-    key_path: List[KeyEntry] = []
+    key_path: list[KeyEntry] = []
     for entry in accessor:
         if isinstance(entry, optree.GetAttrEntry):
             key_path.append(GetAttrKey(entry.name))
@@ -1049,7 +1039,7 @@ def _accessor_to_key_path(accessor: "PyTreeAccessor") -> KeyPath:
 def tree_flatten_with_path(
     tree: PyTree,
     is_leaf: Optional[Callable[[PyTree], bool]] = None,
-) -> Tuple[List[Tuple[KeyPath, Any]], TreeSpec]:
+) -> tuple[list[tuple[KeyPath, Any]], TreeSpec]:
     """Flattens a pytree like :func:`tree_flatten`, but also returns each leaf's key path.
 
     Args:
@@ -1078,7 +1068,7 @@ def tree_flatten_with_path(
 def tree_leaves_with_path(
     tree: PyTree,
     is_leaf: Optional[Callable[[PyTree], bool]] = None,
-) -> List[Tuple[KeyPath, Any]]:
+) -> list[tuple[KeyPath, Any]]:
     """Gets the leaves of a pytree like ``tree_leaves`` and returns each leaf's key path.
 
     Args:
