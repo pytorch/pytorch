@@ -706,8 +706,7 @@ def generate_tensor_like_override_tests(cls):
             for arg in annotated_args[func]:
                 # Guess valid input to aten function based on type of argument
                 t = arg["simple_type"]
-                if t.endswith("?"):
-                    t = t[:-1]
+                t = t.removesuffix("?")
                 if t == "Tensor" and is_method and arg["name"] == "self":
                     # See "Note: properties and __get__"
                     func = func.__get__(instance_gen())
