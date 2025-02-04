@@ -445,6 +445,39 @@ class AOTInductorTestsTemplate:
             with config.patch({"freezing": True}):
                 self.check_model(LinearModel(self.device), example_inputs)
 
+    def test_linear_dynamic_maxautotune(self):
+        if self.device != "cuda":
+            raise unittest.SkipTest("CUDA test only")
+
+        class Model(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.linear = torch.nn.Linear(1, 1)
+
+            def forward(self, x):
+                return self.linear(x)
+
+        model = Model().to(device=self.device)
+        compile_inputs = (torch.randn(2048, 1, device=self.device),)
+        dim0_x = Dim("dim0_x", min=2, max=2048)
+        dynamic_shapes = {"x": {0: dim0_x}}
+        ep = torch.export.export(model, compile_inputs, dynamic_shapes=dynamic_shapes)
+        optimized = torch._inductor.aoti_load_package(
+            torch._inductor.aoti_compile_and_package(
+                ep,
+                inductor_configs={
+                    "max_autotune": True,
+                    "max_autotune_gemm_backends": "TRITON",
+                },
+            )
+        )
+        runtime_input = torch.randn(10, 1, device=self.device)
+        self.assertTrue(same(optimized(runtime_input), model(runtime_input)))
+        runtime_input = torch.randn(16, 1, device=self.device)
+        self.assertTrue(same(optimized(runtime_input), model(runtime_input)))
+        runtime_input = torch.randn(100, 1, device=self.device)
+        self.assertTrue(same(optimized(runtime_input), model(runtime_input)))
+
     @torch._inductor.config.patch(
         pre_grad_fusion_options={
             "normalization_pass": {},
