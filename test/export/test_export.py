@@ -2628,48 +2628,21 @@ def forward(self, p_linear_weight, p_linear_bias, x):
             ep.graph_module.false_graph_0.code
         )
 
-    def test_ends_of_bounds_dynamic(self):
+    def test_ends_of_bounds_oblivious(self):
         class Foo(torch.nn.Module):
             def __init__(self):
                 super().__init__()
                 self.register_buffer("buf", torch.zeros(10))
-            def forward(self, x):
+            def forward(self, x, y):
                 self.buf[0 : x.shape[0]] = x
-                return x + 2
+                return x + 2, y[:, ::2]
 
-        inps = (torch.randn(10), )
+        inps = (torch.randn(10), torch.randn(32, 36))
         dynamic_shapes = {
-            "x": {0: Dim("x0", min=1, max=10)},
+            "x": {0: Dim("dx", min=1, max=10)},
+            "y": {0: Dim("dy0"), 1: Dim("dy1")}
         }
-        ep = export(Foo(), inps, dynamic_shapes=dynamic_shapes)
-
-    def test_maxsize_oblivious_dynamic(self):
-        class Model(torch.nn.Module):
-            def forward(self, z):
-                # return torch.cat((x, y), axis=1) + z[:, ::2]
-                return z[:, ::2]
-
-        model = Model()
-        # x = torch.randn(2, 3)
-        # y = torch.randn(2, 5)
-        z = torch.randn(2, 16)
-        # model(x, y, z)
-
-        batch = torch.export.Dim("batch")
-        # dx = torch.export.Dim("dx")
-        # dy = torch.export.Dim("dy")
-        dz = torch.export.Dim("dz")
-        ep = export(model, (z,), dynamic_shapes={"z": (batch, dz)})
-        print(ep)
-        # torch.export.export(
-        #     model,
-        #     (x, y, z),
-        #     dynamic_shapes={
-        #         "x": {0: batch, 1: dx},
-        #         "y": {0: batch, 1: dy},
-        #         "z": {0: batch, 1: dz},
-        #     },
-        # )
+        ep = export(Foo(), inps, dynamic_shapes=dynamic_shapes, strict=False)
 
     def test_duplicate_modules_with_non_persistent_buffers(self):
         class FooWithBuf(torch.nn.Module):
