@@ -16,6 +16,7 @@ from ..virtualized import ops, V
 from .common import (
     CSEVariable,
     DeferredLine,
+    DTYPE_TO_COMPUTATION_DTYPE,
     IndentedBuffer,
     OpOverrides,
     PythonPrinter,
@@ -255,11 +256,7 @@ class MetalOverrides(OpOverrides):
 
     @staticmethod
     def polygamma(n: CSEVariable, x: CSEVariable) -> str:
-        # polygamma's API takes order as first argument
-        # and the input tensor as second, while the
-        # metal shader has these inverted.
-        # TODO (dcci): make this more uniform.
-        return f"c10::metal::polygamma({x}, {n})"
+        return f"c10::metal::polygamma({n}, {x})"
 
     @staticmethod
     def digamma(x: CSEVariable) -> str:
@@ -419,6 +416,7 @@ class MetalKernel(SIMDKernel):
         value: Union[CSEVariable, tuple[CSEVariable, ...]],
     ) -> Union[CSEVariable, tuple[CSEVariable, ...]]:
         """Codegen a reduction operation"""
+        reduction_dim = next(t for t in self.range_trees if t.is_reduction)
         if reduction_type == "any":
             acc = self._new_accvar(dtype)
             self.loads.writeline(f"{acc} = false;")
@@ -430,7 +428,23 @@ class MetalKernel(SIMDKernel):
             """
             )
             return acc
-        raise NotImplementedError
+        if reduction_type in ["prod", "sum"]:
+            acc_buf = self._new_accvar(src_dtype, reduction_dim.numel)
+            self.body.splice(f"{acc_buf}[{reduction_dim.name}] = {value};")
+            return self.cse.generate(
+                self.body,
+                f"c10::metal::threadgroup_{reduction_type}({acc_buf}, {reduction_dim.numel})",
+                dtype=DTYPE_TO_COMPUTATION_DTYPE[dtype],
+            )
+        if reduction_type in ["max", "min"]:
+            acc_buf = self._new_accvar(src_dtype, reduction_dim.numel)
+            self.body.splice(f"{acc_buf}[{reduction_dim.name}] = {value};")
+            return self.cse.generate(
+                self.body,
+                f"c10::metal::threadgroup_{reduction_type}({acc_buf}, {reduction_dim.numel})",
+                dtype=dtype,
+            )
+        raise NotImplementedError(reduction_type)
 
     def codegen_iteration_ranges_entry(self, entry: IterationRangesEntry) -> None:
         index_expr = self.rename_indexing(entry.expr)
@@ -451,6 +465,8 @@ class MetalKernel(SIMDKernel):
             """,
                 strip=True,
             )
+            if self.inside_reduction:
+                code.writeline("#include <c10/metal/reduction_utils.h>")
             code.writeline("kernel void generated_kernel(")
             with code.indent():
                 for outer, inner in self.args.output_buffers.items():
