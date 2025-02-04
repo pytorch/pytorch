@@ -73,9 +73,7 @@ def _create_differentiable(inps, level=None):
         if isinstance(x, torch.Tensor):
             with enable_inplace_requires_grad(True):
                 return _set_tensor_requires_grad(x)
-        raise ValueError(
-            f"Thing passed to transform API must be Tensor, " f"got {type(x)}"
-        )
+        raise ValueError(f"Thing passed to transform API must be Tensor, got {type(x)}")
 
     return tree_map(create_differentiable, inps)
 
@@ -954,7 +952,7 @@ def assert_non_empty_list_of_tensors(
         if isinstance(out, torch.Tensor):
             continue
         raise RuntimeError(
-            f"{api}: Expected {argname} to only contain Tensors, got " f"{type(out)}"
+            f"{api}: Expected {argname} to only contain Tensors, got {type(out)}"
         )
 
 
