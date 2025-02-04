@@ -471,9 +471,7 @@ def _determine_output_number(
             if num_outputs is not None and isinstance(num_outputs, int):
                 return num_outputs
             else:
-                logger.warning(
-                    "Could not determine the number of outputs for Split."
-                )
+                logger.warning("Could not determine the number of outputs for Split.")
     return len(signature.outputs)
 
 
