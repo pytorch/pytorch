@@ -178,18 +178,4 @@ constexpr bool op_allowlist_contains_name_in_schema(std::string_view allowlist, 
   return allowlist_contains(allowlist, schema.substr(0, schema.find('(')));
 }
 
-// Returns true iff the given dispatch key is on the allowlist
-// and should be registered.  When we turn this on, the list of valid
-// mobile dispatch keys is hard coded (but you need to make sure
-// that you have the correct set of dispatch keys for this).
-constexpr bool dispatch_key_allowlist_check(DispatchKey /*k*/) {
-#ifdef C10_MOBILE
-  return true;
-  // Disabled for now: to be enabled later!
-  // return k == DispatchKey::CPU || k == DispatchKey::Vulkan || k == DispatchKey::QuantizedCPU || k == DispatchKey::BackendSelect || k == DispatchKey::CatchAll;
-#else
-  return true;
-#endif
-}
-
 } // namespace c10::impl

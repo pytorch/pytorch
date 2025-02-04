@@ -14,7 +14,7 @@ import torch
 
 from .. import polyfills, variables
 from ..bytecode_transformation import create_call_function, create_rot_n
-from ..exc import unimplemented, Unsupported
+from ..exc import raise_observed_exception, unimplemented, Unsupported
 from ..guards import GuardBuilder, install_guard
 from ..source import AttrSource, ConstantSource, DefaultsSource, GetItemSource
 from ..utils import (
@@ -102,6 +102,34 @@ def _create_nested_fn(
     func.__annotations__ = annotations
 
     return func
+
+
+fn_known_dunder_attrs = {
+    "__annotations__",
+    "__defaults__",
+    "__kwdefaults__",
+    "__code__",
+    "__globals__",
+    "__closure__",
+    "__doc__",
+}
+
+
+def fn_var_getattr(tx, fn, source, name):
+    source = source and AttrSource(source, name)
+    try:
+        subobj = inspect.getattr_static(fn, name)
+    except AttributeError:
+        # function does not have a __getattr__ or __getattribute__ method,
+        # so we can safely assume that this attribute is absent
+        raise_observed_exception(AttributeError, tx)
+
+    # Special handling for known dunder attributes
+    if name in fn_known_dunder_attrs:
+        subobj = getattr(fn, name)
+    if source:
+        return variables.LazyVariableTracker.create(subobj, source)
+    return VariableTracker.build(tx, subobj)
 
 
 class BaseUserFunctionVariable(VariableTracker):
@@ -281,14 +309,7 @@ class UserFunctionVariable(BaseUserFunctionVariable):
         return result
 
     def var_getattr(self, tx: "InstructionTranslator", name: str):
-        source = self.source and AttrSource(self.source, name)
-        try:
-            subobj = inspect.getattr_static(self.fn, name)
-        except AttributeError:
-            return variables.GetAttrVariable(self, name, source=source)
-        if source:
-            return variables.LazyVariableTracker.create(subobj, source)
-        return VariableTracker.build(tx, subobj)
+        return fn_var_getattr(tx, self.fn, self.source, name)
 
     def call_obj_hasattr(
         self, tx: "InstructionTranslator", name: str
@@ -331,8 +352,15 @@ class BuiltinMethodVariable(BaseUserFunctionVariable):
 
     @staticmethod
     @functools.lru_cache(None)
-    def supported_methods():
-        return {tuple.__new__}
+    def is_supported_builtin_method(obj):
+        method_self = obj.__self__
+        method_name = obj.__name__
+
+        # TODO(anijain2305) - Add support for more builtin methods
+        # Supports tuple.__new__ and frozenset({....}).__contains__
+        return (method_self is tuple and method_name == "__new__") or (
+            type(method_self) is frozenset and method_name == "__contains__"
+        )
 
     def call_function(
         self,
@@ -342,9 +370,9 @@ class BuiltinMethodVariable(BaseUserFunctionVariable):
     ) -> "VariableTracker":
         method_self = self.fn.__self__
         name = self.fn.__name__
-        return variables.BuiltinVariable(method_self).call_method(
-            tx, name, args, kwargs
-        )
+        obj_source = self.source and AttrSource(self.source, "__self__")
+        obj_vt = VariableTracker.build(tx, method_self, obj_source)
+        return obj_vt.call_method(tx, name, args, kwargs)
 
 
 class FunctionDecoratedByContextlibContextManagerVariable(BaseUserFunctionVariable):
@@ -466,6 +494,14 @@ class UserMethodVariable(UserFunctionVariable):
 
     def inspect_parameter_names(self):
         return super().inspect_parameter_names()[1:]
+
+    def var_getattr(self, tx: "InstructionTranslator", name: str):
+        source = self.source and AttrSource(self.source, name)
+        if name == "__self__":
+            return self.obj
+        if name == "__func__":
+            return VariableTracker.build(tx, self.fn, source)
+        return super().var_getattr(tx, name)
 
 
 class WrappedUserMethodVariable(UserMethodVariable):
@@ -698,6 +734,14 @@ class SkipFunctionVariable(VariableTracker):
     ) -> "VariableTracker":
         if inspect.getattr_static(self.value, "_torchdynamo_disable", False):
             unimplemented(f"call torch._dynamo.disable() wrapped function {self.value}")
+        elif isinstance(self.value, types.WrapperDescriptorType):
+            msg = (
+                f"Graph break due to unsupported wrapper descriptor {self.value}. "
+                f"Please file an issue on GitHub "
+                f"so the PyTorch team can add support for it. "
+            )
+            torch._dynamo.utils.warn_once(msg)
+            unimplemented(msg)
         else:
             try:
                 path = inspect.getfile(self.value)
@@ -744,6 +788,12 @@ class SkipFunctionVariable(VariableTracker):
                 )
             msg += f"', {self.reason}'" if self.reason else ""
             unimplemented(msg)
+
+    def call_obj_hasattr(self, tx: "InstructionTranslator", name):
+        return variables.ConstantVariable.create(hasattr(self.value, name))
+
+    def var_getattr(self, tx: "InstructionTranslator", name: str):
+        return fn_var_getattr(tx, self.value, self.source, name)
 
 
 class WrapperUserFunctionVariable(VariableTracker):
@@ -925,6 +975,12 @@ class FunctoolsPartialVariable(VariableTracker):
         self.args = args
         assert isinstance(keywords, dict)
         self.keywords = keywords
+        # fake_value is used for id calculation. Creating this value and id'ng
+        # on it is sufficient for the tracing purposes.
+        self.fake_value = functools.partial(identity)
+
+    def python_type(self):
+        return functools.partial
 
     def reconstruct(self, codegen):
         codegen.add_push_null(lambda: codegen.load_import_from("functools", "partial"))
@@ -961,6 +1017,18 @@ class FunctoolsPartialVariable(VariableTracker):
         return variables.ConstantVariable.create(
             hasattr(functools.partial(identity), name)
         )
+
+    def var_getattr(self, tx: "InstructionTranslator", name: str):
+        source = self.source and AttrSource(self.source, name)
+        # Handle __slots__
+        if name == "func":
+            return self.func
+        if name == "args":
+            return variables.ListVariable(self.args, source=source)
+        if name == "keywords":
+            items = {ConstantVariable.create(k): v for k, v in self.keywords.items()}
+            return variables.ConstDictVariable(items, source=source)
+        raise_observed_exception(AttributeError, tx)
 
     def as_python_constant(self):
         return functools.partial(
