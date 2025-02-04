@@ -436,7 +436,7 @@ class MetalKernel(SIMDKernel):
                 f"c10::metal::threadgroup_sum({acc_buf}, {reduction_dim.numel})",
                 dtype=DTYPE_TO_COMPUTATION_DTYPE[dtype],
             )
-        raise NotImplementedError
+        raise NotImplementedError(reduction_type)
 
     def codegen_iteration_ranges_entry(self, entry: IterationRangesEntry) -> None:
         index_expr = self.rename_indexing(entry.expr)
