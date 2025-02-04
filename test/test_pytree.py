@@ -1390,6 +1390,31 @@ if not torch.utils.pytree.PYTORCH_USE_CXX_PYTREE:
         self.assertEqual(serialized_spec, saved_spec)
         self.assertEqual(complicated_spec, py_pytree.treespec_loads(saved_spec))
 
+    def test_dataclass(self):
+        @dataclass
+        class Point:
+            x: torch.Tensor
+            y: torch.Tensor
+
+        py_pytree.register_dataclass(Point)
+
+        point = Point(torch.tensor(0), torch.tensor(1))
+        point = py_pytree.tree_map(lambda x: x + 1, point)
+        self.assertEqual(point.x, torch.tensor(1))
+        self.assertEqual(point.y, torch.tensor(2))
+
+    def test_constant(self):
+        @dataclass
+        class Config:
+            norm: str
+
+        py_pytree.register_constant(Config)
+
+        config = Config("l1")
+        elements, spec = py_pytree.tree_flatten(config)
+        self.assertEqual(elements, [])
+        self.assertEqual(spec.context.value, config)
+
 
 class TestCxxPytree(TestCase):
     def setUp(self):

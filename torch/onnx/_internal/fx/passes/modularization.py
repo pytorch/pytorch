@@ -5,7 +5,7 @@ import abc
 import collections
 import copy
 import operator
-from typing import Any, Dict, Final, Generator, Iterator, Sequence, Tuple
+from typing import Any, Final, TYPE_CHECKING
 
 import torch
 import torch.fx
@@ -13,14 +13,18 @@ import torch.utils.pytree as pytree
 from torch.onnx._internal.fx import _pass, diagnostics
 
 
-_FX_TRACER_NN_MODULE_META_TYPE = Tuple[str, type]
+if TYPE_CHECKING:
+    from collections.abc import Generator, Iterator, Sequence
+
+
+_FX_TRACER_NN_MODULE_META_TYPE = tuple[str, type]
 """Legacy type of item from `node.meta["nn_module_stack"].items()` produced by FX symbolic tracer."""
 _FX_TRACER_NN_MODULE_STACK_META_TYPE = collections.OrderedDict
 """Legacy type of `node.meta["nn_module_stack"]` produced by FX symbolic tracer."""
 
-_DYNAMO_NN_MODULE_META_TYPE = Tuple[str, Tuple[str, type]]
+_DYNAMO_NN_MODULE_META_TYPE = tuple[str, tuple[str, type]]
 """Type of item from `node.meta["nn_module_stack"].items()` produced by FX dynamo tracer."""
-_DYNAMO_NN_MODULE_STACK_META_TYPE = Dict[str, _DYNAMO_NN_MODULE_META_TYPE]
+_DYNAMO_NN_MODULE_STACK_META_TYPE = dict[str, _DYNAMO_NN_MODULE_META_TYPE]
 """Type of `node.meta["nn_module_stack"]` produced by FX dynamo tracer."""
 
 

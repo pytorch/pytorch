@@ -8,7 +8,6 @@ import math
 import operator
 import unittest
 from re import escape
-from typing import List, Set
 
 import torch
 import torch.utils.pytree.python as pytree
@@ -75,11 +74,11 @@ class _AtenAddOperatorSupport(OperatorSupport):
         return node.op == "call_function" and node.target in {torch.ops.aten.add.Tensor}
 
 
-def _to_partition_names(partitions: List[Partition]) -> List[Set[str]]:
+def _to_partition_names(partitions: list[Partition]) -> list[set[str]]:
     return [{n.name for n in p.nodes} for p in partitions]
 
 
-def _get_output_names(gm: torch.fx.GraphModule) -> List[str]:
+def _get_output_names(gm: torch.fx.GraphModule) -> list[str]:
     output_node = next(n for n in gm.graph.nodes if n.op == "output")
     args = pytree.tree_leaves(output_node.args)
     # if isinstance(args, tuple) and len(args) == 1:

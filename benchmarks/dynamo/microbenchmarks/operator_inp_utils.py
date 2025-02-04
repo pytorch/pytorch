@@ -3,8 +3,9 @@ import logging
 import math
 import os
 from collections import Counter, defaultdict
+from collections.abc import Generator, Iterable
 from functools import partial
-from typing import Any, Dict, Generator, Iterable
+from typing import Any
 
 import torch
 from torch.testing import make_tensor
@@ -259,7 +260,7 @@ class OperatorInputsLoader:
 
     def get_inputs_for_operator(
         self, operator, dtype=None, device="cuda"
-    ) -> Generator[tuple[Iterable[Any], Dict[str, Any]], None, None]:
+    ) -> Generator[tuple[Iterable[Any], dict[str, Any]], None, None]:
         assert (
             str(operator) in self.operator_db
         ), f"Could not find {operator}, must provide overload"

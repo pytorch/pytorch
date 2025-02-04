@@ -82,6 +82,12 @@ symbol_guard_limit_before_specialize: Optional[int] = None
 # This flag changes whether we should use the same symbolic variable to represent input sizes that are the same.
 use_duck_shape = True
 
+# Controls the registration of torch.nonzero() on the meta device.
+# When True, nonzero returns a tensor with shape (self.numel(), self.dim())
+# assuming all elements are none-zero.
+# Default is False to prevent unintended registration. Set to True to enable.
+meta_nonzero_assume_all_nonzero = False
+
 from torch.utils._config_module import install_config_module
 
 
