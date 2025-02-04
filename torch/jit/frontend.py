@@ -6,7 +6,6 @@ import re
 import string
 from collections import namedtuple
 from textwrap import dedent
-from typing import List, Tuple  # noqa: F401
 
 import torch
 import torch.jit.annotations

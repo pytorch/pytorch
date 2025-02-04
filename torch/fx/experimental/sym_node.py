@@ -24,7 +24,7 @@ import operator
 import sys
 import traceback
 from functools import lru_cache, update_wrapper
-from typing import Optional, Set, TYPE_CHECKING, Union
+from typing import Optional, TYPE_CHECKING, Union
 
 import torch
 
@@ -1652,7 +1652,7 @@ def _make_user_magic(method, user_type):
             return (method_to_operator(method))(get_constant(self))
         return wrap_node(getattr(self.node, method_attr)())
 
-    def uninteresting_files() -> Set[str]:
+    def uninteresting_files() -> set[str]:
         import inspect
 
         import torch

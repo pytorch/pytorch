@@ -9,7 +9,6 @@ import keyword
 import math
 import os
 import re
-import typing
 import warnings
 from collections import defaultdict
 from collections.abc import Iterable
@@ -36,11 +35,11 @@ if TYPE_CHECKING:
 # Mapping of builtins to their `typing` equivalent.
 # (PEP585: See D68459095 test plan)
 _origin_type_map = {
-    list: typing.List,
-    dict: typing.Dict,
-    set: typing.Set,
-    frozenset: typing.FrozenSet,
-    tuple: typing.Tuple,
+    list: list,
+    dict: dict,
+    set: set,
+    frozenset: frozenset,
+    tuple: tuple,
 }
 
 _legal_ops = dict.fromkeys(

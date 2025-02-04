@@ -3,7 +3,8 @@ import contextlib
 import warnings
 import weakref
 from abc import ABC, abstractmethod
-from typing import Any, Callable, ContextManager, Optional, Union
+from contextlib import AbstractContextManager
+from typing import Any, Callable, Optional, Union
 
 import torch
 import torch.utils._pytree as pytree
@@ -665,7 +666,7 @@ class BaseFunctionalizeAPI(ABC):
         pass
 
     @abstractmethod
-    def redispatch_to_next(self) -> ContextManager:
+    def redispatch_to_next(self) -> AbstractContextManager:
         pass
 
     @abstractmethod
@@ -709,7 +710,7 @@ class PythonFunctionalizeAPI(BaseFunctionalizeAPI):
     def functionalize(self, inner_f: Callable) -> Callable:
         return dispatch_functionalize(inner_f, self.mode)
 
-    def redispatch_to_next(self) -> ContextManager:
+    def redispatch_to_next(self) -> AbstractContextManager:
         # [NOTE] We don't do anything here because at the time
         # we exercise this path, we would have already popped the
         # FunctionalTensorMode from mode stack. Since FunctionalTensorMode
@@ -753,7 +754,7 @@ class CppFunctionalizeAPI(BaseFunctionalizeAPI):
     def functionalize(self, inner_f: Callable) -> Callable:
         return torch.func.functionalize(inner_f)
 
-    def redispatch_to_next(self) -> ContextManager:
+    def redispatch_to_next(self) -> AbstractContextManager:
         return torch._C._ExcludeDispatchKeyGuard(
             torch._C.DispatchKeySet(torch._C.DispatchKey.Functionalize)
         )
@@ -801,7 +802,7 @@ class FunctorchFunctionalizeAPI(BaseFunctionalizeAPI):
             ),
         )
 
-    def redispatch_to_next(self) -> ContextManager:
+    def redispatch_to_next(self) -> AbstractContextManager:
         return self.interpreter.lower()
 
     def replace(self, input_tensor, output_tensor) -> None:
