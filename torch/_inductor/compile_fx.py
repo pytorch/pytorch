@@ -38,6 +38,7 @@ from typing_extensions import (
     Protocol,
     Self,
     TypedDict,
+    TypeGuard,
     Unpack,
 )
 from unittest import mock
@@ -1397,15 +1398,17 @@ class _LoggerState:
         # Mapping from logger name to level.
         self.loggers = {}
 
-        def filter(handler: logging.Handler) -> bool:
-            if not isinstance(handler, logging.Logger):
+        def filter(
+            logger: Union[logging.Logger, logging.PlaceHolder]
+        ) -> TypeGuard[logging.Logger]:
+            if not isinstance(logger, logging.Logger):
                 # Assume that Placeholders propagate
                 return False
             # We only want to track torch._inductor logging
-            if not handler.name.startswith("torch._inductor"):
+            if not logger.name.startswith("torch._inductor"):
                 return False
-            # If this handler propagates then assume we'll track its parent
-            if handler.propagate:
+            # If this logger propagates then assume we'll track its parent
+            if logger.propagate:
                 return False
             return True
 
@@ -1414,15 +1417,18 @@ class _LoggerState:
             # logging.getChildren() doesn't exist until 3.12
             logging._acquireLock()  # type: ignore[attr-defined]
             try:
-                for handler in root.manager.loggerDict.values():
-                    if filter(handler):
-                        self.loggers[handler.name] = handler.level
+                for logger in root.manager.loggerDict.values():
+                    if filter(logger):
+                        self.loggers[logger.name] = logger.level
             finally:
                 logging._releaseLock()  # type: ignore[attr-defined]
         else:
-            for handler in root.getChildren():
-                if filter(handler):
-                    self.loggers[handler.name] = handler.level
+            q = [root]
+            while q:
+                logger = q.pop()
+                if filter(logger):
+                    self.loggers[logger.name] = logger.level
+                q.extend(logger.getChildren())
 
     def __enter__(self) -> _CapturedLogs:
         assert self._cap is None
