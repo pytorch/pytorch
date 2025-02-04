@@ -1937,7 +1937,7 @@ class SubgraphTracer(fx.Tracer):
         self.allow_side_effects_under_checkpoint = False
 
         # True if this tracer is currently tracing (reconstructing) into a Python generator
-        self.in_generator = False
+        self.is_reconstructing_generator = False
 
         self.debug_level: int = parent.debug_level + 1 if parent is not None else 0
 

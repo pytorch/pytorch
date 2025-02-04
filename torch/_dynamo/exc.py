@@ -162,11 +162,6 @@ class AttributeMutationError(Unsupported):
         super().__init__(msg)
 
 
-class MutationError(Unsupported):
-    def __init__(self, msg: str) -> None:
-        super().__init__(msg)
-
-
 class InfiniteGeneratorError(Unsupported):
     # Raised when the number of yielded values is greater than MAX_ITERATOR_LIMIT
     def __init__(self, msg: str) -> None:
