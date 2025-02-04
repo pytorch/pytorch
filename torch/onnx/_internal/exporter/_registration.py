@@ -119,7 +119,6 @@ class ONNXRegistry:
         """
         signature: _schemas.OpSignature | None
         try:
-            # TODO(justinchuby): Use the op_signature attribute when onnxscript is updated in CI
             if isinstance(function, onnxscript.OnnxFunction):
                 signature = _schemas.OpSignature.from_function(  # type: ignore[attr-defined]
                     function,
@@ -127,8 +126,9 @@ class ONNXRegistry:
                     function.name,
                     opset_version=function.opset.version,
                 )
+                function._pt_onnx_signature = signature  # type: ignore[attr-defined]
             else:
-                signature = _schemas.OpSignature.from_function(  # type: ignore[attr-defined]
+                signature = _schemas.OpSignature.from_function(
                     function, "__custom", function.__name__
                 )
         except Exception:

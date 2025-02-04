@@ -213,7 +213,7 @@ def _get_named_fx_node_args(node: torch.fx.Node) -> dict[str, torch.fx.node.Argu
 
 def get_matching_overload(
     node: torch.fx.Node,
-    overloads: Sequence[Callable],
+    overloads: Sequence[_registration.OnnxDecompMeta],
 ) -> tuple[Callable | None, str]:
     """Get the overload that matches the node's arguments.
 
@@ -230,7 +230,7 @@ def get_matching_overload(
         # now we assume all inputs are named.
         return overloads[
             0
-        ], "The node target does not have a schema. Return the first one."
+        ].onnx_function, "The node target does not have a schema. Return the first one."
     named_args = _get_named_fx_node_args(node)
     # FIXME: Handle when we don't know the names of the arguments
     schema_args: dict[str, torch.Argument] = {
@@ -241,13 +241,13 @@ def get_matching_overload(
     for overload in overloads:
         assigned_types: dict[str, ir.TypeProtocol] = {}
         fail_reason = ""
-        if not hasattr(overload, "signature"):
+        if overload.signature is None:
             # When an overload does not have a signature, we assume it is a custom op and should be matched
             return (
-                overload,
+                overload.onnx_function,
                 "The overload does not have a signature. Assuming it is a custom op and matching it.",
             )
-        for param in overload._pt_onnx_signature:  # type: ignore[attr-defined]
+        for param in overload.signature:
             if param.name not in schema_args and param.required:
                 # We don't need to handle variadic inputs as there is none.
                 # A required parameter is not supplied.
@@ -300,7 +300,7 @@ def get_matching_overload(
             else:
                 raise TypeError(f"Unknown parameter type: {type(param)}")
         if not fail_reason:
-            return overload, "Successfully matched overload"
+            return overload.onnx_function, "Successfully matched overload"
         else:
             failure_messages.append(
                 f"- Failed to match overload `{overload}`: {fail_reason}"
@@ -359,7 +359,5 @@ def dispatch(
             "Fast path: Only one decomposition is defined",
         )
 
-    overload, message = get_matching_overload(
-        node, [decomp.onnx_function for decomp in decomp_metas]
-    )
+    overload, message = get_matching_overload(node, decomp_metas)
     return overload, message
