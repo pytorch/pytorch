@@ -10589,10 +10589,6 @@ def forward(self, x, y):
                 strict=False,
             )
 
-    # TODO requires_grad doesn't seem to work with serialization.
-    @testing.expectedFailureSerDer
-    @testing.expectedFailureCppSerDes
-    @testing.expectedFailureSerDerNonStrict
     def test_preserve_requires_grad_placeholders(self):
         class Module(torch.nn.Module):
             def __init__(self) -> None:
