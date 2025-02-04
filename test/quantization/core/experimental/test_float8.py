@@ -1,5 +1,6 @@
 # Owner(s): ["oncall: quantization"]
 
+import struct
 import unittest
 
 import torch
@@ -39,6 +40,7 @@ MANTISSA_BITS = {
     torch.float8_e5m2fnuz: 2,
     torch.float8_e4m3fn: 3,
     torch.float8_e4m3fnuz: 3,
+    torch.float8_e8m0fnu: 0,
 }
 
 # As in np.finfo(dtype).minexp
@@ -47,6 +49,7 @@ MINEXP = {
     torch.float8_e5m2fnuz: -15,
     torch.float8_e4m3fn: -6,
     torch.float8_e4m3fnuz: -7,
+    torch.float8_e8m0fnu: -127,
 }
 
 SPECIAL_NUMBERS = {
@@ -111,8 +114,8 @@ SPECIAL_NUMBERS = {
         ("10000001", -0.125 * (2**-7), "neg_min_subnorm"),
     ],
     torch.float8_e8m0fnu: [
-        ("00000000", 5.877471754111438e-39, "smallest_number"),
-        ("11111110", 1.701411834604692317316873E+38, "largest_number"),
+        ("00000000", float(2 ** -127), "smallest_number"),
+        ("11111110", float(2 ** 127), "largest_number"),
         ("01111110", 0.5, "zero_point_five"),
         ("01111111", 1.0, "one"),
         ("10000000", 2.0, "two"),
@@ -121,6 +124,10 @@ SPECIAL_NUMBERS = {
 }
 
 FLOAT8_DTYPES_WITH_INF = [torch.float8_e5m2]
+
+def _int_bits_to_float(x):
+    y = struct.unpack('!f', struct.pack('!I', x))[0]
+    return y
 
 
 def simulate_fp8_precision(input, variant):
@@ -208,10 +215,6 @@ ROUND_TRIP_TEST_CASES = (
 
 
 class TestFloat8Dtype(TestCase):
-    """
-    Sanity test for zeros comparison
-    """
-
     @dtypes(*FLOAT8_DTYPES)
     @dtypesIfCUDA(*CUDA_FLOAT8_DTYPES)
     def test_creation_with_zeros(self, dtype, device):
@@ -241,6 +244,71 @@ class TestFloat8Dtype(TestCase):
         x8 = x.to(dtype)
         x8_simulated = simulate_fp8_precision(x, dtype)
         self.assertEqual(x8_simulated, x8.float())
+
+    def test_float8_e8m0fnu_rounding(self, device):
+        # TODO(next): rounding tests for e8m0 here
+        print()
+
+        def _round_rne(unbiased_exponent, lsb, g, r, s):
+            round_up = False
+
+            # print('g', g, 'r', r, 's', s)
+
+            if g == 1:
+                round_up = True
+            else:
+                if lsb:
+                    round_up = True
+
+            if round_up:
+                unbiased_exponent += 1
+
+            return unbiased_exponent
+
+        # TODO full range
+        # for unbiased_exponent in range(-1, 1):
+        for biased_exponent in range(1, 2):
+            print('biased_exponent', biased_exponent)
+
+            # iterate through all the possible options of guard, round, sticky bits
+            # for the current exponent
+            for grs in range(8):
+                print('grs', grs)
+
+                # create a positive floating point number with the specified exponent
+                # and mantissa guard, round, sticky bits
+
+                fp32_as_uint32_t_ref = (biased_exponent << 23) + (grs << 20)
+                # print(fp32_as_uint32_t_ref)
+                fp32_ref = _int_bits_to_float(fp32_as_uint32_t_ref)
+                print(fp32_ref)
+
+                # create an RNE rounded version of the exponent
+                if biased_exponent == 255:
+                    new_biased_exponent = biased_exponent
+                else:
+                    lsb = biased_exponent == 0
+                    g = grs >> 2
+                    r = (grs >> 1) & 0b1
+                    s = grs & 0b1
+                    new_biased_exponent = _round_rne(biased_exponent, lsb, g, r, s)
+
+                # create an RNE rounded version of the float
+                fp32_new = _int_bits_to_float(new_biased_exponent << 23)
+
+                # now, do the same in PyTorch and see if results match
+                fp32_pytorch_unrounded = torch.full((1,), fp32_ref, device=device, dtype=torch.float)
+                fp32_pytorch_e8m0 = fp32_pytorch_unrounded.to(torch.float8_e8m0fnu)
+                fp32_pytorch_e8m0_fp32 = fp32_pytorch_e8m0.to(torch.float)
+                print(fp32_pytorch_e8m0_fp32)
+
+                print('expected', fp32_new, 'actual', fp32_pytorch_e8m0_fp32.item())
+
+
+
+
+                
+            
 
     @dtypes(*FLOAT8_DTYPES)
     @dtypesIfCUDA(*CUDA_FLOAT8_DTYPES)

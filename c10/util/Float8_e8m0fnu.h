@@ -54,9 +54,9 @@ inline C10_HOST_DEVICE uint8_t fp8e8m0fnu_from_fp32_value(float f) {
   // with ties to even
   
   // guard bit - bit 23, or 22 zero-indexed
-  uint8_t g = f_bits & 0x400000;
+  uint8_t g = (f_bits & 0x400000) > 0;
   // round bit - bit 22, or 21 zero-indexed
-  uint8_t r = f_bits & 0x200000;
+  uint8_t r = (f_bits & 0x200000) > 0;
   // sticky bit - bits 21 to 1, or 20 to 0 zero-indexed
   uint8_t s = (f_bits & 0x1FFFFF) > 0;
   // in casting to e8m0, LSB is the implied mantissa bit. It equals to 0 if the 
