@@ -1,4 +1,5 @@
 // Implementation of specal math functions for Metal
+#pragma once
 #include <metal_stdlib>
 
 namespace c10 {
