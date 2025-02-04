@@ -67,7 +67,7 @@ from torch._inductor.cpp_builder import (
 )
 from torch._inductor.cpu_vec_isa import pick_vec_isa
 from torch._inductor.custom_graph_pass import CustomGraphPass, CustomGraphPassType
-from torch._inductor.output_code import has_frozen_params
+from torch._inductor.freezing_utils import has_frozen_params, is_frozen_param
 from torch._inductor.runtime.compile_tasks import (
     _module_to_triton_kernel,
     _reload_python_module,
@@ -494,20 +494,12 @@ class FxGraphCachePickler(pickle.Pickler):
         self._stream = io.BytesIO()
         super().__init__(self._stream)
 
-        # To support caching when the graph has frozen params, we ignore the tensor values of
-        # the _non-inlined_ frozen constants.
-        self._frozen_params = OrderedSet(
-            [getattr(gm, attr) for attr in dir(gm) if attr.startswith("_frozen_param")]
-            if has_frozen_params(gm)
-            else []
-        )
-
         self.dispatch_table = copyreg.dispatch_table.copy()
         self.dispatch_table.update(
             {
                 FakeTensor: functools.partial(self._reduce_fake_tensor),
                 torch.Tensor: functools.partial(self._reduce_tensor),
-                torch.nn.parameter.Parameter: functools.partial(self._reduce_parameter),
+                torch.nn.parameter.Parameter: functools.partial(self._reduce_tensor),
                 torch.SymInt: functools.partial(self._reduce_symint),
                 torch.fx.experimental._backward_state.BackwardState: functools.partial(
                     self._reduce_unsupported
@@ -535,16 +527,24 @@ class FxGraphCachePickler(pickle.Pickler):
 
     def _reduce_tensor(
         self, t: Tensor
-    ) -> Tuple[Callable[[T], T], Tuple[TensorMetadataAndValues]]:
+    ) -> Tuple[Callable[[T], T], Tuple[Union[TensorMetadata, TensorMetadataAndValues]]]:
         """
         Custom reducer to pickle Tensors.  If we see tensors, we know they're constants
         stored as attributes on the GraphModule.
         """
+        from .graph import GraphLowering
+
         if t.is_mkldnn:
             # TODO: These tensors don't currently pickle, so we can't cache a compiled
             # graph containing them. Just fail now. If mkldnn tensors get pickling
             # support, we can remove this.
             raise BypassFxGraphCache("mkldnn tensors unpickleable")
+
+        metadata = extract_tensor_metadata_for_cache_key(t)
+
+        # If this is a non-inlined frozen parameter, we consider the metadata only.
+        if is_frozen_param(t) and not GraphLowering.can_inline_constant(t):
+            return (_ident, (metadata,))
 
         # Very large tensors will be expensive to copy to cpu and hash. Let's at least
         # report any slowness.
@@ -557,20 +557,7 @@ class FxGraphCachePickler(pickle.Pickler):
                 "Please file an issue."
             )
 
-        metadata = extract_tensor_metadata_for_cache_key(t)
         return (_ident, (TensorMetadataAndValues(metadata, values),))
-
-    def _reduce_parameter(
-        self, p: torch.nn.parameter.Parameter
-    ) -> Tuple[Callable[[T], T], Tuple[Union[TensorMetadata, TensorMetadataAndValues]]]:
-        from .graph import GraphLowering
-
-        # If this is a non-inlined frozen parameter, we consider the metadata only.
-        if p in self._frozen_params and not GraphLowering.can_inline_constant(p):
-            metadata = extract_tensor_metadata_for_cache_key(p)
-            return (_ident, (metadata,))
-        else:
-            return self._reduce_tensor(p)
 
     def _reduce_symint(self, s: SymInt) -> tuple[Callable[[T], T], tuple[str]]:
         """
@@ -1067,6 +1054,13 @@ class FxGraphCache:
 
         try:
             artifact_path = graph.after_deserialization(constants)
+
+            from .graph import GraphLowering
+
+            # This is used by tests to check the output for specific details.
+            if GraphLowering.save_output_code is not None:
+                GraphLowering.save_output_code(graph.source_code)
+
         except OSError:
             # Not expected, but in case the PyCodeCache entry is removed from
             # underneath us, treat it as a cache miss and recompile.
@@ -1650,8 +1644,6 @@ class AotCodeCompiler:
             if config.aot_inductor.force_mmap_weights:
                 use_mmap_weights = True
 
-            # precompile the AOT header for this device
-            header_file = _get_cpp_wrapper_header(device_type, aot_mode=graph.aot_mode)
             compile_command = {
                 "vec_isa": picked_vec_isa,
                 "device_type": device_type,
@@ -1663,14 +1655,20 @@ class AotCodeCompiler:
                 compile_only=True,
                 **compile_command,  # type: ignore[arg-type]
             )
-            object_build_options.set_precompiled_header(
-                _precompile_header(
-                    header_file,
-                    vec_isa_cmd_line,
-                    object_build_options.get_compiler(),
-                    compile_command,
+
+            # potentially, precompile the AOT header for this device
+            if config.aot_inductor.precompile_headers:
+                header_file = _get_cpp_wrapper_header(
+                    device_type, aot_mode=graph.aot_mode
                 )
-            )
+                object_build_options.set_precompiled_header(
+                    _precompile_header(
+                        header_file,
+                        vec_isa_cmd_line,
+                        object_build_options.get_compiler(),
+                        compile_command,
+                    )
+                )
 
             object_builder = CppBuilder(
                 name=str(cpp_path_operator.stem),
@@ -1964,7 +1962,6 @@ def custom_op_wrapper(op: str, *args: Any) -> Union[list[c_void_p], c_void_p]:
 # specific compiler version and set of flags.  We explicitly use default_cache_dir here
 # because these headers need to be global, rather than ignored by fresh_inductor_cache.
 _HEADER_DIR = os.path.join(default_cache_dir(), "precompiled_headers")
-_COMPILED_HEADERS: OrderedSet[str] = OrderedSet()
 
 
 def _precompile_header(
@@ -1977,27 +1974,23 @@ def _precompile_header(
         extra=f"{hashable_cmd_line} {compiler_version} {torch.version.__version__} {torch.version.build_uuid}",
         specified_dir=_HEADER_DIR,
     )
-
-    if header_hash not in _COMPILED_HEADERS:
-        header_build_option = CppTorchDeviceOptions(
-            precompiling=True,
-            **compile_command,
-        )
-        cpp_builder = CppBuilder(
-            name=header_full_path,
-            sources=header_full_path,
-            BuildOption=header_build_option,
-        )
-        # _worker_compile_cpp will automatically ignore any compilation whose result
-        # already exists, so this is safe to do anytime the hash is not in
-        # _COMPILED_HEADERS.
-        _worker_compile_cpp(
-            os.path.join(get_lock_dir(), f"{header_hash}.lock"),
-            cpp_builder,
-            header_full_path,
-            cpp_builder.get_target_file_path(),
-        )
-        _COMPILED_HEADERS.add(header_hash)
+    header_build_option = CppTorchDeviceOptions(
+        precompiling=True,
+        **compile_command,
+    )
+    cpp_builder = CppBuilder(
+        name=header_full_path,
+        sources=header_full_path,
+        BuildOption=header_build_option,
+    )
+    # _worker_compile_cpp will automatically ignore any compilation whose result already
+    # exists, so this is always safe.
+    _worker_compile_cpp(
+        os.path.join(get_lock_dir(), f"{header_hash}.lock"),
+        cpp_builder,
+        header_full_path,
+        cpp_builder.get_target_file_path(),
+    )
 
     return header_full_path
 
@@ -2096,7 +2089,9 @@ class CppCodeCache:
             lib = None
 
             # if requested, pre-compile any headers
-            if header_file := cls._get_uncompiled_header(device_type):
+            if config.cpp_cache_precompile_headers and (
+                header_file := cls._get_uncompiled_header(device_type)
+            ):
                 cpp_build_option.set_precompiled_header(
                     _precompile_header(
                         header_file,
