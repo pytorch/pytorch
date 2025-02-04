@@ -882,7 +882,7 @@ def solve_min_cut(
         import networkx as nx
     except ImportError as e:
         raise RuntimeError(
-            "Need networkx installed to perform smart recomputation " "heuristics"
+            "Need networkx installed to perform smart recomputation heuristics"
         ) from e
 
     def is_materialized_backwards(node):
