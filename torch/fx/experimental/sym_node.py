@@ -497,10 +497,8 @@ class SymNode:
             "hint": str(self.hint),
             "file": file,
             "line": line,
-            "user_stack": structured.from_traceback(TracingContext.extract_stack()),
-            "stack": structured.from_traceback(
-                CapturedTraceback.extract(skip=1).summary()
-            ),
+            "framework_stack": "".join(CapturedTraceback.extract(cpp=True).format()),
+            "user_stack": "".join(TracingContext.extract_stack().format())
         }
         import json
         print(json.dumps(out))
@@ -535,10 +533,12 @@ class SymNode:
             "hint": str(self.hint),
             "file": file,
             "line": line,
-            "user_stack": structured.from_traceback(TracingContext.extract_stack()),
-            "stack": structured.from_traceback(
-                CapturedTraceback.extract(skip=1).summary()
-            ),
+            "framework_stack": "".join(CapturedTraceback.extract(cpp=True).format()),
+            "user_stack": "".join(TracingContext.extract_stack().format())
+            # "user_stack": structured.from_traceback(TracingContext.extract_stack()),
+            # "stack": structured.from_traceback(
+            #     CapturedTraceback.extract(skip=1).summary()
+            # ),
         }
         import json
         print(json.dumps(out))
@@ -553,7 +553,6 @@ class SymNode:
             raise
 
     def expect_true(self, file, line):
-        import fbvscode; fbvscode.set_trace()
         from torch.fx.experimental.symbolic_shapes import free_unbacked_symbols
         from torch._guards import ShapeGuard, SLoc, Source, TracingContext
         from torch.utils._traceback import CapturedTraceback, format_frame
@@ -565,10 +564,8 @@ class SymNode:
             "hint": str(self.hint),
             "file": file,
             "line": line,
-            "user_stack": structured.from_traceback(TracingContext.extract_stack()),
-            "stack": structured.from_traceback(
-                CapturedTraceback.extract(skip=1).summary()
-            ),
+            "framework_stack": "".join(CapturedTraceback.extract(cpp=True).format()),
+            "user_stack": "".join(TracingContext.extract_stack().format())
         }
         import json
         print(json.dumps(out))
@@ -601,10 +598,8 @@ class SymNode:
             "hint": str(self.hint),
             "file": file,
             "line": line,
-            "user_stack": structured.from_traceback(TracingContext.extract_stack()),
-            "stack": structured.from_traceback(
-                CapturedTraceback.extract(skip=1).summary()
-            ),
+            "framework_stack": "".join(CapturedTraceback.extract(cpp=True).format()),
+            "user_stack": "".join(TracingContext.extract_stack().format())
         }
         import json
         print(json.dumps(out))
