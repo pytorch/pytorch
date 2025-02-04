@@ -94,7 +94,7 @@ class ScheduleTest(MultiProcContinousTest):
         )
 
         # Attach to a schedule
-        schedule = ScheduleClass(stage, num_microbatches)
+        schedule = ScheduleClass(stage, num_microbatches, scale_grads=False)
 
         # Run
         num_iters = 20
@@ -143,7 +143,7 @@ class ScheduleTest(MultiProcContinousTest):
         )
 
         # Attach to a schedule
-        schedule = ScheduleClass(stage, chunks, loss_fn=loss_fn)
+        schedule = ScheduleClass(stage, chunks, loss_fn=loss_fn, scale_grads=False)
 
         # Run
         for _ in range(20):
@@ -183,7 +183,7 @@ class ScheduleTest(MultiProcContinousTest):
         )
 
         # Attach to a schedule
-        schedule = ScheduleClass(stage, chunks, loss_fn=loss_fn)
+        schedule = ScheduleClass(stage, chunks, loss_fn=loss_fn, scale_grads=False)
 
         # Run
         if self.rank == 0:
@@ -244,7 +244,7 @@ class ScheduleTest(MultiProcContinousTest):
         )
 
         # Attach to a schedule
-        schedule = ScheduleClass(stage, chunks, loss_fn=loss_fn)
+        schedule = ScheduleClass(stage, chunks, loss_fn=loss_fn, scale_grads=False)
 
         # Run
         stage_module = pipe.get_stage_module(self.rank)
@@ -328,7 +328,7 @@ class ScheduleTest(MultiProcContinousTest):
         )
 
         # Attach to a schedule
-        schedule = ScheduleClass(stage, chunks, loss_fn=loss_fn)
+        schedule = ScheduleClass(stage, chunks, loss_fn=loss_fn, scale_grads=False)
 
         # Run
         for _ in range(2):
@@ -423,7 +423,9 @@ class ScheduleTest(MultiProcContinousTest):
         ]
 
         # Attach to a schedule
-        schedule = ScheduleClass(stages, num_microbatches, loss_fn=loss_fn)
+        schedule = ScheduleClass(
+            stages, num_microbatches, loss_fn=loss_fn, scale_grads=False
+        )
         if use_new_runtime:
             old_schedule = schedule
             tmp_schedule = _PipelineScheduleRuntime(
@@ -431,6 +433,7 @@ class ScheduleTest(MultiProcContinousTest):
                 num_microbatches,
                 loss_fn=loss_fn,
                 stage_index_to_group_rank=old_schedule.stage_index_to_group_rank,
+                scale_grads=False,
             )
             tmp_schedule._load_actions(old_schedule.pipeline_order)
             # test that csv round-trip works for compute_comms schedule
@@ -439,6 +442,7 @@ class ScheduleTest(MultiProcContinousTest):
                 num_microbatches,
                 loss_fn=loss_fn,
                 stage_index_to_group_rank=old_schedule.stage_index_to_group_rank,
+                scale_grads=False,
             )
             with tempfile.NamedTemporaryFile() as f:
                 tmp_schedule._dump_csv(f.name)
@@ -449,6 +453,7 @@ class ScheduleTest(MultiProcContinousTest):
                 num_microbatches,
                 loss_fn=loss_fn,
                 stage_index_to_group_rank=old_schedule.stage_index_to_group_rank,
+                scale_grads=False,
             )
             one_more_schedule._load_actions(
                 schedule.pipeline_order_with_comms, format="compute_comms"
@@ -563,7 +568,12 @@ class ScheduleTest(MultiProcContinousTest):
             for stage_module, stage_idx in zip(stage_modules, rank_stages[self.rank])
         ]
 
-        schedule = ScheduleClass(stages, num_microbatches, loss_fn=loss_fn)
+        # We set scale_grads=False since we use a loss function that sums instead of mean-reduces
+        # (note: normally we recommend using mean-reduce loss functions, but we preserve at least one test case
+        #        using sum scaling for completeness)
+        schedule = ScheduleClass(
+            stages, num_microbatches, loss_fn=loss_fn, scale_grads=False
+        )
 
         # Run reference
         ref_x = x.detach().clone().requires_grad_(x.requires_grad)
@@ -661,7 +671,9 @@ class ScheduleTest(MultiProcContinousTest):
         ]
 
         # Attach to a schedule
-        schedule = ScheduleClass(stages, num_microbatches, loss_fn=loss_fn)
+        schedule = ScheduleClass(
+            stages, num_microbatches, loss_fn=loss_fn, scale_grads=False
+        )
         assert isinstance(schedule, _PipelineScheduleRuntime)
 
         # Run
@@ -769,6 +781,7 @@ class ScheduleTest(MultiProcContinousTest):
             num_microbatches,
             stage_index_to_group_rank=stage_index_to_group_rank,
             loss_fn=loss_fn,
+            scale_grads=False,
         )
 
         if use_new_runtime:
@@ -897,7 +910,9 @@ class ScheduleTest(MultiProcContinousTest):
         ]
 
         # Attach to a schedule
-        schedule = ScheduleClass(stages, chunks, loss_fn=full_loss_fn)
+        schedule = ScheduleClass(
+            stages, chunks, loss_fn=full_loss_fn, scale_grads=False
+        )
 
         for _ in range(2):
             # Zero gradients
