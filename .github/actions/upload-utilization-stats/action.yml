@@ -30,9 +30,9 @@ runs:
     - name: Print Inputs
       shell: bash
       run: |
-        echo "workflow_id: ${{github.event.inputs.workflow_runner_id}}"
-        echo "workflow_attempt: ${{github.event.inputs.workflow_attempt}}"
-        echo "workflow_Name: ${{github.event.inputs.workflow_name}}"
-        echo "job_id: ${{github.event.inputs.job_id}}"
-        echo "job_name:  ${{github.event.inputs.job_name}}"
+        echo "workflow_id: ${{inputs.workflow_runner_id}}"
+        echo "workflow_attempt: ${{inputs.workflow_attempt}}"
+        echo "workflow_Name: ${{inputs.workflow_name}}"
+        echo "job_id: ${{inputs.job_id}}"
+        echo "job_name:  ${{inputs.job_name}}"
 # TODO():add upload utilization tests script
