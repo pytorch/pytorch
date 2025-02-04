@@ -1,0 +1,152 @@
+from typing import Any
+from typing_extensions import assert_type
+
+from torch import randn, Tensor
+
+
+TENSOR, INT, FLOAT, BOOL = randn(3), 2, 1.5, True
+
+# Test deduced types of arithmetic operations between tensors, ints, floats and bools
+# The expected type should always be `Tensor`: `Any` and `bool` below are wrong.
+# See https://github.com/pytorch/pytorch/issues/145838
+
+# Unary ops
+
+assert_type(+TENSOR, Tensor)
+assert_type(-TENSOR, Tensor)
+assert_type(~TENSOR, Tensor)
+
+# Binary ops
+
+assert_type(TENSOR == TENSOR, Tensor)
+assert_type(TENSOR != TENSOR, Tensor)
+assert_type(TENSOR < TENSOR, Tensor)
+assert_type(TENSOR > TENSOR, Tensor)
+assert_type(TENSOR <= TENSOR, Tensor)
+assert_type(TENSOR >= TENSOR, Tensor)
+assert_type(TENSOR + TENSOR, Tensor)
+assert_type(TENSOR - TENSOR, Tensor)
+assert_type(TENSOR * TENSOR, Tensor)
+assert_type(TENSOR // TENSOR, Any)
+assert_type(TENSOR / TENSOR, Tensor)
+assert_type(TENSOR % TENSOR, Tensor)
+assert_type(TENSOR**TENSOR, Any)
+assert_type(TENSOR << TENSOR, Tensor)
+assert_type(TENSOR >> TENSOR, Tensor)
+assert_type(TENSOR & TENSOR, Tensor)
+assert_type(TENSOR | TENSOR, Tensor)
+assert_type(TENSOR ^ TENSOR, Tensor)
+
+assert_type(TENSOR == BOOL, Tensor)
+assert_type(TENSOR != BOOL, Tensor)
+assert_type(TENSOR < BOOL, Tensor)
+assert_type(TENSOR > BOOL, Tensor)
+assert_type(TENSOR <= BOOL, Tensor)
+assert_type(TENSOR >= BOOL, Tensor)
+assert_type(TENSOR + BOOL, Tensor)
+assert_type(TENSOR - BOOL, Tensor)
+assert_type(TENSOR * BOOL, Tensor)
+assert_type(TENSOR // BOOL, Any)
+assert_type(TENSOR / BOOL, Tensor)
+assert_type(TENSOR % BOOL, Tensor)
+assert_type(TENSOR**BOOL, Any)
+assert_type(TENSOR << BOOL, Tensor)
+assert_type(TENSOR >> BOOL, Tensor)
+assert_type(TENSOR & BOOL, Tensor)
+assert_type(TENSOR | BOOL, Tensor)
+assert_type(TENSOR ^ BOOL, Tensor)
+
+assert_type(BOOL == TENSOR, bool)
+assert_type(BOOL != TENSOR, bool)
+assert_type(BOOL < TENSOR, Tensor)
+assert_type(BOOL > TENSOR, Tensor)
+assert_type(BOOL <= TENSOR, Tensor)
+assert_type(BOOL >= TENSOR, Tensor)
+assert_type(BOOL + TENSOR, Tensor)
+assert_type(BOOL - TENSOR, Any)
+assert_type(BOOL * TENSOR, Tensor)
+assert_type(BOOL // TENSOR, Any)
+assert_type(BOOL / TENSOR, Any)
+assert_type(BOOL % TENSOR, Any)
+assert_type(BOOL**TENSOR, Any)
+assert_type(BOOL << TENSOR, Any)
+assert_type(BOOL >> TENSOR, Any)
+assert_type(BOOL & TENSOR, Tensor)
+assert_type(BOOL | TENSOR, Tensor)
+assert_type(BOOL ^ TENSOR, Tensor)
+
+assert_type(TENSOR == INT, Tensor)
+assert_type(TENSOR != INT, Tensor)
+assert_type(TENSOR < INT, Tensor)
+assert_type(TENSOR > INT, Tensor)
+assert_type(TENSOR <= INT, Tensor)
+assert_type(TENSOR >= INT, Tensor)
+assert_type(TENSOR + INT, Tensor)
+assert_type(TENSOR - INT, Tensor)
+assert_type(TENSOR * INT, Tensor)
+assert_type(TENSOR // INT, Any)
+assert_type(TENSOR / INT, Tensor)
+assert_type(TENSOR % INT, Tensor)
+assert_type(TENSOR**INT, Any)
+assert_type(TENSOR << INT, Tensor)
+assert_type(TENSOR >> INT, Tensor)
+assert_type(TENSOR & INT, Tensor)
+assert_type(TENSOR | INT, Tensor)
+assert_type(TENSOR ^ INT, Tensor)
+
+assert_type(INT == TENSOR, bool)
+assert_type(INT != TENSOR, bool)
+assert_type(INT < TENSOR, Tensor)
+assert_type(INT > TENSOR, Tensor)
+assert_type(INT <= TENSOR, Tensor)
+assert_type(INT >= TENSOR, Tensor)
+assert_type(INT + TENSOR, Tensor)
+assert_type(INT - TENSOR, Any)
+assert_type(INT * TENSOR, Tensor)
+assert_type(INT // TENSOR, Any)
+assert_type(INT / TENSOR, Any)
+assert_type(INT % TENSOR, Any)
+assert_type(INT**TENSOR, Any)
+assert_type(INT << TENSOR, Any)
+assert_type(INT >> TENSOR, Any)
+assert_type(INT & TENSOR, Any)  # type: ignore[operator]
+assert_type(INT | TENSOR, Any)  # type: ignore[operator]
+assert_type(INT ^ TENSOR, Any)  # type: ignore[operator]
+
+assert_type(TENSOR == FLOAT, Tensor)
+assert_type(TENSOR != FLOAT, Tensor)
+assert_type(TENSOR < FLOAT, Tensor)
+assert_type(TENSOR > FLOAT, Tensor)
+assert_type(TENSOR <= FLOAT, Tensor)
+assert_type(TENSOR >= FLOAT, Tensor)
+assert_type(TENSOR + FLOAT, Tensor)
+assert_type(TENSOR - FLOAT, Tensor)
+assert_type(TENSOR * FLOAT, Tensor)
+assert_type(TENSOR // FLOAT, Any)
+assert_type(TENSOR / FLOAT, Tensor)
+assert_type(TENSOR % FLOAT, Tensor)
+assert_type(TENSOR**FLOAT, Any)
+assert_type(TENSOR << FLOAT, Tensor)
+assert_type(TENSOR >> FLOAT, Tensor)
+assert_type(TENSOR & FLOAT, Tensor)
+assert_type(TENSOR | FLOAT, Tensor)
+assert_type(TENSOR ^ FLOAT, Tensor)
+
+assert_type(FLOAT == TENSOR, bool)
+assert_type(FLOAT != TENSOR, bool)
+assert_type(FLOAT < TENSOR, Tensor)
+assert_type(FLOAT > TENSOR, Tensor)
+assert_type(FLOAT <= TENSOR, Tensor)
+assert_type(FLOAT >= TENSOR, Tensor)
+assert_type(FLOAT + TENSOR, Tensor)
+assert_type(FLOAT - TENSOR, Any)
+assert_type(FLOAT * TENSOR, Tensor)
+assert_type(FLOAT // TENSOR, Any)
+assert_type(FLOAT / TENSOR, Any)
+assert_type(FLOAT % TENSOR, Any)
+assert_type(FLOAT**TENSOR, Any)
+assert_type(FLOAT << TENSOR, Any)
+assert_type(FLOAT >> TENSOR, Any)
+assert_type(FLOAT & TENSOR, Tensor)  # type: ignore[operator]
+assert_type(FLOAT | TENSOR, Tensor)  # type: ignore[operator]
+assert_type(FLOAT ^ TENSOR, Tensor)  # type: ignore[operator]
