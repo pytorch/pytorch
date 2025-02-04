@@ -2248,6 +2248,38 @@ class TestNestedTensorDeviceType(NestedTensorTestCase):
         )
 
     @dtypes(torch.float, torch.double)
+    def test_mamtul_dense_x_njt(self, device, dtype):
+        # T (B, D, E) with NJT (B, *, E, C) broadcasting case
+        # T x NT.tranpose
+        nt = random_nt_from_dims(
+            [3, None, 4], device=device, dtype=dtype, layout=torch.jagged
+        )
+        nt_t = nt.transpose(1, 2)
+        t = torch.randn(3, 5, 4, device=device, dtype=dtype)
+        output = torch.matmul(t, nt_t)
+
+        # should be equivalent to matmul-ing each component with the dense tensor
+        self.assertEqual(nt_t.size(0), output.size(0))
+        for component, t_component, out_component in zip(nt_t, t, output):
+            self.assertEqual(out_component, torch.matmul(t_component, component))
+
+    @dtypes(torch.float, torch.double)
+    def test_mamtul_dense_x_njt_with_broadcasting(self, device, dtype):
+        # T (D, E) with NJT (B, *, E) broadcasting case
+        # T x NT.tranpose
+        nt = random_nt_from_dims(
+            [3, None, 4], device=device, dtype=dtype, layout=torch.jagged
+        )
+        nt_t = nt.transpose(1, 2)
+        t = torch.randn(5, 4, device=device, dtype=dtype)
+        output = torch.matmul(t, nt_t)
+
+        # should be equivalent to matmul-ing each component with the dense tensor
+        self.assertEqual(nt_t.size(0), output.size(0))
+        for component, out_component in zip(nt_t, output):
+            self.assertEqual(out_component, torch.matmul(t, component))
+
+    @dtypes(torch.float, torch.double)
     def test_linear(self, device, dtype):
         a = torch.randn(1, 2, device=device, dtype=dtype)
         b = torch.randn(2, 2, device=device, dtype=dtype)
@@ -3109,6 +3141,57 @@ class TestNestedTensorAutograd(NestedTensorTestCase):
 
         self.assertEqual(torch.nested.to_padded_tensor(nt0.grad, 0.0), pt0.grad)
         self.assertEqual(torch.nested.to_padded_tensor(nt1.grad, 0.0), pt1.grad)
+
+    def test_njt_dense_matmul_gradcheck(self, device):
+        a = torch.randn(2, 6, requires_grad=True, dtype=torch.float64, device=device)
+        b = torch.randn(3, 6, requires_grad=True, dtype=torch.float64, device=device)
+        c = torch.randn(2, 6, requires_grad=True, dtype=torch.float64, device=device)
+        d = torch.randn(3, 6, requires_grad=True, dtype=torch.float64, device=device)
+
+        def grad_test_func(a, b, c, d):
+            nt0 = torch.nested.as_nested_tensor([a, b], layout=torch.jagged)
+            nt1 = torch.nested.nested_tensor_from_jagged(
+                values=torch.cat([c, d], dim=0), offsets=nt0.offsets()
+            )
+            result = torch.matmul(nt0.transpose(1, 2), nt1)
+            return result
+
+        data = (a, b, c, d)
+        assert torch.autograd.gradcheck(grad_test_func, inputs=data)
+
+    def test_njt_dense_matmul_backward(self, device):
+        nt0 = torch.nested.nested_tensor(
+            [torch.randn((2, 6)), torch.randn((3, 6))],
+            requires_grad=True,
+            device=device,
+            layout=torch.jagged,
+        )
+        nt1 = torch.nested.nested_tensor_from_jagged(
+            torch.cat([torch.randn((2, 6)), torch.randn((3, 6))]),
+            offsets=nt0.offsets(),
+        ).requires_grad_(True)
+
+        with torch.no_grad():
+            pt0 = torch.nested.to_padded_tensor(
+                torch.nested.nested_tensor(list(nt0.unbind())), 0.0
+            ).requires_grad_(True)
+            pt1 = torch.nested.to_padded_tensor(
+                torch.nested.nested_tensor(list(nt1.unbind())), 0.0
+            ).requires_grad_(True)
+
+        ynt = torch.matmul(nt0.transpose(-2, -1), nt1)
+        ypt = torch.matmul(pt0.transpose(-2, -1), pt1)
+        ynt.backward(ynt.clone())
+        ypt.backward(ypt.clone())
+
+        nt0_padded_grad = torch.nested.to_padded_tensor(
+            torch.nested.nested_tensor(list(nt0.grad.unbind())), 0.0
+        )
+        nt1_padded_grad = torch.nested.to_padded_tensor(
+            torch.nested.nested_tensor(list(nt1.grad.unbind())), 0.0
+        )
+        self.assertEqual(nt0_padded_grad, pt0.grad)
+        self.assertEqual(nt1_padded_grad, pt1.grad)
 
     def test_nested_tensor_transpose_gradcheck(self, device):
         a = torch.randn(2, 5, requires_grad=True, device=device)
