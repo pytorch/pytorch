@@ -483,11 +483,19 @@ class TestModule(TestCase):
                     output_flattened = pytree.tree_leaves(output)
                     return output_flattened
 
+            def do_check(flat_input):
+                self.assertTrue(
+                    check(
+                        fn_to_gradcheck,
+                        flat_input,
+                        nondet_tol=gradcheck_nondet_tol,
+                        fast_mode=module_info.gradcheck_fast_mode
+                    ))
+
             # check total derivative
             grad_input = input_args + params + tuple(obj for (_, obj) in kwarg_tensors)
             flat_input, flat_spec = pytree.tree_flatten(grad_input)
-
-            self.assertTrue(check(fn_to_gradcheck, flat_input, nondet_tol=gradcheck_nondet_tol))
+            do_check(flat_input)
 
             # check partial derivatives
             old_params_requires_grad = [p.requires_grad for p in params]
@@ -502,14 +510,14 @@ class TestModule(TestCase):
                 p.requires_grad = old
                 grad_input = input_args + params + tuple(obj for (_, obj) in kwarg_tensors)
                 flat_input, flat_spec = pytree.tree_flatten(grad_input)
-                self.assertTrue(check(fn_to_gradcheck, flat_input, nondet_tol=gradcheck_nondet_tol))
+                do_check(flat_input)
                 p.requires_grad = False
 
             for (_, obj), old in zip(kwarg_tensors, old_kwargs_requires_grad):
                 obj.requires_grad = old
                 grad_input = input_args + params + tuple(obj for (_, obj) in kwarg_tensors)
                 flat_input, flat_spec = pytree.tree_flatten(grad_input)
-                self.assertTrue(check(fn_to_gradcheck, flat_input, nondet_tol=gradcheck_nondet_tol))
+                do_check(flat_input)
                 obj.requires_grad = False
 
     @modules(module_db, allowed_dtypes=[torch.double])

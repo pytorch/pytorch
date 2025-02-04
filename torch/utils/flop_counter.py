@@ -2,7 +2,8 @@
 import torch
 from torch.utils.pytree.python import tree_map, tree_flatten, tree_unflatten
 from .module_tracker import ModuleTracker
-from typing import List, Any, Dict, Optional, Union, Tuple, Iterator, TypeVar, Callable
+from typing import Any, Optional, Union, TypeVar, Callable
+from collections.abc import Iterator
 from typing_extensions import ParamSpec
 from collections import defaultdict
 from torch.utils._python_dispatch import TorchDispatchMode
@@ -22,7 +23,7 @@ def get_shape(i):
         return i.shape
     return i
 
-flop_registry: Dict[Any, Any] = {}
+flop_registry: dict[Any, Any] = {}
 
 def shape_wrapper(f):
     @wraps(f)
@@ -89,11 +90,27 @@ def baddbmm_flop(self_shape, a_shape, b_shape, out_shape=None, **kwargs) -> int:
     # Inputs contains the shapes of three tensors.
     return bmm_flop(a_shape, b_shape)
 
+@register_flop_formula(aten._scaled_mm)
+def _scaled_mm_flop(
+    a_shape,
+    b_shape,
+    scale_a_shape,
+    scale_b_shape,
+    bias_shape=None,
+    scale_result_shape=None,
+    out_dtype=None,
+    use_fast_accum=False,
+    out_shape=None,
+    **kwargs,
+) -> int:
+    """Count flops for _scaled_mm."""
+    return mm_flop(a_shape, b_shape)
+
 
 def conv_flop_count(
-    x_shape: List[int],
-    w_shape: List[int],
-    out_shape: List[int],
+    x_shape: list[int],
+    w_shape: list[int],
+    out_shape: list[int],
     transposed: bool = False,
 ) -> int:
     """Count flops for convolution.
@@ -288,7 +305,7 @@ def _unpack_flash_attention_nested_shapes(
     cum_seq_k,
     max_q,
     max_k,
-) -> Iterator[Tuple[Tuple[int, ...], Tuple[int, ...], Tuple[int, ...], Optional[Tuple[int, ...]]]]:
+) -> Iterator[tuple[tuple[int, ...], tuple[int, ...], tuple[int, ...], Optional[tuple[int, ...]]]]:
     """
     Given inputs to a flash_attention_(forward|backward) kernel, this will handle behavior for
     NestedTensor inputs by effectively unbinding the NestedTensor and yielding the shapes for
@@ -334,7 +351,7 @@ def _unpack_efficient_attention_nested_shapes(
     cu_seqlens_k,
     max_seqlen_q,
     max_seqlen_k,
-) -> Iterator[Tuple[Tuple[int, ...], Tuple[int, ...], Tuple[int, ...], Optional[Tuple[int, ...]]]]:
+) -> Iterator[tuple[tuple[int, ...], tuple[int, ...], tuple[int, ...], Optional[tuple[int, ...]]]]:
     """
     Given inputs to a efficient_attention_(forward|backward) kernel, this will handle behavior for
     NestedTensor inputs by effectively unbinding the NestedTensor and yielding the shapes for
@@ -541,6 +558,7 @@ flop_registry = {
     aten.addmm: addmm_flop,
     aten.bmm: bmm_flop,
     aten.baddbmm: baddbmm_flop,
+    aten._scaled_mm: _scaled_mm_flop,
     aten.convolution: conv_flop,
     aten._convolution: conv_flop,
     aten.convolution_backward: conv_backward_flop,
@@ -616,12 +634,12 @@ class FlopCounterMode:
 
     def __init__(
             self,
-            mods: Optional[Union[torch.nn.Module, List[torch.nn.Module]]] = None,
+            mods: Optional[Union[torch.nn.Module, list[torch.nn.Module]]] = None,
             depth: int = 2,
             display: bool = True,
-            custom_mapping: Optional[Dict[Any, Any]] = None):
+            custom_mapping: Optional[dict[Any, Any]] = None):
         super().__init__()
-        self.flop_counts: Dict[str, Dict[Any, int]] = defaultdict(lambda: defaultdict(int))
+        self.flop_counts: dict[str, dict[Any, int]] = defaultdict(lambda: defaultdict(int))
         self.depth = depth
         self.display = display
         self.mode: Optional[_FlopCounterMode] = None
@@ -638,7 +656,7 @@ class FlopCounterMode:
     def get_total_flops(self) -> int:
         return sum(self.flop_counts['Global'].values())
 
-    def get_flop_counts(self) -> Dict[str, Dict[Any, int]]:
+    def get_flop_counts(self) -> dict[str, dict[Any, int]]:
         """Return the flop counts as a dictionary of dictionaries.
 
         The outer
