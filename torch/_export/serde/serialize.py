@@ -11,7 +11,6 @@ import keyword
 import logging
 import math
 import operator
-import re
 import traceback
 import typing
 
@@ -634,9 +633,19 @@ class GraphModuleSerializer(metaclass=Final):
         if unbacked_bindings := node.meta.get("unbacked_bindings"):
             # serialize the symbol names of unbacked bindings;
             # reconstruct the key paths to those symbols when deserializing
-            ret["unbacked_bindings"] = ",".join(
-                u.name for u in unbacked_bindings.keys()
-            )
+            val = node.meta["val"]
+            new_unbacked_bindings = {}
+            for key in unbacked_bindings.values():
+                expr = pytree.key_get(val, key).node.expr
+                if expr.is_symbol and (
+                    expr.name.startswith(prefix_str[SymT.UNBACKED_FLOAT])
+                    or expr.name.startswith(prefix_str[SymT.UNBACKED_INT])
+                ):
+                    new_unbacked_bindings[expr] = key
+            if new_unbacked_bindings:
+                ret["unbacked_bindings"] = ",".join(
+                    u.name for u in new_unbacked_bindings.keys()
+                )
 
         if stack_trace := node.meta.get("stack_trace"):
             ret["stack_trace"] = stack_trace
@@ -1197,7 +1206,7 @@ class GraphModuleSerializer(metaclass=Final):
         elif isinstance(x, ep.SymIntArgument):
             return Argument.create(as_sym_int=SymIntArgument.create(as_name=x.name))
         elif isinstance(x, ep.SymFloatArgument):
-            return Argument.create(as_sym_Float=SymFloatArgument.create(as_name=x.name))
+            return Argument.create(as_sym_float=SymFloatArgument.create(as_name=x.name))
         elif isinstance(x, ep.ConstantArgument):
             return self.serialize_input(x.value)
         elif isinstance(x, ep.CustomObjArgument):
@@ -2489,17 +2498,22 @@ class GraphModuleDeserializer(metaclass=Final):
             def import_nn_module_stack(key, path, ty):
                 return key, (path, ty)
 
-            # Helper function that splits strings by commas except for those
-            # encapsulated by parens, which are valid traces.
-            # TODO: Currently this is needed due to indexing Sequential
-            # layers introducing names in the form "layer.slice(1, None, None)".
-            # If that naming is improved, this fancier splitting can probably be
-            # reverted to a simple split by comma.
+            # Helper function to split string by commas, accounting for nested parentheses/brackets
             def metadata_split(metadata):
-                # Remove the parentheses and commas inside them
-                metadata = re.sub(r'\(.*?\)', '', metadata)
-                # Split the string by comma, except for those inside parentheses
-                return re.split(r'(?<!\()\s*,\s*(?!\()', metadata)
+                out = []
+                start, n = 0, 0
+                a, b = "[(", ")]"
+                for end, c in enumerate(metadata):
+                    if c in a:
+                        n += 1
+                    elif c in b:
+                        n -= 1
+                    elif c == "," and n == 0:
+                        out.append(metadata[start : end])
+                        start = end + 1
+                out.append(metadata[start:])
+                assert len(out) == 3
+                return out
 
             nn_module_stack = dict(
                 import_nn_module_stack(*metadata_split(item))
