@@ -372,8 +372,6 @@ class MetalKernel(SIMDKernel):
     ) -> None:
         super().__init__(tiling, **kwargs)
         self.compute = self.body
-        self.loads = self.body
-        self.stores = self.body
 
     def dtype_to_str(self, dtype: torch.dtype) -> str:
         return DTYPE_TO_METAL[dtype]
@@ -383,7 +381,7 @@ class MetalKernel(SIMDKernel):
         var = self.args.input(name)
         index = self.prepare_indexing(index)
         line = f"{var}[{self.index_to_str(index)}]"
-        return self.cse.generate(self.body, line, dtype=V.graph.get_dtype(name))
+        return self.cse.generate(self.loads, line, dtype=V.graph.get_dtype(name))
 
     def store(
         self, name: str, index: sympy.Expr, value: CSEVariable, mode: StoreMode = None
@@ -392,12 +390,12 @@ class MetalKernel(SIMDKernel):
         index = self.prepare_indexing(index)
         dtype_str = self.dtype_to_str(V.graph.get_dtype(name))
         line = f"{var}[{self.index_to_str(index)}] = static_cast<{dtype_str}>({value});"
-        self.body.writeline(DeferredLine(name, line))
+        self.stores.writeline(DeferredLine(name, line))
 
     def codegen_iteration_ranges_entry(self, entry: IterationRangesEntry) -> None:
         index_expr = self.rename_indexing(entry.expr)
         index_str = self.sexpr(index_expr)  # type: ignore[misc]
-        self.body.writeline(f"{self.index_dtype} {entry.name} = {index_str};")
+        self.loads.writeline(f"{self.index_dtype} {entry.name} = {index_str};")
 
     def codegen_kernel(self, name: Optional[str] = None) -> str:
         """Called at the end to generate a final kernel string"""
@@ -425,24 +423,37 @@ class MetalKernel(SIMDKernel):
                     code.writeline(f"constant {dtype_str}* {inner},")
                 for outer, inner in self.args.sizevars.items():
                     code.writeline(f"constant long& {inner},")
-                if len(idx_var_names) == 1:
+                assert len(idx_var_names) < 4, "Up to 3 index variables are supported"
+                thread_pos_dtype = (
+                    f"uint{len(idx_var_names)}" if len(idx_var_names) > 1 else "uint"
+                )
+                thread_pos_var_name = (
+                    idx_var_names[0] if len(idx_var_names) == 1 else "thread_pos"
+                )
+                thread_pos_suffix = "," if self.inside_reduction else ""
+                code.writeline(
+                    f"{thread_pos_dtype} {thread_pos_var_name} [[thread_position_in_grid]]{thread_pos_suffix}"
+                )
+                if self.inside_reduction:
                     code.writeline(
-                        f"uint {idx_var_names[0]} [[thread_position_in_grid]]"
+                        f"{thread_pos_dtype} group_pos [[thread_position_in_threadgroup]]"
                     )
-                else:
-                    assert (
-                        len(idx_var_names) < 4
-                    ), "Up to 3 index variables are supported"
-                    code.writeline(
-                        f"uint{len(idx_var_names)} thread_pos [[thread_position_in_grid]]"
-                    )
-
             code.writeline(") {")
             with code.indent():
                 if len(idx_var_names) > 1:
                     for idx, name in enumerate(idx_var_names):
                         code.writeline(f"auto {name} = thread_pos.{chr(120 + idx)};")
+                code.splice(self.loads)
+                if self.inside_reduction:
+                    code.writeline(
+                        "threadgroup_barrier(metal::mem_flags::mem_threadgroup);"
+                    )
                 code.splice(self.body)
+                if self.inside_reduction:
+                    code.writeline(
+                        "threadgroup_barrier(metal::mem_flags::mem_threadgroup);"
+                    )
+                code.splice(self.stores)
             code.writeline("}")
         code.writeline('""")')
 
@@ -457,6 +468,9 @@ class MetalKernel(SIMDKernel):
         if len(self.active_range_trees()) > 0:
             threads = [self.pexpr(v.numel) for v in self.active_range_trees()]  # type: ignore[misc]
             args += [f"threads=[{', '.join(threads)}]"]
+        if self.inside_reduction:
+            threads = [self.pexpr(v.numel) if v.is_reduction else "1" for v in self.active_range_trees()]  # type: ignore[misc]
+            args += [f"group_size=[{', '.join(threads)}]"]
 
         wrapper.generate_kernel_call(
             name,
