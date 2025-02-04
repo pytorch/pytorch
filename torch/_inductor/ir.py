@@ -31,6 +31,7 @@ import sympy
 from sympy import Expr, Integer, Symbol
 
 import torch._export.serde.schema as export_schema
+import torch._library.utils as library_utils
 import torch._logging
 import torch.fx
 import torch.utils._pytree as pytree
@@ -6382,13 +6383,7 @@ class FallbackKernel(ExternKernelAlloc):
             # Assertions to make sure we didn't mismatch args
             if isinstance(info.type, torch.ListType):
                 assert isinstance(arg, (list, tuple))
-            is_optional_tensor = isinstance(
-                info.type, torch.OptionalType
-            ) and isinstance(info.type.getElementType(), torch.TensorType)
-            is_list_tensor = isinstance(info.type, torch.ListType) and isinstance(
-                info.type.getElementType(), torch.TensorType
-            )
-            if is_optional_tensor or isinstance(info.type, torch.TensorType):
+            if library_utils.is_tensor_like_type(info.type):
                 # PyTorch also accepts None and scalar types for args marked as "Tensor".
                 # We're not going to check all of them here.
                 assert not isinstance(arg, (tuple, list))
@@ -6405,11 +6400,12 @@ class FallbackKernel(ExternKernelAlloc):
                         MutationOutput(NoneLayout(device=t.get_device()), t, self)
                     )
 
-            if is_list_tensor:
-                for tensor_arg in arg:
-                    add_alias(tensor_arg)
+            if library_utils.is_tensorlist_like_type(info.type):
+                if arg is not None:
+                    for optional_tensor_arg in arg:
+                        add_alias(optional_tensor_arg)
             else:
-                assert isinstance(info.type, torch.TensorType) or is_optional_tensor
+                assert library_utils.is_tensor_like_type(info.type)
                 add_alias(arg)
 
         for info, arg in torch._library.utils.zip_schema(schema, args, kwargs):

@@ -8493,6 +8493,39 @@ class CommonTemplate:
             f(*args)
             self.assertEqual(cloned_args, args)
 
+    @skip_if_cpp_wrapper(
+        "Without major redesign, cpp_wrapper will not support custom ops that are "
+        "defined in Python."
+    )
+    @config.patch(implicit_fallbacks=True)
+    def test_fallback_mutable_op_list_tensor(self):
+        @torch.library.custom_op(
+            "mylib::mysin",
+            mutates_args=["out_list"],
+            schema="(Tensor x, Tensor(a!)[]? out_list) -> Tensor",
+        )
+        def mysin(x, out_list) -> torch.Tensor:
+            r = x.sin()
+            if out_list is not None:
+                out_list[0].copy_(r)
+            return r
+
+        @mysin.register_fake
+        def _(x, out_list) -> torch.Tensor:
+            return torch.empty_like(x)
+
+        def fn(x):
+            x = x * 3
+            s = [torch.empty_like(x)]
+            x = mysin(x, s)
+            x = x / 3
+            return x, s[0]
+
+        x = torch.randn(3, requires_grad=False)
+        expected = fn(x)
+        result = torch.compile(fn, fullgraph=True)(x)
+        self.assertEqual(result, expected)
+
     @config.patch(implicit_fallbacks=True)
     def test_fallback_mutable_op_with_return(self):
         with torch.library._scoped_library("mylib", "FRAGMENT") as m:
