@@ -7,7 +7,7 @@ if not exist "%DOWNLOADS_DIR%" mkdir %DOWNLOADS_DIR%
 if not exist "%DEPENDENCIES_DIR%" mkdir %DEPENDENCIES_DIR%
 
 :: Set download URL for the sccache
-set DOWNLOAD_URL="https://github.com/mozilla/sccache/releases/download/v0.8.1/sccache-v0.8.1-x86_64-pc-windows-msvc.zip"
+set DOWNLOAD_URL="https://github.com/mozilla/sccache/releases/download/v0.9.1/sccache-v0.9.1-x86_64-pc-windows-msvc.zip"
 set INSTALLER_FILE=%DOWNLOADS_DIR%\sccache.zip
 
 :: Download installer
