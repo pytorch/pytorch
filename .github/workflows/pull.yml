@@ -383,6 +383,9 @@ jobs:
 
   win-arm64-vs2022-cpu-py3-build:
     if: github.event_name == 'pull_request'
+    permissions:
+      id-token: write
+      contents: read
     name: win-arm64-vs2022-cpu-py3
     uses: ./.github/workflows/_win-arm64-build.yml
     needs: get-label-type

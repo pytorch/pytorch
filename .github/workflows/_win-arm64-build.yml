@@ -69,6 +69,10 @@ env:
   MSVC_VERSION: latest
   BUILD_TYPE: release
 
+permissions:
+  id-token: write
+  contents: read
+
 jobs:
   build:
     # Don't run on forked repos.
@@ -81,12 +85,11 @@ jobs:
       run:
         shell: bash
     steps:
-      # DISABLED: Since it requires id-token: write permission?
-      # - name: Configure AWS credentials(PyTorch account)
-      #   uses: aws-actions/configure-aws-credentials@v3
-      #   with:
-      #     role-to-assume: arn:aws:iam::308535385114:role/gha_workflow_s3_ossci_linux_windows_read_write
-      #     aws-region: us-east-1
+      - name: Configure AWS credentials(PyTorch account)
+        uses: aws-actions/configure-aws-credentials@v3
+        with:
+          role-to-assume: arn:aws:iam::308535385114:role/gha_workflow_s3_ossci_linux_windows_read_write
+          aws-region: us-east-1
       - name: Git checkout PyTorch
         uses: actions/checkout@v4
         with:
@@ -142,10 +145,9 @@ jobs:
           BUILD_WHEEL: 1
           MAX_JOBS: 8
           PYTHON_VERSION: "3.12"
-          # DISABLED: since sccache can't connect to the bucket
-          # SCCACHE_BUCKET: "ossci-compiler-cache"
-          # SCCACHE_S3_KEY_PREFIX: ${{ github.workflow }}
-          # SCCACHE_REGION: us-east-1
+          SCCACHE_BUCKET: "ossci-compiler-cache"
+          SCCACHE_S3_KEY_PREFIX: ${{ github.workflow }}
+          SCCACHE_REGION: us-east-1
           VC_PRODUCT: "BuildTools"
           VC_VERSION: ""
           VC_YEAR: "${{ inputs.vc-year }}"
