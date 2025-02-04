@@ -4448,7 +4448,7 @@ class DefaultsTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(fn(inputs, x), opt_fn(inputs, x))
 
     def test_udf_tuple(self):
-        class MyTuple(tuple):
+        class MyTuple(tuple):  # noqa: SLOT001
             def len_mulitply_2(self):
                 return len(self) * 2
 
@@ -4475,7 +4475,7 @@ class DefaultsTests(torch._dynamo.test_case.TestCase):
         self.assertTrue(res_tup.checked)
 
     def test_udf_tuple_reconstruction(self):
-        class MyTuple(tuple):
+        class MyTuple(tuple):  # noqa: SLOT001
             pass
 
         def fn(x, klass):
