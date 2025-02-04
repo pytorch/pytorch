@@ -274,6 +274,7 @@ class FlatArgsAdapter(abc.ABC):
         target_spec: pytree.TreeSpec,
         input_spec: pytree.TreeSpec,
         input_args: list[Any],
+        metadata: Optional[dict[str, Any]] = None,
     ) -> list[Any]:
         """NOTE: This adapter may mutate given ``input_args_with_path``."""
         ...
@@ -530,6 +531,7 @@ class UnflattenedModule(torch.nn.Module):
                 target_spec=signature.in_spec,
                 input_spec=in_spec,
                 input_args=flat_args,
+                metadata=self.meta,
             )
 
             if len(flat_args) != signature.in_spec.num_leaves:
