@@ -8,7 +8,7 @@ import logging
 import re
 from collections import defaultdict
 from math import inf
-from typing import Any, Callable, cast, Optional, TYPE_CHECKING, Union
+from typing import Any, Callable, Optional, TYPE_CHECKING, Union
 
 import sympy
 
@@ -39,7 +39,6 @@ from .common import (
     CSEVariable,
     DeferredLine,
     IndentedBuffer,
-    KernelArgType,
     OpOverrides,
     PythonPrinter,
     SizeArg,
@@ -1384,7 +1383,7 @@ class HalideKernel(SIMDKernel):
                 assert "in_ptr" in arg.name
                 return 0
 
-        result: list[tuple[Optional[str], KernelArgType]] = []
+        result = []
         _, a, b, _ = self.args.python_argdefs()
         for call_str, arg in sorted(zip(a, b), key=arg_order):
             result.append((call_str, arg))
@@ -1528,7 +1527,7 @@ class HalideKernel(SIMDKernel):
         code.splice(self.indexing_code)
 
         def update_index(m):
-            var = cast(HalideCSEVariable, self.cse.varname_map[m.group(1)])
+            var = self.cse.varname_map[m.group(1)]
             assert var.used_dims is not None, var
             return str(var)
 
