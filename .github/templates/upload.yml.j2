@@ -74,7 +74,5 @@
       {%- endif %}
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
-      conda-pytorchbot-token: ${{ secrets.CONDA_PYTORCHBOT_TOKEN }}
-      conda-pytorchbot-token-test: ${{ secrets.CONDA_PYTORCHBOT_TOKEN_TEST }}
     uses: ./.github/workflows/_binary-upload.yml
 {%- endmacro %}

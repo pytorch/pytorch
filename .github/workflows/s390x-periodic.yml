@@ -1,0 +1,77 @@
+name: s390x-periodic
+
+on:
+  schedule:
+    # We have several schedules so jobs can check github.event.schedule to activate only for a fraction of the runs.
+    # Also run less frequently on weekends.
+    - cron: 29 8 * * *  # about 1:29am PDT, for mem leak check and rerun disabled tests
+  push:
+    tags:
+      - ciflow/periodic/*
+      - ciflow/s390/*
+    branches:
+      - release/*
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref_name }}-${{ github.ref_type == 'branch' && github.sha }}-${{ github.event_name == 'workflow_dispatch' }}-${{ github.event_name == 'schedule' }}-${{ github.event.schedule }}
+  cancel-in-progress: true
+
+permissions: read-all
+
+jobs:
+  llm-td:
+    if: github.repository_owner == 'pytorch'
+    name: before-test
+    uses: ./.github/workflows/llm_td_retrieval.yml
+    permissions:
+      id-token: write
+      contents: read
+
+  target-determination:
+    name: before-test
+    uses: ./.github/workflows/target_determination.yml
+    needs: llm-td
+    permissions:
+      id-token: write
+      contents: read
+
+  linux-manylinux-2_28-py3-cpu-s390x-build:
+    if: github.repository_owner == 'pytorch'
+    name: linux-manylinux-2_28-py3-cpu-s390x
+    uses: ./.github/workflows/_linux-build.yml
+    with:
+      build-environment: linux-s390x-binary-manywheel
+      docker-image-name: pytorch/manylinuxs390x-builder:cpu-s390x-main
+      runner: linux.s390x
+      test-matrix: |
+        { include: [
+          { config: "default", shard: 1,  num_shards: 10, runner: "linux.s390x" },
+          { config: "default", shard: 2,  num_shards: 10, runner: "linux.s390x" },
+          { config: "default", shard: 3,  num_shards: 10, runner: "linux.s390x" },
+          { config: "default", shard: 4,  num_shards: 10, runner: "linux.s390x" },
+          { config: "default", shard: 5,  num_shards: 10, runner: "linux.s390x" },
+          { config: "default", shard: 6,  num_shards: 10, runner: "linux.s390x" },
+          { config: "default", shard: 7,  num_shards: 10, runner: "linux.s390x" },
+          { config: "default", shard: 8,  num_shards: 10, runner: "linux.s390x" },
+          { config: "default", shard: 9,  num_shards: 10, runner: "linux.s390x" },
+          { config: "default", shard: 10, num_shards: 10, runner: "linux.s390x" },
+        ]}
+    secrets: inherit
+
+  linux-manylinux-2_28-py3-cpu-s390x-test:
+    permissions:
+      id-token: write
+      contents: read
+    name: linux-manylinux-2_28-py3-cpu-s390x
+    uses: ./.github/workflows/_linux-test.yml
+    needs:
+      - linux-manylinux-2_28-py3-cpu-s390x-build
+      - target-determination
+    with:
+      build-environment: linux-s390x-binary-manywheel
+      docker-image: pytorch/manylinuxs390x-builder:cpu-s390x-main
+      test-matrix: ${{ needs.linux-manylinux-2_28-py3-cpu-s390x-build.outputs.test-matrix }}
+      timeout-minutes: 480
+      use-gha: "yes"
+    secrets: inherit

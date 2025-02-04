@@ -348,6 +348,23 @@ class TensorPropertySource(ChainedSource):
 
 
 @dataclasses.dataclass(frozen=True)
+class IndexedSource(ChainedSource):
+    idx: int
+
+    def __post_init__(self):
+        assert self.base is not None
+
+    def reconstruct(self, codegen):
+        raise NotImplementedError
+
+    def guard_source(self):
+        return self.base.guard_source()
+
+    def name(self):
+        return f"({self.idx}, {self.base.name()})"
+
+
+@dataclasses.dataclass(frozen=True)
 class NegateSource(ChainedSource):
     def __post_init__(self):
         assert self.base is not None
@@ -778,6 +795,23 @@ def is_from_optimizer_source(source: Source):
 def is_from_defaults(source: Source):
     if isinstance(source, DefaultsSource):
         return True
+
+    # Accessed with func.__kwdefaults__["foo"]
+    if (
+        isinstance(source, DictGetItemSource)
+        and isinstance(source.base, AttrSource)
+        and source.base.member == "__kwdefaults__"
+    ):
+        return True
+
+    # Accessed with func.__defaults__[0]
+    if (
+        isinstance(source, GetItemSource)
+        and isinstance(source.base, AttrSource)
+        and source.base.member == "__defaults__"
+    ):
+        return True
+
     if isinstance(source, ChainedSource):
         return is_from_defaults(source.base)
     return False
