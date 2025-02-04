@@ -224,7 +224,7 @@ def assign_memory_planning_info_for_scheduler_nodes(
             elif dep.name in name_to_freeable_input_buf:
                 pred_buffers.add(name_to_freeable_input_buf[dep.name])
         pred_nodes = OrderedSet(
-            name_to_fused_node[pred_buffer.defining_op.get_name()]
+            name_to_fused_node[pred_buffer.defining_op_name()]
             for pred_buffer in pred_buffers
             if (isinstance(pred_buffer, SchedulerBuffer))
         )
@@ -411,7 +411,7 @@ def topological_sort_lpmf(
 
     # compute the amount of memory that is allocated when a node is scheduled
     # and the amount of memory that can be freed when a node is scheduled
-    for i, node in enumerate(nodes):
+    for node in nodes:
         # 1. if a buffer read by this node is last used by this node
         for buf in node.mpi_node.pred_buffers:
             if buf_info[buf]["outdegree"] == 1:
