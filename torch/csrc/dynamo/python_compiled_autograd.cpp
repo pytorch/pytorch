@@ -319,14 +319,9 @@ struct VerboseLogger : public PythonLogger {
       std::unordered_set<CacheKey> cached_keys,
       const CacheKey& key,
       size_t node_idx) {
-    std::string node_name =
-        fn.name() + " (NodeCall " + std::to_string(node_idx) + ")";
-
-    if (size_inputs_num > 0) {
-      cumulative_sizes_per_node[size_inputs_num] = node_name;
-    }
-
     if (!logged_node_miss && cached_keys.find(key) == cached_keys.end()) {
+      std::string node_name =
+          fn.name() + " (NodeCall " + std::to_string(node_idx) + ")";
       _log_node_miss(typeid(fn), cached_keys, key, node_name);
       logged_node_miss = true;
     }
@@ -355,23 +350,23 @@ struct VerboseLogger : public PythonLogger {
     log(PythonLogger::DEBUG, oss.str());
   }
 
-  void log_dynamic_shapes_check(size_t size_idx) const {
-    if (cumulative_sizes_per_node.empty()) {
-      return;
+  std::string log_dynamic_shapes_miss(
+      const std::vector<size_t>& new_dyn_sizes_idx,
+      size_t all_dyn_sizes_len) const {
+    std::ostringstream oss;
+    oss << "Cache miss due to " << new_dyn_sizes_idx.size()
+        << " changed tensor shapes (total of " << all_dyn_sizes_len << "): ";
+    for (const auto i : c10::irange(new_dyn_sizes_idx.size() - 1)) {
+      oss << "sizes[" << std::to_string(new_dyn_sizes_idx[i]) << "], ";
     }
-
-    auto it = cumulative_sizes_per_node.lower_bound(size_idx);
-    TORCH_CHECK(it != cumulative_sizes_per_node.end());
-    size_t start_idx =
-        it == cumulative_sizes_per_node.begin() ? 0 : std::prev(it)->first;
-    log(PythonLogger::DEBUG,
-        "Cache miss due to changed shapes: marking size idx " +
-            std::to_string(size_idx - start_idx) + " of " + it->second +
-            " as dynamic");
+    oss << "sizes["
+        << std::to_string(new_dyn_sizes_idx[new_dyn_sizes_idx.size() - 1])
+        << "]";
+    std::string recompile_reason = oss.str();
+    log(PythonLogger::DEBUG, recompile_reason);
+    return recompile_reason;
   }
 
-  // track which size index belongs to which node
-  std::map<size_t, std::string> cumulative_sizes_per_node;
   // only log cache miss due to node key once
   bool logged_node_miss = false;
 };
@@ -450,6 +445,7 @@ struct CacheNode {
     }
     std::vector<uint32_t> dynamic_size_input_origins;
     dynamic_size_input_origins.reserve(len);
+    std::vector<size_t> newly_dynamic;
     for (const auto i : c10::irange(len)) {
       auto& expected = expected_sizes[i];
       bool was_dynamic = expected.dyn_type == SizeInput::DYNAMIC;
@@ -458,7 +454,7 @@ struct CacheNode {
         if (!was_dynamic) {
           cache_hit = false;
           if (vlogger.has_value()) {
-            vlogger->log_dynamic_shapes_check(i);
+            newly_dynamic.emplace_back(call.dyn_size_inputs.size());
           }
         }
         expected = SizeInput(SizeInput::DYNAMIC, data[i].value);
@@ -473,6 +469,11 @@ struct CacheNode {
           dynamic_size_input_origins.emplace_back(call.size_input_origins[i]);
         }
       }
+    }
+    if (vlogger.has_value() && !newly_dynamic.empty()) {
+      std::string recompile_reason = vlogger->log_dynamic_shapes_miss(
+          newly_dynamic, call.dyn_size_inputs.size());
+      recompile_reasons.emplace_back(std::move(recompile_reason));
     }
     call.size_input_origins = std::move(dynamic_size_input_origins);
 
@@ -527,6 +528,7 @@ struct CacheNode {
   std::unordered_map<CacheKey, std::unique_ptr<CacheNode>> next;
   std::vector<CacheKeyBuffer> key_storage;
   std::vector<SizeInput> expected_sizes;
+  std::vector<std::string> recompile_reasons;
 
   THPObjectPtr runtime_wrapper;
   THPObjectPtr compiled_fn;
@@ -644,6 +646,17 @@ static PyObject* wrap_node_origins(
   return pyallorigins;
 }
 
+static PyObject* wrap_string_list(
+    const std::vector<std::string>& recompile_reasons) {
+  PyObject* pyreasons =
+      PyList_New(static_cast<Py_ssize_t>(recompile_reasons.size()));
+  for (const auto i : c10::irange(recompile_reasons.size())) {
+    PyObject* pyreason = PyUnicode_FromString(recompile_reasons[i].c_str());
+    PyList_SET_ITEM(pyreasons, i, pyreason);
+  }
+  return pyreasons;
+}
+
 static void set_ivalue_proxies(
     PyObject* fake_ivalue_args,
     std::vector<LiftedIValueArg>& lifted_ivalue_args) {
@@ -688,19 +701,21 @@ static TraceState call_begin_capture(
     AutogradCompilerCall& compiler_call,
     size_t num_outputs) {
   static PyObject* method_name = PyUnicode_InternFromString("begin_capture");
-  THPObjectPtr pyinput(THPVariable_WrapList(compiler_call.tensor_args.inputs));
-  THPObjectPtr pysizeinput(cache.wrap_dynamic_inputs());
-  THPObjectPtr pyivalueargsinput(
+  THPObjectPtr py_input(THPVariable_WrapList(compiler_call.tensor_args.inputs));
+  THPObjectPtr py_size_input(cache.wrap_dynamic_inputs());
+  THPObjectPtr py_ivalue_args_input(
       wrap_lifted_ivalue_args(compiler_call.lifted_ivalue_args.args));
-  THPObjectPtr pynodeorigins(
-      wrap_node_origins(compiler_call, PyTuple_GET_SIZE(pysizeinput.get())));
+  THPObjectPtr py_node_origins(
+      wrap_node_origins(compiler_call, PyTuple_GET_SIZE(py_size_input.get())));
+  THPObjectPtr py_recompile_reasons(wrap_string_list(cache.recompile_reasons));
   THPObjectPtr pyresult(check(PyObject_CallMethodObjArgs(
       self,
       method_name,
-      pyinput.get(),
-      pysizeinput.get(),
-      pyivalueargsinput.get(),
-      pynodeorigins.get(),
+      py_input.get(),
+      py_size_input.get(),
+      py_ivalue_args_input.get(),
+      py_node_origins.get(),
+      py_recompile_reasons.get(),
       nullptr)));
 
   PyObject *fake_inputs{nullptr}, *fake_sizes{nullptr},

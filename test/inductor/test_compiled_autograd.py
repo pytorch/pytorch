@@ -3168,14 +3168,8 @@ TORCH_LIBRARY(test_cudagraphs_cpu_scalar_used_in_cpp_custom_op, m) {
 
         # recompile
         patterns2 = [
-            r".*Cache miss due to changed shapes: marking size idx (\d+) of SumBackward0 \(NodeCall 1\) as dynamic\n",
-            r".*Cache miss due to changed shapes: marking size idx (\d+) of SumBackward0 \(NodeCall 1\) as dynamic\n",
-            r".*Cache miss due to changed shapes: marking size idx (\d+) of SumBackward0 \(NodeCall 1\) as dynamic\n",
-            r".*Cache miss due to changed shapes: marking size idx (\d+) of ReluBackward0 \(NodeCall 2\) as dynamic\n",
-            r".*Cache miss due to changed shapes: marking size idx (\d+) of AddmmBackward0 \(NodeCall 3\) as dynamic\n",
-            r".*Cache miss due to changed shapes: marking size idx (\d+) of torch::autograd::AccumulateGrad "
-            r"\(NodeCall 5\) as dynamic\n",
-            r".*Cache miss due to changed shapes: marking size idx (\d+) of ReluBackward0 \(NodeCall 6\) as dynamic\n",
+            r".*Cache miss due to 7 changed tensor shapes \(total of 7\): ",
+            r"sizes\[0\], sizes\[1\], sizes\[2\], sizes\[3\], sizes\[4\], sizes\[5\], sizes\[6\]\n",
         ]
 
         all_logs = logs.getvalue()
@@ -3191,7 +3185,43 @@ TORCH_LIBRARY(test_cudagraphs_cpu_scalar_used_in_cpp_custom_op, m) {
         pattern2 = r"".join(patterns2)
         matches2 = re.findall(pattern2, all_logs)
         self.assertEqual(len(matches2), 1)
-        self.assertEqual(len(matches2[0]), len(patterns2))
+
+    def test_verbose_logs_dynamic_shapes(self):
+        logs, ctx = logs_to_string(
+            torch._dynamo.compiled_autograd.__name__, "compiled_autograd_verbose"
+        )
+
+        model = torch.nn.Sequential(
+            torch.nn.Linear(4, 4),
+            torch.nn.ReLU(),
+            torch.nn.Linear(4, 4),
+            torch.nn.ReLU(),
+        )
+
+        for i, j in zip([10, 11, 12], [10, 10, 11]):
+            model.zero_grad()
+            x = torch.randn([i, 4])
+            y = torch.randn([j, 4])
+            result = model(x).sum() + model(y).sum()
+            with ctx(), compiled_autograd._enable(torch.compile(backend="eager")):
+                result.backward()
+
+        self.assertEqual(counters["compiled_autograd"]["captures"], 3)
+
+        actual_logs = logs.getvalue()
+        expected_logs = [
+            "Cache miss due to new autograd node: torch::autograd::GraphRoot (NodeCall 0) with key size 39, previous key sizes=[]",
+            (
+                "Cache miss due to 7 changed tensor shapes (total of 14): "
+                "sizes[0], sizes[1], sizes[2], sizes[3], sizes[4], sizes[5], sizes[6]"
+            ),
+            (
+                "Cache miss due to 7 changed tensor shapes (total of 14): "
+                "sizes[0], sizes[1], sizes[2], sizes[3], sizes[4], sizes[5], sizes[6]"
+            ),
+        ]
+        for expected in expected_logs:
+            self.assertTrue(expected in actual_logs)
 
     def test_verbose_logs_snapshot(self):
         def fn():
