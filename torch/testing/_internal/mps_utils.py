@@ -134,7 +134,6 @@ UNIMPLEMENTED_XFAILIST = {
     "linalg.lstsq": MPSSkipInfo(UNIMPLEMENTED),
     "linalg.lstsqgrad_oriented": MPSSkipInfo(UNIMPLEMENTED),
     "linalg.lu": MPSSkipInfo(UNIMPLEMENTED),
-    "linalg.lu_factor_ex": MPSSkipInfo(UNIMPLEMENTED),
     "linalg.lu_solve": MPSSkipInfo(UNIMPLEMENTED),
     "linalg.matrix_norm": MPSSkipInfo(UNIMPLEMENTED, dtypes=[torch.float32]),
     "linalg.norm": MPSSkipInfo(UNIMPLEMENTED, dtypes=[torch.float32]),
@@ -150,7 +149,6 @@ UNIMPLEMENTED_XFAILIST = {
     "linalg.vecdot": MPSSkipInfo(UNIMPLEMENTED),
     "logcumsumexp": MPSSkipInfo(UNIMPLEMENTED),
     "logdet": MPSSkipInfo(UNIMPLEMENTED),
-    "lu": MPSSkipInfo(UNIMPLEMENTED, upper=15.0),
     "lu_solve": MPSSkipInfo(UNIMPLEMENTED),
     "lu_unpack": MPSSkipInfo(UNIMPLEMENTED),
     "masked.median": MPSSkipInfo(UNIMPLEMENTED),
@@ -275,6 +273,10 @@ UNIMPLEMENTED_XFAILIST = {
     "nn.functional.adaptive_avg_pool1d": MPSSkipInfo(UNIMPLEMENTED),
     "nn.functional.adaptive_avg_pool2d": MPSSkipInfo(UNIMPLEMENTED),
     # Unsupported dtypes
+    'linalg.lu_factor': MPSSkipInfo(
+        UNIMPLEMENTED,
+        dtypes=[torch.float16, torch.float32],  # missing `aten::lu_unpack`.
+    ),
     "ones_like": MPSSkipInfo(UNIMPLEMENTED),
     "zeros_like": MPSSkipInfo(UNIMPLEMENTED),
     # Convolution for integral types is not supported on MPS
@@ -432,6 +434,7 @@ XFAILLIST_GRAD = {
     "equal": MPSSkipInfo(TEST_OUTPUT_GRAD_MATCH, dtypes=[torch.float16, torch.float32]),
     # 'float' object is not iterable
     "item": MPSSkipInfo(TEST_OUTPUT_GRAD_MATCH, dtypes=[torch.float16, torch.float32]),
+    "lu": MPSSkipInfo(TEST_OUTPUT_GRAD_MATCH, dtypes=[torch.float32]),
     # "mse_backward_cpu_out" not implemented for 'Half'
     "nn.functional.mse_loss": MPSSkipInfo(
         TEST_OUTPUT_GRAD_MATCH, dtypes=[torch.float16]
@@ -867,6 +870,7 @@ COMPLEX_XFAILLIST = {
         dtypes=COMPLEX_DTYPES,
         upper=15.0,
     ),
+    "lu": MPSSkipInfo(dtypes=[torch.complex64]),
     "masked_fill": MPSSkipInfo(
         dtypes=COMPLEX_DTYPES,
         upper=15.0,
