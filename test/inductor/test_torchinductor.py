@@ -2819,13 +2819,18 @@ class CommonTemplate:
             return (torch.exp(a), torch.exp(a + b))
 
         # exp(a+b) could be significantly different than exp(a.half()+b.half())
-        self.common(fn, (torch.randn(8, 8), torch.randn(8, 8)), reference_in_float=False)
+        self.common(
+            fn, (torch.randn(8, 8), torch.randn(8, 8)), reference_in_float=False
+        )
 
     def test_exp2(self):
         def fn(a, b):
             return (torch.exp2(a), torch.exp2(a + b), torch.pow(2, -torch.abs(a - b)))
 
-        self.common(fn, (torch.randn(8, 8), torch.randn(8, 8)))
+        # exp(a+b) could be significantly different than exp(a.half()+b.half())
+        self.common(
+            fn, (torch.randn(8, 8), torch.randn(8, 8)), reference_in_float=False
+        )
 
     @skipIfXpu(msg="logaddexp_xpu not implemented for ComplexFloat")
     @skipCUDAIf(True, "Not implemented for CUDA")

@@ -1482,7 +1482,7 @@ def non_single_tensor_return_unsupported(api, ret):
 
     if not isinstance(ret, TensorVariable):
         raise Unsupported(
-            f"{api} over function that returns something " f"other than one Tensor"
+            f"{api} over function that returns something other than one Tensor"
         )
 
 
