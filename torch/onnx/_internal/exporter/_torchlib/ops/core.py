@@ -496,7 +496,6 @@ def aten_any_dims(
 
 
 def _aten_any_dims_no_dim(self: TTensor, keepdims: bool) -> BOOL:
-
     if len(self.shape) == 0:
         result = op.Cast(self, to=BOOL.dtype)
     else:
@@ -828,7 +827,7 @@ def aten_as_strided(
 ) -> TTensor:
     """as_strided(Tensor(a) self, SymInt[] size, SymInt[] stride, SymInt? storage_offset=None) -> Tensor(a)"""
 
-    rank = len(stride.shape)
+    rank = len(stride)
     return _aten_as_strided_onnx(self, size, stride, storage_offset, rank)
 
 
