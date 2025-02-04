@@ -467,7 +467,7 @@ def _determine_output_number(
             if not named_attrs.get("training_mode", 0):
                 return 1
         if signature.name == "Split":
-            return named_attrs.get("num_outputs", 2)  # type: ignore[union-attr]
+            return named_attrs.get("num_outputs", 2)  # type: ignore[return-value]
     return len(signature.outputs)
 
 
@@ -686,7 +686,7 @@ class OpRecorder(evaluator.Evaluator):
                     function.name,
                     opset_version=function.opset.version,
                 )
-                function.__pt_signature = op_signature  # type: ignore[assignment]
+                function.__pt_signature = op_signature  # type: ignore[attr-defined]
 
             named_inputs, named_attrs = _construct_named_inputs_and_attrs(
                 op_signature, args, kwargs
