@@ -940,11 +940,23 @@ class PreserveVersionContextVariable(ContextWrappingVariable):
     """
 
     @staticmethod
+    def _create_lambda_from_tensors(tx, tensors):
+        if isinstance(tensors, variables.TensorVariable):
+            versions = variables.TupleVariable(
+                [x.var_getattr(tx, "_version") for x in [tensors]]
+            )
+            tensors = variables.TupleVariable([tensors])
+        else:
+            versions = variables.TupleVariable(
+                [x.var_getattr(tx, "_version") for x in tensors.items]
+            )
+        return PreserveVersionContextVariable(tensors, versions)
+
+    @staticmethod
     def constructor(tx):
         return variables.LambdaVariable(
-            lambda tensor: PreserveVersionContextVariable(
-                tensor,
-                tensor.var_getattr(tx, "_version"),
+            lambda tensors: PreserveVersionContextVariable._create_lambda_from_tensors(
+                tx, tensors
             )
         )
 
