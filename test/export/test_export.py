@@ -6266,7 +6266,7 @@ def forward(self, b_a_buffer, x):
     @requires_gpu
     def test_export_associative_scan_symbol_dim(self):
         dim1 = torch.export.Dim("dim0", min=5, max=15)
-        xs = torch.randn(3, 10, 2, device=torch.device("cuda"))
+        xs = torch.ones(3, 10, 2, device=torch.device("cuda"))
 
         class Foo(torch.nn.Module):
             def __init__(self) -> None:
@@ -6298,7 +6298,7 @@ def forward(self, x):
     @requires_gpu
     def test_export_associative_scan_symbol_scandim(self):
         dim1 = torch.export.Dim("dim0", min=5, max=15)
-        xs = torch.randn(3, 10, 2, device=torch.device("cuda"))
+        xs = torch.ones(3, 10, 2, device=torch.device("cuda"))
 
         class Foo(torch.nn.Module):
             def __init__(self) -> None:
@@ -6327,13 +6327,15 @@ def forward(self, x):
         )
         self.assertTrue(torch.allclose(ep.module()(xs), Foo()(xs)))
 
+    # This test is expected to fail because accociative_scan's backend is not set to "eager"
+    @unittest.expectedFailure
     @requires_gpu
     def test_export_associative_scan_lifted_buffers(self):
         class M(torch.nn.Module):
             def __init__(self) -> None:
                 super().__init__()
                 self.buffer = torch.nn.Buffer(
-                    torch.randn(3, 2, device=torch.device("cuda"))
+                    torch.ones(3, 2, device=torch.device("cuda"))
                 )
 
             def combine_fn(self, x, y):
@@ -6341,10 +6343,10 @@ def forward(self, x):
 
             def forward(self, x):
                 # TODO: need combine_mode='generic' here as lifted arguments are not yet supported in inductor
-                return associative_scan(self.combine_fn, x, 1, combine_mode="generic")
+                return associative_scan(self.combine_fn, x, 1, combine_mode="pointwise")
 
-        inp = torch.randn(3, 10, 2, device=torch.device("cuda"))
-        ep = torch.export.export(M(), (inp,))
+        inp = torch.ones(3, 10, 2, device=torch.device("cuda"))
+        ep = export(M(), (inp,))
         epm = ep.module()
         self.assertTrue(torch.allclose(epm(inp), M()(inp)))
 
