@@ -12,15 +12,14 @@ namespace c10 {
 struct IValue;
 }
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 class Pickler;
 class SourceRangeSerializer;
 static constexpr size_t kByteOffsetIndex = 0;
 static constexpr size_t kSourceRangeIndex = 1;
 static constexpr size_t kSourceRangeTagIndex = 2;
-constexpr c10::string_view kFormatWithStringTable = "FORMAT_WITH_STRING_TABLE";
+constexpr std::string_view kFormatWithStringTable = "FORMAT_WITH_STRING_TABLE";
 
 class SourceRangePickler {
  public:
@@ -64,5 +63,4 @@ class SourceRangeUnpickler {
 TORCH_API void setShouldUseFormatWithStringTable(
     bool should_use_format_with_string_table);
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

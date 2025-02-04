@@ -20,7 +20,7 @@
 #include <ATen/core/jit_type.h>
 #include <c10/util/ArrayRef.h>
 #include <c10/util/Exception.h>
-#include <c10/util/Optional.h>
+#include <optional>
 
 #include <functional>
 #include <iosfwd>
@@ -33,8 +33,7 @@ class THPPointer;
 using THPObjectPtr = THPPointer<PyObject>;
 using pyobj_list = std::vector<THPObjectPtr>;
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 namespace utils {
 TORCH_API std::string getNodesModuleHierarchy(const Node& n);
 } // namespace utils
@@ -165,7 +164,7 @@ struct OperatorMap;
 // access the same graph
 template <typename T>
 struct Wrap {
-  explicit Wrap(T* p) : elem(p), clear_cb(nullptr) {}
+  explicit Wrap(T* p) : elem(p) {}
   void clear() {
     if (clear_cb) {
       clear_cb(elem);
@@ -173,7 +172,7 @@ struct Wrap {
     elem = nullptr;
   }
   T* elem;
-  void (*clear_cb)(void*);
+  void (*clear_cb)(void*){nullptr};
 };
 
 struct Value {
@@ -224,7 +223,7 @@ struct Value {
     if (hasDebugName()) {
       return unique_name_;
     }
-    return c10::to_string(unique());
+    return std::to_string(unique());
   }
   TORCH_API std::string debugNameBase() const;
   Node* node() {
@@ -348,7 +347,7 @@ struct TORCH_API Node {
   // is changed, we need to rely on this name
   // to retrieve old schemas to successfully apply upgraders
   // for this operator.
-  std::optional<std::string> historic_schema_name_ = c10::nullopt;
+  std::optional<std::string> historic_schema_name_ = std::nullopt;
 
  protected:
   Node(Graph* graph_, NodeKind kind_); // defined after graph
@@ -534,7 +533,7 @@ struct TORCH_API Node {
     if (auto v = get(name)) {
       return v->template to<T>();
     }
-    return c10::nullopt;
+    return std::nullopt;
   }
 
   // Returns true if the value of input name is statically known
@@ -1192,7 +1191,7 @@ struct Graph : std::enable_shared_from_this<Graph> {
   std::unordered_set<const Node*> all_nodes;
   std::unordered_set<const Value*> all_values;
   std::unordered_set<const Block*> all_blocks;
-  size_t next_unique_;
+  size_t next_unique_{0};
 
   std::unordered_map<std::string, Value*> unique_names_;
   // name_base_suffix tracks largest suffix currently used by all names sharing
@@ -1212,8 +1211,7 @@ struct Graph : std::enable_shared_from_this<Graph> {
 
  public:
   Graph(ScopePtr scope_root = c10::make_intrusive<Scope>())
-      : next_unique_(0),
-        current_scope_(std::move(scope_root)),
+      : current_scope_(std::move(scope_root)),
         block_(new Block(this, nullptr)),
         insert_before_(return_node()) {}
 
@@ -1368,8 +1366,8 @@ struct Graph : std::enable_shared_from_this<Graph> {
   // Insert constant IValue into the graph.
   TORCH_API Value* insertConstant(
       const IValue& val,
-      std::optional<SourceRange> loc = c10::nullopt,
-      std::optional<ScopePtr> scope = c10::nullopt);
+      std::optional<SourceRange> loc = std::nullopt,
+      std::optional<ScopePtr> scope = std::nullopt);
 
   // Schema-driven insert:
   // This inserts a node into the graph with inputs determined from args and
@@ -1733,20 +1731,20 @@ struct OperatorMap {
   std::optional<T> find(const Operator& op) {
     const auto it = map.find(Symbol::fromQualString(op.schema().name()));
     if (it == map.end()) {
-      return c10::nullopt;
+      return std::nullopt;
     }
     for (auto vit = it->second.begin(); vit != it->second.end(); ++vit) {
       if (vit->first->schema() == op.schema()) {
         return vit->second;
       }
     }
-    return c10::nullopt;
+    return std::nullopt;
   }
 
   // TODO: return iterator
   std::vector<OpMapType> getAllKeysAndValues() const {
-    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     std::vector<OpMapType> keys_values;
+    keys_values.reserve(map.size());
     for (auto& symbol_mapping : map) {
       auto& vec = symbol_mapping.second;
       for (auto& pair : vec) {
@@ -1809,20 +1807,20 @@ struct FunctionSchemaMap {
   std::optional<T> find(const FunctionSchema& schema) const {
     const auto it = map.find(Symbol::fromQualString(schema.name()));
     if (it == map.end()) {
-      return c10::nullopt;
+      return std::nullopt;
     }
     for (auto vit = it->second.begin(); vit != it->second.end(); ++vit) {
       if (vit->first == schema) {
         return vit->second;
       }
     }
-    return c10::nullopt;
+    return std::nullopt;
   }
 
   // TODO: return iterator
   std::vector<FuncSchemaMapType> getAllKeysAndValues() const {
-    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     std::vector<FuncSchemaMapType> keys_values;
+    keys_values.reserve(map.size());
     for (auto& symbol_mapping : map) {
       auto& vec = symbol_mapping.second;
       for (auto& pair : vec) {
@@ -1837,5 +1835,4 @@ struct FunctionSchemaMap {
   MapType map;
 };
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

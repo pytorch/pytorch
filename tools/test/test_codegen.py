@@ -1,14 +1,13 @@
+from __future__ import annotations
+
 import dataclasses
 import typing
 import unittest
 from collections import defaultdict
-from typing import Dict, List
-
-import torchgen.model
 
 import yaml
-
 from tools.autograd import gen_autograd_functions, load_derivatives
+
 from torchgen import dest
 from torchgen.api.types import CppSignatureGroup, DispatcherSignature
 from torchgen.context import native_function_manager
@@ -22,6 +21,7 @@ from torchgen.model import (
     BackendIndex,
     BackendMetadata,
     DispatchKey,
+    FunctionSchema,
     Location,
     NativeFunction,
     OperatorName,
@@ -32,7 +32,7 @@ from torchgen.selective_build.selector import SelectiveBuilder
 
 class TestCreateDerivative(unittest.TestCase):
     def test_named_grads(self) -> None:
-        schema = torchgen.model.FunctionSchema.parse(
+        schema = FunctionSchema.parse(
             "func(Tensor a, Tensor b) -> (Tensor x, Tensor y)"
         )
         native_function = dataclasses.replace(DEFAULT_NATIVE_FUNCTION, func=schema)
@@ -47,7 +47,7 @@ class TestCreateDerivative(unittest.TestCase):
 
     def test_non_differentiable_output(self) -> None:
         specification = "func(Tensor a, Tensor b) -> (Tensor x, bool y, Tensor z)"
-        schema = torchgen.model.FunctionSchema.parse(specification)
+        schema = FunctionSchema.parse(specification)
         native_function = dataclasses.replace(DEFAULT_NATIVE_FUNCTION, func=schema)
 
         _, differentiability_info = load_derivatives.create_differentiability_info(
@@ -69,7 +69,7 @@ class TestCreateDerivative(unittest.TestCase):
         )
 
     def test_indexed_grads(self) -> None:
-        schema = torchgen.model.FunctionSchema.parse(
+        schema = FunctionSchema.parse(
             "func(Tensor a, Tensor b) -> (Tensor x, Tensor y)"
         )
         native_function = dataclasses.replace(DEFAULT_NATIVE_FUNCTION, func=schema)
@@ -84,7 +84,7 @@ class TestCreateDerivative(unittest.TestCase):
 
     def test_named_grads_and_indexed_grads(self) -> None:
         specification = "func(Tensor a, Tensor b) -> (Tensor x, Tensor y)"
-        schema = torchgen.model.FunctionSchema.parse(specification)
+        schema = FunctionSchema.parse(specification)
         native_function = dataclasses.replace(DEFAULT_NATIVE_FUNCTION, func=schema)
 
         with self.assertRaisesRegex(
@@ -112,7 +112,7 @@ class TestCreateDerivative(unittest.TestCase):
 class TestGenAutogradFunctions(unittest.TestCase):
     def test_non_differentiable_output_invalid_type(self) -> None:
         specification = "func(Tensor a, Tensor b) -> (Tensor x, bool y, Tensor z)"
-        schema = torchgen.model.FunctionSchema.parse(specification)
+        schema = FunctionSchema.parse(specification)
         native_function = dataclasses.replace(DEFAULT_NATIVE_FUNCTION, func=schema)
 
         _, differentiability_info = load_derivatives.create_differentiability_info(
@@ -141,7 +141,7 @@ class TestGenAutogradFunctions(unittest.TestCase):
 
     def test_non_differentiable_output_output_differentiability(self) -> None:
         specification = "func(Tensor a, Tensor b) -> (Tensor x, Tensor y, Tensor z)"
-        schema = torchgen.model.FunctionSchema.parse(specification)
+        schema = FunctionSchema.parse(specification)
         native_function = dataclasses.replace(DEFAULT_NATIVE_FUNCTION, func=schema)
 
         _, differentiability_info = load_derivatives.create_differentiability_info(
@@ -182,7 +182,7 @@ class TestGenAutogradFunctions(unittest.TestCase):
 
     def test_register_bogus_dispatch_key(self) -> None:
         specification = "func(Tensor a, Tensor b) -> (Tensor x, bool y, Tensor z)"
-        schema = torchgen.model.FunctionSchema.parse(specification)
+        schema = FunctionSchema.parse(specification)
         native_function = dataclasses.replace(DEFAULT_NATIVE_FUNCTION, func=schema)
 
         with self.assertRaisesRegex(
@@ -213,17 +213,17 @@ class TestGenAutogradFunctions(unittest.TestCase):
 class TestGenSchemaRegistration(unittest.TestCase):
     def setUp(self) -> None:
         self.selector = SelectiveBuilder.get_nop_selector()
-        self.custom_native_function, _ = torchgen.model.NativeFunction.from_yaml(
+        self.custom_native_function, _ = NativeFunction.from_yaml(
             {"func": "custom::func() -> bool"},
-            loc=torchgen.model.Location(__file__, 1),
+            loc=Location(__file__, 1),
             valid_tags=set(),
         )
         (
             self.fragment_custom_native_function,
             _,
-        ) = torchgen.model.NativeFunction.from_yaml(
+        ) = NativeFunction.from_yaml(
             {"func": "quantized_decomposed::func() -> bool"},
-            loc=torchgen.model.Location(__file__, 1),
+            loc=Location(__file__, 1),
             valid_tags=set(),
         )
 
@@ -285,9 +285,9 @@ TORCH_LIBRARY(custom, m) {
         )
 
     def test_3_namespaces_schema_registration_code_valid(self) -> None:
-        custom2_native_function, _ = torchgen.model.NativeFunction.from_yaml(
+        custom2_native_function, _ = NativeFunction.from_yaml(
             {"func": "custom2::func() -> bool"},
-            loc=torchgen.model.Location(__file__, 1),
+            loc=Location(__file__, 1),
             valid_tags=set(),
         )
         (
@@ -320,7 +320,7 @@ class TestGenNativeFunctionDeclaration(unittest.TestCase):
     def setUp(self) -> None:
         self.op_1_native_function, op_1_backend_index = NativeFunction.from_yaml(
             {"func": "op_1() -> bool", "dispatch": {"CPU": "kernel_1"}},
-            loc=torchgen.model.Location(__file__, 1),
+            loc=Location(__file__, 1),
             valid_tags=set(),
         )
         self.op_2_native_function, op_2_backend_index = NativeFunction.from_yaml(
@@ -328,11 +328,11 @@ class TestGenNativeFunctionDeclaration(unittest.TestCase):
                 "func": "op_2() -> bool",
                 "dispatch": {"CPU": "kernel_2", "QuantizedCPU": "custom::kernel_3"},
             },
-            loc=torchgen.model.Location(__file__, 1),
+            loc=Location(__file__, 1),
             valid_tags=set(),
         )
 
-        backend_indices: Dict[DispatchKey, Dict[OperatorName, BackendMetadata]] = {
+        backend_indices: dict[DispatchKey, dict[OperatorName, BackendMetadata]] = {
             DispatchKey.CPU: {},
             DispatchKey.QuantizedCPU: {},
         }
@@ -382,10 +382,10 @@ TORCH_API bool kernel_1();
 # Test for native_function_generation
 class TestNativeFunctionGeneratrion(unittest.TestCase):
     def setUp(self) -> None:
-        self.native_functions: List[NativeFunction] = []
-        self.backend_indices: Dict[
-            DispatchKey, Dict[OperatorName, BackendMetadata]
-        ] = defaultdict(dict)
+        self.native_functions: list[NativeFunction] = []
+        self.backend_indices: dict[DispatchKey, dict[OperatorName, BackendMetadata]] = (
+            defaultdict(dict)
+        )
         yaml_entry = """
 - func: op(Tensor self) -> Tensor
   dispatch:
@@ -405,10 +405,21 @@ class TestNativeFunctionGeneratrion(unittest.TestCase):
                 "dispatch": {"CPU": "kernel_1"},
                 "autogen": "op_2.out",
             },
-            loc=torchgen.model.Location(__file__, 1),
+            loc=Location(__file__, 1),
             valid_tags=set(),
         )
         BackendIndex.grow_index(self.backend_indices, two_returns_backend_index)
+
+        self.core_func, core_func_index = NativeFunction.from_yaml(
+            {
+                "func": "op_3.vec(Tensor input, SymInt[]? output_size, float[]? scale_factors) -> Tensor",
+                "autogen": "op_3.vec_out",
+                "tags": ["core"],
+            },
+            loc=Location(__file__, 1),
+            valid_tags={"core"},
+        )
+        BackendIndex.grow_index(self.backend_indices, core_func_index)
 
     def test_functional_variant_autogen_out_variant(self) -> None:
         native_functions = [self.one_return_func]
@@ -438,13 +449,26 @@ class TestNativeFunctionGeneratrion(unittest.TestCase):
         ]
         self.assertEqual(backend_metadata.kernel, "op_2_out")
 
+    def test_functional_variant_autogen_out_variant_core(self) -> None:
+        """
+        Tests autogen of out variants for core-tageed ops that are CompositeImplicitAutograd.
+        """
+        native_functions = [self.core_func]
+        add_generated_native_functions(native_functions, self.backend_indices)
+        print(native_functions)
+        self.assertEqual(len(native_functions), 2)
+        self.assertEqual(
+            str(native_functions[1].func),
+            "op_3.vec_out(Tensor input, SymInt[]? output_size, float[]? scale_factors, *, Tensor(a!) out) -> Tensor(a!)",
+        )
+
 
 # Test for static_dispatch
 class TestStaticDispatchGeneratrion(unittest.TestCase):
     def setUp(self) -> None:
-        self.backend_indices: Dict[
-            DispatchKey, Dict[OperatorName, BackendMetadata]
-        ] = defaultdict(dict)
+        self.backend_indices: dict[DispatchKey, dict[OperatorName, BackendMetadata]] = (
+            defaultdict(dict)
+        )
         yaml_entry = """
 - func: op.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
@@ -500,9 +524,9 @@ class TestStaticDispatchGeneratrion(unittest.TestCase):
 
 # Represents the most basic NativeFunction. Use dataclasses.replace()
 # to edit for use.
-DEFAULT_NATIVE_FUNCTION, _ = torchgen.model.NativeFunction.from_yaml(
+DEFAULT_NATIVE_FUNCTION, _ = NativeFunction.from_yaml(
     {"func": "func() -> bool"},
-    loc=torchgen.model.Location(__file__, 1),
+    loc=Location(__file__, 1),
     valid_tags=set(),
 )
 

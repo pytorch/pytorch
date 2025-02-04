@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import inspect
 
 from torch._custom_op.impl import (
@@ -8,6 +9,7 @@ from torch._custom_op.impl import (
     validate_namespace,
 )
 from torch.library import get_ctx
+
 
 __all__ = [
     "custom_op",
@@ -103,7 +105,7 @@ def custom_op(qualname, func_or_schema=None):
                 f"is passed to `custom_op`"
             )
 
-        schema = infer_schema(func)
+        schema = infer_schema(func, mutates_args=())
         _custom_op_with_schema(qualname, schema)
         return func
 

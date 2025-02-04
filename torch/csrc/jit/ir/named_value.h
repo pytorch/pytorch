@@ -4,8 +4,7 @@
 #include <torch/csrc/jit/ir/constants.h>
 #include <torch/csrc/utils/variadic.h>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 struct Value;
 
@@ -22,26 +21,25 @@ struct NamedValue {
   NamedValue(const std::string& name, Value* value)
       : name_(name), value_(value) {}
 
-  /* implicit */ NamedValue(IValue value)
-      : value_(nullptr), ivalue_(std::move(value)) {}
+  /* implicit */ NamedValue(IValue value) : ivalue_(std::move(value)) {}
 
   NamedValue(const std::string& name, IValue value)
       : name_(name), ivalue_(std::move(value)) {}
 
   template <
       typename T,
-      typename = enable_if_t<
-          (!std::is_same<decay_t<T>, NamedValue>::value &&
-           !std::is_same<decay_t<T>, Value*>::value &&
-           !std::is_same<decay_t<T>, IValue>::value)>>
+      typename = std::enable_if_t<
+          (!std::is_same_v<std::decay_t<T>, NamedValue> &&
+           !std::is_same_v<std::decay_t<T>, Value*> &&
+           !std::is_same_v<std::decay_t<T>, IValue>)>>
   // NOLINTNEXTLINE(bugprone-forwarding-reference-overload)
   NamedValue(T&& t) : NamedValue(IValue(std::forward<T>(t))) {}
 
   template <
       typename T,
-      typename = enable_if_t<
-          (!std::is_same<decay_t<T>, Value*>::value &&
-           !std::is_same<decay_t<T>, IValue>::value)>>
+      typename = std::enable_if_t<
+          (!std::is_same_v<std::decay_t<T>, Value*> &&
+           !std::is_same_v<std::decay_t<T>, IValue>)>>
   NamedValue(const std::string& name, T&& t)
       : NamedValue(name, IValue(std::forward<T>(t))) {}
 
@@ -80,5 +78,4 @@ struct NamedValue {
   IValue ivalue_;
 };
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

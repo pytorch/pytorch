@@ -15,8 +15,8 @@
 
 #if !AT_MKLDNN_ENABLED()
 
-namespace at {
-namespace native {
+
+namespace at::native {
 
 Tensor mkldnn_view(const Tensor& self, IntArrayRef size) {
   TORCH_CHECK(false, "mkldnn_reshape: ATen not compiled with MKLDNN support");
@@ -38,15 +38,14 @@ Tensor& mkldnn_transpose_(Tensor& self, int64_t dim0, int64_t dim1) {
   TORCH_CHECK(false, "mkldnn_transpose_: ATen not compiled with MKLDNN support");
 }
 
-} // namespace native
-} // namespace at
+} // namespace at::native
+
 
 #else // AT_MKLDNN_ENABLED
 
 #include <ATen/native/mkldnn/MKLDNNCommon.h>
 
-namespace at {
-namespace native {
+namespace at::native {
 
 Tensor mkldnn_view(const Tensor& self, IntArrayRef size) {
   TORCH_CHECK(false,
@@ -95,19 +94,6 @@ Tensor& mkldnn_transpose_(Tensor& self, int64_t dim0, int64_t dim1) {
   TORCH_CHECK(false, "mkldnn_transpose_: in-place mkldnn operations are not supported yet");
 }
 
-} // namespace native
 } // namespace at
 
 #endif // AT_MKLDNN_ENABLED
-
-
-namespace at {
-namespace native {
-
-
-static Tensor mkldnn_view_symint(const Tensor& self, c10::SymIntArrayRef size) {
-  return mkldnn_view(self, C10_AS_INTARRAYREF_SLOW(size));
-}
-
-} // namespace native
-} // namespace at

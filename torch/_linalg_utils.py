@@ -1,8 +1,7 @@
-"""Various linear algebra utility methods for internal use.
+# mypy: allow-untyped-defs
+"""Various linear algebra utility methods for internal use."""
 
-"""
-
-from typing import Optional, Tuple
+from typing import Optional
 
 import torch
 from torch import Tensor
@@ -43,30 +42,9 @@ def matmul(A: Optional[Tensor], B: Tensor) -> Tensor:
     return torch.matmul(A, B)
 
 
-def conjugate(A):
-    """Return conjugate of tensor A.
-
-    .. note:: If A's dtype is not complex, A is returned.
-    """
-    if A.is_complex():
-        return A.conj()
-    return A
-
-
-def transpose(A):
-    """Return transpose of a matrix or batches of matrices."""
-    ndim = len(A.shape)
-    return A.transpose(ndim - 1, ndim - 2)
-
-
-def transjugate(A):
-    """Return transpose conjugate of a matrix or batches of matrices."""
-    return conjugate(transpose(A))
-
-
 def bform(X: Tensor, A: Optional[Tensor], Y: Tensor) -> Tensor:
     """Return bilinear form of matrices: :math:`X^T A Y`."""
-    return matmul(transpose(X), matmul(A, Y))
+    return matmul(X.mT, matmul(A, Y))
 
 
 def qform(A: Optional[Tensor], S: Tensor):
@@ -79,7 +57,7 @@ def basis(A):
     return torch.linalg.qr(A).Q
 
 
-def symeig(A: Tensor, largest: Optional[bool] = False) -> Tuple[Tensor, Tensor]:
+def symeig(A: Tensor, largest: Optional[bool] = False) -> tuple[Tensor, Tensor]:
     """Return eigenpairs of A with specified ordering."""
     if largest is None:
         largest = False
@@ -101,7 +79,7 @@ def matrix_rank(input, tol=None, symmetric=False, *, out=None) -> Tensor:
     )
 
 
-def solve(input: Tensor, A: Tensor, *, out=None) -> Tuple[Tensor, Tensor]:
+def solve(input: Tensor, A: Tensor, *, out=None) -> tuple[Tensor, Tensor]:
     raise RuntimeError(
         "This function was deprecated since version 1.9 and is now removed. "
         "`torch.solve` is deprecated in favor of `torch.linalg.solve`. "
@@ -113,7 +91,7 @@ def solve(input: Tensor, A: Tensor, *, out=None) -> Tuple[Tensor, Tensor]:
     )
 
 
-def lstsq(input: Tensor, A: Tensor, *, out=None) -> Tuple[Tensor, Tensor]:
+def lstsq(input: Tensor, A: Tensor, *, out=None) -> tuple[Tensor, Tensor]:
     raise RuntimeError(
         "This function was deprecated since version 1.9 and is now removed. "
         "`torch.lstsq` is deprecated in favor of `torch.linalg.lstsq`.\n"
@@ -131,8 +109,12 @@ def lstsq(input: Tensor, A: Tensor, *, out=None) -> Tuple[Tensor, Tensor]:
 
 
 def _symeig(
-    input, eigenvectors=False, upper=True, *, out=None
-) -> Tuple[Tensor, Tensor]:
+    input,
+    eigenvectors=False,
+    upper=True,
+    *,
+    out=None,
+) -> tuple[Tensor, Tensor]:
     raise RuntimeError(
         "This function was deprecated since version 1.9 and is now removed. "
         "The default behavior has changed from using the upper triangular portion of the matrix by default "
@@ -148,8 +130,12 @@ def _symeig(
 
 
 def eig(
-    self: Tensor, eigenvectors: bool = False, *, e=None, v=None
-) -> Tuple[Tensor, Tensor]:
+    self: Tensor,
+    eigenvectors: bool = False,
+    *,
+    e=None,
+    v=None,
+) -> tuple[Tensor, Tensor]:
     raise RuntimeError(
         "This function was deprecated since version 1.9 and is now removed. "
         "`torch.linalg.eig` returns complex tensors of dtype `cfloat` or `cdouble` rather than real tensors "

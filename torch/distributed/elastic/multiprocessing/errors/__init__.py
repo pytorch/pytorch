@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# mypy: allow-untyped-defs
 
 # Copyright (c) Facebook, Inc. and its affiliates.
 # All rights reserved.
@@ -65,12 +66,19 @@ from torch.distributed.elastic.utils.logging import get_logger
 from .error_handler import ErrorHandler  # noqa: F401
 from .handlers import get_error_handler  # noqa: F401
 
-__all__ = ["ProcessFailure", "ChildFailedError", "record", "ErrorHandler", "get_error_handler"]
+
+__all__ = [
+    "ProcessFailure",
+    "ChildFailedError",
+    "record",
+    "ErrorHandler",
+    "get_error_handler",
+]
 
 logger = get_logger(__name__)
 
 
-JSON = Dict
+JSON = dict
 
 _EMPTY_ERROR_DATA = {"message": "<NONE>"}
 _NOT_AVAILABLE = "<N/A>"
@@ -112,7 +120,8 @@ class ProcessFailure:
                 with open(self.error_file) as fp:
                     self.error_file_data = json.load(fp)
                     logger.debug(
-                        "User process failed with error data: %s", json.dumps(self.error_file_data, indent=2)
+                        "User process failed with error data: %s",
+                        json.dumps(self.error_file_data, indent=2),
                     )
                     self.message, self.timestamp = self._get_error_data(
                         self.error_file_data
@@ -134,7 +143,7 @@ class ProcessFailure:
             else:
                 self.message = "To enable traceback see: https://pytorch.org/docs/stable/elastic/errors.html"
 
-    def _get_error_data(self, error_file_data: Dict[str, Any]) -> Tuple[str, int]:
+    def _get_error_data(self, error_file_data: dict[str, Any]) -> tuple[str, int]:
         message = error_file_data["message"]
         if isinstance(message, str):
             timestamp = int(error_file_data.get("timestamp", 0))
@@ -222,7 +231,7 @@ class ChildFailedError(Exception):
     of trainer 1's error file to the scheduler's init process.
     """
 
-    def __init__(self, name: str, failures: Dict[GlobalRank, ProcessFailure]):
+    def __init__(self, name: str, failures: dict[GlobalRank, ProcessFailure]):
         self.name = name
         self.failures = failures
         assert (
@@ -230,16 +239,16 @@ class ChildFailedError(Exception):
         )  # does not make sense to create a ChildFaileError with no failures
         super().__init__(self.format_msg())
 
-    def get_first_failure(self) -> Tuple[GlobalRank, ProcessFailure]:
+    def get_first_failure(self) -> tuple[GlobalRank, ProcessFailure]:
         rank = min(self.failures.keys(), key=lambda r: self.failures[r].timestamp)
         return rank, self.failures[rank]
 
     def format_msg(self, boarder_delim="=", section_delim="-"):
         title = f"{self.name} FAILED"
-        root_rank, root_failure = self.get_first_failure()
+        root_rank, _root_failure = self.get_first_failure()
 
         root_failure_fmt: str = ""
-        other_failures_fmt: List[str] = []
+        other_failures_fmt: list[str] = []
         width = len(title)
         for idx, (rank, failure) in enumerate(self.failures.items()):
             fmt, w = self._format_failure(idx, rank, failure)
@@ -262,8 +271,7 @@ class ChildFailedError(Exception):
 
     def _format_failure(
         self, idx: int, rank: int, failure: ProcessFailure
-    ) -> Tuple[str, int]:
-
+    ) -> tuple[str, int]:
         # failure.message is either a str (when the failure does not generate a traceback - e.g. signals)
         # or a dict (json) of the form
         # {"message": $ERROR_MSG, "extraInfo": {"py_callstack": $TRACEBACK, timestamp: $TS}}
@@ -362,7 +370,7 @@ def record(
                             "local_rank %s FAILED with no error file."
                             " Decorate your entrypoint fn with @record for traceback info."
                             " See: https://pytorch.org/docs/stable/elastic/errors.html",
-                            rank
+                            rank,
                         )
                     )
                 raise

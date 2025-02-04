@@ -10,9 +10,7 @@ typedef float16_t fp16_t;
 typedef uint16_t fp16_t;
 #endif
 
-namespace at {
-namespace native {
-namespace metal {
+namespace at::native::metal {
 
 uint32_t batchSize(const Tensor& tensor);
 uint32_t channelsSize(const Tensor& tensor);
@@ -70,6 +68,4 @@ static inline MetalCommandBuffer* getCommandBuffer(
   return cmdBuffer;
 }
 
-} // namespace metal
-} // namespace native
-} // namespace at
+} // namespace at::native::metal

@@ -1,5 +1,7 @@
+from __future__ import annotations
+
 import itertools
-from typing import Dict, List, Sequence, Union
+from typing import TYPE_CHECKING
 
 from torchgen.api import cpp
 from torchgen.api.types import DispatcherSignature
@@ -7,6 +9,11 @@ from torchgen.code_template import CodeTemplate
 from torchgen.context import with_native_function
 from torchgen.model import Argument, NativeFunction, SchemaKind, TensorOptionsArguments
 from torchgen.utils import FileManager
+
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
+
 
 # Note [Manual Backend kernels]
 # For these ops, we want to manually register to dispatch key Backend and
@@ -72,8 +79,7 @@ DONT_RECORD_TRACE = {
 def should_trace(f: NativeFunction) -> bool:
     # Operations involving Storage or Type are not traceable at the moment
     if any(
-        str(arg.type) in {"Storage", "Type", "ConstQuantizerPtr"}
-        for arg in f.func.schema_order_arguments()
+        str(arg.type) in {"Storage", "Type"} for arg in f.func.schema_order_arguments()
     ):
         return False
     # We can't trace functions which don't have any Tensor or TensorList returns
@@ -136,9 +142,7 @@ ADD_TRACE_INPUT = CodeTemplate("""jit::tracer::addInputs(node, "${name}", ${inpu
 
 
 def format_trace_inputs(f: NativeFunction) -> str:
-    def dispatch_trace_input(
-        arg: Union[Argument, TensorOptionsArguments]
-    ) -> Sequence[str]:
+    def dispatch_trace_input(arg: Argument | TensorOptionsArguments) -> Sequence[str]:
         if isinstance(arg, TensorOptionsArguments):
             name = "options"
             return [
@@ -156,7 +160,7 @@ def format_trace_inputs(f: NativeFunction) -> str:
             else:
                 return [ADD_TRACE_INPUT.substitute(name=name, input=name)]
 
-    args: List[Union[Argument, TensorOptionsArguments]] = list(
+    args: list[Argument | TensorOptionsArguments] = list(
         f.func.schema_order_arguments()
     )
 
@@ -253,19 +257,19 @@ def format_trace_inputs(f: NativeFunction) -> str:
 # arguments (inside of the `native_functions.yaml`)
 RENAME_TRACE_ADD_ARGS = {
     "fill": """\
-    jit::tracer::addInputs(node, "options", c10::optional<ScalarType>());
-    jit::tracer::addInputs(node, "options", layout_or_default(c10::nullopt));
-    jit::tracer::addInputs(node, "options", device_or_default(c10::nullopt));
-    jit::tracer::addInputs(node, "options", pinned_memory_or_default(c10::nullopt));
-    c10::optional<MemoryFormat> memory_format = c10::MemoryFormat::Preserve;
+    jit::tracer::addInputs(node, "options", ::std::optional<ScalarType>());
+    jit::tracer::addInputs(node, "options", layout_or_default(::std::nullopt));
+    jit::tracer::addInputs(node, "options", device_or_default(::std::nullopt));
+    jit::tracer::addInputs(node, "options", pinned_memory_or_default(::std::nullopt));
+    ::std::optional<MemoryFormat> memory_format = c10::MemoryFormat::Preserve;
     jit::tracer::addInputs(node, "memory_format", memory_format);
 """,
     "zero": """\
-    jit::tracer::addInputs(node, "options", c10::optional<ScalarType>());
-    jit::tracer::addInputs(node, "options", layout_or_default(c10::nullopt));
-    jit::tracer::addInputs(node, "options", device_or_default(c10::nullopt));
-    jit::tracer::addInputs(node, "options", pinned_memory_or_default(c10::nullopt));
-    c10::optional<MemoryFormat> memory_format = c10::MemoryFormat::Preserve;
+    jit::tracer::addInputs(node, "options", ::std::optional<ScalarType>());
+    jit::tracer::addInputs(node, "options", layout_or_default(::std::nullopt));
+    jit::tracer::addInputs(node, "options", device_or_default(::std::nullopt));
+    jit::tracer::addInputs(node, "options", pinned_memory_or_default(::std::nullopt));
+    ::std::optional<MemoryFormat> memory_format = c10::MemoryFormat::Preserve;
     jit::tracer::addInputs(node, "memory_format", memory_format);
 """,
 }
@@ -399,8 +403,8 @@ ${assign_return_values}at::_ops::${unambiguous_name}::redispatch(${unpacked_args
 )
 
 
-def emit_trace_body(f: NativeFunction) -> List[str]:
-    trace_body: List[str] = []
+def emit_trace_body(f: NativeFunction) -> list[str]:
+    trace_body: list[str] = []
 
     trace_body.append(format_prerecord_trace(f))
 
@@ -503,7 +507,7 @@ def method_registration(f: NativeFunction) -> str:
     )
 
 
-def gen_trace_type_func(fn: NativeFunction) -> Dict[str, List[str]]:
+def gen_trace_type_func(fn: NativeFunction) -> dict[str, list[str]]:
     return {
         "ops_headers": [f"#include <ATen/ops/{fn.root_name}_ops.h>"],
         "trace_method_definitions": [method_definition(fn)],
@@ -512,7 +516,7 @@ def gen_trace_type_func(fn: NativeFunction) -> Dict[str, List[str]]:
 
 
 def gen_trace_type(
-    out: str, native_functions: List[NativeFunction], template_path: str
+    out: str, native_functions: list[NativeFunction], template_path: str
 ) -> None:
     # NOTE: see Note [Sharded File] at the top of the VariableType.cpp
     # template regarding sharding of the generated files.

@@ -1,6 +1,8 @@
+# mypy: allow-untyped-defs
 # mypy: disable-error-code="method-assign"
-
+import atexit
 import copy
+import cProfile
 import functools
 import getpass
 import inspect
@@ -9,17 +11,17 @@ import logging
 import os
 import re
 import subprocess
+import sys
 import tempfile
 import textwrap
 from collections import Counter
 from importlib import import_module
-from typing import Any, Callable, Dict, List, Optional, TypeVar
+from typing import Any, Callable, Optional, TypeVar
 
 import torch
 import torch._prims_common as utils
 import torch._subclasses.meta_utils
 from torch import Tensor
-
 from torch._dynamo.testing import rand_strided
 from torch._prims_common import is_float_dtype
 from torch.multiprocessing.reductions import StorageWeakRef
@@ -27,6 +29,7 @@ from torch.utils._content_store import ContentStoreReader, ContentStoreWriter
 
 from . import config
 from .utils import clone_inputs, get_debug_dir
+
 
 log = logging.getLogger(__name__)
 
@@ -83,6 +86,7 @@ python_binary(
     compile = False,
     deps = [
         "//caffe2:torch",
+        "//caffe2:libtorch",
         "//caffe2/functorch:functorch",
         "//triton:triton",
         "{cur_target}",
@@ -169,7 +173,7 @@ class NNModuleToString:
             """
             from torch.nn import *
             class Repro(torch.nn.Module):
-                def __init__(self):
+                def __init__(self) -> None:
                     super().__init__()
             """
         )
@@ -181,7 +185,7 @@ class NNModuleToString:
             example_param = next(module.parameters(), None)
             if example_param is not None and example_param.is_cuda:
                 module_str = f"{module_str}.cuda()"
-            model_str += f"{tab*2}self.{module_name} = {module_str}\n"
+            model_str += f"{tab * 2}self.{module_name} = {module_str}\n"
 
         for buffer_name, buffer in gm._buffers.items():
             if buffer is None:
@@ -200,7 +204,9 @@ class NNModuleToString:
                 )
             if buffer.is_cuda:
                 tensor_str = f"{tensor_str}.cuda()"
-            model_str += f"{tab*2}self.register_buffer('{buffer_name}', {tensor_str})\n"
+            model_str += (
+                f"{tab * 2}self.register_buffer('{buffer_name}', {tensor_str})\n"
+            )
 
         for param_name, param in gm._parameters.items():
             if param is None:
@@ -209,7 +215,7 @@ class NNModuleToString:
             if param.is_cuda:
                 maybe_device = ', device="cuda"'
             tensor_str = f"torch.nn.Parameter(torch.randn({list(param.shape)}, dtype={param.dtype}{maybe_device}))"
-            model_str += f"{tab*2}self.{param_name} = {tensor_str}\n"
+            model_str += f"{tab * 2}self.{param_name} = {tensor_str}\n"
 
         # TODO - Keep this code for now. But, I don't think we will need this.
         # attrs = dir(gm)
@@ -245,6 +251,31 @@ def _cuda_system_info_comment():
         model_str += f"# {name} : {count} \n"
     model_str += "\n"
     return model_str
+
+
+def generate_env_vars_string(*, stable_output=False):
+    """
+    Generate a string configuration for environment variables related to Dynamo, Inductor, and Triton.
+    """
+    if stable_output:
+        return "# env var omitted due to stable_output=True"
+
+    allow_list = ["TORCH", "DYNAMO", "INDUCTOR", "TRITON"]
+    skip_list = ["TRITON_LIBDEVICE_PATH", "TRITON_PTXAS_PATH", "TRITON_LIBCUDA_PATH"]
+
+    def filter(key):
+        return any(string in key for string in allow_list) and key not in skip_list
+
+    config_lines = [
+        f"os.environ['{key}'] = '{value}'"
+        for key, value in os.environ.items()
+        if filter(key)
+    ]
+    config_string = "\n".join(config_lines)
+    return f"""\
+import os
+{config_string}
+    """
 
 
 def generate_config_string(*, stable_output=False):
@@ -360,12 +391,14 @@ def same_two_models(
             fp64_ref = run_fwd_maybe_bwd(fp64_model, fp64_examples, only_fwd)
         except Exception:
             if require_fp64:
-                raise RuntimeError("Could not generate fp64 outputs")  # noqa: B904
+                raise RuntimeError(  # noqa: B904
+                    "Could not generate fp64 outputs, workaround with torch._dynamo.config.same_two_models_use_fp64 = False"
+                )
             log.warning("Could not generate fp64 outputs")
 
     try:
         res = run_fwd_maybe_bwd(opt_gm, example_inputs, only_fwd)
-    except Exception as e:
+    except Exception:
         # This means that the minified graph is bad/exposes a different problem.
         # As we are checking accuracy here, lets log the exception and return True.
         log.exception(
@@ -450,7 +483,7 @@ def backend_accuracy_fails(
             require_fp64=require_fp64,
             ignore_non_fp=ignore_non_fp,
         )
-    except Exception as e:
+    except Exception:
         # This means that the minified graph is bad/exposes a different problem.
         # As we are checking accuracy here, lets log the exception and return False.
         log.exception(
@@ -490,7 +523,7 @@ _is_leaf_or_default = _mk_defaulter(False)
 
 
 class NopInputReader:
-    def __init__(self):
+    def __init__(self) -> None:
         self.total = 0
 
     def storage(self, storage_hash, nbytes, *, device=None, dtype_hint=None):
@@ -646,16 +679,22 @@ class InputWriter:
         return v
 
     def tensor(self, name, t) -> None:
+        from torch.fx.experimental.symbolic_shapes import statically_known_true, sym_eq
+
         storage = self.storage(
             t.untyped_storage(), dtype_hint=t.dtype, device_hint=t.device
         )
         args = []
         # NB: this is positional, must come first
-        if _stride_or_default(None, shape=t.shape) != t.stride():
+        if not statically_known_true(
+            sym_eq(_stride_or_default(None, shape=t.shape), t.stride())
+        ):
             args.append(str(tuple(t.stride())))
         if _dtype_or_default(None) != t.dtype:
             args.append(f"dtype={t.dtype!r}")
-        if _storage_offset_or_default(None) != t.storage_offset():
+        if not statically_known_true(
+            _storage_offset_or_default(None) == t.storage_offset()
+        ):
             args.append(f"storage_offset={t.storage_offset()!r}")
         tensor_metadata = torch._utils.get_tensor_metadata(t)
         if tensor_metadata:
@@ -671,6 +710,29 @@ class InputWriter:
             + f")  # {name}"
         )
 
+    def unsupported(self, name, arg):
+        # NB: Try hard not to /print/ a tensor, that will be very slow
+        self._lines.append(f"# {name} was unsupported type for dumping: {type(arg)}")
+        # Best effort dump as much useful stuff we can lol, in case you want
+        # to repair the repro
+        if isinstance(arg, (list, tuple)):
+            self._lines.append('"""')
+            for i, a in enumerate(arg):
+                name_i = f"{name}[{i}]"
+                if isinstance(a, torch.Tensor):
+                    self.tensor(name_i, a)
+                elif isinstance(a, (int, torch.SymInt)):
+                    self.symint(name_i, a)
+                else:
+                    self.unsupported(name_i, a)
+            self._lines.append('"""')
+
+    # write out that the arg was filtered out as it is constant
+    def const(self, name) -> None:
+        self._lines.append(
+            f"reader.const({name!r})  # {name}, filtered out during compilation"
+        )
+
     # TODO: this doesn't actually symint atm
     def symint(self, name, val) -> None:
         if isinstance(val, torch.SymInt):
@@ -679,11 +741,11 @@ class InputWriter:
 
 
 def aot_graph_input_parser(
-    func: Callable[[List[Tensor]], List[Tensor]],
+    func: Callable[[list[Tensor]], list[Tensor]],
     device: str = "cuda",
-    sym_shapes: Optional[Dict[str, int]] = None,
+    sym_shapes: Optional[dict[str, int]] = None,
     default_sym_shape: Optional[int] = None,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """
     Takes in a function which has been printed with print_readable() and constructs kwargs to run it.
 
@@ -714,10 +776,9 @@ def aot_graph_input_parser(
 
     class TensorContainer:
         "Container for tensors as attributes"
-        pass
 
     # Dictionary for tensors from annotations
-    kwargs: Dict[str, Any] = {}
+    kwargs: dict[str, Any] = {}
 
     sym_shapes = sym_shapes or {}
 
@@ -739,7 +800,8 @@ def aot_graph_input_parser(
                 resolved_shape.append(s)
                 dynamic_dims.append(i)
             else:
-                resolved_shape.append(int(dim))
+                if dim:
+                    resolved_shape.append(int(dim))
 
         constructor = torch.randn if dtype.is_floating_point else torch.zeros
         out = constructor(resolved_shape, dtype=dtype, device=device)  # type: ignore[call-arg]
@@ -775,3 +837,41 @@ def aot_graph_input_parser(
             setattr(container, attr_name, gen_tensor(shape, dtype))
 
     return kwargs
+
+
+def profile_to_file(filename: str) -> Callable[[T], T]:
+    """
+    Decorator to cProfile a given function and save the result to disk on process exit.
+
+    Args:
+        filename: filename to save profile to
+    """
+    prof = cProfile.Profile()
+    filename = os.path.abspath(os.path.expanduser(filename))
+
+    def decorator(fn):
+        @functools.wraps(fn)
+        def wrapper(*args, **kwargs):
+            prof.enable()
+            try:
+                return fn(*args, **kwargs)
+            finally:
+                prof.disable()
+
+        return wrapper
+
+    def save_it():
+        prof.dump_stats(filename)
+        sys.stderr.write(
+            textwrap.dedent(
+                f"""\
+                Wrote profile to {filename}, view with:
+
+                    snakeviz {filename}
+
+                """
+            )
+        )
+
+    atexit.register(save_it)
+    return decorator

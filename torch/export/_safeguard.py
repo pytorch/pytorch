@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import torch
 from torch.fx.experimental.proxy_tensor import ProxyTorchDispatchMode
 from torch.overrides import TorchFunctionMode

@@ -1,7 +1,7 @@
 # Owner(s): ["oncall: distributed"]
 
 import unittest
-from typing import List, Optional, Tuple
+from typing import Optional
 
 import torch
 import torch.distributed
@@ -13,7 +13,7 @@ from torch.testing._internal.common_utils import run_tests, TestCase
 
 
 class MyModule(torch.nn.Module):
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
         torch.manual_seed(0)
         self.lin1 = nn.Linear(3, 3, bias=False)
@@ -27,9 +27,9 @@ class MyModule(torch.nn.Module):
 class MyDummyFnOptimizer:
     def __init__(
         self,
-        params: List[Tensor],
+        params: list[Tensor],
         lr: float = 1e-3,
-        betas: Tuple[float, float] = (0.9, 0.999),
+        betas: tuple[float, float] = (0.9, 0.999),
         eps: float = 1e-6,
         weight_decay: float = 0.0,
         _allow_empty_param_list: bool = False,
@@ -63,7 +63,7 @@ class MyDummyFnOptimizer:
                 "MyDummyFnOptimizer does not support step_param() as of now"
             )
 
-    def step(self, gradients: List[Optional[Tensor]]):
+    def step(self, gradients: list[Optional[Tensor]]):
         # call the custom optimizer step implementation
         with torch.no_grad():
             raise RuntimeError("MyDummyFnOptimizer does not support step() as of now")
@@ -92,7 +92,6 @@ class TestFunctionalOptimParity(TestCase):
         module_optim = MyModule()
         module_functional = MyModule()
         optim_params = module_optim.parameters()
-        functional_params = module_functional.parameters()
         optim = optim_cls(optim_params, *args, **kwargs)
         functional_optim_cls = functional_optim_map.get(optim_cls, None)
         if not functional_optim_cls:
@@ -111,10 +110,10 @@ class TestFunctionalOptimParity(TestCase):
         )
         # Save old parameters to verify optimizer modifies them.
         old_module_optim_params = [
-            param.clone().detach() for param in module_optim.parameters()
+            param.detach().clone() for param in module_optim.parameters()
         ]
         old_module_functional_params = [
-            param.clone().detach() for param in module_functional.parameters()
+            param.detach().clone() for param in module_functional.parameters()
         ]
 
         t1 = torch.randn(3, 3)

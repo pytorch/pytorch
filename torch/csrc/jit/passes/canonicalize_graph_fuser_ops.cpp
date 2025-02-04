@@ -3,11 +3,10 @@
 #include <torch/csrc/jit/passes/canonicalize_graph_fuser_ops.h>
 #include <torch/csrc/jit/passes/dead_code_elimination.h>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 struct ChunkOutput {
-  ChunkOutput(Value* v, size_t o) : val(v), offset(o){};
+  ChunkOutput(Value* v, size_t o) : val(v), offset(o) {}
   Value* val;
   size_t offset;
 };
@@ -26,14 +25,14 @@ static std::optional<std::vector<ChunkOutput>> getChunkOutputs(Node* chunk) {
       // number of chunks
       if (static_cast<int64_t>(list_use.user->outputs().size()) !=
           chunk->get<int64_t>(attr::chunks).value()) {
-        return c10::nullopt;
+        return std::nullopt;
       }
       auto unpack_outputs = list_use.user->outputs();
       for (const auto i : c10::irange(unpack_outputs.size())) {
         outputs.emplace_back(unpack_outputs[i], i);
       }
     } else {
-      return c10::nullopt;
+      return std::nullopt;
     }
   }
   return outputs;
@@ -96,5 +95,4 @@ void CanonicalizeOps(const std::shared_ptr<Graph>& graph) {
   EliminateDeadCode(graph);
 }
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

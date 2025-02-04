@@ -71,6 +71,7 @@ struct TORCH_API ReduceOp : torch::CustomClassHolder {
 
   ReduceOp(ReduceOp&& other) = default;
   ReduceOp& operator=(ReduceOp&& other) = default;
+  ~ReduceOp() override = default;
 
   operator RedOpType() const {
     return op_;
@@ -121,7 +122,7 @@ struct BroadcastOptions {
 struct AllreduceOptions {
   ReduceOp reduceOp = ReduceOp::SUM;
   std::chrono::milliseconds timeout = kUnsetTimeout;
-  std::optional<at::Tensor> sparseIndices = c10::nullopt;
+  std::optional<at::Tensor> sparseIndices = std::nullopt;
 };
 
 struct AllreduceCoalescedOptions : AllreduceOptions {};

@@ -1,4 +1,4 @@
-# mypy: ignore-errors
+# mypy: allow-untyped-defs
 
 import sys
 from functools import wraps, partial
@@ -44,7 +44,7 @@ class ShardedTensorTestBase(MultiProcessTestCase):
             )
 
         rpc.init_rpc(
-            name="worker%d" % self.rank,
+            name=f"worker{self.rank:d}",
             rank=self.rank,
             world_size=self.world_size,
             rpc_backend_options=rpc_backend_options,

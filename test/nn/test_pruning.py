@@ -4,7 +4,6 @@ import unittest
 import unittest.mock as mock
 
 import torch
-
 import torch.nn as nn
 import torch.nn.utils.prune as prune
 from torch.testing._internal.common_nn import NNTestCase
@@ -517,7 +516,7 @@ class TestPruningNN(NNTestCase):
         AXIS = 2
         p = prune.RandomStructured(amount=AMOUNT, dim=AXIS)
         t = 2 * torch.randint(low=-1, high=2, size=(5, 4, 2)).to(dtype=torch.float32)
-        nparams_toprune = prune._compute_nparams_toprune(AMOUNT, t.shape[AXIS])
+        prune._compute_nparams_toprune(AMOUNT, t.shape[AXIS])
 
         computed_mask = p.compute_mask(t, default_mask=torch.ones_like(t))
         # check that 1 column is fully prune, the others are left untouched
@@ -776,7 +775,8 @@ class TestPruningNN(NNTestCase):
 
         with TemporaryFileName() as fname:
             torch.save(model, fname)
-            new_model = torch.load(fname)
+            # weights_only=False as this is legacy code that saves the model
+            new_model = torch.load(fname, weights_only=False)
 
         # check that the original weight and the new mask are present
         self.assertIn("0.weight_orig", new_model.state_dict())

@@ -30,9 +30,14 @@ fi
 # Remove packaged libs and headers
 rm -rf $TRITON_ROCM_DIR/include/*
 
-LIBTINFO_PATH="/usr/lib64/libtinfo.so.5"
 LIBNUMA_PATH="/usr/lib64/libnuma.so.1"
 LIBELF_PATH="/usr/lib64/libelf.so.1"
+OS_NAME=`awk -F= '/^NAME/{print $2}' /etc/os-release`
+if [[ "$OS_NAME" == *"CentOS Linux"* ]]; then
+    LIBTINFO_PATH="/usr/lib64/libtinfo.so.5"
+else
+    LIBTINFO_PATH="/usr/lib64/libtinfo.so.6"
+fi
 
 OS_SO_PATHS=(
     $LIBELF_PATH
@@ -93,6 +98,8 @@ done
 
 # Copy Include Files
 cp -r $ROCM_HOME/include/hip $TRITON_ROCM_DIR/include
+cp -r $ROCM_HOME/include/roctracer $TRITON_ROCM_DIR/include
+cp -r $ROCM_HOME/include/hsa $TRITON_ROCM_DIR/include
 
 # Copy linker
 mkdir -p $TRITON_ROCM_DIR/llvm/bin

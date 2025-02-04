@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 # Copyright (c) Facebook, Inc. and its affiliates.
 # All rights reserved.
 #
@@ -12,18 +13,20 @@ import time
 import weakref
 from datetime import timedelta
 from threading import Event, Thread
-from typing import Any, Callable, Dict, Optional, Tuple, Union
+from typing import Any, Callable, Optional, Union
 
-__all__ = ['parse_rendezvous_endpoint']
 
-def _parse_rendezvous_config(config_str: str) -> Dict[str, str]:
+__all__ = ["parse_rendezvous_endpoint"]
+
+
+def _parse_rendezvous_config(config_str: str) -> dict[str, str]:
     """Extract key-value pairs from a rendezvous configuration string.
 
     Args:
         config_str:
             A string in format <key1>=<value1>,...,<keyN>=<valueN>.
     """
-    config: Dict[str, str] = {}
+    config: dict[str, str] = {}
 
     config_str = config_str.strip()
     if not config_str:
@@ -61,7 +64,9 @@ def _try_parse_port(port_str: str) -> Optional[int]:
     return None
 
 
-def parse_rendezvous_endpoint(endpoint: Optional[str], default_port: int) -> Tuple[str, int]:
+def parse_rendezvous_endpoint(
+    endpoint: Optional[str], default_port: int
+) -> tuple[str, int]:
     """Extract the hostname and the port number from a rendezvous endpoint.
 
     Args:
@@ -91,7 +96,7 @@ def parse_rendezvous_endpoint(endpoint: Optional[str], default_port: int) -> Tup
 
     if len(rest) == 1:
         port = _try_parse_port(rest[0])
-        if port is None or port >= 2 ** 16:
+        if port is None or port >= 2**16:
             raise ValueError(
                 f"The port number of the rendezvous endpoint '{endpoint}' must be an integer "
                 "between 0 and 65536."
@@ -134,10 +139,7 @@ def _matches_machine_hostname(host: str) -> bool:
     except (ValueError, socket.gaierror) as _:
         host_addr_list = []
 
-    host_ip_list = [
-        host_addr_info[4][0]
-        for host_addr_info in host_addr_list
-    ]
+    host_ip_list = [host_addr_info[4][0] for host_addr_info in host_addr_list]
 
     this_host = socket.gethostname()
     if host == this_host:
@@ -163,7 +165,7 @@ def _matches_machine_hostname(host: str) -> bool:
     return False
 
 
-def _delay(seconds: Union[float, Tuple[float, float]]) -> None:
+def _delay(seconds: Union[float, tuple[float, float]]) -> None:
     """Suspend the current thread for ``seconds``.
 
     Args:
@@ -193,8 +195,8 @@ class _PeriodicTimer:
     class _Context:
         interval: float
         function: Callable[..., None]
-        args: Tuple[Any, ...]
-        kwargs: Dict[str, Any]
+        args: tuple[Any, ...]
+        kwargs: dict[str, Any]
         stop_event: Event
 
     _name: Optional[str]
@@ -245,7 +247,10 @@ class _PeriodicTimer:
             raise RuntimeError("The timer has already started.")
 
         self._thread = Thread(
-            target=self._run, name=self._name or "PeriodicTimer", args=(self._ctx,), daemon=True
+            target=self._run,
+            name=self._name or "PeriodicTimer",
+            args=(self._ctx,),
+            daemon=True,
         )
 
         # We avoid using a regular finalizer (a.k.a. __del__) for stopping the

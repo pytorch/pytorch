@@ -14,9 +14,9 @@
 #include <c10/core/DeviceType.h>
 #include <c10/core/Stream.h>
 #include <c10/core/impl/PyInterpreter.h>
-#include <c10/util/Optional.h>
 #include <cuda_runtime_api.h>
 #include <cstdint>
+#include <optional>
 
 namespace c10::cuda::impl {
 
@@ -45,7 +45,7 @@ struct CUDAGuardImpl final : public c10::impl::DeviceGuardImplInterface {
     const auto err = C10_CUDA_ERROR_HANDLED(c10::cuda::GetDevice(&device));
     C10_CUDA_CHECK_WARN(err);
     if (err != cudaSuccess) {
-      return c10::nullopt;
+      return std::nullopt;
     }
     return Device(DeviceType::CUDA, device);
   }
@@ -56,7 +56,7 @@ struct CUDAGuardImpl final : public c10::impl::DeviceGuardImplInterface {
   void uncheckedSetDevice(Device d) const noexcept override {
     C10_CUDA_CHECK_WARN(c10::cuda::MaybeSetDevice(d.index()));
   }
-  Stream getStream(Device d) const noexcept override {
+  Stream getStream(Device d) const override {
     return getCurrentCUDAStream(d.index()).unwrap();
   }
   Stream getDefaultStream(Device d) const override {
@@ -70,7 +70,7 @@ struct CUDAGuardImpl final : public c10::impl::DeviceGuardImplInterface {
     return getStreamFromPool(isHighPriority, d.index());
   }
   // NB: These do NOT set the current device
-  Stream exchangeStream(Stream s) const noexcept override {
+  Stream exchangeStream(Stream s) const override {
     CUDAStream cs(s);
     auto old_stream = getCurrentCUDAStream(s.device().index());
     setCurrentCUDAStream(cs);
@@ -217,6 +217,19 @@ struct CUDAGuardImpl final : public c10::impl::DeviceGuardImplInterface {
     }
     // Note: cudaEventSynchronize can be safely called from any device
     C10_CUDA_CHECK(cudaEventSynchronize(cuda_event));
+  }
+
+  // Note: synchronizeDevice can be safely called from any device
+  void synchronizeDevice(const c10::DeviceIndex device_index) const override {
+    DeviceIndex orig_device{-1};
+    C10_CUDA_CHECK(c10::cuda::GetDevice(&orig_device));
+    C10_CUDA_CHECK(c10::cuda::SetDevice(device_index));
+    const c10::impl::PyInterpreter* interp = c10::impl::GPUTrace::get_trace();
+    if (C10_UNLIKELY(interp)) {
+      (*interp)->trace_gpu_device_synchronization(c10::kCUDA);
+    }
+    C10_CUDA_CHECK(cudaDeviceSynchronize());
+    C10_CUDA_CHECK(c10::cuda::SetDevice(orig_device));
   }
 
   void recordDataPtrOnStream(const c10::DataPtr& data_ptr, const Stream& stream)

@@ -37,20 +37,30 @@ std::string ExcludeFileExtension(const std::string& file_name) {
 
 // Narrows the wstr argument and then passes it to _str.
 // Assumes that the input (wide) text is encoded as UTF-16.
-std::ostream& _strFromWide(std::ostream& ss, const std::wstring& wString);
+static std::ostream& _strFromWide(
+    std::ostream& ss,
+    const std::wstring& wString);
 
 #ifndef _WIN32
 
-std::ostream& _strFromWide(std::ostream& ss, const std::wstring& wString) {
+C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wdeprecated-declarations")
+// TODO (huydhn) https://en.cppreference.com/w/cpp/header/codecvt has been
+// deprecated in C++17 but there is no alternative yet, so I just ack it
+static std::ostream& _strFromWide(
+    std::ostream& ss,
+    const std::wstring& wString) {
   std::wstring_convert<std::codecvt_utf8_utf16<wchar_t>> converter;
   return _str(ss, converter.to_bytes(wString));
 }
+C10_DIAGNOSTIC_POP()
 
 #else // #ifndef _WIN32
 // The WIN32 implementation of wstring_convert leaks memory; see
 // https://github.com/microsoft/STL/issues/443
 
-std::ostream& _strFromWide(std::ostream& ss, const std::wstring& wString) {
+static std::ostream& _strFromWide(
+    std::ostream& ss,
+    const std::wstring& wString) {
   return _str(ss, u16u8(wString));
 }
 
@@ -73,7 +83,7 @@ std::ostream& operator<<(std::ostream& out, const SourceLocation& loc) {
   return out;
 }
 
-size_t ReplaceAll(std::string& s, c10::string_view from, c10::string_view to) {
+size_t ReplaceAll(std::string& s, std::string_view from, std::string_view to) {
   if (from.empty()) {
     return 0;
   }
@@ -82,7 +92,7 @@ size_t ReplaceAll(std::string& s, c10::string_view from, c10::string_view to) {
   std::string::size_type last_pos = 0u;
   std::string::size_type cur_pos = 0u;
   std::string::size_type write_pos = 0u;
-  const c10::string_view input(s);
+  const std::string_view input(s);
 
   if (from.size() >= to.size()) {
     // If the replacement string is not larger than the original, we

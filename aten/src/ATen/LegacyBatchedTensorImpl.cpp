@@ -25,7 +25,7 @@ BatchedTensorImpl::BatchedTensorImpl(Tensor value, BatchDims bdims)
   const auto value_strides = value_.strides();
   sizes_and_strides_.resize(public_dims);
   for (const auto dim : c10::irange(public_dims)) {
-    auto actual_dim = actualDim(dim, /*wrap_dim=*/false);
+    auto actual_dim = actualDim(static_cast<int64_t>(dim), /*wrap_dim=*/false);
     sizes_and_strides_.size_at_unchecked(dim) = value_sizes.at(actual_dim);
     sizes_and_strides_.stride_at_unchecked(dim) = value_strides.at(actual_dim);
   }
@@ -37,7 +37,7 @@ BatchedTensorImpl::BatchedTensorImpl(Tensor value, BatchDims bdims)
 int64_t BatchedTensorImpl::actualDim(int64_t dim, bool wrap_dim) const {
   if (wrap_dim) {
     const auto ndim = sizes_and_strides_.size();
-    dim = maybe_wrap_dim(dim, ndim);
+    dim = maybe_wrap_dim(dim, static_cast<int64_t>(ndim));
   }
   auto is_bdim = createBatchDimBitset(bdims_);
 
@@ -76,7 +76,7 @@ void BatchedTensorImpl::checkInvariants() const {
   }
 }
 
-// The following are publically exposed as methods of Tensor
+// The following are publicly exposed as methods of Tensor
 
 IntArrayRef BatchedTensorImpl::strides_custom() const {
   return strides_default();
@@ -113,7 +113,7 @@ const char* BatchedTensorImpl::tensorimpl_type_name() const {
   return "BatchedTensorImpl";
 }
 
-Tensor makeBatched(const Tensor& tensor, BatchDims bdims) {
+Tensor makeBatched(Tensor tensor, BatchDims bdims) {
   TORCH_INTERNAL_ASSERT(!isBatchedTensor(tensor));
   auto tensor_dim = tensor.dim();
   TORCH_CHECK(
@@ -124,15 +124,15 @@ Tensor makeBatched(const Tensor& tensor, BatchDims bdims) {
       std::all_of(bdims.begin(), bdims.end(),
           [](const BatchDim& bdim) { return bdim.level() < kVmapNumLevels; }),
       "We only support up to ", kVmapNumLevels, " nested vmaps");
-  return at::detail::make_tensor<BatchedTensorImpl>(tensor, std::move(bdims));
+  return at::detail::make_tensor<BatchedTensorImpl>(std::move(tensor), std::move(bdims));
 }
 
-Tensor addBatchDim(const Tensor& tensor, int64_t level, int64_t dim) {
+Tensor addBatchDim(Tensor tensor, int64_t level, int64_t dim) {
   const auto* batched = maybeGetBatchedImpl(tensor);
   if (!batched) {
     BatchDims bdims;
     bdims.emplace_back(level, dim);
-    return at::detail::make_tensor<BatchedTensorImpl>(tensor, std::move(bdims));
+    return at::detail::make_tensor<BatchedTensorImpl>(std::move(tensor), std::move(bdims));
   }
   BatchDims new_bdims(batched->bdims().begin(), batched->bdims().end());
   auto actual_bdim = batched->actualDim(dim, /*wrap_dim=*/true);

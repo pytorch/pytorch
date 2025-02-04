@@ -79,7 +79,7 @@ def test_rnns(
 
     if verbose:
         print(experim.forward.graph_for(*experim.inputs))
-    print("")
+    print()
 
 
 def test_vl_py(**test_args):
@@ -141,7 +141,7 @@ def test_vl_py(**test_args):
 
         if test_args["verbose"]:
             print(experim.forward.graph_for(*experim.inputs))
-        print("")
+        print()
 
 
 if __name__ == "__main__":

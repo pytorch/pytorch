@@ -147,6 +147,9 @@ public:
   Vectorized<double> asin() const {
     return Vectorized<double>(Sleef_asind4_u10(values));
   }
+  Vectorized<double> asinh() const {
+    return Vectorized<double>(Sleef_asinhd4_u10(values));
+  }
   Vectorized<double> atan() const {
     return Vectorized<double>(Sleef_atand4_u10(values));
   }
@@ -416,11 +419,15 @@ inline Vectorized<double> Vectorized<double>::le(const Vectorized<double>& other
 template <>
 inline void convert(const double* src, double* dst, int64_t n) {
   int64_t i;
+#ifndef __msvc_cl__
 #pragma unroll
+#endif
   for (i = 0; i <= (n - Vectorized<double>::size()); i += Vectorized<double>::size()) {
     _mm256_storeu_pd(dst + i, _mm256_loadu_pd(src + i));
   }
+#ifndef __msvc_cl__
 #pragma unroll
+#endif
   for (; i < n; i++) {
     dst[i] = src[i];
   }

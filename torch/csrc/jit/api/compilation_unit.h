@@ -12,7 +12,7 @@
 #include <ATen/core/function_schema.h>
 #include <ATen/core/qualified_name.h>
 #include <c10/util/ArrayRef.h>
-#include <c10/util/Optional.h>
+#include <optional>
 
 #include <functional>
 #include <memory>
@@ -97,7 +97,7 @@ struct TORCH_API CompilationUnit {
       const Self* self,
       // see [name mangling]
       bool shouldMangle = false,
-      std::optional<size_t> operator_set_version = c10::nullopt);
+      std::optional<size_t> operator_set_version = std::nullopt);
 
   void define_hooks(
       const std::optional<c10::QualifiedName>& prefix,
@@ -180,7 +180,7 @@ struct TORCH_API CompilationUnit {
         "' already defined.");
     classes_.push_back(std::move(namedType));
     classDict_[*classes_.back()->name()] = classes_.size() - 1;
-  };
+  }
 
   c10::ClassTypePtr get_class(const c10::QualifiedName& name) const {
     auto type = get_type(name);
@@ -293,7 +293,7 @@ struct TORCH_API CompilationUnit {
       const std::unordered_map<std::string, Function*>& function_table,
       bool shouldMangle = false,
       FunctionType type = FunctionType::Method,
-      std::optional<size_t> version = c10::nullopt) const;
+      std::optional<size_t> version = std::nullopt) const;
 
   // Define a property on \p self.
   struct PropertyPair;

@@ -1,6 +1,7 @@
 #define TORCH_ASSERT_NO_OPERATORS
 #include <ATen/NumericUtils.h>
 #include <ATen/Dispatch.h>
+#include <ATen/Dispatch_v2.h>
 #include <ATen/native/DispatchStub.h>
 #include <ATen/native/TensorCompare.h>
 #include <ATen/native/cuda/Loops.cuh>
@@ -12,13 +13,14 @@ namespace at::native {
 namespace {
 
 void where_kernel_impl(TensorIterator &iter) {
-  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND4(kComplexHalf, kHalf, kBFloat16, kBool, iter.dtype(), "where_cuda", [&] {
+  AT_DISPATCH_V2(iter.dtype(), "where_cuda", [&] {
       gpu_kernel(
         iter,
         [=] GPU_LAMBDA (bool cond_val, scalar_t self_val, scalar_t other_val) -> scalar_t {
           return cond_val ? self_val : other_val;
         });
-  });
+  },
+  kComplexHalf, kHalf, kBFloat16, kBool, AT_EXPAND(AT_ALL_TYPES_AND_COMPLEX), AT_EXPAND(AT_FLOAT8_TYPES));
 }
 
 void isposinf_kernel_impl(TensorIteratorBase &iter) {
@@ -93,41 +95,49 @@ void clamp_max_scalar_kernel_impl(TensorIteratorBase& iter, Scalar max) {
 } // anonymous namespace
 
 
-REGISTER_DISPATCH(where_kernel, &where_kernel_impl);
-REGISTER_DISPATCH(isposinf_stub, &isposinf_kernel_impl);
-REGISTER_DISPATCH(isneginf_stub, &isneginf_kernel_impl);
-REGISTER_DISPATCH(clamp_stub, &clamp_kernel_impl);
-REGISTER_DISPATCH(clamp_scalar_stub, &clamp_scalar_kernel_impl);
-REGISTER_DISPATCH(clamp_min_scalar_stub, &clamp_min_scalar_kernel_impl);
-REGISTER_DISPATCH(clamp_max_scalar_stub, &clamp_max_scalar_kernel_impl);
+REGISTER_DISPATCH(where_kernel, &where_kernel_impl)
+REGISTER_DISPATCH(isposinf_stub, &isposinf_kernel_impl)
+REGISTER_DISPATCH(isneginf_stub, &isneginf_kernel_impl)
+REGISTER_DISPATCH(clamp_stub, &clamp_kernel_impl)
+REGISTER_DISPATCH(clamp_scalar_stub, &clamp_scalar_kernel_impl)
+REGISTER_DISPATCH(clamp_min_scalar_stub, &clamp_min_scalar_kernel_impl)
+REGISTER_DISPATCH(clamp_max_scalar_stub, &clamp_max_scalar_kernel_impl)
 
+struct Msg {
+ static constexpr size_t MAX_MSG_LENGTH = 256;
+ char msg[MAX_MSG_LENGTH];
+};
 template <typename scalar_t>
-__global__ void _assert_async_cuda_kernel(const scalar_t* input) {
-  CUDA_KERNEL_ASSERT(input[0] != 0);
+__global__ void _assert_async_cuda_kernel(const scalar_t* input, Msg msg) {
+  CUDA_KERNEL_ASSERT_MSG(input[0] != 0, msg.msg);
 }
 
-__global__ void _assert_async_cuda_kernel(const c10::complex<float>* input) {
-  CUDA_KERNEL_ASSERT(input[0] != c10::complex<float>(0, 0));
+__global__ void _assert_async_cuda_kernel(const c10::complex<float>* input, Msg msg) {
+  CUDA_KERNEL_ASSERT_MSG(input[0] != c10::complex<float>(0, 0), msg.msg);
 }
-__global__ void _assert_async_cuda_kernel(const c10::complex<double>* input) {
-  CUDA_KERNEL_ASSERT(input[0] != c10::complex<double>(0, 0));
+__global__ void _assert_async_cuda_kernel(const c10::complex<double>* input, Msg msg) {
+  CUDA_KERNEL_ASSERT_MSG(input[0] != c10::complex<double>(0, 0), msg.msg);
 }
 
-void _assert_async_cuda(const Tensor& self_tensor) {
+void _assert_async_msg_cuda(const Tensor& self_tensor, std::string_view assert_msg) {
   const TensorBase &self = get_tensor_base(self_tensor);
   auto n = self.numel();
   TORCH_CHECK(n != 0, "Boolean value of Tensor with no values is ambiguous");
   TORCH_CHECK(n < 2, "Boolean value of Tensor with more than one value is ambiguous");
   auto stream = at::cuda::getCurrentCUDAStream();
+  Msg msg;
+  size_t copy_length = assert_msg.length();
+  TORCH_CHECK(copy_length < Msg::MAX_MSG_LENGTH - 1, "Message length must be smaller than " + std::to_string(Msg::MAX_MSG_LENGTH - 1));
+  std::copy_n(assert_msg.data(), copy_length, msg.msg);
+  msg.msg[copy_length] = '\0';  // Ensure null-termination
   AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(at::ScalarType::Half, at::ScalarType::Bool, at::ScalarType::BFloat16, self.scalar_type(), "_assert_async_cuda", [&] {
-    _assert_async_cuda_kernel<<<1, 1, 0, stream>>>(self.const_data_ptr<scalar_t>());
+    _assert_async_cuda_kernel<<<1, 1, 0, stream>>>(self.const_data_ptr<scalar_t>(), msg);
     C10_CUDA_KERNEL_LAUNCH_CHECK();
   });
 }
 
-// TODO (tmanlaibaatar) Ignore assert msg for now
-void _assert_async_msg_cuda(const Tensor& self_tensor, c10::string_view assert_msg) {
-  _assert_async_cuda(self_tensor);
+void _assert_async_cuda(const Tensor& self_tensor) {
+  _assert_async_msg_cuda(self_tensor, "");
 }
 
 } // namespace at::native

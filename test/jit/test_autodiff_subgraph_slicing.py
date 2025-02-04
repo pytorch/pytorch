@@ -13,6 +13,7 @@ from torch.testing._internal.common_utils import (
     ProfilingMode,
 )
 
+
 # Make the helper files in test/ importable
 pytorch_test_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
 sys.path.append(pytorch_test_dir)
@@ -23,6 +24,7 @@ from torch.testing._internal.jit_utils import (
     disable_autodiff_subgraph_inlining,
     JitTestCase,
 )
+
 
 if __name__ == "__main__":
     raise RuntimeError(
@@ -69,7 +71,7 @@ class TestAutodiffSubgraphSlicing(JitTestCase):
         input = torch.rand(6, 10).requires_grad_()
         with disable_autodiff_subgraph_inlining():
             with enable_profiling_mode_for_profiling_tests():
-                output = func(input, profile_and_replay=True)
+                func(input, profile_and_replay=True)
                 FileCheck().check_not("prim::DifferentiableGraph").run(
                     func.graph_for(input)
                 )
@@ -223,7 +225,7 @@ class TestAutodiffSubgraphSlicing(JitTestCase):
             input0 = torch.randn((2,), requires_grad=True)
             input1 = torch.randn((2,))
             output_ref = func(input0, input1)
-            for i in range(2):
+            for _ in range(2):
                 output = jit_f(input0, input1)
                 assert output_ref[0].requires_grad == output[0].requires_grad
                 assert output_ref[1][0].requires_grad == output[1][0].requires_grad
@@ -292,7 +294,7 @@ class TestAutodiffSubgraphSlicing(JitTestCase):
         NUM_PROFILED_RUNS = 1
         with num_profiled_runs(NUM_PROFILED_RUNS):
             WARMUP = 3  # 2 runs to reach backward + 1 to optimize it
-            for x in range(WARMUP):
+            for _ in range(WARMUP):
                 o = t(input, bias)
                 o.sum().backward()
 
@@ -414,7 +416,6 @@ class TestAutodiffSubgraphSlicing(JitTestCase):
 
         graph = self._perform_ad_subgraph_slicing(fn, 1, 1, 1, 1)
 
-        num_nodes = 4 if GRAPH_EXECUTOR == ProfilingMode.PROFILING else 3
         # add moved down
         g_str = str(graph)
         FileCheck().check_not("aten::add").run(g_str[0 : g_str.find("return")])

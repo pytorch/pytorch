@@ -6,13 +6,13 @@ from unittest import mock
 
 import torch
 from torch._inductor.runtime.hints import TRITON_MAX_BLOCK
-
 from torch._inductor.test_case import run_tests, TestCase
 from torch.testing._internal.common_utils import IS_LINUX
-from torch.testing._internal.inductor_utils import HAS_CUDA
+from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
+
 
 try:
-    import triton
+    import triton  # @manual
 except ImportError:
     if __name__ == "__main__":
         sys.exit(0)
@@ -20,6 +20,7 @@ except ImportError:
 
 from torch._inductor import config
 from torch._inductor.runtime.coordinate_descent_tuner import CoordescTuner
+
 
 config.benchmark_kernel = True
 config.coordinate_descent_tuning = True
@@ -65,7 +66,7 @@ class TestCoordinateDescentTuner(TestCase):
         """
 
         # size hint for x being 1 limits the max XBLOCK we try to be 1
-        tuner = CoordescTuner(size_hints=[1])
+        tuner = CoordescTuner(size_hints={"x": 1})
         baseline_config = triton.Config({"XBLOCK": 1}, num_warps=8, num_stages=1)
 
         def func(config):
@@ -89,7 +90,7 @@ class TestCoordinateDescentTuner(TestCase):
         with mock.patch.object(
             CoordescTuner, "compare_config", mock_compare_config_prefer_larger_XBLOCK
         ):
-            x = torch.ones(2, 256).cuda()
+            x = torch.ones(2, 256).to(GPU_TYPE)
             expected = f(x)
             # the first call get correct result when cache miss. Don't know why yet
             _ = torch.compile(f)(x)
@@ -101,17 +102,17 @@ class TestCoordinateDescentTuner(TestCase):
 
     def test_value_too_large(self):
         # Simulate a reduction
-        size_hints = [2**20, 2**20]
+        size_hints = {"x": 2**20, "y": 2**20}
 
         tuner = CoordescTuner(size_hints=size_hints)
 
         max_block = TRITON_MAX_BLOCK
         self.assertFalse(tuner.value_too_large("XBLOCK", max_block["X"]))
         self.assertTrue(tuner.value_too_large("XBLOCK", max_block["X"] * 2))
-        self.assertFalse(tuner.value_too_large("RBLOCK", max_block["R"]))
-        self.assertTrue(tuner.value_too_large("RBLOCK", max_block["R"] * 2))
+        self.assertFalse(tuner.value_too_large("R0_BLOCK", max_block["R0_"]))
+        self.assertTrue(tuner.value_too_large("R0_BLOCK", max_block["R0_"] * 2))
 
 
 if __name__ == "__main__":
-    if IS_LINUX and HAS_CUDA:
+    if IS_LINUX and HAS_GPU:
         run_tests()

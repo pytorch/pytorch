@@ -1,5 +1,5 @@
 # Owner(s): ["module: multiprocessing"]
-
+# ruff: noqa: F841
 import contextlib
 import copy
 import gc
@@ -24,7 +24,6 @@ from torch.testing._internal.common_utils import (
     slowTest,
     TEST_WITH_ASAN,
     TEST_WITH_ROCM,
-    TEST_WITH_TORCHDYNAMO,
     TEST_WITH_TSAN,
     TestCase,
 )
@@ -47,9 +46,6 @@ TEST_CUDA_IPC = (
 )  # https://github.com/pytorch/pytorch/issues/90940
 
 TEST_MULTIGPU = TEST_CUDA_IPC and torch.cuda.device_count() > 1
-
-if TEST_CUDA_IPC:
-    torch.cuda.memory._set_allocator_settings("expandable_segments:False")
 
 
 class SubProcess(mp.Process):
@@ -309,8 +305,9 @@ class TestMultiprocessing(TestCase):
                 is_set = e.is_set()
 
             self.assertTrue(is_set)
-            self.assertTrue(data[0].eq(4).all())
-            self.assertTrue(data[1].eq(4).all())
+            if device != "meta":
+                self.assertTrue(data[0].eq(4).all())
+                self.assertTrue(data[1].eq(4).all())
 
             p.join(100)
             self.assertFalse(p.is_alive())
@@ -326,12 +323,18 @@ class TestMultiprocessing(TestCase):
 
             t1 = q.get()
             t2 = q.get()
-            self.assertTrue(t1.eq(1).all())
+            if device == "meta":
+                self.assertEqual(t1.size(), t2.size())
+            else:
+                self.assertTrue(t1.eq(1).all())
             s1 = t1.storage()
             s2 = t2.storage()
             self.assertEqual(type(s1), type(s2))
             self.assertEqual(s1.data_ptr(), s1.data_ptr())
-            self.assertEqual(s1, s2)
+            if device == "meta":
+                self.assertEqual(s1.size(), s2.size())
+            else:
+                self.assertEqual(s1, s2)
 
             # We need to delete this tensors to allow producer (child process)
             # collect them properly
@@ -411,10 +414,6 @@ class TestMultiprocessing(TestCase):
         TEST_WITH_ASAN,
         "seems to hang with ASAN, see https://github.com/pytorch/pytorch/issues/5326",
     )
-    @unittest.skipIf(
-        TEST_WITH_TORCHDYNAMO,
-        "Fail to clean up temporary /dev/shm/torch_* file, see https://github.com/pytorch/pytorch/issues/91467",
-    )
     def test_fs_sharing(self):
         with fs_sharing():
             # The test works but is very slow on MacOS, see https://github.com/pytorch/pytorch/pull/93183,
@@ -422,27 +421,15 @@ class TestMultiprocessing(TestCase):
             repeat = 1 if IS_MACOS else TEST_REPEATS
             self._test_sharing(repeat=repeat)
 
-    @unittest.skipIf(
-        TEST_WITH_TORCHDYNAMO,
-        "Fail to clean up temporary /dev/shm/torch_* file, see https://github.com/pytorch/pytorch/issues/91467",
-    )
     def test_fs_preserve_sharing(self):
         with fs_sharing():
             self._test_preserve_sharing(repeat=TEST_REPEATS)
 
-    @unittest.skipIf(
-        TEST_WITH_TORCHDYNAMO,
-        "Fail to clean up temporary /dev/shm/torch_* file, see https://github.com/pytorch/pytorch/issues/91467",
-    )
     def test_fs_pool(self):
         with fs_sharing():
             self._test_pool(repeat=TEST_REPEATS)
 
     @unittest.skipIf(not HAS_SHM_FILES, "don't not how to check if shm files exist")
-    @unittest.skipIf(
-        TEST_WITH_TORCHDYNAMO,
-        "Fail to clean up temporary /dev/shm/torch_* file, see https://github.com/pytorch/pytorch/issues/91467",
-    )
     def test_fs(self):
         def queue_put():
             x = torch.DoubleStorage(4)
@@ -857,6 +844,22 @@ if __name__ == "__main__":
         self._test_empty_tensor_sharing(torch.float32, torch.device("cuda"))
         self._test_empty_tensor_sharing(torch.int64, torch.device("cuda"))
 
+    def test_empty_tensor_sharing_meta(self):
+        self._test_empty_tensor_sharing(torch.float32, torch.device("meta"))
+        self._test_empty_tensor_sharing(torch.int64, torch.device("meta"))
+
+    def test_tensor_sharing_meta(self):
+        dtype = torch.float32
+        device = torch.device("meta")
+        q = mp.Queue()
+        empty = torch.tensor([1], dtype=dtype, device=device)
+        q.put(empty)
+        out = q.get(timeout=1)
+        self.assertEqual(out, empty)
+
+    def test_meta_simple(self):
+        self._test_sharing(mp.get_context("spawn"), "meta", torch.float)
+
     def _test_autograd_sharing(self, var, ctx=mp, is_parameter=False):
         device = "cuda" if var.is_cuda else "cpu"
 
@@ -1060,6 +1063,12 @@ if __name__ == "__main__":
     def test_is_shared_cuda(self):
         t = torch.randn(5, 5).cuda()
         self.assertTrue(t.is_shared())
+
+    @unittest.skipIf(sys.platform != "linux", "Only runs on Linux; requires prctl(2)")
+    def test_set_thread_name(self):
+        name = "test name"
+        mp._set_thread_name(name)
+        self.assertEqual(mp._get_thread_name(), name)
 
 
 if __name__ == "__main__":

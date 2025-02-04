@@ -9,7 +9,6 @@ import torch
 import torch._C
 from torch.jit.mobile import _load_for_lite_interpreter
 from torch.testing import FileCheck
-
 from torch.testing._internal.common_utils import (
     find_library_location,
     IS_FBCODE,
@@ -20,6 +19,7 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_ROCM,
 )
 from torch.testing._internal.jit_utils import JitTestCase
+
 
 # Make the helper files in test/ importable
 pytorch_test_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
@@ -114,19 +114,16 @@ class JitBackendTestCase(JitTestCase):
         """
         Stub for correctness tests.
         """
-        pass
 
     def test_save_load(self):
         """
         Stub for serialization tests.
         """
-        pass
 
     def test_errors(self):
         """
         Stub for testing error checking.
         """
-        pass
 
 
 class BasicModuleTest(JitBackendTestCase):
@@ -210,7 +207,7 @@ class BasicModuleUnavailableTest(JitBackendTestCase):
             'raise Exception("Backend is not available."',
         ):
             backend_method = self.lowered_module.__getattr__("forward")
-            backend_output = backend_method(*(input, input))
+            backend_method(*(input, input))
 
     @skipIfRocm
     def test_save_load(self):
@@ -223,7 +220,7 @@ class BasicModuleUnavailableTest(JitBackendTestCase):
             r"Backend is not available.",
             'raise Exception("Backend is not available."',
         ):
-            imported = torch.jit.load(buffer)
+            torch.jit.load(buffer)
 
 
 class NestedModuleTest(JitBackendTestCase):
@@ -559,13 +556,11 @@ class JitBackendTestCaseWithCompiler(JitTestCase):
         """
         Stub for correctness tests.
         """
-        pass
 
     def test_errors(self):
         """
         Stub for testing error checking.
         """
-        pass
 
 
 class BasicModuleTestWithCompiler(JitBackendTestCaseWithCompiler):
@@ -629,7 +624,7 @@ class ErrorMessagesWithCompiler(JitBackendTestCase):
 """,
             "",
         ):
-            lowered_module_n = torch._C._jit_to_backend(
+            torch._C._jit_to_backend(
                 "backend_with_compiler_demo", scripted_module_n, {"forward": {"": ""}}
             )
 
@@ -751,7 +746,7 @@ class CompModuleTestSameNameWithCompiler(JitBackendTestCase):
         A module with two lowered submodules.
         """
 
-        def __init__(self):
+        def __init__(self) -> None:
             super().__init__()
             compile_spec = {
                 "forward": {

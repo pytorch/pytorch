@@ -2,11 +2,14 @@
 # and use the version numbers from there as substitutions for
 # an expand_template action. Since there isn't, this silly script exists.
 
+from __future__ import annotations
+
 import argparse
 import os
-from typing import cast, Dict, Tuple
+from typing import cast
 
-Version = Tuple[int, int, int]
+
+Version = tuple[int, int, int]
 
 
 def parse_version(version: str) -> Version:
@@ -30,7 +33,7 @@ def parse_version(version: str) -> Version:
     return cast(Version, tuple([int(n) for n in version_number_str.split(".")]))
 
 
-def apply_replacements(replacements: Dict[str, str], text: str) -> str:
+def apply_replacements(replacements: dict[str, str], text: str) -> str:
     """
     Applies the given replacements within the text.
 

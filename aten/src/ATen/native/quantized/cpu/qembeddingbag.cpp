@@ -67,8 +67,7 @@ at::Tensor& embedding_lookup_fallback_impl(
   }
 
   int64_t current = 0;
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  float* per_sample_weights_data;
+  float* per_sample_weights_data = nullptr;
   if (per_sample_weights_.has_value()) {
     per_sample_weights_data = per_sample_weights_.value().data_ptr<float>();
   }
@@ -79,8 +78,7 @@ at::Tensor& embedding_lookup_fallback_impl(
         "Expect the lengths data to be less than indices size");
 
     for (int i = 0; i < lengths_data[m]; ++i, ++current) {
-      // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-      int64_t idx;
+      int64_t idx = -1;
       if (!pruned) {
         idx = indices_data[current];
         TORCH_CHECK((idx >= 0 && idx < N), "Invalid indices data");
@@ -102,9 +100,8 @@ at::Tensor& embedding_lookup_fallback_impl(
       if (per_sample_weights_.has_value()) {
         weight_val = per_sample_weights_data[current];
       }
-      // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-      float scale, bias;
-      if (BIT_RATE == 8) {
+      float scale = std::numeric_limits<float>::quiet_NaN(), bias = std::numeric_limits<float>::quiet_NaN();
+      if constexpr (BIT_RATE == 8) {
         const uint8_t* scale_bias =
             weight_data + (idx + 1) * weight_size - 2 * sizeof(float);
         uint32_t scale_val_int32 = 0;
@@ -277,8 +274,7 @@ at::Tensor& embedding_bag_nbit_impl(
     offsets_data = offsets_include_last_val.data();
   }
   {
-    // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
-    std::array<int64_t, 3> shape_arr;
+    std::array<int64_t, 3> shape_arr{};
     c10::IntArrayRef shape;
     if(indices.dim() == 2 && is_embedding_op) {
       const auto indices_sizes = indices.sizes();
@@ -291,7 +287,7 @@ at::Tensor& embedding_bag_nbit_impl(
       shape_arr[1] = D;
       shape = c10::IntArrayRef(&shape_arr[0], 2);
     }
-    at::native::resize_(output, shape, c10::nullopt);
+    at::native::resize_(output, shape, std::nullopt);
   }
 #ifdef USE_FBGEMM
   const auto indices_data = indices.data_ptr<IndexType>();
@@ -447,8 +443,7 @@ at::Tensor& embedding_bag_byte_impl(
     offsets_data = offsets_include_last_val.data();
   }
   {
-    // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
-    std::array<int64_t, 3> shape_arr;
+    std::array<int64_t, 3> shape_arr{};
     c10::IntArrayRef shape;
     if (indices.dim() == 2 && is_embedding_op) {
       const auto indices_sizes = indices.sizes();
@@ -461,7 +456,7 @@ at::Tensor& embedding_bag_byte_impl(
       shape_arr[1] = D;
       shape = c10::IntArrayRef(&shape_arr[0], 2);
     }
-    at::native::resize_(output, shape, c10::nullopt);
+    at::native::resize_(output, shape, std::nullopt);
   }
 #ifdef USE_FBGEMM
   const int64_t N = weight_sizes[0];
@@ -812,8 +807,7 @@ at::Tensor PackedEmbeddingBagWeight::embeddingbag_4bit(
     is_embedding_op);
 }
 
-namespace at {
-namespace native {
+namespace at::native {
 
 Tensor& embedding_bag_byte_rowwise_offsets_out(
     Tensor& output,
@@ -915,7 +909,7 @@ inline at::Tensor create_empty_from(
     const at::Tensor& t,
     c10::ScalarType dtype) {
   return at::detail::empty_cpu(
-      {0}, dtype, t.layout(), t.device(), c10::nullopt, c10::nullopt);
+      {0}, dtype, t.layout(), t.device(), std::nullopt, std::nullopt);
 }
 
 Tensor embedding_bag_byte_rowwise_offsets(
@@ -1082,13 +1076,15 @@ class QEmbedding final {
     const auto offsets_size = indices.numel();
     at::Tensor offsets = at::arange(0, offsets_size, indices.scalar_type());
     at::Tensor output;
+    static_assert(bit_rate==4 || bit_rate ==8,
+          "Currently only support 8-bit embedding quantization");
     if (bit_rate == 8) {
       return packed_weight->embeddingbag_byte(
           indices,
           offsets,
           pruned_weights,
-          c10::nullopt,
-          c10::nullopt,
+          std::nullopt,
+          std::nullopt,
           false /* include_last_offset */,
           true /* is_embedding_op */);
     } else if (bit_rate == 4) {
@@ -1096,14 +1092,10 @@ class QEmbedding final {
           indices,
           offsets,
           pruned_weights,
-          c10::nullopt,
-          c10::nullopt,
+          std::nullopt,
+          std::nullopt,
           false,
           true);
-    } else {
-      TORCH_INTERNAL_ASSERT(
-          false,
-          "Currently only support 8-bit embedding quantization");
     }
     return output;
   }
@@ -1143,5 +1135,4 @@ TORCH_LIBRARY_IMPL(quantized, Meta, m) {
 }
 
 } // namespace
-} // namespace native
-} // namespace at
+} // namespace at::native

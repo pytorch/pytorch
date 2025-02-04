@@ -50,7 +50,7 @@ std::optional<TypePtr> subtractTypeSetFrom(std::vector<TypePtr>& to_subtract, Ar
               });
 
   if (types.empty()) {
-    return c10::nullopt;
+    return std::nullopt;
   } else if (types.size() == 1) {
     return types[0];
   } else {
@@ -98,7 +98,7 @@ void filterDuplicateSubtypes(std::vector<TypePtr>* types) {
     // `Optional` could prevent us from coalescing other types
     if ((t1->isSubtypeOf(*NoneType::get()) && !t2->isSubtypeOf(*NoneType::get()))
         || (!t1->isSubtypeOf(*NoneType::get()) && t2->isSubtypeOf(*NoneType::get()))) {
-          return c10::nullopt;
+          return std::nullopt;
     } else {
       return unifyTypes(t1, t2, /*default_to_union=*/false);
     }
@@ -186,7 +186,7 @@ OptionalType::OptionalType(const TypePtr& contained)
     std::vector<TypePtr> to_subtract{NoneType::get()};
     auto without_none = subtractTypeSetFrom(to_subtract, types_);
     // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
-    contained_ = UnionType::create({*without_none});
+    contained_ = UnionType::create({std::move(without_none.value())});
   }
   has_free_variables_ = contained_->hasFreeVariables();
 }
@@ -278,7 +278,7 @@ std::optional<TypePtr> UnionType::subtractTypeSet(std::vector<TypePtr>& to_subtr
 
 std::optional<TypePtr> UnionType::toOptional() const {
   if (!canHoldType(*NoneType::get())) {
-      return c10::nullopt;
+      return std::nullopt;
   }
 
   std::vector<TypePtr> copied_types = this->containedTypes().vec();
@@ -286,7 +286,7 @@ std::optional<TypePtr> UnionType::toOptional() const {
   auto maybe_opt = UnionType::create(std::move(copied_types));
 
   if (maybe_opt->kind() == UnionType::Kind) {
-    return c10::nullopt;
+    return std::nullopt;
   } else {
     return maybe_opt;
   }

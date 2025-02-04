@@ -10,8 +10,7 @@
 #include <list>
 #include <vector>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 // Replaces prim::Guard nodes with prim::BailOut nodes and
 // computes sets of inputs needed to resume execution at
@@ -30,5 +29,4 @@ TORCH_API std::shared_ptr<Graph> BuildBailOutGraphFrom(
     int64_t bailout_index,
     const std::shared_ptr<Graph>& orig,
     const std::shared_ptr<Graph>& target);
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

@@ -1,7 +1,6 @@
 import io
 import sys
 
-import torch
 import yaml
 from android_api_module import AndroidAPIModule
 from builtin_ops import TSBuiltinOpsModule, TSCollectionOpsModule
@@ -30,12 +29,7 @@ from nn_ops import (
     NNUtilsModule,
     NNVisionModule,
 )
-from quantization_ops import (
-    FusedQuantModule,
-    GeneralQuantModule,
-    # DynamicQuantModule,
-    StaticQuantModule,
-)
+from quantization_ops import FusedQuantModule, GeneralQuantModule, StaticQuantModule
 from sampling_ops import SamplingOpsModule
 from tensor_ops import (
     TensorCreationOpsModule,
@@ -44,12 +38,15 @@ from tensor_ops import (
     TensorTypingOpsModule,
     TensorViewOpsModule,
 )
-from torch.jit.mobile import _load_for_lite_interpreter
 from torchvision_models import (
     MobileNetV2Module,
     MobileNetV2VulkanModule,
     Resnet18Module,
 )
+
+import torch
+from torch.jit.mobile import _load_for_lite_interpreter
+
 
 test_path_ios = "ios/TestApp/models/"
 test_path_android = "android/pytorch_android/src/androidTest/assets/"
@@ -167,8 +164,6 @@ def getModuleFromName(model_name):
     if not isinstance(module, torch.nn.Module):
         module = module.getModule()
 
-    has_bundled_inputs = False  # module.find_method("get_all_bundled_inputs")
-
     if model_name in models_need_trace:
         module = torch.jit.trace(module, [])
     else:
@@ -211,7 +206,7 @@ def generateAllModels(folder, on_the_fly=False):
 
 # generate/update a given model for storage
 def generateModel(name):
-    module, ops = getModuleFromName(name)
+    module, _ = getModuleFromName(name)
     if module is None:
         return
     path_ios = test_path_ios + name + ".ptl"

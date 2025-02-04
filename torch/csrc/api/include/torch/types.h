@@ -2,7 +2,7 @@
 
 #include <ATen/ATen.h>
 
-#include <c10/util/Optional.h>
+#include <optional>
 
 #include <torch/csrc/autograd/generated/variable_factories.h>
 #include <torch/csrc/autograd/variable.h>
@@ -38,8 +38,10 @@ namespace torch {
 // the `func()` function defined in `at::` namespace is always hidden.
 using namespace at; // NOLINT
 
-using c10::nullopt;
-using std::optional;
+#if !defined(FBCODE_CAFFE2) && !defined(C10_NODEPRECATED)
+using std::nullopt; // NOLINT
+using std::optional; // NOLINT
+#endif
 
 using Dtype = at::ScalarType;
 
@@ -49,12 +51,18 @@ constexpr auto kInt8 = at::kChar;
 constexpr auto kInt16 = at::kShort;
 constexpr auto kInt32 = at::kInt;
 constexpr auto kInt64 = at::kLong;
+constexpr auto kUInt16 = at::kUInt16;
+constexpr auto kUInt32 = at::kUInt32;
+constexpr auto kUInt64 = at::kUInt64;
 constexpr auto kFloat16 = at::kHalf;
 constexpr auto kFloat32 = at::kFloat;
 constexpr auto kFloat64 = at::kDouble;
 
 /// Rust-style short dtypes.
 constexpr auto kU8 = kUInt8;
+constexpr auto kU16 = kUInt16;
+constexpr auto kU32 = kUInt32;
+constexpr auto kU64 = kUInt64;
 constexpr auto kI8 = kInt8;
 constexpr auto kI16 = kInt16;
 constexpr auto kI32 = kInt32;

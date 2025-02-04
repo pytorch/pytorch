@@ -8,10 +8,10 @@
 #include <torch/types.h>
 
 #include <cstddef>
+#include <utility>
 #include <vector>
 
-namespace torch {
-namespace nn {
+namespace torch::nn {
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Identity ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
@@ -136,9 +136,10 @@ TORCH_MODULE(Flatten);
 class TORCH_API UnflattenImpl : public Cloneable<UnflattenImpl> {
  public:
   UnflattenImpl(int64_t dim, std::vector<int64_t> sizes)
-      : UnflattenImpl(UnflattenOptions(dim, sizes)) {}
+      : UnflattenImpl(UnflattenOptions(dim, std::move(sizes))) {}
   UnflattenImpl(std::string dimname, UnflattenOptions::namedshape_t namedshape)
-      : UnflattenImpl(UnflattenOptions(dimname, namedshape)) {}
+      : UnflattenImpl(
+            UnflattenOptions(std::move(dimname), std::move(namedshape))) {}
   explicit UnflattenImpl(UnflattenOptions options_);
 
   void reset() override;
@@ -210,5 +211,4 @@ class TORCH_API BilinearImpl : public Cloneable<BilinearImpl> {
 /// learn about PyTorch's module storage semantics.
 TORCH_MODULE(Bilinear);
 
-} // namespace nn
-} // namespace torch
+} // namespace torch::nn

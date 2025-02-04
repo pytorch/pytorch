@@ -1,4 +1,5 @@
 # Owner(s): ["module: fft"]
+# ruff: noqa: F841
 
 import torch
 import unittest
@@ -20,7 +21,7 @@ from torch.testing._internal.common_methods_invocations import (
 from torch.testing._internal.common_cuda import SM53OrLater
 from torch._prims_common import corresponding_complex_dtype
 
-from typing import Optional, List
+from typing import Optional
 from packaging import version
 
 
@@ -596,7 +597,7 @@ class TestFFT(TestCase):
                 else:
                     numpy_fn = getattr(np.fft, fname)
 
-                def fn(t: torch.Tensor, s: Optional[List[int]], dim: List[int] = (-2, -1), norm: Optional[str] = None):
+                def fn(t: torch.Tensor, s: Optional[list[int]], dim: list[int] = (-2, -1), norm: Optional[str] = None):
                     return torch_fn(t, s, dim, norm)
 
                 torch_fns = (torch_fn, torch.jit.script(fn))
@@ -1357,7 +1358,7 @@ class TestFFT(TestCase):
                 'onesided': True,
             },
         ]
-        for i, pattern in enumerate(patterns):
+        for pattern in patterns:
             _test_istft_is_inverse_of_stft(pattern)
 
     @onlyNativeDeviceTypes
@@ -1424,7 +1425,7 @@ class TestFFT(TestCase):
                 'onesided': True,
             },
         ]
-        for i, pattern in enumerate(patterns):
+        for pattern in patterns:
             _test_istft_is_inverse_of_stft_with_padding(pattern)
 
     @onlyNativeDeviceTypes
@@ -1592,7 +1593,7 @@ class FFTDocTestFinder:
     '''The default doctest finder doesn't like that function.__module__ doesn't
     match torch.fft. It assumes the functions are leaked imports.
     '''
-    def __init__(self):
+    def __init__(self) -> None:
         self.parser = doctest.DocTestParser()
 
     def find(self, obj, name=None, module=None, globs=None, extraglobs=None):

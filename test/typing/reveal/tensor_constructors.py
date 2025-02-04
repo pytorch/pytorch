@@ -3,6 +3,7 @@
 import torch
 from torch.testing._internal.common_utils import TEST_NUMPY
 
+
 if TEST_NUMPY:
     import numpy as np
 
@@ -127,3 +128,7 @@ reveal_type(torch.polar(abs, angle))  # E: {Tensor}
 inp = torch.tensor([-1.5, 0, 2.0])
 values = torch.tensor([0.5])
 reveal_type(torch.heaviside(inp, values))  # E: {Tensor}
+
+# contains
+inp = torch.tensor([1, 2, 3])
+reveal_type(inp.__contains__(2))  # E: bool

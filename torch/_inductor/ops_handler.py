@@ -1,23 +1,19 @@
+# mypy: allow-untyped-defs
+from __future__ import annotations
+
 import itertools
-from typing import (
-    Any,
-    Callable,
-    Dict,
-    Generic,
-    Literal,
-    Optional,
-    Tuple,
-    TypeVar,
-    Union,
-)
+from typing import Any, Callable, Generic, Literal, NamedTuple, Optional, TypeVar, Union
+from typing_extensions import Protocol
 from unittest.mock import patch
 
 import sympy
-from typing_extensions import Protocol
 
 import torch
 import torch.utils._pytree as pytree
+
+from ..utils._ordered_set import OrderedSet
 from .utils import IndentedBuffer, reduction_num_outputs, sympy_index_symbol, sympy_str
+
 
 T = TypeVar("T")
 StoreMode = Optional[Literal["atomic_add"]]
@@ -35,7 +31,7 @@ ReductionType = Literal[
 ]
 
 
-def _arg_str(a) -> str:
+def _arg_str(a: object) -> str:
     if isinstance(a, sympy.Expr):
         return sympy_str(a)
     return str(a)
@@ -45,13 +41,12 @@ def _arg_str(a) -> str:
 # implementations make heavy use of __getattr__ magic, and pre-existing
 # stubs for methods would interfere with this mechanism.
 #
-# TODO: A superclass that does desugaring for operations like
-# reciprocal/square might be useful.
+# See OpDecompositions for superclass that desugars operations like reciprocal/square.
 class OpsHandler(Protocol[T]):
     """
     Protocol describing the set of valid operations on ``torch._inductor.virtualized.ops``,
     as well as the contract for op handlers.  The type T signifies the domain
-    of the abstract analysis AKA what all of the functions return / take as arguments
+    of the abstract analysis AKA what all the functions return / take as arguments
     anywhere compute occurs.
 
     While these operators are typically dtype polymorphic (e.g., you can use mul
@@ -86,7 +81,7 @@ class OpsHandler(Protocol[T]):
         """Produces a scalar constant of type dtype."""
         ...
 
-    def load_seed(self, name: str, offset: T):
+    def load_seed(self, name: str, offset: T) -> T:
         """Computes inductor_prims.lookup_seed."""
         ...
 
@@ -108,7 +103,8 @@ class OpsHandler(Protocol[T]):
         evaluates to true.  For example, you would use this if you needed to
         perform an indirect load that may not be valid on some elements;
         without masking, invalid accesses can cause IMAs.  When mask is true,
-        the result is the result of body; otherwise it is other.
+        the result is the result of body; otherwise it is other. Here, `other`
+        needs to be a constant.
 
         Contrast this with ops.where, which can multiplex between two values
         that have been unconditionally computed.
@@ -130,11 +126,47 @@ class OpsHandler(Protocol[T]):
         ...
 
     def to_dtype(
-        self, x: T, dtype: torch.dtype, src_dtype: Optional[torch.dtype] = None
+        self,
+        x: T,
+        dtype: torch.dtype,
+        src_dtype: Optional[torch.dtype] = None,
+        use_compute_types: bool = True,
     ) -> T:
         """
         Convert x to dtype.  src_dtype can be optionally set to specify what the original
         dtype of x was, which can improve code generation (used by torch to(dtype=dtype)).
+        """
+        ...
+
+    def trunc_to_int(self, x: T, dtype: torch.dtype) -> T:
+        """
+        Convert x to dtype with truncation semantics (similar to how the int
+        constructor works in Python).  In Inductor codegen, this just decays
+        to trunc and then to_dtype, but this composite operation helps
+        roundtrips for Sympy evaluation.
+
+        dtype is taken as an explicit parameter because the desired output
+        dtype is typically the index dtype, which may vary between int32 and
+        int64 depending on if we've shown that all the indexing operations can
+        be done in int32.
+        """
+        ...
+
+    def ceil_to_int(self, x: T, dtype: torch.dtype) -> T:
+        """
+        Convert x to dtype with ceiling semantics.  See also trunc_to_int.
+        """
+        ...
+
+    def floor_to_int(self, x: T, dtype: torch.dtype) -> T:
+        """
+        Convert x to dtype with ceiling semantics.  See also trunc_to_int.
+        """
+        ...
+
+    def round_to_int(self, x: T, dtype: torch.dtype) -> T:
+        """
+        Convert x to dtype with round-to-even semantics.  See also trunc_to_int.
         """
         ...
 
@@ -161,11 +193,11 @@ class OpsHandler(Protocol[T]):
     # in scope, which are typically used by sympy.Expr indexing.
 
     def indirect_indexing(
-        self, x: T, size: sympy.Expr, check: bool = True
+        self, x: T, size: sympy.Expr, check: bool = True, wrap_neg=True
     ) -> sympy.Expr:
         """
         Convert an integral x into a sympy.Expr that can be subsequently used in
-        indexing computation.  'size' represents an upper bound on the what valid
+        indexing computation.  'size' represents an upper bound on what valid
         indexes can be; when 'check' is True, we check that the x is in bounds.
 
         NB: This is typically mandatory to implement for any analysis, because you
@@ -201,7 +233,7 @@ class OpsHandler(Protocol[T]):
         src_dtype: torch.dtype,
         reduction_type: ReductionType,
         value: T,
-    ) -> Union[T, Tuple[T, ...]]:
+    ) -> Union[T, tuple[T, ...]]:
         """
         Perform a 'reduction_type' reduction on 'value' of dtype 'src_dtype',
         using 'dtype' as the accumulation dtype for the reduction.  The result
@@ -217,7 +249,7 @@ class OpsHandler(Protocol[T]):
     # TODO: in practice, this seems to actually return None, but not returning
     # a T makes common __getattr__ idioms not type correctly.  Figure out if
     # this should be returning something.
-    def store_reduction(self, name: str, index: sympy.Expr, value: T) -> T:
+    def store_reduction(self, name: str, index: sympy.Expr, value: T) -> None:
         """
         Store the fully accumulated result of 'reduction' to the memory
         location 'name' offset by 'expr'.
@@ -226,23 +258,37 @@ class OpsHandler(Protocol[T]):
 
     def scan(
         self,
-        dtypes: Tuple[torch.dtype, ...],
-        combine_fn: Callable[[Tuple[T, ...], Tuple[T, ...]], Tuple[T, ...]],
-        values: Tuple[T, ...],
-    ) -> Tuple[T, ...]:
+        dtypes: tuple[torch.dtype, ...],
+        combine_fn: Callable[[tuple[T, ...], tuple[T, ...]], tuple[T, ...]],
+        values: tuple[T, ...],
+    ) -> tuple[T, ...]:
         """
         Perform an associative scan on 'value'.
         """
         # TODO: Improve the description with some pseudocode
         ...
 
+    def sort(
+        self,
+        dtypes: tuple[torch.dtype, ...],
+        values: tuple[T, ...],
+        stable: bool,
+        descending: bool,
+    ) -> tuple[T, ...]:
+        """
+        Sort values along the reduction dimension.
+        """
+        ...
+
     def bucketize(
         self,
         values: T,
-        offsets_name: str,
-        offsets_size: sympy.Expr,
+        boundaries: tuple[str, sympy.Expr, sympy.Expr, sympy.Expr],
+        boundary_indices: T,
         indexing_dtype: torch.dtype,
         right: bool,
+        sorter: Optional[tuple[str, sympy.Expr]] = None,
+        sorter_indices: Optional[T] = None,
     ) -> T:
         # See [Note: Inductor bucketize op]
         ...
@@ -398,21 +444,23 @@ class OpsHandler(Protocol[T]):
     def isnan(self, x0: T) -> T:
         ...
 
+    # NB: this returns a float, like the torch operation
+    # This rounds half to even to break ties
     def round(self, x0: T) -> T:
         ...
 
+    # NB: this returns a float, like the torch operation
     def floor(self, x0: T) -> T:
         ...
 
     def sign(self, x0: T) -> T:
         ...
 
-    def to_int(self, x0: T) -> T:
-        ...
-
+    # NB: this returns a float, like the torch operation
     def trunc(self, x0: T) -> T:
         ...
 
+    # NB: this returns a float, like the torch operation
     def ceil(self, x0: T) -> T:
         ...
 
@@ -449,6 +497,7 @@ class OpsHandler(Protocol[T]):
     def mul(self, x0: T, x1: T) -> T:
         ...
 
+    # NB: this returns a float, like the torch operation
     def pow(self, x0: T, x1: T) -> T:
         ...
 
@@ -617,14 +666,21 @@ class OpsHandler(Protocol[T]):
 
     def floordiv(self, x0: T, x1: T) -> T:
         """Python-style floor division between integers only.  Computes the
-        true division of two numbers and floors the result.
+        true division of two numbers and floors the result.  If you want
+        floor division for floats, do regular truediv and floor the result.
         """
         ...
 
     def truediv(self, x0: T, x1: T) -> T:
-        """True division between floats.  Integer inputs are NOT valid: to do
-        Python style (int, int) -> float division, promote the inputs to float
-        first."""
+        """True division between floats.  Integer inputs are NOT valid.  To
+        do Python-style (int, int) -> float division, use int_truediv"""
+        ...
+
+    def int_truediv(self, x0: T, x1: T) -> T:
+        """True division between integers.  This is NOT the same as promoting
+        to float and doing integer division, there is a bespoke algorithm for
+        doing the division in higher precision than the above.
+        """
         ...
 
     def div(self, x0: T, x1: T) -> T:
@@ -638,6 +694,10 @@ class OpsHandler(Protocol[T]):
 
     def remainder(self, x0: T, x1: T) -> T:
         """Python-style modulus, take sign from RHS (x1)."""
+        ...
+
+    def round_decimal(self, x0: T, x1: T) -> T:
+        """Python-style round with decimal argument"""
         ...
 
     # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -690,16 +750,20 @@ class NoopHandler:
         return None
 
     @staticmethod
-    def frexp(x) -> Tuple[None, None]:
+    def frexp(x) -> tuple[None, None]:
         return (None, None)
 
     @staticmethod
-    def scan(dtypes, combine_fn, values) -> Tuple[None, ...]:
-        return tuple(None for i in range(len(values)))
+    def scan(dtypes, combine_fn, values) -> tuple[None, ...]:
+        return (None,) * len(values)
 
     @staticmethod
-    def indirect_indexing(index_var, size, check=True) -> sympy.Symbol:
-        return sympy.Integer(0)
+    def sort(dtypes, values, stable, descending) -> tuple[None, ...]:
+        return (None,) * len(values)
+
+    @staticmethod
+    def indirect_indexing(index_var, size, check=True, wrap_neg=True) -> sympy.Symbol:
+        return sympy.S.Zero
 
 
 # Use mypy to check protocol implemented correctly
@@ -735,7 +799,14 @@ class MockHandler:
         )
 
     @staticmethod
-    def indirect_indexing(index_var, size, check=True) -> sympy.Symbol:
+    def sort(dtypes, values, stable, descending):
+        return tuple(
+            f"ops.sort({dtypes}, {values}, stable={stable}, descending={descending})[{i}]"
+            for i in range(len(values))
+        )
+
+    @staticmethod
+    def indirect_indexing(index_var, size, check=True, wrap_neg=True) -> sympy.Symbol:
         return sympy_index_symbol(str(index_var))
 
     @classmethod
@@ -833,8 +904,8 @@ class KernelFormatterHandler:
         dtype: torch.dtype,
         src_dtype: torch.dtype,
         reduction_type: ReductionType,
-        value: Union[str, Tuple[str, ...]],
-    ) -> Union[str, Tuple[str, ...]]:
+        value: Union[str, tuple[str, ...]],
+    ) -> Union[str, tuple[str, ...]]:
         line = self.parent_handler.reduction(dtype, src_dtype, reduction_type, value)
         num_values = reduction_num_outputs(reduction_type)
         varnames = [f"tmp{next(self.var_counter)}" for _ in range(num_values)]
@@ -864,6 +935,27 @@ def _typecheck_WrapperHandler(h: WrapperHandler[T]) -> OpsHandler[T]:
     return h
 
 
+class AddParenHandler(WrapperHandler[T]):
+    def __getattr__(self, name):
+        def inner(*args, **kwargs):
+            val = getattr(self._inner, name)(*args, **kwargs)
+            return f"({val})"
+
+        return inner
+
+
+# Use mypy to check protocol implemented correctly
+def _typecheck_AddParenHandler(h: AddParenHandler[T]) -> OpsHandler[T]:
+    return h
+
+
+class OpCountResult(NamedTuple):
+    num_ops: int
+    used_ops: OrderedSet[str]
+    read_buffers: list[str]
+    nontrivial_read_count: int
+
+
 class OpCounterCSE:
     """Shim to count how many ops are used"""
 
@@ -872,25 +964,80 @@ class OpCounterCSE:
         self.parent_handler = inner
         self.op_count = 0
         self.var_names = {}
+        self._used_ops = OrderedSet[str]()
+        self._read_names: list[str] = []
+        self._nontrivial_read_count = 0
 
     def __getattr__(self, name):
         def inner(*args, **kwargs):
-            val = getattr(self.parent_handler, name)(*args, **kwargs)
-            if name == "indirect_indexing":
-                return val
+            return pytree.tree_map(
+                self._update_count, getattr(self.parent_handler, name)(*args, **kwargs)
+            )
 
-            def count(val):
-                if val not in self.var_names:
-                    varname = f"tmp{self.op_count}"
-                    self.op_count += 1
-                    self.var_names[val] = varname
-                    return varname
-                else:
-                    return self.var_names[val]
-
-            return pytree.tree_map(count, val)
-
+        self._used_ops.add(name)
         return inner
+
+    def _update_count(self, val):
+        varname = self.var_names.get(val)
+        if not varname:
+            varname = f"tmp{self.op_count}"
+            self.op_count += 1
+            self.var_names[val] = varname
+        return varname
+
+    def indirect_indexing(self, *args, **kwargs):
+        self._used_ops.add("indirect_indexing")
+        return self.parent_handler.indirect_indexing(*args, **kwargs)
+
+    def load(self, name: str, index: sympy.Expr) -> str:
+        val = self.parent_handler.load(name, index)
+        if val not in self.var_names:
+            self._used_ops.add("load")
+            self._read_names.append(name)
+            if not isinstance(index, (sympy.Integer, int)):
+                self._nontrivial_read_count += 1
+        return self._update_count(val)
+
+    def load_seed(self, name: str, offset: T):
+        val = self.parent_handler.load_seed(name, offset)
+        if val not in self.var_names:
+            self._used_ops.add("load_seed")
+            self._read_names.append(name)
+        return self._update_count(val)
+
+    def bucketize(
+        self,
+        values: T,
+        boundaries: tuple[str, sympy.Expr, sympy.Expr, sympy.Expr],
+        boundary_indices: T,
+        indexing_dtype: torch.dtype,
+        right: bool,
+        sorter: Optional[tuple[str, sympy.Expr]] = None,
+        sorter_indices: Optional[T] = None,
+    ) -> T:
+        """
+        See [Note: Inductor bucketize op]
+        """
+        val = self.parent_handler.bucketize(
+            values,
+            boundaries,
+            boundary_indices,
+            indexing_dtype,
+            right,
+            sorter,
+            sorter_indices,
+        )
+        if val not in self.var_names:
+            self._used_ops.add("bucketize")
+            self._read_names.append(boundaries[0])
+            if sorter is not None:
+                self._read_names.append(sorter[0])
+        return self._update_count(val)
+
+    def getvalue(self):
+        return OpCountResult(
+            self.op_count, self._used_ops, self._read_names, self._nontrivial_read_count
+        )
 
 
 def _typecheck_OpCounterCSE(h: OpCounterCSE) -> OpsHandler[str]:
@@ -901,7 +1048,7 @@ class ExtractConstantsHandler(NoopHandler):
     def __init__(self, device):
         self.device = device
 
-    def constant(self, value: Any, dtype: torch.dtype) -> "torch._inductor.ir.Constant":
+    def constant(self, value: Any, dtype: torch.dtype) -> torch._inductor.ir.Constant:
         from torch._inductor import ir
 
         return ir.Constant(value=value, dtype=dtype, device=self.device)
@@ -920,7 +1067,7 @@ class SimpleCSEHandler(WrapperHandler[T]):
 
     def __init__(self, inner: OpsHandler[T]):
         super().__init__(inner)
-        self.cse_cache: Dict[str, Union[T, Tuple[T, ...]]] = {}
+        self.cse_cache: dict[str, Union[T, tuple[T, ...]]] = {}
         self.mock = MockHandler()
 
     def indirect_indexing(self, *args, **kwargs) -> sympy.Expr:

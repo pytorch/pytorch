@@ -1,4 +1,5 @@
 # Owner(s): ["oncall: quantization"]
+# ruff: noqa: F841
 
 import torch
 from torch.testing._internal.common_quantization import skipIfNoFBGEMM
@@ -118,7 +119,7 @@ class TestDeprecatedJitQuantized(JitTestCase):
             K1, N1 = 2, 2
 
             class FooBar(torch.nn.Module):
-                def __init__(self):
+                def __init__(self) -> None:
                     super().__init__()
                     self.linear1 = torch.nn.Linear(K1, N1).float()
 

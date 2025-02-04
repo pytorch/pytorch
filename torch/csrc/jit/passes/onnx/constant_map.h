@@ -2,19 +2,13 @@
 
 #include <c10/macros/Macros.h>
 
-C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wsuggest-override")
-C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wnewline-eof")
 #include <onnx/shape_inference/implementation.h>
-C10_DIAGNOSTIC_POP()
-C10_DIAGNOSTIC_POP()
 
 #include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/serialization/export.h>
-#include <mutex>
 #include <unordered_map>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 using ShapeDataMap =
     std::unordered_map<std::string, ::ONNX_NAMESPACE::TensorShapeProto>;
@@ -27,7 +21,7 @@ class ConstantValueMap {
   static std::optional<size_t> GetRank(const std::string& tensorName);
 
   static void SetAllGraphInputsStatic(bool all_static);
-  static c10::optional<bool> GetAllGraphInputsStatic();
+  static std::optional<bool> GetAllGraphInputsStatic();
 
   static void SetAllGraphInputsReliableComputed(bool computed);
   static bool GetAllGraphInputsReliableComputed();
@@ -110,10 +104,9 @@ class ConstantValueMap {
   SymbolDimMap symbolDimMap;
   DimSymbolMap dimSymbolMap;
   // Stores if all graph-level inputs have static shape
-  c10::optional<bool> allGraphInputsStatic;
+  std::optional<bool> allGraphInputsStatic;
   // True if reliable has been computed for all graph inputs
-  bool allGraphInputsReliableComputed;
+  bool allGraphInputsReliableComputed{};
 };
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

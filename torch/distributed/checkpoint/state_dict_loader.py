@@ -1,6 +1,9 @@
+# mypy: allow-untyped-decorators
+# mypy: allow-untyped-defs
 import os
 import warnings
-from typing import Any, cast, Dict, Optional, Set, Union
+from typing import Any, cast, Optional, Union
+from typing_extensions import deprecated
 
 import torch
 import torch.distributed as dist
@@ -14,11 +17,17 @@ from .planner import LoadPlan, LoadPlanner
 from .storage import StorageReader
 from .utils import _all_gather_keys, _api_bc_check, _DistWrapper, _profile
 
+
 __all__ = ["load_state_dict", "load"]
 
 
+@deprecated(
+    "`load_state_dict` is deprecated and will be removed in future versions. "
+    "Please use `load` instead.",
+    category=FutureWarning,
+)
 def load_state_dict(
-    state_dict: Dict[str, Any],
+    state_dict: dict[str, Any],
     storage_reader: StorageReader,
     process_group: Optional[dist.ProcessGroup] = None,
     coordinator_rank: int = 0,
@@ -26,10 +35,6 @@ def load_state_dict(
     planner: Optional[LoadPlanner] = None,
 ) -> None:
     """This method is deprecated. Please switch to 'load'."""
-    warnings.warn(
-        "'load_state_dict' is deprecated and will be removed in future versions. "
-        "Please use 'load' instead."
-    )
     storage_reader.reset()
     with _profile():
         # TODO: test returning `load` here instead.
@@ -46,12 +51,13 @@ def load_state_dict(
 @_dcp_method_logger(log_exceptions=True)
 @_api_bc_check
 def load(
-    state_dict: Dict[str, Any],
+    state_dict: dict[str, Any],
     *,
     checkpoint_id: Union[str, os.PathLike, None] = None,
     storage_reader: Optional[StorageReader] = None,
     planner: Optional[LoadPlanner] = None,
     process_group: Optional[dist.ProcessGroup] = None,
+    no_dist: bool = False,
 ) -> None:
     """
     Load a distributed ``state_dict`` in SPMD style.
@@ -63,6 +69,8 @@ def load(
     For each ``Stateful`` object (having both a ``state_dict`` and a ``load_state_dict``),
     load will first call ``state_dict`` before attempting deserialization, followed by
     ``load_state_dict`` once the deserialization is complete.
+    For each non-``Stateful`` object, load will deserailize the object, and then replace
+    it in the ``state_dict`` with the deserialized object.
 
     .. warning::
         All tensors in ``state_dict`` must be allocated on their
@@ -102,7 +110,8 @@ def load(
         process_group (Optional[ProcessGroup]):
             ProcessGroup to be used for cross-rank synchronization.
             (Default: ``None``)
-
+        no_dist (bool): If ``True``, this function will assume the intent is to load
+            a checkpoint without using cross-rank synchronization. (Default: ``False``)
     Returns:
         None.
 
@@ -132,10 +141,10 @@ def load(
         rank has an individual GPU, via ``torch.cuda.set_device()``.
     """
 
-    no_dist = not (dist.is_available() and dist.is_initialized())
+    no_dist = no_dist or (not dist.is_available()) or (not dist.is_initialized())
     if no_dist:
         warnings.warn(
-            "torch.distributed is unavailable or uninitialized, assuming the intent is to load in a single process."
+            "torch.distributed is disabled, unavailable or uninitialized, assuming the intent is to load in a single process."
         )
 
     with _profile():
@@ -174,11 +183,16 @@ def load(
                 continue
             elem = state_dict[key]
             if isinstance(elem, Stateful):
+                # If the state_dict is a Stateful object,
+                # DCP does an in-place load in the original state dict.
                 elem.load_state_dict(statetful_sd[key])
+            else:
+                # Otherwise, replace the state_dict with the loaded state_dict.
+                state_dict[key] = statetful_sd[key]
 
 
 def _load_state_dict(
-    state_dict: Dict[str, Any],
+    state_dict: dict[str, Any],
     storage_reader: StorageReader,
     process_group: Optional[dist.ProcessGroup] = None,
     coordinator_rank: int = 0,
@@ -194,6 +208,7 @@ def _load_state_dict(
     ckpt_kwargs = {}
     if (ckpt_id := getattr(storage_reader, "checkpoint_id", None)) is not None:
         ckpt_kwargs["checkpoint_id"] = ckpt_id
+        ckpt_kwargs["process_group"] = distW.group
 
     @_dcp_method_logger(**ckpt_kwargs)
     def local_step():
@@ -228,12 +243,12 @@ def _load_state_dict(
 
 
 def _load_state_dict_from_keys(
-    keys: Optional[Union[Set[str], str]] = None,
+    keys: Optional[Union[set[str], str]] = None,
     *,
     checkpoint_id: Union[str, os.PathLike, None] = None,
     storage_reader: Optional[StorageReader] = None,
     process_group: Optional[dist.ProcessGroup] = None,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """
     Load only the specified keys from the checkpoint, if no keys are specified, the entire
     checkpoint will be loaded. Note, this method completely loads the checkpoint into the
@@ -298,7 +313,7 @@ def _load_state_dict_from_keys(
     if isinstance(keys, str):
         keys = {keys}
 
-    sd: Dict[str, Any] = {}
+    sd: dict[str, Any] = {}
     _load_state_dict(
         state_dict=sd,
         storage_reader=storage_reader,

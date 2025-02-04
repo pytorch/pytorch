@@ -1,7 +1,7 @@
 # This source code is licensed under the BSD-style license found in the
 # LICENSE file in the root directory of this source tree.
 
-from typing import Dict, Iterable, List, Tuple
+from collections.abc import Iterable
 
 import torch
 
@@ -59,13 +59,11 @@ def swap_tensor(
         else:
             del module._buffers[name]
     else:
-        try:
+        if hasattr(module, name):
             orig_tensor = getattr(module, name)
-        except AttributeError as ex:
+        else:
             if not allow_missing:
-                raise AttributeError(
-                    f"{module._get_name()} has no attribute `{name}`"
-                ) from ex
+                raise AttributeError(f"{module._get_name()} has no attribute `{name}`")
             orig_tensor = _MISSING
         if (
             orig_tensor is not _MISSING
@@ -115,7 +113,7 @@ class NamedMemberAccessor:
 
     def __init__(self, module: "torch.nn.Module") -> None:
         self.module = module
-        self.memo: Dict[str, torch.nn.Module] = {}
+        self.memo: dict[str, torch.nn.Module] = {}
 
     # Nested attribute access
 
@@ -132,9 +130,9 @@ class NamedMemberAccessor:
         if not name:
             return self.module
 
-        try:
+        if name in self.memo:
             return self.memo[name]
-        except KeyError:
+        else:
             prefix, dot, attr = name.rpartition(".")
             if dot:
                 module = self.get_submodule(prefix)
@@ -227,7 +225,7 @@ class NamedMemberAccessor:
 
     # Batched operations
 
-    def get_tensors(self, names: Iterable[str]) -> List[torch.Tensor]:
+    def get_tensors(self, names: Iterable[str]) -> list[torch.Tensor]:
         """
         Get the tensors specified by the given paths.
 
@@ -254,7 +252,7 @@ class NamedMemberAccessor:
         for name, value in zip(names, values):
             self.set_tensor(name, value)
 
-    def set_tensors_dict(self, named_tensors: Dict[str, torch.Tensor]) -> None:
+    def set_tensors_dict(self, named_tensors: dict[str, torch.Tensor]) -> None:
         """
         Set the attributes specified by the given paths to values.
 
@@ -283,7 +281,7 @@ class NamedMemberAccessor:
         names: Iterable[str],
         values: Iterable[torch.Tensor],
         allow_missing: bool = False,
-    ) -> List[torch.Tensor]:
+    ) -> list[torch.Tensor]:
         """
         Swap the attributes specified by the given paths to values.
 
@@ -303,8 +301,8 @@ class NamedMemberAccessor:
         ]
 
     def swap_tensors_dict(
-        self, named_tensors: Dict[str, torch.Tensor], allow_missing: bool = False
-    ) -> Tuple[Dict[str, torch.Tensor], List[str]]:
+        self, named_tensors: dict[str, torch.Tensor], allow_missing: bool = False
+    ) -> tuple[dict[str, torch.Tensor], list[str]]:
         """
         Swap the attributes specified by the given paths to values.
 
@@ -334,7 +332,7 @@ class NamedMemberAccessor:
             raise RuntimeError(f"Missing key(s): {', '.join(map(repr, missing_keys))}.")
         return orig_named_tensors, missing_keys
 
-    def check_keys(self, keys: Iterable[str]) -> Tuple[List[str], List[str]]:
+    def check_keys(self, keys: Iterable[str]) -> tuple[list[str], list[str]]:
         """Check that the given keys are valid."""
         keys = set(keys)
         valid_keys = {name for name, _ in self.named_tensors(remove_duplicate=False)}
@@ -347,21 +345,21 @@ class NamedMemberAccessor:
     def named_parameters(
         self,
         remove_duplicate: bool = True,
-    ) -> Iterable[Tuple[str, torch.Tensor]]:
+    ) -> Iterable[tuple[str, torch.Tensor]]:
         """Iterate over all the parameters in the module."""
         yield from self.module.named_parameters(remove_duplicate=remove_duplicate)
 
     def named_buffers(
         self,
         remove_duplicate: bool = True,
-    ) -> Iterable[Tuple[str, torch.Tensor]]:
+    ) -> Iterable[tuple[str, torch.Tensor]]:
         """Iterate over all the buffers in the module."""
         yield from self.module.named_buffers(remove_duplicate=remove_duplicate)
 
     def named_tensors(
         self,
         remove_duplicate: bool = True,
-    ) -> Iterable[Tuple[str, torch.Tensor]]:
+    ) -> Iterable[tuple[str, torch.Tensor]]:
         """Iterate over all the tensors in the module."""
         yield from self.module.named_parameters(remove_duplicate=remove_duplicate)
         yield from self.module.named_buffers(remove_duplicate=remove_duplicate)
@@ -369,6 +367,6 @@ class NamedMemberAccessor:
     def named_modules(
         self,
         remove_duplicate: bool = True,
-    ) -> Iterable[Tuple[str, "torch.nn.Module"]]:
+    ) -> Iterable[tuple[str, "torch.nn.Module"]]:
         """Iterate over all the modules in the module."""
         yield from self.module.named_modules(remove_duplicate=remove_duplicate)

@@ -1,20 +1,24 @@
+# mypy: allow-untyped-defs
 import random
-import torch
+from collections.abc import Iterator, Sized
+from typing import Optional, TypeVar
 
-from torch.utils.data import Sampler, SequentialSampler
+import torch
 from torch.utils.data.datapipes._decorator import functional_datapipe
 from torch.utils.data.datapipes.datapipe import IterDataPipe
-from typing import Dict, Iterator, List, Optional, Sized, Tuple, Type, TypeVar
+from torch.utils.data.sampler import Sampler, SequentialSampler
+
 
 __all__ = [
     "SamplerIterDataPipe",
     "ShufflerIterDataPipe",
 ]
 
-T_co = TypeVar('T_co', covariant=True)
+
+_T_co = TypeVar("_T_co", covariant=True)
 
 
-class SamplerIterDataPipe(IterDataPipe[T_co]):
+class SamplerIterDataPipe(IterDataPipe[_T_co]):
     r"""
     Generate sample elements using the provided ``Sampler`` (defaults to :class:`SequentialSampler`).
 
@@ -27,14 +31,16 @@ class SamplerIterDataPipe(IterDataPipe[T_co]):
     datapipe: IterDataPipe
     sampler: Sampler
 
-    def __init__(self,
-                 datapipe: IterDataPipe,
-                 sampler: Type[Sampler] = SequentialSampler,
-                 sampler_args: Optional[Tuple] = None,
-                 sampler_kwargs: Optional[Dict] = None
-                 ) -> None:
-        assert isinstance(datapipe, Sized), \
-            "Sampler class requires input datapipe implemented `__len__`"
+    def __init__(
+        self,
+        datapipe: IterDataPipe,
+        sampler: type[Sampler] = SequentialSampler,
+        sampler_args: Optional[tuple] = None,
+        sampler_kwargs: Optional[dict] = None,
+    ) -> None:
+        assert isinstance(
+            datapipe, Sized
+        ), "Sampler class requires input datapipe implemented `__len__`"
         super().__init__()
         self.datapipe = datapipe
         self.sampler_args = () if sampler_args is None else sampler_args
@@ -42,7 +48,7 @@ class SamplerIterDataPipe(IterDataPipe[T_co]):
         # https://github.com/python/mypy/pull/9629 will solve
         self.sampler = sampler(*self.sampler_args, data_source=self.datapipe, **self.sampler_kwargs)  # type: ignore[misc]
 
-    def __iter__(self) -> Iterator[T_co]:
+    def __iter__(self) -> Iterator[_T_co]:
         return iter(self.sampler)
 
     def __len__(self) -> int:
@@ -52,8 +58,8 @@ class SamplerIterDataPipe(IterDataPipe[T_co]):
         raise TypeError(f"{type(self).__name__} instance doesn't have valid length")
 
 
-@functional_datapipe('shuffle')
-class ShufflerIterDataPipe(IterDataPipe[T_co]):
+@functional_datapipe("shuffle")
+class ShufflerIterDataPipe(IterDataPipe[_T_co]):
     r"""
     Shuffle the input DataPipe with a buffer (functional name: ``shuffle``).
 
@@ -87,23 +93,24 @@ class ShufflerIterDataPipe(IterDataPipe[T_co]):
         [0, 4, 1, 6, 3, 2, 9, 5, 7, 8]
     """
 
-    datapipe: IterDataPipe[T_co]
+    datapipe: IterDataPipe[_T_co]
     buffer_size: int
-    _buffer: List[T_co]
+    _buffer: list[_T_co]
     _enabled: bool
     _seed: Optional[int]
     _rng: random.Random
 
-    def __init__(self,
-                 datapipe: IterDataPipe[T_co],
-                 *,
-                 buffer_size: int = 10000,
-                 unbatch_level: int = 0
-                 ) -> None:
+    def __init__(
+        self,
+        datapipe: IterDataPipe[_T_co],
+        *,
+        buffer_size: int = 10000,
+        unbatch_level: int = 0,
+    ) -> None:
         super().__init__()
         # TODO: Performance optimization
         #       buffer can be a fixed size and remove expensive `append()` and `len()` operations
-        self._buffer: List[T_co] = []
+        self._buffer: list[_T_co] = []
         assert buffer_size > 0, "buffer_size should be larger than 0"
         if unbatch_level == 0:
             self.datapipe = datapipe
@@ -122,7 +129,7 @@ class ShufflerIterDataPipe(IterDataPipe[T_co]):
         self._seed = seed
         return self
 
-    def __iter__(self) -> Iterator[T_co]:
+    def __iter__(self) -> Iterator[_T_co]:
         if not self._enabled:
             yield from self.datapipe
         else:

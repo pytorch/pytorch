@@ -1,6 +1,7 @@
+# mypy: allow-untyped-defs
 import gc
 import sys
-from typing import Any, Dict, List, NamedTuple, Optional, Tuple
+from typing import Any, NamedTuple, Optional
 import types
 import weakref
 import json
@@ -100,7 +101,7 @@ def annotated_references(obj):
     need for a list.  Descriptions are currently strings.
 
     """
-    references: Dict[int, List[str]] = {}
+    references: dict[int, list[str]] = {}
 
     def add_reference(name, obj):
         references.setdefault(id(obj), []).append(name)
@@ -257,7 +258,7 @@ class Node(NamedTuple):
     label: str
     context: Optional[str]
     root: bool
-    referrents: List[Tuple[str, int]]
+    referrents: list[tuple[str, int]]
 
 def create_graph(objects, *, context=None, filter=None):
     if context is None:
@@ -266,7 +267,7 @@ def create_graph(objects, *, context=None, filter=None):
         filter = is_cuda_tensor
 
     nodes = [Node(object_annotation(obj), context(obj), filter(obj), []) for obj in objects]
-    node_referrers: List[List[int]] = [[] for obj in objects]
+    node_referrers: list[list[int]] = [[] for obj in objects]
 
     id_to_node = {id(obj): i for i, obj in enumerate(objects)}
     for obj in objects:
@@ -278,7 +279,6 @@ def create_graph(objects, *, context=None, filter=None):
             tidx = id_to_node.get(rid, None)
             if tidx is None:
                 continue
-            t = nodes[tidx]
             labels = references.get(rid, ["?"])
             node_referrers[tidx].append(fidx)
             for label in labels:
@@ -293,8 +293,8 @@ def create_graph(objects, *, context=None, filter=None):
         to_keep.add(idx)
         referrers = node_referrers[idx]
         to_search.extend(referrers)
-    id_to_filtered_id: Dict[int, int] = {}
-    filtered: List[Any] = []
+    id_to_filtered_id: dict[int, int] = {}
+    filtered: list[Any] = []
     for i, n in enumerate(nodes):
         if i in to_keep:
             id_to_filtered_id[i] = len(id_to_filtered_id)
@@ -319,7 +319,7 @@ def cuda_allocation_context():
         addr = seg['address']
         for blk in seg['blocks']:
             if blk['state'] == 'active_allocated':
-                frames, real_size = _block_extra(blk)
+                frames, _real_size = _block_extra(blk)
                 addr_to_frame[addr] = frames
             addr += blk['size']
 

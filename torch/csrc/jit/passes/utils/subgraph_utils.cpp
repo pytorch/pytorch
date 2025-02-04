@@ -9,9 +9,7 @@
 
 #include <utility>
 
-namespace torch {
-namespace jit {
-namespace SubgraphUtils {
+namespace torch::jit::SubgraphUtils {
 namespace {
 
 bool hasSubgraph(Node* n) {
@@ -133,7 +131,6 @@ void mergeSubgraph(Node* mergeTo, Node* mergeFrom) {
   }
   ++it;
 
-  std::vector<Node*> merged_nodes;
   while (it != end_it) {
     Node* node = *it;
     ++it;
@@ -429,7 +426,7 @@ Node* createSingletonSubgraphAndUpdateAliasing(
     Symbol subgraphKind,
     AliasDb& db) {
   return executeSubgraphMergeAndUpdateAliasing(
-      to_merge, c10::nullopt, db, [&]() {
+      to_merge, std::nullopt, db, [&]() {
         return createSingletonSubgraph(to_merge, subgraphKind);
       });
 }
@@ -606,7 +603,7 @@ static std::string truncateStrWithHash(const std::string& s, size_t maxlen) {
   if (s.size() <= maxlen) {
     return s;
   }
-  std::string hash_str = c10::to_string(c10::hash<std::string>{}(s));
+  std::string hash_str = std::to_string(c10::hash<std::string>{}(s));
   // If hash-string plus '_' can fit into maxlen, then truncate the original
   // string correspondingly so that the final string with the hash included fits
   // into maxlen. If that's not possible, at least truncate the original string
@@ -634,6 +631,4 @@ std::string generateNameForGraph(
   return truncateStrWithHash(graph_name.str(), maxlen);
 }
 
-} // namespace SubgraphUtils
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit::SubgraphUtils

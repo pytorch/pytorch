@@ -1,14 +1,4 @@
-import textwrap
-import warnings
-from typing import Any, Callable, Optional, Tuple, Union
-
-import torch._functorch.apis as apis
-import torch._functorch.eager_transforms as _impl
-import torch._functorch.make_functional as _nn_impl
-import torch.nn as nn
-from torch._functorch.eager_transforms import argnums_t
-from torch._functorch.vmap import in_dims_t, out_dims_t
-
+# mypy: allow-untyped-defs
 """
 The APIs in this file are exposed as `functorch.*`. They are thin wrappers
 around the torch.func.* APIs that have deprecation warnings -- we're trying
@@ -18,16 +8,27 @@ NB: We don't use *args, **kwargs in the signatures because that changes the
 documentation.
 """
 
+import textwrap
+import warnings
+from typing import Any, Callable, Optional, Union
+
+import torch._functorch.apis as apis
+import torch._functorch.eager_transforms as _impl
+import torch._functorch.make_functional as _nn_impl
+import torch.nn as nn
+from torch._functorch.eager_transforms import argnums_t
+from torch._functorch.vmap import in_dims_t, out_dims_t
+
 
 def get_warning(api, new_api=None, replace_newlines=False):
     if new_api is None:
         new_api = f"torch.func.{api}"
     warning = (
         f"We've integrated functorch into PyTorch. As the final step of the \n"
-        f"integration, functorch.{api} is deprecated as of PyTorch \n"
+        f"integration, `functorch.{api}` is deprecated as of PyTorch \n"
         f"2.0 and will be deleted in a future version of PyTorch >= 2.3. \n"
-        f"Please use {new_api} instead; see the PyTorch 2.0 release notes \n"
-        f"and/or the torch.func migration guide for more details \n"
+        f"Please use `{new_api}` instead; see the PyTorch 2.0 release notes \n"
+        f"and/or the `torch.func` migration guide for more details \n"
         f"https://pytorch.org/docs/main/func.migrating.html"
     )
     if replace_newlines:
@@ -37,7 +38,7 @@ def get_warning(api, new_api=None, replace_newlines=False):
 
 def warn_deprecated(api, new_api=None):
     warning = get_warning(api, new_api, replace_newlines=True)
-    warnings.warn(warning, stacklevel=2)
+    warnings.warn(warning, FutureWarning, stacklevel=3)
 
 
 def setup_docs(functorch_api, torch_func_api=None, new_api_name=None):
@@ -97,7 +98,7 @@ def jvp(
 
 def jacrev(
     func: Callable,
-    argnums: Union[int, Tuple[int]] = 0,
+    argnums: Union[int, tuple[int]] = 0,
     *,
     has_aux=False,
     chunk_size: Optional[int] = None,

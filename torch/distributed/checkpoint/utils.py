@@ -1,19 +1,20 @@
+# mypy: allow-untyped-defs
 import cProfile
 import inspect
 import io
 import itertools
 import os
 import warnings
+from collections.abc import Sequence
 from contextlib import contextmanager
 from functools import wraps
 from pstats import Stats
-from typing import Any, Callable, cast, Dict, List, Optional, Sequence, TypeVar, Union
+from typing import Any, Callable, cast, Optional, TypeVar, Union
 
 import torch
 import torch.distributed as dist
 from torch.distributed._shard.sharded_tensor import ShardedTensor
 from torch.distributed._shard.sharded_tensor.shard import Shard
-from torch.distributed._tensor import DTensor
 
 from .api import (
     _is_wrapped_exception,
@@ -23,6 +24,7 @@ from .api import (
 )
 from .metadata import MetadataIndex, STATE_DICT_TYPE
 
+
 __all__ = ["find_tensor_shard", "find_state_dict_object"]
 
 T = TypeVar("T")
@@ -30,20 +32,20 @@ R = TypeVar("R")
 
 
 def _get_failure_dict(
-    results: List[Union[T, WRAPPED_EXCEPTION]]
-) -> Dict[int, WRAPPED_EXCEPTION]:
+    results: list[Union[T, WRAPPED_EXCEPTION]]
+) -> dict[int, WRAPPED_EXCEPTION]:
     return cast(
-        Dict[int, WRAPPED_EXCEPTION],
+        dict[int, WRAPPED_EXCEPTION],
         {i: err for i, err in enumerate(results) if _is_wrapped_exception(err)},
     )
 
 
 def _all_gather_keys(
-    local_dict: Dict[Any, Any], group: Optional[dist.ProcessGroup] = None
-) -> List[Any]:
+    local_dict: dict[Any, Any], group: Optional[dist.ProcessGroup] = None
+) -> list[Any]:
     """Gathers all keys, and returns them sorted."""
     keys = list(local_dict.keys())
-    gathered_keys: List[List[Any]] = [None] * dist.get_world_size()  # type: ignore[list-item]
+    gathered_keys: list[list[Any]] = [None] * dist.get_world_size(group)  # type: ignore[list-item]
 
     dist.all_gather_object(gathered_keys, keys, group=group)
     return sorted(set(itertools.chain.from_iterable(gathered_keys)))
@@ -94,11 +96,11 @@ class _DistWrapper:
             )
         return cast(T, object_list[0])
 
-    def gather_object(self, object: T) -> Optional[List[T]]:
+    def gather_object(self, object: T) -> Optional[list[T]]:
         """Implement functionality similar to c10d::gather_object but without distributed enabled."""
         if self.use_dist:
             gather_objs = (
-                cast(List[T], [None] * dist.get_world_size(self.group))
+                cast(list[T], [None] * dist.get_world_size(self.group))
                 if self.is_coordinator
                 else None
             )
@@ -114,10 +116,10 @@ class _DistWrapper:
             result = [object]
         return result
 
-    def all_gather_object(self, object: T) -> List[T]:
+    def all_gather_object(self, object: T) -> list[T]:
         """Implement functionality similar to c10d::all_gather_object but without distributed enabled."""
         if self.use_dist:
-            gather_objs = cast(List[T], [None] * dist.get_world_size(self.group))
+            gather_objs = cast(list[T], [None] * dist.get_world_size(self.group))
 
             dist.all_gather_object(
                 object_list=gather_objs, obj=object, group=self.group
@@ -126,10 +128,10 @@ class _DistWrapper:
             gather_objs = [object]
         return gather_objs
 
-    def scatter_object(self, object_list: Optional[List[T]]) -> T:
+    def scatter_object(self, object_list: Optional[list[T]]) -> T:
         """Implement functionality similar to c10d::scatter_object but without distributed enabled."""
         if self.use_dist:
-            gather_result = cast(List[T], [None])
+            gather_result = cast(list[T], [None])
             dist.scatter_object_list(
                 scatter_object_output_list=gather_result,
                 scatter_object_input_list=object_list if self.is_coordinator else None,
@@ -147,7 +149,7 @@ class _DistWrapper:
         self,
         step: str,
         map_fun: Callable[[], T],
-        reduce_fun: Callable[[List[T]], List[R]],
+        reduce_fun: Callable[[list[T]], list[R]],
     ) -> R:
         """
         Compute a value on each rank, then do centralized reduce on a single rank, followed by a scatter.
@@ -165,7 +167,7 @@ class _DistWrapper:
             local_data = _wrap_exception(e)
 
         all_data = self.gather_object(local_data)
-        all_results: Optional[List[Union[R, CheckpointException]]] = None
+        all_results: Optional[list[Union[R, CheckpointException]]] = None
         if self.is_coordinator:
             assert all_data is not None
             node_failures = _get_failure_dict(all_data)
@@ -174,8 +176,8 @@ class _DistWrapper:
                 try:
                     # N.B. why can't mypy cast List[R] to List[Union[R, WRAPPED_EXCEPTION]]?
                     all_results = cast(
-                        List[Union[R, CheckpointException]],
-                        reduce_fun(cast(List[T], all_data)),
+                        list[Union[R, CheckpointException]],
+                        reduce_fun(cast(list[T], all_data)),
                     )
                 except BaseException as e:
                     node_failures[self.rank] = _wrap_exception(e)
@@ -194,7 +196,7 @@ class _DistWrapper:
         self,
         step: str,
         map_fun: Callable[[], T],
-        reduce_fun: Callable[[List[T]], R],
+        reduce_fun: Callable[[list[T]], R],
     ) -> R:
         """
         Compute a value on each rank, then do centralized reduce on a single rank, followed by a broadcast.
@@ -218,7 +220,7 @@ class _DistWrapper:
             node_failures = _get_failure_dict(all_data)
             if len(node_failures) == 0:
                 try:
-                    result = reduce_fun(cast(List[T], all_data))
+                    result = reduce_fun(cast(list[T], all_data))
                 except BaseException as e:
                     node_failures[self.rank] = _wrap_exception(e)
 
@@ -234,7 +236,7 @@ class _DistWrapper:
         self,
         step: str,
         map_fun: Callable[[], T],
-    ) -> List[T]:
+    ) -> list[T]:
         """
         Compute a value on each rank, then all_gather them.
 
@@ -253,7 +255,7 @@ class _DistWrapper:
         node_failures = _get_failure_dict(all_results)
         if len(node_failures) > 0:
             raise CheckpointException(step, node_failures)
-        return cast(List[T], all_results)
+        return cast(list[T], all_results)
 
     def broadcast(
         self,
@@ -301,8 +303,9 @@ def _find_shard(tensor: ShardedTensor, index: MetadataIndex) -> Shard:
 
 
 def find_tensor_shard(tensor: torch.Tensor, index: MetadataIndex) -> torch.Tensor:
-    if isinstance(tensor, DTensor):
-        return tensor.to_local()
+    if hasattr(tensor, "__get_tensor_shard__"):
+        # DTensor implements _Checkpointable
+        return tensor.__get_tensor_shard__(index)  # type: ignore[attr-defined]
     if isinstance(tensor, ShardedTensor):
         return _find_shard(tensor, index).tensor
     if index.offset is not None:
@@ -329,11 +332,11 @@ def find_state_dict_object(state_dict: STATE_DICT_TYPE, index: MetadataIndex) ->
     return obj
 
 
-def _element_wise_add(a: Sequence[int], b: Sequence[int]) -> List[int]:
+def _element_wise_add(a: Sequence[int], b: Sequence[int]) -> list[int]:
     return [i_a + i_b for i_a, i_b in zip(a, b)]
 
 
-def _element_wise_sub(a: Sequence[int], b: Sequence[int]) -> List[int]:
+def _element_wise_sub(a: Sequence[int], b: Sequence[int]) -> list[int]:
     return [i_a - i_b for i_a, i_b in zip(a, b)]
 
 
@@ -345,13 +348,13 @@ class _ReaderView(io.IOBase):
         self.base_stream = base_stream
         self.seek(0)
 
-    def seek(self, __offset: int, __whence: int = os.SEEK_SET) -> int:
-        if __whence == os.SEEK_SET:
-            __offset = self.offset + __offset
-        elif __whence == os.SEEK_END:
-            __whence = os.SEEK_SET
-            __offset = (self.offset + self.len) - __offset
-        return self.base_stream.seek(__offset, __whence)
+    def seek(self, offset: int, whence: int = os.SEEK_SET, /) -> int:
+        if whence == os.SEEK_SET:
+            offset = self.offset + offset
+        elif whence == os.SEEK_END:
+            whence = os.SEEK_SET
+            offset = (self.offset + self.len) - offset
+        return self.base_stream.seek(offset, whence)
 
     def tell(self) -> int:
         return self.base_stream.tell() - self.offset
@@ -363,9 +366,17 @@ class _ReaderView(io.IOBase):
         return self.base_stream.seekable()
 
     def readinto(self, b):
+        max_size = self.len - self.tell()
+        if max_size == 0:
+            return 0
+        if len(b) > max_size:
+            b = memoryview(b)[:max_size]
         return self.base_stream.readinto(b)  # type: ignore[attr-defined]
 
     def read(self, size=-1):
+        max_size = self.len - self.tell()
+        if size == -1 or size > max_size:
+            size = max_size
         return self.base_stream.read(size)
 
 

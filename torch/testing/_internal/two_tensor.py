@@ -8,7 +8,12 @@ from torch.utils._python_dispatch import return_and_correct_aliasing
 # A simple tensor subclass that holds two tensors internally, and runs every op on both tensors.
 class TwoTensor(torch.Tensor):
     @staticmethod
-    def __new__(cls, a, b):
+    def __new__(cls, a, b, outer_size=None, outer_stride=None):
+        if outer_size is None:
+            outer_size = a.size()
+        if outer_stride is None:
+            outer_stride = a.stride()
+
         assert (
             a.device == b.device
             and a.layout == b.layout
@@ -16,9 +21,9 @@ class TwoTensor(torch.Tensor):
             and a.dtype == b.dtype
         )
         # I guess it would be more accurate to represent the shape as torch.cat(a, b).shape
-        shape = a.shape
+        shape = outer_size
         kwargs = {}
-        kwargs["strides"] = a.stride()
+        kwargs["strides"] = outer_stride
         kwargs["storage_offset"] = a.storage_offset()
         kwargs["device"] = a.device
         kwargs["layout"] = a.layout
@@ -31,7 +36,7 @@ class TwoTensor(torch.Tensor):
         assert a.storage_offset() == b.storage_offset()
         return out
 
-    def __init__(self, a, b):
+    def __init__(self, a, b, outer_size=None, outer_stride=None):
         self.a = a
         self.b = b
 
@@ -47,7 +52,10 @@ class TwoTensor(torch.Tensor):
     def __tensor_unflatten__(inner_tensors, meta, outer_size, outer_stride):
         assert meta is None
         a, b = inner_tensors["a"], inner_tensors["b"]
-        return TwoTensor(a, b)
+        if type(a) is torch.Tensor:
+            assert outer_size is not None
+            assert outer_stride is not None
+        return TwoTensor(a, b, outer_size, outer_stride)
 
     @classmethod
     def __torch_dispatch__(cls, func, types, args, kwargs):
@@ -61,17 +69,24 @@ class TwoTensor(torch.Tensor):
 
         out_a = func(*args_a, **kwargs_a)
         out_b = func(*args_b, **kwargs_b)
-        assert type(out_a) == type(out_b)
         out_a_flat, spec = pytree.tree_flatten(out_a)
         out_b_flat = pytree.tree_leaves(out_b)
         # for aten ops that return non-tensors, just assume that
         # our two inner tensors return the same value
         out_flat = [
-            TwoTensor(o_a, o_b) if isinstance(o_a, torch.Tensor) else o_a
+            cls(o_a, o_b) if isinstance(o_a, torch.Tensor) else o_a
             for o_a, o_b in zip(out_a_flat, out_b_flat)
         ]
         out = pytree.tree_unflatten(out_flat, spec)
-        return return_and_correct_aliasing(func, args, kwargs, out)
+        from torch._higher_order_ops.cond import cond_op
+
+        if func is cond_op:
+            return out
+        else:
+            return return_and_correct_aliasing(func, args, kwargs, out)
+
+    def get_elem_a(self):
+        return self.a
 
 
 class TwoTensorMode(torch.utils._python_dispatch.TorchDispatchMode):

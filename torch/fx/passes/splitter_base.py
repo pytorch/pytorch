@@ -1,45 +1,52 @@
+# mypy: allow-untyped-defs
 import argparse
 import copy
-from collections import defaultdict
-from dataclasses import dataclass
-from typing import NamedTuple, Sequence, Iterable, Any, List, Dict, Optional, Tuple
 import logging
+from collections import defaultdict
+from collections.abc import Iterable, Sequence
+from dataclasses import dataclass
+from typing import Any, NamedTuple, Optional
 
 import torch
-from torch.fx.passes.graph_manipulation import get_size_of_node
-from torch.fx.node import map_arg
 from torch.fx._compatibility import compatibility
+from torch.fx.node import map_arg
+from torch.fx.passes.graph_manipulation import get_size_of_node
 
-from .operator_support import (
-    get_node_target,
-    OperatorSupportBase,
-)
 from .graph_drawer import FxGraphDrawer
+from .operator_support import get_node_target, OperatorSupportBase
 from .shape_prop import ShapeProp
 from .split_utils import split_by_tags
 from .tools_common import (
-    FxNetAccFusionsFinder,
     CALLABLE_NODE_OPS,
-    Tensors,
+    FxNetAccFusionsFinder,
+    is_node_output_tensor,
     NodeList,
     NodeSet,
-    is_node_output_tensor,
+    Tensors,
 )
 
 
-__all__ = ['FxNetAccNodesFinder', 'FxNetSplitterInternalError', 'Subgraph', 'SplitResult', 'generate_inputs_for_submodules']
+__all__ = [
+    "FxNetAccNodesFinder",
+    "FxNetSplitterInternalError",
+    "Subgraph",
+    "SplitResult",
+    "generate_inputs_for_submodules",
+]
 _LOGGER = logging.getLogger(__name__)
 
 DEFAULT_MIN_ACC_MODULE_SIZE = 1
 DEFAULT_SKIP_FUSION = False
 DEFAULT_ALLOW_NON_TENSOR = False
 
+
 class _SplitterSettingBase:
     def __init__(
         self,
         min_acc_module_size=DEFAULT_MIN_ACC_MODULE_SIZE,
         skip_fusion=DEFAULT_SKIP_FUSION,
-        allow_non_tensor=DEFAULT_ALLOW_NON_TENSOR
+        allow_non_tensor=DEFAULT_ALLOW_NON_TENSOR,
+        max_acc_splits: int = -1,
     ):
         parser = argparse.ArgumentParser()
         parser.add_argument(
@@ -48,6 +55,13 @@ class _SplitterSettingBase:
             required=False,
             type=int,
             help="Minimum size limit of an accelerator subgraph.",
+        )
+        parser.add_argument(
+            "--max-acc-splits",
+            "--max_acc_splits",
+            required=False,
+            type=int,
+            help="Enforce a maximum number of split subgraphs.",
         )
         parser.add_argument(
             "--skip-fusion",
@@ -71,11 +85,18 @@ class _SplitterSettingBase:
             "we might not care about non-tensor data flow and we can set this option "
             "to true to disable the functionality that prevent non-tensor data flow.",
         )
-        args, unknown = parser.parse_known_args()
+        args, _unknown = parser.parse_known_args()
 
-        self.min_acc_module_size: int = args.min_acc_module_size if args.min_acc_module_size else min_acc_module_size
+        self.min_acc_module_size: int = (
+            args.min_acc_module_size
+            if args.min_acc_module_size
+            else min_acc_module_size
+        )
         self.skip_fusion: bool = args.skip_fusion if args.skip_fusion else skip_fusion
-        self.allow_non_tensor: bool = args.allow_non_tensor if args.allow_non_tensor else allow_non_tensor
+        self.allow_non_tensor: bool = (
+            args.allow_non_tensor if args.allow_non_tensor else allow_non_tensor
+        )
+        self.max_acc_splits: int = max_acc_splits
 
 
 @compatibility(is_backward_compatible=False)
@@ -104,9 +125,7 @@ class FxNetAccNodesFinder:
         self.allow_non_tensor = allow_non_tensor
         self.acc_nodes: NodeSet = set()
 
-    def reduce_acc_nodes_non_tensor_input_helper(
-        self, cpu_worklist: NodeList
-    ):
+    def reduce_acc_nodes_non_tensor_input_helper(self, cpu_worklist: NodeList):
         """
         Transitively excludes nodes from ACC supported set.
         For every node in the worklist:
@@ -180,9 +199,11 @@ class FxNetAccNodesFinder:
 
         return self.acc_nodes
 
+
 @compatibility(is_backward_compatible=False)
 class FxNetSplitterInternalError(Exception):
     pass
+
 
 @compatibility(is_backward_compatible=False)
 @dataclass
@@ -190,6 +211,7 @@ class Subgraph:
     is_acc: bool
     nodes: NodeList
     device_ordinal: Optional[int] = None
+
 
 @compatibility(is_backward_compatible=False)
 class SplitResult(NamedTuple):
@@ -204,7 +226,7 @@ class SplitResult(NamedTuple):
     """
 
     split_module: torch.fx.GraphModule
-    submodule_inputs: Dict[str, Any]
+    submodule_inputs: dict[str, Any]
     non_acc_submodule_prefix: str
 
 
@@ -214,7 +236,7 @@ def generate_inputs_for_submodules(
     inputs: Sequence[Any],
     target_submodules: Iterable[str],
     deepcopy: bool = False,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """
     Generate inputs for targeting submdoules in the given model. Note that if two submodules refer to the same obj, this
     function doesn't work.
@@ -233,7 +255,9 @@ def generate_inputs_for_submodules(
     submodule_to_names = {mod: name for name, mod in model.named_modules()}
 
     def pre_forward(module, module_inputs):
-        results[submodule_to_names[module]] = copy.deepcopy(module_inputs) if deepcopy else module_inputs
+        results[submodule_to_names[module]] = (
+            copy.deepcopy(module_inputs) if deepcopy else module_inputs
+        )
 
     for name, mod in model.named_modules():
         if name in target_submodules:
@@ -298,7 +322,7 @@ class _SplitterBase:
     """
 
     # PCIe bandwidth for the backend, default to 100 GB/s
-    PCIe_BW = 100 * 2 ** 30
+    PCIe_BW = 100 * 2**30
 
     def __init__(
         self,
@@ -308,6 +332,7 @@ class _SplitterBase:
         settings: _SplitterSettingBase,
         non_acc_submodule_name: str = "_run_on_cpu_",
         return_tuple: bool = False,
+        nodes_finder: Optional[FxNetAccNodesFinder] = None,
     ):
         """
         Preprocesses graph before splitting:
@@ -325,7 +350,11 @@ class _SplitterBase:
         self.settings = settings
         self.operator_support = operator_support
         self.sample_input = sample_input
-        self.acc_nodes = FxNetAccNodesFinder(self.module, self.operator_support, self.settings.allow_non_tensor)()
+        if nodes_finder is None:
+            nodes_finder = FxNetAccNodesFinder(
+                self.module, self.operator_support, self.settings.allow_non_tensor
+            )
+        self.acc_nodes = nodes_finder()
 
         if self.settings.skip_fusion:
             self.fusions = {}
@@ -337,25 +366,25 @@ class _SplitterBase:
         self.update_deps_for_fusions()
 
         self.non_acc_submodule_name = non_acc_submodule_name
-        self._node_submodule_map: Dict[str, str] = {}
+        self._node_submodule_map: dict[str, str] = {}
         self._return_tuple = return_tuple
 
-        self.tags: List[str] = []
+        self.tags: list[str] = []
 
     # ===============================================================
     # Helpers for ctor and initial state
     # ===============================================================
 
-    def get_node_submodule_map(self) -> Dict[str, str]:
-        """ Returns a map from node name to submodule name, e.g.
-            node: main_module_impl_impl_over_arch_unary_multiple_embedding
-              _pooling_embedding_pooling_sparse_entity_equivalence_key
-              _proxy_embedding_bag
-            maps to submodule name of: _run_on_acc_1
+    def get_node_submodule_map(self) -> dict[str, str]:
+        """Returns a map from node name to submodule name, e.g.
+        node: main_module_impl_impl_over_arch_unary_multiple_embedding
+          _pooling_embedding_pooling_sparse_entity_equivalence_key
+          _proxy_embedding_bag
+        maps to submodule name of: _run_on_acc_1
         """
         return self._node_submodule_map
 
-    def find_deps(self) -> Dict[torch.fx.Node, NodeSet]:
+    def find_deps(self) -> dict[torch.fx.Node, NodeSet]:
         """
         Builds a graph of node dependencies. Leaf nodes don't have any
         dependencies and the "output" node doesn't have nodes depending on it.
@@ -363,7 +392,7 @@ class _SplitterBase:
         Resulting graph has only direct dependencies, i.e. there are no
         transitive dependencies.
         """
-        deps: Dict[torch.fx.Node, NodeSet] = defaultdict(set)
+        deps: dict[torch.fx.Node, NodeSet] = defaultdict(set)
         for node in self.module.graph.nodes:
             if node.op not in CALLABLE_NODE_OPS:
                 continue
@@ -401,9 +430,7 @@ class _SplitterBase:
 
         return mod
 
-    def _find_culprit(
-        self, mod: torch.fx.GraphModule, inputs: Tensors
-    ) -> str:
+    def _find_culprit(self, mod: torch.fx.GraphModule, inputs: Tensors) -> str:
         """
         When an error occurs during lowering or running the lowered mod, we use this
         function to find culprits in the `mod` that causes the error.
@@ -482,7 +509,9 @@ class _SplitterBase:
                 supported_nodes.append(node)
                 supported_node_types[target].add((arg_dtypes_tuple, kwarg_dtypes_tuple))
             else:
-                unsupported_node_types[target].add((arg_dtypes_tuple, kwarg_dtypes_tuple))
+                unsupported_node_types[target].add(
+                    (arg_dtypes_tuple, kwarg_dtypes_tuple)
+                )
 
         if dump_graph:
             self._draw_graph_based_on_node_support(self.module, supported_nodes)
@@ -517,7 +546,11 @@ class _SplitterBase:
         reports += f" {acc_subgraphs_num} acc subgraphs and {cpu_subgraphs_num} cpu subgraphs.\n"
 
         for i, subgraph in enumerate(subgraphs):
-            reports += f"_run_on_acc_{i}: " if subgraph.is_acc else f"{self.non_acc_submodule_name}{i}: "
+            reports += (
+                f"_run_on_acc_{i}: "
+                if subgraph.is_acc
+                else f"{self.non_acc_submodule_name}{i}: "
+            )
             reports += f"{len(subgraph.nodes)} node(s)\n"
 
         self.tag(subgraphs)
@@ -525,9 +558,7 @@ class _SplitterBase:
         split_mod.eval()
 
         if dump_graph:
-            drawer = FxGraphDrawer(
-                split_mod, "preview", ignore_getattr=True
-            )
+            drawer = FxGraphDrawer(split_mod, "preview", ignore_getattr=True)
             dot_graphs = drawer.get_all_dot_graphs()
             for name, dot_graph in dot_graphs.items():
                 # pyre-fixme[16]: `pydot.Dot` has no attribute `write_raw`.
@@ -554,9 +585,7 @@ class _SplitterBase:
                     handle.remove()
                     return sub_inputs
 
-                submod_inputs = get_submod_inputs(
-                    split_mod, submod, self.sample_input
-                )
+                submod_inputs = get_submod_inputs(split_mod, submod, self.sample_input)
                 ShapeProp(submod).propagate(*submod_inputs)
 
                 total_input_bytes = 0
@@ -619,12 +648,12 @@ class _SplitterBase:
 
     def find_reverse_deps(
         self, tag_id: Optional[int] = None
-    ) -> Dict[torch.fx.Node, NodeSet]:
+    ) -> dict[torch.fx.Node, NodeSet]:
         """
         Builds reversed topological node dependencies, if tag_id is specified,
         we ignore nodes that are in later subgraph i.e. nodes have greater tag_id.
         """
-        result: Dict[torch.fx.Node, NodeSet] = defaultdict(set)
+        result: dict[torch.fx.Node, NodeSet] = defaultdict(set)
 
         for node in self.module.graph.nodes:
             if node.op not in CALLABLE_NODE_OPS:
@@ -639,9 +668,7 @@ class _SplitterBase:
 
         return result
 
-    def update_reverse_deps_for_fusions(
-        self, deps: Dict[torch.fx.Node, NodeSet]
-    ):
+    def update_reverse_deps_for_fusions(self, deps: dict[torch.fx.Node, NodeSet]):
         processed_node = set()
 
         for node, fusion in self.fusions.items():
@@ -731,7 +758,7 @@ class _SplitterBase:
     # Helpers for split() method
     # ===============================================================
 
-    def starter_nodes(self) -> Tuple[NodeSet, NodeSet]:
+    def starter_nodes(self) -> tuple[NodeSet, NodeSet]:
         """
         Finds nodes that consume module inputs or get_attr nodes.
         """
@@ -747,7 +774,7 @@ class _SplitterBase:
                     starter_cpu_nodes.add(user)
         return starter_cpu_nodes, starter_acc_nodes
 
-    def put_nodes_into_subgraphs(self) -> List[Subgraph]:
+    def put_nodes_into_subgraphs(self) -> list[Subgraph]:
         # We start graph traversal from leaf nodes
         current_cpu_nodes, current_acc_nodes = self.starter_nodes()
         visited_nodes: NodeSet = set()
@@ -759,7 +786,7 @@ class _SplitterBase:
         current_subgraph_nodes: NodeList = []
 
         # Result accumulator
-        subgraphs: List[Subgraph] = []
+        subgraphs: list[Subgraph] = []
         while current_cpu_nodes or current_acc_nodes:
             # Find the first node that should belong to the current subgraph and has all dependencies resolved
             current_nodes = current_acc_nodes if acc_subgraph else current_cpu_nodes
@@ -813,12 +840,12 @@ class _SplitterBase:
 
         return subgraphs
 
-    def remove_small_acc_subgraphs(self, subgraphs: List[Subgraph]) -> List[Subgraph]:
+    def remove_small_acc_subgraphs(self, subgraphs: list[Subgraph]) -> list[Subgraph]:
         """
         This pass finds ACC submodules with less than specified size and merges
         them with adjacent CPU submodules.
         """
-        result: List[Subgraph] = []
+        result: list[Subgraph] = []
         for subgraph in subgraphs:
             if subgraph.is_acc:
                 if len(subgraph.nodes) >= self.settings.min_acc_module_size:
@@ -840,10 +867,14 @@ class _SplitterBase:
                     result.append(subgraph)
         return result
 
-    def tag(self, subgraphs: List[Subgraph]):
+    def tag(self, subgraphs: list[Subgraph]):
         self.tags = []
         for subgraph in subgraphs:
-            tag = f"_run_on_acc_{len(self.tags)}" if subgraph.is_acc else f"{self.non_acc_submodule_name}{len(self.tags)}"
+            tag = (
+                f"_run_on_acc_{len(self.tags)}"
+                if subgraph.is_acc
+                else f"{self.non_acc_submodule_name}{len(self.tags)}"
+            )
             self.tags.append(tag)
             for node in subgraph.nodes:
                 if hasattr(node, "tag"):
@@ -853,26 +884,42 @@ class _SplitterBase:
                 self._node_submodule_map[node.name] = tag
 
     def split(self, remove_tag: bool = False) -> torch.fx.GraphModule:
-        split_module = split_by_tags(self.module, self.tags, return_tuple=self._return_tuple)
+        split_module = split_by_tags(
+            self.module, self.tags, return_tuple=self._return_tuple
+        )
         if remove_tag:
             for node in self.module.graph.nodes:
                 if hasattr(node, "tag"):
                     del node.tag
-        return split_module
+        return split_module  # type: ignore[return-value]
 
     def __call__(self) -> torch.fx.GraphModule:
         subgraphs = self.put_nodes_into_subgraphs()
         subgraphs = self.remove_small_acc_subgraphs(subgraphs)
         acc_subgraphs_count = len([s for s in subgraphs if s.is_acc])
         non_acc_subgraphs_count = len(subgraphs) - acc_subgraphs_count
-        print(f"Got {acc_subgraphs_count} acc subgraphs and {non_acc_subgraphs_count} non-acc subgraphs")
+        print(
+            f"Got {acc_subgraphs_count} acc subgraphs and {non_acc_subgraphs_count} non-acc subgraphs"
+        )
         self.tag(subgraphs)
         return self.split()
 
     def generate_split_results(self) -> SplitResult:
         split_module = self()
         submodule_names = []
-        for name, mod in split_module.named_children():
+        for name, _mod in split_module.named_children():
             submodule_names.append(name)
-        submodule_inputs = generate_inputs_for_submodules(split_module, self.sample_input, submodule_names)
+        if (
+            self.settings.max_acc_splits > 0
+            and len(submodule_names) > self.settings.max_acc_splits
+        ):
+            raise ValueError(
+                "Cannot fulfill max_acc_splits limit. "
+                "This may cause split fragmentation and "
+                "result in performance issues."
+            )
+
+        submodule_inputs = generate_inputs_for_submodules(
+            split_module, self.sample_input, submodule_names
+        )
         return SplitResult(split_module, submodule_inputs, self.non_acc_submodule_name)

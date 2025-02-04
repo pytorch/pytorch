@@ -5,6 +5,7 @@ import torch._dynamo.test_case
 import torch._dynamo.testing
 from torch._dynamo.utils import disable_cache_limit
 
+
 # NB: do NOT include this test class in test_dynamic_shapes.py
 
 
@@ -19,7 +20,7 @@ class ConfigTests(torch._dynamo.test_case.TestCase):
         with torch._dynamo.config.patch(
             automatic_dynamic_shapes=False, assume_static_by_default=True
         ):
-            opt_fn = torch._dynamo.optimize(cnt_static)(fn)
+            opt_fn = torch.compile(fn, backend=cnt_static)
             for i in range(2, 12):
                 opt_fn(torch.randn(i), torch.randn(i))
         self.assertEqual(cnt_static.frame_count, 10)
@@ -34,7 +35,7 @@ class ConfigTests(torch._dynamo.test_case.TestCase):
         with torch._dynamo.config.patch(
             automatic_dynamic_shapes=True, assume_static_by_default=True
         ):
-            opt_fn = torch._dynamo.optimize(cnt_dynamic)(fn)
+            opt_fn = torch.compile(fn, backend=cnt_dynamic)
             # NB: must not do 0, 1 as they specialized
             for i in range(2, 12):
                 opt_fn(torch.randn(i), torch.randn(i))
@@ -51,7 +52,7 @@ class ConfigTests(torch._dynamo.test_case.TestCase):
         with torch._dynamo.config.patch(
             automatic_dynamic_shapes=True, assume_static_by_default=False
         ):
-            opt_fn = torch._dynamo.optimize(cnt_dynamic)(fn)
+            opt_fn = torch.compile(fn, backend=cnt_dynamic)
             # NB: must not do 0, 1 as they specialized
             for i in range(2, 12):
                 opt_fn(torch.randn(i), torch.randn(i))
@@ -65,8 +66,8 @@ class ConfigTests(torch._dynamo.test_case.TestCase):
             "verbose",
             "verify_correctness",  # will not affect model, will raise RuntimeError
             # (no silent change to compilation behaviour)
-            "cache_size_limit",
-            "accumulated_cache_size_limit",
+            "recompile_limit",
+            "accumulated_recompile_limit",
             "replay_record_enabled",
             "cprofile",  # only wraps _compile, not graph
             "repro_after",
@@ -95,9 +96,9 @@ class ConfigTests(torch._dynamo.test_case.TestCase):
         new_hash = config.get_hash()
         assert new_hash == starting_hash
 
-        with config.patch({"dead_code_elimination": not config.dead_code_elimination}):
+        with config.patch({"suppress_errors": not config.suppress_errors}):
             changed_hash = config.get_hash()
-            assert "dead_code_elimination" not in config._compile_ignored_keys
+            assert "suppress_errors" not in config._compile_ignored_keys
             assert changed_hash != starting_hash
 
             # Test nested patch

@@ -4,50 +4,49 @@ import copy
 import functools
 import itertools
 import math
+import os
 import platform
 import sys
 import unittest
 from typing import Callable
 from unittest.mock import patch
 
-import numpy as np
-import sympy
 import torch
 from torch import nn
 from torch._C import FileCheck
 from torch._dynamo.testing import rand_strided
 from torch._dynamo.utils import same
-from torch._inductor import codecache, config, metrics
-from torch._inductor.codegen.common import OptimizationContext
-from torch._inductor.codegen.cpp import (
-    CppOverrides,
-    CppVecKernelChecker,
-    CppVecOverrides,
-)
+from torch._inductor import config, cpu_vec_isa, metrics, test_operators
+from torch._inductor.codegen.cpp import CppOverrides, CppVecOverrides
 from torch._inductor.compile_fx import (
     compile_fx,
     compile_fx_inner,
     complex_memory_overlap,
 )
 from torch._inductor.graph import GraphLowering
-from torch._inductor.ir import InterpreterShim
 from torch._inductor.utils import timed
-from torch._inductor.virtualized import V
+from torch._prims_common import is_float_dtype
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.nn import functional as F
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
+    IS_FBCODE,
     IS_MACOS,
     parametrize,
+    skipIfRocm,
     slowTest,
+    TEST_MKL,
+    TEST_WITH_ROCM,
+    xfailIfS390X,
 )
 from torch.utils._python_dispatch import TorchDispatchMode
+
 
 try:
     try:
         from . import test_torchinductor
     except ImportError:
-        import test_torchinductor
+        import test_torchinductor  # @manual=fbcode//caffe2/test/inductor:test_inductor-library
 except unittest.SkipTest:
     if __name__ == "__main__":
         sys.exit(0)
@@ -65,13 +64,31 @@ aten = torch.ops.aten
 check_model = test_torchinductor.check_model
 
 requires_vectorization = unittest.skipUnless(
-    codecache.valid_vec_isa_list(), "Does not support vectorization"
+    cpu_vec_isa.valid_vec_isa_list() and os.getenv("ATEN_CPU_CAPABILITY") != "default",
+    "Does not support vectorization",
 )
 
 
+def _can_check_vec_metrics():
+    return (
+        cpu_vec_isa.valid_vec_isa_list()
+        and os.getenv("ATEN_CPU_CAPABILITY") != "default"
+        and config.cpp.simdlen != 1
+    )
+
+
 def check_metrics_vec_kernel_count(num_expected_vec_kernels):
-    if codecache.valid_vec_isa_list():
+    if _can_check_vec_metrics():
         assert metrics.generated_cpp_vec_kernel_count == num_expected_vec_kernels
+
+
+def simd_lengths_to_test():
+    """Returns a minimal list of simd lengths to cover common cases"""
+    simdlens = [None, 1]
+    valid_isa_list = cpu_vec_isa.valid_vec_isa_list()
+    if valid_isa_list:
+        simdlens.append(valid_isa_list[0].bit_width())
+    return simdlens
 
 
 @contextlib.contextmanager
@@ -111,6 +128,7 @@ class LstmModule(torch.nn.Module):
 class CPUReproTests(TestCase):
     common = check_model
 
+    @skipIfRocm
     def test_conv_stride_constraints(self):
         for fmt in [torch.contiguous_format, torch.channels_last]:
             # TorchDispatch doesn't work in our cuda invocation for some reason
@@ -149,14 +167,14 @@ class CPUReproTests(TestCase):
                     return func(*args, **kwargs)
 
             with RecordFunctions():
-                out = fn_compiled(inps)
+                fn_compiled(inps)
 
             self.assertTrue(conv_seen)
 
     @patch("torch.cuda.is_available", lambda: False)
     def test_conv2d_bn_mixed_dtype(self):
         class Model(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.conv = torch.nn.Conv2d(
                     3,
@@ -210,11 +228,29 @@ class CPUReproTests(TestCase):
                 (v,),
             )
 
+    @config.patch(freezing=True)
+    @unittest.skipIf(not TEST_MKL, "Test requires MKL")
+    @patch("torch.cuda.is_available", lambda: False)
+    def test_mkl_linear(self):
+        dtypes = [torch.float32]
+        options = itertools.product([[2, 3, 10]], [2], [True, False], dtypes)
+        for input_shape, out_dim, bias, dtype in options:
+            mod = torch.nn.Sequential(
+                torch.nn.Linear(input_shape[-1], out_dim, bias=bias)
+            ).eval()
+
+            v = torch.randn(input_shape)
+            with torch.no_grad():
+                self.common(
+                    mod.to(dtype),
+                    (v.to(dtype),),
+                )
+
     @unittest.skipIf(not torch.backends.mkldnn.is_available(), "MKLDNN is not enabled")
     @patch("torch.cuda.is_available", lambda: False)
     def test_unsupported_conv_transpose(self):
         class Model(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.conv_transpose = torch.nn.ConvTranspose2d(
                     3, 6, 3, stride=1, padding=1, output_padding=1
@@ -346,9 +382,9 @@ class CPUReproTests(TestCase):
     @config.patch(freezing=True)
     def test_module_buffer_mutation(self):
         class Model(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
-                self.register_buffer("foo", torch.rand((3, 10)))
+                self.foo = torch.nn.Buffer(torch.rand((3, 10)))
 
             def forward(self, x):
                 lx = [x, x.clone(), x.clone()]
@@ -399,6 +435,17 @@ class CPUReproTests(TestCase):
                     (v,),
                 )
 
+    @torch._dynamo.config.patch(
+        {"dynamic_shapes": True, "assume_static_by_default": False}
+    )
+    def test_full_boolean_dynamic_shape(self):
+        def fn(n):
+            x = torch.full((1024,), n >= 1024)
+            return x, x + 1
+
+        self.common(fn, (1024,))
+        self.common(fn, (1023,))
+
     @config.patch(freezing=True)
     @unittest.skipIf(not torch._C._has_mkldnn, "MKLDNN is not enabled")
     @torch._dynamo.config.patch(dynamic_shapes=True)
@@ -438,10 +485,126 @@ class CPUReproTests(TestCase):
     @torch._dynamo.config.patch(assume_static_by_default=False)
     @torch._dynamo.config.patch(allow_rnn=True)
     @config.patch(freezing=True)
-    def _test_lstm_packed(self, params_dict, change_input_sizes=False):
+    def _test_lstm_packed(
+        self,
+        unbatched,
+        input_size,
+        hidden_size,
+        num_layers,
+        bidirectional,
+        bias,
+        empty_state,
+        batch_first,
+        batch_size,
+        seq_len,
+        change_input_sizes=False,
+    ):
         from torch._dynamo.utils import counters
 
-        for (
+        dtypes = [torch.float]
+        if torch.ops.mkldnn._is_mkldnn_bf16_supported():
+            dtypes.append(torch.bfloat16)
+        if torch.ops.mkldnn._is_mkldnn_fp16_supported():
+            dtypes.append(torch.float16)
+        for dtype in dtypes:
+            counters.clear()
+            num_directions = 2 if bidirectional else 1
+
+            seq_len_var = seq_len + 3
+            if unbatched:
+                v = torch.randn(seq_len, input_size)
+                v_var = torch.randn(seq_len_var, input_size)
+                h = torch.randn(num_layers * num_directions, hidden_size)
+                c = torch.randn(num_layers * num_directions, hidden_size)
+            else:
+                if batch_first:
+                    v = torch.randn(batch_size, seq_len, input_size)
+                    v_var = torch.randn(batch_size, seq_len_var, input_size)
+                else:
+                    v = torch.randn(seq_len, batch_size, input_size)
+                    v_var = torch.randn(seq_len_var, batch_size, input_size)
+                h = torch.randn(num_layers * num_directions, batch_size, hidden_size)
+                c = torch.randn(num_layers * num_directions, batch_size, hidden_size)
+
+            mod = LstmModule(
+                input_size,
+                hidden_size,
+                num_layers,
+                bias,
+                bidirectional,
+                batch_first,
+            ).eval()
+            maybe_autocast = (
+                torch.cpu.amp.autocast()
+                if dtype == torch.bfloat16
+                else contextlib.nullcontext()
+            )
+
+            with torch.no_grad(), maybe_autocast:
+                inps = [v]
+                if not empty_state:
+                    inps.append((h, c))
+
+                fn_opt = torch.compile(mod, backend="inductor")
+                _, code = run_and_get_cpp_code(fn_opt, *inps)
+
+                # Check that _flat_weights are not functional_tensor, otherwise
+                # deepcopy will fail during recompilation.
+                fn_opt_copy = copy.deepcopy(fn_opt)
+                _flat_weights = fn_opt_copy.lstm._flat_weights
+                for _flat_weight in _flat_weights:
+                    self.assertFalse(torch._is_functional_tensor(_flat_weight))
+
+                self.assertTrue("aten.mkldnn_rnn_layer" in code)
+                self.assertEqual(fn_opt(*inps), mod(*inps))
+                self.assertEqual(
+                    counters["inductor"]["pattern_matcher_count"],
+                    num_layers * num_directions
+                    + 2,  # num of mkldnn_rnn_layer call + 2 view call on the concatenated hy, cy.
+                )
+
+                # Change input sizes
+                if change_input_sizes:
+                    inps_var = [v_var]
+                    self.assertEqual(fn_opt(*inps_var), mod(*inps_var))
+
+    @parametrize(
+        "unbatched, input_size, hidden_size, num_layers, bidirectional, bias, empty_state, batch_first, batch_size, seq_len",
+        itertools.product(
+            *[
+                [True, False],
+                [1, 7],
+                [7],
+                [1, 7],
+                [False, True],
+                [False, True],
+                [False, True],
+                [True, False],
+                [1, 7],
+                [1, 7],
+            ]
+        ),
+    )
+    def test_lstm_packed(
+        self,
+        unbatched,
+        input_size,
+        hidden_size,
+        num_layers,
+        bidirectional,
+        bias,
+        empty_state,
+        batch_first,
+        batch_size,
+        seq_len,
+    ):
+        if (
+            TEST_WITH_ROCM
+            and not unbatched
+            and "gfx94" in torch.cuda.get_device_properties(0).gcnArchName.split(":")[0]
+        ):
+            self.skipTest("Flaky on MI300 with unbatched=False")
+        self._test_lstm_packed(
             unbatched,
             input_size,
             hidden_size,
@@ -452,108 +615,111 @@ class CPUReproTests(TestCase):
             batch_first,
             batch_size,
             seq_len,
-        ) in itertools.product(*list(params_dict.values())):
-            dtypes = [torch.float]
-            if torch.ops.mkldnn._is_mkldnn_bf16_supported():
-                dtypes.append(torch.bfloat16)
-            if torch.ops.mkldnn._is_mkldnn_fp16_supported():
-                dtypes.append(torch.float16)
-            for dtype in dtypes:
-                counters.clear()
-                num_directions = 2 if bidirectional else 1
+        )
 
-                seq_len_var = seq_len + 3
-                if unbatched:
-                    v = torch.randn(seq_len, input_size)
-                    v_var = torch.randn(seq_len_var, input_size)
-                    h = torch.randn(num_layers * num_directions, hidden_size)
-                    c = torch.randn(num_layers * num_directions, hidden_size)
-                else:
-                    if batch_first:
-                        v = torch.randn(batch_size, seq_len, input_size)
-                        v_var = torch.randn(batch_size, seq_len_var, input_size)
-                    else:
-                        v = torch.randn(seq_len, batch_size, input_size)
-                        v_var = torch.randn(seq_len_var, batch_size, input_size)
-                    h = torch.randn(
-                        num_layers * num_directions, batch_size, hidden_size
-                    )
-                    c = torch.randn(
-                        num_layers * num_directions, batch_size, hidden_size
-                    )
+    @parametrize(
+        "unbatched, input_size, hidden_size, num_layers, bidirectional, bias, empty_state, batch_first, batch_size, seq_len",
+        itertools.product(
+            *[
+                [False],
+                [2],
+                [5],
+                [3],
+                [True],
+                [True],
+                [False],
+                [False],
+                [2],
+                [3],
+            ]
+        ),
+    )
+    def test_lstm_packed_change_input_sizes_cpu(
+        self,
+        unbatched,
+        input_size,
+        hidden_size,
+        num_layers,
+        bidirectional,
+        bias,
+        empty_state,
+        batch_first,
+        batch_size,
+        seq_len,
+    ):
+        self._test_lstm_packed(
+            unbatched,
+            input_size,
+            hidden_size,
+            num_layers,
+            bidirectional,
+            bias,
+            empty_state,
+            batch_first,
+            batch_size,
+            seq_len,
+            change_input_sizes=True,
+        )
 
-                mod = LstmModule(
-                    input_size,
-                    hidden_size,
-                    num_layers,
-                    bias,
-                    bidirectional,
-                    batch_first,
-                ).eval()
-                maybe_autocast = (
-                    torch.cpu.amp.autocast()
-                    if dtype == torch.bfloat16
-                    else contextlib.nullcontext()
+    def test_set_source_Tensor(self):
+        class MaskedConv2d(torch.nn.Conv2d):
+            def __init__(
+                self,
+                *,
+                in_channels: int,
+                out_channels: int,
+                kernel_size: int,
+                padding: int = 0,
+            ) -> None:
+                super().__init__(
+                    in_channels, out_channels, kernel_size, padding=padding
                 )
+                mask = torch.zeros_like(self.weight)
 
-                with torch.no_grad(), maybe_autocast:
-                    inps = [v]
-                    if not empty_state:
-                        inps.append((h, c))
+                mask[:, :, : kernel_size // 2, :] = 1
+                mask[:, :, kernel_size // 2, : kernel_size // 2] = 1
+                self.register_buffer("mask", mask)
 
-                    fn_opt = torch._dynamo.optimize("inductor")(mod)
-                    _, code = run_and_get_cpp_code(fn_opt, *inps)
+            def forward(self, x: torch.Tensor) -> torch.Tensor:
+                with torch.no_grad():
+                    self.weight.data *= self.mask
+                return super().forward(x)
 
-                    # Check that _flat_weights are not functional_tensor, otherwise
-                    # deepcopy will fail during recompilation.
-                    fn_opt_copy = copy.deepcopy(fn_opt)
-                    _flat_weights = fn_opt_copy.lstm._flat_weights
-                    for _flat_weight in _flat_weights:
-                        self.assertFalse(torch._is_functional_tensor(_flat_weight))
+        class M(torch.nn.Module):
+            def __init__(
+                self, num_channels: int, num_colors: int, H: int, W: int
+            ) -> None:
+                super().__init__()
+                self.num_channels = num_channels
+                self.num_colors = num_colors
+                self.H = H
+                self.W = W
+                kernel_size = 7
+                padding = (kernel_size - 1) // 2
+                # 1 7x7 Mask
+                layers = [
+                    MaskedConv2d(
+                        in_channels=self.num_channels,
+                        out_channels=64,
+                        kernel_size=kernel_size,
+                        padding=padding,
+                    ),
+                ]
+                self.model = nn.Sequential(*layers)
 
-                    self.assertTrue("aten.mkldnn_rnn_layer" in code)
-                    self.assertEqual(fn_opt(*inps), mod(*inps))
-                    self.assertEqual(
-                        counters["inductor"]["pattern_matcher_count"],
-                        num_layers * num_directions
-                        + 2,  # num of mkldnn_rnn_layer call + 2 view call on the concatenated hy, cy.
-                    )
+            def forward(self, x: torch.Tensor) -> torch.Tensor:
+                x = x.permute(0, 3, 1, 2)
+                return self.model(x)
 
-                    # Change input sizes
-                    if change_input_sizes:
-                        inps_var = [v_var]
-                        self.assertEqual(fn_opt(*inps_var), mod(*inps_var))
-
-    @slowTest
-    def test_lstm_packed(self):
-        params_dict = {
-            "unbatched": [True, False],
-            "input_size": [1, 2],
-            "hidden_size": [2],
-            "num_layers": [1, 2],
-            "bidirectional": [False, True],
-            "bias": [False, True],
-            "empty_state": [False, True],
-            "batch_first": [True, False],
-            "batch_size": [1, 2],
-            "seq_len": [1, 2],
-        }
-        self._test_lstm_packed(params_dict)
-
-    def test_lstm_packed_change_input_sizes_cpu(self):
-        params_dict = {
-            "unbatched": [False],
-            "input_size": [2],
-            "hidden_size": [5],
-            "num_layers": [3],
-            "bidirectional": [True],
-            "bias": [True],
-            "empty_state": [False],
-            "batch_first": [False],
-            "batch_size": [2],
-            "seq_len": [3],
-        }
-        self._test_lstm_packed(params_dict, change_input_sizes=True)
+        model = M(H=32, W=32, num_channels=4, num_colors=2)
+        fn_opt = torch.compile(model, backend="inductor")
+        v = (torch.rand(10, 32, 32, 4) > 0.5).to(torch.float32)
+        inps = [
+            v.clone(),
+        ]
+        result, code = run_and_get_cpp_code(fn_opt, *inps)
+        self.assertTrue("aten.set_.source_Tensor" in code)
+        self.assertEqual(model(*inps), result)
 
     @torch._dynamo.config.patch(dynamic_shapes=True)
     @torch._dynamo.config.patch(assume_static_by_default=False)
@@ -595,7 +761,7 @@ class CPUReproTests(TestCase):
 
         with torch.no_grad():
             inps = [embeds, (hidden_0, hidden_1)]
-            fn_opt = torch._dynamo.optimize("inductor")(mod)
+            fn_opt = torch.compile(mod, backend="inductor")
             _, code = run_and_get_cpp_code(fn_opt, *inps)
             # This case is unsupported
             self.assertFalse("torch.ops.mkldnn._lstm" in code)
@@ -700,6 +866,52 @@ class CPUReproTests(TestCase):
                     (_x,),
                 )
 
+    @requires_vectorization
+    def test_asinh_with_corner_inputs(self):
+        # https://github.com/pytorch/pytorch/issues/142345
+
+        def fn(input):
+            out = torch.asinh(input)
+            return out
+
+        x = torch.tensor([0, 0, 0, -10000.1]).repeat(3, 4)
+
+        bit_widths = [isa._bit_width for isa in cpu_vec_isa.valid_vec_isa_list()]
+        for dtype in [torch.float32, torch.bfloat16, torch.float16, torch.double]:
+            for simdlen in bit_widths:
+                with torch.no_grad(), config.patch({"cpp.simdlen": simdlen}):
+                    torch._dynamo.reset()
+                    metrics.reset()
+                    _x = x.to(dtype)
+                    self.common(fn, (_x,))
+                    check_metrics_vec_kernel_count(1)
+
+    @config.patch(fallback_random=True)
+    def test_require_stride_order_non_owning(self):
+        def test_concat_with_conv():
+            x1 = torch.randn(2, 3, 4, 4).to(memory_format=torch.channels_last)
+            x2 = torch.randn(2, 5, 4, 4).to(memory_format=torch.channels_last)
+
+            # First do the concatenation
+            cat_result = torch.cat([x1, x2], dim=1)
+
+            # Then use x1 (which was an input to the cat) in a conv
+            conv_weight = torch.randn(4, 3, 3, 3).to(memory_format=torch.channels_last)
+            x1_conv = torch.nn.functional.conv2d(x1, conv_weight, padding=1)
+
+            return cat_result, x1_conv
+
+        torch.manual_seed(1)
+        f_c = torch.compile(test_concat_with_conv)
+        out_result, code = run_and_get_cpp_code(f_c)
+
+        torch.manual_seed(1)
+        self.assertEqual(out_result, test_concat_with_conv())
+
+        # both inputs to conv should be channels last
+        FileCheck().check("empty_strided_cpu((4, 3, 3, 3), (27, 1, 9, 3)").run(code)
+        FileCheck().check("(2, 3, 4, 4), (128, 1, 32, 8)").run(code)
+
     @config.patch(implicit_fallbacks=True)
     def test_repeat_interleave(self):
         def fn(y):
@@ -779,6 +991,72 @@ class CPUReproTests(TestCase):
             (torch.randn(8),),
         )
 
+    def test_index_put(self):
+        # https://github.com/pytorch/pytorch/issues/138908
+        def fn(x, y):
+            x = x + 10
+            y[x] += y[x]
+
+        x = torch.randint(-10, -9, (1, 2), dtype=torch.int64)
+        y = torch.randn((2, 32), dtype=torch.float32)
+        x_clone = x.clone()
+        y_clone = y.clone()
+        with torch.no_grad():
+            fn(x, y)
+            torch.compile(fn)(x_clone, y_clone)
+            self.assertEqual(y, y_clone, atol=1e-3, rtol=1e-3)
+
+    def test_index_put2(self):
+        # https://github.com/pytorch/pytorch/issues/138908
+        def fn(y, index0, index1):
+            y[index1] += y[index0]
+
+        y = torch.randn((2, 32), dtype=torch.float32)
+        index0 = torch.tensor([[0, 1]])
+        index1 = torch.tensor([[1, 0]])
+        y_clone = y.clone()
+        index0_clone = index0.clone()
+        index1_clone = index1.clone()
+        with torch.no_grad():
+            fn(y, index0, index1)
+            torch.compile(fn)(y_clone, index0_clone, index1_clone)
+            self.assertEqual(y, y_clone, atol=1e-3, rtol=1e-3)
+
+    def test_index_add(self):
+        # https://github.com/pytorch/pytorch/issues/138908
+        def fn(x, y, scale_y, index):
+            values = x[index] + y * scale_y
+            out = x.index_add_(dim=0, source=values, index=index)
+            return out
+
+        inp = (
+            torch.randn(10, 10),
+            torch.randn(5, 10),
+            torch.randn(10),
+            torch.randperm(10, device="cpu")[:5].to(torch.int32),
+        )
+        inp_clones = []
+        for i in range(3):
+            inp_clones.append(
+                [
+                    inp[0].clone(),
+                    inp[1].clone(),
+                    inp[2].clone(),
+                    inp[3].clone()
+                    if i == 0
+                    else torch.zeros(10, device="cpu")[:5].to(torch.int32),
+                ]
+            )
+        inp_clone, inp_clone2, inp_clone3 = inp_clones
+        with torch.no_grad():
+            cfn = torch.compile(fn)
+            ref = fn(*inp)
+            res = cfn(*inp_clone)
+            self.assertEqual(ref, res, atol=1e-3, rtol=1e-3)
+            ref = fn(*inp_clone2)
+            res = cfn(*inp_clone3)
+            self.assertEqual(ref, res, atol=1e-3, rtol=1e-3)
+
     def test_ModularIndexing_range_issue_103133(self):
         def fn(q, k):
             einsum = torch.einsum("bcxd,bcyd->bcxy", (q, k))
@@ -838,7 +1116,7 @@ class CPUReproTests(TestCase):
     def test_fp32_load_with_to_lowp_fp(self):
         # From llama model.
         class Model(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.cache_k = torch.zeros(8, 4, 2, 2)
 
@@ -982,13 +1260,27 @@ class CPUReproTests(TestCase):
     def test_decomposed_dequant_relu_quant_int8(self):
         self._test_decomposed_dequant_relu_quant_helper(torch.int8)
 
-    def _test_dequant_quant_lowering_helper(self, dtype):
+    def _test_dequant_quant_lowering_helper(self, dtype, dequant_out_dtype=None):
         def fn(
-            x, scale, zero_point, use_dequant, use_quant, quant_min, quant_max, dtype
+            x,
+            scale,
+            zero_point,
+            use_dequant,
+            use_quant,
+            quant_min,
+            quant_max,
+            dtype,
+            dequant_out_dtype,
         ):
             if use_dequant:
                 x = torch.ops.quantized_decomposed.dequantize_per_tensor(
-                    x, scale, zero_point, quant_min, quant_max, dtype
+                    x,
+                    scale,
+                    zero_point,
+                    quant_min,
+                    quant_max,
+                    dtype,
+                    out_dtype=dequant_out_dtype,
                 )
 
             x = torch.relu(x)
@@ -1007,8 +1299,14 @@ class CPUReproTests(TestCase):
         quant_min = 0 if dtype == torch.uint8 else -128
         quant_max = 255 if dtype == torch.uint8 else 127
 
-        for use_dequant, use_quant, use_tensor_overload in itertools.product(
-            use_dequant_list, use_quant_list, use_tensor_overload_list
+        for (
+            use_dequant,
+            use_quant,
+            use_tensor_overload,
+        ) in itertools.product(
+            use_dequant_list,
+            use_quant_list,
+            use_tensor_overload_list,
         ):
             x = torch.clamp(
                 torch.randn((1, 7, 7, 9), dtype=torch.float32) * 100,
@@ -1036,6 +1334,7 @@ class CPUReproTests(TestCase):
                         quant_min,
                         quant_max,
                         dtype,
+                        dequant_out_dtype,
                     ),
                 )
                 check_metrics_vec_kernel_count(1)
@@ -1043,10 +1342,16 @@ class CPUReproTests(TestCase):
     @requires_vectorization
     def test_dequant_quant_lowering_uint8(self):
         self._test_dequant_quant_lowering_helper(torch.uint8)
+        self._test_dequant_quant_lowering_helper(
+            torch.uint8, dequant_out_dtype=torch.bfloat16
+        )
 
     @requires_vectorization
     def test_dequant_quant_lowering_int8(self):
         self._test_dequant_quant_lowering_helper(torch.int8)
+        self._test_dequant_quant_lowering_helper(
+            torch.int8, dequant_out_dtype=torch.bfloat16
+        )
 
     def _test_dequant_maxpool2d_lowering_helper(self, dtype):
         def fn(x, scale, zero_point, quant_min, quant_max, dtype):
@@ -1231,13 +1536,24 @@ class CPUReproTests(TestCase):
     def test_per_tensor_fake_quant_int8(self):
         self._test_per_tensor_fake_quant_helper(torch.int8)
 
-    def _test_per_channel_fake_quant_helper(self, dtype, input_dtype=torch.float32):
-        def fn(input, scales, zero_points, axis, quant_min, quant_max, dtype):
+    def _test_per_channel_fake_quant_helper(
+        self, dtype, input_dtype=torch.float32, output_dtype=None
+    ):
+        def fn(
+            input, scales, zero_points, axis, quant_min, quant_max, dtype, output_dtype
+        ):
             input = torch.ops.quantized_decomposed.quantize_per_channel(
                 input, scales, zero_points, axis, quant_min, quant_max, dtype
             )
             input = torch.ops.quantized_decomposed.dequantize_per_channel(
-                input, scales, zero_points, axis, quant_min, quant_max, dtype
+                input,
+                scales,
+                zero_points,
+                axis,
+                quant_min,
+                quant_max,
+                dtype,
+                out_dtype=output_dtype,
             )
             return input
 
@@ -1257,7 +1573,19 @@ class CPUReproTests(TestCase):
         with config.patch({"cpp.simdlen": None}):
             torch._dynamo.reset()
             metrics.reset()
-            self.common(fn, (x, scales, zero_points, axis, quant_min, quant_max, dtype))
+            self.common(
+                fn,
+                (
+                    x,
+                    scales,
+                    zero_points,
+                    axis,
+                    quant_min,
+                    quant_max,
+                    dtype,
+                    output_dtype,
+                ),
+            )
             check_metrics_vec_kernel_count(1)
 
     @requires_vectorization
@@ -1267,7 +1595,7 @@ class CPUReproTests(TestCase):
     @requires_vectorization
     def test_per_channel_fake_quant_module_uint8(self):
         class Mod(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.scales = torch.ones((3,)).to(torch.float64)
                 self.zero_points = torch.zeros((3,)).to(torch.int64)
@@ -1318,10 +1646,16 @@ class CPUReproTests(TestCase):
         self._test_per_channel_fake_quant_helper(
             torch.uint8, input_dtype=torch.bfloat16
         )
+        self._test_per_channel_fake_quant_helper(
+            torch.uint8, input_dtype=torch.bfloat16, output_dtype=torch.bfloat16
+        )
 
     @requires_vectorization
     def test_per_channel_fake_quant_int8_bf16_input(self):
         self._test_per_channel_fake_quant_helper(torch.int8, input_dtype=torch.bfloat16)
+        self._test_per_channel_fake_quant_helper(
+            torch.int8, input_dtype=torch.bfloat16, output_dtype=torch.bfloat16
+        )
 
     def _test_non_contiguous_load_buf_quant_helper(self, dtype):
         def fn(
@@ -1519,7 +1853,7 @@ class CPUReproTests(TestCase):
     def test_int_div(self):
         def fn(x, y):
             s3 = x.size(1)
-            a = torch.zeros((1 + s3) // 2)
+            a = torch.ones((1 + s3) // 2)
             a += y
             return a, s3
 
@@ -1528,7 +1862,7 @@ class CPUReproTests(TestCase):
         self.common(fn, (p0, p1))
 
     def test_no_op_squeeze(self):
-        @torch._dynamo.optimize("inductor")
+        @torch.compile(backend="inductor")
         def forward(arg0_1):
             return torch.ops.aten.squeeze.dim(arg0_1, 1)
 
@@ -1536,7 +1870,7 @@ class CPUReproTests(TestCase):
         self.common(forward, (x,))
 
     def test_parallel_num_threads(self):
-        @torch._dynamo.optimize("inductor")
+        @torch.compile(backend="inductor")
         def fn(x1, x2):
             return x1 + x2
 
@@ -1579,14 +1913,87 @@ class CPUReproTests(TestCase):
             metrics.reset()
             self.common(fn, (value,))
 
+    @unittest.skipIf(IS_FBCODE, "Not yet runnable in fbcode")
     @unittest.skipIf(
-        platform.machine() != "x86_64" or not codecache.valid_vec_isa_list(),
+        not cpu_vec_isa.valid_vec_isa_list()
+        or "avx2" in [str(vec_isa) for vec_isa in cpu_vec_isa.valid_vec_isa_list()]
+        or "asimd" in [str(vec_isa) for vec_isa in cpu_vec_isa.valid_vec_isa_list()],
+        "Does not support vectorization or not s390x/ppc64le machine",
+    )
+    @patch("torch.cuda.is_available", lambda: False)
+    def test_auto_zvec_vsx_simd(self):
+        vec_zvec_vsx = cpu_vec_isa.valid_vec_isa_list()[0]
+        self.assertTrue(vec_zvec_vsx.bit_width() == 256)
+
+        with config.patch({"cpp.simdlen": 0}):
+            isa = cpu_vec_isa.pick_vec_isa()
+            self.assertFalse(isa)
+
+        with config.patch({"cpp.simdlen": 1}):
+            isa = cpu_vec_isa.pick_vec_isa()
+            self.assertFalse(isa)
+
+        with config.patch({"cpp.simdlen": 257}):
+            isa = cpu_vec_isa.pick_vec_isa()
+            self.assertFalse(isa)
+
+        with config.patch({"cpp.simdlen": 256}):
+            isa = cpu_vec_isa.pick_vec_isa()
+            self.assertTrue(isa == vec_zvec_vsx)
+
+        pre_var = os.getenv("ATEN_CPU_CAPABILITY")
+        if pre_var:
+            os.environ.pop("ATEN_CPU_CAPABILITY")
+
+        try:
+            with config.patch({"cpp.simdlen": None}):
+                isa = cpu_vec_isa.pick_vec_isa()
+                self.assertTrue(isa == vec_zvec_vsx)
+
+            with config.patch({"cpp.simdlen": None}):
+                os.environ["ATEN_CPU_CAPABILITY"] = "avx2"
+                isa = cpu_vec_isa.pick_vec_isa()
+                self.assertTrue(isa == vec_zvec_vsx)
+
+            with config.patch({"cpp.simdlen": None}):
+                os.environ["ATEN_CPU_CAPABILITY"] = "avx512"
+                isa = cpu_vec_isa.pick_vec_isa()
+                self.assertTrue(isa == vec_zvec_vsx)
+
+            with config.patch({"cpp.simdlen": None}):
+                os.environ["ATEN_CPU_CAPABILITY"] = "default"
+                isa = cpu_vec_isa.pick_vec_isa()
+                self.assertFalse(isa)
+
+            with config.patch({"cpp.simdlen": None}):
+                os.environ["ATEN_CPU_CAPABILITY"] = "zvector"
+                isa = cpu_vec_isa.pick_vec_isa()
+                self.assertTrue(isa == vec_zvec_vsx)
+
+            with config.patch({"cpp.simdlen": None}):
+                os.environ["ATEN_CPU_CAPABILITY"] = "vsx"
+                isa = cpu_vec_isa.pick_vec_isa()
+                self.assertTrue(isa == vec_zvec_vsx)
+
+        finally:
+            if pre_var:
+                os.environ["ATEN_CPU_CAPABILITY"] = pre_var
+            elif os.getenv("ATEN_CPU_CAPABILITY"):
+                os.environ.pop("ATEN_CPU_CAPABILITY")
+
+    @unittest.skipIf(IS_FBCODE, "Not yet runnable in fbcode")
+    @unittest.skipIf(
+        platform.machine() != "x86_64" or not cpu_vec_isa.valid_vec_isa_list(),
         "Does not support vectorization or not x86_64 machine",
     )
     @patch("torch.cuda.is_available", lambda: False)
     def test_auto_simd(self):
-        vec_avx512 = codecache.supported_vec_isa_list[0]
-        vec_avx2 = codecache.supported_vec_isa_list[1]
+        vec_amx = cpu_vec_isa.supported_vec_isa_list[0]
+        vec_avx512 = cpu_vec_isa.supported_vec_isa_list[1]
+        vec_avx2 = cpu_vec_isa.supported_vec_isa_list[2]
+        self.assertTrue(vec_amx.bit_width() == 512)
+        self.assertTrue(vec_amx.nelements() == 16)
+        self.assertTrue(vec_amx.nelements(torch.bfloat16) == 32)
         self.assertTrue(vec_avx512.bit_width() == 512)
         self.assertTrue(vec_avx2.bit_width() == 256)
         self.assertTrue(vec_avx512.nelements() == 16)
@@ -1594,41 +2001,101 @@ class CPUReproTests(TestCase):
         self.assertTrue(vec_avx512.nelements(torch.bfloat16) == 32)
         self.assertTrue(vec_avx2.nelements(torch.bfloat16) == 16)
 
-        with config.patch({"cpp.simdlen": None}):
-            isa = codecache.pick_vec_isa()
-            if vec_avx512 in codecache.valid_vec_isa_list():
-                self.assertTrue(isa == vec_avx512)
-            else:
-                self.assertTrue(isa == vec_avx2)
-
         with config.patch({"cpp.simdlen": 0}):
-            isa = codecache.pick_vec_isa()
+            isa = cpu_vec_isa.pick_vec_isa()
             self.assertFalse(isa)
 
         with config.patch({"cpp.simdlen": 1}):
-            isa = codecache.pick_vec_isa()
+            isa = cpu_vec_isa.pick_vec_isa()
             self.assertFalse(isa)
 
         with config.patch({"cpp.simdlen": 257}):
-            isa = codecache.pick_vec_isa()
+            isa = cpu_vec_isa.pick_vec_isa()
             self.assertFalse(isa)
 
         with config.patch({"cpp.simdlen": 513}):
-            isa_list = codecache.valid_vec_isa_list()
+            isa_list = cpu_vec_isa.valid_vec_isa_list()
             if vec_avx512 in isa_list:
                 self.assertFalse(isa)
 
         with config.patch({"cpp.simdlen": 512}):
-            isa_list = codecache.valid_vec_isa_list()
-            if vec_avx512 in isa_list:
-                isa = codecache.pick_vec_isa()
+            isa_list = cpu_vec_isa.valid_vec_isa_list()
+            isa = cpu_vec_isa.pick_vec_isa()
+            if vec_amx in isa_list:
+                self.assertTrue(isa == vec_amx)
+            elif vec_avx512 in isa_list:
                 self.assertTrue(isa == vec_avx512)
 
         with config.patch({"cpp.simdlen": 256}):
-            isa_list = codecache.valid_vec_isa_list()
+            isa_list = cpu_vec_isa.valid_vec_isa_list()
             if vec_avx2 in isa_list:
-                isa = codecache.pick_vec_isa()
+                isa = cpu_vec_isa.pick_vec_isa()
                 self.assertTrue(isa == vec_avx2)
+
+        pre_var = os.getenv("ATEN_CPU_CAPABILITY")
+        if pre_var:
+            os.environ.pop("ATEN_CPU_CAPABILITY")
+
+        try:
+            with config.patch({"cpp.simdlen": None}):
+                isa = cpu_vec_isa.pick_vec_isa()
+                if vec_amx in cpu_vec_isa.valid_vec_isa_list():
+                    self.assertTrue(isa == vec_amx)
+                elif vec_avx512 in cpu_vec_isa.valid_vec_isa_list():
+                    self.assertTrue(isa == vec_avx512)
+                else:
+                    self.assertTrue(isa == vec_avx2)
+
+            with config.patch({"cpp.simdlen": None}):
+                os.environ["ATEN_CPU_CAPABILITY"] = "avx2"
+                isa = cpu_vec_isa.pick_vec_isa()
+                if vec_amx in cpu_vec_isa.valid_vec_isa_list():
+                    self.assertTrue(isa == vec_avx2)
+                elif vec_avx512 in cpu_vec_isa.valid_vec_isa_list():
+                    self.assertTrue(isa == vec_avx2)
+                elif vec_avx2 in cpu_vec_isa.valid_vec_isa_list():
+                    self.assertTrue(isa == vec_avx2)
+
+            with config.patch({"cpp.simdlen": None}):
+                os.environ["ATEN_CPU_CAPABILITY"] = "avx512"
+                isa = cpu_vec_isa.pick_vec_isa()
+                if vec_amx in cpu_vec_isa.valid_vec_isa_list():
+                    self.assertTrue(isa == vec_amx)
+                elif vec_avx512 in cpu_vec_isa.valid_vec_isa_list():
+                    self.assertTrue(isa == vec_avx512)
+                else:
+                    self.assertTrue(isa == vec_avx2)
+
+            with config.patch({"cpp.simdlen": None}):
+                os.environ["ATEN_CPU_CAPABILITY"] = "default"
+                isa = cpu_vec_isa.pick_vec_isa()
+                self.assertFalse(isa)
+
+            with config.patch({"cpp.simdlen": None}):
+                os.environ["ATEN_CPU_CAPABILITY"] = "zvector"
+                isa = cpu_vec_isa.pick_vec_isa()
+                if vec_amx in cpu_vec_isa.valid_vec_isa_list():
+                    self.assertTrue(isa == vec_amx)
+                elif vec_avx512 in cpu_vec_isa.valid_vec_isa_list():
+                    self.assertTrue(isa == vec_avx512)
+                else:
+                    self.assertTrue(isa == vec_avx2)
+
+            with config.patch({"cpp.simdlen": None}):
+                os.environ["ATEN_CPU_CAPABILITY"] = "vsx"
+                isa = cpu_vec_isa.pick_vec_isa()
+                if vec_amx in cpu_vec_isa.valid_vec_isa_list():
+                    self.assertTrue(isa == vec_amx)
+                elif vec_avx512 in cpu_vec_isa.valid_vec_isa_list():
+                    self.assertTrue(isa == vec_avx512)
+                else:
+                    self.assertTrue(isa == vec_avx2)
+
+        finally:
+            if pre_var:
+                os.environ["ATEN_CPU_CAPABILITY"] = pre_var
+            elif os.getenv("ATEN_CPU_CAPABILITY"):
+                os.environ.pop("ATEN_CPU_CAPABILITY")
 
     @requires_vectorization
     @patch("torch.cuda.is_available", lambda: False)
@@ -1663,7 +2130,7 @@ class CPUReproTests(TestCase):
         self.assertEqual(expected, actual)
 
     def test_load_same_bool_tensor_twice(self):
-        @torch._dynamo.optimize("inductor")
+        @torch.compile(backend="inductor")
         def fn(a, b):
             x = torch.masked_fill(a, b, -33.0)
             y = torch.masked_fill(a, b, -33.0)
@@ -1883,6 +2350,54 @@ class CPUReproTests(TestCase):
         self.assertEqual(res_aten_eager, res)
         check_metrics_vec_kernel_count(1)
 
+    @requires_vectorization
+    def test_frexp(self):
+        def fn(x):
+            x_frac, x_exp = torch.frexp(x)  # x_frac: int32, x_exp: float32
+            x = x_frac * x_exp
+            return x
+
+        x = torch.randn(64, 1)
+        torch._dynamo.reset()
+        metrics.reset()
+        self.common(fn, (x,))
+        check_metrics_vec_kernel_count(1)
+
+    def test_bitwise_right_shift(self):
+        x = torch.randint(-1, 0, (1, 1, 1), device="cpu", dtype=torch.int64)
+        bit_num = 31
+        res_aten_eager = torch.bitwise_right_shift(x, bit_num)
+        cfn = torch.compile(torch.bitwise_right_shift)
+        res = cfn(x, bit_num)
+        self.assertEqual(res_aten_eager, res)
+
+    def test_bitwise_shift_corner_inputs(self):
+        # Fix https://github.com/pytorch/pytorch/issues/143555
+        # and https://github.com/pytorch/pytorch/issues/143566
+        bitwise_fns = (
+            torch.bitwise_left_shift,
+            torch.bitwise_right_shift,
+        )
+        for bitwise_fn in bitwise_fns:
+            torch._dynamo.reset()
+            metrics.reset()
+            x = torch.tensor(1000, dtype=torch.int64)
+            bit_num = torch.tensor(64, dtype=torch.int64)
+            res_aten_eager = bitwise_fn(x, bit_num)
+            cfn = torch.compile(bitwise_fn)
+            res = cfn(x, bit_num)
+            self.assertEqual(res_aten_eager, res)
+
+    def test_view_dtype(self):
+        def f(x):
+            return x.view(torch.int32) >> 2
+
+        input = torch.ones(16, 16)
+        res_aten_eager = f(input)
+        cfn = torch.compile(f)
+        res = cfn(input)
+        self.assertEqual(res_aten_eager, res)
+
     @patch("torch.cuda.is_available", lambda: False)
     def test_scatter_using_atomic_add(self):
         def fn(a, dim, index, b):
@@ -1909,6 +2424,8 @@ class CPUReproTests(TestCase):
                 FileCheck().check(_target_code_check).run(code)
             if _target_code_check_not:
                 FileCheck().check_not(_target_code_check_not).run(code)
+                # Verify that the output isn't empty
+                FileCheck().check("Output code:").run(code)
 
             self.assertEqual(
                 _fn(*_inps),
@@ -1922,14 +2439,47 @@ class CPUReproTests(TestCase):
             _internal_check(fn, inps, "aten.scatter_reduce_")
 
         if "ATen parallel backend: OpenMP" in torch.__config__.parallel_info():
-            # Fix https://github.com/pytorch/pytorch/issues/118518
-            # which fails to change thread number with native thread pool
             with set_num_threads(1):
-                _internal_check(fn, inps, _target_code_check_not="aten.scatter_reduce_")
+                # When running with a single thread, we expect the aten.scatter will go
+                # into the cpp backend codegen instead of a fallback to aten.scatter_reduce_.
+                # Avoid the inductor cache so we don't serve an entry compiled above.
+                with config.patch(
+                    {"fx_graph_cache": False, "fx_graph_remote_cache": False}
+                ):
+                    _internal_check(
+                        fn, inps, _target_code_check_not="aten.scatter_reduce_"
+                    )
 
             with config.patch({"cpp.dynamic_threads": True}), set_num_threads(1):
                 _internal_check(fn, inps, "aten.scatter_reduce_")
 
+    @patch("torch.cuda.is_available", lambda: False)
+    @requires_vectorization
+    @torch._inductor.config.patch({"cpp.fallback_scatter_reduce_sum": False})
+    def test_scatter_using_atomic_add_vec(self):
+        def fn(a, dim, index, b):
+            return aten.scatter(a, dim, index, b, reduce="add")
+
+        inps = (
+            torch.zeros(1, 1, 25),
+            2,
+            torch.tensor([[[3, 5, 7, 9] * 5]]),
+            torch.ones(1, 1, 25),
+        )
+        torch._dynamo.reset()
+        metrics.reset()
+        self.common(fn, inps)
+        assert metrics.generated_cpp_vec_kernel_count == 2
+
+        with set_num_threads(1), config.patch(
+            {"fx_graph_cache": False, "fx_graph_remote_cache": False}
+        ):
+            torch._dynamo.reset()
+            metrics.reset()
+            self.common(fn, inps)
+            assert metrics.generated_cpp_vec_kernel_count == 2
+
+    @unittest.skipIf(IS_FBCODE, "Not yet runnable in fbcode")
     @requires_vectorization
     @patch("torch.cuda.is_available", lambda: False)
     def test_new_vec_op_cpu_only(self):
@@ -1941,8 +2491,6 @@ class CPUReproTests(TestCase):
             x = torch.randn((2, 9), dtype=dtype)
             x[0, 0] = torch.nan
             x[1, -1] = torch.nan
-
-            tol = 1e-2 if dtype == torch.bfloat16 else 1e-4
 
             with config.patch({"cpp.simdlen": None}):
                 for cpp_wrapper_flag in [True, False]:
@@ -1962,7 +2510,9 @@ class CPUReproTests(TestCase):
         x[0, 0] = torch.nan
         x[1, -1] = torch.nan
 
-        bit_widths = [isa._bit_width for isa in codecache.valid_vec_isa_list()] + [None]
+        bit_widths = [isa._bit_width for isa in cpu_vec_isa.valid_vec_isa_list()] + [
+            None
+        ]
         for item in bit_widths:
             with config.patch({"cpp.simdlen": item}):
                 torch._dynamo.reset()
@@ -1973,6 +2523,7 @@ class CPUReproTests(TestCase):
     @slowTest
     @requires_vectorization
     @patch("torch.cuda.is_available", lambda: False)
+    @config.patch("cpp.enable_tiling_heuristics", False)
     def test__adaptive_avg_pool2d(self):
         def wrap_fn(oh, ow):
             def fn(x):
@@ -1980,7 +2531,7 @@ class CPUReproTests(TestCase):
 
             return fn
 
-        bit_widths = [isa._bit_width for isa in codecache.valid_vec_isa_list()]
+        bit_widths = [isa._bit_width for isa in cpu_vec_isa.valid_vec_isa_list()]
         ih = [16, 65]
         iw = ih
         oh = ih
@@ -2035,6 +2586,133 @@ class CPUReproTests(TestCase):
                 check_metrics_vec_kernel_count(1)
 
     @requires_vectorization
+    def test_vec_bitwise(self):
+        for dtype in [
+            torch.bool,
+            torch.uint8,
+            torch.int8,
+            torch.int32,
+            torch.int64,
+        ]:
+            x = torch.randn(64, dtype=torch.float32)
+            y = torch.randn(64, dtype=torch.float32)
+            if dtype == torch.bool:
+                x = x > 0
+                y = y > 0
+            else:
+                x = x.to(dtype)
+                y = y.to(dtype)
+            bitwise_fns = [
+                torch.bitwise_and,
+                torch.bitwise_not,
+                torch.bitwise_or,
+                torch.bitwise_xor,
+                torch.bitwise_left_shift,
+                torch.bitwise_right_shift,
+            ]
+            for bitwise_fn in bitwise_fns:
+                if (
+                    bitwise_fn
+                    in [
+                        torch.bitwise_left_shift,
+                        torch.bitwise_right_shift,
+                    ]
+                    and dtype == torch.bool
+                ):
+                    # Eager doesn't support bool
+                    # https://pytorch.org/docs/stable/generated/torch.bitwise_left_shift.html
+                    continue
+                torch._dynamo.reset()
+                metrics.reset()
+                if bitwise_fn == torch.bitwise_not:
+                    _args = (x,)
+                else:
+                    _args = (x, y)
+                self.common(bitwise_fn, _args)
+                check_metrics_vec_kernel_count(1)
+
+    @requires_vectorization
+    def test_vec_randn(self):
+        funcs = [torch.randn, torch.rand, torch.randint]
+        float_dtypes = [
+            torch.bfloat16,
+            torch.float16,
+            torch.float32,
+        ]
+        int_dtypes = [
+            torch.int8,
+            torch.uint8,
+            torch.int32,
+            torch.int64,
+        ]
+        dtypes = float_dtypes + int_dtypes
+        for rand_func, dtype in itertools.product(funcs, dtypes):
+            if (rand_func == torch.randint and dtype not in int_dtypes) or (
+                rand_func != torch.randint and dtype not in float_dtypes
+            ):
+                # Skip the invalid combination
+                continue
+            with config.patch(
+                {"fx_graph_cache": False, "fx_graph_remote_cache": False}
+            ):
+                torch._dynamo.reset()
+                metrics.reset()
+
+                def func(seed):
+                    torch.manual_seed(seed)
+                    if rand_func == torch.randint:
+                        return rand_func(0, 64, (64,), dtype=dtype)
+                    else:
+                        return rand_func(64, dtype=dtype)
+
+                cfn = torch.compile(func)
+                # Check the result is deterministic with mauanl seed
+                self.assertEqual(cfn(2024), cfn(2024))
+                check_metrics_vec_kernel_count(1)
+                res_vec = cfn(2024)
+
+                torch._dynamo.reset()
+                metrics.reset()
+                with config.patch({"cpp.simdlen": 0}):
+                    res_scalar = torch.compile(func)(2024)
+                    # Check the same result between scalar and vec
+                    self.assertEqual(res_vec, res_scalar)
+
+    @requires_vectorization
+    def test_bitwise_logical_op_bool(self):
+        bitwise_fns = [
+            torch.bitwise_and,
+            torch.bitwise_or,
+            torch.bitwise_xor,
+            torch.logical_and,
+            torch.logical_or,
+            torch.logical_xor,
+        ]
+
+        for bitwise_fn in bitwise_fns:
+
+            def fn(a, b):
+                c = bitwise_fn((a > 1), (b > 1))
+                return c
+
+            a = torch.ones((64), dtype=torch.int64)
+            b = torch.ones((64), dtype=torch.uint8)
+
+            with config.patch({"cpp.simdlen": None}):
+                torch._dynamo.reset()
+                metrics.reset()
+                self.common(fn, (a, b))
+
+    def test_torch_logit(self):
+        # fix https://github.com/pytorch/pytorch/issues/145379
+        def fn(*args):
+            return torch.logit(args[0], args[1])
+
+        input = torch.tensor(0.3, dtype=torch.float64)
+        eps = torch.tensor(0.9, dtype=torch.float64)
+        self.common(fn, (input, eps))
+
+    @requires_vectorization
     @patch("torch.cuda.is_available", lambda: False)
     def test_vec_compare_op_cpu_only(self):
         def fn(x):
@@ -2076,6 +2754,37 @@ class CPUReproTests(TestCase):
                     metrics.generated_kernel_count
                     - metrics.generated_cpp_vec_kernel_count
                 ) == 0
+
+    @requires_vectorization
+    def test_vec_remainder(self):
+        for dtype in [
+            torch.int8,
+            torch.uint8,
+            torch.int32,
+            torch.int64,
+            torch.bfloat16,
+            torch.float16,
+            torch.float32,
+            torch.float64,
+        ]:
+            if is_float_dtype(dtype):
+                x = torch.randn(64, dtype=dtype)
+                y = torch.randn(64, dtype=dtype)
+            else:
+                lower = 1 if dtype == torch.uint8 else -100
+                x = torch.randint(lower, 100, (64,), dtype=dtype)
+                y = torch.randint(lower, 100, (64,), dtype=dtype)
+                y = torch.where(
+                    y == torch.zeros_like(y),
+                    torch.ones_like(y),
+                    y,
+                )
+
+            torch._dynamo.reset()
+            metrics.reset()
+            _args = (x, y)
+            self.common(torch.remainder, _args)
+            check_metrics_vec_kernel_count(1)
 
     def test_skip_cpp_codegen(self):
         with config.patch({"disable_cpp_codegen": True}):
@@ -2181,232 +2890,6 @@ class CPUReproTests(TestCase):
 
     @requires_vectorization
     @patch("torch.cuda.is_available", lambda: False)
-    def test_cpp_vec_constant_checker(self):
-        _graph: torch.fx.Graph = torch.fx.Graph()
-        a: torch.fx.Node = _graph.create_node("placeholder", "ops")
-        iv: torch.fx.Node = _graph.create_node("placeholder", "iv")
-        fv: torch.fx.Node = _graph.create_node("placeholder", "fv")
-        b: torch.fx.Node = _graph.create_node(
-            "call_method",
-            "constant",
-            args=(
-                a,
-                iv,
-                torch.int64,
-            ),
-        )
-        c: torch.fx.Node = _graph.create_node(
-            "call_method",
-            "constant",
-            args=(
-                a,
-                fv,
-                torch.double,
-            ),
-        )
-        d: torch.fx.Node = _graph.create_node(
-            "call_method",
-            "ge",
-            args=(
-                a,
-                b,
-                b,
-            ),
-        )
-        _graph.output((d, c))
-
-        def get_index():
-            return ""
-
-        submodules = {"get_index": get_index}
-
-        graph_lowering = GraphLowering(
-            torch.fx.GraphModule(submodules, _graph),
-            shape_env=None,
-            num_static_inputs=0,
-        )
-
-        def set_opt_dtype(graph):
-            for node in graph.nodes:
-                if node.target == "constant":
-                    if OptimizationContext.key in node.meta:
-                        opt_ctx = node.meta[OptimizationContext.key]
-                    else:
-                        opt_ctx = OptimizationContext()
-                    opt_ctx.dtype = node.args[-1]
-                    node.meta[OptimizationContext.key] = opt_ctx
-
-        with patch.object(graph_lowering, "wrapper_code", ""), V.set_graph_handler(
-            graph_lowering
-        ):
-            # The moset inner loop variable is used in the index_expr
-            tiling_factor = codecache.pick_vec_isa().nelements(dtype=torch.float)
-            with CppVecKernelChecker(
-                args=None, num_threads=1, tiling_factor=tiling_factor
-            ) as vec_checker:
-                i32_iinfo = np.iinfo(np.int32)
-                f32_iinfo = np.finfo(np.float32)
-                set_opt_dtype(_graph)
-                InterpreterShim(_graph, submodules).run(
-                    V.get_ops_handler(), i32_iinfo.max, f32_iinfo.max
-                )
-                self.assertTrue(vec_checker.simd_vec)
-
-                vec_checker.simd_vec = True
-                set_opt_dtype(_graph)
-                InterpreterShim(_graph, submodules).run(
-                    V.get_ops_handler(), i32_iinfo.min, f32_iinfo.min
-                )
-                self.assertTrue(vec_checker.simd_vec)
-
-                vec_checker.simd_vec = True
-                set_opt_dtype(_graph)
-                InterpreterShim(_graph, submodules).run(
-                    V.get_ops_handler(), i32_iinfo.min, np.inf
-                )
-                self.assertTrue(vec_checker.simd_vec)
-
-                vec_checker.simd_vec = True
-                set_opt_dtype(_graph)
-                InterpreterShim(_graph, submodules).run(
-                    V.get_ops_handler(), i32_iinfo.min, -np.inf
-                )
-                self.assertTrue(vec_checker.simd_vec)
-
-                vec_checker.simd_vec = True
-                set_opt_dtype(_graph)
-                InterpreterShim(_graph, submodules).run(
-                    V.get_ops_handler(), i32_iinfo.min - 1, f32_iinfo.min
-                )
-                self.assertTrue(vec_checker.simd_vec)
-
-                vec_checker.simd_vec = True
-                set_opt_dtype(_graph)
-                InterpreterShim(_graph, submodules).run(
-                    V.get_ops_handler(), i32_iinfo.max + 1, f32_iinfo.max
-                )
-                self.assertTrue(vec_checker.simd_vec)
-
-                vec_checker.simd_vec = True
-                set_opt_dtype(_graph)
-                InterpreterShim(_graph, submodules).run(
-                    V.get_ops_handler(), i32_iinfo.min, f32_iinfo.min * (1 + 1e-5)
-                )
-                self.assertFalse(vec_checker.simd_vec)
-
-                vec_checker.simd_vec = True
-                set_opt_dtype(_graph)
-                InterpreterShim(_graph, submodules).run(
-                    V.get_ops_handler(), i32_iinfo.max, f32_iinfo.max * (1 + 1e-5)
-                )
-                self.assertFalse(vec_checker.simd_vec)
-
-    @requires_vectorization
-    @patch("torch.cuda.is_available", lambda: False)
-    def test_cpp_vec_index_expr_checker(self):
-        _graph: torch.fx.Graph = torch.fx.Graph()
-        a: torch.fx.Node = _graph.create_node("placeholder", "ops")
-        b: torch.fx.Node = _graph.create_node("call_module", "get_index", args=())
-        c: torch.fx.Node = _graph.create_node(
-            "call_method",
-            "index_expr",
-            args=(
-                a,
-                b,
-                torch.int64,
-            ),
-        )
-        d: torch.fx.Node = _graph.create_node(
-            "call_method",
-            "ge",
-            args=(
-                a,
-                c,
-                c,
-            ),
-        )
-        _graph.output(d)
-
-        def get_index():
-            return ""
-
-        submodules = {"get_index": get_index}
-        graph_lowering = GraphLowering(
-            torch.fx.GraphModule(submodules, _graph),
-            shape_env=None,
-            num_static_inputs=0,
-        )
-        with patch.object(graph_lowering, "wrapper_code", ""), V.set_graph_handler(
-            graph_lowering
-        ):
-            itervars = [sympy.Symbol("i"), sympy.Symbol("j"), sympy.Symbol("k")]
-
-            tiling_factor = codecache.pick_vec_isa().nelements(dtype=torch.float)
-            # The most inner loop variable is used in the index_expr
-            with CppVecKernelChecker(
-                args=None, num_threads=1, tiling_factor=tiling_factor
-            ) as vec_checker:
-
-                def get_index():
-                    return -itervars[0] ** 2 + 2 * itervars[0] + itervars[1]
-
-                ranges = [0, 100, 200]
-                vec_checker.itervars = itervars[:2]
-                vec_checker.ranges = ranges[:2]
-                submodules = {"get_index": get_index}
-                InterpreterShim(_graph, submodules).run(V.get_ops_handler())
-                self.assertTrue(vec_checker.simd_vec)
-
-            # Most inner loop variable irrevalant
-            with CppVecKernelChecker(
-                args=None, num_threads=1, tiling_factor=tiling_factor
-            ) as vec_checker:
-
-                def get_index():
-                    return -itervars[0] ** 2 + 2 * itervars[0] + itervars[1]
-
-                ranges = [0, 100, 200]
-                vec_checker.itervars = itervars
-                vec_checker.ranges = ranges
-                submodules = {"get_index": get_index}
-                InterpreterShim(_graph, submodules).run(V.get_ops_handler())
-                self.assertTrue(vec_checker.simd_vec)
-
-            i32_iinfo = np.iinfo(np.int32)
-            _max_value = i32_iinfo.max + 1
-            ranges = [_max_value, _max_value, _max_value]
-            # Most inner loop variable irrevalant but max value is greater than
-            # the max value of INT32
-            with CppVecKernelChecker(
-                args=None, num_threads=1, tiling_factor=tiling_factor
-            ) as vec_checker:
-
-                def get_index():
-                    return itervars[0]
-
-                submodules = {"get_index": get_index}
-                vec_checker.itervars = itervars
-                vec_checker.ranges = ranges
-                InterpreterShim(_graph, submodules).run(V.get_ops_handler())
-                self.assertFalse(vec_checker.simd_vec)
-
-            # Most inner loop variable irrevalant but min value is greater than
-            # the min value of INT32
-            with CppVecKernelChecker(
-                args=None, num_threads=1, tiling_factor=tiling_factor
-            ) as vec_checker:
-
-                def get_index():
-                    return -itervars[0] - 2
-
-                submodules = {"get_index": get_index}
-                vec_checker.itervars = itervars
-                vec_checker.ranges = ranges
-                InterpreterShim(_graph, submodules).run(V.get_ops_handler())
-                self.assertFalse(vec_checker.simd_vec)
-
-    @requires_vectorization
-    @patch("torch.cuda.is_available", lambda: False)
     def test_maxpool2d_cpu_only(self):
         for dtype in vec_dtypes:
             input = torch.randn(26, 32, 112, 112, dtype=dtype).to(
@@ -2425,6 +2908,7 @@ class CPUReproTests(TestCase):
 
     @requires_vectorization
     @patch("torch.cuda.is_available", lambda: False)
+    @config.patch("cpp.enable_tiling_heuristics", False)
     def test_maxpool2d_with_pre_loop_collapse_cpu_only(self):
         x1 = torch.randn(2, 3, 20, 20).to(memory_format=torch.channels_last)
         x2 = torch.randn(2, 3, 20, 20).to(memory_format=torch.channels_last)
@@ -2481,8 +2965,9 @@ class CPUReproTests(TestCase):
                 torch._dynamo.reset()
                 metrics.reset()
                 self.common(fn, (x,))
-                assert metrics.generated_cpp_vec_kernel_count == 0
+                assert metrics.generated_cpp_vec_kernel_count == 1
 
+    @config.patch({"fx_graph_cache": False, "fx_graph_remote_cache": False})
     def test_outer_loop_fusion(self):
         def fn(x):
             max = torch.amax(x, dim=-1, keepdim=True)
@@ -2494,9 +2979,186 @@ class CPUReproTests(TestCase):
             torch._dynamo.reset()
             metrics.reset()
             self.common(fn, (x,))
-            assert len(metrics.cpp_outer_loop_fused_inner_counts) == 1
-            assert metrics.cpp_outer_loop_fused_inner_counts[0] == 2
+            self.assertEqual(
+                len(metrics.cpp_outer_loop_fused_inner_counts),
+                1,
+            )
+            self.assertEqual(
+                metrics.cpp_outer_loop_fused_inner_counts[0].inner_kernel_number,
+                2,
+            )
 
+    def test_outer_loop_fusion_buffer_remove(self):
+        # https://github.com/pytorch/pytorch/issues/144186
+        def fn(x):
+            x = x.sum(dim=-1)
+            x = torch.softmax(x, -1)
+            return x
+
+        x = torch.randn(8, 8, 2)
+        metrics.reset()
+        self.common(fn, (x,))
+
+    @config.patch({"fx_graph_cache": False, "fx_graph_remote_cache": False})
+    def test_local_buffer_in_outer_loop_fusion(self):
+        def fn(x):
+            max = torch.nn.functional.softmax(x, dim=-1)
+            return x - max
+
+        x = torch.randn(4, 12, 1023, 1022)
+
+        with config.patch({"cpp.simdlen": None}):
+            torch._dynamo.reset()
+            metrics.reset()
+            self.common(fn, (x,))
+            self.assertEqual(
+                len(metrics.cpp_outer_loop_fused_inner_counts),
+                1,
+            )
+            self.assertEqual(
+                metrics.cpp_outer_loop_fused_inner_counts[0].inner_kernel_number,
+                3,
+            )
+            self.assertEqual(
+                metrics.cpp_outer_loop_fused_inner_counts[0].local_buffer_number,
+                1,
+            )
+            # Check the number of global buffer allocation
+            torch._dynamo.reset()
+            metrics.reset()
+            _, code = run_and_get_cpp_code(
+                torch.compile(fn, backend="inductor"),
+                x,
+            )
+            self.assertEqual(code.count("empty_strided_cpu("), 3)
+
+    @config.patch({"fx_graph_cache": False, "fx_graph_remote_cache": False})
+    def test_two_local_buffers_in_outer_loop_fusion(self):
+        def fn(x):
+            softmax = torch.nn.functional.softmax(x, dim=-1)
+            sum = torch.sum(softmax, dim=-1)
+            sum_broadcast = torch.broadcast_to(
+                sum.unsqueeze(-1), [*(sum.size()[0:3]), 256]
+            )
+            sum_exp = torch.exp(sum_broadcast)
+            sum2 = torch.sum(sum_exp, dim=-1)
+            sub = sum_exp - sum2.unsqueeze(-1)
+            return x[:, :, :, 0:256] - sub
+
+        x = torch.randn(4, 12, 1023, 1022)
+
+        with config.patch({"cpp.simdlen": None}):
+            torch._dynamo.reset()
+            metrics.reset()
+            atol = None
+            rtol = None
+            if (
+                not cpu_vec_isa.valid_vec_isa_list()
+                or os.getenv("ATEN_CPU_CAPABILITY") == "default"
+            ):
+                atol = 1e-5
+                rtol = 1e-5
+            self.common(fn, (x,), atol=atol, rtol=rtol)
+            self.assertEqual(
+                len(metrics.cpp_outer_loop_fused_inner_counts),
+                1,
+            )
+            self.assertEqual(
+                metrics.cpp_outer_loop_fused_inner_counts[0].inner_kernel_number,
+                5,
+            )
+            self.assertEqual(
+                metrics.cpp_outer_loop_fused_inner_counts[0].local_buffer_number,
+                2,
+            )
+
+    @config.patch({"fx_graph_cache": False, "fx_graph_remote_cache": False})
+    def test_share_local_buffers_in_outer_loop_fusion(self):
+        def fn(x):
+            max = torch.nn.functional.softmax(x, dim=-1)
+            max = torch.nn.functional.softmax(max, dim=-1)
+            return x - max
+
+        x = torch.randn(4, 12, 1023, 1022)
+
+        with config.patch({"cpp.simdlen": None}):
+            torch._dynamo.reset()
+            metrics.reset()
+            self.common(fn, (x,))
+            self.assertEqual(
+                len(metrics.cpp_outer_loop_fused_inner_counts),
+                1,
+            )
+            self.assertEqual(
+                metrics.cpp_outer_loop_fused_inner_counts[0].inner_kernel_number,
+                5,
+            )
+            self.assertEqual(
+                metrics.cpp_outer_loop_fused_inner_counts[0].local_buffer_number,
+                1,  # 2 global bufs share 1 local buf
+            )
+
+    @config.patch({"fx_graph_cache": False, "fx_graph_remote_cache": False})
+    def test_two_local_buffers_in_outer_loop_fusion_case2(self):
+        # exp and exp2 should be replaced by local buffer
+        # since exp will be used after exp2, exp2 can't share the same
+        # local buffer as exp
+        def fn(x):
+            a_max = torch.amax(x, -1, keepdim=True)
+            exp = torch.exp(x - a_max)
+            sum = torch.sum(exp, -1, keepdim=True)
+            exp2 = torch.exp(exp - sum)
+            sum2 = torch.sum(exp2, -1, keepdim=True)
+            sub = exp2 - sum2
+            sub2 = exp - sub
+            return sub2
+
+        x = torch.randn(4, 12, 1023, 1022)
+
+        with config.patch({"cpp.simdlen": None}):
+            torch._dynamo.reset()
+            metrics.reset()
+            self.common(fn, (x,))
+            self.assertEqual(
+                len(metrics.cpp_outer_loop_fused_inner_counts),
+                1,
+            )
+            self.assertEqual(
+                metrics.cpp_outer_loop_fused_inner_counts[0].inner_kernel_number,
+                4,
+            )
+            self.assertEqual(
+                metrics.cpp_outer_loop_fused_inner_counts[0].local_buffer_number,
+                2,
+            )
+
+    @config.patch({"fx_graph_cache": False, "fx_graph_remote_cache": False})
+    def test_local_buffer_with_line_reuse(self):
+        # Test Global buffer which is inplace buffer and replaced by local buffer
+        def fn(x, y):
+            z = torch.matmul(x, y)
+            a_max = torch.amax(x, -1, keepdim=True)
+            # Previous is a inplace buffer and now is a local buffer
+            exp = torch.exp((z - a_max) / z)
+            sum = torch.sum(exp, -1, keepdim=True)
+            return exp - sum
+
+        inputs = [torch.rand(4, 32), torch.rand(32, 32)]
+
+        with config.patch({"cpp.simdlen": None}):
+            torch._dynamo.reset()
+            metrics.reset()
+            self.common(fn, inputs)
+            self.assertEqual(
+                len(metrics.cpp_outer_loop_fused_inner_counts),
+                1,
+            )
+            self.assertEqual(
+                metrics.cpp_outer_loop_fused_inner_counts[0].local_buffer_number,
+                1,
+            )
+
+    @requires_vectorization
     def test_argmin(self):
         def fn(x):
             return torch.argmin(x, -1)
@@ -2506,8 +3168,9 @@ class CPUReproTests(TestCase):
             torch._dynamo.reset()
             metrics.reset()
             self.common(fn, (x,))
-            assert metrics.generated_cpp_vec_kernel_count == 0
+            assert metrics.generated_cpp_vec_kernel_count == 1
 
+    @requires_vectorization
     def test_argmax_argmin_with_nan_value(self):
         def fn(x):
             return torch.argmax(x)
@@ -2530,18 +3193,19 @@ class CPUReproTests(TestCase):
             torch._dynamo.reset()
             metrics.reset()
             self.common(fn, (x,))
-            assert metrics.generated_cpp_vec_kernel_count == 0
+            assert metrics.generated_cpp_vec_kernel_count == 1
 
             # Test argmin
             torch._dynamo.reset()
             metrics.reset()
             self.common(fn2, (x,))
-            assert metrics.generated_cpp_vec_kernel_count == 0
+            assert metrics.generated_cpp_vec_kernel_count == 1
 
     # Currently, we enabled AVX2 and AVX512 for vectorization. If the platform is not
     # supported, the vectorization will not work and skip this test case. For ARM or
     # other platforms support, we just need to add the ISA info to the supported_vector_isa
     # and include proper aten vectorization head file.
+    @unittest.skipIf(IS_FBCODE, "Not yet runnable in fbcode")
     @requires_vectorization
     @patch("torch.cuda.is_available", lambda: False)
     def test_vec_kernel_cpu_only(self):
@@ -2582,7 +3246,6 @@ class CPUReproTests(TestCase):
             x1 = torch.randn((5, 20), dtype=dtype)
             x2 = torch.randn((5, 20), dtype=dtype)
 
-            tol = 1e-2 if dtype == torch.bfloat16 else 1e-4
             with config.patch({"cpp.simdlen": 1}):
                 torch._dynamo.reset()
                 metrics.reset()
@@ -2610,8 +3273,10 @@ class CPUReproTests(TestCase):
             self.common(fn, (x1, x2))
             check_metrics_vec_kernel_count(1)
 
+    @unittest.skipIf(IS_FBCODE, "Not yet runnable in fbcode")
     @unittest.skipIf(
-        sys.platform != "linux", "cpp kernel profile only support linux now"
+        sys.platform not in ["linux", "win32"],
+        "cpp kernel profile only support linux now",
     )
     @patch("torch.cuda.is_available", lambda: False)
     @config.patch({"cpp.enable_kernel_profile": True})
@@ -2619,7 +3284,7 @@ class CPUReproTests(TestCase):
     def test_cpp_kernel_profile(self):
         from torch.profiler import profile
 
-        @torch._dynamo.optimize("inductor", nopython=True)
+        @torch.compile(backend="inductor", fullgraph=True)
         def fn(a, b):
             return a + b
 
@@ -2634,6 +3299,7 @@ class CPUReproTests(TestCase):
                 kernel_profile_events.append(e.name)
         assert len(kernel_profile_events) > 0
 
+    @xfailIfS390X
     @requires_vectorization
     def test_channel_shuffle_cl_output(self):
         """code and shape extracted from shufflenet_v2_x1_0"""
@@ -2646,14 +3312,13 @@ class CPUReproTests(TestCase):
             x = x.view(batchsize, -1, height, width)
             return x.contiguous(memory_format=torch.channels_last)
 
-        for simdlen in (None, 256, 1):
+        for simdlen in simd_lengths_to_test():
             with config.patch({"cpp.simdlen": simdlen}):
                 torch._dynamo.reset()
                 metrics.reset()
                 x = torch.randn(64, 58, 28, 28)
                 self.common(channel_shuffle, (x, 2))
-                if simdlen != 1:
-                    check_metrics_vec_kernel_count(2)
+                check_metrics_vec_kernel_count(2)
 
     @slowTest
     @requires_vectorization
@@ -2661,7 +3326,7 @@ class CPUReproTests(TestCase):
         """a sub-module from TIMM gmlp_s16_224"""
 
         class Model(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.linear = torch.nn.Linear(
                     in_features=256, out_features=1536, bias=True
@@ -2681,22 +3346,22 @@ class CPUReproTests(TestCase):
                 return self.fc(y)
 
         x = torch.randn(128, 196, 256)
-        for simdlen in (None, 256, 1):
+        for simdlen in simd_lengths_to_test():
             with config.patch({"cpp.simdlen": simdlen}):
                 for eval_mode in [True, False]:
                     torch._dynamo.reset()
                     metrics.reset()
                     m = Model().eval() if eval_mode else Model()
                     self.common(m, (x,))
-                    if simdlen != 1:
-                        check_metrics_vec_kernel_count(8)
+                    check_metrics_vec_kernel_count(8)
 
     @requires_vectorization
+    @config.patch("cpp.enable_tiling_heuristics", False)
     def test_transpose_copy(self):
         def fn(a):
             return a.t().contiguous()
 
-        for simdlen in (None, 256, 1):
+        for simdlen in simd_lengths_to_test():
             with config.patch({"cpp.simdlen": simdlen}):
                 for dtype in (torch.float, torch.bfloat16):
                     for shape in (
@@ -2712,8 +3377,7 @@ class CPUReproTests(TestCase):
                         metrics.reset()
                         x = torch.randn(shape, dtype=dtype)
                         self.common(fn, (x,))
-                        if simdlen != 1:
-                            check_metrics_vec_kernel_count(2)
+                        check_metrics_vec_kernel_count(2)
 
     @torch._dynamo.config.patch(specialize_int=False)
     def test_slice_scatter_issue122291(self):
@@ -2725,7 +3389,7 @@ class CPUReproTests(TestCase):
         input_tensor = torch.zeros(shape[0], requires_grad=False, device="cpu")
         src_tensor = torch.ones(shape[1], requires_grad=False, device="cpu")
         with self.assertRaisesRegex(
-            torch._dynamo.exc.BackendCompilerFailed, r".*shape error in scatter op"
+            torch._inductor.exc.InductorError, r".*shape error in scatter op"
         ):
             fn(input_tensor, src_tensor, shape[2], shape[3], shape[4], shape[5])
 
@@ -2743,7 +3407,7 @@ class CPUReproTests(TestCase):
             b = torch.randn(size=(4, 16), dtype=torch.bfloat16)
             c = torch.randn(size=(4, 16), dtype=torch.bfloat16)
             idx = torch.zeros(size=[4], dtype=torch.int64)
-            opt_fn = torch._dynamo.optimize("inductor")(fn)
+            opt_fn = torch.compile(fn, backend="inductor")
             opt_fn(a, b, c, idx)
             self.assertEqual(metrics.generated_kernel_count, 3)
             self.assertTrue(same(fn(a, b, c, idx), opt_fn(a, b, c, idx)))
@@ -2755,7 +3419,7 @@ class CPUReproTests(TestCase):
             b = torch.randn(size=(4, 32), dtype=torch.bfloat16)
             c = torch.randn(size=(4, 32), dtype=torch.bfloat16)
             idx = torch.zeros(size=[4], dtype=torch.int64)
-            opt_fn = torch._dynamo.optimize("inductor")(fn)
+            opt_fn = torch.compile(fn, backend="inductor")
             opt_fn(a, b, c, idx)
             self.assertEqual(metrics.generated_kernel_count, 3)
             self.assertTrue(same(fn(a, b, c, idx), opt_fn(a, b, c, idx)))
@@ -2767,7 +3431,7 @@ class CPUReproTests(TestCase):
             b = torch.randn(size=(4, 64), dtype=torch.bfloat16)
             c = torch.randn(size=(4, 64), dtype=torch.bfloat16)
             idx = torch.zeros(size=[4], dtype=torch.int64)
-            opt_fn = torch._dynamo.optimize("inductor")(fn)
+            opt_fn = torch.compile(fn, backend="inductor")
             opt_fn(a, b, c, idx)
             print(metrics.generated_kernel_count)
             self.assertEqual(metrics.generated_kernel_count, 2)
@@ -2780,7 +3444,7 @@ class CPUReproTests(TestCase):
             b = torch.randn(size=(4, 128), dtype=torch.bfloat16)
             c = torch.randn(size=(4, 128), dtype=torch.bfloat16)
             idx = torch.zeros(size=[4], dtype=torch.int64)
-            opt_fn = torch._dynamo.optimize("inductor")(fn)
+            opt_fn = torch.compile(fn, backend="inductor")
             opt_fn(a, b, c, idx)
             self.assertEqual(metrics.generated_kernel_count, 1)
             self.assertTrue(same(fn(a, b, c, idx), opt_fn(a, b, c, idx)))
@@ -2792,11 +3456,12 @@ class CPUReproTests(TestCase):
         for dtype in _lowp_fp_dtypes:
             metrics.reset()
             x = torch.randn(100, 100).to(dtype)
-            opt_fn = torch._dynamo.optimize("inductor")(fn)
+            opt_fn = torch.compile(fn, backend="inductor")
             self.assertTrue(same(fn(x), opt_fn(x)))
             assert metrics.cpp_to_dtype_count == 0
             check_metrics_vec_kernel_count(1)
 
+    @config.patch("cpp.enable_tiling_heuristics", False)
     def test_transpose_non_contiguous(self):
         def fn(a):
             # From part of timm HaloAttn:
@@ -2821,7 +3486,7 @@ class CPUReproTests(TestCase):
                 permute_2, [16, 32], -1
             )
             getitem = split_with_sizes[0]
-            getitem_1 = split_with_sizes[1]
+            _getitem_1 = split_with_sizes[1]
             permute_3 = torch.ops.aten.permute.default(getitem, [0, 1, 3, 2])
             expand_1 = torch.ops.aten.expand.default(permute_3, [8, 4, 16, 144])
             clone_3 = torch.ops.aten.clone.default(
@@ -2832,7 +3497,6 @@ class CPUReproTests(TestCase):
         metrics.reset()
         x = torch.randn(1, 384, 20, 20).to(memory_format=torch.channels_last)
         self.common(fn, (x,))
-        check_metrics_vec_kernel_count(1)
 
     def test_non_contiguous_index_with_constant_stride(self):
         def fn(x):
@@ -2843,7 +3507,7 @@ class CPUReproTests(TestCase):
 
         metrics.reset()
         x = torch.randn(1, 32, 16, 68)
-        opt_fn = torch._dynamo.optimize("inductor")(fn)
+        opt_fn = torch.compile(fn, backend="inductor")
         _, code = run_and_get_cpp_code(opt_fn, x)
         self.assertTrue(same(fn(x), opt_fn(x)))
         # def and use
@@ -2870,6 +3534,7 @@ class CPUReproTests(TestCase):
         x = torch.randn(2, 3, 4)
         self.assertEqual(torch.compile(func)(x), func(x))
 
+    @config.patch({"fx_graph_cache": False, "fx_graph_remote_cache": False})
     def test_ir_node_str(self):
         @torch.compile
         def fn(x: torch.Tensor) -> torch.Tensor:
@@ -2947,6 +3612,7 @@ class CPUReproTests(TestCase):
         self.common(fn, (x, y))
         check_metrics_vec_kernel_count(2)
 
+    @config.patch("cpp.enable_tiling_heuristics", False)
     def test_transpose_sum_outer(self):
         # https://github.com/pytorch/pytorch/issues/98573
         def fn(a):
@@ -2986,6 +3652,59 @@ class CPUReproTests(TestCase):
         x = torch.rand(4, 5)
         self.common(f, (x,))
 
+    def test_broadcast_scalar_cpp_tile_2d_kernel(self):
+        # Based on detectron2_maskrcnn backbone (conv2d -> max_pool2d)
+        s0 = 12
+        s1 = 21
+
+        data = torch.randn(
+            [1, 256, 8 * s0, 8 * s1],
+        )
+        weight_one = torch.randn([256, 256, 1, 1], requires_grad=True)
+        weight_two = torch.randn((256, 256, 3, 3), requires_grad=True)
+        bias_one = torch.randn([256], requires_grad=True)
+        bias_two = torch.randn([256], requires_grad=True)
+
+        @torch.compile
+        def fn(data, weight_one, weight_two, bias_one, bias_two):
+            conv_result_one = torch.ops.aten.convolution.default(
+                data,
+                weight_one,
+                bias_one,
+                [1, 1],
+                [1, 1],
+                [1, 1],
+                False,
+                [0, 0],
+                1,
+            )
+
+            conv_result_two = torch.ops.aten.convolution.default(
+                data,
+                weight_two,
+                bias_two,
+                [1, 1],
+                [1, 1],
+                [1, 1],
+                False,
+                [0, 0],
+                1,
+            )
+
+            max_pool_result = torch.nn.functional.max_pool2d(
+                conv_result_one,
+                [1, 1],
+                [2, 2],
+                [0, 0],
+                [1, 1],
+                False,
+            )
+            return conv_result_one, conv_result_two, max_pool_result
+
+        torch._dynamo.mark_dynamic(data, 2)
+        torch._dynamo.mark_dynamic(data, 3)
+        self.common(fn, (data, weight_one, weight_two, bias_one, bias_two))
+
     def test_to_channels_last_lowp_fp(self):
         def f(a):
             return a.to(memory_format=torch.channels_last)
@@ -3005,7 +3724,7 @@ class CPUReproTests(TestCase):
 
     def test_linear_buffer_reuse(self):
         class M(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.linear1 = torch.nn.Linear(16, 16)
                 self.tanh = torch.nn.Tanh()
@@ -3028,7 +3747,7 @@ class CPUReproTests(TestCase):
             def run(*ex, **kwargs):
                 return mod(*ex, **kwargs)
 
-            run = torch._dynamo.optimize(compile_fx_wrapper)(run)
+            run = torch.compile(run, backend=compile_fx_wrapper)
             _, code = run_and_get_cpp_code(run, v)
             self.assertFalse("= as_strided(" in code)
             self.assertEqual(run(*v), mod(*v))
@@ -3051,7 +3770,7 @@ class CPUReproTests(TestCase):
     def test_nn_param_assign(self):
         # https://github.com/pytorch/pytorch/issues/99569
         class Model2(nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.conv = nn.Conv2d(in_channels=3, out_channels=5, kernel_size=3)
                 self.batchnorm = nn.BatchNorm2d(num_features=5)
@@ -3079,7 +3798,7 @@ class CPUReproTests(TestCase):
 
     def test_nn_param_assign_wrapped(self):
         class Model2(nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.conv = nn.Conv2d(in_channels=3, out_channels=5, kernel_size=3)
                 self.batchnorm = nn.BatchNorm2d(num_features=5)
@@ -3116,7 +3835,7 @@ class CPUReproTests(TestCase):
             return z
 
         inps = [torch.randn(1, 2, 8, 4), torch.randn(1, 2, 8, 4)]
-        fn_opt = torch._dynamo.optimize("inductor")(fn)
+        fn_opt = torch.compile(fn, backend="inductor")
         _, code = run_and_get_cpp_code(fn_opt, *inps)
         self.assertTrue("in_out_ptr" in code)
         self.assertEqual(fn_opt(*inps), fn(*inps))
@@ -3251,7 +3970,7 @@ class CPUReproTests(TestCase):
     @config.patch(freezing=True)
     def test_linear_with_reshape(self):
         class M(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.linear = torch.nn.Linear(16, 16, bias=False)
 
@@ -3288,32 +4007,53 @@ class CPUReproTests(TestCase):
 
     def test_group_norm_vec(self):
         class M(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
-                self.group_norm = torch.nn.GroupNorm(32, 32)
+                self.group_norm = torch.nn.GroupNorm(3, 90)
 
             def forward(self, x):
                 return self.group_norm(x)
 
-        metrics.reset()
-        mod = M().eval()
-        x = torch.randn(2, 32, 32, 32)
-        with torch.no_grad():
-            self.common(mod, (x,))
-            # 2 generated kernels (one for var_mean, the other for result)
-            check_metrics_vec_kernel_count(2)
+        options = itertools.product(
+            vec_dtypes, [torch.contiguous_format, torch.channels_last], [True, False]
+        )
+        for dtype, fmt, dynamic in options:
+            torch._dynamo.reset()
+            metrics.reset()
+            mod = M().eval()
+            x = torch.randn((2, 90, 6, 6), dtype=dtype).to(memory_format=fmt)
+            with torch.no_grad():
+                expected = mod(x)
+                compiled_m = torch.compile(mod, dynamic=dynamic)
+                actual, code = run_and_get_cpp_code(compiled_m, x)
+                self.assertEqual(expected, actual)
+                # 2 generated kernels (one for var_mean, the other for result)
+                check_metrics_vec_kernel_count(2)
+
+                # check loop split optimization
+                if fmt == torch.channels_last:
+                    # check that there are no non_contiguous loads
+                    FileCheck().check_count(
+                        "__at_align__ std::array", 0, exactly=True
+                    ).run(code)
 
     def test_int_div_vec(self):
         def fn(x, y, mode):
             return torch.div(x, y, rounding_mode=mode)
 
-        x = torch.randint(1, 100, (32, 32))
-        y = torch.randint(1, 100, (32, 32))
-        for mode in [None, "trunc", "floor"]:
-            with torch.no_grad():
-                metrics.reset()
-                self.common(fn, (x, y, mode))
-                check_metrics_vec_kernel_count(1)
+        for dtype in [
+            torch.int8,
+            torch.uint8,
+            torch.int32,
+            torch.int64,
+        ]:
+            x = torch.randint(1, 100, (32, 32), dtype=dtype)
+            y = torch.randint(1, 100, (32, 32), dtype=dtype)
+            for mode in [None, "trunc", "floor"]:
+                with torch.no_grad():
+                    metrics.reset()
+                    self.common(fn, (x, y, mode))
+                    check_metrics_vec_kernel_count(1)
 
     def test_uint8_add(self):
         # https://github.com/pytorch/pytorch/issues/113016
@@ -3336,7 +4076,7 @@ class CPUReproTests(TestCase):
     def test_non_contiguous_reduction_store(self):
         # https://github.com/pytorch/pytorch/issues/113018
         class M(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.conv = torch.nn.Conv2d(39, 1, kernel_size=(1, 17), stride=(2, 2))
 
@@ -3349,7 +4089,7 @@ class CPUReproTests(TestCase):
 
     def test_embedding_vec(self):
         class M(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.emb = torch.nn.Embedding(64, 128)
 
@@ -3364,9 +4104,10 @@ class CPUReproTests(TestCase):
             self.common(m, (idx, x))
             check_metrics_vec_kernel_count(1)
 
+    @requires_vectorization
     def test_embedding_vec_bf16(self):
         class M(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.emb = torch.nn.Embedding(64, 128)
 
@@ -3389,6 +4130,7 @@ class CPUReproTests(TestCase):
         self.assertTrue("cvt_lowp_fp_to_fp32" not in code)
         self.assertTrue("cvt_fp32_to_lowp_fp" not in code)
 
+    @xfailIfS390X
     def test_concat_inner_vec(self):
         def fn(x, y):
             return F.relu(torch.cat([x, y], dim=1))
@@ -3399,6 +4141,7 @@ class CPUReproTests(TestCase):
         self.common(fn, (x, y))
         check_metrics_vec_kernel_count(3)
 
+    @config.patch("cpp.enable_tiling_heuristics", False)
     def test_expr_vec_non_contiguous(self):
         def fn(x):
             # the pattern from sebotnet33ts_256
@@ -3576,6 +4319,26 @@ class CPUReproTests(TestCase):
         # TODO(jgong5): change to 1 with vectorized uint64 load
         assert metrics.generated_cpp_vec_kernel_count == 0
 
+    def test_convert_int8_to_half_vec(self):
+        src_dtypes = [torch.int8, torch.uint8]
+        dst_dtypes = [torch.bfloat16, torch.half]
+        _simd_lens = [isa._bit_width for isa in cpu_vec_isa.valid_vec_isa_list()]
+        for src_dtype, dst_dtype, _simd_len in itertools.product(
+            src_dtypes, dst_dtypes, _simd_lens
+        ):
+
+            def fn(x):
+                return x.to(dst_dtype)
+
+            low = 0 if src_dtype == torch.uint8 else -100
+
+            x = torch.randint(low, 100, (32, 32), dtype=src_dtype)
+            with config.patch({"cpp.simdlen": _simd_len}):
+                torch._dynamo.reset()
+                metrics.reset()
+                self.common(fn, (x,))
+                check_metrics_vec_kernel_count(1)
+
     def test_convert_int32_to_int64_vec(self):
         def fn(x):
             return x.to(torch.int64)
@@ -3612,12 +4375,48 @@ class CPUReproTests(TestCase):
         self.common(fn, (x,))
         check_metrics_vec_kernel_count(1)
 
+    def test_double_pointwise_vec(self):
+        def fn(x):
+            return x * x
+
+        x = torch.randn((32, 32), dtype=torch.double)
+        metrics.reset()
+        self.common(fn, (x,))
+        check_metrics_vec_kernel_count(1)
+
+    def test_double_reduction_vec(self):
+        def fn(x):
+            return x.sum(dim=1)
+
+        x = torch.randn((32, 32), dtype=torch.double)
+        metrics.reset()
+        self.common(fn, (x,))
+        check_metrics_vec_kernel_count(1)
+
+    def test_convert_fp32_to_double_vec(self):
+        def fn(x):
+            return x.to(torch.double)
+
+        x = torch.randn(32, 32)
+        metrics.reset()
+        self.common(fn, (x,))
+        check_metrics_vec_kernel_count(1)
+
+    def test_convert_double_to_fp32_vec(self):
+        def fn(x):
+            return x.to(torch.float32)
+
+        x = torch.randn((32, 32), dtype=torch.double)
+        metrics.reset()
+        self.common(fn, (x,))
+        check_metrics_vec_kernel_count(1)
+
     def test_no_redundant_to_dtypes_between_fused_scheduler_node(self):
         # https://github.com/pytorch/pytorch/issues/115260
         p0 = torch.tensor([1.0879], dtype=torch.float16)
 
         class Model1(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
 
             def forward(self, *args):
@@ -3648,7 +4447,31 @@ class CPUReproTests(TestCase):
         x = torch.randint(0, 100, (819,), dtype=torch.int64)
         metrics.reset()
         self.common(fn, (x,))
-        assert metrics.generated_cpp_vec_kernel_count == 1
+        check_metrics_vec_kernel_count(1)
+
+    def test_highp_to_lowp_cse_var_cache_with_store(self):
+        # Fix issue: https://github.com/pytorch/pytorch/issues/128263
+        input = torch.randn(5, 128, dtype=torch.float32)
+        input2 = torch.randint(0, 10, (5, 128), dtype=torch.int8)
+        input3 = torch.randn(128, 128, dtype=torch.float32)
+
+        class Model(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+
+            def forward(self, x, x2, x3):
+                x2 = x2.to(torch.int32)
+                temp = test_operators.realize(x2.to(torch.float16))
+                temp2 = temp.to(torch.float32)
+                temp2 = temp2 * x
+                return torch.mm(temp, x3.to(torch.float16)), temp2
+
+        metrics.reset()
+        m = Model()
+        self.common(
+            m,
+            (input, input2, input3),
+        )
 
     def test_reduction_float_to_int64(self):
         # https://github.com/pytorch/pytorch/issues/124821
@@ -3658,7 +4481,7 @@ class CPUReproTests(TestCase):
         x = torch.randint(0, 100, (22, 51), dtype=torch.int64)
         metrics.reset()
         self.common(fn, (x,))
-        assert metrics.generated_cpp_vec_kernel_count == 1
+        check_metrics_vec_kernel_count(1)
 
     @config.patch({"cpp.dynamic_threads": True})
     def test_reduction_with_dynamic_threads(self):
@@ -3674,7 +4497,7 @@ class CPUReproTests(TestCase):
     @config.patch(freezing=True)
     def test_linear_float64(self):
         class M(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.weight1 = torch.nn.Parameter(
                     torch.randn(10, 10, dtype=torch.float64)
@@ -3700,7 +4523,7 @@ class CPUReproTests(TestCase):
     def test_fused_attention_conv(self):
         # https://github.com/pytorch/pytorch/issues/121174.
         class Model(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.q_conv = torch.nn.Conv2d(4, 4, 1)
                 self.k_conv = torch.nn.Conv2d(4, 4, 1)
@@ -3720,6 +4543,271 @@ class CPUReproTests(TestCase):
         fn = Model()
         x = torch.randn(1, 4, 2, 2)
         self.common(fn, (x,))
+
+    @parametrize("is_inference", (True, False))
+    def test_disabled_amp(self, is_inference):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.all_head_size = 12 * 64
+                self.dense = nn.Linear(self.all_head_size, self.all_head_size)
+
+            def forward(self, q, k, v):
+                context_layer = F.scaled_dot_product_attention(
+                    q, k, v, attn_mask=None, dropout_p=0.2
+                )
+                context_layer = context_layer.permute(0, 2, 1, 3).contiguous()
+                new_context_layer_shape = context_layer.size()[:-2] + (
+                    self.all_head_size,
+                )
+                context_layer = context_layer.view(new_context_layer_shape)
+                return self.dense(context_layer)
+
+        mod = M().to(torch.bfloat16).eval()
+
+        q = torch.randn((4, 12, 512, 64), dtype=torch.bfloat16) / 10.0
+        k = torch.randn((4, 12, 512, 64), dtype=torch.bfloat16) / 10.0
+        v = torch.randn((4, 12, 512, 64), dtype=torch.bfloat16) / 10.0
+        inputs = (
+            q,
+            k,
+            v,
+        )
+        compiler_mode = torch.compile(mod)
+        from torch.nn.attention import sdpa_kernel, SDPBackend
+
+        context = contextlib.nullcontext if not is_inference else torch.no_grad
+        with config.patch(
+            {"fallback_random": True}
+        ), torch.cpu.amp.autocast(), context(), sdpa_kernel(SDPBackend.MATH):
+            torch.manual_seed(0)
+            eager = mod(*inputs)
+            torch.manual_seed(0)
+            self.assertEqual(compiler_mode(*inputs), eager)
+
+    def test_fused_node(self):
+        # https://github.com/pytorch/pytorch/issues/138550.
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(
+                self,
+                clone_50,
+                gt_scalar,
+                div_tensor,
+                convert_element_type_default_7,
+                convert_element_type_default_13,
+                convert_element_type_default_14,
+            ):
+                convert_element_type_default_4 = (
+                    torch.ops.prims.convert_element_type.default(
+                        clone_50, torch.float32
+                    )
+                )
+                clone_50 = None
+                view_default_6 = torch.ops.aten.view.default(
+                    convert_element_type_default_4, [336, 512, 64]
+                )
+                convert_element_type_default_4 = None
+                convert_element_type_default_5 = (
+                    torch.ops.prims.convert_element_type.default(
+                        view_default_6, torch.bfloat16
+                    )
+                )
+                view_default_6 = None
+                mul_tensor = torch.ops.aten.mul.Tensor(gt_scalar, div_tensor)
+                mul_tensor_1 = torch.ops.aten.mul.Tensor(mul_tensor, 1.1111111111111112)
+                mul_tensor = None
+                expand_default_2 = torch.ops.aten.expand.default(
+                    mul_tensor_1, [28, 12, 512, 512]
+                )
+                mul_tensor_1 = None
+                view_default_3 = torch.ops.aten.view.default(
+                    expand_default_2, [336, 512, 512]
+                )
+                expand_default_2 = None
+                permute_default_4 = torch.ops.aten.permute.default(
+                    view_default_3, [0, 2, 1]
+                )
+                view_default_3 = None
+                convert_element_type_default_6 = (
+                    torch.ops.prims.convert_element_type.default(
+                        permute_default_4, torch.bfloat16
+                    )
+                )
+                permute_default_4 = None
+                bmm_default_2 = torch.ops.aten.bmm.default(
+                    convert_element_type_default_6, convert_element_type_default_5
+                )
+                convert_element_type_default_6 = None
+                convert_element_type_default_10 = (
+                    torch.ops.prims.convert_element_type.default(
+                        bmm_default_2, torch.float32
+                    )
+                )
+                bmm_default_2 = None
+                view_default_7 = torch.ops.aten.view.default(
+                    convert_element_type_default_10, [28, 12, 512, 64]
+                )
+                convert_element_type_default_10 = None
+                convert_element_type_default_18 = (
+                    torch.ops.prims.convert_element_type.default(
+                        view_default_7, torch.bfloat16
+                    )
+                )
+                view_default_7 = None
+                permute_default_9 = torch.ops.aten.permute.default(
+                    convert_element_type_default_18, [0, 2, 1, 3]
+                )
+                convert_element_type_default_18 = None
+                bmm_default_3 = torch.ops.aten.bmm.default(
+                    convert_element_type_default_5, convert_element_type_default_7
+                )
+                convert_element_type_default_5 = convert_element_type_default_7 = None
+                convert_element_type_default_9 = (
+                    torch.ops.prims.convert_element_type.default(
+                        bmm_default_3, torch.float32
+                    )
+                )
+                bmm_default_3 = None
+                view_default_8 = torch.ops.aten.view.default(
+                    convert_element_type_default_9, [28, 12, 512, 512]
+                )
+                convert_element_type_default_9 = None
+                convert_element_type_default_11 = (
+                    torch.ops.prims.convert_element_type.default(
+                        gt_scalar, torch.float32
+                    )
+                )
+                gt_scalar = None
+                mul_tensor_2 = torch.ops.aten.mul.Tensor(
+                    convert_element_type_default_11, 1.1111111111111112
+                )
+                convert_element_type_default_11 = None
+                mul_tensor_3 = torch.ops.aten.mul.Tensor(view_default_8, mul_tensor_2)
+                view_default_8 = mul_tensor_2 = None
+                mul_tensor_4 = torch.ops.aten.mul.Tensor(mul_tensor_3, div_tensor)
+                mul_tensor_3 = None
+                sum_dim_int_list_1 = torch.ops.aten.sum.dim_IntList(
+                    mul_tensor_4, [-1], True
+                )
+                neg_default = torch.ops.aten.neg.default(div_tensor)
+                div_tensor = None
+                fma_default = torch.ops.prims.fma.default(
+                    neg_default, sum_dim_int_list_1, mul_tensor_4
+                )
+                neg_default = sum_dim_int_list_1 = mul_tensor_4 = None
+                view_default_9 = torch.ops.aten.view.default(
+                    fma_default, [336, 512, 512]
+                )
+                fma_default = None
+                convert_element_type_default_12 = (
+                    torch.ops.prims.convert_element_type.default(
+                        view_default_9, torch.bfloat16
+                    )
+                )
+                view_default_9 = None
+                bmm_default_4 = torch.ops.aten.bmm.default(
+                    convert_element_type_default_13, convert_element_type_default_12
+                )
+                convert_element_type_default_13 = None
+                convert_element_type_default_17 = (
+                    torch.ops.prims.convert_element_type.default(
+                        bmm_default_4, torch.float32
+                    )
+                )
+                bmm_default_4 = None
+                view_default_10 = torch.ops.aten.view.default(
+                    convert_element_type_default_17, [28, 12, 64, 512]
+                )
+                convert_element_type_default_17 = None
+                mul_scalar_2 = torch.ops.aten.mul.Scalar(
+                    view_default_10, 0.3535533905932738
+                )
+                view_default_10 = None
+                permute_default_8 = torch.ops.aten.permute.default(
+                    mul_scalar_2, [0, 1, 3, 2]
+                )
+                mul_scalar_2 = None
+                convert_element_type_default_19 = (
+                    torch.ops.prims.convert_element_type.default(
+                        permute_default_8, torch.bfloat16
+                    )
+                )
+                permute_default_8 = None
+                _permute_default_10 = torch.ops.aten.permute.default(
+                    convert_element_type_default_19, [0, 2, 1, 3]
+                )
+                convert_element_type_default_19 = None
+                bmm_default_5 = torch.ops.aten.bmm.default(
+                    convert_element_type_default_12, convert_element_type_default_14
+                )
+                convert_element_type_default_12 = convert_element_type_default_14 = None
+                convert_element_type_default_16 = (
+                    torch.ops.prims.convert_element_type.default(
+                        bmm_default_5, torch.float32
+                    )
+                )
+                bmm_default_5 = None
+                view_default_11 = torch.ops.aten.view.default(
+                    convert_element_type_default_16, [28, 12, 512, 64]
+                )
+                convert_element_type_default_16 = None
+                mul_scalar_3 = torch.ops.aten.mul.Scalar(
+                    view_default_11, 0.3535533905932738
+                )
+                view_default_11 = None
+                convert_element_type_default_20 = (
+                    torch.ops.prims.convert_element_type.default(
+                        mul_scalar_3, torch.bfloat16
+                    )
+                )
+                mul_scalar_3 = None
+                permute_default_11 = torch.ops.aten.permute.default(
+                    convert_element_type_default_20, [0, 2, 1, 3]
+                )
+                convert_element_type_default_20 = None
+                clone_52 = torch.ops.aten.clone.default(
+                    permute_default_11, memory_format=torch.contiguous_format
+                )
+                permute_default_11 = None
+                view_283 = torch.ops.aten.view.default(clone_52, [28, 512, 768])
+                clone_52 = None
+                clone_53 = torch.ops.aten.clone.default(
+                    permute_default_9, memory_format=torch.contiguous_format
+                )
+                permute_default_9 = None
+                view_284 = torch.ops.aten.view.default(clone_53, [28, 512, 768])
+                clone_53 = None
+                view_285 = torch.ops.aten.view.default(view_284, [14336, 768])
+                view_284 = None
+                return view_283, view_285
+
+        clone_50 = torch.randn((28, 12, 512, 64), dtype=torch.bfloat16) / 10
+        gt_scalar = torch.randint(0, 2, (28, 12, 512, 512), dtype=torch.bool)
+        div_tensor = torch.randn((28, 12, 512, 512), dtype=torch.float) / 10
+        convert_element_type_default_7 = (
+            torch.randn((336, 64, 512), dtype=torch.bfloat16) / 10
+        )
+        convert_element_type_default_13 = (
+            torch.randn((336, 64, 512), dtype=torch.bfloat16) / 10
+        )
+        convert_element_type_default_14 = (
+            torch.randn((336, 512, 64), dtype=torch.bfloat16) / 10
+        )
+        inputs = (
+            clone_50,
+            gt_scalar,
+            div_tensor,
+            convert_element_type_default_7,
+            convert_element_type_default_13,
+            convert_element_type_default_14,
+        )
+
+        with torch.cpu.amp.autocast():
+            mod = M().to(torch.bfloat16).eval()
+            self.common(mod, inputs, atol=1e-3, rtol=1e-3)
 
     @requires_vectorization
     def test_vec_indirect_load_cse_cache(self):
@@ -3746,13 +4834,269 @@ class CPUReproTests(TestCase):
             return (mul_1,)
 
         x = torch.zeros(2, 209985).to(torch.int64)
-        opt_fn = torch._dynamo.optimize("inductor")(fn)
+        opt_fn = torch.compile(fn, backend="inductor")
         _, code = run_and_get_cpp_code(opt_fn, x)
         FileCheck().check_count(
             "return at::vec::VectorizedN<int64_t,2>::loadu(tmpbuf.data(),",
-            2,
+            4,
             exactly=True,
         ).run(code)
+
+    def test_load_half(self):
+        def fn(arg0_1, arg0_2):
+            return arg0_1.copy_(arg0_2)
+
+        with config.patch({"cpp.simdlen": 0}):
+            x1 = torch.randn(2, 10).to(torch.half)
+            x2 = torch.randn(2, 10).to(torch.half)
+            opt_fn = torch.compile(fn, backend="inductor")
+            _, code = run_and_get_cpp_code(opt_fn, x1, x2)
+            FileCheck().check_count(
+                "static_cast<float>",
+                0,
+                exactly=True,
+            ).run(code)
+
+    @requires_vectorization
+    def test_repeated_exp(self):
+        def fn(x):
+            y = x.sigmoid()
+            return y + 1, y.sum(-1)
+
+        x = torch.randn(1000, 1000)
+        opt_fn = torch.compile(fn)
+        _, code = run_and_get_cpp_code(opt_fn, x)
+        FileCheck().check_count(
+            ".exp()",
+            1,
+            exactly=True,
+        ).run(code)
+
+    def test_convert_fp32_int64_oob_vec(self):
+        # https://github.com/pytorch/pytorch/issues/129863
+        def fn(x):
+            float32 = x.to(torch.float32)
+            return float32.to(torch.int64)
+
+        x = torch.full((32,), -9223372036854775808, dtype=torch.int64)
+
+        for simdlen in simd_lengths_to_test():
+            with config.patch({"cpp.simdlen": simdlen}):
+                torch._dynamo.reset()
+                metrics.reset()
+                self.common(fn, (x,))
+                check_metrics_vec_kernel_count(1)
+
+    @requires_vectorization
+    def test_consistent_remove_buffers(self):
+        def fn(x):
+            z = x + x
+            z1 = test_operators.realize(z)
+            return x + z1
+
+        # The shape makes sure we generate both vec and scalar kernels
+        x = torch.randn((65,), dtype=torch.bfloat16)
+        with config.patch(inplace_buffers=False):
+            metrics.reset()
+            self.common(fn, (x,))
+            check_metrics_vec_kernel_count(1)
+            _, code = run_and_get_cpp_code(torch.compile(fn), x)
+            FileCheck().check_count(
+                "tmp1 + tmp2",
+                2,
+                exactly=True,
+            ).run(code)
+
+    @requires_vectorization
+    def test_bool_reduction_vec(self):
+        for op in (
+            torch.any,
+            torch.min,
+            torch.max,
+        ):
+
+            def fn(x1, x2, x3):
+                return op(x1), op(x2), op(x3)
+
+            c = [False] * 63
+            input1 = torch.Tensor(c).to(torch.bool)
+            c[10] = True
+            input2 = torch.Tensor(c).to(torch.bool)
+            input3 = torch.Tensor([True] * 63).to(torch.bool)
+            metrics.reset()
+            self.common(
+                fn,
+                (
+                    input1,
+                    input2,
+                    input3,
+                ),
+            )
+            n_veckernel = 6 if op is torch.masked.mean else 3
+            check_metrics_vec_kernel_count(n_veckernel)
+
+    @requires_vectorization
+    def test_full_bits_lowp(self):
+        def check_use_full_bits(func, shapes, dtype, mixed, check_vecn):
+            example_inputs = [torch.randn(shape, dtype=dtype) for shape in shapes]
+            if mixed:
+                example_inputs[0] = example_inputs[0].to(
+                    dtype=torch.half if dtype == torch.bfloat16 else torch.bfloat16
+                )
+            f_opt = torch.compile()(func)
+            _, code = run_and_get_cpp_code(f_opt, *example_inputs)
+            if check_vecn:
+                self.assertTrue(
+                    "at::vec::VectorizedN" in code or "at::vec::convert<float,2" in code
+                )
+            else:
+                self.assertFalse(
+                    "at::vec::VectorizedN" in code or "at::vec::convert<float,2" in code
+                )
+
+        funcs = []
+
+        def func0(arg0, arg1):
+            return torch.ops.aten.sum(
+                torch.ops.aten.add(torch.ops.aten.atanh(arg0), arg1), (2, 3)
+            )
+
+        funcs.append(func0)
+
+        def func1(arg0):
+            v = torch.ops.prims.convert_element_type.default(arg0, torch.float)
+            v = torch.ops.aten.add(torch.ops.aten.atanh(arg0), v)
+            return torch.ops.prims.convert_element_type.default(v, arg0.dtype)
+
+        funcs.append(func1)
+
+        def func2(arg0, arg1):
+            v = torch.ops.aten.atanh(arg0)
+            v = torch.ops.aten.add(v, arg1)
+            return torch.ops.prims.convert_element_type.default(v, arg1.dtype)
+
+        funcs.append(func2)
+
+        # test small shapes
+        funcs.append(func2)
+        small_size = cpu_vec_isa.pick_vec_isa().nelements(dtype=torch.bfloat16) // 2
+
+        example_shapes = [
+            [(10, 32, 20, 20), (10, 32, 20, 20)],
+            [(10, 32, 20, 20)],
+            [(10, 32, 20, 20), (10, 32, 20, 20)],
+            # test small shapes
+            [(small_size), (small_size)],
+        ]
+        mixed_types = [False, False, True, False]
+        check_vecns = [True, True, True, False]
+
+        for dtype in [torch.bfloat16, torch.float16]:
+            for func, shapes, mixed, check_vecn in zip(
+                funcs, example_shapes, mixed_types, check_vecns
+            ):
+                check_use_full_bits(func, shapes, dtype, mixed, check_vecn)
+
+    @config.patch("cpp.simdlen", 256)
+    @requires_vectorization
+    def test_avx2_bool_constant_pad_nd(self):
+        # NOTE: I tried using (0, 12, 12) and removing the cpp.simdlen=256 override, but
+        # that didn't repro the issue.
+        result = torch.testing.make_tensor(
+            (0, 6, 6), dtype=torch.bool, device=torch.device("cpu")
+        )
+
+        def fn(arg):
+            return torch.constant_pad_nd(arg, (1, 1, 1, 1, 1, 1))
+
+        self.common(fn, (result,))
+
+    @config.patch(unroll_reductions_threshold=9999)
+    @requires_vectorization
+    def test_unrolled_bool_prod_vectorized(self):
+        result = torch.zeros((37, 37, 37), dtype=torch.bool)
+        dim_select = [0, 1]
+        result.narrow(dim_select[0], 0, 1).narrow(dim_select[1], 1, 1).zero_()
+        result.narrow(dim_select[0], 2, 1).narrow(dim_select[1], 3, 1).zero_()
+        result.narrow(dim_select[0], 4, 1).narrow(dim_select[1], 3, 1).zero_()
+
+        def fn(arg):
+            return torch.prod(arg, 1, dtype=torch.bool)
+
+        self.common(fn, (result,))
+
+    @requires_vectorization
+    @config.patch("cpp.min_chunk_size", 1)
+    def test_for_loop_collapsed(self):
+        # https://github.com/pytorch/pytorch/issues/122281
+        def fn(x):
+            return x.transpose(1, 0).contiguous()
+
+        x = torch.randn(199, 2)
+        opt_fn = torch.compile(fn, backend="inductor")
+        _, code = run_and_get_cpp_code(opt_fn, x)
+        self.assertTrue(same(fn(x), opt_fn(x)))
+        FileCheck().check_count("#pragma omp for collapse(2)", 1, exactly=True).run(
+            code
+        )
+
+    @config.patch(freezing=True)
+    def test_add_layernorm(self):
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.dense = torch.nn.Linear(768, 768)
+                self.layernorm = torch.nn.LayerNorm(768, eps=1e-12)
+
+            def forward(self, context_layer, hidden_states):
+                attention_output = self.dense(context_layer)
+                hidden_states = attention_output + hidden_states
+                layer_output = self.layernorm(hidden_states)
+                return layer_output
+
+        model = Model()
+        example_batch = (torch.rand(1, 197, 768), torch.rand(1, 197, 768))
+        from torch.testing._internal.common_quantization import (
+            _generate_qdq_quantized_model,
+        )
+
+        with torch.no_grad():
+            converted_model = _generate_qdq_quantized_model(model, example_batch)
+            torch.ao.quantization.move_exported_model_to_eval(converted_model)
+            metrics.reset()
+            torch.compile(converted_model)(*example_batch)
+            check_metrics_vec_kernel_count(3)
+
+    def test_dropout(self):
+        class Model(nn.Module):
+            def __init__(self, dim):
+                super().__init__()
+                self.dropout = eval(f"nn.Dropout{dim}d(p=0.5)")
+
+            def forward(self, x):
+                torch.manual_seed(0)
+                x = self.dropout(x)
+                return x
+
+        for dim in [1, 2, 3]:
+            model = Model(dim)
+            torch.manual_seed(0)
+            shape = [1, 3] + [256] * dim
+            x = torch.randn(*shape)
+            output = model(x)
+            c_model = torch.compile(model)
+            c_output = c_model(x)
+            self.assertTrue(torch.allclose(output, c_output))
+
+    @requires_vectorization
+    def test_bool_max(self):
+        torch.manual_seed(777)
+        x = torch.randn(size=[128, 2501]).ge(0)
+
+        def fn(x):
+            return torch.max(x, 1, False)
+
+        self.common(fn, (x,))
 
 
 if __name__ == "__main__":

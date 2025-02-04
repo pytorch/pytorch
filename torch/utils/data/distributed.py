@@ -1,16 +1,20 @@
 import math
-from typing import TypeVar, Optional, Iterator
+from collections.abc import Iterator
+from typing import Optional, TypeVar
 
 import torch
-from . import Sampler, Dataset
 import torch.distributed as dist
-
-__all__ = ["DistributedSampler", ]
-
-T_co = TypeVar('T_co', covariant=True)
+from torch.utils.data.dataset import Dataset
+from torch.utils.data.sampler import Sampler
 
 
-class DistributedSampler(Sampler[T_co]):
+__all__ = ["DistributedSampler"]
+
+
+_T_co = TypeVar("_T_co", covariant=True)
+
+
+class DistributedSampler(Sampler[_T_co]):
     r"""Sampler that restricts data loading to a subset of the dataset.
 
     It is especially useful in conjunction with
@@ -59,9 +63,15 @@ class DistributedSampler(Sampler[T_co]):
         ...     train(loader)
     """
 
-    def __init__(self, dataset: Dataset, num_replicas: Optional[int] = None,
-                 rank: Optional[int] = None, shuffle: bool = True,
-                 seed: int = 0, drop_last: bool = False) -> None:
+    def __init__(
+        self,
+        dataset: Dataset,
+        num_replicas: Optional[int] = None,
+        rank: Optional[int] = None,
+        shuffle: bool = True,
+        seed: int = 0,
+        drop_last: bool = False,
+    ) -> None:
         if num_replicas is None:
             if not dist.is_available():
                 raise RuntimeError("Requires distributed package to be available")
@@ -72,7 +82,8 @@ class DistributedSampler(Sampler[T_co]):
             rank = dist.get_rank()
         if rank >= num_replicas or rank < 0:
             raise ValueError(
-                f"Invalid rank {rank}, rank should be in the interval [0, {num_replicas - 1}]")
+                f"Invalid rank {rank}, rank should be in the interval [0, {num_replicas - 1}]"
+            )
         self.dataset = dataset
         self.num_replicas = num_replicas
         self.rank = rank
@@ -93,7 +104,7 @@ class DistributedSampler(Sampler[T_co]):
         self.shuffle = shuffle
         self.seed = seed
 
-    def __iter__(self) -> Iterator[T_co]:
+    def __iter__(self) -> Iterator[_T_co]:
         if self.shuffle:
             # deterministically shuffle based on epoch and seed
             g = torch.Generator()
@@ -108,14 +119,16 @@ class DistributedSampler(Sampler[T_co]):
             if padding_size <= len(indices):
                 indices += indices[:padding_size]
             else:
-                indices += (indices * math.ceil(padding_size / len(indices)))[:padding_size]
+                indices += (indices * math.ceil(padding_size / len(indices)))[
+                    :padding_size
+                ]
         else:
             # remove tail of data to make it evenly divisible.
-            indices = indices[:self.total_size]
+            indices = indices[: self.total_size]
         assert len(indices) == self.total_size
 
         # subsample
-        indices = indices[self.rank:self.total_size:self.num_replicas]
+        indices = indices[self.rank : self.total_size : self.num_replicas]
         assert len(indices) == self.num_samples
 
         return iter(indices)

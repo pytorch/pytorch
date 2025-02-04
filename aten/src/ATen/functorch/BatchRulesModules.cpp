@@ -20,9 +20,9 @@ static Tensor getStepTensor(const Tensor& indices, const c10::SymInt& bdim_size,
   return range.view_symint(view_shape);
 }
 
-static std::tuple<Tensor,optional<int64_t>> embedding_batch_rule(
-    const Tensor& weight, optional<int64_t> weight_bdim,
-    const Tensor& indices, optional<int64_t> indices_bdim,
+static std::tuple<Tensor, std::optional<int64_t>> embedding_batch_rule(
+    const Tensor& weight, std::optional<int64_t> weight_bdim,
+    const Tensor& indices, std::optional<int64_t> indices_bdim,
     c10::SymInt padding_idx, bool scale_grad_by_freq, bool sparse) {
   if (!weight_bdim && indices_bdim) {
     // B*, ED -> B*D
@@ -50,14 +50,14 @@ static std::tuple<Tensor,optional<int64_t>> embedding_batch_rule(
   return std::make_tuple(std::move(result), 0);
 }
 
-static std::tuple<Tensor,optional<int64_t>>
+static std::tuple<Tensor, std::optional<int64_t>>
 embedding_dense_backward_batch_rule(
-    const Tensor& grad_, optional<int64_t> grad_bdim,
-    const Tensor& indices_, optional<int64_t> indices_bdim,
+    const Tensor& grad_, std::optional<int64_t> grad_bdim,
+    const Tensor& indices_, std::optional<int64_t> indices_bdim,
     c10::SymInt num_weights, c10::SymInt padding_idx, bool scale_grad_by_freq) {
   Tensor grad = grad_;
   Tensor indices = indices_;
-  if (!indices_bdim && grad_bdim) {
+  if (!indices_bdim.has_value() && grad_bdim) {
     const auto bdim_size = grad.sym_size(*grad_bdim);
     grad = reshape_dim_into(*grad_bdim, -1, grad);
     auto result = at::embedding_dense_backward_symint(
@@ -65,7 +65,8 @@ embedding_dense_backward_batch_rule(
     result = reshape_dim_outof_symint(1, bdim_size, result);
     return std::make_tuple(std::move(result), 1);
   }
-  const auto bdim_size = indices.size(*indices_bdim);
+  // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
+  const auto bdim_size = indices.size(indices_bdim.value());
   indices = moveBatchDimToFront(indices, indices_bdim);
   grad = moveBatchDimToFront(grad, grad_bdim);
   grad = ensure_has_bdim(grad, grad_bdim.has_value(), bdim_size);
@@ -109,9 +110,9 @@ embedding_dense_backward_batch_rule(
  *       output: (BN)CD_{out}H_{out}W_{out}
  */
 template<typename F, F Func, typename... ExtraArgs>
-std::tuple<Tensor,optional<int64_t>>
-grid_sample_batch_rule(const Tensor& input, optional<int64_t> input_bdim, const Tensor& grid, optional<int64_t> grid_bdim, ExtraArgs... extra_args) {
-  std::tuple<Tensor, optional<int64_t>> result;
+std::tuple<Tensor, std::optional<int64_t>>
+static grid_sample_batch_rule(const Tensor& input, std::optional<int64_t> input_bdim, const Tensor& grid, std::optional<int64_t> grid_bdim, ExtraArgs... extra_args) {
+  std::tuple<Tensor, std::optional<int64_t>> result;
   if (input_bdim && !grid_bdim) {
     auto new_input = reshape_dim_into(*input_bdim, 1, input);
     auto out = Func(new_input, grid, std::forward<ExtraArgs>(extra_args)...);
@@ -130,16 +131,16 @@ grid_sample_batch_rule(const Tensor& input, optional<int64_t> input_bdim, const 
     out = reshape_dim_outof(0, input.sizes()[*grid_bdim], out);
     result = std::make_tuple(std::move(out), 0);
   } else {
-    result = std::make_tuple(Func(input, grid, std::forward<ExtraArgs>(extra_args)...), nullopt);
+    result = std::make_tuple(Func(input, grid, std::forward<ExtraArgs>(extra_args)...), std::nullopt);
   }
   return result;
 }
 
 static std::tuple<Tensor, Tensor, Tensor, int64_t>
 grid_sample_backward_helper_in(
-    const Tensor& grad_output, optional<int64_t> grad_output_bdim,
-    const Tensor& input, optional<int64_t> input_bdim,
-    const Tensor& grid, optional<int64_t> grid_bdim) {
+    const Tensor& grad_output, std::optional<int64_t> grad_output_bdim,
+    const Tensor& input, std::optional<int64_t> input_bdim,
+    const Tensor& grid, std::optional<int64_t> grid_bdim) {
 
   auto batch_size = get_bdim_size3(
       grad_output, grad_output_bdim, input, input_bdim, grid, grid_bdim);
@@ -159,60 +160,51 @@ grid_sample_backward_helper_in(
   return std::make_tuple(std::move(grad_output_), std::move(input_), std::move(grid_), batch_size);
 }
 
-static std::tuple<Tensor, optional<int64_t>, Tensor, optional<int64_t>>
+static std::tuple<Tensor, std::optional<int64_t>, Tensor, std::optional<int64_t>>
 grid_sample_backward_helper_out(
-    const std::tuple<Tensor, Tensor> & bw_out,
-    optional<int64_t> grad_input_out_bdim,
-    optional<int64_t> grad_grid_out_bdim,
+    // NOLINTNEXTLINE(performance-unnecessary-value-param)
+    std::tuple<Tensor, Tensor> bw_out,
+    int64_t grad_input_out_bdim,
+    int64_t grad_grid_out_bdim,
     int64_t bdim_size) {
-  auto grad_input = std::get<0>(bw_out);
-  auto grad_grid = std::get<1>(bw_out);
-  grad_input = reshape_dim_outof(*grad_input_out_bdim, bdim_size, grad_input);
-  grad_grid = reshape_dim_outof(*grad_grid_out_bdim, bdim_size, grad_grid);
-  auto result = std::make_tuple(grad_input, grad_input_out_bdim, grad_grid, grad_grid_out_bdim);
-  return result;
+  auto& [grad_input, grad_grid] = bw_out;
+  grad_input = reshape_dim_outof(grad_input_out_bdim, bdim_size, grad_input);
+  grad_grid = reshape_dim_outof(grad_grid_out_bdim, bdim_size, grad_grid);
+  return std::make_tuple(std::move(grad_input), grad_input_out_bdim, std::move(grad_grid), grad_grid_out_bdim);
 }
 
 
 template<typename F, F Func, typename... ExtraArgs>
-std::tuple<Tensor, optional<int64_t>, Tensor, optional<int64_t>>
-grid_sample_backward_batch_rule(
-    const Tensor& grad_output, optional<int64_t> grad_output_bdim,
-    const Tensor& input, optional<int64_t> input_bdim,
-    const Tensor& grid, optional<int64_t> grid_bdim,
+std::tuple<Tensor, std::optional<int64_t>, Tensor, std::optional<int64_t>>
+static grid_sample_backward_batch_rule(
+    const Tensor& grad_output, std::optional<int64_t> grad_output_bdim,
+    const Tensor& input, std::optional<int64_t> input_bdim,
+    const Tensor& grid, std::optional<int64_t> grid_bdim,
     ExtraArgs... extra_args) {
 
   auto new_bw_input = grid_sample_backward_helper_in(
       grad_output, grad_output_bdim, input, input_bdim, grid, grid_bdim);
 
-  auto new_grad_output = std::get<0>(new_bw_input);
-  auto new_input = std::get<1>(new_bw_input);
-  auto new_grid = std::get<2>(new_bw_input);
-  int64_t batch_size = std::get<3>(new_bw_input);
+  auto [new_grad_output, new_input, new_grid, batch_size] = new_bw_input;
 
-  auto bw_out = Func(new_grad_output, new_input, new_grid, std::forward<ExtraArgs>(extra_args)...);
+  auto bw_out = Func(std::move(new_grad_output), std::move(new_input), std::move(new_grid), std::forward<ExtraArgs>(extra_args)...);
 
-  return grid_sample_backward_helper_out(bw_out, 0, 0, batch_size);
+  return grid_sample_backward_helper_out(std::move(bw_out), 0, 0, batch_size);
 }
 
 template<typename F, F Func>
-std::tuple<Tensor, optional<int64_t>, Tensor, optional<int64_t>>
-cudnn_grid_sample_backward_batch_rule(
-    const Tensor& input, optional<int64_t> input_bdim,
-    const Tensor& grid, optional<int64_t> grid_bdim,
-    const Tensor& grad_output, optional<int64_t> grad_output_bdim) {
+std::tuple<Tensor, std::optional<int64_t>, Tensor, std::optional<int64_t>>
+static cudnn_grid_sample_backward_batch_rule(
+    const Tensor& input, std::optional<int64_t> input_bdim,
+    const Tensor& grid, std::optional<int64_t> grid_bdim,
+    const Tensor& grad_output, std::optional<int64_t> grad_output_bdim) {
 
-  auto new_bw_input = grid_sample_backward_helper_in(
+  auto [new_grad_output,new_input,new_grid,bdim_size]= grid_sample_backward_helper_in(
       grad_output, grad_output_bdim, input, input_bdim, grid, grid_bdim);
 
-  auto new_grad_output = std::get<0>(new_bw_input);
-  auto new_input = std::get<1>(new_bw_input);
-  auto new_grid = std::get<2>(new_bw_input);
-  int64_t bdim_size = std::get<3>(new_bw_input);
+  auto bw_out = Func(std::move(new_input), std::move(new_grid), std::move(new_grad_output));
 
-  auto bw_out = Func(new_input, new_grid, new_grad_output);
-
-  return grid_sample_backward_helper_out(bw_out, 0, 0, bdim_size);
+  return grid_sample_backward_helper_out(std::move(bw_out), 0, 0, bdim_size);
 }
 
 // TODO: replace with targetable functionalization
@@ -224,9 +216,9 @@ static Tensor one_hot_decomposition_hack(const Tensor &self, int64_t num_classes
     // but shape inference is not possible.
     if (self.sym_numel() == 0) {
         if (num_classes <= 0) {
-            AT_ERROR("Can not infer total number of classes from empty tensor.");
+            TORCH_CHECK(false, "Can not infer total number of classes from empty tensor.");
         } else {
-            shape.push_back(num_classes);
+            shape.emplace_back(num_classes);
             return at::empty_symint(shape, self.options());
         }
     }
@@ -246,7 +238,7 @@ static Tensor one_hot_decomposition_hack(const Tensor &self, int64_t num_classes
     //   TORCH_CHECK(num_classes > self.max().item().toLong(), "Class values must be smaller than num_classes.");
     // }
 
-    shape.push_back(num_classes);
+    shape.emplace_back(num_classes);
     Tensor ret = at::zeros_symint(shape, self.options());
     return ret.scatter(-1, self.unsqueeze(-1), 1);
 }
@@ -256,11 +248,12 @@ struct UpsampleBackwardBatchRuleHelper;
 
 template <typename F, F Func, typename A, typename B, typename C, typename... T>
 struct UpsampleBackwardBatchRuleHelper<F, Func, typelist<A, B, C, T...>> {
-  static std::tuple<Tensor,optional<int64_t>> apply(
-      const Tensor& grad_output, optional<int64_t> grad_output_bdim,
+  static std::tuple<Tensor, std::optional<int64_t>> apply(
+      const Tensor& grad_output, std::optional<int64_t> grad_output_bdim,
       c10::SymIntArrayRef output_size, c10::SymIntArrayRef input_size,
       T... extra_args) {
-    auto grad_output_ = reshape_dim_into(*grad_output_bdim, 0, grad_output);
+    // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
+    auto grad_output_ = reshape_dim_into(grad_output_bdim.value(), 0, grad_output);
     TORCH_INTERNAL_ASSERT(!input_size.empty());
 
     // input_size is wrong so we correct it
@@ -268,11 +261,12 @@ struct UpsampleBackwardBatchRuleHelper<F, Func, typelist<A, B, C, T...>> {
     physical_input_size[0] = grad_output_.sym_sizes()[0];
 
     auto out = Func(
-        grad_output_,
+        std::move(grad_output_),
         output_size,
-        physical_input_size,
+        std::move(physical_input_size),
         std::forward<T>(extra_args)...);
-    return std::make_tuple(reshape_dim_outof_symint(0, grad_output.sym_sizes()[*grad_output_bdim], out), 0);
+    // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
+    return std::make_tuple(reshape_dim_outof_symint(0, grad_output.sym_sizes()[grad_output_bdim.value()], out), 0);
   }
 
 };
@@ -282,9 +276,9 @@ struct GridSampleBatchRuleHelper;
 
 template <typename F, F Func, typename T1, typename T2, typename... T>
 struct GridSampleBatchRuleHelper<F, Func, typelist<T1, T2, T...>> {
-  static std::tuple<Tensor,optional<int64_t>> apply(
-      const Tensor& input, optional<int64_t> input_batch_dim,
-      const Tensor& grid, optional<int64_t> grid_batch_dim,
+  static std::tuple<Tensor, std::optional<int64_t>> apply(
+      const Tensor& input, std::optional<int64_t> input_batch_dim,
+      const Tensor& grid, std::optional<int64_t> grid_batch_dim,
       T... extra_args) {
     return grid_sample_batch_rule<F, Func, T...>(
         input, input_batch_dim, grid, grid_batch_dim, std::forward<T>(extra_args)...);
@@ -296,10 +290,10 @@ struct GridSampleBackwardBatchRuleHelper;
 
 template <typename F, F Func, typename T1, typename T2, typename T3, typename... T>
 struct GridSampleBackwardBatchRuleHelper<F, Func, typelist<T1, T2, T3, T...>> {
-  static std::tuple<Tensor, optional<int64_t>, Tensor, optional<int64_t>> apply(
-      const Tensor& grad_output, optional<int64_t> grad_output_batch_dim,
-      const Tensor& input, optional<int64_t> input_batch_dim,
-      const Tensor& grid, optional<int64_t> grid_batch_dim,
+  static std::tuple<Tensor, std::optional<int64_t>, Tensor, std::optional<int64_t>> apply(
+      const Tensor& grad_output, std::optional<int64_t> grad_output_batch_dim,
+      const Tensor& input, std::optional<int64_t> input_batch_dim,
+      const Tensor& grid, std::optional<int64_t> grid_batch_dim,
       T... extra_args) {
     return grid_sample_backward_batch_rule<F, Func, T...>(
         grad_output, grad_output_batch_dim,
@@ -311,10 +305,10 @@ struct GridSampleBackwardBatchRuleHelper<F, Func, typelist<T1, T2, T3, T...>> {
 
 template <typename F, F Func>
 struct CudnnGridSampleBackwardBatchRuleHelper {
-  static std::tuple<Tensor, optional<int64_t>, Tensor, optional<int64_t>> apply(
-      const Tensor& input, optional<int64_t> input_batch_dim,
-      const Tensor& grid, optional<int64_t> grid_batch_dim,
-      const Tensor& grad_output, optional<int64_t> grad_output_batch_dim) {
+  static std::tuple<Tensor, std::optional<int64_t>, Tensor, std::optional<int64_t>> apply(
+      const Tensor& input, std::optional<int64_t> input_batch_dim,
+      const Tensor& grid, std::optional<int64_t> grid_batch_dim,
+      const Tensor& grad_output, std::optional<int64_t> grad_output_batch_dim) {
     return cudnn_grid_sample_backward_batch_rule<F, Func>(
         input, input_batch_dim,
         grid, grid_batch_dim,
@@ -363,6 +357,7 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {
 
   EXISTING_BDIM(pixel_shuffle);
   EXISTING_BDIM(pixel_unshuffle);
+  EXISTING_BDIM(channel_shuffle);
 
   VARIADIC_BDIMS(constant_pad_nd);
   EXISTING_BDIM(reflection_pad1d);

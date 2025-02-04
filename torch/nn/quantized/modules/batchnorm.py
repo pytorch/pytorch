@@ -8,5 +8,4 @@ appropriate file under the `torch/ao/nn/quantized/modules`,
 while adding an import statement here.
 """
 
-from torch.ao.nn.quantized.modules.batchnorm import BatchNorm2d
-from torch.ao.nn.quantized.modules.batchnorm import BatchNorm3d
+from torch.ao.nn.quantized.modules.batchnorm import BatchNorm2d, BatchNorm3d

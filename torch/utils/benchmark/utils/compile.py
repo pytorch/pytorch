@@ -1,21 +1,25 @@
+# mypy: allow-untyped-defs
+from typing import Any, Callable, cast, Optional, Union
+
 import torch
-
-__all__ = ["bench_all", "benchmark_compile"]
-
 import torch._dynamo
 from torch._dynamo.testing import CompileCounterWithBackend
 from torch.utils.benchmark import Timer
 
-from typing import Optional, List, Callable, Union, Any, cast
+
+__all__ = ["bench_all", "benchmark_compile"]
+
 
 _warned_tensor_cores = False
 _default_float_32_precision = torch.get_float32_matmul_precision()
 
 try:
     from tabulate import tabulate
+
     HAS_TABULATE = True
-except ImportError:
+except ModuleNotFoundError:
     HAS_TABULATE = False
+    tabulate = None  # type: ignore[assignment]
     print("tabulate is not installed, please pip install tabulate to use this utility")
 
 if HAS_TABULATE:
@@ -149,7 +153,7 @@ if HAS_TABULATE:
         for backend in torch._dynamo.list_backends():
 
             if backend == "inductor":
-                mode_options = cast(List[Optional[str]], list(torch._inductor.list_mode_options().keys())) + [None]
+                mode_options = cast(list[Optional[str]], list(torch._inductor.list_mode_options().keys())) + [None]
                 for mode in mode_options:
                     if mode == "default":
                         continue

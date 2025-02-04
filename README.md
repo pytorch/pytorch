@@ -1,4 +1,4 @@
-![PyTorch Logo](https://github.com/pytorch/pytorch/blob/main/docs/source/_static/img/pytorch-logo-dark.png)
+![PyTorch Logo](https://github.com/pytorch/pytorch/raw/main/docs/source/_static/img/pytorch-logo-dark.png)
 
 --------------------------------------------------------------------------------
 
@@ -27,8 +27,8 @@ Our trunk health (Continuous Integration signals) can be found at [hud.pytorch.o
       - [NVIDIA CUDA Support](#nvidia-cuda-support)
       - [AMD ROCm Support](#amd-rocm-support)
       - [Intel GPU Support](#intel-gpu-support)
-    - [Install Dependencies](#install-dependencies)
     - [Get the PyTorch Source](#get-the-pytorch-source)
+    - [Install Dependencies](#install-dependencies)
     - [Install PyTorch](#install-pytorch)
       - [Adjust Build Options (Optional)](#adjust-build-options-optional)
   - [Docker Image](#docker-image)
@@ -98,7 +98,7 @@ from several research papers on this topic, as well as current and past work suc
 While this technique is not unique to PyTorch, it's one of the fastest implementations of it to date.
 You get the best of speed and flexibility for your crazy research.
 
-![Dynamic graph](https://github.com/pytorch/pytorch/blob/main/docs/source/_static/img/dynamic_graph.gif)
+![Dynamic graph](https://github.com/pytorch/pytorch/raw/main/docs/source/_static/img/dynamic_graph.gif)
 
 ### Python First
 
@@ -160,10 +160,35 @@ They require JetPack 4.2 and above, and [@dusty-nv](https://github.com/dusty-nv)
 
 #### Prerequisites
 If you are installing from source, you will need:
-- Python 3.8 or later (for Linux, Python 3.8.1+ is needed)
-- A compiler that fully supports C++17, such as clang or gcc (gcc 9.4.0 or newer is required)
+- Python 3.9 or later
+- A compiler that fully supports C++17, such as clang or gcc (gcc 9.4.0 or newer is required, on Linux)
+- Visual Studio or Visual Studio Build Tool (Windows only)
 
-We highly recommend installing an [Anaconda](https://www.anaconda.com/download) environment. You will get a high-quality BLAS library (MKL) and you get controlled dependency versions regardless of your Linux distro.
+\* PyTorch CI uses Visual C++ BuildTools, which come with Visual Studio Enterprise,
+Professional, or Community Editions. You can also install the build tools from
+https://visualstudio.microsoft.com/visual-cpp-build-tools/. The build tools *do not*
+come with Visual Studio Code by default.
+
+\* We highly recommend installing an [Anaconda](https://www.anaconda.com/download) environment. You will get a high-quality BLAS library (MKL) and you get controlled dependency versions regardless of your Linux distro.
+
+An example of environment setup is shown below:
+
+* Linux:
+
+```bash
+$ source <CONDA_INSTALL_DIR>/bin/activate
+$ conda create -y -n <CONDA_NAME>
+$ conda activate <CONDA_NAME>
+```
+
+* Windows:
+
+```bash
+$ source <CONDA_INSTALL_DIR>\Scripts\activate.bat
+$ conda create -y -n <CONDA_NAME>
+$ conda activate <CONDA_NAME>
+$ call "C:\Program Files\Microsoft Visual Studio\<VERSION>\Community\VC\Auxiliary\Build\vcvarsall.bat" x64
+```
 
 ##### NVIDIA CUDA Support
 If you want to compile with CUDA support, [select a supported version of CUDA from our support matrix](https://pytorch.org/get-started/locally/), then install the following:
@@ -183,16 +208,27 @@ If you want to compile with ROCm support, install
 - [AMD ROCm](https://rocm.docs.amd.com/en/latest/deploy/linux/quick_start.html) 4.0 and above installation
 - ROCm is currently supported only for Linux systems.
 
+By default the build system expects ROCm to be installed in `/opt/rocm`. If ROCm is installed in a different directory, the `ROCM_PATH` environment variable must be set to the ROCm installation directory. The build system automatically detects the AMD GPU architecture. Optionally, the AMD GPU architecture can be explicitly set with the `PYTORCH_ROCM_ARCH` environment variable [AMD GPU architecture](https://rocm.docs.amd.com/projects/install-on-linux/en/latest/reference/system-requirements.html#supported-gpus)
+
 If you want to disable ROCm support, export the environment variable `USE_ROCM=0`.
 Other potentially useful environment variables may be found in `setup.py`.
 
 ##### Intel GPU Support
 If you want to compile with Intel GPU support, follow these
 - [PyTorch Prerequisites for Intel GPUs](https://www.intel.com/content/www/us/en/developer/articles/tool/pytorch-prerequisites-for-intel-gpus.html) instructions.
-- Intel GPU is currently supported only for Linux systems.
+- Intel GPU is supported for Linux and Windows.
 
 If you want to disable Intel GPU support, export the environment variable `USE_XPU=0`.
 Other potentially useful environment variables may be found in `setup.py`.
+
+#### Get the PyTorch Source
+```bash
+git clone --recursive https://github.com/pytorch/pytorch
+cd pytorch
+# if you are updating an existing checkout
+git submodule sync
+git submodule update --init --recursive
+```
 
 #### Install Dependencies
 
@@ -207,12 +243,13 @@ pip install -r requirements.txt
 **On Linux**
 
 ```bash
-conda install intel::mkl-static intel::mkl-include
+pip install mkl-static mkl-include
 # CUDA only: Add LAPACK support for the GPU if needed
-conda install -c pytorch magma-cuda110  # or the magma-cuda* that matches your CUDA version from https://anaconda.org/pytorch/repo
+conda install -c pytorch magma-cuda121  # or the magma-cuda* that matches your CUDA version from https://anaconda.org/pytorch/repo
 
 # (optional) If using torch.compile with inductor/triton, install the matching version of triton
 # Run from the pytorch directory after cloning
+# For Intel GPU support, please explicitly `export USE_XPU=1` before running command.
 make triton
 ```
 
@@ -220,7 +257,7 @@ make triton
 
 ```bash
 # Add this package on intel x86 processor machines only
-conda install intel::mkl-static intel::mkl-include
+pip install mkl-static mkl-include
 # Add these packages if torch.distributed is needed
 conda install pkg-config libuv
 ```
@@ -228,19 +265,10 @@ conda install pkg-config libuv
 **On Windows**
 
 ```bash
-conda install intel::mkl-static intel::mkl-include
+pip install mkl-static mkl-include
 # Add these packages if torch.distributed is needed.
 # Distributed package support on Windows is a prototype feature and is subject to changes.
 conda install -c conda-forge libuv=1.39
-```
-
-#### Get the PyTorch Source
-```bash
-git clone --recursive https://github.com/pytorch/pytorch
-cd pytorch
-# if you are updating an existing checkout
-git submodule sync
-git submodule update --init --recursive
 ```
 
 #### Install PyTorch
@@ -251,6 +279,8 @@ If you would like to compile PyTorch with [new C++ ABI](https://gcc.gnu.org/onli
 export _GLIBCXX_USE_CXX11_ABI=1
 ```
 
+Please **note** that starting from PyTorch 2.5, the PyTorch build with XPU supports both new and old C++ ABIs. Previously, XPU only supported the new C++ ABI. If you want to compile with Intel GPU support, please follow [Intel GPU Support](#intel-gpu-support).
+
 If you're compiling for AMD ROCm then first run this command:
 ```bash
 # Only run this if you're compiling for ROCm
@@ -259,19 +289,9 @@ python tools/amd_build/build_amd.py
 
 Install PyTorch
 ```bash
-export CMAKE_PREFIX_PATH=${CONDA_PREFIX:-"$(dirname $(which conda))/../"}
+export CMAKE_PREFIX_PATH="${CONDA_PREFIX:-'$(dirname $(which conda))/../'}:${CMAKE_PREFIX_PATH}"
 python setup.py develop
 ```
-
-> _Aside:_ If you are using [Anaconda](https://www.anaconda.com/distribution/#download-section), you may experience an error caused by the linker:
->
-> ```plaintext
-> build/temp.linux-x86_64-3.7/torch/csrc/stub.o: file not recognized: file format not recognized
-> collect2: error: ld returned 1 exit status
-> error: command 'g++' failed with exit status 1
-> ```
->
-> This is caused by `ld` from the Conda environment shadowing the system `ld`. You should use a newer version of Python that fixes this issue. The recommended Python version is 3.8.1+.
 
 **On macOS**
 
@@ -281,13 +301,6 @@ python3 setup.py develop
 
 **On Windows**
 
-Choose Correct Visual Studio Version.
-
-PyTorch CI uses Visual C++ BuildTools, which come with Visual Studio Enterprise,
-Professional, or Community Editions. You can also install the build tools from
-https://visualstudio.microsoft.com/visual-cpp-build-tools/. The build tools *do not*
-come with Visual Studio Code by default.
-
 If you want to build legacy python code, please refer to [Building on legacy code and CUDA](https://github.com/pytorch/pytorch/blob/main/CONTRIBUTING.md#building-on-legacy-code-and-cuda)
 
 **CPU-only builds**
@@ -295,7 +308,6 @@ If you want to build legacy python code, please refer to [Building on legacy cod
 In this mode PyTorch computations will run on your CPU, not your GPU
 
 ```cmd
-conda activate
 python setup.py develop
 ```
 
@@ -349,14 +361,14 @@ with such a step.
 
 On Linux
 ```bash
-export CMAKE_PREFIX_PATH=${CONDA_PREFIX:-"$(dirname $(which conda))/../"}
+export CMAKE_PREFIX_PATH="${CONDA_PREFIX:-'$(dirname $(which conda))/../'}:${CMAKE_PREFIX_PATH}"
 python setup.py build --cmake-only
 ccmake build  # or cmake-gui build
 ```
 
 On macOS
 ```bash
-export CMAKE_PREFIX_PATH=${CONDA_PREFIX:-"$(dirname $(which conda))/../"}
+export CMAKE_PREFIX_PATH="${CONDA_PREFIX:-'$(dirname $(which conda))/../'}:${CMAKE_PREFIX_PATH}"
 MACOSX_DEPLOYMENT_TARGET=10.9 CC=clang CXX=clang++ python setup.py build --cmake-only
 ccmake build  # or cmake-gui build
 ```
@@ -403,9 +415,11 @@ readthedocs theme.
 ```bash
 cd docs/
 pip install -r requirements.txt
+make html
+make serve
 ```
-You can then build the documentation by running `make <format>` from the
-`docs/` folder. Run `make` to get a list of all available output formats.
+
+Run `make` to get a list of all available output formats.
 
 If you get a katex error run `npm install katex`.  If it persists, try
 `npm install -g katex`
@@ -468,7 +482,7 @@ To learn more about making a contribution to Pytorch, please see our [Contributi
 PyTorch is a community-driven project with several skillful engineers and researchers contributing to it.
 
 PyTorch is currently maintained by [Soumith Chintala](http://soumith.ch), [Gregory Chanan](https://github.com/gchanan), [Dmytro Dzhulgakov](https://github.com/dzhulgakov), [Edward Yang](https://github.com/ezyang), and [Nikita Shulga](https://github.com/malfet) with major contributions coming from hundreds of talented individuals in various forms and means.
-A non-exhaustive but growing list needs to mention: Trevor Killeen, Sasank Chilamkurthy, Sergey Zagoruyko, Adam Lerer, Francisco Massa, Alykhan Tejani, Luca Antiga, Alban Desmaison, Andreas Koepf, James Bradbury, Zeming Lin, Yuandong Tian, Guillaume Lample, Marat Dukhan, Natalia Gimelshein, Christian Sarofeen, Martin Raison, Edward Yang, Zachary Devito.
+A non-exhaustive but growing list needs to mention: [Trevor Killeen](https://github.com/killeent), [Sasank Chilamkurthy](https://github.com/chsasank), [Sergey Zagoruyko](https://github.com/szagoruyko), [Adam Lerer](https://github.com/adamlerer), [Francisco Massa](https://github.com/fmassa), [Alykhan Tejani](https://github.com/alykhantejani), [Luca Antiga](https://github.com/lantiga), [Alban Desmaison](https://github.com/albanD), [Andreas Koepf](https://github.com/andreaskoepf), [James Bradbury](https://github.com/jamesb93), [Zeming Lin](https://github.com/ebetica), [Yuandong Tian](https://github.com/yuandong-tian), [Guillaume Lample](https://github.com/glample), [Marat Dukhan](https://github.com/Maratyszcza), [Natalia Gimelshein](https://github.com/ngimel), [Christian Sarofeen](https://github.com/csarofeen), [Martin Raison](https://github.com/martinraison), [Edward Yang](https://github.com/ezyang), [Zachary Devito](https://github.com/zdevito).
 
 Note: This project is unrelated to [hughperkins/pytorch](https://github.com/hughperkins/pytorch) with the same name. Hugh is a valuable contributor to the Torch community and has helped with many things Torch and PyTorch.
 

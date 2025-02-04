@@ -1,9 +1,9 @@
+# mypy: allow-untyped-defs
 import copy
-from typing import Any, cast, List, Optional, Tuple
+from typing import Any, cast, Optional
 
 import torch
 import torch.distributed as dist
-
 import torch.distributed._shard.sharding_spec as shard_spec
 import torch.distributed.distributed_c10d as c10d
 from torch.distributed._shard.sharded_tensor import (
@@ -12,25 +12,24 @@ from torch.distributed._shard.sharded_tensor import (
     ShardedTensorMetadata,
     TensorProperties,
 )
-
 from torch.distributed._shard.sharding_spec import ShardMetadata
 from torch.distributed._shard.sharding_spec.chunk_sharding_spec import ChunkShardingSpec
-from torch.distributed._tensor import DeviceMesh, DTensor, Replicate, Shard as DShard
 from torch.distributed.device_mesh import _mesh_resources
-
 from torch.distributed.fsdp._common_utils import _set_fsdp_flattened
 from torch.distributed.fsdp._fsdp_extensions import FSDPExtensions
 from torch.distributed.fsdp._shard_utils import _create_chunk_sharded_tensor
 from torch.distributed.remote_device import _remote_device
+from torch.distributed.tensor import DeviceMesh, DTensor, Replicate, Shard as DShard
 from torch.distributed.tensor.parallel._data_parallel_utils import (
     _flatten_tensor,
     _unflatten_tensor,
 )
 
+
 __all__ = ["DTensorExtensions"]
 
 
-def _get_box(tensor: DTensor) -> Tuple[torch.Size, torch.Size]:
+def _get_box(tensor: DTensor) -> tuple[torch.Size, torch.Size]:
     device_mesh = tensor.device_mesh
     assert device_mesh.ndim == 1, "Only 1D DeviceMeshes currently handled"
 
@@ -46,12 +45,12 @@ def _get_box(tensor: DTensor) -> Tuple[torch.Size, torch.Size]:
     return (torch.Size(offsets), tensor._local_tensor.size())
 
 
-def _get_box_for(tensor: DTensor, idx: int) -> Tuple[torch.Size, torch.Size]:
+def _get_box_for(tensor: DTensor, idx: int) -> tuple[torch.Size, torch.Size]:
     offsets, size = _get_box(tensor)
     return (torch.Size([val * idx for val in offsets]), size)
 
 
-def _get_local_box(tensor: DTensor) -> Tuple[torch.Size, torch.Size]:
+def _get_local_box(tensor: DTensor) -> tuple[torch.Size, torch.Size]:
     device_mesh = tensor.device_mesh
     coord = device_mesh.get_coordinate()
     assert coord is not None
@@ -112,9 +111,7 @@ def _create_sharded_tensor_md_from_dt(
 def _get_dt_pg(dt: DTensor) -> c10d.ProcessGroup:
     mesh = dt.device_mesh
     assert mesh.ndim == 1, "Only 1D DeviceMeshes currently handled"
-    dim_groups = mesh.get_group()
-    assert isinstance(dim_groups, list)
-    return dim_groups[0]
+    return mesh.get_group()
 
 
 def _rewrite_spec_if_needed(
@@ -166,7 +163,7 @@ def _chunk_tensor(
         )
 
         outer_local_shard = tensor.local_shards()[0]
-        shards: List[Shard] = [
+        shards: list[Shard] = [
             Shard(inner_st, copy.deepcopy(outer_local_shard.metadata))
         ]
         st_meta = copy.deepcopy(tensor.metadata())
@@ -189,7 +186,7 @@ def _chunk_tensor(
             inner_param,
             rank,
             world_size,
-            torch.cuda.device_count(),
+            torch.accelerator.device_count(),
             pg,
         )
 
@@ -230,34 +227,33 @@ def _chunk_dtensor(
 
     The local rank will gets its corresponding chunk as the local tensor to create a DTensor.
     """
-    parent_mesh = _mesh_resources.get_parent_mesh(device_mesh)
-    if parent_mesh is None:
+    root_mesh = _mesh_resources.get_root_mesh(device_mesh)
+    if root_mesh is None:
         raise RuntimeError("No parent device_mesh is found for FSDP device_mesh.")
-    if parent_mesh.ndim < 2:
+    if root_mesh.ndim < 2:
         raise RuntimeError(
-            f"Found parent device_mesh of ndim={parent_mesh.ndim},",
+            f"Found parent device_mesh of ndim={root_mesh.ndim},",
             "but meshes must be at least 2D.",
         )
 
     # We need to explicitly call .detach() to return a new tensor detached from the current graph.
-    tensor = tensor.clone().detach()
+    tensor = tensor.detach().clone()
 
     # When a layer is not involved in TP, then the tensor will not be a DTensor.
     # e.g. When a layer is not sppecified in the parallelize_plan, TP will have no effect on the layer.
     # e.g. When you do PairwiseParallel on a 3 layer model, TP will have no effect on the third layer.
     if isinstance(tensor, torch.Tensor) and not isinstance(tensor, DTensor):
-
         # For tensors, it is replicated across tp dimension and sharded across FSDP dimension.
         # TP is the inner dimension and FSDP is the outer dimension.
         # Therefore, shard placements for tensor is (Shard(0), Replicate()).
-        replicate_placements = [Replicate() for _ in range(parent_mesh.ndim)]
-        shard_placements = [Replicate() for _ in range(parent_mesh.ndim)]
+        replicate_placements = [Replicate() for _ in range(root_mesh.ndim)]
+        shard_placements = [Replicate() for _ in range(root_mesh.ndim)]
         shard_placements[0] = DShard(0)  # type: ignore[call-overload]
 
         return DTensor.from_local(
-            tensor, parent_mesh, replicate_placements, run_check=False
+            tensor, root_mesh, replicate_placements, run_check=False
         ).redistribute(
-            device_mesh=parent_mesh,
+            device_mesh=root_mesh,
             placements=shard_placements,
         )
 
@@ -272,23 +268,23 @@ def _chunk_dtensor(
         # Therefore, shard placements for tensor is (Shard(0), tp_placement).
         # For higher dimensional meshes, it is replicated across other dimensions. For example, with
         # HSDP the shard placements for tensor is (Replicate, Shard(0), tp_placement).
-        replicate_placements = [Replicate() for _ in range(parent_mesh.ndim)]
+        replicate_placements = [Replicate() for _ in range(root_mesh.ndim)]
         replicate_placements[-1] = tp_placement  # type: ignore[call-overload]
-        shard_placements = [Replicate() for i in range(parent_mesh.ndim)]  # type: ignore[misc]
+        shard_placements = [Replicate() for i in range(root_mesh.ndim)]  # type: ignore[misc]
         shard_placements[-2] = DShard(0)  # type: ignore[call-overload]
         shard_placements[-1] = tp_placement  # type: ignore[call-overload]
 
         return DTensor.from_local(
-            tensor, parent_mesh, replicate_placements, run_check=False
+            tensor, root_mesh, replicate_placements, run_check=False
         ).redistribute(
-            device_mesh=parent_mesh,
+            device_mesh=root_mesh,
             placements=shard_placements,
         )
 
 
 def _pre_load_state_dict(
     tensor: torch.Tensor,
-) -> Tuple[torch.Tensor, List[Shard]]:
+) -> tuple[torch.Tensor, list[Shard]]:
     shards = cast(ShardedTensor, tensor).local_shards()
     if len(shards) == 1 and type(shards[0].tensor) is ShardedTensor:
         inner_tensor = shards[0].tensor
@@ -325,6 +321,7 @@ class DTensorExtensions(FSDPExtensions):
     This is the implementation for FSDPExtensions defined in
     https://github.com/pytorch/pytorch/blob/main/torch/distributed/fsdp/_fsdp_extensions.py
     """
+
     def __init__(self, device_handle) -> None:
         super().__init__()
         self.compute_stream = None
@@ -336,7 +333,7 @@ class DTensorExtensions(FSDPExtensions):
     def pre_flatten_transform(
         self,
         tensor: torch.Tensor,
-    ) -> Tuple[torch.Tensor, Optional[Any]]:
+    ) -> tuple[torch.Tensor, Optional[Any]]:
         return _flatten_tensor(tensor)
 
     def post_unflatten_transform(
@@ -353,7 +350,7 @@ class DTensorExtensions(FSDPExtensions):
                 tensor,
                 param_extension,
                 device_handle=self.device_handle,
-                compute_stream=self.compute_stream
+                compute_stream=self.compute_stream,
             )
             _set_fsdp_flattened(result)
             return result
@@ -380,7 +377,7 @@ class DTensorExtensions(FSDPExtensions):
     def pre_load_state_dict_transform(
         self,
         tensor: torch.Tensor,
-    ) -> Tuple[torch.Tensor, List[Shard]]:
+    ) -> tuple[torch.Tensor, list[Shard]]:
         return _pre_load_state_dict(tensor)
 
     def all_gather_dtensor(

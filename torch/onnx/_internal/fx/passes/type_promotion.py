@@ -1,53 +1,44 @@
+# mypy: allow-untyped-defs
 # Owner(s): ["module: onnx"]
 from __future__ import annotations
 
 import abc
-
 import dataclasses
 import inspect
 import logging
-from types import ModuleType
-
-from typing import Any, Callable, Mapping, Optional, Sequence, Set, Union
+from typing import Any, Callable, TYPE_CHECKING
 
 import torch
+import torch._dispatch.python
 import torch._ops
 import torch.fx
 import torch.fx.traceback as fx_traceback
-
 from torch import _prims_common, _refs
-
 from torch._prims_common import (
     ELEMENTWISE_TYPE_PROMOTION_KIND,
     wrappers as _prims_common_wrappers,
 )
 from torch._refs import linalg as _linalg_refs, nn as _nn_refs, special as _special_refs
 from torch._refs.nn import functional as _functional_refs
-from torch._subclasses import fake_tensor
 from torch.fx.experimental import proxy_tensor
-
-# Imported to resolve beartype issue when type checking node.Argument.
-from torch.fx.node import Node  # noqa: F401
-
-from torch.onnx._internal import _beartype
 from torch.onnx._internal.fx import _pass, diagnostics, type_utils as fx_type_utils
 from torch.utils import _python_dispatch, _pytree
 
-logger = logging.getLogger(__name__)
 
-# TODO(bowbao): move to type utils.
-_SCALAR_TYPE_TENSOR_DTYPE_MAP: Mapping[type, torch.dtype] = {
-    bool: torch.bool,
-    int: torch.int64,
-    float: torch.float32,
-    complex: torch.complex32,
-}
+if TYPE_CHECKING:
+    from collections.abc import Mapping, Sequence
+    from types import ModuleType
+
+    from torch._subclasses import fake_tensor
+
+
+logger = logging.getLogger(__name__)
 
 
 def _try_getclosurevars(func):
     try:
         return inspect.getclosurevars(func)
-    except TypeError as e:
+    except TypeError:
         return None
 
 
@@ -80,16 +71,13 @@ class TypePromotionRule(abc.ABC):
     # A class that overrides __eq__() and does not define __hash__() will have its __hash__() implicitly set to None.
     # Ref: https://docs.python.org/3/reference/datamodel.html#object.__hash__
     @abc.abstractmethod
-    def __hash__(self) -> int:
-        ...
+    def __hash__(self) -> int: ...
 
     @abc.abstractmethod
-    def __repr__(self):
-        ...
+    def __repr__(self): ...
 
     @abc.abstractmethod
-    def __eq__(self, other: object) -> bool:
-        ...
+    def __eq__(self, other: object) -> bool: ...
 
     def is_valid(self) -> bool:
         """Check if the rule is valid."""
@@ -161,15 +149,15 @@ class ElementwiseTypePromotionRule(TypePromotionRule):
             f"{self.promote_args_positions}, {self.promote_kwargs_names}, {self.promotion_kind})"
         )
 
-    def __eq__(self, __value: object) -> bool:
-        if not isinstance(__value, ElementwiseTypePromotionRule):
+    def __eq__(self, other: object, /) -> bool:
+        if not isinstance(other, ElementwiseTypePromotionRule):
             return False
         return (
-            self.namespace == __value.namespace
-            and self.op_name == __value.op_name
-            and self.promote_args_positions == __value.promote_args_positions
-            and self.promote_kwargs_names == __value.promote_kwargs_names
-            and self.promotion_kind == __value.promotion_kind
+            self.namespace == other.namespace
+            and self.op_name == other.op_name
+            and self.promote_args_positions == other.promote_args_positions
+            and self.promote_kwargs_names == other.promote_kwargs_names
+            and self.promotion_kind == other.promotion_kind
         )
 
     def __hash__(self) -> int:
@@ -277,13 +265,13 @@ class ReductionTypePromotionRule(TypePromotionRule):
     def __repr__(self):
         return f"ReductionTypePromotionRule('{self.namespace}', '{self.op_name}', {self.promotion_kind})"
 
-    def __eq__(self, __value: object) -> bool:
-        if not isinstance(__value, ElementwiseTypePromotionRule):
+    def __eq__(self, other: object, /) -> bool:
+        if not isinstance(other, ElementwiseTypePromotionRule):
             return False
         return (
-            self.namespace == __value.namespace
-            and self.op_name == __value.op_name
-            and self.promotion_kind == __value.promotion_kind
+            self.namespace == other.namespace
+            and self.op_name == other.op_name
+            and self.promotion_kind == other.promotion_kind
         )
 
     def __hash__(self) -> int:
@@ -297,7 +285,7 @@ class ReductionTypePromotionRule(TypePromotionRule):
         ), f"Reduction op torch.ops.{self.namespace}.{self.op_name} expects at least one argument"
         arg = args[0]
         assert isinstance(arg, torch.Tensor), f"{type(arg)=} is not torch.Tensor"
-        dtype: Optional[torch.dtype] = kwargs.get("dtype", None)
+        dtype: torch.dtype | None = kwargs.get("dtype", None)
 
         computation_dtype, result_dtype = _prims_common.reduction_dtypes(
             arg, self.promotion_kind, dtype
@@ -361,7 +349,7 @@ class SumLikeReductionTypePromotionRule(ReductionTypePromotionRule):
         ), f"Reduction op torch.ops.{self.namespace}.{self.op_name} expects at least one argument"
         arg = args[0]
         assert isinstance(arg, torch.Tensor), f"{type(arg)=} is not torch.Tensor"
-        dtype: Optional[torch.dtype] = kwargs.get("dtype", None)
+        dtype: torch.dtype | None = kwargs.get("dtype", None)
         # The below logic is copied from `torch/_refs/__init__.py` reduction ops impl.
         if dtype is None:
             if _prims_common.is_boolean_dtype(
@@ -560,6 +548,9 @@ _GENERATED_ATEN_TYPE_PROMOTION_RULE_SET = {
     ),
     ElementwiseTypePromotionRule(
         "aten", "digamma_", [0], [], ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT
+    ),
+    ElementwiseTypePromotionRule(
+        "aten", "dot", [0, 1], [], ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
     ),
     ElementwiseTypePromotionRule(
         "aten", "elu", [0], [], ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
@@ -877,10 +868,7 @@ _GENERATED_ATEN_TYPE_PROMOTION_RULE_SET = {
         "aten", "nll_loss", [0], [], ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
     ),
     ElementwiseTypePromotionRule(
-        "aten", "normal", [0], [], ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
-    ),
-    ElementwiseTypePromotionRule(
-        "aten", "normal_", [0], [], ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
+        "aten", "normal", [0, 1], [], ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
     ),
     ElementwiseTypePromotionRule(
         "aten", "pdist", [0], [], ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
@@ -891,12 +879,6 @@ _GENERATED_ATEN_TYPE_PROMOTION_RULE_SET = {
         [0, 1],
         [],
         ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
-    ),
-    ElementwiseTypePromotionRule(
-        "aten", "pow", [0, 1], [], ELEMENTWISE_TYPE_PROMOTION_KIND.BOOL_TO_LONG
-    ),
-    ElementwiseTypePromotionRule(
-        "aten", "pow_", [0, 1], [], ELEMENTWISE_TYPE_PROMOTION_KIND.BOOL_TO_LONG
     ),
     ElementwiseTypePromotionRule(
         "aten", "prelu", [0, 1], [], ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
@@ -930,9 +912,6 @@ _GENERATED_ATEN_TYPE_PROMOTION_RULE_SET = {
     ),
     ElementwiseTypePromotionRule(
         "aten", "rsqrt_", [0], [], ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT
-    ),
-    ElementwiseTypePromotionRule(
-        "aten", "rsub", [0, 1], [], ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
     ),
     ElementwiseTypePromotionRule(
         "aten", "selu", [0], [], ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
@@ -1038,6 +1017,9 @@ _GENERATED_ATEN_TYPE_PROMOTION_RULE_SET = {
         "aten", "trunc_", [0], [], ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
     ),
     ElementwiseTypePromotionRule(
+        "aten", "vdot", [0, 1], [], ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
+    ),
+    ElementwiseTypePromotionRule(
         "aten", "where", [1, 2], [], ELEMENTWISE_TYPE_PROMOTION_KIND.NO_OPMATH
     ),
     ElementwiseTypePromotionRule(
@@ -1140,7 +1122,7 @@ class ElementwiseTypePromotionRuleSetGenerator:
     """
 
     @classmethod
-    def generate_from_torch_refs(cls) -> Set[ElementwiseTypePromotionRule]:
+    def generate_from_torch_refs(cls) -> set[ElementwiseTypePromotionRule]:
         """Parse type promotion rules from reference ops under torch._C._refs."""
         rule_set = set()
         rule_set.update(cls._parse_torch_refs(_refs))
@@ -1153,7 +1135,7 @@ class ElementwiseTypePromotionRuleSetGenerator:
     @classmethod
     def _parse_torch_refs(
         cls, ref_module: ModuleType
-    ) -> Set[ElementwiseTypePromotionRule]:
+    ) -> set[ElementwiseTypePromotionRule]:
         logger.info("Processing module: %s", ref_module.__name__)
         rule_set = set()
         for name in ref_module.__all__:
@@ -1168,7 +1150,7 @@ class ElementwiseTypePromotionRuleSetGenerator:
     def _parse_type_promotion_rule_from_refs_op(
         cls,
         decorated_op: Callable,
-    ) -> Optional[ElementwiseTypePromotionRule]:
+    ) -> ElementwiseTypePromotionRule | None:
         """Retrieve and parse type promotion decorator from op under torch._refs."""
         fn = decorated_op
         type_promo_wrapper = None
@@ -1228,7 +1210,6 @@ class TypePromotionTable:
         for rule in _EXTRA_TYPE_PROMOTION_RULE_SET:
             self.add_rule(rule)
 
-    @_beartype.beartype
     def add_rule(self, rule: TypePromotionRule) -> None:
         """Add a type promotion rule for a python op in a torch.ops module.
 
@@ -1243,20 +1224,16 @@ class TypePromotionTable:
             raise ValueError(f"Invalid type promotion rule: {rule}")
         self._rule_table[f"{rule.namespace}.{rule.op_name}"] = rule
 
-    @_beartype.beartype
-    def get_rule(
-        self, py_op: torch._ops.OpOverloadPacket
-    ) -> Optional[TypePromotionRule]:
+    def get_rule(self, py_op: torch._ops.OpOverloadPacket) -> TypePromotionRule | None:
         """Get type promotion rule for a python op under 'torch.ops.<namespace>'."""
         return self._rule_table.get(str(py_op), None)
 
 
-@_beartype.beartype
 def get_type_promotion_rule(
     diagnostic: diagnostics.Diagnostic,
     node: torch.fx.Node,
     type_promotion_table: TypePromotionTable,
-) -> Optional[TypePromotionRule]:
+) -> TypePromotionRule | None:
     """Get type promotion rule for a node.
 
     Args:
@@ -1304,7 +1281,6 @@ class _OpTraceDispatchMode(_python_dispatch.TorchDispatchMode):
         return func(*args, **kwargs)
 
 
-@_beartype.beartype
 def find_compatible_op_overload(
     op: torch._ops.OpOverloadPacket, args: tuple, kwargs: dict
 ) -> torch._ops.OpOverload:
@@ -1390,7 +1366,6 @@ class _TypePromotionInterpreter(torch.fx.Interpreter):
         node.meta["val"] = proxy_tensor.extract_val(out)
         return out
 
-    @_beartype.beartype
     def _create_node(
         self,
         graph: torch.fx.Graph,
@@ -1412,7 +1387,6 @@ class _TypePromotionInterpreter(torch.fx.Interpreter):
         self._run_node_and_set_meta(node)
         return node
 
-    @_beartype.beartype
     def _rerun_node_after_type_promotion(
         self,
         diagnostic: diagnostics.Diagnostic,
@@ -1478,13 +1452,12 @@ class _TypePromotionInterpreter(torch.fx.Interpreter):
         else:
             raise RuntimeError(f"Unexpected node output type: {type(node_val)}.")
 
-    @_beartype.beartype
     def _maybe_promote_arg(
         self,
         diagnostic: diagnostics.Diagnostic,
         node: torch.fx.Node,
         fx_arg: torch.fx.node.Argument,
-        dtype: Optional[torch.dtype],
+        dtype: torch.dtype | None,
     ) -> torch.fx.node.Argument:
         """Promote fx_arg to dtype if necessary."""
         if dtype is None:
@@ -1584,7 +1557,6 @@ class _TypePromotionInterpreter(torch.fx.Interpreter):
 
         raise NotImplementedError(f"Unknown fx arg type: {type(fx_arg)}")
 
-    @_beartype.beartype
     def _maybe_promote_node(
         self,
         diagnostic: diagnostics.Diagnostic,
@@ -1671,7 +1643,7 @@ class InsertTypePromotion(_pass.Transform):
         self,
         diagnostic_context: diagnostics.DiagnosticContext,
         module: torch.fx.GraphModule,
-        type_promotion_table: Optional[TypePromotionTable] = None,
+        type_promotion_table: TypePromotionTable | None = None,
     ):
         super().__init__(diagnostic_context, module)
         self.interpreter = _TypePromotionInterpreter(
@@ -1681,17 +1653,14 @@ class InsertTypePromotion(_pass.Transform):
     def _fetch_fake_args(
         self,
     ) -> Sequence[
-        Optional[
-            Union[
-                fake_tensor.FakeTensor,
-                float,
-                int,
-                bool,
-                torch.SymInt,
-                torch.SymFloat,
-                torch.SymBool,
-            ]
-        ]
+        fake_tensor.FakeTensor
+        | float
+        | int
+        | bool
+        | torch.SymInt
+        | torch.SymFloat
+        | torch.SymBool
+        | None
     ]:
         """Fetch fake args from fx graph.
 
@@ -1719,7 +1688,6 @@ class InsertTypePromotion(_pass.Transform):
                 fake_args.append(meta_value)
         return fake_args
 
-    @_beartype.beartype
     def _run(self, *args, **kwargs) -> torch.fx.GraphModule:
         assert not args, (
             "`InsertTypePromotion` deduces symbolic fake arguments from the graph. "
@@ -1733,9 +1701,11 @@ class InsertTypePromotion(_pass.Transform):
         fake_mode = self.fake_mode
         assert fake_mode is not None, "Cannot detect fake_mode."
 
-        with proxy_tensor.maybe_disable_fake_tensor_mode(), (
-            fake_mode
-        ), fx_traceback.preserve_node_meta():
+        # Use the python dispatcher to run through some python kernels which
+        # can better handle symints. Without this, some SymInts can become static
+        # when there are dynamic shapes.
+        dispatcher_mode = torch._dispatch.python.enable_python_dispatcher()
+        with fake_mode, dispatcher_mode, fx_traceback.preserve_node_meta():
             self.interpreter.run(*fake_args)
 
         return self.module

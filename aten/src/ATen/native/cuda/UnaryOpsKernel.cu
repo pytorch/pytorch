@@ -34,7 +34,7 @@ void bitwise_not_kernel_cuda(TensorIteratorBase& iter) {
   }
 }
 
-CONSTEXPR_EXCEPT_WIN_CUDA char exp_name[] = "exp_kernel";
+constexpr char exp_name[] = "exp_kernel";
 void exp_kernel_cuda(TensorIteratorBase& iter) {
   auto common_dtype = iter.common_dtype();
   if (at::isComplexType(common_dtype)) {
@@ -92,7 +92,7 @@ C10_HOST_DEVICE static inline c10::complex<T> rsqrt_wrapper(c10::complex<T> v) {
   return one / ::sqrt(v);
 }
 
-CONSTEXPR_EXCEPT_WIN_CUDA char rsqrt_name[] = "rsqrt_kernel";
+constexpr char rsqrt_name[] = "rsqrt_kernel";
 void rsqrt_kernel_cuda(TensorIteratorBase& iter) {
   auto common_dtype = iter.common_dtype();
   if (at::isComplexType(common_dtype)) {
@@ -131,7 +131,7 @@ void rsqrt_kernel_cuda(TensorIteratorBase& iter) {
   }
 }
 
-CONSTEXPR_EXCEPT_WIN_CUDA char sqrt_name[] = "sqrt_kernel";
+constexpr char sqrt_name[] = "sqrt_kernel";
 void sqrt_kernel_cuda(TensorIteratorBase& iter) {
   auto common_dtype = iter.common_dtype();
   if (at::isComplexType(common_dtype)) {
@@ -262,7 +262,7 @@ void nan_to_num_kernel_cuda(
 }
 
 void frexp_kernel_cuda(TensorIteratorBase& iter) {
-  AT_DISPATCH_FLOATING_TYPES_AND(ScalarType::Half,
+  AT_DISPATCH_FLOATING_TYPES_AND2(kHalf, kBFloat16,
     // The iter.dtype() here is the dtype of mantissa output.
     // It's a floating point type and must be the same as the input's dtype.
     iter.dtype(),
@@ -275,12 +275,12 @@ void frexp_kernel_cuda(TensorIteratorBase& iter) {
   });
 }
 
-REGISTER_DISPATCH(bitwise_not_stub, &bitwise_not_kernel_cuda);
-REGISTER_DISPATCH(exp_stub, &exp_kernel_cuda);
-REGISTER_DISPATCH(expm1_stub, &expm1_kernel_cuda);
-REGISTER_DISPATCH(rsqrt_stub, &rsqrt_kernel_cuda);
-REGISTER_DISPATCH(sqrt_stub, &sqrt_kernel_cuda);
-REGISTER_DISPATCH(nan_to_num_stub, &nan_to_num_kernel_cuda);
-REGISTER_DISPATCH(frexp_stub, &frexp_kernel_cuda);
+REGISTER_DISPATCH(bitwise_not_stub, &bitwise_not_kernel_cuda)
+REGISTER_DISPATCH(exp_stub, &exp_kernel_cuda)
+REGISTER_DISPATCH(expm1_stub, &expm1_kernel_cuda)
+REGISTER_DISPATCH(rsqrt_stub, &rsqrt_kernel_cuda)
+REGISTER_DISPATCH(sqrt_stub, &sqrt_kernel_cuda)
+REGISTER_DISPATCH(nan_to_num_stub, &nan_to_num_kernel_cuda)
+REGISTER_DISPATCH(frexp_stub, &frexp_kernel_cuda)
 
 } // namespace at::native

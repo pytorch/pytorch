@@ -1,12 +1,12 @@
 //  Copyright © 2022 Apple Inc.
 
 #pragma once
+#include <ATen/Context.h>
+#include <ATen/mps/MPSEvent.h>
+#include <ATen/mps/MPSStream.h>
 #include <c10/core/impl/DeviceGuardImplInterface.h>
 #include <c10/macros/Macros.h>
 #include <c10/util/Exception.h>
-#include <ATen/Context.h>
-#include <ATen/mps/MPSStream.h>
-#include <ATen/mps/MPSEvent.h>
 
 #ifdef __OBJC__
 #include <Foundation/Foundation.h>
@@ -18,11 +18,10 @@
 #include <c10/core/MemoryFormat.h>
 #include <c10/core/Storage.h>
 #include <c10/core/TensorImpl.h>
-#include <sys/_types/_size_t.h>
-#include <memory>
 #include <c10/core/UndefinedTensorImpl.h>
 #include <c10/util/intrusive_ptr.h>
-
+#include <sys/_types/_size_t.h>
+#include <memory>
 
 namespace at::mps {
 
@@ -30,7 +29,8 @@ typedef MPSEvent* mpsEvent_t;
 
 // TODO: Move the MPSGuardImpl to inherit from NoOpDeviceGuardImpl
 // https://github.com/pytorch/pytorch/issues/77170
-struct TORCH_API MPSGuardImpl final : public c10::impl::DeviceGuardImplInterface {
+struct TORCH_API MPSGuardImpl final
+    : public c10::impl::DeviceGuardImplInterface {
   static constexpr c10::DeviceType static_type = c10::DeviceType::MPS;
 
   // constructor
@@ -64,7 +64,12 @@ struct TORCH_API MPSGuardImpl final : public c10::impl::DeviceGuardImplInterface
     // TODO: Currently setting only device 0
   }
 
-  Stream getStream(Device d) const noexcept override {
+  Stream getStream(Device d) const override {
+    return Stream(Stream::DEFAULT, Device(c10::DeviceType::MPS, 0));
+  }
+
+  Stream getNewStream(Device, int priority = 0) const override {
+    (void)priority;
     return Stream(Stream::DEFAULT, Device(c10::DeviceType::MPS, 0));
   }
 
@@ -73,12 +78,12 @@ struct TORCH_API MPSGuardImpl final : public c10::impl::DeviceGuardImplInterface
   }
 
   // NB: These do NOT set the current device
-  Stream exchangeStream(Stream s) const noexcept override {
+  Stream exchangeStream(Stream s) const override {
     return Stream(Stream::DEFAULT, Device(c10::DeviceType::MPS, 0));
   }
   DeviceIndex deviceCount() const noexcept override {
     if (at::hasMPS()) {
-      //TODO: extend it for multi-device case
+      // TODO: extend it for multi-device case
       return 1;
     } else {
       return 0;
@@ -86,26 +91,27 @@ struct TORCH_API MPSGuardImpl final : public c10::impl::DeviceGuardImplInterface
   }
 
   // Event-related functions
-  void createEvent(
-    mpsEvent_t* event,
-    const EventFlag flag) const;
+  void createEvent(mpsEvent_t* event, const EventFlag flag) const;
 
-  void destroyEvent(
-    void* event,
-    const DeviceIndex device_index) const noexcept override;
+  void destroyEvent(void* event, const DeviceIndex device_index)
+      const noexcept override;
 
   void record(
-    void** event,
-    const Stream& stream,
-    const DeviceIndex device_index,
-    const EventFlag flag) const override;
+      void** event,
+      const Stream& stream,
+      const DeviceIndex device_index,
+      const EventFlag flag) const override;
 
-  void block(
-    void* event,
-    const Stream& stream) const override;
+  void block(void* event, const Stream& stream) const override;
 
   bool queryEvent(void* event) const override;
 
+  void synchronizeEvent(void* event) const override;
+
+  double elapsedTime(void* event1, void* event2, const DeviceIndex device_index)
+      const override;
+
+  void synchronizeDevice(const DeviceIndex device_index) const override;
 };
 
 /// A variant of OptionalDeviceGuard that is specialized for MPS.
@@ -168,7 +174,6 @@ struct OptionalMPSGuard {
   c10::impl::InlineOptionalDeviceGuard<MPSGuardImpl> guard_;
 };
 
-
-C10_REGISTER_GUARD_IMPL(MPS, MPSGuardImpl);
+C10_REGISTER_GUARD_IMPL(MPS, MPSGuardImpl)
 
 } // namespace at::mps

@@ -147,7 +147,7 @@ struct TORCH_API OperandInfo {
   /// promotion target_dtype value can become different from tensor's dtype
   /// also, during type promotion target_dtype and device can be set for an
   /// undefined tensor so that tensor can be properly constructed later.
-  std::optional<Device> device = c10::nullopt;
+  std::optional<Device> device = std::nullopt;
   ScalarType target_dtype = ScalarType::Undefined;
   // Caches dtype of the tensor, because scalar_type is an expensive operation
   // If dtype of the tensor is changed (e.g. as a result of type promotion or in
@@ -250,7 +250,6 @@ struct TORCH_API TensorIteratorBase : public impl::MetaBase {
   using PtrVector = SmallVector<char*, 4>;
   using StrideVector = SmallVector<int64_t, 6>;
 
-  TensorIteratorBase();
   void build(TensorIteratorConfig&);
 
   // The inner-loop function operates on the fastest moving dimension. It
@@ -321,6 +320,7 @@ struct TORCH_API TensorIteratorBase : public impl::MetaBase {
     return operands_[num_outputs_ + arg].current_dtype;
   }
   Device device(int64_t arg = 0) const {
+    // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
     return operands_[arg].device.value();
   }
   c10::DeviceType device_type(int64_t arg = 0) const {
@@ -788,6 +788,9 @@ class TORCH_API TensorIteratorConfig final {
   TensorIteratorConfig() = default;
 
   C10_DISABLE_COPY_AND_ASSIGN(TensorIteratorConfig);
+  TensorIteratorConfig(TensorIteratorConfig&&) = default;
+  TensorIteratorConfig& operator=(TensorIteratorConfig&&) = default;
+  ~TensorIteratorConfig() = default;
 
   /// Construction
   // Stores input/output Tensors without incrementing the reference count.
@@ -971,9 +974,9 @@ class TORCH_API TensorIteratorConfig final {
   int num_outputs_ = 0;
   int num_inputs_ = 0;
 
-  std::optional<DimVector> static_shape_ = c10::nullopt;
-  std::optional<ScalarType> static_dtype_ = c10::nullopt;
-  std::optional<Device> static_device_ = c10::nullopt;
+  std::optional<DimVector> static_shape_ = std::nullopt;
+  std::optional<ScalarType> static_dtype_ = std::nullopt;
+  std::optional<Device> static_device_ = std::nullopt;
   bool check_mem_overlap_ = true;
   bool allow_cpu_scalars_ = false;
   bool is_reduction_ = false;
@@ -993,10 +996,13 @@ class TORCH_API TensorIteratorConfig final {
 /// TensorIterator that can use 32-bit indexing. Taken together the splits cover
 /// the original TensorIterator.
 struct TORCH_API SplitUntil32Bit {
+  // NOLINTNEXTLINE(cppcoreguidelines-special-member-functions)
   struct TORCH_API iterator {
     iterator() = default;
     iterator(const TensorIteratorBase& iter);
     iterator(iterator&&) = default;
+    iterator& operator=(iterator&&) = default;
+    ~iterator() = default;
 
     // Guaranteed to be a TensorIterator proper!
     TensorIterator& operator*() const;

@@ -251,25 +251,25 @@ Tensor _bincount_cuda_template(
     const Tensor& weights,
     int64_t minlength) {
   if (minlength < 0) {
-    AT_ERROR("minlength should be >= 0");
+    TORCH_CHECK(false, "minlength should be >= 0");
   }
   if (self.dim() == 1 && self.numel() == 0) {
     return at::zeros(
         {minlength},
         kLong,
-        c10::nullopt /* layout */,
+        std::nullopt /* layout */,
         kCUDA,
-        c10::nullopt /* pin_memory */);
+        std::nullopt /* pin_memory */);
   }
   if (self.dim() != 1 ||
-      (!std::is_same<input_t, uint8_t>::value &&
+      (!std::is_same_v<input_t, uint8_t> &&
        *self.min().cpu().const_data_ptr<input_t>() < 0)) {
-    AT_ERROR("bincount only supports 1-d non-negative integral inputs.");
+    TORCH_CHECK(false, "bincount only supports 1-d non-negative integral inputs.");
   }
 
   bool has_weights = weights.defined();
   if (has_weights && (weights.dim() != 1 || weights.size(0) != self.size(0))) {
-    AT_ERROR("weights should be 1-d and have the same length as input");
+    TORCH_CHECK(false, "weights should be 1-d and have the same length as input");
   }
 
   const int64_t nbins =
@@ -295,9 +295,9 @@ Tensor _bincount_cuda_template(
     output = at::zeros(
         {nbins},
         kLong,
-        c10::nullopt /* layout */,
+        std::nullopt /* layout */,
         DeviceType::CUDA,
-        c10::nullopt /* pin_memory */);
+        std::nullopt /* pin_memory */);
     cuda::CUDA_tensor_histogram<int64_t, input_t, false>(
         output, self, weights, nbins, minvalue, maxvalue);
   }
@@ -312,16 +312,18 @@ Tensor _histc_cuda_template(
     at::acc_type<input_t, /*is_cuda=*/true> min,
     at::acc_type<input_t, /*is_cuda=*/true> max) {
   if (nbins <= 0) {
-    AT_ERROR("bins must be > 0");
+    TORCH_CHECK(false, "bins must be > 0");
   }
   Tensor output = at::zeros(
       {nbins},
       self.scalar_type(),
-      c10::nullopt /* layout */,
+      std::nullopt /* layout */,
       DeviceType::CUDA,
-      c10::nullopt /* pin_memory */);
-  input_t minvalue = min;
-  input_t maxvalue = max;
+      std::nullopt /* pin_memory */);
+  using bounds_t = at::acc_type<input_t, /*is_cuda=*/true>;
+  bounds_t minvalue = min;
+  bounds_t maxvalue = max;
+
   if (min == max && self.numel() > 0) {
     minvalue = *self.min().cpu().const_data_ptr<input_t>();
     maxvalue = *self.max().cpu().const_data_ptr<input_t>();
@@ -387,7 +389,7 @@ Tensor _histc_cuda(
     const Scalar& min,
     const Scalar& max) {
   if (self.scalar_type() == ScalarType::Half) {
-    AT_ERROR("HalfTensor is not supported");
+    TORCH_CHECK(false, "HalfTensor is not supported");
   }
   // See Note [Writing Nondeterministic Operations]
   // Nondeterministic because of atomicAdd usage

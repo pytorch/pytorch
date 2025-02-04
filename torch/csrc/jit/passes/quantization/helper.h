@@ -8,8 +8,7 @@
 #include <functional>
 #include <regex>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 using graph_rewrite_helper::getFuncName;
 
@@ -150,7 +149,7 @@ TORCH_API Module getInvokedModule(Module& module, Node* n, Value* self);
 
 // Given an CallMethod node, get the module instance corresponding
 // to the instance Value if the instance is a module, otherwise return
-// c10::nullopt
+// std::nullopt
 std::optional<Module> getInvokedModuleOpt(
     const Module& module,
     Node* n,
@@ -212,5 +211,4 @@ bool is_batchnorm3d_module(
     const Match& match,
     const std::unordered_map<std::string, Value*>& vmap);
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

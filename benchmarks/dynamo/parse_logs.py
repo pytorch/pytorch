@@ -3,6 +3,7 @@ import os
 import re
 import sys
 
+
 # This script takes the logs produced by the benchmark scripts (e.g.,
 # torchbench.py) and parses it into a CSV file that summarizes what
 # is failing and why.  It is kept separate from the benchmark script

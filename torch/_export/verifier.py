@@ -1,23 +1,27 @@
+# mypy: allow-untyped-defs
+import builtins
 import inspect
 import math
 import operator
 from collections.abc import Iterable
-from typing import Any, Dict, final, List, Optional, Tuple, Type
+from typing import Any, final, TYPE_CHECKING
 
 import torch
 from torch._ops import HigherOrderOperator, OpOverload
 from torch._subclasses.fake_tensor import FakeTensor
-from torch.export.exported_program import ExportedProgram
 from torch.export.graph_signature import (
     CustomObjArgument,
     InputKind,
     SymIntArgument,
+    SymFloatArgument,
+    SymBoolArgument,
     TensorArgument,
     TokenArgument,
 )
 from torch.fx import GraphModule
-from torch.fx.experimental.symbolic_shapes import SymBool, SymFloat, SymInt
 
+if TYPE_CHECKING:
+    from torch.export.exported_program import ExportedProgram
 
 class SpecViolationError(Exception):
     pass
@@ -33,6 +37,8 @@ def _check_has_fake_tensor(node: torch.fx.Node) -> None:
 
 
 def _check_val(node: torch.fx.Node) -> None:
+    from torch.fx.experimental.symbolic_shapes import SymBool, SymFloat, SymInt
+
     def _check_correct_val(val):
         if val is None:
             return True
@@ -77,7 +83,7 @@ def _check_torch_fn(node: torch.fx.Node) -> None:
         raise SpecViolationError(f"Node.meta {node.name} has invalid torch_fn field {torch_fn}")
 
 class _VerifierMeta(type):
-    _registry: Dict[str, Type['Verifier']] = {}
+    _registry: dict[str, type['Verifier']] = {}
 
     def __new__(metacls, name, bases, attrs):
         if bases:
@@ -107,7 +113,7 @@ def getattr_recursive(obj: Any, target: str) -> Any:
 class Verifier(metaclass=_VerifierMeta):
     dialect = "ATEN"
 
-    def allowed_builtin_ops(self) -> List:
+    def allowed_builtin_ops(self) -> list:
         return [
             operator.getitem,
             operator.add,
@@ -128,15 +134,24 @@ class Verifier(metaclass=_VerifierMeta):
             operator.pow,
             operator.neg,
             operator.abs,
+            operator.lshift,
+            operator.rshift,
             math.ceil,
             math.floor,
+            math.trunc,
+            round,
+            builtins.getattr,
         ]
 
-    def allowed_op_types(self) -> Tuple[Type[Any], ...]:
+    def allowed_op_types(self) -> tuple[type[Any], ...]:
         return (OpOverload, HigherOrderOperator)
 
-    def allowed_getattr_types(self) -> Tuple[Type[Any], ...]:
+    def allowed_getattr_types(self) -> tuple[type[Any], ...]:
         return (torch.fx.GraphModule,)
+
+    def allowed_getattr_types_for_subgm(self) -> tuple[type[Any], ...]:
+        # subgm in HOP's argument could has have getattr(weight) nodes, thus stateful
+        return (torch.fx.GraphModule, torch.nn.parameter.Parameter)
 
     def check_valid_op(self, op):
         pass
@@ -145,27 +160,30 @@ class Verifier(metaclass=_VerifierMeta):
         """
         Additional checks that are specific to some dialects.
         """
-        pass
 
     @final
-    def check(self, ep: ExportedProgram) -> None:
+    def check(self, ep: "ExportedProgram") -> None:
         self._check_graph_module(ep.graph_module)
+        _verify_exported_program_module_call_graph(ep)
         _verify_exported_program_signature(ep)
 
     @final
     def _check_graph_module(self, gm: torch.fx.GraphModule) -> None:
-        def _allowed_getattr_types() -> Tuple[Type[Any], ...]:
-            ret = self.allowed_getattr_types()
+        def _allowed_getattr_types(is_toplevel_gm) -> tuple[type[Any], ...]:
+            if is_toplevel_gm:
+                ret = self.allowed_getattr_types()
+            else:
+                ret = self.allowed_getattr_types_for_subgm()
             assert not any(t is object for t in ret)
             return ret
 
         def _check_valid_op(op) -> None:
-            def _allowed_builtin_ops() -> List:
+            def _allowed_builtin_ops() -> list:
                 ret = self.allowed_builtin_ops()
                 assert all(inspect.isbuiltin(op) for op in ret)
                 return ret
 
-            def _allowed_op_types() -> Tuple[Type[Any], ...]:
+            def _allowed_op_types() -> tuple[type[Any], ...]:
                 ret = self.allowed_op_types()
                 assert not any(t is object for t in ret)
                 return ret
@@ -174,6 +192,7 @@ class Verifier(metaclass=_VerifierMeta):
             _allowed_torch_functions = (
                 torch.autograd.grad_mode.set_grad_enabled,
                 torch.sym_int,
+                torch.sym_float,
                 torch.sym_ite,
                 torch.sym_max,
                 torch.sym_min,
@@ -182,8 +201,10 @@ class Verifier(metaclass=_VerifierMeta):
                 # TODO (tmanlaibaatar)
                 # Predispatch export is able to contain autograd ops.
                 # These will be modeled as HOO later
-                torch._C._set_grad_enabled
-
+                torch._C._set_grad_enabled,
+                torch.amp.autocast_mode._enter_autocast,
+                torch.amp.autocast_mode._exit_autocast,
+                torch.fx.experimental.symbolic_shapes.cast_symbool_to_symint_guardless,
             )
 
             if not isinstance(op, _allowed_op_types()):
@@ -196,13 +217,16 @@ class Verifier(metaclass=_VerifierMeta):
 
             if isinstance(op, OpOverload):
                 # All ops functional
-                if not is_functional(op):
+                # TODO (tmanlaibaatar) more proper way is needed here
+                if self.dialect != "TRAINING" and not is_functional(op):
                     raise SpecViolationError(
                         f"operator '{op}' is not functional"
                     )
             self.check_valid_op(op)
 
         for mod in gm.modules():
+            is_toplevel_gm = mod is gm
+
             if not isinstance(mod, torch.fx.GraphModule):
                 continue
 
@@ -246,11 +270,14 @@ class Verifier(metaclass=_VerifierMeta):
                                     f"processed_bytes(bytes) : {type(processed_bytes)}, "
                                     f"compile_specs(list) : {type(compile_specs)}"
                                 )
+                        elif type(attr).__name__ == "AOTInductorEPModule":
+                            continue
 
-                    if not isinstance(attr, _allowed_getattr_types()):
+
+                    if not isinstance(attr, _allowed_getattr_types(is_toplevel_gm)):
                         raise SpecViolationError(
                             f"Invalid get_attr type {type(attr)}. \n"
-                            f"Valid get_attr types: {_allowed_getattr_types()}"
+                            f"Valid get_attr types: {_allowed_getattr_types(is_toplevel_gm)}"
                         )
 
 
@@ -263,6 +290,29 @@ class Verifier(metaclass=_VerifierMeta):
         self.check_additional(gm)
 
 
+class TrainingIRVerifier(Verifier):
+    dialect = "TRAINING"
+
+
+def _verify_exported_program_module_call_graph(exported_program) -> None:
+    module_call_graph = exported_program.module_call_graph
+    nodes = {
+        node.name for node in exported_program.graph.nodes
+    }
+    for entry in module_call_graph:
+        if entry.signature is not None:
+            for arg in entry.signature.inputs:
+                if arg.name and arg.name not in nodes:
+                    raise SpecViolationError(
+                        f"Input {arg.name} does not exist in the graph."
+                    )
+            for arg in entry.signature.outputs:
+                if arg.name and arg.name not in nodes:
+                    raise SpecViolationError(
+                        f"Output {arg.name} does not exist in the graph."
+                    )
+
+
 def _verify_exported_program_signature(exported_program) -> None:
     # Check ExportedProgram signature matches
     gs = exported_program.graph_signature
@@ -273,11 +323,11 @@ def _verify_exported_program_signature(exported_program) -> None:
     if len(input_node_names) != len(gs.input_specs):
         raise SpecViolationError(
             f"Number of graph inputs ({len(input_node_names)}) "
-            f"does not match number of inputs in the graph signature ({len(gs.user_inputs)})"
+            f"does not match number of inputs in the graph signature ({len(gs.input_specs)})"
         )
 
     for input_spec, node in zip(gs.input_specs, input_node_names):
-        if isinstance(input_spec.arg, (TensorArgument, SymIntArgument)):
+        if isinstance(input_spec.arg, (TensorArgument, SymIntArgument, SymFloatArgument, SymBoolArgument)):
             if input_spec.arg.name != node:
                 raise SpecViolationError(
                     f"Input spec name {input_spec.arg.name} does not match node name {node}"
@@ -390,7 +440,7 @@ def _verify_exported_program_signature(exported_program) -> None:
 
     num_tokens = len(gs.output_tokens)
     end = len(gs.buffers_to_mutate) + len(gs.user_inputs_to_mutate) + num_tokens
-    mutate_nodes: List[str] = output_nodes[num_tokens:end]
+    mutate_nodes: list[str] = output_nodes[num_tokens:end]
     user_output_nodes = output_nodes[end:end + len(gs.user_outputs)]
 
     for mutation_node in mutate_nodes:
@@ -422,7 +472,7 @@ def _verify_exported_program_signature(exported_program) -> None:
             )
 
 
-def load_verifier(dialect: str) -> Optional[Type[Verifier]]:
+def load_verifier(dialect: str) -> type[Verifier]:
     if dialect == "ATEN" or dialect == "":
-        return _VerifierMeta._registry.get(dialect)
+        return _VerifierMeta._registry.get(dialect, Verifier)
     return _VerifierMeta._registry[dialect]

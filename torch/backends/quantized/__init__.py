@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import sys
 import types
 from typing import List
@@ -38,7 +39,7 @@ class _QEngineProp:
 
 
 class _SupportedQEnginesProp:
-    def __get__(self, obj, objtype) -> List[str]:
+    def __get__(self, obj, objtype) -> list[str]:
         qengines = torch._C._supported_qengines()
         return [_get_qengine_str(qe) for qe in qengines]
 
@@ -62,4 +63,4 @@ class QuantizedEngine(types.ModuleType):
 # https://stackoverflow.com/questions/2447353/getattr-on-a-module/7668273#7668273
 sys.modules[__name__] = QuantizedEngine(sys.modules[__name__], __name__)
 engine: str
-supported_engines: List[str]
+supported_engines: list[str]

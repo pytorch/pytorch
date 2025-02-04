@@ -2,19 +2,18 @@
 # not a specific backend
 
 import operator
-from typing import List
 
 import torch
 import torch.ao.nn.qat as nnqat
 import torch.ao.nn.quantized.reference as nnqr
 import torch.nn as nn
 import torch.nn.functional as F
-
-from ..fuser_method_mappings import (
+from torch.ao.quantization.fuser_method_mappings import (
     _sequential_wrapper2,
     fuse_conv_bn,
     fuse_conv_bn_relu,
 )
+
 from ._common_operator_config_utils import _Conv2dMetadata
 from .backend_config import (
     BackendConfig,
@@ -98,7 +97,7 @@ executorch_weight_only_quint8_dtype_config = DTypeConfig(
 # =============================
 
 
-def _get_linear_configs() -> List[BackendPatternConfig]:
+def _get_linear_configs() -> list[BackendPatternConfig]:
     """
     Return all configs related to linear modules and ops.
     """
@@ -110,7 +109,7 @@ def _get_linear_configs() -> List[BackendPatternConfig]:
         executorch_default_dynamic_qint8_dtype_config,
         executorch_default_dynamic_float16_dtype_config,
     ]
-    linear_configs: List[BackendPatternConfig] = []
+    linear_configs: list[BackendPatternConfig] = []
     # linear module
     linear_configs.append(
         BackendPatternConfig(torch.nn.Linear)
@@ -138,7 +137,7 @@ def _get_linear_configs() -> List[BackendPatternConfig]:
     return linear_configs
 
 
-def _get_conv_configs() -> List[BackendPatternConfig]:
+def _get_conv_configs() -> list[BackendPatternConfig]:
     """
     Return all configs related to conv modules and ops.
     """
@@ -294,7 +293,7 @@ def _get_conv_configs() -> List[BackendPatternConfig]:
     return conv_configs
 
 
-def _get_binary_ops_configs() -> List[BackendPatternConfig]:
+def _get_binary_ops_configs() -> list[BackendPatternConfig]:
     """
     Return all configs related to binary ops.
     """
@@ -310,26 +309,33 @@ def _get_binary_ops_configs() -> List[BackendPatternConfig]:
         1: ObservationType.OUTPUT_SHARE_OBSERVER_WITH_INPUT,
         2: ObservationType.OUTPUT_USE_DIFFERENT_OBSERVER_AS_INPUT,
     }
-    binary_op_configs: List[BackendPatternConfig] = []
-    for op in [operator.add, torch.add, operator.sub, torch.sub, operator.mul, torch.mul]:
+    binary_op_configs: list[BackendPatternConfig] = []
+    for op in [
+        operator.add,
+        torch.add,
+        operator.sub,
+        torch.sub,
+        operator.mul,
+        torch.mul,
+    ]:
         bop_patterns = [
             (op, torch.nn.ReLU),
             (op, torch.nn.functional.relu),
             (op, torch.relu),
-            op
+            op,
         ]
-        for bop_pattern in bop_patterns:
-            binary_op_configs.append(
-                BackendPatternConfig(bop_pattern)
-                .set_dtype_configs(dtype_configs)  # noqa: E131
-                ._set_num_tensor_args_to_observation_type(
-                    num_tensor_args_to_observation_type_mapping
-                )
+        binary_op_configs.extend(
+            BackendPatternConfig(bop_pattern)
+            .set_dtype_configs(dtype_configs)  # noqa: E131
+            ._set_num_tensor_args_to_observation_type(
+                num_tensor_args_to_observation_type_mapping
             )
+            for bop_pattern in bop_patterns
+        )
     return binary_op_configs
 
 
-def _get_share_qparams_ops_configs() -> List[BackendPatternConfig]:
+def _get_share_qparams_ops_configs() -> list[BackendPatternConfig]:
     """
     Return the operator configs for the operators that works for both float and quantized
     input if input is quantized, the output Tensor shares the same quantization parameter
@@ -378,17 +384,16 @@ def _get_share_qparams_ops_configs() -> List[BackendPatternConfig]:
         "squeeze_",
         "leaky_relu",
     ]
-    share_qparams_op_configs: List[BackendPatternConfig] = []
-    for op in share_qparams_ops:
-        share_qparams_op_configs.append(
-            BackendPatternConfig(op)
-            .set_observation_type(observation_type)  # noqa: E131
-            .set_dtype_configs(dtype_configs)
-        )
+    share_qparams_op_configs: list[BackendPatternConfig] = [
+        BackendPatternConfig(op)
+        .set_observation_type(observation_type)  # noqa: E131
+        .set_dtype_configs(dtype_configs)
+        for op in share_qparams_ops
+    ]
     return share_qparams_op_configs
 
 
-def _get_bn_configs() -> List[BackendPatternConfig]:
+def _get_bn_configs() -> list[BackendPatternConfig]:
     """
     Return all configs related to batchnorm.
     """
@@ -406,7 +411,7 @@ def _get_bn_configs() -> List[BackendPatternConfig]:
     return bn_configs
 
 
-def _get_cat_configs() -> List[BackendPatternConfig]:
+def _get_cat_configs() -> list[BackendPatternConfig]:
     dtype_configs = [
         qnnpack_default_op_qint8_symmetric_dtype_config,
         executorch_default_op_quint8_dtype_config,
@@ -430,7 +435,7 @@ def _get_cat_configs() -> List[BackendPatternConfig]:
     return cat_configs
 
 
-def _get_embedding_op_configs() -> List[BackendPatternConfig]:
+def _get_embedding_op_configs() -> list[BackendPatternConfig]:
     dtype_configs = [
         executorch_weight_only_quint8_dtype_config,
     ]
@@ -470,7 +475,6 @@ def _get_embedding_op_configs() -> List[BackendPatternConfig]:
             ._set_input_type_to_index({"weight": 1})
         )
     return embedding_op_configs
-
 
 
 # =====================

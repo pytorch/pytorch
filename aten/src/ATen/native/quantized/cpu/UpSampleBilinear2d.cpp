@@ -18,8 +18,7 @@
 
 #include <cstring>
 
-namespace at {
-namespace native {
+namespace at::native {
 namespace {
 
 // pre calculate interpolation params on width
@@ -124,7 +123,7 @@ static void upsample_bilinear2d_out_frame(
 
         const auto* pos1 = i_ptr + h1 * input_width + w1;
 
-        float result = h0lambda * (w0lambda * pos1[0] + w1lambda * pos1[w1p]) +
+        const float result = h0lambda * (w0lambda * pos1[0] + w1lambda * pos1[w1p]) +
             h1lambda *
                 (w0lambda * pos1[h1p * input_width] +
                  w1lambda * pos1[h1p * input_width + w1p]) - input_q_zero_point;
@@ -173,7 +172,7 @@ Tensor upsample_bilinear2d_quantized_cpu(
         input.options().memory_format(input.suggest_memory_format()),
         input.q_scale(),
         input.q_zero_point(),
-        c10::nullopt);
+        std::nullopt);
 
     qupsample_bilinear2d_nhwc_stub(
         input.device().type(),
@@ -216,20 +215,5 @@ Tensor upsample_bilinear2d_quantized_cpu(
   }
 }
 
-using at::native::upsample::compute_output_size;
-using at::native::upsample::get_scale_value;
-
-static Tensor upsample_bilinear2d_quantized_cpu(
-    const Tensor& input,
-    at::OptionalIntArrayRef output_size,
-      bool align_corners,
-    std::optional<ArrayRef<double>> scale_factors) {
-  auto osize = compute_output_size(input.sizes(), output_size, scale_factors);
-  auto scale_h = get_scale_value(scale_factors, 0);
-  auto scale_w = get_scale_value(scale_factors, 1);
-  return upsample_bilinear2d_quantized_cpu(input, osize, align_corners, scale_h, scale_w);
-}
-
 DEFINE_DISPATCH(qupsample_bilinear2d_nhwc_stub);
-} // namespace native
-} // namespace at
+} // namespace at::native

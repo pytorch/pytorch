@@ -9,7 +9,6 @@ from operator import mul
 import torch
 import torch.nn.functional as F
 import torch.nn.init as init
-
 from torch.testing._internal.common_utils import (
     run_tests,
     skipIfNoLapack,
@@ -18,6 +17,7 @@ from torch.testing._internal.common_utils import (
     TEST_SCIPY,
     TestCase,
 )
+
 
 if TEST_SCIPY:
     from scipy import stats
@@ -468,7 +468,7 @@ class TestNNInit(TestCase):
     def test_sparse_default_std(self):
         for use_random_std in [True, False]:
             input_tensor = self._create_random_nd_tensor(2, size_min=30, size_max=35)
-            rows, cols = input_tensor.size(0), input_tensor.size(1)
+            rows = input_tensor.size(0)
             sparsity = self._random_float(0.1, 0.2)
 
             std = 0.01  # default std
@@ -521,7 +521,7 @@ class TestNNInit(TestCase):
             init.normal(x)
 
         with self.assertWarnsRegex(
-            UserWarning,
+            FutureWarning,
             "deprecated",
             msg="methods not suffixed with underscore should be deprecated",
         ):

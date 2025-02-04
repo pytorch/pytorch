@@ -85,7 +85,7 @@ static inline void slow_conv_transpose2d_shape_check(
       check_dim_size(bias, 1, 0, weight.size(1));
     }
   } else if (!weight_nullable) {
-    AT_ERROR("weight tensor is expected to be non-nullable");
+    TORCH_CHECK(false, "weight tensor is expected to be non-nullable");
   }
 
   int ndim = input.dim();
@@ -112,7 +112,7 @@ static inline void slow_conv_transpose2d_shape_check(
       (dilation_width * (kernel_width - 1) + 1) + output_padding_width;
 
   if (output_width < 1 || output_height < 1) {
-    AT_ERROR(
+    TORCH_CHECK(false,
         "Given input size per channel: (",
         input_height,
         " x ",
@@ -802,55 +802,6 @@ TORCH_IMPL_FUNC(slow_conv_transpose2d_structured_cpu)
       dilation);
  }
 
-static std::tuple<Tensor&, Tensor&, Tensor&> slow_conv_transpose2d_backward_out_cpu(const Tensor& grad_output,
-    const Tensor& input,
-    const Tensor& weight,
-    IntArrayRef kernel_size,
-    IntArrayRef stride,
-    IntArrayRef padding,
-    IntArrayRef output_padding,
-    IntArrayRef dilation,
-    Tensor& grad_input,
-    Tensor& grad_weight,
-    Tensor& grad_bias) {
-  if (grad_input.defined()) {
-    slow_conv_transpose2d_backward_out_cpu_template(
-        input,
-        grad_output,
-        grad_input,
-        weight,
-        kernel_size,
-        stride,
-        padding,
-        output_padding,
-        dilation);
-  }
-
-  if (grad_bias.defined()) {
-    at::sum_out(grad_bias, grad_output, IntArrayRef{0, 2, 3});
-  }
-
-  if (grad_weight.defined()) {
-    grad_weight.resize_(weight.sizes(), weight.suggest_memory_format());
-    grad_weight.zero_();
-    slow_conv_transpose2d_acc_grad_parameters_cpu(
-        input,
-        weight,
-        grad_output,
-        grad_weight,
-        grad_bias,
-        kernel_size,
-        stride,
-        padding,
-        output_padding,
-        dilation,
-        1);
-  }
-
-  return std::tuple<Tensor&, Tensor&, Tensor&>(
-      grad_input, grad_weight, grad_bias);
-}
-
 static std::tuple<Tensor, Tensor, Tensor> slow_conv_transpose2d_backward_cpu(
     const Tensor& grad_output,
     const Tensor& input,
@@ -920,7 +871,7 @@ static std::tuple<Tensor, Tensor, Tensor> slow_conv_transpose2d_backward_cpu(
   return std::tuple<Tensor, Tensor, Tensor>(grad_input, grad_weight, grad_bias);
 }
 
-REGISTER_ALL_CPU_DISPATCH(slow_conv_transpose2d_backward_stub, &slow_conv_transpose2d_backward_cpu);
+REGISTER_ALL_CPU_DISPATCH(slow_conv_transpose2d_backward_stub, &slow_conv_transpose2d_backward_cpu)
 
 } // namespace native
 } // namespace at

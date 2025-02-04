@@ -1,17 +1,18 @@
 import itertools
 from dataclasses import asdict, dataclass
 from functools import partial
-from typing import Callable, List, Union
+from typing import Callable, Union
 
 import numpy as np
+from tabulate import tabulate
+from tqdm import tqdm
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.utils.benchmark as benchmark
-from tabulate import tabulate
 from torch.nn.attention.bias import CausalBias, CausalVariant
 from torch.nn.parameter import Parameter
-from tqdm import tqdm
 
 
 def benchmark_torch_function_in_microseconds(func: Callable, *args, **kwargs) -> float:
@@ -49,7 +50,7 @@ class ExperimentResults:
     materialized_mask_time: float
     attn_mask_subclass_time: float
 
-    def get_entries(self) -> List:
+    def get_entries(self) -> list:
         return [
             f"{self.materialized_mask_time:2f}",
             f"{self.attn_mask_subclass_time:2f}",
@@ -61,7 +62,7 @@ class Experiment:
     config: ExperimentConfig
     results: ExperimentResults
 
-    def get_entries(self) -> List:
+    def get_entries(self) -> list:
         return self.config.get_entries() + self.results.get_entries()
 
 
@@ -175,7 +176,7 @@ def run_single_experiment(config: ExperimentConfig) -> ExperimentResults:
     )
 
 
-def generate_experiment_configs() -> List[ExperimentConfig]:
+def generate_experiment_configs() -> list[ExperimentConfig]:
     batch_sizes = [1, 8, 16, 128]
     num_heads = [16, 32]
     q_kv_seq_lens = [(128, 256), (256, 416), (512, 4097), (1024, 2048), (1, 2048)]
@@ -205,7 +206,7 @@ def calculate_speedup(results: ExperimentResults) -> float:
     return results.materialized_mask_time / results.attn_mask_subclass_time
 
 
-def print_results(results: List[Experiment]):
+def print_results(results: list[Experiment]):
     # Calculate speedups
     speedups = [calculate_speedup(r.results) for r in results]
 

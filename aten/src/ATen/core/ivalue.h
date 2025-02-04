@@ -87,7 +87,7 @@ struct StreamData3Holder : c10::intrusive_ptr_target {
 } // namespace ivalue
 
 // This is an owning wrapper for a std::optional<std::vector<T>>
-// that can be implicitly converted to a (non-owning) optional<ArrayRef<T>>.
+// that can be implicitly converted to a (non-owning) std::optional<ArrayRef<T>>.
 // Its purpose is to be used in generated code to keep the vector alive
 // either until the end of a statement (as a temporary), or as a saved arg
 // in autograd.
@@ -103,7 +103,7 @@ struct OptionalArray {
     if (ref) {
       list = std::vector<T>(ref->begin(), ref->end());
     } else {
-      list = nullopt;
+      list = std::nullopt;
     }
     return *this;
   }
@@ -113,21 +113,21 @@ struct OptionalArray {
     if (ref) {
       list = std::vector<T>(ref->begin(), ref->end());
     } else {
-      list = nullopt;
+      list = std::nullopt;
     }
     return *this;
   }
 
   operator std::optional<c10::ArrayRef<T>>() {
     if (!list) {
-      return nullopt;
+      return std::nullopt;
     }
     return *list;
   }
 
   operator c10::OptionalArrayRef<T>() {
     if (!list) {
-      return nullopt;
+      return std::nullopt;
     }
     return *list;
   }
@@ -522,7 +522,7 @@ struct TORCH_API IValue final {
   }
   c10::intrusive_ptr<ivalue::Tuple> toTuple() &&;
   c10::intrusive_ptr<ivalue::Tuple> toTuple() const&;
-  C10_NODISCARD ivalue::Tuple& toTupleRef() const;
+  [[nodiscard]] ivalue::Tuple& toTupleRef() const;
 
   // Double
   IValue(double d) : tag(Tag::Double) {
@@ -683,6 +683,8 @@ struct TORCH_API IValue final {
   c10::List<int64_t> toIntList() &&;
   c10::List<int64_t> toIntList() const&;
   std::vector<int64_t> toIntVector() const;
+  c10::List<c10::SymInt> toSymIntList() &&;
+  c10::List<c10::SymInt> toSymIntList() const&;
   std::vector<c10::SymInt> toSymIntVector() const;
   at::DimVector toDimVector() const;
 
@@ -690,7 +692,7 @@ struct TORCH_API IValue final {
   IValue(c10::intrusive_ptr<ivalue::ConstantString> v);
   IValue(std::string v);
   IValue(const char* v) : IValue(std::string(v)) {}
-  IValue(c10::string_view v) : IValue(std::string(v)){};
+  IValue(std::string_view v) : IValue(std::string(v)){}
   bool isString() const {
     return Tag::String == tag;
   }
@@ -699,7 +701,7 @@ struct TORCH_API IValue final {
   const std::string& toStringRef() const;
   std::optional<std::reference_wrapper<const std::string>> toOptionalStringRef()
       const;
-  c10::string_view toStringView() const;
+  std::string_view toStringView() const;
 
   // DoubleList
   bool isDoubleList() const;
@@ -820,7 +822,7 @@ struct TORCH_API IValue final {
   IValue(std::optional<T> v);
   template <class T, enable_if_list_is_ivalue_constructible<T> = nullptr>
   IValue(c10::OptionalArrayRef<T> v);
-  IValue(c10::nullopt_t);
+  IValue(std::nullopt_t);
 
   // ClassType
   IValue(c10::intrusive_ptr<ivalue::Object> v);
@@ -916,7 +918,7 @@ struct TORCH_API IValue final {
       return toSymFloat();
     else if (isSymBool())
       return toSymBool();
-    throw std::runtime_error("IValue is not a Scalar");
+    TORCH_CHECK(false, "IValue is not a Scalar");
   }
 
   // Device
@@ -1021,9 +1023,9 @@ struct TORCH_API IValue final {
   // ToOptional: convert a IValue to the Optional obj that accepts both T and
   // None
   template <typename T>
-  optional<T> toOptional();
+  std::optional<T> toOptional();
   template <typename T>
-  optional<T> toOptional() const;
+  std::optional<T> toOptional() const;
 
   /// @private [doxygen private]
   /// this is a shallow comparison of two IValues to test the object identity
@@ -1145,10 +1147,10 @@ struct TORCH_API IValue final {
   // TODO: There are several places that recurse over IValue. This is fragile.
   // This visitor should be used to recurse over ivalues.
   void visit(const std::function<bool(const IValue&)>& visitor) const;
-  IValue deepcopy(std::optional<at::Device> device = c10::nullopt) const;
+  IValue deepcopy(std::optional<at::Device> device = std::nullopt) const;
   IValue deepcopy(
       HashIdentityIValueMap& memo,
-      std::optional<at::Device> device = c10::nullopt) const;
+      std::optional<at::Device> device = std::nullopt) const;
 
  private:
   static c10::intrusive_ptr_target* null_to_undefined_tensor(
@@ -1163,7 +1165,7 @@ struct TORCH_API IValue final {
   // this value different (e.g. using NaN boxing), and this would make it more
   // costly to determine the tag for all types vs just determining if something
   // is a particular type. Instead we want clients to use the `isX` methods when
-  // possible. If for perf. reasons you really, absolutely, must have a jump
+  // possible. If for performance reasons you really, absolutely, must have a jump
   // table, then we can revisit this.
   enum class Tag : uint32_t {
 #define DEFINE_TAG(x) x,
@@ -1352,8 +1354,14 @@ struct TORCH_API IValue final {
         DeviceIndex index;
       } as_device;
     } u;
+    static_assert(std::is_trivially_copyable_v<TriviallyCopyablePayload>);
     at::Tensor as_tensor;
     Payload() : u() {}
+    Payload(const Payload&) = delete;
+    Payload(Payload&&) = delete;
+    Payload& operator=(const Payload&) = delete;
+    Payload& operator=(Payload&&) = delete;
+    // NOLINTNEXTLINE(modernize-use-equals-default)
     ~Payload() {}
   };
 
@@ -1523,28 +1531,28 @@ struct TORCH_API WeakTypePtr {
 struct WeakOrStrongCompilationUnit {
   explicit WeakOrStrongCompilationUnit(
       std::shared_ptr<torch::jit::CompilationUnit> shared_cu)
-      : strong_ptr_(std::move(shared_cu)), weak_ptr_(c10::nullopt) {}
+      : strong_ptr_(std::move(shared_cu)), weak_ptr_(std::nullopt) {}
 
   explicit WeakOrStrongCompilationUnit(
       std::weak_ptr<torch::jit::CompilationUnit> weak_cu)
-      : strong_ptr_(c10::nullopt), weak_ptr_(std::move(weak_cu)) {}
+      : strong_ptr_(std::nullopt), weak_ptr_(std::move(weak_cu)) {}
 
   std::shared_ptr<torch::jit::CompilationUnit> getStrongRefOrThrow() const {
-    TORCH_INTERNAL_ASSERT(strong_ptr_ != c10::nullopt);
+    TORCH_INTERNAL_ASSERT(strong_ptr_.has_value());
     return *strong_ptr_;
   }
 
   std::weak_ptr<torch::jit::CompilationUnit> getWeakRefOrThrow() const {
-    TORCH_INTERNAL_ASSERT(weak_ptr_ != c10::nullopt);
+    TORCH_INTERNAL_ASSERT(weak_ptr_.has_value());
     return *weak_ptr_;
   }
 
   bool holdingStrongRef() const {
-    return strong_ptr_ != c10::nullopt;
+    return strong_ptr_.has_value();
   }
 
   bool holdingEmptyStrongRef() const {
-    return holdingStrongRef() && *strong_ptr_ == nullptr;
+    return strong_ptr_ == nullptr;
   }
 
   std::optional<std::shared_ptr<torch::jit::CompilationUnit>> strong_ptr_;

@@ -1,7 +1,7 @@
 # Owner(s): ["module: mkldnn"]
 import itertools
 import unittest
-from typing import NamedTuple, List
+from typing import NamedTuple
 
 import torch
 from torch import nn
@@ -16,7 +16,7 @@ FUSION_GROUP = 'prim::TensorExprGroup'
 class PointwisePostOp(NamedTuple):
     attr : str
     pointwise_module : nn.Module
-    scalars : List = []
+    scalars : list = []
     algorithm : str = ""
 
 CONV_MODULES = {2: torch.nn.Conv2d, 3: torch.nn.Conv3d}
@@ -325,11 +325,15 @@ class TestMkldnnFusion(JitTestCase):
 
         out_feature = 20
         for pointwise_name, pointwise_fn in self._binary_list().items():
-            options = itertools.product([[2, 3, 10], [2, 10]], [True, False])
-            for input_shape, bias in options:
+            # Tensor with size = [1, 10] and stride = [0, 1] is contiguous tensor
+            # but it's strides is not default contiguous strides.
+            options = itertools.product([[[2, 3, 10], None], [[2, 10], None], [[1, 10], [0, 1]]], [True, False])
+            for (input_shape, input_stride), bias in options:
                 with torch.no_grad():
                     mod = M(pointwise_fn, input_shape[-1], out_feature, bias).eval()
                     v = torch.randn(input_shape)
+                    if input_stride is not None:
+                        v = v.as_strided(input_shape, input_stride)
                     other = torch.randn(input_shape[:-1] + [out_feature])
                     ref = mod(v, other)
                     attr = pointwise_name

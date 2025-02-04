@@ -7,10 +7,12 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import torch
 
+
 # Make the helper files in test/ importable
 pytorch_test_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
 sys.path.append(pytorch_test_dir)
 from torch.testing._internal.jit_utils import JitTestCase
+
 
 if __name__ == "__main__":
     raise RuntimeError(
@@ -204,7 +206,7 @@ class TestIsinstance(JitTestCase):
                 hit = not hit
                 for el in obj:
                     # perform some tensor operation
-                    y = el.clamp(0, 0.5)
+                    y = el.clamp(0, 0.5)  # noqa: F841
             if torch.jit.isinstance(obj, Dict[str, str]):
                 hit = not hit
                 str_cat = ""

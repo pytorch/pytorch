@@ -1,6 +1,5 @@
 #pragma once
 
-#include <c10/util/Optional.h>
 #include <torch/csrc/distributed/rpc/message.h>
 #include <torch/csrc/distributed/rpc/rpc_agent.h>
 #include <torch/csrc/distributed/rpc/rref_impl.h>
@@ -8,10 +7,9 @@
 #include <torch/csrc/distributed/rpc/utils.h>
 
 #include <atomic>
+#include <optional>
 
-namespace torch {
-namespace distributed {
-namespace rpc {
+namespace torch::distributed::rpc {
 
 namespace callback {
 // It's the callback for RemoteCall.
@@ -334,6 +332,4 @@ class TORCH_API RRefContext {
   static thread_local bool recording_;
 };
 
-} // namespace rpc
-} // namespace distributed
-} // namespace torch
+} // namespace torch::distributed::rpc

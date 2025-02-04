@@ -1,9 +1,10 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
 import dataclasses
 import logging
-from typing import Dict, List, TYPE_CHECKING
+from typing import TYPE_CHECKING
 
 from torch.distributed.checkpoint.planner import SavePlan
+
 
 if TYPE_CHECKING:
     from torch.distributed.checkpoint.metadata import MetadataIndex
@@ -30,9 +31,9 @@ logger = init_logger()
 
 
 # TODO add docstring for dedup_tensors
-def dedup_tensors(all_plans: List[SavePlan]) -> List[SavePlan]:
+def dedup_tensors(all_plans: list[SavePlan]) -> list[SavePlan]:
     all_plans = list(all_plans)
-    key_to_plan: Dict[MetadataIndex, List[int]] = {}
+    key_to_plan: dict[MetadataIndex, list[int]] = {}
     for plan_idx, plan in enumerate(all_plans):
         for write_item in plan.items:
             key_to_plan.setdefault(write_item.index, []).append(plan_idx)
@@ -41,7 +42,7 @@ def dedup_tensors(all_plans: List[SavePlan]) -> List[SavePlan]:
 
     # Remove duplicates by always keeping the first entry.
     # Compute the per-rank remove set.
-    plan_to_keys: Dict[int, List[MetadataIndex]] = {}
+    plan_to_keys: dict[int, list[MetadataIndex]] = {}
     for key, plans in replicated_items.items():
         for plan_idx in plans[1:]:
             plan_to_keys.setdefault(plan_idx, []).append(key)

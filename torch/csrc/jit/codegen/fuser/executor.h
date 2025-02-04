@@ -7,9 +7,7 @@
 
 #include <cstdint>
 
-namespace torch {
-namespace jit {
-namespace fuser {
+namespace torch::jit::fuser {
 
 // Runs the fusion associated with the key (see registerFusion() in interface.h)
 // on the inputs taken from the given Stack.
@@ -18,6 +16,4 @@ TORCH_API bool runFusion(
     Stack& stack,
     std::string* code_out = nullptr);
 
-} // namespace fuser
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit::fuser

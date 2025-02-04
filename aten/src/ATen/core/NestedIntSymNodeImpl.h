@@ -4,9 +4,9 @@
 #include <c10/core/SymNodeImpl.h>
 #include <c10/macros/Export.h>
 #include <c10/util/Exception.h>
-#include <c10/util/Optional.h>
 #include <c10/util/intrusive_ptr.h>
 #include <cstdint>
+#include <optional>
 #include <string>
 
 namespace c10 {
@@ -67,7 +67,7 @@ class TORCH_API NestedIntSymNodeImpl : public SymNodeImpl {
 
   c10::SymNode wrap_int(int64_t num) override {
     return SymNode(c10::make_intrusive<ConstantSymNodeImpl<int64_t>>(num));
-  };
+  }
 
   int64_t guard_int(const char* file, int64_t line) override {
     TORCH_CHECK(false);

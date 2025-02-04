@@ -9,7 +9,7 @@
 import os
 import socket
 from string import Template
-from typing import List, Any
+from typing import Any
 
 
 def get_env_variable_or_raise(env_name: str) -> str:
@@ -38,7 +38,7 @@ def get_socket_with_port() -> socket.socket:
             s.bind(("localhost", 0))
             s.listen(0)
             return s
-        except OSError as e:
+        except OSError:
             s.close()
     raise RuntimeError("Failed to create a socket")
 
@@ -51,7 +51,7 @@ class macros:
     local_rank = "${local_rank}"
 
     @staticmethod
-    def substitute(args: List[Any], local_rank: str) -> List[str]:
+    def substitute(args: list[Any], local_rank: str) -> list[str]:
         args_sub = []
         for arg in args:
             if isinstance(arg, str):

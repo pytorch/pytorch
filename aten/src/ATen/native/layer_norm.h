@@ -8,6 +8,41 @@ namespace at::native {
 
 namespace {
 
+C10_ALWAYS_INLINE void _check_rms_norm_inputs_symint(
+    const Tensor& input,
+    c10::SymIntArrayRef normalized_shape,
+    const Tensor& weight /* optional */) {
+
+  const int normalized_ndim = normalized_shape.size();
+  TORCH_CHECK(
+      normalized_ndim >= 1,
+      "Expected normalized_shape to be at least 1-dimensional, i.e., ",
+      "containing at least one element, but got normalized_shape = ",
+      normalized_shape);
+  TORCH_CHECK(
+      !weight.defined() || weight.sym_sizes().equals(normalized_shape),
+      "Expected weight to be of same shape as normalized_shape, but got ",
+      "weight of shape ",
+      weight.sym_sizes(),
+      " and normalized_shape = ",
+      normalized_shape);
+
+  const auto input_ndim = input.dim();
+  const auto input_shape = input.sym_sizes();
+  if (input_ndim < normalized_ndim ||
+      !input_shape.slice(input_ndim - normalized_ndim)
+           .equals(normalized_shape)) {
+    std::stringstream ss;
+    ss << "Given normalized_shape=" << normalized_shape
+       << ", expected input with shape [*";
+    for (auto size : normalized_shape) {
+      ss << ", " << size;
+    }
+    ss << "], but got input of size" << input_shape;
+    TORCH_CHECK(false, ss.str());
+  }
+}
+
 C10_ALWAYS_INLINE std::pair<int64_t, int64_t> _check_layer_norm_inputs(
     const Tensor& input,
     IntArrayRef normalized_shape,
@@ -48,7 +83,7 @@ C10_ALWAYS_INLINE std::pair<int64_t, int64_t> _check_layer_norm_inputs(
       ss << ", " << size;
     }
     ss << "], but got input of size" << input_shape;
-    AT_ERROR(ss.str());
+    TORCH_CHECK(false, ss.str());
   }
 
   const int axis = input_ndim - normalized_ndim;
@@ -71,9 +106,9 @@ void layer_norm_cpu_out(
     int64_t M,
     int64_t N);
 
-Tensor rms_norm(
+Tensor rms_norm_symint(
     const Tensor& input,
-    IntArrayRef normalized_shape,
+    c10::SymIntArrayRef normalized_shape,
     const std::optional<Tensor>& weight_opt /* optional */,
     std::optional<double> eps);
 
@@ -100,7 +135,7 @@ using backward_fn = void (*)(
     Tensor* /* dgamma */,
     Tensor* /* dbeta */);
 
-DECLARE_DISPATCH(forward_fn, LayerNormKernel);
-DECLARE_DISPATCH(backward_fn, LayerNormBackwardKernel);
+DECLARE_DISPATCH(forward_fn, LayerNormKernel)
+DECLARE_DISPATCH(backward_fn, LayerNormBackwardKernel)
 
 } // namespace at::native

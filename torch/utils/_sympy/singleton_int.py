@@ -1,5 +1,7 @@
+# mypy: allow-untyped-defs
 import sympy
 from sympy.multipledispatch import dispatch
+
 
 __all__ = ["SingletonInt"]
 

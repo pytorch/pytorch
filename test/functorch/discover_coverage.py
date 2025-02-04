@@ -6,12 +6,15 @@ from enum import Enum
 
 # Importing these files make modifications to the op_db that we need
 import test_ops  # noqa: F401
+
 import test_vmap  # noqa: F401
+from functorch_additional_op_db import additional_op_db
+
 import torch
 import torch._functorch.top_operators_github_usage as top_ops
-from functorch_additional_op_db import additional_op_db
 from torch.testing._internal.common_device_type import toleranceOverride
 from torch.testing._internal.common_methods_invocations import op_db
+
 
 all_overridable = list(torch.overrides.get_testing_overrides().keys())
 
@@ -409,14 +412,6 @@ def get_statuses(for_subset=None, invert=False):
                 if decorator.test_name in tests and decorator.test_name in result:
                     result.remove(decorator.test_name)
         return result
-
-    def get_all_aliases(op):
-        opinfos = op_to_opinfo[op]
-        result = []
-        for opinfo in opinfos:
-            result.append(opinfo.name)
-            result.extend(opinfo.aliases)
-        return set(result)
 
     for name, op in get_covered_ops(overridable_outplace_we_care_about).items():
         successful_tests = get_covered_tests(op)

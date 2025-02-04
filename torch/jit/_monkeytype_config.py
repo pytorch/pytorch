@@ -1,12 +1,15 @@
+# mypy: allow-untyped-defs
 import inspect
-import pathlib
 import sys
 import typing
 from collections import defaultdict
+from collections.abc import Iterable
+from pathlib import Path
 from types import CodeType
-from typing import Dict, Iterable, List, Optional
+from typing import Optional
 
 import torch
+
 
 _IS_MONKEYTYPE_INSTALLED = True
 try:
@@ -87,12 +90,12 @@ if _IS_MONKEYTYPE_INSTALLED:
             self.traces.append(trace)
 
     class JitTypeTraceStore(CallTraceStore):
-        def __init__(self):
+        def __init__(self) -> None:
             super().__init__()
             # A dictionary keeping all collected CallTrace
             # key is fully qualified name of called function
             # value is list of all CallTrace
-            self.trace_records: Dict[str, list] = defaultdict(list)
+            self.trace_records: dict[str, list] = defaultdict(list)
 
         def add(self, traces: Iterable[CallTrace]):
             for t in traces:
@@ -104,10 +107,10 @@ if _IS_MONKEYTYPE_INSTALLED:
             qualified_name: str,
             qualname_prefix: Optional[str] = None,
             limit: int = 2000,
-        ) -> List[CallTraceThunk]:
+        ) -> list[CallTraceThunk]:
             return self.trace_records[qualified_name]
 
-        def analyze(self, qualified_name: str) -> Dict:
+        def analyze(self, qualified_name: str) -> dict:
             # Analyze the types for the given module
             # and create a dictionary of all the types
             # for arguments.
@@ -118,7 +121,7 @@ if _IS_MONKEYTYPE_INSTALLED:
                     all_args[arg].add(arg_type)
             return all_args
 
-        def consolidate_types(self, qualified_name: str) -> Dict:
+        def consolidate_types(self, qualified_name: str) -> dict:
             all_args = self.analyze(qualified_name)
             # If there are more types for an argument,
             # then consolidate the type to `Any` and replace the entry
@@ -135,7 +138,7 @@ if _IS_MONKEYTYPE_INSTALLED:
                     all_args[arg] = get_type(types[0])
             return all_args
 
-        def get_args_types(self, qualified_name: str) -> Dict:
+        def get_args_types(self, qualified_name: str) -> dict:
             return self.consolidate_types(qualified_name)
 
     class JitTypeTraceConfig(monkeytype.config.Config):
@@ -157,15 +160,15 @@ else:
     # When MonkeyType is not installed, we provide dummy class definitions
     # for the below classes.
     class JitTypeTraceStoreLogger:  # type:  ignore[no-redef]
-        def __init__(self):
+        def __init__(self) -> None:
             pass
 
     class JitTypeTraceStore:  # type:  ignore[no-redef]
-        def __init__(self):
+        def __init__(self) -> None:
             self.trace_records = None
 
     class JitTypeTraceConfig:  # type:  ignore[no-redef]
-        def __init__(self):
+        def __init__(self) -> None:
             pass
 
     monkeytype_trace = None  # type: ignore[assignment]  # noqa: F811
@@ -188,5 +191,5 @@ def jit_code_filter(code: CodeType) -> bool:
     ):
         return False
 
-    filename = pathlib.Path(code.co_filename).resolve()
+    filename = Path(code.co_filename).resolve()
     return not any(_startswith(filename, lib_path) for lib_path in LIB_PATHS)

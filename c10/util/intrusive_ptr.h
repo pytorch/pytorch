@@ -232,7 +232,7 @@ class intrusive_ptr final {
 //  the target class T to be fully defined when intrusive_ptr<T> is instantiated
 //  this is a problem for classes that contain pointers to themselves
 //  static_assert(
-//      std::is_base_of<intrusive_ptr_target, TTarget>::value,
+//      std::is_base_of_v<intrusive_ptr_target, TTarget>,
 //      "intrusive_ptr can only be used for classes that inherit from
 //      intrusive_ptr_target.");
 #ifndef _WIN32
@@ -354,7 +354,7 @@ class intrusive_ptr final {
       : target_(
             detail::assign_ptr_<TTarget, NullType, FromNullType>(rhs.target_)) {
     static_assert(
-        std::is_convertible<From*, TTarget*>::value,
+        std::is_convertible_v<From*, TTarget*>,
         "Type mismatch. intrusive_ptr move constructor got pointer of wrong type.");
     rhs.target_ = FromNullType::singleton();
   }
@@ -368,7 +368,7 @@ class intrusive_ptr final {
       : target_(
             detail::assign_ptr_<TTarget, NullType, FromNullType>(rhs.target_)) {
     static_assert(
-        std::is_convertible<From*, TTarget*>::value,
+        std::is_convertible_v<From*, TTarget*>,
         "Type mismatch. intrusive_ptr copy constructor got pointer of wrong type.");
     retain_();
   }
@@ -379,13 +379,13 @@ class intrusive_ptr final {
 
   intrusive_ptr& operator=(intrusive_ptr&& rhs) & noexcept {
     // NOLINTNEXTLINE(*assign*)
-    return operator= <TTarget, NullType>(std::move(rhs));
+    return this->template operator= <TTarget, NullType>(std::move(rhs));
   }
 
   template <class From, class FromNullType>
   intrusive_ptr& operator=(intrusive_ptr<From, FromNullType>&& rhs) & noexcept {
     static_assert(
-        std::is_convertible<From*, TTarget*>::value,
+        std::is_convertible_v<From*, TTarget*>,
         "Type mismatch. intrusive_ptr move assignment got pointer of wrong type.");
     intrusive_ptr tmp = std::move(rhs);
     swap(tmp);
@@ -397,14 +397,14 @@ class intrusive_ptr final {
   // NOLINTNEXTLINE(bugprone-unhandled-self-assignment)
   intrusive_ptr& operator=(const intrusive_ptr& rhs) & noexcept {
     // NOLINTNEXTLINE(*assign-operator, *assignment-signature)
-    return operator= <TTarget, NullType>(rhs);
+    return this->template operator= <TTarget, NullType>(rhs);
   }
 
   template <class From, class FromNullType>
   intrusive_ptr& operator=(
       const intrusive_ptr<From, NullType>& rhs) & noexcept {
     static_assert(
-        std::is_convertible<From*, TTarget*>::value,
+        std::is_convertible_v<From*, TTarget*>,
         "Type mismatch. intrusive_ptr copy assignment got pointer of wrong type.");
     intrusive_ptr tmp = rhs;
     swap(tmp);
@@ -664,15 +664,17 @@ struct MaybeOwnedTraits<c10::intrusive_ptr<T>> {
     toDestroy.release();
   }
 
-  static const owned_type& referenceFromBorrow(const borrow_type& borrow) {
+  static const owned_type& referenceFromBorrow(
+      const borrow_type& borrow) noexcept {
     return borrow;
   }
 
-  static const owned_type* pointerFromBorrow(const borrow_type& borrow) {
+  static const owned_type* pointerFromBorrow(
+      const borrow_type& borrow) noexcept {
     return &borrow;
   }
 
-  static bool debugBorrowIsValid(const borrow_type& /*borrow*/) {
+  static bool debugBorrowIsValid(const borrow_type& /*borrow*/) noexcept {
     return true;
   }
 };
@@ -743,7 +745,7 @@ class weak_intrusive_ptr final {
       : target_(
             detail::assign_ptr_<TTarget, NullType, FromNullType>(rhs.target_)) {
     static_assert(
-        std::is_convertible<From*, TTarget*>::value,
+        std::is_convertible_v<From*, TTarget*>,
         "Type mismatch. weak_intrusive_ptr move constructor got pointer of wrong type.");
     rhs.target_ = FromNullType::singleton();
   }
@@ -758,7 +760,7 @@ class weak_intrusive_ptr final {
       : target_(
             detail::assign_ptr_<TTarget, NullType, FromNullType>(rhs.target_)) {
     static_assert(
-        std::is_convertible<From*, TTarget*>::value,
+        std::is_convertible_v<From*, TTarget*>,
         "Type mismatch. weak_intrusive_ptr copy constructor got pointer of wrong type.");
     retain_();
   }
@@ -769,14 +771,14 @@ class weak_intrusive_ptr final {
 
   weak_intrusive_ptr& operator=(weak_intrusive_ptr&& rhs) & noexcept {
     // NOLINTNEXTLINE(*assign*)
-    return operator= <TTarget, NullType>(std::move(rhs));
+    return this->template operator= <TTarget, NullType>(std::move(rhs));
   }
 
   template <class From, class FromNullType>
   weak_intrusive_ptr& operator=(
       weak_intrusive_ptr<From, FromNullType>&& rhs) & noexcept {
     static_assert(
-        std::is_convertible<From*, TTarget*>::value,
+        std::is_convertible_v<From*, TTarget*>,
         "Type mismatch. weak_intrusive_ptr move assignment got pointer of wrong type.");
     weak_intrusive_ptr tmp = std::move(rhs);
     swap(tmp);
@@ -788,7 +790,7 @@ class weak_intrusive_ptr final {
       return *this;
     }
     // NOLINTNEXTLINE(*assign*)
-    return operator= <TTarget, NullType>(rhs);
+    return this->template operator= <TTarget, NullType>(rhs);
   }
 
   weak_intrusive_ptr& operator=(
@@ -802,7 +804,7 @@ class weak_intrusive_ptr final {
   weak_intrusive_ptr& operator=(
       const weak_intrusive_ptr<From, NullType>& rhs) & noexcept {
     static_assert(
-        std::is_convertible<From*, TTarget*>::value,
+        std::is_convertible_v<From*, TTarget*>,
         "Type mismatch. weak_intrusive_ptr copy assignment got pointer of wrong type.");
     weak_intrusive_ptr tmp = rhs;
     swap(tmp);

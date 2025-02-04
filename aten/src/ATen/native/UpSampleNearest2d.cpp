@@ -22,7 +22,7 @@
 namespace at::meta {
 
 TORCH_META_FUNC(upsample_nearest2d) (
-    const Tensor& input, IntArrayRef output_size, std::optional<double> scales_h, c10::optional<double> scales_w
+    const Tensor& input, IntArrayRef output_size, std::optional<double> scales_h, std::optional<double> scales_w
 ) {
   auto full_output_size = native::upsample_2d_common_check(input.sizes(), output_size);
 
@@ -36,7 +36,7 @@ TORCH_META_FUNC(upsample_nearest2d) (
 }
 
 TORCH_META_FUNC(_upsample_nearest_exact2d) (
-  const Tensor& input, IntArrayRef output_size, std::optional<double> scales_h, c10::optional<double> scales_w
+  const Tensor& input, IntArrayRef output_size, std::optional<double> scales_h, std::optional<double> scales_w
 ) {
   auto full_output_size = native::upsample_2d_common_check(input.sizes(), output_size);
 

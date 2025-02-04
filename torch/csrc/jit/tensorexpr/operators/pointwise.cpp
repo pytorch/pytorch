@@ -1,16 +1,14 @@
 #include <torch/csrc/jit/tensorexpr/operators/misc.h>
 #include <torch/csrc/jit/tensorexpr/operators/pointwise.h>
 
-namespace torch {
-namespace jit {
-namespace tensorexpr {
+namespace torch::jit::tensorexpr {
 
 using namespace torch::jit::tensorexpr;
 
 Tensor computeSign(
     const std::vector<ArgValue>& inputValues,
     const std::vector<ExprHandle>& outputShape,
-    std::optional<std::vector<ExprHandle>> outputStrides) {
+    const std::optional<std::vector<ExprHandle>>& outputStrides) {
   return Compute(
       "aten_sign", outputShape, outputStrides, [&](ParameterList& axes) {
         std::vector<ExprHandle> indices(axes.begin(), axes.end());
@@ -223,6 +221,4 @@ Tensor computeScalar(
   return Tensor(buf, let_stmt);
 }
 
-} // namespace tensorexpr
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit::tensorexpr

@@ -1,12 +1,10 @@
-from typing import (
-    Dict,
-    Sized,
-    Tuple,
-)
+# mypy: allow-untyped-defs
+from collections.abc import Sized
+from enum import IntEnum
 
 from torch.utils.data.datapipes._decorator import functional_datapipe
 from torch.utils.data.datapipes.datapipe import IterDataPipe
-from enum import IntEnum
+
 
 __all__ = [
     "SHARDING_PRIORITIES",
@@ -21,11 +19,16 @@ class SHARDING_PRIORITIES(IntEnum):
 
 
 class _ShardingIterDataPipe(IterDataPipe):
-    def apply_sharding(self, num_of_instances: int, instance_id: int, sharding_group: SHARDING_PRIORITIES):
+    def apply_sharding(
+        self,
+        num_of_instances: int,
+        instance_id: int,
+        sharding_group: SHARDING_PRIORITIES,
+    ):
         raise NotImplementedError
 
 
-@functional_datapipe('sharding_filter')
+@functional_datapipe("sharding_filter")
 class ShardingFilterIterDataPipe(_ShardingIterDataPipe):
     r"""
     Wrapper that allows DataPipe to be sharded (functional name: ``sharding_filter``).
@@ -40,28 +43,37 @@ class ShardingFilterIterDataPipe(_ShardingIterDataPipe):
     def __init__(self, source_datapipe: IterDataPipe, sharding_group_filter=None):
         self.source_datapipe = source_datapipe
         self.sharding_group_filter = sharding_group_filter
-        self.groups: Dict[int, Tuple[int, int]] = {}
+        self.groups: dict[int, tuple[int, int]] = {}
         self.num_of_instances = 1
         self.instance_id = 0
         self._update_num_of_instances()
 
-    def apply_sharding(self, num_of_instances, instance_id, sharding_group=SHARDING_PRIORITIES.DEFAULT):
+    def apply_sharding(
+        self, num_of_instances, instance_id, sharding_group=SHARDING_PRIORITIES.DEFAULT
+    ):
         if instance_id >= num_of_instances:
-            raise ValueError(f"instance_id({instance_id}) should be smaller than num_of_instances({num_of_instances})")
+            raise ValueError(
+                f"instance_id({instance_id}) should be smaller than num_of_instances({num_of_instances})"
+            )
         if sharding_group == SHARDING_PRIORITIES.DEFAULT:
             if len(self.groups) and SHARDING_PRIORITIES.DEFAULT not in self.groups:
-                raise Exception('ShardingFilter cannot mix DEFAULT and non DEFAULT groups')  # noqa: TRY002
+                raise RuntimeError(
+                    "ShardingFilter cannot mix DEFAULT and non DEFAULT groups"
+                )
         else:
             if SHARDING_PRIORITIES.DEFAULT in self.groups:
-                raise Exception('ShardingFilter cannot mix DEFAULT and non DEFAULT groups')  # noqa: TRY002
+                raise RuntimeError(
+                    "ShardingFilter cannot mix DEFAULT and non DEFAULT groups"
+                )
         self.groups[sharding_group] = (num_of_instances, instance_id)
         self._update_num_of_instances()
 
     def _update_num_of_instances(self):
-        sorted_sharding_groups = []
-        for key in sorted(self.groups.keys()):
-            if self.sharding_group_filter is None or key == self.sharding_group_filter:
-                sorted_sharding_groups.append(self.groups[key])
+        sorted_sharding_groups = [
+            self.groups[key]
+            for key in sorted(self.groups.keys())
+            if self.sharding_group_filter is None or key == self.sharding_group_filter
+        ]
 
         sorted_sharding_groups.reverse()
 
@@ -79,6 +91,11 @@ class ShardingFilterIterDataPipe(_ShardingIterDataPipe):
 
     def __len__(self):
         if isinstance(self.source_datapipe, Sized):
-            return len(self.source_datapipe) // self.num_of_instances +\
-                (1 if (self.instance_id < len(self.source_datapipe) % self.num_of_instances) else 0)
+            return len(self.source_datapipe) // self.num_of_instances + (
+                1
+                if (
+                    self.instance_id < len(self.source_datapipe) % self.num_of_instances
+                )
+                else 0
+            )
         raise TypeError(f"{type(self).__name__} instance doesn't have valid length")

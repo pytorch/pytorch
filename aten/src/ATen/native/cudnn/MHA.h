@@ -1,15 +1,15 @@
 #pragma once
 #include <ATen/core/Tensor.h>
 
-namespace at {
-namespace native {
+namespace at::native {
 
 void run_cudnn_SDP_fprop(
     int64_t b,
     int64_t h,
     int64_t s_q,
     int64_t s_kv,
-    int64_t d,
+    int64_t d_k,
+    int64_t d_v,
     float scaling_factor,
     bool isTraining,
     bool is_causal,
@@ -17,6 +17,7 @@ void run_cudnn_SDP_fprop(
     const Tensor& q,
     const Tensor& k,
     const Tensor& v,
+    const std::optional<Tensor>& attn_bias,
     Tensor& softmaxstats,
     Tensor& o,
     Tensor& dropoutseed,
@@ -27,13 +28,15 @@ void run_cudnn_SDP_bprop(
     int64_t h,
     int64_t s_q,
     int64_t s_kv,
-    int64_t d,
+    int64_t d_k,
+    int64_t d_v,
     float scaling_factor,
     bool is_causal,
     float dropout_probability,
     const Tensor& q,
     const Tensor& k,
     const Tensor& v,
+    const std::optional<Tensor>& attn_bias,
     const Tensor& o,
     const Tensor& dO,
     const Tensor& softmaxstats,
@@ -43,5 +46,4 @@ void run_cudnn_SDP_bprop(
     const Tensor& dropoutseed,
     const Tensor& dropoutoffset);
 
-} // namespace native
-} // namespace at
+} // namespace at::native
