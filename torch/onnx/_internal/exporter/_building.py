@@ -467,7 +467,13 @@ def _determine_output_number(
             if not named_attrs.get("training_mode", 0):
                 return 1
         if signature.name == "Split":
-            return named_attrs.get("num_outputs", 2)  # type: ignore[return-value]
+            num_outputs = named_attrs.get("num_outputs")
+            if num_outputs is not None and isinstance(num_outputs, int):
+                return num_outputs
+            else:
+                logger.warning(
+                    "Could not determine the number of outputs for Split."
+                )
     return len(signature.outputs)
 
 
