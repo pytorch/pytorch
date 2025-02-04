@@ -30,7 +30,15 @@ from typing import (
     TypeVar,
     Union,
 )
-from typing_extensions import Never, override, ParamSpec, Protocol, TypedDict, Unpack, Self
+from typing_extensions import (
+    Never,
+    override,
+    ParamSpec,
+    Protocol,
+    Self,
+    TypedDict,
+    Unpack,
+)
 from unittest import mock
 
 import torch._inductor.async_compile  # noqa: F401 required to warm up AsyncCompile pools
@@ -1008,7 +1016,10 @@ class _InProcessFxCompile(FxCompile):
                             "name": "inductor_post_to_pre_grad_nodes",
                             "encoding": "json",
                         },
-                        payload_fn=lambda: provenance_tracking_json,
+                        payload_fn=lambda: json.dumps(provenance_tracking_json),
+                    )
+                    torch._inductor.debug._inductor_post_to_pre_grad_nodes = (
+                        provenance_tracking_json
                     )
                 if config.is_fbcode():
                     log_optimus_to_scuba(
@@ -1381,23 +1392,32 @@ class _LoggerState:
         # Mapping from logger name to level.
         self.loggers = {}
 
-        # logging.getHandlerNames()/getHandlerByName() doesn't exist until 3.12
+        def filter(handler: logging.Handler) -> bool:
+            if not isinstance(handler, logging.Logger):
+                # Assume that Placeholders propagate
+                return False
+            # We only want to track torch._inductor logging
+            if not handler.name.startswith("torch._inductor"):
+                return False
+            # If this handler propagates then assume we'll track its parent
+            if handler.propagate:
+                return False
+            return True
+
         root = logging.getLogger("torch._inductor")
-        logging._acquireLock()  # type: ignore[attr-defined]
-        try:
-            for name, handler in root.manager.loggerDict.items():
-                # We only want to track torch._inductor logging
-                if not name.startswith("torch._inductor"):
-                    continue
-                # If this handler propagates then assume we'll track its parent
-                if not isinstance(handler, logging.Logger):
-                    # Assume that Placeholders propagate
-                    continue
-                if handler.propagate:
-                    continue
-                self.loggers[name] = handler.level
-        finally:
-            logging._releaseLock()  # type: ignore[attr-defined]
+        if sys.version_info < (3, 12):
+            # logging.getChildren() doesn't exist until 3.12
+            logging._acquireLock()  # type: ignore[attr-defined]
+            try:
+                for handler in root.manager.loggerDict.values():
+                    if filter(handler):
+                        self.loggers[handler.name] = handler.level
+            finally:
+                logging._releaseLock()  # type: ignore[attr-defined]
+        else:
+            for handler in root.getChildren():
+                if filter(handler):
+                    self.loggers[handler.name] = handler.level
 
     def __enter__(self) -> _CapturedLogs:
         assert self._cap is None
@@ -2326,6 +2346,7 @@ def compile_fx(
                     colored=True,
                 ),
             )
+            torch._inductor.debug._pre_grad_graph_id = id(model_.graph)
 
             model_ = _recursive_pre_grad_passes(model_, example_inputs_)
 
