@@ -2,12 +2,12 @@
 # Just an early prototype that shows that one can compile elementwise ops into a Metal shader
 from __future__ import annotations
 
+import itertools
 from typing import Any, Optional, TYPE_CHECKING
 
 from sympy.printing.precedence import PRECEDENCE
 
 import torch
-import itertools
 from torch.utils._sympy.printers import ExprPrinter as ExprPrinter_
 from torch.utils._sympy.value_ranges import ValueRanges
 
@@ -28,7 +28,7 @@ if TYPE_CHECKING:
 
     import sympy
 
-    from ..ops_handler import StoreMode, ReductionType
+    from ..ops_handler import ReductionType, StoreMode
     from ..scheduler import Scheduler, SchedulerNode
     from .common import OpVarT
 
@@ -394,14 +394,17 @@ class MetalKernel(SIMDKernel):
     def _new_accvar(
         self,
         dtype: torch.dtype,
-        value: str,
+        elem_count: Optional[int] = None,
         bounds: ValueRanges[Any] = ValueRanges.unknown(),
     ) -> CSEVariable:
         var_name = f"tmp_acc_{next(self.acc_var_ids)}"
         var = V.kernel.create_cse_var(var_name, bounds, dtype)
-        self.loads.writeline(f"threadgroup {self.dtype_to_str(dtype)} {var_name};")
-        self.loads.writeline(f"{var_name} = {value};")
-
+        if elem_count:
+            self.loads.writeline(
+                f"threadgroup {self.dtype_to_str(dtype)} {var_name}[{elem_count}];"
+            )
+        else:
+            self.loads.writeline(f"threadgroup {self.dtype_to_str(dtype)} {var_name};")
         return var
 
     def reduction(
@@ -413,12 +416,15 @@ class MetalKernel(SIMDKernel):
     ) -> Union[CSEVariable, tuple[CSEVariable, ...]]:
         """Codegen a reduction operation"""
         if reduction_type == "any":
-            acc = self._new_accvar(dtype, "false")
-            self.body.splice(f"""
+            acc = self._new_accvar(dtype)
+            self.loads.writeline(f"{acc} = false;")
+            self.body.splice(
+                f"""
                 if ({value}) {{
                     {acc} = true;
                 }}
-            """)
+            """
+            )
             return acc
         raise NotImplementedError
 
