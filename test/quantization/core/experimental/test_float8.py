@@ -23,11 +23,13 @@ FLOAT8_DTYPES = [
     torch.float8_e5m2fnuz,
     torch.float8_e4m3fn,
     torch.float8_e4m3fnuz,
+    torch.float8_e8m0fnu,
 ]
 
 CUDA_FLOAT8_DTYPES = [
     torch.float8_e5m2,
     torch.float8_e4m3fn,
+    torch.float8_e8m0fnu,
 ]
 
 # The following information are not yet provided by torch.finfo.
@@ -107,6 +109,14 @@ SPECIAL_NUMBERS = {
         ("10000111", -0.875 * (2**-7), "neg_max_subnorm"),
         ("00000001", 0.125 * (2**-7), "min_subnorm"),
         ("10000001", -0.125 * (2**-7), "neg_min_subnorm"),
+    ],
+    torch.float8_e8m0fnu: [
+        ("00000000", 5.877471754111438e-39, "smallest_number"),
+        ("11111110", 1.701411834604692317316873E+38, "largest_number"),
+        ("01111110", 0.5, "zero_point_five"),
+        ("01111111", 1.0, "one"),
+        ("10000000", 2.0, "two"),
+        ("11111111", float("nan"), "nan"),
     ],
 }
 
@@ -206,9 +216,15 @@ class TestFloat8Dtype(TestCase):
     @dtypesIfCUDA(*CUDA_FLOAT8_DTYPES)
     def test_creation_with_zeros(self, dtype, device):
         """Sanity test, round-trip casting of zeros."""
-        x = torch.zeros(8, dtype=torch.float, device=device)
         x8 = torch.zeros(8, dtype=dtype, device=device)
-        self.assertEqual(x, x8.float(), atol=0, rtol=0)
+        if dtype is torch.float8_e8m0fnu:
+            # zeros are not supported for this dtype, values get clamped
+            # to 2 ^ -127
+            x = torch.full((8,), 2**-127, dtype=torch.float, device=device)
+            self.assertEqual(x, x8.float(), atol=0, rtol=0)
+        else:
+            x = torch.zeros(8, dtype=torch.float, device=device)
+            self.assertEqual(x, x8.float(), atol=0, rtol=0)
 
     @dtypes(*FLOAT8_DTYPES)
     @dtypesIfCUDA(*CUDA_FLOAT8_DTYPES)
@@ -217,6 +233,9 @@ class TestFloat8Dtype(TestCase):
         """Numerical test of float8 conversion, by performing a round-trip cast
         to the float8 dtype and back to float32, comparing against simulated
         lower precision."""
+        if dtype is torch.float8_e8m0fnu:
+            # TODO(before land): refactor this (below is temporary)
+            return unittest.skip("numerics for e8m0fnu are tested elsewhere")
         x = get_input(dtype, device)
         x = torch.cat((x, -x))
         x8 = x.to(dtype)
@@ -269,6 +288,10 @@ class TestFloat8Dtype(TestCase):
                 torch.use_deterministic_algorithms(use_deterministic)
                 torch.empty(4, 4, device=device, dtype=dtype)
 
+    # TODO(before land): test RNE numerics
+    # TODO(before land): test printing a tensor of dtype
+    # TODO(before land): test calling torch.finfo(dtype)
+
 
 instantiate_device_type_tests(TestFloat8Dtype, globals())
 
@@ -285,6 +308,9 @@ class TestFloat8DtypeCPUOnly(TestCase):
 
     @dtypes(*CUDA_FLOAT8_DTYPES)
     def test_mul(self, dtype):
+        # TODO(future PR): remove arithmetic support from all float8 dtypes
+        if dtype is torch.float8_e8m0fnu:
+            return unittest.skip("arithmetic not supported for torch.float8_e8m0fnu")
         shape = (10, 10)
         a = torch.randn(shape)
         a8_simulated = simulate_fp8_precision(a, dtype)
@@ -299,6 +325,9 @@ class TestFloat8DtypeCPUOnly(TestCase):
     @unittest.skipIf(IS_WINDOWS, "torch.compile not supported on Windows yet")
     @dtypes(*CUDA_FLOAT8_DTYPES)
     def test_pt2_traceable_aot_eager(self, dtype):
+        if dtype is torch.float8_e8m0fnu:
+            return unittest.skip("PT2 support for torch.float8_e8m0fnu is not implemented yet")
+
         @torch.compile(backend="aot_eager", fullgraph=True)
         def f(x):
             x = x.to(dtype)
