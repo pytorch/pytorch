@@ -344,6 +344,9 @@ class TensorVariable(VariableTracker):
         if self.is_nested is not None:
             return ConstantVariable.create(self.is_nested)
 
+    def method_attr_retain_grad(self, tx):
+        unimplemented("retain_grad does not work with AOTDispatcher")
+
     def method_attr_data(self, tx):
         return variables.TorchInGraphFunctionVariable(
             torch._C._autograd._get_data_attr
@@ -1422,7 +1425,7 @@ class UntypedStorageVariable(VariableTracker):
         example_value: torch.UntypedStorage,
         **kwargs,
     ) -> None:
-        super().__init__(**kwargs),
+        super().__init__(**kwargs)
         self.from_tensor = from_tensor
         # Example_value will always have device="meta"
         self.example_value = example_value
@@ -1478,7 +1481,7 @@ class DataPtrVariable(VariableTracker):
         from_tensor: TensorVariable,
         **kwargs,
     ) -> None:
-        super().__init__(**kwargs),
+        super().__init__(**kwargs)
         self.from_tensor = from_tensor
 
     def reconstruct(self, codegen):
