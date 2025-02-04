@@ -1883,13 +1883,22 @@ class GraphLowering(torch.fx.Interpreter):
             # cpu
             return self.codegen()
 
+    def _update_scheduler(self) -> None:
+        """
+        (Re)initializes the scheduler member.  When initializing the scheduler, no CUBIN
+        files should be generated (to avoid biasing any benchmarks and pessimizing
+        fusion decisions).
+        """
+        from .scheduler import Scheduler
+
+        with config.patch("triton.store_cubin", False):
+            self.scheduler = Scheduler(self.operations)
+
     def codegen(self) -> tuple[str, list[tuple[int, Node]]]:
         with dynamo_timed("GraphLowering.codegen", log_pt2_compile_event=True):
-            from .scheduler import Scheduler
-
             self.init_wrapper_code()
 
-            self.scheduler = Scheduler(self.operations)
+            self._update_scheduler()
             V.debug.draw_orig_fx_graph(self.orig_gm, self.scheduler.nodes)
 
             self.wrapper_code.push_codegened_graph(self)
@@ -1941,13 +1950,11 @@ class GraphLowering(torch.fx.Interpreter):
         call), as this will be done in the parent graph's `codegen()`.
         """
         with dynamo_timed("GraphLowering.codegen_subgraph", log_pt2_compile_event=True):
-            from .scheduler import Scheduler
-
             self.wrapper_code = parent_graph.wrapper_code
             self.device_ops = parent_graph.device_ops
             self.cpp_wrapper = parent_graph.cpp_wrapper
 
-            self.scheduler = Scheduler(self.operations)
+            self._update_scheduler()
             self.scheduler.codegen()
 
     def count_bytes(
