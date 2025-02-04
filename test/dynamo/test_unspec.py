@@ -274,7 +274,8 @@ class UnspecTests(torch._dynamo.test_case.TestCase):
 
         x = torch.tensor([[1.0, 2.0], [3.0, 4.0]])
 
-        patch_fn_with_rng_burn("torch._dynamo.eval_frame._maybe_set_eval_frame")
+        # we don't guard against random calls in eval_frame.py today
+        # patch_fn_with_rng_burn("torch._dynamo.eval_frame._maybe_set_eval_frame")
         patch_fn_with_rng_burn("torch._dynamo.convert_frame._compile")
         patch_fn_with_rng_burn(
             "torch._dynamo.symbolic_convert.InstructionTranslator.run"

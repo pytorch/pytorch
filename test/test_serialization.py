@@ -522,6 +522,7 @@ class SerializationMixin:
     def test_serialization_backwards_compat_safe(self):
         self._test_serialization_backwards_compat(True)
 
+    @skipIfTorchDynamo("graph breaks messages collide with warnings")
     def test_serialization_save_warnings(self):
         with warnings.catch_warnings(record=True) as warns:
             with tempfile.NamedTemporaryFile() as checkpoint:
@@ -611,7 +612,6 @@ class SerializationMixin:
         with self.assertRaisesRegex(RuntimeError, error_msg):
             _ = torch.load(buf)
 
-    @unittest.skipIf((3, 8, 0) <= sys.version_info < (3, 8, 2), "See https://bugs.python.org/issue39681")
     def test_serialization_filelike_api_requirements(self):
         filemock = FilelikeMock(b'', has_readinto=False)
         tensor = torch.randn(3, 5)
@@ -638,7 +638,6 @@ class SerializationMixin:
         b = torch.load(data)
         self.assertTrue(torch.equal(tensor, b), msg.format(desc))
 
-    @unittest.skipIf((3, 8, 0) <= sys.version_info < (3, 8, 2), "See https://bugs.python.org/issue39681")
     def test_serialization_filelike_missing_attrs(self):
         # Test edge cases where filelike objects are missing attributes.
         # The Python io docs suggests that these attributes should really exist
@@ -653,7 +652,6 @@ class SerializationMixin:
         for desc, mock in mocks:
             self._test_serialization_filelike(to_serialize, mock, desc)
 
-    @unittest.skipIf((3, 8, 0) <= sys.version_info < (3, 8, 2), "See https://bugs.python.org/issue39681")
     def test_serialization_filelike_stress(self):
         a = torch.randn(11 * (2 ** 9) + 1, 5 * (2 ** 9))
 

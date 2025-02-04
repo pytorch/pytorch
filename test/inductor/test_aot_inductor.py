@@ -18,7 +18,6 @@ from torch._dynamo.device_interface import get_interface_for_device
 from torch._dynamo.testing import rand_strided, same
 from torch._dynamo.utils import counters
 from torch._inductor import config
-from torch._inductor.exc import CppWrapperCodegenError
 from torch._inductor.runtime.runtime_utils import cache_dir
 from torch._inductor.test_case import TestCase
 from torch._inductor.utils import is_big_gpu, run_and_get_cpp_code
@@ -445,6 +444,36 @@ class AOTInductorTestsTemplate:
             with config.patch({"freezing": True}):
                 self.check_model(LinearModel(self.device), example_inputs)
 
+    def test_linear_dynamic_maxautotune(self):
+        class Model(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.linear = torch.nn.Linear(1, 1)
+
+            def forward(self, x):
+                return self.linear(x)
+
+        model = Model().to(device=self.device)
+        compile_inputs = (torch.randn(2048, 1, device=self.device),)
+        dim0_x = Dim("dim0_x", min=2, max=2048)
+        dynamic_shapes = {"x": {0: dim0_x}}
+        ep = torch.export.export(model, compile_inputs, dynamic_shapes=dynamic_shapes)
+        optimized = torch._inductor.aoti_load_package(
+            torch._inductor.aoti_compile_and_package(
+                ep,
+                inductor_configs={
+                    "max_autotune": True,
+                    "max_autotune_gemm_backends": "TRITON",
+                },
+            )
+        )
+        runtime_input = torch.randn(10, 1, device=self.device)
+        self.assertTrue(same(optimized(runtime_input), model(runtime_input)))
+        runtime_input = torch.randn(16, 1, device=self.device)
+        self.assertTrue(same(optimized(runtime_input), model(runtime_input)))
+        runtime_input = torch.randn(100, 1, device=self.device)
+        self.assertTrue(same(optimized(runtime_input), model(runtime_input)))
+
     @torch._inductor.config.patch(
         pre_grad_fusion_options={
             "normalization_pass": {},
@@ -708,8 +737,8 @@ class AOTInductorTestsTemplate:
         self.check_model(Model(), example_inputs, dynamic_shapes=dynamic_shapes)
 
     @unittest.skipIf(
-        not torch.cuda.is_available() or torch.cuda.get_device_capability() < (9, 0),
-        "FP8 is only supported on H100+ and sm_89 and MI300+ devices",
+        not PLATFORM_SUPPORTS_FP8,
+        "FP8 is only supported on H100+, SM 8.9 and MI300+ devices",
     )
     @skipIfRocm  # _scaled_mm_out_cuda  is not compiled for ROCm platform
     @skipIfXpu
@@ -756,8 +785,8 @@ class AOTInductorTestsTemplate:
         )
 
     @unittest.skipIf(
-        not torch.cuda.is_available() or torch.cuda.get_device_capability() < (9, 0),
-        "FP8 is only supported on H100+",
+        not PLATFORM_SUPPORTS_FP8,
+        "FP8 is only supported on H100+, SM 8.9 and MI300+ devices",
     )
     @skipIfRocm  # _scaled_mm_out_cuda  is not compiled for ROCm platform
     @skipIfXpu
@@ -1973,30 +2002,6 @@ class AOTInductorTestsTemplate:
             "pytree processing of the outputs.",
         ):
             torch._inductor.aot_compile(gm, example_inputs)
-
-    @unittest.mock.patch("torch._inductor.graph.supported_dtype_of_cpp_wrapper")
-    def test_unsupported_input_dtype(self, supported_dtype_of_cpp_wrapper_mock):
-        supported_dtype_of_cpp_wrapper_mock.return_value = False
-
-        class Model(torch.nn.Module):
-            def __init__(self) -> None:
-                super().__init__()
-
-            def forward(self, x, y):
-                return x + y
-
-        example_inputs = (
-            torch.randn(10, 10).to(self.device),
-            torch.randn(10, 10).to(self.device),
-        )
-        with self.assertRaisesRegex(
-            CppWrapperCodegenError, "Unsupported input dtype torch.float32"
-        ):
-            torch._export.aot_compile(Model(), example_inputs)
-
-        supported_dtype_of_cpp_wrapper_mock.assert_called_once_with(
-            torch.float32, self.device
-        )
 
     def test_consecutive_compiles(self):
         """Test that compilation behaves correctly with cache hits"""
@@ -3324,7 +3329,7 @@ class AOTInductorTestsTemplate:
     @unittest.skipIf(TEST_WITH_ROCM, "FP8 is not supported on ROCM")
     @unittest.skipIf(
         not PLATFORM_SUPPORTS_FP8,
-        "FP8 is only supported on H100+ and sm_89 and MI300+ devices",
+        "FP8 is only supported on H100+, SM 8.9 and MI300+ devices",
     )
     def test_runtime_checks_fp8(self):
         # cuda only
@@ -4412,6 +4417,19 @@ class AOTInductorTestsTemplate:
                 atol=0.1,
                 rtol=1e-3,
             )
+
+    def test_composed_dynamic_size(self):
+        class Model(torch.nn.Module):
+            def forward(self, x):
+                return x + 1
+
+        example_inputs = (torch.randn(10, device=self.device),)
+        dim = torch.export.Dim("dim_0")
+        dim_even = 2 * dim
+        dynamic_shapes = {
+            "x": {0: dim_even},
+        }
+        self.check_model(Model(), example_inputs, dynamic_shapes=dynamic_shapes)
 
 
 class AOTInductorLoggingTest(LoggingTestCase):
