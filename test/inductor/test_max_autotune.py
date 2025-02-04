@@ -47,17 +47,13 @@ torch.set_float32_matmul_precision("high")
 if HAS_CUDA:
     torch.cuda.memory._set_allocator_settings("expandable_segments:False")
 
-FUNC_CALL = "void inductor_entry_impl(" if config.cpp_wrapper else "def call("
-KERNEL_LAUNCH = "launchKernel(" if config.cpp_wrapper else ".run("
+
+def _get_func_call() -> str:
+    return "void inductor_entry_impl(" if config.cpp_wrapper else "def call("
 
 
-def _get_path_without_sccache() -> str:
-    """
-    Get the PATH environment variable without sccache.
-    """
-    path_envs = os.environ.get("PATH", "").split(":")
-    path_envs = [env for env in path_envs if "/opt/cache/bin" not in env]
-    return ":".join(path_envs)
+def _get_kernel_launch() -> str:
+    return "launchKernel(" if config.cpp_wrapper else ".run("
 
 
 def benchmark_choice(choice, args, out, expected_out, timings):
@@ -796,8 +792,8 @@ class TestMaxAutotune(TestCase):
 
         # mm kernel, and cos kernel
         count = 2 if using_triton_mm else 1
-        FileCheck().check(FUNC_CALL).check_count(
-            KERNEL_LAUNCH, count, exactly=True
+        FileCheck().check(_get_func_call()).check_count(
+            _get_kernel_launch(), count, exactly=True
         ).run(code[0])
 
         def f(x, y):
@@ -809,9 +805,9 @@ class TestMaxAutotune(TestCase):
         f_c = torch.compile(mode="max-autotune-no-cudagraphs")(f)
         _, code = run_and_get_code(f_c, inps[0], inps[1])
         self.assertEqual(f_c(*inps), f(*inps), atol=0.03, rtol=0.25)
-        FileCheck().check(FUNC_CALL).check_count(KERNEL_LAUNCH, 2, exactly=True).run(
-            code[0]
-        )
+        FileCheck().check(_get_func_call()).check_count(
+            _get_kernel_launch(), 2, exactly=True
+        ).run(code[0])
 
         def f(x, y):
             y = torch.cos(y)
@@ -1207,21 +1203,21 @@ class TestPrologueFusion(TestCase):
         )
 
     def check_code(self, code_str, num_kernels, num_allocs, num_deallocs):
-        FileCheck().check(FUNC_CALL).check_count(
-            KERNEL_LAUNCH,
+        FileCheck().check(_get_func_call()).check_count(
+            _get_kernel_launch(),
             num_kernels,
             exactly=True,
         ).run(code_str)
 
         if num_allocs is not None:
-            FileCheck().check(FUNC_CALL).check_count(
+            FileCheck().check(_get_func_call()).check_count(
                 "empty_strided", num_allocs, exactly=True
             ).run(code_str)
 
         # skip the deallocation check when using cpp_wrapper; most deallocations happen
         # outside of our control via RAIIAtenTensorHandle
         if num_deallocs is not None and not config.cpp_wrapper:
-            FileCheck().check(FUNC_CALL).check_count(
+            FileCheck().check(_get_func_call()).check_count(
                 "del", num_deallocs, exactly=True
             ).run(code_str)
 
@@ -1268,7 +1264,7 @@ class TestPrologueFusion(TestCase):
     @unittest.skipIf(TEST_WITH_ROCM, "FP8 is not supported on ROCM")
     @unittest.skipIf(
         not PLATFORM_SUPPORTS_FP8,
-        "FP8 is only supported on H100+ and sm_89 and MI300+ devices",
+        "FP8 is only supported on H100+, SM 8.9 and MI300+ devices",
     )
     def test_low_precision(self):
         M = K = N = 128
@@ -1358,9 +1354,9 @@ class TestPrologueFusion(TestCase):
 
         out, code = run_and_get_code(torch.compile(multi_use), x, y)
 
-        FileCheck().check(FUNC_CALL).check_count(KERNEL_LAUNCH, 2, exactly=True).run(
-            code[0]
-        )
+        FileCheck().check(_get_func_call()).check_count(
+            _get_kernel_launch(), 2, exactly=True
+        ).run(code[0])
         self.assertEqual(out, multi_use(x, y), atol=0.05, rtol=0.05)
 
         def resolve_pending(x):
@@ -1368,9 +1364,9 @@ class TestPrologueFusion(TestCase):
 
         x = torch.rand([128, 128], device=GPU_TYPE)
         out, code = run_and_get_code(torch.compile(resolve_pending), x)
-        FileCheck().check(FUNC_CALL).check_count(KERNEL_LAUNCH, 1, exactly=True).run(
-            code[0]
-        )
+        FileCheck().check(_get_func_call()).check_count(
+            _get_kernel_launch(), 1, exactly=True
+        ).run(code[0])
         self.assertEqual(out, resolve_pending(x), atol=0.05, rtol=0.05)
 
     @config.patch(
@@ -1389,9 +1385,9 @@ class TestPrologueFusion(TestCase):
 
         x = torch.rand([128, 128], dtype=torch.float16, device=GPU_TYPE)
         out, code = run_and_get_code(torch.compile(test_multiple_fusions), x)
-        FileCheck().check(FUNC_CALL).check_count(KERNEL_LAUNCH, 1, exactly=True).run(
-            code[0]
-        )
+        FileCheck().check(_get_func_call()).check_count(
+            _get_kernel_launch(), 1, exactly=True
+        ).run(code[0])
         self.assertEqual(out, test_multiple_fusions(x), atol=0.05, rtol=0.05)
 
     @parametrize("sizes", ((64, 128, 256), (128, 128, 128), (63, 120, 250)))
