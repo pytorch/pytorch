@@ -699,6 +699,26 @@ class GraphModule(torch.nn.Module):
         after = compiled_model(*args, **kwargs)
         self.assertEqual(before, after)
 
+    def test_forward_returns_constant(self):
+        class Foo(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x):
+                return x, [1, 2, 3]  # Tensor and list of integers
+
+            @staticmethod
+            def backward(ctx, grad_output1, grad_output2):
+                return grad_output1
+
+        @torch.compile(backend="aot_eager", fullgraph=True)
+        def f(x):
+            return Foo.apply(x)
+
+        x = torch.tensor(2.0, requires_grad=True)
+        result = f(x)
+        result[0].sum().backward()
+
+        self.assertEqual(result, Foo.apply(x))
+
     # I pulled all of these test cases from test_autograd.py
     # In the future, we should make the Dynamo test suite actually
     # run on test_autograd.py (it's disabled right now) and delete these.

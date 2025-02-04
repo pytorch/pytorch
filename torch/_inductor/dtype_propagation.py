@@ -1,6 +1,7 @@
 # mypy: allow-untyped-defs
 import functools
-from typing import Callable, Optional, Protocol, Sequence, TYPE_CHECKING, TypeVar, Union
+from collections.abc import Sequence
+from typing import Callable, Optional, Protocol, TYPE_CHECKING, TypeVar, Union
 
 import sympy
 
@@ -14,7 +15,6 @@ import torch
 from torch._inductor.virtualized import V
 from torch._prims_common import ELEMENTWISE_TYPE_PROMOTION_KIND, type_to_dtype
 
-from . import config
 from .utils import upcast_compute_type
 from .virtualized import OpsValue
 
@@ -65,15 +65,7 @@ def promote_types(
     dtype_prop_candidates = []
 
     for arg in args:
-        if isinstance(arg, str):
-            # TODO: fix the flex attention instances, enable internally
-            if not config.is_fbcode():
-                assert isinstance(
-                    V.get_ops_handler(),
-                    torch._inductor.select_algorithm.ModificationWrapper,
-                )
-            continue
-
+        assert not isinstance(arg, str)
         if isinstance(arg, OpsValue):
             arg = arg.value
             assert isinstance(arg, torch._prims_common.Number) or hasattr(arg, "dtype")
