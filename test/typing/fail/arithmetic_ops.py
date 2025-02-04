@@ -23,17 +23,17 @@ assert_type(
 )
 
 assert_type(
-    FLOAT
-    & TENSOR,  # E: Unsupported operand types for & ("float" and "Tensor")  [operator]
+    FLOAT  # E: Unsupported operand types for & ("float" and "Tensor")  [operator]
+    & TENSOR,
     Tensor,
 )
 assert_type(
-    FLOAT
-    | TENSOR,  # E: Unsupported operand types for | ("float" and "Tensor")  [operator]
+    FLOAT  # E: Unsupported operand types for | ("float" and "Tensor")  [operator]
+    | TENSOR,
     Tensor,
 )
 assert_type(
-    FLOAT
-    ^ TENSOR,  # E: Unsupported operand types for ^ ("float" and "Tensor")  [operator]
+    FLOAT  # E: Unsupported operand types for ^ ("float" and "Tensor")  [operator]
+    ^ TENSOR,
     Tensor,
 )
