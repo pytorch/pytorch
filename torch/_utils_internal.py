@@ -229,7 +229,7 @@ def max_clock_rate():
             return 1967
         elif "gfx101" in gcn_arch:
             return 1144
-        elif "gfx950" in gcn_arch:
+        elif "gfx95" in gcn_arch:
             return 1700 # TODO: placeholder, get actual value
         else:
             return 1100

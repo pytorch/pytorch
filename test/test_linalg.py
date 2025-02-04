@@ -55,7 +55,7 @@ def blaslt_supported_device():
             if ROCM_VERSION >= (6, 3):
                 archs.extend(['gfx110', 'gfx120'])
             if ROCM_VERSION >= (6, 5):
-                archs.append('gfx950')
+                archs.append('gfx95')
             for arch in archs:
                 if arch in torch.cuda.get_device_properties(0).gcnArchName:
                     return True
