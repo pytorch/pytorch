@@ -857,6 +857,10 @@ class TestSparseSemiStructuredCUTLASS(TestCase):
         if "cutlass" not in SEMI_STRUCTURED_SUPPORTED_BACKENDS:
             self.skipTest('CUTLASS not enabled')
 
+    def tearDown(self):
+        SparseSemiStructuredTensor._FORCE_CUTLASS = False
+        super().tearDown()
+
     @unittest.skipIf(TEST_WITH_ROCM or IS_WINDOWS, "ROCm and Windows doesn't support CUTLASS")
     @inference_dtypes
     def test_linear_cutlass(self, device, dtype):
