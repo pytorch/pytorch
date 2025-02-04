@@ -2590,11 +2590,6 @@ def matmul_backward_default(func, *args, **kwargs):
     if grad is None:
         return (None, None)
 
-    if not inp.is_nested and not other.is_nested:
-        raise ValueError(
-            "matmul_backward_default: expected one of [self, other] to be a nested tensor"
-        )
-
     grad_self = None
     if grad_input_mask[0]:
         grad_self = torch.matmul(grad, other.transpose(-1, -2))
