@@ -1253,6 +1253,9 @@ class cuda:
     # This is mainly used to reduce test time in CI.
     cutlass_max_profiling_configs: Optional[int] = None
 
+    # The L2 swizzle values to consider when profiling CUTLASS configs in max_autotune.
+    cutlass_max_profiling_swizzle_options: list[int] = [2]
+
     # Path to CUDA NVCC.
     # NVCC search order:
     # 1) cuda_cxx set in this config
