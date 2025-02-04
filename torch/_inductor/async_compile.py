@@ -11,7 +11,7 @@ from concurrent.futures import Future, ProcessPoolExecutor, ThreadPoolExecutor
 from concurrent.futures.process import BrokenProcessPool
 from functools import partial
 from time import time
-from typing import Any, Callable, Optional, TYPE_CHECKING
+from typing import Any, Callable, Dict, Optional, TYPE_CHECKING
 
 import torch
 from torch._dynamo.device_interface import get_registered_device_interfaces
@@ -142,7 +142,7 @@ class CompiledTritonKernels:
     Currently, the cache stores Future objects, but it should be generalizable for any kernels.
     """
 
-    _cache = {}
+    _cache: Dict[str, LambdaFuture] = {}
 
     @staticmethod
     def key(kernel_src: str):
