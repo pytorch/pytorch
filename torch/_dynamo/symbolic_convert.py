@@ -1492,10 +1492,11 @@ class InstructionTranslatorBase(
             unimplemented("raise ... from ...")
 
     def CLEANUP_THROW(self, inst):
+        # https://github.com/python/cpython/pull/96010
         tos = self.stack[-1]
         assert isinstance(tos, ExceptionVariable)
         if tos.exc_type is StopIteration:
-            unimplemented("CLEANUP_THROW")
+            unimplemented("CLEANUP_THROW with StopIteration")
         else:
             self.RERAISE(inst)
 
