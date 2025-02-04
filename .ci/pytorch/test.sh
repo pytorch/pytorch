@@ -414,11 +414,7 @@ test_inductor_cpp_wrapper_shard() {
 
   # Run certain inductor unit tests with cpp wrapper. In the end state, we
   # should be able to run all the inductor unit tests with cpp_wrapper.
-  python test/run_test.py --include inductor/test_torchinductor --verbose
-  python test/run_test.py \
-    --include inductor/test_cpu_repro \
-    -k 'test_set_source_Tensor' \
-    --verbose
+  python test/run_test.py --include inductor/test_torchinductor inductor/test_cpu_repro --verbose
 
   # Run inductor benchmark tests with cpp wrapper.
   # Skip benchmark tests if it's in rerun-disabled-mode.
