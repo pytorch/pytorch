@@ -9621,7 +9621,11 @@ class CommonTemplate:
     @skip_if_halide  # cascading accuracy issues due rsqrt fallback
     def test_tmp_not_defined_issue3(self):
         test_device = torch.device(type=self.device)
-        test_device_0 = torch.device(type=self.device, index=0) if self.device != "cpu" else test_device
+        test_device_0 = (
+            torch.device(type=self.device, index=0)
+            if self.device != "cpu"
+            else test_device
+        )
 
         def forward(
             self,
