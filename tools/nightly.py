@@ -115,6 +115,9 @@ class PipSource(NamedTuple):
 
 
 PYTORCH_NIGHTLY_PIP_INDEX_URL = "https://download.pytorch.org/whl/nightly"
+PIP_TIMEOUT = max(
+    60.0, float(os.getenv("PIP_TIMEOUT") or "15")
+)  # increase pip timeout from 15s to 60s
 PIP_SOURCES = {
     "cpu": PipSource(
         name="cpu",
@@ -230,7 +233,10 @@ class Venv:
         self.pip_source = pip_source
         self.base_executable = Path(base_executable or sys.executable).absolute()
         self._executable: Path | None = None
-        self._env = {"PIP_EXTRA_INDEX_URL": self.pip_source.index_url}
+        self._env = {
+            "PIP_EXTRA_INDEX_URL": self.pip_source.index_url,
+            "PIP_TIMEOUT": str(PIP_TIMEOUT),
+        }
 
     def is_venv(self) -> bool:
         """Check if the prefix is a virtual environment."""
