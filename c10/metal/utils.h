@@ -1,3 +1,5 @@
+// Metal helper functions
+#pragma once
 #include <metal_stdlib>
 
 namespace c10 {
