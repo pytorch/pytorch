@@ -291,7 +291,6 @@ UNIMPLEMENTED_XFAILIST = {
         UNIMPLEMENTED, dtypes=[torch.int64, torch.bfloat16]
     ),
     # Unsupported dtypes
-    "dot": MPSSkipInfo(UNIMPLEMENTED, dtypes=[torch.int64]),
     "histc": MPSSkipInfo(UNIMPLEMENTED, dtypes=[torch.float16, torch.bfloat16]),
     "index_add": MPSSkipInfo(UNIMPLEMENTED, dtypes=[torch.int64]),
     "log1p": MPSSkipInfo(UNIMPLEMENTED, dtypes=[torch.int64]),
@@ -319,23 +318,11 @@ UNIMPLEMENTED_XFAILIST = {
         UNIMPLEMENTED,
         dtypes=[torch.int16, torch.int32, torch.int64, torch.uint8, torch.int8],
     ),
-    "addmv": MPSSkipInfo(
-        UNIMPLEMENTED,
-        dtypes=[torch.int16, torch.int32, torch.int64, torch.uint8, torch.int8],
-    ),
     "baddbmm": MPSSkipInfo(
         UNIMPLEMENTED,
         dtypes=[torch.int16, torch.int32, torch.int64, torch.uint8, torch.int8],
     ),
     "mm": MPSSkipInfo(
-        UNIMPLEMENTED,
-        dtypes=[torch.int16, torch.int32, torch.int64, torch.uint8, torch.int8],
-    ),
-    "bmm": MPSSkipInfo(
-        UNIMPLEMENTED,
-        dtypes=[torch.int16, torch.int32, torch.int64, torch.uint8, torch.int8],
-    ),
-    "einsum": MPSSkipInfo(
         UNIMPLEMENTED,
         dtypes=[torch.int16, torch.int32, torch.int64, torch.uint8, torch.int8],
     ),
@@ -347,15 +334,7 @@ UNIMPLEMENTED_XFAILIST = {
         UNIMPLEMENTED,
         dtypes=[torch.int16, torch.int32, torch.int64, torch.uint8, torch.int8],
     ),
-    "matmul": MPSSkipInfo(
-        UNIMPLEMENTED,
-        dtypes=[torch.int16, torch.int32, torch.int64, torch.uint8, torch.int8],
-    ),
     "mat": MPSSkipInfo(
-        UNIMPLEMENTED,
-        dtypes=[torch.int16, torch.int32, torch.int64, torch.uint8, torch.int8],
-    ),
-    "mv": MPSSkipInfo(
         UNIMPLEMENTED,
         dtypes=[torch.int16, torch.int32, torch.int64, torch.uint8, torch.int8],
     ),
