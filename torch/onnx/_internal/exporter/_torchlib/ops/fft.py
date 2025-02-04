@@ -20,7 +20,7 @@ aten = torch.ops.aten
 
 
 @onnx_impl(
-    (aten._fft_c2c, aten._fft_c2r, aten._fft_r2c),
+    (aten._fft_c2c.default, aten._fft_c2r.default, aten._fft_r2c.default),
     private=True,
     complex=True,
     trace_only=True,
@@ -63,7 +63,7 @@ def _fftn_onnx_normalization(
 
 
 @onnx_impl(
-    (aten._fft_c2c, aten._fft_c2r, aten._fft_r2c),
+    (aten._fft_c2c.default, aten._fft_c2r.default, aten._fft_r2c.default),
     trace_only=True,
     private=True,
     complex=True,
@@ -117,7 +117,7 @@ def _fftn_onnx(
     return _fftn_onnx_normalization(self, transformed, normalization, not inverse, dims)
 
 
-@onnx_impl(aten._fft_c2c, trace_only=True, complex=True)
+@onnx_impl(aten._fft_c2c.default, trace_only=True, complex=True)
 def aten__fft_c2c(
     self: TFloat, dim: Sequence[int], normalization: int, forward: bool
 ) -> TFloat:
@@ -136,7 +136,7 @@ def aten__fft_c2c(
     return _fftn_onnx(self, dim, normalization, inverse=not forward, onesided=False)
 
 
-@onnx_impl(aten._fft_c2r, trace_only=True, complex=True)
+@onnx_impl(aten._fft_c2r.default, trace_only=True, complex=True)
 def aten__fft_c2r(
     self: TFloat,
     dim: Sequence[int],
@@ -161,7 +161,7 @@ def aten__fft_c2r(
     return op.Squeeze(real_part, axes=[-1])
 
 
-@onnx_impl(aten._fft_r2c, trace_only=True)
+@onnx_impl(aten._fft_r2c.default, trace_only=True)
 def aten__fft_r2c(
     self: TFloat, dim: Sequence[int], normalization: int, onesided: bool
 ) -> TFloat:

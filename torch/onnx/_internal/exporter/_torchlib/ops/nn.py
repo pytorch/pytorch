@@ -119,7 +119,7 @@ def _adjust_attributes_of_avg_pool(
     return (kernel_shape, strides, pads)
 
 
-@onnx_impl(aten.avg_pool1d, trace_only=True)
+@onnx_impl(aten.avg_pool1d.default, trace_only=True)
 def aten_avg_pool1d(
     self: TFloat,
     kernel_size: Sequence[int],
@@ -151,7 +151,7 @@ def aten_avg_pool1d(
     return result
 
 
-@onnx_impl(aten.avg_pool2d, trace_only=True)
+@onnx_impl(aten.avg_pool2d.default, trace_only=True)
 def aten_avg_pool2d(
     self: TFloat,
     kernel_size: Sequence[int],
@@ -212,7 +212,7 @@ def aten_avg_pool2d_backward(
     raise NotImplementedError
 
 
-@onnx_impl(aten.avg_pool3d, trace_only=True)
+@onnx_impl(aten.avg_pool3d.default, trace_only=True)
 def aten_avg_pool3d(
     self: TFloat,
     kernel_size: Sequence[int],
@@ -296,14 +296,14 @@ def aten_binary_cross_entropy_backward(
     raise NotImplementedError
 
 
-@onnx_impl(aten.celu, trace_only=True)
+@onnx_impl(aten.celu.default, trace_only=True)
 def aten_celu(self: FLOAT, alpha: float = 1.0) -> FLOAT:
     """celu(Tensor self, Scalar alpha=1.0) -> Tensor"""
 
     return op.Celu(self, alpha=alpha)  # op.Celu only support float32
 
 
-@onnx_impl(aten.celu, trace_only=True)
+@onnx_impl(aten.celu.default, trace_only=True)
 def aten_celu_type_promoted(
     self: TFloatUnlessFloat32, alpha: float = 1.0
 ) -> TFloatUnlessFloat32:
@@ -313,7 +313,7 @@ def aten_celu_type_promoted(
     return op.CastLike(op.Celu(self_upcasted, alpha=alpha), self)
 
 
-@onnx_impl(aten.col2im, trace_only=True)
+@onnx_impl(aten.col2im.default, trace_only=True)
 def aten_col2im(
     self: TReal,
     output_size: INT64,
@@ -362,7 +362,7 @@ def aten_conv_depthwise3d(
     raise NotImplementedError
 
 
-@onnx_impl(aten.cross_entropy_loss, trace_only=True)
+@onnx_impl(aten.cross_entropy_loss.default, trace_only=True)
 def aten_cross_entropy_loss(
     self: TFloat,
     target: IntType,
@@ -389,7 +389,7 @@ def aten_cross_entropy_loss(
     return result
 
 
-@onnx_impl(aten.elu, trace_only=True)
+@onnx_impl(aten.elu.default, trace_only=True)
 def aten_elu(
     self: TFloat,
     alpha: float = 1.0,
@@ -469,7 +469,7 @@ def aten_fractional_max_pool3d_backward(
     raise NotImplementedError
 
 
-@onnx_impl(aten.gelu, trace_only=True)
+@onnx_impl(aten.gelu.default, trace_only=True)
 def aten_gelu(self: TReal, approximate: str = "none") -> TReal:
     """gelu(Tensor self, *, str approximate='none') -> Tensor"""
 
@@ -480,7 +480,7 @@ def aten_gelu(self: TReal, approximate: str = "none") -> TReal:
     return result
 
 
-@onnx_impl(aten.gelu, private=True)
+@onnx_impl(aten.gelu.default, private=True)
 def _aten_gelu_approximate_none(self: TReal) -> TReal:
     """gelu(Tensor self, *, str approximate='none') -> Tensor"""
 
@@ -493,7 +493,7 @@ def _aten_gelu_approximate_none(self: TReal) -> TReal:
     return result
 
 
-@onnx_impl(aten.gelu, private=True)
+@onnx_impl(aten.gelu.default, private=True)
 def _aten_gelu_approximate_tanh(self: TReal) -> TReal:
     """gelu(Tensor self, *, str approximate='none') -> Tensor"""
 
@@ -519,7 +519,7 @@ def aten_gelu_backward(
     raise NotImplementedError
 
 
-@onnx_impl(aten.glu, trace_only=True)
+@onnx_impl(aten.glu.default, trace_only=True)
 def aten_glu(self: TFloat, dim: int = -1) -> TFloat:
     """glu(Tensor self, int dim=-1) -> Tensor"""
 
@@ -549,7 +549,7 @@ def aten_glu_backward_jvp(
     raise NotImplementedError
 
 
-@onnx_impl(aten.group_norm, trace_only=True)
+@onnx_impl(aten.group_norm.default, trace_only=True)
 def aten_group_norm(
     input: TFloat,
     num_groups: int,
@@ -613,7 +613,7 @@ def aten_glu_jvp(
     raise NotImplementedError
 
 
-@onnx_impl(aten.hardsigmoid, trace_only=True)
+@onnx_impl(aten.hardsigmoid.default, trace_only=True)
 def aten_hardsigmoid(self: TFloat) -> TFloat:
     """hardsigmoid(Tensor self) -> Tensor"""
 
@@ -626,7 +626,7 @@ def aten_hardsigmoid_backward(grad_output: TensorType, self: TensorType) -> Tens
     raise NotImplementedError
 
 
-@onnx_impl(aten.hardswish)
+@onnx_impl(aten.hardswish.default)
 def aten_hardswish(self: TFloat) -> TFloat:
     """hardswish(Tensor self) -> Tensor"""
 
@@ -639,14 +639,14 @@ def aten_hardswish_backward(grad_output: TensorType, self: TensorType) -> Tensor
     raise NotImplementedError
 
 
-@onnx_impl(aten.hardtanh)
+@onnx_impl(aten.hardtanh.default)
 def aten_hardtanh(self: TReal, min_val: float = -1.0, max_val: float = 1.0) -> TReal:
     """hardtanh(Tensor self, Scalar min_val=-1, Scalar max_val=1) -> Tensor"""
 
     return op.Clip(self, min_val, max_val)
 
 
-@onnx_impl(aten.hardtanh_backward, trace_only=True)
+@onnx_impl(aten.hardtanh_backward.default, trace_only=True)
 def aten_hardtanh_backward(
     grad_output: TensorType, self: TensorType, min_val: float, max_val: float
 ) -> TensorType:
@@ -737,7 +737,7 @@ def _get_im2col_output_shape(input, kernel_h, kernel_w):
     )
 
 
-@onnx_impl(aten.im2col, trace_only=True)
+@onnx_impl(aten.im2col.default, trace_only=True)
 def aten_im2col(
     self: TReal,
     kernel_size: Sequence[int],
@@ -827,7 +827,7 @@ def aten_l1_loss(
     raise NotImplementedError
 
 
-@onnx_impl(aten.leaky_relu)
+@onnx_impl(aten.leaky_relu.default)
 def aten_leaky_relu(self: TFloat, negative_slope: float = 0.01) -> TFloat:
     """leaky_relu(Tensor self, Scalar negative_slope=0.01) -> Tensor"""
 
@@ -845,7 +845,7 @@ def aten_leaky_relu_backward(
     raise NotImplementedError
 
 
-@onnx_impl(aten.linear, trace_only=True)
+@onnx_impl(aten.linear.default, trace_only=True)
 def aten_linear(input: TFloat, weight: TFloat, bias: Optional[TFloat] = None) -> TFloat:
     """linear(Tensor input, Tensor weight, Tensor? bias=None) -> Tensor"""
 
@@ -859,7 +859,7 @@ def aten_linear(input: TFloat, weight: TFloat, bias: Optional[TFloat] = None) ->
     return op.Add(mul, bias)
 
 
-@onnx_impl(aten.log_sigmoid)
+@onnx_impl(aten.log_sigmoid.default)
 def aten_log_sigmoid(self: TFloat) -> TFloat:
     """log_sigmoid(Tensor self) -> Tensor"""
 
@@ -888,7 +888,7 @@ def aten_logit_backward(
     raise NotImplementedError
 
 
-@onnx_impl(aten.max_pool1d, trace_only=True)
+@onnx_impl(aten.max_pool1d.default, trace_only=True)
 def aten_max_pool1d(
     self: TFloatOrUInt8,
     kernel_size: Sequence[int],
@@ -912,7 +912,7 @@ def aten_max_pool1d(
     )
 
 
-@onnx_impl(aten.max_pool1d_with_indices, trace_only=True)
+@onnx_impl(aten.max_pool1d_with_indices.default, trace_only=True)
 def aten_max_pool1d_with_indices(
     self: TFloatOrUInt8,
     kernel_size: Sequence[int],
@@ -993,7 +993,7 @@ def _adjust_attributes_of_max_pool(
     return (kernel_shape, strides, pads, dilations)
 
 
-@onnx_impl(aten.max_pool2d, trace_only=True)
+@onnx_impl(aten.max_pool2d.default, trace_only=True)
 def aten_max_pool2d(
     self: TFloatOrUInt8,
     kernel_size: Sequence[int],
@@ -1045,7 +1045,7 @@ def _aten_max_pool_onnx(
     return pool_result
 
 
-@onnx_impl(aten.max_pool3d, trace_only=True)
+@onnx_impl(aten.max_pool3d.default, trace_only=True)
 def aten_max_pool3d(
     self: TFloatOrUInt8,
     kernel_size: Sequence[int],
@@ -1069,7 +1069,7 @@ def aten_max_pool3d(
     )
 
 
-@onnx_impl(aten.max_pool2d_with_indices, trace_only=True)
+@onnx_impl(aten.max_pool2d_with_indices.default, trace_only=True)
 def aten_max_pool2d_with_indices(
     self: TFloatOrUInt8,
     kernel_size: Sequence[int],
@@ -1117,7 +1117,7 @@ def aten_max_pool2d_with_indices_backward(
     raise NotImplementedError
 
 
-@onnx_impl(aten.max_pool3d_with_indices, trace_only=True)
+@onnx_impl(aten.max_pool3d_with_indices.default, trace_only=True)
 def aten_max_pool3d_with_indices(
     self: TFloatOrUInt8,
     kernel_size: Sequence[int],
@@ -1260,7 +1260,7 @@ def aten_max_unpool3d(
     raise NotImplementedError
 
 
-@onnx_impl(aten.mish)
+@onnx_impl(aten.mish.default)
 def aten_mish(self: TFloat) -> TFloat:
     """mish(Tensor self) -> Tensor"""
 
@@ -1305,7 +1305,7 @@ def aten_mkldnn_reorder_conv3d_weight(
     raise NotImplementedError
 
 
-@onnx_impl(aten.mse_loss, trace_only=True)
+@onnx_impl(aten.mse_loss.default, trace_only=True)
 def aten_mse_loss(self: TReal, target: TReal, reduction: int = 1) -> TReal:
     """mse_loss(Tensor self, Tensor target, int reduction=Mean) -> Tensor"""
     # FIXME: When reduction=0, the shape(result) will be different than other case
@@ -1381,7 +1381,7 @@ def aten_multilabel_margin_loss_forward(
     raise NotImplementedError
 
 
-@onnx_impl(aten.nll_loss, trace_only=True)
+@onnx_impl(aten.nll_loss.default, trace_only=True)
 def aten_nll_loss(
     self: TFloat,
     target: INT64,
@@ -1468,7 +1468,7 @@ def aten_nll_loss_backward(
     raise NotImplementedError
 
 
-@onnx_impl(aten.nll_loss_forward, trace_only=True)
+@onnx_impl(aten.nll_loss_forward.default, trace_only=True)
 def aten_nll_loss_forward(
     self: TensorType,
     target: TensorType,
@@ -1523,7 +1523,7 @@ def aten_pad_sequence(
     raise NotImplementedError
 
 
-@onnx_impl(aten.reflection_pad1d)
+@onnx_impl(aten.reflection_pad1d.default)
 def aten_reflection_pad1d(self: TFloat, padding: INT64) -> TFloat:
     """reflection_pad1d(Tensor self, SymInt[2] padding) -> Tensor"""
 
@@ -1545,7 +1545,7 @@ def aten_reflection_pad1d_backward(
     raise NotImplementedError
 
 
-@onnx_impl(aten.reflection_pad2d)
+@onnx_impl(aten.reflection_pad2d.default)
 def aten_reflection_pad2d(self: TTensor, padding: INT64) -> TTensor:
     """reflection_pad2d(Tensor self, SymInt[4] padding) -> Tensor"""
     # Convert torch padding format to onnx padding format
@@ -1600,14 +1600,14 @@ def aten_reflection_pad3d_backward(
     raise NotImplementedError
 
 
-@onnx_impl(aten.relu, trace_only=True)
+@onnx_impl(aten.relu.default, trace_only=True)
 def aten_relu(self: TReal) -> TReal:
     """relu(Tensor self) -> Tensor"""
 
     return op.Relu(self)
 
 
-@onnx_impl(aten.relu6, trace_only=True)
+@onnx_impl(aten.relu6.default, trace_only=True)
 def aten_relu6(self: TReal) -> TReal:
     """relu6(Tensor self) -> Tensor"""
 
@@ -1615,7 +1615,7 @@ def aten_relu6(self: TReal) -> TReal:
     return op.Min(op.Relu(self), six)
 
 
-@onnx_impl(aten.replication_pad1d)
+@onnx_impl(aten.replication_pad1d.default)
 def aten_replication_pad1d(self: TensorType, padding: INT64) -> TensorType:
     """replication_pad1d(Tensor self, SymInt[2] padding) -> Tensor"""
 
@@ -1637,7 +1637,7 @@ def aten_replication_pad1d_backward(
     raise NotImplementedError
 
 
-@onnx_impl(aten.replication_pad2d)
+@onnx_impl(aten.replication_pad2d.default)
 def aten_replication_pad2d(self: TTensor, padding: INT64) -> TTensor:
     """replication_pad2d(Tensor self, SymInt[4] padding) -> Tensor"""
 
@@ -1673,7 +1673,7 @@ def aten_replication_pad2d_backward(
     raise NotImplementedError
 
 
-@onnx_impl(aten.replication_pad3d)
+@onnx_impl(aten.replication_pad3d.default)
 def aten_replication_pad3d(self: TTensor, padding: INT64) -> TTensor:
     """replication_pad3d(Tensor self, SymInt[6] padding) -> Tensor"""
 
@@ -1793,7 +1793,7 @@ def _attention_scale(query: TFloat) -> TFloat:
     return scale
 
 
-@onnx_impl(aten.scaled_dot_product_attention, trace_only=True)
+@onnx_impl(aten.scaled_dot_product_attention.default, trace_only=True)
 def aten_scaled_dot_product_attention(
     query: TFloat,
     key: TFloat,
@@ -1876,7 +1876,7 @@ def _aten__scaled_dot_product_flash_attention_fillin_empty_outputs(
     return logsumexp, empty_tensor_int, empty_int, empty_tensor_float
 
 
-@onnx_impl(aten._scaled_dot_product_flash_attention, trace_only=True)
+@onnx_impl(aten._scaled_dot_product_flash_attention.default, trace_only=True)
 def aten__scaled_dot_product_flash_attention(
     query: TFloat,
     key: TFloat,
@@ -1920,7 +1920,7 @@ def aten__scaled_dot_product_flash_attention(
     )
 
 
-@onnx_impl(aten._scaled_dot_product_efficient_attention, private=True)
+@onnx_impl(aten._scaled_dot_product_efficient_attention.default, private=True)
 def _aten_scaled_dot_product_efficient_attention_fillin_empty_outputs(
     query: TFloat,
     compute_log_sumexp: bool,
@@ -1957,7 +1957,7 @@ def _aten_scaled_dot_product_efficient_attention_fillin_empty_outputs(
     return logsum_exp, empty_tensor_int
 
 
-@onnx_impl(aten._scaled_dot_product_flash_attention_for_cpu, trace_only=True)
+@onnx_impl(aten._scaled_dot_product_flash_attention_for_cpu.default, trace_only=True)
 def aten__scaled_dot_product_flash_attention_for_cpu(
     query: TFloat,
     key: TFloat,
@@ -1991,7 +1991,7 @@ def aten__scaled_dot_product_flash_attention_for_cpu(
     return result, logsum_exp
 
 
-@onnx_impl(aten._scaled_dot_product_efficient_attention, trace_only=True)
+@onnx_impl(aten._scaled_dot_product_efficient_attention.default, trace_only=True)
 def aten__scaled_dot_product_efficient_attention(
     query: TFloat,
     key: TFloat,
@@ -2030,7 +2030,7 @@ def aten__scaled_dot_product_efficient_attention(
     )
 
 
-@onnx_impl(aten.scaled_dot_product_attention, trace_only=True)
+@onnx_impl(aten.scaled_dot_product_attention.default, trace_only=True)
 def aten_scaled_dot_product_attention_bool_mask(
     query: TFloat,
     key: TFloat,
@@ -2214,7 +2214,7 @@ def aten_sigmoid_backward(grad_output: TensorType, output: TensorType) -> Tensor
     raise NotImplementedError
 
 
-@onnx_impl(aten.silu, trace_only=True)
+@onnx_impl(aten.silu.default, trace_only=True)
 def aten_silu(self: TFloat) -> TFloat:
     """silu(Tensor self) -> Tensor"""
 
@@ -2347,7 +2347,7 @@ def aten_soft_margin_loss_backward(
     raise NotImplementedError
 
 
-@onnx_impl(aten.softplus)
+@onnx_impl(aten.softplus.default)
 def aten_softplus(self: TFloat, beta: float = 1.0, threshold: float = 20.0) -> TFloat:
     """softplus(Tensor self, Scalar beta=1, Scalar threshold=20) -> Tensor"""
 
@@ -2452,7 +2452,7 @@ def _aten_upsample_scales(
     )
 
 
-@onnx_impl(aten.upsample_bicubic2d, trace_only=True)
+@onnx_impl(aten.upsample_bicubic2d.default, trace_only=True)
 def aten_upsample_bicubic2d(
     self: TReal,
     output_size: INT64,
@@ -2514,7 +2514,7 @@ def aten_upsample_bicubic2d_backward(
     raise NotImplementedError
 
 
-@onnx_impl(aten.upsample_bilinear2d, trace_only=True)
+@onnx_impl(aten.upsample_bilinear2d.default, trace_only=True)
 def aten_upsample_bilinear2d(
     self: TReal,
     output_size: INT64,
@@ -2577,7 +2577,7 @@ def aten_upsample_bilinear2d_backward(
     raise NotImplementedError
 
 
-@onnx_impl(aten.upsample_linear1d, trace_only=True)
+@onnx_impl(aten.upsample_linear1d.default, trace_only=True)
 def aten_upsample_linear1d(
     self: TReal, output_size: INT64, align_corners: bool, scales: Optional[float] = None
 ) -> TReal:
@@ -2604,7 +2604,7 @@ def aten_upsample_linear1d_backward(
     raise NotImplementedError
 
 
-@onnx_impl(aten.upsample_nearest1d, trace_only=True)
+@onnx_impl(aten.upsample_nearest1d.default, trace_only=True)
 def aten_upsample_nearest1d(
     self: TReal, output_size: INT64, scales: Optional[float] = None
 ) -> TReal:
@@ -2648,7 +2648,7 @@ def aten_upsample_nearest1d_backward(
     raise NotImplementedError
 
 
-@onnx_impl(aten.upsample_nearest2d, trace_only=True)
+@onnx_impl(aten.upsample_nearest2d.default, trace_only=True)
 def aten_upsample_nearest2d(
     self: TReal,
     output_size: INT64,
@@ -2680,7 +2680,7 @@ def aten_upsample_nearest2d_backward(
     raise NotImplementedError
 
 
-@onnx_impl(aten.upsample_nearest3d, trace_only=True)
+@onnx_impl(aten.upsample_nearest3d.default, trace_only=True)
 def aten_upsample_nearest3d(
     self: TReal,
     output_size: INT64,
@@ -2714,7 +2714,7 @@ def aten_upsample_nearest3d_backward(
     raise NotImplementedError
 
 
-@onnx_impl(aten.upsample_trilinear3d, trace_only=True)
+@onnx_impl(aten.upsample_trilinear3d.default, trace_only=True)
 def aten_upsample_trilinear3d(
     self: TReal,
     output_size: INT64,

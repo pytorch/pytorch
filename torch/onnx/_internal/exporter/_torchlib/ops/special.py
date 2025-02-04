@@ -89,21 +89,21 @@ def aten_special_entr(self: TensorType) -> TensorType:
     raise NotImplementedError
 
 
-@onnx_impl((aten.erf, aten.special_erf))
+@onnx_impl((aten.erf.default, aten.special_erf.default))
 def aten_special_erf(self: TFloat) -> TFloat:
     """erf(Tensor self) -> Tensor"""
 
     return op.Erf(self)
 
 
-@onnx_impl((aten.erfc, aten.special_erfc))
+@onnx_impl((aten.erfc.default, aten.special_erfc.default))
 def aten_special_erfc(self: TFloat) -> TFloat:
     """erfc(Tensor self) -> Tensor"""
 
     return op.Sub(1, op.Erf(self))
 
 
-@onnx_impl(aten.special_erfcx)
+@onnx_impl(aten.special_erfcx.default)
 def aten_special_erfcx(self: TFloat) -> TFloat:
     """special_erfcx(Tensor self) -> Tensor"""
 
@@ -128,7 +128,7 @@ def aten_special_expit(self: TensorType) -> TensorType:
     raise NotImplementedError
 
 
-@onnx_impl((aten.expm1, aten.special_expm1))
+@onnx_impl((aten.expm1.default, aten.special_expm1.default))
 def aten_special_expm1(self: TFloat) -> TFloat:
     """special_expm1(Tensor self) -> Tensor"""
 
@@ -213,7 +213,7 @@ def aten_special_log_ndtr(self: TensorType) -> TensorType:
     raise NotImplementedError
 
 
-@onnx_impl((aten.log_softmax.int, aten.special_log_softmax), trace_only=True)
+@onnx_impl((aten.log_softmax.int, aten.special_log_softmax.default), trace_only=True)
 def aten_special_log_softmax(self: TFloat, dim: int, dtype: int = -1) -> TFloat:
     """special_log_softmax(Tensor self, int dim, *, ScalarType? dtype=None) -> Tensor"""
 
@@ -346,7 +346,7 @@ def aten_special_shifted_chebyshev_polynomial_w(
     raise NotImplementedError
 
 
-@onnx_impl((aten.special_sinc, aten.sinc))
+@onnx_impl((aten.special_sinc.default, aten.sinc.default))
 def aten_special_sinc(self: TFloat) -> TFloat:
     """special_sinc(Tensor self) -> Tensor"""
 

@@ -47,7 +47,7 @@ def aten_linalg_cross(self: TTensor, other: TTensor, dim: int = -1) -> TTensor:
     raise NotImplementedError
 
 
-@onnx_impl((aten._linalg_det, aten.linalg_det, aten.det))
+@onnx_impl((aten._linalg_det.default, aten.linalg_det.default, aten.det.default))
 def aten_linalg_det(A: TFloat) -> TFloat:
     """linalg_det(Tensor A) -> Tensor"""
 
@@ -323,7 +323,7 @@ def aten_linalg_vecdot(x: TensorType, y: TensorType, dim: int = -1) -> TensorTyp
     raise NotImplementedError
 
 
-@onnx_impl(aten.linalg_vector_norm, trace_only=True)
+@onnx_impl(aten.linalg_vector_norm.default, trace_only=True)
 def aten_linalg_vector_norm(
     self: TFloat,
     ord: float = 2.0,
