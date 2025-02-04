@@ -936,7 +936,7 @@ def lower_cpu(
         + mask_graph_placeholder_inps
         + list(mask_mod_other_buffers)
     )
-    fake_buffers: List[Buffer] = [item.data.data for item in buffer_list if isinstance(item, TensorBox)]  # type: ignore[attr-defined]
+    fake_buffers: list[Buffer] = [item.data.data for item in buffer_list if isinstance(item, TensorBox)]  # type: ignore[attr-defined]
 
     (
         query,
