@@ -1001,8 +1001,9 @@ def _init_logs(log_file_name=None):
     # configuration
     trace_dir_name = os.environ.get(TRACE_ENV_VAR, None)
 
-    if os.environ.get(DTRACE_ENV_VAR, None):
+    if dtrace_dir_name := os.environ.get(DTRACE_ENV_VAR, None):
         GET_DTRACE_STRUCTURED = True
+        trace_dir_name = dtrace_dir_name
 
     # This handler may remove itself if trace_dir_name is None and we are not
     # actually in an FB environment.  This allows us to defer actually
