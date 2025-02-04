@@ -49,6 +49,30 @@ __all__ = ["SymNode", "method_to_operator", "magic_methods"]
 
 from torch.types import py_sym_types as SymTypes
 
+import functools
+def capture_specialization(fn):
+    @functools.wraps(fn)
+    def wrapper(self, file, line):
+        from torch._guards import ShapeGuard, SLoc, Source, TracingContext
+        from torch.utils._traceback import CapturedTraceback, format_frame
+        from torch._logging import dtrace_structured, LazyString, structured, trace_structured
+        import json
+        out: Dict[str, object] = {
+            "guard": fn.__name__,
+            "self": str(self),
+            "expr": str(self.expr),
+            "hint": str(self.hint),
+            "file": file,
+            "line": line,
+            "framework_stack": "".join(CapturedTraceback.extract(cpp=True).format()),
+            "user_stack": "".join(TracingContext.extract_stack().format())
+        }
+        print(json.dumps(out))
+
+        fn(self, file, line)
+
+    return wrapper
+
 
 def _to_symtype(t):
     if t is bool:
@@ -486,23 +510,8 @@ class SymNode:
         return SymNode(out, self.shape_env, int, out_hint, fx_node=fx_node)
 
     # You can manually trigger a guard with this function
+    @capture_specialization
     def guard_int(self, file, line):
-        from torch._guards import ShapeGuard, SLoc, Source, TracingContext
-        from torch.utils._traceback import CapturedTraceback, format_frame
-        from torch._logging import dtrace_structured, LazyString, structured, trace_structured
-        out: Dict[str, object] = {
-            "guard": "int",
-            "self": str(self),
-            "expr": str(self.expr),
-            "hint": str(self.hint),
-            "file": file,
-            "line": line,
-            "framework_stack": "".join(CapturedTraceback.extract(cpp=True).format()),
-            "user_stack": "".join(TracingContext.extract_stack().format())
-        }
-        import json
-        print(json.dumps(out))
-
         # TODO: use the file/line for some useful diagnostic on why a
         # guard occurred
         r = self.shape_env.evaluate_expr(self.expr, self.hint, fx_node=self.fx_node)
@@ -512,6 +521,7 @@ class SymNode:
             log.warning("Failed to convert to int: %s", r)
             raise
 
+    @capture_specialization
     def guard_float(self, file, line):
         # TODO: use the file/line for some useful diagnostic on why a
         # guard occurred
@@ -522,27 +532,8 @@ class SymNode:
             log.warning("Failed to convert to float: %s", r)
             raise
 
+    @capture_specialization
     def guard_bool(self, file, line):
-        from torch._guards import ShapeGuard, SLoc, Source, TracingContext
-        from torch.utils._traceback import CapturedTraceback, format_frame
-        from torch._logging import dtrace_structured, LazyString, structured, trace_structured
-        out: Dict[str, object] = {
-            "guard": "bool",
-            "self": str(self),
-            "expr": str(self.expr),
-            "hint": str(self.hint),
-            "file": file,
-            "line": line,
-            "framework_stack": "".join(CapturedTraceback.extract(cpp=True).format()),
-            "user_stack": "".join(TracingContext.extract_stack().format())
-            # "user_stack": structured.from_traceback(TracingContext.extract_stack()),
-            # "stack": structured.from_traceback(
-            #     CapturedTraceback.extract(skip=1).summary()
-            # ),
-        }
-        import json
-        print(json.dumps(out))
-
         # TODO: use the file/line for some useful diagnostic on why a
         # guard occurred
         r = self.shape_env.evaluate_expr(self.expr, self.hint, fx_node=self.fx_node)
@@ -552,25 +543,8 @@ class SymNode:
             log.warning("Failed to convert to bool: %s", r)
             raise
 
+    @capture_specialization
     def expect_true(self, file, line):
-        from torch.fx.experimental.symbolic_shapes import free_unbacked_symbols
-        from torch._guards import ShapeGuard, SLoc, Source, TracingContext
-        from torch.utils._traceback import CapturedTraceback, format_frame
-        from torch._logging import dtrace_structured, LazyString, structured, trace_structured
-        out: Dict[str, object] = {
-            "guard": "expect_true",
-            "self": str(self),
-            "expr": str(self.expr),
-            "hint": str(self.hint),
-            "file": file,
-            "line": line,
-            "framework_stack": "".join(CapturedTraceback.extract(cpp=True).format()),
-            "user_stack": "".join(TracingContext.extract_stack().format())
-        }
-        import json
-        print(json.dumps(out))
-
-
         if (
             self.has_hint()
             and not free_unbacked_symbols(self.expr)
@@ -586,24 +560,8 @@ class SymNode:
             self.expr, f"{file}:{line}", fx_node=self.fx_node
         )
 
+    @capture_specialization
     def expect_size(self, file, line):
-        from torch.fx.experimental.symbolic_shapes import _advise_is_size
-        from torch._guards import ShapeGuard, SLoc, Source, TracingContext
-        from torch.utils._traceback import CapturedTraceback, format_frame
-        from torch._logging import dtrace_structured, LazyString, structured, trace_structured
-        out: Dict[str, object] = {
-            "guard": "expect_size",
-            "self": str(self),
-            "expr": str(self.expr),
-            "hint": str(self.hint),
-            "file": file,
-            "line": line,
-            "framework_stack": "".join(CapturedTraceback.extract(cpp=True).format()),
-            "user_stack": "".join(TracingContext.extract_stack().format())
-        }
-        import json
-        print(json.dumps(out))
-
         b = self.ge(self.wrap_int(0))
         # Generate a deferred runtime assert
         r = b.expect_true(file, line)
