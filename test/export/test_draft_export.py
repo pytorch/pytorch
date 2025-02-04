@@ -224,6 +224,20 @@ class TestDraftExport(TestCase):
             inp = (torch.randn(3, 3), torch.randn(3, 3), torch.tensor(2))
             self.assertEqual(ep.module()(*inp), M()(*inp))
 
+    def test_unbacked_div_mod_replacement(self):
+        class M(torch.nn.Module):
+            def forward(self, x):
+                x = torch.zeros(x.item())
+                x = x.unsqueeze(0).repeat(10, 2)
+                return x.view(-1, 2, 2345)
+
+        _, report = draft_export(M(), (torch.tensor([938]),))
+        self.assertEqual(len(report.failures), 1)
+        self.assertEqual(
+            report.failures[0].failure_type, FailureType.DATA_DEPENDENT_ERROR
+        )
+        self.assertEqual(report.failures[0].data["expr"], "Eq(2*u1, 10)")
+
     def test_dedup_data_dependent_failure(self):
         class M(torch.nn.Module):
             def forward(self, x, y, z):
