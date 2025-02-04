@@ -309,17 +309,14 @@ class WrapperFxCodegen(PythonWrapperCodegen):
         assert not any(buf.get_name() in V.graph.removed_buffers for buf in (old, new))
         assert old.get_dtype() == new.get_dtype()
 
-        result_node = self.buffer_to_node[old.name]
-
-        # Free the old buffer.
-        if old.get_name() not in V.graph.get_output_names() and delete_old:
-            self._free(old)
+        old_node = self.buffer_to_node[old.name]
+        result_node = old_node
 
         # Change shape and stride.
         size = new.get_size()
         stride = new.get_stride()
-        offset = old.offset()
-        if old.get_size() != size or old.get_stride() != stride or old.offset() != offset:
+        offset = new.get_offset()
+        if old.get_size() != size or old.get_stride() != stride or old.get_offset() != offset:
             result_node = self.gm.graph.call_function(
                 torch.as_strided,
                 args=(size, stride, offset)
@@ -328,8 +325,13 @@ class WrapperFxCodegen(PythonWrapperCodegen):
 
         self._record_allocation(new, result_node)
 
+        # Free the old buffer, if we allocated a new tensor.
+        if old.get_name() not in V.graph.get_output_names() and line.delete_old and result_node is not old_node:
+            self._free(old)
+
+
     def _generate_null(self, line: Line) -> None:
-        assert isintstance(line, NullLine)
+        assert isinstance(line, NullLine)
         # Does nothing.
 
     def _generate_comm_buffer(self, line: Line) -> None:

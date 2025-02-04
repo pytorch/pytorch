@@ -6,6 +6,7 @@ import torch
 import unittest
 
 from torch._inductor import config
+from torch._higher_order_ops.triton_kernel_wrap import triton_kernel_wrapper_mutation
 from torch._inductor.virtualized import V
 from torch._inductor.codegen.triton import TritonScheduling
 from torch._inductor.codegen.wrapper_fxir import WrapperFxCodegen
@@ -44,6 +45,21 @@ class FxirTestCase(InductorTestCase):
 
         return gms
 
+    def _compile_and_check(self, func, args, expected_num_kernels: int = 1):
+        opt = torch.compile(func)
+
+        # Get the FX graph from the backend.
+        (gm,) = self._run_and_capture_graphs(opt, args)
+
+        # Check code
+        num_kernels = len(list(gm.graph.find_nodes(op="call_function", target=triton_kernel_wrapper_mutation)))
+        self.assertEqual(num_kernels, expected_num_kernels)
+
+        # Check accuracy
+        result = gm(*args)[0]
+        ref = func(*args)
+        self.assertTrue(torch.allclose(result, ref))
+
     @classmethod
     def setUpClass(cls):
         super().setUpClass()
@@ -54,12 +70,16 @@ class FxirTestCase(InductorTestCase):
     def test_basic(self):
         func = torch.add
         args = [torch.rand(8, device=self.device) for _ in range(2)]
-        opt = torch.compile(func)
+
+        self._compile_and_check(func, args)
+
+    def test_multiple_kernels(self):
+        def foo(x, y):
+            return x.sum() + y.sum()
+
+        args = [torch.rand(length, device=self.device) for length in [517, 1029]]
+        self._compile_and_check(foo, args, expected_num_kernels=2)
 
 
-        # Get the FX graph from the backend.
-        gms = self._run_and_capture_graphs(opt, args)
-        result = gms[0](*args)[0] # FIXME GM returns a tuple
-        ref = func(*args)
 
-        self.assertTrue(torch.allclose(result, ref))
+
