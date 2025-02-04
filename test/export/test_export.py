@@ -2635,14 +2635,16 @@ def forward(self, p_linear_weight, p_linear_bias, x):
                 self.register_buffer("buf", torch.zeros(10))
             def forward(self, x, y):
                 self.buf[0 : x.shape[0]] = x
-                return x + 2, y[:, ::2]
+                return x + 2, y[:, ::1]
 
         inps = (torch.randn(10), torch.randn(32, 36))
         dynamic_shapes = {
             "x": {0: Dim("dx", min=1, max=10)},
             "y": {0: Dim("dy0"), 1: Dim("dy1")}
         }
-        ep = export(Foo(), inps, dynamic_shapes=dynamic_shapes, strict=False)
+        ep = export(Foo(), inps, dynamic_shapes=dynamic_shapes)
+        ep.module()(torch.randn(9), torch.randn(4, 4))
+        ep.module()(torch.randn(1), torch.randn(1, 1))
 
     def test_duplicate_modules_with_non_persistent_buffers(self):
         class FooWithBuf(torch.nn.Module):
