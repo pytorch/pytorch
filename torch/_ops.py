@@ -456,11 +456,6 @@ class HigherOrderOperator(OperatorBase, abc.ABC):
 
     @abc.abstractmethod
     def __call__(self, /, *args, **kwargs):
-        # Dynamo already traces the body of HigherOrderOp beforehand when it
-        # so no need to trace into it.
-        from torch._dynamo import disable
-
-        @disable
         def wrapper():
             flat_args = _to_flat_tuple(args, kwargs)
             if torch.overrides.has_torch_function(flat_args):
