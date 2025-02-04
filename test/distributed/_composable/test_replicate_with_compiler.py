@@ -25,18 +25,20 @@ from torch.distributed.tensor.parallel import (
     RowwiseParallel,
 )
 from torch.nn.parallel.distributed import DistributedDataParallel as DDP
-from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_distributed import (
     DistributedTestBase,
     skip_if_lt_x_gpu,
     skip_if_rocm_multiprocess,
     sm_is_or_higher_than,
 )
+from torch.testing._internal.common_fsdp import get_devtype
 from torch.testing._internal.common_utils import run_tests, skipIfRocm
 from torch.testing._internal.distributed.fake_pg import FakeStore
 from torch.testing._internal.inductor_utils import HAS_GPU
 from torch.utils.checkpoint import checkpoint
 
+
+device_type = str(get_devtype())
 
 DIM = 2000
 
@@ -80,6 +82,10 @@ class MultiProcessInductorTestCase(DistributedTestBase, InductorTestCase):
 
 
 class ReplicateTest(MultiProcessInductorTestCase):
+    @property
+    def world_size(self) -> int:
+        return min(2, torch.get_device_module(device_type).device_count())
+
     def _test_compile(
         self,
         *,
@@ -197,8 +203,8 @@ class ReplicateTest(MultiProcessInductorTestCase):
     @torch._inductor.config.patch(
         reorder_for_locality=False, reorder_for_peak_memory=False
     )
-    def test_compile_gpu(self, device):
-        self._test_compile(no_sync=False, checkpoint=False, device=device)
+    def test_compile_gpu(self):
+        self._test_compile(no_sync=False, checkpoint=False, device=device_type)
 
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     @skip_if_rocm_multiprocess
@@ -206,15 +212,15 @@ class ReplicateTest(MultiProcessInductorTestCase):
     @torch._inductor.config.patch(
         reorder_for_locality=False, reorder_for_peak_memory=False
     )
-    def test_compile_gpu_ac(self, device):
-        self._test_compile(no_sync=False, checkpoint=True, device=device)
+    def test_compile_gpu_ac(self):
+        self._test_compile(no_sync=False, checkpoint=True, device=device_type)
 
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     @skip_if_rocm_multiprocess
     @skip_if_lt_x_gpu(2)
-    def test_compile_bf16(self, device):
+    def test_compile_bf16(self):
         # Check device capability wrt bf16
-        if not sm_is_or_higher_than(device, 8, 0):
+        if not sm_is_or_higher_than(torch.device(device_type), 8, 0):
             self.skipTest("bf16 requires sm >= 8.0")
 
         def setup(model, compiled_replicate_model, compiled_ddp_model) -> None:
@@ -225,12 +231,12 @@ class ReplicateTest(MultiProcessInductorTestCase):
                 None, ddp_default_hooks.bf16_compress_hook
             )
 
-        self._test_compile(no_sync=False, setup_func=setup, device=device)
+        self._test_compile(no_sync=False, setup_func=setup, device=device_type)
 
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     @skip_if_rocm_multiprocess
     @skip_if_lt_x_gpu(2)
-    def test_compile_fp16(self, device):
+    def test_compile_fp16(self):
         def setup(model, compiled_replicate_model, compiled_ddp_model) -> None:
             model.register_comm_hook(None, ddp_default_hooks.fp16_compress_hook)
             compiled_m = compiled_replicate_model._orig_mod
@@ -241,14 +247,14 @@ class ReplicateTest(MultiProcessInductorTestCase):
 
         # TODO: figure out why we need to disable Inductor to avoid test errors.
         self._test_compile(
-            no_sync=False, setup_func=setup, no_inductor=True, device=device
+            no_sync=False, setup_func=setup, no_inductor=True, device=device_type
         )
 
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     @skip_if_rocm_multiprocess
     @skip_if_lt_x_gpu(2)
-    def test_compile_backward_only(self, device):
-        self._test_compile(no_sync=False, no_compile_forward=True, device=device)
+    def test_compile_backward_only(self):
+        self._test_compile(no_sync=False, no_compile_forward=True, device=device_type)
 
     def _test_bucketing(self, init_process_group=True, loop=1):
         if init_process_group:
@@ -364,11 +370,11 @@ class ReplicateTest(MultiProcessInductorTestCase):
 
 
 class DDP_TP_Test(InductorTestCase):
-    def setUp(self, device):
+    def setUp(self):
         # Hmm, why a specific set_device call for rank 0?
         self.rank = 0
         self.world_size = 4
-        torch.get_device_module(device).set_device(device)
+        torch.get_device_module(device_type).set_device(device_type)
 
         store = FakeStore()
         dist.init_process_group(
@@ -386,11 +392,11 @@ class DDP_TP_Test(InductorTestCase):
     )
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     @skipIfRocm
-    def test_ddp_tp(self, device):
+    def test_ddp_tp(self):
         ref_model = Net()
         compiled_replicate_model = deepcopy(ref_model)
         mesh_2d = init_device_mesh(
-            device, (2, self.world_size // 2), mesh_dim_names=("dp", "tp")
+            device_type, (2, self.world_size // 2), mesh_dim_names=("dp", "tp")
         )
         tp_mesh = mesh_2d["tp"]
         dp_mesh = mesh_2d["dp"]
@@ -427,11 +433,6 @@ class DDP_TP_Test(InductorTestCase):
         # ):
         #     self.assertEqual(p1.grad, p2.grad)
 
-
-devices = ["cuda", "hpu"]
-
-instantiate_device_type_tests(DDP_TP_Test, globals(), only_for=devices)
-instantiate_device_type_tests(ReplicateTest, globals(), only_for=devices)
 
 if __name__ == "__main__":
     run_tests()
