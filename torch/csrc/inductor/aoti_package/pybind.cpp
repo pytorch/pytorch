@@ -35,7 +35,8 @@ class AOTIModelPackageLoaderPybind : public AOTIModelPackageLoader {
 
     py::list outputs;
     for (const auto& tensor : result_tensors) {
-      outputs.append(THPVariable_Wrap(tensor));
+      outputs.append(
+          py::reinterpret_steal<py::object>(THPVariable_Wrap(tensor)));
     }
     return outputs;
   }
