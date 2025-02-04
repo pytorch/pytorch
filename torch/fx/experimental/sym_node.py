@@ -487,6 +487,24 @@ class SymNode:
 
     # You can manually trigger a guard with this function
     def guard_int(self, file, line):
+        from torch._guards import ShapeGuard, SLoc, Source, TracingContext
+        from torch.utils._traceback import CapturedTraceback, format_frame
+        from torch._logging import dtrace_structured, LazyString, structured, trace_structured
+        out: Dict[str, object] = {
+            "guard": "int",
+            "self": str(self),
+            "expr": str(self.expr),
+            "hint": str(self.hint),
+            "file": file,
+            "line": line,
+            "user_stack": structured.from_traceback(TracingContext.extract_stack()),
+            "stack": structured.from_traceback(
+                CapturedTraceback.extract(skip=1).summary()
+            ),
+        }
+        import json
+        print(json.dumps(out))
+
         # TODO: use the file/line for some useful diagnostic on why a
         # guard occurred
         r = self.shape_env.evaluate_expr(self.expr, self.hint, fx_node=self.fx_node)
@@ -507,6 +525,24 @@ class SymNode:
             raise
 
     def guard_bool(self, file, line):
+        from torch._guards import ShapeGuard, SLoc, Source, TracingContext
+        from torch.utils._traceback import CapturedTraceback, format_frame
+        from torch._logging import dtrace_structured, LazyString, structured, trace_structured
+        out: Dict[str, object] = {
+            "guard": "bool",
+            "self": str(self),
+            "expr": str(self.expr),
+            "hint": str(self.hint),
+            "file": file,
+            "line": line,
+            "user_stack": structured.from_traceback(TracingContext.extract_stack()),
+            "stack": structured.from_traceback(
+                CapturedTraceback.extract(skip=1).summary()
+            ),
+        }
+        import json
+        print(json.dumps(out))
+
         # TODO: use the file/line for some useful diagnostic on why a
         # guard occurred
         r = self.shape_env.evaluate_expr(self.expr, self.hint, fx_node=self.fx_node)
@@ -517,7 +553,26 @@ class SymNode:
             raise
 
     def expect_true(self, file, line):
+        import fbvscode; fbvscode.set_trace()
         from torch.fx.experimental.symbolic_shapes import free_unbacked_symbols
+        from torch._guards import ShapeGuard, SLoc, Source, TracingContext
+        from torch.utils._traceback import CapturedTraceback, format_frame
+        from torch._logging import dtrace_structured, LazyString, structured, trace_structured
+        out: Dict[str, object] = {
+            "guard": "expect_true",
+            "self": str(self),
+            "expr": str(self.expr),
+            "hint": str(self.hint),
+            "file": file,
+            "line": line,
+            "user_stack": structured.from_traceback(TracingContext.extract_stack()),
+            "stack": structured.from_traceback(
+                CapturedTraceback.extract(skip=1).summary()
+            ),
+        }
+        import json
+        print(json.dumps(out))
+
 
         if (
             self.has_hint()
@@ -536,6 +591,23 @@ class SymNode:
 
     def expect_size(self, file, line):
         from torch.fx.experimental.symbolic_shapes import _advise_is_size
+        from torch._guards import ShapeGuard, SLoc, Source, TracingContext
+        from torch.utils._traceback import CapturedTraceback, format_frame
+        from torch._logging import dtrace_structured, LazyString, structured, trace_structured
+        out: Dict[str, object] = {
+            "guard": "expect_size",
+            "self": str(self),
+            "expr": str(self.expr),
+            "hint": str(self.hint),
+            "file": file,
+            "line": line,
+            "user_stack": structured.from_traceback(TracingContext.extract_stack()),
+            "stack": structured.from_traceback(
+                CapturedTraceback.extract(skip=1).summary()
+            ),
+        }
+        import json
+        print(json.dumps(out))
 
         b = self.ge(self.wrap_int(0))
         # Generate a deferred runtime assert
