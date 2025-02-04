@@ -144,3 +144,10 @@ if len(inductor_intersection) > 0:
         "there should be no overlap between inductor_expected_failures "
         "and inductor_skips, got " + str(inductor_intersection)
     )
+
+subclasses_intersection = subclasses_expected_failures.intersection(subclasses_skips)
+if len(subclasses_intersection) > 0:
+    raise AssertionError(
+        "there should be no overlap between subclasses_expected_failures "
+        "and subclasses_skips, got " + str(subclasses_intersection)
+    )
