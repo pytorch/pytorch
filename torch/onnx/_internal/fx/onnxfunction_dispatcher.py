@@ -418,7 +418,7 @@ class _OnnxSchemaChecker:
         attributes = {"alpha": 1.0}
 
 
-        @onnx_impl("aten::op")
+        @torch_op("aten::op")
         def aten_op(self: TReal, other: TReal, alpha: float = 1) -> TReal: ...
         ```
         Result: Perfect match.
