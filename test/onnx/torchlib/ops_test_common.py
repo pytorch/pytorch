@@ -1,5 +1,4 @@
-# Copyright (c) Microsoft Corporation.
-# Licensed under the MIT License.
+# Owner(s): ["module: onnx"]
 """Common utils for testing operators."""
 
 from __future__ import annotations
@@ -454,9 +453,18 @@ def dtype_op_schema_compatible(dtype: torch.dtype, schema: onnx.defs.OpSchema) -
     #     domain='pkg.onnxscript.torch_lib',
     #     since_version=1,
     #     doc='abs(Tensor self) -> Tensor',
-    #     type_constraints=[OpSchema.TypeConstraintParam(type_param_str='TReal', allowed_type_strs=['tensor(float)', 'tensor(int8)', 'tensor(int16)', 'tensor(int32)', 'tensor(int64)', 'tensor(float16)', 'tensor(double)', 'tensor(bfloat16)'], description='')],
-    #     inputs=[OpSchema.FormalParameter(name='self', type_str='TReal', description='', param_option=<FormalParameterOption.Single: 0>, is_homogeneous=True, min_arity=1, differentiation_category=<DifferentiationCategory.Unknown: 0>)],
-    #     outputs=[OpSchema.FormalParameter(name='return_val', type_str='TReal', description='', param_option=<FormalParameterOption.Single: 0>, is_homogeneous=True, min_arity=1, differentiation_category=<DifferentiationCategory.Unknown: 0>)],
+    #     type_constraints=[OpSchema.TypeConstraintParam(type_param_str='TReal',
+    # allowed_type_strs=['tensor(float)', 'tensor(int8)', 'tensor(int16)',
+    # 'tensor(int32)', 'tensor(int64)', 'tensor(float16)', 'tensor(double)',
+    # 'tensor(bfloat16)'], description='')],
+    #     inputs=[OpSchema.FormalParameter(name='self', type_str='TReal',
+    # description='', param_option=<FormalParameterOption.Single: 0>,
+    # is_homogeneous=True, min_arity=1,
+    # differentiation_category=<DifferentiationCategory.Unknown: 0>)],
+    #     outputs=[OpSchema.FormalParameter(name='return_val',
+    # type_str='TReal', description='',
+    # param_option=<FormalParameterOption.Single: 0>, is_homogeneous=True,
+    # min_arity=1, differentiation_category=<DifferentiationCategory.Unknown: 0>)],
     #     attributes={}
     # )
     # ```

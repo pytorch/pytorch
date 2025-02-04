@@ -1,5 +1,4 @@
-# Copyright (c) Microsoft Corporation.
-# Licensed under the MIT License.
+# Owner(s): ["module: onnx"]
 from __future__ import annotations
 
 import difflib
@@ -59,7 +58,7 @@ ONNX Runtime raises `{error_text}` when executing test `{test_name}` in ONNX Scr
 To recreate this report, use
 
 ```bash
-CREATE_REPRODUCTION_REPORT=1 python -m pytest onnxscript/tests/function_libs/torch_lib/ops_test.py -k {short_test_name}
+CREATE_REPRODUCTION_REPORT=1 python -m pytest test/onnx/torchlib/ops_test.py -k {short_test_name}
 ```
 
 ### To reproduce
@@ -97,7 +96,7 @@ The output of ONNX Runtime does not match that of PyTorch when executing test
 To recreate this report, use
 
 ```bash
-CREATE_REPRODUCTION_REPORT=1 python -m pytest onnxscript/tests/function_libs/torch_lib/ops_test.py -k {short_test_name}
+CREATE_REPRODUCTION_REPORT=1 python -m pytest test/onnx/torchlib/ops_test.py -k {short_test_name}
 ```
 
 ### Inputs

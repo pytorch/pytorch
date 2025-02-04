@@ -1,5 +1,4 @@
-# Copyright (c) Microsoft Corporation.
-# Licensed under the MIT License.
+# Owner(s): ["module: onnx"]
 """Test op correctness by comparing with PyTorch results.
 
 ## Usage

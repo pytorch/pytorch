@@ -1,5 +1,4 @@
-# Copyright (c) Microsoft Corporation.
-# Licensed under the MIT License.
+# Owner(s): ["module: onnx"]
 """
 Test data for aten operators which don't exist in PyTorch file:
 pytorch/torch/testing/_internal/common_methods_invocations.py.
