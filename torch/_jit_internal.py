@@ -1128,6 +1128,8 @@ def is_tuple(ann) -> bool:
     # Check for typing.Tuple missing args (but `tuple` is fine)
     if ann is typing.Tuple:  # noqa: UP006
         raise_error_container_parameter_missing("Tuple")
+    if ann is tuple:
+        return True
 
     # For some reason Python 3.7 violates the Type[A, B].__origin__ == Type rule
     if not hasattr(ann, "__module__"):
@@ -1141,6 +1143,8 @@ def is_list(ann) -> bool:
     # Check for typing.List missing args (but `list` is fine)
     if ann is typing.List:  # noqa: UP006
         raise_error_container_parameter_missing("List")
+    if ann is list:
+        return True
 
     if not hasattr(ann, "__module__"):
         return False
@@ -1153,6 +1157,8 @@ def is_dict(ann) -> bool:
     # Check for typing.Dict missing args (but `dict` is fine)
     if ann is typing.Dict:  # noqa: UP006
         raise_error_container_parameter_missing("Dict")
+    if ann is dict:
+        return True
 
     if not hasattr(ann, "__module__"):
         return False
@@ -1354,28 +1360,30 @@ def _is_exception(obj) -> bool:
 
 
 def raise_error_container_parameter_missing(target_type) -> None:
-    if target_type == "Dict":
-        raise RuntimeError(
-            "Attempted to use Dict without "
-            "contained types. Please add contained type, e.g. "
-            "Dict[int, int]"
-        )
+    example = "[int]"
+    if target_type.endswith("ict"):
+        example = "[int, int]"
     raise RuntimeError(
         f"Attempted to use {target_type} without a "
         "contained type. Please add a contained type, e.g. "
-        f"{target_type}[int]"
+        f"{target_type}{example}"
     )
 
 
+_RAW_TYPE_NAME_MAPPING = {
+    dict: "dict",
+    list: "list",
+    tuple: "tuple",
+    typing.Dict: "Dict",  # noqa: UP006
+    typing.List: "List",  # noqa: UP006
+    typing.Optional: "Optional",
+    typing.Tuple: "Tuple",  # noqa: UP006
+}
+
+
 def check_args_exist(target_type) -> None:
-    if target_type is typing.List or target_type is list:  # noqa: UP006
-        raise_error_container_parameter_missing("List")
-    elif target_type is typing.Tuple or target_type is tuple:  # noqa: UP006
-        raise_error_container_parameter_missing("Tuple")
-    elif target_type is typing.Dict or target_type is dict:  # noqa: UP006
-        raise_error_container_parameter_missing("Dict")
-    elif target_type is None or target_type is Optional:
-        raise_error_container_parameter_missing("Optional")
+    if name := _RAW_TYPE_NAME_MAPPING.get(target_type):
+        raise_error_container_parameter_missing(name)
 
 
 def check_empty_containers(obj) -> None:

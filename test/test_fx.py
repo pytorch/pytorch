@@ -52,7 +52,7 @@ from fx.test_source_matcher_utils import TestSourceMatcher  # noqa: F401
 
 from fx.test_gradual_type import AnnotationsTest  # noqa: F401
 from fx.test_gradual_type import TypeCheckerTest  # noqa: F401
-from typing import Any, Callable, NamedTuple, Optional, Union
+from typing import Any, Callable, NamedTuple, Optional, Union, Tuple, List
 from torch.testing._internal.common_utils import (
     IS_FBCODE,
     IS_MACOS,
@@ -2777,6 +2777,19 @@ class TestFX(JitTestCase):
                 return self.other(x)
 
         traced = symbolic_trace(ReturnTypeModule())
+        self.assertIn("-> list[str]", traced._code)
+        scripted = torch.jit.script(traced)
+        self.assertIn("-> List[str]", scripted.code)
+
+    def test_return_type_exists_pre_pep585(self):
+        class ReturnTypeModule(torch.nn.Module):
+            def other(self, x: typing.List[str]) -> typing.List[str]:  # noqa: UP006
+                return x
+
+            def forward(self, x: typing.List[str]) -> typing.List[str]:  # noqa: UP006
+                return self.other(x)
+
+        traced = symbolic_trace(ReturnTypeModule())
         self.assertIn("-> typing_List[str]", traced._code)
         scripted = torch.jit.script(traced)
         self.assertIn("-> List[str]", scripted.code)
@@ -3561,10 +3574,34 @@ class TestFX(JitTestCase):
         finally:
             del sys.modules["__future__"]
 
-    @unittest.skipIf(sys.version_info > (3, 11), "Does not work in 3.11")
     def test_annotations_empty_tuple(self):
         class Foo(torch.nn.Module):
             def forward(self, x: tuple[()], y: tuple[str, tuple[()]]):
+                return "foo"
+
+        traced = torch.fx.symbolic_trace(Foo())
+
+        x = ()
+        y = ("bar", ())
+
+        traced(x, y)
+
+        FileCheck().check("tuple")   \
+                   .check("tuple[str,tuple]") \
+                   .run(traced.code)
+
+        scripted = torch.jit.script(traced)
+
+        scripted(x, y)
+
+        FileCheck().check("Tuple[()]")   \
+            .check("Tuple[str, Tuple[()]]")    \
+            .run(scripted.code)
+
+    @unittest.skipIf(sys.version_info > (3, 11), "Does not work in 3.11")
+    def test_annotations_empty_tuple_pre_pep585(self):
+        class Foo(torch.nn.Module):
+            def forward(self, x: typing.Tuple[()], y: typing.Tuple[str, typing.Tuple[()]]):  # noqa: UP006
                 return "foo"
 
         traced = torch.fx.symbolic_trace(Foo())
