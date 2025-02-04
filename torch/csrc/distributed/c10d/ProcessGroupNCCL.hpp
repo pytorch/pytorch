@@ -126,6 +126,10 @@ static std::vector<std::string> TORCH_NCCL_LOG_CPP_STACK_ON_UNCLEAN_SHUTDOWN = {
 static std::vector<std::string> TORCH_NCCL_CUDA_EVENT_CACHE = {
     "TORCH_NCCL_CUDA_EVENT_CACHE"};
 
+// Control the number of ranks each root can cover during NCCL comm init.
+static std::vector<std::string> TORCH_NCCL_RANKS_PER_ROOT = {
+    "TORCH_NCCL_RANKS_PER_ROOT"};
+
 static std::vector<std::string> TORCH_NCCL_NAN_CHECK = {"TORCH_NCCL_NAN_CHECK"};
 
 constexpr const char* NCCL_BACKEND_NAME = "nccl";
@@ -768,6 +772,8 @@ class TORCH_API ProcessGroupNCCL : public Backend {
 
   ErrorType getError() override;
 
+  std::shared_ptr<c10::Allocator> getMemAllocator() override;
+
   // Performs NCCL user buffer registration for all buffers in
   // the given MemPool
   void registerMemPool(c10::cuda::MemPool* pool);
@@ -801,6 +807,12 @@ class TORCH_API ProcessGroupNCCL : public Backend {
       bool isSingleP2POp,
       const std::string& devicesKey,
       int p2pRank);
+
+  // Helper that allgathers nccl unique IDs to all ranks through the store
+  void allgatherUniqueNCCLIDs(
+      int rootIdx,
+      ncclUniqueId* ncclID,
+      std::vector<ncclUniqueId>& ncclIDs);
 
   // Helper that looks up the cached NCCL communicators only
   std::shared_ptr<NCCLComm> getNCCLComm(const std::string& deviceKey);
