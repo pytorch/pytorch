@@ -52,6 +52,13 @@ register_log(
         "torch._export.serde.serialize",
     ],
 )
+register_log(
+    "cutlass",
+    [
+        "cutlass",
+        "cutlass_library",
+    ],
+)
 
 register_artifact(
     "guards",

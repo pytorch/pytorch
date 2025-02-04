@@ -5,6 +5,7 @@ import logging
 import os
 import re
 import unittest.mock
+from typing import Set
 
 import torch
 import torch._dynamo.test_case
@@ -16,6 +17,7 @@ from torch._dynamo.testing import (
     skipIfNotPy311,
 )
 from torch._dynamo.trace_rules import _as_posix_path
+from torch._inductor.codegen.cuda.cutlass_utils import try_import_cutlass
 from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.testing._internal.common_utils import (
     find_free_port,
@@ -34,6 +36,10 @@ requires_cuda = unittest.skipUnless(HAS_CUDA, "requires cuda")
 requires_distributed = functools.partial(
     unittest.skipIf, not dist.is_available(), "requires distributed"
 )
+requires_cutlass = unittest.skipUnless(try_import_cutlass(), "requires cutlass")
+
+# all won't work since cutlass is not a child module of torch
+NON_TORCH_QNAMES: Set[str] = {"cutlass", "cutlass_library"}
 
 
 def munge_shape_guards(s: str) -> str:
@@ -298,6 +304,12 @@ LoweringException: AssertionError:
                     logger.getEffectiveLevel(),
                     logging.INFO,
                     msg=f"expected {logger_qname} is INFO, got {logging.getLevelName(logger.getEffectiveLevel())}",
+                )
+            elif logger_qname in NON_TORCH_QNAMES:
+                self.assertEqual(
+                    logger.getEffectiveLevel(),
+                    logging.WARNING,
+                    msg=f"expected {logger_qname} is WARNING, got {logging.getLevelName(logger.getEffectiveLevel())}",
                 )
             else:
                 self.assertEqual(
@@ -876,6 +888,16 @@ TorchDynamo attempted to trace the following frames: [
   * bar test_logging.py:N
 ]""",
         )
+
+    @requires_cutlass
+    @make_settings_test("+cutlass")
+    def test_cutlass(self, records):
+        from torch._inductor.codegen.cuda.cutlass_utils import _gen_ops_cached
+
+        _ = _gen_ops_cached("80", "12.4")
+
+        # expecting some logs
+        self.getRecord(records[0:1], "Culled")
 
 
 # single record tests
