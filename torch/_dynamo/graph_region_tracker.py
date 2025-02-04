@@ -5,17 +5,7 @@ import math
 import pickle
 from collections import defaultdict, deque
 from dataclasses import fields
-from typing import (
-    Any,
-    Callable,
-    Deque,
-    Dict,
-    List,
-    Optional,
-    Set,
-    TYPE_CHECKING,
-    TypeVar,
-)
+from typing import Any, Callable, Optional, TYPE_CHECKING, TypeVar
 
 import torch._logging
 import torch.fx
@@ -31,8 +21,8 @@ if TYPE_CHECKING:
 
 
 Node = torch.fx.Node
-Region = List[Node]
-IdenticalNodes = List[Node]
+Region = list[Node]
+IdenticalNodes = list[Node]
 GlobalStateKey = tuple[bool, bool, int, bool, bool, torch.dtype, bool, bool, bool, bool]
 
 log = logging.getLogger(__name__)
@@ -137,7 +127,7 @@ def get_global_state_key() -> GlobalStateKey:
 class BackwardBfsArgIter:
     def __init__(self, origin: Node) -> None:
         self._cur: Optional[Node] = origin
-        self._queue: Deque[Optional[Node]] = deque()
+        self._queue: deque[Optional[Node]] = deque()
 
     @staticmethod
     def create(origin: Node) -> "BackwardBfsArgIter":
@@ -187,8 +177,8 @@ class GraphRegionTracker:
     """
 
     def __init__(self) -> None:
-        self.hash_to_duplicates: Dict[str, IdenticalNodes] = defaultdict(list)
-        self.node_to_duplicates: Dict[Node, IdenticalNodes] = {}
+        self.hash_to_duplicates: dict[str, IdenticalNodes] = defaultdict(list)
+        self.node_to_duplicates: dict[Node, IdenticalNodes] = {}
         self.input_pickler = InputPickler()
 
     def _hash_node(
@@ -230,7 +220,7 @@ class GraphRegionTracker:
         except NodeHashException as e:
             log.debug("Unable to hash node %s with exception %s", node, e)
 
-    def get_identical_regions(self, graph: torch.fx.Graph) -> List[List[Region]]:
+    def get_identical_regions(self, graph: torch.fx.Graph) -> list[list[Region]]:
         """
         This function is responsible for extracting the largest regions of identical nodes from the given graph.
         **Note**: This function assumes the nodes that have been tracked with track_node are in the provided graph argument.
@@ -271,7 +261,7 @@ class GraphRegionTracker:
         # We start from regions later in the graph and expand them earlier
         # as a result, we will create the largest regions first and they won't
         # overlap.
-        seen_nodes: Set[Node] = set()
+        seen_nodes: set[Node] = set()
         for region_group in region_groups:
             fully_expand_region_group(region_group, seen_nodes, self._is_identical)
             # sort topologically
@@ -287,8 +277,8 @@ class GraphRegionTracker:
 
 
 def fully_expand_region_group(
-    regions: List[Region],
-    seen_nodes: Set[Node],
+    regions: list[Region],
+    seen_nodes: set[Node],
     is_identical_fn: Callable[[Node, Node], bool],
 ) -> None:
     debug_log("--------------------------------------------------")
@@ -301,7 +291,7 @@ def fully_expand_region_group(
         (origin,) = region  # Only works for 1 element sets
         region_iters.append(BackwardBfsArgIter.create(origin))
 
-    nodes_to_add: List[Node] = []
+    nodes_to_add: list[Node] = []
 
     # we already have the origin node in each region
     for region_it in region_iters:
