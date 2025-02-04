@@ -601,7 +601,7 @@ bool can_use_cudnn_attention(const sdp_params& params, bool debug) {
     }
   }
   constexpr auto dense_constraints =
-      array_of<bool (*)(sdp_params const&, bool)>(
+      c10::array_of<bool (*)(sdp_params const&, bool)>(
       check_last_dim_stride_equals_1_dense<true /*ignore_singleton_dim=*/>
   );
 
