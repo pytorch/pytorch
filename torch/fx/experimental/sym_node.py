@@ -1740,7 +1740,6 @@ def _make_user_magic(method, user_type):
             return (method_to_operator(method))(get_constant(self))
         return wrap_node(getattr(self.node, method_attr)())
 
-
     @capture_provenance
     def binary_magic_impl(self, other):
         if not isinstance(other, (int, float, bool, SymInt, SymFloat, SymBool)):
