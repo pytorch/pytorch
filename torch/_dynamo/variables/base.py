@@ -2,7 +2,7 @@
 
 import collections
 from enum import Enum
-from typing import Any, Callable, Dict, List, Optional, TYPE_CHECKING
+from typing import Any, Callable, Optional, Sequence, TYPE_CHECKING
 
 from .. import variables
 from ..current_scope_id import current_scope_id
@@ -227,7 +227,7 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         cls,
         fn: Callable[["VariableTracker"], None],
         value: Any,
-        cache: Optional[Dict[int, Any]] = None,
+        cache: Optional[dict[int, Any]] = None,
     ) -> None:
         """
         Walk value and call fn on all the VariableTracker instances
@@ -356,10 +356,10 @@ class VariableTracker(metaclass=VariableTrackerMeta):
     def reconstruct(self, codegen):
         raise NotImplementedError
 
-    def unpack_var_sequence(self, tx) -> List["VariableTracker"]:
+    def unpack_var_sequence(self, tx) -> list["VariableTracker"]:
         raise NotImplementedError
 
-    def force_unpack_var_sequence(self, tx) -> List["VariableTracker"]:
+    def force_unpack_var_sequence(self, tx) -> list["VariableTracker"]:
         # like unpack_var_sequence, but should only be used when it is
         # safe to eagerly (vs. lazily) unpack this variable.
         # e.g. map(f, x) is normally evaluated lazily but sometimes
@@ -379,17 +379,19 @@ class VariableTracker(metaclass=VariableTrackerMeta):
     def has_force_unpack_var_sequence(self, tx) -> bool:
         return self.has_unpack_var_sequence(tx)
 
-    def inspect_parameter_names(self) -> List[str]:
+    def inspect_parameter_names(self) -> list[str]:
         unimplemented(f"inspect_parameter_names: {self}")
 
-    def call_hasattr(self, tx: "InstructionTranslator", name: str) -> "VariableTracker":
+    def call_obj_hasattr(
+        self, tx: "InstructionTranslator", name: str
+    ) -> "VariableTracker":
         unimplemented(f"hasattr {self.__class__.__name__} {name}")
 
     def call_function(
         self,
         tx: "InstructionTranslator",
-        args: "List[VariableTracker]",
-        kwargs: "Dict[str, VariableTracker]",
+        args: Sequence["VariableTracker"],
+        kwargs: "dict[str, VariableTracker]",
     ) -> "VariableTracker":
         unimplemented(f"call_function {self} {args} {kwargs}")
 
@@ -397,8 +399,8 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         self,
         tx,
         name,
-        args: "List[VariableTracker]",
-        kwargs: "Dict[str, VariableTracker]",
+        args: "list[VariableTracker]",
+        kwargs: "dict[str, VariableTracker]",
     ) -> "VariableTracker":
         if name == "__len__" and self.has_unpack_var_sequence(tx):
             assert not (args or kwargs)

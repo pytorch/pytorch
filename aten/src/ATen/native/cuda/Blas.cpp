@@ -875,6 +875,21 @@ static bool _scaled_mm_allowed_device() {
 #endif
 }
 
+#ifdef USE_ROCM
+static bool _scaled_mm_is_fnuz() {
+    auto dprops = at::cuda::getCurrentDeviceProperties();
+    std::string device_arch = dprops->gcnArchName;
+    static const std::vector<std::string> archs = {"gfx940", "gfx941", "gfx942"};
+    for (std::string arch : archs) {
+        size_t substring = device_arch.find(arch);
+        if (substring != std::string::npos) {
+            return true;
+        }
+    }
+    return false;
+}
+#endif
+
 namespace{
 
 enum class ScalingType {
@@ -926,8 +941,8 @@ ScalingType get_scaling_type(
   // Check for RowWise scaling
   if (scale_a.size(0) == dim_m && scale_a.size(1) == 1 &&
       scale_b.size(0) == 1 && scale_b.size(1) == dim_n) {
-#if !defined(USE_ROCM) && !defined(_MSC_VER) || \
-    (defined(USE_ROCM) && ROCM_VERSION >= 60000)
+#if (!defined(USE_ROCM) && !defined(_MSC_VER)) || \
+    (defined(USE_ROCM) && defined(HIPBLASLT_VEC_EXT))
     TORCH_CHECK(
         scale_a.is_contiguous() && scale_b.is_contiguous(),
         "Both scale_a and scale_b must be contiguous for RowWise scaling.");
@@ -964,7 +979,7 @@ ScalingType get_scaling_type(
 } // namespace
 
 // Computes matrix multiply + bias while applying scaling to input and output matrices
-// Scales are only applicable when matrices are of Float8 type and assumbed to be equal to 1.0 by default.
+// Scales are only applicable when matrices are of Float8 type and assumed to be equal to 1.0 by default.
 // If output matrix type is 16 or 32-bit type, scale_result is not applied.
 // Known limitations:
 //  - Only works if mat1 is row-major and mat2 is column-major
@@ -1063,6 +1078,8 @@ _scaled_mm_out_cuda(const Tensor& mat1, const Tensor& mat2,
     return out;
   }
 
+  // ROCm's hipblaslt supports rowwise, so skip this check that sends this to cutlass.
+#ifndef USE_ROCM
   // We are doing row-wise scaling
   if (scaling_choice == ScalingType::RowWise) {
     TORCH_CHECK(out.dtype() == kBFloat16, "Only bf16 high precsion output types are supported for row-wise scaling.");
@@ -1076,6 +1093,21 @@ _scaled_mm_out_cuda(const Tensor& mat1, const Tensor& mat2,
         out);
     return out;
   }
+#else
+  if (scaling_choice == ScalingType::RowWise) {
+    // For ROCm, match behavior of f8f8bf16_rowwise type checking, for unit test purposes.
+    Tensor b = mat2;
+    if (_scaled_mm_is_fnuz()) {
+      TORCH_CHECK(b.dtype() == at::kFloat8_e4m3fnuz);
+    }
+    else {
+      TORCH_CHECK(b.dtype() == at::kFloat8_e4m3fn);
+    }
+    // Until more than bf16 is supported.
+    TORCH_CHECK(out.scalar_type() == ScalarType::BFloat16,
+         "hipblaslt rowwise _scaled_mm only supports BFloat16 output but got ", out.scalar_type());
+  }
+#endif
 
   cublasCommonArgs args(mat1, mat2, out);
   const auto out_dtype_ = args.result->scalar_type();
@@ -1137,6 +1169,7 @@ _scaled_mm_out_cuda(const Tensor& mat1, const Tensor& mat2,
       params.ldc = args.result_ld;
       params.c_dtype = out_dtype_;
       params.use_fast_accum = use_fast_accum;
+      params.use_rowwise = scaling_choice == ScalingType::RowWise;
       if (transa_ && transb_) {
         TUNABLE_DISPATCH(at::cuda::tunable::BlasOp::T, at::cuda::tunable::BlasOp::T)
       }
@@ -1179,7 +1212,8 @@ _scaled_mm_out_cuda(const Tensor& mat1, const Tensor& mat2,
         scale_result ? scale_result->data_ptr() : nullptr,
         args.result_ld,
         out_dtype_,
-        use_fast_accum);
+        use_fast_accum,
+        scaling_choice == ScalingType::RowWise);
   }
 
   return out;

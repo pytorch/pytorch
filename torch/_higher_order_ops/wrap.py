@@ -7,7 +7,6 @@ from typing import Optional
 from torch._logging import warning_once
 from torch._ops import HigherOrderOperator
 from torch.types import _dtype
-from torch.utils.checkpoint import checkpoint, CheckpointPolicy
 
 
 log = logging.getLogger(__name__)
@@ -120,6 +119,8 @@ class WrapActivationCheckpoint(HigherOrderOperator):
         kwargs["preserve_rng_state"] = False
         # Using interpreter allows preservation of metadata through torch.compile stack.
         with fx_traceback.preserve_node_meta():
+            from torch.utils.checkpoint import checkpoint
+
             return checkpoint(Interpreter(function).run, *args, **kwargs)
 
 
@@ -167,6 +168,8 @@ class TagActivationCheckpoint(HigherOrderOperator):
         We do sorting to ensure same graph from run to run for better
         debuggability. It is not required for correctness.
         """
+        from torch.utils.checkpoint import checkpoint
+
         ckpt_signature = inspect.signature(checkpoint)
         checkpoint_keys = set()
         for name in ckpt_signature.parameters:
@@ -186,6 +189,8 @@ class TagActivationCheckpoint(HigherOrderOperator):
         return checkpoint_kwargs, gmod_kwargs
 
     def tag_nodes(self, gmod, is_sac):
+        from torch.utils.checkpoint import CheckpointPolicy
+
         unique_graph_id = next(uid)
         for node in gmod.graph.nodes:
             if node.op in ("call_function", "call_method", "call_module"):
@@ -226,6 +231,8 @@ Please make sure the checkpointed region does not contain in-place ops (e.g. tor
             gmod = self.tag_nodes(gmod, is_sac=True)
             # Using interpreter allows preservation of metadata through torch.compile stack.
             with fx_traceback.preserve_node_meta():
+                from torch.utils.checkpoint import checkpoint
+
                 return checkpoint(Interpreter(gmod).run, *args, **kwargs)
         else:
             gmod = self.tag_nodes(gmod, is_sac=False)
