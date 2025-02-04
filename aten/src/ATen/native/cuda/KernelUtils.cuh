@@ -255,8 +255,6 @@ __device__ __forceinline__ void opportunistic_fastAtomicAdd(
     // not coalsced, so now let try to capture lane-matches...
 
     auto mask = __match_any_sync(__activemask(), (int64_t)dst);
-    mask = (mask << rotv) | (mask >> (64 - rotv));
-
     int leader = __ffsll(mask) - 1;    // select a leader
     union punner { int l; scalar_t s; } pnr = { .s = value };
     scalar_t crnt_val = (scalar_t)0;
