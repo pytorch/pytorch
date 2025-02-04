@@ -4907,7 +4907,7 @@ class ExternKernel(InputsKernel):
 
     def get_kernel_name(self):  # type: ignore[no-untyped-def]
         return (
-            V.graph.wrapper_code.get_c_shim_func_name(self.cpp_kernel_name)  # type: ignore[attr-defined]
+            V.graph.wrapper_code.get_c_shim_func_name(self.cpp_kernel_name, self.get_device().type)  # type: ignore[attr-defined]
             if V.graph.cpp_wrapper
             else self.python_kernel_name
         )
@@ -5515,6 +5515,7 @@ class ExternKernelOut(ExternKernel):
             self.codegen_reference(),
             self.output_view.codegen_reference() if self.output_view else None,
             args,
+            self.get_device().type,
         )
 
     def __init__(  # type: ignore[no-untyped-def]
