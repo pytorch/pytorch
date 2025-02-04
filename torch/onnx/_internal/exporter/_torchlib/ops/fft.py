@@ -26,7 +26,7 @@ aten = torch.ops.aten
     trace_only=True,
 )
 def _fftn_onnx_normalization(
-    self,
+    self: TFloat,
     transformed: TFloat,
     normalization: int,
     forward: bool,
