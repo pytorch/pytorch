@@ -107,16 +107,20 @@ def close_issue(num: int) -> None:
         "Accept": "application/vnd.github.v3+json",
         "Authorization": f"token {os.environ['GITHUB_TOKEN']}",
     }
-    requests.post(
+    response = requests.post(
         f"https://api.github.com/repos/pytorch/pytorch/issues/{num}/comments",
         data=json.dumps({"body": CLOSING_COMMENT}),
         headers=headers,
     )
-    requests.patch(
+    if response.status_code != 201:
+        print(f"Failed to comment on issue {num}")
+    response = requests.patch(
         f"https://api.github.com/repos/pytorch/pytorch/issues/{num}",
         data=json.dumps({"state": "closed"}),
         headers=headers,
     )
+    if response.status_code != 201:
+        print(f"Failed to comment on issue {num}")
 
 
 def check_if_exists(

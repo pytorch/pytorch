@@ -3,10 +3,13 @@ name: Close nonexistent disable issues
 on:
   schedule:
     - cron: 5 22 * * 5  # this should be about 3PM PT on Friday
+  push:
 
 jobs:
   close-nonexistent-disable-issues:
     environment: rockset-read-only
+    permissions:
+      issues: write
     if: github.repository_owner == 'pytorch'
     runs-on: ubuntu-latest
     steps:
