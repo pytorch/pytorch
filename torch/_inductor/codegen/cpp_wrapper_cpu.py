@@ -1073,9 +1073,12 @@ class CppWrapperCpu(PythonWrapperCodegen):
         if not is_inplace:
             self.writeline(f"AtenTensorHandle {output_handle_name};")
             args = [*args, f"&{output_handle_name}"]
+
+        device = d.type if (d := extern_kernel.get_device()) else self.device
         self.generate_c_shim_extern_kernel_call(
-            extern_kernel.get_kernel_name(), args, extern_kernel.get_device().type
+            extern_kernel.get_kernel_name(), args, device
         )
+
         if not is_inplace:
             self.writeline(f"RAIIAtenTensorHandle {name}({output_handle_name});")
 
@@ -1119,8 +1122,9 @@ class CppWrapperCpu(PythonWrapperCodegen):
             else:
                 raise NotImplementedError(f"unsupported type of {output=}")
         args = args + output_args
+        device = d.type if (d := fallback_kernel.get_device()) else self.device
         self.generate_c_shim_extern_kernel_call(
-            fallback_kernel.cpp_kernel_name, args, fallback_kernel.get_device().type
+            fallback_kernel.cpp_kernel_name, args, device  # type: ignore[arg-type]
         )
         for raii_handle in output_raii_handles:
             self.writeline(raii_handle)
