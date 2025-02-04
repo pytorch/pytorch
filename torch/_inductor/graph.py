@@ -1938,16 +1938,32 @@ class GraphLowering(torch.fx.Interpreter):
                 "Finished codegen for all nodes. The list of kernel names available: %s",
                 V.graph.all_codegen_kernel_names,
             )
-            # Dump the inductor_triton_kernel_to_post_grad_node_info to a json file for debugging trace
-            debug_info = V.debug.log_inductor_triton_kernel_to_post_grad_node_info()
-            trace_structured(
-                "artifact",
-                metadata_fn=lambda: {
-                    "name": "inductor_triton_kernel_to_post_grad_nodes",
-                    "encoding": "json",
-                },
-                payload_fn=lambda: json.dumps(debug_info),
+            # Dump provenance artifacts for debugging trace
+            provenance_info = (
+                V.debug.log_inductor_triton_kernel_to_post_grad_node_info()
             )
+            # provenance_info might be None if config.trace.enabled is not set
+            if provenance_info:
+                (
+                    debug_info,
+                    node_mappings,
+                ) = provenance_info
+                trace_structured(
+                    "artifact",
+                    metadata_fn=lambda: {
+                        "name": "inductor_triton_kernel_to_post_grad_nodes",
+                        "encoding": "json",
+                    },
+                    payload_fn=lambda: json.dumps(debug_info),
+                )
+                trace_structured(
+                    "artifact",
+                    metadata_fn=lambda: {
+                        "name": "inductor_provenance_tracking_node_mappings",
+                        "encoding": "json",
+                    },
+                    payload_fn=lambda: json.dumps(node_mappings),
+                )
 
             result = self.wrapper_code.generate(self.is_inference)
             self.wrapper_code.pop_codegened_graph()
@@ -1989,10 +2005,8 @@ class GraphLowering(torch.fx.Interpreter):
 
         return total_bytes, node_counts, node_runtimes
 
-    @staticmethod
-    def save_output_code(code: str) -> None:
-        # No-op to be patched for unit tests
-        pass
+    # No-op to be patched for unit tests
+    save_output_code: Optional[Callable[[str], None]] = None
 
     def compile_to_module(self) -> ModuleType:
         with dynamo_timed(
@@ -2018,7 +2032,8 @@ class GraphLowering(torch.fx.Interpreter):
                 + '"""\n'
             )
             code = tuning_code + code
-        GraphLowering.save_output_code(code)
+        if GraphLowering.save_output_code is not None:
+            GraphLowering.save_output_code(code)
         output_code_log.debug("Output code: \n%s", code)
 
         inductor_meta = autotune_cache.inductor_meta_from_config()

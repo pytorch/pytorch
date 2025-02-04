@@ -54,8 +54,10 @@ disable_progress = True
 verbose_progress = False
 
 # use fx aot graph codegen cache
-fx_graph_cache = (
-    os.environ.get("TORCHINDUCTOR_FX_GRAPH_CACHE", "0" if is_fbcode() else "1") == "1"
+fx_graph_cache: bool = Config(
+    justknob="pytorch/remote_cache:enable_local_fx_graph_cache",
+    env_name_force="TORCHINDUCTOR_FX_GRAPH_CACHE",
+    default=True,
 )
 
 # use remote fx aot graph codegen cache
@@ -123,6 +125,11 @@ triton_kernel_default_layout_constraint: Literal[
 # use cpp wrapper instead of python wrapper
 # incompatible with disable_cpp_codegen
 cpp_wrapper: bool = os.environ.get("TORCHINDUCTOR_CPP_WRAPPER", "0") == "1"
+
+# Controls automatic precompiling of common include files for codecache.CppCodeCache
+# (i.e. for cpp_wrapper mode and for cpp kernels on CPU).  AOTI header precompiling is
+# controlled by a separate flag.
+cpp_cache_precompile_headers: bool = True
 
 # dead code elimination
 dce = False
@@ -338,7 +345,7 @@ max_autotune_pointwise = os.environ.get("TORCHINDUCTOR_MAX_AUTOTUNE_POINTWISE") 
 max_autotune_gemm = os.environ.get("TORCHINDUCTOR_MAX_AUTOTUNE_GEMM") == "1"
 
 # Modifies the number of autotuning choices displayed, set to None for all
-autotune_num_choices_displayed = 10
+autotune_num_choices_displayed: Optional[int] = 10
 
 # force cublas and triton to use the same precision; cublas supports TF32 for matmul operations
 # when m, n, k are multiples of 16, 16, 8, whereas triton supports TF32 for matmul operations
@@ -1202,6 +1209,9 @@ class aot_inductor:
     # Experimental. Flag to control whether to include weight in .so
     package_constants_in_so: bool = True
 
+    # Experimental.  Controls automatic precompiling of common AOTI include files.
+    precompile_headers: bool = False
+
 
 class cuda:
     # CUDA arch to use for CUDA template kernel compilation.
@@ -1274,6 +1284,16 @@ class cuda:
     # caused by the op ordering of the "pingpong" memory access
     # pattern used by some Cutlass Kernels.
     cutlass_op_denylist_regex: Optional[str] = None
+
+    # Non-negative integer which determines how many kernels are instantiated.
+    # 0 = 0000 generates the fewest kernels, 9999 generates all possible combinations.
+    # increasing first digit reduces schedule / mixed type pruning,
+    # increasing second digit generates more cluster sizes,
+    # increasing third digit generates more MMA multipliers,
+    # increasing fourth digit generates more instruction shapes.
+    cutlass_instantiation_level: str = os.environ.get(
+        "TORCHINDUCTOR_CUTLASS_INSTANTIATION_LEVEL", "0"
+    )
 
 
 class rocm:
