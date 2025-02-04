@@ -20,6 +20,7 @@ from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 from .. import config, polyfills, variables
 from ..exc import (
     AttributeMutationError,
+    ObservedAttributeError,
     unimplemented,
     Unsupported,
     UserError,
@@ -1907,7 +1908,7 @@ class BuiltinVariable(VariableTracker):
 
                 try:
                     getattr_var = obj.var_getattr(tx, name_var.as_python_constant())
-                except AttributeError:
+                except (AttributeError, ObservedAttributeError):
                     getattr_var = None
 
                 if isinstance(getattr_var, variables.TensorVariable):

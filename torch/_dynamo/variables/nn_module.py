@@ -288,8 +288,11 @@ class NNModuleVariable(VariableTracker):
                 )
                 if result is not None:
                     return result
-                # if we can't find a __getattr__, just raise the AttributeError
-                raise
+                # if we can't find a __getattr__, we can't parse this, raise attribute error
+                raise_observed_exception(
+                    AttributeError,
+                    tx,
+                )
 
         if name == "forward":
             guard_to_detect_forward_monkeypatching(self.source, base)
