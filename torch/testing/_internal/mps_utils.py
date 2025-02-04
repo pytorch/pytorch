@@ -438,6 +438,10 @@ XFAILLIST_GRAD = {
         TEST_OUTPUT_GRAD_MATCH,
         dtypes=[torch.float32],  # missing `aten::lu_unpack`.
     ),
+    "linalg.lu_factor": MPSSkipInfo(
+        TEST_OUTPUT_GRAD_MATCH,
+        dtypes=[torch.float32],  # missing `aten::lu_unpack`.
+    ),
     "lu": MPSSkipInfo(TEST_OUTPUT_GRAD_MATCH, dtypes=[torch.float32]),
     # "mse_backward_cpu_out" not implemented for 'Half'
     "nn.functional.mse_loss": MPSSkipInfo(
