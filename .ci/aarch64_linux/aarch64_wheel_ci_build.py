@@ -98,7 +98,7 @@ def update_wheel(wheel_path, desired_cuda) -> None:
         ]
         if "126" in desired_cuda:
             libs_to_copy += ["/usr/local/cuda/lib64/libnvrtc-builtins.so.12.6",]
-        else:
+        elif "128" in desired_cuda:
             libs_to_copy += ["/usr/local/cuda/lib64/libnvrtc-builtins.so.12.8",]
     else:
         libs_to_copy += [
