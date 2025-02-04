@@ -3080,7 +3080,7 @@ def _suppress_guards(shape_env: ShapeEnv) -> Iterator[None]:
 
 
 @dataclass
-class FrameLocalResult:
+class _FrameLocalResult:
     loc: Optional[str] = None
     locals: dict[str, Any] = field(default_factory=dict)
     symbols: dict[str, str] = field(default_factory=dict)
@@ -6413,7 +6413,7 @@ class ShapeEnv:
         sloc, _ = self._get_stack_summary(framework_loc=framework_loc)
         return sloc
 
-    def _find_frame_locals(self) -> FrameLocalResult:
+    def _find_frame_locals(self) -> _FrameLocalResult:
         """
         Given the current user code frame, finds the relevant lines of code,
         values of symbolic locals, and free symbols involved.
@@ -6422,10 +6422,9 @@ class ShapeEnv:
         frame_symbols: dict[str, str] = {}
 
         if (
-            (frame := _find_user_code_frame()) is None
-            or frame.f_code.co_filename == "<string>"
-        ):
-            return FrameLocalResult()
+            frame := _find_user_code_frame()
+        ) is None or frame.f_code.co_filename == "<string>":
+            return _FrameLocalResult()
 
         # find bytecode instructions relevant to the frame
         instructions = list(dis.Bytecode(frame.f_code))
@@ -6442,7 +6441,7 @@ class ShapeEnv:
                 end = i
 
         if start is None or end is None:  # no instructions found
-            return FrameLocalResult()
+            return _FrameLocalResult()
 
         # track involved locals and free symbols
         def go(x: Any) -> Optional[str]:
@@ -6462,7 +6461,7 @@ class ShapeEnv:
                     if str(s) in frame_symbols:  # type: ignore[operator]
                         continue
                     frame_symbols[str(s)] = (  # type: ignore[index]
-                        self.var_to_sources[s][0].name()  # backed
+                        self.var_to_sources[s][0].name()  # type: ignore[assignment]
                         if s in self.var_to_sources
                         else None  # unbacked
                     )
@@ -6483,7 +6482,9 @@ class ShapeEnv:
         locs = co_lines[frame.f_lineno - offset : last_lineno + 1 - offset]
         indent = len(locs[0]) - len(locs[0].lstrip())
         frame_loc = "".join([loc[indent:] for loc in locs]).strip()  # type: ignore[assignment]
-        return FrameLocalResult(loc=frame_loc, locals=frame_locals, symbols=frame_symbols)
+        return _FrameLocalResult(
+            loc=frame_loc, locals=frame_locals, symbols=frame_symbols
+        )
 
     def _log_guard(self, prefix: str, g: SympyBoolean, forcing_spec: bool) -> None:
         dtrace_structured(
