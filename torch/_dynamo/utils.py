@@ -1188,6 +1188,7 @@ class CompilationMetrics:
     tensorify_float_success: Optional[bool] = None
     tensorify_float_failure: Optional[set[str]] = None
     guard_latency_us: Optional[float] = None
+    recompile_reason: Optional[str] = None
 
     @classmethod
     def create(cls, metrics: dict[str, Any]):
@@ -2162,7 +2163,16 @@ if has_triton_package():
 def is_safe_constant(v):
     if istype(v, (tuple, frozenset)):
         return all(map(is_safe_constant, v))
-    return isinstance(v, (enum.Enum, type, torch.Size)) or istype(
+    return isinstance(
+        v,
+        (
+            enum.Enum,
+            type,
+            torch.Size,
+            typing._GenericAlias,  # type: ignore[attr-defined]
+            types.GenericAlias,
+        ),
+    ) or istype(
         v,
         common_constant_types | {slice},
     )

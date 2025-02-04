@@ -1213,7 +1213,8 @@ class PythonWrapperCodegen(CodeGen):
             if config.triton.autotune_at_compile_time:
                 self.generate_and_run_autotune_block()
 
-            if config.annotate_training:
+            # cpp_wrapper currently doesn't support nvtx
+            if config.annotate_training and not config.cpp_wrapper:
                 self.wrapper_call.writeline(
                     "nvtx._device_range_end(training_annotation)"
                 )
@@ -1345,7 +1346,23 @@ class PythonWrapperCodegen(CodeGen):
     def codegen_inputs(self):
         """Assign all symbolic shapes to locals"""
         bound_vars = OrderedSet[sympy.Symbol]()
-        for name, value in V.graph.graph_inputs.items():
+        # There is a subtle case in the cpp wrapper codegen which requires generating
+        # symbol inputs first followed by non-symbol ones.
+        #
+        # When a dynamic size constraint specified at the Export time is an expression,
+        # we need to solve that expression to proper define a symbol in cpp. Thus we
+        # are enforcing this iterating order here to make sure all plain size symbols
+        # are defined first.
+        inputs = [
+            (k, v)
+            for k, v in V.graph.graph_inputs.items()
+            if isinstance(v, sympy.Symbol)
+        ] + [
+            (k, v)
+            for k, v in V.graph.graph_inputs.items()
+            if not isinstance(v, sympy.Symbol)
+        ]
+        for name, value in inputs:
             self.codegen_input_symbol_assignment(name, value, bound_vars)
 
     def ensure_size_computed(self, sym: sympy.Symbol):
@@ -1594,19 +1611,52 @@ class PythonWrapperCodegen(CodeGen):
 
         signature: list[KernelArgType] = []
         constants: dict[str, Any] = {}
-        non_constant_indices = []
+        arg_indices: list[int] = []
         equal_to_1_args: list[str] = []
 
         def add_to_signature(idx, arg):
             signature.append(arg)
-            non_constant_indices.append(idx)
+            arg_indices.append(idx)
+
+        def add_arg(idx, arg, is_constexpr=False, equals_1=False, equals_none=False):
+            if is_constexpr:
+                if triton_version_uses_attrs_dict():
+                    # tl.constexpr args appear in the signature in new versions of triton,
+                    # but not in old versions of triton.
+                    add_to_signature(idx, arg)
+
+                if arg.name in kwargs:
+                    # the arg may not appear in kwargs if it is an autotuned arg.
+                    # in this case, it will be added in triton_heuristics after autotuning.
+                    constants[arg.name] = kwargs[arg.name]
+
+            else:
+                # the only case where arg name isn't in kwargs, should be
+                # when the arg is a constexpr.
+                assert arg.name in kwargs
+
+                if equals_1:
+                    if triton_version_uses_attrs_dict():
+                        # new versions of triton: add the equal-to-1 arg in the signature (labeled as "constexpr"),
+                        #                         and add the arg as a constant.
+                        # new versions of triton: add the equal-to-1 arg in the signature (labeled as, e.g., "i32"),
+                        #                         and add the arg as a constant.
+                        add_to_signature(idx, ConstexprArg(name=arg.name))
+                    else:
+                        add_to_signature(idx, arg)
+                    constants[arg.name] = 1
+                elif equals_none:
+                    if triton_version_uses_attrs_dict():
+                        # new versions of triton: add the none arg in the signature (as a constexpr arg) and as a constant
+                        # old versions of triton: include the none arg as a constant (but not in the signature)
+                        add_to_signature(idx, ConstexprArg(name=arg.name))
+                    constants[arg.name] = None
+                else:
+                    add_to_signature(idx, arg)
 
         for idx, key in enumerate(kernel.arg_names):
             if idx in kernel.constexprs:
-                if key in kwargs:
-                    constants[key] = kwargs[key]
-                if triton_version_uses_attrs_dict():
-                    add_to_signature(idx, ConstexprArg(name=key))
+                add_arg(idx, ConstexprArg(name=key), is_constexpr=True)
                 continue
 
             if key not in kwargs:
@@ -1615,17 +1665,17 @@ class PythonWrapperCodegen(CodeGen):
             arg = kwargs[key]
 
             if kwargs[key] is None:
-                constants[key] = None
+                add_arg(idx, ConstexprArg(name=key), equals_none=True)
             else:
                 if isinstance(arg, ir.TMADescriptor):
-                    add_to_signature(
+                    add_arg(
                         idx,
                         TMADescriptorArg(
                             name=key,
                         ),
                     )
                 elif isinstance(arg, ir.Buffer):
-                    add_to_signature(
+                    add_arg(
                         idx,
                         TensorArg(
                             name=key,
@@ -1637,7 +1687,7 @@ class PythonWrapperCodegen(CodeGen):
                     # for ReinterpretView we use the underlying
                     # buffer name and note the (possibly non-zero)
                     # offset relative to the underlying buffer
-                    add_to_signature(
+                    add_arg(
                         idx,
                         TensorArg(
                             name=key,
@@ -1647,18 +1697,17 @@ class PythonWrapperCodegen(CodeGen):
                         ),
                     )
                 else:
-                    add_to_signature(idx, SizeArg(key, arg))
-                    if isinstance(
+                    equals_1 = isinstance(
                         arg, (int, sympy.Integer)
                     ) and V.graph.sizevars.statically_known_equals(
                         arg, 1  # type: ignore[arg-type]
-                    ):
-                        equal_to_1_args.append(key)
+                    )
+                    add_arg(idx, SizeArg(key, arg), equals_1=equals_1)
 
         triton_signature = signature_to_meta(
             signature,
             size_dtype=None,  # try to infer based on symints
-            indices=non_constant_indices,
+            indices=arg_indices,
             argdefs=[ArgName(x) for x in kernel.arg_names],
         )
         triton_meta: dict[str, Any] = {
@@ -1678,7 +1727,7 @@ class PythonWrapperCodegen(CodeGen):
             "configs": [
                 config_of(
                     signature,
-                    indices=non_constant_indices,
+                    indices=arg_indices,
                 )
             ],
         }

@@ -295,7 +295,7 @@ class BlockStackEntry:
     # Current instruction that pushes something to block_stack
     inst: Instruction
     target: Instruction
-    stack_index: Optional[int] = None
+    stack_index: int
     with_context: Optional[
         Union[ContextWrappingVariable, GenericContextWrappingVariable]
     ] = None
@@ -1368,11 +1368,11 @@ class InstructionTranslatorBase(
 
     def SETUP_LOOP(self, inst):
         # only exists in python<=3.7
-        self.block_stack.append(BlockStackEntry(inst, inst.target))
+        self.block_stack.append(BlockStackEntry(inst, inst.target, len(self.stack)))
 
     def SETUP_EXCEPT(self, inst):
         # only exists in python<=3.7
-        self.block_stack.append(BlockStackEntry(inst, inst.target))
+        self.block_stack.append(BlockStackEntry(inst, inst.target, len(self.stack)))
 
     def POP_BLOCK(self, inst):
         self.block_stack.pop()
@@ -1381,7 +1381,7 @@ class InstructionTranslatorBase(
         self.setup_or_before_with(inst)
 
     def SETUP_FINALLY(self, inst):
-        self.block_stack.append(BlockStackEntry(inst, inst.target))
+        self.block_stack.append(BlockStackEntry(inst, inst.target, len(self.stack)))
 
     def BEGIN_FINALLY(self, inst):
         self.push(None)
@@ -1544,10 +1544,17 @@ class InstructionTranslatorBase(
                         f"Current TOS is {block_stack_entry.inst}"
                     )
 
+                # 1) pop values from the stack until it matches the stack depth
+                # for the handler
+                while len(self.stack) > block_stack_entry.stack_index:
+                    self.pop()
+
                 # Push a dummy block stack entry of EXCEPT_HANDLER
                 # https://github.com/python/cpython/blob/3.10/Python/ceval.c#L1456
                 except_handler_inst = Instruction(1e6, "EXCEPT_HANDLER", None, 0)
-                self.block_stack.append(BlockStackEntry(except_handler_inst, None))
+                self.block_stack.append(
+                    BlockStackEntry(except_handler_inst, None, len(self.stack))
+                )
 
                 # Push old exception
                 if len(self.exn_vt_stack) >= 2:
@@ -2441,7 +2448,7 @@ class InstructionTranslatorBase(
                     BlockStackEntry(inst, target, len(self.stack), ctx)
                 )
             else:
-                self.block_stack.append(BlockStackEntry(inst, target))
+                self.block_stack.append(BlockStackEntry(inst, target, len(self.stack)))
 
         self.push(exit)
         self.push(ctx.enter(self))
