@@ -43,7 +43,16 @@ def is_available() -> bool:
 
         >>> assert torch.accelerator.is_available() "No available accelerators detected."
     """
-    return device_count() > 0
+    # Why not just check "device_count() > 0" like other is_available call?
+    # Because device like CUDA have a python implementation of is_available that is
+    # non-poisoning and some features like Dataloader rely on it.
+    # So we are careful to delegate to the Python version of the accelerator here
+    acc = current_accelerator()
+    if acc is None:
+        return False
+
+    mod = torch.get_device_module(acc)
+    return mod.is_available()
 
 
 def current_accelerator() -> torch.device:
