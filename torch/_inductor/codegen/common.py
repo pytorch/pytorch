@@ -37,11 +37,11 @@ from torch.utils._ordered_set import OrderedSet
 from torch.utils._sympy.numbers import int_oo
 from torch.utils._sympy.printers import PythonPrinter as _PythonPrinter
 from torch.utils._sympy.symbol import free_symbol_is_type, symbol_is_type, SymT
-from torch.utils._sympy.value_ranges import bound_sympy, ValueRangeAnalysis, ValueRanges
+from torch.utils._sympy.value_ranges import bound_sympy, ValueRanges
 
 from .. import config, metrics
 from ..dtype_propagation import DtypePropagationOpsHandler
-from ..ops_handler import BasicMathOps, DefaultHandler
+from ..ops_handler import BasicMathOpsMixin, DefaultHandler
 from ..utils import (
     boolean_ops,
     DeferredLineBase,
@@ -763,7 +763,7 @@ def _all_in_parens(string: str) -> bool:
     return True
 
 
-class OpOverrides(BasicMathOps, OpDecompositions):
+class OpOverrides(BasicMathOpsMixin, OpDecompositions, OpsHandler[Any]):
     @staticmethod
     def paren(string: OpVarT) -> OpVarT:
         if (
@@ -1232,12 +1232,6 @@ pointwise_overrides_data: dict[str, OverridesData] = dict(
         name="special_laguerre_polynomial_l",
     ),
 )
-
-
-if TYPE_CHECKING:
-
-    class _typecheck_OpOverrides(OpOverrides, OpsHandler[str]):
-        pass  # mypy will error if we got any of the signatures wrong
 
 
 class DeferredLine(DeferredLineBase):
@@ -2258,6 +2252,8 @@ class CSEProxy(DefaultHandler):
 
     def __init__(self, kernel: Kernel[Any], parent_handler: OpsHandler[Any]):
         super().__init__()
+        from ..bounds import ValueRangeAnalysis
+
         self.vr_analysis = ValueRangeAnalysis()
         self.kernel = kernel
         self.parent_handler = parent_handler
@@ -2328,6 +2324,7 @@ class CSEProxy(DefaultHandler):
         If the variable comes from an FX node, we forward the bound we have already computed
         Else, if the variable when codegen'ing another op, we try to compute its bounds
         """
+        from ..bounds import ValueRangeAnalysis
         from ..select_algorithm import TritonTemplateKernel
 
         if isinstance(V.kernel, TritonTemplateKernel):
@@ -2565,9 +2562,3 @@ class CSEProxy(DefaultHandler):
             sorter,
             sorter_indices,
         )
-
-
-if TYPE_CHECKING:
-
-    class _typecheck_CSEProxy(CSEProxy, OpsHandler[CSEVariable]):
-        pass

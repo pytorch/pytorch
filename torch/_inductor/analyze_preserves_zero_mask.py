@@ -9,7 +9,7 @@ from torch._inductor import config
 from torch._inductor.dtype_propagation import DtypePropagationOpsHandler
 from torch._inductor.index_propagation import SymPyOps, TypedExpr
 
-from .ops_handler import DefaultHandler, OpsHandler
+from .ops_handler import DefaultHandler
 from .virtualized import StoreMode, V
 
 
@@ -32,27 +32,22 @@ class PreservesZeros(SymPyOps, DefaultHandler):
         self.store_preserves_zeros: Optional[bool] = None
         self.dtype_prop = DtypePropagationOpsHandler()
 
-    @staticmethod
-    def load(name: str, index: sympy.Expr) -> TypedExpr:
+    def load(self, name: str, index: sympy.Expr) -> TypedExpr:
         # In prologue fusion, all loads get broadcasted
-        dtype = V.get_ops_handler().dtype_prop.load(name, index)
+        dtype = self.dtype_prop.load(name, index)
         return TypedExpr(
             sympy.Float(0) if dtype.is_floating_point else sympy.Integer(0), dtype
         )
 
-    @staticmethod
     def store(
-        name: str, index: sympy.Expr, value: TypedExpr, mode: "StoreMode" = None
+        self, name: str, index: sympy.Expr, value: TypedExpr, mode: "StoreMode" = None
     ) -> None:
-        self = V.get_ops_handler()
         assert isinstance(self, PreservesZeros)
         # should only have a single store in prologue
         assert self.store_preserves_zeros is None
         self.store_preserves_zeros = value.is_constant() and value.expr == 0
 
-    @staticmethod
-    def indirect_indexing(*args: Any, **kwargs: Any) -> sympy.Expr:
-        self = V.get_ops_handler()
+    def indirect_indexing(self, *args: Any, **kwargs: Any) -> sympy.Expr:
         return construct_symbol(next(self.count), torch.int32)
 
     def _default(self, name: str, args: tuple[Any, ...], kwargs: dict[str, Any]) -> Any:
@@ -63,12 +58,6 @@ class PreservesZeros(SymPyOps, DefaultHandler):
 
         dtype = getattr(self.dtype_prop, name)(*args, **kwargs)
         return TypedExpr(construct_symbol(next(self.count), dtype), dtype)
-
-
-if TYPE_CHECKING:
-
-    class _typecheck_PreservesZeros(PreservesZeros, OpsHandler[Any]):
-        pass
 
 
 def prologue_preserves_zero_mask(prologue: "SchedulerNode") -> bool:
@@ -100,9 +89,8 @@ class RecordLowPrecisionOps(DefaultHandler):
             "constant",
         )
 
-    @staticmethod
-    def load(name: str, index: sympy.Expr) -> DTypeContainer:
-        return DTypeContainer(V.get_ops_handler().dtype_prop.load(name, index))
+    def load(self, name: str, index: sympy.Expr) -> DTypeContainer:
+        return DTypeContainer(self.dtype_prop.load(name, index))
 
     @staticmethod
     def store(
@@ -129,12 +117,6 @@ class RecordLowPrecisionOps(DefaultHandler):
             self.low_precision_numeric_op = True
 
         return out
-
-
-if TYPE_CHECKING:
-
-    class _typecheck_RecordLowPrecisionOps(RecordLowPrecisionOps, OpsHandler[Any]):
-        pass
 
 
 def low_prec_float(dtype: torch.dtype) -> bool:
