@@ -6708,17 +6708,27 @@ def aten_positive(self: TensorType) -> TensorType:
 
 @onnx_impl(
     (
-        aten.pow.Scalar,
         aten.pow.Tensor_Tensor,
         aten.pow.Tensor_Scalar,
-        operator.pow,
     ),
     trace_only=True,
 )
 def aten_pow(self: TReal, exponent: TTensor) -> TReal:
     """pow(Tensor self, Tensor exponent) -> Tensor"""
-
     return op.Pow(self, exponent)
+
+
+@onnx_impl(
+    (
+        aten.pow.Scalar,
+        operator.pow,
+    ),
+    trace_only=True,
+)
+def aten_pow_scalar(self: float, exponent: TTensor) -> TTensor:
+    """pow.Scalar(Scalar self, Tensor exponent) -> Tensor"""
+
+    return op.Pow(op.Cast(self, to=exponent.dtype), exponent)
 
 
 @onnx_impl((aten.prelu, aten._prelu_kernel), trace_only=True)
@@ -7956,6 +7966,7 @@ def aten_squeeze(self: TTensor) -> TTensor:
 
 @onnx_impl(aten.squeeze.dim, trace_only=True)
 def aten_squeeze_dim(self: TTensor, dim: int) -> TTensor:
+    """squeeze.dim(Tensor(a) self, int dim) -> Tensor(a)"""
     if len(self.shape) == 0:
         return op.Identity(self)
     return op.Squeeze(self, [dim])
@@ -7963,14 +7974,36 @@ def aten_squeeze_dim(self: TTensor, dim: int) -> TTensor:
 
 @onnx_impl(aten.squeeze.dim, complex=True, trace_only=True)
 def aten_squeeze_dim_complex(self: TTensor, dim: int) -> TTensor:
+    if len(self.shape) == 1:
+        # The single dimension is the complex dimension
+        return op.Identity(self)
     if dim < 0:
         # Account for the complex dimension in ONNX
         dim = dim - 1
 
+    return aten_squeeze_dim(self, dim)
+
+
+@onnx_impl(aten.squeeze.dims, trace_only=True)
+def aten_squeeze_dims(self: TTensor, dim: Sequence[int]) -> TTensor:
+    """squeeze.dims(Tensor(a) self, int[] dim) -> Tensor(a)"""
+    if len(self.shape) == 0:
+        return op.Identity(self)
+    return op.Squeeze(self, dim)
+
+
+@onnx_impl(aten.squeeze.dims, complex=True, trace_only=True)
+def aten_squeeze_dim_complex(self: TTensor, dim: Sequence[int]) -> TTensor:
     if len(self.shape) == 1:
         # The single dimension is the complex dimension
         return op.Identity(self)
-    return aten_squeeze_dim(self, dim)
+        dims = []
+    for d in dim:
+        if d < 0:
+            # Account for the complex dimension in ONNX
+            d = d - 1
+        dims.append(d)
+    return aten_squeeze_dims(self, dims)
 
 
 def aten_squeeze_copy(self: TensorType) -> TensorType:
