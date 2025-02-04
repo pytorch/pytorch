@@ -243,7 +243,7 @@ def draft_export(
 
     capture_structured_log = CaptureStructuredTrace(
         [
-            "propagate_real_tensors (dtrace)",
+            "propagate_real_tensors_provenance",
             "guard_added",
             "missing_fake_kernel",
             "mismatched_fake_kernel",
@@ -291,7 +291,7 @@ def draft_export(
         for log_name, log_contents in capture_structured_log.logs:
             failure_type = None
 
-            if log_name == "propagate_real_tensors (dtrace)":
+            if log_name == "propagate_real_tensors_provenance":
                 log_contents["stack"] = filter_stack(
                     log_contents["stack"], str_to_filename
                 )
