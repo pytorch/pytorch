@@ -88,7 +88,10 @@ def mps_ops_grad_modifier(ops):
         'cdist': [torch.float32],
         'masked.scatter': [torch.float16, torch.float32],
         'index_fill': [torch.float16, torch.float32],  # missing `aten::_unique`.
+        'lu': [torch.float16, torch.float32],  # missing `aten::lu_unpack`.
         'linalg.lu_factor': [torch.float16, torch.float32],  # missing `aten::lu_unpack`.
+        'linalg.lu_factor_ex': [torch.float16, torch.float32],  # missing `aten::lu_unpack`.
+        'linalg.det': [torch.float16, torch.float32],  # missing aten::lu_solve.out
         'aminmax': [torch.float32, torch.float16],
         'special.i1': [torch.float16],  # "i1_backward" not implemented for 'Half'
 
@@ -694,7 +697,6 @@ def mps_ops_modifier(ops):
         'lcm': None,
         'linalg.cholesky_ex': None,
         'linalg.cond': None,
-        'linalg.det': None,
         'linalg.eigh': None,
         'linalg.eigvalsh': None,
         'linalg.householder_product': None,
@@ -704,7 +706,6 @@ def mps_ops_modifier(ops):
         'linalg.lstsq': None,
         'linalg.lstsqgrad_oriented': None,
         'linalg.lu': None,
-        'linalg.lu_factor_ex': None,
         'linalg.lu_solve': None,
         'linalg.matrix_norm': [torch.float32],
         'linalg.norm': [torch.float32],
@@ -718,7 +719,6 @@ def mps_ops_modifier(ops):
         'linalg.vecdot': None,
         'logcumsumexp': None,
         'logdet': None,
-        'lu': None,
         'lu_solve': None,
         'lu_unpack': None,
         'masked.median': None,
@@ -2715,6 +2715,68 @@ class TestMPS(TestCaseMPS):
             res_cpu = torch.linalg.vector_norm(B_cpu, ord=3.5, dim=dim)
             self.assertEqual(res_mps, res_cpu)
 
+    def test_linalg_lu_factor_ex(self):
+        from torch.testing._internal.common_utils import make_fullrank_matrices_with_distinct_singular_values
+
+        make_fullrank = make_fullrank_matrices_with_distinct_singular_values
+        make_arg = partial(make_fullrank, device="cpu", dtype=torch.float32)
+
+        def run_lu_factor_ex_test(size, *batch_dims, check_errors):
+            input_cpu = make_arg(*batch_dims, size, size)
+            input_mps = input_cpu.to('mps')
+            out_cpu = torch.linalg.lu_factor_ex(input_cpu, check_errors=check_errors)
+            out_mps = torch.linalg.lu_factor_ex(input_mps, check_errors=check_errors)
+            self.assertEqual(out_cpu, out_mps)
+
+            out_cpu = torch.linalg.lu_factor_ex(input_cpu.mT, check_errors=check_errors)
+            out_mps = torch.linalg.lu_factor_ex(input_mps.mT, check_errors=check_errors)
+            self.assertEqual(out_cpu, out_mps)
+
+        # test with different even/odd matrix sizes
+        matrix_sizes = [1, 2, 3, 4]
+        # even/odd batch sizes
+        batch_sizes = [1, 2, 4]
+
+        for check_errors in [True, False]:
+            for size in matrix_sizes:
+                for batch_size in batch_sizes:
+                    run_lu_factor_ex_test(size, batch_size, check_errors=check_errors)
+        # test >3D matrices
+        run_lu_factor_ex_test(32, 10, 10, check_errors=False)
+        run_lu_factor_ex_test(32, 2, 2, 2, 2, 10, 10, check_errors=True)
+
+    def test_linalg_det(self):
+        from torch.testing._internal.common_utils import make_fullrank_matrices_with_distinct_singular_values
+
+        make_fullrank = make_fullrank_matrices_with_distinct_singular_values
+        make_arg = partial(make_fullrank, device="cpu", dtype=torch.float32)
+
+        def run_det_test(size, *batch_dims):
+            input_cpu = make_arg(*batch_dims, size, size)
+            input_mps = input_cpu.to('mps')
+            out_cpu = torch.linalg.det(input_cpu)
+            out_mps = torch.linalg.det(input_mps)
+            self.assertEqual(out_cpu, out_mps)
+
+            # non-contiguous matrices
+            input_cpu_T = input_cpu.mT
+            input_mps_T = input_mps.mT
+            out_cpu_T = torch.linalg.det(input_cpu_T)
+            out_mps_T = torch.linalg.det(input_mps_T)
+            self.assertEqual(out_cpu_T, out_mps_T)
+
+        # test with different even/odd matrix sizes
+        matrix_sizes = [2, 3, 4]
+        # even/odd batch sizes
+        batch_sizes = [1, 2, 4]
+
+        for size in matrix_sizes:
+            for batch_size in batch_sizes:
+                run_det_test(size, batch_size)
+
+        # test >3D matrices
+        run_det_test(32, 10, 10)
+        run_det_test(32, 2, 2, 10, 10)
 
     def test_layer_norm(self):
         # TODO: Test non-contiguous

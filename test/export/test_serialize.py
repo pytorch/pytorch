@@ -3,7 +3,6 @@ PYTEST_DONT_REWRITE (prevents pytest from rewriting assertions, which interferes
 with test_sym_bool)
 """
 
-
 # Owner(s): ["oncall: export"]
 import copy
 import io
@@ -11,7 +10,9 @@ import math
 import tempfile
 import unittest
 import zipfile
+from collections import namedtuple
 from pathlib import Path
+from typing import NamedTuple
 
 import torch
 import torch._dynamo as torchdynamo
@@ -29,7 +30,7 @@ from torch._export.serde.serialize import (
 )
 from torch._higher_order_ops.torchbind import enable_torchbind_tracing
 from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
-from torch.export import Dim, export_for_training, load, save
+from torch.export import Dim, export_for_training, load, save, unflatten
 from torch.fx.experimental.symbolic_shapes import is_concrete_int, ValueRanges
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
@@ -974,6 +975,55 @@ class TestDeserialize(TestCase):
         inputs = (torch.randn(3, 3, device="meta"),)
         self.check_graph(mod, inputs)
 
+    def test_pytree_namedtuple(self):
+        N1 = namedtuple("N1", ["a", "b"])
+
+        class N2(NamedTuple):
+            a: torch.Tensor
+            b: torch.Tensor
+
+        class M(torch.nn.Module):
+            def forward(self, x, y):
+                return N2(x.a + y.a, x.b * y.b)
+
+        pytree._register_namedtuple(
+            N1,
+            serialized_type_name="test.export.test_serialize.test_pytree_namedtuple.N1",
+        )
+        pytree._register_namedtuple(
+            N2,
+            serialized_type_name="test.export.test_serialize.test_pytree_namedtuple.N2",
+        )
+
+        inp = (N1(torch.randn(3), torch.randn(3)), N1(torch.randn(3), torch.randn(3)))
+        ep = torch.export.export(M(), inp)
+        ep.example_inputs = None  # Can't pickle the input since the namedtuple class is not at a global namespace
+        serialized = ExportedProgramSerializer().serialize(ep)
+        self.assertEqual(
+            len(serialized.exported_program.graph_module.treespec_namedtuple_fields), 2
+        )
+        deserialized = ExportedProgramDeserializer().deserialize(
+            serialized.exported_program,
+            serialized.state_dict,
+            serialized.constants,
+        )
+        self.assertTrue("treespec_namedtuple_fields" in deserialized.graph_module.meta)
+        self.assertEqual(
+            deserialized.graph_module.meta["treespec_namedtuple_fields"],
+            {
+                "test.export.test_serialize.test_pytree_namedtuple.N1": ["a", "b"],
+                "test.export.test_serialize.test_pytree_namedtuple.N2": ["a", "b"],
+            },
+        )
+
+        unlifted = deserialized.module()
+        self.assertTrue("treespec_namedtuple_fields" in unlifted.meta)
+        self.assertEqual(len(unlifted.meta["treespec_namedtuple_fields"]), 2)
+
+        unflattened = unflatten(deserialized)
+        self.assertTrue("treespec_namedtuple_fields" in unflattened.meta)
+        self.assertEqual(len(unflattened.meta["treespec_namedtuple_fields"]), 2)
+
     def test_cond(self):
         from functorch.experimental.control_flow import cond
 
@@ -990,6 +1040,14 @@ class TestDeserialize(TestCase):
                 return cond(x[0][0] > 4, t, f, [x, y])
 
         self.check_graph(M(), inputs)
+
+    def test_sym_float(self):
+        class M(torch.nn.Module):
+            def forward(self, x):
+                b = x.item()
+                return b * 0.1
+
+        self.check_graph(M(), (torch.tensor(1.0),))
 
     def test_arg_from(self):
         class M(torch.nn.Module):
@@ -1381,17 +1439,17 @@ class TestSaveLoad(TestCase):
 
         ep = export_for_training(f, (torch.randn(1, 3),))
 
-        with tempfile.NamedTemporaryFile() as f:
-            save(ep, f)
-            f.seek(0)
+        with self.assertRaisesRegex(
+            RuntimeError, r"Serialized version .* does not match our current"
+        ):
+            with tempfile.NamedTemporaryFile() as f:
+                save(ep, f)
+                f.seek(0)
 
-            # Modify the version
-            with zipfile.ZipFile(f, "a") as zipf:
-                zipf.writestr("version", "-1.1")
+                # Modify the version
+                with zipfile.ZipFile(f, "a") as zipf:
+                    zipf.writestr("version", "-1.1")
 
-            with self.assertRaisesRegex(
-                RuntimeError, r"Serialized version .* does not match our current"
-            ):
                 f.seek(0)
                 load(f)
 
