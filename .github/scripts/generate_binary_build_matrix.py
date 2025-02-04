@@ -396,7 +396,7 @@ def generate_wheels_matrix(
                             f"{'-' if 'aarch64' in gpu_arch_type else ''}{gpu_arch_version.replace('-aarch64', '')}".replace(
                                 ".", "_"
                             )
-                        ), #include special case for aarch64 build, remove the -aarch64 postfix
+                        ),  # include special case for aarch64 build, remove the -aarch64 postfix
                     }
                 )
                 # Special build building to use on Colab. Python 3.11 for 12.4 CUDA
