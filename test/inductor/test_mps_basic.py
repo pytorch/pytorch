@@ -91,6 +91,19 @@ class MPSBasicTests(TestCase):
     def test_pointwise_erf(self):
         self.common(torch.special.erf, (torch.rand(128, 128),), check_lowp=False)
 
+    def test_pointwise_polygamma(self):
+        self.common(
+            torch.special.polygamma,
+            (
+                1,
+                torch.rand(128, 128),
+            ),
+            check_lowp=False,
+        )
+
+    def test_pointwise_digamma(self):
+        self.common(torch.special.digamma, (torch.rand(128, 128),), check_lowp=False)
+
     def test_broadcast(self):
         self.common(torch.add, (torch.rand(32, 1024), torch.rand(1024)))
 

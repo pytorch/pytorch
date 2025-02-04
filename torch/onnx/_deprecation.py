@@ -32,7 +32,7 @@ def deprecated(
                 f"'{function.__module__}.{function.__name__}' "
                 f"is deprecated in version {since} and will be "
                 f"removed in {removed_in}. Please {instructions}.",
-                category=DeprecationWarning,
+                category=FutureWarning,
                 stacklevel=2,
             )
             return function(*args, **kwargs)
