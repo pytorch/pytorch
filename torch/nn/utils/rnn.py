@@ -1,7 +1,7 @@
 import warnings
 from collections.abc import Iterable
 from typing import Any, Callable, NamedTuple, Optional, overload, TypeVar, Union
-from typing_extensions import Self
+from typing_extensions import Self, TypeVarTuple, Unpack
 
 import torch
 from torch import _VF, Tensor
@@ -20,6 +20,7 @@ __all__ = [
 
 _T = TypeVar("_T")
 _R = TypeVar("_R")
+_Args = TypeVarTuple("_Args")
 
 
 class PackedSequence_(NamedTuple):
@@ -127,7 +128,7 @@ class PackedSequence(PackedSequence_):
     ) -> Self:
         ...
 
-    def to(self, *args: Any, **kwargs: Any) -> Self:
+    def to(self, *args: Unpack[_Args], **kwargs: Any) -> Self:  # type:ignore[misc]
         r"""Perform dtype and/or device conversion on `self.data`.
 
         It has similar signature as :meth:`torch.Tensor.to`, except optional
@@ -158,7 +159,7 @@ class PackedSequence(PackedSequence_):
             )
             return type(self)(data, self.batch_sizes, sorted_indices, unsorted_indices)
 
-    def cuda(self, *args: Any, **kwargs: Any) -> Self:
+    def cuda(self, *args: Unpack[_Args], **kwargs: Any) -> Self:
         # Tests to see if 'cuda' should be added to kwargs
         ex = torch.tensor((), dtype=self.data.dtype, device=self.data.device).to(
             *args, **kwargs
@@ -168,7 +169,7 @@ class PackedSequence(PackedSequence_):
         kwargs["device"] = "cuda"
         return self.to(*args, **kwargs)
 
-    def cpu(self, *args: Any, **kwargs: Any) -> Self:
+    def cpu(self, *args: Unpack[_Args], **kwargs: Any) -> Self:
         ex = torch.tensor((), dtype=self.data.dtype, device=self.data.device).to(
             *args, **kwargs
         )
