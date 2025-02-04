@@ -50,7 +50,7 @@ from torch.testing._internal.common_utils import (
     TEST_XPU,
     TestCase,
 )
-from torch.utils._triton import has_triton
+from torch.testing._internal.inductor_utils import HAS_GPU_TRITON
 
 
 Json = dict[str, Any]
@@ -368,10 +368,7 @@ class TestExecutionTrace(TestCase):
     @unittest.skipIf(
         sys.version_info >= (3, 12), "torch.compile is not supported on python 3.12+"
     )
-    @unittest.skipIf(
-        (not has_triton()) or (not TEST_CUDA and not TEST_XPU),
-        "need triton and device(CUDA or XPU) availability to run",
-    )
+    @unittest.skipIf(not HAS_GPU_TRITON, "Requires triton and a compatible GPU device")
     @skipCPUIf(True, "skip CPU device for testing profiling triton")
     def test_execution_trace_with_pt2(self, device):
         @torchdynamo.optimize("inductor")
@@ -422,8 +419,8 @@ class TestExecutionTrace(TestCase):
         sys.version_info >= (3, 12), "torch.compile is not supported on python 3.12+"
     )
     @unittest.skipIf(
-        (not has_triton()) or (not TEST_CUDA and not TEST_XPU),
-        "need triton and device(CUDA or XPU) availability to run",
+        not HAS_GPU_TRITON,
+        "Requires triton and a compatible CUDA or XPU device",
     )
     @skipCPUIf(True, "skip CPU device for testing profiling triton")
     def test_execution_trace_env_enabled_with_pt2(self, device):

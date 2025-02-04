@@ -804,7 +804,7 @@ class _NullDecorator(contextlib.nullcontext):  # type: ignore[type-arg]
         return fn
 
 
-def check_if_dynamo_supported():
+def raise_if_dynamo_unavailable() -> None:
     if sys.version_info >= (3, 14):
         raise RuntimeError("Python 3.14+ not yet supported for torch.compile")
     elif sysconfig.get_config_var("Py_GIL_DISABLED") == 1:
@@ -813,21 +813,40 @@ def check_if_dynamo_supported():
         )
 
 
-def is_dynamo_supported():
+def is_dynamo_supported() -> bool:
     try:
-        check_if_dynamo_supported()
+        raise_if_dynamo_unavailable()
         return True
     except Exception:
         return False
 
 
-def check_if_inductor_supported():
-    check_if_dynamo_supported()
+def raise_if_inductor_unavailable(device: torch.device | str | None = None) -> None:
+    from torch._inductor.codegen.common import (
+        get_scheduling_for_device,
+        init_backend_registration,
+    )
+
+    raise_if_dynamo_unavailable()
+
+    init_backend_registration()
+
+    if device is None:
+        device = torch.get_default_device()
+    elif isinstance(device, str):
+        device = torch.device(device)
+
+    scheduling_factory = get_scheduling_for_device(device.type)
+    if scheduling_factory is None:
+        raise RuntimeError(
+            f"No Inductor scheduling factory registered for {device.type}"
+        )
+    scheduling_factory(None).raise_if_unavailable(device)
 
 
-def is_inductor_supported():
+def is_inductor_supported(device: torch.device | str | None = None) -> bool:
     try:
-        check_if_inductor_supported()
+        raise_if_inductor_unavailable(device)
         return True
     except Exception:
         return False
@@ -884,7 +903,7 @@ def _optimize(
         def toy_example(a, b):
             ...
     """
-    check_if_dynamo_supported()
+    raise_if_dynamo_unavailable()
     # Note: The hooks object could be global instead of passed around, *however* that would make
     # for a confusing API usage and plumbing story wherein we nest multiple .optimize calls.
     # There is some prior art around this, w/r/t nesting backend calls are enforced to be the same
@@ -1451,7 +1470,7 @@ def export(
         f = _f
         specialize_float = _specialize_float
         assume_static_by_default = _assume_static_by_default
-        check_if_dynamo_supported()
+        raise_if_dynamo_unavailable()
         torch._C._log_api_usage_once("torch._dynamo.export")
         if decomposition_table is not None:
             assert (

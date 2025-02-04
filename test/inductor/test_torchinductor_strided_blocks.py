@@ -19,9 +19,9 @@ from torch.testing._internal.common_utils import (
 )
 from torch.testing._internal.inductor_utils import (
     GPU_TYPE,
+    HAS_CPU_TRITON,
     HAS_GPU,
     skip_windows_ci,
-    TRITON_HAS_CPU,
 )
 
 
@@ -896,7 +896,7 @@ class CommonTemplate:
         self.assertTrue("Min" not in code[0])
 
 
-@unittest.skipIf(not TRITON_HAS_CPU, "requires triton CPU backend")
+@unittest.skipIf(not HAS_CPU_TRITON, "requires triton CPU backend")
 @config.patch(cpu_backend="triton")
 @config.patch("triton.use_block_ptr", True)
 class TritonBlockPointerTestCPU(BlockPointerTestBase):
@@ -917,5 +917,5 @@ test_torchinductor.copy_tests(CommonTemplate, TritonBlockPointerTestGPU, GPU_TYP
 if __name__ == "__main__":
     from torch._inductor.test_case import run_tests
 
-    if HAS_GPU or TRITON_HAS_CPU:
+    if HAS_GPU or HAS_CPU_TRITON:
         run_tests(needs="filelock")

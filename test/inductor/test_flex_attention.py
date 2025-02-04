@@ -39,14 +39,12 @@ from torch.testing._internal.common_device_type import (
     flex_attention_supported_platform as supported_platform,
 )
 from torch.testing._internal.common_utils import IS_MACOS, TEST_WITH_ROCM
-from torch.utils._triton import has_triton
+from torch.testing._internal.inductor_utils import HAS_CUDA_TRITON
 
 
 # Use this decorator only when hitting Triton bugs on H100
 running_on_a100_only = skipUnless(
-    torch.cuda.is_available()
-    and has_triton()
-    and torch.cuda.get_device_capability() == (8, 0),
+    HAS_CUDA_TRITON and torch.cuda.get_device_capability() == (8, 0),
     "Requires A100 and Triton",
 )
 
@@ -101,11 +99,7 @@ def create_block_mask_test(score_mod, query, key):
     return block_mask
 
 
-TEST_ON_CUDA = (
-    torch.cuda.is_available()
-    and torch.utils._triton.has_triton()
-    and torch.cuda.get_device_capability() >= (8, 0)
-)
+TEST_ON_CUDA = HAS_CUDA_TRITON and torch.cuda.get_device_capability() >= (8, 0)
 
 if TEST_ON_CUDA:
     test_device = "cuda"
@@ -4611,8 +4605,7 @@ def get_params(dtypes: list[torch.dtype]) -> list[Params]:
 
 # ROCM BUG SEE: https://github.com/pytorch/pytorch/issues/140855
 supports_learnable_bias = unittest.skipUnless(
-    torch.cuda.is_available()
-    and torch.utils._triton.has_triton()
+    HAS_CUDA_TRITON
     and torch.cuda.get_device_capability() >= (8, 0)
     and not TEST_WITH_ROCM,
     "Requires CUDA and Triton, and is not supported on ROCm",
