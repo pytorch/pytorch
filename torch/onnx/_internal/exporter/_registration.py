@@ -126,11 +126,11 @@ class ONNXRegistry:
                     function.name,
                     opset_version=function.opset.version,
                 )
-                function._pt_onnx_signature = signature  # type: ignore[attr-defined]
             else:
                 signature = _schemas.OpSignature.from_function(
                     function, "__custom", function.__name__
                 )
+            function._pt_onnx_signature = signature  # type: ignore[attr-defined]
         except Exception as e:
             logger.info(
                 "Failed to infer the signature for function '%s' because '%s'"
