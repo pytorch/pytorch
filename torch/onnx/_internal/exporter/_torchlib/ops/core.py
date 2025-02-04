@@ -1575,7 +1575,9 @@ def aten_cat_complex(tensors: Sequence[TTensor], dim: int = 0) -> TTensor:
     return aten_cat(tensors, dim=dim)
 
 
-@onnx_impl((aten.cat.default, aten.concat.default, aten.concatenate.default), trace_only=True)
+@onnx_impl(
+    (aten.cat.default, aten.concat.default, aten.concatenate.default), trace_only=True
+)
 def aten_cat(tensors: Sequence[TTensor], dim: int = 0) -> TTensor:
     """cat(Tensor[] tensors, int dim=0) -> Tensor"""
 
@@ -3324,7 +3326,9 @@ def aten_empty_strided(
     return op.Expand(zero, size)
 
 
-@onnx_impl((aten.eq.default, aten.eq.Tensor, aten.eq.Scalar, operator.eq), trace_only=True)
+@onnx_impl(
+    (aten.eq.default, aten.eq.Tensor, aten.eq.Scalar, operator.eq), trace_only=True
+)
 def aten_eq(self: TTensor, other: TTensor) -> BOOL:
     """eq.Tensor(Tensor self, Tensor other) -> Tensor"""
 
@@ -5827,7 +5831,10 @@ def aten__native_batch_norm_no_stats(
     )
 
 
-@onnx_impl((aten.native_batch_norm.default, aten._native_batch_norm_legit.default), trace_only=True)
+@onnx_impl(
+    (aten.native_batch_norm.default, aten._native_batch_norm_legit.default),
+    trace_only=True,
+)
 def aten_native_batch_norm(
     input: TFloat,
     weight: Optional[TFloat] = None,
@@ -6254,7 +6261,9 @@ def aten_native_norm(self: TensorType, p: float = 2.0) -> TensorType:
     raise NotImplementedError
 
 
-@onnx_impl((aten.ne.default, aten.ne.Scalar, aten.ne.Tensor, operator.ne), trace_only=True)
+@onnx_impl(
+    (aten.ne.default, aten.ne.Scalar, aten.ne.Tensor, operator.ne), trace_only=True
+)
 def aten_ne(self: TReal, other: TReal) -> BOOL:
     """ne.Tensor(Tensor self, Tensor other) -> Tensor"""
 

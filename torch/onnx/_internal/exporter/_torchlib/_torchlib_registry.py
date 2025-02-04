@@ -26,9 +26,7 @@ _registry: list[_registration.OnnxDecompMeta] = []
 
 
 def onnx_impl(
-    target: _registration.TorchOp
-    | torch._ops.OpOverloadPacket
-    | tuple[_registration.TorchOp | torch._ops.OpOverloadPacket, ...],
+    target: _registration.TorchOp | tuple[_registration.TorchOp, ...],
     *,
     trace_only: bool = False,
     complex: bool = False,
@@ -38,7 +36,10 @@ def onnx_impl(
     """Register an ONNX implementation of a torch op."""
 
     if isinstance(target, torch._ops.OpOverloadPacket):
-        target = target.default
+        raise TypeError(
+            "Please provide an overload instead of an OpOverloadPacket. "
+            "You can get the default overload with torch.ops.aten.<op>.default."
+        )
 
     def wrapper(
         func: _T,
