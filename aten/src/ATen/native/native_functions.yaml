@@ -9285,12 +9285,12 @@
     MPS: nonzero_mps
   tags: [dynamic_output_shape, core]
 
-- func: nonzero_static.out(Tensor self, *, int size, int fill_value=-1, Tensor(a!) out) -> Tensor(a!)
+- func: nonzero_static.out(Tensor self, *, SymInt size, int fill_value=-1, Tensor(a!) out) -> Tensor(a!)
   dispatch:
     CPU: nonzero_static_out_cpu
     CUDA: nonzero_static_out_cuda
 
-- func: nonzero_static(Tensor self, *, int size, int fill_value=-1) -> Tensor
+- func: nonzero_static(Tensor self, *, SymInt size, int fill_value=-1) -> Tensor
   variants: method, function
   dispatch:
     CPU: nonzero_static_cpu
@@ -13951,6 +13951,7 @@
   structured: True
   dispatch:
     CPU, CUDA: linalg_lu_factor_ex_out
+    MPS: linalg_lu_factor_ex_out_mps
 
 # linalg.lu
 - func: linalg_lu(Tensor A, *, bool pivot=True) -> (Tensor P, Tensor L, Tensor U)
@@ -13985,7 +13986,7 @@
 - func: _linalg_det.result(Tensor A, *, Tensor(a!) result, Tensor(b!) LU, Tensor(c!) pivots) -> (Tensor(a!) result, Tensor(b!) LU, Tensor(c!) pivots)
   structured: True
   dispatch:
-    CPU, CUDA: _linalg_det_out
+    CPU, CUDA, MPS: _linalg_det_out
 
 - func: linalg_det(Tensor A) -> Tensor
   python_module: linalg

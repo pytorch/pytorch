@@ -9,7 +9,6 @@
 #include <torch/csrc/dynamo/debug_macros.h>
 #include <torch/csrc/dynamo/extra_state.h>
 #include <torch/csrc/dynamo/framelocals_mapping.h>
-#include <torch/csrc/dynamo/utils.h>
 #include <torch/csrc/utils/python_compat.h>
 
 PyObject* guard_error_hook = NULL;
@@ -296,7 +295,6 @@ static PyObject* dynamo_call_callback(
   PyObject* cache_entry_pyobj = CacheEntry_to_obj(cache_entry);
   PyObject* res = PyObject_CallFunction(
       callable, "OOO", frame, cache_entry_pyobj, frame_state);
-
   Py_DECREF(frame);
   Py_DECREF(cache_entry_pyobj);
   return res;
@@ -539,17 +537,6 @@ static PyObject* dynamo_eval_custom_code(
   return result;
 }
 
-static PyObject* random_state = NULL;
-
-static void save_random_state() {
-  Py_XSETREF(random_state, random_getstate(random_module()));
-}
-
-static void restore_random_state() {
-  DEBUG_NULL_CHECK(random_state);
-  random_setstate(random_module(), random_state);
-}
-
 static PyObject* dynamo__custom_eval_frame_shim(
     PyThreadState* tstate,
     THP_EVAL_API_FRAME_OBJECT* frame,
@@ -658,11 +645,6 @@ static PyObject* dynamo__custom_eval_frame(
   // in the shim.
   eval_frame_callback_set(Py_None);
 
-  // Preserve random state - restore before calling
-  // dynamo_eval_[frame_default]/[custom_code]!
-  // lookup or call_callback may burn RNG.
-  save_random_state();
-
   // A callback of Py_False indicates "run only" mode, the cache is checked, but
   // we never compile.
   // Also, if extra is marked as "cache_limit_hit", run in "run only" mode
@@ -703,7 +685,6 @@ static PyObject* dynamo__custom_eval_frame(
         DEBUG_TRACE("skip recursive %s", get_frame_name(frame));
         eval_frame_callback_set(Py_None);
       }
-      restore_random_state();
       PyObject* ret = dynamo_eval_frame_default(tstate, frame, throw_flag);
       if (extra_state_cache_limit_hit(extra)) {
         eval_frame_callback_set(callback);
@@ -716,11 +697,9 @@ static PyObject* dynamo__custom_eval_frame(
     // Re-enable custom behavior
     eval_frame_callback_set(callback);
     *should_clear_frame = 1;
-    restore_random_state();
     return dynamo_eval_custom_code(
         tstate, frame, cached_code, trace_annotation, throw_flag);
   }
-  DEBUG_CHECK(PyDict_CheckExact(locals));
   DEBUG_CHECK(PyDict_CheckExact(frame->f_globals));
   DEBUG_CHECK(PyDict_CheckExact(frame->f_builtins));
 
@@ -749,7 +728,6 @@ static PyObject* dynamo__custom_eval_frame(
     eval_frame_callback_set(callback);
     *should_clear_frame = 1;
     framelocals_mapping_free(locals);
-    restore_random_state();
     return dynamo_eval_custom_code(
         tstate, frame, cached_code, trace_annotation, throw_flag);
   }
@@ -783,7 +761,6 @@ static PyObject* dynamo__custom_eval_frame(
     // code.
     DEBUG_TRACE("create skip recursive %s", get_frame_name(frame));
     set_extra_state(F_CODE(frame), SKIP_CODE_RECURSIVE);
-    restore_random_state();
     PyObject* r = dynamo_eval_frame_default(tstate, frame, throw_flag);
     // Re-enable custom behavior
     eval_frame_callback_set(callback);
@@ -792,7 +769,6 @@ static PyObject* dynamo__custom_eval_frame(
     // Dynamo returned cache_limit_hit_flag, so we should recursively skip code.
     DEBUG_TRACE("create cache limit hit %s", get_frame_name(frame));
     set_extra_state_cache_limit_hit(extra, true);
-    restore_random_state();
     PyObject* r = dynamo_eval_frame_default(tstate, frame, throw_flag);
     // Re-enable custom behavior
     eval_frame_callback_set(callback);
@@ -814,7 +790,6 @@ static PyObject* dynamo__custom_eval_frame(
     // Re-enable custom behavior
     eval_frame_callback_set(callback);
     *should_clear_frame = 1;
-    restore_random_state();
     return dynamo_eval_custom_code(
         tstate,
         frame,
@@ -827,7 +802,6 @@ static PyObject* dynamo__custom_eval_frame(
     set_extra_state(F_CODE(frame), SKIP_CODE);
     // Re-enable custom behavior
     eval_frame_callback_set(callback);
-    restore_random_state();
     return dynamo_eval_frame_default(tstate, frame, throw_flag);
   }
 }
