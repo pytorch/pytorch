@@ -1,7 +1,6 @@
 import dataclasses
 import importlib
 import tempfile
-import operator
 import random
 import textwrap
 import types
@@ -46,11 +45,11 @@ from ..utils import (
     LineContext,
 )
 
-def call_triton_kernel(kernel: torch.fx.Node, grid, args):
+def delete(x: torch.Tensor) -> None:
     """
-    Call Triton kernels, for testing purposes.
+    This function is used as an FX op to delete a tensor.
     """
-    return kernel[grid](args)
+    del x
 
 """
 Extra wrapper IR nodes for FX codegen.
@@ -161,7 +160,7 @@ class WrapperFxCodegen(PythonWrapperCodegen):
         Removes the buffer from the symbol table.
         """
         node = self.buffer_to_node[buffer.name]
-        self.gm.graph.call_function(operator.delitem, args=(node, None))
+        self.gm.graph.call_function(delete, args=(node,))
         del self.buffer_to_node[buffer.name]
 
     def _get_buffer(self, node: ir.IRNode) -> BufferLike:
@@ -295,7 +294,7 @@ class WrapperFxCodegen(PythonWrapperCodegen):
         assert isinstance(line, FreeIfNotReusedLine)
         buf = line.node
         assert buf.get_name() not in V.graph.removed_buffers
-        if not buf.is_reused:
+        if not line.is_reused:
             self._free(buf)
 
     def _generate_line_context(self, line: Line) -> None:

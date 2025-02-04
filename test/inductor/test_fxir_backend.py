@@ -9,7 +9,7 @@ from torch._inductor import config
 from torch._higher_order_ops.triton_kernel_wrap import triton_kernel_wrapper_mutation
 from torch._inductor.virtualized import V
 from torch._inductor.codegen.triton import TritonScheduling
-from torch._inductor.codegen.wrapper_fxir import WrapperFxCodegen
+from torch._inductor.codegen.wrapper_fxir import WrapperFxCodegen, delete
 from torch._inductor.test_case import TestCase as InductorTestCase
 from torch.testing._internal.inductor_utils import (
     GPU_TYPE,
@@ -46,7 +46,7 @@ class FxirTestCase(InductorTestCase):
         return gms
 
     def _compile_and_check(self, func, args, expected_num_kernels: int = 1):
-        opt = torch.compile(func)
+        opt = torch.compile(func, fullgraph=True)
 
         # Get the FX graph from the backend.
         (gm,) = self._run_and_capture_graphs(opt, args)
@@ -59,6 +59,8 @@ class FxirTestCase(InductorTestCase):
         result = gm(*args)[0]
         ref = func(*args)
         self.assertTrue(torch.allclose(result, ref))
+
+        return gm
 
     @classmethod
     def setUpClass(cls):
@@ -80,6 +82,17 @@ class FxirTestCase(InductorTestCase):
         args = [torch.rand(length, device=self.device) for length in [517, 1029]]
         self._compile_and_check(foo, args, expected_num_kernels=2)
 
+    def test_free(self):
+        """
+        Test a program that frees a buffer which is no longer in use.
+        """
+        def foo(x, y, z):
+            w = x.sum() + y
+            return z.sum() + w.sum()
 
+        args = [torch.rand(length, device=self.device) for length in [517, 1029, 123]]
+        gm = self._compile_and_check(foo, args, expected_num_kernels=3)
 
-
+        # Check for frees
+        num_frees = len(list(gm.graph.find_nodes(op="call_function", target=delete)))
+        self.assertGreater(num_frees, 0)
