@@ -90,6 +90,7 @@ inline void {{kernel_name}}(
         self.compute_dtype = compute_dtype
         self.register_blocking = register_blocking
         self.alpha = alpha
+        self.pack_vnni_B_locally = False
 
     def get_common_options(self):
         if self.input_dtype in [torch.uint8, torch.int8]:
@@ -166,6 +167,9 @@ inline void {{kernel_name}}(
             res.writeline(f"{ldc}")
         res.writeline(");")
         return res.getvalue()
+
+    def use_local_vnni_blocking(self, should_block_weight: bool):
+        self.pack_vnni_B_locally = should_block_weight
 
     def codegen_init(
         self,
@@ -541,10 +545,66 @@ class CppMicroGemmAMX(CppMicroGemm):
     """
 
     TEMPLATE_ENTRY = r"""
+{%- if pack_vnni_B_locally %}
+{% if block_n == 16 or block_n == 48 %}
+// Interleave 2 rows of 16 16-bit elements into 2 rows
+inline void {{kernel_name}}_interleave2_256(
+    const {{input2_t}}* input0,
+    const {{input2_t}}* input1,
+    {{input2_t}}* output0,
+    {{input2_t}}* output1
+) {
+    auto row0 = _mm256_loadu_epi16(input0);
+    auto row1 = _mm256_loadu_epi16(input1);
+    auto tmp0 = _mm256_unpacklo_epi16(row0, row1);
+    auto tmp1 = _mm256_unpackhi_epi16(row0, row1);
+    auto res0 = _mm256_permute2x128_si256(tmp0, tmp1, 0x20);
+    auto res1 = _mm256_permute2x128_si256(tmp0, tmp1, 0x31);
+    _mm256_storeu_epi16(output0, res0);
+    _mm256_storeu_epi16(output1, res1);
+}
+{% elif block_n == 32 %}
+// Interleave 2 rows of 32 16-bit elements into 2 rows
+inline void {{kernel_name}}_interleave2_512(
+    const {{input2_t}}* input0,
+    const {{input2_t}}* input1,
+    {{input2_t}}* output0,
+    {{input2_t}}* output1
+) {
+    auto row0 = _mm512_loadu_epi16(input0);
+    auto row1 = _mm512_loadu_epi16(input1);
+    auto idx1 = _mm512_set_epi16( 47, 15, 46, 14, 45, 13, 44, 12, 43, 11, 42,
+        10, 41, 9, 40, 8, 39, 7, 38, 6, 37, 5, 36, 4, 35, 3, 34, 2, 33, 1, 32, 0 );
+    auto idx2 = _mm512_set_epi16(
+        47 + 16, 15 + 16, 46 + 16, 14 + 16, 45 + 16, 13 + 16, 44 + 16, 12 + 16,
+        43 + 16, 11 + 16, 42 + 16, 10 + 16, 41 + 16, 9 + 16, 40 + 16, 8 + 16,
+        39 + 16, 7 + 16, 38 + 16, 6 + 16, 37 + 16, 5 + 16, 36 + 16, 4 + 16,
+        35 + 16, 3 + 16, 34 + 16, 2 + 16, 33 + 16, 1 + 16, 32 + 16, 0 + 16 );
+    auto res0 = _mm512_mask_permutex2var_epi16(row0, 0xFFFFFFFF, idx1, row1 );
+    auto res1 = _mm512_mask_permutex2var_epi16(row0, 0xFFFFFFFF, idx2, row1 );
+    _mm512_storeu_epi16(output0, res0);
+    _mm512_storeu_epi16(output1, res1);
+}
+{%- endif %}
+{% if block_n == 48 %}
+// Interleave 2 rows of 48 16-bit elements into 2 rows
+inline void {{kernel_name}}_interleave2_48with256(
+    const {{input2_t}}* input0,
+    const {{input2_t}}* input1,
+    {{input2_t}}* output0,
+    {{input2_t}}* output1
+) {
+    {{kernel_name}}_interleave2_256(input0, input1, output0, output0 + 16);
+    {{kernel_name}}_interleave2_256(input0 + 16, input1 + 16, output0 + 32, output1);
+    {{kernel_name}}_interleave2_256(input0 + 32, input1 + 32, output1 + 16, output1 + 32);
+}
+{%- endif %}
+{%- endif %}
+
 {{declare_kernel}} {
     {{kernel.assert_function}}(N % {{block_n}} == 0, "N dimension must be multiple of {{block_n}}");
     {{kernel.assert_function}}(K % 2 == 0, "K dimension must be multiple of 2");
-{%- if pack_vnni_B %}
+{%- if pack_vnni_B_locally %}
     const auto packed_buf_size = K * {{block_n}};
     {%- if is_msvc_compiler %}
     // MSVC doesn't support stack-allocated dynamic-sized arrays, so using heap memory here.
@@ -553,13 +613,33 @@ class CppMicroGemmAMX(CppMicroGemm):
     {%- else %}
     alignas(4096) {{input2_t}} packed_B_buf[packed_buf_size];
     {%- endif %}
-    for (int indx_k = 0; indx_k < K; ++indx_k) {
-        for (int indx_n = 0; indx_n < N; indx_n += {{block_n}}) {
-            const int ind_packed_k = (indx_n % vnni_size) + k - (k % vnni_size);
-            const int ind_packed_n = (indx_n // vnni_size) + (N // vnni_size) * (indx_k % vnni_size);
-            packed_B_buf[indx_k * {{block_n}} + indx_n] = B[ind_packed_k * ldb + ind_packed_n];
+    auto pack_vnni_B = [&](int base_n_idx) {
+        for (int i = 0; i < K; i += {{vnni_size}}) {
+        {%- if vnni_size == 2 %}
+            {%- if block_n == 16 %}
+            {{kernel_name}}_interleave2_256(
+                B + base_n_idx + i * ldb,
+                B + base_n_idx + (i + 1) * ldb,
+                packed_B_buf + i * {{block_n}},
+                packed_B_buf + (i + 1) * {{block_n}});
+            {%- elif block_n == 32 %}
+            {{kernel_name}}_interleave2_512(
+                B + base_n_idx + i * ldb,
+                B + base_n_idx + (i + 1) * ldb,
+                packed_B_buf + i * {{block_n}},
+                packed_B_buf + (i + 1) * {{block_n}});
+            {%- elif block_n == 48 %}
+            {{kernel_name}}_interleave2_48with256(
+                B + base_n_idx + i * ldb,
+                B + base_n_idx + (i + 1) * ldb,
+                packed_B_buf + i * {{block_n}},
+                packed_B_buf + (i + 1) * {{block_n}});
+            {%- endif %}
+        {%- elif vnni_size == 4 %}
+        // TODO: Support vnni_size == 4
+        {%- endif %}
         }
-    }
+    };
 {%- endif %}
 {%- if use_cached_dequantized_B %}
     // Create a stack-allocated buffer for tiles of B.
@@ -580,11 +660,11 @@ class CppMicroGemmAMX(CppMicroGemm):
 
     auto load_dequantized_B = [&](int base_idx) {
         // Load a tile of B & cache it in L1D.
-{%- if pack_vnni_B %}
+    {%- if pack_vnni_B_locally %}
         {{input2_t}}* base_addr = const_cast<{{input2_t}}*>(B) + base_idx;
-{%- else %}
+    {%- else %}
         {{input2_t}}* base_addr = const_cast<{{input2_t}}*>(packed_B_buf) + base_idx;
-{%- endif %}
+    {%- endif %}
         for (int idx_dq = 0, idx_q = 0; idx_dq < buf_size; idx_q += ldb, idx_dq += {{block_n}}) {
         {%- for vec_idx in range(0, block_n - 1, 32) %}
             auto b_int8 = at::vec::Vectorized<int8_t>::loadu(
@@ -609,13 +689,16 @@ class CppMicroGemmAMX(CppMicroGemm):
     };
 {%- endif %}
 // The ldb would not be block_n if N != block_n
-{%- if use_cached_dequantized_B or pack_vnni_B %}
+{%- if use_cached_dequantized_B or pack_vnni_B_locally %}
     const int64_t updated_ldb = {{block_n}};
 {%- else %}
     const int64_t updated_ldb = ldb;
 {%- endif %}
     // TODO(jgong5): loop unroll for M and N
     for (int64_t n = 0; n < N; n += {{block_n}}) {
+{%- if pack_vnni_B_locally %}
+        pack_vnni_B(n);
+{%- endif %}
 {%- if use_cached_dequantized_B %}
         // Dequantize K * block_n int8 B elements into BF16
         load_dequantized_B(n);
@@ -633,7 +716,7 @@ class CppMicroGemmAMX(CppMicroGemm):
                     A + m * lda,
 {%- if use_cached_dequantized_B %}
                     dequantized_B_buf,
-{%- elif pack_vnni_B %}
+{%- elif pack_vnni_B_locally %}
                     packed_B_buf,
 {%- else %}
                     B + n,
@@ -655,7 +738,7 @@ class CppMicroGemmAMX(CppMicroGemm):
                     A + m_tail * lda,
 {%- if use_cached_dequantized_B %}
                     dequantized_B_buf,
-{%- elif pack_vnni_B %}
+{%- elif pack_vnni_B_locally %}
                     packed_B_buf,
 {%- else %}
                     B + n,
@@ -794,6 +877,7 @@ inline void {{kernel_name}}_amx_kernel_{{num_rows}}_{{num_columns}}(
             "declare_kernel": self.get_kernel_declaration(),
             "use_cached_dequantized_B": self.input_dtype == torch.bfloat16
             and self.input2_dtype == torch.int8,
+            "pack_vnni_B_locally": self.pack_vnni_B_locally,
             "kernel": kernel,
             "block_m": block_m,
             "block_n": block_n,

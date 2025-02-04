@@ -11,7 +11,6 @@ from ..select_algorithm import PartialRender
 from ..virtualized import V
 from .common import ArgName
 from .cpp_gemm_template import CppGemmTemplate, GEMM_TEMPLATE
-from .cpp_micro_gemm import LayoutType
 from .cpp_template_kernel import CppTemplateKernel
 from .cpp_utils import DTYPE_TO_CPP, GemmBlocking
 
@@ -126,11 +125,14 @@ class CppBmmTemplate(CppGemmTemplate):
 
     @staticmethod
     def check_if_block_weight(W, micro_gemm):
-        return micro_gemm.get_b_layout() != LayoutType.NORMAL or (
-            (not W.get_layout().is_contiguous() or W.get_name() in V.graph.constants)  # type: ignore[union-attr]
-            if isinstance(W, ir.IRNode)
-            else not W.is_contiguous()
+        assert isinstance(W, ir.IRNode)
+        _, n = W.get_size()[-2:]
+        result = (
+            not W.get_layout().is_contiguous()
+            or W.get_name() in V.graph.constants
+            or n % micro_gemm.register_blocking.block_n != 0
         )
+        return result
 
     def get_gemm_function_call(
         self,
