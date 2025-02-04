@@ -12,7 +12,7 @@ import itertools
 import os
 import threading
 from functools import partial
-from typing import Any, Callable, List, Optional, Tuple, Union
+from typing import Any, Callable, Optional, Union
 
 import torch
 from torch import Tensor
@@ -32,8 +32,8 @@ from torch.utils._pytree import (
 )
 
 
-in_dims_t = Union[int, Tuple]
-out_dims_t = Union[int, Tuple[int, ...]]
+in_dims_t = Union[int, tuple]
+out_dims_t = Union[int, tuple[int, ...]]
 
 
 def doesnt_support_saved_tensors_hooks(f):
@@ -52,7 +52,7 @@ def doesnt_support_saved_tensors_hooks(f):
 
 # Checks that all args-to-be-batched have the same batch dim size
 def _validate_and_get_batch_size(
-    flat_in_dims: List[Optional[int]], flat_args: List
+    flat_in_dims: list[Optional[int]], flat_args: list
 ) -> int:
     batch_sizes = [
         arg.size(in_dim)
@@ -69,7 +69,7 @@ def _validate_and_get_batch_size(
     return batch_sizes[0]
 
 
-def _num_outputs(batched_outputs: Union[Tensor, Tuple[Tensor, ...]]) -> int:
+def _num_outputs(batched_outputs: Union[Tensor, tuple[Tensor, ...]]) -> int:
     if isinstance(batched_outputs, tuple):
         return len(batched_outputs)
     return 1
@@ -81,7 +81,7 @@ def _num_outputs(batched_outputs: Union[Tensor, Tuple[Tensor, ...]]) -> int:
 
 def _as_tuple(
     value: Any, num_elements: int, error_message_lambda: Callable[[], str]
-) -> Tuple:
+) -> tuple:
     if not isinstance(value, tuple):
         return (value,) * num_elements
     if len(value) != num_elements:
@@ -90,8 +90,8 @@ def _as_tuple(
 
 
 def _process_batched_inputs(
-    in_dims: in_dims_t, args: Tuple, func: Callable
-) -> Tuple[int, List[Any], List[Any], TreeSpec]:
+    in_dims: in_dims_t, args: tuple, func: Callable
+) -> tuple[int, list[Any], list[Any], TreeSpec]:
     if not isinstance(in_dims, int) and not isinstance(in_dims, tuple):
         raise ValueError(
             f"vmap({_get_name(func)}, in_dims={in_dims}, ...)(<inputs>): "
@@ -152,8 +152,8 @@ def _process_batched_inputs(
 
 
 def _create_batched_inputs(
-    flat_in_dims: List[Any], flat_args: List[Any], vmap_level: int, args_spec
-) -> Tuple:
+    flat_in_dims: list[Any], flat_args: list[Any], vmap_level: int, args_spec
+) -> tuple:
     # See NOTE [Ignored _remove_batch_dim, _add_batch_dim]
     batched_inputs = [
         arg if in_dim is None else _add_batch_dim(arg, in_dim, vmap_level)
@@ -186,12 +186,12 @@ def _maybe_remove_batch_dim(name, batched_output, vmap_level, batch_size, out_di
 
 # Undos the batching (and any batch dimensions) associated with the `vmap_level`.
 def _unwrap_batched(
-    batched_outputs: Union[Tensor, Tuple[Tensor, ...]],
+    batched_outputs: Union[Tensor, tuple[Tensor, ...]],
     out_dims: out_dims_t,
     vmap_level: int,
     batch_size: int,
     func: Callable,
-) -> Tuple:
+) -> tuple:
     flat_batched_outputs, output_spec = tree_flatten(batched_outputs)
 
     def incompatible_error():
@@ -249,9 +249,12 @@ def _get_name(func: Callable):
     if hasattr(func, "__name__"):
         return func.__name__
 
-    # Not all callables have __name__, in fact, only static functions/methods do.
-    # A callable created via functools.partial or an nn.Module, to name some
-    # examples, don't have a __name__.
+    if isinstance(func, functools.partial):
+        return f"functools.partial({_get_name(func.func)}, ...)"
+
+    # Not all callables have __name__, in fact, only static functions/methods
+    # do.  A callable created via nn.Module, to name one example, doesn't have a
+    # __name__.
     return repr(func)
 
 

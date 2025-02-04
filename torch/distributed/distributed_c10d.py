@@ -15,7 +15,7 @@ import time
 import warnings
 from collections import namedtuple
 from datetime import timedelta
-from typing import Any, Callable, Dict, List, Optional, TYPE_CHECKING, Union
+from typing import Any, Callable, Optional, TYPE_CHECKING, Union
 from typing_extensions import deprecated
 
 import torch
@@ -259,18 +259,18 @@ class Backend(str):
 
     _BackendPlugin = namedtuple("_BackendPlugin", ["creator_fn", "extended_api"])
 
-    _plugins: Dict[str, _BackendPlugin] = {}
+    _plugins: dict[str, _BackendPlugin] = {}
 
     backend_list = [UNDEFINED, GLOO, NCCL, XCCL, UCC, MPI]
 
     # 3rd-party devices can register the default backend support here
-    default_device_backend_map: Dict[str, str] = {
+    default_device_backend_map: dict[str, str] = {
         "cpu": GLOO,
         "cuda": NCCL,
         "xpu": XCCL,
     }
 
-    backend_capability: Dict[str, List[str]] = {
+    backend_capability: dict[str, list[str]] = {
         GLOO: ["cpu", "cuda"],
         NCCL: ["cuda"],
         XCCL: ["xpu"],
@@ -278,7 +278,7 @@ class Backend(str):
         MPI: ["cpu", "cuda"],
     }
 
-    backend_type_map: Dict[str, ProcessGroup.BackendType] = {
+    backend_type_map: dict[str, ProcessGroup.BackendType] = {
         UNDEFINED: ProcessGroup.BackendType.UNDEFINED,
         GLOO: ProcessGroup.BackendType.GLOO,
         NCCL: ProcessGroup.BackendType.NCCL,
@@ -303,7 +303,7 @@ class Backend(str):
         name,
         func,
         extended_api=False,
-        devices: Optional[Union[str, List[str]]] = None,
+        devices: Optional[Union[str, list[str]]] = None,
     ) -> None:
         """
         Register a new backend with the given name and instantiating function.
@@ -371,7 +371,7 @@ class BackendConfig:
 
     def __init__(self, backend: Backend):
         """Init."""
-        self.device_backend_map: Dict[str, Backend] = {}
+        self.device_backend_map: dict[str, Backend] = {}
         backend = str(backend)
 
         if backend == Backend.UNDEFINED:
@@ -441,7 +441,7 @@ class BackendConfig:
             f"{device}:{backend}" for device, backend in self.device_backend_map.items()
         )
 
-    def get_device_backend_map(self) -> Dict[str, Backend]:
+    def get_device_backend_map(self) -> dict[str, Backend]:
         """Return backend map of the device."""
         return self.device_backend_map
 
@@ -572,14 +572,14 @@ class _CollOp:
 
 # DO NOT USE THESE FIELDS DIRECTLY.
 # Use them through the _world object to make sure the _world override mechanism
-_pg_map: Dict[ProcessGroup, tuple[str, Store]] = {}
-_pg_names: Dict[ProcessGroup, str] = {}
-_pg_group_ranks: Dict[ProcessGroup, Dict[int, int]] = {}
+_pg_map: dict[ProcessGroup, tuple[str, Store]] = {}
+_pg_names: dict[ProcessGroup, str] = {}
+_pg_group_ranks: dict[ProcessGroup, dict[int, int]] = {}
 # For a pg, it is a map from ProcessGroup to BackendConfig
-_pg_backend_config: Dict[ProcessGroup, str] = {}
+_pg_backend_config: dict[ProcessGroup, str] = {}
 _group_count = 0
-_tags_to_pg: Dict[str, List[ProcessGroup]] = {}
-_pg_to_tag: Dict[ProcessGroup, str] = {}
+_tags_to_pg: dict[str, list[ProcessGroup]] = {}
+_pg_to_tag: dict[ProcessGroup, str] = {}
 _backend: Optional[str] = None
 
 
@@ -595,7 +595,7 @@ class _World:
 
     def __init__(self) -> None:
         self._default_pg = None
-        self._pg_coalesce_state: Dict[ProcessGroup, List[_CollOp]] = {}
+        self._pg_coalesce_state: dict[ProcessGroup, list[_CollOp]] = {}
 
     @property
     def default_pg(self) -> Optional[ProcessGroup]:
@@ -612,7 +612,7 @@ class _World:
         self._default_pg = value
 
     @property
-    def pg_map(self) -> Dict[ProcessGroup, tuple[str, Store]]:
+    def pg_map(self) -> dict[ProcessGroup, tuple[str, Store]]:
         """
         Provide Mapping from ProcessGroup to backend name and store.
 
@@ -625,7 +625,7 @@ class _World:
         return _pg_map
 
     @property
-    def pg_names(self) -> Dict[ProcessGroup, str]:
+    def pg_names(self) -> dict[ProcessGroup, str]:
         """
         Process group's names, map from ProcessGroup to str.
 
@@ -635,7 +635,7 @@ class _World:
         return _pg_names
 
     @property
-    def pg_group_ranks(self) -> Dict[ProcessGroup, Dict[int, int]]:
+    def pg_group_ranks(self) -> dict[ProcessGroup, dict[int, int]]:
         """
         Process group's global rank to local rank mapping.
 
@@ -645,7 +645,7 @@ class _World:
         return _pg_group_ranks
 
     @property
-    def pg_backend_config(self) -> Dict[ProcessGroup, str]:
+    def pg_backend_config(self) -> dict[ProcessGroup, str]:
         """
         Process group's backend config.
 
@@ -671,27 +671,27 @@ class _World:
         _group_count = value
 
     @property
-    def tags_to_pg(self) -> Dict[str, List[ProcessGroup]]:
+    def tags_to_pg(self) -> dict[str, list[ProcessGroup]]:
         global _tags_to_pg
         return _tags_to_pg
 
     @property
-    def pg_to_tag(self) -> Dict[ProcessGroup, str]:
+    def pg_to_tag(self) -> dict[ProcessGroup, str]:
         global _pg_to_tag
         return _pg_to_tag
 
     @property
-    def pg_coalesce_state(self) -> Dict[ProcessGroup, List[_CollOp]]:
+    def pg_coalesce_state(self) -> dict[ProcessGroup, list[_CollOp]]:
         return self._pg_coalesce_state
 
     @property
-    def pg_config_info(self) -> List[Dict[str, Any]]:
+    def pg_config_info(self) -> list[dict[str, Any]]:
         """
         Return a list of dict with process groups and backends.
 
         Along with their unique IDs and configurations (types and ranks).
         """
-        config_info: List[Dict[str, Any]] = []
+        config_info: list[dict[str, Any]] = []
         default_pg_size = _get_group_size(None)
         for pg in self.pg_map.keys():
             ranks = self.pg_group_ranks[pg]
@@ -912,7 +912,7 @@ def _get_pg_default_device(group: Optional[ProcessGroup] = None) -> torch.device
         return rv
 
 
-def _device_capability(group: Optional[ProcessGroup] = None) -> List[str]:
+def _device_capability(group: Optional[ProcessGroup] = None) -> list[str]:
     """
     Return the device type(s) supported by ``group``.
 
@@ -1077,7 +1077,7 @@ def _get_global_rank(group, rank) -> int:
     return get_global_rank(group, rank)
 
 
-def get_process_group_ranks(group: ProcessGroup) -> List[int]:
+def get_process_group_ranks(group: ProcessGroup) -> list[int]:
     """
     Get all ranks associated with ``group``.
 
@@ -1103,7 +1103,7 @@ def _get_group_size_by_name(group_name: str) -> int:
     return group.size()
 
 
-def _resolve_group_name_by_ranks_and_tag(ranks: List[int], tag: str) -> str:
+def _resolve_group_name_by_ranks_and_tag(ranks: list[int], tag: str) -> str:
     # TODO(yifu): remove this function once ranks + tag is not a supported
     # identifier for process group for functional collectives.
     group = _find_pg_by_ranks_and_tag(tag, ranks)
@@ -1401,7 +1401,7 @@ def _get_process_group_uid(pg: ProcessGroup) -> int:
     return -1
 
 
-def _get_pg_config(group: Optional[ProcessGroup] = None) -> Dict[str, Any]:
+def _get_pg_config(group: Optional[ProcessGroup] = None) -> dict[str, Any]:
     """
     Return the pg configuration of the given process group.
 
@@ -1416,12 +1416,12 @@ def _get_pg_config(group: Optional[ProcessGroup] = None) -> Dict[str, Any]:
     }
 
 
-def _get_all_pg_configs() -> List[Dict[str, Any]]:
+def _get_all_pg_configs() -> list[dict[str, Any]]:
     """
     Return the pg configuration of all the process groups.
 
     """
-    config_info: List[Dict[str, Any]] = [
+    config_info: list[dict[str, Any]] = [
         _get_pg_config(pg) for pg in _world.pg_map.keys()
     ]
     return config_info
@@ -1811,7 +1811,7 @@ def _shutdown_backend(pg):
     except RuntimeError:
         pass
     if is_nccl_available() and isinstance(backend, ProcessGroupNCCL):
-        # explictly call shutdown to ensure that NCCL resources are released
+        # explicitly call shutdown to ensure that NCCL resources are released
         backend._shutdown()
 
 
@@ -1859,10 +1859,9 @@ def _new_process_group_helper(
             "created, please use a different group name"
         )
 
-    if device_id is not None and (device_id.index is None or device_id.type != "cuda"):
+    if device_id is not None and (device_id.index is None or device_id.type == "cpu"):
         raise ValueError(
-            "init_process_group device_id parameter must be a cuda device with an "
-            "id, e.g. cuda:0, not just cuda or cpu"
+            "init_process_group device_id parameter must be an accelerator with an index"
         )
 
     # Note: _new_process_group_helper is only called from init_process_group, which always provides a timeout value
@@ -2508,7 +2507,7 @@ class _IllegalWork(Work):
 
 class _CoalescingManager:
     def __init__(self) -> None:
-        self.works: List[Work] = []
+        self.works: list[Work] = []
 
     def append(self, work: Work):
         if work:
@@ -2608,7 +2607,7 @@ def _coalescing_manager(
         work.wait()  # type: ignore[possibly-undefined]
 
 
-def batch_isend_irecv(p2p_op_list: List[P2POp]) -> List[Work]:
+def batch_isend_irecv(p2p_op_list: list[P2POp]) -> list[Work]:
     """
     Send or Receive a batch of tensors asynchronously and return a list of requests.
 
@@ -2652,7 +2651,7 @@ def batch_isend_irecv(p2p_op_list: List[P2POp]) -> List[Work]:
     group = p2p_op_list[0].group
     device = p2p_op_list[0].tensor.device
 
-    def peer_kwarg(op: P2POp) -> Dict[str, int]:
+    def peer_kwarg(op: P2POp) -> dict[str, int]:
         key = "group_dst" if op.op == isend else "group_src"
         return {key: op.group_peer}
 
@@ -3055,7 +3054,7 @@ def all_gather_object(object_list, obj, group=None):
 @_exception_logger
 def gather_object(
     obj: Any,
-    object_gather_list: Optional[List[Any]] = None,
+    object_gather_list: Optional[list[Any]] = None,
     dst: Optional[int] = None,
     group: Optional[ProcessGroup] = None,
     group_dst: Optional[int] = None,
@@ -3179,7 +3178,7 @@ def gather_object(
 
 @_exception_logger
 def send_object_list(
-    object_list: List[Any],
+    object_list: list[Any],
     dst: Optional[int] = None,
     group: Optional[ProcessGroup] = None,
     device: Optional[torch.device] = None,
@@ -3278,7 +3277,7 @@ def send_object_list(
 
 @_exception_logger
 def recv_object_list(
-    object_list: List[Any],
+    object_list: list[Any],
     src: Optional[int] = None,
     group: Optional[ProcessGroup] = None,
     device: Optional[torch.device] = None,
@@ -3380,7 +3379,7 @@ def recv_object_list(
 
 @_exception_logger
 def broadcast_object_list(
-    object_list: List[Any],
+    object_list: list[Any],
     src: Optional[int] = None,
     group: Optional[ProcessGroup] = None,
     device: Optional[torch.device] = None,
@@ -3506,8 +3505,8 @@ def broadcast_object_list(
 
 @_exception_logger
 def scatter_object_list(
-    scatter_object_output_list: List[Any],
-    scatter_object_input_list: Optional[List[Any]] = None,
+    scatter_object_output_list: list[Any],
+    scatter_object_input_list: Optional[list[Any]] = None,
     src: Optional[int] = None,
     group: Optional[ProcessGroup] = None,
     group_src: Optional[int] = None,
@@ -3934,7 +3933,7 @@ def _validate_output_list_for_rank(my_rank, dst, gather_list):
 @_exception_logger
 def gather(
     tensor: torch.Tensor,
-    gather_list: Optional[List[torch.Tensor]] = None,
+    gather_list: Optional[list[torch.Tensor]] = None,
     dst: Optional[int] = None,
     group: Optional[ProcessGroup] = None,
     async_op: bool = False,
@@ -4014,7 +4013,7 @@ def gather(
 @_exception_logger
 def scatter(
     tensor: torch.Tensor,
-    scatter_list: Optional[List[torch.Tensor]] = None,
+    scatter_list: Optional[list[torch.Tensor]] = None,
     src: Optional[int] = None,
     group: Optional[ProcessGroup] = None,
     async_op: bool = False,
@@ -4658,7 +4657,7 @@ def _create_process_group_wrapper(
 
 # helper function for deterministically hashing a list of ranks to a unique
 # string
-def _hash_ranks_to_str(ranks: List[int]) -> str:
+def _hash_ranks_to_str(ranks: list[int]) -> str:
     rank_join: str = "_".join(map(str, ranks))
     # In case there is already a PG with the same rank composition
     unique_str = "_".join([rank_join, str(len(_world.pg_names))])
@@ -4666,7 +4665,7 @@ def _hash_ranks_to_str(ranks: List[int]) -> str:
 
 
 # Takes a list of ranks and computes an integer color
-def _process_group_color(ranks: List[int]) -> int:
+def _process_group_color(ranks: list[int]) -> int:
     # Convert list to tuple to make it hashable
     ranks = tuple(ranks)
     hash_value = hash(ranks)
@@ -5316,7 +5315,7 @@ def new_subgroups_by_enumeration(
     return cur_subgroup, subgroups
 
 
-def _find_pg_by_ranks_and_tag(tag: str, ranks: List[int]) -> Optional[ProcessGroup]:
+def _find_pg_by_ranks_and_tag(tag: str, ranks: list[int]) -> Optional[ProcessGroup]:
     if len(tag) > 0 and not tag.startswith("ptd:") and not tag.startswith("user:"):
         tag = f"user:{tag}"
 
@@ -5332,7 +5331,7 @@ def _find_pg_by_ranks_and_tag(tag: str, ranks: List[int]) -> Optional[ProcessGro
 
 
 def _find_or_create_pg_by_ranks_and_tag(
-    tag: str, ranks: List[int], stride: int
+    tag: str, ranks: list[int], stride: int
 ) -> ProcessGroup:
     assert (
         len(ranks) % stride == 0
