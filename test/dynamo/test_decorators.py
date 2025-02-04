@@ -211,6 +211,173 @@ class DecoratorTests(torch._dynamo.test_case.TestCase):
             def fn1(x):
                 return x.cos()
 
+    def test_mark_traceable_tensor_args(self):
+        @torch._dynamo.mark_traceable
+        def func(x, y, z):
+            torch._dynamo.graph_break()
+            return x * y + z
+
+        def fn(x, y):
+            # This mainly tests that tensor proxies are used correctly.
+            t0 = x + 1
+            t1 = func(x, y, t0)
+            t2 = t1 + y
+            return t0 * t2
+
+        x, y = torch.randn(10), torch.randn(10)
+        opt_fn = torch.compile(fn, fullgraph=True, backend="aot_eager")
+
+        ref = fn(x, y)
+        res = opt_fn(x, y)
+        self.assertEqual(ref, res)
+
+    def test_mark_traceable_pre_existing_dict(self):
+        @torch._dynamo.mark_traceable
+        def func(x, d):
+            torch._dynamo.graph_break()
+            return x * d["a"]
+
+        def fn(x, d):
+            t0 = func(x, d)
+            return t0 + 1
+
+        x = torch.randn(10)
+        d = {"a": 2}
+        opt_fn = torch.compile(fn, fullgraph=True, backend="aot_eager")
+
+        ref = fn(x, d)
+        res = opt_fn(x, d)
+        self.assertEqual(ref, res)
+
+    def test_mark_traceable_newly_constructed_dict(self):
+        @torch._dynamo.mark_traceable
+        def func(x, d):
+            torch._dynamo.graph_break()
+            return x * d["a"]
+
+        def fn(x):
+            d = {}
+            d["a"] = 2
+            t0 = func(x, d)
+            return t0 + 1
+
+        x = torch.randn(10)
+        opt_fn = torch.compile(fn, fullgraph=True, backend="aot_eager")
+
+        ref = fn(x)
+        res = opt_fn(x)
+        self.assertEqual(ref, res)
+
+    def test_mark_traceable_pre_existing_dict_with_side_effects(self):
+        @torch._dynamo.mark_traceable
+        def func(x, d):
+            torch._dynamo.graph_break()
+            return x * d["a"]
+
+        def fn(x, d):
+            d["a"] = 1
+            t0 = func(x, d)
+            return t0 + 1
+
+        x = torch.randn(10)
+        d0 = {"a": 0}
+        d1 = dict(d0)
+        opt_fn = torch.compile(fn, fullgraph=True, backend="aot_eager")
+
+        ref = fn(x, d0)
+        res = opt_fn(x, d1)
+        self.assertEqual(ref, res)
+        self.assertEqual(d0, d1)
+
+    def test_mark_traceable_tuple_and_sym_int_output(self):
+        @torch._dynamo.mark_traceable
+        def func(x):
+            torch._dynamo.graph_break()
+            return x + 1, x.size(0)
+
+        def fn(x):
+            t0, n = func(x)
+            return t0 * n
+
+        x = torch.randn(10)
+        opt_fn = torch.compile(fn, dynamic=True, fullgraph=True, backend="aot_eager")
+
+        ref = fn(x)
+        res = opt_fn(x)
+        self.assertEqual(ref, res)
+
+    def test_mark_traceable_pre_existing_pytree_arg(self):
+        class Point:
+            x: torch.Tensor
+            y: torch.Tensor
+
+            def __init__(self, x, y):
+                self.x = x
+                self.y = y
+
+        torch.utils._pytree.register_pytree_node(
+            Point,
+            lambda p: ((p.x, p.y), ()),
+            lambda xy, _: Point(xy[0], xy[1]),
+        )
+
+        @torch._dynamo.mark_traceable
+        def trace_me(p):
+            torch._dynamo.graph_break()
+            return p.x * p.y
+
+        def fn(p):
+            y = p.x + 2
+            res = trace_me(p)
+            y += p.y
+            return y * res
+
+        p = Point(torch.ones(10), torch.ones(1))
+        opt_fn = torch.compile(fn, fullgraph=True, backend="aot_eager")
+
+        ref = fn(p)
+        res = opt_fn(p)
+        self.assertEqual(ref, res)
+
+    def test_mark_traceable_newly_constructed_pytree_arg(self):
+        class Point:
+            x: torch.Tensor
+            y: torch.Tensor
+
+            def __init__(self, x, y):
+                self.x = x
+                self.y = y
+
+        torch.utils._pytree.register_pytree_node(
+            Point,
+            lambda p: ((p.x, p.y), ()),
+            lambda xy, _: Point(xy[0], xy[1]),
+        )
+
+        @torch._dynamo.mark_traceable
+        def trace_me(p):
+            torch._dynamo.graph_break()
+            return p.x * p.y
+
+        def fn(x, y):
+            p = Point(x, y)
+            y = p.x + 2
+            res = trace_me(p)
+            y += p.y
+            return y * res
+
+        x, y = torch.ones(10), torch.ones(1)
+        opt_fn = torch.compile(fn, fullgraph=True, backend="aot_eager")
+
+        ref = fn(x, y)
+        res = opt_fn(x, y)
+        self.assertEqual(ref, res)
+
+    # TODO
+    # - args with pytree.register_constant
+    # - custom class without pytree registration (error)
+    # - more cases......
+
     def test_graph_break(self):
         cnts = torch._dynamo.testing.CompileCounter()
 

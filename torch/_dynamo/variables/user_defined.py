@@ -1301,6 +1301,40 @@ class FrozenDataClassVariable(UserDefinedObjectVariable):
             fields = {}
         self.fields = fields
 
+    def reconstruct_to_python_object(self):
+        # TODO hack to enable experimenting on mark_traceable (need this to
+        # reconstruct input spec)
+        #
+        # Alternatives:
+        # 1. use `PyCodegen` to generate the bytecode, and invoke the function
+        #    to reconstruct the python objects.
+        # 2. ???
+        return self.as_python_constant()
+
+    def as_python_constant(self):
+        # TODO this isn't a safe impl in general because it likely abuses
+        # `as_python_constant` for purposes of `reconstruct_to_python_object`.
+        # However, I can't think of an easier way to get the prototype working.
+
+        # TODO (existing dynamo bug) `LeafSpec` has its own `__init__` whose
+        # arguments isn't inferrable from `fields(self.value)`. So the
+        # reconstruction mechanism below (and the `as_proxy` method) won't work.
+        if type(self.value) is torch.utils._pytree.LeafSpec:
+            return torch.utils._pytree._LEAF_SPEC
+
+        from dataclasses import fields
+
+        args = []
+        kwargs = {}
+        for field in fields(self.value):
+            data = self.fields[field.name].as_python_constant()
+            if hasattr(field, "kw_only") and field.kw_only:
+                kwargs[field.name] = data
+            elif hasattr(field, "init") and field.init:
+                args.append(data)
+
+        return self.python_type()(*args, **kwargs)
+
     def as_proxy(self):
         from dataclasses import fields
 

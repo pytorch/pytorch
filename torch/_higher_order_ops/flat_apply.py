@@ -97,7 +97,7 @@ def impl(func, in_spec, *flat_args):
     assert (
         isinstance(out, torch.Tensor)
         or isinstance(out, (tuple, list))
-        and all(isinstance(x, torch.Tensor) for x in out)
+        and all(map(is_graphable, out))
     )
     return out
 

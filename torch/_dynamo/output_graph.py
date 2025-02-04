@@ -728,6 +728,7 @@ class OutputGraph:
         self,
         target: Union[torch.nn.Module, torch.Tensor, Any],
         *names,
+        return_getattr_proxy=False,
         **options,
     ):
         if is_dynamic_nn_module(target, self.root_tx.export):
@@ -736,8 +737,10 @@ class OutputGraph:
             return VariableTracker.build(self.current_tx, target, **options)
 
         options = dict(options)
-        assert "source" in options
-        source = options["source"]
+        # This was too restrictive even without `mark_traceable`, it forces
+        # `invoke_and_store_as_constant` to pass in a constant source, although
+        # that never gets used, and we create a new constant source below...
+        source = options.get("source", None)
         assert not isinstance(source, ParamBufferSource)
 
         if isinstance(target, torch.Tensor):
@@ -823,6 +826,14 @@ class OutputGraph:
         else:
 
             def wrap_name(module_key):
+                # TODO short-cut hack for prototype
+                # the value was attached to the graph moduel via this line way below:
+                #   `self.nn_modules[name] = target`
+                if return_getattr_proxy:
+                    proxy = self.create_proxy("get_attr", module_key, (), {})
+                    set_example_value(proxy.node, target)
+                    return proxy
+
                 self.output.update_co_names(module_key)
                 self.global_scope[module_key] = target
                 return VariableTracker.build(
