@@ -155,7 +155,7 @@ class isin:
 
 
 class llist(isin, list):
-    pass
+    __slots__ = ()
 
 
 class ltuple(isin, tuple):
