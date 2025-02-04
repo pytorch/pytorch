@@ -10,7 +10,6 @@ import inspect
 import linecache
 import operator
 import os
-import random
 import re
 import sys
 import traceback
@@ -3145,7 +3144,6 @@ BUILTIN_SKIPLIST = (
     abc,
     collections,
     copy,
-    random,
     traceback,
     linecache,
     unittest,
