@@ -1,17 +1,6 @@
 # mypy: allow-untyped-defs
 import itertools
-from typing import (
-    Any,
-    Callable,
-    Dict,
-    Generic,
-    List,
-    Literal,
-    NamedTuple,
-    Optional,
-    TypeVar,
-    Union,
-)
+from typing import Any, Callable, Generic, Literal, NamedTuple, Optional, TypeVar, Union
 from typing_extensions import Protocol
 from unittest.mock import patch
 
@@ -90,7 +79,7 @@ class OpsHandler(Protocol[T]):
         """Produces a scalar constant of type dtype."""
         ...
 
-    def load_seed(self, name: str, offset: T):
+    def load_seed(self, name: str, offset: T) -> T:
         """Computes inductor_prims.lookup_seed."""
         ...
 
@@ -139,7 +128,7 @@ class OpsHandler(Protocol[T]):
         x: T,
         dtype: torch.dtype,
         src_dtype: Optional[torch.dtype] = None,
-        use_compute_types=True,
+        use_compute_types: bool = True,
     ) -> T:
         """
         Convert x to dtype.  src_dtype can be optionally set to specify what the original
@@ -206,7 +195,7 @@ class OpsHandler(Protocol[T]):
     ) -> sympy.Expr:
         """
         Convert an integral x into a sympy.Expr that can be subsequently used in
-        indexing computation.  'size' represents an upper bound on the what valid
+        indexing computation.  'size' represents an upper bound on what valid
         indexes can be; when 'check' is True, we check that the x is in bounds.
 
         NB: This is typically mandatory to implement for any analysis, because you
@@ -961,7 +950,7 @@ def _typecheck_AddParenHandler(h: AddParenHandler[T]) -> OpsHandler[T]:
 class OpCountResult(NamedTuple):
     num_ops: int
     used_ops: OrderedSet[str]
-    read_buffers: List[str]
+    read_buffers: list[str]
     nontrivial_read_count: int
 
 
@@ -974,7 +963,7 @@ class OpCounterCSE:
         self.op_count = 0
         self.var_names = {}
         self._used_ops = OrderedSet[str]()
-        self._read_names: List[str] = []
+        self._read_names: list[str] = []
         self._nontrivial_read_count = 0
 
     def __getattr__(self, name):
@@ -1076,7 +1065,7 @@ class SimpleCSEHandler(WrapperHandler[T]):
 
     def __init__(self, inner: OpsHandler[T]):
         super().__init__(inner)
-        self.cse_cache: Dict[str, Union[T, tuple[T, ...]]] = {}
+        self.cse_cache: dict[str, Union[T, tuple[T, ...]]] = {}
         self.mock = MockHandler()
 
     def indirect_indexing(self, *args, **kwargs) -> sympy.Expr:
