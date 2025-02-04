@@ -157,6 +157,7 @@ for test_name in [
     "test_signbit",
     "test_silu",
     "test_slice_scatter4",
+    "test_softmax",
     "test_sort",
     "test_sum_int",
     "test_sum_keepdims",
