@@ -1,3 +1,4 @@
+import dataclasses
 import inspect
 import logging
 import os
@@ -109,7 +110,9 @@ class FailureReport:
 
         elif self.failure_type == FailureType.CONSTRAINT_VIOLATION_ERROR:
             locals_info = (
-                prettify_frame_locals(**self.data["frame_locals"])
+                prettify_frame_locals(
+                    **dataclasses.asdict(self.data["frame_locals"])
+                )
                 if self.data["frame_locals"]
                 else ""
             )
@@ -128,7 +131,9 @@ class FailureReport:
 
         elif self.failure_type == FailureType.DATA_DEPENDENT_ERROR:
             locals_info = (
-                prettify_frame_locals(**self.data["frame_locals"])
+                prettify_frame_locals(
+                    **dataclasses.asdict(self.data["frame_locals"])
+                )
                 if self.data["frame_locals"]
                 else ""
             )

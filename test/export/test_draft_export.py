@@ -246,6 +246,9 @@ class TestDraftExport(TestCase):
         self.assertEqual(
             report.failures[0].failure_type, FailureType.DATA_DEPENDENT_ERROR
         )
+        frame_locals = report.failures[0].data["frame_locals"]
+        self.assertTrue("if v.item() > 10:" in frame_locals.loc)
+        self.assertEqual(list(frame_locals.locals), ["v"])
 
         inp = (torch.tensor(4), torch.tensor(2), torch.tensor(6))
         self.assertEqual(ep.module()(*inp), M()(*inp))
