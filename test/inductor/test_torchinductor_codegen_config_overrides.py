@@ -1,6 +1,6 @@
 # Owner(s): ["module: inductor"]
 import importlib
-from typing import Any, Callable, List, Optional
+from typing import Any, Callable, Optional
 
 import torch
 import torch.utils.pytree.python as pytree
@@ -55,7 +55,7 @@ class CodegenInductorTest(InductorTestCase):
 
         return result, code
 
-    def count_code(self, substr: str, code: List[str], expected: Optional[int]):
+    def count_code(self, substr: str, code: list[str], expected: Optional[int]):
         count = sum(prog.count(substr) for prog in code)
         if expected is not None:
             self.assertEqual(count, expected)

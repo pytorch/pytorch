@@ -2,7 +2,7 @@
 
 import functools
 import warnings
-from typing import Any, Callable, List, Optional, TYPE_CHECKING, TypeVar, Union
+from typing import Any, Callable, Optional, TYPE_CHECKING, TypeVar, Union
 from typing_extensions import deprecated, ParamSpec
 
 import torch
@@ -86,7 +86,7 @@ class FakeBackwardCFunction:
     def __init__(
         self,
         real: torch.autograd.function.BackwardCFunction,
-        saved_tensors: List[torch.Tensor],
+        saved_tensors: list[torch.Tensor],
     ) -> None:
         self.real = real
         self.saved_tensors = saved_tensors
@@ -104,7 +104,7 @@ class FakeBackwardCFunction:
 
 def call_backward(
     backward_c_function: torch.autograd.function.BackwardCFunction,
-    saved_tensors: List[torch.Tensor],
+    saved_tensors: list[torch.Tensor],
     *args: Any,
 ) -> Union[torch.Tensor, tuple[torch.Tensor, ...]]:
     fake = FakeBackwardCFunction(backward_c_function, saved_tensors)
@@ -116,6 +116,14 @@ def call_backward(
     return grads
 
 
+def normalize_as_list(x: Any) -> list[Any]:
+    if isinstance(x, tuple):
+        return list(x)
+    elif isinstance(x, list):
+        return x
+    return [x]
+
+
 def untyped_storage_size(x: torch.Tensor) -> int:
     return x.untyped_storage().size()
 
@@ -123,12 +131,12 @@ def untyped_storage_size(x: torch.Tensor) -> int:
 class FakeCompiledAutogradEngine:
     @staticmethod
     def queue_callback(
-        final_callbacks: List[Callable[[], None]], cb: Callable[[], None]
+        final_callbacks: list[Callable[[], None]], cb: Callable[[], None]
     ) -> None:
         final_callbacks.append(cb)
 
     @staticmethod
-    def exec_final_callbacks(final_callbacks: List[Callable[[], None]]) -> None:
+    def exec_final_callbacks(final_callbacks: list[Callable[[], None]]) -> None:
         i = 0
         while i < len(final_callbacks):
             cb = final_callbacks[i]
