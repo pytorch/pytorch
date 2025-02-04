@@ -22,15 +22,13 @@ import tempfile
 import textwrap
 import time
 import unittest
+from collections.abc import Iterator, Mapping, MutableMapping
 from datetime import datetime
 from io import StringIO
 from typing import (
     Any,
     Callable,
     Generic,
-    Iterator,
-    Mapping,
-    MutableMapping,
     NamedTuple,
     Optional,
     Protocol,

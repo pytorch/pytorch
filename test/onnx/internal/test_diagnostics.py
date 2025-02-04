@@ -6,7 +6,7 @@ import dataclasses
 import io
 import logging
 import typing
-from typing import AbstractSet, Protocol
+from typing import Protocol
 
 import torch
 from torch.onnx import errors
@@ -19,6 +19,7 @@ from torch.testing._internal import common_utils, logging_utils
 
 if typing.TYPE_CHECKING:
     import unittest
+    from collections.abc import Set as AbstractSet
 
 
 class _SarifLogBuilder(Protocol):

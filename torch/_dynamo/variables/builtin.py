@@ -10,8 +10,8 @@ import operator
 import types
 import typing
 from collections import defaultdict, OrderedDict
-from collections.abc import KeysView
-from typing import Callable, Sequence, TYPE_CHECKING, Union
+from collections.abc import KeysView, Sequence
+from typing import Callable, TYPE_CHECKING, Union
 
 import torch
 from torch import sym_float, sym_int

@@ -1,8 +1,9 @@
 # mypy: ignore-errors
 
 import collections
+from collections.abc import Sequence
 from enum import Enum
-from typing import Any, Callable, Optional, Sequence, TYPE_CHECKING
+from typing import Any, Callable, Optional, TYPE_CHECKING
 
 from .. import variables
 from ..current_scope_id import current_scope_id

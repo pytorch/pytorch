@@ -10,7 +10,7 @@ Python polyfills for common builtins.
 
 from collections.abc import MutableMapping, Sequence
 from itertools import repeat as _repeat
-from typing import Any, Callable, List, TYPE_CHECKING
+from typing import Any, Callable, TYPE_CHECKING
 
 import torch
 

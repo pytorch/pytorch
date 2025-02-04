@@ -2,7 +2,7 @@
 import functools
 from contextlib import contextmanager, ExitStack
 from dataclasses import dataclass
-from typing import Any, Callable, List, Optional, Tuple, Union
+from typing import Any, Callable, Optional, Union
 
 import torch
 import torch.fx.traceback as fx_traceback
@@ -173,7 +173,7 @@ def _detect_input_alias(gm: torch.fx.GraphModule) -> bool:
 
 
 # The invariant here is that we always trace the branch with fake tensor
-def _maybe_fake_tracing(fn, inputs: List[Any], pre_dispatch):
+def _maybe_fake_tracing(fn, inputs: list[Any], pre_dispatch):
     fake_mode = detect_fake_mode(inputs)
     tracing_mode = "real"
     if fake_mode is None:
@@ -554,8 +554,8 @@ def validate_subgraph_args_types(lifted_args: Union[tuple[Any, ...], list[Any]])
 
 def check_input_alias_and_mutation(
     gm: torch.fx.GraphModule,
-    fake_args: List[FakeTensor],
-) -> Tuple[List[int], dict[int, int], dict[int, int], dict[int, int]]:
+    fake_args: list[FakeTensor],
+) -> tuple[list[int], dict[int, int], dict[int, int], dict[int, int]]:
     with disable_proxy_modes_tracing():
         """This function returns mutated inputs, inp-inp alias, inp-out alias, out-out alias
         in the graph module gm. It checks whether input tensor versions have
