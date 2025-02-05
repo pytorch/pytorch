@@ -232,6 +232,25 @@ class TestFixedConfigs(TestCase):
         args = [torch.randn(x, r, device="cuda")]
         self._check(fn, args, persistent=persistent, cfg=cfg)
 
+    @parametrize("persistent", [True, False])
+    def test_min_max_non_power_of_2_rsplit(self, persistent):
+        def fn(x):
+            return torch.amin(x, dim=-1), torch.amax(x, dim=-1)
+
+        cfg = {"XBLOCK": 2, "RSPLIT": 33, "num_warps": 8}
+        if not persistent:
+            cfg["R0_BLOCK"] = 32
+
+        args = [
+            torch.stack(
+                [
+                    torch.arange(10, 4096, device="cuda"),
+                    -torch.arange(10, 4096, device="cuda"),
+                ]
+            )
+        ]
+        self._check(fn, args, persistent=persistent, cfg=cfg)
+
     @parametrize("persistent", [False, True])
     @parametrize("rsplit", [32, 33])
     def test_fixed_config_with_larger_xblock_than_xnumel(self, persistent, rsplit):

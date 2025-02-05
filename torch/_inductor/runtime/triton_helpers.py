@@ -660,13 +660,11 @@ def constexpr_next_power_of_2(
 
 
 @triton_builtin
-def zero_other(ptr: Any, mask: Any, *, _builder: object = None) -> tl.constexpr:
+def if_mask(mask: Any, val, *, _builder: object = None) -> tl.constexpr:
     """
     Work around triton compile error: `ValueError: `other` cannot be provided without `mask``
-    A compile-time to check to return either 0 or None depending on the value of mask.
+    A compile-time to check to return either `val` or `None` depending on the value of mask.
     """
     if isinstance(mask, tl.constexpr) and mask.value is None:
         return tl.constexpr(None)
-    if isinstance(ptr, tl.core.tensor) and ptr.dtype.is_floating():
-        return tl.constexpr(0.0)
-    return tl.constexpr(0)
+    return val
