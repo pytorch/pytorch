@@ -103,7 +103,7 @@ def mps_ops_grad_modifier(ops):
 
         # CPU errors
         # derivative for zeta is not implemented
-        'special.zeta': None
+        'special.zeta': None,
         # derivative for aten::nextafter is not implemented on CPU
         'nextafter': None,
         # derivative for aten::floor_divide is not implemented on CPU
