@@ -355,6 +355,10 @@ class MetalOverrides(OpOverrides):
         cast_b = f"static_cast<decltype({a}+{b})>({b})"
         return f"metal::pow({cast_a}, {cast_b})"
 
+    @staticmethod
+    def zeta(a: CSEVariable, b: CSEVariable) -> str:
+        return f"c10::metal::zeta({a}, {b})"
+
 
 MetalOverrides._initialize_pointwise_overrides("mps")
 

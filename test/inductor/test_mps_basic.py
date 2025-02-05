@@ -104,6 +104,13 @@ class MPSBasicTests(TestCase):
     def test_pointwise_digamma(self):
         self.common(torch.special.digamma, (torch.rand(128, 128),), check_lowp=False)
 
+    def test_pointwise_zeta(self):
+        self.common(
+            torch.special.zeta,
+            (torch.rand(128, 128), torch.rand(128, 128)),
+            check_lowp=False,
+        )
+
     def test_broadcast(self):
         self.common(torch.add, (torch.rand(32, 1024), torch.rand(1024)))
 

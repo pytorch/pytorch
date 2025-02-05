@@ -1,3 +1,4 @@
+#include <c10/metal/special_math.h>
 #include <metal_stdlib>
 using namespace metal;
 
@@ -227,3 +228,28 @@ kernel void complex_kernel(
 
 REGISTER_COMPLEX_OUT_OP(float);
 REGISTER_COMPLEX_OUT_OP(half);
+
+template <typename T>
+kernel void zeta(
+    constant void* input_ [[buffer(0)]],
+    constant void* other_ [[buffer(1)]],
+    device void* out_ [[buffer(2)]],
+    constant uint3* offsets [[buffer(3)]],
+    uint tid [[thread_position_in_grid]]) {
+  device T* out = (device T*)((device uint8_t*)out_ + offsets[tid].x);
+  constant T* input = (constant T*)((constant uint8_t*)input_ + offsets[tid].y);
+  constant T* other = (constant T*)((constant uint8_t*)other_ + offsets[tid].z);
+
+  *out = static_cast<T>(c10::metal::zeta(*input, *other));
+}
+
+#define REGISTER_ZETA_OP(DTYPE)                                   \
+  template [[host_name("zeta_" #DTYPE)]] kernel void zeta<DTYPE>( \
+      constant void* input_ [[buffer(0)]],                        \
+      constant void* other_ [[buffer(1)]],                        \
+      device void* out_ [[buffer(2)]],                            \
+      constant uint3* offsets [[buffer(3)]],                      \
+      uint tid [[thread_position_in_grid]]);
+
+REGISTER_ZETA_OP(float);
+REGISTER_ZETA_OP(half);

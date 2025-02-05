@@ -13463,7 +13463,7 @@
   python_module: special
   variants: function
   dispatch:
-    CPU, CUDA: special_zeta_out
+    CPU, CUDA, MPS: special_zeta_out
   tags: pointwise
 
 - func: special_zeta.self_scalar_out(Scalar self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)

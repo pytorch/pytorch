@@ -109,10 +109,16 @@ static void nextafter_mps_kernel(TensorIteratorBase& iter) {
   mps::binary_mps_impl(iter, "nextafter_kernel");
 }
 
+static void zeta_mps_kernel(TensorIteratorBase& iter) {
+  TORCH_CHECK_TYPE(isFloatingType(iter.common_dtype()), "zeta_mps not implemented for non-floating types");
+  mps::binary_mps_impl(iter, "zeta");
+}
+
 REGISTER_DISPATCH(fmax_stub, &fmax_mps_kernel)
 REGISTER_DISPATCH(fmin_stub, &fmin_mps_kernel)
 REGISTER_DISPATCH(copysign_stub, &copysign_mps_kernel)
 REGISTER_DISPATCH(nextafter_stub, &nextafter_mps_kernel)
+REGISTER_DISPATCH(zeta_stub, &zeta_mps_kernel)
 
 Tensor& polar_out_mps(const Tensor& abs, const Tensor& angle, Tensor& output) {
   auto new_size = at::infer_size(abs.sizes(), angle.sizes());
