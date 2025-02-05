@@ -36,7 +36,7 @@ def onnx_impl(
 
     if isinstance(target, torch._ops.OpOverloadPacket):
         raise TypeError(
-            "Please provide an overload instead of an OpOverloadPacket. "
+            "Please provide an OpOverload instead of an OpOverloadPacket. "
             "You can get the default overload with torch.ops.aten.<op>.default."
         )
 
@@ -72,6 +72,7 @@ def onnx_impl(
                         fx_target=t,
                         signature=None,
                         is_complex=complex,
+                        skip_signature_inference=no_compile,
                     )
                 )
         return processed_func  # type: ignore[return-value]

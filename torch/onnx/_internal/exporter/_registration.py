@@ -36,9 +36,11 @@ class OnnxDecompMeta:
 
     onnx_function: The onnx-script function from torchlib.
     fx_target: The PyTorch node callable target.
+    signature: The ONNX signature of the function. When None, the signature is inferred.
     is_custom: Whether the function is a custom function.
     is_complex: Whether the function is a function that handles complex valued inputs.
     device: The device the function is registered to. If None, it is registered to all devices.
+    skip_signature_inference: Whether to skip signature inference for the function.
     """
 
     onnx_function: Callable
@@ -47,9 +49,10 @@ class OnnxDecompMeta:
     is_custom: bool = False
     is_complex: bool = False
     device: Literal["cuda", "cpu"] | str | None = None  # noqa: PYI051
+    skip_signature_inference: bool = False
 
     def __post_init__(self) -> None:
-        if self.signature is None:
+        if self.signature is None and not self.skip_signature_inference:
             try:
                 if isinstance(self.onnx_function, onnxscript.OnnxFunction):
                     signature = _schemas.OpSignature.from_function(  # type: ignore[attr-defined]
@@ -150,6 +153,12 @@ class ONNXRegistry:
             function: The onnx-script function to register.
             is_complex: Whether the function is a function that handles complex valued inputs.
         """
+        if isinstance(target, torch._ops.OpOverloadPacket):
+            raise TypeError(
+                "Please provide an OpOverload instead of an OpOverloadPacket. "
+                "You can get the default overload with torch.ops.aten.<op>.default."
+            )
+
         self._register(
             target,
             OnnxDecompMeta(
