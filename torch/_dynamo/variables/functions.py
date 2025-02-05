@@ -24,7 +24,6 @@ from ..exc import (
     ObservedGeneratorExit,
     ObservedUserStopIteration,
     raise_observed_exception,
-    SideEffectsError,
     SkipFrame,
     unimplemented,
     Unsupported,
@@ -480,11 +479,11 @@ class LocalGeneratorObjectVariable(VariableTracker):
         except InfiniteGeneratorError:
             # test/dynamo/test_misc.py::test_iterator_limit
             raise
-        except SideEffectsError:
-            raise
         except Unsupported as e:
             torch._C._dynamo.eval_frame.skip_code(self.get_code())
             raise SkipFrame from e
+        finally:
+            counters["unimplemented"] |= counters["inline_call"]
 
     def has_unpack_var_sequence(self, tx):
         return False
