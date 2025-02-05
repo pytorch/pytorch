@@ -72,7 +72,7 @@ at::Tensor InputMetadata::maybe_reduce(
           shape_as_dim_vector(),
           incompatible_shape_error_message(i, grad).str());
       // Should be a no-op if the shapes are actually the same
-      return reduce_grad(grad);
+      return at::symint::sum_to_size<c10::SymInt>(grad, shape_as_dim_vector());
     }
     if (is_same_shape(grad)) {
       return grad;

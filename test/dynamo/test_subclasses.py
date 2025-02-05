@@ -3035,6 +3035,18 @@ class GraphModule(torch.nn.Module):
         values = torch.randn(10, 5).requires_grad_(True)
         self._validate_compile(fn, arg_fn=lambda: (values,))
 
+    def test_in_graph_construction_from_intermediate_6(self):
+        # This is a failure case similar to case 5 above except it happens naturally
+        def fn(values, lengths):
+            offsets = torch.cat([lengths.new_zeros(1), lengths.cumsum(0)])
+            nt = torch.nested.nested_tensor_from_jagged(values, offsets)
+            nt2 = torch.nested.nested_tensor_from_jagged(values, offsets.clone())
+            return (nt * nt2).sin()
+
+        values = torch.randn(9, 5, requires_grad=True)
+        lengths = torch.tensor([2, 4, 3])
+        self._validate_compile(fn, arg_fn=lambda: (values, lengths))
+
     #
     # Case 3: in-graph construction where offsets are both direct graph inputs
     #         and passed in as part of an NJT's offsets.
