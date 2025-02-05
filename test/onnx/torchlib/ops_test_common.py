@@ -35,7 +35,7 @@ import pytest
 from onnxscript import ir
 
 import torch
-from torch.onnx._internal.exporter import _building, _ir_passes, _tensors
+from torch.onnx._internal.exporter import _building, _constants, _ir_passes, _tensors
 from torch.testing._internal.opinfo import core as opinfo_core
 
 
@@ -60,7 +60,6 @@ FLOAT_TYPES = (
     torch.float64,
 )
 
-TEST_OPSET_VERSION = 18
 IS_MACOS = sys.platform.startswith("darwin")
 IS_WINDOWS = os.name == "nt"
 
@@ -508,10 +507,10 @@ def graph_executor(
             (),
             (),
             nodes=(),
-            opset_imports={"": 18, "pkg.torch.onnx": 1},
+            opset_imports={"": _constants.TORCHLIB_OPSET, "pkg.torch.onnx": 1},
             name="main_graph",
         )
-        opset = onnxscript.opset18
+        opset = onnxscript.values.Opset("", _constants.TORCHLIB_OPSET)
         tracer = _building.OpRecorder(opset, {})
         ort_inputs = {}
         onnxscript_args: list[Any] = []
