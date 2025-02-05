@@ -1340,11 +1340,7 @@ def load(
         ...     weights_only=True,
         ... )  # type: ignore[attr-defined]
         # Map tensors from GPU 1 to GPU 0
-        >>> torch.load(
-        ...     "tensors.pt",
-        ...     map_location={"cuda:1": "cuda:0"},
-        ...     weights_only=True,
-        ... )
+        >>> torch.load("tensors.pt", map_location={"cuda:1": "cuda:0"}, weights_only=True)
         # Load tensor from io.BytesIO object
         # Loading from a buffer setting weights_only=False, warning this can be unsafe
         >>> with open("tensor.pt", "rb") as f:
