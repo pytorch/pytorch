@@ -64,10 +64,6 @@ env:
   MSVC_VERSION: latest
   BUILD_TYPE: release
 
-permissions:
-  id-token: write
-  contents: read
-
 jobs:
   build:
     # Don't run on forked repos.
@@ -76,6 +72,9 @@ jobs:
     timeout-minutes: 240
     outputs:
       test-matrix: ${{ steps.filter.outputs.test-matrix }}
+    permissions:
+      id-token: write
+      contents: read
     defaults:
       run:
         shell: bash
