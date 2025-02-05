@@ -18,7 +18,6 @@ from typing import Any, Callable, Optional, Union
 from weakref import WeakSet
 
 import torch._logging.structured
-from torch._guards import CompileId
 from torch._utils_internal import log_trace_structured_event
 from torch.utils._traceback import CapturedTraceback
 
@@ -1172,7 +1171,6 @@ def trace_structured(
     suppress_context: bool = False,
     expect_trace_id: bool = True,  # Whether or not we expect to have a current trace id
     record_logging_overhead: bool = True,  # Whether or not to record the time spent on structured logging
-    compile_id: Optional[CompileId] = None,  # Optional if unavailable in the trace
 ) -> None:
     """
     metadata is an arbitrary JSON compatible struct, but it's expected to not be
@@ -1208,14 +1206,19 @@ def trace_structured(
                 record["rank"] = dist.get_rank()
 
             trace_id = torch._guards.CompileContext.current_trace_id()
-            if expect_trace_id and trace_id is None and compile_id is None:
+            is_compile_time = True
+            if not trace_id:
+                trace_id = torch._dynamo.utils.RuntimeCompileContext.current_trace_id()
+                is_compile_time = False
+
+            if expect_trace_id and trace_id is None and is_compile_time:
                 # Record the stack of the log call to better diagnose why we
                 # don't have a frame id for it
                 record["stack"] = torch._logging.structured.from_traceback(
                     CapturedTraceback.extract(skip=1).summary()
                 )
             else:
-                cid = trace_id.compile_id if trace_id else compile_id
+                cid = trace_id.compile_id if trace_id else None
                 if cid is not None:
                     if cid.compiled_autograd_id is not None:
                         record["compiled_autograd_id"] = cid.compiled_autograd_id

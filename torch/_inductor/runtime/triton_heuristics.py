@@ -705,8 +705,7 @@ class CachingAutotuner(KernelInterface):
             "CachingAutotuner.benchmark_all_configs",
             log_pt2_compile_event=True,
             metadata={"kernel_name": self.inductor_meta.get("kernel_name")},
-            # TODO(masnesral): Enable this when we figure out how to get the CompileId:
-            # dynamo_compile_runtime_column_us="runtime_triton_autotune_time_us",
+            dynamo_compile_column_us="runtime_triton_autotune_time_us",
         ):
             timings = {
                 launcher: self.bench(launcher, *args, **kwargs)

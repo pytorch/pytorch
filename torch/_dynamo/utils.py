@@ -63,7 +63,7 @@ from torch._C import (
 )
 from torch._dispatch.python import enable_python_dispatcher
 from torch._dynamo.metrics_context import MetricsContext, RuntimeMetricsContext
-from torch._guards import CompileId, Source, TracingContext
+from torch._guards import CompileId, Source, TraceId, TracingContext
 from torch._subclasses.meta_utils import is_sparse_compressed
 from torch._utils_internal import (
     justknobs_check,
@@ -573,9 +573,6 @@ def dynamo_timed(
     log_pt2_compile_event: bool = False,
     metadata: Optional[dict[str, object]] = None,
     dynamo_compile_column_us: Optional[str] = None,
-    dynamo_compile_runtime_column_us: Optional[str] = None,
-    compile_id: Optional[CompileId] = None,
-    is_forward: Optional[bool] = None,
     log_waitcounter: bool = False,
 ) -> Generator[Any, None, None]:
     """
@@ -611,22 +608,11 @@ def dynamo_timed(
     - dynamo_compile_column_us: If provided, updates the specified CompilationMetrics
       field to be logged to dyname_compile column. We expect all columns to be _us;
       therefore, the field name must end with "_us".
-    - dynamo_compile_runtime_column_us: Like 'dynamo_compile_column_us', but should
-      be used for those columns captured outside of a compile context, e.g.,
-      runtime autotuning.
-    - compile_id: In the typical case, this parameter should not be needed. Use to
-      supply the compile_id for those cases where we want to log a compile_id where
-      it's not naturally available, e.g., for runtime autotuning.
-    - is_forward: Optionally set an is_forward field for those logging destinations
-      that support it.
     - log_waitcounter: If set, we'll log a waitcounter of the form "pytorch.dynamo_timed.{key}"
     """
     # We're standardizing on microseconds for dynamo_compile timings.
     if dynamo_compile_column_us is not None:
         assert dynamo_compile_column_us.endswith("_us")
-
-    # Only one of these should be set.
-    assert dynamo_compile_column_us is None or dynamo_compile_runtime_column_us is None
 
     if phase_name:
         event_name = phase_name
@@ -643,13 +629,11 @@ def dynamo_timed(
         event_metadata.update(metadata)
     if fn_name:
         event_metadata.update({"fn_name": fn_name})
-    if is_forward is not None:
-        event_metadata.update({"is_backward": not is_forward})
 
     chromium_log: ChromiumEventLogger = get_chromium_event_logger()
     start_ns = time.time_ns()
     chromium_log.log_event_start(
-        event_name, start_ns, event_metadata, log_pt2_compile_event, compile_id
+        event_name, start_ns, event_metadata, log_pt2_compile_event
     )
 
     try:
@@ -664,14 +648,9 @@ def dynamo_timed(
         time_spent_ns = end_ns - start_ns
         compilation_time_metrics[key].append(time_spent_ns / 1e9)
         chromium_log.log_event_end(
-            event_name, end_ns, {}, start_ns, log_pt2_compile_event, compile_id
+            event_name, end_ns, {}, start_ns, log_pt2_compile_event
         )
         if dynamo_compile_column_us:
-            metrics_context = get_metrics_context()
-            if metrics_context.in_progress():
-                metrics_context.increment(
-                    dynamo_compile_column_us, time_spent_ns // 1000
-                )
             # TODO: the events that we capture in calculate_time_spent() seem a little
             # arbitrary. Currently, it's only those fields that are present in
             # CompilationMetrics (but note that we accumulate by the associated event
@@ -679,17 +658,17 @@ def dynamo_timed(
             # this way?
             cumulative_time_spent_ns[event_name] += time_spent_ns
 
-        if dynamo_compile_runtime_column_us:
-            get_runtime_metrics_context().increment(
-                dynamo_compile_runtime_column_us,
-                time_spent_ns // 1000,
-                extra={
-                    "compile_id": compile_id,
-                    "is_runtime": True,
-                    "is_forward": is_forward,
-                },
-            )
-            cumulative_time_spent_ns[event_name] += time_spent_ns
+            is_runtime = torch._guards.CompileContext.try_get() is None
+            if is_runtime:
+                get_runtime_metrics_context().increment(
+                    dynamo_compile_column_us, time_spent_ns // 1000
+                )
+            else:
+                metrics_context = get_metrics_context()
+                if metrics_context.in_progress():
+                    metrics_context.increment(
+                        dynamo_compile_column_us, time_spent_ns // 1000
+                    )
 
 
 @overload
@@ -1258,8 +1237,6 @@ class CompilationMetrics:
         all_metrics["inductor_fx_remote_cache_miss_keys"] = collection_to_str(
             all_metrics.get("inductor_fx_remote_cache_miss_keys")
         )
-        compile_id = all_metrics.get("compile_id")
-        all_metrics["compile_id"] = str(compile_id) if compile_id else None
 
         return cls(**all_metrics)
 
@@ -1318,6 +1295,60 @@ def add_compilation_metrics_to_chromium(c: CompilationMetrics) -> None:
         has_guarded_code=c.has_guarded_code,
         dynamo_config=c.dynamo_config,
     )
+
+
+class RuntimeCompileContext:
+    """
+    For tracking compile-time information that we want available at runtime,
+    e.g., to allow us to query and log at runtime the CompileId active when
+    a module was compiled.
+    """
+
+    @staticmethod
+    def get() -> RuntimeCompileContext:
+        assert _TLS.runtime_compile_context is not None
+        return _TLS.runtime_compile_context
+
+    @staticmethod
+    def try_get() -> Optional[RuntimeCompileContext]:
+        return getattr(_TLS, "runtime_compile_context", None)
+
+    def __init__(self, trace_id: Optional[TraceId]):
+        self.trace_id = trace_id
+
+    @staticmethod
+    def current_trace_id() -> Optional[TraceId]:
+        ctx = RuntimeCompileContext.try_get()
+        return None if ctx is None else ctx.trace_id
+
+    @staticmethod
+    def current_compile_id() -> Optional[CompileId]:
+        trace_id = RuntimeCompileContext.current_trace_id()
+        return None if trace_id is None else trace_id.compile_id
+
+
+_TLS = threading.local()
+
+
+@contextmanager
+def runtime_compile_context(context: Optional[RuntimeCompileContext]):
+    old_context = getattr(_TLS, "runtime_compile_context", None)
+    _TLS.runtime_compile_context = context
+    try:
+        yield context
+    finally:
+        _TLS.runtime_compile_context = old_context
+
+
+def _current_compile_id() -> Optional[CompileId]:
+    """
+    If a CompileContext is active, return its compile_id. Otherwise, return the
+    compile_id of the current RuntimeCompileContext.
+    """
+    compile_id = torch._guards.CompileContext.current_compile_id()
+    if compile_id is not None:
+        return compile_id
+    return RuntimeCompileContext.current_compile_id()
 
 
 def _scrubbed_inductor_config_for_logging() -> Optional[str]:
@@ -1383,14 +1414,12 @@ def record_compilation_metrics(
         inductor_fx_remote_cache_backend_type = None
         remote_cache_version = None
 
-    # Populate the compile_id from the metrics context if it's set. Otherwise,
-    # look for it in the current compile context.
-    compile_id = metrics.get("compile_id")
-    if not compile_id:
-        compile_id = torch._guards.CompileContext.current_compile_id()
+    compile_id = _current_compile_id()
+    is_runtime = torch._guards.CompileContext.try_get() is None
 
     common_metrics = {
-        "compile_id": compile_id,
+        "compile_id": str(compile_id) if compile_id else None,
+        "is_runtime": is_runtime,
         "start_time_us": start_time_ns // 1000,
         "end_time_us": end_time_ns // 1000,
         "duration_us": (end_time_ns - start_time_ns) // 1000,
@@ -1426,10 +1455,6 @@ def record_compilation_metrics(
         # without making it inconsistent with compilation metrics itself, so
         # we ignore the (hopefully small) time spent logging compilation metrics
         record_logging_overhead=False,
-        # These may be runtime logs, e.g., runtime autotunning, so we provide
-        # the CompileId from the compilation metrics in case it's not available
-        # in the current trace.
-        compile_id=compile_id,
     )
 
     # If there's a chromium event in flight, add the CompilationMetrics to it.
@@ -1586,7 +1611,6 @@ class ChromiumEventLogger:
         time_ns: int,
         metadata: dict[str, Any],
         log_pt2_compile_event: bool = False,
-        compile_id: Optional[CompileId] = None,
     ) -> None:
         """
         Logs the start of a single event.
@@ -1594,9 +1618,8 @@ class ChromiumEventLogger:
         :param time_ns Timestamp in nanoseconds
         :param metadata: Any extra metadata associated with this event
         :param log_pt2_compile_event: If True, log to pt2_compile_events
-        :param compile_id: Explicit compile_id (rather than using the current context)
         """
-        compile_id = compile_id or torch._guards.CompileContext.current_compile_id()
+        compile_id = _current_compile_id()
         metadata["compile_id"] = str(compile_id)
         self._log_timed_event(
             event_name,
@@ -1627,7 +1650,6 @@ class ChromiumEventLogger:
         metadata: dict[str, Any],
         start_time_ns: int,
         log_pt2_compile_event: bool,
-        compile_id: Optional[CompileId] = None,
     ) -> None:
         """
         Logs the end of a single event. This function should only be
@@ -1637,9 +1659,8 @@ class ChromiumEventLogger:
         :param metadata: Any extra metadata associated with this event
         :param start_time_ns: The start time timestamp in nanoseconds
         :param log_pt_compile_event: If True, log to pt2_compile_events
-        :param compile_id: Explicit compile_id (rather than using the current context)
         """
-        compile_id = compile_id or torch._guards.CompileContext.current_compile_id()
+        compile_id = _current_compile_id()
         metadata["compile_id"] = str(compile_id)
 
         # Grab metadata collected during event span
@@ -1739,8 +1760,8 @@ class ChromiumEventLogger:
         """
         if metadata is None:
             metadata = {}
-        compile_id = str(torch._guards.CompileContext.current_compile_id())
-        metadata["compile_id"] = compile_id
+        compile_id = _current_compile_id()
+        metadata["compile_id"] = str(compile_id)
         event = {
             "name": event_name,
             "ts": time_ns / 1000,
