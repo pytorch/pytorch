@@ -2,6 +2,7 @@ r"""
 This package introduces support for the current :ref:`accelerator<accelerators>` in python.
 """
 
+from typing import Optional
 from typing_extensions import deprecated
 
 import torch
@@ -57,7 +58,7 @@ def is_available() -> bool:
     return mod.is_available()
 
 
-def current_accelerator(check_available: bool = False) -> torch.device | None:
+def current_accelerator(check_available: bool = False) -> Optional[torch.device]:
     r"""Return the device of the accelerator available at compilation time.
     If no accelerator were available at compilation time, returns None.
     See :ref:`accelerator<accelerators>` for details.
