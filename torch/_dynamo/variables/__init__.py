@@ -94,6 +94,7 @@ from .misc import (
     TorchVersionVariable,
     TypingVariable,
     UnknownVariable,
+    UserDefinedExceptionClassVariable,
     WeakRefVariable,
 )
 from .nn_module import (
