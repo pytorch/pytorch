@@ -51,7 +51,6 @@ from ..virtualized import NullKernelHandler, ops, OpsValue, V
 from .common import (
     BackendFeature,
     BracesBuffer,
-    CppWrapperKernelArgs,
     CSE,
     CSEVariable,
     DataTypePropagation,
@@ -2647,7 +2646,7 @@ class CppVecKernel(CppKernel):
             return super().load(name, index)
         elif stride == 1:
             # load contiguously
-            line = self._get_vec_load_line(var, index, dtype, self._load_mask)
+            line = self._get_vec_load_line(var, index, dtype, self._load_mask)  # type: ignore[arg-type]
             csevar = self.cse.generate(self.loads, line)  # type: ignore[assignment]
         else:
             csevar = self._load_or_store_non_contiguous(var, index, dtype)  # type: ignore[assignment]
@@ -4239,7 +4238,7 @@ class CppScheduling(BaseScheduling):
     # https://github.com/python/cpython/commit/a285af7e626d1b81cf09f8b2bf7656f100bc1237
     # We set a conservative threshold here.
     MAX_FUSED_KERNEL_ARGS_NUM = 500
-    backend_features = dict.fromkeys(
+    backend_features = OrderedSet(
         [
             BackendFeature.INPLACE_BUFFERS,
             BackendFeature.REDUCE_TO_SINGLE_ELEMENT,
@@ -4247,7 +4246,7 @@ class CppScheduling(BaseScheduling):
     )
 
     @classmethod
-    def get_backend_features(cls, device: torch.device):
+    def get_backend_features(cls, device: torch.device) -> OrderedSet[BackendFeature]:
         return cls.backend_features
 
     def __init__(self, scheduler):
@@ -5074,9 +5073,7 @@ class KernelGroup:
 
 
 class CppWrapperKernelGroup(KernelGroup):
-    def __init__(self):
-        super().__init__()
-        self.args = CppWrapperKernelArgs()
+    pass
 
 
 class WorkSharing:

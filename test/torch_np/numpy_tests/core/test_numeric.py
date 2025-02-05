@@ -1,5 +1,4 @@
 # Owner(s): ["module: dynamo"]
-# ruff: noqa: F841
 
 import functools
 import itertools
@@ -805,11 +804,9 @@ class TestTypes(TestCase):
         # these are failing because of the "scalars do not upcast arrays" rule
         # Two first tests (i32 + f32 -> f64, and i64+f32 -> f64) xfail
         # until ufuncs implement the proper type promotion (ufunc loops?)
-        b = np.bool_(0)
-        i8, i16, i32, i64 = np.int8(0), np.int16(0), np.int32(0), np.int64(0)
-        u8 = np.uint8(0)
+        i8, i32, i64 = np.int8(0), np.int32(0), np.int64(0)
         f32, f64 = np.float32(0), np.float64(0)
-        c64, c128 = np.complex64(0), np.complex128(0)
+        c128 = np.complex128(0)
 
         assert_equal(promote_func(i32, f32), np.dtype(np.float64))
         assert_equal(promote_func(i64, f32), np.dtype(np.float64))

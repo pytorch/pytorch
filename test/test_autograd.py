@@ -4799,10 +4799,18 @@ SinBackward0, MulBackward0, torch::autograd::AccumulateGrad
         # version counter doesn't change inside of the context manager
         self.assertEqual(2, x._version)
 
-        torch._C._autograd._unsafe_set_version_counter(x, 0)
+        torch._C._autograd._unsafe_set_version_counter((x,), (0,))
         self.assertEqual(0, x._version)
         with self.assertRaisesRegex(RuntimeError, "Cannot set"):
-            torch._C._autograd._unsafe_set_version_counter(x, -1)
+            torch._C._autograd._unsafe_set_version_counter((x,), (-1,))
+
+        y = torch.ones(2, requires_grad=True).clone()
+        with torch.autograd._unsafe_preserve_version_counter((x, y)):
+            x.mul_(2)
+            y.mul_(3)
+        # version counter doesn't change inside of the context manager
+        self.assertEqual(0, x._version)
+        self.assertEqual(0, y._version)
 
     def test_current_node(self):
         pr = []

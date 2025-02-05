@@ -63,14 +63,17 @@ from ..virtualized import _ops as ops, OpsHandler, ReductionType, StoreMode, V
 from ..wrapper_benchmark import get_kernel_category_by_source_code
 from .block_analysis import BlockPatternMatcher
 from .common import (
+    ArgName,
     BackendFeature,
     ConstexprArg,
     CSE,
     CSEVariable,
     DeferredLine,
     IndentedBuffer,
+    InplacedBuffer,
     OpOverrides,
     PythonPrinter,
+    RemovedArg,
     SizeArg,
     TensorArg,
     WorkspaceArg,
@@ -87,6 +90,7 @@ from .simd import (
 )
 from .triton_utils import (
     config_of,
+    equal_1_arg_indices,
     non_constexpr_signature,
     should_unwrap_unspec_arg,
     signature_to_meta,
@@ -98,6 +102,7 @@ if TYPE_CHECKING:
     from typing import TypeVar
 
     from ..ir import IRNode
+    from .simd_kernel_features import SIMDKernelFeatures
 
     _T = TypeVar("_T")
 
@@ -1518,20 +1523,20 @@ class FixedTritonConfig:
         return item in self.config
 
 
-class TritonCSE(CSE):
+class TritonCSE(CSE[TritonCSEVariable, Union[str, tuple[str, str]]]):
     """
     Subclasses CSE to apply the current load mask to the cache key to avoid CSEing
     variables across separate masked blocks.
     """
 
-    def augment_key(self, cache_key: object) -> object:
+    def augment_key(self, cache_key: str) -> Union[str, tuple[str, str]]:
         if mask := V.kernel._load_mask:
             return (cache_key, mask.name)
         else:
             return cache_key
 
 
-class TritonKernel(SIMDKernel):
+class TritonKernel(SIMDKernel[TritonCSEVariable]):
     overrides = TritonKernelOverrides  # type: ignore[assignment]
     helper_functions: HelperFunctions
     kexpr: Callable[[sympy.Expr], str] = texpr
@@ -2133,6 +2138,11 @@ class TritonKernel(SIMDKernel):
 
         if should_unwrap_unspec_arg(name):
             line = var
+            # unwrapped bf16/fp16 0d tensors are passed in as float32 scalars
+            # see triton_utils.py:signature_of
+            if dtype in (torch.float16, torch.bfloat16):
+                dtype = torch.float32
+
         else:
             if isinstance(indexing, BlockPtrOptions):
                 block_ptr, other = self.codegen_block_ptr(name, var, indexing, other)
@@ -2793,7 +2803,7 @@ class TritonKernel(SIMDKernel):
         # in the global namespace
         helper = IndentedBuffer()
         helper.writeline("@triton.jit")
-        cse = CSE(prefix="", suffix="")
+        cse = CSE()
 
         args = [
             tuple(cse.namedvar(f"arg{i}_{n}", dtype=dtypes[n]) for n in range(num_args))
@@ -2945,7 +2955,8 @@ class TritonKernel(SIMDKernel):
             result_vars = partial_scan_vars
 
         for result_var in result_vars:
-            result_var.mask_vars = masks  # type: ignore[attr-defined]
+            assert isinstance(result_var, TritonCSEVariable)
+            result_var.mask_vars = OrderedSet(masks)
 
         return tuple(result_vars)
 
@@ -3336,9 +3347,13 @@ class TritonKernel(SIMDKernel):
                 and mutation not in V.graph.removed_buffers
                 and mutation not in self.removed_buffers
             ):
-                mutated_args.add(self.args.inplace_buffers[mutation].inner_name)
+                mutated_args.add(
+                    cast(InplacedBuffer, self.args.inplace_buffers[mutation]).inner_name
+                )
             if mutation in self.args.output_buffers:
-                mutated_args.add(self.args.output_buffers[mutation])
+                mutation_arg = self.args.output_buffers[mutation]
+                assert not isinstance(mutation_arg, RemovedArg)
+                mutated_args.add(mutation_arg)
 
         # Note: [Workspace Mutation]
         # workspace arguments are mutated, but are not marked as mutations in self.mutations
@@ -3356,14 +3371,14 @@ class TritonKernel(SIMDKernel):
                 isinstance(arg, WorkspaceArg)
                 and arg.zero_mode == WorkspaceZeroMode.ZERO_ON_CALL
             ):
-                mutated_args.add(argname)
+                mutated_args.add(argname.name)
 
         mutated_args = sorted(mutated_args)
 
         for tree in self.active_range_trees():
             sizearg = SizeArg(f"{tree.prefix}numel", tree.numel)
             signature.append(sizearg)
-            argdefs.append(sizearg.name)
+            argdefs.append(ArgName(sizearg.name))
             # constexpr version causes issues, see
             # https://github.com/pytorch/torchdynamo/pull/1362
             # triton_meta["constants"][len(argdefs)] = V.graph.sizevars.size_hint(
@@ -3375,7 +3390,7 @@ class TritonKernel(SIMDKernel):
             # new versions (but not old versions) of Triton need constexprs included in the signature
             if triton_version_uses_attrs_dict():
                 signature.append(ConstexprArg(arg_name))
-            argdefs.append(f"{arg_name} : tl.constexpr")
+            argdefs.append(ArgName(arg_name, is_constexpr=True))
 
         for tree in self.range_trees:
             if tree.is_reduction and self.persistent_reduction:
@@ -3424,14 +3439,13 @@ class TritonKernel(SIMDKernel):
 
         triton_meta["configs"] = [config_of(signature)]
 
-        if not triton_version_uses_attrs_dict():
-            # Triton compiler includes equal_to_1 args into constants even
-            # when they are not constexpr. otherwise there may be a segfault
-            # during launching the Inductor-compiled Triton kernel.
-            # https://github.com/pytorch/pytorch/issues/120478#issuecomment-1962822307
-            # https://github.com/openai/triton/blob/231efe9ed2d200be0f69a07c298e4342b08efe3d/python/triton/runtime/jit.py#L384
-            for arg_num in triton_meta["configs"][0].equal_to_1:  # type: ignore[index]
-                triton_meta["constants"][signature[arg_num].name] = 1  # type: ignore[index]
+        # Triton compiler includes equal_to_1 args into constants even
+        # when they are not constexpr. otherwise there may be a segfault
+        # during launching the Inductor-compiled Triton kernel.
+        # https://github.com/pytorch/pytorch/issues/120478#issuecomment-1962822307
+        # https://github.com/openai/triton/blob/231efe9ed2d200be0f69a07c298e4342b08efe3d/python/triton/runtime/jit.py#L384
+        for arg_num in equal_1_arg_indices(signature):  # type: ignore[index]
+            triton_meta["constants"][signature[arg_num].name] = 1  # type: ignore[index,union-attr]
 
         self.triton_meta = triton_meta
 
@@ -3484,7 +3498,7 @@ class TritonKernel(SIMDKernel):
             """
         code.splice(heuristics_line)
         code.writeline(
-            f"def {name or str(Placeholder.KERNEL_NAME)}({', '.join(argdefs)}):"
+            f"def {name or str(Placeholder.KERNEL_NAME)}({', '.join(x.full_name() for x in argdefs)}):"
         )
         with code.indent():
             self.codegen_static_numels(code)
@@ -3832,7 +3846,7 @@ class TritonKernel(SIMDKernel):
 
 class TritonScheduling(SIMDScheduling):
     kernel_type: type[Any] = TritonKernel
-    backend_features = dict.fromkeys(  # dict for deterministic order
+    backend_features = OrderedSet(
         [
             BackendFeature.FOREACH,
             BackendFeature.BUCKETIZE,
@@ -3844,13 +3858,11 @@ class TritonScheduling(SIMDScheduling):
     )
     if torch.version.hip is None:
         backend_features.update(
-            dict.fromkeys(
-                [
-                    # TODO: Move this above when ROCm triton adds support for multiple inputs
-                    BackendFeature.TUPLE_REDUCTION,
-                    BackendFeature.SORT,
-                ]
-            )
+            [
+                # TODO: Move this above when ROCm triton adds support for multiple inputs
+                BackendFeature.TUPLE_REDUCTION,
+                BackendFeature.SORT,
+            ]
         )
 
     def __init__(self, scheduler: Optional[Scheduler]) -> None:
@@ -3867,10 +3879,9 @@ class TritonScheduling(SIMDScheduling):
             config.triton.cooperative_reductions
             or config.triton.force_cooperative_reductions
         ):
-            return {
-                **cls.backend_features,
-                BackendFeature.REDUCE_TO_SINGLE_ELEMENT: None,
-            }
+            return OrderedSet(
+                [*cls.backend_features, BackendFeature.REDUCE_TO_SINGLE_ELEMENT]
+            )
         return cls.backend_features
 
     def codegen_comment(self, node_schedule):
@@ -3950,19 +3961,35 @@ class TritonScheduling(SIMDScheduling):
 
         return kernel_name
 
-    def benchmark_fused_nodes(self, nodes, n_spills_threshold=8):
+    def benchmark_fused_nodes(self, nodes, n_spills_threshold=8) -> tuple[float, str]:
+        """
+        Benchmark fused list of nodes and return the execution time
+        in milliseconds on randomly generated inputs.
+        """
+        src_code = self.generate_kernel_code_from_nodes(nodes, benchmark_kernel=True)
+        mod = PyCodeCache.load(src_code)
+        return self.benchmark_codegened_module(
+            mod, n_spills_threshold, node_names=OrderedSet(n.get_name() for n in nodes)
+        )
+
+    def benchmark_codegened_module(
+        self, mod, n_spills_threshold=8, node_names: Optional[OrderedSet[str]] = None
+    ) -> tuple[float, str]:
+        """Benchmark an already compiled module"""
         device_interface = get_interface_for_device(V.graph.device_type)
         with preserve_rng_state(), device_interface.device(
             V.graph.get_current_device_or_throw()
         ):  # type: ignore[attr-defined]
-            src_code = self.generate_kernel_code_from_nodes(
-                nodes, benchmark_kernel=True
-            )
-            mod = PyCodeCache.load(src_code)
+            ms = None
 
             def cache_file_path():
                 assert mod.__file__ is not None
                 return os.path.splitext(mod.__file__)[0] + ".kernel_perf"
+
+            def store_cache():
+                path = cache_file_path()
+                with open(path, "w") as fd:
+                    fd.write(str(ms))  # type: ignore[has-type]
 
             def load_cache():
                 path = cache_file_path()
@@ -3971,15 +3998,13 @@ class TritonScheduling(SIMDScheduling):
                         return float(fd.read())
                 return None
 
-            def store_cache():
-                path = cache_file_path()
-                with open(path, "w") as fd:
-                    fd.write(str(ms))  # type: ignore[has-type]
-
+            node_names = (
+                node_names if node_names is not None else OrderedSet(["unknown"])
+            )
             log.debug(
                 "kernel src code for %s written to: %s",
-                OrderedSet(n.get_name() for n in nodes),
                 mod.__file__,
+                node_names,
             )
             ms = load_cache()
             if ms is not None:
@@ -3988,7 +4013,6 @@ class TritonScheduling(SIMDScheduling):
             args = mod.get_args()
             call = mod.call
             wrapped_jit_function = mod.triton_
-
             # call once to trigger the compilation
             try:
                 call(wrapped_jit_function.clone_args(*args)[0])
@@ -3996,7 +4020,7 @@ class TritonScheduling(SIMDScheduling):
                 log.debug(
                     "Exception (%s) in compiling fused nodes %s",
                     e,
-                    OrderedSet(n.get_name() for n in nodes),
+                    node_names,
                 )
                 ms = float("inf")
                 store_cache()
@@ -4015,7 +4039,6 @@ class TritonScheduling(SIMDScheduling):
                 ms = benchmarker.benchmark_gpu(
                     lambda: call(wrapped_jit_function.clone_args(*args)[0])
                 )
-
                 # overhead of cloning args gives bias for fusing the kernel
                 # in the case of mutating/in-placeable second fusion
                 # TODO - would be better as a hook in triton do_bench that reset
@@ -4027,15 +4050,18 @@ class TritonScheduling(SIMDScheduling):
 
             log.debug(
                 "The fused kernel for %s took %.3f ms to run",
-                OrderedSet(n.get_name() for n in nodes),
+                node_names,
                 ms,
             )
             store_cache()
             return ms, mod.__file__
 
-    def create_kernel_choices(
-        self, kernel_features, kernel_args, kernel_kwargs
-    ) -> list[SIMDKernel]:
+    def create_kernel_choices(  # type: ignore[override]
+        self,
+        kernel_features: SIMDKernelFeatures,
+        kernel_args: list[Any],
+        kernel_kwargs: dict[str, Any],
+    ) -> list[TritonKernel]:
         is_scan = kernel_features.contains_op("scan")
         is_split_scan = is_scan and any(
             node.is_split_scan() for node in kernel_features.scheduler_nodes()
@@ -4069,11 +4095,11 @@ class TritonScheduling(SIMDScheduling):
 
     def add_multi_kernel_choices(
         self,
-        kernel: SIMDKernel,
+        kernel: TritonKernel,
         kernel_args: list[Any],
         kernel_kwargs: dict[str, Any],
-    ) -> list[SIMDKernel]:
-        kernels: list[SIMDKernel] = [kernel]
+    ) -> list[TritonKernel]:
+        kernels: list[TritonKernel] = [kernel]
         if not config.triton.multi_kernel:
             return kernels
 
@@ -4122,8 +4148,8 @@ class TritonScheduling(SIMDScheduling):
 
     def benchmark_combo_kernel(self, node_list):
         mod: ModuleType
-        ms: int
-        ms_clone: int
+        ms: float
+        ms_clone: float
 
         def cache_file_path():
             assert mod.__file__ is not None
@@ -4142,7 +4168,7 @@ class TritonScheduling(SIMDScheduling):
                 fd.write(str(ms) + " " + str(ms_clone))
 
         total_ms, file_list = 0, []
-        total_clone_ms = 0
+        total_clone_ms: float = 0.0
         removed_buffers_orig = V.graph.removed_buffers
         V.graph.removed_buffers = OrderedSet(removed_buffers_orig)
         inplaced_to_remove_orig = V.graph.inplaced_to_remove
@@ -4171,7 +4197,7 @@ class TritonScheduling(SIMDScheduling):
             )
             ms, ms_clone = load_cache()
             if ms is not None:
-                total_ms += ms
+                total_ms += ms  # type: ignore[assignment]
                 total_clone_ms += ms_clone
                 file_list.append(mod.__file__)
                 continue
