@@ -30,7 +30,7 @@ TorchOp: TypeAlias = Union[torch._ops.OpOverload, types.BuiltinFunctionType, Cal
 logger = logging.getLogger(__name__)
 
 
-@dataclasses.dataclass(frozen=True)
+@dataclasses.dataclass
 class OnnxDecompMeta:
     """A wrapper of onnx-script function with additional metadata.
 
@@ -62,6 +62,7 @@ class OnnxDecompMeta:
                     signature = _schemas.OpSignature.from_function(
                         self.onnx_function, "__traced", self.onnx_function.__name__
                     )
+                self.signature = signature
                 self.onnx_function._pt_onnx_signature = signature  # type: ignore[attr-defined]
             except Exception as e:
                 logger.info(

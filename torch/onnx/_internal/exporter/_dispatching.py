@@ -219,7 +219,7 @@ def get_matching_overload(
 
     Args:
         node: The node to match.
-        overloads: The overloads to match against.
+        overloads: The OnnxDecompMeta with overloads and their signatures to match against.
 
     Returns:
         A tuple containing the matched overload and a string describing the reason for failure or success.
