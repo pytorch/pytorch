@@ -104,6 +104,8 @@ def mps_ops_grad_modifier(ops):
         # CPU errors
         # derivative for zeta is not implemented
         'special.zeta': None,
+        # derivative fors sinc is not implemented
+        'sinc' : None,
         # derivative for aten::nextafter is not implemented on CPU
         'nextafter': None,
         # derivative for aten::floor_divide is not implemented on CPU
@@ -842,8 +844,9 @@ def mps_ops_modifier(ops):
         'atan2': [torch.int64],
         'angle': [torch.int64],
 
-        # zeta isn't supported for integral types
+        # Operations not supported for integral types
         'special.zeta': [torch.bool, torch.int16, torch.int32, torch.int64, torch.uint8, torch.int8],
+        'sinc': [torch.bool, torch.int16, torch.int32, torch.int64, torch.uint8, torch.int8],
 
         # GEMM on MPS is not supported for integral types
         'nn.functional.linear': [torch.int16, torch.int32, torch.int64, torch.uint8, torch.int8],
