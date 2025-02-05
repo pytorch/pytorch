@@ -542,7 +542,7 @@ __global__ void GammaBetaBackwardSimpleCUDAKernel(
 
 // We use template parameters here because the compiler can then constant-propagate these
 // constants and produce faster kernel code. In particular, there is a shared memory
-// reduction loop that can be completely optimized away if block_dim_y < 32 (which does
+// reduction loop that can be completely optimized away if block_dim_y == 32 (which does
 // happen at one callsite). After the shared memory reduction there is a warp shuffle phase
 // that reduces without calling __syncthreads().
 template <typename T, typename T_ACC,
