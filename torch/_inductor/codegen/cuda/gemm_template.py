@@ -502,7 +502,7 @@ class CUTLASSGemmTemplate(CUTLASSTemplate, ABC):
 
         ops = self.gen_ops()
         for name, op in ops:
-            for swizzle in (1, 2, 4, 8):
+            for swizzle in inductor_cuda_config.cutlass_max_profiling_swizzle_options:
                 description = f"{name} swizzle={swizzle}"
                 self.maybe_append_choice(
                     choices, description=description, op=op, swizzle=swizzle
