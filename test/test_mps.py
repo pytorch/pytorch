@@ -477,7 +477,6 @@ def mps_ops_modifier(ops):
         'sigmoid',
         'sin',
         'sinh',
-        'special.zeta',
         'sqrt',
         'square',
         'stack',
@@ -495,6 +494,7 @@ def mps_ops_modifier(ops):
         'vstack',
         'where',
         'byte',
+        'zeta',
     }
     # Those ops worked on MacOS12, but broken on MacOS13, see https://github.com/pytorch/pytorch/issues/85758
     MACOS_12_3_XFAILLIST = {
