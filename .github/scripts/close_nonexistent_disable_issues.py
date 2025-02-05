@@ -194,7 +194,6 @@ if __name__ == "__main__":
     if args.dry_run:
         print("dry run, not actually closing")
     else:
-        to_be_closed = [("", (82, "", ""))]
         failed = False
         for item in to_be_closed:
             _, (num, _, _) = item
