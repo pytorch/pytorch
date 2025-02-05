@@ -3910,13 +3910,13 @@ class Scheduler:
             if log.isEnabledFor(logging.DEBUG):
                 try:
                     log.debug(
-                        "Generating code for node %s with estimated runtime %f",
+                        "Generating code for node %s with estimated runtime %f ns",
                         node.get_name(),
                         node.get_estimated_runtime(),
                     )
                 except Exception:
                     log.debug(
-                        "Generating code for node %s with estimated runtime 0.0",
+                        "Generating code for node %s with estimated runtime 0.0 ns",
                         node.get_name(),
                     )
 
