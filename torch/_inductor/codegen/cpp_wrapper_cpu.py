@@ -1042,16 +1042,23 @@ class CppWrapperCpu(PythonWrapperCodegen):
                 f"AOTI_TORCH_ERROR_CODE_CHECK({shim_fn}({', '.join(args)}));"
             )
 
-    def generate_c_shim_extern_kernel_alloc(self, extern_kernel, args):
+    def generate_c_shim_extern_kernel_alloc(
+        self, extern_kernel: ir.ExternKernelAlloc, args: list[str]
+    ) -> None:
         # registered output buffer name
         name = extern_kernel.name
         output_handle_name = f"{name}_handle"
-        self.writeline(f"AtenTensorHandle {output_handle_name};")
-        output_arg = f"&{output_handle_name}"
-        self.generate_c_shim_extern_kernel_call(
-            extern_kernel.get_kernel_name(), args + [output_arg]
+        is_inplace = (
+            isinstance(extern_kernel.op_overload, torch._ops.OpOverload)
+            and torch.Tag.inplace_view in extern_kernel.op_overload.tags
         )
-        self.writeline(f"RAIIAtenTensorHandle {name}({output_handle_name});")
+
+        if not is_inplace:
+            self.writeline(f"AtenTensorHandle {output_handle_name};")
+            args = [*args, f"&{output_handle_name}"]
+        self.generate_c_shim_extern_kernel_call(extern_kernel.get_kernel_name(), args)
+        if not is_inplace:
+            self.writeline(f"RAIIAtenTensorHandle {name}({output_handle_name});")
 
     def generate_extern_kernel_alloc(self, extern_kernel, args):
         if getattr(extern_kernel, "outputs", None):

@@ -114,6 +114,13 @@ class MPSBasicTests(TestCase):
 
         self.common(inc_, (torch.rand(1024),))
 
+    # TODO(NS): Replace me with full test_prod when multi-stage reductions are implemented
+    def test_prod(self):
+        def fn(a):
+            return a.prod(0), a.prod(1), a.prod()
+
+        self.common(fn, (torch.rand((10, 10)),))
+
 
 # Copy tests
 for test_name in [
@@ -123,6 +130,7 @@ for test_name in [
     "test_any",
     "test_arange5",
     "test_argmax_min_int32",
+    "test_argmax_argmin2",
     "test_avg_pool2d5",
     "test_avg_pool2d8",
     "test_builtins_round",
@@ -151,6 +159,7 @@ for test_name in [
     "test_low_memory_max_pool",
     "test_max_min",
     "test_max_pool2d2",
+    "test_min_max_reduction_nan",
     "test_nan_to_num",
     "test_pow2",
     "test_randint_int64_mod",
@@ -165,6 +174,7 @@ for test_name in [
     "test_signbit",
     "test_silu",
     "test_slice_scatter4",
+    "test_softmax",
     "test_sort",
     "test_sum_int",
     "test_sum_keepdims",
