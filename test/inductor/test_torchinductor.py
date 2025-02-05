@@ -1342,16 +1342,10 @@ class CommonTemplate:
                 device=self.device,
             )
             _, code = run_and_get_code(fn, x, y)
-            # cpp_wrapper falls back to Python function calls with complex inputs, so
-            # there are still two calls to aten.view when it's enabled.
             code = " ".join(code)
-            if config.cpp_wrapper:
-                self.assertEqual(code.count("view_dtype"), 1)
-                # The additional 2 counts here come from error messages containing this
-                # string.
-                self.assertEqual(code.count("aten.view"), 4)
-            else:
-                self.assertEqual(code.count("aten.view"), 3)
+            self.assertEqual(
+                code.count("view_dtype" if config.cpp_wrapper else "aten.view"), 3
+            )
 
     def test_add_complex5(self):
         def fn(a, b, alpha):
@@ -2818,19 +2812,13 @@ class CommonTemplate:
         def fn(a, b):
             return (torch.exp(a), torch.exp(a + b))
 
-        # exp(a+b) could be significantly different than exp(a.half()+b.half())
-        self.common(
-            fn, (torch.randn(8, 8), torch.randn(8, 8)), reference_in_float=False
-        )
+        self.common(fn, (torch.randn(8, 8), torch.randn(8, 8)))
 
     def test_exp2(self):
         def fn(a, b):
             return (torch.exp2(a), torch.exp2(a + b), torch.pow(2, -torch.abs(a - b)))
 
-        # exp(a+b) could be significantly different than exp(a.half()+b.half())
-        self.common(
-            fn, (torch.randn(8, 8), torch.randn(8, 8)), reference_in_float=False
-        )
+        self.common(fn, (torch.randn(8, 8), torch.randn(8, 8)))
 
     @skipIfXpu(msg="logaddexp_xpu not implemented for ComplexFloat")
     @skipCUDAIf(True, "Not implemented for CUDA")
@@ -8504,6 +8492,39 @@ class CommonTemplate:
             compiled_f(list(cloned_args))
             f(*args)
             self.assertEqual(cloned_args, args)
+
+    @skip_if_cpp_wrapper(
+        "Without major redesign, cpp_wrapper will not support custom ops that are "
+        "defined in Python."
+    )
+    @config.patch(implicit_fallbacks=True)
+    def test_fallback_mutable_op_list_tensor(self):
+        @torch.library.custom_op(
+            "mylib::mysin",
+            mutates_args=["out_list"],
+            schema="(Tensor x, Tensor(a!)[]? out_list) -> Tensor",
+        )
+        def mysin(x, out_list) -> torch.Tensor:
+            r = x.sin()
+            if out_list is not None:
+                out_list[0].copy_(r)
+            return r
+
+        @mysin.register_fake
+        def _(x, out_list) -> torch.Tensor:
+            return torch.empty_like(x)
+
+        def fn(x):
+            x = x * 3
+            s = [torch.empty_like(x)]
+            x = mysin(x, s)
+            x = x / 3
+            return x, s[0]
+
+        x = torch.randn(3, requires_grad=False)
+        expected = fn(x)
+        result = torch.compile(fn, fullgraph=True)(x)
+        self.assertEqual(result, expected)
 
     @config.patch(implicit_fallbacks=True)
     def test_fallback_mutable_op_with_return(self):

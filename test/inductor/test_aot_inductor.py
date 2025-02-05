@@ -18,7 +18,6 @@ from torch._dynamo.device_interface import get_interface_for_device
 from torch._dynamo.testing import rand_strided, same
 from torch._dynamo.utils import counters
 from torch._inductor import config
-from torch._inductor.exc import CppWrapperCodegenError
 from torch._inductor.runtime.runtime_utils import cache_dir
 from torch._inductor.test_case import TestCase
 from torch._inductor.utils import is_big_gpu, run_and_get_cpp_code
@@ -2003,30 +2002,6 @@ class AOTInductorTestsTemplate:
             "pytree processing of the outputs.",
         ):
             torch._inductor.aot_compile(gm, example_inputs)
-
-    @unittest.mock.patch("torch._inductor.graph.supported_dtype_of_cpp_wrapper")
-    def test_unsupported_input_dtype(self, supported_dtype_of_cpp_wrapper_mock):
-        supported_dtype_of_cpp_wrapper_mock.return_value = False
-
-        class Model(torch.nn.Module):
-            def __init__(self) -> None:
-                super().__init__()
-
-            def forward(self, x, y):
-                return x + y
-
-        example_inputs = (
-            torch.randn(10, 10).to(self.device),
-            torch.randn(10, 10).to(self.device),
-        )
-        with self.assertRaisesRegex(
-            CppWrapperCodegenError, "Unsupported input dtype torch.float32"
-        ):
-            torch._export.aot_compile(Model(), example_inputs)
-
-        supported_dtype_of_cpp_wrapper_mock.assert_called_once_with(
-            torch.float32, self.device
-        )
 
     def test_consecutive_compiles(self):
         """Test that compilation behaves correctly with cache hits"""
@@ -4347,6 +4322,24 @@ class AOTInductorTestsTemplate:
         self.code_check_count(
             model, example_inputs, "aoti_torch_clone_preserve_strides", 0
         )
+
+    @unittest.skipIf(IS_FBCODE, "Not runnable in fbcode")
+    def test_stft(self):
+        N_FFT = 400
+        HOP_LENGTH = 160
+
+        class Model(torch.nn.Module):
+            def forward(self, x):
+                window = torch.hann_window(N_FFT).to(x.device)
+                stft = torch.stft(
+                    x, N_FFT, HOP_LENGTH, window=window, return_complex=True
+                )
+                magnitudes = stft[..., :-1].abs() ** 2
+                return magnitudes
+
+        model = Model()
+        example_inputs = (torch.randn(500, device=self.device),)
+        self.check_model(model, example_inputs)
 
     def test_conv3d(self):
         if self.device != GPU_TYPE or not is_big_gpu():
