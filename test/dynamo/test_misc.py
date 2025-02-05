@@ -11885,6 +11885,7 @@ fn
         self.assertFalse(ne)
         self.assertEqual(len(counters["graph_break"]), 1)
 
+    @unittest.skipIf(sys.version_info < (3, 11), "Python 3.11+")
     def test_RAISE_VARARGS_0(self):
         def foo():
             try:
