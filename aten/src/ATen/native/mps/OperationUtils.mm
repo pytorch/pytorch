@@ -991,7 +991,9 @@ void MetalKernelFunction::startEncoding() {
 }
 
 void MetalKernelFunction::dispatch(uint64_t length, std::optional<uint64_t> group_size) {
-  auto group_size_val = group_size.value_or(std::min(length, getMaxThreadsPerThreadgroup()));
+  const auto max_tg_size = getMaxThreadsPerThreadgroup();
+  const auto group_size_val = group_size.value_or(std::min(length, max_tg_size));
+  TORCH_CHECK_VALUE(group_size_val <= max_tg_size, "Threadgroup size exceeds ", max_tg_size, " limit");
   [encoder dispatchThreads:MTLSizeMake(length, 1, 1) threadsPerThreadgroup:MTLSizeMake(group_size_val, 1, 1)];
 }
 
@@ -999,11 +1001,15 @@ void MetalKernelFunction::dispatch(c10::ArrayRef<uint64_t> length, c10::Optional
   TORCH_CHECK(length.size() > 0 && length.size() < 4, "Dispatch dimentions must be less than 3 and non-empty");
   TORCH_CHECK(!group_size.has_value() || group_size->size() == length.size(),
               "size and group_size must have same number of dimentions");
-  auto group_size_length = group_size.has_value() ? group_size->size() : 0;
+  const auto max_tg_size = getMaxThreadsPerThreadgroup();
+  const auto group_size_length = group_size.has_value() ? group_size->size() : 0;
+  auto tg_size = MTLSizeMake(group_size_length > 0 ? group_size->at(0) : max_tg_size,
+                             group_size_length > 1 ? group_size->at(1) : 1,
+                             group_size_length > 2 ? group_size->at(2) : 1);
+  TORCH_CHECK_VALUE(
+      tg_size.width * tg_size.height * tg_size.depth < max_tg_size, "Threadgroup size exceeds ", max_tg_size, " limit");
   [encoder dispatchThreads:MTLSizeMake(length[0], length.size() > 1 ? length[1] : 1, length.size() == 3 ? length[2] : 1)
-      threadsPerThreadgroup:MTLSizeMake(group_size_length > 0 ? group_size->at(0) : getMaxThreadsPerThreadgroup(),
-                                        group_size_length > 1 ? group_size->at(1) : 1,
-                                        group_size_length == 3 ? group_size->at(2) : 1)];
+      threadsPerThreadgroup:tg_size];
 }
 
 void MetalKernelFunction::setArg(unsigned idx, const at::TensorBase& t) {
