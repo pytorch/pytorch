@@ -6509,21 +6509,6 @@ symbolic_aot_autograd_failures = {
         "linalg.householder_product",
         decorator=unittest.skipIf(IS_MACOS and IS_X86, "flaky"),
     ),
-    # many complex operators incorrect striding, metadata
-    xfail("fft.fft", ""),
-    xfail("fft.hfft2", ""),
-    xfail("fft.hfft", ""),
-    xfail("fft.hfftn", ""),
-    xfail("fft.ifft", ""),
-    xfail("fft.ihfft2", ""),
-    xfail("fft.ihfft", ""),
-    xfail("fft.ihfftn", ""),
-    xfail("fft.irfft2", ""),
-    xfail("fft.irfft", ""),
-    xfail("fft.irfftn", ""),
-    xfail("fft.rfft2", ""),
-    xfail("fft.rfft", ""),
-    xfail("fft.rfftn", ""),
     xfail("stft", ""),  # Cannot call sizes() on tensor with symbolic sizes/strides
 }
 
