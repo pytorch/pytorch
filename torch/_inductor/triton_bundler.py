@@ -1,6 +1,7 @@
 import dataclasses
 import logging
 import os
+import shutil
 import uuid
 from pathlib import Path
 from typing import Optional
@@ -261,5 +262,7 @@ class TritonBundler:
                         # Just append one of them without the extension
                         kernel_names.append(Path(artifact.filename).stem)
                 # Atomic on POSIX systems
+                if os.path.exists(directory):
+                    shutil.rmtree(directory)
                 os.replace(tmp_dir, directory)
             return TritonBundlerMetadata(kernel_names)
