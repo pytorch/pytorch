@@ -49,10 +49,9 @@ public:
   }
   template <uint64_t mask>
   static Vectorized<float> blend(const Vectorized<float>& a, const Vectorized<float>& b) {
-    int VL = svcntw();  // Runtime vector length for float
     // Build an array of flags: each element is 1 if the corresponding bit in 'mask' is set, 0 otherwise.
-    int32_t flag_arr[VL];
-    for (int i = 0; i < VL; i++) {
+    __at_align__ int32_t flag_arr[size()];
+    for (int i = 0; i < size(); i++) {
         flag_arr[i] = (mask & (1ULL << i)) ? 1 : 0;
     }
     // Load the flag array into an SVE int32 vector.

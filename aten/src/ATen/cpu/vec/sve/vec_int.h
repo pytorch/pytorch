@@ -44,7 +44,7 @@ public:                                                                         
   }                                                                                                     \
   template <uint64_t mask>                                                                                      \
   static Vectorized<int##bit##_t> blend(const Vectorized<int##bit##_t>& a, const Vectorized<int##bit##_t>& b) { \
-    alignas(64) int##bit##_t flag_arr[size()];                                                                  \
+    __at_align__ int##bit##_t flag_arr[size()];                                                                 \
     for (int i = 0; i < size(); ++i) {                                                                          \
       flag_arr[i] = (i < 64 && (mask & (1ULL << i))) ? 1 : 0;                                                   \
     }                                                                                                           \
