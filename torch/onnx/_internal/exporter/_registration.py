@@ -155,8 +155,9 @@ class ONNXRegistry:
         """
         if isinstance(target, torch._ops.OpOverloadPacket):
             raise TypeError(
-                "Please provide an OpOverload instead of an OpOverloadPacket. "
-                "You can get the default overload with torch.ops.aten.<op>.default."
+                f"Target '{target}' should be provided as an OpOverload instead of an "
+                "OpOverloadPacket. You can get the default overload with "
+                "<op>.default"
             )
 
         self._register(
