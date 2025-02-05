@@ -779,10 +779,13 @@ class ScheduleTest(MultiProcContinousTest):
         schedule = schedule_class(
             stages,
             num_microbatches,
-            stage_index_to_group_rank=stage_index_to_group_rank,
             loss_fn=loss_fn,
             scale_grads=False,
         )
+        # TODO: remove this once we get rid of stage_index_to_group_rank
+        schedule.stage_index_to_group_rank = stage_index_to_group_rank
+        for stage in stages:
+            stage.stage_index_to_group_rank = stage_index_to_group_rank
 
         if use_new_runtime:
             old_schedule = schedule

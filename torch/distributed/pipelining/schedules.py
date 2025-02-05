@@ -18,6 +18,7 @@ from torch.distributed.fsdp import FSDPModule, UnshardHandle
 from torch.nn.modules.loss import _Loss
 from torch.profiler import record_function
 
+from ._utils import generate_stage_to_rank_mapping
 from .microbatch import merge_chunks, split_args_kwargs_into_chunks, TensorChunkSpec
 from .stage import _PipelineStageBase
 
@@ -1123,10 +1124,14 @@ class PipelineScheduleMulti(_PipelineSchedule):
         self.pp_group_size = stages[0].group_size
         self.rank = stages[0].group_rank
         # Set the pipeline stage states
-        if stage_index_to_group_rank is not None:
-            for stage in self._stages:
-                stage.stage_index_to_group_rank = stage_index_to_group_rank
-        self.stage_index_to_group_rank = stages[0].stage_index_to_group_rank
+        if stage_index_to_group_rank is None:
+            self.stage_index_to_group_rank = generate_stage_to_rank_mapping(
+                self.pp_group_size, self._num_stages
+            )
+        else:
+            self.stage_index_to_group_rank = stage_index_to_group_rank
+        for stage in self._stages:
+            stage.stage_index_to_group_rank = self.stage_index_to_group_rank
 
         # Set the same has_backward flag for stage object
         for stage in self._stages:
@@ -2266,7 +2271,6 @@ class ScheduleZBVZeroBubble(PipelineScheduleMulti):
         args_chunk_spec: Optional[tuple[TensorChunkSpec, ...]] = None,
         kwargs_chunk_spec: Optional[dict[str, TensorChunkSpec]] = None,
         output_merge_spec: Optional[Union[dict[str, Any], tuple[Any]]] = None,
-        stage_index_to_group_rank: Optional[dict[int, int]] = None,
         scale_grads: bool = True,
     ):
         self.pp_group_size = stages[0].group_size
@@ -2277,9 +2281,16 @@ class ScheduleZBVZeroBubble(PipelineScheduleMulti):
             args_chunk_spec=args_chunk_spec,
             kwargs_chunk_spec=kwargs_chunk_spec,
             output_merge_spec=output_merge_spec,
-            stage_index_to_group_rank=stage_index_to_group_rank,
             scale_grads=scale_grads,
         )
+
+        # override the default loop style created in multistage schedule
+        self.stage_index_to_group_rank = generate_stage_to_rank_mapping(
+            self.pp_group_size, self._num_stages, style="v"
+        )
+        for stage in self._stages:
+            stage.stage_index_to_group_rank = self.stage_index_to_group_rank
+
         self.n_local_stages = len(stages)
         if self.n_local_stages != 2:
             raise ValueError(
