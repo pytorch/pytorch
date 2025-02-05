@@ -10,17 +10,17 @@ import numpy.typing as npt
 import onnx
 import onnxscript
 import onnxscript.values
-from onnxscript import BOOL, INT64, ir, opset18 as op
+from onnxscript import INT64, ir, opset18 as op
 from onnxscript.onnx_types import COMPLEX128, COMPLEX64, DOUBLE, FLOAT, TensorType
 
-from torch.onnx._internal.exporter._torchlib import _constants
+from torch.onnx._internal.exporter import _constants
 from torch.onnx._internal.exporter._torchlib._tensor_typing import RealType, TTensor
 
 
 COMPLEX64_TYPE = COMPLEX64.dtype
 COMPLEX128_TYPE = COMPLEX128.dtype
 
-torch_opset = onnxscript.values.Opset(domain=_constants.DOMAIN, version=1)
+torch_opset = onnxscript.values.Opset(domain=_constants.TORCHLIB_DOMAIN, version=1)
 
 
 @onnxscript.script(torch_opset)

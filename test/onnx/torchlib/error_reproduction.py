@@ -1,4 +1,6 @@
 # Owner(s): ["module: onnx"]
+"""Error reproduction utilities for op consistency tests."""
+
 from __future__ import annotations
 
 import difflib
@@ -13,6 +15,7 @@ import numpy as np
 
 import onnx
 import onnxruntime as ort
+import onnxscript
 
 import torch
 
@@ -58,7 +61,7 @@ ONNX Runtime raises `{error_text}` when executing test `{test_name}` in ONNX Scr
 To recreate this report, use
 
 ```bash
-CREATE_REPRODUCTION_REPORT=1 python -m pytest test/onnx/torchlib/test_ops.py -k {short_test_name}
+CREATE_REPRODUCTION_REPORT=1 python -m pytest {test_file_path} -k {short_test_name}
 ```
 
 ### To reproduce
@@ -96,7 +99,7 @@ The output of ONNX Runtime does not match that of PyTorch when executing test
 To recreate this report, use
 
 ```bash
-CREATE_REPRODUCTION_REPORT=1 python -m pytest test/onnx/torchlib/test_ops.py -k {short_test_name}
+CREATE_REPRODUCTION_REPORT=1 python -m pytest {test_file_path} -k {short_test_name}
 ```
 
 ### Inputs
@@ -154,11 +157,24 @@ actual = {actual}
 </p>
 </details>
 
+### ONNX Model
+
+```
+{onnx_model_text}
+```
+
 ### Full error stack
 
 ```
 {error_stack}
 ```
+
+### Environment
+
+```
+{sys_info}
+```
+
 """
 
 
@@ -167,6 +183,7 @@ def create_reproduction_report(
     onnx_model: onnx.ModelProto,
     ort_inputs: Mapping[str, Any],
     error: Exception,
+    test_file_path: str,
 ) -> None:
     # NOTE: We choose to embed the ONNX model as a string in the report instead of
     # saving it to a file because it is easier to share the report with others.
@@ -181,6 +198,7 @@ OS: {platform.platform()}
 Python version: {sys.version}
 onnx=={onnx.__version__}
 onnxruntime=={ort.__version__}
+onnxscript=={onnxscript.__version__}
 numpy=={np.__version__}
 torch=={torch.__version__}"""
     short_test_name = test_name.split(".")[-1]
@@ -199,6 +217,7 @@ torch=={torch.__version__}"""
         error_stack=error_stack,
         sys_info=sys_info,
         onnx_model_textual_representation=onnx_model_textual_representation,
+        test_file_path=test_file_path,
     )
 
     # Turn test name into a valid file name
@@ -210,11 +229,13 @@ torch=={torch.__version__}"""
 def create_mismatch_report(
     test_name: str,
     sample_num: int,
+    onnx_model: onnx.ModelProto,
     inputs,
     kwargs,
     actual,
     expected,
     error: Exception,
+    test_file_path: str,
 ) -> None:
     torch.set_printoptions(threshold=sys.maxsize)
 
@@ -228,6 +249,7 @@ def create_mismatch_report(
         tofile="expected",
         lineterm="",
     )
+    onnx_model_text = onnx.printer.to_text(onnx_model)
     input_shapes = repr(
         [
             f"Tensor<{inp.shape}, dtype={inp.dtype}>"
@@ -236,6 +258,14 @@ def create_mismatch_report(
             for inp in inputs
         ]
     )
+    sys_info = f"""\
+OS: {platform.platform()}
+Python version: {sys.version}
+onnx=={onnx.__version__}
+onnxruntime=={ort.__version__}
+onnxscript=={onnxscript.__version__}
+numpy=={np.__version__}
+torch=={torch.__version__}"""
     markdown = _MISMATCH_MARKDOWN_TEMPLATE.format(
         test_name=test_name,
         short_test_name=short_test_name,
@@ -249,6 +279,9 @@ def create_mismatch_report(
         actual_shape=actual.shape if isinstance(actual, torch.Tensor) else None,
         diff="\n".join(diff),
         error_stack=error_stack,
+        sys_info=sys_info,
+        onnx_model_text=onnx_model_text,
+        test_file_path=test_file_path,
     )
 
     markdown_file_name = f"mismatch-{short_test_name.replace('/', '-').replace(':', '-')}-{str(time.time()).replace('.', '_')}.md"

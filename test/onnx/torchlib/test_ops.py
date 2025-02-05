@@ -215,9 +215,9 @@ def run_test_output_match(
                     reference_torch_outputs = [reference_torch_outputs]
 
                 test_name = test_suite.id()
-                function_output = function_executor(test_name, reference_torch_outputs)(
-                    onnx_function, input_onnx, kwargs_onnx
-                )
+                function_output, model_proto = function_executor(
+                    test_name, reference_torch_outputs
+                )(onnx_function, input_onnx, kwargs_onnx)
                 # Finally we re-flatten everything
                 # TODO: add pytree structure comparison.
                 flattened_torch_outputs, _ = pytree.tree_flatten(torch_output)
@@ -264,11 +264,13 @@ def run_test_output_match(
                             error_reproduction.create_mismatch_report(
                                 test_name,
                                 i,
+                                model_proto,
                                 inputs,
                                 cpu_sample.kwargs,
                                 actual,
                                 expected,
                                 e,
+                                __file__,
                             )
                         if len(flattened_torch_outputs) > 1:
                             raise AssertionError(f"Output {j} mismatch") from e

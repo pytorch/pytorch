@@ -500,7 +500,7 @@ def graph_executor(
 
     def _capture_graph_and_evaluate_torch_script_evaluator(
         function: Callable, args, kwargs
-    ):
+    ) -> tuple[Any, onnx.ModelProto]:
         """Captures the graph of a function and evaluates it using TorchScriptEvaluator."""
 
         # Initialize the ONNX graph
@@ -615,9 +615,11 @@ def graph_executor(
                 # Use an individual process to run ONNX Runtime to catch segfaults
                 return _safe_ort_session_run(
                     model_proto.SerializeToString(), ort_inputs
-                )
+                ), model_proto
 
-            return _ort_session_run(model_proto.SerializeToString(), ort_inputs)
+            return _ort_session_run(
+                model_proto.SerializeToString(), ort_inputs
+            ), model_proto
         except (
             # pylint: disable=c-extension-no-member
             onnxruntime.capi.onnxruntime_pybind11_state.Fail,
@@ -629,7 +631,11 @@ def graph_executor(
         ) as e:
             if os.environ.get("CREATE_REPRODUCTION_REPORT") == "1":
                 error_reproduction.create_reproduction_report(
-                    test_name, model_proto, ort_inputs, e
+                    test_name,
+                    model_proto,
+                    ort_inputs,
+                    e,
+                    "test/onnx/torchlib/test_ops.py",
                 )
             raise RuntimeError(
                 "ONNX Runtime failed to evaluate:\n"
@@ -639,7 +645,11 @@ def graph_executor(
             if os.environ.get("CREATE_REPRODUCTION_REPORT") == "1":
                 # Save the model and inputs to a file for reproduction
                 error_reproduction.create_reproduction_report(
-                    test_name, model_proto, ort_inputs, e
+                    test_name,
+                    model_proto,
+                    ort_inputs,
+                    e,
+                    "test/onnx/torchlib/test_ops.py",
                 )
             raise OrtAbortedError(
                 "ONNX Runtime aborted:\n"
@@ -648,7 +658,11 @@ def graph_executor(
         except Exception as e:
             if os.environ.get("CREATE_REPRODUCTION_REPORT") == "1":
                 error_reproduction.create_reproduction_report(
-                    test_name, model_proto, ort_inputs, e
+                    test_name,
+                    model_proto,
+                    ort_inputs,
+                    e,
+                    "test/onnx/torchlib/test_ops.py",
                 )
             raise
 
