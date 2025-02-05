@@ -676,7 +676,7 @@ class DictTests(torch._dynamo.test_case.TestCase):
                 for key in z:
                     tot += z[key]
 
-                return tot
+                return tot + x
 
         x = torch.tensor([0])
         model = MyMod()
