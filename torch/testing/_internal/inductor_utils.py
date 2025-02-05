@@ -52,6 +52,8 @@ HAS_CUDA = torch.cuda.is_available() and HAS_TRITON
 
 HAS_XPU = torch.xpu.is_available() and HAS_TRITON
 
+HAS_MPS = torch.mps.is_available()
+
 HAS_GPU = HAS_CUDA or HAS_XPU
 
 GPU_TYPE = get_gpu_type()
@@ -110,7 +112,8 @@ def skip_windows_ci(name: str, file: str) -> None:
             sys.exit(0)
         raise unittest.SkipTest("requires sympy/functorch/filelock")
 
-requires_gpu = functools.partial(unittest.skipIf, not HAS_GPU, "requires gpu")
+# TODO: Remove HAS_MPS condition  when `HAS_GPU` includes HAS_MPS
+requires_gpu = functools.partial(unittest.skipIf, not (HAS_GPU or HAS_MPS), "requires gpu")
 requires_triton = functools.partial(unittest.skipIf, not HAS_TRITON, "requires triton")
 
 def requires_cuda_with_enough_memory(min_mem_required):
