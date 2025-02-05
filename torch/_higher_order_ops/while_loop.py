@@ -224,7 +224,7 @@ def while_loop_dense(cond_fn, body_fn, carried_inputs, additional_inputs):
 
 # WAR for https://github.com/pytorch/pytorch/issues/140322
 @while_loop_op.py_impl(CUDAGraphCaptureControlFlowOpDispatchMode)
-def cond_op_cudagraph(mode, cond_fn, body_fn, carried_inputs, additional_inputs):
+def while_loop_cudagraph(mode, cond_fn, body_fn, carried_inputs, additional_inputs):
     assert torch.cuda.is_available() and torch.cuda.is_current_stream_capturing()
     # Re-enter this mode because addition torch.cond() and
     # torch.while_loop() calls may be nested inside cond_fn or body_fn
