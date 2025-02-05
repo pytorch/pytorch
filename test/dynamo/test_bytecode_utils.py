@@ -120,10 +120,10 @@ def fn():
                 z *= 2
             if y is not None:
                 z *= 3
-            return z
+            return z * y
 
         opt_f = torch.compile(f, backend="eager", fullgraph=True)
-        self.assertEqual(opt_f(None, torch.ones(2)), 6)
+        self.assertEqual(opt_f(None, torch.ones(2)), torch.ones(2) * 6)
 
         if sys.version_info >= (3, 11):
             insts = bytecode_transformation.cleaned_instructions(f.__code__)
