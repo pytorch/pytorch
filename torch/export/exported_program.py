@@ -487,9 +487,11 @@ def _decompose_and_get_gm_with_new_signature_constants(
 
                 # aten_export_artifact.constants contains only fake script objects, we need to map them back
                 aten_export_artifact.constants = {
-                    fqn: map_fake_to_real[obj]
-                    if isinstance(obj, FakeScriptObject)
-                    else obj
+                    fqn: (
+                        map_fake_to_real[obj]
+                        if isinstance(obj, FakeScriptObject)
+                        else obj
+                    )
                     for fqn, obj in aten_export_artifact.constants.items()
                 }
 
@@ -1036,6 +1038,11 @@ class ExportedProgram:
     @compatibility(is_backward_compatible=False)
     def example_inputs(self, value):
         # This is allowed
+
+        if value is None:
+            self._example_inputs = value
+            return
+
         if not (
             isinstance(value, tuple)
             and len(value) == 2
