@@ -6252,14 +6252,16 @@ class AssertScalar(ExternKernel):
         return free_unbacked_symbols(self.scalar)
 
     def codegen(self, wrapper) -> None:  # type: ignore[no-untyped-def]
+        if not config.scalar_asserts:
+            return
         # NB: It is EXTREMELY important not to simplify the scalar under assertion here,
         # because simplify is done with respect to runtime asserts.  So if you have
         # "u0 == 0" in the runtime asserts, if you subsequently try to
         # simplify(u0 == 0), you will get True (because we've already runtime assert'ed
         # that it's true).  But we're code generating the actual runtime assert here!!
         symbol = next(iter(self.get_unbacked_symbol_uses()))
-        symbol_str = f"std::to_string({symbol})"
         if V.graph.cpp_wrapper:
+            symbol_str = f"std::to_string({symbol})"
             sizevar = V.graph.wrapper_code.codegen_cpp_sizevar(
                 self.scalar, simplify=False
             )

@@ -3905,6 +3905,12 @@ class AOTInductorTestsTemplate:
             unexpected_inputs = (torch.ones(0, device=self.device), b, c)
             compiled(*unexpected_inputs)
 
+        # Try it again without runtime assertions.
+        with config.patch({"scalar_asserts": False}):
+            AOTIRunnerUtil.run_multiple(
+                self.device, model, [example_inputs, unexpected_inputs]
+            )
+
     def test_none_args_aot_codegen(self):
         if self.device != GPU_TYPE:
             raise unittest.SkipTest("requires GPU")
