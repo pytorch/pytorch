@@ -113,14 +113,14 @@ def close_issue(num: int) -> None:
         headers=headers,
     )
     if response.status_code != 200:
-        raise Exception(f"Failed to comment on issue {num}")
+        raise RuntimeError(f"Failed to comment on issue {num}")
     response = requests.patch(
         f"https://api.github.com/repos/pytorch/pytorch/issues/{num}",
         data=json.dumps({"state": "closed"}),
         headers=headers,
     )
     if response.status_code != 201:
-        raise Exception(f"Failed to close issue {num}")
+        raise RuntimeError(f"Failed to close issue {num}")
 
 
 def check_if_exists(
@@ -199,7 +199,7 @@ if __name__ == "__main__":
             _, (num, _, _) = item
             try:
                 close_issue(num)
-            except Exception as e:
+            except RuntimeError as e:
                 print(e)
                 failed = True
         if failed:
