@@ -30,6 +30,7 @@ from ...utils._sympy.symbol import free_symbol_is_type, prefix_str, symbol_is_ty
 from ...utils._sympy.value_ranges import ValueRanges
 from .. import config, ir, metrics
 from ..codecache import code_hash, get_path, PyCodeCache
+from ..ops_handler import DefaultHandler
 from ..runtime.benchmarking import benchmarker
 from ..runtime.hints import (
     AutotuneHint,
@@ -59,7 +60,7 @@ from ..utils import (
     triton_version_uses_attrs_dict,
     upcast_compute_type,
 )
-from ..virtualized import _ops as ops, OpsHandler, ReductionType, StoreMode, V
+from ..virtualized import _ops as ops, ReductionType, StoreMode, V
 from ..wrapper_benchmark import get_kernel_category_by_source_code
 from .block_analysis import BlockPatternMatcher
 from .common import (
@@ -70,8 +71,10 @@ from .common import (
     CSEVariable,
     DeferredLine,
     IndentedBuffer,
+    InplacedBuffer,
     OpOverrides,
     PythonPrinter,
+    RemovedArg,
     SizeArg,
     TensorArg,
     WorkspaceArg,
@@ -88,6 +91,7 @@ from .simd import (
 )
 from .triton_utils import (
     config_of,
+    equal_1_arg_indices,
     non_constexpr_signature,
     should_unwrap_unspec_arg,
     signature_to_meta,
@@ -99,6 +103,7 @@ if TYPE_CHECKING:
     from typing import TypeVar
 
     from ..ir import IRNode
+    from .simd_kernel_features import SIMDKernelFeatures
 
     _T = TypeVar("_T")
 
@@ -1279,11 +1284,6 @@ class TritonOverrides(OpOverrides):
 TritonOverrides._initialize_pointwise_overrides("triton")
 
 
-# Use mypy to check protocol implemented correctly
-def _typecheck_TritonOverrides(h: TritonOverrides) -> OpsHandler[str]:
-    return h
-
-
 class TritonKernelOverrides(TritonOverrides):
     """Map element-wise ops to Triton within a TritonKernel
 
@@ -1408,11 +1408,6 @@ class TritonKernelOverrides(TritonOverrides):
         return (mantissa, exponent)
 
 
-# Use mypy to check protocol implemented correctly
-def _typecheck_TritonKernelOverrides(h: TritonKernelOverrides) -> OpsHandler[str]:
-    return h
-
-
 class HelperFunctions:
     """An ordered set of helper functions."""
 
@@ -1519,20 +1514,20 @@ class FixedTritonConfig:
         return item in self.config
 
 
-class TritonCSE(CSE):
+class TritonCSE(CSE[TritonCSEVariable, Union[str, tuple[str, str]]]):
     """
     Subclasses CSE to apply the current load mask to the cache key to avoid CSEing
     variables across separate masked blocks.
     """
 
-    def augment_key(self, cache_key: object) -> object:
+    def augment_key(self, cache_key: str) -> Union[str, tuple[str, str]]:
         if mask := V.kernel._load_mask:
             return (cache_key, mask.name)
         else:
             return cache_key
 
 
-class TritonKernel(SIMDKernel):
+class TritonKernel(SIMDKernel[TritonCSEVariable]):
     overrides = TritonKernelOverrides  # type: ignore[assignment]
     helper_functions: HelperFunctions
     kexpr: Callable[[sympy.Expr], str] = texpr
@@ -2799,7 +2794,7 @@ class TritonKernel(SIMDKernel):
         # in the global namespace
         helper = IndentedBuffer()
         helper.writeline("@triton.jit")
-        cse = CSE(prefix="", suffix="")
+        cse = CSE()
 
         args = [
             tuple(cse.namedvar(f"arg{i}_{n}", dtype=dtypes[n]) for n in range(num_args))
@@ -2808,7 +2803,7 @@ class TritonKernel(SIMDKernel):
         signature = ", ".join(str(x) for x in itertools.chain.from_iterable(args))
         helper.writeline(f"def {{name}}({signature}):")
 
-        overrides = TritonOverrides(V.MockHandler())
+        overrides = TritonOverrides()
 
         # Build a name that changes depending on fn to workaround a triton bug
         # where the combine_fn to reduce and scan is not hashed, and so different
@@ -2820,24 +2815,23 @@ class TritonKernel(SIMDKernel):
 
         dtype_handler = DtypePropagationOpsHandler()
 
-        class CSEProxy:
-            def __getattr__(self, name: str) -> Callable[..., CSEVariable]:
-                def inner(*args, **kwargs):
-                    nonlocal helper_name
-                    helper_name += f"_{name}"
+        class CSEProxy(DefaultHandler):
+            def _default(
+                self, name: str, args: tuple[Any, ...], kwargs: dict[str, Any]
+            ) -> Any:
+                nonlocal helper_name
+                helper_name += f"_{name}"
 
-                    output_dtype = getattr(
-                        dtype_handler,
-                        name,
-                    )(*args, **kwargs)
+                output_dtype = getattr(
+                    dtype_handler,
+                    name,
+                )(*args, **kwargs)
 
-                    return cse.generate(
-                        helper,
-                        getattr(overrides, name)(*args, **kwargs),
-                        dtype=output_dtype,
-                    )
-
-                return inner
+                return cse.generate(
+                    helper,
+                    getattr(overrides, name)(*args, **kwargs),
+                    dtype=output_dtype,
+                )
 
         with helper.indent(), V.set_ops_handler(CSEProxy()):
             outputs = fn(*args)
@@ -2951,7 +2945,8 @@ class TritonKernel(SIMDKernel):
             result_vars = partial_scan_vars
 
         for result_var in result_vars:
-            result_var.mask_vars = masks  # type: ignore[attr-defined]
+            assert isinstance(result_var, TritonCSEVariable)
+            result_var.mask_vars = OrderedSet(masks)
 
         return tuple(result_vars)
 
@@ -3342,9 +3337,13 @@ class TritonKernel(SIMDKernel):
                 and mutation not in V.graph.removed_buffers
                 and mutation not in self.removed_buffers
             ):
-                mutated_args.add(self.args.inplace_buffers[mutation].inner_name)
+                mutated_args.add(
+                    cast(InplacedBuffer, self.args.inplace_buffers[mutation]).inner_name
+                )
             if mutation in self.args.output_buffers:
-                mutated_args.add(self.args.output_buffers[mutation])
+                mutation_arg = self.args.output_buffers[mutation]
+                assert not isinstance(mutation_arg, RemovedArg)
+                mutated_args.add(mutation_arg)
 
         # Note: [Workspace Mutation]
         # workspace arguments are mutated, but are not marked as mutations in self.mutations
@@ -3430,14 +3429,13 @@ class TritonKernel(SIMDKernel):
 
         triton_meta["configs"] = [config_of(signature)]
 
-        if not triton_version_uses_attrs_dict():
-            # Triton compiler includes equal_to_1 args into constants even
-            # when they are not constexpr. otherwise there may be a segfault
-            # during launching the Inductor-compiled Triton kernel.
-            # https://github.com/pytorch/pytorch/issues/120478#issuecomment-1962822307
-            # https://github.com/openai/triton/blob/231efe9ed2d200be0f69a07c298e4342b08efe3d/python/triton/runtime/jit.py#L384
-            for arg_num in triton_meta["configs"][0].equal_to_1:  # type: ignore[index]
-                triton_meta["constants"][signature[arg_num].name] = 1  # type: ignore[index,union-attr]
+        # Triton compiler includes equal_to_1 args into constants even
+        # when they are not constexpr. otherwise there may be a segfault
+        # during launching the Inductor-compiled Triton kernel.
+        # https://github.com/pytorch/pytorch/issues/120478#issuecomment-1962822307
+        # https://github.com/openai/triton/blob/231efe9ed2d200be0f69a07c298e4342b08efe3d/python/triton/runtime/jit.py#L384
+        for arg_num in equal_1_arg_indices(signature):  # type: ignore[index]
+            triton_meta["constants"][signature[arg_num].name] = 1  # type: ignore[index,union-attr]
 
         self.triton_meta = triton_meta
 
@@ -4048,9 +4046,12 @@ class TritonScheduling(SIMDScheduling):
             store_cache()
             return ms, mod.__file__
 
-    def create_kernel_choices(
-        self, kernel_features, kernel_args, kernel_kwargs
-    ) -> list[SIMDKernel]:
+    def create_kernel_choices(  # type: ignore[override]
+        self,
+        kernel_features: SIMDKernelFeatures,
+        kernel_args: list[Any],
+        kernel_kwargs: dict[str, Any],
+    ) -> list[TritonKernel]:
         is_scan = kernel_features.contains_op("scan")
         is_split_scan = is_scan and any(
             node.is_split_scan() for node in kernel_features.scheduler_nodes()
@@ -4084,11 +4085,11 @@ class TritonScheduling(SIMDScheduling):
 
     def add_multi_kernel_choices(
         self,
-        kernel: SIMDKernel,
+        kernel: TritonKernel,
         kernel_args: list[Any],
         kernel_kwargs: dict[str, Any],
-    ) -> list[SIMDKernel]:
-        kernels: list[SIMDKernel] = [kernel]
+    ) -> list[TritonKernel]:
+        kernels: list[TritonKernel] = [kernel]
         if not config.triton.multi_kernel:
             return kernels
 

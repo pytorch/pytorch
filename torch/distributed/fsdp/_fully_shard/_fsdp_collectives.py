@@ -67,6 +67,7 @@ def all_gather_copy_in_meta(
 @torch.library.impl(lib, "all_gather_copy_in", "CUDA")
 @torch.library.impl(lib, "all_gather_copy_in", "XPU")
 @torch.library.impl(lib, "all_gather_copy_in", "CPU")
+@torch.library.impl(lib, "all_gather_copy_in", "MTIA")
 def all_gather_copy_in_cuda(
     all_gather_inputs: list[torch.Tensor],
     inp_split_sizes: list[int],
@@ -97,6 +98,7 @@ lib.define(
 @torch.library.impl(lib, "split_with_sizes_copy", "CUDA")
 @torch.library.impl(lib, "split_with_sizes_copy", "XPU")
 @torch.library.impl(lib, "split_with_sizes_copy", "CPU")
+@torch.library.impl(lib, "split_with_sizes_copy", "MTIA")
 def split_with_sizes_copy(
     all_gather_output: torch.Tensor,
     all_gather_input_split_sizes: list[int],
@@ -117,6 +119,7 @@ lib.define(
 @torch.library.impl(lib, "chunk_cat", "CUDA")
 @torch.library.impl(lib, "chunk_cat", "XPU")
 @torch.library.impl(lib, "chunk_cat", "CPU")
+@torch.library.impl(lib, "chunk_cat", "MTIA")
 def chunk_cat(
     tensors: list[torch.Tensor],
     dim: int,
@@ -287,35 +290,37 @@ def foreach_all_gather_copy_out(
         out = [t.view(world_size, -1).view(torch.uint8) for t in split_with_sizes_out]
     else:
         out = [t.view(world_size, -1) for t in split_with_sizes_out]
-    torch.ops.fsdp.split_with_sizes_copy(
-        all_gather_output, all_gather_input_split_sizes, dim=1, out=out
-    )
+    with torch.autograd._unsafe_preserve_version_counter(tuple(out)):
+        torch.ops.fsdp.split_with_sizes_copy(
+            all_gather_output, all_gather_input_split_sizes, dim=1, out=out
+        )
 
     for fsdp_param, param_all_gather_outputs in shard_i_copy_infos:
         # Chunk-cat from the temporary to the final all-gather output tensors
         shard_dim = fsdp_param.fsdp_placement.dim
-        for param_all_gather_output, target_all_gather_output in zip(
-            param_all_gather_outputs, fsdp_param.all_gather_outputs
+
+        with torch.autograd._unsafe_preserve_version_counter(
+            tuple(fsdp_param.all_gather_outputs)
         ):
-            padded_sharded_size = (
-                fsdp_param.padded_sharded_param_size
-                if fsdp_param.sharded_state == ShardedState.SHARDED
-                else cast(
-                    torch.Tensor, fsdp_param._sharded_post_forward_param_data
-                ).size()
-            )
-            pre_param_size = list(padded_sharded_size)
-            pre_param_size[0] *= world_size
-            chunks = torch.chunk(
-                param_all_gather_output.view(pre_param_size), world_size, dim=0
-            )
-            post_param_size = list(padded_sharded_size)
-            post_param_size[shard_dim] *= world_size
-            cat_out = target_all_gather_output.view(post_param_size)
-            torch.cat(chunks, dim=shard_dim, out=cat_out)
-            torch._C._autograd._unsafe_set_version_counter(
-                target_all_gather_output, target_all_gather_output._version - 1
-            )
+            for param_all_gather_output, target_all_gather_output in zip(
+                param_all_gather_outputs, fsdp_param.all_gather_outputs
+            ):
+                padded_sharded_size = (
+                    fsdp_param.padded_sharded_param_size
+                    if fsdp_param.sharded_state == ShardedState.SHARDED
+                    else cast(
+                        torch.Tensor, fsdp_param._sharded_post_forward_param_data
+                    ).size()
+                )
+                pre_param_size = list(padded_sharded_size)
+                pre_param_size[0] *= world_size
+                chunks = torch.chunk(
+                    param_all_gather_output.view(pre_param_size), world_size, dim=0
+                )
+                post_param_size = list(padded_sharded_size)
+                post_param_size[shard_dim] *= world_size
+                cat_out = target_all_gather_output.view(post_param_size)
+                torch.cat(chunks, dim=shard_dim, out=cat_out)
 
 
 @torch.no_grad()
@@ -354,7 +359,7 @@ def foreach_reduce(
     grad_dtype = unsharded_grads[0].dtype
     reduce_dtype = reduce_dtype or grad_dtype
     predivide_factor, postdivide_factor = _get_gradient_divide_factors(
-        reduce_scatter_group, all_reduce_group, reduce_dtype
+        reduce_scatter_group, all_reduce_group, reduce_dtype, device.type
     )
     world_size = reduce_scatter_group.size()
     for i, (fsdp_param, unsharded_grad) in enumerate(zip(fsdp_params, unsharded_grads)):
@@ -525,10 +530,11 @@ def _get_gradient_divide_factors(
     reduce_scatter_group: dist.ProcessGroup,
     all_reduce_group: Optional[dist.ProcessGroup],
     reduce_dtype: torch.dtype,
+    device_type: str = "",
 ) -> Union[tuple[None, None], tuple[float, float]]:
     # For fp32/bf16, we do not need to worry about overflow/underflow, so we
     # use NCCL's built-in division to avoid separate div kernels
-    if reduce_dtype in (torch.float32, torch.bfloat16):
+    if reduce_dtype in (torch.float32, torch.bfloat16) and device_type != "mtia":
         return None, None
     data_parallel_size = reduce_scatter_group.size()
     if all_reduce_group is not None:
