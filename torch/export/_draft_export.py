@@ -195,6 +195,8 @@ class CaptureStructuredTrace(logging.Handler):
         ]
         if len(possible_lazy_trace_handlers) == 0:
             self.lazy_trace_handler = torch._logging._internal.LazyTraceHandler(None)
+            torch._logging._internal._track_handler(self.lazy_trace_handler)
+            self.lazy_trace_handler.setFormatter(torch._logging._internal.TorchLogsFormatter(trace=True))
             self.logger.addHandler(self.lazy_trace_handler)
         else:
             self.lazy_trace_handler = possible_lazy_trace_handlers[0]
