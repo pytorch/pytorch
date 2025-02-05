@@ -85,6 +85,7 @@ jobs:
         with:
           role-to-assume: arn:aws:iam::308535385114:role/gha_workflow_s3_ossci_linux_windows_read_write
           aws-region: us-east-1
+          role-duration-seconds: 18000
       - name: Git checkout PyTorch
         uses: actions/checkout@v4
         with:
