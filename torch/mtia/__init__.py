@@ -66,7 +66,7 @@ def _lazy_init() -> None:
         if not _is_compiled():
             raise AssertionError(
                 "Torch not compiled with MTIA enabled. "
-                "Ensure you have `import mtia.host_runtime.torch_mtia` in your python "
+                "Ensure you have `import mtia.host_runtime.torch_mtia.dynamic_library` in your python "
                 "src file and include `//mtia/host_runtime/torch_mtia:torch_mtia` as "
                 "your target dependency!"
             )
@@ -119,7 +119,8 @@ def synchronize(device: Optional[_device_t] = None) -> None:
 
 def device_count() -> int:
     r"""Return the number of MTIA devices available."""
-    return torch._C._accelerator_hooks_device_count()
+    # TODO: Update _accelerator_hooks_device_count to abstract a MTIA device count API
+    return torch._C._mtia_getDeviceCount()
 
 
 def current_device() -> int:

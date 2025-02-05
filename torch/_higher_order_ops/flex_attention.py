@@ -421,7 +421,7 @@ def flex_attention_functionalize(
         pre_dispatch = hasattr(ctx, "mode") and ctx.mode.pre_dispatch
         with TransformGetItemToIndex():
             mutates = _has_potential_branch_input_mutation(
-                functional_score_mod, example_vals, pre_dispatch
+                score_mod, example_vals, pre_dispatch
             )
         # The only care about mutations of existing buffers since we can't replay these.
         # However, we can just error if anything is detected

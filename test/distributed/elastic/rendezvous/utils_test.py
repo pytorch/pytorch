@@ -10,7 +10,6 @@ import socket
 import threading
 import time
 from datetime import timedelta
-from typing import List
 from unittest import TestCase
 from unittest.mock import patch
 
@@ -350,7 +349,7 @@ class PeriodicTimerTest(TestCase):
         call_interval = 0.2
 
         # Keep the log of intervals between each consecutive call.
-        actual_call_intervals: List[float] = []
+        actual_call_intervals: list[float] = []
 
         # Keep the number of times the function was called.
         call_count = 0

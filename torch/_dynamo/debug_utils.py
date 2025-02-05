@@ -86,6 +86,7 @@ python_binary(
     compile = False,
     deps = [
         "//caffe2:torch",
+        "//caffe2:libtorch",
         "//caffe2/functorch:functorch",
         "//triton:triton",
         "{cur_target}",
