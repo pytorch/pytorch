@@ -3,6 +3,7 @@
 #include <torch/csrc/dynamo/cpython_includes.h>
 #include <torch/csrc/dynamo/debug_macros.h>
 #include <torch/csrc/dynamo/eval_frame.h>
+#include <torch/csrc/dynamo/eval_frame_cpp.h>
 #include <torch/csrc/dynamo/framelocals_mapping.h>
 #include <torch/csrc/utils/python_compat.h>
 
@@ -10,7 +11,7 @@ const char* cache_lookup_profiler_str = "TorchDynamo Cache Lookup";
 
 // Remember to update the type signature for DynamoCallbackFn.__call__ in
 // torch/_dynamo/types.py if this function's signature changes.
-py::object dynamo_call_callback(
+static py::object dynamo_call_callback(
     py::handle callback,
     THP_EVAL_API_FRAME_OBJECT* _frame,
     FrameLocalsMapping* locals,

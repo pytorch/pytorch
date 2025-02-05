@@ -53,12 +53,6 @@ PyObject* dynamo_eval_custom_code(
     const char* trace_annotation,
     int throw_flag);
 
-PyObject* dynamo__custom_eval_frame(
-    PyThreadState* tstate,
-    THP_EVAL_API_FRAME_OBJECT* frame,
-    int throw_flag,
-    PyObject* callback_py);
-
 #ifdef __cplusplus
 
 } // extern "C"

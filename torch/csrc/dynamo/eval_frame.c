@@ -7,6 +7,8 @@
 #include <torch/csrc/dynamo/cpython_includes.h>
 #include <torch/csrc/dynamo/debug_macros.h>
 #include <torch/csrc/dynamo/eval_frame.h>
+#include <torch/csrc/dynamo/eval_frame_cpp.h>
+#include <torch/csrc/utils/python_compat.h>
 
 PyObject* guard_error_hook = NULL;
 
