@@ -2606,6 +2606,18 @@ class GraphModule(torch.nn.Module):
         self.assertEqual(f(torch.ones(3, 3)), opt_f(torch.ones(3, 3)))
         self.assertEqual(cnts.frame_count, 3)
 
+    @make_test
+    def test_getattr(x):
+        def fn(y):
+            return y + 1
+
+        try:
+            _exit = type(fn).__exit__
+        except AttributeError:
+            return x.sin()
+        else:
+            return x.cos()
+
     def test_two_point_iter(self):
         def fn(x, y):
             it = map(lambda n: n + 1, range(6))
