@@ -11368,6 +11368,28 @@ class CommonTemplate:
         # No error
         f(x)
 
+    @torch._dynamo.config.patch(capture_scalar_outputs=True)
+    @torch._inductor.config.patch(implicit_fallbacks=True)
+    def test_custom_op_return_unbacked_symint(self):
+        @torch.library.custom_op(
+            "test_unbacked_symints::ret_unbacked_symint", mutates_args={}
+        )
+        def ret_unbacked_symint(x: torch.Tensor) -> int:
+            s = x.sum().to(torch.int64)
+            if s > 0:
+                return -s.item()
+            return s.item()
+
+        @ret_unbacked_symint.register_fake
+        def fake_impl(x):
+            return x.sum().to(torch.int64).item()
+
+        @torch.compile(fullgraph=True)
+        def f(x):
+            return torch.ops.test_unbacked_symints.ret_unbacked_symint(x)
+
+        f(torch.randn(3, 4))
+
     @requires_gpu()
     @torch._inductor.config.patch("layout_optimization", True)
     @torch._inductor.config.patch("keep_output_stride", False)

@@ -687,15 +687,18 @@ class BaseSchedulerNode:
                     users = self.scheduler.name_to_buf[buf.get_name()].users
                     tot = 0
                     for user in users:
-                        assert isinstance(user.node, BaseSchedulerNode)
-                        if isinstance(user.node.node, MultiOutput):
-                            for sched_buf in user.node.get_outputs():
-                                tot += get_buf_bytes(sched_buf.node)
-                        else:
-                            # Buf is a MultiOutputLayout but not all of its
-                            # users are MultiOutputs...
-                            # TODO: Figure out what's going on
-                            return 0
+                        # Custom ops can return a mixed output of tensor and ints.
+                        # This could happen when the custom op return symints,
+                        assert isinstance(user.node, (BaseSchedulerNode, OutputNode))
+                        if isinstance(user.node, BaseSchedulerNode):
+                            if isinstance(user.node.node, MultiOutput):
+                                for sched_buf in user.node.get_outputs():
+                                    tot += get_buf_bytes(sched_buf.node)
+                            else:
+                                # Buf is a MultiOutputLayout but not all of its
+                                # users are MultiOutputs...
+                                # TODO: Figure out what's going on
+                                return 0
                     return tot
                 elif isinstance(buf.layout, ir.NoneLayout):
                     return sum(
