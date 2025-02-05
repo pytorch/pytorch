@@ -331,6 +331,7 @@ def mps_ops_modifier(ops):
         'select',
         'sgn',
         'slice',
+        'special.zeta',
         'split',
         'split_with_sizes',
         'split_with_sizes_copy',
@@ -494,7 +495,6 @@ def mps_ops_modifier(ops):
         'vstack',
         'where',
         'byte',
-        'zeta',
     }
     # Those ops worked on MacOS12, but broken on MacOS13, see https://github.com/pytorch/pytorch/issues/85758
     MACOS_12_3_XFAILLIST = {
@@ -839,6 +839,7 @@ def mps_ops_modifier(ops):
         'sigmoid': [torch.int64],
         'atan2': [torch.int64],
         'angle': [torch.int64],
+        'special.zeta': [torch.int64],
 
         # GEMM on MPS is not supported for integral types
         'nn.functional.linear': [torch.int16, torch.int32, torch.int64, torch.uint8, torch.int8],
