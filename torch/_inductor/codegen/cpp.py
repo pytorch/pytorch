@@ -22,7 +22,7 @@ from torch.utils._sympy.functions import CeilDiv, FloorDiv, ModularIndexing
 from torch.utils._sympy.symbol import free_symbol_is_type, symbol_is_type, SymT
 
 from ..._dynamo.utils import counters
-from .. import codecache, config, cpp_builder, cpu_vec_isa, ir, metrics
+from .. import config, cpp_builder, cpu_vec_isa, ir, metrics
 from ..loop_body import LoopBody
 from ..scheduler import (
     BaseSchedulerNode,
@@ -1140,9 +1140,7 @@ class CppVecOverrides(CppOverrides):
                 else:
                     # fallback to scalar ops
                     scalar_ops = super(CppVecOverrides, self)
-                    scalar_func = getattr(
-                        scalar_ops, func.__name__, scalar_ops.__getattr__(func.__name__)  # type: ignore[attr-defined]
-                    )
+                    scalar_func = getattr(scalar_ops, func.__name__)
                     assert scalar_func is not None
                     return scalar_func(*args, **kwargs)
 
@@ -1646,8 +1644,11 @@ class CppVecOverrides(CppOverrides):
                     assert isinstance(other_vec_var, CppCSEVariable), other_vec_var
                     body_vec_var.dtype = dtype
                     other_vec_var.dtype = dtype
+                    overrides: type[
+                        Union[CppOverrides, CppVecOverrides]
+                    ] = V.kernel.overrides  # type: ignore[has-type]
                     code.writeline(
-                        f"return {V.kernel.overrides.where(new_mask, body_vec_var, other_vec_var)};"
+                        f"return {overrides.where(new_mask, body_vec_var, other_vec_var)};"
                     )
             code.writeline("()")
             csevar = V.kernel.cse.generate(
@@ -1748,7 +1749,7 @@ class CppVecOverrides(CppOverrides):
         return mantissa, exponent
 
     @classmethod
-    def scalarize(cls, scalar_func):
+    def _scalarize(cls, scalar_func):
         def inner(*args, **kwargs):
             assert not kwargs
             kernel = V.kernel
@@ -1810,11 +1811,10 @@ class CppVecOverrides(CppOverrides):
 
     @classmethod
     def _initialize_scalarize(cls):
+        vec_vars = vars(CppVecOverrides)
         for name, method in vars(CppOverrides).items():
-            if getattr(method, "__class__", None) == staticmethod and name not in vars(
-                CppVecOverrides
-            ):
-                func = cls.scalarize(method.__func__)
+            if isinstance(method, staticmethod) and name not in vec_vars:
+                func = cls._scalarize(method.__func__)
                 func.__name__ = name
                 setattr(cls, name, staticmethod(func))
 
@@ -5038,7 +5038,7 @@ class KernelGroup:
         ]
         if enable_kernel_profile:
             code.writelines(["#include <ATen/record_function.h>"])
-        code.writeline(codecache.cpp_prefix())
+        code.writeline("#include <torch/csrc/inductor/cpp_prefix.h>")
 
         # 2. Function definition
         kernel_decl_name = str(Placeholder.KERNEL_NAME) if name is None else name
