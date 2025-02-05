@@ -1,6 +1,6 @@
 import dataclasses
 import itertools
-from typing import Any, Optional, TYPE_CHECKING
+from typing import Any, Callable, Optional, TYPE_CHECKING
 
 import sympy
 
@@ -9,7 +9,6 @@ from torch._inductor import config
 from torch._inductor.dtype_propagation import DtypePropagationOpsHandler
 from torch._inductor.index_propagation import SymPyOps, TypedExpr
 
-from .ops_handler import DefaultHandler, OpsHandler
 from .virtualized import StoreMode, V
 
 
@@ -21,7 +20,7 @@ def construct_symbol(count: int, dtype: torch.dtype) -> sympy.Symbol:
     return sympy.Symbol(f"unknown_{count}")
 
 
-class PreservesZeros(SymPyOps, DefaultHandler):
+class PreservesZeros(SymPyOps):
     """
     For prologue kernels where the loads are masked, does the final store of this kernel preserve
     the zeros.
@@ -55,20 +54,18 @@ class PreservesZeros(SymPyOps, DefaultHandler):
         self = V.get_ops_handler()
         return construct_symbol(next(self.count), torch.int32)
 
-    def _default(self, name: str, args: tuple[Any, ...], kwargs: dict[str, Any]) -> Any:
+    def __getattr__(self, name: str) -> Callable[..., Any]:
         from torch._inductor.codegen.common import OpDecompositions
 
-        if hasattr(OpDecompositions, name):
-            return getattr(OpDecompositions, name)(*args, **kwargs).value
+        def inner(*args: Any, **kwargs: Any) -> TypedExpr:
+            if hasattr(OpDecompositions, name):
+                return getattr(OpDecompositions, name)(*args, **kwargs).value
 
-        dtype = getattr(self.dtype_prop, name)(*args, **kwargs)
-        return TypedExpr(construct_symbol(next(self.count), dtype), dtype)
+            nonlocal self
+            dtype = getattr(self.dtype_prop, name)(*args, **kwargs)
+            return TypedExpr(construct_symbol(next(self.count), dtype), dtype)
 
-
-if TYPE_CHECKING:
-
-    class _typecheck_PreservesZeros(PreservesZeros, OpsHandler[Any]):
-        pass
+        return inner
 
 
 def prologue_preserves_zero_mask(prologue: "SchedulerNode") -> bool:
@@ -91,7 +88,7 @@ class DTypeContainer:
     is_scalar: bool = False
 
 
-class RecordLowPrecisionOps(DefaultHandler):
+class RecordLowPrecisionOps:
     def __init__(self) -> None:
         self.low_precision_numeric_op = False
         self.dtype_prop = DtypePropagationOpsHandler()
@@ -114,31 +111,28 @@ class RecordLowPrecisionOps(DefaultHandler):
     def indirect_indexing(*args: Any, **kwargs: Any) -> sympy.Expr:
         return sympy.S.Zero
 
-    def _default(self, name: str, args: tuple[Any, ...], kwargs: dict[str, Any]) -> Any:
-        out_dtype = getattr(self.dtype_prop, name)(*args, **kwargs)
-        out = DTypeContainer(out_dtype, is_scalar=(name == "constant"))
-        if name == "constant":
-            out = DTypeContainer(torch.float, is_scalar=True)
+    def __getattr__(self, name: str) -> Callable[..., Any]:
+        def low_prec_float(dtype: torch.dtype) -> bool:
+            return dtype.is_floating_point and dtype.itemsize < 4
 
-        uses_low_prec = any(
-            isinstance(dtype_cont, DTypeContainer) and low_prec_float(dtype_cont.dtype)
-            for dtype_cont in itertools.chain((out,), args, kwargs.values())
-        )
+        def inner(*args: Any, **kwargs: Any) -> DTypeContainer:
+            out_dtype = getattr(self.dtype_prop, name)(*args, **kwargs)
+            out = DTypeContainer(out_dtype, is_scalar=(name == "constant"))
+            if name == "constant":
+                out = DTypeContainer(torch.float, is_scalar=True)
 
-        if uses_low_prec and name not in self.non_numeric_ops:
-            self.low_precision_numeric_op = True
+            uses_low_prec = any(
+                isinstance(dtype_cont, DTypeContainer)
+                and low_prec_float(dtype_cont.dtype)
+                for dtype_cont in itertools.chain((out,), args, kwargs.values())
+            )
 
-        return out
+            if uses_low_prec and name not in self.non_numeric_ops:
+                self.low_precision_numeric_op = True
 
+            return out
 
-if TYPE_CHECKING:
-
-    class _typecheck_RecordLowPrecisionOps(RecordLowPrecisionOps, OpsHandler[Any]):
-        pass
-
-
-def low_prec_float(dtype: torch.dtype) -> bool:
-    return dtype.is_floating_point and dtype.itemsize < 4
+        return inner
 
 
 def can_codegen_without_upcasts(

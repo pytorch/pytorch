@@ -41,7 +41,7 @@ from torch.utils._sympy.value_ranges import bound_sympy, ValueRangeAnalysis, Val
 
 from .. import config, metrics
 from ..dtype_propagation import DtypePropagationOpsHandler
-from ..ops_handler import BasicMathOps, DefaultHandler
+from ..ops_handler import BasicMathOps
 from ..utils import (
     boolean_ops,
     DeferredLineBase,
@@ -2253,7 +2253,7 @@ class KernelTemplate:
         raise NotImplementedError
 
 
-class CSEProxy(DefaultHandler):
+class CSEProxy:
     name = "CSEProxy"
 
     def __init__(self, kernel: Kernel[Any], parent_handler: OpsHandler[Any]):
@@ -2262,66 +2262,69 @@ class CSEProxy(DefaultHandler):
         self.kernel = kernel
         self.parent_handler = parent_handler
 
-    def _default(self, name: str, args: tuple[Any, ...], kwargs: dict[str, Any]) -> Any:
-        bounds = self._bound_variable(name, *args, **kwargs)
+    def __getattr__(self, name: str) -> Callable[..., CSEVariable]:  # type: ignore[misc]
+        def inner(*args: Any, **kwargs: Any) -> CSEVariable:
+            bounds = self._bound_variable(name, *args, **kwargs)
 
-        value = getattr(self.parent_handler, name)(*args, **kwargs)  # type: ignore[has-type]
-        dtype_handler = DtypePropagationOpsHandler()
+            value = getattr(self.parent_handler, name)(*args, **kwargs)  # type: ignore[has-type]
+            dtype_handler = DtypePropagationOpsHandler()
 
-        output_idx = 0
+            output_idx = 0
 
-        def do_cse(v: str) -> CSEVariable:
-            # cpp backend doesnt set current device - TODO: fix
-            if V.graph.current_device is not None:
-                device_str = V.graph.get_current_device_or_throw().type
-                triton_backend = (
-                    config.cpu_backend == "triton"
-                    if device_str == "cpu"
-                    else config.cuda_backend == "triton"
-                    if device_str != "mps"
-                    else False
-                )
-            else:
-                triton_backend = False
-
-            # only triton backend tracks dtype currently
-            if triton_backend:
-                if name == "masked":
-                    output_dtype = value.dtype
+            def do_cse(v: str) -> CSEVariable:
+                # cpp backend doesnt set current device - TODO: fix
+                if V.graph.current_device is not None:
+                    device_str = V.graph.get_current_device_or_throw().type
+                    triton_backend = (
+                        config.cpu_backend == "triton"
+                        if device_str == "cpu"
+                        else config.cuda_backend == "triton"
+                        if device_str != "mps"
+                        else False
+                    )
                 else:
-                    output_dtype = getattr(
-                        dtype_handler,
-                        name,
-                    )(*args, **kwargs)
-            else:
-                # cpp backend doesnt track dtype yet
-                output_dtype = None
+                    triton_backend = False
 
-            csevar = V.kernel.cse.generate(
-                V.kernel.compute,
-                v,
-                bounds=bounds,
-                dtype=output_dtype,
-            )
+                # only triton backend tracks dtype currently
+                if triton_backend:
+                    if name == "masked":
+                        output_dtype = value.dtype
+                    else:
+                        output_dtype = getattr(
+                            dtype_handler,
+                            name,
+                        )(*args, **kwargs)
+                else:
+                    # cpp backend doesnt track dtype yet
+                    output_dtype = None
 
-            nonlocal output_idx
-            if config.test_configs.runtime_triton_dtype_assert and triton_backend:
-                from torch._inductor.codegen.triton import triton_type
-
-                # we tree_map over the output, so we need to fetch corresponding dtype
-                if isinstance(output_dtype, (list, tuple)):
-                    output_dtype = output_dtype[output_idx]
-
-                V.kernel.compute.writeline(
-                    f"tl.static_assert({csevar}.dtype == {triton_type(output_dtype)})"
+                csevar = V.kernel.cse.generate(
+                    V.kernel.compute,
+                    v,
+                    bounds=bounds,
+                    dtype=output_dtype,
                 )
-            output_idx += 1
 
-            csevar.update_on_args(name, args, kwargs)
+                nonlocal output_idx
+                if config.test_configs.runtime_triton_dtype_assert and triton_backend:
+                    from torch._inductor.codegen.triton import triton_type
 
-            return csevar
+                    # we tree_map over the output, so we need to fetch corresponding dtype
+                    if isinstance(output_dtype, (list, tuple)):
+                        output_dtype = output_dtype[output_idx]
 
-        return pytree.tree_map(do_cse, value)
+                    V.kernel.compute.writeline(
+                        f"tl.static_assert({csevar}.dtype == {triton_type(output_dtype)})"
+                    )
+                output_idx += 1
+
+                csevar.update_on_args(name, args, kwargs)
+
+                return csevar
+
+            return pytree.tree_map(do_cse, value)
+
+        return inner
 
     def _bound_variable(self, name: str, *args: Any, **kwargs: Any) -> ValueRanges[Any]:
         """
