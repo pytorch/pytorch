@@ -501,7 +501,7 @@ def _size_of(node: fx.Node) -> int:
             return object_nbytes(val)
 
         raise RuntimeError(f"Unknown metadata type {type(val)} on node {node}")
-    if node.op == "get_attr":
+    if node.op == "get_attr" or node.target is torch.ops.aten._assert_scalar.default:
         return 0
     raise RuntimeError(
         f"Node {node} didn't have `val` metadata; we should always have `val` metadata on the nodes."
@@ -1091,10 +1091,12 @@ def solve_min_cut(
                 if node_info.is_required_fw(user):
                     if node_info.get_fw_order(user) > max_range:
                         continue
-                    heapq.heappush(
-                        sorted_nodes,
-                        (node_info.get_fw_order(user), user, is_fusible(node, user)),
-                    )
+                    val = (node_info.get_fw_order(user), user, is_fusible(node, user))
+                    if val not in sorted_nodes:
+                        heapq.heappush(
+                            sorted_nodes,
+                            val,
+                        )
         return max_range
 
     if min_cut_options.ban_if_used_far_apart:
