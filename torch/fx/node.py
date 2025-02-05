@@ -915,22 +915,12 @@ def map_aggregate(a: ArgumentT, fn: Callable[[Argument], Argument]) -> ArgumentT
     if isinstance(a, tuple):
         it = (map_aggregate(elem, fn) for elem in a)
         result = type(a)(*it) if hasattr(a, "_fields") else tuple(it)
-
-        # TODO(rec): This code is fragile. Using _dynamo.utils.is_namedtuple() instead
-        # of the `hasattr` hack results in test breakage.
-        #
-        # Using `type(a)` instead of `tuple` also breaks tests, which means that if
-        # `ArgumentT` is a class derived from `tuple` that isn't a `namedtuple`
-        # or `NamedTuple`, its type gets thrown away.
     elif isinstance(a, list):
-        # Need to create the intermediate list or dynamo can't trace it.
         result = immutable_list([map_aggregate(elem, fn) for elem in a])
     elif isinstance(a, dict):
-        # Can't use a dict comprehension either.
-        d: dict[str, Any] = {}
+        result = immutable_dict()
         for k, v in a.items():
-            d[k] = map_aggregate(v, fn)
-        result = immutable_dict(d)
+            dict.__setitem__(result, k, map_aggregate(v, fn))  # type: ignore[index]
     elif isinstance(a, slice):
         result = slice(
             map_aggregate(a.start, fn),
