@@ -569,7 +569,11 @@ class SymNode:
         # TODO: use the file/line for some useful diagnostic on why a
         # guard occurred
         r = self.shape_env.evaluate_expr(
-            self.expr, self.hint, fx_node=self.fx_node, size_oblivious=True
+            self.expr,
+            self.hint,
+            fx_node=self.fx_node,
+            size_oblivious=True,
+            expr_sym_node=self,
         )
         try:
             return bool(r)
@@ -1225,6 +1229,94 @@ def _make_node_magic(method, func):
     else:
         method_attr = method
 
+    def uninteresting_files() -> Set[str]:
+        import inspect
+
+        import torch
+
+        mods = [
+            torch._dynamo.eval_frame,
+            torch._dynamo.utils,
+            torch.fx.experimental.sym_node,
+            torch,
+        ]
+        import torch._dynamo.guards
+
+        return (
+            {inspect.getfile(m) for m in mods}
+            | torch._dynamo.guards.uninteresting_files()
+            | {"<string>"}
+        )
+
+    def capture_provenance(fn):
+        @functools.wraps(fn)
+        def wrapper(self, other):
+            result = fn(self, other)
+            if torch._logging._internal.GET_DTRACE_STRUCTURED:
+                floc = None
+                user_stack = None
+                user_top_stack = None
+                user_bottom_stack = None
+
+                if len(TracingContext.extract_stack()) > 0:
+                    user_stack = TracingContext.extract_stack()
+                    user_top_stack = format_frame(user_stack[0], line=True)
+                    user_bottom_stack = format_frame(user_stack[-1], line=True)
+
+                frame = inspect.currentframe()
+                try:
+                    while frame is not None:
+                        if (
+                            floc is None
+                            and frame.f_code.co_filename not in uninteresting_files()
+                        ):
+                            floc = format_frame(
+                                traceback.FrameSummary(
+                                    frame.f_code.co_filename,
+                                    frame.f_lineno,
+                                    frame.f_code.co_name,
+                                ),
+                                line=True,
+                            )
+                        if frame.f_back is None and user_top_stack is None:
+                            user_top_stack = format_frame(
+                                traceback.FrameSummary(
+                                    frame.f_code.co_filename,
+                                    frame.f_lineno,
+                                    frame.f_code.co_name,
+                                ),
+                                line=True,
+                            )
+                            break
+                        frame = frame.f_back
+                finally:
+                    del frame
+
+                def get_id(sym_node) -> Optional[int]:
+                    # We don't want to return an ID if the input is a constant
+                    return None if sym_node.constant is not None else id(sym_node)
+
+                dtrace_structured(
+                    "expression_created",
+                    metadata_fn=lambda: {
+                        "method": method,
+                        "result": str(result),
+                        "result_id": id(result),
+                        "arguments": [str(self), str(other)],
+                        "arguments_id": [
+                            i for i in (get_id(self), get_id(other)) if i is not None
+                        ],
+                        "user_bottom_stack": str(user_bottom_stack),
+                        "user_top_stack": str(user_top_stack),
+                        "floc": str(floc),
+                    },
+                )
+
+            return result
+
+        return wrapper
+
+    # @capture_provenance
     def binary_magic_impl(self, other):
         from torch.fx.experimental.proxy_tensor import (
             get_proxy_mode,
@@ -1652,86 +1744,6 @@ def _make_user_magic(method, user_type):
             return (method_to_operator(method))(get_constant(self))
         return wrap_node(getattr(self.node, method_attr)())
 
-    def uninteresting_files() -> Set[str]:
-        import inspect
-
-        import torch
-
-        mods = [
-            torch._dynamo.eval_frame,
-            torch._dynamo.utils,
-            torch.fx.experimental.sym_node,
-            torch,
-        ]
-        import torch._dynamo.guards
-
-        return (
-            {inspect.getfile(m) for m in mods}
-            | torch._dynamo.guards.uninteresting_files()
-            | {"<string>"}
-        )
-
-    def capture_provenance(fn):
-        @functools.wraps(fn)
-        def wrapper(self, other):
-            result = fn(self, other)
-            if torch._logging._internal.GET_DTRACE_STRUCTURED:
-                floc = None
-                user_stack = None
-                user_top_stack = None
-                user_bottom_stack = None
-
-                if len(TracingContext.extract_stack()) > 0:
-                    user_stack = TracingContext.extract_stack()
-                    user_top_stack = format_frame(user_stack[0], line=True)
-                    user_bottom_stack = format_frame(user_stack[-1], line=True)
-
-                frame = inspect.currentframe()
-                try:
-                    while frame is not None:
-                        if (
-                            floc is None
-                            and frame.f_code.co_filename not in uninteresting_files()
-                        ):
-                            floc = format_frame(
-                                traceback.FrameSummary(
-                                    frame.f_code.co_filename,
-                                    frame.f_lineno,
-                                    frame.f_code.co_name,
-                                ),
-                                line=True,
-                            )
-                        if frame.f_back is None and user_top_stack is None:
-                            user_top_stack = format_frame(
-                                traceback.FrameSummary(
-                                    frame.f_code.co_filename,
-                                    frame.f_lineno,
-                                    frame.f_code.co_name,
-                                ),
-                                line=True,
-                            )
-                            break
-                        frame = frame.f_back
-                finally:
-                    del frame
-
-                dtrace_structured(
-                    "expression_created",
-                    metadata_fn=lambda: {
-                        "method": method,
-                        "arguments": [str(self), str(other)],
-                        "result": str(result),
-                        "user_bottom_stack": str(user_bottom_stack),
-                        "user_top_stack": str(user_top_stack),
-                        "floc": str(floc),
-                    },
-                )
-
-            return result
-
-        return wrapper
-
-    @capture_provenance
     def binary_magic_impl(self, other):
         if not isinstance(other, (int, float, bool, SymInt, SymFloat, SymBool)):
             return NotImplemented
@@ -1749,7 +1761,6 @@ def _make_user_magic(method, user_type):
         ret = wrap_node(getattr(self.node, method_attr)(other_node))
         return get_constant(ret) if is_constant(ret) else ret
 
-    @capture_provenance
     def rbinary_magic_impl(self, other):
         if not isinstance(other, (int, float, bool, SymInt, SymFloat, SymBool)):
             return NotImplemented
