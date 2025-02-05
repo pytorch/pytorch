@@ -1,14 +1,16 @@
 #pragma once
 
 /// Defines the Float8_e8m0fnu type (8-bit floating-point) including
-/// conversions to standard C types 
+/// conversions to standard C types
 /// Binary configuration :
 /// eeeeeeee
 /// no sign bits
 /// 8 exponent bits
 /// no mantissa bits
 ///
-/// This is the E8M0 dtype from the OCP MX format spec (https://www.opencompute.org/documents/ocp-microscaling-formats-mx-v1-0-spec-final-pdf, Section 5.4.1)
+/// This is the E8M0 dtype from the OCP MX format spec
+/// (https://www.opencompute.org/documents/ocp-microscaling-formats-mx-v1-0-spec-final-pdf,
+/// Section 5.4.1)
 
 #include <c10/macros/Export.h>
 #include <c10/macros/Macros.h>
@@ -34,11 +36,10 @@ namespace detail {
  * 8-bit floating-point number in fp8 e8m0fnu format, in bit representation.
  */
 inline C10_HOST_DEVICE uint8_t fp8e8m0fnu_from_fp32_value(float f) {
-
-  // The current iteration of this code optimizes for readability in order to help
-  // build the first numerical test suite.
-  // TODO(before land): after we have the tests and the PR bakes for a bit, rewrite 
-  // this for performance
+  // The current iteration of this code optimizes for readability in order to
+  // help build the first numerical test suite.
+  // TODO(before land): after we have the tests and the PR bakes for a bit,
+  // rewrite this for performance
 
   uint32_t f_bits = c10::detail::fp32_to_bits(f);
 
@@ -50,16 +51,16 @@ inline C10_HOST_DEVICE uint8_t fp8e8m0fnu_from_fp32_value(float f) {
     return exponent;
   }
 
-  // next, we use guard, round, sticky bits and the LSB to implement round to nearest,
-  // with ties to even
-  
+  // next, we use guard, round, sticky bits and the LSB to implement round to
+  // nearest, with ties to even
+
   // guard bit - bit 23, or 22 zero-indexed
   uint8_t g = (f_bits & 0x400000) > 0;
   // round bit - bit 22, or 21 zero-indexed
   uint8_t r = (f_bits & 0x200000) > 0;
   // sticky bit - bits 21 to 1, or 20 to 0 zero-indexed
   uint8_t s = (f_bits & 0x1FFFFF) > 0;
-  // in casting to e8m0, LSB is the implied mantissa bit. It equals to 0 if the 
+  // in casting to e8m0, LSB is the implied mantissa bit. It equals to 0 if the
   // original float32 is denormal, and to 1 if the original float32 is normal.
   uint8_t lsb = exponent > 0;
 
@@ -82,8 +83,8 @@ inline C10_HOST_DEVICE uint8_t fp8e8m0fnu_from_fp32_value(float f) {
 
   if (round_up) {
     // adjust exponent
-    // note that if exponent was 255 we would have already returned earlier, so we know
-    // we can add one safely without running out of bounds
+    // note that if exponent was 255 we would have already returned earlier, so
+    // we know we can add one safely without running out of bounds
     exponent++;
   }
 

@@ -104,7 +104,7 @@ struct dummy_int1_7_t {};
   _(c10::dummy_int1_7_t<5>, Int5) /* 41 */               \
   _(c10::dummy_int1_7_t<6>, Int6) /* 42 */               \
   _(c10::dummy_int1_7_t<7>, Int7) /* 43 */               \
-  _(c10::Float8_e8m0fnu, Float8_e8m0fnu) /* 44 */      
+  _(c10::Float8_e8m0fnu, Float8_e8m0fnu) /* 44 */
 
 // If you want to support ComplexHalf for real, add ComplexHalf
 // into this macro (and change the name).  But beware: convert()

@@ -1,9 +1,9 @@
 #pragma once
 
 #include <c10/macros/Macros.h>
+#include <c10/util/floating_point_utils.h>
 #include <cstring>
 #include <limits>
-#include <c10/util/floating_point_utils.h>
 
 C10_CLANG_DIAGNOSTIC_PUSH()
 #if C10_CLANG_HAS_WARNING("-Wimplicit-int-float-conversion")
@@ -20,7 +20,6 @@ inline C10_HOST_DEVICE Float8_e8m0fnu::Float8_e8m0fnu(float value)
 /// Implicit conversions
 
 inline C10_HOST_DEVICE Float8_e8m0fnu::operator float() const {
-
   // if exponent is zero, need to special case to return 2^-127 instead of zero
   if (x == 0) {
     return c10::detail::fp32_from_bits(0x00400000);
@@ -31,20 +30,20 @@ inline C10_HOST_DEVICE Float8_e8m0fnu::operator float() const {
     return c10::detail::fp32_from_bits(0x7f800001);
   }
 
-  // TODO(before land): do we care about no-control-flow tricks such as below in 
+  // TODO(before land): do we care about no-control-flow tricks such as below in
   // the context of this function?
   // if exponent is 255, need to set any mantissa bit to properly represent NaN
   // nan_signal_bit is 1 if exponent was 255 and 0 otherwise
-  
+
   // uint16_t nan_signal_bit = (x + 1) >> 8;
-  
+
   // if exponent is 255, we add one to create a valid NaN
   // if exponent is not 255, we add zero which is a no-op
-  
+
   // res = res + static_cast<uint8_t>(nan_signal_bit);
 
   // leave sign at 0, set the exponent bits, leave stored mantissa at 0
-  uint32_t res =  x << 23;
+  uint32_t res = x << 23;
 
   return c10::detail::fp32_from_bits(res);
 }
@@ -80,7 +79,7 @@ class numeric_limits<c10::Float8_e8m0fnu> {
   static constexpr bool is_modulo = false;
   static constexpr int digits = 1;
   static constexpr int digits10 = 0;
-  static constexpr int max_digits10 = 1;  // just a 2!
+  static constexpr int max_digits10 = 1; // just a 2!
   static constexpr int radix = 2;
   static constexpr int min_exponent = -126;
   static constexpr int min_exponent10 = -38;
@@ -102,9 +101,10 @@ class numeric_limits<c10::Float8_e8m0fnu> {
     return c10::Float8_e8m0fnu(0b11111110, c10::Float8_e8m0fnu::from_bits());
   }
   static constexpr c10::Float8_e8m0fnu epsilon() {
-    // according to https://en.cppreference.com/w/cpp/types/numeric_limits, this is
-    // "the difference between 1.0 and the next representable value of the given floating-point type".
-    // The next representable value is 2.0, which is 2^1. 1 unbiased is 128 biased.
+    // according to https://en.cppreference.com/w/cpp/types/numeric_limits, this
+    // is "the difference between 1.0 and the next representable value of the
+    // given floating-point type". The next representable value is 2.0, which is
+    // 2^1. 1 unbiased is 128 biased.
     return c10::Float8_e8m0fnu(0b10000000, c10::Float8_e8m0fnu::from_bits());
   }
   static constexpr c10::Float8_e8m0fnu round_error() {

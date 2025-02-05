@@ -114,8 +114,8 @@ SPECIAL_NUMBERS = {
         ("10000001", -0.125 * (2**-7), "neg_min_subnorm"),
     ],
     torch.float8_e8m0fnu: [
-        ("00000000", float(2 ** -127), "smallest_number"),
-        ("11111110", float(2 ** 127), "largest_number"),
+        ("00000000", float(2**-127), "smallest_number"),
+        ("11111110", float(2**127), "largest_number"),
         ("01111110", 0.5, "zero_point_five"),
         ("01111111", 1.0, "one"),
         ("10000000", 2.0, "two"),
@@ -125,8 +125,9 @@ SPECIAL_NUMBERS = {
 
 FLOAT8_DTYPES_WITH_INF = [torch.float8_e5m2]
 
+
 def _int_bits_to_float(x):
-    y = struct.unpack('!f', struct.pack('!I', x))[0]
+    y = struct.unpack("!f", struct.pack("!I", x))[0]
     return y
 
 
@@ -180,6 +181,24 @@ def simulate_fp8_precision(input, variant):
     vals[vals > torch.finfo(variant).max] = torch.inf if have_inf else torch.nan
 
     return vals * signs
+
+
+def _round_e8m0_rne(biased_exponent, lsb, g, r, s):
+    round_up = False
+
+    # apply g,r,s rounding rules for RNE rounding
+    if g == 1:
+        if (r == 1) or (s == 1):
+            round_up = True
+        else:
+            if lsb:
+                round_up = True
+
+    # round up if necessary
+    if round_up:
+        biased_exponent += 1
+
+    return biased_exponent
 
 
 ROUND_TRIP_TEST_CASES = (
@@ -237,73 +256,67 @@ class TestFloat8Dtype(TestCase):
         to the float8 dtype and back to float32, comparing against simulated
         lower precision."""
         if dtype is torch.float8_e8m0fnu:
-            # TODO(before land): refactor this (below is temporary)
             return unittest.skip("numerics for e8m0fnu are tested elsewhere")
+
         x = get_input(dtype, device)
         x = torch.cat((x, -x))
         x8 = x.to(dtype)
         x8_simulated = simulate_fp8_precision(x, dtype)
         self.assertEqual(x8_simulated, x8.float())
 
-    def test_float8_e8m0fnu_rounding(self, device):
-        # TODO(before land): clean up this function
+    def test_float8_e8m0fnu_rne_rounding(self, device):
+        """
+        For every possible e8m0 exponent (256 options) and for every possible
+        g, r, s bits of the float32 mantissa, verify that RNE rounding is
+        correctly applied when casting from float32 to e8m0
 
-        def _round_rne(unbiased_exponent, lsb, g, r, s):
-            round_up = False
-
-            if g == 1:
-                round_up = True
-            else:
-                if lsb:
-                    round_up = True
-
-            if round_up:
-                unbiased_exponent += 1
-
-            return unbiased_exponent
+        Note: this code is morally similar to `test_cast_round_trip`, but
+        IMO simpler to special case e8m0 here.
+        """
 
         for biased_exponent in range(0, 256):
-
             # iterate through all the possible options of guard, round, sticky bits
             # for the current exponent
             for grs in range(8):
-
                 # create a positive floating point number with the specified exponent
                 # and mantissa guard, round, sticky bits
-                fp32_as_uint32_t_ref = (biased_exponent << 23) + (grs << 20)
-                fp32_ref = _int_bits_to_float(fp32_as_uint32_t_ref)
+                uint32_t_start = (biased_exponent << 23) + (grs << 20)
+                fp32_start = _int_bits_to_float(uint32_t_start)
 
                 # create an RNE rounded version of the exponent
                 if biased_exponent == 255:
                     new_biased_exponent = biased_exponent
                 else:
-                    lsb = biased_exponent == 0
+                    lsb = biased_exponent > 0
                     g = grs >> 2
                     r = (grs >> 1) & 0b1
                     s = grs & 0b1
-                    new_biased_exponent = _round_rne(biased_exponent, lsb, g, r, s)
+                    new_biased_exponent = _round_e8m0_rne(biased_exponent, lsb, g, r, s)
 
                 # create an RNE rounded version of the float
-                fp32_new = _int_bits_to_float(new_biased_exponent << 23)
+                fp32_e8m0_fp32_emulated = _int_bits_to_float(new_biased_exponent << 23)
 
                 # now, do the same in PyTorch and see if results match
-                fp32_pytorch_unrounded = torch.full((1,), fp32_ref, device=device, dtype=torch.float)
-                fp32_pytorch_e8m0 = fp32_pytorch_unrounded.to(torch.float8_e8m0fnu)
-                fp32_pytorch_e8m0_fp32 = fp32_pytorch_e8m0.to(torch.float)
+                fp32_pt_start = torch.full(
+                    (1,), fp32_start, device=device, dtype=torch.float
+                )
+                fp32_pt_e8m0 = fp32_pt_start.to(torch.float8_e8m0fnu)
+                fp32_pt_e8m0_fp32 = fp32_pt_e8m0.to(torch.float)
 
-                expected = fp32_new
+                expected = fp32_e8m0_fp32_emulated
                 if biased_exponent == 254 and grs >= 4:
                     # special case rounding up from the largest representable float32 exponent, which
                     # saturates to nan
-                    expected = float('nan')
+                    expected = float("nan")
                 elif biased_exponent == 255:
                     # special case inf and nan, which becomes nan
-                    expected = float('nan')
+                    expected = float("nan")
 
-                actual = fp32_pytorch_e8m0_fp32.item()
+                actual = fp32_pt_e8m0_fp32.item()
 
-                self.assertEqual(expected, actual, f"expected: {expected}, actual: {actual}")
-            
+                self.assertEqual(
+                    expected, actual, f"expected: {expected}, actual: {actual}"
+                )
 
     @dtypes(*FLOAT8_DTYPES)
     @dtypesIfCUDA(*CUDA_FLOAT8_DTYPES)
@@ -351,9 +364,22 @@ class TestFloat8Dtype(TestCase):
                 torch.use_deterministic_algorithms(use_deterministic)
                 torch.empty(4, 4, device=device, dtype=dtype)
 
-    # TODO(before land): test RNE numerics
-    # TODO(before land): test printing a tensor of dtype
-    # TODO(before land): test calling torch.finfo(dtype)
+    @dtypes(*FLOAT8_DTYPES)
+    @dtypesIfCUDA(*CUDA_FLOAT8_DTYPES)
+    def test_to_string(self, dtype, device):
+        x = torch.empty(4, 4, device=device, dtype=dtype)
+        str(x)
+
+    @dtypes(*FLOAT8_DTYPES)
+    def test_finfo(self, dtype, device):
+        torch.finfo(dtype)
+
+    @dtypes(*FLOAT8_DTYPES)
+    @dtypesIfCUDA(*CUDA_FLOAT8_DTYPES)
+    def test_cat(self, dtype, device):
+        x1 = torch.empty(4, 4, device=device, dtype=dtype)
+        x2 = torch.empty(4, 4, device=device, dtype=dtype)
+        torch.cat([x1, x2])
 
 
 instantiate_device_type_tests(TestFloat8Dtype, globals())
@@ -389,7 +415,9 @@ class TestFloat8DtypeCPUOnly(TestCase):
     @dtypes(*CUDA_FLOAT8_DTYPES)
     def test_pt2_traceable_aot_eager(self, dtype):
         if dtype is torch.float8_e8m0fnu:
-            return unittest.skip("PT2 support for torch.float8_e8m0fnu is not implemented yet")
+            return unittest.skip(
+                "PT2 support for torch.float8_e8m0fnu is not implemented yet"
+            )
 
         @torch.compile(backend="aot_eager", fullgraph=True)
         def f(x):

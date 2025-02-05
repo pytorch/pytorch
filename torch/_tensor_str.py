@@ -150,7 +150,15 @@ class _Formatter:
                 # no valid number, do nothing
                 return
 
+            if tensor.dtype == torch.float8_e8m0fnu:  # type: ignore[attr-defined]
+                # float8_e8m0fnu is special and does not define arithmetic ops,
+                # and printing code further in this file assumes the existence
+                # of various arithmetic ops to figure out what to print. We hack
+                # and convert to float here to make printing work correctly.
+                nonzero_finite_vals = nonzero_finite_vals.float()
+
             # Convert to double for easy calculation. HalfTensor overflows with 1e8, and there's no div() on CPU.
+
             nonzero_finite_abs = tensor_totype(nonzero_finite_vals.abs())
             nonzero_finite_min = tensor_totype(nonzero_finite_abs.min())
             nonzero_finite_max = tensor_totype(nonzero_finite_abs.max())

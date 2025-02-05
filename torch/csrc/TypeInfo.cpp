@@ -122,17 +122,24 @@ static PyObject* THPDTypeInfo_bits(THPDTypeInfo* self, void*) {
   return THPUtils_packUInt64(bits);
 }
 
+// TODO(before land): clean up the list below with AT_EXPAND(something),
+// and fix formatting
 #define _AT_DISPATCH_FINFO_TYPES(TYPE, NAME, ...) \
-  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND6(    \
+  AT_DISPATCH_V2(                                 \
+      TYPE,                                       \
+      NAME,                                       \
+      AT_WRAP(__VA_ARGS__),                       \
+      at::ScalarType::Double,                     \
+      at::ScalarType::Float,                      \
+      at::ScalarType::ComplexDouble,              \
+      at::ScalarType::ComplexFloat,               \
       at::kHalf,                                  \
       at::ScalarType::BFloat16,                   \
       at::ScalarType::Float8_e5m2,                \
       at::ScalarType::Float8_e5m2fnuz,            \
       at::ScalarType::Float8_e4m3fn,              \
       at::ScalarType::Float8_e4m3fnuz,            \
-      TYPE,                                       \
-      NAME,                                       \
-      __VA_ARGS__)
+      at::ScalarType::Float8_e8m0fnu)
 
 static PyObject* THPFInfo_eps(THPFInfo* self, void*) {
   HANDLE_TH_ERRORS
