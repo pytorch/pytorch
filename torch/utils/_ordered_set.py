@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Iterable, Iterator, MutableSet, Set as AbstractSet
-from typing import Any, cast, Generic, Optional, TypeVar
+from typing import Any, cast, Optional, TypeVar
 
 
 T = TypeVar("T")
@@ -10,8 +10,7 @@ T_co = TypeVar("T_co", covariant=True)
 __all__ = ["OrderedSet"]
 
 
-# Using Generic[T] bc py38 does not support type parameterized MutableSet
-class OrderedSet(MutableSet, Generic[T]):
+class OrderedSet(MutableSet[T]):
     """
     Insertion ordered set, similar to OrderedDict.
     """

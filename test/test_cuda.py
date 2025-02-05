@@ -358,22 +358,23 @@ class TestCuda(TestCase):
         self.assertEqual(len(str(uuid)), 36)  # xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
         self.assertEqual(len(uuid.bytes), 16)
 
-    def test_copy_non_blocking(self):
-        def _test_copy_non_blocking(a, b):
-            event = torch.cuda.Event()
-            a.copy_(b, non_blocking=True)
+    def _test_copy(self, a, b, non_blocking):
+        event = torch.cuda.Event()
+        a.copy_(b, non_blocking=non_blocking)
+        if non_blocking:
             event.record()
             event.synchronize()
-            self.assertEqual(a, b)
+        self.assertEqual(a.contiguous(), b.contiguous(), atol=0, rtol=0)
 
+    def test_copy_non_blocking(self):
         # 10MB copies
         x = torch.ones(10000000, dtype=torch.uint8).cuda()
         y = torch.zeros(10000000, dtype=torch.uint8).pin_memory()
-        _test_copy_non_blocking(x, y)
+        self._test_copy(x, y, non_blocking=True)
 
         x = torch.zeros(10000000, dtype=torch.uint8).pin_memory()
         y = torch.ones(10000000, dtype=torch.uint8).cuda()
-        _test_copy_non_blocking(x, y)
+        self._test_copy(x, y, non_blocking=True)
 
         # Test the case where the pinned data_ptr is not equal to the storage data_ptr.
         x_base = torch.zeros(10000000, dtype=torch.uint8).pin_memory()
@@ -381,9 +382,11 @@ class TestCuda(TestCase):
         self.assertTrue(x.is_pinned())
         self.assertTrue(x_base.is_pinned())
         self.assertNotEqual(x_base.data_ptr(), x.data_ptr())
-        self.assertEqual(x_base.storage().data_ptr(), x.storage().data_ptr())
+        self.assertEqual(
+            x_base.untyped_storage().data_ptr(), x.untyped_storage().data_ptr()
+        )
         y = torch.ones(10000000 - 1, dtype=torch.uint8).cuda()
-        _test_copy_non_blocking(x, y)
+        self._test_copy(x, y, non_blocking=True)
 
     def test_copy_non_blocking_type_conversion(self):
         a = torch.ones(1, device="cuda")
@@ -393,6 +396,96 @@ class TestCuda(TestCase):
         b.copy_(a, non_blocking=True)
         c.copy_(b, non_blocking=True)
         self.assertEqual(a, c, exact_dtype=False)
+
+    def test_copy_2d(self):
+        # 1d
+        def _test_copy_shape(shape, slice):
+            for dst_device, non_blocking in product(("cuda", "cpu"), (True, False)):
+                src_device = "cpu" if dst_device == "cuda" else "cuda"
+                src = torch.randint(8, shape, device=src_device).__getitem__(slice)
+                dst = torch.empty_like(src, device=dst_device)
+                if non_blocking:
+                    if src_device == "cpu":
+                        src = src.pin_memory()
+                    else:
+                        dst = dst.pin_memory()
+                self._test_copy(dst, src, non_blocking)
+                dst = torch.empty(shape, device=dst_device).__getitem__(slice)
+                src = torch.randint_like(dst, 8, device=src_device)
+                if non_blocking:
+                    if src_device == "cpu":
+                        src = src.pin_memory()
+                    else:
+                        dst = dst.pin_memory()
+                self._test_copy(dst, src, non_blocking)
+
+        _test_copy_shape((12800000,), slice(None, None, 2))
+        _test_copy_shape((4, 5), (slice(None, None, None), slice(None, 4, None)))
+        _test_copy_shape(
+            (4, 5, 6),
+            (slice(None, None, None), slice(None, 4, None), slice(None, None, None)),
+        )
+        _test_copy_shape(
+            (4, 5, 6),
+            (slice(None, None, None), slice(None, None, None), slice(None, 4, None)),
+        )
+        _test_copy_shape(
+            (4, 5, 6, 8),
+            (
+                slice(None, None, None),
+                slice(None, 4, None),
+                slice(None, None, None),
+                slice(None, None, None),
+            ),
+        )
+
+    def test_copy_2d_complex(self):
+        for dst_device, non_blocking, conj in product(
+            ("cuda", "cpu"), (True, False), (True, False)
+        ):
+            src_device = "cpu" if dst_device == "cuda" else "cuda"
+            if dst_device == "cpu" and non_blocking and conj:
+                continue  # FiXME this is also broken for contiguous tensors
+            src = torch.randn((8,), dtype=torch.complex64, device=src_device)[::2]
+            dst = torch.zeros_like(src, device=dst_device)
+            if non_blocking:
+                if src_device == "cpu":
+                    src = src.pin_memory()
+                else:
+                    dst = dst.pin_memory()
+            if conj:
+                src = src.conj()
+            self._test_copy(dst, src, non_blocking)
+            dst = torch.empty((8,), dtype=torch.complex64, device=dst_device)[::2]
+            src = torch.randn_like(dst, device=src_device)
+            if non_blocking:
+                if src_device == "cpu":
+                    src = src.pin_memory()
+                else:
+                    dst = dst.pin_memory()
+            if conj:
+                src = src.conj()
+
+            self._test_copy(dst, src, non_blocking)
+
+    def test_copy_broadcast(self):
+        # broadcasted copies should not take 2d path,
+        # it would error out with cuda invalid param errors
+        def _test_copy_shape(shape_dst, shape_src):
+            for dst_device, non_blocking in product(("cuda", "cpu"), (True, False)):
+                src_device = "cpu" if dst_device == "cuda" else "cuda"
+                src = torch.randint(8, shape_src, device=src_device)
+                dst = torch.empty(shape_dst, dtype=torch.int64, device=dst_device)
+                if non_blocking:
+                    if src_device == "cpu":
+                        src = src.pin_memory()
+                    else:
+                        dst = dst.pin_memory()
+                self._test_copy(dst, src.expand_as(dst), non_blocking)
+
+        _test_copy_shape((128,), (1,))
+        _test_copy_shape((128, 128), (128, 1))
+        _test_copy_shape((128, 128), (1, 128))
 
     @serialTest()
     def test_to_non_blocking(self):
@@ -454,7 +547,10 @@ class TestCuda(TestCase):
         if torch.version.hip:
             default_workspace_size = 1024 * 32 * 1024  # :1024:32  32MiB
             # different size (128 MiB) expected on MI300 GPU
-            if torch.cuda.get_device_capability() >= (9, 4):
+            gcn_arch = str(
+                torch.cuda.get_device_properties(0).gcnArchName.split(":", 1)[0]
+            )
+            if "gfx94" in gcn_arch:
                 default_workspace_size = 1024 * 128 * 1024  # :1024:128
         else:
             default_workspace_size = (
@@ -575,13 +671,6 @@ class TestCuda(TestCase):
             torch._C._get_cublas_allow_bf16_reduced_precision_reduction(), not orig
         )
         torch.backends.cuda.matmul.allow_bf16_reduced_precision_reduction = orig
-
-    def test_cublas_allow_fp16_accumulation_get_set(self):
-        orig = torch.backends.cuda.matmul.allow_fp16_accumulation
-        self.assertEqual(torch._C._get_cublas_allow_fp16_accumulation(), orig)
-        torch.backends.cuda.matmul.allow_fp16_accumulation = not orig
-        self.assertEqual(torch._C._get_cublas_allow_fp16_accumulation(), not orig)
-        torch.backends.cuda.matmul.allow_fp16_accumulation = orig
 
     def test_cudnn_allow_tf32_get_set(self):
         with torch.backends.cudnn.flags(
@@ -3432,6 +3521,52 @@ print(f"{{r1}}, {{r2}}")
             with self.assertRaisesRegex(RuntimeError, error_msg):
                 torch.cuda.gds._GdsFile(f, os.O_CREAT | os.O_RDWR)
 
+    def test_is_pinned_no_context(self):
+        test_script = """\
+import torch
+import multiprocessing
+
+
+def fork_and_check_is_pinned():
+    # Create a pipe to communicate between parent and child processes
+    parent_conn, child_conn = multiprocessing.Pipe()
+
+    def worker(conn):
+        try:
+            x = torch.randn(10)
+            x.is_pinned(device="cuda")
+            x = torch.ones(10, device="cuda")[0].item()
+            conn.send(x)
+        except Exception as e:
+            conn.send(str(e))
+        finally:
+            conn.close()
+    # Fork a new process
+    p = multiprocessing.Process(target=worker, args=(child_conn,))
+    p.start()
+    # Receive the result from the child process
+    result = parent_conn.recv()
+    parent_conn.close()
+    # Wait for the child process to finish
+    p.join()
+    if isinstance(result, str) and result.startswith("Error"):
+        raise RuntimeError(result)
+    return result
+
+x = torch.randn(10)
+# check that is_pinned won't poison future fork
+x.is_pinned(device="cuda")
+ret = fork_and_check_is_pinned()
+print(ret)
+
+"""
+        r = (
+            subprocess.check_output([sys.executable, "-c", test_script])
+            .decode("ascii")
+            .strip()
+        )
+        self.assertEqual(r, "1.0")
+
 
 @unittest.skipIf(not TEST_CUDA, "CUDA not available, skipping tests")
 @torch.testing._internal.common_utils.markDynamoStrictTest
@@ -3912,8 +4047,11 @@ class TestCudaMallocAsync(TestCase):
         # relevant field in data structure
         def requested_bytes_alloc_stats(raw_alloc_size, stream):
             start = torch.cuda.memory_stats()["requested_bytes.all.allocated"]
-            torch._C._cuda_cudaCachingAllocator_raw_alloc(raw_alloc_size, stream)
+            mem_ptr = torch._C._cuda_cudaCachingAllocator_raw_alloc(
+                raw_alloc_size, stream
+            )
             finish = torch.cuda.memory_stats()["requested_bytes.all.allocated"]
+            torch._C._cuda_cudaCachingAllocator_raw_delete(mem_ptr)
             return finish - start
 
         torch.cuda.empty_cache()

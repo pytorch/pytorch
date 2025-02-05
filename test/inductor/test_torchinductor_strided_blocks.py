@@ -697,6 +697,10 @@ class CommonTemplate:
         """
         view = self._discontiguous_tensor(size, self.device)
 
+        if config.triton.cooperative_reductions:
+            expected_num_triton_kernels = 1
+            expected_num_block_pointers = min(2, expected_num_block_pointers)
+
         # We expect many block pointers for this one.
         result, (code,) = run_and_compare(
             self,

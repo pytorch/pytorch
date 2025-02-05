@@ -1,46 +1,21 @@
+#include <c10/metal/special_math.h>
 #include <c10/metal/utils.h>
 #include <metal_stdlib>
-using namespace c10::metal;
 using namespace metal;
-
-constant float a[4] = {0.886226899, -1.645349621, 0.914624893, -0.140543331};
-constant float b[4] = {-2.118377725, 1.442710462, -0.329097515, 0.012229801};
-constant float c[4] = {-1.970840454, -1.624906493, 3.429567803, 1.641345311};
-constant float d[2] = {3.543889200, 1.637067800};
+using namespace c10::metal;
 
 template <typename T0, typename T1>
 kernel void erfinv_kernel(
     device T0* output [[buffer(0)]],
-    device T1* input [[buffer(1)]],
+    constant T1* input [[buffer(1)]],
     uint index [[thread_position_in_grid]]) {
-  float y = input[index];
-  float x, z, num, dem; /*working variables */
-  /* coefficients in rational expansion */
-
-  float y_abs = abs(y);
-  if (y_abs >= 1.0f) {
-    output[index] = T0(y_abs > 1.0f ? NAN : copysign(INFINITY, y));
-    return;
-  }
-  if (y_abs <= 0.7f) {
-    z = y * y;
-    num = ((a[3] * z + a[2]) * z + a[1]) * z + a[0];
-    dem = (((b[3] * z + b[2]) * z + b[1]) * z + b[0]) * z + 1.0f;
-    x = y * num / dem;
-  } else {
-    z = sqrt(-1.0f * log((1.0 - y_abs) / 2.0));
-    num = ((c[3] * z + c[2]) * z + c[1]) * z + c[0];
-    dem = (d[1] * z + d[0]) * z + 1.0f;
-    x = copysign(num, y) / dem;
-  }
-
-  output[index] = T0(x);
+  output[index] = T0(erfinv(input[index]));
 }
 
 template <typename T0, typename T1>
 kernel void exp_kernel(
     device T0* output [[buffer(0)]],
-    device T1* input [[buffer(1)]],
+    constant T1* input [[buffer(1)]],
     uint index [[thread_position_in_grid]]) {
   output[index] = T0(precise::exp(input[index]));
 }
@@ -48,7 +23,7 @@ kernel void exp_kernel(
 template <typename T0>
 kernel void exp_complex_kernel(
     device vec2type_t<T0>* output [[buffer(0)]],
-    device vec2type_t<T0>* input [[buffer(1)]],
+    constant vec2type_t<T0>* input [[buffer(1)]],
     uint index [[thread_position_in_grid]]) {
   output[index].x =
       T0(precise::exp(input[index].x) * precise::cos(input[index].y));
@@ -59,7 +34,7 @@ kernel void exp_complex_kernel(
 template <typename T0, typename T1>
 kernel void tanh_kernel(
     device T0* output [[buffer(0)]],
-    device T1* input [[buffer(1)]],
+    constant T1* input [[buffer(1)]],
     uint index [[thread_position_in_grid]]) {
   output[index] = T0(precise::tanh(input[index]));
 }
@@ -83,7 +58,7 @@ T complex_div(T a, T b) {
 template <typename T0>
 kernel void tanh_complex_kernel(
     device vec2type_t<T0>* output [[buffer(0)]],
-    device vec2type_t<T0>* input [[buffer(1)]],
+    constant vec2type_t<T0>* input [[buffer(1)]],
     uint index [[thread_position_in_grid]]) {
   // tanh(x+iy)=(tanh(x)+itan(y))/(1+itahnh(x)*tan(y));
   auto tanh_x = T0(precise::tanh(input[index].x));
@@ -96,15 +71,15 @@ kernel void tanh_complex_kernel(
   template [[host_name("erfinv_" #DTYPE0 "_" #DTYPE1)]] kernel void            \
   erfinv_kernel(                                                               \
       device DTYPE0* output [[buffer(0)]],                                     \
-      device DTYPE1* input [[buffer(1)]],                                      \
+      constant DTYPE1* input [[buffer(1)]],                                    \
       uint id [[thread_position_in_grid]]);                                    \
   template [[host_name("exp_" #DTYPE0 "_" #DTYPE1)]] kernel void exp_kernel(   \
       device DTYPE0* output [[buffer(0)]],                                     \
-      device DTYPE1* input [[buffer(1)]],                                      \
+      constant DTYPE1* input [[buffer(1)]],                                    \
       uint id [[thread_position_in_grid]]);                                    \
   template [[host_name("tanh_" #DTYPE0 "_" #DTYPE1)]] kernel void tanh_kernel( \
       device DTYPE0* output [[buffer(0)]],                                     \
-      device DTYPE1* input [[buffer(1)]],                                      \
+      constant DTYPE1* input [[buffer(1)]],                                    \
       uint id [[thread_position_in_grid]]);
 
 #if __METAL_VERSION__ >= 310
@@ -123,12 +98,12 @@ INSTANTIATE_UNARY_KERNELS2(float, long);
   template [[host_name("exp_complex_" #DTYPE0 "_" #DTYPE1)]] kernel void  \
   exp_complex_kernel<DTYPE0>(                                             \
       device vec2type_t<DTYPE0> * output [[buffer(0)]],                   \
-      device vec2type_t<DTYPE0> * input [[buffer(1)]],                    \
+      constant vec2type_t<DTYPE0> * input [[buffer(1)]],                  \
       uint did [[thread_position_in_grid]]);                              \
   template [[host_name("tanh_complex_" #DTYPE0 "_" #DTYPE1)]] kernel void \
   tanh_complex_kernel<DTYPE0>(                                            \
       device vec2type_t<DTYPE0> * output [[buffer(0)]],                   \
-      device vec2type_t<DTYPE0> * input [[buffer(1)]],                    \
+      constant vec2type_t<DTYPE0> * input [[buffer(1)]],                  \
       uint did [[thread_position_in_grid]]);
 
 INSTANTIATE_UNARY_KERNELS_VEC2(short, short);

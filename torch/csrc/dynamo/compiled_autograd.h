@@ -1330,8 +1330,8 @@ struct PackedArgs {
   explicit PackedArgs(std::vector<at::IValue> stack_)
       : stack(std::move(stack_)) {}
 
-  std::vector<at::IValue> vec() && {
-    return std::move(stack);
+  const std::vector<at::IValue>& vec() const {
+    return stack;
   }
 
   template <typename T>
