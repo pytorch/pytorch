@@ -203,12 +203,14 @@ def assert_raggedness_matches(nt, size, msg):
     for ns, s in zip(nt_ragged, size_ragged):
         if not is_nested_int(s) and s == -1:
             continue
-        if ns != s:
-            if not (is_nested_int(ns) and is_nested_int(s)):
+        if not (is_nested_int(ns) and is_nested_int(s)):
+            if ns != s:
                 raise RuntimeError(msg)
-            _nested_assert_metadata_equal(
-                get_nested_int_metadata(ns), get_nested_int_metadata(s), msg
-            )
+            else:
+                continue
+        _nested_assert_metadata_equal(
+            get_nested_int_metadata(ns), get_nested_int_metadata(s), msg
+        )
 
 
 def squeeze_leading_ones(t):
@@ -1560,6 +1562,61 @@ def sum_dim_IntList(func, *args, **kwargs):
 
 
 @register_jagged_func(
+    torch.ops.aten.sum_to_size.default,
+    "self: jt_all, size: any",
+)
+def sum_to_size_default(func, *args, **kwargs):
+    from torch.fx.experimental.symbolic_shapes import is_nested_int
+    from torch.nested._internal.nested_int import _nested_assert_metadata_equal
+
+    _, new_kwargs = normalize_function(
+        func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
+    )
+    inp = new_kwargs.pop("input")
+    desired = new_kwargs.pop("size")
+    shape = inp.shape
+
+    msg = "sum_to_size(): sizes unsupported"
+
+    if len(desired) > len(inp.shape):
+        raise RuntimeError(msg)
+
+    # Seed with leading dims
+    num_leading = len(shape) - len(desired)
+    dims_to_reduce = list(range(num_leading))
+
+    for i in range(len(desired)):
+        curr_dim = -i - 1
+        src_s = shape[curr_dim]
+        tgt_s = desired[curr_dim]
+
+        if is_nested_int(tgt_s):
+            if not is_nested_int(src_s):
+                raise RuntimeError(msg)
+            _nested_assert_metadata_equal(
+                get_nested_int_metadata(src_s),
+                get_nested_int_metadata(tgt_s),
+                msg,
+            )
+        elif tgt_s == 1 and (is_nested_int(src_s) or src_s != 1):
+            dims_to_reduce.append(curr_dim)
+        elif src_s != tgt_s:
+            raise RuntimeError(msg)
+
+    if len(dims_to_reduce) == 0:
+        # TODO: actually rewrap into a new nested tensor
+        return inp
+
+    # keepdim then squeeze out the leading dims
+    out = inp.sum(dim=dims_to_reduce, keepdim=True)
+
+    for i in range(num_leading):
+        out = out.squeeze(0)
+
+    return out
+
+
+@register_jagged_func(
     torch.ops.aten.transpose.int, "self: jt_all, dim0: any, dim1: any"
 )
 def transpose_int(func, *args, **kwargs):
@@ -2441,19 +2498,26 @@ def _nested_assert_expandable_to(func, *args, **kwargs):
         raise RuntimeError(msg)
 
     for i in range(len(shape)):
-        src_s = shape[-i - 1]
-        tgt_s = desired[-i - 1]
-        if not is_nested_int(src_s) and src_s == 1:
-            # Avoid comparing nested int with 1
-            continue
-        if src_s != tgt_s:
-            if not (is_nested_int(src_s) and is_nested_int(tgt_s)):
+        curr_dim = -i - 1
+        src_s = shape[curr_dim]
+        tgt_s = desired[curr_dim]  # tgt is large
+
+        if is_nested_int(src_s):
+            if not is_nested_int(tgt_s):
                 raise RuntimeError(msg)
             _nested_assert_metadata_equal(
                 get_nested_int_metadata(src_s),
                 get_nested_int_metadata(tgt_s),
                 msg,
             )
+        elif src_s == 1:
+            # if is_nested_int(tgt_s) or tgt_s != 1:
+            #    append a dim to reduce
+            # else:
+            #    continue
+            continue
+        elif src_s != tgt_s:
+            raise RuntimeError(msg)
 
 
 @register_jagged_func(

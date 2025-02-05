@@ -11,6 +11,7 @@
 #include <ATen/ops/chunk_native.h>
 #include <ATen/ops/split_with_sizes_native.h>
 #include <ATen/ops/value_selecting_reduction_backward_native.h>
+#include <ATen/ops/sum_to_size_native.h>
 #endif
 
 namespace at::native {
@@ -175,6 +176,12 @@ Tensor value_selecting_reduction_backward_nested_symint(
     bool keepdim) {
   TORCH_INTERNAL_ASSERT(
       false, "value_selecting_reduction_backward(): expected to be implemented in Python"
+  );
+}
+
+Tensor sum_to_size_nested_symint(const at::Tensor& self, c10::SymIntArrayRef size) {
+  TORCH_INTERNAL_ASSERT(
+      false, "sum_to_size_nested(): expected to be implemented in Python"
   );
 }
 
