@@ -1,6 +1,5 @@
 # Owner(s): ["module: dynamo"]
 import sys
-import unittest
 
 import torch
 import torch._dynamo.test_case
@@ -35,7 +34,6 @@ class CPythonActiveExceptionTests(torch._dynamo.test_case.TestCase):
     def test_sys_exception_no_exception(self):
         self.assertEqual(sys.exception(), None)
 
-    @unittest.expectedFailure
     @make_dynamo_test
     def test_exc_info_with_exception_instance(self):
         def f():
@@ -52,7 +50,6 @@ class CPythonActiveExceptionTests(torch._dynamo.test_case.TestCase):
         self.assertIs(exc_info[1], e)
         self.assertIs(exc_info[2], e.__traceback__)
 
-    @unittest.expectedFailure
     @make_dynamo_test
     def test_exc_info_with_exception_type(self):
         def f():
@@ -69,7 +66,6 @@ class CPythonActiveExceptionTests(torch._dynamo.test_case.TestCase):
         self.assertIs(exc_info[1], e)
         self.assertIs(exc_info[2], e.__traceback__)
 
-    @unittest.expectedFailure
     @make_dynamo_test
     def test_sys_exception_with_exception_instance(self):
         def f():
@@ -84,7 +80,6 @@ class CPythonActiveExceptionTests(torch._dynamo.test_case.TestCase):
         self.assertIsInstance(e, ValueError)
         self.assertIs(exc, e)
 
-    @unittest.expectedFailure
     @make_dynamo_test
     def test_sys_exception_with_exception_type(self):
         def f():
