@@ -1,3 +1,5 @@
+// Metal helper functions
+#pragma once
 #include <metal_stdlib>
 
 namespace c10 {
@@ -51,6 +53,37 @@ struct vectypes<long> {
   using type2 = short2;
 };
 
+template <typename T>
+struct OpMathType {
+  using type = T;
+};
+
+template <>
+struct OpMathType<half> {
+  using type = float;
+};
+
+template <>
+struct OpMathType<short> {
+  using type = int;
+};
+
+template <>
+struct OpMathType<char> {
+  using type = int;
+};
+
+template <>
+struct OpMathType<uchar> {
+  using type = int;
+};
+
+#if __METAL_VERSION__ >= 310
+template <>
+struct OpMathType<bfloat> {
+  using type = float;
+};
+#endif
 } // namespace detail
 
 template <typename T>
@@ -79,5 +112,7 @@ using vec2type_t = typename detail::vectypes<T>::type2;
 template <typename T>
 using vec4type_t = typename detail::vectypes<T>::type4;
 
+template <typename T>
+using opmath_t = typename detail::OpMathType<T>::type;
 } // namespace metal
 } // namespace c10
