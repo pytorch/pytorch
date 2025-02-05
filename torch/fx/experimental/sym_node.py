@@ -59,7 +59,7 @@ from torch.utils._traceback import CapturedTraceback
 def capture_specialization(fn):
     @functools.wraps(fn)
     def wrapper(self, file, line):
-        if (symbol := os.environ.get("CAPTURE_SPECIALIZATION", None)) and symbol == str(
+        if (symbol := os.environ.get("CAPTURE_SPECIALIZATION", None)) and symbol in str(
             self
         ):
             out: Dict[str, object] = {
@@ -76,7 +76,7 @@ def capture_specialization(fn):
             }
             print(json.dumps(out))
 
-        fn(self, file, line)
+        return fn(self, file, line)
 
     return wrapper
 
