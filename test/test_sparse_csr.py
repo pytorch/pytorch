@@ -3768,8 +3768,8 @@ class TestSparseCompressedTritonKernels(TestCase):
                 )
 
                 for mask_dtype in (torch.bool, dtype):
-                    res = _scaled_dot_product_attention(query, key, value, attn_mask_bsr.to(mask_dtype), scale=scale)
-                    self.assertEqual(res, expected)
+                    res = _scaled_dot_product_attention(query.double(), key.double(), value.double(), attn_mask_bsr.to(mask_dtype), scale=scale)
+                    self.assertEqual(res, expected.to(res.dtype))
 
 
     @parametrize("block_size", [16, 32, 64])
