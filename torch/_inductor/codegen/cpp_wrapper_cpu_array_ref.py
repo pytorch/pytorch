@@ -663,7 +663,7 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
         return not self.allow_stack_allocation and not self.stack_allocated_buffers
 
     def generate_c_shim_extern_kernel_call(
-        self, kernel: str, args: list[str], device: str
+        self, kernel: str, args: list[str], device: str, **_
     ) -> None:
         # In the abi_compatible mode, we call fallback aten ops through a C shim layer
         # Setting self.allow_stack_allocation to False because the exchange between
@@ -687,7 +687,9 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
                     piece = f"borrow_arrayref_tensor_as_tensor({piece})"
                 wrapped_args.append(piece)
 
-        super().generate_c_shim_extern_kernel_call(kernel, wrapped_args, device)
+        super().generate_c_shim_extern_kernel_call(
+            kernel, wrapped_args, device, debug_args=args
+        )
 
     def generate_scatter_fallback(
         self,
