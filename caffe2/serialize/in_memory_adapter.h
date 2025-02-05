@@ -6,8 +6,8 @@ namespace caffe2::serialize {
 
 class MemoryReadAdapter final : public caffe2::serialize::ReadAdapterInterface {
  public:
-  explicit MemoryReadAdapter(const void* data, size_t size)
-      : data_(data), size_(size) {}
+  explicit MemoryReadAdapter(const void* data, off_t size)
+      : data_(data), size_(static_cast<size_t>(size)) {}
 
   size_t size() const override {
     return size_;
