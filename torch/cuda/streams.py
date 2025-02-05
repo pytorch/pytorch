@@ -68,9 +68,13 @@ class Stream(torch._C._CudaStreamBase):
         .. note:: This function returns without waiting for currently enqueued
            kernels in :attr:`stream`: only future operations are affected.
         """
-        self.wait_event(stream.record_event())
+        # events used for synchronization must not be recorded with the flag
+        # cudaEventRecordExternal in the case that we are within a graph, since
+        # the event created here is never returned we can set `enable_timing=False`
+        # to denote that this event is for synchronization only
+        self.wait_event(stream.record_event(enable_timing=False))
 
-    def record_event(self, event=None):
+    def record_event(self, event=None, enable_timing=True):
         r"""Record an event.
 
         Args:
@@ -81,7 +85,7 @@ class Stream(torch._C._CudaStreamBase):
             Recorded event.
         """
         if event is None:
-            event = Event()
+            event = Event(enable_timing=enable_timing)
         event.record(self)
         return event
 

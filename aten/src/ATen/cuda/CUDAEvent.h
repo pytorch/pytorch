@@ -3,13 +3,13 @@
 #include <ATen/cuda/ATenCUDAGeneral.h>
 #include <ATen/cuda/CUDAContext.h>
 #include <c10/core/impl/GPUTrace.h>
-#include <c10/cuda/CUDAGraphsC10Utils.h>
 #include <c10/cuda/CUDAStream.h>
 #include <c10/cuda/CUDAGuard.h>
 #include <ATen/cuda/Exceptions.h>
 #include <c10/util/Exception.h>
 
 #include <cuda_runtime_api.h>
+#include <driver_types.h>
 
 #include <cstdint>
 #include <utility>
@@ -119,11 +119,20 @@ struct TORCH_CUDA_CPP_API CUDAEvent {
     TORCH_CHECK(device_index_ == stream.device_index(), "Event device ", device_index_,
       " does not match recording stream's device ", stream.device_index(), ".");
     CUDAGuard guard(device_index_);
-    if (c10::cuda::currentStreamCaptureStatusMayInitCtx() == c10::cuda::CaptureStatus::None) {
-      AT_CUDA_CHECK(cudaEventRecord(event_, stream));
-    } else {
-      AT_CUDA_CHECK(cudaEventRecordWithFlags(event_, stream, cudaEventRecordExternal));
-    }
+    // Note: cudaEventRecordWithFlags allows us to place events within graphs for timing
+    // purposes, assuming that we set cudaEventRecordExternal. It should be noted that events
+    // which are used for other purposes such as synchronization must not be recorded with
+    // cudaEventRecordExternal. In this case we assume that the cudaEventDisableTiming must be
+    // set such as in `torch.cuda.streams.Stream.wait_stream(...)`.
+    AT_CUDA_CHECK(
+      cudaEventRecordWithFlags(
+        event_,
+        stream,
+        c10::cuda::currentStreamCaptureStatusMayInitCtx() == c10::cuda::CaptureStatus::None
+        || (flags_ & (1 << cudaEventDisableTiming)) == 0
+        ? cudaEventRecordDefault : cudaEventRecordExternal
+      )
+    );
     const c10::impl::PyInterpreter* interp = c10::impl::GPUTrace::get_trace();
     if (C10_UNLIKELY(interp)) {
       (*interp)->trace_gpu_event_record(at::kCUDA,
