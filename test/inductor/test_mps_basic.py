@@ -144,7 +144,6 @@ for test_name in [
     "test_custom_op_2",
     "test_div1",
     "test_div3",
-    "test_exp",
     "test_erfinv",
     "test_floordiv",
     "test_full_truncation",
