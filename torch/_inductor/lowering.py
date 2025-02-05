@@ -1,6 +1,4 @@
 # mypy: allow-untyped-defs
-from __future__ import annotations
-
 import dataclasses
 import functools
 import itertools
@@ -11,7 +9,7 @@ import os
 import warnings
 from collections import defaultdict
 from collections.abc import Iterable, Sequence
-from typing import Any, Callable, Optional, TYPE_CHECKING, TypeVar, Union
+from typing import Any, Callable, Optional, TypeVar, Union
 from typing_extensions import ParamSpec
 from unittest.mock import patch
 
@@ -78,10 +76,6 @@ from .utils import (
     use_scatter_fallback,
 )
 from .virtualized import ops, V
-
-
-if TYPE_CHECKING:
-    from .ops_handler import ReductionType
 
 
 _T = TypeVar("_T")
@@ -5611,7 +5605,7 @@ def _make_reduction_inner(x, *, axis, keepdims, dtype, override_return_dtype):
     )
 
 
-def make_reduction(reduction_type: ReductionType, override_return_dtype=None):
+def make_reduction(reduction_type: str, override_return_dtype=None):
     def inner(x, axis=None, keepdims=False, *, dtype=None):
         kwargs = _make_reduction_inner(
             x,
