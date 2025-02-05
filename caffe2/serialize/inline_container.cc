@@ -622,9 +622,8 @@ size_t PyTorchStreamReader::getRecordOffsetNoRead(
     uint64_t alignment) {
   std::string full_name = archive_name_plus_slash_ + filename;
   size_t full_name_size = full_name.size();
-  std::tuple<size_t, size_t> result =
+  auto [offset, _] =
       detail::getOffset(cursor, full_name_size, size, alignment);
-  size_t offset = std::get<0>(result);
   return offset;
 }
 
