@@ -123,7 +123,6 @@ from ..fx._lazy_graph_module import _use_lazy_graph_module
 from ..fx.graph import _PyTreeCodeGen
 from ..utils._triton import has_triton
 from . import config, metrics
-from .compile_worker.subproc_pool import SubprocPickler
 from .debug import DebugContext
 from .decomposition import select_decomp_table
 from .exc import InductorError
@@ -1232,7 +1231,8 @@ class _VirtualizedSerializer:
     This handles the data for serializing Virtualized.
     """
 
-    # The values here get serialized.
+    # The values here get serialized. We don't grab everything because some of
+    # the fields can't be serialized.
     aot_compilation: Any = None
     choices: Any = None
     local_buffer_context: Any = None
@@ -1305,7 +1305,7 @@ class _WireProtocolInput:
     tracing_context: Optional[torch._guards.TracingContext]
     config: dict[str, object]
     virtualized: _VirtualizedSerializer
-    deterministic_guard: Optional[
+    deterministic_guard_for_testing: Optional[
         torch.testing._internal.common_utils.DeterministicGuard
     ]
     logger_state: _LoggerState
@@ -1386,8 +1386,9 @@ class _LoggerState:
     """
 
     loggers: dict[str, int]
-    # This should be None outside of enter/exit
-    _cap: Optional[_CapturedLogs] = None
+    # The actual log capturing mechanism - this should be None when we're not
+    # actively capturing logs.
+    captured_logs: Optional[_CapturedLogs] = None
 
     def __init__(self) -> None:
         # Mapping from logger name to level.
@@ -1426,10 +1427,10 @@ class _LoggerState:
                 q.extend(logger.getChildren())
 
     def __enter__(self) -> _CapturedLogs:
-        assert self._cap is None
-        self._cap = _CapturedLogs(self)
-        self._cap.apply()
-        return self._cap
+        assert self.captured_logs is None
+        self.captured_logs = _CapturedLogs(self)
+        self.captured_logs.apply()
+        return self.captured_logs
 
     def __exit__(
         self,
@@ -1437,8 +1438,8 @@ class _LoggerState:
         exc_value: Optional[BaseException],
         traceback: Optional[types.TracebackType],
     ) -> None:
-        assert self._cap is not None
-        self._cap.remove()
+        assert self.captured_logs is not None
+        self.captured_logs.remove()
 
 
 class _CapturedLogs:
@@ -1510,6 +1511,8 @@ class _SerializedFxCompile(FxCompile):
             )
 
         try:
+            # _check_for_hop raises BypassFxGraphCache when it detects something
+            # we can't cache (or serialize)
             FxGraphCache._check_for_hop(gm)
         except BypassFxGraphCache as e:
             log.debug("Skipping %s compile: %s", type(self), e)
@@ -1521,13 +1524,13 @@ class _SerializedFxCompile(FxCompile):
 
         # If we're running tests then grab the DeterministicGuard (don't want to
         # import this if it isn't already imported because it has side-effects)
-        deterministic_guard: Optional[
+        deterministic_guard_for_testing: Optional[
             torch.testing._internal.common_utils.DeterministicGuard
         ] = None
         if testing := getattr(torch, "testing", None):
             if internal := getattr(testing, "_internal", None):
                 if common_utils := internal.common_utils:
-                    deterministic_guard = (
+                    deterministic_guard_for_testing = (
                         common_utils.DeterministicGuard._current_state()
                     )
 
@@ -1540,7 +1543,7 @@ class _SerializedFxCompile(FxCompile):
                 context,
                 config.save_config_portable(),
                 _VirtualizedSerializer.serialize(),
-                deterministic_guard,
+                deterministic_guard_for_testing,
                 logger_state,
             ).serialize()
         except (AttributeError, BypassFxGraphCache):
@@ -1598,8 +1601,8 @@ class _SerializedFxCompile(FxCompile):
             stack.enter_context(input.virtualized.patch())
             stack.enter_context(config.patch(input.config))
             captured_logs = stack.enter_context(input.logger_state)
-            if input.deterministic_guard:
-                stack.enter_context(input.deterministic_guard)  # type: ignore[arg-type]
+            if input.deterministic_guard_for_testing:
+                stack.enter_context(input.deterministic_guard_for_testing)
             stack.enter_context(torch._guards.tracing(input.tracing_context))
             stack.enter_context(DebugContext())
 
@@ -1630,6 +1633,11 @@ class _DebugSerdeFxCompile(_SerializedFxCompile):
 
 
 class _OutOfProcessFxCompile(_SerializedFxCompile):
+    """
+    Represents an FxCompile which is run outside the current process (in
+    either a subprocess or possibly even a separate machine).
+    """
+
     def _postprocess(self, output: _WireProtocolOutput) -> None:
         # Since our metrics were gathered in a subprocess make sure to add them
         # here.
@@ -1670,19 +1678,6 @@ _PostCompileData = namedtuple(
 )
 
 
-from torch.fx._graph_pickler import GraphPickler
-
-
-class _SubprocGraphPickler(SubprocPickler):
-    @override
-    def dumps(self, obj: object) -> bytes:
-        return GraphPickler.dumps(obj)
-
-    @override
-    def loads(self, data: bytes) -> object:
-        return GraphPickler.loads(data, None)  # type: ignore[arg-type]
-
-
 class _SubprocessFxCompile(_OutOfProcessFxCompile):
     @override
     def _send_to_child(
@@ -1692,12 +1687,11 @@ class _SubprocessFxCompile(_OutOfProcessFxCompile):
 
         pool = self.process_pool()
 
-        # TODO: This is the wrong thing to do long-term - but for now let's
-        # share the cache so we can identify tests broken by this later.
+        # TODO: This is probably the wrong thing to do long-term - but for now
+        # let's share the cache so we can identify tests broken by this later.
         env_vars = ["TORCHINDUCTOR_CACHE_DIR", "TRITON_CACHE_DIR"]
         extra_env = {v: os.environ[v] for v in env_vars if v in os.environ}
 
-        # start = time.time()
         f = pool.submit(_SubprocessFxCompile._run_in_child_subprocess, input, extra_env)
         last = time.time()
         while not f.done():
@@ -1708,7 +1702,6 @@ class _SubprocessFxCompile(_OutOfProcessFxCompile):
             if now - last > 1:
                 last = now
         output = f.result()
-        # end = time.time()
 
         return output
 
@@ -1717,9 +1710,8 @@ class _SubprocessFxCompile(_OutOfProcessFxCompile):
     def process_pool() -> AnyPool:
         pool = SubprocPool(
             # TODO: Consider raising this limit if we start using async w/
-            # subprocess.
+            # subprocess and want to compile multiple graphs in parallel.
             1,
-            pickler=_SubprocGraphPickler(),
             kind=SubprocKind.SPAWN,
         )
 
@@ -1762,7 +1754,7 @@ class _SubprocessFxCompile(_OutOfProcessFxCompile):
 # For debugging - create a _FxCompile which writes the serialized data to a file
 # and then exits.
 #
-# TODO: make this an envvar?
+# TODO: make this a FxCompileMode value?
 #
 # The "child runner" should look something like this:
 #
