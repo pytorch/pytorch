@@ -139,6 +139,8 @@ def seq(a, b):
 
 
 class isin:
+    __slots__ = ()
+
     def __contains__(self, item):
         for x in self:
             if seq(item, x):
@@ -153,11 +155,11 @@ class isin:
 
 
 class llist(isin, list):
-    pass
+    __slots__ = ()
 
 
 class ltuple(isin, tuple):
-    pass
+    __slots__ = ()
 
 
 empty_dict = {}
