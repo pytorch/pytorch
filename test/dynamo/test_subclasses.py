@@ -630,8 +630,12 @@ class SubclassTests(torch._dynamo.test_case.TestCase):
 
         HANDLED_FUNCTIONS[torch.stack] = _stack
 
+        y = torch.randn(4)
+
         @torch.compile(backend="eager", fullgraph=True)
         def fn(v0, v1):
+            nonlocal y
+            torch.cos(y)
             return torch.stack([v0, v1])
 
         ret = fn(MyClass(1), MyClass(1))
@@ -1773,6 +1777,7 @@ class GraphModule(torch.nn.Module):
 
         @torch.compile(backend="eager", fullgraph=True)
         def f(x):
+            torch.cos(x)
             typ = type(Foo())
             typ.__bases__
             return typ.__bases__
@@ -1781,6 +1786,8 @@ class GraphModule(torch.nn.Module):
 
         @torch.compile(backend="eager", fullgraph=True)
         def g(x):
+            torch.cos(x)
+            typ = type(Foo())
             typ = type(Foo())
             typ.__base__
             return typ.__base__
