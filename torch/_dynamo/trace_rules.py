@@ -16,7 +16,6 @@ import sys
 import traceback
 import types
 import typing
-import unittest
 from collections import defaultdict
 from pathlib import Path
 from typing import Any, Callable, cast, Optional, Union
@@ -3148,7 +3147,6 @@ BUILTIN_SKIPLIST = (
     random,
     traceback,
     linecache,
-    unittest,
 )
 
 # third party libraries skiplist is defined by str, because users may not use these libraries.
