@@ -378,7 +378,6 @@ inline bool isFloat8Type(ScalarType t) {
       t == ScalarType::Float8_e4m3fn || t == ScalarType::Float8_e4m3fnuz ||
       t == ScalarType::Float8_e8m0fnu;
 }
-// TODO add e8m0 here
 
 inline bool isReducedFloatingType(ScalarType t) {
   return t == ScalarType::Half || t == ScalarType::BFloat16 || isFloat8Type(t);

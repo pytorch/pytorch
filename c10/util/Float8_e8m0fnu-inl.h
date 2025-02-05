@@ -103,9 +103,9 @@ class numeric_limits<c10::Float8_e8m0fnu> {
   static constexpr c10::Float8_e8m0fnu epsilon() {
     // according to https://en.cppreference.com/w/cpp/types/numeric_limits, this
     // is "the difference between 1.0 and the next representable value of the
-    // given floating-point type". The next representable value is 2.0, which is
-    // 2^1. 1 unbiased is 128 biased.
-    return c10::Float8_e8m0fnu(0b10000000, c10::Float8_e8m0fnu::from_bits());
+    // given floating-point type". The next representable value is 2.0, so the
+    // difference is 1.0 which is 2^0. 0 unbiased is 127 biased.
+    return c10::Float8_e8m0fnu(0b01111111, c10::Float8_e8m0fnu::from_bits());
   }
   static constexpr c10::Float8_e8m0fnu round_error() {
     // 0.5 in float, which is 2^-1, and -1 + 127 = 126
