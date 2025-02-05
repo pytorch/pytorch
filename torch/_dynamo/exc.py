@@ -168,6 +168,11 @@ class InfiniteGeneratorError(Unsupported):
         super().__init__(msg)
 
 
+class SideEffectsError(Unsupported):
+    def __init__(self, msg: str) -> None:
+        super().__init__(msg)
+
+
 class CondOpArgsMismatchError(ArgsMismatchError):
     """
     Internal error from cond() due to arguments mismatch.
@@ -230,11 +235,6 @@ class UncapturedHigherOrderOpError(TorchDynamoException):
 
 class IncorrectUsage(Exception):
     pass
-
-
-class SideEffectsError(IncorrectUsage):
-    def __init__(self, msg: str) -> None:
-        super().__init__(msg)
 
 
 # TODO: I'm a little uncertain about what error classification we should have

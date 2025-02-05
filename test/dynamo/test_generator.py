@@ -9,6 +9,7 @@ import torch._dynamo.test_case
 import torch._dynamo.testing
 from torch._dynamo.exc import InternalTorchDynamoError, Unsupported
 from torch._dynamo.testing import EagerAndRecordGraphs, normalize_gm
+from torch._dynamo.utils import counters
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
@@ -177,6 +178,8 @@ class GraphModule(torch.nn.Module):
         self.assertEqual(list(g), [t.cos() + 1, t.tan() + 2])
 
     def test_reconstruct_generator_with_dict_mutation(self):
+        counters.clear()
+
         def whoo(t, d):
             d[2] = t
             yield t.sin()
@@ -192,11 +195,16 @@ class GraphModule(torch.nn.Module):
 
         t = torch.randn(2)
         d = {1: t}
-        with self.assertRaisesRegex(
-            InternalTorchDynamoError,
-            "Cannot reconstruct a generator with variable mutations",
-        ):
-            fn(t, d)
+        fn(t, d)
+        self.assertEqual(len(counters["unimplemented"]), 1)
+        self.assertEqual(
+            dict(counters["unimplemented"]),
+            {
+                "Cannot reconstruct a generator with variable mutations. "
+                "Dynamo needs to fully exhaust the generator, which may cause "
+                "unintended variable modifications.": 1
+            },
+        )
 
     def test_reconstruct_generator_with_dict_mutation_before(self):
         def whoo(t, d):
@@ -241,11 +249,16 @@ class GraphModule(torch.nn.Module):
 
         t = torch.randn(2)
         c = Counter()
-        with self.assertRaisesRegex(
-            InternalTorchDynamoError,
-            "Cannot reconstruct a generator with variable mutations",
-        ):
-            fn(t, c)
+        fn(t, c)
+        self.assertEqual(len(counters["unimplemented"]), 1)
+        self.assertEqual(
+            dict(counters["unimplemented"]),
+            {
+                "Cannot reconstruct a generator with variable mutations. "
+                "Dynamo needs to fully exhaust the generator, which may cause "
+                "unintended variable modifications.": 1
+            },
+        )
 
     def test_reconstruct_generator_with_object_mutation_before(self):
         class Counter:
@@ -293,9 +306,13 @@ class GraphModule(torch.nn.Module):
             return t.sin(), list(gen)
 
         t = torch.randn(2)
-        fn(t)
+        y, gen = fn(t)
+        self.assertEqual(y, t.sin())
+        self.assertEqual(list(gen), [t.cos(), t.tan()])
 
     def test_graph_break_in_generator_while_reconstructing(self):
+        counters.clear()
+
         def whoo():
             yield 1
             torch._dynamo.graph_break()
@@ -575,7 +592,7 @@ class GraphModule(torch.nn.Module):
             return gen
 
         with self.assertRaisesRegex(
-            InternalTorchDynamoError,
+            Unsupported,
             "Cannot reconstruct a generator with variable mutations",
         ):
             self._compile_check(fn)
@@ -686,6 +703,7 @@ class GraphModule(torch.nn.Module):
         self.assertEqual(expected, got)
 
     def test_generator_with_side_effects(self):
+        counters.clear()
         i = 0
 
         def whoo(t):
@@ -694,14 +712,21 @@ class GraphModule(torch.nn.Module):
                 i += 1
                 yield t + j
 
+        @torch.compile(backend="eager", fullgraph=True)
         def fn(t):
             return whoo(t), t.sin()
 
-        with self.assertRaisesRegex(
-            InternalTorchDynamoError,
-            "Cannot reconstruct a generator with variable mutations",
-        ):
-            self._compile_check(fn)
+        t = torch.randn(2)
+        fn(t)
+        self.assertEqual(len(counters["unimplemented"]), 1)
+        self.assertEqual(
+            dict(counters["unimplemented"]),
+            {
+                "Cannot reconstruct a generator with variable mutations. "
+                "Dynamo needs to fully exhaust the generator, which may cause "
+                "unintended variable modifications.": 1
+            },
+        )
 
     def test_subgenerator_with_side_effects(self):
         i = 0
@@ -723,14 +748,19 @@ class GraphModule(torch.nn.Module):
             i += 1
             yield t + 4
 
+        @torch.compile(backend="eager", fullgraph=True)
         def fn(t):
             return whoo(t), t.sin()
 
-        with self.assertRaisesRegex(
-            InternalTorchDynamoError,
-            "Cannot reconstruct a generator with variable mutations",
-        ):
-            self._compile_check(fn)
+        t = torch.randn(2)
+        gen, y = fn(t)
+        self.assertEqual(y, t.sin())
+        self.assertEqual(len(list(gen)), 5)
+        self.assertTrue(
+            "Cannot reconstruct a generator with variable mutations. "
+            "Dynamo needs to fully exhaust the generator, which may cause "
+            "unintended variable modifications." in dict(counters["unimplemented"])
+        )
 
     def test_generator_with_side_effects_graph_break(self):
         i = 0
@@ -741,17 +771,22 @@ class GraphModule(torch.nn.Module):
                 i += 1
                 yield t + j
 
+        @torch.compile(backend="eager", fullgraph=False)
         def fn(t):
             gen = whoo(t)
             torch._dynamo.graph_break()
             next(gen)
             return gen, t.sin()
 
-        with self.assertRaisesRegex(
-            InternalTorchDynamoError,
-            "Cannot reconstruct a generator with variable mutations",
-        ):
-            self._compile_check(fn, fullgraph=False)
+        t = torch.randn(2)
+        gen, y = fn(t)
+        self.assertEqual(y, t.sin())
+        self.assertEqual(len(list(gen)), 4)
+        self.assertTrue(
+            "Cannot reconstruct a generator with variable mutations. "
+            "Dynamo needs to fully exhaust the generator, which may cause "
+            "unintended variable modifications." in dict(counters["unimplemented"])
+        )
 
     def test_generator_with_side_effects_graph_break_2(self):
         i = 0
@@ -1204,7 +1239,6 @@ class TestGeneratorThrow(GeneratorTestsBase):
         y = self._compile_check(fn, (t,))
         self.assertEqual(y, t.sin() + t.cos())
 
-    @unittest.skipIf(sys.version_info < (3, 11), "Missing RERAISE")
     def test_throw_with_finally(self):
         z = 0
 
@@ -1385,7 +1419,6 @@ class TestGeneratorThrow(GeneratorTestsBase):
         with self.assertRaises(Unsupported):
             fn(t)
 
-    @unittest.skipIf(sys.version_info < (3, 11), "Missing RERAISE")
     def test_throw_try_except_finally(self):
         z = 0
 
