@@ -648,7 +648,7 @@ class TritonTemplateKernel(TritonKernel):
                     self.body.writeline(str(scatter))
 
             body_val = self.body.getvalue()
-            self.cse.invalidate(OrderedSet[str]())
+            self.cse.invalidate(OrderedSet())
             return body_val
 
     def load_input(
@@ -742,7 +742,7 @@ class TritonTemplateKernel(TritonKernel):
             template_mask = self.template_mask
 
             class StoreOutputSubstitution(V.WrapperHandler):  # type: ignore[name-defined]
-                self.name = name
+                name = "StoreOutputSubstitution"
 
                 def store(
                     self,
