@@ -295,7 +295,8 @@ size_t getPadding(
     size_t size,
     std::string& padding_buf);
 
-std::tuple<size_t, size_t> getOffset(size_t cursor, size_t filename_size, size_t size);
+std::tuple<size_t, size_t>
+getOffset(size_t cursor, size_t filename_size, size_t size);
 
 } // namespace detail
 

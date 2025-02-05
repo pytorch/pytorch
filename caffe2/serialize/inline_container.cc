@@ -237,7 +237,8 @@ constexpr int MZ_ZIP_DATA_DESCRIPTOR_ID = 0x08074b50;
 
 namespace detail {
 
-std::tuple<size_t, size_t> getOffset(size_t cursor, size_t filename_size, size_t size) {
+std::tuple<size_t, size_t>
+getOffset(size_t cursor, size_t filename_size, size_t size) {
   size_t start = cursor + MZ_ZIP_LOCAL_DIR_HEADER_SIZE + filename_size +
       sizeof(mz_uint16) * 2;
   if (size >= MZ_UINT32_MAX || cursor >= MZ_UINT32_MAX) {
@@ -617,8 +618,7 @@ size_t PyTorchStreamReader::getRecordOffsetNoRead(
     size_t size) {
   std::string full_name = archive_name_plus_slash_ + filename;
   size_t full_name_size = full_name.size();
-  std::tuple<size_t, size_t> result = detail::getOffset(cursor, full_name_size, size);
-  size_t offset = std::get<0>(result);
+  auto [offset, _] = detail::getOffset(cursor, full_name_size, size);
   return offset;
 }
 
