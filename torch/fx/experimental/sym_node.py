@@ -582,6 +582,15 @@ class SymNode:
     def is_constant(self):
         return False
 
+    def key_set(self):
+        if self.is_nested_int():
+            return self._hint.node.key_set()
+        else:
+            return (  # TODO: make a empty key set
+                torch._C.DispatchKeySet(torch._C.DispatchKey.Python)
+                - torch._C.DispatchKeySet(torch._C.DispatchKey.Python)
+            )
+
 
 # TODO: this probably needs the sizes-strides eval functions
 METHOD_TO_OPERATOR = {

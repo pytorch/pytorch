@@ -8379,7 +8379,7 @@ BACKWARD_SKIPS_AND_XFAILS = [
     # squeeze(): invalid gradient shape; need to check formula
     XFailRule(
         error_type=RuntimeError,
-        error_msg="returned an invalid gradient at index 0",
+        error_msg="invalid gradient at index 0",
         op_match_fn=lambda device, op: (op.full_name == "squeeze"),
         sample_match_fn=lambda device, sample: (
             sample.name == "5D_contig_with_seqlen_cache: normal_dim"
@@ -8498,7 +8498,7 @@ BACKWARD_SKIPS_AND_XFAILS = [
     # Bug: need to use the correct nested int in the return shape
     XFailRule(
         error_type=RuntimeError,
-        error_msg="Function CloneBackward0 returned an invalid gradient",
+        error_msg="invalid gradient at index 0",
         op_match_fn=lambda device, op: (op.full_name == "clone"),
         sample_match_fn=lambda device, sample: (
             sample.kwargs.get("memory_format", None) == torch.contiguous_format

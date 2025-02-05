@@ -5842,6 +5842,7 @@
   device_guard: False
   dispatch:
     CompositeImplicitAutograd: sum_to_size_symint
+    NestedTensorCPU, NestedTensorCUDA: sum_to_size_nested_symint
 
 - func: sqrt(Tensor self) -> Tensor
   device_check: NoCheck   # TensorIterator
