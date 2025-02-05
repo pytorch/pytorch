@@ -474,7 +474,7 @@ def check_fp16_extra(config, m, n, k, alpha, num_threads):
 @register_micro_gemm(
     *generate_gemm_config(
         VecAVX512,
-        [(8, 64, 1), (8, 32, 1)],
+        [(8, 32, 1)],
         input_dtype=torch.bfloat16,
         input2_dtype=torch.int8,
         output_dtype=torch.float16,
@@ -587,13 +587,7 @@ inline void {{kernel_name}}_kernel(
     c10::ForcedUnroll<COLS>{}(load_scales);
 
     auto loadc = [&](auto i) {
-        if constexpr (accum) {
-            constexpr int row = i / COLS;
-            constexpr int col = i % COLS;
-            vc[i] = _mm512_loadu_ph(C + row * ldc + col * VLEN);
-        } else {
-            vc[i] = _mm512_set1_ph(0.0f);
-        }
+        vc[i] = _mm512_set1_ph(0.0f);
     };
     c10::ForcedUnroll<ROWS * COLS>{}(loadc);
 
@@ -602,31 +596,17 @@ inline void {{kernel_name}}_kernel(
         constexpr int col = i % COLS;
 
         if constexpr (col == 0) {
-            va = _mm512_set1_ph(static_cast<float>(A[row * lda + k]));
+            va = _mm512_set1_ph((_Float16)(A[row * lda + k]));
         }
 
         if constexpr (row == 0) {
-            // Convert VLEN int8 elements to int32, and then fp32, then fp16, then apply scale
-            __m128i first_int8_vector = _mm_loadu_si128((__m128i*)(B + k * ldb + col * VLEN)); // Load 16 int8 values
-            __m128i second_int8_vector = _mm_loadu_si128((__m128i*)(B + k * ldb + col * VLEN + 16)); // Load 16 int8 values
-
-            __m512i first_int32_vector = _mm512_cvtepi8_epi32(first_int8_vector); // 16 int8 -> 16 int32
-            __m512i second_int32_vector = _mm512_cvtepi8_epi32(second_int8_vector); // 16 int8 -> 16 int32
-
-            __m512 first_float_vector = _mm512_cvtepi32_ps(first_int32_vector); // Convert 16 int32 -> 16 float
-            __m512 second_float_vector = _mm512_cvtepi32_ps(second_int32_vector); // Convert 16 int32 -> 16 float
-
-            __m256i first_fp16_vector = _mm512_cvtps_ph(first_float_vector, _MM_FROUND_TO_NEAREST_INT | _MM_FROUND_NO_EXC);
-            __m256i second_fp16_vector = _mm512_cvtps_ph(second_float_vector, _MM_FROUND_TO_NEAREST_INT | _MM_FROUND_NO_EXC);
-
-            vb[col] = _mm512_castsi512_ph(_mm512_castsi256_si512(first_fp16_vector));
-            vb[col] = _mm512_castsi512_ph(_mm512_inserti64x4(_mm512_castph_si512(vb[col]), second_fp16_vector, 1));
-
+            // Convert VLEN int8 elements to int16, then fp16, and then apply scale
+            auto int8_vector = _mm256_loadu_si256((__m256i*)(B + k * ldb + col * VLEN));
+            vb[col] =  _mm512_cvtepi16_ph(_mm512_cvtepi8_epi16(int8_vector));
             vb[col] = _mm512_mul_ph(vb[col], scales[col]);
         }
 
-        constexpr int idx = row * COLS + col;
-        vc[idx] = _mm512_fmadd_ph(va, vb[col], vc[idx]);
+        vc[i] = _mm512_fmadd_ph(va, vb[col], vc[i]);
     };
 
     // Accumulate along k
@@ -638,6 +618,10 @@ inline void {{kernel_name}}_kernel(
     auto storec = [&](auto i) {
         constexpr int row = i / COLS;
         constexpr int col = i % COLS;
+        if constexpr (accum) {
+            auto vc_old = _mm512_loadu_ph(C + row * ldc + col * VLEN);
+            vc[i] = _mm512_fmadd_ph(_mm512_set1_ph(1.0f), vc[i], vc_old);
+        }
         _mm512_storeu_ph(C + row * ldc + col * VLEN, vc[i]);
     };
     c10::ForcedUnroll<ROWS * COLS>{}(storec);
