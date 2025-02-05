@@ -644,7 +644,7 @@ def _make_nested_meta(
         process_min_max_seqlen(metadata, "max_seqlen", max_seqlen)
 
     if sum_lengths is not None:
-        assert isinstance(sum_lengths, int)
+        assert isinstance(sum_lengths, (int, torch.SymInt))
         metadata[f"_sum_lengths_tensor"] = _store_val_in_tensor(sum_lengths)
 
     if metadata.get("_max_seqlen_tensor") is not None:
