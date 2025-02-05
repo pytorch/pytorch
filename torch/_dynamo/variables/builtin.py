@@ -20,6 +20,7 @@ from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 from .. import config, polyfills, variables
 from ..exc import (
     AttributeMutationError,
+    ObservedAttributeError,
     unimplemented,
     Unsupported,
     UserError,
@@ -1463,7 +1464,7 @@ class BuiltinVariable(VariableTracker):
     call_list = _call_tuple_list
 
     def call_callable(self, tx: "InstructionTranslator", arg):
-        from .functions import BaseUserFunctionVariable
+        from .functions import BaseUserFunctionVariable, FunctoolsPartialVariable
         from .nn_module import NNModuleVariable
 
         if isinstance(
@@ -1471,6 +1472,7 @@ class BuiltinVariable(VariableTracker):
             (
                 variables.UserDefinedClassVariable,
                 BaseUserFunctionVariable,
+                FunctoolsPartialVariable,
                 NNModuleVariable,
             ),
         ):
@@ -1871,7 +1873,7 @@ class BuiltinVariable(VariableTracker):
                         version = x._version
                         if version > 0:
                             version = version - 1
-                        torch._C._autograd._unsafe_set_version_counter(x, version)
+                        torch._C._autograd._unsafe_set_version_counter((x,), (version,))
                         return x
 
                     tx.output.create_proxy(
@@ -1906,7 +1908,7 @@ class BuiltinVariable(VariableTracker):
 
                 try:
                     getattr_var = obj.var_getattr(tx, name_var.as_python_constant())
-                except AttributeError:
+                except (AttributeError, ObservedAttributeError):
                     getattr_var = None
 
                 if isinstance(getattr_var, variables.TensorVariable):
@@ -2012,6 +2014,8 @@ class BuiltinVariable(VariableTracker):
             return variables.ConstantVariable.create(id(args[0].fn))
         elif istype(args[0], variables.SkipFunctionVariable):
             return variables.ConstantVariable.create(id(args[0].value))
+        elif istype(args[0], variables.FunctoolsPartialVariable):
+            return variables.ConstantVariable.create(id(args[0].fake_value))
         else:
             unimplemented(f"call_id with args {args}")
 
