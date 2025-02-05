@@ -1046,13 +1046,22 @@ class CppWrapperCpu(PythonWrapperCodegen):
         return shim_fn
 
     def generate_c_shim_extern_kernel_call(
-        self, kernel: str, args: list[str], device: str
+        self,
+        kernel: str,
+        args: list[str],
+        device: str,
+        *,
+        debug_args: Optional[list[str]] = None,
     ) -> None:
+        """debug_args kwarg allows CppWrapperCpuArrayRef to pass in wrapped arguments in
+        place of args while preserving debug printer output."""
         # We can do this unconditionally, since we cache this call.
         self.add_device_include(device)
 
         debug_printer_manager = V.graph.wrapper_code.debug_printer
-        debug_printer_manager.set_printer_args(args, kernel, None, None, "extern")
+        debug_printer_manager.set_printer_args(
+            debug_args if debug_args is not None else args, kernel, None, None, "extern"
+        )
         with debug_printer_manager:
             shim_fn = self.get_c_shim_func_name(kernel, device)
             self.writeline(
