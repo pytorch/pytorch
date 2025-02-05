@@ -226,7 +226,7 @@ static void _bitwise_op_out_mps(const Tensor& self,
 
   auto output_size = at::infer_size_dimvector(self.sizes(), other.sizes());
   resize_output(output, output_size);
-  if (needsGather(output)) {
+  if (!output.is_contiguous()) {
     output = output.contiguous();
     needs_output_copy = true;
   }

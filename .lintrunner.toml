@@ -161,7 +161,8 @@ init_command = [
     'rich==10.9.0',
     'pyyaml==6.0.1',
     'optree==0.13.0',
-    'dataclasses_json==0.6.7'
+    'dataclasses_json==0.6.7',
+    'pandas==2.2.3',
 ]
 
 [[linter]]
@@ -261,7 +262,6 @@ exclude_patterns = [
     'torch/csrc/api/include/torch/linalg.h',
     'torch/csrc/autograd/generated/**',
     'torch/csrc/distributed/**/*.cu',
-    'torch/csrc/distributed/c10d/ProcessGroupNCCL.cpp',
     'torch/csrc/distributed/c10d/WinSockUtils.hpp',
     'torch/csrc/distributed/c10d/quantization/quantization_gpu.h',
     'torch/csrc/dynamo/eval_frame.h',
@@ -558,7 +558,7 @@ exclude_patterns = [
 command = [
     'python3',
     'tools/linter/adapters/grep_linter.py',
-    '--pattern=#include <pybind11\/',
+    '--pattern=#include <pybind11\/(^|[^(gil\.h)])',
     '--allowlist-pattern=#include <torch\/csrc\/utils\/pybind.h>',
     '--linter-name=PYBIND11_INCLUDE',
     '--match-first-only',
@@ -1476,7 +1476,7 @@ init_command = [
     'black==23.12.1',
     'usort==1.0.8.post1',
     'isort==5.13.2',
-    'ruff==0.9.3',  # sync with RUFF
+    'ruff==0.9.4',  # sync with RUFF
 ]
 is_formatter = true
 
@@ -1561,7 +1561,7 @@ init_command = [
     'python3',
     'tools/linter/adapters/pip_init.py',
     '--dry-run={{DRYRUN}}',
-    'ruff==0.9.3',  # sync with PYFMT
+    'ruff==0.9.4',  # sync with PYFMT
 ]
 is_formatter = true
 
@@ -1703,6 +1703,7 @@ command = [
 ]
 include_patterns = [
     "torch/_inductor/**/*.py",
+    "torch/_functorch/partitioners.py",
 ]
 is_formatter = true
 

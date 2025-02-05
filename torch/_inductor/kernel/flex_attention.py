@@ -1308,7 +1308,7 @@ def flex_attention(
         if SPARSE_KV_BLOCK_SIZE % BLOCK_N != 0 or SPARSE_Q_BLOCK_SIZE % BLOCK_M != 0:
             if len(configs) == 1:
                 raise ValueError(
-                    f"Q and KV block size must be divisible by BLOCK_M and BLOCK_N. We"
+                    f"Q and KV block size must be divisible by BLOCK_M and BLOCK_N. We "
                     f"got Q_BLOCK_SIZE={SPARSE_Q_BLOCK_SIZE} and KV_BLOCK_SIZE={SPARSE_KV_BLOCK_SIZE}."
                 )
             continue
@@ -2152,7 +2152,7 @@ def process_joint_outputs(
     assert isinstance(all_joint_outputs, list)
     assert (
         all_joint_outputs[0] is not None
-    ), "joint_subgraph_buffer is None this is a bug!"
+    ), "joint_subgraph_buffer is None - this is a bug!"
 
     joint_buffer = all_joint_outputs[0]
     other_grads = all_joint_outputs[num_placeholders - 1 :]
