@@ -1006,8 +1006,10 @@ void MetalKernelFunction::dispatch(c10::ArrayRef<uint64_t> length, c10::Optional
   auto tg_size = MTLSizeMake(group_size_length > 0 ? group_size->at(0) : max_tg_size,
                              group_size_length > 1 ? group_size->at(1) : 1,
                              group_size_length > 2 ? group_size->at(2) : 1);
-  TORCH_CHECK_VALUE(
-      tg_size.width * tg_size.height * tg_size.depth <= max_tg_size, "Threadgroup size exceeds ", max_tg_size, " limit");
+  TORCH_CHECK_VALUE(tg_size.width * tg_size.height * tg_size.depth <= max_tg_size,
+                    "Threadgroup size exceeds ",
+                    max_tg_size,
+                    " limit");
   [encoder dispatchThreads:MTLSizeMake(length[0], length.size() > 1 ? length[1] : 1, length.size() == 3 ? length[2] : 1)
       threadsPerThreadgroup:tg_size];
 }
