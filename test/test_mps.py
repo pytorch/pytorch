@@ -12564,11 +12564,6 @@ class TestConsistency(TestCaseMPS):
             if op.name == "tensor_split" and isinstance(mps_args[1], torch.Tensor):
                 mps_args[1] = cpu_args[1]
 
-            # print(cpu_args[0].shape)
-            # print(cpu_args[1].shape)
-            # print(cpu_args)
-            # print(cpu_kwargs)
-            # print(cpu_args[0].numel())
             cpu_out = op(*cpu_args, **cpu_kwargs)
             mps_out = op(*mps_args, **mps_kwargs)
 
