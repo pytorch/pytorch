@@ -1513,7 +1513,12 @@ class InstructionTranslatorBase(
             typ = BuiltinVariable(val.exc_type)
             tb = ConstantVariable(None)
         else:
-            unimplemented("WITH_EXCEPT_START")
+            assert len(self.stack) >= 7
+            fn = self.stack[-7]
+            val = self.stack[-4]
+            assert isinstance(val, variables.ExceptionVariable)
+            typ = BuiltinVariable(val.exc_type)
+            tb = ConstantVariable(None)
 
         self.call_function(fn, [typ, val, tb], {})
 
