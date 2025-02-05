@@ -99,8 +99,6 @@ class SizeVarAllocator:
             if result is None:
                 result = self._simplify_with_ranges(expr, var_ranges)
                 cache[key] = result
-                if result != expr:
-                    cache[(result, *var_ranges.items())] = result
             return result
 
         return simplify_with_ranges
