@@ -34,7 +34,6 @@ tolerance:
     - vgg16
     - mobilenet_v3_large
     - nvidia_deeprecommender
-    - timm_efficientdet
 
   # These models need >1e-3 tolerance
   even_higher:
@@ -42,6 +41,7 @@ tolerance:
     - tacotron2
     - yolov3
     - timm_efficientdet
+    - timm_efficientnet
     - squeezenet1_1
 
   higher_fp16:
@@ -66,6 +66,7 @@ tolerance:
 
 require_larger_multiplier_for_smaller_tensor:
   - yolov3
+  - timm_efficientnet
 
 # These benchmarks took >600s on an i9-11900K CPU
 very_slow: &VERY_SLOW_MODELS
