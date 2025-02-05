@@ -1521,6 +1521,8 @@ class InstructionTranslatorBase(
     def RAISE_VARARGS(self, inst):
         if inst.arg == 0:
             # duplicate the top of the stack and re-raise it
+            if sys.version_info < (3, 11):
+                unimplemented("re-raise")
             assert isinstance(self.stack[-1], ExceptionVariable)
             self.stack.append(self.stack[-1])
             self._raise_exception_variable(inst)
@@ -1556,7 +1558,12 @@ class InstructionTranslatorBase(
             typ = BuiltinVariable(val.exc_type)
             tb = ConstantVariable(None)
         else:
-            unimplemented("WITH_EXCEPT_START")
+            assert len(self.stack) >= 7
+            fn = self.stack[-7]
+            val = self.stack[-4]
+            assert isinstance(val, variables.ExceptionVariable)
+            typ = BuiltinVariable(val.exc_type)
+            tb = ConstantVariable(None)
 
         self.call_function(fn, [typ, val, tb], {})
 

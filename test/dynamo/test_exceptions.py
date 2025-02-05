@@ -477,6 +477,7 @@ class ExceptionTests(torch._dynamo.test_case.TestCase):
 
         self.assertIsNone(exc2.__context__)
 
+    @unittest.skipIf(sys.version_info < (3, 11), "Python 3.11+")
     @make_dynamo_test
     def test_raise_match(self):
         a = AttributeError
@@ -649,6 +650,7 @@ class CPythonExceptionTests(torch._dynamo.test_case.TestCase):
         self.assertIs(exc, oe)
         self.assertIs(exc.__context__, ve)
 
+    @unittest.skipIf(sys.version_info < (3, 11), "Python 3.11+")
     @make_dynamo_test
     def test_raise_does_not_create_context_chain_cycle(self):
         A = AssertionError
@@ -687,6 +689,7 @@ class CPythonExceptionTests(torch._dynamo.test_case.TestCase):
         self.assertIs(c.__context__, b)
         self.assertIsNone(b.__context__)
 
+    @unittest.skipIf(sys.version_info < (3, 11), "Python 3.11+")
     @make_dynamo_test
     def test_no_hang_on_context_chain_cycle1(self):
         # See issue 25782. Cycle in context chain.
@@ -742,6 +745,7 @@ class CPythonExceptionTests(torch._dynamo.test_case.TestCase):
         self.assertIs(b.__context__, a)
         self.assertIs(a.__context__, c)
 
+    @unittest.skipIf(sys.version_info < (3, 11), "Python 3.11+")
     @make_dynamo_test
     def test_no_hang_on_context_chain_cycle3(self):
         # See issue 25782. Longer context chain with cycle.
