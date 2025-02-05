@@ -783,6 +783,8 @@ def _compile(
                     code.co_filename,
                     code.co_firstlineno,
                 )
+                if one_graph:
+                    log.debug("No graph captured with one_graph=True")
                 return None
 
         assert (
