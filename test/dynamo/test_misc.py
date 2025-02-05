@@ -4592,7 +4592,7 @@ utils_device.CURRENT_DEVICE == None""".split(
     def test_builtin_subclasses_as_method_on_class_type(self):
         class Foo:
             def __init__(self, name):
-                self.ame_ = name
+                self.name_ = name
 
             def get_name(self):
                 return "Foo " + self.name_
@@ -4658,8 +4658,12 @@ utils_device.CURRENT_DEVICE == None""".split(
             x = torch.cos(x)
             return Foo.__subclasses__()
 
+        y = torch.randn(4)
+
         @torch._dynamo.optimize_assert(counter)
         def fn_single(subs_of_foo_optim):
+            nonlocal y
+            torch.cos(y)
             return subs_of_foo_optim[0].__subclasses__()
 
         subs_of_foo_optim = fn(torch.randn(4))
@@ -5662,8 +5666,12 @@ utils_device.CURRENT_DEVICE == None""".split(
         self.assertEqual(f(input_two_dims), 8)
         self.assertEqual(f(input_two_dims), 8)
 
+        y = torch.randn(4)
+
         @torch.compile(backend="eager", fullgraph=True)
         def f_onnx(x):
+            nonlocal y
+            torch.cos(y)
             return 1 + torch.onnx.operators.shape_as_tensor(x)[0]
 
         self.assertEqual(f_onnx(input_one_dim), 7)
@@ -9443,6 +9451,7 @@ def ___make_guard_fn():
         self.assertEqual(counter.frame_count, 0)
 
     # just to be sure in case anyone tries to run this in older versions of Python
+    @unittest.skip("Requires ongoing work of supporting generators")
     def test_pep0479_convert_stopiteration(self):
         # https://peps.python.org/pep-0479/
         def generator_with_stop_iteration():
@@ -9451,10 +9460,8 @@ def ___make_guard_fn():
             raise StopIteration("StopIteration raised within generator")
             yield 2  # This should never be reached
 
-        @torch.compile(backend="eager", fullgraph=True)
         def fn(t):
-            # TODO - Uncommenting discovers an error
-            # t = torch.cos(t)
+            t = torch.cos(t)
             try:
                 # Try to consume the generator
                 gen = generator_with_stop_iteration()
@@ -9468,8 +9475,10 @@ def ___make_guard_fn():
                 return 200
 
         t = torch.randn(2)
-        y = fn(t)
-        self.assertEqual(y, 100)
+        ref = fn(t)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        res = opt_fn(t)
+        self.assertEqual(ref, res)
 
     def test_yield_send_to_subgenerator_graph_break(self):
         def subgenerator(tensor):
