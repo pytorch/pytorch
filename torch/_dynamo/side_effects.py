@@ -21,7 +21,7 @@ from .bytecode_transformation import (
 from .codegen import PyCodegen
 from .exc import unimplemented
 from .source import GlobalSource, LocalCellSource, LocalSource, Source
-from .utils import dict_new, is_frozen_dataclass, nn_module_new, object_new
+from .utils import dict_new, is_frozen_dataclass, nn_module_new, object_new, tuple_new
 from .variables.base import (
     AttributeMutation,
     AttributeMutationExisting,
@@ -264,6 +264,8 @@ class SideEffects:
             obj = nn_module_new(user_cls)
         elif issubclass(user_cls, (dict, collections.OrderedDict)):
             obj = dict_new(user_cls)
+        elif issubclass(user_cls, tuple):
+            obj = tuple_new(user_cls)
         else:
             try:
                 obj = object_new(user_cls)
@@ -296,6 +298,8 @@ class SideEffects:
             variable_cls = variables.UnspecializedNNModuleVariable
         elif issubclass(user_cls, (dict, collections.OrderedDict)):
             variable_cls = variables.UserDefinedDictVariable
+        elif issubclass(user_cls, tuple):
+            variable_cls = variables.UserDefinedTupleVariable
         elif issubclass(user_cls, MutableMapping):
             variable_cls = variables.MutableMappingVariable
         elif is_frozen_dataclass(user_cls):
@@ -430,6 +434,13 @@ class SideEffects:
     def _get_modified_vars(self):
         return [var for var in self.id_to_variable.values() if self.is_modified(var)]
 
+    def get_new_function(self, var):
+        if isinstance(var, variables.UserDefinedDictVariable):
+            return "dict_new"
+        elif isinstance(var, variables.UserDefinedTupleVariable):
+            return "tuple_new"
+        return "object_new"
+
     def codegen_save_tempvars(self, cg: PyCodegen):
         # Make sure we codegen these modified VT to their source by default, so
         # that mutation and aliasing are properly accounted for.
@@ -455,14 +466,15 @@ class SideEffects:
                     unimplemented("AutogradFunctionContextVariable escaped")
                 cg.add_push_null(
                     lambda: cg.load_import_from(
-                        utils.__name__,
-                        "dict_new"
-                        if isinstance(var, variables.UserDefinedDictVariable)
-                        else "object_new",
+                        utils.__name__, self.get_new_function(var)
                     )
                 )
                 cg(var.mutation_type.cls_source)
-                cg.extend_output(create_call_function(1, False))
+                if isinstance(var, variables.UserDefinedTupleVariable) and var.new_args:
+                    cg(var.new_args)
+                    cg.extend_output(create_call_function(2, False))
+                else:
+                    cg.extend_output(create_call_function(1, False))
                 cg.add_cache(var)
                 var.source = LocalSource(cg.tempvars[var])
             else:
