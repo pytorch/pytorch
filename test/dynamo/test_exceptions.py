@@ -532,6 +532,13 @@ class ExceptionTests(torch._dynamo.test_case.TestCase):
                 exc.__context__.__context__.__context__.__context__, e
             )
 
+    @make_dynamo_test
+    def test_raise_ZeroDivisionError(self):
+        try:
+            1 / 0
+        except Exception:
+            pass
+
 
 class CPythonExceptionTests(torch._dynamo.test_case.TestCase):
     # Tests taken from CPython source code in cpython/Lib/test/test_exceptions.py
