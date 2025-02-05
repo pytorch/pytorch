@@ -20,11 +20,11 @@ from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 from .. import config, polyfills, variables
 from ..exc import (
     AttributeMutationError,
+    ObservedAttributeError,
     unimplemented,
     Unsupported,
     UserError,
     UserErrorType,
-    ObservedAttributeError
 )
 from ..guards import GuardBuilder, install_guard
 from ..replay_record import DummyModule
