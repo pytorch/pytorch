@@ -3734,6 +3734,20 @@ class CommonTemplate:
         with self.assertRaisesRegex(RuntimeError, msg):
             torch.compile(fn)(t)
 
+    def test_linear_dynamic_maxautotune(self):
+        @torch.compile(dynamic=True, mode="max-autotune")
+        class Model(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.linear = torch.nn.Linear(1, 1)
+
+            def forward(self, x):
+                return self.linear(x)
+
+        x = torch.randn(10, 1)
+        torch._dynamo.mark_dynamic(x, 0)
+        self.common(Model(), (x,))
+
     def test_scalar_input(self):
         def fn(x, y):
             a = torch.div(x, y, rounding_mode="floor")
