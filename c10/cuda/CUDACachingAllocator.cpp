@@ -34,6 +34,7 @@
 #include <set>
 #include <utility>
 #include <vector>
+#include <new>
 
 TORCH_SDT_DEFINE_SEMAPHORE(malloc)
 TORCH_SDT_DEFINE_SEMAPHORE(free)
