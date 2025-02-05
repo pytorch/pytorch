@@ -751,7 +751,7 @@ __global__ void GammaBetaBackwardCUDAKernel(
       if (lid == 0) {
         int64_t store_index = blockIdx.x * block_dim_x;
         store_index += i * active_reduce_warps;
-        store_index += (thread_id) / kWarpSize;
+        store_index += warp_id;
         if (dg) {
           dg[store_index] = reg_dg;
         }
@@ -1335,6 +1335,8 @@ void LayerNormBackwardKernelImplInternal(
                       dbeta_data);
       C10_CUDA_KERNEL_LAUNCH_CHECK();
 #else
+      // TODO: Merge these two kernels as they should be identical if the compiler can
+      // propagate constants properly.
       if ((M % kWarpSize == 0) && (N % kWarpSize == 0)) {
         // This implementation relies on warp primitives and requires that M and N divide
         // exactly to warp size.
@@ -1360,7 +1362,7 @@ void LayerNormBackwardKernelImplInternal(
       } else {
         dim3 threads{16, 32};
         int blocks = (N + threads.x - 1) / threads.x;
-        size_t shmem_sz = 2 * sizeof(T_ACC) * threads.x * threads.y;
+        size_t shmem_sz = 2 * sizeof(T_ACC) * (threads.x + 1) * threads.y;
         GammaBetaBackwardCUDAKernel<T, T_ACC, 16, 32>
             <<<blocks, threads, shmem_sz, cuda_stream>>>(
                 M,
