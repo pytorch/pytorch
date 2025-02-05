@@ -1200,7 +1200,7 @@ class PipelineScheduleMulti(_PipelineSchedule):
         """Load a CSV representation of the schedule from a file with the provided filename.
         This API will most likely get renamed/refactored so is marked as internal for now.
 
-        format must be "compute_only" for PipelineScheduleMulti
+        format must be "compute_only" for PipelineScheduleMulti.
         """
         assert format == "compute_only"
         with open(filename, newline="") as csvfile:
@@ -1208,6 +1208,8 @@ class PipelineScheduleMulti(_PipelineSchedule):
             for rank, row in enumerate(reader):
                 self.pipeline_order[rank] = [_Action.from_str(s) for s in row]
 
+        # Validates the order of the pipeline actions and infers the stage_to_rank_mapping.
+        # This will overwrite the default stage_to_rank_mapping created in the constructor
         self._validate_and_set_stage_mapping(self.pipeline_order)
 
     def step(self, *args, target=None, losses: Optional[list] = None, **kwargs):
@@ -1450,7 +1452,7 @@ class _PipelineScheduleRuntime(PipelineScheduleMulti):
         Given an in-memory representation for a simple compute-only schedule, lower it to a complex schedule including
         communication actions.  Stores the schedule in self, and must be called before running step_mo()
         """
-        # validate the actions are valid and sets stage_index_to_group_rank
+        # validate the provided actions are valid and overrides the default stage_index_to_group_rank
         super()._validate_and_set_stage_mapping(actions)
 
         self.pipeline_order_with_comms: dict[int, list[_Action]] = {}
