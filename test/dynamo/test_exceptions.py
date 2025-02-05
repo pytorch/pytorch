@@ -1,5 +1,9 @@
 # Owner(s): ["module: dynamo"]
 
+import contextlib
+import sys
+import unittest
+
 import torch
 import torch._dynamo.config
 import torch._dynamo.test_case
@@ -8,6 +12,12 @@ import torch.nn
 import torch.utils.checkpoint
 from torch._dynamo.bytecode_transformation import Instruction
 from torch._dynamo.symbolic_convert import SpeculationLog, SpeculationLogDivergence
+
+from .utils import make_dynamo_test
+
+
+class CustomException(Exception):
+    ...
 
 
 class ExceptionTests(torch._dynamo.test_case.TestCase):
@@ -450,6 +460,329 @@ class ExceptionTests(torch._dynamo.test_case.TestCase):
         opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
         x = torch.randn(4)
         self.assertEqual(fn(x), opt_fn(x))
+
+    @make_dynamo_test
+    def test_raise_set___context__(self):
+        try:
+            raise TypeError
+        except TypeError as e:
+            exc = e
+
+        self.assertIsNone(exc.__context__)
+
+        try:
+            raise ValueError
+        except ValueError as e:
+            exc2 = e
+
+        self.assertIsNone(exc2.__context__)
+
+    @make_dynamo_test
+    def test_raise_match(self):
+        a = AttributeError
+        b = BytesWarning
+        c = ConnectionError
+        d = DeprecationWarning
+        e = Exception
+
+        def fn(a, b):
+            try:
+                raise a
+            finally:
+                raise b
+
+        def fix_exc_context(frame_exc, new_exc, old_exc):
+            # slightly change from ExitStack.fix_exc_context function
+            while 1:
+                exc_context = new_exc.__context__
+                if exc_context is None or exc_context is old_exc:
+                    return
+                if exc_context is frame_exc:
+                    break
+                new_exc = exc_context
+            new_exc.__context__ = old_exc
+
+        @contextlib.contextmanager
+        def ctx():
+            try:
+                yield
+            finally:
+                frame_exc = prev_exc = sys.exc_info()
+                args = [(d, c), (b, a)]
+                for x, y in args:
+                    try:
+                        fn(x, y)
+                    except BaseException:
+                        new_exc = sys.exc_info()
+                        fix_exc_context(frame_exc[1], new_exc[1], prev_exc[1])
+                        prev_exc = new_exc
+
+                try:
+                    fixed_ctx = prev_exc[1].__context__
+                    raise prev_exc[1]
+                except BaseException:
+                    prev_exc[1].__context__ = fixed_ctx
+                    raise
+
+        try:
+            with ctx():
+                raise e
+        except Exception as exc:
+            self.assertIsInstance(exc, a)
+            self.assertIsInstance(exc.__context__, b)
+            self.assertIsInstance(exc.__context__.__context__, c)
+            self.assertIsInstance(exc.__context__.__context__.__context__, d)
+            self.assertIsInstance(
+                exc.__context__.__context__.__context__.__context__, e
+            )
+
+    @make_dynamo_test
+    def test_raise_ZeroDivisionError(self):
+        try:
+            1 / 0
+        except Exception:
+            pass
+
+    @make_dynamo_test
+    def test_user_defined_exception_variable(self):
+        z = 0
+        try:
+            raise CustomException
+        except ValueError:
+            z = 1
+        except CustomException:
+            z = 2
+        self.assertEqual(z, 2)
+
+
+class CPythonExceptionTests(torch._dynamo.test_case.TestCase):
+    # Tests taken from CPython source code in cpython/Lib/test/test_exceptions.py
+    # https://github.com/pytorch/pytorch/blob/1c290912e4a2a1c981e2b2ad8fd63596f4ad4cd6/test/dynamo/test_exceptions.py
+
+    @unittest.expectedFailure
+    @make_dynamo_test
+    def testChainingAttrs(self):
+        e = Exception()
+        self.assertIsNone(e.__context__)
+        self.assertIsNone(e.__cause__)  # we don't track __cause__
+
+        e = TypeError()
+        self.assertIsNone(e.__context__)
+        self.assertIsNone(e.__cause__)
+
+        class MyException(OSError):
+            pass
+
+        e = MyException()
+        self.assertIsNone(e.__context__)
+        self.assertIsNone(e.__cause__)
+
+    @make_dynamo_test
+    def testChainingDescriptors(self):
+        try:
+            raise Exception  # noqa: TRY002
+        except Exception as exc:
+            e = exc
+
+        self.assertIsNone(e.__context__)
+        self.assertIsNone(e.__cause__)
+        self.assertFalse(e.__suppress_context__)
+
+        e.__context__ = NameError()
+        e.__cause__ = None
+        self.assertIsInstance(e.__context__, NameError)
+        self.assertIsNone(e.__cause__)
+        self.assertTrue(e.__suppress_context__)
+        e.__suppress_context__ = False
+        self.assertFalse(e.__suppress_context__)
+
+    @make_dynamo_test
+    def test_context_of_exception_in_try_and_finally(self):
+        try:
+            try:
+                te = TypeError(1)
+                raise te
+            finally:
+                ve = ValueError(2)
+                raise ve
+        except Exception as e:
+            exc = e
+
+        self.assertIs(exc, ve)
+        self.assertIs(exc.__context__, te)
+
+    @make_dynamo_test
+    def test_context_of_exception_in_except_and_finally(self):
+        try:
+            try:
+                te = TypeError(1)
+                raise te
+            except Exception:  # noqa: E722
+                ve = ValueError(2)
+                raise ve  # noqa: B904
+            finally:
+                oe = OSError(3)
+                raise oe
+        except Exception as e:
+            exc = e
+
+        self.assertIs(exc, oe)
+        self.assertIs(exc.__context__, ve)
+        self.assertIs(exc.__context__.__context__, te)
+
+    @make_dynamo_test
+    def test_context_of_exception_in_else_and_finally(self):
+        try:
+            try:
+                pass
+            except Exception:  # noqa: E722
+                pass
+            else:
+                ve = ValueError(1)
+                raise ve
+            finally:
+                oe = OSError(2)
+                raise oe
+        except Exception as e:
+            exc = e
+
+        self.assertIs(exc, oe)
+        self.assertIs(exc.__context__, ve)
+
+    @make_dynamo_test
+    def test_raise_does_not_create_context_chain_cycle(self):
+        A = AssertionError
+        B = BytesWarning
+        C = ConnectionError
+
+        # Create a context chain:
+        # C -> B -> A
+        # Then raise A in context of C.
+        try:
+            try:
+                raise A
+            except A as a_:
+                a = a_
+                try:
+                    raise B
+                except B as b_:
+                    b = b_
+                    try:
+                        raise C
+                    except C as c_:
+                        c = c_
+                        self.assertIsInstance(a, A)
+                        self.assertIsInstance(b, B)
+                        self.assertIsInstance(c, C)
+                        self.assertIsNone(a.__context__)
+                        self.assertIs(b.__context__, a)
+                        self.assertIs(c.__context__, b)
+                        raise a  # noqa: B904
+        except A as e:
+            exc = e
+
+        # Expect A -> C -> B, without cycle
+        self.assertIs(exc, a)
+        self.assertIs(a.__context__, c)
+        self.assertIs(c.__context__, b)
+        self.assertIsNone(b.__context__)
+
+    @make_dynamo_test
+    def test_no_hang_on_context_chain_cycle1(self):
+        # See issue 25782. Cycle in context chain.
+
+        def cycle():
+            try:
+                raise ValueError(1)
+            except ValueError as ex:
+                ex.__context__ = ex
+                raise TypeError(2)  # noqa: B904
+
+        try:
+            cycle()
+        except Exception as e:
+            exc = e
+
+        self.assertIsInstance(exc, TypeError)
+        self.assertIsInstance(exc.__context__, ValueError)
+        self.assertIs(exc.__context__.__context__, exc.__context__)
+
+    @unittest.expectedFailure
+    @make_dynamo_test
+    def test_no_hang_on_context_chain_cycle2(self):
+        # See issue 25782. Cycle at head of context chain.
+
+        A = AssertionError
+        B = BytesWarning
+        C = ConnectionError
+
+        # Context cycle:
+        # +-----------+
+        # V           |
+        # C --> B --> A
+        with self.assertRaises(C) as cm:
+            try:
+                raise A()  # noqa: RSE102
+            except A as _a:
+                a = _a
+                try:
+                    raise B()  # noqa: RSE102
+                except B as _b:
+                    b = _b
+                    try:
+                        raise C()  # noqa: RSE102
+                    except C as _c:
+                        c = _c
+                        a.__context__ = c
+                        raise c  # noqa: B904
+
+        self.assertIs(cm.exception, c)
+        # Verify the expected context chain cycle
+        self.assertIs(c.__context__, b)
+        self.assertIs(b.__context__, a)
+        self.assertIs(a.__context__, c)
+
+    @make_dynamo_test
+    def test_no_hang_on_context_chain_cycle3(self):
+        # See issue 25782. Longer context chain with cycle.
+        A = AssertionError
+        B = BytesWarning
+        C = ConnectionError
+        D = DeprecationWarning
+        E = Exception
+
+        # Context cycle:
+        #             +-----------+
+        #             V           |
+        # E --> D --> C --> B --> A
+        with self.assertRaises(E) as cm:
+            try:
+                raise A
+            except A as _a:
+                a = _a
+                try:
+                    raise B
+                except B as _b:
+                    b = _b
+                    try:
+                        raise C
+                    except C as _c:
+                        c = _c
+                        a.__context__ = c
+                        try:
+                            raise D
+                        except D as _d:
+                            d = _d
+                            e = E()
+                            raise e  # noqa: B904
+
+        self.assertIs(cm.exception, e)
+        # Verify the expected context chain cycle
+        self.assertIs(e.__context__, d)
+        self.assertIs(d.__context__, c)
+        self.assertIs(c.__context__, b)
+        self.assertIs(b.__context__, a)
+        self.assertIs(a.__context__, c)
 
 
 if __name__ == "__main__":
