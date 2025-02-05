@@ -2351,6 +2351,25 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         return sum(mylist)
 
     @make_test
+    def test_is(x, y):
+        exc = ValueError("abcd")
+        try:
+            raise exc
+        except Exception as e:
+            assert e is exc
+            return x + y
+
+    @make_test
+    def test_is_not(x, y):
+        exc = ValueError("abcd")
+        exc1 = TypeError("abc")
+        try:
+            raise exc
+        except Exception as e:
+            assert e is not exc1
+            return x + y
+
+    @make_test
     def test_are_functorch_transforms_active(x):
         if torch._C._are_functorch_transforms_active():
             return x + 1
@@ -3525,6 +3544,15 @@ class GraphModule(torch.nn.Module):
         self.assertEqual(
             fn(arr, np.s_[..., 1], np.array([3, 3])), np.array([[1, 3], [2, 3]])
         )
+
+    def test_round(self):
+        def fn(t):
+            return t + round(1.00002000011, 7)
+
+        t = torch.randn(2)
+        e = fn(t)
+        g = torch.compile(fn, backend="eager", fullgraph=True)(t)
+        self.assertEqual(e, g)
 
     def test_map_return(self):
         def fn(a, b):
