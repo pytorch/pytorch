@@ -116,3 +116,28 @@ class FxirTestCase(InductorTestCase):
         # Check for the extern kernel
         num_extern = self._count_ops(gm, extern_kernels.addmm)
         self.assertEqual(num_extern, 1)
+
+    def test_fallback(self):
+        """
+        Test a program that calls an aten fallback.
+        """
+
+        length = 8
+        def foo(x):
+            return x + torch.randn(1, device=self.device)
+
+        args = (torch.rand(length, device=self.device),)
+
+        # Since the program has a random output, just check metadata.
+        # Don't check for an exact value.
+        opt = torch.compile(foo, fullgraph=True)
+        (gm,) = self._run_and_capture_graphs(opt, args)
+        result = gm(*args)[0]
+        ref = foo(*args)
+        self.assertEqual(result.shape, ref.shape)
+        self.assertEqual(result.dtype, ref.dtype)
+
+        # Check for the fallback kernel.
+        num_fallback = self._count_ops(gm, torch.ops.aten.randint.low_out)
+        self.assertEqual(num_fallback, 1)
+

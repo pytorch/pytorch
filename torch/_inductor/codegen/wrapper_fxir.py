@@ -14,6 +14,8 @@ from torch._subclasses.fake_tensor import FakeTensorMode
 from torch._higher_order_ops.triton_kernel_wrap import kernel_side_table, triton_kernel_wrapper_mutation
 from torch._library.triton import wrap_triton
 
+aten = torch.ops.aten
+
 from .. import config, ir
 from torch._inductor.select_algorithm import extern_kernels
 from torch._inductor.virtualized import V
@@ -412,9 +414,8 @@ class WrapperFxCodegen(PythonWrapperCodegen):
         #TODO: refactor the codegen from ir.ExternKernelOut into various wrapper codegen
         # classes. We should only need to pass the node here.
 
-        # Remove any kwargs from 'args'.
-        #TODO: refactor this so they're not added to it the first place.
-        args = [arg for arg in args if "=" not in arg]
+        tensor_args = tuple(x.codegen_reference() for x in node.inputs)
+        args = tensor_args + tuple(node.constant_args)
 
         out_name = out_view if out_view else out
         self.writeline(ExternKernelLine(self, kernel=kernel, out=out_name, args=args, kwargs=node.kwargs))
@@ -441,7 +442,13 @@ class WrapperFxCodegen(PythonWrapperCodegen):
 
     def _generate_extern_kernel(self, line):
         assert isinstance(line, ExternKernelLine)
-        op = getattr(extern_kernels, line.kernel.strip("extern_kernels."))
+
+        # Look up the kernel function from its name.
+        module_name, kernel_name = line.kernel.split(".", 1)
+        op = globals()[module_name] # E.g. extern_kernels, aten, etc.
+        for subname in kernel_name.split("."):
+            op = getattr(op, subname) # E.g. extern_kernels.addmm
+
         out_node = self.buffer_to_node[line.out]
 
         # Separate args from kwargs
