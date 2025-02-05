@@ -536,11 +536,12 @@ class FloorToInt(sympy.Function):
 
     @classmethod
     def eval(cls, number):
-        # assert number.is_integer is not True, number
         if number in (sympy.oo, int_oo):
             return int_oo
         if number in (-sympy.oo, int_oo):
             return -int_oo
+        if isinstance(number, sympy.Integer):
+            return number
         if isinstance(number, sympy.Number):
             return sympy.Integer(math.floor(float(number)))
 
@@ -578,7 +579,7 @@ class RShift(sympy.Function):
     def eval(cls, base, shift):
         if shift < 0:
             raise ValueError("negative shift count")
-        return base // 2**shift
+        return FloorDiv(base, 2**shift)
 
 
 class MinMaxBase(Expr, LatticeOp):  # type: ignore[misc]

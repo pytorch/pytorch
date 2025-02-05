@@ -22,6 +22,8 @@ body:
 
         - If comparing eager and torch.compile at fp16/bf16, you should use fp32 as baseline
 
+        - Ensure rng state used to compare results is equivalent. Use `torch._inductor.config.fallback_random=True` and reset the torch rng seed between comparisons
+
         If the above requirements are met, add the label "topic: fuzzer" to your issue.
 
   - type: textarea
