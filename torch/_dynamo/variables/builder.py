@@ -175,7 +175,6 @@ from .misc import (
     DelayGraphBreakVariable,
     GetAttrVariable,
     GetSetDescriptorVariable,
-    InspectSignatureVariable,
     LambdaVariable,
     LoggingLoggerVariable,
     MethodWrapperVariable,
@@ -486,14 +485,6 @@ class VariableBuilder:
         from ..comptime import comptime
 
         entries = [
-            (
-                inspect.signature,
-                lambda self, value: LambdaVariable(
-                    InspectSignatureVariable.create,
-                    source=self.source,
-                    **self.install_guards(GuardBuilder.CLOSURE_MATCH),
-                ),
-            ),
             (comptime, lambda self, value: ComptimeVariable()),
             (
                 dataclasses.fields,
@@ -1030,10 +1021,9 @@ class VariableBuilder:
         elif value is collections.namedtuple:
             self.install_guards(GuardBuilder.ID_MATCH)
             return CollectionsNamedTupleFunction(value, source=self.source)
-        elif (
-            isinstance(value, types.BuiltinMethodType)
-            and value in BuiltinMethodVariable.supported_methods()
-        ):
+        elif isinstance(
+            value, types.BuiltinMethodType
+        ) and BuiltinMethodVariable.is_supported_builtin_method(value):
             self.install_guards(GuardBuilder.ID_MATCH)
             return BuiltinMethodVariable(value, source=self.source)
         elif is_function_or_wrapper(value):
@@ -1478,9 +1468,8 @@ class VariableBuilder:
 
             # we can't do this assert inside FSDP constructor,
             # since we don't know yet whether dynamo will be used
-            assert getattr(
-                value, "_fsdp_use_orig_params", False
-            ), "Dynamo only supports FSDP with use_orig_params=True"
+            if not getattr(value, "_fsdp_use_orig_params", False):
+                unimplemented("Dynamo only supports FSDP with use_orig_params=True")
 
             # Note on FSDP guarding
             # Eager FSDP already assumes (requires, but without enforcement)
