@@ -13,6 +13,13 @@ from .utils import make_dynamo_test
 class Test_Assertions(torch._dynamo.test_case.TestCase):
     # Tests taken from CPython source code in cpython/Lib/test/test_unittest/test_assertions.py
     # https://github.com/python/cpython/blob/3.13/Lib/test/test_unittest/test_assertions.py
+    def setUp(self):
+        if sys.version_info < (3, 11):
+            self.skipTest(
+                "Tracing the unittest module needs exception table (Python 3.11+) to work"
+            )
+        super().setUp()
+
     @make_dynamo_test
     def test_AlmostEqual(self):
         self.assertAlmostEqual(1.00000001, 1.0)
@@ -130,6 +137,10 @@ class TestLongMessage(torch._dynamo.test_case.TestCase):
     asserts that use longMessage."""
 
     def setUp(self):
+        if sys.version_info < (3, 11):
+            return self.skipTest(
+                "Tracing the unittest module needs exception table (Python 3.11+) to work"
+            )
         super().setUp()
 
         class TestableTestFalse(unittest.TestCase):
