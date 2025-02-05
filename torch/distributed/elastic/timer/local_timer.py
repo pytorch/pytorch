@@ -10,8 +10,8 @@ import os
 import signal
 import time
 from queue import Empty
-from typing import Any
-
+from typing import Any, Dict, List, Set
+from torch.multiprocessing import Queue  # Import PyTorch's multiprocessing Queue
 from .api import RequestQueue, TimerClient, TimerRequest, TimerServer
 
 
@@ -31,7 +31,7 @@ class LocalTimerClient(TimerClient):
 
     def __init__(self, mp_queue):
         super().__init__()
-        self._mp_queue = mp_queue
+        self._mp_queue =  Queue()  
 
     def acquire(self, scope_id, expiration_time):
         pid = os.getpid()
@@ -51,12 +51,15 @@ class MultiprocessingRequestQueue(RequestQueue):
 
     def __init__(self, mp_queue: mp.Queue):
         super().__init__()
-        self._mp_queue = mp_queue
+        self._mp_queue =  Queue()  #
 
-    def size(self) -> int:
-        return self._mp_queue.qsize()
-
-    def get(self, size, timeout: float) -> list[TimerRequest]:
+   def size(self) -> int:
+       try:
+           return self._mp_queue.qsize()
+       except NotImplementedError:
+           return 0  # Fallback when qsize() is unsupported
+ 
+   def get(self, size, timeout: float) -> List[TimerRequest]:
         requests = []
         wait = timeout
         for _ in range(0, size):
