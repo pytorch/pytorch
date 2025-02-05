@@ -745,9 +745,11 @@ class DisableContext(_TorchDynamoContext):
                     _is_skip_guard_eval_unsafe_stance()
                 )
                 _maybe_set_eval_frame(_callback_from_stance(self.callback))
+                torch._C._dynamo.guards.disable_ca_bwd()
                 try:
                     return fn(*args, **kwargs)
                 finally:
+                    torch._C._dynamo.guards.enable_ca_bwd()
                     set_eval_frame(None)
                     set_skip_guard_eval_unsafe(prior_skip_guard_eval_unsafe)
             finally:

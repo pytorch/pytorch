@@ -614,6 +614,8 @@ struct TORCH_API Node : std::enable_shared_from_this<Node> {
     return false;
   }
 
+  bool skip_compiled_autograd = false;
+
  protected:
   /// Performs the `Node`'s actual operation.
   virtual variable_list apply(variable_list&& inputs) = 0;

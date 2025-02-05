@@ -9,6 +9,7 @@
 namespace c10::impl {
 
 thread_local TorchDispatchModeTLS torchDispatchModeState;
+thread_local static bool disable_ca_bwd_state;
 
 bool TorchDispatchModeTLS::any_modes_set(bool skip_infra_modes) {
   if (!torchDispatchModeState.stack_.empty())
@@ -191,6 +192,18 @@ std::string to_string(TorchDispatchModeKey mode_key) {
     default:
       return "UNKNOWN_MODE";
   }
+}
+
+bool in_disable_compiled_autograd_ctx() {
+  return disable_ca_bwd_state;
+}
+
+void disable_ca_bwd() {
+  disable_ca_bwd_state = true;
+}
+
+void enable_ca_bwd() {
+  disable_ca_bwd_state = false;
 }
 
 } // namespace c10::impl

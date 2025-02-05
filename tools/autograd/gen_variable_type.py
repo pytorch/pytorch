@@ -614,6 +614,7 @@ ${extra_differentiability_conditions}
 SETUP_DERIVATIVE = CodeTemplate(
     """\
 if (_any_requires_grad) {
+  std::cout << "creating some node backward, tls for CA=" << at::impl::in_disable_compiled_autograd_ctx() << std::endl;
   ${setup}
 }
 """

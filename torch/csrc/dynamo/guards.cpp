@@ -1,4 +1,5 @@
 #include <ATen/PythonTorchFunctionTLS.h>
+#include <c10/core/impl/TorchDispatchModeTLS.h>
 #include <ATen/autocast_mode.h>
 #include <c10/core/SafePyObject.h>
 #include <c10/core/impl/PyInterpreter.h>
@@ -909,6 +910,20 @@ static PyObject* _reinterpret_tensor(PyObject* dummy, PyObject* args) {
   END_HANDLE_TH_ERRORS;
 }
 
+static PyObject* _disable_ca_bwd(PyObject* dummy, PyObject* args) {
+  HANDLE_TH_ERRORS;
+  c10::impl::disable_ca_bwd();
+  Py_RETURN_TRUE;
+  END_HANDLE_TH_ERRORS;
+}
+
+static PyObject* _enable_ca_bwd(PyObject* dummy, PyObject* args) {
+  HANDLE_TH_ERRORS;
+  c10::impl::enable_ca_bwd();
+  Py_RETURN_TRUE;
+  END_HANDLE_TH_ERRORS;
+}
+
 // NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
 static PyMethodDef _methods[] = {
     {"check_type_id", check_type_id, METH_VARARGS, nullptr},
@@ -919,6 +934,8 @@ static PyMethodDef _methods[] = {
     {"_empty_strided_cuda", _empty_strided_cuda, METH_VARARGS, nullptr},
     {"_empty_strided_xpu", _empty_strided_xpu, METH_VARARGS, nullptr},
     {"_reinterpret_tensor", _reinterpret_tensor, METH_VARARGS, nullptr},
+    {"disable_ca_bwd", _disable_ca_bwd, METH_VARARGS, nullptr},
+    {"enable_ca_bwd", _enable_ca_bwd, METH_VARARGS, nullptr},
     {nullptr, nullptr, 0, nullptr}};
 
 static struct PyModuleDef _module = {

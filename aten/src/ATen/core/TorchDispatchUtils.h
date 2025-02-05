@@ -13,5 +13,6 @@ TORCH_API bool tensorlist_has_dispatch(at::ITensorListRef li);
 TORCH_API bool tensorlist_has_dispatch(
     const c10::List<std::optional<at::Tensor>>& li);
 using c10::impl::dispatch_mode_enabled;
+using c10::impl::in_disable_compiled_autograd_ctx;
 
 } // namespace at::impl

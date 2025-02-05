@@ -64,4 +64,10 @@ C10_API bool dispatch_mode_enabled();
 
 C10_API std::string to_string(TorchDispatchModeKey mode_key);
 
+C10_API bool in_disable_compiled_autograd_ctx();
+
+C10_API void disable_ca_bwd();
+
+C10_API void enable_ca_bwd();
+
 } // namespace c10::impl
