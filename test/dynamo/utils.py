@@ -4,9 +4,11 @@ import os
 import sys
 import types
 from contextlib import contextmanager
+from typing import Any, Callable
 
 import torch
 import torch._dynamo
+from torch._dynamo.testing import CompileCounter, optimize_assert, reset
 
 
 g_tensor_export = torch.ones(10)
@@ -60,3 +62,39 @@ def install_guard_manager_testing_hook(hook_fn):
         yield
     finally:
         torch._dynamo.guards.guard_manager_testing_hook_fn = old_value
+
+
+def make_dynamo_test(fn=None, expected_frame_count=1):
+    if fn is None:
+        return lambda fn: make_dynamo_test(
+            fn, expected_frame_count=expected_frame_count
+        )
+
+    def standard_test(
+        self: Any,
+        fn: Callable[..., Any],
+        expected_frame_count: int = 1,
+    ) -> None:
+        def dummy(self_, fn, t):
+            fn(self_)
+            return t.sin()
+
+        actual = CompileCounter()
+
+        t = torch.randn(2)
+        correct = dummy(self, fn, t)
+        reset()
+        opt_fn = optimize_assert(actual)(dummy)
+        val = opt_fn(self, fn, t)
+        reset()
+        self.assertEqual(correct, val)
+        self.assertEqual(actual.frame_count, expected_frame_count)
+
+    def test_fn(self):
+        return standard_test(
+            self,
+            fn=fn,
+            expected_frame_count=expected_frame_count,
+        )
+
+    return test_fn
