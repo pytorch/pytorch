@@ -22,9 +22,9 @@ from ..exc import (
     AttributeMutationError,
     unimplemented,
     Unsupported,
-    UnsupportedAttribute,
     UserError,
     UserErrorType,
+    ObservedAttributeError
 )
 from ..guards import GuardBuilder, install_guard
 from ..replay_record import DummyModule
@@ -1908,7 +1908,7 @@ class BuiltinVariable(VariableTracker):
 
                 try:
                     getattr_var = obj.var_getattr(tx, name_var.as_python_constant())
-                except (AttributeError, UnsupportedAttribute):
+                except (AttributeError, ObservedAttributeError):
                     getattr_var = None
 
                 if isinstance(getattr_var, variables.TensorVariable):
