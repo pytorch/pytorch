@@ -223,6 +223,10 @@ AOTI_TORCH_SCALAR_TO_TENSOR_IMPL(int32, int32_t, Int)
 AOTI_TORCH_SCALAR_TO_TENSOR_IMPL(int64, int64_t, Long)
 AOTI_TORCH_SCALAR_TO_TENSOR_IMPL(bool, bool, Bool)
 AOTI_TORCH_SCALAR_TO_TENSOR_IMPL(complex64, c10::complex<float>, ComplexFloat)
+AOTI_TORCH_SCALAR_TO_TENSOR_IMPL(
+    complex128,
+    c10::complex<double>,
+    ComplexDouble)
 #undef AOTI_TORCH_SCALAR_TO_TENSOR_IMPL
 
 bool aoti_torch_grad_mode_is_enabled() {

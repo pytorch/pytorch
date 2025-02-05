@@ -6,6 +6,7 @@ import contextlib
 import dataclasses
 import enum
 import functools
+import importlib
 import inspect
 import io
 import itertools
@@ -27,6 +28,9 @@ from typing import (
     Any,
     Callable,
     Generic,
+    Iterator,
+    Mapping,
+    MutableMapping,
     NamedTuple,
     Optional,
     Protocol,
@@ -855,15 +859,20 @@ def fresh_inductor_cache(cache_entries=None, dir=None, delete=True):
                             }
                         )
         if delete:
-            shutil.rmtree(inductor_cache_dir)
+            shutil.rmtree(
+                inductor_cache_dir,
+                # Let's not fail if we can't clean up the temp dir. Also note that for
+                # Windows, we can't delete the loaded modules because the module binaries
+                # are open.
+                onerror=lambda func, path, exc_info: log.warning(
+                    "Failed to remove temporary cache dir at %s",
+                    inductor_cache_dir,
+                    exc_info=exc_info,
+                ),
+            )
     except Exception:
-        if not _IS_WINDOWS:
-            """
-            Windows can't delete the loaded modules, because the modules binaries are opened.
-            TODO: discuss if have better solution to handle this issue.
-            """
-            log.warning("on error, temporary cache dir kept at %s", inductor_cache_dir)
-            raise
+        log.warning("on error, temporary cache dir kept at %s", inductor_cache_dir)
+        raise
     finally:
         clear_inductor_caches()
 
@@ -1459,12 +1468,16 @@ class DebugDirManager:
         torch._dynamo.config.debug_dir_root = self.prev_debug_name
 
 
-def run_and_get_code(fn, *args, **kwargs) -> tuple[Any, list[str]]:
+def run_and_get_code(
+    fn: Callable[P, _T],
+    *args: P.args,
+    **kwargs: P.kwargs,
+) -> tuple[_T, list[str]]:
     from .graph import GraphLowering
 
     source_codes: list[str] = []
 
-    def save_output_code(code: str):
+    def save_output_code(code: str) -> None:
         source_codes.append(code)
 
     with mock.patch.object(GraphLowering, "save_output_code", save_output_code):
@@ -2427,6 +2440,58 @@ def upcast_compute_type(dtype: torch.dtype) -> torch.dtype:
     return dtype
 
 
+KeyType = TypeVar("KeyType")
+ValType = TypeVar("ValType")
+
+
+class ScopedDict(MutableMapping[KeyType, ValType]):
+    """
+    A dictionary-like object that allows for scoped updates. It maintains
+    an original dictionary and a set of new items that can override
+    the original items within the scope.  The original dictionary is
+    unmodified.
+    """
+
+    def __init__(self, original_dict: Mapping[KeyType, ValType]):
+        self.original_dict = original_dict
+        self.new_items: dict[KeyType, ValType] = {}
+
+    def __getitem__(self, key: KeyType) -> ValType:
+        if key in self.new_items:
+            return self.new_items[key]
+        return self.original_dict[key]
+
+    def __setitem__(self, key: KeyType, value: ValType):
+        self.new_items[key] = value
+
+    def __contains__(self, key: object) -> bool:
+        return key in self.new_items or key in self.original_dict
+
+    def get(self, key: KeyType, default: Optional[ValType] = None) -> Optional[ValType]:  # type: ignore[override]
+        if key in self.new_items:
+            return self.new_items[key]
+        return self.original_dict.get(key, default)
+
+    def __len__(self) -> int:
+        n = len(self.original_dict)
+        for k in self.new_items:
+            if k not in self.original_dict:
+                n += 1
+        return n
+
+    def __iter__(self) -> Iterator[KeyType]:
+        yield from self.original_dict
+        for k in self.new_items:
+            if k not in self.original_dict:
+                yield k
+
+    def __bool__(self) -> bool:
+        return bool(self.original_dict or self.new_items)
+
+    def __delitem__(self, key: KeyType) -> None:
+        raise NotImplementedError
+
+
 @dataclass_transform(frozen_default=True)
 def ir_dataclass(cls=None, /, *, frozen: bool = True):
     def wrap(cls: _T) -> _T:
@@ -2459,3 +2524,43 @@ def set_kernel_post_grad_provenance_tracing(node_schedule, kernel_name):
                 V.debug._inductor_triton_kernel_to_post_grad_node_info[kernel_name] = [
                     origin.name for origin in node.node.origins
                 ]
+
+
+class TritonAttrsDescriptorVersion(enum.Enum):
+    V0_NO_TRITON = 0
+    V1_COMPILER = 1  # triton.compiler.compiler.AttrsDescriptor
+    V2_BACKENDS = 2  # triton.backends.compiler.AttrsDescriptor
+    V3_BACKENDS_TUPLE = (
+        3  # triton.backends.compiler.AttrsDescriptor, but with tuple support
+    )
+    V4_DICT = 4  # a raw dict
+
+
+@functools.lru_cache(None)
+def get_triton_attrs_descriptor_version() -> TritonAttrsDescriptorVersion:
+    if importlib.util.find_spec("triton") is None:
+        return TritonAttrsDescriptorVersion.V0_NO_TRITON
+
+    import triton.backends.compiler
+    import triton.compiler.compiler
+
+    if hasattr(triton.backends.compiler, "AttrsDescriptor"):
+        # Triton 3.2.0
+        # AttrsDescriptor was moved from triton.compiler.compiler to triton.backends.compiler.
+        # AttrsDescriptor and its serialization format were also changed.
+
+        # TODO: implement V3_BACKENDS_TUPLE
+        # On Dec 9, 2024, tuple support (triton #5220) was implemented and breaks handling.
+        # We don't have a way to detect this (and haven't implemented this version)
+        return TritonAttrsDescriptorVersion.V2_BACKENDS
+    elif hasattr(triton.compiler.compiler, "AttrsDescriptor"):
+        # Triton 3.0.0
+        return TritonAttrsDescriptorVersion.V1_COMPILER
+    else:
+        # After Jan 1, 2025
+        # AttrsDescriptor was removed and replaced with a raw dict.
+        return TritonAttrsDescriptorVersion.V4_DICT
+
+
+def triton_version_uses_attrs_dict() -> bool:
+    return get_triton_attrs_descriptor_version() == TritonAttrsDescriptorVersion.V4_DICT

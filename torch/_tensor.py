@@ -1501,7 +1501,7 @@ class Tensor(torch._C.TensorBase):
         Returns the uniquely determined tuple of int describing the dim order or
         physical layout of :attr:`self`.
 
-        The dim order represents how dimensions are laid out in memory,
+        The dim order represents how dimensions are laid out in memory of dense tensors,
         starting from the outermost to the innermost dimension.
 
         Note that the dim order may not always be uniquely determined.
@@ -1541,6 +1541,12 @@ class Tensor(torch._C.TensorBase):
         """
         if has_torch_function_unary(self):
             return handle_torch_function(Tensor.dim_order, (self,), self)
+
+        if self.is_sparse:
+            raise AttributeError(
+                f"Can't get dim order on sparse type: {self.type()} "
+                "Use Tensor.to_dense() to convert to a dense tensor first."
+            )
 
         # Sanity check ambiguity_check data types
         if not isinstance(ambiguity_check, bool):

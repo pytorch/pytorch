@@ -61,7 +61,11 @@ from torch.utils._sympy.functions import CleanDiv, FloorDiv, ModularIndexing
 from torch.utils._sympy.symbol import SymT
 
 from . import config, dependencies
-from .codegen.common import BackendFeature, index_prevent_reordering
+from .codegen.common import (
+    BackendFeature,
+    get_scheduling_for_device,
+    index_prevent_reordering,
+)
 from .dependencies import (
     Dep,
     extract_free_unbacked_symbols,
@@ -342,7 +346,23 @@ def get_device_type(
 
 
 def is_triton(x: Union[IRNode, torch.device, None, str]) -> bool:
-    return is_gpu(get_device_type(x))
+    device = get_device_type(x)
+    # Special case cpu and cuda as using the method below
+    # to determine if the scheduler is a triton scheduler subclass
+    # requires instantiating a scheduler for them
+    if device in ["cpu", "cuda"]:
+        if getattr(config, f"{device}_backend") == "triton":
+            return True
+        return False
+    if (
+        device is None
+        or (device_scheduling := get_scheduling_for_device(device)) is None
+    ):
+        return False
+    from .codegen.triton import TritonScheduling
+
+    assert isinstance(device_scheduling, type)
+    return issubclass(device_scheduling, TritonScheduling)
 
 
 def is_cpu(x: Union[IRNode, torch.device, None, str]) -> bool:
@@ -365,6 +385,29 @@ def is_aligned_realized_tensor(x: Union[Buffer, TensorBox], alignment: int) -> b
     return aligned_last_dim and aligned_strides
 
 
+def significant_strides_equal(
+    strides1: Sequence[_IntLike],
+    strides2: Sequence[_IntLike],
+    shape: Sequence[_IntLike],
+) -> bool:
+    """
+    Returns true if the strides are equal, ignoring dimensions of size 1 .
+    """
+    assert len(shape) == len(strides1) and len(strides1) == len(strides2)
+    for dim, s1, s2 in zip(shape, strides1, strides2):
+        if V.graph.sizevars.statically_known_leq(dim, 1):  # type: ignore[arg-type]
+            continue
+
+        if not V.graph.sizevars.statically_known_equals(
+            s1, s2
+        ) and not V.graph.sizevars.symbolic_hint(s1) == V.graph.sizevars.symbolic_hint(
+            s2
+        ):
+            return False
+
+    return True
+
+
 def try_match_insignificant_strides(
     tensor: Union[TensorBox, BaseView],
     strides: Sequence[Union[int, torch.SymInt]],
@@ -384,21 +427,7 @@ def try_match_insignificant_strides(
     ):
         return tensor  # type: ignore[arg-type]
 
-    def significant_strides_equal(
-        shape: Sequence[Union[Expr, int]],
-        meta_strides: Sequence[Union[Expr, int]],
-        tensor_strides: Sequence[Union[Expr, int]],
-    ) -> bool:
-        for dim, s1, s2 in zip(shape, meta_strides, tensor_strides):
-            if V.graph.sizevars.statically_known_leq(dim, 1):  # type: ignore[arg-type]
-                continue
-
-            if not V.graph.sizevars.statically_known_equals(s1, s2):
-                return False
-
-        return True
-
-    if not significant_strides_equal(tensor.get_size(), strides, tensor.get_stride()):
+    if not significant_strides_equal(strides, tensor.get_stride(), tensor.get_size()):
         return tensor
 
     storage, old_layout = as_storage_and_layout(tensor)
@@ -1005,22 +1034,6 @@ def get_reduction_combine_fn(
         raise NotImplementedError(f"unknown reduction_type={reduction_type}")
 
 
-def significant_strides_equal(
-    strides1: Sequence[_IntLike], strides2: Sequence[_IntLike], size: Sequence[_IntLike]
-) -> bool:
-    """
-    Returns true if the strides are equal, ignoring dimensions of size 1 .
-    """
-    non_1_indices = [
-        i
-        for i, dim in enumerate(size)
-        if V.graph.sizevars.size_hint(dim, fallback=2) != 1
-    ]
-    strides1 = [V.graph.sizevars.size_hint(strides1[i]) for i in non_1_indices]
-    strides2 = [V.graph.sizevars.size_hint(strides2[i]) for i in non_1_indices]
-    return strides1 == strides2
-
-
 @ir_dataclass
 class Reduction(Loops):
     reduction_ranges: Sequence[_IntLike]
@@ -1235,7 +1248,9 @@ class Reduction(Loops):
         num_inner = 0
         for i in indices:
             j = V.graph.sizevars.simplify_with_ranges(i, ranges1)
-            strides = V.graph.sizevars.stride_hints(j, reduction_vars, ranges1.keys())
+            strides = V.graph.sizevars.stride_hints(
+                j, reduction_vars, list(ranges1.keys())
+            )
             outer = all(s > 1 for s in strides)
             if outer:
                 num_outer += 1
@@ -2394,11 +2409,6 @@ def as_storage_and_layout(
     raise NotImplementedError
 
 
-as_contiguous_storage_and_layout = functools.partial(
-    as_storage_and_layout, want_contiguous=True
-)
-
-
 def is_stride_order_storage_and_layout(
     x: IRNode, stride_order: Sequence[Union[int, Integer]]
 ) -> bool:
@@ -2755,9 +2765,12 @@ class View(GenericView):
             if unbacked_symbols_in_sizes and (not is_contiguous_storage_and_layout(x)):
                 # realize x; otherwise, the dynamic_reshape_indexer below will fail
                 # due to the size_hint's inability to process unbacked SymInts
-                x = ExternKernel.realize_input(x)
+                # TODO: unbacked should not diverge from backed in determining striding
+                # Need to require contiguous here instead of realize, see:
+                # https://github.com/pytorch/pytorch/issues/145561
+                x = ExternKernel.require_contiguous(x)
 
-            storage, old_layout = as_contiguous_storage_and_layout(x)
+            storage, old_layout = as_storage_and_layout(x, want_contiguous=True)
             new_layout = FixedLayout(
                 old_layout.device,
                 old_layout.dtype,
@@ -5730,6 +5743,8 @@ class UserDefinedTritonKernel(ExternKernel):
         return kernel, configs, restore_value_args, reset_to_zero_args
 
     def codegen(self, wrapper) -> None:  # type: ignore[no-untyped-def]
+        from torch._inductor.utils import triton_version_uses_attrs_dict
+
         (
             kernel,
             configs,
@@ -5752,52 +5767,55 @@ class UserDefinedTritonKernel(ExternKernel):
         for idx, kwarg in enumerate(self.ordered_kwargs_for_cpp_kernel):
             if kernel.arg_names.index(kwarg) in kernel.constexprs:
                 constexpr_indices.append(idx)
-        """
-        Filter out None args.
 
-        see https://github.com/pytorch/pytorch/issues/115344
+        if not triton_version_uses_attrs_dict():
+            """
+            Filter out None args.
 
-        Two cases for a None arg:
-        1. The arg is already tl.constexpr, so leave it in
-        2. The arg is not tl.constexpr so we have to remove it
-        """
-        constexpr_indices_set = OrderedSet(constexpr_indices)
-        REMOVED = object()
-        raw_args = [
-            (
-                (idx, arg)
-                if (arg is not None) or (arg is None and idx in constexpr_indices_set)
-                else (idx, REMOVED)
-            )
-            for idx, arg in enumerate(raw_args)
-        ]
-        removed_none_args = [idx for idx, val in raw_args if val == REMOVED]
-        raw_args = [val for idx, val in raw_args if val != REMOVED]
+            see https://github.com/pytorch/pytorch/issues/115344
 
-        # We have to compute the constexpr indices for the new, filtered raw_args
-        # We also have to adjust equal_to_1.
-        if removed_none_args:
-            eq1_indices_set = OrderedSet[int](triton_meta["configs"][0].equal_to_1)
-            constexpr_indices = []
-            equal_to_1 = []
-            index_shift = 0
-            for idx, kwarg in enumerate(self.ordered_kwargs_for_cpp_kernel):
-                # every time we encounter an idx we removed, adjust by one to account for it
-                # So for example if we had [None, const X]
-                # iter 1:
-                #   None was removed, adjust=1
-                # iter 2:
-                #  X is const at idx=1, but the adjusted idx is 0 now, because None was removed
-                if idx in removed_none_args:
-                    index_shift += 1
-                    continue
-                arg_index = kernel.arg_names.index(kwarg)
-                if arg_index in kernel.constexprs:
-                    constexpr_indices.append(idx - index_shift)
-                if arg_index in eq1_indices_set:
-                    equal_to_1.append(idx - index_shift)
+            Two cases for a None arg:
+            1. The arg is already tl.constexpr, so leave it in
+            2. The arg is not tl.constexpr so we have to remove it
+            """
+            constexpr_indices_set = OrderedSet(constexpr_indices)
+            REMOVED = object()
+            raw_args = [
+                (
+                    (idx, arg)
+                    if (arg is not None)
+                    or (arg is None and idx in constexpr_indices_set)
+                    else (idx, REMOVED)
+                )
+                for idx, arg in enumerate(raw_args)
+            ]
+            removed_none_args = [idx for idx, val in raw_args if val == REMOVED]
+            raw_args = [val for idx, val in raw_args if val != REMOVED]
 
-            triton_meta["configs"][0].equal_to_1 = equal_to_1
+            # We have to compute the constexpr indices for the new, filtered raw_args
+            # We also have to adjust equal_to_1.
+            if removed_none_args:
+                eq1_indices_set = OrderedSet[int](triton_meta["configs"][0].equal_to_1)
+                constexpr_indices = []
+                equal_to_1 = []
+                index_shift = 0
+                for idx, kwarg in enumerate(self.ordered_kwargs_for_cpp_kernel):
+                    # every time we encounter an idx we removed, adjust by one to account for it
+                    # So for example if we had [None, const X]
+                    # iter 1:
+                    #   None was removed, adjust=1
+                    # iter 2:
+                    #  X is const at idx=1, but the adjusted idx is 0 now, because None was removed
+                    if idx in removed_none_args:
+                        index_shift += 1
+                        continue
+                    arg_index = kernel.arg_names.index(kwarg)
+                    if arg_index in kernel.constexprs:
+                        constexpr_indices.append(idx - index_shift)
+                    if arg_index in eq1_indices_set:
+                        equal_to_1.append(idx - index_shift)
+
+                triton_meta["configs"][0].equal_to_1 = equal_to_1
 
         # Call to kernel
         self.codegen_comment(wrapper)
@@ -6250,13 +6268,15 @@ class AssertScalar(ExternKernel):
         # "u0 == 0" in the runtime asserts, if you subsequently try to
         # simplify(u0 == 0), you will get True (because we've already runtime assert'ed
         # that it's true).  But we're code generating the actual runtime assert here!!
+        symbol = next(iter(self.get_unbacked_symbol_uses()))
+        symbol_str = f"std::to_string({symbol})"
         if V.graph.cpp_wrapper:
             sizevar = V.graph.wrapper_code.codegen_cpp_sizevar(
                 self.scalar, simplify=False
             )
             # TODO: when we start compiling in C++20, annotate with [[unlikely]].
             wrapper.writeline(
-                f'if (!({sizevar})) {{ throw std::runtime_error("{self.msg}"); }}'
+                f'if (!({sizevar})) {{ throw std::runtime_error("Expected {self.msg} but received " + {symbol_str}); }}'
             )
         else:
             sizevar = V.graph.wrapper_code.codegen_python_sizevar(
@@ -6287,27 +6307,6 @@ class FallbackKernel(ExternKernelAlloc):
         *,
         unbacked_bindings=None,
     ) -> None:
-        # When aten binary ops have constant second args, cpp wrapper expects the scalar
-        # version.  This should long-term be handled as in
-        # https://github.com/pytorch/pytorch/issues/90923.
-        BINARY_OP_MAPPING = {
-            aten.add.Tensor: aten.add.Scalar,
-            aten.div.Tensor: aten.div.Scalar,
-            aten.divide.Tensor: aten.divide.Scalar,
-            aten.floor_divide: aten.floor_divide.Scalar,
-            aten.mul.Tensor: aten.mul.Scalar,
-            aten.multiply.Tensor: aten.multiply.Scalar,
-            aten.sub.Tensor: aten.sub.Scalar,
-            aten.subtract.Tensor: aten.subtract.Scalar,
-            aten.true_divide.Tensor: aten.true_divide.Scalar,
-        }
-        if (
-            kernel in BINARY_OP_MAPPING
-            and len(tensor_args) == 1
-            and len(nontensor_args) == 1
-        ):
-            kernel = BINARY_OP_MAPPING[kernel]
-
         super().__init__(
             layout,
             tuple(tensor_args),

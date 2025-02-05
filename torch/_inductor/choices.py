@@ -98,9 +98,14 @@ class InductorChoices:
         if cooperative is not False:
             rsplit = next_power_of_2(
                 self.reduction_split_factor(
-                    device, xhint, rhint, pstats.reads.dim[1].contiguous_score >= 0.5
+                    device,
+                    reduction_numel_hint=rhint,
+                    numel_hint=xhint,
+                    inner_reduction=pstats.reads.dim[1].contiguous_score >= 0.5,
                 )
             )
+            if rsplit == 1 and config.triton.force_cooperative_reductions:
+                rsplit = 32
             cooperative = rsplit > 1
         else:
             cooperative = False
@@ -146,6 +151,7 @@ class InductorChoices:
 
         if xblock * rblock < target // 2:
             xblock = target // rblock
+        xblock = min(xhint, xblock)
 
         cfg = {"XBLOCK": xblock}
         if not persistent:
