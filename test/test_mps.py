@@ -839,7 +839,9 @@ def mps_ops_modifier(ops):
         'sigmoid': [torch.int64],
         'atan2': [torch.int64],
         'angle': [torch.int64],
-        'special.zeta': [torch.int64],
+
+        # zeta isn't supported for integral types
+        'special.zeta': [torch.bool, torch.int16, torch.int32, torch.int64, torch.uint8, torch.int8],
 
         # GEMM on MPS is not supported for integral types
         'nn.functional.linear': [torch.int16, torch.int32, torch.int64, torch.uint8, torch.int8],
