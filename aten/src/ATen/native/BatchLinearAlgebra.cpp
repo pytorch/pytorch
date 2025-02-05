@@ -627,8 +627,8 @@ TORCH_META_FUNC(linalg_lu_factor_ex)(const Tensor& A, bool pivot, bool check_err
   const auto m = sizes.cend()[-2];
   const auto n = sizes.cend()[-1];
 
-  // make column major strides for BLAS
-  auto LU_strides = at::native::batched_matrix_contiguous_strides(sizes, /*f-contig*=*/true);
+  // row major for MPS device, otherwise column major strides for BLAS
+  auto LU_strides = at::native::batched_matrix_contiguous_strides(sizes, /*f-contig*=*/A.device().type() != at::kMPS);
   set_output_strided(0, sizes, LU_strides, A.options(), {});
 
   // Set sizes to the size of pivots
@@ -1703,11 +1703,10 @@ static void apply_cholesky_solve(Tensor& b, Tensor& A, bool upper, Tensor& infos
   auto ldab = std::max<int64_t>(1, n);
   auto nrhs = b.size(-1);
 
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  int info;
   for (const auto i : c10::irange(batch_size)) {
     const scalar_t* A_working_ptr = &A_data[i * A_mat_stride];
     scalar_t* b_working_ptr = &b_data[i * b_mat_stride];
+    int info = 0;
     lapackCholeskySolve<scalar_t>(uplo, n, nrhs, const_cast<scalar_t*>(A_working_ptr), ldab, b_working_ptr, ldab, &info);
     infos_data[i] = info;
     if (info != 0) {
