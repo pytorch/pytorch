@@ -68,14 +68,17 @@ class Distribution:
                     continue  # skip checking lazily-constructed args
                 value = getattr(self, param)
                 valid = constraint.check(value)
-                if not torch._is_all_true(valid):
-                    raise ValueError(
+                torch._check_with(
+                    ValueError,
+                    valid.item(),
+                    lambda: (
                         f"Expected parameter {param} "
                         f"({type(value).__name__} of shape {tuple(value.shape)}) "
                         f"of distribution {repr(self)} "
                         f"to satisfy the constraint {repr(constraint)}, "
                         f"but found invalid values:\n{value}"
-                    )
+                    ),
+                )
         super().__init__()
 
     def expand(self, batch_shape: _size, _instance=None):
