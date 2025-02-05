@@ -14,9 +14,9 @@ import torch.fx._pytree as fx_pytree
 from torch._dynamo.testing import same
 from torch._inductor import config
 from torch._inductor.test_case import TestCase
-from torch._inductor.utils import clone_preserve_strides
 from torch.testing import FileCheck
 from torch.testing._internal.common_utils import IS_FBCODE
+from torch.testing._internal.inductor_utils import clone_preserve_strides_offset
 from torch.utils import _pytree as pytree
 
 
@@ -186,7 +186,8 @@ def check_model(
             if isinstance(t, torch.Tensor)
         ):
             example_inputs = tuple(
-                clone_preserve_strides(x, device=self.device) for x in example_inputs
+                clone_preserve_strides_offset(x, device=self.device)
+                for x in example_inputs
             )
 
         ref_model = copy.deepcopy(model)
