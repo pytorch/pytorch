@@ -140,6 +140,8 @@ class RocblasGemmOp : public Callable<GemmParams<T>> {
     RocblasGemmOp(int solution) : solution_{solution} {}
 
     TuningStatus Call(const GemmParams<T>* params) override {
+      if (at::globalContext().allowTF32CuBLAS()) return FAIL;  // no support for TF32 in rocBLAS
+
       auto input_output_type = RocBlasDataTypeFor<T>();
       auto compute_type = RocBlasComputeTypeFor<T>();
       auto h_a = DoCastForHalfOrBfloat16(params->alpha);
@@ -206,6 +208,8 @@ class RocblasGemmStridedBatchedOp : public Callable<GemmStridedBatchedParams<T>>
     RocblasGemmStridedBatchedOp(int solution) : solution_{solution} {}
 
     TuningStatus Call(const GemmStridedBatchedParams<T>* params) override {
+      if (at::globalContext().allowTF32CuBLAS()) return FAIL;  // no support for TF32 in rocBLAS
+
       auto input_output_type = RocBlasDataTypeFor<T>();
       auto compute_type = RocBlasComputeTypeFor<T>();
       auto h_a = DoCastForHalfOrBfloat16(params->alpha);
