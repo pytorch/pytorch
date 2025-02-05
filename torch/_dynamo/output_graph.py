@@ -252,6 +252,8 @@ class OutputGraph:
     the root InstructionTranslator's OutputGraph.
     """
 
+    side_effects: SideEffects
+
     def __init__(
         self,
         code_options: dict[str, Any],

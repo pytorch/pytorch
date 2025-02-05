@@ -297,6 +297,9 @@ class UnflattenedModule(torch.nn.Module):
         self.graph.owning_module = self
         self.module_call_graph = deepcopy(export_module.module_call_graph)
         self.flat_args_adapter = flat_args_adapter
+
+        self.meta = export_module.graph_module.meta
+
         # Flag to indicate whether args have been adapted.
         self.adapted = False
         self._run_with_interpreter = RUN_WITH_INTERPRETER
@@ -1389,7 +1392,7 @@ def _reorder_submodules(
         if child is None:
             continue
         fqn = prefix + name
-        _reorder_submodules(child, fqn_order, prefix=fqn + ".")
+        _reorder_submodules(child, fqn_order, prefix=fqn.split("@")[0] + ".")
         delattr(parent, name)
         children.append((fqn_order[fqn], name, child))
     children.sort(key=operator.itemgetter(0))
