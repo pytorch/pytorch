@@ -2,7 +2,7 @@
 
 """Test the support on onnxscript in PyTorch-ONNX converter with onnxruntime."""
 
-import typing
+from typing import Sequence
 
 import onnx_test_common
 import onnxscript
@@ -91,7 +91,7 @@ class TestONNXScriptRuntime(onnx_test_common._TestONNXRuntime):
         @onnxscript.script(custom_opset)
         def layer_norm(
             X,
-            axes: typing.List[int],  # noqa: UP006
+            axes: Sequence[int],
             weight: FLOAT[...],
             bias: FLOAT[...],
             eps: float,
