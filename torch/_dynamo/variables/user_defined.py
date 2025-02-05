@@ -297,6 +297,9 @@ class UserDefinedClassVariable(UserDefinedVariable):
         args: "list[VariableTracker]",
         kwargs: "dict[str, VariableTracker]",
     ) -> "VariableTracker":
+        # Is this import slow?
+        from .ctx_manager import GenericContextWrappingVariable
+
         if (
             name == "__subclasses__"
             and len(args) == 0
@@ -331,6 +334,12 @@ class UserDefinedClassVariable(UserDefinedVariable):
             return variables.ConstDictVariable(
                 {}, collections.OrderedDict, mutation_type=ValueMutationNew()
             )
+        elif (
+            len(args) == 1
+            and isinstance(args[0], GenericContextWrappingVariable)
+            and name == "__enter__"
+        ):
+            return args[0].enter(tx)
 
         return super().call_method(tx, name, args, kwargs)
 
@@ -342,6 +351,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
     ) -> "VariableTracker":
         from ..side_effects import SideEffects
         from .builder import wrap_fx_proxy
+        from .ctx_manager import GenericContextWrappingVariable
 
         constant_args = check_constant_args(args, kwargs)
 
@@ -406,6 +416,16 @@ class UserDefinedClassVariable(UserDefinedVariable):
             return variables.lists.DequeVariable(
                 items, maxlen=maxlen, mutation_type=ValueMutationNew()
             )
+        elif (
+            self.value is types.MethodType
+            and len(args) == 2
+            and isinstance(args[0], variables.GetAttrVariable)
+            and args[0].name in ("__enter__", "__exit__")
+            and isinstance(args[1], GenericContextWrappingVariable)
+        ):
+            cm_obj = args[1].cm_obj
+            fn = getattr(cm_obj, args[0].name).__func__
+            return variables.UserMethodVariable(fn, args[1], source=self.source)
         elif self.value is weakref.ref:
             return variables.WeakRefVariable(args[0])
         elif self.value is functools.partial:
@@ -451,7 +471,6 @@ class UserDefinedClassVariable(UserDefinedVariable):
         ):
             from torch.overrides import TorchFunctionMode
 
-            from .ctx_manager import GenericContextWrappingVariable
             from .functions import (
                 BaseUserFunctionVariable,
                 FunctionDecoratedByContextlibContextManagerVariable,
@@ -476,7 +495,6 @@ class UserDefinedClassVariable(UserDefinedVariable):
                 contextlib.redirect_stdout,
                 contextlib.redirect_stderr,
                 contextlib.suppress,
-                contextlib.ExitStack,
                 contextlib.AsyncExitStack,
             ):
                 # We are not changing the behavior of Dynamo as these function were
