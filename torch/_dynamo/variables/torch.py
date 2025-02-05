@@ -1317,4 +1317,9 @@ class FuncTorchInterpreterVariable(BaseTorchVariable):
             )
         elif name in ["level", "batch_size", "randomness"]:
             return variables.ConstantVariable.create(getattr(self.value, name)())
+        elif name == "lower":
+            assert not args and not kwargs
+            return variables.TemporarilyPopInterpreterStackCtxManagerVariable.create(
+                tx, None
+            )
         return super().call_method(tx, name, args, kwargs)
