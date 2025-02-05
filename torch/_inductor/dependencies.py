@@ -4,17 +4,7 @@ import itertools
 import logging
 import re
 from collections.abc import Sequence
-from typing import (
-    Any,
-    Callable,
-    Iterable,
-    List,
-    Optional,
-    Tuple,
-    TYPE_CHECKING,
-    TypeVar,
-    Union,
-)
+from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple, TypeVar, Union
 from unittest.mock import patch
 
 import sympy
@@ -25,7 +15,6 @@ from torch.utils._ordered_set import OrderedSet
 
 from ..utils._sympy.symbol import make_symbol, SymT
 from .codegen.common import index_prevent_reordering
-from .ops_handler import DefaultHandler
 from .utils import (
     get_dtype_size,
     reduction_num_outputs,
@@ -748,16 +737,19 @@ def canonicalization_prefix() -> str:
 
 
 # ops handler which computes all the free unbacked symbols for an IR
-class FreeUnbackedSymbolsOpsHandler(DefaultHandler):
+class FreeUnbackedSymbolsOpsHandler:
     symbols: OrderedSet[sympy.Symbol]
 
     def __init__(self) -> None:
         self.symbols = OrderedSet()
 
-    def _default(self, name: str, args: tuple[Any, ...], kwargs: dict[str, Any]) -> Any:
-        for a in itertools.chain(args, kwargs.values()):
-            if isinstance(a, (sympy.Expr, sympy.logic.boolalg.Boolean)):
-                self.symbols |= free_unbacked_symbols(a)
+    def __getattr__(self, name: str) -> Callable[..., Any]:
+        def inner(*args: Sequence[Any], **kwargs: Dict[Any, Any]) -> None:
+            for a in itertools.chain(args, kwargs.values()):
+                if isinstance(a, (sympy.Expr, sympy.logic.boolalg.Boolean)):
+                    self.symbols |= free_unbacked_symbols(a)
+
+        return inner
 
     def indirect_indexing(
         self,
@@ -799,12 +791,10 @@ class FreeUnbackedSymbolsOpsHandler(DefaultHandler):
         body()
 
 
-if TYPE_CHECKING:
-
-    class _typecheck_FreeUnbackedSymbolsOpsHandler(
-        FreeUnbackedSymbolsOpsHandler, OpsHandler[None]
-    ):
-        pass
+def _typecheck_FreeUnbackedSymbolsOpsHandler(
+    h: FreeUnbackedSymbolsOpsHandler,
+) -> OpsHandler[None]:
+    return h
 
 
 def extract_free_unbacked_symbols(
