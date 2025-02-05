@@ -2283,7 +2283,8 @@ def forward(self):
 
         res = mod_for_compile(torch.Tensor([[6, 4, 5], [3, 4, 5], [6, 6, 6]]))
         # There is graph break right when we enter body of map
-        self.assertEqual(len(backend.graphs), 0)
+        # Since we are tracing through the Python dispatch logic, it ends up 8 graphs.
+        self.assertEqual(len(backend.graphs), 8)
         self.assertEqual(
             res, mod_for_eager(torch.Tensor([[6, 4, 5], [3, 4, 5], [6, 6, 6]]))
         )
@@ -2319,7 +2320,8 @@ def forward(self):
         eager = mod_for_eager(torch.Tensor([[6, 4, 5], [3, 4, 5], [6, 6, 6]]))
         eager = mod_for_eager(torch.Tensor([[6, 4, 5], [3, 4, 5], [6, 6, 6]]))
 
-        self.assertEqual(len(backend.graphs), 0)
+        # Since we are tracing through the Python dispatch logic, it ends up 9 graphs.
+        self.assertEqual(len(backend.graphs), 9)
         self.assertEqual(res, eager)
 
     def test_wrap_subgraph_name_is_valid(self):
