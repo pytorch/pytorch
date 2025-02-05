@@ -10,7 +10,7 @@ import numpy.typing as npt
 import onnx
 import onnxscript
 import onnxscript.values
-from onnxscript import INT64, ir, opset22 as op
+from onnxscript import INT64, ir, opset21 as op
 from onnxscript.onnx_types import COMPLEX128, COMPLEX64, DOUBLE, FLOAT, TensorType
 
 from torch.onnx._internal.exporter import _constants

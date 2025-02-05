@@ -9,7 +9,7 @@ from __future__ import annotations
 import math
 from typing import Optional, Sequence
 
-from onnxscript.onnx_opset import opset22 as op
+from onnxscript.onnx_opset import opset21 as op
 from onnxscript.onnx_types import TensorType
 
 import torch
