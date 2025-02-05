@@ -102,6 +102,8 @@ def mps_ops_grad_modifier(ops):
         'exponential': [torch.float16, torch.float32],
 
         # CPU errors
+        # derivative for zeta is not implemented
+        'special.zeta': None,
         # derivative for aten::nextafter is not implemented on CPU
         'nextafter': None,
         # derivative for aten::floor_divide is not implemented on CPU
@@ -331,6 +333,7 @@ def mps_ops_modifier(ops):
         'select',
         'sgn',
         'slice',
+        'special.zeta',
         'split',
         'split_with_sizes',
         'split_with_sizes_copy',
@@ -791,7 +794,6 @@ def mps_ops_modifier(ops):
         'special.scaled_modified_bessel_k1': None,
         'special.spherical_bessel_j0': None,
         'special.xlog1py': None,
-        'special.zeta': None,
         'svd_lowrank': None,
         'symeig': None,
         'take': None,
@@ -839,6 +841,9 @@ def mps_ops_modifier(ops):
         'sigmoid': [torch.int64],
         'atan2': [torch.int64],
         'angle': [torch.int64],
+
+        # zeta isn't supported for integral types
+        'special.zeta': [torch.bool, torch.int16, torch.int32, torch.int64, torch.uint8, torch.int8],
 
         # GEMM on MPS is not supported for integral types
         'nn.functional.linear': [torch.int16, torch.int32, torch.int64, torch.uint8, torch.int8],
@@ -12778,6 +12783,11 @@ class TestMetalLibrary(TestCaseMPS):
         self.assertRaises(RuntimeError, lambda: lib.non_existing(mps_tensor))
         # Passing no tensors asserts
         self.assertRaises(RuntimeError, lambda: lib.full(12))
+        # Exceeing thread group size asserts
+        max_thread_group_size = lib.full.max_threads_per_threadgroup
+        self.assertRaises(ValueError, lambda: lib.full(mps_tensor, group_size=max_thread_group_size + 5))
+        self.assertRaises(ValueError, lambda: lib.full(mps_tensor, threads=(3, max_thread_group_size),
+                                                       group_size=(3, max_thread_group_size)))
 
     def test_metal_include(self):
         # Checks that includes embedding works
