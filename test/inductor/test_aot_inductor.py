@@ -4323,6 +4323,24 @@ class AOTInductorTestsTemplate:
             model, example_inputs, "aoti_torch_clone_preserve_strides", 0
         )
 
+    @unittest.skipIf(IS_FBCODE, "Not runnable in fbcode")
+    def test_stft(self):
+        N_FFT = 400
+        HOP_LENGTH = 160
+
+        class Model(torch.nn.Module):
+            def forward(self, x):
+                window = torch.hann_window(N_FFT).to(x.device)
+                stft = torch.stft(
+                    x, N_FFT, HOP_LENGTH, window=window, return_complex=True
+                )
+                magnitudes = stft[..., :-1].abs() ** 2
+                return magnitudes
+
+        model = Model()
+        example_inputs = (torch.randn(500, device=self.device),)
+        self.check_model(model, example_inputs)
+
     def test_conv3d(self):
         if self.device != GPU_TYPE or not is_big_gpu():
             raise unittest.SkipTest("requires modern GPU to run max-autotune")
