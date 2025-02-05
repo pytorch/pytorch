@@ -964,6 +964,7 @@ INT8_SDPA_TEMPLATE = r"""
 extern "C"
 {{kernel.def_kernel(inputs=kernel_args, outputs={"output": output})}}
 {
+  {{ kernel.maybe_codegen_profile() }}
   int64_t num_thread = {{num_thread}};
   using accum_t = float;
   using scalar_t = {{kernel.dtype(query)}};

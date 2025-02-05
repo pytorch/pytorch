@@ -1383,7 +1383,7 @@ def _get_int8_sdpa_score_pattern(
         ),
         Arg(),
     )
-    if is_reduced_type:
+    if is_reduced_type and not has_mask:
         int8_sdpa_score_basic_pattern = CallFunction(
             torch.ops.prims.convert_element_type.default,
             int8_sdpa_score_basic_pattern,
@@ -1449,8 +1449,7 @@ def _get_int8_sdpa_attn_pattern(
     int8_sdpa_exp_pattern = _get_int8_sdpa_exp_pattern(
         has_mask, is_batch_size_1, is_reduced_type
     )
-    torch.ops.prims.convert_element_type.default
-    int8_sdpa_softmax_pattern = CallFunction(
+    int8_sdpa_div_pattern = CallFunction(
         aten.div.Tensor,  # div_1
         int8_sdpa_exp_pattern,  # exp
         CallFunction(
@@ -1460,21 +1459,40 @@ def _get_int8_sdpa_attn_pattern(
             Arg(),
         ),
     )
-    if is_reduced_type:
-        int8_sdpa_softmax_pattern = CallFunction(
-            torch.ops.prims.convert_element_type.default,
-            int8_sdpa_softmax_pattern,
-            Arg(),
-        )
-    return CallFunction(
-        aten.reshape.default,  # view_12
+    int8_sdpa_softmax_pattern = CallFunction(
+        torch.ops.quantized_decomposed.dequantize_per_tensor.default,  # dequantize_per_tensor_6
         CallFunction(
-            aten.expand.default,  # expand_2
-            CallFunction(
+            torch.ops.quantized_decomposed.quantize_per_tensor.default,  # quantize_per_tensor_4
+            int8_sdpa_div_pattern,
+            KeywordArg("a_scale"),
+            KeywordArg("a_zp"),
+            Arg(),
+            Arg(),
+            Arg(),
+        ),
+        KeywordArg("a_scale"),
+        KeywordArg("a_zp"),
+        Arg(),
+        Arg(),
+        Arg(),
+    )
+    if is_reduced_type:
+        if has_mask:
+            int8_sdpa_softmax_pattern = CallFunction(
+                torch.ops.prims.convert_element_type.default,
+                int8_sdpa_softmax_pattern,
+                Arg(),
+            )
+        else:
+            int8_sdpa_softmax_pattern = CallFunction(
                 torch.ops.quantized_decomposed.dequantize_per_tensor.default,  # dequantize_per_tensor_6
                 CallFunction(
                     torch.ops.quantized_decomposed.quantize_per_tensor.default,  # quantize_per_tensor_4
-                    int8_sdpa_softmax_pattern,
+                    CallFunction(
+                        torch.ops.prims.convert_element_type.default,
+                        int8_sdpa_div_pattern,
+                        Arg(),
+                    ),
                     KeywordArg("a_scale"),
                     KeywordArg("a_zp"),
                     Arg(),
@@ -1486,7 +1504,12 @@ def _get_int8_sdpa_attn_pattern(
                 Arg(),
                 Arg(),
                 Arg(),
-            ),
+            )
+    return CallFunction(
+        aten.reshape.default,  # view_12
+        CallFunction(
+            aten.expand.default,  # expand_2
+            int8_sdpa_softmax_pattern,
             Arg(),
         ),
         Arg(),
@@ -1545,7 +1568,7 @@ def _register_int8_sdpa_fp32_mask_lowering():
     )
 
 
-def _register_int8_sdpa_fp32_is_batch_size_1_lowering():
+def _register_int8_sdpa_fp32_bs1_lowering():
     # dtype = float32, without attention mask, batch size == 1
     return _register_int8_sdpa_pattern(
         _get_int8_sdpa_final_pattern(
@@ -1554,7 +1577,7 @@ def _register_int8_sdpa_fp32_is_batch_size_1_lowering():
     )
 
 
-def _register_int8_sdpa_fp32_mask_is_batch_size_1_lowering():
+def _register_int8_sdpa_fp32_mask_bs1_lowering():
     # dtype = float32, with attention mask, batch size == 1
     return _register_int8_sdpa_pattern(
         _get_int8_sdpa_final_pattern(
@@ -1581,7 +1604,7 @@ def _register_int8_sdpa_bf16_mask_lowering():
     )
 
 
-def _register_int8_sdpa_bf16_is_batch_size_1_lowering():
+def _register_int8_sdpa_bf16_bs1_lowering():
     # dtype = bfloat16, without attention mask, batch size == 1
     return _register_int8_sdpa_pattern(
         _get_int8_sdpa_final_pattern(
@@ -1590,7 +1613,7 @@ def _register_int8_sdpa_bf16_is_batch_size_1_lowering():
     )
 
 
-def _register_int8_sdpa_bf16_mask_is_batch_size_1_lowering():
+def _register_int8_sdpa_bf16_mask_bs1_lowering():
     # dtype = bfloat16, with attention mask, batch size == 1
     return _register_int8_sdpa_pattern(
         _get_int8_sdpa_final_pattern(
@@ -1759,12 +1782,12 @@ def _register_woq_lowerings():
 def _register_quantized_sdpa_lowerings():
     _register_int8_sdpa_fp32_lowering()
     _register_int8_sdpa_fp32_mask_lowering()
-    _register_int8_sdpa_fp32_is_batch_size_1_lowering()
-    _register_int8_sdpa_fp32_mask_is_batch_size_1_lowering()
+    _register_int8_sdpa_fp32_bs1_lowering()
+    _register_int8_sdpa_fp32_mask_bs1_lowering()
     _register_int8_sdpa_bf16_lowering()
     _register_int8_sdpa_bf16_mask_lowering()
-    _register_int8_sdpa_bf16_is_batch_size_1_lowering()
-    _register_int8_sdpa_bf16_mask_is_batch_size_1_lowering()
+    _register_int8_sdpa_bf16_bs1_lowering()
+    _register_int8_sdpa_bf16_mask_bs1_lowering()
 
 
 def _is_valid_dequant_promotion_pattern(dtype=torch.float32):
