@@ -320,6 +320,13 @@ AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_AND_QINTS(SPECIALIZE_CppTypeToScalarType)
   _(c10::quint4x2, QUInt4x2)    \
   _(c10::quint2x4, QUInt2x4)
 
+#define AT_FORALL_FLOAT8_TYPES(_)         \
+  _(at::Float8_e5m2, Float8_e5m2)         \
+  _(at::Float8_e4m3fn, Float8_e4m3fn)     \
+  _(at::Float8_e5m2fnuz, Float8_e5m2fnuz) \
+  _(at::Float8_e4m3fnuz, Float8_e4m3fnuz) \
+  _(at::Float8_e8m0fnu, Float8_e8m0fnu)
+
 #define AT_FORALL_COMPLEX_TYPES(_)     \
   _(c10::complex<float>, ComplexFloat) \
   _(c10::complex<double>, ComplexDouble)
