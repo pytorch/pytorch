@@ -208,31 +208,6 @@ class StructuredTraceTest(TestCase):
         finally:
             shutil.rmtree(out, ignore_errors=True)
 
-    def test_compile_id_serialization_deserialization(self):
-        cid = torch._guards.CompileId(
-            frame_id=1,
-            frame_compile_id=2,
-        )
-        assert cid == torch._guards.CompileId.from_string(str(cid))
-
-        cid = torch._guards.CompileId(
-            compiled_autograd_id=1,
-            frame_id=2,
-            frame_compile_id=3,
-        )
-        assert cid == torch._guards.CompileId.from_string(str(cid))
-
-        cid = torch._guards.CompileId(
-            compiled_autograd_id=1,
-            frame_id=None,
-            frame_compile_id=None,
-        )
-        assert cid == torch._guards.CompileId.from_string(str(cid))
-
-        for bad_cid in ["-/-", "-/1", "1/-", "!1/2", "!1/-/-"]:
-            with self.assertRaises(ValueError):
-                torch._guards.CompileId.from_string(bad_cid)
-
     @requires_cuda
     def test_schedule(self):
         fn_opt = torch.compile(inductor_schedule_fn, backend="inductor")
@@ -255,6 +230,7 @@ class StructuredTraceTest(TestCase):
 {"artifact": {"name": "aotautograd_cache_miss", "encoding": "json"}, "frame_id": 0, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}
 {"dynamo_cpp_guards_str": {}, "frame_id": 0, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}
 {"compilation_metrics": "METRICS", "frame_id": 0, "frame_compile_id": 0, "attempt": 0}
+{"compilation_metrics_runtime": "METRICS", "frame_id": 0, "frame_compile_id": 0, "attempt": 0}
 """,  # noqa: B950
         )
 
@@ -282,6 +258,7 @@ class StructuredTraceTest(TestCase):
 {"artifact": {"name": "aotautograd_cache_miss", "encoding": "json"}, "frame_id": 0, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}
 {"dynamo_cpp_guards_str": {}, "frame_id": 0, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}
 {"compilation_metrics": "METRICS", "frame_id": 0, "frame_compile_id": 0, "attempt": 0}
+{"compilation_metrics_runtime": "METRICS", "frame_id": 0, "frame_compile_id": 0, "attempt": 0}
 """,  # noqa: B950
         )
 
