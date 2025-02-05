@@ -31,6 +31,7 @@ from ...utils._sympy.symbol import free_symbol_is_type, prefix_str, symbol_is_ty
 from ...utils._sympy.value_ranges import ValueRanges
 from .. import config, ir, metrics
 from ..codecache import code_hash, get_path, PyCodeCache
+from ..ops_handler import DefaultHandler
 from ..runtime.benchmarking import benchmarker
 from ..runtime.hints import (
     AutotuneHint,
@@ -60,7 +61,7 @@ from ..utils import (
     triton_version_uses_attrs_dict,
     upcast_compute_type,
 )
-from ..virtualized import _ops as ops, OpsHandler, ReductionType, StoreMode, V
+from ..virtualized import _ops as ops, ReductionType, StoreMode, V
 from ..wrapper_benchmark import get_kernel_category_by_source_code
 from .block_analysis import BlockPatternMatcher
 from .common import (
@@ -816,7 +817,7 @@ def maybe_upcast_float32(convert_output: bool = True) -> Callable[[_T], _T]:
 class TritonOverrides(OpOverrides):
     """Map element-wise ops to Triton"""
 
-    LOG_2_E = math.log2(math.e)
+    _LOG_2_E = math.log2(math.e)
 
     @staticmethod
     def to_dtype(
@@ -941,7 +942,7 @@ class TritonOverrides(OpOverrides):
         more details.
         """
         if config.use_fast_math:
-            return f"libdevice.exp2({x} * {TritonOverrides.LOG_2_E})"
+            return f"libdevice.exp2({x} * {TritonOverrides._LOG_2_E})"
         else:
             return f"tl_math.exp({x})"
 
@@ -1296,11 +1297,6 @@ class TritonOverrides(OpOverrides):
 TritonOverrides._initialize_pointwise_overrides("triton")
 
 
-# Use mypy to check protocol implemented correctly
-def _typecheck_TritonOverrides(h: TritonOverrides) -> OpsHandler[str]:
-    return h
-
-
 class TritonKernelOverrides(TritonOverrides):
     """Map element-wise ops to Triton within a TritonKernel
 
@@ -1423,11 +1419,6 @@ class TritonKernelOverrides(TritonOverrides):
         )
         V.kernel.cse.put(cache_key, (mantissa, exponent))
         return (mantissa, exponent)
-
-
-# Use mypy to check protocol implemented correctly
-def _typecheck_TritonKernelOverrides(h: TritonKernelOverrides) -> OpsHandler[str]:
-    return h
 
 
 class HelperFunctions:
@@ -1590,6 +1581,9 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
 
         self.codegen_range_tree()
 
+        if self.cooperative_reduction:
+            self.init_cooperative_reduction_mask()
+
     def dtype_to_str(self, dtype: torch.dtype) -> str:
         return triton_type(dtype)
 
@@ -1615,14 +1609,16 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             self.args
         )
         self.body.splice(
-            """
+            """\
+            RSPLIT_NEXT_POWER_OF_2: tl.constexpr = triton_helpers.constexpr_next_power_of_2(RSPLIT)
+            RSPLIT_IS_POWER_OF_2: tl.constexpr = RSPLIT == RSPLIT_NEXT_POWER_OF_2
+            HAS_RSPLIT: tl.constexpr = RSPLIT > 1
             rsplit_id = tl.program_id(0)
             num_rblocks = (rnumel + RBLOCK - 1) // RBLOCK
             rsplit_chunk = (num_rblocks + RSPLIT - 1) // RSPLIT * RBLOCK
             rsplit_start = rsplit_chunk * rsplit_id
             rsplit_end = rsplit_chunk * (rsplit_id + 1)
             """,
-            strip=True,
         )
         if any(
             not self._has_constant_mask(tree)
@@ -1631,6 +1627,27 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         ):
             self.body.writeline(
                 "rsplit_end = tl.where(rsplit_end < rnumel, rsplit_end, rnumel)"
+            )
+
+    def init_cooperative_reduction_mask(self):
+        rsplit_arange = "tl.arange(0, RSPLIT_NEXT_POWER_OF_2)"
+        if not self.no_x_dim:
+            rsplit_arange = f"{rsplit_arange}[None, :]"
+        self.body.writeline(f"rsplit_arange = {rsplit_arange}")
+
+        if self._has_constant_xmask():
+            self.body.splice(
+                """\
+                if RSPLIT_IS_POWER_OF_2:
+                    rsplit_mask: tl.constexpr = None
+                else:
+                    rsplit_mask = rsplit_arange < RSPLIT
+                """
+            )
+        else:
+            assert not self.no_x_dim
+            self.body.writeline(
+                "rsplit_mask = xmask if RSPLIT_IS_POWER_OF_2 else ((rsplit_arange < RSPLIT) & xmask)"
             )
 
     def codegen_range_tree(self):
@@ -2458,7 +2475,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                     self.compute, where_cond(value, default), dtype=value.dtype
                 )
 
-            masked_value: Union[CSEVariable, Sequence[CSEVariable]] = []
+            masked_value: Union[CSEVariable, Sequence[CSEVariable]]
             if isinstance(value, tuple):
                 masked_value = [_mask_value(v, d) for v, d in zip(value, default)]
             else:
@@ -2564,10 +2581,11 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                     )
 
         if self.cooperative_reduction:
+            default = ir.Reduction.default_accumulator(reduction_type, src_dtype)
             exit_stack = contextlib.ExitStack()
             for buf in (self.post_loop_combine, self.post_loop_store):
                 # only do cooperative reduction combines if we have more than one thread block
-                buf.writeline("if RSPLIT > 1:")
+                buf.writeline("if HAS_RSPLIT:")
                 exit_stack.enter_context(buf.indent())
 
             if reduction_type in ("argmax", "argmin"):
@@ -2575,23 +2593,23 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                     f"{result_var}_bval = {self.reduction_resize(f'{result_var}_val')}"
                 )
                 peer_val = self.codegen_cooperative_reduction_peer_combine(
-                    f"{result_var}_bval", src_dtype
+                    f"{result_var}_bval", src_dtype, default
                 )
                 peer_idx = self.codegen_cooperative_reduction_peer_combine(
-                    result_var, dtype
+                    result_var, dtype, 0
                 )
                 final_argreduce(self.post_loop_store, result_var, peer_val, peer_idx)
             elif is_welford_reduction(reduction_type):
                 assert reduction_type == "welford_reduce"
                 result_mean, result_m2, result_weight = result_var
                 peer_mean = self.codegen_cooperative_reduction_peer_combine(
-                    result_mean, upcast_acc_dtype(src_dtype)
+                    result_mean, upcast_acc_dtype(src_dtype), default[0]
                 )
                 peer_m2 = self.codegen_cooperative_reduction_peer_combine(
-                    result_m2, upcast_acc_dtype(src_dtype)
+                    result_m2, upcast_acc_dtype(src_dtype), default[1]
                 )
                 peer_weight = self.codegen_cooperative_reduction_peer_combine(
-                    result_weight, upcast_acc_dtype(src_dtype)
+                    result_weight, upcast_acc_dtype(src_dtype), default[2]
                 )
                 self.welford_reduce_final_reduction(
                     self.post_loop_store,
@@ -2606,7 +2624,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 )
             else:
                 peers = self.codegen_cooperative_reduction_peer_combine(
-                    result_var, upcast_acc_dtype(src_dtype)
+                    result_var, upcast_acc_dtype(src_dtype), default
                 )
                 final_reduction_define(
                     self.post_loop_store, str(result_var), peers, None
@@ -2743,7 +2761,9 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             return self.fixed_config["RSPLIT"]
         return TRITON_MAX_RSPLIT
 
-    def codegen_cooperative_reduction_peer_combine(self, result_var, dtype):
+    def codegen_cooperative_reduction_peer_combine(
+        self, result_var, dtype, default_val
+    ):
         """
         Generate code to save a [XBLOCK, RSPLIT] temporary workspace, where each thread block writes a different
         column.  After the barrier, every thread block loads the completed value so that it can compute the final
@@ -2751,7 +2771,6 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         """
         xnumel = self.numels["x"]
         mask = "xindex < xnumel" if not self._has_constant_xmask() else None
-        expand = "" if self.no_x_dim else "[None,:]"
 
         nbytes = xnumel * dtype.itemsize * self.max_rsplit()
         ws_name, ws_offset = self.cooperative_reduction_workspace_cache.allocate(nbytes)
@@ -2764,8 +2783,8 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             strip=True,
         )
         self.post_loop_store.writeline(
-            f"{result_var}_peers = tl.load({result_var}_ws + (xindex * RSPLIT + tl.arange(0, RSPLIT){expand}), "
-            f"{mask}, eviction_policy='evict_first')"
+            f"{result_var}_peers = tl.load({result_var}_ws + (xindex * RSPLIT + rsplit_arange), "
+            f"rsplit_mask, eviction_policy='evict_first', other=triton_helpers.if_mask(rsplit_mask, {constant_repr(default_val)}))"
         )
         return f"{result_var}_peers"
 
@@ -2825,7 +2844,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         signature = ", ".join(str(x) for x in itertools.chain.from_iterable(args))
         helper.writeline(f"def {{name}}({signature}):")
 
-        overrides = TritonOverrides(V.MockHandler())
+        overrides = TritonOverrides()
 
         # Build a name that changes depending on fn to workaround a triton bug
         # where the combine_fn to reduce and scan is not hashed, and so different
@@ -2837,24 +2856,23 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
 
         dtype_handler = DtypePropagationOpsHandler()
 
-        class CSEProxy:
-            def __getattr__(self, name: str) -> Callable[..., CSEVariable]:
-                def inner(*args, **kwargs):
-                    nonlocal helper_name
-                    helper_name += f"_{name}"
+        class CSEProxy(DefaultHandler):
+            def _default(
+                self, name: str, args: tuple[Any, ...], kwargs: dict[str, Any]
+            ) -> Any:
+                nonlocal helper_name
+                helper_name += f"_{name}"
 
-                    output_dtype = getattr(
-                        dtype_handler,
-                        name,
-                    )(*args, **kwargs)
+                output_dtype = getattr(
+                    dtype_handler,
+                    name,
+                )(*args, **kwargs)
 
-                    return cse.generate(
-                        helper,
-                        getattr(overrides, name)(*args, **kwargs),
-                        dtype=output_dtype,
-                    )
-
-                return inner
+                return cse.generate(
+                    helper,
+                    getattr(overrides, name)(*args, **kwargs),
+                    dtype=output_dtype,
+                )
 
         with helper.indent(), V.set_ops_handler(CSEProxy()):
             outputs = fn(*args)
@@ -3119,7 +3137,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             sem_ptr = f"{self.semaphores_name} + tl.program_id(1)"
             self.body.splice(
                 f"""
-                if RSPLIT > 1:
+                if HAS_RSPLIT:
                     triton_helpers.x_grid_barrier({sem_ptr})
                 """,
                 strip=True,
@@ -3574,9 +3592,11 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                     code.writeline(f"{tree.prefix}numel = {int(simplified_tree_numel)}")
 
             if tree.is_reduction and self.persistent_reduction:
-                val = self._get_persistent_RBLOCK(tree.numel)
                 if self.cooperative_reduction:
-                    val = f"{val} // RSPLIT"
+                    numel = self.kexpr(self.rename_indexing(tree.numel))
+                    val = f"triton_helpers.constexpr_next_power_of_2(({numel} + RSPLIT - 1) // RSPLIT)"
+                else:
+                    val = self._get_persistent_RBLOCK(tree.numel)
                 code.writeline(f"{tree.prefix.upper()}BLOCK: tl.constexpr = {val}")
 
             if tree.prefix == "x" and self.no_x_dim:
