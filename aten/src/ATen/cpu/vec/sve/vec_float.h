@@ -507,6 +507,7 @@ inline void convert(const float* src, float* dst, int64_t n) {
   for (int64_t i = 0; i < n - fraction; i += Vectorized<float>::size()) {
     svst1_f32(ptrue, dst + i, svldnt1_f32(ptrue, src + i));
   }
+#pragma unroll
   for (int64_t i = n - fraction; i < n; i += Vectorized<float>::size()) {
     svbool_t pg = svwhilelt_b32(i, n);
     svst1_f32(pg, dst + i, svldnt1_f32(pg, src + i));
@@ -524,6 +525,7 @@ inline void convert(const float *src, at::Half *dst, int64_t n) {
                                     ZERO_F16);
     svst1_f16(pg_16, reinterpret_cast<float16_t*>(dst) + i, src_vec);
   }
+#pragma unroll
   for (int64_t i = n - fraction; i < n; i += Vectorized<float>::size()) {
     pg_16 = svwhilelt_b16(i, n);
     pg_32 = svwhilelt_b32(i, n);
@@ -544,6 +546,7 @@ inline void convert(const at::Half *src, float *dst, int64_t n) {
                                     ZERO_F16);
     svst1_f32(pg_32, dst + i, svcvt_f32_f16_x(ptrue, src_vec));
   }
+#pragma unroll
   for (int64_t i =  n - fraction; i < n; i += Vectorized<float>::size()) {
     pg_16 = svwhilelt_b16(i, n);
     pg_32 = svwhilelt_b32(i, n);
@@ -565,6 +568,7 @@ inline void convert(const bool *src, float *dst, int64_t n) {
     svbool_t mask = svcmpne_u32(pg_32, src_vec_u32, ZERO_U32);
     svst1_f32(pg_32, dst + i, svsel_f32(mask, ONE_F32, ZERO_F32));
   }
+#pragma unroll
   for (int64_t i = n - fraction; i < n; i += Vectorized<float>::size()) {
     pg_8 = svwhilelt_b8(i, n);
     pg_32 = svwhilelt_b32(i, n);

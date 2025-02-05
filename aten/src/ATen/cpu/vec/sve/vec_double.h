@@ -508,6 +508,7 @@ inline void convert(const double* src, double* dst, int64_t n) {
   for (int64_t i = 0; i < n - fraction; i += Vectorized<double>::size()) {
     svst1_f64(ptrue, dst + i, svldnt1_f64(ptrue, src + i));
   }
+#pragma unroll
   for (int64_t i = n - fraction; i < n; i += Vectorized<double>::size()) {
     svbool_t pg = svwhilelt_b64(i, n);
     svst1_f64(pg, dst + i, svldnt1_f64(pg, src + i));

@@ -142,9 +142,9 @@ IF(CMAKE_SYSTEM_NAME MATCHES "Linux")
 
     # Assume all vector lengths are supported if SVE is detected
     IF(CXX_SVE_FOUND)
-      message(STATUS "SVE support detected (128, 256, 512 vector lengths assumed).")
+      message(STATUS "SVE support detected. The current toolchain can generate SVE instructions")
     ELSE()
-      message(STATUS "No SVE processor on this machine.")
+      message(STATUS "Current toolchain could not be used to generate SVE instructions.")
     ENDIF()
 
     # Mark the SVE support variable as advanced
