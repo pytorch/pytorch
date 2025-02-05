@@ -112,15 +112,15 @@ def close_issue(num: int) -> None:
         data=json.dumps({"body": CLOSING_COMMENT}),
         headers=headers,
     )
-    if response.status_code != 200:
-        raise RuntimeError(f"Failed to comment on issue {num}")
+    if response.status_code != 201:
+        raise RuntimeError(f"Failed to comment on issue {num}: {response.text}")
     response = requests.patch(
         f"https://api.github.com/repos/pytorch/pytorch/issues/{num}",
         data=json.dumps({"state": "closed"}),
         headers=headers,
     )
-    if response.status_code != 201:
-        raise RuntimeError(f"Failed to close issue {num}")
+    if response.status_code != 200:
+        raise RuntimeError(f"Failed to close issue {num}: {response.text}")
 
 
 def check_if_exists(
@@ -194,6 +194,7 @@ if __name__ == "__main__":
     if args.dry_run:
         print("dry run, not actually closing")
     else:
+        to_be_closed = [("", (82, "", ""))]
         failed = False
         for item in to_be_closed:
             _, (num, _, _) = item
