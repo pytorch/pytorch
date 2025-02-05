@@ -1015,7 +1015,7 @@ class VariableBuilder:
             return WrapperUserFunctionVariable(value, "__wrapped__", source=self.source)
         elif value in (traceback.clear_frames,):
             return TracebackVariable(source=self.source)
-        elif value in (sys.exc_info, sys.exception):
+        elif value in (sys.exc_info,) or sys.version_info >= (3, 11) and value is sys.exception:
             return SysFunctionVariable(value, source=self.source)
         elif is_function_or_wrapper(value) and inspect.getattr_static(
             value, "_torchdynamo_inline", False

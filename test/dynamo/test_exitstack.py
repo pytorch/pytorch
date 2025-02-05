@@ -23,6 +23,10 @@ def set_default_dtype(dtype):
 
 class TestExitStack(torch._dynamo.test_case.TestCase):
     def setUp(self):
+        if sys.version_info < (3, 11):
+            self.skipTest(
+                "Tracing the unittest module needs exception table (Python 3.11+) to work"
+            )
         self._old = torch._dynamo.config.enable_trace_contextlib
         torch._dynamo.config.enable_trace_contextlib = True
 
@@ -569,6 +573,13 @@ class CPythonTestExitStack(CPythonTestBaseExitStack, torch._dynamo.test_case.Tes
         ("__exit__", "raise exc"),
         ("__exit__", "if cb(*exc_details):"),
     ]
+
+    def setUp(self):
+        if sys.version_info < (3, 11):
+            self.skipTest(
+                "Tracing the unittest module needs exception table (Python 3.11+) to work"
+            )
+        return super().setUp()
 
 
 if __name__ == "__main__":
