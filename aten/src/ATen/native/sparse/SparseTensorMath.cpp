@@ -30,6 +30,7 @@
 #include <ATen/ops/_sparse_sum.h>
 #include <ATen/ops/_sparse_sum_backward_native.h>
 #include <ATen/ops/_sparse_sum_native.h>
+#include <ATen/ops/_sparse_broadcast_to_native.h>
 #include <ATen/ops/_sparse_sparse_matmul.h>
 #include <ATen/ops/_sparse_mm_reduce_impl.h>
 #include <ATen/ops/_sparse_mm_reduce_impl_native.h>
@@ -563,28 +564,57 @@ SparseTensor& add_out_sparse_cpu(const SparseTensor& t, const SparseTensor& src,
   TORCH_CHECK(!r.is_cuda(), "add: expected 'out' to be CPU tensor, but got CUDA tensor");
   TORCH_CHECK(!src.is_cuda(), "add: expected 'other' to be a CPU tensor, but got a CUDA tensor");
 
-  TORCH_CHECK(t.sizes().equals(src.sizes()), "add: expected sizes of 'self' and 'other' to match, but ", t.sizes(), " != ", src.sizes());
-
   auto commonDtype = promoteTypes(t.scalar_type(), src.scalar_type());
 
   TORCH_CHECK(canCast(commonDtype, r.scalar_type()), "Can't convert result type ", commonDtype, " to output ", r.scalar_type(), " in add operation");
 
+  // Check if the broadcasting can be performed and if applicable return the shape of the result.
+  const std::vector<int64_t>& res_shape = infer_size(t.sizes(), src.sizes());
+  bool is_same_size = t.sizes().equals(src.sizes());
+
+  // deal with empty sparse tensors
   if (src._nnz() == 0) {
-    return copy_sparse_to_sparse_(r, t);
+    if (is_same_size) {
+      return copy_sparse_to_sparse_(r, t);
+    } else {
+    const SparseTensor& broadcasted_t = sparse_broadcast_to(t, res_shape);
+    return copy_sparse_to_sparse_(r, broadcasted_t);
+    }
   }
   if (t._nnz() == 0) {
-    return mul_out_sparse_scalar(r, src, value);
+    if (is_same_size) {
+      return mul_out_sparse_scalar(r, src, value);
+    } else {
+    const SparseTensor& broadcasted_src = sparse_broadcast_to(src, res_shape);
+    return mul_out_sparse_scalar(r, broadcasted_src, value);
+    }
   }
 
-  TORCH_CHECK(is_same_density(t, src), "add: expected 'self' and 'other' to have same density, but 'self' has ", t.sparse_dim(), " sparse dimensions while 'other' has ", src.sparse_dim(), " sparse dimensions");
+  // the two sparse tensors should have the same dense_dim.
+  bool is_same_dense_ndim = (t.dense_dim() == src.dense_dim());
+  TORCH_CHECK(is_same_dense_ndim, "add: expected 'self' and 'other' to have same number of dense dimensions, but 'self' has ", t.dense_dim(), " dense dimensions while 'other' has ", src.dense_dim(), " dense dimensions");
 
-  r.resize_as_(src);
+  if (is_same_size) {
+    r.resize_as_(src);
+    if (r.is_meta()) {
+      return r;
+      } else if (src._values().is_contiguous() && t._values().is_contiguous()) {
+        return add_out_sparse_contiguous(r, t, src, value, commonDtype);
+      } else {
+        return add_out_sparse_non_contiguous(r, t, src, value, commonDtype);
+      }
+  } else { // broadcasting
+  const SparseTensor& broadcasted_t = sparse_broadcast_to(t, res_shape);
+  const SparseTensor& broadcasted_src = sparse_broadcast_to(src, res_shape);
+
+  r.resize_as_(broadcasted_src);
   if (r.is_meta()) {
     return r;
-  } else if (src._values().is_contiguous() && t._values().is_contiguous()) {
-    return add_out_sparse_contiguous(r, t, src, value, commonDtype);
-  } else {
-    return add_out_sparse_non_contiguous(r, t, src, value, commonDtype);
+    } else if (broadcasted_src._values().is_contiguous() && broadcasted_t._values().is_contiguous()) {
+      return add_out_sparse_contiguous(r, broadcasted_t, broadcasted_src, value, commonDtype);
+    } else {
+      return add_out_sparse_non_contiguous(r, broadcasted_t, broadcasted_src, value, commonDtype);
+    }
   }
 }
 

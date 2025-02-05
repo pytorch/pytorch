@@ -21,6 +21,7 @@
 #include <ATen/Functions.h>
 #include <ATen/NativeFunctions.h>
 #else
+#include <ATen/ops/_sparse_broadcast_to_native.h>
 #include <ATen/ops/_sparse_coo_tensor_with_dims_and_tensors.h>
 #include <ATen/ops/_sparse_sum_native.h>
 #include <ATen/ops/add_native.h>
@@ -390,26 +391,51 @@ SparseTensor& add_out_sparse_cuda(const SparseTensor& t, const SparseTensor& src
   auto commonDtype = at::result_type(t, src);
   TORCH_CHECK(canCast(commonDtype, r_.scalar_type()), "Can't convert result type ", commonDtype, " to output ", r_.scalar_type());
 
-  TORCH_CHECK(t.sizes().equals(src.sizes()), "add: expected 'self' and 'other' to have same size, but ", t.sizes(), " != ", src.sizes());
+  // Check if the broadcasting can be performed and if applicable return the shape of the result.
+  const std::vector<int64_t>& res_shape = infer_size(t.sizes(), src.sizes());
+  bool is_same_size = t.sizes().equals(src.sizes());
 
+  // deal with empty sparse tensors
   if (src._nnz() == 0) {
-    return copy_sparse_to_sparse_(r_, t);
+    if (is_same_size) {
+      return copy_sparse_to_sparse_(r_, t);
+    } else {
+      const SparseTensor& broadcasted_t = sparse_broadcast_to(t, res_shape);
+      return copy_sparse_to_sparse_(r_, broadcasted_t);
+    }
   }
   if (t._nnz() == 0) {
-    return mul_out_sparse_scalar(r_, src, value);
+    if (is_same_size) {
+      return mul_out_sparse_scalar(r_, src, value);
+    } else {
+      const SparseTensor& broadcasted_src = sparse_broadcast_to(src, res_shape);
+      return mul_out_sparse_scalar(r_, broadcasted_src, value);
+    }
   }
 
-  TORCH_CHECK(is_same_density(t, src), "add: expected 'self' and 'other' to have same density, but 'self' has ", t.sparse_dim(), " sparse dimensions while 'other' has ", src.sparse_dim(), " sparse dimensions");
+  // the two sparse tensors should have the same dense_dim.
+  bool is_same_dense_ndim = (t.dense_dim() == src.dense_dim());
+  TORCH_CHECK(is_same_dense_ndim, "add: expected 'self' and 'other' to have same number of dense dimensions, but 'self' has ", t.dense_dim(), " dense dimensions while 'other' has ", src.dense_dim(), " dense dimensions");
 
   // We deliberately choose to simply concat the indices and values tensors
   // rather than merging them. This removes the need to synchronously fetch nnz
   // at the end of the operation, at the cost of having a non-coalesced result.
   // This trade-off is preferable for the common use-case of gradient accumulation.
-  Tensor t_indices_ = t._indices();
-  Tensor s_indices_ = src._indices();
+  SparseTensor broadcasted_t;
+  SparseTensor broadcasted_src;
+  if (is_same_size) {
+    broadcasted_t = t;
+    broadcasted_src = src;
+  } else {
+    broadcasted_t = sparse_broadcast_to(t, res_shape);
+    broadcasted_src = sparse_broadcast_to(src, res_shape);
+  }
 
-  Tensor t_values_ = t._values().to(commonDtype);
-  Tensor s_values_ = src._values().to(commonDtype);
+  Tensor t_indices_ = broadcasted_t._indices();
+  Tensor s_indices_ = broadcasted_src._indices();
+
+  Tensor t_values_ = broadcasted_t._values().to(commonDtype);
+  Tensor s_values_ = broadcasted_src._values().to(commonDtype);
 
   AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND2(
     at::ScalarType::Half, at::ScalarType::BFloat16, commonDtype, "add_out_sparse_cuda", [&] {
@@ -422,14 +448,14 @@ SparseTensor& add_out_sparse_cuda(const SparseTensor& t, const SparseTensor& src
 
   if (r_.scalar_type() != commonDtype) {
     SparseTensor promoted = at::empty({0}, r_.options().dtype(commonDtype));
-    promoted.resize_as_(src);
+    promoted.resize_as_(broadcasted_src);
     alias_into_sparse(promoted, r_indices_, r_values_);
     // performs the addition under the common dtype.
     promoted = promoted.coalesce();
     r_values_ = promoted._values().to(r_.scalar_type());
     r_indices_ = promoted._indices();
   } else {
-    r_.resize_as_(src);
+    r_.resize_as_(broadcasted_src);
   }
 
   alias_into_sparse(r_, r_indices_, r_values_);
