@@ -1456,7 +1456,42 @@ class InstructionTranslatorBase(
                 self.push(ConstantVariable.create(None))
             self.jump(inst)
 
-    def _raise_exception_variable(self, inst):
+    def _raise_exception_variable(self, val):
+        def set_context_recursive(val, prev_idx):
+            if (ctx := val.__context__) and type(ctx) is not ConstantVariable:
+                return val
+            if len(self.exn_vt_stack) + prev_idx > 0:
+                prev = self.exn_vt_stack[prev_idx]
+                set_context_recursive(prev, prev_idx - 1)
+                val.set_context(prev)
+            return val
+
+        def break_context_reference_cycle(val):
+            # See test_exceptions::test_raise_does_not_create_context_chain_cycle
+            # Based on https://github.com/python/cpython/blob/e635bf2e49797ecb976ce45a67fce2201a25ca68/Python/errors.c#L207-L228
+            # As noted on CPython, this is O(chain length) but the context chains
+            # are usually very small
+            o = slow_o = val
+            slow_update_toggle = False  # floyd's algorithm for detecting cycle
+            while True:
+                context = o.__context__
+                if type(context) is ConstantVariable:  # context not set
+                    break
+
+                if context is val:
+                    o.set_context(ConstantVariable(None))
+                    break
+
+                o = context
+                if o is slow_o:
+                    # pre-existing cycle - all exceptions on the path were
+                    # visited and checked
+                    break
+
+                if slow_update_toggle:
+                    slow_o = slow_o.__context__  # visited all exceptions
+                slow_update_toggle = not slow_update_toggle
+
         val = self.pop()
         # User can raise exception in 2 ways
         #   1) raise exception type - raise NotImplementedError
@@ -1467,6 +1502,10 @@ class InstructionTranslatorBase(
             # Create the instance of the exception type
             # https://github.com/python/cpython/blob/3.11/Python/ceval.c#L6547-L6549
             val = val.call_function(self, [], {})  # type: ignore[arg-type]
+
+        # set Exception.__context__
+        set_context_recursive(val, len(self.exn_vt_stack) - 1)
+        break_context_reference_cycle(val)
 
         # Save the exception in a global data structure
         self.exn_vt_stack.append(val)
@@ -1480,7 +1519,10 @@ class InstructionTranslatorBase(
 
     def RAISE_VARARGS(self, inst):
         if inst.arg == 0:
-            unimplemented("re-raise")
+            # duplicate the top of the stack and re-raise it
+            assert isinstance(self.stack[-1], ExceptionVariable)
+            self.stack.append(self.stack[-1])
+            self._raise_exception_variable(inst)
         elif inst.arg == 1:
             self._raise_exception_variable(inst)
         else:
@@ -1496,6 +1538,26 @@ class InstructionTranslatorBase(
             # RERAISE is currently supported in a narrow case of `raise ... from None`
             self._raise_exception_variable(inst)
         unimplemented("RERAISE")
+
+    def WITH_EXCEPT_START(self, inst):
+        if sys.version_info >= (3, 11):
+            # At the top of the stack are 4 values:
+            #    - TOP = exc_info()
+            #    - SECOND = previous exception
+            #    - THIRD: lasti of exception in exc_info()
+            #    - FOURTH: the context.__exit__ bound method
+            #    We call FOURTH(type(TOP), TOP, GetTraceback(TOP)).
+            #    Then we push the __exit__ return value.
+            assert len(self.stack) >= 4
+            fn = self.stack[-4]
+            val = self.stack[-1]
+            assert isinstance(val, variables.ExceptionVariable)
+            typ = BuiltinVariable(val.exc_type)
+            tb = ConstantVariable(None)
+        else:
+            unimplemented("WITH_EXCEPT_START")
+
+        self.call_function(fn, [typ, val, tb], {})
 
     def exception_handler(self, raised_exception):
         if sys.version_info >= (3, 11):
@@ -2228,9 +2290,10 @@ class InstructionTranslatorBase(
         # https://peps.python.org/pep-0479/
         # https://github.com/python/cpython/pull/99006
         # https://github.com/python/cpython/commit/28187141cc34063ef857976ddbca87ba09a882c2
-        assert isinstance(inst, ExceptionVariable)
-        if inst.exc_type is StopIteration:
-            exc.raise_observed_exception(RuntimeError, self)
+        tos = self.stack[-1]
+        assert isinstance(tos, ExceptionVariable)
+        if tos.exc_type is StopIteration:
+            self.stack[-1] = ExceptionVariable(RuntimeError, ())
 
     def DICT_MERGE(self, inst):
         v = self.pop()
@@ -2518,7 +2581,7 @@ class InstructionTranslatorBase(
     def CALL_INTRINSIC_1(self, inst):
         if inst.argval == 3:
             # INTRINSIC_STOPITERATION_ERROR
-            self.STOPITERATION_ERROR(self.pop())
+            self.STOPITERATION_ERROR(inst)
         elif inst.argval == 5:
             # INTRINSIC_UNARY_POSITIVE
             self.UNARY_POSITIVE(inst)
