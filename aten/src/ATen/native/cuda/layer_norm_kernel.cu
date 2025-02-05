@@ -542,9 +542,9 @@ __global__ void GammaBetaBackwardSimpleCUDAKernel(
 
 // We use template parameters here because the compiler can then constant-propagate these
 // constants and produce faster kernel code. In particular, there is a shared memory
-// reduction loop that can be completely optimized away if block_dim_y < 32 (which it is
-// at the single callsite where this kernel is called). The very last portion of the
-// reduce is done using warp shuffles that don't need __syncthreads().
+// reduction loop that can be completely optimized away if block_dim_y < 32 (which does
+// happen at one callsite). After the shared memory reduction there is a warp shuffle phase
+// that reduces without calling __syncthreads().
 template <typename T, typename T_ACC,
           int block_dim_x, int block_dim_y>
 __global__ void GammaBetaBackwardCUDAKernel(
@@ -1232,20 +1232,45 @@ void LayerNormBackwardKernelImplInternal(
                       dbeta_data);
       C10_CUDA_KERNEL_LAUNCH_CHECK();
 #else
-      dim3 threads{16, 32};
-      int blocks = (N + threads.x - 1) / threads.x;
-      size_t shmem_sz = 2 * sizeof(T_ACC) * (threads.x + 1) * threads.y;
-      GammaBetaBackwardCUDAKernel<T, T_ACC, 16, 32>
-          <<<blocks, threads, shmem_sz, cuda_stream>>>(
-              M,
-              N,
-              dY_data,
-              X_data,
-              mean_data,
-              rstd_data,
-              dgamma_data,
-              dbeta_data);
-      C10_CUDA_KERNEL_LAUNCH_CHECK();
+      if ((M % kWarpSize == 0) && (N % kWarpSize == 0)) {
+        // This implementation relies on warp primitives and requires that M and N divide
+        // exactly to warp size.
+        dim3 threads{kWarpSize, kWarpSize};
+        int blocks = (N + threads.x - 1) / threads.x;
+
+        // If M and N divide by warp_size, we can use warp shuffles for all of the
+        // final reduction (otherwise we use warp shuffles only for the final 32 values).
+        // That requires transposing values in shared memory, so we apply a padding to
+        // reduce bank conflicts.
+
+        size_t shmem_sz = 2 * sizeof(T_ACC) * (threads.x + 1) * threads.y;
+        GammaBetaBackwardCUDAKernel<T, T_ACC, 32, 32>
+            <<<blocks, threads, shmem_sz, cuda_stream>>>(
+                M,
+                N,
+                dY_data,
+                X_data,
+                mean_data,
+                rstd_data,
+                dgamma_data,
+                dbeta_data);
+          C10_CUDA_KERNEL_LAUNCH_CHECK();
+      } else {
+        dim3 threads{16, 32};
+        int blocks = (N + threads.x - 1) / threads.x;
+        size_t shmem_sz = 2 * sizeof(T_ACC) * (threads.x + 1) * threads.y;
+        GammaBetaBackwardCUDAKernel<T, T_ACC, 16, 32>
+            <<<blocks, threads, shmem_sz, cuda_stream>>>(
+                M,
+                N,
+                dY_data,
+                X_data,
+                mean_data,
+                rstd_data,
+                dgamma_data,
+                dbeta_data);
+        C10_CUDA_KERNEL_LAUNCH_CHECK();
+      }
 #endif
     }
   }
