@@ -17,7 +17,6 @@ import io
 import itertools
 import os
 import tempfile
-import typing_extensions
 import warnings
 from collections.abc import Collection, Mapping, Sequence
 from typing import Any, Callable, Union
@@ -772,11 +771,6 @@ def check_export_model_diff(
     )
 
 
-@typing_extensions.deprecated(
-    "torch.onnx.verification.* is deprecated. Consider using torch.onnx.export(..., dynamo=True) "
-    "and use ONNXProgram to test the ONNX model",
-    category=DeprecationWarning,
-)
 def verify(
     model: _ModelType,
     input_args: _InputArgsType,
@@ -864,11 +858,6 @@ def verify(
         )
 
 
-@typing_extensions.deprecated(
-    "torch.onnx.verification.* is deprecated. Consider using torch.onnx.export(..., dynamo=True) "
-    "and use ONNXProgram to test the ONNX model",
-    category=DeprecationWarning,
-)
 def verify_aten_graph(
     graph: torch.Graph,
     input_args: tuple[Any, ...],
@@ -1159,11 +1148,6 @@ class OnnxTestCaseRepro:
         _compare_onnx_pytorch_outputs_in_np(run_outputs, expected_outs, options)
 
 
-@typing_extensions.deprecated(
-    "torch.onnx.verification.* is deprecated. Consider using torch.onnx.export(..., dynamo=True) "
-    "and use ONNXProgram to test the ONNX model",
-    category=DeprecationWarning,
-)
 @dataclasses.dataclass
 class GraphInfo:
     """GraphInfo contains validation information of a TorchScript graph and its converted ONNX graph."""
