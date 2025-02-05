@@ -57,7 +57,7 @@ def is_available() -> bool:
     return mod.is_available()
 
 
-def current_accelerator(check_available: bool = False) -> torch.device:
+def current_accelerator(check_available: bool = False) -> torch.device | None:
     r"""Return the device of the accelerator available at compilation time.
     If no accelerator were available at compilation time, returns None.
     See :ref:`accelerator<accelerators>` for details.
@@ -78,8 +78,9 @@ def current_accelerator(check_available: bool = False) -> torch.device:
 
         >>> # xdoctest:
         >>> # If an accelerator is available, sent the model to it
+        >>> model = torch.nn.Linear(2, 2)
         >>> if current_device := current_accelerator(check_available=True) is not None:
-        >>>     mod.to(current_device)
+        >>>     model.to(current_device)
     """
     if (acc := torch._C._accelerator_getAccelerator()) is not None:
         if (not check_available) or (check_available and is_available()):
