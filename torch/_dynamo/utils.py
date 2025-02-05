@@ -443,7 +443,7 @@ class CompileEventLogger:
     @staticmethod
     def increment_toplevel(
         key: str,
-        value: int,
+        value: int = 1,
         log_level: CompileEventLogLevel = CompileEventLogLevel.COMPILATION_METRIC,
     ):
         """
@@ -1189,6 +1189,7 @@ class CompilationMetrics:
     tensorify_float_failure: Optional[set[str]] = None
     guard_latency_us: Optional[float] = None
     recompile_reason: Optional[str] = None
+    num_graph_breaks: Optional[int] = None
 
     @classmethod
     def create(cls, metrics: dict[str, Any]):
