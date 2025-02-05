@@ -22,25 +22,16 @@ class SimpleCNN(nn.Module):
 
 
 try:
-    # Mock one infer
     print("Start to run CNN smoke test")
 
+    # Mock one infer
     net = SimpleCNN()
-    print("CNN model is created")
-    print(net)
-
     net_inputs = torch.rand((1, 1, 5, 5))
-    print("Input data is created")
-    print(net_inputs)
-
     outputs = net(net_inputs)
-    print("Output data is created")
     print(outputs)
 
     criterion = nn.MSELoss()
     optimizer = optim.SGD(net.parameters(), lr=0.001, momentum=0.1)
-
-    print("Start to train CNN model")
 
     # Mock one step training
     label = torch.full((1,), 1.0, dtype=torch.float)
