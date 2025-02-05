@@ -4,9 +4,10 @@ import builtins
 import functools
 import inspect
 import itertools
+import sys
 import types
 from collections.abc import Sequence
-from typing import Any, Callable, Optional, TYPE_CHECKING, TypeVar
+from typing import Any, Callable, Dict, Optional, TYPE_CHECKING, TypeVar
 from typing_extensions import Never
 from unittest.mock import patch
 
@@ -578,6 +579,7 @@ class NestedUserFunctionVariable(BaseUserFunctionVariable):
         # This is present when this function is created by
         # `functools.wrap(wrapped_fn)(this_fn)`.
         wrapped_fn=None,
+        setattr_values=None,
         **kwargs,
     ) -> None:
         super().__init__(**kwargs)
@@ -592,12 +594,16 @@ class NestedUserFunctionVariable(BaseUserFunctionVariable):
         self.annotations = annotations
         self.closure = closure
         self.wrapped_fn: Optional[VariableTracker] = wrapped_fn
+        self.setattr_values: Dict[str, VariableTracker] = setattr_values or {}
 
     def self_args(self):
         return []
 
     def get_code(self):
         return self.code.as_python_constant()
+
+    def python_type(self):
+        return types.FunctionType
 
     def get_function(self):
         if self.closure:
@@ -623,8 +629,27 @@ class NestedUserFunctionVariable(BaseUserFunctionVariable):
             func.__annotations__ = annotations
         return func
 
+    def call_setattr(
+        self,
+        tx: "InstructionTranslator",
+        name_var: VariableTracker,
+        val: VariableTracker,
+    ):
+        self.setattr_values[name_var] = val
+        return ConstantVariable(None)
+
+    def call_method(self, tx, name, args, kwargs):
+        if name == "__setattr__":
+            return self.call_setattr(tx, *args)
+        return super().call_method(tx, name, args, kwargs)
+
     def has_closure(self):
         return self.closure is not None
+
+    def const_getattr(self, tx, name):
+        if name == "__name__":
+            return self.fn_name.as_python_constant()
+        return super().const_getattr(tx, name)
 
     def has_self(self):
         return False
@@ -657,6 +682,9 @@ class NestedUserFunctionVariable(BaseUserFunctionVariable):
         return result
 
     def reconstruct(self, codegen):
+        if self.setattr_values:
+            unimplemented("NestedUserFunctionVariable with setattr_values")
+
         codegen.add_push_null(
             lambda: codegen.load_import_from(__name__, "_create_nested_fn")
         )
@@ -1173,6 +1201,47 @@ class PolyfilledFunctionVariable(VariableTracker):
 
     def as_python_constant(self):
         return self.fn
+
+
+class TracebackVariable(VariableTracker):
+    # We don't track traceback. A call to any function in this module is a no-op
+    def call_function(self, tx, args, kwargs):
+        ...
+
+
+class SysFunctionVariable(VariableTracker):
+    def __init__(self, value, **kwargs):
+        super().__init__(**kwargs)
+        self.value = value
+
+    def exc_info(self, tx):
+        if len(tx.exn_vt_stack):
+            exn = tx.exn_vt_stack[-1]
+            typ = exn.exc_type
+            tb = None
+            items = [
+                VariableTracker.build(tx, typ),
+                exn,
+                VariableTracker.build(tx, tb),
+            ]
+        else:
+            items = [
+                variables.ConstantVariable(None),
+                variables.ConstantVariable(None),
+                variables.ConstantVariable(None),
+            ]
+        return variables.TupleVariable(items)
+
+    def exception(self, tx):
+        return self.exc_info(tx).items[1]
+
+    def call_function(self, tx, args, kwargs):
+        if self.value is sys.exc_info:
+            return self.exc_info(tx)
+        elif self.value is sys.exception:
+            return self.exception(tx)
+        else:
+            unimplemented(f"sys.{self.value.__name__}")
 
 
 from torch._higher_order_ops.triton_kernel_wrap import (
