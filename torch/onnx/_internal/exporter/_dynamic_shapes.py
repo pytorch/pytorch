@@ -52,7 +52,7 @@ def from_dynamic_axes_to_dynamic_shapes(
         # NOTE: torch.export.Dim.AUTO does its best to infer the min and max values
         # from the model, but it's not guaranteed to be dynamic.
         if input_name in output_names:
-            # User specified an output name as a dynamic axis, so we skip it
+            # output names are not needed for dynamic_shapes
             continue
         if isinstance(axes, dict):
             if any(not isinstance(k, int) for k in axes.keys()):
@@ -110,7 +110,7 @@ def from_dynamic_shapes_to_dynamic_axes(
     (2) dynamic_shapes = ({0: Dim("my_custom_axis_name_1"}, {1: Dim("my_custom_axis_name_2")})
 
     these will be converted to dynamic_axes respectively:
-    (1) dynamic_axes = {"x": {0: "my_custom_axis_name_1"}, "y": {1: "my_custom_axis_name_2"}}
+    (1) dynamic_axes = {"x": [0], "y": [1]}
     (2) dynamic_axes = {"x": [0], "y": [1]}
 
     NOTE: If the model input is nested, so is the dynamic_shapes, we need to flatten the dynamic_shapes,
@@ -129,38 +129,52 @@ def from_dynamic_shapes_to_dynamic_axes(
             f"the number of graph inputs(flat) ({len(flat_dynamic_shapes)})"
         ) from exception
 
-    dynamic_axes: dict[str, list[str] | dict[int, str]] = {}
+    dynamic_axes: dict[str, list[int]] = {}
     # input names are assigned in order
     for input_name, axes in zip(input_names, flat_dynamic_shapes):
         if axes is None:
             continue
+
+        converted_axes: list[int] = []
         if isinstance(axes, dict):
-            converted_axes_dict: dict[int, str] = {}
             for axis, dim in axes.items():
                 if dim is None:
                     continue
-                # TODO(titaiwang): What if dim is DimHint?
-                # can we use int?
-                converted_axes_dict[axis] = dim.__name__
-            dynamic_axes[input_name] = converted_axes_dict
+                converted_axes.append(axis)
+            dynamic_axes[input_name] = converted_axes
         elif isinstance(axes, (list, tuple)):
-            converted_axes_list: list[str] = []
-            for dim in axes:
+            for idx, dim in enumerate(axes):
                 if dim is None:
                     continue
-                # TODO(titaiwang): What if dim is DimHint?
-                # can we use int?
-                converted_axes_list.append(dim.__name__)
-            dynamic_axes[input_name] = converted_axes_list
+                converted_axes.append(idx)
+            dynamic_axes[input_name] = converted_axes
     return dynamic_axes
+
+
+def _any_str_in_dynamic_shapes(
+    dynamic_shapes: dict[str, Any] | tuple[Any, ...] | list[Any],
+) -> bool:
+    """Check if there is any string in the dynamic_shapes."""
+    flat_dynamic_shapes, _ = _flatten_dynamic_shapes_to_axes(dynamic_shapes)
+    for axes in flat_dynamic_shapes:
+        if isinstance(axes, dict):
+            for dim in axes.values():
+                if isinstance(dim, str):
+                    return True
+        elif isinstance(axes, (list, tuple)):
+            for dim in axes:
+                if isinstance(dim, str):
+                    return True
+    return False
 
 
 def convert_str_to_export_dim(
     model,
     dynamic_shapes: dict[str, Any] | tuple[Any, ...] | list[Any] | None,
-) -> dict[str, Any] | tuple[Any, ...] | list[Any] | None:
-    if dynamic_shapes is None:
-        return None, False
+) -> tuple[dict[str, Any] | tuple[Any, ...] | list[Any] | None, bool]:
+    # 0. If there is no string in dynamic_shapes, we do not touch dynamic_shapes
+    if dynamic_shapes is None or not _any_str_in_dynamic_shapes(dynamic_shapes):
+        return dynamic_shapes, False
     # 1. Order inputs with model.forward signature to avoid arg mismatch
     #    for example: {"y": {0: Dim.AUTO}, "x": {1: Dim.AUTO}}
     #    Only happens when dynamic_shapes is a dict

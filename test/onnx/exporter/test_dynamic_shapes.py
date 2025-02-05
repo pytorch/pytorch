@@ -56,7 +56,7 @@ class SingnatureOnlyLlamaModel(torch.nn.Module):
 
 
 @common_utils.instantiate_parametrized_tests
-class TestCompat(common_utils.TestCase):
+class TestDynamicShapes(common_utils.TestCase):
     @common_utils.parametrize(
         "dynamic_shapes, input_names, expected_dynamic_axes",
         [
@@ -71,8 +71,8 @@ class TestCompat(common_utils.TestCase):
                 },
                 ["input_x", "input_b"],
                 {
-                    "input_x": {0: "customx_dim_0", 1: "customx_dim_1"},
-                    "input_b": {0: "customb_dim_0"},
+                    "input_x": [0, 1],
+                    "input_b": [0],
                 },
             ),
             (
@@ -90,8 +90,8 @@ class TestCompat(common_utils.TestCase):
                 ),
                 ["input_x", "input_b"],
                 {
-                    "input_x": {0: "customx_dim_0", 1: "customx_dim_1"},
-                    "input_b": {0: "customb_dim_0", 2: "customb_dim_2"},
+                    "input_x": [0, 1],
+                    "input_b": [0, 2],
                 },
             ),
             (
@@ -104,7 +104,7 @@ class TestCompat(common_utils.TestCase):
                 ),
                 ["x"],
                 {
-                    "x": {0: "customx_dim_0", 1: "customx_dim_1"},
+                    "x": [0, 1],
                 },
             ),
         ],
@@ -136,77 +136,50 @@ class TestCompat(common_utils.TestCase):
             )
 
     @common_utils.parametrize(
-        "dynamic_shapes, input_names, expected_dynamic_axes",
+        "dynamic_shapes",
         [
             (
                 # When dynamic_shapes of one input is None
-                (
+                {0: torch.export.Dim("dim", min=3)},
+                [
                     {0: torch.export.Dim("dim", min=3)},
-                    [
-                        {0: torch.export.Dim("dim", min=3)},
-                        {0: torch.export.Dim("dim", min=3)},
-                    ],
-                    {
-                        "a": {0: torch.export.Dim("dim", min=3)},
-                        "b": {0: torch.export.Dim("dim", min=3)},
-                    },
-                    None,
-                ),
-                ["input_x", "input_y", "input_z", "d", "e", "f"],
+                    {0: torch.export.Dim("dim", min=3)},
+                ],
                 {
-                    "input_x": {0: "dim"},
-                    "input_y": {0: "dim"},
-                    "input_z": {0: "dim"},
-                    "d": {0: "dim"},
-                    "e": {0: "dim"},
+                    "a": {0: torch.export.Dim("dim", min=3)},
+                    "b": {0: torch.export.Dim("dim", min=3)},
                 },
+                None,
             ),
             (
                 # When dynamic_shapes of axes is None
-                (
+                {0: torch.export.Dim("dim", min=3), 1: None},
+                [
                     {0: torch.export.Dim("dim", min=3), 1: None},
-                    [
-                        {0: torch.export.Dim("dim", min=3), 1: None},
-                        {0: torch.export.Dim("dim", min=3)},
-                    ],
-                    {
-                        "a": {0: torch.export.Dim("dim", min=3), 1: None},
-                        "b": {0: torch.export.Dim("dim", min=3)},
-                    },
-                    None,
-                ),
-                ["input_x", "input_y", "input_z", "d", "e", "f"],
+                    {0: torch.export.Dim("dim", min=3)},
+                ],
                 {
-                    "input_x": {0: "dim"},
-                    "input_y": {0: "dim"},
-                    "input_z": {0: "dim"},
-                    "d": {0: "dim"},
-                    "e": {0: "dim"},
+                    "a": {0: torch.export.Dim("dim", min=3), 1: None},
+                    "b": {0: torch.export.Dim("dim", min=3)},
                 },
+                None,
             ),
         ],
     )
     def test_dynamic_shapes_supports_nested_input_model_with_input_names_assigned(
-        self, input_names, dynamic_shapes, expected_dynamic_axes
+        self, dynamic_shapes
     ):
-        dim = torch.export.Dim("dim", min=3)
-        dynamic_shapes = (
-            {0: dim},
-            [{0: dim}, {0: dim}],
-            {"a": {0: dim}, "b": {0: dim}},
-            None,
-        )
         # kwargs can still be renamed as long as it's in order
         input_names = ["input_x", "input_y", "input_z", "d", "e", "f"]
         dynamic_axes = _dynamic_shapes.from_dynamic_shapes_to_dynamic_axes(
             dynamic_shapes=dynamic_shapes, input_names=input_names, exception=Exception
         )
         expected_dynamic_axes = {
-            "input_x": {0: "dim"},
-            "input_y": {0: "dim"},
-            "input_z": {0: "dim"},
-            "d": {0: "dim"},
-            "e": {0: "dim"},
+            "input_x": [0],
+            "input_y": [0],
+            "input_z": [0],
+            "d": [0],
+            "e": [0],
         }
         self.assertEqual(dynamic_axes, expected_dynamic_axes)
 
@@ -218,6 +191,7 @@ class TestCompat(common_utils.TestCase):
             torch.ones(4),
         )
 
+        # Test the model with converted dynamic_axes
         with tempfile.TemporaryDirectory() as temp:
             filename = os.path.join(temp, "model.onnx")
             torch.onnx.export(
@@ -236,9 +210,6 @@ class TestCompat(common_utils.TestCase):
             )
         )
 
-
-@common_utils.instantiate_parametrized_tests
-class TestPyTreeDynamicAxesShapes(common_utils.TestCase):
     # The test can't be parametrized because the torch.export.Dim generates objects,
     # and we need the exact same object to compare them.
     def test__unflatten_dynamic_shapes_with_inputs_tree_succeeds_on_tuple(self):
@@ -249,8 +220,10 @@ class TestPyTreeDynamicAxesShapes(common_utils.TestCase):
             "x": {0: x_dim},
             "y": {1: y_dim},
         }
-        unflatten_dynamic_shapes = _dynamic_shapes._unflatten_dynamic_shapes_with_inputs_tree(
-            inputs, dynamic_shapes
+        unflatten_dynamic_shapes = (
+            _dynamic_shapes._unflatten_dynamic_shapes_with_inputs_tree(
+                inputs, dynamic_shapes
+            )
         )
 
         expected_dynamic_shapes = (
@@ -267,8 +240,10 @@ class TestPyTreeDynamicAxesShapes(common_utils.TestCase):
             "x": {0: x_dim},
             "y": {1: y_dim},
         }
-        unflatten_dynamic_shapes = _dynamic_shapes._unflatten_dynamic_shapes_with_inputs_tree(
-            inputs, dynamic_shapes
+        unflatten_dynamic_shapes = (
+            _dynamic_shapes._unflatten_dynamic_shapes_with_inputs_tree(
+                inputs, dynamic_shapes
+            )
         )
 
         expected_dynamic_shapes = {
@@ -304,8 +279,10 @@ class TestPyTreeDynamicAxesShapes(common_utils.TestCase):
             "z0": {2: z0_dim_2},
             "z1": {1: z1_dim_1},
         }
-        unflatten_dynamic_shapes = _dynamic_shapes._unflatten_dynamic_shapes_with_inputs_tree(
-            inputs, dynamic_shapes
+        unflatten_dynamic_shapes = (
+            _dynamic_shapes._unflatten_dynamic_shapes_with_inputs_tree(
+                inputs, dynamic_shapes
+            )
         )
         expected_dynamic_shapes = (
             {0: w_dim_0},
@@ -342,8 +319,10 @@ class TestPyTreeDynamicAxesShapes(common_utils.TestCase):
             "z0": {2: z0_dim_2},
             "z1": {1: z1_dim_1},
         }
-        unflatten_dynamic_shapes = _dynamic_shapes._unflatten_dynamic_shapes_with_inputs_tree(
-            inputs, dynamic_shapes
+        unflatten_dynamic_shapes = (
+            _dynamic_shapes._unflatten_dynamic_shapes_with_inputs_tree(
+                inputs, dynamic_shapes
+            )
         )
         expected_dynamic_shapes = {
             "w": {0: w_dim_0},
