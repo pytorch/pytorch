@@ -94,6 +94,7 @@ class TestDraftExport(TestCase):
             class M(torch.nn.Module):
                 def forward(self, a, b):
                     res = torch.ops.mylib.foo(a, b)
+                    res = torch.ops.mylib.foo(res, b)
                     return res
 
             inp = (torch.ones(3, 3), torch.ones(3, 3))
@@ -229,17 +230,20 @@ class TestDraftExport(TestCase):
             def forward(self, x, y, z):
                 res = 0
                 for v in [x, y]:
-                    if v.item() > 10:
-                        res += v * v
+                    b = v.item()
+                    if b > 10:
+                        res += v * b
                     else:
-                        res += v + v
+                        res += v + b
 
                 return z * res
 
         inp = (torch.tensor(5), torch.tensor(3), torch.tensor(2))
 
         ep, report = draft_export(M(), inp)
-        self.assertTrue(len(report.failures) > 0)
+        # TODO: this should be 1, but we need to deduped the stacktraces between
+        # the two passes of AOTAutograd
+        self.assertEqual(len(report.failures), 2)
         self.assertEqual(
             report.failures[0].failure_type, FailureType.DATA_DEPENDENT_ERROR
         )
