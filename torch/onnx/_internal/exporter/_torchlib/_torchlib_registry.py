@@ -13,7 +13,7 @@ from typing import Any, Callable, Sequence, TypeVar
 import onnxscript
 
 import torch
-from torch.onnx._internal.exporter import _constants, _registration, _schemas
+from torch.onnx._internal.exporter import _constants, _registration
 
 
 _T = TypeVar("_T", bound=Callable)
@@ -43,7 +43,6 @@ def onnx_impl(
     def wrapper(
         func: _T,
     ) -> _T:
-        signature: _schemas.OpSignature | None = None
         processed_func: Any
         if no_compile:
             processed_func = func
@@ -58,21 +57,8 @@ def onnx_impl(
             else:
                 processed_func = onnxscript.TracedOnnxFunction(torchlib_opset, func)
 
-            # TODO(justinchuby): Simplify the logic and remove the private attribute
-            if isinstance(processed_func, onnxscript.OnnxFunction):
-                opset_version = processed_func.opset.version
-            else:
-                opset_version = 1
-
-            signature = _schemas.OpSignature.from_function(
-                processed_func,
-                _constants.TORCHLIB_DOMAIN,
-                getattr(processed_func, "name", func.__name__),
-                opset_version=opset_version,
-            )
-            processed_func._pt_onnx_signature = signature  # type: ignore[assignment]
-
         if not private:
+            # TODO(justinchuby): Simplify the logic and remove the private attribute
             # Skip registration if private
             if not isinstance(target, Sequence):
                 targets = (target,)
@@ -84,7 +70,7 @@ def onnx_impl(
                     _registration.OnnxDecompMeta(
                         onnx_function=processed_func,
                         fx_target=t,
-                        signature=signature,
+                        signature=None,
                         is_complex=complex,
                     )
                 )

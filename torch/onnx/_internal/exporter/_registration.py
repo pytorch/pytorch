@@ -48,6 +48,33 @@ class OnnxDecompMeta:
     is_complex: bool = False
     device: Literal["cuda", "cpu"] | str | None = None  # noqa: PYI051
 
+    def __post_init__(self) -> None:
+        if self.signature is None:
+            try:
+                if isinstance(self.onnx_function, onnxscript.OnnxFunction):
+                    signature = _schemas.OpSignature.from_function(  # type: ignore[attr-defined]
+                        self.onnx_function,
+                        self.onnx_function.function_ir.domain,
+                        self.onnx_function.name,
+                        opset_version=self.onnx_function.opset.version,
+                    )
+                else:
+                    signature = _schemas.OpSignature.from_function(
+                        self.onnx_function, "__traced", self.onnx_function.__name__
+                    )
+                self.onnx_function._pt_onnx_signature = signature  # type: ignore[attr-defined]
+            except Exception as e:
+                logger.info(
+                    "Failed to infer the signature for function '%s' because '%s'"
+                    "All nodes targeting `%s` will be dispatched to this function",
+                    self.onnx_function,
+                    e,
+                    self.fx_target,
+                )
+                # When the function is targeting an HOP, for example, it will accept
+                # functions as arguments and fail to generate an ONNX signature.
+                # In this case we set signature to None and dispatch to this function always.
+
 
 class ONNXRegistry:
     """Registry for ONNX functions.
@@ -117,39 +144,12 @@ class ONNXRegistry:
             function: The onnx-script function to register.
             is_complex: Whether the function is a function that handles complex valued inputs.
         """
-        signature: _schemas.OpSignature | None
-        try:
-            if isinstance(function, onnxscript.OnnxFunction):
-                signature = _schemas.OpSignature.from_function(  # type: ignore[attr-defined]
-                    function,
-                    function.function_ir.domain,
-                    function.name,
-                    opset_version=function.opset.version,
-                )
-            else:
-                signature = _schemas.OpSignature.from_function(
-                    function, "__custom", function.__name__
-                )
-            function._pt_onnx_signature = signature  # type: ignore[attr-defined]
-        except Exception as e:
-            logger.info(
-                "Failed to infer the signature for function '%s' because '%s'"
-                "All nodes targeting `%s` will be dispatched to this function",
-                function,
-                e,
-                target,
-            )
-            # When the function is targeting an HOP, for example, it will accept
-            # functions as arguments and fail to generate an ONNX signature.
-            # In this case we set signature to None and dispatch to this function always.
-            signature = None
-
         self._register(
             target,
             OnnxDecompMeta(
                 onnx_function=function,
                 fx_target=target,
-                signature=signature,
+                signature=None,
                 is_custom=True,
                 is_complex=is_complex,
             ),
