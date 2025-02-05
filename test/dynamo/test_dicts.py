@@ -836,6 +836,17 @@ class DictTests(torch._dynamo.test_case.TestCase):
         d["e"] = 5
         self.assertEqual(d["e"], res["e"])
 
+    def test_move_to_end(self):
+        def fn(x):
+            d = OrderedDict({"a": torch.cos(x), "b": 3, "c": 5})
+            d.move_to_end("a")
+            return d
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        x = torch.randn(4)
+        self.assertEqual(["b", "c", "a"], list(opt_fn(x).keys()))
+        self.assertEqual(fn(x), opt_fn(x))
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
