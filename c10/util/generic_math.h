@@ -69,4 +69,34 @@ inline C10_HOST_DEVICE scalar_t div_floor_integer(scalar_t a, scalar_t b) {
   return a / b;
 }
 
+template <
+    typename scalar_t,
+    std::enable_if_t<std::is_floating_point_v<scalar_t>, int> = 0>
+inline C10_HOST_DEVICE scalar_t div_mod(scalar_t a, scalar_t b)
+    __ubsan_ignore_float_divide_by_zero__ {
+  if (C10_UNLIKELY(b == 0)) {
+    // Divide by zero: return standard IEEE result
+    return std::fmod(a, b);
+  }
+
+  auto mod = std::fmod(a, b);
+  if (mod == 0) {
+    mod = C10_COMPAT_COPYSIGN(scalar_t(0), b);
+  } else if ((b < 0) != (mod < 0)) {
+    mod += b;
+  }
+  return mod;
+}
+
+template <
+    typename scalar_t,
+    std::enable_if_t<std::is_integral_v<scalar_t>, int> = 0>
+inline C10_HOST_DEVICE scalar_t div_mod(scalar_t a, scalar_t b) {
+  auto mod = a % b;
+  if ((b < 0) != (mod < 0)) {
+    mod += b;
+  }
+  return mod;
+}
+
 } // namespace c10
