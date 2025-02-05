@@ -1564,6 +1564,24 @@ class PythonWrapperCodegen(CodeGen):
                 ]
             )
 
+    def _generate_kernel_definition(
+        self,
+        kernel_name: str,
+        kernel_body: str,
+        metadata: Optional[str] = None,
+    ):
+        if config.triton.autotune_at_compile_time:
+            # Skip inserting comments for the autotune block as they may contain cpp style comments
+            code = f"\n\n{kernel_name} = {kernel_body}"
+            self.kernel_autotune_defs.splice(body)
+            if V.graph.cpp_wrapper:
+                # For cpp wrapper, no need to continue codegen for the main body
+                return code
+
+        metadata_comment = f"{metadata}\n" if metadata else ""
+        code = f"\n\n{metadata_comment}{kernel_name} = {kernel_body}"
+        return code
+
     def define_kernel(
         self,
         kernel_name: str,
@@ -1571,16 +1589,8 @@ class PythonWrapperCodegen(CodeGen):
         metadata: Optional[str] = None,
         gpu=True,
     ):
-        if config.triton.autotune_at_compile_time:
-            # Skip inserting comments for the autotune block as they may contain cpp style comments
-            body = f"\n\n{kernel_name} = {kernel_body}"
-            self.kernel_autotune_defs.splice(body)
-            if V.graph.cpp_wrapper:
-                # For cpp wrapper, no need to continue codegen for the main body
-                return
-        metadata_comment = f"{metadata}\n" if metadata else ""
-        body = f"\n\n{metadata_comment}{kernel_name} = {kernel_body}"
-        self.header.splice(body)
+        code = self._generate_kernel_definition(kernel_name, kernel_body, metadata)
+        self.header.splice(code)
 
     def define_subgraph_launcher_fn(self, fn_code: str):
         self.subgraph_definitions.splice(fn_code)

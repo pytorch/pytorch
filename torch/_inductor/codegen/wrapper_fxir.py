@@ -1,6 +1,4 @@
 import dataclasses
-import importlib
-import tempfile
 import random
 import textwrap
 import types
@@ -17,6 +15,7 @@ from torch._library.triton import wrap_triton
 aten = torch.ops.aten
 
 from .. import config, ir
+from torch._inductor.codecache import PyCodeCache
 from torch._inductor.select_algorithm import extern_kernels
 from torch._inductor.virtualized import V
 from torch._inductor.runtime.triton_heuristics import grid, CachingAutotuner
@@ -114,23 +113,12 @@ class WrapperFxCodegen(PythonWrapperCodegen):
     ):
         return WrapperFxCodegen()
 
-    def _import_kernel(self, kernel_name: str, code: str) -> types.ModuleType:
+    def _import_kernel(self, code: str) -> types.ModuleType:
         """
         Imports a kernel as a python module.
         """
-        #TODO Use PyCodeCache. That way we can cache identical kernels.
-        with tempfile.NamedTemporaryFile(suffix=".py") as fp:
-            # Write a module containing the kernel and any necessary imports.
-            with open(fp.name, 'w') as f:
-                f.write(self.imports.getvalue())
-                f.write(self.header.getvalue())
-                f.write(code)
-
-            # Import the module to retrieve the kernel.
-            spec = importlib.util.spec_from_file_location(kernel_name, f.name)
-            mod = importlib.util.module_from_spec(spec)
-            spec.loader.exec_module(mod)
-
+        module_code = self.imports.getvalue() + self.header.getvalue() + code
+        mod = PyCodeCache.load(module_code)
         return mod
 
     def define_kernel(
@@ -468,13 +456,10 @@ class WrapperFxCodegen(PythonWrapperCodegen):
         assert isinstance(line, KernelDefinitionLine)
 
         # Generate code for the kernel.
-        #TODO refactor into parent class?
-        have_metadata = line.metadata and not config.triton.autotune_at_compile_time
-        metadata_comment = f"{line.metadata}\n" if have_metadata else ""
-        kernel_code = f"\n\n{metadata_comment}{line.kernel_name} = {line.kernel_body}"
+        kernel_code = super()._generate_kernel_definition(line.kernel_name, line.kernel_body, line.metadata)
 
-        # Import the code and store the kernel.
-        mod = self._import_kernel(line.kernel_name, kernel_code)
+        # Import the module and store the JIT kernel.
+        mod = self._import_kernel(kernel_code)
         kernel = getattr(mod, line.kernel_name)
         if isinstance(kernel, TritonFuture):
             kernel = kernel.kernel
