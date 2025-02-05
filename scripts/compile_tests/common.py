@@ -378,7 +378,7 @@ def find_control_passed_missing_in_test(
 
     sd = {k: v for k, v in sorted(d.items(), key=lambda item: item[1])}
     for k, v in sd.items():
-        print(f"PYTORCH_TEST_WITH_SUBCLASSES=1 python test/{k}")
+        print(f"{v:4} PYTORCH_TEST_WITH_SUBCLASSES=1 python test/{k} -v")
 
 
 def compute_pass_rate_aot_eager_subclasses(e_dir, dw_dir, ae_dir, sc_dir):

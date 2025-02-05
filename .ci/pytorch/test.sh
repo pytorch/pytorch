@@ -343,7 +343,8 @@ test_aot_eager_wrapped_shard() {
     --exclude-aot-dispatch-tests \
     --shard "$1" "$NUM_TEST_SHARDS" \
     --verbose \
-    --upload-artifacts-while-running
+    --upload-artifacts-while-running \
+    --continue-through-error
   assert_git_not_dirty
 }
 
@@ -361,7 +362,8 @@ test_subclasses_wrapped_shard() {
     --exclude-aot-dispatch-tests \
     --shard "$1" "$NUM_TEST_SHARDS" \
     --verbose \
-    --upload-artifacts-while-running
+    --upload-artifacts-while-running \
+    --continue-through-error
   assert_git_not_dirty
 }
 
