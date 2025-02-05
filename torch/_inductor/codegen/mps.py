@@ -255,8 +255,8 @@ class MetalOverrides(OpOverrides):
         return f"c10::metal::log_gamma({x})"
 
     @staticmethod
-    def polygamma(n: CSEVariable, x: CSEVariable) -> str:
-        return f"c10::metal::polygamma({n}, {x})"
+    def polygamma(x: CSEVariable, y: CSEVariable) -> str:
+        return f"c10::metal::polygamma({x}, {y})"
 
     @staticmethod
     def digamma(x: CSEVariable) -> str:
@@ -355,6 +355,13 @@ class MetalOverrides(OpOverrides):
         cast_b = f"static_cast<decltype({a}+{b})>({b})"
         return f"metal::pow({cast_a}, {cast_b})"
 
+    @staticmethod
+    def zeta(a: CSEVariable, b: CSEVariable) -> str:
+        return f"c10::metal::zeta({a}, {b})"
+
+
+MetalOverrides._initialize_pointwise_overrides("mps")
+
 
 class MetalKernel(SIMDKernel):
     overrides = MetalOverrides  # type: ignore[assignment]
@@ -436,7 +443,7 @@ class MetalKernel(SIMDKernel):
                 f"c10::metal::threadgroup_{reduction_type}({acc_buf}, {reduction_dim.numel})",
                 dtype=DTYPE_TO_COMPUTATION_DTYPE[dtype],
             )
-        if reduction_type in ["max", "min"]:
+        if reduction_type in ["max", "min", "argmax", "argmin"]:
             acc_buf = self._new_accvar(src_dtype, reduction_dim.numel)
             self.body.splice(f"{acc_buf}[{reduction_dim.name}] = {value};")
             return self.cse.generate(
