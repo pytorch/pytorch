@@ -51,7 +51,6 @@ from ..virtualized import NullKernelHandler, ops, OpsValue, V
 from .common import (
     BackendFeature,
     BracesBuffer,
-    CppWrapperKernelArgs,
     CSE,
     CSEVariable,
     DataTypePropagation,
@@ -213,6 +212,8 @@ def reduction_combine(
     next_value,
     index: Optional[sympy.Symbol] = None,
     src_dtype=None,
+    weight_recps=None,
+    masked_weight_recps=None,
 ):
     is_bool = src_dtype == torch.bool
     if reduction_type == "sum":
@@ -227,7 +228,10 @@ def reduction_combine(
     if reduction_type in ("min", "max"):
         return f"{reduction_type}_propagate_nan({var}, {next_value})"
     if reduction_type == "welford_reduce":
-        return f"welford_combine({var}, {next_value})"
+        if weight_recps and masked_weight_recps:
+            return f"welford_combine({var}, {next_value}, &{weight_recps}, &{masked_weight_recps})"
+        else:
+            return f"welford_combine({var}, {next_value})"
     if reduction_type == "welford_combine":
         if isinstance(next_value, tuple):
             mean, m2, weight = next_value
@@ -1141,9 +1145,7 @@ class CppVecOverrides(CppOverrides):
                 else:
                     # fallback to scalar ops
                     scalar_ops = super(CppVecOverrides, self)
-                    scalar_func = getattr(
-                        scalar_ops, func.__name__, scalar_ops.__getattr__(func.__name__)  # type: ignore[attr-defined]
-                    )
+                    scalar_func = getattr(scalar_ops, func.__name__)
                     assert scalar_func is not None
                     return scalar_func(*args, **kwargs)
 
@@ -1647,8 +1649,11 @@ class CppVecOverrides(CppOverrides):
                     assert isinstance(other_vec_var, CppCSEVariable), other_vec_var
                     body_vec_var.dtype = dtype
                     other_vec_var.dtype = dtype
+                    overrides: type[
+                        Union[CppOverrides, CppVecOverrides]
+                    ] = V.kernel.overrides  # type: ignore[has-type]
                     code.writeline(
-                        f"return {V.kernel.overrides.where(new_mask, body_vec_var, other_vec_var)};"
+                        f"return {overrides.where(new_mask, body_vec_var, other_vec_var)};"
                     )
             code.writeline("()")
             csevar = V.kernel.cse.generate(
@@ -1749,7 +1754,7 @@ class CppVecOverrides(CppOverrides):
         return mantissa, exponent
 
     @classmethod
-    def scalarize(cls, scalar_func):
+    def _scalarize(cls, scalar_func):
         def inner(*args, **kwargs):
             assert not kwargs
             kernel = V.kernel
@@ -1811,11 +1816,10 @@ class CppVecOverrides(CppOverrides):
 
     @classmethod
     def _initialize_scalarize(cls):
+        vec_vars = vars(CppVecOverrides)
         for name, method in vars(CppOverrides).items():
-            if getattr(method, "__class__", None) == staticmethod and name not in vars(
-                CppVecOverrides
-            ):
-                func = cls.scalarize(method.__func__)
+            if isinstance(method, staticmethod) and name not in vec_vars:
+                func = cls._scalarize(method.__func__)
                 func.__name__ = name
                 setattr(cls, name, staticmethod(func))
 
@@ -2653,7 +2657,7 @@ class CppVecKernel(CppKernel):
             return super().load(name, index)
         elif stride == 1:
             # load contiguously
-            line = self._get_vec_load_line(var, index, dtype, self._load_mask)
+            line = self._get_vec_load_line(var, index, dtype, self._load_mask)  # type: ignore[arg-type]
             csevar = self.cse.generate(self.loads, line)  # type: ignore[assignment]
         else:
             csevar = self._load_or_store_non_contiguous(var, index, dtype)  # type: ignore[assignment]
@@ -3019,9 +3023,14 @@ class CppVecKernel(CppKernel):
             tmpvar = acc_vec
             if is_welford_reduction(reduction_type):
                 masked_tmpvar = f"masked_{tmpvar}"
-                self.reduction_suffix.writeline(
-                    f"{tmpvar} = {reduction_combine(reduction_type, tmpvar, masked_tmpvar)};"
+                reduction_combine_line = reduction_combine(
+                    reduction_type,
+                    tmpvar,
+                    masked_tmpvar,
+                    weight_recps=self.weight_recps_val,
+                    masked_weight_recps=self.masked_weight_recps_val,
                 )
+                self.reduction_suffix.writeline(f"{tmpvar} = {reduction_combine_line};")
 
         result = reduction_project(reduction_type, tmpvar)
         self.reduction_cse.reduction_cache[reduction_key] = result
@@ -4356,7 +4365,7 @@ class CppScheduling(BaseScheduling):
     # https://github.com/python/cpython/commit/a285af7e626d1b81cf09f8b2bf7656f100bc1237
     # We set a conservative threshold here.
     MAX_FUSED_KERNEL_ARGS_NUM = 500
-    backend_features = dict.fromkeys(
+    backend_features = OrderedSet(
         [
             BackendFeature.INPLACE_BUFFERS,
             BackendFeature.REDUCE_TO_SINGLE_ELEMENT,
@@ -4364,12 +4373,11 @@ class CppScheduling(BaseScheduling):
     )
 
     @classmethod
-    def get_backend_features(cls, device: torch.device):
+    def get_backend_features(cls, device: torch.device) -> OrderedSet[BackendFeature]:
         return cls.backend_features
 
     def __init__(self, scheduler):
-        super().__init__()
-        self.scheduler = scheduler
+        super().__init__(scheduler)
         if scheduler:
             self.reset_kernel_group()
         self._ready_to_flush = False
@@ -5072,7 +5080,7 @@ class CppScheduling(BaseScheduling):
 
         kernel.call_kernel(kernel_name, ctb)
         V.graph.removed_buffers |= kernel.removed_buffers
-        self.scheduler.free_buffers()
+        self.free_buffers_in_scheduler()
 
     def _get_scheduled_num_args(self):
         return self.kernel_group.get_num_args()
@@ -5192,9 +5200,7 @@ class KernelGroup:
 
 
 class CppWrapperKernelGroup(KernelGroup):
-    def __init__(self):
-        super().__init__()
-        self.args = CppWrapperKernelArgs()
+    pass
 
 
 class WorkSharing:

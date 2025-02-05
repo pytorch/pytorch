@@ -97,10 +97,10 @@ struct WeightRecp {
 
 template <typename T>
 Welford<T> welford_combine(const Welford<T>& a, const Welford<T>& b, bool use_index=false) {
-  if (a.index == 0) {
+  if (a.index == 0 && a.chunk_index == 0) {
     return b;
   }
-  if (b.index == 0) {
+  if (b.index == 0 && b.chunk_index == 0) {
     return a;
   }
   auto delta = b.mean - a.mean;
@@ -122,6 +122,23 @@ Welford<T> welford_combine(const Welford<T>& a, const Welford<T>& b, bool use_in
     new_chunk_index,
   };
   return result;
+}
+
+template <typename T>
+Welford<T> welford_combine(Welford<T>& a, Welford<T>& b, WeightRecp<T>* w1, WeightRecp<T>* w2, int num_threads=1) {
+  for (const auto n : c10::irange(num_threads)) {
+    for (const auto i : c10::irange(w1->depth)) {
+      a = welford_combine(a, w1->welford_stk[i]);
+    }
+    w1++;
+  }
+  for (const auto n : c10::irange(num_threads)) {
+    for (const auto i : c10::irange(w2->depth)) {
+      b = welford_combine(b, w2->welford_stk[i]);
+    }
+    w2++;
+  }
+  return welford_combine(a, b);
 }
 
 template <typename T>
