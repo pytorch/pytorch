@@ -51,7 +51,6 @@ from ..virtualized import NullKernelHandler, ops, OpsValue, V
 from .common import (
     BackendFeature,
     BracesBuffer,
-    CppWrapperKernelArgs,
     CSE,
     CSEVariable,
     DataTypePropagation,
@@ -2647,7 +2646,7 @@ class CppVecKernel(CppKernel):
             return super().load(name, index)
         elif stride == 1:
             # load contiguously
-            line = self._get_vec_load_line(var, index, dtype, self._load_mask)
+            line = self._get_vec_load_line(var, index, dtype, self._load_mask)  # type: ignore[arg-type]
             csevar = self.cse.generate(self.loads, line)  # type: ignore[assignment]
         else:
             csevar = self._load_or_store_non_contiguous(var, index, dtype)  # type: ignore[assignment]
@@ -5074,9 +5073,7 @@ class KernelGroup:
 
 
 class CppWrapperKernelGroup(KernelGroup):
-    def __init__(self):
-        super().__init__()
-        self.args = CppWrapperKernelArgs()
+    pass
 
 
 class WorkSharing:

@@ -1342,16 +1342,10 @@ class CommonTemplate:
                 device=self.device,
             )
             _, code = run_and_get_code(fn, x, y)
-            # cpp_wrapper falls back to Python function calls with complex inputs, so
-            # there are still two calls to aten.view when it's enabled.
             code = " ".join(code)
-            if config.cpp_wrapper:
-                self.assertEqual(code.count("view_dtype"), 1)
-                # The additional 2 counts here come from error messages containing this
-                # string.
-                self.assertEqual(code.count("aten.view"), 4)
-            else:
-                self.assertEqual(code.count("aten.view"), 3)
+            self.assertEqual(
+                code.count("view_dtype" if config.cpp_wrapper else "aten.view"), 3
+            )
 
     def test_add_complex5(self):
         def fn(a, b, alpha):
@@ -2818,13 +2812,19 @@ class CommonTemplate:
         def fn(a, b):
             return (torch.exp(a), torch.exp(a + b))
 
-        self.common(fn, (torch.randn(8, 8), torch.randn(8, 8)))
+        # exp(a+b) could be significantly different than exp(a.half()+b.half())
+        self.common(
+            fn, (torch.randn(8, 8), torch.randn(8, 8)), reference_in_float=False
+        )
 
     def test_exp2(self):
         def fn(a, b):
             return (torch.exp2(a), torch.exp2(a + b), torch.pow(2, -torch.abs(a - b)))
 
-        self.common(fn, (torch.randn(8, 8), torch.randn(8, 8)))
+        # exp(a+b) could be significantly different than exp(a.half()+b.half())
+        self.common(
+            fn, (torch.randn(8, 8), torch.randn(8, 8)), reference_in_float=False
+        )
 
     @skipIfXpu(msg="logaddexp_xpu not implemented for ComplexFloat")
     @skipCUDAIf(True, "Not implemented for CUDA")
