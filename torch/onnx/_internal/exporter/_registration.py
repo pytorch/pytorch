@@ -62,8 +62,6 @@ class OnnxDecompMeta:
                     signature = _schemas.OpSignature.from_function(
                         self.onnx_function, "__traced", self.onnx_function.__name__
                     )
-                self.signature = signature
-                self.onnx_function._pt_onnx_signature = signature  # type: ignore[attr-defined]
             except Exception as e:
                 logger.info(
                     "Failed to infer the signature for function '%s' because '%s'"
@@ -75,7 +73,9 @@ class OnnxDecompMeta:
                 # When the function is targeting an HOP, for example, it will accept
                 # functions as arguments and fail to generate an ONNX signature.
                 # In this case we set signature to None and dispatch to this function always.
-
+            else:
+                self.signature = signature
+                self.onnx_function._pt_onnx_signature = signature  # type: ignore[attr-defined]
 
 class ONNXRegistry:
     """Registry for ONNX functions.
