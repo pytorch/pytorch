@@ -3144,9 +3144,7 @@ class TestCase(expecttest.TestCase):
                     if TEST_WITH_TORCHINDUCTOR:
                         from .dynamo_test_failures import FIXME_inductor_non_strict
                         strict_default = filename not in FIXME_inductor_non_strict
-
-                        from .dynamo_test_failures import FIXME_inductor_dont_reset_dynamo
-                        should_reset_dynamo = filename not in FIXME_inductor_dont_reset_dynamo
+                        should_reset_dynamo = True
                     else:
                         strict_default = True
             # inspect.getfile can fail with these
