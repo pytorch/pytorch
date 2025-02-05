@@ -9,7 +9,7 @@ import re
 from abc import ABC, abstractmethod
 from collections import Counter, defaultdict
 from enum import Enum
-from typing import Any, Callable, NamedTuple, Optional, TYPE_CHECKING, Union
+from typing import Any, Callable, Dict, NamedTuple, Optional, TYPE_CHECKING, Union
 
 import torch
 import torch.distributed as dist
@@ -1025,7 +1025,7 @@ def _validate_schedule(
     pp_group_size: int,
     num_stages: int,
     num_microbatches: int,
-):
+) -> Dict[int, int]:
     assert (
         len(actions) == pp_group_size
     ), f"Schedule has incorrect number of ranks - expected {pp_group_size}, actual {len(actions)}"
@@ -1043,6 +1043,7 @@ def _validate_schedule(
         }
         for stage_id in range(num_stages)
     }
+    stage_index_to_rank_mapping = {}
     for rank in actions:
         for action in actions[rank]:
             if action is None:
@@ -1070,6 +1071,13 @@ def _validate_schedule(
                     mb_id in stage_actions[s_id][I]
                 ), f"Running Backward Weight for stage {s_id}, microbatch {mb_id} without first running Backward Input"
                 stage_actions[s_id][W].add(mb_id)
+            if s_id not in stage_index_to_rank_mapping:
+                stage_index_to_rank_mapping[s_id] = rank
+            else:
+                existing_rank = stage_index_to_rank_mapping[s_id]
+                assert (
+                    rank == existing_rank
+                ), f"Stage {s_id} is assigned to both rank {rank} and rank {existing_rank}"
 
     for s_id in stage_actions:
         f_mb = len(stage_actions[s_id][F])
@@ -1085,6 +1093,7 @@ def _validate_schedule(
             b_mb + (i_mb + w_mb) // 2 == num_microbatches
         ), f"Invalid backward microbatches for stage {s_id}: expected {num_microbatches} total backwards, \
             but got B={b_mb}, I={i_mb}, W={w_mb}"
+    return stage_index_to_rank_mapping
 
 
 class PipelineScheduleMulti(_PipelineSchedule):
@@ -1105,7 +1114,6 @@ class PipelineScheduleMulti(_PipelineSchedule):
         args_chunk_spec: Optional[tuple[TensorChunkSpec, ...]] = None,
         kwargs_chunk_spec: Optional[dict[str, TensorChunkSpec]] = None,
         output_merge_spec: Optional[Union[dict[str, Any], tuple[Any]]] = None,
-        stage_index_to_group_rank: Optional[dict[int, int]] = None,
         use_full_backward: Optional[bool] = None,
         scale_grads: bool = True,
     ):
@@ -1124,12 +1132,9 @@ class PipelineScheduleMulti(_PipelineSchedule):
         self.pp_group_size = stages[0].group_size
         self.rank = stages[0].group_rank
         # Set the pipeline stage states
-        if stage_index_to_group_rank is None:
-            self.stage_index_to_group_rank = generate_stage_to_rank_mapping(
-                self.pp_group_size, self._num_stages
-            )
-        else:
-            self.stage_index_to_group_rank = stage_index_to_group_rank
+        self.stage_index_to_group_rank = generate_stage_to_rank_mapping(
+            self.pp_group_size, self._num_stages
+        )
         for stage in self._stages:
             stage.stage_index_to_group_rank = self.stage_index_to_group_rank
 
@@ -1169,6 +1174,21 @@ class PipelineScheduleMulti(_PipelineSchedule):
                 stage._prepare_backward_infra(self._n_microbatches)
         self._stages_initialized = True
 
+    def _validate_and_set_stage_mapping(
+        self, actions: dict[int, list[Optional[_Action]]]
+    ) -> None:
+        """
+        Allocates the stage index to rank mapping which is needed for communication
+        """
+        self.stage_index_to_group_rank = _validate_schedule(
+            actions,
+            self.pp_group_size,
+            self._num_stages,
+            self._n_microbatches,
+        )
+        for stage in self._stages:
+            stage.stage_index_to_group_rank = self.stage_index_to_group_rank
+
     def _dump_csv(self, filename):
         """Dump a CSV representation of the schedule into a file with the provided filename."""
         with open(filename, "w", newline="") as csvfile:
@@ -1180,19 +1200,17 @@ class PipelineScheduleMulti(_PipelineSchedule):
         """Load a CSV representation of the schedule from a file with the provided filename.
         This API will most likely get renamed/refactored so is marked as internal for now.
 
-        format must be "compute_only" for PipelineScheduleMulti
+        format must be "compute_only" for PipelineScheduleMulti.
         """
         assert format == "compute_only"
         with open(filename, newline="") as csvfile:
             reader = csv.reader(csvfile)
             for rank, row in enumerate(reader):
                 self.pipeline_order[rank] = [_Action.from_str(s) for s in row]
-        _validate_schedule(
-            self.pipeline_order,
-            self.pp_group_size,
-            self._num_stages,
-            self._n_microbatches,
-        )
+
+        # Validates the order of the pipeline actions and infers the stage_to_rank_mapping.
+        # This will overwrite the default stage_to_rank_mapping created in the constructor
+        self._validate_and_set_stage_mapping(self.pipeline_order)
 
     def step(self, *args, target=None, losses: Optional[list] = None, **kwargs):
         """
@@ -1434,9 +1452,9 @@ class _PipelineScheduleRuntime(PipelineScheduleMulti):
         Given an in-memory representation for a simple compute-only schedule, lower it to a complex schedule including
         communication actions.  Stores the schedule in self, and must be called before running step_mo()
         """
-        assert (
-            self.stage_index_to_group_rank is not None
-        ), "stage_index_to_group_rank is required for PipelineScheduleRuntime"
+        # validate the provided actions are valid and overrides the default stage_index_to_group_rank
+        super()._validate_and_set_stage_mapping(actions)
+
         self.pipeline_order_with_comms: dict[int, list[_Action]] = {}
         if format == "compute_comms":
             for rank in actions:
@@ -2283,8 +2301,6 @@ class ScheduleZBVZeroBubble(PipelineScheduleMulti):
             output_merge_spec=output_merge_spec,
             scale_grads=scale_grads,
         )
-
-        # override the default loop style created in multistage schedule
         self.stage_index_to_group_rank = generate_stage_to_rank_mapping(
             self.pp_group_size, self._num_stages, style="v"
         )
