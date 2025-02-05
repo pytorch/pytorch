@@ -64,7 +64,6 @@ from typing import Any, Callable, cast, Generic, TYPE_CHECKING, TypeVar, Union
 from torch.utils._ordered_set import OrderedSet
 
 from .ops_handler import (  # noqa: F401
-    DefaultHandler,
     KernelFormatterHandler,
     MockHandler,
     OpsHandler,
@@ -275,15 +274,18 @@ class OpsValue:
         return ops.bitwise_left_shift(self, n)
 
 
-class OpsWrapper(DefaultHandler):
+class OpsWrapper:
     """This wraps any returned IR values into an `OpsValue` instance, so that we
     can overload the magic methods for writing mathematical expressions fluently.
     """
 
-    def _default(self, name: str, args: tuple[Any, ...], kwargs: dict[str, Any]) -> Any:
-        new_args = [OpsWrapper._unwrap(a) for a in args]
-        new_kwargs = {k: OpsWrapper._unwrap(v) for k, v in kwargs.items()}
-        return OpsWrapper._wrap(getattr(_ops, name)(*new_args, **new_kwargs))
+    def __getattr__(self, name):
+        def inner(*args, **kwargs):
+            new_args = [OpsWrapper._unwrap(a) for a in args]
+            new_kwargs = {k: OpsWrapper._unwrap(v) for k, v in kwargs.items()}
+            return OpsWrapper._wrap(getattr(_ops, name)(*new_args, **new_kwargs))
+
+        return inner
 
     @staticmethod
     def _unwrap(x):
@@ -306,7 +308,9 @@ class OpsWrapper(DefaultHandler):
         return _ops.indirect_indexing(index, size, check, wrap_neg)
 
 
-ops: OpsHandler[Any] = OpsWrapper()
+# we lie about the type of ops so the rest of the codebase typecheck properly
+# DefaultHandler implements the OpsHandler protocol via metaprogramming
+ops = cast(OpsHandler[Any], OpsWrapper())
 
 
 class _V:
@@ -314,10 +318,8 @@ class _V:
     KernelFormatterHandler = KernelFormatterHandler
     WrapperHandler = WrapperHandler
 
-    set_ops_handler: Callable[
-        [OpsHandler[Any]], AbstractContextManager[None]
-    ] = _ops._set_handler
-    get_ops_handler: Callable[[], OpsHandler[Any]] = _ops._get_handler
+    set_ops_handler: Callable[[Any], Any] = _ops._set_handler
+    get_ops_handler: Callable[[], Any] = _ops._get_handler
     set_graph_handler: Callable[[GraphLowering], Any] = _graph._set_handler
     set_real_inputs: Callable[[Any], Any] = _real_inputs._set_handler
     get_real_inputs: Callable[[], Any] = _real_inputs._get_handler
