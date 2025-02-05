@@ -7,13 +7,13 @@ Read more about them on https://github.com/pytorch/pytorch/blob/ce4a097bf769d753
 
 ```bash
 # All
-python -m pytest ops_test.py
+python -m pytest test_ops.py
 
 # To run tests on a specific operator (e.g. torch.ceil):
-python -m pytest ops_test.py -k ceil
+python -m pytest test_ops.py -k ceil
 
 # To run tests on a nn operator (e.g. nn.functional.scaled_dot_product_attention):
-python -m pytest ops_test.py -k nn_functional_scaled_dot_product_attention
+python -m pytest test_ops.py -k nn_functional_scaled_dot_product_attention
 ```
 
 ### Environment variables
@@ -23,7 +23,7 @@ in onnxruntime by running the inference sessions in a separate process.
 2. Set `CREATE_REPRODUCTION_REPORT=1` to create markdown files for reproduction of errors. E.g.
 
     ```bash
-    CREATE_REPRODUCTION_REPORT=1 python -m pytest test/onnx/torchlib/ops_test.py -k div_mode_int
+    CREATE_REPRODUCTION_REPORT=1 python -m pytest test/onnx/torchlib/test_ops.py -k div_mode_int
     ```
 
 ## How to add a new operator test

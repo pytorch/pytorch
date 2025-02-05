@@ -3,15 +3,15 @@
 
 Usage:
 
-    pytest ops_test.py
+    pytest test_ops.py
 
     To run tests on a specific operator (e.g. torch.ceil):
 
-    pytest ops_test.py -k ceil
+    pytest test_ops.py -k ceil
 
     To run tests on a nn operator (e.g. nn.functional.scaled_dot_product_attention):
 
-    pytest ops_test.py -k nn_functional_scaled_dot_product_attention
+    pytest test_ops.py -k nn_functional_scaled_dot_product_attention
 
 ## Environment variables
 

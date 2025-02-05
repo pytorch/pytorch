@@ -13,8 +13,7 @@ from typing import Any, Callable, Sequence, TypeVar
 import onnxscript
 
 import torch
-from torch.onnx._internal.exporter import _registration, _schemas
-from torch.onnx._internal.exporter._torchlib import _constants
+from torch.onnx._internal.exporter import _constants, _registration, _schemas
 
 
 _T = TypeVar("_T", bound=Callable)
@@ -49,7 +48,9 @@ def onnx_impl(
         if no_compile:
             processed_func = func
         else:
-            custom_opset = onnxscript.values.Opset(domain=_constants.DOMAIN, version=1)
+            custom_opset = onnxscript.values.Opset(
+                domain=_constants.TORCHLIB_DOMAIN, version=1
+            )
 
             if not trace_only:
                 # Compile the function
@@ -65,7 +66,7 @@ def onnx_impl(
 
             signature = _schemas.OpSignature.from_function(
                 processed_func,
-                _constants.DOMAIN,
+                _constants.TORCHLIB_DOMAIN,
                 getattr(processed_func, "name", func.__name__),
                 opset_version=opset_version,
             )

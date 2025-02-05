@@ -27,7 +27,7 @@ The output of ONNX Runtime does not match that of PyTorch when executing test
 To recreate this report, use
 
 ```bash
-CREATE_REPRODUCTION_REPORT=1 python -m pytest onnxscript/tests/function_libs/torch_lib/ops_test.py -k {short_test_name}
+CREATE_REPRODUCTION_REPORT=1 python -m pytest onnxscript/tests/function_libs/torch_lib/test_ops.py -k {short_test_name}
 ```
 
 ### ONNX Model
