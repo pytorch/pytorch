@@ -954,15 +954,16 @@ class CompileTest(TestCase):
         (
             FileCheck()
             .check("buf0 = empty")
-            .check("buf7 = empty")
+            .check("buf1 = buf0")
+            .check("buf8 = empty")
             # Expect in-place with inductor allocated buf
-            .check("torch.ops._c10d_functional.broadcast_.default(buf0")
-            .check("torch.ops._c10d_functional.wait_tensor.default(buf0")
+            .check("torch.ops._c10d_functional.broadcast_.default(buf1")
+            .check("torch.ops._c10d_functional.wait_tensor.default(buf1")
             # Expect no in-place with graph input (buf5 is a clone)
-            .check("torch.ops._c10d_functional.broadcast_.default(buf7")
-            .check("torch.ops._c10d_functional.wait_tensor.default(buf7")
+            .check("torch.ops._c10d_functional.broadcast_.default(buf8")
+            .check("torch.ops._c10d_functional.wait_tensor.default(buf8")
             # Expect no extra copy on return
-            .check("return (buf0, buf7, )")
+            .check("return (buf1, buf8, )")
             .run(code)
         )
 
