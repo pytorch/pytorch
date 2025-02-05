@@ -6287,6 +6287,7 @@ def forward(self, x):
     select_copy = torch.ops.aten.select_copy.int(movedim, 0, 0)
     add = torch.ops.aten.add.Tensor(select_copy, select_copy);  select_copy = add = None
     select_copy_1 = torch.ops.aten.select_copy.int(movedim, 0, 0);  select_copy_1 = None
+    select_copy_2 = torch.ops.aten.select_copy.int(movedim, 0, 0);  select_copy_2 = None
     scan_combine_graph_0 = self.scan_combine_graph_0
     associative_scan = torch.ops.higher_order.associative_scan(scan_combine_graph_0, [movedim], ());  scan_combine_graph_0 = movedim = None
     getitem = associative_scan[0];  associative_scan = None
