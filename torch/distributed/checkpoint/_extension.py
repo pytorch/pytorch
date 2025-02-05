@@ -3,7 +3,7 @@
 import abc
 import io
 from collections.abc import Sequence
-from typing import cast, IO, Optional, Type
+from typing import cast, IO, Optional
 
 # introduced as collections.abc.Buffer in Python 3.12
 from typing_extensions import Buffer
@@ -189,11 +189,11 @@ class ZStandard(StreamTransformExtension):
 class ExtensionRegistry:
     def __init__(self) -> None:
         # Populate default registry contents
-        self.extensions: dict[str, Type[Extension]] = {
+        self.extensions: dict[str, type[Extension]] = {
             cls.registry_name(): cls for cls in (ZStandard,)
         }
 
-    def register(self, cls: Type[Extension]) -> None:
+    def register(self, cls: type[Extension]) -> None:
         self.extensions[cls.registry_name()] = cls
 
     def from_descriptor_list(self, descriptors: Sequence[str]) -> Sequence[Extension]:

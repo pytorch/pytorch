@@ -99,10 +99,12 @@ def is_forbidden_context_manager(ctx):
 
 
 class UserDefinedVariable(VariableTracker):
-    pass
+    value: object
 
 
 class UserDefinedClassVariable(UserDefinedVariable):
+    value: type[object]
+
     def __init__(self, value, **kwargs) -> None:
         super().__init__(**kwargs)
         self.value = value
@@ -623,9 +625,6 @@ class UserDefinedClassVariable(UserDefinedVariable):
             )
 
             return tensor_variable
-        elif issubclass(self.value, enum.Enum) and len(args) == 1 and not kwargs:
-            options = {"mutation_type": ValueMutationNew()}
-            return variables.EnumVariable.create(self.value, args[0], options)
         elif self.value is random.Random:
             if len(args) == 1 and isinstance(args[0], variables.ConstantVariable):
                 seed = args[0].value
@@ -633,6 +632,14 @@ class UserDefinedClassVariable(UserDefinedVariable):
                 seed = None
             random_object = random.Random(seed)
             return RandomVariable(random_object)
+        elif (
+            self.value is types.MappingProxyType
+            and len(args) == 1
+            and isinstance(args[0], variables.ConstDictVariable)
+        ):
+            # types.MappingProxyType is a read-only proxy of the dict. If the
+            # original dict changes, the changes are reflected in proxy as well.
+            return variables.MappingProxyVariable(args[0])
         elif (
             not self.is_standard_new()
             and SideEffects.cls_supports_mutation_side_effects(self.value)
@@ -645,7 +652,6 @@ class UserDefinedClassVariable(UserDefinedVariable):
                 [self, *args],
                 kwargs,
             )
-
         return super().call_function(tx, args, kwargs)
 
     def is_standard_new(self):
@@ -655,12 +661,14 @@ class UserDefinedClassVariable(UserDefinedVariable):
             new_fn = new_fn.__func__
         return new_fn in (object.__new__, Generic.__new__, dict.__new__)
 
-    def call_hasattr(self, tx: "InstructionTranslator", name: str) -> "VariableTracker":
+    def call_obj_hasattr(
+        self, tx: "InstructionTranslator", name: str
+    ) -> "VariableTracker":
         if self.source:
             source = AttrSource(self.source, name)
             install_guard(source.make_guard(GuardBuilder.HASATTR))
             return variables.ConstantVariable(hasattr(self.value, name))
-        return super().call_hasattr(tx, name)
+        return super().call_obj_hasattr(tx, name)
 
     def const_getattr(self, tx: "InstructionTranslator", name):
         if name == "__name__":
@@ -1248,7 +1256,9 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         # Earlier we were returning GetAttrVariable but its incorrect. In absence of attr, Python raises AttributeError.
         raise_observed_exception(AttributeError, tx)
 
-    def call_hasattr(self, tx: "InstructionTranslator", name: str) -> "VariableTracker":
+    def call_obj_hasattr(
+        self, tx: "InstructionTranslator", name: str
+    ) -> "VariableTracker":
         if self.source:
             install_guard(
                 AttrSource(self.source, name).make_guard(GuardBuilder.HASATTR)
