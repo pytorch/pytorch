@@ -25,7 +25,6 @@ errors.
 from __future__ import annotations
 
 import os
-import unittest
 from typing import Callable, Optional, Sequence, Tuple, TYPE_CHECKING
 
 import error_reproduction
@@ -44,8 +43,9 @@ from torch.utils import _pytree as pytree
 
 
 if TYPE_CHECKING:
-    from torch.testing._internal.opinfo import core as opinfo_core
+    import unittest
 
+    from torch.testing._internal.opinfo import core as opinfo_core
 
 # All dtypes will be tested on the generated symbolic functions.
 # complex64 will be flattened to float32.
