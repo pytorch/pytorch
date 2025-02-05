@@ -4,7 +4,7 @@ import tempfile
 import unittest
 
 import torch
-from torch.export import Dim, dynamic_shapes, export
+from torch.export import Dim, export
 from torch.export._draft_export import draft_export, FailureType
 from torch.testing import FileCheck
 from torch.testing._internal.common_utils import IS_WINDOWS, run_tests, TestCase
