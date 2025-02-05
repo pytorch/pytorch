@@ -85,6 +85,7 @@ public:
     }
     return b;
   }
+  //Implementation is picked from https://github.com/ARM-software/ComputeLibrary/blob/v25.01/src/core/NEON/SVEMath.inl#L105
   inline svfloat32_t svexp_f32_z(svbool_t pg, svfloat32_t x) const {
     const auto c1 = svreinterpret_f32_u32(svdup_n_u32(0x3f7ffff6)); // x^1: 0x1.ffffecp-1f
     const auto c2 = svreinterpret_f32_u32(svdup_n_u32(0x3efffedb)); // x^2: 0x1.fffdb6p-2f
@@ -384,7 +385,7 @@ public:
   Vectorized<float> tan() const {
     return USE_SLEEF(Vectorized<float>(Sleef_tanfx_u10sve(values)),map(std::tan));
   }
-  //Implementation is picked from https://github.com/ARM-software/ComputeLibrary/blob/main/src/core/NEON/SVEMath.inl
+  //Implementation is picked from https://github.com/ARM-software/ComputeLibrary/blob/v25.01/src/core/NEON/SVEMath.inl#L179
   Vectorized<float> tanh() const {
     // Constants used for the tanh calculation.
     const svfloat32_t CONST_1        = svdup_n_f32(1.f);  // Constant 1.0f for the tanh formula.
