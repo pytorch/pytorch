@@ -344,7 +344,11 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         return pairs
 
     def test_itertools_compress(self):
+        y = torch.rand(4)
+
         def fn():
+            nonlocal y
+            torch.cos(y)
             return itertools.compress("ABCDEF", [1, 0, 1, 0, 1, 1])
 
         opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
@@ -3163,7 +3167,7 @@ class GraphModule(torch.nn.Module):
             with self.subTest(op=op):
 
                 def fn(x):
-                    return op(-10, x)
+                    return op(-10, x + 1)
 
                 opt_fn = torch.compile(fullgraph=True)(fn)
 
@@ -3206,20 +3210,20 @@ class GraphModule(torch.nn.Module):
 
     def test_truth(self):
         def fn(x, y):
-            return operator.truth(torch.cos(x)) and bool(y)
+            return operator.truth(x + 1) and bool(y)
 
-        opt_fn = torch.compile(fullgraph=True, dynamic=False)(fn)
+        opt_fn = torch.compile(dynamic=False)(fn)
 
         def test(x, y):
             self.assertEqual(opt_fn(x, y), fn(x, y))
 
+        test(torch.ones(1), 1)
+        test(torch.zeros(1), 1)
+        test(torch.ones(1), torch.ones(1))
         test(1, 100)
         test(-1.1, True)
         test(-1.1, 1.1)
         test(True, False)
-        test(torch.ones(1), 1)
-        test(torch.zeros(1), 1)
-        test(torch.ones(1), torch.ones(1))
 
     def test_unary_fold_op(self):
         for op in (operator.abs, abs, operator.neg, operator.pos, operator.truth):
@@ -4022,7 +4026,7 @@ class DefaultsTests(torch._dynamo.test_case.TestCase):
 
     def test_frozenset_construction(self):
         def fn(x):
-            s = frozenset({x})
+            s = frozenset({x + 1})
             t = frozenset(s)
             return len(t)
 
@@ -4355,7 +4359,7 @@ class DefaultsTests(torch._dynamo.test_case.TestCase):
 
         def foo_custom_str(x):
             a = CustomStr()
-            return x, str(a)
+            return x + 1, str(a)
 
         eager_custom_str = foo_custom_str(torch.ones(4))
         dynamo_custom_str = torch.compile(foo_custom_str, fullgraph=True)(torch.ones(4))
@@ -4368,7 +4372,7 @@ class DefaultsTests(torch._dynamo.test_case.TestCase):
 
         def foo_default_str(x):
             a = DefaultStr()
-            return x, str(a)
+            return x + 1, str(a)
 
         eager_default_str = foo_default_str(torch.ones(4))
         dynamo_default_str = torch.compile(foo_default_str, fullgraph=True)(

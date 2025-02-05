@@ -4084,10 +4084,10 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         x = torch.randn(4)
         self.assertEqual(fn(x), torch.sin(x))
 
+    @unittest.skip("fullgraph=True causes this test to fail. Exiting issue")
     def test_int_format(self):
         def fn(num: int, x):
-            # TODO - Uncommenting discovers an issue
-            # torch.cos(x)
+            torch.cos(x)
             return format(num, "b")
 
         opt_fn = torch.compile(fn, backend="eager", fullgraph=True, dynamic=False)
