@@ -48,15 +48,15 @@ def onnx_impl(
         if no_compile:
             processed_func = func
         else:
-            custom_opset = onnxscript.values.Opset(
+            torchlib_opset = onnxscript.values.Opset(
                 domain=_constants.TORCHLIB_DOMAIN, version=1
             )
 
             if not trace_only:
                 # Compile the function
-                processed_func = onnxscript.script(opset=custom_opset)(func)
+                processed_func = onnxscript.script(opset=torchlib_opset)(func)
             else:
-                processed_func = func
+                processed_func = onnxscript.TracedOnnxFunction(torchlib_opset, func)
 
             # TODO(justinchuby): Simplify the logic and remove the private attribute
             if isinstance(processed_func, onnxscript.OnnxFunction):
