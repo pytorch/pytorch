@@ -1335,46 +1335,20 @@ void LayerNormBackwardKernelImplInternal(
                       dbeta_data);
       C10_CUDA_KERNEL_LAUNCH_CHECK();
 #else
-      // TODO: Merge these two kernels as they should be identical if the compiler can
-      // propagate constants properly.
-      if ((M % kWarpSize == 0) && (N % kWarpSize == 0)) {
-        // This implementation relies on warp primitives and requires that M and N divide
-        // exactly to warp size.
-        dim3 threads{kWarpSize, kWarpSize};
-        int blocks = (N + threads.x - 1) / threads.x;
-
-        // If M and N divide by warp_size, we can use warp shuffles for the final reduction.
-        // That requires transposing values in shared memory, so we apply a padding to
-        // reduce bank conflicts.
-
-        size_t shmem_sz = 2 * sizeof(T_ACC) * (threads.x + 1) * threads.y;
-        GammaBetaBackwardCUDAKernel_32x32<T, T_ACC>
-            <<<blocks, threads, shmem_sz, cuda_stream>>>(
-                M,
-                N,
-                dY_data,
-                X_data,
-                mean_data,
-                rstd_data,
-                dgamma_data,
-                dbeta_data);
-          C10_CUDA_KERNEL_LAUNCH_CHECK();
-      } else {
-        dim3 threads{16, 32};
-        int blocks = (N + threads.x - 1) / threads.x;
-        size_t shmem_sz = 2 * sizeof(T_ACC) * (threads.x + 1) * threads.y;
-        GammaBetaBackwardCUDAKernel<T, T_ACC, 16, 32>
-            <<<blocks, threads, shmem_sz, cuda_stream>>>(
-                M,
-                N,
-                dY_data,
-                X_data,
-                mean_data,
-                rstd_data,
-                dgamma_data,
-                dbeta_data);
-        C10_CUDA_KERNEL_LAUNCH_CHECK();
-      }
+      dim3 threads{16, 32};
+      int blocks = (N + threads.x - 1) / threads.x;
+      size_t shmem_sz = 2 * sizeof(T_ACC) * (threads.x + 1) * threads.y;
+      GammaBetaBackwardCUDAKernel<T, T_ACC, 16, 32>
+          <<<blocks, threads, shmem_sz, cuda_stream>>>(
+              M,
+              N,
+              dY_data,
+              X_data,
+              mean_data,
+              rstd_data,
+              dgamma_data,
+              dbeta_data);
+      C10_CUDA_KERNEL_LAUNCH_CHECK();
 #endif
     }
   }
