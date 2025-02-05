@@ -545,10 +545,6 @@ class CompiledFxGraph(OutputCode):
         return artifact_path
 
 
-def _typecheck_CompiledFxGraph(h: CompiledFxGraph) -> OutputCode:
-    return h
-
-
 @dataclasses.dataclass
 class CompiledAOTI(OutputCode):
     """
@@ -570,10 +566,6 @@ class CompiledAOTI(OutputCode):
 
     def set_triton_bundle(self, triton_bundle: Any) -> None:
         pass
-
-
-def _typecheck_CompiledAOTI(h: CompiledAOTI) -> OutputCode:
-    return h
 
 
 @dataclasses.dataclass
