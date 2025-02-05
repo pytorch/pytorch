@@ -266,7 +266,7 @@ def get_matching_overload(
                 arg = schema_args[param.name].default_value
             elif param.has_default():
                 # Provided in the ONNX op definition
-                arg = param.default
+                arg = param.default  # type: ignore[assignment]
             else:
                 fail_reason = "Parameter not provided"
                 break

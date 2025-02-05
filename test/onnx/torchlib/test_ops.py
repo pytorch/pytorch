@@ -98,7 +98,7 @@ def _should_skip_xfail_test_sample(
     return None, None
 
 
-class TestFunctionValidity(unittest.TestCase):
+class TestFunctionValidity(common_utils.TestCase):
     @parameterized.parameterized.expand(
         [(info.op.name, info) for info in ops_test_data.TESTED_TORCHLIB_OPS]
     )
@@ -277,7 +277,7 @@ def run_test_output_match(
                         raise
 
 
-class TestOutputConsistencyFullGraph(unittest.TestCase):
+class TestOutputConsistencyFullGraph(common_utils.TestCase):
     """Test output consistency between exported ONNX op run as a graph and PyTorch eager mode.
 
     This is a parameterized test suite.

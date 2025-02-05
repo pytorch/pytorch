@@ -7969,7 +7969,7 @@ def aten_squeeze_dims_complex(self: TTensor, dim: Sequence[int]) -> TTensor:
     if len(self.shape) == 1:
         # The single dimension is the complex dimension
         return op.Identity(self)
-        dims = []
+    dims = []
     for d in dim:
         if d < 0:
             # Account for the complex dimension in ONNX
