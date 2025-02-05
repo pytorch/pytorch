@@ -2213,7 +2213,7 @@ class AOTInductorTestsTemplate:
         example_inputs = (torch.randn(10, 10, device=self.device),)
         optimized = torch._inductor.aoti_load_package(
             torch._inductor.aoti_compile_and_package(
-                torch.export.export(Model(), example_inputs)
+                torch.export.export(Model(), example_inputs, strict=True)
             )
         )
         try:
