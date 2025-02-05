@@ -34,8 +34,7 @@ from torch.utils._sympy.reference import (
 )
 from torch.utils._sympy.singleton_int import SingletonInt
 from torch.utils._sympy.solve import INEQUALITY_TYPES, mirror_rel_op, try_solve
-from torch.utils._sympy.value_ranges import ValueRanges
-from torch._inductor.bounds import ValueRangeAnalysis
+from torch.utils._sympy.value_ranges import ValueRangeAnalysis, ValueRanges
 
 
 UNARY_OPS = [
