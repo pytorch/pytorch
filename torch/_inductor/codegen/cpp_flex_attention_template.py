@@ -2,7 +2,7 @@
 import contextlib
 import logging
 import re
-from typing import List, Optional
+from typing import Optional
 from unittest.mock import patch
 
 import sympy
@@ -98,7 +98,7 @@ static inline scalar_t* {{kernel_name}}_conditional_data_ptr(scalar_t* ptr, scal
 }
 
 template <typename scalar_t,
-          typename std::enable_if_t<std::is_reduced_floating_point_v<scalar_t>, int> = 0>
+          typename std::enable_if_t<c10::is_reduced_floating_point_v<scalar_t>, int> = 0>
 static inline scalar_t* {{kernel_name}}_conditional_data_ptr(float* ptr, scalar_t* ptr2) {
   return ptr2;
 }
@@ -313,6 +313,7 @@ FLEX_ATTENTION_TEMPLATE = r"""
 extern "C"
 {{kernel.def_kernel(inputs=kernel_args, outputs={"output": output}, extra_sizevars=template.extra_sizevars)}}
 {
+  {{ kernel.maybe_codegen_profile() }}
   int64_t kvBlockSize = {{kvBlockSize}};
   kvBlockSize = kvBlockSize>{{kernel.size(key, 1)}} ? {{kernel.size(key, 1)}}
                                                     : kvBlockSize;
@@ -320,7 +321,7 @@ extern "C"
 
   // dtypes of kernel and internal buffers
   using scalar_t = {{kernel.dtype(query)}};
-  constexpr bool is_reduced_type = std::is_reduced_floating_point_v<scalar_t>;
+  constexpr bool is_reduced_type = c10::is_reduced_floating_point_v<scalar_t>;
   using accum_t = at::opmath_type<{{kernel.dtype(query)}}>;
   using Vec = at::vec::Vectorized<accum_t>;
   accum_t scaling_factor = {{scale}};
@@ -1020,7 +1021,7 @@ class CppFlexAttentionTemplate(CppTemplate):
         self,
         kernel,
         template_buffer_node: Optional[ir.CppTemplateBuffer] = None,
-        epilogue_nodes: Optional[List[ir.IRNode]] = None,
+        epilogue_nodes: Optional[list[ir.IRNode]] = None,
         **kwargs,
     ) -> str:
         if epilogue_nodes is not None and epilogue_nodes != []:

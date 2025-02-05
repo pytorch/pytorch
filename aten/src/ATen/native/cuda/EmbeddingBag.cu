@@ -136,9 +136,10 @@ __global__ void EmbeddingBag_updateOutputKernel_sum_mean(
       accscalar_t weightFeatSum = 0;
       int64_t bag_size_ = 0;
       for (int64_t emb = begin; emb < end; emb++) {
-        bool pad = (input[emb] == padding_idx);
-        CUDA_KERNEL_ASSERT(input[emb] < numRows);
-        const int64_t weightRow = input[emb] * weight_stride0;
+        index_t input_idx = input[emb];
+        bool pad = (input_idx == padding_idx);
+        CUDA_KERNEL_ASSERT(0 <= input_idx && input_idx < numRows);
+        const int64_t weightRow = input_idx * weight_stride0;
         scalar_t weightValue = weightFeat[weightRow];
         weightValue = pad ? static_cast<scalar_t>(0) : weightValue;
         if (per_sample_weights) {

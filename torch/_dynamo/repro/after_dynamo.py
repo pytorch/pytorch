@@ -20,6 +20,7 @@ from torch._dynamo.debug_utils import (
     BuckTargetWriter,
     extra_imports,
     generate_config_string,
+    generate_env_vars_string,
     helper_for_dump_minify,
     InputReader,
     InputWriter,
@@ -179,6 +180,7 @@ def generate_dynamo_fx_repro_string(
 
     return textwrap.dedent(
         f"""
+{generate_env_vars_string(stable_output=stable_output)}
 from math import inf
 import torch
 from torch import tensor, device

@@ -6,7 +6,7 @@ import sys
 from contextlib import nullcontext
 from copy import deepcopy
 from functools import partial
-from typing import Any, Dict
+from typing import Any
 
 import torch
 import torch.nn as nn
@@ -787,7 +787,7 @@ class TestFSDPStateDict(FSDPTest):
 
     @staticmethod
     def _load_state_dict(
-        model: Module, state_dict_type: str, state_dict: Dict[str, Any]
+        model: Module, state_dict_type: str, state_dict: dict[str, Any]
     ):
         try:
             enum_val = STATE_DICT_MAPPING[state_dict_type]

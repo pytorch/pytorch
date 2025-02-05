@@ -28,7 +28,7 @@ jobs:
       CUDA_VERSION: ${{ matrix.cuda_version }}
       CONFIG: ${{ matrix.config }}
     steps:
-      - name: Checkout pytorch/builder
+      - name: Checkout pytorch/pytorch
         uses: actions/checkout@v4
       - name: Enable MSVC dev commands to enable cl.exe  # FYI incompatible with shell: bash
         uses: ilammy/msvc-dev-cmd@dd5e2fa0a7de1e7929605d9ecc020e749d9856a3

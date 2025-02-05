@@ -3,7 +3,6 @@
 
 import sys
 from pathlib import Path
-from typing import Tuple
 
 import torch
 import torch.distributed as dist
@@ -22,7 +21,7 @@ from torch.testing._internal.common_utils import run_tests, TestCase
 class MyModuleInterface:
     def forward(
         self, tensor: Tensor, number: int, word: str = "default"
-    ) -> Tuple[Tensor, int, str]:
+    ) -> tuple[Tensor, int, str]:
         pass
 
 

@@ -1,8 +1,8 @@
 # mypy: allow-untyped-defs
 import itertools
 import unittest.mock
+from collections.abc import Iterator
 from contextlib import contextmanager
-from typing import Iterator
 
 import torch
 import torch._C

@@ -196,4 +196,31 @@ if(HIP_FOUND)
     # With HIP-SDK 6.2, HIP declares new enum types on Windows
     set(HIP_NEW_TYPE_ENUMS ON)
   endif()
+
+  if(ROCM_VERSION_DEV VERSION_GREATER_EQUAL "5.7.0")
+    # check whether hipblaslt provides HIPBLASLT_MATMUL_DESC_A_SCALE_POINTER_VEC_EXT
+    set(file "${PROJECT_BINARY_DIR}/hipblaslt_test_vec_ext.cc")
+    file(WRITE ${file} ""
+      "#define LEGACY_HIPBLAS_DIRECT\n"
+      "#include <hipblaslt/hipblaslt.h>\n"
+      "int main() {\n"
+      "    hipblasLtMatmulDescAttributes_t attr = HIPBLASLT_MATMUL_DESC_A_SCALE_POINTER_VEC_EXT;\n"
+      "    return 0;\n"
+      "}\n"
+      )
+    try_compile(hipblaslt_compile_result_vec_ext ${PROJECT_RANDOM_BINARY_DIR} ${file}
+      CMAKE_FLAGS "-DINCLUDE_DIRECTORIES=${ROCM_INCLUDE_DIRS}"
+      COMPILE_DEFINITIONS -D__HIP_PLATFORM_AMD__ -D__HIP_PLATFORM_HCC__
+      OUTPUT_VARIABLE hipblaslt_compile_output)
+    if(hipblaslt_compile_result_vec_ext)
+      set(HIPBLASLT_VEC_EXT ON)
+      #message("hipblaslt is using scale pointer vec ext: ${hipblaslt_compile_output}")
+      message("hipblaslt is using scale pointer vec ext")
+    else()
+      set(HIPBLASLT_VEC_EXT OFF)
+      message("hipblaslt is NOT using scale pointer vec ext: ${hipblaslt_compile_output}")
+      #message("hipblaslt is NOT using scale pointer vec ext")
+    endif()
+  endif()
+
 endif()

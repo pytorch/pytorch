@@ -403,6 +403,7 @@
   variants: function, method
   dispatch:
     CPU, CUDA: angle
+    MPS: angle_mps
     SparseCsrCPU, SparseCsrCUDA, SparseCsrMeta: angle_sparse_csr
   tags: pointwise
 
@@ -410,6 +411,7 @@
   device_check: NoCheck   # TensorIterator
   dispatch:
     CPU, CUDA: angle_out
+    MPS: angle_out_mps
     SparseCsrCPU, SparseCsrCUDA, SparseCsrMeta: angle_sparse_csr_out
   tags: pointwise
 
@@ -3864,6 +3866,7 @@
   device_guard: False
   dispatch:
     CompositeImplicitAutograd: value_selecting_reduction_backward_symint
+    NestedTensorCPU, NestedTensorCUDA: value_selecting_reduction_backward_nested_symint
 
 - func: amax(Tensor self, int[1] dim=[], bool keepdim=False) -> Tensor
   variants: function, method
@@ -4176,6 +4179,14 @@
 - func: _weight_int4pack_mm_for_cpu(Tensor self, Tensor mat2, int qGroupSize, Tensor qScaleAndZeros) -> Tensor
   dispatch:
     CPU: _weight_int4pack_mm_cpu
+
+- func: _dyn_quant_pack_4bit_weight(Tensor weights, Tensor scales_zeros, Tensor? bias, int block_size, int in_features, int out_features) -> Tensor
+  dispatch:
+    CPU: _dyn_quant_pack_4bit_weight_cpu
+
+- func: _dyn_quant_matmul_4bit(Tensor inp, Tensor packed_weights, int block_size, int in_features, int out_features) -> Tensor
+  dispatch:
+    CPU: _dyn_quant_matmul_4bit_cpu
 
 - func: _weight_int8pack_mm(Tensor self, Tensor mat2, Tensor scales) -> Tensor
   dispatch:
@@ -9274,12 +9285,12 @@
     MPS: nonzero_mps
   tags: [dynamic_output_shape, core]
 
-- func: nonzero_static.out(Tensor self, *, int size, int fill_value=-1, Tensor(a!) out) -> Tensor(a!)
+- func: nonzero_static.out(Tensor self, *, SymInt size, int fill_value=-1, Tensor(a!) out) -> Tensor(a!)
   dispatch:
     CPU: nonzero_static_out_cpu
     CUDA: nonzero_static_out_cuda
 
-- func: nonzero_static(Tensor self, *, int size, int fill_value=-1) -> Tensor
+- func: nonzero_static(Tensor self, *, SymInt size, int fill_value=-1) -> Tensor
   variants: method, function
   dispatch:
     CPU: nonzero_static_cpu
@@ -9428,11 +9439,13 @@
 - func: cholesky.out(Tensor self, bool upper=False, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
     CPU, CUDA: cholesky_out
+    MPS: cholesky_mps_out
 
 - func: cholesky(Tensor self, bool upper=False) -> Tensor
   variants: method, function
   dispatch:
     CPU, CUDA: cholesky
+    MPS: cholesky_mps
 
 - func: cholesky_solve.out(Tensor self, Tensor input2, bool upper=False, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
@@ -13058,7 +13071,6 @@
   autogen: _slow_conv2d_backward.output_mask_out
 
 - func: _conv_depthwise2d.out(Tensor self, Tensor weight, SymInt[2] kernel_size, Tensor? bias, SymInt[2] stride, SymInt[2] padding, SymInt[2] dilation, *, Tensor(a!) out) -> Tensor(a!)
-  use_const_ref_for_mutable_tensors: True
   python_module: nn
   dispatch:
     CUDA: conv_depthwise2d_cuda_out
@@ -13451,7 +13463,7 @@
   python_module: special
   variants: function
   dispatch:
-    CPU, CUDA: special_zeta_out
+    CPU, CUDA, MPS: special_zeta_out
   tags: pointwise
 
 - func: special_zeta.self_scalar_out(Scalar self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
@@ -13744,7 +13756,6 @@
     CompositeImplicitAutograd: fft_hfft2_symint
 
 - func: fft_hfft2.out(Tensor self, SymInt[1]? s=None, int[1] dim=[-2,-1], str? norm=None, *, Tensor(a!) out) -> Tensor(a!)
-  use_const_ref_for_mutable_tensors: True
   python_module: fft
   variants: function
   dispatch:
@@ -13758,7 +13769,6 @@
     CompositeImplicitAutograd: fft_ihfft2_symint
 
 - func: fft_ihfft2.out(Tensor self, SymInt[1]? s=None, int[1] dim=[-2,-1], str? norm=None, *, Tensor(a!) out) -> Tensor(a!)
-  use_const_ref_for_mutable_tensors: True
   python_module: fft
   variants: function
   dispatch:
@@ -13820,7 +13830,6 @@
     CompositeImplicitAutograd: fft_hfftn_symint
 
 - func: fft_hfftn.out(Tensor self, SymInt[1]? s=None, int[1]? dim=None, str? norm=None, *, Tensor(a!) out) -> Tensor(a!)
-  use_const_ref_for_mutable_tensors: True
   python_module: fft
   variants: function
   dispatch:
@@ -13834,7 +13843,6 @@
     CompositeImplicitAutograd: fft_ihfftn_symint
 
 - func: fft_ihfftn.out(Tensor self, SymInt[1]? s=None, int[1]? dim=None, str? norm=None, *, Tensor(a!) out) -> Tensor(a!)
-  use_const_ref_for_mutable_tensors: True
   python_module: fft
   variants: function
   dispatch:
@@ -13894,9 +13902,15 @@
 
 - func: linalg_cholesky(Tensor self, *, bool upper=False) -> Tensor
   python_module: linalg
+  dispatch:
+    CompositeImplicitAutograd: linalg_cholesky
+    MPS: linalg_cholesky_mps
 
 - func: linalg_cholesky.out(Tensor self, *, bool upper=False, Tensor(a!) out) -> Tensor(a!)
   python_module: linalg
+  dispatch:
+    CompositeImplicitAutograd: linalg_cholesky_out
+    MPS: linalg_cholesky_out_mps
 
 - func: linalg_cross(Tensor self, Tensor other, *, int dim=-1) -> Tensor
   python_module: linalg
@@ -13937,6 +13951,7 @@
   structured: True
   dispatch:
     CPU, CUDA: linalg_lu_factor_ex_out
+    MPS: linalg_lu_factor_ex_out_mps
 
 # linalg.lu
 - func: linalg_lu(Tensor A, *, bool pivot=True) -> (Tensor P, Tensor L, Tensor U)
@@ -13971,7 +13986,7 @@
 - func: _linalg_det.result(Tensor A, *, Tensor(a!) result, Tensor(b!) LU, Tensor(c!) pivots) -> (Tensor(a!) result, Tensor(b!) LU, Tensor(c!) pivots)
   structured: True
   dispatch:
-    CPU, CUDA: _linalg_det_out
+    CPU, CUDA, MPS: _linalg_det_out
 
 - func: linalg_det(Tensor A) -> Tensor
   python_module: linalg

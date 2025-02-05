@@ -365,7 +365,7 @@ class TestBasicGEMM(TestCase):
             UserWarning, f"This overload of {func}_ is deprecated"
         ):
             getattr(out_tensor, func + "_")(1, b1, b2)
-        self.assertEqual(out_tensor, ref * 2),
+        self.assertEqual(out_tensor, ref * 2)
         getattr(res3, func + "_")(b1, b2, beta=1)
         self.assertEqual(out_tensor, res3)
 
@@ -383,7 +383,7 @@ class TestBasicGEMM(TestCase):
             self.assertEqual(out_tensor, getattr(torch, func)(1, out_tensor, 0, b1, b2))
 
         res4 = getattr(torch, func)(out_tensor, b1, b2, beta=1, alpha=0.5)
-        self.assertEqual(res4, ref * 3),
+        self.assertEqual(res4, ref * 3)
 
         nan = torch.full_like(out_tensor, math.nan)
         res5 = getattr(torch, func)(nan, b1, b2, beta=0, alpha=1)
@@ -753,11 +753,11 @@ class TestBasicGEMM(TestCase):
         input_tensor = torch.rand((1, 2, 2), device=device).to(dtype)
         if dtype != torch.float32:
             with self.assertRaisesRegex(RuntimeError, "Input dtypes must be the same"):
-                y = torch.baddbmm(input_tensor, batch1, batch2, beta=0.0)
+                torch.baddbmm(input_tensor, batch1, batch2, beta=0.0)
         else:
             out = torch.randn((1, 2, 2), dtype=dtype, device=device).fill_(torch.nan)
             y_ref = torch.bmm(batch1, batch2)
-            y = torch.baddbmm(input_tensor, batch1, batch2, beta=0.0, out=out)
+            torch.baddbmm(input_tensor, batch1, batch2, beta=0.0, out=out)
             self.assertEqual(out, y_ref)
 
     @dtypes(torch.float)
@@ -838,9 +838,6 @@ class TestBasicGEMM(TestCase):
         a_data = torch.arange(1, o * s + 1, device=device, dtype=dtype).view(o, s)
         x_data = torch.arange(1, s + 1, 1, device=device, dtype=dtype)
         y_data = torch.ones(o, device=device, dtype=dtype)
-        control = torch.tensor(
-            [15.0, 33.0, 51.0, 69.0, 87.0], device=device, dtype=dtype
-        )
 
         def _test(row_major, incx, incy, lda_tail):
             if row_major:
@@ -917,7 +914,8 @@ class TestBasicGEMM(TestCase):
                 return result
             else:
                 out = torch.full_like(result, math.nan)
-                out1 = call_torch_fn(*args, **kwargs, out=out)
+                out1 = call_torch_fn(*args, **kwargs, out=out)  # noqa: F841
+                # FIXME(rec): should this return out1?
                 return out
 
         # mm, addmm
