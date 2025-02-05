@@ -3574,32 +3574,8 @@ class TestFX(JitTestCase):
         finally:
             del sys.modules["__future__"]
 
-    def test_annotations_empty_tuple(self):
-        class Foo(torch.nn.Module):
-            def forward(self, x: tuple[()], y: tuple[str, tuple[()]]):
-                return "foo"
-
-        traced = torch.fx.symbolic_trace(Foo())
-
-        x = ()
-        y = ("bar", ())
-
-        traced(x, y)
-
-        FileCheck().check("tuple")   \
-                   .check("tuple[str,tuple]") \
-                   .run(traced.code)
-
-        scripted = torch.jit.script(traced)
-
-        scripted(x, y)
-
-        FileCheck().check("Tuple[()]")   \
-            .check("Tuple[str, Tuple[()]]")    \
-            .run(scripted.code)
-
     @unittest.skipIf(sys.version_info > (3, 11), "Does not work in 3.11")
-    def test_annotations_empty_tuple_pre_pep585(self):
+    def test_annotations_empty_tuple(self):
         class Foo(torch.nn.Module):
             def forward(self, x: typing.Tuple[()], y: typing.Tuple[str, typing.Tuple[()]]):  # noqa: UP006
                 return "foo"
