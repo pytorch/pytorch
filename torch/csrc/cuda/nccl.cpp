@@ -116,7 +116,7 @@ ncclDataType_t to_nccl_data_type(c10::ScalarType type) {
       return ncclDataType_t::ncclUint8;
 #endif
 
-#ifdef HAS_NCCL_BF16_DATATYPE
+#ifdef NCCL_HAS_BF16_DATATYPE
     case at::kBFloat16:
       return ncclDataType_t::ncclBfloat16;
 #endif
