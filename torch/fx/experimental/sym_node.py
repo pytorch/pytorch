@@ -13,14 +13,18 @@ As this file is imported from within torch/__init__.py we do not want it to depe
 to avoid having to load SymPy at import time, as doing so is *very* slow.
 """
 
+
 import builtins
+import functools
+import inspect
 import itertools
 import logging
 import math
 import operator
 import sys
+import traceback
 from functools import lru_cache, update_wrapper
-from typing import Optional, TYPE_CHECKING, Union
+from typing import Optional, Set, TYPE_CHECKING, Union
 
 import torch
 
@@ -35,6 +39,9 @@ from torch import (  # noqa: F401
     SymFloat,
     SymInt,
 )
+from torch._guards import TracingContext
+from torch._logging import dtrace_structured
+from torch.utils._traceback import format_frame
 
 
 if TYPE_CHECKING:
@@ -1632,6 +1639,93 @@ def _make_user_magic(method, user_type):
                 other = torch.sym_float(other)
         return self, other
 
+    def uninteresting_files() -> Set[str]:
+        import inspect
+
+        import torch
+
+        mods = [
+            torch._dynamo.eval_frame,
+            torch._dynamo.utils,
+            torch.fx.experimental.sym_node,
+            torch,
+        ]
+        import torch._dynamo.guards
+
+        return (
+            {inspect.getfile(m) for m in mods}
+            | torch._dynamo.guards.uninteresting_files()
+            | {"<string>"}
+        )
+
+    def capture_provenance(fn):
+        @functools.wraps(fn)
+        def wrapper(self, other=None):
+            if other is None:
+                result = fn(self)
+            else:
+                result = fn(self, other)
+            if torch._logging._internal.GET_DTRACE_STRUCTURED:
+                floc = None
+                user_stack = None
+                user_top_stack = None
+                user_bottom_stack = None
+
+                if len(TracingContext.extract_stack()) > 0:
+                    user_stack = TracingContext.extract_stack()
+                    user_top_stack = format_frame(user_stack[0], line=True)
+                    user_bottom_stack = format_frame(user_stack[-1], line=True)
+
+                frame = inspect.currentframe()
+                try:
+                    while frame is not None:
+                        if (
+                            floc is None
+                            and frame.f_code.co_filename not in uninteresting_files()
+                        ):
+                            floc = format_frame(
+                                traceback.FrameSummary(
+                                    frame.f_code.co_filename,
+                                    frame.f_lineno,
+                                    frame.f_code.co_name,
+                                ),
+                                line=True,
+                            )
+                        if frame.f_back is None and user_top_stack is None:
+                            user_top_stack = format_frame(
+                                traceback.FrameSummary(
+                                    frame.f_code.co_filename,
+                                    frame.f_lineno,
+                                    frame.f_code.co_name,
+                                ),
+                                line=True,
+                            )
+                            break
+                        frame = frame.f_back
+                finally:
+                    del frame
+
+                if other:
+                    arguments = [str(self), str(other)]
+                else:
+                    arguments = [str(self)]
+
+                dtrace_structured(
+                    "expression_created",
+                    metadata_fn=lambda: {
+                        "method": method,
+                        "arguments": arguments,
+                        "result": str(result),
+                        "user_bottom_stack": str(user_bottom_stack),
+                        "user_top_stack": str(user_top_stack),
+                        "floc": str(floc),
+                    },
+                )
+
+            return result
+
+        return wrapper
+
     # Before and after performing the operation, check if any operands are constant.
     # If so, extract out the constant values first. If `self` itself is a
     # constant, then "redispatch" by calling back into the operator. Sometimes
@@ -1639,12 +1733,14 @@ def _make_user_magic(method, user_type):
     # Alternatively, we could also rewrap into constant Symbool (i.e. by
     # implementing wrap_bool in ConstantSymNodeImpl), but we're not doing that
     # today for no particular reason.
+    @capture_provenance
     def unary_magic_impl(self):
         self = promote(self)
         if is_constant(self):
             return (method_to_operator(method))(get_constant(self))
         return wrap_node(getattr(self.node, method_attr)())
 
+    @capture_provenance
     def binary_magic_impl(self, other):
         if not isinstance(other, (int, float, bool, SymInt, SymFloat, SymBool)):
             return NotImplemented
@@ -1662,6 +1758,7 @@ def _make_user_magic(method, user_type):
         ret = wrap_node(getattr(self.node, method_attr)(other_node))
         return get_constant(ret) if is_constant(ret) else ret
 
+    @capture_provenance
     def rbinary_magic_impl(self, other):
         if not isinstance(other, (int, float, bool, SymInt, SymFloat, SymBool)):
             return NotImplemented
