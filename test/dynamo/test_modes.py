@@ -124,6 +124,7 @@ class TorchFunctionModeTests(torch._dynamo.test_case.TestCase):
 
             @torch.compile(fullgraph=True)
             def fn(x):
+                torch.cos(x)
                 torch.set_default_device("cpu")
                 _pop_torch_function_stack()
 
@@ -318,10 +319,10 @@ class TorchFunctionModeTests(torch._dynamo.test_case.TestCase):
                 return super().__torch_function__(func, types, args, kwargs)
 
         def fn(x):
-            return torch.add(x, 3)
+            return torch.add(torch.cos(x), 3)
 
         def fn_2(x):
-            return torch.mul(x, 3) + torch.add(x, 3)
+            return torch.mul(x, 3) + torch.add(torch.cos(x), 3)
 
         inp = torch.ones(2, 2) + 1
 

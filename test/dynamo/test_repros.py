@@ -2149,7 +2149,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         @torch.compile(backend="eager", fullgraph=True)
         def fn(x):
             isinstance(torch.bfloat16, torch.dtype)
-            return x
+            return torch.cos(x)
 
         fn(torch.randn(3))
 
@@ -3902,10 +3902,11 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         root[:] = [root, root, None, None]
 
         @torch.compile(fullgraph=True, backend="eager")
-        def test_bug():
+        def test_bug(x):
+            x = torch.cos(x)
             return root[0]
 
-        test_bug()
+        test_bug(torch.randn(4))
 
     def test_hf_bigbird_unsqueeze(self):
         def torch_bmm_nd(inp_1, inp_2, ndim=None):
@@ -4084,11 +4085,16 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(fn(x), torch.sin(x))
 
     def test_int_format(self):
-        def fn(num: int):
+        def fn(num: int, x):
+            # TODO - Uncommenting discovers an issue
+            # torch.cos(x)
             return format(num, "b")
 
         opt_fn = torch.compile(fn, backend="eager", fullgraph=True, dynamic=False)
-        self.assertEqual(fn(10), opt_fn(10))
+        x = torch.randn(4)
+        ref = fn(10, x)
+        res = opt_fn(10, x)
+        self.assertEqual(ref, res)
 
     # Repro of torch._dynamo.exc.InternalTorchDynamoError: 'NoneType' object has no attribute 'guards'
     # due to bad empty list handling
@@ -5067,10 +5073,11 @@ def forward(self, s0 : torch.SymInt, s1 : torch.SymInt, L_x_ : torch.Tensor):
             def forward(self, x):
                 return x.sin()
 
-        def f(m):
+        def f(m, x):
+            torch.cos(x)
             return callable(m)
 
-        res = torch.compile(f, fullgraph=True)(M())
+        res = torch.compile(f, fullgraph=True)(M(), torch.rand(4))
         self.assertTrue(res)
 
     def test_stk_sdd_is_transposed(self):
@@ -5533,6 +5540,7 @@ def forward(self, s0 : torch.SymInt, s1 : torch.SymInt, L_x_ : torch.Tensor):
             return x, y
 
         def g(x, y):
+            x = [torch.cos(a) for a in x]
             return map(f, x, y)
 
         opt_g = torch.compile(g, fullgraph=True, backend="eager")

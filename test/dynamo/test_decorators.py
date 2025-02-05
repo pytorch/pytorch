@@ -282,23 +282,33 @@ class DecoratorTests(torch._dynamo.test_case.TestCase):
 
         cnts = torch._dynamo.testing.CompileCounter()
         fn = operator.indexOf
+
+        def fn(a, b, c):
+            torch.cos(c)
+            return operator.indexOf(a, b)
+
         opt_fn = torch.compile(fn, backend=cnts, fullgraph=True)
-        out = fn([1, 2, 3, 4, 5], 3)
-        opt_out = opt_fn([1, 2, 3, 4, 5], 3)
+        x = torch.randn(4)
+        out = fn([1, 2, 3, 4, 5], 3, x)
+        opt_out = opt_fn([1, 2, 3, 4, 5], 3, x)
         self.assertEqual(out, opt_out)
-        self.assertEqual(cnts.frame_count, 0)
+        self.assertEqual(cnts.frame_count, 1)
         self.assertEqual(len(counters["graph_break"]), 0)
 
         torch._dynamo.reset()
         counters.clear()
 
         cnts = torch._dynamo.testing.CompileCounter()
-        fn = polyfill
+
+        def fn(a, b, c):
+            torch.cos(c)
+            return polyfill(a, b)
+
         opt_fn = torch.compile(fn, backend=cnts, fullgraph=True)
-        out = fn([1, 2, 3, 4, 5], 3)
-        opt_out = opt_fn([1, 2, 3, 4, 5], 3)
+        out = fn([1, 2, 3, 4, 5], 3, x)
+        opt_out = opt_fn([1, 2, 3, 4, 5], 3, x)
         self.assertEqual(out, opt_out)
-        self.assertEqual(cnts.frame_count, 0)
+        self.assertEqual(cnts.frame_count, 1)
         self.assertEqual(len(counters["graph_break"]), 0)
 
     @patch.object(torch._dynamo.config, "suppress_errors", True)

@@ -489,8 +489,9 @@ class ConvertFrameAssert:
         if compiled is not None:
             self._has_extracted_graph = True
         if self._one_graph and compiled is None and not self._has_extracted_graph:
-            msg = f"Failed to compile {frame_info(frame)} because no graph was generated with fullgraph=True."
-            raise NoGraphError(msg)
+            if not self._export:
+                msg = f"Failed to compile {frame_info(frame)} because no graph was generated with fullgraph=True."
+                raise NoGraphError(msg)
 
         return compiled
 
