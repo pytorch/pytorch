@@ -330,7 +330,7 @@ class DecoratorTests(torch._dynamo.test_case.TestCase):
             fn3(torch.randn(4, 5))
             self.assertFalse(True)
         except torch._dynamo.exc.Unsupported as e:
-            self.assertIn("call torch._dynamo.disable() wrapped function", str(e))
+            self.assertIn("Skip calling `torch.compiler.disable()`d function", str(e))
 
     def test_disable_optimize(self):
         cnt = torch._dynamo.testing.CompileCounter()

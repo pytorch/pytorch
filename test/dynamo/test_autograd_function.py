@@ -271,7 +271,9 @@ class AutogradFunctionTests(torch._dynamo.test_case.TestCase):
         model = CustomFuncBwdPrintModule()
         opt_model = torch.compile(model, backend="eager", fullgraph=True)
         x = torch.randn(2, 2, dtype=torch.double, requires_grad=True)
-        with self.assertRaisesRegex(torch._dynamo.exc.Unsupported, "builtin: print"):
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported, "Failed to trace builtin operator"
+        ):
             opt_model(x)
 
     def test_stride_in_bwd(self):

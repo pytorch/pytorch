@@ -308,7 +308,13 @@ class MiscTests(torch._inductor.test_case.TestCase):
         first_graph_break = list(counters["graph_break"].keys())[0]
         self.assertExpectedInline(
             first_graph_break,
-            "Graph break for an optree C/C++ function optree._C.PyCapsule.flatten. Consider using torch.utils._pytree - https://github.com/pytorch/pytorch/blob/main/torch/utils/_pytree.py",
+            """\
+Attempted to call function marked as skipped
+  Explanation: Dynamo cannot trace optree C/C++ function optree._C.PyCapsule.flatten.
+  Hint:  Consider using torch.utils._pytree - https://github.com/pytorch/pytorch/blob/main/torch/utils/_pytree.py
+
+  Developer debug context: module: optree._C, qualname: PyCapsule.flatten, skip reason: <missing reason>
+""",
         )
 
     def test_scalar_device_movement(self):
@@ -8899,7 +8905,7 @@ def ___make_guard_fn():
         # and so the guard story for the objects passed into input just isn't there atm.
         with self.assertRaisesRegex(
             torch._dynamo.exc.Unsupported,
-            "^call_method UserDefinedObjectVariable\\(set\\).*",
+            "Unsupported method call",
         ):
             foo(inp)
 
@@ -10591,7 +10597,7 @@ ShapeEnv not equal: field values don't match:
         # Should only be one restart per event
         (restart_reason,) = metrics[0].restart_reasons
         self.assertTrue(
-            "skip function graph_break" in restart_reason,
+            "function marked as skipped" in restart_reason,
             "Should have logged graph break reason",
         )
         self.assertTrue(
@@ -10601,7 +10607,7 @@ ShapeEnv not equal: field values don't match:
 
         (restart_reason,) = metrics[1].restart_reasons
         self.assertTrue(
-            "skip function graph_break" in restart_reason,
+            "function marked as skipped" in restart_reason,
             "Should have logged graph break reason",
         )
         self.assertTrue(

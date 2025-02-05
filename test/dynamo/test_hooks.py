@@ -512,7 +512,9 @@ class HooksTests(torch._dynamo.test_case.TestCase):
         x2 = torch.ones(4, requires_grad=True)
         with compiled_autograd._enable(compiler_fn):
             dynamo_out = torch.compile(mod, backend="inductor", fullgraph=True)(x2, obj)
-            with self.assertRaisesRegex(torch._dynamo.exc.Unsupported, "builtin: str"):
+            with self.assertRaisesRegex(
+                torch._dynamo.exc.Unsupported, "Failed to trace builtin operator"
+            ):
                 dynamo_out[0].backward(torch.ones(4))
 
         self.assertEqual(obj.count, 2)

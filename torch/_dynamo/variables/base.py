@@ -6,7 +6,7 @@ from typing import Any, Callable, Optional, TYPE_CHECKING
 
 from .. import variables
 from ..current_scope_id import current_scope_id
-from ..exc import unimplemented
+from ..exc import unimplemented, unimplemented_v2
 from ..guards import GuardBuilder, install_guard
 from ..source import AttrSource, Source
 from ..utils import istype
@@ -295,6 +295,12 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         except NotImplementedError:
             raise NotImplementedError(f"{self} has no type") from None
 
+    def python_type_name(self):
+        try:
+            return self.python_type().__name__
+        except NotImplementedError:
+            return "<unknown type>"
+
     def as_python_constant(self):
         """For constants"""
         raise NotImplementedError(f"{self} is not a constant")
@@ -391,7 +397,15 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         args: "list[VariableTracker]",
         kwargs: "dict[str, VariableTracker]",
     ) -> "VariableTracker":
-        unimplemented(f"call_function {self} {args} {kwargs}")
+        unimplemented_v2(
+            gb_type="Unsupported function call",
+            context=f"call_function {self} {args} {kwargs}",
+            explanation=f"Dynamo does not know how to trace the function `{self.debug_repr()}`",
+            hints=[
+                f"Avoid calling `{self.debug_repr()}` in your code.",
+                "Please report an issue to PyTorch.",
+            ],
+        )
 
     def call_method(
         self,
@@ -410,7 +424,15 @@ class VariableTracker(metaclass=VariableTrackerMeta):
             and not kwargs
         ):
             return self.var_getattr(tx, args[0].as_python_constant())
-        unimplemented(f"call_method {self} {name} {args} {kwargs}")
+        unimplemented_v2(
+            gb_type="Unsupported method call",
+            context=f"call_method {self} {name} {args} {kwargs}",
+            explanation=f"Dynamo does not know how to trace method `{name}` of class `{self.python_type_name()}`",
+            hints=[
+                f"Avoid calling `{self.python_type_name()}.{name}` in your code.",
+                "Please report an issue to PyTorch.",
+            ],
+        )
 
     def set_name_hint(self, name):
         pass

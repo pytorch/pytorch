@@ -60,7 +60,7 @@ from .exc import (
     exceptions_allowed_to_be_fallback,
     SkipFrame,
     unimplemented,
-    unimplemented_with_warning,
+    unimplemented_v2_with_warning,
 )
 from .graph_deduplication import apply_graph_deduplication
 from .graph_region_tracker import GraphRegionTracker
@@ -628,9 +628,11 @@ class OutputGraph:
         """
         global_state = cast(
             dict[str, tuple[Callable[..., Any], bool]],
-            out
-            if out is not None
-            else self.tracing_context.global_context.global_state,
+            (
+                out
+                if out is not None
+                else self.tracing_context.global_context.global_state
+            ),
         )
 
         # TODO - Consider having a torch level API for torch_function_state. As
@@ -1451,12 +1453,12 @@ class OutputGraph:
         gm._param_name_to_source = self.param_name_to_source  # type: ignore[assignment]
         gm._source_to_user_stacks = self.source_to_user_stacks  # type: ignore[assignment]
 
+        name = (
+            self.compiler_fn.__name__
+            if hasattr(self.compiler_fn, "__name__")
+            else "<unknown compiler_fn>"
+        )
         try:
-            name = (
-                self.compiler_fn.__name__
-                if hasattr(self.compiler_fn, "__name__")
-                else ""
-            )
             _step_logger()(logging.INFO, f"calling compiler function {name}")
             compiler_fn = self.compiler_fn
             if config.verify_correctness:
@@ -1471,12 +1473,16 @@ class OutputGraph:
                 raise BackendCompilerFailed(
                     self.compiler_fn, e, inspect.currentframe()
                 ).with_traceback(e.__traceback__) from None
-            msg = (
-                "Backend compiler failed with a fake tensor exception at \n"
-                f"{self.root_tx.format_frame_summary()}"
-                "Adding a graph break."
+            unimplemented_v2_with_warning(
+                e,
+                self.root_tx.f_code,
+                gb_type="Backend compiler fake tensor exception",
+                context=f"Backend: {name}\nTraceback:\n{self.root_tx.format_frame_summary()}",
+                explanation=f"Backend compiler `{name}` failed with a fake tensor exception",
+                hints=[
+                    "Report an issue to PyTorch",
+                ],
             )
-            unimplemented_with_warning(e, self.root_tx.f_code, msg)
         except SkipFrame as e:
             # The backend compiler has requested that we skip the frame, instead of
             # aborting execution.
