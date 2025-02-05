@@ -1,10 +1,14 @@
 # mypy: allow-untyped-defs
 from __future__ import annotations
 
-from typing import Sequence
+from typing import TYPE_CHECKING
 
 import torch
 from torch.onnx._internal.fx import _pass, diagnostics
+
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
 
 
 class RestoreParameterAndBufferNames(_pass.Transform):

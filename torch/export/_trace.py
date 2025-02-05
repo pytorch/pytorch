@@ -53,6 +53,8 @@ from torch._functorch._aot_autograd.input_output_analysis import (
     _graph_input_names,
     _graph_output_names,
 )
+from torch._functorch._aot_autograd.schemas import GraphSignature
+from torch._functorch._aot_autograd.subclass_utils import get_subclass_typing_container
 from torch._functorch._aot_autograd.traced_function_transforms import (
     create_functional_call,
 )
@@ -847,10 +849,12 @@ def _get_non_persistent_buffers(mod: torch.nn.Module) -> set[str]:
     """
     Returns set of non-persistent buffers in a module and its submodules.
     """
-    result = set()
+    result: set[str] = set()
     for name, m in mod.named_modules(remove_duplicate=False):
-        for b in m._non_persistent_buffers_set:
-            result.add(f"{name}.{b}" if name else b)
+        if name:
+            result.update(f"{name}.{b}" for b in m._non_persistent_buffers_set)
+        else:
+            result.update(m._non_persistent_buffers_set)
     return result
 
 
@@ -1391,6 +1395,22 @@ def _strict_export_lower_to_aten_ir(
     export_graph_signature = aten_export_artifact.sig
     constants = aten_export_artifact.constants
 
+    # update unbacked bindings that might have gone out of sync
+    # between Dynamo and AOTAutograd
+    for node in gm.graph.nodes:
+        if "unbacked_bindings" in node.meta:
+            old_unbacked_bindings = node.meta["unbacked_bindings"]
+            val = node.meta["val"]
+            new_unbacked_bindings = {}
+            for key in old_unbacked_bindings.values():
+                expr = pytree.key_get(val, key).node.expr
+                if expr.is_symbol:
+                    new_unbacked_bindings[expr] = key
+            if new_unbacked_bindings:
+                node.meta["unbacked_bindings"] = new_unbacked_bindings
+            else:
+                del node.meta["unbacked_bindings"]
+
     _populate_param_buffer_metadata_to_new_gm(
         params_buffers_to_node_meta, gm, export_graph_signature
     )
@@ -1437,11 +1457,6 @@ def _export_to_aten_ir_make_fx(
     transform=lambda x: x,
 ) -> ATenExportArtifact:
     def _make_fx_helper(mod, args, kwargs, **flags):
-        from torch._functorch._aot_autograd.schemas import GraphSignature
-        from torch._functorch._aot_autograd.subclass_utils import (
-            get_subclass_typing_container,
-        )
-
         kwargs = kwargs or {}
 
         named_parameters = dict(mod.named_parameters(remove_duplicate=False))
