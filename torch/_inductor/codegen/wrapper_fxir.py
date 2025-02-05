@@ -15,6 +15,7 @@ from torch._higher_order_ops.triton_kernel_wrap import kernel_side_table, triton
 from torch._library.triton import wrap_triton
 
 from .. import config, ir
+from torch._inductor.select_algorithm import extern_kernels
 from torch._inductor.virtualized import V
 from torch._inductor.runtime.triton_heuristics import grid, CachingAutotuner
 from torch._inductor.codecache import TritonFuture
@@ -64,6 +65,13 @@ class WrapperIRLine(MemoryPlanningLine):
 
     def codegen(self, code: IndentedBuffer) -> None:
         raise NotImplementedError("Python codegen not supported")
+
+@dataclasses.dataclass
+class ExternKernelLine(WrapperIRLine):
+    kernel: str
+    out: str
+    args: tuple
+    kwargs: dict
 
 @dataclasses.dataclass
 class KernelCallLine(WrapperIRLine):
@@ -163,6 +171,17 @@ class WrapperFxCodegen(PythonWrapperCodegen):
         self.gm.graph.call_function(delete, args=(node,))
         del self.buffer_to_node[buffer.name]
 
+    def _lookup_args(self, args: tuple) -> tuple:
+        """
+        Maps call args back to FX nodes.
+        """
+        return tuple(
+            self.buffer_to_node[arg]
+            if isinstance(arg, str)
+            else arg
+            for arg in args
+        )
+
     def _get_buffer(self, node: ir.IRNode) -> BufferLike:
         """
         Extract buffer data from an IR node.
@@ -214,6 +233,7 @@ class WrapperFxCodegen(PythonWrapperCodegen):
                 EnterDeviceContextManagerLine: self._generate_enter_device_context_manager,
                 ExitDeviceContextManagerLine: self._generate_exit_device_context_manager,
                 EnterSubgraphLine: self._generate_enter_subgraph,
+                ExternKernelLine: self._generate_extern_kernel,
                 ExitSubgraphLine: self._generate_exit_subgraph,
                 FreeLine: self._generate_free,
                 FreeIfNotReusedLine: self._generate_free_if_not_reused,
@@ -372,15 +392,7 @@ class WrapperFxCodegen(PythonWrapperCodegen):
         if line.grid_fn not in ("grid", None):
             raise NotImplementedError(f"Unsupported grid_fn: '{grid_fn}'")
 
-        # Map call args back to FX nodes.
-        call_args = tuple(
-            self.buffer_to_node[arg]
-            if isinstance(arg, str)
-            else arg
-            for arg in line.call_args
-        )
-
-
+        call_args = self._lookup_args(line.call_args)
         kernel = self.kernels[line.kernel_name]
         call_kwargs = {name: val for name, val in zip(kernel.tuner.triton_meta["signature"], call_args)}
         tuned_kwargs = kernel.tuner.compile_results[0].config.kwargs
@@ -393,6 +405,19 @@ class WrapperFxCodegen(PythonWrapperCodegen):
         node = self.gm.graph.call_function(triton_kernel_wrapper_mutation,
                                            kwargs={"kernel_idx": kernel.wrapped.kernel_idx, "constant_args_idx": constant_args_idx, "grid": [line.grid], "tma_descriptor_metadata": {}, "kwargs": call_kwargs}
         )
+
+    def generate_extern_kernel_out(
+        self, kernel: str, out: str, out_view: Optional[str], args: list[str], node: ir.ExternKernelOut
+    ):
+        #TODO: refactor the codegen from ir.ExternKernelOut into various wrapper codegen
+        # classes. We should only need to pass the node here.
+
+        # Remove any kwargs from 'args'.
+        #TODO: refactor this so they're not added to it the first place.
+        args = [arg for arg in args if "=" not in arg]
+
+        out_name = out_view if out_view else out
+        self.writeline(ExternKernelLine(self, kernel=kernel, out=out_name, args=args, kwargs=node.kwargs))
 
     def generate_kernel_call(
             self,
@@ -413,6 +438,16 @@ class WrapperFxCodegen(PythonWrapperCodegen):
         Generates Wrapper IR for a kernel call.
         """
         self.writeline(KernelCallLine(self, kernel_name=kernel_name, call_args=call_args, grid=tuple(grid), grid_fn=grid_fn, triton=triton))
+
+    def _generate_extern_kernel(self, line):
+        assert isinstance(line, ExternKernelLine)
+        op = getattr(extern_kernels, line.kernel.strip("extern_kernels."))
+        out_node = self.buffer_to_node[line.out]
+
+        # Separate args from kwargs
+        arg_nodes = self._lookup_args(line.args)
+        kwargs = line.kwargs | {"out": out_node}
+        op_node = self.gm.graph.call_function(op, args=arg_nodes, kwargs=kwargs)
 
     def _generate_kernel_call(self, line: Line):
         assert isinstance(line, KernelCallLine)

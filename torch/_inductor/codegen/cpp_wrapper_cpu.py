@@ -1122,7 +1122,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
         self.generate_c_shim_fallback_kernel(fallback_kernel, args)
 
     def generate_extern_kernel_out(
-        self, kernel: str, out: str, out_view: Optional[str], args: list[str]
+        self, kernel: str, out: str, out_view: Optional[str], args: list[str], node: ir.ExternKernelOut
     ):
         if out_view:
             out_name = f"{out}_as_strided"

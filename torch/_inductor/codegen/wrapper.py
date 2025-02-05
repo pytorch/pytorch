@@ -1063,7 +1063,7 @@ class PythonWrapperCodegen(CodeGen):
                 )
 
     def generate_extern_kernel_out(
-        self, kernel: str, out: str, out_view: Optional[str], args: list[str]
+        self, kernel: str, out: str, out_view: Optional[str], args: list[str], node: ir.ExternKernelOut
     ):
         # add debug printer code for triton kernel calls at (jit) inductor level
         debug_printer_manager = V.graph.wrapper_code.debug_printer

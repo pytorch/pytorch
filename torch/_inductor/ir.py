@@ -5504,6 +5504,7 @@ class ExternKernelOut(ExternKernel):
             self.codegen_reference(),
             self.output_view.codegen_reference() if self.output_view else None,
             args,
+            self,
         )
 
     def __init__(  # type: ignore[no-untyped-def]
