@@ -393,7 +393,7 @@ jobs:
       build-environment: win-arm64-vs2022-cpu-py3
       cuda-version: cpu
       sync-tag: win-arm64-cpu-build
-      runner: "windows.4xlarge.nonephemeral"
+      runner: "windows-latest"
       test-matrix: |
         { include: [
           { config: "default", shard: 1, num_shards: 3, runner: "windows-11-arm64" },
