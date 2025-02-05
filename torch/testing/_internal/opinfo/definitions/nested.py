@@ -1054,9 +1054,9 @@ def sample_inputs_matmul(
         # (B, E, j1) x (B, j1, F) => (B, E, F)
         if njt_3d._ragged_idx == 2 and njt_3d.is_contiguous():
             B, E, _ = njt_3d.shape
-            j1 = len(njt_3d.values())
+            sum_j1 = len(njt_3d.values())
             other_cont = torch.randn(
-                j1, E + 2, device=device, dtype=dtype, requires_grad=requires_grad
+                sum_j1, E + 2, device=device, dtype=dtype, requires_grad=requires_grad
             )
             other_njt = torch.nested.nested_tensor_from_jagged(
                 other_cont, njt_3d.offsets(), lengths=njt_3d._lengths
