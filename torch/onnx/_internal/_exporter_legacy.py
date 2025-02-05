@@ -376,6 +376,9 @@ def enable_fake_mode():
     It is highly recommended to initialize the model in fake mode when exporting models that
     are too large to fit into memory.
 
+    NOTE: This function does not support torch.onnx.export(..., dynamo=True, optimize=True), so
+          please call ONNXProgram.optimize() outside of the function after the model is exported.
+
     Example::
 
         # xdoctest: +REQUIRES(env:TORCH_DOCTEST_ONNX)
@@ -391,7 +394,7 @@ def enable_fake_mode():
         ...     # They do not take up memory so we can initialize large models
         ...     my_nn_module = MyModel()
         ...     arg1 = torch.randn(2, 2, 2)
-        >>> onnx_program = torch.onnx.export(my_nn_module, (arg1,), dynamo=True)
+        >>> onnx_program = torch.onnx.export(my_nn_module, (arg1,), dynamo=True, optimize=False)
         >>> # Saving model WITHOUT initializers (only the architecture)
         >>> onnx_program.save(
         ...     "my_model_without_initializers.onnx",
