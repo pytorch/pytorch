@@ -3,7 +3,7 @@
 import json
 import os
 import tempfile
-from typing import Any, Dict, List
+from typing import Any
 from unittest import main, mock, TestCase
 
 import yaml
@@ -362,7 +362,7 @@ class TestConfigFilter(TestCase):
             self.assertEqual(case["expected"], json.dumps(filtered_test_matrix))
 
     def test_set_periodic_modes(self) -> None:
-        testcases: List[Dict[str, str]] = [
+        testcases: list[dict[str, str]] = [
             {
                 "job_name": "a CI job",
                 "test_matrix": "{include: []}",
@@ -702,7 +702,7 @@ class TestConfigFilter(TestCase):
             )
 
         mocked_subprocess.return_value = b""
-        testcases: List[Dict[str, Any]] = [
+        testcases: list[dict[str, Any]] = [
             {
                 "labels": {},
                 "test_matrix": '{include: [{config: "default"}]}',

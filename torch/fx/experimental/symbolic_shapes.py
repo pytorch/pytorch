@@ -186,18 +186,18 @@ def record_shapeenv_event(*args: Any, **kwargs: Any) -> Callable[[Callable[_P, _
 
             framework_stack = ''.join(traceback.format_stack(inspect.currentframe()))
 
-            mutations.append({
-                    "event": "VAR_SET",
-                    "name": "user_stack",
-                    "value": str(user_stack),
-            })
-            mutations.append({
-                    "event": "VAR_SET",
-                    "name": "framework_stack",
-                    "value": str(framework_stack),
-            })
-
             if mutations:
+                mutations.append({
+                        "event": "VAR_SET",
+                        "name": "user_stack",
+                        "value": str(user_stack),
+                })
+                mutations.append({
+                        "event": "VAR_SET",
+                        "name": "framework_stack",
+                        "value": str(framework_stack),
+                })
+
                 out: Dict[str, object] = {
                     "loc": f"{sloc}",
                     "mutations": mutations,
