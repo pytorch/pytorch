@@ -183,7 +183,6 @@ class AutogradCompilerInstance:
             {"graph_id": self.id},
             log_pt2_compile_event=True,
         )
-
         self.aot_graph_cls_name: Optional[str] = None
         self.aot_graph_infos: dict[int, dict[str, Any]] = {}
         self.fx_tracer.root = torch.nn.Module()
@@ -252,7 +251,21 @@ class AutogradCompilerInstance:
         self.stack.enter_context(
             torch.fx.experimental.symbolic_shapes._suppress_guards(env)
         )
-        return inputs, sizes, scalars
+        return str(CompileContext.current_compile_id()), inputs, sizes, scalars
+
+    def log_compile_reasons(
+        self,
+        compile_reasons: list[str],
+    ):
+        assert compile_reasons
+        trace_structured(
+            "artifact",
+            metadata_fn=lambda: {
+                "name": "compiled_autograd_compile_reasons",
+                "encoding": "json",
+            },
+            payload_fn=lambda: compile_reasons,
+        )
 
     def proxy_call_aot_backward(
         self,
