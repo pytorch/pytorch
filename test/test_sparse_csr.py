@@ -3764,11 +3764,11 @@ class TestSparseCompressedTritonKernels(TestCase):
                 if scale is None and query.size(-1) == 0:
                     scale = 1
                 expected = torch.nn.functional.scaled_dot_product_attention(
-                    *broadcast_input(query, key, value, attn_mask), scale=scale
+                    *broadcast_input(query.double(), key.double(), value.double(), attn_mask), scale=scale
                 )
 
                 for mask_dtype in (torch.bool, dtype):
-                    res = _scaled_dot_product_attention(query.double(), key.double(), value.double(), attn_mask_bsr.to(mask_dtype), scale=scale)
+                    res = _scaled_dot_product_attention(query, key, value, attn_mask_bsr.to(mask_dtype), scale=scale)
                     self.assertEqual(res, expected.to(res.dtype))
 
 
