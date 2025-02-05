@@ -17,8 +17,8 @@ static MetalShaderLibrary lib(R"METAL(
 
 kernel void bitwise_and_tensor(constant uint& length [[buffer(0)]],
                          device {0}  *out [[buffer(1)]],
-                         device {1}  *a [[buffer(2)]],
-                         device {2}  *b [[buffer(3)]],
+                         constant {1}  *a [[buffer(2)]],
+                         constant {2}  *b [[buffer(3)]],
                          uint offset [[thread_position_in_grid]]) {{
   if (offset >= length) {{
     return;
@@ -28,7 +28,7 @@ kernel void bitwise_and_tensor(constant uint& length [[buffer(0)]],
 
 kernel void bitwise_and_scalar(constant uint& length [[buffer(0)]],
                          device {0}  *out [[buffer(1)]],
-                         device {1}  *a [[buffer(2)]],
+                         constant {1}  *a [[buffer(2)]],
                          constant {2}  &b [[buffer(3)]],
                          uint offset [[thread_position_in_grid]]) {{
   if (offset >= length) {{
@@ -40,8 +40,8 @@ kernel void bitwise_and_scalar(constant uint& length [[buffer(0)]],
 
 kernel void bitwise_or_tensor(constant uint& length [[buffer(0)]],
                          device {0}  *out [[buffer(1)]],
-                         device {1}  *a [[buffer(2)]],
-                         device {2}  *b [[buffer(3)]],
+                         constant {1}  *a [[buffer(2)]],
+                         constant {2}  *b [[buffer(3)]],
                          uint offset [[thread_position_in_grid]]) {{
   if (offset >= length) {{
     return;
@@ -51,7 +51,7 @@ kernel void bitwise_or_tensor(constant uint& length [[buffer(0)]],
 
 kernel void bitwise_or_scalar(constant uint& length [[buffer(0)]],
                          device {0}  *out [[buffer(1)]],
-                         device {1}  *a [[buffer(2)]],
+                         constant {1}  *a [[buffer(2)]],
                          constant {2}  &b [[buffer(3)]],
                          uint offset [[thread_position_in_grid]]) {{
   if (offset >= length) {{
@@ -62,8 +62,8 @@ kernel void bitwise_or_scalar(constant uint& length [[buffer(0)]],
 
 kernel void bitwise_xor_tensor(constant uint& length [[buffer(0)]],
                          device {0}  *out [[buffer(1)]],
-                         device {1}  *a [[buffer(2)]],
-                         device {2}  *b [[buffer(3)]],
+                         constant {1}  *a [[buffer(2)]],
+                         constant {2}  *b [[buffer(3)]],
                          uint offset [[thread_position_in_grid]]) {{
   if (offset >= length) {{
     return;
@@ -73,7 +73,7 @@ kernel void bitwise_xor_tensor(constant uint& length [[buffer(0)]],
 
 kernel void bitwise_xor_scalar(constant uint& length [[buffer(0)]],
                          device {0}  *out [[buffer(1)]],
-                         device {1}  *a [[buffer(2)]],
+                         constant {1}  *a [[buffer(2)]],
                          constant {2}  &b [[buffer(3)]],
                          uint offset [[thread_position_in_grid]]) {{
   if (offset >= length) {{
@@ -84,8 +84,8 @@ kernel void bitwise_xor_scalar(constant uint& length [[buffer(0)]],
 
 kernel void bitwise_lshift_tensor(constant uint& length [[buffer(0)]],
                          device {0}  *out [[buffer(1)]],
-                         device {1}  *a [[buffer(2)]],
-                         device {2}  *b [[buffer(3)]],
+                         constant {1}  *a [[buffer(2)]],
+                         constant {2}  *b [[buffer(3)]],
                          uint offset [[thread_position_in_grid]]) {{
   if (offset >= length) {{
     return;
@@ -95,7 +95,7 @@ kernel void bitwise_lshift_tensor(constant uint& length [[buffer(0)]],
 
 kernel void bitwise_lshift_scalar(constant uint& length [[buffer(0)]],
                          device {0}  *out [[buffer(1)]],
-                         device {1}  *a [[buffer(2)]],
+                         constant {1}  *a [[buffer(2)]],
                          constant {2}  &b [[buffer(3)]],
                          uint offset [[thread_position_in_grid]]) {{
   if (offset >= length) {{
@@ -106,8 +106,8 @@ kernel void bitwise_lshift_scalar(constant uint& length [[buffer(0)]],
 
 kernel void bitwise_rshift_tensor(constant uint& length [[buffer(0)]],
                          device {0}  *out [[buffer(1)]],
-                         device {1}  *a [[buffer(2)]],
-                         device {2}  *b [[buffer(3)]],
+                         constant {1}  *a [[buffer(2)]],
+                         constant {2}  *b [[buffer(3)]],
                          uint offset [[thread_position_in_grid]]) {{
   if (offset >= length) {{
     return;
@@ -117,7 +117,7 @@ kernel void bitwise_rshift_tensor(constant uint& length [[buffer(0)]],
 
 kernel void bitwise_rshift_scalar(constant uint& length [[buffer(0)]],
                          device {0}  *out [[buffer(1)]],
-                         device {1}  *a [[buffer(2)]],
+                         constant {1}  *a [[buffer(2)]],
                          constant {2}  &b [[buffer(3)]],
                          uint offset [[thread_position_in_grid]]) {{
   if (offset >= length) {{
@@ -128,7 +128,7 @@ kernel void bitwise_rshift_scalar(constant uint& length [[buffer(0)]],
 
 kernel void bitwise_not(constant uint& length [[buffer(0)]],
                          device {0}  *out [[buffer(1)]],
-                         device {1}  *a [[buffer(2)]],
+                         constant {1}  *a [[buffer(2)]],
                          uint offset [[thread_position_in_grid]]) {{
   if (offset >= length) {{
     return;
