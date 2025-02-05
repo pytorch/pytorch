@@ -256,7 +256,8 @@ void apply_lapack_eigh(const Tensor& values, const Tensor& vectors, const Tensor
   lapackSyevd<scalar_t, value_t>(jobz, uplo, n, vectors_data, lda, values_data,
     &lwork_query, lwork, &rwork_query, lrwork, &iwork_query, liwork, infos_data);
 
-  lwork = std::max<int>(1, real_impl<scalar_t, value_t>(lwork_query));
+  lwork = std::max<int>(1, real_impl<scalar_t, value_t>(lwork_query)+1);
+
   Tensor work = at::empty({lwork}, vectors.options());
   auto work_data = work.mutable_data_ptr<scalar_t>();
 
