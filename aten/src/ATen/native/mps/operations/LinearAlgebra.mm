@@ -322,7 +322,6 @@ static void linalg_solve_out_mps_impl(const at::Tensor& A,
   MPSStream* mpsStream = getCurrentMPSStream();
   id<MTLDevice> device = MPSDevice::getInstance()->device();
 
-  mpsStream->synchronize(SyncType::COMMIT_AND_WAIT);
   dispatch_sync_with_rethrow(mpsStream->queue(), ^() {
     @autoreleasepool {
       id<MTLCommandBuffer> commandBuffer = mpsStream->commandBuffer();
