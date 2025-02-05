@@ -92,7 +92,10 @@ def generate_stage_to_rank_mapping(
     pp_size: int, num_stages: int, style: str = "loop"
 ) -> Dict[int, int]:
     """
-    Compute the stage id to rank mapping for either a looped or V-style schedule
+    Compute the stage id to rank mapping for either a looped or V-style schedule.
+
+    Most commonly num_stages == pp_size * 2, but this function can be used to
+    compute the mapping for any number of stages per rank.
     """
     mapping = {}
     if num_stages % pp_size != 0:
