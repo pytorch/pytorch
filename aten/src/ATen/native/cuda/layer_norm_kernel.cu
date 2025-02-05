@@ -540,114 +540,11 @@ __global__ void GammaBetaBackwardSimpleCUDAKernel(
   }
 }
 
-// This implementation gets called if M and N divide with 32. This case should
-// be the most common. We can then make better use of warp level intrinsics
-// to improve performance.
-
-template <typename T, typename T_ACC>
-__global__ void GammaBetaBackwardCUDAKernel_32x32(
-    int64_t M,
-    int64_t N,
-    const T* dY,
-    const T* X,
-    const T_ACC* mean,
-    const T_ACC* rstd,
-    T* dg,
-    T* db) {
-  alignas(sizeof(double)) extern __shared__ char s_data1[];
-  T_ACC* s_data_typed = reinterpret_cast<T_ACC*>(&s_data1);
-  T_ACC* s_dg;
-  T_ACC* s_db;
-
-  T_ACC dg_sum = 0;
-  T_ACC db_sum = 0;
-
-  const int64_t j = ((int64_t) blockIdx.x) * blockDim.x + threadIdx.x;
-
-  if (j < N) {
-    constexpr int unroll_factor = 8;
-    int laneId = threadIdx.x & (C10_WARP_SIZE - 1);
-
-    T_ACC mean_reg, mean_reg_tmp;
-    T_ACC rstd_reg, rstd_reg_tmp;
-    T dY_reg;
-    T X_reg;
-
-    // Main loop
-    int bcounter;
-    for (bcounter = 0; bcounter < M / (blockDim.y * unroll_factor);
-         bcounter++) {
-      int offset = (bcounter * blockDim.y + threadIdx.y) * unroll_factor;
-
-      if (laneId < unroll_factor) {
-        mean_reg_tmp = mean[offset + laneId];
-        rstd_reg_tmp = rstd[offset + laneId];
-      }
-      WARP_SYNC();
-
-      #pragma unroll
-      for (int ii = 0; ii < unroll_factor; ++ii) {
-        dY_reg = dY[(offset + ii) * N + j];
-        X_reg = X[(offset + ii) * N + j];
-        mean_reg = WARP_SHFL(mean_reg_tmp, ii, kWarpSize);
-        rstd_reg = WARP_SHFL(rstd_reg_tmp, ii, kWarpSize);
-        dg_sum += dY_reg * (X_reg - mean_reg) * rstd_reg;
-        db_sum += dY_reg;
-      }
-    }
-
-    // Remainder loop
-    int offset = (bcounter * blockDim.y + threadIdx.y) * unroll_factor;
-    for (int ii = 0; ii < unroll_factor; ii++) {
-      if ((offset + ii) < M) {
-        mean_reg = mean[offset + ii];
-        rstd_reg = rstd[offset + ii];
-        dY_reg = dY[(offset + ii) * N + j];
-        X_reg = X[(offset + ii) * N + j];
-        dg_sum += dY_reg * (X_reg - mean_reg) * rstd_reg;
-        db_sum += dY_reg;
-      }
-    }
-
-    // This kernel uses a block of (C10_WARP_SIZE x C10_WARP_SIZE) and
-    // gets called when M; N divide by 32. We can use warp shuffles
-    // for the final reduction step. This removes 4 shmem loads and
-    // stores with their corresponding __syncthreads()
-
-    // This greatly reduces bank conflicts at the expense of a little
-    // extra shared memory. It does not impact occupancy
-    int padded_bx = (1 + blockDim.x);
-
-    s_dg = s_data_typed;
-    s_db = s_data_typed + (padded_bx * blockDim.y);
-    s_dg[threadIdx.y * padded_bx + threadIdx.x] = dg_sum;
-    s_db[threadIdx.y * padded_bx + threadIdx.x] = db_sum;
-    __syncthreads();
-
-    // Load transposed so that a warp holds an entire column
-    T_ACC reg_dg = s_dg[threadIdx.x * padded_bx + threadIdx.y];
-    T_ACC reg_db = s_db[threadIdx.x * padded_bx + threadIdx.y];
-    for (unsigned delta = C10_WARP_SIZE >> 1; delta >= 1; delta >>= 1) {
-      reg_dg += WARP_SHFL_XOR(reg_dg, delta, kWarpSize);
-      reg_db += WARP_SHFL_XOR(reg_db, delta, kWarpSize);
-    }
-
-    if (threadIdx.x == 0) {
-      const int64_t j = blockIdx.x * blockDim.x + threadIdx.y;
-      if (dg) {
-        dg[j] = reg_dg;
-      }
-      if (db) {
-        db[j] = reg_db;
-      }
-    }
-  }
-}
-
 // We use template parameters here because the compiler can then constant-propagate these
 // constants and produce faster kernel code. In particular, there is a shared memory
 // reduction loop that can be completely optimized away if block_dim_y < 32 (which it is
-// at the single callsite where this kernel is called).
+// at the single callsite where this kernel is called). The very last portion of the
+// reduce is done using warp shuffles that don't need __syncthreads().
 template <typename T, typename T_ACC,
           int block_dim_x, int block_dim_y>
 __global__ void GammaBetaBackwardCUDAKernel(
