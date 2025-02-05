@@ -12778,6 +12778,11 @@ class TestMetalLibrary(TestCaseMPS):
         self.assertRaises(RuntimeError, lambda: lib.non_existing(mps_tensor))
         # Passing no tensors asserts
         self.assertRaises(RuntimeError, lambda: lib.full(12))
+        # Exceeing thread group size asserts
+        max_thread_group_size = lib.full.max_threads_per_threadgroup
+        self.assertRaises(ValueError, lambda: lib.full(mps_tensor, group_size=max_thread_group_size + 5))
+        self.assertRaises(ValueError, lambda: lib.full(mps_tensor, threads=(3, max_thread_group_size),
+                                                       group_size=(3, max_thread_group_size)))
 
     def test_metal_include(self):
         # Checks that includes embedding works
