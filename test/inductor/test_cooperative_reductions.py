@@ -235,7 +235,12 @@ class TestFixedConfigs(TestCase):
     @parametrize("persistent", [True, False])
     def test_min_max_non_power_of_2_rsplit(self, persistent):
         def fn(x):
-            return torch.amin(x, dim=-1), torch.amax(x, dim=-1)
+            return (
+                torch.amin(x, dim=-1),
+                torch.amax(x, dim=-1),
+                torch.argmin(x, dim=-1),
+                torch.argmax(x, dim=-1),
+            )
 
         cfg = {"XBLOCK": 2, "RSPLIT": 33, "num_warps": 8}
         if not persistent:
