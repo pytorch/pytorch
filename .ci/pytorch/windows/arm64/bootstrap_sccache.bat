@@ -18,7 +18,7 @@ curl -L -o "%INSTALLER_FILE%" %DOWNLOAD_URL%
 echo Extracting sccache.zip...
 tar -xf "%INSTALLER_FILE%" -C %DEPENDENCIES_DIR%
 cd %DEPENDENCIES_DIR%
-ren sccache-v0.8.1-x86_64-pc-windows-msvc sccache
+ren sccache-v0.9.1-x86_64-pc-windows-msvc sccache
 cd ..
 
 :: Check if installation was successful
