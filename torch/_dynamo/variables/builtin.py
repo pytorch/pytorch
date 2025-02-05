@@ -1836,6 +1836,7 @@ class BuiltinVariable(VariableTracker):
                 variables.PlacementVariable,
                 variables.NamedTupleVariable,
                 variables.UserDefinedObjectVariable,
+                variables.NestedUserFunctionVariable,
                 variables.ExceptionVariable,
             ),
         ):
