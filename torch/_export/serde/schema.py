@@ -386,6 +386,11 @@ class ModuleCallEntry:
 
 
 @dataclass
+class NamedTupleDef:
+    field_names: Annotated[list[str], 10]
+
+
+@dataclass
 class GraphModule:
     graph: Annotated[Graph, 10]
     signature: Annotated[GraphSignature, 50]
@@ -394,6 +399,8 @@ class GraphModule:
     # conventions.
     module_call_graph: Annotated[list[ModuleCallEntry], 60]
     metadata: Annotated[dict[str, str], 40] = field(default_factory=dict)
+    # Mapping of namedtuple types to namedtuple field names, used for BC
+    treespec_namedtuple_fields: Annotated[dict[str, NamedTupleDef], 70] = field(default_factory=dict)
 
 
 # Invariant: Every time a change is made to the schema, one of the versions
