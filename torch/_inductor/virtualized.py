@@ -308,9 +308,7 @@ class OpsWrapper:
         return _ops.indirect_indexing(index, size, check, wrap_neg)
 
 
-# we lie about the type of ops so the rest of the codebase typecheck properly
-# DefaultHandler implements the OpsHandler protocol via metaprogramming
-ops = cast(OpsHandler[Any], OpsWrapper())
+ops = OpsWrapper()
 
 
 class _V:
