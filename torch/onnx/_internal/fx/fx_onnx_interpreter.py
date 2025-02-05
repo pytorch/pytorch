@@ -150,7 +150,8 @@ def _retrieve_or_adapt_input_to_graph_set(
                     # scalars are promoted to tensors with shape (1,).
                     with onnxscript.evaluator.default_as(tracer):
                         element_value = onnxscript_apis.torchlib_opset().Reshape(
-                            element_value, [1]  # type: ignore[arg-type, type-var]
+                            element_value,  # type: ignore[arg-type, type-var]
+                            [1],  # type: ignore[arg-type, type-var]
                         )
                 sequence_mixed_elements.append(element_value)
             elif isinstance(tensor, int):
