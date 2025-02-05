@@ -27,7 +27,7 @@ from onnxscript import (
     UINT64,
     UINT8,
 )
-from onnxscript.onnx_opset import opset18 as op
+from onnxscript.onnx_opset import opset22 as op
 from onnxscript.onnx_types import TensorType
 
 import torch

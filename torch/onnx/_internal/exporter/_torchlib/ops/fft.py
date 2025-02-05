@@ -8,7 +8,7 @@ from __future__ import annotations
 from typing import Optional, Sequence
 
 from onnxscript import INT64
-from onnxscript.onnx_opset import opset18 as op
+from onnxscript.onnx_opset import opset22 as op
 from onnxscript.onnx_types import TensorType
 
 import torch
