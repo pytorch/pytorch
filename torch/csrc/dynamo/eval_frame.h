@@ -51,12 +51,6 @@ PyObject* dynamo_call_callback(
     CacheEntry* cache_entry,
     FrameState* frame_state);
 
-PyObject* dynamo__custom_eval_frame(
-    PyThreadState* tstate,
-    THP_EVAL_API_FRAME_OBJECT* frame,
-    int throw_flag,
-    PyObject* callback);
-
 #ifdef __cplusplus
 
 } // extern "C"

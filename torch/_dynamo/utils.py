@@ -3089,6 +3089,8 @@ def run_node(tracer, node, args, kwargs, nnmodule):
 
         try:
             if op == "call_function":
+                if node.target is torch.split:
+                    breakpoint()
                 return node.target(*args, **kwargs)
             elif op == "call_method":
                 if not hasattr(args[0], node.target):
