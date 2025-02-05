@@ -6982,11 +6982,11 @@ equal to the size of :attr:`q`, the remaining dimensions are what remains from t
 Args:
     {input}
     q (float or Tensor): a scalar or 1D tensor of values in the range [0, 1].
-    {dim}
-    {keepdim}
+    dim (int, optional): the dimension to reduce.
+    keepdim (bool, optional): whether the output tensor has :attr:`dim` retained or not.
 
 Keyword arguments:
-    interpolation (str): interpolation method to use when the desired quantile lies between two data points.
+    interpolation (str, optional): interpolation method to use when the desired quantile lies between two data points.
                             Can be ``linear``, ``lower``, ``higher``, ``midpoint`` and ``nearest``.
                             Default is ``linear``.
     {out}
