@@ -254,14 +254,24 @@ static void linalg_solve_out_mps_impl(const at::Tensor& A,
 
   TORCH_CHECK(!c10::isComplexType(A.scalar_type()) && !c10::isComplexType(LU.scalar_type()),
               "linalg.lu_factor(): MPS doesn't support complex types.");
+  Tensor A_t, B_t;
+  // If 'left' is false, reinterpret the problem so that Ax = B becomes A^T ⋅ (x^T) = B^T
+  // Then we solve the normal "left" case on the transposed matrices and transpose x finally to get the output
+  if (left) {
+    A_t = A.contiguous();
+    B_t = B.contiguous();
+  } else {
+    A_t = A.transpose(-2, -1).contiguous();
+    B_t = B.transpose(-2, -1).contiguous();
+  }
 
-  Tensor A_t = A.contiguous();
   uint64_t aRows = A_t.size(-2);
   uint64_t aCols = A_t.size(-1);
   uint64_t aElemSize = A_t.element_size();
   int a_ndim = A_t.dim();
-  int b_ndim = B.dim();
-  int numberOfRightHandSides = (b_ndim == a_ndim - 1) ? 1 : (B.dim() >= 2 ? B.size(-1) : 1);
+  int b_ndim = B_t.dim();
+  int numberOfRightHandSides = (b_ndim == a_ndim - 1) ? 1 : (b_ndim >= 2 ? B_t.size(-1) : 1);
+
   uint64_t numPivots = std::min(aRows, aCols);
   std::vector<int64_t> pivot_sizes(A_t.sizes().begin(), A_t.sizes().end() - 2);
   info.fill_(0); // will be set to 1 during kernel if something fails
@@ -273,9 +283,11 @@ static void linalg_solve_out_mps_impl(const at::Tensor& A,
     return;
   }
 
-  Tensor A_ = A_t.dim() > 3 ? A_t.flatten(0, -3) : A_t;
+  if (A_t.dim() > 3) {
+    A_t = A_t.flatten(0, -3);
+  }
 
-  uint64_t batchSize = A_.dim() > 2 ? A_.size(0) : 1;
+  uint64_t batchSize = (A_t.dim() > 2) ? A_t.size(0) : 1;
   std::vector<Tensor> status_tensors;
   std::vector<Tensor> pivots_list;
 
@@ -286,25 +298,31 @@ static void linalg_solve_out_mps_impl(const at::Tensor& A,
     pivots_list.push_back(at::zeros(numPivots, kInt, std::nullopt, kMPS, std::nullopt));
   }
 
-  // Since the MPSMatrixDecompositionLU functions in-place if the result matrix completely aliases the source matrix,
-  // We copy LU from A as the new A.
-  resize_output(LU, A_.sizes());
-  if (!LU.is_same(A_)) {
-    A_ = LU.copy_(A_);
+  resize_output(LU, A_t.sizes());
+  Tensor LU_ = LU;
+  if (!LU_.is_same(A_t)) {
+    A_t = LU_.copy_(A_t);
   } else {
-    A_ = LU;
+    A_t = LU_;
   }
 
-  TORCH_INTERNAL_ASSERT(A_.is_contiguous());
+  TORCH_INTERNAL_ASSERT(A_t.is_contiguous());
 
-  id<MTLBuffer> aBuffer = getMTLBufferStorage(A_);
-  id<MTLBuffer> bBuffer = getMTLBufferStorage(B);
-  id<MTLBuffer> luBuffer = getMTLBufferStorage(LU);
-  id<MTLBuffer> resultBuffer = getMTLBufferStorage(result);
+  Tensor result_t;
+  if (!left) {
+    // For right solve, we'll need to transpose the result back later
+    result_t = at::empty_like(B_t, B_t.options());
+  } else {
+    result_t = result;
+  }
+  id<MTLBuffer> luBuffer = getMTLBufferStorage(LU_);
+  id<MTLBuffer> bBuffer = getMTLBufferStorage(B_t);
+  id<MTLBuffer> resultBuffer = getMTLBufferStorage(result_t);
 
   MPSStream* mpsStream = getCurrentMPSStream();
   id<MTLDevice> device = MPSDevice::getInstance()->device();
 
+  mpsStream->synchronize(SyncType::COMMIT_AND_WAIT);
   dispatch_sync_with_rethrow(mpsStream->queue(), ^() {
     @autoreleasepool {
       id<MTLCommandBuffer> commandBuffer = mpsStream->commandBuffer();
@@ -314,38 +332,30 @@ static void linalg_solve_out_mps_impl(const at::Tensor& A,
                                                                                       columns:aCols] autorelease];
 
       MPSMatrixSolveLU* solver = [[[MPSMatrixSolveLU alloc] initWithDevice:device
-                                                                 transpose:!left
+                                                                 transpose:false
                                                                      order:aRows
                                                     numberOfRightHandSides:numberOfRightHandSides] autorelease];
 
-      MPSMatrixDescriptor* aMatrixDesc = [MPSMatrixDescriptor matrixDescriptorWithRows:aRows
-                                                                               columns:aCols
-                                                                              matrices:1
-                                                                              rowBytes:aCols * aElemSize
-                                                                           matrixBytes:aRows * aCols * aElemSize
-                                                                              dataType:getMPSDataType(A_)];
       MPSMatrixDescriptor* luMatrixDesc = [MPSMatrixDescriptor matrixDescriptorWithRows:aRows
                                                                                 columns:aCols
                                                                                matrices:1
                                                                                rowBytes:aCols * aElemSize
                                                                             matrixBytes:aRows * aCols * aElemSize
-                                                                               dataType:getMPSDataType(LU)];
-
+                                                                               dataType:getMPSDataType(LU_)];
       MPSMatrixDescriptor* rhsMatrixDesc =
           [MPSMatrixDescriptor matrixDescriptorWithRows:aRows
                                                 columns:numberOfRightHandSides
                                                matrices:1
                                                rowBytes:numberOfRightHandSides * aElemSize
-                                            matrixBytes:(aRows * numberOfRightHandSides) * aElemSize
-                                               dataType:getMPSDataType(B)];
-
+                                            matrixBytes:aRows * numberOfRightHandSides * aElemSize
+                                               dataType:getMPSDataType(B_t)];
       MPSMatrixDescriptor* resultMatrixDesc =
           [MPSMatrixDescriptor matrixDescriptorWithRows:aRows
                                                 columns:numberOfRightHandSides
                                                matrices:1
                                                rowBytes:numberOfRightHandSides * aElemSize
                                             matrixBytes:aRows * numberOfRightHandSides * aElemSize
-                                               dataType:getMPSDataType(result)];
+                                               dataType:getMPSDataType(result_t)];
       MPSMatrixDescriptor* pivotsMatrixDesc = [MPSMatrixDescriptor matrixDescriptorWithRows:1
                                                                                     columns:numPivots
                                                                                    matrices:1
@@ -354,20 +364,19 @@ static void linalg_solve_out_mps_impl(const at::Tensor& A,
                                                                                    dataType:MPSDataTypeUInt32];
 
       for (const auto i : c10::irange(batchSize)) {
-        const uint64_t batchOffset = i * aRows * aCols;
+        const uint64_t batchOffsetA = i * aRows * aCols;
+        const uint64_t batchOffsetB = i * aRows * numberOfRightHandSides;
         MPSMatrix* mpsLU = [[[MPSMatrix alloc] initWithBuffer:luBuffer
-                                                       offset:(LU.storage_offset() + batchOffset) * aElemSize
+                                                       offset:(LU_.storage_offset() + batchOffsetA) * aElemSize
                                                    descriptor:luMatrixDesc] autorelease];
 
-        MPSMatrix* mpsRHS =
-            [[[MPSMatrix alloc] initWithBuffer:bBuffer
-                                        offset:(B.storage_offset() + i * aRows * numberOfRightHandSides) * aElemSize
-                                    descriptor:rhsMatrixDesc] autorelease];
+        MPSMatrix* mpsRHS = [[[MPSMatrix alloc] initWithBuffer:bBuffer
+                                                        offset:(B_t.storage_offset() + batchOffsetB) * aElemSize
+                                                    descriptor:rhsMatrixDesc] autorelease];
 
-        MPSMatrix* mpsResult = [[[MPSMatrix alloc]
-            initWithBuffer:resultBuffer
-                    offset:(result.storage_offset() + i * aRows * numberOfRightHandSides) * aElemSize
-                descriptor:resultMatrixDesc] autorelease];
+        MPSMatrix* mpsResult = [[[MPSMatrix alloc] initWithBuffer:resultBuffer
+                                                           offset:(result_t.storage_offset() + batchOffsetB) * aElemSize
+                                                       descriptor:resultMatrixDesc] autorelease];
 
         MPSMatrix* mpsPivots = [[[MPSMatrix alloc] initWithBuffer:getMTLBufferStorage(pivots_list[i])
                                                            offset:0
@@ -387,21 +396,25 @@ static void linalg_solve_out_mps_impl(const at::Tensor& A,
     }
   });
 
-  auto stacked_status = A_.dim() > 2 ? at::stack(status_tensors) : status_tensors[0];
-  std::vector<int64_t> info_sizes(A_t.sizes().begin(), A_t.sizes().end() - 2);
+  auto stacked_status = A.dim() > 2 ? at::stack(status_tensors) : status_tensors[0];
+  std::vector<int64_t> info_sizes(A.sizes().begin(), A.sizes().end() - 2);
   info.copy_(stacked_status.view(info_sizes));
 
   if (check_errors) {
     for (const auto i : c10::irange(status_tensors.size())) {
       int status = status_tensors[i].item<int>();
-      TORCH_CHECK(
-          status == 0,
-          "solve(): Linear solve failed at the ",
-          i + 1,
-          " sample with status: ",
-          status,
-          ". See https://developer.apple.com/documentation/metalperformanceshaders/mpsmatrixdecompositionstatus for details.");
+      TORCH_CHECK(status == 0,
+                  "solve(): Linear solve failed at the ",
+                  i + 1,
+                  " sample with status: ",
+                  status,
+                  ". See https://developer.apple.com/documentation/metalperformanceshaders/"
+                  "mpsmatrixdecompositionstatus for details.");
     }
+  }
+  if (!left) {
+    // If this was a right solve, transpose the result back
+    result.copy_(result_t.transpose(-2, -1).contiguous());
   }
 }
 
