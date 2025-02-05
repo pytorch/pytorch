@@ -123,7 +123,7 @@ struct TORCH_CUDA_CPP_API CUDAEvent {
     // purposes, assuming that we set cudaEventRecordExternal. It should be noted that events
     // which are used for other purposes such as synchronization must not be recorded with
     // cudaEventRecordExternal. In this case we assume that the cudaEventDisableTiming must be
-    // set such as in `torch.cuda.streams.Stream.wait_stream(...)`.
+    // set such as in `torch.cuda.Stream.wait_stream(...)`.
     AT_CUDA_CHECK(
       cudaEventRecordWithFlags(
         event_,
