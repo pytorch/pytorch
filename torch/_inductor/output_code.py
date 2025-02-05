@@ -51,7 +51,6 @@ from torch._inductor.utils import (
     output_node,
     set_tracing_context_output_strides,
 )
-from torch._inductor.virtualized import V
 from torch.utils._ordered_set import OrderedSet
 
 from . import config
@@ -458,8 +457,7 @@ class CompiledFxGraph(OutputCode):
         # TODO: should this be part of fx_kwargs
         self.boxed_forward_device_index = boxed_forward_device_index
 
-        # Save the compile context so we can make it available at runtime
-        # for logging purposes.
+        # Set the compile context so it's available for logging runtime events.
         self._runtime_ctx = RuntimeCompileContext(
             torch._guards.CompileContext.current_trace_id(),
         )
@@ -578,6 +576,7 @@ class CompiledFxGraph(OutputCode):
                     constants.unwrap(self),
                 ).call
 
+            # Set the compile context so it's available for logging runtime events.
             self._runtime_ctx = RuntimeCompileContext(
                 torch._guards.CompileContext.current_trace_id(),
             )
