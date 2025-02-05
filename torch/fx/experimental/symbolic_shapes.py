@@ -5894,6 +5894,7 @@ class ShapeEnv:
         unhinted_expr: sympy.Basic,
         *,
         size_oblivious_result: Optional[sympy.Basic] = None,
+        expr_sym_node: Optional[SymNode] = None,
     ) -> GuardOnDataDependentSymNode:
         # TODO: in a Dynamo context, having user code, and having the
         # name of the local, will be much better
@@ -5932,6 +5933,18 @@ class ShapeEnv:
             + maybe_extra_debug
             # TODO: Help text about how to use our runtime tests to fix this
             # problem
+        )
+
+        dtrace_structured(
+            "guard_on_data_dependent_error",
+            metadata_fn=lambda: {
+                "expr": repr(expr),
+                "unhinted_expr": repr(unhinted_expr),
+                "expr_id": id(expr_sym_node),
+                "stack": structured.from_traceback(
+                    CapturedTraceback.extract(skip=1).summary()
+                ),
+            },
         )
         return GuardOnDataDependentSymNode(expr, msg)
 
@@ -6686,6 +6699,7 @@ class ShapeEnv:
                             expr.xreplace(self.var_to_val),
                             expr,
                             size_oblivious_result=size_oblivious_result,
+                            expr_sym_node = expr_sym_node,
                         )
                 else:
                     expr = new_expr
