@@ -280,7 +280,7 @@ class ComputeCodegenUnboxedKernels:
             [
                 f"""
 Kernel(
-    "{f.namespace}::{f.func.name}",{newline + '"' + (k + '",') if k != 'default' else ''}
+    "{f.namespace}::{f.func.name}",{newline + '"' + (k + '",') if k != "default" else ""}
     []({contextArg.defn()}, EValue** stack) {{
         {code_connector.join(code_list)}
 

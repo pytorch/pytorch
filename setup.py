@@ -1455,8 +1455,7 @@ def main():
         name=package_name,
         version=version,
         description=(
-            "Tensors and Dynamic neural networks in "
-            "Python with strong GPU acceleration"
+            "Tensors and Dynamic neural networks in Python with strong GPU acceleration"
         ),
         long_description=long_description,
         long_description_content_type="text/markdown",

@@ -79,7 +79,7 @@ class TryMergeExplainer:
             (
                 "<details><summary>Advanced Debugging</summary>",
                 "Check the merge workflow status ",
-                f"<a href=\"{os.getenv('GH_RUN_URL')}\">here</a>",
+                f'<a href="{os.getenv("GH_RUN_URL")}">here</a>',
                 "</details>",
             )
         )

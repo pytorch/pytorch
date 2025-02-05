@@ -544,9 +544,13 @@ class Exporter:
         # https://github.com/pytorch/pytorch/issues/103764
         from torch.onnx._internal.fx import decomposition_skip
 
-        with self.options.diagnostic_context, decomposition_skip.enable_decomposition_skips(
-            self.options
-        ), torch._dynamo.config.patch(dataclasses.asdict(DEFAULT_EXPORT_DYNAMO_CONFIG)):
+        with (
+            self.options.diagnostic_context,
+            decomposition_skip.enable_decomposition_skips(self.options),
+            torch._dynamo.config.patch(
+                dataclasses.asdict(DEFAULT_EXPORT_DYNAMO_CONFIG)
+            ),
+        ):
             graph_module = self.options.fx_tracer.generate_fx(
                 self.options, self.model, self.model_args, self.model_kwargs
             )

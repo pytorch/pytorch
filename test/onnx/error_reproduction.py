@@ -163,7 +163,7 @@ torch=={torch.__version__}"""
         onnx_model_text=onnx_model_text,
     )
 
-    markdown_file_name = f'mismatch-{short_test_name.replace("/", "-").replace(":", "-")}-{str(time.time()).replace(".", "_")}.md'
+    markdown_file_name = f"mismatch-{short_test_name.replace('/', '-').replace(':', '-')}-{str(time.time()).replace('.', '_')}.md"
     markdown_file_path = save_error_report(markdown_file_name, markdown)
     print(f"Created reproduction report at {markdown_file_path}")
 

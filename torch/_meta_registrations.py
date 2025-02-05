@@ -4423,8 +4423,7 @@ def pool3d_shape_check(
     torch._check(
         dT > 0 and dW > 0 and dH > 0,
         lambda: (
-            f"stride should be greater than zero, but got "
-            f"dT: {dT}, dH: {dH}, dW: {dW}"
+            f"stride should be greater than zero, but got dT: {dT}, dH: {dH}, dW: {dW}"
         ),
     )
     torch._check(

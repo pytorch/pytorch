@@ -1410,7 +1410,7 @@ def emit_body(
 
             if all_forward_grad_cond:
                 if not is_inplace_foreach:
-                    body.append(f'if ({" || ".join(all_forward_grad_cond)}) {{')
+                    body.append(f"if ({' || '.join(all_forward_grad_cond)}) {{")
                     body.append("  original_self = self.clone();")
                     body.append("}")
                 else:
@@ -1801,7 +1801,7 @@ def emit_body(
         if len(var_names) == 1:
             return f"_any_has_forward_grad_{var_names[0]}"
         else:
-            return f'_any_has_forward_grad_{"_".join(var_names)}'
+            return f"_any_has_forward_grad_{'_'.join(var_names)}"
 
     def emit_any_has_forward_grad() -> list[str]:
         content: list[str] = []
@@ -2089,7 +2089,7 @@ def emit_body(
                     raise RuntimeError(
                         f'Unsupported input type for "{name}" when forbidding forward AD usage.'
                     )
-            return f'({" || ".join(to_check)})'
+            return f"({' || '.join(to_check)})"
         else:
             # (2) If derivative is provided, use that information to determine which inputs
             #     to check fw_grad for

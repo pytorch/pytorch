@@ -145,7 +145,7 @@ Labels: {features.labels}
 
 Current category: {commit.category}
 
-Select from: {', '.join(common.categories)}
+Select from: {", ".join(common.categories)}
 
         """
         )
@@ -165,7 +165,7 @@ Select from: {', '.join(common.categories)}
             cat_choice = choices[0]
         print(f"\nSelected: {cat_choice}")
         print(f"\nCurrent topic: {commit.topic}")
-        print(f"""Select from: {', '.join(topics)}""")
+        print(f"""Select from: {", ".join(topics)}""")
         topic_choice = None
         while topic_choice is None:
             value = input("topic> ").strip()

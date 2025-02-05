@@ -853,8 +853,7 @@ def ignore(drop=False, **kwargs):
 
     if not isinstance(drop, bool):
         raise RuntimeError(
-            "Argument to @torch.jit.ignore must be a bool or "
-            f"a function but got {drop}"
+            f"Argument to @torch.jit.ignore must be a bool or a function but got {drop}"
         )
 
     # for backwards compat
@@ -1537,7 +1536,7 @@ def _get_model_id(obj) -> Optional[str]:
 # In Python-3.11+ typed enums (i.e. IntEnum for example) retain number of base class methods in subclass
 # that were previously dropped. To preserve the behavior, explicitly drop them there
 
-if sys.version_info > (3, 10):
+if sys.version_info >= (3, 11):
     _drop(enum.Enum.__new__)
     _drop(enum.Enum.__format__)
     _drop(enum.Enum.__repr__)

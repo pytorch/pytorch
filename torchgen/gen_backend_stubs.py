@@ -119,10 +119,10 @@ def parse_backend_yaml(
     # ir_gen is ignored by parse_backend_yaml, and re-parsed in gen_lazy_tensor.py
     yaml_values.pop("ir_gen", {})
 
-    assert (
-        len(yaml_values.keys()) == 0
-    ), f'{backend_yaml_path} contains unexpected keys: {", ".join(yaml_values.keys())}. \
-Only the following keys are supported: {", ".join(valid_keys)}'
+    assert len(yaml_values.keys()) == 0, (
+        f"{backend_yaml_path} contains unexpected keys: {', '.join(yaml_values.keys())}. "
+        f"Only the following keys are supported: {', '.join(valid_keys)}"
+    )
 
     def create_backend_index(
         backend_ops: list[str],
