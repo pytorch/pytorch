@@ -265,6 +265,8 @@ class CachingAutotuner(KernelInterface):
             self._precompile_worker()
             self._make_launchers()
             self._dynamic_scale_rblock(reload_in_parent)
+            if reload_in_parent is not None:
+                self._reload_in_parent = reload_in_parent
 
     def _precompile_worker(self):
         if self.compile_results:
@@ -823,6 +825,14 @@ class CachingAutotuner(KernelInterface):
             return launcher
 
         config2launcher = {launcher.config: launcher}
+
+        # If we haven't loaded the function in the parent yet, we have to
+        # in order to run coordesc tuning.
+        # TODO: should we just do this ahead of time if we know we're going to call this?
+        if self.fn.fn is None:
+            assert hasattr(self, "_reload_in_parent")
+            assert callable(self._reload_in_parent)
+            self.fn = self._reload_in_parent().fn
 
         def benchmark_one_config(config):
             with self.lock:
