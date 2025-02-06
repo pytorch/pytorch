@@ -498,7 +498,7 @@ class TestWithNCCL(MultiProcessTestCase):
     @skipIfRocm
     @unittest.skipIf(
         not SM90OrLater,
-        "_fused_all_gather_matmul_native currently only supports sm>=90",
+        "_scaled_mm currently only supports sm>=90",
     )
     @skip_if_lt_x_gpu(2)
     @fresh_inductor_cache()
@@ -549,7 +549,7 @@ class TestWithNCCL(MultiProcessTestCase):
             in_, w, out_grad
         )
 
-        assert torch.allclose(compile_w_grad, eager_w_grad)
+        self.assertTrue(torch.allclose(compile_w_grad, eager_w_grad))
 
 
 class CompileTest(TestCase):
