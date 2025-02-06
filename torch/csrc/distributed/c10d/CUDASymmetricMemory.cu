@@ -980,8 +980,8 @@ class NVSHMEMSymmetricMemory : public SymmetricMemory {
         cudaMemcpyHostToDevice));
   }
 
-  ~NVSHMEMSymmetricMemory() override {
-    // TODO
+  ~NVSHMEMSymmetricMemory() override{
+      // TODO
   };
 
   std::vector<void*> get_buffer_ptrs() override {
@@ -1107,7 +1107,11 @@ class NVSHMEMSymmetricMemory : public SymmetricMemory {
   void put_signal(int dst_rank, int channel, size_t timeout_ms) override {
     check_channel(channel, world_size_);
     c10::cuda::CUDAGuard guard(device_idx_);
-    put_signal_kernel<<<1, C10_WARP_SIZE, 0, at::cuda::getCurrentCUDAStream()>>>(
+    put_signal_kernel<<<
+        1,
+        C10_WARP_SIZE,
+        0,
+        at::cuda::getCurrentCUDAStream()>>>(
         reinterpret_cast<uint32_t**>(signal_pads_dev_),
         dst_rank,
         channel,
@@ -1120,7 +1124,11 @@ class NVSHMEMSymmetricMemory : public SymmetricMemory {
   void wait_signal(int src_rank, int channel, size_t timeout_ms) override {
     check_channel(channel, world_size_);
     c10::cuda::CUDAGuard guard(device_idx_);
-    wait_signal_kernel<<<1, C10_WARP_SIZE, 0, at::cuda::getCurrentCUDAStream()>>>(
+    wait_signal_kernel<<<
+        1,
+        C10_WARP_SIZE,
+        0,
+        at::cuda::getCurrentCUDAStream()>>>(
         reinterpret_cast<uint32_t**>(signal_pads_dev_),
         src_rank,
         channel,
@@ -1168,6 +1176,7 @@ class NVSHMEMSymmetricMemoryAllocator : public SymmetricMemoryAllocator {
     auto symm_mem = c10::make_intrusive<NVSHMEMSymmetricMemory>(
         size, device_idx, rank, world_size);
     void* ptr = symm_mem->get_buffer_ptrs()[rank];
+    // TODO: thread safety
     ptr_to_symm_mem_[ptr] = symm_mem;
     return ptr;
   }

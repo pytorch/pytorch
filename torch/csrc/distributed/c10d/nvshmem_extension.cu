@@ -2,6 +2,8 @@
 
 #include <c10/cuda/CUDAGuard.h>
 
+#include <torch/csrc/distributed/c10d/SymmetricMemory.hpp>
+
 #include <nvshmem.h>
 
 namespace c10d::nvshmem_extension {
@@ -79,8 +81,49 @@ void* nvshmem_malloc(size_t size) {
   return ::nvshmem_malloc(size);
 }
 
-void* nvshmem_ptr(const void *dest, int pe) {
+void* nvshmem_ptr(const void* dest, int pe) {
   return ::nvshmem_ptr(dest, pe);
 }
 
+__global__ void ring_bcast(int* data, size_t nelem, int root, uint64_t* psync) {
+  int mype = nvshmem_my_pe();
+  int npes = nvshmem_n_pes();
+  int peer = (mype + 1) % npes;
+
+  if (mype == root)
+    *psync = 1;
+
+  nvshmem_signal_wait_until(psync, NVSHMEM_CMP_NE, 0);
+
+  if (mype == npes - 1)
+    return;
+
+  nvshmem_int_put(data, data, nelem, peer);
+  nvshmem_fence();
+  nvshmemx_signal_op(psync, 1, NVSHMEM_SIGNAL_SET, peer);
+
+  *psync = 0;
 }
+
+at::Tensor nvshmem_hello(at::Tensor& input) {
+  auto symm_mem = c10d::symmetric_memory::rendezvous(input, "0");
+  int rank = symm_mem->get_rank();
+  int world_size = symm_mem->get_world_size();
+
+  void* buffer_ptr = symm_mem->get_buffer_ptrs()[rank];
+  void* signal_pad_ptr = symm_mem->get_signal_pad_ptrs()[rank];
+  size_t buffer_size = symm_mem->get_buffer_size();
+  int root = 0;
+  void* args[] = {&buffer_ptr, &buffer_size, &root, &signal_pad_ptr};
+
+  dim3 grid_dim(1), block_dim(1);
+  auto stream = at::cuda::getCurrentCUDAStream();
+  nvshmemx_barrier_all_on_stream(stream);
+  nvshmemx_collective_launch(
+      (const void*)ring_bcast, grid_dim, block_dim, args, 0, stream);
+  nvshmemx_barrier_all_on_stream(stream);
+
+  return input;
+}
+
+} // namespace c10d::nvshmem_extension

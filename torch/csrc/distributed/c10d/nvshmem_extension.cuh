@@ -13,6 +13,8 @@ void initialize_nvshmem_with_store(
 
 void* nvshmem_malloc(size_t size);
 
-void* nvshmem_ptr(const void *dest, int pe);
+void* nvshmem_ptr(const void* dest, int pe);
 
-}
+at::Tensor nvshmem_hello(at::Tensor& input);
+
+} // namespace c10d::nvshmem_extension
