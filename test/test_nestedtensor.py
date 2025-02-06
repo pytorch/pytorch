@@ -7679,6 +7679,22 @@ torch.cuda.synchronize()
         for dynamic in [False, True, None]:
             self.assertFalse(_recompiles_for_inputs(f, (nt,), (nt2,), dynamic=dynamic))
 
+    def test_dropout_inference_mode(self, device):
+        seq_len = 32
+        embed_dim = 128
+
+        nt = torch.nested.nested_tensor(
+            [
+                torch.randn(11, seq_len, embed_dim, device=device),
+                torch.randn(11, seq_len, embed_dim, device=device),
+            ],
+            layout=torch.jagged,
+            device=device,
+        )
+
+        with torch.inference_mode():
+            torch.nn.functional.dropout(nt, p=0.05)
+
     @dtypes(torch.float32, torch.double, torch.half)
     def test_unbind_backward(self, device, dtype):
         nt = torch.nested.nested_tensor(
