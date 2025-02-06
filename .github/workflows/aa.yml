@@ -1,0 +1,42 @@
+name: Check PR Template
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, edited]
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+    - name: Clone paddle
+      uses: actions/checkout@v4
+
+    - name: Setup Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.13'
+        cache: 'pip'
+
+    - name: Install dependencies
+      run: |
+        pip install httpx
+
+    - name: Check PR Template
+      env:
+        AGILE_PULL_ID: ${{ github.event.pull_request.number }}
+        GITHUB_API_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      run: |
+        python tools/CheckPRTemplate.py; EXCODE=$?
+        echo "EXCODE: $EXCODE"
+        echo "ipipe_log_param_EXCODE: $EXCODE"
+        set +x
+        if [[ "$EXCODE" != "0" ]];then
+          echo -e "######################################################"
+          echo -e "If you encounter a situation where the PR template does not match the error message, please use the following link to update your PR: [  https://raw.githubusercontent.com/PaddlePaddle/Paddle/develop/.github/PULL_REQUEST_TEMPLATE.md ]"
+          echo -e "##ReferenceDocumentation: ##"
+          echo -e "[ https://github.com/PaddlePaddle/Paddle/wiki/PULL-REQUEST-TEMPLATE--REFERENCE ]"
+          echo -e "[ https://github.com/PaddlePaddle/Paddle/wiki/paddle_ci_manual ]"
+          echo -e "######################################################"
+        fi
