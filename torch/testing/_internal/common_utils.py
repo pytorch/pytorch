@@ -5606,9 +5606,4 @@ def recover_orig_fp32_precision(fn):
             torch.backends.cudnn.rnn.fp32_precision = old_cudnn_rnn_p
             torch.backends.cuda.matmul.fp32_precision = old_cuda_matmul_p
 
-    @wraps(fn)
-    def wrapper(*args, **kwargs):
-        with recover():
-            fn(*args, **kwargs)
-
-    return wrapper
+    return recover()(fn)
