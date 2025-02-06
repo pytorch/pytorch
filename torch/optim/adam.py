@@ -367,17 +367,11 @@ def _single_tensor_adam(
 
     if isinstance(lr, Tensor):
         if differentiable:
-            if lr.dim() > 1 or lr.numel() != 1:
-                raise ValueError(
-                    "Tensor lr must be 0-dimension, or 1-dimension and 1-element "
-                    "for differentiable=True"
-                )
+            if lr.dim() > 1:
+                lr = lr.squeeze()
         else:
             if lr.dim() != 0:
-                raise ValueError(
-                    "Tensor lr must be 0-dimension "
-                    "for differentiable=False, foreach=False, and fused=False"
-                )
+                lr = lr.squeeze()
 
     if torch.jit.is_scripting():
         # this assert is due to JIT being dumb and not realizing that the ops below
@@ -576,9 +570,7 @@ def _multi_tensor_adam(
                 "lr as a Tensor is not supported for capturable=False and foreach=True"
             )
         if lr.device.type != "cpu" and lr.dim() != 0:
-            raise ValueError(
-                "Tensor lr on non-CPU device must be 0-dimension for foreach=True"
-            )
+            lr = lr.squeeze()
 
     # If compiling, the compiler will handle cudagraph checks, see note [torch.compile x capturable]
     if not torch.compiler.is_compiling() and capturable:
