@@ -21,13 +21,11 @@ namespace native {
 
 // expand potential 3d to 4d tensor
 static inline std::tuple<Tensor, bool> ensure_4d(const Tensor& x) {
-    bool squeezed = false;
-    auto t = x;
     if (x.dim() == 3) {
-        t = x.unsqueeze(0);
-        squeezed = true;
-    }
-    return {std::move(t), squeezed};
+     return {x.unsqueeze(0), true};
+   } else {
+     return {x, false};
+   }
 }
 
 std::tuple<Tensor, Tensor> _scaled_dot_product_attention_math_mps(const Tensor& query,
