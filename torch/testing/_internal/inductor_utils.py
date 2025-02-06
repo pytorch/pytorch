@@ -15,6 +15,7 @@ from torch._inductor.utils import GPU_TYPES, get_gpu_type
 from torch.utils._triton import has_triton
 from torch.testing._internal.common_utils import (
     LazyVal,
+    IS_FBCODE,
 )
 from torch.testing._internal.common_utils import (
     TestCase,
@@ -27,7 +28,7 @@ log: logging.Logger = logging.getLogger(__name__)
 def test_cpu():
     try:
         CppCodeCache.load("")
-        return True
+        return not IS_FBCODE
     except (
         CalledProcessError,
         OSError,

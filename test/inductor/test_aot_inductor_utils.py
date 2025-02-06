@@ -107,9 +107,14 @@ class AOTIRunnerUtil:
         inductor_configs=None,
         dynamic_shapes=None,
     ):
+        if not isinstance(model, torch.nn.Module):
+            # This should really be the default behavior of torch.export.export
+            model = WrapperModule(model)
+
         with torch.no_grad():
+            # strict=False needs extra migration work
             ep = torch.export.export(
-                model, example_inputs, dynamic_shapes=dynamic_shapes, strict=False
+                model, example_inputs, dynamic_shapes=dynamic_shapes, strict=True
             )
             package_path = torch._inductor.aoti_compile_and_package(
                 ep, inductor_configs=inductor_configs

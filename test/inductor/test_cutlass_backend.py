@@ -292,7 +292,6 @@ class TestCutlassBackend(TestCase):
             Y = model(a, b)
             if use_aoti:
                 Y_compiled = AOTIRunnerUtil.run(
-                    "cuda",
                     model,
                     (a, b),
                 )

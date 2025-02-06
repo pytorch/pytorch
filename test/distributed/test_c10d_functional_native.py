@@ -549,7 +549,7 @@ class CompileTest(TestCase):
         assert "= torch.ops._c10d_functional.wait_tensor.default" not in code
 
         # Test aoti
-        AOTIRunnerUtil.run("cuda", func, (arg,))
+        AOTIRunnerUtil.run(func, (arg,))
         torch.cuda.synchronize()
 
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
@@ -595,7 +595,7 @@ class CompileTest(TestCase):
         assert "= torch.ops._c10d_functional.wait_tensor.default" not in code
 
         # Test aoti
-        out = AOTIRunnerUtil.run("cuda", func, (args,))  # noqa: F841
+        out = AOTIRunnerUtil.run(func, (args,))  # noqa: F841
         torch.cuda.synchronize()
 
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
@@ -707,7 +707,7 @@ class CompileTest(TestCase):
         assert "= torch.ops._c10d_functional.wait_tensor.default" not in code
 
         # Test aoti
-        AOTIRunnerUtil.run("cuda", func, (arg,))
+        AOTIRunnerUtil.run(func, (arg,))
         torch.cuda.synchronize()
 
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
@@ -741,7 +741,7 @@ class CompileTest(TestCase):
         )
 
         # Test aoti
-        out = AOTIRunnerUtil.run("cuda", func, (args,))  # noqa: F841
+        out = AOTIRunnerUtil.run(func, (args,))  # noqa: F841
         torch.cuda.synchronize()
 
     @unittest.skipIf(not HAS_GPU, "This is a GPU test!")
@@ -763,7 +763,7 @@ class CompileTest(TestCase):
         )
 
         # Test aoti
-        AOTIRunnerUtil.run("cuda", func, (arg,))
+        AOTIRunnerUtil.run(func, (arg,))
         torch.cuda.synchronize()
 
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
@@ -789,7 +789,7 @@ class CompileTest(TestCase):
         )
 
         # Test aoti
-        AOTIRunnerUtil.run("cuda", func, (arg,))
+        AOTIRunnerUtil.run(func, (arg,))
         torch.cuda.synchronize()
 
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
@@ -825,7 +825,7 @@ class CompileTest(TestCase):
         )
 
         # Test aoti
-        AOTIRunnerUtil.run("cuda", func, (args,))
+        AOTIRunnerUtil.run(func, (args,))
         torch.cuda.synchronize()
 
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
@@ -909,7 +909,7 @@ class CompileTest(TestCase):
         )
 
         # Test aoti
-        AOTIRunnerUtil.run("cuda", func, (arg,))
+        AOTIRunnerUtil.run(func, (arg,))
         torch.cuda.synchronize()
 
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")

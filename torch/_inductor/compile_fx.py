@@ -249,7 +249,10 @@ def _warn_tf32_disabled() -> None:
 
 
 def _unlift_graph(
-    mod: GraphModule, gm: GraphModule, graph_signature: GraphSignature
+    mod: GraphModule,
+    gm: GraphModule,
+    graph_signature: GraphSignature,
+    fake_mode: torch._subclasses.FakeTensorMode,
 ) -> GraphModule:
     from torch.export.unflatten import _assign_attr, _AttrKind
 
@@ -270,6 +273,13 @@ def _unlift_graph(
             name,
             attr_kind=_AttrKind.BUFFER,
         )
+
+    # Set missing metadata similar to torch.export._trace.set_missing_meta_vals
+    for node in gm.graph.nodes:
+        if node.op == "get_attr":
+            val = getattr(gm, node.target, None)
+            if isinstance(val, torch.Tensor) and "val" not in node.meta:
+                node.meta["val"] = fake_mode.from_tensor(val, static_shapes=True)
 
     placeholder_nodes = gm.graph.find_nodes(op="placeholder")
     lifted_inputs: list[Optional[FQN]] = []
@@ -610,6 +620,10 @@ def compile_fx_inner(
         # the counter here because we may dropped into compile_fx directly
         # from lazy backwards compilation.
         stack.enter_context(_WaitCounter("pytorch.wait_counter.dynamo_compile").guard())
+
+        if torch._dynamo.callback_handler.prevent_duplicate_callbacks:
+            stack.enter_context(torch._dynamo.callback_handler.install_callbacks())
+
         stack.enter_context(with_fresh_cache_if_config())
         stack.enter_context(DebugContext())
         CompileEventLogger.pt2_compile(
@@ -809,7 +823,7 @@ def _compile_fx_inner(
 
         # Don't clog up the main tlparse output with disabled cache
         if cache_info is not None:
-            torch._logging.trace_structured(
+            trace_structured(
                 "artifact",
                 metadata_fn=lambda: {
                     "name": f"fx_graph_cache_{cache_state}",
@@ -913,7 +927,7 @@ class _InProcessFxCompile(FxCompile):
                 )
                 return fd.getvalue()
 
-            torch._logging.trace_structured(
+            trace_structured(
                 "artifact",
                 metadata_fn=lambda: {
                     "name": "fx_graph_runnable",
@@ -992,7 +1006,10 @@ class _InProcessFxCompile(FxCompile):
                             "name": "inductor_post_to_pre_grad_nodes",
                             "encoding": "json",
                         },
-                        payload_fn=lambda: provenance_tracking_json,
+                        payload_fn=lambda: json.dumps(provenance_tracking_json),
+                    )
+                    torch._inductor.debug._inductor_post_to_pre_grad_nodes = (
+                        provenance_tracking_json
                     )
                 if config.is_fbcode():
                     log_optimus_to_scuba(
@@ -1674,8 +1691,6 @@ def fw_compiler_freezing(
         aot_example_inputs,  # type: ignore[arg-type]
     )
 
-    setattr(opt_model, "_has_frozen_params", True)  # noqa: B010
-
     aot_example_inputs = [aot_example_inputs[ind] for ind in preserved_arg_indices]
     num_fixed = len(preserved_arg_indices) - num_example_inputs
 
@@ -1923,6 +1938,7 @@ def compile_fx(
                     colored=True,
                 ),
             )
+            torch._inductor.debug._pre_grad_graph_id = id(model_.graph)
 
             model_ = _recursive_pre_grad_passes(model_, example_inputs_)
 
@@ -2126,7 +2142,7 @@ def compile_fx(
                     trace_joint=False,
                     decompositions=decompositions,
                 )
-            unlifted_gm = _unlift_graph(model_, gm, graph_signature)
+            unlifted_gm = _unlift_graph(model_, gm, graph_signature, fake_mode)
             if "dynamo_flat_name_to_original_fqn" in model_.meta:
                 unlifted_gm.meta["dynamo_flat_name_to_original_fqn"] = model_.meta[
                     "dynamo_flat_name_to_original_fqn"
