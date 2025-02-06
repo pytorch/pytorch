@@ -10,8 +10,7 @@ import torch.nn
 import torch.utils.checkpoint
 from torch._dynamo.bytecode_transformation import Instruction
 from torch._dynamo.symbolic_convert import SpeculationLog, SpeculationLogDivergence
-
-from .utils import make_dynamo_test
+from torch.testing._internal.common_utils import make_dynamo_test
 
 
 class ExceptionTests(torch._dynamo.test_case.TestCase):
@@ -475,7 +474,7 @@ class ExceptionTests(torch._dynamo.test_case.TestCase):
 
 class CPythonExceptionTests(torch._dynamo.test_case.TestCase):
     # Tests taken from CPython source code in cpython/Lib/test/test_exceptions.py
-    # https://github.com/pytorch/pytorch/blob/1c290912e4a2a1c981e2b2ad8fd63596f4ad4cd6/test/dynamo/test_exceptions.py
+    # https://github.com/python/cpython/blob/v3.13.1/Lib/test/test_exceptions.py
 
     @unittest.expectedFailure
     @make_dynamo_test
