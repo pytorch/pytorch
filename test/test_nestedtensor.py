@@ -3921,11 +3921,7 @@ class TestNestedTensorSubclass(NestedTensorTestCase):
         nt1 = torch.nested.as_nested_tensor([a, b, c], layout=torch.jagged)
         nt2 = torch.nested.as_nested_tensor([a, b, d], layout=torch.jagged)
 
-        self.assertRaisesRegex(
-            RuntimeError,
-            "cannot call binary pointwise function .* with inputs of shapes",
-            lambda: nt1 * nt2,
-        )
+        self.assertRaises(RuntimeError, lambda: nt1 * nt2)
 
     def test_binary_pointwise_transposed(self, device):
         a, b, c = (

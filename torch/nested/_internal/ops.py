@@ -1570,7 +1570,7 @@ def sum_to_size_default(func, *args, **kwargs):
     from torch.fx.experimental.symbolic_shapes import is_nested_int
     from torch.nested._internal.nested_int import _nested_assert_metadata_equal
 
-    _, new_kwargs = normalize_function(
+    _, new_kwargs = normalize_function(  # type: ignore[misc]
         func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
     )
     inp = new_kwargs.pop("input")
