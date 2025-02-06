@@ -10,7 +10,7 @@
 import json
 from dataclasses import asdict, dataclass, field
 from enum import Enum
-from typing import Dict, Optional, Union
+from typing import Optional, Union
 
 
 __all__ = ["EventSource", "Event", "NodeState", "RdzvEvent"]
@@ -42,7 +42,7 @@ class Event:
     name: str
     source: EventSource
     timestamp: int = 0
-    metadata: Dict[str, EventMetadataValue] = field(default_factory=dict)
+    metadata: dict[str, EventMetadataValue] = field(default_factory=dict)
 
     def __str__(self):
         return self.serialize()

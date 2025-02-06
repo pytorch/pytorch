@@ -36,8 +36,9 @@ class WeakTest(TestCase):
     def test_make_weak_keyed_dict_from_weak_keyed_dict(self):
         o = torch.randn(3)
         dict = WeakIdKeyDictionary({o: 364})
-        dict2 = WeakIdKeyDictionary(dict)
         self.assertEqual(dict[o], 364)
+        dict2 = WeakIdKeyDictionary(dict)
+        self.assertEqual(dict2[o], 364)
 
     def check_popitem(self, klass, key1, value1, key2, value2):
         weakdict = klass()

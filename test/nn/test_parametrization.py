@@ -1526,7 +1526,7 @@ class TestNNParametrization(NNTestCase):
         m = torch.nn.utils.parametrizations.spectral_norm(m)
         snm = m.parametrizations.weight[0]
         # this should not run into incompatible shapes
-        x = m(inp)
+        m(inp)
         # check that u refers to the same dimension
         self.assertEqual(
             snm._u.shape, m.parametrizations.weight.original[0, :, 0, 0].shape

@@ -1,6 +1,6 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
 from functools import partial
-from typing import Any, Optional, Tuple
+from typing import Any, Optional
 
 import torch
 from torch.distributed.tensor import DeviceMesh, DTensor, Replicate, Shard
@@ -44,7 +44,7 @@ def input_reshard(
 
     cx: Optional[torch.autograd.graph.saved_tensors_hooks] = None
 
-    def input_reshard_forward_pre_hook(_: torch.nn.Module, _i: Tuple[Any, ...]) -> None:
+    def input_reshard_forward_pre_hook(_: torch.nn.Module, _i: tuple[Any, ...]) -> None:
         saved_tensor_hooks = torch.autograd.graph.saved_tensors_hooks(
             partial(_pack_hook_tp, tp_device_mesh, input_reshard_dim),
             partial(_unpack_hook_tp, tp_device_mesh, input_reshard_dim),
@@ -54,7 +54,7 @@ def input_reshard(
         cx = saved_tensor_hooks  # type: ignore[name-defined]
 
     def input_reshard_backward_hook(
-        _: torch.nn.Module, _i: Tuple[Any, ...], _o: Any
+        _: torch.nn.Module, _i: tuple[Any, ...], _o: Any
     ) -> Any:
         nonlocal cx
         cx.__exit__()  # type: ignore[name-defined, union-attr]

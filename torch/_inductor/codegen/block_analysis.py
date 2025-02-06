@@ -1,7 +1,7 @@
 import collections
 import functools
 import textwrap
-from typing import List, Optional, Tuple
+from typing import Optional
 
 import sympy
 from sympy import Expr, Symbol
@@ -31,7 +31,7 @@ class BlockPatternMatcher:
         )
 
     @staticmethod
-    def get_slice_numels(dims: List[Expr]) -> List[Expr]:
+    def get_slice_numels(dims: list[Expr]) -> list[Expr]:
         """
         Compute the cumulative size of each dimension's slice.
         This proceeds from the last dim up to the second.
@@ -49,7 +49,7 @@ class BlockPatternMatcher:
         index_var: Symbol,
         numel: Expr,
         num_dims: int,
-    ) -> Optional[Tuple[List[Expr], List[Expr], List[Expr]]]:
+    ) -> Optional[tuple[list[Expr], list[Expr], list[Expr]]]:
         """
         Matches modular indexing expressions, converting them to implied block dimensions and strides.
         See triton.py for more information.
@@ -57,8 +57,8 @@ class BlockPatternMatcher:
 
         # Pattern match to find the strides and offset.
         wild = functools.partial(sympy.Wild, exclude=[index_var])
-        dims: List[Expr] = [wild(f"dim_mod{idx}") for idx in range(num_dims)]
-        strides: List[Expr] = [wild(f"stride_mod{idx}") for idx in range(num_dims)]
+        dims: list[Expr] = [wild(f"dim_mod{idx}") for idx in range(num_dims)]
+        strides: list[Expr] = [wild(f"stride_mod{idx}") for idx in range(num_dims)]
 
         # The first dimension's index is computed by division.
         # The remaining are computed by modulo.
@@ -70,6 +70,33 @@ class BlockPatternMatcher:
 
         # Calculate a linear index from block indices.
         match_expr = sympy_dot(strides, block_index_exprs)
+
+        # Heuristic: if the number of dimensions is high, check that the minimum requirements
+        # are met before attempting an expensive full match. see triton.py:match_mod_div_block
+        # for more details. In short, here we check that each subexpression in sympy.Add contains
+        # only FloorDiv or ModularIndexing expressions.
+        if num_dims >= 5:
+            stride, denom, other = sympy.symbols("stride denominator other", cls=wild)
+            mod_div_pattern = stride * ModularIndexing(index_var, denom, other)
+            floor_div_pattern = stride * FloorDiv(index_var, denom)
+            first_dim_floor_div_matched = False
+            match_failed = False
+            for arg in sympy.Add.make_args(index):
+                if arg.match(floor_div_pattern):
+                    # There should only be a single FloorDiv(index, denom) expression
+                    # corresponding to the first dimension
+                    if first_dim_floor_div_matched:
+                        match_failed = True
+                        break
+                    first_dim_floor_div_matched = True
+                elif arg.match(mod_div_pattern):
+                    continue
+                else:
+                    match_failed = True
+                    break
+
+            if match_failed:
+                return None
 
         # Pattern match.
         match = index.match(match_expr)
