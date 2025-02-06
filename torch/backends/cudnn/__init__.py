@@ -9,8 +9,8 @@ import torch
 from torch.backends import (
     __allow_nonbracketed_mutation,
     _FP32Precision,
-    _get_fp32_precision,
-    _set_fp32_precision,
+    _get_fp32_precision_getter,
+    _set_fp32_precision_setter,
     ContextProp,
     PropModule,
 )
@@ -143,7 +143,7 @@ def set_flags(
         None if not is_available() else torch._C._cuda_get_cudnn_benchmark_limit(),
         torch._C._get_cudnn_deterministic(),
         torch._C._get_cudnn_allow_tf32(),
-        torch._C._get_fp32_precision("cuda", "all"),
+        torch._C._get_fp32_precision_getter("cuda", "all"),
     )
     if _enabled is not None:
         torch._C._set_cudnn_enabled(_enabled)
@@ -156,7 +156,7 @@ def set_flags(
     if _allow_tf32 is not None:
         torch._C._set_cudnn_allow_tf32(_allow_tf32)
     if _fp32_precision is not None:
-        torch._C._set_fp32_precision("cuda", "all", _fp32_precision)
+        torch._C._set_fp32_precision_setter("cuda", "all", _fp32_precision)
     return orig_flags
 
 
@@ -214,7 +214,7 @@ class CudnnModule(PropModule):
     conv = _FP32Precision("cuda", "conv")
     rnn = _FP32Precision("cuda", "rnn")
     fp32_precision = ContextProp(
-        _get_fp32_precision("cuda", "all"), _set_fp32_precision("cuda", "all")
+        _get_fp32_precision_getter("cuda", "all"), _set_fp32_precision_setter("cuda", "all")
     )
 
 
