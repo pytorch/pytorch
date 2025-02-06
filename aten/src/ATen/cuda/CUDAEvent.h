@@ -21,7 +21,7 @@
 * `cudaEventRecordExternal`; `cudaEventTimingOnly` enables the distinction between these
 * two use cases. `cudaEventEnableTiming` must be set in conjunction with `cudaEventTimingOnly`.
 */
-#define cudaEventTimingOnly 0x05
+#define cudaEventTimingOnly 0x08
 
 namespace at::cuda {
 
