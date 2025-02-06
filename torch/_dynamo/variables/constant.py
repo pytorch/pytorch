@@ -194,7 +194,9 @@ its type to `common_constant_types`.
             return ConstantVariable.create(result)
         return super().call_method(tx, name, args, kwargs)
 
-    def call_hasattr(self, tx: "InstructionTranslator", name: str) -> "VariableTracker":
+    def call_obj_hasattr(
+        self, tx: "InstructionTranslator", name: str
+    ) -> "VariableTracker":
         result = hasattr(self.value, name)
         return variables.ConstantVariable.create(result)
 
