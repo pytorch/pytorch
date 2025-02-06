@@ -26,7 +26,7 @@ static_assert(
 #define NCCL_HAS_BF16_DATATYPE
 #endif // defined(__CUDA_BF16_TYPES_EXIST__)
 #define NCCL_HAS_AVG
-#elif defined(USE_ROCM) && (TORCH_HIP_VERSION >= 301)
+#elif defined(RCCL_BFLOAT16)
 #define NCCL_HAS_BF16_DATATYPE
 #endif // NCCL >= 2.10
 
