@@ -1358,7 +1358,7 @@ class TestFFT(TestCase):
                 'onesided': True,
             },
         ]
-        for i, pattern in enumerate(patterns):
+        for pattern in patterns:
             _test_istft_is_inverse_of_stft(pattern)
 
     @onlyNativeDeviceTypes
@@ -1425,7 +1425,7 @@ class TestFFT(TestCase):
                 'onesided': True,
             },
         ]
-        for i, pattern in enumerate(patterns):
+        for pattern in patterns:
             _test_istft_is_inverse_of_stft_with_padding(pattern)
 
     @onlyNativeDeviceTypes
