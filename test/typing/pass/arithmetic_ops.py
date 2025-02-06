@@ -156,7 +156,11 @@ NUMBER = Union[int, float, bool]
 
 
 class Binary:
-    """This class shows what is possible by overridding every magic method"""
+    """
+    This class demonstrates what is possible by overriding every magic method
+    relating to binary operations.
+    """
+
     def __add__(self, other: NUMBER) -> "Binary":  # type: ignore[override]
         return self
 
@@ -176,9 +180,6 @@ class Binary:
         return self
 
     def __gt__(self, other: NUMBER) -> "Binary":  # type: ignore[override]
-        return self
-
-    def __invert__(self, other: NUMBER) -> "Binary":  # type: ignore[override]
         return self
 
     def __le__(self, other: NUMBER) -> "Binary":  # type: ignore[override]
