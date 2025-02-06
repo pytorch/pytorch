@@ -2,6 +2,7 @@
 // Light-weight version of CUDAContext.h with fewer transitive includes
 
 #include <cstdint>
+#include <map>
 
 #include <cuda_runtime_api.h>
 #include <cusparse.h>
@@ -87,6 +88,8 @@ TORCH_CUDA_CPP_API cublasHandle_t getCurrentCUDABlasHandle();
 TORCH_CUDA_CPP_API cublasLtHandle_t getCurrentCUDABlasLtHandle();
 
 TORCH_CUDA_CPP_API void clearCublasWorkspaces();
+TORCH_CUDA_CPP_API std::map<std::tuple<void *, void *>, at::DataPtr>& cublas_handle_stream_to_workspace();
+TORCH_CUDA_CPP_API size_t getChosenWorkspaceSize();
 
 #if defined(CUDART_VERSION) || defined(USE_ROCM)
 TORCH_CUDA_CPP_API cusolverDnHandle_t getCurrentCUDASolverDnHandle();

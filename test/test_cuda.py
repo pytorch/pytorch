@@ -358,22 +358,23 @@ class TestCuda(TestCase):
         self.assertEqual(len(str(uuid)), 36)  # xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
         self.assertEqual(len(uuid.bytes), 16)
 
-    def test_copy_non_blocking(self):
-        def _test_copy_non_blocking(a, b):
-            event = torch.cuda.Event()
-            a.copy_(b, non_blocking=True)
+    def _test_copy(self, a, b, non_blocking):
+        event = torch.cuda.Event()
+        a.copy_(b, non_blocking=non_blocking)
+        if non_blocking:
             event.record()
             event.synchronize()
-            self.assertEqual(a, b)
+        self.assertEqual(a.contiguous(), b.contiguous(), atol=0, rtol=0)
 
+    def test_copy_non_blocking(self):
         # 10MB copies
         x = torch.ones(10000000, dtype=torch.uint8).cuda()
         y = torch.zeros(10000000, dtype=torch.uint8).pin_memory()
-        _test_copy_non_blocking(x, y)
+        self._test_copy(x, y, non_blocking=True)
 
         x = torch.zeros(10000000, dtype=torch.uint8).pin_memory()
         y = torch.ones(10000000, dtype=torch.uint8).cuda()
-        _test_copy_non_blocking(x, y)
+        self._test_copy(x, y, non_blocking=True)
 
         # Test the case where the pinned data_ptr is not equal to the storage data_ptr.
         x_base = torch.zeros(10000000, dtype=torch.uint8).pin_memory()
@@ -381,9 +382,11 @@ class TestCuda(TestCase):
         self.assertTrue(x.is_pinned())
         self.assertTrue(x_base.is_pinned())
         self.assertNotEqual(x_base.data_ptr(), x.data_ptr())
-        self.assertEqual(x_base.storage().data_ptr(), x.storage().data_ptr())
+        self.assertEqual(
+            x_base.untyped_storage().data_ptr(), x.untyped_storage().data_ptr()
+        )
         y = torch.ones(10000000 - 1, dtype=torch.uint8).cuda()
-        _test_copy_non_blocking(x, y)
+        self._test_copy(x, y, non_blocking=True)
 
     def test_copy_non_blocking_type_conversion(self):
         a = torch.ones(1, device="cuda")
@@ -393,6 +396,96 @@ class TestCuda(TestCase):
         b.copy_(a, non_blocking=True)
         c.copy_(b, non_blocking=True)
         self.assertEqual(a, c, exact_dtype=False)
+
+    def test_copy_2d(self):
+        # 1d
+        def _test_copy_shape(shape, slice):
+            for dst_device, non_blocking in product(("cuda", "cpu"), (True, False)):
+                src_device = "cpu" if dst_device == "cuda" else "cuda"
+                src = torch.randint(8, shape, device=src_device).__getitem__(slice)
+                dst = torch.empty_like(src, device=dst_device)
+                if non_blocking:
+                    if src_device == "cpu":
+                        src = src.pin_memory()
+                    else:
+                        dst = dst.pin_memory()
+                self._test_copy(dst, src, non_blocking)
+                dst = torch.empty(shape, device=dst_device).__getitem__(slice)
+                src = torch.randint_like(dst, 8, device=src_device)
+                if non_blocking:
+                    if src_device == "cpu":
+                        src = src.pin_memory()
+                    else:
+                        dst = dst.pin_memory()
+                self._test_copy(dst, src, non_blocking)
+
+        _test_copy_shape((12800000,), slice(None, None, 2))
+        _test_copy_shape((4, 5), (slice(None, None, None), slice(None, 4, None)))
+        _test_copy_shape(
+            (4, 5, 6),
+            (slice(None, None, None), slice(None, 4, None), slice(None, None, None)),
+        )
+        _test_copy_shape(
+            (4, 5, 6),
+            (slice(None, None, None), slice(None, None, None), slice(None, 4, None)),
+        )
+        _test_copy_shape(
+            (4, 5, 6, 8),
+            (
+                slice(None, None, None),
+                slice(None, 4, None),
+                slice(None, None, None),
+                slice(None, None, None),
+            ),
+        )
+
+    def test_copy_2d_complex(self):
+        for dst_device, non_blocking, conj in product(
+            ("cuda", "cpu"), (True, False), (True, False)
+        ):
+            src_device = "cpu" if dst_device == "cuda" else "cuda"
+            if dst_device == "cpu" and non_blocking and conj:
+                continue  # FiXME this is also broken for contiguous tensors
+            src = torch.randn((8,), dtype=torch.complex64, device=src_device)[::2]
+            dst = torch.zeros_like(src, device=dst_device)
+            if non_blocking:
+                if src_device == "cpu":
+                    src = src.pin_memory()
+                else:
+                    dst = dst.pin_memory()
+            if conj:
+                src = src.conj()
+            self._test_copy(dst, src, non_blocking)
+            dst = torch.empty((8,), dtype=torch.complex64, device=dst_device)[::2]
+            src = torch.randn_like(dst, device=src_device)
+            if non_blocking:
+                if src_device == "cpu":
+                    src = src.pin_memory()
+                else:
+                    dst = dst.pin_memory()
+            if conj:
+                src = src.conj()
+
+            self._test_copy(dst, src, non_blocking)
+
+    def test_copy_broadcast(self):
+        # broadcasted copies should not take 2d path,
+        # it would error out with cuda invalid param errors
+        def _test_copy_shape(shape_dst, shape_src):
+            for dst_device, non_blocking in product(("cuda", "cpu"), (True, False)):
+                src_device = "cpu" if dst_device == "cuda" else "cuda"
+                src = torch.randint(8, shape_src, device=src_device)
+                dst = torch.empty(shape_dst, dtype=torch.int64, device=dst_device)
+                if non_blocking:
+                    if src_device == "cpu":
+                        src = src.pin_memory()
+                    else:
+                        dst = dst.pin_memory()
+                self._test_copy(dst, src.expand_as(dst), non_blocking)
+
+        _test_copy_shape((128,), (1,))
+        _test_copy_shape((128, 128), (128, 1))
+        _test_copy_shape((128, 128), (1, 128))
 
     @serialTest()
     def test_to_non_blocking(self):
