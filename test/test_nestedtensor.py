@@ -6654,7 +6654,7 @@ torch.cuda.synchronize()
         )
         self.assertEqual(attn_out.shape, q_nt_3.shape)
 
-        # TODO(eqy): skip_backward can be removed when cuDNN NT backward is added
+        @parametrize("skip_backward", [True, False])
         def check_forward_backward(skip_backward=False):
             if not skip_backward:
                 attn_nt = torch.nn.functional.scaled_dot_product_attention(
@@ -6725,17 +6725,19 @@ torch.cuda.synchronize()
             # "group_gemm_dispatch" not implemented for 'BFloat16'
             if not (str(device).startswith("cuda") and dtype == torch.bfloat16):
                 check_forward_backward()
-        val = os.getenv("TORCH_CUDNN_SDPA_NESTED_TENSOR_ENABLED")
-        check_cudnn = int(val) if val is not None else 0
+        check_cudnn = os.getenv("TORCH_CUDNN_SDPA_NESTED_TENSOR_ENABLED", "0") == "1"
         if (
             "cuda" in str(device)
             and check_cudnn
             and (dtype == torch.float16 or dtype == torch.bfloat16)
         ):
-            with torch.nn.attention.sdpa_kernel(
-                torch.nn.attention.SDPBackend.CUDNN_ATTENTION
+            with self.assertRaisesRegex(
+                    RuntimeError, "cuDNN SDPA Nested Tensor"
             ):
-                check_forward_backward(skip_backward=True)
+                with torch.nn.attention.sdpa_kernel(
+                    torch.nn.attention.SDPBackend.CUDNN_ATTENTION
+                ):
+                    check_forward_backward()
 
     @skipIfTorchDynamo("SDPA test compiles internally")
     @unittest.skipIf(IS_WINDOWS, reason="Windows not yet supported for torch.compile")
