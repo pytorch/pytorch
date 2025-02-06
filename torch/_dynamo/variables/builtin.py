@@ -1151,6 +1151,9 @@ class BuiltinVariable(VariableTracker):
                 elif isinstance(args[0], variables.ConstDictVariable):
                     return args[0].call_method(tx, name, args[1:], kwargs)
 
+        if self.fn is str and len(args) >= 1:
+            return args[0].call_method(tx, name, args[1:], kwargs)
+
         return super().call_method(tx, name, args, kwargs)
 
     def _call_int_float(self, tx: "InstructionTranslator", arg):
