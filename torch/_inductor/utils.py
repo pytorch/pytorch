@@ -493,9 +493,10 @@ def cache_on_self(fn: Callable[Concatenate[Any, P], RV]) -> CachedMethod[P, RV]:
             try:
                 return self.{key}
             except AttributeError:
-                rv = fn(self)
-                object.__setattr__(self, "{key}", rv)
-                return rv
+                pass
+            rv = fn(self)
+            object.__setattr__(self, "{key}", rv)
+            return rv
         """.lstrip(),
         ctx,
     )
