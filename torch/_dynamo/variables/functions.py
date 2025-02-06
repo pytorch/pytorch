@@ -310,6 +310,8 @@ class UserFunctionVariable(BaseUserFunctionVariable):
         return result
 
     def var_getattr(self, tx: "InstructionTranslator", name: str):
+        if name in cmp_name_to_op_mapping:
+            return variables.GetAttrVariable(self, name)
         return fn_var_getattr(tx, self.fn, self.source, name)
 
     def call_obj_hasattr(
@@ -794,6 +796,9 @@ class SkipFunctionVariable(VariableTracker):
         return variables.ConstantVariable.create(hasattr(self.value, name))
 
     def var_getattr(self, tx: "InstructionTranslator", name: str):
+        if name in cmp_name_to_op_mapping:
+            return variables.GetAttrVariable(self, name)
+
         return fn_var_getattr(tx, self.value, self.source, name)
 
 
