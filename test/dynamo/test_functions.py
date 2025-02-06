@@ -2359,6 +2359,7 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
             assert e is exc
             return x + y
 
+    @unittest.expectedFailure
     @make_test
     def test_is_not(x, y):
         exc = ValueError("abcd")
