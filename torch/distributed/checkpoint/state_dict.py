@@ -233,6 +233,7 @@ def _iterate_valid_model_state(model, _dsd_fqn_modifiers="fqn_modifiers"):
 
     def recurse(module: nn.Module, curr_fqn: str) -> Generator:
         visited_modules.add(module)
+
         curr_fqn = f"{curr_fqn}." if curr_fqn else ""
         for name, submodule in module.named_children():
             if submodule in visited_modules:
