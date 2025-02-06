@@ -1511,6 +1511,26 @@ class AOTInductorTestsTemplate:
             dynamic_shapes=dynamic_shapes,
         )
 
+    @common_utils.parametrize("dynamic", [False, True])
+    def test_while_loop_with_sym_expr_cond(self, dynamic):
+        inputs = (
+            torch.randn(10, 20, device=self.device),
+            torch.randn(10, 20, device=self.device),
+        )
+        dim0_ab = Dim("s0", min=2, max=1024)
+        dynamic_shapes = None
+        if dynamic:
+            dynamic_shapes = {
+                "c": {},
+                "a": {0: dim0_ab, 1: None},
+                "b": {0: dim0_ab, 1: None},
+            }
+        self.check_model_with_multiple_inputs(
+            WhileLoopModels.SymExprCond(),
+            prepend_counters(inputs),
+            dynamic_shapes=dynamic_shapes,
+        )
+
     @config.patch({"is_predispatch": True})
     def test_constant(self):
         class M(torch.nn.Module):
@@ -2213,7 +2233,7 @@ class AOTInductorTestsTemplate:
         example_inputs = (torch.randn(10, 10, device=self.device),)
         optimized = torch._inductor.aoti_load_package(
             torch._inductor.aoti_compile_and_package(
-                torch.export.export(Model(), example_inputs)
+                torch.export.export(Model(), example_inputs, strict=True)
             )
         )
         try:
@@ -4322,6 +4342,24 @@ class AOTInductorTestsTemplate:
         self.code_check_count(
             model, example_inputs, "aoti_torch_clone_preserve_strides", 0
         )
+
+    @unittest.skipIf(IS_FBCODE, "Not runnable in fbcode")
+    def test_stft(self):
+        N_FFT = 400
+        HOP_LENGTH = 160
+
+        class Model(torch.nn.Module):
+            def forward(self, x):
+                window = torch.hann_window(N_FFT).to(x.device)
+                stft = torch.stft(
+                    x, N_FFT, HOP_LENGTH, window=window, return_complex=True
+                )
+                magnitudes = stft[..., :-1].abs() ** 2
+                return magnitudes
+
+        model = Model()
+        example_inputs = (torch.randn(500, device=self.device),)
+        self.check_model(model, example_inputs)
 
     def test_conv3d(self):
         if self.device != GPU_TYPE or not is_big_gpu():

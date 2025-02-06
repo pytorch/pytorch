@@ -422,7 +422,10 @@ enable_trace_contextlib = True
 enable_faithful_generator_behavior = True
 
 # Inline inbuilt nn modules
-inline_inbuilt_nn_modules = not is_fbcode()
+inline_inbuilt_nn_modules = Config(  # type: ignore[var-annotated]
+    default=True,
+    justknob="pytorch/compiler:inline_inbuilt_nn_modules",
+)
 
 # Use C++ FrameLocalsMapping (raw array view of Python frame fastlocals)
 enable_cpp_framelocals_guard_eval = True
