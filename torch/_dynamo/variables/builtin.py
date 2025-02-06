@@ -676,7 +676,8 @@ class BuiltinVariable(VariableTracker):
                     # is => left is not right -> False
                     # is not => left is right -> False
                     # is not => left is not right -> True
-                    return ConstantVariable(op(left, right))
+                    if left is right:
+                        return ConstantVariable(op(left, right))
 
                 result.append(((VariableTracker, VariableTracker), handle_is))
 
