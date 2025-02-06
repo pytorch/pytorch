@@ -155,6 +155,8 @@ class _Formatter:
                 # and printing code further in this file assumes the existence
                 # of various arithmetic ops to figure out what to print. We hack
                 # and convert to float here to make printing work correctly.
+                # TODO(#113663): also add the other float8 dtypes here after arithmetic
+                # support for them is removed
                 nonzero_finite_vals = nonzero_finite_vals.float()
 
             # Convert to double for easy calculation. HalfTensor overflows with 1e8, and there's no div() on CPU.

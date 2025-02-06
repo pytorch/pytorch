@@ -36,10 +36,7 @@ namespace detail {
  * 8-bit floating-point number in fp8 e8m0fnu format, in bit representation.
  */
 inline C10_HOST_DEVICE uint8_t fp8e8m0fnu_from_fp32_value(float f) {
-  // The current iteration of this code optimizes for readability in order to
-  // help build the first numerical test suite.
-  // TODO(before land): after we have the tests and the PR bakes for a bit,
-  // rewrite this for performance
+  // TODO(future PR): rewrite without control flow
 
   uint32_t f_bits = c10::detail::fp32_to_bits(f);
 
