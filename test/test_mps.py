@@ -91,6 +91,9 @@ def mps_ops_grad_modifier(ops):
         'lu': [torch.float16, torch.float32],  # missing `aten::lu_unpack`.
         'linalg.lu_factor': [torch.float16, torch.float32],  # missing `aten::lu_unpack`.
         'linalg.lu_factor_ex': [torch.float16, torch.float32],  # missing `aten::lu_unpack`.
+        'linalg.solve': [torch.float16, torch.float32],  # missing `aten::lu_solve`.
+        'linalg.solve_ex': [torch.float16, torch.float32],  # missing `aten::lu_solve`.
+        'linalg.tensorsolve': [torch.float16, torch.float32],  # missing `aten::lu_solve`.
         'linalg.det': [torch.float16, torch.float32],  # missing aten::lu_solve.out
         'aminmax': [torch.float32, torch.float16],
         'special.i1': [torch.float16],  # "i1_backward" not implemented for 'Half'
@@ -715,10 +718,7 @@ def mps_ops_modifier(ops):
         'linalg.normsubgradients_at_zero': [torch.float32],
         'linalg.qr': None,
         'linalg.slogdet': None,
-        'linalg.solve': None,
-        'linalg.solve_ex': None,
         'linalg.svdvals': None,
-        'linalg.tensorsolve': None,
         'linalg.vecdot': None,
         'logcumsumexp': None,
         'logdet': None,
@@ -2749,6 +2749,82 @@ class TestMPS(TestCaseMPS):
         # test >3D matrices
         run_lu_factor_ex_test(32, 10, 10, check_errors=False)
         run_lu_factor_ex_test(32, 2, 2, 2, 2, 10, 10, check_errors=True)
+
+    def test_linalg_solve(self):
+        from torch.testing._internal.common_utils import make_fullrank_matrices_with_distinct_singular_values
+
+        make_fullrank = make_fullrank_matrices_with_distinct_singular_values
+        make_arg = partial(make_fullrank, device="cpu", dtype=torch.float32)
+
+        def run_linalg_solve_test(size, *batch_dims):
+            A_cpu = make_arg(*batch_dims, size, size)
+            A_mps = A_cpu.to('mps')
+
+            for left in [True, False]:
+                if left:
+                    b_cpu = torch.randn(*batch_dims, size, 3, device='cpu', dtype=torch.float32)
+                else:
+                    b_cpu = torch.randn(*batch_dims, 3, size, device='cpu', dtype=torch.float32)
+
+                b_mps = b_cpu.to('mps')
+
+                # Solve the system
+                X_cpu = torch.linalg.solve(A_cpu, b_cpu, left=left)
+                X_mps = torch.linalg.solve(A_mps, b_mps, left=left)
+                self.assertEqual(X_cpu, X_mps)
+
+                # Test with transposed matrices
+                X_cpu_t = torch.linalg.solve(A_cpu.mT, b_cpu, left=left)
+                X_mps_t = torch.linalg.solve(A_mps.mT, b_mps, left=left)
+                self.assertEqual(X_cpu_t, X_mps_t)
+
+        # test with different even/odd matrix sizes
+        matrix_sizes = [1, 2, 3, 4]
+        # even/odd batch sizes
+        batch_sizes = [1, 2, 4]
+
+        for size in matrix_sizes:
+            for batch_size in batch_sizes:
+                run_linalg_solve_test(size, batch_size)
+
+        # test >3D matrices
+        run_linalg_solve_test(32, 10, 10)
+        run_linalg_solve_test(32, 2, 2, 2, 2, 10, 10)
+
+    def test_linalg_solve_with_broadcasting(self):
+        from functools import partial
+        import torch
+        from torch.testing._internal.common_utils import (
+            make_fullrank_matrices_with_distinct_singular_values
+        )
+
+        make_fullrank = make_fullrank_matrices_with_distinct_singular_values
+        make_arg = partial(make_fullrank, device="cpu", dtype=torch.float32)
+
+        batch_size = 4
+        size = 3
+
+        A_cpu = make_arg(batch_size, size, size)
+        A_mps = A_cpu.to('mps')
+
+        for left in [True, False]:
+            b_cpu = torch.randn(batch_size, size, device='cpu', dtype=torch.float32)
+            b_mps = b_cpu.to('mps')
+
+            if left:
+                b_cpu = b_cpu.unsqueeze(-1)
+                b_mps = b_mps.unsqueeze(-1)
+            else:
+                b_cpu = b_cpu.view(batch_size, 1, size)
+                b_mps = b_mps.view(batch_size, 1, size)
+
+            X_cpu = torch.linalg.solve(A_cpu, b_cpu, left=left)
+            X_mps = torch.linalg.solve(A_mps, b_mps, left=left)
+            self.assertEqual(X_cpu, X_mps)
+
+            X_cpu_t = torch.linalg.solve(A_cpu.mT, b_cpu, left=left)
+            X_mps_t = torch.linalg.solve(A_mps.mT, b_mps, left=left)
+            self.assertEqual(X_cpu_t, X_mps_t)
 
     def test_linalg_det(self):
         from torch.testing._internal.common_utils import make_fullrank_matrices_with_distinct_singular_values
