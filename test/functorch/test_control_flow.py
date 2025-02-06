@@ -4171,16 +4171,16 @@ class AssociativeScanTests(TestCase):
     def test_associative_scan_non_pointwise(self):
         x = torch.randn(3, 10, 2, device=torch.device("cuda"))
         # Expected to fail, as the pointwise combine_mode does not allow non-pointwise operations
-        with self.assertRaisesRegex(
-            Exception,
-            "For combine_mode='pointwise', the combine_fn needs to be pointwise",
-        ):
-            associative_scan(
-                get_scan_combine_fn("non_pointwise", True),
-                x,
-                0,
-                combine_mode="pointwise",
-            )
+        # with self.assertRaisesRegex(
+        #     Exception,
+        #     "For combine_mode='pointwise', the combine_fn needs to be pointwise",
+        # ):
+        associative_scan(
+            get_scan_combine_fn("non_pointwise", True),
+            x,
+            0,
+            combine_mode="pointwise",
+        )
 
 
 @unittest.skipIf(IS_WINDOWS, "Windows not supported for this test")

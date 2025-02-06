@@ -6313,8 +6313,6 @@ def forward(self, x):
         )
         self.assertTrue(torch.allclose(ep.module()(xs), Foo()(xs)))
 
-    # This test is expected to fail because accociative_scan's backend is not set to "eager"
-    @unittest.expectedFailure
     @requires_gpu
     def test_export_associative_scan_lifted_buffers(self):
         class M(torch.nn.Module):
