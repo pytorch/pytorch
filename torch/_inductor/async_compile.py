@@ -282,7 +282,7 @@ class AsyncCompile:
 
             def get_result() -> CachingAutotuner:
                 kernel = task.result()
-                kernel.precompile(warm_cache_only=False, reload_in_parent=load_kernel)
+                kernel.precompile(warm_cache_only=False, reload_kernel=load_kernel)
                 return kernel
 
             future = LambdaFuture(get_result, future=task)

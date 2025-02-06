@@ -256,17 +256,21 @@ class CachingAutotuner(KernelInterface):
     def precompile(
         self,
         warm_cache_only=False,
-        reload_in_parent: Optional[Callable[[], CachingAutotuner]] = None,
+        reload_kernel: Optional[Callable[[], CachingAutotuner]] = None,
     ):
         if warm_cache_only:
             self._precompile_worker()
             return
         with self.lock:
+            # Helper function for reloading a kernel generated in a worker
+            # in the parent class. Normally we don't need to reload the kernel
+            # in the parent process, but in certain cases (coordesc tuning, dynamic_scale_rblock),
+            # we need to actually run compilation on the parent process
+            if reload_kernel is not None:
+                self._reload_kernel = reload_kernel
             self._precompile_worker()
             self._make_launchers()
-            self._dynamic_scale_rblock(reload_in_parent)
-            if reload_in_parent is not None:
-                self._reload_in_parent = reload_in_parent
+            self._dynamic_scale_rblock()
 
     def _precompile_worker(self):
         if self.compile_results:
@@ -292,9 +296,7 @@ class CachingAutotuner(KernelInterface):
         self.compile_results = compile_results
         self.configs = None
 
-    def _dynamic_scale_rblock(
-        self, reload_in_parent: Optional[Callable[[], CachingAutotuner]] = None
-    ):
+    def _dynamic_scale_rblock(self):
         # TODO(jansel): we should find a way to move this extra compile into the worker process
         # Currently it relies on _make_launchers(), which requires a cuda context, to populate nreg.
         device_prop = self.device_props
@@ -399,8 +401,9 @@ class CachingAutotuner(KernelInterface):
                     and the fn was dropped in prepare_for_pickle().  We haven't loaded the module
                     containing the real fn yet.
                     """
-                    assert reload_in_parent
-                    self.fn = reload_in_parent().fn
+                    assert hasattr(self, "_reload_kernel")
+                    assert callable(self._reload_kernel)
+                    self.fn = self._reload_kernel().fn
                 self.compile_results.append(self._precompile_config(new_config))
 
             self._make_launchers()
@@ -826,13 +829,16 @@ class CachingAutotuner(KernelInterface):
 
         config2launcher = {launcher.config: launcher}
 
-        # If we haven't loaded the function in the parent yet, we have to
-        # in order to run coordesc tuning.
-        # TODO: should we just do this ahead of time if we know we're going to call this?
+        # TODO: should we just load the kernels ahead of time if we know we're going to call this?
         if self.fn.fn is None:
-            assert hasattr(self, "_reload_in_parent")
-            assert callable(self._reload_in_parent)
-            self.fn = self._reload_in_parent().fn
+            """
+            We are in the parent process, while this program was compiled in a worker
+            and the fn was dropped in prepare_for_pickle().  We haven't loaded the module
+            containing the real fn yet.
+            """
+            assert hasattr(self, "_reload_kernel")
+            assert callable(self._reload_kernel)
+            self.fn = self._reload_kernel().fn
 
         def benchmark_one_config(config):
             with self.lock:
