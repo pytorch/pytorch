@@ -25,13 +25,13 @@ struct SDPALogicalParams {
     end,
   };
 
-  logical_tensor query;
-  logical_tensor key;
-  logical_tensor scale;
+  logical_tensor query{};
+  logical_tensor key{};
+  logical_tensor scale{};
   std::optional<logical_tensor> neg_inf;
   std::optional<logical_tensor> attn_mask;
-  logical_tensor value;
-  logical_tensor output;
+  logical_tensor value{};
+  logical_tensor output{};
 
   SDPALogicalParams(
       const at::Tensor& query_,
@@ -86,13 +86,15 @@ struct SDPALogicalParams {
         output_.strides().vec()};
   }
   std::vector<logical_tensor> get_input() const {
-    if (attn_mask.has_value()) {
-      return {query, key, scale, attn_mask.value(), value};
-    } else if (neg_inf.has_value()) {
-      return {query, key, scale, neg_inf.value(), value};
-    } else {
-      return {query, key, scale, value};
+    std::vector<logical_tensor> input = {query, key, scale};
+    if (neg_inf.has_value()) {
+      input.push_back(neg_inf.value());
     }
+    if (attn_mask.has_value()) {
+      input.push_back(attn_mask.value());
+    }
+    input.push_back(value);
+    return input;
   }
   std::vector<logical_tensor> get_output() const {
     return {output};
@@ -165,7 +167,7 @@ partition create_sdpa_graph_partition(
         {scaled_qk_out},
         {mask_row_idx.value()},
         "mask_gen_idx_row"};
-    mask_gen_idx_row->set_attr<int64_t>(op::attr::axis, 2);
+    mask_gen_idx_row->set_attr<int64_t>(op::attr::axis, -2);
 
     mask_col_idx = {lt_id++, data_type::s32};
     mask_gen_idx_col = {
@@ -174,7 +176,7 @@ partition create_sdpa_graph_partition(
         {scaled_qk_out},
         {mask_col_idx.value()},
         "mask_gen_idx_col"};
-    mask_gen_idx_col->set_attr<int64_t>(op::attr::axis, 3);
+    mask_gen_idx_col->set_attr<int64_t>(op::attr::axis, -1);
 
     mask_gt_out = {lt_id++, data_type::boolean};
     mask_gt = {
@@ -244,7 +246,7 @@ void gpu_float_sdpa(
     const Tensor& query,
     const Tensor& key,
     const Tensor& value,
-    const std::optional<at::Tensor>& attn_mask,
+    std::optional<at::Tensor> attn_mask,
     bool is_causal,
     float softmax_scale,
     const Tensor& output) {

@@ -166,7 +166,7 @@ void gpu_float_sdpa(
     const Tensor& query,
     const Tensor& key,
     const Tensor& value,
-    const std::optional<at::Tensor>& attn_mask,
+    std::optional<at::Tensor> attn_mask,
     bool is_causal,
     float softmax_scale,
     const Tensor& output);

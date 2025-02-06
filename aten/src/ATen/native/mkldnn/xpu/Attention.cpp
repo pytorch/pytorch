@@ -223,7 +223,8 @@ _scaled_dot_product_fused_attention_overrideable_xpu(
   } else {
     // Currenetly implict mask only supports square fp16 cases
     const bool support_implict_causal =
-        query.dtype() == at::kHalf && seq_len_q == seq_len_kv;
+        (query.dtype() == at::kHalf || query.dtype() == at::kBFloat16) &&
+        seq_len_q == seq_len_kv;
     if (is_causal && !support_implict_causal) {
       auto bool_tril =
           at::ones_symint(
