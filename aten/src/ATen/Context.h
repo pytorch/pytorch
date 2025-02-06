@@ -349,44 +349,44 @@ class TORCH_API Context {
   void setAllowFP16ReductionCPU(bool);
 
   // Preserved for BC
-  [[deprecated("Please use lazyInitDevice(at::kCUDA) instead")]]
-  void lazyInitCUDA() {
+  [[deprecated("Please use lazyInitDevice(at::kCUDA) instead")]] void
+  lazyInitCUDA() {
     TORCH_WARN_DEPRECATION(
         "lazyInitCUDA is deprecated. Please use lazyInitDevice(at::kCUDA) instead.")
     lazyInitDevice(at::kCUDA);
   }
 
-  [[deprecated("Please use lazyInitDevice(at::kHIP) instead")]]
-  void lazyInitHIP() {
+  [[deprecated("Please use lazyInitDevice(at::kHIP) instead")]] void
+  lazyInitHIP() {
     TORCH_WARN_DEPRECATION(
         "lazyInitHIP is deprecated. Please use lazyInitDevice(at::kHIP) instead.")
     lazyInitDevice(at::kHIP);
   }
 
-  [[deprecated("Please use lazyInitDevice(at::kXPU) instead")]]
-  void lazyInitXPU() {
+  [[deprecated("Please use lazyInitDevice(at::kXPU) instead")]] void
+  lazyInitXPU() {
     TORCH_WARN_DEPRECATION(
         "lazyInitXPU is deprecated. Please use lazyInitDevice(at::kXPU) instead.")
     lazyInitDevice(at::kXPU);
   }
 
-  [[deprecated("Please use lazyInitDevice(at::kMTIA) instead")]]
-  void lazyInitMTIA() {
+  [[deprecated("Please use lazyInitDevice(at::kMTIA) instead")]] void
+  lazyInitMTIA() {
     TORCH_WARN_DEPRECATION(
         "lazyInitMTIA is deprecated. Please use lazyInitDevice(at::kMTIA) instead.")
     lazyInitDevice(at::kMTIA);
   }
 
-  [[deprecated("Please use lazyInitDevice(at::kPrivateUse1) instead")]]
-  void lazyInitPrivateUse1() {
+  [[deprecated("Please use lazyInitDevice(at::kPrivateUse1) instead")]] void
+  lazyInitPrivateUse1() {
     TORCH_WARN_DEPRECATION(
         "lazyInitPrivateUse1 is deprecated. Please use lazyInitDevice(at::kPrivateUse1) instead.")
     lazyInitDevice(at::kPrivateUse1);
   }
 
   [[deprecated(
-      "Please use getAcceleratorHooksInterface(device_type).isPinnedPtr(data) instead")]]
-  bool isPinnedPtr(
+      "Please use getAcceleratorHooksInterface(device_type).isPinnedPtr(data) instead")]] bool
+  isPinnedPtr(
       const void* data,
       std::optional<c10::DeviceType> device_type = std::nullopt) {
     auto opt_device_type =
@@ -404,8 +404,8 @@ class TORCH_API Context {
   }
 
   [[deprecated(
-      "Please use getAcceleratorHooksInterface(device_type).getPinnedMemoryAllocator() instead")]]
-  Allocator* getPinnedMemoryAllocator(
+      "Please use getAcceleratorHooksInterface(device_type).getPinnedMemoryAllocator() instead")]] Allocator*
+  getPinnedMemoryAllocator(
       std::optional<c10::DeviceType> device_type = std::nullopt) {
     return getAcceleratorHooksInterface(device_type).getPinnedMemoryAllocator();
   }
