@@ -1480,12 +1480,7 @@ class InstructionTranslatorBase(
 
     def RAISE_VARARGS(self, inst):
         if inst.arg == 0:
-            # duplicate the top of the stack and re-raise it
-            if sys.version_info < (3, 11):
-                unimplemented("re-raise")
-            assert isinstance(self.stack[-1], ExceptionVariable)
-            self.stack.append(self.stack[-1])
-            self._raise_exception_variable(inst)
+            unimplemented("re-raise")
         elif inst.arg == 1:
             self._raise_exception_variable(inst)
         else:
@@ -1501,31 +1496,6 @@ class InstructionTranslatorBase(
             # RERAISE is currently supported in a narrow case of `raise ... from None`
             self._raise_exception_variable(inst)
         unimplemented("RERAISE")
-
-    def WITH_EXCEPT_START(self, inst):
-        if sys.version_info >= (3, 11):
-            # At the top of the stack are 4 values:
-            #    - TOP = exc_info()
-            #    - SECOND = previous exception
-            #    - THIRD: lasti of exception in exc_info()
-            #    - FOURTH: the context.__exit__ bound method
-            #    We call FOURTH(type(TOP), TOP, GetTraceback(TOP)).
-            #    Then we push the __exit__ return value.
-            assert len(self.stack) >= 4
-            fn = self.stack[-4]
-            val = self.stack[-1]
-            assert isinstance(val, variables.ExceptionVariable)
-            typ = BuiltinVariable(val.exc_type)
-            tb = ConstantVariable(None)
-        else:
-            assert len(self.stack) >= 7
-            fn = self.stack[-7]
-            val = self.stack[-4]
-            assert isinstance(val, variables.ExceptionVariable)
-            typ = BuiltinVariable(val.exc_type)
-            tb = ConstantVariable(None)
-
-        self.call_function(fn, [typ, val, tb], {})
 
     def exception_handler(self, raised_exception):
         if sys.version_info >= (3, 11):
@@ -2258,10 +2228,9 @@ class InstructionTranslatorBase(
         # https://peps.python.org/pep-0479/
         # https://github.com/python/cpython/pull/99006
         # https://github.com/python/cpython/commit/28187141cc34063ef857976ddbca87ba09a882c2
-        tos = self.stack[-1]
-        assert isinstance(tos, ExceptionVariable)
-        if tos.exc_type is StopIteration:
-            self.stack[-1] = ExceptionVariable(RuntimeError, ())
+        assert isinstance(inst, ExceptionVariable)
+        if inst.exc_type is StopIteration:
+            exc.raise_observed_exception(RuntimeError, self)
 
     def DICT_MERGE(self, inst):
         v = self.pop()
@@ -2549,7 +2518,7 @@ class InstructionTranslatorBase(
     def CALL_INTRINSIC_1(self, inst):
         if inst.argval == 3:
             # INTRINSIC_STOPITERATION_ERROR
-            self.STOPITERATION_ERROR(inst)
+            self.STOPITERATION_ERROR(self.pop())
         elif inst.argval == 5:
             # INTRINSIC_UNARY_POSITIVE
             self.UNARY_POSITIVE(inst)
