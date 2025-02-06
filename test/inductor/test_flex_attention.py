@@ -2583,6 +2583,61 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         )
 
     @supported_platform
+    @common_utils.parametrize("mode", ["eager", "inductor"])
+    @common_utils.parametrize(
+        "permute_order",
+        [
+            (0, 1, 2, 3),
+            (1, 0, 2, 3),
+            (0, 2, 1, 3),
+            (2, 0, 1, 3),
+        ],
+    )
+    @common_utils.parametrize("shape", [(2, 5, 128, 16), (4, 2, 64, 16)])
+    def test_flex_attention_backward_stride_ordering(self, mode, permute_order, shape):
+        if TEST_WITH_ROCM:
+            self.skipTest(
+                "ROCM BUG SEE: https://github.com/pytorch/pytorch/issues/140855"
+            )
+        from torch._inductor.ir import get_stride_order
+
+        dtype = torch.float32
+        make_tensor = functools.partial(
+            torch.randn, shape, device="cuda", dtype=dtype, requires_grad=False
+        )
+
+        query, key, value = make_tensor(), make_tensor(), make_tensor()
+        query = query.permute(permute_order)
+        key = key.permute(permute_order)
+        value = value.permute(permute_order)
+
+        query.requires_grad_()
+        key.requires_grad_()
+        value.requires_grad_()
+
+        func = (
+            torch.compile(flex_attention, backend=mode, fullgraph=True)
+            if mode == "inductor"
+            else flex_attention
+        )
+        out = func(query, key, value)
+        grad_output = torch.randn_like(out)
+        out.backward(grad_output)
+
+        for leaf, grad, name in [
+            (query, query.grad, "query"),
+            (key, key.grad, "key"),
+            (value, value.grad, "value"),
+        ]:
+            input_stride_order = get_stride_order(grad.stride())
+            orig_stride_order = get_stride_order(leaf.stride())
+            self.assertEqual(
+                input_stride_order,
+                orig_stride_order,
+                f"Mode: {mode}, Stride order mismatch for {name}: grad {input_stride_order}, input {orig_stride_order}.",
+            )
+
+    @supported_platform
     @common_utils.parametrize("compile", [True, False])
     def test_fully_masked_out_rows_0_check(self, compile: bool):
         # Ensure fully masked out rows won't cause NaNs.

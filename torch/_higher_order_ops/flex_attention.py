@@ -780,7 +780,7 @@ def sdpa_dense_backward(
 ]:
     from torch._dynamo._trace_wrapped_higher_order_op import TransformGetItemToIndex
 
-    Bq, Hq, seq_len_q, qk_head_dim = query.shape
+    Bq, _, _, qk_head_dim = query.shape
     Bkv, Hkv, seq_len_kv, v_head_dim = value.shape
 
     # Get outputs before calling repeat interleave and permute to input stride orders
@@ -1158,7 +1158,7 @@ def flex_attention_backward_fake_tensor_mode(
     torch.Tensor, torch.Tensor, torch.Tensor, tuple[Optional[torch.Tensor], ...]
 ]:
     with mode:
-        Bq, Hq, seq_len_q, qk_head_dim = query.shape
+        Bq, _, _, qk_head_dim = query.shape
         Bkv, Hkv, seq_len_kv, v_head_dim = value.shape
 
         grad_query = torch.empty_like(query)
