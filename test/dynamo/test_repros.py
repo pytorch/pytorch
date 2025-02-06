@@ -15,6 +15,7 @@ import inspect
 import itertools
 import os
 import random
+import types
 import typing
 import unittest
 import warnings
@@ -6018,6 +6019,19 @@ def forward(self, s0 : torch.SymInt, s1 : torch.SymInt, L_x_ : torch.Tensor):
         self.assertEqual(fn(config, x), opt_fn(config, x))
         self.assertEqual(cloned_config.baz, 4)
 
+    @unittest.skipIf(not HAS_OMEGACONG, "missing omegaconf package")
+    def test_omegaconf_listconfig_contains(self):
+        def fn(cfg, x):
+            if 1 in cfg:
+                return torch.sin(x)
+            return torch.cos(x)
+
+        config = OmegaConf.create([1, 2, 3, {"key": "value"}])
+
+        x = torch.randn(4)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(fn(config, x), opt_fn(config, x))
+
     # https://github.com/pytorch/pytorch/issues/136257
     def test_overwriting_params(self):
         class M(torch.nn.Module):
@@ -6434,6 +6448,43 @@ def forward(self, s0 : torch.SymInt, s1 : torch.SymInt, L_x_ : torch.Tensor):
             else:
                 del os.environ["MASTER_PORT"]
 
+    @torch._dynamo.config.patch(
+        recompile_limit=1,
+        fail_on_recompile_limit_hit=True,
+    )
+    def test_compilation_metrics_on_error(self):
+        torch._dynamo.utils.clear_compilation_metrics()
+
+        @torch.compile(backend="eager")
+        def fn(x):
+            # force a recompile in a way friendly to test_dynamic_shapes
+            if x.numel() == 100:
+                return x.sum()
+            elif x.numel() == 10000:
+                return x.sum()
+
+        x = torch.randn(10, 10)
+        y = torch.randn(100, 100)
+        metrics = torch._dynamo.utils._compilation_metrics
+        self.assertEqual(len(metrics), 0)
+
+        fn(x)
+        self.assertTrue(metrics is torch._dynamo.utils._compilation_metrics)
+        self.assertEqual(len(metrics), 1)
+        latest_metrics = metrics[-1]
+        self.assertTrue(latest_metrics.dynamo_config is not None)
+        self.assertTrue(latest_metrics.recompile_reason is None)
+
+        with self.assertRaises(torch._dynamo.exc.FailOnRecompileLimitHit):
+            fn(y)
+        self.assertTrue(metrics is torch._dynamo.utils._compilation_metrics)
+        self.assertEqual(len(metrics), 2)
+        latest_metrics = metrics[-1]
+        self.assertTrue(latest_metrics.dynamo_config is not None)
+        self.assertTrue(latest_metrics.recompile_reason is not None)
+
+        torch._dynamo.utils.clear_compilation_metrics()
+
     def test_dont_dce_rand(self):
         # https://github.com/pytorch/pytorch/issues/143431
         def f(image_latent):
@@ -6634,6 +6685,19 @@ class ReproTestsDevice(torch._dynamo.test_case.TestCase):
         mem_after = torch.cuda.memory_allocated()
         self.assertEqual(mem_before, mem_after)
 
+    def test_udf_class_source(self):
+        class Foo:
+            pass
+
+        def fn(x):
+            foo = Foo()
+            bar = type(foo)()  # noqa: F841
+            return torch.cos(x)
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        x = torch.randn(4)
+        self.assertEqual(fn(x), opt_fn(x))
+
     @requires_cuda
     def test_sdpa_dynamic_shapes(self, device):
         def f(x, s0, s1, s2):
@@ -6654,6 +6718,40 @@ class ReproTestsDevice(torch._dynamo.test_case.TestCase):
             out_ref = f(x_ref, s0, s1, s2)
             out = f_compiled(x, s0, s1, s2)
             self.assertEqual(out_ref, out)
+
+    def test_getattr_return(self):
+        _WrapperDescriptor = type(type.__call__)
+        _MethodWrapper = type(all.__call__)
+        _ClassMethodWrapper = type(int.__dict__["from_bytes"])
+
+        _NonUserDefinedCallables = (
+            _WrapperDescriptor,
+            _MethodWrapper,
+            _ClassMethodWrapper,
+            types.BuiltinFunctionType,
+        )
+
+        def _signature_get_user_defined_method(cls, method_name):
+            try:
+                meth = getattr(cls, method_name)
+            except AttributeError:
+                return
+            else:
+                if not isinstance(meth, _NonUserDefinedCallables):
+                    # Once '__signature__' will be added to 'C'-level
+                    # callables, this check won't be necessary
+                    return meth
+
+        def fn(x):
+            s = _signature_get_user_defined_method(type(torch.nn.Linear), "__call__")
+            if s is None:
+                return torch.cos(x)
+
+            return torch.sin(x)
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        x = torch.randn(4)
+        self.assertEqual(fn(x), opt_fn(x))
 
 
 instantiate_parametrized_tests(ReproTests)
