@@ -19,6 +19,17 @@
 namespace at {
 namespace native {
 
+// expand potential 3d to 4d tensor
+static inline std::tuple<Tensor, bool> ensure_4d(const Tensor& x) {
+    bool squeezed = false;
+    auto t = x;
+    if (x.dim() == 3) {
+        t = x.unsqueeze(0);
+        squeezed = true;
+    }
+    return {t, squeezed};
+}
+
 std::tuple<Tensor, Tensor> _scaled_dot_product_attention_math_mps(const Tensor& query,
                                                                   const Tensor& key,
                                                                   const Tensor& value,
@@ -39,6 +50,11 @@ std::tuple<Tensor, Tensor> _scaled_dot_product_attention_math_mps(const Tensor& 
   TORCH_CHECK(!query.is_nested() && !key.is_nested() && !value.is_nested(),
               "_scaled_dot_product_attention_math_for_mps: query, key, and value must not be nested");
 
+  // Ensure 4D tensors
+  auto [q_, sq] = ensure_4d(query);
+  auto [k_, sk] = ensure_4d(key);
+  auto [v_, sv] = ensure_4d(value);
+
   using namespace mps;
   struct CachedGraph : public MPSCachedGraph {
     CachedGraph(MPSGraph* graph) : MPSCachedGraph(graph) {}
@@ -49,21 +65,21 @@ std::tuple<Tensor, Tensor> _scaled_dot_product_attention_math_mps(const Tensor& 
     MPSGraphTensor* outputTensor = nil;
     MPSGraphTensor* attnTensor = nil;
   };
-  int64_t batchSize = query.size(0);
-  int64_t num_head = query.size(1);
-  int64_t qSize = query.size(2);
-  int64_t headSize = query.size(3);
-  int64_t maxSeqLength = key.size(2);
+  int64_t batchSize = q_.size(0);
+  int64_t num_head = q_.size(1);
+  int64_t qSize = q_.size(2);
+  int64_t headSize = q_.size(3);
+  int64_t maxSeqLength = k_.size(2);
   auto out = at::empty({batchSize, num_head, qSize, headSize}, query.options());
   auto attn = at::empty({batchSize, num_head, qSize, maxSeqLength}, query.options());
   auto scale_factor = sdp::calculate_scale(query, scale).expect_float();
   @autoreleasepool {
-    auto mkey = __func__ + getTensorsStringKey({query, key, value}) + ":" + std::to_string(is_causal) + ":" +
+    auto mkey = __func__ + getTensorsStringKey({q_, k_, v_}) + ":" + std::to_string(is_causal) + ":" +
         std::to_string(attn_mask.has_value());
     auto cachedGraph = LookUpOrCreateCachedGraph<CachedGraph>(mkey, [&](auto mpsGraph, auto graph) {
-      auto qTensor = mpsGraphRankedPlaceHolder(mpsGraph, query);
-      auto kTensor = mpsGraphRankedPlaceHolder(mpsGraph, key);
-      auto vTensor = mpsGraphRankedPlaceHolder(mpsGraph, value);
+      auto qTensor = mpsGraphRankedPlaceHolder(mpsGraph, q_);
+      auto kTensor = mpsGraphRankedPlaceHolder(mpsGraph, k_);
+      auto vTensor = mpsGraphRankedPlaceHolder(mpsGraph, v_);
       auto kT = [mpsGraph transposeTensor:kTensor dimension:2 withDimension:3 name:nil];
       auto scaleTensor = [mpsGraph constantWithScalar:scale_factor shape:getMPSShape({1}) dataType:MPSDataTypeFloat32];
 
@@ -107,9 +123,9 @@ std::tuple<Tensor, Tensor> _scaled_dot_product_attention_math_mps(const Tensor& 
       graph->outputTensor = output;
       graph->attnTensor = sm;
     });
-    auto qPlaceholder = Placeholder(cachedGraph->qTensor, query);
-    auto kPlaceholder = Placeholder(cachedGraph->kTensor, key);
-    auto vPlaceholder = Placeholder(cachedGraph->vTensor, value);
+    auto qPlaceholder = Placeholder(cachedGraph->qTensor, q_);
+    auto kPlaceholder = Placeholder(cachedGraph->kTensor, k_);
+    auto vPlaceholder = Placeholder(cachedGraph->vTensor, v_);
     auto outputPlaceholder = Placeholder(cachedGraph->outputTensor, out);
     auto attnPlaceholder = Placeholder(cachedGraph->attnTensor, attn);
     NSDictionary* feeds = nil;
@@ -122,7 +138,12 @@ std::tuple<Tensor, Tensor> _scaled_dot_product_attention_math_mps(const Tensor& 
     NSDictionary* outs = dictionaryFromPlaceholders(outputPlaceholder, attnPlaceholder);
     runMPSGraph(getCurrentMPSStream(), cachedGraph->graph(), feeds, outs);
   }
-  return {out, attn};
+
+  // Squeeze back to 3D
+  auto final_out = (sq ? out.squeeze(0) : out);
+  auto final_attn = (sq ? attn.squeeze(0) : attn);
+
+  return {final_out, final_attn};
 }
 
 } // namespace native
