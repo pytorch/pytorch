@@ -67,7 +67,7 @@ class _FP32Precision:
 
     def __setattr__(self, name, value):
         if name == "fp32_precision":
-            torch._C._set_fp32_precision(self.backend, self.op, value)
+            torch._C._set_fp32_precision_setter(self.backend, self.op, value)
         elif name in ("backend", "op"):
             super().__setattr__(name, value)
         else:
@@ -75,15 +75,15 @@ class _FP32Precision:
 
     def __getattr__(self, name):
         if name == "fp32_precision":
-            return torch._C._get_fp32_precision(self.backend, self.op)
+            return torch._C._get_fp32_precision_getter(self.backend, self.op)
         else:
             raise AttributeError("Unknown attribute " + name)
 
 
 def set_flags(_fp32_precision="none"):
-    orig_flags = (torch._C._get_fp32_precision("generic", "all"),)
+    orig_flags = (torch._C._get_fp32_precision_getter("generic", "all"),)
     if _fp32_precision is not None:
-        torch._C._set_fp32_precision("generic", "all", _fp32_precision)
+        torch._C._set_fp32_precision_setter("generic", "all", _fp32_precision)
     return orig_flags
 
 
@@ -98,16 +98,16 @@ def flags(fp32_precision="none"):
             set_flags(*orig_flags)
 
 
-def _get_fp32_precision(backend, op):
+def _get_fp32_precision_getter(backend, op):
     def inner():
-        return torch._C._get_fp32_precision(backend, op)
+        return torch._C._get_fp32_precision_getter(backend, op)
 
     return inner
 
 
-def _set_fp32_precision(backend, op):
+def _set_fp32_precision_setter(backend, op):
     def inner(precision):
-        return torch._C._set_fp32_precision(backend, op, precision)
+        return torch._C._set_fp32_precision_setter(backend, op, precision)
 
     return inner
 
@@ -117,7 +117,7 @@ class GenericModule(PropModule):
         super().__init__(m, name)
 
     fp32_precision = ContextProp(
-        _get_fp32_precision("generic", "all"), _set_fp32_precision("generic", "all")
+        _get_fp32_precision_getter("generic", "all"), _set_fp32_precision_setter("generic", "all")
     )
 
 
