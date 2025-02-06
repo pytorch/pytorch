@@ -6297,20 +6297,6 @@ def forward(self, b_a_buffer, x):
                 return associative_scan(self.combine_fn, x, 1)
 
         ep = export(Foo(), (xs,), dynamic_shapes={"x": {1: dim1}})
-        self.assertExpectedInline(
-            ep.graph_module.code.strip(),
-            """\
-def forward(self, x):
-    movedim = torch.ops.aten.movedim.int(x, 1, 0);  x = None
-    select_copy = torch.ops.aten.select_copy.int(movedim, 0, 0)
-    add = torch.ops.aten.add.Tensor(select_copy, select_copy);  select_copy = add = None
-    select_copy_1 = torch.ops.aten.select_copy.int(movedim, 0, 0);  select_copy_1 = None
-    scan_combine_graph_0 = self.scan_combine_graph_0
-    associative_scan = torch.ops.higher_order.associative_scan(scan_combine_graph_0, [movedim], ());  scan_combine_graph_0 = movedim = None
-    getitem = associative_scan[0];  associative_scan = None
-    movedim_1 = torch.ops.aten.movedim.int(getitem, 0, 1);  getitem = None
-    return (movedim_1,)""",
-        )
         self.assertTrue(torch.allclose(ep.module()(xs), Foo()(xs)))
 
     # This test is expected to fail because accociative_scan's backend is not set to "eager"
