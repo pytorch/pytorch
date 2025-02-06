@@ -131,6 +131,7 @@ class MPSBasicTests(TestCase):
 
 # Copy tests
 for test_name in [
+    "test_min_max_reduction",
     "test_add_const_int",
     "test_add_inplace_permuted",
     "test_addmm",
