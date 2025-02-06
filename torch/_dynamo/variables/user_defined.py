@@ -41,6 +41,7 @@ from ..utils import (
     build_checkpoint_variable,
     build_invoke_subgraph_variable,
     check_constant_args,
+    cmp_name_to_op_mapping,
     dict_methods,
     get_custom_getattr,
     has_torch_function,
@@ -184,6 +185,9 @@ class UserDefinedClassVariable(UserDefinedVariable):
             obj = inspect.getattr_static(self.value, name)
         except AttributeError:
             obj = None
+
+        if name in cmp_name_to_op_mapping and not isinstance(obj, types.FunctionType):
+            return variables.GetAttrVariable(self, name, source=source)
 
         if isinstance(obj, staticmethod):
             return VariableTracker.build(tx, obj.__get__(self.value), source)
@@ -795,14 +799,14 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             if is_standard_setattr(method) or isinstance(self.value, threading.local):
                 return self.method_setattr_standard(tx, *args, **kwargs)
 
-            if len(args) == 1 and not kwargs:
-                if method is object.__eq__:
-                    func_var = VariableTracker.build(tx, polyfills.object_eq)
-                    return func_var.call_function(tx, [self, *args], kwargs)
+            if method is object.__eq__ and len(args) == 1 and not kwargs:
+                other = args[0]
+                if not isinstance(other, UserDefinedObjectVariable):
+                    return variables.ConstantVariable.create(NotImplemented)
 
-                if method is object.__ne__:
-                    func_var = VariableTracker.build(tx, polyfills.object_ne)
-                    return func_var.call_function(tx, [self, *args], kwargs)
+                # TODO(anijain2305) - Identity checking should already be a part
+                # of the cmp_eq  polyfill function.
+                return ConstantVariable.create(self.value is other.value)
 
             # check for methods implemented in C++
             if isinstance(method, types.FunctionType):

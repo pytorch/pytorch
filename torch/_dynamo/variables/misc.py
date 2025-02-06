@@ -23,6 +23,7 @@ from ..mutation_guard import unpatched_nn_module_init
 from ..source import AttrSource, GetItemSource, TypeSource, WeakRefCallSource
 from ..utils import (
     check_unspec_or_constant_args,
+    cmp_name_to_op_mapping,
     identity,
     is_tensor_base_attr_getter,
     proxy_args_kwargs,
@@ -952,6 +953,9 @@ class TypingVariable(VariableTracker):
     def var_getattr(self, tx: "InstructionTranslator", name: str):
         from .builder import SourcelessBuilder, VariableBuilder
 
+        if name in cmp_name_to_op_mapping:
+            return variables.GetAttrVariable(self, name)
+
         if tx.output.side_effects.has_pending_mutation_of_attr(self, name):
             return tx.side_effects.load_attr(self, name)
 
@@ -960,7 +964,7 @@ class TypingVariable(VariableTracker):
             attr_source = AttrSource(self.source, name)
             return VariableBuilder(tx, attr_source)(value)
         else:
-            return SourcelessBuilder(tx, value)
+            return SourcelessBuilder.create(tx, value)
 
     def as_python_constant(self):
         return self.value
