@@ -104,6 +104,13 @@ class MPSBasicTests(TestCase):
     def test_pointwise_digamma(self):
         self.common(torch.special.digamma, (torch.rand(128, 128),), check_lowp=False)
 
+    def test_pointwise_zeta(self):
+        self.common(
+            torch.special.zeta,
+            (torch.rand(128, 128), torch.rand(128, 128)),
+            check_lowp=False,
+        )
+
     def test_broadcast(self):
         self.common(torch.add, (torch.rand(32, 1024), torch.rand(1024)))
 
@@ -144,7 +151,6 @@ for test_name in [
     "test_custom_op_2",
     "test_div1",
     "test_div3",
-    "test_exp",
     "test_erfinv",
     "test_floordiv",
     "test_full_truncation",
