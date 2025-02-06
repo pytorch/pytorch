@@ -1705,7 +1705,7 @@ def _make_user_magic(method, user_type):
                 finally:
                     del frame
 
-                if other:
+                if other is not None:
                     arguments = [str(self), str(other)]
                 else:
                     arguments = [str(self)]
