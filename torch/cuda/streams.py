@@ -68,9 +68,9 @@ class Stream(torch._C._CudaStreamBase):
         .. note:: This function returns without waiting for currently enqueued
            kernels in :attr:`stream`: only future operations are affected.
         """
-        self.wait_event(stream.record_event(enable_timing=False))
+        self.wait_event(stream.record_event())
 
-    def record_event(self, event=None, enable_timing=False):
+    def record_event(self, event=None):
         r"""Record an event.
 
         Args:
@@ -81,7 +81,7 @@ class Stream(torch._C._CudaStreamBase):
             Recorded event.
         """
         if event is None:
-            event = Event(enable_timing=enable_timing)
+            event = Event()
         event.record(self)
         return event
 
