@@ -5842,6 +5842,7 @@
   device_guard: False
   dispatch:
     CompositeImplicitAutograd: sum_to_size_symint
+    NestedTensorCPU, NestedTensorCUDA: sum_to_size_nested_symint
 
 - func: sqrt(Tensor self) -> Tensor
   device_check: NoCheck   # TensorIterator
@@ -6302,6 +6303,11 @@
   device_check: NoCheck
   dispatch:
     CPU, CUDA: _nested_compute_contiguous_strides_offsets
+
+- func: _nested_assert_expandable_to(Tensor tgt, SymInt[] src_shape, str msg) -> ()
+  variants: function
+  device_check: NoCheck
+  dispatch: {}
 
 - func: _trilinear(Tensor i1, Tensor i2, Tensor i3, int[] expand1, int[] expand2, int[] expand3, int[] sumdim, int unroll_dim=1) -> Tensor
   dispatch:

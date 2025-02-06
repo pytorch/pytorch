@@ -16,6 +16,8 @@
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
 #else
+#include <ATen/ops/_nested_assert_expandable_to.h>
+#include <ATen/ops/sum_to_size.h>
 #include <ATen/ops/zeros.h>
 #endif
 
