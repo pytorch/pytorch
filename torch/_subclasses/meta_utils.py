@@ -1247,7 +1247,12 @@ class MetaConverter(Generic[_TensorT]):
                 sym_source = EphemeralSource("symint_visitor_fn")
 
                 symbol = shape_env.create_symbol(s, sym_source, positive=None)
-                return shape_env.create_symintnode(symbol, hint=s, source=sym_source)
+                return shape_env.create_symintnode(
+                    symbol,
+                    hint=s,
+                    source=sym_source,
+                    nested_int_metafy_fn=nested_int_metafy_fn,
+                )
 
             real_to_fake_mapping = {}
             if t.is_traceable_wrapper_subclass:
