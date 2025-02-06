@@ -59,6 +59,7 @@ __all__ = [
     "set_state_dict",
 ]
 
+
 _FLAT_PARAM = "_flat_param"
 _PG = "param_groups"
 _PARAMS = "params"
@@ -72,6 +73,7 @@ ValueType = Union[
 DictValueType = dict[str, ValueType]
 ListDictValueType = list[DictValueType]
 OptimizerStateType = dict[str, Union[DictValueType, ListDictValueType]]
+
 
 _patched_state_dict: set[Callable] = set()
 
@@ -137,9 +139,9 @@ class StateDictOptions:
 
 @dataclass
 class _StateDictInfo(StateDictOptions):
-    fqn_param_mapping: dict[
-        Union[str, torch.Tensor], Union[FQNS_T, torch.Tensor]
-    ] = field(default_factory=dict)
+    fqn_param_mapping: dict[Union[str, torch.Tensor], Union[FQNS_T, torch.Tensor]] = (
+        field(default_factory=dict)
+    )
     shared_params_mapping: dict[
         Union[str, torch.Tensor], Union[FQNS_T, torch.Tensor]
     ] = field(default_factory=dict)
@@ -290,9 +292,9 @@ def _verify_options(
 
     options = options or StateDictOptions()
 
-    fqn_param_mapping: dict[
-        Union[str, torch.Tensor], Union[set[str], torch.Tensor]
-    ] = {}
+    fqn_param_mapping: dict[Union[str, torch.Tensor], Union[set[str], torch.Tensor]] = (
+        {}
+    )
     shared_params_mapping: dict[
         Union[str, torch.Tensor], Union[set[str], torch.Tensor]
     ] = {}
@@ -1110,6 +1112,7 @@ def get_state_dict(
         >>> ddp_model = DDP(copy.deepcopy(model))
         >>> ddp_optim = torch.optim.Adam(model.parameters(), lr=1e-3)
 
+
         >>> ddp_state_dict, ddp_optim_state_dict = get_state_dict(ddp_model, ddp_optim)
         >>> fsdp_state_dict, fsdp_optim_state_dict = get_state_dict(fsdp_model, fsdp_optim)
 
@@ -1117,6 +1120,7 @@ def get_state_dict(
         >>> # the asserts will fail.
         >>> assert ddp_state_dict == fsdp_state_dict
         >>> assert ddp_optim_state == fsdp_optim_state_dict
+
 
     Args:
         model (nn.Module): the nn.Module to the model.
