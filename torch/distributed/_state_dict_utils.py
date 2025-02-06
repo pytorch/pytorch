@@ -65,7 +65,7 @@ def _all_gather_sharded_tensor(
         local_tensor = torch.zeros(
             chunk_size, dtype=sharded_tensor.dtype, device=pg_device
         )
-
+    #TODO: deal with this
     tensor = torch.empty(
         chunk_size * world_size,
         dtype=local_tensor.dtype,
