@@ -244,8 +244,8 @@ class TestDraftExport(TestCase):
             report.failures[0].failure_type, FailureType.DATA_DEPENDENT_ERROR
         )
         frame_locals = report.failures[0].data["frame_locals"]
-        self.assertTrue("if v.item() > 10:" in frame_locals.loc)
-        self.assertEqual(list(frame_locals.locals), ["v"])
+        self.assertTrue("if v.item() > 10:" in frame_locals["loc"])
+        self.assertEqual(list(frame_locals["locals"]), ["v"])
 
         inp = (torch.tensor(4), torch.tensor(2), torch.tensor(6))
         self.assertEqual(ep.module()(*inp), M()(*inp))
@@ -276,9 +276,9 @@ class TestDraftExport(TestCase):
             report.failures[0].failure_type, FailureType.CONSTRAINT_VIOLATION_ERROR
         )
         frame_locals = report.failures[0].data["frame_locals"]
-        self.assertTrue("assert a.shape[0] == 3" in frame_locals.loc)
-        self.assertEqual(list(frame_locals.symbols), ["s0"])
-        self.assertEqual(list(frame_locals.locals), ["a"])
+        self.assertTrue("assert a.shape[0] == 3" in frame_locals["loc"])
+        self.assertEqual(list(frame_locals["symbols"]), ["s0"])
+        self.assertEqual(list(frame_locals["locals"]), ["a"])
 
         inp = (torch.randn(3, 3),)
         self.assertEqual(ep.module()(*inp), M()(*inp))

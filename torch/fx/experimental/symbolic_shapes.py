@@ -27,7 +27,7 @@ import traceback
 from collections import Counter, defaultdict
 from collections.abc import Iterator, Mapping, Sequence
 from contextlib import _GeneratorContextManager, contextmanager
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
 from enum import Enum
 from typing import (
     Any,
@@ -6501,7 +6501,7 @@ class ShapeEnv:
                     for k, v in self.source_to_var.items()
                     if v in g.free_symbols
                 },
-                "frame_locals": self._find_frame_locals(),
+                "frame_locals": asdict(self._find_frame_locals()),
             },
         )
         trace_structured(
@@ -6751,7 +6751,7 @@ class ShapeEnv:
                                     for k, v in self.source_to_var.items()
                                     if v in g.free_symbols
                                 },
-                                "frame_locals": self._find_frame_locals(),
+                                "frame_locals": asdict(self._find_frame_locals()),
                             },
                         )
                         transmute_into_runtime_assert = True
