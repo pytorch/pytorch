@@ -926,13 +926,6 @@ def _compile(
                 raise FailOnRecompileLimitHit(
                     f"{limit_type} reached, because fail_on_recompile_limit_hit = True this is a HARD failure"
                 )
-            elif one_graph:
-                raise FailOnRecompileLimitHit(
-                    f"{limit_type} reached with fullgraph=True. Please investigate "
-                    "the recompilations using TORCH_LOGS=recompiles. If the recompilations "
-                    "are expected, please increase the torch._dynamo.config.cache_size_limit "
-                    "to the expected value."
-                )
             elif config.skip_code_recursive_on_recompile_limit_hit and justknobs_check(
                 "pytorch/compiler:skip_code_recursive_on_recompile_limit_hit"
             ):
