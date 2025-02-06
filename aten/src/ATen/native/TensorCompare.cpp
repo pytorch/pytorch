@@ -297,7 +297,7 @@ TORCH_PRECOMPUTE_META_FUNC2(min, dim)
 } // namespace at::meta
 
 namespace at::native {
-
+DEFINE_DISPATCH(isclose_stub); // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(
     where_kernel); // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(
@@ -358,65 +358,21 @@ Tensor isclose(
       !(self.is_quantized() || other.is_quantized()),
       "isclose is not supported for quantized inputs.");
 
-  // Checks that rtol and atol are non-negative
-  // Note: consistent with Python's isclose but divergent from NumPy's, which
-  //  allows negative atol and rtol.
   TORCH_CHECK(
       rtol >= 0, "rtol must be greater than or equal to zero, but got ", rtol);
   TORCH_CHECK(
       atol >= 0, "atol must be greater than or equal to zero, but got ", atol);
 
-  // Computes equality closeness
-  Tensor close = self == other;
-  if (equal_nan && (self.is_floating_point() || self.is_complex())) {
-    // For CompositeCompliance, if `other` is a CCT and `self` is a regular
-    // Tensor, then we can't perform inplace op into `self` with `other`. NOTE:
-    // Inplacing into `close` is fine because it is generated from out-of-place
-    // with args `self` and `other`. So if either of them is a CCT then `close`
-    // will also be a `CCT`.
-    if (isTensorSubclassLike(other)) {
-      close.__ior__(self.isnan().bitwise_and(other.isnan()));
-    } else {
-      close.__ior__(self.isnan().__iand__(other.isnan()));
-    }
-  }
-
-  // In case of zero tolerances the closeness inequality degenerates to an
-  // equality check. In this case, the short-circuit prevents false positives as
-  // detailed in the paragraph below.
-  if (rtol == 0 && atol == 0) {
-    return close;
-  }
-
-  // Note [closeness error computation]
-  // atol and rtol are provided as doubles, so the computation
-  // rtol * other will produce a float or complex tensor.
-  // When the difference (self - other) is compared to it then the
-  // tensor representing the difference will also be cast to float or complex.
-  // However, since (self - other) in uint8 is very likely to produce a
-  // negative value, this moves the cast forward so the difference is
-  // always computed in a float or complex type.
-  // If the values of the integer tensors cannot be exactly represented
-  // by the default scalar type then this may cause an incorrect result.
-
-  // Computes allowed and actual error
-  Tensor cast_self, cast_other;
-  cast_self =
-      self.scalar_type() == at::kBool ? self.to(at::get_default_dtype()) : self;
-  if (c10::isIntegralType(self.scalar_type(), /*includeBool=*/true)) {
-    cast_other = other.to(at::get_default_dtype());
-  } else {
-    cast_other = other;
-  }
-
-  Tensor allowed_error = atol + (rtol * cast_other).abs();
-  Tensor actual_error = (cast_self - cast_other).abs();
-
-  // Computes finite closeness
-  close.__ior__(
-      at::isfinite(actual_error).__iand__(actual_error <= allowed_error));
-
-  return close;
+  Tensor output = at::empty({0}, self.options().dtype(kBool));
+  auto iter = TensorIteratorConfig()
+      .add_output(output)
+      .add_const_input(self)
+      .add_const_input(other)
+      .promote_inputs_to_common_dtype(true)
+      .build();
+    
+  isclose_stub(iter.device_type(), iter, rtol, atol, equal_nan);
+  return output;
 }
 
 Tensor isnan(const Tensor& self) {

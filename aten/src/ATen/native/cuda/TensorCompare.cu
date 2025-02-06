@@ -6,7 +6,7 @@
 #include <ATen/native/TensorCompare.h>
 #include <ATen/native/cuda/Loops.cuh>
 #include <c10/core/Scalar.h>
-
+#include <iostream>
 
 namespace at::native {
 
@@ -39,6 +39,89 @@ void isneginf_kernel_impl(TensorIteratorBase &iter) {
       [] GPU_LAMBDA (scalar_t a) -> bool { return a == -std::numeric_limits<scalar_t>::infinity(); }
     );
   });
+}
+
+template <typename scalar_t>
+void isclose_kernel_impl_complex(TensorIteratorBase& iter, double rtol, double atol, bool equal_nan) {
+  using opmath_t = at::opmath_type<scalar_t>;
+  gpu_kernel(iter, [=]GPU_LAMBDA(scalar_t a, scalar_t b) -> bool {
+    if (a == b) {
+      printf("a==b complex \n");
+
+      return true;
+    }
+
+    opmath_t cast_a = static_cast<opmath_t>(a);
+    opmath_t cast_b = static_cast<opmath_t>(b);
+
+    if (equal_nan && 
+        (::isnan(cast_a.real()) || ::isnan(cast_a.imag())) && 
+        (::isnan(cast_b.real()) || ::isnan(cast_b.imag()))) {
+      printf("equal nan complex \n");
+      return true;
+    }
+
+    if (rtol == 0 && atol == 0) {
+      return false;
+    }
+
+    bool is_a_finite = ::isfinite(cast_a.real()) && ::isfinite(cast_a.imag());
+    bool is_b_finite = ::isfinite(cast_b.real()) && ::isfinite(cast_b.imag());
+
+    if (is_a_finite && is_b_finite) {
+      auto abs_b = std::abs(cast_b);
+      auto allowed_error = static_cast<typename opmath_t::value_type>(atol + rtol * abs_b);
+      return std::abs(cast_a - cast_b) <= allowed_error;
+    }
+
+    return false;
+  });
+}
+
+template <typename scalar_t>
+void isclose_kernel_impl_real(TensorIteratorBase& iter, double rtol, double atol, bool equal_nan) {
+  if constexpr (std::is_same_v<scalar_t, bool>) {
+    gpu_kernel(iter, [=]GPU_LAMBDA(scalar_t a, scalar_t b) -> bool {
+      return a == b;
+    });
+  } else {
+    using opmath_t = at::opmath_type<scalar_t>;
+    gpu_kernel(iter, [=]GPU_LAMBDA(scalar_t a, scalar_t b) -> bool {
+      if (a == b) {
+        return true;
+      }
+
+      opmath_t cast_a = static_cast<opmath_t>(a);
+      opmath_t cast_b = static_cast<opmath_t>(b);
+
+      if (equal_nan && ::isnan(static_cast<double>(cast_a)) && ::isnan(static_cast<double>(cast_b))) {
+        return true;
+      }
+
+      if (rtol == 0 && atol == 0) {
+        return false;
+      }
+
+      if (::isfinite(static_cast<double>(cast_a)) && ::isfinite(static_cast<double>(cast_b))) {
+        auto allowed_error = static_cast<opmath_t>(atol + rtol * ::abs(cast_b));
+        return ::abs(cast_a - cast_b) <= allowed_error;
+      }
+      
+      return false;
+    });
+  }
+}
+
+void isclose_kernel_impl(TensorIteratorBase& iter, double rtol, double atol, bool equal_nan) {
+  if (iter.common_dtype() == kComplexHalf || iter.common_dtype() == kComplexFloat || iter.common_dtype() == kComplexDouble) {
+    AT_DISPATCH_COMPLEX_TYPES_AND(kComplexHalf, iter.common_dtype(), "isclose_cuda", [&]() {
+      isclose_kernel_impl_complex<scalar_t>(iter, rtol, atol, equal_nan);
+    });
+  } else {
+    AT_DISPATCH_ALL_TYPES_AND3(kHalf, kBFloat16, kBool, iter.common_dtype(), "isclose_cuda", [&]() {
+      isclose_kernel_impl_real<scalar_t>(iter, rtol, atol, equal_nan);
+    });
+  }
 }
 
 void clamp_kernel_impl(TensorIteratorBase& iter) {
@@ -94,7 +177,7 @@ void clamp_max_scalar_kernel_impl(TensorIteratorBase& iter, Scalar max) {
 
 } // anonymous namespace
 
-
+REGISTER_DISPATCH(isclose_stub, &isclose_kernel_impl);
 REGISTER_DISPATCH(where_kernel, &where_kernel_impl)
 REGISTER_DISPATCH(isposinf_stub, &isposinf_kernel_impl)
 REGISTER_DISPATCH(isneginf_stub, &isneginf_kernel_impl)

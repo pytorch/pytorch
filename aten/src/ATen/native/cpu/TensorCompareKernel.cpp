@@ -399,6 +399,80 @@ static void clamp_min_scalar_kernel_impl(TensorIteratorBase& iter, Scalar min_) 
   });
 }
 
+template <typename scalar_t>
+void isclose_kernel_impl_real(
+    TensorIteratorBase& iter,
+    double rtol,
+    double atol,
+    bool equal_nan) {
+  cpu_kernel(iter, [=](scalar_t a, scalar_t b) -> bool {
+    if (a == b) {
+      return true;
+    }
+
+    if (equal_nan && std::isnan(static_cast<double>(a)) && std::isnan(static_cast<double>(b))) {
+      return true;
+    }
+
+    if (rtol == 0 && atol == 0) {
+      return false;
+    }
+
+    if (std::isfinite(static_cast<double>(a)) && std::isfinite(static_cast<double>(b))) {
+      auto allowed_error = static_cast<double>(atol + rtol * std::abs(b));
+      return std::abs(a - b) <= allowed_error;
+    }
+
+    return false;
+  });
+}
+
+template <typename scalar_t>
+void isclose_kernel_impl_complex(
+    TensorIteratorBase& iter,
+    double rtol,
+    double atol,
+    bool equal_nan) {
+  cpu_kernel(iter, [=](scalar_t a, scalar_t b) -> bool {
+    if (a == b) {
+      return true;
+    }
+
+    if (equal_nan && 
+        (std::isnan(std::real(a)) || std::isnan(std::imag(a))) && 
+        (std::isnan(std::real(b)) || std::isnan(std::imag(b)))) {
+      return true;
+    }
+
+    if (rtol == 0 && atol == 0) {
+      return false;
+    }
+
+    bool is_a_finite = std::isfinite(std::real(a)) && std::isfinite(std::imag(a));
+    bool is_b_finite = std::isfinite(std::real(b)) && std::isfinite(std::imag(b));
+
+    if (is_a_finite && is_b_finite) {
+      auto abs_b = std::abs(b);
+      auto allowed_error = static_cast<double>(atol + rtol * abs_b);
+      return std::abs(a - b) <= allowed_error;
+    }
+
+    return false;
+  });
+}
+
+void isclose_kernel(TensorIteratorBase& iter, double rtol, double atol, bool equal_nan) {
+  if (isComplexType(iter.common_dtype())) {
+    AT_DISPATCH_COMPLEX_TYPES(iter.common_dtype(), "isclose_cpu", [&]() {
+      isclose_kernel_impl_complex<scalar_t>(iter, rtol, atol, equal_nan);
+    });
+  } else {
+    AT_DISPATCH_ALL_TYPES_AND3(kHalf, kBFloat16, kBool, iter.common_dtype(), "isclose_cpu", [&]() {
+      isclose_kernel_impl_real<scalar_t>(iter, rtol, atol, equal_nan);
+    });
+  }
+}
+
 } // anonymous namespace
 
 REGISTER_DISPATCH(max_stub, &max_kernel_impl)
@@ -413,5 +487,6 @@ REGISTER_DISPATCH(clamp_scalar_stub, &clamp_scalar_kernel_impl)
 REGISTER_DISPATCH(clamp_min_scalar_stub, &clamp_min_scalar_kernel_impl)
 REGISTER_DISPATCH(clamp_max_scalar_stub, &clamp_max_scalar_kernel_impl)
 REGISTER_DISPATCH(isin_default_stub, &isin_default_kernel_cpu)
+REGISTER_DISPATCH(isclose_stub, &isclose_kernel)
 
 } // namespace at::native
