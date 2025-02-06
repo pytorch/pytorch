@@ -2225,7 +2225,10 @@ class FakeTensorMode(TorchDispatchMode):
                         real_out,
                     )
                 else:
-                    # make it clear this can override the output only when the flag is True
+                    # the pending unbacked symbols have to be cleared first
+                    if self.shape_env is not None:
+                        self.shape_env.pending_fresh_unbacked_symbols.clear()
+                    # this can override the output only when the flag is True
                     fake_out = self._maybe_infer_fake_kernel_from_pytree_out(  # type: ignore[assignment]
                         func,
                         (args, kwargs),
