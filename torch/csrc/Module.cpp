@@ -2222,12 +2222,12 @@ Call this whenever a new thread is created in order to propagate values from
             at::DataPtr(reinterpret_cast<void*>(data_ptr), device));
       });
 
-  py_module.def("_get_fp32_precision", [](std::string backend, std::string op) {
+  py_module.def("_get_fp32_precision_getter", [](std::string backend, std::string op) {
     return at::globalContext().float32Precision(backend, op);
   });
 
   py_module.def(
-      "_set_fp32_precision",
+      "_set_fp32_precision_setter",
       [](std::string backend, std::string op, std::string precision) {
         at::globalContext().setFloat32Precision(backend, op, precision);
         return precision;
