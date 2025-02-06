@@ -676,7 +676,9 @@ auto build_graph_and_tensors_nestedtensor(
 
   O->set_ragged_offset(RAG_O_OFF);
   if (Stats) {
-    TORCH_CHECK(false, "cuDNN SDPA Nested Tensor does not yet handle backwards/logsumexp computation");
+    TORCH_CHECK(
+        false,
+        "cuDNN SDPA Nested Tensor does not yet handle backwards/logsumexp computation");
     // TODO(eqy): fix  when stats (backward) support is added
     Stats->set_output(true)
         .set_data_type(fe::DataType_t::FLOAT)
