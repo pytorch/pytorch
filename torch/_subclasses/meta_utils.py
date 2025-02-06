@@ -253,7 +253,11 @@ class MetaTensorDescriber:
         return r
 
     def describe_tensor(
-        self, t: torch.Tensor, *, recurse: bool = True, trace: bool = False
+        self,
+        t: torch.Tensor,
+        *,
+        recurse: bool = True,
+        trace: bool = False,
     ) -> MetaTensorDesc:
         is_leaf = safe_is_leaf(t)
         is_view = t._is_view()
@@ -348,7 +352,34 @@ class MetaTensorDescriber:
             }
             type_v = type(t)
 
-        from torch.nested._internal.nested_tensor import _tensor_symint_registry
+        from torch.nested._internal.tensor_registry import try_get_int
+
+        nested_int_metadata: Optional[MetaTensorDesc] = None
+        if is_nested:
+            from torch.fx.experimental.sym_node import SymNode
+            from torch.nested._internal.nested_int import NestedIntNode
+            from torch.nested._internal.nested_tensor import NestedTensor
+
+            assert isinstance(t, NestedTensor)
+            nested_int = t.shape[t._ragged_idx]
+
+            assert (
+                isinstance(nested_int, torch.SymInt) and nested_int.node.is_nested_int()
+            )
+
+            node = nested_int.node
+
+            if isinstance(node, NestedIntNode):
+                metadata = node.nested_int_cache()
+            else:
+                # When fakifying a tensor that is already fake
+                # (test_jagged_fake_to_fake_preserved), nested_int is
+                # actually a symbolic nested int, e.g. SymNode holding j0 as hint.
+                # So isinstance(nested_int.node, NestedIntNode).
+                assert isinstance(node, SymNode)
+                metadata = node.hint.node.nested_int_cache()
+
+            nested_int_metadata = self.describe_tensor(metadata)
 
         view_func = ViewFunc.from_tensor(t)
 
@@ -380,11 +411,8 @@ class MetaTensorDescriber:
             is_parameter=isinstance(t, torch.nn.Parameter),
             is_traceable_wrapper_subclass=is_traceable_wrapper_subclass_v,
             is_nested=is_nested,
-            nested_int=(
-                _tensor_symint_registry[t].node.nested_int()
-                if t in _tensor_symint_registry
-                else None
-            ),
+            nested_int=try_get_int(t),
+            nested_int_metadata=nested_int_metadata,
             is_functional=is_functional,
             layout=layout,
             device=t.device,
@@ -465,6 +493,18 @@ class MetaTensorDescriber:
             )
             self.traced_tensors.add(r.id)
         return r
+
+
+@dataclass(frozen=True)
+class MetaNestedIntDesc:
+    cache: MetaTensorDesc
+
+
+@dataclass(frozen=True)
+class MetaCustomSizeStridesDesc:
+    size: tuple[Optional[MetaNestedIntDesc], ...]
+    stride: tuple[Optional[MetaNestedIntDesc], ...]
+    # storage_offset can never be NestedInt
 
 
 @dataclass(frozen=True)
@@ -589,10 +629,8 @@ class MetaTensorDesc(Generic[_TensorT]):
     is_gradtrackingtensor: bool = False
     is_view: bool = False
     is_nested: bool = False
-    # We eagerly symbolicize the associated nested int for e.g. offsets / lengths
-    # metadata if that offsets is already associated with a nested int.
-    # See test_construct_from_jagged_with_input_offsets_mixed_case.
     nested_int: Optional[int] = None
+    nested_int_metadata: Optional[MetaTensorDesc] = None
     is_traceable_wrapper_subclass: bool = False
     is_functional: bool = False
     is_conj: bool = False
@@ -854,6 +892,31 @@ class MetaConverter(Generic[_TensorT]):
         )
         self.arg_cnt += 1
 
+        nested_int_meta = t.nested_int_metadata
+
+        def nested_int_metafy_fn(src: Source) -> torch.Tensor:
+            assert nested_int_meta is not None
+            inner_callback = functools.partial(callback, device=nested_int_meta.device)  # type: ignore[call-arg]
+
+            if (
+                inner_contexts := getattr(symbolic_context, "inner_contexts", None)
+            ) is not None:
+                # This only be used with NJT today
+                inner_context = inner_contexts["_metadata"]
+            else:
+                # Run into this case in test_jagged_fake_to_fake_preserved
+                inner_context = all_dynamic_symbolic_context(
+                    nested_int_meta, src, shape_env, inner_callback
+                )
+
+            return self.meta_tensor(
+                nested_int_meta,
+                shape_env,
+                inner_callback,
+                source=src,
+                symbolic_context=inner_context,
+            )
+
         # When we make as_strided calls, we end up generating a guard
         # that the new as_strided tensor is in bounds for the old storage
         # for the base (since as_strided calls can "bust" out of their
@@ -916,6 +979,7 @@ class MetaConverter(Generic[_TensorT]):
                         [d in t.dynamo_dynamic_indices for d in range(t.ndim)],
                         src,
                         symbolic_context=symbolic_context,
+                        nested_int_metafy_fn=nested_int_metafy_fn,
                     )
             else:
                 return (t.size, t.stride, t.storage_offset)
@@ -1183,7 +1247,12 @@ class MetaConverter(Generic[_TensorT]):
                 sym_source = EphemeralSource("symint_visitor_fn")
 
                 symbol = shape_env.create_symbol(s, sym_source, positive=None)
-                return shape_env.create_symintnode(symbol, hint=s, source=sym_source)
+                return shape_env.create_symintnode(
+                    symbol,
+                    hint=s,
+                    source=sym_source,
+                    nested_int_metafy_fn=nested_int_metafy_fn,
+                )
 
             real_to_fake_mapping = {}
             if t.is_traceable_wrapper_subclass:
@@ -1775,12 +1844,11 @@ class MetaConverter(Generic[_TensorT]):
             if t.is_parameter:
                 r._is_param = True
 
+            # TODO(soulitzer): update this note
             # See Note: [Creating symbolic nested int]
             if t.nested_int is not None:
                 assert _is_fake_tensor(r)
-                r.nested_int_memo = r.fake_mode.create_symbolic_nested_int(
-                    nt_tensor_id=t.nested_int
-                )
+                r.register_nested_int_id(t.nested_int)
 
             self.set_tensor_memo(t, r)
 

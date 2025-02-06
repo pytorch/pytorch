@@ -23,6 +23,7 @@ import re
 import sys
 import threading
 import traceback
+import weakref
 from collections import Counter, defaultdict
 from collections.abc import Iterator, Mapping, Sequence
 from contextlib import _GeneratorContextManager, contextmanager
@@ -3244,7 +3245,7 @@ class ShapeEnv:
         self.size_like: set[sympy.Symbol] = set()
         # Duck-shaping says that if two input tensors have the same size,
         # they get assigned the same symbolic variable
-        self.val_to_var: dict[int, sympy.Symbol] = {}
+        self.val_to_var: dict[Union[int, torch.SymInt], sympy.Symbol] = {}
         if specialize_zero_one:
             self.val_to_var = {0: sympy.S.Zero, 1: sympy.S.One}
         self.unbacked_symfloat_counter = itertools.count()
@@ -3850,6 +3851,7 @@ class ShapeEnv:
         source: Source,
         *,
         symbolic_context: Optional[SymbolicContext] = None,
+        nested_int_metafy_fn: Optional[Callable] = None,
     ) -> tuple[
         tuple[Union[int, SymInt], ...],
         tuple[Union[int, SymInt], ...],
@@ -3878,6 +3880,7 @@ class ShapeEnv:
             [_is_dim_dynamic(ex, i) for i in range(ex.dim())],
             source,
             symbolic_context=symbolic_context,
+            nested_int_metafy_fn=nested_int_metafy_fn,
         )
 
     # Dynamo may want to wrap FakeTensors with SymInt sizes up e.g. make_fx(opt_f(), tracing_mode="symbolic").
@@ -3937,6 +3940,7 @@ class ShapeEnv:
         source: Source,
         *,
         symbolic_context: Optional[SymbolicContext] = None,
+        nested_int_metafy_fn: Optional[Callable] = None,
     ) -> tuple[
         tuple[Union[int, SymInt], ...],
         tuple[Union[int, SymInt], ...],
@@ -4016,6 +4020,7 @@ class ShapeEnv:
                 sym,
                 hint=hint,
                 source=TensorPropertySource(source, TensorProperty.SIZE, i),
+                nested_int_metafy_fn=nested_int_metafy_fn,
             )
             for i, (sym, hint) in enumerate(zip(size, ex_size))
         ]
@@ -4029,6 +4034,7 @@ class ShapeEnv:
                     stride_expr,
                     hint=ex_stride[i],
                     source=TensorPropertySource(source, TensorProperty.STRIDE, i),
+                    nested_int_metafy_fn=nested_int_metafy_fn,
                 )
             )
         sym_storage_offset = self.create_symintnode(
@@ -4107,8 +4113,9 @@ class ShapeEnv:
         self,
         sym: sympy.Expr,
         *,
-        hint: Optional[int],
+        hint: Optional[Union[int, torch.SymInt]],
         source: Optional[Source] = None,
+        nested_int_metafy_fn: Optional[Callable] = None,
     ) -> Union[int, SymInt]:
         """Create a SymInt value from a symbolic expression
 
@@ -4135,6 +4142,37 @@ class ShapeEnv:
             if hint is not None:
                 assert int(sym) == hint
             out = int(sym)
+        elif (
+            hint is not None
+            and is_nested_int(hint)
+            and nested_int_metafy_fn is not None
+        ):
+            from torch._dynamo.source import SymNodePropertySource
+            from torch._subclasses.fake_tensor import maybe_get_fake_mode
+            from torch.nested._internal.nested_int import NestedIntNode
+
+            assert nested_int_metafy_fn is not None
+            assert source is not None
+            cache = nested_int_metafy_fn(
+                SymNodePropertySource(source, "nested_int_cache"),
+            )
+            coeff = hint.node.nested_int_coeff()
+
+            out = SymInt(
+                SymNode(
+                    sym,
+                    self,
+                    int,
+                    SymInt(NestedIntNode(cache, coeff=coeff)),
+                    fx_node=fx_node,
+                )
+            )
+            if coeff == 1:
+                # Don't participate in caching when coeff != 1
+                fake_mode = maybe_get_fake_mode(cache)
+                assert fake_mode is not None
+                # See [ Best effort SymInt association ]
+                fake_mode.nt_cache_to_nested_int[cache] = weakref.ref(out)
         else:
             # How can this occur? When we mark_unbacked, we end up with a real
             # tensor that has hints for all sizes, but we MUST NOT create a
@@ -4344,7 +4382,7 @@ class ShapeEnv:
     @record_shapeenv_event()
     def create_symbol(
         self,
-        val: int,
+        val: Union[int, torch.SymInt],
         source: Source,
         dynamic_dim: DimDynamic = DimDynamic.DUCK,
         constraint_dim: DimConstraint = None,  # NB: includes None

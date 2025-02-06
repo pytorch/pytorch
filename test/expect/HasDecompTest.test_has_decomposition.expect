@@ -456,11 +456,8 @@ aten::_nested_from_padded.out
 aten::_nested_from_padded_and_nested_example
 aten::_nested_from_padded_and_nested_example.out
 aten::_nested_from_padded_tensor
-aten::_nested_get_jagged_dummy
-aten::_nested_get_lengths
-aten::_nested_get_max_seqlen
-aten::_nested_get_min_seqlen
-aten::_nested_get_offsets
+aten::_nested_get_jagged_metadata
+aten::_nested_get_non_contig_offsets
 aten::_nested_get_ragged_idx
 aten::_nested_get_values
 aten::_nested_get_values_copy

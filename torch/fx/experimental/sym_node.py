@@ -83,7 +83,7 @@ class SymNode:
         expr,
         shape_env,
         pytype,
-        hint: Optional[Union[int, float, bool]],
+        hint: Optional[Union[int, float, bool, torch.SymInt]],
         constant=None,
         fx_node=None,
         optimized_summation=False,
