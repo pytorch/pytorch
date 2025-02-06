@@ -6329,6 +6329,20 @@ class CommonTemplate:
                 ):
                     c_op(x, kernel_size=2, stride=2)
 
+    def test_replication_pad_errors_with_bool(self):
+        # https://github.com/pytorch/pytorch/issues/143779
+        for dim in (1, 2, 3):
+            def fn(x):
+                x = torch.signbit(x)
+                x = eval(f"nn.ReplicationPad{dim}d(padding=1)")(x)
+                return x
+            c_fn = torch.compile(fn)
+            x = torch.randn([1] * (dim + 2))
+            with self.assertRaisesRegex(
+                RuntimeError, r".*(not implemented|aoti_torch_).*"
+            ):
+                c_fn(x)
+
     def test_log1p(self):
         def fn(x):
             return torch.log1p(x), torch.log1p(x) * 2
