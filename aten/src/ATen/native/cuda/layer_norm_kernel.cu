@@ -541,7 +541,7 @@ __global__ void GammaBetaBackwardSimpleCUDAKernel(
 }
 
 // We use template parameters here because the compiler can then constant-propagate these
-// constants and produce faster kernel code. In particular, there is a shared memory
+// constants and optimize loops, etc.. In particular, there is a shared memory
 // reduction loop that can be completely optimized away if block_dim_y == 32 (which does
 // happen at one callsite). After the shared memory reduction there is a warp shuffle phase
 // that reduces without calling __syncthreads().
@@ -607,7 +607,8 @@ __global__ void GammaBetaBackwardCUDAKernel(
     int padded_bx = (block_dim_x + 1);
 
     // Note that this loop will be optimized away by the compiler if block_dim_y=32
-    // (which it is from the single callsite where this kernel is called).
+    // (which we do have at one callsite). Note that the template variable is
+    // block_dim_y as opposed to blockDim.y which is a CUDA reserved variable.
     for (int offset = block_dim_y / 2; offset >= kWarpSize; offset /= 2) {
       if (threadIdx.y < offset) {
         s_dg[threadIdx.y * padded_bx + threadIdx.x] +=
