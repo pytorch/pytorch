@@ -133,7 +133,7 @@ To toggle the TF32 flags off in C++, you can do
   at::globalContext().setAllowTF32CuBLAS(false);
   at::globalContext().setAllowTF32CuDNN(false);
 
-After Pytorch 2.5, we provide a new sets of APIs to control the TF32 behavior in a more fine-grained way.
+After Pytorch 2.7, we provide a new sets of APIs to control the TF32 behavior in a more fine-grained way.
 We can set float32 precision per backend and per operators. We can also override the global setting for a specific operator.
 
 .. code:: python
@@ -166,7 +166,7 @@ We can also override a generic setting for a specific backend if the fp32_precis
   torch.backends.cudnn.rnn.fp32_precision = "ieee"
 
 For above 2 cases, both `torch.backends.cudnn.conv.fp32_precision` and `torch.backends.cudnn.rnn.fp32_precision`
-is overrided to `tf32`.
+is overrided to `ieee`.
 
 Old settings are still supported. But we suggest to use the new settings for better control. And we do not support
 to use mix of old and new settings.

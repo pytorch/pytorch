@@ -29,7 +29,7 @@ namespace {
   prevision from "ieee", "tf32", "bf16" and "none". The "ieee" precision means
   IEEE standard floating point format "tf32" and "bf16" means we are allowed to
   use "tf32" or "bf16" as internal computation data types for fp32 computations.
-  And "none" means it is override-able by father node's
+  And "none" means it is override-able by parent's node
 
   generic->mkldnn->matmul
                 ->conv
