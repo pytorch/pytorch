@@ -487,6 +487,7 @@ def mps_ops_modifier(ops):
         'square',
         'stack',
         'stft',
+        'sinc',
         'sum',
         'sum_to_size',
         'tan',
@@ -767,7 +768,6 @@ def mps_ops_modifier(ops):
         '_segment_reduce_lengths': None,
         '_segment_reducelengths': None,
         '_segment_reduceoffsets': None,
-        'sinc': None,
         'sparse.mm': None,
         'sparse.mmreduce': None,
         'special.airy_ai': None,
@@ -842,8 +842,9 @@ def mps_ops_modifier(ops):
         'atan2': [torch.int64],
         'angle': [torch.int64],
 
-        # zeta isn't supported for integral types
+        # Operations not supported for integral types
         'special.zeta': [torch.bool, torch.int16, torch.int32, torch.int64, torch.uint8, torch.int8],
+        'sinc': [torch.bool, torch.int16, torch.int32, torch.int64, torch.uint8, torch.int8, torch.complex64],
 
         # GEMM on MPS is not supported for integral types
         'nn.functional.linear': [torch.int16, torch.int32, torch.int64, torch.uint8, torch.int8],

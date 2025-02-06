@@ -231,6 +231,10 @@ class MetalOverrides(OpOverrides):
         return f"metal::precise::sin({x})"
 
     @staticmethod
+    def sinc(x: CSEVariable) -> str:
+        return f"c10::metal::sinc({x})"
+
+    @staticmethod
     def cos(x: CSEVariable) -> str:
         return f"metal::precise::cos({x})"
 

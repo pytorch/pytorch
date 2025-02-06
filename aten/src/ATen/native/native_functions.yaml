@@ -5388,6 +5388,7 @@
   structured_inherits: TensorIteratorBase
   dispatch:
     CPU, CUDA: sinc_out
+    MPS: sinc_out_mps
   tags: pointwise
 
 - func: sinh(Tensor self) -> Tensor

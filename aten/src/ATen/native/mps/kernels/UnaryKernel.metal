@@ -108,3 +108,23 @@ INSTANTIATE_UNARY_KERNELS2(float, long);
 
 INSTANTIATE_UNARY_KERNELS_VEC2(short, short);
 INSTANTIATE_UNARY_KERNELS_VEC2(float, float);
+
+template <typename T0, typename T1>
+kernel void sinc_kernel(
+    device T0* output [[buffer(0)]],
+    constant T1* input [[buffer(1)]],
+    uint index [[thread_position_in_grid]]) {
+  output[index] = T0(sinc(static_cast<float>(input[index])));
+}
+
+#define INSTANTIATE_SINC_KERNEL(DTYPE0, DTYPE1)                                \
+  template [[host_name("sinc_" #DTYPE0 "_" #DTYPE1)]] kernel void sinc_kernel( \
+      device DTYPE0* output [[buffer(0)]],                                     \
+      constant DTYPE1* input [[buffer(1)]],                                    \
+      uint id [[thread_position_in_grid]]);
+
+#if __METAL_VERSION__ >= 310
+INSTANTIATE_SINC_KERNEL(bfloat, bfloat);
+#endif
+INSTANTIATE_SINC_KERNEL(half, half);
+INSTANTIATE_SINC_KERNEL(float, float);
