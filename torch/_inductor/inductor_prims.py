@@ -117,6 +117,7 @@ online_softmax = make_prim(
     return_type=(_prims.RETURN_TYPE.NEW, _prims.RETURN_TYPE.NEW),
     doc="Prepare the softmax by computing the max and sum.",
 )
+prepare_softmax_online = online_softmax
 
 
 def _low_memory_max_pool2d_with_offsets_aten(

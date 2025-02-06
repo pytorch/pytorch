@@ -51,6 +51,9 @@ quantized = torch.ops.quantized
 _quantized = torch.ops._quantized
 quantized_decomposed = torch.ops.quantized_decomposed
 
+import os
+USE_DECOMP_FOR_ONLINE_SOFTMAX = os.getenv("USE_DECOMP_FOR_ONLINE_SOFTMAX", "1") == "1"
+
 inductor_decompositions = get_decompositions(
     [
         aten._adaptive_avg_pool2d_backward,
@@ -92,7 +95,7 @@ inductor_decompositions = get_decompositions(
         aten.upsample_bilinear2d.vec,
         quantized.linear_dynamic_fp16_unpacked_weight,
         _quantized.wrapped_quantized_linear,
-    ]
+    ] + ([] if USE_DECOMP_FOR_ONLINE_SOFTMAX else [aten._log_softmax, aten._softmax])
 )
 decompositions = {**core_aten_decompositions(), **inductor_decompositions}
 
@@ -115,9 +118,13 @@ decomps_to_exclude = [
     aten.sum,  # inductor lowers this directly
     aten.unbind,  # inductor lowers this directly
     aten.baddbmm,  # upcasts to fp32, perf issue
-    aten._softmax,  # inductor will override this rule
-    aten._log_softmax,  # inductor will override this rule
 ]
+
+if USE_DECOMP_FOR_ONLINE_SOFTMAX:
+    decomps_to_exclude += [
+        aten._softmax,  # inductor will override this rule
+        aten._log_softmax,  # inductor will override this rule
+    ]
 
 remove_decompositions(decompositions, decomps_to_exclude)
 
@@ -1083,62 +1090,63 @@ def _use_online_softmax(x: torch.Tensor, dim: int) -> bool:
     if x.device.type != "cuda":
         return False
 
-    return x.size(dim) > 2**14
+    return True
 
 
-@register_decomposition(aten._softmax)
-def _softmax(x: torch.Tensor, dim: int, half_to_float: bool) -> torch.Tensor:
-    # eager softmax returns a contiguous tensor. Ensure that decomp also returns
-    # a contiguous tensor.
-    x = x.contiguous()
-    if half_to_float:
-        assert x.dtype == torch.half
-    computation_dtype, result_dtype = utils.elementwise_dtypes(
-        x, type_promotion_kind=utils.ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
-    )
-    x = x.to(computation_dtype)
-    if x.numel() == 0:
-        unnormalized = torch.exp(x)
-        result = unnormalized / torch.sum(unnormalized, dim, keepdim=True)
-    elif not _use_online_softmax(x, dim):
-        # don't want to affect small softmax. That may inferfere with
-        # the attention patterns.
-        x_max = torch.amax(x, dim, keepdim=True)
-        unnormalized = torch.exp(x - x_max)
-        result = unnormalized / torch.sum(unnormalized, dim, keepdim=True)
-    else:
-        x_max, t_sum = inductor_prims.online_softmax(x, dim)
-        result = torch.exp(x - x_max) / t_sum
-
-    if not half_to_float:
-        result = result.to(result_dtype)
-    return result
-
-
-@register_decomposition(aten._log_softmax)
-def _log_softmax(x: torch.Tensor, dim: int, half_to_float: bool) -> torch.Tensor:
-    # eager log_softmax returns a contiguous tensor. Ensure that decomp also
-    # returns a contiguous tensor.
-    x = x.contiguous()
-    if half_to_float:
-        assert x.dtype == torch.half
-    computation_dtype, result_dtype = utils.elementwise_dtypes(
-        x, type_promotion_kind=utils.ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
-    )
-    x = x.to(computation_dtype)
-    if x.numel() == 0:
-        shifted = x
-        shifted_logsumexp = torch.log(torch.sum(torch.exp(shifted), dim, keepdim=True))
-    elif not _use_online_softmax(x, dim):
-        x_max = torch.amax(x, dim, keepdim=True)
-        shifted = x - x_max
-        shifted_logsumexp = torch.log(torch.sum(torch.exp(shifted), dim, keepdim=True))
-    else:
-        x_max, t_sum = inductor_prims.online_softmax(x, dim)
-        shifted = x - x_max
-        shifted_logsumexp = torch.log(t_sum)
-
-    result = shifted - shifted_logsumexp
-    if not half_to_float:
-        result = result.to(result_dtype)
-    return result
+if USE_DECOMP_FOR_ONLINE_SOFTMAX:
+    @register_decomposition(aten._softmax)
+    def _softmax(x: torch.Tensor, dim: int, half_to_float: bool) -> torch.Tensor:
+        # eager softmax returns a contiguous tensor. Ensure that decomp also returns
+        # a contiguous tensor.
+        x = x.contiguous()
+        if half_to_float:
+            assert x.dtype == torch.half
+        computation_dtype, result_dtype = utils.elementwise_dtypes(
+            x, type_promotion_kind=utils.ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
+        )
+        x = x.to(computation_dtype)
+        if x.numel() == 0:
+            unnormalized = torch.exp(x)
+            result = unnormalized / torch.sum(unnormalized, dim, keepdim=True)
+        elif not _use_online_softmax(x, dim):
+            # don't want to affect small softmax. That may inferfere with
+            # the attention patterns.
+            x_max = torch.amax(x, dim, keepdim=True)
+            unnormalized = torch.exp(x - x_max)
+            result = unnormalized / torch.sum(unnormalized, dim, keepdim=True)
+        else:
+            x_max, t_sum = inductor_prims.online_softmax(x, dim)
+            result = torch.exp(x - x_max) / t_sum
+    
+        if not half_to_float:
+            result = result.to(result_dtype)
+        return result
+    
+    
+    @register_decomposition(aten._log_softmax)
+    def _log_softmax(x: torch.Tensor, dim: int, half_to_float: bool) -> torch.Tensor:
+        # eager log_softmax returns a contiguous tensor. Ensure that decomp also
+        # returns a contiguous tensor.
+        x = x.contiguous()
+        if half_to_float:
+            assert x.dtype == torch.half
+        computation_dtype, result_dtype = utils.elementwise_dtypes(
+            x, type_promotion_kind=utils.ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
+        )
+        x = x.to(computation_dtype)
+        if x.numel() == 0:
+            shifted = x
+            shifted_logsumexp = torch.log(torch.sum(torch.exp(shifted), dim, keepdim=True))
+        elif not _use_online_softmax(x, dim):
+            x_max = torch.amax(x, dim, keepdim=True)
+            shifted = x - x_max
+            shifted_logsumexp = torch.log(torch.sum(torch.exp(shifted), dim, keepdim=True))
+        else:
+            x_max, t_sum = inductor_prims.online_softmax(x, dim)
+            shifted = x - x_max
+            shifted_logsumexp = torch.log(t_sum)
+    
+        result = shifted - shifted_logsumexp
+        if not half_to_float:
+            result = result.to(result_dtype)
+        return result
