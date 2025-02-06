@@ -129,6 +129,7 @@ class TORCH_API Work : public torch::CustomClassHolder {
 
   static c10::intrusive_ptr<Work> create_from_future(
       const c10::intrusive_ptr<c10::ivalue::Future>&);
+  std::function<void()> getRecordFunctionEndCallback() const;
 
  protected:
   // Completes the work object and optionally sets the exception in a

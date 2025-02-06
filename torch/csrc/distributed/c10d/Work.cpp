@@ -144,6 +144,10 @@ uint64_t Work::getSequencenumber() const {
   TORCH_CHECK(false, "This Backend doesn't support getSequencenumber.");
 }
 
+std::function<void()> Work::getRecordFunctionEndCallback() const {
+  return recordFunctionEndCallback_;
+}
+
 class FutureWrappingWork : public Work {
  public:
   FutureWrappingWork(c10::intrusive_ptr<c10::ivalue::Future> fut)
