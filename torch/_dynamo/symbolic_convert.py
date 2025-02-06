@@ -1082,7 +1082,7 @@ class InstructionTranslatorBase(
             except BackendCompilerFailed:
                 raise
             except RuntimeError as e:
-                if hasattr(e, "msg") and "Could not guard on data-dependent" in e.msg:
+                if hasattr(e, "msg") and "data-dependent" in e.msg:
                     print(
                         "\n"
                         + torch.fx.GraphModule({}, self.output.graph).print_readable(
@@ -1467,6 +1467,14 @@ class InstructionTranslatorBase(
             # Create the instance of the exception type
             # https://github.com/python/cpython/blob/3.11/Python/ceval.c#L6547-L6549
             val = val.call_function(self, [], {})  # type: ignore[arg-type]
+
+        # Handle https://peps.python.org/pep-0479/
+        if (
+            is_generator(self.f_code)
+            and isinstance(val, variables.ExceptionVariable)
+            and val.exc_type is StopIteration
+        ):
+            val = variables.BuiltinVariable(RuntimeError).call_function(self, [], {})  # type: ignore[arg-type]
 
         # Save the exception in a global data structure
         self.exn_vt_stack.append(val)
@@ -2253,9 +2261,11 @@ class InstructionTranslatorBase(
         # https://peps.python.org/pep-0479/
         # https://github.com/python/cpython/pull/99006
         # https://github.com/python/cpython/commit/28187141cc34063ef857976ddbca87ba09a882c2
-        assert isinstance(inst, ExceptionVariable)
-        if inst.exc_type is StopIteration:
-            exc.raise_observed_exception(RuntimeError, self)
+        val = self.stack[-1]
+        assert isinstance(val, ExceptionVariable)
+        if val.exc_type is StopIteration:
+            new_val = variables.BuiltinVariable(RuntimeError).call_function(self, [], {})  # type: ignore[arg-type]
+            self.stack[-1] = new_val
 
     def DICT_MERGE(self, inst):
         v = self.pop()
@@ -2543,7 +2553,7 @@ class InstructionTranslatorBase(
     def CALL_INTRINSIC_1(self, inst):
         if inst.argval == 3:
             # INTRINSIC_STOPITERATION_ERROR
-            self.STOPITERATION_ERROR(self.pop())
+            self.STOPITERATION_ERROR(inst)
         elif inst.argval == 5:
             # INTRINSIC_UNARY_POSITIVE
             self.UNARY_POSITIVE(inst)
@@ -3105,6 +3115,7 @@ class InstructionTranslator(InstructionTranslatorBase):
             and not self.inconsistent_side_effects
             and not self.symbolic_locals_contain_module_class()
             and not self.export
+            and not self.one_graph
         ):
             raise exc.SkipFrame("because no content in function call")
         self.instruction_pointer = None
