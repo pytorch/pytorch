@@ -1,7 +1,6 @@
 # Owner(s): ["module: unknown"]
 import copy
 import unittest
-from typing import Tuple
 
 import torch
 from torch._subclasses.fake_tensor import FakeTensorMode
@@ -19,7 +18,13 @@ from torch.distributed._tools.sac_ilp import (
     sac_milp,
 )
 from torch.testing._internal.common_cuda import TEST_CUDA
-from torch.testing._internal.common_utils import run_tests, skipIfTorchDynamo, TestCase
+from torch.testing._internal.common_utils import (
+    MI300_ARCH,
+    run_tests,
+    skipIfRocmArch,
+    skipIfTorchDynamo,
+    TestCase,
+)
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     ModelArgs,
     Transformer,
@@ -34,7 +39,7 @@ class TestSACILP(TestCase):
 
     def _init_model_input_optimizer(
         self,
-    ) -> Tuple[torch.nn.Module, torch.optim.Optimizer, torch.Tensor]:
+    ) -> tuple[torch.nn.Module, torch.optim.Optimizer, torch.Tensor]:
         bsz = 8
         model_args = ModelArgs(
             n_layers=4,
@@ -131,6 +136,7 @@ class TestSACILP(TestCase):
 
     @skipIfTorchDynamo("https://github.com/pytorch/pytorch/issues/115653")
     @unittest.skipIf(not TEST_CUDA, "CUDA not available")
+    @skipIfRocmArch(MI300_ARCH)
     def test_sac_ilp_case1(self):
         """
         This is a case where the memory budget is either binding or too tight,

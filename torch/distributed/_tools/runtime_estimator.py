@@ -2,7 +2,7 @@
 import math
 import os
 from collections import defaultdict
-from typing import Any, Callable, Dict, List, Set, Tuple
+from typing import Any, Callable
 from typing_extensions import Self
 
 import torch
@@ -121,13 +121,13 @@ class RuntimeEstimator(TorchDispatchMode):
                 runtime_estimator.display_modulewise_stats()
     """
 
-    _float_types: Set[torch.dtype] = {
+    _float_types: set[torch.dtype] = {
         torch.float16,
         torch.bfloat16,
         torch.float32,
         torch.float64,
     }
-    _no_fallback_kernel: Set[torch._ops._OpNamespace] = set()
+    _no_fallback_kernel: set[torch._ops._OpNamespace] = set()
     fake_mode: FakeTensorMode
 
     def __init__(self) -> None:
@@ -135,13 +135,13 @@ class RuntimeEstimator(TorchDispatchMode):
         self._estimate: Callable
         self._estimate_mode_type: str
         self._mod_tracker = ModTracker()
-        self.mod_runtimes: Dict[str, Dict[str, float]] = defaultdict(
+        self.mod_runtimes: dict[str, dict[str, float]] = defaultdict(
             lambda: defaultdict(lambda: 0.0)
         )
-        self.mod_fw_pre_order: List[str] = []
-        self.mod_bw_pre_order: List[str] = []
-        self.mod_fw_post_order: List[str] = []
-        self.mod_bw_post_order: List[str] = []
+        self.mod_fw_pre_order: list[str] = []
+        self.mod_bw_pre_order: list[str] = []
+        self.mod_fw_post_order: list[str] = []
+        self.mod_bw_post_order: list[str] = []
         self.total_runtime: float = 0.0
 
     # Adapted from: https://github.com/pytorch/pytorch/blob/9b902b3ee3bd608a19543362b66bf06c373dd374/torch/_subclasses/fake_tensor.py#L1969  # noqa: PGH004,B950
@@ -241,7 +241,7 @@ class RuntimeEstimator(TorchDispatchMode):
         return (pytree.tree_map(map_out, r), mean_op_time)
 
     @classmethod
-    def _benchmark_estimate(cls, func, args, kwargs) -> Tuple[Any, float]:  # type: ignore[no-untyped-def]
+    def _benchmark_estimate(cls, func, args, kwargs) -> tuple[Any, float]:  # type: ignore[no-untyped-def]
         """
         Estimates the runtime of a function using benchmarking.
 
@@ -275,7 +275,7 @@ class RuntimeEstimator(TorchDispatchMode):
 
     # Adapted from: https://github.com/pytorch/pytorch/blob/9b902b3ee3bd608a19543362b66bf06c373dd374/torch/_inductor/scheduler.py#L589  # noqa: PGH004,B950
     @classmethod
-    def _roofline_estimate(cls, func, args, kwargs) -> Tuple[Any, float]:  # type: ignore[no-untyped-def]
+    def _roofline_estimate(cls, func, args, kwargs) -> tuple[Any, float]:  # type: ignore[no-untyped-def]
         """
         Estimates the runtime of a function using a roofline cost model.
 

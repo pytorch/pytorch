@@ -111,7 +111,7 @@ embedding_dense_backward_batch_rule(
  */
 template<typename F, F Func, typename... ExtraArgs>
 std::tuple<Tensor, std::optional<int64_t>>
-grid_sample_batch_rule(const Tensor& input, std::optional<int64_t> input_bdim, const Tensor& grid, std::optional<int64_t> grid_bdim, ExtraArgs... extra_args) {
+static grid_sample_batch_rule(const Tensor& input, std::optional<int64_t> input_bdim, const Tensor& grid, std::optional<int64_t> grid_bdim, ExtraArgs... extra_args) {
   std::tuple<Tensor, std::optional<int64_t>> result;
   if (input_bdim && !grid_bdim) {
     auto new_input = reshape_dim_into(*input_bdim, 1, input);
@@ -162,6 +162,7 @@ grid_sample_backward_helper_in(
 
 static std::tuple<Tensor, std::optional<int64_t>, Tensor, std::optional<int64_t>>
 grid_sample_backward_helper_out(
+    // NOLINTNEXTLINE(performance-unnecessary-value-param)
     std::tuple<Tensor, Tensor> bw_out,
     int64_t grad_input_out_bdim,
     int64_t grad_grid_out_bdim,
@@ -175,7 +176,7 @@ grid_sample_backward_helper_out(
 
 template<typename F, F Func, typename... ExtraArgs>
 std::tuple<Tensor, std::optional<int64_t>, Tensor, std::optional<int64_t>>
-grid_sample_backward_batch_rule(
+static grid_sample_backward_batch_rule(
     const Tensor& grad_output, std::optional<int64_t> grad_output_bdim,
     const Tensor& input, std::optional<int64_t> input_bdim,
     const Tensor& grid, std::optional<int64_t> grid_bdim,
@@ -261,7 +262,7 @@ struct UpsampleBackwardBatchRuleHelper<F, Func, typelist<A, B, C, T...>> {
 
     auto out = Func(
         std::move(grad_output_),
-        std::move(output_size),
+        output_size,
         std::move(physical_input_size),
         std::forward<T>(extra_args)...);
     // NOLINTNEXTLINE(bugprone-unchecked-optional-access)

@@ -87,7 +87,7 @@ struct GemmParams : OpParams {
   GemmParams() = default;
 
   std::string Signature() const override {
-    return fmt::sprintf("%c%c_%ld_%ld_%ld", transa, transb, m, n, k);
+    return fmt::sprintf("%c%c_%ld_%ld_%ld_ld_%ld_%ld_%ld", transa, transb, m, n, k, lda, ldb, ldc);
   }
 
   size_t GetSizeA() const {
@@ -172,7 +172,7 @@ private:
 template <typename T>
 struct GemmAndBiasParams : OpParams {
   std::string Signature() const override {
-    return fmt::sprintf("%c%c_%ld_%ld_%ld", transa, transb, m, n, k);
+    return fmt::sprintf("%c%c_%ld_%ld_%ld_ld_%ld_%ld_%ld", transa, transb, m, n, k, lda, ldb, ldc);
   }
 
   size_t GetSizeA() const {
@@ -258,7 +258,7 @@ private:
 template <typename T>
 struct GemmStridedBatchedParams : OpParams {
   std::string Signature() const override {
-    return fmt::sprintf("%c%c_%ld_%ld_%ld_B_%ld", transa, transb, m, n, k, batch);
+    return fmt::sprintf("%c%c_%ld_%ld_%ld_B_%ld_ld_%ld_%ld_%ld", transa, transb, m, n, k, batch, lda, ldb, ldc);
   }
 
   size_t GetSizeA() const {
@@ -351,7 +351,7 @@ struct ScaledGemmParams : OpParams {
   ScaledGemmParams() = default;
 
   std::string Signature() const override {
-    return fmt::sprintf("%c%c_%ld_%ld_%ld", transa, transb, m, n, k);
+    return fmt::sprintf("%c%c_%ld_%ld_%ld_ld_%ld_%ld_%ld", transa, transb, m, n, k, lda, ldb, ldc);
   }
 
   size_t GetSizeA() const {
@@ -436,6 +436,7 @@ struct ScaledGemmParams : OpParams {
   ScalarType c_dtype{};
   void* amax_ptr{};
   bool use_fast_accum{};
+  bool use_rowwise{};
 private:
   bool duplicate_inputs_{false};
 };

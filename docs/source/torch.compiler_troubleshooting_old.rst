@@ -668,7 +668,7 @@ assumptions about locals and globals in order to allow compiler
 optimizations, and expresses these assumptions as guards that check
 particular values at runtime. If any of these guards fail, Dynamo will
 recompile that function (or part) up to
-``torch._dynamo.config.cache_size_limit`` times. If your program is
+``torch._dynamo.config.recompile_limit`` times. If your program is
 hitting the cache limit, you will first need to determine which guard is
 failing and what part of your program is triggering it.
 
@@ -679,7 +679,7 @@ cost of recompilation outweighs any optimization benefits.
 
 ::
 
-   torch._dynamo.config.cache_size_limit = <your desired cache limit>
+   torch._dynamo.config.recompile_limit = <your desired cache limit>
 
 TorchDynamo plans to support many common cases of dynamic tensor shapes,
 such as varying batch size or sequence length. It does not plan to

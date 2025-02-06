@@ -1,18 +1,9 @@
 # mypy: allow-untyped-defs
+from __future__ import annotations
+
 import itertools
-from typing import (
-    Any,
-    Callable,
-    Dict,
-    Generic,
-    List,
-    Literal,
-    NamedTuple,
-    Optional,
-    Tuple,
-    TypeVar,
-    Union,
-)
+import re
+from typing import Any, Callable, Generic, Literal, NamedTuple, Optional, TypeVar, Union
 from typing_extensions import Protocol
 from unittest.mock import patch
 
@@ -41,7 +32,7 @@ ReductionType = Literal[
 ]
 
 
-def _arg_str(a) -> str:
+def _arg_str(a: object) -> str:
     if isinstance(a, sympy.Expr):
         return sympy_str(a)
     return str(a)
@@ -56,7 +47,7 @@ class OpsHandler(Protocol[T]):
     """
     Protocol describing the set of valid operations on ``torch._inductor.virtualized.ops``,
     as well as the contract for op handlers.  The type T signifies the domain
-    of the abstract analysis AKA what all of the functions return / take as arguments
+    of the abstract analysis AKA what all the functions return / take as arguments
     anywhere compute occurs.
 
     While these operators are typically dtype polymorphic (e.g., you can use mul
@@ -75,23 +66,36 @@ class OpsHandler(Protocol[T]):
     Note that this often describes a class of static methods, for stateless
     ops handlers.
 
-    Handlers are often defined using ``__getattr__`` metaprogramming, which means
-    that you cannot declare that a type implements a protocol by inheriting from
-    it (as the type stubs count as attribute declarations and impede the getattr
-    magic method from being called).  Instead, define a function that casts an
-    argument of your type to the protocol, which is sufficient to induce mypy to
-    test that the protocol is implemented correctly.  Search for ``_typecheck_``
-    in this file to see some examples.  If you see an obscure error where a
-    class doesn't implement a Protocol, but mypy doesn't say why, check to see
-    that ``__getattr__`` is typed correctly (typically, it is not possible to
-    type ``__getattr__`` without typing it as ``Callable[..., Any]``)
+    Handlers are often defined using metaprogramming (e.g. _initialize_pointwise_overrides),
+    which means you will get type errors if you subclass OpsHandler since mypy doesn't know
+    about the methods added via metaprogramming and thinks the class is still abstract.
+    Instead, you should add a block like:
+
+        if TYPE_CHECKING:
+
+            class _typecheck_TritonKernelOverrides(TritonKernelOverrides, OpsHandler[str]):
+                pass  # mypy will error if we got any of the signatures wrong
+
+    Which will check the signatures of non-meta-programmed methods and gives decent error messages.
+
+    Some older parts of the code use a pattern like:
+
+        def _typecheck_KernelFormatterHandler(h: KernelFormatterHandler) -> OpsHandler[str]:
+            return h
+
+    This pattern only works if the class defines a __getattr__ method, which we are moving away from.
+    Additionally, this pattern generates horrible error messages if the signatures are wrong.
+    It gives zero information about what the problem is, which makes the pattern harmful.
+
+    Instead of that, we have tests in test/inductor/test_op_completeness.py which check that all
+    operators are implemented after all the metaprogramming has run.
     """
 
     def constant(self, value: Union[bool, float, int], dtype: torch.dtype) -> T:
         """Produces a scalar constant of type dtype."""
         ...
 
-    def load_seed(self, name: str, offset: T):
+    def load_seed(self, name: str, offset: T) -> T:
         """Computes inductor_prims.lookup_seed."""
         ...
 
@@ -140,7 +144,7 @@ class OpsHandler(Protocol[T]):
         x: T,
         dtype: torch.dtype,
         src_dtype: Optional[torch.dtype] = None,
-        use_compute_types=True,
+        use_compute_types: bool = True,
     ) -> T:
         """
         Convert x to dtype.  src_dtype can be optionally set to specify what the original
@@ -207,7 +211,7 @@ class OpsHandler(Protocol[T]):
     ) -> sympy.Expr:
         """
         Convert an integral x into a sympy.Expr that can be subsequently used in
-        indexing computation.  'size' represents an upper bound on the what valid
+        indexing computation.  'size' represents an upper bound on what valid
         indexes can be; when 'check' is True, we check that the x is in bounds.
 
         NB: This is typically mandatory to implement for any analysis, because you
@@ -243,7 +247,7 @@ class OpsHandler(Protocol[T]):
         src_dtype: torch.dtype,
         reduction_type: ReductionType,
         value: T,
-    ) -> Union[T, Tuple[T, ...]]:
+    ) -> Union[T, tuple[T, ...]]:
         """
         Perform a 'reduction_type' reduction on 'value' of dtype 'src_dtype',
         using 'dtype' as the accumulation dtype for the reduction.  The result
@@ -259,7 +263,7 @@ class OpsHandler(Protocol[T]):
     # TODO: in practice, this seems to actually return None, but not returning
     # a T makes common __getattr__ idioms not type correctly.  Figure out if
     # this should be returning something.
-    def store_reduction(self, name: str, index: sympy.Expr, value: T) -> T:
+    def store_reduction(self, name: str, index: sympy.Expr, value: T) -> None:
         """
         Store the fully accumulated result of 'reduction' to the memory
         location 'name' offset by 'expr'.
@@ -268,10 +272,10 @@ class OpsHandler(Protocol[T]):
 
     def scan(
         self,
-        dtypes: Tuple[torch.dtype, ...],
-        combine_fn: Callable[[Tuple[T, ...], Tuple[T, ...]], Tuple[T, ...]],
-        values: Tuple[T, ...],
-    ) -> Tuple[T, ...]:
+        dtypes: tuple[torch.dtype, ...],
+        combine_fn: Callable[[tuple[T, ...], tuple[T, ...]], tuple[T, ...]],
+        values: tuple[T, ...],
+    ) -> tuple[T, ...]:
         """
         Perform an associative scan on 'value'.
         """
@@ -280,11 +284,11 @@ class OpsHandler(Protocol[T]):
 
     def sort(
         self,
-        dtypes: Tuple[torch.dtype, ...],
-        values: Tuple[T, ...],
+        dtypes: tuple[torch.dtype, ...],
+        values: tuple[T, ...],
         stable: bool,
         descending: bool,
-    ) -> Tuple[T, ...]:
+    ) -> tuple[T, ...]:
         """
         Sort values along the reduction dimension.
         """
@@ -293,11 +297,11 @@ class OpsHandler(Protocol[T]):
     def bucketize(
         self,
         values: T,
-        boundaries: Tuple[str, sympy.Expr, sympy.Expr, sympy.Expr],
+        boundaries: tuple[str, sympy.Expr, sympy.Expr, sympy.Expr],
         boundary_indices: T,
         indexing_dtype: torch.dtype,
         right: bool,
-        sorter: Optional[Tuple[str, sympy.Expr]] = None,
+        sorter: Optional[tuple[str, sympy.Expr]] = None,
         sorter_indices: Optional[T] = None,
     ) -> T:
         # See [Note: Inductor bucketize op]
@@ -527,17 +531,6 @@ class OpsHandler(Protocol[T]):
     def rshift(self, x0: T, x1: T) -> T:
         ...
 
-    def getitem(self, x0: T, x1: T) -> T:
-        # TODO: this is probably just illegal lol
-        ...
-
-    def matmul(self, x0: T, x1: T) -> T:
-        # TODO: this is probably just illegal lol
-        ...
-
-    def invert(self, x0: T) -> T:
-        ...
-
     # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     # These are "special" operators.  These only exist if the target
     # language actually supports the operator.  Keep this in sync with
@@ -693,11 +686,6 @@ class OpsHandler(Protocol[T]):
         """
         ...
 
-    def div(self, x0: T, x1: T) -> T:
-        """TODO: to be removed.  This renders as / no matter what the backend is
-        which is incoherent."""
-        ...
-
     def mod(self, x0: T, x1: T) -> T:
         """C-style modulus, take sign from LHS (x0)."""
         ...
@@ -706,8 +694,12 @@ class OpsHandler(Protocol[T]):
         """Python-style modulus, take sign from RHS (x1)."""
         ...
 
-    def round_decimal(self, x0: T, x1: T) -> T:
-        """Python-style round with decimal argument"""
+    def square(self, x0: T) -> T:
+        ...
+
+    def check_bounds(
+        self, expr: sympy.Expr, size: sympy.Expr, lower: bool, upper: bool
+    ) -> None:
         ...
 
     # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -744,31 +736,57 @@ class OpsHandler(Protocol[T]):
     def libdevice_log(self, x0: T) -> T:
         ...
 
+    # halide-only
+    def halide_clamp(self, value: T, size: sympy.Expr, check: bool) -> T:
+        raise NotImplementedError
+
+    # triton-only
+    def inline_asm_elementwise(
+        self,
+        *inputs: T,
+        asm: str,
+        constraints: Optional[str] = None,
+        dtype: torch.dtype = torch.float32,
+        is_pure: bool = True,
+        pack: int = 1,
+    ) -> T:
+        ...
+
+
+_ignore_op_re = re.compile(r"_.*|paren").fullmatch
+
+
+def list_ops(cls: type[Any]):
+    return OrderedSet([x for x in dir(cls) if not _ignore_op_re(x)])
+
+
+OP_NAMES = list_ops(OpsHandler)
+
+
+def _return_none(*args, **kwargs):
+    return None
+
 
 class NoopHandler:
-    def __getattr__(self, name):
-        if name == "name":
-            return "NoopHandler"
+    name = "NoopHandler"
 
-        def inner(*args, **kwargs):
-            return None
-
-        return inner
+    def __getattr__(self, name: str) -> Callable[..., None]:
+        return _return_none
 
     @staticmethod
     def masked(mask, body, other) -> None:
         return None
 
     @staticmethod
-    def frexp(x) -> Tuple[None, None]:
+    def frexp(x) -> tuple[None, None]:
         return (None, None)
 
     @staticmethod
-    def scan(dtypes, combine_fn, values) -> Tuple[None, ...]:
+    def scan(dtypes, combine_fn, values) -> tuple[None, ...]:
         return (None,) * len(values)
 
     @staticmethod
-    def sort(dtypes, values, stable, descending) -> Tuple[None, ...]:
+    def sort(dtypes, values, stable, descending) -> tuple[None, ...]:
         return (None,) * len(values)
 
     @staticmethod
@@ -781,11 +799,89 @@ def _typecheck_NoopHandler(h: NoopHandler) -> OpsHandler[None]:
     return h
 
 
-class MockHandler:
-    def __getattr__(self, name):
-        if name == "name":
-            return "MockHandler"
+class BasicMathOps:
+    @staticmethod
+    def add(a, b):
+        return f"{a} + {b}"
 
+    @staticmethod
+    def sub(a, b):
+        return f"{a} - {b}"
+
+    @staticmethod
+    def mul(a, b):
+        return f"{a} * {b}"
+
+    @staticmethod
+    def floordiv(a, b):
+        return f"{a} // {b}"
+
+    @staticmethod
+    def truediv(a, b):
+        return f"{a} / {b}"
+
+    @staticmethod
+    def mod(a, b):
+        # careful, depending on target semantics varies
+        return f"{a} % {b}"
+
+    @staticmethod
+    def pow(a, b):
+        return f"{a} ** {b}"
+
+    @staticmethod
+    def lshift(a, b):
+        return f"{a} << {b}"
+
+    @staticmethod
+    def rshift(a, b):
+        return f"{a} >> {b}"
+
+    @staticmethod
+    def and_(a, b):
+        return f"{a} & {b}"
+
+    @staticmethod
+    def or_(a, b):
+        return f"{a} | {b}"
+
+    @staticmethod
+    def xor(a, b):
+        return f"{a} ^ {b}"
+
+    @staticmethod
+    def eq(a, b):
+        return f"{a} == {b}"
+
+    @staticmethod
+    def ne(a, b):
+        return f"{a} != {b}"
+
+    @staticmethod
+    def lt(a, b):
+        return f"{a} < {b}"
+
+    @staticmethod
+    def gt(a, b):
+        return f"{a} > {b}"
+
+    @staticmethod
+    def le(a, b):
+        return f"{a} <= {b}"
+
+    @staticmethod
+    def ge(a, b):
+        return f"{a} >= {b}"
+
+    @staticmethod
+    def neg(a):
+        return f"-{a}"
+
+
+class MockHandler(BasicMathOps):
+    name = "MockHandler"
+
+    def __getattr__(self, name):
         def inner(*args, **kwargs):
             fargs = [_arg_str(a) for a in args]
             fargs.extend(f"{k}={v}" for k, v in kwargs.items())
@@ -818,41 +914,6 @@ class MockHandler:
     @staticmethod
     def indirect_indexing(index_var, size, check=True, wrap_neg=True) -> sympy.Symbol:
         return sympy_index_symbol(str(index_var))
-
-    @classmethod
-    def _init_cls(cls):
-        def make_handler(format_string):
-            @staticmethod  # type: ignore[misc]
-            def inner(*args):
-                return format_string.format(*args)
-
-            return inner
-
-        for name, format_string in {
-            "add": "{} + {}",
-            "sub": "{} - {}",
-            "mul": "{} * {}",
-            "floordiv": "{} // {}",
-            "truediv": "{} / {}",
-            "mod": "{} % {}",  # careful, depending on target semantics varies
-            "pow": "{} ** {}",
-            "lshift": "{} << {}",
-            "rshift": "{} >> {}",
-            "and_": "{} & {}",
-            "or_": "{} | {}",
-            "xor": "{} ^ {}",
-            "eq": "{} == {}",
-            "ne": "{} != {}",
-            "lt": "{} < {}",
-            "gt": "{} > {}",
-            "le": "{} <= {}",
-            "ge": "{} >= {}",
-            "neg": "-{}",
-        }.items():
-            setattr(cls, name, make_handler(format_string))
-
-
-MockHandler._init_cls()
 
 
 # Use mypy to check protocol implemented correctly
@@ -914,8 +975,8 @@ class KernelFormatterHandler:
         dtype: torch.dtype,
         src_dtype: torch.dtype,
         reduction_type: ReductionType,
-        value: Union[str, Tuple[str, ...]],
-    ) -> Union[str, Tuple[str, ...]]:
+        value: Union[str, tuple[str, ...]],
+    ) -> Union[str, tuple[str, ...]]:
         line = self.parent_handler.reduction(dtype, src_dtype, reduction_type, value)
         num_values = reduction_num_outputs(reduction_type)
         varnames = [f"tmp{next(self.var_counter)}" for _ in range(num_values)]
@@ -933,7 +994,7 @@ def _typecheck_KernelFormatterHandler(h: KernelFormatterHandler) -> OpsHandler[s
 
 
 class WrapperHandler(Generic[T]):
-    def __init__(self, inner: OpsHandler[T]):
+    def __init__(self, inner: Any):
         self._inner = inner
 
     def __getattr__(self, item):
@@ -962,7 +1023,7 @@ def _typecheck_AddParenHandler(h: AddParenHandler[T]) -> OpsHandler[T]:
 class OpCountResult(NamedTuple):
     num_ops: int
     used_ops: OrderedSet[str]
-    read_buffers: List[str]
+    read_buffers: list[str]
     nontrivial_read_count: int
 
 
@@ -975,7 +1036,7 @@ class OpCounterCSE:
         self.op_count = 0
         self.var_names = {}
         self._used_ops = OrderedSet[str]()
-        self._read_names: List[str] = []
+        self._read_names: list[str] = []
         self._nontrivial_read_count = 0
 
     def __getattr__(self, name):
@@ -1018,11 +1079,11 @@ class OpCounterCSE:
     def bucketize(
         self,
         values: T,
-        boundaries: Tuple[str, sympy.Expr, sympy.Expr, sympy.Expr],
+        boundaries: tuple[str, sympy.Expr, sympy.Expr, sympy.Expr],
         boundary_indices: T,
         indexing_dtype: torch.dtype,
         right: bool,
-        sorter: Optional[Tuple[str, sympy.Expr]] = None,
+        sorter: Optional[tuple[str, sympy.Expr]] = None,
         sorter_indices: Optional[T] = None,
     ) -> T:
         """
@@ -1058,7 +1119,7 @@ class ExtractConstantsHandler(NoopHandler):
     def __init__(self, device):
         self.device = device
 
-    def constant(self, value: Any, dtype: torch.dtype) -> "torch._inductor.ir.Constant":
+    def constant(self, value: Any, dtype: torch.dtype) -> torch._inductor.ir.Constant:
         from torch._inductor import ir
 
         return ir.Constant(value=value, dtype=dtype, device=self.device)
@@ -1077,7 +1138,7 @@ class SimpleCSEHandler(WrapperHandler[T]):
 
     def __init__(self, inner: OpsHandler[T]):
         super().__init__(inner)
-        self.cse_cache: Dict[str, Union[T, Tuple[T, ...]]] = {}
+        self.cse_cache: dict[str, Union[T, tuple[T, ...]]] = {}
         self.mock = MockHandler()
 
     def indirect_indexing(self, *args, **kwargs) -> sympy.Expr:

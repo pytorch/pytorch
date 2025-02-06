@@ -1,5 +1,5 @@
 # Owner(s): ["module: unknown"]
-
+# ruff: noqa: F841
 import functools
 import unittest
 
@@ -9,6 +9,7 @@ import torch.utils.flop_counter
 from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.testing._internal.common_cuda import (
     PLATFORM_SUPPORTS_FLASH_ATTENTION,
+    PLATFORM_SUPPORTS_FP8,
     PLATFORM_SUPPORTS_MEM_EFF_ATTENTION,
     PLATFORM_SUPPORTS_CUDNN_ATTENTION
 )
@@ -834,6 +835,24 @@ class TestFlopCounter(TestCase):
             torch.ops.aten.convolution
         ]
         self.assertEqual(layer1_conv_flops_standard, layer1_conv_flops_inference)
+
+    @unittest.skipIf(not HAS_CUDA, "CUDA not available")
+    @unittest.skipIf(
+        not PLATFORM_SUPPORTS_FP8,
+        "FP8 is only supported on H100+, SM 8.9 and MI300+ devices",
+    )
+    def test_scaled_mm(self):
+        dtype = torch.float8_e4m3fnuz if torch.version.hip else torch.float8_e4m3fn
+        with FlopCounterMode() as mode:
+            torch._scaled_mm(
+                torch.randn((3 * 16, 5 * 16), device="cuda").to(dtype),
+                torch.randn((7 * 16, 5 * 16), device="cuda").to(dtype).t(),
+                scale_a=torch.ones((), device="cuda"),
+                scale_b=torch.ones((), device="cuda"),
+                out_dtype=torch.bfloat16,
+            )
+
+        self.assertExpectedInline(get_total_flops(mode), """860160""")
 
 if __name__ == "__main__":
     run_tests()
