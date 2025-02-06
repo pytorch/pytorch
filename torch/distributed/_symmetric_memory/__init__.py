@@ -429,6 +429,10 @@ def _pipelined_produce_and_all2all(
             # chunk_producer after all peers have finished reading from it.
             symm_mem.barrier(channel=step % 2)
 
+    # If the sleep wasn't issued in the above loop, do it now.
+    if group_size == 2:
+        torch.cuda._sleep(100)
+
     chunk_producer(rank, out_chunks[rank])
     torch.cuda.current_stream().wait_stream(backend_stream)
     symm_mem.barrier(channel=0)

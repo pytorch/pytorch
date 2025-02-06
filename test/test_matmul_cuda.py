@@ -14,6 +14,7 @@ from torch.quantization._quantized_conversions import (
 from torch.testing import make_tensor
 from torch.testing._internal.common_cuda import (
     SM53OrLater,
+    SM89OrLater,
     _get_torch_cuda_version,
 )
 from torch.testing._internal.common_device_type import (
@@ -38,10 +39,8 @@ from torch.testing._internal.common_utils import (
 )
 
 _IS_SM8X = False
-_IS_SM9X = False
 if TEST_CUDA:
     _IS_SM8X = torch.cuda.get_device_capability(0)[0] == 8
-    _IS_SM9X = torch.cuda.get_device_capability(0)[0] == 9
 
 # Protects against includes accidentally setting the default dtype
 assert torch.get_default_dtype() is torch.float32
