@@ -30,7 +30,6 @@ from ...utils._sympy.symbol import free_symbol_is_type, prefix_str, symbol_is_ty
 from ...utils._sympy.value_ranges import ValueRanges
 from .. import config, ir, metrics
 from ..codecache import code_hash, get_path, PyCodeCache
-from ..ops_handler import DefaultHandler
 from ..runtime.benchmarking import benchmarker
 from ..runtime.hints import (
     AutotuneHint,
@@ -60,7 +59,7 @@ from ..utils import (
     triton_version_uses_attrs_dict,
     upcast_compute_type,
 )
-from ..virtualized import _ops as ops, ReductionType, StoreMode, V
+from ..virtualized import _ops as ops, OpsHandler, ReductionType, StoreMode, V
 from ..wrapper_benchmark import get_kernel_category_by_source_code
 from .block_analysis import BlockPatternMatcher
 from .common import (
@@ -1406,6 +1405,12 @@ class TritonKernelOverrides(TritonOverrides):
         )
         V.kernel.cse.put(cache_key, (mantissa, exponent))
         return (mantissa, exponent)
+
+
+if TYPE_CHECKING:
+
+    class _typecheck_TritonKernelOverrides(TritonKernelOverrides, OpsHandler[str]):
+        pass  # mypy will error if we got any of the signatures wrong
 
 
 class HelperFunctions:
@@ -2843,23 +2848,24 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
 
         dtype_handler = DtypePropagationOpsHandler()
 
-        class CSEProxy(DefaultHandler):
-            def _default(
-                self, name: str, args: tuple[Any, ...], kwargs: dict[str, Any]
-            ) -> Any:
-                nonlocal helper_name
-                helper_name += f"_{name}"
+        class CSEProxy:
+            def __getattr__(self, name: str) -> Callable[..., CSEVariable]:
+                def inner(*args, **kwargs):
+                    nonlocal helper_name
+                    helper_name += f"_{name}"
 
-                output_dtype = getattr(
-                    dtype_handler,
-                    name,
-                )(*args, **kwargs)
+                    output_dtype = getattr(
+                        dtype_handler,
+                        name,
+                    )(*args, **kwargs)
 
-                return cse.generate(
-                    helper,
-                    getattr(overrides, name)(*args, **kwargs),
-                    dtype=output_dtype,
-                )
+                    return cse.generate(
+                        helper,
+                        getattr(overrides, name)(*args, **kwargs),
+                        dtype=output_dtype,
+                    )
+
+                return inner
 
         with helper.indent(), V.set_ops_handler(CSEProxy()):
             outputs = fn(*args)
