@@ -35,6 +35,7 @@ from ..lowering import (
     _full,
     check_and_broadcast_indices,
     empty,
+    empty_like,
     empty_strided,
     expand,
     index_output_size_and_inner_fn,
@@ -2337,16 +2338,8 @@ def flex_attention_backward(*args, **kwargs):
 
     grad_lse_exp2, delta = maybe_realize([grad_lse_exp2, delta])
 
-    # see NOTE:[TritonTemplates with multiple outputs]
-    query_size = list(query.get_size())
-    fill_order = get_fill_order(query.get_stride(), V.graph.sizevars.shape_env)
-    query_strides = construct_strides(query_size, fill_order)
-    grad_query = empty_strided(
-        query_size,
-        stride=[sympy.sympify(s) for s in query_strides],
-        dtype=query.get_dtype(),
-        device=query.get_device(),
-    )
+    # # see NOTE:[TritonTemplates with multiple outputs]
+    grad_query = empty_like(query)
 
     # Construct output layout with stride order matching value
     value_size = [Bq, Hkv, seq_len_kv, v_head_dim]

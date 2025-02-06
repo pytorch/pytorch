@@ -785,7 +785,6 @@ def sdpa_dense_backward(
 
     # Get outputs before calling repeat interleave and permute to input stride orders
     actual_grad_query = torch.empty_like(query)
-    actual_grad_query = _permute_strides(actual_grad_query, query.stride())
 
     actual_grad_key = key.new_empty((Bq, Hkv, seq_len_kv, qk_head_dim))
     actual_grad_key = _permute_strides(actual_grad_key, key.stride())
@@ -1163,7 +1162,6 @@ def flex_attention_backward_fake_tensor_mode(
         Bkv, Hkv, seq_len_kv, v_head_dim = value.shape
 
         grad_query = torch.empty_like(query)
-        grad_query = _permute_strides(grad_query, query.stride())
         # zeros_and_scatter creates a contiguous zeros tensor -> contiguous_format
         grad_score_mod_captured = tuple(
             [
