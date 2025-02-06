@@ -2285,13 +2285,21 @@ class _TorchCompileInductorWrapper:
         self.apply_options(options)
         self.apply_options(CompilerBisector.get_config_change("inductor"))
 
-        if self.config.get("triton.cudagraphs", False):
+        if self.config.get("triton.cudagraphs", False) and not (
+            torch.version.cuda
+            and int(torch.version.cuda.split(".")[0]) >= 12
+            and int(torch.version.cuda.split(".")[1]) >= 6
+        ):
             os.environ["DISABLE_CUPTI_LAZY_REINIT"] = "1"
             # FIXME: CUDA Graph does not work well with CUPTI teardown.
             #   1) crashes on 1st lazy CUPTI re-init after teardown (CUDA 11)
             #   2) crashes on 2nd non-lazy CUPTI re-init after teardown (CUDA 12)
             # Workaround: turn off CUPTI teardown when using CUDA Graphs.
+            # This was fixed in CUDA 12.6, but we keep the workaround for older versions.
             os.environ["TEARDOWN_CUPTI"] = "0"
+        else:
+            os.environ["DISABLE_CUPTI_LAZY_REINIT"] = "0"
+            os.environ["TEARDOWN_CUPTI"] = "1"
 
     def __eq__(self, other):
         return (
