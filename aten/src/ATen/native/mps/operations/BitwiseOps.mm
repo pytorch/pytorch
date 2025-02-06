@@ -16,103 +16,106 @@ namespace mps {
 static MetalShaderLibrary lib(R"METAL(
 
 kernel void bitwise_and_tensor(device {0}  *out [[buffer(0)]],
-                         constant {1}  *a [[buffer(1)]],
-                         constant {2}  *b [[buffer(2)]],
+                         constant {0}  *a [[buffer(1)]],
+                         constant {0}  *b [[buffer(2)]],
                          uint offset [[thread_position_in_grid]]) {{
   out[offset] = a[offset] & b [offset];
 }}
 
 kernel void bitwise_and_scalar(device {0}  *out [[buffer(0)]],
-                         constant {1}  *a [[buffer(1)]],
-                         constant {2}  &b [[buffer(2)]],
+                         constant {0}  *a [[buffer(1)]],
+                         constant {0}  &b [[buffer(2)]],
                          uint offset [[thread_position_in_grid]]) {{
   out[offset] = a[offset] & b;
 }}
 
 
 kernel void bitwise_or_tensor(device {0}  *out [[buffer(0)]],
-                         constant {1}  *a [[buffer(1)]],
-                         constant {2}  *b [[buffer(2)]],
+                         constant {0}  *a [[buffer(1)]],
+                         constant {0}  *b [[buffer(2)]],
                          uint offset [[thread_position_in_grid]]) {{
   out[offset] = a[offset] | b [offset];
 }}
 
 kernel void bitwise_or_scalar(device {0}  *out [[buffer(0)]],
-                         constant {1}  *a [[buffer(1)]],
-                         constant {2}  &b [[buffer(2)]],
+                         constant {0}  *a [[buffer(1)]],
+                         constant {0}  &b [[buffer(2)]],
                          uint offset [[thread_position_in_grid]]) {{
   out[offset] = a[offset] | b;
 }}
 
 kernel void bitwise_xor_tensor(device {0}  *out [[buffer(0)]],
-                         constant {1}  *a [[buffer(1)]],
-                         constant {2}  *b [[buffer(2)]],
+                         constant {0}  *a [[buffer(1)]],
+                         constant {0}  *b [[buffer(2)]],
                          uint offset [[thread_position_in_grid]]) {{
   out[offset] = a[offset] ^ b [offset];
 }}
 
 kernel void bitwise_xor_scalar(device {0}  *out [[buffer(0)]],
-                         constant {1}  *a [[buffer(1)]],
-                         constant {2}  &b [[buffer(2)]],
+                         constant {0}  *a [[buffer(1)]],
+                         constant {0}  &b [[buffer(2)]],
                          uint offset [[thread_position_in_grid]]) {{
   out[offset] = a[offset] ^ b;
 }}
 
 kernel void bitwise_lshift_tensor(device {0}  *out [[buffer(0)]],
-                         constant {1}  *a [[buffer(1)]],
-                         constant {2}  *b [[buffer(2)]],
+                         constant {0}  *a [[buffer(1)]],
+                         constant {0}  *b [[buffer(2)]],
                          uint offset [[thread_position_in_grid]]) {{
   out[offset] = a[offset] << b [offset];
 }}
 
 kernel void bitwise_lshift_scalar(device {0}  *out [[buffer(0)]],
-                         constant {1}  *a [[buffer(1)]],
-                         constant {2}  &b [[buffer(2)]],
+                         constant {0}  *a [[buffer(1)]],
+                         constant {0}  &b [[buffer(2)]],
                          uint offset [[thread_position_in_grid]]) {{
   out[offset] = a[offset] << b;
 }}
 
 kernel void bitwise_rshift_tensor(device {0}  *out [[buffer(0)]],
-                         constant {1}  *a [[buffer(1)]],
-                         constant {2}  *b [[buffer(2)]],
+                         constant {0}  *a [[buffer(1)]],
+                         constant {0}  *b [[buffer(2)]],
                          uint offset [[thread_position_in_grid]]) {{
   out[offset] = a[offset] >> b [offset];
 }}
 
 kernel void bitwise_rshift_scalar(device {0}  *out [[buffer(0)]],
-                         constant {1}  *a [[buffer(1)]],
-                         constant {2}  &b [[buffer(2)]],
+                         constant {0}  *a [[buffer(1)]],
+                         constant {0}  &b [[buffer(2)]],
                          uint offset [[thread_position_in_grid]]) {{
   out[offset] = a[offset] >> b;
 }}
 
 kernel void bitwise_not(device {0}  *out [[buffer(0)]],
-                         constant {1}  *a [[buffer(1)]],
+                         constant {0}  *a [[buffer(1)]],
                          uint offset [[thread_position_in_grid]]) {{
   out[offset] = ~a[offset];
 }}
 )METAL",
-                              3);
-
-static inline std::string getMetalType(const c10::ScalarType scalar_type) {
-  TORCH_CHECK(c10::isIntegralType(scalar_type, /*includesBool=*/true), "Unsupported type");
-  return scalarToMetalTypeString(scalar_type);
-}
-
-static inline std::string getMetalType(const Tensor& t) {
-  return getMetalType(t.scalar_type());
-}
-
-static inline std::string getMetalType(const c10::Scalar& s) {
-  return getMetalType(s.type());
-}
+                              1);
 
 template <typename ScalarOrTensor>
 static id<MTLComputePipelineState> getCPLState(const Tensor& t1,
                                                const Tensor& t2,
                                                const ScalarOrTensor& t3,
                                                const std::string& fname) {
-  return lib.getPipelineStateForFunc(fname, {getMetalType(t1), getMetalType(t2), getMetalType(t3)});
+  TORCH_CHECK(c10::isIntegralType(t1.scalar_type(), /*includesBool=*/true), "Unsupported type ", t1.scalar_type());
+  TORCH_CHECK(t1.scalar_type() == t2.scalar_type(),
+              "Expected input and output to be of the same type, but got ",
+              t1.scalar_type(),
+              " and ",
+              t2.scalar_type());
+  if constexpr (std::is_same_v<ScalarOrTensor, Tensor>) {
+    TORCH_CHECK(t2.scalar_type() == t3.scalar_type(),
+                "Expected all inputs to be of the same type, but got ",
+                t2.scalar_type(),
+                " and ",
+                t3.scalar_type());
+  } else {
+    TORCH_CHECK(t3.type() == kLong, "Unexpected scalar argument type ", t3.type());
+  }
+  auto metal_type = scalarToMetalTypeString(t1);
+  return lib.getPipelineStateForFunc(fname, {metal_type});
 }
 
 static void handle_tensor_tensor_binary_op(const Tensor& self,
