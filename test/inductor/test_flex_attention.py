@@ -2508,6 +2508,28 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         out.sum().backward()
 
     @supported_platform
+    def test_strided_backwards(self):
+        shape = (1, 2, 4096, 64)
+        Q = torch.randn(shape, requires_grad=True, device="cuda", dtype=torch.bfloat16)
+        K = torch.randn(shape, requires_grad=True, device="cuda", dtype=torch.bfloat16)
+        V = torch.randn(shape, requires_grad=True, device="cuda", dtype=torch.bfloat16)
+        func = torch.compile(flex_attention, dynamic=True, fullgraph=True)
+
+        K_sliced = K[:, :, :-128]
+        V_sliced = V[:, :, :-128]
+
+        out_eager = flex_attention(Q, K_sliced, V_sliced)
+        out_compiled = func(Q, K_sliced, V_sliced)
+
+        grad = torch.rand_like(out_eager)
+
+        eager_grads = torch.autograd.grad(out_eager, (Q, K, V), grad)
+        compiled_grads = torch.autograd.grad(out_compiled, (Q, K, V), grad)
+
+        for eager, compiled in zip(eager_grads, compiled_grads):
+            torch.testing.assert_close(eager, compiled, atol=9e-3, rtol=0)
+
+    @supported_platform
     @common_utils.parametrize("mode", ["eager", "inductor", "paged_attention"])
     @common_utils.parametrize(
         "permute_order",
@@ -2559,6 +2581,61 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
             query_stride_order,
             f"Stride order mismatch: out {out_stride_order}, query {query_stride_order}",
         )
+
+    @supported_platform
+    @common_utils.parametrize("mode", ["eager", "inductor"])
+    @common_utils.parametrize(
+        "permute_order",
+        [
+            (0, 1, 2, 3),
+            (1, 0, 2, 3),
+            (0, 2, 1, 3),
+            (2, 0, 1, 3),
+        ],
+    )
+    @common_utils.parametrize("shape", [(2, 5, 128, 16), (4, 2, 64, 16)])
+    def test_flex_attention_backward_stride_ordering(self, mode, permute_order, shape):
+        if TEST_WITH_ROCM:
+            self.skipTest(
+                "ROCM BUG SEE: https://github.com/pytorch/pytorch/issues/140855"
+            )
+        from torch._inductor.ir import get_stride_order
+
+        dtype = torch.float32
+        make_tensor = functools.partial(
+            torch.randn, shape, device="cuda", dtype=dtype, requires_grad=False
+        )
+
+        query, key, value = make_tensor(), make_tensor(), make_tensor()
+        query = query.permute(permute_order)
+        key = key.permute(permute_order)
+        value = value.permute(permute_order)
+
+        query.requires_grad_()
+        key.requires_grad_()
+        value.requires_grad_()
+
+        func = (
+            torch.compile(flex_attention, backend=mode, fullgraph=True)
+            if mode == "inductor"
+            else flex_attention
+        )
+        out = func(query, key, value)
+        grad_output = torch.randn_like(out)
+        out.backward(grad_output)
+
+        for leaf, grad, name in [
+            (query, query.grad, "query"),
+            (key, key.grad, "key"),
+            (value, value.grad, "value"),
+        ]:
+            input_stride_order = get_stride_order(grad.stride())
+            orig_stride_order = get_stride_order(leaf.stride())
+            self.assertEqual(
+                input_stride_order,
+                orig_stride_order,
+                f"Mode: {mode}, Stride order mismatch for {name}: grad {input_stride_order}, input {orig_stride_order}.",
+            )
 
     @supported_platform
     @common_utils.parametrize("compile", [True, False])
