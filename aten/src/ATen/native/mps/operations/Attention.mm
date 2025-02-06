@@ -143,7 +143,7 @@ std::tuple<Tensor, Tensor> _scaled_dot_product_attention_math_mps(const Tensor& 
   auto final_out = (sq ? out.squeeze(0) : out);
   auto final_attn = (sq ? attn.squeeze(0) : attn);
 
-  return {final_out, final_attn};
+  return {std::move(final_out), std::move(final_attn)};
 }
 
 } // namespace native
