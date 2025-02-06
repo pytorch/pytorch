@@ -48,6 +48,7 @@ __all__ = [
     "is_onnxrt_backend_supported",
 ]
 
+import logging
 from typing import Any, Callable, TYPE_CHECKING
 from typing_extensions import deprecated
 
@@ -127,6 +128,8 @@ is_onnxrt_backend_supported.__module__ = "torch.onnx"
 producer_name = "pytorch"
 producer_version = _C_onnx.PRODUCER_VERSION
 
+logger = logging.getLogger(__name__)
+
 
 def export(
     model: torch.nn.Module
@@ -166,6 +169,7 @@ def export(
     custom_opsets: Mapping[str, int] | None = None,
     export_modules_as_functions: bool | Collection[type[torch.nn.Module]] = False,
     autograd_inlining: bool = True,
+    **_ignored_kwargs: Any,
 ) -> ONNXProgram | None:
     r"""Exports a model into ONNX format.
 
@@ -344,6 +348,11 @@ def export(
             Flag used to control whether to inline autograd functions.
             Refer to https://github.com/pytorch/pytorch/pull/74765 for more details.
     """
+    if _ignored_kwargs:
+        logger.warning(
+            "torch.onnx.export received unexpected keyword arguments: %s",
+            _ignored_kwargs,
+        )
     if dynamo is True or isinstance(model, torch.export.ExportedProgram):
         from torch.onnx._internal.exporter import _compat
 
