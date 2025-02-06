@@ -21,12 +21,16 @@ static_assert(
 
 // NCCL BFloat16 is enabled only for CUDA 11+ and NCCL versions 2.10+, or for
 // HIP 3.1+
-#if NCCL_VERSION_CODE >= NCCL_VERSION(2, 10, 0)
-#if defined(__CUDA_BF16_TYPES_EXIST__) || defined(RCCL_BFLOAT16)
+#if defined(__CUDA_BF16_TYPES_EXIST__) && \
+    (NCCL_VERSION_CODE >= NCCL_VERSION(2, 10, 0))
 #define NCCL_HAS_BF16_DATATYPE
-#endif // defined(__CUDA_BF16_TYPES_EXIST__) || defined(RCCL_BFLOAT16)
+#elif defined(RCCL_BFLOAT16)
+#define NCCL_HAS_BF16_DATATYPE
+#endif
+
+#if NCCL_VERSION_CODE >= NCCL_VERSION(2, 10, 0)
 #define NCCL_HAS_AVG
-#endif // NCCL >= 2.10
+#endif
 
 #if NCCL_VERSION_CODE >= NCCL_VERSION(2, 11, 0)
 #define ENABLE_NCCL_PREMUL_SUM_SUPPORT
