@@ -74,31 +74,15 @@ class Adam(Optimizer):
                 raise ValueError(
                     "betas[0] as a Tensor is not supported for capturable=False and foreach=True"
                 )
-            if differentiable:
-                if betas[0].dim() > 1 or betas[0].numel() != 1:
-                    raise ValueError(
-                        "Tensor betas[0] must be 0-dimension, or 1-dimension and 1-element for differentiable=True"
-                    )
-            else:
-                if betas[0].dim() != 0:
-                    raise ValueError(
-                        "Tensor betas[0] must be 0-dimension for differentiable=False"
-                    )
+            if betas[0].numel() != 1:
+                raise ValueError("Tensor betas[0] must be 1-element")
         if isinstance(betas[1], Tensor):
             if not capturable and foreach:
                 raise ValueError(
                     "betas[1] as a Tensor is not supported for capturable=False and foreach=True"
                 )
-            if differentiable:
-                if betas[1].dim() > 1 or betas[1].numel() != 1:
-                    raise ValueError(
-                        "Tensor betas[1] must be 0-dimension, or 1-dimension and 1-element for differentiable=True"
-                    )
-            else:
-                if betas[1].dim() != 0:
-                    raise ValueError(
-                        "Tensor betas[1] must be 0-dimension for differentiable=False"
-                    )
+            if betas[1].numel() != 1:
+                raise ValueError("Tensor betas[1] must be 1-element")
 
         defaults = dict(
             lr=lr,
@@ -591,7 +575,7 @@ def _multi_tensor_adam(
             raise RuntimeError(
                 "lr as a Tensor is not supported for capturable=False and foreach=True"
             )
-        if lr.device.type != 'cpu' and lr.dim() != 0:
+        if lr.device.type != "cpu" and lr.dim() != 0:
             raise ValueError(
                 "Tensor lr on non-CPU device must be 0-dimension for foreach=True"
             )

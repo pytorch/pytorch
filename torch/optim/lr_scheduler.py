@@ -21,7 +21,7 @@ from weakref import ref
 
 from torch import inf, Tensor
 
-from .optimizer import Optimizer, _to_scalar
+from .optimizer import _to_scalar, Optimizer
 
 
 __all__ = [
