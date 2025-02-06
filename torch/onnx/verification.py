@@ -775,7 +775,7 @@ def check_export_model_diff(
 @typing_extensions.deprecated(
     "torch.onnx.verification.* is deprecated. Consider using torch.onnx.export(..., dynamo=True) "
     "and use ONNXProgram to test the ONNX model",
-    category=DeprecationWarning,
+    category=None,
 )
 def verify(
     model: _ModelType,
@@ -867,7 +867,7 @@ def verify(
 @typing_extensions.deprecated(
     "torch.onnx.verification.* is deprecated. Consider using torch.onnx.export(..., dynamo=True) "
     "and use ONNXProgram to test the ONNX model",
-    category=DeprecationWarning,
+    category=None,
 )
 def verify_aten_graph(
     graph: torch.Graph,
@@ -1162,7 +1162,7 @@ class OnnxTestCaseRepro:
 @typing_extensions.deprecated(
     "torch.onnx.verification.* is deprecated. Consider using torch.onnx.export(..., dynamo=True) "
     "and use ONNXProgram to test the ONNX model",
-    category=DeprecationWarning,
+    category=None,
 )
 @dataclasses.dataclass
 class GraphInfo:
