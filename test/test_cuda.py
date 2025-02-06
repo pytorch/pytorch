@@ -2080,7 +2080,7 @@ torch.cuda.synchronize()
 
     @unittest.skipIf(
         not TEST_CUDA_GRAPH or TEST_WITH_ROCM,
-        "CUDA >= 11.0 or ROCM >= 6.4 required for intra-graph timing"
+        "CUDA >= 11.0 or ROCM >= 6.4 required for intra-graph timing",
     )
     def test_graph_timing(self):
         torch.cuda.empty_cache()
