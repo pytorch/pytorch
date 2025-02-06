@@ -6,8 +6,7 @@ from itertools import product
 
 import torch
 import torch._dynamo.test_case
-
-from .utils import make_dynamo_test
+from torch.testing._internal.common_utils import make_dynamo_test
 
 
 class Test_Assertions(torch._dynamo.test_case.TestCase):
