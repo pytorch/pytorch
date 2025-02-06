@@ -22,7 +22,7 @@ SymPy expressions yet, despite sympy.Min and sympy.Max existing.
 """
 import itertools
 from dataclasses import dataclass
-from typing import Any, Callable, Dict, Literal, Optional, overload, Tuple, Union
+from typing import Any, Callable, Literal, Optional, overload, Union
 from typing_extensions import TypeAlias
 
 import sympy
@@ -182,7 +182,7 @@ class IndexPropVar:
         ), "Symbolic IndexPropVar must contain a TypedExpr"
 
 
-IndexPropResult: TypeAlias = Union[IndexPropVar, Tuple["IndexPropResult", ...]]
+IndexPropResult: TypeAlias = Union[IndexPropVar, tuple["IndexPropResult", ...]]
 
 
 class IndexPropagation:
@@ -196,8 +196,8 @@ class IndexPropagation:
     def __init__(
         self,
         inner: Any,
-        iter_ranges: Dict[sympy.Symbol, sympy.Expr],
-        indirect_var_ranges: Dict[sympy.Symbol, sympy.Expr],
+        iter_ranges: dict[sympy.Symbol, sympy.Expr],
+        indirect_var_ranges: dict[sympy.Symbol, sympy.Expr],
     ) -> None:
         self._inner = inner
         self.shape_env = V.graph.sizevars.shape_env
@@ -247,19 +247,19 @@ class IndexPropagation:
     def fallback(
         self,
         name: Literal["indirect_indexing"],
-        args: Tuple[Any, ...],
-        kwargs: Dict[str, Any],
+        args: tuple[Any, ...],
+        kwargs: dict[str, Any],
     ) -> IndexPropVar:
         ...
 
     @overload
     def fallback(
-        self, name: str, args: Tuple[Any, ...], kwargs: Dict[str, Any]
+        self, name: str, args: tuple[Any, ...], kwargs: dict[str, Any]
     ) -> IndexPropResult:
         ...
 
     def fallback(
-        self, name: str, args: Tuple[Any, ...], kwargs: Dict[str, Any]
+        self, name: str, args: tuple[Any, ...], kwargs: dict[str, Any]
     ) -> IndexPropResult:
         # Fallback to the wrapped handler
         new_args = [self.unwrap(a) for a in args]
@@ -267,7 +267,7 @@ class IndexPropagation:
         return self.wrap(getattr(self._inner, name)(*new_args, **new_kwargs))
 
     def propagate_sympy(
-        self, name: str, args: Tuple[Any, ...], kwargs: Dict[str, Any]
+        self, name: str, args: tuple[Any, ...], kwargs: dict[str, Any]
     ) -> IndexPropResult:
         # Build a new SymPy expression from this ops call
         def unwrap(a: Union[Any, IndexPropVar]) -> Any:

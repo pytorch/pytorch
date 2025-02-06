@@ -137,7 +137,7 @@ class Unflatten(TestGenerator):
                 code = Block()
                 code.new_line("super().__init__()")
                 if i < self.n - 1:
-                    code.new_line(f"self.n{i+1} = N{i+1}()")
+                    code.new_line(f"self.n{i + 1} = N{i + 1}()")
                 return code
 
             def gen_forward_body(self, i: int):
@@ -207,7 +207,7 @@ class ConstantUnflatten(Unflatten):
                 code.new_line("super().__init__()")
                 code.new_line("self.const = torch.ones(1)")
                 if i < self.n - 1:
-                    code.new_line(f"self.n{i+1} = N{i+1}()")
+                    code.new_line(f"self.n{i + 1} = N{i + 1}()")
                 return code
 
             def gen_forward_body(self, i: int):
@@ -249,7 +249,7 @@ class BufferUnflatten(Unflatten):
                 code.new_line("super().__init__()")
                 code.new_line("self.buf = torch.nn.Buffer(torch.ones(1))")
                 if i < self.n - 1:
-                    code.new_line(f"self.n{i+1} = N{i+1}()")
+                    code.new_line(f"self.n{i + 1} = N{i + 1}()")
                 return code
 
             def gen_forward_body(self, i: int):

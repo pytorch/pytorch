@@ -136,7 +136,7 @@ class TestDtypeBase(JitTestCase):
         try:
             # Eager execution
             expected_res = fn(*args)
-        except RuntimeError as e:
+        except RuntimeError:
             return
 
         expected_dtype = expected_res.dtype

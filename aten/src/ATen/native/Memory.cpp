@@ -36,10 +36,9 @@ bool is_pinned(const Tensor& self, std::optional<c10::Device> device) {
     opt_device_type = at::getAccelerator();
   }
 
-  if (!self.is_cpu() || // Only CPU tensors can be pinned
-      !opt_device_type.has_value() || // there is no accelerator
-      !at::isAccelerator(
-          opt_device_type.value())) { // passed device not an accelerator
+  if (!self.is_cpu() || !opt_device_type.has_value() ||
+      !at::isAccelerator(opt_device_type.value()) ||
+      !at::globalContext().isInitialized(opt_device_type.value())) {
     return false;
   }
 

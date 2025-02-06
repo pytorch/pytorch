@@ -319,29 +319,29 @@ class TestHash(TestCase):
         ]:
             for i in range(1, s):
                 assert_equal(
-                    hash(st(-(2**i))), hash(-(2**i)), err_msg="%r: -2**%d" % (st, i)
+                    hash(st(-(2**i))), hash(-(2**i)), err_msg=f"{st!r}: -2**{i:d}"
                 )
                 assert_equal(
                     hash(st(2 ** (i - 1))),
                     hash(2 ** (i - 1)),
-                    err_msg="%r: 2**%d" % (st, i - 1),
+                    err_msg=f"{st!r}: 2**{i - 1:d}",
                 )
                 assert_equal(
                     hash(st(2**i - 1)),
                     hash(2**i - 1),
-                    err_msg="%r: 2**%d - 1" % (st, i),
+                    err_msg=f"{st!r}: 2**{i:d} - 1",
                 )
 
                 i = max(i - 1, 1)
                 assert_equal(
                     hash(ut(2 ** (i - 1))),
                     hash(2 ** (i - 1)),
-                    err_msg="%r: 2**%d" % (ut, i - 1),
+                    err_msg=f"{ut!r}: 2**{i - 1:d}",
                 )
                 assert_equal(
                     hash(ut(2**i - 1)),
                     hash(2**i - 1),
-                    err_msg="%r: 2**%d - 1" % (ut, i),
+                    err_msg=f"{ut!r}: 2**{i:d} - 1",
                 )
 
 
@@ -1243,7 +1243,7 @@ class TestCreation(TestCase):
     def _ragged_creation(self, seq):
         # without dtype=object, the ragged object raises
         with pytest.raises(ValueError, match=".*detected shape was"):
-            a = np.array(seq)
+            np.array(seq)
 
         return np.array(seq, dtype=object)
 
@@ -1293,9 +1293,9 @@ class TestCreation(TestCase):
 
     def test_deep_nonragged_object(self):
         # None of these should raise, even though they are missing dtype=object
-        a = np.array([[[Decimal(1)]]])
-        a = np.array([1, Decimal(1)])
-        a = np.array([[1], [Decimal(1)]])
+        np.array([[[Decimal(1)]]])
+        np.array([1, Decimal(1)])
+        np.array([[1], [Decimal(1)]])
 
     @parametrize("dtype", [object, "O,O", "O,(3)O", "(2,3)O"])
     @parametrize(
@@ -1960,10 +1960,8 @@ class TestMethods(TestCase):
         for dt in types:
             if dt == "?":
                 a = np.arange(2, dtype=dt)
-                out = np.arange(2)
             else:
                 a = np.arange(0, 5, dtype=dt)
-                out = np.arange(5)
 
             # Test empty array, use a fresh array to get warnings in
             # valgrind if access happens.
@@ -1975,7 +1973,6 @@ class TestMethods(TestCase):
 
     def test_searchsorted_with_invalid_sorter(self):
         a = np.array([5, 2, 1, 3, 4])
-        s = np.argsort(a)
         assert_raises((TypeError, RuntimeError), np.searchsorted, a, 0, sorter=[1.1])
         assert_raises(
             (ValueError, RuntimeError), np.searchsorted, a, 0, sorter=[1, 2, 3, 4]
@@ -2339,11 +2336,11 @@ class TestMethods(TestCase):
                     # array_less does not seem to work right
                     at(
                         (p[:, :i].T <= p[:, i]).all(),
-                        msg="%d: %r <= %r" % (i, p[:, i], p[:, :i].T),
+                        msg=f"{i:d}: {p[:, i]!r} <= {p[:, :i].T!r}",
                     )
                     at(
                         (p[:, i + 1 :].T > p[:, i]).all(),
-                        msg="%d: %r < %r" % (i, p[:, i], p[:, i + 1 :].T),
+                        msg=f"{i:d}: {p[:, i]!r} < {p[:, i + 1 :].T!r}",
                     )
                     aae(
                         p,
@@ -2358,11 +2355,11 @@ class TestMethods(TestCase):
                     # array_less does not seem to work right
                     at(
                         (p[:i, :] <= p[i, :]).all(),
-                        msg="%d: %r <= %r" % (i, p[i, :], p[:i, :]),
+                        msg=f"{i:d}: {p[i, :]!r} <= {p[:i, :]!r}",
                     )
                     at(
                         (p[i + 1 :, :] > p[i, :]).all(),
-                        msg="%d: %r < %r" % (i, p[i, :], p[:, i + 1 :]),
+                        msg=f"{i:d}: {p[i, :]!r} < {p[:, i + 1 :]!r}",
                     )
                     aae(
                         p,
@@ -2386,10 +2383,10 @@ class TestMethods(TestCase):
     def assert_partitioned(self, d, kth):
         prev = 0
         for k in np.sort(kth):
-            assert_array_less(d[prev:k], d[k], err_msg="kth %d" % k)
+            assert_array_less(d[prev:k], d[k], err_msg=f"kth {k:d}")
             assert_(
                 (d[k:] >= d[k]).all(),
-                msg="kth %d, %r not greater equal %d" % (k, d[k:], d[k]),
+                msg=f"kth {k:d}, {d[k:]!r} not greater equal {d[k]:d}",
             )
             prev = k + 1
 
@@ -2505,7 +2502,6 @@ class TestMethods(TestCase):
     def test_arr_mult(self, func):
         a = np.array([[1, 0], [0, 1]])
         b = np.array([[0, 1], [1, 0]])
-        c = np.array([[9, 1], [1, -9]])
         d = np.arange(24).reshape(4, 6)
         ddt = np.array(
             [
@@ -3856,13 +3852,13 @@ class TestIO(TestCase):
         assert d.shape == (0,)
 
     def test_empty_files_text(self, tmp_filename):
-        with open(tmp_filename, "w") as f:
+        with open(tmp_filename, "w"):
             pass
         y = np.fromfile(tmp_filename)
         assert_(y.size == 0, "Array not empty")
 
     def test_empty_files_binary(self, tmp_filename):
-        with open(tmp_filename, "wb") as f:
+        with open(tmp_filename, "wb"):
             pass
         y = np.fromfile(tmp_filename, sep=" ")
         assert_(y.size == 0, "Array not empty")
@@ -3970,7 +3966,7 @@ class TestIO(TestCase):
                 f.write(b"\0")
 
             for mode in ["rb", "r+b"]:
-                err_msg = "%d %s" % (size, mode)
+                err_msg = f"{size:d} {mode}"
 
                 with open(tmp_filename, mode) as f:
                     f.read(2)
@@ -3987,7 +3983,7 @@ class TestIO(TestCase):
         ]
 
         for size in sizes:
-            err_msg = "%d" % (size,)
+            err_msg = f"{size:d}"
 
             with open(tmp_filename, "wb") as f:
                 f.seek(size - 1)
@@ -4274,7 +4270,7 @@ class TestIO(TestCase):
         # We currently do not support parsing subarray dtypes
         data = "12,42,13," * 50
         with pytest.raises(ValueError):
-            expected = np.fromstring(data, dtype="(3,)i", sep=",")
+            np.fromstring(data, dtype="(3,)i", sep=",")
 
         with open(tmp_filename, "w") as f:
             f.write(data)
@@ -4716,13 +4712,13 @@ class TestStats(TestCase):
         assert_allclose(a3d.mean(axis=2, where=_wh_partial), np.array(_res))
         assert_allclose(np.mean(a3d, axis=2, where=_wh_partial), np.array(_res))
 
-        with pytest.warns(RuntimeWarning) as w:
+        with pytest.warns(RuntimeWarning):
             assert_allclose(
                 a.mean(axis=1, where=wh_partial), np.array([np.nan, 5.5, 9.5, np.nan])
             )
-        with pytest.warns(RuntimeWarning) as w:
+        with pytest.warns(RuntimeWarning):
             assert_equal(a.mean(where=False), np.nan)
-        with pytest.warns(RuntimeWarning) as w:
+        with pytest.warns(RuntimeWarning):
             assert_equal(np.mean(a, where=False), np.nan)
 
     def test_var_values(self):
@@ -4809,9 +4805,9 @@ class TestStats(TestCase):
         assert_allclose(
             np.var(a, axis=0, where=wh_partial), np.var(a[wh_partial[:, 0]], axis=0)
         )
-        with pytest.warns(RuntimeWarning) as w:
+        with pytest.warns(RuntimeWarning):
             assert_equal(a.var(where=False), np.nan)
-        with pytest.warns(RuntimeWarning) as w:
+        with pytest.warns(RuntimeWarning):
             assert_equal(np.var(a, where=False), np.nan)
 
     def test_std_values(self):
@@ -4858,9 +4854,9 @@ class TestStats(TestCase):
         )
         assert_allclose(a.std(axis=0, where=whp), np.std(a[whp[:, 0]], axis=0))
         assert_allclose(np.std(a, axis=0, where=whp), (a[whp[:, 0]]).std(axis=0))
-        with pytest.warns(RuntimeWarning) as w:
+        with pytest.warns(RuntimeWarning):
             assert_equal(a.std(where=False), np.nan)
-        with pytest.warns(RuntimeWarning) as w:
+        with pytest.warns(RuntimeWarning):
             assert_equal(np.std(a, where=False), np.nan)
 
 
@@ -5593,7 +5589,7 @@ class TestMatmul(MatmulCommon, TestCase):
 
         a = np.full((3, 3), add_not_multiply())
         with assert_raises(TypeError):
-            b = np.matmul(a, a)
+            np.matmul(a, a)
 
     @skip(reason="object arrays")
     def test_matmul_exception_add(self):
@@ -5604,7 +5600,7 @@ class TestMatmul(MatmulCommon, TestCase):
 
         a = np.full((3, 3), multiply_not_add())
         with assert_raises(TypeError):
-            b = np.matmul(a, a)
+            np.matmul(a, a)
 
     def test_matmul_bool(self):
         # gh-14439
@@ -5904,7 +5900,7 @@ class TestPEP3118Dtype(TestCase):
             if j == 0:
                 s = "bi"
             else:
-                s = "b%dxi" % j
+                s = f"b{j:d}xi"
             self._check(
                 "@" + s, {"f0": ("i1", 0), "f1": ("i", align * (1 + j // align))}
             )

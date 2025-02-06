@@ -4,6 +4,7 @@
 #include <ATen/CPUGeneratorImpl.h>
 #include <ATen/DeviceAccelerator.h>
 #include <ATen/LinalgBackend.h>
+#include <ATen/ROCmFABackend.h>
 #include <ATen/SDPBackend.h>
 #include <ATen/core/ATenGeneral.h>
 #include <ATen/core/DeprecatedTypeProperties.h>
@@ -98,8 +99,17 @@ class TORCH_API Context {
     }
   }
 
+  bool isInitialized(c10::DeviceType device_type) {
+    if (!init_[static_cast<int8_t>(device_type)].test_once()) {
+      return false;
+    }
+
+    return true;
+  }
+
   static bool hasOpenMP();
   static bool hasMKL();
+  static bool hasKleidiAI();
   static bool hasLAPACK();
   static bool hasMKLDNN();
   static bool hasMAGMA() {
@@ -220,6 +230,9 @@ class TORCH_API Context {
   at::BlasBackend blasPreferredBackend();
   void setBlasPreferredBackend(at::BlasBackend);
 
+  at::ROCmFABackend getROCmFAPreferredBackend() const;
+  void setROCmFAPreferredBackend(at::ROCmFABackend);
+
   // Note [Enabling Deterministic Operations]
   // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
   // Operations in PyTorch that normally act nondeterministically, but have an
@@ -329,36 +342,72 @@ class TORCH_API Context {
   void setDisplayVmapFallbackWarnings(bool enabled);
   bool areVmapFallbackWarningsEnabled() const;
 
+  bool isDefaultMobileCPUAllocatorSet();
   void setDefaultMobileCPUAllocator();
   void unsetDefaultMobileCPUAllocator();
   bool allowFP16ReductionCPU() const;
   void setAllowFP16ReductionCPU(bool);
 
   // Preserved for BC
+  [[deprecated("Please use lazyInitDevice(at::kCUDA) instead")]]
   void lazyInitCUDA() {
     TORCH_WARN_DEPRECATION(
         "lazyInitCUDA is deprecated. Please use lazyInitDevice(at::kCUDA) instead.")
     lazyInitDevice(at::kCUDA);
   }
+
+  [[deprecated("Please use lazyInitDevice(at::kHIP) instead")]]
   void lazyInitHIP() {
     TORCH_WARN_DEPRECATION(
         "lazyInitHIP is deprecated. Please use lazyInitDevice(at::kHIP) instead.")
     lazyInitDevice(at::kHIP);
   }
+
+  [[deprecated("Please use lazyInitDevice(at::kXPU) instead")]]
   void lazyInitXPU() {
     TORCH_WARN_DEPRECATION(
         "lazyInitXPU is deprecated. Please use lazyInitDevice(at::kXPU) instead.")
     lazyInitDevice(at::kXPU);
   }
+
+  [[deprecated("Please use lazyInitDevice(at::kMTIA) instead")]]
   void lazyInitMTIA() {
     TORCH_WARN_DEPRECATION(
         "lazyInitMTIA is deprecated. Please use lazyInitDevice(at::kMTIA) instead.")
     lazyInitDevice(at::kMTIA);
   }
+
+  [[deprecated("Please use lazyInitDevice(at::kPrivateUse1) instead")]]
   void lazyInitPrivateUse1() {
     TORCH_WARN_DEPRECATION(
         "lazyInitPrivateUse1 is deprecated. Please use lazyInitDevice(at::kPrivateUse1) instead.")
     lazyInitDevice(at::kPrivateUse1);
+  }
+
+  [[deprecated(
+      "Please use getAcceleratorHooksInterface(device_type).isPinnedPtr(data) instead")]]
+  bool isPinnedPtr(
+      const void* data,
+      std::optional<c10::DeviceType> device_type = std::nullopt) {
+    auto opt_device_type =
+        device_type.has_value() ? device_type : at::getAccelerator();
+    if (!opt_device_type.has_value() || // there is no accelerator
+        !at::isAccelerator(
+            opt_device_type.value()) || // passed device not an accelerator
+        !isInitialized(
+            opt_device_type.value())) { // If the device is not initialized, no
+                                        // pointer can be pinned for it
+      return false;
+    }
+
+    return getAcceleratorHooksInterface(opt_device_type).isPinnedPtr(data);
+  }
+
+  [[deprecated(
+      "Please use getAcceleratorHooksInterface(device_type).getPinnedMemoryAllocator() instead")]]
+  Allocator* getPinnedMemoryAllocator(
+      std::optional<c10::DeviceType> device_type = std::nullopt) {
+    return getAcceleratorHooksInterface(device_type).getPinnedMemoryAllocator();
   }
 
  private:
@@ -381,11 +430,7 @@ class TORCH_API Context {
   bool enabled_cudnnSDP = true;
   bool enabled_overrideable = true;
   bool allow_fp16_bf16_reduction_mathSDP = false;
-#ifdef USE_ROCM
-  bool benchmark_cudnn = true;
-#else
   bool benchmark_cudnn = false;
-#endif
   Float32MatmulPrecision float32_matmul_precision =
       c10::utils::check_env("TORCH_ALLOW_TF32_CUBLAS_OVERRIDE") == true
       ? at::Float32MatmulPrecision::HIGH
@@ -408,6 +453,10 @@ class TORCH_API Context {
 #endif
       ? at::BlasBackend::Cublaslt
       : at::BlasBackend::Cublas;
+  at::ROCmFABackend rocm_fa_preferred_backend =
+      c10::utils::check_env("TORCH_ROCM_FA_PREFER_CK") == true
+      ? at::ROCmFABackend::Ck
+      : at::ROCmFABackend::Default;
 #ifdef C10_MOBILE
   bool release_original_weights = true;
 #else
@@ -520,6 +569,10 @@ inline bool hasMKL() {
   return globalContext().hasMKL();
 }
 
+inline bool hasKleidiAI() {
+  return globalContext().hasKleidiAI();
+}
+
 inline bool hasLAPACK() {
   return globalContext().hasLAPACK();
 }
@@ -533,45 +586,28 @@ inline bool hasMKLDNN() {
 }
 
 inline void manual_seed(uint64_t seed) {
-  auto gen = globalContext().defaultGenerator(c10::DeviceType::CPU);
   {
+    auto gen = globalContext().defaultGenerator(c10::DeviceType::CPU);
     // See Note [Acquire lock when using random generators]
     std::lock_guard<std::mutex> lock(gen.mutex());
     gen.set_current_seed(seed);
   }
-  // NB: Sometimes we build with CUDA, but we don't have any GPUs
-  // available. In that case, we must not seed CUDA; it will fail!
-  const auto cuda_num_gpus = detail::getCUDAHooks().deviceCount();
-  if (hasCUDA() && cuda_num_gpus > 0) {
-    for (const auto i : c10::irange(cuda_num_gpus)) {
-      auto cuda_gen = globalContext().defaultGenerator(
-          Device(at::kCUDA, static_cast<c10::DeviceIndex>(i)));
-      {
-        // See Note [Acquire lock when using random generators]
-        std::lock_guard<std::mutex> lock(cuda_gen.mutex());
-        cuda_gen.set_current_seed(seed);
-      }
-    }
-  }
 
-  const auto xpu_num_gpus = detail::getXPUHooks().deviceCount();
-  if (hasXPU() && xpu_num_gpus) {
-    for (const auto i : c10::irange(xpu_num_gpus)) {
-      auto xpu_gen = globalContext().defaultGenerator(
-          Device(at::kXPU, static_cast<c10::DeviceIndex>(i)));
-      {
-        // See Note [Acquire lock when using random generators]
-        std::lock_guard<std::mutex> lock(xpu_gen.mutex());
-        xpu_gen.set_current_seed(seed);
-      }
-    }
+  const auto opt_device_type = at::getAccelerator();
+  if (!opt_device_type.has_value()) {
+    return;
   }
-
-  if (hasMPS()) {
-    auto mps_gen = globalContext().defaultGenerator(c10::DeviceType::MPS);
-    // See Note [Acquire lock when using random generators]
-    std::lock_guard<std::mutex> lock(mps_gen.mutex());
-    mps_gen.set_current_seed(seed);
+  const auto num_gpus = globalContext()
+                            .getAcceleratorHooksInterface(opt_device_type)
+                            .deviceCount();
+  for (const auto i : c10::irange(num_gpus)) {
+    auto gen = globalContext().defaultGenerator(
+        Device(opt_device_type.value(), static_cast<c10::DeviceIndex>(i)));
+    {
+      // See Note [Acquire lock when using random generators]
+      std::lock_guard<std::mutex> lock(gen.mutex());
+      gen.set_current_seed(seed);
+    }
   }
 }
 

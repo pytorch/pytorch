@@ -60,7 +60,7 @@ class PackagePickler(_PyTorchLegacyPickler):
         try:
             module_name, name = self.importer.get_name(obj, name)
         except (ObjNotFoundError, ObjMismatchError) as err:
-            raise PicklingError(f"Can't pickle {obj}: {str(err)}") from None
+            raise PicklingError(f"Can't pickle {obj}: {str(err)}") from err
 
         module = self.importer.import_module(module_name)
         _, parent = _getattribute(module, name)
@@ -111,11 +111,11 @@ class PackagePickler(_PyTorchLegacyPickler):
                     + bytes(name, "ascii")
                     + b"\n"
                 )
-            except UnicodeEncodeError:
+            except UnicodeEncodeError as exc:
                 raise PicklingError(
-                    "can't pickle global identifier '%s.%s' using "
-                    "pickle protocol %i" % (module, name, self.proto)  # type: ignore[attr-defined]
-                ) from None
+                    f"can't pickle global identifier '{module}.{name}' using "
+                    f"pickle protocol {self.proto:d}"  # type: ignore[attr-defined]
+                ) from exc
 
         self.memoize(obj)  # type: ignore[attr-defined]
 

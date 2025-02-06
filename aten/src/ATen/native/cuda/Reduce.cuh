@@ -1,6 +1,5 @@
 #pragma once
 
-#include <ATen/core/Array.h>
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/DeviceUtils.cuh>
 #include <ATen/cuda/detail/OffsetCalculator.cuh>
@@ -899,7 +898,7 @@ inline void launch_jitted_reduce_kernel(
     std::mutex &jiterator_mutex,
     std::array<at::cuda::jit::NvrtcFunction, 3> &fn_cache,
     const at::cuda::jit::KernelDescriptor &desc,
-    int vt0, const ReduceConfig& config, void *reduction) {
+    int vt0, const ReduceConfig& config, const void *reduction) {
   dim3 block = config.block();
   dim3 grid = config.grid();
 
@@ -924,7 +923,7 @@ inline void launch_jitted_reduce_kernel(
     *fn_ptr = at::cuda::jit::jit_pwise_function(code, "reduction_" + desc.name);
   }
   constexpr int kernel_args = 1;
-  void* args[kernel_args];
+  const void* args[kernel_args];
   args[0] = reduction;
   at::cuda::jit::launch_jitted_pwise_function(*fn_ptr, args, grid, block, shared_memory);
 }
@@ -1096,17 +1095,17 @@ ReduceConfig setReduceConfig(const TensorIterator& iter){
 
   const int warp_split_threshold =
       std::min<int>(block_height * 16, max_values_per_thread);
+  bool split_across_warps = config.values_per_thread() >= warp_split_threshold;
   const int num_mp =
       at::cuda::getCurrentDeviceProperties()->multiProcessorCount;
-  bool force_splitting_output = false;
 #ifdef USE_ROCM
-  force_splitting_output = iter.ndim() == 2 &&
+  bool force_splitting_output = iter.ndim() == 2 &&
       reduction_on_fastest_striding_dimension &&
       config.values_per_thread() < 1024 && num_mp < 100;
+  split_across_warps = !force_splitting_output && split_across_warps;
 #endif
 
-  if (!force_splitting_output &&
-      config.values_per_thread() >= warp_split_threshold) {
+  if (split_across_warps) {
     // Divide the input across warps in a thread-block, if that leaves at least
     // 16 elements to be summed by each thread. This will require inter-warp
     // reduction using shared memory.
@@ -1160,6 +1159,8 @@ ReduceConfig setReduceConfig(const TensorIterator& iter){
       config.ctas_per_output = div_up(num_mp, 2);
     else if (config.ctas_per_output < 16)
       config.ctas_per_output = 1;
+    if (iter.ndim() == 3 && !reduction_on_fastest_striding_dimension)
+      config.ctas_per_output = 4;
 #endif
     if (config.ctas_per_output > 1) {
       config.input_mult[2] = config.split_input(config.ctas_per_output);

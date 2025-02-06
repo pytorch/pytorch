@@ -243,13 +243,16 @@ def train_convnext_example():
     max_reserved = torch.cuda.max_memory_reserved()
     max_allocated = torch.cuda.max_memory_allocated()
     print(
-        f"rank {rank}, {ITER_TIME} iterations, average latency {(end - start)/ITER_TIME*1000:10.2f} ms"
+        f"rank {rank}, {ITER_TIME} iterations, "
+        f"average latency {(end - start) / ITER_TIME * 1000:10.2f} ms"
     )
     print(
-        f"rank {rank}, forward {forward_time/ITER_TIME*1000:10.2f} ms, backward {backward_time/ITER_TIME*1000:10.2f} ms"
+        f"rank {rank}, forward {forward_time / ITER_TIME * 1000:10.2f} ms, "
+        f"backward {backward_time / ITER_TIME * 1000:10.2f} ms"
     )
     print(
-        f"rank {rank}, max reserved {max_reserved/1024/1024/1024:8.2f} GiB, max allocated {max_allocated/1024/1024/1024:8.2f} GiB"
+        f"rank {rank}, max reserved {max_reserved / 1024 / 1024 / 1024:8.2f} GiB, "
+        f"max allocated {max_allocated / 1024 / 1024 / 1024:8.2f} GiB"
     )
     dist.destroy_process_group()
 

@@ -1,4 +1,6 @@
 # Owner(s): ["module: inductor"]
+# ruff: noqa: F841
+
 import functools
 import gc
 import math
@@ -26,6 +28,7 @@ from torch.testing import FileCheck
 from torch.testing._internal.common_cuda import (
     PLATFORM_SUPPORTS_FLASH_ATTENTION,
     SM80OrLater,
+    SM90OrLater,
     TEST_MULTIGPU,
 )
 from torch.testing._internal.common_utils import (
@@ -34,6 +37,7 @@ from torch.testing._internal.common_utils import (
     IS_FBCODE,
     skipIfRocm,
     TEST_WITH_ASAN,
+    xfailIfPy312Plus,
 )
 
 
@@ -279,6 +283,60 @@ class CudaReproTests(TestCase):
                     torch.randn((6, 6), device="cuda"),
                 )
                 self.assertTrue(same(fn(*inputs), (inputs[0] + inputs[1], 6)))
+
+    @config.patch({"emulate_precision_casts": True})
+    def test_bool_emulate_low_precision(self):
+        from torch import device
+
+        inf = float("inf")
+
+        def forward():
+            full_1 = torch.ops.aten.full.default(
+                [6, 6],
+                1,
+                dtype=torch.float32,
+                layout=torch.strided,
+                device=device(type="cpu"),
+                pin_memory=False,
+            )
+            device_put_3 = torch.ops.prims.device_put.default(
+                full_1, device(type="cuda", index=0)
+            )
+            full_1 = None
+
+            convert_element_type_40 = torch.ops.prims.convert_element_type.default(
+                device_put_3, torch.bool
+            )
+            device_put_3 = None
+            unsqueeze_4 = torch.ops.aten.unsqueeze.default(convert_element_type_40, 1)
+            convert_element_type_40 = None
+            unsqueeze_5 = torch.ops.aten.unsqueeze.default(unsqueeze_4, 3)
+            unsqueeze_4 = None
+            expand = torch.ops.aten.expand.default(unsqueeze_5, [-1, 256, -1, 256])
+            unsqueeze_5 = None
+            clone = torch.ops.aten.clone.default(
+                expand, memory_format=torch.contiguous_format
+            )
+            expand = None
+            view_15 = torch.ops.aten.reshape.default(clone, [1536, 1536])
+            clone = None
+            scalar_tensor = torch.ops.aten.scalar_tensor.default(
+                -inf, dtype=torch.float16, device=device(type="cuda", index=0)
+            )
+            scalar_tensor_1 = torch.ops.aten.scalar_tensor.default(
+                0.0,
+                dtype=torch.float16,
+                layout=torch.strided,
+                device=device(type="cuda", index=0),
+            )
+            where = torch.ops.aten.where.self(view_15, scalar_tensor_1, scalar_tensor)
+            view_15 = scalar_tensor_1 = scalar_tensor = None
+            return where
+
+        from torch._inductor import config
+
+        config.emulate_precision_casts = True
+        self.assertEqual(torch.compile(forward)(), forward())
 
     @config.patch({"emulate_precision_casts": True})
     def test_emulate_low_precision(self):
@@ -1524,7 +1582,9 @@ def triton_poi_fused_add_reflection_pad2d_0(in_ptr0, in_ptr1, out_ptr0, xnumel, 
         not config.is_fbcode(),
         "bfloat16 atomic add is only supported in fbcode today #97016",
     )
-    @skipCUDAIf(not SM80OrLater, "uses bfloat16 which requires SM >= 80")
+    @skipCUDAIf(
+        not SM90OrLater, "uses bfloat16 atomic add instrs which requires SM >= 90"
+    )
     def test_atomic_add_bfloat16(self):
         def f(x, y):
             return torch.index_select(x, 0, y)
@@ -1543,7 +1603,9 @@ def triton_poi_fused_add_reflection_pad2d_0(in_ptr0, in_ptr1, out_ptr0, xnumel, 
 
         self.assertEqual(f(x_ref, y_ref), out)
 
-    @skipCUDAIf(not SM80OrLater, "uses bfloat16 which requires SM >= 80")
+    @skipCUDAIf(
+        not SM90OrLater, "uses bfloat16 atomic add instrs which requires SM >= 90"
+    )
     @unittest.skipIf(
         config.is_fbcode(),
         "bfloat16 atomic add is supported in fbcode, so we won't fallback",
@@ -1611,6 +1673,7 @@ def triton_poi_fused_add_reflection_pad2d_0(in_ptr0, in_ptr1, out_ptr0, xnumel, 
         self.assertEqual(result, a + b)
         self.assertIn("znumel", code)
 
+    @xfailIfPy312Plus  # https://github.com/pytorch/pytorch/issues/142032
     def test_repeated_masked_load(self):
         target_size = (8, 2)
         mem_eff_temporal_upsampling_interp_chunks = 2
