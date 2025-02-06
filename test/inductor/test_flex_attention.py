@@ -2508,6 +2508,28 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         out.sum().backward()
 
     @supported_platform
+    def test_strided_backwards(self):
+        shape = (1, 2, 4096, 64)
+        Q = torch.randn(shape, requires_grad=True, device="cuda", dtype=torch.bfloat16)
+        K = torch.randn(shape, requires_grad=True, device="cuda", dtype=torch.bfloat16)
+        V = torch.randn(shape, requires_grad=True, device="cuda", dtype=torch.bfloat16)
+        func = torch.compile(flex_attention, dynamic=True, fullgraph=True)
+
+        K_sliced = K[:, :, :-128]
+        V_sliced = V[:, :, :-128]
+
+        out_eager = flex_attention(Q, K_sliced, V_sliced)
+        out_compiled = func(Q, K_sliced, V_sliced)
+
+        grad = torch.rand_like(out_eager)
+
+        eager_grads = torch.autograd.grad(out_eager, (Q, K, V), grad)
+        compiled_grads = torch.autograd.grad(out_compiled, (Q, K, V), grad)
+
+        for eager, compiled in zip(eager_grads, compiled_grads):
+            torch.testing.assert_close(eager, compiled, atol=9e-3, rtol=0)
+
+    @supported_platform
     @common_utils.parametrize("mode", ["eager", "inductor", "paged_attention"])
     @common_utils.parametrize(
         "permute_order",
