@@ -459,6 +459,8 @@ void TuningContext::EnableRecordUntuned(bool value) {
     TUNABLE_LOG1("Enable Record Untuned for TunableOp");
   } else {
     TUNABLE_LOG1("Disable Record Untuned for TunableOp");
+    TUNABLE_LOG1("Writing untuned gemm results to file.");
+    untuned_file_.close();
   }
 }
 
