@@ -15,6 +15,7 @@ from torch.utils._ordered_set import OrderedSet
 
 from . import config, ir
 from .dependencies import WeakDep
+from .memory import estimate_peak_memory, FreeableInputBuffer, get_freeable_input_buf
 from .utils import (
     contains_collective,
     contains_wait,
@@ -33,7 +34,7 @@ if TYPE_CHECKING:
     from .scheduler import BaseSchedulerNode
 
 
-def sink_waits(snodes: list[BaseSchedulerNode]) -> list[BaseSchedulerNode]:
+def sink_waits(snodes: list[BaseSchedulerNode], *args) -> list[BaseSchedulerNode]:
     """
     Greedily schedules waits as late as possible.
     """
@@ -42,7 +43,7 @@ def sink_waits(snodes: list[BaseSchedulerNode]) -> list[BaseSchedulerNode]:
     )
 
 
-def raise_comms(snodes: list[BaseSchedulerNode]) -> list[BaseSchedulerNode]:
+def raise_comms(snodes: list[BaseSchedulerNode], *args) -> list[BaseSchedulerNode]:
     """
     Greedily schedules comms as early as possible.
     """
@@ -53,6 +54,7 @@ def raise_comms(snodes: list[BaseSchedulerNode]) -> list[BaseSchedulerNode]:
 
 def reorder_compute_for_overlap(
     snodes: list[BaseSchedulerNode],
+    *args,
 ) -> list[BaseSchedulerNode]:
     """
     This achieves the following overall scheduling procedure:
@@ -68,6 +70,286 @@ def reorder_compute_for_overlap(
     return _schedule_for_comm(
         snodes, raise_comms=True, sink_waits=True, reorder_for_overlap=True
     )
+
+
+def reorder_comms_preserving_peak_memory(
+    snodes: list[BaseSchedulerNode],
+    graph_inputs: OrderedSet[str],
+    graph_outputs: OrderedSet[str],
+) -> list[BaseSchedulerNode]:
+    """
+
+    for each comm node (c)
+    - for each prev node (p) up to a limit(L())
+        - d = prev.free - prev.alloc
+        - h = peak - curr(c)
+        - if h < d:
+            - break
+        - swap c, p
+        - update curr(c) and curr(p).  (note: nodes after c,p won’t be affected because they already account for the sum of alloc/free as if c,p were fused)
+
+    limit L
+    - max of N moves per C to bound the runtime to linear
+    - runtime of compute nodes < runtime of collective + factor
+
+    """
+    # heuristic to avoid degenerating to quadratic time
+    MAX_REORDER = 10
+    name_to_freeable_input_buf: dict[str, FreeableInputBuffer] = get_freeable_input_buf(
+        snodes, graph_inputs
+    )
+    peak_memory, curr_memory = estimate_peak_memory(
+        snodes, name_to_freeable_input_buf, graph_outputs
+    )
+
+    # mainly for debug stats
+    import copy
+
+    initial_curr_memory = copy.deepcopy(curr_memory)
+    initial_overlap = {}
+    final_overlap = {}
+    runtime = {}
+    moves = {}
+
+    print("Before reorder pass")
+    visualize_overlap(snodes)
+    for i, snode in enumerate(snodes):
+        if contains_collective(snode):
+            final_overlap[snode] = initial_overlap[
+                snode
+            ] = 0  # TODO, actually compute initial overlap
+            runtime[snode] = estimate_op_runtime(snode)
+            moves[snode] = 0
+            for j in range(i - 1, max(1, i - MAX_REORDER), -1):
+                prev_snode = snodes[j]
+                if contains_wait(prev_snode):
+                    # TODO we probably do want to relax this, but i need to think about it more
+                    overlap_log.debug(
+                        f"Not moving {node_summary(snode)} ({j + 1}) before a wait, just to keep things simpler for now"
+                    )
+                    break
+
+                if contains_collective(prev_snode):
+                    overlap_log.debug(
+                        f"Not moving {node_summary(snode)} ({j + 1}) before a collective, to preserve collective ordering"
+                    )
+                    break
+
+                dep_names = OrderedSet([s.name for s in snode.unmet_dependencies])
+                if any([o.get_name() in dep_names for o in prev_snode.get_outputs()]):
+                    overlap_log.debug(
+                        f"Not moving {node_summary(snode)} ({j + 1}) before {node_summary(prev_snode)} because of unmet dependencies"
+                    )
+
+                    print(
+                        f"{node_summary(snode)}, {snode.debug_str=}, {snode.unmet_dependencies=}"
+                    )
+                    torch.distributed.breakpoint()
+                    break
+
+                prev_surplus = (
+                    curr_memory[j - 1] - curr_memory[j]
+                )  # prev node's [free - alloc]
+                prev_net_alloc = (
+                    curr_memory[j] - curr_memory[j - 1]
+                )  # todo which of these is most intuitive..
+                h = peak_memory - curr_memory[i]
+                if h < prev_surplus:
+                    overlap_log.debug(
+                        f"Can't move {node_summary(snode)} ({j + 1}) to ({j=}) because of insufficient peak memory headroom {h=}, {prev_surplus=}"
+                    )
+                    break
+                if final_overlap[snode] > runtime[snode]:
+                    overlap_log.debug(
+                        f"Reached sufficient overlapping (compute = {final_overlap[snode]}, comm = {runtime[snode]}) for {node_summary(snode)} ({i=}) with {moves[snode]} moves"
+                    )
+                    break
+
+                moves[snode] += 1
+                tmp = snodes[j]
+                snodes[j] = snodes[j + 1]
+                snodes[j + 1] = tmp
+                curr_net_alloc = curr_memory[j + 1] - curr_memory[j]
+                curr_memory[j] = curr_memory[j] - prev_net_alloc + curr_net_alloc
+
+                final_overlap[snode] += 1  # TODO compute overlap from prev_node
+                overlap_log.debug(
+                    f"Moving {node_summary(snode)} from pos {j + 1} to {j} to swap with {node_summary(prev_snode)}"
+                )
+    print("After reorder pass")
+    visualize_overlap(snodes)
+
+    """
+
+    0   n0      C0
+    1   n1      C0 + Allocs(n1) - Frees(n1)
+    2   n2      C0 + Allocs(n1) - Frees(n1) + Allocs(n2) - Frees(n2)
+
+    0   n0      C0
+    1   n2      C0 + Allocs(n2) - Frees(n2)
+    1   n1      C0 + Allocs(n2) - Frees(n2) + Allocs(n1) - Frees(n1)
+
+    to "swap" the impact on curr_memory when swapping nodes, we subtract "Allocs(n1) - Frees(ns)" from curr_memory[1]
+    note: "Allocs(n1) - Frees(ns)" = curr_memory[1] - curr_memory[0]
+    curr_memory
+    """
+
+    return snodes
+
+
+def sink_comms_and_waits(
+    snodes: list[BaseSchedulerNode], *args
+) -> list[BaseSchedulerNode]:
+    """
+    Sinks waits as late as possible, and then sinks comms as late as possible but earlier than waits.
+    Keeps comms in original order relative to each other.
+
+    Used as a precursor to a pass that raises comms up to a point respecting peak memory
+
+    Args:
+        snodes: the nodes to be scheduled.
+
+    Returns:
+        The new schedule order.
+
+    """
+    # We assign each node a tuple of scores (score_0, score_1, score_2),
+    # decreasing in importance, with a lower value indicating a higher ranking:
+    #
+    # - score_1: 1 if the node is a wait node, 2 if a comm node, 0 otherwise. This score ensures
+    # that wait nodes are deferred as late as possible.
+    # - score_2: the index of the node in the original topological order. This
+    # score provides stability in case of ties.
+    #
+    buf_name_to_snode = {}
+    name_to_fused_node = {}
+    scores_1, scores_2 = {}, {}
+    for idx, snode in enumerate(snodes):
+        for buf_name in snode.get_buffer_names():
+            buf_name_to_snode[buf_name] = snode
+
+        for op_name in snode.get_operation_names():
+            name_to_fused_node[op_name] = snode
+        name_to_fused_node[snode.get_name()] = snode
+
+        node_name = snode.get_name()
+        if contains_collective(snode):
+            scores_1[node_name] = 2
+        else:
+            scores_1[node_name] = 0
+        scores_2[node_name] = idx
+
+    class Runnable:
+        def __init__(self, snode) -> None:
+            self.snode = snode
+            name = next(iter(snode.get_operation_names()))
+            fused_name = name_to_fused_node[name].get_name()
+            self.score = (
+                scores_1[fused_name],
+                scores_2[fused_name],
+            )
+
+        def __lt__(self, other):
+            return self.score < other.score
+
+    unmet_deps: dict[BaseSchedulerNode, OrderedSet[str]] = {
+        snode: OrderedSet(dep.name for dep in snode.unmet_dependencies)
+        for snode in snodes
+    }
+
+    ready: list[Runnable] = []
+    buffer_users: dict[str, OrderedSet[BaseSchedulerNode]] = defaultdict(OrderedSet)
+
+    # print("initial ready nodes:")
+    for snode, deps in unmet_deps.items():
+        if len(deps) == 0:
+            heapq.heappush(ready, Runnable(snode))
+            # print(node_summary(snode))
+        for dep in deps:
+            buffer_users[dep].add(snode)
+    # print("----")
+    scheduled = []
+
+    pending_waits = defaultdict(OrderedSet)
+    orphaned_waits = []
+
+    def defer_waits_but_mark_dependents_ready(snode):
+        assert contains_collective(snode)
+        assert len(snode.get_buffer_names()) == 1
+        buf_name = next(iter(snode.get_buffer_names()))
+        assert len(buffer_users[buf_name]) == 1
+        wait_snode = next(iter(buffer_users[buf_name]))
+        unmet_deps[wait_snode].remove(buf_name)
+        assert (
+            len(wait_snode.get_buffer_names()) == 2
+        ), f"{wait_snode.get_buffer_names()}"
+        # why are there 2 buffers for a wait?``
+        i = iter(wait_snode.get_buffer_names())
+        first_buf_name = next(i)
+        second_buf_name = next(i)
+        print(f"ignoring {first_buf_name=}, using {second_buf_name=}")
+        buf_name = second_buf_name
+
+        orphaned = True
+
+        for user_snode in unmet_deps:
+            if buf_name in unmet_deps[user_snode]:
+                orphaned = False
+                unmet_deps[user_snode].remove(buf_name)
+                print(
+                    f"removing {buf_name} from unmet_deps for {node_summary(user_snode)}, remaining {unmet_deps[user_snode]}"
+                )
+                pending_waits[user_snode].add(wait_snode)
+                if len(unmet_deps[user_snode]) == 0:
+                    heapq.heappush(ready, Runnable(user_snode))
+                    print(
+                        f"marking {node_summary(user_snode)} ready based on collective"
+                    )
+        if orphaned:
+            orphaned_waits.append(wait_snode)
+            print(f"found orphaned wait {node_summary(wait_snode)}")
+
+    def schedule(snode):
+        """
+        Schedules `snode` and put all unblocked nodes onto the ready queue.
+        """
+
+        if snode in pending_waits:
+            for wait_snode in pending_waits[snode]:
+                if wait_snode not in scheduled:
+                    scheduled.append(wait_snode)
+            pending_waits.pop(snode)
+
+        scheduled.append(snode)
+        print(f"{node_summary(snode)} unblocked: ")
+
+        if contains_collective(snode):
+            defer_waits_but_mark_dependents_ready(snode)
+        else:
+            for buf_name in snode.get_buffer_names():
+                for snode in buffer_users[buf_name]:
+                    unmet_deps[snode].remove(buf_name)
+                    if len(unmet_deps[snode]) == 0:
+                        heapq.heappush(ready, Runnable(snode))
+                        print(node_summary(snode))
+
+        print("----")
+
+    while len(ready):
+        snode = heapq.heappop(ready).snode
+        schedule(snode)
+
+    while len(orphaned_waits):
+        schedule(orphaned_waits.pop())
+
+    for snode, deps in unmet_deps.items():
+        assert len(deps) == 0, (
+            "Detected unscheduled nodes. "
+            f"Nodes with unmet dependencies: {unmet_deps}"
+        )
+    visualize_overlap(scheduled)
+    assert len(scheduled) == len(snodes), (len(scheduled), len(snodes))
+    return scheduled
 
 
 def _schedule_for_comm(
@@ -236,13 +518,20 @@ def decide_global_ordering_of_comms(
     if not torch.distributed.is_available():
         return nodes
 
-    comm_nodes = [n for n in nodes if contains_collective(n)]
+    # TODO: its not bad to keep this strict ordering enforcement, but the implementation is problematic.
+    # Given input collectives/waits as C0, W0, C1, W1, ...
+    # we should add a dep from C1 to C0 but in practice we are adding a dep from C1 to W1, i think.
+    # (perhaps becuase of how wait_tensor IR is implemented).
+    # this breaks comm reordering where we want to be free to schedule C0, C1, W0, W1 but are prohibited by
+    # this weak dep
 
-    for i in range(1, len(comm_nodes)):
-        # Enforce ordering by making previous comm a `WeakDep` dependency of the next comm
-        mutating_buf = next(iter(comm_nodes[i].get_buffer_names()))
-        for buf in comm_nodes[i - 1].get_buffer_names():
-            comm_nodes[i].add_fake_dep(WeakDep(buf, mutating_buf=mutating_buf))
+    # comm_nodes = [n for n in nodes if contains_collective(n)]
+
+    # for i in range(1, len(comm_nodes)):
+    #     # Enforce ordering by making previous comm a `WeakDep` dependency of the next comm
+    #     mutating_buf = next(iter(comm_nodes[i].get_buffer_names()))
+    #     for buf in comm_nodes[i - 1].get_buffer_names():
+    #         comm_nodes[i].add_fake_dep(WeakDep(buf, mutating_buf=mutating_buf))
 
     return nodes
 
@@ -274,29 +563,33 @@ def node_summary(snode):
 def visualize_overlap(order):
     total_est_runtime: float = 0.0
     cur_comm_node = None
-    for snode in order:
+
+    def step_log(step, msg):
+        overlap_log.debug(f"{step:>6}: {msg}")
+
+    for step, snode in enumerate(order):
         if cur_comm_node is None:
             if contains_collective(snode):
                 total_est_runtime += estimate_op_runtime(snode)
                 cur_comm_node = snode.node
             elif is_wait(snode.node):
-                raise AssertionError(
-                    "Wait is not expected when there is no collective running"
-                )
+                # raise AssertionError(
+                #     "Wait is not expected when there is no collective running"
+                # )
+                pass
             else:  # exposed compute op
                 total_est_runtime += estimate_op_runtime(snode)
-            overlap_log.debug(f"{node_summary(snode)}")  # noqa: G004
+            step_log(step, f"{node_summary(snode)}")  # noqa: G004
         else:  # cur_comm_node is not None
             if contains_collective(snode):
-                raise AssertionError(
-                    "Found two collectives running at the same time. "
-                    "`visualize_overlap` needs to be updated to handle this case"
-                )
+                total_est_runtime += estimate_op_runtime(snode)
+                cur_comm_node = snode.node
+                step_log(step, f"{node_summary(snode)}")  # noqa: G004
             elif is_wait(snode.node):  # end of this comm op
-                overlap_log.debug(f"{node_summary(snode)}")  # noqa: G004
+                step_log(step, f"{node_summary(snode)}")  # noqa: G004
                 cur_comm_node = None
             else:  # overlapped compute op
-                overlap_log.debug(f"| {node_summary(snode)}")  # noqa: G004
+                step_log(step, f"| {node_summary(snode)}")  # noqa: G004
     overlap_log.debug(
         f"Est. runtime (ms): {total_est_runtime / 1000 / 1000}"  # noqa: G004
     )
@@ -304,6 +597,8 @@ def visualize_overlap(order):
 
 def reorder_compute_and_comm_for_overlap(
     snodes: list[BaseSchedulerNode],
+    graph_inputs: OrderedSet[str],
+    graph_outputs: OrderedSet[str],
 ) -> list[BaseSchedulerNode]:
     order = snodes
     for p in config.reorder_for_compute_comm_overlap_passes:
@@ -317,7 +612,7 @@ def reorder_compute_and_comm_for_overlap(
                 visualize_overlap(order)
             except Exception as e:
                 overlap_log.debug(str(e))
-        order = p(order)  # type: ignore[operator]
+        order = p(order, graph_inputs, graph_outputs)  # type: ignore[operator]
         if torch.distributed.get_rank() == 0:
             overlap_log.debug(
                 f"==== Visualize overlap after reordering pass {p} ===="  # noqa: G004

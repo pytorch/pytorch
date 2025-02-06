@@ -290,9 +290,10 @@ reorder_for_compute_comm_overlap_passes: list[
         ],
     ]
 ] = [
-    "reorder_compute_for_overlap",
-    "sink_waits",
-    "raise_comms",
+    "sink_comms_and_waits",
+    "reorder_comms_preserving_peak_memory",
+    # "reorder_compute_for_overlap",
+    # "raise_comms",
 ]
 
 # enable operator reordering for peak memory optimization
