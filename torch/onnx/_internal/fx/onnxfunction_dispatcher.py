@@ -42,7 +42,7 @@ def _find_opschema_matched_symbolic_function_disagnostic_message_formatter(
     for symbolic_func in default_and_custom_functions:
         overload_func = symbolic_func.onnx_function
         all_function_overload_names += f"ONNX Node: {overload_func.name}[opset={overload_func.opset};is_custom={symbolic_func.is_custom}]. \n"  # noqa: B950
-    return f"FX Node: {node.target}. \n" f"{all_function_overload_names}"
+    return f"FX Node: {node.target}. \n{all_function_overload_names}"
 
 
 def _find_operator_overloads_in_onnx_registry_disagnostic_message_formatter(

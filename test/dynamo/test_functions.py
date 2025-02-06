@@ -4448,7 +4448,7 @@ class DefaultsTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(fn(inputs, x), opt_fn(inputs, x))
 
     def test_udf_tuple(self):
-        class MyTuple(tuple):
+        class MyTuple(tuple):  # noqa: SLOT001
             def len_mulitply_2(self):
                 return len(self) * 2
 
@@ -4475,7 +4475,7 @@ class DefaultsTests(torch._dynamo.test_case.TestCase):
         self.assertTrue(res_tup.checked)
 
     def test_udf_tuple_reconstruction(self):
-        class MyTuple(tuple):
+        class MyTuple(tuple):  # noqa: SLOT001
             pass
 
         def fn(x, klass):
@@ -4518,6 +4518,38 @@ class DefaultsTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(fn(x, word), opt_fn(x, word))
         word = "dynamo"
         self.assertEqual(fn(x, word), opt_fn(x, word))
+
+    def test_func_attrs(self):
+        def f(x=4, y=2):
+            pass
+
+        def fn(x):
+            try:
+                f.dynamo + 1
+            except AttributeError:
+                x = torch.sin(x)
+
+            code = f.__code__
+            defaults = f.__defaults__
+            return x * len(defaults) * code.co_argcount
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        x = torch.randn(4)
+        self.assertEqual(fn(x), opt_fn(x))
+
+    def test_functools_partial_id(self):
+        def gn(a, b):
+            return a + b
+
+        partial_gn = functools.partial(gn, a=3)
+
+        def fn(x):
+            d = {id(partial_gn): 5}
+            return partial_gn(b=x) * d[id(partial_gn)]
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        x = torch.randn(4)
+        self.assertEqual(fn(x), opt_fn(x))
 
 
 instantiate_parametrized_tests(FunctionTests)
