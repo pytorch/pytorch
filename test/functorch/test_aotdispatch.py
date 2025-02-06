@@ -873,7 +873,6 @@ metadata incorrectly.
             temp_plain = x.a + y.b
             res = temp.sum() + temp_plain.sum()
             return x.sin().cos() + res
-
         x = torch.ones(4, requires_grad=True)
         x2 = x.detach().clone().requires_grad_()
         xx = TwoTensor(x, x2)
