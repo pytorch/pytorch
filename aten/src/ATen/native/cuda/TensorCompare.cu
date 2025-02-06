@@ -54,8 +54,8 @@ void isclose_kernel_impl_complex(TensorIteratorBase& iter, double rtol, double a
     opmath_t cast_a = static_cast<opmath_t>(a);
     opmath_t cast_b = static_cast<opmath_t>(b);
 
-    if (equal_nan && 
-        (::isnan(cast_a.real()) || ::isnan(cast_a.imag())) && 
+    if (equal_nan &&
+        (::isnan(cast_a.real()) || ::isnan(cast_a.imag())) &&
         (::isnan(cast_b.real()) || ::isnan(cast_b.imag()))) {
       printf("equal nan complex \n");
       return true;
@@ -106,7 +106,7 @@ void isclose_kernel_impl_real(TensorIteratorBase& iter, double rtol, double atol
         auto allowed_error = static_cast<opmath_t>(atol + rtol * ::abs(cast_b));
         return ::abs(cast_a - cast_b) <= allowed_error;
       }
-      
+
       return false;
     });
   }

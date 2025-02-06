@@ -438,8 +438,8 @@ void isclose_kernel_impl_complex(
       return true;
     }
 
-    if (equal_nan && 
-        (std::isnan(std::real(a)) || std::isnan(std::imag(a))) && 
+    if (equal_nan &&
+        (std::isnan(std::real(a)) || std::isnan(std::imag(a))) &&
         (std::isnan(std::real(b)) || std::isnan(std::imag(b)))) {
       return true;
     }

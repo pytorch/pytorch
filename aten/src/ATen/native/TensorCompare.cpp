@@ -297,7 +297,8 @@ TORCH_PRECOMPUTE_META_FUNC2(min, dim)
 } // namespace at::meta
 
 namespace at::native {
-DEFINE_DISPATCH(isclose_stub); // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
+DEFINE_DISPATCH(
+    isclose_stub); // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(
     where_kernel); // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(
@@ -365,12 +366,12 @@ Tensor isclose(
 
   Tensor output = at::empty({0}, self.options().dtype(kBool));
   auto iter = TensorIteratorConfig()
-      .add_output(output)
-      .add_const_input(self)
-      .add_const_input(other)
-      .promote_inputs_to_common_dtype(true)
-      .build();
-    
+                  .add_output(output)
+                  .add_const_input(self)
+                  .add_const_input(other)
+                  .promote_inputs_to_common_dtype(true)
+                  .build();
+
   isclose_stub(iter.device_type(), iter, rtol, atol, equal_nan);
   return output;
 }
