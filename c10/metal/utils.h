@@ -108,13 +108,13 @@ template <typename T>
 
 #if __METAL_VERSION__ >= 310
 template <>
-bfloat min(bfloat a, bfloat b) {
+inline bfloat min(bfloat a, bfloat b) {
   return bfloat(
       ::metal::isunordered(a, b) ? NAN : ::metal::min(float(a), float(b)));
 }
 
 template <>
-bfloat max(bfloat a, bfloat b) {
+inline bfloat max(bfloat a, bfloat b) {
   return bfloat(
       ::metal::isunordered(a, b) ? NAN : ::metal::max(float(a), float(b)));
 }
