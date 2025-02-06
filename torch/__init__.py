@@ -2285,10 +2285,12 @@ class _TorchCompileInductorWrapper:
         self.apply_options(options)
         self.apply_options(CompilerBisector.get_config_change("inductor"))
 
+        from torch.version import cuda as cuda_version
+
         if self.config.get("triton.cudagraphs", False) and not (
-            torch.version.cuda
-            and int(torch.version.cuda.split(".")[0]) >= 12
-            and int(torch.version.cuda.split(".")[1]) >= 6
+            cuda_version
+            and int(cuda_version.split(".")[0]) >= 12
+            and int(cuda_version.split(".")[1]) >= 6
         ):
             os.environ["DISABLE_CUPTI_LAZY_REINIT"] = "1"
             # FIXME: CUDA Graph does not work well with CUPTI teardown.
