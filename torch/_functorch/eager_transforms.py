@@ -1799,6 +1799,7 @@ def linearize(func: Callable, *primals) -> tuple[Any, Callable]:
     return output, jvp_fn
 
 
+@exposed_in("torch.func")
 def debug_unwrap(tensor: torch.Tensor, *, recurse=True) -> torch.Tensor:
     """Unwraps a functorch tensor (e.g. BatchedTensor, GradTrackingTensor) to its underlying tensor.
 
