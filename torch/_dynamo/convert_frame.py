@@ -1184,6 +1184,9 @@ class ConvertFrame:
             counters["frames"]["ok"] += 1
             return result
         except Exception as e:
+            log.info("HIT THE BIT")
+            print("HIT TEH BIT")
+            raise "HIT TH#E BIT"
             # These two exception types are "soft" failure, in the sense that
             # we know this is due to something we didn't implement all the
             # way, scare the user less about it.  That being said, if you
@@ -1202,6 +1205,7 @@ class ConvertFrame:
                 raise
 
             soft_fail = isinstance(e, Unsupported)
+            print("DEBUG HIT ISSUE")
 
             # This is a soft failure. In the sense, the code path reaches here
             # when we do not support graph breaks on bytecodes like LOAD_ATTR,

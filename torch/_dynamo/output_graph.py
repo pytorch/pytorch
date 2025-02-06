@@ -1302,6 +1302,7 @@ class OutputGraph:
         call that generated code.
         """
         with torch._guards.TracingContext.clear_frame():
+            print("DEBUG COMP AND CALL")
             from .decorators import disable
 
             assert self.should_exit
