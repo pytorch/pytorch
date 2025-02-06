@@ -145,6 +145,9 @@ def mps_ops_grad_modifier(ops):
         # round not working properly for float16
         'round': [torch.float16],
 
+        # sinc precision errors for float16
+        'sinc': [torch.float16],
+
         # atomic operation in backward pass
         '_unsafe_masked_index': [torch.float16],
         '_unsafe_masked_index_put_accumulate': [torch.float16],
