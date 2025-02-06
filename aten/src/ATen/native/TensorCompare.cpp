@@ -14,7 +14,6 @@
 #include <ATen/native/TensorCompare.h>
 #include <ATen/native/TypeProperties.h>
 #include <c10/util/Exception.h>
-#include <iostream>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>

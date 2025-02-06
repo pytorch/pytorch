@@ -6,7 +6,6 @@
 #include <ATen/native/TensorCompare.h>
 #include <ATen/native/cuda/Loops.cuh>
 #include <c10/core/Scalar.h>
-#include <iostream>
 
 namespace at::native {
 
@@ -46,7 +45,6 @@ void isclose_kernel_impl_complex(TensorIteratorBase& iter, double rtol, double a
   using opmath_t = at::opmath_type<scalar_t>;
   gpu_kernel(iter, [=]GPU_LAMBDA(scalar_t a, scalar_t b) -> bool {
     if (a == b) {
-      printf("a==b complex \n");
 
       return true;
     }
@@ -57,7 +55,6 @@ void isclose_kernel_impl_complex(TensorIteratorBase& iter, double rtol, double a
     if (equal_nan &&
         (::isnan(cast_a.real()) || ::isnan(cast_a.imag())) &&
         (::isnan(cast_b.real()) || ::isnan(cast_b.imag()))) {
-      printf("equal nan complex \n");
       return true;
     }
 
