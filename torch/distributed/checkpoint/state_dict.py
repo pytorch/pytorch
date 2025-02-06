@@ -59,7 +59,6 @@ __all__ = [
     "set_state_dict",
 ]
 
-
 _FLAT_PARAM = "_flat_param"
 _PG = "param_groups"
 _PARAMS = "params"
@@ -73,7 +72,6 @@ ValueType = Union[
 DictValueType = dict[str, ValueType]
 ListDictValueType = list[DictValueType]
 OptimizerStateType = dict[str, Union[DictValueType, ListDictValueType]]
-
 
 _patched_state_dict: set[Callable] = set()
 
@@ -134,6 +132,7 @@ class StateDictOptions:
     strict: bool = True
     broadcast_from_rank0: bool = False
     flatten_optimizer_state_dict: bool = False
+    _dsd_fqn_modifiers: str = "fqn_modifiers"
 
 
 @dataclass
@@ -155,6 +154,7 @@ class _StateDictInfo(StateDictOptions):
 def _get_fqns(
     model: nn.Module,
     name: str,
+    _dsd_fqn_modifiers: str = "fqn_modifiers",
     skip_ddp_prefix: bool = True,
     skip_compiler_prefix: bool = True,
 ) -> FQNS_T:
@@ -204,6 +204,14 @@ def _get_fqns(
             if not skip_compiler_prefix:
                 fqn_obj_names.append(curr_obj_name)
         else:
+            # In some modeuls, fqn_modifiers would not shown in the state_dict keys,
+            # skip them in the fqn to ensure load stat dict successfully for them.
+            if hasattr(curr_obj, _dsd_fqn_modifiers):
+                if removed_fqn := getattr(curr_obj, _dsd_fqn_modifiers)().get(
+                    curr_obj_name
+                ):
+                    if hasattr(curr_obj, removed_fqn):
+                        curr_obj = getattr(curr_obj, removed_fqn)
             fqn_obj_names.append(curr_obj_name)
             if curr_obj_name == nn.modules.module._EXTRA_STATE_KEY_SUFFIX:
                 if i != len(obj_names) - 1:
@@ -218,17 +226,25 @@ class _EXTRA_STATE:
     pass
 
 
-def _iterate_valid_model_state(model):
+def _iterate_valid_model_state(model, _dsd_fqn_modifiers="fqn_modifiers"):
     visited_modules: set[nn.Module] = set()
 
     def recurse(module: nn.Module, curr_fqn: str) -> Generator:
         visited_modules.add(module)
-
         curr_fqn = f"{curr_fqn}." if curr_fqn else ""
         for name, submodule in module.named_children():
             if submodule in visited_modules:
                 continue
-            new_fqn = f"{curr_fqn}{name}"
+            # if user have state_dict_hooks in their model, they can add the state_dict key changes
+            # at _dsd_fqn_modifiers in input to align with the function of state_dict_hook
+            if (
+                hasattr(module, _dsd_fqn_modifiers)
+                and name in getattr(module, _dsd_fqn_modifiers)().values()
+            ):
+                # skip fqn_modifiers here thus remove the last `.` added
+                new_fqn = curr_fqn[:-1]
+            else:
+                new_fqn = f"{curr_fqn}{name}"
             yield from recurse(submodule, new_fqn)
 
         for name, obj in chain(
@@ -527,10 +543,14 @@ def _load_model_state_dict(
         return _IncompatibleKeys({}, {})
 
     local_state_dict = {}
-    for key, value in _iterate_valid_model_state(model):
-        fqns = _get_fqns(model, key)
+    for key, value in _iterate_valid_model_state(model, info._dsd_fqn_modifiers):
+        fqns = _get_fqns(model, key, info._dsd_fqn_modifiers)
         fqns_with_prefix = _get_fqns(
-            model, key, skip_ddp_prefix=False, skip_compiler_prefix=False
+            model,
+            key,
+            info._dsd_fqn_modifiers,
+            skip_ddp_prefix=False,
+            skip_compiler_prefix=False,
         )
 
         for fqn, fqn_with_prefix in zip(fqns, fqns_with_prefix):
@@ -1090,7 +1110,6 @@ def get_state_dict(
         >>> ddp_model = DDP(copy.deepcopy(model))
         >>> ddp_optim = torch.optim.Adam(model.parameters(), lr=1e-3)
 
-
         >>> ddp_state_dict, ddp_optim_state_dict = get_state_dict(ddp_model, ddp_optim)
         >>> fsdp_state_dict, fsdp_optim_state_dict = get_state_dict(fsdp_model, fsdp_optim)
 
@@ -1098,7 +1117,6 @@ def get_state_dict(
         >>> # the asserts will fail.
         >>> assert ddp_state_dict == fsdp_state_dict
         >>> assert ddp_optim_state == fsdp_optim_state_dict
-
 
     Args:
         model (nn.Module): the nn.Module to the model.
