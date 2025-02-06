@@ -102,7 +102,7 @@ def export_compat(
                 ) from e
 
     dynamic_shapes_with_export_dim, need_axis_mapping = (
-        _dynamic_shapes.convert_str_to_export_dim(model, dynamic_shapes)
+        _dynamic_shapes.convert_str_to_export_dim(dynamic_shapes)
     )
 
     registry = _registration.ONNXRegistry.from_torchlib()
@@ -172,7 +172,7 @@ def export_compat(
         else:
             raise
 
-    if need_axis_mapping:
+    if need_axis_mapping and dynamic_shapes is not None:
         onnx_program._rename_dynamic_axes(dynamic_shapes)
 
     # Converter opset version and optimize

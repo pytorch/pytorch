@@ -115,7 +115,6 @@ class TestDynamicShapes(common_utils.TestCase):
         dynamic_axes = _dynamic_shapes.from_dynamic_shapes_to_dynamic_axes(
             dynamic_shapes=dynamic_shapes, input_names=input_names, exception=Exception
         )
-        print(dynamic_axes)
         self.assertEqual(dynamic_axes, expected_dynamic_axes)
 
     def test_from_dynamic_shapes_to_dynamic_axes_fails_when_input_names_is_less_than_flat_dynamic_shapes(

@@ -1,11 +1,11 @@
 """Compatibility functions for the torch.onnx.export API."""
 
 # mypy: allow-untyped-defs
-# mypy: disable-error-code=attr-defined
 from __future__ import annotations
 
 import inspect
 import re
+import warnings
 from typing import Any, Sequence
 
 import torch
@@ -60,14 +60,15 @@ def from_dynamic_axes_to_dynamic_shapes(
                     "The axis in dynamic_axes must be in the form of: dict[int, str] or list[int]."
                 )
             dynamic_shapes[input_name] = {
-                k: torch.export.Dim.AUTO for k, _ in axes.items()
+                k: torch.export.Dim.AUTO  # type: ignore[attr-defined]
+                for k, _ in axes.items()
             }
         elif isinstance(axes, list):
             if any(not isinstance(k, int) for k in axes):
                 raise ValueError(
                     "The axis in dynamic_axes must be in the form of: dict[int, str] or list[int]."
                 )
-            dynamic_shapes[input_name] = {k: torch.export.Dim.AUTO for k in axes}
+            dynamic_shapes[input_name] = {k: torch.export.Dim.AUTO for k in axes}  # type: ignore[attr-defined]
         elif axes is None:
             dynamic_shapes[input_name] = None
         else:
@@ -169,23 +170,12 @@ def _any_str_in_dynamic_shapes(
 
 
 def convert_str_to_export_dim(
-    model,
     dynamic_shapes: dict[str, Any] | tuple[Any, ...] | list[Any] | None,
 ) -> tuple[dict[str, Any] | tuple[Any, ...] | list[Any] | None, bool]:
     # 0. If there is no string in dynamic_shapes, we do not touch dynamic_shapes
     if dynamic_shapes is None or not _any_str_in_dynamic_shapes(dynamic_shapes):
         return dynamic_shapes, False
-    # 1. Order inputs with model.forward signature to avoid arg mismatch
-    #    for example: {"y": {0: Dim.AUTO}, "x": {1: Dim.AUTO}}
-    #    Only happens when dynamic_shapes is a dict
-    # NOTE: We don't support the dynamic shapes that is a nested dict with messed up order
-    if isinstance(dynamic_shapes, dict):
-        sig = _signature(model)
-        ordered_dynamic_shapes = {}
-        for param_name in sig.parameters:
-            if param_name in dynamic_shapes:
-                ordered_dynamic_shapes[param_name] = dynamic_shapes[param_name]
-        dynamic_shapes = ordered_dynamic_shapes
+
     # 2. Convert "name" to Dim.AUTO with flattening and identify if there is any string
     #    to be replaced with Dim.AUTO, and then unflatten it back to the original structure.
     #    for example: {"y": {0: "dim_0"}, "x": {1: "dim_1"}}
@@ -203,7 +193,7 @@ def convert_str_to_export_dim(
             converted_axes_dict: dict[int, _Dim | _DimHint | None] = {}
             for axis, dim in axes.items():
                 if isinstance(dim, str):
-                    converted_axes_dict[axis] = torch.export.Dim.AUTO
+                    converted_axes_dict[axis] = torch.export.Dim.AUTO  # type: ignore[attr-defined]
                 else:
                     converted_axes_dict[axis] = dim
             dynamic_shapes_with_export_dim.append(converted_axes_dict)
@@ -211,7 +201,7 @@ def convert_str_to_export_dim(
             converted_axes_list: list[_Dim | _DimHint | None] = []
             for dim in axes:
                 if isinstance(dim, str):
-                    converted_axes_list.append(torch.export.Dim.AUTO)
+                    converted_axes_list.append(torch.export.Dim.AUTO)  # type: ignore[attr-defined]
                 else:
                     converted_axes_list.append(dim)
             dynamic_shapes_with_export_dim.append(converted_axes_list)
@@ -221,7 +211,7 @@ def convert_str_to_export_dim(
     )
     return (
         dynamic_shapes_with_export_dim,
-        dynamic_shapes != dynamic_shapes_with_export_dim,
+        True,
     )
 
 
@@ -229,13 +219,23 @@ def create_rename_mapping(
     inputs, dynamic_shapes: dict[str, Any] | tuple[Any, ...] | list[Any]
 ) -> dict[str, str]:
     """Create a mapping from old names to new names for dynamic axes."""
-    flat_dynamic_shapes = _flatten_dynamic_shapes_to_axes(dynamic_shapes)
-    # TODO(titaiwang): Need a better error message
-    assert len(inputs) == len(
-        flat_dynamic_shapes
-    ), "The number of ONNX graph inputs and dynamic_shapes should be the same."
-    rename_mapping = {}
+
+    # NOTE: There's no need to handle cases where kwargs are out of order with the model signature,
+    # as torch.export.export supports dynamism only when kwargs and dynamic_shapes are provided in order.
+    # Reference: https://github.com/pytorch/pytorch/blob/49082f9dba3b79a344cb03652972ddbe7c3729cc/torch/export/_trace.py#L2034
+
+    flat_dynamic_shapes, _ = _flatten_dynamic_shapes_to_axes(dynamic_shapes)
+    if len(inputs) != len(flat_dynamic_shapes):
+        warnings.warn(
+            "# ONNX model has different number of inputs than the flatten dynamic_shapes. "
+            "The dynamic axes will not be renamed.",
+            UserWarning,
+            stacklevel=3,
+        )
+        return {}
+    rename_mapping: dict[str, str] = {}
     # NOTE: We assume that the flat_dynamic_shapes is in the same order as the inputs
+    # When the axis is static, or it connects to _DimHint in dynamic shapes, we skip renaming
     for idx, axes in enumerate(flat_dynamic_shapes):
         input = inputs[idx]
         if isinstance(axes, dict):
@@ -245,13 +245,37 @@ def create_rename_mapping(
                 old_name = input.shape[dim].value
                 if old_name is None:
                     continue
-                rename_mapping[input.shape[dim].value] = _get_custom_axis_name(axis)
+                if isinstance(axis, _DimHint):
+                    continue
+                # NOTE: ExportedProgram could give the axes the same name if they share
+                # the same shape constraints.
+                custom_name = _get_custom_axis_name(axis)
+                if input.shape[dim].value in rename_mapping:
+                    warnings.warn(
+                        f"# The axis name: {custom_name} will not be used, since it shares "
+                        f"the same shape constraints with another axis: {rename_mapping[input.shape[dim].value]}."
+                    )
+                    continue
+                rename_mapping[input.shape[dim].value] = custom_name
         elif isinstance(axes, (list, tuple)):
             for dim, axis in enumerate(axes):
                 if not isinstance(input.shape[dim], ir.SymbolicDim):
                     continue
                 old_name = input.shape[dim].value
                 if old_name is None:
+                    continue
+                if isinstance(axis, _DimHint):
+                    continue
+                # NOTE: ExportedProgram could give the axes the same name if they share
+                # the same shape constraints.
+                custom_name = _get_custom_axis_name(axis)
+                if input.shape[dim].value in rename_mapping:
+                    warnings.warn(
+                        f"# The axis name: {custom_name} will not be used, since it shares "
+                        f"the same shape constraints with another axis: {rename_mapping[input.shape[dim].value]}.",
+                        UserWarning,
+                        stacklevel=3,
+                    )
                     continue
                 rename_mapping[input.shape[dim].value] = _get_custom_axis_name(axis)
     return rename_mapping
@@ -268,7 +292,6 @@ def iterate_and_change_axis_names(
     model_or_function: ir.Model | ir.Function, rename_mapping: dict[str, str]
 ) -> None:
     """Rename dynamic axes in a model according to the specified dynamic_axes names."""
-
     for value in _all_values(model_or_function):
         if value.shape is None:
             continue
@@ -336,9 +359,14 @@ def _signature(model) -> inspect.Signature:
     raise ValueError("model has no forward method and is not callable")
 
 
-def _all_values(model: ir.Model):
+def _all_values(model_or_function: ir.Model | ir.Function):
     """Yield all values in a model."""
-    yield from model.graph.inputs
-    yield from model.graph.initializers.values()
-    for node in ir.traversal.RecursiveGraphIterator(model.graph):
-        yield from node.outputs
+    if isinstance(model_or_function, ir.Function):
+        yield from model_or_function.inputs
+        for node in ir.traversal.RecursiveGraphIterator(model_or_function):
+            yield from node.outputs
+    else:
+        yield from model_or_function.graph.inputs
+        yield from model_or_function.graph.initializers.values()
+        for node in ir.traversal.RecursiveGraphIterator(model_or_function.graph):
+            yield from node.outputs
