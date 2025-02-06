@@ -451,5 +451,15 @@ inline float digamma(T0 x) {
   }
 }
 
+template <typename T>
+T sinc(T a) {
+  if (a == static_cast<T>(0)) {
+    return static_cast<T>(1);
+  }
+  constexpr T pi = static_cast<T>(M_PI_F);
+  T product = pi * a;
+  return static_cast<T>(::metal::sin(product) / product);
+}
+
 } // namespace metal
 } // namespace c10
