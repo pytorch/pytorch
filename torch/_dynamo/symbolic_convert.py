@@ -2236,11 +2236,11 @@ class InstructionTranslatorBase(
         # https://peps.python.org/pep-0479/
         # https://github.com/python/cpython/pull/99006
         # https://github.com/python/cpython/commit/28187141cc34063ef857976ddbca87ba09a882c2
-        val = self.pop()
+        val = self.stack[-1]
         assert isinstance(val, ExceptionVariable)
-        if val.exc_type is RuntimeError:
-            val = variables.BuiltinVariable(StopIteration).call_function(self, [], {})  # type: ignore[arg-type]
-            self.push(val)
+        if val.exc_type is StopIteration:
+            new_val = variables.BuiltinVariable(RuntimeError).call_function(self, [], {})  # type: ignore[arg-type]
+            self.stack[-1] = new_val
 
     def DICT_MERGE(self, inst):
         v = self.pop()
