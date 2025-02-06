@@ -199,7 +199,7 @@ class AOTInductorTestsTemplate:
             torch.randn(10, 10, device=self.device),
         )
         expected_path = os.path.join(tempfile.mkdtemp(dir=cache_dir()), "model.so")
-        actual_path = AOTIRunnerUtil.compile(
+        actual_path = AOTIRunnerUtil.legacy_compile(
             model, example_inputs, options={"aot_inductor.output_path": expected_path}
         )
         self.assertTrue(actual_path == expected_path)
@@ -219,7 +219,9 @@ class AOTInductorTestsTemplate:
 
         example_inputs = (torch.randn(4, 4, device=self.device),)
         with config.patch({"aot_inductor.use_runtime_constant_folding": True}):
-            self.check_model(Model(self.device), example_inputs)
+            model = Model(device=self.device)
+            actual = AOTIRunnerUtil.legacy_run(self.device, model, example_inputs)
+            self.assertTrue(same(model(*example_inputs), actual))
 
     @requires_gpu
     def test_duplicate_constant_folding(self):
@@ -237,7 +239,9 @@ class AOTInductorTestsTemplate:
 
         example_inputs = (torch.randn(4, 4, device=self.device),)
         with config.patch({"aot_inductor.use_runtime_constant_folding": True}):
-            self.check_model(Model(self.device), example_inputs)
+            model = Model(device=self.device)
+            actual = AOTIRunnerUtil.legacy_run(self.device, model, example_inputs)
+            self.assertTrue(same(model(*example_inputs), actual))
 
     @requires_gpu
     def test_multi_device(self):
@@ -301,7 +305,6 @@ class AOTInductorTestsTemplate:
 
         with torch.no_grad():
             result = AOTIRunnerUtil.run(
-                self.device,
                 m,
                 (ref_x,),
             )
@@ -497,7 +500,9 @@ class AOTInductorTestsTemplate:
 
         example_inputs = (torch.randn(2, 8, device=self.device),)
         counters.clear()
-        self.check_model(Model(), example_inputs)
+        model = Model().to(device=self.device)
+        actual = AOTIRunnerUtil.legacy_run(self.device, model, example_inputs)
+        self.assertTrue(same(model(*example_inputs), actual))
         self.assertEqual(counters["inductor"]["scmerge_split_removed"], 1)
         self.assertEqual(counters["inductor"]["scmerge_cat_removed"], 1)
         self.assertEqual(counters["inductor"]["scmerge_split_sections_removed"], 1)
@@ -1805,8 +1810,8 @@ class AOTInductorTestsTemplate:
         example_inputs = (torch.randn(8, 10, device=device),)
         expected = model(*example_inputs)
 
-        so_path = AOTIRunnerUtil.compile(model, example_inputs)
-        optimized = AOTIRunnerUtil.load(device, so_path)
+        so_path = AOTIRunnerUtil.legacy_compile(model, example_inputs)
+        optimized = AOTIRunnerUtil.legacy_load(device, so_path)
         actual = optimized(*example_inputs)
         torch.testing.assert_close(actual, expected)
 
@@ -1855,14 +1860,12 @@ class AOTInductorTestsTemplate:
         device_interface = get_interface_for_device(GPU_TYPE)
         with device_interface.device(0), torch.no_grad():
             result_gpu_0 = AOTIRunnerUtil.run(
-                GPU_TYPE,
                 Model(weight.to(torch.device(GPU_TYPE, 0))),
                 tuple(t.to(torch.device(GPU_TYPE, 0)) for t in inputs),
             )
 
         with device_interface.device(1), torch.no_grad():
             result_gpu_1 = AOTIRunnerUtil.run(
-                GPU_TYPE,
                 Model(weight.to(torch.device(GPU_TYPE, 1))),
                 tuple(t.to(torch.device(GPU_TYPE, 1)) for t in inputs),
             )
@@ -3122,12 +3125,11 @@ class AOTInductorTestsTemplate:
             torch.randn(1, 16, device=GPU_TYPE),
         )
 
-        so_path: str = AOTIRunnerUtil.compile(
+        package_path: str = AOTIRunnerUtil.compile(
             Model(),
             example_inputs,
         )
-        aot_inductor_module = AOTIRunnerUtil.load(GPU_TYPE, so_path)
-
+        aot_inductor_module = torch._inductor.aoti_load_package(package_path)
         # Don't assign outputs to a variable b/c it will allocate GPU memory.
         device_interface = get_interface_for_device(GPU_TYPE)
         device: int = device_interface.current_device()
@@ -3444,7 +3446,6 @@ class AOTInductorTestsTemplate:
         model = Model()
         with torch.no_grad():
             result = AOTIRunnerUtil.run(
-                self.device,
                 model,
                 (x,),
             )
@@ -3469,7 +3470,6 @@ class AOTInductorTestsTemplate:
 
         with torch.no_grad():
             result = AOTIRunnerUtil.run(
-                self.device,
                 model,
                 (x,),
             )
@@ -3625,9 +3625,14 @@ class AOTInductorTestsTemplate:
             example_inputs_4,
         ]
 
-        self.check_model_with_multiple_inputs(
-            model, example_inputs_list, dynamic_shapes=dynamic_shapes
-        )
+        for example_input in example_inputs_list:
+            actual = AOTIRunnerUtil.legacy_run(
+                self.device,
+                model,
+                example_input,
+                dynamic_shapes=dynamic_shapes,
+            )
+            self.assertTrue(same(model(*example_input), actual))
 
     @common_utils.parametrize("max_autotune", [True, False])
     def test_misc_1(self, max_autotune):
@@ -4015,12 +4020,12 @@ class AOTInductorTestsTemplate:
 
         # Check the runtime assertion is codegen'ed.
         so_path, code = run_and_get_cpp_code(
-            AOTIRunnerUtil.compile, model, example_inputs
+            AOTIRunnerUtil.legacy_compile, model, example_inputs
         )
         lowerbound_check = "u1 >= 1" if mark_unbacked else "u0 >= 2"
         FileCheck().check_count(lowerbound_check, 1).run(code)
 
-        compiled = AOTIRunnerUtil.load(self.device, so_path)
+        compiled = AOTIRunnerUtil.legacy_load(self.device, so_path)
         compiled(*example_inputs)
 
         # Check the runtime assertion.

@@ -249,10 +249,7 @@ def _warn_tf32_disabled() -> None:
 
 
 def _unlift_graph(
-    mod: GraphModule,
-    gm: GraphModule,
-    graph_signature: GraphSignature,
-    fake_mode: torch._subclasses.FakeTensorMode,
+    mod: GraphModule, gm: GraphModule, graph_signature: GraphSignature
 ) -> GraphModule:
     from torch.export.unflatten import _assign_attr, _AttrKind
 
@@ -273,13 +270,6 @@ def _unlift_graph(
             name,
             attr_kind=_AttrKind.BUFFER,
         )
-
-    # Set missing metadata similar to torch.export._trace.set_missing_meta_vals
-    for node in gm.graph.nodes:
-        if node.op == "get_attr":
-            val = getattr(gm, node.target, None)
-            if isinstance(val, torch.Tensor) and "val" not in node.meta:
-                node.meta["val"] = fake_mode.from_tensor(val, static_shapes=True)
 
     placeholder_nodes = gm.graph.find_nodes(op="placeholder")
     lifted_inputs: list[Optional[FQN]] = []
@@ -2142,7 +2132,7 @@ def compile_fx(
                     trace_joint=False,
                     decompositions=decompositions,
                 )
-            unlifted_gm = _unlift_graph(model_, gm, graph_signature, fake_mode)
+            unlifted_gm = _unlift_graph(model_, gm, graph_signature)
             if "dynamo_flat_name_to_original_fqn" in model_.meta:
                 unlifted_gm.meta["dynamo_flat_name_to_original_fqn"] = model_.meta[
                     "dynamo_flat_name_to_original_fqn"
