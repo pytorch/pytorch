@@ -182,13 +182,13 @@ class TestStatelessFunctionalAPI(TestCase):
         rm = torch.zeros(10)
         parameters = {'running_mean': rm}
         prev_rm = module.running_mean.clone()
-        res = functional_call(module, parameters, x)
+        functional_call(module, parameters, x)
         cur_rm = module.running_mean
         self.assertEqual(cur_rm, prev_rm)
         self.assertEqual(rm, torch.full((10,), 12.8))
         # Now run functional without reparametrization and check that the module has
         # been updated
-        res = functional_call(module, {}, x)
+        functional_call(module, {}, x)
         self.assertEqual(module.running_mean, torch.full((10,), 12.8))
 
     @parametrize("functional_call", [
@@ -272,8 +272,6 @@ class TestStatelessFunctionalAPI(TestCase):
     def test_reparametrize_some_weights(self, functional_call):
         module = MockModule()
         weight = torch.tensor([[2.0]])
-        bias = torch.tensor([5.0])
-        buffer = torch.tensor([3.0])
         extra = torch.tensor([1.0])
 
         parameters = {'l1.weight': weight}

@@ -9,7 +9,7 @@ from typing_extensions import deprecated
 
 import torch
 import torch.distributed as dist
-from torch.distributed._state_dict_utils import _offload_state_dict_to_cpu
+from torch.distributed._state_dict_utils import _copy_state_dict, _create_cpu_state_dict
 from torch.distributed.checkpoint._storage_utils import _storage_setup
 from torch.distributed.checkpoint.default_planner import DefaultSavePlanner
 from torch.distributed.checkpoint.logger import _dcp_method_logger
@@ -63,6 +63,7 @@ def save(
     storage_writer: Optional[StorageWriter] = None,
     planner: Optional[SavePlanner] = None,
     process_group: Optional[dist.ProcessGroup] = None,
+    no_dist: bool = False,
 ) -> Metadata:
     """
     Save a distributed model in SPMD style.
@@ -112,6 +113,10 @@ def save(
         process_group (Optional[ProcessGroup]):
             ProcessGroup to be used for cross-rank synchronization.
             (Default: ``None``)
+        no_dist (bool):
+            If ``True``, this function will assume the intent is to load
+            a checkpoint without using cross-rank synchronization.
+            (Default: ``False``)
 
     Returns:
         Metadata: Metadata object for the saved checkpoint.
@@ -138,10 +143,10 @@ def save(
     """
     torch._C._log_api_usage_once("torch.distributed.checkpoint.save")
 
-    no_dist = not (dist.is_available() and dist.is_initialized())
+    no_dist = no_dist or (not dist.is_available()) or (not dist.is_initialized())
     if no_dist:
         warnings.warn(
-            "torch.distributed is unavailable or uninitialized, assuming the intent is to save in a single process."
+            "torch.distributed is disabled, unavailable or uninitialized, assuming the intent is to save in a single process."
         )
 
     with _profile():
@@ -228,7 +233,8 @@ def async_save(
     if isinstance(storage_writer, AsyncStager):
         staged_state_dict = storage_writer.stage(state_dict)
     else:  # provides bwc for storage_writers not implementing AsyncStager
-        staged_state_dict = _offload_state_dict_to_cpu(state_dict, type_check=False)
+        staged_state_dict = _create_cpu_state_dict(state_dict)
+        _copy_state_dict(state_dict, staged_state_dict, type_check=False)
 
     executor = ThreadPoolExecutor(max_workers=1)
     f: Future = executor.submit(

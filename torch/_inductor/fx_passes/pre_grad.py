@@ -2,7 +2,8 @@
 import copy
 import itertools
 import logging
-from typing import Dict, Optional, Sequence
+from collections.abc import Sequence
+from typing import Optional
 
 import torch
 import torch.nn as nn
@@ -417,7 +418,7 @@ def fuse_conv_bn(gm: torch.fx.GraphModule, inplace=False) -> torch.fx.GraphModul
         def is_fusion_enabled(self):
             return self.fusion_enabled
 
-    conv_bn_to_fuse: Dict[int, ConvBNFusion] = {}
+    conv_bn_to_fuse: dict[int, ConvBNFusion] = {}
     for pattern in modules_patterns:
         conv_bn_to_fuse.clear()
         for node in gm.graph.nodes:

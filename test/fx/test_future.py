@@ -2,8 +2,6 @@
 
 from __future__ import annotations  # type: ignore[attr-defined]
 
-import typing
-
 import torch
 from torch.fx import symbolic_trace
 
@@ -27,13 +25,13 @@ class M2(torch.nn.Module):
 
 # Non-torch annotation with no internal forward references
 class M3(torch.nn.Module):
-    def forward(self, x: typing.List[torch.Tensor], a: A) -> torch.Tensor:
+    def forward(self, x: list[torch.Tensor], a: A) -> torch.Tensor:
         return a(x[0])
 
 
 # Non-torch annotation with internal forward references
 class M4(torch.nn.Module):
-    def forward(self, x: typing.List[torch.Tensor], a: A) -> torch.Tensor:
+    def forward(self, x: list[torch.Tensor], a: A) -> torch.Tensor:
         return a(x[0])
 
 
