@@ -6,6 +6,8 @@ from unittest.mock import patch
 
 os.environ["ENV_TRUE"] = "1"
 os.environ["ENV_FALSE"] = "0"
+os.environ["ENV_STR"] = "1234"
+os.environ["ENV_STR_EMPTY"] = ""
 
 from typing import Optional
 
@@ -15,7 +17,7 @@ from torch.testing._internal import (
     fake_config_module3 as config3,
 )
 from torch.testing._internal.common_utils import run_tests, TestCase
-from torch.utils._config_module import _UNSET_SENTINEL, Config
+from torch.utils._config_module import _ConfigEntry, _UNSET_SENTINEL, Config
 
 
 class TestConfigModule(TestCase):
@@ -100,6 +102,16 @@ class TestConfigModule(TestCase):
         config.e_env_force = False
         self.assertTrue(config.e_env_force)
 
+    def test_env_name_string_semantics(self):
+        self.assertEqual(config.e_env_default_str, "1234")
+        self.assertEqual(config.e_env_default_str_empty, "")
+        config.e_env_default_str = "override"
+        self.assertEqual(config.e_env_default_str, "override")
+
+    def test_multi_env(self):
+        self.assertTrue(config2.e_env_default_multi)
+        self.assertTrue(config2.e_env_force_multi)
+
     def test_save_config(self):
         p = config.save_config()
         self.assertDictEqual(
@@ -125,6 +137,8 @@ class TestConfigModule(TestCase):
                 "e_jk_false": False,
                 "e_env_default": True,
                 "e_env_default_FALSE": False,
+                "e_env_default_str": "1234",
+                "e_env_default_str_empty": "",
                 "e_env_force": True,
                 "e_optional": True,
             },
@@ -157,6 +171,8 @@ class TestConfigModule(TestCase):
                 "e_jk_false": False,
                 "e_env_default": True,
                 "e_env_default_FALSE": False,
+                "e_env_default_str": "1234",
+                "e_env_default_str_empty": "",
                 "e_env_force": True,
                 "e_optional": True,
             },
@@ -176,8 +192,9 @@ class TestConfigModule(TestCase):
             """torch.testing._internal.fake_config_module.e_bool = False
 torch.testing._internal.fake_config_module.e_env_default = True
 torch.testing._internal.fake_config_module.e_env_default_FALSE = False
-torch.testing._internal.fake_config_module.e_env_force = True
-torch.testing._internal.fake_config_module._save_config_ignore = ['e_ignored']""",
+torch.testing._internal.fake_config_module.e_env_default_str = '1234'
+torch.testing._internal.fake_config_module.e_env_default_str_empty = ''
+torch.testing._internal.fake_config_module.e_env_force = True""",
         )
 
     def test_codegen_config_function(self):
@@ -198,7 +215,7 @@ torch.testing._internal.fake_config_module3.e_func = _warnings.warn""",
         )
 
     def test_get_hash(self):
-        hash_value = b"\xf2C\xdbo\x99qq\x12\x11\xf7\xb4\xeewVpZ"
+        hash_value = b"\x87\xf7\xc6\x1di\x7f\x96-\x85\xdc\x04\xd5\xd0\xf6\x1c\x87"
         self.assertEqual(
             config.get_hash(),
             hash_value,
@@ -255,6 +272,8 @@ torch.testing._internal.fake_config_module3.e_func = _warnings.warn""",
                 "e_jk_false": False,
                 "e_env_default": True,
                 "e_env_default_FALSE": False,
+                "e_env_default_str": "1234",
+                "e_env_default_str_empty": "",
                 "e_env_force": True,
                 "e_optional": True,
             },
@@ -284,6 +303,8 @@ torch.testing._internal.fake_config_module3.e_func = _warnings.warn""",
                 "e_jk_false": False,
                 "e_env_default": True,
                 "e_env_default_FALSE": False,
+                "e_env_default_str": "1234",
+                "e_env_default_str_empty": "",
                 "e_env_force": True,
                 "e_optional": True,
             },
@@ -313,6 +334,8 @@ torch.testing._internal.fake_config_module3.e_func = _warnings.warn""",
                 "e_jk_false": False,
                 "e_env_default": True,
                 "e_env_default_FALSE": False,
+                "e_env_default_str": "1234",
+                "e_env_default_str_empty": "",
                 "e_env_force": True,
                 "e_optional": True,
             },
@@ -355,7 +378,7 @@ torch.testing._internal.fake_config_module3.e_func = _warnings.warn""",
             AssertionError,
             msg="AssertionError: justknobs only support booleans, thisisnotvalid is not a boolean",
         ):
-            Config(default="bad", justknob="fake_knob")
+            _ConfigEntry(Config(default="bad", justknob="fake_knob"))
 
     def test_alias(self):
         self.assertFalse(config2.e_aliasing_bool)
@@ -365,6 +388,24 @@ torch.testing._internal.fake_config_module3.e_func = _warnings.warn""",
             self.assertTrue(config.e_aliased_bool)
         with config.patch(e_aliased_bool=True):
             self.assertTrue(config2.e_aliasing_bool)
+
+    def test_reference_is_default(self):
+        t = config.e_dict
+        self.assertTrue(config._is_default("e_dict"))
+        t["a"] = "b"
+        self.assertFalse(config._is_default("e_dict"))
+
+    def test_invalid_config_int(self):
+        with self.assertRaises(AssertionError):
+            _ConfigEntry(
+                Config(default=2, env_name_default="FAKE_DISABLE", value_type=int)
+            )
+
+    def test_invalid_config_float(self):
+        with self.assertRaises(AssertionError):
+            _ConfigEntry(
+                Config(default=2, env_name_force="FAKE_DISABLE", value_type=float)
+            )
 
 
 if __name__ == "__main__":

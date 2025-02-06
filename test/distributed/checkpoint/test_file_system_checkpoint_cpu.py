@@ -2,7 +2,7 @@
 
 import sys
 import tempfile
-from typing import Any, Dict, IO
+from typing import Any, IO
 
 import torch
 import torch.distributed as dist
@@ -22,6 +22,7 @@ from torch.distributed.checkpoint import (
     save,
     save_state_dict,
 )
+from torch.distributed.checkpoint._extension import ZStandard
 from torch.distributed.checkpoint.stateful import Stateful
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
@@ -56,8 +57,8 @@ _THREAD_COUNTS = {1, 2}
 
 def assert_state_dict_equal(
     self: TestCase,
-    state_dict_1: Dict[str, torch.Tensor],
-    state_dict_2: Dict[str, torch.Tensor],
+    state_dict_1: dict[str, torch.Tensor],
+    state_dict_2: dict[str, torch.Tensor],
 ) -> bool:
     self.assertEqual(
         len(state_dict_1), len(state_dict_2), "state_dict must be the same size"
@@ -113,10 +114,10 @@ class BlobState:
     def __init__(self, value: IO[bytes]) -> Any:
         self.state = {"blob": value}
 
-    def state_dict(self) -> Dict[str, Any]:
+    def state_dict(self) -> dict[str, Any]:
         return self.state
 
-    def load_state_dict(self, state_dict: Dict[str, Any]) -> None:
+    def load_state_dict(self, state_dict: dict[str, Any]) -> None:
         self.state = state_dict
 
     def __eq__(self, other: object) -> bool:
@@ -183,6 +184,39 @@ class TestDistributedStateDictSaveLoadRot13(TestCase):
             fs_reader = FileSystemReader(
                 path=path, _extension_registry=get_test_extension_registry()
             )
+            load(
+                state_dict=state_dict_to_load_to,
+                storage_reader=fs_reader,
+            )
+
+            assert_state_dict_equal(self, state_dict_to_load_to, state_dict_to_save)
+
+
+class TestDistributedStateDictSaveLoadZStandard(TestCase):
+    @parametrize("thread_count", _THREAD_COUNTS)
+    def test_read_write_only_tensor(self, thread_count) -> None:
+        with tempfile.TemporaryDirectory() as path:
+            state_dict_to_save = MyTestModule().state_dict()
+            state_dict_to_save["test_blob"] = BlobState(b"SomeBlobForTesting")
+
+            fs_writer = FileSystemWriter(
+                path=path,
+                thread_count=thread_count,
+                _extensions=[ZStandard()],
+            )
+            save(
+                state_dict=state_dict_to_save,
+                storage_writer=fs_writer,
+            )
+
+            state_dict_to_load_to = MyTestModule().state_dict()
+            state_dict_to_load_to["test_blob"] = BlobState(b"")
+
+            with self.assertRaises(AssertionError):
+                assert_state_dict_equal(self, state_dict_to_load_to, state_dict_to_save)
+
+            # Load from file without any resharding
+            fs_reader = FileSystemReader(path=path)
             load(
                 state_dict=state_dict_to_load_to,
                 storage_reader=fs_reader,
@@ -525,6 +559,7 @@ class TestDistributedReshardOnLoad(ShardedTensorTestBase):
 instantiate_parametrized_tests(TestDistributedStateDictSaveLoad)
 instantiate_parametrized_tests(TestDistributedStateDictSaveLoadRot13)
 instantiate_parametrized_tests(TestDistributedStateDictSaveLoadWithSharedTensor)
+instantiate_parametrized_tests(TestDistributedStateDictSaveLoadZStandard)
 instantiate_parametrized_tests(TestDistributedReshardOnLoad)
 
 if __name__ == "__main__":
