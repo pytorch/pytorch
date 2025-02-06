@@ -1543,8 +1543,6 @@ ProcessGroupNCCL::~ProcessGroupNCCL() {
     LOG(INFO) << logPrefix()
               << "ProcessGroupNCCL onCompletionHookThread thread joined.";
   }
-
-  delete memPool_;
 }
 
 bool ProcessGroupNCCL::dumpDebuggingInfo(bool includeStackTrace /*=true*/) {
@@ -5429,9 +5427,9 @@ at::Tensor ProcessGroupNCCL::allocateTensor(
     long size,
     at::TensorOptions options) {
   // Some checks
-  TORCH_CHECK(options.has_device(), "Tensor options must include device");
+  TORCH_CHECK_VALUE(options.has_device(), "Tensor options must include device");
   auto device = options.device();
-  TORCH_CHECK(
+  TORCH_CHECK_VALUE(
       device.is_cuda(),
       "NCCL tensor allocator expects cuda type but got " + c10::str(device))
 
@@ -5444,14 +5442,14 @@ at::Tensor ProcessGroupNCCL::allocateTensor(
         reinterpret_cast<c10::cuda::CUDACachingAllocator::CUDAAllocator*>(
             getMemAllocator().get());
     // Pool is created
-    memPool_ = new c10::cuda::MemPool(allocator);
+    memPool_ = std::make_unique<c10::cuda::MemPool>(allocator);
     // Also need to ncclCommRegister it so that NCCL recognizes it
-    registerMemPool(memPool_);
+    registerMemPool(memPool_.get());
     LOG(INFO) << logPrefix() << "Created memory pool";
   }
 
   // Allocate tensor under this MemPool's context
-  auto ctx = c10::cuda::MemPoolContext(memPool_);
+  auto ctx = c10::cuda::MemPoolContext(memPool_.get());
   c10::cuda::CUDACachingAllocator::beginAllocateToPool(
       memPool_->device(), memPool_->id(), [](cudaStream_t) { return true; });
   at::Tensor tensor = at::empty({size}, options);

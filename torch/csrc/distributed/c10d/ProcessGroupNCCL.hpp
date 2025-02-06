@@ -1303,7 +1303,7 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   std::optional<bool> useNonblocking_{std::nullopt};
 
   // Communication-optimized memory pool associated with this PG
-  c10::cuda::MemPool* memPool_ = nullptr;
+  std::unique_ptr<c10::cuda::MemPool> memPool_ = nullptr;
 };
 
 // Dumps the NCCL comm traces and additional information about the Process

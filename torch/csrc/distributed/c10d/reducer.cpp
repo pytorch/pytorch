@@ -1157,7 +1157,6 @@ void Reducer::initialize_buckets(
         offset += length;
       }
 
-      // Allocate the bucket's flattened `gradients` tensor.
       // Make gradient type in the reduced precision if mixed precision is
       // enabled. This ensures that the type is correct when e.g. rebuilding
       // buckets.
@@ -1165,17 +1164,28 @@ void Reducer::initialize_buckets(
         options = options.dtype(mixed_precision_param_dtype_);
       }
 
+      // Allocate the bucket's flattened `gradients` tensor.
       auto bucketSize = static_cast<long>(offset);
-      auto backend = process_group_->getDefaultBackend();
-      if (backend->supportsTensorAlloc()) {
+      // Check if we can use comm-optimized memory pool to allocate tensor
+      c10::intrusive_ptr<Backend> backend = nullptr;
+      try {
+        backend = process_group_->getDefaultBackend();
+      } catch (...) {
+        // Sometimes the backend type can be `UNDEFINED` rather than `NCCL` or
+        // `GLOO`. In this case, we just fall back to the regular way of
+        // creating tensor
+        LOG(INFO)
+            << "Reducer: default comm backend not found, skipping bucket memory optimization";
+      }
+      if (backend != nullptr && backend->supportsTensorAlloc()) {
         // Comm-optimized memory pool is available, use it to allocate tensor
         LOG(INFO)
-            << "Reducer: found communication-optimized memory allocator, using it to create bucket";
+            << "Reducer: found comm-optimized memory allocator, using it to create bucket";
         bucket.gradients = backend->allocateTensor(bucketSize, options);
       } else {
         // Plain creation of tensor
         LOG(INFO)
-            << "Reducer: communication-optimized memory allocator not found, using regular one";
+            << "Reducer: comm-optimized memory allocator not found, using regular one";
         bucket.gradients = at::empty({bucketSize}, options);
       }
 
