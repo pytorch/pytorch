@@ -928,10 +928,10 @@ def _compile(
                 )
             elif one_graph:
                 raise FailOnRecompileLimitHit(
-                    f"{limit_type} reached with fullgraph=True. Please investigate "
-                    "the recompilations using TORCH_LOGS=recompiles. If the recompilations "
-                    "are expected, please increase the torch._dynamo.config.cache_size_limit "
-                    "to the expected value."
+                    f"{limit_type} reached with one_graph=True. Excessive recompilations can degrade "
+                    "performance due to the compilation overhead of each recompilation. To monitor "
+                    "recompilations, enable TORCH_LOGS=recompiles. If recompilations are expected, consider "
+                    "increasing torch._dynamo.config.cache_size_limit to an appropriate value."
                 )
             elif config.skip_code_recursive_on_recompile_limit_hit and justknobs_check(
                 "pytorch/compiler:skip_code_recursive_on_recompile_limit_hit"
