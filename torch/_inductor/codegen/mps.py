@@ -231,6 +231,10 @@ class MetalOverrides(OpOverrides):
         return f"metal::precise::sin({x})"
 
     @staticmethod
+    def sinc(x: CSEVariable) -> str:
+        return f"c10::metal::sinc({x})"
+
+    @staticmethod
     def cos(x: CSEVariable) -> str:
         return f"metal::precise::cos({x})"
 
@@ -445,7 +449,9 @@ class MetalKernel(SIMDKernel):
             )
         if reduction_type in ["max", "min", "argmax", "argmin"]:
             acc_buf = self._new_accvar(src_dtype, reduction_dim.numel)
-            self.body.splice(f"{acc_buf}[{reduction_dim.name}] = {value};")
+            self.body.splice(
+                f"{acc_buf}[{reduction_dim.name}] = static_cast<{DTYPE_TO_METAL[src_dtype]}>({value});"
+            )
             return self.cse.generate(
                 self.body,
                 f"c10::metal::threadgroup_{reduction_type}({acc_buf}, {reduction_dim.numel})",
