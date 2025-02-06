@@ -4,7 +4,6 @@ import os
 import shutil
 import sys
 import tempfile
-from typing import Dict
 
 import torch
 import torch.distributed as dist
@@ -54,8 +53,8 @@ if TEST_WITH_DEV_DBG_ASAN:
 
 def assert_state_dict_equal(
     self: TestCase,
-    state_dict_1: Dict[str, torch.Tensor],
-    state_dict_2: Dict[str, torch.Tensor],
+    state_dict_1: dict[str, torch.Tensor],
+    state_dict_2: dict[str, torch.Tensor],
 ) -> bool:
     self.assertEqual(
         len(state_dict_1), len(state_dict_2), "state_dict must be the same size"

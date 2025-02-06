@@ -3,7 +3,7 @@ import functools
 import logging
 import operator
 import sys
-from typing import Any, Dict, Optional, Set, TYPE_CHECKING
+from typing import Any, Optional, TYPE_CHECKING
 
 
 # Import sympy and ShapeEnv during TYPE_CHECKING since importing sympy is slow
@@ -123,7 +123,7 @@ def insert_deferred_runtime_asserts(
     )
 
     # We are going to mutate the dict
-    expr_to_proxy: Dict[sympy.Expr, fx.Proxy] = {}
+    expr_to_proxy: dict[sympy.Expr, fx.Proxy] = {}
     placeholders = set()
     first_non_placeholder = None
     for node in graph.nodes:
@@ -163,7 +163,7 @@ def insert_deferred_runtime_asserts(
     def _node_metadata_hook(
         node: torch.fx.Node,
         stack_trace: Optional[str] = None,
-        nn_module_stack: Optional[Dict[str, Any]] = None,
+        nn_module_stack: Optional[dict[str, Any]] = None,
     ) -> None:
         fake_args = pytree.tree_map(
             lambda arg: (
@@ -189,8 +189,8 @@ def insert_deferred_runtime_asserts(
             node.meta["nn_module_stack"] = nn_module_stack
 
     # Track asserts/checks we've added
-    added_asserts: Set[sympy.Expr] = set()
-    constrained_unbacked_symbols: Set[sympy.Symbol] = set()
+    added_asserts: set[sympy.Expr] = set()
+    constrained_unbacked_symbols: set[sympy.Symbol] = set()
 
     Analysis = PythonReferenceAnalysis if export else OptimizedPythonReferenceAnalysis
 

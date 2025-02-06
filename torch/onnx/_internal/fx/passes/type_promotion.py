@@ -6,7 +6,7 @@ import abc
 import dataclasses
 import inspect
 import logging
-from typing import Any, Callable, Mapping, Sequence, TYPE_CHECKING
+from typing import Any, Callable, TYPE_CHECKING
 
 import torch
 import torch._dispatch.python
@@ -26,6 +26,7 @@ from torch.utils import _python_dispatch, _pytree
 
 
 if TYPE_CHECKING:
+    from collections.abc import Mapping, Sequence
     from types import ModuleType
 
     from torch._subclasses import fake_tensor

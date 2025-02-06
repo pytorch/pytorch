@@ -204,7 +204,9 @@ with torch.no_grad():
         ep
     )
 """
-        return self._run_full_test(run_code, None, expected_error, isolate=True)
+        return self._run_full_test(
+            run_code, "aot_inductor", expected_error, isolate=False
+        )
 
     # Test that compile errors in AOTInductor can be repro'd (both CPU and CUDA)
     def _test_aoti_unflattened_inputs(self, device, expected_error):
@@ -241,89 +243,74 @@ with torch.no_grad():
     )
     torch._inductor.aoti_compile_and_package(ep)
 """
-        return self._run_full_test(run_code, None, expected_error, isolate=True)
+        return self._run_full_test(
+            run_code, "aot_inductor", expected_error, isolate=False
+        )
+
+    def _aoti_check_relu_repro(self, res):
+        assert res is not None
+        ep_file_path = res.get_exported_program_path()
+        assert ep_file_path is not None
+        gm = export_load(ep_file_path).module()
+        self.assertExpectedInline(
+            str(gm.code).strip(),
+            """\
+def forward(self, linear):
+    linear, = fx_pytree.tree_flatten_spec(([linear], {}), self._in_spec)
+    relu = torch.ops.aten.relu.default(linear);  linear = None
+    return pytree.tree_unflatten((relu,), self._out_spec)""",
+        )
 
     @unittest.skipIf(IS_JETSON, "Fails on Jetson")
     @inductor_config.patch(
-        {
-            "cpp.inject_relu_bug_TESTING_ONLY": "compile_error",
-            "aot_inductor.dump_aoti_minifier": True,
-        }
+        "cpp.inject_relu_bug_TESTING_ONLY",
+        "compile_error",
     )
     def test_aoti_cpu_compile_error(self):
         res = self._test_aoti("cpu", "CppCompileError")
-        ep_file_path = res.get_exported_program_path()
-        gm = export_load(ep_file_path).module()
-        self.assertExpectedInline(
-            str(gm.code).strip(),
-            """\
-def forward(self, linear):
-    linear, = fx_pytree.tree_flatten_spec(([linear], {}), self._in_spec)
-    relu = torch.ops.aten.relu.default(linear);  linear = None
-    return pytree.tree_unflatten((relu,), self._out_spec)""",
-        )
+        self._aoti_check_relu_repro(res)
 
     @unittest.skipIf(IS_JETSON, "Fails on Jetson")
     @inductor_config.patch(
-        {
-            "cpp.inject_relu_bug_TESTING_ONLY": "compile_error",
-            "aot_inductor.dump_aoti_minifier": True,
-        }
+        "cpp.inject_relu_bug_TESTING_ONLY",
+        "compile_error",
     )
     def test_aoti_cpu_compile_error_unflatten(self):
         res = self._test_aoti_unflattened_inputs("cpu", "CppCompileError")
-        ep_file_path = res.get_exported_program_path()
-        gm = export_load(ep_file_path).module()
-        self.assertExpectedInline(
-            str(gm.code).strip(),
-            """\
-def forward(self, linear):
-    linear, = fx_pytree.tree_flatten_spec(([linear], {}), self._in_spec)
-    relu = torch.ops.aten.relu.default(linear);  linear = None
-    return pytree.tree_unflatten((relu,), self._out_spec)""",
-        )
+        self._aoti_check_relu_repro(res)
 
     @requires_gpu
     @skipIfXpu(msg="AOTI for XPU not enabled yet")
     @inductor_config.patch(
-        {
-            "triton.inject_relu_bug_TESTING_ONLY": "compile_error",
-            "aot_inductor.dump_aoti_minifier": True,
-        }
+        "triton.inject_relu_bug_TESTING_ONLY",
+        "compile_error",
     )
     def test_aoti_gpu_compile_error(self):
         res = self._test_aoti(GPU_TYPE, "SyntaxError")
-        ep_file_path = res.get_exported_program_path()
-        gm = export_load(ep_file_path).module()
-        self.assertExpectedInline(
-            str(gm.code).strip(),
-            """\
-def forward(self, linear):
-    linear, = fx_pytree.tree_flatten_spec(([linear], {}), self._in_spec)
-    relu = torch.ops.aten.relu.default(linear);  linear = None
-    return pytree.tree_unflatten((relu,), self._out_spec)""",
-        )
+        self._aoti_check_relu_repro(res)
 
     @requires_gpu
     @skipIfXpu(msg="AOTI for XPU not enabled yet")
     @inductor_config.patch(
-        {
-            "triton.inject_relu_bug_TESTING_ONLY": "compile_error",
-            "aot_inductor.dump_aoti_minifier": True,
-        }
+        "triton.inject_relu_bug_TESTING_ONLY",
+        "compile_error",
     )
     def test_aoti_gpu_compile_error_unflatten(self):
         res = self._test_aoti_unflattened_inputs(GPU_TYPE, "SyntaxError")
-        ep_file_path = res.get_exported_program_path()
-        gm = export_load(ep_file_path).module()
-        self.assertExpectedInline(
-            str(gm.code).strip(),
-            """\
-def forward(self, linear):
-    linear, = fx_pytree.tree_flatten_spec(([linear], {}), self._in_spec)
-    relu = torch.ops.aten.relu.default(linear);  linear = None
-    return pytree.tree_unflatten((relu,), self._out_spec)""",
-        )
+        self._aoti_check_relu_repro(res)
+
+    @unittest.skipIf(IS_JETSON, "Fails on Jetson")
+    @inductor_config.patch("cpp.inject_relu_bug_TESTING_ONLY", "accuracy")
+    def test_aoti_cpu_accuracy_error(self):
+        res = self._test_aoti("cpu", "AccuracyError")
+        self._aoti_check_relu_repro(res)
+
+    @requires_gpu
+    @skipIfXpu(msg="AOTI for XPU not enabled yet")
+    @inductor_config.patch("triton.inject_relu_bug_TESTING_ONLY", "accuracy")
+    def test_aoti_gpu_accuracy_error(self):
+        res = self._test_aoti(GPU_TYPE, "AccuracyError")
+        self._aoti_check_relu_repro(res)
 
 
 if __name__ == "__main__":
