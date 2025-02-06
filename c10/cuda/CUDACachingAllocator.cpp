@@ -30,6 +30,7 @@
 #include <deque>
 #include <memory>
 #include <mutex>
+#include <new>
 #include <regex>
 #include <set>
 #include <utility>
@@ -3298,6 +3299,12 @@ static void uncached_delete(void* ptr) {
 
 static void local_raw_delete(void* ptr);
 
+#ifdef __cpp_lib_hardware_interference_size
+using std::hardware_destructive_interference_size;
+#else
+static constexpr std::size_t hardware_destructive_interference_size = 64;
+#endif
+
 class NativeCachingAllocator : public CUDAAllocator {
  private:
   // allows this allocator to be turned on and off programmatically
@@ -3306,8 +3313,7 @@ class NativeCachingAllocator : public CUDAAllocator {
   // Shard allocation region to have independent mutexes to reduce contention.
   static constexpr size_t kNumMutexShard = 67;
 
-  // TODO: use std::hardware_destructive_interference_size once available
-  struct alignas(64) AlignedMutex {
+  struct alignas(hardware_destructive_interference_size) AlignedMutex {
     std::mutex m;
   };
 
