@@ -3942,10 +3942,7 @@ class TritonScheduling(SIMDScheduling):
 
             _basename, _, kernel_path = get_path(code_hash(src_code.strip()), "py")
             compile_wrapper = IndentedBuffer()
-            # TODO: Refactor this code so that instead of calling async_compile.triton after the entire code has been generated, we
-            # kick off the worker process here to start compiling the code, and save the Future object to await later.
 
-            # If it's a TritonBundler cache hit, we can avoid that altogether and return the compiled kernel directly.
             if async_compile.use_process_pool():
                 # The process pool is warm, we can shell out to workers right away. This
                 # allows us to save the result in async_compile.CompiledTritonKernels,
