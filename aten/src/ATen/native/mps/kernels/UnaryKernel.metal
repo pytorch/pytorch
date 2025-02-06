@@ -114,7 +114,7 @@ kernel void sinc_kernel(
     device T0* output [[buffer(0)]],
     constant T1* input [[buffer(1)]],
     uint index [[thread_position_in_grid]]) {
-  output[index] = T0(sinc(input[index]));
+  output[index] = T0(sinc(static_cast<float>(input[index])));
 }
 
 #define INSTANTIATE_SINC_KERNEL(DTYPE0, DTYPE1)                                \

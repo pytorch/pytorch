@@ -847,7 +847,7 @@ def mps_ops_modifier(ops):
 
         # Operations not supported for integral types
         'special.zeta': [torch.bool, torch.int16, torch.int32, torch.int64, torch.uint8, torch.int8],
-        'sinc': [torch.bool, torch.int16, torch.int32, torch.int64, torch.uint8, torch.int8, torch.bfloat16, torch.float16, torch.complex64],
+        'sinc': [torch.bool, torch.int16, torch.int32, torch.int64, torch.uint8, torch.int8, torch.complex64],
 
         # GEMM on MPS is not supported for integral types
         'nn.functional.linear': [torch.int16, torch.int32, torch.int64, torch.uint8, torch.int8],
