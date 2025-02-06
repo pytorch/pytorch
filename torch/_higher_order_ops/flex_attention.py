@@ -1146,17 +1146,47 @@ def flex_attention_backward_fake_tensor_mode(
     torch.Tensor, torch.Tensor, torch.Tensor, tuple[Optional[torch.Tensor], ...]
 ]:
     with mode:
-        grad_query = torch.empty_like(query)
-        grad_key = torch.empty_like(key)
-        grad_value = torch.empty_like(value)
+        Bq = query.size(0)
+        Bkv = key.size(0)
+        Hkv = key.size(1)
+        seq_len_kv = key.size(2)
+        qk_head_dim = key.size(3)
+
+        grad_query = torch.empty_strided(
+            query.size(), query.stride(), device=query.device, dtype=query.dtype
+        )
         grad_score_mod_captured = tuple(
             [
-                torch.empty_like(buffer)
+                buffer.new_empty(
+                    buffer.size(), dtype=buffer.dtype, device=buffer.device
+                )
                 if isinstance(buffer, torch.Tensor) and buffer.requires_grad
                 else None
                 for buffer in score_mod_other_buffers
             ]
         )
+
+        broadcasted_grad_key = torch.empty_strided(
+            (Bq, Hkv, seq_len_kv, qk_head_dim),
+            key.stride(),
+            device=key.device,
+            dtype=key.dtype,
+        )
+
+        broadcasted_grad_value = torch.empty_strided(
+            (Bq, *value.size()[1:]),
+            value.stride(),
+            device=value.device,
+            dtype=value.dtype,
+        )
+
+        if Bq > 1 and Bkv == 1:
+            grad_key = torch.sum(broadcasted_grad_key, dim=0, keepdim=True)
+            grad_value = torch.sum(broadcasted_grad_value, dim=0, keepdim=True)
+        else:
+            grad_key = broadcasted_grad_key
+            grad_value = broadcasted_grad_value
+
         return grad_query, grad_key, grad_value, grad_score_mod_captured
 
 
