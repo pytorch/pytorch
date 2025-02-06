@@ -2471,7 +2471,7 @@ class GraphModule(torch.nn.Module):
         clone: "f64[s0, s1]" = torch.ops.aten.clone.default(primals_4);  primals_4 = None
 
         mul: "f64[s0, s1]" = torch.ops.aten.mul.Tensor(clone, primals_1);  clone = None
-        return (mul, primals_5, primals_6, primals_7, primals_8, primals_10, primals_10, primals_1, primals_8, primals_10)
+        return (mul, primals_5, primals_6, primals_7, primals_8, primals_10, primals_10, primals_5, primals_1, primals_8, primals_10)
 """,  # noqa: B950
         )
 
@@ -2479,9 +2479,23 @@ class GraphModule(torch.nn.Module):
             normalize_gm(bw[0].print_readable(print_output=False)),
             """\
 class GraphModule(torch.nn.Module):
-    def forward(self, primals_1: "Sym(s2)", primals_8: "Sym(s2)", primals_10: "Sym(s1)", tangents_1: "f64[s0, s1]", tangents_2: "i64[s2 + 1]", tangents_3: "f32[s5, 0]", tangents_4: "f32[s6, 0]"):
+    def forward(self, primals_1: "Sym(s2)", primals_8: "Sym(s2)", primals_10: "Sym(s1)", primals_5: "i64[s2 + 1]", tangents_1: "f64[s0, s1]", tangents_2: "i64[s2 + 1]", tangents_3: "f32[s5, 0]", tangents_4: "f32[s6, 0]", tangents_token: "f32[0]"):
+        with_effects = torch.ops.higher_order.with_effects(tangents_token, torch.ops.nested._assert_equal.default, primals_5, tangents_2, 'invalid gradient at index 0 - got [s2, s3, s1] but expected shape compatible with [s2, s3, s1]');  tangents_token = None
+        getitem: "f32[0]" = with_effects[0];  with_effects = None
+        with_effects_1 = torch.ops.higher_order.with_effects(getitem, torch.ops.nested._assert_equal.default, tangents_2, primals_5, 'sum_to_size(): sizes unsupported');  getitem = None
+        getitem_2: "f32[0]" = with_effects_1[0];  with_effects_1 = None
+
         mul_1: "f64[s0, s1]" = torch.ops.aten.mul.Tensor(tangents_1, primals_1);  tangents_1 = primals_1 = None
-        return (None, None, None, mul_1, tangents_2, tangents_3, tangents_4, primals_8, primals_10, primals_10)
+        with_effects_2 = torch.ops.higher_order.with_effects(getitem_2, torch.ops.nested._assert_equal.default, primals_5, tangents_2, 'invalid gradient at index 0 - got [s2, s3, s1] but expected shape compatible with [s2, s3, s1]');  getitem_2 = None
+        getitem_4: "f32[0]" = with_effects_2[0];  with_effects_2 = None
+        with_effects_3 = torch.ops.higher_order.with_effects(getitem_4, torch.ops.nested._assert_equal.default, tangents_2, primals_5, 'sum_to_size(): sizes unsupported');  getitem_4 = None
+        getitem_6: "f32[0]" = with_effects_3[0];  with_effects_3 = None
+
+        with_effects_4 = torch.ops.higher_order.with_effects(getitem_6, torch.ops.nested._assert_equal.default, primals_5, tangents_2, 'invalid gradient at index 0 - got [s2, s3, s1] but expected shape compatible with [s2, s3, s1]');  getitem_6 = None
+        getitem_8: "f32[0]" = with_effects_4[0];  with_effects_4 = None
+        with_effects_5 = torch.ops.higher_order.with_effects(getitem_8, torch.ops.nested._assert_equal.default, tangents_2, primals_5, 'sum_to_size(): sizes unsupported');  getitem_8 = primals_5 = None
+        getitem_10: "f32[0]" = with_effects_5[0];  with_effects_5 = None
+        return (None, None, None, mul_1, tangents_2, tangents_3, tangents_4, primals_8, primals_10, primals_10, getitem_10)
 """,  # noqa: B950
         )
 
@@ -2505,7 +2519,7 @@ class GraphModule(torch.nn.Module):
 
         cat: "f64[s0, 2*s1]" = torch.ops.aten.cat.default([clone, clone], 1);  clone = None
         add_2: "Sym(2*s1)" = primals_10 + primals_10
-        return (cat, primals_5, primals_6, primals_7, primals_8, add_2, add_2, primals_8, primals_10, add_2)
+        return (cat, primals_5, primals_6, primals_7, primals_8, add_2, add_2, primals_5, primals_8, primals_10, add_2)
 """,  # noqa: B950
         )
 
@@ -2513,12 +2527,32 @@ class GraphModule(torch.nn.Module):
             normalize_gm(bw[0].print_readable(print_output=False)),
             """\
 class GraphModule(torch.nn.Module):
-    def forward(self, primals_8: "Sym(s2)", primals_10: "Sym(s1)", add_2: "Sym(2*s1)", tangents_1: "f64[s0, 2*s1]", tangents_2: "i64[s2 + 1]", tangents_3: "f32[s5, 0]", tangents_4: "f32[s6, 0]"):
+    def forward(self, primals_8: "Sym(s2)", primals_10: "Sym(s1)", add_2: "Sym(2*s1)", primals_5: "i64[s2 + 1]", tangents_1: "f64[s0, 2*s1]", tangents_2: "i64[s2 + 1]", tangents_3: "f32[s5, 0]", tangents_4: "f32[s6, 0]", tangents_token: "f32[0]"):
+        with_effects = torch.ops.higher_order.with_effects(tangents_token, torch.ops.nested._assert_equal.default, primals_5, tangents_2, 'invalid gradient at index 0 - got [s2, s3, 2*s1] but expected shape compatible with [s2, s3, 2*s1]');  tangents_token = None
+        getitem: "f32[0]" = with_effects[0];  with_effects = None
+        with_effects_1 = torch.ops.higher_order.with_effects(getitem, torch.ops.nested._assert_equal.default, tangents_2, primals_5, 'sum_to_size(): sizes unsupported');  getitem = None
+        getitem_2: "f32[0]" = with_effects_1[0];  with_effects_1 = None
+
         slice_1: "f64[s0, s1]" = torch.ops.aten.slice.Tensor(tangents_1, 1, 0, primals_10)
         slice_2: "f64[s0, s1]" = torch.ops.aten.slice.Tensor(tangents_1, 1, primals_10, add_2);  tangents_1 = add_2 = None
+        with_effects_2 = torch.ops.higher_order.with_effects(getitem_2, torch.ops.nested._assert_equal.default, primals_5, tangents_2, 'invalid gradient at index 0 - got [s2, s3, s1] but expected shape compatible with [s2, s3, s1]');  getitem_2 = None
+        getitem_4: "f32[0]" = with_effects_2[0];  with_effects_2 = None
+        with_effects_3 = torch.ops.higher_order.with_effects(getitem_4, torch.ops.nested._assert_equal.default, tangents_2, primals_5, 'sum_to_size(): sizes unsupported');  getitem_4 = None
+        getitem_6: "f32[0]" = with_effects_3[0];  with_effects_3 = None
+        with_effects_4 = torch.ops.higher_order.with_effects(getitem_6, torch.ops.nested._assert_equal.default, primals_5, tangents_2, 'invalid gradient at index 1 - got [s2, s3, s1] but expected shape compatible with [s2, s3, s1]');  getitem_6 = None
+        getitem_8: "f32[0]" = with_effects_4[0];  with_effects_4 = None
+        with_effects_5 = torch.ops.higher_order.with_effects(getitem_8, torch.ops.nested._assert_equal.default, tangents_2, primals_5, 'sum_to_size(): sizes unsupported');  getitem_8 = None
+        getitem_10: "f32[0]" = with_effects_5[0];  with_effects_5 = None
 
+        with_effects_6 = torch.ops.higher_order.with_effects(getitem_10, torch.ops.nested._assert_equal.default, tangents_2, tangents_2, 'cannot call binary pointwise function add.Tensor with inputs of shapes (s2, s3, s1) and (s2, s3, s1)');  getitem_10 = None
+        getitem_12: "f32[0]" = with_effects_6[0];  with_effects_6 = None
         add_4: "f64[s0, s1]" = torch.ops.aten.add.Tensor(slice_1, slice_2);  slice_1 = slice_2 = None
-        return (None, None, None, add_4, tangents_2, tangents_3, tangents_4, primals_8, primals_10, primals_10)
+
+        with_effects_7 = torch.ops.higher_order.with_effects(getitem_12, torch.ops.nested._assert_equal.default, primals_5, tangents_2, 'invalid gradient at index 0 - got [s2, s3, s1] but expected shape compatible with [s2, s3, s1]');  getitem_12 = None
+        getitem_14: "f32[0]" = with_effects_7[0];  with_effects_7 = None
+        with_effects_8 = torch.ops.higher_order.with_effects(getitem_14, torch.ops.nested._assert_equal.default, tangents_2, primals_5, 'sum_to_size(): sizes unsupported');  getitem_14 = primals_5 = None
+        getitem_16: "f32[0]" = with_effects_8[0];  with_effects_8 = None
+        return (None, None, None, add_4, tangents_2, tangents_3, tangents_4, primals_8, primals_10, primals_10, getitem_16)
 """,  # noqa: B950
         )
 
@@ -2628,6 +2662,33 @@ class TestNestedTensor(torch._dynamo.test_case.TestCase, NestedTensorTestCase):
         nt2, _ = self._get_jagged_tensor(((2, 3, 4), 5), offsets)
         nt3, _ = self._get_jagged_tensor(((2, 3, 4), 5), None)
         self._check_recompiles(binary, (nt1, nt2), (nt1, nt3), True)
+
+    def test_binary_recompiles_2(self):
+        def binary(nt1, nt2):
+            return nt1 + nt2
+
+        # Binary recompiles because Dynamo's tensor aliasing guards
+        nt1, offsets = self._get_jagged_tensor(((2, 3, 4), 5), None)
+        nt2, _ = self._get_jagged_tensor(((2, 3, 4), 5), offsets)
+        nt3, _ = self._get_jagged_tensor(((2, 3, 4), 5), None)
+        self._check_recompiles(binary, (nt1, nt2), (nt1, nt3), True)
+
+    def test_binary_assert_in_graph(self):
+        @torch.compile(backend="aot_eager")
+        def binary(nt1, nt2):
+            return nt1 * nt2
+
+        nt1, _ = self._get_jagged_tensor(((2, 3, 4), 5), None)
+        nt2, _ = self._get_jagged_tensor(((2, 3, 4), 5), None)
+        binary(nt1, nt2)
+
+        nt3, _ = self._get_jagged_tensor(((2, 3, 4), 5), None)
+        nt4, _ = self._get_jagged_tensor(((3, 2, 4), 5), None)
+        msg = "cannot call binary pointwise function mul.Tensor with inputs of shapes"
+        with unittest.mock.patch(
+            "torch._dynamo.config.error_on_recompile", True
+        ), self.assertRaisesRegex(RuntimeError, msg):
+            binary(nt3, nt4)
 
     def _validate_compile(self, fn, arg_fn):
         def _gen_grad_outputs(out_val):
@@ -3008,6 +3069,18 @@ class GraphModule(torch.nn.Module):
         values = torch.randn(10, 5).requires_grad_(True)
         self._validate_compile(fn, arg_fn=lambda: (values,))
 
+    def test_in_graph_construction_from_intermediate_6(self):
+        # This is a failure case similar to case 5 above except it happens naturally
+        def fn(values, lengths):
+            offsets = torch.cat([lengths.new_zeros(1), lengths.cumsum(0)])
+            nt = torch.nested.nested_tensor_from_jagged(values, offsets)
+            nt2 = torch.nested.nested_tensor_from_jagged(values, offsets.clone())
+            return (nt * nt2).sin()
+
+        values = torch.randn(9, 5, requires_grad=True)
+        lengths = torch.tensor([2, 4, 3])
+        self._validate_compile(fn, arg_fn=lambda: (values, lengths))
+
     #
     # Case 3: in-graph construction where offsets are both direct graph inputs
     #         and passed in as part of an NJT's offsets.
@@ -3106,8 +3179,6 @@ class GraphModule(torch.nn.Module):
     @requires_cuda
     @fresh_tensor_registry
     def test_different_devices(self):
-        from torch.utils._sympy.singleton_int import SingletonInt
-
         def get_njt(device):
             return torch.nested.nested_tensor(
                 [torch.randn(2, 5), torch.randn(3, 5), torch.randn(18, 5)],
@@ -3155,34 +3226,37 @@ class GraphModule(torch.nn.Module):
 
         fn(t_cpu_cleared, t_cuda)
 
-        singleton_int_0 = SingletonInt((frozenset(), frozenset({0})))
+        def get_str(d):
+            return "\n".join(f"{k}: {v}" for k, v in d.items())
 
-        expected_var_to_val = {
-            "s0": singleton_int_0,
-            "s1": 18,
-            "s2": 2,
-            "s3": 23,
-            "s4": singleton_int_0,
-            "s5": singleton_int_0,
-            "s6": 23,
-            "s7": 23,
-            "s8": singleton_int_0,
-        }
-        # We create extraneous symbols, but for we make sure to reuse symbols for
-        # the common case, e.g. raggedness/metadata preserving operations like pointwise.
-        expected_var_to_sources = {
-            "s0": "L['a']._base.size()[1]",
-            "s1": "L['a']._base.size()[1].node.nested_int_cache()._max_seqlen_tensor.size()[0]",
-            "s2": "L['a']._base.size()[1].node.nested_int_cache()._min_seqlen_tensor.size()[0]",
-            "s3": "L['a']._base._values.size()[0]",
-            "s4": "<ephemeral: intermediate_offsets_or_lengths>",
-            "s5": "L['a'].size()[1]",
-            "s6": "L['a']._values.size()[0]",
-            "s7": "L['b']._base.size()[0]",
-            "s8": "L['b'].size()[1]",
-        }
-        self.assertEqual(curr_var_to_val, expected_var_to_val)
-        self.assertEqual(curr_var_to_sources, expected_var_to_sources)
+        self.assertExpectedInline(
+            get_str(curr_var_to_val),
+            """\
+s0: SingletonInt((frozenset(), frozenset({0})))
+s1: 18
+s2: 2
+s3: 23
+s4: SingletonInt((frozenset(), frozenset({0})))
+s5: SingletonInt((frozenset(), frozenset({0})))
+s6: 23
+s7: 23
+s8: SingletonInt((frozenset(), frozenset({0})))""",
+        )
+
+        self.assertExpectedInline(
+            get_str(curr_var_to_sources),
+            """\
+s0: L['a']._base.size()[1]
+s1: L['a']._base.size()[1].node.nested_int_cache()._max_seqlen_tensor.size()[0]
+s2: L['a']._base.size()[1].node.nested_int_cache()._min_seqlen_tensor.size()[0]
+s3: L['a']._base._values.size()[0]
+s4: <ephemeral: intermediate_offsets_or_lengths>
+s5: L['a'].size()[1]
+s6: L['a']._values.size()[0]
+s7: L['b']._base.size()[0]
+s8: L['b'].size()[1]""",
+        )
+
         self.assertExpectedInline(
             "\n".join(guards),
             """\
