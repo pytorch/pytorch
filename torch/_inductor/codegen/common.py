@@ -947,6 +947,16 @@ class OpOverrides(BasicMathOps, OpDecompositions):
             f"{type(self).__name__}: inline_asm_elementwise only implemented for Triton backend"
         )
 
+    def output(self, x0: OpVarT) -> None:
+        raise AssertionError(
+            f"{type(self).__name__}: ops.output should not appear at codegen time"
+        )
+
+    def placeholder(self, index: int) -> OpVarT:
+        raise AssertionError(
+            f"{type(self).__name__}: ops.placeholder should not appear at codegen time"
+        )
+
     @staticmethod
     def _unimplemented(name: str) -> Callable[..., OpVarT]:
         def unimplemented(self: OpOverrides, *args: Any, **kwargs: Any) -> OpVarT:
@@ -2560,6 +2570,7 @@ class CSEProxy:
         )
 
 
-# Use mypy to check protocol implemented correctly
-def _typecheck_CSEProxy(h: CSEProxy) -> OpsHandler[CSEVariable]:
-    return h
+if TYPE_CHECKING:
+
+    class _typecheck_CSEProxy(CSEProxy, OpsHandler[CSEVariable]):
+        pass
