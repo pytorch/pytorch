@@ -40,10 +40,6 @@ def _arg_str(a: object) -> str:
     return str(a)
 
 
-# NB: This is not done as a parent class, because our ops handlers
-# implementations make heavy use of __getattr__ magic, and pre-existing
-# stubs for methods would interfere with this mechanism.
-#
 # See OpDecompositions for superclass that desugars operations like reciprocal/square.
 class OpsHandler(Generic[T]):
     """
