@@ -1,29 +1,25 @@
+# Owner(s): ["module: inductor"]
 """
 Test the FX IR backend.
 """
 
+import unittest
 from typing import Callable
 
 import torch
-import unittest
-
-from torch._inductor import config
 from torch._higher_order_ops.triton_kernel_wrap import triton_kernel_wrapper_mutation
-from torch._inductor.virtualized import V
-from torch._inductor.select_algorithm import extern_kernels
+from torch._inductor import config
+from torch._inductor.codegen.common import register_backend_for_device
 from torch._inductor.codegen.triton import TritonScheduling
-from torch._inductor.codegen.wrapper_fxir import WrapperFxCodegen, delete
+from torch._inductor.codegen.wrapper_fxir import delete, WrapperFxCodegen
+from torch._inductor.select_algorithm import extern_kernels
 from torch._inductor.test_case import TestCase as InductorTestCase
 from torch.testing._internal.inductor_utils import (
     GPU_TYPE,
+    HAS_GPU,
     requires_gpu,
+    TRITON_HAS_CPU,
 )
-
-from torch._inductor.codegen.common import (
-    register_backend_for_device,
-    get_wrapper_codegen_for_device,
-)
-
 
 
 @requires_gpu()
@@ -33,18 +29,20 @@ class FxirTestCase(InductorTestCase):
     def _count_ops(self, gm: torch.fx.GraphModule, target: Callable) -> int:
         return len(list(gm.graph.find_nodes(op="call_function", target=target)))
 
-    @config.patch(compile_threads=1) # Disable async compile
+    @config.patch(compile_threads=1)  # Disable async compile
     def _run_and_capture_graphs(self, opt, args) -> torch.fx.GraphModule:
-
         gms = []
+
         def generate(self, *args, **kwargs):
             nonlocal gms
             gms.append(self.gm)
             self._generate(*args, **kwargs)
 
-        with unittest.mock.patch.object(torch._inductor.codegen.wrapper_fxir.WrapperFxCodegen, "generate", generate):
+        with unittest.mock.patch.object(
+            torch._inductor.codegen.wrapper_fxir.WrapperFxCodegen, "generate", generate
+        ):
             try:
-                result = opt(*args)
+                opt(*args)
             except torch._inductor.exc.InductorError:
                 # Expect this exception, since the FX backend doesn't support Python codegen.
                 pass
@@ -92,6 +90,7 @@ class FxirTestCase(InductorTestCase):
         """
         Test a program that frees a buffer which is no longer in use.
         """
+
         def foo(x, y, z):
             w = x.sum() + y
             return z.sum() + w.sum()
@@ -107,6 +106,7 @@ class FxirTestCase(InductorTestCase):
         """
         Test a program that calls an extern kernel.
         """
+
         def foo(x, y):
             return x @ y + y.sum()
 
@@ -123,6 +123,7 @@ class FxirTestCase(InductorTestCase):
         """
 
         length = 8
+
         def foo(x):
             return x + torch.randn(1, device=self.device)
 
@@ -141,3 +142,9 @@ class FxirTestCase(InductorTestCase):
         num_fallback = self._count_ops(gm, torch.ops.aten.randint.low_out)
         self.assertEqual(num_fallback, 1)
 
+
+if __name__ == "__main__":
+    from torch._inductor.test_case import run_tests
+
+    if HAS_GPU or TRITON_HAS_CPU:
+        run_tests(needs="filelock")

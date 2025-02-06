@@ -1,51 +1,51 @@
+# mypy: allow-untyped-defs
 import dataclasses
 import random
 import textwrap
 import types
-from typing import Callable, Optional
+from typing import Any, Optional
 
-from triton.runtime.jit import JITFunction
+import sympy
 
 import torch
-from torch._subclasses.fake_tensor import FakeTensorMode
-
-from torch._higher_order_ops.triton_kernel_wrap import kernel_side_table, triton_kernel_wrapper_mutation
+from torch._higher_order_ops.triton_kernel_wrap import (
+    tracing_triton_hopifier_singleton,
+    triton_kernel_wrapper_mutation,
+)
 from torch._library.triton import wrap_triton
+
 
 aten = torch.ops.aten
 
-from .. import config, ir
-from torch._inductor.codecache import PyCodeCache
-from torch._inductor.select_algorithm import extern_kernels
+from torch._inductor.codecache import PyCodeCache, TritonFuture
+from torch._inductor.runtime.triton_heuristics import CachingAutotuner
+from torch._inductor.select_algorithm import extern_kernels  # noqa: F401
 from torch._inductor.virtualized import V
-from torch._inductor.runtime.triton_heuristics import grid, CachingAutotuner
-from torch._inductor.codecache import TritonFuture
-from .common import (
-    IndentedBuffer,
-)
+
+from .. import config, ir
+from ..utils import convert_to_symint, LineContext
+from .common import IndentedBuffer, WorkspaceArg
 from .wrapper import (
-    PythonWrapperCodegen,
-    Line,
-    BufferLike,
-    CommentLine,
-    MemoryPlanningLine,
-    MemoryPlanningState,
-    EnterDeviceContextManagerLine,
-    ExitDeviceContextManagerLine,
-    EnterSubgraphLine,
-    ExitSubgraphLine,
     AllocateLine,
-    FreeLine,
-    FreeIfNotReusedLine,
-    ReuseLine,
-    CommBufferLine,
-    NullLine,
+    BufferLike,
     CommBufferAllocateLine,
     CommBufferFreeLine,
+    CommBufferLine,
+    CommentLine,
+    EnterDeviceContextManagerLine,
+    EnterSubgraphLine,
+    ExitDeviceContextManagerLine,
+    ExitSubgraphLine,
+    FreeIfNotReusedLine,
+    FreeLine,
+    Line,
+    MemoryPlanningLine,
+    MemoryPlanningState,
+    NullLine,
+    PythonWrapperCodegen,
+    ReuseLine,
 )
-from ..utils import (
-    LineContext,
-)
+
 
 def delete(x: torch.Tensor) -> None:
     """
@@ -53,34 +53,41 @@ def delete(x: torch.Tensor) -> None:
     """
     del x
 
+
 """
 Extra wrapper IR nodes for FX codegen.
 """
+
+
 class WrapperIRLine(MemoryPlanningLine):
     """
     Base class for Wrapper IR nodes that do not participate in memory planning.
     Records the call args of the underlying codegen function.
     """
+
     def plan(self, state: MemoryPlanningState) -> MemoryPlanningLine:
         return self
 
     def codegen(self, code: IndentedBuffer) -> None:
         raise NotImplementedError("Python codegen not supported")
 
+
 @dataclasses.dataclass
 class ExternKernelLine(WrapperIRLine):
     kernel: str
     out: str
-    args: tuple
-    kwargs: dict
+    args: tuple[Any, ...]
+    kwargs: dict[Any, Any]
+
 
 @dataclasses.dataclass
 class KernelCallLine(WrapperIRLine):
     kernel_name: str
-    call_args: tuple
-    grid: tuple
+    call_args: tuple[Any, ...]
+    grid: tuple[Any, ...]
     grid_fn: str
     triton: bool
+
 
 @dataclasses.dataclass
 class KernelDefinitionLine(WrapperIRLine):
@@ -88,28 +95,36 @@ class KernelDefinitionLine(WrapperIRLine):
     kernel_body: str
     metadata: Optional[str] = None
 
+
 class TritonKernel:
     """
     Stores metadata about Triton kernels for use in FX.
     """
+
     def __init__(self, tuner: CachingAutotuner):
         self.tuner = tuner
         self.wrapped = wrap_triton(tuner.fn)
+
 
 class WrapperFxCodegen(PythonWrapperCodegen):
     """
     Generate Wrapper FX IR, for use in other backends.
     """
+
     def __init__(self):
         super().__init__()
         graph = torch.fx.Graph()
-        self.gm = torch.fx.GraphModule({}, graph) # Wrapper FX IR.
-        self.buffer_to_node: dict[str, torch.fx.Node] = {} # Symbol table for codegen.
-        self.kernels: Dict[str, TritonKernel] = {} # Table to store Triton kernels.
+        self.gm = torch.fx.GraphModule({}, graph)  # Wrapper FX IR.
+        self.buffer_to_node: dict[
+            Optional[str], torch.fx.Node
+        ] = {}  # Symbol table for codegen.
+        self.kernels: dict[str, TritonKernel] = {}  # Table to store Triton kernels.
 
     @staticmethod
     def create(
-        is_subgraph: bool, subgraph_name: str, parent_wrapper: PythonWrapperCodegen
+        is_subgraph: bool,
+        subgraph_name: Optional[str],
+        parent_wrapper: Optional[PythonWrapperCodegen],
     ):
         return WrapperFxCodegen()
 
@@ -142,7 +157,12 @@ class WrapperFxCodegen(PythonWrapperCodegen):
             )
 
     def _create_meta_from_buffer(self, node: torch.fx.Node, buffer: BufferLike) -> None:
-        node.meta["val"] = self._fake_tensor(tuple(buffer.get_size()), tuple(buffer.get_stride()), dtype=buffer.get_dtype(), device=buffer.get_device())
+        node.meta["val"] = self._fake_tensor(
+            tuple(buffer.get_size()),
+            tuple(buffer.get_stride()),
+            dtype=buffer.get_dtype(),
+            device=buffer.get_device(),
+        )
 
     def _record_allocation(self, buffer: BufferLike, node: torch.fx.Node) -> None:
         """
@@ -161,34 +181,34 @@ class WrapperFxCodegen(PythonWrapperCodegen):
         self.gm.graph.call_function(delete, args=(node,))
         del self.buffer_to_node[buffer.name]
 
-    def _lookup_args(self, args: tuple) -> tuple:
+    def _lookup_args(self, args: tuple[Any, ...]) -> tuple[Any, ...]:
         """
         Maps call args back to FX nodes.
         """
         return tuple(
-            self.buffer_to_node[arg]
-            if isinstance(arg, str)
-            else arg
-            for arg in args
+            self.buffer_to_node[arg] if isinstance(arg, str) else arg for arg in args
         )
 
     def _get_buffer(self, node: ir.IRNode) -> BufferLike:
         """
         Extract buffer data from an IR node.
         """
-        if isinstance(node, BufferLike):
+        if isinstance(node, ir.Buffer):
             return node
         elif isinstance(node, ir.MutableBox):
             return self._get_buffer(node.data)
+        elif isinstance(node, WorkspaceArg):
+            return node
         else:
-            raise NotImplementedError(f"Unable to extract buffer from node: {buffer}")
+            raise NotImplementedError(f"Unable to extract buffer from node: {node}")
 
     def _generate_graph_inputs(self) -> None:
         """
         Converts graph inputs to FX placeholders.
         """
-        for name, buffer in V.graph.graph_inputs.items():
-            buffer = self._get_buffer(buffer)
+        for ir_node in V.graph.graph_inputs.values():
+            buffer = self._get_buffer(ir_node)
+            assert buffer.name
             node = self.gm.graph.placeholder(buffer.name)
             self._create_meta_from_buffer(node, buffer)
             self._record_allocation(buffer, node)
@@ -204,9 +224,8 @@ class WrapperFxCodegen(PythonWrapperCodegen):
         self.gm.graph.output(outputs)
 
     def _generate(self, is_inference):
-
         # We disable planning during training because it presently increases peak memory consumption.
-        #TODO don't duplicate this code. Refactor into a helper in the base class.
+        # TODO don't duplicate this code. Refactor into a helper in the base class.
         if is_inference and config.memory_planning:
             self.memory_plan()
         else:
@@ -215,7 +234,6 @@ class WrapperFxCodegen(PythonWrapperCodegen):
         # Generate FX IR from Wrapper IR.
         self._generate_graph_inputs()
         for line in self.lines:
-
             line_type = type(line)
             conversion_func = {
                 AllocateLine: self._generate_allocate,
@@ -239,14 +257,16 @@ class WrapperFxCodegen(PythonWrapperCodegen):
 
             # FX conversion only supports Wrapper IR, not Python/C++ lines.
             if conversion_func is None:
-                raise NotImplementedError(textwrap.dedent(
-                    f"""
+                raise NotImplementedError(
+                    textwrap.dedent(
+                        f"""
                     Found line of unrecognized type '{line_type}':
                         '{line}'
 
                     FX conversion only supports Wrapper IR lines.
                     """
-                ))
+                    )
+                )
 
             conversion_func(line)
         self._generate_graph_outputs()
@@ -256,7 +276,7 @@ class WrapperFxCodegen(PythonWrapperCodegen):
     def _generate_allocate(self, line: Line) -> None:
         assert isinstance(line, AllocateLine)
         buffer = line.node
-        name = buffer.get_name()
+        name = buffer.name
         assert name not in V.graph.removed_buffers
 
         device = buffer.get_device()
@@ -264,7 +284,12 @@ class WrapperFxCodegen(PythonWrapperCodegen):
         shape = tuple(buffer.get_size())
         stride = tuple(buffer.get_stride())
 
-        node = self.gm.graph.call_function(torch.empty_strided, args=(shape, stride), kwargs={"dtype": dtype, "device": device})
+        node = self.gm.graph.call_function(
+            torch.empty_strided,
+            args=(shape, stride),
+            kwargs={"dtype": dtype, "device": device},
+        )
+        assert name
         node.name = name
         self._create_meta_from_buffer(node, buffer)
         self._record_allocation(buffer, node)
@@ -303,7 +328,7 @@ class WrapperFxCodegen(PythonWrapperCodegen):
     def _generate_free_if_not_reused(self, line: Line) -> None:
         assert isinstance(line, FreeIfNotReusedLine)
         buf = line.node
-        assert buf.get_name() not in V.graph.removed_buffers
+        assert buf.name not in V.graph.removed_buffers
         if not line.is_reused:
             self._free(buf)
 
@@ -315,7 +340,7 @@ class WrapperFxCodegen(PythonWrapperCodegen):
         assert isinstance(line, ReuseLine)
         old = line.node
         new = line.reused_as
-        assert not any(buf.get_name() in V.graph.removed_buffers for buf in (old, new))
+        assert not any(buf.name in V.graph.removed_buffers for buf in (old, new))
         assert old.get_dtype() == new.get_dtype()
 
         old_node = self.buffer_to_node[old.name]
@@ -325,19 +350,25 @@ class WrapperFxCodegen(PythonWrapperCodegen):
         size = new.get_size()
         stride = new.get_stride()
         offset = new.get_offset()
-        if old.get_size() != size or old.get_stride() != stride or old.get_offset() != offset:
+        if (
+            old.get_size() != size
+            or old.get_stride() != stride
+            or old.get_offset() != offset
+        ):
             result_node = self.gm.graph.call_function(
-                torch.as_strided,
-                args=(size, stride, offset)
+                torch.as_strided, args=(size, stride, offset)
             )
             self._create_meta_from_buffer(result_node, new)
 
         self._record_allocation(new, result_node)
 
         # Free the old buffer, if we allocated a new tensor.
-        if old.get_name() not in V.graph.get_output_names() and line.delete_old and result_node is not old_node:
+        if (
+            old.name not in V.graph.get_output_names()
+            and line.delete_old
+            and result_node is not old_node
+        ):
             self._free(old)
-
 
     def _generate_null(self, line: Line) -> None:
         assert isinstance(line, NullLine)
@@ -350,8 +381,7 @@ class WrapperFxCodegen(PythonWrapperCodegen):
     def _generate_comm_buffer_allocate(self, line: Line) -> None:
         assert isinstance(line, CommBufferFreeLine)
         buf = line.node
-        assert buf.get_name() not in V.graph.removed_buffers
-        name = bug.get_name()
+        assert buf.name not in V.graph.removed_buffers
         device = torch.device(f"cuda:{self.node.get_device().index}")
         dtype = buf.get_dtype()
         shape = tuple(buf.get_size())
@@ -359,17 +389,18 @@ class WrapperFxCodegen(PythonWrapperCodegen):
 
         if self.comm_buffer_type != ir.CommBufferType.SYMM_MEM:
             raise NotImplementedError(
-                f"Unsupported comm buffer type: {comm_buffer_type}"
+                f"Unsupported comm buffer type: {self.comm_buffer_type}"
             )
 
         # Distributed is not always avaliable. Only import it if used.
-        from torch._C._distributed_c10d._SymmetricMemory import empty_strided_p2p
+        from torch._C._distributed_c10d import _SymmetricMemory  # noqa: F401
+
         alloc_id = random.randint(0, 2**64 - 1)
         node = self.gm.graph.call_function(
-                empty_strided_p2p,
-                args=(shape, stride, dtype, device, self.group_name, alloc_id),
+            _SymmetricMemory.empty_strided_p2p,
+            args=(shape, stride, dtype, device, self.group_name, alloc_id),
         )
-        self._create_meta_from_buffer(result_node, buf)
+        self._create_meta_from_buffer(node, buf)
         self._record_allocation(buf, node)
 
     def _generate_comm_buffer_free(self, line: Line) -> None:
@@ -380,83 +411,118 @@ class WrapperFxCodegen(PythonWrapperCodegen):
         assert isinstance(line, KernelCallLine)
 
         if line.grid_fn not in ("grid", None):
-            raise NotImplementedError(f"Unsupported grid_fn: '{grid_fn}'")
+            raise NotImplementedError(f"Unsupported grid_fn: '{line.grid_fn}'")
 
+        # Collect all kwargs, including autotuned block sizes.
         call_args = self._lookup_args(line.call_args)
         kernel = self.kernels[line.kernel_name]
-        call_kwargs = {name: val for name, val in zip(kernel.tuner.triton_meta["signature"], call_args)}
+        call_kwargs = dict(zip(kernel.tuner.triton_meta["signature"], call_args))
         tuned_kwargs = kernel.tuner.compile_results[0].config.kwargs
         call_kwargs.update(tuned_kwargs)
 
-        # Dynamo uses a side table to store args which can't go in the FX graph.
-        # We don't have any here.
-        constant_args_idx = kernel_side_table.add_constant_args({})
+        # Convert sympy expressions to symints.
+        for name, val in call_kwargs.items():
+            if isinstance(val, sympy.Expr):
+                call_kwargs[name] = convert_to_symint(val)
 
-        node = self.gm.graph.call_function(triton_kernel_wrapper_mutation,
-                                           kwargs={"kernel_idx": kernel.wrapped.kernel_idx, "constant_args_idx": constant_args_idx, "grid": [line.grid], "tma_descriptor_metadata": {}, "kwargs": call_kwargs}
+        # Store non-graphable kwargs in the side table.
+        (
+            call_kwargs,
+            constant_args_idx,
+        ) = tracing_triton_hopifier_singleton.store_non_graphable_args(call_kwargs)
+
+        self.gm.graph.call_function(
+            triton_kernel_wrapper_mutation,
+            kwargs={
+                "kernel_idx": kernel.wrapped.kernel_idx,
+                "constant_args_idx": constant_args_idx,
+                "grid": [line.grid],
+                "tma_descriptor_metadata": {},
+                "kwargs": call_kwargs,
+            },
         )
 
     def generate_extern_kernel_out(
-        self, kernel: str, out: str, out_view: Optional[str], args: list[str], node: ir.ExternKernelOut
-    ):
-        #TODO: refactor the codegen from ir.ExternKernelOut into various wrapper codegen
+        self,
+        kernel: str,
+        out: str,
+        out_view: Optional[str],
+        args: list[str],
+        node: ir.ExternKernelOut,
+    ) -> None:
+        # TODO: refactor the codegen from ir.ExternKernelOut into various wrapper codegen
         # classes. We should only need to pass the node here.
 
+        # Get the call args in their original types.
         tensor_args = tuple(x.codegen_reference() for x in node.inputs)
-        args = tensor_args + tuple(node.constant_args)
+        call_args = tensor_args + tuple(node.constant_args)
 
         out_name = out_view if out_view else out
-        self.writeline(ExternKernelLine(self, kernel=kernel, out=out_name, args=args, kwargs=node.kwargs))
+        self.writeline(
+            ExternKernelLine(
+                self, kernel=kernel, out=out_name, args=call_args, kwargs=node.kwargs
+            )
+        )
 
     def generate_kernel_call(
-            self,
-            kernel_name: str,
-            call_args,
-            grid=None,
-            device_index=None,
-            gpu=True,
-            triton=True,
-            arg_types=None,
-            raw_args=None,
-            grid_fn: str = "grid",
-            triton_meta=None,
-            autotune_configs=None,
-            grid_extra_kwargs="",
-            ):
+        self,
+        kernel_name: str,
+        call_args,
+        grid=None,
+        device_index=None,
+        gpu=True,
+        triton=True,
+        arg_types=None,
+        raw_args=None,
+        grid_fn: str = "grid",
+        triton_meta=None,
+        autotune_configs=None,
+        grid_extra_kwargs="",
+    ) -> None:
         """
         Generates Wrapper IR for a kernel call.
         """
-        self.writeline(KernelCallLine(self, kernel_name=kernel_name, call_args=call_args, grid=tuple(grid), grid_fn=grid_fn, triton=triton))
+        self.writeline(
+            KernelCallLine(
+                self,
+                kernel_name=kernel_name,
+                call_args=call_args,
+                grid=tuple(grid),
+                grid_fn=grid_fn,
+                triton=triton,
+            )
+        )
 
-    def _generate_extern_kernel(self, line):
+    def _generate_extern_kernel(self, line: Line) -> None:
         assert isinstance(line, ExternKernelLine)
 
         # Look up the kernel function from its name.
         module_name, kernel_name = line.kernel.split(".", 1)
-        op = globals()[module_name] # E.g. extern_kernels, aten, etc.
+        op = globals()[module_name]  # E.g. extern_kernels, aten, etc.
         for subname in kernel_name.split("."):
-            op = getattr(op, subname) # E.g. extern_kernels.addmm
+            op = getattr(op, subname)  # E.g. extern_kernels.addmm
 
         out_node = self.buffer_to_node[line.out]
 
         # Separate args from kwargs
         arg_nodes = self._lookup_args(line.args)
         kwargs = line.kwargs | {"out": out_node}
-        op_node = self.gm.graph.call_function(op, args=arg_nodes, kwargs=kwargs)
+        self.gm.graph.call_function(op, args=arg_nodes, kwargs=kwargs)
 
-    def _generate_kernel_call(self, line: Line):
+    def _generate_kernel_call(self, line: Line) -> None:
         assert isinstance(line, KernelCallLine)
         if not line.triton:
             raise NotImplementedError("FX conversion only supports Triton kernels.")
 
         self._generate_triton_call(line)
 
-
-    def _generate_kernel_definition(self, line: Line):
+    def _generate_kernel_definition(self, line: Line) -> None:
         assert isinstance(line, KernelDefinitionLine)
 
         # Generate code for the kernel.
-        kernel_code = super()._generate_kernel_definition(line.kernel_name, line.kernel_body, line.metadata)
+        kernel_code = super()._format_kernel_definition(
+            line.kernel_name, line.kernel_body, line.metadata
+        )
 
         # Import the module and store the JIT kernel.
         mod = self._import_kernel(kernel_code)

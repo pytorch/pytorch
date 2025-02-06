@@ -400,12 +400,14 @@ class EnterSubgraphLine(WrapperLine):
         self.wrapper.push_codegened_graph(self.graph)
         code.do_indent()
 
+
 @dataclasses.dataclass
 class CommentLine(WrapperLine):
     line: Line
 
     def codegen(self, code: IndentedBuffer) -> None:
         code.writeline(self.line)
+
 
 @dataclasses.dataclass
 class ExitSubgraphLine(WrapperLine):
@@ -515,6 +517,7 @@ class AllocateLine(MemoryPlanningLine):
         line = self.wrapper.make_buffer_allocation(self.node)
         code.writeline(line)
 
+
 @dataclasses.dataclass
 class FreeLine(MemoryPlanningLine):
     node: BufferLike
@@ -525,6 +528,7 @@ class FreeLine(MemoryPlanningLine):
     def codegen(self, code: IndentedBuffer) -> None:
         assert self.node.get_name() not in V.graph.removed_buffers
         code.writeline(self.wrapper.make_buffer_free(self.node))
+
 
 @dataclasses.dataclass
 class FreeIfNotReusedLine(MemoryPlanningLine):
@@ -1063,7 +1067,12 @@ class PythonWrapperCodegen(CodeGen):
                 )
 
     def generate_extern_kernel_out(
-        self, kernel: str, out: str, out_view: Optional[str], args: list[str], node: ir.ExternKernelOut
+        self,
+        kernel: str,
+        out: str,
+        out_view: Optional[str],
+        args: list[str],
+        node: ir.ExternKernelOut,
     ):
         # add debug printer code for triton kernel calls at (jit) inductor level
         debug_printer_manager = V.graph.wrapper_code.debug_printer
@@ -1564,7 +1573,7 @@ class PythonWrapperCodegen(CodeGen):
                 ]
             )
 
-    def _generate_kernel_definition(
+    def _format_kernel_definition(
         self,
         kernel_name: str,
         kernel_body: str,
@@ -1573,7 +1582,7 @@ class PythonWrapperCodegen(CodeGen):
         if config.triton.autotune_at_compile_time:
             # Skip inserting comments for the autotune block as they may contain cpp style comments
             code = f"\n\n{kernel_name} = {kernel_body}"
-            self.kernel_autotune_defs.splice(body)
+            self.kernel_autotune_defs.splice(code)
             if V.graph.cpp_wrapper:
                 # For cpp wrapper, no need to continue codegen for the main body
                 return code
@@ -1589,7 +1598,7 @@ class PythonWrapperCodegen(CodeGen):
         metadata: Optional[str] = None,
         gpu=True,
     ):
-        code = self._generate_kernel_definition(kernel_name, kernel_body, metadata)
+        code = self._format_kernel_definition(kernel_name, kernel_body, metadata)
         self.header.splice(code)
 
     def define_subgraph_launcher_fn(self, fn_code: str):
