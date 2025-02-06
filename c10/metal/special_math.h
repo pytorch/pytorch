@@ -1,4 +1,5 @@
 // Implementation of specal math functions for Metal
+#pragma once
 #include <metal_stdlib>
 
 namespace c10 {
@@ -444,10 +445,20 @@ inline float digamma(T0 x) {
   } else if (x == 0.0f) {
     // As per C++ standard for gamma related functions and SciPy,
     // If the argument is ±0, ±∞ is returned
-    return ::metal::copysign(INFINITY, -x);
+    return ::metal::copysign(INFINITY, static_cast<float>(-x));
   } else {
     return calc_digamma_positive_domain(x);
   }
+}
+
+template <typename T>
+T sinc(T a) {
+  if (a == static_cast<T>(0)) {
+    return static_cast<T>(1);
+  }
+  constexpr T pi = static_cast<T>(M_PI_F);
+  T product = pi * a;
+  return static_cast<T>(::metal::sin(product) / product);
 }
 
 } // namespace metal

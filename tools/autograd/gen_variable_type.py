@@ -631,6 +631,7 @@ if (compute_requires_grad( ${args_to_check} )) {
 ASSIGN_GRAD_FN = CodeTemplate(
     """\
 grad_fn = std::shared_ptr<${op}>(new ${op}(${op_ctor}), deleteNode);
+grad_fn->skip_compiled_autograd = at::impl::in_disable_compiled_autograd_ctx();
 grad_fn->set_next_edges(collect_next_edges( ${args_with_derivatives} ));
 """
 )
@@ -647,6 +648,7 @@ for (const auto& i : c10::irange( ${irange} )) {
           return nullptr;
       } else {
           auto grad_fn = std::shared_ptr<${op}>(new ${op}(${op_ctor}), deleteNode);
+          grad_fn->skip_compiled_autograd = at::impl::in_disable_compiled_autograd_ctx();
           grad_fn->set_next_edges(collect_next_edges( ${args_with_derivatives} ));
           return grad_fn;
       }
