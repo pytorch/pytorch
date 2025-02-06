@@ -436,6 +436,38 @@ class TestDraftExport(TestCase):
             in report.failures[0].data["reason"]
         )
 
+    def test_override_mismatched_fake_kernel_with_unbacked_symbols(self):
+        class M(torch.nn.Module):
+            def forward(self, a, b):
+                return torch.ops.mylib.foo(a, b)
+
+        @torch.library.custom_op("mylib::foo", mutates_args={})
+        def foo(a: torch.Tensor, b: torch.Tensor) -> torch.Tensor:
+            return a[b.item()].to(torch.bfloat16)
+
+        @foo.register_fake
+        def foo_fake_impl(a, b):
+            ctx = torch.library.get_ctx()
+            u = ctx.new_dynamic_size()
+            return torch.empty(u, a.shape[1], dtype=a.dtype)
+
+        mod = M()
+        inputs = (torch.randn(100, 4), torch.tensor(10))
+
+        ep, report = draft_export(mod, inputs)
+        for ep_out, eager_out in zip(ep.module()(*inputs), mod(*inputs)):
+            self.assertTrue(torch.allclose(ep_out, eager_out))
+            self.assertEqual(ep_out.dtype, eager_out.dtype)
+
+        self.assertEqual(len(report.failures), 1)
+        self.assertEqual(
+            report.failures[0].failure_type, FailureType.MISMATCHED_FAKE_KERNEL
+        )
+        self.assertEqual(
+            report.failures[0].data["reason"],
+            "Dtypes torch.bfloat16 and torch.float32 are not equal!",
+        )
+
     # https://github.com/pytorch/pytorch/issues/140625
     @unittest.skipIf(IS_WINDOWS, "aoti_compile_and_package not supported on Windows")
     def test_constantify_unbacked_symbol(self):

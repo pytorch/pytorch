@@ -23,21 +23,27 @@ static PyObject* THCPEvent_pynew(
   unsigned char enable_timing = 0;
   unsigned char blocking = 0;
   unsigned char interprocess = 0;
+  unsigned char timing_only = 0;
 
   // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
   constexpr const char* kwlist[] = {
-      "enable_timing", "blocking", "interprocess", nullptr};
+      "enable_timing", "blocking", "interprocess", "timing_only", nullptr};
   if (!PyArg_ParseTupleAndKeywords(
           args,
           kwargs,
-          "|bbb",
+          "|bbbb",
           // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
           const_cast<char**>(kwlist),
           &enable_timing,
           &blocking,
-          &interprocess)) {
+          &interprocess,
+          &timing_only)) {
     return nullptr;
   }
+
+  TORCH_CHECK(
+    !(!enable_timing && timing_only),
+    "`timing_only=True` can only be set if `enable_timing=True`");
 
   THPObjectPtr ptr(type->tp_alloc(type, 0));
   if (!ptr) {
@@ -47,7 +53,8 @@ static PyObject* THCPEvent_pynew(
   THCPEvent* self = (THCPEvent*)ptr.get();
   unsigned int flags = (blocking ? cudaEventBlockingSync : cudaEventDefault) |
       (enable_timing ? cudaEventDefault : cudaEventDisableTiming) |
-      (interprocess ? cudaEventInterprocess : cudaEventDefault);
+      (interprocess ? cudaEventInterprocess : cudaEventDefault) |
+      (timing_only ? cudaEventTimingOnly : cudaEventDefault);
 
   new (&self->cuda_event) at::cuda::CUDAEvent(flags);
 

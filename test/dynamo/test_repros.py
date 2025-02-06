@@ -15,6 +15,7 @@ import inspect
 import itertools
 import os
 import random
+import types
 import typing
 import unittest
 import warnings
@@ -6307,6 +6308,26 @@ def forward(self, s0 : torch.SymInt, s1 : torch.SymInt, L_x_ : torch.Tensor):
         with mock.patch("torch._dynamo.eval_frame._maybe_set_eval_frame", bad):
             fn(torch.ones(3))
 
+    @torch._dynamo.config.patch(raise_on_ctx_manager_usage=False)
+    def test_no_tracing_into_eval_frame_ctx_manager(self):
+        # Test that dynamo doesn't trace into nested calls from eval_frame
+        # when using a context manager.
+        # Even though we don't officially support Dynamo context managers, we still
+        # have tests that use them, so we should still make sure the eval_frame callback
+        # is set at the correct places in these cases.
+        def fn(x):
+            return x + 1
+
+        orig_fn = torch._dynamo.eval_frame._maybe_set_eval_frame
+
+        def bad(*args, **kwargs):
+            torch._dynamo.graph_break()
+            return orig_fn(*args, **kwargs)
+
+        with mock.patch("torch._dynamo.eval_frame._maybe_set_eval_frame", bad):
+            with torch._dynamo.optimize_assert("eager"):
+                fn(torch.ones(3))
+
     @torch._dynamo.config.patch(allow_empty_graphs=True)
     @parametrize("fullgraph", [True, False])
     def test_empty_graph_nested_calls(self, fullgraph):
@@ -6614,6 +6635,19 @@ class ReproTestsDevice(torch._dynamo.test_case.TestCase):
         mem_after = torch.cuda.memory_allocated()
         self.assertEqual(mem_before, mem_after)
 
+    def test_udf_class_source(self):
+        class Foo:
+            pass
+
+        def fn(x):
+            foo = Foo()
+            bar = type(foo)()  # noqa: F841
+            return torch.cos(x)
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        x = torch.randn(4)
+        self.assertEqual(fn(x), opt_fn(x))
+
     @requires_cuda
     def test_sdpa_dynamic_shapes(self, device):
         def f(x, s0, s1, s2):
@@ -6634,6 +6668,40 @@ class ReproTestsDevice(torch._dynamo.test_case.TestCase):
             out_ref = f(x_ref, s0, s1, s2)
             out = f_compiled(x, s0, s1, s2)
             self.assertEqual(out_ref, out)
+
+    def test_getattr_return(self):
+        _WrapperDescriptor = type(type.__call__)
+        _MethodWrapper = type(all.__call__)
+        _ClassMethodWrapper = type(int.__dict__["from_bytes"])
+
+        _NonUserDefinedCallables = (
+            _WrapperDescriptor,
+            _MethodWrapper,
+            _ClassMethodWrapper,
+            types.BuiltinFunctionType,
+        )
+
+        def _signature_get_user_defined_method(cls, method_name):
+            try:
+                meth = getattr(cls, method_name)
+            except AttributeError:
+                return
+            else:
+                if not isinstance(meth, _NonUserDefinedCallables):
+                    # Once '__signature__' will be added to 'C'-level
+                    # callables, this check won't be necessary
+                    return meth
+
+        def fn(x):
+            s = _signature_get_user_defined_method(type(torch.nn.Linear), "__call__")
+            if s is None:
+                return torch.cos(x)
+
+            return torch.sin(x)
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        x = torch.randn(4)
+        self.assertEqual(fn(x), opt_fn(x))
 
 
 instantiate_parametrized_tests(ReproTests)
