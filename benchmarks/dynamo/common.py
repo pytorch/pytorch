@@ -916,13 +916,10 @@ def latency_experiment(args, model_iter_fn, model, example_inputs, mark, **kwarg
             # inputs will incur high penalty then the next one.
             maybe_mark_step(args)
 
-            with (
-                maybe_mark_profile(p=p, mark=mark),
-                maybe_enable_compiled_autograd(
-                    args.compiled_autograd,
-                    fullgraph=args.nopython,
-                    dynamic=args.dynamic_shapes,
-                ),
+            with maybe_mark_profile(p=p, mark=mark), maybe_enable_compiled_autograd(
+                args.compiled_autograd,
+                fullgraph=args.nopython,
+                dynamic=args.dynamic_shapes,
             ):
                 timings[rep], actual_output = timed(
                     model,
@@ -1093,13 +1090,10 @@ def speedup_experiment(args, model_iter_fn, model, example_inputs, **kwargs):
             # call mark_step between the 2 calls to make the comparison fair.
             maybe_mark_step(args)
 
-            with (
-                maybe_mark_profile(p=p, mark="actual"),
-                maybe_enable_compiled_autograd(
-                    args.compiled_autograd,
-                    fullgraph=args.nopython,
-                    dynamic=args.dynamic_shapes,
-                ),
+            with maybe_mark_profile(p=p, mark="actual"), maybe_enable_compiled_autograd(
+                args.compiled_autograd,
+                fullgraph=args.nopython,
+                dynamic=args.dynamic_shapes,
             ):
                 timings[rep, 1], actual_output = timed(
                     model,
@@ -2451,15 +2445,12 @@ class BenchmarkRunner:
             else:
                 optimized_model_iter_fn = optimize_ctx(self.model_iter_fn)
 
-            with (
-                maybe_enable_compiled_autograd(
-                    self.args.compiled_autograd,
-                    fullgraph=self.args.nopython,
-                    dynamic=self.args.dynamic_shapes,
-                ),
-                maybe_snapshot_memory(
-                    self.args.snapshot_memory, f"compiled_{self.args.only}"
-                ),
+            with maybe_enable_compiled_autograd(
+                self.args.compiled_autograd,
+                fullgraph=self.args.nopython,
+                dynamic=self.args.dynamic_shapes,
+            ), maybe_snapshot_memory(
+                self.args.snapshot_memory, f"compiled_{self.args.only}"
             ):
                 dynamo_latency, dynamo_peak_mem, dynamo_stats = warmup(
                     optimized_model_iter_fn, model, example_inputs, "dynamo"
@@ -2607,15 +2598,12 @@ class BenchmarkRunner:
             else:
                 optimized_model_iter_fn = optimize_ctx(self.model_iter_fn)
 
-            with (
-                maybe_enable_compiled_autograd(
-                    self.args.compiled_autograd,
-                    fullgraph=self.args.nopython,
-                    dynamic=self.args.dynamic_shapes,
-                ),
-                maybe_snapshot_memory(
-                    self.args.snapshot_memory, f"compiled_{self.args.only}"
-                ),
+            with maybe_enable_compiled_autograd(
+                self.args.compiled_autograd,
+                fullgraph=self.args.nopython,
+                dynamic=self.args.dynamic_shapes,
+            ), maybe_snapshot_memory(
+                self.args.snapshot_memory, f"compiled_{self.args.only}"
             ):
                 dynamo_latency, dynamo_peak_mem, dynamo_stats = warmup(
                     optimized_model_iter_fn, model, example_inputs, "dynamo"
@@ -3239,6 +3227,13 @@ def parse_args(args=None):
         "--snapshot_memory",
         action="store_true",
         help="Enables Memory Snapshot tool for memory deep dives: https://pytorch.org/blog/understanding-gpu-memory-1/",
+    )
+
+    parser.add_argument(
+        "--retain-output",
+        action="store_true",
+        help="Enables appending to the already existing output file if it exists \
+            instead of deleting it and creating a new one.",
     )
 
     group_latency = parser.add_mutually_exclusive_group()
@@ -4090,7 +4085,11 @@ def run(runner, args, original_dir=None):
             )
     else:
         metrics.purge_old_log_files()
-        if output_filename and os.path.exists(output_filename):
+        if (
+            output_filename
+            and os.path.exists(output_filename)
+            and not args.retain_output
+        ):
             os.unlink(output_filename)
         if original_dir:
             os.chdir(original_dir)
