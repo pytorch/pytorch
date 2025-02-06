@@ -4,8 +4,7 @@ import unittest
 
 import torch
 import torch._dynamo.test_case
-
-from .utils import make_dynamo_test
+from torch.testing._internal.common_utils import make_dynamo_test
 
 
 class SysTests(torch._dynamo.test_case.TestCase):
@@ -27,6 +26,8 @@ class SysTests(torch._dynamo.test_case.TestCase):
 
 
 class CPythonActiveExceptionTests(torch._dynamo.test_case.TestCase):
+    # Tests taken from CPython source code in cpython/Lib/test/test_sys.py
+    # https://github.com/python/cpython/blob/v3.13.1/Lib/test/test_sys.py
     @make_dynamo_test
     def test_exc_info_no_exception(self):
         self.assertEqual(sys.exc_info(), (None, None, None))
