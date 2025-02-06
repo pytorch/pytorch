@@ -2798,7 +2798,7 @@ class CppVecKernel(CppKernel):
                 FloorDiv(reduction_size, self.ranges[self.tiling_idx])
                 if self.tiling_idx >= self.reduction_depth
                 and self.ranges[self.tiling_idx] % self.tiling_factor
-                else sympy.Integer(0)
+                else reduction_size
             )
             if self.weight_recp_vec_range not in self.weight_recps_cse.reduction_cache:
                 self.weight_recps_val = self.weight_recps_cse.generate(
