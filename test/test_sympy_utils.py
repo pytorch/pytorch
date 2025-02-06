@@ -873,10 +873,10 @@ class TestSympyFunctions(TestCase):
 
 class TestSingletonInt(TestCase):
     def test_basic(self):
-        j1 = SingletonInt(1, coeff=1)
-        j1_copy = SingletonInt(1, coeff=1)
-        j2 = SingletonInt(2, coeff=1)
-        j1x2 = SingletonInt(1, coeff=2)
+        j1 = SingletonInt((frozenset(), frozenset({1})), coeff=1)
+        j1_copy = SingletonInt((frozenset(), frozenset({1})), coeff=1)
+        j2 = SingletonInt((frozenset(), frozenset({2})), coeff=1)
+        j1x2 = SingletonInt((frozenset(), frozenset({1})), coeff=2)
 
         def test_eq(a, b, expected):
             self.assertEqual(sympy.Eq(a, b), expected)
