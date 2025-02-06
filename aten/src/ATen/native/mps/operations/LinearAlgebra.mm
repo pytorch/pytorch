@@ -13,6 +13,7 @@
 #include <ATen/Functions.h>
 #include <ATen/NativeFunctions.h>
 #else
+#include <ATen/ops/_linalg_solve_ex_native.h>
 #include <ATen/ops/addbmm_native.h>
 #include <ATen/ops/addmm_native.h>
 #include <ATen/ops/addr_native.h>
@@ -20,6 +21,7 @@
 #include <ATen/ops/bmm_native.h>
 #include <ATen/ops/cholesky_native.h>
 #include <ATen/ops/linalg_cholesky_native.h>
+#include <ATen/ops/linalg_lu_factor_ex_native.h>
 #include <ATen/ops/linalg_lu_factor_native.h>
 #include <ATen/ops/linalg_solve_triangular_native.h>
 #include <ATen/ops/mm_native.h>
@@ -120,19 +122,25 @@ bool use_metal_mm(const Tensor& self, const Tensor& other, const Tensor& output)
 
 } // anonymous namespace
 
-static void linalg_lu_factor_out_mps_impl(const Tensor& A, bool pivot, Tensor& LU, Tensor& pivots) {
+static void linalg_lu_factor_ex_out_mps_impl(const Tensor& A,
+                                             bool pivot,
+                                             const Tensor& LU,
+                                             const Tensor& pivots,
+                                             const Tensor& info,
+                                             bool check_errors) {
   using namespace mps;
 
   TORCH_CHECK(!c10::isComplexType(A.scalar_type()) && !c10::isComplexType(LU.scalar_type()),
               "linalg.lu_factor(): MPS doesn't support complex types.");
   TORCH_CHECK(pivot, "linalg.lu_factor(): MPS doesn't allow pivot == False.");
 
-  Tensor A_t = A;
+  Tensor A_t = A.contiguous();
   uint64_t aRows = A_t.size(-2);
   uint64_t aCols = A_t.size(-1);
   uint64_t aElemSize = A_t.element_size();
   uint64_t numPivots = std::min(aRows, aCols);
   std::vector<int64_t> pivot_sizes(A_t.sizes().begin(), A_t.sizes().end() - 2);
+  resize_output(info, pivot_sizes);
   pivot_sizes.push_back(numPivots);
   resize_output(pivots, pivot_sizes);
 
@@ -210,23 +218,202 @@ static void linalg_lu_factor_out_mps_impl(const Tensor& A, bool pivot, Tensor& L
     }
   });
   auto stacked_pivots = A_.dim() > 2 ? at::stack(pivots_list) : pivots_list[0];
+  auto stacked_status = A_.dim() > 2 ? at::stack(status_tensors) : status_tensors[0];
   if (A_t.dim() > 3) {
     resize_output(LU, A_t.sizes());
     pivots.copy_(stacked_pivots.view(pivot_sizes));
   } else {
     pivots.copy_(stacked_pivots);
   }
-  pivots += 1; // PyTorch's `pivots` is 1-index.
+  pivot_sizes.pop_back();
+  info.copy_(stacked_status.view(pivot_sizes));
+  pivots.add_(1); // PyTorch's `pivots` is 1-index.
+  if (check_errors) {
+    for (const auto i : c10::irange(status_tensors.size())) {
+      int status = status_tensors[i].item<int>();
+      TORCH_CHECK(
+          status == 0,
+          "lu_factor(): LU factorization failure at the ",
+          i + 1,
+          " sample with status: ",
+          status,
+          ". See https://developer.apple.com/documentation/metalperformanceshaders/mpsmatrixdecompositionstatus for details.");
+    }
+  }
+}
 
-  for (const auto i : c10::irange(status_tensors.size())) {
-    int status = status_tensors[i].item<int>();
-    TORCH_CHECK(
-        status == 0,
-        "lu_factor(): LU factorization failure at the ",
-        i + 1,
-        " sample with status: ",
-        status,
-        ". See https://developer.apple.com/documentation/metalperformanceshaders/mpsmatrixdecompositionstatus for details.");
+static void linalg_solve_out_mps_impl(const at::Tensor& A,
+                                      const at::Tensor& B,
+                                      bool left,
+                                      bool check_errors,
+                                      const at::Tensor& result,
+                                      const at::Tensor& LU,
+                                      const at::Tensor& pivots,
+                                      const at::Tensor& info) {
+  using namespace mps;
+
+  TORCH_CHECK(!c10::isComplexType(A.scalar_type()) && !c10::isComplexType(LU.scalar_type()),
+              "linalg.lu_factor(): MPS doesn't support complex types.");
+  Tensor A_t, B_t;
+  // If 'left' is false, reinterpret the problem so that Ax = B becomes A^T ⋅ (x^T) = B^T
+  // Then we solve the normal "left" case on the transposed matrices and transpose x finally to get the output
+  if (left) {
+    A_t = A.contiguous();
+    B_t = B.contiguous();
+  } else {
+    A_t = A.transpose(-2, -1).contiguous();
+    B_t = B.transpose(-2, -1).contiguous();
+  }
+
+  uint64_t aRows = A_t.size(-2);
+  uint64_t aCols = A_t.size(-1);
+  uint64_t aElemSize = A_t.element_size();
+  int a_ndim = A_t.dim();
+  int b_ndim = B_t.dim();
+  int numberOfRightHandSides = (b_ndim == a_ndim - 1) ? 1 : (b_ndim >= 2 ? B_t.size(-1) : 1);
+
+  uint64_t numPivots = std::min(aRows, aCols);
+  std::vector<int64_t> pivot_sizes(A_t.sizes().begin(), A_t.sizes().end() - 2);
+  info.fill_(0); // will be set to 1 during kernel if something fails
+  resize_output(info, pivot_sizes);
+  pivot_sizes.push_back(numPivots);
+  resize_output(pivots, pivot_sizes);
+
+  if (A_t.numel() == 0) {
+    return;
+  }
+
+  if (A_t.dim() > 3) {
+    A_t = A_t.flatten(0, -3);
+  }
+
+  uint64_t batchSize = (A_t.dim() > 2) ? A_t.size(0) : 1;
+  std::vector<Tensor> status_tensors;
+  std::vector<Tensor> pivots_list;
+
+  status_tensors.reserve(batchSize);
+  pivots_list.reserve(batchSize);
+  for ([[maybe_unused]] const auto i : c10::irange(batchSize)) {
+    status_tensors.push_back(at::zeros(1, kInt, std::nullopt, kMPS, std::nullopt));
+    pivots_list.push_back(at::zeros(numPivots, kInt, std::nullopt, kMPS, std::nullopt));
+  }
+
+  resize_output(LU, A_t.sizes());
+  Tensor LU_ = LU;
+  if (!LU_.is_same(A_t)) {
+    A_t = LU_.copy_(A_t);
+  } else {
+    A_t = LU_;
+  }
+
+  TORCH_INTERNAL_ASSERT(A_t.is_contiguous());
+
+  Tensor result_t;
+  if (!left) {
+    // For right solve, we'll need to transpose the result back later
+    result_t = at::empty_like(B_t, B_t.options());
+  } else {
+    result_t = result;
+  }
+  id<MTLBuffer> luBuffer = getMTLBufferStorage(LU_);
+  id<MTLBuffer> bBuffer = getMTLBufferStorage(B_t);
+  id<MTLBuffer> resultBuffer = getMTLBufferStorage(result_t);
+
+  MPSStream* mpsStream = getCurrentMPSStream();
+  id<MTLDevice> device = MPSDevice::getInstance()->device();
+
+  dispatch_sync_with_rethrow(mpsStream->queue(), ^() {
+    @autoreleasepool {
+      id<MTLCommandBuffer> commandBuffer = mpsStream->commandBuffer();
+
+      MPSMatrixDecompositionLU* lu_decomp = [[[MPSMatrixDecompositionLU alloc] initWithDevice:device
+                                                                                         rows:aRows
+                                                                                      columns:aCols] autorelease];
+
+      MPSMatrixSolveLU* solver = [[[MPSMatrixSolveLU alloc] initWithDevice:device
+                                                                 transpose:false
+                                                                     order:aRows
+                                                    numberOfRightHandSides:numberOfRightHandSides] autorelease];
+
+      MPSMatrixDescriptor* luMatrixDesc = [MPSMatrixDescriptor matrixDescriptorWithRows:aRows
+                                                                                columns:aCols
+                                                                               matrices:1
+                                                                               rowBytes:aCols * aElemSize
+                                                                            matrixBytes:aRows * aCols * aElemSize
+                                                                               dataType:getMPSDataType(LU_)];
+      MPSMatrixDescriptor* rhsMatrixDesc =
+          [MPSMatrixDescriptor matrixDescriptorWithRows:aRows
+                                                columns:numberOfRightHandSides
+                                               matrices:1
+                                               rowBytes:numberOfRightHandSides * aElemSize
+                                            matrixBytes:aRows * numberOfRightHandSides * aElemSize
+                                               dataType:getMPSDataType(B_t)];
+      MPSMatrixDescriptor* resultMatrixDesc =
+          [MPSMatrixDescriptor matrixDescriptorWithRows:aRows
+                                                columns:numberOfRightHandSides
+                                               matrices:1
+                                               rowBytes:numberOfRightHandSides * aElemSize
+                                            matrixBytes:aRows * numberOfRightHandSides * aElemSize
+                                               dataType:getMPSDataType(result_t)];
+      MPSMatrixDescriptor* pivotsMatrixDesc = [MPSMatrixDescriptor matrixDescriptorWithRows:1
+                                                                                    columns:numPivots
+                                                                                   matrices:1
+                                                                                   rowBytes:numPivots * sizeof(uint32_t)
+                                                                                matrixBytes:numPivots * sizeof(uint32_t)
+                                                                                   dataType:MPSDataTypeUInt32];
+
+      for (const auto i : c10::irange(batchSize)) {
+        const uint64_t batchOffsetA = i * aRows * aCols;
+        const uint64_t batchOffsetB = i * aRows * numberOfRightHandSides;
+        MPSMatrix* mpsLU = [[[MPSMatrix alloc] initWithBuffer:luBuffer
+                                                       offset:(LU_.storage_offset() + batchOffsetA) * aElemSize
+                                                   descriptor:luMatrixDesc] autorelease];
+
+        MPSMatrix* mpsRHS = [[[MPSMatrix alloc] initWithBuffer:bBuffer
+                                                        offset:(B_t.storage_offset() + batchOffsetB) * aElemSize
+                                                    descriptor:rhsMatrixDesc] autorelease];
+
+        MPSMatrix* mpsResult = [[[MPSMatrix alloc] initWithBuffer:resultBuffer
+                                                           offset:(result_t.storage_offset() + batchOffsetB) * aElemSize
+                                                       descriptor:resultMatrixDesc] autorelease];
+
+        MPSMatrix* mpsPivots = [[[MPSMatrix alloc] initWithBuffer:getMTLBufferStorage(pivots_list[i])
+                                                           offset:0
+                                                       descriptor:pivotsMatrixDesc] autorelease];
+        id<MTLBuffer> statusBuffer = getMTLBufferStorage(status_tensors[i]);
+        [lu_decomp encodeToCommandBuffer:commandBuffer
+                            sourceMatrix:mpsLU
+                            resultMatrix:mpsLU
+                            pivotIndices:mpsPivots
+                                  status:statusBuffer];
+        [solver encodeToCommandBuffer:commandBuffer
+                         sourceMatrix:mpsLU
+                  rightHandSideMatrix:mpsRHS
+                         pivotIndices:mpsPivots
+                       solutionMatrix:mpsResult];
+      }
+    }
+  });
+
+  auto stacked_status = A.dim() > 2 ? at::stack(status_tensors) : status_tensors[0];
+  std::vector<int64_t> info_sizes(A.sizes().begin(), A.sizes().end() - 2);
+  info.copy_(stacked_status.view(info_sizes));
+
+  if (check_errors) {
+    for (const auto i : c10::irange(status_tensors.size())) {
+      int status = status_tensors[i].item<int>();
+      TORCH_CHECK(status == 0,
+                  "solve(): Linear solve failed at the ",
+                  i + 1,
+                  " sample with status: ",
+                  status,
+                  ". See https://developer.apple.com/documentation/metalperformanceshaders/"
+                  "mpsmatrixdecompositionstatus for details.");
+    }
+  }
+  if (!left) {
+    // If this was a right solve, transpose the result back
+    result.copy_(result_t.transpose(-2, -1).contiguous());
   }
 }
 
@@ -848,7 +1035,7 @@ static Tensor& linalg_cholesky_mps_impl(const Tensor& input, bool upper, Tensor&
 
   Tensor success = at::empty({B}, input.options().dtype(kInt)).fill_(1);
 
-  MTLSize threadGroupSize = MTLSizeMake(256, 1, 1);
+  MTLSize threadGroupSize = MTLSizeMake(32, 8, 1);
 
   @autoreleasepool {
     dispatch_sync_with_rethrow(stream->queue(), ^() {
@@ -1108,16 +1295,34 @@ TORCH_IMPL_FUNC(triangular_solve_mps_out)
   result.copy_(out);
 }
 
+TORCH_IMPL_FUNC(_linalg_solve_ex_out_mps)
+(const Tensor& A,
+ const Tensor& B,
+ bool left,
+ bool check_errors,
+ const Tensor& result,
+ const Tensor& LU,
+ const Tensor& pivots,
+ const Tensor& info) {
+  mps::linalg_solve_out_mps_impl(A, B, left, check_errors, result, LU, pivots, info);
+}
+
 std::tuple<Tensor&, Tensor&> linalg_lu_factor_out_mps(const Tensor& A, bool pivot, Tensor& LU, Tensor& pivots) {
-  mps::linalg_lu_factor_out_mps_impl(A, pivot, LU, pivots);
+  Tensor info = at::empty({}, A.options().dtype(kInt));
+  mps::linalg_lu_factor_ex_out_mps_impl(A, pivot, LU, pivots, info, false);
   return std::tie(LU, pivots);
 }
 
 std::tuple<Tensor, Tensor> linalg_lu_factor_mps(const Tensor& A, bool pivot) {
   Tensor LU = at::empty({0}, A.options());
   Tensor pivots = at::empty({0}, A.options().dtype(kInt));
-  mps::linalg_lu_factor_out_mps_impl(A, pivot, LU, pivots);
+  Tensor info = at::empty({}, A.options().dtype(kInt));
+  mps::linalg_lu_factor_ex_out_mps_impl(A, pivot, LU, pivots, info, false);
   return std::make_tuple(std::move(LU), std::move(pivots));
 }
 
+TORCH_IMPL_FUNC(linalg_lu_factor_ex_out_mps)
+(const Tensor& A, bool pivot, bool check_errors, const Tensor& LU, const Tensor& pivots, const Tensor& info) {
+  mps::linalg_lu_factor_ex_out_mps_impl(A, pivot, LU, pivots, info, check_errors);
+}
 } // namespace at::native

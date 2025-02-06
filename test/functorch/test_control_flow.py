@@ -334,10 +334,7 @@ def _while_loop_tests():
                 out_it + 1,
                 out_it + out_x,
                 out_it < x.shape[0],
-                # Data dependent error on Eq(out_it * 2) in torch.compile path.
-                # Issue tracked here: https://github.com/pytorch/pytorch/issues/143157
-                # torch.ones(out_it * 2),
-                torch.ones(out_it),
+                torch.ones(out_it * 2),
             )
 
     class ConstAndSymIntOutput(torch.nn.Module):
@@ -6593,7 +6590,6 @@ class GraphModule(torch.nn.Module):
         while_loop = torch.ops.higher_order.while_loop(while_loop_cond_graph_0, while_loop_body_graph_0, (0, x), ());  while_loop_cond_graph_0 = while_loop_body_graph_0 = x = None
 
         getitem_2: "Sym(u1)" = while_loop[0]
-        sym_constrain_range_for_size_default = torch.ops.aten.sym_constrain_range_for_size.default(getitem_2);  sym_constrain_range_for_size_default = None
 
         ge: "Sym(u1 >= 1)" = getitem_2 >= 1
         _assert_scalar_default = torch.ops.aten._assert_scalar.default(ge, "Runtime assertion failed for expression u1 >= 1 on node 'ge'");  ge = _assert_scalar_default = None
@@ -6609,7 +6605,8 @@ class GraphModule(torch.nn.Module):
 
         lt: "Sym(u1 < s0)" = getitem_2 < sym_size_int_1;  sym_size_int_1 = None
 
-        ones: "f32[u1]" = torch.ops.aten.ones.default([getitem_2], device = device(type='cpu'), pin_memory = False);  getitem_2 = None
+        mul: "Sym(2*u1)" = getitem_2 * 2;  getitem_2 = None
+        ones: "f32[2*u1]" = torch.ops.aten.ones.default([mul], device = device(type='cpu'), pin_memory = False);  mul = None
         return pytree.tree_unflatten((add, add_1, lt, ones), self._out_spec)
 
     class while_loop_cond_graph_0(torch.nn.Module):
@@ -6658,7 +6655,6 @@ class GraphModule(torch.nn.Module):
         while_loop = torch.ops.higher_order.while_loop(cond_fn_0, body_fn_0, (0, l_x_), (s0, s1));  cond_fn_0 = body_fn_0 = l_x_ = s1 = None
 
         getitem_4: "Sym(u1)" = while_loop[0]
-        _check_is_size = torch._check_is_size(getitem_4);  _check_is_size = None
 
         ge: "Sym(u1 >= 1)" = getitem_4 >= 1
         _assert_scalar_default = torch.ops.aten._assert_scalar.default(ge, "Runtime assertion failed for expression u1 >= 1 on node 'ge'");  ge = _assert_scalar_default = None
@@ -6674,7 +6670,8 @@ class GraphModule(torch.nn.Module):
 
         lt: "Sym(u1 < s0)" = getitem_4 < s0;  s0 = None
 
-        ones: "f32[u1]" = torch.ones(getitem_4);  getitem_4 = None
+        mul: "Sym(2*u1)" = getitem_4 * 2;  getitem_4 = None
+        ones: "f32[2*u1]" = torch.ones(mul);  mul = None
         return (add, add_1, lt, ones)
 
     class cond_fn_0(torch.nn.Module):
@@ -6866,12 +6863,7 @@ class GraphModule(torch.nn.Module):
             )
 
     @skipIfTorchDynamo("Skip because we're testing export")
-    # TODO: we cannot turn on strict=False yet, also see #141762
-    # torch._dynamo.exc.Unsupported: call_method UserDefinedObjectVariable(set) __contains__
-    # [TorchInGraphFunctionVariable(<method 'add' of 'torch._C.TensorBase' objects>)] {}
-    # Seems we're inside the PreDispatchTorchFunctionMode, _side_effectful_need_to_be_preserved_pre_dispatch
-    # becomes a user defined variable instead of SetVariable.
-    @parametrize("strict", [True])
+    @parametrize("strict", [True, False])
     @parametrize("dynamic", [True, False])
     def test_while_loop_op_pytree_int_carry_export(self, strict, dynamic):
         m, args = WHILE_LOOP_TESTS["pytree_int_carry"]

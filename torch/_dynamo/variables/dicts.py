@@ -482,6 +482,15 @@ class ConstDictVariable(VariableTracker):
                 tx.output.side_effects.mutation(self)
                 self.items[Hashable(args[0])] = x
                 return x
+        elif name == "move_to_end":
+            self.install_dict_keys_match_guard()
+            assert not kwargs and len(args) == 1
+            tx.output.side_effects.mutation(self)
+            key = Hashable(args[0])
+            val = self.items[key]
+            self.items.pop(key)
+            self.items[key] = val
+            return ConstantVariable.create(None)
         else:
             return super().call_method(tx, name, args, kwargs)
 

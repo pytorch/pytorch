@@ -2472,14 +2472,32 @@ def sdpa_constraint(fx_node, *args, **kwargs):
         if len(arg.get_size()) not in (3, 4):
             return arg
 
+        if ir.is_aligned_realized_tensor(arg, ALIGNMENT):
+            return ir.try_match_insignificant_strides(
+                ir.ExternKernel.realize_input(arg), meta_stride_expr
+            )
+
+        if (
+            isinstance(arg, IRNode)
+            and arg.maybe_get_stride() is not None
+            and ir.is_aligned_realized_tensor(arg, ALIGNMENT)
+        ):
+            return ir.try_match_insignificant_strides(
+                ir.ExternKernel.realize_input(arg), meta_stride_expr
+            )
+
         if effn_attn_fwd_bias:
-            out_size = arg.get_size()
+            out_size = list(arg.get_size())
 
             expanded_dims = []
             # We require a dense last dimension, but the other strides
             # can be expanded, which results in a smaller tensor
+            maybe_stride = arg.maybe_get_stride()
             for i in range(len(arg.get_size()) - 1):
-                if V.graph.sizevars.statically_known_equals(meta_stride_expr[i], 0):
+                if V.graph.sizevars.statically_known_equals(meta_stride_expr[i], 0) or (
+                    maybe_stride is not None
+                    and V.graph.sizevars.statically_known_equals(maybe_stride[i], 0)
+                ):
                     expanded_dims.append(i)
 
             # Now, pad strides to alignment
@@ -2504,14 +2522,14 @@ def sdpa_constraint(fx_node, *args, **kwargs):
 
                 out_strides[i] = stride
 
-            # TODO: clone_input does not handle expanded dims well
             for dim in expanded_dims:
                 arg = slice_(arg, dim, 0, 1)
 
+            # TODO this is too subtle to get right in lowering, should be handled in match_exact_strides
             out = ir.ExternKernel.require_exact_strides(arg, out_strides)
-            return ir.try_match_insignificant_strides(
-                expand(TensorBox(out), out_size), out_strides
-            )
+            out = expand(TensorBox(out), out_size)
+            out = ir.try_match_insignificant_strides(out, out_strides)
+            return out
 
         if ir.is_aligned_realized_tensor(arg, ALIGNMENT):
             return ir.try_match_insignificant_strides(

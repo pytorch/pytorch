@@ -547,7 +547,10 @@ class FunctionalTensorMode(TorchDispatchMode):
                                     and kwargs["dtype"] != args_unwrapped[0].dtype
                                 )
 
-                            if must_copy():
+                            # `args_unwrapped` might be a tensor constant, not a functional tensor.
+                            if must_copy() and torch._is_functional_tensor(
+                                args_unwrapped[0]
+                            ):
                                 # We can further relax to args_unwrapped[0] != kwargs["dtype"], but I don't think
                                 # we have an aten op for that.
                                 torch.ops.aten._assert_tensor_metadata.default(
