@@ -179,7 +179,6 @@ void direct_copy_kernel_cuda(TensorIteratorBase &iter) {
       gpu_kernel(iter, [] GPU_LAMBDA(scalar_t x) { return x; });
     });
   } else if (dtype == kFloat8_e5m2 || dtype == kFloat8_e4m3fn || dtype == kFloat8_e5m2fnuz || dtype == kFloat8_e4m3fnuz || dtype == kFloat8_e8m0fnu) {
-     // TODO(later): clean this up and remove the special casing
      float8_copy_kernel_cuda(iter);
   } else if (iter.dtype(1) == kFloat && (dtype == kBFloat16 || dtype == kHalf)) {
      if (dtype == kBFloat16) {

@@ -454,7 +454,6 @@ inline ScalarType toUnderlying(ScalarType t) {
   }
 }
 
-// TODO(this PR): define numeric_limits and add float4 here
 inline bool isSignedType(ScalarType t) {
 #define CASE_ISSIGNED(name)     \
   case ScalarType::name:        \

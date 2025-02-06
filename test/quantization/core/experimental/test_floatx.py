@@ -413,7 +413,7 @@ class TestFloat8DtypeCPUOnly(TestCase):
 
     @dtypes(*CUDA_FLOAT8_DTYPES)
     def test_mul(self, dtype):
-        # TODO(future PR): remove arithmetic support from all float8 dtypes
+        # TODO(#113663): remove arithmetic support from all float8 dtypes
         if dtype is torch.float8_e8m0fnu:
             return unittest.skip("arithmetic not supported for torch.float8_e8m0fnu")
         shape = (10, 10)

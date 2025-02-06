@@ -20,6 +20,8 @@ inline C10_HOST_DEVICE Float8_e8m0fnu::Float8_e8m0fnu(float value)
 /// Implicit conversions
 
 inline C10_HOST_DEVICE Float8_e8m0fnu::operator float() const {
+  // TODO(future PR): rewrite without control flow
+
   // if exponent is zero, need to special case to return 2^-127 instead of zero
   if (x == 0) {
     return c10::detail::fp32_from_bits(0x00400000);
@@ -29,18 +31,6 @@ inline C10_HOST_DEVICE Float8_e8m0fnu::operator float() const {
   if (x == 255) {
     return c10::detail::fp32_from_bits(0x7f800001);
   }
-
-  // TODO(before land): do we care about no-control-flow tricks such as below in
-  // the context of this function?
-  // if exponent is 255, need to set any mantissa bit to properly represent NaN
-  // nan_signal_bit is 1 if exponent was 255 and 0 otherwise
-
-  // uint16_t nan_signal_bit = (x + 1) >> 8;
-
-  // if exponent is 255, we add one to create a valid NaN
-  // if exponent is not 255, we add zero which is a no-op
-
-  // res = res + static_cast<uint8_t>(nan_signal_bit);
 
   // leave sign at 0, set the exponent bits, leave stored mantissa at 0
   uint32_t res = x << 23;
