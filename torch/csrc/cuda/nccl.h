@@ -19,37 +19,33 @@ static_assert(
     NCCL_VERSION_CODE >= NCCL_VERSION(2, 7, 0),
     "NCCL version must be 2.7 or later");
 
-static_assert(
-    (NCCL_MAJOR == 2 && NCCL_MINOR >= 7) || (NCCL_MAJOR > 2),
-    "NCCL version must be 2.7 or later");
-
 // NCCL BFloat16 is enabled only for CUDA 11+ and NCCL versions 2.10+, or for
 // HIP 3.1+
-#if defined(NCCL_MAJOR) && NCCL_VERSION_CODE >= NCCL_VERSION(2, 10, 0)
+#if NCCL_VERSION_CODE >= NCCL_VERSION(2, 10, 0)
 #if defined(__CUDA_BF16_TYPES_EXIST__) || defined(RCCL_BFLOAT16)
 #define NCCL_HAS_BF16_DATATYPE
 #endif // defined(__CUDA_BF16_TYPES_EXIST__) || defined(RCCL_BFLOAT16)
 #define NCCL_HAS_AVG
 #endif // NCCL >= 2.10
 
-#if defined(NCCL_MAJOR) && NCCL_VERSION_CODE >= NCCL_VERSION(2, 11, 0)
+#if NCCL_VERSION_CODE >= NCCL_VERSION(2, 11, 0)
 #define ENABLE_NCCL_PREMUL_SUM_SUPPORT
 #endif
 
 // ncclGetLastError() is enabled only for NCCL versions 2.13+
 // ncclRemoteError only exists in NCCL versions 2.13+
-#if defined(NCCL_MAJOR) && NCCL_VERSION_CODE >= NCCL_VERSION(2, 13, 0)
+#if NCCL_VERSION_CODE >= NCCL_VERSION(2, 13, 0)
 #define NCCL_HAS_REMOTE_ERROR
 #endif
 
-#if defined(NCCL_MAJOR) && NCCL_VERSION_CODE >= NCCL_VERSION(2, 14, 0)
+#if NCCL_VERSION_CODE >= NCCL_VERSION(2, 14, 0)
 #define NCCL_HAS_COMM_NONBLOCKING
 #endif
 
 // Note: the first version that supports ncclConfig_t is 2.14. Here we
 // fast-forward the version requirement to 2.17 where ncclConfig_t has CTA and
 // CGA fields because they have already been pybinded out.
-#if defined(NCCL_MAJOR) && NCCL_VERSION_CODE >= NCCL_VERSION(2, 17, 0)
+#if NCCL_VERSION_CODE >= NCCL_VERSION(2, 17, 0)
 #define NCCL_HAS_CONFIG
 #endif
 
@@ -57,7 +53,7 @@ static_assert(
 #define NCCL_HAS_COMM_SPLIT
 #endif
 
-#if defined(NCCL_MAJOR) && NCCL_VERSION_CODE >= NCCL_VERSION(2, 19, 0)
+#if NCCL_VERSION_CODE >= NCCL_VERSION(2, 19, 0)
 #define NCCL_HAS_COMM_REGISTER
 #define NCCL_HAS_MEM_ALLOC
 #endif
