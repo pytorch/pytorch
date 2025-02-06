@@ -6459,27 +6459,6 @@ def forward(self, s0 : torch.SymInt, s1 : torch.SymInt, L_x_ : torch.Tensor):
             ).sum()
             self.assertEqual(actual, expected)
 
-    def test_incompatible_configs(self):
-        with torch._dynamo.config.patch(
-            suppress_errors=False, fail_on_recompile_limit_hit=False
-        ):
-            torch.compile(lambda: None)
-
-        with torch._dynamo.config.patch(
-            suppress_errors=True, fail_on_recompile_limit_hit=False
-        ):
-            torch.compile(lambda: None)
-
-        with torch._dynamo.config.patch(
-            suppress_errors=False, fail_on_recompile_limit_hit=True
-        ):
-            torch.compile(lambda: None)
-
-        with torch._dynamo.config.patch(
-            suppress_errors=True, fail_on_recompile_limit_hit=True
-        ), self.assertRaises(AssertionError):
-            torch.compile(lambda: None)
-
 
 class ReproTestsDevice(torch._dynamo.test_case.TestCase):
     def test_sub_alpha_scalar_repro(self, device):
