@@ -14,7 +14,6 @@ from torch.quantization._quantized_conversions import (
 from torch.testing import make_tensor
 from torch.testing._internal.common_cuda import (
     SM53OrLater,
-    SM89OrLater,
     _get_torch_cuda_version,
 )
 from torch.testing._internal.common_device_type import (
