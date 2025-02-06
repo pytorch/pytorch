@@ -101,6 +101,10 @@ class TORCH_API Context {
             opt_device_type.value())) { // passed device not an accelerator
       return false;
     }
+    if (!init_[static_cast<int8_t>(opt_device_type.value())].test_once()) {
+      // If the device is not initialized, no pointer can be pinned for it
+      return false;
+    }
     return getAcceleratorHooksInterface(opt_device_type).isPinnedPtr(data);
   }
 
@@ -405,11 +409,7 @@ class TORCH_API Context {
   bool enabled_cudnnSDP = true;
   bool enabled_overrideable = true;
   bool allow_fp16_bf16_reduction_mathSDP = false;
-#ifdef USE_ROCM
-  bool benchmark_cudnn = true;
-#else
   bool benchmark_cudnn = false;
-#endif
   Float32MatmulPrecision float32_matmul_precision =
       c10::utils::check_env("TORCH_ALLOW_TF32_CUBLAS_OVERRIDE") == true
       ? at::Float32MatmulPrecision::HIGH

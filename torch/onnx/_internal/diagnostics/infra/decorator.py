@@ -4,7 +4,7 @@ from __future__ import annotations
 import functools
 import logging
 import traceback
-from typing import Any, Callable, Dict, Tuple
+from typing import Any, Callable
 
 from torch.onnx._internal.diagnostics import infra
 from torch.onnx._internal.diagnostics.infra import formatter, utils
@@ -50,7 +50,7 @@ def format_return_values_in_markdown(
 
 
 ModifierCallableType = Callable[
-    [infra.Diagnostic, Callable, Tuple[Any, ...], Dict[str, Any], Any], None
+    [infra.Diagnostic, Callable, tuple[Any, ...], dict[str, Any], Any], None
 ]
 
 

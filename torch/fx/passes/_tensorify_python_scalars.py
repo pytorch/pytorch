@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import logging
 import os
-from typing import Any, List, Set, Union
+from typing import Any, Union
 
 from sympy import Integer, Number, Symbol
 from sympy.logic.boolalg import BooleanAtom
@@ -28,7 +28,7 @@ from torch.utils._sympy.reference import TensorReferenceAnalysis
 from torch.utils._sympy.symbol import symbol_is_type, SymT
 
 
-__all__: List[str] = []
+__all__: list[str] = []
 
 log = logging.getLogger(__name__)
 graph_code_log = torch._logging.getArtifactLogger(__name__, "graph_code")
@@ -242,7 +242,7 @@ def tensorify_python_scalars(
             if node.op == "call_function" and (
                 replacement_op := SUPPORTED_OPS.get(node.target)
             ):
-                args: List[Any] = []
+                args: list[Any] = []
                 transform = False
                 compute_dtype = get_computation_dtype(node.meta["val"].dtype)
 
@@ -299,7 +299,7 @@ def tensorify_python_scalars(
                             "tensorify_float_success", True, overwrite=True
                         )
 
-    failed_tensorify_ops: Set[str] = set()
+    failed_tensorify_ops: set[str] = set()
 
     # Now do one more pass that specializes all symfloats we didn't manage
     # to tensorify away.
