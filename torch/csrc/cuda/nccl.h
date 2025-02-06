@@ -16,18 +16,20 @@
 #include <vector>
 
 static_assert(
+    NCCL_VERSION_CODE >= NCCL_VERSION(2, 7, 0),
+    "NCCL version must be 2.7 or later");
+
+static_assert(
     (NCCL_MAJOR == 2 && NCCL_MINOR >= 7) || (NCCL_MAJOR > 2),
     "NCCL version must be 2.7 or later");
 
 // NCCL BFloat16 is enabled only for CUDA 11+ and NCCL versions 2.10+, or for
 // HIP 3.1+
 #if defined(NCCL_MAJOR) && NCCL_VERSION_CODE >= NCCL_VERSION(2, 10, 0)
-#if defined(__CUDA_BF16_TYPES_EXIST__)
+#if defined(__CUDA_BF16_TYPES_EXIST__) || defined(RCCL_BFLOAT16)
 #define NCCL_HAS_BF16_DATATYPE
-#endif // defined(__CUDA_BF16_TYPES_EXIST__)
+#endif // defined(__CUDA_BF16_TYPES_EXIST__) || defined(RCCL_BFLOAT16)
 #define NCCL_HAS_AVG
-#elif defined(USE_ROCM) && (TORCH_HIP_VERSION >= 301)
-#define NCCL_HAS_BF16_DATATYPE
 #endif // NCCL >= 2.10
 
 #if defined(NCCL_MAJOR) && NCCL_VERSION_CODE >= NCCL_VERSION(2, 11, 0)
