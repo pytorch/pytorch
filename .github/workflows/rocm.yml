@@ -26,12 +26,12 @@ jobs:
       id-token: write
       contents: read
 
-  linux-focal-rocm6_2-py3_10-build:
+  linux-focal-rocm6_3-py3_10-build:
     if: ${{ (github.event_name != 'schedule' || github.repository == 'pytorch/pytorch') && github.repository_owner == 'pytorch' }}
-    name: linux-focal-rocm6.2-py3.10
+    name: linux-focal-rocm6.3-py3.10
     uses: ./.github/workflows/_linux-build.yml
     with:
-      build-environment: linux-focal-rocm6.2-py3.10
+      build-environment: linux-focal-rocm6.3-py3.10
       docker-image-name: pytorch-linux-focal-rocm-n-py3
       sync-tag: rocm-build
       test-matrix: |
@@ -45,17 +45,17 @@ jobs:
         ]}
     secrets: inherit
 
-  linux-focal-rocm6_2-py3_10-test:
+  linux-focal-rocm6_3-py3_10-test:
     permissions:
       id-token: write
       contents: read
-    name: linux-focal-rocm6.2-py3.10
+    name: linux-focal-rocm6.3-py3.10
     uses: ./.github/workflows/_rocm-test.yml
     needs:
-      - linux-focal-rocm6_2-py3_10-build
+      - linux-focal-rocm6_3-py3_10-build
       - target-determination
     with:
-      build-environment: linux-focal-rocm6.2-py3.10
-      docker-image: ${{ needs.linux-focal-rocm6_2-py3_10-build.outputs.docker-image }}
-      test-matrix: ${{ needs.linux-focal-rocm6_2-py3_10-build.outputs.test-matrix }}
+      build-environment: linux-focal-rocm6.3-py3.10
+      docker-image: ${{ needs.linux-focal-rocm6_3-py3_10-build.outputs.docker-image }}
+      test-matrix: ${{ needs.linux-focal-rocm6_3-py3_10-build.outputs.test-matrix }}
     secrets: inherit

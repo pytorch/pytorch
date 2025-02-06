@@ -3,7 +3,8 @@ from __future__ import annotations
 
 import copy
 import functools
-from typing import Any, Callable, Dict, List, Optional, Set, TYPE_CHECKING
+import warnings
+from typing import Any, Callable, Optional, TYPE_CHECKING
 
 import torch
 import torch._dynamo as torchdynamo
@@ -30,6 +31,7 @@ from torch.ao.quantization.quantizer.xnnpack_quantizer_utils import (
     propagate_annotation,
     QuantizationConfig,
 )
+from torch.fx._compatibility import compatibility
 
 
 if TYPE_CHECKING:
@@ -49,7 +51,7 @@ def _get_dynamo_graph(function: Callable, inputs) -> torch.fx.Graph:
     return gm.graph
 
 
-def _get_linear_patterns(input_size: List[int]):
+def _get_linear_patterns(input_size: list[int]):
     in_channels = input_size[-1]
     out_channels = 8  # hard coding but this should not matter
     weight = torch.ones((out_channels, in_channels))
@@ -64,8 +66,8 @@ def _get_linear_patterns(input_size: List[int]):
     return [pattern_w_bias, pattern_wo_bias]
 
 
-def _supported_symmetric_quantized_operators() -> Dict[str, List[OperatorPatternType]]:
-    supported_operators: Dict[str, List[OperatorPatternType]] = {
+def _supported_symmetric_quantized_operators() -> dict[str, list[OperatorPatternType]]:
+    supported_operators: dict[str, list[OperatorPatternType]] = {
         # Both conv and linear should be able to handle relu + hardtanh fusion since
         # those are clamp ops
         "conv2d": [
@@ -84,8 +86,8 @@ def _supported_symmetric_quantized_operators() -> Dict[str, List[OperatorPattern
     return copy.deepcopy(supported_operators)
 
 
-def _get_supported_symmetric_config_and_operators() -> List[OperatorConfig]:
-    supported_config_and_operators: List[OperatorConfig] = []
+def _get_supported_symmetric_config_and_operators() -> list[OperatorConfig]:
+    supported_config_and_operators: list[OperatorConfig] = []
     for quantization_config in [
         get_symmetric_quantization_config(),
         get_symmetric_quantization_config(is_qat=True),
@@ -110,7 +112,7 @@ def get_symmetric_quantization_config(
     weight_qmin: int = -127,
     weight_qmax: int = 127,
 ):
-    extra_args: Dict[str, Any] = {"eps": 2**-12}
+    extra_args: dict[str, Any] = {"eps": 2**-12}
     if is_qat:
         if is_dynamic:
             act_observer_or_fake_quant_ctr = FakeQuantize
@@ -148,7 +150,7 @@ def get_symmetric_quantization_config(
     elif is_per_channel:
         weight_observer_or_fake_quant_ctr = PerChannelMinMaxObserver
 
-    extra_args: Dict[str, Any] = {"eps": 2**-12}
+    extra_args: dict[str, Any] = {"eps": 2**-12}
     if is_qat:
         if weight_qscheme == torch.per_tensor_symmetric:
             extra_args["observer"] = MovingAverageMinMaxObserver
@@ -186,7 +188,7 @@ def get_symmetric_quantization_config(
     return quantization_config
 
 
-def _get_supported_config_and_operators() -> List[OperatorConfig]:
+def _get_supported_config_and_operators() -> list[OperatorConfig]:
     return _get_supported_symmetric_config_and_operators()
 
 
@@ -224,7 +226,7 @@ def _get_module_type_filter(tp: Callable):
 
 
 def _get_not_module_type_or_name_filter(
-    tp_list: List[Callable], module_name_list: List[str]
+    tp_list: list[Callable], module_name_list: list[str]
 ) -> Callable[[Node], bool]:
     module_type_filters = [_get_module_type_filter(tp) for tp in tp_list]
     module_name_list_filters = [_get_module_name_filter(m) for m in module_name_list]
@@ -235,7 +237,15 @@ def _get_not_module_type_or_name_filter(
     return not_module_type_or_name_filter
 
 
+@compatibility(is_backward_compatible=False)
 class XNNPACKQuantizer(Quantizer):
+    """
+    !!! DEPRECATED !!!
+    XNNPACKQuantizer is a marked as deprected. It will be removed in the future.
+    It has been moved to executorch.backends.xnnpack.quantizer.xnnpack_quantizer.XNNPACKQuantizer.
+    Please use the new quantizer instead.
+    """
+
     supported_config_and_operators = _get_supported_config_and_operators()
     STATIC_QAT_ONLY_OPS = [
         "conv_bn_relu",
@@ -268,16 +278,17 @@ class XNNPACKQuantizer(Quantizer):
 
     def __init__(self) -> None:
         super().__init__()
+        warnings.warn(f"{self.__class__.__name__} is deprecated!")
         self.global_config: Optional[QuantizationConfig] = None
-        self.operator_type_config: Dict[
+        self.operator_type_config: dict[
             torch._ops.OpOverloadPacket, Optional[QuantizationConfig]
         ] = {}
-        self.module_type_config: Dict[Callable, Optional[QuantizationConfig]] = {}
-        self.module_name_config: Dict[str, Optional[QuantizationConfig]] = {}
+        self.module_type_config: dict[Callable, Optional[QuantizationConfig]] = {}
+        self.module_name_config: dict[str, Optional[QuantizationConfig]] = {}
 
     @classmethod
-    def get_supported_quantization_configs(cls) -> List[QuantizationConfig]:
-        op_configs: Set[QuantizationConfig] = {
+    def get_supported_quantization_configs(cls) -> list[QuantizationConfig]:
+        op_configs: set[QuantizationConfig] = {
             spec for spec, _ in cls.supported_config_and_operators
         }
         return list(op_configs)
@@ -285,7 +296,7 @@ class XNNPACKQuantizer(Quantizer):
     @classmethod
     def get_supported_operator_for_quantization_config(
         cls, quantization_config: Optional[QuantizationConfig]
-    ) -> List[OperatorPatternType]:
+    ) -> list[OperatorPatternType]:
         if quantization_config is None:
             all_ops = []
             for _, ops in cls.supported_config_and_operators:
@@ -432,5 +443,5 @@ class XNNPACKQuantizer(Quantizer):
         pass
 
     @classmethod
-    def get_supported_operators(cls) -> List[OperatorConfig]:
+    def get_supported_operators(cls) -> list[OperatorConfig]:
         return cls.supported_config_and_operators

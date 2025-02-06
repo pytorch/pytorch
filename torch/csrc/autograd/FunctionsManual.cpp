@@ -2076,8 +2076,6 @@ Tensor chunk_backward_nested(
       self.layout() == c10::kJagged,
       "Nested Strided Tensor doesn't support chunk backward.")
   dim = at::maybe_wrap_dim(dim, self.dim());
-  TORCH_INTERNAL_ASSERT(
-      dim != 0, "Nested Tensor doesn't support chunk backward on dim=0 yet.")
   Tensor ret = at::zeros_like(self);
   std::vector<Tensor> rets = at::chunk(ret, chunks, dim);
   for (const auto j : c10::irange(grads.size())) {
@@ -2176,13 +2174,13 @@ Tensor _nested_narrow_backward(
   Tensor narrowed_grad_values = at::_nested_get_values(narrowed_grad);
   TORCH_INTERNAL_ASSERT(
       grad_values.dim() == narrowed_grad_values.dim(),
-      "Bug encountered in _nested_narrow_backward(); please open an issue");
+      "Bug encountered in _nested_narrow_backward()");
   for (int i = 0; i < grad_values.dim(); ++i) {
     auto narrowed_grad_size = narrowed_grad_values.sym_size(i);
     auto grad_size = grad_values.sym_size(i);
     TORCH_SYM_CHECK(
         narrowed_grad_size.sym_eq(grad_size),
-        "Bug encountered in _nested_narrow_backward(); please open an issue");
+        "Bug encountered in _nested_narrow_backward()");
   }
   narrowed_grad_values.copy_(grad_values);
   return grad_input;

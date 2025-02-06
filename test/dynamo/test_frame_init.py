@@ -93,7 +93,7 @@ class FrameInitTests(torch._dynamo.test_case.TestCase):
             if frame.f_code in code_map1:
                 transformed_code = code_map1[frame.f_code]
                 return torch._dynamo.types.GuardedCode(
-                    transformed_code, empty_guard_manager, CompileId(0, 0)
+                    transformed_code, empty_guard_manager, CompileId(None, 0, 0)
                 )
             return None
 
@@ -101,7 +101,7 @@ class FrameInitTests(torch._dynamo.test_case.TestCase):
             if frame.f_code in code_map2:
                 transformed_code = code_map2[frame.f_code]
                 return torch._dynamo.types.GuardedCode(
-                    transformed_code, empty_guard_manager, CompileId(0, 0)
+                    transformed_code, empty_guard_manager, CompileId(None, 0, 0)
                 )
             return None
 

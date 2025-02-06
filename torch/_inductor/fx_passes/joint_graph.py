@@ -4,7 +4,7 @@ import itertools
 import logging
 import typing
 from collections import Counter
-from typing import Any, Dict, List, Union
+from typing import Any, Union
 
 import torch
 import torch._guards
@@ -158,7 +158,7 @@ def remove_redundant_views(gm: torch.fx.GraphModule):
     """
     with torch.utils._python_dispatch._disable_current_modes():
         # A dictionary mapping a tensor to all aliased views.
-        views: Dict[torch.fx.Node, Dict[torch.dtype, torch.fx.Node]] = {}
+        views: dict[torch.fx.Node, dict[torch.dtype, torch.fx.Node]] = {}
         graph = gm.graph
 
         for node in graph.find_nodes(
@@ -205,11 +205,11 @@ class UniformValueConstantFolder(ConstantFolder):
 
     def __init__(self, gm, skip_constructors=False) -> None:
         super().__init__(gm, skip_constructors)
-        self.node_storages_ptrs: Dict[torch.fx.Node, int] = {}
-        self.constant_data_ptrs: Dict[torch.fx.Node, StorageWeakRef] = {}
+        self.node_storages_ptrs: dict[torch.fx.Node, int] = {}
+        self.constant_data_ptrs: dict[torch.fx.Node, StorageWeakRef] = {}
         # we may constant fold a tensor which in the graph has a sym size
         # see: [constant folding refining of symints]
-        self.node_replacements_shapes: Dict[torch.fx.Node, List[int]] = {}
+        self.node_replacements_shapes: dict[torch.fx.Node, list[int]] = {}
 
         # initialize symint -> node mapping so that we can
         # use symint nodes in full constructors
@@ -249,7 +249,7 @@ class UniformValueConstantFolder(ConstantFolder):
         self.node_replacements_shapes[node] = node.meta["val"].shape
         self.constant_data_ptrs[node] = StorageWeakRef(tensor.untyped_storage())
 
-    def insert_placerholder_values(self, env: Dict[torch.fx.Node, Any]) -> None:
+    def insert_placerholder_values(self, env: dict[torch.fx.Node, Any]) -> None:
         for n in self.module.graph.find_nodes(op="placeholder"):  # type: ignore[operator, union-attr]
             if "val" in n.meta and isinstance(n.meta["val"], torch.SymInt):
                 env[n] = n.meta["val"]
@@ -287,8 +287,11 @@ class UniformValueConstantFolder(ConstantFolder):
             and len(node.args) == 2
         ):
             args, kwargs = self.fetch_args_kwargs_from_env(node)
-            new_args = [[1], args[1]]
-            return aten.full.default(*new_args, **node.kwargs)
+            value = args[1]
+            # Don't specialize symbolic value.
+            if not isinstance(value, (torch.SymInt, torch.SymFloat, torch.SymBool)):
+                new_args = [[1], value]
+                return aten.full.default(*new_args, **node.kwargs)
 
         # handle before view ops because this changes value
         if node.target == aten.view.dtype:
@@ -450,11 +453,6 @@ def joint_graph_passes(graph: torch.fx.GraphModule):
 
     lazy_init()
     count = 0
-    if config.joint_custom_pre_pass is not None:
-        GraphTransformObserver(graph, "joint_custom_pre_pass").apply_graph_pass(
-            config.joint_custom_pre_pass
-        )
-        count += 1
 
     from .post_grad import remove_noop_ops
 
@@ -464,6 +462,12 @@ def joint_graph_passes(graph: torch.fx.GraphModule):
         GraphTransformObserver(graph, "constant_fold_uniform_value").apply_gm_pass(
             constant_fold_uniform_value
         )
+
+    if config.joint_custom_pre_pass is not None:
+        GraphTransformObserver(graph, "joint_custom_pre_pass").apply_graph_pass(
+            config.joint_custom_pre_pass
+        )
+        count += 1
 
     if config.pattern_matcher:
         for i, patterns in enumerate(pass_patterns):

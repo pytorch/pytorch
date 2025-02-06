@@ -1,5 +1,9 @@
-# mypy: allow-untyped-defs
+from collections.abc import Sequence
+
 import torch.fx as fx
+
+
+__all__ = ["set_trace"]
 
 
 def set_trace(gm: fx.GraphModule) -> fx.GraphModule:
@@ -15,7 +19,7 @@ def set_trace(gm: fx.GraphModule) -> fx.GraphModule:
         the `gm` with breakpoint inserted.
     """
 
-    def insert_pdb(body):
+    def insert_pdb(body: Sequence[str]) -> list[str]:
         return ["import pdb; pdb.set_trace()\n", *body]
 
     with gm.graph.on_generate_code(
