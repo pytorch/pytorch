@@ -101,21 +101,22 @@ template <typename T>
   return ::metal::isunordered(a, b) ? NAN : ::metal::min(a, b);
 }
 
-
 template <typename T>
 ::metal::enable_if_t<::metal::is_integral_v<T>, T> min(T a, T b) {
   return ::metal::min(a, b);
 }
 
 #if __METAL_VERSION__ >= 310
-template<>
+template <>
 bfloat min(bfloat a, bfloat b) {
-  return bfloat(::metal::isunordered(a, b) ? NAN : ::metal::min(float(a), float(b)));
+  return bfloat(
+      ::metal::isunordered(a, b) ? NAN : ::metal::min(float(a), float(b)));
 }
 
-template<>
+template <>
 bfloat max(bfloat a, bfloat b) {
-  return bfloat(::metal::isunordered(a, b) ? NAN : ::metal::max(float(a), float(b)));
+  return bfloat(
+      ::metal::isunordered(a, b) ? NAN : ::metal::max(float(a), float(b)));
 }
 #endif
 
