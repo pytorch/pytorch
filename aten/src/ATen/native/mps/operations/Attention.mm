@@ -27,7 +27,7 @@ static inline std::tuple<Tensor, bool> ensure_4d(const Tensor& x) {
         t = x.unsqueeze(0);
         squeezed = true;
     }
-    return {t, squeezed};
+    return {std::move(t), squeezed};
 }
 
 std::tuple<Tensor, Tensor> _scaled_dot_product_attention_math_mps(const Tensor& query,
