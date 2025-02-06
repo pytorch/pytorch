@@ -797,6 +797,11 @@ def verify(
 ):
     """Verify model export to ONNX against original PyTorch model.
 
+    .. deprecated::
+        Deprecated since 2.7.0.
+        Consider using ``torch.onnx.export(..., dynamo=True)`` and use the returned
+        ``ONNXProgram`` to test the ONNX model.
+
     Args:
         model (torch.nn.Module or torch.jit.ScriptModule): See :func:`torch.onnx.export`.
         input_args (tuple): See :func:`torch.onnx.export`.
@@ -876,6 +881,13 @@ def verify_aten_graph(
     params_dict: dict[str, Any] | None = None,
     verification_options: VerificationOptions | None = None,
 ) -> tuple[AssertionError | None, torch.Graph, _OutputsType, _OutputsType]:
+    """Verify aten graph export to ONNX against original PyTorch model.
+
+    .. deprecated::
+        Deprecated since 2.7.0.
+        Consider using ``torch.onnx.export(..., dynamo=True)`` and use the returned
+        ``ONNXProgram`` to test the ONNX model.
+    """
     if verification_options is None:
         verification_options = VerificationOptions()
     if params_dict is None:
@@ -1166,7 +1178,13 @@ class OnnxTestCaseRepro:
 )
 @dataclasses.dataclass
 class GraphInfo:
-    """GraphInfo contains validation information of a TorchScript graph and its converted ONNX graph."""
+    """GraphInfo contains validation information of a TorchScript graph and its converted ONNX graph.
+
+    .. deprecated::
+        Deprecated since 2.7.0.
+        Consider using ``torch.onnx.export(..., dynamo=True)`` and use the returned
+        ``ONNXProgram`` to test the ONNX model.
+    """
 
     graph: torch.Graph
     input_args: tuple[Any, ...]
