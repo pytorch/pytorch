@@ -33,6 +33,7 @@ from ..exc import (
 from ..guards import GuardBuilder, install_guard
 from ..source import (
     AttrSource,
+    CallFunctionNoArgsSource,
     GetItemSource,
     RandomValueSource,
     UnspecializedParamBufferSource,
@@ -307,15 +308,11 @@ class UserDefinedClassVariable(UserDefinedVariable):
             and not kwargs
             and "__subclasses__" not in self.value.__dict__
         ):
-            options = {"mutation_type": ValueMutationNew()}
-            subs_as_vars: list[VariableTracker] = []
-            for sub in self.value.__subclasses__():
-                source = AttrSource(tx.import_source(sub.__module__), sub.__name__)
-                subs_as_vars.append(
-                    variables.UserDefinedClassVariable(sub, source=source)
-                )
-
-            return variables.ListVariable(subs_as_vars, **options)
+            source = self.source
+            if self.source:
+                source = AttrSource(self.source, "__subclasses__")
+                source = CallFunctionNoArgsSource(source)
+            return VariableTracker.build(tx, self.value.__subclasses__(), source)
         elif (
             self.value in {collections.OrderedDict, collections.defaultdict}
             and name == "fromkeys"
