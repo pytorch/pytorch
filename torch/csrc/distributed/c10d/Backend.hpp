@@ -417,6 +417,18 @@ class TORCH_API Backend : public torch::CustomClassHolder {
             "Backend ", getBackendName(), " does not support getMemAllocator"));
   }
 
+  virtual at::Tensor allocateTensor(long size, at::TensorOptions options = {}) {
+    TORCH_CHECK(
+        false,
+        c10::str(
+            "Backend ", getBackendName(), " does not support allocateTensor"));
+  }
+
+  virtual bool supportsTensorAlloc() {
+    // Change to true in concrete backend if supported
+    return false;
+  }
+
  protected:
   // Implementations of this interface need to call this to setup
   // appropriate logging etc.

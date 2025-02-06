@@ -1164,7 +1164,20 @@ void Reducer::initialize_buckets(
       if (mixed_precision_param_dtype_.has_value()) {
         options = options.dtype(mixed_precision_param_dtype_);
       }
-      bucket.gradients = at::empty({static_cast<long>(offset)}, options);
+
+      auto bucketSize = static_cast<long>(offset);
+      auto backend = process_group_->getDefaultBackend();
+      if (backend->supportsTensorAlloc()) {
+        // Comm-optimized memory pool is available, use it to allocate tensor
+        LOG(INFO)
+            << "Reducer: found communication-optimized memory allocator, using it to create bucket";
+        bucket.gradients = backend->allocateTensor(bucketSize, options);
+      } else {
+        // Plain creation of tensor
+        LOG(INFO)
+            << "Reducer: communication-optimized memory allocator not found, using regular one";
+        bucket.gradients = at::empty({bucketSize}, options);
+      }
 
       // Note:  "Gradient Layout Contract"
       //

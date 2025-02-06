@@ -774,6 +774,12 @@ class TORCH_API ProcessGroupNCCL : public Backend {
 
   std::shared_ptr<c10::Allocator> getMemAllocator() override;
 
+  at::Tensor allocateTensor(long size, at::TensorOptions options = {}) override;
+
+  bool supportsTensorAlloc() override {
+    return true;
+  }
+
   // Performs NCCL user buffer registration for all buffers in
   // the given MemPool
   void registerMemPool(c10::cuda::MemPool* pool);
@@ -1294,6 +1300,8 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   // Internal cached value: use NCCL non-blocking API mode or not.
   // Use `useNonblocking()` method instead of accessing this variable directly.
   std::optional<bool> useNonblocking_{std::nullopt};
+
+  c10::cuda::MemPool* memPool_ = nullptr;
 };
 
 // Dumps the NCCL comm traces and additional information about the Process

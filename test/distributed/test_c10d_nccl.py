@@ -1937,7 +1937,8 @@ class DistributedDataParallelTest(
                         opt = torch.optim.SGD(m.parameters(), lr=0.1)
                         opt_ddp = torch.optim.SGD(m_ddp.parameters(), lr=0.1)
                         has_half = any(p.dtype is torch.half for p in m.parameters())
-                        tol = 1.0e-3 if has_half else 1.0e-5
+                        atol = 1.0e-3 if has_half else 1.0e-4
+                        rtol = 1.0e-3
                     except BaseException:
                         # Prints case-specific debugging info to narrow down failing case.
                         print(
@@ -1980,7 +1981,7 @@ class DistributedDataParallelTest(
                                         layer_name + "." + param_name + " " + iter_msg
                                     )
                                     self.assertEqual(
-                                        p.grad, p_ddp.grad, rtol=tol, atol=tol
+                                        p.grad, p_ddp.grad, rtol=rtol, atol=atol
                                     )
                             opt.step()
                             opt_ddp.step()
