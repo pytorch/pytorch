@@ -895,19 +895,19 @@ def sdpa_dense_backward(
     grad_key = torch.sum(grad_key, 2, keepdim=False)
     grad_value = torch.sum(grad_value, 2, keepdim=False)
 
+    # Fill to correctly strided outputs
+    actual_grad_query.copy_(grad_query)
+    actual_grad_key.copy_(grad_key)
+    actual_grad_value.copy_(grad_value)
+
     if Bq != Bkv:
         assert (
             Bq > 1 and Bkv == 1
         ), f"Bq and Bkv must broadcast. Got Bq={Bq} and Bkv={Bkv}"
 
-        # Reduce DK, DV along broadcasted batches.
-        actual_grad_key.copy_(grad_key)
-        actual_grad_value.copy_(grad_value)
-
         actual_grad_key = torch.sum(actual_grad_key, 0, keepdim=True)
         actual_grad_value = torch.sum(actual_grad_value, 0, keepdim=True)
 
-    actual_grad_query.copy_(grad_query)
     score_mod_other_buffer_grads = [
         actual_grad.copy_(grad) if isinstance(actual_grad, torch.Tensor) else None
         for actual_grad, grad in zip(
