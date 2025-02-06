@@ -1,5 +1,4 @@
 # mypy: allow-untyped-defs
-import typing
 from typing import Any, Union
 
 import torch
@@ -387,10 +386,7 @@ class _unsafe_preserve_version_counter(_DecoratorContextManager):
 
     """
 
-    def __init__(
-        self,
-        tensors: Union[torch.Tensor, typing.Tuple[torch.Tensor, ...]],  # noqa: UP006
-    ) -> None:
+    def __init__(self, tensors: Union[torch.Tensor, tuple[torch.Tensor, ...]]) -> None:
         self.tensors = (tensors,) if isinstance(tensors, torch.Tensor) else tensors
         assert isinstance(self.tensors, tuple)
         self.prev_versions = tuple(t._version for t in self.tensors)
