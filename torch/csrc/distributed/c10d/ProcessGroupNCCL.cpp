@@ -1544,15 +1544,7 @@ ProcessGroupNCCL::~ProcessGroupNCCL() {
               << "ProcessGroupNCCL onCompletionHookThread thread joined.";
   }
 
-  if (memPool_) {
-    LOG(INFO) << logPrefix() << "releasing memory pool";
-    c10::cuda::CUDACachingAllocator::releasePool(
-        memPool_->device(), memPool_->id());
-    // Commenting out the delete below since we would hit an internal error at
-    // assert use_count == 1. This should not cause CUDA memory leak as the
-    // `memPool_` itself carries only meta data instead of the actual memory.
-    // delete memPool_;
-  }
+  delete memPool_;
 }
 
 bool ProcessGroupNCCL::dumpDebuggingInfo(bool includeStackTrace /*=true*/) {
@@ -5436,25 +5428,36 @@ std::shared_ptr<c10::Allocator> ProcessGroupNCCL::getMemAllocator() {
 at::Tensor ProcessGroupNCCL::allocateTensor(
     long size,
     at::TensorOptions options) {
+  // Some checks
   TORCH_CHECK(options.has_device(), "Tensor options must include device");
   auto device = options.device();
   TORCH_CHECK(
       device.is_cuda(),
       "NCCL tensor allocator expects cuda type but got " + c10::str(device))
+
   at::cuda::OptionalCUDAGuard gpuGuard(device);
+
+  // Create memory pool
   if (!memPool_) {
+    // Needs a CUDAAllocator
     auto allocator =
         reinterpret_cast<c10::cuda::CUDACachingAllocator::CUDAAllocator*>(
             getMemAllocator().get());
+    // Pool is created
     memPool_ = new c10::cuda::MemPool(allocator);
+    // Also need to ncclCommRegister it so that NCCL recognizes it
     registerMemPool(memPool_);
     LOG(INFO) << logPrefix() << "Created memory pool";
   }
+
+  // Allocate tensor under this MemPool's context
   auto ctx = c10::cuda::MemPoolContext(memPool_);
   c10::cuda::CUDACachingAllocator::beginAllocateToPool(
       memPool_->device(), memPool_->id(), [](cudaStream_t) { return true; });
   at::Tensor tensor = at::empty({size}, options);
   c10::cuda::CUDACachingAllocator::endAllocateToPool(
+      memPool_->device(), memPool_->id());
+  c10::cuda::CUDACachingAllocator::releasePool(
       memPool_->device(), memPool_->id());
   LOG(INFO) << logPrefix() << "Allocated tensor of size " << size
             << " from memory pool";

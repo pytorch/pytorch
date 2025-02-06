@@ -774,6 +774,7 @@ class TORCH_API ProcessGroupNCCL : public Backend {
 
   std::shared_ptr<c10::Allocator> getMemAllocator() override;
 
+  // Allocate tensor from communication-optimized memory pool
   at::Tensor allocateTensor(long size, at::TensorOptions options = {}) override;
 
   bool supportsTensorAlloc() override {
@@ -1301,6 +1302,7 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   // Use `useNonblocking()` method instead of accessing this variable directly.
   std::optional<bool> useNonblocking_{std::nullopt};
 
+  // Communication-optimized memory pool associated with this PG
   c10::cuda::MemPool* memPool_ = nullptr;
 };
 

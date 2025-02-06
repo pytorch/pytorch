@@ -417,6 +417,8 @@ class TORCH_API Backend : public torch::CustomClassHolder {
             "Backend ", getBackendName(), " does not support getMemAllocator"));
   }
 
+  // Allocate tensor (aten::empty) from backend's communication-optimized memory
+  // pool
   virtual at::Tensor allocateTensor(long size, at::TensorOptions options = {}) {
     TORCH_CHECK(
         false,
@@ -424,6 +426,7 @@ class TORCH_API Backend : public torch::CustomClassHolder {
             "Backend ", getBackendName(), " does not support allocateTensor"));
   }
 
+  // Returns true if backend supports tensor allocation
   virtual bool supportsTensorAlloc() {
     // Change to true in concrete backend if supported
     return false;
