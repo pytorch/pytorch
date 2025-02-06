@@ -6301,6 +6301,11 @@ class ShapeEnv:
                                     self.var_to_range[i0], ValueRanges.wrap(d)
                                 ),
                             )
+                            # Propagate hints (real tensor tracing)
+                            if i0 in self.unbacked_var_to_val:
+                                self.set_unbacked_var_to_val(
+                                    i1, self.unbacked_var_to_val[i0] // d
+                                )
                             # Propagate size-like-ness
                             if i0 in self.size_like:
                                 self.size_like.add(i1)
