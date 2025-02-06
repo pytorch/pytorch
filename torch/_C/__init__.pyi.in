@@ -2101,6 +2101,7 @@ class _CudaEventBase:
         enable_timing: _bool = False,
         blocking: _bool = False,
         interprocess: _bool = False,
+        timing_only: _bool = False,
     ) -> _CudaEventBase: ...
     @classmethod
     def from_ipc_handle(cls, device: _device, ipc_handle: bytes) -> _CudaEventBase: ...

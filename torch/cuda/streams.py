@@ -163,7 +163,9 @@ class Event(torch._C._CudaEventBase):
        https://docs.nvidia.com/cuda/cuda-runtime-api/group__CUDART__EVENT.html
     """
 
-    def __new__(cls, enable_timing=False, blocking=False, interprocess=False, timing_only=False):
+    def __new__(
+        cls, enable_timing=False, blocking=False, interprocess=False, timing_only=False
+    ):
         return super().__new__(
             cls,
             enable_timing=enable_timing,

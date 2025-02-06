@@ -2046,7 +2046,7 @@ torch.cuda.synchronize()
         torch.cuda.synchronize()
         with tempfile.TemporaryDirectory() as tempdir:
             g.debug_dump(os.path.join(tempdir, "out_multi_stream.dot"))
-    
+
     @unittest.skipIf(
         not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs"
     )
@@ -2077,9 +2077,10 @@ torch.cuda.synchronize()
         torch.cuda.synchronize()
         with tempfile.TemporaryDirectory() as tempdir:
             g.debug_dump(os.path.join(tempdir, "out_multi_stream.dot"))
-    
+
     @unittest.skipIf(
-        not TEST_CUDA_GRAPH or TEST_WITH_ROCM, "CUDA >= 11.0 or ROCM >= 6.4 required for intra-graph timing"
+        not TEST_CUDA_GRAPH or TEST_WITH_ROCM,
+        "CUDA >= 11.0 or ROCM >= 6.4 required for intra-graph timing"
     )
     def test_graph_timing(self):
         torch.cuda.empty_cache()
@@ -2088,7 +2089,7 @@ torch.cuda.synchronize()
         g = torch.cuda.CUDAGraph()
         start_event = torch.cuda.Event(enable_timing=True, timing_only=True)
         end_event = torch.cuda.Event(enable_timing=True, timing_only=True)
-        with torch.cuda.Graph(g):
+        with torch.cuda.graph(g):
             start_event.record()
             z = x + y
             end_event.record()

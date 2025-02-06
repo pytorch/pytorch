@@ -128,7 +128,15 @@ struct TORCH_CUDA_CPP_API CUDAEvent {
     TORCH_CHECK(device_index_ == stream.device_index(), "Event device ", device_index_,
       " does not match recording stream's device ", stream.device_index(), ".");
     CUDAGuard guard(device_index_);
-#if (defined(CUDA_VERSION) || (defined(USE_ROCM) && ROCM_VERSION >= 60400))
+#if defined(USE_ROCM)
+    TORCH_CHECK(
+      (
+        (c10::cuda::currentStreamCaptureStatusMayInitCtx() == c10::cuda::CaptureStatus::None)
+          || (flags_ & cudaEventDisableTiming)
+          || !timing_only_
+      ), "intra-graph CUDAEvent timing is not supported on ROCm.")
+    AT_CUDA_CHECK(cudaEventRecord(event_, stream));
+#else
     AT_CUDA_CHECK(
       cudaEventRecordWithFlags(
         event_,
@@ -140,14 +148,6 @@ struct TORCH_CUDA_CPP_API CUDAEvent {
         ) ? cudaEventRecordDefault : cudaEventRecordExternal
       )
     );
-#else
-    TORCH_CHECK(
-      (
-        (c10::cuda::currentStreamCaptureStatusMayInitCtx() == c10::cuda::CaptureStatus::None)
-          || (flags_ & cudaEventDisableTiming)
-          || !timing_only_
-      ), "intra-graph CUDAEvent timing is not supported on this ROCm version.")
-    AT_CUDA_CHECK(cudaEventRecord(event_, stream));
 #endif
     const c10::impl::PyInterpreter* interp = c10::impl::GPUTrace::get_trace();
     if (C10_UNLIKELY(interp)) {

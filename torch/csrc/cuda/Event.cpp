@@ -42,8 +42,8 @@ static PyObject* THCPEvent_pynew(
   }
 
   TORCH_CHECK(
-    !(!enable_timing && timing_only),
-    "`timing_only=True` can only be set if `enable_timing=True`");
+      !(!enable_timing && timing_only),
+      "`timing_only=True` can only be set if `enable_timing=True`");
 
   THPObjectPtr ptr(type->tp_alloc(type, 0));
   if (!ptr) {
