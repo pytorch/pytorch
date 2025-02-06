@@ -1320,7 +1320,7 @@ def add_compilation_metrics_to_chromium(c: CompilationMetrics) -> None:
     )
 
 
-def get_dynamo_config_for_logging() -> Optional[str]:
+def _get_dynamo_config_for_logging() -> Optional[str]:
     def clean_for_json(d: dict[str, Any]) -> dict[str, Any]:
         blocklist = {
             "TYPE_CHECKING",
@@ -1433,7 +1433,7 @@ def record_compilation_metrics(
         "structured_logging_overhead_us": to_int_us(
             torch._logging.get_structured_logging_overhead()
         ),
-        "dynamo_config": get_dynamo_config_for_logging(),
+        "dynamo_config": _get_dynamo_config_for_logging(),
         "inductor_config": _scrubbed_inductor_config_for_logging(),
         "cuda_version": torch.version.cuda,
         "triton_version": triton.__version__ if has_triton() else "",
