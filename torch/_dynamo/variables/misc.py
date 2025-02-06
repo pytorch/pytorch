@@ -246,6 +246,12 @@ class ExceptionVariable(VariableTracker):
         codegen.foreach(self.args)
         codegen.call_function(len(self.args), False)
 
+    def __str__(self):
+        return f"ExceptionVariable({self.exc_type})"
+
+    def __repr__(self):
+        return f"ExceptionVariable({self.exc_type})"
+
 
 class UnknownVariable(VariableTracker):
     """
