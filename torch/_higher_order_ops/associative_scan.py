@@ -71,8 +71,10 @@ def safe_map(f, *args):
 
 
 class AssociativeScanOp(HigherOrderOperator):
-    def __init__(self):
+    def __init__(self, combine_mode='pointwise'):
         super().__init__("associative_scan")
+        # self.combine_mode = 'pointwise'
+        self.combine_mode = combine_mode
 
     def __call__(self, combine_fn, xs, additional_inputs):
         assert isinstance(
@@ -83,6 +85,8 @@ class AssociativeScanOp(HigherOrderOperator):
 
 
 associative_scan_op = AssociativeScanOp()
+# associative_scan_op = None
+associative_scan_op.combine_mode = 'pointwise'
 
 
 def associative_scan(
@@ -136,6 +140,12 @@ def associative_scan(
         raise ValueError(
             "Combine_mode must either 'pointwise' or 'generic', but got {combine_mode}"
         )
+    
+    
+    # setattr(associative_scan_op, 'combine_mode', combine_mode)
+    # associative_scan_op.combine_mode = combine_mode
+    # global associative_scan_op
+    # associative_scan_op = AssociativeScanOp(combine_mode)
 
     if not torch.compiler.is_compiling():
         with _set_compilation_env(), torch._dynamo.utils.disable_cache_limit():
@@ -175,23 +185,6 @@ def associative_scan(
     # Call the combine_fn with only a slice along the scan dim
     # and check whether the output leaves have the same slice dimensions
     sliced_leaves = [first_slice_copy(leaf) for leaf in leaves]
-
-    from torch._inductor.utils import is_pointwise_use
-    with disable_proxy_modes_tracing():
-        combine_graph = reenter_make_fx(combine_fn)(pytree.tree_unflatten(sliced_leaves, spec), 
-                                                    pytree.tree_unflatten(sliced_leaves, spec))
-
-    outputs = None
-    for node in combine_graph.graph.nodes:
-        if node.op == "output":
-            assert outputs is None
-            assert len(node.args) == 1
-            outputs = node.args[0]
-
-        # if not all(is_pointwise_use(use) or use.op == "output" for use in node.users):
-        #     raise ValueError(
-        #         "For combine_mode='pointwise', the combine_fn needs to be pointwise"
-        #     )
             
     out = combine_fn(
         pytree.tree_unflatten(sliced_leaves, spec),
@@ -380,11 +373,6 @@ def trace_associative_scan(
             assert outputs is None
             assert len(node.args) == 1
             outputs = node.args[0]
-
-        # if not all(is_pointwise_use(use) or use.op == "output" for use in node.users):
-        #     raise ValueError(
-        #         "For combine_mode='pointwise', the combine_fn needs to be pointwise"
-        #     )
 
     assert outputs is not None
     assert len(outputs) == len(

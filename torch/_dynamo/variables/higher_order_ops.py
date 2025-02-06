@@ -1230,7 +1230,7 @@ class WhileLoopHigherOrderVariable(TorchHigherOrderOperatorVariable):
         )
 
 
-class AssociativeScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
+class AssociativeScanHigherOrderVariable(TorchHigherOrderOperatorVariable): 
     @raise_hard_error_if_graph_break(
         reason="associative_scan must be captured completely with torch.compile."
     )
@@ -1245,6 +1245,8 @@ class AssociativeScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
         from . import TensorVariable
         from .builder import wrap_fx_proxy
 
+        # import pdb
+        # pdb.set_trace()
         args, kwargs = LazyVariableTracker.realize_all((args, kwargs))
 
         def arg_extractor(combine_fn, xs, additional_inputs):
@@ -1290,6 +1292,16 @@ class AssociativeScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
             set_subgraph_inputs="flatten_manual",
         )
         combine_freevars_proxy = tuple(combine_lifted_freevars.keys())
+
+        # Check that the combine_fn is pointwise, if combine_mode='pointwise'
+        from torch._inductor.utils import is_pointwise_use
+        for node in combine_graph.nodes:
+            import pdb
+            pdb.set_trace()
+            if not all(is_pointwise_use(use) or use.op == "output" for use in node.users):
+                unimplemented(
+                    f"For combine_mode='pointwise', the combine_fn needs to be pointwise"
+                )
 
         if combine_result.python_type() != list:
             unimplemented(
