@@ -514,300 +514,36 @@ XFAILLIST_GRAD = {
 COMPLEX_DTYPES = [torch.complex32, torch.complex64]
 """Ops which do not have support for complex dtypes and are expected to fail"""
 COMPLEX_XFAILLIST = {
-    "__rdiv__": MPSSkipInfo(
-        dtypes=COMPLEX_DTYPES,
-        upper=15.0,
-    ),
-    "__rmatmul__": MPSSkipInfo(
-        dtypes=COMPLEX_DTYPES,
-        upper=15.0,
-    ),
     "__rpow__": MPSSkipInfo(dtypes=COMPLEX_DTYPES),
-    "_chunk_cat": MPSSkipInfo(
-        dtypes=COMPLEX_DTYPES,
-        upper=15.0,
-    ),
-    "_unsafe_masked_index": MPSSkipInfo(
-        dtypes=COMPLEX_DTYPES,
-        upper=15.0,
-    ),
     "_unsafe_masked_index_put_accumulate": MPSSkipInfo(dtypes=COMPLEX_DTYPES),
-    "acos": MPSSkipInfo(
-        dtypes=COMPLEX_DTYPES,
-        upper=15.0,
-    ),
-    "acosh": MPSSkipInfo(
-        dtypes=COMPLEX_DTYPES,
-        upper=15.0,
-    ),
-    "all": MPSSkipInfo(
-        dtypes=COMPLEX_DTYPES,
-        upper=15.0,
-    ),
-    "allclose": MPSSkipInfo(
-        dtypes=COMPLEX_DTYPES,
-        upper=15.0,
-    ),
-    "angle": MPSSkipInfo(
-        dtypes=COMPLEX_DTYPES,
-        upper=15.0,
-    ),
-    "any": MPSSkipInfo(
-        dtypes=COMPLEX_DTYPES,
-        upper=15.0,
-    ),
     "addbmm": MPSSkipInfo(dtypes=COMPLEX_DTYPES),
-    "addcdiv": MPSSkipInfo(
-        dtypes=COMPLEX_DTYPES,
-        upper=15.0,
-    ),
-    "addcmul": MPSSkipInfo(
-        dtypes=COMPLEX_DTYPES,
-        upper=15.0,
-    ),
     "addmm": [
         MPSSkipInfo(
             dtypes=COMPLEX_DTYPES,
             variant=" ",
         ),
-        MPSSkipInfo(
-            dtypes=COMPLEX_DTYPES,
-            variant="decomposed",
-            upper=15.0,
-        ),
     ],
-    "addmv": MPSSkipInfo(
-        dtypes=COMPLEX_DTYPES,
-        upper=15.0,
-    ),
     "addr": MPSSkipInfo(dtypes=COMPLEX_DTYPES),
-    "asin": MPSSkipInfo(
-        dtypes=COMPLEX_DTYPES,
-        upper=15.0,
-    ),
     "asinh": MPSSkipInfo(dtypes=COMPLEX_DTYPES),
-    "atan": MPSSkipInfo(
-        dtypes=COMPLEX_DTYPES,
-        upper=15.0,
-    ),
-    "atanh": MPSSkipInfo(
-        dtypes=COMPLEX_DTYPES,
-        upper=15.0,
-    ),
     "baddbmm": MPSSkipInfo(dtypes=COMPLEX_DTYPES),
-    "bfloat16": MPSSkipInfo(
-        dtypes=COMPLEX_DTYPES,
-        upper=15.0,
-    ),
     "block_diag": MPSSkipInfo(dtypes=COMPLEX_DTYPES),
-    "bmm": MPSSkipInfo(
-        dtypes=COMPLEX_DTYPES,
-        upper=15.0,
-    ),
-    "bool": MPSSkipInfo(
-        dtypes=COMPLEX_DTYPES,
-        upper=15.0,
-    ),
-    "cartesian_prod": MPSSkipInfo(
-        dtypes=COMPLEX_DTYPES,
-        upper=15.0,
-    ),
-    "cat": MPSSkipInfo(
-        dtypes=COMPLEX_DTYPES,
-        upper=15.0,
-    ),
-    "char": MPSSkipInfo(
-        dtypes=COMPLEX_DTYPES,
-        upper=15.0,
-    ),
     "cholesky": MPSSkipInfo(dtypes=COMPLEX_DTYPES),
-    "column_stack": MPSSkipInfo(
-        dtypes=COMPLEX_DTYPES,
-        upper=15.0,
-    ),
-    "combinations": MPSSkipInfo(
-        dtypes=COMPLEX_DTYPES,
-        upper=15.0,
-    ),
-    "corrcoef": MPSSkipInfo(
-        dtypes=COMPLEX_DTYPES,
-        upper=15.0,
-    ),
-    "constant_pad_nd": MPSSkipInfo(
-        dtypes=COMPLEX_DTYPES,
-        upper=15.0,
-    ),
-    "cos": MPSSkipInfo(
-        dtypes=COMPLEX_DTYPES,
-        upper=15.0,
-    ),
-    "cosh": MPSSkipInfo(
-        dtypes=COMPLEX_DTYPES,
-        upper=15.0,
-    ),
-    "count_nonzero": MPSSkipInfo(
-        dtypes=COMPLEX_DTYPES,
-        upper=15.0,
-    ),
     "cov": MPSSkipInfo(dtypes=COMPLEX_DTYPES),
     "cross": MPSSkipInfo(dtypes=COMPLEX_DTYPES),
     "cumprod": MPSSkipInfo(dtypes=COMPLEX_DTYPES),
     "cumsum": MPSSkipInfo(dtypes=COMPLEX_DTYPES),
     "cumulative_trapezoid": MPSSkipInfo(dtypes=COMPLEX_DTYPES),
-    "diff": MPSSkipInfo(
-        dtypes=COMPLEX_DTYPES,
-        upper=15.0,
-    ),
     "dist": MPSSkipInfo(dtypes=COMPLEX_DTYPES),
     "div": MPSSkipInfo(
         dtypes=COMPLEX_DTYPES,
         upper=15.0,
-    ),
-    "divno_rounding_mode": MPSSkipInfo(
-        dtypes=COMPLEX_DTYPES,
-        upper=15.0,
-    ),
-    "dot": MPSSkipInfo(
-        dtypes=COMPLEX_DTYPES,
-        upper=15.0,
-    ),
-    "dstack": MPSSkipInfo(
-        dtypes=COMPLEX_DTYPES,
-        upper=15.0,
-    ),
-    "einsum": MPSSkipInfo(
-        dtypes=COMPLEX_DTYPES,
-        upper=15.0,
-    ),
-    "eq": MPSSkipInfo(
-        dtypes=COMPLEX_DTYPES,
-        upper=15.0,
-    ),
-    "equal": MPSSkipInfo(
-        dtypes=COMPLEX_DTYPES,
-        upper=15.0,
-    ),
-    "exp2": MPSSkipInfo(
-        dtypes=COMPLEX_DTYPES,
-        upper=15.0,
-    ),
-    "expm1": MPSSkipInfo(
-        dtypes=COMPLEX_DTYPES,
-        upper=15.0,
-    ),
-    "eye": MPSSkipInfo(
-        dtypes=COMPLEX_DTYPES,
-        upper=15.0,
-    ),
-    "fft.fft": MPSSkipInfo(
-        dtypes=COMPLEX_DTYPES,
-        upper=15.0,
-    ),
-    "fft.fft2": MPSSkipInfo(
-        dtypes=COMPLEX_DTYPES,
-        upper=15.0,
-    ),
-    "fft.fftn": MPSSkipInfo(
-        dtypes=COMPLEX_DTYPES,
-        upper=15.0,
-    ),
-    "fft.fftshift": MPSSkipInfo(
-        dtypes=COMPLEX_DTYPES,
-        upper=15.0,
-    ),
-    "fft.ifft": MPSSkipInfo(
-        dtypes=COMPLEX_DTYPES,
-        upper=15.0,
-    ),
-    "fft.ifft2": MPSSkipInfo(
-        dtypes=COMPLEX_DTYPES,
-        upper=15.0,
-    ),
-    "fft.ifftn": MPSSkipInfo(
-        dtypes=COMPLEX_DTYPES,
-        upper=15.0,
-    ),
-    "fft.ifftshift": MPSSkipInfo(
-        dtypes=COMPLEX_DTYPES,
-        upper=15.0,
-    ),
-    "fft.irfftn": MPSSkipInfo(
-        dtypes=COMPLEX_DTYPES,
-        upper=15.0,
-    ),
-    "fft.irfft2": MPSSkipInfo(
-        dtypes=COMPLEX_DTYPES,
-        upper=15.0,
-    ),
-    "fft.irfft": MPSSkipInfo(
-        dtypes=COMPLEX_DTYPES,
-        upper=15.0,
-    ),
-    "fft.hfftn": MPSSkipInfo(
-        dtypes=COMPLEX_DTYPES,
-        upper=15.0,
-    ),
-    "fft.hfft2": MPSSkipInfo(
-        dtypes=COMPLEX_DTYPES,
-        upper=15.0,
-    ),
-    "fft.hfft": MPSSkipInfo(
-        dtypes=COMPLEX_DTYPES,
-        upper=15.0,
-    ),
-    "flip": MPSSkipInfo(
-        dtypes=COMPLEX_DTYPES,
-        upper=15.0,
-    ),
-    "fliplr": MPSSkipInfo(
-        dtypes=COMPLEX_DTYPES,
-        upper=15.0,
-    ),
-    "flipud": MPSSkipInfo(
-        dtypes=COMPLEX_DTYPES,
-        upper=15.0,
-    ),
-    "float": MPSSkipInfo(
-        dtypes=COMPLEX_DTYPES,
-        upper=15.0,
+        variant=" ",
     ),
     "gather": MPSSkipInfo(dtypes=COMPLEX_DTYPES),
-    "gradient": MPSSkipInfo(
-        dtypes=COMPLEX_DTYPES,
-        upper=15.0,
-    ),
-    "half": MPSSkipInfo(
-        dtypes=COMPLEX_DTYPES,
-        upper=15.0,
-    ),
-    "hstack": MPSSkipInfo(
-        dtypes=COMPLEX_DTYPES,
-        upper=15.0,
-    ),
     "index_add": MPSSkipInfo(dtypes=COMPLEX_DTYPES),
     "index_fill": MPSSkipInfo(dtypes=COMPLEX_DTYPES),
     "index_put": MPSSkipInfo(dtypes=COMPLEX_DTYPES),
-    "inner": MPSSkipInfo(
-        dtypes=COMPLEX_DTYPES,
-        upper=15.0,
-    ),
-    "int": MPSSkipInfo(
-        dtypes=COMPLEX_DTYPES,
-        upper=15.0,
-    ),
-    "isclose": MPSSkipInfo(
-        dtypes=COMPLEX_DTYPES,
-        upper=15.0,
-    ),
-    "isnan": MPSSkipInfo(
-        dtypes=COMPLEX_DTYPES,
-        upper=15.0,
-    ),
     "istft": MPSSkipInfo(dtypes=COMPLEX_DTYPES),
-    "ldexp": MPSSkipInfo(
-        dtypes=COMPLEX_DTYPES,
-        upper=15.0,
-    ),
     "lerp": MPSSkipInfo(dtypes=COMPLEX_DTYPES),
     "linalg.cholesky": MPSSkipInfo(dtypes=COMPLEX_DTYPES),
     "linalg.cross": MPSSkipInfo(dtypes=COMPLEX_DTYPES),
@@ -817,124 +553,16 @@ COMPLEX_XFAILLIST = {
     "linalg.lu_factor_ex": MPSSkipInfo(dtypes=COMPLEX_DTYPES),
     "linalg.matrix_norm": MPSSkipInfo(dtypes=COMPLEX_DTYPES),
     "linalg.matrix_power": MPSSkipInfo(dtypes=COMPLEX_DTYPES),
-    "linalg.multi_dot": MPSSkipInfo(
-        dtypes=COMPLEX_DTYPES,
-        upper=15.0,
-    ),
     "linalg.norm": MPSSkipInfo(dtypes=COMPLEX_DTYPES),
-    "linalg.pinv": MPSSkipInfo(
-        dtypes=COMPLEX_DTYPES,
-        upper=15.0,
-    ),
     "linalg.solve_triangular": MPSSkipInfo(dtypes=COMPLEX_DTYPES),
     "linalg.tensorinv": MPSSkipInfo(dtypes=COMPLEX_DTYPES),
     "linalg.vander": MPSSkipInfo(dtypes=COMPLEX_DTYPES),
     "linalg.vector_norm": MPSSkipInfo(dtypes=COMPLEX_DTYPES),
-    "linspace": MPSSkipInfo(
-        dtypes=COMPLEX_DTYPES,
-        upper=15.0,
-    ),
-    "linspacetensor_overload": MPSSkipInfo(
-        dtypes=COMPLEX_DTYPES,
-        upper=15.0,
-    ),
-    "log10": MPSSkipInfo(
-        dtypes=COMPLEX_DTYPES,
-        upper=15.0,
-    ),
-    "log1p": MPSSkipInfo(
-        dtypes=COMPLEX_DTYPES,
-        upper=15.0,
-    ),
-    "log2": MPSSkipInfo(
-        dtypes=COMPLEX_DTYPES,
-        upper=15.0,
-    ),
-    "log": MPSSkipInfo(
-        dtypes=COMPLEX_DTYPES,
-        upper=15.0,
-    ),
-    "logical_and": MPSSkipInfo(
-        dtypes=COMPLEX_DTYPES,
-        upper=15.0,
-    ),
-    "logical_not": MPSSkipInfo(
-        dtypes=COMPLEX_DTYPES,
-        upper=15.0,
-    ),
-    "logical_or": MPSSkipInfo(
-        dtypes=COMPLEX_DTYPES,
-        upper=15.0,
-    ),
-    "logical_xor": MPSSkipInfo(
-        dtypes=COMPLEX_DTYPES,
-        upper=15.0,
-    ),
     "logaddexp": MPSSkipInfo(dtypes=COMPLEX_DTYPES),
-    "logsumexp": MPSSkipInfo(
-        dtypes=COMPLEX_DTYPES,
-        upper=15.0,
-    ),
-    "long": MPSSkipInfo(
-        dtypes=COMPLEX_DTYPES,
-        upper=15.0,
-    ),
     "lu": MPSSkipInfo(dtypes=[torch.complex64]),
-    "masked_fill": MPSSkipInfo(
-        dtypes=COMPLEX_DTYPES,
-        upper=15.0,
-    ),
     "masked.cumprod": MPSSkipInfo(dtypes=COMPLEX_DTYPES),
     "masked.cumsum": MPSSkipInfo(dtypes=COMPLEX_DTYPES),
-    "masked.mean": MPSSkipInfo(
-        dtypes=COMPLEX_DTYPES,
-        upper=15.0,
-    ),
     "masked.normalize": MPSSkipInfo(dtypes=COMPLEX_DTYPES),
-    "masked.prod": MPSSkipInfo(
-        dtypes=COMPLEX_DTYPES,
-        upper=15.0,
-    ),
-    "masked.std": MPSSkipInfo(
-        dtypes=COMPLEX_DTYPES,
-        upper=15.0,
-    ),
-    "masked.sum": MPSSkipInfo(
-        dtypes=COMPLEX_DTYPES,
-        upper=15.0,
-    ),
-    "masked.var": MPSSkipInfo(
-        dtypes=COMPLEX_DTYPES,
-        upper=15.0,
-    ),
-    "masked.logsumexp": MPSSkipInfo(
-        dtypes=COMPLEX_DTYPES,
-        upper=15.0,
-    ),
-    "matmul": MPSSkipInfo(
-        dtypes=COMPLEX_DTYPES,
-        upper=15.0,
-    ),
-    "mean": MPSSkipInfo(
-        dtypes=COMPLEX_DTYPES,
-        upper=15.0,
-    ),
-    "mm": MPSSkipInfo(
-        dtypes=COMPLEX_DTYPES,
-        upper=15.0,
-    ),
-    "mv": MPSSkipInfo(
-        dtypes=COMPLEX_DTYPES,
-        upper=15.0,
-    ),
-    "ne": MPSSkipInfo(
-        dtypes=COMPLEX_DTYPES,
-        upper=15.0,
-    ),
-    "neg": MPSSkipInfo(
-        dtypes=COMPLEX_DTYPES,
-        upper=15.0,
-    ),
     "nn.functional.conv3d": MPSSkipInfo(dtypes=COMPLEX_DTYPES),
     "nn.functional.l1_loss": MPSSkipInfo(dtypes=COMPLEX_DTYPES),
     "nn.functional.linear": MPSSkipInfo(dtypes=COMPLEX_DTYPES),
@@ -952,157 +580,33 @@ COMPLEX_XFAILLIST = {
         upper=15.0,
     ),
     "nn.functional.pairwise_distance": MPSSkipInfo(dtypes=COMPLEX_DTYPES),
-    "nn.functional.pixel_shuffle": MPSSkipInfo(
-        dtypes=COMPLEX_DTYPES,
-        upper=15.0,
-    ),
-    "nn.functional.pixel_unshuffle": MPSSkipInfo(
-        dtypes=COMPLEX_DTYPES,
-        upper=15.0,
-    ),
-    "nn.functional.rms_norm": MPSSkipInfo(
-        dtypes=COMPLEX_DTYPES,
-        upper=15.0,
-    ),
     "nn.functional.silu": MPSSkipInfo(dtypes=COMPLEX_DTYPES),
-    "nn.functional.softsign": MPSSkipInfo(
-        dtypes=COMPLEX_DTYPES,
-        upper=15.0,
-    ),
     "nn.functional.triplet_margin_loss": MPSSkipInfo(dtypes=COMPLEX_DTYPES),
     "nn.functional.triplet_margin_with_distance_loss": MPSSkipInfo(
         dtypes=COMPLEX_DTYPES
     ),
     "norm": MPSSkipInfo(dtypes=COMPLEX_DTYPES),
     "normal": MPSSkipInfo(dtypes=COMPLEX_DTYPES, variant="in_place"),
-    "pinverse": MPSSkipInfo(
-        dtypes=COMPLEX_DTYPES,
-        upper=15.0,
-    ),
     "pow": MPSSkipInfo(dtypes=COMPLEX_DTYPES),
-    "prod": MPSSkipInfo(
-        dtypes=COMPLEX_DTYPES,
-        upper=15.0,
-    ),
     "rand_like": MPSSkipInfo(dtypes=COMPLEX_DTYPES),
-    "reciprocal": MPSSkipInfo(
-        dtypes=COMPLEX_DTYPES,
-        upper=15.0,
-    ),
     "renorm": MPSSkipInfo(dtypes=COMPLEX_DTYPES),
     "repeat": MPSSkipInfo(dtypes=COMPLEX_DTYPES),
     "resize_": MPSSkipInfo(dtypes=COMPLEX_DTYPES),
     "resize_as_": MPSSkipInfo(dtypes=COMPLEX_DTYPES),
-    "roll": MPSSkipInfo(
-        dtypes=COMPLEX_DTYPES,
-        upper=15.0,
-    ),
-    "rot90": MPSSkipInfo(
-        dtypes=COMPLEX_DTYPES,
-        upper=15.0,
-    ),
-    "rsqrt": MPSSkipInfo(
-        dtypes=COMPLEX_DTYPES,
-        upper=15.0,
-    ),
     "scatter_add": MPSSkipInfo(dtypes=COMPLEX_DTYPES),
     "scatter": MPSSkipInfo(dtypes=COMPLEX_DTYPES),
     "scatter_reduce": [
         MPSSkipInfo(dtypes=COMPLEX_DTYPES, variant="amax"),
         MPSSkipInfo(dtypes=COMPLEX_DTYPES, variant="amin"),
     ],
-    "short": MPSSkipInfo(
-        dtypes=COMPLEX_DTYPES,
-        upper=15.0,
-    ),
-    "sigmoid": MPSSkipInfo(
-        dtypes=COMPLEX_DTYPES,
-        upper=15.0,
-    ),
-    "sin": MPSSkipInfo(
-        dtypes=COMPLEX_DTYPES,
-        upper=15.0,
-    ),
-    "sinh": MPSSkipInfo(
-        dtypes=COMPLEX_DTYPES,
-        upper=15.0,
-    ),
-    "sqrt": MPSSkipInfo(
-        dtypes=COMPLEX_DTYPES,
-        upper=15.0,
-    ),
-    "square": MPSSkipInfo(
-        dtypes=COMPLEX_DTYPES,
-        upper=15.0,
-    ),
-    "stack": MPSSkipInfo(
-        dtypes=COMPLEX_DTYPES,
-        upper=15.0,
-    ),
     "std": MPSSkipInfo(dtypes=COMPLEX_DTYPES),
     "std_mean": MPSSkipInfo(dtypes=COMPLEX_DTYPES),
-    "stft": MPSSkipInfo(
-        dtypes=COMPLEX_DTYPES,
-        upper=15.0,
-    ),
-    "sum": MPSSkipInfo(
-        dtypes=COMPLEX_DTYPES,
-        upper=15.0,
-    ),
-    "sum_to_size": MPSSkipInfo(
-        dtypes=COMPLEX_DTYPES,
-        upper=15.0,
-    ),
     "take_along_dim": MPSSkipInfo(dtypes=COMPLEX_DTYPES),
-    "tan": MPSSkipInfo(
-        dtypes=COMPLEX_DTYPES,
-        upper=15.0,
-    ),
-    "tensordot": MPSSkipInfo(
-        dtypes=COMPLEX_DTYPES,
-        upper=15.0,
-    ),
     "tile": MPSSkipInfo(dtypes=COMPLEX_DTYPES),
-    "trace": MPSSkipInfo(
-        dtypes=COMPLEX_DTYPES,
-        upper=15.0,
-    ),
-    "trapz": MPSSkipInfo(
-        dtypes=COMPLEX_DTYPES,
-        upper=15.0,
-    ),
-    "trapezoid": MPSSkipInfo(
-        dtypes=COMPLEX_DTYPES,
-        upper=15.0,
-    ),
     "triangular_solve": MPSSkipInfo(dtypes=COMPLEX_DTYPES),
-    "tril": MPSSkipInfo(
-        dtypes=COMPLEX_DTYPES,
-        upper=15.0,
-    ),
-    "triu": MPSSkipInfo(
-        dtypes=COMPLEX_DTYPES,
-        upper=15.0,
-    ),
-    "true_divide": MPSSkipInfo(
-        dtypes=COMPLEX_DTYPES,
-        upper=15.0,
-    ),
     "uniform": MPSSkipInfo(dtypes=COMPLEX_DTYPES),
     "var": MPSSkipInfo(dtypes=COMPLEX_DTYPES),
     "var_mean": MPSSkipInfo(dtypes=COMPLEX_DTYPES),
-    "vstack": MPSSkipInfo(
-        dtypes=COMPLEX_DTYPES,
-        upper=15.0,
-    ),
-    "where": MPSSkipInfo(
-        dtypes=COMPLEX_DTYPES,
-        upper=15.0,
-    ),
-    "byte": MPSSkipInfo(
-        dtypes=COMPLEX_DTYPES,
-        upper=15.0,
-    ),
 }
 
 """Failures due to known errors in the MPS backend"""
