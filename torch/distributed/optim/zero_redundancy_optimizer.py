@@ -1517,14 +1517,14 @@ class ZeroRedundancyOptimizer(Optimizer, Joinable):
                     self._bucket_assignments_per_rank[self.global_rank]
                 )
                 logger.info(
-                    "rank %s with %s parameters " "across %s buckets",
+                    "rank %s with %s parameters across %s buckets",
                     self.global_rank,
                     local_numel,
                     num_assigned_buckets,
                 )
                 if self.global_rank == 0:
                     logger.info(
-                        "%s DDP " "buckets and " "%s bucket " "assignments",
+                        "%s DDP buckets and %s bucket assignments",
                         len(self._overlap_info.params_per_bucket),
                         self._overlap_info.num_bucket_assignments,
                     )
