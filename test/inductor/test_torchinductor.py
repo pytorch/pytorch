@@ -2408,7 +2408,7 @@ class CommonTemplate:
             )
 
         dtypes = [torch.float, torch.float16]
-        if not (self.device == "cuda" and not SM80OrLater):
+        if self.is_dtype_supported(torch.bfloat16):
             dtypes += [torch.bfloat16]
         for dtype in dtypes:
             self.common(fn, (torch.randn(8, 8).to(dtype), torch.randn(8, 8).to(dtype)))
