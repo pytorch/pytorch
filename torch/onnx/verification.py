@@ -1709,6 +1709,11 @@ def _produced_by(value: torch.Value, nodes: Collection[torch.Node]) -> bool:
     return value.node() in nodes
 
 
+@typing_extensions.deprecated(
+    "torch.onnx.verification.* is deprecated. Consider using torch.onnx.export(..., dynamo=True) "
+    "and use ONNXProgram to test the ONNX model",
+    category=None,
+)
 def find_mismatch(
     model: torch.nn.Module | torch.jit.ScriptModule,
     input_args: tuple[Any, ...],
@@ -1720,6 +1725,11 @@ def find_mismatch(
     options: VerificationOptions | None = None,
 ) -> GraphInfo:
     r"""Find all mismatches between the original model and the exported model.
+
+    .. deprecated::
+        Deprecated since 2.7.0.
+        Consider using ``torch.onnx.export(..., dynamo=True)`` and use the returned
+        ``ONNXProgram`` to test the ONNX model.
 
     Experimental. The API is subject to change.
 
