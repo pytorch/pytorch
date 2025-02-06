@@ -2297,10 +2297,9 @@ class InstructionTranslatorBase(
         # https://peps.python.org/pep-0479/
         # https://github.com/python/cpython/pull/99006
         # https://github.com/python/cpython/commit/28187141cc34063ef857976ddbca87ba09a882c2
-        tos = self.stack[-1]
-        assert isinstance(tos, ExceptionVariable)
-        if tos.exc_type is StopIteration:
-            self.stack[-1] = ExceptionVariable(RuntimeError, ())
+        assert isinstance(inst, ExceptionVariable)
+        if inst.exc_type is StopIteration:
+            exc.raise_observed_exception(RuntimeError, self)
 
     def DICT_MERGE(self, inst):
         v = self.pop()
@@ -2588,7 +2587,7 @@ class InstructionTranslatorBase(
     def CALL_INTRINSIC_1(self, inst):
         if inst.argval == 3:
             # INTRINSIC_STOPITERATION_ERROR
-            self.STOPITERATION_ERROR(inst)
+            self.STOPITERATION_ERROR(self.pop())
         elif inst.argval == 5:
             # INTRINSIC_UNARY_POSITIVE
             self.UNARY_POSITIVE(inst)
