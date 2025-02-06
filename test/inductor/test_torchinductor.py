@@ -6334,8 +6334,8 @@ class CommonTemplate:
         for dim in (1, 2, 3):
             for dtype in (torch.uint8, torch.uint16, torch.uint32, torch.uint64):
                 input_shape = [1, 8] + [64] * dim
-                x = torch.randn(input_shape).to(dtype).to(GPU_TYPE)
-                conv_weight = (torch.ones(8, 1, *([4] * dim)) / (4 ** dim)).to(GPU_TYPE)
+                x = torch.randn(input_shape).to(dtype)
+                conv_weight = (torch.ones(8, 1, *([4] * dim)) / (4 ** dim))
                 op = eval(f"torch.nn.functional.conv{dim}d")
                 c_op = torch.compile(op)
                 with self.assertRaisesRegex(
