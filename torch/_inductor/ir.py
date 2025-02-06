@@ -31,6 +31,7 @@ import sympy
 from sympy import Expr, Integer, Symbol
 
 import torch._export.serde.schema as export_schema
+import torch._library.utils as library_utils
 import torch._logging
 import torch.fx
 import torch.utils._pytree as pytree
@@ -6382,13 +6383,7 @@ class FallbackKernel(ExternKernelAlloc):
             # Assertions to make sure we didn't mismatch args
             if isinstance(info.type, torch.ListType):
                 assert isinstance(arg, (list, tuple))
-            is_optional_tensor = isinstance(
-                info.type, torch.OptionalType
-            ) and isinstance(info.type.getElementType(), torch.TensorType)
-            is_list_tensor = isinstance(info.type, torch.ListType) and isinstance(
-                info.type.getElementType(), torch.TensorType
-            )
-            if is_optional_tensor or isinstance(info.type, torch.TensorType):
+            if library_utils.is_tensor_like_type(info.type):
                 # PyTorch also accepts None and scalar types for args marked as "Tensor".
                 # We're not going to check all of them here.
                 assert not isinstance(arg, (tuple, list))
@@ -6405,11 +6400,12 @@ class FallbackKernel(ExternKernelAlloc):
                         MutationOutput(NoneLayout(device=t.get_device()), t, self)
                     )
 
-            if is_list_tensor:
-                for tensor_arg in arg:
-                    add_alias(tensor_arg)
+            if library_utils.is_tensorlist_like_type(info.type):
+                if arg is not None:
+                    for optional_tensor_arg in arg:
+                        add_alias(optional_tensor_arg)
             else:
-                assert isinstance(info.type, torch.TensorType) or is_optional_tensor
+                assert library_utils.is_tensor_like_type(info.type)
                 add_alias(arg)
 
         for info, arg in torch._library.utils.zip_schema(schema, args, kwargs):
@@ -6622,24 +6618,7 @@ class FallbackKernel(ExternKernelAlloc):
 
     def codegen(self, wrapper) -> None:  # type: ignore[no-untyped-def]
         kernel = self.op_overload
-        if V.graph.cpp_wrapper and any(i.dtype.is_complex for i in self.inputs):
-            # If any inputs to this fallback op are complex, they may have the Conjugate
-            # or Negative dispatch keys applied.  The cpp_wrapper fallback ops that
-            # _aren't_ runtime dispatched implicitly bypass the conversions for those
-            # keys internally (since they're applied at dispatch time).  Since there's
-            # no way to tell at compile time whether a tensor will have these keys
-            # applied, pessimize complex fallback ops by always using the runtime
-            # dispatched fallback.
-            #
-            # This is not currently expected to be a performance issue, since few models
-            # utilized complex ops, but this decision may need to be reconsidered if
-            # that changes.
-            log_msg = (
-                f"Using proxy executor as fallback for {kernel} due to complex inputs."
-            )
-            log.warning(log_msg)
-            self.use_runtime_dispatch = True
-        elif kernel.namespace == "aten":  # type: ignore[union-attr]
+        if kernel.namespace == "aten":  # type: ignore[union-attr]
             # Aten Fallback Ops
             assert isinstance(kernel, torch._ops.OpOverload)
             if V.graph.cpp_wrapper:
@@ -6660,9 +6639,7 @@ class FallbackKernel(ExternKernelAlloc):
             # For non-aten OpOverload, i.e. custom ops
             self.use_runtime_dispatch = True
 
-        if self.use_runtime_dispatch:
-            self.codegen_comment(wrapper)
-
+        def do_runtime_dispatch() -> None:
             exported_args = None
             args = None
             exported_args = self.export_extern_kernel_node()
@@ -6677,12 +6654,36 @@ class FallbackKernel(ExternKernelAlloc):
                 # NOTE: [special handling of all_reduce_coalesced_'s return value]
                 self.outputs if self.outputs else self.mutation_outputs,
             )
+
+        def is_number(t: torch.JitType) -> bool:
+            return isinstance(t, torch.NumberType) or (
+                isinstance(t, torch.OptionalType)
+                and isinstance(t.getElementType(), torch.NumberType)
+            )
+
+        self.codegen_comment(wrapper)
+        if self.use_runtime_dispatch:
+            do_runtime_dispatch()
         else:
-            self.codegen_comment(wrapper)
             args = [*self.codegen_args(), *self.codegen_kwargs()]
-            V.graph.wrapper_code.generate_fallback_kernel(self, args)
-            if isinstance(self.layout, Layout):
-                self.codegen_size_asserts(wrapper)
+            if (
+                V.graph.cpp_wrapper
+                and isinstance(kernel, torch._ops.OpOverload)
+                and any(
+                    "c10::complex" in arg_str and is_number(op_arg.real_type)
+                    for arg_str, op_arg in zip(args, kernel._schema.arguments)
+                )
+            ):
+                # Handle the special case where a complex number is input to a
+                # cpp_wrapper C-shim kernel.  If the corresponding argument is a number,
+                # the torchgen-created shim API will use type "double", which cannot be
+                # converted to from a c10::complex.  In these cases, fallback to runtime
+                # dispatch.
+                do_runtime_dispatch()
+            else:
+                V.graph.wrapper_code.generate_fallback_kernel(self, args)
+                if isinstance(self.layout, Layout):
+                    self.codegen_size_asserts(wrapper)
 
         self.codegen_unbacked_symbol_defs(wrapper)
 
@@ -7215,7 +7216,7 @@ class InvokeSubgraph(ExternKernel):
 @ir_dataclass(frozen=False)
 class Conditional(ExternKernel):
     predicate: Optional[IRNode] = None
-    operands: Optional[list[TensorBox]] = None
+    operands: Optional[list[Union[TensorBox, ShapeAsConstantBuffer]]] = None
     true_subgraph: Optional[Subgraph] = None
     false_subgraph: Optional[Subgraph] = None
     outputs: Optional[list[MultiOutput]] = None
@@ -7223,7 +7224,7 @@ class Conditional(ExternKernel):
     def __init__(
         self,
         predicate: IRNode,
-        operands: list[TensorBox],
+        operands: list[Union[TensorBox, ShapeAsConstantBuffer]],
         true_subgraph: Subgraph,
         false_subgraph: Subgraph,
         layout: MultiOutputLayout,
@@ -7233,15 +7234,13 @@ class Conditional(ExternKernel):
         self.true_subgraph = true_subgraph
         self.false_subgraph = false_subgraph
 
-        inputs = []
-        if not isinstance(predicate, ShapeAsConstantBuffer):
-            inputs.append(predicate)
-        inputs.extend(operands)
+        sym_args, tensor_args = _split_by_sym_type([predicate] + operands)
 
         super().__init__(
             name=None,
             layout=layout,
-            inputs=inputs,
+            inputs=tensor_args,
+            constant_args=sym_args,
         )
 
         self.name = V.graph.register_buffer(self)
@@ -7253,11 +7252,10 @@ class Conditional(ExternKernel):
         predicate: TensorBox,
         true_fn: Subgraph,
         false_fn: Subgraph,
-        operands: list[TensorBox],
+        operands: list[Union[TensorBox, ShapeAsConstantBuffer]],
     ):
         predicate = cls.realize_input(predicate)
         operands = [cls.realize_input(x) for x in operands]
-
         fx_operands = V.graph.current_node.args[-1]
         fake_operands = [x.meta["val"] for x in fx_operands]  # type: ignore[union-attr]
 
@@ -7291,16 +7289,12 @@ class Conditional(ExternKernel):
             assert to.get_dtype() == fo.get_dtype(), (i, to, fo)
             assert to.get_layout().offset == fo.get_layout().offset, (i, to, fo)
 
-        if not isinstance(predicate, ShapeAsConstantBuffer):
-            # use predicate device for consistent codegen-ing
-            device = predicate.get_device()
-        else:
-            # predicate is not a Tensor: use first operand's device
-            assert (
-                len(operands) > 0
-            ), "When predicate is not a Tensor, there must be at least one operand in torch.cond."
-            device = operands[0].get_device()
-
+        device = next(
+            o.get_device()
+            for o in [predicate] + operands
+            if not isinstance(o, ShapeAsConstantBuffer)
+        )
+        assert device is not None, "cannot determine device"
         conditional = Conditional(
             predicate=predicate,
             operands=operands,
@@ -7333,18 +7327,32 @@ class Conditional(ExternKernel):
         wrapper.codegen_conditional(self)
 
 
+def _split_by_sym_type(
+    args: list[Any],
+) -> tuple[list[ShapeAsConstantBuffer], list[Any]]:
+    non_sym_args = []
+    sym_args = []
+    for arg in args:
+        if isinstance(arg, ShapeAsConstantBuffer):
+            sym_args.append(arg.expr)
+        else:
+            non_sym_args.append(arg)
+
+    return sym_args, non_sym_args
+
+
 @ir_dataclass(frozen=False)
 class WhileLoop(ExternKernel):
-    carried_inputs: Optional[list[TensorBox]] = None
-    additional_inputs: Optional[list[TensorBox]] = None
+    carried_inputs: Optional[list[Union[TensorBox, ShapeAsConstantBuffer]]] = None
+    additional_inputs: Optional[list[Union[TensorBox, ShapeAsConstantBuffer]]] = None
     cond_subgraph: Optional[Subgraph] = None
     body_subgraph: Optional[Subgraph] = None
     outputs: Optional[list[MultiOutput]] = None
 
     def __init__(
         self,
-        carried_inputs: list[TensorBox],
-        additional_inputs: list[TensorBox],
+        carried_inputs: list[Union[TensorBox, ShapeAsConstantBuffer]],
+        additional_inputs: list[Union[TensorBox, ShapeAsConstantBuffer]],
         cond_subgraph: Subgraph,
         body_subgraph: Subgraph,
         layout: MultiOutputLayout,
@@ -7354,10 +7362,12 @@ class WhileLoop(ExternKernel):
         self.cond_subgraph = cond_subgraph
         self.body_subgraph = body_subgraph
 
+        sym_args, tensor_args = _split_by_sym_type(carried_inputs + additional_inputs)
         super().__init__(
             name=None,
             layout=layout,
-            inputs=carried_inputs + additional_inputs,
+            inputs=tensor_args,
+            constant_args=sym_args,
         )
 
         self.name = V.graph.register_buffer(self)
@@ -7368,8 +7378,8 @@ class WhileLoop(ExternKernel):
         cls,
         cond_fn: Subgraph,
         body_fn: Subgraph,
-        carried_inputs: list[TensorBox],
-        additional_inputs: list[TensorBox],
+        carried_inputs: list[Union[TensorBox, ShapeAsConstantBuffer]],
+        additional_inputs: list[Union[TensorBox, ShapeAsConstantBuffer]],
     ):
         carried_inputs = [cls.realize_input(x) for x in carried_inputs]
         additional_inputs = [cls.realize_input(x) for x in additional_inputs]
