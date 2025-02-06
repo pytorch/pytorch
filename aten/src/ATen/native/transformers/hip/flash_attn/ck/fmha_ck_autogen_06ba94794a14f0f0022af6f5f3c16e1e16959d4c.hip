@@ -114,12 +114,8 @@ float fmha_bwd_dq_dk_dv_<dq_dk_dv_trait_0>(const ck_tile::stream_config& s, fmha
     auto [kargs, grids]                    = fmha_bwd_dq_dk_dv_create_kargs_and_grids<k_>(a);
     constexpr dim3 blocks                  = k_::BlockSize();
     constexpr ck_tile::index_t kBlockPerCu = k_::kBlockPerCu;
-#if (defined(__gfx90a__) || defined(__gfx942__))
     return ck_tile::launch_kernel(
-        s, ck_tile::make_kernel<blocks.x, kBlockPerCu>(k_{}, grids, blocks, 0, kargs));
-#else
-    return 0.0;
-#endif
+        s, ck_tile::make_kernel_pt<blocks.x, kBlockPerCu>(k_{}, grids, blocks, 0, kargs));
 }
 
 template <>
@@ -130,10 +126,8 @@ void fmha_bwd_dq_dk_dv_oneshot_<dq_dk_dv_trait_0>(const ck_tile::stream_config& 
     auto [kargs, grids]                    = fmha_bwd_dq_dk_dv_create_kargs_and_grids<k_>(a);
     constexpr dim3 blocks                  = k_::BlockSize();
     constexpr ck_tile::index_t kBlockPerCu = k_::kBlockPerCu;
-#if (defined(__gfx90a__) || defined(__gfx942__))
-    ck_tile::make_kernel<blocks.x, kBlockPerCu>(k_{}, grids, blocks, 0, kargs)(
+    ck_tile::make_kernel_pt<blocks.x, kBlockPerCu>(k_{}, grids, blocks, 0, kargs)(
         ck_tile::stream_config{s.stream_id_});
-#endif
 }
 
 template <>

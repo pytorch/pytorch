@@ -6,7 +6,7 @@ import unittest
 from typing import Optional
 
 import torch
-from torch.testing._internal.common_cuda import PLATFORM_SUPPORTS_FP8
+from torch.testing._internal.common_cuda import PLATFORM_SUPPORTS_FP8, SM89OrLater
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import (
     IS_WINDOWS,
@@ -18,14 +18,10 @@ from torch.testing._internal.common_utils import (
 )
 
 
-_IS_SM9X = False
-if TEST_CUDA:
-    _IS_SM9X = torch.cuda.get_device_capability(0)[0] == 9
-
 # Protects against includes accidentally setting the default dtype
 assert torch.get_default_dtype() is torch.float32
 
-f8_msg = "FP8 is only supported on H100+ and sm_89 and MI300+ devices"
+f8_msg = "FP8 is only supported on H100+, SM 8.9 and MI300+ devices"
 
 if torch.version.hip:
     e4m3_type = torch.float8_e4m3fnuz
@@ -203,9 +199,10 @@ class TestFP8Matmul(TestCase):
         # TODO: will use e5m2_type after upgrading oneDNN to v3.6.
         y_type = e4m3_type if torch.version.hip or device == "cpu" else e5m2_type
         y = torch.full(size, 0.5, device=device, dtype=y_type).t()
+        scale_one = torch.tensor(1.0, device=device)
         scale_a = torch.tensor(1.5, device=device)
         scale_b = torch.tensor(0.66, device=device)
-        out_fp8 = torch._scaled_mm(x, y, scale_a=scale_a, scale_b=scale_b)
+        out_fp8 = torch._scaled_mm(x, y, scale_a=scale_one, scale_b=scale_one)
         self.assertEqual(out_fp8.to(torch.float), torch.full(size, 4.0, device=device))
         out_fp8_s = torch._scaled_mm(x, y, scale_a=scale_a, scale_b=scale_b)
         self.assertEqual(out_fp8, out_fp8_s)
@@ -352,10 +349,7 @@ class TestFP8Matmul(TestCase):
             ),
         )
 
-    @unittest.skipIf(
-        PLATFORM_SUPPORTS_FP8 or not torch.cuda.is_available(),
-        "This test is only for devices with compute capability < 8.9",
-    )
+    @unittest.skipIf(PLATFORM_SUPPORTS_FP8 or not torch.cuda.is_available(), f8_msg)
     def test_error_message_fp8_pre_sm89(self, device) -> None:
         (k, l, m) = (16, 48, 32)
         x = torch.rand((k, l), device=device).to(e4m3_type)
@@ -385,7 +379,7 @@ class TestFP8Matmul(TestCase):
         self.assertEqual(out_fp8, out_fp8_s)
 
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8 or IS_WINDOWS, f8_msg)
-    @unittest.skipIf(not _IS_SM9X, "rowwise implementation is currently sm90 specific")
+    @unittest.skipIf(not SM89OrLater, "rowwise implementation is currently sm89+ specific")
     @parametrize("use_fast_accum", [True, False])
     def test_float8_rowwise_scaling_sanity(self, device, use_fast_accum: bool) -> None:
         M, K, N = (1024, 512, 2048)
@@ -396,8 +390,8 @@ class TestFP8Matmul(TestCase):
         x_scales = torch.ones((x.shape[0], 1), device=device, dtype=torch.float32)
         y_scales = torch.ones((1, y.shape[0]), device=device, dtype=torch.float32)
 
-        x_fp8 = x.to(torch.float8_e4m3fn)
-        y_fp8 = y.to(torch.float8_e4m3fn).t()
+        x_fp8 = x.to(e4m3_type)
+        y_fp8 = y.to(e4m3_type).t()
 
         out_fp8 = torch._scaled_mm(
             x_fp8,
@@ -420,8 +414,8 @@ class TestFP8Matmul(TestCase):
         x = torch.full((M, K), fill_value, device=device)
         y = torch.full((N, K), fill_value, device=device)
 
-        x_fp8 = x.to(torch.float8_e4m3fn)
-        y_fp8 = y.to(torch.float8_e4m3fn).t()
+        x_fp8 = x.to(e4m3_type)
+        y_fp8 = y.to(e4m3_type).t()
 
         with self.assertRaisesRegex(
             RuntimeError,
@@ -489,14 +483,14 @@ class TestFP8Matmul(TestCase):
         ):
             torch._scaled_mm(
                 x_fp8,
-                y_fp8.to(torch.float8_e5m2),
+                y_fp8.to(e5m2_type),
                 scale_a=torch.ones((M, 1), device="cuda"),
                 scale_b=torch.ones((1, N), device="cuda"),
                 out_dtype=torch.bfloat16,
             )
 
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8 or IS_WINDOWS, f8_msg)
-    @unittest.skipIf(not _IS_SM9X, "rowwise implementation is currently sm90 specific")
+    @unittest.skipIf(not SM89OrLater, "rowwise implementation is currently sm89+ specific")
     @parametrize("base_dtype", [torch.bfloat16])
     def test_scaled_mm_vs_emulated_row_wise(self, base_dtype):
         torch.manual_seed(42)
