@@ -7,8 +7,8 @@ import torch
 from torch.backends import (
     __allow_nonbracketed_mutation,
     _FP32Precision,
-    _get_fp32_precision,
-    _set_fp32_precision,
+    _get_fp32_precision_getter,
+    _set_fp32_precision_setter,
     ContextProp,
     PropModule,
 )
@@ -75,14 +75,14 @@ def set_flags(_enabled=None, _deterministic=None, _fp32_precision="none"):
     orig_flags = (
         torch._C._get_mkldnn_enabled(),
         torch._C._get_mkldnn_deterministic(),
-        torch._C._get_fp32_precision("mkldnn", "all"),
+        torch._C._get_fp32_precision_getter("mkldnn", "all"),
     )
     if _enabled is not None:
         torch._C._set_mkldnn_enabled(_enabled)
     if _deterministic is not None:
         torch._C._set_mkldnn_deterministic(_deterministic)
     if _fp32_precision is not None:
-        torch._C._set_fp32_precision("mkldnn", "all", _fp32_precision)
+        torch._C._set_fp32_precision_setter("mkldnn", "all", _fp32_precision)
     return orig_flags
 
 
@@ -109,7 +109,7 @@ class MkldnnModule(PropModule):
     conv = _FP32Precision("mkldnn", "conv")
     rnn = _FP32Precision("mkldnn", "rnn")
     fp32_precision = ContextProp(
-        _get_fp32_precision("mkldnn", "all"), _set_fp32_precision("generic", "all")
+        _get_fp32_precision_getter("mkldnn", "all"), _set_fp32_precision_setter("generic", "all")
     )
 
 
