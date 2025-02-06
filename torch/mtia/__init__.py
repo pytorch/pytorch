@@ -22,8 +22,8 @@ Event = torch.Event
 Stream = torch.Stream
 
 _initialized = False
-_queued_calls: List[
-    Tuple[Callable[[], None], List[str]]
+_queued_calls: list[
+    tuple[Callable[[], None], list[str]]
 ] = []  # don't invoke these until initialization occurs
 _tls = threading.local()
 _initialization_lock = threading.Lock()
@@ -66,7 +66,7 @@ def _lazy_init() -> None:
         if not _is_compiled():
             raise AssertionError(
                 "Torch not compiled with MTIA enabled. "
-                "Ensure you have `import mtia.host_runtime.torch_mtia` in your python "
+                "Ensure you have `import mtia.host_runtime.torch_mtia.dynamic_library` in your python "
                 "src file and include `//mtia/host_runtime/torch_mtia:torch_mtia` as "
                 "your target dependency!"
             )
@@ -119,7 +119,8 @@ def synchronize(device: Optional[_device_t] = None) -> None:
 
 def device_count() -> int:
     r"""Return the number of MTIA devices available."""
-    return torch._C._accelerator_hooks_device_count()
+    # TODO: Update _accelerator_hooks_device_count to abstract a MTIA device count API
+    return torch._C._mtia_getDeviceCount()
 
 
 def current_device() -> int:
@@ -151,7 +152,32 @@ def default_stream(device: Optional[_device_t] = None) -> Stream:
     return torch._C._mtia_getDefaultStream(_get_device_index(device, optional=True))
 
 
-def get_device_capability(device: Optional[_device_t] = None) -> Tuple[int, int]:
+def record_memory_history(
+    enabled: Optional[str] = "all", stacks: str = "python", max_entries: int = 0
+) -> None:
+    r"""Enable/Disable the memory profiler on MTIA allocator
+
+    Args:
+        enabled (all or state, optional) selected device. Returns
+            statistics for the current device, given by current_device(),
+            if device is None (default).
+
+        stacks ("python" or "cpp", optional). Select the stack trace to record.
+
+        max_entries (int, optional). Maximum number of entries to record.
+    """
+    if not is_initialized():
+        return
+    torch._C._mtia_recordMemoryHistory(enabled, stacks, max_entries)
+
+
+def snapshot() -> dict[str, Any]:
+    r"""Return a dictionary of MTIA memory allocator history"""
+
+    return torch._C._mtia_memorySnapshot()
+
+
+def get_device_capability(device: Optional[_device_t] = None) -> tuple[int, int]:
     r"""Return capability of a given device as a tuple of (major version, minor version).
 
     Args:
@@ -329,6 +355,8 @@ __all__ = [
     "memory_stats",
     "max_memory_allocated",
     "get_device_capability",
+    "record_memory_history",
+    "snapshot",
     "empty_cache",
     "set_device",
     "set_stream",

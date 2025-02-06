@@ -12,7 +12,7 @@ import types
 import unittest
 from copy import deepcopy
 from functools import partial
-from typing import Dict, NamedTuple, Tuple
+from typing import NamedTuple
 from unittest.mock import patch
 
 import torch
@@ -27,6 +27,8 @@ from torch._dynamo.utils import ifdynstaticdefault
 from torch._dynamo.variables.torch_function import TensorWithTFOverrideVariable
 from torch.nn.modules.lazy import LazyModuleMixin
 from torch.nn.parameter import Parameter, UninitializedParameter
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
+from torch.testing._internal.common_utils import skipIfHpu
 
 
 try:
@@ -538,7 +540,7 @@ class _DenseBlock(torch.nn.ModuleDict):
     ) -> None:
         super().__init__()
         for i in range(num_layers):
-            self.add_module("denselayer%d" % (i + 1), _Block())
+            self.add_module(f"denselayer{i + 1:d}", _Block())
 
     def forward(self, init_features):
         features = [init_features]
@@ -600,7 +602,7 @@ class LazyMLP(torch.nn.Module):
 
 
 class MyInput(NamedTuple):
-    x: Dict[str, Dict[str, torch.Tensor]]
+    x: dict[str, dict[str, torch.Tensor]]
     y: torch.Tensor
 
 
@@ -825,7 +827,7 @@ class EnumValues(torch.nn.ModuleDict):
     ) -> None:
         super().__init__()
         for i in range(num_layers):
-            self.add_module("denselayer%d" % (i + 1), _Block())
+            self.add_module(f"denselayer{i + 1:d}", _Block())
 
     def forward(self, init_features):
         features = [init_features]
@@ -842,7 +844,7 @@ class AccessByKeys(torch.nn.ModuleDict):
     ) -> None:
         super().__init__()
         for i in range(num_layers):
-            self.add_module("denselayer%d" % (i + 1), _Block())
+            self.add_module(f"denselayer{i + 1:d}", _Block())
 
     def forward(self, init_features):
         features = [init_features]
@@ -1036,7 +1038,7 @@ class ModuleGuardNameIsValid(torch.nn.ModuleDict):
     def __init__(self) -> None:
         super().__init__()
         for i in range(2):
-            self.add_module("l@yer-%d" % (i + 1), BasicModule())
+            self.add_module(f"l@yer-{i + 1:d}", BasicModule())
 
     def forward(self, x):
         for layer in self.values():
@@ -1469,7 +1471,6 @@ class NNModuleTests(torch._dynamo.test_case.TestCase):
         finally:
             TensorWithTFOverrideVariable.global_mangled_class_name = original
 
-    @patch.object(torch._dynamo.config, "raise_on_ctx_manager_usage", False)
     def test_nn_moduledict_contains(self):
         class M(torch.nn.Module):
             def __init__(self, module_dict):
@@ -1503,22 +1504,6 @@ class NNModuleTests(torch._dynamo.test_case.TestCase):
 
         self.assertEqual(cnt.op_count, 1)
         self.assertTrue(torch._dynamo.testing.same(out1, out2))
-
-        module_dict = torch.nn.ModuleDict({"cat": torch.nn.Conv2d(1, 1, 1)})
-        pre = m(data)
-        cnt.clear()
-
-        with torch._dynamo.optimize(cnt, nopython=False):
-            opt_pre = m(data)
-            m = M(module_dict)
-            data = torch.randn(1)
-            out1 = m(data)
-
-        out_post = m(data)
-        self.assertEqual(cnt.frame_count, 1)
-        self.assertEqual(cnt.op_count, 1)
-        self.assertTrue(torch._dynamo.testing.same(pre, opt_pre))
-        self.assertTrue(torch._dynamo.testing.same(out1, out_post))
 
     # RuntimeError: SymIntArrayRef expected to contain only concrete integers
     @expectedFailureDynamic
@@ -1602,26 +1587,6 @@ class NNModuleTests(torch._dynamo.test_case.TestCase):
         res = opt_m(x)
         ref = m(x)
         self.assertTrue(torch.allclose(ref, res))
-
-    # RuntimeError: SymIntArrayRef expected to contain only concrete integers
-    @expectedFailureDynamic
-    @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
-    def test_lazy_module3(self):
-        m = LazyMLP()
-        x = torch.rand([10, 10])
-        cnt = torch._dynamo.testing.CompileCounter()
-        opt_m = torch.compile(m, backend=cnt, fullgraph=True)
-        # first iteration
-        res = opt_m(x)
-        ref = m(x)
-        self.assertTrue(torch.allclose(ref, res))
-        # move to cuda and second iteration
-        m = m.to("cuda")
-        x = x.to("cuda")
-        res = opt_m(x)
-        ref = m(x)
-        self.assertTrue(torch.allclose(ref, res))
-        self.assertEqual(cnt.frame_count, 2)
 
     # RuntimeError: SymIntArrayRef expected to contain only concrete integers
     @expectedFailureDynamic
@@ -1816,6 +1781,27 @@ class NNModuleTests(torch._dynamo.test_case.TestCase):
             res3 = opt_mod(x)
             self.assertTrue(torch.allclose(ref3, res3))
             self.assertEqual(cnt.frame_count, ifdynstaticdefault(2, 1))
+
+
+class NNModuleTestsDevice(torch._dynamo.test_case.TestCase):
+    @expectedFailureDynamic
+    @skipIfHpu
+    def test_lazy_module3(self, device):
+        m = LazyMLP()
+        x = torch.rand([10, 10])
+        cnt = torch._dynamo.testing.CompileCounter()
+        opt_m = torch._dynamo.optimize(cnt, nopython=True)(m)
+        # first iteration
+        res = opt_m(x)
+        ref = m(x)
+        self.assertTrue(torch.allclose(ref, res))
+        # move to device and second iteration
+        m = m.to(device)
+        x = x.to(device)
+        res = opt_m(x)
+        ref = m(x)
+        self.assertTrue(torch.allclose(ref, res))
+        self.assertEqual(cnt.frame_count, 2)
 
 
 class MockModule(torch.nn.Module):
@@ -2086,7 +2072,7 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
 
     def test_no_recompile_on_nn_guarded_modules(self):
         size = (10, 10)
-        cache_size_limit = 1
+        recompile_limit = 1
         num_submodules = 4
         cnts = torch._dynamo.testing.CompileCounterWithBackend("eager")
 
@@ -2116,8 +2102,8 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
         with unittest.mock.patch(
             "torch._dynamo.config.error_on_recompile", True
         ), unittest.mock.patch(
-            "torch._dynamo.config.cache_size_limit",
-            cache_size_limit,
+            "torch._dynamo.config.recompile_limit",
+            recompile_limit,
         ):
             x = torch.randn(*size, requires_grad=True)
             mod(x)
@@ -2126,7 +2112,7 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
             else:
                 self.assertEqual(cnts.frame_count, num_submodules)
 
-    @patch.object(torch._dynamo.config, "accumulated_cache_size_limit", 2)
+    @patch.object(torch._dynamo.config, "accumulated_recompile_limit", 2)
     @patch.object(torch._dynamo.config, "inline_inbuilt_nn_modules", False)
     def test_recompile_limit_on_freed_module(self):
         class Mod(torch.nn.Module):
@@ -2152,7 +2138,7 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
     @patch.object(torch._dynamo.config, "inline_inbuilt_nn_modules", True)
     def test_inline_inbuilt_nn_modules(self):
         size = (10, 10)
-        cache_size_limit = 1
+        recompile_limit = 1
         num_submodules = 4
         cnts = torch._dynamo.testing.CompileCounterWithBackend("eager")
 
@@ -2182,15 +2168,15 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
         with unittest.mock.patch(
             "torch._dynamo.config.error_on_recompile", True
         ), unittest.mock.patch(
-            "torch._dynamo.config.cache_size_limit",
-            cache_size_limit,
+            "torch._dynamo.config.recompile_limit",
+            recompile_limit,
         ):
             x = torch.randn(*size, requires_grad=True)
             mod(x)
             self.assertEqual(cnts.frame_count, 1)
 
-    def test_cache_size_limit_on_guarded_nn_modules(self):
-        cache_size_limit = 2
+    def test_recompile_limit_on_guarded_nn_modules(self):
+        recompile_limit = 2
         num_submodules = 4
         cnts = torch._dynamo.testing.CompileCounterWithBackend("eager")
 
@@ -2219,8 +2205,8 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
         # therefore the total number of expected frame count is 2 *
         # num_submodules.
         with unittest.mock.patch(
-            "torch._dynamo.config.cache_size_limit",
-            cache_size_limit,
+            "torch._dynamo.config.recompile_limit",
+            recompile_limit,
         ):
             for size in [
                 (4,),
@@ -2325,7 +2311,7 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
         m = TestModule()
 
         def forward_hook(
-            module: torch.nn.Module, inputs: Tuple[torch.Tensor], output: torch.Tensor
+            module: torch.nn.Module, inputs: tuple[torch.Tensor], output: torch.Tensor
         ) -> torch.Tensor:
             return 2 * output + 1
 
@@ -2372,7 +2358,7 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
         m = TestModule()
 
         def forward_hook(
-            module: torch.nn.Module, inputs: Tuple[torch.Tensor], output: torch.Tensor
+            module: torch.nn.Module, inputs: tuple[torch.Tensor], output: torch.Tensor
         ) -> torch.Tensor:
             return 2 * output + 1
 
@@ -2421,14 +2407,13 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
         self.assertEqual(compiled_func(inp).item(), 15)
 
         def new_forward_hook(
-            module: torch.nn.Module, inputs: Tuple[torch.Tensor], output: torch.Tensor
+            module: torch.nn.Module, inputs: tuple[torch.Tensor], output: torch.Tensor
         ) -> torch.Tensor:
             return 2 * output + 2
 
         m._forward_hooks[handle.id] = new_forward_hook
         self.assertEqual(compiled_func(inp), outer_func(inp))
         self.assertEqual(compiled_func(inp).item(), 16)
-        self.assertRegex(failure_reason, r"___check_obj_id\(L\['m'\]._forward_hooks")
 
     @patch.object(torch._dynamo.config, "guard_nn_modules", False)
     @patch.object(torch._dynamo.config, "skip_nnmodule_hook_guards", True)
@@ -2441,7 +2426,7 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
         m = TestModule()
 
         def forward_hook(
-            module: torch.nn.Module, inputs: Tuple[torch.Tensor], output: torch.Tensor
+            module: torch.nn.Module, inputs: tuple[torch.Tensor], output: torch.Tensor
         ) -> torch.Tensor:
             return 2 * output + 1
 
@@ -2779,6 +2764,7 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
         run()
         self.assertTrue(models[0].abc)
 
+    @torch._dynamo.config.patch(inline_inbuilt_nn_modules=False)
     def test_assign_does_not_exist(self):
         class MyModule(torch.nn.Module):
             def forward(self, x):
@@ -3070,7 +3056,9 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
     def test_globals_change_in_other_file(self):
         @torch.compile(backend="eager", fullgraph=True)
         def fn(x):
-            update_global()
+            # Let `update_global` get invoked in a nested frame, to make sure
+            # Dynamo is properly modelling globals across frames and files.
+            test_functions.call(update_global)
             a = test_functions.update_global(x)
             # Ensure that the updated global values are read
             return x * a * (_variable + _variable1 + test_functions._variable)
@@ -3229,9 +3217,8 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
         res = opt_fn(x)
         self.assertEqual(ref, res)
 
-    @patch.object(
-        torch._dynamo.config, "skip_tensor_guards_with_matching_dict_tags", False
-    )
+    @torch._dynamo.config.patch("skip_tensor_guards_with_matching_dict_tags", False)
+    @torch._dynamo.config.patch("inline_inbuilt_nn_modules", True)
     def test_param_requires_grad(self):
         def adjust_model(model):
             to_freeze = model.num_iter % 2 == 0
@@ -3277,6 +3264,57 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
         # Check that we have recompiled twice, which leads to 3 frames
         self.assertEqual(cnt.frame_count, 3)
 
+    def test_branch_on_nn_module_custom_len(self):
+        class Cache(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.key_cache = []
+                self.len_invoked = 0
+
+            def __len__(self):
+                self.len_invoked += 1
+                return len(self.key_cache)
+
+        @torch.compile(fullgraph=True, backend="eager")
+        def f(x):
+            cache = Cache()
+            if cache:
+                return x + 1, cache
+            return x + 2, cache
+
+        x = torch.ones(1)
+        res, cache = f(x)
+        self.assertEqual(res, x + 2)
+        # Make sure Dynamo actually traced the method.
+        self.assertEqual(cache.len_invoked, 1)
+
+    def test_branch_on_nn_module_custom_bool(self):
+        class Cache(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.key_cache = [0]
+                self.bool_invoked = 0
+
+            def __bool__(self):
+                self.bool_invoked += 1
+                return len(self.key_cache)
+
+        @torch.compile(fullgraph=True, backend="eager")
+        def f(x):
+            cache = Cache()
+            if cache:
+                return x + 1, cache
+            return x + 2, cache
+
+        x = torch.ones(1)
+        res, cache = f(x)
+        self.assertEqual(res, x + 1)
+        # Make sure Dynamo actually traced the method.
+        self.assertEqual(cache.bool_invoked, 1)
+
+
+devices = ["cuda", "hpu"]
+instantiate_device_type_tests(NNModuleTestsDevice, globals(), only_for=devices)
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests

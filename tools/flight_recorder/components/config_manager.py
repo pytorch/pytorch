@@ -6,7 +6,8 @@
 
 import argparse
 import logging
-from typing import Optional, Sequence
+from collections.abc import Sequence
+from typing import Optional
 
 from tools.flight_recorder.components.fr_logger import FlightRecorderLogger
 

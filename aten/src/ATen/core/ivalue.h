@@ -683,6 +683,8 @@ struct TORCH_API IValue final {
   c10::List<int64_t> toIntList() &&;
   c10::List<int64_t> toIntList() const&;
   std::vector<int64_t> toIntVector() const;
+  c10::List<c10::SymInt> toSymIntList() &&;
+  c10::List<c10::SymInt> toSymIntList() const&;
   std::vector<c10::SymInt> toSymIntVector() const;
   at::DimVector toDimVector() const;
 
@@ -916,7 +918,7 @@ struct TORCH_API IValue final {
       return toSymFloat();
     else if (isSymBool())
       return toSymBool();
-    throw std::runtime_error("IValue is not a Scalar");
+    TORCH_CHECK(false, "IValue is not a Scalar");
   }
 
   // Device

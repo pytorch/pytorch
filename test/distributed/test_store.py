@@ -704,7 +704,7 @@ class RendezvousTCPTest(TestCase):
     def create_tcp_url(self):
         addr = DEFAULT_HOSTNAME
         port = common.find_free_port()
-        url = "tcp://%s:%d?world_size=%d" % (addr, port, 1)
+        url = f"tcp://{addr}:{port:d}?world_size=1"
         return url
 
     def test_common_errors(self):

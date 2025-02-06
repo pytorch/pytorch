@@ -2,7 +2,7 @@
 
 import logging
 import weakref
-from typing import Dict, List, TYPE_CHECKING
+from typing import TYPE_CHECKING
 
 import torch
 from torch._logging import getArtifactLogger
@@ -12,6 +12,7 @@ from ..guards import GuardBuilder, install_guard
 from ..source import (
     AttrSource,
     ConstDictKeySource,
+    DictGetItemSource,
     GetItemSource,
     GlobalWeakRefSource,
     GradSource,
@@ -83,8 +84,8 @@ class OptimizerVariable(UserDefinedObjectVariable):
         self,
         tx,
         name,
-        args: "List[VariableTracker]",
-        kwargs: "Dict[str, VariableTracker]",
+        args: "list[VariableTracker]",
+        kwargs: "dict[str, VariableTracker]",
     ) -> "VariableTracker":
         """This is an optimization to avoid tracing the very slow initialization of the optimizer"""
         if name == "_init_group":
@@ -263,7 +264,7 @@ class OptimizerVariable(UserDefinedObjectVariable):
                                 VariableTracker.build(
                                     tx,
                                     self.value.state[param],
-                                    GetItemSource(
+                                    DictGetItemSource(
                                         state_source,
                                         ConstDictKeySource(state_source, key_index),
                                     ),
@@ -292,7 +293,9 @@ class OptimizerVariable(UserDefinedObjectVariable):
                 else:
                     install_guard(grad_source.make_guard(GuardBuilder.CONSTANT_MATCH))
 
-            if not all_static and perf_hint_log.isEnabledFor(logging.WARNING):
+            # Note: to avoid spam logs only warn if perf hint artifact is enabled
+            # (NB: artifacts are only enabled at the debug or warning level)
+            if not all_static and perf_hint_log.isEnabledFor(logging.DEBUG):
                 non_static_grads = [src.name() for src in non_static_grads]
                 perf_hint_log.warning(
                     (
@@ -306,7 +309,7 @@ class OptimizerVariable(UserDefinedObjectVariable):
         # We have to again iterate over the state dict to collect the
         # tensor_to_source dict. This is used for the finalizer.
         for idx, (p, value) in enumerate(self.value.state.items()):
-            p_state_source = GetItemSource(
+            p_state_source = DictGetItemSource(
                 state_source, ConstDictKeySource(state_source, idx)
             )
             tx.output.guard_on_key_order.add(p_state_source.name())
@@ -316,7 +319,7 @@ class OptimizerVariable(UserDefinedObjectVariable):
                     and v not in self.grad_to_source
                     and v not in self.tensor_to_source
                 ):
-                    self.tensor_to_source[v] = GetItemSource(
+                    self.tensor_to_source[v] = DictGetItemSource(
                         p_state_source, ConstDictKeySource(p_state_source, inner_idx)
                     )
 

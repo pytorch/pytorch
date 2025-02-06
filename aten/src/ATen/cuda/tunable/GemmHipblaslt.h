@@ -179,6 +179,26 @@ float GetBetaFromParams(const ScaledGemmParams<T>* params) {
 }
 
 template <typename T>
+bool GetUseRowwiseFromParams(const GemmParams<T>* params) {
+  return false;
+}
+
+template <typename T>
+bool GetUseRowwiseFromParams(const GemmAndBiasParams<T>* params) {
+  return false;
+}
+
+template <typename T>
+bool GetUseRowwiseFromParams(const GemmStridedBatchedParams<T>* params) {
+  return false;
+}
+
+template <typename T>
+bool GetUseRowwiseFromParams(const ScaledGemmParams<T>* params) {
+  return params->use_rowwise;
+}
+
+template <typename T>
 const void* GetAScalePointerFromParams(const GemmParams<T>* params) {
   return nullptr;
 }
@@ -460,8 +480,18 @@ class HipblasltGemmOp : public Callable<ParamsT> {
       const void* mat2_scale_ptr = GetBScalePointerFromParams<CT>(params);
       const void* result_scale_ptr = GetDScalePointerFromParams<CT>(params);
       if (mat1_scale_ptr && mat2_scale_ptr) {
-        matmul.setAttribute(HIPBLASLT_MATMUL_DESC_A_SCALE_POINTER, mat1_scale_ptr);
-        matmul.setAttribute(HIPBLASLT_MATMUL_DESC_B_SCALE_POINTER, mat2_scale_ptr);
+#ifdef HIPBLASLT_VEC_EXT
+        if (GetUseRowwiseFromParams<CT>(params)) {
+          // swapped
+          matmul.setAttribute(HIPBLASLT_MATMUL_DESC_A_SCALE_POINTER_VEC_EXT, mat2_scale_ptr);
+          matmul.setAttribute(HIPBLASLT_MATMUL_DESC_B_SCALE_POINTER_VEC_EXT, mat1_scale_ptr);
+        }
+        else
+#endif
+        {
+          matmul.setAttribute(HIPBLASLT_MATMUL_DESC_A_SCALE_POINTER, mat1_scale_ptr);
+          matmul.setAttribute(HIPBLASLT_MATMUL_DESC_B_SCALE_POINTER, mat2_scale_ptr);
+        }
       }
       if (result_scale_ptr) {
         matmul.setAttribute(HIPBLASLT_MATMUL_DESC_D_SCALE_POINTER, result_scale_ptr);
@@ -567,13 +597,6 @@ auto GetHipBlasLtTypeStringAndOps() {
         HIPBLAS_COMPUTE_32F,
         heuristic_result));
   TORCH_HIPBLASLT_CHECK(hipblasLtDestroy(handle));
-
-  // Sort heuristic_result by algo index to make sure the order of returned algos is deterministic.
-  std::sort(heuristic_result.begin(),
-      heuristic_result.end(),
-      [](hipblasLtMatmulHeuristicResult_t& a, hipblasLtMatmulHeuristicResult_t& b) {
-      return hipblaslt_ext::getIndexFromAlgo(a.algo) < hipblaslt_ext::getIndexFromAlgo(b.algo);
-      });
 
   int returned_algo_count = heuristic_result.size();
   std::vector<std::pair<std::string, std::unique_ptr<Callable<ParamsT>>>> ret;

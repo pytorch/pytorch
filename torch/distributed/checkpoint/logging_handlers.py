@@ -1,10 +1,9 @@
 import logging
-from typing import List
 
 from torch.distributed.logging_handlers import _log_handlers
 
 
-__all__: List[str] = []
+__all__: list[str] = []
 
 DCP_LOGGER_NAME = "dcp_logger"
 
