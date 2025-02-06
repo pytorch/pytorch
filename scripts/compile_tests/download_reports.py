@@ -7,7 +7,7 @@ import subprocess
 import requests
 
 
-WITH_LF = False
+WITH_LF = True
 LF = "lf." if WITH_LF else ""
 
 CONFIGS = {
@@ -39,9 +39,9 @@ CONFIGS = {
         f"linux-focal-py3.13-clang10 / test (default, 5, 5, {LF}linux.4xlarge)",
     },
     "dynamo_wrapped313": {
-        "linux-focal-py3.13-clang10 / test (dynamo_wrapped, 1, 3, linux.2xlarge)",
-        "linux-focal-py3.13-clang10 / test (dynamo_wrapped, 2, 3, linux.2xlarge)",
-        "linux-focal-py3.13-clang10 / test (dynamo_wrapped, 3, 3, linux.2xlarge)",
+        f"linux-focal-py3.13-clang10 / test (dynamo_wrapped, 1, 3, {LF}linux.2xlarge)",
+        f"linux-focal-py3.13-clang10 / test (dynamo_wrapped, 2, 3, {LF}linux.2xlarge)",
+        f"linux-focal-py3.13-clang10 / test (dynamo_wrapped, 3, 3, {LF}linux.2xlarge)",
     },
     "aot_eager313": {
         f"linux-focal-py3.13-clang10 / test (aot_eager_wrapped, 1, 3, {LF}linux.12xlarge)",

@@ -190,6 +190,7 @@ class TestCaseStatus(Enum):
     PASSED = auto()
     FAILED = auto()
     SKIPPED = auto()
+    SYSTEM_ERR = auto()
 
 
 from typing import Any
@@ -210,6 +211,8 @@ class TestCaseResult:
     def is_skipped(self):
         return self.status == TestCaseStatus.SKIPPED
 
+    def is_system_err(self):
+        return self.status == TestCaseStatus.SYSTEM_ERR
 
 def parse_testcase(testcase) -> TestCaseResult:
     children = list(testcase.iter())
@@ -224,8 +227,11 @@ def parse_testcase(testcase) -> TestCaseResult:
     if "failure" in tags:
         return TestCaseResult(TestCaseStatus.FAILED, k, testcase)
 
-    breakpoint()
-    assert False
+    if "system-err" in tags:
+        return TestCaseResult(TestCaseStatus.SYSTEM_ERR, k, testcase)
+
+    # TODO: handle rerun
+    # print(f"XXX unmarked testcase tags:{tags}")
 
 
 def get_testsuites(xmls):
@@ -241,10 +247,18 @@ def parse_xmls(xmls):
     total_tests = 0
     total_skipped = 0
     total_failed = 0
+    total_errors = 0
     for ts in testsuites:
         total_tests += int(ts.attrib["tests"])
         total_failed += int(ts.attrib["failures"])
         total_skipped += int(ts.attrib["skipped"])
+        total_errors += int(ts.attrib["errors"])
+        unknown_attribs = set(ts.keys()) - {"tests", "failures", "skipped", "timestamp", "time", "name", "errors"}
+        if unknown_attribs:
+            # print(f"XXX testsuite {ts} unknown attribs:{unknown_attribs}")
+            for attr in unknown_attribs:
+                # print(f"XXX {attr}: {ts.attrib[attr]}")
+                pass
     total_passed = total_tests - total_skipped - total_failed
 
     # print("--- HEADER DATA ---")
@@ -260,10 +274,13 @@ def parse_xmls(xmls):
     tc_total_skipped = 0
     tc_total_failed = 0
     tc_total_passed = 0
+    tc_total_system_err = 0
     tcs = dict()
     for testcase in testcases:
         k = key(testcase)
         v = parse_testcase(testcase)
+        if v is None:
+            continue
         tcs[k] = v
         tc_total_tests += 1
         if v.is_failed():
@@ -272,27 +289,24 @@ def parse_xmls(xmls):
             tc_total_skipped += 1
         elif v.is_passed():
             tc_total_passed += 1
+        elif v.is_system_err():
+            tc_total_system_err += 1
         else:
             assert False
 
-    print(f"XXX   total_tests:{tc_total_tests:5} (h:{total_tests:5})")
-    print(f"XXX  total_failed:{tc_total_failed:5} (h:{total_failed:5})")
-    print(f"XXX total_skipped:{tc_total_skipped:5} (h:{total_skipped:5})")
-    print(f"XXX  total_passed:{tc_total_passed:5} (h:{total_passed:5})")
+    print(f"XXX      total_tests:{tc_total_tests:5} (h:{total_tests:5})")
+    print(f"XXX     total_failed:{tc_total_failed:5} (h:{total_failed:5})")
+    print(f"XXX    total_skipped:{tc_total_skipped:5} (h:{total_skipped:5})")
+    print(f"XXX     total_passed:{tc_total_passed:5} (h:{total_passed:5})")
+    print(f"XXX total_system_err:{tc_total_system_err:5} (h:{total_errors:5})")
 
     return tcs
 
 
-def compute_pass_rate_tcs(control_tcs, test_tcs):
-    # passed - passed
-    # 0 - passed
-    # passed - 0
-    # passed - failed
-    # failed - failed
+def compute_pass_rate_tcs(control_tcs, test_tcs, name=""):
+    c_passed_t_passed = 0
+    c_passed_t_notpassed = 0
 
-    # number of tests, that passed or fail in both
-    base_count = 0
-    c_passed_t_failed = 0
     for k, tv in test_tcs.items():
         if tv.is_skipped():
             continue
@@ -303,60 +317,16 @@ def compute_pass_rate_tcs(control_tcs, test_tcs):
         if cv.is_skipped():
             continue
 
-        if cv.is_passed() and tv.is_failed():
-            base_count += 1
-            c_passed_t_failed += 1
-            print(f"CONTROL_PASSED_TEST_FAILED:{k}")
-        elif cv.is_failed() and tv.is_passed():
-            c_failed_t_passed += 1
-            print(f"STRANGE! CONTROL_FAILED_TEST_PASSED:{k}")
-        elif cv.is_failed() and tv.is_failed():
-            c_failed_t_failed += 1
-            print(f"BOTH FAILED:{k}")
-        else:
-            assert cv.is_passed() and tv.is_passed()
-            base_count += 1
+        if cv.is_passed() and tv.is_passed():
+            c_passed_t_passed += 1
 
-    print(f"XXX base_count:{base_count}")
-    print(f"XXX passed_failed_count:{c_passed_t_failed}")
+        if cv.is_passed():
+            c_passed_t_notpassed += 1
 
-    print(f"Pass ratio:{c_passed_t_failed / base_count}")
-
-
-def find_test_in_control_statuses(
-    control_tcs, control_status: TestCaseStatus, test_tcs, test_status: TestCaseStatus
-):
-    for k, tv in test_tcs.items():
-        if tv.status != test_status:
-            continue
-
-        if (cv := control_tcs.get(k, None)) is None:
-            continue
-
-        if cv.status != control_status:
-            continue
-
-        print(
-            f"XXX TEST:{k} {tv.key} {tv.testcase} (control:{control_status} vs test_status:{test_status}"
-        )
-
-
-def find_control_in_test_statuses(
-    control_tcs, control_status: TestCaseStatus, test_tcs, test_status: TestCaseStatus
-):
-    for k, cv in control_tcs.items():
-        if cv.status != control_status:
-            continue
-
-        if (tv := test_tcs.get(k, None)) is None:
-            continue
-
-        if tv.status != test_status:
-            continue
-
-        print(
-            f"XXX TEST:{k} {tv.key} {tv.testcase} (control:{control_status} vs test_status:{test_status}"
-        )
+    num = c_passed_t_passed
+    den = c_passed_t_passed + c_passed_t_notpassed
+    pass_ratio = num / den
+    print(f"XXX Pass_ratio:{pass_ratio:.3} ({num} / {den})")
 
 
 def find_control_passed_missing_in_test(
@@ -380,6 +350,36 @@ def find_control_passed_missing_in_test(
     for k, v in sd.items():
         print(f"{v:4} PYTORCH_TEST_WITH_SUBCLASSES=1 python test/{k} -v")
 
+def report_control_pass_test_notpass(control_tcs, test_tcs, fname):
+    i = 0
+    with open(fname, "w") as f:
+        for k, tv in test_tcs.items():
+            if tv.is_skipped():
+                continue
+
+            if (cv := control_tcs.get(k, None)) is None:
+                continue
+
+            if cv.is_skipped():
+                continue
+
+            if cv.is_passed() and not tv.is_passed():
+                f.write("-"*80)
+                tc = tv.testcase
+                f.write(f"{i:5}: {k}\n")
+                try:
+                    failure = tc.find("failure")
+                    if failure is None:
+                        failure = tc.find("rerun")
+                    failure_msg = failure.attrib["message"]
+                    f.write(f"Failure_message:{failure_msg}\n")
+                    failure_text = failure.text
+                except Exception as e:
+                    print(f"Exception on report prep for key:{k} e:{e}")
+                    import traceback
+                    print(traceback.format_exc())
+                i += 1
+
 
 def compute_pass_rate_aot_eager_subclasses(e_dir, dw_dir, ae_dir, sc_dir):
     print("parsing xmls")
@@ -400,25 +400,18 @@ def compute_pass_rate_aot_eager_subclasses(e_dir, dw_dir, ae_dir, sc_dir):
     tcs_sc = parse_xmls(sc_xmls)
     print("===")
 
+
+    print("*** computing pass rate DYNAMO vs AOT_EAGER")
+    compute_pass_rate_tcs(tcs_dw, tcs_ae)
+
+    print("*** computing pass rate AOT_EAGER vs SC")
+    compute_pass_rate_tcs(tcs_ae, tcs_sc)
+
+    print("*** Find passed in dynamo, missing in SC")
     find_control_passed_missing_in_test(tcs_dw, tcs_sc)
 
-    # find_test_in_control_statuses(tcs_dw, TestCaseStatus.PASSED, tcs_sc, TestCaseStatus.SKIPPED)
-    # find_control_in_test_statuses(tcs_dw, TestCaseStatus.PASSED, tcs_sc, TestCaseStatus.SKIPPED)
-
-    # print("computing pass rate EAGER vs AOT_EAGER")
-    # compute_pass_rate_tcs(tcs_e, tcs_ae)
-
-    # print("computing pass rate AOT_EAGER vs SC")
-    # compute_pass_rate_tcs(tcs_ae, tcs_sc)
-
-    # test_testcases = get_testcases(test_xmls)
-    # tc = {key(t): t for t in test_testcases}
-
-    # # Useful for debugging
-    # not_there_keys = set()
-    # for key_ in control_pass_keys:
-    #     if key_ not in tc:
-    #         not_there_keys.add(key_)
-
-    # fail_keys = control_pass_keys - subset
-    # return fail_keys
+    report_control_pass_test_notpass(
+        tcs_ae,
+        tcs_sc,
+        "test_pass_ae_notpass_sc"
+    )

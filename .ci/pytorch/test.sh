@@ -326,6 +326,7 @@ test_dynamo_wrapped_shard() {
     --shard "$1" "$NUM_TEST_SHARDS" \
     --verbose \
     --upload-artifacts-while-running
+    --continue-through-error
   assert_git_not_dirty
 }
 
