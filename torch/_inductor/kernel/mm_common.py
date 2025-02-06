@@ -1,7 +1,6 @@
 # mypy: allow-untyped-defs
 import logging
-from collections.abc import Sequence
-from typing import Any, cast, Dict, Tuple
+from typing import Any
 
 import sympy
 

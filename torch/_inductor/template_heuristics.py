@@ -4,19 +4,7 @@ import itertools
 from collections import namedtuple
 from functools import partial
 from threading import Lock
-from typing import (
-    Any,
-    Callable,
-    cast,
-    Dict,
-    Generator,
-    List,
-    Sequence,
-    Tuple,
-    Type,
-    TYPE_CHECKING,
-    TypeVar,
-)
+from typing import Any, Callable, Generator, List, Sequence, Tuple, Type, TYPE_CHECKING
 
 from torch.utils._ordered_set import OrderedSet
 
@@ -43,7 +31,7 @@ class BaseConfigSingleton(type):
     ) -> BaseConfigHeuristic:
         with cls._lock:
             if cls not in cls._instances:
-                instance = super().__call__(cls, *args, **kwargs)
+                instance = super().__call__()
                 cls._instances[cls] = instance
             return cls._instances[cls]
 
