@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import itertools
 import re
+import warnings
 from typing import (
     Any,
     Callable,
@@ -796,6 +797,14 @@ class DefaultHandler:
 
         """
         raise NotImplementedError
+
+    def __getattr__(self, name: str) -> Any:
+        def fallback(*args: Any, **kwargs: Any) -> Any:
+            return self._default(name, args, kwargs)
+
+        # would like to remove this function entirely, but it's used in MTIA backend
+        warnings.warn(f"undefined OpHandler.{name}, please add missing op schema")
+        return fallback
 
     @staticmethod
     def _call_default(target: str):
