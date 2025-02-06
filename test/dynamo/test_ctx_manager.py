@@ -20,11 +20,10 @@ from torch.nn import functional as F
 from torch.testing._internal.common_cuda import PLATFORM_SUPPORTS_FLASH_ATTENTION
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
+    make_dynamo_test,
     parametrize,
     TEST_WITH_ROCM,
 )
-
-from .utils import make_dynamo_test
 
 
 try:
@@ -2701,7 +2700,7 @@ class GraphModule(torch.nn.Module):
 
 class CPythonContextManagerTestCase(torch._dynamo.test_case.TestCase):
     # Tests taken from CPython source code in cpython/Lib/test/test_contextlib.py
-    # https://github.com/python/cpython/blob/d48cc82ed25e26b02eb97c6263d95dcaa1e9111b/Lib/test/test_contextlib.py#L70
+    # https://github.com/python/cpython/blob/v3.13.1/Lib/test/test_contextlib.py
 
     @make_dynamo_test
     def test_contextmanager_plain(self):
@@ -3000,6 +2999,21 @@ def woohoo():
         with self.assertRaises(StopIteration):
             with woohoo():
                 raise StopIteration
+
+    @unittest.expectedFailure
+    @make_dynamo_test
+    def test_contextmanager_non_normalised(self):
+        @contextmanager
+        def whoo():
+            try:
+                yield
+            except RuntimeError:
+                raise SyntaxError  # noqa: B904
+
+        ctx = whoo()
+        ctx.__enter__()
+        with self.assertRaises(SyntaxError):
+            ctx.__exit__(RuntimeError, None, None)
 
 
 instantiate_parametrized_tests(CtxManagerTests)

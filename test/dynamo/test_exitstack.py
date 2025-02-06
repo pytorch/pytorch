@@ -7,8 +7,7 @@ from contextlib import contextmanager, ExitStack
 
 import torch
 import torch._dynamo.test_case
-
-from .utils import make_dynamo_test
+from torch.testing._internal.common_utils import make_dynamo_test
 
 
 @contextlib.contextmanager
@@ -568,6 +567,8 @@ class CPythonTestBaseExitStack:
 
 
 class CPythonTestExitStack(CPythonTestBaseExitStack, torch._dynamo.test_case.TestCase):
+    # Tests taken from CPython source code in cpython/Lib/test/test_contextlib.py
+    # https://github.com/python/cpython/blob/v3.13.1/Lib/test/test_contextlib.py
     exit_stack = ExitStack
     callback_error_internal_frames = [
         ("__exit__", "raise exc"),
