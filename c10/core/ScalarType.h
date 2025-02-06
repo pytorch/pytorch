@@ -108,9 +108,6 @@ struct dummy_int1_7_t {};
   _(c10::Float8_e8m0fnu, Float8_e8m0fnu) /* 44 */        \
   _(c10::Float4_e2m1fn_x2, Float4_e2m1fn_x2) /* 45 */
 
-// _(c10::Float8_e8m0fnu, Float8_e8m0fnu)
-// _(c10::Float4_e2m1fn_x2, Float4_e2m1fn_x2)
-
 // If you want to support ComplexHalf for real, add ComplexHalf
 // into this macro (and change the name).  But beware: convert()
 // doesn't work for all the conversions you need...
@@ -392,7 +389,8 @@ inline bool isFloat8Type(ScalarType t) {
 }
 
 inline bool isReducedFloatingType(ScalarType t) {
-  return t == ScalarType::Half || t == ScalarType::BFloat16 || isFloat8Type(t);
+  return t == ScalarType::Half || t == ScalarType::BFloat16 ||
+      isFloat8Type(t) || t == ScalarType::Float4_e2m1fn_x2;
 }
 
 inline bool isFloatingType(ScalarType t) {
