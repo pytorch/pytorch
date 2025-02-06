@@ -153,7 +153,10 @@ class FXSymbolicTracer(_exporter_legacy.FXGraphExtractor):
                     return out
 
 
-                f = fx.symbolic_trace(f, concrete_args={"x": {"a": fx.PH, "b": fx.PH, "c": fx.PH}})
+                f = fx.symbolic_trace(
+                    f,
+                    concrete_args={"x": {"a": fx.PH, "b": fx.PH, "c": fx.PH}},
+                )
                 assert f({"a": 1, "b": 2, "c": 4}) == 7
     """
 
