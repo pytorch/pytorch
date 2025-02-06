@@ -806,6 +806,16 @@ def skip_if_triton(fn):
     return wrapper
 
 
+def skip_if_not_triton(fn):
+    @functools.wraps(fn)
+    def wrapper(self):
+        if not is_triton_backend(self.device):
+            raise unittest.SkipTest(f"triton backend is required for {self.device}")
+        return fn(self)
+
+    return wrapper
+
+
 def skip_if_dynamic(fn):
     @functools.wraps(fn)
     def wrapper(self):
@@ -827,8 +837,11 @@ def is_mps_backend(device):
 
 
 def is_triton_backend(device):
-    if getattr(device, "type", device) == "cpu":
+    device_type = getattr(device, "type", device)
+    if device_type == "cpu":
         return config.cpu_backend == "triton"
+    if device_type == "mps":
+        return False
     return config.cuda_backend == "triton"
 
 
@@ -1888,7 +1901,7 @@ class CommonTemplate:
 
         self.common(fn, (torch.full((4,), float("-inf")),))
 
-    @requires_gpu()
+    @skip_if_not_triton
     def test_reduction_config_limit(self):
         """
         This unit-test tests whether we exceed cudaDeviceProperties.maxGridSize in
@@ -9634,7 +9647,12 @@ class CommonTemplate:
     @requires_gpu()
     @skip_if_halide  # cascading accuracy issues due rsqrt fallback
     def test_tmp_not_defined_issue3(self):
-        from torch import device
+        test_device = torch.device(type=self.device)
+        test_device_0 = (
+            torch.device(type=self.device, index=0)
+            if self.device != "cpu"
+            else test_device
+        )
 
         def forward(
             self,
@@ -9678,7 +9696,7 @@ class CommonTemplate:
                 1,
                 dtype=torch.int32,
                 layout=torch.strided,
-                device=device(type=GPU_TYPE, index=0),
+                device=test_device_0,
                 pin_memory=False,
             )
 
@@ -9687,7 +9705,7 @@ class CommonTemplate:
                 start=0,
                 step=1,
                 dtype=torch.int32,
-                device=device(type=GPU_TYPE),
+                device=test_device,
                 requires_grad=False,
             )
 
@@ -9697,7 +9715,7 @@ class CommonTemplate:
                 start=0,
                 step=1001,
                 dtype=torch.int32,
-                device=device(type=GPU_TYPE, index=0),
+                device=test_device_0,
                 requires_grad=False,
             )
             view: "i32[6150144]" = torch.ops.aten.reshape.default(mul, [-1])
@@ -9744,7 +9762,7 @@ class CommonTemplate:
                 permute_1,
             ]
 
-        kwargs = aot_graph_input_parser(forward, device=GPU_TYPE)
+        kwargs = aot_graph_input_parser(forward, device=self.device)
         self.common(forward, [], kwargs=kwargs)
 
     @skip_if_gpu_halide
@@ -10057,7 +10075,7 @@ class CommonTemplate:
     @tf32_on_and_off(0.005)
     def test_inductor_layout_optimization_input_mutations(self):
         # channel dim must be > 64 for inductor to do layout optimization and use NHWC
-        mod = nn.Conv2d(3, 128, 1, stride=1, bias=False).to(GPU_TYPE)
+        mod = nn.Conv2d(3, 128, 1, stride=1, bias=False).to(self.device)
 
         def f(x):
             x.mul_(2)
@@ -10065,7 +10083,7 @@ class CommonTemplate:
             return out
 
         f_compiled = torch.compile(f)
-        x_ref = torch.rand(2, 3, 128, 128, device=GPU_TYPE)
+        x_ref = torch.rand(2, 3, 128, 128, device=self.device)
         x_test = x_ref.detach().clone()
         with torch.no_grad():
             out_ref = f(x_ref)
@@ -11403,8 +11421,8 @@ class CommonTemplate:
     def test_custom_op_fixed_layout_sequential(self):
         import torch.library
 
-        mod = nn.Conv2d(3, 128, 1, stride=1, bias=False).to(device=GPU_TYPE)
-        inp = torch.rand(2, 3, 128, 128, device=GPU_TYPE)
+        mod = nn.Conv2d(3, 128, 1, stride=1, bias=False).to(device=self.device)
+        inp = torch.rand(2, 3, 128, 128, device=self.device)
         expected_stride = mod(inp).stride()
 
         def bar(x):
@@ -11440,8 +11458,8 @@ class CommonTemplate:
     @tf32_on_and_off(0.005)
     def test_mutable_custom_op_fixed_layout2(self):
         with torch.library._scoped_library("mylib", "DEF") as lib:
-            mod = nn.Conv2d(3, 128, 1, stride=1, bias=False).to(device=GPU_TYPE)
-            inp = torch.rand(2, 3, 128, 128, device=GPU_TYPE)
+            mod = nn.Conv2d(3, 128, 1, stride=1, bias=False).to(device=self.device)
+            inp = torch.rand(2, 3, 128, 128, device=self.device)
             expected_stride = mod(inp).clone().stride()
 
             lib.define(
@@ -11841,7 +11859,7 @@ class CommonTemplate:
         for cpu_dtype in test_dtypes:
             if not self.is_dtype_supported(cpu_dtype):
                 continue
-            x = torch.rand([20], device=GPU_TYPE)
+            x = torch.rand([20], device=self.device)
             y = torch.rand([4], device="cpu", dtype=cpu_dtype)
             self.common(
                 fn,
