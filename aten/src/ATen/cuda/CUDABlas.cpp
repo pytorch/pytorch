@@ -3,6 +3,7 @@
  */
 
 #include <ATen/ATen.h>
+#include <ATen/cuda/CUDAContextLight.h>
 #include <ATen/cuda/CUDABlas.h>
 #include <ATen/cuda/Exceptions.h>
 #include <ATen/cuda/CUDADataType.h>
@@ -214,6 +215,16 @@ static size_t _getWorkspaceSize() {
   return workspace_size;
 }
 
+void* _getWorkspaceWithoutHandle() {
+  cublasHandle_t handle = at::cuda::getCurrentCUDABlasHandle();
+  auto stream = c10::cuda::getCurrentCUDAStream();
+  cudaStream_t _stream = stream;
+  auto key = std::make_tuple(static_cast<void *>(handle), static_cast<void *>(_stream));
+  auto workspace_it = at::cuda::cublas_handle_stream_to_workspace().find(key);
+  TORCH_CHECK(workspace_it != at::cuda::cublas_handle_stream_to_workspace().end());
+  return workspace_it->second.mutable_get();
+}
+
 } // anonymous namespace
 
 namespace at::cuda::blas {
@@ -332,12 +343,6 @@ inline void bgemm_internal_cublaslt(CUDABLAS_BGEMM_ARGTYPES(Dtype)) {
   cudaDataType_t abcType = CUDA_R_32F;
   cublasComputeType_t computeType = CUBLAS_COMPUTE_32F;
   cudaDataType_t scaleType = CUDA_R_32F;
-#ifndef USE_ROCM
-  at::Half halpha;
-  at::Half hbeta;
-#endif
-  void * alpha_ptr = &alpha;
-  void * beta_ptr = &beta;
   if constexpr (std::is_same_v<Dtype, double>) {
     abcType = CUDA_R_64F;
     computeType = CUBLAS_COMPUTE_64F;
@@ -354,16 +359,6 @@ inline void bgemm_internal_cublaslt(CUDABLAS_BGEMM_ARGTYPES(Dtype)) {
     abcType = CUDA_C_32F;
     scaleType = CUDA_C_32F;
   } else if constexpr (std::is_same_v<Dtype, at::Half>) {
-#ifndef USE_ROCM
-    cudaDeviceProp* prop = at::cuda::getCurrentDeviceProperties();
-    if (prop->major >= 7 && at::globalContext().allowFP16AccumulationCuBLAS()) {
-      computeType = CUBLAS_COMPUTE_16F;
-      halpha = alpha;
-      hbeta = beta;
-      alpha_ptr = &halpha;
-      beta_ptr = &hbeta;
-    }
-#endif
     abcType = CUDA_R_16F;
   } else if constexpr (std::is_same_v<Dtype, at::BFloat16>) {
     abcType = CUDA_R_16BF;
@@ -395,9 +390,13 @@ inline void bgemm_internal_cublaslt(CUDABLAS_BGEMM_ARGTYPES(Dtype)) {
   }
 
   CuBlasLtMatmulPreference preference;
+#ifdef USE_ROCM
   // See https://github.com/pytorch/pytorch/issues/73328 for reasoning behind
   // setting this to 1M.
   size_t workspaceSize = _getWorkspaceSize();
+#else
+  size_t workspaceSize = getChosenWorkspaceSize();
+#endif
   preference.setAttribute(CUBLASLT_MATMUL_PREF_MAX_WORKSPACE_BYTES, workspaceSize);
 
 #ifndef USE_ROCM
@@ -409,7 +408,14 @@ inline void bgemm_internal_cublaslt(CUDABLAS_BGEMM_ARGTYPES(Dtype)) {
   preference.setAttribute(CUBLASLT_MATMUL_PREF_MIN_ALIGNMENT_C_BYTES, c_alignment);
 #endif
 
-  auto workspace = at::empty(static_cast<int64_t>(workspaceSize), at::TensorOptions().dtype(at::kByte).device(at::kCUDA));
+#ifdef USE_ROCM
+  auto& allocator = *::c10::cuda::CUDACachingAllocator::get();
+  auto workspace = allocator.allocate(workspaceSize);
+  auto workspace_ptr = workspace.mutable_get();
+  TORCH_CHECK(workspace_ptr != nullptr, "OOM trying to allocate workspace for cublaslt");
+#else
+  auto workspace_ptr = _getWorkspaceWithoutHandle();
+#endif
 
   cublasLtMatmulHeuristicResult_t heuristicResult = {};
   int returnedResult = 0;
@@ -431,18 +437,18 @@ inline void bgemm_internal_cublaslt(CUDABLAS_BGEMM_ARGTYPES(Dtype)) {
   cublasStatus_t cublasStatus = cublasLtMatmul(
       ltHandle,
       computeDesc.descriptor(),
-      alpha_ptr,
+      &alpha,
       a,
       Adesc.descriptor(),
       b,
       Bdesc.descriptor(),
-      beta_ptr,
+      &beta,
       c,
       Cdesc.descriptor(),
       c,
       Cdesc.descriptor(),
       &heuristicResult.algo,
-      workspace.mutable_data_ptr(),
+      workspace_ptr,
       workspaceSize,
       at::cuda::getCurrentCUDAStream());
   TORCH_CHECK(
@@ -546,13 +552,6 @@ void bgemm_internal_cublas<at::Half>(CUDABLAS_BGEMM_ARGTYPES(at::Half)) {
   BGEMM_CHECK_ARGVALUES(at::Half);
   float falpha = alpha;
   float fbeta = beta;
-#ifndef USE_ROCM
-  at::Half halpha;
-  at::Half hbeta;
-#endif
-  void * alpha_ptr = &falpha;
-  void * beta_ptr = &fbeta;
-  auto compute_type = CUDA_R_32F;
 #ifdef USE_ROCM
   int flag = 0;
 #if USE_GEMM_FLAGS_FP16_ALT_IMPL
@@ -561,28 +560,21 @@ void bgemm_internal_cublas<at::Half>(CUDABLAS_BGEMM_ARGTYPES(at::Half)) {
   TORCH_CUDABLAS_CHECK(rocBLASStatusToHIPStatus(rocblas_gemm_strided_batched_ex((rocblas_handle)handle,
                                    hipOperationToRocOperation(opa),
                                    hipOperationToRocOperation(opb), (int)m, (int)n, (int)k,
-                                   (void*)alpha_ptr, a, rocblas_datatype_f16_r, (int)lda, stridea,
+                                   (void*)&falpha, a, rocblas_datatype_f16_r, (int)lda, stridea,
                                    b, rocblas_datatype_f16_r, (int)ldb, strideb,
-                                   (void*)beta_ptr, c, rocblas_datatype_f16_r, (int)ldc, stridec,
+                                   (void*)&fbeta, c, rocblas_datatype_f16_r, (int)ldc, stridec,
                                    c, rocblas_datatype_f16_r, (int)ldc, stridec,
                                    (int) num_batches, rocblas_datatype_f32_r, rocblas_gemm_algo_standard,
                                    0, flag)));
 #else
   cudaDeviceProp* prop = at::cuda::getCurrentDeviceProperties();
-  if (prop->major >= 7 && at::globalContext().allowFP16AccumulationCuBLAS()) {
-    halpha = alpha;
-    hbeta = beta;
-    compute_type = CUDA_R_16F;
-    alpha_ptr = &halpha;
-    beta_ptr = &hbeta;
-  }
   if (prop->major >= 5){
     TORCH_CUDABLAS_CHECK(cublasGemmStridedBatchedEx(
       handle, opa, opb, m, n, k,
-      alpha_ptr, a, CUDA_R_16F, lda, stridea,
-      b, CUDA_R_16F, ldb, strideb, beta_ptr,
+      (void*)(&falpha), a, CUDA_R_16F, lda, stridea,
+      b, CUDA_R_16F, ldb, strideb, (void*)(&fbeta),
       c, CUDA_R_16F, ldc, stridec,
-      num_batches, compute_type, CUBLAS_GEMM_DEFAULT_TENSOR_OP));
+      num_batches, CUDA_R_32F, CUBLAS_GEMM_DEFAULT_TENSOR_OP));
   } else {
     for (const auto i : c10::irange(num_batches)) {
       at::cuda::blas::gemm<at::Half>(
@@ -897,15 +889,8 @@ void gemm_internal_cublas<at::Half>(CUDABLAS_GEMM_ARGTYPES(at::Half)) {
   cublasOperation_t opb = _cublasOpFromChar(transb);
   float falpha = alpha;
   float fbeta = beta;
-#ifndef USE_ROCM
-  at::Half halpha;
-  at::Half hbeta;
-#endif
-  void * alpha_ptr = &falpha;
-  void * beta_ptr = &fbeta;
   _cublasAdjustLdLevel3(transa, transb, m, n, k, &lda, &ldb, &ldc);
   GEMM_CHECK_ARGVALUES(at::Half);
-  auto compute_type = CUDA_R_32F;
 #ifdef USE_ROCM
   int flag = 0;
 #if USE_GEMM_FLAGS_FP16_ALT_IMPL
@@ -918,14 +903,14 @@ void gemm_internal_cublas<at::Half>(CUDABLAS_GEMM_ARGTYPES(at::Half)) {
       m,
       n,
       k,
-      alpha_ptr,
+      &falpha,
       a,
       rocblas_datatype_f16_r,
       lda,
       b,
       rocblas_datatype_f16_r,
       ldb,
-      beta_ptr,
+      &fbeta,
       c,
       rocblas_datatype_f16_r,
       ldc,
@@ -938,13 +923,6 @@ void gemm_internal_cublas<at::Half>(CUDABLAS_GEMM_ARGTYPES(at::Half)) {
       flag)));
 #else
   cudaDeviceProp* prop = at::cuda::getCurrentDeviceProperties();
-  if (prop->major >= 7 && at::globalContext().allowFP16AccumulationCuBLAS()) {
-    compute_type = CUDA_R_16F;
-    halpha = alpha;
-    hbeta = beta;
-    alpha_ptr = &halpha;
-    beta_ptr = &hbeta;
-  }
   if (prop->major >= 5) {
     cublasMath_t cublas_flags = CUBLAS_DEFAULT_MATH;
     if (!at::globalContext().allowFP16ReductionCuBLAS()) {
@@ -959,18 +937,18 @@ void gemm_internal_cublas<at::Half>(CUDABLAS_GEMM_ARGTYPES(at::Half)) {
         m,
         n,
         k,
-        alpha_ptr,
+        &falpha,
         a,
         CUDA_R_16F,
         lda,
         b,
         CUDA_R_16F,
         ldb,
-        beta_ptr,
+        &fbeta,
         c,
         CUDA_R_16F,
         ldc,
-        compute_type,
+        CUDA_R_32F,
         CUBLAS_GEMM_DEFAULT_TENSOR_OP));
     TORCH_CUDABLAS_CHECK(cublasSetMathMode(handle, CUBLAS_DEFAULT_MATH));
   } else {
@@ -1272,12 +1250,6 @@ void gemm_and_bias(
   cudaDataType_t abcType = CUDA_R_32F;
   cublasComputeType_t computeType = CUBLAS_COMPUTE_32F;
   cudaDataType_t scaleType = CUDA_R_32F;
-  void * alpha_ptr = &alpha_val;
-  void * beta_ptr = &beta_val;
-#ifndef USE_ROCM
-  at::Half halpha_val;
-  at::Half hbeta_val;
-#endif
   if constexpr (std::is_same_v<Dtype, double>) {
     abcType = CUDA_R_64F;
     computeType = CUBLAS_COMPUTE_64F;
@@ -1288,17 +1260,6 @@ void gemm_and_bias(
     }
     abcType = CUDA_R_32F;
   } else if constexpr (std::is_same_v<Dtype, at::Half>) {
-#ifndef USE_ROCM
-    cudaDeviceProp* prop = at::cuda::getCurrentDeviceProperties();
-    if (prop->major >= 7 && at::globalContext().allowFP16AccumulationCuBLAS()) {
-      computeType = CUBLAS_COMPUTE_16F;
-      scaleType = CUDA_R_16F;
-      halpha_val = alpha_val;
-      hbeta_val = beta_val;
-      alpha_ptr = &halpha_val;
-      beta_ptr = &hbeta_val;
-    }
-#endif
     abcType = CUDA_R_16F;
   } else if constexpr (std::is_same_v<Dtype, at::BFloat16>) {
     abcType = CUDA_R_16BF;
@@ -1328,9 +1289,14 @@ void gemm_and_bias(
   CuBlasLtMatrixLayout Cdesc(abcType, m, n, result_ld);
 
   CuBlasLtMatmulPreference preference;
+#ifdef USE_ROCM
   // See https://github.com/pytorch/pytorch/issues/73328 for reasoning behind
   // setting this to 1M.
   size_t workspaceSize = _getWorkspaceSize();
+#else
+  size_t workspaceSize = getChosenWorkspaceSize();
+#endif
+
   preference.setAttribute(CUBLASLT_MATMUL_PREF_MAX_WORKSPACE_BYTES, workspaceSize);
 
 #ifndef USE_ROCM
@@ -1344,7 +1310,16 @@ void gemm_and_bias(
   preference.setAttribute(CUBLASLT_MATMUL_PREF_MIN_ALIGNMENT_D_BYTES, d_alignment);
 #endif
 
-  auto workspace = at::empty(static_cast<int64_t>(workspaceSize), at::TensorOptions().dtype(at::kByte).device(at::kCUDA));
+  auto stream = c10::cuda::getCurrentCUDAStream();
+
+#ifdef USE_ROCM
+  auto& allocator = *::c10::cuda::CUDACachingAllocator::get();
+  auto workspace = allocator.allocate(workspaceSize);
+  auto workspace_ptr = workspace.mutable_get();
+  TORCH_CHECK(workspace_ptr != nullptr, "OOM trying to allocate workspace for cublaslt");
+#else
+  auto workspace_ptr = _getWorkspaceWithoutHandle();
+#endif
 
   cublasLtMatmulHeuristicResult_t heuristicResult = {};
   int returnedResult = 0;
@@ -1367,20 +1342,20 @@ void gemm_and_bias(
   cublasStatus_t cublasStatus = cublasLtMatmul(
       ltHandle,
       computeDesc.descriptor(),
-      alpha_ptr,
+      &alpha_val,
       mat1_ptr,
       Adesc.descriptor(),
       mat2_ptr,
       Bdesc.descriptor(),
-      beta_ptr,
+      &beta_val,
       result_ptr,
       Cdesc.descriptor(),
       result_ptr,
       Cdesc.descriptor(),
       &heuristicResult.algo,
-      workspace.mutable_data_ptr(),
+      workspace_ptr,
       workspaceSize,
-      at::cuda::getCurrentCUDAStream());
+      stream);
   TORCH_CHECK(
       cublasStatus == CUBLAS_STATUS_SUCCESS,
       "CUDA error: ",
@@ -1539,8 +1514,17 @@ void scaled_gemm(
     computeDesc.setAttribute(CUBLASLT_MATMUL_DESC_EPILOGUE, CUBLASLT_EPILOGUE_BIAS);
     computeDesc.setAttribute(CUBLASLT_MATMUL_DESC_BIAS_DATA_TYPE, ScalarTypeToCudaDataType(bias_dtype));
   }
+
+  auto stream = c10::cuda::getCurrentCUDAStream();
   size_t workspaceSize = _getWorkspaceSize();
-  auto workspace = at::empty(static_cast<int64_t>(workspaceSize), at::TensorOptions().dtype(at::kByte).device(at::kCUDA));
+#ifdef USE_ROCM
+  auto& allocator = *::c10::cuda::CUDACachingAllocator::get();
+  auto workspace = allocator.allocate(workspaceSize);
+  auto workspace_ptr = workspace.mutable_get();
+  TORCH_CHECK(workspace_ptr != nullptr, "OOM trying to allocate workspace for cublaslt");
+#else
+  auto workspace_ptr = _getWorkspaceWithoutHandle();
+#endif
 
   CuBlasLtMatmulPreference preference;
   preference.setAttribute(CUBLASLT_MATMUL_PREF_MAX_WORKSPACE_BYTES, workspaceSize);
@@ -1624,9 +1608,9 @@ void scaled_gemm(
       result_ptr,
       Ddesc.descriptor(),
       &heuristicResult.algo,
-      workspace.mutable_data_ptr(),
+      workspace_ptr,
       workspaceSize,
-      at::cuda::getCurrentCUDAStream());
+      stream);
   TORCH_CHECK(
       cublasStatus == CUBLAS_STATUS_SUCCESS,
       "CUDA error: ",
@@ -1695,8 +1679,8 @@ void int8_gemm(
   CuBlasLtMatmulPreference preference;
   size_t workspaceSize = _getWorkspaceSize();
   preference.setAttribute(CUBLASLT_MATMUL_PREF_MAX_WORKSPACE_BYTES, workspaceSize);
-  auto workspace = at::empty(workspaceSize, at::TensorOptions().dtype(at::kByte).device(at::kCUDA));
-
+  auto& allocator = *::c10::cuda::CUDACachingAllocator::get();
+  auto workspace = allocator.allocate(workspaceSize);
   cublasLtMatmulHeuristicResult_t heuristicResult = {};
   int returnedResult = 0;
   TORCH_CUDABLAS_CHECK(cublasLtMatmulAlgoGetHeuristic(
@@ -1734,7 +1718,7 @@ void int8_gemm(
       nullptr, // Heuristics don't seem to work for int8
 #endif
 #ifdef USE_ROCM
-      workspace.mutable_data_ptr(),
+      workspace.mutable_get(),
 #else
       nullptr, // Non-zero workspace doesn't seem to work.
 #endif

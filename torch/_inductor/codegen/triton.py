@@ -70,8 +70,10 @@ from .common import (
     CSEVariable,
     DeferredLine,
     IndentedBuffer,
+    InplacedBuffer,
     OpOverrides,
     PythonPrinter,
+    RemovedArg,
     SizeArg,
     TensorArg,
     WorkspaceArg,
@@ -88,6 +90,7 @@ from .simd import (
 )
 from .triton_utils import (
     config_of,
+    equal_1_arg_indices,
     non_constexpr_signature,
     should_unwrap_unspec_arg,
     signature_to_meta,
@@ -99,6 +102,7 @@ if TYPE_CHECKING:
     from typing import TypeVar
 
     from ..ir import IRNode
+    from .simd_kernel_features import SIMDKernelFeatures
 
     _T = TypeVar("_T")
 
@@ -1279,11 +1283,6 @@ class TritonOverrides(OpOverrides):
 TritonOverrides._initialize_pointwise_overrides("triton")
 
 
-# Use mypy to check protocol implemented correctly
-def _typecheck_TritonOverrides(h: TritonOverrides) -> OpsHandler[str]:
-    return h
-
-
 class TritonKernelOverrides(TritonOverrides):
     """Map element-wise ops to Triton within a TritonKernel
 
@@ -1415,9 +1414,10 @@ class TritonKernelOverrides(TritonOverrides):
         return (mantissa, exponent)
 
 
-# Use mypy to check protocol implemented correctly
-def _typecheck_TritonKernelOverrides(h: TritonKernelOverrides) -> OpsHandler[str]:
-    return h
+if TYPE_CHECKING:
+
+    class _typecheck_TritonKernelOverrides(TritonKernelOverrides, OpsHandler[str]):
+        pass  # mypy will error if we got any of the signatures wrong
 
 
 class HelperFunctions:
@@ -1526,20 +1526,20 @@ class FixedTritonConfig:
         return item in self.config
 
 
-class TritonCSE(CSE):
+class TritonCSE(CSE[TritonCSEVariable, Union[str, tuple[str, str]]]):
     """
     Subclasses CSE to apply the current load mask to the cache key to avoid CSEing
     variables across separate masked blocks.
     """
 
-    def augment_key(self, cache_key: object) -> object:
+    def augment_key(self, cache_key: str) -> Union[str, tuple[str, str]]:
         if mask := V.kernel._load_mask:
             return (cache_key, mask.name)
         else:
             return cache_key
 
 
-class TritonKernel(SIMDKernel):
+class TritonKernel(SIMDKernel[TritonCSEVariable]):
     overrides = TritonKernelOverrides  # type: ignore[assignment]
     helper_functions: HelperFunctions
     kexpr: Callable[[sympy.Expr], str] = texpr
@@ -1580,6 +1580,9 @@ class TritonKernel(SIMDKernel):
 
         self.codegen_range_tree()
 
+        if self.cooperative_reduction:
+            self.init_cooperative_reduction_mask()
+
     def dtype_to_str(self, dtype: torch.dtype) -> str:
         return triton_type(dtype)
 
@@ -1605,14 +1608,16 @@ class TritonKernel(SIMDKernel):
             self.args
         )
         self.body.splice(
-            """
+            """\
+            RSPLIT_NEXT_POWER_OF_2: tl.constexpr = triton_helpers.constexpr_next_power_of_2(RSPLIT)
+            RSPLIT_IS_POWER_OF_2: tl.constexpr = RSPLIT == RSPLIT_NEXT_POWER_OF_2
+            HAS_RSPLIT: tl.constexpr = RSPLIT > 1
             rsplit_id = tl.program_id(0)
             num_rblocks = (rnumel + RBLOCK - 1) // RBLOCK
             rsplit_chunk = (num_rblocks + RSPLIT - 1) // RSPLIT * RBLOCK
             rsplit_start = rsplit_chunk * rsplit_id
             rsplit_end = rsplit_chunk * (rsplit_id + 1)
             """,
-            strip=True,
         )
         if any(
             not self._has_constant_mask(tree)
@@ -1621,6 +1626,27 @@ class TritonKernel(SIMDKernel):
         ):
             self.body.writeline(
                 "rsplit_end = tl.where(rsplit_end < rnumel, rsplit_end, rnumel)"
+            )
+
+    def init_cooperative_reduction_mask(self):
+        rsplit_arange = "tl.arange(0, RSPLIT_NEXT_POWER_OF_2)"
+        if not self.no_x_dim:
+            rsplit_arange = f"{rsplit_arange}[None, :]"
+        self.body.writeline(f"rsplit_arange = {rsplit_arange}")
+
+        if self._has_constant_xmask():
+            self.body.splice(
+                """\
+                if RSPLIT_IS_POWER_OF_2:
+                    rsplit_mask: tl.constexpr = None
+                else:
+                    rsplit_mask = rsplit_arange < RSPLIT
+                """
+            )
+        else:
+            assert not self.no_x_dim
+            self.body.writeline(
+                "rsplit_mask = xmask if RSPLIT_IS_POWER_OF_2 else ((rsplit_arange < RSPLIT) & xmask)"
             )
 
     def codegen_range_tree(self):
@@ -2448,7 +2474,7 @@ class TritonKernel(SIMDKernel):
                     self.compute, where_cond(value, default), dtype=value.dtype
                 )
 
-            masked_value: Union[CSEVariable, Sequence[CSEVariable]] = []
+            masked_value: Union[CSEVariable, Sequence[CSEVariable]]
             if isinstance(value, tuple):
                 masked_value = [_mask_value(v, d) for v, d in zip(value, default)]
             else:
@@ -2556,10 +2582,11 @@ class TritonKernel(SIMDKernel):
                     )
 
         if self.cooperative_reduction:
+            default = ir.Reduction.default_accumulator(reduction_type, src_dtype)
             exit_stack = contextlib.ExitStack()
             for buf in (self.post_loop_combine, self.post_loop_store):
                 # only do cooperative reduction combines if we have more than one thread block
-                buf.writeline("if RSPLIT > 1:")
+                buf.writeline("if HAS_RSPLIT:")
                 exit_stack.enter_context(buf.indent())
 
             if reduction_type in ("argmax", "argmin"):
@@ -2567,23 +2594,23 @@ class TritonKernel(SIMDKernel):
                     f"{result_var}_bval = {self.reduction_resize(f'{result_var}_val')}"
                 )
                 peer_val = self.codegen_cooperative_reduction_peer_combine(
-                    f"{result_var}_bval", src_dtype
+                    f"{result_var}_bval", src_dtype, default
                 )
                 peer_idx = self.codegen_cooperative_reduction_peer_combine(
-                    result_var, dtype
+                    result_var, dtype, 0
                 )
                 final_argreduce(self.post_loop_store, result_var, peer_val, peer_idx)
             elif is_welford_reduction(reduction_type):
                 assert reduction_type == "welford_reduce"
                 result_mean, result_m2, result_weight = result_var
                 peer_mean = self.codegen_cooperative_reduction_peer_combine(
-                    result_mean, upcast_acc_dtype(src_dtype)
+                    result_mean, upcast_acc_dtype(src_dtype), default[0]
                 )
                 peer_m2 = self.codegen_cooperative_reduction_peer_combine(
-                    result_m2, upcast_acc_dtype(src_dtype)
+                    result_m2, upcast_acc_dtype(src_dtype), default[1]
                 )
                 peer_weight = self.codegen_cooperative_reduction_peer_combine(
-                    result_weight, upcast_acc_dtype(src_dtype)
+                    result_weight, upcast_acc_dtype(src_dtype), default[2]
                 )
                 self.welford_reduce_final_reduction(
                     self.post_loop_store,
@@ -2598,7 +2625,7 @@ class TritonKernel(SIMDKernel):
                 )
             else:
                 peers = self.codegen_cooperative_reduction_peer_combine(
-                    result_var, upcast_acc_dtype(src_dtype)
+                    result_var, upcast_acc_dtype(src_dtype), default
                 )
                 final_reduction_define(
                     self.post_loop_store, str(result_var), peers, None
@@ -2735,7 +2762,9 @@ class TritonKernel(SIMDKernel):
             return self.fixed_config["RSPLIT"]
         return TRITON_MAX_RSPLIT
 
-    def codegen_cooperative_reduction_peer_combine(self, result_var, dtype):
+    def codegen_cooperative_reduction_peer_combine(
+        self, result_var, dtype, default_val
+    ):
         """
         Generate code to save a [XBLOCK, RSPLIT] temporary workspace, where each thread block writes a different
         column.  After the barrier, every thread block loads the completed value so that it can compute the final
@@ -2743,7 +2772,6 @@ class TritonKernel(SIMDKernel):
         """
         xnumel = self.numels["x"]
         mask = "xindex < xnumel" if not self._has_constant_xmask() else None
-        expand = "" if self.no_x_dim else "[None,:]"
 
         nbytes = xnumel * dtype.itemsize * self.max_rsplit()
         ws_name, ws_offset = self.cooperative_reduction_workspace_cache.allocate(nbytes)
@@ -2756,8 +2784,8 @@ class TritonKernel(SIMDKernel):
             strip=True,
         )
         self.post_loop_store.writeline(
-            f"{result_var}_peers = tl.load({result_var}_ws + (xindex * RSPLIT + tl.arange(0, RSPLIT){expand}), "
-            f"{mask}, eviction_policy='evict_first')"
+            f"{result_var}_peers = tl.load({result_var}_ws + (xindex * RSPLIT + rsplit_arange), "
+            f"rsplit_mask, eviction_policy='evict_first', other=triton_helpers.if_mask(rsplit_mask, {constant_repr(default_val)}))"
         )
         return f"{result_var}_peers"
 
@@ -2808,7 +2836,7 @@ class TritonKernel(SIMDKernel):
         # in the global namespace
         helper = IndentedBuffer()
         helper.writeline("@triton.jit")
-        cse = CSE(prefix="", suffix="")
+        cse = CSE()
 
         args = [
             tuple(cse.namedvar(f"arg{i}_{n}", dtype=dtypes[n]) for n in range(num_args))
@@ -2817,7 +2845,7 @@ class TritonKernel(SIMDKernel):
         signature = ", ".join(str(x) for x in itertools.chain.from_iterable(args))
         helper.writeline(f"def {{name}}({signature}):")
 
-        overrides = TritonOverrides(V.MockHandler())
+        overrides = TritonOverrides()
 
         # Build a name that changes depending on fn to workaround a triton bug
         # where the combine_fn to reduce and scan is not hashed, and so different
@@ -2961,7 +2989,8 @@ class TritonKernel(SIMDKernel):
             result_vars = partial_scan_vars
 
         for result_var in result_vars:
-            result_var.mask_vars = masks  # type: ignore[attr-defined]
+            assert isinstance(result_var, TritonCSEVariable)
+            result_var.mask_vars = OrderedSet(masks)
 
         return tuple(result_vars)
 
@@ -3112,7 +3141,7 @@ class TritonKernel(SIMDKernel):
             sem_ptr = f"{self.semaphores_name} + tl.program_id(1)"
             self.body.splice(
                 f"""
-                if RSPLIT > 1:
+                if HAS_RSPLIT:
                     triton_helpers.x_grid_barrier({sem_ptr})
                 """,
                 strip=True,
@@ -3353,9 +3382,13 @@ class TritonKernel(SIMDKernel):
                 and mutation not in V.graph.removed_buffers
                 and mutation not in self.removed_buffers
             ):
-                mutated_args.add(self.args.inplace_buffers[mutation].inner_name)
+                mutated_args.add(
+                    cast(InplacedBuffer, self.args.inplace_buffers[mutation]).inner_name
+                )
             if mutation in self.args.output_buffers:
-                mutated_args.add(self.args.output_buffers[mutation])
+                mutation_arg = self.args.output_buffers[mutation]
+                assert not isinstance(mutation_arg, RemovedArg)
+                mutated_args.add(mutation_arg)
 
         # Note: [Workspace Mutation]
         # workspace arguments are mutated, but are not marked as mutations in self.mutations
@@ -3441,14 +3474,13 @@ class TritonKernel(SIMDKernel):
 
         triton_meta["configs"] = [config_of(signature)]
 
-        if not triton_version_uses_attrs_dict():
-            # Triton compiler includes equal_to_1 args into constants even
-            # when they are not constexpr. otherwise there may be a segfault
-            # during launching the Inductor-compiled Triton kernel.
-            # https://github.com/pytorch/pytorch/issues/120478#issuecomment-1962822307
-            # https://github.com/openai/triton/blob/231efe9ed2d200be0f69a07c298e4342b08efe3d/python/triton/runtime/jit.py#L384
-            for arg_num in triton_meta["configs"][0].equal_to_1:  # type: ignore[index]
-                triton_meta["constants"][signature[arg_num].name] = 1  # type: ignore[index,union-attr]
+        # Triton compiler includes equal_to_1 args into constants even
+        # when they are not constexpr. otherwise there may be a segfault
+        # during launching the Inductor-compiled Triton kernel.
+        # https://github.com/pytorch/pytorch/issues/120478#issuecomment-1962822307
+        # https://github.com/openai/triton/blob/231efe9ed2d200be0f69a07c298e4342b08efe3d/python/triton/runtime/jit.py#L384
+        for arg_num in equal_1_arg_indices(signature):  # type: ignore[index]
+            triton_meta["constants"][signature[arg_num].name] = 1  # type: ignore[index,union-attr]
 
         self.triton_meta = triton_meta
 
@@ -3564,9 +3596,11 @@ class TritonKernel(SIMDKernel):
                     code.writeline(f"{tree.prefix}numel = {int(simplified_tree_numel)}")
 
             if tree.is_reduction and self.persistent_reduction:
-                val = self._get_persistent_RBLOCK(tree.numel)
                 if self.cooperative_reduction:
-                    val = f"{val} // RSPLIT"
+                    numel = self.kexpr(self.rename_indexing(tree.numel))
+                    val = f"triton_helpers.constexpr_next_power_of_2(({numel} + RSPLIT - 1) // RSPLIT)"
+                else:
+                    val = self._get_persistent_RBLOCK(tree.numel)
                 code.writeline(f"{tree.prefix.upper()}BLOCK: tl.constexpr = {val}")
 
             if tree.prefix == "x" and self.no_x_dim:
@@ -4059,9 +4093,12 @@ class TritonScheduling(SIMDScheduling):
             store_cache()
             return ms, mod.__file__
 
-    def create_kernel_choices(
-        self, kernel_features, kernel_args, kernel_kwargs
-    ) -> list[SIMDKernel]:
+    def create_kernel_choices(  # type: ignore[override]
+        self,
+        kernel_features: SIMDKernelFeatures,
+        kernel_args: list[Any],
+        kernel_kwargs: dict[str, Any],
+    ) -> list[TritonKernel]:
         is_scan = kernel_features.contains_op("scan")
         is_split_scan = is_scan and any(
             node.is_split_scan() for node in kernel_features.scheduler_nodes()
@@ -4095,11 +4132,11 @@ class TritonScheduling(SIMDScheduling):
 
     def add_multi_kernel_choices(
         self,
-        kernel: SIMDKernel,
+        kernel: TritonKernel,
         kernel_args: list[Any],
         kernel_kwargs: dict[str, Any],
-    ) -> list[SIMDKernel]:
-        kernels: list[SIMDKernel] = [kernel]
+    ) -> list[TritonKernel]:
+        kernels: list[TritonKernel] = [kernel]
         if not config.triton.multi_kernel:
             return kernels
 
