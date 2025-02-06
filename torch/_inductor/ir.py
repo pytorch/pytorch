@@ -31,6 +31,7 @@ import sympy
 from sympy import Expr, Integer, Symbol
 
 import torch._export.serde.schema as export_schema
+import torch._library.utils as library_utils
 import torch._logging
 import torch.fx
 import torch.utils._pytree as pytree
@@ -74,7 +75,7 @@ from .dependencies import (
     var_builder,
 )
 from .loop_body import LoopBody
-from .ops_handler import OpCounterCSE, OpCountResult, ReductionType, StoreMode
+from .ops_handler import OpCounterCSE, OpCountResult
 from .runtime.benchmarking import benchmarker
 from .runtime.hints import DeviceProperties, ReductionHint
 from .utils import (
@@ -915,9 +916,9 @@ class Pointwise(Loops):
         output_name: Optional[str],
         indexer: Callable[[Sequence[Expr]], Never],
         vars: Sequence[Expr],
-    ) -> None:
+    ) -> OpsValue:
         loader = self.make_loader()
-        return ops.store(output_name or "unnamed", indexer(vars), loader(vars))
+        return ops.store(output_name, indexer(vars), loader(vars))
 
     def constant_to_device(self, device: torch.device) -> IRNode:
         """Move this to a given device. Requires that all reads are to constants."""
@@ -931,7 +932,7 @@ class Pointwise(Loops):
 @ir_dataclass
 class Scatter(Pointwise):
     output_indexer: Callable[[Sequence[Expr]], Expr]
-    scatter_mode: StoreMode = None
+    scatter_mode: Optional[str] = None
 
     def constant_to_device(self, device: torch.device) -> IRNode:
         """Move this to a given device. Requires that all reads are to constants."""
@@ -951,10 +952,8 @@ class Scatter(Pointwise):
         output_name: Optional[str],
         indexer: Callable[[Sequence[Expr]], Never],
         vars: Sequence[Expr],
-    ) -> None:
+    ) -> OpsValue:
         loader = self.make_loader()
-        if output_name is None:
-            output_name = "unnamed"
         return ops.store(
             output_name,
             indexer(self.output_indexer(vars)),
@@ -1039,7 +1038,7 @@ def get_reduction_combine_fn(
 @ir_dataclass
 class Reduction(Loops):
     reduction_ranges: Sequence[_IntLike]
-    reduction_type: ReductionType
+    reduction_type: str
     # self.dtype represents the dst dtype
     src_dtype: torch.dtype
     reduction_hint: ReductionHint
@@ -1066,14 +1065,14 @@ class Reduction(Loops):
         indexer: Callable[[Sequence[Expr]], Never],
         vars: Sequence[Expr],
         reduction_vars: Sequence[Symbol],
-    ) -> None:
+    ) -> OpsValue:
         value = ops.reduction(
             self.dtype,
             self.src_dtype,
             self.reduction_type,
             self.inner_fn(vars, reduction_vars),
         )
-        return ops.store_reduction(output_name or "unnamed", indexer(vars), value)
+        return ops.store_reduction(output_name, indexer(vars), value)
 
     def index_length(self) -> int:
         return len(self.ranges) + len(self.reduction_ranges)
@@ -1111,7 +1110,7 @@ class Reduction(Loops):
         inner_fn: Callable[..., OpsValue],
         ranges: Sequence[_IntLike],
         reduction_ranges: Sequence[_IntLike],
-        reduction_type: Union[ReductionType, Literal["scan"]],
+        reduction_type: str,
         reduction_numel: Expr,
         input_node: Optional[IRNode] = None,
     ) -> tuple[ReductionHint, _IntLike]:
@@ -1197,7 +1196,7 @@ class Reduction(Loops):
             inner_fn=inner_fn,
             ranges=ranges,
             reduction_ranges=reduction_ranges,
-            reduction_type=reduction_type if reduction_type != "scan" else "sum",
+            reduction_type=reduction_type,
             src_dtype=src_dtype,
             reduction_hint=ReductionHint.DEFAULT,
         )
@@ -1324,7 +1323,7 @@ class Reduction(Loops):
         inner_fn: Callable[..., Any],
         ranges: Sequence[Expr],
         reduction_ranges: Sequence[Expr],
-        reduction_type: ReductionType,
+        reduction_type: str,
         reduction_hint: ReductionHint = ReductionHint.DEFAULT,
         input_node: Optional[IRNode] = None,
     ) -> TensorBox:
@@ -1592,7 +1591,7 @@ class Reduction(Loops):
         original_reduction_ranges: Sequence[Expr],
         new_ranges: list[Expr],
         new_reduction_ranges: list[Integer],
-        reduction_type: ReductionType,
+        reduction_type: str,
         split: _IntLike,
         reduction_hint: ReductionHint,
     ) -> TensorBox:
@@ -1654,7 +1653,7 @@ class Reduction(Loops):
         inner_fn: Callable[..., Any],
         ranges: Sequence[Expr],
         reduction_ranges: Sequence[Expr],
-        reduction_type: ReductionType,
+        reduction_type: str,
         split: _IntLike,
         reduction_hint: ReductionHint,
     ) -> TensorBox:
@@ -1695,7 +1694,7 @@ class Reduction(Loops):
         original_reduction_ranges: Sequence[Expr],
         new_ranges: list[Integer],
         new_reduction_ranges: list[Integer],
-        reduction_type: ReductionType,
+        reduction_type: str,
         reduction_hint: ReductionHint,
     ) -> TensorBox:
         """
@@ -1734,7 +1733,7 @@ class WelfordReduction(Reduction):
         inner_fns: Sequence[Callable[[Sequence[Expr], Sequence[Expr]], OpsValue]],
         ranges: Sequence[Integer],
         reduction_ranges: Sequence[Integer],
-        reduction_type: ReductionType,
+        reduction_type: str,
         reduction_hint: ReductionHint,
         output_index: int,
     ) -> None:
@@ -1766,7 +1765,7 @@ class WelfordReduction(Reduction):
         indexer: Callable[[Sequence[Expr]], Never],
         vars: Sequence[Expr],
         reduction_vars: Sequence[Symbol],
-    ) -> None:
+    ) -> OpsValue:
         values = ops.reduction(
             self.dtype,
             self.src_dtype,
@@ -1774,7 +1773,7 @@ class WelfordReduction(Reduction):
             self.inner_fn(vars, reduction_vars),
         )
         value = values[self.output_index]
-        return ops.store_reduction(output_name or "unnamed", indexer(vars), value)
+        return ops.store_reduction(output_name, indexer(vars), value)
 
     @classmethod
     def create(  # type: ignore[override]
@@ -1784,7 +1783,7 @@ class WelfordReduction(Reduction):
         inner_fns: Sequence[Callable[..., Any]],
         ranges: list[Integer],
         reduction_ranges: list[Integer],
-        reduction_type: ReductionType,
+        reduction_type: str,
         reduction_hint: ReductionHint = ReductionHint.DEFAULT,
     ) -> Sequence[TensorBox]:
         assert reduction_type in ("welford_reduce", "welford_combine")
@@ -1910,7 +1909,7 @@ class WelfordReduction(Reduction):
         inner_fns: Sequence[Callable[..., Any]],
         ranges: list[Integer],
         reduction_ranges: list[Integer],
-        reduction_type: ReductionType,
+        reduction_type: str,
         split: _IntLike,
         reduction_hint: ReductionHint,
     ) -> Sequence[TensorBox]:
@@ -2030,13 +2029,11 @@ class Scan(Loops):
         indexer: Callable[[Sequence[_IntLike]], Never],
         vars: Sequence[Expr],
         scan_vars: Sequence[Symbol],
-    ) -> None:
+    ) -> OpsValue:
         idx = self.reindex(vars, scan_vars)
-        values = tuple(inner_fn(idx) for inner_fn in self.inner_fns)
+        values = [inner_fn(idx) for inner_fn in self.inner_fns]
         result = ops.scan(self.dtypes, self.combine_fn, values)
-        return ops.store(
-            output_name or "unnamed", indexer(idx), result[self.output_index]
-        )
+        return ops.store(output_name, indexer(idx), result[self.output_index])
 
     def get_reduction_type(self) -> Optional[str]:
         # return self.scan_op
@@ -2230,13 +2227,11 @@ class Sort(Loops):
         indexer: Callable[[Sequence[Expr]], Expr],
         vars: Sequence[Expr],
         reduction_vars: Sequence[Expr],
-    ) -> None:
+    ) -> OpsValue:
         idx = self.reindex(vars, reduction_vars)
-        values = tuple(inner_fn(idx) for inner_fn in self.inner_fns)
+        values = [inner_fn(idx) for inner_fn in self.inner_fns]
         result = ops.sort(self.dtypes, values, self.stable, self.descending)
-        return ops.store(
-            output_name or "unnamed", indexer(idx), result[self.output_index]
-        )
+        return ops.store(output_name, indexer(idx), result[self.output_index])
 
     def get_reduction_type(self) -> Optional[str]:
         return "sort"
@@ -3793,7 +3788,7 @@ class Buffer(IRNode):
 
         def loader(index):  # type: ignore[no-untyped-def]
             indexer = self.make_indexer()
-            return ops.load(self.name or "unnamed", indexer(index))
+            return ops.load(self.name, indexer(index))
 
         return loader
 
@@ -3986,7 +3981,7 @@ class ComputedBuffer(OperationBuffer):
             return self.data.make_loader()
         return super().make_loader()
 
-    def get_store_function(self) -> Callable[..., None]:
+    def get_store_function(self) -> Callable[..., OpsValue]:
         indexer = self.get_layout().as_fixed().make_indexer()
         if isinstance(self.data, (Reduction, Scan, Sort)):
             return partial(self.data.store_reduction, self.name, indexer)
@@ -6382,13 +6377,7 @@ class FallbackKernel(ExternKernelAlloc):
             # Assertions to make sure we didn't mismatch args
             if isinstance(info.type, torch.ListType):
                 assert isinstance(arg, (list, tuple))
-            is_optional_tensor = isinstance(
-                info.type, torch.OptionalType
-            ) and isinstance(info.type.getElementType(), torch.TensorType)
-            is_list_tensor = isinstance(info.type, torch.ListType) and isinstance(
-                info.type.getElementType(), torch.TensorType
-            )
-            if is_optional_tensor or isinstance(info.type, torch.TensorType):
+            if library_utils.is_tensor_like_type(info.type):
                 # PyTorch also accepts None and scalar types for args marked as "Tensor".
                 # We're not going to check all of them here.
                 assert not isinstance(arg, (tuple, list))
@@ -6405,11 +6394,12 @@ class FallbackKernel(ExternKernelAlloc):
                         MutationOutput(NoneLayout(device=t.get_device()), t, self)
                     )
 
-            if is_list_tensor:
-                for tensor_arg in arg:
-                    add_alias(tensor_arg)
+            if library_utils.is_tensorlist_like_type(info.type):
+                if arg is not None:
+                    for optional_tensor_arg in arg:
+                        add_alias(optional_tensor_arg)
             else:
-                assert isinstance(info.type, torch.TensorType) or is_optional_tensor
+                assert library_utils.is_tensor_like_type(info.type)
                 add_alias(arg)
 
         for info, arg in torch._library.utils.zip_schema(schema, args, kwargs):
