@@ -1482,10 +1482,11 @@ class ChromiumEventLogger:
 
     def get_top(self) -> Optional[str]:
         """
-        Get the top event name or None if the stack is empty.
+        Get the top event name (i.e. the longest running event)
+        or None if the stack is empty.
         """
         stack = self.get_stack()
-        return stack[-1] if stack else None
+        return stack[0] if stack else None
 
     def get_pt2_compile_substack(self):
         """
