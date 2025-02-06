@@ -781,15 +781,19 @@ def sdpa_dense_backward(
     from torch._dynamo._trace_wrapped_higher_order_op import TransformGetItemToIndex
 
     # Get outputs before calling repeat interleave
-    actual_grad_query = torch.empty_like(query)
-    actual_grad_key = torch.empty_like(key)
-    actual_grad_value = torch.empty_like(value)
+    actual_grad_query = torch.empty_like(query, memory_format=torch.preserve_format)
+    actual_grad_key = torch.empty_like(key, memory_format=torch.preserve_format)
+    actual_grad_value = torch.empty_like(value, memory_format=torch.preserve_format)
 
     def _maybe_new_buffer(
         buffer: Union[torch.Tensor, torch.SymInt, int]
     ) -> Optional[Union[torch.Tensor, torch.SymInt, int]]:
         if isinstance(buffer, torch.Tensor):
-            return torch.empty_like(buffer) if buffer.requires_grad else None
+            return (
+                torch.empty_like(buffer, memory_format=torch.contiguous_format)
+                if buffer.requires_grad
+                else None
+            )
         return buffer
 
     actual_grad_score_mod_captured = [
@@ -1152,14 +1156,11 @@ def flex_attention_backward_fake_tensor_mode(
         seq_len_kv = key.size(2)
         qk_head_dim = key.size(3)
 
-        grad_query = torch.empty_strided(
-            query.size(), query.stride(), device=query.device, dtype=query.dtype
-        )
+        grad_query = torch.empty_like(query, memory_format=torch.preserve_format)
+        # zeros_and_scatter creates a contiguous zeros tensor -> contiguous_format
         grad_score_mod_captured = tuple(
             [
-                buffer.new_empty(
-                    buffer.size(), dtype=buffer.dtype, device=buffer.device
-                )
+                torch.empty_like(buffer, memory_format=torch.contiguous_format)
                 if isinstance(buffer, torch.Tensor) and buffer.requires_grad
                 else None
                 for buffer in score_mod_other_buffers
