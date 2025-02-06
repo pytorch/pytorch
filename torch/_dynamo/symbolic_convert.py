@@ -1468,6 +1468,14 @@ class InstructionTranslatorBase(
             # https://github.com/python/cpython/blob/3.11/Python/ceval.c#L6547-L6549
             val = val.call_function(self, [], {})  # type: ignore[arg-type]
 
+        # Handle https://peps.python.org/pep-0479/
+        if (
+            is_generator(self.f_code)
+            and isinstance(val, variables.ExceptionVariable)
+            and val.exc_type is StopIteration
+        ):
+            val = variables.BuiltinVariable(RuntimeError).call_function(self, [], {})  # type: ignore[arg-type]
+
         # Save the exception in a global data structure
         self.exn_vt_stack.append(val)
 

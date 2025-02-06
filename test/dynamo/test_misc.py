@@ -9424,7 +9424,6 @@ def ___make_guard_fn():
         self.assertEqual(counter.frame_count, 0)
 
     # just to be sure in case anyone tries to run this in older versions of Python
-    @unittest.skip("https://github.com/pytorch/pytorch/pull/146527 exposed a bug")
     def test_pep0479_convert_stopiteration(self):
         # https://peps.python.org/pep-0479/
         def generator_with_stop_iteration():
