@@ -29,7 +29,7 @@ if TYPE_CHECKING:
 
     import sympy
 
-    from ..ops_handler import ReductionType, StoreMode
+    from ..ops_handler import OpsHandler, ReductionType, StoreMode
     from ..scheduler import Scheduler, SchedulerNode
     from .common import OpVarT
 
@@ -363,6 +363,12 @@ class MetalOverrides(OpOverrides):
 MetalOverrides._initialize_pointwise_overrides("mps")
 
 
+if TYPE_CHECKING:
+
+    class _typecheck_MetalOverrides(MetalOverrides, OpsHandler[Any]):
+        pass  # mypy will error if we got any of the signatures wrong
+
+
 class MetalKernel(SIMDKernel):
     overrides = MetalOverrides  # type: ignore[assignment]
     suffix = ";"
@@ -445,7 +451,9 @@ class MetalKernel(SIMDKernel):
             )
         if reduction_type in ["max", "min", "argmax", "argmin"]:
             acc_buf = self._new_accvar(src_dtype, reduction_dim.numel)
-            self.body.splice(f"{acc_buf}[{reduction_dim.name}] = {value};")
+            self.body.splice(
+                f"{acc_buf}[{reduction_dim.name}] = static_cast<{DTYPE_TO_METAL[src_dtype]}>({value});"
+            )
             return self.cse.generate(
                 self.body,
                 f"c10::metal::threadgroup_{reduction_type}({acc_buf}, {reduction_dim.numel})",
