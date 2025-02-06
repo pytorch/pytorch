@@ -135,7 +135,7 @@ class InputDescriptor:
     device: torch.device
 
 
-class TracingOpsHandler(WrapperHandler):
+class TracingOpsHandler(WrapperHandler[T]):
     def __init__(self, tracer: torch.fx.Tracer, num_inputs: int) -> None:
         parent = tracer.create_proxy("placeholder", "ops", (), {})
         super().__init__(parent)
