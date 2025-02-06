@@ -742,7 +742,7 @@ class TritonTemplateKernel(TritonKernel):
             template_mask = self.template_mask
 
             class StoreOutputSubstitution(V.WrapperHandler):  # type: ignore[name-defined]
-                name = "StoreOutputSubstitution"
+                self.name = name
 
                 def store(
                     self,
