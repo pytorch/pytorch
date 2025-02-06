@@ -1187,8 +1187,7 @@ def forward(self, x):
     topk_default = torch.ops.aten.topk.default(x, 2);  x = None
     getitem = topk_default[0]
     getitem_1 = topk_default[1];  topk_default = None
-    mul_tensor = torch.ops.aten.mul.Tensor(getitem, 2)
-    mul = torch.ops.aten.mul.Tensor(getitem, mul_tensor);  getitem = mul_tensor = None
+    mul = torch.ops.aten.mul.Scalar(getitem, 2);  getitem = None
     return (mul, getitem_1)
     """,
         )

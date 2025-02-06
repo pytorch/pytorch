@@ -1277,7 +1277,7 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
                 for node in model.graph.nodes:
                     if (
                         node.op == "call_function"
-                        and node.target == torch.ops.aten.add.Tensor
+                        and node.target == torch.ops.aten.add.Scalar
                     ):
                         input_act1 = node.args[0]
                         # this is a constant, so not valid for annotation
@@ -1500,8 +1500,8 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
                 graph = torch.fx.Graph()
                 graph.graph_copy(model.graph, {})
                 for n in graph.nodes:
-                    if n.target == torch.ops.aten.add.Tensor:
-                        n.target = torch.ops.aten.mul.Tensor
+                    if n.target == torch.ops.aten.add.Scalar:
+                        n.target = torch.ops.aten.mul.Scalar
                 model = torch.fx.GraphModule(model, graph)
                 return model
 
@@ -1522,8 +1522,8 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
         m = prepare_pt2e(m, quantizer)
         m(*example_inputs)
         node_occurrence = {
-            ns.call_function(torch.ops.aten.add.Tensor): 0,
-            ns.call_function(torch.ops.aten.mul.Tensor): 1,
+            ns.call_function(torch.ops.aten.add.Scalar): 0,
+            ns.call_function(torch.ops.aten.mul.Scalar): 1,
         }
         self.checkGraphModuleNodes(m, expected_node_occurrence=node_occurrence)
 

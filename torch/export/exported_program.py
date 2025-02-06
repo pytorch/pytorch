@@ -803,6 +803,59 @@ def _remove_unneccessary_copy_op_pass(
         gm.recompile()
     return gm, new_graph_signature
 
+def _tensor_to_scalar_variant_pass(gm: torch.fx.GraphModule):
+    """
+    Replace tensor to scalar variant ops with the scalar variant ops.
+    """
+    def _is_scalar(x):
+        if isinstance(x, (int, float, torch.SymInt, torch.SymFloat)):
+            return True
+        if isinstance(x, torch.fx.Node) and _is_scalar(x.meta["val"]):
+            return True
+        return False
+
+    def _schema_type_match(schema, args, kwargs) -> bool:
+        for arg, schema_arg in zip(args, schema.arguments):
+            if type(schema_arg.type) == torch.TensorType and _is_scalar(arg):
+                return False
+        for k, v in kwargs.items():
+            for a in schema.arguments:
+                if a.name == k:
+                    if type(a.type) == torch.TensorType and _is_scalar(v):
+                        return False
+                    else:
+                        break
+        return True
+
+    def _try_use_variant(node, variant):
+        if variant not in node.target.overloadpacket:
+            return False
+        variant = getattr(node.target.overloadpacket, variant)
+        if _schema_type_match(variant._schema, node.args, node.kwargs):
+            node.target = variant
+            return True
+        return False
+
+    for m in gm.modules():
+        if not isinstance(m, torch.fx.GraphModule):
+            continue
+        for node in m.graph.nodes:
+            if node.op != "call_function":
+                continue
+            if not isinstance(node.target, torch._ops.OpOverload):
+                continue
+            if node.target._overloadname not in ("Tensor", "Tensor_Tensor"):
+                continue
+            if _schema_type_match(node.target._schema, node.args, node.kwargs):
+                continue
+            _try_use_variant(node, "Scalar") or \
+            _try_use_variant(node, "Scalar_Tensor") or \
+            _try_use_variant(node, "Tensor_Scalar")
+        try:
+            m.recompile()
+        except:
+            pass  # it's not a big deal if we can't recompile.
+
 
 def _common_getitem_elimination_pass(
     gm: torch.fx.GraphModule, graph_signature, module_call_graph
@@ -949,6 +1002,7 @@ class ExportedProgram:
         _common_getitem_elimination_pass(
             self._graph_module, graph_signature, module_call_graph
         )
+        _tensor_to_scalar_variant_pass(self.graph_module)
         self._graph_signature: ExportGraphSignature = graph_signature
         self._state_dict: dict[str, Any] = state_dict
         self._range_constraints: dict[sympy.Symbol, ValueRanges] = range_constraints

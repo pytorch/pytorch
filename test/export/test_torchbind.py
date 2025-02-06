@@ -710,7 +710,7 @@ def forward(self, token, p_linear_weight, p_linear_bias, tq, x):
     getitem_1 = with_effects[1];  with_effects = None
     with_effects_1 = torch.ops.higher_order.with_effects(getitem, torch.ops.higher_order.call_torchbind, tq, 'float_size');  getitem = None
     getitem_2 = with_effects_1[0];  with_effects_1 = None
-    add = torch.ops.aten.add.Tensor(getitem_1, 1.0);  getitem_1 = None
+    add = torch.ops.aten.add.Scalar(getitem_1, 1.0);  getitem_1 = None
     linear = torch.ops.aten.linear.default(x, p_linear_weight, p_linear_bias);  p_linear_weight = p_linear_bias = None
     add_1 = torch.ops.aten.add.Tensor(add, linear);  add = linear = None
     with_effects_2 = torch.ops.higher_order.with_effects(getitem_2, torch.ops.higher_order.call_torchbind, tq, 'is_empty');  getitem_2 = None
@@ -720,7 +720,7 @@ def forward(self, token, p_linear_weight, p_linear_bias, tq, x):
     getitem_7 = with_effects_3[1];  with_effects_3 = None
     with_effects_4 = torch.ops.higher_order.with_effects(getitem_6, torch.ops.higher_order.call_torchbind, tq, 'size');  getitem_6 = None
     getitem_8 = with_effects_4[0];  with_effects_4 = None
-    add_2 = torch.ops.aten.add.Tensor(getitem_7, 0);  getitem_7 = None
+    add_2 = torch.ops.aten.add.Scalar(getitem_7, 0);  getitem_7 = None
     add_3 = torch.ops.aten.add.Tensor(add_2, x);  add_2 = x = None
     return (getitem_8, add_3, add_1, tq)""",  # noqa: B950
         )

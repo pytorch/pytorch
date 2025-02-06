@@ -1826,7 +1826,7 @@ graph():
     %p_p1 : [num_users=1] = placeholder[target=p_p1]
     %p_p2 : [num_users=1] = placeholder[target=p_p2]
     %x : [num_users=1] = placeholder[target=x]
-    %mul : [num_users=1] = call_function[target=torch.ops.aten.mul.Tensor](args = (%p_p1, 2), kwargs = {})
+    %mul : [num_users=1] = call_function[target=torch.ops.aten.mul.Scalar](args = (%p_p1, 2), kwargs = {})
     %add : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%mul, %p_p2), kwargs = {})
     %sum_1 : [num_users=1] = call_function[target=torch.ops.aten.sum.default](args = (%add,), kwargs = {})
     %add_1 : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%x, %sum_1), kwargs = {})
@@ -1842,7 +1842,7 @@ graph():
     %p_parametrizations_p2_original0 : [num_users=1] = placeholder[target=p_parametrizations_p2_original0]
     %p_parametrizations_p2_original1 : [num_users=1] = placeholder[target=p_parametrizations_p2_original1]
     %x : [num_users=1] = placeholder[target=x]
-    %mul : [num_users=2] = call_function[target=torch.ops.aten.mul.Tensor](args = (%p_p1, 2), kwargs = {})
+    %mul : [num_users=2] = call_function[target=torch.ops.aten.mul.Scalar](args = (%p_p1, 2), kwargs = {})
     %add : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%mul, %p_parametrizations_p2_original0), kwargs = {})
     %add_1 : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%mul, %p_parametrizations_p2_original1), kwargs = {})
     %add_2 : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%add, %add_1), kwargs = {})
@@ -1890,7 +1890,7 @@ graph():
     %p_p1 : [num_users=1] = placeholder[target=p_p1]
     %p_p2 : [num_users=1] = placeholder[target=p_p2]
     %x : [num_users=2] = placeholder[target=x]
-    %mul : [num_users=1] = call_function[target=torch.ops.aten.mul.Tensor](args = (%p_p1, 2), kwargs = {})
+    %mul : [num_users=1] = call_function[target=torch.ops.aten.mul.Scalar](args = (%p_p1, 2), kwargs = {})
     %add : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%x, %mul), kwargs = {})
     %add_1 : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%add, %p_p2), kwargs = {})
     %sum_1 : [num_users=1] = call_function[target=torch.ops.aten.sum.default](args = (%add_1,), kwargs = {})
@@ -1911,7 +1911,7 @@ graph():
     %p_parametrizations_p2_original2 : [num_users=1] = placeholder[target=p_parametrizations_p2_original2]
     %p_parametrizations_p2_original3 : [num_users=1] = placeholder[target=p_parametrizations_p2_original3]
     %x : [num_users=2] = placeholder[target=x]
-    %mul : [num_users=1] = call_function[target=torch.ops.aten.mul.Tensor](args = (%p_p1, 2), kwargs = {})
+    %mul : [num_users=1] = call_function[target=torch.ops.aten.mul.Scalar](args = (%p_p1, 2), kwargs = {})
     %add : [num_users=4] = call_function[target=torch.ops.aten.add.Tensor](args = (%x, %mul), kwargs = {})
     %add_1 : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%add, %p_parametrizations_p2_original0), kwargs = {})
     %add_2 : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%add, %p_parametrizations_p2_original1), kwargs = {})
@@ -1966,7 +1966,7 @@ graph():
     %p_p2 : [num_users=1] = placeholder[target=p_p2]
     %b_b1 : [num_users=1] = placeholder[target=b_b1]
     %x : [num_users=1] = placeholder[target=x]
-    %mul : [num_users=1] = call_function[target=torch.ops.aten.mul.Tensor](args = (%p_p1, 2), kwargs = {})
+    %mul : [num_users=1] = call_function[target=torch.ops.aten.mul.Scalar](args = (%p_p1, 2), kwargs = {})
     %add : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%mul, %p_p2), kwargs = {})
     %add_1 : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%add, %b_b1), kwargs = {})
     %sum_1 : [num_users=1] = call_function[target=torch.ops.aten.sum.default](args = (%add_1,), kwargs = {})
@@ -2024,7 +2024,7 @@ graph():
     %p_bar_p2 : [num_users=1] = placeholder[target=p_bar_p2]
     %b_bar_b1 : [num_users=1] = placeholder[target=b_bar_b1]
     %x : [num_users=1] = placeholder[target=x]
-    %mul : [num_users=1] = call_function[target=torch.ops.aten.mul.Tensor](args = (%p_bar_p1, 2), kwargs = {})
+    %mul : [num_users=1] = call_function[target=torch.ops.aten.mul.Scalar](args = (%p_bar_p1, 2), kwargs = {})
     %add : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%mul, %p_bar_p2), kwargs = {})
     %add_1 : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%add, %b_bar_b1), kwargs = {})
     %sum_1 : [num_users=1] = call_function[target=torch.ops.aten.sum.default](args = (%add_1,), kwargs = {})
@@ -2067,9 +2067,9 @@ graph():
     %p_p1 : [num_users=1] = placeholder[target=p_p1]
     %p_p2 : [num_users=1] = placeholder[target=p_p2]
     %x : [num_users=1] = placeholder[target=x]
-    %mul : [num_users=1] = call_function[target=torch.ops.aten.mul.Tensor](args = (%p_p1, 2), kwargs = {})
+    %mul : [num_users=1] = call_function[target=torch.ops.aten.mul.Scalar](args = (%p_p1, 2), kwargs = {})
     %add : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%mul, %p_p2), kwargs = {})
-    %add_1 : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%add, 4), kwargs = {})
+    %add_1 : [num_users=1] = call_function[target=torch.ops.aten.add.Scalar](args = (%add, 4), kwargs = {})
     %getattr_22 : [num_users=1] = call_function[target=builtins.getattr](args = (%add_1, elem), kwargs = {})
     %getattr_27 : [num_users=1] = call_function[target=builtins.getattr](args = (%getattr_22, elem), kwargs = {})
     %add_2 : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%x, %getattr_27), kwargs = {})
@@ -2109,9 +2109,9 @@ graph():
     %p_p1 : [num_users=1] = placeholder[target=p_p1]
     %p_p2 : [num_users=1] = placeholder[target=p_p2]
     %x : [num_users=1] = placeholder[target=x]
-    %mul : [num_users=1] = call_function[target=torch.ops.aten.mul.Tensor](args = (%p_p1, 2), kwargs = {})
+    %mul : [num_users=1] = call_function[target=torch.ops.aten.mul.Scalar](args = (%p_p1, 2), kwargs = {})
     %add : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%mul, %p_p2), kwargs = {})
-    %add_1 : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%add, 4), kwargs = {})
+    %add_1 : [num_users=1] = call_function[target=torch.ops.aten.add.Sclar](args = (%add, 4), kwargs = {})
     %getattr_22 : [num_users=1] = call_function[target=builtins.getattr](args = (%add_1, elem), kwargs = {})
     %getattr_27 : [num_users=1] = call_function[target=builtins.getattr](args = (%getattr_22, elem), kwargs = {})
     %add_2 : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%x, %getattr_27), kwargs = {})
@@ -2152,12 +2152,12 @@ graph():
     %p_p1 : [num_users=1] = placeholder[target=p_p1]
     %p_p2 : [num_users=1] = placeholder[target=p_p2]
     %x : [num_users=1] = placeholder[target=x]
-    %mul : [num_users=1] = call_function[target=torch.ops.aten.mul.Tensor](args = (%p_p1, 2), kwargs = {})
+    %mul : [num_users=1] = call_function[target=torch.ops.aten.mul.Scalar](args = (%p_p1, 2), kwargs = {})
     %add : [num_users=2] = call_function[target=torch.ops.aten.add.Tensor](args = (%mul, %p_p2), kwargs = {})
     %getattr_33 : [num_users=1] = call_function[target=builtins.getattr](args = (%add, a), kwargs = {})
     %getattr_38 : [num_users=1] = call_function[target=builtins.getattr](args = (%getattr_33, elem), kwargs = {})
     %add_1 : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%add, %getattr_38), kwargs = {})
-    %add_2 : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%add_1, 4), kwargs = {})
+    %add_2 : [num_users=1] = call_function[target=torch.ops.aten.add.Scalar](args = (%add_1, 4), kwargs = {})
     %getattr_45 : [num_users=1] = call_function[target=builtins.getattr](args = (%add_2, a), kwargs = {})
     %getattr_50 : [num_users=1] = call_function[target=builtins.getattr](args = (%getattr_45, elem), kwargs = {})
     %add_3 : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%x, %getattr_50), kwargs = {})
@@ -2196,12 +2196,12 @@ graph():
     %p_p1 : [num_users=1] = placeholder[target=p_p1]
     %p_p2 : [num_users=1] = placeholder[target=p_p2]
     %x : [num_users=1] = placeholder[target=x]
-    %mul : [num_users=1] = call_function[target=torch.ops.aten.mul.Tensor](args = (%p_p1, 2), kwargs = {})
+    %mul : [num_users=1] = call_function[target=torch.ops.aten.mul.Scalar](args = (%p_p1, 2), kwargs = {})
     %add : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%x, %mul), kwargs = {})
     %add_1 : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%add, %p_p2), kwargs = {})
     %getattr_21 : [num_users=1] = call_function[target=builtins.getattr](args = (%add_1, elem), kwargs = {})
     %getattr_26 : [num_users=1] = call_function[target=builtins.getattr](args = (%getattr_21, elem), kwargs = {})
-    %add_2 : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%getattr_26, 4), kwargs = {})
+    %add_2 : [num_users=1] = call_function[target=torch.ops.aten.add.Scalar](args = (%getattr_26, 4), kwargs = {})
     return (add_2,)""",
         )
         ep = export(m, (ref_x,))
@@ -3372,8 +3372,8 @@ def forward(self, x):
             str(ep_for_training.graph_module.code).strip(),
             """\
 def forward(self, b_buffer, x):
-    add_ = torch.ops.aten.add_.Tensor(x, 5);  x = None
-    add__1 = torch.ops.aten.add_.Tensor(b_buffer, 5);  b_buffer = None
+    add_ = torch.ops.aten.add_.Scalar(x, 5);  x = None
+    add__1 = torch.ops.aten.add_.Scalar(b_buffer, 5);  b_buffer = None
     add = torch.ops.aten.add.Tensor(add_, add__1);  add_ = add__1 = None
     return (add,)""",
         )
@@ -3384,8 +3384,8 @@ def forward(self, b_buffer, x):
 def forward(self, x):
     x, = fx_pytree.tree_flatten_spec(([x], {}), self._in_spec)
     buffer = self.buffer
-    add_ = torch.ops.aten.add_.Tensor(x, 5);  x = None
-    add__1 = torch.ops.aten.add_.Tensor(buffer, 5);  buffer = None
+    add_ = torch.ops.aten.add_.Scalar(x, 5);  x = None
+    add__1 = torch.ops.aten.add_.Scalar(buffer, 5);  buffer = None
     add = torch.ops.aten.add.Tensor(add_, add__1);  add_ = add__1 = None
     return pytree.tree_unflatten((add,), self._out_spec)""",
         )
@@ -3482,7 +3482,7 @@ def forward(self, x):
             str(ep_for_inference.graph_module.code).strip(),
             """\
 def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
-    add = torch.ops.aten.add.Tensor(b_buffer, 5);  b_buffer = None
+    add = torch.ops.aten.add.Scalar(b_buffer, 5);  b_buffer = None
     permute = torch.ops.aten.permute.default(p_linear_weight, [1, 0]);  p_linear_weight = None
     addmm = torch.ops.aten.addmm.default(p_linear_bias, x, permute);  p_linear_bias = x = permute = None
     sum_1 = torch.ops.aten.sum.dim_IntList(add, [])
@@ -5665,10 +5665,32 @@ def forward(self, x):
     bn_running_var = self.bn.running_var
     bn_num_batches_tracked = self.bn.num_batches_tracked
     conv2d = torch.ops.aten.conv2d.default(x, conv_weight, conv_bias);  x = conv_weight = conv_bias = None
-    add_ = torch.ops.aten.add_.Tensor(bn_num_batches_tracked, 1);  bn_num_batches_tracked = add_ = None
+    add_ = torch.ops.aten.add_.Scalar(bn_num_batches_tracked, 1);  bn_num_batches_tracked = add_ = None
     batch_norm = torch.ops.aten.batch_norm.default(conv2d, bn_weight, bn_bias, bn_running_mean, bn_running_var, True, 0.1, 1e-05, True);  conv2d = bn_weight = bn_bias = bn_running_mean = bn_running_var = None
     return pytree.tree_unflatten((batch_norm,), self._out_spec)""",
         )
+
+    def test_tensor_scalar_variant(self):
+        class Module(torch.nn.Module):
+            def forward(self, x, y):
+                n = x.item()
+                return y + n, y * n, y - n
+
+        fn = Module()
+        ep = export(
+            fn,
+            (torch.tensor(1), torch.randn(4, 3)),
+        )
+        count = 0
+        for node in ep.graph.nodes:
+            if node.op == "call_function":
+                self.assertNotEqual(node.target._overloadname, "Tensor")
+                if node.target._overloadname == "Scalar":
+                    count += 1
+
+        self.assertEqual(count, 3)
+        test_inp = (torch.tensor(2), torch.randn(4, 3))
+        self.assertEqual(ep.module()(*test_inp), fn(*test_inp))
 
     def test_constrain_size_in_eager(self):
         class Module(torch.nn.Module):
@@ -6734,7 +6756,7 @@ def forward(self, p_conv_weight, p_conv_bias, p_conv1d_weight, p_conv1d_bias, c_
     conv1d = torch.ops.aten.conv1d.default(y, p_conv1d_weight, p_conv1d_bias);  y = p_conv1d_weight = p_conv1d_bias = None
     permute = torch.ops.aten.permute.default(c_linear_weight, [1, 0]);  c_linear_weight = None
     matmul = torch.ops.aten.matmul.default(conv2d, permute);  conv2d = permute = None
-    mul = torch.ops.aten.mul.Tensor(c_linear_bias, 2);  c_linear_bias = None
+    mul = torch.ops.aten.mul.Scalar(c_linear_bias, 2);  c_linear_bias = None
     add = torch.ops.aten.add.Tensor(matmul, mul);  matmul = mul = None
     cos = torch.ops.aten.cos.default(add);  add = None
     sum_1 = torch.ops.aten.sum.default(conv1d);  conv1d = None
@@ -9283,8 +9305,8 @@ graph():
             str(ep.graph_module.code).strip(),
             """\
 def forward(self, c_params, x):
-    add = torch.ops.aten.add.Tensor(c_params, 2)
-    add_1 = torch.ops.aten.add.Tensor(c_params, 1);  c_params = None
+    add = torch.ops.aten.add.Scalar(c_params, 2)
+    add_1 = torch.ops.aten.add.Scalar(c_params, 1);  c_params = None
     sub = torch.ops.aten.sub.Tensor(add, add_1);  add = add_1 = None
     sum_1 = torch.ops.aten.sum.dim_IntList(sub, []);  sub = None
     sum_2 = torch.ops.aten.sum.dim_IntList(x, []);  x = None
@@ -9329,8 +9351,8 @@ def forward(self, c_params, x):
             str(ep.graph_module.code).strip(),
             """\
 def forward(self, c_submod_params, x):
-    add = torch.ops.aten.add.Tensor(c_submod_params, 2)
-    add_1 = torch.ops.aten.add.Tensor(c_submod_params, 1);  c_submod_params = None
+    add = torch.ops.aten.add.Scalar(c_submod_params, 2)
+    add_1 = torch.ops.aten.add.Scalar(c_submod_params, 1);  c_submod_params = None
     sub = torch.ops.aten.sub.Tensor(add, add_1);  add = add_1 = None
     sum_1 = torch.ops.aten.sum.dim_IntList(sub, []);  sub = None
     sum_2 = torch.ops.aten.sum.dim_IntList(x, []);  x = None
@@ -9457,15 +9479,15 @@ def forward(self, c_submod_params, x):
             """\
 graph():
     %x : [num_users=1] = placeholder[target=x]
-    %add : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%x, 3), kwargs = {})
+    %add : [num_users=1] = call_function[target=torch.ops.aten.add.Scalar](args = (%x, 3), kwargs = {})
     %n : [num_users=1] = call_module[target=n](args = (%add,), kwargs = {})
-    %add_2 : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%n, 4), kwargs = {})
+    %add_2 : [num_users=1] = call_function[target=torch.ops.aten.add.Scalar](args = (%n, 4), kwargs = {})
     %n_1 : [num_users=1] = call_module[target=n@1](args = (%add_2,), kwargs = {})
-    %add_4 : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%n_1, 5), kwargs = {})
+    %add_4 : [num_users=1] = call_function[target=torch.ops.aten.add.Scalar](args = (%n_1, 5), kwargs = {})
     %p : [num_users=1] = call_module[target=p](args = (%add_4,), kwargs = {})
-    %add_6 : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%p, 6), kwargs = {})
+    %add_6 : [num_users=1] = call_function[target=torch.ops.aten.add.Scalar](args = (%p, 6), kwargs = {})
     %p_1 : [num_users=1] = call_module[target=p](args = (%add_6,), kwargs = {})
-    %add_8 : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%p_1, 7), kwargs = {})
+    %add_8 : [num_users=1] = call_function[target=torch.ops.aten.add.Scalar](args = (%p_1, 7), kwargs = {})
     return (add_8,)""",
             ["", "n", "n@1", "p"],
             [("n@1", "p")],
@@ -9477,15 +9499,15 @@ graph():
             """\
 graph():
     %x : [num_users=1] = placeholder[target=x]
-    %add : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%x, 3), kwargs = {})
+    %add : [num_users=1] = call_function[target=torch.ops.aten.add.Scalar](args = (%x, 3), kwargs = {})
     %n : [num_users=1] = call_module[target=n](args = (%add,), kwargs = {})
-    %add_2 : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%n, 4), kwargs = {})
+    %add_2 : [num_users=1] = call_function[target=torch.ops.aten.add.Scalar](args = (%n, 4), kwargs = {})
     %n_1 : [num_users=1] = call_module[target=n@1](args = (%add_2,), kwargs = {})
-    %add_4 : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%n_1, 5), kwargs = {})
+    %add_4 : [num_users=1] = call_function[target=torch.ops.aten.add.Scalar](args = (%n_1, 5), kwargs = {})
     %p : [num_users=1] = call_module[target=p](args = (%add_4,), kwargs = {})
-    %add_6 : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%p, 6), kwargs = {})
+    %add_6 : [num_users=1] = call_function[target=torch.ops.aten.add.Scalar](args = (%p, 6), kwargs = {})
     %p_1 : [num_users=1] = call_module[target=p@1](args = (%add_6,), kwargs = {})
-    %add_8 : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%p_1, 7), kwargs = {})
+    %add_8 : [num_users=1] = call_function[target=torch.ops.aten.add.Scalar](args = (%p_1, 7), kwargs = {})
     return (add_8,)""",
             ["", "n", "n@1", "p", "p@1"],
             [("n", "p"), ("n@1", "p@1")],
@@ -9497,15 +9519,15 @@ graph():
             """\
 graph():
     %x : [num_users=1] = placeholder[target=x]
-    %add : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%x, 3), kwargs = {})
+    %add : [num_users=1] = call_function[target=torch.ops.aten.add.Scalar](args = (%x, 3), kwargs = {})
     %n : [num_users=1] = call_module[target=n](args = (%add,), kwargs = {})
-    %add_2 : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%n, 4), kwargs = {})
+    %add_2 : [num_users=1] = call_function[target=torch.ops.aten.add.Scalar](args = (%n, 4), kwargs = {})
     %n_1 : [num_users=1] = call_module[target=n](args = (%add_2,), kwargs = {})
-    %add_4 : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%n_1, 5), kwargs = {})
+    %add_4 : [num_users=1] = call_function[target=torch.ops.aten.add.Scalar](args = (%n_1, 5), kwargs = {})
     %p : [num_users=1] = call_module[target=p](args = (%add_4,), kwargs = {})
-    %add_6 : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%p, 6), kwargs = {})
+    %add_6 : [num_users=1] = call_function[target=torch.ops.aten.add.Scalar](args = (%p, 6), kwargs = {})
     %p_1 : [num_users=1] = call_module[target=p@1](args = (%add_6,), kwargs = {})
-    %add_8 : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%p_1, 7), kwargs = {})
+    %add_8 : [num_users=1] = call_function[target=torch.ops.aten.add.Scalar](args = (%p_1, 7), kwargs = {})
     return (add_8,)""",
             ["", "n", "p", "p@1"],
             [("n", "p")],
@@ -9517,15 +9539,15 @@ graph():
             """\
 graph():
     %x : [num_users=1] = placeholder[target=x]
-    %add : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%x, 3), kwargs = {})
+    %add : [num_users=1] = call_function[target=torch.ops.aten.add.Scalar](args = (%x, 3), kwargs = {})
     %n : [num_users=1] = call_module[target=n](args = (%add,), kwargs = {})
-    %add_2 : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%n, 4), kwargs = {})
+    %add_2 : [num_users=1] = call_function[target=torch.ops.aten.add.Scalar](args = (%n, 4), kwargs = {})
     %n_1 : [num_users=1] = call_module[target=n@1](args = (%add_2,), kwargs = {})
-    %add_4 : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%n_1, 5), kwargs = {})
+    %add_4 : [num_users=1] = call_function[target=torch.ops.aten.add.Scalar](args = (%n_1, 5), kwargs = {})
     %p : [num_users=1] = call_module[target=p](args = (%add_4,), kwargs = {})
-    %add_6 : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%p, 6), kwargs = {})
+    %add_6 : [num_users=1] = call_function[target=torch.ops.aten.add.Scalar](args = (%p, 6), kwargs = {})
     %p_1 : [num_users=1] = call_module[target=p@1](args = (%add_6,), kwargs = {})
-    %add_8 : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%p_1, 7), kwargs = {})
+    %add_8 : [num_users=1] = call_function[target=torch.ops.aten.add.Scalar](args = (%p_1, 7), kwargs = {})
     return (add_8,)""",
             ["", "n", "n@1", "p", "p@1"],
             [("n", "p@1"), ("p", "n@1")],
@@ -9775,7 +9797,7 @@ def forward(self, b_t, x, y):
             str(exported_program.graph_module.true_graph_0.submod_1.code.strip()),
             """\
 def forward(self, x, b_t, y):
-    sub = torch.ops.aten.sub.Tensor(x, 1);  x = None
+    sub = torch.ops.aten.sub.Scalar(x, 1);  x = None
     add = torch.ops.aten.add.Tensor(sub, b_t);  sub = b_t = None
     add_1 = torch.ops.aten.add.Tensor(add, y);  add = y = None
     return (add_1,)""",

@@ -800,13 +800,13 @@ def forward(self, token, obj_attr, x):
             """\
 def forward(self, x):
     x, = fx_pytree.tree_flatten_spec(([x], {}), self._in_spec)
-    add = torch.ops.aten.add.Tensor(x, 1);  x = None
+    add = torch.ops.aten.add.Scalar(x, 1);  x = None
     sin = torch.ops.aten.sin.default(add);  add = None
     sum_1 = torch.ops.aten.sum.default(sin);  sin = None
     submod_4 = self.submod_2
     add_1 = torch.ops.higher_order.wrap_with_set_grad_enabled(False, submod_4, sum_1);  submod_4 = sum_1 = None
     getitem = add_1[0];  add_1 = None
-    sub = torch.ops.aten.sub.Tensor(getitem, 1)
+    sub = torch.ops.aten.sub.Scalar(getitem, 1)
     return pytree.tree_unflatten((getitem, sub), self._out_spec)
     """,
         )
@@ -819,13 +819,13 @@ def forward(self, x):
             """\
 def forward(self, x):
     x, = fx_pytree.tree_flatten_spec(([x], {}), self._in_spec)
-    add = torch.ops.aten.add.Tensor(x, 1);  x = None
+    add = torch.ops.aten.add.Scalar(x, 1);  x = None
     sin = torch.ops.aten.sin.default(add);  add = None
     sum_1 = torch.ops.aten.sum.default(sin);  sin = None
     submod_4 = self.submod_2
     add_1 = torch.ops.higher_order.wrap_with_set_grad_enabled(False, submod_4, sum_1);  submod_4 = sum_1 = None
     getitem = add_1[0];  add_1 = None
-    sub = torch.ops.aten.sub.Tensor(getitem, 1)
+    sub = torch.ops.aten.sub.Scalar(getitem, 1)
     return pytree.tree_unflatten((getitem, sub), self._out_spec)
     """,
         )
@@ -838,13 +838,13 @@ def forward(self, x):
             """\
 def forward(self, x):
     x, = fx_pytree.tree_flatten_spec(([x], {}), self._in_spec)
-    add = torch.ops.aten.add.Tensor(x, 1);  x = None
+    add = torch.ops.aten.add.Scalar(x, 1);  x = None
     sin = torch.ops.aten.sin.default(add);  add = None
     sum_1 = torch.ops.aten.sum.default(sin);  sin = None
     submod_3 = self.submod_1
     add_1 = torch.ops.higher_order.wrap_with_set_grad_enabled(False, submod_3, sum_1);  submod_3 = sum_1 = None
     getitem = add_1[0];  add_1 = None
-    sub = torch.ops.aten.sub.Tensor(getitem, 1)
+    sub = torch.ops.aten.sub.Scalar(getitem, 1)
     return pytree.tree_unflatten((getitem, sub), self._out_spec)
     """,
         )
@@ -857,11 +857,11 @@ def forward(self, x):
             """\
 def forward(self, x):
     x, = fx_pytree.tree_flatten_spec(([x], {}), self._in_spec)
-    add = torch.ops.aten.add.Tensor(x, 1);  x = None
+    add = torch.ops.aten.add.Scalar(x, 1);  x = None
     submod_5 = self.submod_1
     sum_1 = torch.ops.higher_order.wrap_with_set_grad_enabled(True, submod_5, add);  submod_5 = add = None
     getitem = sum_1[0];  sum_1 = None
-    add_1 = torch.ops.aten.add.Tensor(getitem, 1);  getitem = None
+    add_1 = torch.ops.aten.add.Scalar(getitem, 1);  getitem = None
     submod_6 = self.submod_3
     sub = torch.ops.higher_order.wrap_with_set_grad_enabled(True, submod_6, add_1);  submod_6 = None
     getitem_1 = sub[0];  sub = None
@@ -877,7 +877,7 @@ def forward(self, x):
             """\
 def forward(self, x):
     x, = fx_pytree.tree_flatten_spec(([x], {}), self._in_spec)
-    add = torch.ops.aten.add.Tensor(x, 1);  x = None
+    add = torch.ops.aten.add.Scalar(x, 1);  x = None
     sin = torch.ops.aten.sin.default(add)
     sum_1 = torch.ops.aten.sum.default(sin);  sin = None
     cos = torch.ops.aten.cos.default(add);  add = None
@@ -886,8 +886,8 @@ def forward(self, x):
     wrap_with_set_grad_enabled = torch.ops.higher_order.wrap_with_set_grad_enabled(False, submod_3, sum_1, sum_2);  submod_3 = sum_1 = sum_2 = None
     add_1 = wrap_with_set_grad_enabled[0]
     add_2 = wrap_with_set_grad_enabled[1];  wrap_with_set_grad_enabled = None
-    sub = torch.ops.aten.sub.Tensor(add_1, 1)
-    sub_1 = torch.ops.aten.sub.Tensor(add_2, 1)
+    sub = torch.ops.aten.sub.Scalar(add_1, 1)
+    sub_1 = torch.ops.aten.sub.Scalar(add_2, 1)
     return pytree.tree_unflatten((add_1, add_2, sub, sub_1), self._out_spec)
     """,  # noqa: B950
         )
@@ -902,13 +902,13 @@ def forward(self, x):
             """\
 def forward(self, x):
     x, = fx_pytree.tree_flatten_spec(([x], {}), self._in_spec)
-    add = torch.ops.aten.add.Tensor(x, 1);  x = None
+    add = torch.ops.aten.add.Scalar(x, 1);  x = None
     submod_5 = self.submod_1
     wrap_with_set_grad_enabled = torch.ops.higher_order.wrap_with_set_grad_enabled(True, submod_5, add);  submod_5 = add = None
     sum_1 = wrap_with_set_grad_enabled[0]
     sum_2 = wrap_with_set_grad_enabled[1];  wrap_with_set_grad_enabled = None
-    add_1 = torch.ops.aten.add.Tensor(sum_1, 1);  sum_1 = None
-    add_2 = torch.ops.aten.add.Tensor(sum_2, 1);  sum_2 = None
+    add_1 = torch.ops.aten.add.Scalar(sum_1, 1);  sum_1 = None
+    add_2 = torch.ops.aten.add.Scalar(sum_2, 1);  sum_2 = None
     submod_6 = self.submod_3
     wrap_with_set_grad_enabled_1 = torch.ops.higher_order.wrap_with_set_grad_enabled(True, submod_6, add_1, add_2);  submod_6 = None
     sub = wrap_with_set_grad_enabled_1[0]
@@ -957,8 +957,8 @@ def forward(self, x1, x2):
             """\
 def forward(self, x1, x2):
     _set_grad_enabled = torch._C._set_grad_enabled(True);  _set_grad_enabled = None
-    add = torch.ops.aten.add.Tensor(x1, 1);  x1 = None
-    add_1 = torch.ops.aten.add.Tensor(x2, 1);  x2 = None
+    add = torch.ops.aten.add.Scalar(x1, 1);  x1 = None
+    add_1 = torch.ops.aten.add.Scalar(x2, 1);  x2 = None
     return (add, add_1)
     """,
         )
@@ -977,8 +977,8 @@ def forward(self, add, add_1):
             """\
 def forward(self, sin, cos):
     _set_grad_enabled_2 = torch._C._set_grad_enabled(True);  _set_grad_enabled_2 = None
-    add_2 = torch.ops.aten.add.Tensor(sin, 1);  sin = None
-    add_3 = torch.ops.aten.add.Tensor(cos, 1);  cos = None
+    add_2 = torch.ops.aten.add.Scalar(sin, 1);  sin = None
+    add_3 = torch.ops.aten.add.Scalar(cos, 1);  cos = None
     return (add_2, add_3)
     """,
         )
@@ -993,14 +993,14 @@ def forward(self, sin, cos):
 def forward(self, x):
     x, = fx_pytree.tree_flatten_spec(([x], {}), self._in_spec)
     submod_3 = self.submod_3
-    add = torch.ops.aten.add.Tensor(x, 1);  x = None
+    add = torch.ops.aten.add.Scalar(x, 1);  x = None
     sin = torch.ops.higher_order.wrap_with_set_grad_enabled(True, submod_3, add);  submod_3 = add = None
     getitem_2 = sin[0];  sin = None
     cos = torch.ops.aten.cos.default(getitem_2);  getitem_2 = None
     submod_4 = self.submod_1
     add_1 = torch.ops.higher_order.wrap_with_autocast('cpu', None, False, None, submod_4, cos);  submod_4 = cos = None
     getitem = add_1[0];  add_1 = None
-    sub = torch.ops.aten.sub.Tensor(getitem, 1)
+    sub = torch.ops.aten.sub.Scalar(getitem, 1)
     return pytree.tree_unflatten((getitem, sub), self._out_spec)
     """,
         )
@@ -1016,7 +1016,7 @@ def forward(self, add):
             mod.submod_1.code.strip("\n"),
             """\
 def forward(self, cos):
-    add_1 = torch.ops.aten.add.Tensor(cos, 1);  cos = None
+    add_1 = torch.ops.aten.add.Scalar(cos, 1);  cos = None
     return (add_1,)
     """,
         )
@@ -1030,7 +1030,7 @@ def forward(self, cos):
             """\
 def forward(self, x):
     x, = fx_pytree.tree_flatten_spec(([x], {}), self._in_spec)
-    add = torch.ops.aten.add.Tensor(x, 1);  x = None
+    add = torch.ops.aten.add.Scalar(x, 1);  x = None
     submod_3 = self.submod_1
     add_1 = torch.ops.higher_order.wrap_with_autocast('cpu', None, True, None, submod_3, add);  submod_3 = add = None
     getitem = add_1[0];  add_1 = None
@@ -1062,7 +1062,7 @@ def forward(self, add):
             """\
 def forward(self, x):
     x, = fx_pytree.tree_flatten_spec(([x], {}), self._in_spec)
-    add = torch.ops.aten.add.Tensor(x, 1);  x = None
+    add = torch.ops.aten.add.Scalar(x, 1);  x = None
     submod_4 = self.submod_1
     sum_1 = torch.ops.higher_order.wrap_with_autocast('cpu', None, True, None, submod_4, add);  submod_4 = add = None
     getitem = sum_1[0];  sum_1 = None
@@ -1090,7 +1090,7 @@ def forward(self, add):
             mod.submod_2.code.strip("\n"),
             """\
 def forward(self, sum_1):
-    add_1 = torch.ops.aten.add.Tensor(sum_1, 1);  sum_1 = None
+    add_1 = torch.ops.aten.add.Scalar(sum_1, 1);  sum_1 = None
     return (add_1,)
     """,
         )
@@ -1099,7 +1099,7 @@ def forward(self, sum_1):
             mod.submod_3.code.strip("\n"),
             """\
 def forward(self, add_1):
-    sub = torch.ops.aten.sub.Tensor(add_1, 1);  add_1 = None
+    sub = torch.ops.aten.sub.Scalar(add_1, 1);  add_1 = None
     return (sub,)
     """,
         )
@@ -1112,7 +1112,7 @@ def forward(self, add_1):
             """\
 def forward(self, x):
     x, = fx_pytree.tree_flatten_spec(([x], {}), self._in_spec)
-    add = torch.ops.aten.add.Tensor(x, 1);  x = None
+    add = torch.ops.aten.add.Scalar(x, 1);  x = None
     submod_4 = self.submod_1
     wrap_with_autocast = torch.ops.higher_order.wrap_with_autocast('cpu', None, True, None, submod_4, add);  submod_4 = add = None
     sum_1 = wrap_with_autocast[0]
@@ -1145,8 +1145,8 @@ def forward(self, add):
             mod.submod_2.code.strip("\n"),
             """\
 def forward(self, sum_1, sum_2):
-    add_1 = torch.ops.aten.add.Tensor(sum_1, 1);  sum_1 = None
-    add_2 = torch.ops.aten.add.Tensor(sum_2, 1);  sum_2 = None
+    add_1 = torch.ops.aten.add.Scalar(sum_1, 1);  sum_1 = None
+    add_2 = torch.ops.aten.add.Scalar(sum_2, 1);  sum_2 = None
     return (add_1, add_2)
     """,
         )
@@ -1155,8 +1155,8 @@ def forward(self, sum_1, sum_2):
             mod.submod_3.code.strip("\n"),
             """\
 def forward(self, add_1, add_2):
-    sub = torch.ops.aten.sub.Tensor(add_1, 1);  add_1 = None
-    sub_1 = torch.ops.aten.sub.Tensor(add_2, 1);  add_2 = None
+    sub = torch.ops.aten.sub.Scalar(add_1, 1);  add_1 = None
+    sub_1 = torch.ops.aten.sub.Scalar(add_2, 1);  add_2 = None
     return (sub, sub_1)
     """,
         )
@@ -1169,11 +1169,11 @@ def forward(self, add_1, add_2):
             """\
 def forward(self, x):
     x, = fx_pytree.tree_flatten_spec(([x], {}), self._in_spec)
-    add = torch.ops.aten.add.Tensor(x, 1);  x = None
+    add = torch.ops.aten.add.Scalar(x, 1);  x = None
     submod_4 = self.submod_1
     sum_1 = torch.ops.higher_order.wrap_with_autocast('cpu', None, True, None, submod_4, add);  submod_4 = add = None
     getitem = sum_1[0];  sum_1 = None
-    add_1 = torch.ops.aten.add.Tensor(getitem, 1);  getitem = None
+    add_1 = torch.ops.aten.add.Scalar(getitem, 1);  getitem = None
     submod_5 = self.submod_3
     sub = torch.ops.higher_order.wrap_with_autocast('cpu', None, True, None, submod_5, add_1);  submod_5 = None
     getitem_1 = sub[0];  sub = None
@@ -1195,7 +1195,7 @@ def forward(self, add):
             mod.submod_3.code.strip("\n"),
             """\
 def forward(self, add_1):
-    sub = torch.ops.aten.sub.Tensor(add_1, 1);  add_1 = None
+    sub = torch.ops.aten.sub.Scalar(add_1, 1);  add_1 = None
     return (sub,)
     """,
         )

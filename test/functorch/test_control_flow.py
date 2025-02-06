@@ -4141,8 +4141,8 @@ def forward(self, x_1):
                 """\
 def forward(self, arg0_1):
     clone = torch.ops.aten.clone.default(arg0_1);  arg0_1 = None
-    add_ = torch.ops.aten.add_.Tensor(clone, 1);  clone = None
-    add__1 = torch.ops.aten.add_.Tensor(add_, -1);  add_ = None
+    add_ = torch.ops.aten.add_.Scalar(clone, 1);  clone = None
+    add__1 = torch.ops.aten.add_.Scalar(add_, -1);  add_ = None
     sum_1 = torch.ops.aten.sum.default(add__1);  add__1 = None
     lt = torch.ops.aten.lt.Scalar(sum_1, 10);  sum_1 = None
     return lt
@@ -4153,9 +4153,9 @@ def forward(self, arg0_1):
                 """\
 def forward(self, arg0_1):
     clone = torch.ops.aten.clone.default(arg0_1);  arg0_1 = None
-    add_ = torch.ops.aten.add_.Tensor(clone, 1);  clone = None
-    add__1 = torch.ops.aten.add_.Tensor(add_, -1);  add_ = None
-    add = torch.ops.aten.add.Tensor(add__1, 1);  add__1 = None
+    add_ = torch.ops.aten.add_.Scalar(clone, 1);  clone = None
+    add__1 = torch.ops.aten.add_.Scalar(add_, -1);  add_ = None
+    add = torch.ops.aten.add.Scalar(add__1, 1);  add__1 = None
     return (add,)
     """,
             )
@@ -4176,8 +4176,8 @@ def forward(self, arg0_1):
                 """\
 def forward(self, arg0_1):
     clone = torch.ops.aten.clone.default(arg0_1);  arg0_1 = None
-    add = torch.ops.aten.add.Tensor(clone, 1);  clone = None
-    add_1 = torch.ops.aten.add.Tensor(add, -1);  add = None
+    add = torch.ops.aten.add.Scalar(clone, 1);  clone = None
+    add_1 = torch.ops.aten.add.Scalar(add, -1);  add = None
     sum_1 = torch.ops.aten.sum.default(add_1);  add_1 = None
     lt = torch.ops.aten.lt.Scalar(sum_1, 10);  sum_1 = None
     return lt
@@ -4188,9 +4188,9 @@ def forward(self, arg0_1):
                 """\
 def forward(self, arg0_1):
     clone = torch.ops.aten.clone.default(arg0_1);  arg0_1 = None
-    add = torch.ops.aten.add.Tensor(clone, 1);  clone = None
-    add_1 = torch.ops.aten.add.Tensor(add, -1);  add = None
-    add_2 = torch.ops.aten.add.Tensor(add_1, 1);  add_1 = None
+    add = torch.ops.aten.add.Scalar(clone, 1);  clone = None
+    add_1 = torch.ops.aten.add.Scalar(add, -1);  add = None
+    add_2 = torch.ops.aten.add.Scalar(add_1, 1);  add_1 = None
     return (add_2,)
     """,
             )
@@ -4211,8 +4211,8 @@ def forward(self, x_1):
                 """\
 def forward(self, arg0_1):
     clone = torch.ops.aten.clone.default(arg0_1);  arg0_1 = None
-    add = torch.ops.aten.add.Tensor(clone, 1);  clone = None
-    add_1 = torch.ops.aten.add.Tensor(add, -1);  add = None
+    add = torch.ops.aten.add.Scalar(clone, 1);  clone = None
+    add_1 = torch.ops.aten.add.Scalar(add, -1);  add = None
     sum_1 = torch.ops.aten.sum.default(add_1);  add_1 = None
     lt = torch.ops.aten.lt.Scalar(sum_1, 10);  sum_1 = None
     return lt
@@ -4223,9 +4223,9 @@ def forward(self, arg0_1):
                 """\
 def forward(self, arg0_1):
     clone = torch.ops.aten.clone.default(arg0_1);  arg0_1 = None
-    add = torch.ops.aten.add.Tensor(clone, 1);  clone = None
-    add_1 = torch.ops.aten.add.Tensor(add, -1);  add = None
-    add_2 = torch.ops.aten.add.Tensor(add_1, 1);  add_1 = None
+    add = torch.ops.aten.add.Scalar(clone, 1);  clone = None
+    add_1 = torch.ops.aten.add.Scalar(add, -1);  add = None
+    add_2 = torch.ops.aten.add.Scalar(add_1, 1);  add_1 = None
     return (add_2,)
     """,
             )
@@ -6620,7 +6620,7 @@ class GraphModule(torch.nn.Module):
             clone: "f32[s0, 3]" = torch.ops.aten.clone.default(x_1);  x_1 = None
             select: "f32[3]" = torch.ops.aten.select.int(clone, 0, it_1)
             select_1: "f32[3]" = torch.ops.aten.select.int(clone, 0, it_1)
-            add: "f32[3]" = torch.ops.aten.add.Tensor(select_1, it_1);  select_1 = None
+            add: "f32[3]" = torch.ops.aten.add.Scalar(select_1, it_1);  select_1 = None
             copy_: "f32[3]" = torch.ops.aten.copy_.default(select, add);  select = add = copy_ = None
             add_1: "Sym(u0 + 1)" = it_1 + 1;  it_1 = None
             return (add_1, clone)
@@ -6755,15 +6755,15 @@ class GraphModule(torch.nn.Module):
         add_4: "Sym(u12 + 1)" = getitem_12 + 1
         add_5: "Sym(u13 + 1)" = getitem_13 + 1
         add_6: "Sym(u14 + 1)" = getitem_14 + 1
-        add_7: "f32[2, 3]" = torch.ops.aten.add.Tensor(getitem_7, 1)
+        add_7: "f32[2, 3]" = torch.ops.aten.add.Scalar(getitem_7, 1)
 
-        add_8: "f32[2, 3]" = torch.ops.aten.add.Tensor(t, getitem_8);  getitem_8 = None
-        add_9: "f32[2, 3]" = torch.ops.aten.add.Tensor(t, getitem_9);  getitem_9 = None
-        add_10: "f32[2, 3]" = torch.ops.aten.add.Tensor(t, getitem_10);  getitem_10 = None
-        add_11: "f32[2, 3]" = torch.ops.aten.add.Tensor(t, getitem_11);  getitem_11 = None
-        add_12: "f32[2, 3]" = torch.ops.aten.add.Tensor(t, getitem_12);  getitem_12 = None
-        add_13: "f32[2, 3]" = torch.ops.aten.add.Tensor(t, getitem_13);  getitem_13 = None
-        add_14: "f32[2, 3]" = torch.ops.aten.add.Tensor(t, getitem_14);  getitem_14 = None
+        add_8: "f32[2, 3]" = torch.ops.aten.add.Scalar(t, getitem_8);  getitem_8 = None
+        add_9: "f32[2, 3]" = torch.ops.aten.add.Scalar(t, getitem_9);  getitem_9 = None
+        add_10: "f32[2, 3]" = torch.ops.aten.add.Scalar(t, getitem_10);  getitem_10 = None
+        add_11: "f32[2, 3]" = torch.ops.aten.add.Scalar(t, getitem_11);  getitem_11 = None
+        add_12: "f32[2, 3]" = torch.ops.aten.add.Scalar(t, getitem_12);  getitem_12 = None
+        add_13: "f32[2, 3]" = torch.ops.aten.add.Scalar(t, getitem_13);  getitem_13 = None
+        add_14: "f32[2, 3]" = torch.ops.aten.add.Scalar(t, getitem_14);  getitem_14 = None
         add_15: "f32[2, 3]" = torch.ops.aten.add.Tensor(getitem_7, t);  getitem_7 = t = None
         return pytree.tree_unflatten((add, add_1, add_2, add_3, add_4, add_5, add_6, add_7, add_8, add_9, add_10, add_11, add_12, add_13, add_14, add_15), self._out_spec)
 
@@ -6778,7 +6778,7 @@ class GraphModule(torch.nn.Module):
     class while_loop_body_graph_0(torch.nn.Module):
         def forward(self, a_1: "Sym(u1)", b_1: "Sym(u2)", c1_1: "Sym(u3)", c2_1: "Sym(u4)", c3_1: "Sym(u5)", c0_1: "Sym(u6)", u0_1: "Sym(u7)", x_1: "f32[2, 3]"):
             add: "Sym(u7 + 1)" = u0_1 + 1;  u0_1 = None
-            add_1: "f32[2, 3]" = torch.ops.aten.add.Tensor(x_1, 1);  x_1 = None
+            add_1: "f32[2, 3]" = torch.ops.aten.add.Scalar(x_1, 1);  x_1 = None
             return (b_1, c1_1, c2_1, c3_1, a_1, 0, add, add_1)
 """,  # noqa: B950
             )
@@ -6898,9 +6898,9 @@ class GraphModule(torch.nn.Module):
         add_1: "Sym(u8 + 1)" = getitem_9 + 1
         add_2: "Sym(u9 + 1)" = getitem_10 + 1
 
-        add_3: "f32[s0, 3]" = torch.ops.aten.add.Tensor(getitem_5, getitem_8);  getitem_8 = None
-        add_4: "f32[s0, 3]" = torch.ops.aten.add.Tensor(getitem_5, getitem_9);  getitem_9 = None
-        add_5: "f32[s0, 3]" = torch.ops.aten.add.Tensor(getitem_5, getitem_10);  getitem_10 = None
+        add_3: "f32[s0, 3]" = torch.ops.aten.add.Scalar(getitem_5, getitem_8);  getitem_8 = None
+        add_4: "f32[s0, 3]" = torch.ops.aten.add.Scalar(getitem_5, getitem_9);  getitem_9 = None
+        add_5: "f32[s0, 3]" = torch.ops.aten.add.Scalar(getitem_5, getitem_10);  getitem_10 = None
         return pytree.tree_unflatten((getitem_6, getitem_7, add, add_1, add_2, add_3, add_4, add_5, getitem_5), self._out_spec)
 
     class while_loop_cond_graph_0(torch.nn.Module):
@@ -6920,7 +6920,7 @@ class GraphModule(torch.nn.Module):
             add_3: "Sym(u18 + 1)" = arg3_1 + 1;  arg3_1 = None
             add_4: "Sym(u19 + 1)" = arg4_1 + 1;  arg4_1 = None
 
-            add_5: "f32[s0, 3]" = torch.ops.aten.add.Tensor(arg5_1, 1);  arg5_1 = None
+            add_5: "f32[s0, 3]" = torch.ops.aten.add.Scalar(arg5_1, 1);  arg5_1 = None
             return (add, add_1, add_2, add_3, add_4, add_5)
 """,  # noqa: B950
             )
@@ -7248,21 +7248,21 @@ class GraphModule(torch.nn.Module):
         cond = torch.ops.higher_order.cond(a, true_graph_0, false_graph_0, [c, b1, b2]);  a = true_graph_0 = false_graph_0 = c = b1 = b2 = None
         getitem: "f32[10]" = cond[0];  cond = None
 
-        mul: "f32[10]" = torch.ops.aten.mul.Tensor(getitem, 2);  getitem = None
+        mul: "f32[10]" = torch.ops.aten.mul.Scalar(getitem, 2);  getitem = None
         return pytree.tree_unflatten((mul,), self._out_spec)
 
     class true_graph_0(torch.nn.Module):
         def forward(self, c: "f32[10]", b1: "i64[1]", b2: "i64[1]"):
             item: "Sym(u0)" = torch.ops.aten.item.default(b1);  b1 = None
 
-            mul: "f32[10]" = torch.ops.aten.mul.Tensor(c, item);  c = item = None
+            mul: "f32[10]" = torch.ops.aten.mul.Scalar(c, item);  c = item = None
             return (mul,)
 
     class false_graph_0(torch.nn.Module):
         def forward(self, c: "f32[10]", b1: "i64[1]", b2: "i64[1]"):
             item: "Sym(u1)" = torch.ops.aten.item.default(b2);  b2 = None
 
-            mul: "f32[10]" = torch.ops.aten.mul.Tensor(c, item);  c = item = None
+            mul: "f32[10]" = torch.ops.aten.mul.Scalar(c, item);  c = item = None
             return (mul,)
 """,  # noqa: B950
         )
@@ -7311,12 +7311,12 @@ class GraphModule(torch.nn.Module):
 
     class true_graph_0(torch.nn.Module):
         def forward(self, x: "f32[s0, 3]", sym_size_int_4: "Sym(s1)", sym_size_int_3: "Sym(s0)", z: "f32[s0, 3]"):
-            add: "f32[s0, 3]" = torch.ops.aten.add.Tensor(x, sym_size_int_4);  x = sym_size_int_4 = None
+            add: "f32[s0, 3]" = torch.ops.aten.add.Scalar(x, sym_size_int_4);  x = sym_size_int_4 = None
             return (add,)
 
     class false_graph_0(torch.nn.Module):
         def forward(self, x: "f32[s0, 3]", sym_size_int_4: "Sym(s1)", sym_size_int_3: "Sym(s0)", z: "f32[s0, 3]"):
-            mul: "f32[s0, 3]" = torch.ops.aten.mul.Tensor(z, sym_size_int_3);  z = sym_size_int_3 = None
+            mul: "f32[s0, 3]" = torch.ops.aten.mul.Scalar(z, sym_size_int_3);  z = sym_size_int_3 = None
 
             add: "f32[s0, 3]" = torch.ops.aten.add.Tensor(x, mul);  x = mul = None
             return (add,)
