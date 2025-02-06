@@ -338,6 +338,8 @@ class Optimizer:
     _optimizer_load_state_dict_pre_hooks: 'OrderedDict[int, Callable[["Optimizer", StateDict], Optional[StateDict]]]'
     _optimizer_load_state_dict_post_hooks: 'OrderedDict[int, Callable[["Optimizer"], None]]'
 
+    _dtype_policy: dict[str, Callable[[torch.Tensor], torch.dtype]]
+
     def __init__(self, params: ParamsT, defaults: dict[str, Any]) -> None:  # noqa: D107
         torch._C._log_api_usage_once("python.optimizer")
         self.defaults = defaults
@@ -347,6 +349,7 @@ class Optimizer:
         self._optimizer_state_dict_post_hooks = OrderedDict()
         self._optimizer_load_state_dict_pre_hooks = OrderedDict()
         self._optimizer_load_state_dict_post_hooks = OrderedDict()
+        self._dtype_policy = OrderedDict()
 
         self._patch_step_function()
 
@@ -864,7 +867,7 @@ class Optimizer:
 
         if len(groups) != len(saved_groups):
             raise ValueError(
-                "loaded state dict has a different number of parameter groups"
+                "loaded state dict has a different number of " "parameter groups"
             )
         param_lens = (len(g["params"]) for g in groups)
         saved_lens = (len(g["params"]) for g in saved_groups)
@@ -999,6 +1002,70 @@ class Optimizer:
                 returns the loss. Optional for most optimizers.
         """
         raise NotImplementedError
+
+    def dtype_policy(self) -> dict[str, Callable[[torch.Tensor], torch.dtype]]:
+        r"""Gets the dtype policy for the optimizer.
+
+        Returns the optimizer's dtype_policy. See the docs for set_dtype_policy for more details.
+
+        """
+        return self._dtype_policy
+
+    def set_dtype_policy(
+        self, policy: dict[str, Callable[[torch.Tensor], torch.dtype]]
+    ) -> None:
+        r"""Set the dtype policy for the optimizer.
+
+        By default, the optimizer initializes state to be the same dtype as the parameter. This
+        function allows the user to enable mixed precision training for the optimizer by specifying
+        lower or higher precision dtypes for state corresponding to a parameter.
+
+        A dtype policy is a dictionary mapping optimizer state to a desired dtype given a parameter.
+        For example, Adam(W) has state ``exp_avg`` and ``exp_avg_sq`` mapping to momentum and
+        variance respectively. The default policy would semantically be the following:
+
+        .. code-block:: python
+
+            default_dtype_policy = {
+                "exp_avg": lambda p: p.dtype,
+                "exp_avg_sq": lambda p: p.dtype,
+            }
+
+
+        If we wanted momentum (exp_avg) to match the param but variance (exp_avg_sq) to be BF16 when
+        the parameter is a float, then the policy would look like:
+
+        .. code-block:: python
+
+            mixed_precision_dtype_policy = {
+                "exp_avg_sq": lambda p: torch.bfloat16 if p.dtype == torch.float else p.dtype
+                # no need to specify "exp_avg" since the default will fall back to p's dtype already
+            }
+
+            model = ...
+            optim = torch.optim.AdamW(model.named_parameters())
+            optim.set_dtype_policy(mixed_precision_dtype_policy)
+
+            # at this point, state has not been initialized
+
+            # run forward and backward
+            loss = model(...)
+            loss.backward()
+
+            # at first step, state will be initialized according to the set policy
+            optim.step()
+            optim.zero_grad()
+
+
+        The new policy will only be applied for any new state initalized after the policy has been
+        set. State loaded from an existing state_dict will not be affected. Previously initialized
+        state will also not be affected.
+
+        Args:
+            policy (Dict[str, Callable]): A dictionary mapping optimizer state keys (str) to a Callable
+                that will intake the parameter.
+        """
+        self._dtype_policy = policy
 
     @torch._disable_dynamo
     def add_param_group(self, param_group: dict[str, Any]) -> None:
