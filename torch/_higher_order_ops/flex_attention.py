@@ -780,10 +780,18 @@ def sdpa_dense_backward(
 ]:
     from torch._dynamo._trace_wrapped_higher_order_op import TransformGetItemToIndex
 
-    # Get outputs before calling repeat interleave
-    actual_grad_query = torch.empty_like(query, memory_format=torch.preserve_format)
-    actual_grad_key = torch.empty_like(key, memory_format=torch.preserve_format)
-    actual_grad_value = torch.empty_like(value, memory_format=torch.preserve_format)
+    Bq, Hq, seq_len_q, qk_head_dim = query.shape
+    Bkv, Hkv, seq_len_kv, v_head_dim = value.shape
+
+    # Get outputs before calling repeat interleave and permute to input stride orders
+    actual_grad_query = torch.empty_like(query)
+    actual_grad_query = _permute_strides(actual_grad_query, query.stride())
+
+    actual_grad_key = key.new_empty((Bq, Hkv, seq_len_kv, qk_head_dim))
+    actual_grad_key = _permute_strides(actual_grad_key, key.stride())
+
+    actual_grad_value = value.new_empty((Bq, Hkv, seq_len_kv, v_head_dim))
+    actual_grad_value = _permute_strides(actual_grad_value, value.stride())
 
     def _maybe_new_buffer(
         buffer: Union[torch.Tensor, torch.SymInt, int]
@@ -894,12 +902,13 @@ def sdpa_dense_backward(
         ), f"Bq and Bkv must broadcast. Got Bq={Bq} and Bkv={Bkv}"
 
         # Reduce DK, DV along broadcasted batches.
-        grad_key = torch.sum(grad_key, 0, keepdim=True)
-        grad_value = torch.sum(grad_value, 0, keepdim=True)
+        actual_grad_key.copy_(grad_key)
+        actual_grad_value.copy_(grad_value)
+
+        actual_grad_key = torch.sum(actual_grad_key, 0, keepdim=True)
+        actual_grad_value = torch.sum(actual_grad_value, 0, keepdim=True)
 
     actual_grad_query.copy_(grad_query)
-    actual_grad_key.copy_(grad_key)
-    actual_grad_value.copy_(grad_value)
     score_mod_other_buffer_grads = [
         actual_grad.copy_(grad) if isinstance(actual_grad, torch.Tensor) else None
         for actual_grad, grad in zip(
@@ -1150,13 +1159,11 @@ def flex_attention_backward_fake_tensor_mode(
     torch.Tensor, torch.Tensor, torch.Tensor, tuple[Optional[torch.Tensor], ...]
 ]:
     with mode:
-        Bq = query.size(0)
-        Bkv = key.size(0)
-        Hkv = key.size(1)
-        seq_len_kv = key.size(2)
-        qk_head_dim = key.size(3)
+        Bq, Hq, seq_len_q, qk_head_dim = query.shape
+        Bkv, Hkv, seq_len_kv, v_head_dim = value.shape
 
-        grad_query = torch.empty_like(query, memory_format=torch.preserve_format)
+        grad_query = torch.empty_like(query)
+        grad_query = _permute_strides(grad_query, query.stride())
         # zeros_and_scatter creates a contiguous zeros tensor -> contiguous_format
         grad_score_mod_captured = tuple(
             [
@@ -1167,18 +1174,12 @@ def flex_attention_backward_fake_tensor_mode(
             ]
         )
 
-        broadcasted_grad_key = torch.empty_strided(
-            (Bq, Hkv, seq_len_kv, qk_head_dim),
-            key.stride(),
-            device=key.device,
-            dtype=key.dtype,
-        )
+        broadcasted_grad_key = key.new_empty((Bq, Hkv, seq_len_kv, qk_head_dim))
+        broadcasted_grad_key = _permute_strides(broadcasted_grad_key, key.stride())
 
-        broadcasted_grad_value = torch.empty_strided(
-            (Bq, *value.size()[1:]),
-            value.stride(),
-            device=value.device,
-            dtype=value.dtype,
+        broadcasted_grad_value = value.new_empty((Bq, Hkv, seq_len_kv, v_head_dim))
+        broadcasted_grad_value = _permute_strides(
+            broadcasted_grad_value, value.stride()
         )
 
         if Bq > 1 and Bkv == 1:

@@ -2317,11 +2317,15 @@ def flex_attention_backward(*args, **kwargs):
 
     mask_graph_buffer = mask_graph_buffer
 
+    # Construct layout with stride order matching K
+    key_size = [Bq, Hkv, seq_len_kv, qk_head_dim]
+    fill_order = get_fill_order(key.get_stride(), V.graph.sizevars.shape_env)
+    key_strides = construct_strides(key_size, fill_order)
     layout_broadcasted_k = FixedLayout(
         key.get_device(),
         key.get_dtype(),
-        [Bq, Hkv, seq_len_kv, qk_head_dim],
-        key.get_stride(),
+        key_size,
+        stride=[sympy.sympify(s) for s in key_strides],
     )
 
     # Create delta which will is needed for the bwd's kernel
@@ -2334,14 +2338,25 @@ def flex_attention_backward(*args, **kwargs):
     grad_lse_exp2, delta = maybe_realize([grad_lse_exp2, delta])
 
     # see NOTE:[TritonTemplates with multiple outputs]
+    query_size = list(query.get_size())
+    fill_order = get_fill_order(query.get_stride(), V.graph.sizevars.shape_env)
+    query_strides = construct_strides(query_size, fill_order)
     grad_query = empty_strided(
-        query.get_size(), query.get_stride(), dtype=dtype, device=device
+        query_size,
+        stride=[sympy.sympify(s) for s in query_strides],
+        dtype=query.get_dtype(),
+        device=query.get_device(),
     )
+
+    # Construct output layout with stride order matching value
+    value_size = [Bq, Hkv, seq_len_kv, v_head_dim]
+    fill_order = get_fill_order(value.get_stride(), V.graph.sizevars.shape_env)
+    value_strides = construct_strides(value_size, fill_order)
     broadcasted_grad_value = empty_strided(
-        (Bq, *value.get_size()[1:]),
-        value.get_stride(),
-        dtype=dtype,
-        device=device,
+        value_size,
+        stride=[sympy.sympify(s) for s in value_strides],
+        dtype=value.get_dtype(),
+        device=value.get_device(),
     )
 
     kernel_options.setdefault("SM_SCALE", scale)
