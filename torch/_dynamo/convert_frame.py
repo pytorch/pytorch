@@ -8,7 +8,6 @@ import dis
 import functools
 import gc
 import itertools
-import json
 import logging
 import os
 import pstats
@@ -903,6 +902,7 @@ def _compile(
             recompile_reason = (
                 "Unable to find recompilation reasons" if not reasons else reasons[-1]
             )
+        metrics_context.update_outer({"recompile_reason": recompile_reason})
 
         exceeded, limit_type = exceeds_recompile_limit(cache_size, compile_id)
         if exceeded:
@@ -1084,36 +1084,6 @@ def _compile(
                 # If compilation failed, the entire time is wasted
                 dynamo_time_before_restart = (time.time_ns() - start_time_ns) / 1e9
 
-            def clean_for_json(d: dict[str, Any]) -> dict[str, Any]:
-                blocklist = {
-                    "TYPE_CHECKING",
-                    "log_file_name",
-                    "verbose",
-                    "repro_after",
-                    "repro_level",
-                    "repro_forward_only",
-                    "repro_tolerance",
-                    "repro_ignore_non_fp",
-                    "same_two_models_use_fp64",
-                    "base_dir",
-                    "debug_dir_root",
-                    "_save_config_ignore",
-                    "log_compilation_metrics",
-                    "inject_BUILD_SET_unimplemented_TESTING_ONLY",
-                    "_autograd_backward_strict_mode_banned_ops",
-                    "reorderable_logging_functions",
-                    "ignore_logger_methods",
-                    "traceable_tensor_subclasses",
-                    "_custom_ops_profile",
-                }
-
-                return {
-                    key: sorted(value) if isinstance(value, set) else value
-                    for key, value in d.items()
-                    if key not in blocklist
-                }
-
-            config_dict = clean_for_json(config.get_config_copy())
             metrics = {
                 "frame_key": frame_key,
                 "co_name": code.co_name,
@@ -1138,12 +1108,10 @@ def _compile(
                 "config_suppress_errors": config.suppress_errors,
                 "config_inline_inbuilt_nn_modules": config.inline_inbuilt_nn_modules,
                 "specialize_float": config.specialize_float,
-                "dynamo_config": json.dumps(config_dict, sort_keys=True),
                 "is_forward": True,
                 "dynamo_compile_time_before_restart_us": to_int_us(
                     dynamo_time_before_restart
                 ),
-                "recompile_reason": recompile_reason,
             }
             # TODO: replace with CompileEventLogger.compilation_metrics
             # There are some columns here not in PT2 Compile Events
