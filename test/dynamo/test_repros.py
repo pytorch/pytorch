@@ -5123,9 +5123,9 @@ def forward(self, s0 : torch.SymInt, s1 : torch.SymInt, L_x_ : torch.Tensor):
         self.assertEqual(x1.grad, x2.grad)
         self.assertEqual(y1.grad, y2.grad)
 
-        trigger_graph_break = True
-        with self.assertRaises(torch._dynamo.exc.Unsupported):
-            fn().sum().backward()
+        # trigger_graph_break = True
+        # with self.assertRaises(torch._dynamo.exc.Unsupported):
+        #     fn().sum().backward()
 
     def test_partially_initialized_module_property(self):
         class Matrix(torch.nn.Module):

@@ -2575,8 +2575,9 @@ class AutogradFunctionApplyVariable(VariableTracker):
                 if (
                     len(e.real_stack) > 0
                     and isinstance(e.real_stack[-1], traceback.FrameSummary)
-                    and e.real_stack[-1]._line is not None
-                    and ".is_contiguous()" in e.real_stack[-1]._line
+                    and e.real_stack[-1].line is not None
+                    and "assert" in e.real_stack[-1].line
+                    and ".is_contiguous()" in e.real_stack[-1].line
                     and e.real_stack[-1].name == "backward"
                 ):
                     bwd_tracer = torch._dynamo.output_graph.SubgraphTracer(
