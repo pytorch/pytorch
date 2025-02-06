@@ -188,11 +188,16 @@ class CaptureStructuredTrace(logging.Handler):
         self.prev_get_dtrace = False
 
         # Get the handler for printing logs to a specific file
-        self.lazy_trace_handler = next(
+        possible_lazy_trace_handlers = [
             handler
             for handler in self.logger.handlers
             if isinstance(handler, torch._logging._internal.LazyTraceHandler)
-        )
+        ]
+        if len(possible_lazy_trace_handlers) == 0:
+            self.lazy_trace_handler = torch._logging._internal.LazyTraceHandler(None)
+            self.logger.addHandler(self.lazy_trace_handler)
+        else:
+            self.lazy_trace_handler = possible_lazy_trace_handlers[0]
         if self.lazy_trace_handler.root_dir is None:
             # Set the logs to go to /tmp/export_unixname/...
             sanitized_username = re.sub(r'[\\/:*?"<>|]', "_", getpass.getuser())
