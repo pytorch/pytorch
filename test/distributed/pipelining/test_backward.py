@@ -184,7 +184,7 @@ class StageBackwardTests(TestCase):
                 raise
 
 
-devices = ["cpu", "cuda", "hpu"]
+devices = ["cpu", "cuda", "hpu", "xpu"]
 instantiate_device_type_tests(StageBackwardTests, globals(), only_for=devices)
 
 if __name__ == "__main__":

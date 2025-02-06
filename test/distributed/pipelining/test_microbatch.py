@@ -88,7 +88,7 @@ class MicrobatchTests(TestCase):
         print(f"equivalence test passed {torch.sum(out)} ref {torch.sum(ref)}")
 
 
-devices = ["cpu", "cuda", "hpu"]
+devices = ["cpu", "cuda", "hpu", "xpu"]
 instantiate_device_type_tests(MicrobatchTests, globals(), only_for=devices)
 
 if __name__ == "__main__":
