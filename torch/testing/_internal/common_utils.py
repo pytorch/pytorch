@@ -1726,6 +1726,51 @@ def skipIfLegacyJitExecutor(msg="test doesn't currently work with legacy JIT exe
     return decorator
 
 
+def make_dynamo_test(
+    fn: Optional[Callable[..., Any]] = None, expected_frame_count: int = 1
+) -> Callable[..., Any]:
+    """
+    Decorator function to create a dynamo test case.
+
+    Dynamo injects a dummy call to `torch.sin(random_tensor)` to ensure graph
+    generation, even when testing for side effects.
+    """
+    from torch._dynamo.testing import CompileCounter, reset, optimize_assert
+    if fn is None:
+        return lambda fn: make_dynamo_test(
+            fn, expected_frame_count=expected_frame_count
+        )
+
+    def standard_test(
+        self: Any,
+        fn: Callable[..., Any],
+        expected_frame_count: int = 1,
+    ) -> None:
+        def dummy(fn: Callable[..., Any], t: torch.Tensor) -> torch.Tensor:
+            fn(self)
+            return t.sin()
+
+        actual = CompileCounter()
+
+        t = torch.randn(2)
+        correct = dummy(fn, t)
+        reset()
+        opt_fn = optimize_assert(actual)(dummy)
+        val = opt_fn(fn, t)
+        reset()
+        self.assertEqual(correct, val)
+        self.assertEqual(actual.frame_count, expected_frame_count)
+
+    def test_fn(self: Any) -> None:
+        return standard_test(
+            self,
+            fn=fn,
+            expected_frame_count=expected_frame_count,
+        )
+
+    return test_fn
+
+
 # Run PyTorch tests with translation validation on.
 TEST_WITH_TV = os.getenv('PYTORCH_TEST_WITH_TV') == '1'
 
