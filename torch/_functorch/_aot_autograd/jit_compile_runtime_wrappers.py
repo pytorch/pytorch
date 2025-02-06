@@ -310,6 +310,7 @@ def collect_fw_donated_buffer_idxs(
         if (
             t is not None
             and not is_sparse_any(t)
+            and isinstance(t, torch.Tensor)
             and StorageWeakRef(t.untyped_storage()) not in storage_refs
         ):
             donated_buffer_idxs.append(i)
