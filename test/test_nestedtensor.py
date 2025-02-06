@@ -7628,10 +7628,14 @@ torch.cuda.synchronize()
         seq_len = 32
         embed_dim = 128
 
-        nt = torch.nested.nested_tensor([
-            torch.randn(11, seq_len, embed_dim, device=device),
-            torch.randn(11, seq_len, embed_dim, device=device)
-        ], layout=torch.jagged, device=device)
+        nt = torch.nested.nested_tensor(
+            [
+                torch.randn(11, seq_len, embed_dim, device=device),
+                torch.randn(11, seq_len, embed_dim, device=device),
+            ],
+            layout=torch.jagged,
+            device=device,
+        )
 
         with torch.inference_mode():
             torch.nn.functional.dropout(nt, p=0.05)
