@@ -1,9 +1,8 @@
 # mypy: allow-untyped-defs
 import dataclasses
 import sys
-from collections import namedtuple
 from enum import Enum
-from typing import Callable, Optional, Tuple
+from typing import Callable, Optional
 
 import sympy
 
@@ -773,15 +772,28 @@ inline void {{kernel_name}}_transpose_b_kernel(
 }
 """
 
+    # set extra parameters to generate gemm that
+    # supports arbitrary sizes of n and transposed B matrix
     def set_extra_configs(self, extra_config):
-        self.extra_config = extra_config
-        assert hasattr(extra_config, "trans_b")
-        assert hasattr(extra_config, "expand_n")
+        if not hasattr(extra_config, "trans_b"):
+            extra_config.trans_b = False
+        if not hasattr(extra_config, "expand_n"):
+            extra_config.expand_n = False
         if not hasattr(extra_config, "internal_block_m"):
             extra_config.internal_block_m = 4
-        if not  hasattr(extra_config, "internal_block_n"):
+        if not hasattr(extra_config, "internal_block_n"):
             extra_config.internal_block_n = 4
 
+        # trans_b is only supported on platforms that
+        # support avx512 or avx2 since transpose_NxN is
+        # only implemented on these platforms
+        if extra_config.trans_b:
+            vec_isa = pick_vec_isa()
+            assert issubclass(vec_isa.__class__, VecAVX512) or issubclass(
+                vec_isa.__class__, VecAVX2
+            )
+
+        self.extra_config = extra_config
         self.extra_config.internal_block_m = min(
             extra_config.internal_block_m, self.register_blocking.block_m
         )
@@ -801,7 +813,12 @@ inline void {{kernel_name}}_transpose_b_kernel(
             "restrict_keyword": get_restrict_keyword(),
             **self.get_common_options(),
         }
-        if hasattr(self, "extra_config") and hasattr(self.extra_config, "trans_b") and self.extra_config.trans_b:
+        if (
+            hasattr(self, "extra_config")
+            and hasattr(self.extra_config, "trans_b")
+            and self.extra_config.trans_b
+        ):
+            # generate kernel with trans_b and sub-block size
             options.update(
                 {
                     "trans_b": self.extra_config.trans_b,
@@ -812,7 +829,12 @@ inline void {{kernel_name}}_transpose_b_kernel(
         result = KernelTemplate._template_from_string(self.TEMPLATE_KERNEL).render(
             options
         )
-        if hasattr(self, "extra_config") and hasattr(self.extra_config, "expand_n") and self.extra_config.expand_n:
+        if (
+            hasattr(self, "extra_config")
+            and hasattr(self.extra_config, "expand_n")
+            and self.extra_config.expand_n
+        ):
+            # support arbitrary sizes of n
             options.update(
                 {
                     "expand_n": self.extra_config.expand_n,

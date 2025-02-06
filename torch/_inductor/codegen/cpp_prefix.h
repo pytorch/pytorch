@@ -946,14 +946,45 @@ class AMXState {
   }
 };
 
+template <typename T>
+struct is_one_of {
+  using type1 = float;
+  using type2 = bfloat16;
+  using type3 = half;
+  using type4 = int8_t;
+
+  static constexpr bool value = std::is_same_v<T, type1> ||
+      std::is_same_v<T, type2> || std::is_same_v<T, type3> ||
+      std::is_same_v<T, type4>;
+};
+
 #if defined(CPU_CAPABILITY_AVX512)
-template<typename compute_t, typename input_t, int N>
-inline std::enable_if_t<std::is_same_v<compute_t, float> && N==16, void>
+template <typename compute_t, typename input_t, int N>
+inline std::enable_if_t<
+    !(std::is_same_v<compute_t, float> && is_one_of<input_t>::value && N == 16),
+    void>
 transpose_NxN(
-  at::vec::VectorizedN<compute_t, N>& srcs,
-  const input_t * __restrict__ src_ptr,
-  int64_t ld,
-  int64_t load_size) {
+    at::vec::VectorizedN<compute_t, N>& srcs,
+    const input_t* __restrict__ src_ptr,
+    int64_t ld,
+    int64_t load_size) {
+  TORCH_CHECK(
+      false,
+      "transpose_NxN is only supported with compute_t==float, input_t==one of (float, bfloat16, half, int8) and N==16 on avx512");
+}
+
+// Used by Inductor CPP codegen
+// Code referred to FBGEMM:
+// https://github.com/pytorch/FBGEMM/blob/39a423e4ad1a04b77fea81c7d09c3e6f8984fae9/src/UtilsAvx512.cc#L19-L228
+template<typename compute_t, typename input_t, int N>
+inline std::enable_if_t<
+    std::is_same_v<compute_t, float> && is_one_of<input_t>::value && N==16,
+    void>
+transpose_NxN(
+    at::vec::VectorizedN<compute_t, N>& srcs,
+    const input_t * __restrict__ src_ptr,
+    int64_t ld,
+    int64_t load_size) {
   using VectorizedIn = at::vec::Vectorized<input_t>;
   if constexpr (std::is_reduced_floating_point_v<input_t>) {
     srcs[0] = at::vec::convert<compute_t>(VectorizedIn::loadu(src_ptr, load_size));
@@ -1092,16 +1123,29 @@ transpose_NxN(
   srcs[14] = _mm512_shuffle_f32x4(v_trans[6], v_trans[14], 0xdd);
   srcs[15] = _mm512_shuffle_f32x4(v_trans[7], v_trans[15], 0xdd);
 }
-#endif
-
-
-#if defined(CPU_CAPABILITY_AVX2)
+#elif defined(CPU_CAPABILITY_AVX2)
 template<typename compute_t, typename input_t, int N>
-inline std::enable_if_t<std::is_same_v<compute_t, float> && N==8, void>
-transpose_NxN(at::vec::VectorizedN<compute_t, N>& srcs,
-const input_t * __restrict__ src_ptr,
-int64_t ld,
-int64_t load_size) {
+inline std::enable_if_t<!(std::is_same_v<compute_t, float> && is_one_of<input_t>::value && N==8), void>
+transpose_NxN(
+  at::vec::VectorizedN<compute_t, N>& srcs,
+  const input_t * __restrict__ src_ptr,
+  int64_t ld,
+  int64_t load_size) {
+  TORCH_CHECK(false, "transpose_NxN is only supported with compute_t==float, input_t==one of (float, bfloat16, half, int8) and N==8 on avx2");
+}
+
+// Used by Inductor CPP codegen
+// Code referred to:
+// https://github.com/pytorch/pytorch/blob/main/aten/src/ATen/cpu/vec/vec256/vec256_float.h#L572-L657
+template<typename compute_t, typename input_t, int N>
+inline std::enable_if_t<
+    std::is_same_v<compute_t, float> && is_one_of<input_t>::value && N == 16,
+    void>
+transpose_NxN(
+  at::vec::VectorizedN<compute_t, N>& srcs,
+  const input_t * __restrict__ src_ptr,
+  int64_t ld,
+  int64_t load_size) {
   using VectorizedIn = at::vec::Vectorized<input_t>;
   if constexpr (std::is_reduced_floating_point_v<input_t>) {
     srcs[0] = at::vec::convert<compute_t>(VectorizedIn::loadu(src_ptr, load_size));
