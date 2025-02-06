@@ -49,6 +49,7 @@ __all__ = [
 ]
 
 from typing import Any, Callable, TYPE_CHECKING
+from typing_extensions import deprecated
 
 import torch
 from torch import _C
@@ -402,6 +403,10 @@ def export(
         return None
 
 
+@deprecated(
+    "torch.onnx.dynamo_export is deprecated since 2.6.0. Please use torch.onnx.export(..., dynamo=True) instead.",
+    category=None,
+)
 def dynamo_export(
     model: torch.nn.Module | Callable | torch.export.ExportedProgram,  # type: ignore[name-defined]
     /,
@@ -410,6 +415,10 @@ def dynamo_export(
     **model_kwargs,
 ) -> ONNXProgram:
     """Export a torch.nn.Module to an ONNX graph.
+
+    .. deprecated::
+        Deprecated since 2.6.0.
+        Please use ``torch.onnx.export(..., dynamo=True)`` instead.
 
     Args:
         model: The PyTorch model to be exported to ONNX.
@@ -452,7 +461,6 @@ def dynamo_export(
         onnx_program.save("my_dynamic_model.onnx")
     """
 
-    # NOTE: The new exporter is experimental and is not enabled by default.
     import warnings
 
     from torch.onnx import _flags
@@ -476,7 +484,7 @@ def dynamo_export(
                 "You are using an experimental ONNX export logic, which currently only supports dynamic shapes. "
                 "For a more comprehensive set of export options, including advanced features, please consider using "
                 "`torch.onnx.export(..., dynamo=True)`. ",
-                category=DeprecationWarning,
+                category=FutureWarning,
             )
 
         if export_options is not None and export_options.dynamic_shapes:

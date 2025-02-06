@@ -82,10 +82,14 @@ class ONNXFakeContext:
 
 @deprecated(
     "torch.onnx.dynamo_export is deprecated since 2.6.0. Please use torch.onnx.export(..., dynamo=True) instead.",
-    category=DeprecationWarning,
+    category=None,
 )
 class OnnxRegistry:
     """Registry for ONNX functions.
+
+    .. deprecated::
+        Deprecated since 2.6.0.
+        Please use ``torch.onnx.export(..., dynamo=True)`` instead.
 
     The registry maintains a mapping from qualified names to symbolic functions under a
     fixed opset version. It supports registering custom onnx-script functions and for
@@ -230,10 +234,14 @@ class OnnxRegistry:
 
 @deprecated(
     "torch.onnx.dynamo_export is deprecated since 2.6.0. Please use torch.onnx.export(..., dynamo=True) instead.",
-    category=DeprecationWarning,
+    category=None,
 )
 class ExportOptions:
     """Options to influence the TorchDynamo ONNX exporter.
+
+    .. deprecated::
+        Deprecated since 2.6.0.
+        Please use ``torch.onnx.export(..., dynamo=True)`` instead.
 
     Attributes:
         dynamic_shapes: Shape information hint for input/output tensors.
@@ -444,10 +452,14 @@ def enable_fake_mode():
 
 @deprecated(
     "torch.onnx.dynamo_export is deprecated since 2.6.0. Please use torch.onnx.export(..., dynamo=True) instead.",
-    category=DeprecationWarning,
+    category=None,
 )
 class ONNXRuntimeOptions:
     """Options to influence the execution of the ONNX model through ONNX Runtime.
+
+    .. deprecated::
+        Deprecated since 2.6.0.
+        Please use ``torch.onnx.export(..., dynamo=True)`` instead.
 
     Attributes:
         session_options: ONNX Runtime session options.
@@ -702,7 +714,7 @@ def _assert_dependencies(export_options: ResolvedExportOptions):
 
 @deprecated(
     "torch.onnx.dynamo_export is deprecated since 2.6.0. Please use torch.onnx.export(..., dynamo=True) instead.",
-    category=DeprecationWarning,
+    category=None,
 )
 def dynamo_export(
     model: torch.nn.Module | Callable,
@@ -712,6 +724,10 @@ def dynamo_export(
     **model_kwargs,
 ) -> _onnx_program.ONNXProgram:
     """Export a torch.nn.Module to an ONNX graph.
+
+    .. deprecated::
+        Deprecated since 2.6.0.
+        Please use ``torch.onnx.export(..., dynamo=True)`` instead.
 
     Args:
         model: The PyTorch model to be exported to ONNX.
