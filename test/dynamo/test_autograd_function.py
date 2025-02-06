@@ -974,6 +974,160 @@ class GraphModule(torch.nn.Module):
         self.assertEqual(y, y_ref)
         self.assertEqual(x.grad, x_ref.grad)
 
+    def test_assert_is_contiguous_after_matmul(self):
+        # We guarantee that the output of matmul is contiguous, so the backward graph should be fully captured.
+        class LinearFunction(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x, weight):
+                ctx.save_for_backward(x, weight)
+                y = x.matmul(weight.t())
+                return y
+
+            @staticmethod
+            def backward(ctx, grad_output):
+                x, weight = ctx.saved_tensors
+                grad_x = grad_output.matmul(weight)
+                assert grad_x.is_contiguous()
+                grad_weight = grad_output.transpose(0, 1).matmul(x)
+
+                return grad_x, grad_weight
+
+        def fn(x, weight):
+            return LinearFunction.apply(x, weight)
+
+        x1 = torch.randn(5, 3, requires_grad=True)
+        x2 = copy.deepcopy(x1)
+        W1 = torch.randn(4, 3, requires_grad=True)
+        W2 = copy.deepcopy(W1)
+
+        y1 = fn(x1, W1)
+        y1.sum().backward()
+
+        cnts = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch.compile(fn, backend=cnts)
+        y2 = opt_fn(x2, W2)
+        y2.sum().backward()
+
+        self.assertEqual(y1, y2)
+        self.assertEqual(x1.grad, x2.grad)
+        self.assertEqual(W1.grad, W2.grad)
+        self.assertEqual(cnts.frame_count, 1)
+
+    def test_assert_is_contiguous_on_grad_output_directly(self):
+        class LinearFunction(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x, weight):
+                ctx.save_for_backward(x, weight)
+                y = x.matmul(weight.t())
+                return y
+
+            @staticmethod
+            def backward(ctx, grad_output):
+                assert grad_output.is_contiguous()
+                x, weight = ctx.saved_tensors
+                grad_x = grad_output.matmul(weight)
+                grad_weight = grad_output.transpose(0, 1).matmul(x)
+
+                return grad_x, grad_weight
+
+        def fn(x, weight):
+            return LinearFunction.apply(x, weight)
+
+        x1 = torch.randn(5, 3, requires_grad=True)
+        x2 = copy.deepcopy(x1)
+        W1 = torch.randn(4, 3, requires_grad=True)
+        W2 = copy.deepcopy(W1)
+
+        y1 = fn(x1, W1)
+        y1.backward(y1.clone().detach().requires_grad_(True))
+
+        cnts = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch.compile(fn, backend=cnts)
+        y2 = opt_fn(x2, W2)
+        y2.backward(y2.clone().detach().requires_grad_(True))
+
+        self.assertEqual(y1, y2)
+        self.assertEqual(x1.grad, x2.grad)
+        self.assertEqual(W1.grad, W2.grad)
+        self.assertEqual(cnts.frame_count, 1)
+
+    def test_insert_contiguous_call_during_speculating_backward(self):
+        # If users call `assert grad_output.is_contiguous()` directly, it indicates that `grad_output` is expected to be contiguous.
+        # However, when speculating the backward graph, we use the `fwd_out` fake tensor as `grad_output`, which may cause
+        # the assertion to fail. To handle this, we insert a `.contiguous()` call to ensure `grad_output` is contiguous.
+        # If it is already contiguous, the downstream Inductor will optimize away the redundant operation.
+        class LinearFunction(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x, weight):
+                ctx.save_for_backward(x, weight)
+                y = x.matmul(weight.t()).t()
+                return y
+
+            @staticmethod
+            def backward(ctx, grad_output):
+                assert grad_output.is_contiguous()
+                x, weight = ctx.saved_tensors
+                grad_x = grad_output.t().matmul(weight)
+                grad_weight = grad_output.matmul(x)
+
+                return grad_x, grad_weight
+
+        cnt = torch._dynamo.testing.CompileCounterWithBackend("aot_eager")
+
+        @torch.compile(backend=cnt, fullgraph=True)
+        def fn(x, weight):
+            return LinearFunction.apply(x, weight)
+
+        x = torch.randn(5, 3, requires_grad=True)
+        W = torch.randn(4, 3, requires_grad=True)
+
+        fn(x, W)
+
+        # check Dynamo captured graph is correct!
+        actual_graph = torch._dynamo.testing.normalize_gm(
+            cnt.graphs[0].print_readable(print_output=False)
+        )
+        self.assertExpectedInline(
+            actual_graph,
+            """\
+class GraphModule(torch.nn.Module):
+    def forward(self, L_x_: "f32[5, 3]", L_weight_: "f32[4, 3]"):
+        l_x_ = L_x_
+        l_weight_ = L_weight_
+
+        function_ctx = torch.autograd.function.FunctionCtx();  function_ctx = None
+        fwd_body_0 = self.fwd_body_0
+        bwd_body_0 = self.bwd_body_0
+        autograd_function_apply: "f32[4, 5]" = torch.ops.higher_order.autograd_function_apply(fwd_body_0, bwd_body_0, l_x_, l_weight_, args_tensor_mask = [True, True], non_differentiable_idx = []);  fwd_body_0 = bwd_body_0 = l_x_ = l_weight_ = None
+        return (autograd_function_apply,)
+
+    class fwd_body_0(torch.nn.Module):
+        def forward(self, ctx : torch.autograd.function.Function, x: "f32[5, 3]", weight: "f32[4, 3]"):
+            _set_grad_enabled = torch._C._set_grad_enabled(False);  _set_grad_enabled = None
+
+            t: "f32[3, 4]" = weight.t()
+            matmul: "f32[5, 4]" = x.matmul(t);  t = None
+            y: "f32[4, 5]" = matmul.t();  matmul = None
+
+            _set_grad_enabled_1 = torch._C._set_grad_enabled(True);  _set_grad_enabled_1 = None
+            return (y, [weight, x])
+
+    class bwd_body_0(torch.nn.Module):
+        def forward(self, function_ctx : torch.autograd.function.Function, y: "f32[4, 5]", weight: "f32[4, 3]", x: "f32[5, 3]"):
+            _set_grad_enabled = torch._C._set_grad_enabled(False);  _set_grad_enabled = None
+
+            contiguous: "f32[4, 5]" = y.contiguous();  y = None
+
+            t: "f32[5, 4]" = contiguous.t()
+            grad_x: "f32[5, 3]" = t.matmul(weight);  t = weight = None
+
+            grad_weight: "f32[4, 3]" = contiguous.matmul(x);  contiguous = x = None
+
+            _set_grad_enabled_1 = torch._C._set_grad_enabled(True);  _set_grad_enabled_1 = None
+            return (grad_x, grad_weight)
+""",
+        )
+
     def test_smuggle_symint_issue_111031(self):
         from torch.autograd import Function
 

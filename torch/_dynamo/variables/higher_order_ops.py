@@ -1070,10 +1070,15 @@ class WhileLoopHigherOrderVariable(TorchHigherOrderOperatorVariable):
                 return SymNodeVariable.create(tx, proxy, example_value)
 
             new_operands_seq = [
-                create_unbacked_sym_node_var(tx)
-                if (isinstance(carry, ConstantVariable) and carry.python_type() is int)
-                or (isinstance(carry, SymNodeVariable))
-                else carry
+                (
+                    create_unbacked_sym_node_var(tx)
+                    if (
+                        isinstance(carry, ConstantVariable)
+                        and carry.python_type() is int
+                    )
+                    or (isinstance(carry, SymNodeVariable))
+                    else carry
+                )
                 for carry in operands_seq
             ]
 
@@ -2552,17 +2557,63 @@ class AutogradFunctionApplyVariable(VariableTracker):
         with tx.output.subtracer(fwd_fn, fwd_tracer), tx.strict_translation_mode(
             is_strict_for
         ):
-            (bwd_out, _), bwd_graph, bwd_freevars = speculate_subgraph(
-                tx,
-                bwd_fn,
-                bwd_args,
-                kwargs,
-                "autograd.Function",
-                enable_grad=False,
-                set_subgraph_inputs="manual",
-                restore_side_effects=False,
-                tracer=bwd_tracer,
-            )
+            try:
+                (bwd_out, _), bwd_graph, bwd_freevars = speculate_subgraph(
+                    tx,
+                    bwd_fn,
+                    bwd_args,
+                    kwargs,
+                    "autograd.Function",
+                    enable_grad=False,
+                    set_subgraph_inputs="manual",
+                    restore_side_effects=False,
+                    tracer=bwd_tracer,
+                )
+            except torch._dynamo.exc.Unsupported as e:
+                import traceback
+
+                if (
+                    len(e.real_stack) > 0
+                    and isinstance(e.real_stack[-1], traceback.FrameSummary)
+                    and e.real_stack[-1]._line is not None
+                    and ".is_contiguous()" in e.real_stack[-1]._line
+                    and e.real_stack[-1].name == "backward"
+                ):
+                    bwd_tracer = torch._dynamo.output_graph.SubgraphTracer(
+                        tx.output,
+                        parent=fwd_tracer,
+                        source_target="autograd.Function",
+                    )
+                    from .._trace_wrapped_higher_order_op import (
+                        autograd_function_backward_rewritten,
+                    )
+
+                    if isinstance(self.bwd_graph, types.FunctionType):
+                        bwd_fn = UserFunctionVariable(
+                            autograd_function_backward_rewritten(self.bwd_graph)
+                        )
+                    elif isinstance(self.bwd_graph, types.MethodType):
+                        bwd_fn = UserMethodVariable(
+                            autograd_function_backward_rewritten(
+                                self.bwd_graph.__func__
+                            ),
+                            UserDefinedClassVariable(self.bwd_graph.__class__),
+                        )
+                    else:
+                        unimplemented("non-function or method")
+                    (bwd_out, _), bwd_graph, bwd_freevars = speculate_subgraph(
+                        tx,
+                        bwd_fn,
+                        bwd_args,
+                        kwargs,
+                        "autograd.Function",
+                        enable_grad=False,
+                        set_subgraph_inputs="manual",
+                        restore_side_effects=False,
+                        tracer=bwd_tracer,
+                    )
+                else:
+                    raise e
 
         # TODO: assert that bwd_graph didn't capture values that were
         # not created inside fwd_graph.
