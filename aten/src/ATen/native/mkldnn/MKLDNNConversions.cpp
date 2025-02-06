@@ -295,9 +295,7 @@ Tensor pack_linear(const Tensor& weight, const Tensor& input) {
   for (int64_t i = 0, ndim = input.sizes().size(); i < ndim - 1; ++i) {
     flattened_dim *= input.sizes()[i];
   }
-  if (
-    !input.sizes().size() > 3 || 
-    !apply_mkldnn_matmul_heur(flattened_dim, weight.sizes()[1], weight.sizes()[0])) {
+  if (!apply_mkldnn_matmul_heur(flattened_dim, weight.sizes()[1], weight.sizes()[0])) {
     return weight;
   }
   ideep::matmul_forward_params params;
