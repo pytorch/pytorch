@@ -61,6 +61,8 @@
 
 #include <torch/custom_class.h>
 
+#include <torch/csrc/distributed/c10d/nvshmem_extension.cuh>
+
 namespace {
 
 #ifdef USE_C10D_NCCL

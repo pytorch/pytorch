@@ -975,6 +975,32 @@ elseif(USE_CUDA)
     target_link_libraries(torch_cuda PRIVATE __caffe2_nccl)
     target_compile_definitions(torch_cuda PRIVATE USE_NCCL)
   endif()
+
+  # Use env var for these for now for prototyping purposes
+  set(USE_NVSHMEM $ENV{USE_NVSHMEM} CACHE BOOL "Enable NVSHMEM support")
+  set(NVSHMEM_HOME $ENV{NVSHMEM_HOME} CACHE PATH "Path to NVSHMEM build dir")
+
+  if (USE_NVSHMEM)
+    set(NVSHMEM_INCLUDE_DIR "${NVSHMEM_HOME}/src/include")
+    set(NVSHMEM_LIB_DIR "${NVSHMEM_HOME}/src/lib")
+
+    include_directories(${NVSHMEM_INCLUDE_DIR})
+
+    # Linking with nvshmem requires the source binary to be built with -rdc
+    # which is not viable for libtorch_cuda. So we isolate the linking of
+    # nvshmem in nvshmem_extension.
+    add_library(nvshmem_extension SHARED
+        "${TORCH_SRC_DIR}/csrc/distributed/c10d/nvshmem_extension.cu"
+    )
+    set_target_properties(nvshmem_extension PROPERTIES CUDA_SEPARABLE_COMPILATION ON)
+    target_compile_options(nvshmem_extension PRIVATE $<$<COMPILE_LANGUAGE:CUDA>:-rdc=true>)
+    target_link_libraries(nvshmem_extension PRIVATE
+        ${NVSHMEM_LIB_DIR}/libnvshmem.a
+        ${NVSHMEM_LIB_DIR}/nvshmem_bootstrap_uid.so
+    )
+    target_link_libraries(torch_cuda PRIVATE nvshmem_extension)
+    install(TARGETS nvshmem_extension EXPORT Caffe2Targets DESTINATION lib)
+  endif()
   if(USE_UCC)
     target_link_libraries(torch_cuda PRIVATE __caffe2_ucc)
     target_compile_definitions(torch_cuda PRIVATE USE_UCC)
