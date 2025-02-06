@@ -73,6 +73,21 @@ def construct_strides(
     return strides
 
 
+def infer_dense_strides(size: Sequence[int], orig_strides: Sequence[int]):
+    """This is a mirror of the same function in aten/src/ATen/ExpandUtils.cpp
+
+    Args:
+        size: The size of the output tensor
+        orig_strides: The strides of the input tensor
+    Returns:
+        List[int]: Dense non-overlapping strides that preserve the input tensor's layout permutation.
+        The returned strides follow the same stride propagation rules as TensorIterator. This matches
+        The behavior of empty_like()
+    """
+    fill_order = get_fill_order(orig_strides, V.graph.sizevars.shape_env)
+    return construct_strides(size, fill_order)
+
+
 def flex_attention_grid(batch_size, q_heads, num_queries, d_model, meta):
     """How is this kernel parallelized?
     We create a grid of (batch_size * num_heads, ceil_div(n_queries, query_block_size), 1)
@@ -987,8 +1002,7 @@ def lower_cpu(
 
     # Construct output layout with strides matching the query.
     out_size = [B, Hq, seq_len_q, v_head_dim]
-    fill_order = get_fill_order(query.get_stride())
-    out_strides = construct_strides(out_size, fill_order)
+    out_strides = infer_dense_strides(out_size, query.get_stride())
 
     layout = FixedLayout(
         query.get_device(),
@@ -1247,8 +1261,7 @@ def flex_attention(
 
     # Construct output layout with strides matching the query.
     out_size = [B, Hq, seq_len_q, v_head_dim]
-    fill_order = get_fill_order(query.get_stride(), V.graph.sizevars.shape_env)
-    out_strides = construct_strides(out_size, fill_order)
+    out_strides = infer_dense_strides(out_size, q_strides)
 
     layout = FixedLayout(
         query.get_device(),
@@ -2320,8 +2333,8 @@ def flex_attention_backward(*args, **kwargs):
 
     # Construct layout with stride order matching K
     key_size = [Bq, Hkv, seq_len_kv, qk_head_dim]
-    fill_order = get_fill_order(key.get_stride(), V.graph.sizevars.shape_env)
-    key_strides = construct_strides(key_size, fill_order)
+    key_strides = infer_dense_strides(key_size, key.get_stride())
+
     layout_broadcasted_k = FixedLayout(
         key.get_device(),
         key.get_dtype(),
@@ -2343,8 +2356,8 @@ def flex_attention_backward(*args, **kwargs):
 
     # Construct output layout with stride order matching value
     value_size = [Bq, Hkv, seq_len_kv, v_head_dim]
-    fill_order = get_fill_order(value.get_stride(), V.graph.sizevars.shape_env)
-    value_strides = construct_strides(value_size, fill_order)
+    value_strides = infer_dense_strides(value_size, value.get_stride())
+
     broadcasted_grad_value = empty_strided(
         value_size,
         stride=[sympy.sympify(s) for s in value_strides],
