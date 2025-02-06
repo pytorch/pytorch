@@ -2545,9 +2545,10 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
 
             if reduction_type in ("argmax", "argmin"):
                 accumulator_index = f"_{result_var}_index"
-                long_max = torch.iinfo(torch.int64).max
+                index_dtype = self.features.select_index_dtype()
                 self.body.writeline(
-                    f"{accumulator_index} = tl.full({self.dense_size_str()}, {long_max}, tl.int64)"
+                    f"{accumulator_index} = tl.full({self.dense_size_str()}, "
+                    f"{torch.iinfo(index_dtype).max}, {self.dtype_to_str(index_dtype)})"
                 )
                 root_op = {"argmax": "max", "argmin": "min"}[reduction_type]
 
@@ -2609,8 +2610,9 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 peer_val = self.codegen_cooperative_reduction_peer_combine(
                     f"{result_var}_bval", src_dtype, default
                 )
+                index_dtype = self.features.select_index_dtype()
                 peer_idx = self.codegen_cooperative_reduction_peer_combine(
-                    result_var, dtype, 0
+                    result_var, index_dtype, torch.iinfo(index_dtype).max
                 )
                 final_argreduce(self.post_loop_store, result_var, peer_val, peer_idx)
             elif is_welford_reduction(reduction_type):
