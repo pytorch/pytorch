@@ -1181,7 +1181,7 @@ def _model_to_graph(
     return graph, params_dict, torch_out
 
 
-@deprecated("Please remove usage of this function", category=None)
+@deprecated("Please remove usage of this function")
 def unconvertible_ops(
     model,
     args,
