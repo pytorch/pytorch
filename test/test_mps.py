@@ -12931,7 +12931,7 @@ class TestCommon(TestCase):
     # `@dtypesIfMPS(torch.float32)`, but for now, the assertions themselves need to be loosened
     @suppress_warnings
     # MPS only supports float32
-    @ops(_ref_test_ops, allowed_dtypes=(torch.float32,))
+    @ops(mps_op_db(_ref_test_ops), allowed_dtypes=(torch.float32,))
     def test_numpy_ref_mps(self, device, dtype, op):
         # Unlike `test_numpy_ref`, this test compares in `float32` since at the time of this test's creation MPS
         # does not support float64 Tensors.
