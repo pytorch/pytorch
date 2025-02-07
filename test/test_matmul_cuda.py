@@ -360,6 +360,32 @@ def to_blocked(input_matrix) -> torch.Tensor:
     # Layout rearranged tiles according to second pic
     return rearranged.flatten()
 
+# copied from https://github.com/pytorch/ao/blob/main/torchao/prototype/mx_formats/custom_cast.py
+
+def down_size(size):
+    assert size[-1] % 2 == 0, f"{size} last dim not divisible by two"
+    return (*size[:-1], size[-1] // 2)
+
+# TODO delete upsize/unpack if not used later in this PR
+def up_size(size):
+    return (*size[:-1], size[-1] * 2)
+
+def unpack_uint4(uint8_data) -> torch.Tensor:
+    assert uint8_data.is_contiguous()
+    shape = uint8_data.shape
+    first_elements = (uint8_data >> 4).to(torch.uint8)
+    second_elements = (uint8_data & 0b1111).to(torch.uint8)
+    unpacked = torch.stack([first_elements, second_elements], dim=-1).view(
+        up_size(shape)
+    )
+    return unpacked
+
+def pack_uint4(uint8_data) -> torch.Tensor:
+    shape = uint8_data.shape
+    assert shape[-1] % 2 == 0
+    uint8_data = uint8_data.contiguous().view(-1)
+    return (uint8_data[::2] << 4 | uint8_data[1::2]).view(down_size(shape))
+
 @unittest.skipIf(not torch.cuda.is_available(), "CUDA not found")
 class TestFP8MatmulCuda(TestCase):
 
@@ -765,8 +791,7 @@ class TestFP8MatmulCuda(TestCase):
     # TODO(before land): real skip condition, should only run on CUDA 12.8+ with CUDA capability 10.0+
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
     # TODO also test fp4_x2
-    @parametrize("elem_dtype", [torch.float8_e4m3fn,])
-    def test_mx_blockwise(self, elem_dtype) -> None:
+    def test_blockwise_mxfp8(self) -> None:
 
         # inspiration: https://github.com/pytorch/ao/pull/1625
 
@@ -784,15 +809,23 @@ class TestFP8MatmulCuda(TestCase):
         BLOCK_SIZE = 32
 
         assert M == K == N
-        A = torch.eye(M, device=device, dtype=torch.uint8).to(elem_dtype)
-        B = torch.eye(M, device=device, dtype=torch.uint8).to(elem_dtype).t()
+        A_ref = torch.eye(M, device=device, dtype=torch.bfloat16)
+        B_ref = torch.eye(M, device=device, dtype=torch.bfloat16)
+        C_ref = A_ref @ B_ref
+
+        A = A_ref.to(torch.float8_e4m3fn)
+        B = B_ref.to(torch.float8_e4m3fn).t()
+
+        # 127 in e8m0 is 2^0==1
+        # TODO more scale correctness testing
         A_scale = torch.full((M, K // BLOCK_SIZE), 127, device=device, dtype=torch.uint8)
         B_scale = torch.full((N, K // BLOCK_SIZE), 127, device=device, dtype=torch.uint8)
 
+        # convert to swizzled format
         A_scale = to_blocked(A_scale)
         B_scale = to_blocked(B_scale)
 
-        # TODO fast_accum
+        # TODO sweep fast_accum
 
         C = torch._scaled_mm(
             A,
@@ -808,12 +841,97 @@ class TestFP8MatmulCuda(TestCase):
             b_dtype=None,
             scale_dtype=DataType.E8M0,
         )
-        print(C)
+        torch.testing.assert_close(C, C_ref, atol=0, rtol=0)
 
-        # TODO matches expected numerics with eye
-        # TODO fp4x2
+    # TODO(before land): real skip condition, should only run on CUDA 12.8+ with CUDA capability 10.0+
+    @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
+    def test_blockwise_nvfp4(self) -> None:
 
+        # inspiration: https://github.com/pytorch/ao/pull/1625
 
+        # not for land, need to move to in-core dtypes
+        from enum import IntEnum
+        class DataType(IntEnum):
+            DEFAULT = 0
+            E8M0 = 1
+            FP4 = 2
+            UFP8 = 3
+
+        device = "cuda"
+        # TODO other shapes
+        M, K, N = 128, 128, 128
+        BLOCK_SIZE = 16
+        # torch.set_printoptions(profile='full', linewidth=320)
+
+        assert M == K == N
+        A_ref = torch.eye(M, device=device, dtype=torch.bfloat16)
+        B_ref = torch.eye(M, device=device, dtype=torch.bfloat16)
+        A_ref = torch.ones(M, K, device=device, dtype=torch.bfloat16)
+        B_ref = torch.ones(N, K, device=device, dtype=torch.bfloat16)
+        C_ref = A_ref @ B_ref
+        print('C_ref', C_ref)
+
+        A = A_ref.to(torch.uint8)
+        B = B_ref.to(torch.uint8)
+
+        # super hacky "cast" to fp4_e2m1_x1:
+        # * we only have 1s and 0s in uint8
+        # * 1 in uint8 is 0b00000001
+        # * 1 in fp4_e2m1_x1 is 0b00000010
+        # * just replace the values
+        # TODO(before land): use a generic cast and test numerics more 
+        # comprehensively
+        A[A == 1] = 2
+        B[B == 1] = 2
+
+        # now, pack fp4_e2m1_x1 into fp4_e2m1_x2
+        A = pack_uint4(A)
+        B = pack_uint4(B)
+        print('A', A, A.shape)
+        print('B after t')
+        B = B.t()
+        print(B, B.shape)
+
+        # TODO more scale correctness testing
+        A_scale = torch.full((M, K // BLOCK_SIZE), 1, device=device, dtype=torch.float8_e4m3fn).view(torch.uint8)
+        B_scale = torch.full((N, K // BLOCK_SIZE), 1, device=device, dtype=torch.float8_e4m3fn).view(torch.uint8)
+
+        # convert to swizzled format
+        A_scale = to_blocked(A_scale)
+        B_scale = to_blocked(B_scale)
+
+        # https://docs.nvidia.com/cuda/cublas/index.html?highlight=blocked#d-block-quantization
+        # e2m1 max = 6
+        # e4m3 max = 448
+        # calculation max = 128
+        scale_result = torch.tensor(6.0 * 448.0 / 128.0, device=device)
+        print(scale_result)
+
+        # TODO sweep fast_accum
+
+        C = torch._scaled_mm(
+            A,
+            B,
+            # scales are switched
+            B_scale,
+            A_scale,
+            bias=None,
+            scale_result=scale_result,
+            out_dtype=torch.bfloat16,
+            use_fast_accum=False,
+            a_dtype=DataType.FP4,
+            b_dtype=DataType.FP4,
+            scale_dtype=DataType.UFP8,
+        )
+        print('C', C, C.shape)
+        if False:
+            print('C_ref')
+            print(C_ref, C_ref.shape)
+            print('C')
+            print(C, C.shape)
+            print(C.max(dim=0))
+            print(C.max(dim=1))
+        torch.testing.assert_close(C, C_ref, atol=0, rtol=0)
 
 
 @unittest.skipIf(TEST_WITH_ROCM, "ROCm doesn't support CUTLASS")
