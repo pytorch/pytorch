@@ -8,10 +8,10 @@ import dis
 import functools
 import gc
 import itertools
-import json
 import logging
 import os
 import pstats
+import random
 import subprocess
 import sys
 import threading
@@ -89,7 +89,7 @@ from .exc import (
 )
 from .guards import (
     CheckFunctionManager,
-    get_and_maybe_log_recompilation_reason,
+    get_and_maybe_log_recompilation_reasons,
     GuardedCode,
 )
 from .hooks import Hooks
@@ -192,14 +192,13 @@ def fx_forward_from_src_skip_result(
     return result
 
 
-# TODO it is possible to move more global state preservation to eval_frame.py/c.
-# See how we preserve Python random state.
 def preserve_global_state(fn: Callable[_P, _T]) -> Callable[_P, _T]:
     """
     Context manager to:
         1) Save/restore torch.is_grad_enabled() state
-        2) Save/restore torch random state
-        3) Monkey patch torch.fx.graph_module._forward_from_src
+        2) Save/restore python random state
+        3) Save/restore torch random state
+        4) Monkey patch torch.fx.graph_module._forward_from_src
     """
 
     @functools.wraps(fn)
@@ -217,6 +216,7 @@ def preserve_global_state(fn: Callable[_P, _T]) -> Callable[_P, _T]:
             prior_mobile_allocator_state = (
                 torch._C._is_default_mobile_cpu_allocator_set()
             )
+            py_rng_state = random.getstate()
             prior_dtype = torch.get_default_dtype()
             torch_rng_state = torch.random.get_rng_state()
             cuda_rng_state = None
@@ -244,6 +244,7 @@ def preserve_global_state(fn: Callable[_P, _T]) -> Callable[_P, _T]:
                 torch.use_deterministic_algorithms(
                     prior_deterministic, warn_only=prior_warn_only
                 )
+                random.setstate(py_rng_state)
                 torch.random.set_rng_state(torch_rng_state)
                 torch.set_default_dtype(prior_dtype)
                 curr_mobile_allocator_state = (
@@ -895,22 +896,19 @@ def _compile(
             distributed_state = None
 
         # Check recompilations
-        recompile_reasons = None
+        recompile_reason: Optional[str] = None
         if is_recompilation(cache_size) and frame:
-            recompile_reasons = get_and_maybe_log_recompilation_reason(
-                cache_entry, frame
+            reasons = get_and_maybe_log_recompilation_reasons(cache_entry, frame)
+            recompile_reason = (
+                "Unable to find recompilation reasons" if not reasons else reasons[-1]
             )
+        metrics_context.update_outer({"recompile_reason": recompile_reason})
 
         exceeded, limit_type = exceeds_recompile_limit(cache_size, compile_id)
         if exceeded:
 
             def format_func_info(code: CodeType) -> str:
                 return f"'{code.co_name}' ({code.co_filename}:{code.co_firstlineno})"
-
-            def format_guard_failures() -> str:
-                if not recompile_reasons:
-                    return "Unable to find recompilation reasons"
-                return recompile_reasons[-1]
 
             log.warning(
                 "torch._dynamo hit config.%s (%s)\n"
@@ -921,12 +919,19 @@ def _compile(
                 limit_type,
                 getattr(config, limit_type),
                 format_func_info(code),
-                format_guard_failures(),
+                recompile_reason,
                 troubleshooting_url,
             )
             if config.fail_on_recompile_limit_hit:
                 raise FailOnRecompileLimitHit(
                     f"{limit_type} reached, because fail_on_recompile_limit_hit = True this is a HARD failure"
+                )
+            elif one_graph:
+                raise FailOnRecompileLimitHit(
+                    f"{limit_type} reached with one_graph=True. Excessive recompilations can degrade "
+                    "performance due to the compilation overhead of each recompilation. To monitor "
+                    "recompilations, enable TORCH_LOGS=recompiles. If recompilations are expected, consider "
+                    "increasing torch._dynamo.config.cache_size_limit to an appropriate value."
                 )
             elif config.skip_code_recursive_on_recompile_limit_hit and justknobs_check(
                 "pytorch/compiler:skip_code_recursive_on_recompile_limit_hit"
@@ -1086,36 +1091,6 @@ def _compile(
                 # If compilation failed, the entire time is wasted
                 dynamo_time_before_restart = (time.time_ns() - start_time_ns) / 1e9
 
-            def clean_for_json(d: dict[str, Any]) -> dict[str, Any]:
-                blocklist = {
-                    "TYPE_CHECKING",
-                    "log_file_name",
-                    "verbose",
-                    "repro_after",
-                    "repro_level",
-                    "repro_forward_only",
-                    "repro_tolerance",
-                    "repro_ignore_non_fp",
-                    "same_two_models_use_fp64",
-                    "base_dir",
-                    "debug_dir_root",
-                    "_save_config_ignore",
-                    "log_compilation_metrics",
-                    "inject_BUILD_SET_unimplemented_TESTING_ONLY",
-                    "_autograd_backward_strict_mode_banned_ops",
-                    "reorderable_logging_functions",
-                    "ignore_logger_methods",
-                    "traceable_tensor_subclasses",
-                    "_custom_ops_profile",
-                }
-
-                return {
-                    key: sorted(value) if isinstance(value, set) else value
-                    for key, value in d.items()
-                    if key not in blocklist
-                }
-
-            config_dict = clean_for_json(config.get_config_copy())
             metrics = {
                 "frame_key": frame_key,
                 "co_name": code.co_name,
@@ -1140,7 +1115,6 @@ def _compile(
                 "config_suppress_errors": config.suppress_errors,
                 "config_inline_inbuilt_nn_modules": config.inline_inbuilt_nn_modules,
                 "specialize_float": config.specialize_float,
-                "dynamo_config": json.dumps(config_dict, sort_keys=True),
                 "is_forward": True,
                 "dynamo_compile_time_before_restart_us": to_int_us(
                     dynamo_time_before_restart
