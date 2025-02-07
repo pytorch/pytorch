@@ -1046,10 +1046,7 @@ static void lu_unpack_mps_impl(const Tensor& LU_data,
     @autoreleasepool {
       dispatch_sync_with_rethrow(stream->queue(), ^() {
         auto computeEncoder = stream->commandEncoder();
-        mtl_setBuffer(computeEncoder, P, 0);
-        mtl_setBuffer(computeEncoder, pivots, 1);
-        mtl_setBytes(computeEncoder, r, 2);
-        mtl_setBytes(computeEncoder, k, 3);
+        mtl_setArgs(computeEncoder, P, pivots, r, k);
         [computeEncoder setComputePipelineState:applyPivotsPSO];
         [computeEncoder dispatchThreadgroups:gridSize threadsPerThreadgroup:threadGroupSize];
       });
