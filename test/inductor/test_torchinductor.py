@@ -13563,6 +13563,7 @@ if HAS_GPU and not TEST_WITH_ASAN:
             self.assertEqual(fn_opt(*inps), fn(*inps))
 
         @torch._functorch.config.patch("donated_buffer", True)
+        @torch._inductor.config.patch("triton.cooperative_reductions", False)
         def test_donated_buffer_inplace(self):
             batch_size = 32
             seq_length = 50

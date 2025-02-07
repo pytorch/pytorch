@@ -32,12 +32,7 @@ from ...utils._sympy.value_ranges import ValueRanges
 from .. import config, ir, metrics
 from ..codecache import code_hash, get_path, PyCodeCache
 from ..runtime.benchmarking import benchmarker
-from ..runtime.hints import (
-    AutotuneHint,
-    DeviceProperties,
-    TRITON_MAX_BLOCK,
-    TRITON_MAX_RSPLIT,
-)
+from ..runtime.hints import AutotuneHint, DeviceProperties, TRITON_MAX_BLOCK
 from ..runtime.runtime_utils import get_max_y_grid, next_power_of_2
 from ..runtime.triton_heuristics import (
     cooperative_reduction_grid,
@@ -2772,10 +2767,28 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
 
         return result_mean, result_m2, result_weight
 
-    def max_rsplit(self):
+    @cache_on_self
+    def cooperative_reduction_rsplit(self):
+        assert self.cooperative_reduction
+        assert len(self.numels) == 2
         if self.fixed_config:
             return self.fixed_config["RSPLIT"]
-        return TRITON_MAX_RSPLIT
+        split = V.choices.reduction_split_factor(
+            V.graph.get_current_device_or_throw(),
+            V.graph.sizevars.size_hint(self.features.reduction_numel, fallback=8192),
+            V.graph.sizevars.size_hint(self.features.numel, fallback=8192),
+            self.features.memory_stats().persistent.reads.dim[1].contiguous_score
+            >= 0.5,
+        )
+        if split == 1:
+            assert config.triton.force_cooperative_reductions
+            return min(
+                32,
+                V.graph.sizevars.size_hint(
+                    self.features.reduction_numel, fallback=8192
+                ),
+            )
+        return split
 
     def codegen_cooperative_reduction_peer_combine(
         self, result_var, dtype, default_val
@@ -2788,7 +2801,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         xnumel = self.numels["x"]
         mask = "xindex < xnumel" if not self._has_constant_xmask() else None
 
-        nbytes = xnumel * dtype.itemsize * self.max_rsplit()
+        nbytes = xnumel * dtype.itemsize * self.cooperative_reduction_rsplit()
         ws_name, ws_offset = self.cooperative_reduction_workspace_cache.allocate(nbytes)
 
         self.post_loop_combine.splice(
@@ -3480,6 +3493,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             **self.inductor_meta_common(),
         }
         if self.cooperative_reduction:
+            inductor_meta["rsplit"] = self.cooperative_reduction_rsplit()
             inductor_meta["persistent_reduction"] = self.persistent_reduction
 
         num_gb = None
@@ -3765,7 +3779,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             max_block = self.max_block(tree.prefix)
 
         if tree.is_reduction and self.cooperative_reduction:
-            max_block = max_block * self.max_rsplit()
+            max_block = max_block * self.cooperative_reduction_rsplit()
 
         # Optional optimization: if block divides numel exactly, we will
         # never need to do a masked load to handle stragglers at the end.
