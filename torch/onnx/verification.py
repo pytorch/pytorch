@@ -44,7 +44,12 @@ _OutputsType = Union[Sequence[_NumericType], Sequence]
 
 
 class OnnxBackend(enum.Enum):
-    """Enum class for ONNX backend used for export verification."""
+    """Enum class for ONNX backend used for export verification.
+
+    .. deprecated:: 2.7
+        Consider using ``torch.onnx.export(..., dynamo=True)`` and use the returned
+        ``ONNXProgram`` to test the ONNX model.
+    """
 
     REFERENCE = "ONNXReferenceEvaluator"
     ONNX_RUNTIME_CPU = "CPUExecutionProvider"
@@ -54,6 +59,10 @@ class OnnxBackend(enum.Enum):
 @dataclasses.dataclass
 class VerificationOptions:
     """Options for ONNX export verification.
+
+    .. deprecated:: 2.7
+        Consider using ``torch.onnx.export(..., dynamo=True)`` and use the returned
+        ``ONNXProgram`` to test the ONNX model.
 
     Attributes:
         flatten: If True, unpack nested list/tuple/dict inputs into a flattened list of

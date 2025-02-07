@@ -356,6 +356,9 @@ def export(
         autograd_inlining: Deprecated.
             Flag used to control whether to inline autograd functions.
             Refer to https://github.com/pytorch/pytorch/pull/74765 for more details.
+
+    Returns:
+        :class:`torch.onnx.ONNXProgram` if dynamo is True, otherwise None.
     """
     if dynamo is True or isinstance(model, torch.export.ExportedProgram):
         from torch.onnx._internal.exporter import _compat
