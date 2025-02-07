@@ -15,7 +15,6 @@
 #include <c10/cuda/CUDAAllocatorConfig.h>
 #include <c10/cuda/CUDAGraphsC10Utils.h>
 #include <c10/cuda/CUDAGuard.h>
-#include <c10/util/CallOnce.h>
 #include <c10/util/Exception.h>
 #include <c10/util/Logging.h>
 #include <c10/util/WaitCounter.h>
@@ -419,7 +418,6 @@ static std::future<bool> launchAsyncGilCheck() {
 
     try {
       auto& gil_checker = get_gil_checker();
-      // NOLINTNEXTLINE(clang-analyzer-core*)
       promise.set_value((*gil_checker)());
     } catch (...) {
       promise.set_exception(std::current_exception());
