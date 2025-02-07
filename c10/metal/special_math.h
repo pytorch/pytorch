@@ -451,5 +451,31 @@ inline float digamma(T0 x) {
   }
 }
 
+template <typename T>
+T sinc(T a) {
+  if (a == static_cast<T>(0)) {
+    return static_cast<T>(1);
+  }
+  constexpr T pi = static_cast<T>(M_PI_F);
+  T product = pi * a;
+  return static_cast<T>(::metal::sin(product) / product);
+}
+
+// Complex sinc2 implementation
+inline float2 sinc(float2 inp) {
+  float2 a = inp * M_PI_F;
+  const float a2 = a.x * a.x + a.y * a.y;
+  if (a2 == 0) {
+    return 0;
+  }
+  float cosx;
+  float sinx = ::metal::sincos(a.x, cosx);
+  float sinhy = ::metal::sinh(a.y);
+  float coshy = ::metal::cosh(a.y);
+  auto re = sinx * coshy * a.x + cosx * sinhy * a.y;
+  auto im = cosx * sinhy * a.x - sinx * coshy * a.y;
+  return float2(re, im) / a2;
+}
+
 } // namespace metal
 } // namespace c10

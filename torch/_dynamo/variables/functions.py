@@ -20,6 +20,7 @@ from ..source import AttrSource, ConstantSource, DefaultsSource, GetItemSource
 from ..utils import (
     check_constant_args,
     check_unspec_or_constant_args,
+    cmp_name_to_op_mapping,
     counters,
     identity,
     is_function,
@@ -309,6 +310,8 @@ class UserFunctionVariable(BaseUserFunctionVariable):
         return result
 
     def var_getattr(self, tx: "InstructionTranslator", name: str):
+        if name in cmp_name_to_op_mapping:
+            return variables.GetAttrVariable(self, name)
         return fn_var_getattr(tx, self.fn, self.source, name)
 
     def call_obj_hasattr(
@@ -793,6 +796,9 @@ class SkipFunctionVariable(VariableTracker):
         return variables.ConstantVariable.create(hasattr(self.value, name))
 
     def var_getattr(self, tx: "InstructionTranslator", name: str):
+        if name in cmp_name_to_op_mapping:
+            return variables.GetAttrVariable(self, name)
+
         return fn_var_getattr(tx, self.value, self.source, name)
 
 
@@ -949,6 +955,9 @@ class FunctoolsWrapsVariable(UserFunctionVariable):
 
 
 class CollectionsNamedTupleFunction(UserFunctionVariable):
+    def as_python_constant(self):
+        return self.fn
+
     def call_function(
         self,
         tx: "InstructionTranslator",
