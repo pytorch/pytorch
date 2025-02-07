@@ -12858,7 +12858,7 @@ class TestConsistency(TestCaseMPS):
 class TestErrorInputs(TestCase):
     _ignore_not_implemented_error = True
 
-    @ops(mps_ops_error_inputs_modifier(test_error_inputs_op_db), dtypes=OpDTypes.none)
+    @ops(mps_op_db([op for op in op_db if op.error_inputs_func is not None]), dtypes=OpDTypes.none)
     def test_error_inputs(self, device, op):
         self.assertEqual(device, "mps:0")
 

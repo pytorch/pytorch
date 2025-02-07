@@ -14,6 +14,7 @@ TEST_ERROR_INPUTS = "test_error_inputs"
 
 
 COMMON = "TestCommon"
+ERROR_INPUTS = "TestErrorInputs"
 
 
 def xfailUnimplemented(test_func: Callable) -> Callable:
@@ -81,7 +82,8 @@ class MPSSkipInfo:
         self.lower = lower
 
         if UNIMPLEMENTED in self.tests:
-            self.tests = []
+            # Not all tests fail for unimplemented ops, so we specify here
+            self.tests = [TEST_OUTPUT_GRAD_MATCH, TEST_OUTPUT_MATCH]
             self.skip = xfailUnimplemented
 
 
@@ -746,7 +748,38 @@ OTHER_XFAILLIST = {
     # https://pytorch.org/docs/2.0/generated/torch.empty.html
     "empty": MPSSkipInfo(),
     "empty_like": MPSSkipInfo(),
-    "empty_permuted": MPSSkipInfo(),
+    "empty_permuted": MPSSkipInfo(TEST_OUTPUT_MATCH, TEST_OUTPUT_GRAD_MATCH),
+}
+
+ERRORINPUT_XFAILLIST = {
+    # Exceptions are not raised
+    "__rmod__": MPSSkipInfo(TEST_ERROR_INPUTS),
+    "__rsub__": MPSSkipInfo(TEST_ERROR_INPUTS),
+    "__rpow__": MPSSkipInfo(TEST_ERROR_INPUTS),
+    "bernoulli": MPSSkipInfo(TEST_ERROR_INPUTS),
+    "clamp_max": MPSSkipInfo(TEST_ERROR_INPUTS),
+    "clamp_min": MPSSkipInfo(TEST_ERROR_INPUTS),
+    "masked_scatter": MPSSkipInfo(TEST_ERROR_INPUTS),
+    # unsupported float64 dtype
+    "cat": MPSSkipInfo(TEST_ERROR_INPUTS),
+    "complex": MPSSkipInfo(TEST_ERROR_INPUTS),
+    "multinomial": MPSSkipInfo(TEST_ERROR_INPUTS),
+    "nn.functional.conv1d": MPSSkipInfo(TEST_ERROR_INPUTS),
+    "nn.functional.conv2d": MPSSkipInfo(TEST_ERROR_INPUTS),
+    "nn.functional.conv3d": MPSSkipInfo(TEST_ERROR_INPUTS),
+    "gather": MPSSkipInfo(TEST_ERROR_INPUTS),
+    "scatter": MPSSkipInfo(TEST_ERROR_INPUTS),
+    "scatter_add": MPSSkipInfo(TEST_ERROR_INPUTS),
+    # unsupported complex dtypes
+    "masked_fill": MPSSkipInfo(TEST_ERROR_INPUTS),
+    # MPS does not support tensor dimensions > 16
+    "amax": MPSSkipInfo(TEST_ERROR_INPUTS),
+    "amin": MPSSkipInfo(TEST_ERROR_INPUTS),
+    "aminmax": MPSSkipInfo(TEST_ERROR_INPUTS),
+    # memory overlapping checks
+    "index_select": MPSSkipInfo(TEST_ERROR_INPUTS),
+    # unimplemented
+    "logcumsumexp": MPSSkipInfo(TEST_ERROR_INPUTS),
 }
 
 
@@ -768,6 +801,7 @@ append_skips(XFAILLIST_GRAD)
 append_skips(COMPLEX_XFAILLIST)
 append_skips(OTHER_XFAILLIST)
 append_skips(MPS_DOWNSTREAM_XFAILLIST)
+append_skips(ERRORINPUT_XFAILLIST)
 
 
 def mps_op_db(op_db: List[OpInfo]) -> List[OpInfo]:
