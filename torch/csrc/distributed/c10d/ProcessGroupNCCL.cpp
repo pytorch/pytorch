@@ -1457,6 +1457,10 @@ void ProcessGroupNCCL::shutdown() {
     // Use long interval to avoid acquiring CPU too frequently
     ncclComm->waitReady(true);
   }
+  // Deregister memory pool after finalizing all collectives
+  if (memPool_) {
+    deregisterMemPool(memPool_.get());
+  }
   // Tell watchdog to (1) flush its queue and (2) do not use comm objects
   // anymore because I am going to destroy them now
   LOG(INFO) << logPrefix() << "Operations flushed, joining watchdog thread.";
