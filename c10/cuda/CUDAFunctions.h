@@ -73,55 +73,40 @@ C10_CUDA_API __inline__ WarningState& warning_state() {
   return warning_state_;
 }
 // the subsequent functions are defined in the header because for performance
-// reasons we want them to be inline
+// reasons we want them to be inline.
+// performs contiguous or 2D cudaMemcpy and synchronizes afterwards
+// if width_in_bytes is not -1, 2d copy is performed and all 2d params are
+// expected to be set to valid values, no additional checks are performed other
+// than by cuda call itself
 C10_CUDA_API void __inline__ memcpy_and_sync(
     void* dst,
     const void* src,
     int64_t nbytes,
     cudaMemcpyKind kind,
-    cudaStream_t stream) {
-  if (C10_UNLIKELY(
-          warning_state().get_sync_debug_mode() != SyncDebugMode::L_DISABLED)) {
-    warn_or_error_on_sync();
-  }
-  const c10::impl::PyInterpreter* interp = c10::impl::GPUTrace::get_trace();
-  if (C10_UNLIKELY(interp)) {
-    (*interp)->trace_gpu_stream_synchronization(
-        c10::kCUDA, reinterpret_cast<uintptr_t>(stream));
-  }
-#if defined(TORCH_HIP_VERSION) && (TORCH_HIP_VERSION >= 301)
-  C10_CUDA_CHECK(hipMemcpyWithStream(dst, src, nbytes, kind, stream));
-#else
-  C10_CUDA_CHECK(cudaMemcpyAsync(dst, src, nbytes, kind, stream));
-  C10_CUDA_CHECK(cudaStreamSynchronize(stream));
-#endif
-}
-
-C10_CUDA_API void __inline__ memcpy2d_conditional_sync(
-    void* dst,
-    const void* src,
-    size_t src_pitch,
-    size_t dst_pitch,
-    size_t width_in_bytes,
-    size_t height,
-    cudaMemcpyKind kind,
     cudaStream_t stream,
-    bool non_blocking = false) {
+    int64_t width_in_bytes = -1,
+    int64_t src_pitch = -1,
+    int64_t dst_pitch = -1,
+    int64_t height = -1) {
   if (C10_UNLIKELY(
           warning_state().get_sync_debug_mode() != SyncDebugMode::L_DISABLED)) {
     warn_or_error_on_sync();
   }
-
   const c10::impl::PyInterpreter* interp = c10::impl::GPUTrace::get_trace();
   if (C10_UNLIKELY(interp)) {
     (*interp)->trace_gpu_stream_synchronization(
         c10::kCUDA, reinterpret_cast<uintptr_t>(stream));
   }
-
-  C10_CUDA_CHECK(cudaMemcpy2DAsync(
-      dst, dst_pitch, src, src_pitch, width_in_bytes, height, kind, stream));
-
-  if (!non_blocking) {
+  if (width_in_bytes == -1) {
+#if defined(TORCH_HIP_VERSION) && (TORCH_HIP_VERSION >= 301)
+    C10_CUDA_CHECK(hipMemcpyWithStream(dst, src, nbytes, kind, stream));
+#else
+    C10_CUDA_CHECK(cudaMemcpyAsync(dst, src, nbytes, kind, stream));
+    C10_CUDA_CHECK(cudaStreamSynchronize(stream));
+#endif
+  } else {
+    C10_CUDA_CHECK(cudaMemcpy2DAsync(
+        dst, dst_pitch, src, src_pitch, width_in_bytes, height, kind, stream));
     C10_CUDA_CHECK(cudaStreamSynchronize(stream));
   }
 }
