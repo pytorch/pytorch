@@ -91,34 +91,20 @@ class TORCH_API Context {
     }
   }
 
-  bool isPinnedPtr(
-      const void* data,
-      std::optional<c10::DeviceType> device_type = std::nullopt) {
-    auto opt_device_type =
-        device_type.has_value() ? device_type : at::getAccelerator();
-    if (!opt_device_type.has_value() || // there is no accelerator
-        !at::isAccelerator(
-            opt_device_type.value())) { // passed device not an accelerator
-      return false;
-    }
-    if (!init_[static_cast<int8_t>(opt_device_type.value())].test_once()) {
-      // If the device is not initialized, no pointer can be pinned for it
-      return false;
-    }
-    return getAcceleratorHooksInterface(opt_device_type).isPinnedPtr(data);
-  }
-
-  Allocator* getPinnedMemoryAllocator(
-      std::optional<c10::DeviceType> device_type = std::nullopt) {
-    return getAcceleratorHooksInterface(device_type).getPinnedMemoryAllocator();
-  }
-
   void lazyInitDevice(c10::DeviceType device_type) {
     if (device_type != at::kCPU) {
       c10::call_once(init_[static_cast<int8_t>(device_type)], [&] {
         getAcceleratorHooksInterface(device_type).init();
       });
     }
+  }
+
+  bool isInitialized(c10::DeviceType device_type) {
+    if (!init_[static_cast<int8_t>(device_type)].test_once()) {
+      return false;
+    }
+
+    return true;
   }
 
   static bool hasOpenMP();
@@ -365,30 +351,65 @@ class TORCH_API Context {
   void setAllowFP16ReductionCPU(bool);
 
   // Preserved for BC
-  void lazyInitCUDA() {
+  [[deprecated("Please use lazyInitDevice(at::kCUDA) instead")]] void
+  lazyInitCUDA() {
     TORCH_WARN_DEPRECATION(
         "lazyInitCUDA is deprecated. Please use lazyInitDevice(at::kCUDA) instead.")
     lazyInitDevice(at::kCUDA);
   }
-  void lazyInitHIP() {
+
+  [[deprecated("Please use lazyInitDevice(at::kHIP) instead")]] void
+  lazyInitHIP() {
     TORCH_WARN_DEPRECATION(
         "lazyInitHIP is deprecated. Please use lazyInitDevice(at::kHIP) instead.")
     lazyInitDevice(at::kHIP);
   }
-  void lazyInitXPU() {
+
+  [[deprecated("Please use lazyInitDevice(at::kXPU) instead")]] void
+  lazyInitXPU() {
     TORCH_WARN_DEPRECATION(
         "lazyInitXPU is deprecated. Please use lazyInitDevice(at::kXPU) instead.")
     lazyInitDevice(at::kXPU);
   }
-  void lazyInitMTIA() {
+
+  [[deprecated("Please use lazyInitDevice(at::kMTIA) instead")]] void
+  lazyInitMTIA() {
     TORCH_WARN_DEPRECATION(
         "lazyInitMTIA is deprecated. Please use lazyInitDevice(at::kMTIA) instead.")
     lazyInitDevice(at::kMTIA);
   }
-  void lazyInitPrivateUse1() {
+
+  [[deprecated("Please use lazyInitDevice(at::kPrivateUse1) instead")]] void
+  lazyInitPrivateUse1() {
     TORCH_WARN_DEPRECATION(
         "lazyInitPrivateUse1 is deprecated. Please use lazyInitDevice(at::kPrivateUse1) instead.")
     lazyInitDevice(at::kPrivateUse1);
+  }
+
+  [[deprecated(
+      "Please use getAcceleratorHooksInterface(device_type).isPinnedPtr(data) instead")]] bool
+  isPinnedPtr(
+      const void* data,
+      std::optional<c10::DeviceType> device_type = std::nullopt) {
+    auto opt_device_type =
+        device_type.has_value() ? device_type : at::getAccelerator();
+    if (!opt_device_type.has_value() || // there is no accelerator
+        !at::isAccelerator(
+            opt_device_type.value()) || // passed device not an accelerator
+        !isInitialized(
+            opt_device_type.value())) { // If the device is not initialized, no
+                                        // pointer can be pinned for it
+      return false;
+    }
+
+    return getAcceleratorHooksInterface(opt_device_type).isPinnedPtr(data);
+  }
+
+  [[deprecated(
+      "Please use getAcceleratorHooksInterface(device_type).getPinnedMemoryAllocator() instead")]] Allocator*
+  getPinnedMemoryAllocator(
+      std::optional<c10::DeviceType> device_type = std::nullopt) {
+    return getAcceleratorHooksInterface(device_type).getPinnedMemoryAllocator();
   }
 
  private:
