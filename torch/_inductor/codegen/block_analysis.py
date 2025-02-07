@@ -156,9 +156,8 @@ class BlockPatternMatcher:
         index_var: Symbol,
     ) -> Optional[Expr]:
         """
-        Matches simple expressions of the from stride * index, returning the
+        Matches simple expressions of the form stride * index, returning the
         stride.
-        See triton.py for more information.
         """
         index = cls._preprocess(index)
         stride = sympy.Wild("stride", exclude=[index_var])
