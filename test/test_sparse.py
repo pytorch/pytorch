@@ -1358,10 +1358,6 @@ class TestSparse(TestSparseBase):
         test_shape(10, 100, 0, 0)
         test_shape(10, 100, 0, 20)
 
-    @unittest.skipIf(
-        IS_WINDOWS and TEST_CUDA,
-        "bmm sparse-dense CUDA is not yet supported in Windows, at least up to CUDA 10.1"
-    )
     @coalescedonoff
     @dtypes(torch.double)
     def test_bmm(self, device, dtype, coalesced):
@@ -1416,10 +1412,6 @@ class TestSparse(TestSparseBase):
     @onlyCUDA
     @coalescedonoff
     @dtypes(torch.double)
-    @unittest.skipIf(
-        IS_WINDOWS,
-        "bmm sparse-dense CUDA is not yet supported in Windows, at least up to CUDA 10.1"
-    )
     def test_bmm_deterministic(self, device, dtype, coalesced):
         def test_shape(num_mats, dim_i, dim_j, dim_k, nnz):
             a_list = []
@@ -1454,10 +1446,6 @@ class TestSparse(TestSparseBase):
         test_shape(10, 10, 100, 0, 20)
 
     @onlyCUDA
-    @unittest.skipIf(
-        IS_WINDOWS and TEST_CUDA,
-        "bmm sparse-dense CUDA is not yet supported in Windows, at least up to CUDA 10.1"
-    )
     def test_bmm_oob(self, device):
         # Targets an out of bounds error when the sparse tensor has no non-zero
         # values in the first batch dimension (#131977).
