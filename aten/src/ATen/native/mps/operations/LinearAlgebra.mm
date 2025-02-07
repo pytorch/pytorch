@@ -1010,6 +1010,7 @@ static void lu_unpack_mps_impl(const Tensor& LU_data,
                                const Tensor& P,
                                const Tensor& L,
                                const Tensor& U) {
+  checkAllSameGPU("lu_unpack", {LU_data, LU_pivots, P, L, U});
   const auto ndim = LU_data.dim();
   TORCH_CHECK(ndim >= 2, "LU_data must have at least 2 dimensions");
 
