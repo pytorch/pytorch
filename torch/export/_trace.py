@@ -1399,22 +1399,6 @@ def _strict_export_lower_to_aten_ir(
     export_graph_signature = aten_export_artifact.sig
     constants = aten_export_artifact.constants
 
-    # update unbacked bindings that might have gone out of sync
-    # between Dynamo and AOTAutograd
-    for node in gm.graph.nodes:
-        if "unbacked_bindings" in node.meta:
-            old_unbacked_bindings = node.meta["unbacked_bindings"]
-            val = node.meta["val"]
-            new_unbacked_bindings = {}
-            for key in old_unbacked_bindings.values():
-                expr = pytree.key_get(val, key).node.expr
-                if expr.is_symbol:
-                    new_unbacked_bindings[expr] = key
-            if new_unbacked_bindings:
-                node.meta["unbacked_bindings"] = new_unbacked_bindings
-            else:
-                del node.meta["unbacked_bindings"]
-
     _populate_param_buffer_metadata_to_new_gm(
         params_buffers_to_node_meta, gm, export_graph_signature
     )

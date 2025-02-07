@@ -635,9 +635,19 @@ class GraphModuleSerializer(metaclass=Final):
         if unbacked_bindings := node.meta.get("unbacked_bindings"):
             # serialize the symbol names of unbacked bindings;
             # reconstruct the key paths to those symbols when deserializing
-            ret["unbacked_bindings"] = ",".join(
-                u.name for u in unbacked_bindings.keys()
-            )
+            val = node.meta["val"]
+            new_unbacked_bindings = {}
+            for key in unbacked_bindings.values():
+                expr = pytree.key_get(val, key).node.expr
+                if expr.is_symbol and (
+                    expr.name.startswith(prefix_str[SymT.UNBACKED_FLOAT])
+                    or expr.name.startswith(prefix_str[SymT.UNBACKED_INT])
+                ):
+                    new_unbacked_bindings[expr] = key
+            if new_unbacked_bindings:
+                ret["unbacked_bindings"] = ",".join(
+                    u.name for u in new_unbacked_bindings.keys()
+                )
 
         if stack_trace := node.meta.get("stack_trace"):
             ret["stack_trace"] = stack_trace
