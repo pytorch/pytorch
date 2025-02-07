@@ -5,7 +5,7 @@ import contextlib
 import functools
 import inspect
 import operator
-from typing import Deque, Dict, List, TYPE_CHECKING
+from typing import TYPE_CHECKING
 
 import torch._C
 import torch.utils._pytree as pytree
@@ -253,7 +253,9 @@ class SymbolicTorchFunctionState:
 
         TorchFunctionModeStackVariable.reset()
 
-        self.mode_stack: Deque[TorchFunctionModeVariable] = collections.deque()
+        self.mode_stack: collections.deque[
+            TorchFunctionModeVariable
+        ] = collections.deque()
 
         for i, val in enumerate(py_stack):
             self.mode_stack.append(
@@ -657,8 +659,8 @@ class TensorWithTFOverrideVariable(TensorVariable):
         self,
         tx,
         name,
-        args: "List[VariableTracker]",
-        kwargs: "Dict[str, VariableTracker]",
+        args: "list[VariableTracker]",
+        kwargs: "dict[str, VariableTracker]",
     ) -> "VariableTracker":
         # This code block implements inlining the __torch_function__ override
         # of `call_method`.

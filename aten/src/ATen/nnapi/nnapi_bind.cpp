@@ -112,8 +112,7 @@ void NnapiCompilation::init2(
 void NnapiCompilation::run(
     std::vector<at::Tensor> inputs,
     std::vector<at::Tensor> outputs) {
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  ANeuralNetworksExecution* execution;
+  ANeuralNetworksExecution* execution = nullptr;
   check_nnapi->Execution_create(compilation_.get(), &execution);
   ExecutionPtr execution_unique_ptr(execution);
 
@@ -150,8 +149,7 @@ void NnapiCompilation::run(
   // TODO: Maybe skip this for fixed-size outputs?
   for (const auto i : c10::irange(outputs.size())) {
     auto& t = outputs[i];
-    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-    uint32_t rank;
+    uint32_t rank = 0;
     check_nnapi->Execution_getOutputOperandRank(execution, i, &rank);
     std::vector<uint32_t> dims(rank);
     check_nnapi->Execution_getOutputOperandDimensions(execution, i, dims.data());

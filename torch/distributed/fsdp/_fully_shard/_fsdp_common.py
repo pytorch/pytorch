@@ -3,7 +3,7 @@ import math
 import traceback
 from dataclasses import dataclass
 from enum import auto, Enum
-from typing import Any, List, Optional
+from typing import Any, Optional
 
 import torch
 import torch.distributed as dist
@@ -120,7 +120,7 @@ def _get_dim0_padded_size(tensor_size: torch.Size, dim0_factor: int) -> torch.Si
 
 def _chunk_with_empty(
     tensor: torch.Tensor, num_chunks: int, dim: int
-) -> List[torch.Tensor]:
+) -> list[torch.Tensor]:
     chunks = list(torch.chunk(tensor, num_chunks, dim=dim))
     while len(chunks) < num_chunks:
         chunks.append(chunks[0].new_empty(0))

@@ -1,6 +1,6 @@
 # mypy: allow-untyped-defs
 import warnings
-from typing import Optional, Tuple
+from typing import Optional
 
 import torch
 import torch.nn.functional as F
@@ -1146,7 +1146,7 @@ class MultiheadAttention(Module):
         attn_mask: Optional[Tensor] = None,
         average_attn_weights: bool = True,
         is_causal: bool = False,
-    ) -> Tuple[Tensor, Optional[Tensor]]:
+    ) -> tuple[Tensor, Optional[Tensor]]:
         r"""Compute attention outputs using query, key, and value embeddings.
 
             Supports optional parameters for padding, masks and attention weights.
@@ -1401,7 +1401,7 @@ class MultiheadAttention(Module):
         attn_mask: Optional[Tensor],
         key_padding_mask: Optional[Tensor],
         query: Tensor,
-    ) -> Tuple[Optional[Tensor], Optional[int]]:
+    ) -> tuple[Optional[Tensor], Optional[int]]:
         r"""Determine mask type and combine masks if necessary.
 
         If only one mask is provided, that mask
