@@ -1,16 +1,21 @@
 # Owner(s): ["module: inductor"]
 
+import math
 import os
 
 from triton.testing import do_bench
 
 import torch
 import torch._inductor.config as inductor_config
+from torch._dynamo.utils import same
 from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import run_and_get_code
-from torch.testing._internal.common_utils import IS_LINUX, parametrize, instantiate_parametrized_tests
-from torch.testing._internal.inductor_utils import HAS_CUDA, GPU_TYPE
-from torch._dynamo.utils import same
+from torch.testing._internal.common_utils import (
+    instantiate_parametrized_tests,
+    IS_LINUX,
+    parametrize,
+)
+from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_CUDA
 
 
 DO_PERF_TEST = os.environ.get("DO_PERF_TEST") == "1"
@@ -43,7 +48,7 @@ class TestOnlineSoftmax(TestCase):
     def test_log_softmax(self):
         self.do_test_acc_and_perf(torch.log_softmax)
 
-    def get_softmax_wrapper(self, V=50304, use_log_softmax=False):
+    def get_softmax_wrapper(self, V=50304, use_log_softmax=False, device=GPU_TYPE):
         N = 32 * 1024
 
         @torch.compile
@@ -53,7 +58,7 @@ class TestOnlineSoftmax(TestCase):
             else:
                 return torch.softmax(x, dim=-1)
 
-        x = torch.randn(N, V, dtype=torch.bfloat16, device=GPU_TYPE)
+        x = torch.randn(N, V, dtype=torch.bfloat16, device=device)
         out, source_codes = run_and_get_code(f, x)
         return source_codes[0]
 
@@ -70,6 +75,12 @@ class TestOnlineSoftmax(TestCase):
 
         self.assertEqual(wrapper_code.count("for r0_offset in"), 2)
 
+    def test_no_online_softmax_for_cpu(self):
+        code = self.get_softmax_wrapper(V=2048, device="cpu")
+
+        # CPU need an explicit loop across different rows.
+        # For GPU, this is parallelized by the hardware.
+        self.assertEqual(code.count("for(int64_t"), 4)
 
     def test_codegen_softmax_persistent_reduction(self):
         """
@@ -78,11 +89,34 @@ class TestOnlineSoftmax(TestCase):
         wrapper_code = self.get_softmax_wrapper(1024)
         self.assertEqual(wrapper_code.count("for r0_offset in"), 0)
 
-    # This test only work if we use pattern matcher rather the decompose
-    # softmax/log_softmax specially.
+    @inductor_config.patch("triton.persistent_reductions", False)
+    def test_sdpa(self):
+        """
+        Make sure online softmax here does not conflict with the sdpa
+        patterns.
+        """
+        q, k, v = (
+            torch.randn((4, 2, 16, 32), device=GPU_TYPE, dtype=torch.bfloat16)
+            for _ in range(3)
+        )
+
+        def f(q, k, v):
+            return (
+                torch.matmul(q, k.transpose(-2, -1))
+                .div(math.sqrt(k.shape[-1]))
+                .softmax(dim=-1)
+                .matmul(v)
+            )
+
+        opt_f = torch.compile(f)
+        ref = f(q, k, v)
+        act, (code,) = run_and_get_code(opt_f, q, k, v)
+        self.assertTrue(torch.allclose(ref, act, atol=1e-2, rtol=1e-2))
+        self.assertTrue("aten._scaled_dot_product_" in code)
+
     @parametrize("nrow", [2, 2048])
     @parametrize("dim", [-1, 0, 1])
-    def no_test_prepare_softmax(self, dim, nrow):
+    def test_prepare_softmax(self, dim, nrow):
         def f(x, dim):
             xmax = x.amax(dim=dim, keepdim=True)
             xsum = (x - xmax).exp().sum(dim=dim, keepdim=True)
@@ -100,6 +134,7 @@ class TestOnlineSoftmax(TestCase):
             # A single loop due to online softmax
             expected_num_loop = 1
         self.assertEqual(code.count("for r0_offset in"), expected_num_loop)
+
 
 instantiate_parametrized_tests(TestOnlineSoftmax)
 

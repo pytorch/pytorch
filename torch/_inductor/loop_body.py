@@ -17,8 +17,12 @@ from torch.utils._sympy.symbol import SymT
 
 from . import config, dependencies
 from .codegen.common import index_prevent_reordering
-from .ops_handler import  WrapperHandler
-from .utils import cache_on_self, sympy_index_symbol_with_prefix, sympy_subs, reduction_num_outputs
+from .utils import (
+    cache_on_self,
+    reduction_num_outputs,
+    sympy_index_symbol_with_prefix,
+    sympy_subs,
+)
 from .virtualized import ops, V
 
 
@@ -475,10 +479,9 @@ class LoopBodyBlock:
                 )
                 return self._inner.store_reduction(name, index, value)
 
-
             def reduction(self, dtype, src_dtype, reduction_type, value):
                 result = self._inner.reduction(dtype, src_dtype, reduction_type, value)
-        
+
                 num_outputs = reduction_num_outputs(reduction_type)
                 if num_outputs > 1:
                     return tuple(result[i] for i in range(num_outputs))
