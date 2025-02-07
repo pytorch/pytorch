@@ -417,6 +417,10 @@ enable_cpp_symbolic_shape_guards = False
 # Enable tracing through contextlib.contextmanager
 enable_trace_contextlib = True
 
+# Enable tracing generator functions lazily. If False, Dynamo will exhaust
+# generators upon first execution. And if True, the generator will be accessed lazily
+enable_faithful_generator_behavior = False
+
 # Inline inbuilt nn modules
 inline_inbuilt_nn_modules = Config(  # type: ignore[var-annotated]
     default=True,

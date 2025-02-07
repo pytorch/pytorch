@@ -493,7 +493,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
             ):
                 if not torch._dynamo.config.enable_trace_contextlib:
                     unimplemented("contextlib.contextmanager")
-                # Replace UserFunctionVariable by FunctionDecoratedBycontextlibContextManagerVariable
+                # Wrap UserFunctionVariable in FunctionDecoratedByContextlibContextManagerVariable
                 # if the function is annotated with @contextlib.contextmanager
                 # This shouldn't be necessary once generator functions are fully
                 # supported in dynamo
@@ -804,6 +804,11 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 # TODO(anijain2305) - Identity checking should already be a part
                 # of the cmp_eq  polyfill function.
                 return ConstantVariable.create(self.value is other.value)
+
+            if torch._dynamo.config.enable_faithful_generator_behavior and isinstance(
+                self.value, types.GeneratorType
+            ):
+                unimplemented("Generator as graph argument is not supported")
 
             # check for methods implemented in C++
             if isinstance(method, types.FunctionType):
