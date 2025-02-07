@@ -177,7 +177,7 @@ if [[ $CUDA_VERSION == 12* ]]; then
                 "/usr/local/cuda/lib64/libcufile_rdma.so.1"
             )
             DEPS_SONAME+=(
-                 "libcufile.so.0"
+                "libcufile.so.0"
                 "libcufile_rdma.so.1"
             )
         fi
