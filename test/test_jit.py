@@ -1,4 +1,5 @@
 # Owner(s): ["oncall: jit"]
+# ruff: noqa: F841
 
 import torch
 
@@ -107,10 +108,10 @@ from torch.testing._internal.jit_utils import JitTestCase, enable_cpu_fuser, dis
 from torch.testing._internal.jit_metaprogramming_utils import (
     get_script_args,
     create_input, unpack_variables,
-    additional_module_tests, EXCLUDE_SCRIPT_MODULES,
+    get_all_nn_module_tests, EXCLUDE_SCRIPT_MODULES,
     get_nn_module_name_from_kwargs, get_nn_mod_test_name, script_method_template)
 
-from torch.testing._internal.common_nn import module_tests, new_module_tests, criterion_tests
+from torch.testing._internal.common_nn import criterion_tests
 
 # For testing truediv in python 2
 from torch.testing._internal.test_module.future_div import div_int_future, div_float_future
@@ -16247,7 +16248,7 @@ class TestProducerVersion(TestCase):
         # issue gh-32561
         self.assertTrue(torch.__version__.startswith(torch.onnx.producer_version))
 
-for test in module_tests + new_module_tests + additional_module_tests:
+for test in get_all_nn_module_tests():
     add_nn_module_test(**test)
 
 for test in criterion_tests:

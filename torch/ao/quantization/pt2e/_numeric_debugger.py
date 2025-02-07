@@ -1,10 +1,12 @@
 import copy
 import logging
+from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import Callable, Dict, List, Optional, Sequence, Tuple
+from typing import Callable, Optional
 
 import torch
 from torch.ao.ns.fx.utils import compute_sqnr
+from torch.ao.quantization.pt2e.graph_utils import bfs_trace_with_node_process
 from torch.export import ExportedProgram
 from torch.fx import GraphModule, Node
 from torch.nn import functional as F
@@ -42,25 +44,79 @@ def generate_numeric_debug_handle(ep: ExportedProgram) -> None:
         )
 
     unique_id = 0
-    # Find the max ID that exists in the graph first, in case part of the graph
-    # has already been annotated. This way we guarantee there are no duplicate
-    # handle IDs.
-    for node in ep.graph.nodes:
+
+    def _find_max_id(node: torch.fx.Node) -> None:
+        nonlocal unique_id
         unique_id = max(
             unique_id, node.meta.get(CUSTOM_KEY, {}).get(NUMERIC_DEBUG_HANDLE_KEY, 0)
         )
-    unique_id += 1
 
-    for node in ep.graph.nodes:
-        if node.op in ["output", "placeholder"]:
-            continue
-
+    def _assign_debug_handle(node: torch.fx.Node) -> None:
+        nonlocal unique_id
         if CUSTOM_KEY not in node.meta:
             node.meta[CUSTOM_KEY] = {}
 
         if NUMERIC_DEBUG_HANDLE_KEY not in node.meta[CUSTOM_KEY]:
             node.meta[CUSTOM_KEY][NUMERIC_DEBUG_HANDLE_KEY] = unique_id
             unique_id += 1
+
+    # Find the max ID that exists in the graph first, in case part of the graph
+    # has already been annotated. This way we guarantee there are no duplicate
+    # handle IDs.
+    bfs_trace_with_node_process(ep, _find_max_id)
+
+    unique_id += 1
+
+    # Assign debug handles to all nodes in the graph that don't have one based on the
+    # max ID found in the previous step.
+    bfs_trace_with_node_process(ep, _assign_debug_handle)
+
+
+def _detach(x: object) -> object:
+    detached: object = None
+    if isinstance(x, torch.Tensor):
+        detached = x.detach()
+    elif isinstance(x, (list, tuple)):
+        detached = type(x)([_detach(e) for e in x])
+    elif isinstance(x, dict):
+        detached = {k: _detach(e) for k, e in x.items()}
+    else:
+        detached = x
+    return detached
+
+
+def _tensor_shape_equals(x: object, y: object) -> bool:
+    if isinstance(x, torch.Tensor) and isinstance(y, torch.Tensor):
+        return x.shape == y.shape
+    elif isinstance(x, (list, tuple)) and isinstance(y, (list, tuple)):
+        return all(_tensor_shape_equals(e1, e2) for e1, e2 in zip(x, y))
+    elif isinstance(x, dict) and isinstance(y, dict):
+        all_equal = True
+        for k in x:
+            all_equal = all_equal and k in y and (_tensor_shape_equals(x[k], y[k]))
+        return all_equal
+    else:
+        log.debug("Comparing non Tensors: %s and %s, they must be equal", x, y)
+        return type(x) == type(y) and x == y
+
+
+def _loss_fn(
+    loss: Callable[[torch.Tensor, torch.Tensor], torch.Tensor], x: object, y: object
+) -> object:
+    """The returned loss will have the same structure as `x` and `y`, e.g.
+    if both are Tensor, we'll return a Tensor
+    if both are list, we'll return a list of Tensors
+    if both are dict, we'll return a dict with the same key, and value being the loss between the
+    two Tensors
+    """
+    if isinstance(x, torch.Tensor) and isinstance(y, torch.Tensor):
+        return loss(x.to(torch.float32), y.to(torch.float32))
+    elif isinstance(x, (list, tuple)) and isinstance(y, (list, tuple)):
+        return type(x)([_loss_fn(loss, e1, e2) for e1, e2 in zip(x, y)])
+    elif isinstance(x, dict) and isinstance(y, dict):
+        return {k: _loss_fn(loss, e, y[k]) for k, e in x.items()}
+    else:
+        return None
 
 
 class OutputLogger(torch.nn.Module):
@@ -82,11 +138,10 @@ class OutputLogger(torch.nn.Module):
         self.node_name = node_name
         self.nn_module_stack = nn_module_stack
         self.debug_handle = debug_handle
-        self.stats: List[torch.Tensor] = []
+        self.stats: list[object] = []
 
     def forward(self, x: object) -> object:
-        if isinstance(x, torch.Tensor):
-            self.stats.append(x.detach())
+        self.stats.append(_detach(x))
         return x
 
     def __extra_repr__(self) -> str:
@@ -154,27 +209,17 @@ class QuantizationComparisonResult:
     ref: torch.Tensor
 
     @property
-    def mse_loss(self) -> torch.Tensor:
-        return F.mse_loss(
-            self.actual.to(dtype=torch.float32), self.ref.to(dtype=torch.float32)
-        )
+    def mse_loss(self) -> object:
+        return self.loss(F.mse_loss)
 
     @property
-    def sqnr(self) -> torch.Tensor:
-        return compute_sqnr(
-            self.actual.to(dtype=torch.float32), self.ref.to(dtype=torch.float32)
-        )
+    def sqnr(self) -> object:
+        return self.loss(compute_sqnr)
 
     def loss(
         self, loss_function: Callable[[torch.Tensor, torch.Tensor], torch.Tensor]
-    ) -> torch.Tensor:
-        if self.actual.shape != self.ref.shape:
-            raise ValueError(
-                f"Cannot compare tensors with different shapes: {self.actual.shape} vs {self.ref.shape}"
-            )
-        return loss_function(
-            self.actual.to(dtype=torch.float32), self.ref.to(dtype=torch.float32)
-        )
+    ) -> object:
+        return _loss_fn(loss_function, self.actual, self.ref)
 
     def __repr__(self) -> str:
         # Don't include the tensors themselves as they are quite large to print
@@ -184,16 +229,19 @@ class QuantizationComparisonResult:
         )
 
     def __post_init__(self) -> None:
-        if not isinstance(self.actual, torch.Tensor):
+        if not isinstance(self.actual, (torch.Tensor, list, tuple, dict)):
             raise ValueError(
-                f"`self.actual` value must be a Tensor, got: {self.actual}"
+                f"`self.actual` value must be a Tensor, list, tuple or dict, got: {self.actual}"
             )
 
-        if not isinstance(self.ref, torch.Tensor):
-            raise ValueError(f"`self.ref` value must be a Tensor, got: {self.ref}")
-        if self.actual.shape != self.ref.shape:
+        if not isinstance(self.ref, (torch.Tensor, list, tuple, dict)):
             raise ValueError(
-                f"Cannot compare tensors with different shapes: ref={self.ref.shape} vs actual={self.actual.shape}"
+                f"`self.ref` value must be a Tensor, list, tuple or dict, got: {self.ref}"
+            )
+
+        if not _tensor_shape_equals(self.ref, self.actual):
+            raise ValueError(
+                f"Cannot compare tensors with different shapes: ref={self.ref} vs actual={self.actual}"
             )
 
 
@@ -223,14 +271,18 @@ def _module_stack_to_str(module_stack: object) -> str:
 
 def extract_results_from_loggers(
     model: GraphModule,
-) -> Dict[int, Tuple[Optional[str], object, List[torch.Tensor]]]:
+) -> dict[int, tuple[Optional[str], object, list[object]]]:
     """For a given model, extract the tensors stats and related information for each debug handle.
+    The reason we have a list of object, instead of Tensor is because the output of node may not be
+    a Tensor, it could be (nested) list, tuple or dict as well.
 
     Returns:
-        A dict is keyed by the debug_handle id and the values are a list of Tensors recorded
-        in loggers"""
+        A dict is keyed by the debug_handle id and the values are a list of object recorded
+        in loggers
+
+    """
     # Results maps debug handle to a tensor list for each model being compared.
-    handles: Dict[int, Tuple[Optional[str], object, List[torch.Tensor]]] = {}
+    handles: dict[int, tuple[Optional[str], object, list[object]]] = {}
     for _name, module in model.named_children():
         if isinstance(module, OutputLogger) and len(module.stats) > 0:
             handles[module.debug_handle] = (
@@ -243,9 +295,9 @@ def extract_results_from_loggers(
 
 
 def compare_results(
-    ref_results: Dict[int, Tuple[Optional[str], object, List[torch.Tensor]]],
-    actual_results: Dict[int, Tuple[Optional[str], object, List[torch.Tensor]]],
-) -> Dict[int, NodeAccuracySummary]:
+    ref_results: dict[int, tuple[Optional[str], object, list[torch.Tensor]]],
+    actual_results: dict[int, tuple[Optional[str], object, list[torch.Tensor]]],
+) -> dict[int, NodeAccuracySummary]:
     """Given two dict mapping from `debug_handle_id` (int) to list of tensors
     return a map from `debug_handle_id` to `NodeAccuracySummary` that contains
     comparison information like SQNR, MSE etc.

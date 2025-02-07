@@ -101,7 +101,7 @@ class DynamoProfilerTests(torch._dynamo.test_case.TestCase):
         with TemporaryFileName() as fname:
             et.register_callback(fname)
             et.start()
-            out = opt_fn(*inputs)
+            opt_fn(*inputs)
             et.stop()
             et.unregister_callback()
 

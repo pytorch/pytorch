@@ -157,7 +157,9 @@ if(USE_ROCM)
       USE_ROCM
       __HIP_PLATFORM_AMD__
       )
-    list(APPEND TORCH_PYTHON_LINK_LIBRARIES ${ROCM_ROCTX_LIB})
+    if(NOT WIN32)
+      list(APPEND TORCH_PYTHON_LINK_LIBRARIES ${ROCM_ROCTX_LIB})
+    endif()
 endif()
 
 if(USE_XPU)
@@ -310,7 +312,7 @@ endif()
 
 add_library(torch_python SHARED ${TORCH_PYTHON_SRCS})
 torch_compile_options(torch_python)  # see cmake/public/utils.cmake
-if(NOT WIN32)
+if(APPLE)
   target_compile_options(torch_python PRIVATE
       $<$<COMPILE_LANGUAGE:CXX>: -fvisibility=default>)
 endif()

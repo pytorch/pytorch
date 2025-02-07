@@ -171,7 +171,7 @@ class ReorderLogsTests(torch._dynamo.test_case.TestCase):
         counters.clear()
         with torch._dynamo.config.patch(reorderable_logging_functions={custom_log}):
             opt_f = torch.compile(backend="eager")(f)
-            opt_out = opt_f(x)
+            opt_f(x)
 
         self.assertEqual(sum(counters["graph_break"].values()), 1)
         self.assertEqual(custom_logs[0], "moo")

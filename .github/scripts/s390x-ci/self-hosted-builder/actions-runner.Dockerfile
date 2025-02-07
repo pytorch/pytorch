@@ -1,12 +1,12 @@
 # Self-Hosted IBM Z Github Actions Runner.
 
 # Temporary image: amd64 dependencies.
-FROM docker.io/amd64/ubuntu:23.10 as ld-prefix
+FROM --platform=linux/amd64 docker.io/ubuntu:24.04 as ld-prefix
 ENV DEBIAN_FRONTEND=noninteractive
-RUN apt-get update && apt-get -y install ca-certificates libicu72 libssl3
+RUN apt-get update && apt-get -y install ca-certificates libicu74 libssl3
 
 # Main image.
-FROM docker.io/s390x/ubuntu:23.10
+FROM --platform=linux/s390x docker.io/ubuntu:24.04
 
 # Packages for pytorch building and testing.
 ENV DEBIAN_FRONTEND=noninteractive

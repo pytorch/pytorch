@@ -95,12 +95,12 @@ class TestModuleTracker(TestCase):
         inp = torch.rand(1, 2, requires_grad=True)
 
         # Should not fail
-        with ModuleTracker() as tracker:
+        with ModuleTracker():
             res = mod(inp)
             res.sum().backward()
 
         # Should not fail
-        with ModuleTracker() as tracker:
+        with ModuleTracker():
             res = checkpoint(lambda inp: mod(inp), inp)
             res.sum().backward()
 

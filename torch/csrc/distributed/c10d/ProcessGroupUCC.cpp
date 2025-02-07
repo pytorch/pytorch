@@ -105,7 +105,7 @@ std::unordered_map<std::string, std::string> torch_ucc_envs_map = {
     //                                                   on selected operations
     // Supported operations:
     // [allgather,allgather_base,allreduce,alltoall,broadcast,
-    //  gather,reduce,reduce_scatter,scatter,send,recv]
+    //  gather,reduce,reduce_scatter, reduce_scatter_base,scatter,send,recv]
     {"TORCH_UCC_BLOCKING_WAIT", "none"},
 
     {"TORCH_UCC_USE_FUTURE", "1"},
@@ -126,6 +126,7 @@ std::vector<OpType> parse_blocking_wait(std::string op_list_string) {
       {"gather", OpType::GATHER},
       {"reduce", OpType::REDUCE},
       {"reduce_scatter", OpType::REDUCE_SCATTER},
+      {"reduce_scatter_base", OpType::_REDUCE_SCATTER_BASE},
       {"scatter", OpType::SCATTER},
       {"send", OpType::SEND},
       {"recv", OpType::RECV},
@@ -1453,6 +1454,48 @@ c10::intrusive_ptr<Work> ProcessGroupUCC::reduce_scatter(
       inputTensors[0],
       outputTensors,
       "ucc:reduce_scatter");
+}
+
+c10::intrusive_ptr<Work> ProcessGroupUCC::_reduce_scatter_base(
+    at::Tensor& outputTensor,
+    at::Tensor& inputTensor,
+    const ReduceScatterOptions& opts) {
+  check_tensor({outputTensor});
+  check_tensor({inputTensor});
+  initComm(outputTensor.device());
+
+  auto data = std::make_unique<WorkData>();
+
+  ucc_coll_args_t coll;
+  coll.mask = 0;
+  coll.flags = 0;
+  coll.coll_type = UCC_COLL_TYPE_REDUCE_SCATTER;
+  coll.op = to_ucc_reduceOp(opts.reduceOp, inputTensor.scalar_type());
+
+  coll.src.info.buffer = inputTensor.data_ptr();
+  coll.src.info.count = inputTensor.numel();
+  coll.src.info.datatype = ucc_dtype_map.at(inputTensor.scalar_type());
+  coll.src.info.mem_type = to_ucc_memType(inputTensor.device().type());
+  coll.dst.info.buffer = outputTensor.data_ptr();
+  coll.dst.info.count = outputTensor.numel();
+  coll.dst.info.datatype = ucc_dtype_map.at(outputTensor.scalar_type());
+  coll.dst.info.mem_type = to_ucc_memType(outputTensor.device().type());
+
+  std::vector<at::Tensor> inputTensors = {inputTensor};
+  std::vector<at::Tensor> outputTensors = {outputTensor};
+  SAVE_TENSORS(inputTensors, data->src);
+  SAVE_TENSORS(outputTensors, data->dst);
+
+  return collective_post(
+      OpType::_REDUCE_SCATTER_BASE,
+      []() {},
+      []() {},
+      coll,
+      std::move(data),
+      outputTensor.device(),
+      inputTensors,
+      outputTensors,
+      "ucc:_reduce_scatter_base");
 }
 
 c10::intrusive_ptr<Work> ProcessGroupUCC::scatter(

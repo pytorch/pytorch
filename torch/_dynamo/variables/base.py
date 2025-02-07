@@ -2,7 +2,7 @@
 
 import collections
 from enum import Enum
-from typing import Any, Callable, Dict, List, Optional, TYPE_CHECKING
+from typing import Any, Callable, Optional, Sequence, TYPE_CHECKING
 
 from .. import variables
 from ..current_scope_id import current_scope_id
@@ -183,11 +183,10 @@ class VariableTrackerMeta(type):
 
     def __instancecheck__(cls, instance) -> bool:
         """Make isinstance work with LazyVariableTracker"""
-        if type.__instancecheck__(
-            variables.LazyVariableTracker, instance
-        ) and cls not in (
-            VariableTracker,
-            variables.LazyVariableTracker,
+        # This is super expensive - just having it costs over 4% of tracing
+        # time!
+        if (type(instance) is variables.LazyVariableTracker) and (
+            cls not in (VariableTracker, variables.LazyVariableTracker)
         ):
             instance = instance.realize()
         return type.__instancecheck__(cls, instance)
@@ -228,7 +227,7 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         cls,
         fn: Callable[["VariableTracker"], None],
         value: Any,
-        cache: Optional[Dict[int, Any]] = None,
+        cache: Optional[dict[int, Any]] = None,
     ) -> None:
         """
         Walk value and call fn on all the VariableTracker instances
@@ -357,10 +356,10 @@ class VariableTracker(metaclass=VariableTrackerMeta):
     def reconstruct(self, codegen):
         raise NotImplementedError
 
-    def unpack_var_sequence(self, tx) -> List["VariableTracker"]:
+    def unpack_var_sequence(self, tx) -> list["VariableTracker"]:
         raise NotImplementedError
 
-    def force_unpack_var_sequence(self, tx) -> List["VariableTracker"]:
+    def force_unpack_var_sequence(self, tx) -> list["VariableTracker"]:
         # like unpack_var_sequence, but should only be used when it is
         # safe to eagerly (vs. lazily) unpack this variable.
         # e.g. map(f, x) is normally evaluated lazily but sometimes
@@ -380,17 +379,19 @@ class VariableTracker(metaclass=VariableTrackerMeta):
     def has_force_unpack_var_sequence(self, tx) -> bool:
         return self.has_unpack_var_sequence(tx)
 
-    def inspect_parameter_names(self) -> List[str]:
+    def inspect_parameter_names(self) -> list[str]:
         unimplemented(f"inspect_parameter_names: {self}")
 
-    def call_hasattr(self, tx: "InstructionTranslator", name: str) -> "VariableTracker":
+    def call_obj_hasattr(
+        self, tx: "InstructionTranslator", name: str
+    ) -> "VariableTracker":
         unimplemented(f"hasattr {self.__class__.__name__} {name}")
 
     def call_function(
         self,
         tx: "InstructionTranslator",
-        args: "List[VariableTracker]",
-        kwargs: "Dict[str, VariableTracker]",
+        args: Sequence["VariableTracker"],
+        kwargs: "dict[str, VariableTracker]",
     ) -> "VariableTracker":
         unimplemented(f"call_function {self} {args} {kwargs}")
 
@@ -398,8 +399,8 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         self,
         tx,
         name,
-        args: "List[VariableTracker]",
-        kwargs: "Dict[str, VariableTracker]",
+        args: "list[VariableTracker]",
+        kwargs: "dict[str, VariableTracker]",
     ) -> "VariableTracker":
         if name == "__len__" and self.has_unpack_var_sequence(tx):
             assert not (args or kwargs)
@@ -449,8 +450,6 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         source: Optional[Source] = None,
     ) -> Any:
         """Create a new VariableTracker from a value and optional Source"""
-        from . import builder
-
         if source is None:
             return builder.SourcelessBuilder.create(tx, value)
         else:
@@ -493,3 +492,6 @@ def typestr(*objs):
             return type(obj).__name__
     else:
         return " ".join(map(typestr, objs))
+
+
+from . import builder

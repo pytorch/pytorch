@@ -250,8 +250,7 @@ void apply_lapack_eigh(const Tensor& values, const Tensor& vectors, const Tensor
   int liwork = -1;
   scalar_t lwork_query;
   value_t rwork_query;
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  int iwork_query;
+  int iwork_query = 0;
 
   // call lapackSyevd once to get the optimal size for work data
   lapackSyevd<scalar_t, value_t>(jobz, uplo, n, vectors_data, lda, values_data,
@@ -339,8 +338,7 @@ static void apply_geqrf(const Tensor& input, const Tensor& tau) {
   auto n = input.size(-1);
   auto lda = std::max<int64_t>(1, m);
 
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  int info;
+  int info = 0;
   // Run once, first to get the optimum work size.
   // Since we deal with batches of matrices with the same dimensions, doing this outside
   // the loop saves (batch_size - 1) workspace queries which would provide the same result
@@ -410,8 +408,7 @@ inline void apply_orgqr(Tensor& self, const Tensor& tau) {
   auto n = self.size(-1);
   auto k = tau.size(-1);
   auto lda = std::max<int64_t>(1, m);
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  int info;
+  int info = 0;
 
   // LAPACK's requirement
   TORCH_INTERNAL_ASSERT(m >= n);
@@ -609,7 +606,7 @@ void apply_lstsq(const Tensor& A, Tensor& B, Tensor& rank, Tensor& singular_valu
 // This is a type and driver dispatching helper function for 'apply_lstsq'
 void lstsq_kernel(const Tensor& a, Tensor& b, Tensor& rank, Tensor& singular_values, Tensor& infos, double rcond, std::string driver_name) {
 
-  static auto driver_string_to_type = std::unordered_map<c10::string_view, LapackLstsqDriverType>({
+  static auto driver_string_to_type = std::unordered_map<std::string_view, LapackLstsqDriverType>({
     {"gels", at::native::LapackLstsqDriverType::Gels},
     {"gelsy", at::native::LapackLstsqDriverType::Gelsy},
     {"gelsd", at::native::LapackLstsqDriverType::Gelsd},
@@ -1087,7 +1084,7 @@ static void apply_svd(const Tensor& A,
 void svd_kernel(const Tensor& A,
                 const bool full_matrices,
                 const bool compute_uv,
-                const std::optional<c10::string_view>& driver,
+                const std::optional<std::string_view>& driver,
                 const Tensor& U,
                 const Tensor& S,
                 const Tensor& Vh,

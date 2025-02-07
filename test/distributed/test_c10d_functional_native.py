@@ -1,7 +1,6 @@
 # Owner(s): ["module: c10d"]
 import threading
 import unittest
-from typing import List
 
 import torch
 import torch.distributed as dist
@@ -65,7 +64,7 @@ class TestWithNCCL(MultiProcessTestCase):
         return 2
 
     @property
-    def ranks(self) -> List[int]:
+    def ranks(self) -> list[int]:
         return list(range(self.world_size))
 
     @property
@@ -429,7 +428,7 @@ class TestWithNCCL(MultiProcessTestCase):
 
         input = torch.full((10, 10), float(self.rank), device=self.device)
         self.assertEqual(torch._C._distributed_c10d._get_work_registry_size(), 0)
-        output = torch.ops._c10d_functional.all_reduce(
+        torch.ops._c10d_functional.all_reduce(
             input,
             "avg",
             "default",
@@ -550,13 +549,13 @@ class CompileTest(TestCase):
         assert "= torch.ops._c10d_functional.wait_tensor.default" not in code
 
         # Test aoti
-        out = AOTIRunnerUtil.run("cuda", func, (arg,))
+        AOTIRunnerUtil.run("cuda", func, (arg,))
         torch.cuda.synchronize()
 
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     @fresh_inductor_cache()
     def test_inductor_all_reduce_coalesced(self):
-        def func(args: List[torch.Tensor]) -> torch.Tensor:
+        def func(args: list[torch.Tensor]) -> torch.Tensor:
             bufs = [arg + 42 for arg in args]
             # Expect in-place with inductor allocated buf
             ar0 = funcol.all_reduce_coalesced(bufs, "avg", "0")
@@ -596,7 +595,7 @@ class CompileTest(TestCase):
         assert "= torch.ops._c10d_functional.wait_tensor.default" not in code
 
         # Test aoti
-        out = AOTIRunnerUtil.run("cuda", func, (args,))
+        out = AOTIRunnerUtil.run("cuda", func, (args,))  # noqa: F841
         torch.cuda.synchronize()
 
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
@@ -708,13 +707,13 @@ class CompileTest(TestCase):
         assert "= torch.ops._c10d_functional.wait_tensor.default" not in code
 
         # Test aoti
-        out = AOTIRunnerUtil.run("cuda", func, (arg,))
+        AOTIRunnerUtil.run("cuda", func, (arg,))
         torch.cuda.synchronize()
 
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     @fresh_inductor_cache()
     def test_inductor_all_gather_into_tensor_coalesced(self):
-        def func(args: List[torch.Tensor]) -> torch.Tensor:
+        def func(args: list[torch.Tensor]) -> torch.Tensor:
             ag0 = funcol.all_gather_into_tensor_coalesced(args, "0")
             ag0 = [funcol.wait_tensor(out) for out in ag0]
             return ag0
@@ -742,7 +741,7 @@ class CompileTest(TestCase):
         )
 
         # Test aoti
-        out = AOTIRunnerUtil.run("cuda", func, (args,))
+        out = AOTIRunnerUtil.run("cuda", func, (args,))  # noqa: F841
         torch.cuda.synchronize()
 
     @unittest.skipIf(not HAS_GPU, "This is a GPU test!")
@@ -764,7 +763,7 @@ class CompileTest(TestCase):
         )
 
         # Test aoti
-        out = AOTIRunnerUtil.run("cuda", func, (arg,))
+        AOTIRunnerUtil.run("cuda", func, (arg,))
         torch.cuda.synchronize()
 
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
@@ -790,13 +789,13 @@ class CompileTest(TestCase):
         )
 
         # Test aoti
-        out = AOTIRunnerUtil.run("cuda", func, (arg,))
+        AOTIRunnerUtil.run("cuda", func, (arg,))
         torch.cuda.synchronize()
 
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     @fresh_inductor_cache()
     def test_inductor_reduce_scatter_tensor_coalesced(self):
-        def func(args: List[torch.Tensor]) -> torch.Tensor:
+        def func(args: list[torch.Tensor]) -> torch.Tensor:
             rs0 = funcol.reduce_scatter_tensor_coalesced(
                 args, "avg", [0] * len(args), "0"
             )
@@ -910,7 +909,7 @@ class CompileTest(TestCase):
         )
 
         # Test aoti
-        out = AOTIRunnerUtil.run("cuda", func, (arg,))
+        AOTIRunnerUtil.run("cuda", func, (arg,))
         torch.cuda.synchronize()
 
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")

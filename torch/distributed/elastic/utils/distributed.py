@@ -142,7 +142,7 @@ def get_free_port():
         >>> get_free_port()
         63976
 
-    ..note:
+    .. note::
         The port returned by :func:`get_free_port` is not reserved and may be
         taken by another process after this function returns.
     """

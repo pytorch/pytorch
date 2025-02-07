@@ -7,9 +7,9 @@ import torch
 import torch.distributed as dist
 import torch.nn.functional as F
 from torch import nn
-from torch.distributed._composable.fsdp import fully_shard
 from torch.distributed._composable.replicate import replicate
 from torch.distributed._tensor import DTensor
+from torch.distributed.fsdp import fully_shard
 from torch.testing._internal.common_distributed import (
     MultiProcessTestCase,
     skip_if_lt_x_gpu,
