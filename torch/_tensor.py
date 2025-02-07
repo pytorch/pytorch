@@ -1517,6 +1517,8 @@ class Tensor(torch._C.TensorBase):
         Args:
             ambiguity_check (bool or List[torch.memory_format]): The check method for ambiguity of dim order.
 
+        Examples::
+
             >>> torch.empty((2, 3, 5, 7)).dim_order()
             (0, 1, 2, 3)
             >>> torch.empty((2, 3, 5, 7)).transpose(1, 2).dim_order()
@@ -1539,6 +1541,7 @@ class Tensor(torch._C.TensorBase):
             ... except TypeError as e:
             ...     print(e)
             The ambiguity_check argument must be a bool or a list of memory formats.
+
         .. warning::
             The dim_order tensor API is experimental and subject to change.
         """
