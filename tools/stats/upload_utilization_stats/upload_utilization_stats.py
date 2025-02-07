@@ -429,6 +429,10 @@ if __name__ == "__main__":
         repo = args.repo
     print(f"repo: {repo}")
 
+    if not args.workflow_run_id or not args.workflow_run_attempt or not args.job_id or not args.workflow_name or not args.job_name:
+        print("missing required arguments")
+        sys.exit(1)
+
     workflow_info = WorkflowInfo(
         workflow_run_id=args.workflow_run_id,
         run_attempt=args.workflow_run_attempt,
