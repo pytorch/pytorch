@@ -84,7 +84,22 @@ def _format_param(name: str, optimizer: Optimizer, param):
 
 
 class LRScheduler:
-    r"""Adjusts the learning rate during optimization."""
+    r"""Learning Rate Scheduler Base Class.
+
+    This is the base class for all learning rate schedulers in PyTorch. It provides
+    common functionality for adjusting the learning rate of an optimizer during training.
+
+    .. note::
+        You cannot use LRScheduler directly, see one of the concrete implementations and tutorials
+        `in here <https://pytorch.org/docs/stable/optim.html#how-to-adjust-learning-rate>`_.
+
+
+    Args:
+        optimizer (Optimizer): Wrapped optimizer. (Find more about
+            `optimizer <https://pytorch.org/docs/stable/optim.html#base-class>`_) .
+        last_epoch (int, optional): The index of the last training epoch to resume.
+            Default: -1, starts from first epoch.
+    """
 
     _get_lr_called_within_step: bool = False
 
@@ -206,7 +221,11 @@ class LRScheduler:
                 )
 
     def step(self, epoch: Optional[int] = None):
-        """Perform a step."""
+        """
+        Updates the learning rate for the current epoch.
+
+        The `epoch` parameter is being deprecated, please use `scheduler.step()` to step the scheduler.
+        """
         # Raise a warning if old pattern is detected
         # https://github.com/pytorch/pytorch/issues/20124
         if self._step_count == 1:
