@@ -172,7 +172,7 @@ def _any_str_in_dynamic_shapes(
 def convert_str_to_export_dim(
     dynamic_shapes: dict[str, Any] | tuple[Any, ...] | list[Any] | None,
 ) -> tuple[dict[str, Any] | tuple[Any, ...] | list[Any] | None, bool]:
-    # 0. If there is no string in dynamic_shapes, we do not touch dynamic_shapes
+    # 1. If there is no string in dynamic_shapes, we do not touch dynamic_shapes
     if dynamic_shapes is None or not _any_str_in_dynamic_shapes(dynamic_shapes):
         return dynamic_shapes, False
 
