@@ -24,8 +24,6 @@ from .virtualized import V
 
 
 if TYPE_CHECKING:
-    from functools import partial
-
     from triton import Config as TritonConfig
 
     from torch.utils._ordered_set import OrderedSet
