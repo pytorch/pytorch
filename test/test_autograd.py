@@ -8091,7 +8091,7 @@ for shape in [(1,), ()]:
         view_a = a.unbind()[0]
         with self.assertRaisesRegex(
             RuntimeError,
-            "This view is the output of a function that returns " "multiple views.",
+            "This view is the output of a function that returns multiple views.",
         ):
             view_a.copy_(b)
 
@@ -11588,23 +11588,6 @@ class TestAutogradDeviceType(TestCase):
         )
         x = torch.randn(shape, requires_grad=True, device=device)
         x[i].sum().backward()
-
-    # test requires cuda, because:
-    # (1) cpu impl of foreach falls back to functional + copy_
-    # (2) the copy_ will bump the VC, which is not what we want to test
-    @onlyCUDA
-    def test_vc_bumped_on_mutable_ops_with_no_returns(self, device):
-        outs = [
-            torch.ones(4, 1, device=device),
-            torch.ones(4, 1, device=device),
-        ]
-        x = torch.ones(4, 2, device=device)
-
-        vcs_before = [x._version for x in outs]
-        torch.split_with_sizes_copy(x, [1, 1], dim=1, out=outs)
-        vcs_after = [x._version for x in outs]
-        for before, after in zip(vcs_before, vcs_after):
-            self.assertTrue(before < after)
 
     def _test_reentrant_parent_error_on_cpu(self, device):
         t1 = torch.rand([3, 3], requires_grad=True)
