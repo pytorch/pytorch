@@ -65,7 +65,7 @@ def higher_order_cond(
     cond: ir.Value,
     true_func: ir.Function,
     false_func: ir.Function,
-    inputs: Sequence[ir.Value],
+    *inputs: Sequence[ir.Value],
 ) -> Sequence[ir.Value]:
     then_node = ir.Node(
         true_func.domain, true_func.name, inputs, num_outputs=len(true_func.outputs)

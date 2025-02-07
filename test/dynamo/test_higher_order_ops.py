@@ -1106,7 +1106,7 @@ class GraphModule(torch.nn.Module):
 
         # Using cond.py_impl
         @cond_op.py_impl(TwoTensor)
-        def _(pred, true_fn, false_fn, operands):
+        def _(pred, true_fn, false_fn, *operands):
             nonlocal called
             called += 1
             assert len(operands) == 1
@@ -1153,7 +1153,7 @@ class GraphModule(torch.nn.Module):
 
         # Using cond.py_impl
         @cond_op.py_impl(MyMode)
-        def _(mode, pred, true_fn, false_fn, operands):
+        def _(mode, pred, true_fn, false_fn, *operands):
             nonlocal py_impl_called
             py_impl_called += 1
             return cond_op(pred, true_fn, false_fn, *operands)
