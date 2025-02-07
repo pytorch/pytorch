@@ -1724,6 +1724,9 @@ class Reduction(Loops):
         )
 
 
+INNER_FN_TY = Callable[[Sequence[Expr], Sequence[Expr]], OpsValue]
+
+
 class MultiOutputReduction(Reduction):
     output_index: int
 
@@ -1731,7 +1734,7 @@ class MultiOutputReduction(Reduction):
         self,
         device: torch.device,
         dst_dtype: torch.dtype,
-        inner_fn: Callable[[Sequence[Expr], Sequence[Expr]], OpsValue],
+        inner_fns: Union[INNER_FN_TY, Sequence[INNER_FN_TY]],
         ranges: Sequence[Integer],
         reduction_ranges: Sequence[Integer],
         reduction_type: str,
@@ -1739,10 +1742,23 @@ class MultiOutputReduction(Reduction):
         reduction_hint: ReductionHint,
         output_index: int,
     ):
+        if callable(inner_fns):
+            inner_fns = (inner_fns,)
+
+        loader: Callable[[Sequence[Expr], Sequence[Expr]], Any]
+        if len(inner_fns) == 1:
+            loader = inner_fns[0]
+        else:
+
+            def loader(
+                idx: Sequence[Expr], reduction_idx: Sequence[Expr]
+            ) -> tuple[OpsValue, ...]:
+                return tuple(fn(idx, reduction_idx) for fn in inner_fns)
+
         super().__init__(
             device=device,
             dtype=dst_dtype,
-            inner_fn=inner_fn,
+            inner_fn=loader,
             ranges=ranges,
             reduction_ranges=reduction_ranges,
             reduction_type=reduction_type,
@@ -1764,12 +1780,12 @@ class MultiOutputReduction(Reduction):
             self.reduction_type,
             self.inner_fn(vars, reduction_vars),
         )
-        if isinstance(values, (tuple, list)):
-            value = values[self.output_index]
-        else:
-            value = values
+        assert isinstance(values, (tuple, list)), f"{type(values)}"
+        value = values[self.output_index]
         return ops.store_reduction(output_name, indexer(vars), value)
 
+
+class OnlineSoftmaxReduction(MultiOutputReduction):
     @classmethod
     def create(  # type: ignore[override]
         cls,
@@ -1779,11 +1795,14 @@ class MultiOutputReduction(Reduction):
         inner_fn: Callable[..., Any],
         ranges: Sequence[Expr],
         reduction_ranges: Sequence[Expr],
-        reduction_type: str,
         num_output: int,
         reduction_hint: ReductionHint = ReductionHint.DEFAULT,
         input_node: Optional[IRNode] = None,
     ) -> Sequence[TensorBox]:
+        """
+        Create the reduction disregarding splitting.
+        """
+        reduction_type = "online_softmax_reduce"
         results = tuple(
             TensorBox.create(
                 MultiOutputReduction(
@@ -1805,58 +1824,7 @@ class MultiOutputReduction(Reduction):
         return results
 
 
-class WelfordReduction(Reduction):
-    output_index: int
-
-    def __init__(
-        self,
-        device: torch.device,
-        dtype: torch.dtype,
-        inner_fns: Sequence[Callable[[Sequence[Expr], Sequence[Expr]], OpsValue]],
-        ranges: Sequence[Integer],
-        reduction_ranges: Sequence[Integer],
-        reduction_type: str,
-        reduction_hint: ReductionHint,
-        output_index: int,
-    ) -> None:
-        loader: Callable[[Sequence[Expr], Sequence[Expr]], Any]
-        if len(inner_fns) == 1:
-            loader = inner_fns[0]
-        else:
-
-            def loader(
-                idx: Sequence[Expr], reduction_idx: Sequence[Expr]
-            ) -> tuple[OpsValue, ...]:
-                return tuple(fn(idx, reduction_idx) for fn in inner_fns)
-
-        super().__init__(
-            device=device,
-            dtype=dtype,
-            inner_fn=loader,
-            ranges=ranges,
-            reduction_ranges=reduction_ranges,
-            reduction_type=reduction_type,
-            src_dtype=dtype,
-            reduction_hint=reduction_hint,
-        )
-        self.output_index = output_index
-
-    def store_reduction(
-        self,
-        output_name: Optional[str],
-        indexer: Callable[[Sequence[Expr]], Never],
-        vars: Sequence[Expr],
-        reduction_vars: Sequence[Symbol],
-    ) -> OpsValue:
-        values = ops.reduction(
-            self.dtype,
-            self.src_dtype,
-            self.reduction_type,
-            self.inner_fn(vars, reduction_vars),
-        )
-        value = values[self.output_index]
-        return ops.store_reduction(output_name, indexer(vars), value)
-
+class WelfordReduction(MultiOutputReduction):
     @classmethod
     def create(  # type: ignore[override]
         cls,
@@ -1967,6 +1935,7 @@ class WelfordReduction(Reduction):
                     ranges,
                     reduction_ranges,
                     reduction_type,
+                    dtype,
                     reduction_hint,
                     output_idx,
                 )

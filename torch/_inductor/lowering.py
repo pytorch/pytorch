@@ -55,7 +55,7 @@ from .ir import (
     IndexingConstant,
     IRNode,
     is_triton,
-    MultiOutputReduction,
+    OnlineSoftmaxReduction,
     ops_wrapper,
     PermuteView,
     Pointwise,
@@ -6802,8 +6802,8 @@ def prepare_softmax_online(x, dim):
     )
 
     if num_split == 1:
-        max_tensor, sum_tensor = MultiOutputReduction.create(
-            reduction_type="online_softmax_reduce", input_node=x, num_output=2, **kwargs
+        max_tensor, sum_tensor = OnlineSoftmaxReduction.create(
+            input_node=x, num_output=2, **kwargs
         )
         return max_tensor, sum_tensor
     else:
