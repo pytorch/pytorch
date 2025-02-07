@@ -511,8 +511,16 @@ XFAILLIST_GRAD = {
         TEST_OUTPUT_GRAD_MATCH, dtypes=[torch.float16, torch.float32]
     ),
     # Uncategorized grad failures
-    "nanquantile": MPSSkipInfo(TEST_OUTPUT_GRAD_MATCH, dtypes=[torch.float32]),
-    "quantile": MPSSkipInfo(TEST_OUTPUT_GRAD_MATCH, dtypes=[torch.float32]),
+    "nanquantile": MPSSkipInfo(
+        TEST_OUTPUT_GRAD_MATCH,
+        dtypes=[torch.float32],
+        upper=15.0,
+    ),
+    "quantile": MPSSkipInfo(
+        TEST_OUTPUT_GRAD_MATCH,
+        dtypes=[torch.float32],
+        upper=15.0,
+    ),
 }
 
 
@@ -623,7 +631,7 @@ MPS_DOWNSTREAM_XFAILLIST = {
     "nanquantile": MPSSkipInfo(TEST_OUTPUT_MATCH, dtypes=[torch.float32], upper=15.0),
     "quantile": MPSSkipInfo(TEST_OUTPUT_MATCH, dtypes=[torch.float32], upper=15.0),
     "nn.functional.conv3d": MPSSkipInfo(
-        TEST_OUTPUT_MATCH, dtypes=[torch.float16], upper=15.0
+        TEST_OUTPUT_MATCH, dtypes=[torch.bfloat16], upper=15.0
     ),
 }
 
