@@ -5,7 +5,7 @@ import itertools
 import logging
 import operator
 from collections import Counter, defaultdict
-from typing import Any, Callable, Dict, List, Optional, TypeVar, Union
+from typing import Any, Callable, Optional, TypeVar, Union
 from typing_extensions import ParamSpec
 
 import torch
@@ -119,6 +119,9 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
             functools.partial(group_batch_fusion_passes, pre_grad=False)
         )
         GraphTransformObserver(gm, "remove_noop_ops").apply_graph_pass(remove_noop_ops)
+        GraphTransformObserver(gm, "remove_assert_ops").apply_graph_pass(
+            remove_assert_ops
+        )
         for i, patterns in enumerate(pass_patterns):
             GraphTransformObserver(gm, f"pass_pattern_{i}").apply_graph_pass(
                 patterns.apply
@@ -610,7 +613,7 @@ def same_meta(node1: torch.fx.Node, node2: torch.fx.Node):
     )
 
 
-noop_registry: Dict[Any, Any] = {}
+noop_registry: dict[Any, Any] = {}
 
 
 def register_noop_decomp(targets, nop_arg=0):
@@ -754,6 +757,34 @@ def remove_noop_ops(graph: torch.fx.Graph):
             if same_meta(node, src) and cond(*args, **kwargs):
                 node.replace_all_uses_with(src)
                 graph.erase_node(node)
+
+
+def remove_assert_ops(graph: torch.fx.Graph):
+    """
+    Removes aten._assert_tensor_metadata.default op because
+    1) it will be lowered to a no-op in inductor
+    2) it can block fusion, such as unfuse_bias_add_to_pointwise fusion.
+
+    This op could come from aten.to functionalization in export.
+
+    For example, if we have a graph like below
+
+    %addmm = aten.addmm.default(%linear_bias, %arg3_1, %permute)
+    %_assert_tensor_metadata = aten._assert_tensor_metadata.default(%addmm, None, None, torch.float16)
+    %convert_element_type_3 = prims.convert_element_type.default(%addmm, torch.float32)
+    %pow_1 = aten.pow.Tensor_Scalar(%convert_element_type_3, 2)
+
+    We still want to fuse add from addmm with pow, instead of fusing add with mm, according to unfuse_bias_add_to_pointwise fusion.
+
+    However, aten._assert_tensor_metadata.default is not a pointwise op, and would fail the should_prefer_unfused_addmm check.
+
+    We remove this op so it doesn't block fusion decisions. It's safe because this op is lowered to a no-op with @register_lowering.
+
+    """
+    for node in graph.find_nodes(
+        op="call_function", target=torch.ops.aten._assert_tensor_metadata.default
+    ):
+        graph.erase_node(node)
 
 
 def decompose_triton_kernel_wrapper_functional(graph):
@@ -1197,11 +1228,11 @@ class ConstructorMoverPass:
         ten = node.meta.get("val")
         return None if not isinstance(ten, torch.Tensor) else ten.device
 
-    def get_cpu_indeg_count(self, graph: fx.Graph) -> Dict[fx.Node, int]:
+    def get_cpu_indeg_count(self, graph: fx.Graph) -> dict[fx.Node, int]:
         """
         Get the number of cpu inputs to a node
         """
-        cpu_indeg: Dict[fx.Node, int] = Counter()
+        cpu_indeg: dict[fx.Node, int] = Counter()
 
         for node in graph.nodes:
             cpu_count = 0
@@ -1253,26 +1284,26 @@ class ConstructorMoverPass:
             node.kwargs = kwargs
 
     def find_movable_constructors(
-        self, graph: fx.Graph, constructors: List[fx.Node]
+        self, graph: fx.Graph, constructors: list[fx.Node]
     ) -> OrderedSet[fx.Node]:
         """
         Starting from the cpu constructors, iterate through the graph and test that all of their
         downstream uses can safely be moved to cpu.
         """
-        cpu_indeg: Dict[fx.Node, int] = self.get_cpu_indeg_count(graph)
+        cpu_indeg: dict[fx.Node, int] = self.get_cpu_indeg_count(graph)
 
         # which constructors cannot be moved to gpu
         cannot_move_to_gpu = OrderedSet[fx.Node]()
 
         # For any node in the graph, which constructors does it have a dependency on
-        constructor_dependencies: Dict[fx.Node, OrderedSet[fx.Node]] = defaultdict(
+        constructor_dependencies: dict[fx.Node, OrderedSet[fx.Node]] = defaultdict(
             OrderedSet
         )
 
         # if a cpu node has a dependency on two different cpu constructors,
         # then if either constructor cannot be moved to gpu, the other cannot as well.
         # In this case any node with a dependency on one will have a dependency on the other
-        equal_constructor_sets: Dict[fx.Node, OrderedSet[fx.Node]] = {
+        equal_constructor_sets: dict[fx.Node, OrderedSet[fx.Node]] = {
             c: OrderedSet([c]) for c in constructors
         }
 
@@ -1285,7 +1316,7 @@ class ConstructorMoverPass:
                 equal_constructor_sets[obj] = set1
             return set1
 
-        queue: List[fx.Node] = list(constructors)
+        queue: list[fx.Node] = list(constructors)
 
         for c in queue:
             constructor_dependencies[c].add(c)

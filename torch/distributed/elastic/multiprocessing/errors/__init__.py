@@ -78,7 +78,7 @@ __all__ = [
 logger = get_logger(__name__)
 
 
-JSON = Dict
+JSON = dict
 
 _EMPTY_ERROR_DATA = {"message": "<NONE>"}
 _NOT_AVAILABLE = "<N/A>"
@@ -143,7 +143,7 @@ class ProcessFailure:
             else:
                 self.message = "To enable traceback see: https://pytorch.org/docs/stable/elastic/errors.html"
 
-    def _get_error_data(self, error_file_data: Dict[str, Any]) -> tuple[str, int]:
+    def _get_error_data(self, error_file_data: dict[str, Any]) -> tuple[str, int]:
         message = error_file_data["message"]
         if isinstance(message, str):
             timestamp = int(error_file_data.get("timestamp", 0))
@@ -231,7 +231,7 @@ class ChildFailedError(Exception):
     of trainer 1's error file to the scheduler's init process.
     """
 
-    def __init__(self, name: str, failures: Dict[GlobalRank, ProcessFailure]):
+    def __init__(self, name: str, failures: dict[GlobalRank, ProcessFailure]):
         self.name = name
         self.failures = failures
         assert (
@@ -248,7 +248,7 @@ class ChildFailedError(Exception):
         root_rank, _root_failure = self.get_first_failure()
 
         root_failure_fmt: str = ""
-        other_failures_fmt: List[str] = []
+        other_failures_fmt: list[str] = []
         width = len(title)
         for idx, (rank, failure) in enumerate(self.failures.items()):
             fmt, w = self._format_failure(idx, rank, failure)

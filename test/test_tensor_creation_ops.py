@@ -2758,6 +2758,22 @@ class TestTensorCreation(TestCase):
                                                             sparse_size, dtype=torch.float64)
                 self.assertEqual(sparse_with_dtype.device, torch.device('cpu'))
 
+    @onlyCUDA
+    @onlyNativeDeviceTypes
+    def test_new_tensor_device(self, device):
+        torch_device = torch.device(device)
+        cpu_device = torch.device('cpu')
+        tensor = torch.tensor((1, 2, 3), device=device)
+
+        # need more than one device_type to test this
+        assert self.device_type == 'cuda'
+        for left, right in product([tensor, tensor.cpu()], [tensor, tensor.cpu()]):
+            for device_arg in [torch_device, cpu_device, None]:
+                if device_arg is None:
+                    self.assertEqual(left.new_tensor(right).device, left.device)
+                else:
+                    self.assertEqual(left.new_tensor(right, device=device_arg).device, device_arg)
+
     def _test_signal_window_functions(self, name, dtype, device, **kwargs):
         import scipy.signal as signal
 

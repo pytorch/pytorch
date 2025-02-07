@@ -4,9 +4,9 @@
 #include <ATen/DynamicLibrary.h>
 #include <stdexcept>
 
-namespace at {
-namespace cuda {
-namespace detail {
+
+
+namespace at::cuda::detail {
 namespace _stubs {
 
 at::DynamicLibrary& getCUDALibrary() {
@@ -293,6 +293,4 @@ NVRTC lazyNVRTC = {
   AT_FORALL_NVRTC(_REFERENCE_MEMBER)
 #undef _REFERENCE_MEMBER
 };
-} // namespace detail
-} // namespace cuda
-} // namespace at
+} // namespace at::cuda::detail

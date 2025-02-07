@@ -187,6 +187,35 @@ def get_qconv2d_pt2e_pattern(users=1):
     )
 
 
+def get_qconv2d_binary_pt2e_pattern(users=1):
+    return CallFunction(
+        torch.ops.onednn.qconv2d_pointwise.binary,
+        KeywordArg("x"),
+        KeywordArg("x_scale"),
+        KeywordArg("x_zp"),
+        KeywordArg("packed_weight"),
+        KeywordArg("w_scale"),
+        KeywordArg("w_zp"),
+        KeywordArg("accum"),
+        KeywordArg("b"),
+        KeywordArg("stride"),
+        KeywordArg("padding"),
+        KeywordArg("dilation"),
+        KeywordArg("groups"),
+        KeywordArg("output_scale"),
+        KeywordArg("output_zero_point"),
+        KeywordArg("output_dtype"),
+        KeywordArg("accum_scale"),
+        KeywordArg("accum_zero_point"),
+        KeywordArg("binary_op_name"),
+        KeywordArg("alpha"),
+        KeywordArg("unary_op_name"),
+        KeywordArg("unary_op_args"),
+        KeywordArg("unary_op_algorithm"),
+        _users=users,
+    )
+
+
 def get_qlinear_pt2e_pattern(x_scale_zp_are_tensors, users=1):
     qlinear_op = (
         torch.ops.onednn.qlinear_pointwise.tensor
@@ -330,6 +359,14 @@ def _is_valid_quantized_conv2d_optimization_pattern():
         return True
 
     return fn
+
+
+def _is_valid_qconv_post_op_fusion_pattern(has_binary_post_op=False):
+    return (
+        _is_valid_qconv_binary_optimization_pattern()
+        if has_binary_post_op
+        else _is_valid_quantized_conv2d_optimization_pattern()
+    )
 
 
 def _is_valid_qconv_lowering_pattern():
@@ -551,8 +588,8 @@ def _register_quantized_linear_binary_lowering(
         binary_op_name = kwargs["binary_op_name"]
         alpha = kwargs["alpha"]
         unary_op_name = kwargs["unary_op_name"]
-        scalars_attr = kwargs["unary_op_args"]
-        algorithm_attr = kwargs["unary_op_algorithm"]
+        unary_op_args = kwargs["unary_op_args"]
+        unary_op_algorithm = kwargs["unary_op_algorithm"]
 
         if binary_op_name == "sum" and not _can_be_inplace(x2):
             # When we enable the GEMM Template, the output of QLinear
@@ -581,8 +618,8 @@ def _register_quantized_linear_binary_lowering(
             binary_op_name,
             alpha,
             unary_op_name,
-            scalars_attr,
-            algorithm_attr,
+            unary_op_args,
+            unary_op_algorithm,
         )
         counters["inductor"]["qlinear_binary_lower_count"] += 1
         counters["inductor"]["qlinear_binary_lower_nodes"] += len(match.nodes)
@@ -686,24 +723,19 @@ def _register_quantized_conv_binary_lowering(
     pattern,
     pass_number,
     computation_op,
-    binary_unary_attr,
 ):
     @register_lowering_pattern(
         pattern,
-        extra_check=_is_valid_qconv_binary_optimization_pattern(),
+        extra_check=_is_valid_qconv_lowering_pattern(),
         pass_number=pass_number,
     )
     def qconv_binary(match: Match, *args, **kwargs):
         output_dtype = _get_pattern_output_dtype(match)
         assert output_dtype is not None
         x, x_scale, x_zp = kwargs["x"], kwargs["x_scale"], kwargs["x_zp"]
-        accum = (
-            kwargs["accum"]
-            if output_dtype == torch.uint8
-            else kwargs["accum_after_dequant"]
-        )
-        accum_scale = kwargs["accum_scale"] if output_dtype == torch.uint8 else 1.0
-        accum_zp = kwargs["accum_zp"] if output_dtype == torch.uint8 else 0
+        accum = kwargs["accum"]
+        accum_scale = kwargs["accum_scale"]
+        accum_zp = kwargs["accum_zero_point"]
         packed_weight, w_scale, w_zp = (
             kwargs["packed_weight"],
             kwargs["w_scale"],
@@ -717,8 +749,15 @@ def _register_quantized_conv_binary_lowering(
             kwargs["groups"],
         )
         # Output QParams
-        o_inv_scale = kwargs["o_inv_scale"] if output_dtype == torch.uint8 else 1.0
-        o_zero_point = kwargs["o_zp"] if output_dtype == torch.uint8 else 0
+        output_scale = kwargs["output_scale"]
+        output_zero_point = kwargs["output_zero_point"]
+
+        # post ops
+        binary_op_name = kwargs["binary_op_name"]
+        alpha = kwargs["alpha"]
+        unary_op_name = kwargs["unary_op_name"]
+        unary_op_args = kwargs["unary_op_args"]
+        unary_op_algorithm = kwargs["unary_op_algorithm"]
 
         accum.realize()
         from .mkldnn_fusion import _can_be_inplace
@@ -740,19 +779,19 @@ def _register_quantized_conv_binary_lowering(
             padding,
             dilation,
             groups,
-            o_inv_scale,
-            o_zero_point,
+            output_scale,
+            output_zero_point,
             output_dtype,
             accum_scale,
             accum_zp,
-            binary_unary_attr.binary_op_name,
-            binary_unary_attr.alpha,
-            binary_unary_attr.unary_op_name,
-            binary_unary_attr.scalars_attr,
-            binary_unary_attr.algorithm_attr,
+            binary_op_name,
+            alpha,
+            unary_op_name,
+            unary_op_args,
+            unary_op_algorithm,
         )
-        counters["inductor"]["qconv2d_binary_matcher_count"] += 1
-        counters["inductor"]["qconv2d_binary_matcher_nodes"] += len(match.nodes)
+        counters["inductor"]["qconv2d_binary_lower_count"] += 1
+        counters["inductor"]["qconv2d_binary_lower_nodes"] += len(match.nodes)
         return L[computation_op](*computation_args)
 
     return qconv_binary
@@ -783,177 +822,17 @@ def _register_quantization_unary_lowering():
         )
 
 
-def _register_quantization_binary_fusion():
-    class BinaryUnaryAttr:
-        def __init__(
-            self,
-            binary_op_name: str,
-            alpha=None,
-            unary_op_name: str = "none",
-            scalars_attr=None,
-            algorithm_attr=None,
-        ) -> None:
-            self.binary_op_name = binary_op_name
-            self.alpha = alpha if alpha else 1.0
-            self.unary_op_name = unary_op_name
-            self.scalars_attr = scalars_attr if scalars_attr else []
-            self.algorithm_attr = algorithm_attr if algorithm_attr else ""
-
-    for int8_mixed_bf16_with_inplace_add in [False, True]:
-        # Priority 1 to match: QConv2d Binary or Binary-Unary pattern with int8 output
-        swap_binary_inputs_list = [False, True]
-        binary_replace_patterns = {}
-        for swap_inputs in swap_binary_inputs_list:
-            binary_replace_patterns.update(
-                {
-                    BinaryUnaryAttr(
-                        "sum", 1.0, "none", [], ""
-                    ): generate_pattern_with_output_quant(
-                        generate_pattern_with_binary(
-                            aten.add.Tensor,
-                            get_qconv2d_pt2e_pattern(1),
-                            dequantize_accum_pattern,
-                            int8_mixed_bf16_with_inplace_add,
-                            swap_inputs=swap_inputs,
-                        ),
-                    ),
-                    BinaryUnaryAttr(
-                        "sum", 1.0, "relu", [], ""
-                    ): generate_pattern_with_output_quant(
-                        generate_pattern_with_unary(
-                            generate_pattern_with_binary(
-                                aten.add.Tensor,
-                                get_qconv2d_pt2e_pattern(1),
-                                dequantize_accum_pattern,
-                                int8_mixed_bf16_with_inplace_add,
-                                swap_inputs=swap_inputs,
-                            ),
-                            aten.relu.default,
-                        ),
-                    ),
-                }
-            )
-
-        for binary_unary_attr, patterns in binary_replace_patterns.items():
-            _register_quantized_conv_binary_lowering(
-                patterns,
-                0,  # pass_number
-                torch.ops.onednn.qconv2d_pointwise.binary,  # computation_op
-                binary_unary_attr,  # binary_unary_attr
-            )
-
-        # Priority 2 to match: QConv2d Binary-Unary pattern with fp32/bfloat16 output
-        binary_replace_float_out_patterns = {}
-        for swap_inputs in swap_binary_inputs_list:
-            binary_replace_float_out_patterns.update(
-                {
-                    BinaryUnaryAttr(
-                        "sum", 1.0, "relu", [], ""
-                    ): generate_pattern_with_unary(
-                        generate_pattern_with_binary(
-                            aten.add.Tensor,
-                            get_qconv2d_pt2e_pattern(1),
-                            KeywordArg("accum_after_dequant"),
-                            int8_mixed_bf16_with_inplace_add,
-                            swap_inputs=swap_inputs,
-                        ),
-                        aten.relu.default,
-                    )
-                }
-            )
-
-        for (
-            binary_unary_attr,
-            patterns,
-        ) in binary_replace_float_out_patterns.items():
-            if int8_mixed_bf16_with_inplace_add:
-                _register_quantized_conv_binary_lowering(
-                    patterns,
-                    0,  # pass_number
-                    torch.ops.onednn.qconv2d_pointwise.binary,  # computation_op
-                    binary_unary_attr,  # binary_unary_attr
-                )
-            else:
-                _register_quantized_conv_binary_lowering(
-                    patterns,
-                    1,  # pass_number
-                    torch.ops.onednn.qconv2d_pointwise.binary,  # computation_op
-                    binary_unary_attr,  # binary_unary_attr
-                )
-
-        # Priority 3: QConv2d Binary pattern with fp32/bfloat16 output
-        binary_replace_float_out_patterns = {}
-        for swap_inputs in swap_binary_inputs_list:
-            binary_replace_float_out_patterns.update(
-                {
-                    BinaryUnaryAttr(
-                        "sum", 1.0, "none", [], ""
-                    ): generate_pattern_with_binary(
-                        aten.add.Tensor,
-                        get_qconv2d_pt2e_pattern(1),
-                        KeywordArg("accum_after_dequant"),
-                        int8_mixed_bf16_with_inplace_add,
-                        swap_inputs=swap_inputs,
-                    ),
-                }
-            )
-
-        for (
-            binary_unary_attr,
-            patterns,
-        ) in binary_replace_float_out_patterns.items():
-            _register_quantized_conv_binary_lowering(
-                patterns,
-                1 if int8_mixed_bf16_with_inplace_add else 2,  # pass_number
-                torch.ops.onednn.qconv2d_pointwise.binary,  # computation_op
-                binary_unary_attr,  # binary_unary_attr
-            )
+def _register_quantization_binary_lowering():
+    # QConv2d
+    for users in (1, 2):
+        qconv_pattern = get_qconv2d_binary_pt2e_pattern(users)
+        _register_quantized_conv_binary_lowering(
+            qconv_pattern,
+            2,  # pass_number
+            torch.ops.onednn.qconv2d_pointwise.binary,  # computation_op
+        )
 
     # QLinear
-    r"""
-    Supported linear-binary(-unary) patterns
-
-        linear(X)   extra input
-               \   /
-                Add
-                 |
-            Optional(relu)
-                 |
-                 Y
-
-    1. int8-mixed-fp32
-    +---+---------------+-----------+------------------------------+---------+
-    | # | Add type      | Quant out | Pattern                      | Post op |
-    +---+---------------+-----------+------------------------------+---------+
-    | 1 | In-/out-place | Yes       | linear + fp32 -> (relu) -> q | add     |
-    +---+---------------+-----------+------------------------------+---------+
-    | 2 | In-/out-place | No        | linear + fp32 -> (relu)      | sum     |
-    +---+---------------+-----------+------------------------------+---------+
-
-    2. int8-mixed-bf16
-    +---+----------+---------------+-----------+-----------------------------------------+---------+
-    | # | X2 dtype | Add type      | Quant out | Pattern                                 | Post op |
-    +---+----------+---------------+-----------+-----------------------------------------+---------+
-    | 1 | BF16     | In-/out-place | Yes       | linear + bf16 -> (relu) -> q            | add     |
-    +---+----------+---------------+-----------+-----------------------------------------+---------+
-    | 2 | BF16     | In-/out-place | No        | linear + bf16 -> (relu)                 | sum     |
-    +---+----------+---------------+-----------+-----------------------------------------+---------+
-    | 3 | FP32     | Out-place     | Yes       | linear + fp32 -> (relu) -> q            | add     |
-    |   |          | In-place right|           |                                         |         |
-    +---+----------+---------------+-----------+-----------------------------------------+---------+
-    | 4 | FP32     | Out-place     | No        | linear + fp32 -> (relu)                 | sum     |
-    |   |          | In-place right|           |                                         |         |
-    +---+----------+---------------+-----------+-----------------------------------------+---------+
-    | 5 | FP32     | In-place left | Yes       | linear + fp32 -> to_bf16 -> (relu) -> q | add     |
-    +---+----------+---------------+-----------+-----------------------------------------+---------+
-    | 6 | FP32     | In-place left | No        | linear + fp32 -> to_bf16 -> (relu)      | add     |
-    +---+----------+---------------+-----------+-----------------------------------------+---------+
-
-    Note
-    (1) The positions of linear and the extra input can be swapped.
-    (2) we don't insert q-dq before the extra input of linear-add by recipe. But if q-dq is found at the
-    extra input, we don't match that pattern because we cannot match all these patterns in 3 passes.
-    """
     for x_scale_zp_are_tensors in (False, True):
         qlinear_pattern = get_qlinear_binary_pt2e_pattern(x_scale_zp_are_tensors)
         computation_op = (
@@ -1332,7 +1211,7 @@ def _register_woq_mm_int8_pattern4():
 
 def _register_quantization_lowerings():
     _register_quantization_unary_lowering()
-    _register_quantization_binary_fusion()
+    _register_quantization_binary_lowering()
     _register_quantization_maxpool2d()
     _register_quantization_cat()
     _register_quantization_reshape()
@@ -2674,7 +2553,7 @@ def _register_smooth_quant_int_mm_pattern():
                     packed_weight_op, args=packed_weight_inputs
                 )
 
-                dummy_zp = match.graph.call_function(aten.empty, args=([0],))
+                dummy_zp = None
                 w_scale = match.graph.call_function(
                     prims.convert_element_type.default, args=(w_scale, torch.float32)
                 )
@@ -2800,9 +2679,11 @@ def _register_qconv_post_op_fusion_pass(
     computation_op,
     post_op_attr,
 ):
+    has_binary_post_op = post_op_attr.binary_op_name != "none"
+
     @register_freezing_graph_pattern(
         pattern,
-        extra_check=_is_valid_quantized_conv2d_optimization_pattern(),
+        extra_check=_is_valid_qconv_post_op_fusion_pattern(has_binary_post_op),
         pass_number=pass_number,
     )
     def qconv(match: Match, *args, **kwargs):
@@ -2849,25 +2730,60 @@ def _register_qconv_post_op_fusion_pass(
 
         out_node = match.output_node()
         with match.graph.inserting_before(out_node):
-            computation_args = (
-                x,
-                x_scale,
-                x_zp,
-                packed_weight,
-                w_scale,
-                w_zp,
-                b,
-                stride,
-                padding,
-                dilation,
-                groups,
-                o_inv_scale,
-                o_zero_point,
-                output_dtype,
-                post_op_attr.unary_op_name,
-                post_op_attr.scalars_attr,
-                post_op_attr.algorithm_attr,
-            )
+            if not has_binary_post_op:
+                computation_args: tuple[Any, ...] = (
+                    x,
+                    x_scale,
+                    x_zp,
+                    packed_weight,
+                    w_scale,
+                    w_zp,
+                    b,
+                    stride,
+                    padding,
+                    dilation,
+                    groups,
+                    o_inv_scale,
+                    o_zero_point,
+                    output_dtype,
+                    post_op_attr.unary_op_name,
+                    post_op_attr.scalars_attr,
+                    post_op_attr.algorithm_attr,
+                )
+            else:
+                accum = (
+                    kwargs["accum"]
+                    if output_dtype == torch.uint8
+                    else kwargs["accum_after_dequant"]
+                )
+                accum_scale = (
+                    kwargs["accum_scale"] if output_dtype == torch.uint8 else 1.0
+                )
+                accum_zp = kwargs["accum_zp"] if output_dtype == torch.uint8 else 0
+                computation_args = (
+                    x,
+                    x_scale,
+                    x_zp,
+                    packed_weight,
+                    w_scale,
+                    w_zp,
+                    accum,
+                    b,
+                    stride,
+                    padding,
+                    dilation,
+                    groups,
+                    o_inv_scale,
+                    o_zero_point,
+                    output_dtype,
+                    accum_scale,
+                    accum_zp,
+                    post_op_attr.binary_op_name,
+                    post_op_attr.alpha,
+                    post_op_attr.unary_op_name,
+                    post_op_attr.scalars_attr,
+                    post_op_attr.algorithm_attr,
+                )
             new_conv_node = match.graph.call_function(
                 computation_op, args=computation_args
             )
@@ -2875,8 +2791,18 @@ def _register_qconv_post_op_fusion_pass(
             new_conv_node.meta.update(out_node.meta)
             for node in reversed(match.nodes):
                 match.graph.erase_node(node)
-        counters["inductor"]["qconv2d_unary_matcher_count"] += 1
-        counters["inductor"]["qconv2d_unary_matcher_nodes"] += len(match.nodes)
+        count_key = (
+            "qconv2d_binary_matcher_count"
+            if has_binary_post_op
+            else "qconv2d_unary_matcher_count"
+        )
+        nodes_key = (
+            "qconv2d_binary_matcher_nodes"
+            if has_binary_post_op
+            else "qconv2d_unary_matcher_nodes"
+        )
+        counters["inductor"][count_key] += 1
+        counters["inductor"][nodes_key] += len(match.nodes)
 
     return qconv
 
@@ -2996,6 +2922,116 @@ def _register_qconv_unary_fusion():
                 4,  # pass_number
                 torch.ops.onednn.qconv2d_pointwise.default,  # computation_op
                 unary_attr,  # unary_attr
+            )
+
+
+def _register_qconv_binary_fusion():
+    for int8_mixed_bf16_with_inplace_add in [False, True]:
+        # Priority 1 to match: QConv2d Binary or Binary-Unary pattern with int8 output
+        swap_binary_inputs_list = [False, True]
+        binary_replace_patterns = {}
+        for swap_inputs in swap_binary_inputs_list:
+            binary_replace_patterns.update(
+                {
+                    PostOpAttr(
+                        "sum", 1.0, "none", [], ""
+                    ): generate_pattern_with_output_quant(
+                        generate_pattern_with_binary(
+                            aten.add.Tensor,
+                            get_qconv2d_pt2e_pattern(1),
+                            dequantize_accum_pattern,
+                            int8_mixed_bf16_with_inplace_add,
+                            swap_inputs=swap_inputs,
+                        ),
+                    ),
+                    PostOpAttr(
+                        "sum", 1.0, "relu", [], ""
+                    ): generate_pattern_with_output_quant(
+                        generate_pattern_with_unary(
+                            generate_pattern_with_binary(
+                                aten.add.Tensor,
+                                get_qconv2d_pt2e_pattern(1),
+                                dequantize_accum_pattern,
+                                int8_mixed_bf16_with_inplace_add,
+                                swap_inputs=swap_inputs,
+                            ),
+                            aten.relu.default,
+                        ),
+                    ),
+                }
+            )
+
+        for binary_unary_attr, patterns in binary_replace_patterns.items():
+            _register_qconv_post_op_fusion_pass(
+                patterns,
+                3,  # pass_number
+                torch.ops.onednn.qconv2d_pointwise.binary,  # computation_op
+                binary_unary_attr,  # binary_unary_attr
+            )
+
+        # Priority 2 to match: QConv2d Binary-Unary pattern with fp32/bfloat16 output
+        binary_replace_float_out_patterns = {}
+        for swap_inputs in swap_binary_inputs_list:
+            binary_replace_float_out_patterns.update(
+                {
+                    PostOpAttr("sum", 1.0, "relu", [], ""): generate_pattern_with_unary(
+                        generate_pattern_with_binary(
+                            aten.add.Tensor,
+                            get_qconv2d_pt2e_pattern(1),
+                            KeywordArg("accum_after_dequant"),
+                            int8_mixed_bf16_with_inplace_add,
+                            swap_inputs=swap_inputs,
+                        ),
+                        aten.relu.default,
+                    )
+                }
+            )
+
+        for (
+            binary_unary_attr,
+            patterns,
+        ) in binary_replace_float_out_patterns.items():
+            if int8_mixed_bf16_with_inplace_add:
+                _register_qconv_post_op_fusion_pass(
+                    patterns,
+                    3,  # pass_number
+                    torch.ops.onednn.qconv2d_pointwise.binary,  # computation_op
+                    binary_unary_attr,  # binary_unary_attr
+                )
+            else:
+                _register_qconv_post_op_fusion_pass(
+                    patterns,
+                    4,  # pass_number
+                    torch.ops.onednn.qconv2d_pointwise.binary,  # computation_op
+                    binary_unary_attr,  # binary_unary_attr
+                )
+
+        # Priority 3: QConv2d Binary pattern with fp32/bfloat16 output
+        binary_replace_float_out_patterns = {}
+        for swap_inputs in swap_binary_inputs_list:
+            binary_replace_float_out_patterns.update(
+                {
+                    PostOpAttr(
+                        "sum", 1.0, "none", [], ""
+                    ): generate_pattern_with_binary(
+                        aten.add.Tensor,
+                        get_qconv2d_pt2e_pattern(1),
+                        KeywordArg("accum_after_dequant"),
+                        int8_mixed_bf16_with_inplace_add,
+                        swap_inputs=swap_inputs,
+                    ),
+                }
+            )
+
+        for (
+            binary_unary_attr,
+            patterns,
+        ) in binary_replace_float_out_patterns.items():
+            _register_qconv_post_op_fusion_pass(
+                patterns,
+                4 if int8_mixed_bf16_with_inplace_add else 5,  # pass_number
+                torch.ops.onednn.qconv2d_pointwise.binary,  # computation_op
+                binary_unary_attr,  # binary_unary_attr
             )
 
 
@@ -3447,6 +3483,7 @@ def _register_quantization_weight_pack_pass():
     if not torch.ops.mkldnn._is_mkldnn_acl_supported():
         # skip fusion on ARM
         _register_qconv_unary_fusion()
+        _register_qconv_binary_fusion()
         _register_qlinear_unary_fusion()
         _register_qlinear_binary_fusion()
 

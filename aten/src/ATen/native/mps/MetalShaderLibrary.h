@@ -18,6 +18,7 @@ typedef void* MTLComputeCommandEncoder_t;
 #include <optional>
 #include <type_traits>
 #include <unordered_map>
+#include <utility>
 #include <vector>
 
 // Forward declaration of TensorBase
@@ -91,15 +92,17 @@ class MetalKernelFunction {
 
 class MetalShaderLibrary {
  public:
-  MetalShaderLibrary(const std::string& src)
-      : shaderSource(src), nparams(0), compile_options(nullptr) {}
-  MetalShaderLibrary(const std::string& src, unsigned nparams_)
-      : shaderSource(src), nparams(nparams_), compile_options(nullptr) {}
+  MetalShaderLibrary(std::string src)
+      : shaderSource(std::move(src)), nparams(0), compile_options(nullptr) {}
+  MetalShaderLibrary(std::string src, unsigned nparams_)
+      : shaderSource(std::move(src)),
+        nparams(nparams_),
+        compile_options(nullptr) {}
   MetalShaderLibrary(
-      const std::string& src,
+      std::string src,
       unsigned nparams_,
       MTLCompileOptions* compile_options_)
-      : shaderSource(src),
+      : shaderSource(std::move(src)),
         nparams(nparams_),
         compile_options(compile_options_) {}
   MetalShaderLibrary(const MetalShaderLibrary&) = delete;
@@ -153,7 +156,7 @@ class DynamicMetalShaderLibrary : public MetalShaderLibrary {
     // Compile right away
     getLibrary();
   }
-  ~DynamicMetalShaderLibrary();
+  ~DynamicMetalShaderLibrary() override;
 };
 
 } // namespace at::native::mps

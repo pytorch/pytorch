@@ -1,5 +1,4 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
-from typing import Dict
 
 from torch.distributed.checkpoint.metadata import STATE_DICT_TYPE
 
@@ -21,7 +20,7 @@ Change set_element to recreate the right type for tuple, OrderedDict, and NamedT
 """
 
 
-FLATTEN_MAPPING = Dict[str, OBJ_PATH]
+FLATTEN_MAPPING = dict[str, OBJ_PATH]
 
 
 # TODO: Update Docstring for nested_dict.py

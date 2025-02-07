@@ -2,7 +2,6 @@
 """Adds docstrings to functions defined in the torch._C module."""
 
 import re
-from typing import Dict
 
 import torch._C
 from torch._C import _add_docstr as add_docstr
@@ -170,7 +169,7 @@ rocm_fp16_notes = {
 :ref:`different precision<fp16_on_mi200>` for backward."""
 }
 
-reproducibility_notes: Dict[str, str] = {
+reproducibility_notes: dict[str, str] = {
     "forward_reproducibility_note": """This operation may behave nondeterministically when given tensors on \
 a CUDA device. See :doc:`/notes/randomness` for more information.""",
     "backward_reproducibility_note": """This operation may produce nondeterministic gradients when given tensors on \
@@ -3612,13 +3611,20 @@ Examples::
             [ 0.6927, -0.3735, -0.4945]])
 
 
-    >>> torch.diagonal(a, 0)
+    >>> torch.diagonal(a)
     tensor([-1.0854, -0.0905, -0.4945])
 
 
     >>> torch.diagonal(a, 1)
     tensor([ 1.1431,  0.0360])
 
+    >>> b = torch.randn(2, 5)
+    >>> b
+    tensor([[-1.7948, -1.2731, -0.3181,  2.0200, -1.6745],
+            [ 1.8262, -1.5049,  0.4114,  1.0704, -1.2607]])
+
+    >>> torch.diagonal(b, 1, 1, 0)
+    tensor([1.8262])
 
     >>> x = torch.randn(2, 5, 4, 2)
     >>> torch.diagonal(x, offset=-1, dim1=1, dim2=2)

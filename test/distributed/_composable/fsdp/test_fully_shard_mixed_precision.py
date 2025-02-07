@@ -2,7 +2,7 @@
 
 import copy
 import functools
-from typing import Dict, List, Optional, Union
+from typing import Optional, Union
 
 import torch
 import torch.distributed as dist
@@ -339,7 +339,7 @@ class TestFullyShardMixedPrecisionTraining(FSDPTest):
                 model.set_reshard_after_backward(
                     is_last_microbatch or reshard_after_forward
                 )
-                losses: List[torch.Tensor] = []
+                losses: list[torch.Tensor] = []
                 for _model in (ref_model_compute, model):
                     losses.append(
                         _model(microbatch_inps[microbatch_idx].detach()).sum()
@@ -391,7 +391,7 @@ class TestFullyShardMixedPrecisionCasts(FSDPTestMultiThread):
 
         # Subtest 1: use fp16 on the second child submodule -- does not require
         # any additional casting logic
-        forward_inputs: Dict[str, nn.Module] = {}
+        forward_inputs: dict[str, nn.Module] = {}
         model = SaveForwardInputsModel(
             forward_inputs,
             cast_forward_inputs=False,
@@ -405,7 +405,7 @@ class TestFullyShardMixedPrecisionCasts(FSDPTestMultiThread):
 
         # Subtest 2: use fp16 on the second child module, where the user module
         # owns the cast
-        forward_inputs: Dict[nn.Module, torch.Tensor] = {}
+        forward_inputs: dict[nn.Module, torch.Tensor] = {}
         model = SaveForwardInputsModel(
             forward_inputs=forward_inputs, cast_forward_inputs=True
         ).cuda()
@@ -423,7 +423,7 @@ class TestFullyShardMixedPrecisionCasts(FSDPTestMultiThread):
 
         # Subtest 3: use fp16 on the first child module and specify its output
         # dtype so that the second child module does not need to cast
-        forward_inputs: Dict[nn.Module, torch.Tensor] = {}
+        forward_inputs: dict[nn.Module, torch.Tensor] = {}
         model = SaveForwardInputsModel(
             forward_inputs=forward_inputs, cast_forward_inputs=False
         ).cuda()
@@ -448,7 +448,7 @@ class TestFullyShardMixedPrecisionCasts(FSDPTestMultiThread):
 
     def _test_submodules_with_external_inputs(self, enable_submodule_cast: bool):
         class ToyModule(nn.Module):
-            def __init__(self, forward_inputs: Dict[str, torch.Tensor]) -> None:
+            def __init__(self, forward_inputs: dict[str, torch.Tensor]) -> None:
                 super().__init__()
                 self.l = nn.Linear(100, 100)
                 self.forward_inputs = forward_inputs
@@ -459,7 +459,7 @@ class TestFullyShardMixedPrecisionCasts(FSDPTestMultiThread):
                 return self.l(x)
 
         class ToyModel(nn.Module):
-            def __init__(self, forward_inputs: Dict[str, torch.Tensor]) -> None:
+            def __init__(self, forward_inputs: dict[str, torch.Tensor]) -> None:
                 super().__init__()
                 self.l1 = nn.Linear(100, 100)
                 self.l2 = ToyModule(forward_inputs)
@@ -472,7 +472,7 @@ class TestFullyShardMixedPrecisionCasts(FSDPTestMultiThread):
                 )  # external input
                 return self.l2(self.l1(x), y)
 
-        forward_inputs: Dict[str, torch.Tensor] = {}
+        forward_inputs: dict[str, torch.Tensor] = {}
         model = ToyModel(forward_inputs).cuda()
         x = torch.zeros(2, 100, device="cuda", dtype=torch.float32)
         fully_shard(
