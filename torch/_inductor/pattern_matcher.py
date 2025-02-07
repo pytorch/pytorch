@@ -66,7 +66,6 @@ from torch.fx.experimental.proxy_tensor import make_fx
 from torch.fx.experimental.symbolic_shapes import guard_size_oblivious
 from torch.fx.graph_module import _get_attr
 from torch.fx.immutable_collections import immutable_dict, immutable_list
-from torch.fx.node import map_arg
 from torch.fx.passes.graph_transform_observer import GraphTransformObserver
 from torch.utils._ordered_set import OrderedSet
 
@@ -1322,7 +1321,11 @@ def register_replacement(
                     f"of the inputs is unused? argnames={argnames}, match.kwargs={match.kwargs}"
                 )
 
-        args = map_arg([match.kwargs[a] for a in argnames], lambda n: n.meta["val"])
+        args = list(
+            torch.fx.map_arg(
+                [match.kwargs[name] for name in argnames], lambda n: n.meta["val"]
+            )
+        )
 
         sym_args: list[torch.SymInt] = []
         with torch._dynamo.utils.detect_fake_mode(args):
