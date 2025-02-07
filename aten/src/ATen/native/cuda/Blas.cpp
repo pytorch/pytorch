@@ -1,4 +1,5 @@
 #include <cstdint>
+#include "c10/util/typeid.h"
 #include <c10/util/Exception.h>
 #include <c10/core/Scalar.h>
 #include <c10/core/ScalarType.h>
@@ -892,9 +893,10 @@ static bool _scaled_mm_is_fnuz() {
 
 namespace{
 
-enum class ScalingType {
+enum class ScalingType : std::uint8_t {
   TensorWise,
   RowWise,
+  BlockWise,
   Error
 };
 /*
@@ -920,6 +922,9 @@ ScalingType get_scaling_type(
     int64_t dim_m,
     int64_t dim_n) {
   // Both Per-Tensor and Row-wise scaling expect fp32 tensors
+  if(scale_a.scalar_type() == scale_b.scalar_type() && scale_a.scalar_type() == at::kByte) {
+    return ScalingType::BlockWise;
+  }
   TORCH_CHECK(
       scale_a.scalar_type() == kFloat && scale_b.scalar_type() == kFloat,
       "Both scale_a and scale_b must be float (fp32) tensors.");
@@ -1005,6 +1010,9 @@ _scaled_mm_out_cuda(const Tensor& mat1, const Tensor& mat2,
           const std::optional<at::Tensor>& scale_result,
           std::optional<c10::ScalarType> out_dtype,
           bool use_fast_accum,
+          std::optional<int64_t> a_dtype,
+          std::optional<int64_t> b_dtype, 
+          std::optional<int64_t> scale_dtype,
           Tensor& out) {
   // Check sizes
   bool allowed_device = _scaled_mm_allowed_device();
@@ -1035,8 +1043,8 @@ _scaled_mm_out_cuda(const Tensor& mat1, const Tensor& mat2,
        mat2.sizes()[1], ") must be divisible by 16");
   // Check types
   TORCH_CHECK(!out_dtype || *out_dtype == out.scalar_type(), "out_dtype must match output matrix type");
-  TORCH_CHECK(isFloat8Type(mat1.scalar_type()), "Expected mat1 to be Float8 matrix got ", mat1.scalar_type());
-  TORCH_CHECK(isFloat8Type(mat2.scalar_type()), "Expected mat2 to be Float8 matrix got ", mat2.scalar_type());
+  // TORCH_CHECK(isFloat8Type(mat1.scalar_type()), "Expected mat1 to be Float8 matrix got ", mat1.scalar_type());
+  // TORCH_CHECK(isFloat8Type(mat2.scalar_type()), "Expected mat2 to be Float8 matrix got ", mat2.scalar_type());
   // Type restrictions imposed by CuBLASLt as of CUDA-12.1
   TORCH_CHECK(mat1.scalar_type() != ScalarType::Float8_e5m2 || mat2.scalar_type() != ScalarType::Float8_e5m2,
         "Multiplication of two Float8_e5m2 matrices is not supported");
@@ -1213,7 +1221,10 @@ _scaled_mm_out_cuda(const Tensor& mat1, const Tensor& mat2,
         args.result_ld,
         out_dtype_,
         use_fast_accum,
-        scaling_choice == ScalingType::RowWise);
+        scaling_choice == ScalingType::RowWise,
+        static_cast<at::cuda::blas::DataType>(a_dtype.value()),
+        static_cast<at::cuda::blas::DataType>(b_dtype.value()),
+        static_cast<at::cuda::blas::DataType>(scale_dtype.value()));
   }
 
   return out;
@@ -1226,10 +1237,13 @@ _scaled_mm_cuda(const Tensor& mat_a, const Tensor& mat_b,
           const std::optional<at::Tensor>& bias,
           const std::optional<at::Tensor>& scale_result,
           std::optional<c10::ScalarType> out_dtype,
-          bool use_fast_accum) {
+          bool use_fast_accum,
+          std::optional<int64_t> a_dtype,
+          std::optional<int64_t> b_dtype, 
+          std::optional<int64_t> scale_dtype) {
   const auto out_dtype_ = out_dtype.value_or(mat_a.scalar_type());
   Tensor out = at::empty({0}, mat_a.options().dtype(out_dtype_));
-  return _scaled_mm_out_cuda(mat_a, mat_b, scale_a, scale_b, bias, scale_result, out_dtype, use_fast_accum, out);
+  return _scaled_mm_out_cuda(mat_a, mat_b, scale_a, scale_b, bias, scale_result, out_dtype, use_fast_accum, a_dtype, b_dtype, scale_dtype, out);
 }
 
 } // namespace at::native

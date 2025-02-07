@@ -13,6 +13,8 @@
 #include <c10/macros/Export.h>
 #include <c10/util/env.h>
 #include <c10/util/irange.h>
+#include "c10/core/Allocator.h"
+#include "c10/core/ScalarType.h"
 
 #ifdef USE_ROCM
 #include <hipblaslt/hipblaslt-ext.hpp>
@@ -1433,7 +1435,10 @@ void scaled_gemm(
     int64_t result_ld,
     ScalarType result_dtype,
     bool use_fast_accum,
-    bool use_rowwise) {
+    bool use_rowwise,
+    DataType a_dtype,
+    DataType b_dtype,
+    DataType scale_dtype) {
 #if CUDA_VERSION >= 11080 || defined(USE_ROCM)
   const auto computeType = CUBLAS_COMPUTE_32F;
   const auto scaleType = CUDA_R_32F;
@@ -1442,17 +1447,8 @@ void scaled_gemm(
   CuBlasLtMatmulDescriptor computeDesc(computeType, scaleType);
   computeDesc.setAttribute(CUBLASLT_MATMUL_DESC_TRANSA, _cublasOpFromChar(transa));
   computeDesc.setAttribute(CUBLASLT_MATMUL_DESC_TRANSB, _cublasOpFromChar(transb));
-#if defined(USE_ROCM) && defined(HIPBLASLT_VEC_EXT)
-  if (use_rowwise) {
-    // swapped
-    computeDesc.setAttribute(HIPBLASLT_MATMUL_DESC_A_SCALE_POINTER_VEC_EXT, mat2_scale_ptr);
-    computeDesc.setAttribute(HIPBLASLT_MATMUL_DESC_B_SCALE_POINTER_VEC_EXT, mat1_scale_ptr);
-  }
-  else
-#else
   // rowwise isn't supported using cublaslt or older hipblaslt
   TORCH_INTERNAL_ASSERT(use_rowwise == false, "rowwise scaled_gemm not supported with blaslt");
-#endif
   {
     computeDesc.setAttribute(CUBLASLT_MATMUL_DESC_A_SCALE_POINTER, mat1_scale_ptr);
     computeDesc.setAttribute(CUBLASLT_MATMUL_DESC_B_SCALE_POINTER, mat2_scale_ptr);
@@ -1460,24 +1456,30 @@ void scaled_gemm(
   if (result_scale_ptr != nullptr) {
     computeDesc.setAttribute(CUBLASLT_MATMUL_DESC_D_SCALE_POINTER, result_scale_ptr);
   }
-#ifndef USE_ROCM
+
   const int8_t fastAccuMode = use_fast_accum ? 1 : 0;
   computeDesc.setAttribute(CUBLASLT_MATMUL_DESC_FAST_ACCUM, fastAccuMode);
-#endif
-  CuBlasLtMatrixLayout Adesc(ScalarTypeToCudaDataType(mat1_dtype), m, k, mat1_ld, transa == 't');
-  CuBlasLtMatrixLayout Bdesc(ScalarTypeToCudaDataType(mat2_dtype), k, n, mat2_ld, transb == 't');
-#ifdef USE_ROCM
-  // Cdesc is unused, beta is 0. But hipblaslt needs this set to something reasonable.
-  CuBlasLtMatrixLayout Cdesc(ScalarTypeToCudaDataType(result_dtype), m, n, result_ld);
-#else
+  auto cuda_mat1_dtype = mat1_dtype == c10::ScalarType::Byte ? dtype_to_cuda(a_dtype) : ScalarTypeToCudaDataType(mat1_dtype);
+  auto cuda_mat2_dtype = mat2_dtype == c10::ScalarType::Byte ? dtype_to_cuda(b_dtype) : ScalarTypeToCudaDataType(mat2_dtype);
+
+  CuBlasLtMatrixLayout Adesc(cuda_mat1_dtype, m, k, mat1_ld, transa == 't');
+  CuBlasLtMatrixLayout Bdesc(cuda_mat2_dtype, k, n, mat2_ld, transb == 't');
   CuBlasLtMatrixLayout Cdesc(ScalarTypeToCudaDataType(bias_dtype), m, n, result_ld);
-#endif
   CuBlasLtMatrixLayout Ddesc(ScalarTypeToCudaDataType(result_dtype), m, n, result_ld);
   if (bias_ptr) {
     computeDesc.setAttribute(CUBLASLT_MATMUL_DESC_BIAS_POINTER, bias_ptr);
     computeDesc.setAttribute(CUBLASLT_MATMUL_DESC_EPILOGUE, CUBLASLT_EPILOGUE_BIAS);
     computeDesc.setAttribute(CUBLASLT_MATMUL_DESC_BIAS_DATA_TYPE, ScalarTypeToCudaDataType(bias_dtype));
   }
+  if (scale_dtype == DataType::UFP8){
+    computeDesc.setAttribute(CUBLASLT_MATMUL_DESC_A_SCALE_MODE, CUBLASLT_MATMUL_MATRIX_SCALE_VEC16_UE4M3);
+    computeDesc.setAttribute(CUBLASLT_MATMUL_DESC_B_SCALE_MODE, CUBLASLT_MATMUL_MATRIX_SCALE_VEC16_UE4M3);
+  } 
+  if  (scale_dtype == DataType::E8M0){
+    computeDesc.setAttribute(CUBLASLT_MATMUL_DESC_A_SCALE_MODE, CUBLASLT_MATMUL_MATRIX_SCALE_VEC32_UE8M0);
+    computeDesc.setAttribute(CUBLASLT_MATMUL_DESC_B_SCALE_MODE, CUBLASLT_MATMUL_MATRIX_SCALE_VEC32_UE8M0);
+  }
+
   size_t workspaceSize = _getWorkspaceSize();
   auto workspace = at::empty(static_cast<int64_t>(workspaceSize), at::TensorOptions().dtype(at::kByte).device(at::kCUDA));
 
@@ -1498,52 +1500,7 @@ void scaled_gemm(
       &heuristicResult,
       &returnedResult));
   if (returnedResult == 0) {
-#ifndef USE_ROCM
     TORCH_CUDABLAS_CHECK(CUBLAS_STATUS_NOT_SUPPORTED);
-#else
-    // hipblaslt might be able to recover by returning all algos
-    std::vector<hipblasLtMatmulHeuristicResult_t> all_algos;
-    TORCH_CUDABLAS_CHECK(hipblaslt_ext::getAllAlgos(
-        ltHandle,
-        hipblaslt_ext::GemmType::HIPBLASLT_GEMM,
-        _cublasOpFromChar(transa),
-        _cublasOpFromChar(transb),
-        ScalarTypeToCudaDataType(mat1_dtype),
-        ScalarTypeToCudaDataType(mat2_dtype),
-        // C is nullptr and beta=0, so set to something reasonable. See above.
-        //ScalarTypeToCudaDataType(bias_dtype),
-        ScalarTypeToCudaDataType(result_dtype),
-        ScalarTypeToCudaDataType(result_dtype),
-        CUBLAS_COMPUTE_32F,
-        all_algos));
-    if (all_algos.size() == 0) {
-      TORCH_CUDABLAS_CHECK(CUBLAS_STATUS_NOT_SUPPORTED);
-    }
-    // pick first valid solution
-    bool found = false;
-    for (size_t i = 0; i < all_algos.size(); i++) {
-        size_t ret_workspace_size = 0;
-        auto is_valid_status = hipblaslt_ext::matmulIsAlgoSupported(
-                ltHandle,
-                computeDesc.descriptor(),
-                &alpha_val,
-                Adesc.descriptor(),
-                Bdesc.descriptor(),
-                &beta_val,
-                Cdesc.descriptor(),
-                Ddesc.descriptor(),
-                all_algos[i].algo,
-                ret_workspace_size);
-        if (is_valid_status == HIPBLAS_STATUS_SUCCESS) {
-            if (ret_workspace_size <= workspaceSize) {
-                heuristicResult = all_algos[i];
-                found = true;
-                break;
-            }
-        }
-    }
-    TORCH_CHECK(found, "could not find valid hipblaslt solution");
-#endif
   }
   cublasStatus_t cublasStatus = cublasLtMatmul(
       ltHandle,
@@ -1554,11 +1511,7 @@ void scaled_gemm(
       mat2_ptr,
       Bdesc.descriptor(),
       &beta_val,
-#ifdef USE_ROCM
-      result_ptr, // unused, since beta_val is 0, but hipblaslt can't handle nullptr
-#else
       nullptr,
-#endif
       Cdesc.descriptor(),
       result_ptr,
       Ddesc.descriptor(),
