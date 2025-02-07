@@ -340,19 +340,26 @@ ncclResult_t NCCLComm::checkForNcclError() {
 #endif
 }
 
-ncclResult_t NCCLComm::registerSegment(void* ptr, size_t size) {
+ncclResult_t NCCLComm::registerSegment(
+    void* ptr,
+    size_t size,
+    bool errorOnRereg /*=true*/) {
   LockType lock(mutex_);
 #ifdef NCCL_HAS_COMM_REGISTER
   // We register only segments from cache allocator
   // which are guaranteed to be with disjoint addr ranges. Thus, a ptr always
   // maps to a unique handle and should not be registered before the current
   // ptr is deregistered and freed.
-  TORCH_CHECK(
-      registeredSegmentHandles_.count(ptr) == 0,
-      "Segment with ptr ",
-      ptr,
-      " has already been registered on ncclComm_ ",
-      ncclComm_);
+  if (registeredSegmentHandles_.count(ptr) > 0) {
+    TORCH_CHECK(
+        !errorOnRereg,
+        "Segment with ptr ",
+        ptr,
+        " has already been registered on ncclComm_ ",
+        ncclComm_);
+    // Skip below
+    return ncclSuccess;
+  }
 
   void* handle = nullptr;
   // Use getNcclComm to make sure comm is ready before calling nccl APIs

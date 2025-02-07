@@ -1937,8 +1937,7 @@ class DistributedDataParallelTest(
                         opt = torch.optim.SGD(m.parameters(), lr=0.1)
                         opt_ddp = torch.optim.SGD(m_ddp.parameters(), lr=0.1)
                         has_half = any(p.dtype is torch.half for p in m.parameters())
-                        atol = 1.0e-3 if has_half else 1.0e-4
-                        rtol = 1.0e-3
+                        tol = 1.0e-3 if has_half else 1.0e-5
                     except BaseException:
                         # Prints case-specific debugging info to narrow down failing case.
                         print(
@@ -1981,7 +1980,7 @@ class DistributedDataParallelTest(
                                         layer_name + "." + param_name + " " + iter_msg
                                     )
                                     self.assertEqual(
-                                        p.grad, p_ddp.grad, rtol=rtol, atol=atol
+                                        p.grad, p_ddp.grad, rtol=tol, atol=tol
                                     )
                             opt.step()
                             opt_ddp.step()
@@ -2008,7 +2007,7 @@ class DistributedDataParallelTest(
         replica_devices = [dev0]
         # Tells _test_grad_layout to construct ConvNet with all layers on this process's first assigned device.
         layer_devs = dev0
-        local_batch_size = 8
+        local_batch_size = 16
         self._test_grad_layout(replica_devices, layer_devs, local_batch_size)
 
     @requires_nccl()
@@ -2022,7 +2021,7 @@ class DistributedDataParallelTest(
         replica_devices = None
         # Tells _test_grad_layout to constructs this process's ConvNet on 2 devices, with 2 layers on each device.
         layer_devs = [dev0] * 2 + [dev1] * 2
-        local_batch_size = 8
+        local_batch_size = 16
         self._test_grad_layout(replica_devices, layer_devs, local_batch_size)
 
     @requires_nccl()

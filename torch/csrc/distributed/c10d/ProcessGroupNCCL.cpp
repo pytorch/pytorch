@@ -1176,7 +1176,8 @@ void ProcessGroupNCCL::registerMemPool(c10::cuda::MemPool* pool) {
     ncclComm->registerSegment(
         // NOLINTNEXTLINE(performance-no-int-to-ptr)
         reinterpret_cast<void*>(segmentInfo.address),
-        segmentInfo.total_size);
+        segmentInfo.total_size,
+        /*errorOnRereg=*/false); // ignores reregistration error
   }
 }
 
@@ -5443,8 +5444,6 @@ at::Tensor ProcessGroupNCCL::allocateTensor(
             getMemAllocator().get());
     // Pool is created
     memPool_ = std::make_unique<c10::cuda::MemPool>(allocator);
-    // Also need to ncclCommRegister it so that NCCL recognizes it
-    registerMemPool(memPool_.get());
     LOG(INFO) << logPrefix() << "Created memory pool";
   }
 
@@ -5453,6 +5452,9 @@ at::Tensor ProcessGroupNCCL::allocateTensor(
   c10::cuda::CUDACachingAllocator::beginAllocateToPool(
       memPool_->device(), memPool_->id(), [](cudaStream_t) { return true; });
   at::Tensor tensor = at::empty({size}, options);
+  // Also need to ncclCommRegister the pool in case new segments are created;
+  // reregistration of old segments will be ignored
+  registerMemPool(memPool_.get());
   c10::cuda::CUDACachingAllocator::endAllocateToPool(
       memPool_->device(), memPool_->id());
   c10::cuda::CUDACachingAllocator::releasePool(
