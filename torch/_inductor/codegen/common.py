@@ -52,6 +52,7 @@ from ..utils import (
     sympy_dot,
     sympy_index_symbol,
     sympy_subs,
+    triton_type,
     unique,
 )
 from ..virtualized import ops, OpsHandler, OpsValue, ReductionType, StoreMode, V
@@ -1784,6 +1785,15 @@ class CSE(Generic[CSEVariableType, AugmentedKeyT]):
                     else:
                         line = f"{expr}{self.suffix}"
                     buffer.writeline(line)
+
+                    if (
+                        assignment
+                        and config.test_configs.runtime_triton_dtype_assert
+                        and dtype is not None
+                    ):
+                        assert_line = f"tl.static_assert({self.prefix}{var}.dtype == {triton_type(dtype)})"
+                        buffer.writeline(assert_line)
+
         else:
             var.bounds = var.bounds.tighten(bounds)
             var.use_count += 1

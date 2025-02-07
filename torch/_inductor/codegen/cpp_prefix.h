@@ -75,22 +75,26 @@ struct IsVecType<at::vec::VectorizedN<T, 2>>: std::true_type {};
 
 template <typename T>
 struct WeightRecp {
-  using scalar_t = typename T::value_type;
-  std::vector<scalar_t> weight_recps;
+  static std::vector<typename T::value_type> weight_recps;
   std::vector<Welford<T>> welford_stk;
   uint64_t depth;
   WeightRecp() {}
   WeightRecp(uint64_t N) {
-    weight_recps.reserve(kChunkSize);
-    for (const auto i : c10::irange(kChunkSize)) {
-      weight_recps.push_back(
-          scalar_t(static_cast<double>(1) / static_cast<double>(i + 1)));
-    }
     uint64_t m = (N + kChunkSize - 1) / kChunkSize; //div up
     depth = m > 0 ? ceil(log2(m)) : 0;
     welford_stk.assign(depth, Welford<T>());
   }
 };
+
+template<typename T>
+std::vector<typename T::value_type> WeightRecp<T>::weight_recps = []() {
+  using scalar_t = typename T::value_type;
+  std::vector<scalar_t> temp(kChunkSize);
+  for (const auto i : c10::irange(kChunkSize)) {
+    temp[i] = scalar_t(static_cast<double>(1) / static_cast<double>(i + 1));
+  }
+  return temp;
+}();
 
 template <typename T>
 Welford<T> welford_combine(const Welford<T>& a, const Welford<T>& b, bool use_index=false) {
