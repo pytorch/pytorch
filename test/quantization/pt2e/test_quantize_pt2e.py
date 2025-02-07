@@ -55,7 +55,11 @@ from torch.testing._internal.common_utils import (
     TEST_CUDA,
     TEST_HPU,
 )
-
+from torch.ao.quantization.observer import HistogramObserver
+from torch.ao.quantization.quantizer.utils import (
+    _annotate_input_qspec_map,
+    _annotate_output_qspec,
+)
 
 @skipIfNoQNNPACK
 class TestQuantizePT2E(PT2EQuantizationTestCase):
@@ -2478,6 +2482,29 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
             if node.name == "mul":
                 check_nn_module(node)
 
+    def test_full_like_with_kwargs(self):
+        """Test that we can quantize full_like, even though it has kwargs which there is an assert for
+            in prepare_pt2e."""
+        class FullLike(torch.nn.Module):
+            def forward(self, t : torch.Tensor):
+                return torch.full_like(t, 1.)
+
+        class TestQuantizer(Quantizer):
+            def annotate(self, model: torch.fx.GraphModule) -> torch.fx.GraphModule:
+                qspec = QuantizationSpec(torch.int8, HistogramObserver, qscheme=torch.per_tensor_symmetric)
+                for node in model.graph.nodes:
+                    for input_node in node.all_input_nodes:
+                        _annotate_input_qspec_map(node, input_node, qspec)
+                    _annotate_output_qspec(node, qspec)
+                return model
+
+            def validate(self, model: torch.fx.GraphModule) -> None:
+                pass
+
+        model = FullLike()
+        exported_model = torch.export.export(model, (torch.randn(10),))
+        # Test that no assertion error is raised.
+        prepared_model = prepare_pt2e(exported_model.graph_module, TestQuantizer())
 
 @skipIfNoQNNPACK
 class TestQuantizePT2EAffineQuantization(PT2EQuantizationTestCase):
