@@ -2789,16 +2789,23 @@ class CppVecKernel(CppKernel):
                 lambda x, y: x * y, self.ranges[self.reduction_depth :]
             )
             self.weight_recps_vec_range = (
-                FloorDiv(reduction_size, self.ranges[self.tiling_idx])
-                * FloorDiv(self.ranges[self.tiling_idx], self.tiling_factor)
-                if self.tiling_idx >= self.reduction_depth
-                else reduction_size
+                (
+                    FloorDiv(reduction_size, self.ranges[self.tiling_idx])
+                    * FloorDiv(self.ranges[self.tiling_idx], self.tiling_factor)
+                    if self.tiling_idx >= self.reduction_depth
+                    else reduction_size
+                )
+                if FloorDiv(self.ranges[self.tiling_idx], self.tiling_factor)
+                else sympy.Integer(0)
             )
             self.masked_weight_recps_vec_range = (
-                FloorDiv(reduction_size, self.ranges[self.tiling_idx])
-                if self.tiling_idx >= self.reduction_depth
-                and self.ranges[self.tiling_idx] % self.tiling_factor
-                else reduction_size
+                (
+                    FloorDiv(reduction_size, self.ranges[self.tiling_idx])
+                    if self.tiling_idx >= self.reduction_depth
+                    else reduction_size
+                )
+                if self.ranges[self.tiling_idx] % self.tiling_factor
+                else sympy.Integer(0)
             )
             self.weight_recps_val = self.weight_recps_cse.generate(
                 self.compute, f"reduction {reduction_key}", write=False
