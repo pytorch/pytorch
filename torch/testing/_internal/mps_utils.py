@@ -644,9 +644,7 @@ MPS_DOWNSTREAM_XFAILLIST = {
     # MPS returns incorrect results before MacOS15
     "nanquantile": MPSSkipInfo(TEST_OUTPUT_MATCH, dtypes=[torch.float32], upper=15.0),
     "quantile": MPSSkipInfo(TEST_OUTPUT_MATCH, dtypes=[torch.float32], upper=15.0),
-    "nn.functional.conv3d": MPSSkipInfo(
-        TEST_OUTPUT_MATCH, dtypes=[torch.bfloat16], upper=15.0
-    ),
+    "nn.functional.conv3d": MPSSkipInfo(TEST_OUTPUT_MATCH, upper=15.0),
 }
 
 """Other uncategorized xfails"""
