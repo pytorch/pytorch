@@ -27,12 +27,13 @@ def max_memory_allocated(device: Optional[_device_t] = None) -> int:
     r"""Return the maximum memory allocated in bytes for a given device.
 
     Args:
-        device (torch.device or int, optional): selected device. Returns
-            statistic for the current device, given by :func:`~torch.mtia.current_device`,
-            if :attr:`device` is ``None`` (default).
+        device (torch.device, str, or int, optional) selected device. Returns
+            statistics for the current device, given by current_device(),
+            if device is None (default).
     """
-
-    return memory_stats(device=device).get("allocated_bytes.all.peak", 0)
+    if not is_initialized():
+        return 0
+    return memory_stats(device).get("dram", 0).get("peak_bytes", 0)
 
 
 __all__ = [
