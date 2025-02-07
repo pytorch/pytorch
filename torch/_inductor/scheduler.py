@@ -3880,11 +3880,39 @@ class Scheduler:
             and name not in self.mutation_real_name
         )
 
+    def graph_partition(self):
+        partitions = [self.nodes]
+        reads = [[]]
+        writes = [[]]
+        return partitions, reads, writes
+        # TODO1: partition self.nodes into multiple lists.
+        # TODO2: for each group, collect inputs and outputs
+
     def codegen(self) -> None:
         with dynamo_timed("Scheduler.codegen"):
-            return self._codegen()
+            return (
+                self._codegen_partitions()
+                if torch._inductor.config.graph_partition and not V.graph.aot_mode
+                else self._codegen(self.nodes)
+            )
 
-    def _codegen(self) -> None:
+    def _codegen_partitions(self) -> None:
+        # TODO
+        partitions, reads, writes = self.graph_partition()
+
+        for nodes, read, write in zip(partitions, reads, writes):
+            self._codegen(nodes)
+            # TODO1: move V.graph.wrapper_code.lines to V.graph.wrapper_code.subgraph_lines
+            # TODO2: codegen for signature like `def subgraph1(arg0):`
+            # TODO3: codegen for input arguments  like `arg0, arg1 = args`
+            # TODO4: codegen for output arguments like `return out0, out1`
+            # TODO5: codegen for subgraph launcher in V.graph.wrapper_code.subgraph_launchers,
+            #           like `buf2 = subgraph1(arg0)` which will appear in `def call`.
+
+        # TODO6: in generate, we may need additionally convert V.graph.wrapper_code.subgraph_lines
+        #           into the actual code but under `def subgraph1(arg0)`.
+
+    def _codegen(self, nodes: List[BaseSchedulerNode]) -> None:
         if config.check_stack_no_cycles_TESTING_ONLY:
             import torch._dynamo.convert_frame
 
@@ -3906,7 +3934,7 @@ class Scheduler:
                 seen.add(key)
 
         self.current_device = None
-        for node in self.nodes:
+        for node in nodes:
             if log.isEnabledFor(logging.DEBUG):
                 try:
                     log.debug(
@@ -3919,7 +3947,6 @@ class Scheduler:
                         "Generating code for node %s with estimated runtime 0.0",
                         node.get_name(),
                     )
-
             self.enter_context(node)
 
             if device := node.get_device():

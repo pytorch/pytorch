@@ -1396,6 +1396,7 @@ class GraphLowering(torch.fx.Interpreter):
             maybe_propagate(schema_arg, old_arg, new_arg)
 
     def run_node(self, n: torch.fx.Node) -> object:
+        # breakpoint()
         def debug(msg: str) -> None:
             log.debug("lowering %s %s", LazyString(n.format_node), msg)
 
@@ -1460,6 +1461,7 @@ class GraphLowering(torch.fx.Interpreter):
                     result = super().run_node(n)
             else:
                 debug("")
+                # breakpoint()
                 result = super().run_node(n)
 
             # require the same stride order for dense outputs,
