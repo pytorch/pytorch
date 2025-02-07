@@ -1936,6 +1936,9 @@ class SubgraphTracer(fx.Tracer):
         # backward recomputation of the checkpoint region doesn't affect its correctness.
         self.allow_side_effects_under_checkpoint = False
 
+        # True if this tracer is currently tracing (reconstructing) into a Python generator
+        self.is_reconstructing_generator = False
+
         self.debug_level: int = parent.debug_level + 1 if parent is not None else 0
 
         self._cur_code = None

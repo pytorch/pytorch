@@ -168,6 +168,11 @@ class InfiniteGeneratorError(Unsupported):
         super().__init__(msg)
 
 
+class SideEffectsError(Unsupported):
+    def __init__(self, msg: str) -> None:
+        super().__init__(msg)
+
+
 class CondOpArgsMismatchError(ArgsMismatchError):
     """
     Internal error from cond() due to arguments mismatch.

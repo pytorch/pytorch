@@ -428,18 +428,23 @@ class LocalGeneratorObjectVariable(VariableTracker):
     __repr__ = __str__
 
     def reconstruct(self, codegen):
-        from torch._dynamo.symbolic_convert import InstructionTranslator
+        from torch._dynamo.side_effects import disallow_side_effects_in_generator
+        from torch._dynamo.symbolic_convert import (
+            InstructionTranslator,
+            save_and_restart_speculation_log,
+            temporarely_allow_writes_to_output_graph,
+        )
 
         tx = InstructionTranslator.current_tx()
-        tracer = self._get_inline_tracer(tx)
-        try:
-            prev = tx.output.should_exit
-            tx.output.should_exit = False
+        save = save_and_restart_speculation_log(tx)
+        disallow = disallow_side_effects_in_generator(tx)
+        temp = temporarely_allow_writes_to_output_graph(tx)
+
+        with save, disallow, temp:
+            tracer = self._get_inline_tracer(tx)
             if not tracer.generator_exhausted:
                 self.remaining_items = self.force_unpack_var_sequence(tx)
             variables.ListIteratorVariable(self.remaining_items).reconstruct(codegen)
-        finally:
-            tx.output.should_exit = prev
 
     def bind_args(self, tx, args, kwargs):
         return self.fn.bind_args(tx, args, kwargs)
@@ -480,6 +485,8 @@ class LocalGeneratorObjectVariable(VariableTracker):
         except Unsupported as e:
             torch._C._dynamo.eval_frame.skip_code(self.get_code())
             raise SkipFrame from e
+        finally:
+            counters["unimplemented"] |= counters["inline_call"]
 
     def has_unpack_var_sequence(self, tx):
         return False
