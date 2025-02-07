@@ -6,10 +6,14 @@ from __future__ import annotations
 
 import itertools
 import sys
-from typing import Callable, Iterable, Iterator, overload, TypeVar
+from typing import Callable, overload, TYPE_CHECKING, TypeVar
 from typing_extensions import TypeAlias
 
 from ..decorators import substitute_in_graph
+
+
+if TYPE_CHECKING:
+    from collections.abc import Iterable, Iterator
 
 
 __all__ = [

@@ -1,6 +1,6 @@
 import dataclasses
 import types
-from typing import Any, Callable, Dict, List, NamedTuple, Optional, Protocol, Union
+from typing import Any, Callable, NamedTuple, Optional, Protocol, Union
 
 # CacheEntry has a `guard_manager` field for the guard, and a `code` field for the code object.
 from torch._C._dynamo.eval_frame import (
@@ -12,7 +12,7 @@ from torch._guards import CompileId
 
 
 # We use a dict to store additional data per frame.
-FrameState = Dict[Any, Any]
+FrameState = dict[Any, Any]
 
 
 class GuardFail(NamedTuple):
@@ -23,17 +23,17 @@ class GuardFail(NamedTuple):
 
 
 class GuardFn(Protocol):
-    closure_vars: Dict[str, object]
-    args: List[str]
-    code_parts: List[str]
-    verbose_code_parts: List[str]
-    global_scope: Dict[str, object]
+    closure_vars: dict[str, object]
+    args: list[str]
+    code_parts: list[str]
+    verbose_code_parts: list[str]
+    global_scope: dict[str, object]
     guard_fail_fn: Optional[Callable[[GuardFail], None]]
     cache_entry: Optional[CacheEntry]
     extra_state: Optional[ExtraState]
 
     # maps locals of user function to bool
-    def __call__(self, f_locals: Dict[str, object]) -> bool:
+    def __call__(self, f_locals: dict[str, object]) -> bool:
         ...
 
 
@@ -63,7 +63,7 @@ class DynamoGuardHook(Protocol):
         self,
         guard_manager: GuardFn,
         code: types.CodeType,
-        f_locals: Dict[str, object],
+        f_locals: dict[str, object],
         index: int,
         last: bool,
     ) -> None:
