@@ -17,7 +17,6 @@ from torch.testing._internal.common_distributed import (
     skip_if_rocm_multiprocess,
 )
 from torch.testing._internal.common_utils import (
-    NO_MULTIPROCESSING_SPAWN,
     run_tests,
     skip_but_pass_in_sandcastle_if,
     TEST_WITH_DEV_DBG_ASAN,
@@ -45,10 +44,6 @@ if TEST_WITH_DEV_DBG_ASAN:
         "Skip dev-asan as torch + multiprocessing spawn have known issues",
         file=sys.stderr,
     )
-    sys.exit(0)
-
-if NO_MULTIPROCESSING_SPAWN:
-    print("Spawn not available, skipping tests.", file=sys.stderr)
     sys.exit(0)
 
 BACKEND = os.environ["BACKEND"]
