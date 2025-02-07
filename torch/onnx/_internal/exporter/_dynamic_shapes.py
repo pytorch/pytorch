@@ -24,7 +24,7 @@ def from_dynamic_axes_to_dynamic_shapes(
     input_names: Sequence[str] | None = None,
 ) -> tuple[dict[str, Any | None] | None, tuple[Any, ...], dict[str, Any] | None]:
     """
-    Converts dynamic_axes into dynamic_shapes by wrapping the axis names with torch.export.Dim.AUTO.
+    Converts dynamic_axes into dynamic_shapes by wrapping the axis names with ``torch.export.Dim.AUTO``.
 
     dynamic_axes examples:
     (1) dynamic_axes = {"x": {0: "my_custom_axis_name_1"}, "y": {1: "my_custom_axis_name_2"}}
@@ -34,7 +34,7 @@ def from_dynamic_axes_to_dynamic_shapes(
     (1) dynamic_shapes = {"x": {0: Dim.AUTO}, "y": {1: Dim.AUTO}}
     (2) dynamic_shapes = {"x": {0: Dim.AUTO}, "y": {1: Dim.AUTO}}
 
-    Detail on Dim.AUTO: https://github.com/pytorch/pytorch/pull/133620
+    Detail on Dim.AUTO: `#133620 <https://github.com/pytorch/pytorch/pull/133620>`_
     """
     # https://github.com/pytorch/pytorch/pull/128371
     # 1. The function does not need to provide dynamic_shapes to torch.export.export
@@ -289,10 +289,10 @@ def _get_custom_axis_name(axis: _Dim | str) -> str:
 
 
 def iterate_and_change_axis_names(
-    model_or_function: ir.Model | ir.Function, rename_mapping: dict[str, str]
+    model: ir.Model, rename_mapping: dict[str, str]
 ) -> None:
     """Rename dynamic axes in a model according to the specified dynamic_axes names."""
-    for value in _all_values(model_or_function):
+    for value in _all_values(model):
         if value.shape is None:
             continue
         new_shape = []
@@ -359,14 +359,15 @@ def _signature(model) -> inspect.Signature:
     raise ValueError("model has no forward method and is not callable")
 
 
-def _all_values(model_or_function: ir.Model | ir.Function):
+def _all_values(model: ir.Model):
     """Yield all values in a model."""
-    if isinstance(model_or_function, ir.Function):
-        yield from model_or_function.inputs
-        for node in ir.traversal.RecursiveGraphIterator(model_or_function):
-            yield from node.outputs
-    else:
-        yield from model_or_function.graph.inputs
-        yield from model_or_function.graph.initializers.values()
-        for node in ir.traversal.RecursiveGraphIterator(model_or_function.graph):
+    # Yield all values in the model
+    yield from model.graph.inputs
+    yield from model.graph.initializers.values()
+    for node in ir.traversal.RecursiveGraphIterator(model.graph):
+        yield from node.outputs
+    # Yield all values in functions
+    for function in model.functions.values():
+        yield from function.inputs
+        for node in ir.traversal.RecursiveGraphIterator(function):
             yield from node.outputs

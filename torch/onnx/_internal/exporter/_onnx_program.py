@@ -264,10 +264,6 @@ ONNXProgram(
             self.model.graph.inputs, dynamic_shapes
         )
         _dynamic_shapes.iterate_and_change_axis_names(self.model, rename_mapping)
-        for model_function in self.model.functions.values():
-            _dynamic_shapes.iterate_and_change_axis_names(
-                model_function, rename_mapping
-            )
 
 
 def _process_args(args, kwargs) -> tuple[torch.Tensor, ...]:
