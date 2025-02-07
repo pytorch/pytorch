@@ -1013,12 +1013,10 @@ class VariableBuilder:
         elif is_lru_cache_wrapped_function(value):
             self.install_guards(GuardBuilder.TYPE_MATCH)
             return WrapperUserFunctionVariable(value, "__wrapped__", source=self.source)
-        elif value in (traceback.clear_frames,):
+        elif value is traceback.clear_frames:
             return TracebackVariable(source=self.source)
-        elif (
-            value in (sys.exc_info,)
-            or sys.version_info >= (3, 11)
-            and value is sys.exception
+        elif value is sys.exc_info or (
+            sys.version_info >= (3, 11) and value is sys.exception
         ):
             return SysFunctionVariable(value, source=self.source)
         elif is_function_or_wrapper(value) and inspect.getattr_static(
