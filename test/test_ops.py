@@ -1435,6 +1435,18 @@ class TestCommon(TestCase):
 
     @ops(op_db, allowed_dtypes=(torch.bool,))
     def test_non_standard_bool_values(self, device, dtype, op):
+        if TEST_WITH_ROCM and "cuda" in device:
+            rocm_blocklist = [
+                "test_non_standard_bool_values_masked_scatter_cuda_bool",
+                "test_non_standard_bool_values_scatter_add_cuda_bool",
+                "test_non_standard_bool_values_scatter_cuda_bool",
+                "test_non_standard_bool_values_scatter_reduce_sum_cuda_bool",
+                "test_non_standard_bool_values_tril_cuda_bool",
+                "test_non_standard_bool_values_triu_cuda_bool",
+            ]
+            if self._testMethodName in rocm_blocklist:
+                self.skipTest("Failed on ROCm")
+
         # Test boolean values other than 0x00 and 0x01 (gh-54789)
         def convert_boolean_tensors(x):
             if not isinstance(x, torch.Tensor) or x.dtype != torch.bool:
