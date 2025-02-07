@@ -1322,12 +1322,19 @@ class TritonKernelOverrides(TritonOverrides):
         # we only respect non int32-int64 dtypes and otherwise use current kernel indexing dtype
         index_dtype = torch.int32 if V.kernel.index_dtype == "tl.int32" else torch.int64
         dtype = dtype if dtype not in (torch.int32, torch.int64) else index_dtype
-        var = V.kernel.cse.generate(
-            V.kernel.compute,
-            indexing.index_str,
-            bounds=get_bounds_index_expr(expr),
-            dtype=dtype,
-        )
+
+        # after we emit this var we cast it to the correct dtype
+        orig = config.test_configs.runtime_triton_dtype_assert
+        try:
+            config.test_configs.runtime_triton_dtype_assert = False
+            var = V.kernel.cse.generate(
+                V.kernel.compute,
+                indexing.index_str,
+                bounds=get_bounds_index_expr(expr),
+                dtype=dtype,
+            )
+        finally:
+            config.test_configs.runtime_triton_dtype_assert = orig
 
         if dtype not in (torch.int32, torch.int64):
             var = V.kernel.cse.generate(
@@ -2491,7 +2498,9 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                     self.cse.generate(
                         self.compute,
                         f"tl.broadcast_to({reduction_range_prefix}index, {masked_value}.shape)",
-                        dtype=torch.int64,
+                        dtype=torch.int32
+                        if V.kernel.index_dtype == "tl.int32"
+                        else torch.int64,
                     )
                 )
                 root_op = {"argmax": "max", "argmin": "min"}[reduction_type]
@@ -2905,6 +2914,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         broadcasted_values = []
         accumulators = []
 
+        dtypes = tuple(upcast_compute_type(dtype) for dtype in dtypes)
         cse_compute = functools.partial(self.cse.generate, self.compute)
         combine_helper_fn = self._lift_helper(combine_fn, len(values), dtypes)
         dim = self.triton_tensor_ndim() - self.num_reduction_dims
@@ -2913,19 +2923,19 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             value_dtype = self.cse.generate(
                 self.compute,
                 f"{value}.to({triton_compute_type(dtype)})",
-                dtype=upcast_compute_type(dtype),
+                dtype=dtype,
             )
             value = self.cse.generate(
                 self.compute,
                 f"tl.broadcast_to({value_dtype}, {self.dense_size_str()})",
-                dtype=upcast_compute_type(dtype),
+                dtype=dtype,
             )
             broadcasted_values.append(value)
 
             acc_type = triton_acc_type(dtype)
 
             if not self.persistent_reduction:
-                accumulator = self.cse.newvar(dtype=upcast_compute_type(dtype))
+                accumulator = self.cse.newvar(dtype=dtype)
                 reduced_size = self.dense_size_list()
                 reduced_size[-1] = "1"
                 reduced_size = f"[{', '.join(reduced_size)}]"
@@ -2959,7 +2969,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             f"tl.associative_scan(({csv(broadcasted_values)}), {dim}, {combine_helper_fn})",
             values,
             masks,
-            (upcast_compute_type(dtype) for dtype in dtypes),
+            dtypes,
         )
 
         if not self.persistent_reduction:
@@ -3017,6 +3027,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         cse_compute = functools.partial(self.cse.generate, self.compute)
         dim = self.triton_tensor_ndim() - self.num_reduction_dims
 
+        dtypes = tuple(upcast_compute_type(dtype) for dtype in dtypes)
         assert len(dtypes) == len(values)
         broadcasted_values = [
             cse_compute(
