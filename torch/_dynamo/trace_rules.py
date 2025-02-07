@@ -1,4 +1,5 @@
 # mypy: allow-untyped-defs
+import abc
 import builtins
 import collections
 import copy
@@ -6,6 +7,7 @@ import dataclasses
 import functools
 import importlib
 import inspect
+import linecache
 import operator
 import os
 import random
@@ -297,6 +299,7 @@ manual_torch_name_rule_map = {
     "torch._functorch.pyfunctorch.coerce_cinterpreter": TorchInGraphFunctionVariable,
     "torch._higher_order_ops.triton_kernel_wrap.do_prune_configs": UserFunctionVariable,
     "torch._higher_order_ops.foreach_map.foreach_map": UserFunctionVariable,
+    "torch._higher_order_ops.flat_apply.is_graphable": UserFunctionVariable,
     "torch._constrain_as_size": UserFunctionVariable,
     "torch._tensor._convert": UserFunctionVariable,
     "torch.jit._unwrap_optional": UserFunctionVariable,
@@ -423,7 +426,6 @@ torch_c_binding_in_graph_functions = dict.fromkeys(
         "torch._C._cpu._is_amx_tile_supported",
         "torch._C._cpu._is_amx_fp16_supported",
         "torch._C._cpu._init_amx",
-        "torch._C._cpu._is_arm_sve_supported",
         "torch._C._crash_if_aten_asan",
         "torch._C._crash_if_csrc_asan",
         "torch._C._crash_if_csrc_ubsan",
@@ -2438,7 +2440,6 @@ torch_non_c_binding_in_graph_functions = dict.fromkeys(
         "torch._C._cpu._is_amx_tile_supported",
         "torch._C._cpu._is_amx_fp16_supported",
         "torch.cpu._init_amx",
-        "torch._C._cpu._is_arm_sve_supported",
         "torch.cpu.current_device",
         "torch.cpu.current_stream",
         "torch.cpu.device_count",
@@ -3153,11 +3154,12 @@ def is_numpy_type_info(obj) -> bool:
 
 
 BUILTIN_SKIPLIST = (
+    abc,
     collections,
     copy,
-    inspect,
     random,
     traceback,
+    linecache,
     unittest,
 )
 

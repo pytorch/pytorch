@@ -93,6 +93,7 @@ from .utils import (
     get_instruction_source_311,
     get_locals_to_steal,
     get_static_address_type,
+    get_unique_name_wrt,
     graph_break_reasons,
     increment_op_count,
     lazy_format_graph_code,
@@ -724,11 +725,21 @@ class OutputGraph:
 
         return name
 
+    def register_static_attr_and_return_proxy(
+        self, attr_prefix: str, attr_value: Any
+    ) -> fx.Proxy:
+        attr_name = get_unique_name_wrt(attr_prefix, self.nn_modules)
+        # TODO `nn_modules` has been historically overloaded to store a lot more
+        # than just nn module objects, fix that.
+        self.nn_modules[attr_name] = attr_value
+        proxy = self.create_proxy("get_attr", attr_name, (), {})
+        set_example_value(proxy.node, attr_value)
+        return proxy
+
     def register_attr_or_module(
         self,
         target: Union[torch.nn.Module, torch.Tensor, Any],
         *names,
-        return_getattr_proxy=False,
         **options,
     ):
         if is_dynamic_nn_module(target, self.root_tx.export):
@@ -737,10 +748,8 @@ class OutputGraph:
             return VariableTracker.build(self.current_tx, target, **options)
 
         options = dict(options)
-        # This was too restrictive even without `mark_traceable`, it forces
-        # `invoke_and_store_as_constant` to pass in a constant source, although
-        # that never gets used, and we create a new constant source below...
-        source = options.get("source", None)
+        assert "source" in options
+        source = options["source"]
         assert not isinstance(source, ParamBufferSource)
 
         if isinstance(target, torch.Tensor):
@@ -826,14 +835,6 @@ class OutputGraph:
         else:
 
             def wrap_name(module_key):
-                # TODO short-cut hack for prototype
-                # the value was attached to the graph moduel via this line way below:
-                #   `self.nn_modules[name] = target`
-                if return_getattr_proxy:
-                    proxy = self.create_proxy("get_attr", module_key, (), {})
-                    set_example_value(proxy.node, target)
-                    return proxy
-
                 self.output.update_co_names(module_key)
                 self.global_scope[module_key] = target
                 return VariableTracker.build(
@@ -847,35 +848,30 @@ class OutputGraph:
 
         name = OutputGraph.module_key_name(*names)
 
-        base = name
-        for i in itertools.count():
-            if name not in self.nn_modules and name not in self.global_scope:
-                self.nn_modules[name] = target
-                if isinstance(target, torch.nn.Module):
+        name = get_unique_name_wrt(name, self.nn_modules, self.global_scope)
+        self.nn_modules[name] = target
+        if isinstance(target, torch.nn.Module):
 
-                    def register_leaf_name(leaf_name):
-                        assert self.param_name_to_source is not None
-                        new_source = ParamBufferSource(source, leaf_name)
-                        new_name = f"{name}.{leaf_name}"
-                        self.param_name_to_source[new_name] = new_source
-                        if isinstance(source, LocalSource):
-                            self.dynamo_flat_name_to_original_fqn[
-                                OutputGraph.module_key_name(new_source.name())
-                            ] = leaf_name
+            def register_leaf_name(leaf_name):
+                assert self.param_name_to_source is not None
+                new_source = ParamBufferSource(source, leaf_name)
+                new_name = f"{name}.{leaf_name}"
+                self.param_name_to_source[new_name] = new_source
+                if isinstance(source, LocalSource):
+                    self.dynamo_flat_name_to_original_fqn[
+                        OutputGraph.module_key_name(new_source.name())
+                    ] = leaf_name
 
-                    # annoying, but there are cases when we do not have parameters
-                    # see test_nn_moduledict_contains
-                    if hasattr(target, "_parameters"):
-                        for leaf_name, _ in target.named_parameters():
-                            register_leaf_name(leaf_name)
-                    if hasattr(target, "_buffers"):
-                        for leaf_name, _ in target.named_buffers():
-                            register_leaf_name(leaf_name)
+            # annoying, but there are cases when we do not have parameters
+            # see test_nn_moduledict_contains
+            if hasattr(target, "_parameters"):
+                for leaf_name, _ in target.named_parameters():
+                    register_leaf_name(leaf_name)
+            if hasattr(target, "_buffers"):
+                for leaf_name, _ in target.named_buffers():
+                    register_leaf_name(leaf_name)
 
-                return wrap_name(name)
-            name = f"{base}_{i}"
-
-        raise AssertionError("unreachable")
+        return wrap_name(name)
 
     def handle_aliases_for_stolen_lists(self, tx):
         # If list inputs are stolen, but still needed after the function call, create aliases to keep them alive
@@ -1485,7 +1481,7 @@ class OutputGraph:
                     self.compiler_fn, e, inspect.currentframe()
                 ).with_traceback(e.__traceback__) from None
             msg = (
-                "Backend compiler failed with a fake tensor exception at \n"
+                f"Backend compiler failed with {str(e)} at \n"
                 f"{self.root_tx.format_frame_summary()}"
                 "Adding a graph break."
             )

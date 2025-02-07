@@ -1008,6 +1008,16 @@ def is_function(value):
     )
 
 
+cmp_name_to_op_mapping = {
+    "__eq__": operator.eq,
+    "__ne__": operator.ne,
+    "__lt__": operator.lt,
+    "__le__": operator.le,
+    "__gt__": operator.gt,
+    "__ge__": operator.ge,
+}
+
+
 def is_wrapper_or_member_descriptor(value):
     return isinstance(
         value,
@@ -1188,6 +1198,7 @@ class CompilationMetrics:
     tensorify_float_success: Optional[bool] = None
     tensorify_float_failure: Optional[set[str]] = None
     guard_latency_us: Optional[float] = None
+    recompile_reason: Optional[str] = None
 
     @classmethod
     def create(cls, metrics: dict[str, Any]):
@@ -1319,6 +1330,40 @@ def add_compilation_metrics_to_chromium(c: CompilationMetrics) -> None:
     )
 
 
+def _get_dynamo_config_for_logging() -> Optional[str]:
+    def clean_for_json(d: dict[str, Any]) -> dict[str, Any]:
+        blocklist = {
+            "TYPE_CHECKING",
+            "log_file_name",
+            "verbose",
+            "repro_after",
+            "repro_level",
+            "repro_forward_only",
+            "repro_tolerance",
+            "repro_ignore_non_fp",
+            "same_two_models_use_fp64",
+            "base_dir",
+            "debug_dir_root",
+            "_save_config_ignore",
+            "log_compilation_metrics",
+            "inject_BUILD_SET_unimplemented_TESTING_ONLY",
+            "_autograd_backward_strict_mode_banned_ops",
+            "reorderable_logging_functions",
+            "ignore_logger_methods",
+            "traceable_tensor_subclasses",
+            "_custom_ops_profile",
+        }
+
+        return {
+            key: sorted(value) if isinstance(value, set) else value
+            for key, value in d.items()
+            if key not in blocklist
+        }
+
+    config_dict = clean_for_json(config.get_config_copy())
+    return json.dumps(config_dict, sort_keys=True)
+
+
 def _scrubbed_inductor_config_for_logging() -> Optional[str]:
     """
     Method to parse and scrub uninteresting configs from inductor config
@@ -1398,6 +1443,7 @@ def record_compilation_metrics(
         "structured_logging_overhead_us": to_int_us(
             torch._logging.get_structured_logging_overhead()
         ),
+        "dynamo_config": _get_dynamo_config_for_logging(),
         "inductor_config": _scrubbed_inductor_config_for_logging(),
         "cuda_version": torch.version.cuda,
         "triton_version": triton.__version__ if has_triton() else "",
@@ -2500,6 +2546,24 @@ def get_safe_global_name(tx, root, obj):
     # may be deleted when the first torch.compile invocation is deleted)
     # We mangle it based off of the output_graph's id.
     return f"{root}_{id(obj)}_c{tx.output.compile_id}"
+
+
+def get_unique_name_wrt(prefix: str, *containers) -> str:
+    """
+    Return a name that starts with `prefix` and is not in any of the
+    `containers` (e.g., map, set).
+    """
+    for i in itertools.count():
+        name = f"{prefix}_{i}"
+        found = False
+
+        for container in containers:
+            if name in container:
+                found = True
+        if not found:
+            return name
+
+    assert False, "unreachable"
 
 
 def wrap_fake_exception(fn):

@@ -275,9 +275,9 @@ class DecoratorTests(torch._dynamo.test_case.TestCase):
             return x * d["a"]
 
         def fn(x, d):
-            d["a"] = 1
+            d["a"] = x + 1
             t0 = func(x, d)
-            return t0 + 1
+            return t0 + 2
 
         x = torch.randn(10)
         d0 = {"a": 0}
@@ -372,11 +372,6 @@ class DecoratorTests(torch._dynamo.test_case.TestCase):
         ref = fn(x, y)
         res = opt_fn(x, y)
         self.assertEqual(ref, res)
-
-    # TODO
-    # - args with pytree.register_constant
-    # - custom class without pytree registration (error)
-    # - more cases......
 
     def test_graph_break(self):
         cnts = torch._dynamo.testing.CompileCounter()

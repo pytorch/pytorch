@@ -34,15 +34,23 @@ def from_graphable(flat_args, spec):
     return stuff
 
 
+def func_to_graphable(func):
+    """
+    Pack and flatten a function type into graphable types.
+    This is useful for legalizing the function argument of `flat_apply`.
+    """
+    return pytree.tree_flatten(_ConstantFunction(func))
+
+
 @dataclass
-class ConstantFunction:
+class _ConstantFunction:
     func: Callable
 
     def __call__(self, *args, **kwargs):
         return self.func(*args, **kwargs)
 
 
-pytree.register_constant(ConstantFunction)
+pytree.register_constant(_ConstantFunction)
 
 _op_types = (
     torch._ops.OpOverload,
@@ -84,21 +92,28 @@ class FlatApply(HigherOrderOperator):
 
 def impl(func, in_spec, *flat_args):
     if not isinstance(func, _op_types):
-        # assume ConstantFunction
+        # assume _ConstantFunction
         func = pytree._retrieve_constant(func)
-        assert isinstance(func, ConstantFunction)
+        assert isinstance(func, _ConstantFunction)
 
     args, kwargs = from_graphable(flat_args, in_spec)
     out = func(*args, **kwargs)
-    # TODO: The following needs to change for pytree outputs.
+
+    # Right now, all outputs must either be graphable or lists/tuples of graphables.
+    #
+    # TODO: The following can be updated to support non-graphable outputs and pytrees.
+    # For non-graphable constant outputs: the assumption would be that they are constant
+    # (everytime the function runs those MUST be the same)
+    # For pytree outputs:
     # I'm not sure if we need to return (flat_output, spec) or just (flat_output,):
     # in the latter case the tracers need to carry out the output specs
     # (they need to know how to reconstruct the object from just the flat_output).
-    assert (
-        isinstance(out, torch.Tensor)
-        or isinstance(out, (tuple, list))
-        and all(map(is_graphable, out))
-    )
+    def is_valid_output(x):
+        if isinstance(x, (tuple, list)):
+            return all(map(is_valid_output, x))
+        return is_graphable(x)
+
+    assert is_valid_output(out)
     return out
 
 

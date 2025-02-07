@@ -158,6 +158,9 @@ def allow_in_graph(fn):
 def mark_traceable(fn):
     """
     TODO doc
+    1. input constraints
+    2. output constraints
+    3. function semantics constraints
     """
     assert callable(fn), "mark_traceable expects a callable"
     if trace_rules.lookup_callable(fn) != variables.TorchInGraphFunctionVariable:
