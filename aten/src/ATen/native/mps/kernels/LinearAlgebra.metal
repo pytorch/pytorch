@@ -395,6 +395,90 @@ kernel void applySYRK(
   }
 }
 
+kernel void applyPivots(
+    device float* P [[buffer(0)]],
+    device const int* pivots [[buffer(1)]],
+    constant uint& R [[buffer(2)]],
+    constant uint& K [[buffer(3)]],
+    uint3 tid [[thread_position_in_threadgroup]],
+    uint3 bid [[threadgroup_position_in_grid]],
+    uint3 tpg [[threads_per_threadgroup]]) {
+  uint tx = tid.x;
+  uint ty = tid.y;
+  uint linear_tid = ty * tpg.x + tx;
+  uint group_size = tpg.x * tpg.y;
+  uint batch_idx = bid.x;
+
+  // i.e. 1024 floats
+  threadgroup float4 sharedScratch[256];
+
+  for (int i = static_cast<int>(K) - 1; i >= 0; i--) {
+    int pivot = pivots[batch_idx * K + i];
+    if (pivot == i) {
+      // no swap needed
+      continue;
+    }
+
+    // row swaps in chunks(for large matrices)
+    for (uint chunkStart = 0; chunkStart < R; chunkStart += 1024) {
+      // actual chunk size (may be smaller than 1024 near the end)
+      uint chunkSize = min((uint)1024, R - chunkStart);
+
+      // 1. load pivot row data into sharedScratch in float4 blocks
+      for (uint j = linear_tid * 4 + chunkStart; j < (chunkStart + chunkSize);
+           j += group_size * 4) {
+        uint elementsRemaining = (chunkStart + chunkSize) - j;
+
+        // If we have fewer than 4 floats left in this chunk, do scalar fallback
+        if (elementsRemaining < 4) {
+          for (uint e = 0; e < elementsRemaining; e++) {
+            // copy pivot row data into the correct sub-element of float4
+            sharedScratch[(j - chunkStart) / 4][e] =
+                P[batch_idx * R * R + pivot * R + (j + e)];
+          }
+        } else {
+          device const float4* pivotPtr =
+              reinterpret_cast<device const float4*>(
+                  &P[batch_idx * R * R + pivot * R + j]);
+          sharedScratch[(j - chunkStart) / 4] = *pivotPtr;
+        }
+      }
+      threadgroup_barrier(mem_flags::mem_threadgroup);
+
+      // 2. swap the rows(row i gets swapped w pivot)
+      for (uint j = linear_tid * 4 + chunkStart; j < (chunkStart + chunkSize);
+           j += group_size * 4) {
+        uint elementsRemaining = (chunkStart + chunkSize) - j;
+
+        // handle remainder with scalar logic
+        if (elementsRemaining < 4) {
+          for (uint e = 0; e < elementsRemaining; e++) {
+            float row_i_value = P[batch_idx * R * R + i * R + (j + e)];
+            float pivot_row_value = sharedScratch[(j - chunkStart) / 4][e];
+
+            P[batch_idx * R * R + i * R + (j + e)] = pivot_row_value;
+            P[batch_idx * R * R + pivot * R + (j + e)] = row_i_value;
+          }
+        } else {
+          device float4* rowIPtr = reinterpret_cast<device float4*>(
+              &P[batch_idx * R * R + i * R + j]);
+          float4 row_i_val = *rowIPtr;
+
+          float4 pivot_val = sharedScratch[(j - chunkStart) / 4];
+
+          device float4* pivotPtr = reinterpret_cast<device float4*>(
+              &P[batch_idx * R * R + pivot * R + j]);
+
+          // perform swap
+          *rowIPtr = pivot_val;
+          *pivotPtr = row_i_val;
+        }
+      }
+      threadgroup_barrier(mem_flags::mem_threadgroup);
+    }
+  }
+}
+
 #define INSTANTIATE_NAIVE_MM(DTYPE)                          \
   template [[host_name("naive_matmul_" #DTYPE)]] kernel void \
   naive_matmul<DTYPE>(                                       \
