@@ -18,7 +18,7 @@ from ..decorators import substitute_in_graph
 if TYPE_CHECKING:
     import builtins
     from collections.abc import Iterable
-    from typing_extensions import Self
+    from typing import Self
 
     from torch.utils._cxx_pytree import PyTree
 

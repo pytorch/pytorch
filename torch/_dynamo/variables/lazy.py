@@ -1,8 +1,7 @@
 import collections
 import functools
 import inspect
-from typing import Any, Callable, final, Optional, Union
-from typing_extensions import Self
+from typing import Any, Callable, final, Optional, Self, Union
 
 from ..utils import is_function_or_wrapper
 from .base import VariableTracker

@@ -1,7 +1,6 @@
 import dataclasses
 import os
-from typing import Any
-from typing_extensions import Self
+from typing import Any, Self
 
 import torch
 

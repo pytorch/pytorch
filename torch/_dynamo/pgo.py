@@ -8,8 +8,7 @@ import logging
 import os
 import pickle
 from collections import defaultdict
-from typing import Optional, TYPE_CHECKING, TypeVar, Union
-from typing_extensions import Self
+from typing import Optional, Self, TYPE_CHECKING, TypeVar, Union
 
 import torch._dynamo.config
 import torch._utils_internal
