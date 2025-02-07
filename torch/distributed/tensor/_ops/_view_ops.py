@@ -1,7 +1,8 @@
 # mypy: allow-untyped-defs
 # Copyright (c) Meta Platforms, Inc. and affiliates
+from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
-from typing import Callable, cast, Dict, Iterable, List, Optional, Sequence, Set, Union
+from typing import Callable, cast, Optional, Union
 
 import torch
 from torch import Tensor
@@ -216,7 +217,7 @@ def dim_flatten(ndim: int, start_dim=0, end_dim=-1) -> DimMap:
         # other dims are passed through
         if end_dim < 0:
             end_dim += ndim
-        results: List[DimSpec] = [InputDim(i) for i in range(start_dim)]
+        results: list[DimSpec] = [InputDim(i) for i in range(start_dim)]
         results.append(
             Flatten.new(tuple(InputDim(i) for i in range(start_dim, end_dim + 1)))
         )
@@ -414,7 +415,7 @@ def dim_unsqueeze(ndim: int, dim: int) -> DimMap:
 
 def dim_view_as_real(shape: Shape) -> DimMap:
     ndim = len(shape)
-    results: List[DimSpec] = [InputDim(i) for i in range(ndim - 1)]
+    results: list[DimSpec] = [InputDim(i) for i in range(ndim - 1)]
     # each complex number is split into two real numbers,
     # resulting in one more dimension of size 2
     results.append(Split(InputDim(ndim - 1), (shape[-1], 2), 0))
@@ -442,7 +443,7 @@ def dim_reduction(
     )
 
 
-dim_maps: Dict[Callable[..., torch.Tensor], Callable[..., DimMap]] = {
+dim_maps: dict[Callable[..., torch.Tensor], Callable[..., DimMap]] = {
     torch.atleast_1d: lambda x: dim_pad_left(x.ndim, 1),
     torch.atleast_2d: lambda x: dim_pad_left(x.ndim, 2),
     torch.atleast_3d: lambda x: dim_atleast_3d(x.ndim),
@@ -488,11 +489,11 @@ def propagate_shape_and_sharding(
     assert len(input_src_placements) == len(mesh_sizes)
     # for each input dim, for each mesh dim, provides a list of possible shardable dimensions
     mesh_ndim = len(mesh_sizes)
-    shardable_dims: Dict[int, List[bool]] = {}
+    shardable_dims: dict[int, list[bool]] = {}
 
     # in case an input dimension disappears (e.g. collapsing, reduction)
     # we cannot shard in that dimension (we need a replication fall-back rule)
-    seen_input_dims: Set[int] = set()
+    seen_input_dims: set[int] = set()
 
     def collect_used_inputs(cmd: DimSpec) -> None:
         if isinstance(cmd, InputDim):

@@ -671,9 +671,28 @@ class TestOptimRenewed(TestCase):
 
         loaded_dict = optim.state_dict()
 
+        # Test that Adam respects the decoupled_weight_decay key
         new_optim = torch.optim.Adam(model.parameters())
         new_optim.load_state_dict(loaded_dict)
+        self.assertTrue(new_optim.param_groups[0]["decoupled_weight_decay"])
 
+        # Test that decoupled_weight_decay is always True for AdamW
+        adam_optim = torch.optim.Adam(model.parameters())
+        adam_state_dict = adam_optim.state_dict()
+        self.assertFalse(adam_state_dict["param_groups"][0]["decoupled_weight_decay"])
+
+        new_optim = torch.optim.AdamW(model.parameters())
+        new_optim.load_state_dict(adam_state_dict)
+        self.assertTrue(new_optim.param_groups[0]["decoupled_weight_decay"])
+
+        # Test that state_dicts from the old AdamW (with no decoupled_weight_decay key)
+        # will have decoupled_weight_decay=True in new AdamW:
+        old_adamw_dict = deepcopy(loaded_dict)
+        del old_adamw_dict["param_groups"][0]["decoupled_weight_decay"]
+        self.assertFalse("decoupled_weight_decay" in old_adamw_dict["param_groups"][0])
+
+        new_optim = torch.optim.AdamW(model.parameters())
+        new_optim.load_state_dict(old_adamw_dict)
         self.assertTrue(new_optim.param_groups[0]["decoupled_weight_decay"])
 
     def _compare_between(

@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 
-from typing import Callable, Iterator, TypeVar
+from collections.abc import Iterator
+from typing import Callable, TypeVar
 from typing_extensions import Self
 
 

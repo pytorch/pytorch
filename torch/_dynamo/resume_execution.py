@@ -3,7 +3,7 @@ import copy
 import dataclasses
 import sys
 import types
-from typing import Any, cast, Dict, List, Optional
+from typing import Any, cast, Optional
 
 from .bytecode_transformation import (
     bytecode_from_template,
@@ -91,7 +91,7 @@ class ReenterWith:
     stack_index: int
     target_values: Optional[tuple[Any, ...]] = None
 
-    def try_except_torch_function_mode(self, code_options, cleanup: List[Instruction]):
+    def try_except_torch_function_mode(self, code_options, cleanup: list[Instruction]):
         """
         Codegen based off of:
         try:
@@ -113,7 +113,7 @@ class ReenterWith:
 
     # If we do not want to destroy the stack, we can do the same thing as a
     # `SETUP_WITH` block, only that we store the context manager in a local_symbol
-    def try_finally(self, code_options, cleanup: List[Instruction]):
+    def try_finally(self, code_options, cleanup: list[Instruction]):
         """
         Codegen based off of:
         load args
@@ -134,7 +134,7 @@ class ReenterWith:
             if name not in code_options["co_names"]:
                 code_options["co_names"] += (name,)
 
-        create_ctx: List[Instruction] = []
+        create_ctx: list[Instruction] = []
         _initial_push_null(create_ctx)
         create_ctx.extend(
             [
@@ -168,7 +168,7 @@ class ReenterWith:
         if self.target_values:
             load_args = [create_load_const(val) for val in self.target_values]
 
-        create_ctx: List[Instruction] = []
+        create_ctx: list[Instruction] = []
         _initial_push_null(create_ctx)
         create_ctx.extend(
             [
@@ -212,17 +212,17 @@ class ReenterWith:
 @dataclasses.dataclass
 class ResumeFunctionMetadata:
     code: types.CodeType
-    instructions: List[Instruction] = dataclasses.field(default_factory=list)
+    instructions: list[Instruction] = dataclasses.field(default_factory=list)
     # Python 3.11+ fields
     # NOTE: Python 3.11 removed blocks, but for our purposes, a "block" consists
     # of instructions of all exception table entries that have the same target.
 
     # map from PUSH_EXC_INFO's in the prefix to original block target offset
-    prefix_block_target_offset_remap: List[int] = dataclasses.field(
+    prefix_block_target_offset_remap: list[int] = dataclasses.field(
         default_factory=list
     )
     # map from new block target offsets to original block target offsets
-    block_target_offset_remap: Optional[Dict[int, int]] = None
+    block_target_offset_remap: Optional[dict[int, int]] = None
 
 
 def _filter_iter(l1, l2, cond):
@@ -232,7 +232,7 @@ def _filter_iter(l1, l2, cond):
     returns the instructions with offsets in sorted_offsets
     """
     it = iter(l2)
-    res: List[Instruction] = []
+    res: list[Instruction] = []
     try:
         cur = next(it)
         for val in l1:
@@ -245,7 +245,7 @@ def _filter_iter(l1, l2, cond):
 
 
 def _load_tuple_and_call(tup):
-    insts: List[Instruction] = []
+    insts: list[Instruction] = []
     _initial_push_null(insts)
     insts.extend(create_load_const(val) for val in tup)
     insts.extend(create_call_function(len(tup), False))
@@ -304,7 +304,7 @@ class ContinueExecutionCache:
         is_py311_plus = sys.version_info >= (3, 11)
         meta = ResumeFunctionMetadata(code)
 
-        def update(instructions: List[Instruction], code_options: Dict[str, Any]):
+        def update(instructions: list[Instruction], code_options: dict[str, Any]):
             meta.instructions = copy.deepcopy(instructions)
 
             args = [f"___stack{i}" for i in range(nstack)]
@@ -354,7 +354,7 @@ class ContinueExecutionCache:
                     )
                 prefix.append(create_instruction("RESUME", arg=0))
 
-            cleanup: List[Instruction] = []
+            cleanup: list[Instruction] = []
             hooks = {fn.stack_index: fn for fn in setup_fns}
             hook_target_offsets = {
                 fn.stack_index: setup_fn_target_offsets[i]
@@ -452,7 +452,7 @@ class ContinueExecutionCache:
         return new_code
 
     @staticmethod
-    def unreachable_codes(code_options) -> List[Instruction]:
+    def unreachable_codes(code_options) -> list[Instruction]:
         """Codegen a `raise None` to make analysis work for unreachable code"""
         return [
             create_load_const(None),
@@ -477,7 +477,7 @@ class ContinueExecutionCache:
         new_offset = None
 
         def find_new_offset(
-            instructions: List[Instruction], code_options: Dict[str, Any]
+            instructions: list[Instruction], code_options: dict[str, Any]
         ):
             nonlocal new_offset
             (target,) = (i for i in instructions if i.offset == offset)
@@ -501,14 +501,14 @@ class ContinueExecutionCache:
                 block_target_offset_remap = meta.block_target_offset_remap = {}
 
                 def remap_block_offsets(
-                    instructions: List[Instruction], code_options: Dict[str, Any]
+                    instructions: list[Instruction], code_options: dict[str, Any]
                 ):
                     # NOTE: each prefix block generates exactly one PUSH_EXC_INFO,
                     # so we can tell which block a prefix PUSH_EXC_INFO belongs to,
                     # by counting. Then we can use meta.prefix_block-target_offset_remap
                     # to determine where in the original code the PUSH_EXC_INFO offset
                     # replaced.
-                    prefix_blocks: List[Instruction] = []
+                    prefix_blocks: list[Instruction] = []
                     for inst in instructions:
                         if len(prefix_blocks) == len(
                             meta.prefix_block_target_offset_remap

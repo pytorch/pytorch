@@ -11,8 +11,8 @@
 #include <sleef.h>
 #endif
 
-namespace at {
-namespace vec {
+
+namespace at::vec {
 // See Note [CPU_CAPABILITY namespace]
 inline namespace CPU_CAPABILITY {
 
@@ -717,4 +717,4 @@ inline void transpose_mxn(const float* src, int64_t ld_src, float* dst, int64_t 
 
 #endif
 
-}}}
+}}
