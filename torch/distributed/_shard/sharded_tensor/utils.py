@@ -69,7 +69,7 @@ def _validate_output_tensor_for_gather(
             )
     elif dst_tensor:
         raise ValueError(
-            "Argument ``dst_tensor`` must NOT be specified " "on non-destination ranks."
+            "Argument ``dst_tensor`` must NOT be specified on non-destination ranks."
         )
 
 
