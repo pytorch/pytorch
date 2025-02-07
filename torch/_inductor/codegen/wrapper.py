@@ -1243,7 +1243,7 @@ class PythonWrapperCodegen(CodeGen):
 
     def _cleanup_autotune_example_tensors(self):
         """Delete all autotune-generated tensors after the last use."""
-        to_delete = {n: [] for n in self.kernel_autotune_names}
+        to_delete: dict[str, list[str]] = {n: [] for n in self.kernel_autotune_names}
         for tensor_arg, kernel_name in self.kernel_autotune_example_args.values():
             to_delete[kernel_name].append(tensor_arg)
 
