@@ -74,7 +74,7 @@ std::tuple<Tensor, Tensor> _scaled_dot_product_attention_math_mps(const Tensor& 
   @autoreleasepool {
     auto mkey = __func__ + getTensorsStringKey({q_, k_, v_}) + ":" + std::to_string(is_causal) + ":" +
         std::to_string(attn_mask.has_value());
-    auto cachedGraph = LookUpOrCreateCachedGraph<CachedGraph>(mkey, [&](auto mpsGraph, auto graph) {
+    auto cachedGraph = LookUpOrCreateCachedGraph<CachedGraph>(mkey, [&, q_=q_, k_=k_, v_=v_](auto mpsGraph, auto graph) {
       auto qTensor = mpsGraphRankedPlaceHolder(mpsGraph, q_);
       auto kTensor = mpsGraphRankedPlaceHolder(mpsGraph, k_);
       auto vTensor = mpsGraphRankedPlaceHolder(mpsGraph, v_);
