@@ -1681,8 +1681,7 @@ class Tensor(torch._C.TensorBase):
 
             max_version (tuple[int, int] or None): An optional Python tuple with
             2 integers, representing the maximum version the caller supports. If
-            None is passed, then PyTorch will fallback to DLPack 0.X, where versions
-            are not supported.
+            None (default), PyTorch will fallback to DLPack 0.8.
         """
         if has_torch_function_unary(self):
             return handle_torch_function(Tensor.__dlpack__, (self,), self, stream)
@@ -1739,9 +1738,9 @@ class Tensor(torch._C.TensorBase):
 
         if max_version is None or max_version[0] < 1:
             # Fallback to the old, unversioned variant.
-            return torch.to_dlpack_unversioned(self)
+            return torch.to_dlpack(self)
 
-        return torch.to_dlpack(self)
+        return _C._to_dlpack_versioned(self)
 
     def __dlpack_device__(self) -> tuple[enum.IntEnum, int]:
         if has_torch_function_unary(self):

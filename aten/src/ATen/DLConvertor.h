@@ -11,14 +11,13 @@
 namespace at {
 
 TORCH_API ScalarType toScalarType(const DLDataType& dtype);
-TORCH_API DLManagedTensorVersioned* toDLPack(const Tensor& src);
-TORCH_API DLManagedTensor* toDLPackUnversioned(const Tensor& src);
-TORCH_API Tensor fromDLPack(
+TORCH_API DLManagedTensor* toDLPack(const Tensor& src);
+TORCH_API DLManagedTensorVersioned* toDLPackVersioned(const Tensor& src);
+TORCH_API Tensor
+fromDLPack(DLManagedTensor* src, std::function<void(void*)> deleter = {});
+TORCH_API Tensor fromDLPackVersioned(
     DLManagedTensorVersioned* src,
-    std::optional<std::function<void(void*)>> deleter = std::nullopt);
-TORCH_API Tensor fromDLPackUnversioned(
-    DLManagedTensor* src,
-    std::optional<std::function<void(void*)>> deleter = std::nullopt);
+    std::function<void(void*)> deleter = {});
 TORCH_API DLDataType getDLDataType(const Tensor& t);
 TORCH_API DLDevice getDLContext(const Tensor& tensor, const int64_t& device_id);
 
@@ -45,16 +44,16 @@ template <>
 struct DLPackTraits<DLManagedTensor> {
   inline static const char* capsule = "dltensor";
   inline static const char* used = "used_dltensor";
-  inline static auto toDLPack = at::toDLPackUnversioned;
-  inline static auto fromDLPack = at::fromDLPackUnversioned;
+  inline static auto toDLPack = at::toDLPack;
+  inline static auto fromDLPack = at::fromDLPack;
 };
 
 template <>
 struct DLPackTraits<DLManagedTensorVersioned> {
   inline static const char* capsule = "dltensor_versioned";
   inline static const char* used = "used_dltensor_versioned";
-  inline static auto toDLPack = at::toDLPack;
-  inline static auto fromDLPack = at::fromDLPack;
+  inline static auto toDLPack = at::toDLPackVersioned;
+  inline static auto fromDLPack = at::fromDLPackVersioned;
 };
 
 } // namespace at

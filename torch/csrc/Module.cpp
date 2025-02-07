@@ -614,13 +614,13 @@ PyObject* THPModule_toDLPackImpl(PyObject* _unused, PyObject* data) {
 } // namespace
 
 static PyObject* THPModule_toDLPack(PyObject* _unused, PyObject* data) {
-  return THPModule_toDLPackImpl<DLManagedTensorVersioned>(_unused, data);
+  return THPModule_toDLPackImpl<DLManagedTensor>(_unused, data);
 }
 
-static PyObject* THPModule_toDLPackUnversioned(
+static PyObject* THPModule_toDLPackVersioned(
     PyObject* _unused,
     PyObject* data) {
-  return THPModule_toDLPackImpl<DLManagedTensor>(_unused, data);
+  return THPModule_toDLPackImpl<DLManagedTensorVersioned>(_unused, data);
 }
 
 static PyObject* THPModule_fromDLPack(PyObject* _unused, PyObject* data) {
@@ -1616,7 +1616,7 @@ static std::initializer_list<PyMethodDef> TorchMethods = {
      METH_NOARGS,
      nullptr},
     {"_to_dlpack", THPModule_toDLPack, METH_O, nullptr},
-    {"_to_dlpack_unversioned", THPModule_toDLPackUnversioned, METH_O, nullptr},
+    {"_to_dlpack_versioned", THPModule_toDLPackVersioned, METH_O, nullptr},
     {"_from_dlpack", THPModule_fromDLPack, METH_O, nullptr},
     {"_get_cpp_backtrace", THModule_getCppBacktrace, METH_VARARGS, nullptr},
     {"_rename_privateuse1_backend",

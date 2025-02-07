@@ -5,15 +5,6 @@ import enum
 
 from torch._C import _from_dlpack
 from torch._C import _to_dlpack as to_dlpack
-from torch._C import _to_dlpack_unversioned as to_dlpack_unversioned
-
-__all__ = [
-    "DLDeviceType",
-    "from_dlpack",
-    "to_dlpack",
-    "to_dlpack_unversioned",
-]
-
 
 class DLDeviceType(enum.IntEnum):
     # Enums as in DLPack specification (aten/src/ATen/dlpack.h)
