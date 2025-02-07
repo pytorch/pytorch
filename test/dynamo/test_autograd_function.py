@@ -975,7 +975,6 @@ class GraphModule(torch.nn.Module):
         self.assertEqual(x.grad, x_ref.grad)
 
     def test_assert_is_contiguous_after_matmul(self):
-        # We guarantee that the output of matmul is contiguous, so the backward graph should be fully captured.
         class LinearFunction(torch.autograd.Function):
             @staticmethod
             def forward(ctx, x, weight):
