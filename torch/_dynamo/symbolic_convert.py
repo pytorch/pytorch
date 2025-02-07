@@ -107,6 +107,7 @@ from .variables.misc import (
     NullVariable,
     PythonModuleVariable,
     UnknownVariable,
+    UserDefinedExceptionClassVariable,
 )
 from .variables.nn_module import NNModuleVariable
 from .variables.tensor import supported_comparison_ops, SymNodeVariable, TensorVariable
@@ -1722,11 +1723,19 @@ class InstructionTranslatorBase(
             # https://github.com/python/cpython/blob/3.10/Python/ceval.c#L3650-L3665
             exc_instance = self.stack.pop()
 
-        # Users can check exception in 2 ways
-        # 1) except NotImplementedError --> BuilinVariable
-        # 2) except (NotImplemetedError, AttributeError) -> TupleVariable
+        # Users can check exception in 3 ways
+        # 1) except NotImplementedError --> BuiltinVariable
+        # 2) except CustomException --> UserDefinedExceptionClasVariable
+        # 3) except (NotImplemetedError, AttributeError) -> TupleVariable
 
-        if not isinstance(expected_exc_types, (BuiltinVariable, TupleVariable)):
+        if not isinstance(
+            expected_exc_types,
+            (
+                BuiltinVariable,
+                TupleVariable,
+                UserDefinedExceptionClassVariable,
+            ),
+        ):
             unimplemented(
                 f"except has an unsupported types of objects {expected_exc_types}"
             )
@@ -1745,7 +1754,9 @@ class InstructionTranslatorBase(
             ]
 
         for expected_type in expected_types:
-            if not isinstance(expected_type, BuiltinVariable):
+            if not isinstance(
+                expected_type, (BuiltinVariable, UserDefinedExceptionClassVariable)
+            ):
                 unimplemented(
                     f"except has an unsupported types of object {expected_type}"
                 )

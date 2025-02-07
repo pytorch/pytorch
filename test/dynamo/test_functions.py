@@ -2619,6 +2619,23 @@ class GraphModule(torch.nn.Module):
         else:
             return x.cos()
 
+    @unittest.expectedFailure
+    def test_getattr_metaclass(self):
+        class Meta(type):
+            def __getattr__(cls, name):
+                return len(name)
+
+        class C(metaclass=Meta):
+            attr = 123
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(t):
+            return t + C.attr + C.dynamic_attr
+
+        t = torch.randn(2)
+        y = fn(t)
+        self.assertEqual(y, t + 123 + 12)
+
     def test_two_point_iter(self):
         def fn(x, y):
             it = map(lambda n: n + 1, range(6))

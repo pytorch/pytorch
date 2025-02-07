@@ -185,7 +185,12 @@ class UserDefinedClassVariable(UserDefinedVariable):
         try:
             obj = inspect.getattr_static(self.value, name)
         except AttributeError:
-            raise_observed_exception(AttributeError, tx)
+            if type(self.value) is type:
+                raise_observed_exception(AttributeError, tx)
+            else:
+                # Cannot reason about classes with a custom metaclass
+                # See: test_functions::test_getattr_metaclass
+                obj = None
 
         if name in cmp_name_to_op_mapping and not isinstance(obj, types.FunctionType):
             return variables.GetAttrVariable(self, name, source=source)
