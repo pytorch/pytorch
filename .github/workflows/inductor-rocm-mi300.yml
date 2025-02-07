@@ -33,8 +33,6 @@ jobs:
       curr_branch: ${{ github.head_ref || github.ref_name }}
       curr_ref_type: ${{ github.ref_type }}
 
-      # Moved from inductor-rocm-mi300.yml
-
   linux-focal-rocm6_3-py3_10-inductor-build:
     name: rocm6.3-py3.10-inductor
     uses: ./.github/workflows/_linux-build.yml
