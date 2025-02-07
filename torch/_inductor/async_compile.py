@@ -249,6 +249,27 @@ class AsyncCompile:
         )
 
     def triton(self, kernel_name: str, source_code: str, device_str: str = "cuda"):
+        """
+        Async_compile.triton is more complicated than the other backends because
+        we're trying to optimize compile time as much as possible for this hot callsite.
+
+        First of all, the function is cached by CompiledTritonKernels; if there's a kernel
+        already compiled, we grab it directly from the cache and return.
+
+        Otherwise, if we have multiple compile threads, we kick off triton compilations on each
+        worker process by giving it a kernel and source code to compile. The worker initializes
+        a CachingAutotuner, runs triton compilation, and pickles the kernel back to us.
+        We use TritonCompileResult to represent the objects being pickled back to us by each
+        worker.
+
+        Some maybe not obvious things that are pickled back to us:
+        - Most of the time, we can avoid sending back CachingAutotuner.fn and other metadata
+          and do not have to pay the cost of loading the triton kernel on the parent. But certain
+          cases, like coordesc tuning and dynamic_scale_rblock, require us to reload the function
+          in the parent lazily when we require it.
+        - The AutotuneCache, if enabled, is constructed on each worker per triton config
+          and pickled by to us via `CachingAutotuner.save_cache_hook`.
+        """
         if future := CompiledTritonKernels.get(source_code, None):
             counters["inductor"]["async_compile_cache_hit"] += 1
             return future
@@ -280,9 +301,16 @@ class AsyncCompile:
                 extra_env,
             )
 
+            def reload_kernel_in_parent():
+                # Benchmark how often this happens
+                with dynamo_timed("reload_kernel_in_parent"):
+                    return load_kernel()
+
             def get_result() -> CachingAutotuner:
                 kernel = task.result()
-                kernel.precompile(warm_cache_only=False, reload_kernel=load_kernel)
+                kernel.precompile(
+                    warm_cache_only=False, reload_kernel=reload_kernel_in_parent
+                )
                 return kernel
 
             future = LambdaFuture(get_result)
