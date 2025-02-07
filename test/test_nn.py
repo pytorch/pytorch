@@ -13011,10 +13011,53 @@ if __name__ == '__main__':
     @largeTensorTest("20GB", "cuda")
     def test_softmax_backward_64bit_indexing(self, device):
         for numel in (2147483650, 2147483650 + 1):
-            x = torch.empty([1, 1, numel], device=device, dtype=torch.float16)
-            x.fill_(1.0 / numel)
+            x = torch.ones([1, 1, numel], device=device, dtype=torch.float16)
             out = torch._softmax_backward_data(x, x, 2, x.dtype)
             self.assertEqual(out[0, 0, 0], 1 / numel)
+
+    @onlyCUDA
+    def test_softmax_backward_smem(self, device):
+        # We use smem for tensors that have > 1024 elements and size >= 4096 bytes.
+        numel = 2048
+        dtype = torch.float32
+        output = torch.ones([numel], device=device, dtype=dtype)
+        grad_output = torch.ones([numel], device=device, dtype=dtype) * (1.0 / numel)
+        result = torch._softmax_backward_data(grad_output, output, 0, output.dtype)
+        expected_result = torch.ones([numel], dtype=dtype) * (1.0 / numel - 1.0)
+        self.assertEqual(expected_result, result)
+
+    @onlyCUDA
+    def test_softmax_backward_without_fully_vectorized(self, device):
+        # We don't use smem here because the size of the elements does not divide
+        # ILP cleanly. ILP is defined as sizeof(float4) / sizeof(dtype). Since ILP
+        # is 4 and numel is not divisible by 4, we don't use shared memory here.
+        numel = 2048 + 1
+        dtype = torch.float32
+        output = torch.ones([numel], device=device, dtype=dtype)
+        grad_output = torch.ones([numel], device=device, dtype=dtype) * (1.0 / numel)
+        result = torch._softmax_backward_data(grad_output, output, 0, output.dtype)
+        expected_result = torch.ones([numel], dtype=dtype) * (1.0 / numel - 1.0)
+        self.assertEqual(expected_result, result)
+
+    @onlyCUDA
+    def test_softmax_backward_unaligned(self, device):
+        # We don't use smem here because the output is not aligned to 16 bytes.
+        numel = 2048
+        dtype = torch.float32
+        # It's hard to get pytorch to return us a tensor that is not aligned to 16
+        # bytes. To work around that, we create an aligned tensor and create a
+        # slice of it that is not aligned.
+        output = torch.ones([numel + 1], device=device, dtype=dtype)
+        self.assertEqual(output.data_ptr() % 16, 0)
+        # Now output is not aligned to 16 bytes.
+        output = output[1:]
+        self.assertNotEqual(output.data_ptr() % 16, 0)
+
+        grad_output = torch.ones([numel], device=device, dtype=dtype) * (1.0 / numel)
+        result = torch._softmax_backward_data(grad_output, output, 0, output.dtype)
+        expected_result = torch.ones([numel], dtype=dtype) * (1.0 / numel - 1.0)
+        self.assertEqual(expected_result, result)
+
 
     # reference issue: https://github.com/pytorch/pytorch/issues/68248
     @onlyCUDA
