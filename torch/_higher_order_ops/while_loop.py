@@ -6,13 +6,12 @@ import torch
 import torch.utils._pytree as pytree
 from torch._C import DispatchKey
 from torch._higher_order_ops.utils import (
-    check_input_mutation_and_alias,
     _maybe_run_with_interpreter,
     _set_compilation_env,
     autograd_not_implemented,
+    check_input_mutation_and_alias,
     diff_tensor_meta,
     reenter_make_fx,
-    UnsupportedAliasMutationException,
     validate_subgraph_args_types,
 )
 from torch._ops import HigherOrderOperator
@@ -470,7 +469,9 @@ def while_loop_func(ctx, cond_fn, body_fn, carried_inputs, additional_inputs):
             (cond_fn, "cond_fn"),
             (body_fn, "body_fn"),
         ]:
-            check_input_mutation_and_alias(fn, unwrapped_inputs, pre_dispatch=pre_dispatch)
+            check_input_mutation_and_alias(
+                fn, unwrapped_inputs, pre_dispatch=pre_dispatch
+            )
         ret = while_loop_op(
             functional_cond_fn,
             functional_body_fn,

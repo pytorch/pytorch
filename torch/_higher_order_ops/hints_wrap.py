@@ -3,11 +3,10 @@ import torch
 import torch.utils._pytree as pytree
 from torch._C import DispatchKey
 from torch._higher_order_ops.utils import (
-    check_input_mutation_and_alias,
     autograd_not_implemented,
+    check_input_mutation_and_alias,
     reenter_make_fx,
     unique_graph_id,
-    UnsupportedAliasMutationException,
 )
 from torch._ops import HigherOrderOperator
 from torch._subclasses.fake_tensor import FakeTensorMode
@@ -96,7 +95,9 @@ def hints_wrapper_functionalize(ctx, body_fn, args, kwargs, hints):
     with ctx.redispatch_to_next():
         functional_body_fn = ctx.functionalize(body_fn)
         pre_dispatch = hasattr(ctx, "mode") and ctx.mode.pre_dispatch
-        check_input_mutation_and_alias(body_fn, unwrapped_args, pre_dispatch=pre_dispatch)
+        check_input_mutation_and_alias(
+            body_fn, unwrapped_args, pre_dispatch=pre_dispatch
+        )
         # if _has_potential_branch_input_mutation(
         #     body_fn, unwrapped_args, pre_dispatch=pre_dispatch
         # ):

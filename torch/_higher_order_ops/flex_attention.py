@@ -7,13 +7,12 @@ import torch.utils._pytree as pytree
 from torch import Tensor
 from torch._C import DispatchKey
 from torch._higher_order_ops.utils import (
-    check_input_mutation_and_alias,
     _maybe_reenter_make_fx,
     autograd_not_implemented,
+    check_input_mutation_and_alias,
     reenter_make_fx,
     save_tensors_and_symints_for_backward,
     saved_tensors_and_symints,
-    UnsupportedAliasMutationException,
     validate_subgraph_args_types,
 )
 from torch._ops import HigherOrderOperator
@@ -428,7 +427,6 @@ def flex_attention_functionalize(
         # # However, we can just error if anything is detected
         # if mutates:
         #     raise UnsupportedAliasMutationException("Mutations detected in score_mod")
-            
 
         out = flex_attention(
             query_unwrapped,

@@ -176,10 +176,17 @@ def _detect_alias(gm: torch.fx.GraphModule) -> bool:
     example_inputs = [
         ph.meta.get("val", None) for ph in gm.graph.find_nodes(op="placeholder")
     ]
-    _, inp_inp_alias_map, inp_out_alias_map, out_out_alias_map = check_input_alias_and_mutation(
-        gm, example_inputs
-    )
-    if len(inp_inp_alias_map) > 0 or len(inp_out_alias_map) > 0 or len(out_out_alias_map) > 0:
+    (
+        _,
+        inp_inp_alias_map,
+        inp_out_alias_map,
+        out_out_alias_map,
+    ) = check_input_alias_and_mutation(gm, example_inputs)
+    if (
+        len(inp_inp_alias_map) > 0
+        or len(inp_out_alias_map) > 0
+        or len(out_out_alias_map) > 0
+    ):
         return True
     return False
 
@@ -215,8 +222,11 @@ def has_potential_input_mutation_or_alias(gm, inputs, pre_dispatch=False):
 
     return _detect_input_mutation(gm), _detect_alias(gm)
 
+
 def check_input_mutation_and_alias(combine_fn, sample_inputs, pre_dispatch=False):
-    has_branch_input_mutation, has_branch_alias = has_potential_input_mutation_or_alias(combine_fn, sample_inputs, pre_dispatch=pre_dispatch)
+    has_branch_input_mutation, has_branch_alias = has_potential_input_mutation_or_alias(
+        combine_fn, sample_inputs, pre_dispatch=pre_dispatch
+    )
     if has_branch_input_mutation:
         raise UnsupportedAliasMutationException(
             "A branch or combine_fn might be modifying the input! Consider cloning the input before modifying it."
