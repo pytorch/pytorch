@@ -1223,7 +1223,7 @@ def trace_structured(
 
             trace_id = torch._guards.CompileContext.current_trace_id()
             if not trace_id:
-                trace_id = torch._dynamo.utils.RuntimeCompileContext.current_trace_id()
+                trace_id = torch._guards.RuntimeCompileContext.current_trace_id()
 
             if expect_trace_id and trace_id is None:
                 # Record the stack of the log call to better diagnose why we

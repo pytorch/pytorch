@@ -63,7 +63,7 @@ from torch._C import (
 )
 from torch._dispatch.python import enable_python_dispatcher
 from torch._dynamo.metrics_context import MetricsContext, RuntimeMetricsContext
-from torch._guards import CompileId, Source, TraceId, TracingContext
+from torch._guards import CompileId, Source, TracingContext
 from torch._subclasses.meta_utils import is_sparse_compressed
 from torch._utils_internal import (
     justknobs_check,
@@ -1297,49 +1297,6 @@ def add_compilation_metrics_to_chromium(c: CompilationMetrics) -> None:
     )
 
 
-class RuntimeCompileContext:
-    """
-    For tracking compile-time information that we want available at runtime,
-    e.g., to allow us to query and log at runtime the CompileId active when
-    a module was compiled.
-    """
-
-    @staticmethod
-    def get() -> RuntimeCompileContext:
-        assert _TLS.runtime_compile_context is not None
-        return _TLS.runtime_compile_context
-
-    @staticmethod
-    def try_get() -> Optional[RuntimeCompileContext]:
-        return getattr(_TLS, "runtime_compile_context", None)
-
-    def __init__(self, trace_id: Optional[TraceId]):
-        self.trace_id = trace_id
-
-    @staticmethod
-    def current_trace_id() -> Optional[TraceId]:
-        ctx = RuntimeCompileContext.try_get()
-        return None if ctx is None else ctx.trace_id
-
-    @staticmethod
-    def current_compile_id() -> Optional[CompileId]:
-        trace_id = RuntimeCompileContext.current_trace_id()
-        return None if trace_id is None else trace_id.compile_id
-
-
-_TLS = threading.local()
-
-
-@contextmanager
-def runtime_compile_context(context: Optional[RuntimeCompileContext]):
-    old_context = getattr(_TLS, "runtime_compile_context", None)
-    _TLS.runtime_compile_context = context
-    try:
-        yield context
-    finally:
-        _TLS.runtime_compile_context = old_context
-
-
 def _current_compile_id() -> Optional[CompileId]:
     """
     If a CompileContext is active, return its compile_id. Otherwise, return the
@@ -1348,7 +1305,7 @@ def _current_compile_id() -> Optional[CompileId]:
     compile_id = torch._guards.CompileContext.current_compile_id()
     if compile_id is not None:
         return compile_id
-    return RuntimeCompileContext.current_compile_id()
+    return torch._guards.RuntimeCompileContext.current_compile_id()
 
 
 def _scrubbed_inductor_config_for_logging() -> Optional[str]:

@@ -26,17 +26,14 @@ import dataclasses
 import logging
 import os
 import re
+from contextlib import nullcontext
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, TYPE_CHECKING, Union
 from typing_extensions import TypeAlias
 
 import torch
-from torch._dynamo.utils import (
-    counters,
-    get_runtime_metrics_context,
-    runtime_compile_context,
-    RuntimeCompileContext,
-)
+from torch._dynamo.utils import counters, get_runtime_metrics_context
+from torch._guards import runtime_compile_context, RuntimeCompileContext
 from torch._inductor.cudagraph_utils import (
     BoxedDeviceIndex,
     CudagraphCachedInfo,
@@ -458,16 +455,21 @@ class CompiledFxGraph(OutputCode):
         self.boxed_forward_device_index = boxed_forward_device_index
 
         # Set the compile context so it's available for logging runtime events.
-        self._runtime_ctx = RuntimeCompileContext(
-            torch._guards.CompileContext.current_trace_id(),
-        )
+        self._runtime_ctx = RuntimeCompileContext()
 
         # aot autograd needs to know to pass in inputs as a list
         self._boxed_call = True
 
     def __call__(self, inputs: Sequence[Any]) -> Any:
         assert self.current_callable is not None
-        with runtime_compile_context(self._runtime_ctx):
+
+        # We set a "runtime" compile context to be used for any logging where it makes
+        # sense to make available the compile_id used during compilation of the graph,
+        # e.g., for logging runtime autotuning. For compiled autograd, compilation
+        # happens at runtime. For logging, We still consider that to be "compile time",
+        # so we set the runtime compile context only when a compile context is not set.
+        set_ctx = torch._guards.CompileContext.try_get() is None
+        with runtime_compile_context(self._runtime_ctx) if set_ctx else nullcontext():
             try:
                 return self.current_callable(inputs)
             finally:
@@ -577,9 +579,7 @@ class CompiledFxGraph(OutputCode):
                 ).call
 
             # Set the compile context so it's available for logging runtime events.
-            self._runtime_ctx = RuntimeCompileContext(
-                torch._guards.CompileContext.current_trace_id(),
-            )
+            self._runtime_ctx = RuntimeCompileContext()
 
         except OSError:
             log.error("Failed to load artifact: %s", artifact_path)
