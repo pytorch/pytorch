@@ -147,7 +147,7 @@ def disable_apex_o2_state_dict_hook(model: torch.nn.Module | torch.jit.ScriptFun
             pass
 
 
-@deprecated("Please remove usage of this function", category=None)
+@deprecated("Please remove usage of this function")
 @contextlib.contextmanager
 def setup_onnx_logging(verbose: bool):
     """A context manager to temporarily set the ONNX logging verbosity.
@@ -510,14 +510,14 @@ def export(
         warnings.warn(
             "Setting `operator_export_type` to something other than default is deprecated. "
             "The option will be removed in a future release.",
-            category=FutureWarning,
+            category=DeprecationWarning,
         )
     if training == _C_onnx.TrainingMode.TRAINING:
         warnings.warn(
             "Setting `training` to something other than default is deprecated. "
             "The option will be removed in a future release. Please set the training mode "
             "before exporting the model.",
-            category=FutureWarning,
+            category=DeprecationWarning,
         )
 
     args = (args,) if isinstance(args, torch.Tensor) else args

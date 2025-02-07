@@ -871,8 +871,7 @@ def verify(
 
 @typing_extensions.deprecated(
     "torch.onnx.verification.* is deprecated. Consider using torch.onnx.export(..., dynamo=True) "
-    "and use ONNXProgram to test the ONNX model",
-    category=None,
+    "and use ONNXProgram to test the ONNX model"
 )
 def verify_aten_graph(
     graph: torch.Graph,
@@ -1173,8 +1172,7 @@ class OnnxTestCaseRepro:
 
 @typing_extensions.deprecated(
     "torch.onnx.verification.* is deprecated. Consider using torch.onnx.export(..., dynamo=True) "
-    "and use ONNXProgram to test the ONNX model",
-    category=None,
+    "and use ONNXProgram to test the ONNX model"
 )
 @dataclasses.dataclass
 class GraphInfo:
@@ -1711,8 +1709,7 @@ def _produced_by(value: torch.Value, nodes: Collection[torch.Node]) -> bool:
 
 @typing_extensions.deprecated(
     "torch.onnx.verification.* is deprecated. Consider using torch.onnx.export(..., dynamo=True) "
-    "and use ONNXProgram to test the ONNX model",
-    category=None,
+    "and use ONNXProgram to test the ONNX model"
 )
 def find_mismatch(
     model: torch.nn.Module | torch.jit.ScriptModule,

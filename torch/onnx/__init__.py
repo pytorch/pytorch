@@ -169,7 +169,6 @@ def export(
     custom_opsets: Mapping[str, int] | None = None,
     export_modules_as_functions: bool | Collection[type[torch.nn.Module]] = False,
     autograd_inlining: bool = True,
-    **_ignored_kwargs: Any,
 ) -> ONNXProgram | None:
     r"""Exports a model into ONNX format.
 
@@ -348,11 +347,6 @@ def export(
             Flag used to control whether to inline autograd functions.
             Refer to https://github.com/pytorch/pytorch/pull/74765 for more details.
     """
-    if _ignored_kwargs:
-        logger.warning(
-            "torch.onnx.export received unexpected keyword arguments: %s",
-            _ignored_kwargs,
-        )
     if dynamo is True or isinstance(model, torch.export.ExportedProgram):
         from torch.onnx._internal.exporter import _compat
 
@@ -413,8 +407,7 @@ def export(
 
 
 @deprecated(
-    "torch.onnx.dynamo_export is deprecated since 2.6.0. Please use torch.onnx.export(..., dynamo=True) instead.",
-    category=None,
+    "torch.onnx.dynamo_export is deprecated since 2.6.0. Please use torch.onnx.export(..., dynamo=True) instead."
 )
 def dynamo_export(
     model: torch.nn.Module | Callable | torch.export.ExportedProgram,  # type: ignore[name-defined]
@@ -493,7 +486,7 @@ def dynamo_export(
                 "You are using an experimental ONNX export logic, which currently only supports dynamic shapes. "
                 "For a more comprehensive set of export options, including advanced features, please consider using "
                 "`torch.onnx.export(..., dynamo=True)`. ",
-                category=FutureWarning,
+                category=DeprecationWarning,
             )
 
         if export_options is not None and export_options.dynamic_shapes:
