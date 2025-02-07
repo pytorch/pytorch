@@ -24,9 +24,9 @@ set CUDNN_LIB_FOLDER="lib\x64"
 if exist "C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v%CUDA_VERSION_STR%\bin\nvcc.exe" goto set_cuda_env_vars
 
 if %CUDA_VER% EQU 118 goto cuda118
-if %CUDA_VER% EQU 121 goto cuda121
 if %CUDA_VER% EQU 124 goto cuda124
 if %CUDA_VER% EQU 126 goto cuda126
+if %CUDA_VER% EQU 128 goto cuda128
 
 echo CUDA %CUDA_VERSION_STR% is not supported
 exit /b 1
@@ -42,33 +42,6 @@ if not exist "%SRC_DIR%\temp_build\%CUDA_INSTALL_EXE%" (
 )
 
 set CUDNN_FOLDER=cudnn-windows-x86_64-9.5.0.50_cuda11-archive
-set CUDNN_LIB_FOLDER="lib"
-set "CUDNN_INSTALL_ZIP=%CUDNN_FOLDER%.zip"
-if not exist "%SRC_DIR%\temp_build\%CUDNN_INSTALL_ZIP%" (
-    curl -k -L "http://s3.amazonaws.com/ossci-windows/%CUDNN_INSTALL_ZIP%" --output "%SRC_DIR%\temp_build\%CUDNN_INSTALL_ZIP%"
-    if errorlevel 1 exit /b 1
-    set "CUDNN_SETUP_FILE=%SRC_DIR%\temp_build\%CUDNN_INSTALL_ZIP%"
-)
-
-@REM cuDNN 8.3+ required zlib to be installed on the path
-echo Installing ZLIB dlls
-curl -k -L "http://s3.amazonaws.com/ossci-windows/zlib123dllx64.zip" --output "%SRC_DIR%\temp_build\zlib123dllx64.zip"
-7z x "%SRC_DIR%\temp_build\zlib123dllx64.zip" -o"%SRC_DIR%\temp_build\zlib"
-xcopy /Y "%SRC_DIR%\temp_build\zlib\dll_x64\*.dll" "C:\Windows\System32"
-
-goto cuda_common
-
-:cuda121
-
-set CUDA_INSTALL_EXE=cuda_12.1.1_531.14_windows.exe
-if not exist "%SRC_DIR%\temp_build\%CUDA_INSTALL_EXE%" (
-    curl -k -L "https://ossci-windows.s3.amazonaws.com/%CUDA_INSTALL_EXE%" --output "%SRC_DIR%\temp_build\%CUDA_INSTALL_EXE%"
-    if errorlevel 1 exit /b 1
-    set "CUDA_SETUP_FILE=%SRC_DIR%\temp_build\%CUDA_INSTALL_EXE%"
-    set "ARGS=cuda_profiler_api_12.1 thrust_12.1 nvcc_12.1 cuobjdump_12.1 nvprune_12.1 nvprof_12.1 cupti_12.1 cublas_12.1 cublas_dev_12.1 cudart_12.1 cufft_12.1 cufft_dev_12.1 curand_12.1 curand_dev_12.1 cusolver_12.1 cusolver_dev_12.1 cusparse_12.1 cusparse_dev_12.1 npp_12.1 npp_dev_12.1 nvrtc_12.1 nvrtc_dev_12.1 nvml_dev_12.1 nvjitlink_12.1 nvtx_12.1"
-)
-
-set CUDNN_FOLDER=cudnn-windows-x86_64-9.5.0.50_cuda12-archive
 set CUDNN_LIB_FOLDER="lib"
 set "CUDNN_INSTALL_ZIP=%CUDNN_FOLDER%.zip"
 if not exist "%SRC_DIR%\temp_build\%CUDNN_INSTALL_ZIP%" (
@@ -123,6 +96,33 @@ if not exist "%SRC_DIR%\temp_build\%CUDA_INSTALL_EXE%" (
 )
 
 set CUDNN_FOLDER=cudnn-windows-x86_64-9.5.0.50_cuda12-archive
+set CUDNN_LIB_FOLDER="lib"
+set "CUDNN_INSTALL_ZIP=%CUDNN_FOLDER%.zip"
+if not exist "%SRC_DIR%\temp_build\%CUDNN_INSTALL_ZIP%" (
+    curl -k -L "http://s3.amazonaws.com/ossci-windows/%CUDNN_INSTALL_ZIP%" --output "%SRC_DIR%\temp_build\%CUDNN_INSTALL_ZIP%"
+    if errorlevel 1 exit /b 1
+    set "CUDNN_SETUP_FILE=%SRC_DIR%\temp_build\%CUDNN_INSTALL_ZIP%"
+)
+
+@REM cuDNN 8.3+ required zlib to be installed on the path
+echo Installing ZLIB dlls
+curl -k -L "http://s3.amazonaws.com/ossci-windows/zlib123dllx64.zip" --output "%SRC_DIR%\temp_build\zlib123dllx64.zip"
+7z x "%SRC_DIR%\temp_build\zlib123dllx64.zip" -o"%SRC_DIR%\temp_build\zlib"
+xcopy /Y "%SRC_DIR%\temp_build\zlib\dll_x64\*.dll" "C:\Windows\System32"
+
+goto cuda_common
+
+:cuda128
+
+set CUDA_INSTALL_EXE=cuda_12.8.0_571.96_windows.exe
+if not exist "%SRC_DIR%\temp_build\%CUDA_INSTALL_EXE%" (
+    curl -k -L "https://ossci-windows.s3.amazonaws.com/%CUDA_INSTALL_EXE%" --output "%SRC_DIR%\temp_build\%CUDA_INSTALL_EXE%"
+    if errorlevel 1 exit /b 1
+    set "CUDA_SETUP_FILE=%SRC_DIR%\temp_build\%CUDA_INSTALL_EXE%"
+    set "ARGS=cuda_profiler_api_12.8 thrust_12.8 nvcc_12.8 cuobjdump_12.8 nvprune_12.8 nvprof_12.8 cupti_12.8 cublas_12.8 cublas_dev_12.8 cudart_12.8 cufft_12.8 cufft_dev_12.8 curand_12.8 curand_dev_12.8 cusolver_12.8 cusolver_dev_12.8 cusparse_12.8 cusparse_dev_12.8 npp_12.8 npp_dev_12.8 nvrtc_12.8 nvrtc_dev_12.8 nvml_dev_12.8 nvjitlink_12.8 nvtx_12.8"
+)
+
+set CUDNN_FOLDER=cudnn-windows-x86_64-9.7.0.66_cuda12-archive
 set CUDNN_LIB_FOLDER="lib"
 set "CUDNN_INSTALL_ZIP=%CUDNN_FOLDER%.zip"
 if not exist "%SRC_DIR%\temp_build\%CUDNN_INSTALL_ZIP%" (
