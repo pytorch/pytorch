@@ -468,7 +468,6 @@ def canonicalize_quant_mapping(gm: torch.fx.GraphModule):
         else:
             quant_options = None
 
-        # breakpoint()
         subgraph, args = invoke_quant.args
         with gm.graph.inserting_before(invoke_quant):
             invoke_quant_replacement = graph.call_function(
@@ -482,7 +481,7 @@ def canonicalize_quant_mapping(gm: torch.fx.GraphModule):
             invoke_quant.replace_all_uses_with(invoke_quant_replacement)
             graph.erase_node(invoke_quant)
 
-            if len(quant_options_node.users) == 0:
+            if quant_options_node and len(quant_options_node.users) == 0:
                 graph.erase_node(quant_options_node)
 
             first_user = next(iter(invoke_quant_replacement.users))
@@ -496,7 +495,7 @@ def canonicalize_quant_mapping(gm: torch.fx.GraphModule):
                 subgraph_graph = getattr(gm, subgraph.target)
                 output_node = torch._inductor.utils.output_node(subgraph_graph)
                 assert (
-                    isinstance(output_node.args[0], tuple)
+                    isinstance(output_node.args[0], (list, tuple))
                     and len(output_node.args[0]) == 1
                 )
 
