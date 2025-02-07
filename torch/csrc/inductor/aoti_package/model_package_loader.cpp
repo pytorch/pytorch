@@ -464,6 +464,12 @@ std::vector<at::Tensor> AOTIModelPackageLoader::run(
   return runner_->run(inputs, stream_handle);
 }
 
+std::vector<at::Tensor> AOTIModelPackageLoader::boxed_run(
+    std::vector<at::Tensor>&& inputs,
+    void* stream_handle) {
+  return runner_->boxed_run(std::move(inputs), stream_handle);
+}
+
 std::unordered_map<std::string, std::string> AOTIModelPackageLoader::
     get_metadata() {
   return metadata_;

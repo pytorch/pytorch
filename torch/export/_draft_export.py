@@ -1,8 +1,12 @@
+import getpass
 import inspect
 import logging
 import os
+import re
+import tempfile
+from collections import defaultdict
 from enum import IntEnum
-from typing import Any, Dict, List, Optional, Tuple, Union
+from typing import Any, Optional, Union
 
 import torch
 import torch._logging._internal
@@ -26,7 +30,7 @@ class FailureType(IntEnum):
         return self.name
 
 
-def prettify_stack(stack: List[Dict[str, str]], str_to_filename: Dict[str, str]) -> str:
+def prettify_stack(stack: list[dict[str, str]], str_to_filename: dict[str, str]) -> str:
     res = ""
     for frame in stack:
         if frame["filename"] not in str_to_filename:
@@ -37,9 +41,29 @@ def prettify_stack(stack: List[Dict[str, str]], str_to_filename: Dict[str, str])
     return res
 
 
+def prettify_frame_locals(
+    loc: str, locals: dict[str, Any], symbols: dict[str, Any]
+) -> str:
+    res = f"    {loc}\n"
+    local_str = "\n".join(f"            {k}: {v}" for k, v in locals.items())
+    res += f"""
+        Locals:
+{local_str}
+"""
+    if any(v is not None for v in symbols.values()):
+        symbol_str = "\n".join(
+            f"           {k}: {v}" for k, v in symbols.items() if v is not None
+        )
+        res += f"""
+        Symbols:
+{symbol_str}
+"""
+    return res
+
+
 def filter_stack(
-    stack: List[Dict[str, str]], str_to_filename: Dict[str, str]
-) -> List[Dict[str, str]]:
+    stack: list[dict[str, str]], str_to_filename: dict[str, str]
+) -> list[dict[str, str]]:
     for i, s in enumerate(reversed(stack)):
         s["filename"] = str(s["filename"])
         if s["filename"] not in str_to_filename:
@@ -50,22 +74,33 @@ def filter_stack(
     return stack[-3:]
 
 
-def hash_stack(stack: List[Dict[str, str]]) -> str:
+def hash_stack(stack: list[dict[str, str]]) -> str:
     return ";".join(f'line: {s["line"]} filename: {s["filename"]}' for s in stack)
+
+
+def get_loc(filename: str, lineno: int) -> Optional[str]:
+    try:
+        with open(filename) as f:
+            for i, line in enumerate(f):
+                if i == lineno - 1:
+                    return line.strip()
+    except FileNotFoundError:
+        pass
+    return None
 
 
 class FailureReport:
     def __init__(
-        self, failure_type: FailureType, data: Dict[str, Any], xfail: bool = False
+        self, failure_type: FailureType, data: dict[str, Any], xfail: bool = False
     ) -> None:
         self.failure_type: FailureType = failure_type
-        self.data: Dict[str, Any] = data
+        self.data: dict[str, Any] = data
         self.xfail: bool = xfail
 
     def __repr__(self) -> str:
         return f"FailureReport(failure_type={self.failure_type}, xfail={self.xfail}, data={self.data})"
 
-    def print(self, str_to_filename: Dict[str, str]) -> str:
+    def print(self, str_to_filename: dict[str, str]) -> str:
         if self.failure_type == FailureType.MISSING_FAKE_KERNEL:
             op = self.data["op"]
 
@@ -76,10 +111,16 @@ class FailureReport:
 """  # noqa: B950
 
         elif self.failure_type == FailureType.CONSTRAINT_VIOLATION_ERROR:
+            locals_info = (
+                prettify_frame_locals(**self.data["frame_locals"])
+                if self.data["frame_locals"]
+                else ""
+            )
             return f"""Constraint violation error.
     The specified input dynamic_shapes spec was found to be incorrect during tracing.
     Specifically, this guard was added: {self.data["expr"]}, where {self.data["symbol_to_sources"]}.
-    This occured at the following stacktrace: {prettify_stack(self.data["stack"], str_to_filename)}.
+    This occured at the following stacktrace: {prettify_stack(self.data["stack"], str_to_filename)}:
+        {locals_info}
     Because of this, we have modified the dynamic shapes structure to be the
     following. You can also use torch.export.Dim.AUTO instead to specify your
     dynamic shapes, and we will automatically infer the dynamism for you.
@@ -89,10 +130,17 @@ class FailureReport:
 """
 
         elif self.failure_type == FailureType.DATA_DEPENDENT_ERROR:
+            locals_info = (
+                prettify_frame_locals(**self.data["frame_locals"])
+                if self.data["frame_locals"]
+                else ""
+            )
             return f"""Data dependent error.
-    When exporting, we were unable to figure out if the expression `{self.data["expr"]}` always holds.
-    This occurred at the following stacktrace: {prettify_stack(self.data["stack"], str_to_filename)}.
-    As a result, it was specialized to evaluate to `{self.data["result"]}`, and asserts were inserted into the graph.
+    When exporting, we were unable to evaluate the value of `{self.data["expr"]}`.
+    This was encountered {self.data["occurrences"]} times.
+    This occurred at the following stacktrace: {prettify_stack(self.data["stack"], str_to_filename)}:
+        {locals_info}
+    As a result, it was specialized to a constant (e.g. `{self.data["result"]}` in the 1st occurrence), and asserts were inserted into the graph.
 
     Please add `torch._check(...)` to the original code to assert this data-dependent assumption.
     Please refer to https://docs.google.com/document/d/1kZ_BbB3JnoLbUZleDT6635dHs88ZVYId8jT-yTFgf3A/edit#heading=h.boi2xurpqa0o for more details.
@@ -113,8 +161,8 @@ class FailureReport:
 
 
 class DraftExportReport:
-    def __init__(self, failures: List[FailureReport], str_to_filename: Dict[str, str]):
-        self.failures: List[FailureReport] = failures
+    def __init__(self, failures: list[FailureReport], str_to_filename: dict[str, str]):
+        self.failures: list[FailureReport] = failures
         self.str_to_filename = str_to_filename
 
     def successful(self) -> bool:
@@ -156,12 +204,31 @@ Please follow the instructions to fix the errors.
 
 
 class CaptureStructuredTrace(logging.Handler):
-    def __init__(self, specific_log_keys: List[str]):
+    def __init__(self, specific_log_keys: list[str]):
         super().__init__()
         self.specific_log_keys = specific_log_keys
-        self.logs: List[Tuple[str, Dict[str, Any]]] = []
+        self.logs: list[tuple[str, dict[str, Any]]] = []
         self.logger = logging.getLogger("torch.__trace")
         self.prev_get_dtrace = False
+
+        # Get the handler for printing logs to a specific file
+        possible_lazy_trace_handlers = [
+            handler
+            for handler in self.logger.handlers
+            if isinstance(handler, torch._logging._internal.LazyTraceHandler)
+        ]
+        if len(possible_lazy_trace_handlers) == 0:
+            self.lazy_trace_handler = torch._logging._internal.LazyTraceHandler(None)
+            self.logger.addHandler(self.lazy_trace_handler)
+        else:
+            self.lazy_trace_handler = possible_lazy_trace_handlers[0]
+        if self.lazy_trace_handler.root_dir is None:
+            # Set the logs to go to /tmp/export_unixname/...
+            sanitized_username = re.sub(r'[\\/:*?"<>|]', "_", getpass.getuser())
+            self.lazy_trace_handler.root_dir = os.path.join(
+                tempfile.gettempdir(),
+                "export_" + sanitized_username,
+            )
 
     def __enter__(self) -> "CaptureStructuredTrace":
         self.logs = []
@@ -185,20 +252,20 @@ class CaptureStructuredTrace(logging.Handler):
 
 def draft_export(
     mod: torch.nn.Module,
-    args: Tuple[Any, ...],
-    kwargs: Optional[Dict[str, Any]] = None,
+    args: tuple[Any, ...],
+    kwargs: Optional[dict[str, Any]] = None,
     *,
-    dynamic_shapes: Optional[Union[Dict[str, Any], Tuple[Any], List[Any]]] = None,
-    preserve_module_call_signature: Tuple[str, ...] = (),
+    dynamic_shapes: Optional[Union[dict[str, Any], tuple[Any], list[Any]]] = None,
+    preserve_module_call_signature: tuple[str, ...] = (),
     strict: bool = False,
     pre_dispatch: bool = False,
-) -> Tuple[ExportedProgram, DraftExportReport]:
+) -> tuple[ExportedProgram, DraftExportReport]:
     kwargs = kwargs or {}
     dynamic_shapes = dynamic_shapes or {}
 
     capture_structured_log = CaptureStructuredTrace(
         [
-            "propagate_real_tensors",
+            "propagate_real_tensors_provenance",
             "guard_added",
             "missing_fake_kernel",
             "mismatched_fake_kernel",
@@ -234,28 +301,30 @@ def draft_export(
                 preserve_module_call_signature=preserve_module_call_signature,
             )
 
-        str_to_filename: Dict[str, str] = {
+        torch._logging.dtrace_structured("exported_program", payload_fn=lambda: str(ep))
+
+        str_to_filename: dict[str, str] = {
             str(v): k for (k, v) in torch._logging.structured.INTERN_TABLE.items()
         }
-        failures: List[FailureReport] = []
-        custom_ops_logs: Dict[
-            Any, Tuple[Dict[str, Any], FailureType]
+        failures: list[FailureReport] = []
+        custom_ops_logs: dict[
+            Any, tuple[dict[str, Any], FailureType]
         ] = {}  # Dedup custom ops
-        data_dependent_logs: Dict[
-            str, Dict[str, Any]
-        ] = {}  # Dedup data dependent errors based on stacktrace
+        # Dedup data dependent errors based on stacktrace
+        data_dependent_logs: dict[str, int] = defaultdict(int)
 
         for log_name, log_contents in capture_structured_log.logs:
             failure_type = None
 
-            if log_name == "propagate_real_tensors":
+            if log_name == "propagate_real_tensors_provenance":
                 log_contents["stack"] = filter_stack(
                     log_contents["stack"], str_to_filename
                 )
-                if hash_stack(log_contents["stack"]) in data_dependent_logs:
+                data_dependent_logs[hash_stack(log_contents["stack"])] += 1
+
+                if data_dependent_logs[hash_stack(log_contents["stack"])] > 1:
                     continue
 
-                data_dependent_logs[hash_stack(log_contents["stack"])] = log_contents
                 failure_type = FailureType.DATA_DEPENDENT_ERROR
 
             elif log_name == "guard_added":
@@ -297,6 +366,13 @@ def draft_export(
                 )
             )
 
+        # Count data dependent errors
+        for failure in failures:
+            if failure.failure_type == FailureType.DATA_DEPENDENT_ERROR:
+                failure.data["occurrences"] = data_dependent_logs[
+                    hash_stack(failure.data["stack"])
+                ]
+
         report = DraftExportReport(failures, str_to_filename)
 
         # Add asserts around custom ops
@@ -304,5 +380,28 @@ def draft_export(
 
     ep._report = report
     if not report.successful():
-        log.warning(report)
+        log_filename = capture_structured_log.lazy_trace_handler.stream.name
+
+        log.warning(
+            """
+###################################################################################################
+WARNING: %s issue(s) found during export, and it was not able to soundly produce a graph.
+To view the report of failures in an html page, please run the command:
+    `tlparse %s --export`
+Or, you can view the errors in python by inspecting `print(ep._report)`.
+###################################################################################################
+        """,
+            len(report.failures),
+            log_filename,
+        )
+    else:
+        log.info(
+            """
+##############################################################################################
+Congratuations: No issues are found during export, and it was able to soundly produce a graph.
+You can now change back to torch.export.export()
+##############################################################################################
+    """
+        )
+
     return ep, report

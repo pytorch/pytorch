@@ -587,13 +587,13 @@ template <> struct AsIntegerType<double> { typedef uint64_t type; };
 template <> struct AsIntegerType<bfloat16> { typedef uint16_t type; };
 
 template <typename T>
-typename std::enable_if_t<!std::is_reduced_floating_point_v<T>, T>
+typename std::enable_if_t<!c10::is_reduced_floating_point_v<T>, T>
 inline fetch_value(volatile T *addr) {
   return *addr;
 }
 
 template <typename T>
-typename std::enable_if_t<std::is_reduced_floating_point_v<T>, T>
+typename std::enable_if_t<c10::is_reduced_floating_point_v<T>, T>
 inline fetch_value(volatile T *addr) {
   return T(addr->x, T::from_bits());
 }
