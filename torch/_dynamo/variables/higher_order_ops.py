@@ -801,30 +801,15 @@ class CondHigherOrderVariable(TorchHigherOrderOperatorVariable):
         args: "list[VariableTracker]",
         kwargs: "dict[str, VariableTracker]",
     ) -> "VariableTracker":
-        from . import ListVariable, TensorVariable
+        from . import TensorVariable
 
         args, kwargs = LazyVariableTracker.realize_all((args, kwargs))
-
-        for i, k in enumerate(["pred", "true_fn", "false_fn", "operands"]):
-            if v := kwargs.pop(k, None):
-                assert i == len(
-                    args
-                ), "did not provide the right number of non-keyword args"
-                args.append(v)
 
         if kwargs:
             unimplemented(f"torch.cond: Got unexpected kwargs: {list(kwargs.keys())}")
 
-        # TODO(voz): Support fake tensor dispatch for recursive
-        # ops - see torch/dispatch/_dispatcher.py
-        if len(args) != 4:
-            unimplemented(
-                f"Expected 4 arguments but got {len(args)}.\n"
-                f"Usage: cond(pred, true_fn, false_fn, operands)",
-            )
-
         # Specialize into one of the branches since pred is constant
-        pred, true_fn, false_fn, operands = args
+        pred, true_fn, false_fn, *operands = args
         if type(args[0]) is ConstantVariable:
             warnings.warn(
                 "Pred is a Python constant. When used with torch.cond, it specializes on one of the branches."
@@ -832,9 +817,9 @@ class CondHigherOrderVariable(TorchHigherOrderOperatorVariable):
                 UserWarning,
             )
             if pred.as_python_constant():
-                return true_fn.call_function(tx, operands.unpack_var_sequence(tx), {})
+                return true_fn.call_function(tx, operands, {})
             else:
-                return false_fn.call_function(tx, operands.unpack_var_sequence(tx), {})
+                return false_fn.call_function(tx, operands, {})
 
         # predicate
         if type(pred) not in (ConstantVariable, TensorVariable, SymNodeVariable):
@@ -844,16 +829,11 @@ class CondHigherOrderVariable(TorchHigherOrderOperatorVariable):
                 f"with original python type {str(pred.python_type())}.",
             )
 
-        # operands
-        if not isinstance(operands, (ListVariable, TupleVariable)):
+        if not all(
+            only_consist_of(op, (TensorVariable, ConstantVariable)) for op in operands
+        ):
             unimplemented(
-                f"Expected operands to be a list/tuple but got "
-                f"{operands.python_type()}",
-            )
-        operands_seq = operands.unpack_var_sequence(tx)
-        if not only_consist_of(operands, (TensorVariable, ConstantVariable)):
-            unimplemented(
-                "Expect operands to be a tuple of pytrees that only consists of tensor leaves."
+                "Expect operands to be pytrees that only consist of tensor leaves."
             )
 
         # branches
@@ -884,7 +864,7 @@ class CondHigherOrderVariable(TorchHigherOrderOperatorVariable):
             ) = speculate_subgraph(
                 tx,
                 args[ix],
-                operands_seq,
+                operands,
                 {},
                 "cond",
                 source_target=self.value,
@@ -956,7 +936,7 @@ class CondHigherOrderVariable(TorchHigherOrderOperatorVariable):
             true_node,
             false_node,
             # We pick true_shared but it shouldn't matter
-            true_shared + unique_true + unique_false,
+            *(true_shared + unique_true + unique_false),
         )
 
         flat_example_value = pytree.tree_map_only(

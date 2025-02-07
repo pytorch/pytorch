@@ -1100,7 +1100,7 @@ class GraphModule(torch.nn.Module):
             NotImplementedError,
             "no rule registered for HOP cond and subclass .*TwoTensor'>",
         ):
-            res = cond_op(a.sum() > 0, torch.sin, torch.cos, (t,))
+            res = cond_op(a.sum() > 0, torch.sin, torch.cos, t)
 
         called = 0
 
@@ -1110,11 +1110,21 @@ class GraphModule(torch.nn.Module):
             nonlocal called
             called += 1
             assert len(operands) == 1
-            a = cond_op(pred, true_fn, false_fn, (operands[0].a,))
-            b = cond_op(pred, true_fn, false_fn, (operands[0].b,))
+            a = cond_op(
+                pred,
+                true_fn,
+                false_fn,
+                operands[0].a,
+            )
+            b = cond_op(
+                pred,
+                true_fn,
+                false_fn,
+                operands[0].b,
+            )
             return TwoTensor(a, b)
 
-        res = cond_op(a.sum() > 0, torch.sin, torch.cos, (t,))
+        res = cond_op(a.sum() > 0, torch.sin, torch.cos, t)
         self.assertEqual(res.a, torch.sin(a))
         self.assertEqual(res.b, torch.sin(b))
         self.assertEqual(called, 1)
@@ -1137,7 +1147,7 @@ class GraphModule(torch.nn.Module):
             "no rule registered for HOP cond and mode .*MyMode",
         ):
             with MyMode():
-                res = cond_op(pred, torch.sin, torch.cos, (a,))
+                res = cond_op(pred, torch.sin, torch.cos, a)
 
         py_impl_called = 0
 
@@ -1146,12 +1156,12 @@ class GraphModule(torch.nn.Module):
         def _(mode, pred, true_fn, false_fn, operands):
             nonlocal py_impl_called
             py_impl_called += 1
-            return cond_op(pred, true_fn, false_fn, operands)
+            return cond_op(pred, true_fn, false_fn, *operands)
 
         a = torch.tensor([1.0, 0.1, 1.0])
         pred = a.sum() > 0
         with MyMode():
-            res = cond_op(pred, torch.sin, torch.cos, (a,))
+            res = cond_op(pred, torch.sin, torch.cos, a)
         self.assertEqual(res, a.sin())
 
     def test_capture_value_created_in_subgraph(self):
@@ -2068,7 +2078,7 @@ def forward(self, child : torch.Tensor, const_unused : int):
                 node.op == "call_function"
                 and node.target == torch.ops.higher_order.cond
             ):
-                _, _, _, operands = node.args
+                _, _, _, *operands = node.args
                 # Since we compile wit dynamic, each branch takes 4 inputs (buffer, x, z, s1)
                 self.assertEqual(len(operands), 4)
             if node.op == "get_attr":
@@ -2143,7 +2153,7 @@ def forward(self, L_x_ : torch.Tensor):
     gt = sum_1 > 0;  sum_1 = None
     cond_true_0 = self.cond_true_0
     cond_false_0 = self.cond_false_0
-    cond = torch.ops.higher_order.cond(gt, cond_true_0, cond_false_0, [l_x_]);  gt = cond_true_0 = cond_false_0 = l_x_ = None
+    cond = torch.ops.higher_order.cond(gt, cond_true_0, cond_false_0, l_x_);  gt = cond_true_0 = cond_false_0 = l_x_ = None
     getitem = cond[0];  cond = None
     return (getitem,)""",
             )
@@ -2187,7 +2197,7 @@ def forward(self, L_x_ : torch.Tensor):
     gt = sum_1 > 0;  sum_1 = None
     cond_true_0 = self.cond_true_0
     cond_false_0 = self.cond_false_0
-    cond = torch.ops.higher_order.cond(gt, cond_true_0, cond_false_0, []);  gt = cond_true_0 = cond_false_0 = None
+    cond = torch.ops.higher_order.cond(gt, cond_true_0, cond_false_0);  gt = cond_true_0 = cond_false_0 = None
     getitem = cond[0];  cond = None
     return (getitem,)""",
             )
@@ -3115,7 +3125,7 @@ def forward(self, L_pred_ : torch.Tensor, L_pytree_in_0_ : torch.Tensor, L_pytre
     l_pytree_in_4_g_ = L_pytree_in_4_g_
     cond_true_0 = self.cond_true_0
     cond_false_0 = self.cond_false_0
-    cond = torch.ops.higher_order.cond(l_pred_, cond_true_0, cond_false_0, [l_pytree_in_0_, l_pytree_in_1_0_0_0_, l_pytree_in_2_, l_pytree_in_3_0_, l_pytree_in_3_1_0_, l_pytree_in_3_2_, l_pytree_in_4_g_]);  l_pred_ = cond_true_0 = cond_false_0 = l_pytree_in_0_ = l_pytree_in_1_0_0_0_ = l_pytree_in_2_ = l_pytree_in_3_0_ = l_pytree_in_3_1_0_ = l_pytree_in_3_2_ = l_pytree_in_4_g_ = None
+    cond = torch.ops.higher_order.cond(l_pred_, cond_true_0, cond_false_0, l_pytree_in_0_, l_pytree_in_1_0_0_0_, l_pytree_in_2_, l_pytree_in_3_0_, l_pytree_in_3_1_0_, l_pytree_in_3_2_, l_pytree_in_4_g_);  l_pred_ = cond_true_0 = cond_false_0 = l_pytree_in_0_ = l_pytree_in_1_0_0_0_ = l_pytree_in_2_ = l_pytree_in_3_0_ = l_pytree_in_3_1_0_ = l_pytree_in_3_2_ = l_pytree_in_4_g_ = None
     getitem = cond[0];  cond = None
     return (getitem,)""",  # noqa: B950
         )
@@ -6891,8 +6901,6 @@ class ActivationCheckpointingTests(torch._dynamo.test_case.TestCase):
         )
 
     def test_cond_with_kwargs(self):
-        from torch._higher_order_ops.cond import cond_op
-
         def test(pred, x):
             def true_fn(x):
                 return x
@@ -6900,7 +6908,9 @@ class ActivationCheckpointingTests(torch._dynamo.test_case.TestCase):
             def false_fn(x):
                 return -x
 
-            return cond_op(pred=pred, true_fn=true_fn, false_fn=false_fn, operands=[x])
+            return torch.cond(
+                pred=pred, true_fn=true_fn, false_fn=false_fn, operands=[x]
+            )
 
         cnt = CompileCounter()
         opt_test = torch.compile(test, backend=cnt, fullgraph=True)
@@ -6913,42 +6923,6 @@ class ActivationCheckpointingTests(torch._dynamo.test_case.TestCase):
             torch.allclose(test(false_pred, inp), opt_test(false_pred, inp))
         )
         self.assertEqual(cnt.frame_count, 1)
-
-    def test_cond_with_invalid_kwargs(self):
-        from torch._higher_order_ops.cond import cond_op
-
-        def test(pred, mode, x):
-            def true_fn(x):
-                return x
-
-            def false_fn(x):
-                return -x
-
-            if mode:
-                return cond_op(
-                    pred=pred,
-                    true_fn=true_fn,
-                    false_fn=false_fn,
-                    operands=[x],
-                    invalid=True,
-                )
-            else:
-                return cond_op(
-                    pred,
-                    pred=pred,
-                    true_fn=true_fn,
-                    false_fn=false_fn,
-                    operands=[x],
-                )
-
-        cnt = CompileCounter()
-        opt_test = torch.compile(test, backend=cnt)
-        inp = torch.ones(3, 3)
-        with self.assertRaises(torch._dynamo.exc.UncapturedHigherOrderOpError):
-            opt_test(True, True, inp)
-
-        with self.assertRaises(AssertionError):
-            opt_test(True, False, inp)
 
     def test_cond_with_mismatched_output(self):
         def output_mismatch_test(x):

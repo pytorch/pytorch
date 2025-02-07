@@ -499,12 +499,12 @@ def forward(self, pred_1, x_1):
     sym_size_int = torch.ops.aten.sym_size.int(x_1, 0)
     true_graph_0 = self.true_graph_0
     false_graph_0 = self.false_graph_0
-    cond = torch.ops.higher_order.cond(pred_1, true_graph_0, false_graph_0, (x_1, sym_size_int));  true_graph_0 = false_graph_0 = None
+    cond = torch.ops.higher_order.cond(pred_1, true_graph_0, false_graph_0, x_1, sym_size_int);  true_graph_0 = false_graph_0 = None
     getitem = cond[0];  cond = None
     ones_like = torch.ops.aten.ones_like.default(getitem, pin_memory = False);  getitem = None
     true_graph_1 = self.true_graph_1
     false_graph_1 = self.false_graph_1
-    cond_1 = torch.ops.higher_order.cond(pred_1, true_graph_1, false_graph_1, (ones_like, x_1, sym_size_int));  pred_1 = true_graph_1 = false_graph_1 = ones_like = x_1 = sym_size_int = None
+    cond_1 = torch.ops.higher_order.cond(pred_1, true_graph_1, false_graph_1, ones_like, x_1, sym_size_int);  pred_1 = true_graph_1 = false_graph_1 = ones_like = x_1 = sym_size_int = None
     getitem_1 = cond_1[0]
     getitem_2 = cond_1[1];  cond_1 = getitem_2 = None
     return (getitem_1,)""",  # noqa: B950
@@ -542,12 +542,12 @@ def forward(self, pred_1, x_1):
     sym_size_int = torch.ops.aten.sym_size.int(x_1, 0)
     true_graph_0 = self.true_graph_0
     false_graph_0 = self.false_graph_0
-    cond = torch.ops.higher_order.cond(pred_1, true_graph_0, false_graph_0, (x_1, sym_size_int));  true_graph_0 = false_graph_0 = None
+    cond = torch.ops.higher_order.cond(pred_1, true_graph_0, false_graph_0, x_1, sym_size_int);  true_graph_0 = false_graph_0 = None
     getitem = cond[0];  cond = None
     ones_like = torch.ops.aten.ones_like.default(getitem, pin_memory = False);  getitem = None
     true_graph_1 = self.true_graph_1
     false_graph_1 = self.false_graph_1
-    cond_1 = torch.ops.higher_order.cond(pred_1, true_graph_1, false_graph_1, (ones_like, x_1, sym_size_int));  pred_1 = true_graph_1 = false_graph_1 = ones_like = x_1 = sym_size_int = None
+    cond_1 = torch.ops.higher_order.cond(pred_1, true_graph_1, false_graph_1, ones_like, x_1, sym_size_int);  pred_1 = true_graph_1 = false_graph_1 = ones_like = x_1 = sym_size_int = None
     getitem_1 = cond_1[0]
     getitem_2 = cond_1[1];  cond_1 = getitem_2 = None
     return (getitem_1,)""",  # noqa: B950
@@ -654,12 +654,12 @@ def forward(self, pred_1, x_1, y_1, z_1):
     sym_size_int_1 = torch.ops.aten.sym_size.int(y_1, 0)
     true_graph_0 = self.true_graph_0
     false_graph_0 = self.false_graph_0
-    cond = torch.ops.higher_order.cond(pred_1, true_graph_0, false_graph_0, (z_1, y_1, sym_size_int, sym_size_int_1));  true_graph_0 = false_graph_0 = None
+    cond = torch.ops.higher_order.cond(pred_1, true_graph_0, false_graph_0, z_1, y_1, sym_size_int, sym_size_int_1);  true_graph_0 = false_graph_0 = None
     getitem = cond[0];  cond = None
     ones_like = torch.ops.aten.ones_like.default(getitem, pin_memory = False);  getitem = None
     true_graph_1 = self.true_graph_1
     false_graph_1 = self.false_graph_1
-    cond_1 = torch.ops.higher_order.cond(pred_1, true_graph_1, false_graph_1, (ones_like, z_1, y_1, sym_size_int, sym_size_int_1));  pred_1 = true_graph_1 = false_graph_1 = ones_like = z_1 = y_1 = sym_size_int = sym_size_int_1 = None
+    cond_1 = torch.ops.higher_order.cond(pred_1, true_graph_1, false_graph_1, ones_like, z_1, y_1, sym_size_int, sym_size_int_1);  pred_1 = true_graph_1 = false_graph_1 = ones_like = z_1 = y_1 = sym_size_int = sym_size_int_1 = None
     getitem_1 = cond_1[0]
     getitem_2 = cond_1[1];  getitem_2 = None
     getitem_3 = cond_1[2];  getitem_3 = None
@@ -714,7 +714,7 @@ def forward(self, pred_1, x_1):
     _param_constant0 = self._param_constant0
     _param_constant1 = self._param_constant1
     _tensor_constant0 = self._tensor_constant0
-    cond = torch.ops.higher_order.cond(pred_1, true_graph_0, false_graph_0, (_param_constant0, _param_constant1, x_1, sym_size_int, _tensor_constant0));  true_graph_0 = false_graph_0 = _param_constant0 = _param_constant1 = _tensor_constant0 = None
+    cond = torch.ops.higher_order.cond(pred_1, true_graph_0, false_graph_0, _param_constant0, _param_constant1, x_1, sym_size_int, _tensor_constant0);  true_graph_0 = false_graph_0 = _param_constant0 = _param_constant1 = _tensor_constant0 = None
     getitem = cond[0];  cond = None
     ones_like = torch.ops.aten.ones_like.default(getitem, pin_memory = False);  getitem = None
     true_graph_1 = self.true_graph_1
@@ -722,7 +722,7 @@ def forward(self, pred_1, x_1):
     _param_constant0_1 = self._param_constant0
     _param_constant1_1 = self._param_constant1
     _tensor_constant0_1 = self._tensor_constant0
-    cond_1 = torch.ops.higher_order.cond(pred_1, true_graph_1, false_graph_1, (ones_like, _param_constant0_1, _param_constant1_1, x_1, sym_size_int, _tensor_constant0_1));  pred_1 = true_graph_1 = false_graph_1 = ones_like = _param_constant0_1 = _param_constant1_1 = x_1 = sym_size_int = _tensor_constant0_1 = None
+    cond_1 = torch.ops.higher_order.cond(pred_1, true_graph_1, false_graph_1, ones_like, _param_constant0_1, _param_constant1_1, x_1, sym_size_int, _tensor_constant0_1);  pred_1 = true_graph_1 = false_graph_1 = ones_like = _param_constant0_1 = _param_constant1_1 = x_1 = sym_size_int = _tensor_constant0_1 = None
     getitem_1 = cond_1[0];  getitem_1 = None
     getitem_2 = cond_1[1]
     getitem_3 = cond_1[2];  getitem_3 = None
@@ -835,12 +835,12 @@ def forward(self, pred_1, a_1, b_1, c_1):
     sym_size_int_2 = torch.ops.aten.sym_size.int(c_1, 0)
     true_graph_0 = self.true_graph_0
     false_graph_0 = self.false_graph_0
-    cond = torch.ops.higher_order.cond(pred_1, true_graph_0, false_graph_0, (a_1, b_1, sym_size_int, sym_size_int_1, c_1, sym_size_int_2));  true_graph_0 = false_graph_0 = None
+    cond = torch.ops.higher_order.cond(pred_1, true_graph_0, false_graph_0, a_1, b_1, sym_size_int, sym_size_int_1, c_1, sym_size_int_2);  true_graph_0 = false_graph_0 = None
     getitem = cond[0];  cond = None
     ones_like = torch.ops.aten.ones_like.default(getitem, pin_memory = False);  getitem = None
     true_graph_1 = self.true_graph_1
     false_graph_1 = self.false_graph_1
-    cond_1 = torch.ops.higher_order.cond(pred_1, true_graph_1, false_graph_1, (ones_like, a_1, b_1, sym_size_int, sym_size_int_1, c_1, sym_size_int_2));  pred_1 = true_graph_1 = false_graph_1 = ones_like = a_1 = b_1 = sym_size_int = sym_size_int_1 = c_1 = sym_size_int_2 = None
+    cond_1 = torch.ops.higher_order.cond(pred_1, true_graph_1, false_graph_1, ones_like, a_1, b_1, sym_size_int, sym_size_int_1, c_1, sym_size_int_2);  pred_1 = true_graph_1 = false_graph_1 = ones_like = a_1 = b_1 = sym_size_int = sym_size_int_1 = c_1 = sym_size_int_2 = None
     getitem_1 = cond_1[0]
     getitem_2 = cond_1[1]
     getitem_3 = cond_1[2];  getitem_3 = None
@@ -910,7 +910,7 @@ def forward(self, pred_1):
     _tensor_constant0 = self._tensor_constant0
     _tensor_constant1 = self._tensor_constant1
     _tensor_constant2 = self._tensor_constant2
-    cond = torch.ops.higher_order.cond(pred_1, true_graph_0, false_graph_0, (_tensor_constant0, _tensor_constant1, _tensor_constant2));  true_graph_0 = false_graph_0 = _tensor_constant0 = _tensor_constant1 = _tensor_constant2 = None
+    cond = torch.ops.higher_order.cond(pred_1, true_graph_0, false_graph_0, _tensor_constant0, _tensor_constant1, _tensor_constant2);  true_graph_0 = false_graph_0 = _tensor_constant0 = _tensor_constant1 = _tensor_constant2 = None
     getitem = cond[0];  cond = None
     ones_like = torch.ops.aten.ones_like.default(getitem, pin_memory = False);  getitem = None
     true_graph_1 = self.true_graph_1
@@ -918,7 +918,7 @@ def forward(self, pred_1):
     _tensor_constant0_1 = self._tensor_constant0
     _tensor_constant1_1 = self._tensor_constant1
     _tensor_constant2_1 = self._tensor_constant2
-    cond_1 = torch.ops.higher_order.cond(pred_1, true_graph_1, false_graph_1, (ones_like, _tensor_constant0_1, _tensor_constant1_1, _tensor_constant2_1));  pred_1 = true_graph_1 = false_graph_1 = ones_like = _tensor_constant0_1 = _tensor_constant1_1 = _tensor_constant2_1 = None
+    cond_1 = torch.ops.higher_order.cond(pred_1, true_graph_1, false_graph_1, ones_like, _tensor_constant0_1, _tensor_constant1_1, _tensor_constant2_1);  pred_1 = true_graph_1 = false_graph_1 = ones_like = _tensor_constant0_1 = _tensor_constant1_1 = _tensor_constant2_1 = None
     getitem_1 = cond_1[0]
     getitem_2 = cond_1[1]
     getitem_3 = cond_1[2];  cond_1 = getitem_3 = None
@@ -986,7 +986,7 @@ def forward(self, pred_1):
     _tensor_constant0 = self._tensor_constant0
     _tensor_constant1 = self._tensor_constant1
     _tensor_constant2 = self._tensor_constant2
-    cond = torch.ops.higher_order.cond(pred_1, true_graph_0, false_graph_0, (_tensor_constant0, _tensor_constant1, _tensor_constant2));  pred_1 = true_graph_0 = false_graph_0 = _tensor_constant0 = _tensor_constant1 = _tensor_constant2 = None
+    cond = torch.ops.higher_order.cond(pred_1, true_graph_0, false_graph_0, _tensor_constant0, _tensor_constant1, _tensor_constant2);  pred_1 = true_graph_0 = false_graph_0 = _tensor_constant0 = _tensor_constant1 = _tensor_constant2 = None
     getitem = cond[0]
     getitem_1 = cond[1];  cond = None
     view = torch.ops.aten.view.default(getitem, [4]);  getitem = None
@@ -1036,7 +1036,7 @@ def forward(self, pred_1, x_1):
     _param_constant3 = self._param_constant3
     _param_constant4 = self._param_constant4
     _param_constant5 = self._param_constant5
-    cond = torch.ops.higher_order.cond(pred_1, true_graph_0, false_graph_0, (x_1, _param_constant0, _param_constant1, _param_constant2, _param_constant3, _param_constant4, _param_constant5));  true_graph_0 = false_graph_0 = _param_constant0 = _param_constant1 = _param_constant2 = _param_constant3 = _param_constant4 = _param_constant5 = None
+    cond = torch.ops.higher_order.cond(pred_1, true_graph_0, false_graph_0, x_1, _param_constant0, _param_constant1, _param_constant2, _param_constant3, _param_constant4, _param_constant5);  true_graph_0 = false_graph_0 = _param_constant0 = _param_constant1 = _param_constant2 = _param_constant3 = _param_constant4 = _param_constant5 = None
     getitem = cond[0];  cond = None
     ones_like = torch.ops.aten.ones_like.default(getitem, pin_memory = False);  getitem = None
     true_graph_1 = self.true_graph_1
@@ -1047,7 +1047,7 @@ def forward(self, pred_1, x_1):
     _param_constant3_1 = self._param_constant3
     _param_constant4_1 = self._param_constant4
     _param_constant5_1 = self._param_constant5
-    cond_1 = torch.ops.higher_order.cond(pred_1, true_graph_1, false_graph_1, (ones_like, x_1, _param_constant0_1, _param_constant1_1, _param_constant2_1, _param_constant3_1, _param_constant4_1, _param_constant5_1));  pred_1 = true_graph_1 = false_graph_1 = ones_like = x_1 = _param_constant0_1 = _param_constant1_1 = _param_constant2_1 = _param_constant3_1 = _param_constant4_1 = _param_constant5_1 = None
+    cond_1 = torch.ops.higher_order.cond(pred_1, true_graph_1, false_graph_1, ones_like, x_1, _param_constant0_1, _param_constant1_1, _param_constant2_1, _param_constant3_1, _param_constant4_1, _param_constant5_1);  pred_1 = true_graph_1 = false_graph_1 = ones_like = x_1 = _param_constant0_1 = _param_constant1_1 = _param_constant2_1 = _param_constant3_1 = _param_constant4_1 = _param_constant5_1 = None
     getitem_1 = cond_1[0]
     getitem_2 = cond_1[1];  getitem_2 = None
     getitem_3 = cond_1[2];  getitem_3 = None
@@ -1100,12 +1100,12 @@ def forward(self, pred_1, x_1):
 def forward(self, pred_1, x_1):
     true_graph_0 = self.true_graph_0
     false_graph_0 = self.false_graph_0
-    cond = torch.ops.higher_order.cond(pred_1, true_graph_0, false_graph_0, (x_1,));  true_graph_0 = false_graph_0 = None
+    cond = torch.ops.higher_order.cond(pred_1, true_graph_0, false_graph_0, x_1);  true_graph_0 = false_graph_0 = None
     getitem = cond[0];  cond = None
     ones_like = torch.ops.aten.ones_like.default(getitem, pin_memory = False);  getitem = None
     true_graph_1 = self.true_graph_1
     false_graph_1 = self.false_graph_1
-    cond_1 = torch.ops.higher_order.cond(pred_1, true_graph_1, false_graph_1, (ones_like, x_1));  pred_1 = true_graph_1 = false_graph_1 = ones_like = x_1 = None
+    cond_1 = torch.ops.higher_order.cond(pred_1, true_graph_1, false_graph_1, ones_like, x_1);  pred_1 = true_graph_1 = false_graph_1 = ones_like = x_1 = None
     getitem_1 = cond_1[0];  cond_1 = None
     return (getitem_1,)""",  # noqa: B950
         )
@@ -1155,12 +1155,12 @@ def forward(self, pred_1, x_1):
 def forward(self, pred_1, x_1):
     true_graph_0 = self.true_graph_0
     false_graph_0 = self.false_graph_0
-    cond = torch.ops.higher_order.cond(pred_1, true_graph_0, false_graph_0, (x_1,));  true_graph_0 = false_graph_0 = None
+    cond = torch.ops.higher_order.cond(pred_1, true_graph_0, false_graph_0, x_1);  true_graph_0 = false_graph_0 = None
     getitem = cond[0];  cond = None
     ones_like = torch.ops.aten.ones_like.default(getitem, pin_memory = False);  getitem = None
     true_graph_1 = self.true_graph_1
     false_graph_1 = self.false_graph_1
-    cond_1 = torch.ops.higher_order.cond(pred_1, true_graph_1, false_graph_1, (ones_like, x_1));  pred_1 = true_graph_1 = false_graph_1 = ones_like = x_1 = None
+    cond_1 = torch.ops.higher_order.cond(pred_1, true_graph_1, false_graph_1, ones_like, x_1);  pred_1 = true_graph_1 = false_graph_1 = ones_like = x_1 = None
     getitem_1 = cond_1[0];  cond_1 = None
     return (getitem_1,)""",  # noqa: B950
         )
@@ -1198,12 +1198,12 @@ def forward(self, pred_1, x_1):
     sym_size_int = torch.ops.aten.sym_size.int(x_1, 0)
     true_graph_0 = self.true_graph_0
     false_graph_0 = self.false_graph_0
-    cond = torch.ops.higher_order.cond(pred_1, true_graph_0, false_graph_0, (x_1, sym_size_int));  true_graph_0 = false_graph_0 = None
+    cond = torch.ops.higher_order.cond(pred_1, true_graph_0, false_graph_0, x_1, sym_size_int);  true_graph_0 = false_graph_0 = None
     getitem = cond[0];  cond = None
     ones_like = torch.ops.aten.ones_like.default(getitem, pin_memory = False);  getitem = None
     true_graph_1 = self.true_graph_1
     false_graph_1 = self.false_graph_1
-    cond_1 = torch.ops.higher_order.cond(pred_1, true_graph_1, false_graph_1, (ones_like, x_1, sym_size_int));  pred_1 = true_graph_1 = false_graph_1 = ones_like = x_1 = sym_size_int = None
+    cond_1 = torch.ops.higher_order.cond(pred_1, true_graph_1, false_graph_1, ones_like, x_1, sym_size_int);  pred_1 = true_graph_1 = false_graph_1 = ones_like = x_1 = sym_size_int = None
     getitem_1 = cond_1[0]
     getitem_2 = cond_1[1];  cond_1 = getitem_2 = None
     return (getitem_1,)""",  # noqa: B950
@@ -1333,22 +1333,18 @@ def forward(self, pred_1, x_1):
                 """\
 def forward(self):
     _tensor_constant0 = self._tensor_constant0
-    ones_like = torch.ops.aten.ones_like.default(_tensor_constant0, pin_memory = False,\
- memory_format = torch.preserve_format);  _tensor_constant0 = None
+    ones_like = torch.ops.aten.ones_like.default(_tensor_constant0, pin_memory = False, memory_format = torch.preserve_format);  _tensor_constant0 = None
     _tensor_constant1 = self._tensor_constant1
     true_graph_0 = self.true_graph_0
     false_graph_0 = self.false_graph_0
     _tensor_constant2 = self._tensor_constant2
     _tensor_constant3 = self._tensor_constant3
     _tensor_constant4 = self._tensor_constant4
-    cond = torch.ops.higher_order.cond(_tensor_constant1, true_graph_0, false_graph_0,\
- (ones_like, _tensor_constant2, _tensor_constant3, _tensor_constant4));\
-  _tensor_constant1 = true_graph_0 = false_graph_0 = ones_like = _tensor_constant2 =\
- _tensor_constant3 = _tensor_constant4 = None
+    cond = torch.ops.higher_order.cond(_tensor_constant1, true_graph_0, false_graph_0, ones_like, _tensor_constant2, _tensor_constant3, _tensor_constant4);  _tensor_constant1 = true_graph_0 = false_graph_0 = ones_like = _tensor_constant2 = _tensor_constant3 = _tensor_constant4 = None
     getitem = cond[0];  getitem = None
     getitem_1 = cond[1]
     getitem_2 = cond[2];  cond = None
-    return (getitem_1, getitem_2)""",
+    return (getitem_1, getitem_2)""",  # noqa: B950
             )
         else:
             self.assertExpectedInline(
@@ -1437,8 +1433,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1):
                 """\
 def forward(self):
     _tensor_constant0 = self._tensor_constant0
-    ones_like = torch.ops.aten.ones_like.default(_tensor_constant0, pin_memory = False,\
- memory_format = torch.preserve_format);  _tensor_constant0 = None
+    ones_like = torch.ops.aten.ones_like.default(_tensor_constant0, pin_memory = False, memory_format = torch.preserve_format);  _tensor_constant0 = None
     _tensor_constant1 = self._tensor_constant1
     true_graph_0 = self.true_graph_0
     false_graph_0 = self.false_graph_0
@@ -1447,17 +1442,13 @@ def forward(self):
     _tensor_constant4 = self._tensor_constant4
     _tensor_constant5 = self._tensor_constant5
     _tensor_constant6 = self._tensor_constant6
-    cond = torch.ops.higher_order.cond(_tensor_constant1, true_graph_0, false_graph_0,\
- (ones_like, _tensor_constant2, _tensor_constant3, _tensor_constant4, _tensor_constant5,\
- _tensor_constant6));  _tensor_constant1 = true_graph_0 = false_graph_0 = ones_like =\
- _tensor_constant2 = _tensor_constant3 = _tensor_constant4 = _tensor_constant5 =\
- _tensor_constant6 = None
+    cond = torch.ops.higher_order.cond(_tensor_constant1, true_graph_0, false_graph_0, ones_like, _tensor_constant2, _tensor_constant3, _tensor_constant4, _tensor_constant5, _tensor_constant6);  _tensor_constant1 = true_graph_0 = false_graph_0 = ones_like = _tensor_constant2 = _tensor_constant3 = _tensor_constant4 = _tensor_constant5 = _tensor_constant6 = None
     getitem = cond[0];  getitem = None
     getitem_1 = cond[1]
     getitem_2 = cond[2]
     getitem_3 = cond[3]
     getitem_4 = cond[4];  cond = None
-    return (getitem_1, getitem_2, getitem_3, getitem_4)""",
+    return (getitem_1, getitem_2, getitem_3, getitem_4)""",  # noqa: B950
             )
         else:
             self.assertExpectedInline(
@@ -3968,7 +3959,7 @@ def forward(self, L_pred_ : torch.Tensor, L_x_ : torch.Tensor):
     l_x_ = L_x_
     cond_true_0 = self.cond_true_0
     cond_false_0 = self.cond_false_0
-    cond = torch.ops.higher_order.cond(l_pred_, cond_true_0, cond_false_0, [l_x_]);  l_pred_ = cond_true_0 = cond_false_0 = l_x_ = None
+    cond = torch.ops.higher_order.cond(l_pred_, cond_true_0, cond_false_0, l_x_);  l_pred_ = cond_true_0 = cond_false_0 = l_x_ = None
     result = cond[0];  cond = None
     grad_out = torch.ones_like(result)
     return (result, grad_out)""",  # noqa: B950
@@ -4001,7 +3992,7 @@ def forward(self, L_ctx_saved_tensors_0_ : torch.Tensor, L_ctx_pred : torch.Tens
     l_flat_grads_0_ = L_flat_grads_0_
     cond_true_0 = self.cond_true_0
     cond_false_0 = self.cond_false_0
-    cond = torch.ops.higher_order.cond(l_ctx_pred, cond_true_0, cond_false_0, [l_ctx_saved_tensors_0_, l_flat_grads_0_]);  l_ctx_pred = cond_true_0 = cond_false_0 = l_ctx_saved_tensors_0_ = l_flat_grads_0_ = None
+    cond = torch.ops.higher_order.cond(l_ctx_pred, cond_true_0, cond_false_0, l_ctx_saved_tensors_0_, l_flat_grads_0_);  l_ctx_pred = cond_true_0 = cond_false_0 = l_ctx_saved_tensors_0_ = l_flat_grads_0_ = None
     getitem = cond[0];  cond = None
     return (getitem,)""",  # noqa: B950
         )
@@ -4540,7 +4531,7 @@ def forward(self, a_1, b_1):
     sym_size_int_3 = torch.ops.aten.sym_size.int(b_1, 1)
     true_graph_0 = self.true_graph_0
     false_graph_0 = self.false_graph_0
-    cond = torch.ops.higher_order.cond(gt, true_graph_0, false_graph_0, [a_1, b_1, sym_size_int, sym_size_int_1, sym_size_int_2, sym_size_int_3]);  gt = true_graph_0 = false_graph_0 = a_1 = b_1 = sym_size_int = sym_size_int_1 = sym_size_int_2 = sym_size_int_3 = None
+    cond = torch.ops.higher_order.cond(gt, true_graph_0, false_graph_0, a_1, b_1, sym_size_int, sym_size_int_1, sym_size_int_2, sym_size_int_3);  gt = true_graph_0 = false_graph_0 = a_1 = b_1 = sym_size_int = sym_size_int_1 = sym_size_int_2 = sym_size_int_3 = None
     getitem = cond[0];  cond = None
     return getitem""",  # noqa: B950
         )
@@ -5022,11 +5013,11 @@ def forward(self, x_1):
 def forward(self, x_1, pred_1, pred2_1):
     true_graph_0 = self.true_graph_0
     false_graph_0 = self.false_graph_0
-    cond = torch.ops.higher_order.cond(pred_1, true_graph_0, false_graph_0, [x_1]);  pred_1 = true_graph_0 = false_graph_0 = None
+    cond = torch.ops.higher_order.cond(pred_1, true_graph_0, false_graph_0, x_1);  pred_1 = true_graph_0 = false_graph_0 = None
     getitem = cond[0];  cond = None
     true_graph_1 = self.true_graph_1
     false_graph_1 = self.false_graph_1
-    cond_1 = torch.ops.higher_order.cond(pred2_1, true_graph_1, false_graph_1, [x_1]);  pred2_1 = true_graph_1 = false_graph_1 = x_1 = None
+    cond_1 = torch.ops.higher_order.cond(pred2_1, true_graph_1, false_graph_1, x_1);  pred2_1 = true_graph_1 = false_graph_1 = x_1 = None
     getitem_1 = cond_1[0];  cond_1 = None
     add = torch.ops.aten.add.Tensor(getitem, getitem_1);  getitem = getitem_1 = None
     return add""",  # noqa: B950
@@ -5195,11 +5186,11 @@ def forward(self, arg0_1):
 def forward(self, x_1, pred_1, pred2_1):
     true_graph_0 = self.true_graph_0
     false_graph_0 = self.false_graph_0
-    cond = torch.ops.higher_order.cond(pred_1, true_graph_0, false_graph_0, [x_1]);  pred_1 = true_graph_0 = false_graph_0 = None
+    cond = torch.ops.higher_order.cond(pred_1, true_graph_0, false_graph_0, x_1);  pred_1 = true_graph_0 = false_graph_0 = None
     getitem = cond[0];  cond = None
     true_graph_1 = self.true_graph_1
     false_graph_1 = self.false_graph_1
-    cond_1 = torch.ops.higher_order.cond(pred2_1, true_graph_1, false_graph_1, [x_1]);  pred2_1 = true_graph_1 = false_graph_1 = x_1 = None
+    cond_1 = torch.ops.higher_order.cond(pred2_1, true_graph_1, false_graph_1, x_1);  pred2_1 = true_graph_1 = false_graph_1 = x_1 = None
     getitem_1 = cond_1[0];  cond_1 = None
     add = torch.ops.aten.add.Tensor(getitem, getitem_1);  getitem = getitem_1 = None
     return add""",  # noqa: B950
@@ -5673,7 +5664,7 @@ def forward(self, x_1):
     sym_size_int_1 = torch.ops.aten.sym_size.int(x_1, 1)
     true_graph_0 = self.true_graph_0
     false_graph_0 = self.false_graph_0
-    cond = torch.ops.higher_order.cond(eq, true_graph_0, false_graph_0, [x_1, sym_size_int, sym_size_int_1]);  eq = true_graph_0 = false_graph_0 = x_1 = sym_size_int = sym_size_int_1 = None
+    cond = torch.ops.higher_order.cond(eq, true_graph_0, false_graph_0, x_1, sym_size_int, sym_size_int_1);  eq = true_graph_0 = false_graph_0 = x_1 = sym_size_int = sym_size_int_1 = None
     getitem = cond[0];  cond = None
     return getitem""",  # noqa: B950
         )
@@ -5705,7 +5696,7 @@ def forward(self, x_1):
     sym_size_int_1 = torch.ops.aten.sym_size.int(x_1, 0)
     true_graph_0 = self.true_graph_0
     false_graph_0 = self.false_graph_0
-    cond = torch.ops.higher_order.cond(gt, true_graph_0, false_graph_0, [x_1, sym_size_int_1]);  gt = true_graph_0 = false_graph_0 = x_1 = sym_size_int_1 = None
+    cond = torch.ops.higher_order.cond(gt, true_graph_0, false_graph_0, x_1, sym_size_int_1);  gt = true_graph_0 = false_graph_0 = x_1 = sym_size_int_1 = None
     getitem = cond[0];  cond = None
     return getitem""",  # noqa: B950
         )
@@ -5786,7 +5777,7 @@ def forward(self, x_1):
     false_graph_0 = self.false_graph_0
     _tensor_constant0 = self._tensor_constant0
     _tensor_constant1 = self._tensor_constant1
-    cond = torch.ops.higher_order.cond(eq, true_graph_0, false_graph_0, [x_1, _tensor_constant0, sym_size_int, sym_size_int_1, _tensor_constant1]);  eq = true_graph_0 = false_graph_0 = x_1 = _tensor_constant0 = sym_size_int = sym_size_int_1 = _tensor_constant1 = None
+    cond = torch.ops.higher_order.cond(eq, true_graph_0, false_graph_0, x_1, _tensor_constant0, sym_size_int, sym_size_int_1, _tensor_constant1);  eq = true_graph_0 = false_graph_0 = x_1 = _tensor_constant0 = sym_size_int = sym_size_int_1 = _tensor_constant1 = None
     getitem = cond[0];  cond = None
     return getitem""",  # noqa: B950
         )
@@ -5937,7 +5928,7 @@ def forward(self, pred_1, x_1):
 def forward(self, arg0_1, arg1_1):
     true_graph_0 = self.true_graph_0
     false_graph_0 = self.false_graph_0
-    cond = torch.ops.higher_order.cond(arg1_1, true_graph_0, false_graph_0, [arg0_1]);  arg1_1 = true_graph_0 = false_graph_0 = arg0_1 = None
+    cond = torch.ops.higher_order.cond(arg1_1, true_graph_0, false_graph_0, arg0_1);  arg1_1 = true_graph_0 = false_graph_0 = arg0_1 = None
     getitem = cond[0];  cond = None
     return [getitem]""",  # noqa: B950
         )
@@ -6026,7 +6017,7 @@ def forward(self, x_1):
     sym_size_int_1 = torch.ops.aten.sym_size.int(x_1, 1)
     true_graph_0 = self.true_graph_0
     false_graph_0 = self.false_graph_0
-    cond = torch.ops.higher_order.cond(eq, true_graph_0, false_graph_0, [x_1, sym_size_int, sym_size_int_1]);  eq = true_graph_0 = false_graph_0 = x_1 = sym_size_int = sym_size_int_1 = None
+    cond = torch.ops.higher_order.cond(eq, true_graph_0, false_graph_0, x_1, sym_size_int, sym_size_int_1);  eq = true_graph_0 = false_graph_0 = x_1 = sym_size_int = sym_size_int_1 = None
     getitem = cond[0];  cond = None
     return getitem""",  # noqa: B950
             )
@@ -6382,7 +6373,7 @@ def forward(self, s0 : torch.SymInt, L_a_ : torch.Tensor, L_b_ : torch.Tensor, L
     tensor = torch.tensor([True])
     cond_true_0 = self.cond_true_0
     cond_false_0 = self.cond_false_0
-    cond = torch.ops.higher_order.cond(tensor, cond_true_0, cond_false_0, [l_a_, l_b_, l_self_num, s0]);  tensor = cond_true_0 = cond_false_0 = l_a_ = l_b_ = l_self_num = s0 = None
+    cond = torch.ops.higher_order.cond(tensor, cond_true_0, cond_false_0, l_a_, l_b_, l_self_num, s0);  tensor = cond_true_0 = cond_false_0 = l_a_ = l_b_ = l_self_num = s0 = None
     getitem = cond[0];  cond = None
     return (getitem,)""",  # noqa: B950
         )
@@ -7245,7 +7236,7 @@ class GraphModule(torch.nn.Module):
         a, b1, b2, c, = fx_pytree.tree_flatten_spec(([a, b1, b2, c], {}), self._in_spec)
         true_graph_0 = self.true_graph_0
         false_graph_0 = self.false_graph_0
-        cond = torch.ops.higher_order.cond(a, true_graph_0, false_graph_0, [c, b1, b2]);  a = true_graph_0 = false_graph_0 = c = b1 = b2 = None
+        cond = torch.ops.higher_order.cond(a, true_graph_0, false_graph_0, c, b1, b2);  a = true_graph_0 = false_graph_0 = c = b1 = b2 = None
         getitem: "f32[10]" = cond[0];  cond = None
 
         mul: "f32[10]" = torch.ops.aten.mul.Tensor(getitem, 2);  getitem = None
@@ -7305,7 +7296,7 @@ class GraphModule(torch.nn.Module):
 
         true_graph_0 = self.true_graph_0
         false_graph_0 = self.false_graph_0
-        cond = torch.ops.higher_order.cond(gt, true_graph_0, false_graph_0, [x, sym_size_int_4, sym_size_int_3, z]);  gt = true_graph_0 = false_graph_0 = x = sym_size_int_4 = sym_size_int_3 = z = None
+        cond = torch.ops.higher_order.cond(gt, true_graph_0, false_graph_0, x, sym_size_int_4, sym_size_int_3, z);  gt = true_graph_0 = false_graph_0 = x = sym_size_int_4 = sym_size_int_3 = z = None
         getitem: "f32[s0, 3]" = cond[0];  cond = None
         return pytree.tree_unflatten((getitem,), self._out_spec)
 

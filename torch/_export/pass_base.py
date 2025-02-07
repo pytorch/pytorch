@@ -200,7 +200,7 @@ class _ExportPassBaseDeprecatedDoNotUse(PassBase):
                     meta,
                 )
             elif target == torch.ops.higher_order.cond:
-                pred, true_fn, false_fn, inputs = args
+                pred, true_fn, false_fn, *inputs = args
                 return self.callback.call_cond(pred, true_fn, false_fn, inputs, meta)
             elif target == torch.ops.higher_order.map_impl:
                 f, mapped_args, operands = args  # type: ignore[assignment]
@@ -355,7 +355,7 @@ class _ExportPassBaseDeprecatedDoNotUse(PassBase):
         return self._fx(
             "call_function",
             torch.ops.higher_order.cond,
-            (pred, true_branch.graph_module, false_branch.graph_module, list(inputs)),
+            (pred, true_branch.graph_module, false_branch.graph_module, *inputs),
             {},
             meta,
         )

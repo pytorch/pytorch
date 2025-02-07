@@ -790,7 +790,7 @@ def _name_hoo_subgraph_placeholders(gm: torch.fx.GraphModule) -> None:
         ):
             # HOO subgraphs have varying input schemas, so we enumerate them there
             if node.target._name == "cond":
-                _, true_graph, false_graph, cond_args = node._args
+                _, true_graph, false_graph, *cond_args = node._args
                 subgraph_ph_tuples.append((getattr(gm, true_graph.target), cond_args))
                 subgraph_ph_tuples.append((getattr(gm, false_graph.target), cond_args))
             elif node.target._name == "wrap_with_set_grad_enabled":

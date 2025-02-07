@@ -58,9 +58,9 @@ class CondOp(HigherOrderOperator):
     def __init__(self):
         super().__init__("cond")
 
-    def __call__(self, pred, true_fn, false_fn, operands):
+    def __call__(self, pred, true_fn, false_fn, *operands):
         validate_subgraph_args_types(operands)
-        return super().__call__(pred, true_fn, false_fn, operands)
+        return super().__call__(pred, true_fn, false_fn, *operands)
 
 
 cond_op = CondOp()
@@ -136,7 +136,7 @@ def cond(
 
     """
     if torch.compiler.is_dynamo_compiling():
-        return cond_op(pred, true_fn, false_fn, operands)
+        return cond_op(pred, true_fn, false_fn, *operands)
 
     from torch._dynamo.backends.debugging import (
         make_eager_backend_with_torch_function_mode,
@@ -194,7 +194,7 @@ def cond(
             else:
                 backend = "eager"
             return torch.compile(_cond_op_wrapper, backend=backend, fullgraph=True)(
-                pred, true_fn, false_fn, operands
+                pred, true_fn, false_fn, *operands
             )
 
 
@@ -239,11 +239,7 @@ def create_fw_bw_graph_branches(true_fn, false_fn, *operands):
         return fw_true_graph, fw_false_graph, joint_true_graph, joint_false_graph
 
 
-def trace_cond(proxy_mode, func_overload, pred, true_fn, false_fn, operands):
-    assert isinstance(
-        operands, (list, tuple)
-    ), f"Cond operands must be a list or tuple of tensors and SymInts {operands}"
-
+def trace_cond(proxy_mode, func_overload, pred, true_fn, false_fn, *operands):
     true_graph = reenter_make_fx(true_fn)(*operands)
     false_graph = reenter_make_fx(false_fn)(*operands)
 
@@ -323,7 +319,7 @@ def trace_cond(proxy_mode, func_overload, pred, true_fn, false_fn, operands):
     proxy_mode.tracer.root.register_module(true_name, true_graph)
     proxy_mode.tracer.root.register_module(false_name, false_graph)
 
-    args = (pred, true_graph, false_graph, operands)
+    args = (pred, true_graph, false_graph, *operands)
 
     proxy_args = pytree.tree_map(proxy_mode.tracer.unwrap_proxy, args)
 
@@ -359,7 +355,7 @@ def trace_cond(proxy_mode, func_overload, pred, true_fn, false_fn, operands):
 
 
 @cond_op.py_impl(DispatchKey.CompositeExplicitAutograd)
-def cond_op_dense(pred, true_fn, false_fn, operands):
+def cond_op_dense(pred, true_fn, false_fn, *operands):
     assert all(
         isinstance(o, (torch.Tensor, int)) for o in operands
     ), f"Dense implementation operands must be a list of tensors and ints {operands}"
@@ -388,7 +384,7 @@ class CondAutogradOp(torch.autograd.Function):
         save_tensors_and_symints_for_backward(ctx, operands)
 
         with torch._C._AutoDispatchBelowAutograd():
-            return cond_op(pred, fw_true_graph, fw_false_graph, operands)
+            return cond_op(pred, fw_true_graph, fw_false_graph, *operands)
 
     @staticmethod
     def backward(ctx, *flat_grads):
@@ -398,13 +394,13 @@ class CondAutogradOp(torch.autograd.Function):
             ctx._pred,
             ctx._joint_true_graph,
             ctx._joint_false_graph,
-            flat_grads + operands,
+            *(flat_grads + operands),
         )
         return None, None, None, None, None, *grads
 
 
 @cond_op.py_impl(DispatchKey.Autograd)
-def cond_autograd(pred, true_fn, false_fn, operands):
+def cond_autograd(pred, true_fn, false_fn, *operands):
     # A shortcut for the case where all inputs don't require gradient,
     # we skip tracing the forward and backward graph.
     if pytree.tree_all_only(
@@ -413,7 +409,7 @@ def cond_autograd(pred, true_fn, false_fn, operands):
         (pred, operands),
     ):
         with torch._C._AutoDispatchBelowAutograd():
-            return cond_op(pred, true_fn, false_fn, operands)
+            return cond_op(pred, true_fn, false_fn, *operands)
 
     (
         fw_true_graph,
@@ -433,12 +429,12 @@ def cond_autograd(pred, true_fn, false_fn, operands):
 
 
 @cond_op.py_impl(ProxyTorchDispatchMode)
-def inner(mode, pred, true_fn, false_fn, operands):
-    return trace_cond(mode, cond_op, pred, true_fn, false_fn, operands)
+def inner(mode, pred, true_fn, false_fn, *operands):
+    return trace_cond(mode, cond_op, pred, true_fn, false_fn, *operands)
 
 
 @cond_op.py_impl(FakeTensorMode)
-def cond_fake_tensor_mode(mode, pred, true_fn, false_fn, operands):
+def cond_fake_tensor_mode(mode, pred, true_fn, false_fn, *operands):
     # Ignore here, because if you've gotten here but you're not manually
     # tracing the inner graphs, that means that you intend to reuse the graph
     # directly.  Which means the old unbacked symbol bindings are appropriate.
@@ -475,8 +471,8 @@ def cond_fake_tensor_mode(mode, pred, true_fn, false_fn, operands):
 
 
 @cond_op.py_functionalize_impl
-def cond_func(ctx, pred, true_fn, false_fn, inputs):
-    unwrapped_inputs = ctx.unwrap_tensors(inputs)
+def cond_func(ctx, pred, true_fn, false_fn, *operands):
+    unwrapped_operands = ctx.unwrap_tensors(operands)
     unwrapped_pred = ctx.unwrap_tensors(pred)
     with ctx.redispatch_to_next():
         functional_true = ctx.functionalize(_maybe_run_with_interpreter(true_fn))
@@ -484,7 +480,7 @@ def cond_func(ctx, pred, true_fn, false_fn, inputs):
         pre_dispatch = hasattr(ctx, "mode") and ctx.mode.pre_dispatch
         for branch in [true_fn, false_fn]:
             if _has_potential_branch_input_mutation(
-                branch, unwrapped_inputs, pre_dispatch=pre_dispatch
+                branch, unwrapped_operands, pre_dispatch=pre_dispatch
             ):
                 raise UnsupportedAliasMutationException(
                     "One of torch.cond branch might be modifying the input! "
@@ -492,7 +488,7 @@ def cond_func(ctx, pred, true_fn, false_fn, inputs):
                 )
         for branch in [true_fn, false_fn]:
             if _has_potential_branch_input_alias(
-                branch, unwrapped_inputs, pre_dispatch=pre_dispatch
+                branch, unwrapped_operands, pre_dispatch=pre_dispatch
             ):
                 raise UnsupportedAliasMutationException(
                     "One of torch.cond branch might be aliasing the input! "
@@ -501,18 +497,15 @@ def cond_func(ctx, pred, true_fn, false_fn, inputs):
                 )
 
         cond_return = cond_op(
-            unwrapped_pred, functional_true, functional_false, unwrapped_inputs
+            unwrapped_pred, functional_true, functional_false, *unwrapped_operands
         )
         return ctx.wrap_tensors(cond_return)
 
 
 @cond_op.py_impl(torch._C._functorch.TransformType.Vmap)
-def cond_batch_rule(interpreter, pred, true_fn, false_fn, inputs):
-    assert isinstance(
-        inputs, (list, tuple)
-    ), "Cond inputs must be a list or tuple of tensors"
+def cond_batch_rule(interpreter, pred, true_fn, false_fn, *operands):
     assert all(
-        isinstance(i, torch.Tensor) for i in inputs
+        isinstance(i, torch.Tensor) for i in operands
     ), "Cond inputs must be a list of tensors"
 
     pred_is_batched = isinstance(pred, torch.Tensor) and is_batchedtensor(pred)
@@ -522,7 +515,7 @@ def cond_batch_rule(interpreter, pred, true_fn, false_fn, inputs):
     tensors, in_dims = zip(
         *[
             (get_unwrapped(t), maybe_get_bdim(t)) if is_batchedtensor(t) else (t, None)
-            for t in inputs
+            for t in operands
         ]
     )
 
@@ -546,7 +539,7 @@ def cond_batch_rule(interpreter, pred, true_fn, false_fn, inputs):
         false_fn = torch.vmap(false_fn, in_dims=in_dims)
 
         with interpreter.lower():
-            result = cond_op(pred, true_fn, false_fn, tensors)
+            result = cond_op(pred, true_fn, false_fn, *tensors)
 
     if not isinstance(result, tuple):
         result = (result,)

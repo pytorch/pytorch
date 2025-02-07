@@ -7250,7 +7250,7 @@ class Conditional(ExternKernel):
     ):
         predicate = cls.realize_input(predicate)
         operands = [cls.realize_input(x) for x in operands]
-        fx_operands = V.graph.current_node.args[-1]
+        fx_operands = V.graph.current_node.args[3:]
         fake_operands = [x.meta["val"] for x in fx_operands]  # type: ignore[union-attr]
 
         for subgraph in (true_fn, false_fn):
