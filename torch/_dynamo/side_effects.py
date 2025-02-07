@@ -21,7 +21,7 @@ from .bytecode_transformation import (
 from .codegen import PyCodegen
 from .exc import unimplemented
 from .source import GlobalSource, LocalCellSource, LocalSource, Source
-from .utils import dict_new, is_frozen_dataclass, nn_module_new, object_new, tuple_new
+from .utils import is_frozen_dataclass, nn_module_new, object_new
 from .variables.base import (
     AttributeMutation,
     AttributeMutationExisting,
@@ -264,18 +264,17 @@ class SideEffects:
                 obj = torch.autograd.Function()
         elif issubclass(user_cls, torch.nn.Module):
             obj = nn_module_new(user_cls)
-        elif issubclass(user_cls, (dict, collections.OrderedDict)):
-            obj = dict_new(user_cls)
-        elif issubclass(user_cls, tuple):
-            obj = tuple_new(user_cls)
         else:
-            try:
+            tmp_var_cls = variable_cls
+            if isinstance(variable_cls, functools.partial):
+                tmp_var_cls = tmp_var_cls.func
+
+            if issubclass(type(tmp_var_cls), type) and issubclass(
+                tmp_var_cls, variables.UserDefinedObjectVariable
+            ):
+                obj = user_cls.__new__(user_cls)
+            else:
                 obj = object_new(user_cls)
-            except TypeError:
-                # TODO(anijain2305/jansel) - Even though object.__new__ is same
-                # as user_cls.__new__, calling object.__new__(user_cls) fails
-                # with TypeError.
-                unimplemented(f"Unable to construct the object of type {user_cls}")
         variable = variable_cls(
             obj,
             mutation_type=AttributeMutationNew(cls_source),
@@ -436,13 +435,6 @@ class SideEffects:
     def _get_modified_vars(self):
         return [var for var in self.id_to_variable.values() if self.is_modified(var)]
 
-    def get_new_function(self, var):
-        if isinstance(var, variables.UserDefinedDictVariable):
-            return "dict_new"
-        elif isinstance(var, variables.UserDefinedTupleVariable):
-            return "tuple_new"
-        return "object_new"
-
     def codegen_save_tempvars(self, cg: PyCodegen):
         # Make sure we codegen these modified VT to their source by default, so
         # that mutation and aliasing are properly accounted for.
@@ -466,11 +458,17 @@ class SideEffects:
             elif isinstance(var.mutation_type, AttributeMutationNew):
                 if isinstance(var, variables.AutogradFunctionContextVariable):
                     unimplemented("AutogradFunctionContextVariable escaped")
-                cg.add_push_null(
-                    lambda: cg.load_import_from(
-                        utils.__name__, self.get_new_function(var)
+                if isinstance(var, variables.UserDefinedObjectVariable):
+
+                    def gen_fn():
+                        cg(var.mutation_type.cls_source)  # type: ignore[attr-defined]
+                        cg.extend_output([cg.create_load_attr("__new__")])
+
+                    cg.add_push_null(gen_fn)
+                else:
+                    cg.add_push_null(
+                        lambda: cg.load_import_from(utils.__name__, "object_new")
                     )
-                )
                 cg(var.mutation_type.cls_source)
                 if isinstance(var, variables.UserDefinedTupleVariable) and var.new_args:
                     cg(var.new_args)

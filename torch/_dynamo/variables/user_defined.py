@@ -36,6 +36,7 @@ from ..source import (
     CallFunctionNoArgsSource,
     GetItemSource,
     RandomValueSource,
+    TypeSource,
     UnspecializedParamBufferSource,
 )
 from ..utils import (
@@ -710,6 +711,8 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         assert type(value) is self.value_type
         # This is used with __new__, when the new object is sourceless but the user class can be sourceful.
         self.cls_source = cls_source
+        if cls_source is None and self.source is not None:
+            self.cls_source = TypeSource(self.source)
 
     def __str__(self) -> str:
         inner = self.value_type.__name__
