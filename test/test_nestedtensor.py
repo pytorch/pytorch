@@ -7995,7 +7995,8 @@ FORWARD_SKIPS_AND_XFAILS = [
                 and sample.input.dim() >= sample.kwargs["condition"].dim()
             )
             or (
-                not sample.kwargs["other"].is_nested
+                isinstance(sample.kwargs["other"], torch.Tensor)
+                and not sample.kwargs["other"].is_nested
                 and sample.kwargs["other"].dim() >= sample.kwargs["condition"].dim()
             )
         ),
@@ -8639,7 +8640,12 @@ class TestNestedTensorOpInfo(NestedTensorTestCase):
     # needed to avoid "data dependent operator: aten._local_scalar_dense.default"
     @torch._dynamo.config.patch(capture_scalar_outputs=True)
     @sample_skips_and_xfails(COMPILE_FORWARD_SKIPS_AND_XFAILS)
-    def test_compile_forward(self, device, dtype, op):
+    @parametrize(
+        "construct_in_graph",
+        [False, True],
+        name_fn=lambda c: "in_graph_constructed" if c else "",
+    )
+    def test_compile_forward(self, device, dtype, op, construct_in_graph):
         for sample, subtest_ctx, skip_xfail_ctx in op.sample_inputs(
             device=device, dtype=dtype, requires_grad=False, use_subtests=True
         ):
@@ -8648,15 +8654,43 @@ class TestNestedTensorOpInfo(NestedTensorTestCase):
 
                 op_fn = op.op
 
-                def f(*args, **kwargs):
-                    return op_fn(*args, **kwargs)
+                if construct_in_graph and isinstance(sample.input, NestedTensor):
+                    # define a function that accepts a deconstructed NJT input
+                    # and immediately reconstructs it in-graph
+                    def f(*args, **kwargs):
+                        inp = args[0]
+                        inp = torch.nested.nested_tensor_from_jagged(
+                            values=inp[0],
+                            offsets=inp[1],
+                            lengths=inp[2],
+                            jagged_dim=inp[3],
+                            min_seqlen=inp[4],
+                            max_seqlen=inp[5],
+                        )
+                        return op_fn(inp, *args[1:], **kwargs)
+                else:
+
+                    def f(*args, **kwargs):
+                        return op_fn(*args, **kwargs)
 
                 compiled_f = torch.compile(
                     f, fullgraph=True, backend="inductor"
                 )
 
-                out_ref = f(sample.input, *sample.args, **sample.kwargs)
-                out_compile = compiled_f(sample.input, *sample.args, **sample.kwargs)
+                inp = (
+                    (
+                        sample.input._values,
+                        sample.input._offsets,
+                        sample.input._lengths,
+                        sample.input._ragged_idx,
+                        sample.input._maybe_min_seqlen,
+                        sample.input._maybe_max_seqlen,
+                    )
+                    if construct_in_graph and isinstance(sample.input, NestedTensor)
+                    else sample.input
+                )
+                out_ref = f(inp, *sample.args, **sample.kwargs)
+                out_compile = compiled_f(inp, *sample.args, **sample.kwargs)
                 if op._extra_op_data.is_view:
                     tree_map_only(
                         NestedTensor, lambda x: self.assertTrue(x._is_view()), out_ref

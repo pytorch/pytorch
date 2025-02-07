@@ -1484,6 +1484,10 @@ def sample_inputs_where(op_info, device, dtype, requires_grad, **kwargs):
         sample.name = sample.name.replace("(", "(NT, ")
         yield sample
 
+        # in addition to scalar tensor, also test with actual scalar
+        if isinstance(other, torch.Tensor) and other.shape == ():
+            yield _update_sample(sample, {"other": other.item()})
+
 
 # === END OP-SPECIFIC SAMPLE INPUTS FUNCS / REFERENCES ===
 
