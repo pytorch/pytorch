@@ -128,6 +128,7 @@ from torch.testing._internal.inductor_utils import (
     skipCPUIf,
     skipCUDAIf,
 )
+from torch.testing._internal.triton_utils import requires_cuda
 
 
 HAS_AVX2 = "fbgemm" in torch.backends.quantized.supported_engines
@@ -3746,6 +3747,26 @@ class CommonTemplate:
         msg = r".*isDifferentiableType\(variable.scalar_type\(\)\) INTERNAL ASSERT FAILED.*"
         with self.assertRaisesRegex(RuntimeError, msg):
             torch.compile(fn)(t)
+
+    @config.patch(
+        {
+            "max_autotune": True,
+            "max_autotune_gemm_backends": "TRITON",
+        }
+    )
+    def test_linear_dynamic_maxautotune(self):
+        @torch.compile(dynamic=True)
+        class Model(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.linear = torch.nn.Linear(1, 1)
+
+            def forward(self, x):
+                return self.linear(x)
+
+        x = torch.randn(10, 1)
+        torch._dynamo.mark_dynamic(x, 0)
+        self.common(Model(), (x,))
 
     def test_scalar_input(self):
         def fn(x, y):
@@ -12413,6 +12434,50 @@ class CommonTemplate:
         act = opt_f(image_latent)
 
         torch.testing.assert_close(ref, act, atol=1e-3, rtol=1e-3)
+
+    @requires_cuda
+    @config.patch(use_fast_math=True)
+    def test_prepare_softmax_with_fast_math(self):
+        """
+        Measure on a A100, perf is 3.487ms v.s. 3.358ms without or with flushing to zero. A 4% speedup.
+        """
+        if DO_PERF_TEST:
+            M = 32768
+            N = 50304
+        else:
+            # Use small shapes if not doing perf test
+            M = 128
+            N = 128
+        x = torch.randn(M, N, dtype=torch.bfloat16, device=GPU_TYPE)
+
+        def f(x):
+            """
+            Not calling softmax directly to generate kernel just for
+            computation of max & sum.
+
+            If we call softmax directly, the computation of the final
+            result will double the membw usage. In that case saving
+            computation does not matter much.
+
+            In reality during training, since max & sum need to be saved
+            for bwd and the computation of softmax result is fused with
+            other kernels, we do see such prepare_softmax kernel appear
+            in real models.
+            """
+            x_max = x.amax(dim=-1, keepdim=True)
+            x_sum = (x - x_max).exp().sum(dim=-1, keepdim=True).log()
+            return x_max, x_sum
+
+        opt_f = torch.compile(f)
+        ref = f(x)
+        act = opt_f(x)
+        self.assertTrue(same(ref, act, tol=1e-2), f"Ref:\n{ref}\nAct:\n{act}")
+
+        if DO_PERF_TEST:
+            from triton.testing import do_bench
+
+            ms = do_bench(lambda: opt_f(x))
+            print(f"{ms=:.3f}")
 
 
 @dataclasses.dataclass

@@ -52,7 +52,6 @@ skip_code_recursive_on_recompile_limit_hit = True
 # raise a hard error if cache limit is hit.  If you are on a model where you
 # know you've sized the cache correctly, this can help detect problems when
 # you regress guards/specialization.  This works best when recompile_limit = 1.
-# This flag is incompatible with: suppress_errors.
 # [@compile_ignored: runtime_behaviour]
 fail_on_recompile_limit_hit = False
 
@@ -165,7 +164,6 @@ traceable_tensor_subclasses: set[type[Any]] = set()
 # This is a good way to get your model to work one way or another, but you may
 # lose optimization opportunities this way.  Devs, if your benchmark model is failing
 # this way, you should figure out why instead of suppressing it.
-# This flag is incompatible with: fail_on_recompile_limit_hit.
 suppress_errors = bool(os.environ.get("TORCHDYNAMO_SUPPRESS_ERRORS", False))
 
 # Record and write an execution record of the current frame to a file
@@ -420,7 +418,10 @@ enable_cpp_symbolic_shape_guards = False
 enable_trace_contextlib = True
 
 # Inline inbuilt nn modules
-inline_inbuilt_nn_modules = not is_fbcode()
+inline_inbuilt_nn_modules = Config(  # type: ignore[var-annotated]
+    default=True,
+    justknob="pytorch/compiler:inline_inbuilt_nn_modules",
+)
 
 # Use C++ FrameLocalsMapping (raw array view of Python frame fastlocals)
 enable_cpp_framelocals_guard_eval = True
