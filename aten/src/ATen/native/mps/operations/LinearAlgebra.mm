@@ -1017,8 +1017,7 @@ static void lu_unpack_mps_impl(const Tensor& LU_data,
   const auto c = LU_data.size(-1);
   const auto k = std::min<int64_t>(r, c);
 
-  int64_t batchSize =
-      std::accumulate(LU_data.sizes().begin(), LU_data.sizes().end() - 2, 1LL, std::multiplies<int64_t>());
+  const auto  batchSize = c10::multiply_integers(LU_data.sizes().begin(), LU_data.sizes().end() - 2);
 
   if (unpack_data) {
     Tensor L_part = r < c ? at::slice(LU_data, -1, 0, k) : LU_data;
