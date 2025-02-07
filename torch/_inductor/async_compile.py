@@ -313,7 +313,7 @@ class AsyncCompile:
                 )
                 return kernel
 
-            future = LambdaFuture(get_result)
+            future = LambdaFuture(get_result, future=task)
             CompiledTritonKernels.save(source_code, future)
             return future
         else:

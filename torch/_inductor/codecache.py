@@ -3223,8 +3223,11 @@ class CodeCacheFuture:
 
 
 class LambdaFuture(CodeCacheFuture):
-    def __init__(self, result_fn: Callable[..., Any]) -> None:
+    def __init__(
+        self, result_fn: Callable[..., Any], future: Optional[Future[Any]] = None
+    ) -> None:
         self.result_fn = result_fn
+        self.future = future
 
     def result(self) -> Callable[..., Any]:  # type: ignore[override]
         return self.result_fn()

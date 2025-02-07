@@ -980,6 +980,17 @@ class TritonCompileResult:
 
     @staticmethod
     def _serialize_metadata(metadata):
+        """
+        Triton uses a nested class called KernelMetadata to store metadata information.
+        Pickle does not work well with nested namedtuples, as the namedtuple doesn't appear
+        in the toplevel namespace of the module. So these serialization/deser functions
+        are used to convert the namedtuples to a dict and back.
+
+        As for packed_metadata, depending on the triton backend, KernelMetadata can be
+        a namedtuple, or a regular tuple! So the serialization function branches on whether
+        the metadata to be serialized is a namedtuple or regular, serializable one.
+        """
+
         def is_namedtuple(obj) -> bool:
             return (
                 isinstance(obj, tuple)
@@ -1006,6 +1017,7 @@ class TritonCompileResult:
         # replace the fields that don't pickle nicely
         kernel_state = {
             **kernel.__dict__,
+            # See doc about serializing metadata above
             "metadata": self._serialize_metadata(kernel.metadata),
             "packed_metadata": self._serialize_metadata(
                 getattr(kernel, "packed_metadata", None)

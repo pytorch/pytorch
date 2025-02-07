@@ -160,6 +160,11 @@ class AutotuneCache:
         self.is_fbcode = is_fbcode
         self.remote_cache = (remote_cache, cache_key)
 
+    # The AutotuneCache may be serialized/deserialized if we're using
+    # AsyncCompile worker processes to run triton compilation.
+    # This is because AutotuneCache instances are created on the worker
+    # process, but we need to run AutotuneCache.save on the parent process
+    # when actually doing autotuning.
     def __getstate__(self) -> dict[str, Any]:
         # The remote cache handles themselves may not be serializable
         # So clear it and reconstruct it on setstate
