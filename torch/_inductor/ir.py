@@ -5145,7 +5145,8 @@ class ExternKernel(InputsKernel):
         allow_padding=False,
     ):
         assert order is not None or exact_strides is not None
-        if x.get_numel() in (0, 1):  # Layout doesn't matter
+        # Layout generally doesn't matter, but some consuming external ops might have requirements
+        if x.get_numel() in (0, 1) and not exact_strides:
             return x
 
         # require x to have the layout
