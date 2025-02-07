@@ -1,9 +1,11 @@
 # mypy: allow-untyped-defs
 from __future__ import annotations
 
+import inspect
 import itertools
 import re
 import warnings
+from io import StringIO
 from typing import Any, Callable, Generic, Literal, NamedTuple, Optional, TypeVar, Union
 from unittest.mock import patch
 
@@ -729,7 +731,7 @@ class OpsHandler(Generic[T]):
     ) -> T:
         raise NotImplementedError
 
-    def output(self, x0: T) -> None:
+    def output(self, *args: T) -> None:
         """This is a fake op used in analysis but not codegen"""
         raise NotImplementedError
 
@@ -755,7 +757,7 @@ class DefaultHandler(OpsHandler[Any]):
         provide generic op behavior.
 
         Args:
-            target: name of the op, see OpHandler.target
+            name: name of the op, see OpHandler.{name}
             args: positional args passed to the op
             kwargs: keyword args passed to the op
 
@@ -783,8 +785,41 @@ class DefaultHandler(OpsHandler[Any]):
 
     @classmethod
     def _init_cls(cls):
+        """
+        Here we codegen many functions of the form:
+
+            def add(self, a, b):
+                return self._default('add', (a, b), {})
+
+        and install them in cls.  This is the same as _call_default above,
+        but is about 1.2x faster since CPython varargs parsing is slow.
+        """
+        code = StringIO()
         for target in OP_NAMES:
-            setattr(cls, target, cls._call_default(target))
+            sig = inspect.signature(getattr(OpsHandler, target))
+            if all(
+                p.kind == inspect.Parameter.POSITIONAL_OR_KEYWORD
+                and p.default is inspect.Parameter.empty
+                for p in sig.parameters.values()
+            ):
+                self_arg, *args = sig.parameters.keys()
+                assert self_arg == "self"
+                code.write(
+                    f"""
+                    def {target}(self, {', '.join(args)}):
+                        return self._default({target!r}, ({', '.join(args)}, ), {{}})
+                    """.strip()
+                )
+                code.write("\n\n")
+            else:
+                # slower fallback for ops with default or variadic arguments
+                setattr(cls, target, cls._call_default(target))
+
+        ctx: dict[str, Any] = {}
+        exec(code.getvalue(), ctx)
+        for target, impl in ctx.items():
+            if target in OP_NAMES:
+                setattr(cls, target, impl)
 
 
 DefaultHandler._init_cls()
