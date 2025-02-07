@@ -892,18 +892,6 @@ cunn_SoftMaxBackwardSmem(scalar_t *gradInput, const outscalar_t *output, const o
   output += static_cast<int64_t>(blockIdx.x) * classes;
   gradOutput += static_cast<int64_t>(blockIdx.x) * classes;
 
-  const int64_t shift = ((uint64_t)gradInput) % ALIGN_BYTES / sizeof(scalar_t);
-  const int64_t output_shift = ((uint64_t)output) % ALIGN_BYTES / sizeof(outscalar_t);
-  const int64_t grad_output_shift = ((uint64_t)gradOutput) % ALIGN_BYTES / sizeof(outscalar_t);
-
-  const bool can_use_32bit_indexing = is_32bit_representable(shift) && is_32bit_representable(output_shift) && is_32bit_representable(grad_output_shift) && is_32bit_representable(classes);
-
-  // This kernel is only safe to run on inputs that fit within shared memory.
-  assert(can_use_32bit_indexing);
-  assert(shift == 0);
-  assert(output_shift == 0);
-  assert(grad_output_shift == 0);
-
   accscalar_t threadSum = 0;
 
   using LoadT = at::native::memory::aligned_vector<outscalar_t, ILP>;
