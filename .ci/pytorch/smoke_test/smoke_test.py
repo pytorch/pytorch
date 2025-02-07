@@ -163,6 +163,13 @@ def test_cuda_runtime_errors_captured() -> None:
 
 
 def test_cuda_gds_errors_captured() -> None:
+    major_version = int(torch.version.cuda.split(".")[0])
+    minor_version = int(torch.version.cuda.split(".")[1])
+
+    if major_version < 12 or (major_version == 12 and minor_version < 6):
+        print("CUDA version is not supported for GDS smoke test")
+        return
+
     cuda_exception_missed = True
     try:
         print("Testing test_cuda_gds_errors_captured")

@@ -120,8 +120,7 @@ if [[ $USE_CUSPARSELT == "1" && $CUDA_VERSION == "11.8" ]]; then
 fi
 
 
-# Turn USE_CUFILE off for CUDA 11.8
-# since nvidia-cufile-cu11 is not available in PYPI
+# Turn USE_CUFILE off for CUDA 11.8 since nvidia-cufile-cu11 is not available in PYPI
 if [[ $USE_CUFILE == "1" && $CUDA_VERSION == "11.8" ]]; then
     export USE_CUFILE=0
 fi
@@ -151,8 +150,6 @@ if [[ $CUDA_VERSION == 12* ]]; then
             "/usr/local/cuda/lib64/libnvToolsExt.so.1"
             "/usr/local/cuda/lib64/libnvrtc.so.12"
             "/usr/local/cuda/lib64/libnvrtc-builtins.so"
-            "/usr/local/cuda/lib64/libcufile.so.0"
-            "/usr/local/cuda/lib64/libcufile_rdma.so.1"
         )
         DEPS_SONAME+=(
             "libcudnn_adv.so.9"
@@ -170,9 +167,20 @@ if [[ $CUDA_VERSION == 12* ]]; then
             "libnvToolsExt.so.1"
             "libnvrtc.so.12"
             "libnvrtc-builtins.so"
-            "libcufile.so.0"
-            "libcufile_rdma.so.1"
         )
+        if [[ $CUDA_VERSION == 12.4]]; then
+            # Turn USE_CUFILE off for CUDA 12.4 since 1.9.0.20 is not available in PYPI
+            export USE_CUFILE=0
+        else
+            DEPS_LIST+=(
+                "/usr/local/cuda/lib64/libcufile.so.0"
+                "/usr/local/cuda/lib64/libcufile_rdma.so.1"
+            )
+            DEPS_SONAME+=(
+                 "libcufile.so.0"
+                "libcufile_rdma.so.1"
+            )
+        fi
     else
         echo "Using nvidia libs from pypi."
         CUDA_RPATHS=(
@@ -182,7 +190,6 @@ if [[ $CUDA_VERSION == 12* ]]; then
             '$ORIGIN/../../nvidia/cuda_runtime/lib'
             '$ORIGIN/../../nvidia/cudnn/lib'
             '$ORIGIN/../../nvidia/cufft/lib'
-            '$ORIGIN/../../nvidia/cufile/lib'
             '$ORIGIN/../../nvidia/curand/lib'
             '$ORIGIN/../../nvidia/cusolver/lib'
             '$ORIGIN/../../nvidia/cusparse/lib'
@@ -190,6 +197,14 @@ if [[ $CUDA_VERSION == 12* ]]; then
             '$ORIGIN/../../nvidia/nccl/lib'
             '$ORIGIN/../../nvidia/nvtx/lib'
         )
+        if [[ $CUDA_VERSION == 12.4]]; then
+            # Turn USE_CUFILE off for CUDA 12.4 since 1.9.0.20 is not available in PYPI
+            export USE_CUFILE=0
+        else
+            CUDA_RPATHS+=(
+                '$ORIGIN/../../nvidia/cufile/lib'
+            )
+        fi
         CUDA_RPATHS=$(IFS=: ; echo "${CUDA_RPATHS[*]}")
         export C_SO_RPATH=$CUDA_RPATHS':$ORIGIN:$ORIGIN/lib'
         export LIB_SO_RPATH=$CUDA_RPATHS':$ORIGIN'
