@@ -4,17 +4,7 @@ from __future__ import annotations
 import itertools
 import re
 import warnings
-from typing import (
-    Any,
-    Callable,
-    Literal,
-    NamedTuple,
-    Optional,
-    TYPE_CHECKING,
-    TypeVar,
-    Union,
-)
-from typing_extensions import Protocol
+from typing import Any, Callable, Generic, Literal, NamedTuple, Optional, TypeVar, Union
 from unittest.mock import patch
 
 import sympy
@@ -48,12 +38,8 @@ def _arg_str(a: object) -> str:
     return str(a)
 
 
-# NB: This is not done as a parent class, because our ops handlers
-# implementations make heavy use of __getattr__ magic, and pre-existing
-# stubs for methods would interfere with this mechanism.
-#
 # See OpDecompositions for superclass that desugars operations like reciprocal/square.
-class OpsHandler(Protocol[T]):
+class OpsHandler(Generic[T]):
     """
     Protocol describing the set of valid operations on ``torch._inductor.virtualized.ops``,
     as well as the contract for op handlers.  The type T signifies the domain
@@ -77,49 +63,30 @@ class OpsHandler(Protocol[T]):
     ops handlers.
 
     Handlers are often defined using metaprogramming (e.g. _initialize_pointwise_overrides),
-    which means you will get type errors if you subclass OpsHandler since mypy doesn't know
-    about the methods added via metaprogramming and thinks the class is still abstract.
-    Instead, you should add a block like:
-
-        if TYPE_CHECKING:
-
-            class _typecheck_TritonKernelOverrides(TritonKernelOverrides, OpsHandler[str]):
-                pass  # mypy will error if we got any of the signatures wrong
-
-    Which will check the signatures of non-meta-programmed methods and gives decent error messages.
-
-    Some older parts of the code use a pattern like:
-
-        def _typecheck_KernelFormatterHandler(h: KernelFormatterHandler) -> OpsHandler[str]:
-            return h
-
-    This pattern only works if the class defines a __getattr__ method, which we are moving away from.
-    Additionally, this pattern generates horrible error messages if the signatures are wrong.
-    It gives zero information about what the problem is, which makes the pattern harmful.
-
-    Instead of that, we have tests in test/inductor/test_op_completeness.py which check that all
-    operators are implemented after all the metaprogramming has run.
+    which means you will not get type errors for those methods.  We have tests in
+    test/inductor/test_op_completeness.py which check that all operators are implemented after
+    all the metaprogramming has run.
     """
 
     def constant(self, value: Union[bool, float, int], dtype: torch.dtype) -> T:
         """Produces a scalar constant of type dtype."""
-        ...
+        raise NotImplementedError
 
     def load_seed(self, name: str, offset: T) -> T:
         """Computes inductor_prims.lookup_seed."""
-        ...
+        raise NotImplementedError
 
     def rand(self, seed: T, offset: T) -> T:
         """Computes inductor_prims.random with mode="rand".  offset has dtype int32."""
-        ...
+        raise NotImplementedError
 
     def randn(self, seed: T, offset: T) -> T:
         """Computes inductor_prims.random with mode="randn".  offset has dtype int32."""
-        ...
+        raise NotImplementedError
 
     def randint64(self, seed: T, offset: T, low: T, high: T) -> T:
         """Computes inductor_prims.randint.  offset has dtype int32."""
-        ...
+        raise NotImplementedError
 
     def masked(self, mask: T, body: Callable[[], T], other: T) -> T:
         """
@@ -133,13 +100,13 @@ class OpsHandler(Protocol[T]):
         Contrast this with ops.where, which can multiplex between two values
         that have been unconditionally computed.
         """
-        ...
+        raise NotImplementedError
 
     def where(self, condition: T, input: T, other: T) -> T:
         """
         Computes torch.where: when condition is true, return input; otherwise return other.
         """
-        ...
+        raise NotImplementedError
 
     def index_expr(self, expr: sympy.Expr, dtype: torch.dtype) -> T:
         """
@@ -147,7 +114,7 @@ class OpsHandler(Protocol[T]):
         an indexing expression, thus the name; however, it can also be used in
         non-indexing situations.
         """
-        ...
+        raise NotImplementedError
 
     def to_dtype(
         self,
@@ -160,7 +127,7 @@ class OpsHandler(Protocol[T]):
         Convert x to dtype.  src_dtype can be optionally set to specify what the original
         dtype of x was, which can improve code generation (used by torch to(dtype=dtype)).
         """
-        ...
+        raise NotImplementedError
 
     def trunc_to_int(self, x: T, dtype: torch.dtype) -> T:
         """
@@ -174,38 +141,38 @@ class OpsHandler(Protocol[T]):
         int64 depending on if we've shown that all the indexing operations can
         be done in int32.
         """
-        ...
+        raise NotImplementedError
 
     def ceil_to_int(self, x: T, dtype: torch.dtype) -> T:
         """
         Convert x to dtype with ceiling semantics.  See also trunc_to_int.
         """
-        ...
+        raise NotImplementedError
 
     def floor_to_int(self, x: T, dtype: torch.dtype) -> T:
         """
         Convert x to dtype with ceiling semantics.  See also trunc_to_int.
         """
-        ...
+        raise NotImplementedError
 
     def round_to_int(self, x: T, dtype: torch.dtype) -> T:
         """
         Convert x to dtype with round-to-even semantics.  See also trunc_to_int.
         """
-        ...
+        raise NotImplementedError
 
     def to_dtype_bitcast(self, x: T, dtype: torch.dtype, src_dtype: torch.dtype) -> T:
         """
         Reinterpret cast x to dtype (reinterpreting the bits in memory as another dtype.)
         src_dtype must be the original type of x.
         """
-        ...
+        raise NotImplementedError
 
     def identity(self, x: T) -> T:
         """
         Returns x as is.  This is used to trigger CSE.
         """
-        ...
+        raise NotImplementedError
 
     # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     # These operations are only available in a "kernel" context.  Check
@@ -227,13 +194,13 @@ class OpsHandler(Protocol[T]):
         NB: This is typically mandatory to implement for any analysis, because you
         MUST return a valid sympy.Expr of some sort (even if it's a meaningless symbol).
         """
-        ...
+        raise NotImplementedError
 
     def load(self, name: str, index: sympy.Expr) -> T:
         """
         Load from the memory location 'name', offset by some indexing expression 'index'.
         """
-        ...
+        raise NotImplementedError
 
     def store(
         self,
@@ -246,7 +213,7 @@ class OpsHandler(Protocol[T]):
         Store 'value' to the memory location 'name' offset by 'expr'.  If
         specified, 'mode' can require the store to be an atomic addition.
         """
-        ...
+        raise NotImplementedError
 
     # TODO: Better explain how the "collective" semantics of these ops;
     # remember that the input value is a scalar, you can't reduce on it in the
@@ -268,7 +235,7 @@ class OpsHandler(Protocol[T]):
         function returns multiple outputs; consult reduction_num_outputs to
         determine the amount in metaprogramming applications.
         """
-        ...
+        raise NotImplementedError
 
     # TODO: in practice, this seems to actually return None, but not returning
     # a T makes common __getattr__ idioms not type correctly.  Figure out if
@@ -278,7 +245,7 @@ class OpsHandler(Protocol[T]):
         Store the fully accumulated result of 'reduction' to the memory
         location 'name' offset by 'expr'.
         """
-        ...
+        raise NotImplementedError
 
     def scan(
         self,
@@ -290,7 +257,7 @@ class OpsHandler(Protocol[T]):
         Perform an associative scan on 'value'.
         """
         # TODO: Improve the description with some pseudocode
-        ...
+        raise NotImplementedError
 
     def sort(
         self,
@@ -302,7 +269,7 @@ class OpsHandler(Protocol[T]):
         """
         Sort values along the reduction dimension.
         """
-        ...
+        raise NotImplementedError
 
     def bucketize(
         self,
@@ -315,231 +282,231 @@ class OpsHandler(Protocol[T]):
         sorter_indices: Optional[T] = None,
     ) -> T:
         # See [Note: Inductor bucketize op]
-        ...
+        raise NotImplementedError
 
     # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     # The following ops have semantics that correspond exactly to the torch
     # operation with the same corresponding name.
 
     def abs(self, x0: T) -> T:
-        ...
+        raise NotImplementedError
 
     def exp(self, x0: T) -> T:
-        ...
+        raise NotImplementedError
 
     def exp2(self, x0: T) -> T:
-        ...
+        raise NotImplementedError
 
     def expm1(self, x0: T) -> T:
-        ...
+        raise NotImplementedError
 
     def sqrt(self, x0: T) -> T:
-        ...
+        raise NotImplementedError
 
     def relu(self, x0: T) -> T:
-        ...
+        raise NotImplementedError
 
     def minimum(self, x0: T, x1: T) -> T:
-        ...
+        raise NotImplementedError
 
     def maximum(self, x0: T, x1: T) -> T:
-        ...
+        raise NotImplementedError
 
     def cos(self, x0: T) -> T:
-        ...
+        raise NotImplementedError
 
     def sin(self, x0: T) -> T:
-        ...
+        raise NotImplementedError
 
     def lgamma(self, x0: T) -> T:
-        ...
+        raise NotImplementedError
 
     def erf(self, x0: T) -> T:
-        ...
+        raise NotImplementedError
 
     def cosh(self, x0: T) -> T:
-        ...
+        raise NotImplementedError
 
     def sinh(self, x0: T) -> T:
-        ...
+        raise NotImplementedError
 
     def acos(self, x0: T) -> T:
-        ...
+        raise NotImplementedError
 
     def acosh(self, x0: T) -> T:
-        ...
+        raise NotImplementedError
 
     def asin(self, x0: T) -> T:
-        ...
+        raise NotImplementedError
 
     def asinh(self, x0: T) -> T:
-        ...
+        raise NotImplementedError
 
     def atan2(self, x0: T, x1: T) -> T:
-        ...
+        raise NotImplementedError
 
     def atan(self, x0: T) -> T:
-        ...
+        raise NotImplementedError
 
     def atanh(self, x0: T) -> T:
-        ...
+        raise NotImplementedError
 
     def copysign(self, x0: T, x1: T) -> T:
-        ...
+        raise NotImplementedError
 
     def erfc(self, x0: T) -> T:
-        ...
+        raise NotImplementedError
 
     def erfinv(self, x0: T) -> T:
-        ...
+        raise NotImplementedError
 
     def frexp(self, x0: T):
-        ...
+        raise NotImplementedError
 
     def hypot(self, x0: T, x1: T) -> T:
-        ...
+        raise NotImplementedError
 
     def log10(self, x0: T) -> T:
-        ...
+        raise NotImplementedError
 
     def log2(self, x0: T) -> T:
-        ...
+        raise NotImplementedError
 
     def nextafter(self, x0: T, x1: T) -> T:
-        ...
+        raise NotImplementedError
 
     def logical_and(self, x0: T, x1: T) -> T:
-        ...
+        raise NotImplementedError
 
     def logical_not(self, x0: T) -> T:
-        ...
+        raise NotImplementedError
 
     def logical_or(self, x0: T, x1: T) -> T:
-        ...
+        raise NotImplementedError
 
     def logical_xor(self, x0: T, x1: T) -> T:
-        ...
+        raise NotImplementedError
 
     def bitwise_and(self, x0: T, x1: T) -> T:
-        ...
+        raise NotImplementedError
 
     def bitwise_not(self, x0: T) -> T:
-        ...
+        raise NotImplementedError
 
     def bitwise_or(self, x0: T, x1: T) -> T:
-        ...
+        raise NotImplementedError
 
     def bitwise_xor(self, x0: T, x1: T) -> T:
-        ...
+        raise NotImplementedError
 
     def bitwise_left_shift(self, x0: T, x1: T) -> T:
-        ...
+        raise NotImplementedError
 
     def bitwise_right_shift(self, x0: T, x1: T) -> T:
-        ...
+        raise NotImplementedError
 
     def rsqrt(self, x0: T) -> T:
-        ...
+        raise NotImplementedError
 
     def log1p(self, x0: T) -> T:
-        ...
+        raise NotImplementedError
 
     def tan(self, x0: T) -> T:
-        ...
+        raise NotImplementedError
 
     def tanh(self, x0: T) -> T:
-        ...
+        raise NotImplementedError
 
     def sigmoid(self, x0: T) -> T:
-        ...
+        raise NotImplementedError
 
     def signbit(self, x0: T) -> T:
-        ...
+        raise NotImplementedError
 
     def fmod(self, x0: T, x1: T) -> T:
-        ...
+        raise NotImplementedError
 
     def log(self, x0: T) -> T:
-        ...
+        raise NotImplementedError
 
     def isinf(self, x0: T) -> T:
-        ...
+        raise NotImplementedError
 
     def isnan(self, x0: T) -> T:
-        ...
+        raise NotImplementedError
 
     # NB: this returns a float, like the torch operation
     # This rounds half to even to break ties
     def round(self, x0: T) -> T:
-        ...
+        raise NotImplementedError
 
     # NB: this returns a float, like the torch operation
     def floor(self, x0: T) -> T:
-        ...
+        raise NotImplementedError
 
     def sign(self, x0: T) -> T:
-        ...
+        raise NotImplementedError
 
     # NB: this returns a float, like the torch operation
     def trunc(self, x0: T) -> T:
-        ...
+        raise NotImplementedError
 
     # NB: this returns a float, like the torch operation
     def ceil(self, x0: T) -> T:
-        ...
+        raise NotImplementedError
 
     def neg(self, x0: T) -> T:
-        ...
+        raise NotImplementedError
 
     def reciprocal(self, x0: T) -> T:
-        ...
+        raise NotImplementedError
 
     def eq(self, x0: T, x1: T) -> T:
-        ...
+        raise NotImplementedError
 
     def ne(self, x0: T, x1: T) -> T:
-        ...
+        raise NotImplementedError
 
     def lt(self, x0: T, x1: T) -> T:
-        ...
+        raise NotImplementedError
 
     def gt(self, x0: T, x1: T) -> T:
-        ...
+        raise NotImplementedError
 
     def le(self, x0: T, x1: T) -> T:
-        ...
+        raise NotImplementedError
 
     def ge(self, x0: T, x1: T) -> T:
-        ...
+        raise NotImplementedError
 
     def add(self, x0: T, x1: T) -> T:
-        ...
+        raise NotImplementedError
 
     def sub(self, x0: T, x1: T) -> T:
-        ...
+        raise NotImplementedError
 
     def mul(self, x0: T, x1: T) -> T:
-        ...
+        raise NotImplementedError
 
     # NB: this returns a float, like the torch operation
     def pow(self, x0: T, x1: T) -> T:
-        ...
+        raise NotImplementedError
 
     def and_(self, x0: T, x1: T) -> T:
-        ...
+        raise NotImplementedError
 
     def or_(self, x0: T, x1: T) -> T:
-        ...
+        raise NotImplementedError
 
     def xor(self, x0: T, x1: T) -> T:
-        ...
+        raise NotImplementedError
 
     # These are metaprogrammed by MockHandler._init_cls
     def lshift(self, x0: T, x1: T) -> T:
-        ...
+        raise NotImplementedError
 
     def rshift(self, x0: T, x1: T) -> T:
-        ...
+        raise NotImplementedError
 
     # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     # These are "special" operators.  These only exist if the target
@@ -547,124 +514,124 @@ class OpsHandler(Protocol[T]):
     # pointwise_overrides_data.
 
     def airy_ai(self, x: T) -> T:
-        ...
+        raise NotImplementedError
 
     def bessel_j0(self, x: T) -> T:
-        ...
+        raise NotImplementedError
 
     def bessel_j1(self, x: T) -> T:
-        ...
+        raise NotImplementedError
 
     def bessel_y0(self, x: T) -> T:
-        ...
+        raise NotImplementedError
 
     def bessel_y1(self, x: T) -> T:
-        ...
+        raise NotImplementedError
 
     def digamma(self, x: T) -> T:
-        ...
+        raise NotImplementedError
 
     def erfcx(self, x: T) -> T:
-        ...
+        raise NotImplementedError
 
     def fma(self, x: T, y: T, z: T) -> T:
-        ...
+        raise NotImplementedError
 
     def igamma(self, x: T, y: T) -> T:
-        ...
+        raise NotImplementedError
 
     def igammac(self, x: T, y: T) -> T:
-        ...
+        raise NotImplementedError
 
     def gammainc(self, x: T, y: T) -> T:
-        ...
+        raise NotImplementedError
 
     def gammaincc(self, x: T, y: T) -> T:
-        ...
+        raise NotImplementedError
 
     def i0(self, x: T) -> T:
-        ...
+        raise NotImplementedError
 
     def i0e(self, x: T) -> T:
-        ...
+        raise NotImplementedError
 
     def i1(self, x: T) -> T:
-        ...
+        raise NotImplementedError
 
     def i1e(self, x: T) -> T:
-        ...
+        raise NotImplementedError
 
     def log_ndtr(self, x: T) -> T:
-        ...
+        raise NotImplementedError
 
     def modified_bessel_i0(self, x: T) -> T:
-        ...
+        raise NotImplementedError
 
     def modified_bessel_i1(self, x: T) -> T:
-        ...
+        raise NotImplementedError
 
     def modified_bessel_k0(self, x: T) -> T:
-        ...
+        raise NotImplementedError
 
     def modified_bessel_k1(self, x: T) -> T:
-        ...
+        raise NotImplementedError
 
     def ndtr(self, x: T) -> T:
-        ...
+        raise NotImplementedError
 
     def ndtri(self, x: T) -> T:
-        ...
+        raise NotImplementedError
 
     def polygamma(self, x: T, y: T) -> T:
-        ...
+        raise NotImplementedError
 
     def scaled_modified_bessel_k0(self, x: T) -> T:
-        ...
+        raise NotImplementedError
 
     def scaled_modified_bessel_k1(self, x: T) -> T:
-        ...
+        raise NotImplementedError
 
     def spherical_bessel_j0(self, x: T) -> T:
-        ...
+        raise NotImplementedError
 
     def zeta(self, x: T, y: T) -> T:
-        ...
+        raise NotImplementedError
 
     def chebyshev_polynomial_t(self, x: T, y: T) -> T:
-        ...
+        raise NotImplementedError
 
     def chebyshev_polynomial_u(self, x: T, y: T) -> T:
-        ...
+        raise NotImplementedError
 
     def chebyshev_polynomial_v(self, x: T, y: T) -> T:
-        ...
+        raise NotImplementedError
 
     def chebyshev_polynomial_w(self, x: T, y: T) -> T:
-        ...
+        raise NotImplementedError
 
     def legendre_polynomial_p(self, x: T, y: T) -> T:
-        ...
+        raise NotImplementedError
 
     def shifted_chebyshev_polynomial_t(self, x: T, y: T) -> T:
-        ...
+        raise NotImplementedError
 
     def shifted_chebyshev_polynomial_u(self, x: T, y: T) -> T:
-        ...
+        raise NotImplementedError
 
     def shifted_chebyshev_polynomial_v(self, x: T, y: T) -> T:
-        ...
+        raise NotImplementedError
 
     def shifted_chebyshev_polynomial_w(self, x: T, y: T) -> T:
-        ...
+        raise NotImplementedError
 
     def hermite_polynomial_h(self, x: T, y: T) -> T:
-        ...
+        raise NotImplementedError
 
     def hermite_polynomial_he(self, x: T, y: T) -> T:
-        ...
+        raise NotImplementedError
 
     def laguerre_polynomial_l(self, x: T, y: T) -> T:
-        ...
+        raise NotImplementedError
 
     # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     # These operators are a bit special, because they are conventionally
@@ -675,42 +642,42 @@ class OpsHandler(Protocol[T]):
         """C-style trunc division between integers only.  Computes the true
         division of two numbers and rounds the result to zero.
         """
-        ...
+        raise NotImplementedError
 
     def floordiv(self, x0: T, x1: T) -> T:
         """Python-style floor division between integers only.  Computes the
         true division of two numbers and floors the result.  If you want
         floor division for floats, do regular truediv and floor the result.
         """
-        ...
+        raise NotImplementedError
 
     def truediv(self, x0: T, x1: T) -> T:
         """True division between floats.  Integer inputs are NOT valid.  To
         do Python-style (int, int) -> float division, use int_truediv"""
-        ...
+        raise NotImplementedError
 
     def int_truediv(self, x0: T, x1: T) -> T:
         """True division between integers.  This is NOT the same as promoting
         to float and doing integer division, there is a bespoke algorithm for
         doing the division in higher precision than the above.
         """
-        ...
+        raise NotImplementedError
 
     def mod(self, x0: T, x1: T) -> T:
         """C-style modulus, take sign from LHS (x0)."""
-        ...
+        raise NotImplementedError
 
     def remainder(self, x0: T, x1: T) -> T:
         """Python-style modulus, take sign from RHS (x1)."""
-        ...
+        raise NotImplementedError
 
     def square(self, x0: T) -> T:
-        ...
+        raise NotImplementedError
 
     def check_bounds(
         self, expr: sympy.Expr, size: sympy.Expr, lower: bool, upper: bool
     ) -> None:
-        ...
+        raise NotImplementedError
 
     # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     # In CUDA, optimized implementations of other mathematical operations are
@@ -726,25 +693,25 @@ class OpsHandler(Protocol[T]):
     # for many analyses it's not conveniently available.)
 
     def libdevice_abs(self, x0: T) -> T:
-        ...
+        raise NotImplementedError
 
     def libdevice_exp(self, x0: T) -> T:
-        ...
+        raise NotImplementedError
 
     def libdevice_sqrt(self, x0: T) -> T:
-        ...
+        raise NotImplementedError
 
     def libdevice_cos(self, x0: T) -> T:
-        ...
+        raise NotImplementedError
 
     def libdevice_sin(self, x0: T) -> T:
-        ...
+        raise NotImplementedError
 
     def libdevice_sigmoid(self, x0: T) -> T:
-        ...
+        raise NotImplementedError
 
     def libdevice_log(self, x0: T) -> T:
-        ...
+        raise NotImplementedError
 
     # halide-only
     def halide_clamp(self, value: T, size: sympy.Expr, check: bool) -> T:
@@ -760,15 +727,15 @@ class OpsHandler(Protocol[T]):
         is_pure: bool = True,
         pack: int = 1,
     ) -> T:
-        ...
+        raise NotImplementedError
 
     def output(self, x0: T) -> None:
         """This is a fake op used in analysis but not codegen"""
-        ...
+        raise NotImplementedError
 
     def placeholder(self, index: int) -> T:
         """This is a fake op used in analysis but not codegen"""
-        ...
+        raise NotImplementedError
 
 
 _ignore_op_re = re.compile(r"_.*|paren").fullmatch
@@ -781,7 +748,7 @@ def list_ops(cls: type[Any]):
 OP_NAMES = list_ops(OpsHandler)
 
 
-class DefaultHandler:
+class DefaultHandler(OpsHandler[Any]):
     def _default(self, name: str, args: tuple[Any, ...], kwargs: dict[str, Any]) -> Any:
         """
         Default implementation for all ops.  Override in a subclass to
@@ -850,13 +817,7 @@ class NoopHandler(DefaultHandler):
         return sympy.S.Zero
 
 
-if TYPE_CHECKING:
-
-    class _typecheck_NoopHandler(NoopHandler, OpsHandler[None]):
-        pass  # mypy will error if we got any of the signatures wrong
-
-
-class BasicMathOps:
+class BasicMathOpsMixin:
     @staticmethod
     def add(a, b):
         return f"{a} + {b}"
@@ -935,7 +896,7 @@ class BasicMathOps:
         return f"-{a}"
 
 
-class MockHandler(BasicMathOps, DefaultHandler):
+class MockHandler(BasicMathOpsMixin, DefaultHandler):
     name = "MockHandler"
 
     def _default(self, name: str, args: tuple[Any, ...], kwargs: dict[str, Any]) -> Any:
@@ -971,14 +932,8 @@ class MockHandler(BasicMathOps, DefaultHandler):
         return sympy_index_symbol(str(index_var))
 
 
-if TYPE_CHECKING:
-
-    class _typecheck_MockHandler(MockHandler, OpsHandler[str]):
-        pass  # mypy will error if we got any of the signatures wrong
-
-
 class KernelFormatterHandler(DefaultHandler):
-    def __init__(self, parent_handler):
+    def __init__(self, parent_handler: OpsHandler[Any]):
         self.parent_handler = parent_handler
         self._output = IndentedBuffer(1)
         self.var_counter = itertools.count()
@@ -1042,14 +997,8 @@ class KernelFormatterHandler(DefaultHandler):
         return self._output.getvalue()
 
 
-if TYPE_CHECKING:
-
-    class _typecheck_KernelFormatterHandler(KernelFormatterHandler, OpsHandler[str]):
-        pass  # mypy will error if we got any of the signatures wrong
-
-
 class WrapperHandler(DefaultHandler):
-    def __init__(self, inner: Any):
+    def __init__(self, inner: OpsHandler[Any]):
         self._inner = inner
 
     def _default(self, name: str, args: tuple[Any, ...], kwargs: dict[str, Any]) -> Any:
@@ -1074,11 +1023,11 @@ class OpCountResult(NamedTuple):
 class OpCounterCSE(DefaultHandler):
     """Shim to count how many ops are used"""
 
-    def __init__(self, inner):
+    def __init__(self, inner: OpsHandler[Any]):
         super().__init__()
         self.parent_handler = inner
         self.op_count = 0
-        self.var_names = {}
+        self.var_names: dict[str, str] = {}
         self._used_ops: OrderedSet[str] = OrderedSet()
         self._read_names: list[str] = []
         self._nontrivial_read_count = 0
@@ -1152,26 +1101,16 @@ class OpCounterCSE(DefaultHandler):
         )
 
 
-if TYPE_CHECKING:
-
-    class _typecheck_OpCounterCSE(OpCounterCSE, OpsHandler[str]):
-        pass  # mypy will error if we got any of the signatures wrong
-
-
 class ExtractConstantsHandler(NoopHandler):
-    def __init__(self, device):
+    def __init__(self, device: Optional[torch.device]):
         self.device = device
 
     def constant(self, value: Any, dtype: torch.dtype) -> torch._inductor.ir.Constant:
         from torch._inductor import ir
 
-        return ir.Constant(value=value, dtype=dtype, device=self.device)
-
-
-if TYPE_CHECKING:
-
-    class _typecheck_ExtractConstantsHandler(ExtractConstantsHandler, OpsHandler[Any]):
-        pass  # mypy will error if we got any of the signatures wrong
+        return ir.Constant(
+            value=value, dtype=dtype, device=self.device or torch.get_default_device()
+        )
 
 
 class SimpleCSEHandler(WrapperHandler):
@@ -1204,9 +1143,3 @@ class SimpleCSEHandler(WrapperHandler):
         val = getattr(self._inner, name)(*args, **kwargs)
         self.cse_cache[key] = val
         return val
-
-
-if TYPE_CHECKING:
-
-    class _typecheck_SimpleCSEHandler(SimpleCSEHandler, OpsHandler[Any]):
-        pass  # mypy will error if we got any of the signatures wrong

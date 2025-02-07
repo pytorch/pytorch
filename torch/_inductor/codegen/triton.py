@@ -61,7 +61,7 @@ from ..utils import (
     triton_version_uses_attrs_dict,
     upcast_compute_type,
 )
-from ..virtualized import _ops as ops, OpsHandler, ReductionType, StoreMode, V
+from ..virtualized import _ops as ops, ReductionType, StoreMode, V
 from ..wrapper_benchmark import get_kernel_category_by_source_code
 from .block_analysis import BlockPatternMatcher
 from .common import (
@@ -1426,12 +1426,6 @@ class TritonKernelOverrides(TritonOverrides):
         )
         V.kernel.cse.put(cache_key, (mantissa, exponent))
         return (mantissa, exponent)
-
-
-if TYPE_CHECKING:
-
-    class _typecheck_TritonKernelOverrides(TritonKernelOverrides, OpsHandler[str]):
-        pass  # mypy will error if we got any of the signatures wrong
 
 
 class HelperFunctions:
