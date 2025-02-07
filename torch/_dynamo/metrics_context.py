@@ -139,9 +139,7 @@ class RuntimeMetricsContext:
         self._metrics: dict[str, Any] = {}
         self._start_time_ns: int = 0
 
-    def increment(
-        self, metric: str, value: int, extra: Optional[dict[str, Any]]
-    ) -> None:
+    def increment(self, metric: str, value: int) -> None:
         """
         Increment a metric by a given amount.
         """
@@ -152,16 +150,13 @@ class RuntimeMetricsContext:
             self._metrics[metric] = 0
         self._metrics[metric] += value
 
-        if extra:
-            for k, v in extra.items():
-                if k not in self._metrics and v is not None:
-                    self._metrics[k] = v
-
-    def finish(self) -> None:
+    def finish(self, extra: Optional[dict[str, Any]] = None) -> None:
         """
         Call the on_exit function with the metrics gathered so far and reset.
         """
         if self._metrics:
             end_time_ns = time.time_ns()
+            if extra:
+                self._metrics.update(extra)
             self._on_exit(self._start_time_ns, end_time_ns, self._metrics, None, None)
             self._metrics = {}

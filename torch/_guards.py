@@ -763,6 +763,32 @@ class CompileContext:
         return TraceId(self.compile_id, self.attempt)
 
 
+class RuntimeCompileContext:
+    """
+    For tracking compile-time information that we want available at runtime,
+    e.g., to allow us to query and log at runtime the CompileId active when
+    a module was compiled. A RuntimeCompileContext and a CompileContext
+    should never be active at the same time.
+    """
+
+    @staticmethod
+    def try_get() -> Optional[RuntimeCompileContext]:
+        return getattr(_TLS, "runtime_compile_context", None)
+
+    def __init__(self, trace_id: Optional[TraceId] = None):
+        self.trace_id = trace_id or CompileContext.current_trace_id()
+
+    @staticmethod
+    def current_compile_id() -> Optional[CompileId]:
+        trace_id = RuntimeCompileContext.current_trace_id()
+        return None if trace_id is None else trace_id.compile_id
+
+    @staticmethod
+    def current_trace_id() -> Optional[TraceId]:
+        ctx = RuntimeCompileContext.try_get()
+        return None if ctx is None else ctx.trace_id
+
+
 class TracingContext:
     """
     Provides the currently installed TracingContext, or None.
@@ -937,12 +963,26 @@ class TracingContext:
 
 @contextmanager
 def compile_context(context: Optional[CompileContext]):
+    assert RuntimeCompileContext.try_get() is None
+
     old_context = getattr(_TLS, "compile_context", None)
     _TLS.compile_context = context
     try:
         yield context
     finally:
         _TLS.compile_context = old_context
+
+
+@contextmanager
+def runtime_compile_context(context: Optional[RuntimeCompileContext]):
+    assert CompileContext.try_get() is None
+
+    old_context = getattr(_TLS, "runtime_compile_context", None)
+    _TLS.runtime_compile_context = context
+    try:
+        yield context
+    finally:
+        _TLS.runtime_compile_context = old_context
 
 
 @contextmanager
