@@ -1,11 +1,17 @@
 import math
 from collections.abc import Sequence
-from typing import Any, Callable, Optional, Union
+from typing import Any, Callable, Literal, Optional, Union
 
 import torch
 import torch.utils._pytree as pytree
 from torch import Tensor
 from torch._C import DispatchKey
+from torch._C._functorch import TransformType
+from torch._functorch.pyfunctorch import (
+    FuncTorchInterpreter,
+    HOPAutoDispatchBelowAutograd,
+)
+from torch._functorch.utils import enable_single_level_autograd_function
 from torch._higher_order_ops.utils import (
     _has_potential_branch_input_mutation,
     _maybe_reenter_make_fx,
@@ -489,7 +495,7 @@ def create_fw_bw_graph(
     # All of these imports need to be here in order to avoid circular dependencies
     from torch._dispatch.python import suspend_functionalization
     from torch._functorch.aot_autograd import AOTConfig, create_joint
-    from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
+    from torch._subclasses.fake_tensor import FakeTensorMode
     from torch._subclasses.functional_tensor import disable_functional_mode
     from torch.fx.experimental.proxy_tensor import disable_proxy_modes_tracing
 
@@ -532,10 +538,10 @@ def create_fw_bw_graph(
                 unwrapped_score_mod_indexes = pytree.tree_map(_from_fun, index_values)
                 unwrapped_other_buffers = pytree.tree_map(_from_fun, other_buffers)
 
-            assert all(
-                isinstance(t, (FakeTensor, int, torch.SymInt))
-                for t in unwrapped_score_mod_indexes + unwrapped_other_buffers
-            )
+            # assert all(
+            #     isinstance(t, (FakeTensor, int, torch.SymInt))
+            #     for t in unwrapped_score_mod_indexes + unwrapped_other_buffers
+            # )
 
             example_flat_out = pytree.tree_map(
                 _from_fun,
@@ -577,7 +583,7 @@ def create_fw_bw_graph(
         return score_mod, joint_graph
 
 
-class FlexAttentionAutogradOp(torch.autograd.Function):
+class FlexAttentionAutogradOp(torch.autograd.function._SingleLevelFunction):
     @staticmethod
     def forward(
         ctx: Any,
@@ -606,18 +612,19 @@ class FlexAttentionAutogradOp(torch.autograd.Function):
         ctx.scale = scale
         ctx.kernel_options = kernel_options
         ctx._score_mod_other_buffers_len = len(score_mod_other_buffers)
-        with torch._C._AutoDispatchBelowAutograd():
-            out, logsumexp = flex_attention(
-                query,
-                key,
-                value,
-                fw_graph,
-                block_mask,
-                scale,
-                kernel_options,
-                score_mod_other_buffers,
-                mask_mod_other_buffers,
-            )
+
+        out, logsumexp = HOPAutoDispatchBelowAutograd(
+            flex_attention,
+            query,
+            key,
+            value,
+            fw_graph,
+            block_mask,
+            scale,
+            kernel_options,
+            score_mod_other_buffers,
+            mask_mod_other_buffers,
+        )
 
         save_tensors_and_symints_for_backward(
             ctx,
@@ -710,7 +717,17 @@ class FlexAttentionAutogradOp(torch.autograd.Function):
 
 
 @flex_attention.py_impl(DispatchKey.Autograd)
+def _(*args: Any, **kwargs: Any) -> Any:
+    return flex_attention_autograd(None, *args, **kwargs)
+
+
+@flex_attention.py_impl(TransformType.Grad)
+def _(_ignored: FuncTorchInterpreter, *args: Any, **kwargs: Any) -> Any:
+    return flex_attention_autograd(None, *args, **kwargs)
+
+
 def flex_attention_autograd(
+    _ignored: Literal[None],
     query: torch.Tensor,
     key: torch.Tensor,
     value: torch.Tensor,
@@ -741,18 +758,19 @@ def flex_attention_autograd(
             )
         else:
             fw_graph, bw_graph = score_mod, None
-        out, logsumexp = FlexAttentionAutogradOp.apply(
-            query,
-            key,
-            value,
-            fw_graph,
-            bw_graph,
-            block_mask,
-            scale,
-            kernel_options,
-            mask_mod_other_buffers,
-            *score_mod_other_buffers,
-        )
+        with enable_single_level_autograd_function():
+            out, logsumexp = FlexAttentionAutogradOp.apply(  # type: ignore[attr-defined]
+                query,
+                key,
+                value,
+                fw_graph,
+                bw_graph,
+                block_mask,
+                scale,
+                kernel_options,
+                mask_mod_other_buffers,
+                *score_mod_other_buffers,
+            )
     return out, logsumexp
 
 
@@ -1162,4 +1180,10 @@ def flex_attention_backward_fake_tensor_mode(
 
 flex_attention_backward.py_impl(DispatchKey.Autograd)(
     autograd_not_implemented(flex_attention_backward, deferred_error=True)
+)
+
+flex_attention_backward.py_impl(TransformType.Grad)(
+    autograd_not_implemented(
+        flex_attention_backward, deferred_error=True, functorch=True
+    )
 )

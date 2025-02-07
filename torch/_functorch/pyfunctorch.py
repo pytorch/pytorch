@@ -6,6 +6,8 @@ from typing import Any
 import torch
 import torch.utils._pytree as pytree
 from torch._C._functorch import (
+    _unwrap_for_grad,
+    _wrap_for_grad,
     CFunctionalizeInterpreterPtr,
     CGradInterpreterPtr,
     CInterpreter,
@@ -250,6 +252,28 @@ def coerce_cinterpreter(cinterpreter: CInterpreter) -> FuncTorchInterpreter:
     if key == TransformType.Functionalize:
         return FunctionalizeInterpreter(cinterpreter)
     raise RuntimeError(f"NYI: PyDispatcher has not implemented support for {key}")
+
+
+def HOPAutoDispatchBelowAutograd(func, *args, **kwargs):
+    """Wrapper around torch._C._AutoDispatchBelowAutograd that works with functorch.grad
+    Please use this when you're implementing an autograd py_impl for a HOP.
+    """
+    interpreter = torch._C._functorch.peek_interpreter_stack()
+    if interpreter is None:
+        with torch._C._AutoDispatchBelowAutograd():
+            return func(*args, **kwargs)
+    interpreter = retrieve_current_functorch_interpreter()
+    assert isinstance(interpreter, GradInterpreter)
+    level = interpreter.level()
+    args, kwargs = pytree.tree_map_only(
+        torch.Tensor, lambda x: _unwrap_for_grad(x, level), (args, kwargs)
+    )
+    with interpreter.lower():
+        result = func(*args, **kwargs)
+    result = pytree.tree_map_only(
+        torch.Tensor, lambda x: _wrap_for_grad(x, level), result
+    )
+    return result
 
 
 def retrieve_current_functorch_interpreter() -> FuncTorchInterpreter:

@@ -2282,6 +2282,26 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
             )
         )
 
+    @common_utils.parametrize(
+        "score_mod", [_identity, _causal, _times_two, _squared, _trig, _trig2]
+    )
+    def test_functorch_grad(self, score_mod):
+        make_tensor = functools.partial(
+            torch.randn,
+            (2, 2, 11, 4),
+            device="cpu",
+            dtype=torch.float64,
+            requires_grad=True,
+        )
+        query, key, value = make_tensor(), make_tensor(), make_tensor()
+
+        def fn(query, key, value):
+            return flex_attention(query, key, value, score_mod)[0].sum()
+
+        expected = torch.autograd.grad(fn(query, key, value), (query, key, value))
+        result = torch.func.grad(fn, argnums=(0, 1, 2))(query, key, value)
+        self.assertEqual(result, expected)
+
     @supported_platform
     def test_eager_backward_strides(self):
         class Repro(torch.nn.Module):

@@ -141,6 +141,7 @@ class OperatorBase:
                 raise RuntimeError(
                     f"Trying to override a python impl for {k} on operator {self.name()}"
                 )
+
             self.py_kernels[k] = fn
             self._dispatch_cache.clear()
             return fn

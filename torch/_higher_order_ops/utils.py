@@ -7,6 +7,7 @@ from typing import Any, Callable, List, Optional, Tuple, Union
 import torch
 import torch.fx.traceback as fx_traceback
 import torch.utils._pytree as pytree
+from torch._functorch.pyfunctorch import HOPAutoDispatchBelowAutograd
 from torch._guards import detect_fake_mode
 from torch._ops import OperatorBase
 from torch._subclasses.fake_tensor import FakeTensor
@@ -36,34 +37,38 @@ def autograd_not_implemented_inner(
     Raises:
         RuntimeError: If autograd is enabled and any of the arguments to the Operator
     """
-    with torch._C._AutoDispatchBelowAutograd():
-        result = operator(*args, **kwargs)
-        flat_operands = pytree.arg_tree_leaves(*args)
-        if torch.is_grad_enabled() and any(
-            f.requires_grad for f in flat_operands if isinstance(f, torch.Tensor)
-        ):
-            if delayed_error:
-                err_fn = torch._C._functions.DelayedError(
-                    f"Autograd not implemented for {str(operator)}",
-                    1,
-                )
+    result = HOPAutoDispatchBelowAutograd(operator, *args, **kwargs)
+    flat_operands = pytree.arg_tree_leaves(*args)
+    if torch.is_grad_enabled() and any(
+        f.requires_grad for f in flat_operands if isinstance(f, torch.Tensor)
+    ):
+        if delayed_error:
+            err_fn = torch._C._functions.DelayedError(
+                f"Autograd not implemented for {str(operator)}",
+                1,
+            )
 
-                def fake_requires_grad(tensor):
-                    if torch.is_floating_point(tensor) or torch.is_complex(tensor):
-                        tensor = tensor.detach()
-                        tensor.requires_grad = True
-                    return tensor
+            def fake_requires_grad(tensor):
+                if torch.is_floating_point(tensor) or torch.is_complex(tensor):
+                    tensor = tensor.detach()
+                    tensor.requires_grad = True
+                return tensor
 
-                return pytree.tree_map_only(
-                    torch.Tensor, lambda x: err_fn(fake_requires_grad(x)), result
-                )
-            else:
-                raise RuntimeError(f"Autograd not implemented for {str(operator)}")
-        return result
+            return pytree.tree_map_only(
+                torch.Tensor, lambda x: err_fn(fake_requires_grad(x)), result
+            )
+        else:
+            raise RuntimeError(f"Autograd not implemented for {str(operator)}")
+    return result
 
 
-def autograd_not_implemented(op: OperatorBase, deferred_error: bool) -> Callable:
+def autograd_not_implemented(
+    op: OperatorBase, deferred_error: bool, *, functorch: bool = False
+) -> Callable:
     def inner(*args, **kwargs):
+        if functorch:
+            # ignore first arg, which is the functorch interpreter
+            args = args[1:]
         return autograd_not_implemented_inner(op, deferred_error, *args, **kwargs)
 
     return inner
