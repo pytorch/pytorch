@@ -396,10 +396,10 @@ test_inductor_cpp_wrapper_shard() {
   export TORCHINDUCTOR_CPP_WRAPPER=1
   test_inductor_shard "$1"
 
-  # Run inductor benchmark tests with cpp wrapper.
-  # Skip benchmark tests if it's in rerun-disabled-mode.
-  if [[ "$PYTORCH_TEST_RERUN_DISABLED_TESTS" -eq "1" ]]; then
-    echo "skip dynamo benchmark tests for rerun-disabled-test"
+  # Run inductor benchmark tests with cpp wrapper.  Skip benchmark tests if it's
+  # in rerun-disabled-mode, or if we're not in the first shard.
+  if [[ "$PYTORCH_TEST_RERUN_DISABLED_TESTS" -eq "1" || "$1" -ne "1" ]]; then
+    echo "skip dynamo benchmark tests for rerun-disabled-test, or if not in the first shard"
     return
   fi
 
