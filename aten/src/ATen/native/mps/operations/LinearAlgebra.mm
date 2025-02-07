@@ -1040,7 +1040,8 @@ static void lu_unpack_mps_impl(const Tensor& LU_data,
 
     auto pivots = (LU_pivots.dim() == 1) ? LU_pivots.sub(1) : LU_pivots.view({batchSize, -1}).sub(1);
 
-    MTLSize threadGroupSize = MTLSizeMake(32, 8, 1);
+    uint32_t maxThreadsPerGroup = [applyPivotsPSO maxTotalThreadsPerThreadgroup];
+    MTLSize threadGroupSize = MTLSizeMake(maxThreadsPerGroup, 1, 1);
     MTLSize gridSize = MTLSizeMake(batchSize, 1, 1);
     @autoreleasepool {
       dispatch_sync_with_rethrow(stream->queue(), ^() {

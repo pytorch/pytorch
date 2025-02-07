@@ -404,13 +404,8 @@ kernel void applyPivots(
     uint3 bid [[threadgroup_position_in_grid]],
     uint3 tpg [[threads_per_threadgroup]]) {
   uint tx = tid.x;
-  uint ty = tid.y;
-  uint linear_tid = ty * tpg.x + tx;
   uint group_size = tpg.x * tpg.y;
   uint batch_idx = bid.x;
-
-  // i.e. 1024 floats
-  threadgroup float4 sharedScratch[256];
 
   for (int i = static_cast<int>(K) - 1; i >= 0; i--) {
     int pivot = pivots[batch_idx * K + i];
@@ -419,63 +414,36 @@ kernel void applyPivots(
       continue;
     }
 
-    // row swaps in chunks(for large matrices)
-    for (uint chunkStart = 0; chunkStart < R; chunkStart += 1024) {
-      // actual chunk size (may be smaller than 1024 near the end)
-      uint chunkSize = min((uint)1024, R - chunkStart);
+    for (uint j = tx * 4; j < R; j += group_size * 4) {
+      uint elementsRemaining = R - j;
 
-      // 1. load pivot row data into sharedScratch in float4 blocks
-      for (uint j = linear_tid * 4 + chunkStart; j < (chunkStart + chunkSize);
-           j += group_size * 4) {
-        uint elementsRemaining = (chunkStart + chunkSize) - j;
+      // if we can use float4 or not
+      if (elementsRemaining < 4) {
+        for (uint e = 0; e < elementsRemaining; e++) {
+          float row_i_value = P[batch_idx * R * R + i * R + (j + e)];
+          float pivot_row_value = P[batch_idx * R * R + pivot * R + (j + e)];
 
-        // If we have fewer than 4 floats left in this chunk, do scalar fallback
-        if (elementsRemaining < 4) {
-          for (uint e = 0; e < elementsRemaining; e++) {
-            // copy pivot row data into the correct sub-element of float4
-            sharedScratch[(j - chunkStart) / 4][e] =
-                P[batch_idx * R * R + pivot * R + (j + e)];
-          }
-        } else {
-          device const float4* pivotPtr =
-              reinterpret_cast<device const float4*>(
-                  &P[batch_idx * R * R + pivot * R + j]);
-          sharedScratch[(j - chunkStart) / 4] = *pivotPtr;
+          P[batch_idx * R * R + i * R + (j + e)] = pivot_row_value;
+          P[batch_idx * R * R + pivot * R + (j + e)] = row_i_value;
         }
+      } else {
+        // vectorized load/stores
+        device float4* rowIPtr =
+            reinterpret_cast<device float4*>(&P[batch_idx * R * R + i * R + j]);
+        device float4* pivotPtr = reinterpret_cast<device float4*>(
+            &P[batch_idx * R * R + pivot * R + j]);
+
+        float4 row_i_val = *rowIPtr;
+        float4 pivot_val = *pivotPtr;
+
+        *rowIPtr = pivot_val;
+        *pivotPtr = row_i_val;
       }
-      threadgroup_barrier(mem_flags::mem_threadgroup);
-
-      // 2. swap the rows(row i gets swapped w pivot)
-      for (uint j = linear_tid * 4 + chunkStart; j < (chunkStart + chunkSize);
-           j += group_size * 4) {
-        uint elementsRemaining = (chunkStart + chunkSize) - j;
-
-        // handle remainder with scalar logic
-        if (elementsRemaining < 4) {
-          for (uint e = 0; e < elementsRemaining; e++) {
-            float row_i_value = P[batch_idx * R * R + i * R + (j + e)];
-            float pivot_row_value = sharedScratch[(j - chunkStart) / 4][e];
-
-            P[batch_idx * R * R + i * R + (j + e)] = pivot_row_value;
-            P[batch_idx * R * R + pivot * R + (j + e)] = row_i_value;
-          }
-        } else {
-          device float4* rowIPtr = reinterpret_cast<device float4*>(
-              &P[batch_idx * R * R + i * R + j]);
-          float4 row_i_val = *rowIPtr;
-
-          float4 pivot_val = sharedScratch[(j - chunkStart) / 4];
-
-          device float4* pivotPtr = reinterpret_cast<device float4*>(
-              &P[batch_idx * R * R + pivot * R + j]);
-
-          // perform swap
-          *rowIPtr = pivot_val;
-          *pivotPtr = row_i_val;
-        }
-      }
-      threadgroup_barrier(mem_flags::mem_threadgroup);
     }
+    // barrier here so different threads do not rush after each other
+    // swapping rows for the next iteration while
+    // some threads are swapping the current one
+    threadgroup_barrier(mem_flags::mem_threadgroup);
   }
 }
 
