@@ -482,14 +482,14 @@ def export(
         warnings.warn(
             "Setting `operator_export_type` to something other than default is deprecated. "
             "The option will be removed in a future release.",
-            category=FutureWarning,
+            category=DeprecationWarning,
         )
     if training == _C_onnx.TrainingMode.TRAINING:
         warnings.warn(
             "Setting `training` to something other than default is deprecated. "
             "The option will be removed in a future release. Please set the training mode "
             "before exporting the model.",
-            category=FutureWarning,
+            category=DeprecationWarning,
         )
 
     args = (args,) if isinstance(args, torch.Tensor) else args
