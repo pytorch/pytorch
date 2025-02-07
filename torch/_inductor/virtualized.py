@@ -306,9 +306,7 @@ class OpsWrapper(DefaultHandler):
         return _ops.indirect_indexing(index, size, check, wrap_neg)
 
 
-# we lie about the type of ops so the rest of the codebase typecheck properly
-# DefaultHandler implements the OpsHandler protocol via metaprogramming
-ops = cast(OpsHandler[Any], OpsWrapper())
+ops: OpsHandler[Any] = OpsWrapper()
 
 
 class _V:
@@ -316,8 +314,10 @@ class _V:
     KernelFormatterHandler = KernelFormatterHandler
     WrapperHandler = WrapperHandler
 
-    set_ops_handler: Callable[[Any], Any] = _ops._set_handler
-    get_ops_handler: Callable[[], Any] = _ops._get_handler
+    set_ops_handler: Callable[
+        [OpsHandler[Any]], AbstractContextManager[None]
+    ] = _ops._set_handler
+    get_ops_handler: Callable[[], OpsHandler[Any]] = _ops._get_handler
     set_graph_handler: Callable[[GraphLowering], Any] = _graph._set_handler
     set_real_inputs: Callable[[Any], Any] = _real_inputs._set_handler
     get_real_inputs: Callable[[], Any] = _real_inputs._get_handler
