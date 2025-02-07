@@ -649,14 +649,14 @@ extern "C"
         // apply score mod function
         {
             {{ template.generate_other_buffer("score_others", 0, "len_score_other", kernel.args) }}
-            accum_t* out_ptr0 = in_ptr0;
+            accum_t* out_ptr{{score_buf_idx}} = in_ptr0;
             {{ template.modification(score_mod, score_buf_name, score_buf_idx)|indent(12, false) }}
         }
 
         // Apply block mask, fill unused with -inf
         {
             {{ template.generate_other_buffer("mask_others", -1, "len_mask_other", kernel.args) }}
-            accum_t* out_ptr1 = in_ptr0;
+            accum_t* out_ptr{{mask_buf_idx}} = in_ptr0;
             {{ template.modification(mask_mod, mask_buf_name, mask_buf_idx)|indent(12, false) }}
         }
 

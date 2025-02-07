@@ -924,15 +924,9 @@ def lower_cpu(
     # We use symbols to represent them during the compilation here.
     # They'll be replaced by the string "cur_qSplitSize" and "cur_kvSplitSize" in
     # the modification function of the CppFlexAttentionTemplate class.
-    cur_qSplitSize = sympy.Symbol(
-        str(V.graph.sizevars.shape_env.create_unbacked_symint())
-    )
-    cur_kvSplitSize = sympy.Symbol(
-        str(V.graph.sizevars.shape_env.create_unbacked_symint())
-    )
+    cur_qSplitSize = V.graph.sizevars.shape_env.create_unbacked_symint().node.expr
+    cur_kvSplitSize = V.graph.sizevars.shape_env.create_unbacked_symint().node.expr
     shape_env = V.graph.sizevars.shape_env
-    assert cur_qSplitSize not in shape_env.var_to_range
-    assert cur_kvSplitSize not in shape_env.var_to_range
 
     # We don't know the concret value of cur_qSplitSize and cur_kvSplitSize during the compilation.
     # Mark symbols > 1 to ensure broadcasting is always applied.
@@ -945,8 +939,8 @@ def lower_cpu(
         create_placeholder(name, dtype, query.get_device(), size)
         for name, dtype, size in [
             ("score", score_dtype, [cur_qSplitSize, cur_kvSplitSize]),
-            ("b", torch.int64, [1]),
-            ("h", torch.int64, [1]),
+            ("b", torch.int64, []),
+            ("h", torch.int64, []),
             ("q_idx", torch.int64, [cur_qSplitSize, 1]),
             ("kv_idx", torch.int64, [1, cur_kvSplitSize]),
         ]
@@ -965,8 +959,8 @@ def lower_cpu(
         create_placeholder(name, dtype, query.get_device(), size)
         for name, dtype, size in [
             ("score", score_dtype, [cur_qSplitSize, cur_kvSplitSize]),
-            ("b", torch.int64, [1]),
-            ("h", torch.int64, [1]),
+            ("b", torch.int64, []),
+            ("h", torch.int64, []),
             ("q_idx", torch.int64, [cur_qSplitSize, 1]),
             ("kv_idx", torch.int64, [1, cur_kvSplitSize]),
         ]
@@ -1032,6 +1026,12 @@ def lower_cpu(
         mask_graph_placeholder_inps + list(mask_mod_other_buffers),
         converted_mask_graph_module,
     )
+
+    # Clear the pending fresh unbacked symbols that are created for cur_qSplitSize and cur_kvSplitSize in the current kernel.
+    pending = V.graph.sizevars.shape_env.pending_fresh_unbacked_symbols
+    V.graph.sizevars.shape_env.pending_fresh_unbacked_symbols = [
+        x for x in pending if x not in (cur_qSplitSize, cur_kvSplitSize)
+    ]
 
     buffer_list = (
         placeholder_inps
