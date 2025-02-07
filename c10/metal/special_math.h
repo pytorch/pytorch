@@ -461,5 +461,21 @@ T sinc(T a) {
   return static_cast<T>(::metal::sin(product) / product);
 }
 
+// Complex sinc2 implementation
+inline float2 sinc(float2 inp) {
+  float2 a = inp * M_PI_F;
+  const float a2 = a.x * a.x + a.y * a.y;
+  if (a2 == 0) {
+    return 0;
+  }
+  float cosx;
+  float sinx = ::metal::sincos(a.x, cosx);
+  float sinhy = ::metal::sinh(a.y);
+  float coshy = ::metal::cosh(a.y);
+  auto re = sinx * coshy * a.x + cosx * sinhy * a.y;
+  auto im = cosx * sinhy * a.x - sinx * coshy * a.y;
+  return float2(re, im) / a2;
+}
+
 } // namespace metal
 } // namespace c10
