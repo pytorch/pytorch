@@ -445,7 +445,9 @@ class AOTInductorTestsTemplate:
             example_inputs = (torch.randn(10, 10, device=self.device).to(dtype),)
 
             with config.patch({"freezing": True}):
-                self.check_model(LinearModel(self.device), example_inputs)
+                model = LinearModel(device=self.device)
+                actual = AOTIRunnerUtil.legacy_run(self.device, model, example_inputs)
+                self.assertTrue(same(model(*example_inputs), actual))
 
     def test_linear_dynamic_maxautotune(self):
         class Model(torch.nn.Module):
@@ -609,7 +611,8 @@ class AOTInductorTestsTemplate:
         batch = 2
         a = torch.randn(batch, M, K, device=self.device)
         example_inputs = (a,)
-        self.check_model(model, example_inputs)
+        actual = AOTIRunnerUtil.legacy_run(self.device, model, example_inputs)
+        self.assertTrue(same(model(*example_inputs), actual))
 
     def test_aliased_buffer_reuse(self):
         class Model(torch.nn.Module):
@@ -902,15 +905,18 @@ class AOTInductorTestsTemplate:
         list_example_inputs.append(
             (torch.randn(batch, M, K, device=self.device),),
         )
-        self.check_model_with_multiple_inputs(
-            model,
-            list_example_inputs,
-            dynamic_shapes=dynamic_shapes,
-            options={
-                "max_autotune": True,
-                "max_autotune_gemm_backends": "TRITON",
-            },
-        )
+        for example_inputs in list_example_inputs:
+            actual = AOTIRunnerUtil.legacy_run(
+                self.device,
+                model,
+                example_inputs,
+                dynamic_shapes=dynamic_shapes,
+                options={
+                    "max_autotune": True,
+                    "max_autotune_gemm_backends": "TRITON",
+                },
+            )
+            self.assertTrue(same(model(*example_inputs), actual))
 
     def test_bmm_multiple_dynamic(self):
         class Model(torch.nn.Module):
@@ -1516,6 +1522,26 @@ class AOTInductorTestsTemplate:
             dynamic_shapes=dynamic_shapes,
         )
 
+    @common_utils.parametrize("dynamic", [False, True])
+    def test_while_loop_with_sym_expr_cond(self, dynamic):
+        inputs = (
+            torch.randn(10, 20, device=self.device),
+            torch.randn(10, 20, device=self.device),
+        )
+        dim0_ab = Dim("s0", min=2, max=1024)
+        dynamic_shapes = None
+        if dynamic:
+            dynamic_shapes = {
+                "c": {},
+                "a": {0: dim0_ab, 1: None},
+                "b": {0: dim0_ab, 1: None},
+            }
+        self.check_model_with_multiple_inputs(
+            WhileLoopModels.SymExprCond(),
+            prepend_counters(inputs),
+            dynamic_shapes=dynamic_shapes,
+        )
+
     @config.patch({"is_predispatch": True})
     def test_constant(self):
         class M(torch.nn.Module):
@@ -1960,8 +1986,11 @@ class AOTInductorTestsTemplate:
         }
 
         example_inputs = (x, y, z)
-        m = Model(self.device).to(dtype=torch.float)
-        self.check_model(m, example_inputs, dynamic_shapes=dynamic_shapes)
+        model = Model(self.device).to(dtype=torch.float)
+        actual = AOTIRunnerUtil.legacy_run(
+            self.device, model, example_inputs, dynamic_shapes=dynamic_shapes
+        )
+        self.assertTrue(same(model(*example_inputs), actual))
 
     def test_fake_tensor_device_validation(self):
         if self.device != GPU_TYPE:
@@ -2216,7 +2245,7 @@ class AOTInductorTestsTemplate:
         example_inputs = (torch.randn(10, 10, device=self.device),)
         optimized = torch._inductor.aoti_load_package(
             torch._inductor.aoti_compile_and_package(
-                torch.export.export(Model(), example_inputs)
+                torch.export.export(Model(), example_inputs, strict=True)
             )
         )
         try:
