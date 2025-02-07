@@ -8652,7 +8652,7 @@ class TestNestedTensorOpInfo(NestedTensorTestCase):
                     return op_fn(*args, **kwargs)
 
                 compiled_f = torch.compile(
-                    f, fullgraph=True, backend="aot_eager_decomp_partition"
+                    f, fullgraph=True, backend="inductor"
                 )
 
                 out_ref = f(sample.input, *sample.args, **sample.kwargs)
@@ -8676,7 +8676,7 @@ class TestNestedTensorOpInfo(NestedTensorTestCase):
                         return op_fn(*args, **kwargs)
 
                     compiled_in_f = torch.compile(
-                        in_f, fullgraph=True, backend="aot_eager_decomp_partition"
+                        in_f, fullgraph=True, backend="inductor"
                     )
 
                     compiled_in_f(sample.input, *sample.args, **sample.kwargs)
@@ -8706,7 +8706,7 @@ class TestNestedTensorOpInfo(NestedTensorTestCase):
                     return op_fn(*args, **kwargs)
 
                 compiled_f = torch.compile(
-                    f, fullgraph=True, backend="aot_eager_decomp_partition"
+                    f, fullgraph=True, backend="inductor"
                 )
 
                 out_ref = f(sample.input, *sample.args, **sample.kwargs)
