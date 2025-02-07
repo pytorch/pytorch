@@ -289,6 +289,18 @@ bool check_mem_efficient_hardware_support(sdp_params const& params, bool debug) 
   return true;
 }
 
+bool check_mem_efficient_batch_size(sdp_params const& params, bool debug) {
+  if (params.query.sym_size(0) >= (1 << 16)) {
+    if (debug) {
+      TORCH_WARN(
+           "Mem Efficient Attention only supports batch size < 2**16. Got batch size ",
+            params.query.sym_size(0));
+    }
+    return false;
+  }
+  return true;
+}
+
 bool check_requires_grad_and_head_dim_gt192_constraints_on_sm86_89_or_120(
     sdp_params const& params,
     bool debug) {
@@ -674,6 +686,7 @@ bool can_use_mem_efficient_attention(sdp_params const& params, bool debug) {
       check_all_tensors_on_device,
       check_mem_efficient_hardware_support,
       check_tensor_shapes,
+      check_mem_efficient_batch_size,
 #ifdef USE_ROCM
       check_head_dim_size_flash<true /* caller_is_meff */>
 #else
