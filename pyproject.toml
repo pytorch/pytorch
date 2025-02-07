@@ -122,9 +122,12 @@ select = [
     "PLR1722", # use sys exit
     "PLR1736", # unnecessary list index
     "PLW0129", # assert on string literal
+    "PLW0131", # named expr without context
     "PLW0133", # useless exception statement
+    "PLW0245", # super without brackets
     "PLW0406", # import self
     "PLW0711", # binary op exception
+    "PLW1501", # bad open mode
     "PLW1509", # preexec_fn not safe with threads
     "PLW2101", # useless lock statement
     "PLW3301", # nested min max
