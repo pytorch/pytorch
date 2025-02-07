@@ -138,19 +138,20 @@ class ItertoolsVariable(VariableTracker):
 
             if len(args) == 1 and args[0].has_unpack_var_sequence(tx):
                 seq = args[0].unpack_var_sequence(tx)
-                keyfunc = (
-                    (
-                        lambda x: (
-                            retrieve_const_key(
-                                kwargs.get("key").call_function(tx, [x], {})
-                            )
-                        )
-                    )
-                    if "key" in kwargs
-                    else None
-                )
             else:
                 unimplemented("Unsupported arguments for itertools.groupby")
+
+            if "key" in kwargs:
+
+                def keyfunc(x):
+                    return retrieve_const_key(
+                        kwargs.get("key").call_function(tx, [x], {})
+                    )
+
+            else:
+
+                def keyfunc(x):
+                    return retrieve_const_key(x)
 
             result = []
             try:

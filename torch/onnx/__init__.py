@@ -152,7 +152,7 @@ def export(
     custom_translation_table: dict[Callable, Callable | Sequence[Callable]]
     | None = None,
     report: bool = False,
-    optimize: bool = False,
+    optimize: bool = True,
     verify: bool = False,
     profile: bool = False,
     dump_exported_program: bool = False,
@@ -289,7 +289,7 @@ def export(
         report: Whether to generate a markdown report for the export process. This option
             is only valid when dynamo is True.
         optimize: Whether to optimize the exported model. This option
-            is only valid when dynamo is True.
+            is only valid when dynamo is True. Default is True.
         verify: Whether to verify the exported model using ONNX Runtime. This option
             is only valid when dynamo is True.
         profile: Whether to profile the export process. This option
