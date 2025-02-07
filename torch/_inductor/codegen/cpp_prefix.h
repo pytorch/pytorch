@@ -90,9 +90,6 @@ struct WeightRecp {
     depth = m > 0 ? ceil(log2(m)) : 0;
     welford_stk.assign(depth, Welford<T>());
   }
-  void clean_stack() {
-    welford_stk.assign(depth, Welford<T>());
-  }
 };
 
 template <typename T>
@@ -125,18 +122,12 @@ Welford<T> welford_combine(const Welford<T>& a, const Welford<T>& b, bool use_in
 }
 
 template <typename T>
-Welford<T> welford_combine(Welford<T>& a, Welford<T>& b, WeightRecp<T>* w1, WeightRecp<T>* w2, int num_threads=1) {
-  for (const auto n : c10::irange(num_threads)) {
-    for (const auto i : c10::irange(w1->depth)) {
-      a = welford_combine(a, w1->welford_stk[i]);
-    }
-    w1++;
+Welford<T> welford_combine(Welford<T>& a, Welford<T>& b, WeightRecp<T>* w1, WeightRecp<T>* w2) {
+  for (const auto i : c10::irange(w1->depth)) {
+    a = welford_combine(a, w1->welford_stk[i]);
   }
-  for (const auto n : c10::irange(num_threads)) {
-    for (const auto i : c10::irange(w2->depth)) {
-      b = welford_combine(b, w2->welford_stk[i]);
-    }
-    w2++;
+  for (const auto i : c10::irange(w2->depth)) {
+    b = welford_combine(b, w2->welford_stk[i]);
   }
   return welford_combine(a, b);
 }

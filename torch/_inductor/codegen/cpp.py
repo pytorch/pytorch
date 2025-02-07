@@ -2816,9 +2816,6 @@ class CppVecKernel(CppKernel):
                     dtype, self.weight_recps_vec_range, self.weight_recps_val
                 )
             )
-            self.non_parallel_reduction_prefix.writeline(
-                f"{self.weight_recps_val}.clean_stack();"
-            )
             # generate weight_recps for parallel reduction
             num_threads = (
                 "max_threads" if config.cpp.dynamic_threads else parallel_num_threads()
@@ -2830,9 +2827,6 @@ class CppVecKernel(CppKernel):
                     self.weight_recps_val,
                     num_threads,
                 )
-            )
-            self.local_reduction_init.writeline(
-                f"{self.weight_recps_val}.clean_stack();"
             )
             # use masked acc_vec for tail vec kernel
             self.reduction_prefix_generators.append(
@@ -2857,9 +2851,6 @@ class CppVecKernel(CppKernel):
                     self.masked_weight_recps_val,
                 )
             )
-            self.non_parallel_reduction_prefix.writeline(
-                f"{self.masked_weight_recps_val}.clean_stack();"
-            )
             # generate weight_recps for parallel reduction
             num_threads = (
                 "max_threads" if config.cpp.dynamic_threads else parallel_num_threads()
@@ -2871,9 +2862,6 @@ class CppVecKernel(CppKernel):
                     self.masked_weight_recps_val,
                     num_threads,
                 )
-            )
-            self.local_reduction_init.writeline(
-                f"{self.masked_weight_recps_val}.clean_stack();"
             )
             # use masked acc_vec for tail vec kernel
             acc_vec_ = masked_acc_vec if self.tail_size else acc_vec
