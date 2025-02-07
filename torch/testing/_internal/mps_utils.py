@@ -508,6 +508,9 @@ XFAILLIST_GRAD = {
     "nn.functional.conv3d": MPSSkipInfo(
         TEST_OUTPUT_GRAD_MATCH, dtypes=[torch.float16, torch.float32]
     ),
+    # Uncategorized grad failures
+    "nanquantile": MPSSkipInfo(TEST_OUTPUT_GRAD_MATCH, dtypes=[torch.float32]),
+    "quantile": MPSSkipInfo(TEST_OUTPUT_GRAD_MATCH, dtypes=[torch.float32]),
 }
 
 
@@ -614,6 +617,12 @@ MPS_DOWNSTREAM_XFAILLIST = {
     "arange": MPSSkipInfo(dtypes=[torch.uint8]),
     # TODO: remove this once downstream function 'aten::_linalg_svd.U' have been implemented
     "linalg.matrix_rank": MPSSkipInfo(),
+    # MPS returns incorrect results before MacOS15
+    "nanquantile": MPSSkipInfo(TEST_OUTPUT_MATCH, dtypes=[torch.float32], upper=15.0),
+    "quantile": MPSSkipInfo(TEST_OUTPUT_MATCH, dtypes=[torch.float32], upper=15.0),
+    "nn.functional.conv3d": MPSSkipInfo(
+        TEST_OUTPUT_MATCH, dtypes=[torch.float16], upper=15.0
+    ),
 }
 
 """Other uncategorized xfails"""
