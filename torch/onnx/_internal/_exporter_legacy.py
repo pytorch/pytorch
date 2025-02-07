@@ -86,8 +86,7 @@ class ONNXFakeContext:
 class OnnxRegistry:
     """Registry for ONNX functions.
 
-    .. deprecated::
-        Deprecated since 2.6.0.
+    .. deprecated:: 2.6
         Please use ``torch.onnx.export(..., dynamo=True)`` instead.
 
     The registry maintains a mapping from qualified names to symbolic functions under a
@@ -237,8 +236,7 @@ class OnnxRegistry:
 class ExportOptions:
     """Options to influence the TorchDynamo ONNX exporter.
 
-    .. deprecated::
-        Deprecated since 2.6.0.
+    .. deprecated:: 2.6
         Please use ``torch.onnx.export(..., dynamo=True)`` instead.
 
     Attributes:
@@ -454,8 +452,7 @@ def enable_fake_mode():
 class ONNXRuntimeOptions:
     """Options to influence the execution of the ONNX model through ONNX Runtime.
 
-    .. deprecated::
-        Deprecated since 2.6.0.
+    .. deprecated:: 2.6
         Please use ``torch.onnx.export(..., dynamo=True)`` instead.
 
     Attributes:
@@ -721,8 +718,7 @@ def dynamo_export(
 ) -> _onnx_program.ONNXProgram:
     """Export a torch.nn.Module to an ONNX graph.
 
-    .. deprecated::
-        Deprecated since 2.6.0.
+    .. deprecated:: 2.6
         Please use ``torch.onnx.export(..., dynamo=True)`` instead.
 
     Args:

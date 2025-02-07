@@ -62,8 +62,7 @@ def select_model_mode_for_export(model, mode: _C_onnx.TrainingMode):
     """A context manager to temporarily set the training mode of ``model``
     to ``mode``, resetting it when we exit the with-block.
 
-    .. deprecated::
-        Deprecated since 2.7.0.
+    .. deprecated:: 2.7
         Please set training mode before exporting the model.
 
     Args:
@@ -114,8 +113,7 @@ def select_model_mode_for_export(model, mode: _C_onnx.TrainingMode):
 def disable_apex_o2_state_dict_hook(model: torch.nn.Module | torch.jit.ScriptFunction):
     """A context manager to temporarily disable the Apex O2 hook that returns.
 
-    .. deprecated::
-        Deprecated since 2.7.0.
+    .. deprecated:: 2.7
         Please remove usage of this function.
     """
     # Apex O2 hook state_dict to return fp16 weights as fp32.
@@ -152,8 +150,7 @@ def disable_apex_o2_state_dict_hook(model: torch.nn.Module | torch.jit.ScriptFun
 def setup_onnx_logging(verbose: bool):
     """A context manager to temporarily set the ONNX logging verbosity.
 
-    .. deprecated::
-        Deprecated since 2.7.0.
+    .. deprecated:: 2.7
         Please remove usage of this function.
     """
     is_originally_enabled = _C._jit_is_onnx_log_enabled
@@ -172,8 +169,7 @@ def exporter_context(model, mode: _C_onnx.TrainingMode, verbose: bool):
     """A context manager to temporarily set the training mode of ``model``
     to ``mode``, disable the Apex O2 hook, and set the ONNX logging verbosity.
 
-    .. deprecated::
-        Deprecated since 2.7.0.
+    .. deprecated:: 2.7
         Please set training mode before exporting the model.
     """
     with select_model_mode_for_export(
@@ -1190,8 +1186,7 @@ def unconvertible_ops(
 ) -> tuple[_C.Graph, list[str]]:
     """Returns an approximated list of all ops that are yet supported by :mod:`torch.onnx`.
 
-    .. deprecated::
-        Deprecated since 2.5.0.
+    .. deprecated:: 2.5
         Please remove usage of this function.
 
     The list is approximated because some ops may be removed during the conversion

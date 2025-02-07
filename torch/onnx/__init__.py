@@ -169,6 +169,19 @@ def export(
 ) -> ONNXProgram | None:
     r"""Exports a model into ONNX format.
 
+    .. versionchanged:: 2.6
+        *training* is now deprecated. Instead, set the training mode of the model before exporting.
+    .. versionchanged:: 2.6
+        *operator_export_type* is now deprecated. Only ONNX is supported.
+    .. versionchanged:: 2.6
+        *do_constant_folding* is now deprecated. It is always enabled.
+    .. versionchanged:: 2.6
+        *export_modules_as_functions* is now deprecated.
+    .. versionchanged:: 2.6
+        *autograd_inlining* is now deprecated.
+    .. versionchanged:: 2.7
+        *optimize* is now True by default.
+
     Args:
         model: The model to be exported.
         args: Example positional inputs. Any non-Tensor arguments will be hard-coded into the
@@ -415,8 +428,7 @@ def dynamo_export(
 ) -> ONNXProgram:
     """Export a torch.nn.Module to an ONNX graph.
 
-    .. deprecated::
-        Deprecated since 2.6.0.
+    .. deprecated:: 2.6
         Please use ``torch.onnx.export(..., dynamo=True)`` instead.
 
     Args:

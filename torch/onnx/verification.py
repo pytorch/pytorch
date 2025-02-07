@@ -797,8 +797,7 @@ def verify(
 ):
     """Verify model export to ONNX against original PyTorch model.
 
-    .. deprecated::
-        Deprecated since 2.7.0.
+    .. deprecated:: 2.7
         Consider using ``torch.onnx.export(..., dynamo=True)`` and use the returned
         ``ONNXProgram`` to test the ONNX model.
 
@@ -882,8 +881,7 @@ def verify_aten_graph(
 ) -> tuple[AssertionError | None, torch.Graph, _OutputsType, _OutputsType]:
     """Verify aten graph export to ONNX against original PyTorch model.
 
-    .. deprecated::
-        Deprecated since 2.7.0.
+    .. deprecated:: 2.7
         Consider using ``torch.onnx.export(..., dynamo=True)`` and use the returned
         ``ONNXProgram`` to test the ONNX model.
     """
@@ -1178,8 +1176,7 @@ class OnnxTestCaseRepro:
 class GraphInfo:
     """GraphInfo contains validation information of a TorchScript graph and its converted ONNX graph.
 
-    .. deprecated::
-        Deprecated since 2.7.0.
+    .. deprecated:: 2.7
         Consider using ``torch.onnx.export(..., dynamo=True)`` and use the returned
         ``ONNXProgram`` to test the ONNX model.
     """
@@ -1723,8 +1720,7 @@ def find_mismatch(
 ) -> GraphInfo:
     r"""Find all mismatches between the original model and the exported model.
 
-    .. deprecated::
-        Deprecated since 2.7.0.
+    .. deprecated:: 2.7
         Consider using ``torch.onnx.export(..., dynamo=True)`` and use the returned
         ``ONNXProgram`` to test the ONNX model.
 
