@@ -48,7 +48,6 @@ __all__ = [
     "is_onnxrt_backend_supported",
 ]
 
-import logging
 from typing import Any, Callable, TYPE_CHECKING
 from typing_extensions import deprecated
 
@@ -127,8 +126,6 @@ is_onnxrt_backend_supported.__module__ = "torch.onnx"
 
 producer_name = "pytorch"
 producer_version = _C_onnx.PRODUCER_VERSION
-
-logger = logging.getLogger(__name__)
 
 
 def export(
