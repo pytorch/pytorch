@@ -184,7 +184,7 @@ class DistConvolutionOpsTest(DTensorTestBase):
         )
 
     @with_comms
-    def test_conv_replicate_dtensor(self):
+    def test_conv_backward_none_grad_inp(self):
         device_mesh = init_device_mesh(
             device_type="cuda", mesh_shape=(self.world_size,)
         )
@@ -196,14 +196,13 @@ class DistConvolutionOpsTest(DTensorTestBase):
 
         b = conv.bias
         b_dt = torch.nn.Parameter(DTensor.from_local(b, device_mesh, [Replicate()]))
-        assert b.requires_grad
-        assert b_dt.requires_grad
 
         res = F.conv2d(x_dt, w_dt, b_dt, padding=1)
-        # res_l = res.to_local()
         dres = torch.rand_like(res)
-        print(dres.requires_grad)
         res.backward(dres)
+        self.assertTrue(w_dt.grad is not None)
+        self.assertTrue(b_dt.grad is not None)
+        self.assertTrue(x_dt.grad is None)
 
 
 if __name__ == "__main__":
