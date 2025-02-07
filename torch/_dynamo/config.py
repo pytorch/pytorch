@@ -516,6 +516,7 @@ _autograd_backward_strict_mode_banned_ops = [
     "is_neg",
     "is_conj",
     "is_pinned",
+    "is_contiguous",
 ]
 
 # Enables caching of dispatches to fake tensors.
