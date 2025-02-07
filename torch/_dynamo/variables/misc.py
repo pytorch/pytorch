@@ -312,6 +312,15 @@ class ExceptionVariable(VariableTracker):
     __repr__ = __str__
 
 
+class UserDefinedExceptionClassVariable(ExceptionVariable):
+    def __init__(self, exc_type, **kwargs):
+        super().__init__(exc_type, (), **kwargs)
+
+    @property
+    def fn(self):
+        return self.exc_type
+
+
 class UnknownVariable(VariableTracker):
     """
     It could be anything!

@@ -15,6 +15,10 @@ from torch._dynamo.symbolic_convert import SpeculationLog, SpeculationLogDiverge
 from torch.testing._internal.common_utils import make_dynamo_test
 
 
+class CustomException(Exception):
+    ...
+
+
 class ExceptionTests(torch._dynamo.test_case.TestCase):
     def test_exception(self):
         def fn(x):
@@ -455,6 +459,17 @@ class ExceptionTests(torch._dynamo.test_case.TestCase):
         opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
         x = torch.randn(4)
         self.assertEqual(fn(x), opt_fn(x))
+
+    @make_dynamo_test
+    def test_user_defined_exception_variable(self):
+        z = 0
+        try:
+            raise CustomException
+        except ValueError:
+            z = 1
+        except CustomException:
+            z = 2
+        self.assertEqual(z, 2)
 
     @make_dynamo_test
     def test_raise_set___context__(self):
