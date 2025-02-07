@@ -8673,9 +8673,7 @@ class TestNestedTensorOpInfo(NestedTensorTestCase):
                     def f(*args, **kwargs):
                         return op_fn(*args, **kwargs)
 
-                compiled_f = torch.compile(
-                    f, fullgraph=True, backend="inductor"
-                )
+                compiled_f = torch.compile(f, fullgraph=True, backend="inductor")
 
                 inp = (
                     (
@@ -8739,9 +8737,7 @@ class TestNestedTensorOpInfo(NestedTensorTestCase):
                 def f(*args, **kwargs):
                     return op_fn(*args, **kwargs)
 
-                compiled_f = torch.compile(
-                    f, fullgraph=True, backend="inductor"
-                )
+                compiled_f = torch.compile(f, fullgraph=True, backend="inductor")
 
                 out_ref = f(sample.input, *sample.args, **sample.kwargs)
                 out_compile = compiled_f(sample.input, *sample.args, **sample.kwargs)
