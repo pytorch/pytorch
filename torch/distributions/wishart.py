@@ -1,7 +1,6 @@
 # mypy: allow-untyped-defs
 import math
 import warnings
-from numbers import Number
 from typing import Optional, Union
 
 import torch
@@ -10,7 +9,7 @@ from torch.distributions import constraints
 from torch.distributions.exp_family import ExponentialFamily
 from torch.distributions.multivariate_normal import _precision_to_scale_tril
 from torch.distributions.utils import lazy_property
-from torch.types import _size
+from torch.types import _Number, _size, Number
 
 
 __all__ = ["Wishart"]
@@ -97,7 +96,7 @@ class Wishart(ExponentialFamily):
                 "scale_tril must be at least two-dimensional, with optional leading batch dimensions"
             )
 
-        if isinstance(df, Number):
+        if isinstance(df, _Number):
             batch_shape = torch.Size(param.shape[:-2])
             self.df = torch.tensor(df, dtype=param.dtype, device=param.device)
         else:
@@ -107,7 +106,7 @@ class Wishart(ExponentialFamily):
 
         if self.df.le(event_shape[-1] - 1).any():
             raise ValueError(
-                f"Value of df={df} expected to be greater than ndim - 1 = {event_shape[-1]-1}."
+                f"Value of df={df} expected to be greater than ndim - 1 = {event_shape[-1] - 1}."
             )
 
         if scale_tril is not None:

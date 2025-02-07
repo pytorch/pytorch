@@ -4,16 +4,18 @@ from __future__ import annotations
 import atexit
 import functools
 import logging
+import multiprocessing
 import os
 import sys
-from concurrent.futures import Future, ThreadPoolExecutor
+from concurrent.futures import Future, ProcessPoolExecutor, ThreadPoolExecutor
 from concurrent.futures.process import BrokenProcessPool
+from functools import partial
 from time import time
-from typing import Any, Callable, Dict, List, Optional, TYPE_CHECKING
+from typing import Any, Callable, Optional, TYPE_CHECKING
 
 import torch
 from torch._dynamo.device_interface import get_registered_device_interfaces
-from torch._dynamo.utils import dynamo_timed, set_feature_use
+from torch._dynamo.utils import counters, dynamo_timed, set_feature_use
 from torch._inductor import config
 from torch._inductor.codecache import (
     CodeCacheFuture,
@@ -26,11 +28,13 @@ from torch._inductor.codecache import (
     TritonCodeCache,
     TritonFuture,
 )
-from torch._inductor.compile_worker.subproc_pool import SubprocPool
+from torch._inductor.compile_worker.subproc_pool import AnyPool, SubprocPool
+from torch._inductor.compile_worker.watchdog import _async_compile_initializer
 from torch._inductor.runtime.compile_tasks import (
     _set_triton_ptxas_path,
     _worker_compile_triton,
 )
+from torch._inductor.utils import clear_on_fresh_inductor_cache
 from torch.hub import _Faketqdm, tqdm
 from torch.utils._ordered_set import OrderedSet
 from torch.utils._triton import has_triton_package
@@ -93,7 +97,7 @@ _IS_WINDOWS = sys.platform == "win32"
 log = logging.getLogger(__name__)
 
 # Used to keep track of all process pools invoked so far.
-_pool_set = OrderedSet[SubprocPool]()
+_pool_set = OrderedSet[AnyPool]()
 
 
 def shutdown_compile_workers() -> None:
@@ -125,6 +129,12 @@ def get_compile_threads() -> int:
     return config.compile_threads
 
 
+@clear_on_fresh_inductor_cache
+@functools.lru_cache(None)
+def get_future_cache():
+    return {}
+
+
 class AsyncCompile:
     def __init__(self) -> None:
         pass
@@ -142,14 +152,37 @@ class AsyncCompile:
 
     @staticmethod
     @functools.lru_cache(1)
-    def process_pool() -> SubprocPool:
+    def process_pool() -> AnyPool:
         assert get_compile_threads() > 1
-        # Wrapper around ProcessPoolExecutor forks in a new process we control
-        log.info("Creating subprocess pool with %d workers", get_compile_threads())
-        pool = SubprocPool(get_compile_threads())
+        log.info(
+            "Creating '%s' pool with %d workers",
+            config.worker_start_method,
+            get_compile_threads(),
+        )
+
+        pool: AnyPool
+        if config.worker_start_method == "subprocess":
+            # Wrapper around ProcessPoolExecutor forks in a new process we control
+            pool = SubprocPool(get_compile_threads())
+        else:
+            if config.worker_start_method == "spawn":
+                # Avoid creating pools in the spawned subprocs themselves:
+                os.environ["TORCH_WARM_POOL"] = "0"
+            pre_fork_setup()
+            ctx = multiprocessing.get_context(config.worker_start_method)
+            pool = ProcessPoolExecutor(
+                get_compile_threads(),
+                mp_context=ctx,
+                initializer=partial(_async_compile_initializer, os.getpid()),
+            )
+            # when this pool is created in a subprocess object, the normal exit handler
+            # doesn't run, and we need to register our own handler.
+            # exitpriority has to be high, because another one of the finalizers will
+            # kill the worker thread that sends the shutdown message to the workers...
+            multiprocessing.util.Finalize(None, pool.shutdown, exitpriority=sys.maxsize)
 
         # Set an attribute we can check to see if the pool is ready.
-        pool.ready_future = pool.submit(AsyncCompile._get_ready)  # type: ignore[attr-defined]
+        pool.ready_future = pool.submit(AsyncCompile._get_ready)  # type: ignore[union-attr]
         _pool_set.add(pool)
         return pool
 
@@ -171,7 +204,7 @@ class AsyncCompile:
     def use_process_pool(self):
         return (
             get_compile_threads() > 1
-            and self.process_pool().ready_future.done()  # type: ignore[attr-defined]
+            and self.process_pool().ready_future.done()  # type: ignore[union-attr]
         )
 
     def triton(self, kernel_name: str, source_code: str, device_str: str = "cuda"):
@@ -186,14 +219,20 @@ class AsyncCompile:
 
         kernel = TritonCodeCache.load(kernel_name, source_code)
         if self.use_process_pool():
-            set_feature_use(
-                "pytorch/inductor:enable_parallel_compile_version (post_warmup)", True
-            )
+            set_feature_use("parallel_compile_post_warmup", True)
             # We want to support changing these env vars after (and while) the
             # process pool is running, so pass them to the subprocess to reset.
             env_vars = ["TORCHINDUCTOR_CACHE_DIR", "TRITON_CACHE_DIR"]
             extra_env = {v: os.environ[v] for v in env_vars if v in os.environ}
-            return TritonFuture(
+
+            future_cache = get_future_cache()
+
+            if future := future_cache.get(source_code, None):
+                counters["inductor"]["async_compile_cache_hit"] += 1
+                return future
+
+            counters["inductor"]["async_compile_cache_miss"] += 1
+            future = TritonFuture(
                 kernel,
                 self.process_pool().submit(
                     _worker_compile_triton,
@@ -201,10 +240,11 @@ class AsyncCompile:
                     extra_env,
                 ),
             )
+            future_cache[source_code] = future
+            return future
+
         else:
-            set_feature_use(
-                "pytorch/inductor:enable_parallel_compile_version (post_warmup)", False
-            )
+            set_feature_use("parallel_compile_post_warmup", False)
             with dynamo_timed(
                 "async_compile.precompile",
                 log_pt2_compile_event=True,
@@ -228,7 +268,7 @@ class AsyncCompile:
             get_result = CppCodeCache.load_async(source_code, submit_fn=self.submit)
             return LambdaFuture(lambda: get_result().kernel)
 
-    def cpp_pybinding(self, argtypes: List[str], source_code: str):
+    def cpp_pybinding(self, argtypes: list[str], source_code: str):
         kernel_code_log.info("CPP+Bindings Kernel:\n%s", source_code)
         if get_compile_threads() <= 1:
             return CppPythonBindingsCodeCache.load_pybinding(argtypes, source_code)
@@ -277,7 +317,7 @@ class AsyncCompile:
             )
             return LambdaFuture(get_result)
 
-    def wait(self, scope: Dict[str, Any]) -> None:
+    def wait(self, scope: dict[str, Any]) -> None:
         with dynamo_timed(
             "async_compile.wait",
             log_pt2_compile_event=True,

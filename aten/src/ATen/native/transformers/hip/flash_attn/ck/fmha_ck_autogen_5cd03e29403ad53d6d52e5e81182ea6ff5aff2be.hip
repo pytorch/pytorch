@@ -76,9 +76,5 @@ float fmha_fwd_<trait_0>(const ck_tile::stream_config& s, fmha_fwd_args a)
     auto [kargs, grids] = fmha_fwd_create_kargs_and_grids<k_>(a);
     constexpr dim3 blocks             = k_::BlockSize();
     constexpr ck_tile::index_t kBlockPerCu = k_::kBlockPerCu;
-#if (defined(__gfx90a__) || defined(__gfx942__))
-    return ck_tile::launch_kernel(s, ck_tile::make_kernel<blocks.x, kBlockPerCu>(k_{}, grids, blocks, 0, kargs));
-#else
-    return 0.0;
-#endif
+    return ck_tile::launch_kernel(s, ck_tile::make_kernel_pt<blocks.x, kBlockPerCu>(k_{}, grids, blocks, 0, kargs));
 }

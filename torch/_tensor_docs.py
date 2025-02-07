@@ -2749,6 +2749,7 @@ add_docstr_all(
     "is_pinned",
     r"""
 Returns true if this tensor resides in pinned memory.
+By default, the device pinned memory on will be the current :ref:`accelerator<accelerators>`.
 """,
 )
 
@@ -6397,7 +6398,8 @@ See :func:`torch.dsplit`
 add_docstr_all(
     "stft",
     r"""
-stft(frame_length, hop, fft_size=None, return_onesided=True, window=None, pad_end=0) -> Tensor
+stft(frame_length, hop, fft_size=None, return_onesided=True, window=None,
+ pad_end=0, align_to_window=None) -> Tensor
 
 See :func:`torch.stft`
 """,
@@ -6465,6 +6467,7 @@ add_docstr_all(
 pin_memory() -> Tensor
 
 Copies the tensor to pinned memory, if it's not already pinned.
+By default, the device pinned memory on will be the current :ref:`accelerator<accelerators>`.
 """,
 )
 

@@ -2,7 +2,7 @@
 
 import logging
 import weakref
-from typing import Dict, List, TYPE_CHECKING
+from typing import TYPE_CHECKING
 
 import torch
 from torch._logging import getArtifactLogger
@@ -84,8 +84,8 @@ class OptimizerVariable(UserDefinedObjectVariable):
         self,
         tx,
         name,
-        args: "List[VariableTracker]",
-        kwargs: "Dict[str, VariableTracker]",
+        args: "list[VariableTracker]",
+        kwargs: "dict[str, VariableTracker]",
     ) -> "VariableTracker":
         """This is an optimization to avoid tracing the very slow initialization of the optimizer"""
         if name == "_init_group":
@@ -293,7 +293,9 @@ class OptimizerVariable(UserDefinedObjectVariable):
                 else:
                     install_guard(grad_source.make_guard(GuardBuilder.CONSTANT_MATCH))
 
-            if not all_static and perf_hint_log.isEnabledFor(logging.WARNING):
+            # Note: to avoid spam logs only warn if perf hint artifact is enabled
+            # (NB: artifacts are only enabled at the debug or warning level)
+            if not all_static and perf_hint_log.isEnabledFor(logging.DEBUG):
                 non_static_grads = [src.name() for src in non_static_grads]
                 perf_hint_log.warning(
                     (

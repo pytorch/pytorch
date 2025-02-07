@@ -1,6 +1,5 @@
 # mypy: allow-untyped-decorators
 # mypy: allow-untyped-defs
-from typing import Tuple
 
 import torch
 from torch.ao.quantization.fake_quantize import _is_symmetric_quant
@@ -61,7 +60,7 @@ class AdaroundFakeQuantizer(FakeQuantize):
         self.use_soft_rounding = True
 
     @torch.jit.export
-    def calculate_qparams(self) -> Tuple[torch.Tensor, torch.Tensor]:
+    def calculate_qparams(self) -> tuple[torch.Tensor, torch.Tensor]:
         return self.scale, self.zero_point
 
     @torch.jit.export
