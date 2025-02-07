@@ -1036,6 +1036,7 @@ static void lu_unpack_mps_impl(const Tensor& LU_data,
     auto stream = getCurrentMPSStream();
     auto device = MPSDevice::getInstance()->device();
     auto applyPivotsPSO = lib.getPipelineStateForFunc("applyPivots");
+     uint32_t maxThreadsPerGroup = [applyPivotsPSO maxTotalThreadsPerThreadgroup];
 
     auto pivots = (LU_pivots.dim() == 1) ? LU_pivots.sub(1) : LU_pivots.view({batchSize, -1}).sub(1);
 
@@ -1044,7 +1045,7 @@ static void lu_unpack_mps_impl(const Tensor& LU_data,
         auto computeEncoder = stream->commandEncoder();
         mtl_setArgs(computeEncoder, P, pivots, r, k);
         [computeEncoder setComputePipelineState:applyPivotsPSO];
-        mtl_dispatch1DJob(computeEncoder, batchSize);
+        mtl_dispatch1DJob(computeEncoder, batchSize*maxThreadsPerGroup);
       });
     }
   }
