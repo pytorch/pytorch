@@ -1,6 +1,7 @@
 # Owner(s): ["module: inductor"]
 import importlib
-from typing import Any, Callable, List, Optional
+from typing import Any, Callable, Optional
+from unittest import skipIf
 
 import torch
 import torch.utils._pytree as pytree
@@ -55,7 +56,7 @@ class CodegenInductorTest(InductorTestCase):
 
         return result, code
 
-    def count_code(self, substr: str, code: List[str], expected: Optional[int]):
+    def count_code(self, substr: str, code: list[str], expected: Optional[int]):
         count = sum(prog.count(substr) for prog in code)
         if expected is not None:
             self.assertEqual(count, expected)
@@ -83,6 +84,7 @@ class CodegenInductorTest(InductorTestCase):
             self.count_code("= reinterpret_tensor(", code, 2)
 
     @requires_gpu()
+    @skipIf(GPU_TYPE == "mps", "Triton is not available for MPS")
     def test_kernel_fusion_thresholds(self):
         def func(a, b):
             tmp0 = a + 1
