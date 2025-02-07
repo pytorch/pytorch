@@ -9,6 +9,7 @@ import torch._dynamo.test_case
 import torch._dynamo.testing
 from torch._dynamo.exc import InternalTorchDynamoError, Unsupported
 from torch._dynamo.testing import EagerAndRecordGraphs, normalize_gm
+from torch._dynamo.utils import counters
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
@@ -155,6 +156,182 @@ class GraphModule(torch.nn.Module):
         return (add,)
 """,
         )
+
+    def test_reconstruct_generator_with_local_var_mutation(self):
+        def whoo(t):
+            x = 0
+            yield t.sin() + x
+            x += 1
+            yield t.cos() + x
+            x += 1
+            yield t.tan() + x
+
+        @torch.compile(backend="eager", fullgraph=False)
+        def fn(t):
+            gen = whoo(t)
+            next(gen)
+            return t.sin(), gen
+
+        t = torch.randn(2)
+        y, g = fn(t)
+        self.assertEqual(y, t.sin())
+        self.assertEqual(list(g), [t.cos() + 1, t.tan() + 2])
+
+    def test_reconstruct_generator_with_dict_mutation(self):
+        counters.clear()
+
+        def whoo(t, d):
+            d[2] = t
+            yield t.sin()
+            yield t.cos()
+            d[3] = t + 1
+            yield t.tan()
+
+        @torch.compile(backend="eager", fullgraph=False)
+        def fn(t, d):
+            gen = whoo(t, d)
+            next(gen)
+            return t.sin(), whoo(t, d)
+
+        t = torch.randn(2)
+        d = {1: t}
+        fn(t, d)
+        self.assertEqual(len(counters["unimplemented"]), 1)
+        self.assertEqual(
+            dict(counters["unimplemented"]),
+            {
+                "Cannot reconstruct a generator with variable mutations. "
+                "Dynamo needs to fully exhaust the generator, which may cause "
+                "unintended variable modifications.": 1
+            },
+        )
+
+    def test_reconstruct_generator_with_dict_mutation_before(self):
+        def whoo(t, d):
+            d[2] = t
+            yield t.sin()
+            yield t.cos()
+            yield t.tan()
+
+        @torch.compile(backend="eager", fullgraph=False)
+        def fn(t, d):
+            gen = whoo(t, d)
+            next(gen)
+            return t.sin(), gen
+
+        t = torch.randn(2)
+        d = {1: t}
+        y, g = fn(t, d)
+        self.assertEqual(y, t.sin())
+        self.assertEqual(list(g), [t.cos(), t.tan()])
+        self.assertEqual(d, {1: t, 2: t})
+
+    def test_reconstruct_generator_with_object_mutation(self):
+        class Counter:
+            def __init__(self):
+                self.x = 0
+
+            def incr(self):
+                self.x += 1
+
+        def whoo(t, c):
+            c.incr()
+            yield t.sin()
+            yield t.cos()
+            c.incr()
+            yield t.tan()
+
+        @torch.compile(backend="eager", fullgraph=False)
+        def fn(t, c):
+            gen = whoo(t, c)
+            next(gen)
+            return t.sin(), gen
+
+        t = torch.randn(2)
+        c = Counter()
+        fn(t, c)
+        self.assertEqual(len(counters["unimplemented"]), 1)
+        self.assertEqual(
+            dict(counters["unimplemented"]),
+            {
+                "Cannot reconstruct a generator with variable mutations. "
+                "Dynamo needs to fully exhaust the generator, which may cause "
+                "unintended variable modifications.": 1
+            },
+        )
+
+    def test_reconstruct_generator_with_object_mutation_before(self):
+        class Counter:
+            def __init__(self):
+                self.x = 0
+
+            def incr(self):
+                self.x += 1
+
+        def whoo(t, c):
+            c.incr()
+            yield t.sin()
+            yield t.cos()
+            yield t.tan()
+
+        @torch.compile(backend="eager", fullgraph=False)
+        def fn(t, c):
+            gen = whoo(t, c)
+            next(gen)
+            # We should be able to reconstruct the generator as there's no object
+            # mutation after the first yield
+            return t.sin(), gen
+
+        t = torch.randn(2)
+        c = Counter()
+        y, g = fn(t, c)
+        self.assertEqual(c.x, 1)
+        self.assertEqual(y, t.sin())
+        self.assertEqual(list(g), [t.cos(), t.tan()])
+
+    def test_graph_break_and_reconstruct_generator(self):
+        def whoo(t):
+            yield t.sin()
+            yield t.cos()
+            yield t.tan()
+
+        def g(t):
+            torch._dynamo.graph_break()
+
+        @torch.compile(backend="eager", fullgraph=False)
+        def fn(t):
+            gen = whoo(t)
+            next(gen)
+            g(t)
+            return t.sin(), list(gen)
+
+        t = torch.randn(2)
+        y, gen = fn(t)
+        self.assertEqual(y, t.sin())
+        self.assertEqual(list(gen), [t.cos(), t.tan()])
+
+    def test_graph_break_in_generator_while_reconstructing(self):
+        counters.clear()
+
+        def whoo():
+            yield 1
+            torch._dynamo.graph_break()
+            yield 2
+
+        eager = EagerAndRecordGraphs()
+
+        @torch.compile(backend=eager, fullgraph=False)
+        def fn(t):
+            gen = whoo()
+            s = next(gen)
+            torch._dynamo.graph_break()
+            s += next(gen)
+            return t + s
+
+        t = torch.randn(2)
+        y = fn(t)
+        self.assertEqual(y, t + 3)
+        self.assertEqual(len(eager.graphs), 0)
 
     def test_generator_as_argument(self):
         # The inline tracer needs to be kept in sync if an already advanced generator
@@ -404,6 +581,22 @@ class GraphModule(torch.nn.Module):
         with self.assertRaises(StopIteration):
             next(gen)
 
+    @unittest.expectedFailure
+    def test_reconstruct_generator_tensor_mutation(self):
+        def whoo(t):
+            yield t.sin_()
+            yield t.cos_()
+
+        def fn(t):
+            gen = whoo(t)
+            return gen
+
+        with self.assertRaisesRegex(
+            Unsupported,
+            "Cannot reconstruct a generator with variable mutations",
+        ):
+            self._compile_check(fn)
+
     def test_subgenerator(self):
         def subgen(t):
             yield t + 1
@@ -509,8 +702,8 @@ class GraphModule(torch.nn.Module):
         got = torch.compile(backend="eager", fullgraph=False)(fn)(t)
         self.assertEqual(expected, got)
 
-    @unittest.expectedFailure
     def test_generator_with_side_effects(self):
+        counters.clear()
         i = 0
 
         def whoo(t):
@@ -519,14 +712,22 @@ class GraphModule(torch.nn.Module):
                 i += 1
                 yield t + j
 
+        @torch.compile(backend="eager", fullgraph=True)
         def fn(t):
             return whoo(t), t.sin()
 
         t = torch.randn(2)
-        with self.assertRaises(Unsupported):
-            fn(t)
+        fn(t)
+        self.assertEqual(len(counters["unimplemented"]), 1)
+        self.assertEqual(
+            dict(counters["unimplemented"]),
+            {
+                "Cannot reconstruct a generator with variable mutations. "
+                "Dynamo needs to fully exhaust the generator, which may cause "
+                "unintended variable modifications.": 1
+            },
+        )
 
-    @unittest.expectedFailure
     def test_subgenerator_with_side_effects(self):
         i = 0
 
@@ -547,13 +748,20 @@ class GraphModule(torch.nn.Module):
             i += 1
             yield t + 4
 
+        @torch.compile(backend="eager", fullgraph=True)
         def fn(t):
             return whoo(t), t.sin()
 
-        with self.assertRaises(Unsupported):
-            self._compile_check(fn)
+        t = torch.randn(2)
+        gen, y = fn(t)
+        self.assertEqual(y, t.sin())
+        self.assertEqual(len(list(gen)), 5)
+        self.assertTrue(
+            "Cannot reconstruct a generator with variable mutations. "
+            "Dynamo needs to fully exhaust the generator, which may cause "
+            "unintended variable modifications." in dict(counters["unimplemented"])
+        )
 
-    @unittest.expectedFailure
     def test_generator_with_side_effects_graph_break(self):
         i = 0
 
@@ -567,11 +775,18 @@ class GraphModule(torch.nn.Module):
         def fn(t):
             gen = whoo(t)
             torch._dynamo.graph_break()
-            return list(zip(range(3), gen))
+            next(gen)
+            return gen, t.sin()
 
         t = torch.randn(2)
-        with self.assertRaises(Unsupported):
-            fn(t)
+        gen, y = fn(t)
+        self.assertEqual(y, t.sin())
+        self.assertEqual(len(list(gen)), 4)
+        self.assertTrue(
+            "Cannot reconstruct a generator with variable mutations. "
+            "Dynamo needs to fully exhaust the generator, which may cause "
+            "unintended variable modifications." in dict(counters["unimplemented"])
+        )
 
     def test_generator_with_side_effects_graph_break_2(self):
         i = 0
@@ -583,15 +798,16 @@ class GraphModule(torch.nn.Module):
                 yield t + j
                 torch._dynamo.graph_break()
 
-        @torch.compile(backend="eager", fullgraph=False)
+        eager = EagerAndRecordGraphs()
+
+        @torch.compile(backend=eager, fullgraph=False)
         def fn(t):
             gen = whoo(t)
             return list(zip(range(3), gen))
 
         t = torch.randn(2)
-        y = fn(t)
-        self.assertEqual(i, 3)
-        self.assertEqual(y, [(0, t), (1, t + 1), (2, t + 2)])
+        fn(t)
+        self.assertEqual(len(eager.graphs), 0)
 
     @unittest.skipIf(sys.version_info < (3, 12), "Test CLEANUP_THROW")
     @unittest.expectedFailure
