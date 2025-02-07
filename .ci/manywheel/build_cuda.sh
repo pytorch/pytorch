@@ -168,7 +168,7 @@ if [[ $CUDA_VERSION == 12* ]]; then
             "libnvrtc.so.12"
             "libnvrtc-builtins.so"
         )
-        if [[ $CUDA_VERSION == 12.4]]; then
+        if [[ $CUDA_VERSION == 12.4 ]]; then
             # Turn USE_CUFILE off for CUDA 12.4 since 1.9.0.20 is not available in PYPI
             export USE_CUFILE=0
         else
@@ -197,7 +197,7 @@ if [[ $CUDA_VERSION == 12* ]]; then
             '$ORIGIN/../../nvidia/nccl/lib'
             '$ORIGIN/../../nvidia/nvtx/lib'
         )
-        if [[ $CUDA_VERSION == 12.4]]; then
+        if [[ $CUDA_VERSION == 12.4 ]]; then
             # Turn USE_CUFILE off for CUDA 12.4 since 1.9.0.20 is not available in PYPI
             export USE_CUFILE=0
         else
