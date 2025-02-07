@@ -329,6 +329,37 @@ def to_fp8_saturated(
 
     return x.to(fp8_dtype)
 
+# copied from https://github.com/drisspg/transformer_nuggets/blob/main/transformer_nuggets/mx/to_blocked.py
+def ceil_div(a, b):
+    return (a + b - 1) // b
+
+def to_blocked(input_matrix) -> torch.Tensor:
+    """
+    Rearrange a large matrix by breaking it into blocks and applying the rearrangement pattern.
+
+    See:
+        https://docs.nvidia.com/cuda/cublas/index.html#d-block-scaling-factors-layout
+
+    Args:
+        input_matrix: Input tensor of shape (H, W)
+
+    Returns:
+        Rearranged tensor of shape (32*ceil_div(H,128), 16*ceil_div(W,4))
+    """
+    rows, cols = input_matrix.shape
+    n_row_blocks = ceil_div(rows, 128)
+    n_col_blocks = ceil_div(cols, 4)
+
+    # Pad out and view as tiles of (128, 4)
+    padded = torch.nn.functional.pad(input_matrix, (0, -cols % 4, 0, -rows % 128))
+    blocks = padded.view(n_row_blocks, 128, n_col_blocks, 4).permute(0, 2, 1, 3)
+
+    # rearrange all tiles
+    rearranged = blocks.reshape(-1, 4, 32, 4).transpose(1, 2).reshape(-1, 32, 16)
+
+    # Layout rearranged tiles according to second pic
+    return rearranged.flatten()
+
 @unittest.skipIf(not torch.cuda.is_available(), "CUDA not found")
 class TestFP8MatmulCuda(TestCase):
 
@@ -730,6 +761,59 @@ class TestFP8MatmulCuda(TestCase):
         out_fp8 = f(x_fp8, y_fp8, scale_a, scale_b, out_dtype=out_dtype)
         self.assertEqual(out_dtype, out_fp8.dtype)
         self.assertEqual(out_fp32, out_fp8.to(torch.float))
+
+    # TODO(before land): real skip condition, should only run on CUDA 12.8+ with CUDA capability 10.0+
+    @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
+    # TODO also test fp4_x2
+    @parametrize("elem_dtype", [torch.float8_e4m3fn,])
+    def test_mx_blockwise(self, elem_dtype) -> None:
+
+        # inspiration: https://github.com/pytorch/ao/pull/1625
+
+        # not for land, need to move to in-core dtypes
+        from enum import IntEnum
+        class DataType(IntEnum):
+            DEFAULT = 0
+            E8M0 = 1
+            FP4 = 2
+            UFP8 = 3
+
+        device = "cuda"
+        # TODO other shapes
+        M, K, N = 256, 256, 256
+        BLOCK_SIZE = 32
+
+        assert M == K == N
+        A = torch.eye(M, device=device, dtype=torch.uint8).to(elem_dtype)
+        B = torch.eye(M, device=device, dtype=torch.uint8).to(elem_dtype).t()
+        A_scale = torch.full((M, K // BLOCK_SIZE), 127, device=device, dtype=torch.uint8)
+        B_scale = torch.full((N, K // BLOCK_SIZE), 127, device=device, dtype=torch.uint8)
+
+        A_scale = to_blocked(A_scale)
+        B_scale = to_blocked(B_scale)
+
+        # TODO fast_accum
+
+        C = torch._scaled_mm(
+            A,
+            B,
+            # scales are switched
+            B_scale,
+            A_scale,
+            bias=None,
+            scale_result=None,
+            out_dtype=torch.bfloat16,
+            use_fast_accum=False,
+            a_dtype=None,
+            b_dtype=None,
+            scale_dtype=DataType.E8M0,
+        )
+        print(C)
+
+        # TODO matches expected numerics with eye
+        # TODO fp4x2
+
+
 
 
 @unittest.skipIf(TEST_WITH_ROCM, "ROCm doesn't support CUTLASS")
