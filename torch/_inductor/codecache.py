@@ -43,6 +43,7 @@ from typing import (
     TypeVar,
     Union,
 )
+from typing_extensions import Self
 
 import torch
 import torch.distributed as dist
@@ -3027,7 +3028,7 @@ class DLLWrapper:
 
         return _wrapped_func
 
-    def __enter__(self) -> DLLWrapper:  # noqa: PYI034
+    def __enter__(self) -> Self:
         return self
 
     def __exit__(self, *args: Any) -> None:
