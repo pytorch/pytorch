@@ -21,7 +21,6 @@ from .. import config, polyfills, variables
 from ..exc import (
     AttributeMutationError,
     ObservedAttributeError,
-    raise_observed_exception,
     unimplemented,
     Unsupported,
     UserError,
@@ -874,7 +873,7 @@ class BuiltinVariable(VariableTracker):
                             *[x.as_python_constant() for x in args],
                         )
                     except Exception as exc:
-                        raise_observed_exception(type(exc), tx)
+                        unimplemented(f"constant fold exception: {repr(exc)}")
                     return VariableTracker.build(tx, res)
 
             else:
@@ -1219,12 +1218,6 @@ class BuiltinVariable(VariableTracker):
 
                 # Inline the user function
                 return tx.inline_user_function_return(user_func_variable, [arg], {})
-        elif isinstance(arg, (variables.ExceptionVariable,)):
-            if len(arg.args) == 0:
-                value = f"{arg.exc_type}"
-            else:
-                value = ", ".join(a.as_python_constant() for a in arg.args)
-            return variables.ConstantVariable.create(value=value)
 
     def _call_min_max(self, tx: "InstructionTranslator", *args):
         if len(args) == 1 and args[0].has_force_unpack_var_sequence(tx):
