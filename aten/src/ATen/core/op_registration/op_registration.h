@@ -330,9 +330,9 @@ public:
     // enable_if: only enable it if Lambda is a functor (note: lambdas are functors)
     std::enable_if_t<
         guts::is_functor<std::decay_t<Lambda>>::value
-        && !std::is_same<typename guts::infer_function_traits_t<std::decay_t<Lambda>>::func_type, KernelFunction::BoxedKernelFunction>::value,
+        && !std::is_same_v<typename guts::infer_function_traits_t<std::decay_t<Lambda>>::func_type, KernelFunction::BoxedKernelFunction>,
         Options&&> kernel(DispatchKey dispatch_key, Lambda&& functor) && {
-      static_assert(!std::is_base_of<OperatorKernel, std::decay_t<Lambda>>::value, "The kernel(x) API for registering a kernel is only meant to be used with lambdas. Your kernel is a functor. Please use the kernel<Functor>() API instead.");
+      static_assert(!std::is_base_of_v<OperatorKernel, std::decay_t<Lambda>>, "The kernel(x) API for registering a kernel is only meant to be used with lambdas. Your kernel is a functor. Please use the kernel<Functor>() API instead.");
 
       // We don't support stateful lambdas (i.e. lambdas with a capture), because their
       // behavior would be nonobvious. A functor kernel with cache gets a new instance of
@@ -371,9 +371,9 @@ public:
     // enable_if: only enable it if Lambda is a functor (note: lambdas are functors)
     std::enable_if_t<
         guts::is_functor<std::decay_t<Lambda>>::value
-        && !std::is_same<typename guts::infer_function_traits_t<std::decay_t<Lambda>>::func_type, KernelFunction::BoxedKernelFunction>::value,
+        && !std::is_same_v<typename guts::infer_function_traits_t<std::decay_t<Lambda>>::func_type, KernelFunction::BoxedKernelFunction>,
         Options&&> catchAllKernel(Lambda&& lambda) && {
-      static_assert(!std::is_base_of<OperatorKernel, std::decay_t<Lambda>>::value, "The kernel(x) API for registering a kernel is only meant to be used with lambdas. Your kernel is a functor. Please use the kernel<Functor>() API instead.");
+      static_assert(!std::is_base_of_v<OperatorKernel, std::decay_t<Lambda>>, "The kernel(x) API for registering a kernel is only meant to be used with lambdas. Your kernel is a functor. Please use the kernel<Functor>() API instead.");
 
       // We don't support stateful lambdas (i.e. lambdas with a capture), because their
       // behavior would be nonobvious.

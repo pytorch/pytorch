@@ -12,7 +12,7 @@ In particular, the following analyses are provided:
 
 import contextlib
 import itertools
-from typing import Any, Dict, List, Optional, Tuple, Union
+from typing import Any, Optional, Union
 
 import torch
 import torch.utils._pytree as pytree
@@ -40,8 +40,8 @@ zip = strict_zip
 
 def remove_dupe_metadata(
     m: ViewAndMutationMeta,
-    keep_arg_mask: List[bool],
-    add_dupe_map: List[int],
+    keep_arg_mask: list[bool],
+    add_dupe_map: list[int],
 ) -> ViewAndMutationMeta:
     assert len(m.input_info) == len(keep_arg_mask)
     # Easy invariant: the first argument should never be a dupe (it will be kept)
@@ -104,12 +104,12 @@ def create_synthetic_base_metadata(
     m: ViewAndMutationMeta,
     # Maps each outer argument idx to its inner idx (or, if this outer arg is generated from a
     # synthetic base, you get a tuple of (i, TensorMeta), telling you the base tensor idx, and view metadata)
-    synthetic_base_info: List[Union[int, Tuple[int, torch.Tensor]]],
-    outer_args: List[Any],
-    inner_args: List[Any],
-) -> Tuple[ViewAndMutationMeta, List[int]]:
+    synthetic_base_info: list[Union[int, tuple[int, torch.Tensor]]],
+    outer_args: list[Any],
+    inner_args: list[Any],
+) -> tuple[ViewAndMutationMeta, list[int]]:
     # maps inner arg indices to outer arg indices
-    synthetic_base_to_indices: Dict[int, List[int]] = {}
+    synthetic_base_to_indices: dict[int, list[int]] = {}
     for inner_idx in range(len(inner_args)):
         outer_aliased_indices_of_current_base_arg = [
             outer_idx
@@ -348,10 +348,10 @@ def create_graph_signature(
     in_spec: pytree.TreeSpec,
     out_spec: pytree.TreeSpec,
     *,
-    user_args_flat: List[Tensor],
-    params_and_buffers_flat: List[Tensor],
-    param_names: List[str],
-    buffer_names: List[str],
+    user_args_flat: list[Tensor],
+    params_and_buffers_flat: list[Tensor],
+    param_names: list[str],
+    buffer_names: list[str],
     trace_joint: bool,
     num_user_fw_outs: Optional[int],
     loss_index: Optional[int],

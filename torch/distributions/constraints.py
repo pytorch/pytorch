@@ -1,4 +1,8 @@
 # mypy: allow-untyped-defs
+
+from typing import Any, Callable, Optional
+
+
 r"""
 The following constraints are implemented:
 
@@ -198,13 +202,17 @@ class _DependentProperty(property, _Dependent):
     """
 
     def __init__(
-        self, fn=None, *, is_discrete=NotImplemented, event_dim=NotImplemented
-    ):
+        self,
+        fn: Optional[Callable[..., Any]] = None,
+        *,
+        is_discrete: Optional[bool] = NotImplemented,
+        event_dim: Optional[int] = NotImplemented,
+    ) -> None:
         super().__init__(fn)
         self._is_discrete = is_discrete
         self._event_dim = event_dim
 
-    def __call__(self, fn):  # type: ignore[override]
+    def __call__(self, fn: Callable[..., Any]) -> "_DependentProperty":  # type: ignore[override]
         """
         Support for syntax to customize static attributes::
 

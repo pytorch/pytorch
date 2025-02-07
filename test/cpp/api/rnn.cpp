@@ -499,6 +499,8 @@ TEST_F(RNNTest, BidirectionalGRUReverseForward_CUDA) {
 // Reverse forward of bidirectional LSTM should act
 // as regular forward of unidirectional LSTM
 void BidirectionalLSTMReverseForwardTest(bool cuda) {
+  // ROCm 6.3 had a regression in RNN behavior requiring ASSERT_NEAR
+  constexpr auto tolerance = 1e-5;
   auto opt = torch::TensorOptions()
                  .dtype(torch::kFloat32)
                  .requires_grad(false)
@@ -532,9 +534,10 @@ void BidirectionalLSTMReverseForwardTest(bool cuda) {
       std::get<0>(bi_output).size(0), std::get<0>(reverse_output).size(0));
   auto size = std::get<0>(bi_output).size(0);
   for (int i = 0; i < size; i++) {
-    ASSERT_EQ(
+    ASSERT_NEAR(
         std::get<0>(bi_output)[i][0][1].item<float>(),
-        std::get<0>(reverse_output)[size - 1 - i][0][0].item<float>());
+        std::get<0>(reverse_output)[size - 1 - i][0][0].item<float>(),
+        tolerance);
   }
   // The hidden states of the reversed LSTM sits
   // in the odd indices in the first dimension.

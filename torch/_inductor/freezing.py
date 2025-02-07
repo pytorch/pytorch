@@ -4,7 +4,7 @@ from __future__ import annotations
 import itertools
 import logging
 import weakref
-from typing import Any, List, Optional
+from typing import Any, Optional
 
 import torch
 import torch.utils._pytree as pytree
@@ -12,6 +12,7 @@ from torch._dynamo.utils import dynamo_timed, lazy_format_graph_code
 from torch._functorch.aot_autograd import MutationType
 from torch._functorch.compile_utils import fx_graph_cse
 from torch._inductor.constant_folding import constant_fold, replace_node_with_constant
+from torch._inductor.freezing_utils import enter_freezing, record_has_frozen_params
 from torch._inductor.fx_passes.freezing_patterns import freezing_passes
 from torch._inductor.fx_passes.post_grad import view_to_reshape
 
@@ -28,7 +29,7 @@ def replace_params_with_constants(
     gm: torch.fx.GraphModule,
     flat_params: list[Any],
     fw_metadata: torch._functorch.aot_autograd.ViewAndMutationMeta,
-) -> List[int]:
+) -> list[int]:
     """
     Replaces the parameters of a PyTorch GraphModule with constants wherever possible.
     Returns a list of indices representing the input parameters that were not converted to constants.
@@ -66,8 +67,8 @@ def replace_params_with_constants(
 def freeze(
     dynamo_gm: torch.fx.GraphModule,
     aot_autograd_gm: torch.fx.GraphModule,
-    example_inputs: List[torch._subclasses.FakeTensor],
-) -> tuple[torch.fx.GraphModule, List[int]]:
+    example_inputs: list[torch._subclasses.FakeTensor],
+) -> tuple[torch.fx.GraphModule, list[int]]:
     """
     Inlines parameters that are not mutated into constants and optimizes the graph through constant propagation
     and other techniques. If enabled, the function also discards the original parameters of the module for memory efficiency.
@@ -83,6 +84,15 @@ def freeze(
         Tuple[torch.fx.GraphModule, List[int]]: A tuple containing the frozen GraphModule and a list of indices
         of the inputs that were preserved (not turned into constants).
     """
+    with enter_freezing():
+        return _freeze(dynamo_gm, aot_autograd_gm, example_inputs)
+
+
+def _freeze(
+    dynamo_gm: torch.fx.GraphModule,
+    aot_autograd_gm: torch.fx.GraphModule,
+    example_inputs: list[torch._subclasses.FakeTensor],
+) -> tuple[torch.fx.GraphModule, list[int]]:
     # We have convert conv's weight to channels last which may meet error for .view
     # when doing fake_tensor_prop. So we need to convert view to reshape first.
     # See the details in fx_codegen_and_compile of compile_fx.py.
@@ -119,6 +129,7 @@ def freeze(
         "%s", lazy_format_graph_code("FROZEN GRAPH", aot_autograd_gm, colored=True)
     )
 
+    record_has_frozen_params(aot_autograd_gm)
     return aot_autograd_gm, preserved_arg_indices
 
 
