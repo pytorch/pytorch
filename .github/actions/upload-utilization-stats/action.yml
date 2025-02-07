@@ -35,5 +35,17 @@ runs:
         echo "workflow_Name: ${{inputs.workflow_name}}"
         echo "job_id: ${{inputs.job_id}}"
         echo "job_name:  ${{inputs.job_name}}"
+    - name: Upload utilizatoin stats to s3
+      shell: bash
+      run: |
+        python3 -m tools.stats.upload_utilization_stats.upload_utilization_stats
+        --workflow-run-id ${{inputs.workflow_run_id}}
+        --workflow-name ${{inputs.workflow_name}}
+        --workflow-run-attempt ${{inputs.workflow_attempt}}
+        --job-id ${{inputs.job_id}}
+        --job-name ${{inputs.job_name}}
+        -- debug
+      env:
+        BUILD_TIME: ${{ inputs.build-time }}
 
 # TODO():add upload utilization tests script
