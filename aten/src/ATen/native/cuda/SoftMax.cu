@@ -1168,6 +1168,10 @@ void host_softmax_backward(const Tensor &grad_, const Tensor &output_, int64_t d
         can_use_smem &= (!(reinterpret_cast<const uintptr_t>(output.const_data_ptr<scalar_t>()) % ALIGN_BYTES));
         can_use_smem &= !(reinterpret_cast<const uintptr_t>(grad.const_data_ptr<scalar_t>()) % ALIGN_BYTES);
         can_use_smem &= !(dim_size % ILP);
+        // This should not be needed on current generation GPUs because the size of shared memory is so low.
+        // But we add this check to be defensive and future-proof just in case shared memory size goes up
+        // to be so large as to requires 64-bits of addressing.
+        can_use_smem &= dim_size < std::numeric_limits<int32_t>::max();
 
         if (can_use_smem) {
           // TORCH_CHECK(false);
@@ -1210,6 +1214,10 @@ void host_softmax_backward(const Tensor &grad_, const Tensor &output_, int64_t d
         can_use_smem &= (!(reinterpret_cast<const uintptr_t>(output.const_data_ptr<accscalar_t>()) % ALIGN_BYTES));
         can_use_smem &= !(reinterpret_cast<const uintptr_t>(grad.const_data_ptr<accscalar_t>()) % ALIGN_BYTES);
         can_use_smem &= !(dim_size % ILP);
+        // This should not be needed on current generation GPUs because the size of shared memory is so low.
+        // But we add this check to be defensive and future-proof just in case shared memory size goes up
+        // to be so large as to requires 64-bits of addressing.
+        can_use_smem &= dim_size < std::numeric_limits<int32_t>::max();
 
         if (can_use_smem) {
           assert(false);
