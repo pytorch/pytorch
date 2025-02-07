@@ -5,6 +5,7 @@ import torch
 import re
 import unittest
 import functools
+import contextlib
 import os
 from subprocess import CalledProcessError
 import sys
@@ -51,6 +52,8 @@ else:
 HAS_CUDA = torch.cuda.is_available() and HAS_TRITON
 
 HAS_XPU = torch.xpu.is_available() and HAS_TRITON
+
+HAS_MPS = torch.mps.is_available()
 
 HAS_GPU = HAS_CUDA or HAS_XPU
 
@@ -110,7 +113,8 @@ def skip_windows_ci(name: str, file: str) -> None:
             sys.exit(0)
         raise unittest.SkipTest("requires sympy/functorch/filelock")
 
-requires_gpu = functools.partial(unittest.skipIf, not HAS_GPU, "requires gpu")
+# TODO: Remove HAS_MPS condition  when `HAS_GPU` includes HAS_MPS
+requires_gpu = functools.partial(unittest.skipIf, not (HAS_GPU or HAS_MPS), "requires gpu")
 requires_triton = functools.partial(unittest.skipIf, not HAS_TRITON, "requires triton")
 
 def requires_cuda_with_enough_memory(min_mem_required):
@@ -137,3 +141,39 @@ IS_H100 = LazyVal(
 )
 
 IS_BIG_GPU = LazyVal(lambda: HAS_CUDA and is_big_gpu())
+
+def maybe_skip_size_asserts(op):
+    """
+    For certain ops, there meta and eager implementation returns differents
+    strides. This cause size/strides assert fail. Skip adding those
+    asserts for now.
+    """
+    if (
+        op.aten_name
+        in (
+            "fft_hfftn",
+            "fft_hfft",
+            "fft_hfft2",
+            "fft_ihfftn",
+            "fft_fft",
+            "fft_fft2",
+            "fft_fftn",
+            "fft_ifft",
+            "fft_ifft2",
+            "fft_ifftn",
+            "fft_irfft",
+            "fft_irfft2",
+            "fft_irfftn",
+            "fft_ihfft",
+            "fft_ihfft2",
+            "fft_rfft",
+            "fft_rfft2",
+            "fft_rfftn",
+            "linalg_eig",
+            "linalg_eigvals",
+        )
+        and "TORCHINDUCTOR_SIZE_ASSERTS" not in os.environ
+    ):
+        return torch._inductor.config.patch(size_asserts=False)
+    else:
+        return contextlib.nullcontext()
