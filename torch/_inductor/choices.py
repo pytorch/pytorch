@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import typing
-from functools import partial
 from typing import Any, Generator, Optional, TYPE_CHECKING
 
 import sympy
@@ -24,6 +23,7 @@ from .virtualized import V
 
 
 if TYPE_CHECKING:
+    from functools import partial
     from triton import Config as TritonConfig
 
     from torch.utils._ordered_set import OrderedSet
