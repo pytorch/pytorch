@@ -34,6 +34,7 @@ from typing import (
     NamedTuple,
     Optional,
     Protocol,
+    Tuple,
     TYPE_CHECKING,
     TypeVar,
     Union,
@@ -753,7 +754,7 @@ def any_is_symbolic(*args: Any) -> bool:
 
 def get_first_incompatible_cudagraph_node(
     gm: torch.fx.GraphModule,
-) -> Optional[torch.fx.Node]:
+) -> Optional[Tuple[torch.fx.Node, str]]:
     from torch.fx.experimental.symbolic_shapes import free_unbacked_symbols
 
     forbidden_set = OrderedSet(
@@ -792,9 +793,9 @@ def get_first_incompatible_cudagraph_node(
 
     for node in gm.graph.nodes:
         if str(node.target) in forbidden_set:
-            return node
+            return node, "incompatible op"
         if (val := node.meta.get("val")) is not None and free_unbacked_symbols(val):
-            return node
+            return node, "unbacked symint"
     return None
 
 

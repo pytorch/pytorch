@@ -1851,6 +1851,22 @@ if HAS_CUDA and not TEST_WITH_ASAN:
             out = foo(torch.rand([4, 4], device="cuda", requires_grad=True))
             self.assertFalse(self.get_manager().new_graph_id().id == 0)
 
+        def test_unbacked_symint_warning_message(self):
+            @torch.compile(mode="reduce-overhead")
+            def foo(x):
+                return x + 1
+
+            x = torch.randn(2, 3, device="cuda")
+            torch._dynamo.decorators.mark_unbacked(x, 0)
+
+            with capture_stderr() as captured_output:
+                foo(x)
+
+            FileCheck().check(
+                "skipping cudagraphs due to disabling cudagraphs due to unbacked symint arg0_1"
+            ).run(captured_output[0])
+            self.assertEqual(counters["inductor"]["cudagraph_skips"], 1)
+
         @torch._dynamo.config.patch("capture_scalar_outputs", True)
         def test_incompatible_cudagraph_ops_item(self):
             @torch.compile(mode="reduce-overhead")
@@ -1865,10 +1881,8 @@ if HAS_CUDA and not TEST_WITH_ASAN:
                 self.assertEqual(foo(torch.tensor(3, device="cuda")), 3)
                 self.assertEqual(foo(torch.tensor(6, device="cuda")), 6)
 
-            # NOTE: this test is named after incompatible ops, but is not skipping due to incompatible ops.
-            # This should get fixed.
             FileCheck().check(
-                " to incompatible op aten._local_scalar_dense.default"
+                " to unbacked symint aten._local_scalar_dense.default"
             ).run(captured_output[0])
             self.assertEqual(counters["inductor"]["cudagraph_skips"], 1)
 
@@ -1907,7 +1921,7 @@ if HAS_CUDA and not TEST_WITH_ASAN:
                     foo(torch.tensor([1, 0, 0], device="cuda")), torch.tensor([[0]])
                 )
 
-            FileCheck().check("incompatible op aten.nonzero.default").check("foo").run(
+            FileCheck().check(" unbacked symint aten.nonzero.default").check("foo").run(
                 captured_output[0]
             )
             self.assertEqual(counters["inductor"]["cudagraph_skips"], 1)
@@ -1941,7 +1955,7 @@ if HAS_CUDA and not TEST_WITH_ASAN:
                 )
 
             FileCheck().check(
-                "skipping cudagraphs due to incompatible op (nonzero)"
+                "skipping cudagraphs due to unbacked symint (nonzero)"
             ).run(captured_output[0])
             self.assertEqual(counters["inductor"]["cudagraph_skips"], 1)
 
