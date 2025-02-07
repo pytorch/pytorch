@@ -3229,6 +3229,13 @@ def parse_args(args=None):
         help="Enables Memory Snapshot tool for memory deep dives: https://pytorch.org/blog/understanding-gpu-memory-1/",
     )
 
+    parser.add_argument(
+        "--retain-output",
+        action="store_true",
+        help="Enables appending to the already existing output file if it exists \
+            instead of deleting it and creating a new one.",
+    )
+
     group_latency = parser.add_mutually_exclusive_group()
     group_latency.add_argument(
         "--cold-start-latency",
@@ -3556,6 +3563,15 @@ def run(runner, args, original_dir=None):
             # some of the models do not support use_deterministic_algorithms
             torch.use_deterministic_algorithms(True)
         os.environ["CUBLAS_WORKSPACE_CONFIG"] = ":4096:8"
+        if args.only is not None and args.only in {
+            "DebertaForQuestionAnswering",
+            "RobertaForQuestionAnswering",
+            "nvidia_deeprecommender",
+            "volo_d1_224",
+        }:
+            # These seem unhappy with numerics of larger cuBLASLt workspace
+            # sizes following #145130 (due to enabling split-k?)
+            torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction = False
         torch.backends.cudnn.deterministic = True
         torch.backends.cudnn.allow_tf32 = False
         torch.backends.cudnn.benchmark = False
@@ -4078,7 +4094,11 @@ def run(runner, args, original_dir=None):
             )
     else:
         metrics.purge_old_log_files()
-        if output_filename and os.path.exists(output_filename):
+        if (
+            output_filename
+            and os.path.exists(output_filename)
+            and not args.retain_output
+        ):
             os.unlink(output_filename)
         if original_dir:
             os.chdir(original_dir)
