@@ -736,7 +736,7 @@ def _foreach_map(subgraph, *args, **kwargs):
     """
     from .subgraph_lowering import PointwiseSubgraphLowering
 
-    inputs = args[0]  # nested tuple
+    inputs = args
 
     gm = subgraph.graph_module
     pw_subgraph = PointwiseSubgraphLowering(gm, root_graph_lowering=V.graph)
