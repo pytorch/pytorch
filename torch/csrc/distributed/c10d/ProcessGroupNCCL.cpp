@@ -1459,7 +1459,11 @@ void ProcessGroupNCCL::shutdown() {
   }
   // Deregister memory pool after finalizing all collectives
   if (memPool_) {
-    deregisterMemPool(memPool_.get());
+    try {
+      deregisterMemPool(memPool_.get());
+    } catch (...) {
+      LOG(ERROR) << logPrefix() << "Failed to deregister memory pool, ignoring";
+    }
   }
   // Tell watchdog to (1) flush its queue and (2) do not use comm objects
   // anymore because I am going to destroy them now
