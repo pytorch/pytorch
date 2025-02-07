@@ -49,7 +49,13 @@ class FxirTestCase(InductorTestCase):
 
         return gms
 
-    def _compile_and_check(self, func, args, expected_num_triton_kernels: int = 1):
+    def _compile_and_check(
+        self,
+        func,
+        args,
+        expected_num_triton_kernels: int = 1,
+        metadata_only: bool = False,
+    ):
         opt = torch.compile(func, fullgraph=True)
 
         # Get the FX graph from the backend.
@@ -62,7 +68,11 @@ class FxirTestCase(InductorTestCase):
         # Check accuracy
         result = gm(*args)[0]
         ref = func(*args)
-        self.assertTrue(torch.allclose(result, ref))
+        if metadata_only:
+            self.assertEqual(result.shape, ref.shape)
+            self.assertEqual(result.dtype, ref.dtype)
+        else:
+            self.assertTrue(torch.allclose(result, ref))
 
         return gm
 
@@ -131,16 +141,64 @@ class FxirTestCase(InductorTestCase):
 
         # Since the program has a random output, just check metadata.
         # Don't check for an exact value.
-        opt = torch.compile(foo, fullgraph=True)
-        (gm,) = self._run_and_capture_graphs(opt, args)
-        result = gm(*args)[0]
-        ref = foo(*args)
-        self.assertEqual(result.shape, ref.shape)
-        self.assertEqual(result.dtype, ref.dtype)
+        gm = self._compile_and_check(
+            foo, args, expected_num_triton_kernels=2, metadata_only=True
+        )
 
         # Check for the fallback kernel.
         num_fallback = self._count_ops(gm, torch.ops.aten.randint.low_out)
         self.assertEqual(num_fallback, 1)
+
+    def test_cat_inputs(self):
+        """
+        Test concatenation of graph inputs.
+        """
+
+        def foo(x, y):
+            return torch.cat((x, y)) + 1
+
+        args = [torch.rand(8, device=self.device) for _ in range(2)]
+        self._compile_and_check(foo, args, expected_num_triton_kernels=1)
+
+    def test_cat_to_alloc(self):
+        """
+        Test concatenation that's optimized out to an allocation.
+        """
+        length = 8
+
+        def foo(x):
+            y, z = tuple(
+                torch.arange(length // 2, device=self.device) for _ in range(2)
+            )
+            return x + torch.cat((y, z))
+
+        args = [torch.rand(length, device=self.device)]
+        gm = self._compile_and_check(foo, args, expected_num_triton_kernels=1)
+
+        # Expect a single allocation, even though eager mode would use 2.
+        num_allocs = self._count_ops(gm, torch.empty_strided)
+        self.assertEqual(num_allocs, 1)
+
+    def test_cat_reinterpret_view(self):
+        """
+        Test torch.cat using ReinterpretView.
+        """
+        length = 8
+
+        def foo(x):
+            y, z = tuple(torch.rand(length // 2, device=self.device) for _ in range(2))
+            return x + torch.cat((y, z))
+
+        args = [torch.rand(length, device=self.device)]
+
+        # Since this test generates random numbers, check metadata only.
+        gm = self._compile_and_check(
+            foo, args, expected_num_triton_kernels=3, metadata_only=True
+        )
+
+        # Check for as_strided. We map ReinterpretView to this.
+        num_as_strided = self._count_ops(gm, torch.as_strided)
+        self.assertEqual(num_as_strided, 2)
 
 
 if __name__ == "__main__":

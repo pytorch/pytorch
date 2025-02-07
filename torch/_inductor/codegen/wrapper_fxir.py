@@ -43,6 +43,7 @@ from .wrapper import (
     MemoryPlanningState,
     NullLine,
     PythonWrapperCodegen,
+    ReinterpretLine,
     ReuseLine,
 )
 
@@ -157,6 +158,9 @@ class WrapperFxCodegen(PythonWrapperCodegen):
             )
 
     def _create_meta_from_buffer(self, node: torch.fx.Node, buffer: BufferLike) -> None:
+        name = buffer.get_name()
+        assert name
+        node.name = name
         node.meta["val"] = self._fake_tensor(
             tuple(buffer.get_size()),
             tuple(buffer.get_stride()),
@@ -193,12 +197,10 @@ class WrapperFxCodegen(PythonWrapperCodegen):
         """
         Extract buffer data from an IR node.
         """
-        if isinstance(node, ir.Buffer):
+        if isinstance(node, (ir.Buffer, WorkspaceArg)):
             return node
-        elif isinstance(node, ir.MutableBox):
+        elif isinstance(node, (ir.BaseView, ir.MutableBox)):
             return self._get_buffer(node.data)
-        elif isinstance(node, WorkspaceArg):
-            return node
         else:
             raise NotImplementedError(f"Unable to extract buffer from node: {node}")
 
@@ -246,6 +248,7 @@ class WrapperFxCodegen(PythonWrapperCodegen):
                 FreeLine: self._generate_free,
                 FreeIfNotReusedLine: self._generate_free_if_not_reused,
                 LineContext: self._generate_line_context,
+                ReinterpretLine: self._generate_reinterpret,
                 ReuseLine: self._generate_reuse,
                 NullLine: self._generate_null,
                 CommBufferLine: self._generate_comm_buffer,
@@ -336,6 +339,37 @@ class WrapperFxCodegen(PythonWrapperCodegen):
         assert isinstance(line, LineContext)
         # We ignore line context in FX IR.
 
+    def _generate_reinterpret(self, line: Line) -> None:
+        assert isinstance(line, ReinterpretLine)
+
+        buffer = line.node
+        layout = buffer.get_output_spec()
+        assert isinstance(layout, ir.NonOwningLayout)
+
+        # Look up the input view.
+        input_buffer = self._get_buffer(layout.view)
+        input_node = self.buffer_to_node[input_buffer.get_name()]
+
+        # Look up output metadata.
+        name = buffer.get_name()
+        assert name
+        size = tuple(layout.size)
+        stride = tuple(layout.stride)
+        offset = buffer.get_offset() + layout.offset
+
+        # Map ReinterpretView to as_strided.
+        result_node = self.gm.graph.call_function(
+            torch.as_strided, args=(input_node, size, stride, offset)
+        )
+        result_node.name = name
+        result_node.meta["val"] = self._fake_tensor(
+            size,
+            stride,
+            dtype=buffer.get_dtype(),
+            device=buffer.get_device(),
+        )
+        self._record_allocation(buffer, result_node)
+
     def _generate_reuse(self, line: Line) -> None:
         assert isinstance(line, ReuseLine)
         old = line.node
@@ -356,7 +390,7 @@ class WrapperFxCodegen(PythonWrapperCodegen):
             or old.get_offset() != offset
         ):
             result_node = self.gm.graph.call_function(
-                torch.as_strided, args=(size, stride, offset)
+                torch.as_strided, args=(old_node, size, stride, offset)
             )
             self._create_meta_from_buffer(result_node, new)
 

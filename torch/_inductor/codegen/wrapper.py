@@ -554,6 +554,22 @@ class FreeIfNotReusedLine(MemoryPlanningLine):
 
 
 @dataclasses.dataclass
+class ReinterpretLine(MemoryPlanningLine):
+    node: BufferLike
+
+    def plan(self, state: MemoryPlanningState) -> MemoryPlanningLine:
+        return self
+
+    def codegen(self, code: IndentedBuffer) -> None:
+        buf = self.node
+        code.writeline(
+            self.wrapper.codegen_deferred_allocation(
+                buf.get_name(), buf.get_output_spec()
+            )
+        )
+
+
+@dataclasses.dataclass
 class ReuseLine(MemoryPlanningLine):
     node: BufferLike
     reused_as: BufferLike
@@ -2263,14 +2279,12 @@ class PythonWrapperCodegen(CodeGen):
             f"  {self.comment} reuse"
         )
 
-    def codegen_deferred_allocation(self, name, layout):
-        self.writeline(
-            DeferredLine(
-                name,
-                f"{self.declare_maybe_reference}{name} = "
-                f"{self.move_begin}{layout.view.codegen_reference()}{self.move_end}{self.ending}"
-                f"  {self.comment} alias",
-            )
+    def codegen_deferred_allocation(self, name, layout) -> DeferredLine:
+        return DeferredLine(
+            name,
+            f"{self.declare_maybe_reference}{name} = "
+            f"{self.move_begin}{layout.view.codegen_reference()}{self.move_end}{self.ending}"
+            f"  {self.comment} alias",
         )
 
     def codegen_allocation(self, buffer: ir.Buffer):
@@ -2304,7 +2318,7 @@ class PythonWrapperCodegen(CodeGen):
             assert isinstance(layout.view.data, ir.StorageBox), type(layout.view.data)
             assert isinstance(layout.view.data.data, ir.Buffer), type(layout.view.data)
             self.codegen_allocation(layout.view.data.data)
-            self.codegen_deferred_allocation(name, layout)
+            self.writeline(ReinterpretLine(self, buffer))
             return
 
         if isinstance(layout, ir.CommBufferLayout):
