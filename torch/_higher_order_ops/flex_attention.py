@@ -7,7 +7,7 @@ import torch.utils._pytree as pytree
 from torch import Tensor
 from torch._C import DispatchKey
 from torch._higher_order_ops.utils import (
-    _has_potential_branch_input_mutation,
+    check_input_mutation_and_alias,
     _maybe_reenter_make_fx,
     autograd_not_implemented,
     reenter_make_fx,
@@ -420,13 +420,15 @@ def flex_attention_functionalize(
         functional_score_mod = ctx.functionalize(score_mod)
         pre_dispatch = hasattr(ctx, "mode") and ctx.mode.pre_dispatch
         with TransformGetItemToIndex():
-            mutates = _has_potential_branch_input_mutation(
-                score_mod, example_vals, pre_dispatch
-            )
-        # The only care about mutations of existing buffers since we can't replay these.
-        # However, we can just error if anything is detected
-        if mutates:
-            raise UnsupportedAliasMutationException("Mutations detected in score_mod")
+            check_input_mutation_and_alias(score_mod, example_vals, pre_dispatch)
+        #     mutates = _has_potential_branch_input_mutation(
+        #         score_mod, example_vals, pre_dispatch
+        #     )
+        # # The only care about mutations of existing buffers since we can't replay these.
+        # # However, we can just error if anything is detected
+        # if mutates:
+        #     raise UnsupportedAliasMutationException("Mutations detected in score_mod")
+            
 
         out = flex_attention(
             query_unwrapped,

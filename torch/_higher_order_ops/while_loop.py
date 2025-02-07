@@ -6,8 +6,7 @@ import torch
 import torch.utils._pytree as pytree
 from torch._C import DispatchKey
 from torch._higher_order_ops.utils import (
-    _has_potential_branch_input_alias,
-    _has_potential_branch_input_mutation,
+    check_input_mutation_and_alias,
     _maybe_run_with_interpreter,
     _set_compilation_env,
     autograd_not_implemented,
@@ -471,19 +470,7 @@ def while_loop_func(ctx, cond_fn, body_fn, carried_inputs, additional_inputs):
             (cond_fn, "cond_fn"),
             (body_fn, "body_fn"),
         ]:
-            if _has_potential_branch_input_mutation(
-                fn, unwrapped_inputs, pre_dispatch=pre_dispatch
-            ):
-                raise UnsupportedAliasMutationException(
-                    f"torch.while_loop's {fn_name} might be modifying the input!"
-                )
-
-            if _has_potential_branch_input_alias(
-                fn, unwrapped_inputs, pre_dispatch=pre_dispatch
-            ):
-                raise UnsupportedAliasMutationException(
-                    f"torch.while_loop's {fn_name} might be aliasing the input!"
-                )
+            check_input_mutation_and_alias(fn, unwrapped_inputs, pre_dispatch=pre_dispatch)
         ret = while_loop_op(
             functional_cond_fn,
             functional_body_fn,

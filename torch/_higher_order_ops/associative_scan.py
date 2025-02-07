@@ -9,6 +9,7 @@ import torch._subclasses.functional_tensor
 import torch.utils._pytree as pytree
 from torch._C import DispatchKey
 from torch._higher_order_ops.utils import (
+    check_input_mutation_and_alias,
     _maybe_run_with_interpreter,
     _set_compilation_env,
     autograd_not_implemented,
@@ -415,6 +416,16 @@ def associative_scan_functionalize(ctx, combine_fn, xs):
         functional_combine_fn = ctx.functionalize(
             _maybe_run_with_interpreter(combine_fn)
         )
+        pre_dispatch = hasattr(ctx, "mode") and ctx.mode.pre_dispatch
+        sample_inputs = list(
+            itertools.chain(
+                [inp.clone() for inp in unwrapped_xs],
+                [inp.clone() for inp in unwrapped_xs],
+            )
+        )
+        
+        check_input_mutation_and_alias(combine_fn, sample_inputs, pre_dispatch=pre_dispatch)
+        
         ret = associative_scan_op(functional_combine_fn, unwrapped_xs)
     return ctx.wrap_tensors(ret)
 

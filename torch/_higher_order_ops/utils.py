@@ -172,6 +172,18 @@ def _detect_input_alias(gm: torch.fx.GraphModule) -> bool:
     return False
 
 
+def _detect_alias(gm: torch.fx.GraphModule) -> bool:
+    example_inputs = [
+        ph.meta.get("val", None) for ph in gm.graph.find_nodes(op="placeholder")
+    ]
+    _, inp_inp_alias_map, inp_out_alias_map, out_out_alias_map = check_input_alias_and_mutation(
+        gm, example_inputs
+    )
+    if len(inp_inp_alias_map) > 0 or len(inp_out_alias_map) > 0 or len(out_out_alias_map) > 0:
+        return True
+    return False
+
+
 # The invariant here is that we always trace the branch with fake tensor
 def _maybe_fake_tracing(fn, inputs: List[Any], pre_dispatch):
     fake_mode = detect_fake_mode(inputs)
@@ -189,6 +201,30 @@ def _maybe_fake_tracing(fn, inputs: List[Any], pre_dispatch):
             pre_dispatch=pre_dispatch,
             _error_on_data_dependent_ops=False,
         )(*inputs)
+
+
+def has_potential_input_mutation_or_alias(gm, inputs, pre_dispatch=False):
+    try:
+        gm = _maybe_fake_tracing(gm, inputs, pre_dispatch)
+    except UnsupportedAliasMutationException:
+        # this can happen when nested cond_op is
+        # functionalized
+        return True
+    except Exception as e:
+        raise e
+
+    return _detect_input_mutation(gm), _detect_alias(gm)
+
+def check_input_mutation_and_alias(combine_fn, sample_inputs, pre_dispatch=False):
+    has_branch_input_mutation, has_branch_alias = has_potential_input_mutation_or_alias(combine_fn, sample_inputs, pre_dispatch=pre_dispatch)
+    if has_branch_input_mutation:
+        raise UnsupportedAliasMutationException(
+            "A branch or combine_fn might be modifying the input! Consider cloning the input before modifying it."
+        )
+    if has_branch_alias:
+        raise UnsupportedAliasMutationException(
+            "Aliasing within branch or combine_fn might be occuring! If you are returning a view of the input or twice the same output, please make sure to clone it."
+        )
 
 
 def has_potential_input_alias_or_mutation(gm, inputs, pre_dispatch=False):
