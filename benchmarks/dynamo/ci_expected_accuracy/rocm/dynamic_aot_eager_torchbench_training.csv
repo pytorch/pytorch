@@ -118,6 +118,10 @@ hf_Reformer,pass,23
 
 
 
+hf_Roberta_base,pass,6
+
+
+
 hf_T5,pass,0
 
 
