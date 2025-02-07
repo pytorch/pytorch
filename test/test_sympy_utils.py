@@ -8,10 +8,10 @@ import sys
 from typing import Callable
 
 import sympy
+from sympy.core.relational import is_ge, is_gt, is_le, is_lt
 
 import torch
 import torch.fx as fx
-from sympy.core.relational import is_ge, is_gt, is_le, is_lt
 from torch.testing._internal.common_device_type import skipIf
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
@@ -122,9 +122,7 @@ def valid_binary(fn, a, b):
         return False
     elif fn == "pow_by_natural" and (
         # sympy will expand to x*x*... for integral b; don't do it if it's big
-        b > 4
-        or b < 0
-        or (a == b == 0)
+        b > 4 or b < 0 or (a == b == 0)
     ):
         return False
     elif fn == "mod" and (a < 0 or b <= 0):

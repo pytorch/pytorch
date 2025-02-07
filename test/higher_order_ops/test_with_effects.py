@@ -1,4 +1,6 @@
 # Owner(s): ["module: functorch"]
+# ruff: noqa: F841
+# flake8: noqa: B950
 import unittest
 from collections import deque
 from functools import partial
@@ -65,9 +67,9 @@ def get_fw_bw_graph(
     out = aot_function(
         f,
         fw_compiler=partial(extract_graph, graph_cell=fw_graph_cell),
-        bw_compiler=(
-            partial(extract_graph, graph_cell=bw_graph_cell) if requires_grad else nop
-        ),
+        bw_compiler=partial(extract_graph, graph_cell=bw_graph_cell)
+        if requires_grad
+        else nop,
         partition_fn=partitioner,
         decompositions=default_decompositions,
         dynamic=dynamic,

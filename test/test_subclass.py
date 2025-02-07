@@ -8,24 +8,19 @@ from unittest import expectedFailure
 import torch
 from torch import nn
 from torch.nn.modules.lazy import LazyModuleMixin
-from torch.nn.utils.parametrize import (
-    register_parametrization,
-    remove_parametrizations,
-)
-from torch.testing._internal.common_subclass import (
-    DiagTensorBelow,
-    subclass_db,
-)
+from torch.nn.utils.parametrize import register_parametrization, remove_parametrizations
+from torch.testing._internal.common_subclass import DiagTensorBelow, subclass_db
 from torch.testing._internal.common_utils import (
-    TestCase,
     instantiate_parametrized_tests,
     parametrize,
     run_tests,
     skipIfTorchDynamo,
     subtest,
+    TestCase,
 )
 from torch.testing._internal.logging_tensor import LoggingTensor
 from torch.utils._pytree import tree_map
+
 
 # The current test methodology in this file is to test a variety of real use cases
 # with a set of fully-fledged tensor subclasses. In the future, this may change
@@ -34,8 +29,10 @@ from torch.utils._pytree import tree_map
 
 
 # Decorator for parametrizing tests across the various tensor classes.
-parametrize_tensor_cls = parametrize("tensor_cls", [
-    subtest(tensor_cls, name=info.name) for tensor_cls, info in subclass_db.items()])
+parametrize_tensor_cls = parametrize(
+    "tensor_cls",
+    [subtest(tensor_cls, name=info.name) for tensor_cls, info in subclass_db.items()],
+)
 
 
 class TestSubclass(TestCase):
@@ -96,7 +93,9 @@ class TestSubclass(TestCase):
                 # Serialization should preserve both custom type and "parameter-ness".
                 self.assertIsInstance(x_loaded, nn.Parameter)
 
-    @skipIfTorchDynamo("Visible only with functorch as functorch monkeypatches tensor str")
+    @skipIfTorchDynamo(
+        "Visible only with functorch as functorch monkeypatches tensor str"
+    )
     @parametrize_tensor_cls
     @parametrize("as_param", [False, True])
     def test_repr(self, tensor_cls, as_param):
@@ -138,11 +137,13 @@ class TestSubclass(TestCase):
                 self.p_list = nn.ParameterList([create_fn() for _ in range(3)])
                 self.p_list.append(create_fn())
 
-                self.p_dict = nn.ParameterDict({
-                    'foo': create_fn(),
-                    'bar': create_fn(),
-                })
-                self.p_dict['baz'] = create_fn()
+                self.p_dict = nn.ParameterDict(
+                    {
+                        "foo": create_fn(),
+                        "bar": create_fn(),
+                    }
+                )
+                self.p_dict["baz"] = create_fn()
 
                 with torch.no_grad():
                     nn.init.normal_(self.p1)
@@ -193,18 +194,18 @@ class TestSubclass(TestCase):
 
         m = MyModule()
         self.assertEqual(len(m.state_dict()), 1)
-        register_parametrization(m, 'weight', MyParametrization())
+        register_parametrization(m, "weight", MyParametrization())
         self.assertIsInstance(m.weight, tensor_cls)
         output = m(self._create_tensor(torch.Tensor))
         self.assertIsInstance(output, tensor_cls)
-        remove_parametrizations(m, 'weight', leave_parametrized=leave_parametrized)
+        remove_parametrizations(m, "weight", leave_parametrized=leave_parametrized)
 
     # Lazy modules with custom tensors are not supported yet.
     @expectedFailure
     @parametrize_tensor_cls
     def test_lazy_module(self, tensor_cls):
         if tensor_cls is torch.Tensor:
-            self.fail('dummy fail for base tensor until the test passes for subclasses')
+            self.fail("dummy fail for base tensor until the test passes for subclasses")
 
         class MyLazyModule(LazyModuleMixin, nn.Module):
             def __init__(self) -> None:
@@ -226,16 +227,20 @@ class TestSubclass(TestCase):
         self.assertFalse(m.has_uninitialized_params())
         self.assertIsInstance(m.param, tensor_cls)
 
-    def test_non_rewrapping_torch_dispatch_subclass_as_parameter_throws_for_detach(self):
-
+    def test_non_rewrapping_torch_dispatch_subclass_as_parameter_throws_for_detach(
+        self,
+    ):
         # Define a subclass that does not rewrap for any function in its __torch_dispatch__ impl.
         class NonRewrappingTensor(torch.Tensor):
             @staticmethod
-            def __new__(
-                cls, t: torch.Tensor
-            ):
+            def __new__(cls, t: torch.Tensor):
                 r = super()._make_wrapper_subclass(
-                    cls, t.shape, dtype=t.dtype, requires_grad=t.requires_grad, device=t.device)
+                    cls,
+                    t.shape,
+                    dtype=t.dtype,
+                    requires_grad=t.requires_grad,
+                    device=t.device,
+                )
                 return r
 
             def __init__(self, t) -> None:
@@ -243,7 +248,6 @@ class TestSubclass(TestCase):
 
             @classmethod
             def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
-
                 def unwrap(e) -> torch.Tensor:
                     if isinstance(e, NonRewrappingTensor):
                         t = e.tensor
@@ -255,11 +259,15 @@ class TestSubclass(TestCase):
                 # Return an unwrapped tensor no longer of original subclass type.
                 return r
 
-        with self.assertRaisesRegex(RuntimeError, r"requires that detach\(\) returns an instance of the same type"):
+        with self.assertRaisesRegex(
+            RuntimeError,
+            r"requires that detach\(\) returns an instance of the same type",
+        ):
             nn.Parameter(NonRewrappingTensor(torch.randn(3)))
 
     def test_tensor_subclass_storage_data_accesses_throw(self):
         from torch.testing._internal.logging_tensor import LoggingTensor
+
         x = torch.ones(2)
         x_log = LoggingTensor(x)
         # Accessing storage on a tensor subclass is valid
@@ -280,5 +288,5 @@ class TestSubclass(TestCase):
 
 instantiate_parametrized_tests(TestSubclass)
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     run_tests()
