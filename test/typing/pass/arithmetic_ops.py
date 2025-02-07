@@ -1,5 +1,5 @@
 from typing import Any, Union
-from typing_extensions import assert_type
+from typing_extensions import assert_type, TypeAlias
 
 from torch import randn, Tensor
 
@@ -152,7 +152,7 @@ assert_type(FLOAT | TENSOR, Tensor)  # type: ignore[operator]
 assert_type(FLOAT ^ TENSOR, Tensor)  # type: ignore[operator]
 
 
-NUMBER = Union[int, float, bool]
+NUMBER: TypeAlias = Union[int, float, bool]
 
 
 class Binary:
