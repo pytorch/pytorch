@@ -1017,14 +1017,14 @@ static void lu_unpack_mps_impl(const Tensor& LU_data,
   const auto c = LU_data.size(-1);
   const auto k = std::min<int64_t>(r, c);
 
-  const auto  batchSize = c10::multiply_integers(LU_data.sizes().begin(), LU_data.sizes().end() - 2);
+  const auto batchSize = c10::multiply_integers(LU_data.sizes().begin(), LU_data.sizes().end() - 2);
 
   if (unpack_data) {
-    Tensor L_part = r < c ? at::slice(LU_data, -1, 0, k) : LU_data;
+    Tensor L_part = r < c ? slice(LU_data, -1, 0, k) : LU_data;
     L.copy_(L_part.tril());
-    ndim == 2 ? L.diagonal().fill_(1) : L.diagonal(0, -2, -1).fill_(1);
+    (ndim == 2 ? L.diagonal() : L.diagonal(0, -2, -1)).fill_(1);
 
-    Tensor U_part = r < c ? LU_data : at::slice(LU_data, -2, 0, k);
+    Tensor U_part = r < c ? LU_data : slice(LU_data, -2, 0, k);
     U.copy_(U_part.triu());
   }
 
@@ -1036,7 +1036,7 @@ static void lu_unpack_mps_impl(const Tensor& LU_data,
     auto stream = getCurrentMPSStream();
     auto device = MPSDevice::getInstance()->device();
     auto applyPivotsPSO = lib.getPipelineStateForFunc("applyPivots");
-     uint32_t maxThreadsPerGroup = [applyPivotsPSO maxTotalThreadsPerThreadgroup];
+    uint32_t maxThreadsPerGroup = [applyPivotsPSO maxTotalThreadsPerThreadgroup];
 
     auto pivots = (LU_pivots.dim() == 1) ? LU_pivots.sub(1) : LU_pivots.view({batchSize, -1}).sub(1);
 
@@ -1045,7 +1045,7 @@ static void lu_unpack_mps_impl(const Tensor& LU_data,
         auto computeEncoder = stream->commandEncoder();
         mtl_setArgs(computeEncoder, P, pivots, r, k);
         [computeEncoder setComputePipelineState:applyPivotsPSO];
-        mtl_dispatch1DJob(computeEncoder, batchSize*maxThreadsPerGroup);
+        mtl_dispatch1DJob(computeEncoder, applyPivotsPSO, batchSize * maxThreadsPerGroup);
       });
     }
   }
