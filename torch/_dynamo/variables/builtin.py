@@ -21,6 +21,7 @@ from .. import config, polyfills, variables
 from ..exc import (
     AttributeMutationError,
     ObservedAttributeError,
+    raise_observed_exception,
     unimplemented,
     Unsupported,
     UserError,
@@ -873,7 +874,7 @@ class BuiltinVariable(VariableTracker):
                             *[x.as_python_constant() for x in args],
                         )
                     except Exception as exc:
-                        unimplemented(f"constant fold exception: {repr(exc)}")
+                        raise_observed_exception(type(exc), tx)
                     return VariableTracker.build(tx, res)
 
             else:

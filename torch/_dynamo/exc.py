@@ -291,6 +291,13 @@ observed_exception_map = {
 }
 
 
+def create_dynamo_observed_exception(e: type[Exception]) -> None:
+    if e not in observed_exception_map:
+        name = getattr(e, "__name__", str(e))
+        internal_exc = type(f"Observed{name}Error", (ObservedException,), {})
+        observed_exception_map[e] = internal_exc
+
+
 def raise_observed_exception(
     exc_type: type[Exception],
     tx: InstructionTranslatorBase,
@@ -304,6 +311,8 @@ def raise_observed_exception(
     # stack and raise the exception.
     exception_vt = BuiltinVariable(exc_type).call_function(tx, args or [], kwargs or {})  # type: ignore[arg-type]
     tx.exn_vt_stack.append(exception_vt)
+    if exc_type not in observed_exception_map:
+        create_dynamo_observed_exception(exc_type)
     raise observed_exception_map[exc_type]
 
 
