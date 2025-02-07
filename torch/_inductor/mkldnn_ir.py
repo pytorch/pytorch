@@ -1,5 +1,5 @@
 # mypy: allow-untyped-defs
-from typing import Any, List, Optional
+from typing import Any, Optional
 
 import sympy
 
@@ -13,7 +13,6 @@ from .ir import (
     FlexibleLayout,
     get_device_type,
     ir_node_to_tensor,
-    IRNode,
     is_contiguous_storage_and_layout,
     Layout,
     may_convert_to_optional,
@@ -32,13 +31,13 @@ def _prepare_convolution_fusion_create(
     x: "TensorBox",
     weight: "TensorBox",
     bias: "TensorBox",
-    padding: List[int],
-    stride: List[int],
-    dilation: List[int],
+    padding: list[int],
+    stride: list[int],
+    dilation: list[int],
     groups: int,
     transposed: bool = False,
-    output_padding: Optional[List[int]] = None,
-    quantize_args: Optional[List["TensorBox"]] = None,
+    output_padding: Optional[list[int]] = None,
+    quantize_args: Optional[list["TensorBox"]] = None,
     other: Optional["TensorBox"] = None,
 ):
     """
@@ -205,7 +204,7 @@ def _prepare_linear_fusion_create(
     x: "TensorBox",
     weight: "TensorBox",
     bias: "TensorBox",
-    quantize_args: Optional[List["TensorBox"]] = None,
+    quantize_args: Optional[list["TensorBox"]] = None,
     other: Optional["TensorBox"] = None,
     binary_sum: bool = False,
 ):
@@ -253,7 +252,7 @@ def _prepare_linear_fusion_create(
         output_size,
         output_stride,
     )
-    constant_args: List[Any] = []
+    constant_args: list[Any] = []
 
     if bias is not None:
         inputs.append(bias)
@@ -299,12 +298,12 @@ class ConvolutionUnary(ExternKernelAlloc):
         x: "TensorBox",
         weight: "TensorBox",
         bias: "TensorBox",
-        padding_: List[int],
-        stride_: List[int],
-        dilation_: List[int],
+        padding_: list[int],
+        stride_: list[int],
+        dilation_: list[int],
         groups: int,
         attr,
-        scalars: Optional[List[Any]],
+        scalars: Optional[list[Any]],
         algorithm,
     ):
         (
@@ -358,14 +357,14 @@ class ConvolutionBinary(ExternKernelAlloc):
         other: "TensorBox",
         weight: "TensorBox",
         bias: "TensorBox",
-        padding_: List[int],
-        stride_: List[int],
-        dilation_: List[int],
+        padding_: list[int],
+        stride_: list[int],
+        dilation_: list[int],
         groups: int,
         binary_attr: str,
         binary_alpha: Optional[float],
         unary_attr: Optional[str],
-        unary_scalars: Optional[List[Any]],
+        unary_scalars: Optional[list[Any]],
         unary_algorithm: Optional[str],
     ):
         (
@@ -432,14 +431,14 @@ class ConvolutionBinaryInplace(ExternKernelAlloc):
         other: "TensorBox",
         weight: "TensorBox",
         bias: "TensorBox",
-        padding_: List[int],
-        stride_: List[int],
-        dilation_: List[int],
+        padding_: list[int],
+        stride_: list[int],
+        dilation_: list[int],
         groups: int,
         binary_attr: str,
         binary_alpha: Optional[float],
         unary_attr: Optional[str],
-        unary_scalars: Optional[List[Any]],
+        unary_scalars: Optional[list[Any]],
         unary_algorithm: Optional[str],
     ):
         (
@@ -497,13 +496,13 @@ class ConvolutionTransposeUnary(ExternKernelAlloc):
         x: "TensorBox",
         weight: "TensorBox",
         bias: "TensorBox",
-        padding_: List[int],
-        output_padding_: List[int],
-        stride_: List[int],
-        dilation_: List[int],
+        padding_: list[int],
+        output_padding_: list[int],
+        stride_: list[int],
+        dilation_: list[int],
         groups_: int,
         attr,
-        scalars: Optional[List[Any]],
+        scalars: Optional[list[Any]],
         algorithm,
     ):
         transposed = True
@@ -581,9 +580,9 @@ class QConvPointWisePT2E(ExternKernelAlloc):
         w_scale: "TensorBox",
         w_zero_point: "TensorBox",
         bias: "TensorBox",
-        stride: List[int],
-        padding: List[int],
-        dilation: List[int],
+        stride: list[int],
+        padding: list[int],
+        dilation: list[int],
         groups: int,
         output_scale: float,
         output_zero_point: int,
@@ -693,9 +692,9 @@ class QConvPointWiseBinaryPT2E(ExternKernelAlloc):
         w_zero_point,
         qaccum: "TensorBox",
         bias: "TensorBox",
-        stride: List[int],
-        padding: List[int],
-        dilation: List[int],
+        stride: list[int],
+        padding: list[int],
+        dilation: list[int],
         groups: int,
         output_scale: "TensorBox",
         output_zero_point: "TensorBox",
@@ -713,7 +712,7 @@ class QConvPointWiseBinaryPT2E(ExternKernelAlloc):
         (
             inputs,
             constant_args,
-            kernel_layout,
+            _kernel_layout,
             req_stride_order,
             qaccum,
         ) = _prepare_convolution_fusion_create(
@@ -833,10 +832,9 @@ class LinearUnary(ExternKernelAlloc):
         x = cls.require_contiguous(cls.realize_input(x))
         w = cls.require_contiguous(cls.realize_input(w))
 
-        *m, ic = x.get_size()
-        oc, ic = w.get_size()
+        *m, _ic = x.get_size()
+        oc, _ic = w.get_size()
         output_size = list(m) + [oc]
-        output_stride = FlexibleLayout.contiguous_strides(output_size)
         inputs = [x, w]
         constant_args = [attr, scalars if scalars else [-1], algorithm]
         if B is not None:
@@ -888,10 +886,9 @@ class LinearBinary(ExternKernelAlloc):
         y = cls.require_contiguous(cls.realize_input(y))
         w = cls.require_contiguous(cls.realize_input(w))
 
-        *m, ic = x.get_size()
-        oc, ic = w.get_size()
+        *m, _ic = x.get_size()
+        oc, _ic = w.get_size()
         output_size = list(m) + [oc]
-        output_stride = FlexibleLayout.contiguous_strides(output_size)
         inputs = [x, y, w]
         constant_args = [attr]
         if B is not None:
@@ -1142,7 +1139,7 @@ class MkldnnRnnLayer(ExternKernelAlloc):
         hx: "TensorBox",
         cx: "TensorBox",
         reverse: bool,
-        batch_sizes: List[int],
+        batch_sizes: list[int],
         mode: int,
         hidden_size: int,
         num_layers: int,
@@ -1173,8 +1170,6 @@ class MkldnnRnnLayer(ExternKernelAlloc):
 
         hy_shape = hx.get_size()
         cy_shape = cx.get_size()
-
-        res: List[IRNode] = []
 
         inputs = [x, w0, w1, w2, w3, hx, cx]
         constant_args = [

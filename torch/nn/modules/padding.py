@@ -1,5 +1,5 @@
 # mypy: allow-untyped-defs
-from typing import Sequence, Tuple
+from collections.abc import Sequence
 
 import torch.nn.functional as F
 from torch import Tensor
@@ -83,7 +83,7 @@ class CircularPad1d(_CircularPadNd):
                  [5., 6., 7., 4., 5., 6., 7., 4.]]])
     """
 
-    padding: Tuple[int, int]
+    padding: tuple[int, int]
 
     def __init__(self, padding: _size_2_t) -> None:
         super().__init__()
@@ -142,7 +142,7 @@ class CircularPad2d(_CircularPadNd):
                   [8., 6., 7., 8., 6.]]]])
     """
 
-    padding: Tuple[int, int, int, int]
+    padding: tuple[int, int, int, int]
 
     def __init__(self, padding: _size_4_t) -> None:
         super().__init__()
@@ -191,7 +191,7 @@ class CircularPad3d(_CircularPadNd):
         >>> output = m(input)
     """
 
-    padding: Tuple[int, int, int, int, int, int]
+    padding: tuple[int, int, int, int, int, int]
 
     def __init__(self, padding: _size_6_t) -> None:
         super().__init__()
@@ -262,7 +262,7 @@ class ConstantPad1d(_ConstantPadNd):
                  [ 3.5000,  3.5000,  3.5000, -3.6372,  0.1182, -1.8652,  3.5000]]])
     """
 
-    padding: Tuple[int, int]
+    padding: tuple[int, int]
 
     def __init__(self, padding: _size_2_t, value: float):
         super().__init__(value)
@@ -313,7 +313,7 @@ class ConstantPad2d(_ConstantPadNd):
     """
 
     __constants__ = ["padding", "value"]
-    padding: Tuple[int, int, int, int]
+    padding: tuple[int, int, int, int]
 
     def __init__(self, padding: _size_4_t, value: float) -> None:
         super().__init__(value)
@@ -353,7 +353,7 @@ class ConstantPad3d(_ConstantPadNd):
         >>> output = m(input)
     """
 
-    padding: Tuple[int, int, int, int, int, int]
+    padding: tuple[int, int, int, int, int, int]
 
     def __init__(self, padding: _size_6_t, value: float) -> None:
         super().__init__(value)
@@ -405,7 +405,7 @@ class ReflectionPad1d(_ReflectionPadNd):
                  [7., 6., 5., 4., 5., 6., 7., 6.]]])
     """
 
-    padding: Tuple[int, int]
+    padding: tuple[int, int]
 
     def __init__(self, padding: _size_2_t) -> None:
         super().__init__()
@@ -458,7 +458,7 @@ class ReflectionPad2d(_ReflectionPadNd):
                   [7., 6., 7., 8., 7.]]]])
     """
 
-    padding: Tuple[int, int, int, int]
+    padding: tuple[int, int, int, int]
 
     def __init__(self, padding: _size_4_t) -> None:
         super().__init__()
@@ -512,7 +512,7 @@ class ReflectionPad3d(_ReflectionPadNd):
                    [1., 0., 1., 0.]]]]])
     """
 
-    padding: Tuple[int, int, int, int, int, int]
+    padding: tuple[int, int, int, int, int, int]
 
     def __init__(self, padding: _size_6_t) -> None:
         super().__init__()
@@ -564,7 +564,7 @@ class ReplicationPad1d(_ReplicationPadNd):
                  [4., 4., 4., 4., 5., 6., 7., 7.]]])
     """
 
-    padding: Tuple[int, int]
+    padding: tuple[int, int]
 
     def __init__(self, padding: _size_2_t) -> None:
         super().__init__()
@@ -616,7 +616,7 @@ class ReplicationPad2d(_ReplicationPadNd):
                   [6., 6., 7., 8., 8.]]]])
     """
 
-    padding: Tuple[int, int, int, int]
+    padding: tuple[int, int, int, int]
 
     def __init__(self, padding: _size_4_t) -> None:
         super().__init__()
@@ -657,7 +657,7 @@ class ReplicationPad3d(_ReplicationPadNd):
         >>> output = m(input)
     """
 
-    padding: Tuple[int, int, int, int, int, int]
+    padding: tuple[int, int, int, int, int, int]
 
     def __init__(self, padding: _size_6_t) -> None:
         super().__init__()
@@ -708,7 +708,7 @@ class ZeroPad1d(ConstantPad1d):
                  [ 0.0000,  0.0000,  0.0000, -3.6372,  0.1182, -1.8652,  0.0000]]])
     """
 
-    padding: Tuple[int, int]
+    padding: tuple[int, int]
 
     def __init__(self, padding: _size_2_t) -> None:
         super().__init__(padding, 0.0)
@@ -762,7 +762,7 @@ class ZeroPad2d(ConstantPad2d):
                   [ 0.0000, -0.9162, -0.5436, -0.6446,  0.0000]]]])
     """
 
-    padding: Tuple[int, int, int, int]
+    padding: tuple[int, int, int, int]
 
     def __init__(self, padding: _size_4_t) -> None:
         super().__init__(padding, 0.0)
@@ -804,7 +804,7 @@ class ZeroPad3d(ConstantPad3d):
         >>> output = m(input)
     """
 
-    padding: Tuple[int, int, int, int, int, int]
+    padding: tuple[int, int, int, int, int, int]
 
     def __init__(self, padding: _size_6_t) -> None:
         super().__init__(padding, 0.0)

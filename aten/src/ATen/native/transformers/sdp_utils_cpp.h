@@ -14,11 +14,10 @@
 
 #include <c10/core/SymInt.h>
 #include <c10/core/SymFloat.h>
-#include <c10/util/string_view.h>
-#include <c10/util/Array.h>
 #include <cmath>
 #include <cstdint>
 #include <functional>
+#include <string_view>
 
 namespace sdp {
 
@@ -54,8 +53,6 @@ inline c10::SymFloat calculate_scale(
       : (c10::SymFloat(1.0) / (c10::SymFloat(query.sym_size(-1)).sqrt()));
   return c10::SymFloat(softmax_scale);
 }
-
-using c10::array_of;
 
 inline bool input_requires_grad(sdp_params const& params) {
   const bool any_inputs_require_grad = params.query.requires_grad() ||
@@ -112,7 +109,7 @@ inline bool try_broadcast_param_size(
     const c10::SymInt q_size,
     const c10::SymInt k_size,
     const c10::SymInt v_size,
-    c10::string_view param_name,
+    std::string_view param_name,
     bool debug) {
   auto max_size = std::max({q_size, k_size, v_size});
   if ((q_size != max_size && q_size != 1) ||
@@ -140,7 +137,7 @@ inline bool try_broadcast_param_size(
 
 inline bool check_for_seq_len_0_and_consistent_head_dim_nested_tensor_helper(
     at::Tensor const& param,
-    c10::string_view param_name,
+    std::string_view param_name,
     bool debug) {
   const auto nt_tensor_impl = at::native::get_nested_tensor_impl(param);
   const at::Tensor& sizes = nt_tensor_impl->get_nested_sizes();

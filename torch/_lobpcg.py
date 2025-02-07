@@ -3,7 +3,7 @@
 # Author: Pearu Peterson
 # Created: February 2020
 
-from typing import Dict, Optional, Tuple
+from typing import Optional
 
 import torch
 from torch import _linalg_utils as _utils, Tensor
@@ -268,10 +268,10 @@ class LOBPCGAutogradFunction(torch.autograd.Function):
         largest: Optional[bool] = None,
         method: Optional[str] = None,
         tracker: None = None,
-        ortho_iparams: Optional[Dict[str, int]] = None,
-        ortho_fparams: Optional[Dict[str, float]] = None,
-        ortho_bparams: Optional[Dict[str, bool]] = None,
-    ) -> Tuple[Tensor, Tensor]:
+        ortho_iparams: Optional[dict[str, int]] = None,
+        ortho_fparams: Optional[dict[str, float]] = None,
+        ortho_bparams: Optional[dict[str, bool]] = None,
+    ) -> tuple[Tensor, Tensor]:
         # makes sure that input is contiguous for efficiency.
         # Note: autograd does not support dense gradients for sparse input yet.
         A = A.contiguous() if (not A.is_sparse) else A
@@ -354,10 +354,10 @@ def lobpcg(
     largest: Optional[bool] = None,
     method: Optional[str] = None,
     tracker: None = None,
-    ortho_iparams: Optional[Dict[str, int]] = None,
-    ortho_fparams: Optional[Dict[str, float]] = None,
-    ortho_bparams: Optional[Dict[str, bool]] = None,
-) -> Tuple[Tensor, Tensor]:
+    ortho_iparams: Optional[dict[str, int]] = None,
+    ortho_fparams: Optional[dict[str, float]] = None,
+    ortho_bparams: Optional[dict[str, bool]] = None,
+) -> tuple[Tensor, Tensor]:
     """Find the k largest (or smallest) eigenvalues and the corresponding
     eigenvectors of a symmetric positive definite generalized
     eigenvalue problem using matrix-free LOBPCG methods.
@@ -591,10 +591,10 @@ def _lobpcg(
     largest: Optional[bool] = None,
     method: Optional[str] = None,
     tracker: None = None,
-    ortho_iparams: Optional[Dict[str, int]] = None,
-    ortho_fparams: Optional[Dict[str, float]] = None,
-    ortho_bparams: Optional[Dict[str, bool]] = None,
-) -> Tuple[Tensor, Tensor]:
+    ortho_iparams: Optional[dict[str, int]] = None,
+    ortho_fparams: Optional[dict[str, float]] = None,
+    ortho_bparams: Optional[dict[str, bool]] = None,
+) -> tuple[Tensor, Tensor]:
     # A must be square:
     assert A.shape[-2] == A.shape[-1], A.shape
     if B is not None:
@@ -697,9 +697,9 @@ class LOBPCG:
         B: Optional[Tensor],
         X: Tensor,
         iK: Optional[Tensor],
-        iparams: Dict[str, int],
-        fparams: Dict[str, float],
-        bparams: Dict[str, bool],
+        iparams: dict[str, int],
+        fparams: dict[str, float],
+        bparams: dict[str, bool],
         method: str,
         tracker: None,
     ) -> None:
@@ -720,10 +720,10 @@ class LOBPCG:
         self.E = torch.zeros((n,), dtype=X.dtype, device=X.device)
         self.R = torch.zeros((m, n), dtype=X.dtype, device=X.device)
         self.S = torch.zeros((m, 3 * n), dtype=X.dtype, device=X.device)
-        self.tvars: Dict[str, Tensor] = {}
-        self.ivars: Dict[str, int] = {"istep": 0}
-        self.fvars: Dict[str, float] = {"_": 0.0}
-        self.bvars: Dict[str, bool] = {"_": False}
+        self.tvars: dict[str, Tensor] = {}
+        self.ivars: dict[str, int] = {"istep": 0}
+        self.fvars: dict[str, float] = {"_": 0.0}
+        self.bvars: dict[str, bool] = {"_": False}
 
     def __str__(self):
         lines = ["LOPBCG:"]
@@ -900,7 +900,7 @@ class LOBPCG:
         if self.ivars["istep"] == 0:
             Ri = self._get_rayleigh_ritz_transform(self.X)
             M = _utils.qform(_utils.qform(self.A, self.X), Ri)
-            E, Z = _utils.symeig(M, largest)
+            _E, Z = _utils.symeig(M, largest)
             self.X = mm(self.X, mm(Ri, Z))
             self.update_residual()
             np = 0
@@ -978,7 +978,6 @@ class LOBPCG:
 
         """
         B = self.B
-        mm = torch.matmul
         SBS = _utils.qform(B, S)
         d_row = SBS.diagonal(0, -2, -1) ** -0.5
         d_col = d_row.reshape(d_row.shape[0], 1)
@@ -1097,7 +1096,6 @@ class LOBPCG:
         BU = mm_B(self.B, U)
         VBU = mm(V.mT, BU)
         i = j = 0
-        stats = ""
         for i in range(i_max):
             U = U - mm(V, VBU)
             drop = False

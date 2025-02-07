@@ -79,7 +79,7 @@ class TestCudaTrace(TestCase):
         if torch.version.hip:
             user_stream = torch.cuda.Stream()
             with torch.cuda.stream(user_stream):
-                tensor = torch.ones(5, device="cuda")
+                torch.ones(5, device="cuda")
         else:
             torch.cuda.Stream()
 

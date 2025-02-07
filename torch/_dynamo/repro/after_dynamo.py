@@ -20,6 +20,7 @@ from torch._dynamo.debug_utils import (
     BuckTargetWriter,
     extra_imports,
     generate_config_string,
+    generate_env_vars_string,
     helper_for_dump_minify,
     InputReader,
     InputWriter,
@@ -179,6 +180,7 @@ def generate_dynamo_fx_repro_string(
 
     return textwrap.dedent(
         f"""
+{generate_env_vars_string(stable_output=stable_output)}
 from math import inf
 import torch
 from torch import tensor, device
@@ -451,13 +453,11 @@ def repro_run(options, mod, load_args):
     else:
         with torch.amp.autocast("cuda", enabled=options.autocast):
             args = run_load_args(options, mod, load_args)
-            ref = run_fwd_maybe_bwd(
-                mod, args, only_fwd=options.only_fwd, disable_clone=True
-            )
+            run_fwd_maybe_bwd(mod, args, only_fwd=options.only_fwd, disable_clone=True)
             del args
 
             args = run_load_args(options, mod, load_args)
-            res = run_fwd_maybe_bwd(
+            run_fwd_maybe_bwd(
                 opt_mod, args, only_fwd=options.only_fwd, disable_clone=True
             )
 

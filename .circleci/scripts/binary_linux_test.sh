@@ -55,9 +55,6 @@ mv /final_pkgs/debug-*.zip /tmp/debug_final_pkgs || echo "no debug packages to m
 # Install the package
 # These network calls should not have 'retry's because they are installing
 # locally and aren't actually network calls
-# TODO there is duplicated and inconsistent test-python-env setup across this
-#   file, builder/smoke_test.sh, and builder/run_tests.sh, and also in the
-#   conda build scripts themselves. These should really be consolidated
 # Pick only one package of multiple available (which happens as result of workflow re-runs)
 pkg="/final_pkgs/\$(ls -1 /final_pkgs|sort|tail -1)"
 if [[ "\$PYTORCH_BUILD_VERSION" == *dev* ]]; then
@@ -90,15 +87,15 @@ if [[ "$PACKAGE_TYPE" == libtorch ]]; then
 fi
 
 # Test the package
-/builder/check_binary.sh
+/pytorch/.ci/pytorch/check_binary.sh
 
 if [[ "\$GPU_ARCH_TYPE" != *s390x* && "\$GPU_ARCH_TYPE" != *xpu* && "\$GPU_ARCH_TYPE" != *rocm*  && "$PACKAGE_TYPE" != libtorch ]]; then
   # Exclude s390, xpu, rocm and libtorch builds from smoke testing
-  python /builder/test/smoke_test/smoke_test.py --package=torchonly --torch-compile-check disabled
+  python /pytorch/.ci/pytorch/smoke_test/smoke_test.py --package=torchonly --torch-compile-check disabled
 fi
 
 # Clean temp files
-cd /builder && git clean -ffdx
+cd /pytorch/.ci/pytorch/ && git clean -ffdx
 
 # =================== The above code will be executed inside Docker container ===================
 EOL

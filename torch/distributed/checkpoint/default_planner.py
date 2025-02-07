@@ -7,7 +7,7 @@ import logging
 import operator
 from collections import ChainMap
 from functools import reduce
-from typing import Any, cast, Dict, List, Optional, Tuple, Union
+from typing import Any, cast, Optional, Union
 
 import torch
 from torch.distributed._shard._utils import narrow_tensor_by_index
@@ -106,8 +106,8 @@ class DefaultSavePlanner(SavePlanner):
         return self.plan
 
     def create_global_plan(
-        self, all_plans: List[SavePlan]
-    ) -> Tuple[List[SavePlan], Metadata]:
+        self, all_plans: list[SavePlan]
+    ) -> tuple[list[SavePlan], Metadata]:
         all_plans = dedup_save_plans(all_plans, self.dedup_save_to_lowest_rank)
 
         global_plan, metadata = create_default_global_save_plan(all_plans)
@@ -234,7 +234,7 @@ class DefaultLoadPlanner(LoadPlanner):
             self.state_dict, self.metadata, not self.allow_partial_load
         )
 
-    def create_global_plan(self, global_plan: List[LoadPlan]) -> List[LoadPlan]:
+    def create_global_plan(self, global_plan: list[LoadPlan]) -> list[LoadPlan]:
         return create_default_global_load_plan(global_plan)
 
     def finish_plan(self, new_plan: LoadPlan) -> LoadPlan:
@@ -293,7 +293,7 @@ class _EmptyStateDictLoadPlanner(DefaultLoadPlanner):
         if key in self.keys:
             True
 
-        unflattened_keys: List[str] = []
+        unflattened_keys: list[str] = []
         planner_data = metadata.planner_data.get(key)
         for unflattened_key in planner_data:
             if unflattened_keys:
@@ -334,7 +334,7 @@ class _EmptyStateDictLoadPlanner(DefaultLoadPlanner):
 
 
 def create_default_local_load_plan(
-    state_dict: Dict[str, Any], metadata: Metadata, strict: bool = True
+    state_dict: dict[str, Any], metadata: Metadata, strict: bool = True
 ) -> LoadPlan:
     requests = []
     """
@@ -356,6 +356,14 @@ def create_default_local_load_plan(
                 continue
 
         md = metadata.state_dict_metadata[fqn]
+        if (
+            isinstance(md, TensorStorageMetadata)
+            and getattr(obj, "size", None) is not None
+            and md.size != obj.size()
+        ):
+            raise ValueError(
+                f"Size mismatch between saved {md.size} and current: {obj.size()} for {fqn}",
+            )
         # Since DTensor supports submesh, adding extra check to ensure _create_read_items()
         # gets called only when the current rank is part of the mesh for the corresponding DTensor.
         if isinstance(obj, DTensor):
@@ -368,8 +376,8 @@ def create_default_local_load_plan(
 
 
 def create_default_global_load_plan(
-    all_plans: List[LoadPlan],
-) -> List[LoadPlan]:
+    all_plans: list[LoadPlan],
+) -> list[LoadPlan]:
     """
     Create global load plan used by DefaultLoadPlanner.
 
@@ -380,7 +388,7 @@ def create_default_global_load_plan(
 
 
 def create_default_local_save_plan(
-    state_dict: Dict[str, Any], is_coordinator: bool
+    state_dict: dict[str, Any], is_coordinator: bool
 ) -> SavePlan:
     """
     Create the ``SavePlan`` used by DefaultSavePlanner.
@@ -407,9 +415,9 @@ def create_default_local_save_plan(
 
 
 def create_default_global_save_plan(
-    all_plans: List[SavePlan],
+    all_plans: list[SavePlan],
     rewrite_index_hints: bool = True,
-) -> Tuple[List[SavePlan], Metadata]:
+) -> tuple[list[SavePlan], Metadata]:
     """
     Create the global plan and metadata used by DefaultSavePlanner.
 
@@ -418,7 +426,7 @@ def create_default_global_save_plan(
     The only global planning change is to update index hints in all ``MetadataIndex`` objects if
     ``rewrite_index_hints`` is True.
     """
-    md: Dict[str, STORAGE_TYPES] = {}
+    md: dict[str, STORAGE_TYPES] = {}
     new_plans = []
     for plan in all_plans:
         new_items = []
@@ -498,7 +506,7 @@ def _check_box_bounds(
     return True
 
 
-def _validate_global_plan(global_plan: List[SavePlan], metadata: Metadata) -> bool:
+def _validate_global_plan(global_plan: list[SavePlan], metadata: Metadata) -> bool:
     all_good = True
     for key, value in metadata.state_dict_metadata.items():
         if isinstance(value, BytesStorageMetadata):

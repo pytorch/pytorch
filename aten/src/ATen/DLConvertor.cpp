@@ -260,7 +260,6 @@ ScalarType toScalarType(const DLDataType& dtype) {
   return stype;
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
 namespace {
 struct ATenDLMTensor {
   Tensor handle;

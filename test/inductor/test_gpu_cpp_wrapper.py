@@ -58,9 +58,31 @@ class TestGpuWrapper(InductorTestCase):
 class DynamicShapesGpuWrapperGpuTests(InductorTestCase):
     device = GPU_TYPE
 
+    def test_annotation_training(self):
+        batch_size = 32
+        seq_length = 50
+        hidden_size = 768
+
+        def create_test_fn():
+            def test_fn():
+                inp = torch.randn(
+                    batch_size, seq_length, hidden_size, device=self.device
+                )
+                weight = torch.randn(hidden_size, hidden_size, device=self.device)
+                matmul_output = inp @ weight
+                torch.nn.LayerNorm(hidden_size, device=self.device)(matmul_output)
+                return True
+
+            return test_fn
+
+        fn = torch.compile(options={"annotate_training": True, "cpp_wrapper": True})(
+            create_test_fn()
+        )
+        fn()
+
 
 test_failures_gpu_wrapper = {
-    "test_mm_plus_mm2_cuda_dynamic_shapes": test_torchinductor.TestFailure(
+    "test_mm_plus_mm2_dynamic_shapes": test_torchinductor.TestFailure(
         ("gpu_wrapper",), is_skip=True
     ),
     "test_randint_xpu": test_torchinductor.TestFailure(("gpu_wrapper",), is_skip=False),
@@ -146,10 +168,6 @@ if RUN_GPU:
         "test_enable_dynamic_shapes_cpp_wrapper",
         "test_dynamic_shapes_persistent_reduction_mixed_x_dim",
         "test_cat_slice_cat",
-        "test_mm_plus_mm2",
-        "test_mm_plus_mm3",
-        "test_addmm",
-        "test_linear_relu",
         "test_fft_real_input",
         "test_fft_real_input_real_output",
     ]
@@ -232,10 +250,12 @@ if RUN_GPU:
         # ),
         BaseTest(
             "test_mm_plus_mm2",
+            device=None,
             tests=test_select_algorithm.TestSelectAlgorithm(),
         ),
         BaseTest(
             "test_mm_plus_mm3",
+            device=None,
             tests=test_select_algorithm.TestSelectAlgorithm(),
         ),
         BaseTest("test_fft_real_input"),
@@ -254,11 +274,13 @@ if RUN_GPU:
         # skip if not enough SMs
         BaseTest(
             "test_addmm",
+            device=None,
             tests=test_select_algorithm.TestSelectAlgorithm(),
         ),
         # skip if not enough SMs
         BaseTest(
             "test_linear_relu",
+            device=None,
             tests=test_select_algorithm.TestSelectAlgorithm(),
         ),
     ]:
@@ -268,7 +290,7 @@ if RUN_GPU:
 
     from torch._inductor.utils import is_big_gpu
 
-    if GPU_TYPE == "cuda" and is_big_gpu(0):
+    if GPU_TYPE == "cuda" and is_big_gpu():
         skip_list = ["test_addmm", "test_linear_relu"]
         # need to skip instead of omit, otherwise fbcode ci can be flaky
         for test_name in skip_list:

@@ -34,3 +34,5 @@ API Reference
 .. autofunction:: read_file
 .. autofunction:: tune_gemm_in_file
 .. autofunction:: mgpu_tune_gemm_in_file
+.. autofunction:: set_rotating_buffer_size
+.. autofunction:: get_rotating_buffer_size

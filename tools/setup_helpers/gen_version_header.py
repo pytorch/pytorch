@@ -6,10 +6,10 @@ from __future__ import annotations
 
 import argparse
 import os
-from typing import cast, Tuple
+from typing import cast
 
 
-Version = Tuple[int, int, int]
+Version = tuple[int, int, int]
 
 
 def parse_version(version: str) -> Version:

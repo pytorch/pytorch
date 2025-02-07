@@ -160,10 +160,10 @@ class GraphModule(torch.nn.Module):
             return invoke_quant_test(inner, (x, y), scheme="nf4")
 
         with self.assertRaisesRegex(RuntimeError, "aliases of the inputs"):
-            out = f(inner, x, y)
+            f(inner, x, y)
 
         with self.assertRaisesRegex(RuntimeError, "inputs are mutated"):
-            out = f(inner2, x, y)
+            f(inner2, x, y)
 
     def test_eager_call(self):
         def inner(x, y):

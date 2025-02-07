@@ -13,6 +13,7 @@
 #include <ATen/ATen.h>
 #include <ATen/hip/impl/HIPStreamMasqueradingAsCUDA.h>
 #include <ATen/native/hip/ck_gemm.h>
+#include <ATen/native/hip/ck_types.h>
 
 #include <ck/ck.hpp>
 #include <ck/tensor_operation/gpu/device/gemm_specialization.hpp>
@@ -39,57 +40,6 @@ using Col = ck::tensor_layout::gemm::ColumnMajor;
 using PassThrough = ck::tensor_operation::element_wise::PassThrough;
 
 namespace at::native {
-
-template <typename T>
-struct CkMathType {
-  using dtype = T;
-};
-
-template <>
-struct CkMathType<at::BFloat16> {
-  using dtype = ck::bhalf_t;
-};
-
-template <>
-struct CkMathType<at::Half> {
-  using dtype = ck::half_t;
-};
-
-
-template <bool A, bool B>
-struct CkTensorLayout {
-  // default goes to row-wise for now
-  using a_layout = Row;
-  using b_layout = Row;
-};
-
-// True denotes transpose is necessary. Default is Col, so return Row
-template <>
-struct CkTensorLayout<true, true> {
-  using a_layout = Col;
-  using b_layout = Col;
-};
-
-
-template <>
-struct CkTensorLayout<true, false> {
-  using a_layout = Row;
-  using b_layout = Col;
-};
-
-template <>
-struct CkTensorLayout<false, true> {
-  using a_layout = Col;
-  using b_layout = Row;
-};
-
-
-template <>
-struct CkTensorLayout<false, false> {
-  using a_layout = Row;
-  using b_layout = Row;
-};
-
 
 // Elementwise Operators
 struct AlphaBetaAdd

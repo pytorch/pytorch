@@ -1,7 +1,7 @@
 import json
 import os
 from functools import lru_cache
-from typing import Any, Dict, List
+from typing import Any
 
 import clickhouse_connect  # type: ignore[import]
 
@@ -25,12 +25,12 @@ def get_clickhouse_client() -> Any:
     )
 
 
-def query_clickhouse(query: str, params: Dict[str, Any]) -> List[Dict[str, Any]]:
+def query_clickhouse(query: str, params: dict[str, Any]) -> list[dict[str, Any]]:
     """
     Queries ClickHouse.  Returns datetime in YYYY-MM-DD HH:MM:SS format.
     """
 
-    def convert_to_json_list(res: bytes) -> List[Dict[str, Any]]:
+    def convert_to_json_list(res: bytes) -> list[dict[str, Any]]:
         rows = []
         for row in res.decode().split("\n"):
             if row:

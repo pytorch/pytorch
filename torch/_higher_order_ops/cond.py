@@ -3,7 +3,7 @@
 import contextlib
 import logging
 import warnings
-from typing import Any, Callable, List, Tuple, Union
+from typing import Any, Callable, Union
 
 import torch
 import torch._subclasses.functional_tensor
@@ -71,7 +71,7 @@ def cond(
     pred: Union[bool, int, float, torch.Tensor],
     true_fn: Callable,
     false_fn: Callable,
-    operands: Union[Tuple, List] = (),
+    operands: Union[tuple, list] = (),
 ) -> Any:
     r"""
     Conditionally applies `true_fn` or `false_fn`.
@@ -133,11 +133,6 @@ def cond(
           - The function cannot have in-place mutations on inputs or global variables.
             (Note: in-place tensor operations such as `add_` for intermediate results
             are allowed in a branch)
-
-    .. warning::
-        Temporal Limitations:
-
-        - The **output** of branches must be a **single Tensor**. Pytree of tensors will be supported in the future.
 
     """
     if torch.compiler.is_dynamo_compiling():
@@ -483,11 +478,11 @@ def cond_fake_tensor_mode(mode, pred, true_fn, false_fn, operands):
 def cond_func(ctx, pred, true_fn, false_fn, inputs):
     unwrapped_inputs = ctx.unwrap_tensors(inputs)
     unwrapped_pred = ctx.unwrap_tensors(pred)
-    with ctx.redispatch_to_next() as m:
+    with ctx.redispatch_to_next():
         functional_true = ctx.functionalize(_maybe_run_with_interpreter(true_fn))
         functional_false = ctx.functionalize(_maybe_run_with_interpreter(false_fn))
         pre_dispatch = hasattr(ctx, "mode") and ctx.mode.pre_dispatch
-        for branch in [functional_true, functional_false]:
+        for branch in [true_fn, false_fn]:
             if _has_potential_branch_input_mutation(
                 branch, unwrapped_inputs, pre_dispatch=pre_dispatch
             ):

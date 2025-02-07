@@ -2274,6 +2274,7 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
             "XNNPACK/src/microkernel-utils.c",
             "XNNPACK/src/operator-run.c",
             "XNNPACK/src/reference/packing.cc",
+            "XNNPACK/src/packw.c",
             "XNNPACK/src/cache.c",
             "XNNPACK/src/indirection.c",
             "XNNPACK/src/operator-utils.c",
