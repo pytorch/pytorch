@@ -10132,6 +10132,30 @@ def ___make_guard_fn():
 
         self.assertEqual(actual, expected)
 
+    def test_frozen_dataclass_field_without_init(self):
+        @dataclasses.dataclass(frozen=True)
+        class TestDataClass:
+            x: torch.Tensor
+            n: int = dataclasses.field(init=False)
+
+            def __post_init__(self):
+                object.__setattr__(self, "n", self.x.shape[0])
+
+        @allow_in_graph
+        def inner_fn(dc):
+            return dc.x + dc.n
+
+        def fn(x):
+            dc = TestDataClass(x)
+            return inner_fn(dc)
+
+        fn_opt = torch.compile(fullgraph=True)(fn)
+        inps = (torch.ones(2, 3),)
+        actual = fn_opt(*inps)
+        expected = fn(*inps)
+
+        self.assertEqual(actual, expected)
+
     def test_pytree_tree_leaves(self):
         implemtations = [("python", python_pytree)]
         if cxx_pytree is not None:
@@ -10264,6 +10288,25 @@ def ___make_guard_fn():
                 actual = fn_opt(x, y)
 
                 self.assertEqual(actual, expected)
+
+    def test_pytree_leafspec_as_proxy(self):
+        import torch.utils._pytree as pytree
+
+        @allow_in_graph
+        def inner_fn(spec, x):
+            if spec.num_leaves == 1:
+                return x + 1
+            return x + 2
+
+        def fn(x):
+            return inner_fn(pytree._LEAF_SPEC, x)
+
+        fn_opt = torch.compile(fullgraph=True)(fn)
+        inps = (torch.ones(2),)
+        actual = fn_opt(*inps)
+        expected = fn(*inps)
+
+        self.assertEqual(actual, expected)
 
     def test_shape_env_no_recording(self):
         main = ShapeEnv(should_record_events=False)

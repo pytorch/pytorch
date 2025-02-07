@@ -1306,9 +1306,9 @@ class FrozenDataClassVariable(UserDefinedObjectVariable):
         kwargs = {}
         for field in fields(self.value):
             proxy = self.fields[field.name].as_proxy()
-            if hasattr(field, "kw_only") and field.kw_only:
+            if field.kw_only:
                 kwargs[field.name] = proxy
-            else:
+            elif field.init:
                 args.append(proxy)
 
         return self.python_type()(*args, **kwargs)
