@@ -787,7 +787,9 @@ class AOTInductorTestsTemplate:
     @skipIfXpu
     def test_fp8_view_of_param(self):
         if self.device == "cuda" and not PLATFORM_SUPPORTS_FP8:
-            raise unittest.SkipTest("FP8 is only supported on H100+, SM 8.9 and MI300+ devices")
+            raise unittest.SkipTest(
+                "FP8 is only supported on H100+, SM 8.9 and MI300+ devices"
+            )
 
         class Model(torch.nn.Module):
             def __init__(self, dtype, weight):
@@ -1501,6 +1503,26 @@ class AOTInductorTestsTemplate:
             }
         self.check_model_with_multiple_inputs(
             WhileLoopModels.UnbackedSymIntClosure(),
+            prepend_counters(inputs),
+            dynamic_shapes=dynamic_shapes,
+        )
+
+    @common_utils.parametrize("dynamic", [False, True])
+    def test_while_loop_with_sym_expr_cond(self, dynamic):
+        inputs = (
+            torch.randn(10, 20, device=self.device),
+            torch.randn(10, 20, device=self.device),
+        )
+        dim0_ab = Dim("s0", min=2, max=1024)
+        dynamic_shapes = None
+        if dynamic:
+            dynamic_shapes = {
+                "c": {},
+                "a": {0: dim0_ab, 1: None},
+                "b": {0: dim0_ab, 1: None},
+            }
+        self.check_model_with_multiple_inputs(
+            WhileLoopModels.SymExprCond(),
             prepend_counters(inputs),
             dynamic_shapes=dynamic_shapes,
         )
