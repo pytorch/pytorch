@@ -416,7 +416,7 @@ def unimplemented_v2(
     hints: list[str],
     *,
     from_exc: Any = _NOTHING,
-    log_warning=False,
+    log_warning: bool = False,
 ) -> NoReturn:
     hints_str = "\n".join(hints)
     hints_str = textwrap.indent(hints_str, "  Hint: ")

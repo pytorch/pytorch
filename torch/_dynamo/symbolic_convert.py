@@ -2410,8 +2410,8 @@ class InstructionTranslatorBase(
         ):
             unimplemented_v2(
                 gb_type="Unsupported context manager",
-                context=f"Attempted {inst.opname} on {ctx}",
-                explanation=f"Dynamo does not know how to enter a {self.python_type_name()} context manager.",
+                context=f"Attempted SETUP_WITH/BEFORE_WITH on {ctx}",
+                explanation=f"Dynamo does not know how to enter a `{ctx.python_type_name()}` context manager.",
                 hints=[
                     "Avoid using the unsupported context manager.",
                     "File an issue to PyTorch. Simple context managers can potentially be supported, "

@@ -845,7 +845,7 @@ class BuiltinVariable(VariableTracker):
                     f"Consider using an equivalent alternative function/method to `{fn.__name__}`.",
                     "If you are attempting to call a logging function (e.g. `print`), "
                     "you can try adding it to `torch._dynamo.config.reorderable_logging_functions`.",
-                    "Please report an issue to PyTorch",
+                    "Please report an issue to PyTorch.",
                 ],
             )
 
