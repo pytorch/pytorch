@@ -1,4 +1,5 @@
 // Implementation of specal math functions for Metal
+#pragma once
 #include <metal_stdlib>
 
 namespace c10 {
@@ -31,7 +32,7 @@ T erf(T x) {
 }
 
 template <typename T>
-float erfinv(T y) {
+inline float erfinv(T y) {
   /* coefficients in rational expansion */
   constexpr float a[4] = {0.886226899, -1.645349621, 0.914624893, -0.140543331};
   constexpr float b[4] = {-2.118377725, 1.442710462, -0.329097515, 0.012229801};
@@ -66,7 +67,7 @@ float erfinv(T y) {
  */
 
 template <typename T>
-T chbevl(T x, const float array[], const int len) {
+inline T chbevl(T x, const float array[], const int len) {
   T b0, b1, b2;
 
   b0 = array[0];
@@ -195,7 +196,7 @@ T i1(T _x) {
 
 // gamma, lgamma
 template <typename T>
-float log_gamma(const T);
+inline float log_gamma(const T);
 
 template <typename T>
 float gamma(const T x) {
@@ -263,7 +264,7 @@ float gamma(const T x) {
 }
 
 template <typename T>
-float log_gamma(const T x) {
+inline float log_gamma(const T x) {
   constexpr float LOG_PI = 1.14472988584940017414342735135305;
   constexpr float HALF_LOG_TWO_PI = 0.91893853320467274178032973640562;
   constexpr float LGAMMA_EXPANSION_COEF[8] = {
@@ -313,7 +314,7 @@ float log_gamma(const T x) {
   return LOG_PI - rc - ::metal::log(log_arg);
 }
 
-float zeta(float x, float q) {
+inline float zeta(float x, float q) {
   constexpr float MACHEP = 1.11022302462515654042E-16;
   constexpr float ZETA_EXPANSION[] = {
       12.0,
@@ -383,14 +384,14 @@ float zeta(float x, float q) {
 }
 
 template <typename T0>
-float polygamma(const T0 input, const int64_t order) {
+inline float polygamma(const int64_t order, const T0 input) {
   float x = input;
   float n = order;
   float sgn = ((order % 2) ? 1 : -1);
   return sgn * gamma(n + 1) * zeta(n + 1, x);
 }
 
-float calc_digamma_positive_domain(float x) {
+inline float calc_digamma_positive_domain(float x) {
   constexpr float DIGAMMA_COEF[7] = {
       8.33333333333333333333E-2,
       -2.10927960927960927961E-2,
@@ -425,7 +426,7 @@ float calc_digamma_positive_domain(float x) {
 }
 
 template <typename T0>
-float digamma(T0 x) {
+inline float digamma(T0 x) {
   if (x < 0.0f) {
     if (x == ::metal::trunc(x)) {
       // As per C++ standard for gamma related functions and SciPy,
@@ -444,10 +445,20 @@ float digamma(T0 x) {
   } else if (x == 0.0f) {
     // As per C++ standard for gamma related functions and SciPy,
     // If the argument is ±0, ±∞ is returned
-    return ::metal::copysign(INFINITY, -x);
+    return ::metal::copysign(INFINITY, static_cast<float>(-x));
   } else {
     return calc_digamma_positive_domain(x);
   }
+}
+
+template <typename T>
+T sinc(T a) {
+  if (a == static_cast<T>(0)) {
+    return static_cast<T>(1);
+  }
+  constexpr T pi = static_cast<T>(M_PI_F);
+  T product = pi * a;
+  return static_cast<T>(::metal::sin(product) / product);
 }
 
 } // namespace metal
