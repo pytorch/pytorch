@@ -98,18 +98,6 @@ def hints_wrapper_functionalize(ctx, body_fn, args, kwargs, hints):
         check_input_mutation_and_alias(
             body_fn, unwrapped_args, pre_dispatch=pre_dispatch
         )
-        # if _has_potential_branch_input_mutation(
-        #     body_fn, unwrapped_args, pre_dispatch=pre_dispatch
-        # ):
-        #     raise UnsupportedAliasMutationException(
-        #         "body_fn of hints_wrapper might be modifying the input!"
-        #     )
-        # if _has_potential_branch_input_alias(
-        #     body_fn, unwrapped_args, pre_dispatch=pre_dispatch
-        # ):
-        #     raise UnsupportedAliasMutationException(
-        #         "body_fn of hints_wrapper might be aliasing the input!"
-        #     )
         outputs = hints_wrapper(
             functional_body_fn,
             unwrapped_args,

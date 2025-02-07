@@ -224,6 +224,16 @@ def has_potential_input_mutation_or_alias(gm, inputs, pre_dispatch=False):
 
 
 def check_input_mutation_and_alias(combine_fn, sample_inputs, pre_dispatch=False):
+    _, has_branch_alias = check_input_mutation(
+        combine_fn, sample_inputs, pre_dispatch=pre_dispatch
+    )
+    if has_branch_alias:
+        raise UnsupportedAliasMutationException(
+            "Aliasing within branch or combine_fn might be occuring! If you are returning a view of the input or twice the same output, please make sure to clone it."
+        )
+
+
+def check_input_mutation(combine_fn, sample_inputs, pre_dispatch=False):
     has_branch_input_mutation, has_branch_alias = has_potential_input_mutation_or_alias(
         combine_fn, sample_inputs, pre_dispatch=pre_dispatch
     )
@@ -231,10 +241,7 @@ def check_input_mutation_and_alias(combine_fn, sample_inputs, pre_dispatch=False
         raise UnsupportedAliasMutationException(
             "A branch or combine_fn might be modifying the input! Consider cloning the input before modifying it."
         )
-    if has_branch_alias:
-        raise UnsupportedAliasMutationException(
-            "Aliasing within branch or combine_fn might be occuring! If you are returning a view of the input or twice the same output, please make sure to clone it."
-        )
+    return has_branch_input_mutation, has_branch_alias
 
 
 def has_potential_input_alias_or_mutation(gm, inputs, pre_dispatch=False):
