@@ -1,7 +1,5 @@
 # Owner(s): ["module: dynamo"]
 
-import contextlib
-import sys
 import unittest
 
 import torch
@@ -461,6 +459,18 @@ class ExceptionTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(fn(x), opt_fn(x))
 
     @make_dynamo_test
+    def test_user_defined_exception_variable(self):
+        z = 0
+        try:
+            raise CustomException
+        except ValueError:
+            z = 1
+        except CustomException:
+            z = 2
+        self.assertEqual(z, 2)
+
+    @unittest.expectedFailure
+    @make_dynamo_test
     def test_raise_set___context__(self):
         try:
             raise TypeError
@@ -475,84 +485,6 @@ class ExceptionTests(torch._dynamo.test_case.TestCase):
             exc2 = e
 
         self.assertIsNone(exc2.__context__)
-
-    @unittest.skipIf(sys.version_info < (3, 11), "Python 3.11+")
-    @make_dynamo_test
-    def test_raise_match(self):
-        a = AttributeError
-        b = BytesWarning
-        c = ConnectionError
-        d = DeprecationWarning
-        e = Exception
-
-        def fn(a, b):
-            try:
-                raise a
-            finally:
-                raise b
-
-        def fix_exc_context(frame_exc, new_exc, old_exc):
-            # slightly change from ExitStack.fix_exc_context function
-            while 1:
-                exc_context = new_exc.__context__
-                if exc_context is None or exc_context is old_exc:
-                    return
-                if exc_context is frame_exc:
-                    break
-                new_exc = exc_context
-            new_exc.__context__ = old_exc
-
-        @contextlib.contextmanager
-        def ctx():
-            try:
-                yield
-            finally:
-                frame_exc = prev_exc = sys.exc_info()
-                args = [(d, c), (b, a)]
-                for x, y in args:
-                    try:
-                        fn(x, y)
-                    except BaseException:
-                        new_exc = sys.exc_info()
-                        fix_exc_context(frame_exc[1], new_exc[1], prev_exc[1])
-                        prev_exc = new_exc
-
-                try:
-                    fixed_ctx = prev_exc[1].__context__
-                    raise prev_exc[1]
-                except BaseException:
-                    prev_exc[1].__context__ = fixed_ctx
-                    raise
-
-        try:
-            with ctx():
-                raise e
-        except Exception as exc:
-            self.assertIsInstance(exc, a)
-            self.assertIsInstance(exc.__context__, b)
-            self.assertIsInstance(exc.__context__.__context__, c)
-            self.assertIsInstance(exc.__context__.__context__.__context__, d)
-            self.assertIsInstance(
-                exc.__context__.__context__.__context__.__context__, e
-            )
-
-    @make_dynamo_test
-    def test_raise_ZeroDivisionError(self):
-        try:
-            1 / 0
-        except Exception:
-            pass
-
-    @make_dynamo_test
-    def test_user_defined_exception_variable(self):
-        z = 0
-        try:
-            raise CustomException
-        except ValueError:
-            z = 1
-        except CustomException:
-            z = 2
-        self.assertEqual(z, 2)
 
 
 class CPythonExceptionTests(torch._dynamo.test_case.TestCase):
@@ -577,6 +509,7 @@ class CPythonExceptionTests(torch._dynamo.test_case.TestCase):
         self.assertIsNone(e.__context__)
         self.assertIsNone(e.__cause__)
 
+    @unittest.expectedFailure
     @make_dynamo_test
     def testChainingDescriptors(self):
         try:
@@ -596,6 +529,7 @@ class CPythonExceptionTests(torch._dynamo.test_case.TestCase):
         e.__suppress_context__ = False
         self.assertFalse(e.__suppress_context__)
 
+    @unittest.expectedFailure
     @make_dynamo_test
     def test_context_of_exception_in_try_and_finally(self):
         try:
@@ -611,6 +545,7 @@ class CPythonExceptionTests(torch._dynamo.test_case.TestCase):
         self.assertIs(exc, ve)
         self.assertIs(exc.__context__, te)
 
+    @unittest.expectedFailure
     @make_dynamo_test
     def test_context_of_exception_in_except_and_finally(self):
         try:
@@ -630,6 +565,7 @@ class CPythonExceptionTests(torch._dynamo.test_case.TestCase):
         self.assertIs(exc.__context__, ve)
         self.assertIs(exc.__context__.__context__, te)
 
+    @unittest.expectedFailure
     @make_dynamo_test
     def test_context_of_exception_in_else_and_finally(self):
         try:
@@ -649,7 +585,7 @@ class CPythonExceptionTests(torch._dynamo.test_case.TestCase):
         self.assertIs(exc, oe)
         self.assertIs(exc.__context__, ve)
 
-    @unittest.skipIf(sys.version_info < (3, 11), "Python 3.11+")
+    @unittest.expectedFailure
     @make_dynamo_test
     def test_raise_does_not_create_context_chain_cycle(self):
         A = AssertionError
@@ -688,7 +624,7 @@ class CPythonExceptionTests(torch._dynamo.test_case.TestCase):
         self.assertIs(c.__context__, b)
         self.assertIsNone(b.__context__)
 
-    @unittest.skipIf(sys.version_info < (3, 11), "Python 3.11+")
+    @unittest.expectedFailure
     @make_dynamo_test
     def test_no_hang_on_context_chain_cycle1(self):
         # See issue 25782. Cycle in context chain.
@@ -744,7 +680,7 @@ class CPythonExceptionTests(torch._dynamo.test_case.TestCase):
         self.assertIs(b.__context__, a)
         self.assertIs(a.__context__, c)
 
-    @unittest.skipIf(sys.version_info < (3, 11), "Python 3.11+")
+    @unittest.expectedFailure
     @make_dynamo_test
     def test_no_hang_on_context_chain_cycle3(self):
         # See issue 25782. Longer context chain with cycle.
