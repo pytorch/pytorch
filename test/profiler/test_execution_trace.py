@@ -92,8 +92,14 @@ class TestExecutionTrace(TestCase):
             _record_function_with_args_exit(rf_handle)
 
     def get_execution_trace_root(self, output_file_name) -> Json:
+        import gzip
+
         nodes = []
-        with open(output_file_name) as f:
+        with (
+            gzip.open(output_file_name)
+            if output_file_name.endswith(".gz")
+            else open(output_file_name)
+        ) as f:
             et_graph = json.load(f)
             assert "nodes" in et_graph
             nodes = et_graph["nodes"]
@@ -299,7 +305,8 @@ class TestExecutionTrace(TestCase):
             or torch.profiler.ProfilerActivity.XPU in supported_activities()
         )
         # Create a temp file to save execution trace data.
-        fp = tempfile.NamedTemporaryFile("w+t", suffix=".et.json", delete=False)
+        # Use a gzip file to test compression codepath
+        fp = tempfile.NamedTemporaryFile("w", suffix=".et.json.gz", delete=False)
         fp.close()
         expected_loop_events = 0
 
