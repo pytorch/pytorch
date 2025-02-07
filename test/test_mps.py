@@ -335,6 +335,7 @@ def mps_ops_modifier(ops):
         'scalar_tensor',
         'select',
         'sgn',
+        'sinc',
         'slice',
         'special.zeta',
         'split',
@@ -487,7 +488,6 @@ def mps_ops_modifier(ops):
         'square',
         'stack',
         'stft',
-        'sinc',
         'sum',
         'sum_to_size',
         'tan',
@@ -844,7 +844,6 @@ def mps_ops_modifier(ops):
 
         # Operations not supported for integral types
         'special.zeta': [torch.bool, torch.int16, torch.int32, torch.int64, torch.uint8, torch.int8],
-        'sinc': [torch.bool, torch.int16, torch.int32, torch.int64, torch.uint8, torch.int8, torch.complex64],
 
         # GEMM on MPS is not supported for integral types
         'nn.functional.linear': [torch.int16, torch.int32, torch.int64, torch.uint8, torch.int8],
