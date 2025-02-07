@@ -404,10 +404,11 @@ test_inductor_cpp_wrapper_shard() {
 
   if [[ "$1" -eq "2" ]]; then
     # For now, manually put the opinfo tests in shard 2, and all other tests in
-    # shard 1.  Test specific things triggering past bugs, for now.
+    # shard 1.  Run all CPU tests, as well as specific GPU tests triggering past
+    # bugs, for now.
     python test/run_test.py \
       --include inductor/test_torchinductor_opinfo \
-      -k 'linalg or to_sparse' \
+      -k 'linalg or to_sparse or TestInductorOpInfoCPU' \
       --verbose
     exit
   fi
@@ -417,6 +418,7 @@ test_inductor_cpp_wrapper_shard() {
   python test/run_test.py \
     --include inductor/test_torchinductor inductor/test_max_autotune inductor/test_cpu_repro \
     --verbose
+  python test/run_test.py --inductor --include test_torch -k 'take' --verbose
 
   # Run inductor benchmark tests with cpp wrapper.
   # Skip benchmark tests if it's in rerun-disabled-mode.
