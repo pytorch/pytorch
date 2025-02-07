@@ -6689,7 +6689,7 @@ def triton_kernel_wrap_(
     return {key: val for key, val in kwargs.items() if isinstance(val, TensorBox)}
 
 
-@register_lowering(torch.ops.higher_order.cond)
+@register_lowering(torch.ops.higher_order.cond, type_promotion_kind=None)
 def cond(pred, true_fn, false_fn, operands):
     if any(isinstance(x, IRNode) and is_triton(x) for x in [pred, *operands]):
         msg = "control flow operator: torch.cond."
@@ -6701,7 +6701,7 @@ def cond(pred, true_fn, false_fn, operands):
     return list(map(TensorBox.create, result))
 
 
-@register_lowering(torch.ops.higher_order.while_loop)
+@register_lowering(torch.ops.higher_order.while_loop, type_promotion_kind=None)
 def while_loop(cond_fn, body_fn, carried_inputs, additional_inputs):
     if any(
         isinstance(x, IRNode) and is_triton(x)
