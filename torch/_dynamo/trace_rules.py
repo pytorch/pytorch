@@ -3024,6 +3024,9 @@ def _polyfilled_function_ids() -> set[int]:
     return set()
 
 
+_polyfilled_class_mapping = {}
+
+
 @FunctionIdSet
 def _numpy_function_ids() -> dict[int, str]:
     unsupported_funcs = {

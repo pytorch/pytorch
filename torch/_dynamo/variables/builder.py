@@ -144,7 +144,6 @@ from .functions import (
     CollectionsNamedTupleFunction,
     CollectiveFunctionRewriteVariable,
     CreateTMADescriptorVariable,
-    FunctoolsPartialVariable,
     FunctoolsWrapsVariable,
     TritonKernelVariable,
     UserFunctionVariable,
@@ -222,6 +221,7 @@ from .user_defined import (
     FrozenDataClassVariable,
     KeyedJaggedTensorVariable,
     MutableMappingVariable,
+    PolyFilledUserDefinedClassVariable,
     SourcelessGraphModuleVariable,
     UserDefinedClassVariable,
     UserDefinedDictVariable,
@@ -670,32 +670,36 @@ class VariableBuilder:
             return build_checkpoint_variable(source=self.source)
         elif is_invoke_subgraph(value):
             return build_invoke_subgraph_variable(source=self.source)
-        elif isinstance(value, functools.partial):
-            func_src = AttrSource(self.get_source(), "func")
-            func_obj = VariableBuilder(self.tx, func_src)(value.func)
+        # elif isinstance(value, functools.partial):
+        #     self.install_guards(GuardBuilder.TYPE_MATCH)
+        #     new_value = polyfills.functools.partial(value.func, value.args, value.keywords)
+        #     return UserDefinedObjectVariable(new_value, source=self.source)
+        #     # func_src = AttrSource(self.get_source(), "func")
+        #     # func_obj = VariableBuilder(self.tx, func_src)(value.func)
 
-            args = []
-            args_source = AttrSource(self.get_source(), "args")
-            for i, arg in enumerate(value.args):
-                args.append(
-                    VariableBuilder(self.tx, GetItemSource(args_source, i))(arg)
-                )
+        #     # args = []
+        #     # args_source = AttrSource(self.get_source(), "args")
+        #     # for i, arg in enumerate(value.args):
+        #     #     args.append(
+        #     #         VariableBuilder(self.tx, GetItemSource(args_source, i))(arg)
+        #     #     )
 
-            keywords = {}
-            keywords_source = AttrSource(self.get_source(), "keywords")
-            for k, v in value.keywords.items():
-                if not ConstantVariable.is_literal(k):
-                    unimplemented("functools.partial with non-literal keyword")
-                keywords[k] = VariableBuilder(
-                    self.tx, DictGetItemSource(keywords_source, k)
-                )(v)
+        #     # keywords = {}
+        #     # keywords_source = AttrSource(self.get_source(), "keywords")
+        #     # for k, v in value.keywords.items():
+        #     #     if not ConstantVariable.is_literal(k):
+        #     #         unimplemented("functools.partial with non-literal keyword")
+        #     #     keywords[k] = VariableBuilder(
+        #     #         self.tx, DictGetItemSource(keywords_source, k)
+        #     #     )(v)
 
-            install_guard(
-                self.get_source().make_guard(GuardBuilder.TYPE_MATCH),
-                keywords_source.make_guard(GuardBuilder.DICT_KEYS_MATCH),
-                args_source.make_guard(GuardBuilder.SEQUENCE_LENGTH),
-            )
-            return FunctoolsPartialVariable(func_obj, args, keywords)
+        #     # install_guard(
+        #     #     self.get_source().make_guard(GuardBuilder.TYPE_MATCH),
+        #     #     keywords_source.make_guard(GuardBuilder.DICT_KEYS_MATCH),
+        #     #     args_source.make_guard(GuardBuilder.SEQUENCE_LENGTH),
+        #     # )
+        #     # breakpoint()
+        #     # return FunctoolsPartialVariable(func_obj, args, keywords)
         elif is_typing(value):
             # typing.List, typing.Mapping, etc.
             self.install_guards(GuardBuilder.ID_MATCH)
@@ -1097,6 +1101,15 @@ class VariableBuilder:
             # unlikely to change, so its ok to skip the guard here.
             return MethodWrapperVariable(value)
         elif issubclass(type(value), type):
+            if trace_class := trace_rules._polyfilled_class_mapping.get(value):
+                return PolyFilledUserDefinedClassVariable.create(
+                    tx=self.tx,
+                    orig_class=value,
+                    orig_source=self.source,
+                    trace_class=trace_class
+                )
+
+
             if value in (
                 torch.utils.hooks.BackwardHook,
                 torch.nn.Parameter,

@@ -409,6 +409,33 @@ def substitute_in_graph(
     return wrapper
 
 
+def substitute_class(original_class, supports_reconstruction=True):
+    """
+    Register a polyfill handler for a class, usually a C++ class from the C extension, to be
+    used in place of the original class when inlining the original class in the graph.
+
+    .. note::
+
+        The polyfill handler is only used when inlining the original class. It is not used when
+        the original class is called directly. In the eager mode, the decorated class calls
+        the performant C++ class rather than the polyfill handler.
+    """
+
+    def inner(traceable_class):
+        assert hasattr(traceable_class, "convert_to_traceable")
+        if supports_reconstruction:
+            assert hasattr(traceable_class, "convert_to_original")
+            traceable_class.__global_name__ = f"___{traceable_class.__module__}_{traceable_class.__name__}___"
+
+        from torch._dynamo.trace_rules import _polyfilled_class_mapping
+        _polyfilled_class_mapping[original_class] = traceable_class
+
+        _polyfilled_class_mapping
+        return traceable_class
+
+    return inner
+
+
 # Helper function to flatten a tensor subclass and apply a function to
 # all inner tensors that match the outer dim. Used to reduce duplication
 # across the various marking APIs.

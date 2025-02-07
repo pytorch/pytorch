@@ -13,7 +13,7 @@ import threading
 import types
 import warnings
 import weakref
-from typing import Generic, TYPE_CHECKING
+from typing import Generic, TYPE_CHECKING, Callable, Any
 from typing_extensions import is_typeddict
 
 import torch._dynamo.config
@@ -411,16 +411,24 @@ class UserDefinedClassVariable(UserDefinedVariable):
         elif self.value is weakref.ref:
             return variables.WeakRefVariable(args[0])
         elif self.value is functools.partial:
-            if not args:
-                unimplemented("functools.partial malformed")
-            # The first arg, a callable (the ctor below will assert on types)
-            fn = args[0]
-            rest_args = args[1:]
-            # guards for the produced FunctoolsPartialVariable are installed in FunctoolsPartialVariable ctor from the
-            # args and keywords
-            return variables.functions.FunctoolsPartialVariable(
-                fn, args=rest_args, keywords=kwargs
+            new_cls_vt = variables.UserDefinedClassVariable(polyfills.functools.partial)
+            var = tx.output.side_effects.track_object_new_from_user_defined_class(
+                new_cls_vt
             )
+            var.call_method(tx, "__init__", args, kwargs)
+            return var
+            # new_value = functools.partial(identity)
+            # return UserDefinedObjectVariable(new_value, )
+            # if not args:
+            #     unimplemented("functools.partial malformed")
+            # # The first arg, a callable (the ctor below will assert on types)
+            # fn = args[0]
+            # rest_args = args[1:]
+            # # guards for the produced FunctoolsPartialVariable are installed in FunctoolsPartialVariable ctor from the
+            # # args and keywords
+            # return variables.functions.FunctoolsPartialVariable(
+            #     fn, args=rest_args, keywords=kwargs
+            # )
         elif self.value is warnings.catch_warnings and not args:
             return variables.CatchWarningsCtxManagerVariable.create(tx, kwargs)
         elif self.value is torch.cuda.device and not kwargs and len(args) == 1:
@@ -704,15 +712,21 @@ class UserDefinedObjectVariable(UserDefinedVariable):
 
     _nonvar_fields = {"value", "value_type", *UserDefinedVariable._nonvar_fields}
 
-    def __init__(self, value, value_type=None, cls_source=None, **kwargs) -> None:
+    def __init__(
+        self, value, value_type=None, cls_source=None, is_polyfilled=False, **kwargs
+    ) -> None:
         super().__init__(**kwargs)
         self.value = value
+        if is_polyfilled:
+            assert value_type is not None, "polyfill must provide the original type"
         self.value_type = value_type or type(value)
-        assert type(value) is self.value_type
+        if not is_polyfilled:
+            assert type(value) is self.value_type
         # This is used with __new__, when the new object is sourceless but the user class can be sourceful.
         self.cls_source = cls_source
         if cls_source is None and self.source is not None:
             self.cls_source = TypeSource(self.source)
+        self.is_polyfilled = is_polyfilled
 
     def __str__(self) -> str:
         inner = self.value_type.__name__
@@ -1550,3 +1564,107 @@ class MutableMappingVariable(UserDefinedObjectVariable):
 
 class RandomVariable(UserDefinedObjectVariable):
     pass
+
+
+class PolyFilledUserDefinedClassVariable(VariableTracker):
+    @staticmethod
+    def create(tx, orig_class, orig_source, trace_class):
+        trace_source = AttrSource(tx.import_source(trace_class.__module__), trace_class.__name__)
+        trace_vt = UserDefinedClassVariable(trace_class, source=trace_source)
+
+        return PolyFilledUserDefinedClassVariable(orig_class, trace_class, trace_vt, source=orig_source)
+
+    def __init__(self, original_class, traceable_class, traceable_class_vt, **kwargs) -> None:
+        self.original_class = original_class
+        self.traceable_class = traceable_class
+        self.traceable_class_vt = traceable_class_vt
+        # # NB - The `value` is changed to the polyfilled class. From here, the
+        # # polyfilled class is used to create the object.
+        # self.value = traceable_class
+
+    def as_python_constant(self):
+        return self.original_class
+
+    def as_proxy(self):
+        return self.original_class
+
+    def call_function(
+        self,
+        tx: "InstructionTranslator",
+        args: "list[VariableTracker]",
+        kwargs: "dict[str, VariableTracker]",
+    ) -> "VariableTracker":
+        obj = self.traceable_class_vt.call_function(tx, args, kwargs)
+        assert isinstance(obj, UserDefinedObjectVariable)
+        # return obj
+        global_name = self.traceable_class.__global_name__
+        installed_global_name = tx.output.install_global_by_id(global_name, self.traceable_class.convert_to_original)
+        return PolyFilledUserDefinedObjectVariable(obj, self.original_class, self.traceable_class, installed_global_name, mutation_type=obj.mutation_type)
+
+    def var_getattr(self, tx: "InstructionTranslator", name: str) -> "VariableTracker":
+        return self.traceable_class_vt.var_getattr(tx, name)
+
+    def call_method(
+        self,
+        tx,
+        name,
+        args: "list[VariableTracker]",
+        kwargs: "dict[str, VariableTracker]",
+    ) -> "VariableTracker":
+        return self.traceable_class_vt.call_method(tx, name, args, kwargs)
+
+
+class PolyFilledUserDefinedObjectVariable(VariableTracker):
+    def __init__(self, udf_vt, original_class, traceable_class, installed_global_name, **kwargs) -> None:
+        super().__init__(**kwargs)
+        self.udf_vt = udf_vt
+        self.original_class = original_class
+        self.traceable_class = traceable_class
+        self.installed_global_name = installed_global_name
+
+    def reconstruct(self, codegen):
+        if self.udf_vt not in codegen.tempvars:
+            unimplemented("Incorrect reconstruction for polyfilled object")
+        
+        # We have the tempvar for the instance of traceable class. For
+        # reconstructing to the original class, call traceable_class
+        # convert_to_original method.
+
+        codegen.add_push_null(
+            lambda: codegen.extend_output(
+                [
+                    codegen.create_load_global(self.installed_global_name, add=True),
+                    codegen.create_load(codegen.tempvars[self.udf_vt]),
+                ]
+            )
+        )
+        codegen.extend_output(create_call_function(1, False))
+        
+    
+    def python_type(self):
+        # NB - This is intentional. For tracing purpose, we want to ensure that
+        # the class is considered original class. If not, we will have wrong
+        # conditionals on isinstance(value, class_type)
+        return self.original_class
+
+
+def _forward_to_udf_vt(
+    name: str,
+) -> Callable[[PolyFilledUserDefinedObjectVariable, Any, Any], Any]:
+    @functools.wraps(getattr(UserDefinedObjectVariable, name))
+    def forward_to_udf_vt(
+        self: PolyFilledUserDefinedObjectVariable, *args: Any, **kwargs: Any
+    ) -> Any:
+        return getattr(self.udf_vt, name)(*args, **kwargs)
+
+    return forward_to_udf_vt
+
+
+def _populate() -> None:
+    for name, value in UserDefinedObjectVariable.__dict__.items():
+        if name not in PolyFilledUserDefinedObjectVariable.__dict__:
+            if callable(value):
+                setattr(PolyFilledUserDefinedObjectVariable, name, _forward_to_udf_vt(name))
+
+
+_populate()

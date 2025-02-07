@@ -1591,7 +1591,7 @@ class BuiltinVariable(VariableTracker):
     def call_getitem(self, tx: "InstructionTranslator", *args, **kwargs):
         return args[0].call_method(tx, "__getitem__", args[1:], kwargs)
 
-    def call_isinstance(self, tx: "InstructionTranslator", arg, isinstance_type):
+    def call_isinstance(self, tx: "InstructionTranslator", arg, isinstance_type_vt):
         try:
             arg_type = arg.python_type()
         except NotImplementedError:
@@ -1599,7 +1599,7 @@ class BuiltinVariable(VariableTracker):
                 f"isinstance({arg}, {isinstance_type}): can't determine type of {arg}"
             )
 
-        isinstance_type = isinstance_type.as_python_constant()
+        isinstance_type = isinstance_type_vt.as_python_constant()
 
         if isinstance(arg, variables.TensorVariable) and arg.dtype is not None:
 
@@ -1640,6 +1640,9 @@ class BuiltinVariable(VariableTracker):
         # handle __instancecheck__ defined in user class
         if (
             isinstance(arg, variables.UserDefinedObjectVariable)
+            and not isinstance(
+                isinstance_type_vt, variables.PolyFilledUserDefinedClassVariable
+            )
             and "__instancecheck__" in isinstance_type.__class__.__dict__
         ):
             return variables.ConstantVariable.create(
