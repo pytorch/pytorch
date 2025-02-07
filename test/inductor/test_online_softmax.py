@@ -127,13 +127,35 @@ class TestOnlineSoftmax(TestCase):
         ref = f(x, dim)
         self.assertTrue(same(ref, act, tol=1e-2))
 
-        if nrow == 2 and dim == 0:
-            # persistent reduction triggered
-            expected_num_loop = 0
+        if nrow == 2048 and dim == 0:
+            # split reduction is triggered. We have multiple kernels
+            self.assertTrue(code.count("def triton") >= 2)
         else:
-            # A single loop due to online softmax
-            expected_num_loop = 1
-        self.assertEqual(code.count("for r0_offset in"), expected_num_loop)
+            if nrow == 2 and dim == 0:
+                # persistent reduction triggered
+                expected_num_loop = 0
+            else:
+                # A single loop due to online softmax
+                expected_num_loop = 1
+            self.assertEqual(code.count("for r0_offset in"), expected_num_loop)
+
+    def test_split_reduction(self):
+        """
+        We don't split online_softmax_reduce for now. Check
+        'Split online_softmax_reduce' note in the code.
+
+        When a split is promsing, we fallback for now.
+
+        This is just a manual example rather than something we
+        see in practice.
+        """
+        # tensor shape to trigger split reduction
+        x = torch.randn(1, 2**20, dtype=torch.bfloat16, device=GPU_TYPE)
+        ref = torch.softmax(x, dim=-1)
+        act, (code,) = run_and_get_code(torch.compile(torch.softmax), x, dim=-1)
+        self.assertTrue(torch.allclose(ref, act, atol=1e-3, rtol=1e-3))
+        self.assertTrue(code.count("def triton") >= 2)
+        self.assertTrue("online_softmax_reduce" not in code)
 
 
 instantiate_parametrized_tests(TestOnlineSoftmax)

@@ -53,7 +53,7 @@ def eager_force_stride(input_tensor: Tensor, stride) -> Tensor:
     return new_tensor
 
 
-def eager_online_softmax(x: Tensor, dim: int) -> Tuple[Tensor, Tensor]:
+def eager_prepare_softmax(x: Tensor, dim: int) -> Tuple[Tensor, Tensor]:
     amax = torch.amax(x, dim, keepdim=True)
     return amax, torch.sum(torch.exp(x - amax), dim, keepdim=True)
 
@@ -111,13 +111,12 @@ fma = make_prim(
     lambda a, b, c: (a * b) + c,
     doc="Fused multiply add: fma(a, b, c) -> (a * b) + c without rounding after the multiplication",
 )
-online_softmax = make_prim(
-    "online_softmax(Tensor a, int dim) -> (Tensor, Tensor)",
-    eager_online_softmax,
+prepare_softmax_online = make_prim(
+    "prepare_softmax_online(Tensor a, int dim) -> (Tensor, Tensor)",
+    eager_prepare_softmax,
     return_type=(_prims.RETURN_TYPE.NEW, _prims.RETURN_TYPE.NEW),
     doc="Prepare the softmax by computing the max and sum.",
 )
-prepare_softmax_online = online_softmax
 
 
 def _low_memory_max_pool2d_with_offsets_aten(

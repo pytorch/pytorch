@@ -6,6 +6,7 @@ import logging
 import math
 import operator
 import os
+import textwrap
 import warnings
 from collections import defaultdict
 from collections.abc import Iterable, Sequence
@@ -6782,27 +6783,56 @@ from .comm_lowering import register_comm_lowerings
 
 register_comm_lowerings()
 
-# Lowering inductor_prims.online_softmax to do a customized reduction.
-#
-# A lowering without online softmax for reference:
-#
-# @register_lowering(inductor_prims.online_softmax, type_promotion_kind=None)
-# def online_softmax(x, dim):
-#     amax = reduce_amax(x, dim, keepdims=True)
-#     exp = lowerings[aten.exp](sub(x, amax))
-#     xsum = sum_(exp, dim, keepdims=True)
-#     return amax, xsum
 
-
-@register_lowering(inductor_prims.online_softmax, type_promotion_kind=None)
-def online_softmax(x, dim):
+@register_lowering(inductor_prims.prepare_softmax_online, type_promotion_kind=None)
+def prepare_softmax_online(x, dim):
+    """
+    Lowering inductor_prims.prepare_softmax_online to compute max/sum in one pass if no split is needed.
+    """
     kwargs = _make_reduction_inner(
         x, axis=dim, keepdims=True, dtype=None, override_return_dtype=None
     )
-    max_tensor, sum_tensor = MultiOutputReduction.create(
-        reduction_type="online_softmax_reduce", input_node=x, num_output=2, **kwargs
+
+    reduction_ranges = kwargs["reduction_ranges"]
+    rnumel = V.graph.sizevars.simplify(sympy_product(reduction_ranges))
+    _, num_split = ir.Reduction.num_splits(
+        **kwargs,
+        reduction_type="online_softmax_reduce",
+        reduction_numel=rnumel,
     )
-    return max_tensor, sum_tensor
+
+    if num_split == 1:
+        max_tensor, sum_tensor = MultiOutputReduction.create(
+            reduction_type="online_softmax_reduce", input_node=x, num_output=2, **kwargs
+        )
+        return max_tensor, sum_tensor
+    else:
+        # Note: [Split online_softmax_reduce]
+        # We don't split reduction for online_softmax_reduce for now.
+        # On one hand, supporting split reduction makes things complex since
+        # the splitted out reuctions requires 2 inputs rather than one.
+        # On the other hand, during training the online_softmax_reduce should
+        # usually don't requires a split due to large batch size
+        # (more specifically batch size times sequence length).
+        # We should support split reduction if we find legit use cases to
+        # motivate the work.
+        #
+        # TODO: does inference need split online_softmax_reduce?
+
+        warnings.warn(
+            textwrap.dedent(
+                """
+            Online softmax is disabled on the fly since Inductor decides to
+            split the reduction. Cut an issue to PyTorch if this is an
+            important use case and you want to speed it up with online
+            softmax.
+            """
+            )
+        )
+        amax = reduce_amax(x, dim, keepdims=True)
+        exp = lowerings[aten.exp](sub(x, amax))
+        xsum = sum_(exp, dim, keepdims=True)
+        return amax, xsum
 
 
 # populate lowerings defined in kernel/*
