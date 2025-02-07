@@ -64,6 +64,7 @@ from typing import Any, Callable, cast, Generic, TYPE_CHECKING, TypeVar, Union
 from torch.utils._ordered_set import OrderedSet
 
 from .ops_handler import (  # noqa: F401
+    DefaultHandler,
     KernelFormatterHandler,
     MockHandler,
     OpsHandler,
@@ -274,18 +275,15 @@ class OpsValue:
         return ops.bitwise_left_shift(self, n)
 
 
-class OpsWrapper:
+class OpsWrapper(DefaultHandler):
     """This wraps any returned IR values into an `OpsValue` instance, so that we
     can overload the magic methods for writing mathematical expressions fluently.
     """
 
-    def __getattr__(self, name):
-        def inner(*args, **kwargs):
-            new_args = [OpsWrapper._unwrap(a) for a in args]
-            new_kwargs = {k: OpsWrapper._unwrap(v) for k, v in kwargs.items()}
-            return OpsWrapper._wrap(getattr(_ops, name)(*new_args, **new_kwargs))
-
-        return inner
+    def _default(self, name: str, args: tuple[Any, ...], kwargs: dict[str, Any]) -> Any:
+        new_args = [OpsWrapper._unwrap(a) for a in args]
+        new_kwargs = {k: OpsWrapper._unwrap(v) for k, v in kwargs.items()}
+        return OpsWrapper._wrap(getattr(_ops, name)(*new_args, **new_kwargs))
 
     @staticmethod
     def _unwrap(x):
