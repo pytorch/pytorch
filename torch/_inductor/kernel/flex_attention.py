@@ -822,14 +822,11 @@ def create_num_blocks_fake_generator(sparse_indices):
     # If it's too short then prefetching won't help. If it's too long then
     # autotuning will take longer for no good reason.
     def create_num_blocks_fake(x) -> torch.Tensor:
-        # Add the guards
-        num_blocks_for_autotuning = V.graph.sizevars.size_hint(
-            sparse_indices.shape[-1]
-        )
+        num_blocks_for_autotuning = V.graph.sizevars.size_hint(sparse_indices.shape[-1])
         size = [V.graph.sizevars.size_hint(i) for i in x.get_size()]
         return torch.full(
             size,
-            int(num_blocks_for_autotuning),
+            num_blocks_for_autotuning,
             dtype=x.get_dtype(),
             device=x.get_device(),
         )
@@ -839,9 +836,7 @@ def create_num_blocks_fake_generator(sparse_indices):
 
 def create_indices_fake(x) -> torch.Tensor:
     size = [V.graph.sizevars.size_hint(i) for i in x.get_size()]
-    indices = torch.arange(
-        0, size[-1], dtype=x.get_dtype(), device=x.get_device()
-    )
+    indices = torch.arange(0, size[-1], dtype=x.get_dtype(), device=x.get_device())
     indices = indices.expand(size).contiguous()
     return indices
 
