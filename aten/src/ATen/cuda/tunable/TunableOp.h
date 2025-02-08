@@ -98,6 +98,7 @@ class TunableOp {
         auto& mgr = ctx->GetTuningResultsManager();
         auto op_sig = Signature();
         auto params_sig = params->Signature();
+        auto blas_sig = params->BLASSignature();
         result = mgr.Lookup(op_sig, params_sig);
         // If there is not previous tuning result been found, we do the tuning iff tuning is enabled
         if (result == ResultEntry::Null()) {
@@ -107,7 +108,7 @@ class TunableOp {
           }
           else if (ctx->IsRecordUntunedEnabled()) {
             // or record the gemm into file
-            mgr.RecordUntuned(ctx->GetUntunedFile(), op_sig, params_sig);
+            mgr.RecordUntuned(ctx->GetUntunedFile(), op_sig, params_sig, blas_sig);
           }
         }
       }

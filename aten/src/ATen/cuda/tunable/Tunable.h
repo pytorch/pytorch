@@ -99,7 +99,8 @@ class TORCH_CUDA_CPP_API TuningResultsManager {
 
     size_t GetSize();
 
-    void RecordUntuned( std::ofstream& untuned_file, const std::string& op_signature, const std::string& params_signature);
+    void RecordUntuned( std::ofstream& untuned_file, const std::string& op_signature,
+      const std::string& params_signature, const std::string& blas_signature);
   private:
     std::mutex lock_;
     ResultsMap results_;
