@@ -8,3 +8,5 @@ ubuntu|pytorch|torchdata|main|62092ddd2ca61a19c2d1fcc67f24994f744869ed|https://g
 centos|pytorch|torchdata|main|62092ddd2ca61a19c2d1fcc67f24994f744869ed|https://github.com/pytorch/data
 ubuntu|pytorch|torchaudio|main|b6d4675c7aedc53ba04f3f55786aac1de32be6b4|https://github.com/pytorch/audio
 centos|pytorch|torchaudio|main|b6d4675c7aedc53ba04f3f55786aac1de32be6b4|https://github.com/pytorch/audio
+ubuntu|pytorch|ao|main|6ffe2360a7382c51b9a5a5ab30fb7aeb4b98963d|https://github.com/pytorch/ao
+centos|pytorch|ao|main|6ffe2360a7382c51b9a5a5ab30fb7aeb4b98963d|https://github.com/pytorch/ao
