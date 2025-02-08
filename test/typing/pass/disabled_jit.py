@@ -1,5 +1,5 @@
 from enum import Enum
-from typing import Type, TypeVar
+from typing import TypeVar
 from typing_extensions import assert_never, assert_type, ParamSpec
 
 import pytest
@@ -18,7 +18,7 @@ class Color(Enum):
 
 
 # Script Enum
-assert_type(jit.script(Color), Type[Color])
+assert_type(jit.script(Color), type[Color])
 
 # ScriptDict
 assert_type(jit.script({1: 1}), ScriptDict)
