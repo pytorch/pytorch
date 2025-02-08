@@ -307,12 +307,15 @@ class SideEffects:
             else:
                 raise RuntimeError(f"Unexpected base_cls_vt {base_cls_vt}")
 
-            init_args = [arg.get_example_value() for arg in init_args]
-
-            # Calling __new__ is fine because only those user_cls reach here
-            # whose __new__ do not have side-effects.
             assert base_cls.__new__ in (object.__new__, dict.__new__, tuple.__new__)
-            obj = base_cls.__new__(user_cls, *init_args)
+            # TODO(anijain2305) - Consider adding get_example_value method to
+            # each VT to get an example value for all args. As we expand the
+            # scope to other __new__ methods, we might need to call __new__ with
+            # init_args (like functools.partial)
+            # init_args = [arg.get_example_value() for arg in init_args]
+            # obj = base_cls.__new__(user_cls, *init_args)
+
+            obj = base_cls.__new__(user_cls)
         return obj
 
     def track_new_user_defined_object(

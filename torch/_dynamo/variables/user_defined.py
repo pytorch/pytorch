@@ -514,8 +514,11 @@ class UserDefinedClassVariable(UserDefinedVariable):
                     )
                 ] + args[1:]
 
+            options = {}
+            options["base_cls_vt"] = variables.BuiltinVariable(object)
+            options["init_args"] = []
             cm_obj = tx.output.side_effects.track_object_new(
-                self.source, self.value, var_cls, {}
+                self.source, self.value, var_cls, options
             )
             cm_obj.call_method(tx, "__init__", args, kwargs)
             return cm_obj
