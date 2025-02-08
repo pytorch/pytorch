@@ -341,6 +341,8 @@ hop_db = [
             DecorateInfo(unittest.expectedFailure, "TestHOP", "test_serialize_export"),
             DecorateInfo(unittest.expectedFailure, "TestHOP", "test_retrace_export"),
         ),
+        # "torch.compile with aot_autograd does not currently support double backward."
+        supports_gradgrad=False,
     ),
     OpInfo(
         name="invoke_quant_packed",
