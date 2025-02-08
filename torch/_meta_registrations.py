@@ -7060,10 +7060,10 @@ def _register_inplace_meta(fn):
 @register_meta(aten.lerp)
 @out_wrapper()
 def lerp(start, end, weight):
-    torch._check(
-        start.dtype == end.dtype,
-        lambda: f"expected dtype {start.dtype} for `end`, but got dtype {end.dtype}",
-    )
+    # torch._check(
+    #     start.dtype == end.dtype,
+    #     lambda: f"expected dtype {start.dtype} for `end`, but got dtype {end.dtype}",
+    # )
     args = [start, end]
     if isinstance(weight, TensorLike):
         if weight.ndim != 0:
