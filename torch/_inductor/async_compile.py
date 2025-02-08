@@ -169,7 +169,8 @@ class CompiledTritonKernels:
 
     @staticmethod
     def get(kernel_src: str, default: Any) -> LambdaFuture:
-        return CompiledTritonKernels._cache.get(kernel_src, default)
+        key = CompiledTritonKernels.key(kernel_src)
+        return CompiledTritonKernels._cache.get(key, default)
 
     @staticmethod
     def cache_clear():
