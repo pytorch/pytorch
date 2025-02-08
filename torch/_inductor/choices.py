@@ -15,6 +15,7 @@ from .virtualized import V
 
 if TYPE_CHECKING:
     import torch
+    from torch.utils._ordered_set import OrderedSet
 
     from .codegen.simd_kernel_features import SIMDKernelFeatures
     from .codegen.triton import TritonKernel
@@ -219,7 +220,7 @@ class InductorChoices:
             not config.aggressive_fusion or node1.is_reduction() or node2.is_reduction()
         ):
             if is_metric_table_enabled("fusion_failure_due_to_indexing_mismatch"):
-                common_buf_names = (
+                common_buf_names: OrderedSet[str] = (
                     node1.read_writes.buffer_names() & node2.read_writes.buffer_names()
                 )
                 if len(common_buf_names) > 0:
@@ -231,7 +232,7 @@ class InductorChoices:
                             "node2_name": node2.get_name(),
                             "node1_debug_str": write_text(node1.debug_str()),
                             "node2_debug_str": write_text(node2.debug_str()),
-                            "common_buffer_names": list(common_buf_names),
+                            "common_buffer_names": list(common_buf_names),  # type: ignore[dict-item]
                             "failure_reason": scheduler.decide_fusion_fail_reason(
                                 node1, node2, common_buf_names
                             ),

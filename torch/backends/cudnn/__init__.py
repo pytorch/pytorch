@@ -214,7 +214,8 @@ class CudnnModule(PropModule):
     conv = _FP32Precision("cuda", "conv")
     rnn = _FP32Precision("cuda", "rnn")
     fp32_precision = ContextProp(
-        _get_fp32_precision_getter("cuda", "all"), _set_fp32_precision_setter("cuda", "all")
+        _get_fp32_precision_getter("cuda", "all"),
+        _set_fp32_precision_setter("cuda", "all"),
     )
 
 

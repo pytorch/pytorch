@@ -15,7 +15,7 @@ PyObject* guard_error_hook = NULL;
 const char* cache_lookup_profiler_str = "TorchDynamo Cache Lookup";
 
 typedef struct {
-    int active_dynamo_threads;
+  int active_dynamo_threads;
 } ModuleState;
 
 // static int active_dynamo_threads = 0;
@@ -700,7 +700,6 @@ static PyObject* dynamo__custom_eval_frame(
     return dynamo_eval_custom_code(
         tstate, frame, cached_code, trace_annotation, throw_flag);
   }
-  DEBUG_CHECK(PyDict_CheckExact(locals));
   DEBUG_CHECK(PyDict_CheckExact(frame->f_globals));
   DEBUG_CHECK(PyDict_CheckExact(frame->f_builtins));
 
@@ -831,7 +830,9 @@ static PyTypeObject THPPyInterpreterFrameType = {
 
 #endif // !(IS_PYTHON_3_14_PLUS)
 
-static PyObject* increment_working_threads(PyThreadState* tstate, PyObject* module) {
+static PyObject* increment_working_threads(
+    PyThreadState* tstate,
+    PyObject* module) {
   ModuleState* state = PyModule_GetState(module);
 
   if (state != NULL) {
@@ -844,11 +845,13 @@ static PyObject* increment_working_threads(PyThreadState* tstate, PyObject* modu
   Py_RETURN_NONE;
 }
 
-static PyObject* decrement_working_threads(PyThreadState* tstate, PyObject* module) {
+static PyObject* decrement_working_threads(
+    PyThreadState* tstate,
+    PyObject* module) {
   ModuleState* state = PyModule_GetState(module);
 
   if (state != NULL) {
-      if (state->active_dynamo_threads > 0) {
+    if (state->active_dynamo_threads > 0) {
       state->active_dynamo_threads = state->active_dynamo_threads - 1;
       if (state->active_dynamo_threads == 0) {
         enable_eval_frame_default(tstate);
@@ -859,7 +862,10 @@ static PyObject* decrement_working_threads(PyThreadState* tstate, PyObject* modu
   Py_RETURN_NONE;
 }
 
-static PyObject* set_eval_frame(PyObject* new_callback, PyThreadState* tstate, PyObject* module) {
+static PyObject* set_eval_frame(
+    PyObject* new_callback,
+    PyThreadState* tstate,
+    PyObject* module) {
   // Change the eval frame callback and return the old one
   //  - None: disables TorchDynamo
   //  - False: run-only mode (reuse existing compiles)
@@ -982,13 +988,13 @@ static PyObject* raise_sigtrap(PyObject* dummy, PyObject* obj) {
   Py_RETURN_NONE;
 }
 
-static int clear_state(PyObject *module) {
-    ModuleState* state = PyModule_GetState(module);
-    if (state) {
-        state->active_dynamo_threads = 0;
-        return 0;
-    }
-    return -1;
+static int clear_state(PyObject* module) {
+  ModuleState* state = PyModule_GetState(module);
+  if (state) {
+    state->active_dynamo_threads = 0;
+    return 0;
+  }
+  return -1;
 }
 
 static PyMethodDef _methods[] = {
