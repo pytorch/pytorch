@@ -1148,7 +1148,7 @@ def create_micro_gemm(
             is_woq_int4,
         )
 
-    def woq_extra_check(config, m, n, k, alpha, is_woq_int4, q_group_size):
+    def woq_extra_check(config, m, n, k, block_m, alpha, is_woq_int4, q_group_size):
         if input_dtype != torch.bfloat16 or input2_dtype not in [
             torch.uint8,
             torch.int8,
@@ -1210,7 +1210,7 @@ def create_micro_gemm(
                     continue
                 block_m, block_n, block_k = config.register_blocking
                 if not woq_extra_check(
-                    config, m, n, k, alpha, is_woq_int4, q_group_size
+                    config, m, n, k, block_m, alpha, is_woq_int4, q_group_size
                 ):
                     continue
                 # Criteria on the ranking of configurations
