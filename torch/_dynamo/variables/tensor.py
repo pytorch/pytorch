@@ -1187,9 +1187,6 @@ class SymNodeVariable(VariableTracker):
         self.sym_num = sym_num
         self._tensor_var = None
 
-    def get_example_value(self):
-        return self.sym_num
-
     def python_type(self):
         if isinstance(self.sym_num, SymTypes):
             return self.sym_num.node.pytype
