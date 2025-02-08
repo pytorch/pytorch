@@ -3,7 +3,7 @@
 import importlib
 import math
 import warnings
-from typing import Callable, List, Optional, TYPE_CHECKING, Union
+from typing import Callable, Optional, TYPE_CHECKING, Union
 
 import torch
 from torch import _VF, sym_int as _sym_int, Tensor
@@ -708,7 +708,7 @@ def max_pool1d_with_indices(
             return_indices=return_indices,
         )
     if stride is None:
-        stride = torch.jit.annotate(List[int], [])
+        stride = torch.jit.annotate(list[int], [])
     return torch.max_pool1d_with_indices(
         input, kernel_size, stride, padding, dilation, ceil_mode
     )
@@ -736,7 +736,7 @@ def _max_pool1d(
             return_indices=return_indices,
         )
     if stride is None:
-        stride = torch.jit.annotate(List[int], [])
+        stride = torch.jit.annotate(list[int], [])
     return torch.max_pool1d(input, kernel_size, stride, padding, dilation, ceil_mode)
 
 
@@ -798,7 +798,7 @@ def max_pool2d_with_indices(
             return_indices=return_indices,
         )
     if stride is None:
-        stride = torch.jit.annotate(List[int], [])
+        stride = torch.jit.annotate(list[int], [])
     return torch._C._nn.max_pool2d_with_indices(
         input, kernel_size, stride, padding, dilation, ceil_mode
     )
@@ -826,7 +826,7 @@ def _max_pool2d(
             return_indices=return_indices,
         )
     if stride is None:
-        stride = torch.jit.annotate(List[int], [])
+        stride = torch.jit.annotate(list[int], [])
     return torch.max_pool2d(input, kernel_size, stride, padding, dilation, ceil_mode)
 
 
@@ -888,7 +888,7 @@ def max_pool3d_with_indices(
             return_indices=return_indices,
         )
     if stride is None:
-        stride = torch.jit.annotate(List[int], [])
+        stride = torch.jit.annotate(list[int], [])
     return torch._C._nn.max_pool3d_with_indices(
         input, kernel_size, stride, padding, dilation, ceil_mode
     )
@@ -916,7 +916,7 @@ def _max_pool3d(
             return_indices=return_indices,
         )
     if stride is None:
-        stride = torch.jit.annotate(List[int], [])
+        stride = torch.jit.annotate(list[int], [])
     return torch.max_pool3d(input, kernel_size, stride, padding, dilation, ceil_mode)
 
 
@@ -939,7 +939,7 @@ def _unpool_output_size(
     output_size: Optional[list[int]],
 ) -> list[int]:
     input_size = input.size()
-    default_size = torch.jit.annotate(List[int], [])
+    default_size = torch.jit.annotate(list[int], [])
     for d in range(len(kernel_size)):
         default_size.append(
             (input_size[-len(kernel_size) + d] - 1) * stride[d]
@@ -5301,9 +5301,9 @@ See also `One-hot on Wikipedia`_ .
 
 Arguments:
     tensor (LongTensor): class values of any shape.
-    num_classes (int):  Total number of classes. If set to -1, the number
+    num_classes (int, optional):  Total number of classes. If set to -1, the number
         of classes will be inferred as one greater than the largest class
-        value in the input tensor.
+        value in the input tensor. Default: -1
 
 Returns:
     LongTensor that has one more dimension with 1 values at the

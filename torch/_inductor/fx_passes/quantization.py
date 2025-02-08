@@ -2553,7 +2553,7 @@ def _register_smooth_quant_int_mm_pattern():
                     packed_weight_op, args=packed_weight_inputs
                 )
 
-                dummy_zp = match.graph.call_function(aten.empty, args=([0],))
+                dummy_zp = None
                 w_scale = match.graph.call_function(
                     prims.convert_element_type.default, args=(w_scale, torch.float32)
                 )
