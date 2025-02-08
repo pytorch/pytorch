@@ -259,9 +259,9 @@ class Match:
                 trace_fn = functools.partial(
                     fwd_only, run_functional_passes=run_functional_passes
                 )
-                replacement = trace_fn(
-                    replacement_fn, torch.fx.map_arg(args, lambda arg: arg.meta["val"])
-                )
+            replacement = trace_fn(
+                replacement_fn, torch.fx.map_arg(args, lambda arg: arg.meta["val"])
+            )
             if len(self.nodes) == 1:
                 for n in replacement.graph.nodes:
                     _transfer_meta(
