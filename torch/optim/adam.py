@@ -145,6 +145,7 @@ class Adam(Optimizer):
         state_steps,
     ):
         has_complex = False
+        beta1, _ = group["betas"]
         for p in group["params"]:
             if p.grad is not None:
                 has_complex |= torch.is_complex(p)
@@ -173,9 +174,12 @@ class Adam(Optimizer):
                         else torch.tensor(0.0, dtype=_get_scalar_dtype())
                     )
                     # Exponential moving average of gradient values
-                    state["exp_avg"] = torch.zeros_like(
-                        p, memory_format=torch.preserve_format
-                    )
+                    # case beta1 == 0, we don't need exp_avg
+
+                    if beta1 > 0:
+                        state["exp_avg"] = torch.zeros_like(
+                            p, memory_format=torch.preserve_format
+                        )
                     # Exponential moving average of squared gradient values
                     state["exp_avg_sq"] = torch.zeros_like(
                         p, memory_format=torch.preserve_format
@@ -185,8 +189,8 @@ class Adam(Optimizer):
                         state["max_exp_avg_sq"] = torch.zeros_like(
                             p, memory_format=torch.preserve_format
                         )
-
-                exp_avgs.append(state["exp_avg"])
+                if beta1 > 0:
+                    exp_avgs.append(state["exp_avg"])
                 exp_avg_sqs.append(state["exp_avg_sq"])
 
                 if group["amsgrad"]:
@@ -382,9 +386,10 @@ def _single_tensor_adam(
     else:
         beta1_dict = None
 
+    use_exp_avg = len(exp_avgs) > 0
     for i, param in enumerate(params):
         grad = grads[i] if not maximize else -grads[i]
-        exp_avg = exp_avgs[i]
+        exp_avg = exp_avgs[i] if use_exp_avg else grad
         exp_avg_sq = exp_avg_sqs[i]
         step_t = state_steps[i]
 
@@ -436,7 +441,8 @@ def _single_tensor_adam(
             device_beta1 = beta1
 
         # Decay the first and second moment running average coefficient
-        exp_avg.lerp_(grad, 1 - device_beta1)
+        if use_exp_avg:
+            exp_avg.lerp_(grad, 1 - device_beta1)
 
         # Nested if is necessary to bypass jitscript rules
         if differentiable and isinstance(beta2, Tensor):
@@ -604,6 +610,7 @@ def _multi_tensor_adam(
         else None
     )
 
+    use_exp_avg = len(exp_avgs) > 0
     for (
         device_params_,
         device_grads_,
@@ -614,7 +621,9 @@ def _multi_tensor_adam(
     ), _ in grouped_tensors.values():
         device_params = cast(list[Tensor], device_params_)
         device_grads = cast(list[Tensor], device_grads_)
-        device_exp_avgs = cast(list[Tensor], device_exp_avgs_)
+        device_exp_avgs = (
+            cast(list[Tensor], device_exp_avgs_) if use_exp_avg else device_grads
+        )
         device_exp_avg_sqs = cast(list[Tensor], device_exp_avg_sqs_)
         device_state_steps = cast(list[Tensor], device_state_steps_)
 
@@ -635,11 +644,12 @@ def _multi_tensor_adam(
                     device_exp_avg_sqs,
                     device_max_exp_avg_sqs,
                 )
-            else:
+            elif use_exp_avg:
                 _view_as_real(
                     device_params, device_grads, device_exp_avgs, device_exp_avg_sqs
                 )
-
+            else:
+                _view_as_real(device_params, device_grads, device_exp_avg_sqs)
         if maximize:
             device_grads = torch._foreach_neg(device_grads)  # type: ignore[assignment]
 
@@ -670,7 +680,8 @@ def _multi_tensor_adam(
         # Decay the first and second moment running average coefficient
         # Use device beta1 if beta1 is a tensor to ensure all
         # tensors are on the same device
-        torch._foreach_lerp_(device_exp_avgs, device_grads, 1 - device_beta1)
+        if use_exp_avg:
+            torch._foreach_lerp_(device_exp_avgs, device_grads, 1 - device_beta1)
 
         torch._foreach_mul_(device_exp_avg_sqs, beta2)
 
@@ -805,6 +816,7 @@ def _fused_adam(
     grouped_tensors = Optimizer._group_tensors_by_device_and_dtype(
         [params, grads, exp_avgs, exp_avg_sqs, max_exp_avg_sqs, state_steps]  # type: ignore[list-item]
     )
+    use_exp_avg = len(exp_avgs) > 0
     for (device, _), (
         (
             device_params_,
@@ -818,7 +830,9 @@ def _fused_adam(
     ) in grouped_tensors.items():
         device_params = cast(list[Tensor], device_params_)
         device_grads = cast(list[Tensor], device_grads_)
-        device_exp_avgs = cast(list[Tensor], device_exp_avgs_)
+        device_exp_avgs = (
+            cast(list[Tensor], device_exp_avgs_) if use_exp_avg else device_grads
+        )
         device_exp_avg_sqs = cast(list[Tensor], device_exp_avg_sqs_)
         device_state_steps = cast(list[Tensor], device_state_steps_)
 
