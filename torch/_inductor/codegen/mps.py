@@ -463,12 +463,15 @@ class MetalKernel(SIMDKernel):
                 f"c10::metal::threadgroup_{reduction_type}({acc_buf}, {reduction_dim.numel})",
                 dtype=dtype,
             )
-        if reduction_type == 'welford_reduce':
+        if reduction_type == "welford_reduce":
             return self.welford_reduce_fallback(dtype, value)
-            # TODO: This is how it supposed ot be
+            # TODO: This is how it supposed to be
             acc_buf = self._new_accvar(src_dtype, reduction_dim.numel)
             self.body.splice(f"{acc_buf}[{reduction_dim.name}] = {value};")
-            wf_res = self.cse.generate(self.body, f"c10::metal::threadgroup_{reduction_type}({acc_buf}, {reduction_dim.numel})")
+            wf_res = self.cse.generate(
+                self.body,
+                f"c10::metal::threadgroup_{reduction_type}({acc_buf}, {reduction_dim.numel})",
+            )
             return (f"{wf_res}.x", f"{wf_res}.y", self.features.reduction_numel)
         raise NotImplementedError(reduction_type)
 
