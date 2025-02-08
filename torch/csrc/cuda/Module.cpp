@@ -29,6 +29,7 @@
 #ifdef USE_NCCL
 #include <torch/csrc/cuda/python_nccl.h>
 #endif
+#include <c10/util/CallOnce.h>
 #include <c10/util/irange.h>
 
 #include <torch/csrc/CudaIPCTypes.h>
