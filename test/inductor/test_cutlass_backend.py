@@ -45,7 +45,6 @@ log = logging.getLogger(__name__)
 HAS_CUDA = HAS_CUDA and not torch.version.hip
 SM80OrLater = SM80OrLater and not torch.version.hip
 SM90OrLater = SM90OrLater and not torch.version.hip
-SM80 = SM80OrLater and torch.cuda.get_device_capability() == (8, 0)
 
 
 def _get_path_without_sccache() -> str:
@@ -797,20 +796,15 @@ class TestCutlassBackend(TestCase):
             torch.testing.assert_close(expected, actual, atol=0.01, rtol=0.01)
 
     # TODO: Enable dynamic test cases when dynamic support is added.
-    @unittest.skipIf(True, "disabled due to broken on A100")
-    # error: TypeError: can't multiply sequence by non-int of type 'str'
-    @unittest.skipIf(not SM80, "need sm_80 exactly")
+    @unittest.skipIf(not SM80OrLater or SM90OrLater, "need sm_8x exactly")
     @parametrize("dynamic", (False,))
-    @parametrize("max_autotune_gemm_backends", ("CUTLASS", "CUTLASS,Triton,ATen"))
     @unittest.mock.patch.dict(os.environ, {"PATH": _get_path_without_sccache()})
-    def test_max_autotune_cutlass_backend_mixed_mm(
-        self, dynamic: bool, max_autotune_gemm_backends: str
-    ):
+    def test_max_autotune_cutlass_backend_mixed_mm(self, dynamic: bool):
         """
         Make sure autotuning mm in sub processes work without crashes.
         """
 
-        if max_autotune_gemm_backends == "CUTLASS" and torch.version.hip:
+        if torch.version.hip:
             return
 
         torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction = False
@@ -830,7 +824,7 @@ class TestCutlassBackend(TestCase):
             {
                 "max_autotune": True,
                 "autotune_in_subproc": True,
-                "max_autotune_gemm_backends": max_autotune_gemm_backends,
+                "max_autotune_gemm_backends": "CUTLASS",
                 "cuda.cutlass_dir": _CUTLASS_DIR,
                 "cuda.cutlass_max_profiling_configs": 2,
                 "use_mixed_mm": True,
@@ -854,20 +848,17 @@ class TestCutlassBackend(TestCase):
         assert cutlass_kernels_count > 0
 
     # TODO: Enable dynamic test cases when dynamic support is added.
-    @unittest.skipIf(True, "disabled due to broken on A100")
-    # error: TypeError: can't multiply sequence by non-int of type 'str'
-    @unittest.skipIf(not SM80, "need sm_80 exactly")
+    @unittest.skipIf(not SM80OrLater or SM90OrLater, "need sm_8x exactly")
     @parametrize("dynamic", (False,))
-    @parametrize("max_autotune_gemm_backends", ("CUTLASS", "CUTLASS,Triton,ATen"))
     @unittest.mock.patch.dict(os.environ, {"PATH": _get_path_without_sccache()})
     def test_max_autotune_cutlass_backend_sparse_semi_structured_mm(
-        self, dynamic: bool, max_autotune_gemm_backends: str
+        self, dynamic: bool
     ):
         """
         Make sure autotuning mm in sub processes work without crashes.
         """
 
-        if max_autotune_gemm_backends == "CUTLASS" and torch.version.hip:
+        if torch.version.hip:
             return
 
         SparseSemiStructuredTensor._FORCE_CUTLASS = True
@@ -885,7 +876,7 @@ class TestCutlassBackend(TestCase):
             {
                 "max_autotune": True,
                 "autotune_in_subproc": True,
-                "max_autotune_gemm_backends": max_autotune_gemm_backends,
+                "max_autotune_gemm_backends": "CUTLASS",
                 "cuda.cutlass_dir": _CUTLASS_DIR,
                 "cuda.cutlass_max_profiling_configs": 2,
                 "autotune_local_cache": True,
