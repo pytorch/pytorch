@@ -8,7 +8,6 @@ import os
 import sys
 import unittest
 from pathlib import Path
-from typing import Tuple
 
 import onnxruntime
 from parameterized import parameterized
@@ -206,7 +205,7 @@ class TestDynamoWithONNXRuntime(onnx_test_common._TestONNXRuntime):
         # number_of_exported_onnx_models[i] contains # of ONNX models exported from
         # the i-th element (type: torch.fx.GraphModule) in
         # OrtBackend._all_ort_execution_info.execution_info_per_graph_module.values().
-        number_of_exported_onnx_models_for_all_graph_modules: Tuple[int, ...],
+        number_of_exported_onnx_models_for_all_graph_modules: tuple[int, ...],
     ):
         self.assertEqual(expected_execution_count, ort_backend.execution_count)
         self.assertEqual(

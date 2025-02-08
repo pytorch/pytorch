@@ -9,7 +9,6 @@ import math
 import operator
 from typing import (
     Callable,
-    Dict,
     Generic,
     Optional,
     overload,
@@ -302,17 +301,17 @@ class ValueRanges(Generic[_T]):
         return self.lower == self.upper
 
     @staticmethod
-    @functools.lru_cache(maxsize=None)
+    @functools.cache
     def unknown() -> ValueRanges[sympy.Expr]:
         return ValueRanges(-sympy.oo, sympy.oo)
 
     @staticmethod
-    @functools.lru_cache(maxsize=None)
+    @functools.cache
     def unknown_int() -> ValueRanges[sympy.Expr]:
         return ValueRanges(-int_oo, int_oo)
 
     @staticmethod
-    @functools.lru_cache(maxsize=None)
+    @functools.cache
     def unknown_bool() -> ValueRanges[SympyBoolean]:
         return ValueRanges(sympy.false, sympy.true)
 
@@ -1108,7 +1107,7 @@ class ValueRangeAnalysis(SymPyValueRangeAnalysis):
 
 
 def bound_sympy(
-    expr: sympy.Expr, ranges: Optional[Dict[sympy.Symbol, ValueRanges]] = None
+    expr: sympy.Expr, ranges: Optional[dict[sympy.Symbol, ValueRanges]] = None
 ) -> ValueRanges:
     log.debug(
         "bound_sympy(%s)%s",

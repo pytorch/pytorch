@@ -681,12 +681,6 @@ def _use_fb_internal_macros() -> list[str]:
                 "C10_USE_MINIMAL_GLOG",
                 "C10_DISABLE_TENSORIMPL_EXTENSIBILITY",
             ]
-            # TODO: this is to avoid FC breakage for fbcode. When using newly
-            # generated model.so on an older verion of PyTorch, need to use
-            # the v1 version for aoti_torch_create_tensor_from_blob
-            create_tensor_from_blob_v1 = "AOTI_USE_CREATE_TENSOR_FROM_BLOB_V1"
-
-            fb_internal_macros.append(create_tensor_from_blob_v1)
             return fb_internal_macros
         else:
             return []
@@ -761,16 +755,9 @@ def _get_build_args_of_chosen_isa(vec_isa: VecISA) -> tuple[list[str], list[str]
 def _get_torch_related_args(
     include_pytorch: bool, aot_mode: bool
 ) -> tuple[list[str], list[str], list[str]]:
-    from torch.utils.cpp_extension import _TORCH_PATH, TORCH_LIB_PATH
+    from torch.utils.cpp_extension import include_paths, TORCH_LIB_PATH
 
-    include_dirs = [
-        os.path.join(_TORCH_PATH, "include"),
-        os.path.join(_TORCH_PATH, "include", "torch", "csrc", "api", "include"),
-        # Some internal (old) Torch headers don't properly prefix their includes,
-        # so we need to pass -Itorch/lib/include/TH as well.
-        os.path.join(_TORCH_PATH, "include", "TH"),
-        os.path.join(_TORCH_PATH, "include", "THC"),
-    ]
+    include_dirs = include_paths()
     libraries_dirs = [TORCH_LIB_PATH]
     libraries = []
     if sys.platform != "darwin" and not config.is_fbcode():
@@ -778,7 +765,7 @@ def _get_torch_related_args(
         if not aot_mode:
             libraries.append("torch_python")
 
-    if _IS_WINDOWS and platform.machine().lower() != "arm64":
+    if _IS_WINDOWS:
         libraries.append("sleef")
 
     return include_dirs, libraries_dirs, libraries
@@ -1164,19 +1151,25 @@ def _set_gpu_runtime_env() -> None:
         os.environ["CUDA_HOME"] = build_paths.sdk_home
 
 
+@functools.lru_cache(8)
+def _find_libcudart_static(path: str) -> Optional[Path]:
+    lib_dirs = list(Path(path).rglob("libcudart_static.a"))
+    if lib_dirs:
+        return lib_dirs[0].resolve().parent
+    log_msg = f'"libcudart_static.a" not found under {path}'
+    log.info(log_msg)
+    return None
+
+
 def _transform_cuda_paths(lpaths: list[str]) -> None:
     # This handles two cases:
     # 1. Cases where libs are in (e.g.) lib/cuda-12 and lib/cuda-12/stubs
     # 2. Linux machines may have CUDA installed under either lib64/ or lib/
     for i, path in enumerate(lpaths):
         if "CUDA_HOME" in os.environ and path.startswith(os.environ["CUDA_HOME"]):
-            try:
-                lib_dir = next(Path(path).rglob("libcudart_static.a")).resolve().parent
-            except StopIteration:
-                log_msg = f'"libcudart_static.a" not found under {path}'
-                log.info(log_msg)
+            lib_dir: Optional[Path] = _find_libcudart_static(path)
+            if lib_dir is None:
                 continue
-
             lpaths[i] = str(lib_dir)
             stub_dir = lib_dir / "stubs"
             if stub_dir.exists():
