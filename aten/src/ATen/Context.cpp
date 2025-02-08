@@ -412,7 +412,6 @@ void Context::setFloat32Precision(const std::string& backend, const std::string&
   if (validate_fp32_prec(backend, p)) {
     fp32_precision[backend][op] = p;
   } else {
-    // FIXME: add detail precision for backend
     std::string msg;
     auto iterp = _fp32_precisions.find(backend);
     TORCH_CHECK(iterp != _fp32_precisions.end());
@@ -529,7 +528,6 @@ void Context::setROCmFAPreferredBackend(at::ROCmFABackend b) {
   rocm_fa_preferred_backend = b;
 }
 
-
 bool Context::allowFP16ReductionCuBLAS() const {
   return allow_fp16_reduction_cublas;
 }
@@ -544,6 +542,14 @@ bool Context::allowBF16ReductionCuBLAS() const {
 
 void Context::setAllowBF16ReductionCuBLAS(bool b) {
   allow_bf16_reduction_cublas = b;
+}
+
+bool Context::allowFP16AccumulationCuBLAS() const {
+  return allow_fp16_accumulation_cublas;
+}
+
+void Context::setAllowFP16AccumulationCuBLAS(bool b) {
+  allow_fp16_accumulation_cublas = b;
 }
 
 
