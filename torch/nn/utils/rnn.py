@@ -419,7 +419,7 @@ def pad_sequence(
     ``pad_sequence`` stacks a list of Tensors along a new dimension, and pads them
     to equal length. :attr:`sequences` can be list of sequences with size ``L x *``,
     where `L` is length of the sequence and ``*`` is any number of dimensions
-    (including 0). If :attr:`batch_first` is ``False``, the output is of size
+    (including ``0``). If :attr:`batch_first` is ``False``, the output is of size
     ``T x B x *``, and ``B x T x *`` otherwise, where ``B`` is the batch size
     (the number of elements in :attr:`sequences`), ``T`` is the length of the longest
     sequence.
@@ -441,9 +441,9 @@ def pad_sequence(
         sequences (list[Tensor]): list of variable length sequences.
         batch_first (bool, optional): if ``True``, the output will be in ``B x T x *``
             format, ``T x B x *`` otherwise.
-        padding_value (float, optional): value for padded elements. Default: 0.
+        padding_value (float, optional): value for padded elements. Default: ``0``.
         padding_side (str, optional): the side to pad the sequences on.
-            Default: "right".
+            Default: ``'right'``.
 
     Returns:
         Tensor of size ``T x B x *`` if :attr:`batch_first` is ``False``.
@@ -501,7 +501,7 @@ def unpad_sequence(
     Args:
         padded_sequences (Tensor): padded sequences.
         lengths (Tensor): length of original (unpadded) sequences.
-        batch_first (bool, optional): whether batch dimension first or not. Default: False.
+        batch_first (bool, optional): whether batch dimension first or not. Default: ``False``.
 
     Returns:
         a list of :class:`Tensor` objects
@@ -532,7 +532,7 @@ def pack_sequence(
 
     ``sequences`` should be a list of Tensors of size ``L x *``, where `L` is
     the length of a sequence and `*` is any number of trailing dimensions,
-    including zero.
+    including ``0``.
 
     For unsorted sequences, use `enforce_sorted = False`. If ``enforce_sorted``
     is ``True``, the sequences should be sorted in the order of decreasing length.

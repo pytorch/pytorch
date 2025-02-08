@@ -1,16 +1,16 @@
 # Owner(s): ["module: unknown"]
 
-from typing import Dict, Any
+from typing import Any
 from torch.ao.pruning import BaseSparsifier
 import torch
 import torch.nn.functional as F
 from torch import nn
 
 class ImplementedSparsifier(BaseSparsifier):
-    def __init__(self, **kwargs: Dict[str, Any]) -> None:
+    def __init__(self, **kwargs: dict[str, Any]) -> None:
         super().__init__(defaults=kwargs)
 
-    def update_mask(self, module: nn.Module, tensor_name: str, **kwargs: Dict[str, Any]) -> None:
+    def update_mask(self, module: nn.Module, tensor_name: str, **kwargs: dict[str, Any]) -> None:
         module.parametrizations.weight[0].mask[0] = 0  # type: ignore[index, union-attr]
         linear_state = self.state['linear1.weight']
         linear_state['step_count'] = linear_state.get('step_count', 0) + 1
