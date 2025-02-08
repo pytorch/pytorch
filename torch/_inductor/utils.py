@@ -356,24 +356,16 @@ def is_pointwise_use(
     """
 
     if not use.op == "call_function":
-        import pdb
-        pdb.set_trace()
         return False
 
     if not (
         isinstance(use.target, torch._ops.OpOverload) or use.target is operator.getitem
     ):
-        import pdb
-        pdb.set_trace()
         return False
 
     if use.target is operator.getitem or is_view(use.target):
-        import pdb
-        pdb.set_trace()
         return all(is_pointwise_use(u, is_pointwise_fn) for u in use.users)
 
-    import pdb
-    pdb.set_trace()
     return torch.Tag.pointwise in use.target.tags or (
         is_pointwise_fn is not None and is_pointwise_fn(use.target)
     )
