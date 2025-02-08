@@ -3814,22 +3814,19 @@ class GraphModule(torch.nn.Module):
 class TestBlockMask(InductorTestCase):
     def setUp(self):
         super(self.__class__, self).setUp()
-        self.test_inference_only = False
         if test_device[0] == "cpu":
-            if LONG_COMPILATION_ON_CPU:
-                self.skipTest(
-                    "skip UT for CPU due to long compilation time found in CI"
-                )
-            self.test_inference_only = True
+            self.skipTest(
+                "skip UT for CPUs as 'BlockMask' is common and covered on CUDA"
+            )
 
     @supported_platform
-    def test_block_mask_attributes(self, device):
-        offset = torch.zeros(8, device=device)
+    def test_block_mask_attributes(self):
+        offset = torch.zeros(8, device="cuda")
 
         def causal_mask(b, h, q, kv):
             return (q + (offset[b] * 128)) >= kv
 
-        block_mask = create_block_mask(causal_mask, 4, 2, 2048, 2048, device=device)
+        block_mask = create_block_mask(causal_mask, 4, 2, 2048, 2048)
         self.assertEqual(block_mask.shape, (4, 2, 2048, 2048))
         self.assertEqual(block_mask[0].shape, (2, 2048, 2048))
         self.assertEqual(block_mask[0, 0].shape, (2048, 2048))
@@ -3839,15 +3836,15 @@ class TestBlockMask(InductorTestCase):
         self.assertEqual(block_mask[1, 0].sparsity(), 46.875)
         self.assertEqual(block_mask.sparsity(), block_mask[1].sparsity())
 
-        offset = torch.arange(8, device=device)
-        block_mask = create_block_mask(causal_mask, 8, 1, 2048, 2048, device=device)
+        offset = torch.arange(8, device="cuda")
+        block_mask = create_block_mask(causal_mask, 8, 1, 2048, 2048)
         self.assertEqual(block_mask.sparsity(), 29.1015625)
         self.assertTrue(block_mask.sparsity() < block_mask[0].sparsity())
         self.assertTrue(block_mask[0].sparsity() > block_mask[1].sparsity())
 
     @supported_platform
     @common_utils.parametrize("BLOCK_SIZE", [32, 64, 128, 256, (32, 64), (64, 32)])
-    def test_block_size_changes(self, device, BLOCK_SIZE: Union[int, tuple[int, int]]):
+    def test_block_size_changes(self, BLOCK_SIZE: Union[int, tuple[int, int]]):
         B, H, Q_LEN, KV_LEN = 4, 2, 2048, 2048
 
         if isinstance(BLOCK_SIZE, int):
@@ -3857,20 +3854,20 @@ class TestBlockMask(InductorTestCase):
             Q_BLOCK_SIZE, KV_BLOCK_SIZE = BLOCK_SIZE
 
         block_mask = create_block_mask(
-            noop_mask, B, H, Q_LEN, KV_LEN, BLOCK_SIZE=BLOCK_SIZE, device=device
+            noop_mask, B, H, Q_LEN, KV_LEN, BLOCK_SIZE=BLOCK_SIZE
         )
 
         self.assertEqual(block_mask.BLOCK_SIZE, (Q_BLOCK_SIZE, KV_BLOCK_SIZE))
         self.assertEqual(block_mask.shape, (B, H, Q_LEN, KV_LEN))
 
     @supported_platform
-    def test_getitem(self, device):
-        offset = torch.zeros(8, device=device)
+    def test_getitem(self):
+        offset = torch.zeros(8, device="cuda")
 
         def causal_mask(b, h, q, kv):
             return (q + (offset[b] * 128)) >= kv
 
-        block_mask = create_block_mask(causal_mask, 4, 2, 512, 512, device=device)
+        block_mask = create_block_mask(causal_mask, 4, 2, 512, 512)
         assert block_mask.kv_num_blocks.shape == (4, 2, 4)
         assert block_mask.kv_indices.shape == (4, 2, 4, 4)
 
@@ -3921,7 +3918,6 @@ class TestBlockMask(InductorTestCase):
             )
 
     @supported_platform
-    @unittest.skipIf(SKIP_UT_ON_CPU, "Skip on CPU as CUDA is needed")
     def test_block_mask_device_change(self):
         offset = torch.zeros(8, device="cuda")
 
@@ -3947,57 +3943,51 @@ class TestBlockMask(InductorTestCase):
         assert block_mask.q_num_blocks.is_cuda
 
     @supported_platform
-    def test_compiling_create_block_mask(self, device):
-        seq = torch.arange(512, device=device) // 127
+    def test_compiling_create_block_mask(self):
+        seq = torch.arange(512, device="cuda") // 127
 
         def mask_mod(b, h, q, kv):
             return (q >= kv) & (seq[q] == seq[kv])
 
         block_mask = torch.compile(create_block_mask, fullgraph=True)(
-            mask_mod, 1, 1, 512, 512, device=device
+            mask_mod, 1, 1, 512, 512
         )
         self.assertIsInstance(block_mask, BlockMask)
         self.assertEqual(block_mask.kv_num_blocks.shape, torch.Size((1, 1, 4)))
         self.assertEqual(block_mask.kv_indices.shape, torch.Size((1, 1, 4, 4)))
 
     @supported_platform
-    def test_compiling_create_block_mask_no_recompile(self, device):
+    def test_compiling_create_block_mask_no_recompile(self):
         def mask_mod(b, h, q, kv):
             return q >= kv
 
         torch._dynamo.reset()
-        block_mask = torch.compile(create_block_mask)(
-            mask_mod, 2, 4, 1024, 1024, device=device
-        )
+        block_mask = torch.compile(create_block_mask)(mask_mod, 2, 4, 1024, 1024)
         self.assertIsInstance(block_mask, BlockMask)
         self.assertEqual(block_mask.kv_num_blocks.shape, torch.Size((2, 4, 8)))
         self.assertEqual(block_mask.kv_indices.shape, torch.Size((2, 4, 8, 8)))
         self.assertEqual(torch._dynamo.utils.counters["aot_autograd"]["ok"], 1)
 
         # automatic dynamic shapes triggered and recompilation.
-        block_mask = torch.compile(create_block_mask)(
-            mask_mod, 4, 8, 2048, 2048, device=device
-        )
+        block_mask = torch.compile(create_block_mask)(mask_mod, 4, 8, 2048, 2048)
         self.assertIsInstance(block_mask, BlockMask)
         self.assertEqual(block_mask.kv_num_blocks.shape, torch.Size((4, 8, 16)))
         self.assertEqual(block_mask.kv_indices.shape, torch.Size((4, 8, 16, 16)))
         self.assertEqual(torch._dynamo.utils.counters["aot_autograd"]["ok"], 2)
 
         # no recompilation.
-        block_mask = torch.compile(create_block_mask)(
-            mask_mod, 6, 16, 3072, 3072, device=device
-        )
+        block_mask = torch.compile(create_block_mask)(mask_mod, 6, 16, 3072, 3072)
         self.assertIsInstance(block_mask, BlockMask)
         self.assertEqual(block_mask.kv_num_blocks.shape, torch.Size((6, 16, 24)))
         self.assertEqual(block_mask.kv_indices.shape, torch.Size((6, 16, 24, 24)))
         self.assertEqual(torch._dynamo.utils.counters["aot_autograd"]["ok"], 2)
 
     @supported_platform
-    def test_block_mask_viz(self, device):
+    def test_block_mask_viz(self):
         def causal_mask(b, h, q, kv):
             return q >= kv
 
-        block_mask = create_block_mask(causal_mask, 1, 1, 2048, 2048, device=device)
+        block_mask = create_block_mask(causal_mask, 1, 1, 2048, 2048)
 
         def replace_non_printable(s):
             def replace(c):
@@ -4033,14 +4023,12 @@ BlockMask(shape=(1,s1,s2048,s2048),ssparsity=46.88%,s
 )""",
         )
 
-        offset = torch.arange(8, device=device)
+        offset = torch.arange(8, device="cuda")
 
         def causal_offset_mask(b, h, q, kv):
             return (q + offset[b] * 128) >= kv
 
-        block_mask = create_block_mask(
-            causal_offset_mask, 8, 1, 2048, 2048, device=device
-        )
+        block_mask = create_block_mask(causal_offset_mask, 8, 1, 2048, 2048)
         str_block_mask = str(block_mask)
         self.assertTrue("sparsity=29.10" in str_block_mask)
 
@@ -4071,8 +4059,8 @@ BlockMask(shape=(1,s1,s2048,s2048),ssparsity=46.88%,s
 
     @supported_platform
     @common_utils.parametrize("full_indices", [False, True])
-    def test_from_kv_blocks(self, device, full_indices: bool):
-        device = torch.device(device)
+    def test_from_kv_blocks(self, full_indices: bool):
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         (
             kv_num_blocks,
             kv_indices,
@@ -4125,8 +4113,8 @@ BlockMask(shape=(1,s1,s2048,s2048),ssparsity=46.88%,s
             self.assertIsNone(block_mask.full_q_indices)
 
     @supported_platform
-    def test_block_size(self, device):
-        device = torch.device(device)
+    def test_block_size(self):
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         kv_num_blocks, kv_indices, _, _ = self.generate_test_inputs(False, device)
         block_mask = BlockMask.from_kv_blocks(kv_num_blocks, kv_indices)
         self.assertEqual(
@@ -4141,7 +4129,6 @@ BlockMask(shape=(1,s1,s2048,s2048),ssparsity=46.88%,s
         self.assertEqual(block_mask_custom.BLOCK_SIZE, custom_block_size)
 
     @supported_platform
-    @unittest.skipIf(SKIP_UT_ON_CPU, "Skip on CPU as CUDA is needed")
     def test_upcast_appropriately(self):
         q = torch.randn((1, 1, 128, 16), dtype=torch.float16, device="cuda")
         k = torch.randn((1, 1, 128, 16), dtype=torch.float16, device="cuda")
@@ -4154,8 +4141,8 @@ BlockMask(shape=(1,s1,s2048,s2048),ssparsity=46.88%,s
         torch.compile(flex_attention)(q, k, v, score_mod=score_mod)
 
     @supported_platform
-    def test_init_mismatched_full_kv(self, device):
-        device = torch.device(device)
+    def test_init_mismatched_full_kv(self):
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         kv_num_blocks, kv_indices, full_kv_num_blocks, _ = self.generate_test_inputs(
             True, device
         )
@@ -4176,8 +4163,8 @@ BlockMask(shape=(1,s1,s2048,s2048),ssparsity=46.88%,s
             )
 
     @supported_platform
-    def test_init_mismatched_full_q(self, device):
-        device = torch.device(device)
+    def test_init_mismatched_full_q(self):
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         kv_num_blocks, kv_indices, _, _ = self.generate_test_inputs(False, device)
 
         with self.assertRaises(AssertionError):
@@ -4197,14 +4184,11 @@ BlockMask(shape=(1,s1,s2048,s2048),ssparsity=46.88%,s
 
     @supported_platform
     @common_utils.parametrize("compile", [False, True])
-    @common_utils.parametrize("dtype", test_dtypes_fast)
-    def test_no_q_info(self, device, compile: bool, dtype):
-        device = torch.device(device)
-
+    def test_no_q_info(self, compile: bool):
         def causal_mask(b, h, q_idx, kv_idx):
             return q_idx >= kv_idx
 
-        block_mask = create_block_mask(causal_mask, 1, 1, 2048, 2048, device=device)
+        block_mask = create_block_mask(causal_mask, 1, 1, 2048, 2048)
         # manually set q_num_blocks and q_indices to None
         block_mask.q_num_blocks = None
         block_mask.q_indices = None
@@ -4222,9 +4206,9 @@ BlockMask(shape=(1,s1,s2048,s2048),ssparsity=46.88%,s
                 2,
                 2048,
                 64,
-                device=device,
-                dtype=dtype,
-                requires_grad=False if self.test_inference_only else True,
+                device="cuda",
+                dtype=torch.float16,
+                requires_grad=True,
             )
             for _ in range(3)
         ]
@@ -4237,7 +4221,7 @@ BlockMask(shape=(1,s1,s2048,s2048),ssparsity=46.88%,s
         torch.testing.assert_close(causal_mask_out, sdpa_mask_out, atol=5e-3, rtol=0.0)
 
     @supported_platform
-    def test_doc_mask_clamped_repro(self, device):
+    def test_doc_mask_clamped_repro(self):
         def _offsets_to_doc_ids_tensor(offsets):
             device = offsets.device
             counts = offsets[1:] - offsets[:-1]
@@ -4273,7 +4257,7 @@ BlockMask(shape=(1,s1,s2048,s2048),ssparsity=46.88%,s
                 lengths[index] += 1
             return lengths
 
-        device = device
+        device = "cuda"
         max_seq_len, doc_count = 128, 4
         SEQ_LEN = max_seq_len
 
@@ -4303,7 +4287,7 @@ BlockMask(shape=(1,s1,s2048,s2048),ssparsity=46.88%,s
         )
         for i in range(5):
             lengths = generate_random_lengths(1024 + i, 5)
-            offsets = length_to_offsets(lengths, device)
+            offsets = length_to_offsets(lengths, "cuda")
             doc_ids = _offsets_to_doc_ids_tensor(offsets)
 
             def doc_mask_mod(b, h, q_idx, kv_idx):
@@ -4315,14 +4299,11 @@ BlockMask(shape=(1,s1,s2048,s2048),ssparsity=46.88%,s
             q, k, v = (
                 torch.randn(1, 12, 1024 + i, 64, device=device) for _ in range(3)
             )
-            block_mask = create_block_mask(
-                doc_mask_mod, None, None, 1024 + i, 1024 + i, device=device
-            )
+            block_mask = create_block_mask(doc_mask_mod, None, None, 1024 + i, 1024 + i)
             torch.compile(flex_attention)(q, k, v, block_mask=block_mask)
 
     @supported_platform
-    @common_utils.parametrize("dtype", test_dtypes_fast)
-    def test_eager_tracing_correctness(self, device, dtype):
+    def test_eager_tracing_correctness(self):
         qk_dims = 64
         v_dims = 128
         q_heads = 4
@@ -4330,7 +4311,7 @@ BlockMask(shape=(1,s1,s2048,s2048),ssparsity=46.88%,s
         seq_len = 256
         batch_size = 1
 
-        make_tensor = functools.partial(torch.randn, device=device, dtype=dtype)
+        make_tensor = functools.partial(torch.randn, device="cuda", dtype=torch.float16)
         q = make_tensor(*(batch_size, q_heads, seq_len, qk_dims))
         k = make_tensor(*(batch_size, kv_heads, seq_len, qk_dims))
         v = make_tensor(*(batch_size, kv_heads, seq_len, v_dims))
@@ -4352,7 +4333,6 @@ BlockMask(shape=(1,s1,s2048,s2048),ssparsity=46.88%,s
         )
 
     @supported_platform
-    @unittest.skipIf(SKIP_UT_ON_CPU, "Skip on CPU as CUDA is needed")
     def test_create_is_cuda_graphable(self):
         def mask_mod(b, h, q, kv):
             return q >= kv
@@ -4366,7 +4346,7 @@ BlockMask(shape=(1,s1,s2048,s2048),ssparsity=46.88%,s
 
     @common_utils.parametrize("compile", [False, True])
     @supported_platform
-    def test_block_mask_vs_sequence_lengths(self, device, compile):
+    def test_block_mask_vs_sequence_lengths(self, compile):
         if compile:
             flex_attention_call = torch.compile(flex_attention)
         else:
@@ -4378,24 +4358,18 @@ BlockMask(shape=(1,s1,s2048,s2048),ssparsity=46.88%,s
         def create_inputs(S):
             q, k, v = (
                 torch.randn(
-                    1,
-                    8,
-                    S,
-                    64,
-                    dtype=torch.float32 if device == "cpu" else torch.float16,
-                    requires_grad=False if self.test_inference_only else True,
-                    device=device,
+                    1, 8, S, 64, dtype=torch.float16, requires_grad=True, device="cuda"
                 )
                 for _ in range(3)
             )
             return q, k, v
 
-        block_mask = create_block_mask(mask_mod, None, None, 1024, 1024, device=device)
+        block_mask = create_block_mask(mask_mod, None, None, 1024, 1024)
         flex_attention_call(*create_inputs(1024), block_mask=block_mask)
         with self.assertRaisesRegex(ValueError, "block_mask was created for"):
             flex_attention_call(*create_inputs(2048), block_mask=block_mask)
 
-        block_mask = create_block_mask(mask_mod, None, None, 1023, 1023, device=device)
+        block_mask = create_block_mask(mask_mod, None, None, 1023, 1023)
         with self.assertRaisesRegex(ValueError, "block_mask was created for"):
             flex_attention_call(*create_inputs(1024), block_mask=block_mask)
 
@@ -5418,8 +5392,9 @@ class TestLearnableBiases(InductorTestCase):
 
 
 instantiate_device_type_tests(TestFlexAttention, globals(), only_for=test_device)
-instantiate_device_type_tests(TestBlockMask, globals(), only_for=test_device)
 instantiate_device_type_tests(TestPagedAttention, globals(), only_for=test_device)
+
+common_utils.instantiate_parametrized_tests(TestBlockMask)
 common_utils.instantiate_parametrized_tests(TestLearnableBiases)
 
 if __name__ == "__main__":
