@@ -3209,6 +3209,7 @@ LEGACY_MOD_INLINELIST = {
     "torch._higher_order_ops.while_loop",
     "torch._higher_order_ops.associative_scan",
     "torch._higher_order_ops.scan",
+    "torch._higher_order_ops._invoke_quant",
     "torch._higher_order_ops.utils",
     "torch.nn.attention.flex_attention",
     "torch.ao.quantization.pt2e.export_utils",
