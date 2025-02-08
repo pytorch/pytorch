@@ -370,9 +370,11 @@ def meta_fft_r2c(self, dim, normalization, onesided):
         return output
 
     else:
-        return self.new_empty(
+        sorted_dims = _sort_dims(self, dim, exclude_last=True)
+        out = self.new_empty(
             out_sizes, dtype=utils.corresponding_complex_dtype(self.dtype)
         )
+        return _exec_fft(out, self, out_sizes, sorted_dims, forward=True)
 
 
 @register_meta(aten.randperm.generator_out)
