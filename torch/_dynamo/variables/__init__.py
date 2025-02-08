@@ -1,3 +1,21 @@
+"""
+This package implements variable tracking and symbolic execution capabilities for Dynamo,
+which are essential for converting Python code into FX graphs. It provides a comprehensive
+set of variable types that handle different Python constructs during tracing.
+
+Each variable type (like BuiltinVariable, TensorVariable, NNModuleVariable, etc.) is responsible
+for tracking and symbolically executing operations on specific Python objects. This enables
+Dynamo to:
+- Track the flow of values through Python code
+- Maintain correct semantics during graph conversion
+- Handle complex Python features like context managers, iterators, and custom objects
+- Support both eager and symbolic execution modes
+
+The VariableTracker base class provides the foundation for all variable types, with each
+subclass implementing specific behavior for different Python constructs. This modular design
+allows Dynamo to accurately trace and optimize Python code while preserving its semantics.
+"""
+
 from .base import VariableTracker
 from .builtin import BuiltinVariable
 from .constant import ConstantVariable, EnumVariable

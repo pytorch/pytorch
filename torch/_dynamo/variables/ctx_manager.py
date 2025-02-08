@@ -1,4 +1,25 @@
 # mypy: ignore-errors
+
+"""
+This file contains a collection of context manager classes used by Dynamo for tracking
+and managing various PyTorch runtime states during graph compilation. These context
+managers handle different aspects of PyTorch's execution environment, including:
+
+- Autograd states (grad mode, inference mode)
+- CUDA streams and events
+- Profiling contexts
+- Deterministic algorithms
+- Forward/backward AD modes
+- SDPA (Scaled Dot Product Attention) kernels
+- FSDP (Fully Sharded Data Parallel) states
+- AMP (Automatic Mixed Precision) autocast states
+
+The context managers ensure proper state transitions during graph compilation by
+tracking enter/exit points and managing cleanup operations. They help maintain
+consistency between eager execution and compiled graph behavior by capturing and
+restoring state changes.
+"""
+
 import dataclasses
 import inspect
 import sys
@@ -34,7 +55,7 @@ if TYPE_CHECKING:
 
 
 @dataclasses.dataclass
-class ContextMangerState:
+class ContextManagerState:
     """
     Mutating `self` in VariableTracker is not allowed because we copy
     them.  This is a mutable container pointed to by context managers
@@ -69,7 +90,7 @@ class ContextWrappingVariable(VariableTracker):
         super().__init__(**kwargs)
         self.target_values = target_values
         self.initial_values = initial_values
-        self.state = ContextMangerState() if state is None else state
+        self.state = ContextManagerState() if state is None else state
 
     def enter(self, tx):
         self._call_func(tx, self.target_values)
