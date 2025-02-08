@@ -50,7 +50,7 @@ class TestSortAndSelect(TestCase):
                 return ((b != b) | (a <= b)).all().item()
 
         else:
-            raise RuntimeError(
+            raise ValueError(
                 f'unknown order "{order}", must be "ascending" or "descending"'
             )
 
