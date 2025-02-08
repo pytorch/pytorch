@@ -464,8 +464,6 @@ class MetalKernel(SIMDKernel):
                 dtype=dtype,
             )
         if reduction_type == "welford_reduce":
-            return self.welford_reduce_fallback(dtype, value)
-            # TODO: This is how it supposed to be
             acc_buf = self._new_accvar(src_dtype, reduction_dim.numel)
             self.body.splice(f"{acc_buf}[{reduction_dim.name}] = {value};")
             wf_res = self.cse.generate(

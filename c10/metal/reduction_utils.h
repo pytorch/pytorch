@@ -31,11 +31,12 @@ opmath_t<T> threadgroup_prod(threadgroup T* data, unsigned size) {
 
 template <typename T>
 float2 threadgroup_welford_reduce(threadgroup T* data, unsigned size) {
-  float m = 0;
+  float m = data[0];
   float m2 = 0;
-  for (unsigned idx = 0; idx < size; ++idx) {
-    m += (data[idx] - m) / (idx + 1);
-    m2 += (data[idx] - m) * (data[idx] - m);
+  for (unsigned idx = 1; idx < size; ++idx) {
+    float delta = data[idx] - m;
+    m += delta / (idx + 1);
+    m2 += delta * (data[idx] - m);
   }
   return float2(m, m2);
 }
