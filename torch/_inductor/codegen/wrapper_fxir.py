@@ -3,6 +3,7 @@ import dataclasses
 import random
 import textwrap
 import types
+from collections import Counter
 from typing import Any, Optional
 
 import sympy
@@ -24,7 +25,7 @@ from torch._inductor.virtualized import V
 
 from .. import config, ir
 from ..utils import convert_to_symint, LineContext
-from .common import IndentedBuffer, WorkspaceArg
+from .common import IndentedBuffer, WorkspaceArg, WorkspaceZeroMode
 from .wrapper import (
     AllocateLine,
     BufferLike,
@@ -42,6 +43,7 @@ from .wrapper import (
     MemoryPlanningLine,
     MemoryPlanningState,
     NullLine,
+    OutputLine,
     PythonWrapperCodegen,
     ReinterpretLine,
     ReuseLine,
@@ -120,6 +122,15 @@ class WrapperFxCodegen(PythonWrapperCodegen):
             Optional[str], torch.fx.Node
         ] = {}  # Symbol table for codegen.
         self.kernels: dict[str, TritonKernel] = {}  # Table to store Triton kernels.
+        self._unique_symbol_ids: Counter[str] = Counter()
+
+    def _get_unique_symbol(self, prefix: str) -> str:
+        """
+        Returns a symbol IDs that are guaranteed to be unique.
+        """
+        unique_id = self._unique_symbol_ids[prefix]
+        self._unique_symbol_ids[prefix] += 1
+        return f"{prefix}_{unique_id}"
 
     @staticmethod
     def create(
@@ -215,17 +226,50 @@ class WrapperFxCodegen(PythonWrapperCodegen):
             self._create_meta_from_buffer(node, buffer)
             self._record_allocation(buffer, node)
 
-    def _generate_graph_outputs(self) -> None:
+    def _codegen_outputs_wrapper_ir(self):
         """
-        Convert graph outputs to FX.
+        Graph outputs can perform some operations, like ReinterpretView.
+        Convert these ops to Wrapper IR.
         """
-        outputs = tuple(
-            self.buffer_to_node[self._get_buffer(output).name]
-            for output in V.graph.graph_outputs
+        # TODO: This IR is also applicable to other backends. Move into wrapper.py, and
+        # possibly delete get_output_refs() which does direct codegen.
+
+        def codegen_output(node: ir.IRNode) -> BufferLike:
+            """
+            Generates wrapper IR for output transformations, such as ReinterpretView.
+            """
+            if isinstance(node, (ir.Buffer, WorkspaceArg)):
+                return node
+            elif isinstance(node, ir.StorageBox):
+                return codegen_output(node.data)
+            elif isinstance(node, ir.ReinterpretView):
+                # We need to introduce a new symbol if the output is a ReinterpretView.
+                # Use a WorkspaceArg for this.
+                buffer = self._get_buffer(node.data)
+                input_name = buffer.get_name()
+                unique_suffix = self._get_unique_symbol(input_name)
+                device = buffer.get_device()
+                assert device
+                reused_as = WorkspaceArg(
+                    count=buffer.get_size(),
+                    zero_mode=WorkspaceZeroMode.UNINITIALIZED,
+                    device=device,
+                    outer_name=f"{input_name}_view_{unique_suffix}",
+                    dtype=buffer.get_dtype(),
+                )
+                self.writeline(ReinterpretLine(self, buffer, reused_as, node.layout))
+                return reused_as
+            else:
+                raise NotImplementedError(f"Unrecognized output node: {node}")
+
+        output_buffers = tuple(
+            codegen_output(node) for idx, node in enumerate(V.graph.graph_outputs)
         )
-        self.gm.graph.output(outputs)
+        self.writeline(OutputLine(output_buffers))
 
     def _generate(self, is_inference):
+        self._codegen_outputs_wrapper_ir()
+
         # We disable planning during training because it presently increases peak memory consumption.
         # TODO don't duplicate this code. Refactor into a helper in the base class.
         if is_inference and config.memory_planning:
@@ -251,6 +295,7 @@ class WrapperFxCodegen(PythonWrapperCodegen):
                 ReinterpretLine: self._generate_reinterpret,
                 ReuseLine: self._generate_reuse,
                 NullLine: self._generate_null,
+                OutputLine: self._generate_output,
                 CommBufferLine: self._generate_comm_buffer,
                 CommBufferAllocateLine: self._generate_comm_buffer_allocate,
                 CommBufferFreeLine: self._generate_comm_buffer_free,
@@ -272,7 +317,6 @@ class WrapperFxCodegen(PythonWrapperCodegen):
                 )
 
             conversion_func(line)
-        self._generate_graph_outputs()
 
         self.gm.recompile()
 
@@ -339,23 +383,28 @@ class WrapperFxCodegen(PythonWrapperCodegen):
         assert isinstance(line, LineContext)
         # We ignore line context in FX IR.
 
+    def _generate_output(self, line: Line) -> None:
+        assert isinstance(line, OutputLine)
+
+        outputs = tuple(
+            self.buffer_to_node[buffer.get_name()] for buffer in line.buffers
+        )
+        self.gm.graph.output(outputs)
+
     def _generate_reinterpret(self, line: Line) -> None:
         assert isinstance(line, ReinterpretLine)
 
-        buffer = line.node
-        layout = buffer.get_output_spec()
-        assert isinstance(layout, ir.NonOwningLayout)
-
-        # Look up the input view.
-        input_buffer = self._get_buffer(layout.view)
+        input_buffer = line.node
+        result_buffer = line.reused_as
+        layout = line.layout
         input_node = self.buffer_to_node[input_buffer.get_name()]
 
         # Look up output metadata.
-        name = buffer.get_name()
+        name = result_buffer.get_name()
         assert name
         size = tuple(layout.size)
         stride = tuple(layout.stride)
-        offset = buffer.get_offset() + layout.offset
+        offset = input_buffer.get_offset() + layout.offset
 
         # Map ReinterpretView to as_strided.
         result_node = self.gm.graph.call_function(
@@ -365,10 +414,10 @@ class WrapperFxCodegen(PythonWrapperCodegen):
         result_node.meta["val"] = self._fake_tensor(
             size,
             stride,
-            dtype=buffer.get_dtype(),
-            device=buffer.get_device(),
+            dtype=layout.dtype,
+            device=layout.device,
         )
-        self._record_allocation(buffer, result_node)
+        self._record_allocation(result_buffer, result_node)
 
     def _generate_reuse(self, line: Line) -> None:
         assert isinstance(line, ReuseLine)

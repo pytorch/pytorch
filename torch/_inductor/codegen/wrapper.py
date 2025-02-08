@@ -556,16 +556,15 @@ class FreeIfNotReusedLine(MemoryPlanningLine):
 @dataclasses.dataclass
 class ReinterpretLine(MemoryPlanningLine):
     node: BufferLike
+    reused_as: BufferLike
+    layout: ir.Layout
 
     def plan(self, state: MemoryPlanningState) -> MemoryPlanningLine:
         return self
 
     def codegen(self, code: IndentedBuffer) -> None:
-        buf = self.node
         code.writeline(
-            self.wrapper.codegen_deferred_allocation(
-                buf.get_name(), buf.get_output_spec()
-            )
+            self.wrapper.codegen_deferred_allocation(self.node.get_name(), self.layout)
         )
 
 
@@ -671,6 +670,11 @@ class CommBufferFreeLine(CommBufferLine):
     def codegen(self, code: IndentedBuffer) -> None:
         line = self.wrapper.make_buffer_free(self.node)
         code.writeline(f"{line} # {self.comm_buffer_type.value} buffer free")
+
+
+@dataclasses.dataclass
+class OutputLine(WrapperLine):
+    buffers: tuple[BufferLike, ...]
 
 
 BufferName = str
@@ -2315,10 +2319,12 @@ class PythonWrapperCodegen(CodeGen):
             assert isinstance(
                 layout.view, ir.ReinterpretView
             ), f"unexpected {type(layout.view)}: {layout.view}"
-            assert isinstance(layout.view.data, ir.StorageBox), type(layout.view.data)
-            assert isinstance(layout.view.data.data, ir.Buffer), type(layout.view.data)
-            self.codegen_allocation(layout.view.data.data)
-            self.writeline(ReinterpretLine(self, buffer))
+            box = layout.view.data
+            assert isinstance(box, ir.StorageBox), type(box)
+            input_buffer = box.data
+            assert isinstance(input_buffer, ir.Buffer), type(input_buffer)
+            self.codegen_allocation(input_buffer)
+            self.writeline(ReinterpretLine(self, input_buffer, buffer, layout))
             return
 
         if isinstance(layout, ir.CommBufferLayout):

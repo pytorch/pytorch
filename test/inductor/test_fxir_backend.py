@@ -200,6 +200,21 @@ class FxirTestCase(InductorTestCase):
         num_as_strided = self._count_ops(gm, torch.as_strided)
         self.assertEqual(num_as_strided, 2)
 
+    def test_reshape_output(self):
+        """
+        Test reshaping the output, which maps to a ReinterpretView.
+        """
+
+        def foo(x, y):
+            return torch.reshape(x + y, (8,))
+
+        args = [torch.rand((2, 4), device=self.device) for _ in range(2)]
+        gm = self._compile_and_check(foo, args, expected_num_triton_kernels=1)
+
+        # Check for as_strided. We map ReinterpretView to this.
+        num_as_strided = self._count_ops(gm, torch.as_strided)
+        self.assertEqual(num_as_strided, 1)
+
 
 if __name__ == "__main__":
     from torch._inductor.test_case import run_tests
