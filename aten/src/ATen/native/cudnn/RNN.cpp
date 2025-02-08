@@ -249,7 +249,7 @@ descriptor(cudnnHandle_t handle, DropoutDescriptor&& dropout_desc) const {
       datatype,
       input_datatype,
       algo,
-      at::globalContext().allowTF32CuDNN());
+      at::globalContext().allowTF32CuDNN("rnn"));
 #else
     rnn_desc.set(
         handle,
@@ -265,7 +265,7 @@ descriptor(cudnnHandle_t handle, DropoutDescriptor&& dropout_desc) const {
         datatype,
         input_datatype,
         algo,
-        at::globalContext().allowTF32CuDNN());
+        at::globalContext().allowTF32CuDNN("rnn"));
 #endif
   return rnn_desc;
 }
