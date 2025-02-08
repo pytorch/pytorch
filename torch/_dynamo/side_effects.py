@@ -1,7 +1,6 @@
 # mypy: allow-untyped-defs
 import collections
 import contextlib
-import functools
 import inspect
 import warnings
 import weakref
@@ -262,19 +261,8 @@ class SideEffects:
         if user_cls is torch.autograd.function.FunctionCtx:
             with warnings.catch_warnings(record=True):
                 obj = torch.autograd.Function()
-        elif issubclass(user_cls, torch.nn.Module):
-            obj = nn_module_new(user_cls)
         else:
-            tmp_var_cls = variable_cls
-            if isinstance(variable_cls, functools.partial):
-                tmp_var_cls = tmp_var_cls.func
-
-            if issubclass(type(tmp_var_cls), type) and issubclass(
-                tmp_var_cls, variables.UserDefinedObjectVariable
-            ):
-                obj = user_cls.__new__(user_cls)
-            else:
-                obj = object_new(user_cls)
+            obj = object_new(user_cls)
         variable = variable_cls(
             obj,
             mutation_type=AttributeMutationNew(cls_source),
@@ -284,14 +272,7 @@ class SideEffects:
         self.keepalive.append(obj)
         return variable
 
-    def track_object_new_from_user_defined_class(
-        self,
-        cls_variable: "variables.UserDefinedClassVariable",
-    ):
-        cls_source = cls_variable.source
-        user_cls = cls_variable.value
-
-        # Find the variable class
+    def get_variable_cls(self, user_cls):
         variable_cls: type[
             variables.UserDefinedObjectVariable
         ] = variables.UserDefinedObjectVariable
@@ -305,14 +286,59 @@ class SideEffects:
             variable_cls = variables.MutableMappingVariable
         elif is_frozen_dataclass(user_cls):
             variable_cls = FrozenDataClassVariable
-        else:
-            variable_cls = variables.UserDefinedObjectVariable
-
         assert issubclass(variable_cls, variables.UserDefinedObjectVariable)
+        return variable_cls
 
-        variable_cls = functools.partial(variable_cls, cls_source=cls_source)
+    def get_example_value(
+        self,
+        base_cls_vt,
+        cls_vt,
+        init_args,
+    ):
+        user_cls = cls_vt.value
+        if issubclass(user_cls, torch.nn.Module):
+            # TODO(anijain2305) - Is it possible to remove this specialization?
+            obj = nn_module_new(user_cls)
+        else:
+            if isinstance(base_cls_vt, variables.BuiltinVariable):
+                base_cls = base_cls_vt.fn
+            elif isinstance(base_cls_vt, variables.UserDefinedClassVariable):
+                base_cls = base_cls_vt.value
+            else:
+                raise RuntimeError(f"Unexpected base_cls_vt {base_cls_vt}")
 
-        return self.track_object_new(cls_source, user_cls, variable_cls, {})
+            init_args = [arg.get_example_value() for arg in init_args]
+
+            # Calling __new__ is fine because only those user_cls reach here
+            # whose __new__ do not have side-effects.
+            assert base_cls.__new__ in (object.__new__, dict.__new__, tuple.__new__)
+            obj = base_cls.__new__(user_cls, *init_args)
+        return obj
+
+    def track_new_user_defined_object(
+        self,
+        base_cls_vt,
+        cls_vt,
+        init_args,
+    ):
+        """
+        args_vt and kwargs_vt are the arguments to the __new__ and __init__ functions.
+        """
+        cls_source = cls_vt.source
+        user_cls = cls_vt.value
+        variable_cls = self.get_variable_cls(user_cls)
+        obj = self.get_example_value(base_cls_vt, cls_vt, init_args)
+
+        variable = variable_cls(
+            obj,
+            cls_source=cls_vt.source,
+            base_cls_vt=base_cls_vt,
+            init_args=init_args,
+            mutation_type=AttributeMutationNew(cls_source),
+        )
+        self.id_to_variable[id(obj)] = variable
+        self.keepalive.append(obj)
+        return variable
 
     def track_cell_new(
         self,
@@ -461,7 +487,8 @@ class SideEffects:
                 if isinstance(var, variables.UserDefinedObjectVariable):
 
                     def gen_fn():
-                        cg(var.mutation_type.cls_source)  # type: ignore[attr-defined]
+                        assert var.base_cls_vt is not None
+                        cg(var.base_cls_vt)  # type: ignore[attr-defined]
                         cg.extend_output([cg.create_load_attr("__new__")])
 
                     cg.add_push_null(gen_fn)
@@ -470,11 +497,9 @@ class SideEffects:
                         lambda: cg.load_import_from(utils.__name__, "object_new")
                     )
                 cg(var.mutation_type.cls_source)
-                if isinstance(var, variables.UserDefinedTupleVariable) and var.new_args:
-                    cg(var.new_args)
-                    cg.extend_output(create_call_function(2, False))
-                else:
-                    cg.extend_output(create_call_function(1, False))
+                for i in var.init_args:
+                    cg(i)
+                cg.extend_output(create_call_function(1 + len(var.init_args), False))
                 cg.add_cache(var)
                 var.source = LocalSource(cg.tempvars[var])
             else:

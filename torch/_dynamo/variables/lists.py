@@ -81,6 +81,9 @@ class BaseListVariable(VariableTracker):
     def as_python_constant(self):
         return self.python_type()([x.as_python_constant() for x in self.items])
 
+    def get_example_value(self):
+        return self.python_type()([x.get_example_value() for x in self.items])
+
     def as_proxy(self):
         assert self.python_type() is not SizeVariable
         return self.python_type()(self._as_proxy())

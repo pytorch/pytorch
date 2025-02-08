@@ -158,8 +158,16 @@ class SuperVariable(VariableTracker):
             else:
                 unimplemented("super() nn.Module.__init__")
         elif self.objvar.source and inner_fn is object.__new__:
-            return tx.output.side_effects.track_object_new_from_user_defined_class(
-                self.objvar
+            return tx.output.side_effects.track_new_user_defined_object(
+                variables.BuiltinVariable(object),
+                self.objvar,
+                args[1:],
+            )
+        elif self.objvar.source and inner_fn is dict.__new__:
+            return tx.output.side_effects.track_new_user_defined_object(
+                variables.BuiltinVariable(dict),
+                self.objvar,
+                args[1:],
             )
         elif isinstance(inner_fn, staticmethod) and isinstance(
             inner_fn.__func__, types.FunctionType
