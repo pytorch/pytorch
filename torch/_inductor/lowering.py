@@ -1007,17 +1007,29 @@ def squeeze(x, dim=None):
 
     new_shape = []
     new_stride = []
-    original_stride = x.get_stride()
+    is_storage_and_layout = ir.is_storage_and_layout(x)
+    original_stride = x.get_stride() if is_storage_and_layout else None
+    new_offset = x.get_layout().offset if is_storage_and_layout else None
     for d, s in enumerate(x.get_size()):
         if not (
             d in dims
             and V.graph.sizevars.evaluate_expr(sympy.Eq(s, 1), size_oblivious=True)
         ):
             new_shape.append(s)
-            new_stride.append(original_stride[d])
+            if is_storage_and_layout:
+                assert isinstance(original_stride, list)
+                new_stride.append(original_stride[d])
 
     # squeeze does nothing if the size isn't 1
-    return as_strided(x, new_shape, new_stride) if new_shape != x.get_size() else x
+    return (
+        (
+            as_strided(x, new_shape, new_stride, new_offset)
+            if is_storage_and_layout
+            else view(x, new_shape)
+        )
+        if new_shape != x.get_size()
+        else x
+    )
 
 
 @register_lowering(aten.squeeze_copy, type_promotion_kind=None)
