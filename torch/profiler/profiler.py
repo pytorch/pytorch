@@ -222,7 +222,8 @@ class _KinetoProfile:
                 import torch._inductor.config as inductor_config
 
                 if inductor_config.triton.cudagraphs and not (
-                    torch.version.cuda
+                    hasattr(torch.version, "cuda")
+                    and torch.version.cuda
                     and int(torch.version.cuda.split(".")[0]) >= 12
                     and int(torch.version.cuda.split(".")[1]) >= 6
                 ):
@@ -235,9 +236,9 @@ class _KinetoProfile:
                     # This was fixed in CUDA 12.6, but we keep the workaround for older versions.
                     os.environ["TEARDOWN_CUPTI"] = "0"
                 else:
-                    os.environ["DISABLE_CUPTI_LAZY_REINIT"] = "0"
+                    os.environ["DISABLE_CUPTI_LAZY_REINIT"] = os.environ.get("DISABLE_CUPTI_LAZY_REINIT", 0)
+                    os.environ["TEARDOWN_CUPTI"] = os.environ.get("TEARDOWN_CUPTI", 1)
                     self.add_metadata_json("DISABLE_CUPTI_LAZY_REINIT", "0")
-                    os.environ["TEARDOWN_CUPTI"] = "1"
 
             # Insert the preset user metadata to the trace
             for k, v in self.preset_metadata.items():
