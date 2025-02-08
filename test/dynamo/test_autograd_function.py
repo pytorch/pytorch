@@ -160,7 +160,7 @@ class CustomFuncStrideBwd(torch.autograd.Function):
 
     @staticmethod
     def backward(ctx, grad_output):
-        return grad_output.stride()
+        return grad_output * grad_output.stride()[-1]
 
 
 class CustomFuncStrideModule(torch.nn.Module):
@@ -278,17 +278,17 @@ class AutogradFunctionTests(torch._dynamo.test_case.TestCase):
         torch._dynamo.utils.counters.clear()
         cnt = torch._dynamo.testing.CompileCounter()
         model = CustomFuncStrideModule()
-        opt_model = torch.compile(backend=cnt)(model)
-        x = torch.randn(2, 2, dtype=torch.double, requires_grad=True)
-        ref = model(x)
-        res = opt_model(x)
+        opt_model = torch.compile(backend=cnt, fullgraph=True)(model)
+        x1 = torch.randn(2, 2, dtype=torch.double, requires_grad=True)
+        x2 = copy.deepcopy(x1)
+        ref = model(x1)
+        ref.backward(x1.clone().detach())
+        res = opt_model(x2)
+        res.backward(x2.clone().detach())
 
         self.assertEqual(ref, res)
+        self.assertEqual(x1.grad, x2.grad)
         self.assertEqual(cnt.frame_count, 1)
-        # graph break: Illegal getattr invocation stride in strict mod.
-        self.assertEqual(
-            list(torch._dynamo.utils.counters["graph_break"].values()), [1]
-        )
 
     def test_enum_arg(self):
         from enum import Enum

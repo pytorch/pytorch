@@ -2570,9 +2570,9 @@ class AutogradFunctionApplyVariable(VariableTracker):
                     tracer=bwd_tracer,
                 )
             except torch._dynamo.exc.Unsupported as e:
-                from unittest import mock
+                if isinstance(e, torch._dynamo.exc.IllegalGetAttrInvocation):
+                    from unittest import mock
 
-                if e.msg == "Illegal getattr invocation is_contiguous in strict mode":
                     bwd_tracer = torch._dynamo.output_graph.SubgraphTracer(
                         tx.output,
                         parent=fwd_tracer,
@@ -2595,14 +2595,10 @@ class AutogradFunctionApplyVariable(VariableTracker):
                         )
                     else:
                         unimplemented("non-function or method")
-                    strict_mode_banned_ops = copy.copy(
-                        torch._dynamo.config._autograd_backward_strict_mode_banned_ops
-                    )
-                    strict_mode_banned_ops.remove("is_contiguous")
 
                     with mock.patch(
-                        "torch._dynamo.config._autograd_backward_strict_mode_banned_ops",
-                        strict_mode_banned_ops,
+                        "torch._dynamo.config._autograd_backward_strict_mode_conditional_banned_ops",
+                        [],
                     ):
                         (bwd_out, _), bwd_graph, bwd_freevars = speculate_subgraph(
                             tx,

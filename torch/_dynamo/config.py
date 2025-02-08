@@ -508,14 +508,17 @@ ignore_logger_methods: set[Callable[..., Any]] = set()
 inject_BUILD_SET_unimplemented_TESTING_ONLY = False
 
 _autograd_backward_strict_mode_banned_ops = [
-    "stride",
     "requires_grad",
-    "storage_offset",
     "layout",
     "data",
     "is_neg",
     "is_conj",
     "is_pinned",
+]
+
+_autograd_backward_strict_mode_conditional_banned_ops = [
+    "stride",
+    "storage_offset",
     "is_contiguous",
 ]
 
