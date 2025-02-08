@@ -100,6 +100,11 @@ class LazyVariableTracker(VariableTracker):
     def __getattr__(self, item: str) -> Any:
         return getattr(self.realize(), item)
 
+    def get_example_value(self) -> Any:
+        if self.is_realized():
+            return self.unwrap().get_example_value()
+        return self._cache.value
+
     # most methods are auto-generated below, these are the ones we want to exclude
     visit = VariableTracker.visit  # type: ignore[assignment]
     __repr__ = __str__

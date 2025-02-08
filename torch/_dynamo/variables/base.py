@@ -299,6 +299,26 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         """For constants"""
         raise NotImplementedError(f"{self} is not a constant")
 
+    def get_example_value(self):
+        """
+        This value is used only for constructing a value for user defined object.
+
+        This is not used for any tracing purpose.
+        """
+
+        try:
+            return self.as_python_constant()
+        except NotImplementedError:
+            if isinstance(self, variables.TensorVariable):
+                import torch
+
+                return torch.randn(1)
+            if isinstance(self, variables.BaseUserFunctionVariable):
+                return self.fn
+            if hasattr(self, "value"):
+                return self.value
+            raise
+
     def guard_as_python_constant(self):
         """Similar to as_python_constant(), but add ID_MATCH guards to try to force things to become constants"""
         try:
