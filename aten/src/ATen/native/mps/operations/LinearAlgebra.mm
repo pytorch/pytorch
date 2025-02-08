@@ -24,7 +24,9 @@
 #include <ATen/ops/linalg_lu_factor_ex_native.h>
 #include <ATen/ops/linalg_lu_factor_native.h>
 #include <ATen/ops/linalg_solve_triangular_native.h>
+#include <ATen/ops/lu_unpack_native.h>
 #include <ATen/ops/mm_native.h>
+#include <ATen/ops/slice.h>
 #include <ATen/ops/stack.h>
 #include <ATen/ops/triangular_solve_native.h>
 #endif
@@ -1001,6 +1003,54 @@ static Tensor& linalg_solve_triangular_mps_impl(const Tensor& A,
   return out;
 }
 
+static void lu_unpack_mps_impl(const Tensor& LU_data,
+                               const Tensor& LU_pivots,
+                               bool unpack_data,
+                               bool unpack_pivots,
+                               const Tensor& P,
+                               const Tensor& L,
+                               const Tensor& U) {
+  const auto ndim = LU_data.dim();
+  TORCH_CHECK(ndim >= 2, "LU_data must have at least 2 dimensions");
+
+  const auto r = LU_data.size(-2);
+  const auto c = LU_data.size(-1);
+  const auto k = std::min<int64_t>(r, c);
+
+  const auto batchSize = c10::multiply_integers(LU_data.sizes().begin(), LU_data.sizes().end() - 2);
+
+  if (unpack_data) {
+    Tensor L_part = r < c ? slice(LU_data, -1, 0, k) : LU_data;
+    L.copy_(L_part.tril());
+    (ndim == 2 ? L.diagonal() : L.diagonal(0, -2, -1)).fill_(1);
+
+    Tensor U_part = r < c ? LU_data : slice(LU_data, -2, 0, k);
+    U.copy_(U_part.triu());
+  }
+
+  if (unpack_pivots) {
+    // P as an identity matrix for pivots
+    P.fill_(0);
+    LU_pivots.dim() == 1 ? P.diagonal().fill_(1) : P.diagonal(0, -2, -1).fill_(1);
+
+    auto stream = getCurrentMPSStream();
+    auto device = MPSDevice::getInstance()->device();
+    auto applyPivotsPSO = lib.getPipelineStateForFunc("applyPivots");
+    uint32_t maxThreadsPerGroup = [applyPivotsPSO maxTotalThreadsPerThreadgroup];
+
+    auto pivots = (LU_pivots.dim() == 1) ? LU_pivots.sub(1) : LU_pivots.view({batchSize, -1}).sub(1);
+
+    @autoreleasepool {
+      dispatch_sync_with_rethrow(stream->queue(), ^() {
+        auto computeEncoder = stream->commandEncoder();
+        mtl_setArgs(computeEncoder, P, pivots, r, k);
+        [computeEncoder setComputePipelineState:applyPivotsPSO];
+        mtl_dispatch1DJob(computeEncoder, applyPivotsPSO, batchSize * maxThreadsPerGroup);
+      });
+    }
+  }
+}
+
 static Tensor& linalg_cholesky_mps_impl(const Tensor& input, bool upper, Tensor& out) {
   using namespace mps;
 
@@ -1319,6 +1369,17 @@ std::tuple<Tensor, Tensor> linalg_lu_factor_mps(const Tensor& A, bool pivot) {
   Tensor info = at::empty({}, A.options().dtype(kInt));
   mps::linalg_lu_factor_ex_out_mps_impl(A, pivot, LU, pivots, info, false);
   return std::make_tuple(std::move(LU), std::move(pivots));
+}
+
+TORCH_IMPL_FUNC(lu_unpack_out_mps)
+(const Tensor& LU_data,
+ const Tensor& LU_pivots,
+ bool unpack_data,
+ bool unpack_pivots,
+ const Tensor& P,
+ const Tensor& L,
+ const Tensor& U) {
+  mps::lu_unpack_mps_impl(LU_data, LU_pivots, unpack_data, unpack_pivots, P, L, U);
 }
 
 TORCH_IMPL_FUNC(linalg_lu_factor_ex_out_mps)

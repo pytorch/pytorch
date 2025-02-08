@@ -9520,6 +9520,7 @@
   structured: True
   dispatch:
     CPU, CUDA: lu_unpack_out
+    MPS: lu_unpack_out_mps
 
 # TODO: remove dispatch section when porting TH CUDA to ATen
 - func: multinomial.out(Tensor self, int num_samples, bool replacement=False, *, Generator? generator=None, Tensor(a!) out) -> Tensor(a!)
