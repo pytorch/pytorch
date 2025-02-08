@@ -2,7 +2,7 @@
 #include <ATen/ops/cat_cuda_dispatch.h>
 #include <ATen/ops/norm_cuda_dispatch.h>
 #include <ATen/ops/unsqueeze.h>
-#include <torch/extension.h>
+#include <torch/library.h>
 
 at::Tensor ultra_norm(at::TensorList inputs) {
     auto res = at::native::foreach_tensor_norm_cuda(inputs);
