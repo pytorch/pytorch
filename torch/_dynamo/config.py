@@ -417,8 +417,15 @@ enable_cpp_symbolic_shape_guards = False
 # Enable tracing through contextlib.contextmanager
 enable_trace_contextlib = True
 
+# Enable tracing generator functions lazily. If False, Dynamo will exhaust
+# generators upon first execution. And if True, the generator will be accessed lazily
+enable_faithful_generator_behavior = True
+
 # Inline inbuilt nn modules
-inline_inbuilt_nn_modules = not is_fbcode()
+inline_inbuilt_nn_modules = Config(  # type: ignore[var-annotated]
+    default=True,
+    justknob="pytorch/compiler:inline_inbuilt_nn_modules",
+)
 
 # Use C++ FrameLocalsMapping (raw array view of Python frame fastlocals)
 enable_cpp_framelocals_guard_eval = True
@@ -571,8 +578,10 @@ enable_compiler_collectives = os.environ.get("TORCH_COMPILER_COLLECTIVES", "0") 
 # will typically cause cache misses.  We continuously update the profile,
 # so if we only discover something is dynamic on the second run, we will update
 # the profile for subsequent runs.
-automatic_dynamic_local_pgo: bool = (
-    os.environ.get("TORCH_DYNAMO_AUTOMATIC_DYNAMIC_LOCAL_PGO", "0") == "1"
+automatic_dynamic_local_pgo: bool = Config(
+    justknob="pytorch/remote_cache:enable_local_automatic_dynamic_pgo",
+    env_name_force="TORCH_DYNAMO_AUTOMATIC_DYNAMIC_LOCAL_PGO",
+    default=True,
 )
 
 # Like above, but using remote cache
