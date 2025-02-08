@@ -85,6 +85,7 @@ class CppBmmTemplate(CppGemmTemplate):
         epilogue_creator: Optional[Callable[[ir.Buffer], ir.Pointwise]] = None,
         should_block_weights: bool = False,
         name="bmm",
+        **kwargs,
     ):
         """
         In order to simplify the implementation and increase code reuse, the BMM template implements
