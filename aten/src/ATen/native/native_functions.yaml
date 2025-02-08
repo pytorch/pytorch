@@ -14841,7 +14841,7 @@
     Meta: _fused_sdp_choice_meta
     CPU, NestedTensorCPU: _fused_sdp_choice_cpp
     CUDA, NestedTensorCUDA: _fused_sdp_choice_cuda
-    XPU, NestedTensorXPU: _fused_sdp_choice_xpu
+    XPU: _fused_sdp_choice_xpu
   tags: nondeterministic_seeded
 
 - func: _scaled_dot_product_attention_math(Tensor query, Tensor key, Tensor value, Tensor? attn_mask=None, float dropout_p=0.0, bool is_causal=False, Tensor? dropout_mask=None, *, float? scale=None, bool enable_gqa=False) -> (Tensor, Tensor)
