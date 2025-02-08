@@ -253,7 +253,9 @@ def _print_snapshot(snapshot: dict[torch.device, dict[str, int]], units: str) ->
         print(
             f"Device: {dev}",
             *(
-                f"\t{k}: {_rounding_fn(v, divisor, 2)} {units}"
+                f"\t{k.value}: {_rounding_fn(v, divisor, 2)} {units}"
+                if isinstance(k, _RefType)
+                else f"\t{k}: {_rounding_fn(v, divisor, 2)} {units}"
                 for k, v in dev_snap.items()
             ),
             sep="\n",
@@ -275,7 +277,9 @@ def _print_snapshot_tabular(
     divisor = _get_mem_divisor(units)
     table_data = []
     key_list = list(next(iter(snapshot.values())).keys())
-    headers = ["Device"] + [f"{key}" for key in key_list]
+    headers = ["Device"] + [
+        f"{key.value}" if isinstance(key, _RefType) else f"{key}" for key in key_list
+    ]
 
     for dev, dev_snap in snapshot.items():
         if _rounding_fn(dev_snap[_TOTAL_KEY], divisor, 2) <= 0:
@@ -290,7 +294,7 @@ def _print_state_snapshots(
     snapshots: dict[_State, list[dict[torch.device, dict[str, int]]]], units: str
 ) -> None:
     for state, snapshot_list in snapshots.items():
-        print(f"{state}")
+        print(f"{state.value}")
         for i, snapshot in enumerate(snapshot_list):
             print(f"# {i + 1}:")
             _print_snapshot(snapshot, units)
@@ -312,7 +316,7 @@ def _print_state_snapshots_tabular(
     divisor = _get_mem_divisor(units)
     for state, snapshot_list in snapshots.items():
         for i, snapshot in enumerate(snapshot_list):
-            state_call = f"{state} # {i + 1}"
+            state_call = f"{state.value} # {i + 1}"
             for dev, dev_snap in snapshot.items():
                 if _rounding_fn(dev_snap[_TOTAL_KEY], divisor, 2) <= 0:
                     continue
@@ -324,7 +328,9 @@ def _print_state_snapshots_tabular(
                 }
                 last_state_call = state_call
                 for k, v in dev_snap.items():
-                    row[f"{k}"] = f"{_rounding_fn(v, divisor, 2)} {units}"
+                    row[
+                        f"{k.value}" if isinstance(k, _RefType) else f"{k}"
+                    ] = f"{_rounding_fn(v, divisor, 2)} {units}"
                 table_data.append(row)
     print(tabulate(table_data, headers="keys", tablefmt="rst"))
 
@@ -411,6 +417,7 @@ class MemTracker(TorchDispatchMode):
         # Weak references to the topmost AC module currently active
         self._ac_mod: Optional[weakref.ref] = None
         self._orig_resize = torch.UntypedStorage.resize_
+        self._depth = 0
 
     def _update_snap(
         self,
@@ -685,15 +692,16 @@ class MemTracker(TorchDispatchMode):
                 self._in_ac = True
         else:
             parents = set(self._mod_tracker.parents) - {mod_name}
-            if len(parents) == 1 and "Global" in parents:
-                raise NotImplementedError(
-                    "MemTracker does not support memory tracking for multiple iterative calls."
-                    " Either use ``reset_mod_stats`` to clear module memory stats for the previous iteration"
-                    " or file a github issue if you need this feature."
-                )
+            # if len(parents) == 1 and "Global" in parents:
+            #     raise NotImplementedError(
+            #         "MemTracker does not support memory tracking for multiple iterative calls."
+            #         " Either use ``reset_mod_stats`` to clear module memory stats for the previous iteration"
+            #         " or file a github issue if you need this feature."
+            #     )
             mod_stats = self.memory_tracking[module]
             state = _ModState.PRE_FW
             input_mem = self._track_inputs_or_outputs(inputs)
+            mod_stats.mod_fqn = mod_name
             mod_stats.input_mem = input_mem
 
         mem_snapshot = self.get_tracker_snapshot()
@@ -826,6 +834,8 @@ class MemTracker(TorchDispatchMode):
                 self._track_module_params_and_buffers(obj, install_grad_hooks=False)
             elif isinstance(obj, optim.Optimizer):
                 self._track_optimizer_states(_MemRefType.OPT, obj)
+            elif obj is None:
+                continue
             else:
                 raise TypeError(
                     f"Object of type {type(obj)} is not supported for tracking. "
@@ -891,29 +901,45 @@ class MemTracker(TorchDispatchMode):
         """
         self.memory_tracking.clear()
 
+    def _track_dtensor_dispatch(self) -> None:
+        self._dtensor_dispatch = torch.distributed.tensor.DTensor._op_dispatcher.dispatch
+        def custom_dispatch(*args, **kwargs):
+            with self:
+                return self._dtensor_dispatch(*args, **kwargs)
+        torch.distributed.tensor.DTensor._op_dispatcher.dispatch = custom_dispatch
+
+    def _restore_dtensor_dispatch(self) -> None:
+        torch.distributed.tensor.DTensor._op_dispatcher.dispatch = self._dtensor_dispatch
+
     def __enter__(self) -> "MemTracker":
-        self._register_global_optimizer_hook()
-        self._mod_tracker.register_user_hooks(
-            self._pre_fw_hook,
-            self._post_fw_hook,
-            self._pre_bw_hook,
-            self._post_bw_hook,
-        )
-        self._track_resize()
-        self._peak_mem_snap = self.get_tracker_snapshot()
-        self._peak_mem = {
-            dev: dev_snap[_TOTAL_KEY] for dev, dev_snap in self._peak_mem_snap.items()
-        }
-        self._mod_tracker.__enter__()
+        if self._depth == 0:
+            self._register_global_optimizer_hook()
+            self._mod_tracker.register_user_hooks(
+                self._pre_fw_hook,
+                self._post_fw_hook,
+                self._pre_bw_hook,
+                self._post_bw_hook,
+            )
+            self._track_resize()
+            self._track_dtensor_dispatch()
+            self._peak_mem_snap = self.get_tracker_snapshot()
+            self._peak_mem = {
+                dev: dev_snap[_TOTAL_KEY] for dev, dev_snap in self._peak_mem_snap.items()
+            }
+            self._mod_tracker.__enter__()
         super().__enter__()
+        self._depth += 1
         return self
 
     def __exit__(self, *args: Any) -> None:
-        self._deregister_param_and_optimizer_hooks()
-        self._mod_tracker.clear_user_hooks()
-        self._restore_resize()
+        self._depth -= 1
+        if self._depth == 0:
+            self._deregister_param_and_optimizer_hooks()
+            self._mod_tracker.clear_user_hooks()
+            self._restore_resize()
+            self._mod_tracker.__exit__(*args)
         super().__exit__(*args)
-        self._mod_tracker.__exit__(*args)
+        
 
     def __torch_dispatch__(self, func, types, args=(), kwargs=None):  # type: ignore[no-untyped-def]
         res = func(*args, **kwargs or {})
@@ -929,4 +955,9 @@ class MemTracker(TorchDispatchMode):
         tree_map_only(torch.Tensor, partial(self._track, reftype), res)
         peak_state = _ModState.PEAK_BW if self._mod_tracker.is_bw else _ModState.PEAK_FW
         self._update_peak_stats(peak_state)
+        # mib = 2**20
+        # mem_stats = torch.cuda.memory_stats()
+        # cuda_mem = mem_stats["active_bytes.all.peak"]
+        # peak_mem = self._peak_mem[torch.device(torch.cuda.current_device())]
+        # print(f"Func: {func} CUDA: {cuda_mem/mib:.3f} TRACKER {peak_mem/mib:.3f}")
         return res
