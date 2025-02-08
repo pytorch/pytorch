@@ -12,7 +12,7 @@ from torch.utils._sympy.printers import ExprPrinter as ExprPrinter_
 from torch.utils._sympy.value_ranges import ValueRanges
 
 from ..utils import get_bounds_index_expr, get_kernel_metadata
-from ..virtualized import ops, V
+from ..virtualized import ops, OpsWrapper, V
 from .common import (
     CSEVariable,
     DeferredLine,
@@ -470,7 +470,9 @@ class MetalKernel(SIMDKernel):
                 self.body,
                 f"c10::metal::threadgroup_{reduction_type}({acc_buf}, {reduction_dim.numel})",
             )
-            return (f"{wf_res}.x", f"{wf_res}.y", self.features.reduction_numel)
+            return OpsWrapper._unwrap(
+                (f"{wf_res}.x", f"{wf_res}.y", self.features.reduction_numel)
+            )
         raise NotImplementedError(reduction_type)
 
     def codegen_iteration_ranges_entry(self, entry: IterationRangesEntry) -> None:
