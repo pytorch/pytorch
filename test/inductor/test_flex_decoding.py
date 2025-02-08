@@ -993,12 +993,12 @@ class TestFlexDecoding(InductorTestCase):
 
     @supported_platform
     @unittest.skipIf(SKIP_UT_ON_CPU, "Skip on CPU as not supported")
-    def test_non_divisible_multi_token_offset_mask_with_captured_buffer(self, device):
+    def test_non_divisible_multi_token_offset_mask_with_captured_buffer(self):
         KV_S = S - 3
         Q_S = 3
-        offset_kv = torch.randn(KV_S, device=device, dtype=torch.bfloat16)
-        offset_q = torch.randn(Q_S, device=device, dtype=torch.bfloat16)
-        offset_tensor = torch.tensor(S // 2 - 3, device=device, dtype=torch.int32)
+        offset_kv = torch.randn(KV_S, device="cuda", dtype=torch.bfloat16)
+        offset_q = torch.randn(Q_S, device="cuda", dtype=torch.bfloat16)
+        offset_tensor = torch.tensor(S // 2 - 3, device="cuda", dtype=torch.int32)
 
         def score_mod(score, b, h, q, kv):
             return score + offset_kv[kv] + offset_q[q]
@@ -1006,14 +1006,8 @@ class TestFlexDecoding(InductorTestCase):
         def mask_mod(b, h, q, kv):
             return kv >= q + offset_tensor
 
-        block_mask = create_block_mask(mask_mod, B, 1, Q_S, KV_S, device=device)
-        self.run_test(
-            Q_S=Q_S,
-            KV_S=KV_S,
-            block_mask=block_mask,
-            score_mod=score_mod,
-            device=device,
-        )
+        block_mask = create_block_mask(mask_mod, B, 1, Q_S, KV_S)
+        self.run_test(Q_S=Q_S, KV_S=KV_S, block_mask=block_mask, score_mod=score_mod)
 
     @supported_platform
     @common_utils.parametrize("dtype", test_dtypes_fast)
@@ -1286,7 +1280,13 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
             converted_block_mask1,
             converted_score_mod1,
         ) = self.preprocess_paged_attention(
-            scoremod_1, query, keys[0], values[0], block_mask, torch.float32, device=device
+            scoremod_1,
+            query,
+            keys[0],
+            values[0],
+            block_mask,
+            torch.float32,
+            device=device,
         )
         (
             k_cache2,
@@ -1294,7 +1294,13 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
             converted_block_mask2,
             converted_score_mod2,
         ) = self.preprocess_paged_attention(
-            scoremod_2, query, keys[1], values[1], block_mask, torch.float32, device=device
+            scoremod_2,
+            query,
+            keys[1],
+            values[1],
+            block_mask,
+            torch.float32,
+            device=device,
         )
 
         def paged_f(q, k1, k2, v1, v2):
@@ -1360,7 +1366,13 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
             converted_block_mask1,
             converted_score_mod1,
         ) = self.preprocess_paged_attention(
-            scoremod_1, query, keys[0], values[0], block_mask, torch.float32, device=device
+            scoremod_1,
+            query,
+            keys[0],
+            values[0],
+            block_mask,
+            torch.float32,
+            device=device,
         )
         (
             k_cache2,
@@ -1368,7 +1380,13 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
             converted_block_mask2,
             converted_score_mod2,
         ) = self.preprocess_paged_attention(
-            scoremod_2, query, keys[1], values[1], block_mask, torch.float32, device=device
+            scoremod_2,
+            query,
+            keys[1],
+            values[1],
+            block_mask,
+            torch.float32,
+            device=device,
         )
         (
             k_cache3,
@@ -1376,7 +1394,13 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
             converted_block_mask3,
             converted_score_mod3,
         ) = self.preprocess_paged_attention(
-            scoremod_1, query, keys[2], values[2], block_mask, torch.float32, device=device
+            scoremod_1,
+            query,
+            keys[2],
+            values[2],
+            block_mask,
+            torch.float32,
+            device=device,
         )
 
         paged_attention1 = functools.partial(
