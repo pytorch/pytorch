@@ -1006,15 +1006,18 @@ def squeeze(x, dim=None):
     dims = OrderedSet((dim,) if not isinstance(dim, tuple) else dim)
 
     new_shape = []
+    new_stride = []
+    original_stride = x.get_stride()
     for d, s in enumerate(x.get_size()):
         if not (
             d in dims
             and V.graph.sizevars.evaluate_expr(sympy.Eq(s, 1), size_oblivious=True)
         ):
             new_shape.append(s)
+            new_stride.append(original_stride[d])
 
     # squeeze does nothing if the size isn't 1
-    return view(x, new_shape) if new_shape != x.get_size() else x
+    return as_strided(x, new_shape, new_stride) if new_shape != x.get_size() else x
 
 
 @register_lowering(aten.squeeze_copy, type_promotion_kind=None)
