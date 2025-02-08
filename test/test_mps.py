@@ -88,9 +88,6 @@ def mps_ops_grad_modifier(ops):
         'cdist': [torch.float32],
         'masked.scatter': [torch.float16, torch.float32],
         'index_fill': [torch.float16, torch.float32],  # missing `aten::_unique`.
-        'lu': [torch.float16, torch.float32],  # missing `aten::lu_unpack`.
-        'linalg.lu_factor': [torch.float16, torch.float32],  # missing `aten::lu_unpack`.
-        'linalg.lu_factor_ex': [torch.float16, torch.float32],  # missing `aten::lu_unpack`.
         'linalg.solve': [torch.float16, torch.float32],  # missing `aten::lu_solve`.
         'linalg.solve_ex': [torch.float16, torch.float32],  # missing `aten::lu_solve`.
         'linalg.tensorsolve': [torch.float16, torch.float32],  # missing `aten::lu_solve`.
@@ -335,6 +332,7 @@ def mps_ops_modifier(ops):
         'scalar_tensor',
         'select',
         'sgn',
+        'sinc',
         'slice',
         'special.zeta',
         'split',
@@ -487,7 +485,6 @@ def mps_ops_modifier(ops):
         'square',
         'stack',
         'stft',
-        'sinc',
         'sum',
         'sum_to_size',
         'tan',
@@ -724,7 +721,6 @@ def mps_ops_modifier(ops):
         'logcumsumexp': None,
         'logdet': None,
         'lu_solve': None,
-        'lu_unpack': None,
         'masked.median': None,
         'matrix_exp': None,
         'mode': None,
@@ -844,7 +840,6 @@ def mps_ops_modifier(ops):
 
         # Operations not supported for integral types
         'special.zeta': [torch.bool, torch.int16, torch.int32, torch.int64, torch.uint8, torch.int8],
-        'sinc': [torch.bool, torch.int16, torch.int32, torch.int64, torch.uint8, torch.int8, torch.complex64],
 
         # GEMM on MPS is not supported for integral types
         'nn.functional.linear': [torch.int16, torch.int32, torch.int64, torch.uint8, torch.int8],
