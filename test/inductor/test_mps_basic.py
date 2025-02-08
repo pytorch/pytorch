@@ -164,6 +164,7 @@ for test_name in [
     "test_inf",
     "test_isinf",
     "test_isinf2",
+    "test_layer_norm",
     "test_lgamma",
     "test_linear_float64",
     "test_log_fp64",
