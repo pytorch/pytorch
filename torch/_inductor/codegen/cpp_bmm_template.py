@@ -9,6 +9,7 @@ import sympy
 from .. import ir
 from ..select_algorithm import PartialRender
 from ..virtualized import V
+from .common import ArgName
 from .cpp_gemm_template import CppGemmTemplate, GEMM_TEMPLATE
 from .cpp_micro_gemm import LayoutType
 from .cpp_template_kernel import CppTemplateKernel
@@ -136,7 +137,7 @@ class CppBmmTemplate(CppGemmTemplate):
         kernel: CppTemplateKernel,
         function_name: str,
         placeholder: str,
-        b_index: int,
+        b_index: str,
     ) -> str:
         """
         Similar to 'def_kernel' in cpp_template_kernel, but instead of generating a function definition,
@@ -150,8 +151,8 @@ class CppBmmTemplate(CppGemmTemplate):
             arg_defs, call_args, _, _ = kernel.args.python_argdefs()
             for i, buf in enumerate(call_args):
                 if buf == self.b_index:
-                    arg_defs[i] = b_index
-            call = f"{function_name}({', '.join(arg_defs)});"
+                    arg_defs[i] = ArgName(b_index)
+            call = f"{function_name}({', '.join(x.full_name() for x in arg_defs)});"
             return call
 
         assert placeholder not in kernel.render_hooks

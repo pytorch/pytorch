@@ -1200,25 +1200,23 @@ class TritonHOPifier:
             defaults = inspect.signature(Autotuner.__init__).parameters
             # Newer version of triton change attribute name from warmup to num_warmup and rep to num_rep.
             # The call to get_first_attr is to maintain backward-compatibility.
+
+            def defaults_ok(
+                attr: str, alternates: tuple[str, ...], values: tuple[Any, ...]
+            ) -> bool:
+                if attr not in defaults:
+                    return True
+                value = torch._dynamo.utils.get_first_attr(kernel, attr, *alternates)
+                if value == defaults[attr].default:
+                    return True
+                return value in values
+
             if (
                 not torch._inductor.config.unsafe_ignore_unsupported_triton_autotune_args
                 and (
-                    (
-                        "warmup" in defaults
-                        and defaults["warmup"].default
-                        != torch._dynamo.utils.get_first_attr(
-                            kernel, "num_warmups", "warmup"
-                        )
-                    )
-                    or (
-                        "rep" in defaults
-                        and defaults["rep"].default
-                        != torch._dynamo.utils.get_first_attr(kernel, "num_reps", "rep")
-                    )
-                    or (
-                        "use_cuda_graph" in defaults
-                        and defaults["use_cuda_graph"].default != kernel.use_cuda_graph
-                    )
+                    not defaults_ok("num_warmups", ("warmup",), (25, None))
+                    or not defaults_ok("num_reps", ("rep",), (100, None))
+                    or not defaults_ok("use_cuda_graph", (), (False,))
                 )
             ):
                 self.raise_unsupported(

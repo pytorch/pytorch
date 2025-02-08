@@ -108,7 +108,7 @@ from .variables.misc import (
     PythonModuleVariable,
     UnknownVariable,
 )
-from .variables.nn_module import NNModuleVariable, UnspecializedNNModuleVariable
+from .variables.nn_module import NNModuleVariable
 from .variables.tensor import supported_comparison_ops, SymNodeVariable, TensorVariable
 from .variables.torch_function import (
     SymbolicTorchFunctionState,
@@ -295,7 +295,7 @@ class BlockStackEntry:
     # Current instruction that pushes something to block_stack
     inst: Instruction
     target: Instruction
-    stack_index: Optional[int] = None
+    stack_index: int
     with_context: Optional[
         Union[ContextWrappingVariable, GenericContextWrappingVariable]
     ] = None
@@ -590,12 +590,6 @@ def generic_jump(truth_fn: typing.Callable[[object], bool], push: bool):
         elif isinstance(value, NNModuleVariable):
             # Equivalent of "self.nn_module is not None"
             mod = self.output.get_submodule(value.module_key)
-            if truth_fn(mod):
-                if push:
-                    self.push(value)
-                self.jump(inst)
-        elif isinstance(value, UnspecializedNNModuleVariable):
-            mod = value.value
             if truth_fn(mod):
                 if push:
                     self.push(value)
@@ -1087,9 +1081,21 @@ class InstructionTranslatorBase(
                 raise
             except BackendCompilerFailed:
                 raise
+            except RuntimeError as e:
+                if hasattr(e, "msg") and "data-dependent" in e.msg:
+                    print(
+                        "\n"
+                        + torch.fx.GraphModule({}, self.output.graph).print_readable(
+                            print_output=False, include_stride=True, include_device=True
+                        ),
+                        file=sys.stderr,
+                    )
+
+                raise
             except Exception as e:
                 if self.exec_recorder:
                     e.exec_record = self.exec_recorder.get_record()  # type: ignore[attr-defined]
+
                 raise
             finally:
                 self.output.pop_tx()
@@ -1374,11 +1380,11 @@ class InstructionTranslatorBase(
 
     def SETUP_LOOP(self, inst):
         # only exists in python<=3.7
-        self.block_stack.append(BlockStackEntry(inst, inst.target))
+        self.block_stack.append(BlockStackEntry(inst, inst.target, len(self.stack)))
 
     def SETUP_EXCEPT(self, inst):
         # only exists in python<=3.7
-        self.block_stack.append(BlockStackEntry(inst, inst.target))
+        self.block_stack.append(BlockStackEntry(inst, inst.target, len(self.stack)))
 
     def POP_BLOCK(self, inst):
         self.block_stack.pop()
@@ -1387,7 +1393,7 @@ class InstructionTranslatorBase(
         self.setup_or_before_with(inst)
 
     def SETUP_FINALLY(self, inst):
-        self.block_stack.append(BlockStackEntry(inst, inst.target))
+        self.block_stack.append(BlockStackEntry(inst, inst.target, len(self.stack)))
 
     def BEGIN_FINALLY(self, inst):
         self.push(None)
@@ -1461,6 +1467,14 @@ class InstructionTranslatorBase(
             # Create the instance of the exception type
             # https://github.com/python/cpython/blob/3.11/Python/ceval.c#L6547-L6549
             val = val.call_function(self, [], {})  # type: ignore[arg-type]
+
+        # Handle https://peps.python.org/pep-0479/
+        if (
+            is_generator(self.f_code)
+            and isinstance(val, variables.ExceptionVariable)
+            and val.exc_type is StopIteration
+        ):
+            val = variables.BuiltinVariable(RuntimeError).call_function(self, [], {})  # type: ignore[arg-type]
 
         # Save the exception in a global data structure
         self.exn_vt_stack.append(val)
@@ -1550,10 +1564,17 @@ class InstructionTranslatorBase(
                         f"Current TOS is {block_stack_entry.inst}"
                     )
 
+                # 1) pop values from the stack until it matches the stack depth
+                # for the handler
+                while len(self.stack) > block_stack_entry.stack_index:
+                    self.pop()
+
                 # Push a dummy block stack entry of EXCEPT_HANDLER
                 # https://github.com/python/cpython/blob/3.10/Python/ceval.c#L1456
                 except_handler_inst = Instruction(1e6, "EXCEPT_HANDLER", None, 0)
-                self.block_stack.append(BlockStackEntry(except_handler_inst, None))
+                self.block_stack.append(
+                    BlockStackEntry(except_handler_inst, None, len(self.stack))
+                )
 
                 # Push old exception
                 if len(self.exn_vt_stack) >= 2:
@@ -2215,9 +2236,11 @@ class InstructionTranslatorBase(
         # https://peps.python.org/pep-0479/
         # https://github.com/python/cpython/pull/99006
         # https://github.com/python/cpython/commit/28187141cc34063ef857976ddbca87ba09a882c2
-        assert isinstance(inst, ExceptionVariable)
-        if inst.exc_type is StopIteration:
-            exc.raise_observed_exception(RuntimeError, self)
+        val = self.stack[-1]
+        assert isinstance(val, ExceptionVariable)
+        if val.exc_type is StopIteration:
+            new_val = variables.BuiltinVariable(RuntimeError).call_function(self, [], {})  # type: ignore[arg-type]
+            self.stack[-1] = new_val
 
     def DICT_MERGE(self, inst):
         v = self.pop()
@@ -2447,7 +2470,7 @@ class InstructionTranslatorBase(
                     BlockStackEntry(inst, target, len(self.stack), ctx)
                 )
             else:
-                self.block_stack.append(BlockStackEntry(inst, target))
+                self.block_stack.append(BlockStackEntry(inst, target, len(self.stack)))
 
         self.push(exit)
         self.push(ctx.enter(self))
@@ -2505,7 +2528,7 @@ class InstructionTranslatorBase(
     def CALL_INTRINSIC_1(self, inst):
         if inst.argval == 3:
             # INTRINSIC_STOPITERATION_ERROR
-            self.STOPITERATION_ERROR(self.pop())
+            self.STOPITERATION_ERROR(inst)
         elif inst.argval == 5:
             # INTRINSIC_UNARY_POSITIVE
             self.UNARY_POSITIVE(inst)
@@ -2812,36 +2835,34 @@ class InstructionTranslator(InstructionTranslatorBase):
                 if name in f_locals:
                     # This models cells that are also function inputs.
                     value = f_locals[name]
-                    # NOTE: cell objects in `f_locals` are already dereferenced,
-                    # so we can't easily retrieve the original cell objects.
-                    # However, we create a new cell object for the sake of
-                    # internal consistency (variable for each existing cell has
-                    # an associated python cell object in `SideEffects`).
+                    # NOTE: root frame inputs that are captured by a nested
+                    # function become special cell objects -- they exist in
+                    # `f_locals` as contents of the cells, rather than the cells
+                    # objects themselves.
                     #
-                    # But this isn't the original cell object, why is it safe?
-                    # That's because
+                    # In Dynamo, we choose to represent such input cell objects
+                    # as newly created (rather than pre-existing) cell objects,
+                    # because
                     #
-                    # 1. Dynamo only uses these cell objects for their ids, so that
-                    # if we encounter the same cell (if it's captured by some
-                    # pre-existing function), we'll reuse the original
-                    # `CellVariable` instance we created for the cell object.
+                    # 1. The reason for representing a pre-existing cell object
+                    # is to emit guard or codegen mutations. However, local
+                    # cells should never be used for guards. Moreover, at this
+                    # point these input cell objects should've never been
+                    # accessed by anyone else, since Dynamo intercepts the frame
+                    # right after its evaluation starts, i.e., right after these
+                    # cell objects are created. So they should have no external
+                    # reference, meaning no mutation needs to be propagated.
                     #
-                    # 2. In this case the original cell object should've
-                    # never been accessed by anyone else, as Dynamo intercepts
-                    # the frame right after its evaluation starts, i.e., right
-                    # after these cell objects are created. Thus they cannot be
-                    # captured by any pre-existig function.
-                    dummy_cell = types.CellType(value)
-                    cell_source = LocalCellSource(name)
+                    # 2. This conveniently allows codegen to prune away
+                    # mutations to these cells, unless they escape the frame.
                     contents_source = LocalSource(
                         name, is_input=True, is_derefed_cell_contents=True
                     )
                     contents_var: VariableTracker = LazyVariableTracker.create(
                         value, contents_source
                     )
-                    cell_var = side_effects.track_cell_existing(
-                        cell_source, dummy_cell, contents_var
-                    )
+                    cell_var = side_effects.track_cell_new()
+                    side_effects.store_cell(cell_var, contents_var)
                 else:
                     cell_var = side_effects.track_cell_new()
                 cell_var.local_name = name
@@ -3069,6 +3090,7 @@ class InstructionTranslator(InstructionTranslatorBase):
             and not self.inconsistent_side_effects
             and not self.symbolic_locals_contain_module_class()
             and not self.export
+            and not self.one_graph
         ):
             raise exc.SkipFrame("because no content in function call")
         self.instruction_pointer = None
