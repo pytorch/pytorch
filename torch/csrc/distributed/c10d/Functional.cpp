@@ -36,7 +36,6 @@ at::Tensor& all_reduce_(
     std::string reduce_op,
     // NOLINTNEXTLINE(performance-unnecessary-value-param)
     std::string group_name) {
-  TORCH_CHECK(input.is_contiguous());
   c10d::AllreduceOptions opts;
   opts.reduceOp = to_reduce_op(reduce_op);
 
@@ -51,7 +50,6 @@ at::Tensor all_reduce(
     const at::Tensor& input,
     std::string reduce_op,
     std::string group_name) {
-  TORCH_CHECK(input.is_contiguous());
   auto output = input.clone(at::MemoryFormat::Contiguous);
   return all_reduce_(output, std::move(reduce_op), std::move(group_name));
 }
@@ -62,9 +60,6 @@ std::vector<at::Tensor> all_reduce_coalesced_(
     std::string reduce_op,
     // NOLINTNEXTLINE(performance-unnecessary-value-param)
     std::string group_name) {
-  for (const auto& tensor : inputs) {
-    TORCH_CHECK(tensor.is_contiguous());
-  }
   c10d::AllreduceCoalescedOptions opts;
   opts.reduceOp = to_reduce_op(reduce_op);
 
@@ -84,7 +79,6 @@ std::vector<at::Tensor> all_reduce_coalesced(
   std::vector<at::Tensor> outputs;
   outputs.reserve(inputs.size());
   for (const auto& tensor : inputs) {
-    TORCH_CHECK(tensor.is_contiguous());
     outputs.push_back(tensor.clone(at::MemoryFormat::Contiguous));
   }
   return all_reduce_coalesced_(
@@ -222,7 +216,6 @@ at::Tensor all_to_all_single(
 
 // NOLINTNEXTLINE(performance-unnecessary-value-param)
 at::Tensor& broadcast_(at::Tensor& input, int64_t src, std::string group_name) {
-  TORCH_CHECK(input.is_contiguous());
   c10d::BroadcastOptions opts;
   opts.rootRank = src;
   std::vector<at::Tensor> inputs{input};
@@ -237,7 +230,6 @@ at::Tensor broadcast(
     const at::Tensor& input,
     int64_t src,
     std::string group_name) {
-  TORCH_CHECK(input.is_contiguous());
   auto output = input.clone(at::MemoryFormat::Contiguous);
   return broadcast_(output, src, std::move(group_name));
 }
