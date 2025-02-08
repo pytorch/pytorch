@@ -23,7 +23,6 @@
 #endif
 
 #include <c10/core/SymInt.h>
-#include <c10/util/string_view.h>
 
 #if USE_ROCM
 #if defined(USE_FLASH_ATTENTION) || defined(USE_MEM_EFF_ATTENTION)
@@ -217,7 +216,7 @@ bool check_sm_version(cudaDeviceProp * dprops) {
 bool check_flash_attention_hardware_support(sdp_params const& params, bool debug) {
   // Check that the gpu is capable of running flash attention
   using sm80 = SMVersion<8, 0>;
-  using sm90 = SMVersion<9, 0>;
+  using sm120 = SMVersion<12, 0>;
 #if USE_ROCM
 #if USE_ROCM_ATTENTION
   if(at::globalContext().getROCmFAPreferredBackend() == at::ROCmFABackend::Ck) {
@@ -240,10 +239,10 @@ bool check_flash_attention_hardware_support(sdp_params const& params, bool debug
 #endif
 #else
   auto dprops = at::cuda::getCurrentDeviceProperties();
-  if (!check_sm_version<sm80, sm90>(dprops)) {
+  if (!check_sm_version<sm80, sm120>(dprops)) {
     if (debug) {
       TORCH_WARN(
-          "Flash attention only supports gpu architectures in the range [sm80, sm90]. Attempting to run on a sm ",
+          "Flash attention only supports gpu architectures in the range [sm80, sm120]. Attempting to run on a sm ",
           dprops->major,
           ".",
           dprops->minor,
@@ -258,7 +257,7 @@ bool check_flash_attention_hardware_support(sdp_params const& params, bool debug
 bool check_mem_efficient_hardware_support(sdp_params const& params, bool debug) {
   // Mem Efficient attention supports hardware in the range [sm_50, sm_90]
   using sm50 = SMVersion<5, 0>;
-  using sm90 = SMVersion<9, 0>;
+  using sm120 = SMVersion<12, 0>;
 #if USE_ROCM
 #if USE_ROCM_ATTENTION
   auto stream = at::cuda::getCurrentCUDAStream().stream();
@@ -275,10 +274,10 @@ bool check_mem_efficient_hardware_support(sdp_params const& params, bool debug) 
 #endif
 #else
   auto dprops = at::cuda::getCurrentDeviceProperties();
-  if (!check_sm_version<sm50, sm90>(dprops)) {
+  if (!check_sm_version<sm50, sm120>(dprops)) {
     if (debug) {
       TORCH_WARN(
-          "Mem Efficient Attention only supports gpu architectures in the range [sm50, sm90]. Attempting to run on a sm ",
+          "Mem Efficient Attention only supports gpu architectures in the range [sm50, sm120]. Attempting to run on a sm ",
           dprops->major,
           ".",
           dprops->minor,
@@ -290,15 +289,17 @@ bool check_mem_efficient_hardware_support(sdp_params const& params, bool debug) 
   return true;
 }
 
-bool check_requires_grad_and_head_dim_gt192_constraints_on_sm86_89(
+bool check_requires_grad_and_head_dim_gt192_constraints_on_sm86_89_or_120(
     sdp_params const& params,
     bool debug) {
   // Flash Attention will raise an error in the backward pass if the head_dim
   // size is greater than 192 And the device is between in the range [sm86, sm89]
   using sm86 = SMVersion<8, 6>;
   using sm89 = SMVersion<8, 9>;
+  using sm120 = SMVersion<12, 0>;
   auto dprops = at::cuda::getCurrentDeviceProperties();
   bool is_sm86_or_sm89 = check_sm_version<sm86, sm89>(dprops);
+  bool is_sm120 = check_sm_version<sm120, sm120>(dprops);
   bool is_head_dim_gt192 = params.query.sym_size(-1) > 192;
   bool is_head_dim_lte224 = params.query.sym_size(-1) <= 224;
   bool is_dropout = params.dropout > 0.0;
@@ -306,7 +307,7 @@ bool check_requires_grad_and_head_dim_gt192_constraints_on_sm86_89(
   bool cond1 = is_head_dim_gt192 && is_head_dim_lte224;
   // head_dim size > 224 and is_dropout is not supported on sm86 and sm89
   bool cond2 = params.query.sym_size(-1) > 224 && is_dropout;
-  if (input_requires_grad(params) && is_sm86_or_sm89 && (cond1 || cond2)) {
+  if (input_requires_grad(params) && (is_sm86_or_sm89 || is_sm120) && (cond1 || cond2)) {
     if (debug) {
       TORCH_WARN(
           "Flash attention currently doesn't support training with head_dim ∈ (192, 224] or "
@@ -488,12 +489,12 @@ bool check_cudnn_layout(sdp_params const& params, bool debug) {
 
 bool check_cudnn_hardware_support(sdp_params const& params, bool debug) {
   using sm80 = SMVersion<8, 0>;
-  using sm90 = SMVersion<9, 0>;
+  using sm120 = SMVersion<12, 0>;
   auto dprops = at::cuda::getCurrentDeviceProperties();
-  if (!check_sm_version<sm80, sm90>(dprops)) {
+  if (!check_sm_version<sm80, sm120>(dprops)) {
     if (debug) {
       TORCH_WARN(
-          "cuDNN MHA only supports gpu architectures in the range [sm80, sm90]. Attempting to run on a sm ",
+          "cuDNN MHA only supports gpu architectures in the range [sm80, sm120]. Attempting to run on a sm ",
           dprops->major,
           ".",
           dprops->minor,
@@ -615,7 +616,7 @@ bool can_use_flash_attention(sdp_params const& params, bool debug) {
       check_for_attn_mask,
       check_head_dim_size_flash<false /*caller_is_meff*/>,
       check_flash_attention_hardware_support,
-      check_requires_grad_and_head_dim_gt192_constraints_on_sm86_89,
+      check_requires_grad_and_head_dim_gt192_constraints_on_sm86_89_or_120,
       check_flash_causal_non_square_seqlens,
       check_dtypes_low_precision);
   for (auto& constraint : general_constraints) {

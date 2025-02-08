@@ -3,7 +3,8 @@
 # AND SCRUB AWAY TORCH NOTIONS THERE.
 import collections
 import functools
-from typing import Callable, OrderedDict, TypeVar
+from typing import Callable, TypeVar
+from collections import OrderedDict
 from typing_extensions import ParamSpec
 
 

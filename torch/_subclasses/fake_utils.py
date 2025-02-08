@@ -2,7 +2,7 @@
 
 import functools
 import warnings
-from typing import Any, Callable, List, Union
+from typing import Any, Callable, Union
 
 import torch
 import torch.utils._pytree as pytree
@@ -102,8 +102,8 @@ def is_sdpa_error(func, idx, e):
 
 
 def try_convert_fake_to_real(
-    ten_list: List[Union[FakeTensor, Any]]
-) -> List[Union[FakeTensor, torch.Tensor, Any]]:
+    ten_list: list[Union[FakeTensor, Any]]
+) -> list[Union[FakeTensor, torch.Tensor, Any]]:
     """
     Attempt to convert fake tensors to a corresponding real tensor with the correct underlying storage by looking up
     the FakeTensorMode meta to real storage mapping. On failure to find the storage mapping, the FakeTensor will
