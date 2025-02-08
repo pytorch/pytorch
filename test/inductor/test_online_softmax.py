@@ -7,7 +7,7 @@ from triton.testing import do_bench
 
 import torch
 import torch._inductor.config as inductor_config
-from torch._dynamo.utils import same
+from torch._dynamo.utils import rmse, same
 from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import run_and_get_code
 from torch.testing._internal.common_utils import (
@@ -19,6 +19,12 @@ from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_CUDA
 
 
 DO_PERF_TEST = os.environ.get("DO_PERF_TEST") == "1"
+
+
+def _prepare_softmax(x, dim):
+    xmax = x.amax(dim=dim, keepdim=True)
+    xsum = (x - xmax).exp().sum(dim=dim, keepdim=True)
+    return xmax, xsum
 
 
 class TestOnlineSoftmax(TestCase):
@@ -117,14 +123,9 @@ class TestOnlineSoftmax(TestCase):
     @parametrize("nrow", [2, 2048])
     @parametrize("dim", [-1, 0, 1])
     def test_prepare_softmax(self, dim, nrow):
-        def f(x, dim):
-            xmax = x.amax(dim=dim, keepdim=True)
-            xsum = (x - xmax).exp().sum(dim=dim, keepdim=True)
-            return xmax, xsum
-
         x = torch.randn(nrow, 2048, dtype=torch.bfloat16, device=GPU_TYPE)
-        act, (code,) = run_and_get_code(torch.compile(f), x, dim)
-        ref = f(x, dim)
+        act, (code,) = run_and_get_code(torch.compile(_prepare_softmax), x, dim)
+        ref = _prepare_softmax(x, dim)
         self.assertTrue(same(ref, act, tol=1e-2))
 
         if nrow == 2048 and dim == 0:
@@ -156,6 +157,35 @@ class TestOnlineSoftmax(TestCase):
         self.assertTrue(torch.allclose(ref, act, atol=1e-3, rtol=1e-3))
         self.assertTrue(code.count("def triton") >= 2)
         self.assertTrue("online_softmax_reduce" not in code)
+
+    @parametrize("dtype", [torch.bfloat16, torch.half, torch.float32])
+    def test_acc_with_fp64(self, dtype):
+        x = torch.randn(32768, 50257, device=GPU_TYPE, dtype=dtype)
+
+        ref_fp64 = _prepare_softmax(x.to(dtype=torch.float64), dim=-1)
+        ref = _prepare_softmax(x, dim=-1)
+        res, (code,) = run_and_get_code(torch.compile(_prepare_softmax), x, dim=-1)
+        self.assertTrue("online_softmax_reduce" in code)
+
+        # Max should be exactly equal
+        self.assertEqual(ref[0], res[0])
+        self.assertEqual(ref[0].to(dtype=torch.float64), ref_fp64[0])
+
+        ref_error = rmse(ref_fp64[1], ref[1]).item()
+        res_error = rmse(ref_fp64[1], res[1]).item()
+
+        # My local tests even shows a smaller res_error:
+        #   ref_error=2.1065, res_error=2.1028
+        # for bf16
+        #   ref_error=0.2611, res_error=0.2609
+        # for fp16
+        #   ref_error=0.0001, res_error=0.0001
+        # for fp32
+        print(f"{ref_error=:.4f}, {res_error=:.4f}")
+
+        self.assertTrue(
+            res_error < ref_error + 0.1
+        )  # Is this good enough to make CI stable
 
 
 instantiate_parametrized_tests(TestOnlineSoftmax)
