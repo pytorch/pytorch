@@ -225,8 +225,10 @@ def _scaled_dot_product_ring_efficient_attention(
 ) -> tuple[torch.Tensor, ...]:
     if attn_bias is not None:
         raise NotImplementedError("attn_bias is not supported yet")
+
     if not compute_log_sumexp:
-        raise NotImplementedError("compute_log_sumexp must be set")
+        # CP requires compute_log_sumexp to be True because it always merges LSE
+        compute_log_sumexp = True
 
     seq_dim = 2
     return _templated_ring_attention(
