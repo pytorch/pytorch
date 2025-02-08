@@ -307,7 +307,7 @@ bool initialize_block(
   return true;
 }
 
-{% if Meta is defined and Meta is not None %}
+{% if Meta is defined and Meta is not none %}
 template <class Element>
 bool initialize_block_meta(
   cutlass::DeviceAllocation<Element>& block,
@@ -336,7 +336,7 @@ extern "C" int run_standalone(uint64_t seed, int repetitions) {
     using ElementB = {{kernel.cutlass_dtype(W)}};
     using ElementC = {{kernel.cutlass_dtype(Bias, default_dtype='uint8_t')}}; // may not be void
     using ElementD = {{kernel.cutlass_dtype(Y)}};
-    {% if Meta is defined and Meta is not None %}
+    {% if Meta is defined and Meta is not none %}
     using ElementE = {{kernel.cutlass_dtype(Meta)}};
     {% endif %}
 
@@ -347,7 +347,7 @@ extern "C" int run_standalone(uint64_t seed, int repetitions) {
     cutlass::DeviceAllocation<ElementC> Bias_data({{kernel.max_valid_index(Bias)+1}});
     initialize_block(Bias_data, seed++);
     cutlass::DeviceAllocation<ElementD> Y_data({{kernel.max_valid_index(Y)+1}});
-    {% if Meta is defined and Meta is not None %}
+    {% if Meta is defined and Meta is not none %}
     cutlass::DeviceAllocation<ElementE> Meta_data({{kernel.max_valid_index(Meta)+1}});
     initialize_block_meta(Meta_data, seed++);
     {% endif %}
