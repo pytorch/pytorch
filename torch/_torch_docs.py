@@ -6454,9 +6454,6 @@ max(input) -> Tensor
 
 Returns the maximum value of all elements in the ``input`` tensor.
 
-.. warning::
-    This function produces deterministic (sub)gradients unlike ``max(dim=0)``
-
 Args:
     {input}
 
@@ -7062,9 +7059,6 @@ add_docstr(
 min(input) -> Tensor
 
 Returns the minimum value of all elements in the :attr:`input` tensor.
-
-.. warning::
-    This function produces deterministic (sub)gradients unlike ``min(dim=0)``
 
 Args:
     {input}
