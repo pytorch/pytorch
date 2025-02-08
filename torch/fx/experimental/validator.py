@@ -819,7 +819,13 @@ def bisect(shape_env):
     ]
 
     # Preparing the indices for binary search.
+    # The overall invariants are
+    # - for all i < left, assert_node[i] doesn't fail
+    # - for all i >= right, assert_node[i] fails
+    # - `right in exception` always holds
+    # - `left <= right` always holds
     left, mid, right = 0, 0, len(assert_nodes) - 1
+    exception[right] = check_node_fails(assert_nodes[right])
 
     while left < right:
         mid = (left + right) // 2
