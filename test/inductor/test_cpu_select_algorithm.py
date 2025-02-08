@@ -2299,6 +2299,63 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
             self.assertEqual(actual, expected, atol=atol, rtol=rtol)
         self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 2)
 
+    @patches
+    @torch.no_grad
+    @unittest.skipIf(not TEST_MKL, "Test requires MKL")
+    @set_num_threads(1)  # avoid k_slicing to make the test deterministic
+    @parametrize(
+        "out_features1",
+        (
+            8,
+            16,
+            24,
+            32,
+            48,
+        ),
+    )
+    @dtypes(torch.float)
+    def test_local_and_global_accumulator(self, out_features1, dtype):
+        batch_size = 256
+        in_features = 64
+        out_features = 129
+        in_features1 = 128
+        bias = True
+        try:
+            try:
+                from . import test_aot_inductor_utils
+            except ImportError:
+                import test_aot_inductor_utils
+        except Exception:
+            # skip this UT if import failed
+            return
+
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+                self.linear = torch.nn.Linear(in_features, out_features, bias)
+                self.linear1 = torch.nn.Linear(in_features1, out_features1, bias)
+
+            def forward(self, x):
+                y = self.linear(x)
+                view = torch.ops.aten.view.default(y, [-1, in_features1])
+                return self.linear1(view)
+
+        counters.clear()
+        x = torch.randn(batch_size, in_features).to(dtype=dtype)
+        mod = M().to(dtype=dtype).eval()
+        with verify(dtype) as (atol, rtol), torch.no_grad():
+            expected = mod(
+                x,
+            )
+            actual = test_aot_inductor_utils.AOTIRunnerUtil.run(
+                "cpu",
+                mod,
+                (x,),
+            )
+            self.assertEqual(actual, expected, atol=atol, rtol=rtol)
+        self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 2)
+
 
 @dynamo_config.patch({"dynamic_shapes": True, "assume_static_by_default": False})
 class _DynamicShapesTestBase(BaseTestSelectAlgorithm):
