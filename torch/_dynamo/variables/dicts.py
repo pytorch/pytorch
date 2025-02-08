@@ -198,6 +198,12 @@ class ConstDictVariable(VariableTracker):
             for k, v in self.items.items()
         }
 
+    def get_example_value(self):
+        return {
+            k.vt.get_example_value(): v.get_example_value()
+            for k, v in self.items.items()
+        }
+
     def keys_as_python_constant(self):
         self.install_dict_keys_match_guard()
         return {k.vt.as_python_constant(): v for k, v in self.items.items()}

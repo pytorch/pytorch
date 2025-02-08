@@ -13,7 +13,7 @@ import threading
 import types
 import warnings
 import weakref
-from typing import Generic, TYPE_CHECKING
+from typing import TYPE_CHECKING
 from typing_extensions import is_typeddict
 
 import torch._dynamo.config
@@ -188,6 +188,9 @@ class UserDefinedClassVariable(UserDefinedVariable):
         except AttributeError:
             obj = None
 
+        if obj in (object.__new__, tuple.__new__, dict.__new__):
+            return super().var_getattr(tx, name)
+
         if name in cmp_name_to_op_mapping and not isinstance(obj, types.FunctionType):
             return variables.GetAttrVariable(self, name, source=source)
 
@@ -333,7 +336,12 @@ class UserDefinedClassVariable(UserDefinedVariable):
             return variables.ConstDictVariable(
                 {}, collections.OrderedDict, mutation_type=ValueMutationNew()
             )
-
+        elif name == "__new__":
+            return tx.output.side_effects.track_new_user_defined_object(
+                self,
+                args[0],
+                args[1:],
+            )
         return super().call_method(tx, name, args, kwargs)
 
     def call_function(
@@ -570,18 +578,11 @@ class UserDefinedClassVariable(UserDefinedVariable):
                     default_kwargs[field.name] = var_tracker
             kwargs.update(default_kwargs)
 
-            var = tx.output.side_effects.track_object_new_from_user_defined_class(self)
+            var = tx.output.side_effects.track_new_user_defined_object(
+                variables.BuiltinVariable(object), self, args
+            )
             var.call_method(tx, "__init__", args, kwargs)
             return var
-        elif (
-            self.is_standard_new()
-            and SideEffects.cls_supports_mutation_side_effects(self.value)
-            and self.source
-        ):
-            var = tx.output.side_effects.track_object_new_from_user_defined_class(self)
-            with do_not_convert_to_tracable_parameter():
-                var.call_method(tx, "__init__", args, kwargs)
-                return var
         elif (
             variables.RestrictedListSubclassVariable.is_matching_cls(self.value)
             and self.source
@@ -642,18 +643,15 @@ class UserDefinedClassVariable(UserDefinedVariable):
             # types.MappingProxyType is a read-only proxy of the dict. If the
             # original dict changes, the changes are reflected in proxy as well.
             return variables.MappingProxyVariable(args[0])
-        elif (
-            not self.is_standard_new()
-            and SideEffects.cls_supports_mutation_side_effects(self.value)
-            and self.source
-        ):
-            return tx.inline_user_function_return(
-                VariableTracker.build(
-                    tx, polyfills.instantiate_user_defined_class_object
-                ),
-                [self, *args],
-                kwargs,
-            )
+        elif SideEffects.cls_supports_mutation_side_effects(self.value) and self.source:
+            with do_not_convert_to_tracable_parameter():
+                return tx.inline_user_function_return(
+                    VariableTracker.build(
+                        tx, polyfills.instantiate_user_defined_class_object
+                    ),
+                    [self, *args],
+                    kwargs,
+                )
         return super().call_function(tx, args, kwargs)
 
     def is_standard_new(self):
@@ -661,7 +659,8 @@ class UserDefinedClassVariable(UserDefinedVariable):
         new_fn = inspect.getattr_static(self.value, "__new__", None)
         if isinstance(new_fn, staticmethod):
             new_fn = new_fn.__func__
-        return new_fn in (object.__new__, Generic.__new__, dict.__new__)
+        # return new_fn in (object.__new__, Generic.__new__, dict.__new__)
+        return new_fn is object.__new__
 
     def call_obj_hasattr(
         self, tx: "InstructionTranslator", name: str
@@ -704,7 +703,16 @@ class UserDefinedObjectVariable(UserDefinedVariable):
 
     _nonvar_fields = {"value", "value_type", *UserDefinedVariable._nonvar_fields}
 
-    def __init__(self, value, value_type=None, cls_source=None, **kwargs) -> None:
+    def __init__(
+        self,
+        value,
+        *,
+        value_type=None,
+        cls_source=None,
+        base_cls_vt=None,
+        init_args=None,
+        **kwargs,
+    ) -> None:
         super().__init__(**kwargs)
         self.value = value
         self.value_type = value_type or type(value)
@@ -713,6 +721,13 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         self.cls_source = cls_source
         if cls_source is None and self.source is not None:
             self.cls_source = TypeSource(self.source)
+
+        # These attributes are used to reconstruct the user defined object. The
+        # pseudo code looks like this. Builtin C __new__ do not support kwargs,
+        # so init_args is sufficient.
+        #   obj = base_cls.__new__(user_cls, *args)
+        self.base_cls_vt = base_cls_vt
+        self.init_args = init_args
 
     def __str__(self) -> str:
         inner = self.value_type.__name__
@@ -1122,6 +1137,11 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             elif getattr_fn is not None:
                 unimplemented("UserDefined with non-function __getattr__")
 
+        from ..mutation_guard import unpatched_nn_module_init
+
+        if subobj is torch.nn.Module.__init__:
+            subobj = unpatched_nn_module_init
+
         if isinstance(subobj, property):
             if self.source:
                 # Read the class attribute to reach the property
@@ -1476,11 +1496,6 @@ class UserDefinedTupleVariable(UserDefinedObjectVariable):
     def __init__(self, value, **kwargs):
         super().__init__(value, **kwargs)
         self._tuple_vt = None
-        # tuple.__new__ (tuple being immutable) inits the tuple elements. This
-        # behavior is different from object.__new__ or dict.__new__ where
-        # reconstructing object/dict does not need to consider __new__ args.
-        # These args are stored in the new_args field.
-        self.new_args = None
 
     def set_underlying_tuple_vt(self, tuple_vt):
         self._tuple_vt = tuple_vt
@@ -1490,9 +1505,6 @@ class UserDefinedTupleVariable(UserDefinedObjectVariable):
         result = UserDefinedTupleVariable(value, **kwargs)
         result.set_underlying_tuple_vt(tuple_vt)
         return result
-
-    def set_new_args(self, new_args):
-        self.new_args = new_args
 
     def call_method(
         self,
