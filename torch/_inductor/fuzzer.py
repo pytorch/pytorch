@@ -501,8 +501,6 @@ MODULE_DEFAULTS: dict[str, ConfigType] = {
     "torch._dynamo.config": {
         "traceable_tensor_subclasses": DEFAULT,  # Typing
         "compiled_autograd_kwargs_override": DEFAULT,  # Typing
-        "fail_on_recompile_limit_hit": DEFAULT,  # fails in combo with suppress_errors
-        "suppress_errors": DEFAULT,
     },
 }
 
