@@ -953,10 +953,9 @@ This class does not support ``__members__`` property.)");
       "_register_work",
       [](const at::Tensor& tensor,
          const c10::intrusive_ptr<::c10d::Work>& work) {
-        py::object obj = py::cast(work);
-        auto holder = c10::make_intrusive<::c10d::PyProcessGroup::PyWorkHolder>(
-            work, obj);
-        ::c10d::register_work(tensor, holder);
+        dynamic_cast<::c10d::PyProcessGroup::PyWork*>(work.get())
+            ->ref_py_object();
+        ::c10d::register_work(tensor, work);
       },
       py::arg("tensor"),
       py::arg("work"));

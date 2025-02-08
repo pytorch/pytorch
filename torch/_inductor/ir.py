@@ -1470,26 +1470,24 @@ class Reduction(Loops):
             if is_float_dtype(dtype):
                 return float("-inf")
             elif is_boolean_dtype(dtype):
-                return False
+                return 0
             else:
                 return torch.iinfo(dtype).min
         if reduction_type in ("min", "argmin"):
             if is_float_dtype(dtype):
                 return float("inf")
             elif is_boolean_dtype(dtype):
-                return True
+                return 1
             else:
                 return torch.iinfo(dtype).max
 
-        zero = False if is_boolean_dtype(dtype) else 0
-        one = True if is_boolean_dtype(dtype) else 1
         return {
-            "sum": zero,
-            "prod": one,
-            "xor_sum": zero,
-            "any": zero,
-            "welford_reduce": (zero, zero, zero),
-            "welford_combine": (zero, zero, zero),
+            "sum": 0,
+            "prod": 1,
+            "xor_sum": 0,
+            "any": 0,
+            "welford_reduce": (0, 0, 0),
+            "welford_combine": (0, 0, 0),
         }[reduction_type]
 
     @staticmethod
@@ -5145,8 +5143,7 @@ class ExternKernel(InputsKernel):
         allow_padding=False,
     ):
         assert order is not None or exact_strides is not None
-        # Layout generally doesn't matter, but some consuming external ops might have requirements
-        if x.get_numel() in (0, 1) and not exact_strides:
+        if x.get_numel() in (0, 1):  # Layout doesn't matter
             return x
 
         # require x to have the layout
@@ -7407,8 +7404,10 @@ class WhileLoop(ExternKernel):
 
         # make sure cond_fn returns a boolean scalar Tensor
         assert len(cond_outputs) == 1, cond_outputs
-        assert cond_outputs[0].get_dtype() == torch.bool, cond_outputs
-        assert len(cond_outputs[0].get_size()) == 0, cond_outputs
+        p = cond_outputs[0]
+        if not isinstance(p, ShapeAsConstantBuffer):
+            assert p.get_dtype() == torch.bool, p
+            assert len(p.get_size()) == 0, p
 
         assert (
             len(all_inputs) > 0
