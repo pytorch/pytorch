@@ -159,7 +159,7 @@ class TestOnlineSoftmax(TestCase):
         self.assertTrue("online_softmax_reduce" not in code)
 
     @parametrize("dtype", [torch.bfloat16, torch.half, torch.float32])
-    def test_acc_with_fp64(self, dtype):
+    def test_prepare_softmax_acc_with_fp64(self, dtype):
         x = torch.randn(32768, 50257, device=GPU_TYPE, dtype=dtype)
 
         ref_fp64 = _prepare_softmax(x.to(dtype=torch.float64), dim=-1)
@@ -182,6 +182,36 @@ class TestOnlineSoftmax(TestCase):
         #   ref_error=0.0001, res_error=0.0001
         # for fp32
         print(f"{ref_error=:.4f}, {res_error=:.4f}")
+
+        self.assertTrue(
+            res_error < ref_error + 0.1
+        )  # Is this good enough to make CI stable
+
+    @parametrize("fn", [torch.log_softmax, torch.softmax])
+    @parametrize("dtype", [torch.bfloat16, torch.half, torch.float32])
+    def test_softmax_acc_with_fp64(self, dtype, fn):
+        x = torch.randn(32768, 50257, device=GPU_TYPE, dtype=dtype)
+
+        ref_fp64 = fn(x.to(dtype=torch.float64), dim=-1)
+        ref = fn(x, dim=-1)
+        res, (code,) = run_and_get_code(torch.compile(fn), x, dim=-1)
+        self.assertTrue("online_softmax_reduce" in code)
+
+        ref_error = rmse(ref_fp64, ref).item()
+        res_error = rmse(ref_fp64, res).item()
+
+        # For torch.softmax,
+        # I get almost 0 for ref_error/res_error for all 3 dtypes. It's because
+        # each value is very small since each row add up to 1.0
+        #
+        # For torch.log_softmax
+        #   ref_error=0.0180399032, res_error=0.0180399031
+        # for bf16
+        #   ref_error=0.0022548872, res_error=0.0022548872
+        # for fp16
+        #   ref_error=0.0000003744, res_error=0.0000003748
+        # for fp32
+        print(f"{ref_error=:.10f}, {res_error=:.10f}")
 
         self.assertTrue(
             res_error < ref_error + 0.1
