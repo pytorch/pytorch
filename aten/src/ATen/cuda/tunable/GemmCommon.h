@@ -153,6 +153,13 @@ template <typename T>
 struct GemmParams : OpParams {
   GemmParams() = default;
 
+  std::string BLASSignature() const override {
+    std::string alpha_str = to_string_opmath<T>(alpha);
+    std::string beta_str = to_string_opmath<T>(beta);
+    return fmt::sprintf("-m %ld -n %ld -k %ld --lda %ld --ldb %ld --ldc %ld --ldd %ld --stride_a 0 --stride_b 0 -- stride_c 0 --stride_d 0 --alpha %s --beta %s --transA %c --transB %c --batch_count 1 --a_type %s --b_type %s --c_type %s --d_type %s --compute_type %s",
+      m, n, k, lda, ldb, ldc, ldc, alpha_str, beta_str, transa, transb, TypeName<T>(T{}), TypeName<T>(T{}), TypeName<T>(T{}), TypeName<T>(T{}), TypeName<T>(T{}));
+  }
+
   std::string Signature() const override {
     return fmt::sprintf("%c%c_%ld_%ld_%ld_ld_%ld_%ld_%ld", transa, transb, m, n, k, lda, ldb, ldc);
   }
@@ -238,6 +245,9 @@ private:
 
 template <typename T>
 struct GemmAndBiasParams : OpParams {
+  std::string BLASSignature() const override {
+    return "SomeSignature";  // Implement the correct logic
+}
   std::string Signature() const override {
     return fmt::sprintf("%c%c_%ld_%ld_%ld_ld_%ld_%ld_%ld", transa, transb, m, n, k, lda, ldb, ldc);
   }
@@ -324,6 +334,10 @@ private:
 
 template <typename T>
 struct GemmStridedBatchedParams : OpParams {
+  std::string BLASSignature() const override {
+    return "SomeSignature";  // Implement the correct logic
+}
+
   std::string Signature() const override {
     return fmt::sprintf("%c%c_%ld_%ld_%ld_B_%ld_ld_%ld_%ld_%ld", transa, transb, m, n, k, batch, lda, ldb, ldc);
   }
@@ -417,6 +431,9 @@ template <typename T>
 struct ScaledGemmParams : OpParams {
   ScaledGemmParams() = default;
 
+  std::string BLASSignature() const override {
+    return "SomeSignature";  // Implement the correct logic
+}
   std::string Signature() const override {
     return fmt::sprintf("%c%c_%ld_%ld_%ld_ld_%ld_%ld_%ld", transa, transb, m, n, k, lda, ldb, ldc);
   }
