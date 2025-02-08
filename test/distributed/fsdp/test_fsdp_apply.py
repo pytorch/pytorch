@@ -36,6 +36,10 @@ device_type = torch.device(get_devtype())
 class TestApply(FSDPTest):
     @property
     def world_size(self):
+        if torch.cuda.is_available():
+            gpu_cnt = torch.cuda.device_count()
+            if gpu_cnt < 2:
+                return gpu_cnt
         return 2
 
     @torch.no_grad()
