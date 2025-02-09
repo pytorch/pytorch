@@ -75,18 +75,25 @@ class OpNamespace:
     def __init__(self):
         self.custom_function_name_counter: Counter[str] = Counter()
 
-    def add(self, name, fn, is_custom_function=False):
+    def add(self, name, fn, is_custom_function, is_traceable):
         if is_custom_function:
             name = "CppNode" + name
             count = self.custom_function_name_counter[name]
             self.custom_function_name_counter[name] += 1
             name = f"{name}{count}"
-        else:
-            assert not hasattr(self, name)
 
+        assert not hasattr(self, name)
         result = Op(name, fn, is_custom_function)
-        torch._dynamo.allow_in_graph(result)
-        setattr(self, name, result)
+        if is_traceable:
+            setattr(self, name, torch._dynamo.allow_in_graph(result))
+        else:
+            # C++ autograd function was not marked as traceable
+            # Dynamo can't dry run it at compile time, so must fallback to eager
+            @torch._dynamo.disable
+            def fn(*args, **kwargs):
+                return result(*args, **kwargs)
+
+            setattr(self, name, fn)
         return name
 
     def get(self, name):
@@ -176,7 +183,6 @@ class AutogradCompilerInstance:
             {"graph_id": self.id},
             log_pt2_compile_event=True,
         )
-
         self.aot_graph_cls_name: Optional[str] = None
         self.aot_graph_infos: dict[int, dict[str, Any]] = {}
         self.fx_tracer.root = torch.nn.Module()
@@ -245,7 +251,21 @@ class AutogradCompilerInstance:
         self.stack.enter_context(
             torch.fx.experimental.symbolic_shapes._suppress_guards(env)
         )
-        return inputs, sizes, scalars
+        return str(CompileContext.current_compile_id()), inputs, sizes, scalars
+
+    def log_compile_reasons(
+        self,
+        compile_reasons: list[str],
+    ):
+        assert compile_reasons
+        trace_structured(
+            "artifact",
+            metadata_fn=lambda: {
+                "name": "compiled_autograd_compile_reasons",
+                "encoding": "json",
+            },
+            payload_fn=lambda: compile_reasons,
+        )
 
     def proxy_call_aot_backward(
         self,
@@ -478,9 +498,9 @@ class AutogradCompilerInstance:
             # Weird quantity so it's easy to grep
             return torch.zeros([0, 123456789])
 
-    def bind_function(self, fn_name, fn, is_custom_function):
+    def bind_function(self, fn_name, fn, is_custom_function, is_traceable):
         """Binds ops.fn_name = fn"""
-        return ops.add(fn_name, fn, is_custom_function)
+        return ops.add(fn_name, fn, is_custom_function, is_traceable)
 
     def apply_functional(self, fn_name, grads, args, output_metadata):
         """Proxies a call to ops.fn_name(grads, *args) into the graph"""

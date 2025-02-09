@@ -549,7 +549,7 @@ std::string getNcclErrorDetailStr(
 
 // Dump proxyTrace log to stdout
 void printNcclCommProxyTrace(
-    std::string& dumpReason,
+    const std::string& dumpReason,
     const std::unordered_map<std::string, std::string>& dumpMap) {
   LOG(INFO) << "Dumping nccl comm trace, reason: " << dumpReason;
   for (auto& [key, value] : dumpMap) {
