@@ -344,6 +344,17 @@ class UserDefinedClassVariable(UserDefinedVariable):
             return variables.ConstantVariable(self.value == args[0].value)
         elif name == "__ne__" and len(args) == 1 and hasattr(args[0], "value"):
             return variables.ConstantVariable(self.value != args[0].value)
+        elif (
+            name == "__new__"
+            and self.value is collections.OrderedDict
+            and isinstance(args[0], UserDefinedClassVariable)
+            and args[0].value is collections.OrderedDict
+        ):
+            assert len(args) == 1
+            assert len(kwargs) == 0
+            return variables.ConstDictVariable(
+                {}, collections.OrderedDict, mutation_type=ValueMutationNew()
+            )
         elif name == "__new__" and UserDefinedClassVariable.is_supported_new_method(
             self.value.__new__
         ):
