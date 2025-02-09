@@ -477,5 +477,27 @@ inline float2 sinc(float2 inp) {
   return float2(re, im) / a2;
 }
 
+template <typename T>
+inline T spherical_bessel_j0(T x) {
+  if (::metal::isinf(x))
+    return T(0.0);
+  if (::metal::abs(x) < T(0.5)) {
+    return T(1.0) +
+        x * x *
+        (T(-1.0) / T(6.0) +
+         x * x *
+             (T(1.0) / T(120.0) +
+              x * x *
+                  (T(-1.0) / T(5040.0) +
+                   x * x *
+                       (T(1.0) / T(362880.0) +
+                        x * x *
+                            (T(-1.0) / T(39916800.0) +
+                             x * x * (T(1.0) / T(6227020800.0)))))));
+  }
+
+  return ::metal::sin(x) / x;
+}
+
 } // namespace metal
 } // namespace c10
