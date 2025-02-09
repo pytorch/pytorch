@@ -514,22 +514,31 @@ class SideEffects:
             elif isinstance(var.mutation_type, AttributeMutationNew):
                 if isinstance(var, variables.AutogradFunctionContextVariable):
                     unimplemented("AutogradFunctionContextVariable escaped")
+
+                # Reconstruct the bytecode for
+                # base_cls.__new__(user_cls, *args)
+
                 if isinstance(var, variables.UserDefinedObjectVariable):
 
-                    def gen_fn():
+                    def load_new_method():
                         assert var.base_cls_vt is not None
                         cg(var.base_cls_vt)  # type: ignore[attr-defined]
                         cg.extend_output([cg.create_load_attr("__new__")])
 
-                    cg.add_push_null(gen_fn)
+                    cg.add_push_null(load_new_method)
                 else:
                     cg.add_push_null(
                         lambda: cg.load_import_from(utils.__name__, "object_new")
                     )
                 cg(var.mutation_type.cls_source)
-                for i in var.init_args:
-                    cg(i)
+
+                # Generate the args to the __new__ method
+                for arg in var.init_args:
+                    cg(arg)
+
+                # Call the __new__ method
                 cg.extend_output(create_call_function(1 + len(var.init_args), False))
+
                 cg.add_cache(var)
                 var.source = LocalSource(cg.tempvars[var])
             else:
