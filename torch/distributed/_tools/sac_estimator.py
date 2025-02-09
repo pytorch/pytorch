@@ -23,7 +23,7 @@ from torch.utils._python_dispatch import (
     TorchDispatchMode,
 )
 from torch.utils.checkpoint import SAC_IGNORED_OPS
-from torch.utils.pytree.python import tree_flatten
+from torch.utils.pytree import tree_iter
 
 
 __all__ = ["SACEstimator", "SACStats", "MSPS", "SACTradeOffStats", "SACGreedyOrderMeta"]
@@ -309,8 +309,7 @@ class SACEstimator(TorchDispatchMode):
             )
 
     def _get_force_store_random(self, inputs: Any) -> bool:
-        flat_inputs, _ = tree_flatten(inputs)
-        return all(not isinstance(x, torch.Tensor) for x in flat_inputs)
+        return all(not isinstance(x, torch.Tensor) for x in tree_iter(inputs))
 
     def _get_sac_stats(
         self, data: list[_SACMetadata], force_store_random: bool
@@ -429,7 +428,7 @@ class SACEstimator(TorchDispatchMode):
     ):
         # 1. Get the runtime estimate
         out, op_time = self._estimate_runtime(func, args, kwargs)
-        flat_outs, _ = tree_flatten(out)
+        flat_outs = tree_iter(out)
         out_storages_cuda: set[UntypedStorage] = set()
         out_storages_cpu: set[UntypedStorage] = set()
         cuda_devices: set[torch.device] = set()

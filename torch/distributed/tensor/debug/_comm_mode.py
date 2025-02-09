@@ -18,7 +18,7 @@ from torch.nn.modules.module import (
     register_module_full_backward_pre_hook,
 )
 from torch.utils._python_dispatch import TorchDispatchMode
-from torch.utils.pytree.python import tree_flatten
+from torch.utils.pytree import tree_iter
 
 
 __all__ = ["CommDebugMode"]
@@ -122,8 +122,11 @@ class _CommModeModuleTracker(ModTracker):
         # adds current sub-module to module tracker parent class
         super()._get_append_fn(w_mod, self.name, False)()
 
-        args, _ = tree_flatten(input)
-        tensors = [a for a in args if isinstance(a, torch.Tensor) and a.requires_grad]
+        tensors = [
+            a
+            for a in tree_iter(input)
+            if isinstance(a, torch.Tensor) and a.requires_grad
+        ]
         if not self.is_bw and tensors:
             register_multi_grad_hook(
                 tensors, super()._get_pop_fn(w_mod, self.name, True)

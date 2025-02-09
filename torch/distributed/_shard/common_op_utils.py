@@ -2,7 +2,7 @@
 from typing import Optional
 
 import torch
-import torch.utils.pytree.python as pytree
+import torch.utils.pytree as pytree
 
 
 def _basic_validation(op, args=(), kwargs=None):
