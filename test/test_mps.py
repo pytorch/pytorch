@@ -699,7 +699,6 @@ def mps_ops_modifier(ops):
         'index_reduceamin': None,
         'kthvalue': None,
         'lcm': None,
-        'linalg.cholesky_ex': None,
         'linalg.cond': None,
         'linalg.eigh': None,
         'linalg.eigvalsh': None,
@@ -6525,14 +6524,14 @@ class TestMPS(TestCaseMPS):
                 atol=0, rtol=0
             )
 
-    def test_cholesky(self):
+    def test_linalg_cholesky(self):
         from torch.testing._internal.common_utils import random_hermitian_pd_matrix
 
         def run_cholesky_test(size, *batch_dims, upper):
             input_cpu = random_hermitian_pd_matrix(size, *batch_dims, dtype=torch.float32, device="cpu")
             input_mps = input_cpu.to('mps')
-            output_cpu = torch.linalg.cholesky(input_cpu, upper=upper)
-            output_mps = torch.linalg.cholesky(input_mps, upper=upper)
+            output_cpu = torch.linalg.cholesky_ex(input_cpu, upper=upper)
+            output_mps = torch.linalg.cholesky_ex(input_mps, upper=upper)
             self.assertEqual(output_cpu, output_mps, atol=2e-5, rtol=1e-6)
 
         # test with different even/odd matrix sizes
