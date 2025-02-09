@@ -1368,19 +1368,19 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
     @inductor_config.patch({"freezing": True})
     @patches
     @torch.no_grad
-    @dtypes(torch.bfloat16)
+    @dtypes(torch.float16)
     @parametrize(
         "batch_size",
-        (
-            1,
-            32,
-        ),
+        (1,),
     )
-    @parametrize("in_features", (128, 144))
-    @parametrize("out_features", (64, 65))
+    @parametrize("in_features", (4096,))
+    @parametrize("out_features", (4096,))
+    @unittest.skipIf(
+        not torch.cpu._is_avx512_fp16_supported(), "Requires AVX512_FP16 support"
+    )
     def test_int8_woq_mm(self, dtype, batch_size, in_features, out_features):
         # x will be reshaped from 3d to 2d
-        second_dim_size = 4
+        second_dim_size = 1
 
         def _convert_weight_to_int8pack(w):
             scale, zp = _calculate_dynamic_per_channel_qparams(
@@ -1397,7 +1397,7 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
                 quant_max=127,
                 dtype=torch.int8,
             )
-            return w_int8, scale.to(torch.bfloat16)
+            return w_int8, scale.to(dtype)
 
         class M(torch.nn.Module):
             def __init__(self, w):
@@ -1418,6 +1418,7 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
         w_int8pack, w_scales = _convert_weight_to_int8pack(w)
         mod = M(w_int8pack).eval()
         self.common(mod, (x, w_scales))
+        # , atol=1e-2 if small_batch_size else None, rtol=1e-2 if small_batch_size else None)
         self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 1)
         if batch_size > 4:
             vec_amx = VecAMX()

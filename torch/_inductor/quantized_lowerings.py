@@ -68,7 +68,8 @@ def register_woq_mm_ops() -> None:
             else []
         )
 
-        def _fuse_scale(m, n):
+        def _fuse_scale(m, n) -> bool:
+            # If AVX512_FP16 is available, we'll fuse scale
             if has_free_symbols((n,)):
                 return False
             if n % 32 != 0:
@@ -77,7 +78,7 @@ def register_woq_mm_ops() -> None:
                 m = V.graph.sizevars.size_hint(m, fallback=1)
             if (
                 m <= 4
-                and mat1.get_dtype() == torch.bfloat16
+                and mat1.get_dtype() == torch.float16
                 and mat2.get_dtype() == torch.int8
                 and torch._C._cpu._is_avx512_fp16_supported()
             ):
@@ -85,7 +86,7 @@ def register_woq_mm_ops() -> None:
             else:
                 return False
 
-        # scale is applied as an epilogue, and the scale tensor is expanded (with a view op)
+        # scale might be applied as an epilogue, and the scale tensor is expanded (with a view op)
         # for broadcasting, as it's 1D.
         def _mul_epilogue(buf: torch.Tensor) -> Any:
             return create_epilogue_with_attr(

@@ -111,7 +111,7 @@ class ConstantFolder(torch.fx.Interpreter):
                 and isinstance(node.args[0], torch.fx.Node)
                 and "val" in node.args[0].meta
                 and node.args[0].meta["val"].dtype == torch.int8  # type: ignore[union-attr]
-                and node.args[1] == torch.bfloat16
+                and node.args[1] in [torch.bfloat16, torch.half]
             )
 
         if (

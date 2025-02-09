@@ -135,6 +135,7 @@ inline void {{kernel_name}}(
         B: ir.Buffer,
         C: ir.Buffer,
         accum: bool,
+        scales: Optional[ir.Buffer] = None,
     ) -> str:
         """
         Generate the code for calling the templated kernel that computes
@@ -152,9 +153,12 @@ inline void {{kernel_name}}(
         res = IndentedBuffer()
         res.writeline(f"{self.name}<{value_to_cpp(accum, 'bool')}>(")
         with res.indent():
-            extra_args = self.get_kernel_extra_args()
-            if extra_args:
-                res.writeline(extra_args)
+            kwargs_for_extra_args = {}
+            if scales is not None:
+                kwargs_for_extra_args = {"kernel": kernel, "scales": scales}
+            extra_args = self.get_kernel_extra_args(**kwargs_for_extra_args)
+            for arg in extra_args:
+                res.writeline(arg)
             res.writeline(f"{A_ptr},")
             res.writeline(f"{B_ptr},")
             res.writeline(f"{C_ptr},")
@@ -498,8 +502,8 @@ def check_fp16_extra(config, m, n, k, alpha, num_threads):
 @register_micro_gemm(
     *generate_gemm_config(
         VecAVX512,
-        [(8, 32, 1)],
-        input_dtype=torch.bfloat16,
+        [(4, 32, 1)],
+        input_dtype=torch.float16,
         input2_dtype=torch.int8,
         output_dtype=torch.float16,
         compute_dtype=torch.float16,
@@ -510,28 +514,9 @@ class CppFP16MicroGemm(CppMicroGemmFP32Vec):
     """
     This class generates the code for micro gemm using FP16 vec instructions for compute.
     Both compute & accum are in FP16.
-    A should be bfloat16 and B should be int8.
+    A should be float16 and B should be int8.
     Scale is fused because overflow would happen during accum if scale is a post-op.
     """
-
-    DECLARE_KERNEL = r"""
-template <bool accum>
-inline void {{kernel_name}}(
-{%- if kernel_extra_args_declare %}
-    {{kernel_extra_args_declare}}
-{%- endif %}
-    const {{input_t}}* {{restrict_keyword}} A,
-    const {{input2_t}}* {{restrict_keyword}} B,
-    const {{input_t}}* {{restrict_keyword}} S,
-    {{output_t}}* {{restrict_keyword}} C,
-    int64_t M,
-    int64_t N,
-    int64_t K,
-    int64_t lda,
-    int64_t ldb,
-    int64_t ldc
-)
-"""
 
     TEMPLATE_ENTRY = r"""
 {{declare_kernel}} {
@@ -582,7 +567,7 @@ template <int64_t BLOCK_M, int64_t BLOCK_N, bool accum>
 inline void {{kernel_name}}_kernel(
     const {{input_t}}* {{restrict_keyword}} A,
     const {{input2_t}}* {{restrict_keyword}} B,
-    const {{input_t}}* S,
+    const {{input_t}}*{{restrict_keyword}} S,
     {{output_t}}* {{restrict_keyword}} C,
     int64_t K,
     int64_t lda,
@@ -599,14 +584,7 @@ inline void {{kernel_name}}_kernel(
     __m512h vc[ROWS * COLS];
 
     auto load_scales = [&](int i) {
-        auto bf16_scales = _mm512_loadu_si512((__m512i*)(S + i * VLEN));
-        __m512 first_16_floats;
-        __m512 next_16_floats;
-        cvtbf16_fp32(bf16_scales, first_16_floats, next_16_floats);
-        __m256i first_fp16_vector = _mm512_cvtps_ph(first_16_floats, _MM_FROUND_TO_NEAREST_INT | _MM_FROUND_NO_EXC);
-        __m256i second_fp16_vector = _mm512_cvtps_ph(next_16_floats, _MM_FROUND_TO_NEAREST_INT | _MM_FROUND_NO_EXC);
-        scales[i] = _mm512_castsi512_ph(_mm512_castsi256_si512(first_fp16_vector));
-        scales[i] = _mm512_castsi512_ph(_mm512_inserti64x4(_mm512_castph_si512(scales[i]), second_fp16_vector, 1));
+        scales[i] = _mm512_loadu_ph((__m512h*)(S + i * VLEN));
     };
     c10::ForcedUnroll<COLS>{}(load_scales);
 
@@ -620,7 +598,7 @@ inline void {{kernel_name}}_kernel(
         constexpr int col = i % COLS;
 
         if constexpr (col == 0) {
-            va = _mm512_set1_ph((_Float16)(A[row * lda + k]));
+            va = _mm512_set1_ph(*((_Float16*)(A + row * lda + k)));
         }
 
         if constexpr (row == 0) {
@@ -652,47 +630,17 @@ inline void {{kernel_name}}_kernel(
 }
 """
 
-    def codegen_call(
-        self,
-        kernel: CppTemplateKernel,
-        A: ir.Buffer,
-        B: ir.Buffer,
-        S: ir.Buffer,
-        Y: ir.Buffer,
-        accum: bool,
-    ) -> str:
-        """
-        Generate the code for calling the templated kernel that computes
-        `C += alpha * A @ B` if `accum` is True, or `C = alpha * A @ B` otherwise.
-        """
-        A_ptr = f"&({kernel.index(A, [0, 0])})"
-        B_ptr = f"&({kernel.index(B, [0, 0])})"
-        S_ptr = f"&({kernel.index(S, [0])})"
-        Y_ptr = f"&({kernel.index(Y, [0, 0])})"
-        M = kernel.size(Y, 0)
-        N = kernel.size(Y, 1)
-        K = kernel.size(A, 1)
-        lda = kernel.stride(A, 0)
-        ldb = kernel.stride(B, 0)
-        ldc = kernel.stride(Y, 0)
-        res = IndentedBuffer()
-        res.writeline(f"{self.name}<{value_to_cpp(accum, 'bool')}>(")
-        with res.indent():
-            extra_args = self.get_kernel_extra_args()
-            if extra_args:
-                res.writeline(extra_args)
-            res.writeline(f"{A_ptr},")
-            res.writeline(f"{B_ptr},")
-            res.writeline(f"{S_ptr},")
-            res.writeline(f"{Y_ptr},")
-            res.writeline(f"{M},")
-            res.writeline(f"{N},")
-            res.writeline(f"{K},")
-            res.writeline(f"{lda},")
-            res.writeline(f"{ldb},")
-            res.writeline(f"{ldc}")
-        res.writeline(");")
-        return res.getvalue()
+    def get_kernel_extra_args_declare(self) -> str:
+        return "const half* __restrict__ S,"
+
+    def get_kernel_extra_args(self, **kwargs) -> list[str]:
+        assert "kernel" in kwargs
+        assert "scales" in kwargs
+        scales = kwargs["scales"]
+        kernel = kwargs["kernel"]
+        return [
+            f"&({kernel.index(scales, [0])}),",
+        ]
 
 
 # extra check for CppMicroGemmAMX
@@ -1118,13 +1066,13 @@ def create_micro_gemm(
 
     if (
         m <= 4
-        and input_dtype == torch.bfloat16
+        and input_dtype == torch.float16
         and input2_dtype == torch.int8
         and torch._C._cpu._is_avx512_fp16_supported()
         and not has_free_symbols((n,))
         and n % 32 == 0
     ):
-        # We compute this GEMM with FP16 instructions
+        # We compute this GEMM with FP16 compute & accumulation
         output_dtype = torch.float16
         compute_dtype = torch.float16
 
@@ -1153,7 +1101,7 @@ def create_micro_gemm(
                 if (
                     config.vec_isa_cls == VecAMX
                     and m < block_m
-                    and input_dtype == torch.bfloat16
+                    and input_dtype in [torch.bfloat16, torch.half]
                     and input2_dtype == torch.int8
                 ):
                     # For int8 WoQ GEMM, AMX micro-kernel may not perform well if m < block_m

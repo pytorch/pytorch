@@ -237,9 +237,9 @@ GEMM_TEMPLATE = r"""
 {%- endif %}
 {%- if x_scale is none and w_scale is not none %}
                         if (kc == k_block_start) {
-                            {{ micro_gemm.codegen_call(kernel, tile_X, tile_W, tile_scale, acc_slice, accum=False)|indent(28, false) }}
+                            {{ micro_gemm.codegen_call(kernel, tile_X, tile_W, acc_slice, accum=False, scales=tile_scale)|indent(28, false) }}
                         } else {
-                            {{ micro_gemm.codegen_call(kernel, tile_X, tile_W, tile_scale, acc_slice, accum=True)|indent(28, false) }}
+                            {{ micro_gemm.codegen_call(kernel, tile_X, tile_W, acc_slice, accum=True, scales=tile_scale)|indent(28, false) }}
                         }
 {%- else %}
                         if (kc == k_block_start) {
@@ -1166,7 +1166,7 @@ class CppGemmTemplate(CppTemplate):
             w_scale = self.input_nodes[bias_idx + 3]
             w_zp = self.input_nodes[bias_idx + 4]
         elif (
-            self.input_nodes[0].get_dtype() == torch.bfloat16
+            self.input_nodes[0].get_dtype() == torch.float16
             and self.input_nodes[1].get_dtype() == torch.int8
             and self.m <= 4
             and self.n % 32 == 0
