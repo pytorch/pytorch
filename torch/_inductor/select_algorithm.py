@@ -598,6 +598,22 @@ class TritonTemplateKernel(TritonKernel):
 
         return scatter_graph.data.store_output(scatter_graph.name, contiguous_strides, [])  # type: ignore[attr-defined]
 
+    def _handle_intra_kernel_reduction(self, reduction):
+        """Handle processing for a single intra kernel reduction.
+
+        Args:
+            reduction: The reduction to process
+        """
+        assert isinstance(
+            reduction, ir.IntraKernelReduction
+        ), f"reduction must be an instance of IntraKernelReduction but got {type(reduction)}"
+
+        reduction = reduction.data
+        assert isinstance(reduction, ir.Reduction)
+        reduction = reduction.data
+        assert isinstance(reduction, ir.ComputedBuffer)
+        breakpoint()
+
     def modification(
         self,
         subgraph_number: int,
