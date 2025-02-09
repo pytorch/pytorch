@@ -81,10 +81,9 @@ def get_total_reduction_numel(numels: dict[str, int]) -> int:
     )
 
 
-def validate_args(func, args, kwargs, exclude = 0):
+def validate_args(func, args, kwargs):
     """Ensure the correct number of arguments are passed to the method."""
-    expected_params = inspect.signature(func).parameters
-    expected_args_count = len(expected_params) - exclude
+    expected_args_count = len(func.arg_names)
     actual_args_count = len(args) + len(kwargs)
 
     if actual_args_count != expected_args_count:
@@ -266,6 +265,7 @@ class CachingAutotuner(KernelInterface):
         )
 
         self.triton_interpret = os.environ.get("TRITON_INTERPRET", "0") == "1"
+        self._args_validated = False
 
     def precompile(
         self,
@@ -589,7 +589,10 @@ class CachingAutotuner(KernelInterface):
             # reset to zero before evaluating any config
             self.reset_to_zero_args(*args, **kwargs)
             args_with_constexprs = self._get_args_with_constexprs(cloned_args, launcher)
-            validate_args(launcher, *args_with_constexprs, **cloned_kwargs, 2)
+            
+            # Validate args before running the kernel
+            validate_args(launcher, args_with_constexprs, cloned_kwargs)
+            
             launcher(
                 *args_with_constexprs,
                 **cloned_kwargs,
@@ -892,8 +895,11 @@ class CachingAutotuner(KernelInterface):
         if self.dump_launch_params:
             _dump_launch_params(args, kwargs, launcher, self.fn.__name__)
 
-        # it is faster than entering and exiting a context manager, even if the context
-        # manager is a nullcontext.
+        # Validate args only on first run
+        if not self._args_validated:
+            validate_args(launcher, args, kwargs)
+            self._args_validated = True
+
         if autograd_profiler._is_profiler_enabled:
             # grid can be a tuple of ints or a string.
             if isinstance(grid, tuple):
@@ -912,7 +918,6 @@ class CachingAutotuner(KernelInterface):
                     "stream": stream,
                 },
             ):
-                validate_args(launcher, *args, **kwargs, 2)
                 return launcher(
                     *args,
                     **kwargs,
@@ -920,7 +925,6 @@ class CachingAutotuner(KernelInterface):
                     stream=stream,
                 )
         else:
-            validate_args(launcher, *args, **kwargs, 2)
             return launcher(
                 *args,
                 **kwargs,

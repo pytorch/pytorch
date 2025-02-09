@@ -315,27 +315,60 @@ def create_mock_autotuner():
 class TestTritonHeuristics:
     def test_validate_args_basic(self):
         """Test basic launcher argument validation"""
-        def mock_launcher(in_ptr0, in_ptr1, out_ptr0, xnumel, XBLOCK, grid, stream):
-            pass
+        class MockFunction:
+            def __init__(self):
+                # Include stream and grid in arg_names since they're now expected in kwargs
+                self.arg_names = ['in_ptr0', 'in_ptr1', 'out_ptr0', 'xnumel', 'XBLOCK', 'stream', 'grid']
+        
+        mock_func = MockFunction()
         
         # Create mock tensors
         in_ptr0 = torch.randn(10)
         in_ptr1 = torch.randn(10)
         out_ptr0 = torch.randn(10)
         
-        # Test valid case
-        validate_args(mock_launcher, (in_ptr0, in_ptr1, out_ptr0, 10, 32), {}, 2)
+        # Test valid case - now passing stream and grid in kwargs
+        validate_args(mock_func, 
+                     (in_ptr0, in_ptr1, out_ptr0, 10, 32), 
+                     {'stream': None, 'grid': (1,1,1)})
         
         # Test invalid cases
         with pytest.raises(TypeError, match="Incorrect number of arguments passed to method"):
-            validate_args(mock_launcher, (in_ptr0, in_ptr1, out_ptr0, 10), {}, 2)
+            # Missing stream and grid
+            validate_args(mock_func, 
+                        (in_ptr0, in_ptr1, out_ptr0, 10, 32), 
+                        {})
         
         with pytest.raises(TypeError, match="Incorrect number of arguments passed to method"):
-            validate_args(mock_launcher, (in_ptr0, in_ptr1, out_ptr0, 10, 32, 64), {}, 2)
+            # Too many arguments
+            validate_args(mock_func, 
+                        (in_ptr0, in_ptr1, out_ptr0, 10, 32, None, None), 
+                        {'stream': None, 'grid': (1,1,1)})
+
+    def test_arg_names_validation(self):
+        """Test validation of arg_names attribute"""
+        class MockFunction:
+            def __init__(self, arg_names):
+                self.arg_names = arg_names
+
+        # Test with correct number of arguments
+        mock_func = MockFunction(['in_ptr0', 'out_ptr0', 'stream', 'grid'])
+        validate_args(mock_func, 
+                     (torch.randn(10), torch.randn(10)),
+                     {'stream': None, 'grid': (1,1,1)})
+
+        # Test with missing arguments
+        with pytest.raises(TypeError, match="Incorrect number of arguments passed to method"):
+            validate_args(mock_func, 
+                        (torch.randn(10),),
+                        {'stream': None, 'grid': (1,1,1)})
 
     def test_autotuner_launcher_validation(self):
         """Test launcher validation in CachingAutotuner context"""
         autotuner = create_mock_autotuner()
+        
+        # Update MockTritonFunction in create_mock_autotuner to include stream and grid
+        autotuner.fn.arg_names = ['in_ptr0', 'in_ptr1', 'out_ptr0', 'xnumel', 'XBLOCK', 'stream', 'grid']
         
         # Setup mock data
         in_ptr0 = torch.randn(1024)
@@ -346,18 +379,17 @@ class TestTritonHeuristics:
         launcher = MockLauncher(Config({"XBLOCK": 32}, num_warps=4, num_stages=1))
         launcher.bin = MockCompiledKernel()
         
-        # Test valid args
+        # Test valid args - now including stream and grid in kwargs
         args = [in_ptr0, in_ptr1, out_ptr0, 1024]
-        kwargs = {}
-        grid = (32, 1, 1)
+        kwargs = {'stream': None, 'grid': (32, 1, 1)}
         
         # This should pass
-        autotuner.bench(launcher, *args, grid=grid, **kwargs)
+        autotuner.bench(launcher, *args, **kwargs)
         
         # Test invalid number of args
         invalid_args = args[:-1]  # Remove one argument
         with pytest.raises(TypeError, match="Incorrect number of arguments passed to method"):
-            autotuner.bench(launcher, *invalid_args, grid=grid, **kwargs)
+            validate_args(launcher, invalid_args, kwargs)
 
     def test_autotuner_constexpr_handling(self):
         """Test handling of constexpr arguments in CachingAutotuner"""
