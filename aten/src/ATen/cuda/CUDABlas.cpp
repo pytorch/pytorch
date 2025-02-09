@@ -1444,6 +1444,9 @@ void scaled_gemm(
   const auto scaleType = CUDA_R_32F;
   const float alpha_val = 1.0;
   const float beta_val = 0.0;
+  if (scale_dtype == DataType::UFP8){
+    // k = k * 2;
+  }
   CuBlasLtMatmulDescriptor computeDesc(computeType, scaleType);
   computeDesc.setAttribute(CUBLASLT_MATMUL_DESC_TRANSA, _cublasOpFromChar(transa));
   computeDesc.setAttribute(CUBLASLT_MATMUL_DESC_TRANSB, _cublasOpFromChar(transb));
@@ -1461,6 +1464,8 @@ void scaled_gemm(
   computeDesc.setAttribute(CUBLASLT_MATMUL_DESC_FAST_ACCUM, fastAccuMode);
   auto cuda_mat1_dtype = mat1_dtype == c10::ScalarType::Byte ? dtype_to_cuda(a_dtype) : ScalarTypeToCudaDataType(mat1_dtype);
   auto cuda_mat2_dtype = mat2_dtype == c10::ScalarType::Byte ? dtype_to_cuda(b_dtype) : ScalarTypeToCudaDataType(mat2_dtype);
+  // cuda_mat1_dtype = CUDA_R_4F_E2M1;
+  // cuda_mat2_dtype = CUDA_R_4F_E2M1;
 
   CuBlasLtMatrixLayout Adesc(cuda_mat1_dtype, m, k, mat1_ld, transa == 't');
   CuBlasLtMatrixLayout Bdesc(cuda_mat2_dtype, k, n, mat2_ld, transb == 't');
@@ -1474,6 +1479,8 @@ void scaled_gemm(
   if (scale_dtype == DataType::UFP8){
     computeDesc.setAttribute(CUBLASLT_MATMUL_DESC_A_SCALE_MODE, CUBLASLT_MATMUL_MATRIX_SCALE_VEC16_UE4M3);
     computeDesc.setAttribute(CUBLASLT_MATMUL_DESC_B_SCALE_MODE, CUBLASLT_MATMUL_MATRIX_SCALE_VEC16_UE4M3);
+    // TODO is below needed?
+    // computeDesc.setAttribute(CUBLASLT_MATMUL_DESC_D_SCALE_MODE, CUBLASLT_MATMUL_MATRIX_SCALE_SCALAR_32F);
   } 
   if  (scale_dtype == DataType::E8M0){
     computeDesc.setAttribute(CUBLASLT_MATMUL_DESC_A_SCALE_MODE, CUBLASLT_MATMUL_MATRIX_SCALE_VEC32_UE8M0);
