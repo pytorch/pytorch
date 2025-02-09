@@ -402,15 +402,15 @@ def get_submodule_folders():
 
 def checkout_nccl():
     report(f'-- Checkout nccl: {get_cmake_cache_vars()["USE_CUDA"]}')
-    if get_cmake_cache_vars()["USE_CUDA"]:
-        cuda_version = os.getenv("CUDA_VERSION", "")
-        commit_hash = "80f6bda4378b99d99e82b4d76a633791cc45fef0"
-        if cuda_version.startswith("11.8"):
-            commit_hash = "ab2b89c4c339bd7f816fbc114a4b05d386b66290"
-        nccl_basedir = os.path.join(cwd, "nccl")
-        report(f"-- Calling nccl checkout: {commit_hash}")
-        subprocess.check_call(["git", "clone", "https://github.com/NVIDIA/nccl.git", "nccl"], cwd=cwd)
-        subprocess.check_call(["git", "checkout", commit_hash], cwd=nccl_basedir)
+    #if get_cmake_cache_vars()["USE_CUDA"]:
+    cuda_version = os.getenv("DESIRED_CUDA", "")
+    commit_hash = "80f6bda4378b99d99e82b4d76a633791cc45fef0"
+    if cuda_version.startswith("11.8"):
+        commit_hash = "ab2b89c4c339bd7f816fbc114a4b05d386b66290"
+    nccl_basedir = os.path.join(cwd, "nccl")
+    report(f"-- Calling nccl checkout: {commit_hash}")
+    subprocess.check_call(["git", "clone", "https://github.com/NVIDIA/nccl.git", "nccl"], cwd=cwd)
+    subprocess.check_call(["git", "checkout", commit_hash], cwd=nccl_basedir)
 
 def check_submodules():
     def check_for_files(folder, files):
