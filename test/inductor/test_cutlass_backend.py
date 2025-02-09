@@ -827,9 +827,10 @@ class TestCutlassBackend(TestCase):
                 "max_autotune_gemm_backends": "CUTLASS",
                 "cuda.cutlass_dir": _CUTLASS_DIR,
                 "cuda.cutlass_max_profiling_configs": 2,
-                "use_mixed_mm": True,
                 "autotune_local_cache": True,
                 "autotune_fallback_to_aten": False,
+                "use_mixed_mm": True,
+                "mixed_mm_choice": "aten",  # to disable Triton
             }
         ):
             Y_compiled = torch.compile(mm, dynamic=dynamic)(a, b)
