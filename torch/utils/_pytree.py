@@ -1624,6 +1624,8 @@ def treespec_loads(serialized: str) -> TreeSpec:
 
 
 class _Asterisk(str):
+    __slots__ = ()
+
     def __new__(cls) -> Self:
         return super().__new__(cls, "*")
 
