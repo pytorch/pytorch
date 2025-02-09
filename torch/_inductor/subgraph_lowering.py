@@ -39,6 +39,7 @@ class PointwiseSubgraphLowering(torch.fx.Interpreter):
     additional_lowerings: Optional[LoweringDict]
     buffers: list[ir.Buffer]
     mutated_buffers: OrderedSet[str]
+    intra_kernel_reductions: list[ir.Buffer]
 
     def __init__(
         self,
@@ -57,6 +58,7 @@ class PointwiseSubgraphLowering(torch.fx.Interpreter):
         # Used to track buffers created during lowering
         self.mutated_buffers = OrderedSet()
         self.buffers = []
+        self.intra_kernel_reductions = []
 
     @contextmanager
     def _op_context(self, op: TargetType) -> Generator[None, None, None]:
@@ -90,6 +92,15 @@ class PointwiseSubgraphLowering(torch.fx.Interpreter):
             self.buffers.append(buffer)
             return name
         else:
+            if isinstance(buffer.data, ir.Reduction):
+                # RANDOM NUMBER FOR NOW
+                REDUCTION_MAX = 128
+                reduction = buffer.data
+                if len(reduction.reduction_ranges) == 1 and reduction.reduction_ranges[0] <=REDUCTION_MAX:
+                    self.intra_kernel_reductions.append(buffer)
+                    name =  self.qualify_name(f"buf{len(self.intra_kernel_reductions)}")
+                    self.intra_kernel_reductions.append(buffer)
+                    return name
             raise SubgraphLoweringException(
                 "Buffers cannot be created while lowering a pointwise subgraph. "
                 "This could be for a good reason (e.g. you're calling an op we can't codegen as a pointwise op), "
