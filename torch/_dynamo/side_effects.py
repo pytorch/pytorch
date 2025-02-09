@@ -293,9 +293,20 @@ class SideEffects:
         return variable
 
     def get_variable_cls(self, user_cls):
+        from torch.overrides import TorchFunctionMode
+
+        from .variables.ctx_manager import GenericContextWrappingVariable
+        from .variables.torch_function import TorchFunctionModeVariable
+
         variable_cls: type[
             variables.UserDefinedObjectVariable
         ] = variables.UserDefinedObjectVariable
+        if issubclass(
+            user_cls, TorchFunctionMode
+        ) and TorchFunctionModeVariable.is_supported_torch_function_mode(user_cls):
+            variable_cls = TorchFunctionModeVariable
+        elif hasattr(user_cls, "__enter__") and hasattr(user_cls, "__exit__"):
+            variable_cls = GenericContextWrappingVariable
         if issubclass(user_cls, torch.nn.Module):
             variable_cls = variables.UnspecializedNNModuleVariable
         elif issubclass(user_cls, (dict, collections.OrderedDict)):
