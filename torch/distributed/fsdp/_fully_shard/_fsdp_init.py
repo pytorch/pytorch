@@ -107,7 +107,7 @@ def _verify_managed_param(name: str, param: nn.Parameter) -> None:
     """
     if len(param.shape) == 0:
         raise ValueError(
-            "fully_shard doesn't support salar parameters. "
+            "fully_shard doesn't support scalar parameters. "
             f"Change {name} to a 1D tensor with numel equal to 1."
         )
 
