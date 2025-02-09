@@ -218,7 +218,6 @@ def export_compat(
     dump_exported_program: bool = False,
     artifacts_dir: str | os.PathLike = ".",
     fallback: bool = False,
-    **_,
 ) -> _onnx_program.ONNXProgram:
     if opset_version is None:
         opset_version = onnxscript_apis.torchlib_opset_version()
