@@ -1011,7 +1011,7 @@ _scaled_mm_out_cuda(const Tensor& mat1, const Tensor& mat2,
           std::optional<c10::ScalarType> out_dtype,
           bool use_fast_accum,
           std::optional<int64_t> a_dtype,
-          std::optional<int64_t> b_dtype, 
+          std::optional<int64_t> b_dtype,
           std::optional<int64_t> scale_dtype,
           Tensor& out) {
   // Check sizes
@@ -1239,7 +1239,7 @@ _scaled_mm_cuda(const Tensor& mat_a, const Tensor& mat_b,
           std::optional<c10::ScalarType> out_dtype,
           bool use_fast_accum,
           std::optional<int64_t> a_dtype,
-          std::optional<int64_t> b_dtype, 
+          std::optional<int64_t> b_dtype,
           std::optional<int64_t> scale_dtype) {
   const auto out_dtype_ = out_dtype.value_or(mat_a.scalar_type());
   Tensor out = at::empty({0}, mat_a.options().dtype(out_dtype_));

@@ -22,7 +22,7 @@ namespace at::cuda::blas {
 // Hacking up still
 enum DataType : std::uint8_t {
    DEFAULT = 0,
-   E8M0 = 1, 
+   E8M0 = 1,
    FP4 = 2,
    UFP8 = 3
 };
