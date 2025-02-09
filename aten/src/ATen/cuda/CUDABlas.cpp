@@ -1424,10 +1424,12 @@ void scaled_gemm(
     const void* mat1_scale_ptr,
     int64_t mat1_ld,
     ScalarType mat1_dtype,
+    ScalarType mat1_scale_dtype,
     const void* mat2_ptr,
     const void* mat2_scale_ptr,
     int64_t mat2_ld,
     ScalarType mat2_dtype,
+    ScalarType mat2_scale_dtype,
     const void* bias_ptr,
     ScalarType bias_dtype,
     void* result_ptr,
@@ -1435,10 +1437,7 @@ void scaled_gemm(
     int64_t result_ld,
     ScalarType result_dtype,
     bool use_fast_accum,
-    bool use_rowwise,
-    DataType a_dtype,
-    DataType b_dtype,
-    DataType scale_dtype) {
+    bool use_rowwise) {
 #if CUDA_VERSION >= 11080 || defined(USE_ROCM)
   const auto computeType = CUBLAS_COMPUTE_32F;
   const auto scaleType = CUDA_R_32F;
@@ -1469,13 +1468,8 @@ void scaled_gemm(
   const int8_t fastAccuMode = use_fast_accum ? 1 : 0;
   computeDesc.setAttribute(CUBLASLT_MATMUL_DESC_FAST_ACCUM, fastAccuMode);
 #endif
-  auto cuda_mat1_dtype = mat1_dtype == c10::ScalarType::Byte ? dtype_to_cuda(a_dtype) : ScalarTypeToCudaDataType(mat1_dtype);
-  auto cuda_mat2_dtype = mat2_dtype == c10::ScalarType::Byte ? dtype_to_cuda(b_dtype) : ScalarTypeToCudaDataType(mat2_dtype);
-  // cuda_mat1_dtype = CUDA_R_4F_E2M1;
-  // cuda_mat2_dtype = CUDA_R_4F_E2M1;
-
-  CuBlasLtMatrixLayout Adesc(cuda_mat1_dtype, m, k, mat1_ld, transa == 't');
-  CuBlasLtMatrixLayout Bdesc(cuda_mat2_dtype, k, n, mat2_ld, transb == 't');
+  CuBlasLtMatrixLayout Adesc(ScalarTypeToCudaDataType(mat1_dtype), m, k, mat1_ld, transa == 't');
+  CuBlasLtMatrixLayout Bdesc(ScalarTypeToCudaDataType(mat2_dtype), k, n, mat2_ld, transb == 't');
 #ifdef USE_ROCM
   // Cdesc is unused, beta is 0. But hipblaslt needs this set to something reasonable.
   CuBlasLtMatrixLayout Cdesc(ScalarTypeToCudaDataType(result_dtype), m, n, result_ld);
@@ -1488,15 +1482,11 @@ void scaled_gemm(
     computeDesc.setAttribute(CUBLASLT_MATMUL_DESC_EPILOGUE, CUBLASLT_EPILOGUE_BIAS);
     computeDesc.setAttribute(CUBLASLT_MATMUL_DESC_BIAS_DATA_TYPE, ScalarTypeToCudaDataType(bias_dtype));
   }
-  if (scale_dtype == DataType::UFP8){
-    computeDesc.setAttribute(CUBLASLT_MATMUL_DESC_A_SCALE_MODE, CUBLASLT_MATMUL_MATRIX_SCALE_VEC16_UE4M3);
-    computeDesc.setAttribute(CUBLASLT_MATMUL_DESC_B_SCALE_MODE, CUBLASLT_MATMUL_MATRIX_SCALE_VEC16_UE4M3);
-    // TODO is below needed?
-    // computeDesc.setAttribute(CUBLASLT_MATMUL_DESC_D_SCALE_MODE, CUBLASLT_MATMUL_MATRIX_SCALE_SCALAR_32F);
-  }
-  if  (scale_dtype == DataType::E8M0){
+  // TODO(before land) better check here
+  if (mat1_scale_dtype == kFloat8_e8m0fnu) {
     computeDesc.setAttribute(CUBLASLT_MATMUL_DESC_A_SCALE_MODE, CUBLASLT_MATMUL_MATRIX_SCALE_VEC32_UE8M0);
     computeDesc.setAttribute(CUBLASLT_MATMUL_DESC_B_SCALE_MODE, CUBLASLT_MATMUL_MATRIX_SCALE_VEC32_UE8M0);
+
   }
 
   size_t workspaceSize = _getWorkspaceSize();

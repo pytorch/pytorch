@@ -1,5 +1,5 @@
 #include <cstdint>
-#include "c10/util/typeid.h"
+#include <c10/util/typeid.h>
 #include <c10/util/Exception.h>
 #include <c10/core/Scalar.h>
 #include <c10/core/ScalarType.h>
@@ -921,10 +921,11 @@ ScalingType get_scaling_type(
     const at::Tensor& scale_b,
     int64_t dim_m,
     int64_t dim_n) {
-  // Both Per-Tensor and Row-wise scaling expect fp32 tensors
-  if(scale_a.scalar_type() == scale_b.scalar_type() && scale_a.scalar_type() == at::kByte) {
+  // TODO(before land): clean up 
+  if (scale_a.scalar_type() == scale_b.scalar_type() && scale_a.scalar_type() == at::kFloat8_e8m0fnu) {
     return ScalingType::BlockWise;
   }
+  // Both Per-Tensor and Row-wise scaling expect fp32 tensors
   TORCH_CHECK(
       scale_a.scalar_type() == kFloat && scale_b.scalar_type() == kFloat,
       "Both scale_a and scale_b must be float (fp32) tensors.");
@@ -1010,9 +1011,6 @@ _scaled_mm_out_cuda(const Tensor& mat1, const Tensor& mat2,
           const std::optional<at::Tensor>& scale_result,
           std::optional<c10::ScalarType> out_dtype,
           bool use_fast_accum,
-          std::optional<int64_t> a_dtype,
-          std::optional<int64_t> b_dtype,
-          std::optional<int64_t> scale_dtype,
           Tensor& out) {
   // Check sizes
   bool allowed_device = _scaled_mm_allowed_device();
@@ -1210,10 +1208,12 @@ _scaled_mm_out_cuda(const Tensor& mat1, const Tensor& mat2,
         scale_a.data_ptr(),
         args.lda,
         args.mata->scalar_type(),
+        scale_a.scalar_type(),
         args.matb->data_ptr(),
         scale_b.data_ptr(),
         args.ldb,
         args.matb->scalar_type(),
+        scale_b.scalar_type(),
         bias ? bias->data_ptr(): nullptr,
         bias ? bias->scalar_type() : isFloat8Type(out_dtype_) ? at::ScalarType::Half : out_dtype_,
         args.result->data_ptr(),
@@ -1221,10 +1221,7 @@ _scaled_mm_out_cuda(const Tensor& mat1, const Tensor& mat2,
         args.result_ld,
         out_dtype_,
         use_fast_accum,
-        scaling_choice == ScalingType::RowWise,
-        static_cast<at::cuda::blas::DataType>(a_dtype.value()),
-        static_cast<at::cuda::blas::DataType>(b_dtype.value()),
-        static_cast<at::cuda::blas::DataType>(scale_dtype.value()));
+        scaling_choice == ScalingType::RowWise);
   }
 
   return out;
@@ -1237,13 +1234,10 @@ _scaled_mm_cuda(const Tensor& mat_a, const Tensor& mat_b,
           const std::optional<at::Tensor>& bias,
           const std::optional<at::Tensor>& scale_result,
           std::optional<c10::ScalarType> out_dtype,
-          bool use_fast_accum,
-          std::optional<int64_t> a_dtype,
-          std::optional<int64_t> b_dtype,
-          std::optional<int64_t> scale_dtype) {
+          bool use_fast_accum) {
   const auto out_dtype_ = out_dtype.value_or(mat_a.scalar_type());
   Tensor out = at::empty({0}, mat_a.options().dtype(out_dtype_));
-  return _scaled_mm_out_cuda(mat_a, mat_b, scale_a, scale_b, bias, scale_result, out_dtype, use_fast_accum, a_dtype, b_dtype, scale_dtype, out);
+  return _scaled_mm_out_cuda(mat_a, mat_b, scale_a, scale_b, bias, scale_result, out_dtype, use_fast_accum, out);
 }
 
 } // namespace at::native

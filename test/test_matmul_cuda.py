@@ -790,18 +790,8 @@ class TestFP8MatmulCuda(TestCase):
 
     # TODO(before land): real skip condition, should only run on CUDA 12.8+ with CUDA capability 10.0+
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
-    # TODO also test fp4_x2
     def test_blockwise_mxfp8(self) -> None:
-
         # inspiration: https://github.com/pytorch/ao/pull/1625
-
-        # not for land, need to move to in-core dtypes
-        from enum import IntEnum
-        class DataType(IntEnum):
-            DEFAULT = 0
-            E8M0 = 1
-            FP4 = 2
-            UFP8 = 3
 
         device = "cuda"
         # TODO other shapes
@@ -816,30 +806,26 @@ class TestFP8MatmulCuda(TestCase):
         A = A_ref.to(torch.float8_e4m3fn)
         B = B_ref.to(torch.float8_e4m3fn).t()
 
-        # 127 in e8m0 is 2^0==1
         # TODO more scale correctness testing
-        A_scale = torch.full((M, K // BLOCK_SIZE), 127, device=device, dtype=torch.uint8)
-        B_scale = torch.full((N, K // BLOCK_SIZE), 127, device=device, dtype=torch.uint8)
+        A_scale = torch.full((M, K // BLOCK_SIZE), 1.0, device=device, dtype=torch.float8_e8m0fnu)
+        B_scale = torch.full((N, K // BLOCK_SIZE), 1.0, device=device, dtype=torch.float8_e8m0fnu)
 
         # convert to swizzled format
         A_scale = to_blocked(A_scale)
         B_scale = to_blocked(B_scale)
 
         # TODO sweep fast_accum
-
         C = torch._scaled_mm(
             A,
             B,
             # scales are switched
+            # TODO write this up, or switch in c++ land
             B_scale,
             A_scale,
             bias=None,
             scale_result=None,
             out_dtype=torch.bfloat16,
             use_fast_accum=False,
-            a_dtype=None,
-            b_dtype=None,
-            scale_dtype=DataType.E8M0,
         )
         torch.testing.assert_close(C, C_ref, atol=0, rtol=0)
 

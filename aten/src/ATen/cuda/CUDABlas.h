@@ -18,30 +18,6 @@
 
 namespace at::cuda::blas {
 
-
-// Hacking up still
-enum DataType : std::uint8_t {
-   DEFAULT = 0,
-   E8M0 = 1,
-   FP4 = 2,
-   UFP8 = 3
-};
-
-auto inline dtype_to_cuda(DataType dtype) -> cudaDataType_t{
-  switch (dtype) {
-    case DataType::DEFAULT:
-      return CUDA_R_32F;
-    case DataType::E8M0:
-      return CUDA_R_8F_UE8M0;
-    case DataType::FP4:
-      return CUDA_R_4F_E2M1;
-    case DataType::UFP8:
-      return CUDA_R_8F_UE4M3;
-    default:
-      TORCH_CHECK(false, "dtype not supported");
-  }
-}
-
 // RAII guard that sets the CuBLAS pointer mode and restores it to
 // its previous value when the guard is destroyed
 class PointerModeGuard {
@@ -154,10 +130,12 @@ void scaled_gemm(
     const void* mat1_scale_ptr,
     int64_t mat1_ld,
     ScalarType mat1_dtype,
+    ScalarType mat1_scale_dtype,
     const void* mat2_ptr,
     const void* mat2_scale_ptr,
     int64_t mat2_ld,
     ScalarType mat2_dtype,
+    ScalarType mat2_scale_dtype,
     const void* bias_ptr,
     ScalarType bias_dtype,
     void* result_ptr,
@@ -165,10 +143,7 @@ void scaled_gemm(
     int64_t result_ld,
     ScalarType result_dtype,
     bool use_fast_accum,
-    bool use_rowwise,
-    DataType a_dtype,
-    DataType b_dtype,
-    DataType scale_dtype);
+    bool use_rowwise);
 
 #define CUDABLAS_BGEMM_ARGTYPES(Dtype)                                                        \
   char transa, char transb, int64_t m, int64_t n, int64_t k, at::opmath_type<Dtype> alpha,    \
