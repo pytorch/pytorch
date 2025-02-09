@@ -481,19 +481,17 @@ template <typename T>
 inline T spherical_bessel_j0(T x) {
   if (::metal::isinf(x))
     return T(0.0);
+  T x2 = x * x;
+  T k1 = static_cast<T>(-1.0);
+  T k2 = static_cast<T>(1.0);
   if (::metal::abs(x) < T(0.5)) {
     return T(1.0) +
-        x * x *
-        (T(-1.0) / T(6.0) +
-         x * x *
-             (T(1.0) / T(120.0) +
-              x * x *
-                  (T(-1.0) / T(5040.0) +
-                   x * x *
-                       (T(1.0) / T(362880.0) +
-                        x * x *
-                            (T(-1.0) / T(39916800.0) +
-                             x * x * (T(1.0) / T(6227020800.0)))))));
+        x2 * (k1 / T(6.0) +
+        x2 * (k2 / T(120.0) +
+        x2 * (k1 / T(5040.0) +
+        x2 * (k2 / T(362880.0) +
+        x2 * (k1 / T(39916800.0) +
+        x2 * (k2 / T(6227020800.0)))))));
   }
 
   return ::metal::sin(x) / x;
