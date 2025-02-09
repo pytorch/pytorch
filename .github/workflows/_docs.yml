@@ -166,6 +166,7 @@ jobs:
             -e DOCS_TYPE \
             -e RUN_DOXYGEN \
             -e WITH_PUSH \
+            -e PYTORCH_USE_CXX_PYTREE=1 \
             --env-file="/tmp/github_env_${GITHUB_RUN_ID}" \
             --security-opt seccomp=unconfined \
             --cap-add=SYS_PTRACE \
