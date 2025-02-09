@@ -686,7 +686,6 @@ class UserDefinedClassVariable(UserDefinedVariable):
         new_fn = inspect.getattr_static(self.value, "__new__", None)
         if isinstance(new_fn, staticmethod):
             new_fn = new_fn.__func__
-        # return new_fn in (object.__new__, Generic.__new__, dict.__new__)
         return new_fn is object.__new__
 
     def call_obj_hasattr(
