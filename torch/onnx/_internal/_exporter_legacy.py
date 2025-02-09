@@ -25,7 +25,7 @@ from typing_extensions import deprecated
 
 import torch
 import torch._ops
-import torch.utils._pytree as pytree
+import torch.utils.pytree.python as pytree
 from torch.onnx import errors
 from torch.onnx._internal import io_adapter
 from torch.onnx._internal._lazy_import import onnxscript_apis, onnxscript_ir as ir

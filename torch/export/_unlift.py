@@ -6,7 +6,7 @@ from itertools import chain
 from typing import Any, Optional
 
 import torch
-import torch.utils._pytree as pytree
+import torch.utils.pytree.python as pytree
 from torch._export.non_strict_utils import (
     _enter_enable_graph_inputs_of_type_nn_module,
     _exit_enable_graph_inputs_of_type_nn_module,

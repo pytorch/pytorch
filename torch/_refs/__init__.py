@@ -15,7 +15,7 @@ from typing import Any, Callable, cast, Dict, List, Optional, overload, Tuple, U
 import torch
 import torch._prims as prims
 import torch._prims_common as utils
-import torch.utils._pytree as pytree
+import torch.utils.pytree.python as pytree
 from torch import sym_float, sym_int
 from torch._prims_common import (
     BoolLike,

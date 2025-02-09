@@ -8,6 +8,7 @@ from typing_extensions import ParamSpec
 
 import torch
 import torch._prims_common as utils
+import torch.utils.pytree.python as pytree
 from torch import SymBool, SymFloat, Tensor
 from torch._decomp import (
     _add_op_to_registry,
@@ -38,7 +39,6 @@ from torch._prims_common.wrappers import (
 )
 from torch._refs import _broadcast_shapes, _maybe_broadcast
 from torch.fx.experimental import _config as exp_config
-from torch.utils import _pytree as pytree
 
 
 _T = TypeVar("_T")

@@ -3,7 +3,7 @@ from dataclasses import dataclass
 
 import torch
 import torch._dynamo.test_case
-import torch.utils._pytree as pytree
+import torch.utils.pytree.python as pytree
 
 
 def distance(a, b, norm):

@@ -2,8 +2,8 @@
 import functools
 
 import torch
+import torch.utils.pytree.python as pytree
 from torch.nn.utils._expanded_weights.expanded_weights_impl import ExpandedWeight
-from torch.utils import _pytree as pytree
 
 
 # dependency on `functional_call` means that this can't be exposed in utils

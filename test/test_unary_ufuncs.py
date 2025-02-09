@@ -52,7 +52,7 @@ from torch.testing._internal.common_utils import (
     torch_to_numpy_dtype_dict,
     xfailIfTorchDynamo,
 )
-from torch.utils import _pytree as pytree
+import torch.utils.pytree.python as pytree
 
 if TEST_SCIPY:
     import scipy

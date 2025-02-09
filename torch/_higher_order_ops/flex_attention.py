@@ -3,7 +3,7 @@ from collections.abc import Sequence
 from typing import Any, Callable, Optional, Union
 
 import torch
-import torch.utils._pytree as pytree
+import torch.utils.pytree.python as pytree
 from torch import Tensor
 from torch._C import DispatchKey
 from torch._higher_order_ops.utils import (

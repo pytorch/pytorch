@@ -14,7 +14,7 @@ from typing import Callable, Optional, TYPE_CHECKING, Union
 import torch
 import torch._inductor.inductor_prims
 import torch.fx as fx
-import torch.utils._pytree as pytree
+import torch.utils.pytree.python as pytree
 from torch.fx.experimental._backward_state import BackwardState
 from torch.fx.experimental.proxy_tensor import is_sym_node, py_sym_types
 from torch.fx.experimental.sym_node import magic_methods, method_to_operator

@@ -4,7 +4,7 @@ from typing import Callable
 
 import torch
 import torch.fx.node
-import torch.utils._pytree as pytree
+import torch.utils.pytree.python as pytree
 from torch._ops import HigherOrderOperator
 
 

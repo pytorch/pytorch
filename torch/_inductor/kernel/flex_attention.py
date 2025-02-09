@@ -13,7 +13,7 @@ import sympy
 import torch
 from torch._inductor.virtualized import V
 from torch.utils._ordered_set import OrderedSet
-from torch.utils._pytree import tree_map
+from torch.utils.pytree.python import tree_map
 
 from .. import config
 from ..ir import (

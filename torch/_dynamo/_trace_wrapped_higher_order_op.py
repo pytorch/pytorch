@@ -1,7 +1,7 @@
 from typing import Any, Optional
 
 import torch
-import torch.utils._pytree as pytree
+import torch.utils.pytree.python as pytree
 from torch._C import DispatchKey
 from torch._higher_order_ops.utils import autograd_not_implemented
 from torch._ops import HigherOrderOperator, OpOverload
@@ -10,7 +10,7 @@ from torch.fx.experimental._backward_state import BackwardState
 from torch.fx.experimental.proxy_tensor import ProxyTorchDispatchMode, track_tensor_tree
 from torch.overrides import TorchFunctionMode
 from torch.utils._python_dispatch import _get_current_dispatch_mode
-from torch.utils._pytree import tree_map_only
+from torch.utils.pytree.python import tree_map_only
 
 
 Tensor = torch.Tensor

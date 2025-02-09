@@ -13,6 +13,7 @@ from typing import Optional, TYPE_CHECKING
 import torch._C
 import torch.fx
 import torch.nn
+import torch.utils.pytree.python as pytree
 from torch._dispatch.python import enable_python_dispatcher
 from torch._dynamo.utils import get_fake_value
 from torch._dynamo.variables.builtin import BuiltinVariable
@@ -24,7 +25,6 @@ from torch._guards import Source
 from torch._ops import HigherOrderOperator
 from torch.fx.node import map_arg
 from torch.fx.passes.shape_prop import _extract_tensor_metadata
-from torch.utils import _pytree as pytree
 
 from .. import variables
 from ..exc import (

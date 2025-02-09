@@ -26,7 +26,7 @@ from typing import (
 )
 
 import torch
-from torch.utils import _pytree as pytree
+import torch.utils.pytree.python as pytree
 from torch.utils._backport_slots import dataclass_slots
 from torch.utils._traceback import CapturedTraceback, format_frame
 from torch.utils.weak import WeakTensorKeyDictionary

@@ -5,6 +5,7 @@ import unittest
 from contextlib import nullcontext
 
 import torch
+import torch.utils.pytree.python as pytree
 from torch._dispatch.python import (
     enable_crossref_functionalize,
     enable_python_dispatcher,
@@ -26,8 +27,7 @@ from torch.testing._internal.common_utils import (
     xfail_inherited_tests,
 )
 from torch.testing._internal.logging_tensor import capture_logs, LoggingTensor
-from torch.utils import _pytree as pytree
-from torch.utils._pytree import tree_map_only
+from torch.utils.pytree.python import tree_map_only
 
 
 def are_aliased(x, y):

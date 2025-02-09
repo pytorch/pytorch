@@ -8,10 +8,10 @@ from functools import partial
 from typing import Any
 
 import torch
+import torch.utils.pytree.python as pytree
 from torch.testing import make_tensor
-from torch.utils import _pytree as pytree
 from torch.utils._python_dispatch import TorchDispatchMode
-from torch.utils._pytree import tree_map
+from torch.utils.pytree.python import tree_map
 
 
 log = logging.getLogger(__name__)

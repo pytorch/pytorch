@@ -11,7 +11,7 @@ from torch.export.dynamic_shapes import (
     _tree_map_with_path,
     Dim,
 )
-from torch.utils._pytree import tree_map
+from torch.utils.pytree.python import tree_map
 
 from .serialize import _dataclass_to_dict
 

@@ -38,8 +38,8 @@ from torch._export.non_strict_utils import _enable_graph_inputs_of_type_nn_modul
 from torch._library.fake_class_registry import FakeScriptObject
 from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
 from torch.fx.experimental import symbolic_shapes
-from torch.utils import _pytree as pytree
-from torch.utils._pytree import treespec_dumps, treespec_loads
+import torch.utils.pytree.python as pytree
+from torch.utils.pytree.python import treespec_dumps, treespec_loads
 from torch.utils._sympy.numbers import int_oo
 from torch.utils._sympy.symbol import prefix_str, SymT
 from torch.utils._sympy.value_ranges import ValueRanges

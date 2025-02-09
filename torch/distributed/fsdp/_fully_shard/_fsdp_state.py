@@ -17,7 +17,7 @@ from torch.distributed._composable_state import (
 )
 from torch.distributed.device_mesh import _get_device_handle
 from torch.distributed.utils import _to_kwargs
-from torch.utils._pytree import tree_flatten, tree_map
+from torch.utils.pytree.python import tree_flatten, tree_map
 
 from ._fsdp_api import MixedPrecisionPolicy
 from ._fsdp_common import (

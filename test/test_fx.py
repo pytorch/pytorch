@@ -24,11 +24,6 @@ from copy import deepcopy
 from math import sqrt
 from typing import Any, Callable, List, NamedTuple, Optional, Tuple, Union
 
-import torch
-import torch.fx._pytree as fx_pytree
-import torch.utils._pytree as pytree
-from functorch.experimental import control_flow
-
 from fx.named_tup import MyNamedTup
 from fx.test_common_passes import TestCommonPass  # noqa: F401
 from fx.test_cse_pass import TestCSEPass  # noqa: F401
@@ -37,15 +32,16 @@ from fx.test_fx_const_fold import TestConstFold  # noqa: F401
 from fx.test_fx_param_shape_control_flow import (  # noqa: F401
     TestConstParamShapeInControlFlow,
 )
-
-from fx.test_gradual_type import (  # noqa: F401  # noqa: F401
-    AnnotationsTest,
-    TypeCheckerTest,
-)
+from fx.test_gradual_type import AnnotationsTest, TypeCheckerTest  # noqa: F401
 from fx.test_matcher_utils import TestMatcher  # noqa: F401
 from fx.test_pass_infra import TestPassManager  # noqa: F401
 from fx.test_source_matcher_utils import TestSourceMatcher  # noqa: F401
 from fx.test_subgraph_rewriter import TestSubgraphRewriter  # noqa: F401
+
+import torch
+import torch.fx._pytree as fx_pytree
+import torch.utils.pytree.python as pytree
+from functorch.experimental import control_flow
 from torch.fx import (
     CodeGen,
     Graph,
@@ -66,7 +62,6 @@ from torch.fx.immutable_collections import immutable_dict, immutable_list
 from torch.fx.node import _format_arg, Argument, Target
 from torch.fx.operator_schemas import get_signature_for_torch_op
 from torch.fx.passes import shape_prop
-
 from torch.fx.proxy import TraceError
 from torch.multiprocessing import Process
 from torch.testing import FileCheck
@@ -85,6 +80,7 @@ from torch.testing._internal.common_utils import (
     skipIfTorchDynamo,
 )
 from torch.testing._internal.jit_utils import JitTestCase
+
 
 try:
     from torchvision import models as torchvision_models

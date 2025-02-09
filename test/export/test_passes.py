@@ -10,6 +10,7 @@ import unittest
 from re import escape
 
 import torch
+import torch.utils.pytree.python as pytree
 from functorch.experimental.control_flow import cond
 from torch._dynamo.eval_frame import is_dynamo_supported
 from torch._export.non_strict_utils import (
@@ -53,7 +54,6 @@ from torch.testing._internal.common_utils import (
     TestCase,
 )
 from torch.testing._internal.torchbind_impls import init_torchbind_implementations
-from torch.utils import _pytree as pytree
 
 
 def count_call_function(graph: torch.fx.Graph, target: torch.ops.OpOverload) -> int:

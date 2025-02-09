@@ -10,6 +10,7 @@ import torch._dynamo.config as dynamo_config
 import torch._inductor.config as inductor_config
 import torch._inductor.fx_passes.post_grad
 import torch.nn.functional as F
+import torch.utils.pytree.python as pytree
 from torch._dynamo.utils import count_calls, counters
 from torch._higher_order_ops.auto_functionalize import auto_functionalized
 from torch._higher_order_ops.out_dtype import out_dtype
@@ -48,7 +49,6 @@ from torch.testing._internal.inductor_utils import (
     IS_A100,
     IS_BIG_GPU,
 )
-from torch.utils import _pytree as pytree
 
 
 aten = torch.ops.aten
@@ -1419,7 +1419,7 @@ class TestPatternMatcher(TestCase):
         FileCheck().check_not("extern_kernels.addmm(").run(code[0])
 
     def test_serialized_patterns_up_to_date(self):
-        import torch.utils._pytree as pytree
+        import torch.utils.pytree.python as pytree
         from torch._inductor.fx_passes import joint_graph
         from torch._inductor.pattern_matcher import _known_precompiled_patterns
 

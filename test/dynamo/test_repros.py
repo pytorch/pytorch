@@ -38,7 +38,7 @@ import torch._dynamo.utils
 import torch._functorch.config
 import torch.distributed as dist
 import torch.library
-import torch.utils._pytree as pytree
+import torch.utils.pytree.python as pytree
 from torch import nn
 from torch._dynamo.debug_utils import same_two_models
 from torch._dynamo.testing import CompileCounter, rand_strided, same, skipIfPy312

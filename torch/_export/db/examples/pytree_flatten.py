@@ -1,7 +1,7 @@
 # mypy: allow-untyped-defs
 import torch
 
-from torch.utils import _pytree as pytree
+import torch.utils.pytree.python as pytree
 
 class PytreeFlatten(torch.nn.Module):
     """

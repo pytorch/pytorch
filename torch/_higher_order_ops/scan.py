@@ -6,7 +6,7 @@ from typing import Any, Callable
 import torch
 import torch._prims_common as utils
 import torch._subclasses.functional_tensor
-import torch.utils._pytree as pytree
+import torch.utils.pytree.python as pytree
 from torch._C import DispatchKey
 from torch._higher_order_ops.utils import (
     _has_potential_branch_input_alias,

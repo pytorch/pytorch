@@ -1,6 +1,6 @@
 # mypy: allow-untyped-defs
 import torch
-from torch.utils._pytree import tree_map, tree_flatten, tree_unflatten
+from torch.utils.pytree.python import tree_map, tree_flatten, tree_unflatten
 from .module_tracker import ModuleTracker
 from typing import Any, Optional, Union, TypeVar, Callable
 from collections.abc import Iterator
@@ -48,7 +48,7 @@ def register_flop_formula(targets, get_raw=False) -> Callable[[Callable[_P, _T]]
             flop_registry[target] = flop_formula
 
         # To handle allowing multiple aten_ops at once
-        torch.utils._pytree.tree_map_(register, targets)
+        torch.utils.pytree.python.tree_map_(register, targets)
 
         return flop_formula
 

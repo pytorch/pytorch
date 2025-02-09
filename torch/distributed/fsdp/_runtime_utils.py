@@ -9,6 +9,7 @@ import torch.distributed as dist
 import torch.distributed.fsdp._traversal_utils as traversal_utils
 import torch.nn as nn
 import torch.nn.functional as F
+import torch.utils.pytree.python as pytree
 from torch.autograd import Variable
 from torch.autograd.graph import register_multi_grad_hook
 from torch.distributed.algorithms._comm_hooks import LOW_PRECISION_HOOKS
@@ -37,7 +38,6 @@ from torch.distributed.utils import (
     _p_assert,
     _to_kwargs,
 )
-from torch.utils import _pytree as pytree
 
 
 logger = logging.getLogger(__name__)

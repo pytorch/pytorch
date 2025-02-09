@@ -1,6 +1,6 @@
 from typing import Any, Callable, Optional
 
-from torch.utils._pytree import Context, TreeSpec
+from torch.utils.pytree.python import Context, TreeSpec
 
 
 def reorder_kwargs(user_kwargs: dict[str, Any], spec: TreeSpec) -> dict[str, Any]:

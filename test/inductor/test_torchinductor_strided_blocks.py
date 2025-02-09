@@ -6,7 +6,7 @@ import unittest
 from typing import Any, Callable, Optional, Union
 
 import torch
-import torch.utils._pytree as pytree
+import torch.utils.pytree.python as pytree
 from torch._inductor import config
 from torch._inductor.runtime.hints import TRITON_MAX_BLOCK
 from torch._inductor.runtime.runtime_utils import is_power_of_2

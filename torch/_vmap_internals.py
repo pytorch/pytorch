@@ -5,7 +5,11 @@ from typing_extensions import deprecated
 
 import torch
 from torch import Tensor
-from torch.utils._pytree import _broadcast_to_and_flatten, tree_flatten, tree_unflatten
+from torch.utils.pytree.python import (
+    _broadcast_to_and_flatten,
+    tree_flatten,
+    tree_unflatten,
+)
 
 
 in_dims_t = Union[int, tuple]

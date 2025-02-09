@@ -14,6 +14,7 @@ from typing_extensions import deprecated
 import torch
 import torch.distributed as dist
 import torch.distributed._shard.sharding_spec as shard_spec
+import torch.utils.pytree.python as pytree
 from torch._utils import _get_device_module
 from torch.distributed import distributed_c10d, rpc
 from torch.distributed._shard._utils import DEPRECATE_MSG
@@ -26,7 +27,6 @@ from torch.distributed._shard.sharding_spec.api import (
     _has_custom_op,
 )
 from torch.distributed.remote_device import _remote_device
-from torch.utils import _pytree as pytree
 
 from .metadata import ShardedTensorMetadata, TensorProperties
 from .reshard import reshard_local_shard, reshuffle_local_shard

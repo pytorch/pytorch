@@ -49,7 +49,7 @@ from torch.testing._internal.inductor_utils import (
     maybe_skip_size_asserts,
 )
 from torch.utils._python_dispatch import TorchDispatchMode
-from torch.utils._pytree import tree_map
+from torch.utils.pytree.python import tree_map
 
 
 try:

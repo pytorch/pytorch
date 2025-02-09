@@ -17,7 +17,7 @@ from typing import NamedTuple
 import torch
 import torch._dynamo as torchdynamo
 import torch.export._trace
-import torch.utils._pytree as pytree
+import torch.utils.pytree.python as pytree
 from torch._export.db.case import ExportCase, SupportLevel
 from torch._export.db.examples import all_examples
 from torch._export.serde.serialize import (

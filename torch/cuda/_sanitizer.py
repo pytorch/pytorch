@@ -26,7 +26,7 @@ from typing import Any, Optional, TypeVar
 
 import torch
 import torch.cuda._gpu_trace as gpu_trace
-from torch.utils import _pytree as pytree
+import torch.utils.pytree.python as pytree
 from torch.utils._python_dispatch import TorchDispatchMode
 
 

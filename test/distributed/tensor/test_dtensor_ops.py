@@ -7,6 +7,7 @@ import warnings
 import torch
 import torch.distributed as dist
 import torch.testing._internal.common_methods_invocations as common_ops
+import torch.utils.pytree.python as pytree
 from torch.distributed._tensor import DeviceMesh, DTensor
 from torch.overrides import resolve_name
 from torch.testing._internal.common_device_type import (
@@ -19,8 +20,7 @@ from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorConverter,
     DTensorOpTestBase,
 )
-from torch.utils import _pytree as pytree
-from torch.utils._pytree import tree_map
+from torch.utils.pytree.python import tree_map
 
 
 # rewrite common size variables to sth can be sharded evenly

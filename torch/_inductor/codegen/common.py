@@ -31,8 +31,8 @@ import sympy
 
 import torch
 import torch.fx
+import torch.utils.pytree.python as pytree
 from torch._prims_common import ELEMENTWISE_TYPE_PROMOTION_KIND
-from torch.utils import _pytree as pytree
 from torch.utils._ordered_set import OrderedSet
 from torch.utils._sympy.numbers import int_oo
 from torch.utils._sympy.printers import PythonPrinter as _PythonPrinter

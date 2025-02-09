@@ -8,8 +8,8 @@ import torch
 import torch._dynamo.testing
 import torch._inductor.config as inductor_config
 import torch._inductor.test_case
-import torch.utils._pytree as pytree
 import torch.utils.cpp_extension
+import torch.utils.pytree.python as pytree
 from torch import Tensor
 from torch._dynamo.testing import CompileCounterWithBackend
 from torch._higher_order_ops.auto_functionalize import try_use_slice

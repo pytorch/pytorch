@@ -5,7 +5,7 @@ import torch
 from torch._dynamo.test_case import TestCase
 from torch.export._tree_utils import is_equivalent, reorder_kwargs
 from torch.testing._internal.common_utils import run_tests
-from torch.utils._pytree import tree_structure
+from torch.utils.pytree.python import tree_structure
 
 
 class TestTreeUtils(TestCase):

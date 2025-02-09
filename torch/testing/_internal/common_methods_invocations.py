@@ -48,7 +48,7 @@ import torch._refs.nn.functional
 import torch._refs.special
 import torch._refs.linalg
 import torch._prims as prims  # noqa: F401
-from torch.utils import _pytree as pytree
+import torch.utils.pytree.python as pytree
 
 
 from packaging import version

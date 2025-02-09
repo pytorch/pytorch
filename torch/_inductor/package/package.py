@@ -11,7 +11,7 @@ from typing import Any, IO, Optional, Union
 
 import torch
 import torch._inductor
-import torch.utils._pytree as pytree
+import torch.utils.pytree.python as pytree
 from torch._inductor import exc
 from torch._inductor.cpp_builder import BuildOptionsBase, CppBuilder
 from torch.export._tree_utils import reorder_kwargs

@@ -45,7 +45,7 @@ from typing_extensions import deprecated, TypeAlias, TypeGuard
 import torch
 import torch.fx
 import torch.fx.traceback as fx_traceback
-import torch.utils._pytree as pytree
+import torch.utils.pytree.python as pytree
 
 # NB: The sym_* functions are used via getattr() and must be imported here.
 from torch import SymBool, SymFloat, SymInt

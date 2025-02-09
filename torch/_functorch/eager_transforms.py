@@ -12,6 +12,7 @@ from typing import Any, Callable, Optional, Union
 
 import torch
 import torch.autograd.forward_ad as fwAD
+import torch.utils.pytree.python as pytree
 from torch._C._functorch import (
     _assert_wrapped_functional,
     _func_decrement_nesting,
@@ -34,8 +35,7 @@ from torch._functorch.utils import argnums_t, exposed_in
 from torch._subclasses.functional_tensor import FunctionalTensor
 from torch.fx.experimental import const_fold
 from torch.fx.experimental.proxy_tensor import make_fx
-from torch.utils import _pytree as pytree
-from torch.utils._pytree import (
+from torch.utils.pytree.python import (
     tree_flatten,
     tree_map,
     tree_map_,

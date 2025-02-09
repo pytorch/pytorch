@@ -6,7 +6,7 @@ from typing import Optional
 
 import torch
 import torch.fx._pytree as fx_pytree
-import torch.utils._pytree as pytree
+import torch.utils.pytree.python as pytree
 from torch.export.exported_program import (
     ConstantArgument,
     ExportedProgram,

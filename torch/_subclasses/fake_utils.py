@@ -5,7 +5,7 @@ import warnings
 from typing import Any, Callable, Union
 
 import torch
-import torch.utils._pytree as pytree
+import torch.utils.pytree.python as pytree
 from torch._ops import OpOverload
 from torch._subclasses.fake_tensor import (
     FakeTensor,

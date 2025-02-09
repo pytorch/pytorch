@@ -54,7 +54,7 @@ if TYPE_CHECKING:
     from .codegen.common import WorkspaceArg
 
 from torch.utils._ordered_set import OrderedSet
-from torch.utils._pytree import tree_map_only
+from torch.utils.pytree.python import tree_map_only
 
 
 GPU_TYPES = ["cuda", "mps", "xpu"]

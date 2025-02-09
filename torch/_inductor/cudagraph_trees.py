@@ -61,6 +61,7 @@ from typing import (
 )
 
 import torch.fx
+import torch.utils.pytree.python as pytree
 from torch import Tensor
 from torch._dynamo.mutation_guard import GenerationTracker
 from torch._dynamo.utils import counters, dynamo_timed, preserve_rng_state
@@ -87,7 +88,6 @@ from torch._inductor.cudagraph_utils import (
 )
 from torch.multiprocessing.reductions import StorageWeakRef
 from torch.storage import UntypedStorage
-from torch.utils import _pytree as pytree
 from torch.utils._ordered_set import OrderedSet
 from torch.utils.weak import TensorWeakRef
 

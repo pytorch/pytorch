@@ -14,7 +14,7 @@ from torch.distributed.tensor.placement_types import Placement
 try:
     from torch.utils._cxx_pytree import tree_leaves, tree_map_only, TreeSpec
 except ImportError:
-    from torch.utils._pytree import (  # type: ignore[no-redef, assignment]
+    from torch.utils.pytree.python import (  # type: ignore[no-redef, assignment]
         tree_leaves,
         tree_map_only,
         TreeSpec,

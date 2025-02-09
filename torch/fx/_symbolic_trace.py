@@ -14,7 +14,7 @@ from types import CodeType, FunctionType, ModuleType
 from typing import Any, Callable, NamedTuple, Optional, Union
 
 import torch
-import torch.utils._pytree as pytree
+import torch.utils.pytree.python as pytree
 from torch._C import ScriptObject  # type: ignore[attr-defined]
 from torch._library.fake_class_registry import FakeScriptObject
 

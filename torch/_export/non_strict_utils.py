@@ -6,7 +6,7 @@ from collections import defaultdict
 from typing import Any, Callable, Optional, TYPE_CHECKING, Union
 
 import torch
-import torch.utils._pytree as pytree
+import torch.utils.pytree.python as pytree
 from torch._dynamo.source import (
     AttrSource,
     GetItemSource,
@@ -44,7 +44,7 @@ from torch.fx.experimental.symbolic_shapes import (
     StatelessSymbolicContext,
     ValueRanges,
 )
-from torch.utils._pytree import (
+from torch.utils.pytree.python import (
     GetAttrKey,
     KeyPath,
     MappingKey,

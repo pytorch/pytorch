@@ -3,8 +3,8 @@ import dataclasses
 from dataclasses import dataclass
 from typing import Any, Callable, Optional, Protocol
 
+import torch.utils.pytree.python as pytree
 from torch import _C, _ops, autograd, Tensor
-from torch.utils import _pytree
 
 from . import utils
 
@@ -105,7 +105,7 @@ def make_autograd_impl(op: _ops.OpOverload, info: InfoProtocol) -> Callable:
     # The dispatcher passes any keyword-only-args as kwargs and the
     # rest of the args (even if specified as kwargs) as args.
     def autograd_impl(keyset, *args, **keyword_only_args):
-        if _C.is_grad_enabled() and _pytree.tree_any_only(
+        if _C.is_grad_enabled() and pytree.tree_any_only(
             Tensor, lambda x: x.requires_grad, args, not_list_of_tensor
         ):
             result = Generated.apply(*args, Metadata(keyset, keyword_only_args))  # type: ignore[attr-defined]
@@ -236,6 +236,6 @@ def not_list_of_optional_tensor(tree):
     return True
 
 
-flatten = _pytree.tree_flatten
-unflatten = _pytree.tree_unflatten
-spec_t = _pytree.TreeSpec
+flatten = pytree.tree_flatten
+unflatten = pytree.tree_unflatten
+spec_t = pytree.TreeSpec

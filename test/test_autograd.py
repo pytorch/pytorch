@@ -13801,11 +13801,11 @@ class TestSelectiveActivationCheckpoint(TestCase):
             def __torch_dispatch__(cls, func, types, args, kwargs):
                 if kwargs is None:
                     kwargs = {}
-                args_inner = torch.utils._pytree.tree_map_only(
+                args_inner = torch.utils.pytree.python.tree_map_only(
                     cls, lambda x: x.inner, args
                 )
                 out_inner = func(*args_inner, **kwargs)
-                return torch.utils._pytree.tree_map_only(
+                return torch.utils.pytree.python.tree_map_only(
                     torch.Tensor, lambda x: cls(x), out_inner
                 )
 

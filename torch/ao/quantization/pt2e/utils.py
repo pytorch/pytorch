@@ -12,7 +12,7 @@ from torch.ao.quantization.quantizer import QuantizationAnnotation
 from torch.export.unflatten import _assign_attr, _AttrKind
 from torch.fx import GraphModule, Node
 from torch.nn.utils.fusion import fuse_conv_bn_weights
-from torch.utils._pytree import LeafSpec
+from torch.utils.pytree.python import LeafSpec
 
 
 __all__ = [

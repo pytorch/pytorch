@@ -18,7 +18,7 @@ from torch.nn.modules.module import (
     register_module_full_backward_pre_hook,
 )
 from torch.utils._python_dispatch import TorchDispatchMode
-from torch.utils._pytree import tree_flatten
+from torch.utils.pytree.python import tree_flatten
 
 
 __all__ = ["CommDebugMode"]

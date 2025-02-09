@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from typing import Any, Callable, Union
 
 import torch
+import torch.utils.pytree.python as pytree
 from torch._dispatch.python import enable_python_dispatcher
 from torch._dynamo.utils import ReinplaceCounters, ReInplaceTrigger
 from torch._higher_order_ops.triton_kernel_wrap import (
@@ -21,7 +22,6 @@ from torch._inductor.lowering import (
 from torch._inductor.virtualized import V
 from torch.fx.immutable_collections import immutable_dict
 from torch.fx.passes.reinplace import _is_view_op
-from torch.utils import _pytree as pytree
 from torch.utils._ordered_set import OrderedSet
 
 
