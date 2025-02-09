@@ -149,6 +149,21 @@ class UserDefinedClassVariable(UserDefinedVariable):
 
         return set(tensortype_to_dtype.keys()) | _in_graph_class_list
 
+    @staticmethod
+    @functools.lru_cache(None)
+    def supported_c_new_functions():
+        return {
+            object.__new__,
+            dict.__new__,
+            tuple.__new__,
+        }
+
+    @staticmethod
+    def is_supported_new_method(value):
+        # TODO(anijain2305) - Extend this to support objects with default tp_new
+        # functions.
+        return value in UserDefinedClassVariable.supported_c_new_functions()
+
     def can_constant_fold_through(self):
         return self.value in self._constant_fold_classes()
 
@@ -188,7 +203,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
         except AttributeError:
             obj = None
 
-        if obj in (object.__new__, tuple.__new__, dict.__new__):
+        if name == "__new__" and UserDefinedClassVariable.is_supported_new_method(obj):
             return super().var_getattr(tx, name)
 
         if name in cmp_name_to_op_mapping and not isinstance(obj, types.FunctionType):
@@ -229,7 +244,6 @@ class UserDefinedClassVariable(UserDefinedVariable):
             source
             and not inspect.ismethoddescriptor(obj)
             and not is_wrapper_or_member_descriptor(obj)
-            and obj is not dict.__new__
         ):
             return VariableTracker.build(tx, obj, source)
 
@@ -330,13 +344,9 @@ class UserDefinedClassVariable(UserDefinedVariable):
             return variables.ConstantVariable(self.value == args[0].value)
         elif name == "__ne__" and len(args) == 1 and hasattr(args[0], "value"):
             return variables.ConstantVariable(self.value != args[0].value)
-        elif name == "__new__" and self.value is collections.OrderedDict:
-            assert len(args) == 1
-            assert len(kwargs) == 0
-            return variables.ConstDictVariable(
-                {}, collections.OrderedDict, mutation_type=ValueMutationNew()
-            )
-        elif name == "__new__":
+        elif name == "__new__" and UserDefinedClassVariable.is_supported_new_method(
+            self.value.__new__
+        ):
             return tx.output.side_effects.track_new_user_defined_object(
                 self,
                 args[0],
