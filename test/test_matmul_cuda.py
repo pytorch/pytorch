@@ -360,31 +360,6 @@ def to_blocked(input_matrix) -> torch.Tensor:
     # Layout rearranged tiles according to second pic
     return rearranged.flatten()
 
-# copied from https://github.com/pytorch/ao/blob/main/torchao/prototype/mx_formats/custom_cast.py
-
-def down_size(size):
-    assert size[-1] % 2 == 0, f"{size} last dim not divisible by two"
-    return (*size[:-1], size[-1] // 2)
-
-# TODO delete upsize/unpack if not used later in this PR
-def up_size(size):
-    return (*size[:-1], size[-1] * 2)
-
-def unpack_uint4(uint8_data) -> torch.Tensor:
-    assert uint8_data.is_contiguous()
-    shape = uint8_data.shape
-    first_elements = (uint8_data >> 4).to(torch.uint8)
-    second_elements = (uint8_data & 0b1111).to(torch.uint8)
-    unpacked = torch.stack([first_elements, second_elements], dim=-1).view(
-        up_size(shape)
-    )
-    return unpacked
-
-def pack_uint4(uint8_data) -> torch.Tensor:
-    shape = uint8_data.shape
-    assert shape[-1] % 2 == 0
-    uint8_data = uint8_data.contiguous().view(-1)
-    return (uint8_data[::2] << 4 | uint8_data[1::2]).view(down_size(shape))
 
 @unittest.skipIf(not torch.cuda.is_available(), "CUDA not found")
 class TestFP8MatmulCuda(TestCase):

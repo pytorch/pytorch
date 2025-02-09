@@ -84,9 +84,6 @@ inline cudaDataType ScalarTypeToCudaDataType(const c10::ScalarType& scalar_type)
     case c10::ScalarType::Float8_e5m2:
       return CUDA_R_8F_E5M2;
 #endif
-    // TODO(before land) add cuda version check 12.0 here
-    case c10::ScalarType::Float8_e8m0fnu:
-      return CUDA_R_8F_UE8M0;
 #if defined(USE_ROCM)
 #if defined(HIP_NEW_TYPE_ENUMS)
     case c10::ScalarType::Float8_e4m3fnuz:
