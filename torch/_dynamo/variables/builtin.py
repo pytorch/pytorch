@@ -1089,15 +1089,14 @@ class BuiltinVariable(VariableTracker):
                 return obj.method_setattr_standard(tx, name_var, val)
 
         if name == "__new__":
-            if self.fn is object:
-                assert len(args) == 1
+            # Supported __new__ methods
+            if self.fn is object and len(args) == 1:
                 assert len(kwargs) == 0
                 return tx.output.side_effects.track_new_user_defined_object(
                     self, args[0], args[1:]
                 )
-            if self.fn is dict:
-                assert len(args) == 1
-                assert len(kwargs) == 0
+
+            if self.fn is dict and len(args) == 1 and not kwargs:
                 dict_vt = ConstDictVariable({}, dict, mutation_type=ValueMutationNew())
                 if isinstance(args[0], BuiltinVariable) and args[0].fn is dict:
                     return dict_vt
@@ -1109,6 +1108,7 @@ class BuiltinVariable(VariableTracker):
                     args[0],
                     args[1:],
                 )
+
             if (
                 self.fn is tuple
                 and len(args) == 2
