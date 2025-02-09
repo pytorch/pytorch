@@ -1474,7 +1474,7 @@ class OutputGraph:
                     self.compiler_fn, e, inspect.currentframe()
                 ).with_traceback(e.__traceback__) from None
             msg = (
-                "Backend compiler failed with a fake tensor exception at \n"
+                f"Backend compiler failed with {str(e)} at \n"
                 f"{self.root_tx.format_frame_summary()}"
                 "Adding a graph break."
             )
@@ -1935,6 +1935,9 @@ class SubgraphTracer(fx.Tracer):
         # Only safe if we know for sure that *NOT* replaying these side-effects during
         # backward recomputation of the checkpoint region doesn't affect its correctness.
         self.allow_side_effects_under_checkpoint = False
+
+        # True if this tracer is currently tracing (reconstructing) into a Python generator
+        self.is_reconstructing_generator = False
 
         self.debug_level: int = parent.debug_level + 1 if parent is not None else 0
 
