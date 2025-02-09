@@ -307,7 +307,9 @@ class SideEffects:
             else:
                 raise RuntimeError(f"Unexpected base_cls_vt {base_cls_vt}")
 
-            assert base_cls.__new__ in (object.__new__, dict.__new__, tuple.__new__)
+            assert variables.UserDefinedClassVariable.is_supported_new_method(
+                base_cls.__new__
+            )
             # TODO(anijain2305) - Consider adding get_example_value method to
             # each VT to get an example value for all args. As we expand the
             # scope to other __new__ methods, we might need to call __new__ with
@@ -325,7 +327,12 @@ class SideEffects:
         init_args,
     ):
         """
-        args_vt and kwargs_vt are the arguments to the __new__ and __init__ functions.
+        Creates a UserDefinedObjectVariable (or its subclass) variable tracker
+        and mark it for attribute mutation tracking.
+
+        Also records the variable trackers to call __new__ method on
+        reconstruction. Roughly, the reconstruction looks like this
+            base_cls_vt.__new__(user_cls, *init_args)
         """
         cls_source = cls_vt.source
         user_cls = cls_vt.value
