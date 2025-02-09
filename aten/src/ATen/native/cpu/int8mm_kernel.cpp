@@ -20,7 +20,7 @@ namespace at::native {
 
 namespace {
 
-#if defined(CPU_CAPABILITY_AVX512) && !defined(_MSC_VER)
+#if (defined(CPU_CAPABILITY_AVX512) || defined(CPU_CAPABILITY_AVX2)) && !defined(_MSC_VER)
 
 // A block : {BLOCK_M, BLOCK_K}, lda = K
 // B block : {BLOCK_K, BLOCK_N}, ldb = K
@@ -28,12 +28,12 @@ namespace {
 //
 // scales block: {BLOCK_N}
 //
-template <int BLOCK_M, int BLOCK_N>
+template <int BLOCK_M, int BLOCK_N, typename T>
 inline void tinygemm_kernel(
-    const BFloat16* RESTRICT A,
+    const T* RESTRICT A,
     const int8_t* RESTRICT B,
-    const BFloat16* RESTRICT scales,
-    BFloat16* RESTRICT C,
+    const T* RESTRICT scales,
+    T* RESTRICT C,
     int lda,
     int ldb,
     int ldc,
@@ -44,19 +44,22 @@ inline void tinygemm_kernel(
 
   const int PREFETCH_SIZE_K = 16 * 4;
 
-  __m512 va;
-  __m512 vb[COLS];
-  __m512 vc[ROWS * COLS];
-  __m512 scale[COLS];
+  using Vectorized = at::vec::Vectorized<float>;
+  using VectorizedIn = at::vec::Vectorized<T>;
+  constexpr auto VLEN = Vectorized::size();
+
+  Vectorized va;
+  at::vec::VectorizedN<float, COLS> vb;
+  at::vec::VectorizedN<float, ROWS*COLS> vc;
+  at::vec::VectorizedN<float, COLS> scale;
 
   auto load_scale = [&](int i) {
-    float ss = static_cast<float>(scales[i]);
-    scale[i] = _mm512_set1_ps(ss);
+    scale[i] = Vectorized(static_cast<float>(scales[i]));
   };
   c10::ForcedUnroll<COLS>{}(load_scale);
 
   auto loadc = [&](auto i) {
-    vc[i] = _mm512_setzero_ps();
+    vc[i] = Vectorized(0.0f);
   };
   c10::ForcedUnroll<ROWS * COLS>{}(loadc);
 
@@ -65,119 +68,64 @@ inline void tinygemm_kernel(
     constexpr int col = i % COLS;
 
     if constexpr (col == 0) {
-      __m256i a16 = _mm256_load_si256((__m256i*)(A + row * lda + k));
+      auto a16 = VectorizedIn::loadu(A + row * lda + k, VLEN);
       if (k + PREFETCH_SIZE_K < K) {
         _mm_prefetch(A + row * lda + k + PREFETCH_SIZE_K, _MM_HINT_T0);
       }
-      vec::cvtbf16_fp32(a16, va);
+      va = at::vec::convert<float>(a16);
     }
 
     if constexpr (row == 0) {
-      __m128i b8 = _mm_load_si128((__m128i*)(B + col * ldb + k));
+      auto b8 = at::vec::Vectorized<int8_t>::loadu(B + col * ldb + k, VLEN);
       if (k + PREFETCH_SIZE_K < K) {
         _mm_prefetch(B + col * ldb + k + PREFETCH_SIZE_K, _MM_HINT_T0);
       }
-      __m512i b32 = _mm512_cvtepi8_epi32(b8);
-      vb[col] = _mm512_cvtepi32_ps(b32);
-      vb[col] = _mm512_mul_ps(vb[col], scale[col]);
+      vb[col] = at::vec::convert<float>(b8);
+      vb[col] = vb[col] * scale[col];
     }
 
     constexpr int idx = row * COLS + col;
-    vc[idx] = _mm512_fmadd_ps(va, vb[col], vc[idx]);
+    vc[idx] = at::vec::fmadd(va, vb[col], vc[idx]);
   };
 
-  for (int k = 0; k < K; k += 16) {
+  for (int k = 0; k < K; k += VLEN) {
       c10::ForcedUnroll<ROWS * COLS>{}(compute, k);
   }
 
   auto storec = [&](auto i) {
     constexpr int row = i / COLS;
     constexpr int col = i % COLS;
-    C[row * ldc + col] = static_cast<BFloat16>(_mm512_reduce_add_ps(vc[i]));
+    C[row * ldc + col] = static_cast<T>(vc[i].reduce_add());
   };
   c10::ForcedUnroll<ROWS * COLS>{}(storec);
 }
 
-#elif defined(CPU_CAPABILITY_AVX2) && !defined(_MSC_VER)
+#else
 
-static inline float _mm256_reduce_add_ps(__m256& v) {
-  __m256 v1 = _mm256_permute2f128_ps(v, v, 0x1);
-  v = _mm256_add_ps(v, v1);
-  v1 = _mm256_shuffle_ps(v, v, 0x4E);
-  v = _mm256_add_ps(v, v1);
-  v1 = _mm256_shuffle_ps(v, v, 0xB1);
-  v = _mm256_add_ps(v, v1);
-  return _mm256_cvtss_f32(v);
-}
-
-template <int BLOCK_M, int BLOCK_N>
+// non-vectorized version
+template <int BLOCK_M, int BLOCK_N, typename T>
 inline void tinygemm_kernel(
-    const BFloat16* RESTRICT A,
+    const T* RESTRICT A,
     const int8_t* RESTRICT B,
-    const BFloat16* RESTRICT scales,
-    BFloat16* RESTRICT C,
+    const T* RESTRICT scales,
+    T* RESTRICT C,
     int lda,
     int ldb,
     int ldc,
     int K) {
 
-  constexpr int ROWS = BLOCK_M;
-  constexpr int COLS = BLOCK_N;
-
-  const int PREFETCH_SIZE_K = 16 * 4;
-
-  __m256 va;
-  __m256 vb[COLS];
-  __m256 vc[ROWS * COLS];
-  __m256 scale[COLS];
-
-  auto load_scale = [&](int i) {
-    float ss = static_cast<float>(scales[i]);
-    scale[i] = _mm256_set1_ps(ss);
-  };
-  c10::ForcedUnroll<COLS>{}(load_scale);
-
-  auto loadc = [&](auto i) {
-    vc[i] = _mm256_setzero_ps();
-  };
-  c10::ForcedUnroll<ROWS * COLS>{}(loadc);
-
-  auto compute = [&](auto i, int k) {
-    constexpr int row = i / COLS;
-    constexpr int col = i % COLS;
-
-    if constexpr (col == 0) {
-      __m128i a16 = _mm_load_si128((__m128i*)(A + row * lda + k));
-      if (k + PREFETCH_SIZE_K < K) {
-        _mm_prefetch(A + row * lda + k + PREFETCH_SIZE_K, _MM_HINT_T0);
+  for (const auto m : c10::irange(BLOCK_M)) {
+    for (const auto n : c10::irange(BLOCK_N)) {
+      float c_val = 0;
+      float scale_val = static_cast<float>(scales[n]);
+      for (const auto k : c10::irange(K)) {
+        float a_val = static_cast<float>(A[m * lda + k]);
+        float b_val = static_cast<float>(B[n * ldb + k]);
+        c_val += a_val * (b_val * scale_val);
       }
-      vec::cvtbf16_fp32(a16, va);
+      C[m * ldc + n] = c_val;
     }
-
-    if constexpr (row == 0) {
-       __m128i b8 = _mm_loadu_si64((__m128i*)(B + col * ldb + k));
-       if (k + PREFETCH_SIZE_K < K) {
-         _mm_prefetch(B + col * ldb + k + PREFETCH_SIZE_K, _MM_HINT_T0);
-       }
-       __m256i b32 = _mm256_cvtepi8_epi32(b8);
-       vb[col] = _mm256_cvtepi32_ps(b32);
-       vb[col] = _mm256_mul_ps(vb[col], scale[col]);
-     }
-
-     constexpr int idx = row * COLS + col;
-     vc[idx] = _mm256_fmadd_ps(va, vb[col], vc[idx]);
-  };
-
-  for (int k = 0; k < K; k += 8) {
-    c10::ForcedUnroll<ROWS * COLS>{}(compute, k);
   }
-
-  auto storec = [&](auto i) {
-    constexpr int row = i / COLS;
-    constexpr int col = i % COLS;
-    C[row * ldc + col] = static_cast<BFloat16>(_mm256_reduce_add_ps(vc[i]));
-  };
-  c10::ForcedUnroll<ROWS * COLS>{}(storec);
 }
 
 #endif
@@ -304,32 +252,6 @@ inline void tinygemm_kernel(
   tinygemm_kernel_<BLOCK_M, BLOCK_N>(A, B, scales, C, lda, ldb, ldc, K);
 }
 #endif
-
-// non-vectorized version
-template <int BLOCK_M, int BLOCK_N, typename T>
-inline void tinygemm_kernel(
-    const T* RESTRICT A,
-    const int8_t* RESTRICT B,
-    const T* RESTRICT scales,
-    T* RESTRICT C,
-    int lda,
-    int ldb,
-    int ldc,
-    int K) {
-
-  for (const auto m : c10::irange(BLOCK_M)) {
-    for (const auto n : c10::irange(BLOCK_N)) {
-      float c_val = 0;
-      float scale_val = static_cast<float>(scales[n]);
-      for (const auto k : c10::irange(K)) {
-        float a_val = static_cast<float>(A[m * lda + k]);
-        float b_val = static_cast<float>(B[n * ldb + k]);
-        c_val += a_val * (b_val * scale_val);
-      }
-      C[m * ldc + n] = c_val;
-    }
-  }
-}
 
 #define LAUNCH_TINYGEMM_KERNEL(MB_SIZE, NB_SIZE)                 \
   tinygemm_kernel<MB_SIZE, NB_SIZE>(                             \
