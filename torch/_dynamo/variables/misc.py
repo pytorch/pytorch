@@ -164,10 +164,13 @@ class SuperVariable(VariableTracker):
             and variables.UserDefinedClassVariable.is_supported_new_method(inner_fn)
         ):
             user_cls = inner_fn.__self__
-            if hasattr(user_cls, "__module__") and user_cls.__module__ == "bulitins":
+            if hasattr(user_cls, "__module__") and user_cls.__module__ == "builtins":
                 user_cls_vt = variables.BuiltinVariable(user_cls)
             else:
-                user_cls_vt = variables.UserDefinedClassVariable(user_cls)
+                user_cls_source = source.member
+                user_cls_vt = variables.UserDefinedClassVariable(
+                    user_cls, source=user_cls_source
+                )
             return user_cls_vt.call_method(tx, "__new__", args, kwargs)
         elif isinstance(inner_fn, staticmethod) and isinstance(
             inner_fn.__func__, types.FunctionType
