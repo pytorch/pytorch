@@ -1444,9 +1444,6 @@ void scaled_gemm(
   const auto scaleType = CUDA_R_32F;
   const float alpha_val = 1.0;
   const float beta_val = 0.0;
-  if (scale_dtype == DataType::UFP8){
-    // k = k * 2;
-  }
   CuBlasLtMatmulDescriptor computeDesc(computeType, scaleType);
   computeDesc.setAttribute(CUBLASLT_MATMUL_DESC_TRANSA, _cublasOpFromChar(transa));
   computeDesc.setAttribute(CUBLASLT_MATMUL_DESC_TRANSB, _cublasOpFromChar(transb));
