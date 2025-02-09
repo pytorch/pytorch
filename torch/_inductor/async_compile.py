@@ -289,6 +289,7 @@ class AsyncCompile:
             _load_triton_kernel_from_source, kernel_name, source_code
         )
         is_parallel = self.use_process_pool()
+        assert(is_parallel)
         set_feature_use("parallel_compile_post_warmup", is_parallel)
         if is_parallel:
             # We want to support changing these env vars after (and while) the
