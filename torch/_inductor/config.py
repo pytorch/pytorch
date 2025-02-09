@@ -148,6 +148,9 @@ allow_buffer_reuse = True
 # Enable pooled allocations for non-output tensors
 memory_planning = os.environ.get("TORCHINDUCTOR_MEMORY_PLANNING", "0") == "1"
 
+# Enable to allow using ftz variant of exponenet instruction in triton codegen.
+use_fast_math = os.environ.get("TORCHINDUCTOR_USE_FAST_MATH") == "1"
+
 # How to organize memory under memory_planning=True:
 # - "none": do not try to pool storage, just reuse
 # - "intermediates": all non-outputs share storage, outputs each get unique storage
@@ -1244,6 +1247,9 @@ class cuda:
     # By default it's None, so that all CUTLASS configs are tuned.
     # This is mainly used to reduce test time in CI.
     cutlass_max_profiling_configs: Optional[int] = None
+
+    # The L2 swizzle values to consider when profiling CUTLASS configs in max_autotune.
+    cutlass_max_profiling_swizzle_options: list[int] = [2]
 
     # Path to CUDA NVCC.
     # NVCC search order:
