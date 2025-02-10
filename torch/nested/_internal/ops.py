@@ -965,25 +965,26 @@ def narrow(func, *args, **kwargs):
         out_kwargs = extract_kwargs(inp)
         start_val, length_val = new_kwargs["start"], new_kwargs["length"]
         end_val = start_val + length_val
-        batch = inp._offsets.shape[0] - 1
+        batch = inp.size(0)
         if end_val > batch:
             raise RuntimeError(
                 f"narrow(): start ({start_val}) + length ({length_val}) "
                 f"exceeds dimension size ({batch})"
             )
 
-        # clamp start, end values
+        # clamp start, end values to batch dim boundaries
+        # NB: all of these are in outer batch dim space
         if start_val < 0:
-            start_val += inp._values.size(dim)
+            start_val += batch
         if end_val < 0:
-            end_val += inp._values.size(dim)
-        start_val = max(min(start_val, inp._values.size(dim)), 0)
-        end_val = max(min(end_val, inp._values.size(dim)), 0)
+            end_val += batch
+        start_val = max(min(start_val, batch), 0)
+        end_val = max(min(end_val, batch), 0)
         length_val = max(min(length_val, end_val - start_val), 0)
 
         # shortcut if no actual narrowing is happening; this helps us ensure
         # that length < batch size if we don't take this path
-        if length_val == inp.size(0):
+        if length_val == batch:
             return inp.detach()
 
         # +1 to include last offset. Also normalize offsets to start at 0.
