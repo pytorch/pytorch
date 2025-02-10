@@ -15729,6 +15729,7 @@
 - func: special_spherical_bessel_j0.out(Tensor x, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
     CPU, CUDA: special_spherical_bessel_j0_out
+    MPS: spherical_bessel_j0_kernel_mps
   python_module: special
   structured_inherits: TensorIteratorBase
   structured: True
