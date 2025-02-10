@@ -177,6 +177,9 @@ if [[ "$BUILD_ENVIRONMENT" == *rocm* ]]; then
   # Print GPU info
   rocminfo
   rocminfo | grep -E 'Name:.*\sgfx|Marketing'
+
+  # for benchmarks/dynamo/check_accuracy.py, we need to put results in a rocm specific directory to avoid clashes with cuda
+  MAYBE_ROCM="rocm/"
 fi
 
 if [[ "$BUILD_ENVIRONMENT" == *xpu* ]]; then
@@ -429,7 +432,7 @@ test_inductor_cpp_wrapper_shard() {
     --output "$TEST_REPORTS_DIR/inductor_cpp_wrapper_training.csv"
     python benchmarks/dynamo/check_accuracy.py \
       --actual "$TEST_REPORTS_DIR/inductor_cpp_wrapper_training.csv" \
-      --expected "benchmarks/dynamo/ci_expected_accuracy/inductor_timm_training.csv"
+      --expected "benchmarks/dynamo/ci_expected_accuracy/${MAYBE_ROCM}inductor_timm_training.csv"
 
     python benchmarks/dynamo/torchbench.py --device cuda --accuracy \
       --bfloat16 --inference --inductor --only hf_T5 --output "$TEST_REPORTS_DIR/inductor_cpp_wrapper_inference.csv"
@@ -439,7 +442,7 @@ test_inductor_cpp_wrapper_shard() {
       --bfloat16 --inference --inductor --only moco --output "$TEST_REPORTS_DIR/inductor_cpp_wrapper_inference.csv"
     python benchmarks/dynamo/check_accuracy.py \
       --actual "$TEST_REPORTS_DIR/inductor_cpp_wrapper_inference.csv" \
-      --expected "benchmarks/dynamo/ci_expected_accuracy/inductor_torchbench_inference.csv"
+      --expected "benchmarks/dynamo/ci_expected_accuracy/${MAYBE_ROCM}inductor_torchbench_inference.csv"
   fi
 }
 
@@ -638,10 +641,10 @@ test_single_dynamo_benchmark() {
       --output "$TEST_REPORTS_DIR/${name}_${suite}.csv"
     python benchmarks/dynamo/check_accuracy.py \
       --actual "$TEST_REPORTS_DIR/${name}_$suite.csv" \
-      --expected "benchmarks/dynamo/ci_expected_accuracy/${TEST_CONFIG}_${name}.csv"
+      --expected "benchmarks/dynamo/ci_expected_accuracy/${MAYBE_ROCM}${TEST_CONFIG}_${name}.csv"
     python benchmarks/dynamo/check_graph_breaks.py \
       --actual "$TEST_REPORTS_DIR/${name}_$suite.csv" \
-      --expected "benchmarks/dynamo/ci_expected_accuracy/${TEST_CONFIG}_${name}.csv"
+      --expected "benchmarks/dynamo/ci_expected_accuracy/${MAYBE_ROCM}${TEST_CONFIG}_${name}.csv"
   fi
 }
 
@@ -728,7 +731,7 @@ test_inductor_torchbench_smoketest_perf() {
       --only $test --output "$TEST_REPORTS_DIR/inductor_warm_start_smoketest_$test.csv"
     python benchmarks/dynamo/check_accuracy.py \
       --actual "$TEST_REPORTS_DIR/inductor_warm_start_smoketest_$test.csv" \
-      --expected "benchmarks/dynamo/ci_expected_accuracy/inductor_huggingface_training.csv"
+      --expected "benchmarks/dynamo/ci_expected_accuracy/${MAYBE_ROCM}inductor_huggingface_training.csv"
   done
 }
 
