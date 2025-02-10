@@ -287,12 +287,15 @@ def uninteresting_files() -> set[str]:
     import torch._inductor.sizevars
     import torch._library.custom_ops
     import torch._library.fake_impl
+    import torch._logging
     import torch._subclasses.fake_tensor
     import torch._subclasses.meta_utils
 
     mods = [
         sys.modules[__name__],
         torch.fx.experimental.recording,
+        torch._logging.structured,
+        torch._logging._internal,
         torch.fx.experimental.sym_node,
         torch.fx.interpreter,
         torch,
@@ -4246,10 +4249,8 @@ class ShapeEnv:
                 "symbol": str(symbol),
                 "node_id": id(sym_node),
                 "vr": f"[{vr.lower}, {vr.upper}]",
-                "user_stack": structured.from_traceback(TracingContext.extract_stack()),
-                "stack": structured.from_traceback(
-                    CapturedTraceback.extract(skip=1).summary()
-                ),
+                "user_stack": structured.get_user_stack(3),
+                "stack": structured.get_framework_stack(),
             },
         )
 
@@ -6768,15 +6769,15 @@ class ShapeEnv:
                             orig_expr,
                             unsound_result,
                         )
+
                         trace_structured(
                             "propagate_real_tensors",
                             metadata_fn=lambda: {
                                 "expr": repr(orig_expr),
                                 "result": repr(unsound_result),
                                 "expr_node_id": id(expr_sym_node),
-                                "stack": structured.from_traceback(
-                                    CapturedTraceback.extract(skip=1).summary()
-                                ),
+                                "user_stack": structured.get_user_stack(3),
+                                "stack": structured.get_framework_stack(3),
                             },
                         )
                         dtrace_structured(
