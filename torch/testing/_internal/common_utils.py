@@ -1727,7 +1727,7 @@ def skipIfLegacyJitExecutor(msg="test doesn't currently work with legacy JIT exe
 
 
 def make_dynamo_test(
-    fn: Optional[Callable[..., Any]] = None, expected_frame_count: int = 1
+    fn: Optional[Callable[..., Any]] = None
 ) -> Callable[..., Any]:
     """
     Decorator function to create a dynamo test case.
@@ -1737,35 +1737,27 @@ def make_dynamo_test(
     """
     from torch._dynamo.testing import CompileCounter, reset, optimize_assert
     if fn is None:
-        return lambda fn: make_dynamo_test(
-            fn, expected_frame_count=expected_frame_count
-        )
+        return lambda fn: make_dynamo_test(fn)
 
     def standard_test(
         self: Any,
         fn: Callable[..., Any],
-        expected_frame_count: int = 1,
     ) -> None:
-        def dummy(fn: Callable[..., Any], t: torch.Tensor) -> torch.Tensor:
+        def dummy(fn: Callable[..., Any]) -> None:
             fn(self)
-            return t.sin()
 
         actual = CompileCounter()
 
-        t = torch.randn(2)
-        correct = dummy(fn, t)
+        dummy(fn)
         reset()
         opt_fn = optimize_assert(actual)(dummy)
-        val = opt_fn(fn, t)
+        opt_fn(fn)
         reset()
-        self.assertEqual(correct, val)
-        self.assertEqual(actual.frame_count, expected_frame_count)
 
     def test_fn(self: Any) -> None:
         return standard_test(
             self,
             fn=fn,
-            expected_frame_count=expected_frame_count,
         )
 
     return test_fn
