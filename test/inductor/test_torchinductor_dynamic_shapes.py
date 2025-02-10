@@ -557,7 +557,7 @@ class TestInductorDynamic(TestCase):
     )
     @torch._inductor.config.patch(implicit_fallbacks=True)
     def test_dynamic_stride_nobreak(self, device):
-        @torch.library.custom_op("test::dynamic_stride_nobreak", mutates_args=())
+        @torch.library.custom_op("test::foo", mutates_args=())
         def foo(x: torch.Tensor) -> torch.Tensor:
             stride = x.item()
             return torch.empty_strided((1,), (stride,), device=x.device)
