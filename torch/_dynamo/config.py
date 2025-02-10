@@ -519,7 +519,6 @@ inject_BUILD_SET_unimplemented_TESTING_ONLY = False
 _autograd_backward_strict_mode_banned_ops = [
     "requires_grad",
     "layout",
-    "data",
     "is_neg",
     "is_conj",
     "is_pinned",

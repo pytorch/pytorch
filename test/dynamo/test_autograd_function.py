@@ -439,6 +439,35 @@ class AutogradFunctionTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(result, Foo.apply(x))
         self.assertEqual(cnt.frame_count, 1)
 
+    def test_data_in_bwd(self):
+        class Foo(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, input_tensor):
+                ctx.save_for_backward(input_tensor)
+                return input_tensor * 3
+
+            @staticmethod
+            def backward(ctx, grad_output):
+                (input_tensor,) = ctx.saved_tensors
+
+                # Modify gradient using .data (Dangerous: Breaks autograd tracking!)
+                modified_grad = grad_output.clone()
+                modified_grad.data[
+                    input_tensor.data < 0
+                ] = 0  # Zero-out gradients for negative inputs
+
+                return modified_grad * 3
+
+        @torch.compile(backend="aot_eager", fullgraph=True)
+        def fn(x):
+            return Foo.apply(x)
+
+        x = torch.tensor([-2.0, 1.0, 3.0], requires_grad=True)
+        res = fn(x)
+        self.assertEqual(res, Foo.apply(x))
+        res.sum().backward()
+        self.assertEqual(x.grad, torch.tensor([0.0, 3.0, 3.0]))
+
     def test_amp_custom_fwd_bwd(self):
         torch._dynamo.utils.counters.clear()
         cnt = torch._dynamo.testing.CompileCounter()
