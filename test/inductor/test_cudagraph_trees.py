@@ -1851,7 +1851,7 @@ if HAS_CUDA and not TEST_WITH_ASAN:
             out = foo(torch.rand([4, 4], device="cuda", requires_grad=True))
             self.assertFalse(self.get_manager().new_graph_id().id == 0)
 
-        def test_unbacked_symint_warning_message(self):
+        def test_input_unbacked_symint(self):
             @torch.compile(mode="reduce-overhead")
             def foo(x):
                 return x + 1
@@ -1859,13 +1859,9 @@ if HAS_CUDA and not TEST_WITH_ASAN:
             x = torch.randn(2, 3, device="cuda")
             torch._dynamo.decorators.mark_unbacked(x, 0)
 
-            with capture_stderr() as captured_output:
-                foo(x)
+            foo(x)
 
-            FileCheck().check(
-                "skipping cudagraphs due to disabling cudagraphs due to unbacked symint arg0_1"
-            ).run(captured_output[0])
-            self.assertEqual(counters["inductor"]["cudagraph_skips"], 1)
+            self.assertEqual(counters["inductor"]["cudagraph_skips"], 0)
 
         @torch._dynamo.config.patch("capture_scalar_outputs", True)
         def test_incompatible_cudagraph_ops_item(self):

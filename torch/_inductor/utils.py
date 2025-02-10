@@ -791,11 +791,24 @@ def get_first_incompatible_cudagraph_node(
             )
         )
 
+    input_unbacked_symbols: OrderedSet[sympy.Symbol] = OrderedSet()
     for node in gm.graph.nodes:
         if str(node.target) in forbidden_set:
             return node, "incompatible op"
-        if (val := node.meta.get("val")) is not None and free_unbacked_symbols(val):
+
+        if node.op == "placeholder" and (val := node.meta.get("val")) is not None:
+            input_unbacked_symbols.update(free_unbacked_symbols(val))
+
+    # skip cudagraph if there are unbacked symbols not shown in inputs
+    for node in gm.graph.nodes:
+        if node.op == "placeholder":
+            continue
+
+        if (val := node.meta.get("val")) is not None and len(
+            free_unbacked_symbols(val) - input_unbacked_symbols
+        ) != 0:
             return node, "unbacked symint"
+
     return None
 
 
