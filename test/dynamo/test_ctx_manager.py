@@ -2670,6 +2670,7 @@ class GraphModule(torch.nn.Module):
         self.assertEqual(len(counters["graph_break"]), 0)
         self.assertEqual(y, t.sin())
 
+    @unittest.skipIf(sys.version_info < (3, 11), "Python 3.11+")
     def test_WITH_EXCEPT_START(self):
         @contextmanager
         def ctx():

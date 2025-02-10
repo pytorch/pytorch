@@ -171,7 +171,15 @@ class GenericContextWrappingVariable(UserDefinedObjectVariable):
                 self.cm_obj.__exit__.__func__,
                 self,
                 source=source,
-            ).call_function(tx, args, {})
+            ).call_function(
+                tx,
+                [
+                    variables.ConstantVariable.create(None),
+                    variables.ConstantVariable.create(None),
+                    variables.ConstantVariable.create(None),
+                ],
+                {},
+            )
         except Unsupported as e:
             unimplemented(
                 f"Unsupported context manager {self.cm_obj}'s __exit__ function",
