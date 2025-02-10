@@ -921,7 +921,6 @@ ScalingType get_scaling_type(
     const at::Tensor& scale_b,
     int64_t dim_m,
     int64_t dim_n) {
-  // TODO(before land): clean up
   if (scale_a.scalar_type() == scale_b.scalar_type() && scale_a.scalar_type() == at::kFloat8_e8m0fnu) {
     return ScalingType::BlockWise;
   }

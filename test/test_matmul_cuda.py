@@ -390,7 +390,6 @@ def data_to_mx_scale(x, block_size):
     x = x.reshape(-1, block_size)
     max_abs = torch.amax(torch.abs(x), 1)
     largest_p2_lt_max_abs = torch.floor(torch.log2(max_abs))
-    target_max_pow2 = 8
     scale_e8m0_unbiased = largest_p2_lt_max_abs - F8E4M3_LARGEST_POW2
     scale_e8m0_unbiased = torch.clamp(scale_e8m0_unbiased, -1 * F8E8M0_EXP_BIAS, F8E8M0_EXP_BIAS)
     scale_e8m0_biased = scale_e8m0_unbiased + F8E8M0_EXP_BIAS
