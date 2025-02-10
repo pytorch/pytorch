@@ -183,6 +183,7 @@ _SYM_OPS = {
     operator.gt,
     operator.neg,
     operator.pos,
+    math.trunc,
     torch.sym_not,
     operator.mul,
     operator.add,
