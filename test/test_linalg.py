@@ -6875,11 +6875,10 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
     @parametrize("m", [32, 64])
     @parametrize("k", [32, 64])
     @parametrize("n", [48, 64])
-    @parametrize("dtype", [torch.float16, torch.bfloat16])
     def test__int8_mm(self, device, m, k, n):
         torch.manual_seed(1)
-        a = torch.rand((m, k), dtype=dtype, device=device)
-        b = torch.rand((n, k), dtype=dtype, device=device)
+        a = torch.rand((m, k), dtype=torch.bfloat16, device=device)
+        b = torch.rand((n, k), dtype=torch.bfloat16, device=device)
 
         def convert_weight_to_int8pack(b):
             b_int8pack, b_scales, _ = _dynamically_quantize_per_channel(
@@ -6903,10 +6902,11 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
     @parametrize("m", [32, 64])
     @parametrize("k", [32, 64])
     @parametrize("n", [48, 64])
-    def test_compile_int8_mm(self, device, m, k, n):
+    @parametrize("dtype", [torch.float16, torch.bfloat16])
+    def test_compile_int8_mm(self, device, m, k, n, dtype):
         torch.manual_seed(1)
-        a = torch.rand((m, k), dtype=torch.bfloat16, device=device)
-        b = torch.rand((n, k), dtype=torch.bfloat16, device=device)
+        a = torch.rand((m, k), dtype=dtype, device=device)
+        b = torch.rand((n, k), dtype=dtype, device=device)
 
         b_int8pack, b_scales, _ = _dynamically_quantize_per_channel(
             b, -128, 127, torch.int8
