@@ -50,6 +50,26 @@ std::vector<T> store_all_gather(
   return peer_vals;
 }
 
+void maybe_initialize_env_vars() {
+  auto nccl_socket_if_name = c10::utils::get_env("NCCL_SOCKET_IFNAME");
+  auto nccl_hca_list = c10::utils::get_env("NCCL_IB_HCA");
+  auto nccl_ib_gid_index = c10::utils::get_env("NCCL_IB_GID_INDEX");
+  auto nvshmem_socket_if_name = c10::utils::get_env("NVSHMEM_BOOTSTRAP_UID_SOCK_IFNAME");
+  auto nvshmem_hca_list = c10::utils::get_env("NCCL_IB_HCA");
+  auto nvshmem_ib_gid_index = c10::utils::get_env("NVSHMEM_IB_GID_INDEX");
+
+  if (!nvshmem_socket_if_name.has_value() && nccl_socket_if_name.has_value()) {
+    c10::utils::set_env("NVSHMEM_BOOTSTRAP_UID_SOCK_IFNAME", nccl_socket_if_name->c_str());
+  }
+  if (!nvshmem_hca_list.has_value() && nccl_hca_list.has_value()) {
+    c10::utils::set_env("NVSHMEM_ENABLE_NIC_PE_MAPPING", "1");
+    c10::utils::set_env("NVSHMEM_HCA_LIST", nccl_hca_list->c_str());
+  }
+  if (!nvshmem_ib_gid_index.has_value() && nccl_ib_gid_index.has_value()) {
+    c10::utils::set_env("NVSHMEM_IB_GID_INDEX", nccl_ib_gid_index->c_str());
+  }
+}
+
 void initialize_nvshmem_with_store(
     c10::intrusive_ptr<c10d::Store> store,
     int rank,
@@ -58,6 +78,8 @@ void initialize_nvshmem_with_store(
   if (is_initialized) {
     return;
   }
+
+  maybe_initialize_env_vars();
 
   nvshmemx_uniqueid_t unique_id;
   TORCH_CHECK(

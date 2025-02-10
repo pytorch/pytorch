@@ -980,7 +980,7 @@ elseif(USE_CUDA)
   set(USE_NVSHMEM $ENV{USE_NVSHMEM} CACHE BOOL "Enable NVSHMEM support")
   set(NVSHMEM_HOME $ENV{NVSHMEM_HOME} CACHE PATH "Path to NVSHMEM build dir")
 
-  if (USE_NVSHMEM)
+  if(USE_NVSHMEM)
     set(NVSHMEM_INCLUDE_DIR "${NVSHMEM_HOME}/src/include")
     set(NVSHMEM_LIB_DIR "${NVSHMEM_HOME}/src/lib")
 
@@ -1000,6 +1000,10 @@ elseif(USE_CUDA)
     )
     target_link_libraries(torch_cuda PRIVATE nvshmem_extension)
     install(TARGETS nvshmem_extension EXPORT Caffe2Targets DESTINATION lib)
+    install(
+        FILES ${NVSHMEM_LIB_DIR}/nvshmem_bootstrap_uid.so
+        DESTINATION lib
+    )
   endif()
   if(USE_UCC)
     target_link_libraries(torch_cuda PRIVATE __caffe2_ucc)

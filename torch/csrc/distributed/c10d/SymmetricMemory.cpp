@@ -249,8 +249,7 @@ TORCH_LIBRARY_FRAGMENT(symm_mem, m) {
   m.def(
       "memset32_(Tensor(a!) input, int offset, int val, int count) -> Tensor(a!)");
 
-  m.def(
-      "nvshmem_hello(Tensor(a!) input) -> Tensor(a!)");
+  m.def("nvshmem_hello(Tensor(a!) input) -> Tensor(a!)");
 }
 
 TORCH_LIBRARY_IMPL(symm_mem, Meta, m) {
