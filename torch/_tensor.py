@@ -6,7 +6,8 @@ import warnings
 from collections import OrderedDict
 from copy import deepcopy
 from numbers import Number
-from typing import Any, Optional, Union
+from typing import Any, Callable, cast, Optional, TypeVar, Union
+from typing_extensions import TypeAlias
 
 import torch
 import torch._C as _C
@@ -27,20 +28,31 @@ from torch.overrides import (
 )
 
 
-def _handle_torch_function_and_wrap_type_error_to_not_implemented(f):
-    assigned = functools.WRAPPER_ASSIGNMENTS
+# TensorArg: TypeAlias = Union["Tensor", int, float, bool, complex]
+# _TensorMethod: TypeAlias = Callable[["torch._C.TensorBase", TensorArg], "Tensor"]
+# _TensorMethod: TypeAlias = Callable[["Tensor", TensorArg], "Tensor"]
 
-    @functools.wraps(f, assigned=assigned)
-    def wrapped(*args, **kwargs):
+RealArg: TypeAlias = Union["Tensor", int, float, bool]
+NumberArg: TypeAlias = Union[RealArg, complex]
+
+MethodT = TypeVar("MethodT", bound=Callable[[Any, Any], "Tensor"])
+
+
+def _handle_torch_function_and_wrap_type_error_to_not_implemented(
+    f: MethodT
+) -> MethodT:
+    @functools.wraps(f)
+    def wrapped(self, other) -> "Tensor":
         try:
+            args = self, other
             # See https://github.com/pytorch/pytorch/issues/75462
             if has_torch_function(args):
-                return handle_torch_function(wrapped, args, *args, **kwargs)
-            return f(*args, **kwargs)
+                return handle_torch_function(wrapped, args, self, other)
+            return f(self, other)
         except TypeError:
             return NotImplemented
 
-    return wrapped
+    return cast(MethodT, wrapped)
 
 
 # Should not be used, this is kept only for BC of loading old serialized Tensor subclasses
@@ -1094,25 +1106,28 @@ class Tensor(torch._C.TensorBase):
         )
 
     @_handle_torch_function_and_wrap_type_error_to_not_implemented
-    def __rsub__(self, other):
+    def __rsub__(self, other: NumberArg) -> "Tensor":
         return _C._VariableFunctions.rsub(self, other)
 
     @_handle_torch_function_and_wrap_type_error_to_not_implemented
-    def __rdiv__(self, other):
+    def __rdiv__(self, other: NumberArg) -> "Tensor":
         return self.reciprocal() * other
 
     __rtruediv__ = __rdiv__
     __itruediv__ = _C.TensorBase.__idiv__
 
-    __pow__ = _handle_torch_function_and_wrap_type_error_to_not_implemented(
-        _C.TensorBase.pow
+    __pow__ = cast(
+        Callable[["torch._C.TensorBase", NumberArg], "Tensor"],
+        _handle_torch_function_and_wrap_type_error_to_not_implemented(
+            _C.TensorBase.pow
+        )
     )
     __ipow__ = _handle_torch_function_and_wrap_type_error_to_not_implemented(
         _C.TensorBase.pow_
     )
 
     @_handle_torch_function_and_wrap_type_error_to_not_implemented
-    def __rmod__(self, other):
+    def __rmod__(self, other: NumberArg) -> "Tensor":
         return torch.remainder(other, self)
 
     def __format__(self, format_spec):
@@ -1123,27 +1138,29 @@ class Tensor(torch._C.TensorBase):
         return object.__format__(self, format_spec)
 
     @_handle_torch_function_and_wrap_type_error_to_not_implemented
-    def __rpow__(self, other):
+    def __rpow__(self, other: NumberArg) -> "Tensor":
         return torch.pow(other, self)
 
     @_handle_torch_function_and_wrap_type_error_to_not_implemented
-    def __floordiv__(self, other):
+    def __floordiv__(self, other: RealArg) -> "Tensor":  # type: ignore[override]
+        # TODO(rec): the superclass say it accepts complex here, torch.floor_divide
+        # says it doesn't.
         return torch.floor_divide(self, other)
 
     @_handle_torch_function_and_wrap_type_error_to_not_implemented
-    def __rfloordiv__(self, other):
+    def __rfloordiv__(self, other: RealArg) -> "Tensor":  # type: ignore[override]
         return torch.floor_divide(other, self)
 
     @_handle_torch_function_and_wrap_type_error_to_not_implemented
-    def __rlshift__(self, other):
+    def __rlshift__(self, other: NumberArg) -> "Tensor":
         return torch.bitwise_left_shift(other, self)
 
     @_handle_torch_function_and_wrap_type_error_to_not_implemented
-    def __rrshift__(self, other):
+    def __rrshift__(self, other: NumberArg) -> "Tensor":
         return torch.bitwise_right_shift(other, self)
 
     @_handle_torch_function_and_wrap_type_error_to_not_implemented
-    def __rmatmul__(self, other):
+    def __rmatmul__(self, other: "Tensor") -> "Tensor":
         return torch.matmul(other, self)
 
     __pos__ = _C.TensorBase.positive
