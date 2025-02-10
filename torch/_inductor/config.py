@@ -515,7 +515,7 @@ max_fusion_size = 64
 max_pointwise_cat_inputs = 8
 
 # force concat to be generated as a pointwise op with masked loads
-force_pointwise_cat = False
+force_pointwise_cat = True
 
 # replace small reductions with pointwise, disable with `= 1`
 unroll_reductions_threshold = 8
