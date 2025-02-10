@@ -4,7 +4,6 @@
 from __future__ import annotations
 
 import inspect
-import re
 import warnings
 from typing import Any, Sequence
 
@@ -288,34 +287,6 @@ def _get_custom_axis_name(axis: _Dim | str) -> str:
     return axis
 
 
-def iterate_and_change_axis_names(
-    model: ir.Model, rename_mapping: dict[str, str]
-) -> None:
-    """Rename dynamic axes in a model according to the specified dynamic_axes names."""
-    for value in _all_values(model):
-        if value.shape is None:
-            continue
-        new_shape = []
-        changed = False
-        for dim in value.shape:
-            if not isinstance(dim, ir.SymbolicDim):
-                new_shape.append(dim)
-                continue
-            dim_name = dim.value
-            if dim_name in rename_mapping:
-                new_shape.append(rename_mapping[dim_name])
-                changed = True
-            elif dim_name is not None:
-                new_name = _replace_names(dim_name, rename_mapping)
-                new_shape.append(new_name)
-                if new_name != dim_name:
-                    changed = True
-            else:
-                new_shape.append(None)
-        if changed:
-            value.shape = ir.Shape(new_shape)
-
-
 def _unflatten_dynamic_shapes_with_inputs_tree(
     inputs: list[Any],
     dynamic_shapes: dict[str, Any],
@@ -345,29 +316,8 @@ def _flatten_dynamic_shapes_to_axes(
     return _pytree.tree_flatten(dynamic_shapes, is_leaf=is_axes)
 
 
-def _replace_names(shape_expr: str, rename_mapping: dict[str, str]) -> str:
-    """Replace all known names in a shape expression with new names."""
-    for old_name, new_name in rename_mapping.items():
-        shape_expr = re.sub(rf"\b{old_name}\b", new_name, shape_expr)
-    return shape_expr
-
-
 def _signature(model) -> inspect.Signature:
     should_be_callable = getattr(model, "forward", model)
     if callable(should_be_callable):
         return inspect.signature(should_be_callable)
     raise ValueError("model has no forward method and is not callable")
-
-
-def _all_values(model: ir.Model):
-    """Yield all values in a model."""
-    # Yield all values in the model
-    yield from model.graph.inputs
-    yield from model.graph.initializers.values()
-    for node in ir.traversal.RecursiveGraphIterator(model.graph):
-        yield from node.outputs
-    # Yield all values in functions
-    for function in model.functions.values():
-        yield from function.inputs
-        for node in ir.traversal.RecursiveGraphIterator(function):
-            yield from node.outputs
