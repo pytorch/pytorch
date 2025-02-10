@@ -149,6 +149,26 @@ static PyObject* THPSize_repr(THPSize* self) {
   END_HANDLE_TH_ERRORS
 }
 
+static PyObject* THPSize_add(PyObject* self, PyObject* other) {
+  HANDLE_TH_ERRORS
+  if (!PyTuple_Check(other)) {
+    Py_RETURN_NOTIMPLEMENTED;
+  }
+
+  THPObjectPtr result(PySequence_Concat(self, other));
+  if (!result) {
+    throw python_error();
+  }
+
+  PyObject* size_obj = PyObject_CallFunctionObjArgs(
+      (PyObject*)&THPSizeType, result.get(), nullptr);
+  if (!size_obj) {
+    throw python_error();
+  }
+  return size_obj;
+  END_HANDLE_TH_ERRORS
+}
+
 template <typename FnType, FnType fn, typename... Args>
 static PyObject* wrap_tuple_fn(Args... args) {
   THPObjectPtr result((*fn)(std::forward<Args>(args)...));
@@ -231,6 +251,14 @@ static PyMethodDef THPSize_methods[] = {
     {"__reduce__", THPSize_reduce, METH_NOARGS, nullptr},
     {nullptr}};
 
+// Needed to ensure tuple + Size returns a Size instead of a tuple
+static PyNumberMethods THPSize_as_number = {
+    THPSize_add, // nb_add
+    nullptr, // nb_subtract
+    nullptr, // nb_multiply
+    // ... rest nullptr
+};
+
 PyTypeObject THPSizeType = {
     PyVarObject_HEAD_INIT(nullptr, 0)
     "torch.Size", /* tp_name */
@@ -242,7 +270,7 @@ PyTypeObject THPSizeType = {
     nullptr, /* tp_setattr */
     nullptr, /* tp_reserved */
     (reprfunc)THPSize_repr, /* tp_repr */
-    nullptr, /* tp_as_number */
+    &THPSize_as_number, /* tp_as_number */
     &THPSize_as_sequence, /* tp_as_sequence */
     &THPSize_as_mapping, /* tp_as_mapping */
     nullptr, /* tp_hash  */
