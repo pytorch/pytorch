@@ -152,6 +152,7 @@ void quantized_matmul(
     double binary_alpha,
     const c10::string_view& unary_post_op,
     torch::List<std::optional<at::Scalar>>& unary_post_op_args,
-    c10::string_view unary_post_op_algorithm);
+    c10::string_view unary_post_op_algorithm,
+    bool m2_trnas);
 
 } // namespace at::native::onednn
