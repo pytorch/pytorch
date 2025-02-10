@@ -18,13 +18,6 @@ class InvokeQuantTracer(BaseHOP):
             subgraph, *operands, scheme=scheme, quant_options=quant_options
         )
 
-    def _call_FakeTensorMode(
-        self, mode, subgraph, *operands, scheme: Optional[str] = None, **kwargs
-    ):
-        # TODO: this should probably route through FakeTensorMode to reuse caching
-        with mode:
-            return subgraph(*operands)
-
 
 invoke_quant_packed = InvokeQuantTracer()
 
@@ -35,13 +28,6 @@ class InvokeQuantUnpacked(BaseHOP):
 
     def __call__(self, subgraph, *operands, scheme=None):
         return super().__call__(subgraph, *operands, scheme=scheme)
-
-    def _call_FakeTensorMode(
-        self, mode, subgraph, *operands, scheme: Optional[str] = None, **kwargs
-    ):
-        # TODO: this should probably route through FakeTensorMode to reuse caching
-        with mode:
-            return subgraph(*operands, **kwargs)
 
 
 invoke_quant = InvokeQuantUnpacked()
