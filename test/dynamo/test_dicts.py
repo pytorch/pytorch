@@ -848,6 +848,30 @@ class DictTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(["b", "c", "a"], list(opt_fn(x).keys()))
         self.assertEqual(fn(x), opt_fn(x))
 
+    def test_overridden_get_item(self):
+        class MyDict(dict):
+            def __init__(self, *args, **kwargs):
+                super().__init__(*args, **kwargs)
+                self.calls = 0
+
+            def __getitem__(self, key):
+                self.calls += 1
+                return super().__getitem__(key) + 1
+
+        def fn(x, d):
+            d["d"] = 4
+            return x * d["a"] + d["b"] + d["c"] + d["d"]
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        x = torch.randn(4)
+        d1 = MyDict({"a": 2, "b": 3, "c": 5})
+        ref = fn(x, d1)
+
+        d2 = MyDict({"a": 2, "b": 3, "c": 5})
+        res = opt_fn(x, d2)
+        self.assertEqual(ref, res)
+        self.assertEqual(d1.calls, d2.calls)
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests

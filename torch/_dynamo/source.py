@@ -554,13 +554,29 @@ class DictGetItemSource(ChainedSource):
         return self.base.guard_source()
 
     def reconstruct(self, codegen):
+        # reconstruct dict.__getitem__(dct, key)
+
+        # Load dict.__getitem__
+        def load_dict_getitem():
+            codegen.extend_output(
+                [
+                    codegen.create_load_global("dict", add=True),
+                    codegen.create_load_attr("__getitem__"),
+                ]
+            )
+
+        codegen.add_push_null(load_dict_getitem)
+
+        # Load dict
         self.base.reconstruct(codegen)
+
+        # Load key
         if isinstance(self.index, Source):
             self.index.reconstruct(codegen)
         else:
             codegen.append_output(codegen.create_load_const(self.index))
-        # TODO(anijain2305) - Change this to dict.__getitem__(d, k)
-        codegen.append_output(create_instruction("BINARY_SUBSCR"))
+
+        codegen.extend_output(create_call_function(2, False))
 
     def name(self):
         if isinstance(self.index, ConstDictKeySource):
