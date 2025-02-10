@@ -254,6 +254,18 @@ class ExceptionVariable(VariableTracker):
         return f"ExceptionVariable({self.exc_type})"
 
 
+class UserDefinedExceptionClassVariable(ExceptionVariable):
+    def __init__(self, exc_type, args, **kwargs):
+        super().__init__(exc_type, args, **kwargs)
+
+    @property
+    def fn(self):
+        return self.exc_type
+
+    def call_function(self, tx, args, kwargs):
+        return UserDefinedExceptionClassVariable(self.exc_type, args, **kwargs)
+
+
 class UnknownVariable(VariableTracker):
     """
     It could be anything!
