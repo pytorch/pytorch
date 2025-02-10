@@ -162,6 +162,17 @@ class AttributeMutationError(Unsupported):
         super().__init__(msg)
 
 
+class InfiniteGeneratorError(Unsupported):
+    # Raised when the number of yielded values is greater than MAX_ITERATOR_LIMIT
+    def __init__(self, msg: str) -> None:
+        super().__init__(msg)
+
+
+class SideEffectsError(Unsupported):
+    def __init__(self, msg: str) -> None:
+        super().__init__(msg)
+
+
 class CondOpArgsMismatchError(ArgsMismatchError):
     """
     Internal error from cond() due to arguments mismatch.
@@ -267,12 +278,17 @@ class ObservedKeyError(ObservedLookupError):
     pass
 
 
+class ObservedGeneratorExit(ObservedException):
+    pass
+
+
 class ObservedAttributeError(ObservedException):
     # An AttributeError exception to be raised from inside Dynamo tracing. This can happen on user defined object __getattr__
     pass
 
 
 class ObservedRuntimeError(ObservedException):
+    # A RuntimeError exception to be raised from inside Dynamo tracing. This can happen on generator.throw(..) method
     pass
 
 
@@ -280,22 +296,30 @@ class ObservedNotImplementedError(ObservedException):
     pass
 
 
+class ObservedTypeError(ObservedException):
+    # A TypeError exception to be raised from inside Dynamo tracing. This can happen on generator.send(..) method
+    pass
+
+
 observed_exception_map = {
     StopIteration: ObservedUserStopIteration,
     LookupError: ObservedLookupError,
     IndexError: ObservedIndexError,
+    GeneratorExit: ObservedGeneratorExit,
     KeyError: ObservedKeyError,
     AttributeError: ObservedAttributeError,
     RuntimeError: ObservedRuntimeError,
     NotImplementedError: ObservedNotImplementedError,
+    TypeError: ObservedTypeError,
 }
 
 
-def create_dynamo_observed_exception(e: type[Exception]) -> None:
-    if e not in observed_exception_map:
-        name = getattr(e, "__name__", str(e))
-        internal_exc = type(f"Observed{name}Error", (ObservedException,), {})
-        observed_exception_map[e] = internal_exc
+def get_dynamo_observed_exception(exc_type: type[Exception]) -> type[ObservedException]:
+    if exc_type not in observed_exception_map:
+        observed_exception_map[exc_type] = type(
+            f"Observed{exc_type.__name__}Error", (ObservedException,), {}
+        )
+    return observed_exception_map[exc_type]
 
 
 def raise_observed_exception(
@@ -311,8 +335,6 @@ def raise_observed_exception(
     # stack and raise the exception.
     exception_vt = BuiltinVariable(exc_type).call_function(tx, args or [], kwargs or {})  # type: ignore[arg-type]
     tx.exn_vt_stack.append(exception_vt)
-    if exc_type not in observed_exception_map:
-        create_dynamo_observed_exception(exc_type)
     raise observed_exception_map[exc_type]
 
 
@@ -438,14 +460,6 @@ def augment_exc_message(exc: Exception, msg: str = "\n", export: bool = False) -
                 f"\nMinifier script written to {exc.inner_exception.minifier_path}. Run "
                 "this script to find the smallest traced graph which reproduces this error.\n"
             )
-
-    if not config.suppress_errors and not export:
-        msg += (
-            "\n\n"
-            "You can suppress this exception and fall back to eager by setting:\n"
-            "    import torch._dynamo\n"
-            "    torch._dynamo.config.suppress_errors = True\n"
-        )
 
     old_msg = "" if len(exc.args) == 0 else str(exc.args[0])
 

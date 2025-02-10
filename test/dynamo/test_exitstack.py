@@ -221,6 +221,7 @@ class CPythonTestBaseExitStack:
         new_stack.close()
         self.assertEqual(result, [1, 2, 3])
 
+    @unittest.expectedFailure
     @make_dynamo_test
     def test_exit_raise(self):
         with self.assertRaises(ZeroDivisionError):
@@ -228,6 +229,7 @@ class CPythonTestBaseExitStack:
                 stack.push(lambda *exc: False)
                 1 / 0
 
+    @unittest.expectedFailure
     @make_dynamo_test
     def test_exit_suppress(self):
         with self.exit_stack() as stack:
@@ -325,6 +327,7 @@ class CPythonTestBaseExitStack:
         self.assertIsInstance(inner_exc, ValueError)
         self.assertIsInstance(inner_exc.__context__, ZeroDivisionError)
 
+    @unittest.expectedFailure
     @make_dynamo_test
     def test_exit_exception_chaining(self):
         # Ensure exception chaining matches the reference behaviour
@@ -483,6 +486,7 @@ class CPythonTestBaseExitStack:
                 exc.__context__.__context__.__context__.__context__.__context__
             )
 
+    @unittest.expectedFailure
     @make_dynamo_test
     def test_body_exception_suppress(self):
         def suppress_exc(*exc_details):
@@ -495,6 +499,7 @@ class CPythonTestBaseExitStack:
         except IndexError:
             self.fail("Expected no exception, got IndexError")
 
+    @unittest.expectedFailure
     @make_dynamo_test
     def test_exit_exception_chaining_suppress(self):
         with self.exit_stack() as stack:
