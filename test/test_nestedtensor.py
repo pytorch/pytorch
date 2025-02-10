@@ -8632,6 +8632,7 @@ class TestNestedTensorOpInfo(NestedTensorTestCase):
 
                     self.assertEqualNoncontigAware(grads, grads_ref)
 
+    @skipCUDAIf(not SM70OrLater, "GPU capability is < SM70")
     @ops(
         [op for op in njt_op_db if op.supports_njt],
         allowed_dtypes=(torch.float32,),
@@ -8717,6 +8718,7 @@ class TestNestedTensorOpInfo(NestedTensorTestCase):
                     else:
                         self.assertEqual(sample.input, out_ref)
 
+    @skipCUDAIf(not SM70OrLater, "GPU capability is < SM70")
     @ops(
         [op for op in njt_op_db if op.supports_njt and op.supports_autograd],
         allowed_dtypes=(torch.float32,),
