@@ -438,7 +438,10 @@ def _create_cpu_state_dict(
         if len(obj.size()) == 0:
             return obj
 
-        ret = cast(DTensor, copy.deepcopy(obj.to(device="cpu")))
+        if obj.device != torch.device("cpu"):
+            ret = cast(DTensor, obj.to(device="cpu"))
+        else:
+            ret = copy.deepcopy(obj)
         ret._local_tensor = tensor_func(ret._local_tensor, pg, device, None)
         return ret
 
