@@ -141,7 +141,7 @@ def _get_user_allowed_globals():
             f, name = f
             rc[name] = f
         else:
-            module, name = f.__module__, f.__name__
+            module, name = f.__module__, f.__qualname__
             rc[f"{module}.{name}"] = f
     return rc
 

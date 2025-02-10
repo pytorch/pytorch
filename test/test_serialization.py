@@ -117,6 +117,13 @@ class FilelikeMock:
     def was_called(self, name):
         return name in self.calls
 
+class ClassAMock:
+    class Nested:
+        pass
+
+class ClassBMock:
+    class Nested:
+        pass
 
 class SerializationMixin:
     def _test_serialization_data(self):
@@ -1120,6 +1127,21 @@ class TestSerialization(TestCase, SerializationMixin):
         t = torch.zeros(3, 3)
         _test_save_load_attr(t)
         _test_save_load_attr(torch.nn.Parameter(t))
+
+    def test_serialization_nested_class(self) -> None:
+        with tempfile.NamedTemporaryFile() as checkpoint:
+            torch.save(
+                dict(
+                    a_nested=ClassAMock.Nested(),
+                    b_nested=ClassBMock.Nested(),
+                ),
+                checkpoint
+            )
+            checkpoint.seek(0)
+            torch.serialization.add_safe_globals(
+                [ClassAMock, ClassBMock, getattr, ClassAMock.Nested, ClassBMock.Nested]
+            )
+            torch.load(checkpoint, weights_only=True)
 
     def test_weights_only_assert(self):
         class HelloWorld:
