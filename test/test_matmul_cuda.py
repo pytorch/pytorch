@@ -965,10 +965,8 @@ class TestFP8MatmulCuda(TestCase):
         C = torch._scaled_mm(
             A,
             B.t(),
-            # scales are switched
-            # TODO write this up, or switch in c++ land
-            B_scale,
             A_scale,
+            B_scale,
             out_dtype=torch.bfloat16,
             use_fast_accum=fast_accum,
         )
