@@ -417,6 +417,8 @@ jobs:
           path: ./**/core.[1-9]*
 
       - name: Upload utilization stats
+        if: always() && steps.test.conclusion && steps.test.conclusion != 'skipped'
+        continue-on-error: true
         uses: ./.github/actions/upload-utilization-stats
         with:
           job_id: ${{ steps.get-job-id.outputs.job-id }}
