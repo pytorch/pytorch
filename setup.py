@@ -297,6 +297,7 @@ if BUILD_PYTHON_ONLY:
 # Parameters parsed from environment
 ################################################################################
 
+# os.environ["CMAKE_GENERATOR"] = "Ninja"
 VERBOSE_SCRIPT = True
 RUN_BUILD_DEPS = True
 # see if the user passed a quiet flag to setup.py arguments and respect
