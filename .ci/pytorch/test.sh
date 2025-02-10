@@ -1438,7 +1438,7 @@ test_executorch() {
 test_linux_aarch64() {
   python test/run_test.py --include test_modules test_mkldnn test_mkldnn_fusion test_openmp test_torch test_dynamic_shapes \
         test_transformers test_multiprocessing test_numpy_interop test_autograd test_binary_ufuncs test_complex test_spectral_ops \
-        test_foreach test_reductions test_unary_ufuncs test_tensor_creation_ops \
+        test_foreach test_reductions test_unary_ufuncs test_tensor_creation_ops nn/test_convolution \
         --shard "$SHARD_NUMBER" "$NUM_TEST_SHARDS" --verbose
 
   # Dynamo tests
@@ -1457,7 +1457,7 @@ test_linux_aarch64() {
        inductor/test_split_cat_fx_passes inductor/test_standalone_compile inductor/test_torchinductor \
        inductor/test_torchinductor_codegen_dynamic_shapes inductor/test_torchinductor_dynamic_shapes inductor/test_memory \
        inductor/test_triton_cpu_backend inductor/test_triton_extension_backend inductor/test_mkldnn_pattern_matcher inductor/test_cpu_cpp_wrapper \
-       --shard "$SHARD_NUMBER" "$NUM_TEST_SHARDS" --verbose
+       inductor/test_fused_attention inductor/test_cpu_select_algorithm --shard "$SHARD_NUMBER" "$NUM_TEST_SHARDS" --verbose
 }
 
 if ! [[ "${BUILD_ENVIRONMENT}" == *libtorch* || "${BUILD_ENVIRONMENT}" == *-bazel-* ]]; then

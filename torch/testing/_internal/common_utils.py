@@ -1590,6 +1590,8 @@ def xpassIfTorchDynamo_np(func):
         return unittest.skip("skipping numpy 2.0+ dynamo-wrapped test")(func)
     return func if TEST_WITH_TORCHDYNAMO else unittest.expectedFailure(func)
 
+def xfailIfAarch64(func):
+    return unittest.expectedFailure(func) if IS_ARM64 else func
 
 def xfailIfACL(func):
     return unittest.expectedFailure(func) if TEST_ACL else func
