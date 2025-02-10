@@ -639,7 +639,7 @@ class DistributedDataParallel(Module, Joinable):
     def __init__(
         self,
         module: Module,
-        device_ids: Optional[List[Union[int, device]]] = None,
+        device_ids: Optional[Union[List[int], List[device], List[Union[int, device]]]] = None,
         output_device: Optional[Union[int, device]] = None,
         dim: int = 0,
         broadcast_buffers: bool = True,
