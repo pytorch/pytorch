@@ -2063,7 +2063,7 @@ def _export(
     # it makes more sense to do the switch here.
     # export_training_ir_rollout_check returns True in OSS
     # while internally it returns False UNLESS otherwise specified.
-    if pre_dispatch and export_training_ir_rollout_check():
+    if True:
         return _export_for_training(
             mod,
             args,
