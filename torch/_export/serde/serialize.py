@@ -2723,6 +2723,10 @@ def _dataclass_to_dict(obj):
         return obj
 
 
+def _to_json_bytes(obj: Any) -> bytes:
+    return json.dumps(_dataclass_to_dict(obj), cls=EnumEncoder).encode("utf-8")
+
+
 def serialize(
     exported_program: ep.ExportedProgram,
     opset_version: Optional[dict[str, int]] = None,
@@ -2734,10 +2738,7 @@ def serialize(
         )
     assert isinstance(serialized_program.exported_program, ExportedProgram)
 
-    json_program = json.dumps(
-        _dataclass_to_dict(serialized_program.exported_program), cls=EnumEncoder
-    )
-    json_bytes = json_program.encode("utf-8")
+    json_bytes = _to_json_bytes(serialized_program.exported_program)
     artifact = SerializedArtifact(
         json_bytes,
         serialized_program.state_dict,
