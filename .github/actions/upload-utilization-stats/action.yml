@@ -35,6 +35,17 @@ runs:
         echo "workflow_Name: ${{inputs.workflow_name}}"
         echo "job_id: ${{inputs.job_id}}"
         echo "job_name:  ${{inputs.job_name}}"
+      steps:
+    - uses: nick-fields/retry@v3.0.0
+      name: Setup dependencies
+      with:
+        shell: bash
+        timeout_minutes: 5
+        max_attempts: 5
+        retry_wait_seconds: 30
+        command: |
+          set -eu
+          python3 -m pip install boto3==1.35.42 pandas=2.2.3
     - name: Upload utilizatoin stats to s3
       shell: bash
       run: |
