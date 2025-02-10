@@ -13,6 +13,10 @@ from torch._dynamo.symbolic_convert import SpeculationLog, SpeculationLogDiverge
 from torch.testing._internal.common_utils import make_dynamo_test
 
 
+class CustomException(Exception):
+    ...
+
+
 class ExceptionTests(torch._dynamo.test_case.TestCase):
     def test_exception(self):
         def fn(x):
