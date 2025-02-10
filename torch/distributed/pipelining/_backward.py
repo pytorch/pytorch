@@ -344,7 +344,7 @@ def stage_backward(
         # 2. extract_tensors_with_grads referred to both stage_output_tensors, output_grad_tensors,
         #    and to itself (extract_tensors_with_grads) since it makes a recursive call
         # 3. stage_output_tensors was kept alive by the above refcycle, and it holds activation tensors, which is bad
-        # fix -> explictly pass in the ref to the fn, so there is no gc cycle anymore
+        # fix -> explicitly pass in the ref to the fn, so there is no gc cycle anymore
         extract_tensors_with_grads(
             stage_output, output_grads, extract_tensors_with_grads
         )

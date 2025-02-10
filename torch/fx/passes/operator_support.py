@@ -24,9 +24,9 @@ TargetTypeName = str
 
 # Arguments' dtypes for a given node, see `OperatorSupport`
 SupportedArgumentDTypes = t.Optional[
-    t.Tuple[
+    tuple[
         t.Sequence[t.Sequence[torch.dtype]],
-        t.Dict[str, t.Sequence[torch.dtype]],
+        dict[str, t.Sequence[torch.dtype]],
     ]
 ]
 
@@ -204,7 +204,7 @@ class OpSupports:
         return create_op_support(_decline_if_input_dtype)
 
     @classmethod
-    def decline_if_node_in_names(cls, disallow_set: t.Set[str]) -> OperatorSupportBase:
+    def decline_if_node_in_names(cls, disallow_set: set[str]) -> OperatorSupportBase:
         """
         If a node has a name that is in the disallow set, reported it as non-supported.
         """

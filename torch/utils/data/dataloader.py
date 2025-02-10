@@ -14,7 +14,8 @@ import os
 import queue
 import threading
 import warnings
-from typing import Any, Callable, Generic, Iterable, List, Optional, TypeVar, Union
+from collections.abc import Iterable
+from typing import Any, Callable, Generic, Optional, TypeVar, Union
 
 import torch
 import torch.distributed as dist
@@ -51,7 +52,7 @@ _worker_init_fn_t = Callable[[int], None]
 # Ideally we would parameterize `DataLoader` by the return type of `collate_fn`, but there is currently no way to have that
 # type parameter set to a default value if the user doesn't pass in a custom 'collate_fn'.
 # See https://github.com/python/mypy/issues/3737.
-_collate_fn_t = Callable[[List[_T]], Any]
+_collate_fn_t = Callable[[list[_T]], Any]
 
 
 # These functions used to be defined in this file. However, it was moved to
@@ -241,7 +242,7 @@ class DataLoader(Generic[_T_co]):
         batch_size: Optional[int] = 1,
         shuffle: Optional[bool] = None,
         sampler: Union[Sampler, Iterable, None] = None,
-        batch_sampler: Union[Sampler[List], Iterable[List], None] = None,
+        batch_sampler: Union[Sampler[list], Iterable[list], None] = None,
         num_workers: int = 0,
         collate_fn: Optional[_collate_fn_t] = None,
         pin_memory: bool = False,
@@ -355,7 +356,7 @@ class DataLoader(Generic[_T_co]):
             self._dataset_kind = _DatasetKind.Map
 
         if sampler is not None and shuffle:
-            raise ValueError("sampler option is mutually exclusive with " "shuffle")
+            raise ValueError("sampler option is mutually exclusive with shuffle")
 
         if batch_sampler is not None:
             # auto_collation with custom batch_sampler
