@@ -298,8 +298,10 @@ class ExceptionVariable(VariableTracker):
             return self.__cause__
         elif name == "__suppress_context__":
             return self.__suppress_context__
-        if name == "__traceback__":
+        elif name == "__traceback__":
             return variables.ConstantVariable(None)
+        elif name == "args":
+            return variables.ListVariable(self.args, source=self.source)
         return super().var_getattr(tx, name)
 
     def __str__(self):
@@ -314,12 +316,15 @@ class ExceptionVariable(VariableTracker):
 
 
 class UserDefinedExceptionClassVariable(ExceptionVariable):
-    def __init__(self, exc_type, **kwargs):
-        super().__init__(exc_type, (), **kwargs)
+    def __init__(self, exc_type, args, **kwargs):
+        super().__init__(exc_type, args, **kwargs)
 
     @property
     def fn(self):
         return self.exc_type
+
+    def call_function(self, tx, args, kwargs):
+        return UserDefinedExceptionClassVariable(self.exc_type, args, **kwargs)
 
 
 class UnknownVariable(VariableTracker):
