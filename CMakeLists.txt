@@ -714,7 +714,7 @@ endif()
 # Build libtorch mobile library, which contains ATen/TH ops and native support
 # for TorchScript model, but doesn't contain not-yet-unified caffe2 ops;
 if(INTERN_BUILD_MOBILE)
-  if(NOT BUILD_SHARED_LIBS AND NOT "${SELECTED_OP_LIST}" STREQUAL "")
+    if(NOT BUILD_SHARED_LIBS AND NOT "${SELECTED_OP_LIST}" STREQUAL "")
     string(APPEND CMAKE_CXX_FLAGS " -DNO_EXPORT")
   endif()
   if(BUILD_MOBILE_AUTOGRAD)
@@ -1224,7 +1224,7 @@ if(ANDROID AND (NOT ANDROID_DEBUG_SYMBOLS))
   endif()
 endif()
 
-if(NOT APPLE AND UNIX)
+if(NOT APPLE AND NOT QNX AND UNIX)
   list(APPEND Caffe2_DEPENDENCY_LIBS dl)
 endif()
 

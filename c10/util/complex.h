@@ -252,7 +252,7 @@ struct alignas(sizeof(T) * 2) complex {
     U c = rhs.real();
     U d = rhs.imag();
 
-#if defined(__GNUC__) && !defined(__clang__)
+#if defined(__GNUC__) && !defined(__clang__) && !defined(__QNX__)
     // std::abs is already constexpr by gcc
     auto abs_c = std::abs(c);
     auto abs_d = std::abs(d);

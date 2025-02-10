@@ -1503,6 +1503,10 @@ if(MSVC AND BUILD_SHARED_LIBS)
   target_compile_options(torch_cpu PRIVATE "-DONNX_BUILD_MAIN_LIB")
 endif()
 
+if(QNX)
+  target_compile_options(torch_cpu PRIVATE "-Wno-error=nonnull")
+endif()
+
 caffe2_interface_library(torch_cpu torch_cpu_library)
 
 if(USE_CUDA)

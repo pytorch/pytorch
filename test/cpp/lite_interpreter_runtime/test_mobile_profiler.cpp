@@ -45,15 +45,24 @@ bool checkMetaData(
 } // namespace
 
 TEST(MobileProfiler, ModuleHierarchy) {
+#if defined(__QNX__)
+  // Don't compile an absolute path when building for a target.
+  auto testModelFile = "to_be_profiled_module.ptl";
+#else
   auto testModelFile = torch::testing::getResourcePath(
       "test/cpp/lite_interpreter_runtime/to_be_profiled_module.ptl");
+#endif
 
   std::vector<IValue> inputs;
   inputs.emplace_back(at::rand({64, 64}));
   inputs.emplace_back(at::rand({64, 64}));
   std::string trace_file_name("/tmp/test_trace.trace");
 
+#if defined(__QNX__)
+  mobile::Module bc = _load_for_mobile(testModelFile);
+#else
   mobile::Module bc = _load_for_mobile(testModelFile.string());
+#endif
   {
     KinetoEdgeCPUProfiler profiler(
         bc,
@@ -99,15 +108,24 @@ TEST(MobileProfiler, ModuleHierarchy) {
 }
 
 TEST(MobileProfiler, Backend) {
+#if defined(__QNX__)
+  // Don't compile an absolute path when building for a target.
+  auto testModelFile = "test_backend_for_profiling.ptl";
+#else
   auto testModelFile = torch::testing::getResourcePath(
       "test/cpp/lite_interpreter_runtime/test_backend_for_profiling.ptl");
+#endif
 
   std::vector<IValue> inputs;
   inputs.emplace_back(at::rand({64, 64}));
   inputs.emplace_back(at::rand({64, 64}));
   std::string trace_file_name("/tmp/test_trace_backend.trace");
 
+#if defined(__QNX__)
+  mobile::Module bc = _load_for_mobile(testModelFile);
+#else
   mobile::Module bc = _load_for_mobile(testModelFile.string());
+#endif
   {
     KinetoEdgeCPUProfiler profiler(
         bc,
@@ -133,15 +151,24 @@ TEST(MobileProfiler, Backend) {
 }
 
 TEST(MobileProfiler, BackendMemoryEvents) {
+#if defined(__QNX__)
+  // Don't compile an absolute path when building for a target.
+  auto testModelFile = "test_backend_for_profiling.ptl";
+#else
   auto testModelFile = torch::testing::getResourcePath(
       "test/cpp/lite_interpreter_runtime/test_backend_for_profiling.ptl");
+#endif
 
   std::vector<IValue> inputs;
   inputs.emplace_back(at::rand({64, 64}));
   inputs.emplace_back(at::rand({64, 64}));
   std::string trace_file_name("/tmp/test_trace_backend_memory.trace");
 
+#if defined(__QNX__)
+  mobile::Module bc = _load_for_mobile(testModelFile);
+#else
   mobile::Module bc = _load_for_mobile(testModelFile.string());
+#endif
   {
     mobile::KinetoEdgeCPUProfiler profiler(
         bc,
@@ -165,8 +192,13 @@ TEST(MobileProfiler, BackendMemoryEvents) {
 }
 
 TEST(MobileProfiler, ProfilerEvent) {
+#if defined(__QNX__)
+  // Don't compile an absolute path when building for a target.
+  auto testModelFile = "test_backend_for_profiling.ptl";
+#else
   auto testModelFile = torch::testing::getResourcePath(
       "test/cpp/lite_interpreter_runtime/test_backend_for_profiling.ptl");
+#endif
 
   std::vector<IValue> inputs;
   inputs.emplace_back(at::rand({64, 64}));
@@ -177,7 +209,11 @@ TEST(MobileProfiler, ProfilerEvent) {
       torch::profiler::ProfilerPerfEvents.begin(),
       torch::profiler::ProfilerPerfEvents.end());
 
+#if defined(__QNX__)
+  mobile::Module bc = _load_for_mobile(testModelFile);
+#else
   mobile::Module bc = _load_for_mobile(testModelFile.string());
+#endif
   {
     // Bail if something goes wrong here
     try {

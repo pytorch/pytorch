@@ -337,6 +337,13 @@ class numeric_limits<c10::BFloat16> {
     return c10::BFloat16(0x0001, c10::BFloat16::from_bits());
   }
 };
+ 
+#if defined(__QNX__)
+  inline bool isnan(c10::BFloat16& val)
+  {
+    return std::isnan(static_cast<float>(val));
+  }
+#endif
 
 } // namespace std
 
