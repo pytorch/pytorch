@@ -3230,66 +3230,66 @@ class TestCase(expecttest.TestCase):
                     super_run = torch._dynamo.optimize("inductor")(super_run)
                 elif TEST_WITH_SUBCLASSES:
                     super_run = torch._dynamo.optimize("test_subclasses")(super_run)
+                else:
+                    # Assume eager-generated GraphModules will not error out.
+                    # If we do, this is probably a Dynamo bug!
+                    super_run = torch._dynamo.optimize("eager_noexcept", nopython=nopython)(super_run)
 
-                # Assume eager-generated GraphModules will not error out.
-                # If we do, this is probably a Dynamo bug!
-                super_run = torch._dynamo.optimize("eager_noexcept", nopython=nopython)(super_run)
+                key = f"{self.__class__.__name__}.{self._testMethodName}"
 
-            key = f"{self.__class__.__name__}.{self._testMethodName}"
+                def expect_failure(f, file_name):
+                    @wraps(f)
+                    def wrapper(*args, **kwargs):
+                        try:
+                            f(*args, **kwargs)
+                        except BaseException as e:
+                            self.skipTest(e)
+                        raise RuntimeError(f"Unexpected success, please remove `{file_name}`")
+                    return wrapper
 
-            def expect_failure(f, file_name):
-                @wraps(f)
-                def wrapper(*args, **kwargs):
-                    try:
-                        f(*args, **kwargs)
-                    except BaseException as e:
-                        self.skipTest(e)
-                    raise RuntimeError(f"Unexpected success, please remove `{file_name}`")
-                return wrapper
+                if TEST_WITH_TORCHINDUCTOR:
+                    subdir = "test/inductor_expected_failures"
+                    from .dynamo_test_failures import inductor_expected_failures as expected_failures
+                elif TEST_WITH_SUBCLASSES:
+                    subdir = "test/subclasses_expected_failures"
+                    from .dynamo_test_failures import subclasses_expected_failures as expected_failures
+                else:
+                    subdir = "test/dynamo_expected_failures"
+                    from .dynamo_test_failures import dynamo_expected_failures as expected_failures
 
-            if TEST_WITH_TORCHINDUCTOR:
-                subdir = "test/inductor_expected_failures"
-                from .dynamo_test_failures import inductor_expected_failures as expected_failures
-            elif TEST_WITH_SUBCLASSES:
-                subdir = "test/subclasses_expected_failures"
-                from .dynamo_test_failures import subclasses_expected_failures as expected_failures
-            else:
-                subdir = "test/dynamo_expected_failures"
-                from .dynamo_test_failures import dynamo_expected_failures as expected_failures
-
-            if key in expected_failures:
-                method = getattr(self, self._testMethodName)
-                file_name = os.path.join(subdir, key)
-                setattr(self, self._testMethodName, expect_failure(method, file_name))
-
-            def ignore_failure(f, file_name):
-                @wraps(f)
-                def wrapper(*args, **kwargs):
-                    try:
-                        f(*args, **kwargs)
-                    except BaseException as e:
-                        self.skipTest(e)
+                if key in expected_failures:
                     method = getattr(self, self._testMethodName)
-                    if getattr(method, "__unittest_expecting_failure__", False):
-                        self.skipTest("unexpected success")
-                    else:
-                        self.skipTest(f"This test passed, maybe we can remove `{file_name}`")
-                return wrapper
+                    file_name = os.path.join(subdir, key)
+                    setattr(self, self._testMethodName, expect_failure(method, file_name))
 
-            if TEST_WITH_TORCHINDUCTOR:
-                subdir = "test/inductor_skips"
-                from .dynamo_test_failures import inductor_skips as skips
-            elif TEST_WITH_SUBCLASSES:
-                subdir = "test/subclasses_skips"
-                from .dynamo_test_failures import subclasses_skips as skips
-            else:
-                subdir = "test/dynamo_skips"
-                from .dynamo_test_failures import dynamo_skips as skips
+                def ignore_failure(f, file_name):
+                    @wraps(f)
+                    def wrapper(*args, **kwargs):
+                        try:
+                            f(*args, **kwargs)
+                        except BaseException as e:
+                            self.skipTest(e)
+                        method = getattr(self, self._testMethodName)
+                        if getattr(method, "__unittest_expecting_failure__", False):
+                            self.skipTest("unexpected success")
+                        else:
+                            self.skipTest(f"This test passed, maybe we can remove `{file_name}`")
+                    return wrapper
 
-            if key in skips:
-                method = getattr(self, self._testMethodName)
-                file_name = os.path.join(subdir, key)
-                setattr(self, self._testMethodName, ignore_failure(method, file_name))
+                if TEST_WITH_TORCHINDUCTOR:
+                    subdir = "test/inductor_skips"
+                    from .dynamo_test_failures import inductor_skips as skips
+                elif TEST_WITH_SUBCLASSES:
+                    subdir = "test/subclasses_skips"
+                    from .dynamo_test_failures import subclasses_skips as skips
+                else:
+                    subdir = "test/dynamo_skips"
+                    from .dynamo_test_failures import dynamo_skips as skips
+
+                if key in skips:
+                    method = getattr(self, self._testMethodName)
+                    file_name = os.path.join(subdir, key)
+                    setattr(self, self._testMethodName, ignore_failure(method, file_name))
 
             # with torch._dynamo.eval_frame.dynamo_override_backend(override_backend):
             super_run(result=result)
