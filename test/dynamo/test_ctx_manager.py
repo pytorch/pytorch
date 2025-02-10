@@ -1750,11 +1750,11 @@ class GraphModule(torch.nn.Module):
 
 class ContextlibContextManagerTests(torch._dynamo.test_case.TestCase):
     def setUp(self):
-        self._old = torch._dynamo.config.enable_trace_contextlib
+        self._prev = torch._dynamo.config.enable_trace_contextlib
         torch._dynamo.config.enable_trace_contextlib = True
 
     def tearDown(self):
-        torch._dynamo.config.enable_trace_contextlib = self._old
+        torch._dynamo.config.enable_trace_contextlib = self._prev
 
     def test_ctx_basic0(self):
         @contextlib.contextmanager
@@ -2243,7 +2243,7 @@ class GraphModule(torch.nn.Module):
         eager = EagerAndRecordGraphs()
         out = torch.compile(backend=eager, fullgraph=False)(fn)(x)
         self.assertEqual(expected, out)
-        self.assertEqual(len(eager.graphs), 1)
+        self.assertEqual(len(eager.graphs), 0)
 
     def test_graph_break_before_and_after___enter__(self):
         @contextlib.contextmanager
@@ -2269,7 +2269,7 @@ class GraphModule(torch.nn.Module):
         eager = EagerAndRecordGraphs()
         out = torch.compile(backend=eager, fullgraph=False)(fn)(x)
         self.assertEqual(expected, out)
-        self.assertEqual(len(eager.graphs), 1)
+        self.assertEqual(len(eager.graphs), 0)
 
     def test_graph_break_before___enter___and_disable___exit__(self):
         @contextlib.contextmanager
@@ -2299,7 +2299,7 @@ class GraphModule(torch.nn.Module):
         eager = EagerAndRecordGraphs()
         out = torch.compile(backend=eager, fullgraph=False)(fn)(x)
         self.assertEqual(expected, out)
-        self.assertEqual(len(eager.graphs), 1)
+        self.assertEqual(len(eager.graphs), 0)
 
     def test_disable___enter__(self):
         def h(x):
@@ -2580,7 +2580,7 @@ class GraphModule(torch.nn.Module):
         eager = EagerAndRecordGraphs()
         out = torch.compile(backend=eager, fullgraph=False)(fn)(x)
         self.assertEqual(expected, out)
-        self.assertEqual(len(eager.graphs), 1)
+        self.assertEqual(len(eager.graphs), 0)
 
     def test_dynamo_disable_ctx(self):
         @contextlib.contextmanager
@@ -2630,7 +2630,7 @@ class GraphModule(torch.nn.Module):
         eager = EagerAndRecordGraphs()
         out = torch.compile(backend=eager, fullgraph=False, dynamic=False)(f)(x)
         self.assertEqual(expected, out)
-        self.assertEqual(len(eager.graphs), 3)
+        self.assertEqual(len(eager.graphs), 2)
 
     @parametrize("name", ("suppress", "stdout", "stderr"))
     def test_contextlib_suppress(self, name):
@@ -2676,7 +2676,6 @@ class GraphModule(torch.nn.Module):
         self.assertEqual(len(counters["graph_break"]), 0)
         self.assertEqual(y, t.sin())
 
-    @unittest.expectedFailure  # needs generator.throw
     def test_WITH_EXCEPT_START(self):
         @contextmanager
         def ctx():
@@ -2718,7 +2717,6 @@ class CPythonContextManagerTestCase(torch._dynamo.test_case.TestCase):
             state.append(x)
         self.assertEqual(state, [1, 42, 999])
 
-    @unittest.expectedFailure
     @make_dynamo_test
     def test_contextmanager_finally(self):
         state = []
@@ -2767,7 +2765,6 @@ class CPythonContextManagerTestCase(torch._dynamo.test_case.TestCase):
         self.assertEqual(frames[0].name, "test_contextmanager_traceback")
         self.assertEqual(frames[0].line, "raise NotImplementedError(42)")
 
-    @unittest.expectedFailure
     @make_dynamo_test
     def test_contextmanager_no_reraise(self):
         @contextmanager
@@ -2779,19 +2776,19 @@ class CPythonContextManagerTestCase(torch._dynamo.test_case.TestCase):
         # Calling __exit__ should not result in an exception
         self.assertFalse(ctx.__exit__(TypeError, TypeError("foo"), None))
 
-    @unittest.expectedFailure
     @make_dynamo_test
     def test_contextmanager_trap_yield_after_throw(self):
         @contextmanager
         def whoo():
             try:
                 yield
-            except Exception:
+            except Exception:  # noqa: E722
                 yield
 
         ctx = whoo()
         ctx.__enter__()
-        self.assertRaises(RuntimeError, ctx.__exit__, TypeError, TypeError("foo"), None)
+        with self.assertRaises(RuntimeError):
+            ctx.__exit__(TypeError, TypeError("foo"), None)
 
     @unittest.expectedFailure
     @make_dynamo_test
@@ -2966,7 +2963,6 @@ def woohoo():
         with self.assertRaises(RuntimeError):
             ctx.__enter__()
 
-    @unittest.expectedFailure
     @make_dynamo_test
     def test_contextmanager_trap_second_yield(self):
         @contextmanager
@@ -3000,7 +2996,6 @@ def woohoo():
             with woohoo():
                 raise StopIteration
 
-    @unittest.expectedFailure
     @make_dynamo_test
     def test_contextmanager_non_normalised(self):
         @contextmanager
