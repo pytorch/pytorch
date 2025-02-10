@@ -7064,6 +7064,161 @@ class GraphModule(torch.nn.Module):
         self.assertEqual(len(while_loop_nodes), 1)
         self.assertEqual(len(while_loop_nodes[0].meta.get("unbacked_bindings")), 5)
 
+    # Return the .module() graph str result of non-strict export
+    def _check_export_ret_graph_str(self, fn, args, dynamic_shapes=None) -> str:
+        strict_ep = torch.export.export(
+            fn, args, dynamic_shapes=dynamic_shapes, strict=True
+        )
+        non_strict_ep = torch.export.export(
+            fn, args, dynamic_shapes=dynamic_shapes, strict=False
+        )
+        eager_res = fn(*args)
+        self.assertEqual(strict_ep.module()(*args), eager_res)
+        self.assertEqual(non_strict_ep.module()(*args), eager_res)
+        return normalize_gm(non_strict_ep.module().print_readable(print_output=False))
+
+    @skipIfTorchDynamo("Skip because dynamo cannot trace torch.export.")
+    @torch._dynamo.config.patch(capture_scalar_outputs=True)
+    def test_cond_eager_run_with_item(self):
+        class M(torch.nn.Module):
+            def forward(self, a, b1, b2, c):
+                def true_fn(x):
+                    return x * b1.item()
+
+                def false_fn(x):
+                    return x * b2.item()
+
+                r = torch.cond(a, true_fn, false_fn, (c,))
+                return r * 2
+
+        x = torch.randn(10, requires_grad=True)
+        args = (
+            torch.tensor(True),
+            torch.tensor([3]),
+            torch.tensor([4]),
+            x,
+        )
+        model = M()
+        torch.export.export(model, args, strict=True)
+        graph_str = self._check_export_ret_graph_str(model, args, None)
+        self.assertExpectedInline(
+            graph_str,
+            """\
+class GraphModule(torch.nn.Module):
+    def forward(self, a, b1, b2, c):
+        a: "b8[]"; b1: "i64[1]"; b2: "i64[1]"; c: "f32[10]";
+
+        a, b1, b2, c, = fx_pytree.tree_flatten_spec(([a, b1, b2, c], {}), self._in_spec)
+        true_graph_0 = self.true_graph_0
+        false_graph_0 = self.false_graph_0
+        cond = torch.ops.higher_order.cond(a, true_graph_0, false_graph_0, [c, b1, b2]);  a = true_graph_0 = false_graph_0 = c = b1 = b2 = None
+        getitem: "f32[10]" = cond[0];  cond = None
+
+        mul: "f32[10]" = torch.ops.aten.mul.Tensor(getitem, 2);  getitem = None
+        return pytree.tree_unflatten((mul,), self._out_spec)
+
+    class true_graph_0(torch.nn.Module):
+        def forward(self, c: "f32[10]", b1: "i64[1]", b2: "i64[1]"):
+            item: "Sym(u0)" = torch.ops.aten.item.default(b1);  b1 = None
+
+            mul: "f32[10]" = torch.ops.aten.mul.Tensor(c, item);  c = item = None
+            return (mul,)
+
+    class false_graph_0(torch.nn.Module):
+        def forward(self, c: "f32[10]", b1: "i64[1]", b2: "i64[1]"):
+            item: "Sym(u1)" = torch.ops.aten.item.default(b2);  b2 = None
+
+            mul: "f32[10]" = torch.ops.aten.mul.Tensor(c, item);  c = item = None
+            return (mul,)
+""",  # noqa: B950
+        )
+
+    @skipIfTorchDynamo("Skip because dynamo cannot trace torch.export.")
+    def test_cond_symint_closure(self):
+        from torch.export import Dim
+
+        class M(torch.nn.Module):
+            def forward(self, x, y, z):
+                a = y.shape[0]
+                b = z.shape[0]
+
+                def true_fn(x):
+                    return x + a
+
+                def false_fn(x):
+                    return x + b * z
+
+                # When exporting with non-strict: a and b are symints,
+                # so torch.compile need to wrap and trace symint inputs.
+                return torch.cond(x.shape[0] > 5, true_fn, false_fn, (x,))
+
+        args = (torch.ones(3, 3), torch.ones(5), torch.ones(3, 3))
+        model = M()
+        dynamic_shapes = {"x": {0: Dim("d")}, "y": {0: Dim("d1")}, "z": {0: Dim("d")}}
+        non_strict_graph_str = self._check_export_ret_graph_str(
+            model, args, dynamic_shapes
+        )
+        self.assertExpectedInline(
+            non_strict_graph_str,
+            """\
+class GraphModule(torch.nn.Module):
+    def forward(self, x, y, z):
+        x: "f32[s0, 3]"; y: "f32[s1]"; z: "f32[s0, 3]";
+
+        x, y, z, = fx_pytree.tree_flatten_spec(([x, y, z], {}), self._in_spec)
+        sym_size_int_3: "Sym(s0)" = torch.ops.aten.sym_size.int(x, 0)
+        sym_size_int_4: "Sym(s1)" = torch.ops.aten.sym_size.int(y, 0);  y = None
+
+        gt: "Sym(s0 > 5)" = sym_size_int_3 > 5
+
+        true_graph_0 = self.true_graph_0
+        false_graph_0 = self.false_graph_0
+        cond = torch.ops.higher_order.cond(gt, true_graph_0, false_graph_0, [x, sym_size_int_4, sym_size_int_3, z]);  gt = true_graph_0 = false_graph_0 = x = sym_size_int_4 = sym_size_int_3 = z = None
+        getitem: "f32[s0, 3]" = cond[0];  cond = None
+        return pytree.tree_unflatten((getitem,), self._out_spec)
+
+    class true_graph_0(torch.nn.Module):
+        def forward(self, x: "f32[s0, 3]", sym_size_int_4: "Sym(s1)", sym_size_int_3: "Sym(s0)", z: "f32[s0, 3]"):
+            add: "f32[s0, 3]" = torch.ops.aten.add.Tensor(x, sym_size_int_4);  x = sym_size_int_4 = None
+            return (add,)
+
+    class false_graph_0(torch.nn.Module):
+        def forward(self, x: "f32[s0, 3]", sym_size_int_4: "Sym(s1)", sym_size_int_3: "Sym(s0)", z: "f32[s0, 3]"):
+            mul: "f32[s0, 3]" = torch.ops.aten.mul.Tensor(z, sym_size_int_3);  z = sym_size_int_3 = None
+
+            add: "f32[s0, 3]" = torch.ops.aten.add.Tensor(x, mul);  x = mul = None
+            return (add,)
+""",  # noqa: B950
+        )
+
+    # unbacked symint inputs are created during non-strict export,
+    # which causes a graph break
+    @unittest.expectedFailure
+    def test_cond_unbacked_symint_closure(self):
+        from torch.export import Dim
+
+        class M(torch.nn.Module):
+            def forward(self, x, y, z):
+                a = y.shape[0]
+                b = z.shape[0]
+                # c is an unbacked symint in non-strict export
+                c = y.sum().item()
+
+                def true_fn(x):
+                    return x + a + c
+
+                def false_fn(x):
+                    return x + b * z * c
+
+                # When exporting with non-strict: a and b are symints,
+                # so torch.compile need to wrap and trace symint inputs.
+                return torch.cond(x.shape[0] > 5, true_fn, false_fn, (x,))
+
+        args = (torch.ones(3, 3), torch.ones(5, dtype=torch.int32), torch.ones(3, 3))
+        model = M()
+        dynamic_shapes = {"x": {0: Dim("d")}, "y": {0: Dim("d1")}, "z": {0: Dim("d")}}
+        _ = self._check_export_ret_graph_str(model, args, dynamic_shapes)
+
 
 _hop_schema_test_schema_types = [
     "bool",
@@ -7078,6 +7233,7 @@ _hop_schema_test_schema_types = [
 ]
 
 
+@skipIfTorchDynamo("We don't expect users to torch.compile hop schema generation.")
 @unittest.skipIf(IS_WINDOWS, "Windows not supported for this test")
 class TestHopSchema(TestCase):
     def _get_example_val(self, ty: str):
@@ -7197,159 +7353,6 @@ class TestHopSchema(TestCase):
             """while_loop(GraphModule cond_fn, GraphModule body_fn, Tensor[2] carried_inputs, Tensor[3] additional_inputs) -> Tensor[2]""",  # noqa: B950
         )
         self.assertEqual(schema.parse(str(schema)), schema)
-
-    # Return the .module() graph str result of non-strict export
-    def _check_export(self, fn, args, dynamic_shapes=None) -> str:
-        strict_ep = torch.export.export(
-            fn, args, dynamic_shapes=dynamic_shapes, strict=True
-        )
-        non_strict_ep = torch.export.export(
-            fn, args, dynamic_shapes=dynamic_shapes, strict=False
-        )
-        eager_res = fn(*args)
-        self.assertEqual(strict_ep.module()(*args), eager_res)
-        self.assertEqual(non_strict_ep.module()(*args), eager_res)
-        return normalize_gm(non_strict_ep.module().print_readable(print_output=False))
-
-    @skipIfTorchDynamo("Skip because dynamo cannot trace torch.export.")
-    @torch._dynamo.config.patch(capture_scalar_outputs=True)
-    def test_cond_eager_run_with_item(self):
-        class M(torch.nn.Module):
-            def forward(self, a, b1, b2, c):
-                def true_fn(x):
-                    return x * b1.item()
-
-                def false_fn(x):
-                    return x * b2.item()
-
-                r = torch.cond(a, true_fn, false_fn, (c,))
-                return r * 2
-
-        x = torch.randn(10, requires_grad=True)
-        args = (
-            torch.tensor(True),
-            torch.tensor([3]),
-            torch.tensor([4]),
-            x,
-        )
-        model = M()
-        torch.export.export(model, args, strict=True)
-        graph_str = self._check_export(model, args, None)
-        self.assertExpectedInline(
-            graph_str,
-            """\
-class GraphModule(torch.nn.Module):
-    def forward(self, a, b1, b2, c):
-        a: "b8[]"; b1: "i64[1]"; b2: "i64[1]"; c: "f32[10]";
-
-        a, b1, b2, c, = fx_pytree.tree_flatten_spec(([a, b1, b2, c], {}), self._in_spec)
-        true_graph_0 = self.true_graph_0
-        false_graph_0 = self.false_graph_0
-        cond = torch.ops.higher_order.cond(a, true_graph_0, false_graph_0, [c, b1, b2]);  a = true_graph_0 = false_graph_0 = c = b1 = b2 = None
-        getitem: "f32[10]" = cond[0];  cond = None
-
-        mul: "f32[10]" = torch.ops.aten.mul.Tensor(getitem, 2);  getitem = None
-        return pytree.tree_unflatten((mul,), self._out_spec)
-
-    class true_graph_0(torch.nn.Module):
-        def forward(self, c: "f32[10]", b1: "i64[1]", b2: "i64[1]"):
-            item: "Sym(u0)" = torch.ops.aten.item.default(b1);  b1 = None
-
-            mul: "f32[10]" = torch.ops.aten.mul.Tensor(c, item);  c = item = None
-            return (mul,)
-
-    class false_graph_0(torch.nn.Module):
-        def forward(self, c: "f32[10]", b1: "i64[1]", b2: "i64[1]"):
-            item: "Sym(u1)" = torch.ops.aten.item.default(b2);  b2 = None
-
-            mul: "f32[10]" = torch.ops.aten.mul.Tensor(c, item);  c = item = None
-            return (mul,)
-""",  # noqa: B950
-        )
-
-    @skipIfTorchDynamo("Skip because dynamo cannot trace torch.export.")
-    def test_cond_symint_closure(self):
-        from torch.export import Dim
-
-        class M(torch.nn.Module):
-            def forward(self, x, y, z):
-                a = y.shape[0]
-                b = z.shape[0]
-
-                def true_fn(x):
-                    return x + a
-
-                def false_fn(x):
-                    return x + b * z
-
-                # When exporting with non-strict: a and b are symints,
-                # so torch.compile need to wrap and trace symint inputs.
-                return torch.cond(x.shape[0] > 5, true_fn, false_fn, (x,))
-
-        args = (torch.ones(3, 3), torch.ones(5), torch.ones(3, 3))
-        model = M()
-        dynamic_shapes = {"x": {0: Dim("d")}, "y": {0: Dim("d1")}, "z": {0: Dim("d")}}
-        non_strict_graph_str = self._check_export(model, args, dynamic_shapes)
-        self.assertExpectedInline(
-            non_strict_graph_str,
-            """\
-class GraphModule(torch.nn.Module):
-    def forward(self, x, y, z):
-        x: "f32[s0, 3]"; y: "f32[s1]"; z: "f32[s0, 3]";
-
-        x, y, z, = fx_pytree.tree_flatten_spec(([x, y, z], {}), self._in_spec)
-        sym_size_int_3: "Sym(s0)" = torch.ops.aten.sym_size.int(x, 0)
-        sym_size_int_4: "Sym(s1)" = torch.ops.aten.sym_size.int(y, 0);  y = None
-
-        gt: "Sym(s0 > 5)" = sym_size_int_3 > 5
-
-        true_graph_0 = self.true_graph_0
-        false_graph_0 = self.false_graph_0
-        cond = torch.ops.higher_order.cond(gt, true_graph_0, false_graph_0, [x, sym_size_int_4, sym_size_int_3, z]);  gt = true_graph_0 = false_graph_0 = x = sym_size_int_4 = sym_size_int_3 = z = None
-        getitem: "f32[s0, 3]" = cond[0];  cond = None
-        return pytree.tree_unflatten((getitem,), self._out_spec)
-
-    class true_graph_0(torch.nn.Module):
-        def forward(self, x: "f32[s0, 3]", sym_size_int_4: "Sym(s1)", sym_size_int_3: "Sym(s0)", z: "f32[s0, 3]"):
-            add: "f32[s0, 3]" = torch.ops.aten.add.Tensor(x, sym_size_int_4);  x = sym_size_int_4 = None
-            return (add,)
-
-    class false_graph_0(torch.nn.Module):
-        def forward(self, x: "f32[s0, 3]", sym_size_int_4: "Sym(s1)", sym_size_int_3: "Sym(s0)", z: "f32[s0, 3]"):
-            mul: "f32[s0, 3]" = torch.ops.aten.mul.Tensor(z, sym_size_int_3);  z = sym_size_int_3 = None
-
-            add: "f32[s0, 3]" = torch.ops.aten.add.Tensor(x, mul);  x = mul = None
-            return (add,)
-""",  # noqa: B950
-        )
-
-    # unbacked symint inputs are created during non-strict export,
-    # which causes a graph break
-    @unittest.expectedFailure
-    def test_cond_unbacked_symint_closure(self):
-        from torch.export import Dim
-
-        class M(torch.nn.Module):
-            def forward(self, x, y, z):
-                a = y.shape[0]
-                b = z.shape[0]
-                # c is an unbacked symint in non-strict export
-                c = y.sum().item()
-
-                def true_fn(x):
-                    return x + a + c
-
-                def false_fn(x):
-                    return x + b * z * c
-
-                # When exporting with non-strict: a and b are symints,
-                # so torch.compile need to wrap and trace symint inputs.
-                return torch.cond(x.shape[0] > 5, true_fn, false_fn, (x,))
-
-        args = (torch.ones(3, 3), torch.ones(5, dtype=torch.int32), torch.ones(3, 3))
-        model = M()
-        dynamic_shapes = {"x": {0: Dim("d")}, "y": {0: Dim("d1")}, "z": {0: Dim("d")}}
-        _ = self._check_export(model, args, dynamic_shapes)
 
 
 instantiate_parametrized_tests(TestHopSchema)
