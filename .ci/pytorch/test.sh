@@ -1519,7 +1519,10 @@ elif [[ "${TEST_CONFIG}" == *torchbench* ]]; then
 elif [[ "${TEST_CONFIG}" == *inductor_cpp_wrapper* ]]; then
   install_torchaudio cuda
   install_torchvision
-  checkout_install_torchbench hf_T5 llama moco
+  # We only run benchmarks on shard 1
+  if [[ "$SHARD_NUMBER" -eq "1" ]]; then
+    checkout_install_torchbench hf_T5 llama moco
+  fi
   PYTHONPATH=$(pwd)/torchbench test_inductor_cpp_wrapper_shard "$SHARD_NUMBER"
 elif [[ "${TEST_CONFIG}" == *inductor* ]]; then
   install_torchvision
