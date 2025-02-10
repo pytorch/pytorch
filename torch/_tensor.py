@@ -1098,6 +1098,18 @@ class Tensor(torch._C.TensorBase):
         )
 
     @_handle_torch_function_and_wrap_type_error_to_not_implemented
+    def __rand__(self, other: Union["Tensor", int, bool]) -> "Tensor":
+        return self & other
+
+    @_handle_torch_function_and_wrap_type_error_to_not_implemented
+    def __ror__(self, other: Union["Tensor", int, bool]) -> "Tensor":
+        return self | other
+
+    @_handle_torch_function_and_wrap_type_error_to_not_implemented
+    def __rxor__(self, other: Union["Tensor", int, bool]) -> "Tensor":
+        return self ^ other
+
+    @_handle_torch_function_and_wrap_type_error_to_not_implemented
     def __rsub__(self, other: Union["Tensor", int, float, bool, complex]) -> "Tensor":
         return _C._VariableFunctions.rsub(self, other)
 
