@@ -1008,7 +1008,7 @@ def squeeze(x, dim=None):
     new_shape = []
     new_stride = []
     is_storage_and_layout = ir.is_storage_and_layout(x)
-    original_stride = x.get_stride() if is_storage_and_layout else None
+    original_stride = x.get_stride() if is_storage_and_layout else []
     new_offset = x.get_layout().offset if is_storage_and_layout else None
     for d, s in enumerate(x.get_size()):
         if not (
@@ -1017,7 +1017,6 @@ def squeeze(x, dim=None):
         ):
             new_shape.append(s)
             if is_storage_and_layout:
-                assert isinstance(original_stride, list)
                 new_stride.append(original_stride[d])
 
     # squeeze does nothing if the size isn't 1
