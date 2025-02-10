@@ -4164,7 +4164,7 @@ class AssociativeScanTests(TestCase):
     def test_associative_scan_non_pointwise(self):
         x = torch.randn(3, 10, 2, device=torch.device("cuda"))
         with self.assertRaisesRegex(
-            # Should be: 
+            # Should be:
             RuntimeError,
             r"For combine_mode='pointwise', the combine_fn needs to be pointwise",
             # torch._dynamo.exc.UncapturedHigherOrderOpError,
@@ -4176,11 +4176,12 @@ class AssociativeScanTests(TestCase):
                 0,
                 combine_mode="pointwise",
             )
-            
+
     @unittest.skipIf(not SM70OrLater, "triton")
     @requires_cuda
     def test_associative_scan_input_mutation(self):
         device = torch.device("cuda")
+
         def fct_input_mutation(x, y):
             x.add_(1)
             return x + y
@@ -4188,17 +4189,18 @@ class AssociativeScanTests(TestCase):
         x = torch.randn(3, 2, 2, device=device)
 
         with self.assertRaisesRegex(
-            # Should be: 
+            # Should be:
             # UnsupportedAliasMutationException,
             torch._dynamo.exc.BackendCompilerFailed,
-            "Combine_fn might be modifying the input!"
+            "Combine_fn might be modifying the input!",
         ):
             associative_scan(fct_input_mutation, x, 0)
-        
+
     @unittest.skipIf(not SM70OrLater, "triton")
     @requires_cuda
     def test_associative_scan_input_output_alias(self):
         device = torch.device("cuda")
+
         def fct_input_output_alias(x, y):
             return x[0], x[1] + y[1]
 
@@ -4207,7 +4209,7 @@ class AssociativeScanTests(TestCase):
         inp = (x, y)
 
         with self.assertRaisesRegex(
-            # Should be: 
+            # Should be:
             # UnsupportedAliasMutationException,
             torch._dynamo.exc.BackendCompilerFailed,
             "Combine_fn might be aliasing the input!",

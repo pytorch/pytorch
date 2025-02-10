@@ -1257,7 +1257,7 @@ class WhileLoopHigherOrderVariable(TorchHigherOrderOperatorVariable):
         )
 
 
-class AssociativeScanHigherOrderVariable(TorchHigherOrderOperatorVariable): 
+class AssociativeScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
     @raise_hard_error_if_graph_break(
         reason="associative_scan must be captured completely with torch.compile."
     )

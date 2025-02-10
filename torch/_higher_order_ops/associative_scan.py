@@ -9,18 +9,17 @@ import torch._subclasses.functional_tensor
 import torch.utils._pytree as pytree
 from torch._C import DispatchKey
 from torch._higher_order_ops.utils import (
-    UnsupportedAliasMutationException,
-    _has_potential_branch_input_mutation,
     _has_potential_branch_input_alias,
+    _has_potential_branch_input_mutation,
     _maybe_run_with_interpreter,
     _set_compilation_env,
     autograd_not_implemented,
     first_slice_copy,
     reenter_make_fx,
     unique_graph_id,
+    UnsupportedAliasMutationException,
     validate_subgraph_args_types,
 )
-
 from torch._ops import HigherOrderOperator
 from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.fx.experimental.proxy_tensor import (
@@ -75,9 +74,8 @@ def safe_map(f, *args):
 
 
 class AssociativeScanOp(HigherOrderOperator):
-    def __init__(self, combine_mode='pointwise'):
+    def __init__(self):
         super().__init__("associative_scan")
-        self.combine_mode = combine_mode
 
     def __call__(self, combine_fn, xs, additional_inputs):
         assert isinstance(
@@ -144,7 +142,7 @@ def associative_scan(
 
     if not torch.compiler.is_compiling():
         with _set_compilation_env(), torch._dynamo.utils.disable_cache_limit():
-            return torch.compile(associative_scan, fullgraph=True, backend='aot_eager')(
+            return torch.compile(associative_scan, fullgraph=True, backend="aot_eager")(
                 combine_fn, xs, dim, reverse=reverse, combine_mode=combine_mode
             )
 
@@ -180,7 +178,7 @@ def associative_scan(
     # Call the combine_fn with only a slice along the scan dim
     # and check whether the output leaves have the same slice dimensions
     sliced_leaves = [first_slice_copy(leaf) for leaf in leaves]
-            
+
     out = combine_fn(
         pytree.tree_unflatten(sliced_leaves, spec),
         pytree.tree_unflatten(sliced_leaves, spec),
@@ -368,7 +366,7 @@ def trace_associative_scan(
             assert outputs is None
             assert len(node.args) == 1
             outputs = node.args[0]
-            
+
         # Check that the combine_fn is pointwise, if combine_mode='pointwise'
         if not all(is_pointwise_use(use) or use.op == "output" for use in node.users):
             raise RuntimeError(
@@ -454,7 +452,7 @@ def associative_scan_functionalize(ctx, combine_fn, xs, additional_inputs):
             raise UnsupportedAliasMutationException(
                 "Combine_fn might be aliasing the input!"
             )
-        
+
         ret = associative_scan_op(
             functional_combine_fn,
             unwrapped_xs,
