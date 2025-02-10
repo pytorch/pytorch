@@ -149,6 +149,26 @@ static PyObject* THPSize_repr(THPSize* self) {
   END_HANDLE_TH_ERRORS
 }
 
+static PyObject* THPSize_radd(PyObject* self, PyObject* other) {
+  HANDLE_TH_ERRORS
+  if (!PyTuple_Check(other)) {
+    Py_RETURN_NOTIMPLEMENTED;
+  }
+
+  THPObjectPtr result(PySequence_Concat(other, self));
+  if (!result) {
+    throw python_error();
+  }
+
+  PyObject* size_obj = PyObject_CallFunctionObjArgs(
+      (PyObject*)&THPSizeType, result.get(), nullptr);
+  if (!size_obj) {
+    throw python_error();
+  }
+  return size_obj;
+  END_HANDLE_TH_ERRORS
+}
+
 template <typename FnType, FnType fn, typename... Args>
 static PyObject* wrap_tuple_fn(Args... args) {
   THPObjectPtr result((*fn)(std::forward<Args>(args)...));
@@ -229,6 +249,7 @@ static PyObject* THPSize_reduce(PyObject* _self, PyObject* noargs) {
 static PyMethodDef THPSize_methods[] = {
     {"numel", THPSize_numel, METH_NOARGS, nullptr},
     {"__reduce__", THPSize_reduce, METH_NOARGS, nullptr},
+    {"__radd__", THPSize_radd, METH_O, nullptr},
     {nullptr}};
 
 PyTypeObject THPSizeType = {
