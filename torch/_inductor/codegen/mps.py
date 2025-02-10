@@ -12,7 +12,7 @@ from torch.utils._sympy.printers import ExprPrinter as ExprPrinter_
 from torch.utils._sympy.value_ranges import ValueRanges
 
 from ..utils import get_bounds_index_expr, get_kernel_metadata
-from ..virtualized import ops, V
+from ..virtualized import ops, OpsWrapper, V
 from .common import (
     CSEVariable,
     DeferredLine,
@@ -231,6 +231,10 @@ class MetalOverrides(OpOverrides):
         return f"metal::precise::sin({x})"
 
     @staticmethod
+    def sinc(x: CSEVariable) -> str:
+        return f"c10::metal::sinc({x})"
+
+    @staticmethod
     def cos(x: CSEVariable) -> str:
         return f"metal::precise::cos({x})"
 
@@ -355,6 +359,10 @@ class MetalOverrides(OpOverrides):
         cast_b = f"static_cast<decltype({a}+{b})>({b})"
         return f"metal::pow({cast_a}, {cast_b})"
 
+    @staticmethod
+    def zeta(a: CSEVariable, b: CSEVariable) -> str:
+        return f"c10::metal::zeta({a}, {b})"
+
 
 MetalOverrides._initialize_pointwise_overrides("mps")
 
@@ -441,11 +449,23 @@ class MetalKernel(SIMDKernel):
             )
         if reduction_type in ["max", "min", "argmax", "argmin"]:
             acc_buf = self._new_accvar(src_dtype, reduction_dim.numel)
-            self.body.splice(f"{acc_buf}[{reduction_dim.name}] = {value};")
+            self.body.splice(
+                f"{acc_buf}[{reduction_dim.name}] = static_cast<{DTYPE_TO_METAL[src_dtype]}>({value});"
+            )
             return self.cse.generate(
                 self.body,
                 f"c10::metal::threadgroup_{reduction_type}({acc_buf}, {reduction_dim.numel})",
                 dtype=dtype,
+            )
+        if reduction_type == "welford_reduce":
+            acc_buf = self._new_accvar(src_dtype, reduction_dim.numel)
+            self.body.splice(f"{acc_buf}[{reduction_dim.name}] = {value};")
+            wf_res = self.cse.generate(
+                self.body,
+                f"c10::metal::threadgroup_{reduction_type}({acc_buf}, {reduction_dim.numel})",
+            )
+            return OpsWrapper._unwrap(
+                (f"{wf_res}.x", f"{wf_res}.y", self.features.reduction_numel)
             )
         raise NotImplementedError(reduction_type)
 
