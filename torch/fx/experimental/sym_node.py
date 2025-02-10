@@ -1224,7 +1224,7 @@ def _make_node_magic(method, func):
         method_attr = f"{method}_"
     else:
         method_attr = method
-    
+
     def uninteresting_files() -> Set[str]:
         import inspect
 
