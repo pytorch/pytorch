@@ -297,6 +297,7 @@ class SideEffects:
 
         from .variables.ctx_manager import GenericContextWrappingVariable
         from .variables.torch_function import TorchFunctionModeVariable
+        from .variables.user_defined import is_forbidden_context_manager
 
         variable_cls: type[
             variables.UserDefinedObjectVariable
@@ -305,9 +306,13 @@ class SideEffects:
             user_cls, TorchFunctionMode
         ) and TorchFunctionModeVariable.is_supported_torch_function_mode(user_cls):
             variable_cls = TorchFunctionModeVariable
-        elif hasattr(user_cls, "__enter__") and hasattr(user_cls, "__exit__"):
+        elif (
+            hasattr(user_cls, "__enter__")
+            and hasattr(user_cls, "__exit__")
+            and not is_forbidden_context_manager(user_cls)
+        ):
             variable_cls = GenericContextWrappingVariable
-        if issubclass(user_cls, torch.nn.Module):
+        elif issubclass(user_cls, torch.nn.Module):
             variable_cls = variables.UnspecializedNNModuleVariable
         elif issubclass(user_cls, (dict, collections.OrderedDict)):
             variable_cls = variables.UserDefinedDictVariable
