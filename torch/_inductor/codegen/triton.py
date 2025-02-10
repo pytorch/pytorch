@@ -31,6 +31,7 @@ from ...utils._sympy.symbol import free_symbol_is_type, prefix_str, symbol_is_ty
 from ...utils._sympy.value_ranges import ValueRanges
 from .. import config, ir, metrics
 from ..codecache import code_hash, get_path, PyCodeCache
+from ..ops_handler import DefaultHandler
 from ..runtime.benchmarking import benchmarker
 from ..runtime.hints import (
     AutotuneHint,
@@ -60,7 +61,7 @@ from ..utils import (
     triton_version_uses_attrs_dict,
     upcast_compute_type,
 )
-from ..virtualized import _ops as ops, OpsHandler, ReductionType, StoreMode, V
+from ..virtualized import _ops as ops, ReductionType, StoreMode, V
 from ..wrapper_benchmark import get_kernel_category_by_source_code
 from .block_analysis import BlockPatternMatcher
 from .common import (
@@ -1427,12 +1428,6 @@ class TritonKernelOverrides(TritonOverrides):
         return (mantissa, exponent)
 
 
-if TYPE_CHECKING:
-
-    class _typecheck_TritonKernelOverrides(TritonKernelOverrides, OpsHandler[str]):
-        pass  # mypy will error if we got any of the signatures wrong
-
-
 class HelperFunctions:
     """An ordered set of helper functions."""
 
@@ -1795,7 +1790,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             and self.index_dtype == "tl.int32"
         ):
 
-            def match_strided_block(
+            def match_affine_block(
                 index: sympy.Expr, range_tree: IterationRangesRoot
             ) -> Optional[BlockParameters]:
                 """
@@ -1804,16 +1799,16 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
 
                 This implies stride (s,), and shape (XBLOCK,).
                 """
-                symbol = range_tree.symbol()
-                stride = sympy.Wild("stride", exclude=[symbol])
-                m = index.match(symbol * stride)
-                if m is None:
+                stride = BlockPatternMatcher.match_affine_block_expr(
+                    index, range_tree.symbol()
+                )
+                if stride is None:
                     return None
 
                 return BlockParameters(
                     shape=[range_tree.numel],
                     block_shape=[TritonSymbols.get_block_size(range_tree)],
-                    strides=[m[stride]],
+                    strides=[stride],
                     offsets=[TritonSymbols.get_block_offset(range_tree)],
                 )
 
@@ -1922,7 +1917,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 Match a block indexing subexpression involving a single range tree.
                 """
                 for match_func in (
-                    match_strided_block,
+                    match_affine_block,
                     match_mod_div_block,
                 ):
                     match = match_func(expr, range_tree)
@@ -2872,24 +2867,23 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
 
         dtype_handler = DtypePropagationOpsHandler()
 
-        class CSEProxy:
-            def __getattr__(self, name: str) -> Callable[..., CSEVariable]:
-                def inner(*args, **kwargs):
-                    nonlocal helper_name
-                    helper_name += f"_{name}"
+        class CSEProxy(DefaultHandler):
+            def _default(
+                self, name: str, args: tuple[Any, ...], kwargs: dict[str, Any]
+            ) -> Any:
+                nonlocal helper_name
+                helper_name += f"_{name}"
 
-                    output_dtype = getattr(
-                        dtype_handler,
-                        name,
-                    )(*args, **kwargs)
+                output_dtype = getattr(
+                    dtype_handler,
+                    name,
+                )(*args, **kwargs)
 
-                    return cse.generate(
-                        helper,
-                        getattr(overrides, name)(*args, **kwargs),
-                        dtype=output_dtype,
-                    )
-
-                return inner
+                return cse.generate(
+                    helper,
+                    getattr(overrides, name)(*args, **kwargs),
+                    dtype=output_dtype,
+                )
 
         with helper.indent(), V.set_ops_handler(CSEProxy()):
             outputs = fn(*args)
