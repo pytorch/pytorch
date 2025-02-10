@@ -12,7 +12,7 @@ import os
 import warnings
 from collections import defaultdict
 from collections.abc import Iterable, Sequence
-from typing import Any, Callable, Optional, TypeVar, Union
+from typing import Any, Callable, Optional, TYPE_CHECKING, TypeVar, Union
 from typing_extensions import ParamSpec
 from unittest.mock import patch
 
@@ -79,6 +79,10 @@ from .utils import (
     use_scatter_fallback,
 )
 from .virtualized import ops, V
+
+
+if TYPE_CHECKING:
+    from .ops_handler import ReductionType
 
 
 _T = TypeVar("_T")
@@ -5633,7 +5637,7 @@ def _make_reduction_inner(x, *, axis, keepdims, dtype, override_return_dtype):
     )
 
 
-def make_reduction(reduction_type: str, override_return_dtype=None):
+def make_reduction(reduction_type: ReductionType, override_return_dtype=None):
     def inner(x, axis=None, keepdims=False, *, dtype=None):
         kwargs = _make_reduction_inner(
             x,
@@ -6748,6 +6752,23 @@ def while_loop(cond_fn, body_fn, carried_inputs, additional_inputs):
 def invoke_subgraph(subgraph_fn: ir.Subgraph, identifier: str, operands):
     result = ir.InvokeSubgraph.create(subgraph_fn, operands)
     return list(map(TensorBox.create, result))
+
+
+@register_lowering(torch._higher_order_ops.invoke_quant, type_promotion_kind=None)
+def invoke_quant_tracer(subgraph_fn: ir.Subgraph, *operands, scheme=None):
+    output = None
+    for i, node in enumerate(subgraph_fn.graph_module.graph.nodes):
+        if node.op == "placeholder":
+            V.graph.env[node] = operands[i]
+            continue
+        # todo getattr
+        elif node.op == "output":
+            args, kwargs = V.graph.fetch_args_kwargs_from_env(node)
+            output = torch.fx.Interpreter.output(V.graph, node, args, kwargs)
+        else:
+            V.graph.env[node] = V.graph.run_node(node)
+
+    return output
 
 
 @register_lowering(associative_scan_op, type_promotion_kind=None)

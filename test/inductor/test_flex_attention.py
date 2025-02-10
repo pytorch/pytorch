@@ -2510,9 +2510,9 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
     @supported_platform
     def test_strided_backwards(self):
         shape = (1, 2, 4096, 64)
-        Q = torch.randn(shape, requires_grad=True, device="cuda", dtype=torch.bfloat16)
-        K = torch.randn(shape, requires_grad=True, device="cuda", dtype=torch.bfloat16)
-        V = torch.randn(shape, requires_grad=True, device="cuda", dtype=torch.bfloat16)
+        Q = torch.randn(shape, requires_grad=True, device="cuda")
+        K = torch.randn(shape, requires_grad=True, device="cuda")
+        V = torch.randn(shape, requires_grad=True, device="cuda")
         func = torch.compile(flex_attention, dynamic=True, fullgraph=True)
 
         K_sliced = K[:, :, :-128]
