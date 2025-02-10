@@ -468,6 +468,33 @@ class AutogradFunctionTests(torch._dynamo.test_case.TestCase):
         res.sum().backward()
         self.assertEqual(x.grad, torch.tensor([0.0, 3.0, 3.0]))
 
+    def test_requires_grad_in_bwd(self):
+        class Foo(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x):
+                ctx.save_for_backward(x)
+                return torch.sin(x + 1)
+
+            @staticmethod
+            def backward(ctx, grad_output):
+                (x,) = ctx.saved_tensors
+                if grad_output.requires_grad:
+                    return grad_output * torch.sin(
+                        x + 1
+                    )  # Wrong gradient, we should never get here.
+                else:
+                    return grad_output * torch.cos(x + 1)
+
+        @torch.compile(backend="aot_eager", fullgraph=True)
+        def fn(x):
+            return Foo.apply(x)
+
+        x = torch.tensor([1.0, 3.0], requires_grad=True)
+        res = fn(x)
+        self.assertEqual(res, Foo.apply(x))
+        res.sum().backward()
+        self.assertEqual(x.grad, torch.cos(x + 1))
+
     def test_amp_custom_fwd_bwd(self):
         torch._dynamo.utils.counters.clear()
         cnt = torch._dynamo.testing.CompileCounter()
