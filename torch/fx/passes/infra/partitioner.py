@@ -145,14 +145,12 @@ class CapabilityBasedPartitioner:
 
             # find new partition users if merge.
             all_user_nodes = set()
-            removed_candidates_list = [other_nodes, self_nodes]
-            partition_users_list = [partition_users[self_id], partition_users[other_id]]
-            for users, removed_candidates in zip(
-                partition_users_list, removed_candidates_list
-            ):
-                for user in users:
-                    if user not in removed_candidates:
-                        all_user_nodes.add(user)
+            for self_user in partition_users[self_id]:
+                if self_user not in other_nodes:
+                    all_user_nodes.add(self_user)
+            for other_user in partition_users[other_id]:
+                if other_user not in self_nodes:
+                    all_user_nodes.add(other_user)
 
             # check if merge would create cyclic dependency.
             if dfs_iter_find_cycle(all_user_nodes):
