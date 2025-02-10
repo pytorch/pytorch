@@ -419,16 +419,27 @@ def check_submodules():
     # If none of the submodule folders exists, try to initialize them
     if all(not_exists_or_empty(folder) for folder in folders):
         try:
-            print(" --- Trying to initialize submodules")
+            report(" --- Trying to initialize submodules")
             start = time.time()
             subprocess.check_call(
                 ["git", "submodule", "update", "--init", "--recursive"], cwd=cwd
             )
             end = time.time()
-            print(f" --- Submodule initialization took {end - start:.2f} sec")
+
+            # Use older nccl for CUDA 11.8 build
+            if( folder.contains("nccl") ):
+                cuda_version = os.getenv("DESIRED_CUDA", "")
+                cuda_version_2 = os.getenv("CUDA_VERSION", "")
+                if cuda_version.startswith("11.8") or cuda_version_2.startswith("11.8"):
+                    subprocess.check_call(
+                        ["git", "checkout", "ab2b89c4c339bd7f816fbc114a4b05d386b66290"], cwd=cwd
+                    )
+                    report(" --- NCCL module initialized to ab2b89c4c339bd7f816fbc114a4b05d386b66290")
+
+            report(f" --- Submodule initialization took {end - start:.2f} sec")
         except Exception:
-            print(" --- Submodule initalization failed")
-            print("Please run:\n\tgit submodule update --init --recursive")
+            report(" --- Submodule initalization failed")
+            report("Please run:\n\tgit submodule update --init --recursive")
             sys.exit(1)
     for folder in folders:
         check_for_files(
@@ -442,6 +453,7 @@ def check_submodules():
                 "LICENSE.txt",
             ],
         )
+    
     check_for_files(
         os.path.join(third_party_path, "fbgemm", "third_party", "asmjit"),
         ["CMakeLists.txt"],
