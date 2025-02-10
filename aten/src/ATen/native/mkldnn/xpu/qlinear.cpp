@@ -25,6 +25,11 @@ Tensor q_linear_pointwise(
 
   const int64_t dim = act.dim();
   TORCH_CHECK(dim == 2, "qliner XPU: input dim should be 2, but got", dim);
+  TORCH_CHECK(
+      act.device() == weight.device() &&
+          act.device() == weight_scales.device() &&
+          act.device() == weight_zero_points.device(),
+      "qlinear xpu: input tensors(act, weight, weight scale, weight zero-points) should be on the same device");
   int64_t K = act.size(dim - 1);
   int64_t M = act.numel() / K;
   // [M, K] x [K, N]
@@ -55,7 +60,8 @@ Tensor q_linear_pointwise(
       /*binary alpha*/ 1.0,
       post_op_name,
       post_op_args,
-      post_op_algorithm);
+      post_op_algorithm,
+      /*m2_trans*/ true);
 
   return qout;
 }
@@ -78,6 +84,11 @@ Tensor q_linear_pointwise_tensor(
 
   const int64_t dim = act.dim();
   TORCH_CHECK(dim == 2, "qliner XPU: input dim should be 2, but got", dim);
+  TORCH_CHECK(
+      act.device() == weight.device() &&
+          act.device() == weight_scales.device() &&
+          act.device() == weight_zero_points.device(),
+      "qlinear xpu: input tensors(act, weight, weight scale, weight zero-points) should be on the same device");
   int64_t K = act.size(dim - 1);
   int64_t M = act.numel() / K;
   // [M, K] x [K, N]
@@ -108,7 +119,8 @@ Tensor q_linear_pointwise_tensor(
       /*binary alpha*/ 1.0,
       post_op_name,
       post_op_args,
-      post_op_algorithm);
+      post_op_algorithm,
+      /*m2_trans*/ true);
 
   return qout;
 }
