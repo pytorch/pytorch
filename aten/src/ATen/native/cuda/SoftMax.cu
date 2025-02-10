@@ -1119,7 +1119,7 @@ Tensor host_softmax(const Tensor & input_, const int64_t dim_, const bool half_t
 template<typename input_t, typename output_t, typename accscalar_t, template<typename, typename, typename> class Epilogue>
 void dispatch_host_softmax_backward(int64_t dim_size, dim3 grid, Tensor &grad, Tensor &output, const Tensor &gI) {
   cudaStream_t stream = at::cuda::getCurrentCUDAStream();
-        constexpr int ILP = sizeof(float4) / sizeof(accscalar_t);
+        constexpr int ILP = sizeof(float4) / sizeof(output_t);
         dim3 block = SoftMax_getBlockSize(ILP, dim_size);
 
         size_t smem_reduction_sz = block.x / C10_WARP_SIZE * sizeof(accscalar_t);
