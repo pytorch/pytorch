@@ -401,7 +401,7 @@ def test_subclasses(gm, inputs, **kwargs):
             return gm
 
     MAX_SUBCLASSES_NESTING: int = int(
-        os.getenv("PYTORCH_TEST_WITH_SUBCLASSES_MAX_NESTING", default=1)
+        os.getenv("PYTORCH_TEST_WITH_SUBCLASSES_MAX_NESTING", default=2)
     )
     N: int = len(TRANSFORMATIONS)
 
@@ -421,7 +421,7 @@ def test_subclasses(gm, inputs, **kwargs):
     NUM_TENSOR_INPUTS = len(TENSOR_INPUTS_IDXS)
 
     MAX_NUM_TENSOR_INPUTS_TRANSFORM = int(
-        os.getenv("PYTORCH_TEST_WITH_SUBCLASSES_MAX_NUM_TENSOR_INPUTS_TRANSFORM", default=4)
+        os.getenv("PYTORCH_TEST_WITH_SUBCLASSES_MAX_NUM_TENSOR_INPUTS_TRANSFORM", default=8)
     )
 
     TENSOR_INPUTS_TRANSFORM_SEQS = []
@@ -461,7 +461,7 @@ def test_subclasses(gm, inputs, **kwargs):
         test_gm.print_readable(False),
     )
     MAX_INPUT_VARIANTS: int = int(
-        os.getenv("PYTORCH_TEST_WITH_SUBCLASSES_MAX_INPUT_VARIANTS", default=64)
+        os.getenv("PYTORCH_TEST_WITH_SUBCLASSES_MAX_INPUT_VARIANTS", default=1024)
     )
     import random
 

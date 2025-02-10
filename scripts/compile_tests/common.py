@@ -2,6 +2,7 @@ import functools
 import os
 import warnings
 from dataclasses import dataclass
+from typing import List
 
 
 try:
@@ -350,10 +351,62 @@ def find_control_passed_missing_in_test(
     for k, v in sd.items():
         print(f"{v:4} PYTORCH_TEST_WITH_SUBCLASSES=1 python test/{k} -v")
 
-def report_control_pass_test_notpass(control_tcs, test_tcs, fname):
+@dataclass
+class Failure:
+    testcase_result: TestCaseResult
+    msg: str
+    text: str
+    sim: int = -1
+
+    @property
+    def key(self) -> str:
+        return self.testcase_result.key
+
+
+@dataclass
+class Category:
+    items: List[Failure]
+
+from fuzzywuzzy import fuzz
+
+def similarity(x: Failure, y: Failure) -> int: # [0, 100]
+    r = fuzz.ratio(x.msg, y.msg)
+    return r
+
+def categorize(categories, f: Failure):
+    if not categories:
+        categories.append(Category([f]))
+        return
+
+    max_similarity = 0
+    max_similarity_cat = None
+    for c in categories:
+        s = similarity(f, c.items[0])
+        if s > max_similarity:
+            max_similarity = s
+            max_similarity_cat = c
+
+    if max_similarity > 75:
+        f.sim = max_similarity
+        max_similarity_cat.items.append(f)
+        return
+
+    categories.append(Category([f]))
+
+def report_control_pass_test_notpass(control_tcs, test_tcs, dirname):
+    import os
+    if not os.path.isdir(dirname):
+        os.makedirs(dirname)
+
+    categories: List[List[Failure]] = []
+
     i = 0
-    with open(fname, "w") as f:
-        for k, tv in test_tcs.items():
+    num_tcs = len(test_tcs.items())
+    with open(f"{dirname}/report", "w") as file:
+        for _i, (k, tv) in enumerate(test_tcs.items()):
+            if _i % 1000 == 0:
+                print(f"XXX process {_i}/{num_tcs}")
+
             if tv.is_skipped():
                 continue
 
@@ -364,21 +417,33 @@ def report_control_pass_test_notpass(control_tcs, test_tcs, fname):
                 continue
 
             if cv.is_passed() and not tv.is_passed():
-                f.write("-"*80)
+                file.write("-"*40)
                 tc = tv.testcase
-                f.write(f"{i:5}: {k}\n")
+                file.write(f"{i:5}: {k}\n")
                 try:
                     failure = tc.find("failure")
                     if failure is None:
                         failure = tc.find("rerun")
-                    failure_msg = failure.attrib["message"]
-                    f.write(f"Failure_message:{failure_msg}\n")
-                    failure_text = failure.text
+                    msg = failure.attrib["message"]
+                    file.write(f"Failure_message:{msg}\n")
+                    text = failure.text
+
+                    f = Failure(tv, msg, text)
+                    categorize(categories, f)
                 except Exception as e:
                     print(f"Exception on report prep for key:{k} e:{e}")
                     import traceback
                     print(traceback.format_exc())
                 i += 1
+    total_failures = i
+    num_cats = len(categories)
+    for i, c in enumerate(sorted(categories, key=lambda c: len(c.items), reverse=True)):
+        print(f"XXX CATEGORY {i}/{num_cats} len(items):{len(c.items):5} of {total_failures}")
+        with open(f"{dirname}/cat_{i}_N{len(c.items)}", "w") as file:
+            for j, f in enumerate(c.items):
+                file.write(f"Failure {j} sim:{f.sim} key:{f.key}\n")
+                file.write(f"msg: {f.msg}\n")
+                file.write(f"text: {f.text}\n")
 
 
 def compute_pass_rate_aot_eager_subclasses(e_dir, dw_dir, ae_dir, sc_dir):
@@ -411,7 +476,12 @@ def compute_pass_rate_aot_eager_subclasses(e_dir, dw_dir, ae_dir, sc_dir):
     find_control_passed_missing_in_test(tcs_dw, tcs_sc)
 
     report_control_pass_test_notpass(
+        tcs_dw,
         tcs_ae,
-        tcs_sc,
-        "test_pass_ae_notpass_sc"
+        "test_pass_dw_notpass_aw_75"
     )
+    #report_control_pass_test_notpass(
+    #    tcs_ae,
+    #    tcs_sc,
+    #    "test_pass_ae_notpass_sc_70"
+    #)
