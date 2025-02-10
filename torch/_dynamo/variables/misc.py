@@ -234,6 +234,7 @@ class SuperVariable(VariableTracker):
 
 
 class ExceptionVariable(VariableTracker):
+    # The ExceptionVariable corresponds to the BaseException class in Python
     def __init__(self, exc_type, args, **kwargs) -> None:
         super().__init__(**kwargs)
         self.exc_type = exc_type
