@@ -34,13 +34,13 @@ def _handle_torch_function_and_wrap_type_error_to_not_implemented(
     f: TensorMethodT,
 ) -> TensorMethodT:
     @functools.wraps(f)
-    def wrapped(self, other) -> "Tensor":
+    def wrapped(self: Union["Tensor", "torch._C.TensorBase"], other: Any) -> "Tensor":
         try:
             args = self, other
             # See https://github.com/pytorch/pytorch/issues/75462
             if has_torch_function(args):
                 return handle_torch_function(wrapped, args, *args)
-            return f(self, other)
+            return f(*args)
         except TypeError:
             return NotImplemented
 
@@ -847,21 +847,21 @@ class Tensor(torch._C.TensorBase):
     def module_load(self, other, assign=False):
         r"""Defines how to transform ``other`` when loading it into ``self`` in :meth:`~nn.Module.load_state_dict`.
 
-        Used when :func:`~torch.__future__.get_swap_module_params_on_conversion` is ``True``.
+                Used when :func:`~torch.__future__.get_swap_module_params_on_conversion` is ``True``.
 
-        It is expected that ``self`` is a parameter or buffer in an ``nn.Module`` and ``other`` is the
-        value in the state dictionary with the corresponding key, this method defines
-        how ``other`` is remapped before being swapped with ``self`` via
-        :func:`~torch.utils.swap_tensors` in :meth:`~nn.Module.load_state_dict`.
+                It is expected that ``self`` is a parameter or buffer in an ``nn.Module`` and ``other`` is the
+                value in the state dictionary with the corresponding key, this method defines
+                how ``other`` is remapped before being swapped with ``self`` via
+                :func:`~torch.utils.swap_tensors` in :meth:`~nn.Module.load_state_dict`.
 
-        .. note::
-            This method should always return a new object that is not ``self`` or ``other``.
-            For example, the default implementation returns ``self.copy_(other).detach()``
-            if ``assign`` is ``False`` or ``other.detach()`` if ``assign`` is ``True``.
+        ¸        .. note::
+                    This method should always return a new object that is not ``self`` or ``other``.
+                    For example, the default implementation returns ``self.copy_(other).detach()``
+                    if ``assign`` is ``False`` or ``other.detach()`` if ``assign`` is ``True``.
 
-        Args:
-            other (Tensor): value in state dict with key corresponding to ``self``
-            assign (bool): the assign argument passed to :meth:`nn.Module.load_state_dict`
+                Args:
+                    other (Tensor): value in state dict with key corresponding to ``self``
+                    assign (bool): the assign argument passed to :meth:`nn.Module.load_state_dict`
 
         """
         if has_torch_function_variadic(self, other):
