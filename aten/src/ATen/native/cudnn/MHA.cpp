@@ -418,12 +418,18 @@ auto build_graph_and_tensors(
                                     .set_name("Seed")
                                     .set_dim({1, 1, 1, 1})
                                     .set_stride({1, 1, 1, 1})
-                                    .set_data_type(dropoutseed.dtype() == kInt ? fe::DataType_t::INT32 : fe::DataType_t::INT64));
+                                    .set_data_type(
+                                        dropoutseed.dtype() == kInt
+                                            ? fe::DataType_t::INT32
+                                            : fe::DataType_t::INT64));
   auto offset = mha_graph->tensor(fe::graph::Tensor_attributes()
                                       .set_name("Offset")
                                       .set_dim({1, 1, 1, 1})
                                       .set_stride({1, 1, 1, 1})
-                                      .set_data_type(dropoutoffset.dtype() == kInt ? fe::DataType_t::INT32 : fe::DataType_t::INT64));
+                                      .set_data_type(
+                                          dropoutoffset.dtype() == kInt
+                                              ? fe::DataType_t::INT32
+                                              : fe::DataType_t::INT64));
   auto scaled_dot_product_flash_attention_options =
       fe::graph::SDPA_attributes()
           .set_name("CUDNN_SDPA")
@@ -564,13 +570,19 @@ auto build_graph_and_tensors_backward(
                                     .set_name("Seed")
                                     .set_dim({1, 1, 1, 1})
                                     .set_stride({1, 1, 1, 1})
-                                    .set_data_type(dropoutseed.dtype() == kInt ? fe::DataType_t::INT32 : fe::DataType_t::INT64));
+                                    .set_data_type(
+                                        dropoutseed.dtype() == kInt
+                                            ? fe::DataType_t::INT32
+                                            : fe::DataType_t::INT64));
 
   auto Offset = mha_graph->tensor(fe::graph::Tensor_attributes()
                                       .set_name("Offset")
                                       .set_dim({1, 1, 1, 1})
                                       .set_stride({1, 1, 1, 1})
-                                      .set_data_type(dropoutoffset.dtype() == kInt ? fe::DataType_t::INT32 : fe::DataType_t::INT64));
+                                      .set_data_type(
+                                          dropoutoffset.dtype() == kInt
+                                              ? fe::DataType_t::INT32
+                                              : fe::DataType_t::INT64));
 
   auto O = mha_graph->tensor(fe::graph::Tensor_attributes()
                                  .set_name("O")
