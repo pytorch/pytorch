@@ -218,6 +218,7 @@ add_needs_realized_inputs(
         aten.convolution_backward,
         aten.max_pool2d_with_indices,
         aten.max_pool2d_with_indices_backward,
+        aten.mkldnn_max_pool2d,
         aten.mm,
         aten.upsample_nearest2d,
         aten._upsample_nearest_exact2d,
@@ -4297,7 +4298,7 @@ def _low_memory_max_pool2d_offsets_to_indices(
 
 # Fallback selected when we do not decompose to the low-memory path.
 make_fallback(aten.max_pool2d_with_indices)
-
+make_fallback(aten.mkldnn_max_pool2d)
 
 fallback_max_pool2d_with_indices_backward = fallback_handler(
     aten.max_pool2d_with_indices_backward.default,
