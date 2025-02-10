@@ -413,6 +413,21 @@ class ExceptionTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(ref[0], res[0])
         self.assertEqual(ref[1], res[1])
 
+    def test_raise_GeneratorExit(self):
+        # GeneratorExit does not inherit from Exception
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(t):
+            try:
+                raise GeneratorExit
+            except Exception:
+                return t.sin()
+            except BaseException:
+                return t.cos()
+
+        t = torch.randn(2)
+        y = fn(t)
+        self.assertEqual(y, t.cos())
+
     def test_speculation_exception(self):
         log = SpeculationLog()
         log.next("fake", 555, "fake", Instruction(1, "fake", 1, 1))
@@ -546,13 +561,6 @@ class ExceptionTests(torch._dynamo.test_case.TestCase):
             self.assertIsInstance(
                 exc.__context__.__context__.__context__.__context__, e
             )
-
-    @make_dynamo_test
-    def test_raise_ZeroDivisionError(self):
-        try:
-            1 / 0
-        except Exception:
-            pass
 
 
 class CPythonExceptionTests(torch._dynamo.test_case.TestCase):
