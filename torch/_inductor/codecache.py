@@ -3179,6 +3179,9 @@ class CUDACodeCache:
                     cmd = cuda_compile_command(
                         [input_path], output_path, dst_file_ext, extra_args
                     )
+                    with open(input_path, "a") as f:
+                        f.write("\n")
+                        f.write(f"// CUDA Compile cmd\n// {cmd}\n")
                     start_time = time()
                     log.debug("CUDA Compilation: %s", cmd)
                     cmd_parts = cmd.split(" ")
