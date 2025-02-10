@@ -307,10 +307,9 @@ def _flatten_dynamic_shapes_to_axes(
                 and (v is None or isinstance(v, (_Dim, _DimHint, str)))
                 for k, v in x.items()
             )
-            or (
-                isinstance(x, (list, tuple))
-                and all(isinstance(v, (_Dim, _DimHint, str)) for v in x)
-            )
+        ) or (
+            isinstance(x, (list, tuple))
+            and all(isinstance(v, (_Dim, _DimHint, str)) for v in x)
         )
 
     return _pytree.tree_flatten(dynamic_shapes, is_leaf=is_axes)
