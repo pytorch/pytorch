@@ -1,6 +1,7 @@
 #include <torch/csrc/distributed/c10d/CUDASymmetricMemory.hpp>
 
 #include <torch/csrc/distributed/c10d/CUDASymmetricMemory-inl.h>
+#include <torch/csrc/distributed/c10d/nvshmem_extension.cuh>
 
 #include <ATen/ceil_div.h>
 #include <ATen/cuda/CUDAContext.h>
@@ -931,15 +932,298 @@ c10::intrusive_ptr<Block> CUDASymmetricMemoryAllocator::find_block(void* ptr) {
   return it->second;
 }
 
-struct RegisterCUDASymmetricMemoryAllocator {
-  RegisterCUDASymmetricMemoryAllocator() {
+// struct RegisterCUDASymmetricMemoryAllocator {
+//   RegisterCUDASymmetricMemoryAllocator() {
+//     register_allocator(
+//         c10::DeviceType::CUDA,
+//         c10::make_intrusive<CUDASymmetricMemoryAllocator>());
+//   }
+// };
+//
+// static RegisterCUDASymmetricMemoryAllocator register_allocator_;
+
+class NVSHMEMSymmetricMemory : public SymmetricMemory {
+ public:
+  NVSHMEMSymmetricMemory(
+      size_t buffer_size,
+      int device_idx,
+      int rank,
+      int world_size)
+      : buffer_size_(buffer_size),
+        device_idx_(device_idx),
+        rank_(rank),
+        world_size_(world_size) {
+    c10::cuda::CUDAGuard guard(device_idx);
+
+    void* buffer_ptr = nvshmem_extension::nvshmem_malloc(buffer_size_);
+    for (int r = 0; r < world_size_; ++r) {
+      buffers_.push_back(nvshmem_extension::nvshmem_ptr(buffer_ptr, r));
+    }
+
+    void* signal_pad_ptr = nvshmem_extension::nvshmem_malloc(signal_pad_size);
+    for (int r = 0; r < world_size_; ++r) {
+      signal_pads_.push_back(nvshmem_extension::nvshmem_ptr(signal_pad_ptr, r));
+    }
+
+    const size_t arr_size = sizeof(void*) * world_size_;
+    buffers_dev_ = reinterpret_cast<void**>(
+        c10::cuda::CUDACachingAllocator::raw_alloc(arr_size));
+    signal_pads_dev_ = reinterpret_cast<void**>(
+        c10::cuda::CUDACachingAllocator::raw_alloc(arr_size));
+
+    AT_CUDA_CHECK(cudaMemcpy(
+        buffers_dev_, buffers_.data(), arr_size, cudaMemcpyHostToDevice));
+    AT_CUDA_CHECK(cudaMemcpy(
+        signal_pads_dev_,
+        signal_pads_.data(),
+        arr_size,
+        cudaMemcpyHostToDevice));
+  }
+
+  ~NVSHMEMSymmetricMemory() override{
+      // TODO
+  };
+
+  std::vector<void*> get_buffer_ptrs() override {
+    return buffers_;
+  }
+
+  std::vector<void*> get_signal_pad_ptrs() override {
+    return signal_pads_;
+  }
+
+  void** get_buffer_ptrs_dev() override {
+    return buffers_dev_;
+  }
+
+  void** get_signal_pad_ptrs_dev() override {
+    return signal_pads_dev_;
+  }
+
+  size_t get_buffer_size() override {
+    return buffer_size_;
+  }
+
+  size_t get_signal_pad_size() override {
+    return signal_pad_size;
+  };
+
+  bool has_multicast_support() override {
+    // TODO
+    return false;
+  }
+
+  void* get_multicast_ptr() override {
+    // TODO
+    return nullptr;
+  }
+
+  at::Tensor get_buffer(
+      int rank,
+      c10::IntArrayRef sizes,
+      c10::ScalarType dtype,
+      int64_t storage_offset) {
+    // TODO: deduplicate
+    const size_t numel = std::accumulate(
+        sizes.begin(),
+        sizes.end(),
+        static_cast<size_t>(1),
+        std::multiplies<size_t>());
+    const auto element_size = c10::elementSize(dtype);
+    const auto req_size = (numel + storage_offset) * element_size;
+    TORCH_CHECK(
+        req_size <= buffer_size_,
+        "NVSHMEMSymmetricMemory::get_buffer: the requested size (",
+        req_size,
+        " bytes) exceeds the allocated size (",
+        buffer_size_,
+        " bytes)");
+    auto data_ptr = reinterpret_cast<uint8_t*>(buffers_[rank]) +
+        storage_offset * element_size;
+    auto device = c10::Device(c10::DeviceType::CUDA, device_idx_);
+    auto options = at::TensorOptions().dtype(dtype).device(device);
+    return at::for_blob(data_ptr, sizes)
+        .options(options)
+        .target_device(device)
+        .make_tensor();
+  }
+
+  at::Tensor get_signal_pad(
+      int rank,
+      c10::IntArrayRef sizes,
+      std::optional<c10::ScalarType> dtype,
+      int64_t storage_offset) override {
+    // TODO: deduplicate
+    // If the dtype is unspecified, default it to UInt32, as it
+    // is the most common type for signaling purposes.
+    if (!dtype.has_value()) {
+      dtype = c10::ScalarType::UInt32;
+    }
+
+    // If the shape is unspecified, treat the signal pad as a 1d tensor.
+    const auto element_size = c10::elementSize(*dtype);
+    std::vector<int64_t> shape;
+    if (sizes.size() != 0) {
+      shape = sizes.vec();
+    } else {
+      shape.push_back(signal_pad_size / element_size);
+    }
+
+    const size_t numel = std::accumulate(
+        shape.begin(),
+        shape.end(),
+        static_cast<size_t>(1),
+        std::multiplies<size_t>());
+    const auto req_size = (numel + storage_offset) * element_size;
+    TORCH_CHECK(
+        req_size <= signal_pad_size,
+        "NVSHMEMSymmetricMemory::get_signal_pad: the requested size (",
+        req_size,
+        " bytes) exceeds the allocated size (",
+        signal_pad_size,
+        " bytes)");
+    auto data_ptr = reinterpret_cast<uint8_t*>(signal_pads_[rank]) +
+        storage_offset * element_size;
+    auto device = c10::Device(c10::DeviceType::CUDA, device_idx_);
+    auto options = at::TensorOptions().dtype(*dtype).device(device);
+    return at::for_blob(data_ptr, shape)
+        .options(options)
+        .target_device(device)
+        .make_tensor();
+  }
+
+  void barrier(int channel, size_t timeout_ms) override {
+    check_channel(channel, world_size_);
+    c10::cuda::CUDAGuard guard(device_idx_);
+    barrier_kernel<<<1, C10_WARP_SIZE, 0, at::cuda::getCurrentCUDAStream()>>>(
+        reinterpret_cast<uint32_t**>(signal_pads_dev_),
+        channel,
+        rank_,
+        world_size_,
+        timeout_ms);
+    C10_CUDA_KERNEL_LAUNCH_CHECK();
+  }
+
+  void put_signal(int dst_rank, int channel, size_t timeout_ms) override {
+    check_channel(channel, world_size_);
+    c10::cuda::CUDAGuard guard(device_idx_);
+    put_signal_kernel<<<
+        1,
+        C10_WARP_SIZE,
+        0,
+        at::cuda::getCurrentCUDAStream()>>>(
+        reinterpret_cast<uint32_t**>(signal_pads_dev_),
+        dst_rank,
+        channel,
+        rank_,
+        world_size_,
+        timeout_ms);
+    C10_CUDA_KERNEL_LAUNCH_CHECK();
+  }
+
+  void wait_signal(int src_rank, int channel, size_t timeout_ms) override {
+    check_channel(channel, world_size_);
+    c10::cuda::CUDAGuard guard(device_idx_);
+    wait_signal_kernel<<<
+        1,
+        C10_WARP_SIZE,
+        0,
+        at::cuda::getCurrentCUDAStream()>>>(
+        reinterpret_cast<uint32_t**>(signal_pads_dev_),
+        src_rank,
+        channel,
+        rank_,
+        world_size_,
+        timeout_ms);
+    C10_CUDA_KERNEL_LAUNCH_CHECK();
+  }
+
+  int get_rank() override {
+    return rank_;
+  }
+
+  int get_world_size() override {
+    return world_size_;
+  }
+
+ private:
+  size_t buffer_size_;
+  std::vector<void*> buffers_;
+  std::vector<void*> signal_pads_;
+  int device_idx_;
+  int rank_;
+  int world_size_;
+  void** buffers_dev_;
+  void** signal_pads_dev_;
+};
+
+class NVSHMEMSymmetricMemoryAllocator : public SymmetricMemoryAllocator {
+ public:
+  void* alloc(
+      size_t size,
+      int device_idx,
+      const std::optional<std::string>& group_name) override {
+    if (group_name == std::nullopt) {
+      TORCH_CHECK(
+          false, "NVSHMEMSymmetricMemoryAllocator::alloc requires group_name");
+    }
+    auto group_info = get_group_info(*group_name);
+    auto store = group_info.store;
+    int rank = group_info.rank;
+    int world_size = group_info.world_size;
+
+    nvshmem_extension::initialize_nvshmem_with_store(store, rank, world_size);
+    auto symm_mem = c10::make_intrusive<NVSHMEMSymmetricMemory>(
+        size, device_idx, rank, world_size);
+    void* ptr = symm_mem->get_buffer_ptrs()[rank];
+    // TODO: thread safety
+    ptr_to_symm_mem_[ptr] = symm_mem;
+    return ptr;
+  }
+
+  void free(void* ptr) override {
+    // TODO: thread safety
+    ptr_to_symm_mem_.erase(ptr);
+  };
+
+  size_t get_alloc_size(void* ptr) override {
+    auto it = ptr_to_symm_mem_.find(ptr);
+    if (it == ptr_to_symm_mem_.end()) {
+      TORCH_CHECK(
+          false, ptr, " is not allocated with NVSHMEMSymmetricMemoryAllocator");
+    }
+    return it->second->get_buffer_size();
+  };
+
+  c10::intrusive_ptr<SymmetricMemory> rendezvous(
+      void* ptr,
+      const std::optional<std::string>& group_name) override {
+    auto it = ptr_to_symm_mem_.find(ptr);
+    if (it == ptr_to_symm_mem_.end()) {
+      return nullptr;
+    }
+    return it->second;
+  };
+
+  bool has_multicast_support(int device_idx) override {
+    // TODO
+    return false;
+  };
+
+ private:
+  std::unordered_map<void*, c10::intrusive_ptr<SymmetricMemory>>
+      ptr_to_symm_mem_;
+};
+
+struct RegisterNVSHMEMSymmetricMemoryAllocator {
+  RegisterNVSHMEMSymmetricMemoryAllocator() {
     register_allocator(
         c10::DeviceType::CUDA,
-        c10::make_intrusive<CUDASymmetricMemoryAllocator>());
+        c10::make_intrusive<NVSHMEMSymmetricMemoryAllocator>());
   }
 };
 
-static RegisterCUDASymmetricMemoryAllocator register_allocator_;
+static RegisterNVSHMEMSymmetricMemoryAllocator register_allocator_;
 
 } // namespace symmetric_memory
 } // namespace c10d
