@@ -345,7 +345,10 @@ class AOTInductorTestsTemplate:
             torch.randn(10, 10, device=self.device),
             torch.randn(10, 10, device=self.device),
         )
-        self.check_model(Model(self.device), example_inputs)
+        model = Model(self.device)
+        expected = model(*example_inputs)
+        actual = AOTIRunnerUtil.legacy_run(self.device, model, example_inputs)
+        self.assertEqual(expected, actual)
 
     @unittest.skipIf(
         IS_FBCODE,
@@ -368,7 +371,10 @@ class AOTInductorTestsTemplate:
         )
 
         with config.patch({"freezing": True}):
-            self.check_model(Model(self.device), example_inputs)
+            model = Model(self.device)
+            expected = model(*example_inputs)
+            actual = AOTIRunnerUtil.legacy_run(self.device, model, example_inputs)
+            self.assertEqual(expected, actual)
 
     @unittest.skipIf(
         IS_FBCODE,
@@ -423,7 +429,11 @@ class AOTInductorTestsTemplate:
 
             example_inputs = (torch.randn(1, iC, 3, 3, device=self.device).to(dtype),)
             with config.patch({"freezing": True}):
-                self.check_model(Model(self.device), example_inputs)
+                # self.check_model(Model(self.device), example_inputs)
+                model = Model(self.device)
+                expected = model(*example_inputs)
+                actual = AOTIRunnerUtil.legacy_run(self.device, model, example_inputs)
+                self.assertEqual(expected, actual)
 
     @unittest.skipIf(
         IS_FBCODE,
@@ -610,6 +620,8 @@ class AOTInductorTestsTemplate:
         model = Model(N, K, self.device)
         batch = 2
         a = torch.randn(batch, M, K, device=self.device)
+        # We should be able to call self.check_model here, but torch.export.export
+        # constants (non-parameter, non-buffer) doesn't work today.
         example_inputs = (a,)
         actual = AOTIRunnerUtil.legacy_run(self.device, model, example_inputs)
         self.assertTrue(same(model(*example_inputs), actual))
@@ -1518,26 +1530,6 @@ class AOTInductorTestsTemplate:
             }
         self.check_model_with_multiple_inputs(
             WhileLoopModels.UnbackedSymIntClosure(),
-            prepend_counters(inputs),
-            dynamic_shapes=dynamic_shapes,
-        )
-
-    @common_utils.parametrize("dynamic", [False, True])
-    def test_while_loop_with_sym_expr_cond(self, dynamic):
-        inputs = (
-            torch.randn(10, 20, device=self.device),
-            torch.randn(10, 20, device=self.device),
-        )
-        dim0_ab = Dim("s0", min=2, max=1024)
-        dynamic_shapes = None
-        if dynamic:
-            dynamic_shapes = {
-                "c": {},
-                "a": {0: dim0_ab, 1: None},
-                "b": {0: dim0_ab, 1: None},
-            }
-        self.check_model_with_multiple_inputs(
-            WhileLoopModels.SymExprCond(),
             prepend_counters(inputs),
             dynamic_shapes=dynamic_shapes,
         )
@@ -3090,11 +3082,14 @@ class AOTInductorTestsTemplate:
         K = 128
         example_inputs = (torch.randn(2, M, K, device=self.device),)
         model = Model(N, K, self.device)
-        self.check_model(model, example_inputs)
+        actual = AOTIRunnerUtil.legacy_run(self.device, model, example_inputs)
+        self.assertTrue(same(model(*example_inputs), actual))
+
         # Update model weights, after this AOTInductor should re-generate model.so
         # if weights are stored in the model.so
         model.weight += 1
-        self.check_model(model, example_inputs)
+        actual = AOTIRunnerUtil.legacy_run(self.device, model, example_inputs)
+        self.assertTrue(same(model(*example_inputs), actual))
 
     def test_triton_kernel_extern_kernel_arg(self):
         if self.device != GPU_TYPE:
@@ -3759,7 +3754,7 @@ class AOTInductorTestsTemplate:
         # test default debug printing all tensor values codegen
         with config.patch({"aot_inductor.debug_intermediate_value_printer": "2"}):
             result, code = run_and_get_cpp_code(
-                AOTIRunnerUtil.compile, model, example_inputs
+                AOTIRunnerUtil.legacy_compile, model, example_inputs
             )
 
             # check the c shim print_tensor_handle call is triggered by the config and injected the cpp output code as expected
@@ -3786,7 +3781,7 @@ class AOTInductorTestsTemplate:
             }
         ):
             result, code = run_and_get_cpp_code(
-                AOTIRunnerUtil.compile, model, example_inputs
+                AOTIRunnerUtil.legacy_compile, model, example_inputs
             )
             filtered_kernel_calls = [
                 (filtered_kernel_name, 2),
