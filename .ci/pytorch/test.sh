@@ -46,6 +46,9 @@ BUILD_BIN_DIR="$BUILD_DIR"/bin
 SHARD_NUMBER="${SHARD_NUMBER:=1}"
 NUM_TEST_SHARDS="${NUM_TEST_SHARDS:=1}"
 
+# enable debug asserts in serialization
+export TORCH_SERIALIZATION_DEBUG=1
+
 export VALGRIND=ON
 # export TORCH_INDUCTOR_INSTALL_GXX=ON
 if [[ "$BUILD_ENVIRONMENT" == *clang9* || "$BUILD_ENVIRONMENT" == *xpu* ]]; then
@@ -411,7 +414,9 @@ test_inductor_cpp_wrapper_shard() {
 
   # Run certain inductor unit tests with cpp wrapper. In the end state, we
   # should be able to run all the inductor unit tests with cpp_wrapper.
-  python test/run_test.py --include inductor/test_torchinductor --verbose
+  python test/run_test.py \
+    --include inductor/test_torchinductor inductor/test_max_autotune inductor/test_cpu_repro \
+    --verbose
 
   # Run inductor benchmark tests with cpp wrapper.
   # Skip benchmark tests if it's in rerun-disabled-mode.
