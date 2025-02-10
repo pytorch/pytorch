@@ -425,17 +425,6 @@ def check_submodules():
                 ["git", "submodule", "update", "--init", "--recursive"], cwd=cwd
             )
             end = time.time()
-
-            # Use older nccl for CUDA 11.8 build
-            if( folder.contains("nccl") ):
-                cuda_version = os.getenv("DESIRED_CUDA", "")
-                cuda_version_2 = os.getenv("CUDA_VERSION", "")
-                if cuda_version.startswith("11.8") or cuda_version_2.startswith("11.8"):
-                    subprocess.check_call(
-                        ["git", "checkout", "ab2b89c4c339bd7f816fbc114a4b05d386b66290"], cwd=cwd
-                    )
-                    report(" --- NCCL module initialized to ab2b89c4c339bd7f816fbc114a4b05d386b66290")
-
             report(f" --- Submodule initialization took {end - start:.2f} sec")
         except Exception:
             report(" --- Submodule initalization failed")
@@ -492,11 +481,21 @@ def mirror_files_into_torchgen():
             continue
         raise RuntimeError("Check the file paths in `mirror_files_into_torchgen()`")
 
+def check_nccl():
+    cuda_version = os.getenv("DESIRED_CUDA", "")
+    cuda_version_2 = os.getenv("CUDA_VERSION", "")
+    if cuda_version.startswith("11.8") or cuda_version_2.startswith("11.8"):
+        nccl_path = os.path.join(third_party_path, "nccl", "nccl")
+        report("-- Overriding nccl for CUDA 11.8 ")
+        subprocess.check_call(
+            ["git", "checkout", "ab2b89c4c339bd7f816fbc114a4b05d386b66290"], cwd=nccl_path
+        )
 
 # all the work we need to do _before_ setup runs
 def build_deps():
     report("-- Building version " + version)
     check_submodules()
+    check_nccl()
     check_pydep("yaml", "pyyaml")
     build_python = not BUILD_LIBTORCH_WHL
     build_pytorch(
