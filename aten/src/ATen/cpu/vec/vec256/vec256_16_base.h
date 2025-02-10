@@ -659,7 +659,6 @@ static inline Vectorized<T> binary_op_as_fp32(const Vectorized<T>& a, const Vect
   return cvt_from_fp32<T>(o1, o2);
 }
 
-#ifdef CPU_CAPABILITY_AVX512
 #define CONVERT_VECTORIZED_INIT(type, name) \
 inline std::tuple<Vectorized<float>, Vectorized<float>> convert_##name##_float(const Vectorized<type>& a) { \
   __m256 o1, o2; \
@@ -686,7 +685,7 @@ inline void load_fp32_from_##name(const type *data, Vectorized<float>& out1, Vec
   out2 = out2_values; \
 }
 
-#else // CPU_CAPABILITY_AVX512
+#else // CPU_CAPABILITY_AVX2
 
 #define CONVERT_NON_VECTORIZED_INIT(type, name) \
 inline std::tuple<Vectorized<float>, Vectorized<float>> convert_##name##_float(const Vectorized<type>& a) { \
@@ -724,7 +723,5 @@ inline void load_fp32_from_##name(const type *data, Vectorized<float>& out1, Vec
   load_fp32_from_##name(data, out2); \
 }
 
-#endif
-
-} // at::vec
-} // CPU_CAPABILITY
+#endif // CPU_CAPABILITY_AVX2
+}} // namespace::at::vec::CPU_CAPABILITY

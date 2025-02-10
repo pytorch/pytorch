@@ -737,18 +737,16 @@ Vectorized<BFloat16> inline fmadd(const Vectorized<BFloat16>& a,
 }
 
 CONVERT_VECTORIZED_INIT(BFloat16, bfloat16);
-
-#else // defined(CPU_CAPABILITY_AVX2)
-
-CONVERT_NON_VECTORIZED_INIT(BFloat16, bfloat16);
-
-#endif // defined(CPU_CAPABILITY_AVX2)
-
-#if defined(CPU_CAPABILITY_AVX2)
 LOAD_FP32_VECTORIZED_INIT(BFloat16, bf16);
+
 #else // defined(CPU_CAPABILITY_AVX2)
-LOAD_FP32_NON_VECTORIZED_INIT(BFloat16, bf16);
+
+#ifdef CPU_CAPABILITY_SVE
+CONVERT_NON_VECTORIZED_INIT(BFloat16, bfloat16);
 #endif
+
+LOAD_FP32_NON_VECTORIZED_INIT(BFloat16, bf16);
+#endif // defined(CPU_CAPABILITY_AVX2)
 }} // namsepace at::vec::CPU_CAPABILITY
 
 #pragma GCC diagnostic pop

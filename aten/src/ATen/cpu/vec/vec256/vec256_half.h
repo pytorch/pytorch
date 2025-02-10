@@ -20,7 +20,7 @@ namespace at::vec {
 // See Note [CPU_CAPABILITY namespace]
 inline namespace CPU_CAPABILITY {
 
-#if defined(CPU_CAPABILITY_AVX2)
+#ifdef CPU_CAPABILITY_AVX2
 
 #ifndef SLEEF_CONST
 #if (defined(__GNUC__) || defined(__CLANG__)) && !defined(__INTEL_COMPILER)
@@ -238,57 +238,16 @@ Vectorized<Half> inline fmadd(const Vectorized<Half>& a,
 }
 
 CONVERT_VECTORIZED_INIT(Half, half)
+LOAD_FP32_VECTORIZED_INIT(Half, fp16);
 
 #else // defined(CPU_CAPABILITY_AVX2)
 
-#if defined(__aarch64__) && !defined(C10_MOBILE) && !defined(__CUDACC__)
-inline std::tuple<Vectorized<float>, Vectorized<float>> convert_half_float(const Vectorized<Half>& a) {
-  static_assert(Vectorized<Half>::size() == 2 * Vectorized<float>::size());
-#if defined(__ARM_FEATURE_FP16_VECTOR_ARITHMETIC)
-  float16x8x2_t arr = a;
-  float16x8_t x = arr.val[0];
-  float16x8_t y = arr.val[1];
-#else
-  auto arr = reinterpret_cast<const float16_t*>(a.operator const Half*());
-  float16x8_t x = vld1q_f16(arr);
-  float16x8_t y = vld1q_f16(arr + Vectorized<float>::size());
-#endif
-  float32x4_t x1 = vcvt_f32_f16(vget_low_f16(x));
-  float32x4_t x2 = vcvt_f32_f16(vget_high_f16(x));
-  float32x4_t y1 = vcvt_f32_f16(vget_low_f16(y));
-  float32x4_t y2 = vcvt_f32_f16(vget_high_f16(y));
-  return { Vectorized<float>(x1, x2), Vectorized<float>(y1, y2) };
-}
-inline Vectorized<Half> convert_float_half(const Vectorized<float>& a, const Vectorized<float>& b) {
-  static_assert(Vectorized<Half>::size() == 2 * Vectorized<float>::size());
-  float32x4x2_t x = a;
-  float32x4x2_t y = b;
-  float16x4_t x1 = vcvt_f16_f32(x.val[0]);
-  float16x4_t x2 = vcvt_f16_f32(x.val[1]);
-  float16x4_t y1 = vcvt_f16_f32(y.val[0]);
-  float16x4_t y2 = vcvt_f16_f32(y.val[1]);
-#if defined(__ARM_FEATURE_FP16_VECTOR_ARITHMETIC)
-  return Vectorized<Half>(vcombine_f16(x1, x2), vcombine_f16(y1, y2));
-#else
-  Vectorized<Half> rc;
-  auto arr = reinterpret_cast<float16_t*>(rc.operator Half*());
-  vst1q_f16(arr, vcombine_f16(x1, x2));
-  vst1q_f16(arr + Vectorized<float>::size(), vcombine_f16(y1, y2));
-  return rc;
-#endif
-}
-#else
+#ifdef CPU_CAPABILITY_SVE
 CONVERT_NON_VECTORIZED_INIT(Half, half);
 #endif
 
-#endif // defined(CPU_CAPABILITY_AVX2)
-
-#if defined(CPU_CAPABILITY_AVX2)
-LOAD_FP32_VECTORIZED_INIT(Half, fp16);
-#else // defined(CPU_CAPABILITY_AVX2)
 LOAD_FP32_NON_VECTORIZED_INIT(Half, fp16);
-
-#endif
+#endif // defined(CPU_CAPABILITY_AVX2)
 }} // namsepace at::vec::CPU_CAPABILITY
 
 #pragma GCC diagnostic pop
