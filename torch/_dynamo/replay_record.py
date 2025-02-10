@@ -20,6 +20,7 @@ class ModuleRecord:
 class DummyModule:
     name: str
     is_torch: bool = False
+    value: object = None
 
     @property
     def __name__(self) -> str:
