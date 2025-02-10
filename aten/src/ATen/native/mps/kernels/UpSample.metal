@@ -245,16 +245,14 @@ kernel void upsample_bilinear2d_aa(
   auto output_x = thread_index % output_sizes.x;
   auto output_y = thread_index / output_sizes.x;
   auto x_center = area_pixel_compute_source_index(
-                      scales.x, output_x, align_corners, /*cubic=*/false);
+      scales.x, output_x, align_corners, /*cubic=*/false);
   auto y_center = area_pixel_compute_source_index(
-                      scales.y, output_y, align_corners, /*cubic=*/false);
+      scales.y, output_y, align_corners, /*cubic=*/false);
   auto clamped_scales = max(1.0, scales);
   auto x_min = max(0L, long(floor(x_center - clamped_scales.x + 1)));
-  auto x_max =
-      min(input_sizes.x, long(ceil(x_center + clamped_scales.x)));
+  auto x_max = min(input_sizes.x, long(ceil(x_center + clamped_scales.x)));
   auto y_min = max(0L, long(floor(y_center - clamped_scales.y + 1)));
-  auto y_max =
-      min(input_sizes.y, long(ceil(y_center + clamped_scales.y)));
+  auto y_max = min(input_sizes.y, long(ceil(y_center + clamped_scales.y)));
   for (int n = 0; n < output_sizes.w; n++) {
     for (int c = 0; c < output_sizes.z; c++) {
       float res = 0.0;
