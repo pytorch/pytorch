@@ -7,7 +7,6 @@ from collections import OrderedDict
 from copy import deepcopy
 from numbers import Number
 from typing import Any, Callable, cast, Optional, TypeVar, Union
-from typing_extensions import TypeAlias
 
 import torch
 import torch._C as _C
@@ -27,11 +26,12 @@ from torch.overrides import (
     has_torch_function_variadic,
 )
 
+
 TensorMethodT = TypeVar("TensorMethodT", bound=Callable[[Any, Any], "Tensor"])
 
 
 def _handle_torch_function_and_wrap_type_error_to_not_implemented(
-    f: TensorMethodT
+    f: TensorMethodT,
 ) -> TensorMethodT:
     @functools.wraps(f)
     def wrapped(self, other) -> "Tensor":
@@ -39,7 +39,7 @@ def _handle_torch_function_and_wrap_type_error_to_not_implemented(
             args = self, other
             # See https://github.com/pytorch/pytorch/issues/75462
             if has_torch_function(args):
-                return handle_torch_function(wrapped, args, self, other)
+                return handle_torch_function(wrapped, args, *args)
             return f(self, other)
         except TypeError:
             return NotImplemented
@@ -1109,10 +1109,13 @@ class Tensor(torch._C.TensorBase):
     __itruediv__ = _C.TensorBase.__idiv__
 
     __pow__ = cast(
-        Callable[["torch._C.TensorBase", Union["Tensor", int, float, bool, complex]], "Tensor"],
+        Callable[
+            ["torch._C.TensorBase", Union["Tensor", int, float, bool, complex]],
+            "Tensor",
+        ],
         _handle_torch_function_and_wrap_type_error_to_not_implemented(
             _C.TensorBase.pow
-        )
+        ),
     )
     __ipow__ = _handle_torch_function_and_wrap_type_error_to_not_implemented(
         _C.TensorBase.pow_
@@ -1144,11 +1147,15 @@ class Tensor(torch._C.TensorBase):
         return torch.floor_divide(other, self)
 
     @_handle_torch_function_and_wrap_type_error_to_not_implemented
-    def __rlshift__(self, other: Union["Tensor", int, float, bool, complex]) -> "Tensor":
+    def __rlshift__(
+        self, other: Union["Tensor", int, float, bool, complex]
+    ) -> "Tensor":
         return torch.bitwise_left_shift(other, self)
 
     @_handle_torch_function_and_wrap_type_error_to_not_implemented
-    def __rrshift__(self, other: Union["Tensor", int, float, bool, complex]) -> "Tensor":
+    def __rrshift__(
+        self, other: Union["Tensor", int, float, bool, complex]
+    ) -> "Tensor":
         return torch.bitwise_right_shift(other, self)
 
     @_handle_torch_function_and_wrap_type_error_to_not_implemented
