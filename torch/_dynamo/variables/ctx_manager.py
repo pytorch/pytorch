@@ -236,6 +236,42 @@ class GradInplaceRequiresGradCtxManagerVariable(ContextWrappingVariable):
         return variables.ConstantVariable.create(None)
 
 
+class TemporarilyPopInterpreterStackCtxManagerVariable(ContextWrappingVariable):
+    """represents torch._functorch.pyfunction.temporarily_pop_interpreter_stack()"""
+
+    @staticmethod
+    def create(tx: "InstructionTranslator", target_values, **kwargs):
+        return TemporarilyPopInterpreterStackCtxManagerVariable(
+            target_values=target_values,
+            initial_values=None,
+            **kwargs,
+        )
+
+    def enter(self, tx):
+        self.saved = torch._C._functorch.pop_dynamic_layer_stack()
+        self.set_cleanup_hook(
+            tx,
+            lambda: torch._C._functorch.push_dynamic_layer_stack(self.saved),
+        )
+        self.state.proxy = tx.output.create_node(
+            "call_function",
+            torch._C._functorch.pop_dynamic_layer_stack,
+            (),
+            {},
+        )
+        return variables.ConstantVariable.create(None)
+
+    def exit(self, tx: "InstructionTranslator", *args):
+        self.state.cleanup()
+        tx.output.create_node(
+            "call_function",
+            torch._C._functorch.push_dynamic_layer_stack,
+            (self.state.proxy,),
+            {},
+        )
+        return variables.ConstantVariable.create(None)
+
+
 class JvpIncrementNestingCtxManagerVariable(ContextWrappingVariable):
     """represents torch.func.jvp increment/decrement nesting"""
 
@@ -940,19 +976,38 @@ class PreserveVersionContextVariable(ContextWrappingVariable):
     """
 
     @staticmethod
+    def _create_lambda_from_tensors(tx, tensors):
+        if isinstance(tensors, variables.TensorVariable):
+            versions = variables.TupleVariable(
+                [x.var_getattr(tx, "_version") for x in [tensors]]
+            )
+            tensors = variables.TupleVariable([tensors])
+        else:
+            versions = variables.TupleVariable(
+                [x.var_getattr(tx, "_version") for x in tensors.items]
+            )
+        return PreserveVersionContextVariable(tensors, versions)
+
+    @staticmethod
     def constructor(tx):
         return variables.LambdaVariable(
-            lambda tensor: PreserveVersionContextVariable(
-                tensor,
-                tensor.var_getattr(tx, "_version"),
+            lambda tensors: PreserveVersionContextVariable._create_lambda_from_tensors(
+                tx, tensors
             )
         )
 
-    def __init__(self, tensor, prev_version, **kwargs) -> None:
+    def __init__(self, tensors, prev_versions, **kwargs) -> None:
         kwargs.setdefault("target_values", None)
         super().__init__(**kwargs)
-        self.tensor = tensor
-        self.prev_version = prev_version
+        self.tensors = tensors
+        self.prev_versions = prev_versions
+        # The context manager accepts Union[Tensor, Tuple[Tensor]]
+        if isinstance(self.tensors, variables.TensorVariable):
+            self.tensors = variables.TupleVariable([self.tensors])
+        if isinstance(
+            self.prev_versions, (variables.ConstantVariable, variables.SymNodeVariable)
+        ):
+            self.prev_versions = variables.TupleVariable([self.prev_versions])
 
     def enter(self, tx):
         pass
@@ -962,7 +1017,7 @@ class PreserveVersionContextVariable(ContextWrappingVariable):
 
         return variables.TorchInGraphFunctionVariable(
             _unsafe_set_version_counter
-        ).call_function(tx, [self.tensor, self.prev_version], {})
+        ).call_function(tx, [self.tensors, self.prev_versions], {})
 
     def reconstruct(self, codegen):
         unimplemented(
@@ -1116,6 +1171,9 @@ class StreamVariable(VariableTracker):
         self.value = value
         self.device = device
 
+    def python_type(self):
+        return torch.Stream
+
     def call_method(
         self,
         tx,
@@ -1124,15 +1182,8 @@ class StreamVariable(VariableTracker):
         kwargs: "dict[str, VariableTracker]",
     ) -> "VariableTracker":
         assert hasattr(self.value, name), f"no stream method found named {name}"
-        assert name in [
-            "wait_stream",
-            "synchronize",
-            "query",
-            "record_event",
-            "wait_event",
-        ], f" unsupported stream method {name}"
 
-        from ..utils import proxy_args_kwargs
+        from ..utils import cmp_name_to_op_mapping, proxy_args_kwargs
         from .builder import wrap_fx_proxy_cls
 
         if name in ("wait_stream", "synchronize", "wait_event"):
@@ -1156,8 +1207,17 @@ class StreamVariable(VariableTracker):
                     "call_method", name, *proxy_args_kwargs([self] + args, kwargs)
                 ),
             )
-        else:
-            unimplemented(self.device + " stream method " + name + " unsupported")
+        elif name in cmp_name_to_op_mapping and len(args) == 1 and not kwargs:
+            # NB : Checking for mutation is necessary because we compare
+            # constant values
+            other = args[0]
+            if not isinstance(other, StreamVariable):
+                return variables.ConstantVariable.create(NotImplemented)
+            return variables.ConstantVariable.create(
+                cmp_name_to_op_mapping[name](self.value, other.value)
+            )
+
+        return super().call_method(tx, name, args, kwargs)
 
     def as_proxy(self):
         return self.proxy
