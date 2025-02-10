@@ -8202,7 +8202,7 @@ FORWARD_SKIPS_AND_XFAILS = [
     # narrow(): not supported with non-contig on dims other than the batch dim
     XFailRule(
         error_type=RuntimeError,
-        error_msg="not yet supported for non-contiguous nested tensors on dim != 0",
+        error_msg="not yet supported on dim != 0 for non-contiguous nested tensors",
         op_match_fn=lambda device, op: (op.full_name == "narrow"),
         sample_match_fn=lambda device, sample: (
             sample.kwargs["dim"] != 0
@@ -8575,6 +8575,26 @@ COMPILE_BACKWARD_SKIPS_AND_XFAILS = [
         op_match_fn=lambda device, op: True,
         sample_match_fn=lambda device, sample: ("noncontig_holes" in sample.name),
         name="noncontig_holes_data_dependency",
+    ),
+    # narrow(): non-contig on the batch dim has some problems when not spanning
+    # the entire batch dim (nearly all the time). This needs some investigation.
+    XFailRule(
+        error_type=torch._dynamo.exc.BackendCompilerFailed,
+        # GuardOnDataDependentSymNode: Could not guard on data-dependent expression
+        # Eq(IsNonOverlappingAndDenseIndicator(5, 3, u9, 81, 27, 1), 1)
+        # (unhinted: Eq(IsNonOverlappingAndDenseIndicator(5, 3, u9, 3*s1, s1, 1), 1)).
+        # (Size-like symbols: u9)
+        error_msg="Could not guard on data-dependent expression",
+        op_match_fn=lambda device, op: (op.full_name == "narrow"),
+        sample_match_fn=lambda device, sample: (
+            (sample.input._lengths is not None or sample.input._ragged_idx != 1)
+            and sample.kwargs["dim"] == 0
+            and (
+                sample.kwargs["start"] != 0
+                or sample.kwargs["length"] != sample.input.shape[0]
+            )
+        ),
+        name="narrow_noncontig_on_batch_dim_broken",
     ),
     # mean(): weird bug
     XFailRule(
