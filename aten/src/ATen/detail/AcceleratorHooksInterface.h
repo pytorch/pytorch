@@ -20,23 +20,6 @@ struct TORCH_API AcceleratorHooksInterface {
   // squelch -Werror=non-virtual-dtor
   virtual ~AcceleratorHooksInterface() = default;
 
-  // Whether this backend was enabled at compilation time.
-  // This function should NEVER throw.
-  virtual bool isBuilt() const {
-    return false;
-  }
-
-  // Whether this backend can be used at runtime, meaning it was built,
-  // its runtime dependencies are available (driver) and at least one
-  // supported device can be used.
-  // This function should NEVER throw. This function should NOT initialize the context
-  // on any device (result of hasPrimaryContext below should not change).
-  // While it is acceptable for this function to poison fork, it is
-  // recommended to avoid doing so whenever possible.
-  virtual bool isAvailable() const {
-    return false;
-  }
-
   // Whether the device at device_index is fully initialized or not.
   virtual bool hasPrimaryContext(DeviceIndex device_index) const = 0;
 
