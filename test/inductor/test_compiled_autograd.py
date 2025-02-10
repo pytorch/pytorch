@@ -3670,8 +3670,16 @@ class CompiledAutograd0(torch.nn.Module):
 
 
 def load_test_module(name):
+    paths = []
     testdir = Path(__file__).absolute().parent.parent
-    with mock.patch("sys.path", [*sys.path, str(testdir)]):
+    paths.append(str(testdir))
+
+    if "/" in name:
+        # for relative imports in test/functorch
+        subdir = name.split("/")[-2]
+        paths.append(str(testdir / subdir))
+
+    with mock.patch("sys.path", [*sys.path, *paths]):
         return SourceFileLoader(
             name, str(testdir / f"{name.replace('.', '/')}.py")
         ).load_module()
