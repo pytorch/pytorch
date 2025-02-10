@@ -50,7 +50,7 @@ inline void tinygemm_kernel(
 
   Vectorized va;
   at::vec::VectorizedN<float, COLS> vb;
-  at::vec::VectorizedN<float, ROWS*COLS> vc;
+  at::vec::VectorizedN<float, ROWS * COLS> vc;
   at::vec::VectorizedN<float, COLS> scale;
 
   auto load_scale = [&](int i) {
