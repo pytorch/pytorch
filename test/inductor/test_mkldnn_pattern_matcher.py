@@ -2060,6 +2060,12 @@ class TestPatternMatcher(TestPatternMatcherBase):
                 return self.linear2(self.linear(x))
 
         mod = M(bias, do_permute=do_permute).eval().to(device=device)
+        assert isinstance(inputs, tuple)
+
+        def __convert_tensor_to_device(input, device):
+            return input.to(device=device) if isinstance(input, torch.Tensor) else input
+
+        inputs = tuple(__convert_tensor_to_device(input, device) for input in inputs)
 
         def _default_matcher_check_fn():
             self.assertEqual(
