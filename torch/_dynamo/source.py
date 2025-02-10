@@ -559,6 +559,7 @@ class DictGetItemSource(ChainedSource):
             self.index.reconstruct(codegen)
         else:
             codegen.append_output(codegen.create_load_const(self.index))
+        # TODO(anijain2305) - Change this to dict.__getitem__(d, k)
         codegen.append_output(create_instruction("BINARY_SUBSCR"))
 
     def name(self):

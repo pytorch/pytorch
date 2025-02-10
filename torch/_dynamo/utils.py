@@ -2409,7 +2409,7 @@ def to_subclass(t, cls):
 
 
 def dict_keys_getitem(d, n):
-    return next(itertools.islice(iter(d), n, n + 1))
+    return next(itertools.islice(iter(dict(d)), n, n + 1))
 
 
 def enum_repr(value, local):
