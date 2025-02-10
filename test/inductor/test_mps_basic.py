@@ -104,6 +104,16 @@ class MPSBasicTests(TestCase):
     def test_pointwise_digamma(self):
         self.common(torch.special.digamma, (torch.rand(128, 128),), check_lowp=False)
 
+    def test_pointwise_sinc(self):
+        self.common(torch.special.sinc, (torch.rand(128, 128),), check_lowp=False)
+
+    def test_pointwise_zeta(self):
+        self.common(
+            torch.special.zeta,
+            (torch.rand(128, 128), torch.rand(128, 128)),
+            check_lowp=False,
+        )
+
     def test_broadcast(self):
         self.common(torch.add, (torch.rand(32, 1024), torch.rand(1024)))
 
@@ -114,9 +124,17 @@ class MPSBasicTests(TestCase):
 
         self.common(inc_, (torch.rand(1024),))
 
+    # TODO(NS): Replace me with full test_prod when multi-stage reductions are implemented
+    def test_prod(self):
+        def fn(a):
+            return a.prod(0), a.prod(1), a.prod()
+
+        self.common(fn, (torch.rand((10, 10)),))
+
 
 # Copy tests
 for test_name in [
+    "test_min_max_reduction",
     "test_add_const_int",
     "test_add_inplace_permuted",
     "test_addmm",
@@ -137,7 +155,6 @@ for test_name in [
     "test_custom_op_2",
     "test_div1",
     "test_div3",
-    "test_exp",
     "test_erfinv",
     "test_floordiv",
     "test_full_truncation",
@@ -147,6 +164,7 @@ for test_name in [
     "test_inf",
     "test_isinf",
     "test_isinf2",
+    "test_layer_norm",
     "test_lgamma",
     "test_linear_float64",
     "test_log_fp64",
@@ -156,7 +174,6 @@ for test_name in [
     "test_min_max_reduction_nan",
     "test_nan_to_num",
     "test_pow2",
-    "test_prod",
     "test_randint_int64_mod",
     "test_randn_generator",
     "test_remainder",
