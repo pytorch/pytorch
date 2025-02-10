@@ -188,7 +188,7 @@ class SchedulerDonatedBuffer(SchedulerBuffer):
 
 class BaseSchedulerNode:
     group: tuple[torch.device, tuple[tuple[sympy.Expr, ...], ...]]
-    read_writes: dependencies.ReadWrites
+    read_writes: dependencies.ReadWrites #TODO: Use this one
     unmet_dependencies: OrderedSet[Dep]
     # .min_order and .max_order are only relevant for "grouped" nodes such as FusedSchedulerNode.
     # e.g. if the FusedSchedulerNode includes nodes (op_1, op_2, op_3), and op_X is X-th node
@@ -207,7 +207,7 @@ class BaseSchedulerNode:
 
     def _init_from_node(self, node: ir.Operation) -> None:
         self.node: Optional[ir.Operation] = node
-        self.ancestors = OrderedSet[str]()
+        self.ancestors = OrderedSet[str]() # TODO: Use this one
         self.last_usage = OrderedSet[
             str
         ]()  # buffers that won't be used after this kernel
@@ -3881,10 +3881,10 @@ class Scheduler:
         )
 
     def graph_partition(self):
-        partitions = [self.nodes]
-        reads = [[]]
-        writes = [[]]
-        return partitions, reads, writes
+        partitions: List[List[BaseSchedulerNode]] = [self.nodes]
+        placeholders = [[]]
+        outputs = [[]]
+        return partitions, placeholders, outputs
         # TODO1: partition self.nodes into multiple lists.
         # TODO2: for each group, collect inputs and outputs
 
@@ -3898,13 +3898,14 @@ class Scheduler:
 
     def _codegen_partitions(self) -> None:
         # TODO
-        partitions, reads, writes = self.graph_partition()
+        partitions, placeholders, outputs = self.graph_partition()
 
-        for nodes, read, write in zip(partitions, reads, writes):
+        for nodes, read, write in zip(partitions, placeholders, outputs):
             self._codegen(nodes)
             # TODO1: move V.graph.wrapper_code.lines to V.graph.wrapper_code.subgraph_lines
             # TODO2: codegen for signature like `def subgraph1(arg0):`
             # TODO3: codegen for input arguments  like `arg0, arg1 = args`
+            #                   used/defs instead of read/writes.
             # TODO4: codegen for output arguments like `return out0, out1`
             # TODO5: codegen for subgraph launcher in V.graph.wrapper_code.subgraph_launchers,
             #           like `buf2 = subgraph1(arg0)` which will appear in `def call`.
