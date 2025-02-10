@@ -19,7 +19,8 @@ from torch.testing._internal.common_cuda import (
     SM53OrLater,
     SM89OrLater,
     _get_torch_cuda_version,
-    PLATFORM_SUPPORTS_FP8
+    PLATFORM_SUPPORTS_FP8,
+    PLATFORM_SUPPORTS_MX_GEMM
 )
 from torch.testing._internal.common_device_type import (
     dtypes,
@@ -213,6 +214,7 @@ class TestMatmulCuda(TestCase):
 
 
 f8_msg = "FP8 is only supported on H100+, SM 8.9 and MI300+ devices"
+mx_skip_msg = "MX gemm is only supported on CUDA capability 10.0+"
 
 if torch.version.hip:
     e4m3_type = torch.float8_e4m3fnuz
@@ -373,6 +375,28 @@ def compute_error(x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
     Ps = torch.norm(x)
     Pn = torch.norm(x - y)
     return 20 * torch.log10(Ps / Pn)
+
+# largest power of 2 representable in `torch.float8_e4m3fn`
+F8E4M3_LARGEST_POW2 = 8
+# max value of `torch.float8_e4m3fn` (448)
+F8E4M3_MAX_VAL = torch.finfo(torch.float8_e4m3fn).max
+# exponent bias of `torch.float8_e8m0fnu`
+F8E8M0_EXP_BIAS = 127
+
+def data_to_mx_scale(x, block_size):
+    # simple implementation of https://www.opencompute.org/documents/ocp-microscaling-formats-mx-v1-0-spec-final-pdf
+    # section 6.3, not all edge cases (such as NaN) are handled/tested
+    orig_shape = x.shape
+    x = x.reshape(-1, block_size)
+    max_abs = torch.amax(torch.abs(x), 1)
+    largest_p2_lt_max_abs = torch.floor(torch.log2(max_abs))
+    target_max_pow2 = 8
+    scale_e8m0_unbiased = largest_p2_lt_max_abs - F8E4M3_LARGEST_POW2
+    scale_e8m0_unbiased = torch.clamp(scale_e8m0_unbiased, -1 * F8E8M0_EXP_BIAS, F8E8M0_EXP_BIAS)
+    scale_e8m0_biased = scale_e8m0_unbiased + F8E8M0_EXP_BIAS
+    scale_e8m0_biased = scale_e8m0_biased.to(torch.uint8)
+    scale_e8m0_biased = scale_e8m0_biased.view(torch.float8_e8m0fnu)
+    return scale_e8m0_biased.reshape(orig_shape[0], -1)
 
 
 @unittest.skipIf(not torch.cuda.is_available(), "CUDA not found")
@@ -777,36 +801,30 @@ class TestFP8MatmulCuda(TestCase):
         self.assertEqual(out_dtype, out_fp8.dtype)
         self.assertEqual(out_fp32, out_fp8.to(torch.float))
 
-    # TODO(before land): real skip condition, should only run on CUDA 12.8+ with CUDA capability 10.0+
-    @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
+    @unittest.skipIf(not PLATFORM_SUPPORTS_MX_GEMM, mx_skip_msg)
     @parametrize("test_case_name", [
-        # "a_eye_b_eye", 
-        # "a_ones_b_ones",
-        # "a_ones_modified_b_ones",
-        # "a_ones_b_ones_modified",
-        # "a_scale_modified_b_ones",
-        # "a_ones_b_scale_modified",
-        # "data_random_scales_one",
+        "a_eye_b_eye",
+        "a_ones_b_ones",
+        "a_ones_modified_b_ones",
+        "a_ones_b_ones_modified",
+        "a_scale_modified_b_ones",
+        "a_ones_b_scale_modified",
+        "data_random_scales_one",
         "data_random_scales_from_data",
     ])
-    def test_blockwise_mxfp8(self, test_case_name) -> None:
+    @parametrize("fast_accum", [False, True])
+    @parametrize("mkn", [(128, 128, 128), (256, 256, 256), (128, 256, 512), (256, 512, 128), (512, 128, 256)])
+    def test_blockwise_mxfp8_numerics(self, test_case_name, fast_accum, mkn) -> None:
         # inspiration: https://github.com/pytorch/ao/pull/1625
 
-        # test cases:
-        # * A=eye, B=eye
-        # * A=ones, B=ones
-        # * - change A_scale
-        # * - change B_scale
-
         device = "cuda"
-        # TODO other shapes
-        # M, K, N = 256, 256, 256
-        M, K, N = 128, 128, 128
+        M, K, N = mkn
         BLOCK_SIZE = 32
         require_exact_match = True
 
         if test_case_name == "a_eye_b_eye":
-            assert M == K == N
+            if not ((M == K) and (M == N)):
+                return unittest.skip("this test is only defined for M == K == N, skipping")
             A_ref = torch.eye(M, device=device, dtype=torch.bfloat16)
             B_ref = torch.eye(M, device=device, dtype=torch.bfloat16)
 
@@ -818,7 +836,6 @@ class TestFP8MatmulCuda(TestCase):
             # convert to swizzled format
             A_scale = to_blocked(A_scale)
             B_scale = to_blocked(B_scale)
-
 
         elif test_case_name == "a_ones_b_ones":
             A_ref = torch.ones(M, K, device=device, dtype=torch.bfloat16)
@@ -924,51 +941,28 @@ class TestFP8MatmulCuda(TestCase):
 
         elif test_case_name == "data_random_scales_from_data":
             require_exact_match = False
-            # scales all-ones, element data random while being exactly representable in float8_e4m3fn
-
-            # generate integers in [0, 255] and interpret as float8_e4m3fn
-            A_ref = torch.randint(0, 255, (M, K), device=device, dtype=torch.uint8).view(torch.float8_e4m3fn).to(torch.bfloat16)
-            B_ref = torch.randint(0, 255, (N, K), device=device, dtype=torch.uint8).view(torch.float8_e4m3fn).to(torch.bfloat16)
-            # modification: don't allow NaN values
-            A_ref[torch.isnan(A_ref)] = 0
-            B_ref[torch.isnan(B_ref)] = 0
-
-            def data_to_mx_scale(x):
-                orig_shape = x.shape
-                x = x.reshape(-1, BLOCK_SIZE)
-                max_abs = torch.amax(torch.abs(x), 1)
-                # print(max_abs)
-                largest_p2_lt_max_abs = torch.floor(torch.log2(max_abs))
-                # print(largest_p2_lt_max_abs)
-                target_max_pow2 = 8
-                scale_e8m0_unbiased = largest_p2_lt_max_abs - target_max_pow2
-                scale_e8m0_unbiased = torch.clamp(scale_e8m0_unbiased, -127, 127)
-                scale_e8m0_biased = scale_e8m0_unbiased + 127
-                # print(1, scale_e8m0_biased, scale_e8m0_biased.max())
-                scale_e8m0_biased = scale_e8m0_biased.to(torch.uint8)
-                scale_e8m0_biased = scale_e8m0_biased.view(torch.float8_e8m0fnu)
-                # print(2, scale_e8m0_biased)
-                return scale_e8m0_biased.reshape(orig_shape[0], -1)
-                
+            # random data, scales from data
+            A_ref = torch.randn((M, K), device=device, dtype=torch.bfloat16) * 1000
+            B_ref = torch.randn((N, K), device=device, dtype=torch.bfloat16) * 1000
 
             # Calculate scales based on the inputs
-            A_scale = data_to_mx_scale(A_ref) 
-            B_scale = data_to_mx_scale(B_ref) 
+            A_scale = data_to_mx_scale(A_ref, BLOCK_SIZE)
+            B_scale = data_to_mx_scale(B_ref, BLOCK_SIZE)
 
-            max_val = torch.finfo(torch.float8_e4m3fn).max  # 448.0
+            max_val = F8E4M3_MAX_VAL
             min_val = -1 * max_val
 
-            A = (A_ref.reshape(-1, BLOCK_SIZE) / A_scale.reshape(M * K // BLOCK_SIZE, 1).float()).reshape(M, K).clamp(min=min_val, max=max_val).to(torch.float8_e4m3fn)
-            B = (B_ref.reshape(-1, BLOCK_SIZE) / B_scale.reshape(N * K // BLOCK_SIZE, 1).float()).reshape(N, K).clamp(min=min_val, max=max_val).to(torch.float8_e4m3fn)
+            A = (A_ref.reshape(-1, BLOCK_SIZE) / A_scale.reshape(M * K // BLOCK_SIZE, 1).float()).reshape(M, K)
+            A = A.clamp(min=min_val, max=max_val).to(torch.float8_e4m3fn)
+            B = (B_ref.reshape(-1, BLOCK_SIZE) / B_scale.reshape(N * K // BLOCK_SIZE, 1).float()).reshape(N, K)
+            B = B.clamp(min=min_val, max=max_val).to(torch.float8_e4m3fn)
 
             # convert to swizzled format
             A_scale = to_blocked(A_scale)
             B_scale = to_blocked(B_scale)
 
-
         C_ref = A_ref @ B_ref.t()
 
-        # TODO sweep fast_accum
         C = torch._scaled_mm(
             A,
             B.t(),
@@ -977,20 +971,14 @@ class TestFP8MatmulCuda(TestCase):
             B_scale,
             A_scale,
             out_dtype=torch.bfloat16,
-            use_fast_accum=False,
+            use_fast_accum=fast_accum,
         )
-
-        print('A', A)
-        print('B.t()', B.t())
-        print('C', C)
-        print('C_ref', C_ref)
 
         if require_exact_match:
             torch.testing.assert_close(C, C_ref, atol=0, rtol=0)
         else:
             sqnr = compute_error(C_ref, C)
-            print('sqnr', sqnr)
-            assert sqnr.item() > 30.0
+            assert sqnr.item() > 22.0
 
 
 @unittest.skipIf(TEST_WITH_ROCM, "ROCm doesn't support CUTLASS")
