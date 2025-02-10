@@ -13039,25 +13039,35 @@ if __name__ == '__main__':
         expected_result = torch.ones([numel], dtype=dtype) * (1.0 / numel - 1.0)
         self.assertEqual(expected_result, result)
 
-    @onlyCUDA
-    def test_softmax_backward_unaligned(self, device):
-        # We don't use smem here because the output is not aligned to 16 bytes.
-        numel = 2048
-        dtype = torch.float32
+    def make_unaligned_1d_tensor_of_ones(self, numel, device, dtype):
         # It's hard to get pytorch to return us a tensor that is not aligned to 16
         # bytes. To work around that, we create an aligned tensor and create a
         # slice of it that is not aligned.
         output = torch.ones([numel + 1], device=device, dtype=dtype)
-        self.assertEqual(output.data_ptr() % 16, 0)
-        # Now output is not aligned to 16 bytes.
-        output = output[1:]
-        self.assertNotEqual(output.data_ptr() % 16, 0)
+        unaligned_output = output[1:]
+        self.assertNotEqual(unaligned_output.data_ptr() % 16, 0)
+        return unaligned_output
 
+    @onlyCUDA
+    def test_softmax_backward_unaligned_output(self, device):
+        # We don't use smem here because the output is not aligned to 16 bytes.
+        numel = 2048
+        dtype = torch.float32
+        unaligned_output = self.make_unaligned_1d_tensor_of_ones(numel, device, dtype)
         grad_output = torch.ones([numel], device=device, dtype=dtype) * (1.0 / numel)
-        result = torch._softmax_backward_data(grad_output, output, 0, output.dtype)
+        result = torch._softmax_backward_data(grad_output, unaligned_output, 0, unaligned_output.dtype)
         expected_result = torch.ones([numel], dtype=dtype) * (1.0 / numel - 1.0)
         self.assertEqual(expected_result, result)
 
+    @onlyCUDA
+    def test_softmax_backward_unaligned_grad_output(self, device):
+        numel = 2048
+        dtype = torch.float32
+        output = torch.ones([numel], device=device, dtype=dtype)
+        unaligned_grad_output = self.make_unaligned_1d_tensor_of_ones(numel, device, dtype) * (1.0 / numel)
+        result = torch._softmax_backward_data(unaligned_grad_output, output, 0, output.dtype)
+        expected_result = torch.ones([numel], dtype=dtype) * (1.0 / numel - 1.0)
+        self.assertEqual(expected_result, result)
 
     # reference issue: https://github.com/pytorch/pytorch/issues/68248
     @onlyCUDA

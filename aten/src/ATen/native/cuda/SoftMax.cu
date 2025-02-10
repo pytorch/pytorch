@@ -1171,10 +1171,9 @@ void host_softmax_backward(const Tensor &grad_, const Tensor &output_, int64_t d
         // This should not be needed on current generation GPUs because the size of shared memory is so low.
         // But we add this check to be defensive and future-proof just in case shared memory size goes up
         // to be so large as to requires 64-bits of addressing.
-        can_use_smem &= dim_size < std::numeric_limits<int32_t>::max();
+        can_use_smem &= (dim_size < std::numeric_limits<int32_t>::max());
 
         if (can_use_smem) {
-          // TORCH_CHECK(false);
           size_t smem_sz = dim_size * sizeof(scalar_t) + smem_reduction_sz;
           cunn_SoftMaxBackwardSmem<ILP, scalar_t, accscalar_t, scalar_t, Epilogue>
           <<<grid, block, smem_sz, stream>>>(
@@ -1217,10 +1216,9 @@ void host_softmax_backward(const Tensor &grad_, const Tensor &output_, int64_t d
         // This should not be needed on current generation GPUs because the size of shared memory is so low.
         // But we add this check to be defensive and future-proof just in case shared memory size goes up
         // to be so large as to requires 64-bits of addressing.
-        can_use_smem &= dim_size < std::numeric_limits<int32_t>::max();
+        can_use_smem &= (dim_size < std::numeric_limits<int32_t>::max());
 
         if (can_use_smem) {
-          assert(false);
           size_t smem_sz = dim_size * sizeof(accscalar_t) + smem_reduction_sz;
           cunn_SoftMaxBackwardSmem<ILP, scalar_t, accscalar_t, accscalar_t, Epilogue>
           <<<grid, block, smem_sz, stream>>>(
