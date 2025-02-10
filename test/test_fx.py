@@ -20,7 +20,6 @@ import typing
 import unittest
 import warnings
 from math import sqrt
-from functorch.experimental import control_flow
 from torch.multiprocessing import Process
 from torch.testing import FileCheck
 from torch.testing._internal.common_methods_invocations import op_db
@@ -38,6 +37,8 @@ from collections import namedtuple
 from typing import Any, Callable, List, NamedTuple, Optional, Tuple, Union
 
 import torch
+
+from functorch.experimental import control_flow
 
 from fx.named_tup import MyNamedTup
 from fx.test_common_passes import TestCommonPass  # noqa: F401
