@@ -109,10 +109,13 @@ TORCH_META_FUNC(fractional_max_pool2d_backward)(
   /* get contiguous gradOutput */
   auto gradOutput = gradOutput_.contiguous();
 
-  TORCH_CHECK(outputW == gradOutput.size(widthDim),
-    "fractional_max_pool2d_backward(): gradOutput width unexpected");
-  TORCH_CHECK(outputH == gradOutput.size(heightDim),
-    "fractional_max_pool2d_backward(): gradOutput height unexpected");
+  auto expectedOutputShape = IntArrayRef(input.sizes().data(), ndims - 2).vec();
+  expectedOutputShape.push_back(outputH);
+  expectedOutputShape.push_back(outputW);
+  TORCH_CHECK(gradOutput.sizes().equals(expectedOutputShape),
+    "fractional_max_pool2d_backward(): gradOutput sizes unexpected");
+  TORCH_CHECK(indices.sizes().equals(expectedOutputShape),
+    "fractional_max_pool2d_backward(): indices sizes unexpected");
 
   /* resize */
   if (ndims == 3) {
@@ -148,17 +151,14 @@ static void fractional_max_pool2d_out_single_batch_frame(
           randomSamplesForPlane[1], inputH, outputH, poolSizeH);
 
       /* loop over output */
-      // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-      int h, w;
-
       const scalar_t* inputForPlane = input + plane * inputW * inputH;
       scalar_t* outputForPlane = output + plane * outputW * outputH;
       int64_t* indicesForPlane = indices + plane * outputW * outputH;
 
-      for (h = 0; h < outputH; ++h) {
+      for (int h = 0; h < outputH; ++h) {
         int inputHStart = sequenceH[h];
 
-        for (w = 0; w < outputW; ++w) {
+        for (int w = 0; w < outputW; ++w) {
           int inputWStart = sequenceW[w];
 
           int h2 = inputHStart, w2 = inputWStart;

@@ -51,6 +51,10 @@ MPSCommandBuffer* MPSStream::commandBuffer() {
   return _commandBuffer;
 }
 
+id<MTLDevice> MPSStream::device() const {
+  return [_commandQueue device];
+}
+
 id<MTLComputeCommandEncoder> MPSStream::commandEncoder() {
   if (!_commandEncoder) {
     _commandEncoder = [commandBuffer() computeCommandEncoder].retain;

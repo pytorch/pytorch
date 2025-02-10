@@ -5,7 +5,8 @@ import itertools as it
 import sys
 import textwrap
 import unittest
-from typing import Callable, Dict, Iterator, List, Optional, Tuple
+from collections.abc import Iterator
+from typing import Callable, Optional
 
 import torch
 from torch._C._profiler import _EventType, _TensorMetadata
@@ -309,9 +310,9 @@ class TestDataFlow(TestCase):
     @staticmethod
     def formatSchemas(
         prof: torch.profiler.profile, indent: int = 12
-    ) -> Tuple[Tuple[str, Tuple[bool, ...]], ...]:
+    ) -> tuple[tuple[str, tuple[bool, ...]], ...]:
         tree = prof.profiler.kineto_results.experimental_event_tree()
-        out: List[Tuple[str, Tuple[bool, ...]]] = []
+        out: list[tuple[str, tuple[bool, ...]]] = []
         for node in _utils.traverse_dfs(tree):
             if node.tag == _EventType.TorchOp:
                 e = node.extra_fields
@@ -327,8 +328,8 @@ class TestDataFlow(TestCase):
 
     @staticmethod
     def _run_and_format_data_flow(
-        inputs: Dict[str, torch.Tensor],
-        f: Callable[..., Optional[Dict[str, torch.Tensor]]],
+        inputs: dict[str, torch.Tensor],
+        f: Callable[..., Optional[dict[str, torch.Tensor]]],
         indent: int = 12,
     ) -> str:
         with profile() as prof:
@@ -339,7 +340,7 @@ class TestDataFlow(TestCase):
         graph = memory_profile._data_flow_graph
         storage_to_id = {key.storage.ptr: key.id for key in graph._active_version}
 
-        lines: List[str] = []
+        lines: list[str] = []
         for name, t in it.chain(inputs.items(), outputs.items()):
             lines.append(f"{name + ':':<8} T{storage_to_id[t.storage().data_ptr()]}")
             if t.grad is not None:
@@ -352,7 +353,7 @@ class TestDataFlow(TestCase):
         for node in graph.flow_nodes:
             destroyed = {k for k, v in node._edges.items() if v.is_deletion}
 
-            inputs: List[str] = []
+            inputs: list[str] = []
             for key, (_, v) in node.inputs.items():
                 inputs.append(f"T{key.id}(v{v}{'*' if key in destroyed else ''})")
 
@@ -833,7 +834,7 @@ class TestMemoryProfilerE2E(TestCase):
     @staticmethod
     def _lookup_tensor_categories(
         t: torch.Tensor, memory_profile: _memory_profiler.MemoryProfile
-    ) -> Dict[_memory_profiler.TensorAndID, Optional[_memory_profiler.Category]]:
+    ) -> dict[_memory_profiler.TensorAndID, Optional[_memory_profiler.Category]]:
         storage = t.storage()
         if storage is None:
             raise ValueError("Cannot look up uninitialized Tensor.")
@@ -889,7 +890,7 @@ class TestMemoryProfilerE2E(TestCase):
             fn(lambda name: record_ops.mark_region(f"-- {name} ".ljust(105, "-")))
 
         memory_profile = prof._memory_profile()
-        ptr_pair_to_key: Dict[Tuple[int, int], _memory_profiler.TensorKey] = {}
+        ptr_pair_to_key: dict[tuple[int, int], _memory_profiler.TensorKey] = {}
         snapshot = memory_profile._category_snapshot()
 
         # Build map from observed live Tensors to the memory profiler's
@@ -922,7 +923,7 @@ class TestMemoryProfilerE2E(TestCase):
 
             return f"{target_key.storage.allocation_id} ({','.join(categories)})"
 
-        out: List[str] = []
+        out: list[str] = []
         for name, inputs, outputs in record_ops.results:
             if inputs or outputs:
                 # PyTorch ops

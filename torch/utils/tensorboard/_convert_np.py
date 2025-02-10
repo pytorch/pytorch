@@ -1,4 +1,3 @@
-# mypy: allow-untyped-defs
 """This module converts objects into numpy array."""
 
 import numpy as np
@@ -6,7 +5,7 @@ import numpy as np
 import torch
 
 
-def make_np(x):
+def make_np(x: torch.Tensor) -> np.ndarray:
     """
     Convert an object into numpy array.
 
@@ -27,7 +26,7 @@ def make_np(x):
     )
 
 
-def _prepare_pytorch(x):
+def _prepare_pytorch(x: torch.Tensor) -> np.ndarray:
     if x.dtype == torch.bfloat16:
         x = x.to(torch.float16)
     x = x.detach().cpu().numpy()

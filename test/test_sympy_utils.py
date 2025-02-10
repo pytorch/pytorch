@@ -5,7 +5,7 @@ import itertools
 import math
 import pickle
 import sys
-from typing import Callable, List, Tuple, Type
+from typing import Callable
 
 import sympy
 
@@ -22,6 +22,7 @@ from torch.testing._internal.common_utils import (
 )
 from torch.utils._sympy.functions import (
     FloorDiv,
+    Identity,
     OpaqueUnaryFn_cos,
     simple_floordiv_gcd,
 )
@@ -34,7 +35,8 @@ from torch.utils._sympy.reference import (
 )
 from torch.utils._sympy.singleton_int import SingletonInt
 from torch.utils._sympy.solve import INEQUALITY_TYPES, mirror_rel_op, try_solve
-from torch.utils._sympy.value_ranges import ValueRangeAnalysis, ValueRanges
+from torch.utils._sympy.value_ranges import ValueRanges
+from torch._inductor.bounds import ValueRangeAnalysis
 
 
 UNARY_OPS = [
@@ -594,7 +596,7 @@ class TestSympyInterp(TestCase):
                     self.fail(f"Unexpected error for {fn}{args}: {str(e)}")
 
 
-def type_name_fn(type: Type) -> str:
+def type_name_fn(type: type) -> str:
     return type.__name__
 
 
@@ -606,7 +608,7 @@ def parametrize_relational_types(*types):
 
 
 class TestSympySolve(TestCase):
-    def _create_integer_symbols(self) -> List[sympy.Symbol]:
+    def _create_integer_symbols(self) -> list[sympy.Symbol]:
         return sympy.symbols("a b c", integer=True)
 
     def test_give_up(self):
@@ -665,9 +667,9 @@ class TestSympySolve(TestCase):
 
     def _test_cases(
         self,
-        cases: List[Tuple[sympy.Basic, sympy.Basic]],
+        cases: list[tuple[sympy.Basic, sympy.Basic]],
         thing: sympy.Basic,
-        op: Type[sympy.Rel],
+        op: type[sympy.Rel],
         **kwargs,
     ):
         for source, expected in cases:
@@ -761,7 +763,7 @@ class TestSympySolve(TestCase):
             Le: (Le(FloorDiv(a, pos), integer), (integer + 1) * pos),
         }[op]
 
-        cases: List[Tuple[sympy.Basic, sympy.Basic]] = [
+        cases: list[tuple[sympy.Basic, sympy.Basic]] = [
             # 'b' is not strictly positive
             (op(FloorDiv(a, b), integer), None),
             # 'c' is not strictly positive
@@ -954,6 +956,17 @@ class TestSingletonInt(TestCase):
 
         self.assertEqual(j1.free_symbols, set())
 
+class TestIdentity(TestCase):
+    def test_expand_identity(self):
+        """
+        Test removing an identity via expansion.
+        """
+        x = sympy.Symbol("x")
+        arg = x + sympy.S.One
+        expr = Identity(arg)
+        expanded = expr.expand(identity=True)
+        self.assertEqual(expanded.count(Identity), 0)
+        self.assertEqual(expanded, arg)
 
 instantiate_parametrized_tests(TestValueRanges)
 instantiate_parametrized_tests(TestSympyInterp)

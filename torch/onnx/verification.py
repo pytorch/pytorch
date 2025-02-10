@@ -17,8 +17,10 @@ import io
 import itertools
 import os
 import tempfile
+import typing_extensions
 import warnings
-from typing import Any, Callable, Collection, Mapping, Sequence, Tuple, Union
+from collections.abc import Collection, Mapping, Sequence
+from typing import Any, Callable, Union
 
 import numpy as np
 import numpy.typing as npt
@@ -36,13 +38,18 @@ _ORT_PROVIDERS = ("CPUExecutionProvider",)
 
 _NumericType = Union[Number, torch.Tensor, np.ndarray]
 _ModelType = Union[torch.nn.Module, torch.jit.ScriptModule]
-_InputArgsType = Union[torch.Tensor, Tuple[Any, ...]]
+_InputArgsType = Union[torch.Tensor, tuple[Any, ...]]
 _InputKwargsType = Mapping[str, Any]
 _OutputsType = Union[Sequence[_NumericType], Sequence]
 
 
 class OnnxBackend(enum.Enum):
-    """Enum class for ONNX backend used for export verification."""
+    """Enum class for ONNX backend used for export verification.
+
+    .. deprecated:: 2.7
+        Consider using ``torch.onnx.export(..., dynamo=True)`` and use the returned
+        ``ONNXProgram`` to test the ONNX model.
+    """
 
     REFERENCE = "ONNXReferenceEvaluator"
     ONNX_RUNTIME_CPU = "CPUExecutionProvider"
@@ -52,6 +59,10 @@ class OnnxBackend(enum.Enum):
 @dataclasses.dataclass
 class VerificationOptions:
     """Options for ONNX export verification.
+
+    .. deprecated:: 2.7
+        Consider using ``torch.onnx.export(..., dynamo=True)`` and use the returned
+        ``ONNXProgram`` to test the ONNX model.
 
     Attributes:
         flatten: If True, unpack nested list/tuple/dict inputs into a flattened list of
@@ -770,6 +781,11 @@ def check_export_model_diff(
     )
 
 
+@typing_extensions.deprecated(
+    "torch.onnx.verification.* is deprecated. Consider using torch.onnx.export(..., dynamo=True) "
+    "and use ONNXProgram to test the ONNX model",
+    category=None,
+)
 def verify(
     model: _ModelType,
     input_args: _InputArgsType,
@@ -789,6 +805,10 @@ def verify(
     options: VerificationOptions | None = None,
 ):
     """Verify model export to ONNX against original PyTorch model.
+
+    .. deprecated:: 2.7
+        Consider using ``torch.onnx.export(..., dynamo=True)`` and use the returned
+        ``ONNXProgram`` to test the ONNX model.
 
     Args:
         model (torch.nn.Module or torch.jit.ScriptModule): See :func:`torch.onnx.export`.
@@ -857,6 +877,10 @@ def verify(
         )
 
 
+@typing_extensions.deprecated(
+    "torch.onnx.verification.* is deprecated. Consider using torch.onnx.export(..., dynamo=True) "
+    "and use ONNXProgram to test the ONNX model"
+)
 def verify_aten_graph(
     graph: torch.Graph,
     input_args: tuple[Any, ...],
@@ -864,6 +888,12 @@ def verify_aten_graph(
     params_dict: dict[str, Any] | None = None,
     verification_options: VerificationOptions | None = None,
 ) -> tuple[AssertionError | None, torch.Graph, _OutputsType, _OutputsType]:
+    """Verify aten graph export to ONNX against original PyTorch model.
+
+    .. deprecated:: 2.7
+        Consider using ``torch.onnx.export(..., dynamo=True)`` and use the returned
+        ``ONNXProgram`` to test the ONNX model.
+    """
     if verification_options is None:
         verification_options = VerificationOptions()
     if params_dict is None:
@@ -1147,9 +1177,18 @@ class OnnxTestCaseRepro:
         _compare_onnx_pytorch_outputs_in_np(run_outputs, expected_outs, options)
 
 
+@typing_extensions.deprecated(
+    "torch.onnx.verification.* is deprecated. Consider using torch.onnx.export(..., dynamo=True) "
+    "and use ONNXProgram to test the ONNX model"
+)
 @dataclasses.dataclass
 class GraphInfo:
-    """GraphInfo contains validation information of a TorchScript graph and its converted ONNX graph."""
+    """GraphInfo contains validation information of a TorchScript graph and its converted ONNX graph.
+
+    .. deprecated:: 2.7
+        Consider using ``torch.onnx.export(..., dynamo=True)`` and use the returned
+        ``ONNXProgram`` to test the ONNX model.
+    """
 
     graph: torch.Graph
     input_args: tuple[Any, ...]
@@ -1674,6 +1713,10 @@ def _produced_by(value: torch.Value, nodes: Collection[torch.Node]) -> bool:
     return value.node() in nodes
 
 
+@typing_extensions.deprecated(
+    "torch.onnx.verification.* is deprecated. Consider using torch.onnx.export(..., dynamo=True) "
+    "and use ONNXProgram to test the ONNX model"
+)
 def find_mismatch(
     model: torch.nn.Module | torch.jit.ScriptModule,
     input_args: tuple[Any, ...],
@@ -1685,6 +1728,10 @@ def find_mismatch(
     options: VerificationOptions | None = None,
 ) -> GraphInfo:
     r"""Find all mismatches between the original model and the exported model.
+
+    .. deprecated:: 2.7
+        Consider using ``torch.onnx.export(..., dynamo=True)`` and use the returned
+        ``ONNXProgram`` to test the ONNX model.
 
     Experimental. The API is subject to change.
 

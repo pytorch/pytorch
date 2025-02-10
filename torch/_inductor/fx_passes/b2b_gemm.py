@@ -1,7 +1,6 @@
 # mypy: allow-untyped-defs
 import functools
 from collections import deque
-from typing import Dict, List, Tuple
 
 import torch
 from torch.utils._ordered_set import OrderedSet
@@ -452,7 +451,7 @@ unoptimized_choice = ExternKernelChoice(unoptimized_b2b_gemm)
 
 
 def build_subgraph_buffer(
-    args: List[TensorBox],
+    args: list[TensorBox],
     subgraph: Subgraph,
 ):
     """
@@ -612,7 +611,7 @@ def b2b_gemm_handler(match: Match, mat1: torch.fx.Node, mat2: torch.fx.Node) -> 
     def all_reach_via_pointwise_with_no_other_inputs(
         src: torch.fx.Node,
         dst: torch.fx.Node,
-    ) -> Tuple[bool, OrderedSet[torch.fx.Node]]:
+    ) -> tuple[bool, OrderedSet[torch.fx.Node]]:
         """
         check whether every user path from src reaches dst via pointwise nodes,
         with no other input nodes for the intermediates and dst;
@@ -621,7 +620,7 @@ def b2b_gemm_handler(match: Match, mat1: torch.fx.Node, mat2: torch.fx.Node) -> 
         (2) the subgraph node set including src and dst (which only makes sense when the Boolean value is True)
         """
         visited = OrderedSet[torch.fx.Node]()
-        input_counter: Dict[torch.fx.Node, int] = {}
+        input_counter: dict[torch.fx.Node, int] = {}
 
         all_reachable = True
         queue = deque([src])
@@ -667,11 +666,11 @@ def b2b_gemm_handler(match: Match, mat1: torch.fx.Node, mat2: torch.fx.Node) -> 
     graph, module = inner_mm.graph, inner_mm.graph.owning_module
 
     # construct the new (sub)graph
-    subgraph_node_list: List[
+    subgraph_node_list: list[
         torch.fx.Node
     ] = []  # ordered list of nodes used for node removal later
     new_graph: torch.fx.Graph = torch.fx.Graph()
-    node_remapping: Dict[torch.fx.Node, torch.fx.Node] = {}
+    node_remapping: dict[torch.fx.Node, torch.fx.Node] = {}
     new_input_anchor: torch.fx.Node  # inner_mm, to be changed to an input node
     new_output_anchor: torch.fx.Node  # f_node, to be used to construct an output node
     new_input_node: torch.fx.Node
