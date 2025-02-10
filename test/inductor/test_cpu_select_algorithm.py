@@ -2195,7 +2195,6 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
     @dtypes(torch.float, torch.bfloat16, torch.half)
     def test_bmm_2d_permute(self, Ndim, order, dtype):
         # TODO: Support bmm with transposed X
-        dtype = torch.float
         bs = 12
         Mdim = 10
         Kdim = 62
