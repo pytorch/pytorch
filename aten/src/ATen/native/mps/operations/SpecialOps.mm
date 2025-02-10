@@ -49,6 +49,11 @@ static void i1_kernel_mps(TensorIteratorBase& iter) {
   unary_kernel_mps(iter, "i1");
 }
 
+static void spherical_bessel_j0_kernel_mps(TensorIteratorBase& iter) {
+  unary_kernel_mps(iter, "spherical_bessel_j0");
+}
+
 REGISTER_DISPATCH(i0_stub, &i0_kernel_mps)
 REGISTER_DISPATCH(special_i1_stub, &i1_kernel_mps)
+REGISTER_DISPATCH(special_spherical_bessel_j0_stub, &spherical_bessel_j0_kernel_mps)
 } // namespace at::native
