@@ -757,6 +757,8 @@ class TorchHigherOrderOperatorVariable(VariableTracker):
             return InvokeSubgraphHigherOrderVariable(value, source, **kwargs)
         elif isinstance(value, PrimHOPBase):
             return PrimHOPBaseVariable(value, source, **kwargs)
+        elif value.__name__ == "custom_function_call":
+            return CustomFunctionHigherOrderOperatorVariable(value, source, **kwargs)
         else:
             unimplemented(f"HigherOrderOperator {value.__name__}")
 
@@ -767,6 +769,26 @@ class TorchHigherOrderOperatorVariable(VariableTracker):
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
         unimplemented(f"HigherOrderOperator {self.value.__name__}")
+
+
+class CustomFunctionHigherOrderOperatorVariable(TorchHigherOrderOperatorVariable):
+    """
+    Wraps torch._functorch.autograd_function.custom_function_call
+    """
+
+    def call_function(
+        self,
+        tx: "InstructionTranslator",
+        args: "list[VariableTracker]",
+        kwargs: "dict[str, VariableTracker]",
+    ) -> "VariableTracker":
+        return torch._dynamo.variables.UserMethodVariable(
+            self.value.__call__.__func__,
+            torch._dynamo.variables.UserDefinedObjectVariable(
+                self.value, source=self.source
+            ),
+            source=AttrSource(AttrSource(self.source, "__call__"), "__func__"),
+        ).call_function(tx, args, kwargs)
 
 
 class CondHigherOrderVariable(TorchHigherOrderOperatorVariable):
@@ -1487,7 +1509,7 @@ def non_single_tensor_return_unsupported(api, ret):
 
     if not isinstance(ret, TensorVariable):
         raise Unsupported(
-            f"{api} over function that returns something " f"other than one Tensor"
+            f"{api} over function that returns something other than one Tensor"
         )
 
 
@@ -2570,7 +2592,9 @@ class AutogradFunctionApplyVariable(VariableTracker):
                     tracer=bwd_tracer,
                 )
             except torch._dynamo.exc.Unsupported as e:
-                if isinstance(e, torch._dynamo.exc.IllegalGetAttrInvocation):
+                if isinstance(
+                    e, torch._dynamo.exc.UnknownPropertiesDuringBackwardTrace
+                ):
                     from unittest import mock
 
                     bwd_tracer = torch._dynamo.output_graph.SubgraphTracer(
