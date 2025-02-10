@@ -1,8 +1,10 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/Config.h>
 #include <ATen/core/Tensor.h>
 #include <ATen/TensorUtils.h>
 #include <ATen/NamedTensorUtils.h>
 #include <ATen/native/xnnpack/Engine.h>
+#include <c10/core/GradMode.h>
 #include <c10/util/Exception.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
@@ -159,6 +161,16 @@ Tensor max_pool2d(
         self, kernel_size, padding, stride, dilation, ceil_mode);
   }
 #endif
+
+#if AT_MKLDNN_ENABLED()
+#if !defined(C10_MOBILE)
+  if (!((GradMode::is_enabled() && self.requires_grad()) || self._fw_grad(/*level */ 0).defined())) {
+    return at::mkldnn_max_pool2d(
+        self, kernel_size, stride, padding, dilation, ceil_mode);
+  }
+#endif
+#endif
+
   auto output_and_indices = at::max_pool2d_with_indices(
       self, kernel_size, stride, padding, dilation, ceil_mode);
   return std::get<0>(output_and_indices);

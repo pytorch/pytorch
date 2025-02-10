@@ -1,6 +1,6 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
-#include <ATen/core/Tensor.h>
 #include <ATen/Config.h>
+#include <ATen/core/Tensor.h>
 #include <ATen/core/grad_mode.h>
 #include <ATen/native/Resize.h>
 #include <ATen/native/utils/ParamUtils.h>
@@ -9,6 +9,7 @@
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/NativeFunctions.h>
 #else
+#include <ATen/ops/_to_dense_native.h>
 #include <ATen/ops/adaptive_avg_pool2d_native.h>
 #include <ATen/ops/avg_pool2d_backward_native.h>
 #include <ATen/ops/avg_pool2d_native.h>
@@ -211,7 +212,9 @@ static Tensor _mkldnn_pooling(
   const auto padding_vec = expand_param_if_needed(padding, "padding", dims);
   auto dilation_vec = expand_param_if_needed(dilation, "dilation", dims);
 
-  const ideep::tensor& x = itensor_from_mkldnn(input);
+  bool is_channels_last = input.is_mkldnn() ? false :
+      input.suggest_memory_format() == at::MemoryFormat::ChannelsLast;
+  const ideep::tensor& x = itensor_from_tensor(input, /*from_const_data_ptr*/true);
   std::vector<int64_t> output_sizes;
 
   auto padding_vec_r = padding_vec;
@@ -268,19 +271,47 @@ static Tensor _mkldnn_pooling(
     aprop_kind = ideep::prop_kind::forward_inference;
   }
 
-  ideep::tensor y;
-  ideep::pooling_forward::compute(
-      x,
-      {output_sizes.cbegin(), output_sizes.cend()},
-      y,
-      {stride_vec.cbegin(), stride_vec.cend()},
-      {kernel_size_vec.cbegin(), kernel_size_vec.cend()},
-      {padding_vec.cbegin(), padding_vec.cend()},
-      {padding_vec_r.cbegin(), padding_vec_r.cend()},
-      algo,
-      aprop_kind);
-
-  return new_with_itensor_mkldnn(std::move(y), optTypeMetaToScalarType(input.options().dtype_opt()), input.options().device_opt());
+  if (is_channels_last) {
+    auto output = at::empty(
+        output_sizes,
+        input.options().memory_format(input.suggest_memory_format()));
+    ideep::tensor y =
+        itensor_view_from_dense(output, /*from_const_data_ptr*/ true);
+    ideep::pooling_forward::compute(
+        x,
+        {output_sizes.cbegin(), output_sizes.cend()},
+        y,
+        {stride_vec.cbegin(), stride_vec.cend()},
+        {kernel_size_vec.cbegin(), kernel_size_vec.cend()},
+        {padding_vec.cbegin(), padding_vec.cend()},
+        {padding_vec_r.cbegin(), padding_vec_r.cend()},
+        algo,
+        aprop_kind);
+    return output;
+  } else {
+    ideep::tensor y;
+    ideep::pooling_forward::compute(
+        x,
+        {output_sizes.cbegin(), output_sizes.cend()},
+        y,
+        {stride_vec.cbegin(), stride_vec.cend()},
+        {kernel_size_vec.cbegin(), kernel_size_vec.cend()},
+        {padding_vec.cbegin(), padding_vec.cend()},
+        {padding_vec_r.cbegin(), padding_vec_r.cend()},
+        algo,
+        aprop_kind);
+    if (input.is_mkldnn()) {
+      return new_with_itensor_mkldnn(
+          std::move(y),
+          optTypeMetaToScalarType(input.options().dtype_opt()),
+          input.options().device_opt());
+    } else {
+      return mkldnn_to_dense(new_with_itensor_mkldnn(
+          std::move(y),
+          optTypeMetaToScalarType(input.options().dtype_opt()),
+          input.options().device_opt()));
+    }
+  }
 }
 
 static Tensor _mkldnn_pooling_backward(
