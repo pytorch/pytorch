@@ -145,7 +145,7 @@ PyObject* tensor_to_numpy(const at::Tensor& tensor, bool force /*=false*/) {
     TORCH_CHECK(
         !(at::GradMode::is_enabled() && tensor.requires_grad()),
         "Can't call numpy() on Tensor that requires grad. "
-        "Use tensor.detach().numpy() instead.");
+        "Use tensor.detach().cpu().numpy() instead.");
 
     TORCH_CHECK(
         !tensor.is_conj(),
