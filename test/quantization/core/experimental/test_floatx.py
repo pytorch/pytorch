@@ -15,6 +15,7 @@ from torch.testing._internal.common_utils import (
     parametrize,
     run_tests,
     subtest,
+    TemporaryFileName,
     TestCase,
 )
 
@@ -380,6 +381,15 @@ class TestFloat8Dtype(TestCase):
         x1 = torch.empty(4, 4, device=device, dtype=dtype)
         x2 = torch.empty(4, 4, device=device, dtype=dtype)
         torch.cat([x1, x2])
+
+    @dtypes(*FLOAT8_DTYPES)
+    @dtypesIfCUDA(*CUDA_FLOAT8_DTYPES)
+    def test_save_load(self, dtype, device):
+        x1 = torch.randint(0, 10, (4, 4), device=device, dtype=torch.uint8).view(dtype)
+        with TemporaryFileName() as fname:
+            torch.save(x1, fname)
+            x1_save_load = torch.load(fname)
+            torch.testing.assert_close(x1, x1_save_load, atol=0, rtol=0)
 
 
 class TestFloat4Dtype(TestCase):
