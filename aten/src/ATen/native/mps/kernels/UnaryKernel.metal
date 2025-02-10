@@ -117,14 +117,37 @@ kernel void sinc_kernel(
   output[index] = T0(sinc(static_cast<float>(input[index])));
 }
 
+template <typename T>
+kernel void sinc_complex(
+    device T* output [[buffer(0)]],
+    constant T* input [[buffer(1)]],
+    uint index [[thread_position_in_grid]]) {
+  output[index] = T(sinc(float2(input[index])));
+}
+
 #define INSTANTIATE_SINC_KERNEL(DTYPE0, DTYPE1)                                \
   template [[host_name("sinc_" #DTYPE0 "_" #DTYPE1)]] kernel void sinc_kernel( \
       device DTYPE0* output [[buffer(0)]],                                     \
       constant DTYPE1* input [[buffer(1)]],                                    \
-      uint id [[thread_position_in_grid]]);
+      uint id [[thread_position_in_grid]])
+
+#define INSTANTIATE_SINC_COMPLEX_KERNEL(DTYPE)                          \
+  template [[host_name("sinc_complex_" #DTYPE "_" #DTYPE)]] kernel void \
+  sinc_complex(                                                         \
+      device DTYPE##2 * output [[buffer(0)]],                           \
+      constant DTYPE##2 * input [[buffer(1)]],                          \
+      uint id [[thread_position_in_grid]])
 
 #if __METAL_VERSION__ >= 310
 INSTANTIATE_SINC_KERNEL(bfloat, bfloat);
 #endif
 INSTANTIATE_SINC_KERNEL(half, half);
 INSTANTIATE_SINC_KERNEL(float, float);
+INSTANTIATE_SINC_KERNEL(float, long);
+INSTANTIATE_SINC_KERNEL(float, int);
+INSTANTIATE_SINC_KERNEL(float, short);
+INSTANTIATE_SINC_KERNEL(float, char);
+INSTANTIATE_SINC_KERNEL(float, uchar);
+INSTANTIATE_SINC_KERNEL(float, bool);
+INSTANTIATE_SINC_COMPLEX_KERNEL(half);
+INSTANTIATE_SINC_COMPLEX_KERNEL(float);
