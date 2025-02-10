@@ -35,7 +35,6 @@ runs:
         echo "workflow_Name: ${{inputs.workflow_name}}"
         echo "job_id: ${{inputs.job_id}}"
         echo "job_name:  ${{inputs.job_name}}"
-      steps:
     - uses: nick-fields/retry@v3.0.0
       name: Setup dependencies
       with:
