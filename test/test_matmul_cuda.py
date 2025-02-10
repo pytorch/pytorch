@@ -19,7 +19,8 @@ from torch.testing._internal.common_cuda import (
     SM53OrLater,
     SM89OrLater,
     _get_torch_cuda_version,
-    PLATFORM_SUPPORTS_FP8
+    PLATFORM_SUPPORTS_FP8,
+    PLATFORM_SUPPORTS_MX_GEMM
 )
 from torch.testing._internal.common_device_type import (
     dtypes,
@@ -213,6 +214,7 @@ class TestMatmulCuda(TestCase):
 
 
 f8_msg = "FP8 is only supported on H100+, SM 8.9 and MI300+ devices"
+mx_skip_msg = "MX gemm is only supported on CUDA capability 10.0+"
 
 if torch.version.hip:
     e4m3_type = torch.float8_e4m3fnuz
@@ -328,6 +330,73 @@ def to_fp8_saturated(
         raise ValueError(f"to_fp8_saturated(): Unsupported fp8_dtype: {fp8_dtype}")
 
     return x.to(fp8_dtype)
+
+# copied from https://github.com/drisspg/transformer_nuggets/blob/main/transformer_nuggets/mx/to_blocked.py
+def ceil_div(a, b):
+    return (a + b - 1) // b
+
+def to_blocked(input_matrix) -> torch.Tensor:
+    """
+    Rearrange a large matrix by breaking it into blocks and applying the rearrangement pattern.
+
+    See:
+        https://docs.nvidia.com/cuda/cublas/index.html#d-block-scaling-factors-layout
+
+    Args:
+        input_matrix: Input tensor of shape (H, W)
+
+    Returns:
+        Rearranged tensor of shape (32*ceil_div(H,128), 16*ceil_div(W,4))
+    """
+    rows, cols = input_matrix.shape
+    n_row_blocks = ceil_div(rows, 128)
+    n_col_blocks = ceil_div(cols, 4)
+
+    # Pad out and view as tiles of (128, 4)
+    padded = torch.nn.functional.pad(input_matrix, (0, -cols % 4, 0, -rows % 128))
+    blocks = padded.view(n_row_blocks, 128, n_col_blocks, 4).permute(0, 2, 1, 3)
+
+    # rearrange all tiles
+    rearranged = blocks.reshape(-1, 4, 32, 4).transpose(1, 2).reshape(-1, 32, 16)
+
+    # Layout rearranged tiles according to second pic
+    return rearranged.flatten()
+
+def compute_error(x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
+    """Computes the error between two tensors in dB.
+
+    For more details see:
+        https://en.wikipedia.org/wiki/Signal-to-noise_ratio
+
+    Args:
+        x: The original tensor.
+        y: The tensor to compare to the original tensor.
+    """
+    Ps = torch.norm(x)
+    Pn = torch.norm(x - y)
+    return 20 * torch.log10(Ps / Pn)
+
+# largest power of 2 representable in `torch.float8_e4m3fn`
+F8E4M3_LARGEST_POW2 = 8
+# max value of `torch.float8_e4m3fn` (448)
+F8E4M3_MAX_VAL = torch.finfo(torch.float8_e4m3fn).max
+# exponent bias of `torch.float8_e8m0fnu`
+F8E8M0_EXP_BIAS = 127
+
+def data_to_mx_scale(x, block_size):
+    # simple implementation of https://www.opencompute.org/documents/ocp-microscaling-formats-mx-v1-0-spec-final-pdf
+    # section 6.3, not all edge cases (such as NaN) are handled/tested
+    orig_shape = x.shape
+    x = x.reshape(-1, block_size)
+    max_abs = torch.amax(torch.abs(x), 1)
+    largest_p2_lt_max_abs = torch.floor(torch.log2(max_abs))
+    scale_e8m0_unbiased = largest_p2_lt_max_abs - F8E4M3_LARGEST_POW2
+    scale_e8m0_unbiased = torch.clamp(scale_e8m0_unbiased, -1 * F8E8M0_EXP_BIAS, F8E8M0_EXP_BIAS)
+    scale_e8m0_biased = scale_e8m0_unbiased + F8E8M0_EXP_BIAS
+    scale_e8m0_biased = scale_e8m0_biased.to(torch.uint8)
+    scale_e8m0_biased = scale_e8m0_biased.view(torch.float8_e8m0fnu)
+    return scale_e8m0_biased.reshape(orig_shape[0], -1)
+
 
 @unittest.skipIf(not torch.cuda.is_available(), "CUDA not found")
 class TestFP8MatmulCuda(TestCase):
@@ -730,6 +799,183 @@ class TestFP8MatmulCuda(TestCase):
         out_fp8 = f(x_fp8, y_fp8, scale_a, scale_b, out_dtype=out_dtype)
         self.assertEqual(out_dtype, out_fp8.dtype)
         self.assertEqual(out_fp32, out_fp8.to(torch.float))
+
+    @unittest.skipIf(not PLATFORM_SUPPORTS_MX_GEMM, mx_skip_msg)
+    @parametrize("test_case_name", [
+        "a_eye_b_eye",
+        "a_ones_b_ones",
+        "a_ones_modified_b_ones",
+        "a_ones_b_ones_modified",
+        "a_scale_modified_b_ones",
+        "a_ones_b_scale_modified",
+        "data_random_scales_one",
+        "data_random_scales_from_data",
+    ])
+    @parametrize("fast_accum", [False, True])
+    @parametrize("mkn", [(128, 128, 128), (256, 256, 256), (128, 256, 512), (256, 512, 128), (512, 128, 256)])
+    def test_blockwise_mxfp8_numerics(self, test_case_name, fast_accum, mkn) -> None:
+        # inspiration: https://github.com/pytorch/ao/pull/1625
+
+        device = "cuda"
+        M, K, N = mkn
+        BLOCK_SIZE = 32
+        require_exact_match = True
+
+        if test_case_name == "a_eye_b_eye":
+            if not ((M == K) and (M == N)):
+                return unittest.skip("this test is only defined for M == K == N, skipping")
+            A_ref = torch.eye(M, device=device, dtype=torch.bfloat16)
+            B_ref = torch.eye(M, device=device, dtype=torch.bfloat16)
+
+            A = A_ref.to(torch.float8_e4m3fn)
+            B = B_ref.to(torch.float8_e4m3fn)
+
+            A_scale = torch.full((M, K // BLOCK_SIZE), 1.0, device=device, dtype=torch.float8_e8m0fnu)
+            B_scale = torch.full((N, K // BLOCK_SIZE), 1.0, device=device, dtype=torch.float8_e8m0fnu)
+            # convert to swizzled format
+            A_scale = to_blocked(A_scale)
+            B_scale = to_blocked(B_scale)
+
+        elif test_case_name == "a_ones_b_ones":
+            A_ref = torch.ones(M, K, device=device, dtype=torch.bfloat16)
+            B_ref = torch.ones(N, K, device=device, dtype=torch.bfloat16)
+
+            A = A_ref.to(torch.float8_e4m3fn)
+            B = B_ref.to(torch.float8_e4m3fn)
+
+            A_scale = torch.full((M, K // BLOCK_SIZE), 1.0, device=device, dtype=torch.float8_e8m0fnu)
+            B_scale = torch.full((N, K // BLOCK_SIZE), 1.0, device=device, dtype=torch.float8_e8m0fnu)
+            # convert to swizzled format
+            A_scale = to_blocked(A_scale)
+            B_scale = to_blocked(B_scale)
+
+        elif test_case_name == "a_ones_modified_b_ones":
+            A_ref = torch.ones(M, K, device=device, dtype=torch.bfloat16)
+            B_ref = torch.ones(N, K, device=device, dtype=torch.bfloat16)
+
+            A = A_ref.to(torch.float8_e4m3fn)
+            B = B_ref.to(torch.float8_e4m3fn)
+
+            A_ref[1][0:BLOCK_SIZE] = 2
+            A[1][0:BLOCK_SIZE] = 2
+
+            A_scale = torch.full((M, K // BLOCK_SIZE), 1.0, device=device, dtype=torch.float8_e8m0fnu)
+            B_scale = torch.full((N, K // BLOCK_SIZE), 1.0, device=device, dtype=torch.float8_e8m0fnu)
+            # convert to swizzled format
+            A_scale = to_blocked(A_scale)
+            B_scale = to_blocked(B_scale)
+
+        elif test_case_name == "a_ones_b_ones_modified":
+            A_ref = torch.ones(M, K, device=device, dtype=torch.bfloat16)
+            B_ref = torch.ones(N, K, device=device, dtype=torch.bfloat16)
+
+            A = A_ref.to(torch.float8_e4m3fn)
+            B = B_ref.to(torch.float8_e4m3fn)
+
+            B_ref[1][0:BLOCK_SIZE] = 2
+            B[1][0:BLOCK_SIZE] = 2
+
+            A_scale = torch.full((M, K // BLOCK_SIZE), 1.0, device=device, dtype=torch.float8_e8m0fnu)
+            B_scale = torch.full((N, K // BLOCK_SIZE), 1.0, device=device, dtype=torch.float8_e8m0fnu)
+            # convert to swizzled format
+            A_scale = to_blocked(A_scale)
+            B_scale = to_blocked(B_scale)
+
+        elif test_case_name == "a_scale_modified_b_ones":
+            A_ref = torch.ones(M, K, device=device, dtype=torch.bfloat16)
+            B_ref = torch.ones(N, K, device=device, dtype=torch.bfloat16)
+
+            A = A_ref.to(torch.float8_e4m3fn)
+            B = B_ref.to(torch.float8_e4m3fn)
+
+            A_scale = torch.full((M, K // BLOCK_SIZE), 1.0, device=device, dtype=torch.float8_e8m0fnu)
+            B_scale = torch.full((N, K // BLOCK_SIZE), 1.0, device=device, dtype=torch.float8_e8m0fnu)
+
+            A_ref[1][0:BLOCK_SIZE] = 4
+            A[1][0:BLOCK_SIZE] = 2
+            A_scale[1][0] = 2
+
+            # convert to swizzled format
+            A_scale = to_blocked(A_scale)
+            B_scale = to_blocked(B_scale)
+
+        elif test_case_name == "a_ones_b_scale_modified":
+            A_ref = torch.ones(M, K, device=device, dtype=torch.bfloat16)
+            B_ref = torch.ones(N, K, device=device, dtype=torch.bfloat16)
+
+            A = A_ref.to(torch.float8_e4m3fn)
+            B = B_ref.to(torch.float8_e4m3fn)
+
+            A_scale = torch.full((M, K // BLOCK_SIZE), 1.0, device=device, dtype=torch.float8_e8m0fnu)
+            B_scale = torch.full((N, K // BLOCK_SIZE), 1.0, device=device, dtype=torch.float8_e8m0fnu)
+
+            B_ref[1][0:BLOCK_SIZE] = 4
+            B[1][0:BLOCK_SIZE] = 2
+            B_scale[1][0] = 2
+
+            # convert to swizzled format
+            A_scale = to_blocked(A_scale)
+            B_scale = to_blocked(B_scale)
+
+        elif test_case_name == "data_random_scales_one":
+            require_exact_match = False
+            # scales all-ones, element data random while being exactly representable in float8_e4m3fn
+
+            # generate integers in [0, 255] and interpret as float8_e4m3fn
+            A_ref = torch.randint(0, 255, (M, K), device=device, dtype=torch.uint8).view(torch.float8_e4m3fn).to(torch.bfloat16)
+            B_ref = torch.randint(0, 255, (N, K), device=device, dtype=torch.uint8).view(torch.float8_e4m3fn).to(torch.bfloat16)
+            # modification: don't allow NaN values
+            A_ref[torch.isnan(A_ref)] = 0
+            B_ref[torch.isnan(B_ref)] = 0
+
+            A = A_ref.to(torch.float8_e4m3fn)
+            B = B_ref.to(torch.float8_e4m3fn)
+
+            A_scale = torch.full((M, K // BLOCK_SIZE), 1.0, device=device, dtype=torch.float8_e8m0fnu)
+            B_scale = torch.full((N, K // BLOCK_SIZE), 1.0, device=device, dtype=torch.float8_e8m0fnu)
+
+            # convert to swizzled format
+            A_scale = to_blocked(A_scale)
+            B_scale = to_blocked(B_scale)
+
+        elif test_case_name == "data_random_scales_from_data":
+            require_exact_match = False
+            # random data, scales from data
+            A_ref = torch.randn((M, K), device=device, dtype=torch.bfloat16) * 1000
+            B_ref = torch.randn((N, K), device=device, dtype=torch.bfloat16) * 1000
+
+            # Calculate scales based on the inputs
+            A_scale = data_to_mx_scale(A_ref, BLOCK_SIZE)
+            B_scale = data_to_mx_scale(B_ref, BLOCK_SIZE)
+
+            max_val = F8E4M3_MAX_VAL
+            min_val = -1 * max_val
+
+            A = (A_ref.reshape(-1, BLOCK_SIZE) / A_scale.reshape(M * K // BLOCK_SIZE, 1).float()).reshape(M, K)
+            A = A.clamp(min=min_val, max=max_val).to(torch.float8_e4m3fn)
+            B = (B_ref.reshape(-1, BLOCK_SIZE) / B_scale.reshape(N * K // BLOCK_SIZE, 1).float()).reshape(N, K)
+            B = B.clamp(min=min_val, max=max_val).to(torch.float8_e4m3fn)
+
+            # convert to swizzled format
+            A_scale = to_blocked(A_scale)
+            B_scale = to_blocked(B_scale)
+
+        C_ref = A_ref @ B_ref.t()
+
+        C = torch._scaled_mm(
+            A,
+            B.t(),
+            A_scale,
+            B_scale,
+            out_dtype=torch.bfloat16,
+            use_fast_accum=fast_accum,
+        )
+
+        if require_exact_match:
+            torch.testing.assert_close(C, C_ref, atol=0, rtol=0)
+        else:
+            sqnr = compute_error(C_ref, C)
+            assert sqnr.item() > 22.0
 
 
 @unittest.skipIf(TEST_WITH_ROCM, "ROCm doesn't support CUTLASS")
