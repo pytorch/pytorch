@@ -231,7 +231,8 @@ def supports_complex(reduceOp: ReduceOp) -> bool:
     return reduceOp not in denyList
 
 
-class Backend(str):
+# TODO refactor into enum/strenum
+class Backend(str):  # noqa: SLOT000
     """
     An enum-like class for backends.
 
@@ -1811,7 +1812,7 @@ def _shutdown_backend(pg):
     except RuntimeError:
         pass
     if is_nccl_available() and isinstance(backend, ProcessGroupNCCL):
-        # explictly call shutdown to ensure that NCCL resources are released
+        # explicitly call shutdown to ensure that NCCL resources are released
         backend._shutdown()
 
 

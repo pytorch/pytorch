@@ -74,7 +74,7 @@ import os
 import unittest
 import numpy as np
 from torch.testing import FileCheck
-from typing import Callable, Dict, Any, Union, Type, Optional
+from typing import Callable, Any, Union, Optional
 import torch._dynamo as torchdynamo
 import torch.ao.quantization.quantizer.x86_inductor_quantizer as xiq
 import torch.ao.quantization.quantizer.xpu_inductor_quantizer as xpuiq
@@ -898,8 +898,8 @@ class QuantizationTestCase(TestCase):
 
         def assert_types_for_matched_subgraph_pairs(
             self,
-            matched_subgraph_pairs: Dict[str, tuple[NSSubgraph, NSSubgraph]],
-            expected_types: Dict[str, tuple[tuple[Callable, Callable], tuple[Callable, Callable]]],
+            matched_subgraph_pairs: dict[str, tuple[NSSubgraph, NSSubgraph]],
+            expected_types: dict[str, tuple[tuple[Callable, Callable], tuple[Callable, Callable]]],
             gm_a: GraphModule,
             gm_b: GraphModule,
         ) -> None:
@@ -952,7 +952,7 @@ class QuantizationTestCase(TestCase):
 
         def assert_ns_compare_dict_valid(
             self,
-            act_compare_dict: Dict[str, Dict[str, Dict[str, Any]]],
+            act_compare_dict: dict[str, dict[str, dict[str, Any]]],
         ) -> None:
             """
             Verifies that the act_compare_dict (output of Numeric Suite APIs) is valid:
@@ -1214,7 +1214,7 @@ class QuantizationTestCase(TestCase):
         self.assertTrue(expected_name in str(q_embeddingbag))
 
 class QuantizationLiteTestCase(QuantizationTestCase):
-    def _create_quantized_model(self, model_class: Type[torch.nn.Module], **kwargs):
+    def _create_quantized_model(self, model_class: type[torch.nn.Module], **kwargs):
         # Creates quantized model for testing mobile script modules
         qengine = "qnnpack"
         with override_quantized_engine(qengine):

@@ -7,7 +7,7 @@ import warnings
 import weakref
 from collections.abc import MutableMapping
 from types import CellType
-from typing import Any, Optional
+from typing import Any, Optional, TYPE_CHECKING
 
 import torch.nn
 
@@ -19,9 +19,9 @@ from .bytecode_transformation import (
     create_instruction,
 )
 from .codegen import PyCodegen
-from .exc import unimplemented
+from .exc import SideEffectsError, unimplemented
 from .source import GlobalSource, LocalCellSource, LocalSource, Source
-from .utils import dict_new, is_frozen_dataclass, nn_module_new, object_new
+from .utils import dict_new, is_frozen_dataclass, nn_module_new, object_new, tuple_new
 from .variables.base import (
     AttributeMutation,
     AttributeMutationExisting,
@@ -32,6 +32,10 @@ from .variables.base import (
     VariableTracker,
 )
 from .variables.user_defined import FrozenDataClassVariable
+
+
+if TYPE_CHECKING:
+    from torch._dynamo.symbolic_convert import InstructionTranslator
 
 
 def _manual_dict_setitem(dict_from, dict_to, mro_index):
@@ -134,6 +138,14 @@ class SideEffects:
             and output_graph.current_tx.output.current_tracer.allow_side_effects_under_checkpoint
         )
 
+    def is_reconstructing_generator(self):
+        output_graph = self.output_graph_weakref()
+
+        return (
+            output_graph
+            and output_graph.current_tx.output.current_tracer.is_reconstructing_generator
+        )
+
     def check_allowed_side_effect(self, item):
         from torch._dynamo.variables.misc import AutogradFunctionContextVariable
 
@@ -143,6 +155,14 @@ class SideEffects:
             return True
         if self.should_allow_side_effects_under_checkpoint():
             return True
+        if self.is_reconstructing_generator():
+            # This is missing the case where one mutates a tensor. See
+            # test_generator.py::test_reconstruct_generator_tensor_mutation
+            raise SideEffectsError(
+                "Cannot reconstruct a generator with variable mutations. "
+                "Dynamo needs to fully exhaust the generator, which may cause "
+                "unintended variable modifications."
+            )
         if not is_side_effect_safe(item.mutation_type):
             unimplemented(
                 "HigherOrderOperator: Mutating a variable not in the current scope (SideEffects)"
@@ -192,6 +212,8 @@ class SideEffects:
         return inspect.getattr_static(cls, "__getattribute__", None) in (
             object.__getattribute__,
             dict.__getattribute__,
+            int.__getattribute__,
+            str.__getattribute__,
         )
 
     def is_attribute_mutation(self, item):
@@ -264,6 +286,8 @@ class SideEffects:
             obj = nn_module_new(user_cls)
         elif issubclass(user_cls, (dict, collections.OrderedDict)):
             obj = dict_new(user_cls)
+        elif issubclass(user_cls, tuple):
+            obj = tuple_new(user_cls)
         else:
             try:
                 obj = object_new(user_cls)
@@ -296,6 +320,8 @@ class SideEffects:
             variable_cls = variables.UnspecializedNNModuleVariable
         elif issubclass(user_cls, (dict, collections.OrderedDict)):
             variable_cls = variables.UserDefinedDictVariable
+        elif issubclass(user_cls, tuple):
+            variable_cls = variables.UserDefinedTupleVariable
         elif issubclass(user_cls, MutableMapping):
             variable_cls = variables.MutableMappingVariable
         elif is_frozen_dataclass(user_cls):
@@ -430,6 +456,13 @@ class SideEffects:
     def _get_modified_vars(self):
         return [var for var in self.id_to_variable.values() if self.is_modified(var)]
 
+    def get_new_function(self, var):
+        if isinstance(var, variables.UserDefinedDictVariable):
+            return "dict_new"
+        elif isinstance(var, variables.UserDefinedTupleVariable):
+            return "tuple_new"
+        return "object_new"
+
     def codegen_save_tempvars(self, cg: PyCodegen):
         # Make sure we codegen these modified VT to their source by default, so
         # that mutation and aliasing are properly accounted for.
@@ -455,14 +488,15 @@ class SideEffects:
                     unimplemented("AutogradFunctionContextVariable escaped")
                 cg.add_push_null(
                     lambda: cg.load_import_from(
-                        utils.__name__,
-                        "dict_new"
-                        if isinstance(var, variables.UserDefinedDictVariable)
-                        else "object_new",
+                        utils.__name__, self.get_new_function(var)
                     )
                 )
                 cg(var.mutation_type.cls_source)
-                cg.extend_output(create_call_function(1, False))
+                if isinstance(var, variables.UserDefinedTupleVariable) and var.new_args:
+                    cg(var.new_args)
+                    cg.extend_output(create_call_function(2, False))
+                else:
+                    cg.extend_output(create_call_function(1, False))
                 cg.add_cache(var)
                 var.source = LocalSource(cg.tempvars[var])
             else:
@@ -828,7 +862,7 @@ class SideEffects:
 
 
 @contextlib.contextmanager
-def allow_side_effects_under_checkpoint(tx: "InstructionTranslator"):  # type: ignore[name-defined]  # noqa: F821
+def allow_side_effects_under_checkpoint(tx: "InstructionTranslator"):
     assert tx.output.current_tracer.under_activation_checkpoint
     orig_val = tx.output.current_tracer.allow_side_effects_under_checkpoint
     try:
@@ -836,3 +870,13 @@ def allow_side_effects_under_checkpoint(tx: "InstructionTranslator"):  # type: i
         yield
     finally:
         tx.output.current_tracer.allow_side_effects_under_checkpoint = orig_val
+
+
+@contextlib.contextmanager
+def disallow_side_effects_in_generator(tx: "InstructionTranslator"):
+    orig_val = tx.output.current_tracer.is_reconstructing_generator
+    try:
+        tx.output.current_tracer.is_reconstructing_generator = True
+        yield
+    finally:
+        tx.output.current_tracer.is_reconstructing_generator = orig_val
