@@ -3310,7 +3310,6 @@ if torch.distributed.is_available():
 # See "A note on skip/inline rules" for more details.
 MOD_SKIPLIST = [
     "torch._VF",
-    "torch.__config__",
     "torch.__future__",
     "torch.__init__",
     "torch._appdirs",
@@ -3344,17 +3343,12 @@ MOD_SKIPLIST = [
     "torch._prims_common",
     "torch._python_dispatcher",
     "torch._refs",
-    "torch._size_docs",
-    "torch._sources",
-    "torch._storage_docs",
     "torch._streambase",
     "torch._strobelight",
     "torch._subclasses",
     "torch._tensor",
-    "torch._tensor_docs",
     "torch._tensor_str",
     "torch._thread_safe_fork",
-    "torch._torch_docs",
     "torch._utils",
     "torch._utils_internal",
     "torch._vendor",
@@ -3399,7 +3393,6 @@ MOD_SKIPLIST = [
     "torch.quantization",
     "torch.quasirandom",
     "torch.random",
-    "torch.return_types",
     "torch.serialization",
     "torch.share",
     "torch.signal",
@@ -3410,7 +3403,6 @@ MOD_SKIPLIST = [
     "torch.torch_version",
     "torch.types",
     "torch.utils",
-    "torch.version",
     "torch.xpu",
 ]
 
