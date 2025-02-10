@@ -821,7 +821,7 @@ def _get_nv_config(query, mode: Mode) -> tuple[int, int, int, int]:
         else:  # modest hardware or extremely large head_dim
             return (16, 16, 4, 1)
 
-def _get_xpu_config(query, mode: Mode) -> Tuple[int, int, int, int]:
+def _get_xpu_config(query, mode: Mode) -> tuple[int, int, int, int]:
     dtype = query.get_dtype()
     head_dim = V.graph.sizevars.evaluate_static_shape(query.get_size()[-1])
     fwd_config = None
@@ -853,7 +853,7 @@ def _get_xpu_config(query, mode: Mode) -> Tuple[int, int, int, int]:
         else:  # modest hardware or extremely large head_dim
             return (16, 16, 4, 1)
 
-def _get_default_config_fwd(query) -> Tuple[int, int, int, int]:
+def _get_default_config_fwd(query) -> tuple[int, int, int, int]:
     device_type = query.get_device().type
     if device_type == "cuda": 
         if torch.version.hip is None:
@@ -865,7 +865,7 @@ def _get_default_config_fwd(query) -> Tuple[int, int, int, int]:
     else:
         raise NotImplementedError(f"Unsupported device type: {device_type}")
 
-def _get_default_config_bwd(query) -> Tuple[int, int, int, int]:
+def _get_default_config_bwd(query) -> tuple[int, int, int, int]:
     device_type = query.get_device().type
     if device_type == "cuda": 
         if torch.version.hip is None:

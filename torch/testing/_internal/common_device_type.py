@@ -16,7 +16,7 @@ from typing import Any, Callable, ClassVar, Optional, TypeVar, Union
 from typing_extensions import ParamSpec
 
 import torch
-from torch._inductor.utils import GPU_TYPES, HAS_XPU
+from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU, HAS_XPU
 from torch.testing._internal.common_cuda import (
     _get_torch_cuda_version,
     _get_torch_rocm_version,
