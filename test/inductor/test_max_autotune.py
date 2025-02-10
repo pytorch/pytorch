@@ -1031,6 +1031,9 @@ class TestMaxAutotuneRemoteCache(TestCase):
         PatchCaches.tearDown()
 
     @parametrize("dynamic", (False, True))
+    @config.patch(
+        {"compile_threads": 1}
+    )  # Worker processes do not register PatchCaches() properly
     def test_max_autotune_remote_caching(self, dynamic: bool):
         from unittest.mock import patch
 

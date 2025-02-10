@@ -256,18 +256,29 @@ class CachingAutotuner(KernelInterface):
     def precompile(
         self,
         warm_cache_only=False,
-        reload_in_parent: Optional[Callable[[], CachingAutotuner]] = None,
+        reload_kernel: Optional[Callable[[], CachingAutotuner]] = None,
     ):
         if warm_cache_only:
             self._precompile_worker()
             return
         with self.lock:
+            # Helper function for reloading a kernel generated in a worker
+            # in the parent class. Normally we don't need to reload the kernel
+            # in the parent process, but in certain cases (coordesc tuning, dynamic_scale_rblock),
+            # we need to actually run compilation on the parent process
+            if reload_kernel is not None:
+                self._reload_kernel = reload_kernel
             self._precompile_worker()
             self._make_launchers()
-            self._dynamic_scale_rblock(reload_in_parent)
+            self._dynamic_scale_rblock()
 
     def _precompile_worker(self):
         if self.compile_results:
+            for result in self.compile_results:
+                TritonBundler.put(
+                    triton_hash_to_path_key(result.kernel.hash),
+                    self.triton_meta.get("device", 0),
+                )
             return
         assert not self.launchers
         if not self.configs:
@@ -285,9 +296,7 @@ class CachingAutotuner(KernelInterface):
         self.compile_results = compile_results
         self.configs = None
 
-    def _dynamic_scale_rblock(
-        self, reload_in_parent: Optional[Callable[[], CachingAutotuner]] = None
-    ):
+    def _dynamic_scale_rblock(self):
         # TODO(jansel): we should find a way to move this extra compile into the worker process
         # Currently it relies on _make_launchers(), which requires a cuda context, to populate nreg.
         device_prop = self.device_props
@@ -392,8 +401,9 @@ class CachingAutotuner(KernelInterface):
                     and the fn was dropped in prepare_for_pickle().  We haven't loaded the module
                     containing the real fn yet.
                     """
-                    assert reload_in_parent
-                    self.fn = reload_in_parent().fn
+                    assert hasattr(self, "_reload_kernel")
+                    assert callable(self._reload_kernel)
+                    self.fn = self._reload_kernel().fn
                 self.compile_results.append(self._precompile_config(new_config))
 
             self._make_launchers()
@@ -415,6 +425,7 @@ class CachingAutotuner(KernelInterface):
             for result in self.compile_results:
                 try:
                     launchers.append(result.make_launcher())
+
                 except (OutOfResources, PTXASError) as e:
                     exc = e
         if len(launchers) == 0:
@@ -519,7 +530,6 @@ class CachingAutotuner(KernelInterface):
                 compile_meta,
             )
             raise
-
         TritonBundler.put(
             triton_hash_to_path_key(binary.hash), self.triton_meta.get("device", 0)
         )
@@ -819,6 +829,17 @@ class CachingAutotuner(KernelInterface):
 
         config2launcher = {launcher.config: launcher}
 
+        # TODO: should we just load the kernels ahead of time if we know we're going to call this?
+        if self.fn.fn is None:
+            """
+            We are in the parent process, while this program was compiled in a worker
+            and the fn was dropped in prepare_for_pickle().  We haven't loaded the module
+            containing the real fn yet.
+            """
+            assert hasattr(self, "_reload_kernel")
+            assert callable(self._reload_kernel)
+            self.fn = self._reload_kernel().fn
+
         def benchmark_one_config(config):
             with self.lock:
                 launcher = self._precompile_config(config).make_launcher()
@@ -966,12 +987,50 @@ class TritonCompileResult:
         self.compile_meta = compile_meta
         self.inductor_meta = inductor_meta
 
+    @staticmethod
+    def _serialize_metadata(metadata):
+        """
+        Triton uses a nested class called KernelMetadata to store metadata information.
+        Pickle does not work well with nested namedtuples, as the namedtuple doesn't appear
+        in the toplevel namespace of the module. So these serialization/deser functions
+        are used to convert the namedtuples to a dict and back.
+
+        As for packed_metadata, depending on the triton backend, KernelMetadata can be
+        a namedtuple, or a regular tuple! So the serialization function branches on whether
+        the metadata to be serialized is a namedtuple or regular, serializable one.
+        """
+
+        def is_namedtuple(obj) -> bool:
+            return (
+                isinstance(obj, tuple)
+                and hasattr(obj, "_asdict")
+                and hasattr(obj, "_fields")
+            )
+
+        if is_namedtuple(metadata):
+            return metadata._asdict()
+        else:
+            return metadata
+
+    @staticmethod
+    def _deserialize_metadata(metadata):
+        if isinstance(metadata, dict):
+            return TritonCompileResult._kernel_metadata_cls(tuple(metadata.keys()))(
+                **metadata
+            )
+        else:
+            return metadata
+
     def __getstate__(self) -> dict[str, Any]:
         kernel = self.kernel
         # replace the fields that don't pickle nicely
         kernel_state = {
             **kernel.__dict__,
-            "metadata": kernel.metadata._asdict(),
+            # See doc about serializing metadata above
+            "metadata": self._serialize_metadata(kernel.metadata),
+            "packed_metadata": self._serialize_metadata(
+                getattr(kernel, "packed_metadata", None)
+            ),
             "module": None,  # regenerated by kernel._init_handles()
             "function": None,  # regenerated by kernel._init_handles()
             "run": None,  # regenerated by kernel._init_handles()
@@ -984,13 +1043,13 @@ class TritonCompileResult:
         # TODO(jansel): need to fixup src.fn which is now None
         kernel = CompiledKernel.__new__(CompiledKernel)
         metadata = state["kernel"]["metadata"]
+        packed_metadata = state["kernel"]["packed_metadata"]
         kernel.__dict__.update(
             {
                 **state["kernel"],
                 # "src": src,
-                "metadata": self._kernel_metadata_cls(tuple(metadata.keys()))(
-                    **metadata
-                ),
+                "metadata": self._deserialize_metadata(metadata),
+                "packed_metadata": self._deserialize_metadata(packed_metadata),
             }
         )
         self.__dict__.update(state)
