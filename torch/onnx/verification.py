@@ -44,12 +44,7 @@ _OutputsType = Union[Sequence[_NumericType], Sequence]
 
 
 class OnnxBackend(enum.Enum):
-    """Enum class for ONNX backend used for export verification.
-
-    .. deprecated:: 2.7
-        Consider using ``torch.onnx.export(..., dynamo=True)`` and use the returned
-        ``ONNXProgram`` to test the ONNX model.
-    """
+    """Enum class for ONNX backend used for export verification."""
 
     REFERENCE = "ONNXReferenceEvaluator"
     ONNX_RUNTIME_CPU = "CPUExecutionProvider"
@@ -59,10 +54,6 @@ class OnnxBackend(enum.Enum):
 @dataclasses.dataclass
 class VerificationOptions:
     """Options for ONNX export verification.
-
-    .. deprecated:: 2.7
-        Consider using ``torch.onnx.export(..., dynamo=True)`` and use the returned
-        ``ONNXProgram`` to test the ONNX model.
 
     Attributes:
         flatten: If True, unpack nested list/tuple/dict inputs into a flattened list of
@@ -784,7 +775,7 @@ def check_export_model_diff(
 @typing_extensions.deprecated(
     "torch.onnx.verification.* is deprecated. Consider using torch.onnx.export(..., dynamo=True) "
     "and use ONNXProgram to test the ONNX model",
-    category=None,
+    category=DeprecationWarning,
 )
 def verify(
     model: _ModelType,
@@ -805,10 +796,6 @@ def verify(
     options: VerificationOptions | None = None,
 ):
     """Verify model export to ONNX against original PyTorch model.
-
-    .. deprecated:: 2.7
-        Consider using ``torch.onnx.export(..., dynamo=True)`` and use the returned
-        ``ONNXProgram`` to test the ONNX model.
 
     Args:
         model (torch.nn.Module or torch.jit.ScriptModule): See :func:`torch.onnx.export`.
@@ -879,7 +866,8 @@ def verify(
 
 @typing_extensions.deprecated(
     "torch.onnx.verification.* is deprecated. Consider using torch.onnx.export(..., dynamo=True) "
-    "and use ONNXProgram to test the ONNX model"
+    "and use ONNXProgram to test the ONNX model",
+    category=DeprecationWarning,
 )
 def verify_aten_graph(
     graph: torch.Graph,
@@ -888,12 +876,6 @@ def verify_aten_graph(
     params_dict: dict[str, Any] | None = None,
     verification_options: VerificationOptions | None = None,
 ) -> tuple[AssertionError | None, torch.Graph, _OutputsType, _OutputsType]:
-    """Verify aten graph export to ONNX against original PyTorch model.
-
-    .. deprecated:: 2.7
-        Consider using ``torch.onnx.export(..., dynamo=True)`` and use the returned
-        ``ONNXProgram`` to test the ONNX model.
-    """
     if verification_options is None:
         verification_options = VerificationOptions()
     if params_dict is None:
@@ -1179,16 +1161,12 @@ class OnnxTestCaseRepro:
 
 @typing_extensions.deprecated(
     "torch.onnx.verification.* is deprecated. Consider using torch.onnx.export(..., dynamo=True) "
-    "and use ONNXProgram to test the ONNX model"
+    "and use ONNXProgram to test the ONNX model",
+    category=DeprecationWarning,
 )
 @dataclasses.dataclass
 class GraphInfo:
-    """GraphInfo contains validation information of a TorchScript graph and its converted ONNX graph.
-
-    .. deprecated:: 2.7
-        Consider using ``torch.onnx.export(..., dynamo=True)`` and use the returned
-        ``ONNXProgram`` to test the ONNX model.
-    """
+    """GraphInfo contains validation information of a TorchScript graph and its converted ONNX graph."""
 
     graph: torch.Graph
     input_args: tuple[Any, ...]
@@ -1713,10 +1691,6 @@ def _produced_by(value: torch.Value, nodes: Collection[torch.Node]) -> bool:
     return value.node() in nodes
 
 
-@typing_extensions.deprecated(
-    "torch.onnx.verification.* is deprecated. Consider using torch.onnx.export(..., dynamo=True) "
-    "and use ONNXProgram to test the ONNX model"
-)
 def find_mismatch(
     model: torch.nn.Module | torch.jit.ScriptModule,
     input_args: tuple[Any, ...],
@@ -1728,10 +1702,6 @@ def find_mismatch(
     options: VerificationOptions | None = None,
 ) -> GraphInfo:
     r"""Find all mismatches between the original model and the exported model.
-
-    .. deprecated:: 2.7
-        Consider using ``torch.onnx.export(..., dynamo=True)`` and use the returned
-        ``ONNXProgram`` to test the ONNX model.
 
     Experimental. The API is subject to change.
 
