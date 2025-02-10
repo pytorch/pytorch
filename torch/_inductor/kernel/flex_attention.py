@@ -35,6 +35,7 @@ from ..lowering import (
     _full,
     check_and_broadcast_indices,
     empty,
+    empty_like,
     empty_strided,
     expand,
     index_output_size_and_inner_fn,
@@ -70,6 +71,21 @@ def construct_strides(
         current_stride *= sizes[dim]
 
     return strides
+
+
+def infer_dense_strides(size: Sequence[int], orig_strides: Sequence[int]):
+    """This is a mirror of the same function in aten/src/ATen/ExpandUtils.cpp
+
+    Args:
+        size: The size of the output tensor
+        orig_strides: The strides of the input tensor
+    Returns:
+        List[int]: Dense non-overlapping strides that preserve the input tensor's layout permutation.
+        The returned strides follow the same stride propagation rules as TensorIterator. This matches
+        The behavior of empty_like()
+    """
+    fill_order = get_fill_order(orig_strides, V.graph.sizevars.shape_env)
+    return construct_strides(size, fill_order)
 
 
 def flex_attention_grid(batch_size, q_heads, num_queries, d_model, meta):
@@ -822,10 +838,11 @@ def create_num_blocks_fake_generator(sparse_indices):
     # If it's too short then prefetching won't help. If it's too long then
     # autotuning will take longer for no good reason.
     def create_num_blocks_fake(x) -> torch.Tensor:
-        num_blocks_for_autotuning = min(16, sparse_indices.shape[-1])
+        num_blocks_for_autotuning = V.graph.sizevars.size_hint(sparse_indices.shape[-1])
+        size = [V.graph.sizevars.size_hint(i) for i in x.get_size()]
         return torch.full(
-            x.get_size(),
-            int(num_blocks_for_autotuning),
+            size,
+            num_blocks_for_autotuning,
             dtype=x.get_dtype(),
             device=x.get_device(),
         )
@@ -834,10 +851,9 @@ def create_num_blocks_fake_generator(sparse_indices):
 
 
 def create_indices_fake(x) -> torch.Tensor:
-    indices = torch.arange(
-        0, int(x.get_size()[-1]), dtype=x.get_dtype(), device=x.get_device()
-    )
-    indices = indices.expand(x.get_size()).contiguous()
+    size = [V.graph.sizevars.size_hint(i) for i in x.get_size()]
+    indices = torch.arange(0, size[-1], dtype=x.get_dtype(), device=x.get_device())
+    indices = indices.expand(size).contiguous()
     return indices
 
 
@@ -986,8 +1002,7 @@ def lower_cpu(
 
     # Construct output layout with strides matching the query.
     out_size = [B, Hq, seq_len_q, v_head_dim]
-    fill_order = get_fill_order(query.get_stride())
-    out_strides = construct_strides(out_size, fill_order)
+    out_strides = infer_dense_strides(out_size, query.get_stride())
 
     layout = FixedLayout(
         query.get_device(),
@@ -1246,8 +1261,7 @@ def flex_attention(
 
     # Construct output layout with strides matching the query.
     out_size = [B, Hq, seq_len_q, v_head_dim]
-    fill_order = get_fill_order(query.get_stride(), V.graph.sizevars.shape_env)
-    out_strides = construct_strides(out_size, fill_order)
+    out_strides = infer_dense_strides(out_size, q_strides)
 
     layout = FixedLayout(
         query.get_device(),
@@ -2317,11 +2331,15 @@ def flex_attention_backward(*args, **kwargs):
 
     mask_graph_buffer = mask_graph_buffer
 
+    # Construct layout with stride order matching K
+    key_size = [Bq, Hkv, seq_len_kv, qk_head_dim]
+    key_strides = infer_dense_strides(key_size, key.get_stride())
+
     layout_broadcasted_k = FixedLayout(
         key.get_device(),
         key.get_dtype(),
-        [Bq, Hkv, seq_len_kv, qk_head_dim],
-        key.get_stride(),
+        key_size,
+        stride=[sympy.sympify(s) for s in key_strides],
     )
 
     # Create delta which will is needed for the bwd's kernel
@@ -2333,15 +2351,18 @@ def flex_attention_backward(*args, **kwargs):
 
     grad_lse_exp2, delta = maybe_realize([grad_lse_exp2, delta])
 
-    # see NOTE:[TritonTemplates with multiple outputs]
-    grad_query = empty_strided(
-        query.get_size(), query.get_stride(), dtype=dtype, device=device
-    )
+    # # see NOTE:[TritonTemplates with multiple outputs]
+    grad_query = empty_like(query)
+
+    # Construct output layout with stride order matching value
+    value_size = [Bq, Hkv, seq_len_kv, v_head_dim]
+    value_strides = infer_dense_strides(value_size, value.get_stride())
+
     broadcasted_grad_value = empty_strided(
-        (Bq, *value.get_size()[1:]),
-        value.get_stride(),
-        dtype=dtype,
-        device=device,
+        value_size,
+        stride=[sympy.sympify(s) for s in value_strides],
+        dtype=value.get_dtype(),
+        device=value.get_device(),
     )
 
     kernel_options.setdefault("SM_SCALE", scale)

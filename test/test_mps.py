@@ -88,9 +88,6 @@ def mps_ops_grad_modifier(ops):
         'cdist': [torch.float32],
         'masked.scatter': [torch.float16, torch.float32],
         'index_fill': [torch.float16, torch.float32],  # missing `aten::_unique`.
-        'lu': [torch.float16, torch.float32],  # missing `aten::lu_unpack`.
-        'linalg.lu_factor': [torch.float16, torch.float32],  # missing `aten::lu_unpack`.
-        'linalg.lu_factor_ex': [torch.float16, torch.float32],  # missing `aten::lu_unpack`.
         'linalg.solve': [torch.float16, torch.float32],  # missing `aten::lu_solve`.
         'linalg.solve_ex': [torch.float16, torch.float32],  # missing `aten::lu_solve`.
         'linalg.tensorsolve': [torch.float16, torch.float32],  # missing `aten::lu_solve`.
@@ -724,7 +721,6 @@ def mps_ops_modifier(ops):
         'logcumsumexp': None,
         'logdet': None,
         'lu_solve': None,
-        'lu_unpack': None,
         'masked.median': None,
         'matrix_exp': None,
         'mode': None,
