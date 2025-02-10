@@ -9833,7 +9833,6 @@ class TestNNDeviceType(NNTestCase):
         else:
             _ = F.interpolate(x, (12, 12), mode=mode, antialias=antialias)
 
-    @expectedFailureMPS  # NotImplementedError: aten::_upsample_bilinear2d_aa.out https://github.com/pytorch/pytorch/issues/77764
     @parametrize_test("memory_format", [torch.contiguous_format, torch.channels_last])
     def test_upsamplingBilinear2d_aa_correctness(self, device, memory_format):
         # NOTE: We expand the batch dim such that `b*c` is above the maximum
