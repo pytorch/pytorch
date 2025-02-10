@@ -7,7 +7,7 @@ import warnings
 import weakref
 from collections.abc import MutableMapping
 from types import CellType
-from typing import Any, Optional
+from typing import Any, Optional, TYPE_CHECKING
 
 import torch.nn
 
@@ -19,7 +19,7 @@ from .bytecode_transformation import (
     create_instruction,
 )
 from .codegen import PyCodegen
-from .exc import unimplemented
+from .exc import SideEffectsError, unimplemented
 from .source import GlobalSource, LocalCellSource, LocalSource, Source
 from .utils import dict_new, is_frozen_dataclass, nn_module_new, object_new, tuple_new
 from .variables.base import (
@@ -32,6 +32,10 @@ from .variables.base import (
     VariableTracker,
 )
 from .variables.user_defined import FrozenDataClassVariable
+
+
+if TYPE_CHECKING:
+    from torch._dynamo.symbolic_convert import InstructionTranslator
 
 
 def _manual_dict_setitem(dict_from, dict_to, mro_index):
@@ -134,6 +138,14 @@ class SideEffects:
             and output_graph.current_tx.output.current_tracer.allow_side_effects_under_checkpoint
         )
 
+    def is_reconstructing_generator(self):
+        output_graph = self.output_graph_weakref()
+
+        return (
+            output_graph
+            and output_graph.current_tx.output.current_tracer.is_reconstructing_generator
+        )
+
     def check_allowed_side_effect(self, item):
         from torch._dynamo.variables.misc import AutogradFunctionContextVariable
 
@@ -143,6 +155,14 @@ class SideEffects:
             return True
         if self.should_allow_side_effects_under_checkpoint():
             return True
+        if self.is_reconstructing_generator():
+            # This is missing the case where one mutates a tensor. See
+            # test_generator.py::test_reconstruct_generator_tensor_mutation
+            raise SideEffectsError(
+                "Cannot reconstruct a generator with variable mutations. "
+                "Dynamo needs to fully exhaust the generator, which may cause "
+                "unintended variable modifications."
+            )
         if not is_side_effect_safe(item.mutation_type):
             unimplemented(
                 "HigherOrderOperator: Mutating a variable not in the current scope (SideEffects)"
@@ -842,7 +862,7 @@ class SideEffects:
 
 
 @contextlib.contextmanager
-def allow_side_effects_under_checkpoint(tx: "InstructionTranslator"):  # type: ignore[name-defined]  # noqa: F821
+def allow_side_effects_under_checkpoint(tx: "InstructionTranslator"):
     assert tx.output.current_tracer.under_activation_checkpoint
     orig_val = tx.output.current_tracer.allow_side_effects_under_checkpoint
     try:
@@ -850,3 +870,13 @@ def allow_side_effects_under_checkpoint(tx: "InstructionTranslator"):  # type: i
         yield
     finally:
         tx.output.current_tracer.allow_side_effects_under_checkpoint = orig_val
+
+
+@contextlib.contextmanager
+def disallow_side_effects_in_generator(tx: "InstructionTranslator"):
+    orig_val = tx.output.current_tracer.is_reconstructing_generator
+    try:
+        tx.output.current_tracer.is_reconstructing_generator = True
+        yield
+    finally:
+        tx.output.current_tracer.is_reconstructing_generator = orig_val
