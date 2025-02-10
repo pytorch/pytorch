@@ -643,6 +643,9 @@ class DictTests(torch._dynamo.test_case.TestCase):
         ):
 
             class CustomDict(super_class):
+                def __new__(self, *args, **kwargs):
+                    return super().__new__(self, *args, **kwargs)
+
                 def __init__(self, *args, **kwargs):
                     super().__init__(*args, **kwargs)
 
