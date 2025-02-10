@@ -1,0 +1,16 @@
+Collecting gevent
+  Using cached gevent-24.11.1-cp312-cp312-manylinux_2_17_x86_64.manylinux2014_x86_64.whl.metadata (13 kB)
+Collecting zope.event (from gevent)
+  Using cached zope.event-5.0-py3-none-any.whl.metadata (4.4 kB)
+Collecting zope.interface (from gevent)
+  Using cached zope.interface-7.2-cp312-cp312-manylinux_2_5_x86_64.manylinux1_x86_64.manylinux_2_17_x86_64.manylinux2014_x86_64.whl.metadata (44 kB)
+Collecting greenlet>=3.1.1 (from gevent)
+  Using cached greenlet-3.1.1-cp312-cp312-manylinux_2_24_x86_64.manylinux_2_28_x86_64.whl.metadata (3.8 kB)
+Requirement already satisfied: setuptools in ./venv/lib/python3.12/site-packages (from zope.event->gevent) (75.8.0)
+Downloading gevent-24.11.1-cp312-cp312-manylinux_2_17_x86_64.manylinux2014_x86_64.whl (6.8 MB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 6.8/6.8 MB 16.4 MB/s eta 0:00:00
+Using cached greenlet-3.1.1-cp312-cp312-manylinux_2_24_x86_64.manylinux_2_28_x86_64.whl (613 kB)
+Downloading zope.event-5.0-py3-none-any.whl (6.8 kB)
+Downloading zope.interface-7.2-cp312-cp312-manylinux_2_5_x86_64.manylinux1_x86_64.manylinux_2_17_x86_64.manylinux2014_x86_64.whl (264 kB)
+Installing collected packages: zope.interface, zope.event, greenlet, gevent
+Successfully installed gevent-24.11.1 greenlet-3.1.1 zope.event-5.0 zope.interface-7.2
