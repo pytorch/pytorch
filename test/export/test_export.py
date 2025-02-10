@@ -980,6 +980,44 @@ graph():
         ep_output = ep.module()(seq_embeddings, mask, exp)
         self.assertTrue(torch.allclose(output, ep_output))
 
+    def test_mask_torch_check(self):
+        class TestModule(torch.nn.Module):
+            def forward(self, seq_embeddings, mask, exp):
+                output = seq_embeddings[mask]
+                # output.shape has unbacked symint, assert side knowledge of
+                # output.shape as exp.shape to force it to have backed symint
+                torch._check(output.size(0) == exp.size(0))
+                final_output = output * 2
+                return final_output
+
+        m = TestModule()
+
+        seq_embeddings = torch.randn(5, 5)
+        mask = torch.ones(5, 5, dtype=torch.bool)
+        exp = torch.randn(25)
+        output = m(seq_embeddings, mask, exp)
+
+        batch = torch.export.Dim("batch")
+        exp_size = torch.export.Dim("exp_size", max=100)
+        ep = export(
+            m,
+            (seq_embeddings, mask, exp),
+            dynamic_shapes={
+                "seq_embeddings": (batch, None),
+                "mask": (batch, None),
+                "exp": (exp_size,),
+            },
+        )
+        ep_output = ep.module()(seq_embeddings, mask, exp)
+        self.assertTrue(torch.allclose(output, ep_output))
+
+        seq_embeddings = torch.randn(6, 5)
+        mask = torch.ones(6, 5, dtype=torch.bool)
+        exp = torch.randn(30)
+        output = m(seq_embeddings, mask, exp)
+        ep_output = ep.module()(seq_embeddings, mask, exp)
+        self.assertTrue(torch.allclose(output, ep_output))
+
     def test_setgrad_lifted_tensor(self):
         class M(torch.nn.Module):
             def forward(self, x, y):
@@ -9691,7 +9729,6 @@ def forward(self, p_bar_linear_weight, p_bar_linear_bias, x):
             "torch.ops.profiler._record_function_enter_new.default", 0, exactly=True
         ).run(ep.graph_module.code)
 
-    @testing.expectedFailureSerDerNonStrict
     def test_replace_unbacked_with_very_large_upperbound(self):
         # beyond 2^53 where python floats lose precision
         VERY_LARGE_INT = 1000000007999999992

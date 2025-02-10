@@ -26,7 +26,6 @@ import torch
 import torch._logging
 from torch._dynamo.exc import TensorifyScalarRestartAnalysis
 from torch._guards import tracing, TracingContext
-from torch.fx.experimental.symbolic_shapes import guard_bool
 from torch.utils._functools import cache_method
 
 from . import config, exc, logging as torchdynamo_logging, trace_rules, variables
@@ -641,7 +640,7 @@ def generic_jump(truth_fn: typing.Callable[[object], bool], push: bool):
                 self.jump(inst)
         elif isinstance(value, SymNodeVariable):
             try:
-                eval_result = guard_bool(value.sym_num != 0)
+                eval_result = value.evaluate_expr(self.output)
             except exc.UserError as e:
                 if self.should_compile_partial_graph():
                     return jump_graph_break(self, inst, value, extra_msg=f"\n{e}")
