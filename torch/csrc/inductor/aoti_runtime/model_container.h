@@ -409,7 +409,9 @@ class AOTInductorModelContainer {
   RAIIDataPtr constant_blob_;
   RAIIDataPtr constant_blob_secondary_;
 
+#if defined(USE_CUDA) || defined(USE_XPU)
   size_t blob_size_;
+#endif
   std::vector<size_t> constants_internal_offset_;
 
   // Determine which constants is being used for the model.
