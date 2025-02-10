@@ -1136,6 +1136,16 @@ class BuiltinVariable(VariableTracker):
                 result.set_underlying_tuple_vt(tuple_vt)
                 return result
 
+            if self.fn is list:
+                list_vt = ListVariable([], mutation_type=ValueMutationNew())
+                if isinstance(args[0], BuiltinVariable) and args[0].fn is list:
+                    return list_vt
+                return tx.output.side_effects.track_new_user_defined_object(
+                    self,
+                    args[0],
+                    args[1:],
+                )
+
         if self.fn is object and name == "__init__":
             # object.__init__ is a no-op
             return variables.ConstantVariable(None)

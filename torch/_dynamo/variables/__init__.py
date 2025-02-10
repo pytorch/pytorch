@@ -66,7 +66,6 @@ from .iter import (
 from .lazy import LazyVariableTracker
 from .lists import (
     BaseListVariable,
-    FxImmutableListVariable,
     ListIteratorVariable,
     ListVariable,
     NamedTupleVariable,
@@ -121,6 +120,7 @@ from .user_defined import (
     RemovableHandleVariable,
     UserDefinedClassVariable,
     UserDefinedDictVariable,
+    UserDefinedListVariable,
     UserDefinedObjectVariable,
     UserDefinedTupleVariable,
 )

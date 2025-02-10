@@ -477,6 +477,13 @@ class ListVariable(CommonListMethodsVariable):
             self.items[:] = [x for x, *_ in sorted_items_with_keys]
             return ConstantVariable.create(None)
 
+        if name == "__init__" and self.is_mutable():
+            assert not kwargs
+            if len(args) == 1 and args[0].has_force_unpack_var_sequence(tx):
+                (arg,) = args
+                tx.output.side_effects.mutation(self)
+                self.items[:] = arg.force_unpack_var_sequence(tx)
+                return ConstantVariable.create(None)
         return super().call_method(tx, name, args, kwargs)
 
     def var_getattr(self, tx, name):
@@ -495,58 +502,6 @@ class ListVariable(CommonListMethodsVariable):
         if self.python_type() is not list:
             return super().call_obj_hasattr(tx, name)
         return variables.ConstantVariable.create(hasattr([], name))
-
-
-class FxImmutableListVariable(ListVariable):
-    def __init__(self, items, **kwargs) -> None:
-        super().__init__(items, **kwargs)
-        self.mutable_methods = {
-            "__delitem__",
-            "__iadd__",
-            "__imul__",
-            "__setitem__",
-            "append",
-            "clear",
-            "extend",
-            "insert",
-            "pop",
-            "remove",
-            "reverse",
-            "sort",
-        }
-
-    def python_type(self):
-        return torch.fx.immutable_collections.immutable_list
-
-    def reconstruct(self, codegen: "PyCodegen") -> None:
-        # load torch.fx.immutable_collections.immutable_list
-        codegen.add_push_null(
-            lambda: codegen.extend_output(
-                [
-                    codegen.create_load_python_module(torch.fx.immutable_collections),
-                    codegen.create_load_attr("immutable_list"),
-                ]
-            )
-        )
-
-        # Construct the list
-        super().reconstruct(codegen)
-
-        # Construct the immutable_list
-        codegen.extend_output(create_call_function(1, False))
-
-    def call_method(
-        self,
-        tx,
-        name,
-        args: list["VariableTracker"],
-        kwargs: dict[str, "VariableTracker"],
-    ) -> "VariableTracker":
-        if name in self.mutable_methods:
-            # immutable fx list raises NotImplementedError
-            raise_observed_exception(NotImplementedError, tx)
-
-        return super().call_method(tx, name, args, kwargs)
 
 
 class DequeVariable(CommonListMethodsVariable):

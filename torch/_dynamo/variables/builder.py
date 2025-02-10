@@ -225,6 +225,7 @@ from .user_defined import (
     SourcelessGraphModuleVariable,
     UserDefinedClassVariable,
     UserDefinedDictVariable,
+    UserDefinedListVariable,
     UserDefinedObjectVariable,
     UserDefinedTupleVariable,
 )
@@ -1267,6 +1268,22 @@ class VariableBuilder:
             result = UserDefinedTupleVariable.create(
                 value, tuple_vt=tuple_vt, source=self.source
             )
+            return self.tx.output.side_effects.track_object_existing(value, result)
+        elif isinstance(value, list):
+            self.install_guards(GuardBuilder.TYPE_MATCH)
+            self.install_guards(GuardBuilder.SEQUENCE_LENGTH)
+
+            # NB - Be careful in not triggering user code. Guards also work on
+            # the underlying list data structure.
+            output = [
+                LazyVariableTracker.create(
+                    list.__getitem__(value, i),
+                    source=GetItemSource(self.get_source(), i),
+                )
+                for i in range(list.__len__(value))
+            ]
+            list_vt = ListVariable(output, mutation_type=ValueMutationNew())
+            result = UserDefinedListVariable(value, list_vt=list_vt, source=self.source)
             return self.tx.output.side_effects.track_object_existing(value, result)
         elif issubclass(type(value), MutableMapping):
             self.install_guards(GuardBuilder.TYPE_MATCH)

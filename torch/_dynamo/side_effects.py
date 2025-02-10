@@ -48,6 +48,11 @@ def _manual_dict_setitem(dict_from, dict_to, mro_index):
         dict_class.__setitem__(dict_to, k, v)
 
 
+def _manual_list_setitem(list_from, list_to):
+    list.clear(list_to)
+    list.extend(list_to, list_from)
+
+
 class SideEffects:
     """
     Track side effects (list mutation, setattr, etc) that need to be
@@ -213,6 +218,8 @@ class SideEffects:
             dict.__getattribute__,
             int.__getattribute__,
             str.__getattribute__,
+            list.__getattribute__,
+            tuple.__getattribute__,
         )
 
     def is_attribute_mutation(self, item):
@@ -233,8 +240,8 @@ class SideEffects:
             return False
         if isinstance(item.mutation_type, (AttributeMutationNew, ValueMutationNew)):
             return True
-        if self.is_attribute_mutation(item):
-            return item in self.store_attr_mutations
+        if self.is_attribute_mutation(item) and item in self.store_attr_mutations:
+            return True
         return item.mutation_type.is_modified
 
     def _track_obj(
@@ -318,6 +325,8 @@ class SideEffects:
             variable_cls = variables.UserDefinedDictVariable
         elif issubclass(user_cls, tuple):
             variable_cls = variables.UserDefinedTupleVariable
+        elif issubclass(user_cls, list):
+            variable_cls = variables.UserDefinedListVariable
         elif issubclass(user_cls, MutableMapping):
             variable_cls = variables.MutableMappingVariable
         elif is_frozen_dataclass(user_cls):
@@ -819,6 +828,41 @@ class SideEffects:
                     suffixes.append(
                         [
                             *dict_update_insts,
+                            create_instruction("POP_TOP"),
+                        ]
+                    )
+                elif isinstance(var, variables.UserDefinedListVariable):
+                    # Update the list to the updated items. Be careful in
+                    # calling the list methods and not the overridden methods.
+                    varname_map = {}
+                    for name in _manual_list_setitem.__code__.co_varnames:
+                        varname_map[name] = cg.tx.output.new_var()
+
+                    cg(var.source)  # type: ignore[attr-defined]
+                    cg.extend_output(
+                        [
+                            create_instruction(
+                                "STORE_FAST", argval=varname_map["list_to"]
+                            )
+                        ]
+                    )
+
+                    cg(var._list_vt, allow_cache=False)  # Don't codegen via source
+                    cg.extend_output(
+                        [
+                            create_instruction(
+                                "STORE_FAST", argval=varname_map["list_from"]
+                            )
+                        ]
+                    )
+
+                    list_update_insts = bytecode_from_template(
+                        _manual_list_setitem, varname_map=varname_map
+                    )
+
+                    suffixes.append(
+                        [
+                            *list_update_insts,
                             create_instruction("POP_TOP"),
                         ]
                     )

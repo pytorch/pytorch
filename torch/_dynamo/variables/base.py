@@ -127,6 +127,7 @@ class AttributeMutation(MutationType):
 
     def __init__(self, typ: SourceType):
         super().__init__(typ)
+        self.is_modified = False
 
 
 class AttributeMutationExisting(AttributeMutation):

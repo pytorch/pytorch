@@ -4499,6 +4499,60 @@ class DefaultsTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(ref, res)
         self.assertTrue(isinstance(res, tuple))
 
+    def test_udf_list(self):
+        class MyList(list):  # noqa: SLOT001
+            def len_mulitply_2(self):
+                return len(self) * 2
+
+            def __contains__(self, val):
+                # Ensure that overridden method is traced
+                self.checked = True
+                return super().__contains__(val)
+
+        def fn(x, lst):
+            if 3 in lst:
+                x = torch.cos(x)
+            else:
+                x = torch.sin(x)
+            return x * lst.len_mulitply_2()
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        x = torch.randn(4)
+        ref_lst = MyList([1, 2, 3])
+        ref = fn(x, ref_lst)
+        res_lst = MyList([1, 2, 3])
+        res = opt_fn(x, res_lst)
+        self.assertEqual(ref, res)
+        self.assertTrue(ref_lst.checked)
+        self.assertTrue(res_lst.checked)
+
+    def test_udf_list_reconstruction(self):
+        class MyList(list):  # noqa: SLOT001
+            # def __new__(cls, *args, **kwargs):
+            #     return super().__new__(cls, *args, **kwargs)
+            pass
+
+        def fn(x, klass):
+            x = x * 2
+            sc_list = list.__new__(klass)
+            sc_list.append(x)
+            if isinstance(sc_list, MyList):
+                sc_list.attr = 3
+            return sc_list
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        x = torch.randn(4)
+        ref = fn(x, MyList)
+        res = opt_fn(x, MyList)
+        self.assertEqual(ref, res)
+        self.assertTrue(isinstance(res, MyList))
+        self.assertEqual(ref.attr, res.attr)
+
+        ref = fn(x, list)
+        res = opt_fn(x, list)
+        self.assertEqual(ref, res)
+        self.assertTrue(isinstance(res, list))
+
     def test_sys_recursionlimit(self):
         def fn(x):
             return x.sin() * sys.getrecursionlimit()
