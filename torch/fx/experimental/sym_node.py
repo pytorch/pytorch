@@ -516,7 +516,9 @@ class SymNode:
     def guard_bool(self, file, line):
         # TODO: use the file/line for some useful diagnostic on why a
         # guard occurred
-        r = self.shape_env.evaluate_expr(self.expr, self.hint, fx_node=self.fx_node)
+        r = self.shape_env.evaluate_expr(
+            self.expr, self.hint, fx_node=self.fx_node, expr_sym_node=self
+        )
         try:
             return bool(r)
         except Exception:
@@ -1250,8 +1252,11 @@ def _make_node_magic(method, func):
 
     def capture_provenance(fn):
         @functools.wraps(fn)
-        def wrapper(self, other):
-            result = fn(self, other)
+        def wrapper(self, other=None):
+            if other is None:
+                result = fn(self)
+            else:
+                result = fn(self, other)
             if torch._logging._internal.GET_DTRACE_STRUCTURED:
                 floc = None
                 user_stack = None
@@ -1303,7 +1308,7 @@ def _make_node_magic(method, func):
                         "result": str(result),
                         "result_id": id(result),
                         "arguments": [str(self), str(other)],
-                        "arguments_id": [
+                        "argument_ids": [
                             i for i in (get_id(self), get_id(other)) if i is not None
                         ],
                         "user_bottom_stack": str(user_bottom_stack),
@@ -1316,7 +1321,7 @@ def _make_node_magic(method, func):
 
         return wrapper
 
-    # @capture_provenance
+    @capture_provenance
     def binary_magic_impl(self, other):
         from torch.fx.experimental.proxy_tensor import (
             get_proxy_mode,
@@ -1411,6 +1416,7 @@ def _make_node_magic(method, func):
         )
         return result
 
+    @capture_provenance
     def unary_magic_impl(self):
         from torch.fx.experimental.proxy_tensor import (
             get_proxy_mode,

@@ -126,6 +126,11 @@ triton_kernel_default_layout_constraint: Literal[
 # incompatible with disable_cpp_codegen
 cpp_wrapper: bool = os.environ.get("TORCHINDUCTOR_CPP_WRAPPER", "0") == "1"
 
+# Controls automatic precompiling of common include files for codecache.CppCodeCache
+# (i.e. for cpp_wrapper mode and for cpp kernels on CPU).  AOTI header precompiling is
+# controlled by a separate flag.
+cpp_cache_precompile_headers: bool = True
+
 # dead code elimination
 dce = False
 
@@ -147,6 +152,9 @@ allow_buffer_reuse = True
 
 # Enable pooled allocations for non-output tensors
 memory_planning = os.environ.get("TORCHINDUCTOR_MEMORY_PLANNING", "0") == "1"
+
+# Enable to allow using ftz variant of exponenet instruction in triton codegen.
+use_fast_math = os.environ.get("TORCHINDUCTOR_USE_FAST_MATH") == "1"
 
 # How to organize memory under memory_planning=True:
 # - "none": do not try to pool storage, just reuse
@@ -1203,6 +1211,9 @@ class aot_inductor:
 
     # Experimental. Flag to control whether to include weight in .so
     package_constants_in_so: bool = True
+
+    # Experimental.  Controls automatic precompiling of common AOTI include files.
+    precompile_headers: bool = False
 
 
 class cuda:
