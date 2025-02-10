@@ -14,7 +14,7 @@
 #include <arm_compute/runtime/Tensor.h>
 #include <array>
 
-namespace acl_utils {
+namespace at::native::acl_utils {
 
 using ACLDynamicQuantMatmulCacheKey = std::tuple<
     int64_t, // M
@@ -67,9 +67,14 @@ struct ACLDynamicQuantMatmul {
   }
 };
 
-} // namespace acl_utils
+} // namespace at::native::acl_utils
 
 struct PackedLinearWeightsACL : public PackedLinearWeightsOnednn {
+  using ACLDynamicQuantMatmul = at::native::acl_utils::ACLDynamicQuantMatmul;
+  using ACLDynamicQuantMatmulCacheKey =
+      at::native::acl_utils::ACLDynamicQuantMatmulCacheKey;
+  using ACLDynamicQuantMatmulCacheKeyIndex =
+      at::native::acl_utils::ACLDynamicQuantMatmulCacheKeyIndex;
   PackedLinearWeightsACL(
       std::unique_ptr<ideep::tensor> weight,
       std::optional<ideep::tensor> bias,
@@ -97,8 +102,8 @@ struct PackedLinearWeightsACL : public PackedLinearWeightsOnednn {
   at::Tensor apply_dynamic_relu(at::Tensor input, bool reduce_range = false)
       override;
 
-  std::shared_ptr<acl_utils::ACLDynamicQuantMatmul> get_acl_dynamic_quant_matmul(
-      const acl_utils::ACLDynamicQuantMatmulCacheKey& key) {
+  std::shared_ptr<ACLDynamicQuantMatmul> get_acl_dynamic_quant_matmul(
+      const ACLDynamicQuantMatmulCacheKey& key) {
     // We're only maintaining a 2 element LRU cache
     // hit first
     if (acl_dynamic_quant_cache[0] != nullptr &&
@@ -130,17 +135,15 @@ struct PackedLinearWeightsACL : public PackedLinearWeightsOnednn {
   // allow for a (configuration free) fast path for autoregressive
   // transformer-like models which usually involve 2 input tensor shapes; one
   // for the prefill phase and another for the autoregressive phase
-  std::array<std::shared_ptr<acl_utils::ACLDynamicQuantMatmul>, 2>
-      acl_dynamic_quant_cache;
+  std::array<std::shared_ptr<ACLDynamicQuantMatmul>, 2> acl_dynamic_quant_cache;
 
-  std::shared_ptr<acl_utils::ACLDynamicQuantMatmul>
-  create_acl_dynamic_quant_matmul(
-      const acl_utils::ACLDynamicQuantMatmulCacheKey& key) {
-    int64_t m = std::get<static_cast<int>(
-        acl_utils::ACLDynamicQuantMatmulCacheKeyIndex::M)>(key);
+  std::shared_ptr<ACLDynamicQuantMatmul> create_acl_dynamic_quant_matmul(
+      const ACLDynamicQuantMatmulCacheKey& key) {
+    int64_t m =
+        std::get<static_cast<int>(ACLDynamicQuantMatmulCacheKeyIndex::M)>(key);
     bool fuse_relu = std::get<static_cast<int>(
-        acl_utils::ACLDynamicQuantMatmulCacheKeyIndex::FUSE_RELU)>(key);
-    auto acl_gemm = std::make_shared<acl_utils::ACLDynamicQuantMatmul>();
+        ACLDynamicQuantMatmulCacheKeyIndex::FUSE_RELU)>(key);
+    auto acl_gemm = std::make_shared<ACLDynamicQuantMatmul>();
     acl_gemm->key = key;
     acl_gemm->src_fp32_tensor_info = arm_compute::TensorInfo(
         arm_compute::TensorShape(k_, m), arm_compute::Format::F32);
