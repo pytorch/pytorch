@@ -13020,12 +13020,12 @@ if __name__ == '__main__':
         torch.manual_seed(0)
         # We use smem for tensors that have > 1024 elements and size >= 4096 bytes.
         numel = 2048
-        dtype = torch.float32
-        output = torch.rand([numel], device=device, dtype=dtype)
-        grad_output = torch.rand([numel], device=device, dtype=dtype)
-        result = torch._softmax_backward_data(grad_output, output, 0, output.dtype)
-        expected_result = torch._softmax_backward_data(grad_output.cpu(), output.cpu(), 0, dtype)
-        self.assertEqual(expected_result, result)
+        for dtype in [torch.half, torch.float32]:
+            output = torch.rand([numel], device=device, dtype=dtype)
+            grad_output = torch.rand([numel], device=device, dtype=dtype)
+            result = torch._softmax_backward_data(grad_output, output, 0, output.dtype)
+            expected_result = torch._softmax_backward_data(grad_output.cpu(), output.cpu(), 0, dtype)
+            self.assertEqual(expected_result, result)
 
     @onlyCUDA
     def test_softmax_backward_without_fully_vectorized(self, device):
