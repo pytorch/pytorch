@@ -10,6 +10,9 @@ import os
 from subprocess import CalledProcessError
 import sys
 import torch._inductor.async_compile  # noqa: F401 required to warm up AsyncCompile pools
+from torch.fx.experimental.proxy_tensor import make_fx
+from torch._inductor.graph import GraphLowering
+from torch._inductor.compile_fx import shape_env_from_inputs
 from torch._inductor.codecache import CppCodeCache
 from torch._inductor.utils import get_gpu_shared_memory, is_big_gpu
 from torch._inductor.utils import GPU_TYPES, get_gpu_type
@@ -141,6 +144,21 @@ IS_H100 = LazyVal(
 )
 
 IS_BIG_GPU = LazyVal(lambda: HAS_CUDA and is_big_gpu())
+
+def dummy_graph() -> GraphLowering:
+    """
+    Create a graph. This is useful for unit testing code which accesses
+    V.graph.sizevars.
+    """
+    example_inputs = [torch.randn(10) for _ in range(2)]
+    gm = make_fx(torch.add, tracing_mode="fake")(*example_inputs)
+    shape_env = shape_env_from_inputs(example_inputs)
+    graph = GraphLowering(
+        gm,
+        shape_env=shape_env,
+    )
+
+    return graph
 
 def maybe_skip_size_asserts(op):
     """
