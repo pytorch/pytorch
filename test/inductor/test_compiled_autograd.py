@@ -3754,6 +3754,7 @@ known_graph_breaks_tests = {
     "test_deep_reentrant",  # reentrant .backward
     "test_reentrant_priority",  # reentrant .backward
     "test_simple_reentrant",  # reentrant .backward
+    "test_split_with_sizes_aot_autograd_cleans_up_traceback_meta",  # skipfile logging_utils
 }
 
 test_contexts = {
@@ -3869,6 +3870,12 @@ known_failing_tests = {
     "test_dtensor_partial_placement_graph_output",
     "test_tp_compile_comm_reordering",
     "test_unwrap_async_collective_tensor_tangent",
+    # Category: AOTDispatch
+    "test_aot_sequence_nr",  # RuntimeError: compiled_autograd does not support AnomalyMode
+    "test_donated_buffer_with_retain_or_create_graph3",  # RuntimeError: compiled_autograd does not support create_graph
+    "test_donated_buffer_with_retain_or_create_graph4",  # AssertionError: RuntimeError not raised
+    "test_double_backward_errors",  # RuntimeError: compiled_autograd does not support create_graph
+    "test_eager_sequence_nr",  # RuntimeError: compiled_autograd does not support create_graph
     # Uncategorized
     "test_not_implemented_grad",  # Dynamo changes the types of exceptions
 }
@@ -3882,9 +3889,17 @@ if IS_S390X:
 
 test_autograd = load_test_module("test_autograd")
 test_custom_ops = load_test_module("test_custom_ops")
+test_aot_autograd = load_test_module("dynamo/test_aot_autograd")
+test_aotdispatch = load_test_module("functorch/test_aotdispatch")
 
 TestAutogradWithCompiledAutograd = wrap_test_class(test_autograd.TestAutograd)
 TestCustomOpWithCompiledAutograd = wrap_test_class(test_custom_ops.TestCustomOp)
+TestAotAutogradFallbackWithCompiledAutograd = wrap_test_class(test_aot_autograd.AotAutogradFallbackTests)
+TestPythonKeyWithCompiledAutograd = wrap_test_class(test_aotdispatch.TestPythonKey)
+TestAOTAutogradWithDynamoWithCompiledAutograd = wrap_test_class(test_aotdispatch.TestAOTAutogradWithDynamo)
+TestPartitioningWithCompiledAutograd = wrap_test_class(test_aotdispatch.TestPartitioning)
+TestAOTDispatchWithCompiledAutograd = wrap_test_class(test_aotdispatch.TestAOTDispatch)
+TestAOTModuleSimplifiedWithCompiledAutograd = wrap_test_class(test_aotdispatch.TestAOTModuleSimplified)
 if torch.distributed.is_available() and HAS_CUDA:
     test_dtensor = load_test_module("distributed/tensor/test_dtensor_compile")
     TestDTensorCompileWithCompiledAutograd = wrap_test_class(
