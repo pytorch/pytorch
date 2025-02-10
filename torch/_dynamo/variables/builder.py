@@ -115,7 +115,13 @@ from ..utils import (
     unwrap_with_attr_name_if_wrapper,
     wrap_fake_exception,
 )
-from .base import typestr, ValueMutationNew, VariableTracker, VariableTrackerMeta
+from .base import (
+    typestr,
+    ValueMutationExisting,
+    ValueMutationNew,
+    VariableTracker,
+    VariableTrackerMeta,
+)
 from .constant import ConstantVariable, EnumVariable
 from .ctx_manager import (
     AutocastModeVariable,
@@ -1234,10 +1240,6 @@ class VariableBuilder:
                 for i, (k, v) in enumerate(get_items_from_dict(value))
             )
 
-            # NB: This is deliberately kept ValueMutationNew because dict_vt is
-            # an internal representation. dict_vt tracks the mutation on the
-            # dict side. side_effects infra uses the UserDefinedDictVariable to
-            # apply side-effects of this dict_vt.
             dict_vt = ConstDictVariable(
                 result,
                 user_cls=(
@@ -1245,8 +1247,12 @@ class VariableBuilder:
                     if isinstance(value, collections.OrderedDict)
                     else dict
                 ),
-                mutation_type=ValueMutationNew(),
+                mutation_type=ValueMutationExisting(),
+                source=self.source,
             )
+            # Force this to reconstruct on mutation to keep the reconstruction
+            # bytecode simple
+            dict_vt.should_reconstruct_all = True
 
             result = UserDefinedDictVariable(value, dict_vt=dict_vt, source=self.source)
             return self.tx.output.side_effects.track_object_existing(value, result)
@@ -1264,7 +1270,9 @@ class VariableBuilder:
                 for i in range(tuple.__len__(value))
             ]
 
-            tuple_vt = TupleVariable(output, mutation_type=ValueMutationNew())
+            tuple_vt = TupleVariable(
+                output, source=self.source, mutation_type=ValueMutationExisting()
+            )
             result = UserDefinedTupleVariable.create(
                 value, tuple_vt=tuple_vt, source=self.source
             )
@@ -1282,7 +1290,9 @@ class VariableBuilder:
                 )
                 for i in range(list.__len__(value))
             ]
-            list_vt = ListVariable(output, mutation_type=ValueMutationNew())
+            list_vt = ListVariable(
+                output, source=self.source, mutation_type=ValueMutationExisting()
+            )
             result = UserDefinedListVariable(value, list_vt=list_vt, source=self.source)
             return self.tx.output.side_effects.track_object_existing(value, result)
         elif issubclass(type(value), MutableMapping):

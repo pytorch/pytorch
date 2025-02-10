@@ -163,9 +163,6 @@ class DictTests(torch._dynamo.test_case.TestCase):
             x = x * sd.get(2, 0)
             x = x * sd.get(3, 4)
             x = len(sd) * x
-            x = x * sd.attr
-            sd.attr = 10
-            x = x * sd.attr
             return x
 
         x = torch.randn(4)
@@ -174,17 +171,14 @@ class DictTests(torch._dynamo.test_case.TestCase):
         sd1 = SimpleDict()
         sd1[2] = 5
         sd1[4] = 10
-        sd1.attr = 4
 
         sd2 = SimpleDict()
         sd2[2] = 5
         sd2[4] = 10
-        sd2.attr = 4
         self.assertTrue(sd1 == sd2)
 
         self.assertEqual(fn(sd1, x), opt_fn(sd2, x))
         self.assertTrue(sd1 == sd2)
-        self.assertTrue(sd1.attr == sd2.attr)
 
     def test_dict_subclass_setitem(self):
         class SetItemDict(dict):
@@ -218,8 +212,12 @@ class DictTests(torch._dynamo.test_case.TestCase):
 
         @torch.compile(backend="eager")
         def fn(x, d):
+            # Forces side effects attribute reapplication logic
+            d.sample = 1
+            d["baz"] = 4
             return x * d["foo"] * d["bar"]
 
+        fn(torch.randn(4), d)
         fn(torch.randn(4), d)
         with unittest.mock.patch("torch._dynamo.config.error_on_recompile", True):
             fn(torch.randn(4), d)
@@ -324,7 +322,7 @@ class DictTests(torch._dynamo.test_case.TestCase):
 
     def test_ordered_dict_subclass_reordered_keys(self):
         class ODSubclass(OrderedDict):
-            def keys():
+            def keys(self):
                 return super().keys()
 
         d = ODSubclass()

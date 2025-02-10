@@ -742,6 +742,9 @@ class UserDefinedObjectVariable(UserDefinedVariable):
     def __repr__(self) -> str:
         return f"{self.__class__.__name__}({self.value_type.__name__})"
 
+    def is_modified(self, side_effects):
+        return side_effects.is_attribute_mutation(self)
+
     def python_type(self):
         return self.value_type
 
@@ -1474,10 +1477,7 @@ class UserDefinedDictVariable(UserDefinedObjectVariable):
     ) -> "VariableTracker":
         method = self._maybe_get_baseclass_method(name)
         if method in self._dict_methods:
-            out = self._dict_vt.call_method(tx, name, args, kwargs)
-            if tx.output.side_effects.is_modified(self._dict_vt):
-                self.mutation_type.is_modified = True
-            return out
+            return self._dict_vt.call_method(tx, name, args, kwargs)
         return super().call_method(tx, name, args, kwargs)
 
     def unpack_var_sequence(self, tx):
@@ -1487,6 +1487,11 @@ class UserDefinedDictVariable(UserDefinedObjectVariable):
         ):
             return self._dict_vt.unpack_var_sequence(tx)
         raise NotImplementedError
+
+    def is_modified(self, side_effects):
+        return side_effects.is_attribute_mutation(self) or side_effects.is_modified(
+            self._dict_vt
+        )
 
 
 class UserDefinedListVariable(UserDefinedObjectVariable):
@@ -1519,10 +1524,7 @@ class UserDefinedListVariable(UserDefinedObjectVariable):
         assert self._list_vt is not None
         method = self._maybe_get_baseclass_method(name)
         if method in list_methods:
-            out = self._list_vt.call_method(tx, name, args, kwargs)
-            if tx.output.side_effects.is_modified(self._list_vt):
-                self.mutation_type.is_modified = True
-            return out
+            return self._list_vt.call_method(tx, name, args, kwargs)
         return super().call_method(tx, name, args, kwargs)
 
     def unpack_var_sequence(self, tx):
@@ -1530,6 +1532,11 @@ class UserDefinedListVariable(UserDefinedObjectVariable):
         if type(self.value).__iter__ is list.__iter__:
             return self._list_vt.unpack_var_sequence(tx)
         raise NotImplementedError
+
+    def is_modified(self, side_effects):
+        return side_effects.is_attribute_mutation(self) or side_effects.is_modified(
+            self._list_vt
+        )
 
 
 class UserDefinedTupleVariable(UserDefinedObjectVariable):

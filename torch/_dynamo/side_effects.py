@@ -240,8 +240,14 @@ class SideEffects:
             return False
         if isinstance(item.mutation_type, (AttributeMutationNew, ValueMutationNew)):
             return True
-        if self.is_attribute_mutation(item) and item in self.store_attr_mutations:
-            return True
+
+        if isinstance(item, variables.UserDefinedObjectVariable):
+            # Checks if the underlying dict or tuple vt has been modified
+            return item.is_modified(self)
+
+        if self.is_attribute_mutation(item):
+            return item in self.store_attr_mutations
+
         return item.mutation_type.is_modified
 
     def _track_obj(
@@ -275,7 +281,9 @@ class SideEffects:
         variable: VariableTracker,
     ):
         return self._track_obj(
-            item, variable, mutation_type_cls=AttributeMutationExisting
+            item,
+            variable,
+            mutation_type_cls=AttributeMutationExisting,
         )
 
     def track_object_new(
@@ -780,7 +788,9 @@ class SideEffects:
                     suffixes.append([cg.create_store_deref(var.local_name)])
 
             elif self.is_attribute_mutation(var):
-                if isinstance(var, variables.UserDefinedDictVariable):
+                if isinstance(
+                    var, variables.UserDefinedDictVariable
+                ) and self.is_modified(var._dict_vt):
                     # Do dict related update manually here. The store_attr
                     # mutations will be applied later.
                     varname_map = {}
@@ -831,7 +841,9 @@ class SideEffects:
                             create_instruction("POP_TOP"),
                         ]
                     )
-                elif isinstance(var, variables.UserDefinedListVariable):
+                elif isinstance(
+                    var, variables.UserDefinedListVariable
+                ) and self.is_modified(var._list_vt):
                     # Update the list to the updated items. Be careful in
                     # calling the list methods and not the overridden methods.
                     varname_map = {}
