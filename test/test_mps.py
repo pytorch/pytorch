@@ -81,6 +81,7 @@ def mps_ops_grad_modifier(ops):
         '__getitem__': [torch.float16],
         '_segment_reduce': [torch.float16, torch.float32],
         '_chunk_cat': [torch.float16, torch.float32],
+        '_upsample_bilinear2d_aa': None,
         'sparse.mmreduce': [torch.float32],  # csr not supported
         'unique_consecutive': [torch.float16, torch.float32],
         'special_modified_bessel_i0': [torch.float16, torch.float32],
@@ -798,7 +799,7 @@ def mps_ops_modifier(ops):
         'unique': None,
         'vdot': None,
         'segment_reduce_': None,
-        '_upsample_bilinear2d_aa': None,
+        '_upsample_bilinear2d_aa': [torch.uint8],
         'geometric' : None,
         'geometric_': None,
         'log_normal_': None,
@@ -12523,6 +12524,8 @@ class TestConsistency(TestCaseMPS):
             return (1e-6, 2e-3 if dtype == torch.float16 else 4e-6)
         if op.name == "nn.functional.interpolate":
             return (1e-3, 1e-4)
+        if op.name == "_upsample_bilinear2d_aa":
+            return (2e-5, 2e-6)
         if op.name in ['fft.rfftn', 'fft.hfftn', 'fft.hfft2', 'fft.fft', 'fft.fftn', 'fft.rfft']:
             # TODO: Investigate why this is needed
             # See https://github.com/pytorch/pytorch/issues/120237

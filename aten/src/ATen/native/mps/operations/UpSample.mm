@@ -473,16 +473,4 @@ TORCH_IMPL_FUNC(_upsample_bilinear2d_aa_out_mps)
   mps::upsample_kernel_out_template(input, output_size, align_corners, scales_h, scales_w, output, "bilinear2d_aa");
 }
 
-TORCH_IMPL_FUNC(_upsample_bilinear2d_aa_backward_out_mps)
-(const Tensor& grad_output,
- IntArrayRef output_size,
- IntArrayRef input_size,
- bool align_corners,
- std::optional<double> scales_h,
- std::optional<double> scales_w,
- const Tensor& grad_input) {
-  mps::upsample_kernel_backward_out_template(
-      grad_input, grad_output, output_size, input_size, align_corners, scales_h, scales_w, "bilinear2d_aa");
-}
-
 } // namespace at::native

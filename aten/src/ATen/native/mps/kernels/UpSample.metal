@@ -244,10 +244,11 @@ kernel void upsample_bilinear2d_aa(
     uint thread_index [[thread_position_in_grid]]) {
   auto output_x = thread_index % output_sizes.x;
   auto output_y = thread_index / output_sizes.x;
+  (void)align_corners; // Align corners is unused for AA algorithm
   auto x_center = area_pixel_compute_source_index(
-      scales.x, output_x, align_corners, /*cubic=*/false);
+      scales.x, output_x, /*align_corners=*/false, /*cubic=*/false);
   auto y_center = area_pixel_compute_source_index(
-      scales.y, output_y, align_corners, /*cubic=*/false);
+      scales.y, output_y, /*align_corners=*/false, /*cubic=*/false);
   auto clamped_scales = max(1.0, scales);
   auto x_min = max(0L, long(floor(x_center - clamped_scales.x + 1)));
   auto x_max = min(input_sizes.x, long(ceil(x_center + clamped_scales.x)));
@@ -271,7 +272,7 @@ kernel void upsample_bilinear2d_aa(
       outputData
           [n * output_strides.w + c * output_strides.z +
            output_x * output_strides.x + output_y * output_strides.y] =
-              res / ws;
+              static_cast<T>(res / ws);
     }
   }
 }
@@ -460,9 +461,11 @@ INSTANTIATE_UPSAMPLE_BILINEAR_AA(float);
 INSTANTIATE_UPSAMPLE_BICUBIC_BACKWARD(float);
 INSTANTIATE_UPSAMPLE_BICUBIC(half);
 INSTANTIATE_UPSAMPLE_BILINEAR(half);
+INSTANTIATE_UPSAMPLE_BILINEAR_AA(half);
 INSTANTIATE_UPSAMPLE_BICUBIC_BACKWARD(half);
 #if __METAL_VERSION__ >= 310
 INSTANTIATE_UPSAMPLE_BICUBIC(bfloat);
 INSTANTIATE_UPSAMPLE_BILINEAR(bfloat);
+INSTANTIATE_UPSAMPLE_BILINEAR_AA(bfloat);
 INSTANTIATE_UPSAMPLE_BICUBIC_BACKWARD(bfloat);
 #endif
