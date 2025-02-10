@@ -9,7 +9,19 @@ import torch._dynamo.test_case
 from torch.testing._internal.common_utils import make_dynamo_test
 
 
-class Test_Assertions(torch._dynamo.test_case.TestCase):
+class TestUnittest(torch._dynamo.test_case.TestCase):
+    @make_dynamo_test
+    def test_SkipTest(self):
+        z = 0
+        SkipTest = unittest.SkipTest
+        try:
+            raise SkipTest("abcd")
+        except Exception:
+            z = 1
+        self.assertEqual(z, 1)
+
+
+class CPythonTest_Assertions(torch._dynamo.test_case.TestCase):
     # Tests taken from CPython source code in cpython/Lib/test/test_unittest/test_assertions.py
     # https://github.com/python/cpython/blob/3.13/Lib/test/test_unittest/test_assertions.py
     def setUp(self):
@@ -129,7 +141,7 @@ class Test_Assertions(torch._dynamo.test_case.TestCase):
             self.fail("assertNotRegex should have failed.")
 
 
-class TestLongMessage(torch._dynamo.test_case.TestCase):
+class CPythonTestLongMessage(torch._dynamo.test_case.TestCase):
 
     """Test that the individual asserts honour longMessage.
     This actually tests all the message behaviour for
