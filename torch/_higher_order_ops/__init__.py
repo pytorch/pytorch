@@ -1,3 +1,8 @@
+from torch._higher_order_ops._invoke_quant import (
+    invoke_quant,
+    invoke_quant_packed,
+    InvokeQuant,
+)
 from torch._higher_order_ops.aoti_call_delegate import aoti_call_delegate
 from torch._higher_order_ops.associative_scan import associative_scan
 from torch._higher_order_ops.auto_functionalize import (
@@ -51,6 +56,9 @@ __all__ = [
     "executorch_call_delegate",
     "call_torchbind",
     "run_const_graph",
+    "InvokeQuant",
+    "invoke_quant",
+    "invoke_quant_packed",
     "wrap_with_set_grad_enabled",
     "wrap_with_autocast",
     "wrap_activation_checkpoint",
