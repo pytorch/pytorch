@@ -470,6 +470,7 @@ TORCH_IMPL_FUNC(_upsample_bilinear2d_aa_out_mps)
  std::optional<double> scales_h,
  std::optional<double> scales_w,
  const Tensor& output) {
+  TORCH_CHECK(at::isFloatingType(input.scalar_type()), __func__, " only supports floating-point dtypes");
   mps::upsample_kernel_out_template(input, output_size, align_corners, scales_h, scales_w, output, "bilinear2d_aa");
 }
 
