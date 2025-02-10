@@ -594,17 +594,6 @@ class UserDefinedClassVariable(UserDefinedVariable):
             var.call_method(tx, "__init__", args, kwargs)
             return var
         elif (
-            self.is_standard_new()
-            and SideEffects.cls_supports_mutation_side_effects(self.value)
-            and self.source
-        ):
-            var = tx.output.side_effects.track_new_user_defined_object(
-                variables.BuiltinVariable(object), self, args
-            )
-            with do_not_convert_to_tracable_parameter():
-                var.call_method(tx, "__init__", args, kwargs)
-                return var
-        elif (
             variables.RestrictedListSubclassVariable.is_matching_cls(self.value)
             and self.source
         ):
@@ -664,18 +653,15 @@ class UserDefinedClassVariable(UserDefinedVariable):
             # types.MappingProxyType is a read-only proxy of the dict. If the
             # original dict changes, the changes are reflected in proxy as well.
             return variables.MappingProxyVariable(args[0])
-        elif (
-            not self.is_standard_new()
-            and SideEffects.cls_supports_mutation_side_effects(self.value)
-            and self.source
-        ):
-            return tx.inline_user_function_return(
-                VariableTracker.build(
-                    tx, polyfills.instantiate_user_defined_class_object
-                ),
-                [self, *args],
-                kwargs,
-            )
+        elif SideEffects.cls_supports_mutation_side_effects(self.value) and self.source:
+            with do_not_convert_to_tracable_parameter():
+                return tx.inline_user_function_return(
+                    VariableTracker.build(
+                        tx, polyfills.instantiate_user_defined_class_object
+                    ),
+                    [self, *args],
+                    kwargs,
+                )
         return super().call_function(tx, args, kwargs)
 
     def is_standard_new(self):
@@ -1164,6 +1150,11 @@ class UserDefinedObjectVariable(UserDefinedVariable):
 
             elif getattr_fn is not None:
                 unimplemented("UserDefined with non-function __getattr__")
+
+        from ..mutation_guard import unpatched_nn_module_init
+
+        if subobj is torch.nn.Module.__init__:
+            subobj = unpatched_nn_module_init
 
         if isinstance(subobj, property):
             if self.source:
