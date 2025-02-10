@@ -18,6 +18,7 @@ from .ctx_manager import (
     SetFwdGradEnabledContextManager,
     StreamContextVariable,
     StreamVariable,
+    TemporarilyPopInterpreterStackCtxManagerVariable,
     VmapIncrementNestingCtxManagerVariable,
     WithExitFunctionVariable,
 )
@@ -26,14 +27,20 @@ from .dicts import (
     DefaultDictVariable,
     DictKeySetVariable,
     FrozensetVariable,
+    MappingProxyVariable,
     NNModuleHooksDictVariable,
     SetVariable,
 )
 from .distributed import BackwardHookVariable, DistributedVariable, PlacementVariable
 from .functions import (
+    BuiltinMethodVariable,
+    CollectionsNamedTupleFunction,
     CreateTMADescriptorVariable,
     FunctionDecoratedByContextlibContextManagerVariable,
     FunctoolsPartialVariable,
+    FunctoolsWrapsVariable,
+    LocalGeneratorFunctionVariable,
+    LocalGeneratorObjectVariable,
     NestedUserFunctionVariable,
     PolyfilledFunctionVariable,
     SkipFunctionVariable,
@@ -59,6 +66,7 @@ from .iter import (
 from .lazy import LazyVariableTracker
 from .lists import (
     BaseListVariable,
+    FxImmutableListVariable,
     ListIteratorVariable,
     ListVariable,
     NamedTupleVariable,
@@ -75,7 +83,6 @@ from .misc import (
     DeletedVariable,
     ExceptionVariable,
     GetAttrVariable,
-    InspectSignatureVariable,
     LambdaVariable,
     MethodWrapperVariable,
     NewGlobalVariable,
@@ -115,6 +122,7 @@ from .user_defined import (
     UserDefinedClassVariable,
     UserDefinedDictVariable,
     UserDefinedObjectVariable,
+    UserDefinedTupleVariable,
 )
 
 
@@ -141,7 +149,6 @@ __all__ = [
     "FakeItemVariable",
     "GetAttrVariable",
     "GradModeVariable",
-    "InspectSignatureVariable",
     "IteratorVariable",
     "ItertoolsVariable",
     "LambdaVariable",
@@ -169,6 +176,7 @@ __all__ = [
     "SliceVariable",
     "StringFormatVariable",
     "SuperVariable",
+    "TemporarilyPopInterpreterStackCtxManagerVariable",
     "TensorVariable",
     "TMADescriptorVariable",
     "TorchCtxManagerClassVariable",
@@ -180,9 +188,11 @@ __all__ = [
     "UnspecializedPythonVariable",
     "UntypedStorageVariable",
     "UserDefinedClassVariable",
+    "UserDefinedTupleVariable",
     "UserDefinedObjectVariable",
     "UserFunctionVariable",
     "UserMethodVariable",
     "VariableTracker",
     "WithExitFunctionVariable",
+    "MappingProxyVariable",
 ]

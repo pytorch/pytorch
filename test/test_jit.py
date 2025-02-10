@@ -13617,7 +13617,7 @@ dedent """
             self.checkScript(test_oct, (n,))
             self.checkScript(test_hex, (n,))
 
-    @unittest.skipIf(IS_WINDOWS or IS_SANDCASTLE, "NYI: TemporaryFileName support for Windows or Sandcastle")
+    @unittest.skipIf(IS_SANDCASTLE, "NYI: TemporaryFileName support for Sandcastle")
     def test_get_set_state(self):
         class Root(torch.jit.ScriptModule):
             __constants__ = ['number']
@@ -15345,7 +15345,7 @@ dedent """
             return 1
         self.assertEqual(fun(), 1)
 
-    @unittest.skipIf(IS_WINDOWS or IS_SANDCASTLE, "NYI: TemporaryFileName support for Windows or Sandcastle")
+    @unittest.skipIf(IS_SANDCASTLE, "NYI: TemporaryFileName support for Sandcastle")
     def test_attribute_unpickling(self):
         tensor = torch.randn(2, 2)
         tester = self
@@ -15436,7 +15436,6 @@ dedent """
     def test_script_scope(self):
         scripted = torch.jit.script(torch.nn.functional.triplet_margin_loss)
 
-    @unittest.skipIf(IS_WINDOWS, "NYI: TemporaryFileName on Windows")
     def test_serialization_sharing(self):
         class M(torch.jit.ScriptModule):
             def __init__(self) -> None:
@@ -15461,16 +15460,17 @@ dedent """
             m.save(fname)
             archive_name = os.path.basename(os.path.normpath(fname))
             archive = zipfile.ZipFile(fname, 'r')
-            pickled_data = archive.read(os.path.join(archive_name, 'data.pkl'))
+            pickled_data = archive.read(f"{archive_name}/data.pkl")
 
             out = io.StringIO()
             pickletools.dis(pickled_data, out=out)
             disassembled = out.getvalue()
+            archive.close()
 
             FileCheck().check_count(s1, 1, exactly=True) \
                 .check_count("BINGET", 2, exactly=True) \
                 .check_count(s2, 1, exactly=True) \
-                .check_count("BINGET", 2, exactly=True).run(out.getvalue())
+                .check_count("BINGET", 2, exactly=True).run(disassembled)
 
     def test_sys_stdout_override(self):
         @torch.jit.script
