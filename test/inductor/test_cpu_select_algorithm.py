@@ -53,11 +53,6 @@ set_num_threads = test_cpu_repro.set_num_threads
 
 aten = torch.ops.aten
 
-requires_vectorization = unittest.skipUnless(
-    cpu_vec_isa.valid_vec_isa_list() and os.getenv("ATEN_CPU_CAPABILITY") != "default",
-    "Does not support vectorization",
-)
-
 
 def patches(fn):
     def skip_cache(self, choices, name, key, benchmark):
@@ -840,10 +835,10 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
         else:
             self._check_amx_counter(vec_amx)
 
-    @requires_vectorization
     @unittest.skipIf(
-        "asimd" in [str(vec_isa) for vec_isa in cpu_vec_isa.valid_vec_isa_list()],
-        "Does not support on NEON or SVE",
+        (not issubclass(cpu_vec_isa.pick_vec_isa().__class__, cpu_vec_isa.VecAVX512))
+        and (not issubclass(cpu_vec_isa.pick_vec_isa().__class__, cpu_vec_isa.VecAVX2)),
+        "Only support avx2 or avx512",
     )
     @dtypes(torch.bfloat16, torch.half, torch.float, torch.int8)
     def test_microgemm_fp32_vec(self, dtype):
@@ -981,6 +976,8 @@ extern "C" void cpp_ref_gemm(const {{input_type}}* X, const {{input_type}}* W, f
                 C.dtype,
                 torch.float,
                 GemmBlocking,
+                1,
+                trans_b,
             )
 
             class DummyModule(torch.nn.Module):
@@ -990,17 +987,8 @@ extern "C" void cpp_ref_gemm(const {{input_type}}* X, const {{input_type}}* W, f
             gm = torch.fx.symbolic_trace(DummyModule())
             fake_graph = GraphLowering(gm)
 
-            extra_config = namedtuple(
-                "extra_config",
-                ["internal_block_m", "internal_block_n", "trans_b", "expand_n"],
-            )
-            extra_config.internal_block_m = 1
-            extra_config.internal_block_n = 4
-            extra_config.trans_b = trans_b
-            extra_config.expand_n = True
             with V.set_graph_handler(fake_graph):
                 kernel = CppTemplateKernel("cpp_micro_gemm", parallel_num_threads())
-                micro_gemm.set_extra_configs(extra_config)
                 code = micro_gemm.codegen_define(kernel)
             res = IndentedBuffer()
             res.writeline(torch._inductor.codecache.cpp_prefix())
@@ -1015,14 +1003,12 @@ extern "C" void cpp_ref_gemm(const {{input_type}}* X, const {{input_type}}* W, f
             torch.int8: "int8_t",
         }
         shapes = [
-            (1, 64, 128),
+            (1, 31, 128),
             (1, 61, 127),
             (5, 31, 29),
-            (7, 65, 31),
-            (31, 127, 61),
-            (32, 63, 64),
-            (128, 64, 32),
-            (129, 65, 31),
+            (7, 47, 31),
+            (31, 11, 61),
+            (32, 64, 64),
         ]
         for trans_b in [True, False]:
             for accum in [True, False]:

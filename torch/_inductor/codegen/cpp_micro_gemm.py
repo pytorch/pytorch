@@ -164,7 +164,6 @@ inline void {{kernel_name}}(
             res.writeline(f"{lda},")
             res.writeline(f"{ldb},")
             res.writeline(f"{ldc}")
-
         res.writeline(");")
         return res.getvalue()
 
@@ -193,6 +192,7 @@ class CppMicroGemmConfig:
     vec_isa_cls: type[VecISA]
     register_blocking: GemmBlocking
     extra_check: Optional[Callable[..., bool]] = None
+    trans_b: bool = False
 
 
 micro_gemm_configs: dict[type[CppMicroGemm], list[CppMicroGemmConfig]] = {}
@@ -218,6 +218,7 @@ def generate_gemm_config(
     output_dtype=None,
     compute_dtype=None,
     extra_check=None,
+    trans_b=False,
 ):
     if output_dtype is None:
         output_dtype = input_dtype
@@ -234,6 +235,7 @@ def generate_gemm_config(
             vec_isa_cls,
             GemmBlocking(*blocking),
             extra_check,
+            trans_b,
         )
         for blocking in register_blockings
     ]
@@ -385,7 +387,7 @@ class CppMicroGemmFP32Vec(CppMicroGemm):
                     ldb,
                     ldc
                 );
-{%- if expand_n %}
+{%- if tail_n %}
             } else if (block_n == {{block_n}}){
 {%- else %}
             } else {
@@ -416,7 +418,7 @@ class CppMicroGemmFP32Vec(CppMicroGemm):
                     {{kernel.assert_function}}(false, "Unsupported block_m: {{block_m}}");
                 }
 
-{%- if expand_n %}
+{%- if tail_n %}
             } else {
                 switch (block_m) {
 {%- for b in range(block_m, 0, -1) %}
@@ -457,13 +459,13 @@ class CppMicroGemmFP32Vec(CppMicroGemm):
 
 template <int64_t BLOCK_M, int64_t BLOCK_N, bool accum>
 {%- if not trans_b %}
-{%- if expand_n %}
+{%- if tail_n %}
 inline void {{kernel_name}}_ntail_kernel(
 {%- else %}
 inline void {{kernel_name}}_kernel(
 {%- endif %}
 {%- else %}
-{%- if expand_n %}
+{%- if tail_n %}
 inline void {{kernel_name}}_ntail_transpose_b_kernel(
 {%- else %}
 inline void {{kernel_name}}_transpose_b_kernel(
@@ -472,7 +474,7 @@ inline void {{kernel_name}}_transpose_b_kernel(
     const {{input_t}}* {{restrict_keyword}} A,
     const {{input2_t}}* {{restrict_keyword}} B,
     {{output_t}}* {{restrict_keyword}} C,
-{%- if expand_n %}
+{%- if tail_n %}
     int64_t N,
 {%- endif %}
     int64_t K,
@@ -491,7 +493,7 @@ inline void {{kernel_name}}_transpose_b_kernel(
     at::vec::VectorizedN<{{compute_t}}, COLS> vb;
     at::vec::VectorizedN<{{compute_t}}, ROWS*COLS> vc;
 
-{%- if expand_n %}
+{%- if tail_n %}
     int64_t rCOLS = (N + VLEN - 1) / VLEN;
     int ntail = N % VLEN;
 {%- endif %}
@@ -499,7 +501,7 @@ inline void {{kernel_name}}_transpose_b_kernel(
         if constexpr (accum) {
             constexpr int row = i / COLS;
             constexpr int col = i % COLS;
-{%- if expand_n %}
+{%- if tail_n %}
             int load_size = (col == rCOLS - 1 && ntail != 0) ? ntail : VLEN;
             if (col < rCOLS) {
                 vc[i] = Vectorized::loadu(C + row * ldc + col * VLEN, load_size);
@@ -516,7 +518,7 @@ inline void {{kernel_name}}_transpose_b_kernel(
     auto compute = [&, COLS](auto i, int k) {
         constexpr int row = i / COLS;
         constexpr int col = i % COLS;
-{%- if expand_n %}
+{%- if tail_n %}
         int load_size = (col == rCOLS - 1 && ntail != 0) ? ntail : VLEN;
 {%- endif %}
         if constexpr (col == 0) {
@@ -528,7 +530,7 @@ inline void {{kernel_name}}_transpose_b_kernel(
         }
 
         if constexpr (row == 0) {
-{%- if expand_n %}
+{%- if tail_n %}
             if (col < rCOLS) {
 {%- if input2_dtype in [torch.bfloat16, torch.float16] %}
                 auto b = VectorizedIn::loadu(B + k * ldb + col * VLEN, load_size);
@@ -561,7 +563,7 @@ inline void {{kernel_name}}_transpose_b_kernel(
         }
 
         constexpr int idx = row * COLS + col;
-{%- if expand_n %}
+{%- if tail_n %}
         if (col < rCOLS) {
             vc[idx] = at::vec::fmadd(va, vb[col], vc[idx]);
         }
@@ -578,7 +580,7 @@ inline void {{kernel_name}}_transpose_b_kernel(
     auto storec = [&](auto i) {
         constexpr int row = i / COLS;
         constexpr int col = i % COLS;
-{%- if expand_n %}
+{%- if tail_n %}
         int store_size = (col == rCOLS - 1 && ntail != 0) ? ntail : VLEN;
         if (col < rCOLS) {
             vc[i].store(C + row * ldc + col * VLEN, store_size);
@@ -590,19 +592,20 @@ inline void {{kernel_name}}_transpose_b_kernel(
     c10::ForcedUnroll<ROWS * COLS>{}(storec);
 
 {%- else %}
-    // Use 2 implementations for the transpose B case:
+    // Use 2 implementations for the transposed B:
     // First implementation:
-    //   Transpose and then perform outer product calculation in blocks,
+    //   Transpose first and then perform outer product calculation in sub-blocks,
     //   which introduces an additional tranpose overhead of [K, N] compared to the non-tranpose version.
     // Second implementation:
-    //   Directly perform inner product calculation in blocks,
+    //   Directly perform inner product calculation in sub-blocks,
     //   which introduces an additional vector reduction of [M, N] compared to the non-tranpose version.
     // Therefore, when M * N / (K * N) is large, the first implementation has better performance.
-{%- if expand_n %}
-    if (K % Vectorized::size() == 0 && N % Vectorized::size() == 0 && 32 * BLOCK_M > K) {
+{%- if tail_n %}
+    if (K % Vectorized::size() == 0 && N % Vectorized::size() == 0 && 24 * BLOCK_M > K) {
 {%- else %}
-    if (K % Vectorized::size() == 0 && 32 * BLOCK_M > K) {
+    if (K % Vectorized::size() == 0 && 24 * BLOCK_M > K) {
 {%- endif %}
+        // First implementation:
         constexpr auto VLEN = Vectorized::size();
         constexpr auto ROWS = BLOCK_M;
         constexpr auto COLS = BLOCK_N / VLEN;
@@ -620,6 +623,17 @@ inline void {{kernel_name}}_transpose_b_kernel(
             }
         };
         c10::ForcedUnroll<ROWS * COLS>{}(loadc);
+        auto unroll_loadB = [&](auto i, const {{input2_t}}* {{restrict_keyword}} src_ptr) {
+{%- if input2_dtype in [torch.bfloat16, torch.float16] %}
+            auto b = VectorizedIn::loadu(src_ptr + i * ldb, VLEN);
+            vb[i] = at::vec::convert<{{compute_t}}>(b);
+{%- elif input2_dtype == torch.int8 %}
+            auto b32 = at::vec::convert_to_int32<int8_t>(src_ptr + i * ldb, VLEN);
+            vb[i] = at::vec::convert<float>(b32);
+{%- else %}
+            vb[i] = VectorizedIn::loadu(src_ptr + i * ldb, VLEN);
+{%- endif %}
+        };
         auto unroll_fma = [&](auto i, int idx, int idk, int row, int col) {
 {%- if alpha != 1 %}
             va = Vectorized(static_cast<{{compute_t}}>(A[row * lda + idk + i]) * {{alpha}});
@@ -634,7 +648,8 @@ inline void {{kernel_name}}_transpose_b_kernel(
             constexpr int e_col = col * VLEN;
             int idk = k * VLEN;
             if constexpr (row == 0) {
-                transpose_NxN(vb, B + e_col * ldb + idk, ldb, VLEN);
+                c10::ForcedUnroll<VLEN>{}(unroll_loadB, B + e_col * ldb + idk);
+                at::vec::transpose_block(vb);
             }
             constexpr int idx = row * COLS + col;
             c10::ForcedUnroll<VLEN>{}(unroll_fma, idx, idk, row, col);
@@ -650,6 +665,7 @@ inline void {{kernel_name}}_transpose_b_kernel(
         };
         c10::ForcedUnroll<ROWS * COLS>{}(storec);
     } else {
+        // Second implementation
 {%- if input2_dtype in [torch.bfloat16, torch.float16] %}
         constexpr auto VLEN = VectorizedIn::size();
 {%- else %}
@@ -657,9 +673,9 @@ inline void {{kernel_name}}_transpose_b_kernel(
 {%- endif %}
         int _K = (K + VLEN - 1) / VLEN;
         // sub-block size of BLOCK_N and BLOCK_M
-        constexpr int sM = {{internal_block_m}};
-        constexpr int sN = {{internal_block_n}};
-{%- if expand_n %}
+        constexpr int sM = {{sub_block_m}};
+        constexpr int sN = {{sub_block_n}};
+{%- if tail_n %}
         int bN = (N + sN - 1) / sN;
 {%- else %}
         constexpr int bN = (BLOCK_N + sN - 1) / sN;
@@ -675,7 +691,7 @@ inline void {{kernel_name}}_transpose_b_kernel(
 {%- endif %}
         at::vec::VectorizedN<{{compute_t}}, sN * sM> vmid;
 
-{%- if expand_n %}
+{%- if tail_n %}
         int ntail = N % sN;
 {%- else %}
         constexpr int ntail = BLOCK_N % sN;
@@ -684,14 +700,14 @@ inline void {{kernel_name}}_transpose_b_kernel(
         int ktail = K % VLEN;
 
         auto compute_trans = [&](int m, int n, int k) {
-{%- if expand_n %}
+{%- if tail_n %}
             int e_n = (n == bN - 1 && ntail != 0) ? (N - n * sN) : sN;
 {%- else %}
             int e_n = (n == bN - 1 && ntail != 0) ? (BLOCK_N - n * sN) : sN;
 {%- endif %}
             int e_m = (m == bM - 1 && mtail != 0) ? (BLOCK_M - m * sM) : sM;
             int e_k = (k == _K - 1 && ktail != 0) ? (K - k * VLEN) : VLEN;
-            {{kernel.unroll_pragma(internal_block_n)}}
+            {{kernel.unroll_pragma(sub_block_n)}}
             for (int i = 0; i < e_n; i++) {
 {%- if input2_dtype in [torch.bfloat16, torch.float16] %}
                 auto b = VectorizedIn::loadu(B + (sN * n + i) * ldb + k * VLEN, e_k);
@@ -704,7 +720,7 @@ inline void {{kernel_name}}_transpose_b_kernel(
 {%- endif %}
             }
 
-            {{kernel.unroll_pragma(internal_block_m)}}
+            {{kernel.unroll_pragma(sub_block_m)}}
             for (int s = 0; s < e_m; s++) {
 {%- if input2_dtype in [torch.bfloat16, torch.float16] %}
                 auto a = VectorizedIn::loadu(A + (sM * m + s) * lda + k * VLEN, e_k);
@@ -720,7 +736,7 @@ inline void {{kernel_name}}_transpose_b_kernel(
                 va = va * Vectorized({{alpha}});
 {%- endif %}
                 if (k == 0) {
-                    {{kernel.unroll_pragma(internal_block_n)}}
+                    {{kernel.unroll_pragma(sub_block_n)}}
                     for (int i = 0; i < e_n; i++) {
 {%- if input2_dtype in [torch.bfloat16, torch.float16] %}
                         vmid[sN * s + i] = at::vec::fmadd(va[0], vb[2 * i], Vectorized(0.0f));
@@ -730,7 +746,7 @@ inline void {{kernel_name}}_transpose_b_kernel(
 {%- endif %}
                     }
                 } else {
-                    {{kernel.unroll_pragma(internal_block_n)}}
+                    {{kernel.unroll_pragma(sub_block_n)}}
                     for (int i = 0; i < e_n; i++) {
 {%- if input2_dtype in [torch.bfloat16, torch.float16] %}
                         vmid[sN * s + i] = at::vec::fmadd(va[0], vb[2 * i], vmid[sN * s + i]);
@@ -744,9 +760,9 @@ inline void {{kernel_name}}_transpose_b_kernel(
 
             // store to C
             if (k == _K - 1) {
-                {{kernel.unroll_pragma(internal_block_m)}}
+                {{kernel.unroll_pragma(sub_block_m)}}
                 for (int s = 0; s < e_m; s++) {
-                    {{kernel.unroll_pragma(internal_block_n)}}
+                    {{kernel.unroll_pragma(sub_block_n)}}
                     for (int i = 0; i < e_n; i++) {
                         auto v = at::vec::vec_reduce_all([](Vectorized& x, Vectorized& y) { return x + y; }, vmid[sN * s + i]);
                         if constexpr (accum) {
@@ -772,34 +788,39 @@ inline void {{kernel_name}}_transpose_b_kernel(
 }
 """
 
-    # set extra parameters to generate gemm that
-    # supports arbitrary sizes of n and transposed B matrix
-    def set_extra_configs(self, extra_config):
-        if not hasattr(extra_config, "trans_b"):
-            extra_config.trans_b = False
-        if not hasattr(extra_config, "expand_n"):
-            extra_config.expand_n = False
-        if not hasattr(extra_config, "internal_block_m"):
-            extra_config.internal_block_m = 4
-        if not hasattr(extra_config, "internal_block_n"):
-            extra_config.internal_block_n = 4
-
+    # set trans_b to generate gemm that
+    # supports transposed B matrix
+    # TODO add trans_b support for other micro gemms
+    # and move setting of trans_b to the init of CppMicroGemm
+    def __init__(
+        self,
+        name,
+        input_dtype,
+        input2_dtype,
+        output_dtype,
+        compute_dtype,
+        register_blocking,
+        alpha=1,
+        trans_b=False,
+    ) -> None:
+        super().__init__(
+            name,
+            input_dtype,
+            input2_dtype,
+            output_dtype,
+            compute_dtype,
+            register_blocking,
+            alpha,
+        )
         # trans_b is only supported on platforms that
-        # support avx512 or avx2 since transpose_NxN is
+        # support avx512 or avx2 since transpose_block is
         # only implemented on these platforms
-        if extra_config.trans_b:
+        if trans_b:
             vec_isa = pick_vec_isa()
             assert issubclass(vec_isa.__class__, VecAVX512) or issubclass(
                 vec_isa.__class__, VecAVX2
             )
-
-        self.extra_config = extra_config
-        self.extra_config.internal_block_m = min(
-            extra_config.internal_block_m, self.register_blocking.block_m
-        )
-        self.extra_config.internal_block_n = min(
-            extra_config.internal_block_n, self.register_blocking.block_n
-        )
+        self.trans_b = trans_b
 
     def codegen_define(self, kernel: CppTemplateKernel) -> str:
         options = {
@@ -809,40 +830,35 @@ inline void {{kernel_name}}_transpose_b_kernel(
             "block_n": self.register_blocking.block_n,
             "block_k": self.register_blocking.block_k,
             "trans_b": False,
-            "expand_n": False,
+            "tail_n": False,
             "restrict_keyword": get_restrict_keyword(),
             **self.get_common_options(),
         }
-        if (
-            hasattr(self, "extra_config")
-            and hasattr(self.extra_config, "trans_b")
-            and self.extra_config.trans_b
-        ):
-            # generate kernel with trans_b and sub-block size
+        if self.trans_b:
+            # TODO supports tuning of sub_block_m/sub_block_n
+            # to get better performance for specific shapes
+            sub_block_m = min(4, self.register_blocking.block_m)
+            sub_block_n = min(4, self.register_blocking.block_n)
+            # update options to generate kernel with trans_b and sub-block size
             options.update(
                 {
-                    "trans_b": self.extra_config.trans_b,
-                    "internal_block_m": self.extra_config.internal_block_m,
-                    "internal_block_n": self.extra_config.internal_block_n,
+                    "trans_b": self.trans_b,
+                    "sub_block_m": sub_block_m,
+                    "sub_block_n": sub_block_n,
                 }
             )
         result = KernelTemplate._template_from_string(self.TEMPLATE_KERNEL).render(
             options
         )
-        if (
-            hasattr(self, "extra_config")
-            and hasattr(self.extra_config, "expand_n")
-            and self.extra_config.expand_n
-        ):
-            # support arbitrary sizes of n
-            options.update(
-                {
-                    "expand_n": self.extra_config.expand_n,
-                }
-            )
-            result += KernelTemplate._template_from_string(self.TEMPLATE_KERNEL).render(
-                options
-            )
+        # update options to generate the kernel for the tail of N
+        options.update(
+            {
+                "tail_n": True,
+            }
+        )
+        result += KernelTemplate._template_from_string(self.TEMPLATE_KERNEL).render(
+            options
+        )
         result += KernelTemplate._template_from_string(self.TEMPLATE_ENTRY).render(
             options
         )
