@@ -33,7 +33,7 @@ from ..utils import (
     sympy_index_symbol,
     sympy_subs,
 )
-from ..virtualized import _ops as ops, OpsHandler, V
+from ..virtualized import _ops as ops, V
 from .common import (
     BackendFeature,
     CSEVariable,
@@ -561,12 +561,6 @@ class HalideOverrides(OpOverrides):
 
 
 HalideOverrides._initialize_pointwise_overrides("halide")
-
-
-if TYPE_CHECKING:
-
-    class _typecheck_HalideOverrides(HalideOverrides, OpsHandler[str]):
-        pass  # mypy will error if we got any of the signatures wrong
 
 
 class HalideCSEVariable(CSEVariable):
