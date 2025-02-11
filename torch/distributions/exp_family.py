@@ -1,4 +1,6 @@
 # mypy: allow-untyped-defs
+from typing import cast
+
 import torch
 from torch import Tensor
 from torch.distributions.distribution import Distribution
@@ -61,5 +63,5 @@ class ExponentialFamily(Distribution):
         gradients = torch.autograd.grad(lg_normal.sum(), nparams, create_graph=True)
         result += lg_normal
         for np, g in zip(nparams, gradients):
-            result -= (np * g).reshape(self._batch_shape + (-1,)).sum(-1)
+            result -= cast(float, (np * g).reshape(self._batch_shape + (-1,)).sum(-1))
         return result
