@@ -111,6 +111,23 @@ inline std::string to_string_opmath(const at::opmath_type<T>& value) {
     }
 }
 
+// convert activation epilogue to string
+inline std::string to_string_epilogue(const at::cuda::blas::GEMMAndBiasActivationEpilogue& value) {
+  switch (value) {
+    case at::cuda::blas::GEMMAndBiasActivationEpilogue::None:
+      return std::string("None");
+      break;
+    case at::cuda::blas::GEMMAndBiasActivationEpilogue::RELU:
+      return std::string("RELU");
+      break;
+    case cuda::blas::GEMMAndBiasActivationEpilogue::GELU:
+      return std::string("GELU");
+      break;
+    default:
+      return std::string("unknown");
+  }
+}
+
 namespace detail {
 
 static bool NumericalCheck(ScalarType dtype, void* c, void* other_c, int64_t size) {
