@@ -155,9 +155,6 @@ extern "C" {
 PT_EXPORT {{kernel_call_signature}} {
   try {
   int64_t B = {{kernel.size(Y, 0, -3, default_value=1)}};
-  int64_t M = {{kernel.size(X, -2)}};
-  int64_t K = {{kernel.size(W, -2)}};
-  int64_t N = {{kernel.size(W, -1)}};
   using ElementComputeEpilogue = {{instance_type}}::ElementAccumulator;
   using coord_t = cutlass::gemm::GemmCoord::Index;
   static cutlass::KernelHardwareInfo hw_info;
@@ -176,13 +173,6 @@ PT_EXPORT {{kernel_call_signature}} {
 
   // check for null pointers after workspace size, since querying workspace size doesn't require valid data pointers
 #ifndef CUTLASS_BACKEND_DISABLE_CHECKS
-  {{kernel.check_not_null(X)}}
-  {{kernel.check_not_null(W)}}
-  {{kernel.check_not_null(Bias)}}
-  {{kernel.check_not_null(Meta)}}
-  {{kernel.check_not_null(Y)}}
-
-
   {
     auto status = gemm_op.can_implement(arguments);
     CUTLASS_CHECK(status);
@@ -278,7 +268,7 @@ GEMM_ARGS_SPARSE_CUTLASS_2X = r"""
     {
       static_cast<coord_t>({{M}}),
       static_cast<coord_t>({{N}}),
-      static_cast<coord_t>(K),
+      static_cast<coord_t>(2 * K),
     },  // GemmCoord problem_size
     X_ref,  // TensorRef<ElementA const, LayoutA> ref_A
     W_ref,  // TensorRef<ElementB const, LayoutB> ref_B
@@ -1382,7 +1372,7 @@ class CUTLASS2xGemmTemplate(CUTLASSGemmTemplate):
         A_size = [int(i) for i in A_layout.size]
         B_size = [int(i) for i in B_layout.size]
         K = max(A_size[1], B_size[0])
-        return (K == A_size[1] or K == 2 * A_size[0]) and K == B_size[0]
+        return (K == A_size[1] or K == 2 * A_size[1]) and K == B_size[0]
 
     def _shape_match(
         self,
