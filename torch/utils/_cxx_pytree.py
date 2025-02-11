@@ -20,7 +20,10 @@ from typing import Any, Callable, Optional, overload, TypeVar, Union
 from typing_extensions import deprecated, TypeIs
 
 import optree
-from optree import PyTreeSpec as TreeSpec  # direct import for type annotations
+from optree import (  # direct import for type annotations
+    PyTreeSpec,
+    PyTreeSpec as TreeSpec,
+)
 
 import torch.utils._pytree as python_pytree
 from torch.utils._pytree import KeyEntry as KeyEntry
@@ -230,8 +233,11 @@ def _private_register_pytree_node(
         )
 
 
+_pytreespec_types = (PyTreeSpec,)  # will be updated in torch._dynamo.polyfilles.pytree
+
+
 def _is_pytreespec_instance(obj: Any, /) -> TypeIs[TreeSpec]:
-    return isinstance(obj, TreeSpec)
+    return isinstance(obj, _pytreespec_types)
 
 
 def tree_is_leaf(

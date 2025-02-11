@@ -7,6 +7,7 @@ import itertools
 import logging
 import math
 import operator
+import sys
 import types
 import typing
 from collections import defaultdict, OrderedDict
@@ -21,6 +22,7 @@ from .. import config, polyfills, variables
 from ..exc import (
     AttributeMutationError,
     ObservedAttributeError,
+    raise_observed_exception,
     unimplemented,
     Unsupported,
     UserError,
@@ -116,6 +118,13 @@ polyfill_fn_mapping = {
     operator.gt: polyfills.cmp_gt,
     operator.ge: polyfills.cmp_ge,
 }
+# A mapping from polyfilled class and original class to both classes for `isinstance` check
+# Insert two key-value pairs for each polyfilled class and original class
+# {
+#     polyfilled_class: (polyfilled_class, original_class),
+#     original_class: (polyfilled_class, original_class),
+# }
+polyfill_class_mapping: dict[type, tuple[type, ...]] = {}
 
 
 class BuiltinVariable(VariableTracker):
@@ -1658,10 +1667,37 @@ class BuiltinVariable(VariableTracker):
                 isinstance_type.__class__.__instancecheck__(isinstance_type, arg.value)
             )
 
+        if isinstance(isinstance_type, type):
+            isinstance_type: tuple[type, ...] = (isinstance_type,)
+        elif sys.version_info >= (3, 10) and isinstance(
+            isinstance_type, types.UnionType
+        ):
+            isinstance_type: tuple[type, ...] = isinstance_type.__args__
+        elif not (
+            isinstance(isinstance_type, tuple)
+            and all(isinstance(tp, type) for tp in isinstance_type)
+        ):
+            raise_observed_exception(
+                TypeError,
+                tx,
+                args=[
+                    "isinstance() arg 2 must be a type, a tuple of types, or a union"
+                ],
+            )
+
+        if any(tp in polyfill_class_mapping for tp in isinstance_type):
+            isinstance_type = tuple(
+                dict.fromkeys(
+                    itertools.chain.from_iterable(
+                        polyfill_class_mapping.get(tp, (tp,)) for tp in isinstance_type
+                    )
+                )
+            )
+
         try:
             val = issubclass(arg_type, isinstance_type)
         except TypeError:
-            val = arg_type is isinstance_type
+            val = arg_type in isinstance_type
         return variables.ConstantVariable.create(val)
 
     def call_issubclass(self, tx: "InstructionTranslator", left_ty, right_ty):
