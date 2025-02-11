@@ -235,9 +235,8 @@ class DebugPrinterManager:
         ):
             if V.graph.cpp_wrapper:
                 V.graph.wrapper_code.writeline(
-                    f'printf("[ {launch_prefix}: {kernel_name} ]");'
+                    f'printf("[ {launch_prefix}: {kernel_name} ]\\n");'
                 )
-                V.graph.wrapper_code.writeline('printf("\\n");')
             return
 
         if self.debug_printer_level != IntermediateValueDebuggingLevel.PRINT_ONLY:
