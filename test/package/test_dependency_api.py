@@ -138,6 +138,7 @@ class TestDependencyAPI(PackageTestCase):
         with self.assertRaisesRegex(NotImplementedError, "was mocked out"):
             r()
 
+    @skipIfTorchDynamo("import interference since eval_frame.c makes imports")
     def test_mock_glob(self):
         buffer = BytesIO()
         with PackageExporter(buffer) as he:
@@ -324,6 +325,7 @@ class TestDependencyAPI(PackageTestCase):
             ),
         )
 
+    @skipIfTorchDynamo("import interference since eval_frame.c makes imports")
     def test_repackage_mocked_module(self):
         """Re-packaging a package that contains a mocked module should work correctly."""
         buffer = BytesIO()

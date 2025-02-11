@@ -20,7 +20,7 @@ def normalize_graph(gm):
     return normalize_gm(gm.print_readable(print_output=False))
 
 
-class InvokeQuantTest(torch._higher_order_ops.PrimHOPBase):
+class InvokeQuantTest(torch._higher_order_ops.BaseHOP):
     def __init__(self):
         super().__init__("invoke_quant_test")
 
@@ -31,7 +31,7 @@ class InvokeQuantTest(torch._higher_order_ops.PrimHOPBase):
 invoke_quant_test = InvokeQuantTest()
 
 
-class PrimHOPBaseTest(torch._dynamo.test_case.TestCase):
+class BaseHOPTest(torch._dynamo.test_case.TestCase):
     # TODO: flip to False later, we're landing a refactor PR and don't want to merge conflict
     @torch._dynamo.config.patch(assume_static_by_default=True)
     def test_dynamo(self):
@@ -140,7 +140,7 @@ class GraphModule(torch.nn.Module):
             mm_1: "f32[3, 3]" = torch.ops.aten.mm.default(t, mul_1);  t = None
             t_1: "f32[3, 3]" = torch.ops.aten.t.default(arg1_1);  arg1_1 = None
             mm_2: "f32[3, 3]" = torch.ops.aten.mm.default(mul_1, t_1);  mul_1 = t_1 = None
-            return [mm_2, mm_1]
+            return (mm_2, mm_1)
 """,  # NOQA: B950
         )
 
