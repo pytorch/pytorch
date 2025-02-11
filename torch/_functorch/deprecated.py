@@ -10,7 +10,7 @@ documentation.
 
 import textwrap
 import warnings
-from typing import Any, Callable, Optional, Tuple, Union
+from typing import Any, Callable, Optional, Union
 
 import torch._functorch.apis as apis
 import torch._functorch.eager_transforms as _impl
@@ -98,7 +98,7 @@ def jvp(
 
 def jacrev(
     func: Callable,
-    argnums: Union[int, Tuple[int]] = 0,
+    argnums: Union[int, tuple[int]] = 0,
     *,
     has_aux=False,
     chunk_size: Optional[int] = None,

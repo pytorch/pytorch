@@ -15,7 +15,7 @@ from torch._higher_order_ops.triton_kernel_wrap import (
     triton_kernel_wrapper_mutation,
 )
 from torch._inductor import metrics
-from torch._inductor.utils import run_and_get_code
+from torch._inductor.utils import run_and_get_code, triton_version_uses_attrs_dict
 from torch._library import capture_triton
 from torch.testing import FileCheck
 from torch.testing._internal import common_utils
@@ -26,7 +26,7 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_ROCM,
 )
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_CUDA, HAS_GPU, HAS_XPU
-from torch.testing._internal.logging_utils import logs_to_string
+from torch.testing._internal.logging_utils import log_settings, logs_to_string
 
 # Defines all the kernels for tests
 from torch.testing._internal.triton_utils import *  # noqa: F403
@@ -550,7 +550,6 @@ def forward(self, x_1, output_1):
         call_triton(output)
 
     @requires_gpu
-    @skipIfRocm
     def test_triton_kernel_dependancies(self):
         def call_triton(
             x: torch.Tensor,
@@ -669,7 +668,6 @@ def forward(self, x_1, output_1):
 
     @requires_gpu
     @skipIfXpu
-    @skipIfRocm
     def test_triton_kernel_constants(self):
         @triton.jit
         def mulC_kernel(
@@ -754,7 +752,6 @@ def forward(self, x_1, output_1):
         self.assertEqual(compiled_func(t1, t2, output2), torch_add)
 
     @requires_gpu
-    @skipIfRocm  # https://github.com/pytorch/pytorch/actions/runs/10051552819/job/27782048305?pr=131431
     @common_utils.parametrize("backend", ["eager", "aot_eager", "inductor"])
     @patch.object(
         torch._inductor.config, "unsafe_ignore_unsupported_triton_autotune_args", True
@@ -1266,12 +1263,18 @@ def forward(self, x_1, output_1):
             torch.compile(f, dynamic=dynamic), x, y
         )
 
-        if dynamic:
-            # when half_n_elements passed to the Triton kernel is
-            # dynamic, equal_to_1 specializaiton can't be enforced
-            self.assertTrue(_triton_get_ast_equal_to_str(()) in sources[0])
+        if triton_version_uses_attrs_dict():
+            self.assertFalse("equal_to" in sources[0])
         else:
-            self.assertTrue(_triton_get_ast_equal_to_str((3,)) in sources[0])
+            if dynamic:
+                # when half_n_elements passed to the Triton kernel is
+                # dynamic, equal_to_1 specializaiton can't be enforced
+
+                # also, equal_to_1 specialization doesn't occur (or appear in the signature)
+                # for newer versions ofo triton (i.e. the ones where triton_version_uses_attrs_dict() == True)
+                self.assertTrue(_triton_get_ast_equal_to_str(()) in sources[0])
+            else:
+                self.assertTrue(_triton_get_ast_equal_to_str((3,)) in sources[0])
         self.assertEqual(compiled_out, eager_out)
 
     @requires_gpu
@@ -1300,7 +1303,8 @@ def forward(self, x_1, output_1):
 
         # float 1.0 (both literal or symbolic)
         # should not be added to equal_to_1
-        self.assertTrue(_triton_get_ast_equal_to_str(()) in sources[0])
+        if not triton_version_uses_attrs_dict():
+            self.assertTrue(_triton_get_ast_equal_to_str(()) in sources[0])
         self.assertEqual(compiled_out, eager_out)
 
     @requires_gpu
@@ -1727,19 +1731,17 @@ def forward(self, arg0_1, arg1_1):
             out = torch.zeros_like(a)
             n_elements = out.numel()
 
-            ptrs = [t.data_ptr() for t in (a, b, out)]
-
             if after_data_ptr:
                 torch._dynamo.graph_break()
 
             descs = [
                 triton.tools.experimental_descriptor.create_1d_tma_descriptor(
-                    ptr,
+                    t.data_ptr(),
                     n_elements,
                     BLOCK_SIZE,
                     t.element_size(),
                 )
-                for ptr in ptrs
+                for t in (a, b, out)
             ]
 
             if after_create_desc:
@@ -2257,6 +2259,55 @@ def forward(self, arg0_1, arg1_1):
         actual = torch.compile(fn)(x)
         self.assertEqual(expected, actual)
 
+    @requires_gpu
+    @unittest.skipIf(
+        not triton_version_uses_attrs_dict(),
+        "Test is only valid for new triton versions where attrs is represented by a raw dict",
+    )
+    def test_triton_attrs_dict_equal_1_None_format(self):
+        @triton.jit
+        def triton_(in_ptr, out_ptr, numel, add_amount, BLOCK_SIZE: tl.constexpr):
+            offsets = tl.arange(0, BLOCK_SIZE)
+            x = tl.load(in_ptr + offsets, mask=(offsets < numel))
+            output = x * x
+            if add_amount is not None:
+                output = output + add_amount
+            tl.store(out_ptr + offsets, output, mask=(offsets < numel))
+
+        def fn(x):
+            y = torch.empty_like(x)
+            BLOCK_SIZE = 256
+            grid = (1,)
+            triton_[grid](x, y, x.numel(), None, BLOCK_SIZE)
+            return y
+
+        x = torch.full((1,), 2.5, device=GPU_TYPE)
+        expected = fn(x)
+
+        fn_c = torch.compile(fn)
+        res, code = run_and_get_code(fn_c, x)
+        self.assertEqual(expected, res)
+
+        FileCheck().check("triton_meta=").check("'constants':").check("'numel': 1").run(
+            code[0]
+        )
+        FileCheck().check("triton_meta=").check("'constants':").check(
+            "'add_amount': None"
+        ).run(code[0])
+        FileCheck().check("triton_meta=").check("'constants':").check(
+            "'BLOCK_SIZE': 256"
+        ).run(code[0])
+
+        FileCheck().check("triton_meta=").check("'signature':").check(
+            "'numel': 'constexpr'"
+        ).run(code[0])
+        FileCheck().check("triton_meta=").check("'signature':").check(
+            "'add_amount': 'constexpr'"
+        ).run(code[0])
+        FileCheck().check("triton_meta=").check("'signature':").check(
+            "'BLOCK_SIZE': 'constexpr'"
+        ).run(code[0])
+
 
 def make_mutation_test(fn):
     @requires_gpu
@@ -2434,7 +2485,6 @@ class MutationTests(torch._inductor.test_case.TestCase):
         )
 
     @requires_gpu
-    @skipIfRocm
     def test_triton_kernel_inference_mode(self):
         def f(x, y, out):
             n_elements = x.numel()
@@ -3424,8 +3474,10 @@ class CustomOpTests(torch._inductor.test_case.TestCase):
         w = torch.randn(K, N, device=GPU_TYPE)
 
         torch._dynamo.decorators.mark_unbacked(x, 0)
-        torch._logging.set_logs(output_code=True)
-        with self.assertLogs(logger="torch._inductor", level=logging.DEBUG) as log:
+
+        with log_settings("+output_code"), self.assertLogs(
+            logger="torch._inductor", level=logging.DEBUG
+        ) as log:
             foo(x, w)
 
         output = "\n".join(record.getMessage() for record in log.records)
@@ -3599,59 +3651,6 @@ class CustomOpTests(torch._inductor.test_case.TestCase):
 
         # this should cause an exception, since pre_hook is not allowed
         msg = "Passing multiple @triton.autotune decorators is not supported. Please use a single @triton.autotune decorator instead."
-        with self.assertRaisesRegex(torch._dynamo.exc.Unsupported, msg):
-            add_compiled = torch.compile(
-                add, mode="reduce-overhead", fullgraph=True, backend=backend
-            )
-            add_compiled(x, y).mean()
-
-    @requires_gpu
-    @common_utils.parametrize("backend", ["eager", "aot_eager", "inductor"])
-    def test_triton_heuristics_exception(self, backend):
-        @triton.autotune(
-            configs=[
-                triton.Config(
-                    {"BLOCK_SIZE": 4096},
-                )
-            ],
-            key=["n_elements"],
-        )
-        # @triton.heuristics is not yet supported
-        @triton.heuristics(
-            values={"TEST_HEURISTICS": lambda args: args["n_elements"] * 2}
-        )
-        @triton.jit
-        def add_kernel(
-            x_ptr,
-            y_ptr,
-            output_ptr,
-            n_elements,
-            BLOCK_SIZE: tl.constexpr,
-            TEST_HEURISTICS: tl.constexpr,
-        ):
-            pid = tl.program_id(axis=0)
-
-            block_start = pid * BLOCK_SIZE
-            offsets = block_start + tl.arange(0, BLOCK_SIZE)
-            mask = offsets < n_elements
-
-            x = tl.load(x_ptr + offsets, mask=mask)
-            y = tl.load(y_ptr + offsets, mask=mask)
-            output = x + y
-            tl.store(output_ptr + offsets, output, mask=mask)
-
-        def add(x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
-            output = torch.ones(x.shape, device=x.device, dtype=x.dtype)
-            n_elements = output.numel()
-            grid = lambda meta: (triton.cdiv(n_elements, meta["BLOCK_SIZE"]),)
-            add_kernel[grid](x, y, output, n_elements)
-            return output
-
-        x = torch.ones((4096,), device=GPU_TYPE, dtype=torch.float16)
-        y = torch.ones((4096,), device=GPU_TYPE, dtype=torch.float16)
-
-        # this should cause an exception, since pre_hook is not allowed
-        msg = "Passing @triton.heuristics decorator after @triton.autotune decorator is not supported. is not supported."
         with self.assertRaisesRegex(torch._dynamo.exc.Unsupported, msg):
             add_compiled = torch.compile(
                 add, mode="reduce-overhead", fullgraph=True, backend=backend
@@ -3842,6 +3841,134 @@ class CustomOpTests(torch._inductor.test_case.TestCase):
         f(dst, src, 1.5, N)
 
         self.assertEqual(counter.op_count, 2)
+
+    # see: https://github.com/triton-lang/triton/blob/67ea999935f4511a535a25bdecb27e79e3c3af41/python/test/unit/language/test_decorator.py#L31
+    @requires_gpu
+    @common_utils.parametrize("non_strict", [True, False])
+    @common_utils.parametrize("backend", ["eager", "aot_eager", "inductor"])
+    @common_utils.parametrize("autotune_at_compile_time", [True, False])
+    def test_triton_kernel_heuristic(
+        self, backend, autotune_at_compile_time, non_strict
+    ):
+        # for non-strict mode
+        libname = "my_cool_namespace"
+        opname = "my_triton_operator"
+
+        @triton.autotune(
+            configs=[
+                triton.Config(kwargs={"BLOCK_SIZE": 32}),
+            ],
+            key=["N"],
+        )
+        # we should be able to modify existing keys in kwargs
+        @triton.heuristics({"BLOCK_SIZE": lambda nargs: nargs["BLOCK_SIZE"] * 2})
+        # test kwargs
+        @triton.heuristics({"EVEN_N": lambda nargs: nargs["N"] + 10})
+        @triton.heuristics({"EVEN_N": lambda nargs: nargs["EVEN_N"] * 2})
+        # test args
+        # There are differences here from OSS Triton because we run these functions in Dynamo
+        # We don't have access to the .data_ptr() of TensorVariables
+        @triton.heuristics({"NDIM_src": lambda nargs: nargs["src"] is None})
+        # test that heuristics are applied in the correct order
+        @triton.heuristics({"EVEN_N": lambda nargs: nargs["EVEN_N"] - 10})
+        @triton.jit
+        def heuristics_kernel(
+            dst,
+            src,
+            N,
+            BLOCK_SIZE: tl.constexpr,
+            EVEN_N: tl.constexpr,
+            NDIM_src: tl.constexpr,
+        ):
+            tl.store(dst, EVEN_N + BLOCK_SIZE)
+            tl.store(dst + 1, NDIM_src)
+
+        grid = lambda META: (triton.cdiv(N, META["BLOCK_SIZE"]),)
+
+        def f(
+            dst: torch.Tensor,
+            src: torch.Tensor,
+            N: int,
+        ) -> None:
+            grid = lambda META: (triton.cdiv(N, META["BLOCK_SIZE"]),)
+            if non_strict:
+                torch.library.wrap_triton(heuristics_kernel)[grid](dst, src, N=N)
+            else:
+                heuristics_kernel[grid](dst, src, N=N)
+
+        if non_strict:
+            decorator = torch.library.triton_op(
+                f"{libname}::{opname}", mutates_args={"dst"}
+            )(f)
+        else:
+            # we can just pass the function 'f' for dynamo
+            decorator = f
+
+        compiled_f = torch.compile(decorator, backend=backend)
+
+        N = 1023
+        src = torch.empty(N, device=GPU_TYPE)
+        dst = torch.zeros(N, device=GPU_TYPE)
+
+        with torch._inductor.config.patch(
+            {"triton.autotune_at_compile_time": autotune_at_compile_time}
+        ):
+            compiled_f(dst, src, N=N)
+
+        # now let's run without torch.compile to compare
+        triton_src = torch.empty(N, device=GPU_TYPE)
+        triton_dst = torch.zeros(N, device=GPU_TYPE)
+        heuristics_kernel[grid](triton_dst, triton_src, N=N)
+
+        # triton_dst[0].item() is 2120
+        # (1023 + 10) * 2 - 10 + BLOCK_SIZE = 2056 + 64 = 2120
+        # this is to test that we apply the heuristics in the correct order
+        self.assertEqual(triton_dst[0].item(), 2120)
+        self.assertEqual(triton_dst[1].item(), 0.0)
+
+        # Results should match
+        self.assertEqual(dst[0].item(), triton_dst[0].item())
+        self.assertEqual(dst[1].item(), triton_dst[1].item())
+
+        # @triton.heuristics cannot return non-constant values
+        # check for the exception
+        if not non_strict:
+
+            @triton.autotune(
+                configs=[
+                    triton.Config(kwargs={"BLOCK_SIZE": 32}),
+                ],
+                key=["N"],
+            )
+            # torch.randint(...)[0] will produce a non-constant value
+            @triton.heuristics({"EVEN_N": lambda nargs: torch.randint(1, (1, 1))[0]})
+            @triton.jit
+            def heuristics_kernel(
+                dst,
+                src,
+                N,
+                BLOCK_SIZE: tl.constexpr,
+                EVEN_N: tl.constexpr,
+            ):
+                tl.store(dst, N)
+
+            grid = lambda META: (triton.cdiv(N, META["BLOCK_SIZE"]),)
+
+            def f(
+                dst: torch.Tensor,
+                src: torch.Tensor,
+                N: int,
+            ) -> None:
+                grid = lambda META: (triton.cdiv(N, META["BLOCK_SIZE"]),)
+                heuristics_kernel[grid](dst, src, N=N)
+
+            compiled_f = torch.compile(f, backend=backend, fullgraph=True)
+            N = 1023
+            src = torch.empty(N, device=GPU_TYPE)
+            dst = torch.zeros(N, device=GPU_TYPE)
+            msg = "@triton.heuristics must return constant values because configs can only contain constant values."
+            with self.assertRaisesRegex(torch._dynamo.exc.Unsupported, msg):
+                compiled_f(dst, src, N=N)
 
 
 common_utils.instantiate_parametrized_tests(KernelTests)

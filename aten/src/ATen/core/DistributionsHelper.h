@@ -40,11 +40,15 @@ struct uniform_int_from_to_distribution {
 
   template <typename RNG>
   C10_HOST_DEVICE inline T operator()(RNG generator) {
+#ifdef FBCODE_CAFFE2
     if ((
       std::is_same_v<T, int64_t> ||
       std::is_same_v<T, double> ||
       std::is_same_v<T, float> ||
       std::is_same_v<T, at::BFloat16>) && range_ >= 1ULL << 32)
+#else
+    if (range_ >= 1ULL << 28) // allow approx 5% skew in uniform int generation using %
+#endif
     {
       return transformation::uniform_int_from_to<T>(generator->random64(), range_, base_);
     } else {

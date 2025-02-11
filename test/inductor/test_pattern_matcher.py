@@ -3,7 +3,7 @@ import copy
 import itertools
 import os
 import unittest
-from typing import Callable, List, Optional
+from typing import Callable, Optional
 
 import torch
 import torch._dynamo.config as dynamo_config
@@ -143,7 +143,6 @@ class TestPatternMatcher(TestCase):
                 ref[indices], test[indices]
             )  # also checks that dtype is correct
 
-    @skipIfRocm
     @skipIfXpu
     @skipCUDAIf(not SM80OrLater, "need sm_80")
     @inductor_config.patch(force_fuse_int_mm_with_mul=True)
@@ -179,7 +178,8 @@ class TestPatternMatcher(TestCase):
             self._test_fused_int_mm_mul_impl(fn2, args, True)
 
     def test_duplicate_search(self):
-        from typing import Callable, Iterable
+        from collections.abc import Iterable
+        from typing import Callable
 
         import torch
         from torch._inductor.pattern_matcher import (
@@ -201,7 +201,7 @@ class TestPatternMatcher(TestCase):
             return x - 2
 
         patterns = PatternMatcherPass()
-        inputs = [torch.empty(4, 5, dtype=torch.float32, device="cuda")]
+        inputs = [torch.empty(4, 5, dtype=torch.float32, device=GPU_TYPE)]
         register_replacement(pattern1, replacement1, inputs, fwd_only, patterns)
         register_replacement(pattern2, replacement2, inputs, fwd_only, patterns)
 
@@ -233,11 +233,10 @@ class TestPatternMatcher(TestCase):
             y2 = y.relu() - 2
             return y2
 
-        inp = torch.rand(3, 5, device="cuda")
+        inp = torch.rand(3, 5, device=GPU_TYPE)
         self.assertEqual(f(inp), f_replaced(inp))
         self.assertEqual(count, 2)
 
-    @skipIfRocm
     @skipIfXpu
     @skipCUDAIf(not SM80OrLater, "need sm_80")
     @inductor_config.patch(force_fuse_int_mm_with_mul=True)
@@ -1887,7 +1886,7 @@ class TestPatternMatcher(TestCase):
             return graph
 
         def custom_backend(
-            graph: torch.fx.GraphModule, example_inputs: List[torch.Tensor]
+            graph: torch.fx.GraphModule, example_inputs: list[torch.Tensor]
         ) -> Callable:
             from torch._inductor import config
 

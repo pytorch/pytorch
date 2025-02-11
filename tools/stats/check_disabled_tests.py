@@ -6,7 +6,7 @@ import os
 import xml.etree.ElementTree as ET
 from pathlib import Path
 from tempfile import TemporaryDirectory
-from typing import Any, Generator
+from typing import Any, TYPE_CHECKING
 
 from tools.stats.upload_stats_lib import (
     download_s3_artifacts,
@@ -15,6 +15,10 @@ from tools.stats.upload_stats_lib import (
     upload_workflow_stats_to_s3,
 )
 from tools.stats.upload_test_stats import process_xml_element
+
+
+if TYPE_CHECKING:
+    from collections.abc import Generator
 
 
 TESTCASE_TAG = "testcase"

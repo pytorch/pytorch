@@ -116,7 +116,7 @@ struct TORCH_API MTIAHooksInterface : AcceleratorHooksInterface {
 
 
   virtual void recordMemoryHistory(
-    std::optional<std::string> enabled,
+    const std::optional<std::string>& enabled,
     const std::string& stacks,
     size_t max_entries) const {
     FAIL_MTIAHOOKS_FUNC(__func__);
@@ -125,6 +125,15 @@ struct TORCH_API MTIAHooksInterface : AcceleratorHooksInterface {
   virtual PyObject* memorySnapshot() const {
     FAIL_MTIAHOOKS_FUNC(__func__);
     return nullptr;
+  }
+
+  virtual DeviceIndex getDeviceCount() const {
+    FAIL_MTIAHOOKS_FUNC(__func__);
+    return 0;
+  }
+
+  virtual void resetPeakMemoryStats(DeviceIndex device) const {
+    FAIL_MTIAHOOKS_FUNC(__func__);
   }
 
 };
