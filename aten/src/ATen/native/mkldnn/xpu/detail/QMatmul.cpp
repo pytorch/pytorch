@@ -33,6 +33,7 @@ at::Tensor broadcast_bias2D(
     case 0:
       TORCH_CHECK(
           bias.numel() == 1, "matmul supports 1 numel when bias dim is [] ...");
+      break;
     default:
       TORCH_CHECK(0, "unsupported bias dim in matmul ...");
   }
@@ -124,8 +125,8 @@ void quantized_matmul(
       attr);
 
   size_t dims = result.dim();
-  at::Device curDevice = at::Device(at::kXPU, c10::xpu::current_device());
-  auto engine = GpuEngineManager::Instance().get_engine(curDevice);
+  at::Device cur_device = at::Device(at::kXPU, c10::xpu::current_device());
+  auto engine = GpuEngineManager::Instance().get_engine(cur_device);
   auto stream = GpuStreamManager::Instance().get_stream();
 
   at::Tensor m1 = is_onednn_matmul_strides(mat1) ? mat1 : mat1.contiguous();
