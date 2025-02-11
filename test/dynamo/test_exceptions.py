@@ -159,7 +159,6 @@ class ExceptionTests(torch._dynamo.test_case.TestCase):
         opt_fn = torch.compile(fn, backend="eager")
         opt_fn(x)
 
-    # TODO(anijain2305) - does not work with fullgraph=True
     def test_exception_with_ctx_manager(self):
         def fn(x):
             x = torch.cos(x)
@@ -173,8 +172,7 @@ class ExceptionTests(torch._dynamo.test_case.TestCase):
 
         x = torch.randn(4)
         ref = fn(x)
-        # Cant use fullgraph=True because WITH_EXCEPT_START is not supported
-        opt_fn = torch.compile(fn, backend="eager")
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
         res = opt_fn(x)
         self.assertEqual(ref, res)
 
@@ -220,6 +218,40 @@ class ExceptionTests(torch._dynamo.test_case.TestCase):
         opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
         got = opt_fn(x)
         self.assertEqual(expected, got)
+
+    def test_raise_custom_exception(self):
+        class Exc(Exception):
+            ...
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(t):
+            try:
+                raise Exc
+            except Exc:
+                return t.sin()
+            except Exception:
+                return t.cos()
+
+        t = torch.randn(2)
+        y = fn(t)
+        self.assertEqual(y, t.sin())
+
+    def test_raise_custom_exception_with_args(self):
+        class Exc(Exception):
+            ...
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(t):
+            try:
+                raise Exc(1, 2.0)
+            except Exc as e:
+                return t.sin() + e.args[0] + e.args[1]
+            except Exception:
+                return t.cos()
+
+        t = torch.randn(2)
+        y = fn(t)
+        self.assertEqual(y, t.sin() + 1 + 2.0)
 
     def test_nn_module_getattr(self):
         class A:
@@ -411,6 +443,20 @@ class ExceptionTests(torch._dynamo.test_case.TestCase):
         res = opt_fn(x, d, "m")
         self.assertEqual(ref[0], res[0])
         self.assertEqual(ref[1], res[1])
+
+    @unittest.expectedFailure
+    def test_reconstruct___context__(self):
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(t):
+            v = ValueError(1, 2, 3)
+            v.__context__ = TypeError()
+            return t.sin(), v
+
+        t = torch.randn(2)
+        y, v = fn(t)
+        self.assertEqual(y, t.sin())
+        self.assertIsInstance(v, ValueError)
+        self.assertIsInstance(v.__context__, TypeError)
 
     def test_raise_GeneratorExit(self):
         # GeneratorExit does not inherit from Exception
