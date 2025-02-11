@@ -220,8 +220,8 @@ class LogRecord:
             return hash((key, data["op"]))
         elif key == "mismatched_fake_kernel":
             return hash((key, data["op"], data["reason"]))
-        elif key == "propagate_real_tensors":
-            return hash((key, json.dumps(data["user_stack"])))
+        elif key == "propagate_real_tensors_provenance":
+            return hash((key, json.dumps(data["stack"])))
         elif key == "create_unbacked_symbol":
             return hash((key, json.dumps(data["user_stack"])))
 
@@ -302,7 +302,9 @@ class CaptureStructuredTrace(torch._logging._internal.LazyTraceHandler):
             if key in metadata:
                 if self.log_record.try_add((key, metadata[key])):
                     if key == "expression_created":
-                        # We don't want to log all expression_created logs, only the ones that are relevant to the guards/propagate_real_tensor
+                        # We don't want to log all expression_created logs, only
+                        # the ones that are relevant to the
+                        # guards/propagate_real_tensor
                         self.expression_created_logs[
                             metadata[key]["result_id"]
                         ] = ExpressionCreatedNode(
