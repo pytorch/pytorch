@@ -20,8 +20,11 @@ if TYPE_CHECKING:
     from collections.abc import Iterator, Sequence
 
 
-FSTRING_START = getattr(token, "FSTRING_START", -1)  # py3.12+
-FSTRING_END = getattr(token, "FSTRING_END", -1)
+# Python 3.12 and up have two new token tyoes, FSTRING_START and FSTRING_END
+NO_TOKEN = -1
+FSTRING_START: int = getattr(token, "FSTRING_START", NO_TOKEN)
+FSTRING_END: int = getattr(token, "FSTRING_END", NO_TOKEN)
+
 START_OF_LINE_TOKENS = {token.DEDENT, token.INDENT, token.NEWLINE}
 IGNORED_TOKENS = {token.COMMENT, token.ENDMARKER, token.ENCODING, token.NL}
 EMPTY_TOKENS = START_OF_LINE_TOKENS | IGNORED_TOKENS
@@ -104,16 +107,6 @@ class LintResult:
     def is_edit(self) -> bool:
         return None not in (self.char, self.length, self.line, self.replacement)
 
-    @property
-    def end(self) -> int:
-        assert self.char is not None and self.length is not None
-        return self.char + self.length
-
-    def contains(self, r: LintResult) -> bool:
-        assert self.char is not None and self.line is not None
-        assert r.char is not None and r.line is not None
-        return self.line == r.line and self.char <= r.char and self.end >= r.end
-
     def apply(self, lines: list[str]) -> None:
         if not (
             self.char is None
@@ -125,6 +118,16 @@ class LintResult:
             before = line[: self.char]
             after = line[self.char + self.length :]
             lines[self.line - 1] = f"{before}{self.replacement}{after}"
+
+    def contains(self, r: LintResult) -> bool:
+        assert self.char is not None and self.line is not None
+        assert r.char is not None and r.line is not None
+        return self.line == r.line and self.char <= r.char and self.end >= r.end
+
+    @property
+    def end(self) -> int:
+        assert self.char is not None and self.length is not None
+        return self.char + self.length
 
     def as_message(self, code: str, path: str) -> LintMessage:
         d = dc.asdict(self)
@@ -284,6 +287,11 @@ class PythonFile:
 
     @cached_property
     def opening_comment_lines(self) -> int:
+        """
+        The number of comments, lines starting with #, at the top of the file.
+        If you need to insert an import and there are no other imports yet, you
+        can insert it after this line.
+        """
         it = (i for i, s in enumerate(self.lines) if not s.startswith("#"))
         return next(it, 0)
 
