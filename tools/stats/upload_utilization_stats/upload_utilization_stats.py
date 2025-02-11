@@ -421,4 +421,28 @@ def parse_args() -> argparse.Namespace:
 
 
 if __name__ == "__main__":
-    print(f"repo: we are here")
+    args = parse_args()
+
+    # Flush stdout so that any errors in the upload show up last in the logs.
+    sys.stdout.flush()
+
+    repo = PYTORCH_REPO
+    if args.repo:
+        repo = args.repo
+    print(f"repo: {repo}")
+
+    workflow_info = WorkflowInfo(
+        workflow_run_id=args.workflow_run_id,
+        run_attempt=args.workflow_run_attempt,
+        job_id=args.job_id,
+        workflow_name=args.workflow_name,
+        job_name=args.job_name,
+        repo=repo,
+    )
+
+    ud = UploadUtilizationData(
+        info=workflow_info,
+        dry_run=args.dry_run,
+        debug=args.debug,
+    )
+    ud.start()
