@@ -233,7 +233,8 @@ def _private_register_pytree_node(
         )
 
 
-_pytreespec_types = (PyTreeSpec,)  # will be updated in torch._dynamo.polyfilles.pytree
+# Will be updated in torch._dynamo.polyfilles.pytree
+_pytreespec_types: tuple[type, ...] = (PyTreeSpec,)
 
 
 def _is_pytreespec_instance(obj: Any, /) -> TypeIs[TreeSpec]:

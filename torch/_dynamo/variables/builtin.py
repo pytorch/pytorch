@@ -1667,15 +1667,22 @@ class BuiltinVariable(VariableTracker):
                 isinstance_type.__class__.__instancecheck__(isinstance_type, arg.value)
             )
 
-        if isinstance(isinstance_type, type):
-            isinstance_type: tuple[type, ...] = (isinstance_type,)
+        isinstance_type_tuple: tuple[type, ...]
+        if isinstance(isinstance_type, (type,)) or callable(
+            getattr(isinstance_type, "__instancecheck__", None)
+        ):
+            isinstance_type_tuple = (isinstance_type,)
         elif sys.version_info >= (3, 10) and isinstance(
             isinstance_type, types.UnionType
         ):
-            isinstance_type: tuple[type, ...] = isinstance_type.__args__
+            isinstance_type_tuple = isinstance_type.__args__
         elif not (
             isinstance(isinstance_type, tuple)
-            and all(isinstance(tp, type) for tp in isinstance_type)
+            and all(
+                isinstance(tp, (type,))
+                or callable(getattr(tp, "__instancecheck__", None))
+                for tp in isinstance_type
+            )
         ):
             raise_observed_exception(
                 TypeError,
@@ -1684,20 +1691,23 @@ class BuiltinVariable(VariableTracker):
                     "isinstance() arg 2 must be a type, a tuple of types, or a union"
                 ],
             )
+        else:
+            isinstance_type_tuple = isinstance_type
 
-        if any(tp in polyfill_class_mapping for tp in isinstance_type):
-            isinstance_type = tuple(
+        if any(tp in polyfill_class_mapping for tp in isinstance_type_tuple):
+            isinstance_type_tuple = tuple(
                 dict.fromkeys(
                     itertools.chain.from_iterable(
-                        polyfill_class_mapping.get(tp, (tp,)) for tp in isinstance_type
+                        polyfill_class_mapping.get(tp, (tp,))
+                        for tp in isinstance_type_tuple
                     )
                 )
             )
 
         try:
-            val = issubclass(arg_type, isinstance_type)
+            val = issubclass(arg_type, isinstance_type_tuple)
         except TypeError:
-            val = arg_type in isinstance_type
+            val = arg_type in isinstance_type_tuple
         return variables.ConstantVariable.create(val)
 
     def call_issubclass(self, tx: "InstructionTranslator", left_ty, right_ty):

@@ -7,7 +7,6 @@ from __future__ import annotations
 from collections import deque
 from dataclasses import dataclass, field
 from typing import Any, Callable, Literal, TYPE_CHECKING
-from typing_extensions import TypeIs
 
 import torch.utils._pytree as python_pytree
 from torch.utils._pytree import BUILTIN_TYPES, STANDARD_DICT_TYPES
@@ -318,9 +317,10 @@ if python_pytree._cxx_pytree_dynamo_traceable:
             assert callable(self._unflatten_func)
             return self._unflatten_func(self._metadata, subtrees)
 
-    cxx_pytree._pytreespec_types = (PyTreeSpec, cxx_pytree.PyTreeSpec)
-    polyfill_class_mapping[PyTreeSpec] = (cxx_pytree.PyTreeSpec,)
-    polyfill_class_mapping[cxx_pytree.PyTreeSpec] = (PyTreeSpec,)
+    _pytreespec_types = (PyTreeSpec, cxx_pytree.PyTreeSpec)
+    cxx_pytree._pytreespec_types = _pytreespec_types
+    polyfill_class_mapping[PyTreeSpec] = _pytreespec_types
+    polyfill_class_mapping[cxx_pytree.PyTreeSpec] = _pytreespec_types
     _is_pytreespec_instance = cxx_pytree._is_pytreespec_instance
 
     _LEAF_SPEC = PyTreeSpec((), None, None, (), None)
