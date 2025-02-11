@@ -232,6 +232,26 @@ void* _getWorkspaceWithoutHandle() {
   return workspace_it->second.mutable_get();
 }
 
+void* _getWorkspace(size_t& workspaceSize) {
+  #ifdef USE_ROCM
+    // See https://github.com/pytorch/pytorch/issues/73328 for reasoning behind
+    // setting this to 1M.
+    workspaceSize = _getWorkspaceSize();
+  #else
+    workspaceSize = at::cuda::getChosenWorkspaceSize();
+  #endif
+
+  #ifdef USE_ROCM || IS_FBCODE
+    auto& allocator = *::c10::cuda::CUDACachingAllocator::get();
+    auto workspace = allocator.allocate(workspaceSize);
+    auto workspace_ptr = workspace.mutable_get();
+    TORCH_CHECK(workspace_ptr != nullptr, "OOM trying to allocate workspace for cublaslt");
+  #else
+    auto workspace_ptr = _getWorkspaceWithoutHandle();
+  #endif
+  return workspace_ptr;
+}
+
 } // anonymous namespace
 
 namespace at::cuda::blas {
@@ -421,13 +441,8 @@ static inline void bgemm_internal_cublaslt(CUDABLAS_BGEMM_ARGTYPES(Dtype)) {
   }
 
   CuBlasLtMatmulPreference preference;
-#ifdef USE_ROCM
-  // See https://github.com/pytorch/pytorch/issues/73328 for reasoning behind
-  // setting this to 1M.
-  size_t workspaceSize = _getWorkspaceSize();
-#else
-  size_t workspaceSize = getChosenWorkspaceSize();
-#endif
+  size_t workspaceSize = 0;
+  auto workspace_ptr = _getWorkspace(workspaceSize);
   preference.setAttribute(CUBLASLT_MATMUL_PREF_MAX_WORKSPACE_BYTES, workspaceSize);
 
 #ifndef USE_ROCM
@@ -437,15 +452,6 @@ static inline void bgemm_internal_cublaslt(CUDABLAS_BGEMM_ARGTYPES(Dtype)) {
   preference.setAttribute(CUBLASLT_MATMUL_PREF_MIN_ALIGNMENT_A_BYTES, a_alignment);
   preference.setAttribute(CUBLASLT_MATMUL_PREF_MIN_ALIGNMENT_B_BYTES, b_alignment);
   preference.setAttribute(CUBLASLT_MATMUL_PREF_MIN_ALIGNMENT_C_BYTES, c_alignment);
-#endif
-
-#ifdef USE_ROCM
-  auto& allocator = *::c10::cuda::CUDACachingAllocator::get();
-  auto workspace = allocator.allocate(workspaceSize);
-  auto workspace_ptr = workspace.mutable_get();
-  TORCH_CHECK(workspace_ptr != nullptr, "OOM trying to allocate workspace for cublaslt");
-#else
-  auto workspace_ptr = _getWorkspaceWithoutHandle();
 #endif
 
   cublasLtMatmulHeuristicResult_t heuristicResult = {};
@@ -1379,14 +1385,8 @@ void gemm_and_bias(
   CuBlasLtMatrixLayout Cdesc(abcType, m, n, result_ld);
 
   CuBlasLtMatmulPreference preference;
-#ifdef USE_ROCM
-  // See https://github.com/pytorch/pytorch/issues/73328 for reasoning behind
-  // setting this to 1M.
-  size_t workspaceSize = _getWorkspaceSize();
-#else
-  size_t workspaceSize = getChosenWorkspaceSize();
-#endif
-
+  size_t workspaceSize = 0;
+  auto workspace_ptr = _getWorkspace(workspaceSize);
   preference.setAttribute(CUBLASLT_MATMUL_PREF_MAX_WORKSPACE_BYTES, workspaceSize);
 
 #ifndef USE_ROCM
@@ -1401,16 +1401,6 @@ void gemm_and_bias(
 #endif
 
   auto stream = c10::cuda::getCurrentCUDAStream();
-
-#ifdef USE_ROCM
-  auto& allocator = *::c10::cuda::CUDACachingAllocator::get();
-  auto workspace = allocator.allocate(workspaceSize);
-  auto workspace_ptr = workspace.mutable_get();
-  TORCH_CHECK(workspace_ptr != nullptr, "OOM trying to allocate workspace for cublaslt");
-#else
-  auto workspace_ptr = _getWorkspaceWithoutHandle();
-#endif
-
   cublasLtMatmulHeuristicResult_t heuristicResult = {};
   int returnedResult = 0;
   cublasLtHandle_t ltHandle = at::cuda::getCurrentCUDABlasLtHandle();
@@ -1623,16 +1613,8 @@ void scaled_gemm(
   }
 
   auto stream = c10::cuda::getCurrentCUDAStream();
-  size_t workspaceSize = _getWorkspaceSize();
-#ifdef USE_ROCM
-  auto& allocator = *::c10::cuda::CUDACachingAllocator::get();
-  auto workspace = allocator.allocate(workspaceSize);
-  auto workspace_ptr = workspace.mutable_get();
-  TORCH_CHECK(workspace_ptr != nullptr, "OOM trying to allocate workspace for cublaslt");
-#else
-  auto workspace_ptr = _getWorkspaceWithoutHandle();
-#endif
-
+  size_t workspaceSize = 0;
+  auto workspace_ptr = _getWorkspace(workspaceSize);
   CuBlasLtMatmulPreference preference;
   preference.setAttribute(CUBLASLT_MATMUL_PREF_MAX_WORKSPACE_BYTES, workspaceSize);
   cublasLtMatmulHeuristicResult_t heuristicResult = {};
