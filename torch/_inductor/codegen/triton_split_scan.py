@@ -203,8 +203,5 @@ class TritonSplitScanKernel(TritonKernel):
     def _get_heuristic(self):
         return "split_scan"
 
-    def _get_grid_fn_str(self):
-        return "split_scan_grid"
-
     def _get_grid_fn(self):
         return split_scan_grid
