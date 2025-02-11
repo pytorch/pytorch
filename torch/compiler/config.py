@@ -13,6 +13,7 @@ contain configuration options that affect only a specific part of the compiler:
 """
 
 import sys
+import os
 from typing import Optional
 
 from torch.utils._config_module import Config, install_config_module
@@ -29,7 +30,7 @@ __all__ = [
 # FB-internal note: you do NOT have to specify this explicitly specify this if
 # you run on MAST, we will automatically default this to
 # mast:MAST_JOB_NAME:MAST_JOB_VERSION.
-job_id: Optional[str] = Config(env_name_default="TORCH_COMPILE_JOB_ID", default=None)
+job_id: Optional[str] = os.environ.get("TORCH_COMPILE_JOB_ID", None)
 """
 Semantically, this should be an identifier that uniquely identifies, e.g., a
 training job.  You might have multiple attempts of the same job, e.g., if it was
