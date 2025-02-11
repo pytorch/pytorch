@@ -2112,11 +2112,8 @@ class AlgorithmSelectorCache(PersistentCache):
         )
         if config.autotune_num_choices_displayed == 0:
             return
-        elif config.autotune_num_choices_displayed is None:
-            n = -1
-        else:
-            n = config.autotune_num_choices_displayed
-
+        # when autotune_num_choices_displayed is None, [:None] means all
+        n = config.autotune_num_choices_displayed
         top_k = sorted(timings, key=timings.__getitem__)[:n]
 
         best = top_k[0]
