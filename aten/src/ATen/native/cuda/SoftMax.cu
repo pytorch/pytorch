@@ -1119,34 +1119,34 @@ Tensor host_softmax(const Tensor & input_, const int64_t dim_, const bool half_t
 template<typename input_t, typename output_t, typename accscalar_t, template<typename, typename, typename> class Epilogue>
 void dispatch_host_softmax_backward(int64_t dim_size, dim3 grid, Tensor &grad, Tensor &output, const Tensor &gI) {
   cudaStream_t stream = at::cuda::getCurrentCUDAStream();
-        constexpr int ILP = sizeof(float4) / sizeof(output_t);
-        dim3 block = SoftMax_getBlockSize(ILP, dim_size);
+  constexpr int ILP = sizeof(float4) / sizeof(output_t);
+  dim3 block = SoftMax_getBlockSize(ILP, dim_size);
 
-        size_t smem_reduction_sz = block.x / C10_WARP_SIZE * sizeof(accscalar_t);
-        auto max_elements_per_smem = (at::cuda::getCurrentDeviceProperties()->sharedMemPerBlock -
-          smem_reduction_sz) / sizeof(output_t);
-        bool can_use_smem = dim_size < max_elements_per_smem;
-        can_use_smem &= (!(reinterpret_cast<const uintptr_t>(gI.const_data_ptr<input_t>()) % ALIGN_BYTES));
-        can_use_smem &= (!(reinterpret_cast<const uintptr_t>(output.const_data_ptr<output_t>()) % ALIGN_BYTES));
-        can_use_smem &= !(reinterpret_cast<const uintptr_t>(grad.const_data_ptr<output_t>()) % ALIGN_BYTES);
-        can_use_smem &= !(dim_size % ILP);
-        // This should not be needed on current generation GPUs because the size of shared memory is so low.
-        // But we add this check to be defensive and future-proof just in case shared memory size goes up
-        // to be so large as to requires 64-bits of addressing.
-        can_use_smem &= (dim_size < std::numeric_limits<int32_t>::max());
+  size_t smem_reduction_sz = block.x / C10_WARP_SIZE * sizeof(accscalar_t);
+  auto max_elements_per_smem = (at::cuda::getCurrentDeviceProperties()->sharedMemPerBlock -
+    smem_reduction_sz) / sizeof(output_t);
+  bool can_use_smem = dim_size < max_elements_per_smem;
+  can_use_smem &= (!(reinterpret_cast<const uintptr_t>(gI.const_data_ptr<input_t>()) % ALIGN_BYTES));
+  can_use_smem &= (!(reinterpret_cast<const uintptr_t>(output.const_data_ptr<output_t>()) % ALIGN_BYTES));
+  can_use_smem &= !(reinterpret_cast<const uintptr_t>(grad.const_data_ptr<output_t>()) % ALIGN_BYTES);
+  can_use_smem &= !(dim_size % ILP);
+  // This should not be needed on current generation GPUs because the size of shared memory is so low.
+  // But we add this check to be defensive and future-proof just in case shared memory size goes up
+  // to be so large as to requires 64-bits of addressing.
+  can_use_smem &= (dim_size < std::numeric_limits<int32_t>::max());
 
-        if (can_use_smem) {
-          size_t smem_sz = dim_size * sizeof(output_t) + smem_reduction_sz;
-          cunn_SoftMaxBackwardSmem<ILP, input_t, accscalar_t, output_t, Epilogue>
-          <<<grid, block, smem_sz, stream>>>(
-            gI.mutable_data_ptr<input_t>(), output.const_data_ptr<output_t>(), grad.const_data_ptr<output_t>(), dim_size);
-        } else {
-          cunn_SoftMaxBackward<ILP, input_t, accscalar_t, output_t, Epilogue>
-          <<<grid, block, block.x * sizeof(accscalar_t), stream>>>(
-              gI.mutable_data_ptr<input_t>(), output.const_data_ptr<output_t>(), grad.const_data_ptr<output_t>(), dim_size
-            );
-        }
-        C10_CUDA_KERNEL_LAUNCH_CHECK();
+  if (can_use_smem) {
+    size_t smem_sz = dim_size * sizeof(output_t) + smem_reduction_sz;
+    cunn_SoftMaxBackwardSmem<ILP, input_t, accscalar_t, output_t, Epilogue>
+    <<<grid, block, smem_sz, stream>>>(
+      gI.mutable_data_ptr<input_t>(), output.const_data_ptr<output_t>(), grad.const_data_ptr<output_t>(), dim_size);
+  } else {
+    cunn_SoftMaxBackward<ILP, input_t, accscalar_t, output_t, Epilogue>
+    <<<grid, block, block.x * sizeof(accscalar_t), stream>>>(
+        gI.mutable_data_ptr<input_t>(), output.const_data_ptr<output_t>(), grad.const_data_ptr<output_t>(), dim_size
+      );
+  }
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
 }
 
 template<template<typename, typename, typename> class Epilogue, bool is_log_softmax>
