@@ -2159,10 +2159,10 @@ class CppKernel(Kernel):
                 loop_nest.max_parallel_depth(), threads
             )
 
-        is_reduction_only = loop_nest.is_reduction_only(start_depth)
+        is_reduction = loop_nest.loops[start_depth].is_reduction
         with contextlib.ExitStack() as stack:
             if par_depth:
-                if is_reduction_only:
+                if is_reduction:
                     # need to close the worksharing scope to define reduction vars outside it
                     worksharing.close()
                 else:
@@ -2218,7 +2218,7 @@ class CppKernel(Kernel):
                         if reduction_prefix:
                             stack_outer.enter_context(code.indent())
                         code.splice(reduction_prefix)
-                    if is_reduction_only and loop.parallel:
+                    if is_reduction and loop.parallel:
                         worksharing.parallel(threads)
                         if kernel.local_reduction_init:
                             assert kernel.local_reduction_stores
@@ -2226,7 +2226,7 @@ class CppKernel(Kernel):
 
                     gen_loop_at(_loop_nest, depth)
 
-                    if is_reduction_only and loop.parallel:
+                    if is_reduction and loop.parallel:
                         if kernel.local_reduction_stores:
                             code.splice(kernel.local_reduction_stores)
                         worksharing.close()
@@ -4210,7 +4210,7 @@ class OuterLoopFusedKernel(CppKernel):
         super().__init__(kernel_group.args, kernel_group.ws.num_threads)
         self.inner: list[LoopNest] = []
 
-    def decide_parallel_depth(self, max_parallel_depth, threads) -> int:
+    def decide_parallel_depth(self, max_parallel_depth, threads) -> tuple[int, int]:
         kernels_parallel_depth = []
         nested_kernels: list[CppKernel] = [
             loop_nest.get_kernel() for loop_nest in self.inner
@@ -5262,29 +5262,22 @@ class LoopNest:
         max_depth = 0
         start_depth = 0
         is_reduction = self.loops[0].is_reduction
+        sizes = sympy.Integer(1)
         for loop in self.loops:
             if loop.is_reduction != is_reduction:
                 break
+            sizes = sizes * loop.size
             max_depth += 1
-        if (
-            len(self.loops) > 2
-            and not self.loops[0].is_reduction
-            and self.loops[1].is_reduction
-        ):
-            if (
-                isinstance(self.loops[0].size, sympy.Integer)
-                and isinstance(self.loops[1].size, sympy.Integer)
-                and self.loops[0].size * 100 < self.loops[1].size
-            ):
-                start_depth = 1
-        return max_depth, start_depth
 
-    def is_reduction_only(self, start_depth):
-        """
-        Whether all the loops are for reduction. Reduction loops
-        are always the inner most ones.
-        """
-        return self.loops is not None and self.loops[start_depth].is_reduction
+        if (
+            max_depth < len(self.loops)
+            and isinstance(sizes, sympy.Integer)
+            and isinstance(self.loops[max_depth].size, sympy.Integer)
+            and sizes * 100 < self.loops[max_depth].size
+        ):
+            start_depth = max_depth
+            max_depth = 1
+        return max_depth, start_depth
 
     def mark_parallel(self, par_depth):
         assert (
