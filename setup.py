@@ -493,31 +493,11 @@ def mirror_files_into_torchgen():
             continue
         raise RuntimeError("Check the file paths in `mirror_files_into_torchgen()`")
 
-def check_nccl():
-    cuda_version = os.getenv("DESIRED_CUDA", "")
-    cuda_version_2 = os.getenv("CUDA_VERSION", "")
-    if cuda_version.startswith("11.8") or cuda_version_2.startswith("11.8"):
-        nccl_path = os.path.join(third_party_path, "nccl", "nccl")
-        report("-- Overriding nccl for CUDA 11.8 ")
-        subprocess.check_call(
-            ["pwd"], cwd=nccl_path
-        )
-        subprocess.check_call(
-            ["git", "status"], cwd=nccl_path
-        )
-        subprocess.check_call(
-            ["git", "fetch", "--all"], cwd=nccl_path
-        )
-        subprocess.check_call(
-            ["git", "checkout", "ab2b89c"], cwd=nccl_path
-        )
-
 # all the work we need to do _before_ setup runs
 def build_deps():
     report("-- Building version " + version)
     checkout_nccl()
     check_submodules()
-    check_nccl()
     check_pydep("yaml", "pyyaml")
     build_python = not BUILD_LIBTORCH_WHL
     build_pytorch(
