@@ -534,7 +534,6 @@ class CppWrapperGpu(CppWrapperCpu):
                 triton_meta,
                 autotune_configs,
                 grid_extra_kwargs,
-                signature,
             )
 
         if device_index is None:
