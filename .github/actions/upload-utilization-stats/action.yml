@@ -50,7 +50,6 @@ runs:
       shell: bash
       run: |
         python3 -m tools.stats.upload_utilization_stats.upload_utilization_stats \
-          --debug \
           --workflow-run-id "${{inputs.workflow_run_id}}" \
           --workflow-name "${{inputs.workflow_name}}" \
           --workflow-run-attempt "${{inputs.workflow_attempt}}" \
