@@ -117,6 +117,7 @@ class TestDependencyAPI(PackageTestCase):
                     ),
                 )
 
+    @skipIfTorchDynamo("import interference since eval_frame.c makes imports")
     def test_mock(self):
         buffer = BytesIO()
         with PackageExporter(buffer) as he:

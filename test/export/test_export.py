@@ -5649,8 +5649,8 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
             str(ep.graph_module.code).strip(),
             """\
 def forward(self, c_lifted_tensor_0, x):
-    lift_fresh_copy = torch.ops.aten.lift_fresh_copy.default(c_lifted_tensor_0);  c_lifted_tensor_0 = None
-    _assert_async = torch.ops.aten._assert_async.msg(lift_fresh_copy, 'Fail');  lift_fresh_copy = _assert_async = None
+    clone = torch.ops.prims.clone.default(c_lifted_tensor_0, memory_format = torch.preserve_format);  c_lifted_tensor_0 = None
+    _assert_async = torch.ops.aten._assert_async.msg(clone, 'Fail');  clone = _assert_async = None
     return (x,)""",
         )
 
@@ -7049,8 +7049,8 @@ graph():
 graph():
     %c_lifted_tensor_0 : [num_users=1] = placeholder[target=c_lifted_tensor_0]
     %x : [num_users=2] = placeholder[target=x]
-    %lift_fresh_copy : [num_users=1] = call_function[target=torch.ops.aten.lift_fresh_copy.default](args = (%c_lifted_tensor_0,), kwargs = {})
-    %add : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%x, %lift_fresh_copy), kwargs = {})
+    %clone : [num_users=1] = call_function[target=torch.ops.aten.clone.default](args = (%c_lifted_tensor_0,), kwargs = {})
+    %add : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%x, %clone), kwargs = {})
     %mul : [num_users=1] = call_function[target=torch.ops.aten.mul.Tensor](args = (%add, %x), kwargs = {})
     return (mul,)""",
         )
@@ -7091,8 +7091,8 @@ graph():
     %detach : [num_users=1] = call_function[target=torch.ops.aten.detach.default](args = (%ones,), kwargs = {})
     %detach_1 : [num_users=1] = call_function[target=torch.ops.aten.detach.default](args = (%detach,), kwargs = {})
     %detach_2 : [num_users=1] = call_function[target=torch.ops.aten.detach.default](args = (%detach_1,), kwargs = {})
-    %lift_fresh_copy : [num_users=1] = call_function[target=torch.ops.aten.lift_fresh_copy.default](args = (%c_lifted_tensor_0,), kwargs = {})
-    %detach_3 : [num_users=1] = call_function[target=torch.ops.aten.detach.default](args = (%lift_fresh_copy,), kwargs = {})
+    %clone : [num_users=1] = call_function[target=torch.ops.aten.clone.default](args = (%c_lifted_tensor_0,), kwargs = {})
+    %detach_3 : [num_users=1] = call_function[target=torch.ops.aten.detach.default](args = (%clone,), kwargs = {})
     %detach_4 : [num_users=1] = call_function[target=torch.ops.aten.detach.default](args = (%detach_3,), kwargs = {})
     %detach_5 : [num_users=1] = call_function[target=torch.ops.aten.detach.default](args = (%detach_4,), kwargs = {})
     %mul : [num_users=1] = call_function[target=torch.ops.aten.mul.Tensor](args = (%detach_2, %detach_5), kwargs = {})
@@ -9292,6 +9292,90 @@ graph():
         ufm = torch.export.unflatten(ep)
         self.assertTrue(torch.allclose(ufm(*inp), epm(*inp)))
 
+    @testing.expectedFailureLegacyExportNonStrict
+    @testing.expectedFailureLegacyExportStrict
+    def test_constant_tensor_with_non_functional(self):
+        class TestModel(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.params = torch.ones((4, 4, 10))
+
+            def forward(self, x):
+                ff = self.params + 2
+                ff2 = self.params + 1
+                buf = torch.ops.aten.sub_.Tensor(ff, ff2)
+                return buf.sum() + x.sum()
+
+        model = TestModel()
+
+        x = torch.zeros((4, 4, 10))
+
+        ep_training = torch.export.export_for_training(model, (x,), strict=False)
+        state_dict_before = ep_training.state_dict
+
+        ep = export(model, (x,), strict=False).run_decompositions()
+        state_dict_after = ep.state_dict
+        self.assertEqual(state_dict_before.keys(), state_dict_after.keys())
+
+        self.assertExpectedInline(
+            str(ep.graph_module.code).strip(),
+            """\
+def forward(self, c_params, x):
+    add = torch.ops.aten.add.Tensor(c_params, 2)
+    add_1 = torch.ops.aten.add.Tensor(c_params, 1);  c_params = None
+    sub = torch.ops.aten.sub.Tensor(add, add_1);  add = add_1 = None
+    sum_1 = torch.ops.aten.sum.dim_IntList(sub, []);  sub = None
+    sum_2 = torch.ops.aten.sum.dim_IntList(x, []);  x = None
+    add_2 = torch.ops.aten.add.Tensor(sum_1, sum_2);  sum_1 = sum_2 = None
+    return (add_2,)""",
+        )
+
+    @testing.expectedFailureLegacyExportNonStrict
+    @testing.expectedFailureLegacyExportStrict
+    def test_constant_tensor_with_non_functional_nested(self):
+        class SubMod(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.params = torch.ones((4, 4, 10))
+
+            def forward(self, x):
+                return x
+
+        class TestModel(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.submod = SubMod()
+
+            def forward(self, x):
+                ff = self.submod.params + 2
+                ff2 = self.submod.params + 1
+                buf = torch.ops.aten.sub_.Tensor(ff, ff2)
+                return buf.sum() + x.sum()
+
+        model = TestModel()
+
+        x = torch.zeros((4, 4, 10))
+
+        ep_training = torch.export.export_for_training(model, (x,), strict=False)
+        state_dict_before = ep_training.state_dict
+
+        ep = export(model, (x,), strict=False).run_decompositions()
+        state_dict_after = ep.state_dict
+        self.assertEqual(state_dict_before.keys(), state_dict_after.keys())
+
+        self.assertExpectedInline(
+            str(ep.graph_module.code).strip(),
+            """\
+def forward(self, c_submod_params, x):
+    add = torch.ops.aten.add.Tensor(c_submod_params, 2)
+    add_1 = torch.ops.aten.add.Tensor(c_submod_params, 1);  c_submod_params = None
+    sub = torch.ops.aten.sub.Tensor(add, add_1);  add = add_1 = None
+    sum_1 = torch.ops.aten.sum.dim_IntList(sub, []);  sub = None
+    sum_2 = torch.ops.aten.sum.dim_IntList(x, []);  x = None
+    add_2 = torch.ops.aten.add.Tensor(sum_1, sum_2);  sum_1 = sum_2 = None
+    return (add_2,)""",
+        )
+
     def test_cond_unflatten(self):
         class M1(torch.nn.Module):
             def forward(self, p, a, b):
@@ -10731,6 +10815,47 @@ def forward(self, x, y):
         self.assertTrue(torch.allclose(a, torch.ones(4, 4)))
         self.assertTrue(torch.allclose(b, torch.ones(4, 4)))
 
+    @testing.expectedFailureLegacyExportNonStrict
+    @testing.expectedFailureLegacyExportStrict
+    def test_constant_tensor_mutation(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.foo = torch.randn(2, 2)
+
+            def forward(self, x):
+                self.foo.add_(5)
+                return self.foo + x
+
+        with self.assertRaisesRegex(RuntimeError, "Constant foo is"):
+            _ = (
+                export(M(), (torch.ones(2, 2),), strict=False)
+                .run_decompositions()
+                .graph
+            )
+
+    def test_constant_return(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.foo = torch.randn(2, 2)
+
+            def forward(self, x):
+                return self.foo, self.foo + x
+
+        graph = (
+            export(M(), (torch.ones(2, 2),), strict=False).run_decompositions().graph
+        )
+        self.assertExpectedInline(
+            str(graph).strip(),
+            """\
+graph():
+    %c_foo : [num_users=2] = placeholder[target=c_foo]
+    %x : [num_users=1] = placeholder[target=x]
+    %add : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%c_foo, %x), kwargs = {})
+    return (c_foo, add)""",
+        )
+
     def test_constant_requires_grad_const(self):
         class M(torch.nn.Module):
             def __init__(self):
@@ -11793,6 +11918,48 @@ class GraphModule(torch.nn.Module):
             ]
             self.assertEqual(len(shift_op), 1)
 
+    def test_default_decomposition_core_cia_ops(self):
+        """
+        Verify that core ATen ops with Composite Implicit Autograd dispatch are not
+        decomposed by default.
+        """
+
+        # TODO Add avg_pool1d, and adaptive_avg_pool1d when ready.
+        # See issue #116684.
+        core_cia_ops = {
+            "torch.ops.aten.upsample_bilinear2d.vec": (
+                torch.ops.aten.upsample_bilinear2d.vec,
+                {
+                    "align_corners": False,
+                    "scale_factors": [2, 2],
+                    "output_size": None,
+                },
+            ),
+            "torch.ops.aten.upsample_nearest2d.vec": (
+                torch.ops.aten.upsample_nearest2d.vec,
+                {
+                    "scale_factors": [2, 2],
+                    "output_size": None,
+                },
+            ),
+        }
+
+        for op_name, (op, kwargs) in core_cia_ops.items():
+
+            class M(torch.nn.Module):
+                def forward(self, x):
+                    return op(x, **kwargs)
+
+            ep = export(M(), (torch.randn(2, 3, 4, 5),))
+            FileCheck().check_count(op_name, 1, exactly=True).run(ep.graph_module.code)
+
+            decomp_table = default_decompositions()
+
+            ep = ep.run_decompositions(
+                decomp_table=decomp_table,
+            )
+            FileCheck().check_count(op_name, 1, exactly=True).run(ep.graph_module.code)
+
 
 @unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo isn't support")
 class TestOneOffModelExportResult(TestCase):
@@ -12398,30 +12565,30 @@ class TestExportCustomClass(TorchTestCase):
             torch.distributed.destroy_process_group()
 
     def test_preserve_cia_op(self):
-        class StaticResizeBilinear2dModule(torch.nn.Module):
+        class StaticResizeTrilinear2dModule(torch.nn.Module):
             def forward(self, x):
                 a = torch.nn.functional.interpolate(
                     x,
-                    size=(x.shape[2] * 2, x.shape[3] * 3),
-                    mode="bilinear",
+                    size=(x.shape[2] * 2, x.shape[3] * 3, x.shape[4] * 4),
+                    mode="trilinear",
                     align_corners=False,
                     antialias=False,
                 )
                 return a
 
-        ep = export(StaticResizeBilinear2dModule(), (torch.randn(2, 3, 4, 5),))
+        ep = export(StaticResizeTrilinear2dModule(), (torch.randn(2, 3, 4, 5, 6),))
         FileCheck().check_count(
-            "torch.ops.aten.upsample_bilinear2d.vec", 1, exactly=True
+            "torch.ops.aten.upsample_trilinear3d.vec", 1, exactly=True
         ).run(ep.graph_module.code)
 
         decomp_table = default_decompositions()
-        del decomp_table[torch.ops.aten.upsample_bilinear2d.vec]
+        del decomp_table[torch.ops.aten.upsample_trilinear3d.vec]
         ep = ep.run_decompositions(
             decomp_table=decomp_table,
         )
 
         FileCheck().check_count(
-            "torch.ops.aten.upsample_bilinear2d.vec", 1, exactly=True
+            "torch.ops.aten.upsample_trilinear3d.vec", 1, exactly=True
         ).run(ep.graph_module.code)
 
 
