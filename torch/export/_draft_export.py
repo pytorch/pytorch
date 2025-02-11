@@ -1,5 +1,4 @@
 import getpass
-import inspect
 import json
 import logging
 import os
@@ -31,23 +30,24 @@ class FailureType(IntEnum):
         return self.name
 
 
-def prettify_stack(stack: list[dict[str, str]], str_to_filename: dict[str, str]) -> str:
+def prettify_stack(stack: list[dict[str, str]], str_to_filename: dict[int, str]) -> str:
     res = ""
     for frame in stack:
         if frame["filename"] not in str_to_filename:
             continue
 
         res += f"""
-        File {str_to_filename[frame['filename']]}, lineno {frame['line']}, in {frame['name']}"""
+        File {str_to_filename[frame['filename']]}, lineno {frame['line']}, in {frame['name']}"""  # type: ignore[index]
+
+    res += f"\n            {stack[-1]['loc']}"
     return res
 
 
 def prettify_frame_locals(
     loc: str, locals: dict[str, Any], symbols: dict[str, Any]
 ) -> str:
-    res = f"    {loc}\n"
     local_str = "\n".join(f"            {k}: {v}" for k, v in locals.items())
-    res += f"""
+    res = f"""
         Locals:
 {local_str}
 """
@@ -60,19 +60,6 @@ def prettify_frame_locals(
 {symbol_str}
 """
     return res
-
-
-def filter_stack(
-    stack: list[dict[str, str]], str_to_filename: dict[str, str]
-) -> list[dict[str, str]]:
-    for i, s in enumerate(reversed(stack)):
-        s["filename"] = str(s["filename"])
-        if s["filename"] not in str_to_filename:
-            continue
-        torch_filepath = os.path.dirname(inspect.getfile(torch)) + os.path.sep
-        if torch_filepath not in str_to_filename[s["filename"]]:
-            return stack[len(stack) - i - 3 : len(stack) - i]
-    return stack[-3:]
 
 
 def get_loc(filename: str, lineno: int) -> Optional[str]:
@@ -97,7 +84,7 @@ class FailureReport:
     def __repr__(self) -> str:
         return f"FailureReport(failure_type={self.failure_type}, xfail={self.xfail}, data={self.data})"
 
-    def print(self, str_to_filename: dict[str, str]) -> str:
+    def print(self, str_to_filename: dict[int, str]) -> str:
         if self.failure_type == FailureType.MISSING_FAKE_KERNEL:
             op = self.data["op"]
 
@@ -135,8 +122,9 @@ class FailureReport:
             return f"""Data dependent error.
     When exporting, we were unable to evaluate the value of `{self.data["expr"]}`.
     This was encountered {self.data["occurrences"]} times.
-    This occurred at the following stacktrace: {prettify_stack(self.data["stack"], str_to_filename)}:
+    This occurred at the following user stacktrace: {prettify_stack(self.data["user_stack"], str_to_filename)}
         {locals_info}
+    And the following framework stacktrace: {prettify_stack(self.data["stack"], str_to_filename)}\n
     As a result, it was specialized to a constant (e.g. `{self.data["result"]}` in the 1st occurrence), and asserts were inserted into the graph.
 
     Please add `torch._check(...)` to the original code to assert this data-dependent assumption.
@@ -158,7 +146,7 @@ class FailureReport:
 
 
 class DraftExportReport:
-    def __init__(self, failures: list[FailureReport], str_to_filename: dict[str, str]):
+    def __init__(self, failures: list[FailureReport], str_to_filename: dict[int, str]):
         self.failures: list[FailureReport] = failures
         self.str_to_filename = str_to_filename
 
@@ -242,7 +230,7 @@ class LogRecord:
 
 
 class CaptureStructuredTrace(torch._logging._internal.LazyTraceHandler):
-    def __init__(self):
+    def __init__(self) -> None:
         self.specific_log_keys = [
             "str",
             "exported_program",
@@ -315,7 +303,9 @@ class CaptureStructuredTrace(torch._logging._internal.LazyTraceHandler):
                         continue
                     elif key == "propagate_real_tensors_provenance":
 
-                        def _log_expression_created(emit_func, sym_node_id):
+                        def _log_expression_created(
+                            emit_func, sym_node_id: int
+                        ) -> None:
                             if sym_node_id is None:
                                 return
                             if res := self.expression_created_logs.get(
@@ -381,9 +371,7 @@ def draft_export(
 
         torch._logging.dtrace_structured("exported_program", payload_fn=lambda: str(ep))
 
-        str_to_filename: dict[str, str] = {
-            str(v): k for (k, v) in torch._logging.structured.INTERN_TABLE.items()
-        }
+        str_to_filename: dict[int, str] = {}
         failures: list[FailureReport] = []
         custom_ops_logs: dict[
             Any, tuple[dict[str, Any], FailureType]
@@ -392,14 +380,15 @@ def draft_export(
         for log_name, log_contents in capture_structured_log.log_record.logs:
             failure_type = None
 
-            if log_name == "propagate_real_tensors_provenance":
+            if log_name == "str":
+                str_to_filename[log_contents[1]] = log_contents[0]  # type: ignore[index]
+                continue
+
+            elif log_name == "propagate_real_tensors_provenance":
                 log_contents[
                     "occurrences"
                 ] = capture_structured_log.log_record.get_log_count(
                     (log_name, log_contents)
-                )
-                log_contents["stack"] = filter_stack(
-                    log_contents["stack"], str_to_filename
                 )
 
                 failure_type = FailureType.DATA_DEPENDENT_ERROR
@@ -415,9 +404,6 @@ def draft_export(
                     # specified in the dynamic_shapes arg. These have a source.
                     continue
 
-                log_contents["stack"] = filter_stack(
-                    log_contents["stack"], str_to_filename
-                )
                 log_contents["new_dynamic_shapes"] = new_shapes
             elif log_name == "missing_fake_kernel":
                 failure_type = FailureType.MISSING_FAKE_KERNEL
