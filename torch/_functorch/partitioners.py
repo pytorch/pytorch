@@ -619,63 +619,6 @@ def reordering_to_mimic_autograd_engine(gm: fx.GraphModule) -> fx.GraphModule:
     return new_gm
 
 
-def cudagraph_safe_rng_functionalize(fw_module: torch.fx.GraphModule, bw_module: torch.fx.GraphModule, recomputable_rng_ops_map: dict[fx.Node, dict[str, fx.Node]]):
-     for rng_count, (base_node, node_pair) in enumerate(
-        recomputable_rng_ops_map.items()
-    ):
-        # Step 2 - Modify the fwd pass such that
-
-        fw_node = node_pair["fwd"]
-        bw_node = node_pair["bwd"]
-        fw_graph = fw_module.graph
-        bw_graph = bw_module.graph
-
-        with fw_module.graph.inserting_after(last_fwd_input):
-            fwd_rng_state = fw_module.graph.placeholder(
-                f"fwd_rng_state_{rng_count}"
-            )
-            # TODO - val here contains real tensor.. potential leak
-            fwd_rng_state.meta["val"] = torch.cuda.default_generators[
-                0
-            ].graphsafe_get_state()
-            last_fwd_input = fwd_rng_state
-
-        with bw_module.graph.inserting_after(last_bwd_input):
-            bwd_rng_state = bw_module.graph.placeholder(
-                f"bwd_rng_state_{rng_count}"
-            )
-            # same here
-            bwd_rng_state.meta["val"] = torch.cuda.default_generators[
-                0
-            ].graphsafe_get_state()
-            last_bwd_input = bwd_rng_state
-
-        fw_kwargs = dict(fw_node.kwargs)
-        fw_kwargs["rng_state"] = fwd_rng_state
-        with fw_module.graph.inserting_after(fw_node):
-            functional_fw_node = fw_graph.create_node(
-                "call_function",
-                graphsafe_run_with_rng_state,
-                args=(fw_node.target, *fw_node.args),
-                kwargs=fw_kwargs,
-            )
-        fw_node.replace_all_uses_with(functional_fw_node)
-        fw_graph.erase_node(fw_node)
-
-        bwd_kwargs = dict(bw_node.kwargs)
-        bwd_kwargs["rng_state"] = bwd_rng_state
-        with bw_graph.inserting_before(bw_node):
-            rng_output = bw_graph.create_node(
-                "call_function",
-                graphsafe_run_with_rng_state,
-                args=(bw_node.target, *bw_node.args),
-                kwargs=bwd_kwargs,
-            )
-            bw_node.replace_all_uses_with(rng_output)
-            bw_graph.erase_node(bw_node)
-   
-
-
 def functionalize_rng_ops(
     joint_module: fx.GraphModule,
     fw_module: fx.GraphModule,
@@ -714,7 +657,7 @@ def functionalize_rng_ops(
                 random_nodes[node.name] = node
         return random_nodes
 
-    def get_device(node):
+    def get_device(node) -> Optional[torch.device]:
         """
         Check the example value of the node outputs to find the device type.
         """
@@ -728,12 +671,12 @@ def functionalize_rng_ops(
         for candidate in candidates:
             if isinstance(candidate, torch.Tensor):
                 if candidate.device.type == "cuda":
-                    return "cuda"
+                    return candidate.device
 
-        return "cpu"
+        return torch.device("cpu")
 
-    def get_sample_rng_state(device):
-        if device == "cuda":
+    def get_sample_rng_state(device: Optional[torch.device]):
+        if device is not None and device.type == "cuda":
             return torch.cuda.get_rng_state()
         return torch.get_rng_state()
 
@@ -780,12 +723,17 @@ def functionalize_rng_ops(
         fw_node = node_pair["fwd"]
         bw_node = node_pair["bwd"]
         device = get_device(fw_node)
-        device_idx = None if device != "cuda" else base_node.meta["val"].device.index
 
         fw_graph = fw_module.graph
         bw_graph = bw_module.graph
 
-        if config.graphsafe_rng_functionalization and device == "cuda":
+        if (
+            config.graphsafe_rng_functionalization
+            and device is not None
+            and device.type == "cuda"
+        ):
+            device_idx = device.index
+            assert device_idx is not None
             with fw_module.graph.inserting_after(last_fwd_input):
                 fwd_rng_state = fw_module.graph.placeholder(
                     f"fwd_rng_state_{rng_count}"
@@ -861,9 +809,7 @@ def functionalize_rng_ops(
             with bw_graph.inserting_before(bw_tangent_start_node):
                 state_name = f"rng_state_output_{next(uid)}"
                 bw_rng_state_node = bw_graph.placeholder(state_name)
-                bw_rng_state_node.meta["val"] = get_sample_rng_state(
-                    device
-                )
+                bw_rng_state_node.meta["val"] = get_sample_rng_state(device)
 
             with bw_graph.inserting_before(bw_node):
                 rng_output = bw_graph.create_node(

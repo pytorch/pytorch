@@ -1816,16 +1816,22 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
         fw_metadata: ViewAndMutationMeta,  # runtime metadata
         try_save_cache_entry: Optional[Callable],  # Save cache entry after compilation
     ):
-
-        # TODO: does not currently handle fwd and backward not in sync
-        # needs to use correct device idx
+        # TODO: needs to use correct device idx
+        # needs to handle retain graph
         num_rng = fw_metadata.num_graphsafe_rng_states
         fwd_rng_states = [
-            torch.cuda.default_generators[torch.cuda.current_device()].clone_state() for _ in range(num_rng)
+            torch.cuda.default_generators[torch.cuda.current_device()].clone_state()
+            for _ in range(num_rng)
         ]
         bwd_rng_states = [
-            torch.cuda.default_generators[torch.cuda.current_device()].clone_state() for _ in range(num_rng)
+            torch.cuda.default_generators[torch.cuda.current_device()].clone_state()
+            for _ in range(num_rng)
         ]
+        curr_iter = itertools.count(0)
+        backward_state_position = 0
+        # todo - list ?
+        pending_forwards = set()
+        saved_backward_states: Dict[int, List[torch.Generator]] = {}
 
         class CompiledFunction(torch.autograd.Function):
             compiled_fw = compiled_fw_func
@@ -1850,6 +1856,16 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
                     ctx._compiled_autograd_backward_state = bw_state
 
                 if num_rng:
+                    _curr_iter = next(curr_iter)
+                    ctx._curr_iter = _curr_iter
+
+                    # Save forward states if we have pending forwards
+                    if pending_forwards:
+                        saved_backward_states[_curr_iter] = [
+                            rng_state.clone_state() for rng_state in fwd_rng_states
+                        ]
+
+                    pending_forwards.add(_curr_iter)
                     args = (*args, *fwd_rng_states)
 
                 # There is a pretty complicated calling convention around what the compiled fw returns.
@@ -1980,6 +1996,33 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
                 )
 
                 if num_rng:
+                    curr_backward_iter = ctx._curr_iter
+
+                    nonlocal backward_state_position, bwd_rng_states
+
+                    # Save current state if we have a pending forward that needs this state
+                    if (
+                        backward_state_position in pending_forwards
+                        and backward_state_position not in saved_backward_states
+                        and backward_state_position != curr_backward_iter
+                    ):
+                        saved_backward_states[backward_state_position] = [
+                            rng_state.clone_state() for rng_state in bwd_rng_states
+                        ]
+
+                    # Restore saved states if needed
+                    if curr_backward_iter in saved_backward_states:
+                        # Skip copying if backward state is already at the previous position
+                        if backward_state_position != curr_backward_iter:
+                            for bwd_state, saved_state in zip(
+                                bwd_rng_states,
+                                saved_backward_states[curr_backward_iter],
+                            ):
+                                bwd_state.graphsafe_set_state(saved_state)
+                        del saved_backward_states[curr_backward_iter]
+
+                    backward_state_position = curr_backward_iter + 1
+                    pending_forwards.remove(curr_backward_iter)
                     all_args.extend(bwd_rng_states)
 
                 def impl_fn(double_ctx=None):

@@ -4,9 +4,12 @@ import contextlib
 import functools
 import gc
 import importlib
+import itertools
 import sys
 import unittest
 import warnings
+from collections import defaultdict
+from typing import Mapping, Sequence
 
 import torch
 import torch._dynamo.config as dynamo_config
@@ -19,7 +22,9 @@ from torch._inductor.compile_fx import compile_fx_inner
 from torch._inductor.cudagraph_trees import cudagraphify_impl as tree_cudagraphify_impl
 from torch._inductor.cudagraph_utils import FunctionID
 from torch._inductor.test_case import TestCase as InductorTestCase
+from torch._ops import OpOverload
 from torch.fx.experimental.proxy_tensor import make_fx
+from torch.fx.immutable_collections import immutable_dict
 from torch.testing import FileCheck
 from torch.testing._internal.common_cuda import TEST_MULTIGPU
 from torch.testing._internal.common_utils import (
@@ -2504,7 +2509,143 @@ if HAS_CUDA and not TEST_WITH_ASAN:
             eager_result = f(example_input)
             self.assertEqual(compiled_result, eager_result)
 
+    class TestSAC(TestCase):
+        def test_simple(self):
+            from torch._dynamo.backends.debugging import (
+                aot_eager_decomp_partition_with_mode,
+            )
+            from torch.utils._mode_utils import no_dispatch
+            from torch.utils._python_dispatch import TorchDispatchMode
+
+            device = "cuda"
+
+            class ObserverMode(TorchDispatchMode):
+                def __init__(self):
+                    super().__init__()
+
+                    self.op_outputs = defaultdict(list)
+
+                def __torch_dispatch__(
+                    self,
+                    func: OpOverload,
+                    types: Sequence[type],
+                    args: Sequence[object] = (),
+                    kwargs: Mapping[str, object] = immutable_dict(),
+                ) -> object:
+                    out = func(*args, **kwargs)
+                    return out
+
+            from torch._prims.rng_prims import graphsafe_run_with_rng_state
+
+            @graphsafe_run_with_rng_state.py_impl(ObserverMode)
+            def fn(mode, op, *args, **kwargs):
+                with no_dispatch():
+                    out = graphsafe_run_with_rng_state(op, *args, **kwargs)
+
+                mode.op_outputs[op].append(out)
+                return out
+
+            obs = ObserverMode()
+
+            def gn(x, y):
+                return torch.sigmoid(torch.rand_like(x) * y) * x
+
+            def fn(x, y):
+                x = torch.sin(x)
+                x = torch.utils.checkpoint.checkpoint(gn, x, y, use_reentrant=True)
+                x = torch.sin(x)
+                return x
+
+            x = torch.randn(4, 4, device=device, requires_grad=True)
+            y = torch.randn(4, 4, device=device, requires_grad=True)
+
+            aot_eager_decomp_partition_with_mode = functools.partial(
+                aot_eager_decomp_partition_with_mode, mode=obs
+            )
+
+            fn = torch.compile(fn, backend=aot_eager_decomp_partition_with_mode)
+
+            fn(x, y).sum().backward()
+            self.assertEqual(len(obs.op_outputs[aten.rand.default]), 2)
+            self.assertEqual(
+                obs.op_outputs[aten.rand.default][0],
+                obs.op_outputs[aten.rand.default][1],
+            )
+
+        @parametrize("order", (list(itertools.permutations([0, 1, 2]))))
+        def test_uneven_forward_backward(self, order):
+            from torch._dynamo.backends.debugging import (
+                aot_eager_decomp_partition_with_mode,
+            )
+            from torch.utils._mode_utils import no_dispatch
+            from torch.utils._python_dispatch import TorchDispatchMode
+
+            device = "cuda"
+
+            class ObserverMode(TorchDispatchMode):
+                def __init__(self):
+                    super().__init__()
+                    self.curr_run = 0
+                    self.op_outputs = defaultdict(list)
+
+                def __torch_dispatch__(
+                    self,
+                    func: OpOverload,
+                    types: Sequence[type],
+                    args: Sequence[object] = (),
+                    kwargs: Mapping[str, object] = immutable_dict(),
+                ) -> object:
+                    out = func(*args, **kwargs)
+                    return out
+
+            from torch._prims.rng_prims import graphsafe_run_with_rng_state
+
+            @graphsafe_run_with_rng_state.py_impl(ObserverMode)
+            def fn(mode, op, *args, **kwargs):
+                with no_dispatch():
+                    out = graphsafe_run_with_rng_state(op, *args, **kwargs)
+
+                mode.op_outputs[(mode.curr_run, op)].append(out)
+                return out
+
+            obs = ObserverMode()
+
+            def gn(x, y):
+                return torch.sigmoid(torch.rand_like(x) * y) * x
+
+            def fn(x, y):
+                x = torch.sin(x)
+                x = torch.utils.checkpoint.checkpoint(gn, x, y, use_reentrant=True)
+                x = torch.sin(x)
+                return x
+
+            aot_eager_decomp_partition_with_mode = functools.partial(
+                aot_eager_decomp_partition_with_mode, mode=obs
+            )
+
+            fn = torch.compile(fn, backend=aot_eager_decomp_partition_with_mode)
+
+            outs = []
+            for i in range(3):
+                obs.curr_run = i
+                x = torch.randn(4, 4, device=device, requires_grad=True)
+                y = torch.randn(4, 4, device=device, requires_grad=True)
+                outs.append(fn(x, y).sum())
+
+            for idx in order:
+                obs.curr_run = idx
+                outs[idx].backward()
+
+            for run in range(0, 3):
+                self.assertEqual(len(obs.op_outputs[(run, aten.rand.default)]), 2)
+                self.assertEqual(
+                    obs.op_outputs[(run, aten.rand.default)][0],
+                    obs.op_outputs[(run, aten.rand.default)][1],
+                )
+
     instantiate_parametrized_tests(CudaGraphTreeTests)
+    instantiate_parametrized_tests(TestSAC)
+
 
 if __name__ == "__main__":
     from torch._inductor.test_case import run_tests
