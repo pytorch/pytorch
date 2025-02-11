@@ -33,6 +33,18 @@ inline namespace CPU_CAPABILITY {
 #define SLEEF_CONST_OLD
 #endif
 
+template<typename T, typename Op>
+static inline Vectorized<T> binary_op_as_fp32(const Vectorized<T>& a, const Vectorized<T>& b, Op op) {
+  __m256 a_lo, a_hi;
+  __m256 b_lo, b_hi;
+  cvt_to_fp32<T>(__m256i(a), a_lo, a_hi);
+  cvt_to_fp32<T>(__m256i(b), b_lo, b_hi);
+  auto o1 = op(a_lo, b_lo);
+  auto o2 = op(a_hi, b_hi);
+  return cvt_from_fp32<T>(o1, o2);
+}
+
+
 // bfloat16 conversion
 static inline void cvtbf16_fp32(const __m128i& a, __m256& o) {
   o = _mm256_castsi256_ps(_mm256_slli_epi32(_mm256_cvtepu16_epi32(a), 16));
