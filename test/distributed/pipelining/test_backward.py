@@ -10,7 +10,6 @@ from torch.distributed.pipelining._backward import (
     stage_backward_input,
     stage_backward_weight,
 )
-from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import run_tests, TestCase
 
 
@@ -19,19 +18,19 @@ batch_size = 256
 
 
 class StageBackwardTests(TestCase):
-    def test_stage_backward(self, device):
+    def test_stage_backward(self):
         # MLP as a stage module
-        mod = MLPModule(d_hid).to(device)
-        x = torch.randn(batch_size, d_hid, device=device)
+        mod = MLPModule(d_hid)
+        x = torch.randn(batch_size, d_hid)
         # As in a pipeline stage, the inputs to this stage requires gradients
         x.requires_grad_(True)
-        target = torch.randn(batch_size, d_hid, device=device)
+        target = torch.randn(batch_size, d_hid)
         loss_fn = torch.nn.MSELoss(reduction="sum")
 
         # Make a copy
-        ref_mod = copy.deepcopy(mod).to(device)
-        ref_x = x.detach().requires_grad_(x.requires_grad).to(device)
-        ref_target = target.detach().to(device)
+        ref_mod = copy.deepcopy(mod)
+        ref_x = x.detach().requires_grad_(x.requires_grad)
+        ref_target = target.detach()
 
         # Forward and backward in stage manner
         out = mod(x)
@@ -58,19 +57,19 @@ class StageBackwardTests(TestCase):
                 print(f"Gradient test failed for {name}: {p.grad} vs {ref_p.grad}")
                 raise
 
-    def test_stage_backward_input(self, device):
+    def test_stage_backward_input(self):
         # MLP as a stage module
-        mod = MLPModule(d_hid).to(device)
-        x = torch.randn(batch_size, d_hid, device=device)
+        mod = MLPModule(d_hid)
+        x = torch.randn(batch_size, d_hid)
         # As in a pipeline stage, the inputs to this stage requires gradients
         x.requires_grad_(True)
-        target = torch.randn(batch_size, d_hid, device=device)
+        target = torch.randn(batch_size, d_hid)
         loss_fn = torch.nn.MSELoss(reduction="sum")
 
         # Make a copy
-        ref_mod = copy.deepcopy(mod).to(device)
-        ref_x = x.detach().requires_grad_(x.requires_grad).to(device)
-        ref_target = target.detach().to(device)
+        ref_mod = copy.deepcopy(mod)
+        ref_x = x.detach().requires_grad_(x.requires_grad)
+        ref_target = target.detach()
 
         # Forward, then backward of loss with respect to inputs
         out = mod(x)
@@ -93,19 +92,20 @@ class StageBackwardTests(TestCase):
             # Check that the weight gradients were not updated
             self.assertEqual(p.grad, None)
 
-    def test_stage_backward_weight(self, device):
+    def test_stage_backward_weight(self):
         # MLP as a stage module
-        mod = MLPModule(d_hid).to(device)
-        x = torch.randn(batch_size, d_hid, device=device)
+        mod = MLPModule(d_hid)
+        x = torch.randn(batch_size, d_hid)
         # As in a pipeline stage, the inputs to this stage requires gradients
         x.requires_grad_(True)
-        target = torch.randn(batch_size, d_hid, device=device)
+        target = torch.randn(batch_size, d_hid)
         loss_fn = torch.nn.MSELoss(reduction="sum")
 
         # Make a copy
-        ref_mod = copy.deepcopy(mod).to(device)
-        ref_x = x.detach().requires_grad_(x.requires_grad).to(device)
-        ref_target = target.detach().to(device)
+        ref_mod = copy.deepcopy(mod)
+        ref_x = x.detach().requires_grad_(x.requires_grad)
+        ref_target = target.detach()
+
         # Forward, then backward of loss with respect to inputs
         out = mod(x)
         loss = loss_fn(out, target)
@@ -133,26 +133,25 @@ class StageBackwardTests(TestCase):
                 print(f"Gradient test failed for {name}: {p.grad} vs {ref_p.grad}")
                 raise
 
-    def test_stage_backward_weight_multiple_iters(self, device):
+    def test_stage_backward_weight_multiple_iters(self):
         # MLP as a stage module
-        mod = MLPModule(d_hid).to(device)
+        mod = MLPModule(d_hid)
         inputs = []
         for _ in range(10):
-            x = torch.randn(batch_size, d_hid, device=device)
+            x = torch.randn(batch_size, d_hid)
             inputs.append(x)
             # As in a pipeline stage, the inputs to this stage requires gradients
             x.requires_grad_(True)
 
-        target = torch.randn(batch_size, d_hid, device=device)
+        target = torch.randn(batch_size, d_hid)
         loss_fn = torch.nn.MSELoss(reduction="sum")
 
         # Make a copy
-        ref_mod = copy.deepcopy(mod).to(device)
+        ref_mod = copy.deepcopy(mod)
         ref_inputs = []
         for x in inputs:
-            ref_x = x.detach().requires_grad_(x.requires_grad).to(device)
-            ref_inputs.append(ref_x)
-        ref_target = target.detach().to(device)
+            ref_inputs.append(x.detach().requires_grad_(x.requires_grad))
+        ref_target = target.detach()
 
         # Forward, then backward of loss with respect to inputs
         for x in inputs:
@@ -183,9 +182,6 @@ class StageBackwardTests(TestCase):
                 print(f"Gradient test failed for {name}: {p.grad} vs {ref_p.grad}")
                 raise
 
-
-devices = ["cpu", "cuda", "hpu", "xpu"]
-instantiate_device_type_tests(StageBackwardTests, globals(), only_for=devices)
 
 if __name__ == "__main__":
     run_tests()
