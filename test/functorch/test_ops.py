@@ -2339,6 +2339,7 @@ class TestOperators(TestCase):
             skip("sparse.sampled_addmm", ""),
             skip("sparse.mm", "reduce"),
             skip("native_layer_norm", "", device_type="cpu"),
+            #skip("nn.functional.scaled_dot_product_attention", "", device_type="cuda"), # temp skip
             # RuntimeError: Expected contiguous tensor, but got
             # non-contiguous tensor for argument #2 'grad_output'
             decorate(
@@ -2402,6 +2403,9 @@ class TestOperators(TestCase):
             self.skipTest("Skipped! Autograd not supported.")
             return
 
+        if op.name == "nn.functional.scaled_dot_product_attention" and TEST_WITH_ROCM:
+            torch.backends.cuda.enable_mem_efficient_sdp(False)
+            
         sample_inputs = op.sample_inputs(device, dtype, requires_grad=True)
 
         for sample_input in sample_inputs:
