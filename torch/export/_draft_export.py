@@ -345,7 +345,7 @@ def draft_export(
         failures: list[FailureReport] = []
         custom_ops_logs: dict[
             Any, tuple[dict[str, Any], FailureType]
-        ] = {}  # Dedup custom ops
+        ] = {}  # For adding in assertions before custom ops
 
         for log_name, log_contents in capture_structured_log.log_record.logs:
             failure_type = None

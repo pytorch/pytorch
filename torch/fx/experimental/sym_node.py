@@ -1295,9 +1295,9 @@ def _make_node_magic(method, func):
                     del frame
 
                 if other is not None:
-                    arguments = [str(self), str(other)]
+                    arguments = [self, other]
                 else:
-                    arguments = [str(self)]
+                    arguments = [self]
 
                 def get_id(sym_node) -> Optional[int]:
                     # We don't want to return an ID if the input is a constant
@@ -1309,8 +1309,10 @@ def _make_node_magic(method, func):
                         "method": method,
                         "result": str(result),
                         "result_id": id(result),
-                        "arguments": arguments,
-                        "argument_ids": [i for i in arguments if i is not None],
+                        "arguments": [str(a) for a in arguments],
+                        "argument_ids": [
+                            get_id(i) for i in arguments if get_id(i) is not None
+                        ],
                         "user_bottom_stack": str(user_bottom_stack),
                         "user_top_stack": str(user_top_stack),
                         "floc": str(floc),
