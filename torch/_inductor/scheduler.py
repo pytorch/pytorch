@@ -22,6 +22,7 @@ from typing import (
     List,
     Optional,
     Sequence,
+    Tuple,
     TYPE_CHECKING,
     TypeVar,
     Union,
@@ -188,7 +189,7 @@ class SchedulerDonatedBuffer(SchedulerBuffer):
 
 class BaseSchedulerNode:
     group: tuple[torch.device, tuple[tuple[sympy.Expr, ...], ...]]
-    read_writes: dependencies.ReadWrites #TODO: Use this one
+    read_writes: dependencies.ReadWrites
     unmet_dependencies: OrderedSet[Dep]
     # .min_order and .max_order are only relevant for "grouped" nodes such as FusedSchedulerNode.
     # e.g. if the FusedSchedulerNode includes nodes (op_1, op_2, op_3), and op_X is X-th node
@@ -207,7 +208,7 @@ class BaseSchedulerNode:
 
     def _init_from_node(self, node: ir.Operation) -> None:
         self.node: Optional[ir.Operation] = node
-        self.ancestors = OrderedSet[str]() # TODO: Use this one
+        self.ancestors = OrderedSet[str]()
         self.last_usage = OrderedSet[
             str
         ]()  # buffers that won't be used after this kernel
@@ -3880,55 +3881,76 @@ class Scheduler:
             and name not in self.mutation_real_name
         )
 
-    def graph_partition(self):
-        # breakpoint()
-        partitions: List[List[BaseSchedulerNode]] = [self.nodes]
-        inputs = []
-        outputs = []
+    def only_gpu_inputs_and_outputs(self, node: BaseSchedulerNode) -> bool:
+        if not node.is_gpu():
+            return False
 
-        # a name is included in partition_outputs if it appears in V.graph.graph_output_names
-        # or used by another graph partition later.
-        # a name is included in partition_inputs if it is used by some nodes in a partition,
-        # and is not produced by some nodes in the partition.
-        # unmet_dependencies is not sufficient since it excludes graph inputs.
+        if isinstance(node.node, ir.DeviceCopy):
+            return False
+
+        return True
+
+    def get_partition_rules(self) -> List[Callable[[BaseSchedulerNode], bool]]:
+        return [self.only_gpu_inputs_and_outputs]
+
+    def get_graph_partition_signature(
+        self, partitions: List[List[BaseSchedulerNode]]
+    ) -> Tuple[List[OrderedSet[str]], List[OrderedSet[str]]]:
+        inputs: List[OrderedSet[str]] = []
+        outputs: List[OrderedSet[str]] = []
+
+        unmet_outputs = OrderedSet(V.graph.get_output_names())
 
         for partition in reversed(partitions):
-            partition_outputs = OrderedSet()
-            partition_inputs = OrderedSet()
+            node_outputs: OrderedSet[str] = OrderedSet()
 
-            read_writes = dependencies.ReadWrites.merge_list([x.read_writes for x in partition])
-            # tensors = read_writes.reads | read_writes.writes 
+            for node in partition:
+                node_outputs.update(node.outputs_by_name.keys())
 
+            partition_outputs = node_outputs.intersection(unmet_outputs)
 
+            read_writes = dependencies.ReadWrites.merge_list(
+                [x.read_writes for x in partition]
+            )
+            partition_inputs = (
+                OrderedSet([x.name for x in read_writes.reads | read_writes.writes])
+                - node_outputs
+            )
 
+            unmet_outputs = partition_inputs.union(unmet_outputs - partition_outputs)
 
+            inputs.append(partition_inputs)
+            outputs.append(partition_outputs)
+        breakpoint()
+        assert unmet_outputs.issubset(
+            OrderedSet(V.graph.graph_inputs.keys())
+        ), f"{unmet_outputs=} should be subset of {V.graph.graph_inputs.keys()=}"
 
-            # for node in partition:
-            #     for name in node.get_buffer_names():
-            #         if name in V.graph.graph_output_names:
-            #             partition_outputs.add(name)
-            #         elif name in self.name_to_buf:
-            #             buf = self.name_to_buf[name]
-            #             if buf.is_output():
-            #                 partition_outputs.add(name)
-            #             elif buf.is_input():
-            #                 partition_inputs.add(name)
-            #         else:
-            #             # name is a graph input
-            #             partition_inputs.add(name)
+        return inputs[::-1], outputs[::-1]
 
+    def graph_partition(
+        self,
+    ) -> Tuple[
+        List[List[BaseSchedulerNode]], List[OrderedSet[str]], List[OrderedSet[str]]
+    ]:
+        partitions: List[List[BaseSchedulerNode]] = []
+        partition_rules = self.get_partition_rules()
 
+        cur_partition: List[BaseSchedulerNode] = []
+        for node in self.nodes:
+            for should_partition in partition_rules:
+                if should_partition(node):
+                    if cur_partition:
+                        partitions.append(cur_partition)
+                        cur_partition = []
+                    partitions.append([node])
+                else:
+                    cur_partition.append(node)
 
+        if cur_partition:
+            partitions.append(cur_partition)
 
-        # partition_outputs, partition_inputs = [], []
-        
-
-
-
-
-        return partitions, inputs, outputs
-        # TODO1: partition self.nodes into multiple lists.
-        # TODO2: for each group, collect inputs and outputs
+        return partitions, *self.get_graph_partition_signature(partitions)
 
     def codegen(self) -> None:
         with dynamo_timed("Scheduler.codegen"):
@@ -3940,8 +3962,9 @@ class Scheduler:
 
     def _codegen_partitions(self) -> None:
         # TODO
-        partitions, inputs, outputs = self.graph_partition()
 
+        partitions, inputs, outputs = self.graph_partition()
+        breakpoint()
         for nodes, read, write in zip(partitions, inputs, outputs):
             self._codegen(nodes)
             # TODO1: move V.graph.wrapper_code.lines to V.graph.wrapper_code.subgraph_lines
