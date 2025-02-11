@@ -1,5 +1,4 @@
 # flake8: noqa
-from typing import Any
 from typing_extensions import assert_type
 
 from torch import randn, Tensor
@@ -11,15 +10,15 @@ TENSOR, INT, FLOAT = randn(3), 2, 1.5
 
 assert_type(
     INT & TENSOR,  # E: Unsupported operand types for & ("int" and "Tensor")  [operator]
-    Any,
+    Tensor,
 )
 assert_type(
     INT | TENSOR,  # E: Unsupported operand types for | ("int" and "Tensor")  [operator]
-    Any,
+    Tensor,
 )
 assert_type(
     INT ^ TENSOR,  # E: Unsupported operand types for ^ ("int" and "Tensor")  [operator]
-    Any,
+    Tensor,
 )
 
 assert_type(
