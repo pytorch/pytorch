@@ -1,4 +1,5 @@
 # mypy: allow-untyped-defs
+import contextlib
 from typing import Callable, Union
 
 import torch
@@ -37,13 +38,13 @@ class WhileLoopOp(HigherOrderOperator):
         additional_inputs: tuple[Union[torch.Tensor, torch.SymInt, int], ...],
         /,
     ):
-        if not isinstance(carried_inputs, tuple):
+        if not isinstance(carried_inputs, (tuple, list)):
             raise RuntimeError(
-                f"carried_inputs must be a tuple, got {type(carried_inputs)}"
+                f"carried_inputs must be a tuple or list, got {type(carried_inputs)}"
             )
-        if not isinstance(additional_inputs, tuple):
+        if not isinstance(additional_inputs, (tuple, list)):
             raise RuntimeError(
-                f"additional_inputs must be a tuple, got {type(additional_inputs)}"
+                f"additional_inputs must be a tuple or list, got {type(additional_inputs)}"
             )
 
         validate_subgraph_args_types(carried_inputs)
@@ -197,9 +198,9 @@ def while_loop_dense(cond_fn, body_fn, carried_inputs, additional_inputs):
                 f"cond_fn must return a boolean scalar tensor or a boolean but got {pred}"
             )
 
-    if not isinstance(carried_inputs, tuple):
+    if not isinstance(carried_inputs, (tuple, list)):
         raise RuntimeError(
-            f"carried_inputs must be a tuple but got {type(carried_inputs)}"
+            f"carried_inputs must be a tuple or list but got {type(carried_inputs)}"
         )
 
     while pred := cond_fn(*carried_vals, *additional_inputs):
@@ -230,11 +231,18 @@ def _find_or_create_fake_mode() -> FakeTensorMode:
     return fake_mode
 
 
-def _create_unbacked_symint(fake_mode: FakeTensorMode) -> torch.SymInt:
+def _create_unbacked_symint(
+    fake_mode: FakeTensorMode, ignore_fresh_unbacked_symbols: bool
+) -> torch.SymInt:
     assert (
         fake_mode is not None and fake_mode.shape_env is not None
     ), "Must provide a fake_mode with shape_env."
-    with fake_mode.shape_env.ignore_fresh_unbacked_symbols():
+    ctx = (
+        contextlib.nullcontext()
+        if not ignore_fresh_unbacked_symbols
+        else fake_mode.shape_env.ignore_fresh_unbacked_symbols()
+    )
+    with ctx:
         return fake_mode.shape_env.create_unbacked_symint()
 
 
@@ -283,7 +291,10 @@ def while_loop_tracing(mode, cond_fn, body_fn, carried_inputs, additional_inputs
         fake_mode: FakeTensorMode = _find_or_create_fake_mode()
         unspecialized_carried_inputs = pytree.tree_map_only(
             (int, torch.SymInt),
-            lambda _: _create_unbacked_symint(fake_mode),
+            # For temporarily created unbacked symints, we don't need to bind them to any proxy
+            lambda _: _create_unbacked_symint(
+                fake_mode, ignore_fresh_unbacked_symbols=True
+            ),
             carried_inputs,
         )
 
@@ -437,7 +448,13 @@ def while_loop_fake_tensor_mode(
             )
         # See NOTE [unspecialize int carry with unbacked symints]
         return pytree.tree_map_only(
-            (int, torch.SymInt), lambda _: _create_unbacked_symint(mode), body_outs
+            (int, torch.SymInt),
+            # For while_loop's unbacked symint output, we want them to be bound
+            # to the proxy of while_loop's output.
+            lambda _: _create_unbacked_symint(
+                mode, ignore_fresh_unbacked_symbols=False
+            ),
+            body_outs,
         )
 
 
