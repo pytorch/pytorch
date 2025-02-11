@@ -2769,6 +2769,7 @@ class TestPatternMatcher(TestPatternMatcherBase):
             is_dynamic=is_dynamic,
         )
 
+    @skipIfNoXPU
     @parametrize("use_relu", [True, False])
     @parametrize("is_qat", [False])
     @parametrize("is_dynamic", [False])
