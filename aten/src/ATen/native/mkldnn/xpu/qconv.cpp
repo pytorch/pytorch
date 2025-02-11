@@ -76,7 +76,7 @@ class QConvoneDNNXPU final {
         dilation.vec());
 
     Tensor output = at::empty(
-        dst_tz, device(c10::kXPU).dtype(output_dtype).memory_format(mfmt));
+        dst_tz, act.options().dtype(output_dtype).memory_format(mfmt));
 
     return quantized_convolution(
         act,
@@ -159,8 +159,7 @@ class QConvoneDNNXPU final {
     Tensor output = has_accum_postop_sum
         ? accum
         : at::empty(
-              dst_tz,
-              device(c10::kXPU).dtype(output_dtype).memory_format(mfmt));
+              dst_tz, act.options().dtype(output_dtype).memory_format(mfmt));
 
     output = quantized_convolution(
         act,
