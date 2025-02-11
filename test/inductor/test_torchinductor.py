@@ -3322,13 +3322,13 @@ class CommonTemplate:
 
     @skip_if_cpu
     @skip_if_halide  # only 32-bit indexing
-    @largeTensorTest(2**34)
+    @largeTensorTest("4GB")
     def test_large_tensor_reduction(self):
         # Test 64-bit indexing works correctly
         def fn(a):
             return torch.max(a)
 
-        t = torch.ones(2**35, dtype=torch.int8, device=self.device)
+        t = torch.ones(2**32, dtype=torch.int8, device=self.device)
         t[-1] = 2
 
         # self.common OOMs here because it copies inputs to check for mutations
@@ -3358,7 +3358,7 @@ class CommonTemplate:
         self.assertEqual(actual, expect)
 
     @skip_if_halide  # only 32-bit indexing
-    @largeTensorTest("2GB")
+    @largeTensorTest("4GB")
     def test_large_pointwise(self):
         def fn(a):
             return a + 1
@@ -11721,7 +11721,7 @@ class CommonTemplate:
         "triton.autotune_pointwise", True
     )  # needed to introduce config that exceed max shared memory usage
     @serialTest()
-    @largeTensorTest("16GB")
+    @largeTensorTest("13GB")
     def test_large_block_sizes(self):
         """
         Inductor will try triton configs like x = 64 and y = 1024 which will
