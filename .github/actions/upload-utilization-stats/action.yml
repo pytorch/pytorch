@@ -54,4 +54,4 @@ runs:
           --workflow-name "${{inputs.workflow_name}}" \
           --workflow-run-attempt "${{inputs.workflow_attempt}}" \
           --job-id "${{inputs.job_id}}" \
-          --job-name "${{inputs.job_name}}" 
+          --job-name "${{inputs.job_name}}"
