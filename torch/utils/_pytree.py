@@ -964,16 +964,11 @@ class TreeSpec:
         return unflatten_fn(child_pytrees, self.context)
 
 
-@dataclasses.dataclass(frozen=True, repr=False)
 class LeafSpec(TreeSpec):
-    type: Any = dataclasses.field(default=None, init=False)
-    context: Context = dataclasses.field(default=None, init=False)
-    children_specs: list["TreeSpec"] = dataclasses.field(
-        default_factory=list, init=False
-    )
+    def __init__(self) -> None:
+        super().__init__(None, None, [])
 
     def __post_init__(self) -> None:
-        # Override `__post_init__` for `num_leaves` derivation.
         object.__setattr__(self, "num_nodes", 1)
         object.__setattr__(self, "num_leaves", 1)
         object.__setattr__(self, "num_children", 0)
