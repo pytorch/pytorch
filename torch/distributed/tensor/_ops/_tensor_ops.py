@@ -148,32 +148,16 @@ def create_like_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> StrategyType:
     assert isinstance(select_strategy, OpStrategy)
     for arg_strategy in select_strategy.strategies:
         arg_spec = arg_strategy.output_spec
-        if is_tensor_partial(arg_spec):
-            # if the arg_spec have partial, accept partial
-            # in the input_specs but output replicate for
-            # those corresponding mesh dims
-            output_spec = DTensorSpec(
-                mesh=arg_spec.mesh,
-                placements=tuple(
-                    Replicate() if isinstance(p, Partial) else p
-                    for p in arg_spec.placements
-                ),
-            )
-            create_like_strategy.strategies.append(
-                PlacementStrategy(output_specs=output_spec, input_specs=(arg_spec,))
-            )
-
-        else:
-            # still create a new DTensorSpec for output_spec to avoid
-            # input_specs and output_specs sharing the same tensor_meta,
-            # e.g. the output tensor of _like ops can have different dtypes
-            output_spec = DTensorSpec(
-                mesh=arg_spec.mesh,
-                placements=arg_spec.placements,
-            )
-            create_like_strategy.strategies.append(
-                PlacementStrategy(output_specs=output_spec, input_specs=(arg_spec,))
-            )
+        output_spec = DTensorSpec(
+            mesh=arg_spec.mesh,
+            placements=tuple(
+                Replicate() if isinstance(p, Partial) else p
+                for p in arg_spec.placements
+            ),
+        )
+        create_like_strategy.strategies.append(
+            PlacementStrategy(output_specs=output_spec, input_specs=(arg_spec,))
+        )
 
     return create_like_strategy
 
