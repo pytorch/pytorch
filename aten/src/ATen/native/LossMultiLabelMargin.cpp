@@ -117,7 +117,8 @@ static void multilabel_margin_loss_forward_out_cpu_template(
 #ifndef STRIP_ERROR_MESSAGES
   auto target_arg = TensorArg(target, "target", 2);
 #endif
-  int64_t nframe = 0, dim = 0;
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
+  int64_t nframe, dim;
   const int64_t ndims = input.dim();
   multilabel_margin_loss_shape_check(nframe, dim, ndims, input, target);
 
@@ -229,7 +230,8 @@ static void multilabel_margin_loss_backward_out_cpu_template(
     const Tensor& target,
     int64_t reduction,
     const Tensor& is_target) {
-  int64_t nframe = 0, dim = 0;
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
+  int64_t nframe, dim;
   CheckedFrom c = "multilabel_margin_loss_backward_cpu_template";
   auto target_arg = TensorArg(target, "target", 3);
   auto is_target_arg = TensorArg(is_target, "is_target", 5);

@@ -715,6 +715,7 @@ def _setup_standard_sys_libs(
         include_dirs.append(build_paths.sleef_include)
         include_dirs.append(build_paths.openmp_include)
         include_dirs.append(build_paths.python_include)
+        include_dirs.append(build_paths.pybind_include)
         include_dirs.append(build_paths.cc_include)
         include_dirs.append(build_paths.libgcc_include)
         include_dirs.append(build_paths.libgcc_arch_include)

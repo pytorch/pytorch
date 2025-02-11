@@ -218,7 +218,7 @@ int get_vector_size(at::Tensor self, at::Tensor ret, at::Tensor mask) {
     TORCH_INTERNAL_ASSERT(vec_size <= 16, "Value of VEC must be in [2, 4, 8, 16]");
 #else
     // make sure we don't break assumption that we can't have > 4 elements / thread
-    TORCH_INTERNAL_ASSERT(vec_size <= 8, "Value of VEC must be in [2, 4, 8]");
+    TORCH_INTERNAL_ASSERT(vec_size <= 4, "Value of VEC must be in [2, 4]");
 #endif
   }
 

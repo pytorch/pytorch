@@ -44,7 +44,6 @@ from typing import (
     Generic,
     Optional,
     overload,
-    Set,
     TypeVar,
     Union,
 )
@@ -1008,16 +1007,6 @@ def is_function(value):
     )
 
 
-cmp_name_to_op_mapping = {
-    "__eq__": operator.eq,
-    "__ne__": operator.ne,
-    "__lt__": operator.lt,
-    "__le__": operator.le,
-    "__gt__": operator.gt,
-    "__ge__": operator.ge,
-}
-
-
 def is_wrapper_or_member_descriptor(value):
     return isinstance(
         value,
@@ -1343,7 +1332,8 @@ def _scrubbed_inductor_config_for_logging() -> Optional[str]:
             except Exception:
                 return "Value is not JSON serializable"
 
-    keys_to_scrub: Set[Any] = set()
+    configs_to_scrub_re = r"((^TYPE_CHECKING$)|(.*_progress$)|(.*TESTING.*)|(.*(rocm|halide).*)|(^trace\..*)|(^_))"
+    keys_to_scrub = set()
     inductor_conf_str = None
     inductor_config_copy = (
         torch._inductor.config.get_config_copy() if torch._inductor.config else None
@@ -1351,7 +1341,7 @@ def _scrubbed_inductor_config_for_logging() -> Optional[str]:
     if inductor_config_copy is not None:
         try:
             for key, val in inductor_config_copy.items():
-                if not isinstance(key, str):
+                if not isinstance(key, str) or re.search(configs_to_scrub_re, key):
                     keys_to_scrub.add(key)
                 # Convert set() to list for json.dumps()
                 if isinstance(val, set):

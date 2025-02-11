@@ -46,7 +46,6 @@ from ..utils import (
 )
 from ..virtualized import V
 from .common import (
-    ArgName,
     CodeGen,
     DeferredLine,
     IndentedBuffer,
@@ -1658,7 +1657,7 @@ class PythonWrapperCodegen(CodeGen):
             signature,
             size_dtype=None,  # try to infer based on symints
             indices=non_constant_indices,
-            argdefs=[ArgName(x) for x in kernel.arg_names],
+            argdefs=kernel.arg_names,
         )
         triton_meta: dict[str, Any] = {
             "signature": triton_signature,

@@ -38,7 +38,6 @@ from ..utils import (
     check_numpy_ndarray_args,
     check_unspec_or_constant_args,
     check_unspec_python_args,
-    cmp_name_to_op_mapping,
     dict_methods,
     extract_fake_example_value,
     get_fake_value,
@@ -98,16 +97,6 @@ IN_PLACE_DESUGARING_MAP = {
     operator.iand: operator.and_,
     operator.ior: operator.or_,
     operator.ixor: operator.xor,
-}
-
-
-polyfill_fn_mapping = {
-    operator.eq: polyfills.cmp_eq,
-    operator.ne: polyfills.cmp_ne,
-    operator.lt: polyfills.cmp_lt,
-    operator.le: polyfills.cmp_le,
-    operator.gt: polyfills.cmp_gt,
-    operator.ge: polyfills.cmp_ge,
 }
 
 
@@ -283,6 +272,7 @@ class BuiltinVariable(VariableTracker):
         # combinations. Handlers are attempted in order, and will be used if the type checks
         # match. They are expected to have the signature:
         # fn(tx, arg0: VariableTracker, arg1: VariableTracker) -> VariableTracker
+        from .dicts import DictKeysVariable, SetVariable
         from .functions import BaseUserFunctionVariable, UserFunctionVariable
         from .nn_module import NNModuleVariable
         from .tensor import supported_const_comparison_ops
@@ -468,52 +458,38 @@ class BuiltinVariable(VariableTracker):
         ]
         op_handlers[operator.mul].extend(list_like_expansion_handlers)
 
+        size_or_tuple = (SizeVariable, TupleVariable)
+        has_set_items = (SetVariable, DictKeysVariable)
+
         def create_cmp_op_handlers(op):
             def compare_by_value(tx: "InstructionTranslator", a, b):
                 return ConstantVariable(op(a.value, b.value))
 
-            if op in polyfill_fn_mapping:
-                # For constants, speedup the comparison instead of using
-                # polyfill. Removing this line causes major regression for pr
-                # time benchmark - add_loop_eager.
-                result = [((ConstantVariable, ConstantVariable), compare_by_value)]
-
-                op_var = BuiltinVariable(op)
-                # Special handling of SymNode variable
-                result.extend(
-                    [
-                        (
-                            (SymNodeVariable, VariableTracker),
-                            op_var._comparison_with_symnode,
-                        ),
-                        (
-                            (VariableTracker, SymNodeVariable),
-                            op_var._comparison_with_symnode,
-                        ),
-                    ]
-                )
-
-                def handler(tx, a, b):
-                    return tx.inline_user_function_return(
-                        VariableTracker.build(tx, polyfill_fn_mapping[op]), [a, b], {}
-                    )
-
-                result.append(((VariableTracker, VariableTracker), handler))
-                return result
-
             result = [((ConstantVariable, ConstantVariable), compare_by_value)]
 
-            if op in supported_const_comparison_ops.values() and op.__name__.startswith(
-                "is_"
-            ):
+            if op in supported_const_comparison_ops.values():
                 # Tensor is None, List is not None, etc
                 none_result = op(object(), None)
+                if op.__name__.startswith("is_"):
 
-                def never(tx: "InstructionTranslator", a, b):
-                    return ConstantVariable(none_result)
+                    def never(tx: "InstructionTranslator", a, b):
+                        return ConstantVariable(none_result)
 
-                obj_op_none = never
-                none_op_obj = never
+                    obj_op_none = never
+                    none_op_obj = never
+                else:
+
+                    def obj_op_none(
+                        tx: "InstructionTranslator", a, b: ConstantVariable
+                    ):
+                        if b.value is None or b.value is True or b.value is False:
+                            return ConstantVariable(none_result)
+
+                    def none_op_obj(
+                        tx: "InstructionTranslator", a: ConstantVariable, b
+                    ):
+                        if a.value is None or a.value is True or a.value is False:
+                            return ConstantVariable(none_result)
 
                 types_that_are_never_none = (
                     TensorVariable,
@@ -538,61 +514,90 @@ class BuiltinVariable(VariableTracker):
                     ]
                 )
 
-                op_var = BuiltinVariable(op)
-                result.extend(
-                    [
+            def list_compare_nocheck(tx: "InstructionTranslator", left, right):
+                return BaseListVariable.list_compare(tx, op, left, right)
+
+            def list_compare_check(tx: "InstructionTranslator", left, right):
+                if type(left) is not type(
+                    right
+                ):  # Mismatch in BaseListVariable subclasses
+                    unimplemented(f"{op.__name__}({left}, {right})")
+                return BaseListVariable.list_compare(tx, op, left, right)
+
+            def compare_set_items(tx: "InstructionTranslator", left, right):
+                return ConstantVariable(op(left.set_items, right.set_items))
+
+            def compare_via_method(tx: "InstructionTranslator", left, right):
+                return left.call_method(tx, f"__{op.__name__}__", [right], {})
+
+            if op.__name__.startswith("is_"):
+                compare_user_defined = compare_by_value
+            else:
+                compare_user_defined = compare_via_method
+
+            op_var = BuiltinVariable(op)
+            result.extend(
+                [
+                    (
                         (
-                            (
-                                (UserFunctionVariable, BuiltinVariable),
-                                (UserFunctionVariable, BuiltinVariable),
-                            ),
-                            lambda tx, a, b: ConstantVariable(op(a.fn, b.fn)),
+                            (UserFunctionVariable, BuiltinVariable),
+                            (UserFunctionVariable, BuiltinVariable),
                         ),
+                        lambda tx, a, b: ConstantVariable(op(a.fn, b.fn)),
+                    ),
+                    (
                         (
-                            (
-                                NNModuleVariable,
-                                NNModuleVariable,
-                            ),
-                            lambda tx, a, b: ConstantVariable(
-                                op(
-                                    tx.output.get_submodule(a.module_key),
-                                    tx.output.get_submodule(b.module_key),
-                                )
-                            ),
+                            NNModuleVariable,
+                            NNModuleVariable,
                         ),
+                        lambda tx, a, b: ConstantVariable(
+                            op(
+                                tx.output.get_submodule(a.module_key),
+                                tx.output.get_submodule(b.module_key),
+                            )
+                        ),
+                    ),
+                    ((size_or_tuple, size_or_tuple), list_compare_nocheck),
+                    (
+                        (variables.BaseListVariable, variables.BaseListVariable),
+                        list_compare_check,
+                    ),
+                    ((has_set_items, has_set_items), compare_set_items),
+                    (
+                        (UserDefinedObjectVariable, UserDefinedObjectVariable),
+                        compare_user_defined,
+                    ),
+                    (
+                        (UserDefinedClassVariable, UserDefinedClassVariable),
+                        compare_user_defined,
+                    ),
+                    (
                         (
-                            (UserDefinedObjectVariable, UserDefinedObjectVariable),
-                            compare_by_value,
+                            (StreamVariable, EventVariable, ConstantVariable),
+                            (StreamVariable, EventVariable, ConstantVariable),
                         ),
-                        (
-                            (UserDefinedClassVariable, UserDefinedClassVariable),
-                            compare_by_value,
-                        ),
-                        (
-                            (
-                                (StreamVariable, EventVariable, ConstantVariable),
-                                (StreamVariable, EventVariable, ConstantVariable),
-                            ),
-                            compare_by_value,
-                        ),
-                        (
-                            (TensorVariable, VariableTracker),
-                            op_var._comparison_with_tensor,
-                        ),
-                        (
-                            (VariableTracker, TensorVariable),
-                            op_var._comparison_with_tensor,
-                        ),
-                        (
-                            (SymNodeVariable, VariableTracker),
-                            op_var._comparison_with_symnode,
-                        ),
-                        (
-                            (VariableTracker, SymNodeVariable),
-                            op_var._comparison_with_symnode,
-                        ),
-                    ]
-                )
+                        compare_by_value,
+                    ),
+                    (
+                        (TensorVariable, VariableTracker),
+                        op_var._comparison_with_tensor,
+                    ),
+                    (
+                        (VariableTracker, TensorVariable),
+                        op_var._comparison_with_tensor,
+                    ),
+                    (
+                        (SymNodeVariable, VariableTracker),
+                        op_var._comparison_with_symnode,
+                    ),
+                    (
+                        (VariableTracker, SymNodeVariable),
+                        op_var._comparison_with_symnode,
+                    ),
+                ]
+            )
+
+            if op.__name__.startswith("is_"):
 
                 def handle_is(tx: "InstructionTranslator", left, right):
                     # If the two objects are of different type, we can safely return False
@@ -1701,8 +1706,6 @@ class BuiltinVariable(VariableTracker):
                 member, (torch._ops.OpOverloadPacket, torch._ops.OpOverload)
             ) and torch._dynamo.trace_rules.is_aten_op_or_tensor_method(member):
                 return variables.TorchInGraphFunctionVariable(member, source=source)
-            elif name in cmp_name_to_op_mapping:
-                return variables.GetAttrVariable(obj, name, source=source)
         elif isinstance(obj, DummyModule):
             # TODO(mlazos) - Do we need this?
             if obj.is_torch or name not in obj.value.__dict__:

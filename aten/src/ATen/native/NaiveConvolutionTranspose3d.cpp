@@ -668,7 +668,8 @@ void slow_conv_transpose3d_acc_grad_parameters_cpu(
       output_padding_height,
       1);
 
-  int64_t n_output_plane = 0;
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
+  int64_t n_output_plane;
   if (grad_weight.defined()) {
     n_output_plane = grad_weight.size(1);
   } else if (grad_bias.defined()) {

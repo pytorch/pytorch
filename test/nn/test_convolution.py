@@ -11,7 +11,12 @@ import torch.backends.cudnn as cudnn
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.testing import make_tensor
-from torch.testing._internal.common_cuda import TEST_CUDA, TEST_CUDNN, tf32_on_and_off
+from torch.testing._internal.common_cuda import (
+    TEST_CUDA,
+    TEST_CUDNN,
+    tf32_is_not_fp32,
+    tf32_on_and_off,
+)
 from torch.testing._internal.common_device_type import (
     disablecuDNN,
     disableMkldnn,
@@ -60,7 +65,7 @@ from torch.testing._internal.common_utils import (
 )
 
 
-AMPERE_OR_ROCM = TEST_WITH_ROCM or torch.cuda.is_tf32_supported()
+AMPERE_OR_ROCM = TEST_WITH_ROCM or tf32_is_not_fp32()
 
 
 if TEST_SCIPY:
@@ -2072,7 +2077,7 @@ class TestConvolutionNNDeviceType(NNTestCase):
             if mode == "same":
                 actual = actual[:5, :5, :10]
 
-            if torch.cuda.is_tf32_supported() and (
+            if tf32_is_not_fp32() and (
                 dtype == torch.float or dtype == torch.complex64
             ):
                 self.assertEqual(actual, expected, atol=0.05, rtol=0.05)
@@ -3915,7 +3920,7 @@ class TestConvolutionNNDeviceType(NNTestCase):
                     inp, w, None, (1, 1), (0, 0), (1, 1), 1
                 )
             self.assertTrue(cudnn_out.is_contiguous(memory_format=memory_format))
-            if torch.cuda.is_tf32_supported() and dtype == torch.float:
+            if tf32_is_not_fp32() and dtype == torch.float:
                 self.assertEqual(conv2d_out.relu(), cudnn_out, atol=4e-3, rtol=0.006)
             else:
                 self.assertEqual(conv2d_out.relu(), cudnn_out)
@@ -3953,7 +3958,7 @@ class TestConvolutionNNDeviceType(NNTestCase):
                 )
 
             self.assertTrue(cudnn_out.is_contiguous(memory_format=memory_format))
-            if torch.cuda.is_tf32_supported() and dtype == torch.float:
+            if tf32_is_not_fp32() and dtype == torch.float:
                 self.assertEqual(
                     F.relu(conv2d_out + alpha * z), cudnn_out, atol=2e-3, rtol=0.006
                 )

@@ -11,6 +11,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch._C._dynamo.guards import assert_size_stride
 from torch.testing import make_tensor
+from torch.testing._internal.common_cuda import tf32_is_not_fp32
 from torch.testing._internal.common_device_type import (
     dtypes,
     instantiate_device_type_tests,
@@ -30,7 +31,7 @@ from torch.testing._internal.common_utils import (
 )
 
 
-AMPERE_OR_ROCM = TEST_WITH_ROCM or torch.cuda.is_tf32_supported()
+AMPERE_OR_ROCM = TEST_WITH_ROCM or tf32_is_not_fp32()
 if TEST_SCIPY:
     import scipy.ndimage
     import scipy.signal

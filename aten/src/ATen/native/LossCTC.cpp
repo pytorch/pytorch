@@ -70,7 +70,8 @@ std::tuple<Tensor, Tensor, size_t, std::vector<int64_t>> ctc_loss_allocate_outpu
   TORCH_CHECK((int64_t) input_lengths.size() == batch_size, "input_lengths must be of size batch_size");
   TORCH_CHECK((int64_t) target_lengths.size() == batch_size, "target_lengths must be of size batch_size");
 
-  size_t tg_target_stride = 0;
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
+  size_t tg_target_stride;
   int64_t max_target_length = 0;
   std::vector<int64_t> tg_batch_offsets(batch_size);
   if (targets.dim() == 1) { // concatenated targets
@@ -239,8 +240,10 @@ Tensor ctc_loss_backward_cpu_template(const Tensor& grad_out, const Tensor& log_
   Tensor grad = at::full_like(log_probs, neginf, LEGACY_CONTIGUOUS_MEMORY_FORMAT); // at this point, this is log of empty sum
 
   // The admin bits. We don't do much checking and assume that the forward did.
-  int64_t tg_target_stride = 0;
-  int64_t max_target_length = 0;
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
+  int64_t tg_target_stride;
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
+  int64_t max_target_length;
   std::vector<int64_t> tg_batch_offsets(batch_size);
 
   if (targets.dim() == 1) { // concatenated targets

@@ -222,7 +222,6 @@ S390X_TESTLIST = [
     "dynamo/test_backward_higher_order_ops",
     "dynamo/test_base_output",
     "dynamo/test_bytecode_utils",
-    "dynamo/test_callback",
     "dynamo/test_compile",
     "dynamo/test_comptime",
     "dynamo/test_config",

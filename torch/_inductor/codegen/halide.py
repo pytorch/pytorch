@@ -1647,8 +1647,8 @@ class HalideScheduling(SIMDScheduling):
     kernel_type = HalideKernel  # type: ignore[arg-type,assignment]
 
     @classmethod
-    def get_backend_features(cls, device: torch.device) -> OrderedSet[BackendFeature]:
-        result = OrderedSet(
+    def get_backend_features(cls, device: torch.device):
+        result = dict.fromkeys(
             [
                 BackendFeature.TUPLE_REDUCTION,
                 BackendFeature.PREFER_STORE_LOOP_ORDER,
@@ -1656,7 +1656,7 @@ class HalideScheduling(SIMDScheduling):
             ]
         )
         if config.halide.scan_kernels:
-            result.add(BackendFeature.SCAN)
+            result[BackendFeature.SCAN] = None
         return result
 
     def define_kernel(self, src_code, node_schedule, kernel):

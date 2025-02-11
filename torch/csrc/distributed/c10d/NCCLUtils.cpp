@@ -421,6 +421,7 @@ std::string getNcclVersion() {
   return versionString;
 }
 
+#ifdef USE_C10D_NCCL
 size_t hashTensors(const std::vector<at::Tensor>& tensors) {
   size_t hash = 0;
   for (auto& tensor : tensors) {
@@ -441,6 +442,7 @@ size_t hashTensors(const std::vector<at::Tensor>& tensors) {
   }
   return hash;
 }
+#endif
 
 // Default value: 30 minutes
 int nccl_nonblocking_timeout() {
@@ -520,7 +522,7 @@ std::string getNcclErrorDetailStr(
 
 // Dump proxyTrace log to stdout
 void printNcclCommProxyTrace(
-    std::string& dumpReason,
+    std::string dumpReason,
     const std::unordered_map<std::string, std::string>& dumpMap) {
   LOG(INFO) << "Dumping nccl comm trace, reason: " << dumpReason;
   for (auto& [key, value] : dumpMap) {

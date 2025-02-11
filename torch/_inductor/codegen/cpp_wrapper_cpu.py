@@ -157,7 +157,15 @@ class CppWrapperCpu(PythonWrapperCodegen):
                 #include <Python.h>
 
                 #define PYBIND11_SIMPLE_GIL_MANAGEMENT
-                #include <pybind11/gil.h>
+                """
+            )
+            self.header.splice(
+                "#include <pybind11/pybind11.h>"
+                if config.is_fbcode()
+                else "#include <pybind11/gil.h>"
+            )
+            self.header.splice(
+                """
                 namespace py = pybind11;
 
                 class RAIIPyObject {

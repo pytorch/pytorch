@@ -620,7 +620,8 @@ Tensor& multinomial_out_mps(const Tensor& self,
     // Sanity checks on `self`.
     auto is_valid = ((self.max() < INFINITY) & (self.min() >= 0)).item();
     TORCH_CHECK(is_valid.to<bool>(), "probability tensor contains either `inf`, `nan` or element < 0");
-    bool zero_prob_condition = false;
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
+    bool zero_prob_condition;
     if (self.dim() == 1) {
       zero_prob_condition = (self.sum() == 0).item().to<bool>();
     } else {
