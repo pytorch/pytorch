@@ -2,13 +2,12 @@
 #include <caffe2/serialize/read_adapter_interface.h>
 #include <cstring>
 
-namespace caffe2 {
-namespace serialize {
+namespace caffe2::serialize {
 
 class MemoryReadAdapter final : public caffe2::serialize::ReadAdapterInterface {
  public:
   explicit MemoryReadAdapter(const void* data, off_t size)
-      : data_(data), size_(size) {}
+      : data_(data), size_(static_cast<size_t>(size)) {}
 
   size_t size() const override {
     return size_;
@@ -23,8 +22,7 @@ class MemoryReadAdapter final : public caffe2::serialize::ReadAdapterInterface {
 
  private:
   const void* data_;
-  off_t size_;
+  size_t size_{};
 };
 
-} // namespace serialize
-} // namespace caffe2
+} // namespace caffe2::serialize
