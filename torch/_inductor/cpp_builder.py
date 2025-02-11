@@ -14,6 +14,7 @@ import shutil
 import subprocess
 import sys
 import sysconfig
+import tempfile
 import textwrap
 import warnings
 from collections.abc import Sequence
@@ -265,6 +266,7 @@ def is_msvc_cl() -> bool:
     return _is_msvc_cl(get_cpp_compiler())
 
 
+@functools.lru_cache(None)
 def get_compiler_version_info(compiler: str) -> str:
     env = os.environ.copy()
     env["LC_ALL"] = "C"  # Don't localize output
@@ -373,6 +375,8 @@ class BuildOptionsBase:
         aot_mode: bool = False,
         use_absolute_path: bool = False,
         compile_only: bool = False,
+        precompiling: bool = False,
+        preprocessing: bool = False,
     ) -> None:
         self._compiler = compiler
         self._definations: list[str] = definitions or []
@@ -381,12 +385,16 @@ class BuildOptionsBase:
         self._ldflags: list[str] = ldflags or []
         self._libraries_dirs: list[str] = libraries_dirs or []
         self._libraries: list[str] = libraries or []
-        # Some args is hard to abstract to OS compatable, passthrough it directly.
+        # Some args are hard to abstract to OS compatible, passthrough directly.
         self._passthrough_args: list[str] = passthrough_args or []
+
+        self.precompiled_header: Optional[str] = None
 
         self._aot_mode: bool = aot_mode
         self._use_absolute_path: bool = use_absolute_path
         self._compile_only: bool = compile_only
+        self._precompiling: bool = precompiling
+        self._preprocessing: bool = preprocessing
 
     def _process_compile_only_options(self) -> None:
         if self._compile_only:
@@ -438,6 +446,12 @@ class BuildOptionsBase:
 
     def get_compile_only(self) -> bool:
         return self._compile_only
+
+    def get_precompiling(self) -> bool:
+        return self._precompiling
+
+    def get_preprocessing(self) -> bool:
+        return self._preprocessing
 
     def save_flags_to_json(self, file: str) -> None:
         attrs = {
@@ -627,11 +641,16 @@ class CppOptions(BuildOptionsBase):
         extra_flags: Sequence[str] = (),
         use_absolute_path: bool = False,
         compiler: str = "",
+        precompiling: bool = False,
+        preprocessing: bool = False,
     ) -> None:
-        super().__init__()
+        super().__init__(
+            compile_only=compile_only,
+            use_absolute_path=use_absolute_path,
+            precompiling=precompiling,
+            preprocessing=preprocessing,
+        )
         self._compiler = compiler if compiler else get_cpp_compiler()
-        self._use_absolute_path = use_absolute_path
-        self._compile_only = compile_only
 
         (
             definations,
@@ -1102,6 +1121,8 @@ class CppTorchOptions(CppOptions):
         shared: bool = True,
         extra_flags: Sequence[str] = (),
         compiler: str = "",
+        precompiling: bool = False,
+        preprocessing: bool = False,
     ) -> None:
         super().__init__(
             compile_only=compile_only,
@@ -1109,6 +1130,8 @@ class CppTorchOptions(CppOptions):
             extra_flags=extra_flags,
             use_absolute_path=use_absolute_path,
             compiler=compiler,
+            precompiling=precompiling,
+            preprocessing=preprocessing,
         )
 
         self._aot_mode = aot_mode
@@ -1270,6 +1293,8 @@ class CppTorchDeviceOptions(CppTorchOptions):
         use_mmap_weights: bool = False,
         shared: bool = True,
         extra_flags: Sequence[str] = (),
+        precompiling: bool = False,
+        preprocessing: bool = False,
     ) -> None:
         super().__init__(
             vec_isa=vec_isa,
@@ -1279,6 +1304,8 @@ class CppTorchDeviceOptions(CppTorchOptions):
             use_absolute_path=use_absolute_path,
             use_mmap_weights=use_mmap_weights,
             extra_flags=extra_flags,
+            precompiling=precompiling,
+            preprocessing=preprocessing,
         )
 
         device_definations: list[str] = []
@@ -1362,13 +1389,28 @@ class CppBuilder:
             3. Final target file: output_dir/name.ext
     """
 
-    def __get_python_module_ext(self) -> str:
-        SHARED_LIB_EXT = ".pyd" if _IS_WINDOWS else ".so"
-        return SHARED_LIB_EXT
+    @staticmethod
+    def __get_python_module_flags() -> tuple[str, str]:
+        extension = ".pyd" if _IS_WINDOWS else ".so"
+        output_flags = "/Fe" if _IS_WINDOWS else "-o"
+        return extension, output_flags
 
-    def __get_object_ext(self) -> str:
-        EXT = ".obj" if _IS_WINDOWS else ".o"
-        return EXT
+    @staticmethod
+    def __get_object_flags() -> tuple[str, str]:
+        extension = ".obj" if _IS_WINDOWS else ".o"
+        output_flags = "/Fe" if _IS_WINDOWS else "-c -o"
+        return extension, output_flags
+
+    def __get_precompiled_header_flags(self) -> tuple[str, str]:
+        extension = ".pch" if _IS_WINDOWS or _is_clang(self._compiler) else ".gch"
+        output_flags = "/Fp" if _IS_WINDOWS else "-o"
+        return extension, output_flags
+
+    @staticmethod
+    def __get_preprocessor_output_flags() -> tuple[str, str]:
+        extension = ".i"
+        output_flags = "/P /Fi" if _IS_WINDOWS else "-E -o"
+        return extension, output_flags
 
     def __init__(
         self,
@@ -1403,26 +1445,46 @@ class CppBuilder:
         self._output_dir = output_dir
 
         self._compile_only = BuildOption.get_compile_only()
-        file_ext = (
-            self.__get_object_ext()
-            if self._compile_only
-            else self.__get_python_module_ext()
+        self._precompiling = BuildOption.get_precompiling()
+        self._preprocessing = BuildOption.get_preprocessing()
+        # Only one of these options (if any) should be true at any given time.
+        assert sum((self._compile_only, self._precompiling, self._preprocessing)) <= 1
+        self._do_link = not (
+            self._compile_only or self._precompiling or self._preprocessing
         )
+
+        if self._compile_only:
+            file_ext, self._output_flags = self.__get_object_flags()
+        elif self._precompiling:
+            file_ext, self._output_flags = self.__get_precompiled_header_flags()
+        elif self._preprocessing:
+            file_ext, self._output_flags = self.__get_preprocessor_output_flags()
+        else:
+            file_ext, self._output_flags = self.__get_python_module_flags()
         self._target_file = os.path.join(self._output_dir, f"{self._name}{file_ext}")
 
         if isinstance(sources, str):
             sources = [sources]
 
-        if config.is_fbcode():
-            if self._aot_mode and not self._use_absolute_path:
-                inp_name = sources
-                # output process @ get_name_and_dir_from_output_file_path
-            else:
-                # We need to copy any absolute-path torch includes
-                inp_name = [os.path.basename(i) for i in sources]
-                self._target_file = os.path.basename(self._target_file)
+        if config.is_fbcode() and (not self._aot_mode or self._use_absolute_path):
+            # We need to copy any absolute-path torch includes
+            sources = [os.path.basename(i) for i in sources]
+            self._target_file = os.path.basename(self._target_file)
 
-            self._sources_args = " ".join(inp_name)
+        if self._precompiling:
+            assert len(sources) == 1
+            header = sources[0]
+
+            if _IS_WINDOWS:
+                # Visual C++ and ICC both require a dummy source file to compile, in
+                # addition to the header.
+                self._precompiling_dummy_file = tempfile.NamedTemporaryFile(
+                    suffix=".cpp", buffering=0
+                )
+                self._precompiling_dummy_file.write(f'#include "{header}"\n'.encode())
+                self._sources_args = f"/Yc{header} {self._precompiling_dummy_file.name}"
+            else:
+                self._sources_args = f"-x c++-header {header}"
         else:
             self._sources_args = " ".join(sources)
 
@@ -1437,6 +1499,12 @@ class CppBuilder:
                 self._definations_args += f"/D {defination} "
             else:
                 self._definations_args += f"-D {defination} "
+
+        if precompiled_header := BuildOption.precompiled_header:
+            if _IS_WINDOWS:
+                self._include_dirs_args = f"/Yu{precompiled_header} "
+            else:
+                self._include_dirs_args = f"-include {precompiled_header} "
 
         for inc_dir in BuildOption.get_include_dirs():
             if _IS_WINDOWS:
@@ -1476,26 +1544,28 @@ class CppBuilder:
             libraries_args: str,
             libraries_dirs_args: str,
             passthrough_args: str,
+            output_flags: str,
             target_file: str,
         ) -> str:
             if _IS_WINDOWS:
                 # https://learn.microsoft.com/en-us/cpp/build/walkthrough-compile-a-c-program-on-the-command-line?view=msvc-1704
                 # https://stackoverflow.com/a/31566153
                 cmd = (
-                    f"{compiler} {include_dirs_args} {definations_args} {cflags_args} {sources} "
-                    f"{passthrough_args} /LD /Fe{target_file} /link {libraries_dirs_args} {libraries_args} {ldflags_args} "
+                    f"{compiler} {include_dirs_args} {definations_args} {cflags_args} "
+                    f"{sources} {passthrough_args} {output_flags}{target_file}"
                 )
+                if self._do_link:
+                    cmd += f" /LD /link {libraries_dirs_args} {libraries_args} {ldflags_args}"
                 cmd = normalize_path_separator(cmd)
             else:
-                compile_only_arg = "-c" if self._compile_only else ""
-                cmd = re.sub(
-                    r"[ \n]+",
-                    " ",
-                    f"""
-                    {compiler} {sources} {definations_args} {cflags_args} {include_dirs_args}
-                    {passthrough_args} {ldflags_args} {libraries_args} {libraries_dirs_args} {compile_only_arg} -o {target_file}
-                    """,
-                ).strip()
+                cmd = (
+                    f"{compiler} {sources} {definations_args} {cflags_args} "
+                    f"{include_dirs_args} {passthrough_args} "
+                )
+                if self._do_link:
+                    cmd += f"{ldflags_args} {libraries_args} {libraries_dirs_args} "
+                cmd += f"{output_flags} {target_file}"
+                cmd = re.sub(r"[ \n]+", " ", cmd).strip()
             return cmd
 
         command_line = format_build_command(
@@ -1508,6 +1578,7 @@ class CppBuilder:
             libraries_args=self._libraries_args,
             libraries_dirs_args=self._libraries_dirs_args,
             passthrough_args=self._passthrough_parameters_args,
+            output_flags=self._output_flags,
             target_file=self._target_file,
         )
         return command_line
