@@ -234,19 +234,13 @@ void* _getWorkspaceWithoutHandle() {
 
 void* _getWorkspace(size_t& workspaceSize) {
   #ifdef (USE_ROCM || IS_FBCODE)
-    // See https://github.com/pytorch/pytorch/issues/73328 for reasoning behind
-    // setting this to 1M.
     workspaceSize = _getWorkspaceSize();
-  #else
-    workspaceSize = at::cuda::getChosenWorkspaceSize();
-  #endif
-
-  #ifdef (USE_ROCM || IS_FBCODE)
     auto& allocator = *::c10::cuda::CUDACachingAllocator::get();
     auto workspace = allocator.allocate(workspaceSize);
     auto workspace_ptr = workspace.mutable_get();
     TORCH_CHECK(workspace_ptr != nullptr, "OOM trying to allocate workspace for cublaslt");
   #else
+    workspaceSize = at::cuda::getChosenWorkspaceSize();
     auto workspace_ptr = _getWorkspaceWithoutHandle();
   #endif
   return workspace_ptr;
