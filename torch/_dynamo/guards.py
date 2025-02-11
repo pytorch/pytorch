@@ -1102,14 +1102,14 @@ class GuardBuilder(GuardBuilderBase):
             assert not isinstance(
                 base_example_value, (dict, collections.OrderedDict)
             ), "Use DictGetItemSource"
-            if isinstance(base_example_value, list) and not source.index_is_slice:
+            if isinstance(base_example_value, list):
                 out = base_guard_manager.list_getitem_manager(
                     key=source.index,
                     source=source_name,
                     example_value=example_value,
                     guard_manager_enum=guard_manager_enum,
                 )
-            elif isinstance(base_example_value, tuple) and not source.index_is_slice:
+            elif isinstance(base_example_value, tuple):
                 out = base_guard_manager.tuple_getitem_manager(
                     key=source.index,
                     source=source_name,
@@ -1118,8 +1118,6 @@ class GuardBuilder(GuardBuilderBase):
                 )
             else:
                 index = source.index
-                if source.index_is_slice:
-                    index = source.unpack_slice()
                 out = base_guard_manager.getitem_manager(
                     key=index,
                     source=source_name,

@@ -476,40 +476,27 @@ class DefaultsSource(ChainedSource):
 @dataclasses.dataclass(frozen=True)
 class GetItemSource(ChainedSource):
     index: Any
-    index_is_slice: bool = False
 
     def __post_init__(self):
         assert self.base is not None
         if isinstance(self.index, slice):
             # store the hashable version of the slice so the whole GetItemSource is hashable
             super().__setattr__("index", self.index.__reduce__())
-            super().__setattr__("index_is_slice", True)
 
     def reconstruct(self, codegen):
         self.base.reconstruct(codegen)
-        if self.index_is_slice:
-            codegen.append_output(codegen.create_load_const(self.unpack_slice()))
-        else:
-            codegen.append_output(codegen.create_load_const(self.index))
+        codegen.append_output(codegen.create_load_const(self.index))
         codegen.append_output(create_instruction("BINARY_SUBSCR"))
 
     def guard_source(self):
         return self.base.guard_source()
-
-    def unpack_slice(self):
-        assert self.index_is_slice
-        slice_class, slice_args = self.index
-        return slice_class(*slice_args)
 
     def name(self):
         # Index can be of following types
         # 1) index is a slice - example 1:4
         # 2) index is a constant - example string, integer
         assert not isinstance(self.index, Source)
-        if self.index_is_slice:
-            return f"{self.base.name()}[{self.unpack_slice()!r}]"
-        else:
-            return f"{self.base.name()}[{self.index!r}]"
+        return f"{self.base.name()}[{self.index!r}]"
 
 
 @dataclasses.dataclass(frozen=True)
@@ -598,12 +585,7 @@ class ListGetItemSource(GetItemSource):
         self.base.reconstruct(codegen)
 
         # Load the index
-        if self.index_is_slice:
-            raise RuntimeError(
-                "List[slice] is a temporary object and should not have a source"
-            )
-        else:
-            codegen.append_output(codegen.create_load_const(self.index))
+        codegen.append_output(codegen.create_load_const(self.index))
 
         codegen.extend_output(create_call_function(2, False))
 
@@ -612,12 +594,7 @@ class ListGetItemSource(GetItemSource):
         # 1) index is a slice - example 1:4
         # 2) index is a constant - example string, integer
         assert not isinstance(self.index, Source)
-        if self.index_is_slice:
-            raise RuntimeError(
-                "List[slice] is a temporary object and should not have a source"
-            )
-        else:
-            return f"list.__getitem__({self.base.name()}, {self.index!r})"
+        return f"list.__getitem__({self.base.name()}, {self.index!r})"
 
 
 @dataclasses.dataclass(frozen=True)

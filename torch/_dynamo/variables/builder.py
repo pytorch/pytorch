@@ -1373,7 +1373,7 @@ class VariableBuilder:
 
             guards = []
             for i, tensor_variable in enumerate(list_variable.items):
-                source_i = GetItemSource(base=source, index=i, index_is_slice=False)
+                source_i = GetItemSource(base=source, index=i)
                 # access unpacked tensor from this list instead of from a lifted arg
                 self.tx.output.input_source_to_var[source_i] = tensor_variable
                 tensor_variable.proxy.node.meta["tensor_dict"] = _extract_tensor_dict(
@@ -2444,9 +2444,7 @@ def handle_traced_output(example_value, tx, proxy, options, subclass_type, targe
                     assert isinstance(example_value, list)
                     source = options["source"]
                     options_i = options.copy()
-                    options_i["source"] = GetItemSource(
-                        base=source, index=i, index_is_slice=False
-                    )
+                    options_i["source"] = GetItemSource(base=source, index=i)
                 else:
                     # use the same options object as parent
                     options_i = options
