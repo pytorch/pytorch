@@ -294,8 +294,6 @@ def uninteresting_files() -> set[str]:
     mods = [
         sys.modules[__name__],
         torch.fx.experimental.recording,
-        torch._logging.structured,
-        torch._logging._internal,
         torch.fx.experimental.sym_node,
         torch.fx.interpreter,
         torch,
@@ -6699,11 +6697,9 @@ class ShapeEnv:
             if static_expr is not None:
                 self.log.debug(
                     "eval %s == %s [statically known]",
-                    (
-                        f"size_oblivious({orig_expr})"
-                        if size_oblivious
-                        else size_oblivious
-                    ),
+                    f"size_oblivious({orig_expr})"
+                    if size_oblivious
+                    else size_oblivious,
                     static_expr,
                 )
                 if hint is not None:
@@ -6769,15 +6765,15 @@ class ShapeEnv:
                             orig_expr,
                             unsound_result,
                         )
-
                         trace_structured(
                             "propagate_real_tensors",
                             metadata_fn=lambda: {
                                 "expr": repr(orig_expr),
                                 "result": repr(unsound_result),
+                                "stack": structured.from_traceback(
+                                    CapturedTraceback.extract(skip=1).summary()
+                                ),
                                 "expr_node_id": id(expr_sym_node),
-                                "user_stack": structured.get_user_stack(3),
-                                "stack": structured.get_framework_stack(3),
                             },
                         )
                         dtrace_structured(
@@ -6785,13 +6781,13 @@ class ShapeEnv:
                             metadata_fn=lambda: {
                                 "expr": repr(orig_expr),
                                 "result": repr(unsound_result),
-                                "stack": structured.from_traceback(
-                                    CapturedTraceback.extract(skip=1).summary()
-                                ),
+                                "expr_node_id": id(expr_sym_node),
+                                "user_stack": structured.get_user_stack(3),
+                                "stack": structured.get_framework_stack(3),
                                 "symbol_to_sources": {
                                     str(v): k
                                     for k, v in self.source_to_var.items()
-                                    if v in g.free_symbols
+                                    if v in orig_expr.free_symbols
                                 },
                                 "frame_locals": asdict(self._find_frame_locals()),
                             },

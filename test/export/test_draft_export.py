@@ -269,6 +269,7 @@ class TestDraftExport(TestCase):
         class M(torch.nn.Module):
             def forward(self, x, y):
                 a = x.item()
+                a = -a
                 a = a // 3
                 a = a + 5
 
