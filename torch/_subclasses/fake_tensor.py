@@ -1999,6 +1999,11 @@ class FakeTensorMode(TorchDispatchMode):
         converter = self.fake_tensor_converter
 
         is_lift_func = func in self.lift_fns
+        device_conversion_skip_const_prop = (
+            func is torch.ops.aten._to_copy.default
+            and isinstance(args[0], torch.Tensor)
+            and args[0].device.type == "meta"
+        )
 
         # To constant propagate through these functions:
         # 1, If this is a lift due to a torch.tensor call,
@@ -2012,6 +2017,7 @@ class FakeTensorMode(TorchDispatchMode):
             should_allow_numbers_as_tensors(func)
             and not has_symbolic_sizes
             and not flat_arg_fake_tensors
+            and not device_conversion_skip_const_prop
         ):
             assert all(
                 t.constant is not None for t in flat_arg_fake_tensors
