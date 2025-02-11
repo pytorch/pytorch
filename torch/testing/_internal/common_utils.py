@@ -1730,10 +1730,8 @@ def make_dynamo_test(
     fn: Optional[Callable[..., Any]] = None
 ) -> Callable[..., Any]:
     """
-    Decorator function to create a dynamo test case.
-
-    Dynamo injects a dummy call to `torch.sin(random_tensor)` to ensure graph
-    generation, even when testing for side effects.
+    Decorator function to create a dynamo test case. A function annotate with
+    this decorator takes as input a unittest object.
     """
     from torch._dynamo.testing import CompileCounter, reset, optimize_assert
     if fn is None:
