@@ -3300,6 +3300,61 @@ class TestPatternMatcher(TestPatternMatcherBase):
                 rtol=0.07,
             )
 
+    @skipIfNoDynamoSupport
+    def test_woq_int4_cpu(self):
+        class M(torch.nn.Module):
+            def __init__(self, in_feature, out_feature, group_size):
+                super().__init__()
+                self.weight = torch.randint(
+                    0, 255, (out_feature, in_feature // 2), dtype=torch.uint8
+                )
+                self.group_size = group_size
+                self.qScaleAndZeros = torch.rand(
+                    (in_feature // group_size, out_feature, 2), dtype=torch.bfloat16
+                )
+
+            def forward(self, x):
+                if x.ndim > 2:
+                    x = x.reshape(-1, x.shape[-1])
+                    y = torch.ops.aten._weight_int4pack_mm_for_cpu.default(
+                        x, self.weight, self.group_size, self.qScaleAndZeros
+                    )
+                    return y.reshape(*x.shape[:-1], y.shape[-1])
+                return torch.ops.aten._weight_int4pack_mm_for_cpu.default(
+                    x, self.weight, self.group_size, self.qScaleAndZeros
+                )
+
+        bs = 4
+        seq = 8
+        x_dim_list = [2, 3]
+        in_feature_list = [256, 512]
+        out_feature_list = [256, 512]
+        group_size_list = [64, 128]
+        cases = itertools.product(
+            x_dim_list, in_feature_list, out_feature_list, group_size_list
+        )
+        for x_dim, in_feature, out_feature, group_size in cases:
+            x_shape = (seq, in_feature) if x_dim == 2 else (bs, seq, in_feature)
+            x = torch.randn(x_shape, dtype=torch.bfloat16)
+            m = M(in_feature, out_feature, group_size).eval()
+
+            def matcher_check_fn():
+                self.assertEqual(
+                    counters["inductor"]["woq_matcher_count"], 0 if TEST_ACL else 1
+                )
+
+            include_ops = [
+                "aoti_torch_cpu__weight_int4pack_mm_cpu_tensor"
+                if torch._inductor.config.cpp_wrapper
+                else "extern_kernels.int4mm_packed_weight_cpu"
+            ]
+            self._test_code_common(
+                m,
+                (x,),
+                include_ops,
+                ["torch.ops.aten._weight_int4pack_mm_for_cpu.default"],
+            )
+
     def _test_linear_dynamic_fp16_helper(self, use_relu: bool):
         class M(torch.nn.Module):
             def __init__(self, bias: bool, use_relu: bool):
