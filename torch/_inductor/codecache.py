@@ -43,10 +43,10 @@ from typing import (
     TypeVar,
     Union,
 )
+from typing_extensions import Self
 
 import torch
 import torch.distributed as dist
-import torch.version
 from torch import SymInt, Tensor
 from torch._dynamo.utils import CompileEventLogger, counters, dynamo_timed
 from torch._inductor import config, exc, metrics
@@ -69,7 +69,6 @@ from torch._inductor.cpu_vec_isa import pick_vec_isa
 from torch._inductor.custom_graph_pass import CustomGraphPass, CustomGraphPassType
 from torch._inductor.freezing_utils import has_frozen_params, is_frozen_param
 from torch._inductor.runtime.compile_tasks import (
-    _module_to_triton_kernel,
     _reload_python_module,
     _reload_python_module_in_subproc,
 )
@@ -359,10 +358,11 @@ def sha256_hash(data: bytes) -> str:
     return base64.b32encode(hashlib.sha256(data).digest())[:51].decode("utf-8").lower()
 
 
-def code_hash(code: Union[str, bytes], extra: str = "") -> str:
+def code_hash(code: Union[str, bytes], extra: Union[str, bytes] = "") -> str:
     hashing_str = code if isinstance(code, bytes) else code.encode("utf-8")
-    if extra != "":
-        hashing_str = hashing_str + b"||" + extra.encode("utf-8")
+    if extra:
+        extra_b = extra if isinstance(extra, bytes) else extra.encode("utf-8")
+        hashing_str = hashing_str + b"||" + extra_b
     return "c" + sha256_hash(hashing_str)
 
 
@@ -1427,8 +1427,7 @@ class AotCodeCompiler:
         # So we need get a command_line which contains isa related parameter as a part of hash key.
         # And then pass the command_line to below write function as extra parameter to
         # guarantee the source code hash contains ISA difference.
-        vec_isa_cmd_line = vec_isa_cmd_gen.get_command_line()
-        cpp_command = repr(vec_isa_cmd_line)
+        cpp_command = repr(vec_isa_cmd_gen.get_command_line())
 
         # Meta internal AOTInductor CPU
         fbcode_aot_cpu_re = (
@@ -1644,15 +1643,15 @@ class AotCodeCompiler:
                 use_mmap_weights = True
 
             compile_command = {
-                "vec_isa": picked_vec_isa,
-                "device_type": device_type,
                 "aot_mode": graph.aot_mode,
+                "device_type": device_type,
                 "use_absolute_path": use_absolute_path,
                 "use_mmap_weights": use_mmap_weights,
+                "vec_isa": picked_vec_isa,
             }
             object_build_options = CppTorchDeviceOptions(
-                compile_only=True,
                 **compile_command,  # type: ignore[arg-type]
+                compile_only=True,
             )
 
             # potentially, precompile the AOT header for this device
@@ -1660,13 +1659,10 @@ class AotCodeCompiler:
                 header_file = _get_cpp_wrapper_header(
                     device_type, aot_mode=graph.aot_mode
                 )
-                object_build_options.set_precompiled_header(
-                    _precompile_header(
-                        header_file,
-                        vec_isa_cmd_line,
-                        object_build_options.get_compiler(),
-                        compile_command,
-                    )
+                object_build_options.precompiled_header = _precompile_header(
+                    header_file,
+                    cpp_command,
+                    **compile_command,
                 )
 
             object_builder = CppBuilder(
@@ -1928,19 +1924,38 @@ def custom_op_wrapper(op: str, *args: Any) -> Union[list[c_void_p], c_void_p]:
 _HEADER_DIR = os.path.join(default_cache_dir(), "precompiled_headers")
 
 
+@functools.lru_cache(None)
 def _precompile_header(
-    header: str, hashable_cmd_line: str, compiler: str, compile_command: dict[str, Any]
+    header: str,
+    hashable_cmd_line: str,
+    **compile_command: Any,
 ) -> str:
-    compiler_version = get_compiler_version_info(compiler)
+    # Get the preprocessed output from the header file to be precompiled.  This allows
+    # us to properly invalidate the file cache when any header dependency changes.
+    with tempfile.NamedTemporaryFile(buffering=0, suffix=".h") as preprocessing_header:
+        preprocessing_header.write(f"#include <{header}>\n".encode())
+        preprocessor = CppBuilder(
+            name=preprocessing_header.name,
+            sources=preprocessing_header.name,
+            BuildOption=CppTorchDeviceOptions(**compile_command, preprocessing=True),
+        )
+        preprocessor.build()
+
+        # read, then cleanup, the preprocessor output file
+        with open(preprocessor.get_target_file_path()) as preprocessor_output_file:
+            preprocessor_output = preprocessor_output_file.read()
+        os.unlink(preprocessor.get_target_file_path())
+
+    header_build_option = CppTorchDeviceOptions(**compile_command, precompiling=True)
     header_hash, header_full_path = write(
         content=f"#include <{header}>\n",
         extension="h",
-        extra=f"{hashable_cmd_line} {compiler_version} {torch.version.__version__} {torch.version.build_uuid}",
+        extra=(
+            hashable_cmd_line
+            + preprocessor_output
+            + get_compiler_version_info(header_build_option.get_compiler())
+        ),
         specified_dir=_HEADER_DIR,
-    )
-    header_build_option = CppTorchDeviceOptions(
-        precompiling=True,
-        **compile_command,
     )
     cpp_builder = CppBuilder(
         name=header_full_path,
@@ -2055,13 +2070,10 @@ class CppCodeCache:
             if config.cpp_cache_precompile_headers and (
                 header_file := cls._get_uncompiled_header(device_type)
             ):
-                cpp_build_option.set_precompiled_header(
-                    _precompile_header(
-                        header_file,
-                        vec_isa_cmd,
-                        cpp_build_option.get_compiler(),
-                        compile_command,
-                    )
+                cpp_build_option.precompiled_header = _precompile_header(
+                    header_file,
+                    vec_isa_cmd,
+                    **compile_command,
                 )
 
             cpp_builder = CppBuilder(
@@ -2881,10 +2893,10 @@ class PyCodeCache:
         return parse_stack_trace(entry)
 
 
-class TritonCodeCache:
-    @classmethod
-    def load(cls, kernel_name: str, source_code: str) -> ModuleType:
-        return _module_to_triton_kernel(PyCodeCache.load(source_code), kernel_name)
+def _load_triton_kernel_from_source(
+    kernel_name: str, source_code: str
+) -> CachingAutotuner:
+    return getattr(PyCodeCache.load(source_code), kernel_name)
 
 
 def _cuda_compiler() -> Optional[str]:
@@ -3093,7 +3105,7 @@ class DLLWrapper:
 
         return _wrapped_func
 
-    def __enter__(self) -> DLLWrapper:  # noqa: PYI034
+    def __enter__(self) -> Self:
         return self
 
     def __exit__(self, *args: Any) -> None:
@@ -3149,6 +3161,9 @@ class CUDACodeCache:
                     cmd = cuda_compile_command(
                         [input_path], output_path, dst_file_ext, extra_args
                     )
+                    with open(input_path, "a") as f:
+                        f.write("\n")
+                        f.write(f"// CUDA Compile cmd\n// {cmd}\n")
                     start_time = time()
                     log.debug("CUDA Compilation: %s", cmd)
                     cmd_parts = cmd.split(" ")
@@ -3288,30 +3303,12 @@ class CodeCacheFuture:
         raise NotImplementedError
 
 
-class TritonFuture(CodeCacheFuture):
-    kernel: CachingAutotuner
-
-    def __init__(
-        self,
-        kernel: Any,
-        future: Optional[Future[Any]],
-    ) -> None:
-        self.kernel = kernel
-        self.future = future
-
-    def result(self) -> Callable[..., Any]:
-        if self.future is not None:
-            # If the worker failed this will throw an exception.
-            result = self.future.result()
-            assert result is None
-            self.future = None
-            self.kernel.precompile()
-        return self.kernel
-
-
 class LambdaFuture(CodeCacheFuture):
-    def __init__(self, result_fn: Callable[..., Any]) -> None:
+    def __init__(
+        self, result_fn: Callable[..., Any], future: Optional[Future[Any]] = None
+    ) -> None:
         self.result_fn = result_fn
+        self.future = future
 
     def result(self) -> Callable[..., Any]:  # type: ignore[override]
         return self.result_fn()
