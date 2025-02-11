@@ -192,7 +192,6 @@ from .misc import (
     SavedTensorBox,
     TorchVersionVariable,
     TypingVariable,
-    UserDefinedExceptionClassVariable,
     WeakRefVariable,
 )
 from .nn_module import (
@@ -230,6 +229,7 @@ from .user_defined import (
     SourcelessGraphModuleVariable,
     UserDefinedClassVariable,
     UserDefinedDictVariable,
+    UserDefinedExceptionClassVariable,
     UserDefinedObjectVariable,
     UserDefinedTupleVariable,
 )
@@ -1109,7 +1109,7 @@ class VariableBuilder:
             return MethodWrapperVariable(value)
         elif issubclass(type(value), type) and issubclass(value, BaseException):
             self.install_guards(GuardBuilder.ID_MATCH)
-            return UserDefinedExceptionClassVariable(value, ())
+            return UserDefinedExceptionClassVariable(value)
         elif issubclass(type(value), type):
             if value in (
                 torch.utils.hooks.BackwardHook,
