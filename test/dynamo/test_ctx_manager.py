@@ -2718,6 +2718,7 @@ class CPythonContextManagerTestCase(torch._dynamo.test_case.TestCase):
             state.append(x)
         self.assertEqual(state, [1, 42, 999])
 
+    @skipIfNotPy311
     @make_dynamo_test
     def test_contextmanager_finally(self):
         state = []
@@ -2929,7 +2930,6 @@ def woohoo():
         with self.assertRaises(TypeError):
             woohoo(b=3)
 
-    @unittest.expectedFailure
     @make_dynamo_test
     def test_recursive(self):
         depth = 0
