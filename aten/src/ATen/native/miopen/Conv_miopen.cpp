@@ -347,7 +347,7 @@ struct algorithm_search<miopenConvFwdAlgorithm_t> {
   static BenchmarkCache<algo_t>& cache() { return fwd_algos; }
   static BenchmarkCache<size_t>& wsscache() { return fwd_wssizes; }
 
-  static perf_t findAlgorithm(const ConvolutionArgs& args) {
+  static perf_t findAlgorithm(const ConvolutionArgs& args, bool benchmark) {
     int perf_count;
     perf_t perf_results;
     size_t max_ws_size = getWorkspaceSize(args, DEFAULT_ALGO);
@@ -363,7 +363,7 @@ struct algorithm_search<miopenConvFwdAlgorithm_t> {
         &perf_results,
         ws.data,
         ws.size,
-        false));
+        benchmark));
     return perf_results;
   }
 
@@ -420,7 +420,7 @@ struct algorithm_search<miopenConvBwdDataAlgorithm_t> {
   static BenchmarkCache<algo_t>& cache() { return bwd_data_algos; }
   static BenchmarkCache<size_t>& wsscache() { return bwd_data_wssizes; }
 
-  static perf_t findAlgorithm(const ConvolutionArgs& args) {
+  static perf_t findAlgorithm(const ConvolutionArgs& args, bool benchmark) {
     int perf_count;
     perf_t perf_results;
     size_t max_ws_size = getWorkspaceSize(args, DEFAULT_ALGO);
@@ -436,7 +436,7 @@ struct algorithm_search<miopenConvBwdDataAlgorithm_t> {
         &perf_results,
         ws.data,
         ws.size,
-        false));
+        benchmark));
     return perf_results;
   }
 
@@ -493,7 +493,7 @@ struct algorithm_search<miopenConvBwdWeightsAlgorithm_t> {
   static BenchmarkCache<algo_t>& cache() { return bwd_filter_algos; }
   static BenchmarkCache<size_t>& wsscache() { return bwd_filter_wssizes; }
 
-  static perf_t findAlgorithm(const ConvolutionArgs& args) {
+  static perf_t findAlgorithm(const ConvolutionArgs& args, bool benchmark) {
     int perf_count;
     perf_t perf_results;
     size_t max_ws_size = getWorkspaceSize(args, DEFAULT_ALGO);
@@ -509,7 +509,7 @@ struct algorithm_search<miopenConvBwdWeightsAlgorithm_t> {
         &perf_results,
         ws.data,
         ws.size,
-        false));
+        benchmark));
     return perf_results;
   }
 
@@ -576,7 +576,7 @@ void findAlgorithm(const ConvolutionArgs& args, bool benchmark, algo_t* algo) {
     return;
   }
 
-  auto perfResults = search::findAlgorithm(args);
+  auto perfResults = search::findAlgorithm(args, benchmark);
   *algo = reinterpret_cast<algo_t&>(perfResults);
 
   cache.insert(args.params, *algo);
@@ -705,9 +705,21 @@ void raw_miopen_convolution_forward_out(
   args.idesc.set(input);
   args.wdesc.set(weight, input.suggest_memory_format(), 0);
   args.odesc.set(output);
-  args.cdesc.set(dataType, c_mode, input.dim() - 2, args.params.padding, args.params.stride, args.params.dilation, args.params.groups, deterministic);
+  args.cdesc.set(dataType, c_mode, input.dim() - 2, args.params.padding, args.params.stride, args.params.dilation, args.params.groups, benchmark, deterministic);
 
-  if (benchmark) {
+  if (deterministic && !benchmark) {
+      // immediate mode is triggered for the specific combination of benchmark=off deterministic=on
+      uint64_t solution_id;
+      Workspace workspace = chooseSolution<miopenConvFwdAlgorithm_t>(args, &solution_id);
+
+      MIOPEN_CHECK(miopenConvolutionForwardImmediate(
+        args.handle,
+        args.wdesc.desc(), weight.const_data_ptr(),
+        args.idesc.desc(), input.const_data_ptr(),
+        args.cdesc.desc(),
+        args.odesc.desc(), output.data_ptr(), workspace.data, workspace.size, solution_id));
+  }
+  else {
       miopenConvFwdAlgorithm_t fwdAlg;
       GPUWorkspace workspace = chooseAlgorithm(args, benchmark, &fwdAlg);
 
@@ -720,17 +732,6 @@ void raw_miopen_convolution_forward_out(
         args.wdesc.desc(), weight.const_data_ptr(),
         args.cdesc.desc(), fwdAlg, &zero,
         args.odesc.desc(), output.data_ptr(), workspace.data, workspace.size));
-  }
-  else {
-      uint64_t solution_id;
-      GPUWorkspace workspace = chooseSolution<miopenConvFwdAlgorithm_t>(args, &solution_id);
-
-      MIOPEN_CHECK(miopenConvolutionForwardImmediate(
-        args.handle,
-        args.wdesc.desc(), weight.const_data_ptr(),
-        args.idesc.desc(), input.const_data_ptr(),
-        args.cdesc.desc(),
-        args.odesc.desc(), output.data_ptr(), workspace.data, workspace.size, solution_id));
   }
 }
 
@@ -813,9 +814,21 @@ void raw_miopen_depthwise_convolution_forward_out(
   args.idesc.set(input);
   args.wdesc.set(weight, input.suggest_memory_format(), 0);
   args.odesc.set(output);
-  args.cdesc.set(dataType, c_mode, input.dim() - 2, args.params.padding, args.params.stride, args.params.dilation, args.params.groups, deterministic);
+  args.cdesc.set(dataType, c_mode, input.dim() - 2, args.params.padding, args.params.stride, args.params.dilation, args.params.groups, benchmark, deterministic);
 
-  if (benchmark) {
+  if (deterministic && !benchmark) {
+      // immediate mode is triggered for the specific combination of benchmark=off deterministic=on
+      uint64_t solution_id;
+      Workspace workspace = chooseSolution<miopenConvFwdAlgorithm_t>(args, &solution_id);
+
+      MIOPEN_CHECK(miopenConvolutionForwardImmediate(
+        args.handle,
+        args.wdesc.desc(), weight.const_data_ptr(),
+        args.idesc.desc(), input.const_data_ptr(),
+        args.cdesc.desc(),
+        args.odesc.desc(), output.data_ptr(), workspace.data, workspace.size, solution_id));
+  }
+  else {
       miopenConvFwdAlgorithm_t fwdAlg;
       GPUWorkspace workspace = chooseAlgorithm(args, benchmark, &fwdAlg);
 
@@ -828,17 +841,6 @@ void raw_miopen_depthwise_convolution_forward_out(
         args.wdesc.desc(), weight.const_data_ptr(),
         args.cdesc.desc(), fwdAlg, &zero,
         args.odesc.desc(), output.data_ptr(), workspace.data, workspace.size));
-  }
-  else {
-      uint64_t solution_id;
-      GPUWorkspace workspace = chooseSolution<miopenConvFwdAlgorithm_t>(args, &solution_id);
-
-      MIOPEN_CHECK(miopenConvolutionForwardImmediate(
-        args.handle,
-        args.wdesc.desc(), weight.const_data_ptr(),
-        args.idesc.desc(), input.const_data_ptr(),
-        args.cdesc.desc(),
-        args.odesc.desc(), output.data_ptr(), workspace.data, workspace.size, solution_id));
   }
 }
 
@@ -968,9 +970,21 @@ void raw_miopen_convolution_backward_weight_out(
   args.idesc.set(input);
   args.wdesc.set(grad_weight, input.suggest_memory_format(), 0);
   args.odesc.set(grad_output);
-  args.cdesc.set(dataType, c_mode, input.dim() - 2, args.params.padding, args.params.stride, args.params.dilation, args.params.groups, deterministic);
+  args.cdesc.set(dataType, c_mode, input.dim() - 2, args.params.padding, args.params.stride, args.params.dilation, args.params.groups, benchmark, deterministic);
 
-  if (benchmark) {
+  if (deterministic && !benchmark) {
+      // immediate mode is triggered for the specific combination of benchmark=off deterministic=on
+      uint64_t solution_id;
+      Workspace workspace = chooseSolution<miopenConvBwdWeightsAlgorithm_t>(args, &solution_id);
+
+      MIOPEN_CHECK(miopenConvolutionBackwardWeightsImmediate(
+          args.handle,
+          args.odesc.desc(), grad_output.const_data_ptr(),
+          args.idesc.desc(), input.const_data_ptr(),
+          args.cdesc.desc(),
+          args.wdesc.desc(), grad_weight.data_ptr(), workspace.data, workspace.size, solution_id));
+  }
+  else {
       miopenConvBwdWeightsAlgorithm_t bwdFilterAlg;
       GPUWorkspace workspace = chooseAlgorithm(args, benchmark, &bwdFilterAlg);
 
@@ -983,17 +997,6 @@ void raw_miopen_convolution_backward_weight_out(
           args.idesc.desc(), input.const_data_ptr(),
           args.cdesc.desc(), bwdFilterAlg, &zero,
           args.wdesc.desc(), grad_weight.data_ptr(), workspace.data, workspace.size));
-  }
-  else {
-      uint64_t solution_id;
-      GPUWorkspace workspace = chooseSolution<miopenConvBwdWeightsAlgorithm_t>(args, &solution_id);
-
-      MIOPEN_CHECK(miopenConvolutionBackwardWeightsImmediate(
-          args.handle,
-          args.odesc.desc(), grad_output.const_data_ptr(),
-          args.idesc.desc(), input.const_data_ptr(),
-          args.cdesc.desc(),
-          args.wdesc.desc(), grad_weight.data_ptr(), workspace.data, workspace.size, solution_id));
   }
 }
 
@@ -1012,9 +1015,21 @@ void raw_miopen_depthwise_convolution_backward_weight_out(
   args.idesc.set(input);
   args.wdesc.set(grad_weight, input.suggest_memory_format(), 0);
   args.odesc.set(grad_output);
-  args.cdesc.set(dataType, c_mode, input.dim() - 2, args.params.padding, args.params.stride, args.params.dilation, args.params.groups, deterministic);
+  args.cdesc.set(dataType, c_mode, input.dim() - 2, args.params.padding, args.params.stride, args.params.dilation, args.params.groups, benchmark, deterministic);
 
-  if (benchmark) {
+  if (deterministic && !benchmark) {
+      // immediate mode is triggered for the specific combination of benchmark=off deterministic=on
+      uint64_t solution_id;
+      Workspace workspace = chooseSolution<miopenConvBwdWeightsAlgorithm_t>(args, &solution_id);
+
+      MIOPEN_CHECK(miopenConvolutionBackwardWeightsImmediate(
+          args.handle,
+          args.odesc.desc(), grad_output.const_data_ptr(),
+          args.idesc.desc(), input.const_data_ptr(),
+          args.cdesc.desc(),
+          args.wdesc.desc(), grad_weight.data_ptr(), workspace.data, workspace.size, solution_id));
+  }
+  else {
       miopenConvBwdWeightsAlgorithm_t bwdFilterAlg;
       GPUWorkspace workspace = chooseAlgorithm(args, benchmark, &bwdFilterAlg);
 
@@ -1027,17 +1042,6 @@ void raw_miopen_depthwise_convolution_backward_weight_out(
           args.idesc.desc(), input.const_data_ptr(),
           args.cdesc.desc(), bwdFilterAlg, &zero,
           args.wdesc.desc(), grad_weight.data_ptr(), workspace.data, workspace.size));
-  }
-  else {
-      uint64_t solution_id;
-      GPUWorkspace workspace = chooseSolution<miopenConvBwdWeightsAlgorithm_t>(args, &solution_id);
-
-      MIOPEN_CHECK(miopenConvolutionBackwardWeightsImmediate(
-          args.handle,
-          args.odesc.desc(), grad_output.const_data_ptr(),
-          args.idesc.desc(), input.const_data_ptr(),
-          args.cdesc.desc(),
-          args.wdesc.desc(), grad_weight.data_ptr(), workspace.data, workspace.size, solution_id));
   }
 }
 
@@ -1217,9 +1221,21 @@ void raw_miopen_convolution_backward_input_out(
   args.idesc.set(grad_input);
   args.wdesc.set(weight, grad_output.suggest_memory_format(), 0);
   args.odesc.set(grad_output);
-  args.cdesc.set(dataType, c_mode, grad_output.dim() - 2, args.params.padding, args.params.stride, args.params.dilation, args.params.groups, deterministic);
+  args.cdesc.set(dataType, c_mode, grad_output.dim() - 2, args.params.padding, args.params.stride, args.params.dilation, args.params.groups, benchmark, deterministic);
 
-  if (benchmark) {
+  if (deterministic && !benchmark) {
+      // immediate mode is triggered for the specific combination of benchmark=off deterministic=on
+      uint64_t solution_id;
+      Workspace workspace = chooseSolution<miopenConvBwdDataAlgorithm_t>(args, &solution_id);
+
+      MIOPEN_CHECK(miopenConvolutionBackwardDataImmediate(
+          args.handle,
+          args.odesc.desc(), grad_output.const_data_ptr(),
+          args.wdesc.desc(), weight.const_data_ptr(),
+          args.cdesc.desc(),
+          args.idesc.desc(), grad_input.mutable_data_ptr(), workspace.data, workspace.size, solution_id));
+  }
+  else {
       miopenConvBwdDataAlgorithm_t bwdDataAlg;
       GPUWorkspace workspace = chooseAlgorithm(args, benchmark, &bwdDataAlg);
 
@@ -1232,17 +1248,6 @@ void raw_miopen_convolution_backward_input_out(
           args.wdesc.desc(), weight.const_data_ptr(),
           args.cdesc.desc(), bwdDataAlg, &zero,
           args.idesc.desc(), grad_input.mutable_data_ptr(), workspace.data, workspace.size));
-  }
-  else {
-      uint64_t solution_id;
-      GPUWorkspace workspace = chooseSolution<miopenConvBwdDataAlgorithm_t>(args, &solution_id);
-
-      MIOPEN_CHECK(miopenConvolutionBackwardDataImmediate(
-          args.handle,
-          args.odesc.desc(), grad_output.const_data_ptr(),
-          args.wdesc.desc(), weight.const_data_ptr(),
-          args.cdesc.desc(),
-          args.idesc.desc(), grad_input.mutable_data_ptr(), workspace.data, workspace.size, solution_id));
   }
 }
 
@@ -1326,9 +1331,21 @@ void raw_miopen_depthwise_convolution_backward_input_out(
   args.idesc.set(grad_input);
   args.wdesc.set(weight, grad_output.suggest_memory_format(), 0);
   args.odesc.set(grad_output);
-  args.cdesc.set(dataType, c_mode, grad_output.dim() - 2, args.params.padding, args.params.stride, args.params.dilation, args.params.groups, deterministic);
+  args.cdesc.set(dataType, c_mode, grad_output.dim() - 2, args.params.padding, args.params.stride, args.params.dilation, args.params.groups, benchmark, deterministic);
 
-  if (benchmark) {
+  if (deterministic && !benchmark) {
+      // immediate mode is triggered for the specific combination of benchmark=off deterministic=on
+      uint64_t solution_id;
+      Workspace workspace = chooseSolution<miopenConvBwdDataAlgorithm_t>(args, &solution_id);
+
+      MIOPEN_CHECK(miopenConvolutionBackwardDataImmediate(
+          args.handle,
+          args.odesc.desc(), grad_output.const_data_ptr(),
+          args.wdesc.desc(), weight.const_data_ptr(),
+          args.cdesc.desc(),
+          args.idesc.desc(), grad_input.mutable_data_ptr(), workspace.data, workspace.size, solution_id));
+  }
+  else {
       miopenConvBwdDataAlgorithm_t bwdDataAlg;
       GPUWorkspace workspace = chooseAlgorithm(args, benchmark, &bwdDataAlg);
 
@@ -1341,17 +1358,6 @@ void raw_miopen_depthwise_convolution_backward_input_out(
           args.wdesc.desc(), weight.const_data_ptr(),
           args.cdesc.desc(), bwdDataAlg, &zero,
           args.idesc.desc(), grad_input.mutable_data_ptr(), workspace.data, workspace.size));
-  }
-  else {
-      uint64_t solution_id;
-      GPUWorkspace workspace = chooseSolution<miopenConvBwdDataAlgorithm_t>(args, &solution_id);
-
-      MIOPEN_CHECK(miopenConvolutionBackwardDataImmediate(
-          args.handle,
-          args.odesc.desc(), grad_output.const_data_ptr(),
-          args.wdesc.desc(), weight.const_data_ptr(),
-          args.cdesc.desc(),
-          args.idesc.desc(), grad_input.mutable_data_ptr(), workspace.data, workspace.size, solution_id));
   }
 }
 
@@ -1488,7 +1494,7 @@ void raw_miopen_convolution_relu_out(
   args.idesc.set(input);
   args.wdesc.set(weight, input.suggest_memory_format(), 0);
   args.odesc.set(output);
-  args.cdesc.set(dataType, c_mode, input.dim() - 2, args.params.padding, args.params.stride, args.params.dilation, args.params.groups, deterministic);
+  args.cdesc.set(dataType, c_mode, input.dim() - 2, args.params.padding, args.params.stride, args.params.dilation, args.params.groups, benchmark, deterministic);
 
   TensorDescriptor bdesc;
   bdesc.set(bias.expand({1, bias.size(0)}), output.dim());
