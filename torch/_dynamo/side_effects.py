@@ -219,7 +219,6 @@ class SideEffects:
             int.__getattribute__,
             str.__getattribute__,
             list.__getattribute__,
-            tuple.__getattribute__,
         )
 
     def is_attribute_mutation(self, item):

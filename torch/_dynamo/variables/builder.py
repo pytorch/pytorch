@@ -74,6 +74,7 @@ from ..source import (
     GradSource,
     is_constant_source,
     is_from_optimizer_source,
+    ListGetItemSource,
     LocalSource,
     NumpyTensorSource,
     OptimizerSource,
@@ -166,7 +167,6 @@ from .lists import (
     ListVariable,
     NamedTupleVariable,
     RangeVariable,
-    RestrictedListSubclassVariable,
     SizeVariable,
     SliceVariable,
     TupleIteratorVariable,
@@ -1123,22 +1123,6 @@ class VariableBuilder:
                 value,
                 source=self.source,
             )
-        elif RestrictedListSubclassVariable.is_matching_cls(type(value)):
-            self.install_guards(GuardBuilder.SEQUENCE_LENGTH)
-            return self.tx.output.side_effects.track_mutable(
-                value,
-                RestrictedListSubclassVariable(
-                    [
-                        LazyVariableTracker.create(
-                            value=value[i], source=GetItemSource(self.source, i)
-                        )
-                        for i in range(len(value))
-                    ],
-                    user_cls=type(value),
-                    user_cls_source=AttrSource(self.source, "__class__"),
-                    source=self.source,
-                ),
-            )
         elif TorchScriptObjectVariable.is_matching_cls(type(value)):
             from ..source import (
                 FlattenScriptObjectSource,
@@ -1286,7 +1270,7 @@ class VariableBuilder:
             output = [
                 LazyVariableTracker.create(
                     list.__getitem__(value, i),
-                    source=GetItemSource(self.get_source(), i),
+                    source=ListGetItemSource(self.get_source(), i),
                 )
                 for i in range(list.__len__(value))
             ]

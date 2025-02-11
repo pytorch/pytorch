@@ -584,16 +584,6 @@ class UserDefinedClassVariable(UserDefinedVariable):
             var.call_method(tx, "__init__", args, kwargs)
             return var
         elif (
-            variables.RestrictedListSubclassVariable.is_matching_cls(self.value)
-            and self.source
-        ):
-            return variables.RestrictedListSubclassVariable(
-                variables.BuiltinVariable(list).call_function(tx, args, kwargs).items,
-                user_cls=self.value,
-                user_cls_source=self.source,
-                mutation_type=ValueMutationNew(),
-            )
-        elif (
             self.value in self._in_graph_classes()
             or is_traceable_wrapper_subclass_type(self.value)
         ):

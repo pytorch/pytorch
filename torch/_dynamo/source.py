@@ -586,6 +586,53 @@ class DictGetItemSource(ChainedSource):
 
 
 @dataclasses.dataclass(frozen=True)
+class ListGetItemSource(GetItemSource):
+    """
+    Same as GetItemSource with reconstruct and name overridden to be list specific.
+    """
+
+    def reconstruct(self, codegen):
+        # Reconstruct list.__getitem__(lst, index) to avoid any side effects
+        # from possibly overridden __getitem__.
+
+        # Load list.__getitem__
+        def load_list_getitem():
+            codegen.extend_output(
+                [
+                    codegen.create_load_global("list", add=True),
+                    codegen.create_load_attr("__getitem__"),
+                ]
+            )
+
+        codegen.add_push_null(load_list_getitem)
+
+        # Load the list
+        self.base.reconstruct(codegen)
+
+        # Load the index
+        if self.index_is_slice:
+            raise RuntimeError(
+                "List[slice] is a temporary object and should not have a source"
+            )
+        else:
+            codegen.append_output(codegen.create_load_const(self.index))
+
+        codegen.extend_output(create_call_function(2, False))
+
+    def name(self):
+        # Index can be of following types
+        # 1) index is a slice - example 1:4
+        # 2) index is a constant - example string, integer
+        assert not isinstance(self.index, Source)
+        if self.index_is_slice:
+            raise RuntimeError(
+                "List[slice] is a temporary object and should not have a source"
+            )
+        else:
+            return f"list.__getitem__({self.base.name()}, {self.index!r})"
+
+
+@dataclasses.dataclass(frozen=True)
 class TupleIteratorGetItemSource(GetItemSource):
     def reconstruct(self, codegen):
         codegen.add_push_null(

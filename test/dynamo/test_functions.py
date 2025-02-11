@@ -4518,11 +4518,17 @@ class DefaultsTests(torch._dynamo.test_case.TestCase):
                 self.checked = True
                 return super().__contains__(val)
 
+            def __getitem__(self, idx):
+                # Tests that the reconstruction logic does not call the
+                # overridden __getitem__ method.
+                raise RuntimeError("Should not be called")
+
         def fn(x, lst):
             if 3 in lst:
                 x = torch.cos(x)
             else:
                 x = torch.sin(x)
+            lst.append(4)
             return x * lst.len_mulitply_2()
 
         opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
@@ -4532,8 +4538,27 @@ class DefaultsTests(torch._dynamo.test_case.TestCase):
         res_lst = MyList([1, 2, 3])
         res = opt_fn(x, res_lst)
         self.assertEqual(ref, res)
+        self.assertEqual(len(ref_lst), len(res_lst))
         self.assertTrue(ref_lst.checked)
         self.assertTrue(res_lst.checked)
+
+    def test_udf_list_slice(self):
+        class MyList(list):  # noqa: SLOT001
+            def len_mulitply_2(self):
+                return len(self) * 2
+
+        def fn(x, lst):
+            lst.append(4)
+            return x * lst.len_mulitply_2() * sum(lst[1:3])
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        x = torch.randn(4)
+        ref_lst = MyList([1, 2, 3])
+        ref = fn(x, ref_lst)
+        res_lst = MyList([1, 2, 3])
+        res = opt_fn(x, res_lst)
+        self.assertEqual(ref, res)
+        self.assertEqual(len(ref_lst), len(res_lst))
 
     def test_udf_list_reconstruction(self):
         class MyList(list):  # noqa: SLOT001
