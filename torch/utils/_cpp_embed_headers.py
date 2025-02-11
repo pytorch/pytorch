@@ -14,7 +14,7 @@ def _embed_headers(
 ) -> str:
     for line_idx, cur_line in enumerate(content):
         # Eliminate warning: `#pragma once in main file`
-        if cur_line.starts_with("#pragma once"):
+        if cur_line.startswith("#pragma once"):
             cur_line[line_idx] = ""
             continue
         m = _match('^\\s*#include\\s*[<"]([^>"]+)[>"]', cur_line)
