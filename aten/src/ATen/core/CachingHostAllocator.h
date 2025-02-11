@@ -620,24 +620,41 @@ protected:
   alignas(64) HostStatsStaged stats_;
 };
 
-template <typename T>
+
+template<typename StreamType>
 struct CachingHostAllocatorInterface : public at::Allocator {
-  CachingHostAllocatorInterface() : impl_(std::make_unique<T>()) {}
+  CachingHostAllocatorInterface() = default;
+
+  virtual void free(void* ctx) = 0;
+
+  virtual bool record_event(void* ptr, void* ctx, StreamType stream) = 0;
+
+  virtual void empty_cache() = 0;
+
+  virtual HostStats getStats() = 0;
+
+  virtual void resetAccumulatedStats() = 0;
+
+  virtual void resetPeakStats() = 0;
+};
+
+template <typename T, typename S>
+struct CachingHostAllocatorPimpl : public CachingHostAllocatorInterface<S> {
+  CachingHostAllocatorPimpl() : impl_(std::make_unique<T>()) {}
 
   at::DataPtr allocate(size_t size) override {
     TORCH_CHECK_NOT_IMPLEMENTED(false, "Not implemented for allocate");
   }
 
-  void free(void* ctx) {
+  void free(void* ctx) override {
     impl_->free(ctx);
   }
 
-  template <typename S>
-  bool record_event(void* ptr, void* ctx, S stream) {
+  bool record_event(void* ptr, void* ctx, S stream) override {
     return impl_->record_event(ptr, ctx, stream);
   }
 
-  void empty_cache() {
+  void empty_cache() override {
     impl_->empty_cache();
   }
 
@@ -646,15 +663,15 @@ struct CachingHostAllocatorInterface : public at::Allocator {
     impl_->copy_data(dest, src, count);
   }
 
-  HostStats getStats() {
+  HostStats getStats() override {
     return impl_->getStats();
   }
 
-  void resetAccumulatedStats() {
+  void resetAccumulatedStats() override {
     impl_->resetAccumulatedStats();
   }
 
-  void resetPeakStats() {
+  void resetPeakStats() override {
     impl_->resetPeakStats();
   }
 

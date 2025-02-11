@@ -3,6 +3,7 @@
 #include <ATen/core/CachingHostAllocator.h>
 #include <c10/core/Allocator.h>
 #include <c10/cuda/CUDAStream.h>
+#include <c10/cuda/CUDAGraphsC10Utils.h>
 
 namespace at::cuda {
 
@@ -26,6 +27,15 @@ TORCH_CUDA_CPP_API bool CachingHostAllocator_recordEvent(
     void* ptr,
     void* ctx,
     c10::cuda::CUDAStream stream);
+
+TORCH_CUDA_CPP_API void CachingHostAllocator_beginAllocateToPool(
+   MempoolId_t pool_id, std::function<bool(CUDAStream)> filter);
+
+TORCH_CUDA_CPP_API void CachingHostAllocator_endAllocateToPool(
+   MempoolId_t pool_id);
+
+TORCH_CUDA_CPP_API void CachingHostAllocator_releasePool(
+    MempoolId_t pool_id);
 
 // Releases cached pinned memory allocations via cudaHostFree
 TORCH_CUDA_CPP_API void CachingHostAllocator_emptyCache();

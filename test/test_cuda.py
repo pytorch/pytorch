@@ -4811,6 +4811,97 @@ class TestBlockStateAbsorption(TestCase):
 
 
 @unittest.skipIf(not TEST_CUDA, "CUDA not available, skipping tests")
+class TestGraphPinMemory(TestCase):
+    def test_two_graphs(self):
+        graph = torch.cuda.CUDAGraph()
+        with torch.cuda.graph(graph, capture_error_mode="thread_local"):
+            data = torch.randn(8).pin_memory()
+            data_gpu = torch.randn(8, device="cuda")
+            data_gpu.copy_(data, non_blocking=True)
+            old_data_ptr = data.data_ptr()
+            del data
+            data2 = torch.randn(8).pin_memory()
+        assert data2.data_ptr() == old_data_ptr
+
+        old_data2_ptr = data2.data_ptr()
+
+        del data2
+
+        graph2 = torch.cuda.CUDAGraph()
+        with torch.cuda.graph(
+            graph2, capture_error_mode="thread_local", pool=graph.pool()
+        ):
+            data3 = torch.randn(8).pin_memory()
+            data_gpu = torch.randn(8, device="cuda")
+            data_gpu.copy_(data3, non_blocking=True)
+            old_data3_ptr = data3.data_ptr()
+            del data3
+            data4 = torch.randn(8).pin_memory()
+        assert data4.data_ptr() == old_data3_ptr
+        old_data4_ptr = data4.data_ptr()
+
+        assert old_data_ptr == old_data2_ptr == old_data3_ptr == old_data4_ptr
+
+    def test_pin_memory_no_free(self):
+        pass
+
+    def test_pin_memory_no_use(self):
+        graph = torch.cuda.CUDAGraph()
+        with torch.cuda.graph(graph, capture_error_mode="thread_local"):
+            data = torch.empty(8, pin_memory=True)
+            data2 = torch.empty(8, pin_memory=True)
+        assert data.data_ptr() != data2.data_ptr()
+        del data2
+
+    def test_pin_memory_use(self):
+        graph = torch.cuda.CUDAGraph()
+        with torch.cuda.graph(graph, capture_error_mode="thread_local"):
+            data = torch.randn(8).pin_memory()
+            data_gpu = torch.randn(8, device="cuda")
+            data_gpu.copy_(data, non_blocking=True)
+            old_data_ptr = data.data_ptr()
+            del data
+            data2 = torch.randn(8).pin_memory()
+        assert data2.data_ptr() == old_data_ptr
+
+    def test_pin_memory_joined_stream(self):
+        graph = torch.cuda.CUDAGraph()
+
+        with torch.cuda.graph(graph, capture_error_mode="global"):
+            data = torch.randn(8).pin_memory()
+            data_gpu = torch.randn(8, device="cuda")
+
+            s2 = torch.cuda.Stream()
+            s2.wait_stream(torch.cuda.current_stream())
+            with torch.cuda.stream(s2):
+                data_gpu.copy_(data, non_blocking=True)
+            torch.cuda.current_stream().wait_stream(s2)
+            # This *should* free my allocation!
+            old_data_ptr = data.data_ptr()
+            del data
+            data2 = torch.randn(8).pin_memory()
+        assert data2.data_ptr() == old_data_ptr
+
+    def test_pin_memory_unjoined_stream(self):
+        graph = torch.cuda.CUDAGraph()
+
+        with torch.cuda.graph(graph, capture_error_mode="global"):
+            data = torch.randn(8).pin_memory()
+            data_gpu = torch.randn(8, device="cuda")
+
+            s2 = torch.cuda.Stream()
+            s2.wait_stream(torch.cuda.current_stream())
+            with torch.cuda.stream(s2):
+                data_gpu.copy_(data, non_blocking=True)
+            # This should *not* free my allocation!
+            old_data_ptr = data.data_ptr()
+            del data
+            torch.cuda.current_stream().wait_stream(s2)
+            data2 = torch.randn(8).pin_memory()
+        assert data2.data_ptr() == old_data_ptr
+
+
+@unittest.skipIf(not TEST_CUDA, "CUDA not available, skipping tests")
 class TestMemPool(TestCase):
     def test_mempool_id(self):
         pool1 = torch.cuda.graph_pool_handle()
@@ -4907,6 +4998,8 @@ class TestMemPool(TestCase):
             # above and so the CUDACachingAllocator packed it into a 2 MB buffer
             self.assertEqual(len(pool.snapshot()), 1)
 
+            # Does't he realize that cutting a block into segments is
+            # not suitable for NCCL?
             out_1 = torch.randn(nelem_1mb, device="cuda")
 
             # pool should still have 1 segment since we made another small allocation
