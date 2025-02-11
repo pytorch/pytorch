@@ -1,7 +1,6 @@
 # mypy: allow-untyped-defs
 import collections
 import contextlib
-import functools
 import inspect
 import warnings
 import weakref
@@ -21,7 +20,7 @@ from .bytecode_transformation import (
 from .codegen import PyCodegen
 from .exc import SideEffectsError, unimplemented
 from .source import GlobalSource, LocalCellSource, LocalSource, Source
-from .utils import dict_new, is_frozen_dataclass, nn_module_new, object_new, tuple_new
+from .utils import is_frozen_dataclass, nn_module_new, object_new
 from .variables.base import (
     AttributeMutation,
     AttributeMutationExisting,
@@ -282,20 +281,8 @@ class SideEffects:
         if user_cls is torch.autograd.function.FunctionCtx:
             with warnings.catch_warnings(record=True):
                 obj = torch.autograd.Function()
-        elif issubclass(user_cls, torch.nn.Module):
-            obj = nn_module_new(user_cls)
-        elif issubclass(user_cls, (dict, collections.OrderedDict)):
-            obj = dict_new(user_cls)
-        elif issubclass(user_cls, tuple):
-            obj = tuple_new(user_cls)
         else:
-            try:
-                obj = object_new(user_cls)
-            except TypeError:
-                # TODO(anijain2305/jansel) - Even though object.__new__ is same
-                # as user_cls.__new__, calling object.__new__(user_cls) fails
-                # with TypeError.
-                unimplemented(f"Unable to construct the object of type {user_cls}")
+            obj = object_new(user_cls)
         variable = variable_cls(
             obj,
             mutation_type=AttributeMutationNew(cls_source),
@@ -305,18 +292,27 @@ class SideEffects:
         self.keepalive.append(obj)
         return variable
 
-    def track_object_new_from_user_defined_class(
-        self,
-        cls_variable: "variables.UserDefinedClassVariable",
-    ):
-        cls_source = cls_variable.source
-        user_cls = cls_variable.value
+    def get_variable_cls(self, user_cls):
+        from torch.overrides import TorchFunctionMode
 
-        # Find the variable class
+        from .variables.ctx_manager import GenericContextWrappingVariable
+        from .variables.torch_function import TorchFunctionModeVariable
+        from .variables.user_defined import is_forbidden_context_manager
+
         variable_cls: type[
             variables.UserDefinedObjectVariable
         ] = variables.UserDefinedObjectVariable
-        if issubclass(user_cls, torch.nn.Module):
+        if issubclass(
+            user_cls, TorchFunctionMode
+        ) and TorchFunctionModeVariable.is_supported_torch_function_mode(user_cls):
+            variable_cls = TorchFunctionModeVariable
+        elif (
+            hasattr(user_cls, "__enter__")
+            and hasattr(user_cls, "__exit__")
+            and not is_forbidden_context_manager(user_cls)
+        ):
+            variable_cls = GenericContextWrappingVariable
+        elif issubclass(user_cls, torch.nn.Module):
             variable_cls = variables.UnspecializedNNModuleVariable
         elif issubclass(user_cls, (dict, collections.OrderedDict)):
             variable_cls = variables.UserDefinedDictVariable
@@ -326,14 +322,69 @@ class SideEffects:
             variable_cls = variables.MutableMappingVariable
         elif is_frozen_dataclass(user_cls):
             variable_cls = FrozenDataClassVariable
-        else:
-            variable_cls = variables.UserDefinedObjectVariable
-
         assert issubclass(variable_cls, variables.UserDefinedObjectVariable)
+        return variable_cls
 
-        variable_cls = functools.partial(variable_cls, cls_source=cls_source)
+    def get_example_value(
+        self,
+        base_cls_vt,
+        cls_vt,
+        init_args,
+    ):
+        user_cls = cls_vt.value
+        if issubclass(user_cls, torch.nn.Module):
+            # TODO(anijain2305) - Is it possible to remove this specialization?
+            obj = nn_module_new(user_cls)
+        else:
+            if isinstance(base_cls_vt, variables.BuiltinVariable):
+                base_cls = base_cls_vt.fn
+            elif isinstance(base_cls_vt, variables.UserDefinedClassVariable):
+                base_cls = base_cls_vt.value
+            else:
+                raise RuntimeError(f"Unexpected base_cls_vt {base_cls_vt}")
 
-        return self.track_object_new(cls_source, user_cls, variable_cls, {})
+            assert variables.UserDefinedClassVariable.is_supported_new_method(
+                base_cls.__new__
+            )
+            # TODO(anijain2305) - Consider adding get_example_value method to
+            # each VT to get an example value for all args. As we expand the
+            # scope to other __new__ methods, we might need to call __new__ with
+            # init_args (like functools.partial)
+            # init_args = [arg.get_example_value() for arg in init_args]
+            # obj = base_cls.__new__(user_cls, *init_args)
+
+            obj = base_cls.__new__(user_cls)
+        return obj
+
+    def track_new_user_defined_object(
+        self,
+        base_cls_vt,
+        cls_vt,
+        init_args,
+    ):
+        """
+        Creates a UserDefinedObjectVariable (or its subclass) variable tracker
+        and mark it for attribute mutation tracking.
+
+        Also records the variable trackers to call __new__ method on
+        reconstruction. Roughly, the reconstruction looks like this
+            base_cls_vt.__new__(user_cls, *init_args)
+        """
+        cls_source = cls_vt.source
+        user_cls = cls_vt.value
+        variable_cls = self.get_variable_cls(user_cls)
+        obj = self.get_example_value(base_cls_vt, cls_vt, init_args)
+
+        variable = variable_cls(
+            obj,
+            cls_source=cls_vt.source,
+            base_cls_vt=base_cls_vt,
+            init_args=init_args,
+            mutation_type=AttributeMutationNew(cls_source),
+        )
+        self.id_to_variable[id(obj)] = variable
+        self.keepalive.append(obj)
+        return variable
 
     def track_cell_new(
         self,
@@ -456,13 +507,6 @@ class SideEffects:
     def _get_modified_vars(self):
         return [var for var in self.id_to_variable.values() if self.is_modified(var)]
 
-    def get_new_function(self, var):
-        if isinstance(var, variables.UserDefinedDictVariable):
-            return "dict_new"
-        elif isinstance(var, variables.UserDefinedTupleVariable):
-            return "tuple_new"
-        return "object_new"
-
     def codegen_save_tempvars(self, cg: PyCodegen):
         # Make sure we codegen these modified VT to their source by default, so
         # that mutation and aliasing are properly accounted for.
@@ -486,17 +530,31 @@ class SideEffects:
             elif isinstance(var.mutation_type, AttributeMutationNew):
                 if isinstance(var, variables.AutogradFunctionContextVariable):
                     unimplemented("AutogradFunctionContextVariable escaped")
-                cg.add_push_null(
-                    lambda: cg.load_import_from(
-                        utils.__name__, self.get_new_function(var)
-                    )
-                )
-                cg(var.mutation_type.cls_source)
-                if isinstance(var, variables.UserDefinedTupleVariable) and var.new_args:
-                    cg(var.new_args)
-                    cg.extend_output(create_call_function(2, False))
+
+                # Reconstruct the bytecode for
+                # base_cls.__new__(user_cls, *args)
+
+                if isinstance(var, variables.UserDefinedObjectVariable):
+
+                    def load_new_method():
+                        assert var.base_cls_vt is not None
+                        cg(var.base_cls_vt)  # type: ignore[attr-defined]
+                        cg.extend_output([cg.create_load_attr("__new__")])
+
+                    cg.add_push_null(load_new_method)
                 else:
-                    cg.extend_output(create_call_function(1, False))
+                    cg.add_push_null(
+                        lambda: cg.load_import_from(utils.__name__, "object_new")
+                    )
+                cg(var.mutation_type.cls_source)
+
+                # Generate the args to the __new__ method
+                for arg in var.init_args:
+                    cg(arg)
+
+                # Call the __new__ method
+                cg.extend_output(create_call_function(1 + len(var.init_args), False))
+
                 cg.add_cache(var)
                 var.source = LocalSource(cg.tempvars[var])
             else:
