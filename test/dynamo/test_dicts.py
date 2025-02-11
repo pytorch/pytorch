@@ -643,6 +643,9 @@ class DictTests(torch._dynamo.test_case.TestCase):
         ):
 
             class CustomDict(super_class):
+                def __new__(self, *args, **kwargs):
+                    return super().__new__(self, *args, **kwargs)
+
                 def __init__(self, *args, **kwargs):
                     super().__init__(*args, **kwargs)
 
@@ -835,6 +838,17 @@ class DictTests(torch._dynamo.test_case.TestCase):
         # check update to d is reflected in res
         d["e"] = 5
         self.assertEqual(d["e"], res["e"])
+
+    def test_move_to_end(self):
+        def fn(x):
+            d = OrderedDict({"a": torch.cos(x), "b": 3, "c": 5})
+            d.move_to_end("a")
+            return d
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        x = torch.randn(4)
+        self.assertEqual(["b", "c", "a"], list(opt_fn(x).keys()))
+        self.assertEqual(fn(x), opt_fn(x))
 
 
 if __name__ == "__main__":
