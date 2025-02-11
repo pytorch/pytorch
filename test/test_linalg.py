@@ -1119,6 +1119,15 @@ class TestLinalg(TestCase):
             with self.assertRaisesRegex(RuntimeError, "tensors to be on the same device"):
                 torch.linalg.eigvalsh(t, out=out)
 
+    @onlyCPU
+    @skipCPUIfNoLapack
+    @dtypes(*floating_and_complex_types())
+    def test_eigh_lwork_lapack(self, device, dtype):
+        # test that the calculated lwork does not cause a crash, see https://github.com/pytorch/pytorch/issues/145801
+        t = torch.rand(3000, 3000, device=device, dtype=dtype)
+        y = torch.linalg.eigh(t)
+        self.assertEqual(y.eigenvalues.shape, (3000,))
+
     @dtypes(*floating_and_complex_types())
     def test_kron(self, device, dtype):
 
