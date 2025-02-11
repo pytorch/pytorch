@@ -54,8 +54,10 @@ disable_progress = True
 verbose_progress = False
 
 # use fx aot graph codegen cache
-fx_graph_cache = (
-    os.environ.get("TORCHINDUCTOR_FX_GRAPH_CACHE", "0" if is_fbcode() else "1") == "1"
+fx_graph_cache: bool = Config(
+    justknob="pytorch/remote_cache:enable_local_fx_graph_cache",
+    env_name_force="TORCHINDUCTOR_FX_GRAPH_CACHE",
+    default=True,
 )
 
 # use remote fx aot graph codegen cache
@@ -145,6 +147,9 @@ allow_buffer_reuse = True
 
 # Enable pooled allocations for non-output tensors
 memory_planning = os.environ.get("TORCHINDUCTOR_MEMORY_PLANNING", "0") == "1"
+
+# Enable to allow using ftz variant of exponenet instruction in triton codegen.
+use_fast_math = os.environ.get("TORCHINDUCTOR_USE_FAST_MATH") == "1"
 
 # How to organize memory under memory_planning=True:
 # - "none": do not try to pool storage, just reuse
@@ -338,7 +343,7 @@ max_autotune_pointwise = os.environ.get("TORCHINDUCTOR_MAX_AUTOTUNE_POINTWISE") 
 max_autotune_gemm = os.environ.get("TORCHINDUCTOR_MAX_AUTOTUNE_GEMM") == "1"
 
 # Modifies the number of autotuning choices displayed, set to None for all
-autotune_num_choices_displayed = 10
+autotune_num_choices_displayed: Optional[int] = 10
 
 # force cublas and triton to use the same precision; cublas supports TF32 for matmul operations
 # when m, n, k are multiples of 16, 16, 8, whereas triton supports TF32 for matmul operations
@@ -1243,6 +1248,9 @@ class cuda:
     # This is mainly used to reduce test time in CI.
     cutlass_max_profiling_configs: Optional[int] = None
 
+    # The L2 swizzle values to consider when profiling CUTLASS configs in max_autotune.
+    cutlass_max_profiling_swizzle_options: list[int] = [2]
+
     # Path to CUDA NVCC.
     # NVCC search order:
     # 1) cuda_cxx set in this config
@@ -1274,6 +1282,16 @@ class cuda:
     # caused by the op ordering of the "pingpong" memory access
     # pattern used by some Cutlass Kernels.
     cutlass_op_denylist_regex: Optional[str] = None
+
+    # Non-negative integer which determines how many kernels are instantiated.
+    # 0 = 0000 generates the fewest kernels, 9999 generates all possible combinations.
+    # increasing first digit reduces schedule / mixed type pruning,
+    # increasing second digit generates more cluster sizes,
+    # increasing third digit generates more MMA multipliers,
+    # increasing fourth digit generates more instruction shapes.
+    cutlass_instantiation_level: str = os.environ.get(
+        "TORCHINDUCTOR_CUTLASS_INSTANTIATION_LEVEL", "0"
+    )
 
 
 class rocm:

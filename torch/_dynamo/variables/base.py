@@ -2,14 +2,14 @@
 
 import collections
 from enum import Enum
-from typing import Any, Callable, Optional, TYPE_CHECKING
+from typing import Any, Callable, Optional, Sequence, TYPE_CHECKING
 
 from .. import variables
 from ..current_scope_id import current_scope_id
 from ..exc import unimplemented, unimplemented_v2
 from ..guards import GuardBuilder, install_guard
 from ..source import AttrSource, Source
-from ..utils import istype
+from ..utils import cmp_name_to_op_mapping, istype
 
 
 if TYPE_CHECKING:
@@ -388,13 +388,15 @@ class VariableTracker(metaclass=VariableTrackerMeta):
     def inspect_parameter_names(self) -> list[str]:
         unimplemented(f"inspect_parameter_names: {self}")
 
-    def call_hasattr(self, tx: "InstructionTranslator", name: str) -> "VariableTracker":
+    def call_obj_hasattr(
+        self, tx: "InstructionTranslator", name: str
+    ) -> "VariableTracker":
         unimplemented(f"hasattr {self.__class__.__name__} {name}")
 
     def call_function(
         self,
         tx: "InstructionTranslator",
-        args: "list[VariableTracker]",
+        args: Sequence["VariableTracker"],
         kwargs: "dict[str, VariableTracker]",
     ) -> "VariableTracker":
         unimplemented_v2(
@@ -424,6 +426,29 @@ class VariableTracker(metaclass=VariableTrackerMeta):
             and not kwargs
         ):
             return self.var_getattr(tx, args[0].as_python_constant())
+        elif (
+            name in cmp_name_to_op_mapping
+            and len(args) == 1
+            and self.is_python_constant()
+            and not tx.output.side_effects.has_pending_mutation(self)
+            and not kwargs
+        ):
+            # NB : Checking for mutation is necessary because we compare
+            # constant values
+            other = args[0]
+            if not isinstance(self, type(other)):
+                return variables.ConstantVariable.create(NotImplemented)
+            if (
+                not other.is_python_constant()
+                or tx.output.side_effects.has_pending_mutation(other)
+            ):
+                unimplemented(f"call_method {self} {name} {args} {kwargs}")
+
+            return variables.ConstantVariable.create(
+                cmp_name_to_op_mapping[name](
+                    self.as_python_constant(), other.as_python_constant()
+                )
+            )
         unimplemented_v2(
             gb_type="Unsupported method call",
             context=f"call_method {self} {name} {args} {kwargs}",

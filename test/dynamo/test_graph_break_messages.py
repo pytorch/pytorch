@@ -1,15 +1,17 @@
 # Owner(s): ["module: dynamo"]
 
-import logging
+import re
 import unittest
+import warnings
 
 import torch
 import torch._dynamo
 import torch._dynamo.config
 import torch._dynamo.test_case
+import torch.utils._pytree as python_pytree
 from torch._dynamo.exc import Unsupported
-from torch.testing._internal.common_utils import munge_exc
-from torch.testing._internal.logging_utils import LoggingTestCase, make_logging_test
+from torch._dynamo.utils import counters
+from torch.testing._internal.common_utils import IS_FBCODE, scoped_load_inline
 
 
 def _helper(fn, args, backend="eager"):
@@ -81,7 +83,9 @@ from user code:
 
         self.assertExpectedInlineMunged(
             Unsupported,
-            lambda: torch.compile(fn, backend="eager", fullgraph=True)(torch.Tensor([1])),
+            lambda: torch.compile(fn, backend="eager", fullgraph=True)(
+                torch.Tensor([1])
+            ),
             """\
 Tensor.item
 
@@ -97,7 +101,9 @@ from user code:
         with torch._dynamo.config.patch(capture_scalar_outputs=True):
             self.assertExpectedInlineMunged(
                 Unsupported,
-                lambda: torch.compile(fn, backend="eager", fullgraph=True)(torch.ones(3)),
+                lambda: torch.compile(fn, backend="eager", fullgraph=True)(
+                    torch.ones(3)
+                ),
                 """\
 Data dependent operator
   Explanation: Operator `aten.equal.default` has a non-Tensor output whose value is dependent on the data of Tensor inputs.
@@ -108,7 +114,7 @@ Data dependent operator
 
 from user code:
    File "test_graph_break_messages.py", line N, in fn
-    _helper(fn, (torch.ones(3),)),""",
+    return torch.equal(x, x)""",
             )
 
     def test_super_call_method(self):
@@ -117,7 +123,9 @@ from user code:
 
         self.assertExpectedInlineMunged(
             Unsupported,
-            lambda: torch.compile(fn, backend="eager", fullgraph=True)(zip(range(5), range(10))),
+            lambda: torch.compile(fn, backend="eager", fullgraph=True)(
+                zip(range(5), range(10))
+            ),
             """\
 Unsupported method call
   Explanation: Dynamo does not know how to trace method `__iter__` of class `zip`
@@ -138,7 +146,9 @@ from user code:
 
         self.assertExpectedInlineMunged(
             Unsupported,
-            lambda: torch.compile(fn, backend="eager", fullgraph=True)(zip(range(5), range(10))),
+            lambda: torch.compile(fn, backend="eager", fullgraph=True)(
+                zip(range(5), range(10))
+            ),
             """\
 Unsupported function call
   Explanation: Dynamo does not know how to trace the function `UserDefinedObjectVariable(zip)`
@@ -184,21 +194,22 @@ from user code:
 
         self.assertExpectedInlineMunged(
             Unsupported,
-            lambda: torch.compile(fn, backend=bad_backend, fullgraph=True)(torch.ones(3, 3))
+            lambda: torch.compile(fn, backend=bad_backend, fullgraph=True)(
+                torch.ones(3, 3)
+            ),
             """\
-Backend compiler fake tensor exception
-  Explanation: Backend compiler `bad_backend` failed with a fake tensor exception
+Backend compiler exception
+  Explanation: Backend compiler `bad_backend` failed with test. Adding a graph break.
   Hint: Report an issue to PyTorch
 
   Developer debug context: Backend: bad_backend
+Exception:test
 Traceback:
   File "test_graph_break_messages.py", line N, in fn
     return x + 1""",
         )
 
     def test_unsupported_builtin(self):
-        import operator
-
         def fn():
             print("abc")
 
@@ -217,5 +228,229 @@ Failed to trace builtin operator
 
 from user code:
    File "test_graph_break_messages.py", line N, in fn
-    print("abc")"""",
+    print("abc")""",
         )
+
+    def test_skipfile_call(self):
+        def fn():
+            return unittest.skip("test")
+
+        def post_munge(s):
+            return re.sub(r"file `.*case.py`", "file `case.py`", s)
+
+        self.assertExpectedInlineMunged(
+            Unsupported,
+            lambda: torch.compile(fn, backend="eager", fullgraph=True)(),
+            """\
+Attempted to call function marked as skipped
+  Explanation: Dynamo developers have manually marked that the function `skip` in file `case.py` should not be traced.
+  Hint: Avoid calling the function `skip`.
+  Hint: Remove the function `skip` or the file `case.py` from torch/_dynamo/trace_rules.py. More graph breaks may occur as a result of attempting to trace into the function.
+  Hint: Please file an issue to PyTorch.
+
+  Developer debug context: module: unittest.case, qualname: skip, skip reason: <missing reason>
+
+
+from user code:
+   File "test_graph_break_messages.py", line N, in fn
+    return unittest.skip("test")""",
+            post_munge=post_munge,
+        )
+
+    def test_skipfile_dynamo_call(self):
+        def fn():
+            torch._dynamo.disable()
+
+        self.assertExpectedInlineMunged(
+            Unsupported,
+            lambda: torch.compile(fn, backend="eager", fullgraph=True)(),
+            """\
+Attempted to call function marked as skipped
+  Explanation: Dynamo developers have manually marked that the function `disable` in file `_dynamo/decorators.py` should not be traced.
+  Hint: Avoid calling the function `disable`.
+
+  Developer debug context: module: torch._dynamo.decorators, qualname: disable, skip reason: <missing reason>
+
+
+from user code:
+   File "test_graph_break_messages.py", line N, in fn
+    torch._dynamo.disable()""",
+        )
+
+    def test_disable(self):
+        @torch.compiler.disable
+        def inner():
+            return 1
+
+        def fn():
+            return inner()
+
+        def post_munge(s):
+            return re.sub(
+                r"<function GraphBreakMessagesTest.test_disable.<locals>.inner at 0x[0-9A-Fa-f]+>",
+                "<function inner>",
+                s,
+            )
+
+        self.assertExpectedInlineMunged(
+            Unsupported,
+            lambda: torch.compile(fn, backend="eager", fullgraph=True)(),
+            """\
+Skip calling `torch.compiler.disable()`d function
+  Explanation: Skip calling function `<function inner>` since it was wrapped with `torch.compiler.disable`
+  Hint: Remove the `torch.compiler.disable` call
+
+  Developer debug context: <function inner>
+
+
+from user code:
+   File "test_graph_break_messages.py", line N, in fn
+    return inner()""",
+            post_munge=post_munge,
+        )
+
+    def test_graph_break(self):
+        def fn():
+            torch._dynamo.graph_break()
+
+        self.assertExpectedInlineMunged(
+            Unsupported,
+            lambda: torch.compile(fn, backend="eager", fullgraph=True)(),
+            """\
+Attempted to call function marked as skipped
+  Explanation: Dynamo developers have manually marked that the function `graph_break` in file `_dynamo/decorators.py` should not be traced.
+  Hint: Avoid calling the function `graph_break`.
+
+  Developer debug context: module: torch._dynamo.decorators, qualname: graph_break, skip reason: <missing reason>
+
+
+from user code:
+   File "test_graph_break_messages.py", line N, in fn
+    torch._dynamo.graph_break()""",
+        )
+
+    def test_warnings(self):
+        def fn():
+            warnings.warn("test")
+
+        self.assertExpectedInlineMunged(
+            Unsupported,
+            lambda: torch.compile(fn, backend="eager", fullgraph=True)(),
+            """\
+Attempted to call function marked as skipped
+  Explanation: Dynamo does not know how to trace the Python builtin `_warnings.warn`.
+  Hint: If you are attempting to call a logging function (e.g. `_warnings.warn`), you can try adding it to `torch._dynamo.config.reorderable_logging_functions`.
+  Hint: Please file an issue on GitHub so the PyTorch team can add support for it.
+
+  Developer debug context: module: _warnings, qualname: warn, skip reason: <missing reason>
+
+
+from user code:
+   File "test_graph_break_messages.py", line N, in fn
+    warnings.warn("test")""",
+        )
+
+    @unittest.skipIf(not python_pytree._cxx_pytree_exists, "missing optree package")
+    def test_optree_graph_break_message(self):
+        import optree
+
+        @torch.compile(backend="eager")
+        def fn(x):
+            d = {"a": 1}
+            optree.tree_flatten(d)
+            return torch.sin(x)
+
+        fn(torch.randn(4))
+        self.assertEqual(len(counters["graph_break"]), 1)
+        first_graph_break = list(counters["graph_break"].keys())[0]
+        self.assertExpectedInline(
+            first_graph_break,
+            """\
+Attempted to call function marked as skipped
+  Explanation: Dynamo cannot trace optree C/C++ function optree._C.PyCapsule.flatten.
+  Hint:  Consider using torch.utils._pytree - https://github.com/pytorch/pytorch/blob/main/torch/utils/_pytree.py
+
+  Developer debug context: module: optree._C, qualname: PyCapsule.flatten, skip reason: <missing reason>
+""",
+        )
+
+    @unittest.skipIf(IS_FBCODE, "inline cpp_extension doesn't work in fbcode")
+    @scoped_load_inline
+    def test_cpp_extension_recommends_custom_ops(self, load_inline):
+        cpp_source = """
+        #include <torch/extension.h>
+        at::Tensor foobar(const at::Tensor& x) {
+            return x.clone();
+        }
+        """
+        module = load_inline(
+            name="mylib",
+            cpp_sources=cpp_source,
+            functions="foobar",
+            verbose=True,
+        )
+
+        x = torch.ones(2, 2, requires_grad=True)
+        counters.clear()
+
+        @torch.compile(backend="eager")
+        def f(x):
+            return module.foobar(x)
+
+        with self.assertWarnsOnceRegex(
+            UserWarning,
+            ".*https://pytorch.org/tutorials/advanced/custom_ops_landing_page.html.*",
+            flags=re.DOTALL,
+        ):
+            f(x)
+        self.assertEqual(len(counters["graph_break"]), 1)
+        first_graph_break = list(counters["graph_break"].keys())[0]
+        self.assertExpectedInline(
+            first_graph_break,
+            """\
+Attempted to call function marked as skipped
+  Explanation: Dynamo does not know how to trace the builtin `mylib.PyCapsule.foobar.` This function is either a Python builtin (e.g. _warnings.warn) or a third-party C/C++ Python extension (perhaps created with pybind).
+  Hint: If it is a Python builtin, please file an issue on GitHub so the PyTorch team can add support for it and see the next case for a workaround.
+  Hint: If it is a third-party C/C++ Python extension, please either wrap it into a PyTorch-understood custom operator (see https://pytorch.org/tutorials/advanced/custom_ops_landing_page.html for more details) or, if it is traceable, use `torch.compiler.allow_in_graph`.
+
+  Developer debug context: module: mylib, qualname: PyCapsule.foobar, skip reason: <missing reason>
+""",
+        )
+
+        cpp_source = """
+        #include <torch/extension.h>
+        at::Tensor baz(const at::Tensor& x) {
+            return x.clone();
+        }
+        """
+        module2 = load_inline(
+            name="mylib2",
+            cpp_sources=cpp_source,
+            functions="baz",
+            verbose=True,
+        )
+
+        torch._dynamo.reset()
+
+        # Test that each warning only happens once
+        @torch.compile(backend="eager")
+        def f(x):
+            module2.baz(x)
+            module.foobar(x)
+            module.foobar(x)
+            module2.baz(x)
+            module.foobar(x)
+            module2.baz(x)
+            return x.clone()
+
+        with warnings.catch_warnings(record=True) as ws:
+            warnings.simplefilter("always")
+            f(x)
+            f(x)
+        self.assertEqual(len(ws), 2)
+
+
+if __name__ == "__main__":
+    from torch._dynamo.test_case import run_tests
+
+    run_tests()

@@ -252,6 +252,8 @@ class OutputGraph:
     the root InstructionTranslator's OutputGraph.
     """
 
+    side_effects: SideEffects
+
     def __init__(
         self,
         code_options: dict[str, Any],
@@ -1476,9 +1478,9 @@ class OutputGraph:
             unimplemented_v2_with_warning(
                 e,
                 self.root_tx.f_code,
-                gb_type="Backend compiler fake tensor exception",
-                context=f"Backend: {name}\nTraceback:\n{self.root_tx.format_frame_summary()}",
-                explanation=f"Backend compiler `{name}` failed with a fake tensor exception",
+                gb_type="Backend compiler exception",
+                context=f"Backend: {name}\nException:{str(e)}\nTraceback:\n{self.root_tx.format_frame_summary()}",
+                explanation=f"Backend compiler `{name}` failed with {str(e)}. Adding a graph break.",
                 hints=[
                     "Report an issue to PyTorch",
                 ],
@@ -1939,6 +1941,9 @@ class SubgraphTracer(fx.Tracer):
         # Only safe if we know for sure that *NOT* replaying these side-effects during
         # backward recomputation of the checkpoint region doesn't affect its correctness.
         self.allow_side_effects_under_checkpoint = False
+
+        # True if this tracer is currently tracing (reconstructing) into a Python generator
+        self.is_reconstructing_generator = False
 
         self.debug_level: int = parent.debug_level + 1 if parent is not None else 0
 

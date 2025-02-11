@@ -169,13 +169,35 @@ function install_torchrec_and_fbgemm() {
   torchrec_commit=$(get_pinned_commit torchrec)
   local fbgemm_commit
   fbgemm_commit=$(get_pinned_commit fbgemm)
+  if [[ "$BUILD_ENVIRONMENT" == *rocm* ]] ; then
+    fbgemm_commit=$(get_pinned_commit fbgemm_rocm)
+  fi
   pip_uninstall torchrec-nightly
   pip_uninstall fbgemm-gpu-nightly
   pip_install setuptools-git-versioning scikit-build pyre-extensions
 
-  # See https://github.com/pytorch/pytorch/issues/106971
-  CUDA_PATH=/usr/local/cuda-12.1 pip_install --no-use-pep517 --user "git+https://github.com/pytorch/FBGEMM.git@${fbgemm_commit}#egg=fbgemm-gpu&subdirectory=fbgemm_gpu"
-  pip_install --no-use-pep517 --user "git+https://github.com/pytorch/torchrec.git@${torchrec_commit}"
+  if [[ "$BUILD_ENVIRONMENT" == *rocm* ]] ; then
+    # install torchrec first because it installs fbgemm nightly on top of rocm fbgemm
+    pip_install --no-use-pep517 --user "git+https://github.com/pytorch/torchrec.git@${torchrec_commit}"
+    pip_uninstall fbgemm-gpu-nightly
+
+    pip_install tabulate  # needed for newer fbgemm
+    pip_install patchelf  # needed for rocm fbgemm
+    git clone --recursive https://github.com/pytorch/fbgemm
+    pushd fbgemm/fbgemm_gpu
+    git checkout "${fbgemm_commit}"
+    python setup.py install \
+      --package_variant=rocm \
+      -DHIP_ROOT_DIR="${ROCM_PATH}" \
+      -DCMAKE_C_FLAGS="-DTORCH_USE_HIP_DSA" \
+      -DCMAKE_CXX_FLAGS="-DTORCH_USE_HIP_DSA"
+    popd
+    rm -rf fbgemm
+  else
+    # See https://github.com/pytorch/pytorch/issues/106971
+    CUDA_PATH=/usr/local/cuda-12.1 pip_install --no-use-pep517 --user "git+https://github.com/pytorch/FBGEMM.git@${fbgemm_commit}#egg=fbgemm-gpu&subdirectory=fbgemm_gpu"
+    pip_install --no-use-pep517 --user "git+https://github.com/pytorch/torchrec.git@${torchrec_commit}"
+  fi
 }
 
 function clone_pytorch_xla() {
@@ -204,6 +226,11 @@ function checkout_install_torchbench() {
     # to install and test other models
     python install.py --continue_on_fail
   fi
+
+  # TODO (huydhn): transformers-4.44.2 added by https://github.com/pytorch/benchmark/pull/2488
+  # is regressing speedup metric. This needs to be investigated further
+  pip install transformers==4.38.1
+
   echo "Print all dependencies after TorchBench is installed"
   python -mpip freeze
   popd

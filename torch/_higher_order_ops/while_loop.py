@@ -1,9 +1,15 @@
 # mypy: allow-untyped-defs
+import contextlib
 from typing import Callable, Union
 
 import torch
 import torch.utils._pytree as pytree
 from torch._C import DispatchKey
+from torch._higher_order_ops.cudagraph_conditional_nodes import (
+    ControlFlowOpWarmupDispatchMode,
+    CUDAGraphCaptureControlFlowOpDispatchMode,
+    while_loop_node,
+)
 from torch._higher_order_ops.utils import (
     _has_potential_branch_input_alias,
     _has_potential_branch_input_mutation,
@@ -17,6 +23,7 @@ from torch._higher_order_ops.utils import (
 )
 from torch._ops import HigherOrderOperator
 from torch._subclasses.fake_tensor import FakeTensorMode
+from torch.cuda.graphs import _graph_no_gc
 from torch.fx.experimental.proxy_tensor import (
     _temp_remove_metadata_torch_function_mode,
     ProxyTorchDispatchMode,
@@ -215,6 +222,37 @@ def while_loop_dense(cond_fn, body_fn, carried_inputs, additional_inputs):
     return carried_vals
 
 
+# WAR for https://github.com/pytorch/pytorch/issues/140322
+@while_loop_op.py_impl(CUDAGraphCaptureControlFlowOpDispatchMode)
+def while_loop_cudagraph(mode, cond_fn, body_fn, carried_inputs, additional_inputs):
+    assert torch.cuda.is_available() and torch.cuda.is_current_stream_capturing()
+    # Re-enter this mode because addition torch.cond() and
+    # torch.while_loop() calls may be nested inside cond_fn or body_fn
+    with mode:
+        return while_loop_node(cond_fn, body_fn, carried_inputs, additional_inputs)
+
+
+# WAR for https://github.com/pytorch/pytorch/issues/140322
+@while_loop_op.py_impl(ControlFlowOpWarmupDispatchMode)
+def while_loop_warmup(mode, cond_fn, body_fn, carried_inputs, additional_inputs):
+    if torch.cuda.is_current_stream_capturing():
+        # This is a call to torch.while_loop() nested within either
+        # torch.while_loop() or another torch.cond() function.
+        with mode:
+            return while_loop_node(cond_fn, body_fn, carried_inputs, additional_inputs)
+    else:
+        with _graph_no_gc(
+            torch.cuda.CUDAGraph(),
+            pool=None,
+            stream=mode.capture_stream,
+            capture_error_mode="relaxed",
+        ), mode:
+            while_loop_node(cond_fn, body_fn, carried_inputs, additional_inputs)
+    # Since ControlFlowOpWarmupDispatchMode has been popped, this call
+    # will fall back to while_loop_dense
+    return while_loop_dense(cond_fn, body_fn, carried_inputs, additional_inputs)
+
+
 while_loop_op.py_impl(DispatchKey.Autograd)(
     autograd_not_implemented(while_loop_op, deferred_error=True)
 )
@@ -230,11 +268,18 @@ def _find_or_create_fake_mode() -> FakeTensorMode:
     return fake_mode
 
 
-def _create_unbacked_symint(fake_mode: FakeTensorMode) -> torch.SymInt:
+def _create_unbacked_symint(
+    fake_mode: FakeTensorMode, ignore_fresh_unbacked_symbols: bool
+) -> torch.SymInt:
     assert (
         fake_mode is not None and fake_mode.shape_env is not None
     ), "Must provide a fake_mode with shape_env."
-    with fake_mode.shape_env.ignore_fresh_unbacked_symbols():
+    ctx = (
+        contextlib.nullcontext()
+        if not ignore_fresh_unbacked_symbols
+        else fake_mode.shape_env.ignore_fresh_unbacked_symbols()
+    )
+    with ctx:
         return fake_mode.shape_env.create_unbacked_symint()
 
 
@@ -283,7 +328,10 @@ def while_loop_tracing(mode, cond_fn, body_fn, carried_inputs, additional_inputs
         fake_mode: FakeTensorMode = _find_or_create_fake_mode()
         unspecialized_carried_inputs = pytree.tree_map_only(
             (int, torch.SymInt),
-            lambda _: _create_unbacked_symint(fake_mode),
+            # For temporarily created unbacked symints, we don't need to bind them to any proxy
+            lambda _: _create_unbacked_symint(
+                fake_mode, ignore_fresh_unbacked_symbols=True
+            ),
             carried_inputs,
         )
 
@@ -437,7 +485,13 @@ def while_loop_fake_tensor_mode(
             )
         # See NOTE [unspecialize int carry with unbacked symints]
         return pytree.tree_map_only(
-            (int, torch.SymInt), lambda _: _create_unbacked_symint(mode), body_outs
+            (int, torch.SymInt),
+            # For while_loop's unbacked symint output, we want them to be bound
+            # to the proxy of while_loop's output.
+            lambda _: _create_unbacked_symint(
+                mode, ignore_fresh_unbacked_symbols=False
+            ),
+            body_outs,
         )
 
 

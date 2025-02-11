@@ -1507,6 +1507,12 @@ TEST_CUDA_GRAPH = TEST_CUDA and (not TEST_SKIP_CUDAGRAPH) and (
 )
 
 TEST_CUDA_CUDSS = TEST_CUDA and (torch.version.cuda and int(torch.version.cuda.split(".")[0]) >= 12)
+TEST_CUDA_GRAPH_CONDITIONAL_NODES = TEST_CUDA_GRAPH and (
+    torch.version.cuda and (
+        (int(torch.version.cuda.split(".")[0]) >= 12 and int(torch.version.cuda.split(".")[1]) >= 4) or
+        (int(torch.version.cuda.split(".")[0]) >= 13)
+    )
+)
 
 def allocator_option_enabled_fn(allocator_config, _, option):
     if allocator_config is None:
@@ -3067,13 +3073,16 @@ class TestCase(expecttest.TestCase):
 
     # Munges exceptions that internally contain stack traces, using munge_exc
     def assertExpectedInlineMunged(
-        self, exc_type, callable, expect, *, suppress_suffix=True
+        self, exc_type, callable, expect, *, suppress_suffix=True, post_munge=None,
     ):
         try:
             callable()
         except exc_type as e:
+            munged = munge_exc(e, suppress_suffix=suppress_suffix, skip=1)
+            if post_munge:
+                munged = post_munge(munged)
             self.assertExpectedInline(
-                munge_exc(e, suppress_suffix=suppress_suffix, skip=1), expect, skip=1
+                munged, expect, skip=1
             )
             return
         self.fail(msg="Did not raise when expected to")
@@ -3134,6 +3143,15 @@ class TestCase(expecttest.TestCase):
         # Is the class strict and compiling?
         strict_default = False
         should_reset_dynamo = False
+
+        # We disable size_asserts for test_ops since some tests fail
+        # due to mismatch of strides returned from eager v.s. meta kernels
+        # Only some of the ops has this problem, but since tests in
+        # test_op.py are parametrized, it's hard to do this specifically
+        # for the affected ops.
+        # It's not a big deal since these problems are captured by
+        # test_torchinductor_opinfo.py as well.
+        should_disable_size_asserts = False
         if compiled:
             try:
                 path = inspect.getfile(type(test_cls))
@@ -3145,6 +3163,9 @@ class TestCase(expecttest.TestCase):
                         from .dynamo_test_failures import FIXME_inductor_non_strict
                         strict_default = filename not in FIXME_inductor_non_strict
                         should_reset_dynamo = True
+
+                        if filename == "test_ops":
+                            should_disable_size_asserts = True
                     else:
                         strict_default = True
             # inspect.getfile can fail with these
@@ -3177,7 +3198,14 @@ class TestCase(expecttest.TestCase):
             suppress_errors = not strict_mode
         else:
             suppress_errors = torch._dynamo.config.suppress_errors
-        with unittest.mock.patch("torch._dynamo.config.suppress_errors", suppress_errors):
+
+        maybe_disable_size_asserts = (
+            torch._inductor.config.patch(size_asserts=False)
+            if should_disable_size_asserts
+            else contextlib.nullcontext()
+        )
+
+        with unittest.mock.patch("torch._dynamo.config.suppress_errors", suppress_errors), maybe_disable_size_asserts:
             if TEST_WITH_AOT_EAGER:
                 super_run = torch._dynamo.optimize("aot_eager_decomp_partition")(super_run)
             elif TEST_WITH_TORCHDYNAMO or TEST_WITH_TORCHINDUCTOR:
@@ -4149,14 +4177,14 @@ class TestCase(expecttest.TestCase):
             self.assertTrue(len(ws) == 0, msg)
 
     @contextmanager
-    def assertWarnsOnceRegex(self, category, regex=''):
+    def assertWarnsOnceRegex(self, category, regex='', flags=0):
         """Context manager for code that *must always* warn
 
         This filters expected warnings from the test and fails if
         the expected warning is not caught. It uses set_warn_always() to force
         TORCH_WARN_ONCE to behave like TORCH_WARN
         """
-        pattern = re.compile(regex)
+        pattern = re.compile(regex, flags=flags)
         with warnings.catch_warnings(record=True) as ws:
             warnings.simplefilter("always")  # allow any warning to be raised
             with set_warn_always_context(True):
