@@ -5904,7 +5904,6 @@ class ShapeEnv:
         unhinted_expr: sympy.Basic,
         *,
         size_oblivious_result: Optional[sympy.Basic] = None,
-        expr_sym_node: Optional[SymNode] = None,
     ) -> GuardOnDataDependentSymNode:
         # TODO: in a Dynamo context, having user code, and having the
         # name of the local, will be much better
@@ -5943,18 +5942,6 @@ class ShapeEnv:
             + maybe_extra_debug
             # TODO: Help text about how to use our runtime tests to fix this
             # problem
-        )
-
-        dtrace_structured(
-            "guard_on_data_dependent_error",
-            metadata_fn=lambda: {
-                "expr": repr(expr),
-                "unhinted_expr": repr(unhinted_expr),
-                "expr_id": id(expr_sym_node),
-                "stack": structured.from_traceback(
-                    CapturedTraceback.extract(skip=1).summary()
-                ),
-            },
         )
         return GuardOnDataDependentSymNode(expr, msg)
 
@@ -6698,11 +6685,9 @@ class ShapeEnv:
             if static_expr is not None:
                 self.log.debug(
                     "eval %s == %s [statically known]",
-                    (
-                        f"size_oblivious({orig_expr})"
-                        if size_oblivious
-                        else size_oblivious
-                    ),
+                    f"size_oblivious({orig_expr})"
+                    if size_oblivious
+                    else size_oblivious,
                     static_expr,
                 )
                 if hint is not None:
@@ -6773,7 +6758,6 @@ class ShapeEnv:
                             metadata_fn=lambda: {
                                 "expr": repr(orig_expr),
                                 "result": repr(unsound_result),
-                                "expr_node_id": id(expr_sym_node),
                                 "stack": structured.from_traceback(
                                     CapturedTraceback.extract(skip=1).summary()
                                 ),
@@ -6784,13 +6768,14 @@ class ShapeEnv:
                             metadata_fn=lambda: {
                                 "expr": repr(orig_expr),
                                 "result": repr(unsound_result),
+                                "expr_node_id": id(expr_sym_node),
                                 "stack": structured.from_traceback(
                                     CapturedTraceback.extract(skip=1).summary()
                                 ),
                                 "symbol_to_sources": {
                                     str(v): k
                                     for k, v in self.source_to_var.items()
-                                    if v in g.free_symbols
+                                    if v in orig_expr.free_symbols
                                 },
                                 "frame_locals": asdict(self._find_frame_locals()),
                             },
@@ -6804,7 +6789,6 @@ class ShapeEnv:
                             expr.xreplace(self.var_to_val),
                             expr,
                             size_oblivious_result=size_oblivious_result,
-                            expr_sym_node=expr_sym_node,
                         )
                 else:
                     expr = new_expr
