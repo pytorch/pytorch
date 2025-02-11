@@ -6,7 +6,7 @@ import re
 import tempfile
 from dataclasses import dataclass
 from enum import IntEnum
-from typing import Any, Optional, Union
+from typing import Any, Callable, Optional, Union
 
 import torch
 import torch._logging._internal
@@ -146,9 +146,15 @@ class FailureReport:
 
 
 class DraftExportReport:
-    def __init__(self, failures: list[FailureReport], str_to_filename: dict[int, str]):
+    def __init__(
+        self,
+        failures: list[FailureReport],
+        str_to_filename: dict[int, str],
+        expressions_created: dict[int, dict[str, Any]],
+    ):
         self.failures: list[FailureReport] = failures
         self.str_to_filename = str_to_filename
+        self.expressions_created: dict[int, dict[str, Any]] = expressions_created
 
     def successful(self) -> bool:
         return len(self.failures) == 0 or all(
@@ -209,9 +215,9 @@ class LogRecord:
         elif key == "mismatched_fake_kernel":
             return hash((key, data["op"], data["reason"]))
         elif key == "propagate_real_tensors_provenance":
-            return hash((key, json.dumps(data["stack"])))
+            return hash((key, json.dumps(data["user_stack"])))
         elif key == "create_unbacked_symbol":
-            return hash((key, json.dumps(data["stack"])))
+            return hash((key, json.dumps(data["user_stack"])))
 
         return hash((key, json.dumps(data)))
 
@@ -301,16 +307,20 @@ class CaptureStructuredTrace(torch._logging._internal.LazyTraceHandler):
                             record,
                         )
                         continue
+
                     elif key == "propagate_real_tensors_provenance":
 
                         def _log_expression_created(
-                            emit_func, sym_node_id: int
+                            emit_func: Callable[[Any], None], sym_node_id: int
                         ) -> None:
+                            # Log all the relevant expression_created logs
                             if sym_node_id is None:
                                 return
                             if res := self.expression_created_logs.get(
                                 sym_node_id, None
                             ):
+                                # Don't log the expression if we have already
+                                # printed it beforehand
                                 if not res.visited:
                                     for arg in res.argument_ids:
                                         _log_expression_created(emit_func, arg)
@@ -375,7 +385,8 @@ def draft_export(
         failures: list[FailureReport] = []
         custom_ops_logs: dict[
             Any, tuple[dict[str, Any], FailureType]
-        ] = {}  # Dedup custom ops
+        ] = {}  # For adding in assertions before custom ops
+        expressions_created: dict[int, dict[str, Any]] = {}
 
         for log_name, log_contents in capture_structured_log.log_record.logs:
             failure_type = None
@@ -408,12 +419,14 @@ def draft_export(
             elif log_name == "missing_fake_kernel":
                 failure_type = FailureType.MISSING_FAKE_KERNEL
                 custom_ops_logs[log_contents["op"]] = (log_contents, failure_type)
+
             elif log_name == "mismatched_fake_kernel":
                 failure_type = FailureType.MISMATCHED_FAKE_KERNEL
                 custom_ops_logs[(log_contents["op"], log_contents["reason"])] = (
                     log_contents,
                     failure_type,
                 )
+
             else:
                 continue
 
@@ -425,7 +438,11 @@ def draft_export(
                 )
             )
 
-        report = DraftExportReport(failures, str_to_filename)
+        for k, v in capture_structured_log.expression_created_logs.items():
+            if v.visited:
+                expressions_created[k] = v.record
+
+        report = DraftExportReport(failures, str_to_filename, expressions_created)
 
         # Add asserts around custom ops
         insert_custom_op_guards(ep.graph_module, list(custom_ops_logs.keys()))
