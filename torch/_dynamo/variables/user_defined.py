@@ -1336,6 +1336,20 @@ class FrozenDataClassVariable(UserDefinedObjectVariable):
             fields = {}
         self.fields = fields
 
+    def as_python_constant(self):
+        from dataclasses import fields
+
+        args = []
+        kwargs = {}
+        for field in fields(self.value):
+            data = self.fields[field.name].as_python_constant()
+            if getattr(field, "kw_only", False):
+                kwargs[field.name] = data
+            elif field.init:
+                args.append(data)
+
+        return self.python_type()(*args, **kwargs)
+
     def as_proxy(self):
         from dataclasses import fields
 
@@ -1343,9 +1357,9 @@ class FrozenDataClassVariable(UserDefinedObjectVariable):
         kwargs = {}
         for field in fields(self.value):
             proxy = self.fields[field.name].as_proxy()
-            if hasattr(field, "kw_only") and field.kw_only:
+            if getattr(field, "kw_only", False):
                 kwargs[field.name] = proxy
-            else:
+            elif field.init:
                 args.append(proxy)
 
         return self.python_type()(*args, **kwargs)

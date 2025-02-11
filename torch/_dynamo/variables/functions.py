@@ -1167,6 +1167,10 @@ class SkipFunctionVariable(VariableTracker):
                     "is created inside the parent function that is getting "
                     "compiled. This is not supported for now."
                 )
+            elif self.value.__qualname__ == "mark_traceable":
+                msg = """
+Found a mark_traceable decorator to a function which is created inside the parent function that is getting compiled.  Please move the usage to outside the `torch.compile`-ed region.
+"""  # NOQA: B950
             msg += f"', {self.reason}'" if self.reason else ""
             unimplemented(msg)
 
