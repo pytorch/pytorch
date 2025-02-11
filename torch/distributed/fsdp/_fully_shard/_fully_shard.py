@@ -46,6 +46,7 @@ def fully_shard(
     shard_placement_fn: Optional[Callable[[nn.Parameter], Optional[Shard]]] = None,
     mp_policy: MixedPrecisionPolicy = MixedPrecisionPolicy(),
     offload_policy: OffloadPolicy = OffloadPolicy(),
+    ignored_params: Optional[set[nn.Parameter]] = None,
 ):
     """
     Apply fully sharded data parallelism (FSDP) to ``module``, where FSDP
@@ -131,6 +132,8 @@ def fully_shard(
         offload_policy (OffloadPolicy): This controls the offloading policy,
             which offers parameter/gradient/optimizer state offloading. See
             :class:`OffloadPolicy` and its subclasses for details.
+        ignored_params: Optional(Set[nn.Parameter]): The set of parameters that we
+            don't want to shard with FSDP.
     """
     if isinstance(module, (nn.ModuleList, nn.ModuleDict)):
         raise ValueError(
@@ -159,8 +162,9 @@ def fully_shard(
     state = fully_shard.state(modules[0])
     state.init(modules, device, mp_policy)
 
-    managed_modules = _get_managed_modules(modules)
-    params, buffers = _get_managed_states(managed_modules)
+    managed_modules = _get_managed_modules(modules, ignored_params)
+    params, buffers = _get_managed_states(managed_modules, ignored_params)
+
     _move_states_to_device(params, buffers, device)
     if params:
         state._fsdp_param_group = FSDPParamGroup(
