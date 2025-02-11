@@ -241,7 +241,7 @@ void* _getWorkspace(size_t& workspaceSize) {
     workspaceSize = at::cuda::getChosenWorkspaceSize();
   #endif
 
-  #ifdef USE_ROCM || defined(IS_FBCODE)
+  #ifdef (USE_ROCM || IS_FBCODE)
     auto& allocator = *::c10::cuda::CUDACachingAllocator::get();
     auto workspace = allocator.allocate(workspaceSize);
     auto workspace_ptr = workspace.mutable_get();
