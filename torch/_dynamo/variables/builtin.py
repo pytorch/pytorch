@@ -1669,6 +1669,7 @@ class BuiltinVariable(VariableTracker):
 
         isinstance_type_tuple: tuple[type, ...]
         if isinstance(isinstance_type, (type,)) or callable(
+            # E.g. isinstance([], typing.Sequence)
             getattr(isinstance_type, "__instancecheck__", None)
         ):
             isinstance_type_tuple = (isinstance_type,)
@@ -1676,14 +1677,12 @@ class BuiltinVariable(VariableTracker):
             isinstance_type, types.UnionType
         ):
             isinstance_type_tuple = isinstance_type.__args__
-        elif not (
-            isinstance(isinstance_type, tuple)
-            and all(
-                isinstance(tp, (type,))
-                or callable(getattr(tp, "__instancecheck__", None))
-                for tp in isinstance_type
-            )
+        elif isinstance(isinstance_type, tuple) and all(
+            isinstance(tp, (type,)) or callable(getattr(tp, "__instancecheck__", None))
+            for tp in isinstance_type
         ):
+            isinstance_type_tuple = isinstance_type
+        else:
             raise_observed_exception(
                 TypeError,
                 tx,
@@ -1691,8 +1690,6 @@ class BuiltinVariable(VariableTracker):
                     "isinstance() arg 2 must be a type, a tuple of types, or a union"
                 ],
             )
-        else:
-            isinstance_type_tuple = isinstance_type
 
         if any(tp in polyfill_class_mapping for tp in isinstance_type_tuple):
             isinstance_type_tuple = tuple(
