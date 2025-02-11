@@ -50,6 +50,8 @@ struct PyNode : public Node {
       const variable_list& inputs,
       SwapSavedVariables& saved) override;
 
+  bool compiled_autograd_should_lift() const;
+
   // THPFunction this Function is wrapping.  Owning!
   PyObject* obj;
 

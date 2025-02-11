@@ -215,13 +215,12 @@ def tp_convolution_backward(
 
         # step4 aggregate gradients for edge pixels
         grad_in_tensor = local_results[0]
-        if grad_in_tensor is not None:
-            grad_in_tensor = _ring_send_recv_aggregate(
-                grad_in_tensor, d1, d2, left, right, rank, size
-            )
-            local_results = list(local_results)
-            local_results[0] = grad_in_tensor
+        grad_in_tensor = _ring_send_recv_aggregate(
+            grad_in_tensor, d1, d2, left, right, rank, size
+        )
 
+        local_results = list(local_results)
+        local_results[0] = grad_in_tensor
         local_results = cast(tuple[object, ...], local_results)
 
         return local_results
