@@ -88,7 +88,6 @@ std::vector<at::Tensor> all_reduce_coalesced(
 at::Tensor allocate_all_gather_output(
     const at::Tensor& input,
     int64_t group_size) {
-  TORCH_CHECK(input.is_contiguous());
   auto output_size = input.sizes().vec();
   output_size[0] *= group_size;
   return at::empty(
@@ -104,7 +103,6 @@ std::vector<at::Tensor> all_gather_into_tensor_coalesced(
   std::vector<at::Tensor> outputs;
   outputs.reserve(inputs.size());
   for (const auto& tensor : inputs) {
-    TORCH_CHECK(tensor.is_contiguous());
     outputs.push_back(allocate_all_gather_output(tensor, group_size));
   }
 
@@ -120,7 +118,6 @@ at::Tensor all_gather_into_tensor(
     const at::Tensor& input,
     int64_t group_size,
     std::string group_name) {
-  TORCH_CHECK(input.is_contiguous());
   std::vector<at::Tensor> inputs{input};
   return all_gather_into_tensor_coalesced(
       inputs, group_size, std::move(group_name))[0];
@@ -131,7 +128,6 @@ at::Tensor& all_gather_into_tensor_out(
     int64_t group_size,
     const std::string& group_name,
     at::Tensor& output) {
-  TORCH_CHECK(input.is_contiguous());
   c10d::AllgatherOptions opts;
 
   auto group = c10d::resolve_process_group(group_name);
@@ -143,7 +139,6 @@ at::Tensor& all_gather_into_tensor_out(
 at::Tensor allocate_reduce_scatter_output(
     const at::Tensor& input,
     const int64_t group_size) {
-  TORCH_CHECK(input.is_contiguous());
   auto output_size = input.sizes().vec();
   if (output_size[0] % group_size != 0) {
     LOG(WARNING) << "The first dimension of the reduce_scatter input ("
@@ -168,7 +163,6 @@ std::vector<at::Tensor> reduce_scatter_tensor_coalesced(
   std::vector<at::Tensor> outputs;
   outputs.reserve(inputs.size());
   for (const auto& tensor : inputs) {
-    TORCH_CHECK(tensor.is_contiguous());
     outputs.push_back(allocate_reduce_scatter_output(tensor, group_size));
   }
 
@@ -185,7 +179,6 @@ at::Tensor reduce_scatter_tensor(
     std::string reduce_op,
     int64_t group_size,
     std::string group_name) {
-  TORCH_CHECK(input.is_contiguous());
   std::vector<at::Tensor> inputs{input};
   return reduce_scatter_tensor_coalesced(
       inputs, std::move(reduce_op), group_size, std::move(group_name))[0];
@@ -197,7 +190,6 @@ at::Tensor all_to_all_single(
     std::vector<int64_t> input_split_sizes,
     // NOLINTNEXTLINE(performance-unnecessary-value-param)
     std::string group_name) {
-  TORCH_CHECK(input.is_contiguous());
   std::vector<int64_t> output_sizes = input.sizes().vec();
   output_sizes[0] = std::accumulate(
       output_split_sizes.begin(), output_split_sizes.end(), int64_t(0));

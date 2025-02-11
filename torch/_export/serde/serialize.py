@@ -183,7 +183,6 @@ _SYM_OPS = {
     operator.gt,
     operator.neg,
     operator.pos,
-    math.trunc,
     torch.sym_not,
     operator.mul,
     operator.add,
@@ -636,9 +635,19 @@ class GraphModuleSerializer(metaclass=Final):
         if unbacked_bindings := node.meta.get("unbacked_bindings"):
             # serialize the symbol names of unbacked bindings;
             # reconstruct the key paths to those symbols when deserializing
-            ret["unbacked_bindings"] = ",".join(
-                u.name for u in unbacked_bindings.keys()
-            )
+            val = node.meta["val"]
+            new_unbacked_bindings = {}
+            for key in unbacked_bindings.values():
+                expr = pytree.key_get(val, key).node.expr
+                if expr.is_symbol and (
+                    expr.name.startswith(prefix_str[SymT.UNBACKED_FLOAT])
+                    or expr.name.startswith(prefix_str[SymT.UNBACKED_INT])
+                ):
+                    new_unbacked_bindings[expr] = key
+            if new_unbacked_bindings:
+                ret["unbacked_bindings"] = ",".join(
+                    u.name for u in new_unbacked_bindings.keys()
+                )
 
         if stack_trace := node.meta.get("stack_trace"):
             ret["stack_trace"] = stack_trace
@@ -2714,10 +2723,6 @@ def _dataclass_to_dict(obj):
         return obj
 
 
-def _to_json_bytes(obj: Any) -> bytes:
-    return json.dumps(_dataclass_to_dict(obj), cls=EnumEncoder).encode("utf-8")
-
-
 def serialize(
     exported_program: ep.ExportedProgram,
     opset_version: Optional[dict[str, int]] = None,
@@ -2729,7 +2734,10 @@ def serialize(
         )
     assert isinstance(serialized_program.exported_program, ExportedProgram)
 
-    json_bytes = _to_json_bytes(serialized_program.exported_program)
+    json_program = json.dumps(
+        _dataclass_to_dict(serialized_program.exported_program), cls=EnumEncoder
+    )
+    json_bytes = json_program.encode("utf-8")
     artifact = SerializedArtifact(
         json_bytes,
         serialized_program.state_dict,

@@ -777,8 +777,9 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   // Allocate tensor from communication-optimized memory pool
   at::Tensor allocateTensor(long size, at::TensorOptions options = {}) override;
 
-  // Whether tensor allocation from NCCL memory pool is supported
-  bool supportsTensorAlloc() override;
+  bool supportsTensorAlloc() override {
+    return true;
+  }
 
   // Performs NCCL user buffer registration for all buffers in
   // the given MemPool

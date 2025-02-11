@@ -15,6 +15,7 @@ import math
 import sys
 import warnings
 from typing import Callable, TYPE_CHECKING
+from typing_extensions import deprecated
 
 import torch
 import torch._C._onnx as _C_onnx
@@ -23,7 +24,7 @@ import torch.onnx
 from torch import _C
 
 # Monkey-patch graph manipulation methods on Graph, used for the ONNX symbolics
-from torch.onnx import _constants, _deprecation, _type_utils, errors, symbolic_helper
+from torch.onnx import _constants, _type_utils, errors, symbolic_helper
 from torch.onnx._globals import GLOBALS
 from torch.onnx._internal import jit_utils, registration
 
@@ -3315,91 +3316,55 @@ def _unique2(g: jit_utils.GraphContext, input, sorted, return_inverse, return_co
 
 
 @_onnx_symbolic("aten::_cast_Byte")
-@_deprecation.deprecated(
-    "2.0",
-    "the future",
-    "Avoid using this function and create a Cast node instead",
-)
+@deprecated("Avoid using this function and create a Cast node instead")
 def _cast_Byte(g: jit_utils.GraphContext, input, non_blocking):
     return g.op("Cast", input, to_i=_C_onnx.TensorProtoDataType.UINT8)
 
 
 @_onnx_symbolic("aten::_cast_Char")
-@_deprecation.deprecated(
-    "2.0",
-    "the future",
-    "Avoid using this function and create a Cast node instead",
-)
+@deprecated("Avoid using this function and create a Cast node instead")
 def _cast_Char(g: jit_utils.GraphContext, input, non_blocking):
     return g.op("Cast", input, to_i=_C_onnx.TensorProtoDataType.INT8)
 
 
 @_onnx_symbolic("aten::_cast_Short")
-@_deprecation.deprecated(
-    "2.0",
-    "the future",
-    "Avoid using this function and create a Cast node instead",
-)
+@deprecated("Avoid using this function and create a Cast node instead")
 def _cast_Short(g: jit_utils.GraphContext, input, non_blocking):
     return g.op("Cast", input, to_i=_C_onnx.TensorProtoDataType.INT16)
 
 
 @_onnx_symbolic("aten::_cast_Int")
-@_deprecation.deprecated(
-    "2.0",
-    "the future",
-    "Avoid using this function and create a Cast node instead",
-)
+@deprecated("Avoid using this function and create a Cast node instead")
 def _cast_Int(g: jit_utils.GraphContext, input, non_blocking):
     return g.op("Cast", input, to_i=_C_onnx.TensorProtoDataType.INT32)
 
 
 @_onnx_symbolic("aten::_cast_Long")
-@_deprecation.deprecated(
-    "2.0",
-    "the future",
-    "Avoid using this function and create a Cast node instead",
-)
+@deprecated("Avoid using this function and create a Cast node instead")
 def _cast_Long(g: jit_utils.GraphContext, input, non_blocking):
     return g.op("Cast", input, to_i=_C_onnx.TensorProtoDataType.INT64)
 
 
 @_onnx_symbolic("aten::_cast_Half")
-@_deprecation.deprecated(
-    "2.0",
-    "the future",
-    "Avoid using this function and create a Cast node instead",
-)
+@deprecated("Avoid using this function and create a Cast node instead")
 def _cast_Half(g: jit_utils.GraphContext, input, non_blocking):
     return g.op("Cast", input, to_i=_C_onnx.TensorProtoDataType.FLOAT16)
 
 
 @_onnx_symbolic("aten::_cast_Float")
-@_deprecation.deprecated(
-    "2.0",
-    "the future",
-    "Avoid using this function and create a Cast node instead",
-)
+@deprecated("Avoid using this function and create a Cast node instead")
 def _cast_Float(g: jit_utils.GraphContext, input, non_blocking):
     return g.op("Cast", input, to_i=_C_onnx.TensorProtoDataType.FLOAT)
 
 
 @_onnx_symbolic("aten::_cast_Double")
-@_deprecation.deprecated(
-    "2.0",
-    "the future",
-    "Avoid using this function and create a Cast node instead",
-)
+@deprecated("Avoid using this function and create a Cast node instead")
 def _cast_Double(g: jit_utils.GraphContext, input, non_blocking):
     return g.op("Cast", input, to_i=_C_onnx.TensorProtoDataType.DOUBLE)
 
 
 @_onnx_symbolic("aten::_cast_Bool")
-@_deprecation.deprecated(
-    "2.0",
-    "the future",
-    "Avoid using this function and create a Cast node instead",
-)
+@deprecated("Avoid using this function and create a Cast node instead")
 def _cast_Bool(g: jit_utils.GraphContext, input, non_blocking):
     return g.op("Cast", input, to_i=_C_onnx.TensorProtoDataType.BOOL)
 
