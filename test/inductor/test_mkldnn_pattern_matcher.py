@@ -2010,9 +2010,10 @@ class TestPatternMatcher(TestPatternMatcherBase):
             check_quantization=True,
         )
 
-    def _qlinear_cpu_test_helper(
+    def _qlinear_test_helper(
         self,
         inputs,
+        device="cpu",
         int8_mixed_bf16=False,
         do_permute=False,
         matcher_check_fn=None,
@@ -2032,7 +2033,13 @@ class TestPatternMatcher(TestPatternMatcherBase):
                     x = torch.reshape(torch.permute(x, (0, 2, 3, 1)), (2, 12, 4))
                 return self.linear2(self.linear(x))
 
-        mod = M(bias, do_permute=do_permute).eval()
+        mod = M(bias, do_permute=do_permute).eval().to(device=device)
+        assert isinstance(inputs, tuple)
+
+        def __convert_tensor_to_device(input, device):
+            return input.to(device=device) if isinstance(input, torch.Tensor) else input
+
+        inputs = tuple(__convert_tensor_to_device(input, device) for input in inputs)
 
         def _default_matcher_check_fn():
             self.assertEqual(
@@ -2060,7 +2067,19 @@ class TestPatternMatcher(TestPatternMatcherBase):
         This testcase will quantize a single Linear Moduel.
         """
         for bias in [True, False]:
-            self._qlinear_cpu_test_helper((torch.randn((2, 4)),), bias=bias)
+            self._qlinear_test_helper((torch.randn((2, 4)),), bias=bias)
+
+    @skipIfNoDynamoSupport
+    @skipIfNoONEDNN
+    @skipIfNoXPU
+    def test_qlinear_xpu(self):
+        r"""
+        This testcase will quantize a single Linear Moduel.
+        """
+        for bias in [True, False]:
+            self._qlinear_test_helper(
+                (torch.randn((2, 4)).to(device="xpu"),), device="xpu", bias=bias
+            )
 
     @skipIfNoDynamoSupport
     @skipIfNoONEDNN
@@ -2069,7 +2088,7 @@ class TestPatternMatcher(TestPatternMatcherBase):
         This testcase will quantize a single Linear Moduel.
         """
         for bias in [True, False]:
-            self._qlinear_cpu_test_helper(
+            self._qlinear_test_helper(
                 (torch.randn((2, 4)),), bias=bias, is_dynamic=True
             )
 
@@ -2080,7 +2099,7 @@ class TestPatternMatcher(TestPatternMatcherBase):
         This testcase will quantize a single Linear Moduel.
         """
         for bias in [True, False]:
-            self._qlinear_cpu_test_helper(
+            self._qlinear_test_helper(
                 (torch.randn((2, 4)),), bias=bias, is_dynamic=True, is_qat=True
             )
 
@@ -2091,7 +2110,7 @@ class TestPatternMatcher(TestPatternMatcherBase):
         This testcase will quantize a single Linear Moduel.
         """
         for bias in [True, False]:
-            self._qlinear_cpu_test_helper(
+            self._qlinear_test_helper(
                 (torch.randn((2, 3, 4)),), bias=bias, is_dynamic=True
             )
 
@@ -2103,7 +2122,7 @@ class TestPatternMatcher(TestPatternMatcherBase):
         This testcase will quantize a single Linear Moduel with int8_mixed_bf16 quantization.
         """
         for bias in [True, False]:
-            self._qlinear_cpu_test_helper(
+            self._qlinear_test_helper(
                 (torch.randn((2, 4)),), int8_mixed_bf16=True, bias=bias
             )
 
@@ -2114,7 +2133,7 @@ class TestPatternMatcher(TestPatternMatcherBase):
         This testcase will quantize a single Linear Moduel.
         """
         for bias in [True, False]:
-            self._qlinear_cpu_test_helper((torch.randn((2, 3, 4)),), bias=bias)
+            self._qlinear_test_helper((torch.randn((2, 3, 4)),), bias=bias)
 
     @skipIfNoDynamoSupport
     @skipIfNoONEDNNBF16
@@ -2124,7 +2143,7 @@ class TestPatternMatcher(TestPatternMatcherBase):
         This testcase will quantize a single Linear Moduel with int8_mixed_bf16 quantization.
         """
         for bias in [True, False]:
-            self._qlinear_cpu_test_helper(
+            self._qlinear_test_helper(
                 (torch.randn((2, 3, 4)),), int8_mixed_bf16=True, bias=bias
             )
 
@@ -2147,7 +2166,7 @@ class TestPatternMatcher(TestPatternMatcherBase):
                     13 if bias else 12,
                 )
 
-            self._qlinear_cpu_test_helper(
+            self._qlinear_test_helper(
                 (torch.randn((2, 4, 3, 4)),),
                 do_permute=True,
                 matcher_check_fn=matcher_check_fn,
@@ -2174,7 +2193,7 @@ class TestPatternMatcher(TestPatternMatcherBase):
                     17 if bias else 16,
                 )
 
-            self._qlinear_cpu_test_helper(
+            self._qlinear_test_helper(
                 (torch.randn((2, 4, 3, 4)),),
                 int8_mixed_bf16=True,
                 do_permute=True,
@@ -2182,8 +2201,8 @@ class TestPatternMatcher(TestPatternMatcherBase):
                 bias=bias,
             )
 
-    def _qlinear_unary_cpu_test_helper(
-        self, inputs, unary_op=torch.nn.ReLU(), int8_mixed_bf16=False
+    def _qlinear_unary_test_helper(
+        self, inputs, unary_op=torch.nn.ReLU(), device="cpu", int8_mixed_bf16=False
     ):
         class M(torch.nn.Module):
             def __init__(self, use_bias):
@@ -2199,7 +2218,7 @@ class TestPatternMatcher(TestPatternMatcherBase):
 
         bias_list = [True, False]
         for bias in bias_list:
-            mod = M(bias).eval()
+            mod = M(bias).eval().to(device=device)
 
             def matcher_check_fn():
                 # 1. dequant-linear pattern matched in quantization weight prepack
@@ -2230,7 +2249,18 @@ class TestPatternMatcher(TestPatternMatcherBase):
         r"""
         This testcase will quantize a Linear->ReLU pattern.
         """
-        self._qlinear_unary_cpu_test_helper((torch.randn((2, 4)),))
+        self._qlinear_unary_test_helper((torch.randn((2, 4)),))
+
+    @skipIfNoDynamoSupport
+    @skipIfNoONEDNN
+    @skipIfNoXPU
+    def test_qlinear_relu_xpu(self):
+        r"""
+        This testcase will quantize a Linear->ReLU pattern.
+        """
+        self._qlinear_unary_test_helper(
+            (torch.randn((2, 4)).to(device="xpu"),), device="xpu"
+        )
 
     @skipIfNoDynamoSupport
     @skipIfNoONEDNNBF16
@@ -2239,9 +2269,7 @@ class TestPatternMatcher(TestPatternMatcherBase):
         r"""
         This testcase will quantize a Linear->ReLU pattern with int8_mixed_bf16 quantization.
         """
-        self._qlinear_unary_cpu_test_helper(
-            (torch.randn((2, 4)),), int8_mixed_bf16=True
-        )
+        self._qlinear_unary_test_helper((torch.randn((2, 4)),), int8_mixed_bf16=True)
 
     @skipIfNoDynamoSupport
     @skipIfNoONEDNN
@@ -2249,7 +2277,7 @@ class TestPatternMatcher(TestPatternMatcherBase):
         r"""
         This testcase will quantize a Linear->ReLU pattern.
         """
-        self._qlinear_unary_cpu_test_helper((torch.randn((2, 3, 4)),))
+        self._qlinear_unary_test_helper((torch.randn((2, 3, 4)),))
 
     @skipIfNoDynamoSupport
     @skipIfNoONEDNNBF16
@@ -2258,9 +2286,7 @@ class TestPatternMatcher(TestPatternMatcherBase):
         r"""
         This testcase will quantize a Linear->ReLU pattern with int8_mixed_bf16 quantization.
         """
-        self._qlinear_unary_cpu_test_helper(
-            (torch.randn((2, 3, 4)),), int8_mixed_bf16=True
-        )
+        self._qlinear_unary_test_helper((torch.randn((2, 3, 4)),), int8_mixed_bf16=True)
 
     @skipIfNoDynamoSupport
     @skipIfNoONEDNN
@@ -2269,7 +2295,19 @@ class TestPatternMatcher(TestPatternMatcherBase):
         This testcase will quantize a Linear->GELU pattern.
         """
         for gelu in [torch.nn.GELU("none"), torch.nn.GELU("tanh")]:
-            self._qlinear_unary_cpu_test_helper((torch.randn((2, 4)),), gelu)
+            self._qlinear_unary_test_helper((torch.randn((2, 4)),), gelu)
+
+    @skipIfNoDynamoSupport
+    @skipIfNoONEDNN
+    @skipIfNoXPU
+    def test_qlinear_gelu_xpu(self):
+        r"""
+        This testcase will quantize a Linear->GELU pattern.
+        """
+        for gelu in [torch.nn.GELU("none"), torch.nn.GELU("tanh")]:
+            self._qlinear_unary_test_helper(
+                (torch.randn((2, 4)).to(device="xpu"),), gelu, device="xpu"
+            )
 
     @skipIfNoDynamoSupport
     @skipIfNoONEDNNBF16
@@ -2279,7 +2317,7 @@ class TestPatternMatcher(TestPatternMatcherBase):
         This testcase will quantize a Linear->GELU pattern with int8_mixed_bf16 quantization.
         """
         for gelu in [torch.nn.GELU("none"), torch.nn.GELU("tanh")]:
-            self._qlinear_unary_cpu_test_helper(
+            self._qlinear_unary_test_helper(
                 (torch.randn((2, 4)),), gelu, int8_mixed_bf16=True
             )
 
