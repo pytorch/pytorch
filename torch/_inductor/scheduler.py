@@ -3881,10 +3881,52 @@ class Scheduler:
         )
 
     def graph_partition(self):
+        # breakpoint()
         partitions: List[List[BaseSchedulerNode]] = [self.nodes]
-        placeholders = [[]]
-        outputs = [[]]
-        return partitions, placeholders, outputs
+        inputs = []
+        outputs = []
+
+        # a name is included in partition_outputs if it appears in V.graph.graph_output_names
+        # or used by another graph partition later.
+        # a name is included in partition_inputs if it is used by some nodes in a partition,
+        # and is not produced by some nodes in the partition.
+        # unmet_dependencies is not sufficient since it excludes graph inputs.
+
+        for partition in reversed(partitions):
+            partition_outputs = OrderedSet()
+            partition_inputs = OrderedSet()
+
+            read_writes = dependencies.ReadWrites.merge_list([x.read_writes for x in partition])
+            # tensors = read_writes.reads | read_writes.writes 
+
+
+
+
+
+            # for node in partition:
+            #     for name in node.get_buffer_names():
+            #         if name in V.graph.graph_output_names:
+            #             partition_outputs.add(name)
+            #         elif name in self.name_to_buf:
+            #             buf = self.name_to_buf[name]
+            #             if buf.is_output():
+            #                 partition_outputs.add(name)
+            #             elif buf.is_input():
+            #                 partition_inputs.add(name)
+            #         else:
+            #             # name is a graph input
+            #             partition_inputs.add(name)
+
+
+
+
+        # partition_outputs, partition_inputs = [], []
+        
+
+
+
+
+        return partitions, inputs, outputs
         # TODO1: partition self.nodes into multiple lists.
         # TODO2: for each group, collect inputs and outputs
 
@@ -3898,9 +3940,9 @@ class Scheduler:
 
     def _codegen_partitions(self) -> None:
         # TODO
-        partitions, placeholders, outputs = self.graph_partition()
+        partitions, inputs, outputs = self.graph_partition()
 
-        for nodes, read, write in zip(partitions, placeholders, outputs):
+        for nodes, read, write in zip(partitions, inputs, outputs):
             self._codegen(nodes)
             # TODO1: move V.graph.wrapper_code.lines to V.graph.wrapper_code.subgraph_lines
             # TODO2: codegen for signature like `def subgraph1(arg0):`

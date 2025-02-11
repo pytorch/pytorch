@@ -1282,6 +1282,9 @@ class GraphLowering(torch.fx.Interpreter):
             self.graph_id if self.graph_id is not None else -1,
         )
 
+        # TODO: better graph_output_name
+        self.graph_output_names = [node.data.name for node in self.graph_outputs]
+
     def finalize(self) -> None:
         for buf in self.buffers:
             buf.decide_layout()
