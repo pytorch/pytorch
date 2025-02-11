@@ -125,44 +125,6 @@ jobs:
       test-matrix: ${{ needs.macos-py3-arm64-build.outputs.test-matrix }}
     secrets: inherit
 
-  win-vs2019-cpu-py3-build:
-    name: win-vs2019-cpu-py3
-    uses: ./.github/workflows/_win-build.yml
-    needs: get-label-type
-    with:
-      build-environment: win-vs2019-cpu-py3
-      cuda-version: cpu
-      sync-tag: win-cpu-build
-      runner: "${{ needs.get-label-type.outputs.label-type }}windows.4xlarge.nonephemeral"
-      test-matrix: |
-        { include: [
-          { config: "default", shard: 1, num_shards: 3, runner: "${{ needs.get-label-type.outputs.label-type }}windows.4xlarge.nonephemeral" },
-          { config: "default", shard: 2, num_shards: 3, runner: "${{ needs.get-label-type.outputs.label-type }}windows.4xlarge.nonephemeral" },
-          { config: "default", shard: 3, num_shards: 3, runner: "${{ needs.get-label-type.outputs.label-type }}windows.4xlarge.nonephemeral" },
-        ]}
-    secrets: inherit
-
-  win-vs2019-cpu-py3-test:
-    name: win-vs2019-cpu-py3
-    uses: ./.github/workflows/_win-test.yml
-    needs:
-      - win-vs2019-cpu-py3-build
-      - target-determination
-    with:
-      build-environment: win-vs2019-cpu-py3
-      cuda-version: cpu
-      test-matrix: ${{ needs.win-vs2019-cpu-py3-build.outputs.test-matrix }}
-    secrets: inherit
-
-  win-vs2019-cuda12_4-py3-build:
-    name: win-vs2019-cuda12.4-py3
-    uses: ./.github/workflows/_win-build.yml
-    needs: get-label-type
-    with:
-      build-environment: win-vs2019-cuda12.4-py3
-      cuda-version: "12.4"
-      runner: "${{ needs.get-label-type.outputs.label-type }}windows.4xlarge.nonephemeral"
-    secrets: inherit
 
   linux-focal-rocm6_3-py3_10-build:
     if: ${{ startsWith(github.event.ref, 'refs/tags/ciflow/trunk') }}

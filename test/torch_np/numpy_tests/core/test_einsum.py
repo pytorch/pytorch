@@ -1,5 +1,4 @@
 # Owner(s): ["module: dynamo"]
-# ruff: noqa: F841
 
 import functools
 import itertools
@@ -440,7 +439,7 @@ class TestEinsum(TestCase):
             assert_equal(np.einsum(a, [0], b, [1], optimize=do_opt), np.outer(a, b))
 
         # Suppress the complex warnings for the 'as f8' tests
-        with suppress_warnings() as sup:
+        with suppress_warnings():
             # matvec(a,b) / a.dot(b) where a is matrix, b is vector
             for n in range(1, 17):
                 a = np.arange(4 * n, dtype=dtype).reshape(4, n)

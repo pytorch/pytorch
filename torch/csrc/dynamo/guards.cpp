@@ -782,6 +782,13 @@ static PyObject* assert_size_stride(PyObject* dummy, PyObject* args) {
     PyErr_SetString(PyExc_AssertionError, "wrong number of dimensions");
     return nullptr;
   }
+
+  // We may add the size/stride assert at compile time due to unbacked symint,
+  // but at runtime, the tensor can be empty.
+  if (tensor.numel() == 0) {
+    Py_RETURN_TRUE;
+  }
+
   std::stringstream msg;
   int num_errors = 0;
   for (auto i : c10::irange(ndim)) {
@@ -2277,8 +2284,6 @@ class GuardManager {
     return _root;
   }
 
-  bool has_relational_guards();
-
   std::string get_source() {
     return _source;
   }
@@ -2411,7 +2416,7 @@ class GuardManager {
         // to avoid early exits when dict_tag matches and the object is
         // immutable.
         new_tag = get_dict_version_unchecked(value);
-        matches_dict_tag = (new_tag == _dict_tag) && !has_relational_guards();
+        matches_dict_tag = (new_tag == _dict_tag);
       }
     }
 
@@ -2634,10 +2639,6 @@ class RootGuardManager : public GuardManager {
     _relational_guard_resetters.emplace_back(std::move(relational_guard));
   }
 
-  bool has_relational_guards() {
-    return !_relational_guard_resetters.empty();
-  }
-
   // Python visible API to check guard function.
   bool check(py::handle value) {
     return check_nopybind(value.ptr());
@@ -2854,9 +2855,6 @@ class RootGuardManager : public GuardManager {
   bool _init_local_state = false;
 };
 
-bool GuardManager::has_relational_guards() {
-  return _root->has_relational_guards();
-}
 /*
  * Dicts are common in python code. Therefore, we handle guards for dicts
  * differently and use PyDict_* APIs which are faster than PyObject_* APIs
