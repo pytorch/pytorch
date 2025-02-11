@@ -256,18 +256,56 @@ __device__ __forceinline__ void opportunistic_fastAtomicAdd(
 
     auto mask = __match_any_sync(__activemask(), (int64_t)dst);
     int leader = __ffsll(mask) - 1;    // select a leader
-    union punner { int l; scalar_t s; } pnr = { .s = value };
     scalar_t crnt_val = (scalar_t)0;
     auto crnt_msk = mask >> (leader);
     int crnt_idx = leader;
-    while (crnt_msk != 0) {
+    if constexpr(sizeof(scalar_t) <= sizeof(int)) {
+     union punner { int l; scalar_t s; } pnr = { .s = value };
+     while (crnt_msk != 0) {
         if (crnt_msk & 1) {
             punner add_val = { .l = __shfl(pnr.l ,crnt_idx) };
             crnt_val += add_val.s;
         }
         crnt_idx++;
         crnt_msk = crnt_msk >> 1;
+     }
     }
+    else if constexpr(sizeof(scalar_t) <= sizeof(long)) {
+     union punner { long l; scalar_t s; } pnr = { .s = value };
+     while (crnt_msk != 0) {
+        if (crnt_msk & 1) {
+            punner add_val = { .l = __shfl(pnr.l ,crnt_idx) };
+            crnt_val += add_val.s;
+        }
+        crnt_idx++;
+        crnt_msk = crnt_msk >> 1;
+     }
+    }
+    else if constexpr(sizeof(scalar_t) <= sizeof(long long)) {
+     union punner { long long l; scalar_t s; } pnr = { .s = value };
+     while (crnt_msk != 0) {
+        if (crnt_msk & 1) {
+            punner add_val = { .l = __shfl(pnr.l ,crnt_idx) };
+            crnt_val += add_val.s;
+        }
+        crnt_idx++;
+        crnt_msk = crnt_msk >> 1;
+     }
+    }
+    else {
+     union punner { long long l[2]; scalar_t s; } pnr = { .s = value };
+     while (crnt_msk != 0) {
+        if (crnt_msk & 1) {
+            punner add_val = { .l[0] = __shfl(pnr.l[0] ,crnt_idx) };
+	    add_val.l[1] = __shfl(pnr.l[1] ,crnt_idx);
+            crnt_val += add_val.s;
+        }
+        crnt_idx++;
+        crnt_msk = crnt_msk >> 1;
+     }
+    }
+
+
     if (__lane_id() == leader) {  // only leader-lane does the update
       fastAtomicAdd(self_ptr, index, numel, crnt_val, true);
     }
