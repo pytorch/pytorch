@@ -6683,11 +6683,9 @@ class ShapeEnv:
             if static_expr is not None:
                 self.log.debug(
                     "eval %s == %s [statically known]",
-                    (
-                        f"size_oblivious({orig_expr})"
-                        if size_oblivious
-                        else size_oblivious
-                    ),
+                    f"size_oblivious({orig_expr})"
+                    if size_oblivious
+                    else size_oblivious,
                     static_expr,
                 )
                 if hint is not None:
@@ -6758,7 +6756,6 @@ class ShapeEnv:
                             metadata_fn=lambda: {
                                 "expr": repr(orig_expr),
                                 "result": repr(unsound_result),
-                                "expr_node_id": id(expr_sym_node),
                                 "stack": structured.from_traceback(
                                     CapturedTraceback.extract(skip=1).summary()
                                 ),
@@ -6769,13 +6766,14 @@ class ShapeEnv:
                             metadata_fn=lambda: {
                                 "expr": repr(orig_expr),
                                 "result": repr(unsound_result),
+                                "expr_node_id": id(expr_sym_node),
                                 "stack": structured.from_traceback(
                                     CapturedTraceback.extract(skip=1).summary()
                                 ),
                                 "symbol_to_sources": {
                                     str(v): k
                                     for k, v in self.source_to_var.items()
-                                    if v in g.free_symbols
+                                    if v in orig_expr.free_symbols
                                 },
                                 "frame_locals": asdict(self._find_frame_locals()),
                             },
