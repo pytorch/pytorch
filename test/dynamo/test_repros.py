@@ -1418,9 +1418,9 @@ class ReproTests(torch._dynamo.test_case.TestCase):
             self.assertTrue(same(opt_model(a, b, c, d), correct))
 
         if torch._dynamo.config.assume_static_by_default:
-            self.assertExpectedInline(cnt.frame_count, """4""")
+            self.assertExpectedInline(cnt.frame_count, """2""")
         else:
-            self.assertExpectedInline(cnt.frame_count, """5""")
+            self.assertExpectedInline(cnt.frame_count, """3""")
 
     def test_hf_model_output(self):
         ex = ModelOutput(a=torch.randn(10), b=torch.randn(10), c=torch.randn(10))
@@ -6509,6 +6509,27 @@ def forward(self, s0 : torch.SymInt, s1 : torch.SymInt, L_x_ : torch.Tensor):
                 torch.randn((2, 12, 16, 32, 32))
             ).sum()
             self.assertEqual(actual, expected)
+
+    def test_incompatible_configs(self):
+        with torch._dynamo.config.patch(
+            suppress_errors=False, fail_on_recompile_limit_hit=False
+        ):
+            torch.compile(lambda: None)
+
+        with torch._dynamo.config.patch(
+            suppress_errors=True, fail_on_recompile_limit_hit=False
+        ):
+            torch.compile(lambda: None)
+
+        with torch._dynamo.config.patch(
+            suppress_errors=False, fail_on_recompile_limit_hit=True
+        ):
+            torch.compile(lambda: None)
+
+        with torch._dynamo.config.patch(
+            suppress_errors=True, fail_on_recompile_limit_hit=True
+        ), self.assertRaises(AssertionError):
+            torch.compile(lambda: None)
 
 
 class ReproTestsDevice(torch._dynamo.test_case.TestCase):
