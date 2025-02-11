@@ -155,7 +155,6 @@ class ExceptionTests(torch._dynamo.test_case.TestCase):
         opt_fn = torch.compile(fn, backend="eager")
         opt_fn(x)
 
-    # TODO(anijain2305) - does not work with fullgraph=True
     def test_exception_with_ctx_manager(self):
         def fn(x):
             x = torch.cos(x)
@@ -169,8 +168,7 @@ class ExceptionTests(torch._dynamo.test_case.TestCase):
 
         x = torch.randn(4)
         ref = fn(x)
-        # Cant use fullgraph=True because WITH_EXCEPT_START is not supported
-        opt_fn = torch.compile(fn, backend="eager")
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
         res = opt_fn(x)
         self.assertEqual(ref, res)
 
@@ -216,6 +214,23 @@ class ExceptionTests(torch._dynamo.test_case.TestCase):
         opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
         got = opt_fn(x)
         self.assertEqual(expected, got)
+
+    def test_raise_custom_exception(self):
+        class Exc(Exception):
+            ...
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(t):
+            try:
+                raise Exc
+            except Exc:
+                return t.sin()
+            except Exception:
+                return t.cos()
+
+        t = torch.randn(2)
+        y = fn(t)
+        self.assertEqual(y, t.sin())
 
     def test_nn_module_getattr(self):
         class A:
