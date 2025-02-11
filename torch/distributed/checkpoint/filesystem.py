@@ -53,6 +53,11 @@ from torch.distributed.checkpoint.storage import (
 from torch.distributed.checkpoint.utils import _create_file_view
 from torch.futures import Future
 
+try:
+    import safetensors
+except ImportError:
+    pass
+
 
 __all__ = ["FileSystemWriter", "FileSystemReader", "FileSystem", "FileSystemBase"]
 
@@ -303,6 +308,7 @@ def _write_item(
     data: Union[io.BytesIO, torch.Tensor],
     write_item: WriteItem,
     storage_key: str,
+    safe_tensors: bool = False,
 ) -> WriteResult:
     offset = stream.tell()
 
@@ -316,7 +322,8 @@ def _write_item(
     else:
         assert isinstance(data, torch.Tensor)
         assert data.device == torch.device("cpu")
-        torch.save(data, transform_to)
+        if not safe_tensors:
+            torch.save(data, transform_to)
     transform_to.close()
 
     length = stream.tell() - offset
@@ -348,6 +355,7 @@ def _write_files_from_queue(
     inflight_threshhold: int,
     use_fsync: bool,
     thread_count: int,
+    safe_tensors: bool,
 ) -> None:
     try:
         while True:
@@ -389,14 +397,19 @@ def _write_files_from_queue(
                 for write_item in bytes_w:
                     data = planner.resolve_data(write_item)
                     write_results.append(
-                        _write_item(transforms, stream, data, write_item, storage_key)
+                        _write_item(transforms, stream, data, write_item, storage_key, safe_tensors)
                     )
 
+                tensor_dict = {}
                 for tensor, write_item in loader.values():
                     assert tensor.is_cpu
                     write_results.append(
-                        _write_item(transforms, stream, tensor, write_item, storage_key)
+                        _write_item(transforms, stream, tensor, write_item, storage_key, safe_tensors)
                     )
+                    tensor_dict[write_item.index.fqn] = tensor
+
+                if safe_tensors:
+                     stream.write(safetensors.torch.save(tensor_dict))
 
                 if use_fsync:
                     try:
@@ -456,13 +469,17 @@ class FileSystem(FileSystemBase):
     def create_stream(
         self, path: Union[str, os.PathLike], mode: str
     ) -> Generator[io.IOBase, None, None]:
-        with cast(Path, path).open(mode) as stream:
+        if not isinstance(path, Path):
+            path = Path(path)
+        with path.open(mode) as stream:
             yield cast(io.IOBase, stream)
 
     def concat_path(
         self, path: Union[str, os.PathLike], suffix: str
     ) -> Union[str, os.PathLike]:
-        return cast(Path, path) / suffix
+        if not isinstance(path, Path):
+            path = Path(path)
+        return path / suffix
 
     def init_path(self, path: Union[str, os.PathLike]) -> Union[str, os.PathLike]:
         if not isinstance(path, Path):
@@ -605,6 +622,15 @@ class _FileSystemWriter(StorageWriter):
                 path = self.fs.concat_path(self.path, file_name)
                 file_queue.put((path, file_name, [item]))
 
+        self._write_data(planner, file_queue)
+
+
+    def _write_data(
+        self,
+        planner: SavePlanner,
+        file_queue: queue.Queue,
+        safe_tensors: bool = False,
+    ) -> Future[list[WriteResult]]:
         result_queue: queue.Queue = queue.Queue()
 
         threads = []
@@ -620,6 +646,7 @@ class _FileSystemWriter(StorageWriter):
                     self.per_thread_copy_ahead,
                     self.sync_files,
                     self.thread_count,
+                    safe_tensors,
                 ),
             )
             t.start()
@@ -634,6 +661,7 @@ class _FileSystemWriter(StorageWriter):
             inflight_threshhold=self.per_thread_copy_ahead,
             use_fsync=self.sync_files,
             thread_count=self.thread_count,
+            safe_tensors=safe_tensors,
         )
 
         for t in threads:
