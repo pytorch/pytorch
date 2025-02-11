@@ -1395,7 +1395,13 @@ def use_cpp_bmm_template(layout, mat1, mat2):
 
 
 def use_cpp_gemm_template(
-    layout, mat1, mat2, mat2_transposed=False, require_constant_mat2=True
+    layout,
+    mat1,
+    mat2,
+    mat2_transposed=False,
+    require_constant_mat2=True,
+    is_woq_int4=False,
+    q_group_size=None,
 ):
     from . import ir
     from .codegen.cpp_micro_gemm import create_micro_gemm
@@ -1415,6 +1421,7 @@ def use_cpp_gemm_template(
         mat2,
         out_dtype=layout.dtype if int8_gemm else None,
         mat2_transposed=mat2_transposed,
+        use_4x2_dim=is_woq_int4,
     )
 
     # TODO(jgong5): support dynamic shapes for n or k
@@ -1433,6 +1440,8 @@ def use_cpp_gemm_template(
         input2_dtype=mat2.get_dtype(),
         output_dtype=output_dtype,
         num_threads=parallel_num_threads(),
+        is_woq_int4=is_woq_int4,
+        q_group_size=q_group_size,
     )
 
     def is_last_dim_stride1(x):
