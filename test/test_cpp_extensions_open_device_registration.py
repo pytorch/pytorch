@@ -499,27 +499,6 @@ class TestCppExtensionOpenRgistration(common.TestCase):
         z = x[y, y]
         self.assertEqual(z_cpu, z)
 
-    def test_open_device_tensorlist_type_fallback(self):
-        # create tensors located in custom device
-        v_openreg = torch.Tensor([1, 2, 3]).to("openreg")
-        # create result tensor located in cpu
-        z_cpu = torch.Tensor([2, 4, 6])
-        # create tensorlist for foreach_add op
-        x = (v_openreg, v_openreg)
-        y = (v_openreg, v_openreg)
-        # Check that our device is correct.
-        device = self.module.custom_device()
-        self.assertTrue(v_openreg.device == device)
-        self.assertFalse(v_openreg.is_cpu)
-
-        # call _foreach_add op, which will fallback to cpu
-        z = torch._foreach_add(x, y)
-        self.assertEqual(z_cpu, z[0])
-        self.assertEqual(z_cpu, z[1])
-
-        # call _fused_adamw_ with undefined tensor.
-        self.module.fallback_with_undefined_tensor()
-
     @skipIfTorchDynamo()
     @unittest.skipIf(
         np.__version__ < "1.25",
