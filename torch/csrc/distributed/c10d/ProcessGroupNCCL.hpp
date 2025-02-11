@@ -126,6 +126,10 @@ static std::vector<std::string> TORCH_NCCL_LOG_CPP_STACK_ON_UNCLEAN_SHUTDOWN = {
 static std::vector<std::string> TORCH_NCCL_CUDA_EVENT_CACHE = {
     "TORCH_NCCL_CUDA_EVENT_CACHE"};
 
+// Control the number of ranks each root can cover during NCCL comm init.
+static std::vector<std::string> TORCH_NCCL_RANKS_PER_ROOT = {
+    "TORCH_NCCL_RANKS_PER_ROOT"};
+
 static std::vector<std::string> TORCH_NCCL_NAN_CHECK = {"TORCH_NCCL_NAN_CHECK"};
 
 constexpr const char* NCCL_BACKEND_NAME = "nccl";
@@ -492,7 +496,7 @@ class TORCH_API ProcessGroupNCCL : public Backend {
     // Schedule NCCL operations on high priority CUDA streams
     bool is_high_priority_stream;
 
-#ifdef NCCL_HAS_COMM_NONBLOCKING
+#ifdef NCCL_HAS_CONFIG
     // Configure ranks
     ncclConfig_t config = NCCL_CONFIG_INITIALIZER;
 #endif
@@ -770,6 +774,12 @@ class TORCH_API ProcessGroupNCCL : public Backend {
 
   std::shared_ptr<c10::Allocator> getMemAllocator() override;
 
+  // Allocate tensor from communication-optimized memory pool
+  at::Tensor allocateTensor(long size, at::TensorOptions options = {}) override;
+
+  // Whether tensor allocation from NCCL memory pool is supported
+  bool supportsTensorAlloc() override;
+
   // Performs NCCL user buffer registration for all buffers in
   // the given MemPool
   void registerMemPool(c10::cuda::MemPool* pool);
@@ -803,6 +813,12 @@ class TORCH_API ProcessGroupNCCL : public Backend {
       bool isSingleP2POp,
       const std::string& devicesKey,
       int p2pRank);
+
+  // Helper that allgathers nccl unique IDs to all ranks through the store
+  void allgatherUniqueNCCLIDs(
+      int rootIdx,
+      ncclUniqueId* ncclID,
+      std::vector<ncclUniqueId>& ncclIDs);
 
   // Helper that looks up the cached NCCL communicators only
   std::shared_ptr<NCCLComm> getNCCLComm(const std::string& deviceKey);
@@ -1284,6 +1300,9 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   // Internal cached value: use NCCL non-blocking API mode or not.
   // Use `useNonblocking()` method instead of accessing this variable directly.
   std::optional<bool> useNonblocking_{std::nullopt};
+
+  // Communication-optimized memory pool associated with this PG
+  std::unique_ptr<c10::cuda::MemPool> memPool_ = nullptr;
 };
 
 // Dumps the NCCL comm traces and additional information about the Process
