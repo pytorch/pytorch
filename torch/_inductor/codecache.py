@@ -1977,10 +1977,26 @@ def _precompile_header(
         )
         preprocessor.build()
 
-        # read, then cleanup, the preprocessor output file
-        with open(preprocessor.get_target_file_path()) as preprocessor_output_file:
-            preprocessor_output = preprocessor_output_file.read()
-        os.unlink(preprocessor.get_target_file_path())
+        def _get_file_checksum(filename: str) -> str:
+            """Reading the whole preprocessed header in for hashing is very expensive,
+            but calling a fast hashing utility in a subprocess is cheap."""
+            if _IS_WINDOWS:
+                cmd_output = subprocess.run(
+                    ["certutil", "-hashfile", filename, "SHA512"],
+                    capture_output=True,
+                    text=True,
+                )
+                return cmd_output.stdout.splitlines()[1]
+
+            cmd_output = subprocess.run(
+                ["sha512sum", filename], capture_output=True, text=True
+            )
+            return cmd_output.stdout.split()[0]
+
+        # hash, then cleanup, the preprocessor output file
+        preprocessor_file_name = preprocessor.get_target_file_path()
+        preprocessor_hash = _get_file_checksum(preprocessor_file_name)
+        os.unlink(preprocessor_file_name)
 
     header_build_option = CppTorchDeviceOptions(**compile_command, precompiling=True)
     header_hash, header_full_path = write(
@@ -1988,7 +2004,7 @@ def _precompile_header(
         extension="h",
         extra=(
             hashable_cmd_line
-            + preprocessor_output
+            + preprocessor_hash
             + get_compiler_version_info(header_build_option.get_compiler())
         ),
         specified_dir=_HEADER_DIR,
