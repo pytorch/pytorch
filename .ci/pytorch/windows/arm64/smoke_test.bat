@@ -10,15 +10,7 @@ echo "unknown package type"
 exit /b 1
 
 :wheel
-echo "install wheel package"
-
-echo Running pip install...
-pip install -q --pre numpy protobuf
-echo Error level after pip install: %ERRORLEVEL%
-if errorlevel 1 exit /b 1
-
-for /F "delims=" %%i in ('where /R "%PYTORCH_FINAL_PACKAGE_DIR:/=\%" *.whl') do pip install "%%i"
-if errorlevel 1 exit /b 1
+call %PYTORCH_ROOT%\.ci\pytorch\windows\arm64\bootstrap_tests.bat
 
 goto smoke_test
 
