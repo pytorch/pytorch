@@ -10269,7 +10269,6 @@ def ___make_guard_fn():
         reconstructed = cxx_pytree.tree_unflatten(leaves, treespec)
         self.assertEqual(x, reconstructed)
 
-
         def fn(x, y):
             treespec = cxx_pytree.tree_structure(x)
             if isinstance(treespec, cxx_pytree.PyTreeSpec):
