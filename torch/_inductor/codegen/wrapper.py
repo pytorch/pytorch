@@ -683,7 +683,7 @@ class MultiOutputLine(WrapperLine):
     arg_name: str
     indices: Sequence[Any]
 
-    def codegen(self):
+    def codegen(self, code: IndentedBuffer) -> None:
         def codegen_list_tuple_access(basename, indices):  # type: ignore[no-untyped-def]
             if len(indices) > 0:
                 itype, i = indices[0]
@@ -704,7 +704,7 @@ class MultiOutputLine(WrapperLine):
                 return basename
 
         value = codegen_list_tuple_access(self.arg_name, self.indices)
-        self.wrapper.writeline(
+        code.writeline(
             f"{self.wrapper.declare}{self.result_name} = {value}{self.wrapper.ending}"
         )
 
