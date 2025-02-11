@@ -182,7 +182,7 @@ def all_gather_tensor(
     gather_dim: int,
     group: RANK_TYPES,
     tag: str = "",
-):
+) -> torch.Tensor:
     """
     Gather tensor data across from all machines and concatenate over ``gather_dim``.
 

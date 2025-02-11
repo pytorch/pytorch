@@ -113,6 +113,7 @@ def get_artifacts_urls(results, suites):
             and "test" in r["jobName"]
             and "build" not in r["jobName"]
             and "runner-determinator" not in r["jobName"]
+            and "unit-test" not in r["jobName"]
         ):
             *_, test_str = parse_job_name(r["jobName"])
             suite, shard_id, num_shards, machine, *_ = parse_test_str(test_str)

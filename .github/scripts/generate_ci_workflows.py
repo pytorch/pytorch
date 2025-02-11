@@ -144,20 +144,6 @@ LINUX_BINARY_BUILD_WORFKLOWS = [
             isolated_workflow=True,
         ),
     ),
-    BinaryBuildWorkflow(
-        os=OperatingSystem.LINUX,
-        package_type="libtorch",
-        abi_version=generate_binary_build_matrix.PRE_CXX11_ABI,
-        build_configs=generate_binary_build_matrix.generate_libtorch_matrix(
-            OperatingSystem.LINUX,
-            generate_binary_build_matrix.PRE_CXX11_ABI,
-            libtorch_variants=["shared-with-deps"],
-        ),
-        ciflow_config=CIFlowConfig(
-            labels={LABEL_CIFLOW_BINARIES, LABEL_CIFLOW_BINARIES_LIBTORCH},
-            isolated_workflow=True,
-        ),
-    ),
 ]
 
 LINUX_BINARY_SMOKE_WORKFLOWS = [
@@ -166,7 +152,7 @@ LINUX_BINARY_SMOKE_WORKFLOWS = [
         package_type="manywheel",
         build_configs=generate_binary_build_matrix.generate_wheels_matrix(
             OperatingSystem.LINUX,
-            arches=["11.8", "12.4", "12.6"],
+            arches=["11.8", "12.4", "12.6", "12.8"],
             python_versions=["3.9"],
         ),
         branches="main",
@@ -194,18 +180,6 @@ LINUX_BINARY_SMOKE_WORKFLOWS = [
         build_configs=generate_binary_build_matrix.generate_libtorch_matrix(
             OperatingSystem.LINUX,
             generate_binary_build_matrix.CXX11_ABI,
-            arches=["cpu"],
-            libtorch_variants=["shared-with-deps"],
-        ),
-        branches="main",
-    ),
-    BinaryBuildWorkflow(
-        os=OperatingSystem.LINUX,
-        package_type="libtorch",
-        abi_version=generate_binary_build_matrix.PRE_CXX11_ABI,
-        build_configs=generate_binary_build_matrix.generate_libtorch_matrix(
-            OperatingSystem.LINUX,
-            generate_binary_build_matrix.PRE_CXX11_ABI,
             arches=["cpu"],
             libtorch_variants=["shared-with-deps"],
         ),

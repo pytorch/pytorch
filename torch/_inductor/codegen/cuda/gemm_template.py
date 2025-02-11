@@ -88,6 +88,8 @@ PT_EXPORT {{kernel_call_signature}} {
   return 0;
 }
 }
+
+// configuration name: {{op_conf_name}}
 """
 
 # Jinja template for Cutlass 3.x GEMM Kernel arguments, used by the CUTLASSGemmTemplate class below.
@@ -502,7 +504,7 @@ class CUTLASSGemmTemplate(CUTLASSTemplate, ABC):
 
         ops = self.gen_ops()
         for name, op in ops:
-            for swizzle in (1, 2, 4, 8):
+            for swizzle in inductor_cuda_config.cutlass_max_profiling_swizzle_options:
                 description = f"{name} swizzle={swizzle}"
                 self.maybe_append_choice(
                     choices, description=description, op=op, swizzle=swizzle
@@ -962,6 +964,7 @@ class CUTLASSGemmTemplate(CUTLASSTemplate, ABC):
             input_reorder=self.input_reorder,
             epilogue_args=epilogue_args,
             test_call_statement=test_call_statement,
+            op_conf_name=op.configuration_name(),
         )
         options.update(dict(zip(extra_names, extra_inputs)))
         res = self._template_from_string(self._get_template()).render(**options)
