@@ -144,6 +144,11 @@ Tensor q_linear_pointwise_binary(
     c10::string_view unary_post_op,
     torch::List<std::optional<at::Scalar>> unary_post_op_args,
     c10::string_view unary_post_op_algorithm) {
+  TORCH_CHECK(
+      act.device() == weight.device() &&
+          act.device() == weight_scales.device() &&
+          act.device() == weight_zero_points.device(),
+      "qlinear xpu: input tensors(act, weight, weight scale, weight zero-points) should be on the same device");
   Tensor b_raw = bias.has_value() ? bias.value() : at::Tensor();
 
   const int64_t dim = act.dim();
@@ -156,7 +161,7 @@ Tensor q_linear_pointwise_binary(
   std::vector<int64_t> dst_dims = {M, N};
   auto out_dtype =
       output_dtype.has_value() ? output_dtype.value() : act.scalar_type();
-  Tensor qout = at::empty(dst_dims, device(c10::kXPU).dtype(out_dtype));
+  Tensor qout = at::empty(dst_dims, act.options().dtype(out_dtype));
 
   quantized_matmul(
       act.contiguous(),
@@ -177,7 +182,8 @@ Tensor q_linear_pointwise_binary(
       /*binary alpha*/ binary_alpha,
       unary_post_op,
       unary_post_op_args,
-      unary_post_op_algorithm);
+      unary_post_op_algorithm,
+      /*m2_trans*/ true);
 
   return qout;
 }
@@ -201,6 +207,11 @@ Tensor q_linear_pointwise_binary_tensor(
     c10::string_view unary_post_op,
     torch::List<std::optional<at::Scalar>> unary_post_op_args,
     c10::string_view unary_post_op_algorithm) {
+  TORCH_CHECK(
+      act.device() == weight.device() &&
+          act.device() == weight_scales.device() &&
+          act.device() == weight_zero_points.device(),
+      "qlinear xpu: input tensors(act, weight, weight scale, weight zero-points) should be on the same device");
   Tensor b_raw = bias.has_value() ? bias.value() : at::Tensor();
 
   const int64_t dim = act.dim();
@@ -213,7 +224,7 @@ Tensor q_linear_pointwise_binary_tensor(
   std::vector<int64_t> dst_dims = {M, N};
   auto out_dtype =
       output_dtype.has_value() ? output_dtype.value() : act.scalar_type();
-  Tensor qout = at::empty(dst_dims, device(c10::kXPU).dtype(out_dtype));
+  Tensor qout = at::empty(dst_dims, act.options().dtype(out_dtype));
 
   quantized_matmul(
       act.contiguous(),
@@ -234,7 +245,8 @@ Tensor q_linear_pointwise_binary_tensor(
       /*binary alpha*/ binary_alpha,
       unary_post_op,
       unary_post_op_args,
-      unary_post_op_algorithm);
+      unary_post_op_algorithm,
+      /*m2_trans*/ true);
 
   return qout;
 }

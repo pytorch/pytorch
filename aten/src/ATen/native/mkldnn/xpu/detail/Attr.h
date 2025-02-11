@@ -425,21 +425,21 @@ static inline void construct_attr_by_post_op(
     if (unary_post_op == "none") {
       if (input1_zero_point != 0)
         attr = attr.append_post_eltwise(
-            /*scale*/ 1,
-            /*alpha*/ 1,
+            /*scale*/ 1.f,
+            /*alpha*/ 1.f,
             -input1_zero_point * input1_scale,
             attr.kind_with_linear);
       attr = attr.append_post_sum(1, input1_scale, /*input1_zero_point*/ 0);
     } else if (unary_post_op == "relu") {
       if (input1_zero_point != 0)
         attr = attr.append_post_eltwise(
-            /*scale*/ 1,
-            /*alpha*/ 1,
+            /*scale*/ 1.f,
+            /*alpha*/ 1.f,
             -input1_zero_point * input1_scale,
             attr.kind_with_linear);
       attr = attr.append_post_sum(1, input1_scale, /*input1_zero_point*/ 0);
       attr = attr.append_post_eltwise(
-          /* eltwise_scale */ 1.f,
+          /* scale */ 1.f,
           /* alpha */ 0.f,
           /* beta */ 0.f,
           attr.kind_with_relu);
