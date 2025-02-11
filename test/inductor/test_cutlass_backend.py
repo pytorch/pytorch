@@ -75,9 +75,9 @@ class TestCutlassBackend(TestCase):
             os.environ["INDUCTOR_TEST_DISABLE_FRESH_CACHE"] = "1"
             super().setUp()
         finally:
-            os.environ[
-                "INDUCTOR_TEST_DISABLE_FRESH_CACHE"
-            ] = old_disable_fresh_cache_envvar
+            os.environ["INDUCTOR_TEST_DISABLE_FRESH_CACHE"] = (
+                old_disable_fresh_cache_envvar
+            )
         torch.random.manual_seed(1234)
 
     def tearDown(self):
@@ -653,7 +653,7 @@ class TestCutlassBackend(TestCase):
             model = MyModel()
             M, N, K = 128, 64, 64
             dynamic_shapes = {
-                "x": {0: Dim.DYNAMIC},
+                "x": {0: Dim.DYNAMIC},  # type: ignore[attr-defined]
                 "w": None,
             }
 
