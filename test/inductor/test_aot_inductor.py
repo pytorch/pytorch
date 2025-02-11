@@ -4010,6 +4010,16 @@ class AOTInductorTestsTemplate:
 
         self.check_model(Model(), example_inputs)
 
+    @dynamo_config.patch({"capture_scalar_outputs": True})
+    def test_unbacked_arg(self):
+        class Model(torch.nn.Module):
+            def forward(self):
+                full = torch.full((), 11)
+                i0 = full.item()
+                return (torch.full((i0,), 0.0),)
+
+        self.check_model(Model(), ())
+
     @common_utils.parametrize("mark_unbacked", (True, False))
     def test_unbacked_equals_input_size_runtime_assertion(self, mark_unbacked: bool):
         # This test checks the unbacked symint runtime assertions, for the following cases:

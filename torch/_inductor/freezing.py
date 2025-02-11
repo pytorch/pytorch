@@ -98,9 +98,11 @@ def _freeze(
     # See the details in fx_codegen_and_compile of compile_fx.py.
     view_to_reshape(aot_autograd_gm)
 
-    if tracing_context := torch._guards.TracingContext.try_get():
+    tracing_context = torch._guards.TracingContext.try_get()
+
+    # tracing_context.params_flat_unwrap_subclasses might be None for aot export
+    if tracing_context and tracing_context.params_flat_unwrap_subclasses:
         fw_metadata = tracing_context.fw_metadata
-        assert tracing_context.params_flat_unwrap_subclasses is not None
         params_flat = tracing_context.params_flat_unwrap_subclasses
         assert fw_metadata is not None and params_flat is not None
 

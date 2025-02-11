@@ -524,9 +524,13 @@ def fake_tensor_prop(
                 else mock.patch.object(fake_mode, "allow_non_fake_inputs", True)
             )
             with ctx:  # type: ignore[attr-defined]
-                FakeTensorProp(gm, mode=fake_mode).propagate_dont_convert_inputs(
-                    *example_inputs
-                )
+                if V.aot_compilation:
+                    # we need fake tensor here to re-use the FakeTensorCache
+                    FakeTensorProp(gm, mode=fake_mode).propagate(*example_inputs)
+                else:
+                    FakeTensorProp(gm, mode=fake_mode).propagate_dont_convert_inputs(
+                        *example_inputs
+                    )
 
     return fake_mode
 
@@ -1698,7 +1702,7 @@ def fw_compiler_freezing(
     tracing_context = torch._guards.TracingContext.try_get()
     unwrapped_args_offsets = [0]
     max_offset_idx = 0
-    if tracing_context is not None:
+    if tracing_context is not None and not V.aot_compilation:
         assert tracing_context.params_flat_unwrap_subclasses is not None
         params_flat_unwrap = tracing_context.params_flat_unwrap_subclasses
         max_offset_idx = max(0, len(params_flat_unwrap) - 1)
@@ -1842,10 +1846,19 @@ def compile_fx(
             }
         ), V.set_real_inputs(example_inputs_):
             inputs_: Sequence[InputType] = example_inputs_
+            # [NOTE] Fake mode in inductor
+            # In AOT inductor, we get fake_mode from placeholder node meta, val or example_values.
+            # When there's no user inputs, we look at other nodes' meta to determine the fake_mode.
+            # In JIT inductor, we get fake_mode from tracing context. In addition, if we are in cpp_wrapper
+            # mode and trying to create fake_tensor, we need to convert inputs to use the same fake_mode as
+            # the tracing context fake mode. The inputs might have a different fake_mode than the tracing
+            # context fake_mode if they used the fake_mode
+            # [here](https://github.com/pytorch/pytorch/blob/v2.6.0/torch/_dynamo/output_graph.py#L1373-L1379).
+            if isinstance(model_, GraphModule) and V.aot_compilation:
+                from torch.fx.passes.runtime_assert import _get_example_value
 
-            if isinstance(model_, GraphModule):
                 fake_inputs = [
-                    node.meta.get("val")
+                    _get_example_value(node)
                     for node in model_.graph.nodes
                     if node.op == "placeholder"
                 ]
@@ -1868,6 +1881,13 @@ def compile_fx(
                                     "make sure torch.export() and torch.aot_compile() run on the same device."
                                 )
                     inputs_ = fake_inputs  # type: ignore[assignment]
+            else:
+                fake_mode = detect_fake_mode()
+                inputs_ = [
+                    fake_mode.from_tensor(t) if isinstance(t, torch.Tensor) else t
+                    for t in inputs_
+                ]
+
             return compile_fx(
                 model_,
                 inputs_,
@@ -2116,16 +2136,43 @@ def compile_fx(
 
         bw_compiler = SerializableAOTDispatchCompiler(OutputCode, bw_compiler)
 
-        fake_mode = detect_fake_mode(
-            example_inputs_
-        ) or torch._subclasses.FakeTensorMode(allow_non_fake_inputs=True)
+        # [See NOTE] Fake mode in inductor
+        fake_mode = detect_fake_mode(example_inputs_)
+
+        if (
+            V.aot_compilation
+            and isinstance(model_, GraphModule)
+            and fake_mode is None
+            and len(example_inputs_) == 0
+        ):
+            # Used for AOT inductor where there's no user inputs.
+            from torch.fx.passes.runtime_assert import _get_example_value
+
+            fake_node_vals = [
+                value
+                for node in model_.graph.nodes
+                if isinstance(
+                    value := _get_example_value(node),
+                    torch._subclasses.fake_tensor.FakeTensor,
+                )
+            ]
+
+            fake_mode = detect_fake_mode(fake_node_vals)
+
+        fake_mode = fake_mode or torch._subclasses.FakeTensorMode(
+            allow_non_fake_inputs=True,
+            shape_env=torch.fx.experimental.symbolic_shapes.ShapeEnv(),
+        )
+
         tracing_context = (
             torch._guards.TracingContext.try_get()
             or torch._guards.TracingContext(fake_mode)
         )
 
         if V.aot_compilation:
-            with functorch_config.patch(unlift_effect_tokens=True):
+            with functorch_config.patch(
+                unlift_effect_tokens=True
+            ), torch._guards.tracing(tracing_context):
                 gm, graph_signature = aot_export_module(
                     model_,
                     example_inputs_,
@@ -2151,7 +2198,11 @@ def compile_fx(
             context = (
                 torch._C._DisableAutocast if disable_amp else contextlib.nullcontext
             )
-            with V.set_fake_mode(fake_mode), compiled_autograd._disable(), context():
+            with V.set_fake_mode(
+                fake_mode
+            ), compiled_autograd._disable(), context(), torch._guards.tracing(
+                tracing_context
+            ):
                 return inference_compiler(unlifted_gm, example_inputs_)
 
         with V.set_fake_mode(fake_mode), torch._guards.tracing(
