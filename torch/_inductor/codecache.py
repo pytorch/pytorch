@@ -43,6 +43,7 @@ from typing import (
     TypeVar,
     Union,
 )
+from typing_extensions import Self
 
 import torch
 import torch.distributed as dist
@@ -3027,7 +3028,7 @@ class DLLWrapper:
 
         return _wrapped_func
 
-    def __enter__(self) -> DLLWrapper:  # noqa: PYI034
+    def __enter__(self) -> Self:
         return self
 
     def __exit__(self, *args: Any) -> None:
@@ -3083,6 +3084,9 @@ class CUDACodeCache:
                     cmd = cuda_compile_command(
                         [input_path], output_path, dst_file_ext, extra_args
                     )
+                    with open(input_path, "a") as f:
+                        f.write("\n")
+                        f.write(f"// CUDA Compile cmd\n// {cmd}\n")
                     start_time = time()
                     log.debug("CUDA Compilation: %s", cmd)
                     cmd_parts = cmd.split(" ")
