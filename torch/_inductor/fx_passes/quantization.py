@@ -3088,13 +3088,11 @@ def _register_qlinear_post_op_fusion_pass(
         # Output QParams
         o_inv_scale = (
             kwargs["o_inv_scale"]
-            if (output_dtype in OrderedSet([torch.uint8, torch.int8]))
+            if (output_dtype in [torch.uint8, torch.int8])
             else 1.0
         )
         o_zero_point = (
-            kwargs["o_zp"]
-            if (output_dtype in OrderedSet([torch.uint8, torch.int8]))
-            else 0
+            kwargs["o_zp"] if (output_dtype in [torch.uint8, torch.int8]) else 0
         )
         assert (
             kwargs["postop_name"] == "none"
