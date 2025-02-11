@@ -2182,6 +2182,16 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         with self.assertRaises(torch._dynamo.exc.Unsupported):
             f(torch.zeros(2), A())
 
+    def test_one_hot(self):
+        @torch.compile
+        def f(x, y):
+            return torch.nn.functional.one_hot(x, y)
+
+        with self.assertRaisesRegex(
+            RuntimeError, "Class values must be smaller than num_classes"
+        ):
+            f(torch.arange(0, 5) % 3, 0)
+
     def test_sort_out(self):
         dtype = torch.float32
         device = "cpu"
