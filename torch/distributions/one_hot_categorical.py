@@ -1,11 +1,12 @@
 # mypy: allow-untyped-defs
+from typing import Optional
+
 import torch
-from torch import Tensor
+from torch import Tensor, Generator
 from torch.distributions import constraints
 from torch.distributions.categorical import Categorical
 from torch.distributions.distribution import Distribution
 from torch.types import _size
-
 
 __all__ = ["OneHotCategorical", "OneHotCategoricalStraightThrough"]
 
@@ -92,11 +93,11 @@ class OneHotCategorical(Distribution):
     def param_shape(self) -> torch.Size:
         return self._categorical.param_shape
 
-    def sample(self, sample_shape=torch.Size()):
+    def sample(self, sample_shape=torch.Size(), generator: Optional[Generator] = None):
         sample_shape = torch.Size(sample_shape)
         probs = self._categorical.probs
         num_events = self._categorical._num_events
-        indices = self._categorical.sample(sample_shape)
+        indices = self._categorical.sample(sample_shape, generator)
         return torch.nn.functional.one_hot(indices, num_events).to(probs)
 
     def log_prob(self, value):

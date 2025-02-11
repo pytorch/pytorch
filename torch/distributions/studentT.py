@@ -2,12 +2,12 @@
 import math
 
 import torch
-from torch import inf, nan, Tensor
+from torch import inf, nan, Tensor, Generator
 from torch.distributions import Chi2, constraints
 from torch.distributions.distribution import Distribution
 from torch.distributions.utils import _standard_normal, broadcast_all
 from torch.types import _size
-
+from typing import Optional
 
 __all__ = ["StudentT"]
 
@@ -76,7 +76,7 @@ class StudentT(Distribution):
         new._validate_args = self._validate_args
         return new
 
-    def rsample(self, sample_shape: _size = torch.Size()) -> Tensor:
+    def rsample(self, sample_shape: _size = torch.Size(), generator: Optional[Generator] = None) -> Tensor:
         # NOTE: This does not agree with scipy implementation as much as other distributions.
         # (see https://github.com/fritzo/notebooks/blob/master/debug-student-t.ipynb). Using DoubleTensor
         # parameters seems to help.
@@ -85,8 +85,8 @@ class StudentT(Distribution):
         #   Z ~ Chi2(df)
         #   Y = X / sqrt(Z / df) ~ StudentT(df)
         shape = self._extended_shape(sample_shape)
-        X = _standard_normal(shape, dtype=self.df.dtype, device=self.df.device)
-        Z = self._chi2.rsample(sample_shape)
+        X = _standard_normal(shape, dtype=self.df.dtype, device=self.df.device, generator=generator)
+        Z = self._chi2.rsample(sample_shape, generator)
         Y = X * torch.rsqrt(Z / self.df)
         return self.loc + self.scale * Y
 

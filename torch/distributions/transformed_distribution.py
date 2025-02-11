@@ -1,14 +1,14 @@
 # mypy: allow-untyped-defs
 
 import torch
-from torch import Tensor
+from torch import Tensor, Generator
 from torch.distributions import constraints
 from torch.distributions.distribution import Distribution
 from torch.distributions.independent import Independent
 from torch.distributions.transforms import ComposeTransform, Transform
 from torch.distributions.utils import _sum_rightmost
 from torch.types import _size
-
+from typing import Optional
 
 __all__ = ["TransformedDistribution"]
 
@@ -130,7 +130,7 @@ class TransformedDistribution(Distribution):
     def has_rsample(self) -> bool:  # type: ignore[override]
         return self.base_dist.has_rsample
 
-    def sample(self, sample_shape=torch.Size()):
+    def sample(self, sample_shape=torch.Size(), generator: Optional[Generator] = None):
         """
         Generates a sample_shape shaped sample or sample_shape shaped batch of
         samples if the distribution parameters are batched. Samples first from
@@ -138,19 +138,19 @@ class TransformedDistribution(Distribution):
         list.
         """
         with torch.no_grad():
-            x = self.base_dist.sample(sample_shape)
+            x = self.base_dist.sample(sample_shape, generator)
             for transform in self.transforms:
                 x = transform(x)
             return x
 
-    def rsample(self, sample_shape: _size = torch.Size()) -> Tensor:
+    def rsample(self, sample_shape: _size = torch.Size(), generator: Optional[Generator] = None) -> Tensor:
         """
         Generates a sample_shape shaped reparameterized sample or sample_shape
         shaped batch of reparameterized samples if the distribution parameters
         are batched. Samples first from base distribution and applies
         `transform()` for every transform in the list.
         """
-        x = self.base_dist.rsample(sample_shape)
+        x = self.base_dist.rsample(sample_shape, generator)
         for transform in self.transforms:
             x = transform(x)
         return x
