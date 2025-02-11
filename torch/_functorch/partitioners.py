@@ -1934,7 +1934,6 @@ def min_cut_rematerialization_partition(
         saved_sym_nodes=saved_sym_nodes,
         num_fwd_outputs=num_fwd_outputs,
     )
-
     if graph_has_recomputable_ops:
         if graph_has_recomputable_rng_ops:
             fw_module, bw_module = functionalize_rng_ops(

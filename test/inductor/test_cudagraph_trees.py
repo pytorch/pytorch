@@ -2623,18 +2623,19 @@ if HAS_CUDA and not TEST_WITH_ASAN:
                 aot_eager_decomp_partition_with_mode, mode=obs
             )
 
-            fn = torch.compile(fn, backend=aot_eager_decomp_partition_with_mode)
+            fn_c = torch.compile(fn, backend=aot_eager_decomp_partition_with_mode)
 
+            torch.manual_seed(0)
             outs = []
             for i in range(3):
                 obs.curr_run = i
                 x = torch.randn(4, 4, device=device, requires_grad=True)
                 y = torch.randn(4, 4, device=device, requires_grad=True)
-                outs.append(fn(x, y).sum())
+                outs.append(fn_c(x, y))
 
             for idx in order:
                 obs.curr_run = idx
-                outs[idx].backward()
+                outs[idx].sum().backward()
 
             for run in range(0, 3):
                 self.assertEqual(len(obs.op_outputs[(run, aten.rand.default)]), 2)
@@ -2642,6 +2643,46 @@ if HAS_CUDA and not TEST_WITH_ASAN:
                     obs.op_outputs[(run, aten.rand.default)][0],
                     obs.op_outputs[(run, aten.rand.default)][1],
                 )
+
+        @config.patch(fallback_random=True)
+        def test_cudagraphs_aot_eager_compat_equal(self):
+            def gn(x, y):
+                return torch.sigmoid(torch.rand_like(x) * y) * x
+
+            def fn(x, y):
+                x = torch.sin(x)
+                x = torch.utils.checkpoint.checkpoint(gn, x, y, use_reentrant=True)
+                x = torch.sin(x)
+                return x
+
+            outs = []
+            grads = []
+
+            outs2 = []
+            grads2 = []
+
+            compile_fns = [
+                lambda fn: torch.compile(fn, mode="reduce-overhead"),
+                lambda fn: torch.compile(fn, backend="aot_eager_decomp_partition"),
+            ]
+            for i, compile_fn in enumerate(compile_fns):
+                torch.manual_seed(0)
+                for _ in range(3):
+                    x = torch.randn(4, 4, device="cuda", requires_grad=True)
+                    y = torch.randn(4, 4, device="cuda", requires_grad=True)
+
+                    out = compile_fn(fn)(x, y)
+                    out.sum().backward()
+                    if i == 0:
+                        outs.append(out.clone())
+                        grads.append((x.grad.clone(), y.grad.clone()))
+                    else:
+                        outs2.append(out.clone())
+                        grads2.append((x.grad.clone(), y.grad.clone()))
+
+            self.assertEqual(outs, outs2)
+            self.assertEqual(grads, grads2)
+            self.assertEqual(counters["inductor"]["cudagraph_skips"], 0)
 
     instantiate_parametrized_tests(CudaGraphTreeTests)
     instantiate_parametrized_tests(TestSAC)

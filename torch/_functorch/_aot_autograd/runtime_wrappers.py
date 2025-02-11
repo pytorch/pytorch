@@ -1827,11 +1827,11 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
             torch.cuda.default_generators[torch.cuda.current_device()].clone_state()
             for _ in range(num_rng)
         ]
-        curr_iter = itertools.count(0)
+
+        curr_fwd_iter = itertools.count(0)
         backward_state_position = 0
-        # todo - list ?
-        pending_forwards = set()
-        saved_backward_states: Dict[int, List[torch.Generator]] = {}
+        pending_forwards: set[int] = set()
+        saved_backward_states: dict[int, list[torch.Generator]] = {}
 
         class CompiledFunction(torch.autograd.Function):
             compiled_fw = compiled_fw_func
@@ -1856,7 +1856,7 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
                     ctx._compiled_autograd_backward_state = bw_state
 
                 if num_rng:
-                    _curr_iter = next(curr_iter)
+                    _curr_iter = next(curr_fwd_iter)
                     ctx._curr_iter = _curr_iter
 
                     # Save forward states if we have pending forwards
