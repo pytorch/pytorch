@@ -204,8 +204,7 @@ torch_compile_graph_format = os.environ.get("TORCH_COMPILE_GRAPH_FORMAT", "svg")
 # Valid only if fake_tensor_propagate_real_tensors = True; if a fake-real
 # kernel mismatch is detected, bypasses by making a fake kernel from the
 # real tensor outputs.
-generate_fake_kernels_from_real_mismatches = True
-
+generate_fake_kernels_from_real_mismatches = False
 
 # CUDAGraph save run_with_rng functionalization.
 # TODO: turn on by default
