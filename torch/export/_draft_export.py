@@ -1,10 +1,10 @@
 import getpass
 import inspect
+import json
 import logging
 import os
 import re
 import tempfile
-from collections import defaultdict
 from enum import IntEnum
 from typing import Any, Optional, Union
 
@@ -72,10 +72,6 @@ def filter_stack(
         if torch_filepath not in str_to_filename[s["filename"]]:
             return stack[len(stack) - i - 3 : len(stack) - i]
     return stack[-3:]
-
-
-def hash_stack(stack: list[dict[str, str]]) -> str:
-    return ";".join(f'line: {s["line"]} filename: {s["filename"]}' for s in stack)
 
 
 def get_loc(filename: str, lineno: int) -> Optional[str]:
@@ -203,42 +199,77 @@ Please follow the instructions to fix the errors.
         raise NotImplementedError("Not implemented yet")
 
 
-class CaptureStructuredTrace(logging.Handler):
-    def __init__(self, specific_log_keys: list[str]):
-        super().__init__()
-        self.specific_log_keys = specific_log_keys
+class LogRecord:
+    def __init__(self) -> None:
+        self.log_count: dict[int, int] = {}
         self.logs: list[tuple[str, dict[str, Any]]] = []
+
+    def _hash(self, element: tuple[str, dict[str, Any]]) -> int:
+        key, data = element
+
+        if key == "missing_fake_kernel":
+            return hash((key, data["op"]))
+        elif key == "mismatched_fake_kernel":
+            return hash((key, data["op"], data["reason"]))
+        elif key == "propagate_real_tensors_provenance":
+            return hash((key, json.dumps(data["stack"])))
+        elif key == "create_unbacked_symbol":
+            return hash((key, json.dumps(data["stack"])))
+
+        return hash((key, json.dumps(data)))
+
+    def try_add(self, element: tuple[str, dict[str, str]]) -> bool:
+        hash_value = self._hash(element)
+        if hash_value in self.log_count:
+            self.log_count[hash_value] += 1
+            return False
+
+        self.log_count[hash_value] = 1
+        self.logs.append(element)
+        return True
+
+    def get_log_count(self, element: tuple[str, dict[str, Any]]) -> int:
+        return self.log_count[self._hash(element)]
+
+
+class CaptureStructuredTrace(torch._logging._internal.LazyTraceHandler):
+    def __init__(self, specific_log_keys: list[str]):
+        self.specific_log_keys = specific_log_keys
+        self.log_record: LogRecord = LogRecord()
         self.logger = logging.getLogger("torch.__trace")
         self.prev_get_dtrace = False
 
-        # Get the handler for printing logs to a specific file
+        if root_dir := os.environ.get(torch._logging._internal.DTRACE_ENV_VAR):
+            super().__init__(root_dir)
+        else:
+            sanitized_username = re.sub(r'[\\/:*?"<>|]', "_", getpass.getuser())
+            root_dir = os.path.join(
+                tempfile.gettempdir(),
+                "export_" + sanitized_username,
+            )
+            super().__init__(root_dir)
+
+        self.setFormatter(torch._logging._internal.TorchLogsFormatter(trace=True))
+
+    def __enter__(self) -> "CaptureStructuredTrace":
+        self.log_record = LogRecord()
+
+        # Remove the lazy trace handler if it exists
         possible_lazy_trace_handlers = [
             handler
             for handler in self.logger.handlers
             if isinstance(handler, torch._logging._internal.LazyTraceHandler)
         ]
-        if len(possible_lazy_trace_handlers) == 0:
-            self.lazy_trace_handler = torch._logging._internal.LazyTraceHandler(None)
-            self.logger.addHandler(self.lazy_trace_handler)
-        else:
-            self.lazy_trace_handler = possible_lazy_trace_handlers[0]
-        if self.lazy_trace_handler.root_dir is None:
-            # Set the logs to go to /tmp/export_unixname/...
-            sanitized_username = re.sub(r'[\\/:*?"<>|]', "_", getpass.getuser())
-            self.lazy_trace_handler.root_dir = os.path.join(
-                tempfile.gettempdir(),
-                "export_" + sanitized_username,
-            )
+        for handler in possible_lazy_trace_handlers:
+            self.logger.removeHandler(handler)
 
-    def __enter__(self) -> "CaptureStructuredTrace":
-        self.logs = []
         self.logger.addHandler(self)
         self.prev_get_dtrace = torch._logging._internal.GET_DTRACE_STRUCTURED
         torch._logging._internal.GET_DTRACE_STRUCTURED = True
         return self
 
     def __exit__(self, exc_type, exc_value, traceback) -> None:  # type: ignore[no-untyped-def]
-        self.logs = []
+        self.log_record = LogRecord()
         self.logger.removeHandler(self)
         torch._logging._internal.GET_DTRACE_STRUCTURED = self.prev_get_dtrace
         self.prev_get_dtrace = False
@@ -247,7 +278,8 @@ class CaptureStructuredTrace(logging.Handler):
         metadata = record.metadata
         for key in self.specific_log_keys:
             if key in metadata:
-                self.logs.append((key, metadata[key]))
+                if self.log_record.try_add((key, metadata[key])):
+                    super().emit(record)
 
 
 def draft_export(
@@ -266,9 +298,13 @@ def draft_export(
     capture_structured_log = CaptureStructuredTrace(
         [
             "propagate_real_tensors_provenance",
+            "str",
+            "exported_program",
             "guard_added",
             "missing_fake_kernel",
             "mismatched_fake_kernel",
+            "expression_created",
+            "create_unbacked_symbol",
         ]
     )
 
@@ -309,21 +345,20 @@ def draft_export(
         failures: list[FailureReport] = []
         custom_ops_logs: dict[
             Any, tuple[dict[str, Any], FailureType]
-        ] = {}  # Dedup custom ops
-        # Dedup data dependent errors based on stacktrace
-        data_dependent_logs: dict[str, int] = defaultdict(int)
+        ] = {}  # For adding in assertions before custom ops
 
-        for log_name, log_contents in capture_structured_log.logs:
+        for log_name, log_contents in capture_structured_log.log_record.logs:
             failure_type = None
 
             if log_name == "propagate_real_tensors_provenance":
+                log_contents[
+                    "occurrences"
+                ] = capture_structured_log.log_record.get_log_count(
+                    (log_name, log_contents)
+                )
                 log_contents["stack"] = filter_stack(
                     log_contents["stack"], str_to_filename
                 )
-                data_dependent_logs[hash_stack(log_contents["stack"])] += 1
-
-                if data_dependent_logs[hash_stack(log_contents["stack"])] > 1:
-                    continue
 
                 failure_type = FailureType.DATA_DEPENDENT_ERROR
 
@@ -343,20 +378,16 @@ def draft_export(
                 )
                 log_contents["new_dynamic_shapes"] = new_shapes
             elif log_name == "missing_fake_kernel":
-                if log_contents["op"] in custom_ops_logs:
-                    continue
                 failure_type = FailureType.MISSING_FAKE_KERNEL
                 custom_ops_logs[log_contents["op"]] = (log_contents, failure_type)
             elif log_name == "mismatched_fake_kernel":
-                if (log_contents["op"], log_contents["reason"]) in custom_ops_logs:
-                    continue
                 failure_type = FailureType.MISMATCHED_FAKE_KERNEL
                 custom_ops_logs[(log_contents["op"], log_contents["reason"])] = (
                     log_contents,
                     failure_type,
                 )
             else:
-                raise RuntimeError(f"Unknown log name: {log_name}")
+                continue
 
             assert failure_type is not None
             failures.append(
@@ -366,13 +397,6 @@ def draft_export(
                 )
             )
 
-        # Count data dependent errors
-        for failure in failures:
-            if failure.failure_type == FailureType.DATA_DEPENDENT_ERROR:
-                failure.data["occurrences"] = data_dependent_logs[
-                    hash_stack(failure.data["stack"])
-                ]
-
         report = DraftExportReport(failures, str_to_filename)
 
         # Add asserts around custom ops
@@ -380,7 +404,7 @@ def draft_export(
 
     ep._report = report
     if not report.successful():
-        log_filename = capture_structured_log.lazy_trace_handler.stream.name
+        log_filename = capture_structured_log.stream.name
 
         log.warning(
             """

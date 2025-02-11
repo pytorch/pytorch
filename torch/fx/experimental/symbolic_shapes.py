@@ -303,6 +303,8 @@ def uninteresting_files() -> set[str]:
         torch._library.fake_impl,
         torch._subclasses.meta_utils,
         torch._subclasses.fake_tensor,
+        torch._logging._internal,
+        torch._logging.structured,
     ]
     import torch._dynamo.guards
 
