@@ -1,5 +1,5 @@
 # mypy: allow-untyped-defs
-from typing import Optional
+from typing import cast, Optional
 
 import torch
 import torch.utils._pytree as pytree
@@ -62,7 +62,7 @@ def philox_rand_offset(
     numel_scalar = 1
     for dim_size in shape:
         numel_scalar *= dim_size
-    numel = torch.scalar_tensor(numel_scalar, dtype=torch.int64)
+    numel = cast(float, torch.scalar_tensor(numel_scalar, dtype=torch.int64))
 
     block_size = 256
     unroll = 4
