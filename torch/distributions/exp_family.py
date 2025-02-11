@@ -1,4 +1,6 @@
 # mypy: allow-untyped-defs
+from typing import cast, Union
+
 import torch
 from torch import Tensor
 from torch.distributions.distribution import Distribution
@@ -55,11 +57,11 @@ class ExponentialFamily(Distribution):
         """
         Method to compute the entropy using Bregman divergence of the log normalizer.
         """
-        result = -self._mean_carrier_measure
+        result: Union[float, torch.Tensor] = -self._mean_carrier_measure
         nparams = [p.detach().requires_grad_() for p in self._natural_params]
         lg_normal = self._log_normalizer(*nparams)
         gradients = torch.autograd.grad(lg_normal.sum(), nparams, create_graph=True)
         result += lg_normal
         for np, g in zip(nparams, gradients):
-            result -= (np * g).reshape(self._batch_shape + (-1,)).sum(-1)
+            result -= cast(float, (np * g).reshape(self._batch_shape + (-1,)).sum(-1))
         return result

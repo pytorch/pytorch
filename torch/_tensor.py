@@ -1121,13 +1121,13 @@ class Tensor(torch._C.TensorBase):
         _C.TensorBase.pow_
     )
 
-    def __and__(self, other: Union["Tensor", int, bool]) -> "Tensor":
+    def __and__(self, other: Union["Tensor", int, bool]) -> "Tensor":  # type: ignore[override]
         return super().__and__(other)
 
-    def __or__(self, other: Union["Tensor", int, bool]) -> "Tensor":
+    def __or__(self, other: Union["Tensor", int, bool]) -> "Tensor":  # type: ignore[override]
         return super().__or__(other)
 
-    def __xor__(self, other: Union["Tensor", int, bool]) -> "Tensor":
+    def __xor__(self, other: Union["Tensor", int, bool]) -> "Tensor":  # type: ignore[override]
         return super().__xor__(other)
 
     @_handle_torch_function_and_wrap_type_error_to_not_implemented
