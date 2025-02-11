@@ -2347,6 +2347,7 @@ tuple_iterator: type[Iterator[Any]] = type(iter(()))
 range_iterator: type[Iterator[Any]] = type(iter(range(0)))
 tuple_iterator_len = tuple_iterator.__length_hint__  # type: ignore[attr-defined]
 object_new = object.__new__
+exception_new = Exception.__new__
 dict_new = dict.__new__
 dict_methods = {
     method
