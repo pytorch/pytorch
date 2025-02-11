@@ -1104,6 +1104,23 @@ ScalingType get_scaling_type(
 
 } // namespace
 
+// Add helper function to cache device properties check
+static bool IsGfx950Device(int device_index) {
+  static std::mutex mutex;
+  static std::unordered_map<int, bool> device_check_cache;
+  
+  std::lock_guard<std::mutex> guard(mutex);
+  auto it = device_check_cache.find(device_index);
+  if (it != device_check_cache.end()) {
+    return it->second;
+  }
+  
+  hipDeviceProp_t* prop = at::cuda::getDeviceProperties(device_index);
+  bool is_gfx950 = (std::string(prop->gcnArchName) == "gfx950");
+  device_check_cache[device_index] = is_gfx950;
+  return is_gfx950;
+}
+
 // Computes matrix multiply + bias while applying scaling to input and output matrices
 // Scales are only applicable when matrices are of Float8 type and assumed to be equal to 1.0 by default.
 // If output matrix type is 16 or 32-bit type, scale_result is not applied.
@@ -1232,7 +1249,7 @@ _scaled_mm_out_cuda(const Tensor& mat1, const Tensor& mat2,
   }
 #else
   if (scaling_choice == ScalingType::RowWise) {
-    // For ROCm, match behavior of f8f8bf16_rowwise type checking, for unit test purposes.
+    // For ROCm, match behavior of f8f8bf16_rowwise type checking
     Tensor b = mat2;
     if (_scaled_mm_is_fnuz()) {
       TORCH_CHECK(b.dtype() == at::kFloat8_e4m3fnuz);
@@ -1240,9 +1257,29 @@ _scaled_mm_out_cuda(const Tensor& mat1, const Tensor& mat2,
     else {
       TORCH_CHECK(b.dtype() == at::kFloat8_e4m3fn);
     }
-    // Until more than bf16 is supported.
+    // Until more than bf16 is supported
     TORCH_CHECK(out.scalar_type() == ScalarType::BFloat16,
-         "hipblaslt rowwise _scaled_mm only supports BFloat16 output but got ", out.scalar_type());
+         "hipblaslt rowwise _scaled_mm only supports BFloat16 output");
+  }
+  else if (scaling_choice == ScalingType::BlockWise) {
+    TORCH_CHECK(mat1.scalar_type() == at::kFloat8_e8m0fnu && 
+                mat2.scalar_type() == at::kFloat8_e8m0fnu,
+                "Block-wise scaling requires both matrices to be Float8_e8m0fnu type");
+    
+#if ROCM_VERSION >= 60500
+    TORCH_CHECK(IsGfx950Device(mat1.device().index()),
+               "Block-wise scaling for Float8_e8m0fnu is only supported on gfx950");
+    
+    TORCH_CHECK(mat1.size(0) % 32 == 0 && mat1.size(1) % 32 == 0 &&
+               mat2.size(0) % 32 == 0 && mat2.size(1) % 32 == 0,
+               "Matrix dimensions must be multiples of 32 for block-wise scaling");
+    
+    TORCH_CHECK(out.scalar_type() == ScalarType::BFloat16 || 
+                out.scalar_type() == ScalarType::Half,
+                "Block-wise scaling only supports BFloat16 or Half output types");
+#else
+    TORCH_CHECK(false, "Block-wise scaling for Float8_e8m0fnu requires ROCm 6.5 or later");
+#endif
   }
 #endif
 
