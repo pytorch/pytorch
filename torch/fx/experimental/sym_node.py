@@ -569,7 +569,10 @@ class SymNode:
         # TODO: use the file/line for some useful diagnostic on why a
         # guard occurred
         r = self.shape_env.evaluate_expr(
-            self.expr, self.hint, fx_node=self.fx_node, size_oblivious=True
+            self.expr,
+            self.hint,
+            fx_node=self.fx_node,
+            size_oblivious=True,
         )
         try:
             return bool(r)
@@ -1292,16 +1295,24 @@ def _make_node_magic(method, func):
                     del frame
 
                 if other is not None:
-                    arguments = [str(self), str(other)]
+                    arguments = [self, other]
                 else:
-                    arguments = [str(self)]
+                    arguments = [self]
+
+                def get_id(sym_node) -> Optional[int]:
+                    # We don't want to return an ID if the input is a constant
+                    return None if sym_node.constant is not None else id(sym_node)
 
                 dtrace_structured(
                     "expression_created",
                     metadata_fn=lambda: {
                         "method": method,
-                        "arguments": arguments,
                         "result": str(result),
+                        "result_id": id(result),
+                        "arguments": [str(a) for a in arguments],
+                        "argument_ids": [
+                            get_id(i) for i in arguments if get_id(i) is not None
+                        ],
                         "user_bottom_stack": str(user_bottom_stack),
                         "user_top_stack": str(user_top_stack),
                         "floc": str(floc),

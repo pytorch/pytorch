@@ -261,6 +261,31 @@ class TestDraftExport(TestCase):
         inp = (torch.tensor(4), torch.tensor(2), torch.tensor(6))
         self.assertEqual(ep.module()(*inp), M()(*inp))
 
+    def test_complex_data_dependent_expr(self):
+        class M(torch.nn.Module):
+            def forward(self, x, y):
+                a = x.item()
+                a = -a
+                a = a // 3
+                a = a + 5
+
+                z = torch.cat([y, y])
+
+                torch._check_is_size(a)
+                torch._check(a < z.shape[0])
+
+                return z[:a]
+
+        _, report = draft_export(
+            M(),
+            (torch.tensor(6), torch.randn(5)),
+            dynamic_shapes={"x": None, "y": {0: Dim.DYNAMIC}},
+        )
+        self.assertTrue(len(report.failures) > 0)
+        self.assertEqual(
+            report.failures[0].failure_type, FailureType.DATA_DEPENDENT_ERROR
+        )
+
     def test_offsets(self):
         class M(torch.nn.Module):
             def forward(self, x):
