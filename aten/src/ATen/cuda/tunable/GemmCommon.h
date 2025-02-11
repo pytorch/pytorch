@@ -173,8 +173,9 @@ struct GemmParams : OpParams {
   std::string BLASSignature() const override {
     std::string alpha_str = to_string_opmath<T>(alpha);
     std::string beta_str = to_string_opmath<T>(beta);
-    return fmt::sprintf("-m %ld -n %ld -k %ld --lda %ld --ldb %ld --ldc %ld --ldd %ld --stride_a 0 --stride_b 0 -- stride_c 0 --stride_d 0 --alpha %s --beta %s --transA %c --transB %c --batch_count 1 --a_type %s --b_type %s --c_type %s --d_type %s --compute_type %s",
-      m, n, k, lda, ldb, ldc, ldc, alpha_str, beta_str, transa, transb, TypeName<T>(T{}), TypeName<T>(T{}), TypeName<T>(T{}), TypeName<T>(T{}), TypeName<T>(T{}));
+    return fmt::sprintf("-m %ld -n %ld -k %ld --lda %ld --ldb %ld --ldc %ld --ldd %ld --stride_a 0 --stride_b 0 -- stride_c 0 --stride_d 0 "
+      "--alpha %s --beta %s --transA %c --transB %c --batch_count 1 --a_type %s --b_type %s --c_type %s --d_type %s --compute_type float",
+      m, n, k, lda, ldb, ldc, ldc, alpha_str, beta_str, transa, transb, TypeName<T>(T{}), TypeName<T>(T{}), TypeName<T>(T{}), TypeName<T>(T{}));
   }
 
   std::string Signature() const override {
@@ -263,8 +264,13 @@ private:
 template <typename T>
 struct GemmAndBiasParams : OpParams {
   std::string BLASSignature() const override {
-    return "SomeSignature";  // Implement the correct logic
-}
+    std::string alpha_str = to_string_opmath<T>(alpha);
+    std::string activation_str = to_string_epilogue(activation);
+    return fmt::sprintf("-m %ld -n %ld -k %ld --lda %ld --ldb %ld --ldc %ld --ldd %ld --stride_a 0 --stride_b 0 -- stride_c 0 --stride_d 0 "
+      "--alpha %s --transA %c --transB %c --batch_count 1 --a_type %s --b_type %s --c_type %s --d_type %s --compute_type float --activation %s --bias_type %s",
+      m, n, k, lda, ldb, ldc, ldc, alpha_str, transa, transb, TypeName<T>(T{}), TypeName<T>(T{}), TypeName<T>(T{}), TypeName<T>(T{}), activation_str, TypeName<T>(T{}));
+  }
+
   std::string Signature() const override {
     return fmt::sprintf("%c%c_%ld_%ld_%ld_ld_%ld_%ld_%ld", transa, transb, m, n, k, lda, ldb, ldc);
   }
@@ -352,8 +358,13 @@ private:
 template <typename T>
 struct GemmStridedBatchedParams : OpParams {
   std::string BLASSignature() const override {
-    return "SomeSignature";  // Implement the correct logic
-}
+    std::string alpha_str = to_string_opmath<T>(alpha);
+    std::string beta_str = to_string_opmath<T>(beta);
+    return fmt::sprintf("-m %ld -n %ld -k %ld --lda %ld --ldb %ld --ldc %ld --ldd %ld --stride_a %ld --stride_b %ld --stride_c %ld --stride_d %ld "
+      "--alpha %s --beta %s --transA %c --transB %c --batch_count %ld --a_type %s --b_type %s --c_type %s --d_type %s --compute_type float",
+      m, n, k, lda, ldb, ldc, ldc, stride_a, stride_b, stride_c, stride_c, alpha_str, beta_str, transa, transb, batch,
+      TypeName<T>(T{}), TypeName<T>(T{}), TypeName<T>(T{}), TypeName<T>(T{}));
+  }
 
   std::string Signature() const override {
     return fmt::sprintf("%c%c_%ld_%ld_%ld_B_%ld_ld_%ld_%ld_%ld", transa, transb, m, n, k, batch, lda, ldb, ldc);
@@ -449,8 +460,17 @@ struct ScaledGemmParams : OpParams {
   ScaledGemmParams() = default;
 
   std::string BLASSignature() const override {
-    return "SomeSignature";  // Implement the correct logic
-}
+    std::string a_dtype_str = c10::toString(a_dtype);
+    std::string b_dtype_str = c10::toString(b_dtype);
+    std::string c_dtype_str = c10::toString(c_dtype);
+    std::string bias_dtype_str = c10::toString(bias_dtype);
+
+    // Excluding use_fast_accum and use_rowise booleans for now
+    return fmt::sprintf("-m %ld -n %ld -k %ld --lda %ld --ldb %ld --ldc %ld --ldd %ld --stride_a 0 --stride_b 0 -- stride_c 0 --stride_d 0 "
+      "--transA %c --transB %c --batch_count 1 --a_type %s --b_type %s --c_type %s --d_type %s --compute_type float --bias_type %s",
+      m, n, k, lda, ldb, ldc, ldc, transa, transb, a_dtype_str, b_dtype_str, c_dtype_str, c_dtype_str, bias_dtype_str);
+  }
+
   std::string Signature() const override {
     return fmt::sprintf("%c%c_%ld_%ld_%ld_ld_%ld_%ld_%ld", transa, transb, m, n, k, lda, ldb, ldc);
   }
