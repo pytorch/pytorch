@@ -526,7 +526,6 @@ class ExceptionTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(fn(x), opt_fn(x))
 
     def test_user_defined_exception_variable(self):
-
         @torch.compile(backend="eager", fullgraph=True)
         def fn(t):
             z = 0
@@ -543,7 +542,6 @@ class ExceptionTests(torch._dynamo.test_case.TestCase):
         fn(t)
 
     def test_user_defined_exception_with_args(self):
-
         @torch.compile(backend="eager", fullgraph=True)
         def fn(t):
             z = 0
