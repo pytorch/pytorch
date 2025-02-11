@@ -658,6 +658,12 @@ class UserDefinedClassVariable(UserDefinedVariable):
                 [self, *args],
                 kwargs,
             )
+        # elif issubclass(self.value, BaseException):
+        #     var = tx.output.side_effects.track_object_new_from_user_defined_class(self)
+        #     with do_not_convert_to_tracable_parameter():
+        #         var.call_method(tx, "__init__", args, kwargs)
+        #         return var
+        #     # return UserDefinedExceptionObjectVariable(self.value, args, kwargs)
         return super().call_function(tx, args, kwargs)
 
     def is_standard_new(self):
@@ -665,7 +671,12 @@ class UserDefinedClassVariable(UserDefinedVariable):
         new_fn = inspect.getattr_static(self.value, "__new__", None)
         if isinstance(new_fn, staticmethod):
             new_fn = new_fn.__func__
-        return new_fn in (object.__new__, Generic.__new__, dict.__new__)
+        return new_fn in (
+            object.__new__,
+            Generic.__new__,
+            dict.__new__,
+            Exception.__new__,
+        )
 
     def call_obj_hasattr(
         self, tx: "InstructionTranslator", name: str
@@ -680,6 +691,24 @@ class UserDefinedClassVariable(UserDefinedVariable):
         if name == "__name__":
             return self.value.__name__
         return super().const_getattr(tx, name)
+
+
+class UserDefinedExceptionClassVariable(UserDefinedClassVariable):
+    def __init__(self, value, **kwargs):
+        super().__init__(value, **kwargs)
+        self.exc_vt = variables.ExceptionVariable(value, ())
+
+    @property
+    def fn(self):
+        return self.exc_type
+
+    def __getattr__(self, name):
+        if name in self.__class__.__dict__.keys():
+            return getattr(self, name)
+        return getattr(self.exc_vt, name)
+
+    def __str__(self):
+        return f"{self.value.__name__}"
 
 
 class NO_SUCH_SUBOBJ:
@@ -1355,6 +1384,41 @@ class SourcelessGraphModuleVariable(UserDefinedObjectVariable):
             args,
             kwargs,
         )
+
+
+class UserDefinedExceptionObjectVariable(UserDefinedObjectVariable):
+    def __init__(self, value, **kwargs):
+        super().__init__(value, **kwargs)
+        self.exc_vt = variables.ExceptionVariable(self.value_type, ())
+
+    @property
+    def fn(self):
+        return self.value_type
+
+    def call_method(self, tx, name, args, kwargs):
+        if (
+            name == "__init__"
+            and (method := self._maybe_get_baseclass_method(name))
+            and inspect.ismethoddescriptor(method)
+            and method == Exception.__init__
+            and len(kwargs) == 0
+        ):
+            self.exc_vt.args = args
+            self.value.args = args
+            return variables.ConstantVariable(None)
+            # from . import UserMethodVariable
+            # method = self._maybe_get_baseclass_method(name)
+            # source = None if self.source is None else AttrSource(AttrSource(self.source, "__class__"), name)
+            # return UserMethodVariable(method, self, source=source).call_function(tx, args, kwargs)
+        return super().call_method(tx, name, args, kwargs)
+
+    def __getattr__(self, name):
+        if name in self.__class__.__dict__.keys():
+            return getattr(self, name)
+        return getattr(self.exc_vt, name)
+
+    def reconstruct(self, codegen):
+        unimplemented(f"{self.__class__.__name__} reconstruct")
 
 
 class KeyedJaggedTensorVariable(UserDefinedObjectVariable):

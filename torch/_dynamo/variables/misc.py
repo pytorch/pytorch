@@ -315,21 +315,6 @@ class ExceptionVariable(VariableTracker):
     __repr__ = __str__
 
 
-class UserDefinedExceptionClassVariable(ExceptionVariable):
-    def __init__(self, exc_type, args, **kwargs):
-        super().__init__(exc_type, args, **kwargs)
-
-    @property
-    def fn(self):
-        return self.exc_type
-
-    def call_function(self, tx, args, kwargs):
-        return UserDefinedExceptionClassVariable(self.exc_type, args, **kwargs)
-
-    def reconstruct(self, codegen):
-        unimplemented("UserDefinedExceptionClass reconstruct")
-
-
 class UnknownVariable(VariableTracker):
     """
     It could be anything!
