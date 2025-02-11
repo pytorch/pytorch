@@ -233,16 +233,16 @@ void* _getWorkspaceWithoutHandle() {
 }
 
 void* _getWorkspace(size_t& workspaceSize) {
-  #ifdef (USE_ROCM || IS_FBCODE)
-    workspaceSize = _getWorkspaceSize();
-    auto& allocator = *::c10::cuda::CUDACachingAllocator::get();
-    auto workspace = allocator.allocate(workspaceSize);
-    auto workspace_ptr = workspace.mutable_get();
-    TORCH_CHECK(workspace_ptr != nullptr, "OOM trying to allocate workspace for cublaslt");
-  #else
-    workspaceSize = at::cuda::getChosenWorkspaceSize();
-    auto workspace_ptr = _getWorkspaceWithoutHandle();
-  #endif
+#ifdef (USE_ROCM || IS_FBCODE)
+  workspaceSize = _getWorkspaceSize();
+  auto& allocator = *::c10::cuda::CUDACachingAllocator::get();
+  auto workspace = allocator.allocate(workspaceSize);
+  auto workspace_ptr = workspace.mutable_get();
+  TORCH_CHECK(workspace_ptr != nullptr, "OOM trying to allocate workspace for cublaslt");
+#else
+  workspaceSize = at::cuda::getChosenWorkspaceSize();
+  auto workspace_ptr = _getWorkspaceWithoutHandle();
+#endif
   return workspace_ptr;
 }
 
