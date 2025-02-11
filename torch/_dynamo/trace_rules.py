@@ -3364,7 +3364,6 @@ MOD_SKIPLIST = [
     "torch.export",
     "torch.fb",
     "torch.fft",
-    "torch.func",
     "torch.functional",
     "torch.futures",
     "torch.fx",
