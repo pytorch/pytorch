@@ -1,5 +1,5 @@
 # mypy: allow-untyped-defs
-from typing import cast, Optional
+from typing import Optional
 
 import torch
 import torch.utils._pytree as pytree
@@ -62,7 +62,7 @@ def philox_rand_offset(
     numel_scalar = 1
     for dim_size in shape:
         numel_scalar *= dim_size
-    numel = cast(float, torch.scalar_tensor(numel_scalar, dtype=torch.int64))
+    numel = torch.scalar_tensor(numel_scalar, dtype=torch.int64)
 
     block_size = 256
     unroll = 4
@@ -70,11 +70,8 @@ def philox_rand_offset(
     device_property = torch.cuda.get_device_properties(torch.cuda.current_device())
     blocks_per_sm = device_property.max_threads_per_multi_processor // block_size
     grid_size = (numel + block_size - 1) // block_size
-    grid_size = min(grid_size, device_property.multi_processor_count * blocks_per_sm)
-    offset = (
-        (numel - 1) // (block_size * grid_size * unroll) + 1
-    ) * curand4_engine_calls
-    return offset
+    grid_size = min(grid_size, device_property.multi_processor_count * blocks_per_sm)  # type: ignore[call-overload]
+    return ((numel - 1) // (block_size * grid_size * unroll) + 1) * curand4_engine_calls
 
 
 def register_philox_rand():
