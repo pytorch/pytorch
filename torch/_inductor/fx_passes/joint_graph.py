@@ -466,7 +466,7 @@ def canonicalize_quant_mapping(gm: torch.fx.GraphModule):
                 **invoke_quant.kwargs["quant_options"].kwargs,
             )
         else:
-            quant_options = None
+            quant_options = torch._higher_order_ops.InvokeQuant()
 
         subgraph, args = invoke_quant.args
         with gm.graph.inserting_before(invoke_quant):
