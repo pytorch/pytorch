@@ -1958,6 +1958,7 @@ def custom_op_wrapper(op: str, *args: Any) -> Union[list[c_void_p], c_void_p]:
 # specific compiler version and set of flags.  We explicitly use default_cache_dir here
 # because these headers need to be global, rather than ignored by fresh_inductor_cache.
 _HEADER_DIR = os.path.join(default_cache_dir(), "precompiled_headers")
+_HEADER_LOCK_DIR = os.path.join(_HEADER_DIR, "locks")
 
 
 @functools.lru_cache(None)
@@ -2016,8 +2017,9 @@ def _precompile_header(
     )
     # _worker_compile_cpp will automatically ignore any compilation whose result already
     # exists, so this is always safe.
+    os.makedirs(_HEADER_LOCK_DIR, exist_ok=True)
     _worker_compile_cpp(
-        os.path.join(get_lock_dir(), f"{header_hash}.lock"),
+        os.path.join(_HEADER_LOCK_DIR, f"{header_hash}.lock"),
         cpp_builder,
         header_full_path,
         cpp_builder.get_target_file_path(),
