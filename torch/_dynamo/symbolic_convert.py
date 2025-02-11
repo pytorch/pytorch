@@ -26,6 +26,7 @@ import torch
 import torch._logging
 from torch._dynamo.exc import TensorifyScalarRestartAnalysis
 from torch._guards import tracing, TracingContext
+from torch.fx.experimental.symbolic_shapes import guard_bool
 from torch.utils._functools import cache_method
 
 from . import config, exc, logging as torchdynamo_logging, trace_rules, variables
@@ -669,7 +670,15 @@ def generic_jump(truth_fn: typing.Callable[[object], bool], push: bool):
                 self.jump(inst)
         elif isinstance(value, SymNodeVariable):
             try:
-                eval_result = value.evaluate_expr(self.output)
+                # if the user is branching on a SymBool, guard on it
+                # if the user has code like:
+                #    if size:
+                #        ...
+                # then they are just testing truthiness: guard that the expr != 0
+                if isinstance(value.sym_num, torch.SymBool):
+                    eval_result = value.evaluate_expr(self.output)
+                else:
+                    eval_result = guard_bool(value.sym_num != 0)
             except exc.UserError as e:
                 if self.should_compile_partial_graph():
                     return jump_graph_break(self, inst, value, extra_msg=f"\n{e}")

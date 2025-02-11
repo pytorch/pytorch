@@ -6721,6 +6721,24 @@ class ReproTestsDevice(torch._dynamo.test_case.TestCase):
         x = torch.randn(4)
         self.assertEqual(fn(x), opt_fn(x))
 
+    def test_truthiness_of_symints_no_recompiles(self, device):
+        def f(x):
+            numel = x.numel()
+            if numel:
+                return x + 1
+            else:
+                return x + 2
+
+        cnt = torch._dynamo.testing.CompileCounter()
+        f_compiled = torch.compile(f, backend=cnt, dynamic=True)
+
+        x1 = torch.randn(4)
+        _ = f_compiled(x1)
+        x2 = torch.randn(5)
+        _ = f_compiled(x2)
+
+        self.assertEqual(cnt.frame_count, 1)
+
     @requires_cuda
     def test_sdpa_dynamic_shapes(self, device):
         def f(x, s0, s1, s2):
