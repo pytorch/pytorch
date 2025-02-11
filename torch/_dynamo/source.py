@@ -492,9 +492,6 @@ class GetItemSource(ChainedSource):
         return self.base.guard_source()
 
     def name(self):
-        # Index can be of following types
-        # 1) index is a slice - example 1:4
-        # 2) index is a constant - example string, integer
         assert not isinstance(self.index, Source)
         return f"{self.base.name()}[{self.index!r}]"
 
