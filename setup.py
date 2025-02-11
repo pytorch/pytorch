@@ -409,9 +409,10 @@ def checkout_nccl():
     #if cuda_version.startswith("11.8") or cuda_version_2.startswith("11.8"):
     commit_hash = "ab2b89c4c339bd7f816fbc114a4b05d386b66290"
     nccl_basedir = os.path.join(third_party_path, "nccl")
+    ncc_targetdir = os.path.join(nccl_basedir, "nccl")
     report(f"-- Calling nccl checkout: {commit_hash}")
-    subprocess.check_call(["git", "clone", "https://github.com/NVIDIA/nccl.git"], cwd=third_party_path)
-    subprocess.check_call(["git", "checkout", commit_hash], cwd=nccl_basedir)
+    subprocess.check_call(["git", "clone", "https://github.com/NVIDIA/nccl.git", "nccl"], cwd=nccl_basedir)
+    subprocess.check_call(["git", "checkout", commit_hash], cwd=ncc_targetdir)
 
 def check_submodules():
     def check_for_files(folder, files):
