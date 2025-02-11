@@ -231,7 +231,7 @@ __device__ __forceinline__ void opportunistic_fastAtomicAdd(
     const index_t numel,
     scalar_t value) {
 
-    scalar_t* dst = self_ptr + sizeof(scalar_t) * index;
+    scalar_t* dst = self_ptr + index;
     //Try to pack coalseced bf16 and fp16
     if constexpr (std::is_same<scalar_t, c10::BFloat16>::value || std::is_same<scalar_t, c10::Half>::value)
     {
