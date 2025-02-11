@@ -2357,6 +2357,7 @@ dict_methods = {
 tuple_new = tuple.__new__
 tuple_methods = {method for method in tuple.__dict__.values() if callable(method)}
 list_methods = {method for method in list.__dict__.values() if callable(method)}
+list_getitem = list.__getitem__
 
 
 def builtin_dict_keys(d):
@@ -2406,6 +2407,9 @@ def normalize_range_iter(range_iter) -> tuple[int, int, int]:
 
 def to_subclass(t, cls):
     return t.as_subclass(cls)
+
+
+dict_getitem = dict.__getitem__
 
 
 def dict_keys_getitem(d, n):

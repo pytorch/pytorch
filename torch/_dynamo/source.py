@@ -557,15 +557,9 @@ class DictGetItemSource(ChainedSource):
         # reconstruct dict.__getitem__(dct, key)
 
         # Load dict.__getitem__
-        def load_dict_getitem():
-            codegen.extend_output(
-                [
-                    codegen.create_load_global("dict", add=True),
-                    codegen.create_load_attr("__getitem__"),
-                ]
-            )
-
-        codegen.add_push_null(load_dict_getitem)
+        codegen.add_push_null(
+            lambda: codegen.load_import_from(utils.__name__, "dict_getitem")
+        )
 
         # Load dict
         self.base.reconstruct(codegen)
@@ -596,15 +590,9 @@ class ListGetItemSource(GetItemSource):
         # from possibly overridden __getitem__.
 
         # Load list.__getitem__
-        def load_list_getitem():
-            codegen.extend_output(
-                [
-                    codegen.create_load_global("list", add=True),
-                    codegen.create_load_attr("__getitem__"),
-                ]
-            )
-
-        codegen.add_push_null(load_list_getitem)
+        codegen.add_push_null(
+            lambda: codegen.load_import_from(utils.__name__, "list_getitem")
+        )
 
         # Load the list
         self.base.reconstruct(codegen)
