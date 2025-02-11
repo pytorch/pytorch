@@ -896,7 +896,7 @@ class CppMicroBrgemm(CppMicroGemm):
         compute_dtype=torch.float,
     ),
 )
-class CppMicroGemmWoQInt4Vec(CppMicroGemmFP32Vec):
+class CppMicroGemmWoQInt4Avx512(CppMicroGemmFP32Vec):
     """
     This class generates the code for WoQ int4 micro gemm using AVX512 intrinsics.
     It is based on the corresponding ATen kernel.
@@ -1116,7 +1116,7 @@ inline void {{kernel_name}}_kernel(
         return [
             "group_size,",
             f"&({kernel.index(qscale_and_zeros, [0, 0, 0])}),",
-            "N * 2,",
+            "N * 2,",  # lds
             "k_start,",
         ]
 
