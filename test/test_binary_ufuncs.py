@@ -1198,7 +1198,6 @@ class TestBinaryUfuncs(TestCase):
 
     # Verifies that the inplace dunders (like idiv) actually are in place
     @expectedFailureMeta  # UserWarning not triggered
-
     def test_inplace_dunders(self, device):
         t = torch.randn((1,), device=device)
         expected = t.data_ptr()
@@ -1695,7 +1694,6 @@ class TestBinaryUfuncs(TestCase):
             self.assertEqual(cpu_out, cuda_out)
 
     @skipIfTorchDynamo()
-
     @dtypes(*all_types_and_complex_and(torch.half))
     def test_complex_scalar_pow_tensor(self, device, dtype):
         complexes = [0.5j, 1.0 + 1.0j, -1.5j, 2.2 - 1.6j, 1 + 0j]
@@ -1725,7 +1723,6 @@ class TestBinaryUfuncs(TestCase):
             else:
                 self._test_pow(base, first_exp)
                 self._test_pow(base, second_exp)
-
 
     @skipMeta
     def test_pow_scalar_type_promotion(self, device):
@@ -1896,7 +1893,6 @@ class TestBinaryUfuncs(TestCase):
         _scalar_helper(lambda a, b: math.floor(a / b), operator.floordiv)
         _scalar_helper(lambda a, b: math.floor(a / b), torch.floor_divide)
 
-
     @skipIfTorchDynamo("Not a suitable test for TorchDynamo")
     def test_div_and_floordiv_script_vs_python(self, device):
         # Creates jitted functions of two tensors
@@ -1968,7 +1964,6 @@ class TestBinaryUfuncs(TestCase):
                     # This should emit a UserWarning, why doesn't it?
                     # See issue gh-52387
                     self.assertEqual(5 // a, scripted_rfloordiv_scalar(a_t))
-
 
     @skipIfTorchDynamo("Not a suitable test for TorchDynamo")
     def test_idiv_and_ifloordiv_vs_python(self, device):
@@ -2881,7 +2876,6 @@ class TestBinaryUfuncs(TestCase):
                 expected = np.hypot(input[0].cpu().numpy(), input[1].cpu().numpy())
             self.assertEqual(actual, expected, exact_dtype=False)
 
-
     @dtypes(torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64)
     def test_gcd(self, device, dtype):
         # Tests gcd(0, 0), gcd(0, a) cases
@@ -2906,7 +2900,6 @@ class TestBinaryUfuncs(TestCase):
             expected = np.gcd(a.cpu().numpy(), b.cpu().numpy())
             self.assertEqual(actual, expected)
 
-
     @dtypes(torch.int16, torch.int32, torch.int64)
     def test_lcm(self, device, dtype):
         # Tests lcm(0, 0), lcm(0, a) cases
@@ -2922,7 +2915,6 @@ class TestBinaryUfuncs(TestCase):
         actual = torch.lcm(a, b)
         expected = np.lcm(a.cpu().numpy(), b.cpu().numpy())
         self.assertEqual(actual, expected, exact_dtype=False)
-
 
     @dtypesIfCPU(torch.float32, torch.float64, torch.float16)
     @dtypes(torch.float32, torch.float64)
@@ -2947,7 +2939,6 @@ class TestBinaryUfuncs(TestCase):
         actual = torch.nextafter(a, b)
         expected = np.nextafter(a.cpu().numpy(), b.cpu().numpy())
         self.assertEqual(actual, expected, atol=0, rtol=0)
-
 
     @dtypes(torch.bfloat16)
     def test_nextafter_bfloat16(self, device, dtype):
@@ -3168,7 +3159,6 @@ class TestBinaryUfuncs(TestCase):
                     )  # all casts to complex128 are safe
                     compare_with_numpy_bin_op(torch_op, numpy_op, a, b, out=out)
 
-
     @dtypes(torch.int8, torch.int16, torch.int32, torch.int64)
     def test_signed_shift(self, device, dtype):
         "Ensure that signed integer bit shifting works as expected."
@@ -3183,7 +3173,6 @@ class TestBinaryUfuncs(TestCase):
         )  # [1111...111011, 101]
         self.assertEqual(a >> 1, expected_r)
         self.compare_with_numpy(lambda x: x >> 1, lambda x: np.right_shift(x, 1), a)
-
 
     @dtypes(*get_all_int_dtypes())
     def test_shift_limits(self, device, dtype):
@@ -3233,7 +3222,6 @@ class TestBinaryUfuncs(TestCase):
                     exact_dtype=exact_dtype,
                     msg=f">> {shift}",
                 )
-
 
     @dtypes(
         *list(

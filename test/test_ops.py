@@ -659,7 +659,6 @@ class TestCommon(TestCase):
         self._ref_test_helper(contextlib.nullcontext, device, dtype, op)
 
     @skipMeta
-
     @ops([op for op in op_db if op.error_inputs_func is not None], dtypes=OpDTypes.none)
     def test_errors(self, device, op):
         error_inputs = op.error_inputs(device)
@@ -670,7 +669,6 @@ class TestCommon(TestCase):
                 self.assertFalse(isinstance(out, type(NotImplemented)))
 
     @skipMeta
-
     @ops(
         [op for op in op_db if op.error_inputs_sparse_func is not None],
         dtypes=OpDTypes.none,
@@ -693,7 +691,6 @@ class TestCommon(TestCase):
                 self.assertFalse(isinstance(out, type(NotImplemented)))
 
     @skipMeta
-
     @ops(
         [op for op in python_ref_db if op.error_inputs_func is not None],
         dtypes=OpDTypes.none,
@@ -719,7 +716,6 @@ class TestCommon(TestCase):
     # Tests that the function produces the same result when called with
     #   noncontiguous tensors.
     @with_tf32_off
-
     @suppress_warnings
     @ops(op_db, allowed_dtypes=(torch.float32, torch.long, torch.complex64))
     def test_noncontiguous_samples(self, device, dtype, op):
@@ -1461,7 +1457,6 @@ class TestCommon(TestCase):
     # Validates that each OpInfo specifies its forward and backward dtypes
     #   correctly for CPU and CUDA devices
     @skipMeta
-
     @ops(ops_and_refs, dtypes=OpDTypes.none)
     def test_dtypes(self, device, op):
         # Check complex32 support only if the op claims.
@@ -1657,7 +1652,6 @@ class TestCommon(TestCase):
 
     # Validates that each OpInfo that sets promotes_int_to_float=True does as it says
     @skipMeta
-
     @ops(
         (op for op in op_db if op.promotes_int_to_float),
         allowed_dtypes=integral_types_and(torch.bool),
