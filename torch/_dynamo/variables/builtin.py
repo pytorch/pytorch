@@ -49,6 +49,7 @@ from ..utils import (
     istype,
     numpy_operator_wrapper,
     proxy_args_kwargs,
+    str_methods,
     tensortype_to_dtype,
 )
 from .base import ValueMutationNew, VariableTracker
@@ -1152,7 +1153,10 @@ class BuiltinVariable(VariableTracker):
                     return args[0].call_method(tx, name, args[1:], kwargs)
 
         if self.fn is str and len(args) >= 1:
-            return args[0].call_method(tx, name, args[1:], kwargs)
+            resolved_fn = getattr(self.fn, name)
+            if resolved_fn in str_methods:
+                if isinstance(args[0], ConstantVariable):
+                    return args[0].call_method(tx, name, args[1:], kwargs)
 
         return super().call_method(tx, name, args, kwargs)
 
