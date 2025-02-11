@@ -233,7 +233,7 @@ void* _getWorkspaceWithoutHandle() {
 }
 
 void* _getWorkspace(size_t& workspaceSize) {
-  #ifdef USE_ROCM
+  #ifdef (USE_ROCM || IS_FBCODE)
     // See https://github.com/pytorch/pytorch/issues/73328 for reasoning behind
     // setting this to 1M.
     workspaceSize = _getWorkspaceSize();
