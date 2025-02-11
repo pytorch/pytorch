@@ -4218,6 +4218,7 @@ class ShapeEnv:
         symbol: sympy.Symbol,
         vr: ValueRanges,
         source: Optional[Source] = None,
+        sym_node: Optional[SymNode] = None,
     ) -> None:
         is_debug = config.extended_debug_create_symbol is not None and str(
             symbol
@@ -4241,6 +4242,7 @@ class ShapeEnv:
             "create_unbacked_symbol",
             metadata_fn=lambda: {
                 "symbol": str(symbol),
+                "node_id": id(sym_node),
                 "vr": f"[{vr.lower}, {vr.upper}]",
                 "user_stack": structured.from_traceback(TracingContext.extract_stack()),
                 "stack": structured.from_traceback(
@@ -4267,9 +4269,12 @@ class ShapeEnv:
         # Create a new FX placeholder and Z3 variable for 'symbol'.
         fx_node = self._create_fx_placeholder_and_z3var(symbol, float)
 
-        self._log_create_unbacked_symbol("create_unbacked_symfloat", symbol, vr)
+        sym_node = SymNode(symbol, self, float, None, fx_node=fx_node)
+        self._log_create_unbacked_symbol(
+            "create_unbacked_symfloat", symbol, vr, sym_node=sym_node
+        )
 
-        return SymFloat(SymNode(symbol, self, float, None, fx_node=fx_node))
+        return SymFloat(sym_node)
 
     @record_shapeenv_event()
     def create_unbacked_symint(self, source: Optional[Source] = None) -> SymInt:
@@ -4289,9 +4294,12 @@ class ShapeEnv:
         # Create a new FX placeholder and Z3 variable for 'symbol'.
         fx_node = self._create_fx_placeholder_and_z3var(symbol, int)
 
-        self._log_create_unbacked_symbol("create_unbacked_symint", symbol, vr, source)
+        sym_node = SymNode(symbol, self, int, None, fx_node=fx_node)
+        self._log_create_unbacked_symbol(
+            "create_unbacked_symint", symbol, vr, source, sym_node=sym_node
+        )
 
-        return SymInt(SymNode(symbol, self, int, None, fx_node=fx_node))
+        return SymInt(sym_node)
 
     def is_unbacked_symint(self, symbol: sympy.Symbol) -> bool:
         """Check if a sympy symbol matches the naming convention for unbacked symbols"""
@@ -4315,9 +4323,12 @@ class ShapeEnv:
         # Create a new FX placeholder and Z3 variable for 'symbol'.
         fx_node = self._create_fx_placeholder_and_z3var(symbol, bool)
 
-        self._log_create_unbacked_symbol("create_unbacked_symbool", symbol, vr)
+        sym_node = SymNode(sympy.Eq(symbol, 1), self, bool, None, fx_node=fx_node)
+        self._log_create_unbacked_symbol(
+            "create_unbacked_symbool", symbol, vr, sym_node=sym_node
+        )
 
-        return SymBool(SymNode(sympy.Eq(symbol, 1), self, bool, None, fx_node=fx_node))
+        return SymBool(sym_node)
 
     @record_shapeenv_event()
     def create_unspecified_symbol(
@@ -6552,10 +6563,16 @@ class ShapeEnv:
         size_oblivious: bool = False,
         *,
         forcing_spec: bool = False,
+        expr_sym_node: Optional[SymNode] = None,
     ) -> sympy.Basic:
         try:
             return self._evaluate_expr(
-                orig_expr, hint, fx_node, size_oblivious, forcing_spec=forcing_spec
+                orig_expr,
+                hint,
+                fx_node,
+                size_oblivious,
+                forcing_spec=forcing_spec,
+                expr_sym_node=expr_sym_node,
             )
         except Exception:
             self.log.warning(
@@ -6575,6 +6592,7 @@ class ShapeEnv:
         size_oblivious: bool = False,
         *,
         forcing_spec: bool = False,
+        expr_sym_node: Optional[SymNode] = None,
     ) -> sympy.Basic:
         """
         Given an expression, evaluates it, adding guards if necessary
@@ -6738,6 +6756,7 @@ class ShapeEnv:
                             metadata_fn=lambda: {
                                 "expr": repr(orig_expr),
                                 "result": repr(unsound_result),
+                                "expr_node_id": id(expr_sym_node),
                                 "stack": structured.from_traceback(
                                     CapturedTraceback.extract(skip=1).summary()
                                 ),
