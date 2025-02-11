@@ -707,7 +707,7 @@ class TorchHigherOrderOperatorVariable(VariableTracker):
 
     @staticmethod
     def make(value, source=None, **kwargs):
-        from torch._higher_order_ops import PrimHOPBase
+        from torch._higher_order_ops import BaseHOP
 
         if value.__name__ == "cond":
             return CondHigherOrderVariable(value, source, **kwargs)
@@ -755,8 +755,8 @@ class TorchHigherOrderOperatorVariable(VariableTracker):
             return AutoFunctionalizeHigherOrderVariable(value, source, **kwargs)
         elif value.__name__ == "invoke_subgraph":
             return InvokeSubgraphHigherOrderVariable(value, source, **kwargs)
-        elif isinstance(value, PrimHOPBase):
-            return PrimHOPBaseVariable(value, source, **kwargs)
+        elif isinstance(value, BaseHOP):
+            return BaseHOPVariable(value, source, **kwargs)
         elif value.__name__ == "custom_function_call":
             return CustomFunctionHigherOrderOperatorVariable(value, source, **kwargs)
         else:
@@ -2874,7 +2874,7 @@ def hash_graph_and_inputs(tx, gmod, fake_inputs):
     return key
 
 
-class PrimHOPBaseVariable(WrapHigherOrderVariable):
+class BaseHOPVariable(WrapHigherOrderVariable):
     def call_function(
         self,
         tx: "InstructionTranslator",
