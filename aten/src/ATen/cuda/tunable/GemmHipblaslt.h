@@ -493,15 +493,14 @@ class HipblasltGemmOp : public Callable<ParamsT> {
           // Check if device is gfx950
           if (std::string(prop.gcnArchName) == "gfx950") {
             // MX-format : Set Scale block sizes for matrix A and B (only available on gfx950 with ROCm 6.5+)
-            int32_t a_block_rows = params->m;
-            int32_t a_block_cols = 1;
-            int32_t b_block_rows = params->k;
-            int32_t b_block_cols = 1;
+            constexpr int32_t required_block_size = 32;
+            TORCH_CHECK(params->m % required_block_size == 0 && params->k % required_block_size == 0,
+                       "Block sizes must be 32. Got m=", params->m, ", k=", params->k);
             
-            matmul.setAttribute(HIPBLASLT_MATMUL_DESC_A_SCALE_BLOCK_SIZE_ROWS_VEC_EXT, a_block_rows);
-            matmul.setAttribute(HIPBLASLT_MATMUL_DESC_A_SCALE_BLOCK_SIZE_COLS_VEC_EXT, a_block_cols);
-            matmul.setAttribute(HIPBLASLT_MATMUL_DESC_B_SCALE_BLOCK_SIZE_ROWS_VEC_EXT, b_block_rows);
-            matmul.setAttribute(HIPBLASLT_MATMUL_DESC_B_SCALE_BLOCK_SIZE_COLS_VEC_EXT, b_block_cols);
+            matmul.setAttribute(HIPBLASLT_MATMUL_DESC_A_SCALE_BLOCK_SIZE_ROWS_VEC_EXT, required_block_size);
+            matmul.setAttribute(HIPBLASLT_MATMUL_DESC_A_SCALE_BLOCK_SIZE_COLS_VEC_EXT, required_block_size);
+            matmul.setAttribute(HIPBLASLT_MATMUL_DESC_B_SCALE_BLOCK_SIZE_ROWS_VEC_EXT, required_block_size);
+            matmul.setAttribute(HIPBLASLT_MATMUL_DESC_B_SCALE_BLOCK_SIZE_COLS_VEC_EXT, required_block_size);
           }
 #endif
         }
