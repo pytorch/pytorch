@@ -11,14 +11,16 @@ namespace at::cuda {
 namespace {
 
 DeviceIndex num_gpus = -1;
-c10::once_flag init_flag;
 std::deque<c10::once_flag> device_flags;
 std::vector<cudaDeviceProp> device_properties;
 
 void initCUDAContextVectors() {
-  num_gpus = c10::cuda::device_count();
-  device_flags.resize(num_gpus);
-  device_properties.resize(num_gpus);
+  static bool init_flag [[maybe_unused]] = []() {
+    num_gpus = c10::cuda::device_count();
+    device_flags.resize(num_gpus);
+    device_properties.resize(num_gpus);
+    return true;
+  }();
 }
 
 void initDeviceProperty(DeviceIndex device_index) {
@@ -44,7 +46,7 @@ cudaDeviceProp* getCurrentDeviceProperties() {
 }
 
 cudaDeviceProp* getDeviceProperties(c10::DeviceIndex device) {
-  c10::call_once(init_flag, initCUDAContextVectors);
+  initCUDAContextVectors();
   if (device == -1) device = c10::cuda::current_device();
   AT_ASSERT(device >= 0 && device < num_gpus, "device=", static_cast<int>(device), ", num_gpus=", num_gpus);
   c10::call_once(device_flags[device], initDeviceProperty, device);
@@ -52,7 +54,7 @@ cudaDeviceProp* getDeviceProperties(c10::DeviceIndex device) {
 }
 
 bool canDeviceAccessPeer(c10::DeviceIndex device, c10::DeviceIndex peer_device) {
-  c10::call_once(init_flag, initCUDAContextVectors);
+  initCUDAContextVectors();
   if (device == -1) device = c10::cuda::current_device();
   AT_ASSERT(device >= 0 && device < num_gpus, "device=", static_cast<int>(device), ", num_gpus=", num_gpus);
   AT_ASSERT(peer_device >= 0 && peer_device < num_gpus, "peer_device=", static_cast<int>(peer_device), ", num_gpus=", num_gpus);

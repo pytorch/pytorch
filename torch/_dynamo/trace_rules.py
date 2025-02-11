@@ -32,8 +32,9 @@ from .utils import getfile, hashable, NP_SUPPORTED_MODULES, unwrap_if_wrapper
 from .variables import (
     BuiltinVariable,
     FunctionalCallVariable,
-    FunctionDecoratedByContextlibContextManagerVariable,
     FunctorchHigherOrderVariable,
+    LocalGeneratorFunctionVariable,
+    LocalGeneratorObjectVariable,
     NestedUserFunctionVariable,
     PolyfilledFunctionVariable,
     SkipFunctionVariable,
@@ -3209,6 +3210,7 @@ LEGACY_MOD_INLINELIST = {
     "torch._higher_order_ops.while_loop",
     "torch._higher_order_ops.associative_scan",
     "torch._higher_order_ops.scan",
+    "torch._higher_order_ops._invoke_quant",
     "torch._higher_order_ops.utils",
     "torch.nn.attention.flex_attention",
     "torch.ao.quantization.pt2e.export_utils",
@@ -3308,7 +3310,6 @@ if torch.distributed.is_available():
 # See "A note on skip/inline rules" for more details.
 MOD_SKIPLIST = [
     "torch._VF",
-    "torch.__config__",
     "torch.__future__",
     "torch.__init__",
     "torch._appdirs",
@@ -3325,7 +3326,11 @@ MOD_SKIPLIST = [
     "torch._export",
     "torch._functorch",
     "torch._guards",
-    "torch._higher_order_op",
+    "torch._higher_order_ops._invoke_quant",
+    "torch._higher_order_ops.effects",
+    "torch._higher_order_ops.map",
+    "torch._higher_order_ops.torchbind",
+    "torch._higher_order_ops.wrap",
     "torch._inductor",
     "torch._jit_internal",
     "torch._lazy",
@@ -3342,17 +3347,12 @@ MOD_SKIPLIST = [
     "torch._prims_common",
     "torch._python_dispatcher",
     "torch._refs",
-    "torch._size_docs",
-    "torch._sources",
-    "torch._storage_docs",
     "torch._streambase",
     "torch._strobelight",
     "torch._subclasses",
     "torch._tensor",
-    "torch._tensor_docs",
     "torch._tensor_str",
     "torch._thread_safe_fork",
-    "torch._torch_docs",
     "torch._utils",
     "torch._utils_internal",
     "torch._vendor",
@@ -3397,7 +3397,6 @@ MOD_SKIPLIST = [
     "torch.quantization",
     "torch.quasirandom",
     "torch.random",
-    "torch.return_types",
     "torch.serialization",
     "torch.share",
     "torch.signal",
@@ -3408,7 +3407,6 @@ MOD_SKIPLIST = [
     "torch.torch_version",
     "torch.types",
     "torch.utils",
-    "torch.version",
     "torch.xpu",
 ]
 
@@ -3619,7 +3617,8 @@ def check_verbose(obj, is_inlined_call=False):
             UserFunctionVariable,
             UserMethodVariable,
             NestedUserFunctionVariable,
-            FunctionDecoratedByContextlibContextManagerVariable,
+            LocalGeneratorFunctionVariable,
+            LocalGeneratorObjectVariable,
         ),
     ):
         try:
@@ -3639,7 +3638,14 @@ def check_verbose(obj, is_inlined_call=False):
     # Consulte the central trace rules defined in torch._dynamo.trace_rules.
     reasons: set[str] = set()
     rule = lookup_inner(fi.py_obj, fi.name, fi.filename, is_inlined_call, reasons)
-    if issubclass(rule, (UserFunctionVariable, PolyfilledFunctionVariable)):
+    if issubclass(
+        rule,
+        (
+            UserFunctionVariable,
+            LocalGeneratorFunctionVariable,
+            PolyfilledFunctionVariable,
+        ),
+    ):
         return SkipResult(
             False,
             f"inlined according trace_rules.lookup {reasons.pop()}",
