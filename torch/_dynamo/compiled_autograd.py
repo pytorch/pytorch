@@ -90,10 +90,10 @@ class OpNamespace:
             # C++ autograd function was not marked as traceable
             # Dynamo can't dry run it at compile time, so must fallback to eager
             @torch._dynamo.disable
-            def fn(*args, **kwargs):
+            def run_non_traceable_cpp_in_eager(*args, **kwargs):
                 return result(*args, **kwargs)
 
-            setattr(self, name, fn)
+            setattr(self, name, run_non_traceable_cpp_in_eager)
         return name
 
     def get(self, name):
@@ -212,9 +212,9 @@ class AutogradCompilerInstance:
             )
             for idx, val in enumerate(sizes)
         ]
-        self.bind_tensors_to_proxies(sizes, self.sizes_proxy, sizes_origins)
+        proxies = self.bind_tensors_to_proxies(sizes, self.sizes_proxy, sizes_origins)
         for i, symint in enumerate(sizes):
-            self.symnode_proxy_lookup[symint.node] = self.sizes_proxy[i]
+            self.symnode_proxy_lookup[symint.node] = proxies[i]
 
         for idx, val in enumerate(scalars):
             source = self.source("scalars", idx)
@@ -1144,6 +1144,7 @@ class AutogradCompilerInstance:
 
         assert len(tensors) == len(proxies)
         track_tensor_tree(tensors, proxies, constant=None, tracer=self.fx_tracer)
+        return proxies
 
     def bind_backward_state(self, index: int):
         assert self.hooks_proxy is not None
