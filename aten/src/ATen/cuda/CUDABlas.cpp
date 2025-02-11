@@ -233,7 +233,7 @@ void* _getWorkspaceWithoutHandle() {
 }
 
 void* _getWorkspace(size_t& workspaceSize) {
-#ifdef (USE_ROCM || IS_FBCODE)
+#ifdef (defined(USE_ROCM) || defined(IS_FBCODE))
   workspaceSize = _getWorkspaceSize();
   auto& allocator = *::c10::cuda::CUDACachingAllocator::get();
   auto workspace = allocator.allocate(workspaceSize);
