@@ -8,7 +8,11 @@ from unittest import skipIf
 import torch.nn
 from torch.package import EmptyMatchError, Importer, PackageExporter, PackageImporter
 from torch.package.package_exporter import PackagingError
-from torch.testing._internal.common_utils import IS_WINDOWS, run_tests
+from torch.testing._internal.common_utils import (
+    IS_WINDOWS,
+    run_tests,
+    skipIfTorchDynamo,
+)
 
 
 try:
@@ -43,6 +47,7 @@ class TestDependencyAPI(PackageTestCase):
         self.assertIsNot(package_a, package_a_im)
         self.assertIs(package_a.subpackage, package_a_im.subpackage)
 
+    @skipIfTorchDynamo("import interference since eval_frame.c makes imports")
     def test_extern_glob(self):
         buffer = BytesIO()
         with PackageExporter(buffer) as he:
@@ -112,6 +117,7 @@ class TestDependencyAPI(PackageTestCase):
                     ),
                 )
 
+    @skipIfTorchDynamo("import interference since eval_frame.c makes imports")
     def test_mock(self):
         buffer = BytesIO()
         with PackageExporter(buffer) as he:
@@ -132,6 +138,7 @@ class TestDependencyAPI(PackageTestCase):
         with self.assertRaisesRegex(NotImplementedError, "was mocked out"):
             r()
 
+    @skipIfTorchDynamo("import interference since eval_frame.c makes imports")
     def test_mock_glob(self):
         buffer = BytesIO()
         with PackageExporter(buffer) as he:
@@ -318,6 +325,7 @@ class TestDependencyAPI(PackageTestCase):
             ),
         )
 
+    @skipIfTorchDynamo("import interference since eval_frame.c makes imports")
     def test_repackage_mocked_module(self):
         """Re-packaging a package that contains a mocked module should work correctly."""
         buffer = BytesIO()

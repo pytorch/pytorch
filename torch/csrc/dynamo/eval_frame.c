@@ -9,6 +9,7 @@
 #include <torch/csrc/dynamo/debug_macros.h>
 #include <torch/csrc/dynamo/extra_state.h>
 #include <torch/csrc/dynamo/framelocals_mapping.h>
+#include <torch/csrc/dynamo/utils.h>
 #include <torch/csrc/utils/python_compat.h>
 
 PyObject* guard_error_hook = NULL;
@@ -295,6 +296,7 @@ static PyObject* dynamo_call_callback(
   PyObject* cache_entry_pyobj = CacheEntry_to_obj(cache_entry);
   PyObject* res = PyObject_CallFunction(
       callable, "OOO", frame, cache_entry_pyobj, frame_state);
+
   Py_DECREF(frame);
   Py_DECREF(cache_entry_pyobj);
   return res;
@@ -741,6 +743,17 @@ static PyObject* dynamo__custom_eval_frame(
     return NULL;
   }
   // cache miss
+
+  // Preserve random state - restore before calling
+  // dynamo_eval_[frame_default]/[custom_code]!
+  // call_callback may burn RNG.
+  // NOTE: guard eval should NOT modify global state!
+  PyObject* rng_state = system_random_getstate();
+  if (rng_state == NULL) {
+    *should_clear_frame = 1;
+    return NULL;
+  }
+
   CacheEntry* cache_entry = extract_cache_entry(extra);
   FrameState* frame_state = extract_frame_state(extra);
   PyObject* result =
@@ -755,8 +768,12 @@ static PyObject* dynamo__custom_eval_frame(
     // Dynamo barfs, that's it for Dynamo, even if you catch the exception
     // inside the torch.compile block we won't try to Dynamo anything else.
     *should_clear_frame = 1;
+    Py_DECREF(rng_state);
     return NULL;
-  } else if (result == skip_code_recursive_flag) {
+  }
+  system_random_setstate(rng_state);
+  Py_DECREF(rng_state);
+  if (result == skip_code_recursive_flag) {
     // Dynamo returned skip_code_recursive_flag, so we should recursively skip
     // code.
     DEBUG_TRACE("create skip recursive %s", get_frame_name(frame));

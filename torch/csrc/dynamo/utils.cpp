@@ -2,6 +2,16 @@
 
 namespace torch::dynamo {
 
+// random utilities for C dynamo
+
+PyObject* system_random_getstate() {
+  return py::module_::import("random").attr("getstate")().release().ptr();
+}
+
+void system_random_setstate(PyObject* state) {
+  py::module_::import("random").attr("setstate")(py::handle(state));
+}
+
 static std::array<PyMethodDef, 1> _methods = {{
     {nullptr,
      nullptr,
