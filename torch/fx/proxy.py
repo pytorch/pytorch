@@ -344,7 +344,7 @@ class TracerBase:
             args = []
             kwargs = {}
             for field in fields(a):
-                if field.kw_only:
+                if getattr(field, "kw_only", False):
                     kwargs[field.name] = self.create_arg(getattr(a, field.name))
                 elif field.init:
                     args.append(self.create_arg(getattr(a, field.name)))
