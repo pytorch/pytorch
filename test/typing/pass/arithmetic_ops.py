@@ -1,4 +1,4 @@
-from typing import Any, Union
+from typing import Union
 from typing_extensions import assert_type, TypeAlias
 
 from torch import randn, Tensor
