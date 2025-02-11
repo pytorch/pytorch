@@ -34,6 +34,13 @@ void topk_out_with_sort(
 // TODO: remove this when CUDA <11.6 is no longer supported
 bool disable_sort_for_topk();
 bool should_use_sort(const Tensor& self, int64_t dim) {
+#if defined(USE_ROCM)
+  size_t n_multidims = 0; // number of dimensions with dimensionality more than one
+  for(int s: self.sizes()) {
+    n_multidims += (s > 1);
+  }
+  return (n_multidims == 1 && self.numel()>=10000); // based on the experiments in https://github.com/pytorch/pytorch/pull/146387
+#else
   if (disable_sort_for_topk()) return false;
   // This heuristics is based on the experiment in https://github.com/pytorch/pytorch/pull/68632
   if (self.dim() == 0) return false;
@@ -42,6 +49,7 @@ bool should_use_sort(const Tensor& self, int64_t dim) {
   if (slice_size == 0) return false;
   int64_t num_slices = self.numel() / slice_size;
   return num_slices <= 10 && slice_size >= 100000;
+#endif
 }
 
 TORCH_IMPL_FUNC(topk_out_cuda)
