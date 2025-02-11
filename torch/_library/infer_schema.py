@@ -66,9 +66,7 @@ def infer_schema(
     sig = inspect.signature(prototype_function)
 
     def error_fn(what):
-        raise ValueError(
-            f"infer_schema(func): {what} " f"Got func with signature {sig})"
-        )
+        raise ValueError(f"infer_schema(func): {what} Got func with signature {sig})")
 
     def convert_type_string(annotation_type: str):
         try:
