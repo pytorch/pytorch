@@ -712,9 +712,6 @@ def _assert_dependencies(export_options: ResolvedExportOptions):
         raise missing_opset("onnxscript")
 
 
-@deprecated(
-    "torch.onnx.dynamo_export is deprecated since 2.7.0. Please use torch.onnx.export(..., dynamo=True) instead.",
-)
 def dynamo_export(
     model: torch.nn.Module | Callable,
     /,
