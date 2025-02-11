@@ -105,9 +105,9 @@ bundled_autotune_remote_cache: Optional[bool] = bundled_autotune_remote_cache_de
 force_disable_caches: bool = os.environ.get("TORCHINDUCTOR_FORCE_DISABLE_CACHES") == "1"
 
 # If set to "DEFAULT", this will use the default path that is "torch/_inductor/fx_passes/serialized_patterns/"
-# If set to another path, serialized_pattern_path will generate patterens to the given path
-serialized_pattern_path = os.environ.get(
-    "TORCHINDUCTOR_SERIALIZED_PATTERN_PATH", "DEFAULT"
+# If set to another path, torchinductor_serialized_pattern_path will generate patterens to the given path
+torchinductor_serialized_pattern_path = os.environ.get(
+    "SERIALIZED_PATTERN_PATH", "DEFAULT"
 )
 
 # sleep in inductor for testing
