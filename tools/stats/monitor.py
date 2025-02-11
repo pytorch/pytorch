@@ -182,9 +182,10 @@ class UsageLogger:
             in a pretty format with more information.
         """
         self._log_interval = log_interval
+        self._data_collect_interval = data_collect_interval
         self._metadata = UtilizationMetadata(
             level="metadata",
-            usage_collect_interval=self._log_interval,
+            usage_collect_interval=self._data_collect_interval,
             data_model_version=getDataModelVersion(),
             job_id=_job_id,
             job_name=_job_name,
@@ -192,7 +193,7 @@ class UsageLogger:
             workflow_name=_workflow_name,
             start_at=getTsNow(),
         )
-        self._data_collect_interval = data_collect_interval
+
         self._has_pynvml = pynvml_enabled
         self._has_amdsmi = amdsmi_enabled
         self._gpu_handles: list[Any] = []
