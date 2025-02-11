@@ -368,7 +368,7 @@ def _single_tensor_nadam(
             param.addcdiv_(
                 exp_avg,
                 denom,
-                value=cast(float, (-lr * mu_next) / (1.0 - mu_product_next)),
+                value=(-lr * mu_next.item()) / (1.0 - mu_product_next.item()),
             )
 
 
