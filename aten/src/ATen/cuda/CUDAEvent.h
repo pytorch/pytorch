@@ -110,7 +110,7 @@ struct TORCH_CUDA_CPP_API CUDAEvent {
   }
 
   // Note: cudaEventRecord must be called on the same device as the event.
-  void record(const CUDAStream& stream) {
+  void record(const CUDAStream& stream, unsigned int flags=cudaEventRecordDefault) {
     if (!is_created_) {
       createEvent(stream.device_index());
     }
@@ -118,7 +118,7 @@ struct TORCH_CUDA_CPP_API CUDAEvent {
     TORCH_CHECK(device_index_ == stream.device_index(), "Event device ", device_index_,
       " does not match recording stream's device ", stream.device_index(), ".");
     CUDAGuard guard(device_index_);
-    AT_CUDA_CHECK(cudaEventRecord(event_, stream));
+    AT_CUDA_CHECK(cudaEventRecordWithFlags(event_, stream, flags));
     const c10::impl::PyInterpreter* interp = c10::impl::GPUTrace::get_trace();
     if (C10_UNLIKELY(interp)) {
       (*interp)->trace_gpu_event_record(at::kCUDA,
