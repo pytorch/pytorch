@@ -18,9 +18,10 @@ c10::Allocator* GetCPUAllocatorMaybePinned(bool pin_memory) {
     // To properly support this, see https://github.com/pytorch/pytorch/issues/14560
 
     std::optional<c10::DeviceType> opt_device_type = std::nullopt;
-    // Preserved for BC, CUDA first
-    // See Note [Accelerator Concept]
-    // Remove later
+    // As mentioned in Note [Accelerator Context], the accelerators in PyTorch should be mutually exclusive,
+    // and PrivateUse1 has the highest priority, followed by CUDA;
+    // However, since exclusivity between accelerators cannot be guaranteed at present,
+    // in order to ensure backward compatibility (previously the default was CUDA), CUDA are prioritized.
     if (at::globalContext().hasCUDA()) {
       opt_device_type = c10::DeviceType::CUDA;
     } else {
