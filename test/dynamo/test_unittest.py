@@ -129,7 +129,6 @@ class CPythonTest_Assertions(torch._dynamo.test_case.TestCase):
         else:
             self.fail("assertRaises() didn't let exception pass through")
 
-    @unittest.expectedFailure
     @make_dynamo_test
     def testAssertNotRegex(self):
         self.assertNotRegex("Ala ma kota", r"r+")

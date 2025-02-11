@@ -204,7 +204,6 @@ class CPythonTestBaseExitStack:
             result.append(2)
         self.assertEqual(result, [1, 2])
 
-    @unittest.expectedFailure
     @make_dynamo_test
     def test_pop_all(self):
         result = []
