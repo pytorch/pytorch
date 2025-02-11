@@ -211,7 +211,7 @@ class LogRecord:
             return hash((key, data["op"]))
         elif key == "mismatched_fake_kernel":
             return hash((key, data["op"], data["reason"]))
-        elif key == "propagate_real_tensors":
+        elif key == "propagate_real_tensors_provenance":
             return hash((key, json.dumps(data["stack"])))
         elif key == "create_unbacked_symbol":
             return hash((key, json.dumps(data["stack"])))
