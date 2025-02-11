@@ -63,7 +63,7 @@ class InvokeQuant:
         scheme: Optional[str] = None,
         **kwargs,
     ):
-        if not torch._utils.is_compiling():
+        if not torch.compiler.is_compiling():
             return args[0](*args[1], **kwargs)
 
         if scheme is not None:
