@@ -108,7 +108,6 @@ from .variables.misc import (
     NullVariable,
     PythonModuleVariable,
     UnknownVariable,
-    UserDefinedExceptionClassVariable,
 )
 from .variables.nn_module import NNModuleVariable
 from .variables.tensor import supported_comparison_ops, SymNodeVariable, TensorVariable
@@ -119,6 +118,8 @@ from .variables.torch_function import (
 from .variables.user_defined import (
     RemovableHandleVariable,
     UserDefinedClassVariable,
+    UserDefinedExceptionClassVariable,
+    UserDefinedExceptionObjectVariable,
     UserDefinedObjectVariable,
 )
 
@@ -1560,10 +1561,19 @@ class InstructionTranslatorBase(
         self.exn_vt_stack.append(val)
 
         # 2) when user raises exception instance
-        if isinstance(val, variables.ExceptionVariable):
-            if observed_exception_type := exc.observed_exception_map.get(val.exc_type):
-                raise observed_exception_type(f"raised exception {val}")
-            raise exc.ObservedException(f"raised exception {val}")
+        if isinstance(
+            val,
+            (
+                variables.ExceptionVariable,
+                UserDefinedExceptionClassVariable,
+                UserDefinedExceptionObjectVariable,
+            ),
+        ):
+            observed_exception_type = exc.get_dynamo_observed_exception(val.exc_type)
+            raise observed_exception_type(f"raised exception {val}")
+            # if observed_exception_type := exc.observed_exception_map.get(val.exc_type):
+            #     raise observed_exception_type(f"raised exception {val}")
+            # raise exc.ObservedException(f"raised exception {val}")
         unimplemented(f"raise {exc}")
 
     def RAISE_VARARGS(self, inst):
@@ -1735,7 +1745,14 @@ class InstructionTranslatorBase(
     def POP_EXCEPT(self, inst):
         if sys.version_info >= (3, 11):
             val = self.pop()
-            assert isinstance(val, variables.ExceptionVariable)
+            assert isinstance(
+                val,
+                (
+                    variables.ExceptionVariable,
+                    UserDefinedExceptionClassVariable,
+                    UserDefinedExceptionObjectVariable,
+                ),
+            )
 
             # This exception is handled and therefore we can clear the error indicator
             assert len(self.exn_vt_stack)
@@ -1783,6 +1800,7 @@ class InstructionTranslatorBase(
                 BuiltinVariable,
                 TupleVariable,
                 UserDefinedExceptionClassVariable,
+                UserDefinedExceptionObjectVariable,
             ),
         ):
             unimplemented(
@@ -1790,7 +1808,14 @@ class InstructionTranslatorBase(
             )
 
         if sys.version_info >= (3, 11):
-            if not isinstance(exc_instance, variables.ExceptionVariable):
+            if not isinstance(
+                exc_instance,
+                (
+                    variables.ExceptionVariable,
+                    UserDefinedExceptionClassVariable,
+                    UserDefinedExceptionObjectVariable,
+                ),
+            ):
                 unimplemented(
                     f"except expects to recieve an object of exception type but received {exc_instance}"
                 )
@@ -1804,14 +1829,28 @@ class InstructionTranslatorBase(
 
         for expected_type in expected_types:
             if not isinstance(
-                expected_type, (BuiltinVariable, UserDefinedExceptionClassVariable)
+                expected_type,
+                (
+                    BuiltinVariable,
+                    UserDefinedExceptionObjectVariable,
+                    UserDefinedExceptionClassVariable,
+                ),
             ):
                 unimplemented(
                     f"except has an unsupported types of object {expected_type}"
                 )
-            if isinstance(exc_instance, variables.ExceptionVariable) and issubclass(
-                exc_instance.exc_type, expected_type.fn
-            ):
+            # if isinstance(exc_instance, variables.ExceptionVariable) and issubclass(
+            #     exc_instance.exc_type, expected_type.fn
+            # ):
+            #     return True
+            if isinstance(
+                exc_instance,
+                (
+                    variables.ExceptionVariable,
+                    UserDefinedExceptionClassVariable,
+                    UserDefinedExceptionObjectVariable,
+                ),
+            ) and issubclass(exc_instance.exc_type, expected_type.fn):
                 return True
             elif isinstance(exc_instance, variables.BuiltinVariable) and issubclass(
                 exc_instance.fn, expected_type.fn
