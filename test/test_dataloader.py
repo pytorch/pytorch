@@ -36,6 +36,7 @@ from torch.testing._internal.common_utils import (
     skipIfXpu,
     slowTest,
     TEST_CUDA,
+    TEST_MPS,
     TEST_NUMPY,
     TEST_WITH_ASAN,
     TEST_WITH_ROCM,
@@ -3145,6 +3146,15 @@ class TestDictDataLoader(TestCase):
     @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
     def test_pin_memory_with_only_device(self):
         loader = DataLoader(self.dataset, batch_size=2, pin_memory_device="cuda")
+        for sample in loader:
+            self.assertFalse(sample["a_tensor"].is_pinned())
+            self.assertFalse(sample["another_dict"]["a_number"].is_pinned())
+
+    @unittest.skipIf(not TEST_MPS, "MPS unavailable")
+    def test_pin_memory_skip_mps(self):
+        loader = DataLoader(
+            self.dataset, batch_size=2, pin_memory=True, pin_memory_device="mps"
+        )
         for sample in loader:
             self.assertFalse(sample["a_tensor"].is_pinned())
             self.assertFalse(sample["another_dict"]["a_number"].is_pinned())
