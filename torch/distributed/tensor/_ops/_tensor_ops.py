@@ -164,7 +164,16 @@ def create_like_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> StrategyType:
             )
 
         else:
-            create_like_strategy.strategies.append(PlacementStrategy(arg_spec))
+            # still create a new DTensorSpec for output_spec to avoid
+            # input_specs and output_specs sharing the same tensor_meta,
+            # e.g. the output tensor of _like ops can have different dtypes
+            output_spec = DTensorSpec(
+                mesh=arg_spec.mesh,
+                placements=arg_spec.placements,
+            )
+            create_like_strategy.strategies.append(
+                PlacementStrategy(output_specs=output_spec, input_specs=(arg_spec,))
+            )
 
     return create_like_strategy
 
