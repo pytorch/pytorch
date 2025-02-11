@@ -17497,8 +17497,6 @@ op_db: list[OpInfo] = [
                     supports_out=False,
                     supports_autograd=False,
                     supports_forward_ad=True,
-                    supports_one_python_scalar=True,
-                    supports_two_python_scalars=True,
                     skips=(
                         DecorateInfo(unittest.expectedFailure, 'TestNormalizeOperators', 'test_normalize_operator_exhaustive'),
                     )),
@@ -17508,8 +17506,6 @@ op_db: list[OpInfo] = [
                     supports_out=False,
                     supports_autograd=False,
                     supports_forward_ad=True,
-                    supports_one_python_scalar=True,
-                    supports_two_python_scalars=True,
                     skips=(
                         DecorateInfo(unittest.expectedFailure, 'TestNormalizeOperators', 'test_normalize_operator_exhaustive'),
                     )),
@@ -17519,8 +17515,6 @@ op_db: list[OpInfo] = [
                     supports_out=False,
                     supports_autograd=False,
                     supports_forward_ad=True,
-                    supports_one_python_scalar=True,
-                    supports_two_python_scalars=True,
                     skips=(
                         DecorateInfo(unittest.expectedFailure, 'TestNormalizeOperators', 'test_normalize_operator_exhaustive'),
                     )),
