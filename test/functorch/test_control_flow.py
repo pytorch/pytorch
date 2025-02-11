@@ -1295,6 +1295,7 @@ def forward(self, pred_1, x_1):
 
         return cond_outputs, cond_inputs
 
+    @skipIfTorchDynamo("don't test compile on compile")
     @unittest.skipIf(not SM70OrLater, "triton")
     @unittest.skipIf(not torch.cuda.is_available(), "Test requires CUDA.")
     @parametrize("compile_mode", ["none", "eager", "compile", "compile_dynamic_shape"])
@@ -1396,6 +1397,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1):
     # TODO: The compile_mode = `compile_dynamic_shape` raises the Error
     # torch._inductor.exc.LoweringException: NotImplementedError: get_size() is not
     # implemented by <class 'torch._inductor.ir.NoneAsConstantBuffer'>!
+    @skipIfTorchDynamo("don't test compile on compile")
     @unittest.skipIf(not SM70OrLater, "triton")
     @unittest.skipIf(not torch.cuda.is_available(), "Test requires CUDA.")
     @parametrize("compile_mode", ["none", "eager", "compile"])
@@ -1544,6 +1546,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1, arg5_1):
     # TODO: The compile_mode = `compile_dynamic_shape` raises the Error
     # torch._inductor.exc.LoweringException: NotImplementedError: get_size() is not
     # implemented by <class 'torch._inductor.ir.NoneAsConstantBuffer'>!
+    @skipIfTorchDynamo("don't test compile on compile")
     @unittest.skipIf(not SM70OrLater, "triton")
     @unittest.skipIf(not torch.cuda.is_available(), "Test requires CUDA.")
     @parametrize("compile_mode", ["compile_dynamic_shape"])
@@ -1781,6 +1784,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1, arg5_1):
         self.assertEqual(out, exp_out)
 
     # TODO: provide an implementation for all compile modes and re-enable all test
+    @skipIfTorchDynamo("don't test compile on compile")
     @requires_cuda
     @parametrize("reverse", [False, True])
     @parametrize("compile_mode", ["none", "eager"])
@@ -1882,6 +1886,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1, arg5_1):
         self.assertEqual(result, result_exp)
 
     # TODO: provide an implementation for all compile modes and re-enable all test
+    @skipIfTorchDynamo("don't test compile on compile")
     @requires_cuda
     @parametrize("reverse", [False, True])
     @parametrize("compile_mode", ["none", "eager"])
@@ -2180,6 +2185,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1, arg5_1):
         self.assertEqual(result, expected_result)
 
     # TODO: provide an implementation for all compile modes and re-enable all test
+    @skipIfTorchDynamo("don't test compile on compile")
     @requires_cuda
     @parametrize("compile_mode", ["none", "eager"])
     @parametrize("reverse", [False, True])
@@ -2214,6 +2220,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1, arg5_1):
             self.assertEqual(result, expected_result)
 
     # TODO: provide an implementation for all compile modes and re-enable all test
+    @skipIfTorchDynamo("don't test compile on compile")
     @requires_cuda
     @parametrize("compile_mode", ["none", "eager"])
     @parametrize("reverse", [False, True])
@@ -2417,6 +2424,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1, arg5_1):
             )
             self.assertEqual(cnt.frame_count, 6)
 
+    @skipIfTorchDynamo("don't test compile on compile")
     @requires_cuda
     @parametrize("compile_mode", ["none", "eager"])
     def test_scan_init_scanned_0(self, compile_mode):
@@ -2454,6 +2462,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1, arg5_1):
                     dim=dim,
                 )
 
+    @skipIfTorchDynamo("don't test compile on compile")
     @requires_cuda
     @parametrize("compile_mode", ["none", "eager"])
     def test_scan_init_non_tensor(self, compile_mode):
@@ -2478,6 +2487,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1, arg5_1):
             ):
                 scan_fct(get_scan_combine_fn("add", False), init, x, dim=dim)
 
+    @skipIfTorchDynamo("don't test compile on compile")
     @requires_cuda
     @parametrize("compile_mode", ["none", "eager"])
     def test_scan_init_wrong_shape(self, compile_mode):
@@ -2510,6 +2520,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1, arg5_1):
                     dim=dim,
                 )
 
+    @skipIfTorchDynamo("don't test compile on compile")
     @requires_cuda
     @parametrize("compile_mode", ["none", "eager"])
     def test_scan_init_wrong_pytree(self, compile_mode):
@@ -2544,6 +2555,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1, arg5_1):
             ):
                 scan_fct(add_one_carry, init, x, dim=dim)
 
+    @skipIfTorchDynamo("don't test compile on compile")
     @requires_cuda
     @parametrize("reverse", [False, True])
     @parametrize("compile_mode", ["none", "eager"])
