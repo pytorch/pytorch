@@ -2554,15 +2554,18 @@ def get_unique_name_wrt(prefix: str, *containers) -> str:
     Return a name that starts with `prefix` and is not in any of the
     `containers` (e.g., map, set).
     """
+    name = prefix
     for i in itertools.count():
-        name = f"{prefix}_{i}"
         found = False
-
         for container in containers:
             if name in container:
                 found = True
+                break
+
         if not found:
             return name
+        # else update and retry
+        name = f"{prefix}_{i}"
 
     raise AssertionError("unreachable")
 
