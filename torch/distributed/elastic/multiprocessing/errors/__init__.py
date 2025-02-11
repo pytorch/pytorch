@@ -325,7 +325,7 @@ def record(
         error_handler.dump_error_file(failure.error_file, failure.exitcode)
         raise
      except Exception as e:
-        error_handler.record(e)
+        error_handler.record_exception(e)
         raise
 
     .. important:: use this decorator once per process at the top level method,
