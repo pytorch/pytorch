@@ -20,6 +20,7 @@ from .aoti_hipify_utils import maybe_hipify_code_wrapper
 from .common import get_device_op_overrides
 from .cpp_utils import cexpr
 from .cpp_wrapper_cpu import CppWrapperCpu
+from .triton_utils import equal_1_arg_indices
 from .multi_kernel import MultiKernelCall
 from .wrapper import PythonWrapperCodegen, SymbolicCallArg
 
@@ -488,6 +489,7 @@ class CppWrapperGpu(CppWrapperCpu):
         triton_meta=None,
         autotune_configs=None,
         grid_extra_kwargs="",
+        signature=None,
     ):
         """
         Override the default value of argument 'gpu' to True here.
@@ -532,6 +534,7 @@ class CppWrapperGpu(CppWrapperCpu):
                 triton_meta,
                 autotune_configs,
                 grid_extra_kwargs,
+                signature,
             )
 
         if device_index is None:
@@ -558,8 +561,10 @@ class CppWrapperGpu(CppWrapperCpu):
                 triton_meta is not None
                 and triton_meta.get("configs")
                 and triton_meta.get("signature")
-            ):
-                equal_to_1 = triton_meta["configs"][0].equal_to_1
+            ):  
+                # breakpoint()
+                # equal_to_1 = triton_meta["configs"][0].equal_to_1
+                equal_to_1 = equal_1_arg_indices(signature)
                 call_args = [
                     arg for i, arg in enumerate(call_args) if i not in equal_to_1
                 ]

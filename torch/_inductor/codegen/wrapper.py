@@ -2048,6 +2048,7 @@ class PythonWrapperCodegen(CodeGen):
         triton_meta=None,
         autotune_configs=None,
         grid_extra_kwargs="",
+        signature=None,
     ):
         """
         Generates kernel call code.
