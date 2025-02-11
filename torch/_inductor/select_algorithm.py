@@ -445,7 +445,7 @@ class TritonTemplateKernel(TritonKernel):
         def hook():
             # python_argdefs() cannot be run until after the rest of the template lazily adds more args
             arg_defs, *_ = self.args.python_argdefs()
-            return f"{', '.join(x.full_name() for x in arg_defs)}"
+            return f"{', '.join(arg_defs)}"
 
         self.render_hooks["<ARGDEFS>"] = hook
         return "<ARGDEFS>"
@@ -515,9 +515,7 @@ class TritonTemplateKernel(TritonKernel):
             code = IndentedBuffer()
             code.splice(gen_common_triton_imports())
             code.splice(self.jit_lines())
-            code.writeline(
-                f"def {self.kernel_name}({', '.join(x.full_name() for x in arg_defs)}):"
-            )
+            code.writeline(f"def {self.kernel_name}({', '.join(arg_defs)}):")
             with code.indent():
                 code.splice(self.defines)
                 code.splice(renames.getvalue())
@@ -1065,14 +1063,6 @@ class TritonTemplate(KernelTemplate):
         """
         assert self.template, "requires jinja2"
         defines = StringIO()
-
-        # HACK: Triton currently breaks if TF32 floats are requested, but the CUDA
-        # capability doesn't support them.  This is a bug in Triton, but for now we'll
-        # patch around it here.  See https://github.com/triton-lang/triton/issues/3011
-        # for one example issue with this problem.
-        if not torch.cuda.is_tf32_supported():
-            kwargs["ALLOW_TF32"] = "False"
-
         for name, val in kwargs.items():
             defines.write(f"{name} : tl.constexpr = {val}\n")
         defines = defines.getvalue()

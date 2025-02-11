@@ -289,8 +289,6 @@ PLAT_TO_VCVARS = {
     'win-amd64' : 'x86_amd64',
 }
 
-min_supported_cpython = "0x03090000"  # Python 3.9 hexcode
-
 def get_cxx_compiler():
     if IS_WINDOWS:
         compiler = os.environ.get('CXX', 'cl')
@@ -575,22 +573,11 @@ class BuildExtension(build_ext):
                         extension.extra_compile_args[ext] = []
 
             self._add_compile_flag(extension, '-DTORCH_API_INCLUDE_EXTENSION_H')
-
-            if extension.py_limited_api:
-                # compile any extension that has passed in py_limited_api to the
-                # Extension constructor with the Py_LIMITED_API flag set to our
-                # min supported CPython version.
-                # See https://docs.python.org/3/c-api/stable.html#c.Py_LIMITED_API
-                self._add_compile_flag(extension, f'-DPy_LIMITED_API={min_supported_cpython}')
-            else:
-                # pybind11 is not CPython API stable so don't add these flags used when
-                # compiling pybind11 when pybind11 is not even used. otherwise, the build
-                # logs are confusing.
-                # See note [Pybind11 ABI constants]
-                for name in ["COMPILER_TYPE", "STDLIB", "BUILD_ABI"]:
-                    val = getattr(torch._C, f"_PYBIND11_{name}")
-                    if val is not None and not IS_WINDOWS:
-                        self._add_compile_flag(extension, f'-DPYBIND11_{name}="{val}"')
+            # See note [Pybind11 ABI constants]
+            for name in ["COMPILER_TYPE", "STDLIB", "BUILD_ABI"]:
+                val = getattr(torch._C, f"_PYBIND11_{name}")
+                if val is not None and not IS_WINDOWS:
+                    self._add_compile_flag(extension, f'-DPYBIND11_{name}="{val}"')
             self._define_torch_extension_name(extension)
             self._add_gnu_cpp_abi_flag(extension)
 
@@ -985,7 +972,7 @@ def CppExtension(name, sources, *args, **kwargs):
     constructor. Full list arguments can be found at
     https://setuptools.pypa.io/en/latest/userguide/ext_modules.html#extension-api-reference
 
-    .. warning::
+    .. note::
         The PyTorch python API (as provided in libtorch_python) cannot be built
         with the flag ``py_limited_api=True``.  When this flag is passed, it is
         the user's responsibility in their library to not use APIs from
@@ -993,14 +980,6 @@ def CppExtension(name, sources, *args, **kwargs):
         APIs from libtorch (aten objects, operators and the dispatcher). For
         example, to give access to custom ops from python, the library should
         register the ops through the dispatcher.
-
-        Contrary to CPython setuptools, who does not define -DPy_LIMITED_API
-        as a compile flag when py_limited_api is specified as an option for
-        the "bdist_wheel" command in ``setup``, PyTorch does! We will specify
-        -DPy_LIMITED_API=min_supported_cpython to best enforce consistency,
-        safety, and sanity in order to encourage best practices. To target a
-        different version, set min_supported_cpython to the hexcode of the
-        CPython version of choice.
 
     Example:
         >>> # xdoctest: +SKIP
@@ -1057,7 +1036,7 @@ def CUDAExtension(name, sources, *args, **kwargs):
     constructor. Full list arguments can be found at
     https://setuptools.pypa.io/en/latest/userguide/ext_modules.html#extension-api-reference
 
-    .. warning::
+    .. note::
         The PyTorch python API (as provided in libtorch_python) cannot be built
         with the flag ``py_limited_api=True``.  When this flag is passed, it is
         the user's responsibility in their library to not use APIs from
@@ -1065,14 +1044,6 @@ def CUDAExtension(name, sources, *args, **kwargs):
         APIs from libtorch (aten objects, operators and the dispatcher). For
         example, to give access to custom ops from python, the library should
         register the ops through the dispatcher.
-
-        Contrary to CPython setuptools, who does not define -DPy_LIMITED_API
-        as a compile flag when py_limited_api is specified as an option for
-        the "bdist_wheel" command in ``setup``, PyTorch does! We will specify
-        -DPy_LIMITED_API=min_supported_cpython to best enforce consistency,
-        safety, and sanity in order to encourage best practices. To target a
-        different version, set min_supported_cpython to the hexcode of the
-        CPython version of choice.
 
     Example:
         >>> # xdoctest: +SKIP
@@ -1437,6 +1408,10 @@ def _get_pybind11_abi_build_flags():
     # that can cause a hard to debug segfaults.
     # For PyTorch extensions we want to relax those restrictions and pass compiler, stdlib and abi properties
     # captured during PyTorch native library compilation in torch/csrc/Module.cpp
+    #
+    # Note that these flags don't have side effects even if the PyTorch extension does not
+    # require nor use pybind, so we do not do anything differently for them in the py_limited_api
+    # case.
 
     abi_cflags = []
     for pname in ["COMPILER_TYPE", "STDLIB", "BUILD_ABI"]:

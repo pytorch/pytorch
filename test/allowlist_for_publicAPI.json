@@ -1032,6 +1032,7 @@
     "List",
     "Number",
     "Sequence",
+    "Tuple",
     "Union"
   ],
   "torch.utils.benchmark.utils.compare": [

@@ -29,7 +29,6 @@ torch.cuda
     ipc_collect
     is_available
     is_initialized
-    is_tf32_supported
     memory_usage
     set_device
     set_stream

@@ -46,30 +46,32 @@ extern uint8_t _binary_constants_bin_end[];
 
 namespace {
 
-using RAIIDataPtr = std::unique_ptr<void, std::function<void(void*)>>;
-
 #ifdef USE_CUDA
 
-RAIIDataPtr RAII_gpuMalloc(size_t num_bytes) {
+using GPUPtr = std::unique_ptr<void, std::function<void(void*)>>;
+
+GPUPtr RAII_gpuMalloc(size_t num_bytes) {
   void* data_ptr;
   AOTI_RUNTIME_DEVICE_CHECK(cudaMalloc((void**)&data_ptr, num_bytes));
   auto deleter = [](void* ptr) { AOTI_RUNTIME_DEVICE_CHECK(cudaFree(ptr)); };
-  return RAIIDataPtr(data_ptr, deleter);
+  return GPUPtr(data_ptr, deleter);
 }
 
 #endif // USE_CUDA
 
 #ifdef USE_XPU
 
-RAIIDataPtr RAII_gpuMalloc(size_t num_bytes) {
+using GPUPtr = std::unique_ptr<void, std::function<void(void*)>>;
+
+GPUPtr RAII_gpuMalloc(size_t num_bytes) {
   sycl::queue* queue_ptr = nullptr;
   aoti_torch_get_current_sycl_queue((void**)&queue_ptr);
   void* data_ptr = sycl::malloc_device(num_bytes, *queue_ptr);
   auto deleter = [queue_ptr](void* ptr) { sycl::free(ptr, *queue_ptr); };
-  return RAIIDataPtr(data_ptr, deleter);
+  return GPUPtr(data_ptr, deleter);
 }
 
-#endif // USE_XPU
+#endif // USE_CUDA
 
 } // anonymous namespace
 
@@ -340,16 +342,14 @@ class AOTInductorModelBase {
     }
   }
 
-  RAIIDataPtr&& release_constant_blob() {
+#if defined(USE_CUDA) || defined(USE_XPU)
+  GPUPtr&& release_constant_blob() {
     return std::move(constant_blob_);
   }
+#endif
 
   std::shared_ptr<std::vector<ConstantHandle>> get_constants_array() {
     return constants_;
-  }
-
-  int32_t get_device_type() const {
-    return device_type_;
   }
 
   int32_t get_device_idx() const {
@@ -643,8 +643,10 @@ class AOTInductorModelBase {
   std::shared_ptr<ConstantMap> constants_map_;
   std::shared_ptr<std::vector<ConstantHandle>> constants_;
 
-  // Holds the blob storage for constants' at::Tensor.
-  RAIIDataPtr constant_blob_;
+#if defined(USE_CUDA) || defined(USE_XPU)
+  // Holds the blob storage for constants' at::Tensor for CUDA.
+  GPUPtr constant_blob_;
+#endif // USE_CUDA
 
 #ifdef USE_MMAP_SELF
   uint8_t* self_mmap = NULL;

@@ -69,7 +69,6 @@ post_grad_pass_names = [
     "unbind_stack_aten_pass",
     "shape_padding_multiplier",
     "pad_aten_mm_pass",
-    "split_cat_aten_pass",
 ]
 
 for pass_name in pre_grad_pass_names:
@@ -1636,98 +1635,6 @@ def mutate_cat_node(match: Match, split_sections: list[int], dim: int):
                 counters["inductor"]["mutate_cat_pass"] += 1
 
 
-getitem_split_aten = ListOf(
-    CallFunction(
-        operator.getitem,
-        CallFunctionVarArgs(torch.ops.aten.split.Tensor, users=MULTIPLE),
-        Ignored(),
-        _users=MULTIPLE,
-    ),
-    partial=True,
-)
-
-
-@register_graph_pattern(
-    CallFunctionVarArgs(torch.ops.aten.split.Tensor, users=MULTIPLE),
-    pass_dict=construct_pattern_matcher_pass("normalization_aten_pass"),
-)
-def normalize_split_default_aten(match: Match, *args, **kwargs):
-    split_node = match.nodes[0]
-    graph = match.graph
-    split_input, split_size, split_dim = _get_split_args_default(split_node)
-    if split_input is None or split_dim is None or split_size is None:
-        log.debug("couldn't find split args")
-        return
-    if not is_node_meta_valid(split_node):
-        log.debug("val absent for node: %s", split_node)
-        return
-    assert isinstance(split_node.meta["val"], (list, tuple))
-    split_sections = [t.size()[split_dim] for t in split_node.meta["val"]]
-    if any(isinstance(section, torch.SymInt) for section in split_sections):
-        # TODO dynamic_shapes with assume_static_by_default=False fails while AOT Autograd tracing.
-        return
-    if split_dim < 0:  # Normalize split dim
-        split_dim += split_input.meta["val"].dim()
-
-    new_args = (split_input, split_size)
-    new_kwargs = {"dim": split_dim}
-    if (
-        split_node.args == new_args
-        and split_node.kwargs == new_kwargs
-        and split_node.op == "call_function"
-    ):
-        return
-
-    with graph.inserting_after(split_node):
-        new_split_node = graph.call_function(
-            torch.ops.aten.split.Tensor,
-            args=new_args,
-            kwargs=new_kwargs,  # type: ignore[arg-type]
-        )
-    split_node.replace_all_uses_with(new_split_node)
-    new_split_node.meta.update(split_node.meta)
-    graph.erase_node(split_node)
-    counters["inductor"]["normalization_aten_pass"] += 1
-
-
-@register_graph_pattern(
-    CallFunction(
-        torch.ops.aten.cat.default,
-        getitem_split_aten,
-        dim=Ignored(),
-        _users=MULTIPLE,
-    ),
-    pass_dict=construct_pattern_matcher_pass("split_cat_aten_pass"),
-)
-def merge_split_cat_aten(match: Match, *args, **kwargs):
-    graph = match.graph
-    split_node = match.nodes[0]
-    split_input, _, split_dim = _get_split_args_default(split_node)
-    # get the getitem nodes from the split node
-    getitem_nodes = list(split_node.users.keys())
-    cat_node = next(iter(getitem_nodes[0].users.keys()))
-    cat_dim = get_arg_value(cat_node, 1, "dim")
-    cat_inputs = get_arg_value(cat_node, 0, "tensors")
-    # check split node and cat node has same dim
-    if split_dim != cat_dim:
-        return
-    # check the split node has consecutive indices
-    indices = [getitem.args[1] for getitem in getitem_nodes]
-    if not is_sorted_and_consecutive(indices) and len(getitem_nodes) != len(cat_inputs):  # type: ignore[arg-type]
-        return
-    # replace the users of the cat node to be the input of the split node
-    cat_node.replace_all_uses_with(split_input)
-    # remove the cat node
-    graph.erase_node(cat_node)
-    # remove getitem nodes and split node with no users
-    for getitem_node in getitem_nodes:
-        if len(getitem_node.users) == 0:
-            graph.erase_node(getitem_node)
-    if len(split_node.users) == 0:
-        graph.erase_node(split_node)
-    counters["inductor"]["split_cat_aten_pass"] += 1
-
-
 @register_graph_pattern(
     CallFunctionVarArgs(torch.ops.aten.cat.default, users=MULTIPLE),
     pass_dict=construct_pattern_matcher_pass("normalization_aten_pass"),
@@ -2127,6 +2034,10 @@ def remove_split_unbind_children(graph: torch.fx.Graph, inputs: list[torch.fx.No
 #                         cat (user=mul, dim=1, split_node)
 
 
+@register_graph_pattern(
+    CallFunctionVarArgs(torch.cat, users=MULTIPLE),
+    pass_dict=construct_pattern_matcher_pass("split_cat_to_slices_pass"),
+)
 @register_graph_pattern(
     CallFunction(
         torch.cat,

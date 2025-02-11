@@ -923,6 +923,7 @@ void codegenOutputQuery(
 // TODO: try making the CUcontext thread local to see if that improves performance - why is this slow?
 void initializeCudaContext() {
   // lazily construct context if non-existing yet;
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   CUcontext pctx = nullptr;
   AT_CUDA_DRIVER_CHECK(at::globalContext().getNVRTC().cuCtxGetCurrent(&pctx));
   if (!pctx) {
@@ -932,6 +933,7 @@ void initializeCudaContext() {
   }
 }
 
+#ifdef USE_ROCM
 int calc_io_size(
     const int nInputs,
     const int nOutputs,
@@ -951,6 +953,7 @@ int calc_io_size(
 
     return 0;
 }
+#endif
 
 int calc_thread_work_size(
     const int nInputs,
@@ -969,14 +972,7 @@ int calc_thread_work_size(
     }
     return io_size;
 #else
-    auto io_size = at::cuda::jit::calc_io_size(nInputs, nOutputs, inputs_type, result_type);
-    TORCH_INTERNAL_ASSERT(io_size > 0);
-    if (io_size == 1) {
-        return 16;
-    } else {
-        return 8;
-    }
-    return io_size;
+    return JIT_THREAD_WORK_SIZE;
 #endif
 }
 
@@ -1598,6 +1594,7 @@ NvrtcFunction jit_pwise_function(
   const std::string compute = std::string("--gpu-architecture=") +
       (compile_to_sass ? "sm_" : "compute_") + std::to_string(cuda_major) +
       std::to_string(cuda_minor);
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   std::vector<const char*> args = {
       "--std=c++17", compute.c_str(), "-default-device"};
 #endif
