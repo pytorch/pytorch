@@ -12,8 +12,8 @@ contain configuration options that affect only a specific part of the compiler:
 * :mod:`torch.fx.experimental.config`
 """
 
-import sys
 import os
+import sys
 from typing import Optional
 
 from torch.utils._config_module import Config, install_config_module
