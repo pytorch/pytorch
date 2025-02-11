@@ -98,7 +98,9 @@ else:
     inductor_expected_failures = set(os.listdir(inductor_failures_directory))
     inductor_skips = set(os.listdir(inductor_skips_directory))
 
-    subclasses_failures_directory = os.path.join(test_dir, "subclasses_expected_failures")
+    subclasses_failures_directory = os.path.join(
+        test_dir, "subclasses_expected_failures"
+    )
     subclasses_skips_directory = os.path.join(test_dir, "subclasses_skips")
 
     subclasses_expected_failures = set(os.listdir(subclasses_failures_directory))

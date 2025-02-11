@@ -7,7 +7,7 @@ import subprocess
 import requests
 
 
-WITH_LF = True
+WITH_LF = False
 LF = "lf." if WITH_LF else ""
 
 CONFIGS = {
@@ -81,7 +81,6 @@ def download_reports(commit_sha, configs=("dynamo39", "dynamo311", "eager311")):
     output = subprocess.check_output(
         ["gh", "run", "list", "-c", commit_sha, "-w", "pull", "--json", "databaseId"]
     ).decode()
-    print(f"download_reports output:{output}")
     workflow_run_id = str(json.loads(output)[0]["databaseId"])
     output = subprocess.check_output(["gh", "run", "view", workflow_run_id])
     workflow_jobs = parse_workflow_jobs(output)
@@ -89,6 +88,7 @@ def download_reports(commit_sha, configs=("dynamo39", "dynamo311", "eager311")):
     pprint.pprint(workflow_jobs)
 
     # Figure out which jobs we need to download logs for
+    # TODO: Add double checking WITH_LF / without
     required_jobs = []
     for config in configs:
         required_jobs.extend(list(CONFIGS[config]))

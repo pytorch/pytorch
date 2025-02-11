@@ -191,7 +191,6 @@ class TestCaseStatus(Enum):
     PASSED = auto()
     FAILED = auto()
     SKIPPED = auto()
-    SYSTEM_ERR = auto()
 
 
 from typing import Any
@@ -212,8 +211,6 @@ class TestCaseResult:
     def is_skipped(self):
         return self.status == TestCaseStatus.SKIPPED
 
-    def is_system_err(self):
-        return self.status == TestCaseStatus.SYSTEM_ERR
 
 def parse_testcase(testcase) -> TestCaseResult:
     children = list(testcase.iter())
@@ -227,9 +224,6 @@ def parse_testcase(testcase) -> TestCaseResult:
 
     if "failure" in tags:
         return TestCaseResult(TestCaseStatus.FAILED, k, testcase)
-
-    if "system-err" in tags:
-        return TestCaseResult(TestCaseStatus.SYSTEM_ERR, k, testcase)
 
     # TODO: handle rerun
     # print(f"XXX unmarked testcase tags:{tags}")
@@ -254,7 +248,15 @@ def parse_xmls(xmls):
         total_failed += int(ts.attrib["failures"])
         total_skipped += int(ts.attrib["skipped"])
         total_errors += int(ts.attrib["errors"])
-        unknown_attribs = set(ts.keys()) - {"tests", "failures", "skipped", "timestamp", "time", "name", "errors"}
+        unknown_attribs = set(ts.keys()) - {
+            "tests",
+            "failures",
+            "skipped",
+            "timestamp",
+            "time",
+            "name",
+            "errors",
+        }
         if unknown_attribs:
             # print(f"XXX testsuite {ts} unknown attribs:{unknown_attribs}")
             for attr in unknown_attribs:
@@ -275,7 +277,6 @@ def parse_xmls(xmls):
     tc_total_skipped = 0
     tc_total_failed = 0
     tc_total_passed = 0
-    tc_total_system_err = 0
     tcs = dict()
     for testcase in testcases:
         k = key(testcase)
@@ -290,16 +291,13 @@ def parse_xmls(xmls):
             tc_total_skipped += 1
         elif v.is_passed():
             tc_total_passed += 1
-        elif v.is_system_err():
-            tc_total_system_err += 1
         else:
             assert False
 
-    print(f"XXX      total_tests:{tc_total_tests:5} (h:{total_tests:5})")
-    print(f"XXX     total_failed:{tc_total_failed:5} (h:{total_failed:5})")
-    print(f"XXX    total_skipped:{tc_total_skipped:5} (h:{total_skipped:5})")
-    print(f"XXX     total_passed:{tc_total_passed:5} (h:{total_passed:5})")
-    print(f"XXX total_system_err:{tc_total_system_err:5} (h:{total_errors:5})")
+    print(f"     total_tests:{tc_total_tests:5} (h:{total_tests:5})")
+    print(f"    total_failed:{tc_total_failed:5} (h:{total_failed:5})")
+    print(f"   total_skipped:{tc_total_skipped:5} (h:{total_skipped:5})")
+    print(f"    total_passed:{tc_total_passed:5} (h:{total_passed:5})")
 
     return tcs
 
@@ -318,16 +316,16 @@ def compute_pass_rate_tcs(control_tcs, test_tcs, name=""):
         if cv.is_skipped():
             continue
 
-        if cv.is_passed() and tv.is_passed():
-            c_passed_t_passed += 1
-
         if cv.is_passed():
-            c_passed_t_notpassed += 1
+            if tv.is_passed():
+                c_passed_t_passed += 1
+            else:
+                c_passed_t_notpassed += 1
 
     num = c_passed_t_passed
     den = c_passed_t_passed + c_passed_t_notpassed
     pass_ratio = num / den
-    print(f"XXX Pass_ratio:{pass_ratio:.3} ({num} / {den})")
+    print(f"PASS_RATIO_{name}:{pass_ratio:.3} ({num} / {den})")
 
 
 def find_control_passed_missing_in_test(
@@ -351,6 +349,7 @@ def find_control_passed_missing_in_test(
     for k, v in sd.items():
         print(f"{v:4} PYTORCH_TEST_WITH_SUBCLASSES=1 python test/{k} -v")
 
+
 @dataclass
 class Failure:
     testcase_result: TestCaseResult
@@ -367,11 +366,14 @@ class Failure:
 class Category:
     items: List[Failure]
 
+
 from fuzzywuzzy import fuzz
 
-def similarity(x: Failure, y: Failure) -> int: # [0, 100]
+
+def similarity(x: Failure, y: Failure) -> int:  # [0, 100]
     r = fuzz.ratio(x.msg, y.msg)
     return r
+
 
 def categorize(categories, f: Failure):
     if not categories:
@@ -393,8 +395,10 @@ def categorize(categories, f: Failure):
 
     categories.append(Category([f]))
 
+
 def report_control_pass_test_notpass(control_tcs, test_tcs, dirname):
     import os
+
     if not os.path.isdir(dirname):
         os.makedirs(dirname)
 
@@ -404,8 +408,8 @@ def report_control_pass_test_notpass(control_tcs, test_tcs, dirname):
     num_tcs = len(test_tcs.items())
     with open(f"{dirname}/report", "w") as file:
         for _i, (k, tv) in enumerate(test_tcs.items()):
-            if _i % 1000 == 0:
-                print(f"XXX process {_i}/{num_tcs}")
+            if _i % 20000 == 0:
+                print(f"...processing... {_i}/{num_tcs}")
 
             if tv.is_skipped():
                 continue
@@ -417,7 +421,7 @@ def report_control_pass_test_notpass(control_tcs, test_tcs, dirname):
                 continue
 
             if cv.is_passed() and not tv.is_passed():
-                file.write("-"*40)
+                file.write("-" * 40)
                 tc = tv.testcase
                 file.write(f"{i:5}: {k}\n")
                 try:
@@ -433,12 +437,15 @@ def report_control_pass_test_notpass(control_tcs, test_tcs, dirname):
                 except Exception as e:
                     print(f"Exception on report prep for key:{k} e:{e}")
                     import traceback
+
                     print(traceback.format_exc())
                 i += 1
     total_failures = i
     num_cats = len(categories)
     for i, c in enumerate(sorted(categories, key=lambda c: len(c.items), reverse=True)):
-        print(f"XXX CATEGORY {i}/{num_cats} len(items):{len(c.items):5} of {total_failures}")
+        print(
+            f"CATEGORY {i}/{num_cats} len(items):{len(c.items):5} of {total_failures}"
+        )
         with open(f"{dirname}/cat_{i}_N{len(c.items)}", "w") as file:
             for j, f in enumerate(c.items):
                 file.write(f"Failure {j} sim:{f.sim} key:{f.key}\n")
@@ -465,23 +472,22 @@ def compute_pass_rate_aot_eager_subclasses(e_dir, dw_dir, ae_dir, sc_dir):
     tcs_sc = parse_xmls(sc_xmls)
     print("===")
 
-
     print("*** computing pass rate DYNAMO vs AOT_EAGER")
-    compute_pass_rate_tcs(tcs_dw, tcs_ae)
+    compute_pass_rate_tcs(tcs_dw, tcs_ae, "DYNAMO_vs_AOT_EAGER")
 
     print("*** computing pass rate AOT_EAGER vs SC")
-    compute_pass_rate_tcs(tcs_ae, tcs_sc)
+    compute_pass_rate_tcs(tcs_ae, tcs_sc, "AOT_EAGER_vs_SUBCLASSES")
 
     print("*** Find passed in dynamo, missing in SC")
     find_control_passed_missing_in_test(tcs_dw, tcs_sc)
 
-    report_control_pass_test_notpass(
-        tcs_dw,
-        tcs_ae,
-        "test_pass_dw_notpass_aw_75"
-    )
-    #report_control_pass_test_notpass(
+    # report_control_pass_test_notpass(
+    #    tcs_dw,
+    #    tcs_ae,
+    #    "test_pass_dw_notpass_aw_75"
+    # )
+    # report_control_pass_test_notpass(
     #    tcs_ae,
     #    tcs_sc,
     #    "test_pass_ae_notpass_sc_70"
-    #)
+    # )

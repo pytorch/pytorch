@@ -51,12 +51,12 @@ from torch.testing._internal.common_utils import (
     run_tests,
     runOnRocm,
     skipIfRocm,
+    skipIfTorchSubclasses,
     TEST_WITH_ASAN,
     TEST_WITH_ROCM,
     TestCase,
     unMarkDynamoStrictTest,
     xfailIfS390X,
-    skipIfTorchSubclasses,
 )
 from torch.testing._internal.opinfo.core import SampleInput
 from torch.utils import _pytree as pytree

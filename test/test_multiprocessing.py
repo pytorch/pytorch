@@ -21,12 +21,12 @@ from torch.testing._internal.common_utils import (
     load_tests,
     NO_MULTIPROCESSING_SPAWN,
     run_tests,
+    skipIfTorchSubclasses,
     slowTest,
     TEST_WITH_ASAN,
     TEST_WITH_ROCM,
     TEST_WITH_TSAN,
     TestCase,
-    skipIfTorchSubclasses,
 )
 
 
