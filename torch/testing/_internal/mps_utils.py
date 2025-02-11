@@ -148,7 +148,6 @@ UNIMPLEMENTED_XFAILIST = {
     "logcumsumexp": MPSSkipInfo(UNIMPLEMENTED),
     "logdet": MPSSkipInfo(UNIMPLEMENTED),
     "lu_solve": MPSSkipInfo(UNIMPLEMENTED),
-    "lu_unpack": MPSSkipInfo(UNIMPLEMENTED),
     "masked.median": MPSSkipInfo(UNIMPLEMENTED),
     "matrix_exp": MPSSkipInfo(UNIMPLEMENTED),
     "mode": MPSSkipInfo(UNIMPLEMENTED),
@@ -241,7 +240,6 @@ UNIMPLEMENTED_XFAILIST = {
     "special.ndtri": MPSSkipInfo(UNIMPLEMENTED),
     "special.scaled_modified_bessel_k0": MPSSkipInfo(UNIMPLEMENTED),
     "special.scaled_modified_bessel_k1": MPSSkipInfo(UNIMPLEMENTED),
-    "special.spherical_bessel_j0": MPSSkipInfo(UNIMPLEMENTED),
     "special.xlog1py": MPSSkipInfo(UNIMPLEMENTED),
     "special.zeta": MPSSkipInfo(
         UNIMPLEMENTED,
@@ -262,7 +260,6 @@ UNIMPLEMENTED_XFAILIST = {
     "unique": MPSSkipInfo(UNIMPLEMENTED),
     "vdot": MPSSkipInfo(UNIMPLEMENTED),
     "segment_reduce_": MPSSkipInfo(UNIMPLEMENTED),
-    "_upsample_bilinear2d_aa": MPSSkipInfo(UNIMPLEMENTED),
     "geometric": MPSSkipInfo(UNIMPLEMENTED),
     "geometric_": MPSSkipInfo(UNIMPLEMENTED),
     "log_normal_": MPSSkipInfo(UNIMPLEMENTED),
@@ -377,6 +374,7 @@ XFAILLIST_GRAD = {
         TEST_OUTPUT_GRAD_MATCH, dtypes=[torch.float16]
     ),
     # Unimplemented ops
+    "_upsample_bilinear2d_aa": MPSSkipInfo(TEST_OUTPUT_GRAD_MATCH),
     "linalg.det": MPSSkipInfo(TEST_OUTPUT_GRAD_MATCH),
     "linalg.solve": MPSSkipInfo(TEST_OUTPUT_GRAD_MATCH),
     "linalg.solve_ex": MPSSkipInfo(TEST_OUTPUT_GRAD_MATCH),
@@ -398,6 +396,7 @@ XFAILLIST_GRAD = {
     "special_modified_bessel_i0": MPSSkipInfo(
         TEST_OUTPUT_GRAD_MATCH, dtypes=[torch.float16, torch.float32]
     ),
+    "special.spherical_bessel_j0": MPSSkipInfo(TEST_OUTPUT_GRAD_MATCH),
     "scalar_tensor": MPSSkipInfo(
         TEST_OUTPUT_GRAD_MATCH, dtypes=[torch.float16, torch.float32]
     ),
@@ -446,14 +445,7 @@ XFAILLIST_GRAD = {
     "equal": MPSSkipInfo(TEST_OUTPUT_GRAD_MATCH, dtypes=[torch.float16, torch.float32]),
     # 'float' object is not iterable
     "item": MPSSkipInfo(TEST_OUTPUT_GRAD_MATCH, dtypes=[torch.float16, torch.float32]),
-    "linalg.lu_factor_ex": MPSSkipInfo(
-        TEST_OUTPUT_GRAD_MATCH,
-        dtypes=[torch.float32],  # missing `aten::lu_unpack`.
-    ),
-    "linalg.lu_factor": MPSSkipInfo(
-        TEST_OUTPUT_GRAD_MATCH,
-        dtypes=[torch.float32],  # missing `aten::lu_unpack`.
-    ),
+    "lu_unpack": MPSSkipInfo(TEST_OUTPUT_GRAD_MATCH),
     "lu": MPSSkipInfo(TEST_OUTPUT_GRAD_MATCH, dtypes=[torch.float32]),
     # "mse_backward_cpu_out" not implemented for 'Half'
     "nn.functional.mse_loss": MPSSkipInfo(
