@@ -430,3 +430,19 @@ if __name__ == "__main__":
     if args.repo:
         repo = args.repo
     print(f"repo: {repo}")
+
+    workflow_info = WorkflowInfo(
+        workflow_run_id=args.workflow_run_id,
+        run_attempt=args.workflow_run_attempt,
+        job_id=args.job_id,
+        workflow_name=args.workflow_name,
+        job_name=args.job_name,
+        repo=repo,
+    )
+
+    ud = UploadUtilizationData(
+        info=workflow_info,
+        dry_run=args.dry_run,
+        debug=args.debug,
+    )
+    ud.start()

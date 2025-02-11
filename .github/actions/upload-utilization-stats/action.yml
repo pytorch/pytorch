@@ -50,8 +50,8 @@ runs:
       run: |
         python3 -m tools.stats.upload_utilization_stats.upload_utilization_stats \
           --debug \
-          --workflow-run-id ${{inputs.workflow_run_id}} \
-          --workflow-name ${{inputs.workflow_name}} \
-          --workflow-run-attempt ${{inputs.workflow_attempt}} \
-          --job-id ${{inputs.job_id}} \
-          --job-name ${{inputs.job_name}} \
+          --workflow-run-id "${{inputs.workflow_run_id}}" \
+          --workflow-name "${{inputs.workflow_name}}" \
+          --workflow-run-attempt "${{inputs.workflow_attempt}}" \
+          --job-id "${{inputs.job_id}}" \
+          --job-name "${{inputs.job_name}}" \
