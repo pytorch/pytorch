@@ -359,6 +359,10 @@ UNIMPLEMENTED_XFAILIST = {
             torch.bfloat16,
         ],
     ),
+    "_upsample_bilinear2d_aa": MPSSkipInfo(
+        TEST_OUTPUT_MATCH,
+        dtypes=[torch.uint8],
+    ),
 }
 
 """Expected failures due to backwards pass issues"""
@@ -396,7 +400,6 @@ XFAILLIST_GRAD = {
     "special_modified_bessel_i0": MPSSkipInfo(
         TEST_OUTPUT_GRAD_MATCH, dtypes=[torch.float16, torch.float32]
     ),
-    "special.spherical_bessel_j0": MPSSkipInfo(TEST_OUTPUT_GRAD_MATCH),
     "scalar_tensor": MPSSkipInfo(
         TEST_OUTPUT_GRAD_MATCH, dtypes=[torch.float16, torch.float32]
     ),
@@ -445,8 +448,6 @@ XFAILLIST_GRAD = {
     "equal": MPSSkipInfo(TEST_OUTPUT_GRAD_MATCH, dtypes=[torch.float16, torch.float32]),
     # 'float' object is not iterable
     "item": MPSSkipInfo(TEST_OUTPUT_GRAD_MATCH, dtypes=[torch.float16, torch.float32]),
-    "lu_unpack": MPSSkipInfo(TEST_OUTPUT_GRAD_MATCH),
-    "lu": MPSSkipInfo(TEST_OUTPUT_GRAD_MATCH, dtypes=[torch.float32]),
     # "mse_backward_cpu_out" not implemented for 'Half'
     "nn.functional.mse_loss": MPSSkipInfo(
         TEST_OUTPUT_GRAD_MATCH, dtypes=[torch.float16]
@@ -579,6 +580,7 @@ COMPLEX_XFAILLIST = {
     "linalg.vector_norm": MPSSkipInfo(dtypes=COMPLEX_DTYPES),
     "logaddexp": MPSSkipInfo(dtypes=COMPLEX_DTYPES),
     "lu": MPSSkipInfo(dtypes=[torch.complex64]),
+    "lu_unpack": MPSSkipInfo(dtypes=[torch.complex64]),
     "masked.cumprod": MPSSkipInfo(dtypes=COMPLEX_DTYPES),
     "masked.cumsum": MPSSkipInfo(dtypes=COMPLEX_DTYPES),
     "masked.normalize": MPSSkipInfo(dtypes=COMPLEX_DTYPES),
