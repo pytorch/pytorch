@@ -1816,6 +1816,17 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
         fw_metadata: ViewAndMutationMeta,  # runtime metadata
         try_save_cache_entry: Optional[Callable],  # Save cache entry after compilation
     ):
+
+        # TODO: does not currently handle fwd and backward not in sync
+        # needs to use correct device idx
+        num_rng = fw_metadata.num_graphsafe_rng_states
+        fwd_rng_states = [
+            torch.cuda.default_generators[torch.cuda.current_device()].clone_state() for _ in range(num_rng)
+        ]
+        bwd_rng_states = [
+            torch.cuda.default_generators[torch.cuda.current_device()].clone_state() for _ in range(num_rng)
+        ]
+
         class CompiledFunction(torch.autograd.Function):
             compiled_fw = compiled_fw_func
             compiled_bw = compiled_bw_func
@@ -1837,6 +1848,9 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
                     bw_state = args[backward_state_indices[0]]
                     assert isinstance(bw_state, BackwardState)
                     ctx._compiled_autograd_backward_state = bw_state
+
+                if num_rng:
+                    args = (*args, *fwd_rng_states)
 
                 # There is a pretty complicated calling convention around what the compiled fw returns.
                 # The full list of outputs and their relative order is:
@@ -1964,6 +1978,9 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
                     CompiledFunction.maybe_subclass_metadata,
                     *flat_args,
                 )
+
+                if num_rng:
+                    all_args.extend(bwd_rng_states)
 
                 def impl_fn(double_ctx=None):
                     out = CompiledFunction._backward_impl(ctx, all_args)

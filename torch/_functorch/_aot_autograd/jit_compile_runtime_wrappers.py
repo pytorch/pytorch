@@ -448,9 +448,16 @@ def aot_dispatch_autograd(
             fake_mode = detect_fake_mode()
             if fake_mode is not None and fake_mode.shape_env is not None:
                 tensorify_python_scalars(fx_g, fake_mode.shape_env, fake_mode)
+
             fw_module, bw_module = aot_config.partition_fn(
                 fx_g, joint_inputs, num_fwd_outputs=num_inner_fwd_outputs
             )
+            num_rng_states = sum(
+                1
+                for n in fw_module.graph.find_nodes(op="placeholder")
+                if "fwd_rng_state" in n.name
+            )
+            fw_metadata.num_graphsafe_rng_states = num_rng_states
 
             # See Note [Side-Effectful Tokens in AOTAutograd]
             if config.unlift_effect_tokens and (
@@ -666,6 +673,14 @@ def aot_dispatch_autograd(
             functionalized_rng_wrapper = FunctionalizedRngRuntimeWrapper(
                 return_new_outs=False
             )
+
+            # TODO - no "Fake Generator"
+            rng_states = [
+                torch.cuda.default_generators[0].clone_state()
+                for _ in range(fw_metadata.num_graphsafe_rng_states)
+            ]
+            adjusted_flat_args.extend(rng_states)  # type: ignore[arg-type]
+
             (
                 fw_module,
                 adjusted_flat_args,
