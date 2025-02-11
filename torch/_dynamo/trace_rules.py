@@ -3337,6 +3337,7 @@ MOD_SKIPLIST = [
     "torch._meta_registrations",
     "torch._namedtensor_internals",
     "torch._numpy",
+    "torch._ops",
     "torch._prims_common",
     "torch._python_dispatcher",
     "torch._refs",
