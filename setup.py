@@ -488,7 +488,10 @@ def check_nccl():
         nccl_path = os.path.join(third_party_path, "nccl", "nccl")
         report("-- Overriding nccl for CUDA 11.8 ")
         subprocess.check_call(
-            ["git", "pull"], cwd=nccl_path
+            ["ls", "-las"], cwd=nccl_path
+        )
+        subprocess.check_call(
+            ["git", "fetch", "origin"], cwd=nccl_path
         )
         subprocess.check_call(
             ["git", "checkout", "v2.21.5-1"], cwd=nccl_path

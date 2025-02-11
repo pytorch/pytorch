@@ -43,7 +43,7 @@ ADD ./common/install_mkl.sh install_mkl.sh
 RUN bash ./install_mkl.sh && rm install_mkl.sh
 
 FROM base as magma
-ARG BASE_CUDA_VERSION=10.2
+ARG BASE_CUDA_VERSION=11.8
 # Install magma
 ADD ./common/install_magma.sh install_magma.sh
 RUN bash ./install_magma.sh ${BASE_CUDA_VERSION} && rm install_magma.sh
