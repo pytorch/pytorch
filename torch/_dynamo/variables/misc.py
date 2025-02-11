@@ -250,7 +250,7 @@ class ExceptionVariable(VariableTracker):
         self.__context__ = context
 
     def reconstruct(self, codegen):
-        if self.__context__:
+        if type(self.__context__) is not ConstantVariable:
             unimplemented("ExceptionVariable with __context__")
         codegen.add_push_null(
             lambda: codegen.load_import_from("builtins", self.exc_type.__name__)
@@ -325,6 +325,9 @@ class UserDefinedExceptionClassVariable(ExceptionVariable):
 
     def call_function(self, tx, args, kwargs):
         return UserDefinedExceptionClassVariable(self.exc_type, args, **kwargs)
+
+    def reconstruct(self, codegen):
+        unimplemented("UserDefinedExceptionClass reconstruct")
 
 
 class UnknownVariable(VariableTracker):
