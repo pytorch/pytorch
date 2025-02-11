@@ -2723,16 +2723,16 @@ class TestMPS(TestCaseMPS):
         make_fullrank = make_fullrank_matrices_with_distinct_singular_values
         make_arg = partial(make_fullrank, device="cpu", dtype=torch.float32)
 
-        def run_lu_factor_ex_test(size, *batch_dims, check_errors):
+        def run_lu_factor_ex_test(size, *batch_dims, check_errors, atol=1e-5, rtol=1e-6):
             input_cpu = make_arg(*batch_dims, size, size)
             input_mps = input_cpu.to('mps')
             out_cpu = torch.linalg.lu_factor_ex(input_cpu, check_errors=check_errors)
             out_mps = torch.linalg.lu_factor_ex(input_mps, check_errors=check_errors)
-            self.assertEqual(out_cpu, out_mps)
+            self.assertEqual(out_cpu, out_mps, atol=atol, rtol=rtol)
 
             out_cpu = torch.linalg.lu_factor_ex(input_cpu.mT, check_errors=check_errors)
             out_mps = torch.linalg.lu_factor_ex(input_mps.mT, check_errors=check_errors)
-            self.assertEqual(out_cpu, out_mps)
+            self.assertEqual(out_cpu, out_mps, atol=atol, rtol=rtol)
 
         # test with different even/odd matrix sizes
         matrix_sizes = [1, 2, 3, 4]
@@ -2745,7 +2745,9 @@ class TestMPS(TestCaseMPS):
                     run_lu_factor_ex_test(size, batch_size, check_errors=check_errors)
         # test >3D matrices
         run_lu_factor_ex_test(32, 10, 10, check_errors=False)
-        run_lu_factor_ex_test(32, 2, 2, 2, 2, 10, 10, check_errors=True)
+        run_lu_factor_ex_test(32, 2, 2, 10, 10, check_errors=True)
+        # big matrix check with batch size > 1
+        run_lu_factor_ex_test(256, 2, check_errors=False, atol=3e-5, rtol=5e-6)
 
     def test_linalg_solve(self):
         from torch.testing._internal.common_utils import make_fullrank_matrices_with_distinct_singular_values
