@@ -1,6 +1,6 @@
 # mypy: allow-untyped-defs
 import random
-from typing import Any, List
+from typing import Any
 
 from torch.utils.data.datapipes._decorator import functional_datapipe
 from torch.utils.data.datapipes.dataframe import dataframe_wrapper as df_wrapper
@@ -64,7 +64,7 @@ class ShuffleDataFramesPipe(DFIterDataPipe):
 
     def __iter__(self):
         size = None
-        all_buffer: List[Any] = []
+        all_buffer: list[Any] = []
         for df in self.source_datapipe:
             if size is None:
                 size = df_wrapper.get_len(df)

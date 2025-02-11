@@ -620,11 +620,7 @@ Tensor _conj_physical(const Tensor& self) {
   if (self.is_conj()) {
     return self.conj().clone();
   }
-  auto options = self.options();
-  if (c10::isIntegralType(self.scalar_type(), /*includeBool=*/true)) {
-    options = options.dtype(c10::get_default_dtype());
-  }
-  auto result = at::empty_like(self, options);
+  auto result = at::empty_like(self);
   return at::conj_physical_out(result, self);
 }
 

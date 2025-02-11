@@ -1,7 +1,6 @@
 # mypy: allow-untyped-defs
-from numbers import Number
-
 import torch
+from torch import Tensor
 from torch.distributions import constraints
 from torch.distributions.distribution import Distribution
 from torch.distributions.transformed_distribution import TransformedDistribution
@@ -13,7 +12,7 @@ from torch.distributions.utils import (
     logits_to_probs,
     probs_to_logits,
 )
-from torch.types import _size
+from torch.types import _Number, _size
 
 
 __all__ = ["LogitRelaxedBernoulli", "RelaxedBernoulli"]
@@ -48,10 +47,10 @@ class LogitRelaxedBernoulli(Distribution):
                 "Either `probs` or `logits` must be specified, but not both."
             )
         if probs is not None:
-            is_scalar = isinstance(probs, Number)
+            is_scalar = isinstance(probs, _Number)
             (self.probs,) = broadcast_all(probs)
         else:
-            is_scalar = isinstance(logits, Number)
+            is_scalar = isinstance(logits, _Number)
             (self.logits,) = broadcast_all(logits)
         self._param = self.probs if probs is not None else self.logits
         if is_scalar:
@@ -78,18 +77,18 @@ class LogitRelaxedBernoulli(Distribution):
         return self._param.new(*args, **kwargs)
 
     @lazy_property
-    def logits(self):
+    def logits(self) -> Tensor:
         return probs_to_logits(self.probs, is_binary=True)
 
     @lazy_property
-    def probs(self):
+    def probs(self) -> Tensor:
         return logits_to_probs(self.logits, is_binary=True)
 
     @property
-    def param_shape(self):
+    def param_shape(self) -> torch.Size:
         return self._param.size()
 
-    def rsample(self, sample_shape: _size = torch.Size()) -> torch.Tensor:
+    def rsample(self, sample_shape: _size = torch.Size()) -> Tensor:
         shape = self._extended_shape(sample_shape)
         probs = clamp_probs(self.probs.expand(shape))
         uniforms = clamp_probs(
@@ -140,13 +139,13 @@ class RelaxedBernoulli(TransformedDistribution):
         return super().expand(batch_shape, _instance=new)
 
     @property
-    def temperature(self):
+    def temperature(self) -> Tensor:
         return self.base_dist.temperature
 
     @property
-    def logits(self):
+    def logits(self) -> Tensor:
         return self.base_dist.logits
 
     @property
-    def probs(self):
+    def probs(self) -> Tensor:
         return self.base_dist.probs

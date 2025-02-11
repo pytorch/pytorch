@@ -1,7 +1,6 @@
 #include <ATen/ATen.h>
 #include <ATen/xpu/XPUContext.h>
 #include <ATen/xpu/XPUGeneratorImpl.h>
-#include <c10/util/CallOnce.h>
 #include <c10/xpu/XPUCachingAllocator.h>
 #include <c10/xpu/XPUFunctions.h>
 #include <torch/csrc/Module.h>
@@ -32,8 +31,8 @@ static void forked_child() {
 // has some working functions (e.g. device_count) but cannot fully initialize.
 static void poison_fork() {
 #ifndef WIN32
-  static c10::once_flag flag;
-  c10::call_once(flag, [] { pthread_atfork(nullptr, nullptr, forked_child); });
+  static auto result [[maybe_unused]] =
+      pthread_atfork(nullptr, nullptr, forked_child);
 #endif
 }
 

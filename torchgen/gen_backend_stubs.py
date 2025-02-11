@@ -499,6 +499,7 @@ TORCH_API void Register${backend_name}${dispatch_key}NativeFunctions() {
             "dispatch_headers": dest.gen_registration_headers(
                 backend_index, per_operator_headers=per_operator_headers, rocm=False
             ),
+            "dispatch_helpers": dest.gen_registration_helpers(backend_index),
             "dispatch_definitions": fm.substitute_with_template(
                 "RegisterDispatchDefinitions.ini",
                 lambda: {
@@ -506,7 +507,6 @@ TORCH_API void Register${backend_name}${dispatch_key}NativeFunctions() {
                     "ns_epilogue": ns_helper.epilogue,
                     "static_init_dispatch_registrations": static_init_dispatch_registrations,
                     "deferred_dispatch_registrations": deferred_dispatch_registrations,
-                    "dispatch_helpers": dest.gen_registration_helpers(backend_index),
                     "dispatch_namespace": dispatch_key.lower(),
                     "dispatch_namespaced_definitions": "",
                     "dispatch_anonymous_definitions": list(
