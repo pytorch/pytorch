@@ -483,7 +483,6 @@ class TestEmbeddingNNDeviceType(NNTestCase):
     # padding indices to fill in the gaps indicated by the offset array
 
     @skipIfTorchDynamo("see https://github.com/pytorch/pytorch/pull/95621")
-
     @dtypes(torch.float32, torch.float64)
     @dtypesIfCUDA(torch.half, torch.bfloat16)
     def test_embedding_bag_1D_padding_idx(self, device, dtype):
@@ -1581,7 +1580,7 @@ class TestEmbeddingNNDeviceType(NNTestCase):
             )
         self.assertEqual(output_non_contig, output_contig)
 
-  # currently fails on XLA
+    # currently fails on XLA
     @dtypes(*itertools.product((torch.int, torch.long), (torch.int, torch.long)))
     def test_embedding_bag_bfloat16(self, device, dtypes):
         with set_default_dtype(torch.double):
@@ -1604,7 +1603,7 @@ class TestEmbeddingNNDeviceType(NNTestCase):
                 test_backward=True,
             )
 
-  # currently fails on XLA
+    # currently fails on XLA
     @dtypes(*itertools.product((torch.int, torch.long), (torch.int, torch.long)))
     def test_embedding_bag_half(self, device, dtypes):
         self._test_EmbeddingBag(
