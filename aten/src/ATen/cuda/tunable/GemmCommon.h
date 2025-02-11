@@ -102,7 +102,7 @@ inline const char* TypeName(c10::complex<float> v) {
 
 // Convert opmath_type<T> to string
 template <typename T>
-std::string to_string_opmath(const at::opmath_type<T>& value) {
+inline std::string to_string_opmath(const at::opmath_type<T>& value) {
     if constexpr (std::is_same_v<at::opmath_type<T>, c10::complex<float>> ||
                   std::is_same_v<at::opmath_type<T>, c10::complex<double>>) {
         return fmt::format("({:.4f}, {:.4f})", value.real(), value.imag());
