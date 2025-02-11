@@ -74,12 +74,12 @@ struct IsVecType<at::vec::VectorizedN<T, 2>>: std::true_type {};
 #endif
 
 template <typename T>
-struct WeightRecp {
+struct WelfordHelper {
   static std::vector<typename T::value_type> weight_recps;
   std::vector<Welford<T>> welford_stk;
   uint64_t depth;
-  WeightRecp() {}
-  WeightRecp(uint64_t N) {
+  WelfordHelper() {}
+  WelfordHelper(uint64_t N) {
     uint64_t m = (N + kChunkSize - 1) / kChunkSize; //div up
     depth = m > 0 ? ceil(log2(m)) : 0;
     welford_stk.assign(depth, Welford<T>());
@@ -87,7 +87,7 @@ struct WeightRecp {
 };
 
 template<typename T>
-std::vector<typename T::value_type> WeightRecp<T>::weight_recps = []() {
+std::vector<typename T::value_type> WelfordHelper<T>::weight_recps = []() {
   using scalar_t = typename T::value_type;
   std::vector<scalar_t> temp(kChunkSize);
   for (const auto i : c10::irange(kChunkSize)) {
@@ -126,7 +126,7 @@ Welford<T> welford_combine(const Welford<T>& a, const Welford<T>& b, bool use_in
 }
 
 template <typename T>
-Welford<T> welford_combine(Welford<T>& a, Welford<T>& b, WeightRecp<T>* w1, WeightRecp<T>* w2) {
+Welford<T> welford_combine(Welford<T>& a, Welford<T>& b, WelfordHelper<T>* w1, WelfordHelper<T>* w2) {
   for (const auto i : c10::irange(w1->depth)) {
     a = welford_combine(a, w1->welford_stk[i]);
   }
@@ -137,7 +137,8 @@ Welford<T> welford_combine(Welford<T>& a, Welford<T>& b, WeightRecp<T>* w1, Weig
 }
 
 template <typename T>
-Welford<T> welford_combine(Welford<T>& acc, T& data, WeightRecp<T>* w=nullptr) {
+Welford<T> welford_combine(Welford<T>& acc, T& data, WelfordHelper<T>* w=nullptr) {
+  // Combine Welford algorithm with cascade sum to improve numerical stability.
   if constexpr (IsVecType<T>::value) {
     if (w != nullptr && acc.index == kChunkSize) {
       w->welford_stk[0] = welford_combine(w->welford_stk[0], acc);
@@ -188,7 +189,7 @@ struct IndexValue {
 
 #if INDUCTOR_USE_VECTOR_TYPES()
 template <typename T>
-Welford<T> welford_combine(Welford<T>& acc, T& data, int64_t tail_size, WeightRecp<T>* w=nullptr) {
+Welford<T> welford_combine(Welford<T>& acc, T& data, int64_t tail_size, WelfordHelper<T>* w=nullptr) {
   auto out = welford_combine(acc, data, w);
   return Welford<T>{
     T::set(acc.mean, out.mean, tail_size),
@@ -531,7 +532,7 @@ inline at::vec::Vectorized<float> vec_shuffle_down(at::vec::Vectorized<float> x,
 #endif
 
 template <typename scalar_t>
-Welford<scalar_t> welford_vec_reduce_all(Welford<at::vec::Vectorized<scalar_t>> acc, WeightRecp<at::vec::Vectorized<scalar_t>>* w=nullptr, int num_threads=1) {
+Welford<scalar_t> welford_vec_reduce_all(Welford<at::vec::Vectorized<scalar_t>> acc, WelfordHelper<at::vec::Vectorized<scalar_t>>* w=nullptr, int num_threads=1) {
   if (w != nullptr) {
     for (const auto n : c10::irange(num_threads)) {
       for (const auto i : c10::irange(w->depth)) {
@@ -574,7 +575,7 @@ Welford<scalar_t> welford_vec_reduce_all(Welford<at::vec::Vectorized<scalar_t>> 
 }
 
 template <typename scalar_t>
-Welford<scalar_t> welford_vec_reduce_all(Welford<at::vec::VectorizedN<scalar_t, 2>> acc, WeightRecp<at::vec::VectorizedN<scalar_t, 2>>* w=nullptr, int num_threads=1) {
+Welford<scalar_t> welford_vec_reduce_all(Welford<at::vec::VectorizedN<scalar_t, 2>> acc, WelfordHelper<at::vec::VectorizedN<scalar_t, 2>>* w=nullptr, int num_threads=1) {
   if (w != nullptr) {
     for (const auto n : c10::irange(num_threads)) {
       for (const auto i : c10::irange(w->depth)) {
