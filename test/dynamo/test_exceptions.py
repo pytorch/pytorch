@@ -18,6 +18,12 @@ class CustomException(Exception):
     ...
 
 
+class CustomExceptionWithArgs(Exception):
+    def __init__(self, a, b=None):
+        self.a = a
+        self.b = b
+
+
 class ExceptionTests(torch._dynamo.test_case.TestCase):
     def test_exception(self):
         def fn(x):
@@ -520,16 +526,38 @@ class ExceptionTests(torch._dynamo.test_case.TestCase):
         x = torch.randn(4)
         self.assertEqual(fn(x), opt_fn(x))
 
-    @make_dynamo_test
     def test_user_defined_exception_variable(self):
-        z = 0
-        try:
-            raise CustomException
-        except ValueError:
-            z = 1
-        except CustomException:
-            z = 2
-        self.assertEqual(z, 2)
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(t):
+            z = 0
+            try:
+                raise CustomException
+            except ValueError:
+                z = 1
+            except CustomException:
+                z = 2
+            assert z == 2
+            return t.sin()
+
+        t = torch.randn(2)
+        fn(t)
+
+    def test_user_defined_exception_with_args(self):
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(t):
+            z = 0
+            try:
+                raise CustomExceptionWithArgs(2, b=3)
+            except ValueError:
+                z = 1
+            except CustomExceptionWithArgs:
+                z = 2
+            assert z == 2
+
+        t = torch.randn(2)
+        fn(t)
 
     @make_dynamo_test
     def test_raise_set___context__(self):

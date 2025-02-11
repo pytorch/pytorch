@@ -21,7 +21,14 @@ from .bytecode_transformation import (
 from .codegen import PyCodegen
 from .exc import SideEffectsError, unimplemented
 from .source import GlobalSource, LocalCellSource, LocalSource, Source
-from .utils import dict_new, is_frozen_dataclass, nn_module_new, object_new, tuple_new
+from .utils import (
+    dict_new,
+    exception_new,
+    is_frozen_dataclass,
+    nn_module_new,
+    object_new,
+    tuple_new,
+)
 from .variables.base import (
     AttributeMutation,
     AttributeMutationExisting,
@@ -214,6 +221,7 @@ class SideEffects:
             dict.__getattribute__,
             int.__getattribute__,
             str.__getattribute__,
+            BaseException.__getattribute__,
         )
 
     def is_attribute_mutation(self, item):
@@ -288,6 +296,8 @@ class SideEffects:
             obj = dict_new(user_cls)
         elif issubclass(user_cls, tuple):
             obj = tuple_new(user_cls)
+        elif issubclass(user_cls, Exception):
+            obj = exception_new(user_cls)
         else:
             try:
                 obj = object_new(user_cls)
@@ -326,6 +336,8 @@ class SideEffects:
             variable_cls = variables.MutableMappingVariable
         elif is_frozen_dataclass(user_cls):
             variable_cls = FrozenDataClassVariable
+        elif issubclass(user_cls, BaseException):
+            variable_cls = variables.UserDefinedExceptionObjectVariable
         else:
             variable_cls = variables.UserDefinedObjectVariable
 
