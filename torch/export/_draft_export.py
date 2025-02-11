@@ -145,7 +145,7 @@ class FailureReport:
 
 
 class DraftExportReport:
-    def __init__(self, failures: list[FailureReport], str_to_filename: dict[int, str]):
+    def __init__(self, failures: list[FailureReport], str_to_filename: dict[str, str]):
         self.failures: list[FailureReport] = failures
         self.str_to_filename = str_to_filename
 
@@ -331,7 +331,7 @@ def draft_export(
         failures: list[FailureReport] = []
         custom_ops_logs: dict[
             Any, tuple[dict[str, Any], FailureType]
-        ] = {}  # Dedup custom ops
+        ] = {}  # For adding in assertions before custom ops
 
         for log_name, log_contents in capture_structured_log.log_record.logs:
             failure_type = None
@@ -364,12 +364,14 @@ def draft_export(
             elif log_name == "missing_fake_kernel":
                 failure_type = FailureType.MISSING_FAKE_KERNEL
                 custom_ops_logs[log_contents["op"]] = (log_contents, failure_type)
+
             elif log_name == "mismatched_fake_kernel":
                 failure_type = FailureType.MISMATCHED_FAKE_KERNEL
                 custom_ops_logs[(log_contents["op"], log_contents["reason"])] = (
                     log_contents,
                     failure_type,
                 )
+
             else:
                 continue
 
