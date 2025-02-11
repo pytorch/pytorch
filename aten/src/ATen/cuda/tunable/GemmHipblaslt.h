@@ -485,6 +485,25 @@ class HipblasltGemmOp : public Callable<ParamsT> {
           // swapped
           matmul.setAttribute(HIPBLASLT_MATMUL_DESC_A_SCALE_POINTER_VEC_EXT, mat2_scale_ptr);
           matmul.setAttribute(HIPBLASLT_MATMUL_DESC_B_SCALE_POINTER_VEC_EXT, mat1_scale_ptr);
+          
+#if ROCM_VERSION >= 60500
+          // Query device properties
+          hipDeviceProp_t prop;
+          TORCH_CHECK(hipSuccess == hipGetDeviceProperties(&prop, at::cuda::current_device()));
+          // Check if device is gfx950
+          if (std::string(prop.gcnArchName) == "gfx950") {
+            // MX-format : Set Scale block sizes for matrix A and B (only available on gfx950 with ROCm 6.5+)
+            int32_t a_block_rows = params->m;
+            int32_t a_block_cols = 1;
+            int32_t b_block_rows = params->k;
+            int32_t b_block_cols = 1;
+            
+            matmul.setAttribute(HIPBLASLT_MATMUL_DESC_A_SCALE_BLOCK_SIZE_ROWS_VEC_EXT, a_block_rows);
+            matmul.setAttribute(HIPBLASLT_MATMUL_DESC_A_SCALE_BLOCK_SIZE_COLS_VEC_EXT, a_block_cols);
+            matmul.setAttribute(HIPBLASLT_MATMUL_DESC_B_SCALE_BLOCK_SIZE_ROWS_VEC_EXT, b_block_rows);
+            matmul.setAttribute(HIPBLASLT_MATMUL_DESC_B_SCALE_BLOCK_SIZE_COLS_VEC_EXT, b_block_cols);
+          }
+#endif
         }
         else
 #endif
