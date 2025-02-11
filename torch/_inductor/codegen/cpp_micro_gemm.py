@@ -554,6 +554,12 @@ inline void {{kernel_name}}_interleave2_256(
     {{input2_t}}* output0,
     {{input2_t}}* output1
 ) {
+    // Inputs rows:
+    // a0, a1, ..., a15
+    // b0, b1, ..., b15
+    // Output rows:
+    // a0, b0, a1, b1, ..., a7, b7
+    // a8, b8, a9, b9, ..., a15, b15
     auto row0 = _mm256_loadu_epi16(input0);
     auto row1 = _mm256_loadu_epi16(input1);
     auto tmp0 = _mm256_unpacklo_epi16(row0, row1);
@@ -571,6 +577,12 @@ inline void {{kernel_name}}_interleave2_512(
     {{input2_t}}* output0,
     {{input2_t}}* output1
 ) {
+    // Inputs rows:
+    // a0, a1, ..., a31
+    // b0, b1, ..., b31
+    // Output rows:
+    // a0, b0, a1, b1, ..., a15, b15
+    // a16, b16, a16, b16, ..., a31, b31
     auto row0 = _mm512_loadu_epi16(input0);
     auto row1 = _mm512_loadu_epi16(input1);
     auto idx1 = _mm512_set_epi16( 47, 15, 46, 14, 45, 13, 44, 12, 43, 11, 42,
@@ -594,6 +606,16 @@ inline void {{kernel_name}}_interleave2_48with256(
     {{input2_t}}* output0,
     {{input2_t}}* output1
 ) {
+    // Use 256-bit interleave kernels, rather than 512+256, since 256-bit chunks of inputs
+    // and outputs need to be moved to different rows.
+    // For example, the first 16 elements of rows input0 and input1 end up on the same row output0
+    // The next 16 elements are placed on different rows in output0 and output1.
+    // Inputs rows:
+    // a0, a1, ..., a15 | b0, b1, ..., b15 | c0, c1, ..., c15
+    // d0, d1, ..., d15 | e0, e1, ..., e15 | f0, f1, ..., f15
+    // Output rows:
+    // a0, d0, a1, d1, ..., a15, d15 | b0, e0, b1, e1, ..., b7, e7
+    // b8, e8, b9, e9, ..., b15, e15 | c0, f0, c1, f1, ..., c15, f15
     {{kernel_name}}_interleave2_256(input0, input1, output0, output0 + 16);
     {{kernel_name}}_interleave2_256(input0 + 16, input1 + 16, output0 + 32, output1);
     {{kernel_name}}_interleave2_256(input0 + 32, input1 + 32, output1 + 16, output1 + 32);
@@ -636,7 +658,8 @@ inline void {{kernel_name}}_interleave2_48with256(
                 packed_B_buf + (i + 1) * {{block_n}});
             {%- endif %}
         {%- elif vnni_size == 4 %}
-        // TODO: Support vnni_size == 4
+        // TODO: Support vnni_size == 4 to support non-constant GEMM inputs
+        // BMM never uses 8-bit inputs since no quantized kernels are supported
         {%- endif %}
         }
     };
@@ -660,11 +683,7 @@ inline void {{kernel_name}}_interleave2_48with256(
 
     auto load_dequantized_B = [&](int base_idx) {
         // Load a tile of B & cache it in L1D.
-    {%- if pack_vnni_B_locally %}
         {{input2_t}}* base_addr = const_cast<{{input2_t}}*>(B) + base_idx;
-    {%- else %}
-        {{input2_t}}* base_addr = const_cast<{{input2_t}}*>(packed_B_buf) + base_idx;
-    {%- endif %}
         for (int idx_dq = 0, idx_q = 0; idx_dq < buf_size; idx_q += ldb, idx_dq += {{block_n}}) {
         {%- for vec_idx in range(0, block_n - 1, 32) %}
             auto b_int8 = at::vec::Vectorized<int8_t>::loadu(
@@ -697,9 +716,9 @@ inline void {{kernel_name}}_interleave2_48with256(
     // TODO(jgong5): loop unroll for M and N
     for (int64_t n = 0; n < N; n += {{block_n}}) {
 {%- if pack_vnni_B_locally %}
+        // Pack non-constant weights into VNNI interleaved format in packed_B_buf
         pack_vnni_B(n);
-{%- endif %}
-{%- if use_cached_dequantized_B %}
+{%- elif use_cached_dequantized_B %}
         // Dequantize K * block_n int8 B elements into BF16
         load_dequantized_B(n);
 {%- endif %}

@@ -11,6 +11,7 @@ from ..select_algorithm import PartialRender
 from ..virtualized import V
 from .common import ArgName
 from .cpp_gemm_template import CppGemmTemplate, GEMM_TEMPLATE
+from .cpp_micro_gemm import LayoutType
 from .cpp_template_kernel import CppTemplateKernel
 from .cpp_utils import DTYPE_TO_CPP, GemmBlocking
 
@@ -130,7 +131,10 @@ class CppBmmTemplate(CppGemmTemplate):
         result = (
             not W.get_layout().is_contiguous()
             or W.get_name() in V.graph.constants
-            or n % micro_gemm.register_blocking.block_n != 0
+            or (
+                n % micro_gemm.register_blocking.block_n != 0
+                and micro_gemm.get_b_layout != LayoutType.NORMAL
+            )
         )
         return result
 
