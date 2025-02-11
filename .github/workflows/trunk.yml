@@ -126,7 +126,6 @@ jobs:
     secrets: inherit
 
   win-arm64-vs2022-cpu-py3-build:
-    if: github.event_name == 'pull_request'
     permissions:
       id-token: write
       contents: read
