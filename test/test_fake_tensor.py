@@ -2077,6 +2077,13 @@ class FakeTensorDispatchCache(TestCase):
             self.assertTrue(isinstance(t, FakeTensor))
             self.assertEqual(t.device, torch.device('cpu'))
 
+    def test_meta_tensor_to_fake_cpu(self):
+        x = torch.randn(4, 4, device='meta')
+        with FakeTensorMode(allow_non_fake_inputs=True):
+            x_cpu = x.to(device='cpu')
+        self.assertTrue(isinstance(x_cpu, FakeTensor))
+        self.assertEqual(x_cpu.device, torch.device('cpu'))
+
     def test_cache_tuple_outputs(self):
         """
         Test to check that ops with tuple outputs work.
