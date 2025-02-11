@@ -157,14 +157,23 @@ def allow_in_graph(fn):
 
 def mark_traceable(fn):
     """
-    TODO doc
-    1. input constraints
-    2. output constraints
-    3. function semantics constraints
+    Like `allow_in_graph`, but with the following enhancements/differences:
+
+    1. Supports user-defined class as inputs, as long as the class has been
+       registered with pytree.
+    2. In the resulting Dynamo graph, the call to a `mark_traceable`-ed function
+       will be represented as a call to `torch._higher_order_ops.flat_apply`,
+       which takes in the `mark_traceable`-ed function and pytree-flattened
+       inputs.
+
+    NOTE: like `allow_in_graph`, aliasing information is neither preserved
+    between inputs themselves, nor between inputs and outputs (when backend like
+    `aot_autograd` traces through the `flat_apply` op).
     """
     assert callable(fn), "mark_traceable expects a callable"
-    if trace_rules.lookup_callable(fn) != variables.TorchInGraphFunctionVariable:
+    if id(fn) not in trace_rules._mark_traceable_callable_ids:
         trace_rules._disallowed_callable_ids.remove(id(fn))
+        trace_rules._allowed_callable_ids.add(id(fn))
         trace_rules._mark_traceable_callable_ids.add(id(fn))
     return fn
 
