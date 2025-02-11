@@ -28,7 +28,6 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
 import argparse
 import copy
 import dataclasses
-import datetime
 import os
 import signal
 import threading
@@ -40,6 +39,7 @@ import psutil  # type: ignore[import]
 
 from tools.stats.utilization_stats_lib import (
     getDataModelVersion,
+    getTsNow,
     GpuUsage,
     RecordData,
     UtilizationMetadata,
@@ -190,6 +190,7 @@ class UsageLogger:
             job_name=_job_name,
             workflow_id=_workflow_run_id,
             workflow_name=_workflow_name,
+            start_at=getTsNow(),
         )
         self._data_collect_interval = data_collect_interval
         self._has_pynvml = pynvml_enabled
@@ -252,12 +253,16 @@ class UsageLogger:
         """
         output the data.
         """
-        self._metadata.start_at = datetime.datetime.now().timestamp()
+        self._metadata.start_at = getTsNow()
         self.log_json(self._metadata.to_json())
 
         while not self.exit_event.is_set():
             collecting_start_time = time.time()
-            stats = UtilizationRecord()
+            stats = UtilizationRecord(
+                level="record",
+                timestamp=getTsNow(),
+            )
+
             try:
                 data_list, error_list = self.shared_resource.get_and_reset()
                 if self._debug_mode:
@@ -275,8 +280,6 @@ class UsageLogger:
                 if not data_list:
                     # pass since no data is collected
                     continue
-                stats.level = "record"
-                stats.timestamp = datetime.datetime.now().timestamp()
 
                 cpu_stats = self._generate_stats(
                     [data.cpu_percent for data in data_list]
@@ -303,7 +306,7 @@ class UsageLogger:
             except Exception as e:
                 stats = UtilizationRecord(
                     level="record",
-                    timestamp=datetime.datetime.now().timestamp(),
+                    timestamp=getTsNow(),
                     error=str(e),
                 )
             finally:
