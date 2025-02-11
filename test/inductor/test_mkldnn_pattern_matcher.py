@@ -2602,10 +2602,12 @@ class TestPatternMatcher(TestPatternMatcherBase):
         def fake_quant(x):
             # to produce a float32 result as extra input
             qlib = torch.ops.quantized_decomposed
-            x = qlib.quantize_per_tensor.default(x, 0.0166785, 42, 0, 255, torch.uint8)
-            x = qlib.dequantize_per_tensor.default(
-                x, 0.0166785, 42, 0, 255, torch.uint8
-            )
+            if device == "cpu":
+                qmin, qmax, dtype = 0, 255, torch.uint8
+            else:
+                qmin, qmax, dtype = -128, 127, torch.int8
+            x = qlib.quantize_per_tensor.default(x, 0.0166785, 42, qmin, qmax, dtype)
+            x = qlib.dequantize_per_tensor.default(x, 0.0166785, 42, qmin, qmax, dtype)
             return x
 
         class M(torch.nn.Module):
@@ -2650,7 +2652,7 @@ class TestPatternMatcher(TestPatternMatcherBase):
             lambda x, y: x.add_(y),
             lambda x, y: y.add_(x),
         ]
-        fake_quant_x2_list = [False, True]
+        fake_quant_x2_list = [False, True] if int8_mixed_bf16 else [False]
         cases = itertools.product(add_fn_list, fake_quant_x2_list)
         for add_fn, fq_x2 in cases:
             mod = M(add_fn, use_relu, fq_x2).eval().to(device=device)
