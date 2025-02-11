@@ -6,7 +6,6 @@ import unittest
 from typing import Any, Callable, Optional, Union
 
 import torch
-import torch.utils._pytree as pytree
 from torch._inductor import config
 from torch._inductor.runtime.hints import TRITON_MAX_BLOCK
 from torch._inductor.runtime.runtime_utils import is_power_of_2
@@ -18,6 +17,7 @@ from torch.testing._internal.common_utils import (
     subtest,
 )
 from torch.testing._internal.inductor_utils import (
+    allclose_many,
     GPU_TYPE,
     HAS_GPU,
     skip_windows_ci,
@@ -62,19 +62,13 @@ def run_and_compare(
     if config_patches is None:
         config_patches = {}
 
-    def flatten_tensors(tensors):
-        flat, spec = pytree.tree_flatten(tensors)
-        return flat
-
     with config.patch(config_patches):
         compiled = torch.compile(func, backend="inductor", **compile_kwargs)
         result, code = run_and_get_code(compiled, *args)
 
     # Check numerical accuracy
-    ref_tensors = flatten_tensors(func(*args))
-    actual_tensors = flatten_tensors(result)
-    for ref, actual in zip(ref_tensors, actual_tensors):
-        self.assertTrue(torch.allclose(ref, actual))
+    ref = func(*args)
+    allclose_many(self, ref, result)
 
     def count_code(substr: str, expected: Optional[int]):
         count = sum(prog.count(substr) for prog in code)

@@ -1,5 +1,6 @@
 # mypy: allow-untyped-defs
 import dataclasses
+import operator
 import random
 import textwrap
 import types
@@ -42,6 +43,7 @@ from .wrapper import (
     Line,
     MemoryPlanningLine,
     MemoryPlanningState,
+    MultiOutputLine,
     NullLine,
     OutputLine,
     PythonWrapperCodegen,
@@ -78,7 +80,7 @@ class WrapperIRLine(MemoryPlanningLine):
 @dataclasses.dataclass
 class ExternKernelLine(WrapperIRLine):
     kernel: str
-    out: str
+    result: Optional[str]
     args: tuple[Any, ...]
     kwargs: dict[Any, Any]
 
@@ -294,6 +296,7 @@ class WrapperFxCodegen(PythonWrapperCodegen):
                 LineContext: self._generate_line_context,
                 ReinterpretLine: self._generate_reinterpret,
                 ReuseLine: self._generate_reuse,
+                MultiOutputLine: self._generate_multi_output,
                 NullLine: self._generate_null,
                 OutputLine: self._generate_output,
                 CommBufferLine: self._generate_comm_buffer,
@@ -453,6 +456,20 @@ class WrapperFxCodegen(PythonWrapperCodegen):
         ):
             self._free(old)
 
+    def _generate_multi_output(self, line: Line) -> None:
+        assert isinstance(line, MultiOutputLine)
+
+        # Extract the index for tuple access.
+        inds = line.indices[0][1:]
+        assert len(inds) == 1, f"Cannot convert {inds} to an index."
+        idx = inds[0]
+
+        arg_node = self.buffer_to_node[line.arg_name]
+        node = self.gm.graph.call_function(operator.getitem, args=(arg_node, idx))
+        node.meta["val"] = arg_node.meta["val"][idx]
+        node.name = line.result_name
+        self.buffer_to_node[line.result_name] = node
+
     def _generate_null(self, line: Line) -> None:
         assert isinstance(line, NullLine)
         # Does nothing.
@@ -463,6 +480,7 @@ class WrapperFxCodegen(PythonWrapperCodegen):
 
     def _generate_comm_buffer_allocate(self, line: Line) -> None:
         assert isinstance(line, CommBufferFreeLine)
+
         buf = line.node
         assert buf.name not in V.graph.removed_buffers
         device = torch.device(f"cuda:{self.node.get_device().index}")
@@ -535,17 +553,39 @@ class WrapperFxCodegen(PythonWrapperCodegen):
     ) -> None:
         # TODO: refactor the codegen from ir.ExternKernelOut into various wrapper codegen
         # classes. We should only need to pass the node here.
+        out = out_view if out_view else out
+        self._generate_extern_kernel_line(node, out_kwarg=out)
 
+    def _generate_extern_kernel_line(
+        self,
+        kernel: ir.ExternKernel,
+        out_kwarg: Optional[str] = None,
+    ) -> None:
         # Get the call args in their original types.
-        tensor_args = tuple(x.codegen_reference() for x in node.inputs)
-        call_args = tensor_args + tuple(node.constant_args)
+        tensor_args = tuple(x.codegen_reference() for x in kernel.inputs)
+        call_args = tensor_args + tuple(kernel.constant_args)
 
-        out_name = out_view if out_view else out
+        # Get the result buffer.
+        # Some kernels write to a pre-existing output tensor via the "out" kwarg.
+        kwargs = kernel.kwargs
+        result: Optional[str] = None
+        if out_kwarg:
+            kwargs["out"] = out_kwarg
+        elif not isinstance(kernel.layout, ir.NoneLayout):
+            result = kernel.get_name()
+
         self.writeline(
             ExternKernelLine(
-                self, kernel=kernel, out=out_name, args=call_args, kwargs=node.kwargs
+                self,
+                kernel=kernel.get_kernel_name(),
+                result=result,
+                args=call_args,
+                kwargs=kwargs,
             )
         )
+
+    def generate_extern_kernel_alloc(self, extern_kernel: ir.ExternKernelAlloc, args):
+        self._generate_extern_kernel_line(extern_kernel, None)
 
     def generate_kernel_call(
         self,
@@ -585,12 +625,32 @@ class WrapperFxCodegen(PythonWrapperCodegen):
         for subname in kernel_name.split("."):
             op = getattr(op, subname)  # E.g. extern_kernels.addmm
 
-        out_node = self.buffer_to_node[line.out]
-
-        # Separate args from kwargs
+        # Separate args from kwargs.
         arg_nodes = self._lookup_args(line.args)
-        kwargs = line.kwargs | {"out": out_node}
-        self.gm.graph.call_function(op, args=arg_nodes, kwargs=kwargs)
+        kwargs = line.kwargs
+
+        # Look up the output kwarg.
+        if "out" in kwargs:
+            kwargs["out"] = self.buffer_to_node[kwargs["out"]]
+
+        node = self.gm.graph.call_function(op, args=arg_nodes, kwargs=kwargs)
+
+        # Assign the result to the given name.
+        result = line.result
+        if result:
+            assert (
+                "out" not in line.kwargs
+            ), f"Extern kernel '{line}' has both result and out kwarg. Expected only one."
+            node.name = result
+            self.buffer_to_node[result] = node
+
+            arg_tensors = [
+                arg.meta["val"] if isinstance(arg, torch.fx.Node) else arg
+                for arg in arg_nodes
+            ]
+
+            # Run the operation to propagate metadata.
+            node.meta["val"] = op(*arg_tensors, **kwargs)
 
     def _generate_kernel_call(self, line: Line) -> None:
         assert isinstance(line, KernelCallLine)

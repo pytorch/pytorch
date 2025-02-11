@@ -3,6 +3,7 @@
 Test the FX IR backend.
 """
 
+import operator
 import unittest
 from typing import Callable
 
@@ -15,6 +16,8 @@ from torch._inductor.codegen.wrapper_fxir import delete, WrapperFxCodegen
 from torch._inductor.select_algorithm import extern_kernels
 from torch._inductor.test_case import TestCase as InductorTestCase
 from torch.testing._internal.inductor_utils import (
+    allclose_many,
+    call_many,
     GPU_TYPE,
     HAS_GPU,
     requires_gpu,
@@ -27,7 +30,7 @@ class FxirTestCase(InductorTestCase):
     device = GPU_TYPE
 
     def _count_ops(self, gm: torch.fx.GraphModule, target: Callable) -> int:
-        return len(list(gm.graph.find_nodes(op="call_function", target=target)))
+        return len(gm.graph.find_nodes(op="call_function", target=target))
 
     @config.patch(compile_threads=1)  # Disable async compile
     def _run_and_capture_graphs(self, opt, args) -> torch.fx.GraphModule:
@@ -66,13 +69,17 @@ class FxirTestCase(InductorTestCase):
         self.assertEqual(num_kernels, expected_num_triton_kernels)
 
         # Check accuracy
-        result = gm(*args)[0]
+        result = gm(*args)
         ref = func(*args)
         if metadata_only:
-            self.assertEqual(result.shape, ref.shape)
-            self.assertEqual(result.dtype, ref.dtype)
+
+            def check_metadata(x, y):
+                self.assertEqual(x.shape, y.shape)
+                self.assertEqual(x.dtype, y.dtype)
+
+            call_many(check_metadata, ref, result)
         else:
-            self.assertTrue(torch.allclose(result, ref))
+            allclose_many(self, ref, result)
 
         return gm
 
@@ -214,6 +221,27 @@ class FxirTestCase(InductorTestCase):
         # Check for as_strided. We map ReinterpretView to this.
         num_as_strided = self._count_ops(gm, torch.as_strided)
         self.assertEqual(num_as_strided, 1)
+
+    def test_extern_multi_output(self):
+        """
+        Test an extern kernel with multiple outputs.
+        Also test a graph with multiple outputs.
+        """
+
+        def foo(x):
+            top, idx = torch.topk(x, 2)
+            return top + 1, idx * 2
+
+        args = [torch.rand(8, device=self.device)]
+        gm = self._compile_and_check(foo, args, expected_num_triton_kernels=2)
+
+        # Check for multiple kernel outputs via getitems.
+        num_getitems = self._count_ops(gm, operator.getitem)
+        self.assertEqual(num_getitems, 2)
+
+        # Check for multiple graph outputs.
+        output_node = gm.graph.find_nodes(op="output")[0]
+        self.assertEqual(len(output_node.args[0]), 2)
 
 
 if __name__ == "__main__":
