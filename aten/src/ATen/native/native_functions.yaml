@@ -12728,6 +12728,7 @@
   dispatch:
     CPU: _upsample_bilinear2d_aa_out_cpu
     CUDA: _upsample_bilinear2d_aa_out_cuda
+    MPS: _upsample_bilinear2d_aa_out_mps
 
 - func: _upsample_bilinear2d_aa(Tensor self, SymInt[2] output_size, bool align_corners, float? scales_h=None, float? scales_w=None) -> Tensor
   python_module: nn
@@ -15730,7 +15731,7 @@
 
 - func: special_spherical_bessel_j0.out(Tensor x, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
-    CPU, CUDA: special_spherical_bessel_j0_out
+    CPU, CUDA, MPS: special_spherical_bessel_j0_out
   python_module: special
   structured_inherits: TensorIteratorBase
   structured: True
