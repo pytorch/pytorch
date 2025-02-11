@@ -1,10 +1,8 @@
 #include <ATen/core/op_registration/op_registration.h>
 #include <ATen/native/mkldnn/xpu/detail/oneDNN.h>
 #include <c10/core/MemoryFormat.h>
-#include <torch/library.h>
-
 #include <c10/core/ScalarType.h>
-#include <iostream>
+#include <torch/library.h>
 
 using namespace at::native::onednn;
 namespace at::native::xpu {
@@ -76,8 +74,15 @@ class QConvoneDNNXPU final {
         stride.vec(),
         dilation.vec());
 
-    Tensor output = at::empty(
-        dst_tz, device(c10::kXPU).dtype(output_dtype).memory_format(mfmt));
+    bool fp32_output =
+        output_dtype.has_value() && (output_dtype == c10::kFloat);
+    bool bfloat16_output =
+        output_dtype.has_value() && (output_dtype == c10::kBFloat16);
+    auto dst_dtype = fp32_output
+        ? c10::kFloat
+        : (bfloat16_output ? c10::kBFloat16 : act.scalar_type());
+    Tensor output =
+        at::empty(dst_tz, act.options().dtype(dst_dtype).memory_format(mfmt));
 
     return quantized_convolution(
         act,
@@ -156,7 +161,6 @@ class QConvoneDNNXPU final {
         stride.vec(),
         dilation.vec());
 
-
     bool fp32_output =
         output_dtype.has_value() && (output_dtype == c10::kFloat);
     bool bfloat16_output =
@@ -165,9 +169,9 @@ class QConvoneDNNXPU final {
         ? c10::kFloat
         : (bfloat16_output ? c10::kBFloat16 : act.scalar_type());
     bool has_accum_postop_sum = binary_attr == "sum";
-    Tensor output = has_accum_postop_sum ?
-        accum : at::empty(
-        dst_tz, device(c10::kXPU).dtype(dst_dtype).memory_format(mfmt));
+    Tensor output = has_accum_postop_sum
+        ? accum
+        : at::empty(dst_tz, act.options().dtype(dst_dtype).memory_format(mfmt));
 
     output = quantized_convolution(
         act,

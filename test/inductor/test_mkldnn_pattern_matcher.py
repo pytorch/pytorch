@@ -160,25 +160,20 @@ class TestPatternMatcherBase(TestCase):
             isinstance(input, torch.Tensor) and input.device.type == "xpu"
             for input in inputs
         )
+        device_type = "xpu" if has_xpu else "cpu"
         if check_autocast == torch.bfloat16 and (
             torch.ops.mkldnn._is_mkldnn_bf16_supported() or has_xpu
         ):
-            if has_xpu:
-                maybe_autocast = torch.amp.autocast(
-                    device_type="xpu", dtype=torch.bfloat16
-                )
-            else:
-                maybe_autocast = torch.cpu.amp.autocast(dtype=torch.bfloat16)
+            maybe_autocast = torch.amp.autocast(
+                device_type=device_type, dtype=torch.bfloat16
+            )
             atol, rtol = 1e-2, 1e-2
         elif check_autocast == torch.float16 and (
             torch.ops.mkldnn._is_mkldnn_fp16_supported() or has_xpu
         ):
-            if has_xpu:
-                maybe_autocast = torch.amp.autocast(
-                    device_type="xpu", dtype=torch.float16
-                )
-            else:
-                maybe_autocast = torch.cpu.amp.autocast(dtype=torch.float16)
+            maybe_autocast = torch.amp.autocast(
+                device_type=device_type, dtype=torch.float16
+            )
             atol, rtol = 1e-2, 1e-2
         else:
             assert check_autocast == torch.float32
