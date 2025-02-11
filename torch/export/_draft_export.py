@@ -211,7 +211,7 @@ class LogRecord:
         elif key == "propagate_real_tensors_provenance":
             return hash((key, json.dumps(data["stack"])))
         elif key == "create_unbacked_symbol":
-            return hash((key, json.dumps(data["user_stack"])))
+            return hash((key, json.dumps(data["stack"])))
 
         return hash((key, json.dumps(data)))
 
