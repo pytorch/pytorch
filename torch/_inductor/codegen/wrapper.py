@@ -926,12 +926,34 @@ class PythonWrapperCodegen(CodeGen):
     def write_prefix(self) -> None:
         assert self.launcher_fn_name is not None
         self.write_async_compile_wait()
-        self.prefix.splice(
-            f"""
-            def {self.launcher_fn_name}(args):
-            """
-        )
-        with self.prefix.indent():
+        if torch._inductor.config.graph_partition and not hasattr(
+            self, "subgraph_name"
+        ):
+            self.prefix.splice(
+                """
+                class Runner:
+                    def __init__(self):
+                        pass
+
+                    def recursively_apply_fns(self, fns):
+                        new_callables = []
+                        for fn, c in zip(fns, self.callables):
+                            new_callables.append(fn(c))
+                        self.callables = new_callables
+
+                    def call(self, args):
+                """
+            )
+            prefix_indent = 2
+        else:
+            self.prefix.splice(
+                f"""
+                def {self.launcher_fn_name}(args):
+                """
+            )
+            prefix_indent = 1
+
+        with self.prefix.indent(prefix_indent):
             if config.triton.debug_sync_graph:
                 self.prefix.writeline(V.graph.device_ops.synchronize())
             phase = V.graph.get_training_phase()
@@ -1235,11 +1257,29 @@ class PythonWrapperCodegen(CodeGen):
         self.finalize_prefix()
         result.splice(self.prefix)
 
-        with result.indent():
+        wrapper_call_indent = (
+            2
+            if torch._inductor.config.graph_partition
+            and not hasattr(self, "subgraph_name")
+            else 1
+        )
+
+        with result.indent(wrapper_call_indent):
             result.splice(self.wrapper_call)
 
         self.generate_before_suffix(result)
         result.splice(self.suffix)
+
+        if torch._inductor.config.graph_partition and not hasattr(
+            self, "subgraph_name"
+        ):
+            result.splice(
+                """
+                runner = Runner()
+                call = runner.call
+                recursively_apply_fns = runner.recursively_apply_fns
+                """
+            )
 
         self.generate_end(result)
 
