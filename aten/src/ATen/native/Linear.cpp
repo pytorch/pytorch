@@ -35,6 +35,7 @@
 #include <string>
 #include <utility>
 #include <vector>
+#include <iostream>
 
 namespace at::native {
 
@@ -827,12 +828,18 @@ Tensor tensordot(const Tensor& input1, const Tensor& input2, IntArrayRef dims1, 
   // when enabling the fast-path with dot.
   // TODO: resolve that
   if ((t1.device().type() == at::kMPS || t2.device().type() == at::kMPS) || size1 != 1 || size2 != 1) {
+    if (t1.device().type() == at::kMPS || t2.device().type() == at::kMPS) {
+      std::cout << "MPS: mm path" << std::endl;
+    }
     // permute and reshape for matrix multiplication
     t1 = t1.permute(p1).reshape_symint({size1, csize});
     t2 = t2.permute(p2).reshape_symint({csize, size2});
     // multiply and reshape to target size
     return at::mm(t1, t2).reshape_symint(rsizes);
   } else {
+    if (t1.device().type() == at::kMPS || t2.device().type() == at::kMPS) {
+      std::cout << "MPS: dot path" << std::endl;
+    }
     // permute to align for contraction
     t1 = t1.permute(p1);
     t2 = t2.permute(p2);
