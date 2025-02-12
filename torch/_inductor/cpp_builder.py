@@ -176,7 +176,7 @@ def _is_gcc(cpp_compiler: str) -> bool:
     if sys.platform == "darwin" and _is_apple_clang(cpp_compiler):
         return False
     # special handling clang++: https://github.com/pytorch/pytorch/issues/146712
-    if (re.search(r"clang\+\+)", cpp_compiler))
+    if (re.search(r"clang\+\+)", cpp_compiler)):
         return False
     return bool(re.search(r"(gcc|g\+\+)", cpp_compiler))
 
