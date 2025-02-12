@@ -27,7 +27,7 @@ cmake --version
 echo "Environment variables:"
 env
 
-export SCCACHE_ERROR_LOG="/tmp/sccache_log.txt"
+export SCCACHE_ERROR_LOG="${BASH_SOURCE[0]}/../../sccache_error.log"
 export SCCACHE_LOG=debug
 
 if [[ "$BUILD_ENVIRONMENT" == *cuda* ]]; then

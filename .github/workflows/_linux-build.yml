@@ -275,8 +275,7 @@ jobs:
 
           END_TIME=$(date +%s)
           echo "build_time=$((END_TIME - START_TIME))" >> "$GITHUB_OUTPUT"
-          mv /tmp/sccache_log.txt sccache_log.txt
-          zip -r sccache_log.zip sccache_log.txt
+          zip -r sccache_log.zip sccache_error.log
 
       - name: store
         uses: seemethere/upload-artifact-s3@v5
