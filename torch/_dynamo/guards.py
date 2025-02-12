@@ -2831,7 +2831,7 @@ def recompilation_reason_for_no_tensor_aliasing_guard(guard_manager, scope):
 def get_guard_fail_reason_helper(
     guard_manager: GuardFn,
     f_locals: dict[str, object],
-    compile_id: CompileId,
+    compile_id: CompileId | None,
 ) -> str:
     """
     Return the reason why `guard_manager` failed.
