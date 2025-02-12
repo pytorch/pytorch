@@ -48,7 +48,7 @@ static void binary_mps_impl(TensorIteratorBase& iter, const std::string func_nam
       auto computeEncoder = mpsStream->commandEncoder();
       if (supports_dense && iter.is_contiguous()) {
         const auto kernel_name = fmt::format("{}_dense_{}", func_name, scalarToMetalTypeString(input));
-        auto  binaryPSO = lib.getPipelineStateForFunc(kernel_name);
+        auto binaryPSO = lib.getPipelineStateForFunc(kernel_name);
         [computeEncoder setComputePipelineState:binaryPSO];
         mtl_setArgs(computeEncoder, input, other, out);
         mtl_dispatch1DJob(computeEncoder, binaryPSO, numThreads);
