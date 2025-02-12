@@ -2413,11 +2413,11 @@ dict_getitem = dict.__getitem__
 
 
 def dict_keys_getitem(d, n):
-    # Call dict(d) to prevent calling overridden __iter__
+    # Call dict(d) to prevent calling overridden __iter__/keys
     dict_class = dict
     if isinstance(d, OrderedDict):
         dict_class = OrderedDict
-    return next(itertools.islice(iter(dict_class(d)), n, n + 1))
+    return next(itertools.islice(dict_class.keys(d), n, n + 1))
 
 
 def enum_repr(value, local):

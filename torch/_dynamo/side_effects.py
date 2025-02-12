@@ -48,7 +48,7 @@ def _manual_dict_setitem(dict_from, dict_to, mro_index):
         dict_class.__setitem__(dict_to, k, v)
 
 
-def _manual_list_setitem(list_from, list_to):
+def _manual_list_update(list_from, list_to):
     list.clear(list_to)
     list.extend(list_to, list_from)
 
@@ -242,7 +242,9 @@ class SideEffects:
 
         if isinstance(item, variables.UserDefinedObjectVariable):
             # Checks if the underlying dict or tuple vt has been modified
-            return item.is_modified(self)
+            return item in self.store_attr_mutations or item.is_underlying_vt_modified(
+                self
+            )
 
         if self.is_attribute_mutation(item):
             return item in self.store_attr_mutations
@@ -846,7 +848,7 @@ class SideEffects:
                     # Update the list to the updated items. Be careful in
                     # calling the list methods and not the overridden methods.
                     varname_map = {}
-                    for name in _manual_list_setitem.__code__.co_varnames:
+                    for name in _manual_list_update.__code__.co_varnames:
                         varname_map[name] = cg.tx.output.new_var()
 
                     cg(var.source)  # type: ignore[attr-defined]
@@ -868,7 +870,7 @@ class SideEffects:
                     )
 
                     list_update_insts = bytecode_from_template(
-                        _manual_list_setitem, varname_map=varname_map
+                        _manual_list_update, varname_map=varname_map
                     )
 
                     suffixes.append(

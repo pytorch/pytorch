@@ -218,6 +218,7 @@ class DictTests(torch._dynamo.test_case.TestCase):
             return x * d["foo"] * d["bar"]
 
         fn(torch.randn(4), d)
+        # This is intentional because the dict is mutated, so we will have a recompilation.
         fn(torch.randn(4), d)
         with unittest.mock.patch("torch._dynamo.config.error_on_recompile", True):
             fn(torch.randn(4), d)

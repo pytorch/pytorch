@@ -732,8 +732,8 @@ class UserDefinedObjectVariable(UserDefinedVariable):
     def __repr__(self) -> str:
         return f"{self.__class__.__name__}({self.value_type.__name__})"
 
-    def is_modified(self, side_effects):
-        return side_effects.is_attribute_mutation(self)
+    def is_underlying_vt_modified(self, side_effects):
+        return False
 
     def python_type(self):
         return self.value_type
@@ -1478,10 +1478,8 @@ class UserDefinedDictVariable(UserDefinedObjectVariable):
             return self._dict_vt.unpack_var_sequence(tx)
         raise NotImplementedError
 
-    def is_modified(self, side_effects):
-        return side_effects.is_attribute_mutation(self) or side_effects.is_modified(
-            self._dict_vt
-        )
+    def is_underlying_vt_modified(self, side_effects):
+        return side_effects.is_modified(self._dict_vt)
 
 
 class UserDefinedListVariable(UserDefinedObjectVariable):
@@ -1523,10 +1521,8 @@ class UserDefinedListVariable(UserDefinedObjectVariable):
             return self._list_vt.unpack_var_sequence(tx)
         raise NotImplementedError
 
-    def is_modified(self, side_effects):
-        return side_effects.is_attribute_mutation(self) or side_effects.is_modified(
-            self._list_vt
-        )
+    def is_underlying_vt_modified(self, side_effects):
+        return side_effects.is_modified(self._list_vt)
 
 
 class UserDefinedTupleVariable(UserDefinedObjectVariable):
