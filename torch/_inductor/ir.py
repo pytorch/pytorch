@@ -4949,6 +4949,7 @@ class ExternKernel(InputsKernel):
         args_flat, args_spec = pytree.tree_flatten(binded_args)
 
         is_arg_tensor = []
+        # tensor_args can be either tensor or torchbind objects
         tensor_args = []
         non_tensor_args: list[Any] = []
         for arg in args_flat:
@@ -4998,6 +4999,8 @@ class ExternKernel(InputsKernel):
                 and x.get_name() in V.graph.torchbind_constants
             ):
                 example_args.append(V.graph.torchbind_constants[x.get_name()])
+            elif isinstance(x, TorchBindObject):
+                example_args.append(x.get_real_obj())
             else:
                 example_args.append(ir_node_to_tensor(x, guard_shape=True))
 
@@ -6558,12 +6561,14 @@ class FallbackKernel(ExternKernelAlloc):
             self.get_kwargs_value(key, **kwargs)
             for key in self.ordered_kwargs_for_cpp_kernel
         ]
+        target = self.op_overload
+
         if not V.graph.aot_mode:
             # No need to serialize in the cpp wrapper JIT mode
             return [*args, *ordered_kwargs]
 
         serializer = GraphModuleSerializer(None, None)  # type: ignore[arg-type]
-        named_arguments = serializer.serialize_inputs(self.op_overload, args, kwargs)
+        named_arguments = serializer.serialize_inputs(target, args, kwargs)
 
         # serialize_outputs
         def handle_single_output(return_type, output):  # type: ignore[no-untyped-def]
@@ -6589,7 +6594,6 @@ class FallbackKernel(ExternKernelAlloc):
             else:
                 raise RuntimeError(f"Unsupported return type {type(return_type)}")
 
-        target = self.op_overload
         returns = target._schema.returns  # type: ignore[union-attr]
         if len(returns) == 1:
             # NOTE: [special handling of all_reduce_coalesced_'s return value]
@@ -6643,7 +6647,6 @@ class FallbackKernel(ExternKernelAlloc):
             self.use_runtime_dispatch = True
 
         def do_runtime_dispatch() -> None:
-            exported_args = None
             args = None
             exported_args = self.export_extern_kernel_node()
 
@@ -7508,7 +7511,10 @@ class EffectfulKernel(FallbackKernel):
 
         from torch._higher_order_ops.effects import get_effect_key
 
-        effect_type = get_effect_key(kernel, (*nontensor_args, *tensor_args), kwargs)
+        uncovered_args = [
+            a.value if isinstance(a, TorchBindObject) else a for a in tensor_args
+        ]
+        effect_type = get_effect_key(kernel, (*nontensor_args, *uncovered_args), kwargs)
         assert effect_type is not None
         self.effect_type = effect_type
         self.prev_effect_buffer = V.graph.effectful_ops.get(effect_type, None)
@@ -7530,14 +7536,25 @@ class EffectfulKernel(FallbackKernel):
 
 @ir_dataclass
 class TorchBindObject(IRNode):
+    from torch._library.fake_class_registry import FakeScriptObject
+
     name: str
-    value: torch._C.ScriptObject
+    value: Union[FakeScriptObject, torch.ScriptObject]
 
     def get_name(self):  # type: ignore[no-untyped-def]
         return self.name
 
     def codegen_reference(self, writer: Optional[IndentedBuffer] = None) -> str:
         return self.name
+
+    def get_value(self) -> Union[FakeScriptObject, torch.ScriptObject]:
+        return self.value
+
+    def get_real_obj(self) -> torch.ScriptObject:
+        if isinstance(self.value, torch.ScriptObject):
+            return self.value
+        else:
+            return self.value.real_obj
 
 
 class _CollectiveKernel(FallbackKernel):

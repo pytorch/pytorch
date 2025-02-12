@@ -10,6 +10,7 @@ import math
 import operator
 import os
 import pprint
+import sys
 import textwrap
 import traceback
 import typing
@@ -670,7 +671,7 @@ class BaseSchedulerNode:
 
         for buf_name in reads | writes:
             buf_accessed_elems = sum(node_numel for dep in buf_accesses[buf_name])
-            buf: Union[ir.Buffer, ir.TensorBox]
+            buf: Union[ir.Buffer, ir.TensorBox, ir.TorchBindObject]
             if buf_name in V.graph.name_to_buffer:
                 buf = V.graph.name_to_buffer[buf_name]
             elif buf_name in V.graph.graph_inputs:
@@ -678,12 +679,17 @@ class BaseSchedulerNode:
             else:
                 continue
 
-            def get_buf_bytes(buf: Optional[Union[ir.Buffer, ir.TensorBox]]) -> int:
+            def get_buf_bytes(
+                buf: Optional[Union[ir.Buffer, ir.TensorBox, ir.TorchBindObject]]
+            ) -> int:
                 if not buf:
                     return 0
+
+                if isinstance(buf, ir.TorchBindObject):
+                    return sys.getsizeof(buf.get_real_obj())
                 # Kind of a lazy way to get the MultiOutput nodes corresponding to
                 # a MultiOutputLayout
-                if isinstance(buf.layout, MultiOutputLayout):
+                elif isinstance(buf.layout, MultiOutputLayout):
                     users = self.scheduler.name_to_buf[buf.get_name()].users
                     tot = 0
                     for user in users:
@@ -1088,7 +1094,8 @@ class SchedulerNode(BaseSchedulerNode):
             if not isinstance(dep, WeakDep):
                 buf_name = dep.name
                 buf = V.graph.get_buffer(buf_name)
-                lines.append(f"{buf_name}_layout = {pformat(buf.layout)}")
+                if not isinstance(buf, ir.TorchBindObject):
+                    lines.append(f"{buf_name}_layout = {pformat(buf.layout)}")
         if isinstance(self._body, LoopBody):
             lines.append(f"class {name}_loop_body:")
             lines.append(textwrap.indent(self._body.debug_str(), "    "))
@@ -3296,9 +3303,12 @@ class Scheduler:
                 continue
 
             # Add more rules here
+            layout_str = ""
+            if not isinstance(buf, ir.TorchBindObject):
+                layout_str = f"Layout: {buf.layout}"
             reasons[
                 buf_name
-            ] = f"Unknown reason: {lhs_dep} v.s. {rhs_dep}. Layout: {buf.layout}"
+            ] = f"Unknown reason: {lhs_dep} v.s. {rhs_dep}. {layout_str}"
 
         return str(reasons)
 
@@ -3811,9 +3821,15 @@ class Scheduler:
                 if buf.can_free():
                     V.graph.wrapper_code.codegen_free(buf.node)
             elif name in V.graph.graph_inputs:
-                storage = V.graph.graph_inputs[name].data
-                assert isinstance(storage, ir.StorageBox) and storage.is_input_buffer()
-                V.graph.wrapper_code.codegen_free(storage.data)
+                inp = V.graph.graph_inputs[name]
+                if isinstance(inp, ir.TorchBindObject):
+                    V.graph.wrapper_code.codegen_free(inp)
+                else:
+                    storage = inp.data
+                    assert (
+                        isinstance(storage, ir.StorageBox) and storage.is_input_buffer()
+                    )
+                    V.graph.wrapper_code.codegen_free(storage.data)
 
         self.buffer_names_to_free.clear()
 
