@@ -452,13 +452,18 @@ def aot_dispatch_autograd(
             fw_module, bw_module = aot_config.partition_fn(
                 fx_g, joint_inputs, num_fwd_outputs=num_inner_fwd_outputs
             )
-            num_rng_states = sum(
-                1
+            rng_states = [
+                n
                 for n in fw_module.graph.find_nodes(op="placeholder")
                 if "fwd_rng_state" in n.name
-            )
-            fw_metadata.num_graphsafe_rng_states = num_rng_states
+            ]
+            fw_metadata.num_graphsafe_rng_states = len(rng_states)
+            if rng_states:
+                fw_metadata.graphsafe_rng_state_index = (
+                    rng_states[0].meta["val"].device.index
+                )
 
+            # assert fw_metadata.graphsafe_rng_state_index == 1
             # See Note [Side-Effectful Tokens in AOTAutograd]
             if config.unlift_effect_tokens and (
                 num_tokens > 0 or fw_metadata.num_backward_tokens > 0

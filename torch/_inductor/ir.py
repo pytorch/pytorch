@@ -4977,7 +4977,9 @@ class ExternKernel(InputsKernel):
         # Rerun fake tensor propagation, because Inductor may have changed the
         # strides of inputs and we need to determine accurately what the
         # output stride will be.
-        example_args: list[Union[torch.Tensor, torch._C.ScriptObject]] = []
+        example_args: list[
+            Union[torch.Tensor, torch._C.ScriptObject, torch._C.Generator]
+        ] = []
 
         # We need to retain the constant values of fake tensors that we originally
         # propagated the graph with, because for some operators running without a
@@ -4993,12 +4995,10 @@ class ExternKernel(InputsKernel):
             ):
                 example_args.append(V.graph.torchbind_constants[x.get_name()])
             elif isinstance(x, torch._inductor.ir.GeneratorState):
+                ex_inp = V.graph.example_inputs
+                assert ex_inp is not None
                 generator = next(
-                    (
-                        e
-                        for e in reversed(V.graph.example_inputs)
-                        if isinstance(e, torch._C.Generator)
-                    ),
+                    (e for e in reversed(ex_inp) if isinstance(e, torch._C.Generator)),
                     None,
                 )
                 assert generator is not None

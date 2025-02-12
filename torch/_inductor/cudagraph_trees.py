@@ -925,8 +925,10 @@ class CUDAGraphNode:
         # graph used for recording model invocation
         self.graph: Optional[torch.cuda.CUDAGraph] = torch.cuda.CUDAGraph()
 
-        for rng_state in rng_states:
-            self.graph.register_generator_state(rng_state)
+        # TODO: register_generator_state should potentially take explicit device
+        with torch.cuda.device(self.device):
+            for rng_state in rng_states:
+                self.graph.register_generator_state(rng_state)
 
         # we allocate non-static inputs within the same memory pool as the CUDAGraph
         # which we will record the model with. For memory efficiency, it is important

@@ -1018,7 +1018,7 @@ class GraphLowering(torch.fx.Interpreter):
                 is torch._prims.rng_prims.graphsafe_run_with_rng_state
             )
             obj = ir.GeneratorState(name=target)
-            self.graph_inputs[target] = obj
+            self.graph_inputs[target] = obj  # type: ignore[assignment]
             self.graph_input_names.append(target)
             return obj
 

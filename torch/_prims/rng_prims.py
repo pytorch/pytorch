@@ -331,7 +331,7 @@ def register_graphsafe_run_with_rng_state_op():
 
     @graphsafe_run_with_rng_state.py_impl(DispatchKey.CUDA)
     def impl_cuda(op, *args, rng_state=None, **kwargs):
-        device_idx = torch.cuda.current_device()
+        device_idx = rng_state.device.index
         generator = torch.cuda.default_generators[device_idx]
         current_state = generator.graphsafe_get_state()
         generator.graphsafe_set_state(rng_state)

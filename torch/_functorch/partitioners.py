@@ -716,6 +716,14 @@ def functionalize_rng_ops(
     last_fwd_input = next(reversed(fw_module.graph.find_nodes(op="placeholder")))
     last_bwd_input = next(reversed(bw_module.graph.find_nodes(op="placeholder")))
 
+    devices = OrderedSet(
+        get_device(node_pair["fwd"]) for node_pair in recomputable_rng_ops_map.values()
+    )
+    devices.discard(torch.device("cpu"))
+    # multiple cuda devices wont work with cudagraphs anyway,
+    # fallback to non graphsafe rng checkpointing
+    multi_cuda_devices = len(devices) > 1
+
     for rng_count, (base_node, node_pair) in enumerate(
         recomputable_rng_ops_map.items()
     ):
@@ -728,7 +736,8 @@ def functionalize_rng_ops(
         bw_graph = bw_module.graph
 
         if (
-            config.graphsafe_rng_functionalization
+            not multi_cuda_devices
+            and config.graphsafe_rng_functionalization
             and device is not None
             and device.type == "cuda"
         ):

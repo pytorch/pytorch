@@ -1816,17 +1816,22 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
         fw_metadata: ViewAndMutationMeta,  # runtime metadata
         try_save_cache_entry: Optional[Callable],  # Save cache entry after compilation
     ):
-        # TODO: needs to use correct device idx
         # needs to handle retain graph
         num_rng = fw_metadata.num_graphsafe_rng_states
-        fwd_rng_states = [
-            torch.cuda.default_generators[torch.cuda.current_device()].clone_state()
-            for _ in range(num_rng)
-        ]
-        bwd_rng_states = [
-            torch.cuda.default_generators[torch.cuda.current_device()].clone_state()
-            for _ in range(num_rng)
-        ]
+        graphsafe_idx = fw_metadata.graphsafe_rng_state_index
+        if num_rng:
+            assert graphsafe_idx is not None
+            fwd_rng_states = [
+                torch.cuda.default_generators[graphsafe_idx].clone_state()
+                for _ in range(num_rng)
+            ]
+            bwd_rng_states = [
+                torch.cuda.default_generators[graphsafe_idx].clone_state()
+                for _ in range(num_rng)
+            ]
+        else:
+            fwd_rng_states = []
+            bwd_rng_states = []
 
         curr_fwd_iter = itertools.count(0)
         backward_state_position = 0
@@ -1998,13 +2003,20 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
                 if num_rng:
                     curr_backward_iter = ctx._curr_iter
 
+                    retain_graph = (
+                        torch._C._autograd._get_current_graph_task_keep_graph()
+                    )
+
                     nonlocal backward_state_position, bwd_rng_states
 
                     # Save current state if we have a pending forward that needs this state
                     if (
                         backward_state_position in pending_forwards
                         and backward_state_position not in saved_backward_states
-                        and backward_state_position != curr_backward_iter
+                        and (
+                            backward_state_position != curr_backward_iter
+                            or retain_graph
+                        )
                     ):
                         saved_backward_states[backward_state_position] = [
                             rng_state.clone_state() for rng_state in bwd_rng_states
@@ -2019,10 +2031,12 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
                                 saved_backward_states[curr_backward_iter],
                             ):
                                 bwd_state.graphsafe_set_state(saved_state)
-                        del saved_backward_states[curr_backward_iter]
+                        if not retain_graph:
+                            del saved_backward_states[curr_backward_iter]
 
                     backward_state_position = curr_backward_iter + 1
-                    pending_forwards.remove(curr_backward_iter)
+                    if not retain_graph:
+                        pending_forwards.remove(curr_backward_iter)
                     all_args.extend(bwd_rng_states)
 
                 def impl_fn(double_ctx=None):
