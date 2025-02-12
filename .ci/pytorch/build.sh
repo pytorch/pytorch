@@ -27,7 +27,8 @@ cmake --version
 echo "Environment variables:"
 env
 
-cat "" > "/var/lib/jenkins/.config/sccache/config"
+mkdir -p /var/lib/jenkins/.cache/sccache
+echo "" > "/var/lib/jenkins/.config/sccache/config"
 
 export SCCACHE_ERROR_LOG="${BASH_SOURCE[0]}/../../sccache_error.log"
 export SCCACHE_LOG=debug
