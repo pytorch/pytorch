@@ -487,6 +487,17 @@ class TestReductions(TestCase):
             y2 = op(x2, dim=-1)
             self.assertEqual(y, y2)
 
+    @onlyCPU
+    @dtypes(torch.float, torch.bfloat16)
+    def test_reduction_lastdim_overflow(self, device, dtype):
+        x1 = torch.ones((1, 32, 224, 224, 160), device=device, dtype=torch.double)
+        x2 = torch.ones((1, 32, 224, 224, 160), device=device, dtype=dtype)
+        ops = [torch.norm, torch.linalg.vector_norm]
+        for op in ops:
+            y1 = op(x1)
+            y2 = op(x2)
+            self.assertEqual(y1.to(dtype), y2)
+
     @skipIfNoSciPy
     @dtypes(torch.float32, torch.double, torch.complex64, torch.complex128)
     def test_logsumexp(self, device, dtype):
