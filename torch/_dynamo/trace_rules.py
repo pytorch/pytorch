@@ -3200,6 +3200,15 @@ def _module_dir(m: types.ModuleType):
 
 # These are legacy workarounds, don't add new modules to this list.
 # Please use the MOD_INLINELIST instead to force inline functions under particular modules.
+#
+# NB: The only thing that is different about MOD_INLINELIST and LEGACY_MOD_INLINELIST
+# is the behavior of a function f2 in the module when called by a function f1
+# in a module in MOD_SKIPLIST (see MOD_SKIPLIST for more details)
+#
+# LEGACY_MOD_INLINELIST is the same thing as Dynamo's behavior on a module that
+# is not in any *_INLINELIST or *_SKIPLIST.
+# That being said, we prefer people to add things to MOD_INLINELIST over
+# LEGACY_MOD_INLINELIST because it is less likely to break existing tests.
 LEGACY_MOD_INLINELIST = {
     "torch._dynamo.external_utils",
     "torch._export.db.examples",
@@ -3241,6 +3250,11 @@ if torch.distributed.is_available():
 # Force inline functions under these modules, even they are in *_SKIPLIST.
 # We are using python module name instead of file or directory object to avoid circular dependency.
 # Please keep this sorted alphabetically.
+#
+# Btw, it is not "ideal" for something to be in MOD_INLINELIST. If Dynamo
+# fully supports a module, then the ideal case is that it is not in
+# any *_INLINELIST or *_SKIPLIST: then, the behavior of Dynamo is that
+# it will always inline into functions in the module.
 MOD_INLINELIST = [
     "torch._decomp",
     "torch._dynamo._trace_wrapped_higher_order_op",
@@ -3308,6 +3322,14 @@ if torch.distributed.is_available():
 # take precedence over this list; e.g. if a function is in
 # MOD_INLINELIST and MOD_SKIPLIST, then it will be inlined.
 # See "A note on skip/inline rules" for more details.
+#
+# The skip is NOT recursive. If a function f1 in a module in MOD_SKIPLIST
+# calls out to another function f2 in some other module, then Dynamo's
+# behavior (skip/inline) depends on what we've marked f2 as:
+# - if f2 is a function in a module in MOD_SKIPLIST, then we skip f2
+# - if f2 is a function in a module in MOD_INLINELIST, then we skip f2
+# - if f2 is a function in a module in LEGACY_MOD_INLINELIST, then we inline f2
+# - if f2 is a function in a module not in any *_LIST, then we inline f2
 MOD_SKIPLIST = [
     "torch._VF",
     "torch.__future__",
