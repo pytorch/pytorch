@@ -1108,15 +1108,9 @@ class Tensor(torch._C.TensorBase):
     __rtruediv__ = __rdiv__
     __itruediv__ = _C.TensorBase.__idiv__
 
-    __pow__ = cast(
-        Callable[
-            ["torch._C.TensorBase", Union["Tensor", int, float, bool, complex]],
-            "Tensor",
-        ],
-        _handle_torch_function_and_wrap_type_error_to_not_implemented(
-            _C.TensorBase.pow
-        ),
-    )
+    def __pow__(self, other: Union["Tensor", int, float, bool, complex]) -> "Tensor":
+        return torch.pow(self, other)
+
     __ipow__ = _handle_torch_function_and_wrap_type_error_to_not_implemented(
         _C.TensorBase.pow_
     )
