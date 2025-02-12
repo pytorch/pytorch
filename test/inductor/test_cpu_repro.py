@@ -4084,7 +4084,8 @@ class CPUReproTests(TestCase):
             with torch.no_grad():
                 expected = mod(x)
                 compiled_m = torch.compile(mod, dynamic=dynamic)
-                actual = compiled_m(x)
+                actual, code = run_and_get_cpp_code(compiled_m, x)
+                print(code)
                 self.assertEqual(expected, actual)
 
     def test_int_div_vec(self):
