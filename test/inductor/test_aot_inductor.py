@@ -401,7 +401,10 @@ class AOTInductorTestsTemplate:
             )
 
             with config.patch({"freezing": True}):
-                self.check_model(Model(self.device), example_inputs)
+                model = Model(self.device)
+                expected = model(*example_inputs)
+                actual = AOTIRunnerUtil.legacy_run(self.device, model, example_inputs)
+                self.assertEqual(expected, actual)
 
     @unittest.skipIf(
         IS_FBCODE,
@@ -1530,6 +1533,26 @@ class AOTInductorTestsTemplate:
             }
         self.check_model_with_multiple_inputs(
             WhileLoopModels.UnbackedSymIntClosure(),
+            prepend_counters(inputs),
+            dynamic_shapes=dynamic_shapes,
+        )
+
+    @common_utils.parametrize("dynamic", [False, True])
+    def test_while_loop_with_sym_expr_cond(self, dynamic):
+        inputs = (
+            torch.randn(10, 20, device=self.device),
+            torch.randn(10, 20, device=self.device),
+        )
+        dim0_ab = Dim("s0", min=2, max=1024)
+        dynamic_shapes = None
+        if dynamic:
+            dynamic_shapes = {
+                "c": {},
+                "a": {0: dim0_ab, 1: None},
+                "b": {0: dim0_ab, 1: None},
+            }
+        self.check_model_with_multiple_inputs(
+            WhileLoopModels.SymExprCond(),
             prepend_counters(inputs),
             dynamic_shapes=dynamic_shapes,
         )
