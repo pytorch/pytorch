@@ -3899,12 +3899,12 @@ class Scheduler:
 
     def only_gpu_inputs_and_outputs(self, node: BaseSchedulerNode) -> bool:
         if not node.is_gpu():
-            return False
+            return True
 
         if isinstance(node.node, ir.DeviceCopy):
-            return False
+            return True
 
-        return True
+        return False
 
     def get_partition_rules(self) -> List[Callable[[BaseSchedulerNode], bool]]:
         return [self.only_gpu_inputs_and_outputs]
@@ -3983,7 +3983,9 @@ class Scheduler:
         if cur_partition:
             partitions.append(cur_partition)
 
-        return partitions, *self.get_graph_partition_signature(partitions)
+        inputs, outputs = self.get_graph_partition_signature(partitions)
+
+        return partitions, inputs, outputs
 
     def codegen(self) -> None:
         with dynamo_timed("Scheduler.codegen"):

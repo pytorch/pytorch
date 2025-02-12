@@ -926,8 +926,10 @@ class PythonWrapperCodegen(CodeGen):
     def write_prefix(self) -> None:
         assert self.launcher_fn_name is not None
         self.write_async_compile_wait()
-        if torch._inductor.config.graph_partition and not hasattr(
-            self, "subgraph_name"
+        if (
+            not config.cpp_wrapper
+            and torch._inductor.config.graph_partition
+            and not hasattr(self, "subgraph_name")
         ):
             self.prefix.splice(
                 """
@@ -1270,8 +1272,10 @@ class PythonWrapperCodegen(CodeGen):
         self.generate_before_suffix(result)
         result.splice(self.suffix)
 
-        if torch._inductor.config.graph_partition and not hasattr(
-            self, "subgraph_name"
+        if (
+            not config.cpp_wrapper
+            and torch._inductor.config.graph_partition
+            and not hasattr(self, "subgraph_name")
         ):
             result.splice(
                 """

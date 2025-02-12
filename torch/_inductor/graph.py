@@ -1778,9 +1778,19 @@ class GraphLowering(torch.fx.Interpreter):
         assert (
             wrapper_code_gen_cls is not None
         ), f"Device {self.device_type} not supported"
-        self.wrapper_code = wrapper_code_gen_cls.create(
-            is_subgraph, subgraph_name, parent_wrapper_code, input_names, output_nodes
-        )
+
+        if self.device_type == "cuda":
+            self.wrapper_code = wrapper_code_gen_cls.create(
+                is_subgraph,
+                subgraph_name,
+                parent_wrapper_code,
+                input_names,
+                output_nodes,
+            )
+        else:
+            self.wrapper_code = wrapper_code_gen_cls.create(
+                is_subgraph, subgraph_name, parent_wrapper_code
+            )
 
         if self.const_module:
             # If we have const module, we could reuse the kernels
