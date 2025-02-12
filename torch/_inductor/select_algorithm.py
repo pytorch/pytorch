@@ -770,7 +770,10 @@ class TritonTemplateKernel(TritonKernel):
                         if value_dtype != V.graph.get_buffer(name).dtype:
                             value_str = f"{value_str}.to({triton_type(V.graph.get_buffer(name).dtype)})"
 
-                        V.kernel.compute.writeline(f"{output_name} = {value_str}")
+                        # TODO: we should have intermediary var shapes
+                        V.kernel.compute.writeline(
+                            f"{output_name} = {value_str}.broadcast_to(xindex.shape)"
+                        )
 
             self.ops_handler = StoreOutputSubstitution
 
