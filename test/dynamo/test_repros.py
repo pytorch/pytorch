@@ -6522,6 +6522,16 @@ def forward(self, s0 : torch.SymInt, s1 : torch.SymInt, L_x_ : torch.Tensor):
         ), self.assertRaises(AssertionError):
             torch.compile(lambda: None)
 
+    def test_str_isalnum(self):
+        def f(x, c):
+            str.isalnum(c)
+            return x.sin()
+
+        opt_f = torch.compile(f, backend="eager", fullgraph=True)
+        x = torch.randn(3)
+        c = "foobar"
+        self.assertEqual(f(x, c), opt_f(x, c))
+
 
 class ReproTestsDevice(torch._dynamo.test_case.TestCase):
     def test_sub_alpha_scalar_repro(self, device):
