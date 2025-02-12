@@ -485,7 +485,7 @@ inline T spherical_bessel_j0(T x) {
   T k1 = static_cast<T>(-1.0);
   T k2 = static_cast<T>(1.0);
 
-  if (::metal::abs(x) < T(0.5)) {
+  if (::metal::fabs(static_cast<T>(x)) < T(0.5)) {
     return T(1.0) +
         x2 *
         (k1 / T(6.0) +
@@ -500,7 +500,7 @@ inline T spherical_bessel_j0(T x) {
                              x2 * (k2 / T(6227020800.0)))))));
   }
 
-  return ::metal::sin(x) / x;
+  return static_cast<T>(::metal::sin(x) / x);
 }
 
 } // namespace metal

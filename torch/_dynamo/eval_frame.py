@@ -833,6 +833,13 @@ def is_inductor_supported():
         return False
 
 
+def check_for_incompatible_configs():
+    # Some of the configs should be mutually exclusive
+    assert not (
+        config.suppress_errors and config.fail_on_recompile_limit_hit
+    ), "Dynamo configs suppress_error and fail_on_recompile_limit_hit can not both be active at the same time."
+
+
 def optimize(*args, **kwargs):
     def rebuild_ctx():
         ca_kwargs_override = config.compiled_autograd_kwargs_override
@@ -885,6 +892,7 @@ def _optimize(
             ...
     """
     check_if_dynamo_supported()
+    check_for_incompatible_configs()
     # Note: The hooks object could be global instead of passed around, *however* that would make
     # for a confusing API usage and plumbing story wherein we nest multiple .optimize calls.
     # There is some prior art around this, w/r/t nesting backend calls are enforced to be the same

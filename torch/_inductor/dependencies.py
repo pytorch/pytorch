@@ -5,6 +5,7 @@ import logging
 import re
 from collections.abc import Sequence
 from typing import Any, Callable, Iterable, List, Optional, Tuple, TypeVar, Union
+from typing_extensions import Self
 from unittest.mock import patch
 
 import sympy
@@ -38,7 +39,7 @@ class Dep(abc.ABC):
     index: sympy.Expr
 
     @abc.abstractmethod
-    def rename(self, renames: dict[str, str]) -> "Dep":
+    def rename(self, renames: dict[str, str]) -> Self:
         pass
 
     @abc.abstractmethod
@@ -57,7 +58,7 @@ class Dep(abc.ABC):
     def is_contiguous(self) -> bool:
         pass
 
-    def normalize_with_stride_order(self, prefix: str = "t") -> "Dep":
+    def normalize_with_stride_order(self, prefix: str = "t") -> Self:
         return self
 
 

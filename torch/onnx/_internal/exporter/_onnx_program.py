@@ -12,10 +12,11 @@ import os
 import tempfile
 import textwrap
 import warnings
-from typing import Callable, TYPE_CHECKING
+from typing import Any, Callable, TYPE_CHECKING
 
 import torch
 from torch.onnx._internal._lazy_import import onnx, onnxscript_apis, onnxscript_ir as ir
+from torch.onnx._internal.exporter import _dynamic_shapes, _ir_passes
 from torch.utils import _pytree
 
 
@@ -253,6 +254,16 @@ ONNXProgram(
         if self._tempdir is not None:
             self._tempdir.cleanup()
             self._tempdir = None
+
+    def _rename_dynamic_axes(
+        self,
+        dynamic_shapes: dict[str, Any] | tuple[Any, ...] | list[Any],
+    ) -> None:
+        """Rename dynamic axes in a model according to the specified dynamic_axes names."""
+        rename_mapping = _dynamic_shapes.create_rename_mapping(
+            self.model.graph.inputs, dynamic_shapes
+        )
+        _ir_passes.rename_axis(self.model, rename_mapping)
 
 
 def _process_args(args, kwargs) -> tuple[torch.Tensor, ...]:

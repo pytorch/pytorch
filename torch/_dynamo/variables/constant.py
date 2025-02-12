@@ -185,7 +185,7 @@ its type to `common_constant_types`.
             return ConstantVariable.create(len(self.value))
         elif name == "__round__" and len(args) == 1 and args[0].is_python_constant():
             return ConstantVariable.create(
-                round(self.value, args[0].is_python_constant())
+                round(self.value, args[0].as_python_constant())
             )
         elif name == "__contains__" and len(args) == 1 and args[0].is_python_constant():
             assert not kwargs

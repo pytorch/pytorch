@@ -60,7 +60,47 @@ try:
         if not _version.hip:
             import pynvml  # type: ignore[import]
         else:
-            import amdsmi  # type: ignore[import]
+            import ctypes
+            from pathlib import Path
+
+            # In ROCm (at least up through 6.3.2) there're 2 copies of libamd_smi.so:
+            # - One at lib/libamd_smi.so
+            # - One at share/amd_smi/amdsmi/libamd_smi.so
+            #
+            # The amdsmi python module hardcodes loading the second one in share-
+            # https://github.com/ROCm/amdsmi/blob/1d305dc9708e87080f64f668402887794cd46584/py-interface/amdsmi_wrapper.py#L174
+            #
+            # See also https://github.com/ROCm/amdsmi/issues/72.
+            #
+            # This creates an ODR violation if the copy of libamd_smi.so from lib
+            # is also loaded (via `ld` linking, `LD_LIBRARY_PATH` or `rpath`).
+            #
+            # In order to avoid the violation we hook CDLL and try using the
+            # already loaded version of amdsmi, or any version in the processes
+            # rpath/LD_LIBRARY_PATH first, so that we only load a single copy
+            # of the .so.
+            class amdsmi_cdll_hook:
+                def __init__(self) -> None:
+                    self.original_CDLL = ctypes.CDLL  # type: ignore[misc,assignment]
+
+                def hooked_CDLL(
+                    self, name: Union[str, Path, None], *args: Any, **kwargs: Any
+                ) -> ctypes.CDLL:
+                    if name and Path(name).name == "libamd_smi.so":
+                        try:
+                            return self.original_CDLL("libamd_smi.so", *args, **kwargs)
+                        except OSError:
+                            pass
+                    return self.original_CDLL(name, *args, **kwargs)  # type: ignore[arg-type]
+
+                def __enter__(self) -> None:
+                    ctypes.CDLL = self.hooked_CDLL  # type: ignore[misc,assignment]
+
+                def __exit__(self, type: Any, value: Any, traceback: Any) -> None:
+                    ctypes.CDLL = self.original_CDLL  # type: ignore[misc]
+
+            with amdsmi_cdll_hook():
+                import amdsmi  # type: ignore[import]
 
         _HAS_PYNVML = True
     except ModuleNotFoundError:

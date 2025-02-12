@@ -540,7 +540,7 @@ if(USE_XNNPACK AND NOT USE_SYSTEM_XNNPACK)
     set(__caffe2_CMAKE_POSITION_INDEPENDENT_CODE_FLAG ${CMAKE_POSITION_INDEPENDENT_CODE})
     set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
-    if(Win32)
+    if(WIN32)
       # Disable libm dependency explicitly to avoid symbol conflict for XNNPACK as
       # Windows runtime has provided the math functions - #134989
       set(XNNPACK_BUILD_WITH_LIBM OFF CACHE BOOL "")

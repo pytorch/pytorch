@@ -256,7 +256,9 @@ void apply_lapack_eigh(const Tensor& values, const Tensor& vectors, const Tensor
   lapackSyevd<scalar_t, value_t>(jobz, uplo, n, vectors_data, lda, values_data,
     &lwork_query, lwork, &rwork_query, lrwork, &iwork_query, liwork, infos_data);
 
-  lwork = std::max<int>(1, real_impl<scalar_t, value_t>(lwork_query));
+  value_t next_after_lw = std::nextafter(real_impl<scalar_t, value_t>(lwork_query), std::numeric_limits<value_t>::infinity());
+  lwork = std::max<int>(1, std::ceil(next_after_lw));
+
   Tensor work = at::empty({lwork}, vectors.options());
   auto work_data = work.mutable_data_ptr<scalar_t>();
 
@@ -267,7 +269,8 @@ void apply_lapack_eigh(const Tensor& values, const Tensor& vectors, const Tensor
   Tensor rwork;
   value_t* rwork_data = nullptr;
   if (vectors.is_complex()) {
-    lrwork = std::max<int>(1, rwork_query);
+    value_t next_after_rwork_query = std::nextafter(rwork_query, std::numeric_limits<value_t>::infinity());
+    lrwork = std::max<int>(1, std::ceil(next_after_rwork_query));
     rwork = at::empty({lrwork}, values.options());
     rwork_data = rwork.mutable_data_ptr<value_t>();
   }

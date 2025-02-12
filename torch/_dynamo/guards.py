@@ -91,6 +91,7 @@ from .source import (
     GlobalStateSource,
     GlobalWeakRefSource,
     GradSource,
+    ListGetItemSource,
     LocalSource,
     NNModuleSource,
     NumpyTensorSource,
@@ -1084,6 +1085,14 @@ class GuardBuilder(GuardBuilderBase):
 
             out = base_guard_manager.indexed_manager(
                 idx=source.idx,
+                source=source_name,
+                example_value=example_value,
+                guard_manager_enum=guard_manager_enum,
+            )
+        elif istype(source, ListGetItemSource):
+            assert base_guard_manager  # to make mypy happy
+            out = base_guard_manager.list_getitem_manager(
+                key=source.index,
                 source=source_name,
                 example_value=example_value,
                 guard_manager_enum=guard_manager_enum,

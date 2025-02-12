@@ -20,6 +20,7 @@ from torch.distributed._functional_collectives import (
     reduce_scatter_tensor,
     reduce_scatter_tensor_coalesced,
 )
+from torch.testing._internal.common_cuda import SM90OrLater
 from torch.testing._internal.common_distributed import (
     MultiProcessTestCase,
     requires_nccl,
@@ -27,6 +28,7 @@ from torch.testing._internal.common_distributed import (
 )
 from torch.testing._internal.common_utils import (  # type: ignore[attr-defined]
     run_tests,
+    skipIfRocm,
     TestCase,
 )
 from torch.testing._internal.distributed.fake_pg import FakeStore
@@ -479,6 +481,62 @@ class TestWithNCCL(MultiProcessTestCase):
         t = TestThread()
         t.start()
         t.join()
+
+    @skipIfRocm
+    @unittest.skipIf(
+        not SM90OrLater,
+        "_scaled_mm currently only supports sm>=90",
+    )
+    @skip_if_lt_x_gpu(2)
+    @fresh_inductor_cache()
+    def test_fixed_striding(self):
+        self._init_process_group()
+
+        def scale(t):
+            scale = (
+                torch.finfo(torch.float8_e4m3fn).max
+                / t.abs().amax(dim=-1, keepdim=True).float()
+            )
+            t = t.mul(scale).to(torch.float8_e4m3fn)
+            return t, scale
+
+        def fp8_rowwise_backward(in_, w, out_grad):
+            out_grad_fp8, scale_out_grad = scale(out_grad)
+            w_fp8, scale_w = scale(w.t().contiguous())
+            out_grad_fp8 = funcol.all_gather_tensor(
+                out_grad_fp8, gather_dim=0, group=torch.distributed.group.WORLD
+            )
+            scale_out_grad = funcol.all_gather_tensor(
+                scale_out_grad, gather_dim=0, group=torch.distributed.group.WORLD
+            )
+            in_grad = torch._scaled_mm(
+                out_grad_fp8,
+                w_fp8.t(),
+                scale_a=scale_out_grad,
+                scale_b=scale_w.t(),
+                out_dtype=torch.bfloat16,
+            )
+
+            out_grad = funcol.all_gather_tensor(
+                out_grad.t().contiguous(),
+                gather_dim=0,
+                group=torch.distributed.group.WORLD,
+            )
+            w_grad = out_grad @ in_
+
+            return in_grad, w_grad
+
+        m, n, k = 128, 256, 64
+        in_ = torch.randn((m, k), device="cuda", dtype=torch.bfloat16)
+        w = torch.randn((n, k), device="cuda", dtype=torch.bfloat16)
+        out_grad = torch.randn((m, n), device="cuda", dtype=torch.bfloat16)
+
+        eager_in_grad, eager_w_grad = fp8_rowwise_backward(in_, w, out_grad)
+        compile_in_grad, compile_w_grad = torch.compile(fp8_rowwise_backward)(
+            in_, w, out_grad
+        )
+
+        self.assertTrue(torch.allclose(compile_w_grad, eager_w_grad))
 
 
 def dummy_init_pg() -> None:
@@ -1035,15 +1093,16 @@ class CompileTest(TestCase):
         (
             FileCheck()
             .check("buf0 = empty")
-            .check("buf7 = empty")
+            .check("buf1 = buf0")
+            .check("buf8 = empty")
             # Expect in-place with inductor allocated buf
-            .check("torch.ops._c10d_functional.broadcast_.default(buf0")
-            .check("torch.ops._c10d_functional.wait_tensor.default(buf0")
+            .check("torch.ops._c10d_functional.broadcast_.default(buf1")
+            .check("torch.ops._c10d_functional.wait_tensor.default(buf1")
             # Expect no in-place with graph input (buf5 is a clone)
-            .check("torch.ops._c10d_functional.broadcast_.default(buf7")
-            .check("torch.ops._c10d_functional.wait_tensor.default(buf7")
+            .check("torch.ops._c10d_functional.broadcast_.default(buf8")
+            .check("torch.ops._c10d_functional.wait_tensor.default(buf8")
             # Expect no extra copy on return
-            .check("return (buf0, buf7, )")
+            .check("return (buf1, buf8, )")
             .run(code)
         )
 
