@@ -178,7 +178,7 @@ bool FunctionalTensorWrapper::is_up_to_date() const {
 // See Note [Functionalization Pass - Inplace View Ops]
 void FunctionalTensorWrapper::mutate_view_meta(const at::functionalization::ViewMeta& meta) {
   view_metas_.push_back(meta);
-  // Manually track the fact that this tensor recieved a metadata mutation!
+  // Manually track the fact that this tensor received a metadata mutation!
   has_metadata_mutation_ = true;
   // Mark this tensor as being symbolic if there are any symbolic inputs used by the view operation.
   maybe_mark_symbolic(meta);
@@ -579,7 +579,7 @@ std::vector<Tensor> from_functional_tensor(ITensorListRef t_list) {
   for (const auto& tensor : t_list) {
     // from_functional_tensor(Tensor) has asserts to make sure you don't accidentally call
     // it on a non-functional input,
-    // but from_functional_tensor(TensorList) can recieve a list containing both
+    // but from_functional_tensor(TensorList) can receive a list containing both
     // functional and non-functional tensors.
     // Example of when that can happen: torch.cat(function_input_tensor, global_state_tensor).
     // When that happens, we're okay with only unwrapping the functional tensors.
