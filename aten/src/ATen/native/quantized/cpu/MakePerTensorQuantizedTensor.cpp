@@ -11,8 +11,7 @@
 #include <ATen/ops/_make_per_tensor_quantized_tensor_native.h>
 #endif
 
-namespace at {
-namespace native {
+namespace at::native {
 
 Tensor make_per_tensor_quantized_tensor_cpu(
     const Tensor& self,
@@ -37,5 +36,4 @@ Tensor make_per_tensor_quantized_tensor_cpu(
   return dst;
 }
 
-} // namespace native
-} // namespace at
+} // namespace at::native

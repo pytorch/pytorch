@@ -983,6 +983,10 @@ function process_alloc_data(snapshot, device, plot_segments, max_entries) {
       if (elem.stream !== null) {
         text = `${text}, stream ${elem.stream}`;
       }
+      if (elem.timestamp !== null) {
+        var d = new Date(elem.time_us / 1000);
+        text = `${text}, timestamp ${d}`;
+      }
       if (!elem.action.includes('alloc')) {
         text = `${text}\nalloc not recorded, stack trace for free:`;
       }
@@ -1269,6 +1273,22 @@ function create_trace_view(
     );
   const delegate = ContextViewer(context_div.append('pre').text('none'), data);
   plot.set_delegate(delegate);
+}
+
+function create_settings_view(dst, snapshot, device) {
+  dst.selectAll('svg').remove();
+  dst.selectAll('div').remove();
+  const settings_div = dst.append('div');
+  settings_div.append('p').text('CUDA Caching Allocator Settings:');
+
+  // Check if allocator_settings exists in snapshot
+  if ('allocator_settings' in snapshot) {
+    settings_div
+      .append('pre')
+      .text(JSON.stringify(snapshot.allocator_settings, null, 2));
+  } else {
+    settings_div.append('p').text('No allocator settings found.');
+  }
 }
 
 function unpickle(buffer) {
@@ -1564,6 +1584,7 @@ const kinds = {
   'Allocator State History': create_segment_view,
   'Active Cached Segment Timeline': (dst, snapshot, device) =>
     create_trace_view(dst, snapshot, device, true),
+  'Allocator Settings': create_settings_view,
 };
 
 const snapshot_cache = {};

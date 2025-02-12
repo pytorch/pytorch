@@ -8,7 +8,6 @@ import math
 import operator
 import unittest
 from re import escape
-from typing import List, Set
 
 import torch
 from functorch.experimental.control_flow import cond
@@ -41,10 +40,12 @@ from torch.export._remove_auto_functionalized_pass import (
     unsafe_remove_auto_functionalized_pass,
 )
 from torch.export._remove_effect_tokens_pass import _remove_effect_tokens
+from torch.export.passes import move_to_device_pass
 from torch.fx.experimental.symbolic_shapes import ShapeEnv
 from torch.fx.passes.infra.partitioner import Partition
 from torch.fx.passes.operator_support import OperatorSupport
 from torch.library import _scoped_library, impl
+from torch.testing._internal.common_cuda import TEST_CUDA
 from torch.testing._internal.common_utils import (
     IS_WINDOWS,
     run_tests,
@@ -73,11 +74,11 @@ class _AtenAddOperatorSupport(OperatorSupport):
         return node.op == "call_function" and node.target in {torch.ops.aten.add.Tensor}
 
 
-def _to_partition_names(partitions: List[Partition]) -> List[Set[str]]:
+def _to_partition_names(partitions: list[Partition]) -> list[set[str]]:
     return [{n.name for n in p.nodes} for p in partitions]
 
 
-def _get_output_names(gm: torch.fx.GraphModule) -> List[str]:
+def _get_output_names(gm: torch.fx.GraphModule) -> list[str]:
     output_node = next(n for n in gm.graph.nodes if n.op == "output")
     args = pytree.tree_leaves(output_node.args)
     # if isinstance(args, tuple) and len(args) == 1:
@@ -245,6 +246,17 @@ def _with_autocast_tests():
                 e = d - 1
             return d, e
 
+    class NestedAutocastOp(torch.nn.Module):
+        def forward(self, x):
+            x = x + 1
+            with torch.autocast(device_type="cpu", enabled=True):
+                c = x.sin().sum()
+                with torch.autocast(device_type="cpu", enabled=False):
+                    d = c + 1
+            with torch.autocast(device_type="cpu", enabled=True):
+                e = d - 1
+            return d, e
+
     x = torch.randn(2, 2)
 
     def _get_predispatch_module(mod, args):
@@ -264,6 +276,40 @@ def _with_autocast_tests():
         "ctx_manager_split": (
             SplitAutocastOp(),
             _get_predispatch_module(SplitAutocastOp(), (x,)),
+            (x,),
+        ),
+        "ctx_manager_nested": (
+            NestedAutocastOp(),
+            _get_predispatch_module(NestedAutocastOp(), (x,)),
+            (x,),
+        ),
+    }
+
+
+def _with_mixed_autocast_set_grad_tests():
+    from torch.export._trace import _export
+
+    class WithAutocastSetGradOp(torch.nn.Module):
+        def forward(self, x):
+            x = x + 1
+            torch._C._set_grad_enabled(True)
+            c = x.sin()
+            torch._C._set_grad_enabled(False)
+            c = c.cos()
+            with torch.autocast(device_type="cpu", enabled=False):
+                d = c + 1
+            e = d - 1
+            return d, e
+
+    x = torch.randn(2, 2)
+
+    def _get_predispatch_module(mod, args):
+        return _export(mod, args, pre_dispatch=True).module()
+
+    return {
+        "multi_ctx_manager": (
+            WithAutocastSetGradOp(),
+            _get_predispatch_module(WithAutocastSetGradOp(), (x,)),
             (x,),
         ),
     }
@@ -328,17 +374,23 @@ def _sequential_split_inline_tests():
 class TestPasses(TestCase):
     def setUp(self):
         super().setUp()
+        self.MIXED_AUTOCAST_SET_GRAD_TESTS = _with_mixed_autocast_set_grad_tests()
         self.SEQUENTIAL_SPLIT_INLINE_TESTS = _sequential_split_inline_tests()
         self.SET_GRAD_ENABLED_TESTS = _set_grad_enabled_tests()
         self.WITH_AUTOCAST_TESTS = _with_autocast_tests()
-
         init_torchbind_implementations()
 
     def tearDown(self):
         self.SEQUENTIAL_SPLIT_INLINE_TESTS.clear()
         self.SET_GRAD_ENABLED_TESTS.clear()
         self.WITH_AUTOCAST_TESTS.clear()
+        self.MIXED_AUTOCAST_SET_GRAD_TESTS.clear()
         super().tearDown()
+
+    def _check_node_users_in_the_same_graph(self, gm):
+        for node in gm.graph.nodes:
+            for user in node.users:
+                self.assertTrue(user.graph is gm.graph)
 
     def test_runtime_assert_one_dim(self) -> None:
         class M(torch.nn.Module):
@@ -351,7 +403,9 @@ class TestPasses(TestCase):
         x = torch.zeros(2, 2, 3)
 
         dim1_x = torch.export.Dim("dim1_x", min=2, max=6)
-        ep = torch.export.export(M(), (x,), dynamic_shapes={"x": {1: dim1_x}})
+        ep = torch.export.export(
+            M(), (x,), dynamic_shapes={"x": {1: dim1_x}}, strict=True
+        )
 
         with self.assertRaisesRegex(
             RuntimeError,
@@ -378,7 +432,10 @@ class TestPasses(TestCase):
         dim0_x, dim0_y = torch.export.dims("dim0_x", "dim0_y", min=3)
 
         ep = torch.export.export(
-            M(), (x, y), dynamic_shapes={"x": {0: dim0_x, 1: dim1_x}, "y": {0: dim0_y}}
+            M(),
+            (x, y),
+            dynamic_shapes={"x": {0: dim0_x, 1: dim1_x}, "y": {0: dim0_y}},
+            strict=True,
         )
 
         with self.assertRaisesRegex(
@@ -408,7 +465,10 @@ class TestPasses(TestCase):
         dim0_x = torch.export.Dim("dim0_x", min=3)
 
         ep = torch.export.export(
-            M(), (x, y), dynamic_shapes={"x": {0: dim0_x, 1: dim1_x}, "y": None}
+            M(),
+            (x, y),
+            dynamic_shapes={"x": {0: dim0_x, 1: dim1_x}, "y": None},
+            strict=True,
         )
 
         with self.assertRaisesRegex(
@@ -443,7 +503,7 @@ class TestPasses(TestCase):
 
         dim1_y = torch.export.Dim("dim1_y", min=3, max=6)
         ep = torch.export.export(
-            M(), (x, y), dynamic_shapes={"x": None, "y": {1: dim1_y}}
+            M(), (x, y), dynamic_shapes={"x": None, "y": {1: dim1_y}}, strict=True
         )
 
         with self.assertRaisesRegex(RuntimeError, escape("shape[1] to be equal to 2")):
@@ -473,7 +533,7 @@ class TestPasses(TestCase):
 
         x = torch.zeros(4, 2, 3)
 
-        ep = export(M(), (x,))
+        ep = export(M(), (x,), strict=True)
         self.assertEqual(count_call_function(ep.graph, torch.ops.aten.view.default), 1)
 
         ep = ep._transform_do_not_use(ReplaceViewOpsWithViewCopyOpsPass())
@@ -489,7 +549,7 @@ class TestPasses(TestCase):
 
         x = torch.zeros(4, 2, 3)
         foo = Module()
-        ep = export(foo, (x,))._transform_do_not_use(
+        ep = export(foo, (x,), strict=True)._transform_do_not_use(
             ReplaceViewOpsWithViewCopyOpsPass()
         )
         # After this pass, there shouldn't be any view nodes in the graph
@@ -560,18 +620,18 @@ class TestPasses(TestCase):
 
         m = MyModule()
         inputs = (torch.ones(2, 3),)
-        ep = torch.export.export(m, inputs, strict=False)
+        ep = export(m, inputs, strict=False).run_decompositions({})
         without_token_ep = _remove_effect_tokens(ep)
         self.assertExpectedInline(
             without_token_ep.graph_module.code.strip(),
             """\
 def forward(self, token, obj_attr, x):
-    with_effects = torch._higher_order_ops.effects.with_effects(token, torch.ops._TorchScriptTesting.takes_foo_tuple_return.default, foo = obj_attr, x = x);  token = x = None
+    with_effects = torch.ops.higher_order.with_effects(token, torch.ops._TorchScriptTesting.takes_foo_tuple_return.default, foo = obj_attr, x = x);  token = x = None
     getitem = with_effects[0]
     getitem_1 = with_effects[1]
     getitem_2 = with_effects[2];  with_effects = None
     add = torch.ops.aten.add.Tensor(getitem_1, getitem_2);  getitem_1 = getitem_2 = None
-    with_effects_1 = torch._higher_order_ops.effects.with_effects(getitem, torch.ops._TorchScriptTesting.takes_foo.default, foo = obj_attr, x = add);  getitem = obj_attr = add = None
+    with_effects_1 = torch.ops.higher_order.with_effects(getitem, torch.ops._TorchScriptTesting.takes_foo.default, foo = obj_attr, x = add);  getitem = obj_attr = add = None
     getitem_3 = with_effects_1[0]
     getitem_4 = with_effects_1[1];  with_effects_1 = None
     return (getitem_3, getitem_4)""",  # noqa: B950
@@ -590,7 +650,7 @@ def forward(self, token, obj_attr, x):
                 allow_non_fake_inputs=True,
             )
             with _fakify_script_objects(m, (), {}, fake_mode) as (
-                patched_mod,
+                _,
                 _,
                 _,
                 fake_constant_attrs,
@@ -604,17 +664,16 @@ def forward(self, token, obj_attr, x):
     @unittest.expectedFailure
     def test_fakify_script_objects_properly_handle_containers(self):
         m = ModelsWithScriptObjectAttr.SimpleWithAttrInContainer()
-        constant_attrs = _gather_constant_attrs(m)
         fake_mode = FakeTensorMode(
             shape_env=ShapeEnv(tracked_fakes=[]),
             allow_non_fake_inputs=True,
         )
         with _fakify_script_objects(m, (), {}, fake_mode) as (
-            patched_mod,
+            _,
             _,
             _,
             fake_constant_attrs,
-            fake_to_real,
+            _,
         ):
             self.assertTrue("attr" in fake_constant_attrs.values())
             self.assertTrue("pytree_attr2" in fake_constant_attrs.values())
@@ -632,7 +691,7 @@ def forward(self, token, obj_attr, x):
 
         x = torch.tensor([2])
         mod = M()
-        ep = export(mod, (x,))
+        ep = export(mod, (x,), strict=True)
 
         with self.assertRaisesRegex(
             RuntimeError, r"Runtime assertion failed for expression u[\d+] \<\= 5"
@@ -657,7 +716,9 @@ def forward(self, token, obj_attr, x):
 
         mod = M()
         dim0_x = torch.export.Dim("dim0_x")
-        ep = torch.export.export(mod, (x,), dynamic_shapes={"x": {0: dim0_x}})
+        ep = torch.export.export(
+            mod, (x,), dynamic_shapes={"x": {0: dim0_x}}, strict=True
+        )
 
         num_assert = count_call_function(
             ep.graph, torch.ops.aten._assert_scalar.default
@@ -710,7 +771,7 @@ def forward(self, token, obj_attr, x):
         x = torch.tensor([2])
         y = torch.tensor([5])
         mod = M()
-        ep = export(mod, (torch.tensor(True), x, y))
+        ep = export(mod, (torch.tensor(True), x, y), strict=True)
 
         with self.assertRaisesRegex(
             RuntimeError, "is outside of inline constraint \\[2, 5\\]."
@@ -727,17 +788,12 @@ def forward(self, token, obj_attr, x):
 
         func = Module()
         x = torch.randn(1, dtype=torch.float32)
-        ep = torch.export.export(func, args=(x,))
+        ep = torch.export.export(func, args=(x,), strict=True)
         _ExportPassBaseDeprecatedDoNotUse()(ep.graph_module)
 
     def test_predispatch_set_grad(self):
-        def _check_node_users_in_the_same_graph(gm):
-            for node in gm.graph.nodes:
-                for user in node.users:
-                    self.assertTrue(user.graph is gm.graph)
-
         mod_orig, mod, args = self.SET_GRAD_ENABLED_TESTS["op"]
-        _check_node_users_in_the_same_graph(mod)
+        self._check_node_users_in_the_same_graph(mod)
         self.assertEqual(mod_orig(*args), mod(*args))
         self.assertExpectedInline(
             mod.code.strip("\n"),
@@ -748,7 +804,7 @@ def forward(self, x):
     sin = torch.ops.aten.sin.default(add);  add = None
     sum_1 = torch.ops.aten.sum.default(sin);  sin = None
     submod_4 = self.submod_2
-    add_1 = torch._higher_order_ops.wrap.wrap_with_set_grad_enabled(False, submod_4, sum_1);  submod_4 = sum_1 = None
+    add_1 = torch.ops.higher_order.wrap_with_set_grad_enabled(False, submod_4, sum_1);  submod_4 = sum_1 = None
     getitem = add_1[0];  add_1 = None
     sub = torch.ops.aten.sub.Tensor(getitem, 1)
     return pytree.tree_unflatten((getitem, sub), self._out_spec)
@@ -756,7 +812,7 @@ def forward(self, x):
         )
 
         mod_orig, mod, args = self.SET_GRAD_ENABLED_TESTS["op_under_no_grad"]
-        _check_node_users_in_the_same_graph(mod)
+        self._check_node_users_in_the_same_graph(mod)
         self.assertEqual(mod_orig(*args), mod(*args))
         self.assertExpectedInline(
             mod.code.strip("\n"),
@@ -767,7 +823,7 @@ def forward(self, x):
     sin = torch.ops.aten.sin.default(add);  add = None
     sum_1 = torch.ops.aten.sum.default(sin);  sin = None
     submod_4 = self.submod_2
-    add_1 = torch._higher_order_ops.wrap.wrap_with_set_grad_enabled(False, submod_4, sum_1);  submod_4 = sum_1 = None
+    add_1 = torch.ops.higher_order.wrap_with_set_grad_enabled(False, submod_4, sum_1);  submod_4 = sum_1 = None
     getitem = add_1[0];  add_1 = None
     sub = torch.ops.aten.sub.Tensor(getitem, 1)
     return pytree.tree_unflatten((getitem, sub), self._out_spec)
@@ -775,7 +831,7 @@ def forward(self, x):
         )
 
         mod_orig, mod, args = self.SET_GRAD_ENABLED_TESTS["ctx_manager"]
-        _check_node_users_in_the_same_graph(mod)
+        self._check_node_users_in_the_same_graph(mod)
         self.assertEqual(mod_orig(*args), mod(*args))
         self.assertExpectedInline(
             mod.code.strip("\n"),
@@ -786,7 +842,7 @@ def forward(self, x):
     sin = torch.ops.aten.sin.default(add);  add = None
     sum_1 = torch.ops.aten.sum.default(sin);  sin = None
     submod_3 = self.submod_1
-    add_1 = torch._higher_order_ops.wrap.wrap_with_set_grad_enabled(False, submod_3, sum_1);  submod_3 = sum_1 = None
+    add_1 = torch.ops.higher_order.wrap_with_set_grad_enabled(False, submod_3, sum_1);  submod_3 = sum_1 = None
     getitem = add_1[0];  add_1 = None
     sub = torch.ops.aten.sub.Tensor(getitem, 1)
     return pytree.tree_unflatten((getitem, sub), self._out_spec)
@@ -794,7 +850,7 @@ def forward(self, x):
         )
 
         mod_orig, mod, args = self.SET_GRAD_ENABLED_TESTS["ctx_manager_under_no_grad"]
-        _check_node_users_in_the_same_graph(mod)
+        self._check_node_users_in_the_same_graph(mod)
         self.assertEqual(mod_orig(*args), mod(*args))
         self.assertExpectedInline(
             mod.code.strip("\n"),
@@ -803,18 +859,18 @@ def forward(self, x):
     x, = fx_pytree.tree_flatten_spec(([x], {}), self._in_spec)
     add = torch.ops.aten.add.Tensor(x, 1);  x = None
     submod_5 = self.submod_1
-    sum_1 = torch._higher_order_ops.wrap.wrap_with_set_grad_enabled(True, submod_5, add);  submod_5 = add = None
+    sum_1 = torch.ops.higher_order.wrap_with_set_grad_enabled(True, submod_5, add);  submod_5 = add = None
     getitem = sum_1[0];  sum_1 = None
     add_1 = torch.ops.aten.add.Tensor(getitem, 1);  getitem = None
     submod_6 = self.submod_3
-    sub = torch._higher_order_ops.wrap.wrap_with_set_grad_enabled(True, submod_6, add_1);  submod_6 = None
+    sub = torch.ops.higher_order.wrap_with_set_grad_enabled(True, submod_6, add_1);  submod_6 = None
     getitem_1 = sub[0];  sub = None
     return pytree.tree_unflatten((add_1, getitem_1), self._out_spec)
     """,
         )
 
         mod_orig, mod, args = self.SET_GRAD_ENABLED_TESTS["ctx_manager_multi_dep"]
-        _check_node_users_in_the_same_graph(mod)
+        self._check_node_users_in_the_same_graph(mod)
         self.assertEqual(mod_orig(*args), mod(*args))
         self.assertExpectedInline(
             mod.code.strip("\n"),
@@ -827,7 +883,7 @@ def forward(self, x):
     cos = torch.ops.aten.cos.default(add);  add = None
     sum_2 = torch.ops.aten.sum.default(cos);  cos = None
     submod_3 = self.submod_1
-    wrap_with_set_grad_enabled = torch._higher_order_ops.wrap.wrap_with_set_grad_enabled(False, submod_3, sum_1, sum_2);  submod_3 = sum_1 = sum_2 = None
+    wrap_with_set_grad_enabled = torch.ops.higher_order.wrap_with_set_grad_enabled(False, submod_3, sum_1, sum_2);  submod_3 = sum_1 = sum_2 = None
     add_1 = wrap_with_set_grad_enabled[0]
     add_2 = wrap_with_set_grad_enabled[1];  wrap_with_set_grad_enabled = None
     sub = torch.ops.aten.sub.Tensor(add_1, 1)
@@ -839,7 +895,7 @@ def forward(self, x):
         mod_orig, mod, args = self.SET_GRAD_ENABLED_TESTS[
             "ctx_manager_multi_dep_no_grad"
         ]
-        _check_node_users_in_the_same_graph(mod)
+        self._check_node_users_in_the_same_graph(mod)
         self.assertEqual(mod_orig(*args), mod(*args))
         self.assertExpectedInline(
             mod.code.strip("\n"),
@@ -848,13 +904,13 @@ def forward(self, x):
     x, = fx_pytree.tree_flatten_spec(([x], {}), self._in_spec)
     add = torch.ops.aten.add.Tensor(x, 1);  x = None
     submod_5 = self.submod_1
-    wrap_with_set_grad_enabled = torch._higher_order_ops.wrap.wrap_with_set_grad_enabled(True, submod_5, add);  submod_5 = add = None
+    wrap_with_set_grad_enabled = torch.ops.higher_order.wrap_with_set_grad_enabled(True, submod_5, add);  submod_5 = add = None
     sum_1 = wrap_with_set_grad_enabled[0]
     sum_2 = wrap_with_set_grad_enabled[1];  wrap_with_set_grad_enabled = None
     add_1 = torch.ops.aten.add.Tensor(sum_1, 1);  sum_1 = None
     add_2 = torch.ops.aten.add.Tensor(sum_2, 1);  sum_2 = None
     submod_6 = self.submod_3
-    wrap_with_set_grad_enabled_1 = torch._higher_order_ops.wrap.wrap_with_set_grad_enabled(True, submod_6, add_1, add_2);  submod_6 = None
+    wrap_with_set_grad_enabled_1 = torch.ops.higher_order.wrap_with_set_grad_enabled(True, submod_6, add_1, add_2);  submod_6 = None
     sub = wrap_with_set_grad_enabled_1[0]
     sub_1 = wrap_with_set_grad_enabled_1[1];  wrap_with_set_grad_enabled_1 = None
     return pytree.tree_unflatten((add_1, add_2, sub, sub_1), self._out_spec)
@@ -927,14 +983,79 @@ def forward(self, sin, cos):
     """,
         )
 
+    def test_predispatch_autocast_and_set_grad(self):
+        mod_orig, mod, args = self.MIXED_AUTOCAST_SET_GRAD_TESTS["multi_ctx_manager"]
+        self._check_node_users_in_the_same_graph(mod)
+        self.assertEqual(mod_orig(*args), mod(*args))
+        self.assertExpectedInline(
+            mod.code.strip("\n"),
+            """\
+def forward(self, x):
+    x, = fx_pytree.tree_flatten_spec(([x], {}), self._in_spec)
+    submod_3 = self.submod_3
+    add = torch.ops.aten.add.Tensor(x, 1);  x = None
+    sin = torch.ops.higher_order.wrap_with_set_grad_enabled(True, submod_3, add);  submod_3 = add = None
+    getitem_2 = sin[0];  sin = None
+    cos = torch.ops.aten.cos.default(getitem_2);  getitem_2 = None
+    submod_4 = self.submod_1
+    add_1 = torch.ops.higher_order.wrap_with_autocast('cpu', None, False, None, submod_4, cos);  submod_4 = cos = None
+    getitem = add_1[0];  add_1 = None
+    sub = torch.ops.aten.sub.Tensor(getitem, 1)
+    return pytree.tree_unflatten((getitem, sub), self._out_spec)
+    """,
+        )
+        self.assertExpectedInline(
+            mod.submod_3.code.strip("\n"),
+            """\
+def forward(self, add):
+    sin = torch.ops.aten.sin.default(add);  add = None
+    return (sin,)
+    """,
+        )
+        self.assertExpectedInline(
+            mod.submod_1.code.strip("\n"),
+            """\
+def forward(self, cos):
+    add_1 = torch.ops.aten.add.Tensor(cos, 1);  cos = None
+    return (add_1,)
+    """,
+        )
+
     def test_predispatch_autocast(self):
-        def _check_node_users_in_the_same_graph(gm):
-            for node in gm.graph.nodes:
-                for user in node.users:
-                    self.assertTrue(user.graph is gm.graph)
+        mod_orig, mod, args = self.WITH_AUTOCAST_TESTS["ctx_manager_nested"]
+        self._check_node_users_in_the_same_graph(mod)
+        self.assertEqual(mod_orig(*args), mod(*args))
+        self.assertExpectedInline(
+            mod.code.strip("\n"),
+            """\
+def forward(self, x):
+    x, = fx_pytree.tree_flatten_spec(([x], {}), self._in_spec)
+    add = torch.ops.aten.add.Tensor(x, 1);  x = None
+    submod_3 = self.submod_1
+    add_1 = torch.ops.higher_order.wrap_with_autocast('cpu', None, True, None, submod_3, add);  submod_3 = add = None
+    getitem = add_1[0];  add_1 = None
+    submod_4 = self.submod_2
+    sub = torch.ops.higher_order.wrap_with_autocast('cpu', None, True, None, submod_4, getitem);  submod_4 = None
+    getitem_1 = sub[0];  sub = None
+    return pytree.tree_unflatten((getitem, getitem_1), self._out_spec)
+    """,
+        )
+
+        self.assertExpectedInline(
+            mod.submod_1.code.strip("\n"),
+            """\
+def forward(self, add):
+    sin = torch.ops.aten.sin.default(add);  add = None
+    sum_1 = torch.ops.aten.sum.default(sin);  sin = None
+    submod_2 = self.submod_1
+    add_1 = torch.ops.higher_order.wrap_with_autocast('cpu', None, False, None, submod_2, sum_1);  submod_2 = sum_1 = None
+    getitem = add_1[0];  add_1 = None
+    return (getitem,)
+    """,
+        )
 
         mod_orig, mod, args = self.WITH_AUTOCAST_TESTS["ctx_manager"]
-        _check_node_users_in_the_same_graph(mod)
+        self._check_node_users_in_the_same_graph(mod)
         self.assertEqual(mod_orig(*args), mod(*args))
         self.assertExpectedInline(
             mod.code.strip("\n"),
@@ -943,13 +1064,13 @@ def forward(self, x):
     x, = fx_pytree.tree_flatten_spec(([x], {}), self._in_spec)
     add = torch.ops.aten.add.Tensor(x, 1);  x = None
     submod_4 = self.submod_1
-    sum_1 = torch._higher_order_ops.wrap.wrap_with_autocast('cpu', None, True, None, submod_4, add);  submod_4 = add = None
+    sum_1 = torch.ops.higher_order.wrap_with_autocast('cpu', None, True, None, submod_4, add);  submod_4 = add = None
     getitem = sum_1[0];  sum_1 = None
     submod_5 = self.submod_2
-    add_1 = torch._higher_order_ops.wrap.wrap_with_autocast('cpu', None, False, None, submod_5, getitem);  submod_5 = getitem = None
+    add_1 = torch.ops.higher_order.wrap_with_autocast('cpu', None, False, None, submod_5, getitem);  submod_5 = getitem = None
     getitem_1 = add_1[0];  add_1 = None
     submod_6 = self.submod_3
-    sub = torch._higher_order_ops.wrap.wrap_with_autocast('cpu', None, True, None, submod_6, getitem_1);  submod_6 = None
+    sub = torch.ops.higher_order.wrap_with_autocast('cpu', None, True, None, submod_6, getitem_1);  submod_6 = None
     getitem_2 = sub[0];  sub = None
     return pytree.tree_unflatten((getitem_1, getitem_2), self._out_spec)
     """,
@@ -984,7 +1105,7 @@ def forward(self, add_1):
         )
 
         mod_orig, mod, args = self.WITH_AUTOCAST_TESTS["ctx_manager_multi_dep"]
-        _check_node_users_in_the_same_graph(mod)
+        self._check_node_users_in_the_same_graph(mod)
         self.assertEqual(mod_orig(*args), mod(*args))
         self.assertExpectedInline(
             mod.code.strip("\n"),
@@ -993,15 +1114,15 @@ def forward(self, x):
     x, = fx_pytree.tree_flatten_spec(([x], {}), self._in_spec)
     add = torch.ops.aten.add.Tensor(x, 1);  x = None
     submod_4 = self.submod_1
-    wrap_with_autocast = torch._higher_order_ops.wrap.wrap_with_autocast('cpu', None, True, None, submod_4, add);  submod_4 = add = None
+    wrap_with_autocast = torch.ops.higher_order.wrap_with_autocast('cpu', None, True, None, submod_4, add);  submod_4 = add = None
     sum_1 = wrap_with_autocast[0]
     sum_2 = wrap_with_autocast[1];  wrap_with_autocast = None
     submod_5 = self.submod_2
-    wrap_with_autocast_1 = torch._higher_order_ops.wrap.wrap_with_autocast('cpu', None, False, None, submod_5, sum_1, sum_2);  submod_5 = sum_1 = sum_2 = None
+    wrap_with_autocast_1 = torch.ops.higher_order.wrap_with_autocast('cpu', None, False, None, submod_5, sum_1, sum_2);  submod_5 = sum_1 = sum_2 = None
     add_1 = wrap_with_autocast_1[0]
     add_2 = wrap_with_autocast_1[1];  wrap_with_autocast_1 = None
     submod_6 = self.submod_3
-    wrap_with_autocast_2 = torch._higher_order_ops.wrap.wrap_with_autocast('cpu', None, True, None, submod_6, add_1, add_2);  submod_6 = None
+    wrap_with_autocast_2 = torch.ops.higher_order.wrap_with_autocast('cpu', None, True, None, submod_6, add_1, add_2);  submod_6 = None
     sub = wrap_with_autocast_2[0]
     sub_1 = wrap_with_autocast_2[1];  wrap_with_autocast_2 = None
     return pytree.tree_unflatten((add_1, add_2, sub, sub_1), self._out_spec)
@@ -1041,7 +1162,7 @@ def forward(self, add_1, add_2):
         )
 
         mod_orig, mod, args = self.WITH_AUTOCAST_TESTS["ctx_manager_split"]
-        _check_node_users_in_the_same_graph(mod)
+        self._check_node_users_in_the_same_graph(mod)
         self.assertEqual(mod_orig(*args), mod(*args))
         self.assertExpectedInline(
             mod.code.strip("\n"),
@@ -1050,11 +1171,11 @@ def forward(self, x):
     x, = fx_pytree.tree_flatten_spec(([x], {}), self._in_spec)
     add = torch.ops.aten.add.Tensor(x, 1);  x = None
     submod_4 = self.submod_1
-    sum_1 = torch._higher_order_ops.wrap.wrap_with_autocast('cpu', None, True, None, submod_4, add);  submod_4 = add = None
+    sum_1 = torch.ops.higher_order.wrap_with_autocast('cpu', None, True, None, submod_4, add);  submod_4 = add = None
     getitem = sum_1[0];  sum_1 = None
     add_1 = torch.ops.aten.add.Tensor(getitem, 1);  getitem = None
     submod_5 = self.submod_3
-    sub = torch._higher_order_ops.wrap.wrap_with_autocast('cpu', None, True, None, submod_5, add_1);  submod_5 = None
+    sub = torch.ops.higher_order.wrap_with_autocast('cpu', None, True, None, submod_5, add_1);  submod_5 = None
     getitem_1 = sub[0];  sub = None
     return pytree.tree_unflatten((add_1, getitem_1), self._out_spec)
     """,
@@ -1119,7 +1240,7 @@ def forward(self, add_1):
 
             mod = M()
             x = torch.randn([3, 3])
-            ep = export(mod, (x,))
+            ep = export(mod, (x,), strict=True)
             inplace_ep = unsafe_remove_auto_functionalized_pass(ep)
             nodes = inplace_ep.graph.nodes
             for node in nodes:
@@ -1162,22 +1283,57 @@ def forward(self, add_1):
 
             mod = M()
             x = torch.randn([3, 3])
-            ep = export(mod, (x,))
+            ep = export(mod, (x,), strict=True).run_decompositions({})
             inplace_ep = unsafe_remove_auto_functionalized_pass(ep)
+            graph_text = str(inplace_ep.graph)
+            self.assertExpectedInline(
+                graph_text,
+                """\
+graph():
+    %b_state : [num_users=2] = placeholder[target=b_state]
+    %x : [num_users=1] = placeholder[target=x]
+    %custom_mutator_tuple_default : [num_users=2] = call_function[target=torch.ops.DO_NOT_USE_TEST_ONLY.custom_mutator_tuple.\
+default](args = (%x, %b_state), kwargs = {})
+    %getitem_3 : [num_users=1] = call_function[target=operator.getitem](args = (%custom_mutator_tuple_default, 0), kwargs = {})
+    %getitem_4 : [num_users=1] = call_function[target=operator.getitem](args = (%custom_mutator_tuple_default, 1), kwargs = {})
+    return (b_state, getitem_3, getitem_4)""",
+            )
 
-            nodes = inplace_ep.graph.nodes
-            getitems = 0
-            for node in nodes:
-                if node.op == "call_function":
-                    self.assertFalse(node.target is auto_functionalized)
-                    if node.target is operator.getitem:
-                        getitems += 1
-            self.assertEqual(getitems, 2)  # tuple return of len 2
+    @unittest.skipIf(not TEST_CUDA, "requires cuda")
+    def test_move_to_device_pass(self):
+        class Model(torch.nn.Module):
+            def __init__(self, size=4, h_dim=10):
+                super().__init__()
+                self.rnn = torch.nn.GRU(size, h_dim, batch_first=True)
 
-            out_specs = inplace_ep.graph_signature.output_specs
-            self.assertEqual(out_specs[0].arg.name, "b_state")  # state
-            self.assertEqual(out_specs[1].arg.name, "getitem")  # tuple return 1
-            self.assertEqual(out_specs[2].arg.name, "getitem_1")  # tuple return 2
+            def forward(self, x):
+                _, states = self.rnn(x)
+                return states
+
+        # move the exported program from cpu to cuda:0
+        mod = Model()
+        example_inputs = (torch.rand(1, 10, 4),)
+        ep = export(mod, example_inputs, strict=True)
+        location = torch.device("cuda:0")
+        ep = move_to_device_pass(ep, location=location)
+        gm = ep.module()
+        test_inputs = (torch.rand(1, 10, 4).to("cuda:0"),)
+        outputs = gm(*test_inputs)
+        self.assertEqual(outputs.device, torch.device("cuda:0"))
+        # move it back to cpu
+        location = "cpu"
+        ep = move_to_device_pass(ep, location=location)
+        gm = ep.module()
+        test_inputs = (torch.rand(1, 10, 4).to("cpu"),)
+        outputs = gm(*test_inputs)
+        self.assertEqual(outputs.device, torch.device("cpu"))
+        # move it to cuda:0 again
+        location = {"cpu": "cuda:0"}
+        ep = move_to_device_pass(ep, location=location)
+        gm = ep.module()
+        test_inputs = (torch.rand(1, 10, 4).to("cuda:0"),)
+        outputs = gm(*test_inputs)
+        self.assertEqual(outputs.device, torch.device("cuda:0"))
 
 
 if __name__ == "__main__":

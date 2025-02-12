@@ -23,7 +23,7 @@ constexpr auto kInternalModule = "torch.distributed.rpc.internal";
     auto dur = std::chrono::duration_cast<std::chrono::microseconds>(    \
         std::chrono::high_resolution_clock::now() - startTime);          \
     RpcAgent::getCurrentRpcAgent()->addGilWaitTime(dur);                 \
-  } // NOLINT
+  }
 
 // PythonTypeResolver that inherits from Script::Resolver to
 // support resolving types together with ScriptTypeParser.

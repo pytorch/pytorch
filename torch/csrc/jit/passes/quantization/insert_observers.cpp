@@ -17,8 +17,7 @@
 #include <string>
 #include <utility>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 using ModuleQConfigMap = std::unordered_map<ModulePtr, std::optional<QConfig>>;
 
@@ -1120,8 +1119,7 @@ void InsertObserversHelper::fillBoundaryValueMap(
         // offset of input for the caller node, since the first
         // input of CallFunction is the function node and the graph
         // for CallFunction start with actual input
-        // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-        size_t input_offset;
+        size_t input_offset = 0;
         if (n->kind() == prim::CallMethod) {
           auto m_opt = getInvokedModuleOpt(module, n, self);
           if (!m_opt.has_value()) {
@@ -1469,8 +1467,7 @@ InsertObserversHelper::insertObserversFor(
       if (n->kind() == prim::CallMethod || userDefinedCallFunction(n)) {
         script::Module m;
         std::shared_ptr<Graph> g;
-        // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-        size_t input_offset;
+        size_t input_offset = 0;
         bool is_udf_for_subblock = is_user_defined_function;
         if (n->kind() == prim::CallMethod) {
           auto m_opt = getInvokedModuleOpt(module, n, self);
@@ -1722,5 +1719,4 @@ Module InsertObserversForOnDevicePTQ(
       cloned_module, observer_method_name, /* is_entry_point */ true);
   return cloned_module;
 }
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

@@ -1,5 +1,4 @@
 # Owner(s): ["module: functorch"]
-
 # Copyright (c) Facebook, Inc. and its affiliates.
 # All rights reserved.
 #
@@ -1302,8 +1301,6 @@ class TestAutogradFunction(TestCase):
     # https://github.com/pytorch/pytorch/issues/90224
     @unittest.expectedFailure
     def test_once_differentiable_grad_vjp(self, device):
-        NumpyCubeNotComposable = self._get_NumpyCubeNotComposable()
-
         # grad x vjp
         x = torch.randn([], device=device)
         grad_y = torch.randn_like(x)
@@ -1554,7 +1551,7 @@ class TestAutogradFunctionVmapAPI(TestCase):
         B = 2
         x = torch.randn(B, 3)
         with self.assertRaisesRegex(RuntimeError, "to have two returns"):
-            result = vmap(Zeros.apply)(x)
+            vmap(Zeros.apply)(x)
 
         class TwoZeros(torch.autograd.Function):
             @staticmethod
@@ -1574,7 +1571,7 @@ class TestAutogradFunctionVmapAPI(TestCase):
         B = 2
         x = torch.randn(B, 3)
         with self.assertRaisesRegex(RuntimeError, "to have two returns"):
-            result = vmap(Zeros.apply)(x)
+            vmap(Zeros.apply)(x)
 
     def test_incompatible_out_dims_error_msg(self, device):
         class Zeros(torch.autograd.Function):
@@ -1595,7 +1592,7 @@ class TestAutogradFunctionVmapAPI(TestCase):
         B = 2
         x = torch.randn(B, 3)
         with self.assertRaisesRegex(RuntimeError, "returned an incompatible"):
-            result = vmap(Zeros.apply)(x)
+            vmap(Zeros.apply)(x)
 
         class Zeros(torch.autograd.Function):
             @staticmethod
@@ -1615,7 +1612,7 @@ class TestAutogradFunctionVmapAPI(TestCase):
         B = 2
         x = torch.randn(B, 3)
         with self.assertRaisesRegex(RuntimeError, "returned an incompatible"):
-            result = vmap(Zeros.apply)(x)
+            vmap(Zeros.apply)(x)
 
     def test_kwarg_only_tensors(self, device):
         with self.assertRaisesRegex(NotImplementedError, "kwarg-only Tensor args"):
@@ -2637,6 +2634,17 @@ class TestJvp(TestCase):
         self.assertTrue(isinstance(result, tuple))
         self.assertEqual(result, expected)
 
+    def test_jvp_new_tensor(self):
+        def f(x):
+            y = x.new_tensor(0.5)
+            return x + y
+
+        x = torch.rand(10, 10)
+        tangents = torch.zeros_like(x)
+        actual = jvp(f, (x,), (tangents,))
+        expected = (f(x), torch.zeros_like(x))
+        self.assertEqual(actual, expected)
+
     def test_primals_tangents_length_mismatch(self, device):
         x = torch.randn(2, 3, device=device)
         t = torch.randn(2, 3, device=device)
@@ -2871,7 +2879,7 @@ class TestLinearize(TestCase):
         self.assertEqual(actual_jvp, expected_jvp)
 
     @dtypes(torch.float)
-    def test_linearize_composition(self, device, dtype):
+    def test_linearize_composition_vmap(self, device, dtype):
         x_p = make_tensor((3, 1), device=device, dtype=dtype)
         x_t = make_tensor((3, 3, 1), device=device, dtype=dtype)
 
@@ -2885,6 +2893,25 @@ class TestLinearize(TestCase):
             return jvp(fn, (x_p,), (x_t,))[1]
 
         expected_batched_jvp = vmap(jvp_fn)(x_t)
+
+        self.assertEqual(actual_batched_jvp, expected_batched_jvp)
+
+    @dtypes(torch.float)
+    def test_linearize_composition_grad(self, device, dtype):
+        x_p = make_tensor((3,), device=device, dtype=dtype)
+        x_t = make_tensor((3,), device=device, dtype=dtype)
+
+        def fn(x):
+            z = torch.ones(3, device=device, dtype=dtype)
+            return grad(lambda x: z @ x)(x)
+
+        _, jvp_fn = linearize(fn, x_p)
+        actual_batched_jvp = jvp_fn(x_t)
+
+        def jvp_fn(x_t):
+            return jvp(fn, (x_p,), (x_t,))[1]
+
+        expected_batched_jvp = jvp_fn(x_t)
 
         self.assertEqual(actual_batched_jvp, expected_batched_jvp)
 
@@ -3124,7 +3151,7 @@ class TestHelpers(TestCase):
 
             @staticmethod
             def backward(ctx, gy):
-                wrapped = torch._functorch.autograd_function.CtxWithSavedTensors(
+                wrapped = torch._functorch.autograd_function.CtxWithSavedTensors(  # noqa: F841
                     ctx, (y,)
                 )
                 return gy
@@ -3138,7 +3165,7 @@ class TestHelpers(TestCase):
 
             @staticmethod
             def backward(ctx, gy):
-                wrapped = torch._functorch.autograd_function.CtxWithSavedTensors(
+                wrapped = torch._functorch.autograd_function.CtxWithSavedTensors(  # noqa: F841
                     ctx, (y,)
                 )
                 return gy
@@ -3234,6 +3261,18 @@ class TestHelpers(TestCase):
         out = A.apply(x, y)
         out.backward()
 
+    def test_debug_unwrap(self):
+        stuff = []
+
+        def f(x):
+            stuff.append(torch.func.debug_unwrap(x))
+            return x.sin()
+
+        x = torch.randn(2, 3)
+        _ = vmap(vmap(f))(x)
+        self.assertEqual(stuff[0], x)
+        self.assertTrue(stuff[0] is x)
+
     def test_reductify_leaf(self, device):
         reductify_leaf = torch._functorch.autograd_function.reductify_leaf
         B = 2
@@ -3277,8 +3316,6 @@ class TestHelpers(TestCase):
 @markDynamoStrictTest
 class TestComposability(TestCase):
     def test_deprecation_vmap(self, device):
-        x = torch.randn(3, device=device)
-
         # functorch version of the API is deprecated
         with self.assertWarnsRegex(FutureWarning, "Please use `torch.vmap`"):
             vmap(torch.sin)
@@ -4516,7 +4553,7 @@ class TestExamplesCorrectness(TestCase):
     @unittest.skipIf(not USE_TORCHVISION, "test requires torchvision")
     @parametrize("mechanism", ["make_functional", "functional_call"])
     def test_resnet18_per_sample_grads(self, device, mechanism):
-        import torchvision.models as models
+        from torchvision import models
 
         model = models.__dict__["resnet18"](
             pretrained=False, norm_layer=(lambda c: nn.GroupNorm(min(32, c), c))
@@ -4728,9 +4765,9 @@ def forward(self, x_1, indices_1) -> torch.Tensor:
             y = x.detach()
             return y + y
 
-        with FakeTensorMode() as mode:
+        with FakeTensorMode():
             x = torch.ones(2, device=device, requires_grad=True)
-            out = functionalize(f)(x)
+            functionalize(f)(x)
         self.assertEqual(x.size(), (2,))
 
     def test_functionalize_fx_simple(self, device):
@@ -4959,7 +4996,14 @@ def forward(self, x_1):
 
 
 def construct_sum_pyop():
-    mysum = HigherOrderOperator("mysum")
+    class MySum(HigherOrderOperator):
+        def __init__(self):
+            super().__init__("mysum")
+
+        def __call__(self, *args, **kwargs):
+            return super().__call__(*args, **kwargs)
+
+    mysum = MySum()
 
     @mysum.py_impl(torch._C._functorch.TransformType.Vmap)
     def mysum_batch_rule(interpreter, x, dim):
@@ -5139,7 +5183,6 @@ class TestCompileTransforms(TestCase):
         self.assertEqual(actual, expected)
 
     # torch.compile is not supported on Windows
-    @expectedFailureIf(IS_WINDOWS)
     @torch._dynamo.config.patch(suppress_errors=False)
     def test_grad_deprecated_api(self, device):
         x = torch.randn((), device=device)
@@ -5150,7 +5193,7 @@ class TestCompileTransforms(TestCase):
 
         actual = wrapper_fn(x, y)
         expected = torch.compile(wrapper_fn, backend="eager", fullgraph=True)(x, y)
-        fn = torch.compile(wrapper_fn, backend="eager", fullgraph=True)
+        torch.compile(wrapper_fn, backend="eager", fullgraph=True)
         self.assertEqual(actual, expected)
 
         def wrapper_fn(x, y):

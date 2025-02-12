@@ -1,21 +1,20 @@
 #pragma once
 
+#include <ATen/core/ivalue.h>
 #include <c10/macros/Export.h>
 #include <torch/csrc/jit/mobile/compatibility/runtime_compatibility.h>
 
 #include <istream>
 #include <memory>
 #include <unordered_map>
+#include <vector>
 
-namespace caffe2 {
-namespace serialize {
+namespace caffe2::serialize {
 class PyTorchStreamReader;
 class ReadAdapterInterface;
-} // namespace serialize
-} // namespace caffe2
+} // namespace caffe2::serialize
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 // The family of methods below to get bytecode version from a model
 // Throws if not passed in a well formed model
@@ -24,7 +23,7 @@ TORCH_API uint64_t _get_model_bytecode_version(std::istream& in);
 TORCH_API uint64_t _get_model_bytecode_version(const std::string& filename);
 
 TORCH_API uint64_t _get_model_bytecode_version(
-    std::shared_ptr<caffe2::serialize::ReadAdapterInterface> rai);
+    const std::shared_ptr<caffe2::serialize::ReadAdapterInterface>& rai);
 
 uint64_t _get_model_bytecode_version(
     const std::vector<c10::IValue>& bytecode_ivalues);
@@ -94,13 +93,12 @@ enum ModelCompatibilityStatus {
 
 struct ModelCompatCheckResult {
   ModelCompatibilityStatus status;
-  std::vector<std::string> errors;
+  std::vector<std::string> errors{};
 };
 // Takes in information about a runtime and a model and returns if the two are
 // compatible with one another.
 TORCH_API ModelCompatCheckResult is_compatible(
     RuntimeCompatibilityInfo runtime_info,
-    ModelCompatibilityInfo model_info);
+    const ModelCompatibilityInfo& model_info);
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

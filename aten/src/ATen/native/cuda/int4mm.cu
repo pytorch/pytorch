@@ -17,13 +17,13 @@ namespace at::native {
 
 template <typename U, typename V>
 constexpr __host__ __device__ auto divDown(U a, V b) -> decltype(a + b) {
-  static_assert(std::is_integral<U>::value && std::is_integral<V>::value, "");
+  static_assert(std::is_integral_v<U> && std::is_integral_v<V>, "");
   return (a / b);
 }
 
 template <typename U, typename V>
 constexpr __host__ __device__ auto divUp(U a, V b) -> decltype(a + b) {
-  static_assert(std::is_integral<U>::value && std::is_integral<V>::value, "");
+  static_assert(std::is_integral_v<U> && std::is_integral_v<V>, "");
   // Overflow safe variant of (a + b - 1) / b
   const uint64_t blocks = a / b + (a % b != 0);
   return blocks;
@@ -31,19 +31,19 @@ constexpr __host__ __device__ auto divUp(U a, V b) -> decltype(a + b) {
 
 template <typename U, typename V>
 constexpr __host__ __device__ auto roundDown(U a, V b) -> decltype(a + b) {
-  static_assert(std::is_integral<U>::value && std::is_integral<V>::value, "");
+  static_assert(std::is_integral_v<U> && std::is_integral_v<V>, "");
   return divDown(a, b) * b;
 }
 
 template <typename U, typename V>
 constexpr __host__ __device__ auto roundUp(U a, V b) -> decltype(a + b) {
-  static_assert(std::is_integral<U>::value && std::is_integral<V>::value, "");
+  static_assert(std::is_integral_v<U> && std::is_integral_v<V>, "");
   return divUp(a, b) * b;
 }
 
 template <typename U, typename V>
 constexpr __host__ __device__ bool isEvenDivisor(U a, V b) {
-  static_assert(std::is_integral<U>::value && std::is_integral<V>::value, "");
+  static_assert(std::is_integral_v<U> && std::is_integral_v<V>, "");
   return (a % V(b) == 0) && ((a / V(b)) >= 1);
 }
 
@@ -70,7 +70,7 @@ static_assert(log2(4) == 2, "log2");
 
 template <typename T>
 constexpr __host__ __device__ bool isPowerOf2(T v) {
-  static_assert(std::is_integral<T>::value, "");
+  static_assert(std::is_integral_v<T>, "");
   return (v && !(v & (v - 1)));
 }
 
@@ -79,7 +79,7 @@ static_assert(!isPowerOf2(3333), "isPowerOf2");
 
 template <typename T>
 constexpr __host__ __device__ T nextHighestPowerOf2(T v) {
-  static_assert(std::is_integral<T>::value, "");
+  static_assert(std::is_integral_v<T>, "");
   return (isPowerOf2(v) ? (T)2 * v : ((T)1 << (log2(v) + 1)));
 }
 
@@ -101,7 +101,7 @@ static_assert(
 
 template <typename T>
 constexpr __host__ __device__ T nextLowestPowerOf2(T v) {
-  static_assert(std::is_integral<T>::value, "");
+  static_assert(std::is_integral_v<T>, "");
   return (isPowerOf2(v) ? v / (T)2 : ((T)1 << (log2(v))));
 }
 

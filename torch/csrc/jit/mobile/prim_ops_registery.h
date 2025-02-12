@@ -4,9 +4,7 @@
 #include <functional>
 #include <vector>
 
-namespace torch {
-namespace jit {
-namespace mobile {
+namespace torch::jit::mobile {
 
 using Stack = std::vector<c10::IValue>;
 
@@ -27,6 +25,4 @@ class prim_op_fn_register {
   }
 };
 
-} // namespace mobile
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit::mobile

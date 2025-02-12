@@ -2,10 +2,8 @@
 
 #include <torch/csrc/python_headers.h>
 
-namespace torch {
-namespace multiprocessing {
+namespace torch::multiprocessing {
 
-PyMethodDef* python_functions();
+const PyMethodDef* python_functions();
 
-} // namespace multiprocessing
-} // namespace torch
+} // namespace torch::multiprocessing

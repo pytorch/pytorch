@@ -2,9 +2,7 @@
 
 #include <torch/csrc/jit/tensorexpr/kernel.h>
 
-namespace torch {
-namespace jit {
-namespace tensorexpr {
+namespace torch::jit::tensorexpr {
 
 Tensor computeSoftmax(
     const std::vector<ArgValue>& inputs,
@@ -12,6 +10,4 @@ Tensor computeSoftmax(
     const std::vector<ExprHandle>& outputStrides,
     bool log_softmax);
 
-} // namespace tensorexpr
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit::tensorexpr

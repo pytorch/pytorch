@@ -34,7 +34,7 @@ class APoTObserver(ObserverBase):
 
     # min_val and max_val are optional args to override
     # the min_val and max_val observed by forward
-    def calculate_qparams(self, signed):
+    def calculate_qparams(self, signed):  # type:ignore[override]
         return self._calculate_qparams(signed, self.min_val, self.max_val)
 
     r""" Calculates nonuniform quantization parameters according to APoT paper:
@@ -83,7 +83,7 @@ class APoTObserver(ObserverBase):
 
             if signed:
                 # sort tensor in reverse order before adding to list if signed
-                sorted, indices = torch.sort(p_curr, descending=True)
+                sorted, _indices = torch.sort(p_curr, descending=True)
                 p_all.append(sorted)
             else:
                 p_all.append(p_curr)
@@ -148,7 +148,7 @@ class APoTObserver(ObserverBase):
     """
 
     def quant_levels_visualization(self, signed=False):
-        alpha, gamma, quantization_levels, level_indices = self.calculate_qparams(
+        alpha, _gamma, quantization_levels, level_indices = self.calculate_qparams(
             signed
         )
 
@@ -162,7 +162,7 @@ class APoTObserver(ObserverBase):
             for x in xs
         ]
 
-        f = plt.figure(figsize=(15, 10))
+        plt.figure(figsize=(15, 10))
 
         plt.plot(xs, ys)
         plt.title("APoT Quantization Plot")

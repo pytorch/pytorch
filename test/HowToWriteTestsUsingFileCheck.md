@@ -93,7 +93,7 @@ annotations from the example above one would write:
 * `CHECK-COUNT-EXACTLY-<num>: <pattern>`
   Scans the input and succeeds when a line containing exactly `NUM` entries of
   `PATTERN` is found.
-* `CHECK-DAG: pattern`
+* `CHECK-DAG: <pattern>`
   Works similar to the usual `CHECK` pragma, but also matches if there exists a
   way to reorder the CHECK-DAG pragmas to satisfy all patterns.
   For example the following pattern:
@@ -110,3 +110,18 @@ annotations from the example above one would write:
   bar
   end
   ```
+* `CHECK-SOURCE-HIGHLIGHTED: <pattern>`
+  Check for highlighted source ranges. This is useful when writing tests regarding generated error messages that require source code highlighting.
+  For example the following pattern:
+  ```
+  # CHECK-SOURCE-HIGHLIGHTED: raise Exception("raised exception
+  ```
+  would match the following input:
+  ```
+  def method_that_raises() -> torch.Tensor:
+      raise Exception("raised exception")  # noqa: TRY002
+      ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ <--- HERE
+  builtins.Exception: raised exception
+  ```
+* `CHECK-REGEX: <pattern>`
+  Scans the input until `PATTERN` is matched, accepts RE syntax for std::regex.

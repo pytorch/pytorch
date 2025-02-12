@@ -12,8 +12,7 @@ namespace c10 {
 TypePtr parseType(const std::string& pythonStr);
 } // namespace c10
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 // clang-format off
 
@@ -684,5 +683,4 @@ const std::vector<ByteCodeFunctionWithOperator>& getUpgraderBytecodeList() {
 
 // clang-format on
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

@@ -7,20 +7,58 @@
 
 #include <chrono>
 #include <cstddef>
-#include <cstdint>
 #include <thread>
-#include <vector>
 
 namespace at::cuda {
+
+void external_stream_deleter(cudaStream_t* stream) {
+  if (stream != nullptr) {
+    cudaStreamDestroy(*stream);
+    delete stream;
+  }
+}
+
+namespace {
+UniquePtrExternalCudaStream create_external_stream() {
+  // From:
+  // https://docs.nvidia.com/cuda/cuda-runtime-api/group__CUDART__STREAM.html#group__CUDART__STREAM_1g793d7d4e474388ddfda531603dc34aa3
+  // "Capture must be ended on the same stream in which it was initiated, and it
+  // may only be initiated if the stream is not already in capture mode."
+
+  // Since pytorch uses a pool of 32 pre-allocated cuda streams,
+  // should a user nest 32 conditional nodes, there would be an error
+  // for the 32nd node, since that node's stream would already be in
+  // capture mode. The easiest solution is to handle stream creation
+  // and deletion ourselves.
+
+  // we use cudaStreamNonBlocking because every default cuda stream in
+  // pytorch uses that flag for all streams used for stream capture
+  // (see kDefaultFlags in CUDAStream.cpp). This would need to be kept
+  // in sync, should that ever change. Or kDefaultFlags needs to be
+  // exposed in a header file.
+  auto stream_ptr = std::make_unique<cudaStream_t>();
+  AT_CUDA_CHECK(
+      cudaStreamCreateWithFlags(stream_ptr.get(), cudaStreamNonBlocking));
+  return UniquePtrExternalCudaStream(
+      stream_ptr.release(), external_stream_deleter);
+}
+} // anonymous namespace
 
 static bool _cuda_graphs_debug = false;
 constexpr int kSynchronizeBusyWaitMillis = 10;
 
+// To support stream capture across multiple threads, we use a global
+// hashmap mapping cuda stream capture IDs to CUDAGraph objects. This
+// was originally a thread_local std::stack<CUDAGraph*>, but that was
+// not acceptable since stream capture does span threads in certain
+// circumstances (in particular, during autograd).
+static std::mutex _currently_capturing_graphs_mutex;
+static ska::flat_hash_map<CaptureId_t, CUDAGraph*> _currently_capturing_graphs;
+
 MempoolId_t graph_pool_handle() {
   // Sets just the second value, to distinguish it from MempoolId_ts created from
   // cudaStreamGetCaptureInfo id_s in capture_begin.
-  auto new_pool = c10::cuda::MemPool();
-  return new_pool.id();
+  return c10::cuda::MemPool::graph_pool_handle();
 }
 
 /**
@@ -80,10 +118,12 @@ void CUDAGraph::register_generator_state(const at::Generator& generator) {
   cuda_gen->register_graph(this);
 }
 
-void CUDAGraph::capture_begin(MempoolId_t pool/*=0*/, cudaStreamCaptureMode capture_mode) {
+void CUDAGraph::capture_begin(MempoolId_t pool/*={0,0}*/, cudaStreamCaptureMode capture_mode) {
   TORCH_CHECK(!has_graph_exec_,
               "This CUDAGraph instance already owns a captured graph. "
               "To capture a new graph, create a new instance.");
+
+  capture_mode_ = capture_mode;
 
   // default generator is always registered
   auto* gen = get_generator_or_default<CUDAGeneratorImpl>(
@@ -115,20 +155,14 @@ void CUDAGraph::capture_begin(MempoolId_t pool/*=0*/, cudaStreamCaptureMode capt
   } else {
     // User did not ask us to share a mempool. Create graph pool handle using is_user_created=false.
     // Sets just the first value, to distinguish it from MempoolId_ts created by graph_pool_handle().
-    auto mempool = c10::cuda::MemPool({}, false);
-    mempool_id_ = mempool.id();
+    mempool_id_ = c10::cuda::MemPool::graph_pool_handle(false);
     TORCH_INTERNAL_ASSERT(mempool_id_.first > 0);
   }
 
   // Addendum: beginAllocateStreamToPool is now called before cudaStreamBeginCapture to prevent an
   // autograd thread's free() call triggering an invalid cudaEventRecord in the caching allocator
   // due to the capture status being updated _after_ a capture had already started.
-  c10::cuda::CUDACachingAllocator::beginAllocateToPool(capture_dev_, mempool_id_, [this](cudaStream_t stream) {
-      cudaStreamCaptureStatus status;
-      CaptureId_t stream_capture_id;
-      AT_CUDA_CHECK(cudaStreamGetCaptureInfo(stream, &status, &stream_capture_id));
-      return status == cudaStreamCaptureStatus::cudaStreamCaptureStatusActive && stream_capture_id == capture_id_;
-  });
+  c10::cuda::CUDACachingAllocator::beginAllocateToPool(capture_dev_, mempool_id_, create_allocate_filter());
 
   // At this point, any NCCL watchdogs should be aware that we are in capture mode
   // and therefore should not enqueue any additional work that could be event-queried.
@@ -144,10 +178,14 @@ void CUDAGraph::capture_begin(MempoolId_t pool/*=0*/, cudaStreamCaptureMode capt
   // https://docs.nvidia.com/cuda/cuda-runtime-api/group__CUDART__STREAM.html#group__CUDART__STREAM_1g9d0535d93a214cbf126835257b16ba85
   AT_CUDA_CHECK(cudaStreamBeginCapture(capture_stream_, capture_mode));
 
-  cudaStreamCaptureStatus status;
+  cudaStreamCaptureStatus status{};
   AT_CUDA_CHECK(cudaStreamGetCaptureInfo(stream, &status, &capture_id_));
   TORCH_INTERNAL_ASSERT(status == cudaStreamCaptureStatus::cudaStreamCaptureStatusActive);
 
+  {
+    std::unique_lock<std::mutex> lock(_currently_capturing_graphs_mutex);
+    _currently_capturing_graphs.emplace(capture_id_, this);
+  }
 }
 
 void CUDAGraph::capture_end() {
@@ -158,9 +196,17 @@ void CUDAGraph::capture_end() {
 
   AT_CUDA_CHECK(cudaStreamEndCapture(capture_stream_, &graph_));
 
+  {
+    std::unique_lock<std::mutex> lock(_currently_capturing_graphs_mutex);
+    TORCH_CHECK(
+        _currently_capturing_graphs.count(capture_id_),
+        "capture_end() called before capture_begin().");
+    _currently_capturing_graphs.erase(capture_id_);
+  }
+
   c10::cuda::CUDACachingAllocator::endAllocateToPool(capture_dev_, mempool_id_);
 
-  TORCH_CHECK(graph_ != NULL, "Invalid capture.");
+  TORCH_CHECK(graph_ != nullptr, "Invalid capture.");
   has_graph_ = true;
 
   // In typical graph usage some tensors (e.g. the tensors used for graph IO) are not freed
@@ -174,8 +220,8 @@ void CUDAGraph::capture_end() {
   // https://docs.nvidia.com/cuda/cuda-runtime-api/group__CUDART__GRAPH.html#group__CUDART__GRAPH_1g1accfe1da0c605a577c22d9751a09597
   // cudaGraphInstantiateWithFlags
   // https://docs.nvidia.com/cuda/cuda-runtime-api/group__CUDART__GRAPH.html#group__CUDART__GRAPH_1ga2c652a24ba93e52b99a47bec0888233
-#if (defined(CUDA_VERSION) && CUDA_VERSION >= 11040)
-  int version;
+#if ((defined(CUDA_VERSION) && CUDA_VERSION >= 11040) || (defined(USE_ROCM) && ROCM_VERSION >= 60200))
+  int version = 0;
   AT_CUDA_CHECK(cudaDriverGetVersion(&version));
   if (version < 11040) {
 #endif
@@ -187,7 +233,9 @@ void CUDAGraph::capture_end() {
 #else
     AT_CUDA_CHECK(cudaGraphInstantiate(&graph_exec_, graph_, NULL, NULL, 0));
 #endif
-#if (defined(CUDA_VERSION) && CUDA_VERSION >= 11040)
+//Since ROCm 6.2, we want to go down this path as hipGraphExecDestroy in the destructor will not immediately free the memory.
+//It will wait for the next sync operation. cudaGraphInstantiateFlagAutoFreeOnLaunch will add async frees after graph launch.
+#if ((defined(CUDA_VERSION) && CUDA_VERSION >= 11040) || (defined(USE_ROCM) && ROCM_VERSION >= 60200))
   } else {
     AT_CUDA_CHECK(cudaGraphInstantiateWithFlags(&graph_exec_,
                                                 graph_,
@@ -202,8 +250,21 @@ void CUDAGraph::capture_end() {
     wholegraph_increments = generator_state->capture_epilogue();
   }
 
+#if !defined(USE_ROCM) && (defined(CUDA_VERSION) && CUDA_VERSION >= 12040)
+  bool any_wholegraph_increments_nonzero = false;
+  for (auto& [generator_state, wholegraph_increments] : captured_generator_states_) {
+    if (wholegraph_increments != 0) {
+      any_wholegraph_increments_nonzero = true;
+    }
+  }
+
+  if (any_wholegraph_increments_nonzero && !descendent_graphs_.empty()) {
+    TORCH_WARN("You used random numbers in a cuda graph that uses conditional nodes. The previous design assumed that all RNG operations would execute only once, unconditionally, but this is no longer guaranteed with data-dependent control flow. Running with the cuda graph repeatedly may not match running without the cuda graph.");
+  }
+#endif // !defined(USE_ROCM) && defined(CUDA_VERSION) && CUDA_VERSION >= 12040
+
   size_t numCUDAGraphNodes = 0;
-  AT_CUDA_CHECK(cudaGraphGetNodes(graph_, NULL, &numCUDAGraphNodes));
+  AT_CUDA_CHECK(cudaGraphGetNodes(graph_, nullptr, &numCUDAGraphNodes));
   if (numCUDAGraphNodes == 0) {
       TORCH_WARN("The CUDA Graph is empty. This usually means that the graph was ",
                  "attempted to be captured on wrong device or stream.");
@@ -233,7 +294,7 @@ void CUDAGraph::replay() {
   // graph_exec_ may be replayed in any stream.
   AT_CUDA_CHECK(cudaGraphLaunch(graph_exec_, at::cuda::getCurrentCUDAStream()));
 
-  int version;
+  int version = 0;
   AT_CUDA_CHECK(cudaDriverGetVersion(&version));
   if (version < 11040) {
     // Workaround for bug in libcuda.so that causes replayed graphs with
@@ -259,7 +320,7 @@ void CUDAGraph::debug_dump(const std::string& debug_path) {
       has_graph_ = false;
     }
   } else {
-    TORCH_WARN("CUDA Graphs debug not enabled, set with torch._C._cuda_enable_graphs_debug_mode");
+    TORCH_WARN("CUDA Graphs debug not enabled, set with [graph].enable_debug_mode()");
   }
 #else
   TORCH_CHECK(false, "CUDA graphs may only be used in Pytorch built with CUDA >= 11.3 or ROCM >= 5.6");
@@ -302,7 +363,7 @@ void CUDAGraph::reset() {
 
 // Returns an id another graph's capture_begin can use to share the same memory pool as this graph.
 MempoolId_t CUDAGraph::pool() {
-TORCH_CHECK(has_graph_exec_,
+  TORCH_CHECK(has_graph_exec_,
               "Called CUDAGraph::pool() without a preceding successful capture.");
   return mempool_id_;
 }
@@ -313,6 +374,264 @@ CUDAGraph::~CUDAGraph() {
     generator_state->unregister_graph(this);
   }
   reset();
+
+// There are recent HIP changes where hipGraphExecDestroy doesn't immediately free memory.
+// They wait for next sync point in order to free the memory, this is to ensure that all
+// hipGraphLaunch are finished before we release any memory. This feature was enabled in rocm6.2.
+// We need to ensure all async opreations finish before deleting the object.
+#if (defined(USE_ROCM) && ROCM_VERSION >= 60200)
+  if (capture_dev_ != UNDEFINED_DEVICE) // check if capture_dev_ contains the real device id
+  {
+    AT_CUDA_CHECK(cudaSetDevice(capture_dev_));
+    AT_CUDA_CHECK(cudaDeviceSynchronize());
+  }
+#endif
 }
+
+CUDAGraph* CUDAGraph::get_currently_capturing_graph() {
+  std::unique_lock<std::mutex> lock(_currently_capturing_graphs_mutex);
+  cudaStreamCaptureStatus status{};
+  CaptureId_t current_capture_id = -1;
+  auto stream = at::cuda::getCurrentCUDAStream();
+  AT_CUDA_CHECK(cudaStreamGetCaptureInfo(stream, &status, &current_capture_id));
+  TORCH_CHECK(
+      status == cudaStreamCaptureStatus::cudaStreamCaptureStatusActive,
+      "The current stream is not currently capturing.");
+  TORCH_CHECK(
+      _currently_capturing_graphs.count(current_capture_id),
+      "get_currently_capturing_graph() can be used only between capture_begin() and capture_end(). Did you use a stream without making it depend upon the original stream used for capture?");
+  return _currently_capturing_graphs.at(current_capture_id);
+}
+
+void CUDAGraph::begin_capture_to_if_node(
+    const at::Tensor& scalar_cuda_pred_tensor) {
+#if !defined(USE_ROCM) && (defined(CUDA_VERSION) && CUDA_VERSION >= 12040)
+  TORCH_CHECK(
+      !has_graph_exec_,
+      "begin_capture_to_if_node() must be called before capture_begin()");
+
+  cudaStreamCaptureStatus status{};
+  cudaGraph_t currently_capturing_graph{};
+  AT_CUDA_CHECK(cudaStreamGetCaptureInfo(
+      getCurrentCUDAStream(), &status, nullptr, &currently_capturing_graph));
+  TORCH_CHECK(
+      status == cudaStreamCaptureStatusActive,
+      "capture_begin() must be called before begin_capture_to_if_node()");
+  cudaGraphConditionalHandle handle{};
+  AT_CUDA_CHECK(cudaGraphConditionalHandleCreate(
+      &handle, currently_capturing_graph, 0, 0));
+
+  set_conditional_handle(handle, scalar_cuda_pred_tensor);
+
+  const cudaGraphNode_t* dependencies{};
+  size_t num_dependencies = 0;
+  AT_CUDA_CHECK(cudaStreamGetCaptureInfo(
+      getCurrentCUDAStream(),
+      &status,
+      nullptr,
+      &currently_capturing_graph,
+      &dependencies,
+      &num_dependencies));
+  TORCH_CHECK(status == cudaStreamCaptureStatusActive);
+
+  cudaGraphNodeParams params{};
+  params.type = cudaGraphNodeTypeConditional;
+  params.conditional.handle = handle;
+  params.conditional.type = cudaGraphCondTypeIf;
+  params.conditional.size = 1;
+
+  cudaGraphNode_t cond_node{};
+  AT_CUDA_CHECK(cudaGraphAddNode(
+      &cond_node,
+      currently_capturing_graph,
+      dependencies,
+      num_dependencies,
+      &params));
+
+  cudaGraph_t if_node_child_graph = params.conditional.phGraph_out[0];
+
+  AT_CUDA_CHECK(cudaStreamUpdateCaptureDependencies(
+      getCurrentCUDAStream(), &cond_node, 1, cudaStreamSetCaptureDependencies));
+
+  UniquePtrExternalCudaStream child_stream = create_external_stream();
+  conditional_graph_capture_streams_ids_.push(-1);
+  c10::cuda::CUDACachingAllocator::endAllocateToPool(capture_dev_, mempool_id_);
+  c10::cuda::CUDACachingAllocator::beginAllocateToPool(
+      capture_dev_, mempool_id_, create_child_allocate_filter());
+  AT_CUDA_CHECK(cudaStreamBeginCaptureToGraph(
+      *child_stream, if_node_child_graph, nullptr, nullptr, 0, capture_mode_));
+
+  AT_CUDA_CHECK(cudaStreamGetCaptureInfo(
+      *child_stream, &status, &conditional_graph_capture_streams_ids_.top()));
+  TORCH_INTERNAL_ASSERT(
+      status == cudaStreamCaptureStatus::cudaStreamCaptureStatusActive);
+
+  // We need to get the raw_stream here before emplace() to prevent
+  // std::move(child_stream) from potentially executing before
+  // *child_stream.
+  cudaStream_t raw_stream = *child_stream;
+  conditional_node_streams_.emplace(
+      getStreamFromExternal(raw_stream, getCurrentCUDAStream().device_index()),
+      std::move(child_stream));
+
+  {
+    std::unique_lock<std::mutex> lock(_currently_capturing_graphs_mutex);
+    _currently_capturing_graphs.emplace(
+        conditional_graph_capture_streams_ids_.top(), this);
+  }
+
+#else // !defined(USE_ROCM) && (defined(CUDA_VERSION) && CUDA_VERSION >= 12040)
+  AT_ERROR(
+      __func__,
+      " CUDA Graphs conditional nodes are not supported for cuda version < 12.4");
+  return;
+#endif
+}
+
+cudaGraphConditionalHandle CUDAGraph::begin_capture_to_while_loop_node(
+    const at::Tensor& scalar_cuda_pred_tensor) {
+#if !defined(USE_ROCM) && (defined(CUDA_VERSION) && CUDA_VERSION >= 12040)
+  cudaStreamCaptureStatus status{};
+  cudaGraph_t currently_capturing_graph{};
+  AT_CUDA_CHECK(cudaStreamGetCaptureInfo(
+      getCurrentCUDAStream(), &status, nullptr, &currently_capturing_graph));
+  TORCH_CHECK(
+      status == cudaStreamCaptureStatusActive,
+      "capture_begin() must be called before begin_capture_to_while_loop_node()");
+  cudaGraphConditionalHandle handle{};
+  AT_CUDA_CHECK(cudaGraphConditionalHandleCreate(
+      &handle, currently_capturing_graph, 0, 0));
+
+  set_conditional_handle(handle, scalar_cuda_pred_tensor);
+
+  const cudaGraphNode_t* dependencies{};
+  size_t num_dependencies = 0;
+  AT_CUDA_CHECK(cudaStreamGetCaptureInfo(
+      getCurrentCUDAStream(),
+      &status,
+      nullptr,
+      &currently_capturing_graph,
+      &dependencies,
+      &num_dependencies));
+  TORCH_CHECK(status == cudaStreamCaptureStatusActive);
+
+  cudaGraphNodeParams params{};
+  params.type = cudaGraphNodeTypeConditional;
+  params.conditional.handle = handle;
+  params.conditional.type = cudaGraphCondTypeWhile;
+  params.conditional.size = 1;
+
+  cudaGraphNode_t cond_node{};
+  AT_CUDA_CHECK(cudaGraphAddNode(
+      &cond_node,
+      currently_capturing_graph,
+      dependencies,
+      num_dependencies,
+      &params));
+
+  cudaGraph_t while_node_child_graph = params.conditional.phGraph_out[0];
+
+  AT_CUDA_CHECK(cudaStreamUpdateCaptureDependencies(
+      getCurrentCUDAStream(), &cond_node, 1, cudaStreamSetCaptureDependencies));
+
+  UniquePtrExternalCudaStream child_stream = create_external_stream();
+  conditional_graph_capture_streams_ids_.push(-1);
+  c10::cuda::CUDACachingAllocator::endAllocateToPool(capture_dev_, mempool_id_);
+  c10::cuda::CUDACachingAllocator::beginAllocateToPool(
+      capture_dev_, mempool_id_, create_child_allocate_filter());
+  AT_CUDA_CHECK(cudaStreamBeginCaptureToGraph(
+      *child_stream,
+      while_node_child_graph,
+      nullptr,
+      nullptr,
+      0,
+      capture_mode_));
+
+  AT_CUDA_CHECK(cudaStreamGetCaptureInfo(
+      *child_stream, &status, &conditional_graph_capture_streams_ids_.top()));
+  TORCH_INTERNAL_ASSERT(
+      status == cudaStreamCaptureStatus::cudaStreamCaptureStatusActive);
+
+  // We need to get the raw_stream here before emplace() to prevent
+  // std::move(child_stream) from potentially executing before
+  // *child_stream.
+  cudaStream_t raw_stream = *child_stream;
+  conditional_node_streams_.emplace(
+      getStreamFromExternal(raw_stream, getCurrentCUDAStream().device_index()),
+      std::move(child_stream));
+
+  {
+    std::unique_lock<std::mutex> lock(_currently_capturing_graphs_mutex);
+    _currently_capturing_graphs.emplace(
+        conditional_graph_capture_streams_ids_.top(), this);
+  }
+
+  return handle;
+#else // !defined(USE_ROCM) && (defined(CUDA_VERSION) && CUDA_VERSION >= 12040)
+  AT_ERROR(
+      __func__,
+      " CUDA Graphs conditional nodes are not supported for cuda version < 12.4");
+  return cudaGraphConditionalHandle{};
+#endif
+}
+
+void CUDAGraph::end_capture_to_conditional_node() {
+#if !defined(USE_ROCM) && (defined(CUDA_VERSION) && CUDA_VERSION >= 12040)
+  {
+    std::unique_lock<std::mutex> lock(_currently_capturing_graphs_mutex);
+    CaptureId_t capture_id = conditional_graph_capture_streams_ids_.top();
+    TORCH_CHECK(
+        _currently_capturing_graphs.count(capture_id),
+        "capture_end() called before capture_begin().");
+    _currently_capturing_graphs.erase(capture_id);
+  }
+
+  CUDAStream stream = conditional_node_streams_.top().first.current_stream();
+  cudaGraph_t graph{};
+  AT_CUDA_CHECK(cudaStreamEndCapture(stream.stream(), &graph));
+  descendent_graphs_.push_back(graph);
+  conditional_node_streams_.pop();
+  conditional_graph_capture_streams_ids_.pop();
+
+  c10::cuda::CUDACachingAllocator::endAllocateToPool(capture_dev_, mempool_id_);
+  if (conditional_graph_capture_streams_ids_.empty()) {
+    c10::cuda::CUDACachingAllocator::beginAllocateToPool(
+        capture_dev_, mempool_id_, create_allocate_filter());
+  } else {
+    c10::cuda::CUDACachingAllocator::beginAllocateToPool(
+        capture_dev_, mempool_id_, create_child_allocate_filter());
+  }
+#else // !defined(USE_ROCM) && (defined(CUDA_VERSION) && CUDA_VERSION >= 12040)
+  AT_ERROR(
+      __func__,
+      " CUDA Graphs conditional nodes are not supported for cuda version < 12.4");
+#endif
+}
+
+std::function<bool(cudaStream_t)> CUDAGraph::create_allocate_filter() {
+  return [this](cudaStream_t stream) {
+    cudaStreamCaptureStatus status{};
+    CaptureId_t stream_capture_id = 0;
+    AT_CUDA_CHECK(cudaStreamGetCaptureInfo(stream, &status, &stream_capture_id));
+    return status == cudaStreamCaptureStatus::cudaStreamCaptureStatusActive && stream_capture_id == capture_id_;
+  };
+}
+
+std::function<bool(cudaStream_t)> CUDAGraph::create_child_allocate_filter() {
+#if !defined(USE_ROCM) && (defined(CUDA_VERSION) && CUDA_VERSION >= 12040)
+  return [&current_capture_id = conditional_graph_capture_streams_ids_.top()](cudaStream_t stream) {
+      cudaStreamCaptureStatus status{};
+      CaptureId_t stream_capture_id{};
+      AT_CUDA_CHECK(cudaStreamGetCaptureInfo(stream, &status, &stream_capture_id));
+      return status == cudaStreamCaptureStatus::cudaStreamCaptureStatusActive && stream_capture_id == current_capture_id;
+  };
+#else // !defined(USE_ROCM) && (defined(CUDA_VERSION) && CUDA_VERSION >= 12040)
+  AT_ERROR(
+      __func__,
+      " CUDA Graphs conditional nodes are not supported for cuda version < 12.4");
+  return std::function<bool(cudaStream_t)>();
+#endif
+}
+
 
 } // namespace at::cuda

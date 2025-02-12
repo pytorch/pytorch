@@ -7,37 +7,36 @@
 #include <torch/csrc/utils/pybind.h>
 
 #include <string>
-#include <vector>
 
 namespace py = pybind11;
 
-namespace pybind11 {
-namespace detail {
-#define ITEM_TYPE_CASTER(T, Name)                                             \
-  template <>                                                                 \
-  struct type_caster<typename torch::OrderedDict<std::string, T>::Item> {     \
-   public:                                                                    \
-    using Item = typename torch::OrderedDict<std::string, T>::Item;           \
-    using PairCaster = make_caster<std::pair<std::string, T>>;                \
-    PYBIND11_TYPE_CASTER(Item, _("Ordered" #Name "DictItem"));                \
-    bool load(handle src, bool convert) {                                     \
-      return PairCaster().load(src, convert);                                 \
-    }                                                                         \
-    static handle cast(Item src, return_value_policy policy, handle parent) { \
-      return PairCaster::cast(                                                \
-          src.pair(), std::move(policy), std::move(parent));                  \
-    }                                                                         \
+namespace pybind11::detail {
+#define ITEM_TYPE_CASTER(T, Name)                                         \
+  template <>                                                             \
+  struct type_caster<typename torch::OrderedDict<std::string, T>::Item> { \
+   public:                                                                \
+    using Item = typename torch::OrderedDict<std::string, T>::Item;       \
+    using PairCaster = make_caster<std::pair<std::string, T>>;            \
+    PYBIND11_TYPE_CASTER(Item, _("Ordered" #Name "DictItem"));            \
+    bool load(handle src, bool convert) {                                 \
+      return PairCaster().load(src, convert);                             \
+    }                                                                     \
+    static handle cast(                                                   \
+        const Item& src,                                                  \
+        return_value_policy policy,                                       \
+        handle parent) {                                                  \
+      return PairCaster::cast(                                            \
+          src.pair(), std::move(policy), std::move(parent));              \
+    }                                                                     \
   }
 
 // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
 ITEM_TYPE_CASTER(torch::Tensor, Tensor);
 // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
 ITEM_TYPE_CASTER(std::shared_ptr<torch::nn::Module>, Module);
-} // namespace detail
-} // namespace pybind11
+} // namespace pybind11::detail
 
-namespace torch {
-namespace python {
+namespace torch::python {
 namespace {
 template <typename T>
 void bind_ordered_dict(py::module module, const char* dict_name) {
@@ -73,5 +72,4 @@ void init_bindings(PyObject* module) {
   add_module_bindings(
       py::class_<nn::Module, std::shared_ptr<nn::Module>>(nn, "Module"));
 }
-} // namespace python
-} // namespace torch
+} // namespace torch::python

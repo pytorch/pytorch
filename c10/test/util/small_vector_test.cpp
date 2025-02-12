@@ -127,11 +127,6 @@ class Constructable {
   friend bool operator==(const Constructable& c0, const Constructable& c1) {
     return c0.getValue() == c1.getValue();
   }
-
-  friend bool C10_UNUSED
-  operator!=(const Constructable& c0, const Constructable& c1) {
-    return c0.getValue() != c1.getValue();
-  }
 };
 
 int Constructable::numConstructorCalls;
@@ -144,6 +139,7 @@ int Constructable::numMoveAssignmentCalls;
 
 struct NonCopyable {
   NonCopyable() = default;
+  ~NonCopyable() = default;
   NonCopyable(NonCopyable&&) noexcept = default;
   NonCopyable& operator=(NonCopyable&&) noexcept = default;
 
@@ -204,13 +200,12 @@ class SmallVectorTest : public SmallVectorTestBase {
   VectorT otherVector;
 };
 
-typedef ::testing::Types<
+using SmallVectorTestTypes = ::testing::Types<
     SmallVector<Constructable, 0>,
     SmallVector<Constructable, 1>,
     SmallVector<Constructable, 2>,
     SmallVector<Constructable, 4>,
-    SmallVector<Constructable, 5>>
-    SmallVectorTestTypes;
+    SmallVector<Constructable, 5>>;
 TYPED_TEST_SUITE(SmallVectorTest, SmallVectorTestTypes, );
 
 // Constructor test.
@@ -472,11 +467,11 @@ TYPED_TEST(SmallVectorTest, AppendNonIterTest) {
 }
 
 struct output_iterator {
-  typedef std::output_iterator_tag iterator_category;
-  typedef int value_type;
-  typedef int difference_type;
-  typedef value_type* pointer;
-  typedef value_type& reference;
+  using iterator_category = std::output_iterator_tag;
+  using value_type = int;
+  using difference_type = int;
+  using pointer = value_type*;
+  using reference = value_type&;
   operator int() {
     return 2;
   }
@@ -821,7 +816,7 @@ class DualSmallVectorsTest<std::pair<VectorT1, VectorT2>>
   }
 };
 
-typedef ::testing::Types<
+using DualSmallVectorTestTypes = ::testing::Types<
     // Small mode -> Small mode.
     std::pair<SmallVector<Constructable, 4>, SmallVector<Constructable, 4>>,
     // Small mode -> Big mode.
@@ -829,8 +824,7 @@ typedef ::testing::Types<
     // Big mode -> Small mode.
     std::pair<SmallVector<Constructable, 2>, SmallVector<Constructable, 4>>,
     // Big mode -> Big mode.
-    std::pair<SmallVector<Constructable, 2>, SmallVector<Constructable, 2>>>
-    DualSmallVectorTestTypes;
+    std::pair<SmallVector<Constructable, 2>, SmallVector<Constructable, 2>>>;
 
 TYPED_TEST_SUITE(DualSmallVectorsTest, DualSmallVectorTestTypes, );
 
@@ -888,11 +882,14 @@ TEST(SmallVectorCustomTest, NoAssignTest) {
 }
 
 struct MovedFrom {
-  bool hasValue;
-  MovedFrom() : hasValue(true) {}
+  bool hasValue{true};
+  MovedFrom() = default;
+  ~MovedFrom() = default;
+  MovedFrom(const MovedFrom& m) = delete;
   MovedFrom(MovedFrom&& m) noexcept : hasValue(m.hasValue) {
     m.hasValue = false;
   }
+  MovedFrom& operator=(const MovedFrom& m) = delete;
   MovedFrom& operator=(MovedFrom&& m) noexcept {
     hasValue = m.hasValue;
     m.hasValue = false;
@@ -924,6 +921,7 @@ struct EmplaceableArg {
   EmplaceableArg(EmplaceableArg& X)
       : State(X.State == EAS_Arg ? EAS_LValue : EAS_Failure) {}
 
+  ~EmplaceableArg() = default;
   explicit EmplaceableArg(bool) : State(EAS_Arg) {}
 
   EmplaceableArg& operator=(EmplaceableArg&&) = delete;
@@ -939,6 +937,7 @@ struct Emplaceable {
   EmplaceableState State;
 
   Emplaceable() : State(ES_Emplaced) {}
+  ~Emplaceable() = default;
 
   template <class A0Ty>
   explicit Emplaceable(A0Ty&& A0)
@@ -1107,7 +1106,7 @@ class SmallVectorReferenceInvalidationTest : public SmallVectorTestBase {
 
   template <class T>
   static bool isValueType() {
-    return std::is_same<T, typename VectorT::value_type>::value;
+    return std::is_same_v<T, typename VectorT::value_type>;
   }
 
   void SetUp() override {

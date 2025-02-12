@@ -12,7 +12,6 @@ class FakeStore(dist.Store):
     A fake store is a fake Key-Value store simply for initialization usage
     the of fake process group, one can either use FakeStore or HashStore.
     """
-    pass
 
 
 def _create_fake_pg(prefix_store, rank, world_size, timeout):

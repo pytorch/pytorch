@@ -2,17 +2,8 @@
 
 #include <c10/macros/Export.h>
 #include <istream>
-#include <memory>
 
-namespace caffe2 {
-namespace serialize {
-class ReadAdapterInterface;
-class PyTorchStreamWriter;
-} // namespace serialize
-} // namespace caffe2
-
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 TORCH_API bool _backport_for_mobile(
     std::istream& in,
@@ -34,5 +25,4 @@ TORCH_API bool _backport_for_mobile(
     const std::string& output_filename,
     const int64_t to_version);
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

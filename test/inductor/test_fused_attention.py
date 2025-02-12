@@ -161,7 +161,7 @@ class TestSDPAPatternRewriterTemplate(TestCase):
                     check_train=False,
                 )
 
-    @skipIfRocm
+    @skipIfRocm  # https://github.com/pytorch/pytorch/issues/146848
     def _test_insignificant_strides(self):
         f32 = torch.float32
 
@@ -368,7 +368,6 @@ class TestSDPAPatternRewriterTemplate(TestCase):
             checkpoint_wrapper(sfdp_pattern_6), contains=False, has_dropout=True
         )
 
-    @skipIfRocm
     def _test_sdpa_rewriter_7(self):
         def sfdp_pattern_7(query, key, value, training):
             q = query.permute(0, 2, 1, 3)
@@ -410,7 +409,6 @@ class TestSDPAPatternRewriterTemplate(TestCase):
             atol=2e-3,
         )
 
-    @skipIfRocm
     def _test_sdpa_rewriter_8(self):
         def sfdp_pattern_8(query, key, value):
             q = query.permute(0, 2, 1, 3)
@@ -436,7 +434,6 @@ class TestSDPAPatternRewriterTemplate(TestCase):
         )
         self._check_common(checkpoint_wrapper(sfdp_pattern_8), args, atol=2e-3)
 
-    @skipIfRocm
     def _test_sdpa_rewriter_9(self):
         def sfdp_pattern_9(query, key, value, training):
             q = query.permute(0, 2, 1, 3)
@@ -478,7 +475,6 @@ class TestSDPAPatternRewriterTemplate(TestCase):
             atol=2e-3,
         )
 
-    @skipIfRocm
     def _test_sdpa_rewriter_10(self):
         def sfdp_pattern_10(query, key, value):
             q = query.permute(0, 2, 1, 3)
@@ -668,7 +664,6 @@ class TestSDPAPatternRewriterTemplate(TestCase):
 
         self._check_common(dot_prod_attention, check_train=False)
 
-    @skipIfRocm
     def _test_sdpa_rewriter_13(self, dtype):
         def dot_prod_attention(
             query: torch.Tensor,
@@ -909,7 +904,6 @@ class TestSDPAPatternRewriterTemplate(TestCase):
             check_train=False,
         )
 
-    @skipIfRocm
     def _test_sdpa_rewriter_19(self):
         def dot_prod_attention(
             query: torch.Tensor,

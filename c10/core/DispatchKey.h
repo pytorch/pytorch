@@ -353,12 +353,14 @@ enum class DispatchKey : uint16_t {
   // Autocasting precedes VariableTypeId, to ensure casts are autograd-exposed
   // and inputs are saved for backward in the post-autocast type.
   AutocastCPU,
+  AutocastMTIA,
   AutocastXPU,
   AutocastIPU,
   AutocastHPU,
   AutocastXLA,
   // AutocastXLA is only being used for TPUs. XLA GPUs continue to use
   // AutocastCUDA.
+  AutocastMPS,
   AutocastCUDA,
   AutocastPrivateUse1,
 

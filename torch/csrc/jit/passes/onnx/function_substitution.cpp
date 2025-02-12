@@ -4,8 +4,7 @@
 #include <torch/csrc/jit/passes/onnx/helper.h>
 #include <torch/csrc/jit/passes/onnx/naming.h>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 namespace {
 
@@ -193,5 +192,4 @@ void ONNXFunctionCallSubstitution(Graph& graph) {
   GRAPH_DUMP("After function call substitution calls: ", &graph);
 }
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

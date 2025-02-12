@@ -2,7 +2,11 @@ torch.utils.mobile_optimizer
 ===================================
 
 .. warning::
-    This API is in beta and may change in the near future.
+   PyTorch Mobile is no longer actively supported. Please check out
+   `ExecuTorch <https://pytorch.org/executorch-overview>`__, PyTorch's
+   all-new on-device inference library. You can also review
+   documentation on `XNNPACK <https://pytorch.org/executorch/stable/native-delegates-executorch-xnnpack-delegate.html>`__
+   and `Vulkan <https://pytorch.org/executorch/stable/native-delegates-executorch-vulkan-delegate.html>`__ delegates.
 
 Torch mobile supports ``torch.utils.mobile_optimizer.optimize_for_mobile`` utility to run a list of optimization pass with modules in eval mode.
 The method takes the following parameters: a torch.jit.ScriptModule object, a blocklisting optimization set, a preserved method list, and a backend.

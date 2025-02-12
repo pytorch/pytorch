@@ -35,7 +35,7 @@ class PythonSymNodeImpl : public c10::SymNodeImpl {
   PythonSymNodeImpl(py::object pyobj) : c10::SymNodeImpl() {
     pyobj_ = std::make_shared<c10::SafePyObject>(
         pyobj.release().ptr(), getPyInterpreter());
-  };
+  }
 
   c10::SymNode wrap_int(int64_t num) override {
     py::gil_scoped_acquire acquire;

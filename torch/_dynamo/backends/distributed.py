@@ -3,7 +3,7 @@
 import logging
 import traceback
 from dataclasses import dataclass, field
-from typing import Any, List, Optional
+from typing import Any, Optional
 from unittest import mock
 
 import torch
@@ -36,11 +36,11 @@ def args_str(args):
 @dataclass
 class Bucket:
     size: int = 0
-    params: List[str] = field(default_factory=list)
-    nodes: List[fx.Node] = field(default_factory=list)
+    params: list[str] = field(default_factory=list)
+    nodes: list[fx.Node] = field(default_factory=list)
 
     # param_ids is just used for unit testing
-    param_ids: List = field(default_factory=list)
+    param_ids: list = field(default_factory=list)
 
     # keep track of any buckets that were extended for logging purposes
     opcount_increased_to_capture_external_output: int = 0
@@ -60,15 +60,14 @@ def bucket_has_external_output(bucket: Bucket) -> bool:
     return False
 
 
-def pretty_print_buckets(buckets: List[Bucket], bucket_bytes_cap: int):
+def pretty_print_buckets(buckets: list[Bucket], bucket_bytes_cap: int):
     headers = ("Index", "Size (b)", "Param Names")
     rows = []
     extended_buckets = []
     for idx, bucket in enumerate(reversed(buckets)):
         if len(bucket.params) > 0:
             rows.append((idx, bucket.size, bucket.params[0]))
-            for param in bucket.params[1:]:
-                rows.append((None, None, param))
+            rows.extend((None, None, param) for param in bucket.params[1:])
         if bucket.opcount_increased_to_capture_external_output > 0:
             extended_buckets.append(
                 (
@@ -258,7 +257,7 @@ class SubmodCompiler(torch.fx.interpreter.Interpreter):
             # For aot_eager and other backends, tracing context is not set
             has_tracing_context = torch._guards.TracingContext.try_get() is not None
             if has_tracing_context:
-                g = FakeifyFirstAOTInvocationGuard()
+                g = FakeifyFirstAOTInvocationGuard()  # noqa: F841
 
             from torch._dynamo.utils import counters
 
@@ -406,30 +405,13 @@ class DDPOptimizer:
             ):
                 self.add_param(bucket, param, arg.target)
 
-    def compile_fn(self, gm: fx.GraphModule, example_inputs: List[torch.Tensor]):
+    def compile_fn(self, gm: fx.GraphModule, example_inputs: list[torch.Tensor]):
         """
         Implements graph splitting, first determining a set of of buckets by counting
         parameter sizes in reverse graph order, then invoking the user/backend compiler
         to compile each subgraph. Finally, stiches compiled graphs into one graphmodule
         and returns its callable.
         """
-        if has_higher_order_op(gm):
-            # This indicates presence of a higher order op. For now, we
-            # have no way to break the higher order op into two buckets.
-            # Allowing higher order ops in the graph also requires
-            # changes in the split_module, becuase graph splitter
-            # currently assumes that all the args of all ops are
-            # tensors, but in the case of higher order ops, it could be
-            # a graph module. As a workaround, we are shortcircuiting
-            raise NotImplementedError(
-                "DDPOptimizer backend: Found a higher order op in the graph. "
-                "This is not supported. Please turn off DDP optimizer using "
-                "torch._dynamo.config.optimize_ddp=False. Note that this can "
-                "cause performance degradation because there will be one bucket "
-                "for the entire Dynamo graph. Please refer to this issue - "
-                "https://github.com/pytorch/pytorch/issues/104674."
-            )
-
         # 1: compute the partition map according to DDP bucket logic
         buckets = [Bucket()]  # (size, param_names)
         processed_modules = set()
@@ -543,7 +525,8 @@ class DDPOptimizer:
             fake_mode = torch._subclasses.fake_tensor.FakeTensorMode()
 
         submod_compiler = SubmodCompiler(split_gm, self.backend_compile_fn, fake_mode)
-        submod_compiler.run(*example_inputs)
+        with torch._dynamo.utils._disable_saved_tensors_hooks_during_tracing():
+            submod_compiler.run(*example_inputs)
         split_gm.recompile()
 
         ddp_graph_log.debug(

@@ -1,16 +1,18 @@
 # mypy: allow-untyped-defs
 import logging
-from typing import cast, Sequence
+from collections.abc import Sequence
+from typing import cast
+
+from torch.utils._ordered_set import OrderedSet
 
 from ...._dynamo.utils import counters
 from ... import config
 from ...codecache import code_hash, get_path
 from ...ir import CUDATemplateBuffer
-from ...scheduler import BaseSchedulerNode, BaseScheduling, Scheduler, SchedulerNode
+from ...scheduler import BaseSchedulerNode, BaseScheduling, SchedulerNode
 from ...utils import get_fused_kernel_name, get_kernel_metadata, sympy_product
 from ...virtualized import V
-from ..common import IndentedBuffer
-from ..debug_utils import DebugPrinterManager
+from ..common import BackendFeature, IndentedBuffer
 
 
 log = logging.getLogger(__name__)
@@ -25,13 +27,9 @@ class CUDACPPScheduling(BaseScheduling):
     It handles fusion decisions and CUDA C++ specific template code generation.
     """
 
-    def __init__(self, scheduler: Scheduler) -> None:
-        super().__init__()
-        self.scheduler = scheduler
-
     @classmethod
-    def get_backend_features(cls, device):
-        return {}
+    def get_backend_features(cls, device) -> OrderedSet[BackendFeature]:
+        return OrderedSet()
 
     def group_fn(self, sizes):
         return tuple(V.graph.sizevars.simplify(sympy_product(s)) for s in sizes)
@@ -67,7 +65,9 @@ class CUDACPPScheduling(BaseScheduling):
             compile_wrapper = IndentedBuffer()
             compile_wrapper.writeline("async_compile.cuda(r'''")
             compile_wrapper.splice(src_code, strip=True)
-            compile_wrapper.writeline("''', 'so')")
+            compile_wrapper.writeline(
+                f"''', 'so', aot_compile={str(V.graph.aot_mode)})"
+            )
 
             metadata_comment = f"# kernel path: {kernel_path}"
             origins, detailed_origins = get_kernel_metadata(node_schedule, wrapper)
@@ -81,6 +81,7 @@ class CUDACPPScheduling(BaseScheduling):
         self,
         template_node: BaseSchedulerNode,
         epilogue_nodes: Sequence[BaseSchedulerNode],
+        prologue_nodes: Sequence[BaseSchedulerNode],
     ):
         """
         Codegen a CUDA template, possibly with fused epilogues
@@ -90,7 +91,7 @@ class CUDACPPScheduling(BaseScheduling):
             template_node
         ), "Template node passed to CUDAScheduler.codegen_template must be a SchedulerNode that wraps a CUDATemplateBuffer"
         template_node = cast(SchedulerNode, template_node)
-        _, (numel, rnumel) = template_node.group
+        _, (_numel, rnumel) = template_node.group
         assert rnumel == 1
         ctb: CUDATemplateBuffer = cast(CUDATemplateBuffer, template_node.node)
         kernel, render = ctb.make_kernel_render(ctb)
@@ -103,13 +104,13 @@ class CUDACPPScheduling(BaseScheduling):
             kernel_name = self.define_kernel(src_code, node_schedule)
 
         # debug printing values of intermediate tensors
-        # Note: MultiKernel debug printing is not supported for now
-        enable_debug_printer = config.aot_inductor.debug_intermediate_value_printer
-        _, call_args, _, arg_types = kernel.args.python_argdefs()
-        with DebugPrinterManager(
-            enable_debug_printer, call_args, kernel_name, kernel, arg_types
-        ):
+        _, call_args, arg_signatures, _ = kernel.args.python_argdefs()
+        debug_printer_manager = V.graph.wrapper_code.debug_printer
+        debug_printer_manager.set_printer_args(
+            call_args, kernel_name, arg_signatures, kernel
+        )
+        with debug_printer_manager:
             kernel.call_kernel(kernel_name, ctb)
 
         V.graph.removed_buffers |= kernel.removed_buffers
-        self.scheduler.free_buffers()
+        self.free_buffers_in_scheduler()

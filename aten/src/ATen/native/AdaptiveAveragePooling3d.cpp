@@ -313,7 +313,7 @@ Tensor adaptive_avg_pool3d_symint(Tensor const& input, SymIntArrayRef output_siz
         "adaptive_avg_pool3d: elements of output_size must be greater than or equal to 0 ",
         "but received {", output_size[0], ", ", output_size[1], ",", output_size[2], "}");
 
-  if (output_size[0] == 1 && output_size[1] == 1 && output_size[2] == 1 && !input.is_xpu()) {
+  if (output_size[0] == 1 && output_size[1] == 1 && output_size[2] == 1) {
     // in this case, adaptive pooling is just computing mean over hw
     // dimensions, which can be done more efficiently
     Tensor out = input.mean({-1, -2, -3}, /* keepdim = */ true);

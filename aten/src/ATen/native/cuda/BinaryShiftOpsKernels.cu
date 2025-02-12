@@ -38,7 +38,7 @@ void rshift_kernel_cuda(TensorIteratorBase& iter) {
   });
 }
 
-REGISTER_DISPATCH(lshift_stub, &lshift_kernel_cuda);
-REGISTER_DISPATCH(rshift_stub, &rshift_kernel_cuda);
+REGISTER_DISPATCH(lshift_stub, &lshift_kernel_cuda)
+REGISTER_DISPATCH(rshift_stub, &rshift_kernel_cuda)
 
 } // namespace at::native

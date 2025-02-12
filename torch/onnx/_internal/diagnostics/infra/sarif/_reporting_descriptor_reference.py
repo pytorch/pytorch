@@ -28,10 +28,10 @@ class ReportingDescriptorReference(object):
     properties: Optional[_property_bag.PropertyBag] = dataclasses.field(
         default=None, metadata={"schema_property_name": "properties"}
     )
-    tool_component: Optional[
-        _tool_component_reference.ToolComponentReference
-    ] = dataclasses.field(
-        default=None, metadata={"schema_property_name": "toolComponent"}
+    tool_component: Optional[_tool_component_reference.ToolComponentReference] = (
+        dataclasses.field(
+            default=None, metadata={"schema_property_name": "toolComponent"}
+        )
     )
 
 

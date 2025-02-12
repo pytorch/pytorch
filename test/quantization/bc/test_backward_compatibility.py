@@ -3,7 +3,6 @@
 import os
 import sys
 import unittest
-from typing import Set
 
 # torch
 import torch
@@ -42,10 +41,8 @@ def get_filenames(self, subname):
     test_file = os.path.realpath(sys.modules[module_id].__file__)
     base_name = os.path.join(os.path.dirname(test_file), "../serialized", munged_id)
 
-    subname_output = ""
     if subname:
         base_name += "_" + subname
-        subname_output = f" ({subname})"
 
     input_file = base_name + ".input.pt"
     state_dict_file = base_name + ".state_dict.pt"
@@ -113,7 +110,8 @@ class TestSerialization(TestCase):
             torch.save(qmodule(input_tensor), expected_file)
 
         input_tensor = torch.load(input_file)
-        qmodule.load_state_dict(torch.load(state_dict_file))
+        # weights_only = False as sometimes get ScriptObject here
+        qmodule.load_state_dict(torch.load(state_dict_file, weights_only=False))
         qmodule_scripted = torch.jit.load(scripted_module_file)
         qmodule_traced = torch.jit.load(traced_module_file)
         expected = torch.load(expected_file)
@@ -142,7 +140,7 @@ class TestSerialization(TestCase):
         """
         (
             input_file,
-            state_dict_file,
+            _,
             scripted_module_file,
             traced_module_file,
             expected_file,
@@ -193,7 +191,7 @@ class TestSerialization(TestCase):
             input_file,
             state_dict_file,
             _,
-            traced_module_file,
+            _,
             expected_file,
             _package_file,
             _get_attr_targets_file,
@@ -217,7 +215,7 @@ class TestSerialization(TestCase):
         """
         (
             input_file,
-            state_dict_file,
+            _,
             _scripted_module_file,
             _traced_module_file,
             expected_file,
@@ -240,7 +238,7 @@ class TestSerialization(TestCase):
             mq = quantize_fx.convert_fx(mp)
             return mq
 
-        def _get_get_attr_target_strings(m: GraphModule) -> Set[str]:
+        def _get_get_attr_target_strings(m: GraphModule) -> set[str]:
             results = set()
             for node in m.graph.nodes:
                 if node.op == "get_attr":
@@ -266,7 +264,7 @@ class TestSerialization(TestCase):
         # load input tensor
         input_tensor = torch.load(input_file)
         expected_output_tensor = torch.load(expected_file)
-        expected_get_attrs = torch.load(get_attr_targets_file)
+        expected_get_attrs = torch.load(get_attr_targets_file, weights_only=False)
 
         # load model from package and verify output and get_attr targets match
         imp = torch.package.PackageImporter(package_file)

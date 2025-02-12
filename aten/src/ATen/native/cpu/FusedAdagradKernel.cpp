@@ -12,10 +12,10 @@ namespace at::native {
 namespace{
 
 template <typename scalar_t, typename opmath_t>
-typename std::enable_if<
-    std::is_same<scalar_t, Half>::value || std::is_same<scalar_t, BFloat16>::value,
-    void>::
-    type inline adagrad_math(
+std::enable_if_t<
+    std::is_same_v<scalar_t, Half> || std::is_same_v<scalar_t, BFloat16>,
+    void>
+    inline adagrad_math(
   scalar_t* param_ptr,
   scalar_t* grad_ptr,
   scalar_t* state_sum_ptr,
@@ -81,10 +81,10 @@ typename std::enable_if<
 
 
 template <typename scalar_t, typename opmath_t>
-typename std::enable_if<
-    std::is_same<scalar_t, float>::value || std::is_same<scalar_t, double>::value,
-    void>::
-    type inline adagrad_math(
+std::enable_if_t<
+    std::is_same_v<scalar_t, float> || std::is_same_v<scalar_t, double>,
+    void>
+    inline adagrad_math(
   scalar_t* param_ptr,
   scalar_t* grad_ptr,
   scalar_t* state_sum_ptr,
@@ -214,5 +214,5 @@ void fused_adagrad_kernel(
 
 }
 
-REGISTER_DISPATCH(fused_adagrad_stub, &fused_adagrad_kernel);
+REGISTER_DISPATCH(fused_adagrad_stub, &fused_adagrad_kernel)
 } // namespace at::native

@@ -1,5 +1,7 @@
 #pragma once
 
+#include <ATen/native/TensorIterator.h>
+
 namespace at {
 struct TensorIteratorBase;
 

@@ -6,8 +6,8 @@
 
 #if !AT_MKLDNN_ENABLED()
 
-namespace at {
-namespace native {
+
+namespace at::native {
 
 void mkldnn_matmul(
     const Tensor &mat1,
@@ -85,16 +85,15 @@ void mkldnn_matmul_i8i8i32(
   TORCH_INTERNAL_ASSERT(false, __func__, ": ATen not compiled with MKLDNN support");
 }
 
-} // namespace native
-} // namespace at
+} // namespace at::native
+
 
 #else // AT_MKLDNN_ENABLED
 
 #include <ATen/native/mkldnn/MKLDNNCommon.h>
 #include <ATen/native/mkldnn/Utils.h>
 
-namespace at {
-namespace native {
+namespace at::native {
 
 static bool use_mkldnn_bf16_matmul() {
   return at::globalContext().userEnabledMkldnn() && mkldnn_bf16_device_check();
@@ -136,7 +135,7 @@ mkldnn_gemm(
   if (beta != 0.0f) {
     op_attr = ideep::attr_t::fuse_sum();
   }
-  if (std::is_same_v<scalar_t, float>) op_attr.set_fpmath_mode(dnnl_fpmath_mode_bf16); // bf32 path
+  if (bf32_usable) op_attr.set_fpmath_mode(dnnl_fpmath_mode_bf16); // bf32 path
 
   // NOTE: View as c-contiguous to avoid extra reordering in mkldnn
   // Use identity: C = AB <=> C^T = B^T A^T
@@ -237,15 +236,27 @@ void mkldnn_matmul(
               "mkldnn_matmul:  unsupported dims for mat and mat2");
 
 #if defined(__aarch64__)
-  // oneDNN fast-maths mode (enabled by setting the environment variable ONEDNN_DEFAULT_FPMATH_MODE=BF16) will dispatch
-  // fp32 inputs to bf16 kernels where HW permits. So, both fp32 and bf16 inputs are permitted.
-  TORCH_CHECK((mat1.scalar_type() == mat2.scalar_type()) && (mat1.scalar_type() == result.scalar_type()) &&
-              ((mat1.scalar_type() == at::kFloat) || (mat1.scalar_type() == at::kBFloat16)),
-              "mkldnn_matmul:  only enabled for fp32 and bf16 path");
+  // oneDNN fast-maths mode (enabled by setting the environment variable
+  // ONEDNN_DEFAULT_FPMATH_MODE=BF16) will dispatch fp32 inputs to bf16 kernels
+  // where HW permits. So, both fp32 and bf16 inputs are permitted.
+  TORCH_CHECK(
+      (mat1.scalar_type() == mat2.scalar_type()) &&
+          (mat1.scalar_type() == result.scalar_type()) &&
+          ((mat1.scalar_type() == at::kFloat) ||
+           (mat1.scalar_type() == at::kBFloat16) ||
+           (mat1.scalar_type() == at::kHalf)),
+      "mkldnn_matmul:  only enabled for fp32, bf16 and fp16 path");
   // device needs to support bf16 if the inputs are of bf16 type
   if (mat1.scalar_type() == at::kBFloat16) {
-    TORCH_CHECK(mkldnn_bf16_device_check_arm(),
-                "mkldnn_matmul: mkldnn_matmul bf16 path needs a cpu with bf16 support");
+    TORCH_CHECK(
+        mkldnn_bf16_device_check_arm(),
+        "mkldnn_matmul: mkldnn_matmul bf16 path needs a cpu with bf16 support");
+  }
+  // device needs to support fp16 if the inputs are of fp16 type
+  if (mat1.scalar_type() == at::kHalf) {
+    TORCH_CHECK(
+        mkldnn_fp16_device_check_arm(),
+        "mkldnn_matmul: mkldnn_matmul fp16 path needs a cpu with fp16 support");
   }
 #else
   TORCH_CHECK(
@@ -270,13 +281,14 @@ void mkldnn_matmul(
   auto mat1_unsqueezed = mat1.dim() == 1 ? mat1.unsqueeze(0) : mat1;
   auto mat2_unsqueezed = mat2.dim() == 1 ? mat2.unsqueeze(1) : mat2;
   auto result_unsqueezed = result.dim() == 1 ? result.unsqueeze(1) : result;
+  bool bf32_usable = mat1.scalar_type() == at::kFloat && use_mkldnn_bf32_matmul();
 
   ideep::attr_t op_attr;
   // "addmm", "addbmm" "baddbmm" in pytorch allow bias to be 2-D or 3-D tensor
   // but mkldnn matmul primitive only support bias be 1-D tensors
   // to address their differences, we use mkldnn post ops to perform a fused "add" after matrix multiplication is over
   if (beta != 0.0f) op_attr = ideep::attr_t::fuse_sum();
-  if (mat1.scalar_type() == at::kFloat) op_attr.set_fpmath_mode(dnnl_fpmath_mode_bf16); // bf32 path
+  if (bf32_usable) op_attr.set_fpmath_mode(dnnl_fpmath_mode_bf16); // bf32 path
   // If alpha = 0, dose not need actually do gemm computation
   if (alpha == 0)
     return;
@@ -512,7 +524,6 @@ void mkldnn_matmul_i8i8i32(
   }
 }
 
-} // namespace native
 } // namespace at
 
 #endif // AT_MKLDNN_ENABLED

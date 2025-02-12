@@ -7,9 +7,10 @@
 
 #include <ATen/cpu/vec/vec_base.h>
 #if !(defined(__VSX__)  || defined(CPU_CAPABILITY_VSX) || defined(CPU_CAPABILITY_ZVECTOR))
+#if defined(CPU_CAPABILITY_SVE256)
+#include <ATen/cpu/vec/sve/vec_common_sve.h>
+#endif
 #include <ATen/cpu/vec/vec256/vec256_float.h>
-#include <ATen/cpu/vec/vec256/vec256_float_neon.h>
-#include <ATen/cpu/vec/vec256/vec256_half_neon.h>
 #include <ATen/cpu/vec/vec256/vec256_bfloat16.h>
 #include <ATen/cpu/vec/vec256/vec256_double.h>
 #include <ATen/cpu/vec/vec256/vec256_int.h>
@@ -312,6 +313,17 @@ inline Vectorized<int8_t> flip(const Vectorized<int8_t> & v) {
 template<>
 inline Vectorized<uint8_t> flip(const Vectorized<uint8_t> & v) {
   return flip8(v);
+}
+
+inline Vectorized<bool> operator&&(
+    const Vectorized<bool>& self,
+    const Vectorized<bool>& other) {
+  const __m256i* self_ = reinterpret_cast<const __m256i*>(self.as_bytes());
+  const __m256i* other_ = reinterpret_cast<const __m256i*>(other.as_bytes());
+  __m256i out = _mm256_and_si256(*self_, *other_);
+  Vectorized<bool> ret;
+  std::memcpy(ret, &out, ret.size() * sizeof(bool));
+  return ret;
 }
 
 #endif // (defined(CPU_CAPABILITY_AVX2)

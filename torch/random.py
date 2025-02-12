@@ -1,7 +1,7 @@
 # mypy: allow-untyped-defs
 import contextlib
 import warnings
-from typing import Generator
+from collections.abc import Generator
 
 import torch
 from torch._C import default_generator
@@ -146,6 +146,10 @@ def fork_rng(
         device_type (str): device type str, default is `cuda`. As for custom device,
             see details in [Note: support the custom device with privateuse1]
     """
+
+    if device_type == "meta":
+        yield
+        return
 
     device_type = torch.device(device_type).type
     device_mod = getattr(torch, device_type, None)

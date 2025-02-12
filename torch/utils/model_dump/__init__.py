@@ -76,6 +76,7 @@ import urllib.parse
 import zipfile
 from pathlib import Path
 from typing import Dict
+import warnings
 
 import torch.utils.show_pickle
 
@@ -130,15 +131,12 @@ def hierarchical_pickle(data):
             }
         if typename == "torch._utils._rebuild_tensor_v2":
             assert data.state is None
-            if len(data.args) == 6:
-                storage, offset, size, stride, requires_grad, hooks = data.args
-            else:
-                storage, offset, size, stride, requires_grad, hooks, metadata = data.args
+            storage, offset, size, stride, requires_grad, *_ = data.args
             storage_info = get_storage_info(storage)
             return {"__tensor_v2__": [storage_info, offset, size, stride, requires_grad]}
         if typename == "torch._utils._rebuild_qtensor":
             assert data.state is None
-            storage, offset, size, stride, quantizer, requires_grad, hooks = data.args
+            storage, offset, size, stride, quantizer, requires_grad, *_ = data.args
             storage_info = get_storage_info(storage)
             assert isinstance(quantizer, tuple)
             assert isinstance(quantizer[0], torch.utils.show_pickle.FakeClass)
@@ -240,7 +238,7 @@ def get_model_info(
         # so re-used strings are stored efficiently.
         # However, JSON has no way of representing this,
         # so we have to do it manually.
-        interned_strings : Dict[str, int] = {}
+        interned_strings : dict[str, int] = {}
 
         def ist(s):
             if s not in interned_strings:
@@ -392,6 +390,7 @@ def get_info_and_burn_skeleton(path_or_bytesio, **kwargs):
 
 
 def main(argv, *, stdout=None):
+    warnings.warn("torch.utils.model_dump is deprecated and will be removed in a future PyTorch release.")
     parser = argparse.ArgumentParser()
     parser.add_argument("--style", choices=["json", "html"])
     parser.add_argument("--title")

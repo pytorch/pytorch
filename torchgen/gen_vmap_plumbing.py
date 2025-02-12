@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import textwrap
 from dataclasses import dataclass
-from typing import Sequence
+from typing import TYPE_CHECKING
 
 from torchgen.api.translate import translate
 from torchgen.api.types import DispatcherSignature
@@ -20,6 +20,10 @@ from torchgen.model import (
     Type,
 )
 from torchgen.utils import mapMaybe
+
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
 
 
 def is_tensor(typ: Type) -> bool:
@@ -111,7 +115,7 @@ def gen_returns(
             idx += 2
         elif is_tensor_list(ret.type):
             wrapped_returns.append(
-                f"makeBatchedVector(std::get<{idx}>({results_var}), std::get<{idx+1}>({results_var}), {cur_level_var})"
+                f"makeBatchedVector(std::get<{idx}>({results_var}), std::get<{idx + 1}>({results_var}), {cur_level_var})"
             )
             idx += 2
         else:
@@ -207,7 +211,14 @@ def gen_vmap_plumbing(native_function: NativeFunction) -> str | None:
         return None
     if len(returns) == 0:
         return gen_vmap_plumbing_no_returns(native_function)
-    if not all(ret.type.is_tensor_like() for ret in returns):
+    return_symint_overrides = [
+        "_scaled_dot_product_flash_attention",
+        "_scaled_dot_product_cudnn_attention",
+    ]
+    if (
+        not all(ret.type.is_tensor_like() for ret in returns)
+        and schema.name.unambiguous_name() not in return_symint_overrides
+    ):
         return None
     # in-place views need special handling
     if "inplace_view" in native_function.tags:

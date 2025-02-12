@@ -645,7 +645,7 @@ RecordProfile::RecordProfile(std::ostream& out) : out_(out) {
 }
 
 RecordProfile::RecordProfile(const std::string& filename)
-    : file_(new std::ofstream(filename)), out_(*file_) {
+    : file_(std::make_unique<std::ofstream>(filename)), out_(*file_) {
   init();
 }
 

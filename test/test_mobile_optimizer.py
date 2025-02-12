@@ -37,7 +37,6 @@ class TestOptimizer(TestCase):
         dilation = 1
         input_channels = input_channels_per_group * groups
         output_channels = output_channels_per_group * groups
-        kernels = (kernel_h, kernel_w)
         strides = (stride_h, stride_w)
         paddings = (pad_h, pad_w)
         dilations = (dilation, dilation)
@@ -303,7 +302,7 @@ class TestOptimizer(TestCase):
             torch.ao.quantization.convert(model, inplace=True)
             model = torch.jit.script(model)
             # this line should not have ASAN failures
-            model_optim = optimize_for_mobile(model)
+            optimize_for_mobile(model)
 
     def test_generate_mobile_module_lints(self):
         class MyTestModule(torch.nn.Module):
@@ -427,7 +426,6 @@ class TestOptimizer(TestCase):
 
             def fuse_model(self):
                 torch.ao.quantization.fuse_modules(self, [['conv2', 'relu']], inplace=True)
-                pass
 
         class Child(nn.Module):
             def __init__(self) -> None:

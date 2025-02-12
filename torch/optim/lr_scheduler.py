@@ -5,17 +5,14 @@ import types
 import warnings
 from bisect import bisect_right
 from collections import Counter
+from collections.abc import Iterable, Sequence
 from functools import partial, wraps
 from typing import (
     Any,
     Callable,
     cast,
-    Dict,
-    Iterable,
-    List,
     Literal,
     Optional,
-    Sequence,
     SupportsFloat,
     TypedDict,
     Union,
@@ -92,7 +89,10 @@ class LRScheduler:
     _get_lr_called_within_step: bool = False
 
     def __init__(
-        self, optimizer: Optimizer, last_epoch=-1, verbose="deprecated"
+        self,
+        optimizer: Optimizer,
+        last_epoch: int = -1,
+        verbose="deprecated",
     ):  # noqa: D107
         # Attach optimizer
         if not isinstance(optimizer, Optimizer):
@@ -113,7 +113,7 @@ class LRScheduler:
                         "param 'initial_lr' is not specified "
                         f"in param_groups[{i}] when resuming an optimizer"
                     )
-        self.base_lrs: List[float] = [
+        self.base_lrs: list[float] = [
             group["initial_lr"] for group in optimizer.param_groups
         ]
         self.last_epoch = last_epoch
@@ -160,7 +160,7 @@ class LRScheduler:
             key: value for key, value in self.__dict__.items() if key != "optimizer"
         }
 
-    def load_state_dict(self, state_dict: Dict[str, Any]):
+    def load_state_dict(self, state_dict: dict[str, Any]):
         """Load the scheduler's state.
 
         Args:
@@ -169,18 +169,18 @@ class LRScheduler:
         """
         self.__dict__.update(state_dict)
 
-    def get_last_lr(self) -> List[float]:
+    def get_last_lr(self) -> list[float]:
         """Return last computed learning rate by current scheduler."""
         return self._last_lr
 
-    def get_lr(self) -> List[float]:
+    def get_lr(self) -> list[float]:
         """Compute learning rate using chainable form of the scheduler."""
         raise NotImplementedError
 
     def print_lr(
         self,
         is_verbose: bool,
-        group: Dict[str, Any],
+        group: dict[str, Any],
         lr: float,
         epoch: Optional[int] = None,
     ):
@@ -240,19 +240,17 @@ class LRScheduler:
                 warnings.warn(EPOCH_DEPRECATION_WARNING, UserWarning)
                 self.last_epoch = epoch
                 if hasattr(self, "_get_closed_form_lr"):
-                    values = cast(List[float], self._get_closed_form_lr())
+                    values = cast(list[float], self._get_closed_form_lr())
                 else:
                     values = self.get_lr()
 
-        for i, data in enumerate(zip(self.optimizer.param_groups, values)):
-            param_group, lr = data
+        for param_group, lr in zip(self.optimizer.param_groups, values):
             if isinstance(param_group["lr"], Tensor):
-                lr_val = lr.item() if isinstance(lr, Tensor) else lr  # type: ignore[attr-defined]
-                param_group["lr"].fill_(lr_val)
+                param_group["lr"].fill_(lr)
             else:
                 param_group["lr"] = lr
 
-        self._last_lr: List[float] = [
+        self._last_lr: list[float] = [
             group["lr"] for group in self.optimizer.param_groups
         ]
 
@@ -319,13 +317,13 @@ class LambdaLR(LRScheduler):
     def __init__(
         self,
         optimizer: Optimizer,
-        lr_lambda: Union[Callable[[int], float], List[Callable[[int], float]]],
-        last_epoch=-1,
+        lr_lambda: Union[Callable[[int], float], list[Callable[[int], float]]],
+        last_epoch: int = -1,
         verbose="deprecated",
     ):  # noqa: D107
         self.optimizer = optimizer
 
-        self.lr_lambdas: List[Callable[[int], float]]
+        self.lr_lambdas: list[Callable[[int], float]]
         if not isinstance(lr_lambda, list) and not isinstance(lr_lambda, tuple):
             self.lr_lambdas = [lr_lambda] * len(optimizer.param_groups)
         else:
@@ -419,13 +417,13 @@ class MultiplicativeLR(LRScheduler):
     def __init__(
         self,
         optimizer: Optimizer,
-        lr_lambda: Union[Callable[[int], float], List[Callable[[int], float]]],
-        last_epoch=-1,
+        lr_lambda: Union[Callable[[int], float], list[Callable[[int], float]]],
+        last_epoch: int = -1,
         verbose="deprecated",
     ):  # noqa: D107
         self.optimizer = optimizer
 
-        self.lr_lambdas: List[Callable[[int], float]]
+        self.lr_lambdas: list[Callable[[int], float]]
         if not isinstance(lr_lambda, list) and not isinstance(lr_lambda, tuple):
             self.lr_lambdas = [lr_lambda] * len(optimizer.param_groups)
         else:
@@ -524,8 +522,8 @@ class StepLR(LRScheduler):
         self,
         optimizer: Optimizer,
         step_size: int,
-        gamma=0.1,
-        last_epoch=-1,
+        gamma: float = 0.1,
+        last_epoch: int = -1,
         verbose="deprecated",
     ):  # noqa: D107
         self.step_size = step_size
@@ -583,8 +581,8 @@ class MultiStepLR(LRScheduler):
         self,
         optimizer: Optimizer,
         milestones: Iterable[int],
-        gamma=0.1,
-        last_epoch=-1,
+        gamma: float = 0.1,
+        last_epoch: int = -1,
         verbose="deprecated",
     ):  # noqa: D107
         self.milestones = Counter(milestones)
@@ -649,9 +647,9 @@ class ConstantLR(LRScheduler):
     def __init__(
         self,
         optimizer: Optimizer,
-        factor=1.0 / 3,
-        total_iters=5,
-        last_epoch=-1,
+        factor: float = 1.0 / 3,
+        total_iters: int = 5,
+        last_epoch: int = -1,
         verbose="deprecated",
     ):  # noqa: D107
         if factor > 1.0 or factor < 0:
@@ -727,10 +725,10 @@ class LinearLR(LRScheduler):
     def __init__(
         self,
         optimizer: Optimizer,
-        start_factor=1.0 / 3,
-        end_factor=1.0,
-        total_iters=5,
-        last_epoch=-1,
+        start_factor: float = 1.0 / 3,
+        end_factor: float = 1.0,
+        total_iters: int = 5,
+        last_epoch: int = -1,
         verbose="deprecated",
     ):  # noqa: D107
         if start_factor > 1.0 or start_factor <= 0:
@@ -804,7 +802,11 @@ class ExponentialLR(LRScheduler):
     """
 
     def __init__(
-        self, optimizer: Optimizer, gamma: float, last_epoch=-1, verbose="deprecated"
+        self,
+        optimizer: Optimizer,
+        gamma: float,
+        last_epoch: int = -1,
+        verbose="deprecated",
     ):  # noqa: D107
         self.gamma = gamma
         super().__init__(optimizer, last_epoch, verbose)
@@ -858,9 +860,9 @@ class SequentialLR(LRScheduler):
     def __init__(
         self,
         optimizer: Optimizer,
-        schedulers: List[LRScheduler],
-        milestones: List[int],
-        last_epoch=-1,
+        schedulers: list[LRScheduler],
+        milestones: list[int],
+        last_epoch: int = -1,
         verbose="deprecated",
     ):  # noqa: D107
         if len(schedulers) < 1:
@@ -903,15 +905,27 @@ class SequentialLR(LRScheduler):
             group["lr"] = group["initial_lr"]
 
         # "Undo" the step performed by other schedulers
-        for scheduler in self._schedulers:
-            scheduler.last_epoch -= 1
+        self.recursive_undo()
 
         # Perform the initial step for only the first scheduler
         self._schedulers[0]._initial_step()
 
         self._last_lr = schedulers[0].get_last_lr()
 
-    def step(self):
+    def recursive_undo(self, sched=None):
+        """
+        Recursively undo any step performed by the initialisation of
+        schedulers.
+        """
+        scheds = self if sched is None else sched
+
+        if hasattr(scheds, "_schedulers"):
+            for s in scheds._schedulers:
+                self.recursive_undo(s)
+        elif hasattr(scheds, "last_epoch"):
+            scheds.last_epoch -= 1
+
+    def step(self):  # type: ignore[override]
         """Perform a step."""
         self.last_epoch += 1
         idx = bisect_right(self._milestones, self.last_epoch)
@@ -993,9 +1007,9 @@ class PolynomialLR(LRScheduler):
     def __init__(
         self,
         optimizer: Optimizer,
-        total_iters=5,
-        power=1.0,
-        last_epoch=-1,
+        total_iters: int = 5,
+        power: float = 1.0,
+        last_epoch: int = -1,
         verbose="deprecated",
     ):  # noqa: D107
         self.total_iters = total_iters
@@ -1075,8 +1089,8 @@ class CosineAnnealingLR(LRScheduler):
         self,
         optimizer: Optimizer,
         T_max: int,
-        eta_min=0,
-        last_epoch=-1,
+        eta_min: float = 0.0,
+        last_epoch: int = -1,
         verbose="deprecated",
     ):  # noqa: D107
         self.T_max = T_max
@@ -1180,7 +1194,7 @@ class ChainedScheduler(LRScheduler):
             group["lr"] for group in self._schedulers[-1].optimizer.param_groups
         ]
 
-    def step(self):
+    def step(self):  # type: ignore[override]
         """Perform a step."""
         for scheduler in self._schedulers:
             scheduler.step()
@@ -1289,13 +1303,13 @@ class ReduceLROnPlateau(LRScheduler):
         self,
         optimizer: Optimizer,
         mode: Literal["min", "max"] = "min",
-        factor=0.1,
-        patience=10,
-        threshold=1e-4,
+        factor: float = 0.1,
+        patience: int = 10,
+        threshold: float = 1e-4,
         threshold_mode: Literal["rel", "abs"] = "rel",
-        cooldown=0,
-        min_lr: Union[List[float], float] = 0,
-        eps=1e-8,
+        cooldown: int = 0,
+        min_lr: Union[list[float], float] = 0,
+        eps: float = 1e-8,
         verbose="deprecated",
     ):  # noqa: D107
         if factor >= 1.0:
@@ -1312,8 +1326,10 @@ class ReduceLROnPlateau(LRScheduler):
                 raise ValueError(
                     f"expected {len(optimizer.param_groups)} min_lrs, got {len(min_lr)}"
                 )
+            self.default_min_lr = None
             self.min_lrs = list(min_lr)
         else:
+            self.default_min_lr = min_lr
             self.min_lrs = [min_lr] * len(optimizer.param_groups)
 
         self.patience = patience
@@ -1369,6 +1385,20 @@ class ReduceLROnPlateau(LRScheduler):
         self._last_lr = [group["lr"] for group in self.optimizer.param_groups]
 
     def _reduce_lr(self, epoch):
+        if len(self.optimizer.param_groups) != len(self.min_lrs):
+            if self.default_min_lr is None:
+                raise RuntimeError(
+                    "The number of param groups in the `optimizer` "
+                    f"({len(self.optimizer.param_groups)}) differs "
+                    f"from when `ReduceLROnPlateau` was initialized "
+                    f"({len(self.min_lrs)}), usually due to a new "
+                    "param group being added to the optimizer. Please "
+                    "modify the `min_lrs` field to match the length "
+                    "of the `optimizer` param groups."
+                )
+            else:
+                self.min_lrs = [self.default_min_lr] * len(self.optimizer.param_groups)
+
         for i, param_group in enumerate(self.optimizer.param_groups):
             old_lr = float(param_group["lr"])
             new_lr = max(old_lr * self.factor, self.min_lrs[i])
@@ -1524,18 +1554,18 @@ class CyclicLR(LRScheduler):
     def __init__(
         self,
         optimizer: Optimizer,
-        base_lr: Union[float, List[float]],
-        max_lr: Union[float, List[float]],
-        step_size_up=2000,
+        base_lr: Union[float, list[float]],
+        max_lr: Union[float, list[float]],
+        step_size_up: int = 2000,
         step_size_down: Optional[int] = None,
         mode: Literal["triangular", "triangular2", "exp_range"] = "triangular",
-        gamma=1.0,
+        gamma: float = 1.0,
         scale_fn: Optional[Callable[[float], float]] = None,
         scale_mode: Literal["cycle", "iterations"] = "cycle",
-        cycle_momentum=True,
-        base_momentum=0.8,
-        max_momentum=0.9,
-        last_epoch=-1,
+        cycle_momentum: bool = True,
+        base_momentum: float = 0.8,
+        max_momentum: float = 0.9,
+        last_epoch: int = -1,
         verbose="deprecated",
     ):  # noqa: D107
         # Attach optimizer
@@ -1741,9 +1771,9 @@ class CosineAnnealingWarmRestarts(LRScheduler):
         self,
         optimizer: Optimizer,
         T_0: int,
-        T_mult=1,
-        eta_min=0,
-        last_epoch=-1,
+        T_mult: int = 1,
+        eta_min: float = 0.0,
+        last_epoch: int = -1,
         verbose="deprecated",
     ):  # noqa: D107
         if T_0 <= 0 or not isinstance(T_0, int):
@@ -1831,8 +1861,7 @@ class CosineAnnealingWarmRestarts(LRScheduler):
         self.last_epoch = math.floor(epoch)
 
         with _enable_get_lr_call(self):
-            for i, data in enumerate(zip(self.optimizer.param_groups, self.get_lr())):
-                param_group, lr = data
+            for param_group, lr in zip(self.optimizer.param_groups, self.get_lr()):
                 param_group["lr"] = lr
 
         self._last_lr = [group["lr"] for group in self.optimizer.param_groups]
@@ -1956,19 +1985,19 @@ class OneCycleLR(LRScheduler):
     def __init__(
         self,
         optimizer: Optimizer,
-        max_lr: Union[float, List[float]],
+        max_lr: Union[float, list[float]],
         total_steps: Optional[int] = None,
         epochs: Optional[int] = None,
         steps_per_epoch: Optional[int] = None,
-        pct_start=0.3,
+        pct_start: float = 0.3,
         anneal_strategy: Literal["cos", "linear"] = "cos",
-        cycle_momentum=True,
-        base_momentum: Union[float, List[float]] = 0.85,
-        max_momentum: Union[float, List[float]] = 0.95,
-        div_factor=25.0,
-        final_div_factor=1e4,
-        three_phase=False,
-        last_epoch=-1,
+        cycle_momentum: bool = True,
+        base_momentum: Union[float, list[float]] = 0.85,
+        max_momentum: Union[float, list[float]] = 0.95,
+        div_factor: float = 25.0,
+        final_div_factor: float = 1e4,
+        three_phase: bool = False,
+        last_epoch: int = -1,
         verbose="deprecated",
     ):  # noqa: D107
         # Validate optimizer
@@ -1996,7 +2025,7 @@ class OneCycleLR(LRScheduler):
                 "You must define either total_steps OR (epochs AND steps_per_epoch)"
             )
 
-        self._schedule_phases: List[_SchedulePhase]
+        self._schedule_phases: list[_SchedulePhase]
         if three_phase:
             self._schedule_phases = [
                 {

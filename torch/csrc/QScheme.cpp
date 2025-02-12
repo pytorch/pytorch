@@ -22,7 +22,7 @@ PyObject* THPQScheme_New(at::QScheme qscheme, const std::string& name) {
   return self.release();
 }
 
-PyObject* THPQScheme_reduce(PyObject* _self, PyObject* noargs) {
+static PyObject* THPQScheme_reduce(PyObject* _self, PyObject* noargs) {
   auto self = (THPQScheme*)_self;
   return THPUtils_packString(self->name);
 }
@@ -33,13 +33,14 @@ static PyMethodDef THPQScheme_methods[] = {
     {nullptr} /* Sentinel */
 };
 
-PyObject* THPQScheme_repr(THPQScheme* self) {
+static PyObject* THPQScheme_repr(THPQScheme* self) {
   std::string name = self->name;
   return THPUtils_packString("torch." + name);
 }
 
 PyTypeObject THPQSchemeType = {
-    PyVarObject_HEAD_INIT(nullptr, 0) "torch.qscheme", /* tp_name */
+    PyVarObject_HEAD_INIT(nullptr, 0)
+    "torch.qscheme", /* tp_name */
     sizeof(THPQScheme), /* tp_basicsize */
     0, /* tp_itemsize */
     nullptr, /* tp_dealloc */

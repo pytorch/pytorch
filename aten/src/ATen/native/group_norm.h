@@ -35,8 +35,8 @@ using backward_fn = void (*)(
     Tensor& /* dgamma */,
     Tensor& /* dbeta */);
 
-DECLARE_DISPATCH(forward_fn, GroupNormKernel);
-DECLARE_DISPATCH(backward_fn, GroupNormBackwardKernel);
+DECLARE_DISPATCH(forward_fn, GroupNormKernel)
+DECLARE_DISPATCH(backward_fn, GroupNormBackwardKernel)
 
 } // namespace native
 } // namespace at

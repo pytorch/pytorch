@@ -11,8 +11,7 @@
 #include <cstdint>
 #include <memory>
 
-namespace torch {
-namespace autograd {
+namespace torch::autograd {
 
 struct TORCH_API CopyBackwards : public Node {
   variable_list apply(variable_list&& grads) override;
@@ -173,6 +172,7 @@ struct TORCH_API CopySlices : public Node {
   variable_list apply_with_saved(
       const variable_list& inputs,
       SwapSavedVariables& saved) override;
+  void update_exec_info();
 
   at::TensorGeometry base;
   // view and view_fn are redundant and view_fn will be used if available.
@@ -182,5 +182,4 @@ struct TORCH_API CopySlices : public Node {
   std::shared_ptr<Node> fn;
 };
 
-} // namespace autograd
-} // namespace torch
+} // namespace torch::autograd

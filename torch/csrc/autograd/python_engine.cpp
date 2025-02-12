@@ -32,9 +32,7 @@ struct THPEngine {
 
 static bool _reinitialize_engine = false;
 
-namespace torch {
-namespace autograd {
-namespace python {
+namespace torch::autograd::python {
 
 PythonEngine::PythonEngine() = default;
 
@@ -102,7 +100,7 @@ void PythonEngine::thread_init(
 }
 
 void PythonEngine::thread_on_exception(
-    std::shared_ptr<GraphTask> graph_task,
+    const std::shared_ptr<GraphTask>& graph_task,
     const std::shared_ptr<Node>& fn,
     std::exception& e) {
   // See Note [ Persisting PyErr state across autograd engine threads ]
@@ -110,7 +108,7 @@ void PythonEngine::thread_on_exception(
   if (python_err) {
     python_err->persist();
   }
-  Engine::thread_on_exception(std::move(graph_task), fn, e);
+  Engine::thread_on_exception(graph_task, fn, e);
 }
 
 std::unique_ptr<AnomalyMetadata> PythonEngine::make_anomaly_metadata() {
@@ -160,13 +158,11 @@ c10::intrusive_ptr<at::ivalue::Future> PythonEngine::execute_with_graph_task(
     throw;
   }
 }
-} // namespace python
-} // namespace autograd
-} // namespace torch
+} // namespace torch::autograd::python
 
 PyObject* THPEngineClass = nullptr;
 
-inline static Edge parseGradientEdge(PyObject* obj, int64_t index) {
+static Edge parseGradientEdge(PyObject* obj, int64_t index) {
   PyObject* grad_fn = PyTuple_GetItem(obj, 0);
   auto output_nr = THPUtils_unpackLong(PyTuple_GetItem(obj, 1));
   std::shared_ptr<torch::autograd::Node> grad_fn_sp;
@@ -198,15 +194,15 @@ PyObject* THPEngine_run_backward(
   unsigned char allow_unreachable = 0;
   unsigned char accumulate_grad =
       0; // Indicate whether to accumulate grad into leaf Tensors or capture
-  constexpr const char* accepted_kwargs[] = {// NOLINT
-                                             "tensors",
-                                             "grad_tensors",
-                                             "keep_graph",
-                                             "create_graph",
-                                             "inputs",
-                                             "allow_unreachable",
-                                             "accumulate_grad",
-                                             nullptr};
+  constexpr const char* accepted_kwargs[] = {
+      "tensors",
+      "grad_tensors",
+      "keep_graph",
+      "create_graph",
+      "inputs",
+      "allow_unreachable",
+      "accumulate_grad",
+      nullptr};
   if (!PyArg_ParseTupleAndKeywords(
           args,
           kwargs,
@@ -464,7 +460,8 @@ static struct PyMethodDef THPEngine_methods[] = {
     {nullptr}};
 
 PyTypeObject THPEngineType = {
-    PyVarObject_HEAD_INIT(nullptr, 0) "torch._C._EngineBase", /* tp_name */
+    PyVarObject_HEAD_INIT(nullptr, 0)
+    "torch._C._EngineBase", /* tp_name */
     sizeof(THPEngine), /* tp_basicsize */
     0, /* tp_itemsize */
     nullptr, /* tp_dealloc */

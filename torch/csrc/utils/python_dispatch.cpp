@@ -97,6 +97,10 @@ struct EnableHermeticPyObject {
     c10::impl::tls_set_dispatch_key_included(
         at::DispatchKey::PythonTLSSnapshot, old_python_snapshot_);
   }
+  EnableHermeticPyObject(const EnableHermeticPyObject&) = delete;
+  EnableHermeticPyObject(EnableHermeticPyObject&&) = delete;
+  EnableHermeticPyObject& operator=(const EnableHermeticPyObject&) = delete;
+  EnableHermeticPyObject& operator=(EnableHermeticPyObject&&) = delete;
   bool old_;
   bool old_excluded_python_;
   bool old_python_;
@@ -222,11 +226,11 @@ static torch::_RegisterOrVerify register_or_verify() {
 
 static py::object ophandle_call_boxed(
     const c10::OperatorHandle& handle,
-    py::args args,
+    const py::args& args,
     const py::kwargs& kwargs) {
   auto stack = torch::jit::createStackForSchema(
       handle.schema(),
-      std::move(args),
+      args,
       kwargs,
       /*self=*/std::nullopt);
   {
@@ -638,7 +642,7 @@ void initDispatchBindings(PyObject* module) {
       if (!op.overload_name.empty()) {
         ss << "." << op.overload_name;
       }
-      names.emplace_back(ss.str());
+      names.emplace_back(std::move(ss).str());
     }
 
     return names;
@@ -726,6 +730,7 @@ void initDispatchBindings(PyObject* module) {
       DEF_ONE(PreDispatch)
       DEF_ONE(Functionalize)
       DEF_ONE(AutocastCPU)
+      DEF_ONE(AutocastMPS)
       DEF_ONE(AutocastXPU)
       DEF_ONE(AutocastHPU)
       DEF_ONE(AutocastIPU)

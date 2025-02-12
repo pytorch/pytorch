@@ -12,6 +12,7 @@
 #include <ATen/ops/clamp_max_native.h>
 #include <ATen/ops/clamp_min_native.h>
 #include <ATen/ops/clamp_native.h>
+#include <ATen/ops/eq.h>
 #include <ATen/ops/isin_native.h>
 #include <ATen/ops/nan_to_num_native.h>
 #include <ATen/ops/ones_like_native.h>
@@ -335,6 +336,26 @@ static void isin_Tensor_Tensor_out_mps(const Tensor& elements,
   }
 }
 
+static void is_posneginf_helper(TensorIteratorBase& iter, bool is_neg) {
+  const auto& self = iter.input(0);
+  auto& out = iter.output(0);
+  @autoreleasepool {
+    auto cachedGraph = LookUpOrCreateCachedGraph<MPSUnaryCachedGraph>(
+        __func__ + std::to_string(is_neg) + getTensorsStringKey(self), [&](auto mpsGraph, auto newCachedGraph) {
+          auto infTensor = [mpsGraph constantWithScalar:is_neg ? -std::numeric_limits<float>::infinity()
+                                                               : std::numeric_limits<float>::infinity()
+                                               dataType:getMPSScalarType(self)];
+          newCachedGraph->inputTensor_ = mpsGraphRankedPlaceHolder(mpsGraph, self);
+          newCachedGraph->outputTensor_ = [mpsGraph equalWithPrimaryTensor:newCachedGraph->inputTensor_
+                                                           secondaryTensor:infTensor
+                                                                      name:nil];
+        });
+    auto selfPlaceholder = Placeholder(cachedGraph->inputTensor_, self);
+    auto outputPlaceholder = Placeholder(cachedGraph->outputTensor_, out);
+    runMPSGraph(
+        getCurrentMPSStream(), cachedGraph->graph(), dictionaryFromPlaceholders(selfPlaceholder), outputPlaceholder);
+  }
+}
 } // namespace mps
 
 // APIs exposed to at::native scope
@@ -412,19 +433,6 @@ static void where_kernel_mps(TensorIterator& iter) {
   MPSDataType conditionDataType = getMPSScalarType(condition.scalar_type());
   MPSDataType selfDataType = getMPSScalarType(self.scalar_type());
   MPSDataType otherDataType = getMPSScalarType(other.scalar_type());
-  // Workaround for `selectWithPredicateTensor` on macOS Monterey where bool data type may cause a hang
-  // The issue is fixed in macOS Ventura (13.0)
-  if (!is_macos_13_or_newer()) {
-    if (condition.scalar_type() == kBool) {
-      conditionDataType = MPSDataTypeInt8;
-    }
-    if (self.scalar_type() == kBool) {
-      selfDataType = MPSDataTypeInt8;
-    }
-    if (other.scalar_type() == kBool) {
-      otherDataType = MPSDataTypeInt8;
-    }
-  }
 
   @autoreleasepool {
     string key = "where_self_out_mps:" + getTensorsStringKey({cond_bool, self, other});
@@ -527,7 +535,7 @@ Tensor& nan_to_num_out_mps(const Tensor& self,
                                                                     name:nil];
     });
     MPSScalar nanReplacementScalar, posInfReplacementScalar, negInfReplacementScalar;
-    AT_DISPATCH_FLOATING_TYPES_AND(kHalf, self.scalar_type(), "nan_to_num_mps", [&]() {
+    AT_DISPATCH_FLOATING_TYPES_AND2(kBFloat16, kHalf, self.scalar_type(), "nan_to_num_mps", [&]() {
       scalar_t nan_replacement = static_cast<scalar_t>(nan.value_or(0.));
       scalar_t pos_inf_replacement =
           pos_inf.has_value() ? static_cast<scalar_t>(pos_inf.value()) : std::numeric_limits<scalar_t>::max();
@@ -554,6 +562,16 @@ Tensor& nan_to_num_out_mps(const Tensor& self,
   return result;
 }
 
-REGISTER_DISPATCH(where_kernel, &where_kernel_mps);
+static void isneginf_kernel_mps(TensorIteratorBase& iter) {
+  mps::is_posneginf_helper(iter, true);
+}
+
+static void isposinf_kernel_mps(TensorIteratorBase& iter) {
+  mps::is_posneginf_helper(iter, false);
+}
+
+REGISTER_DISPATCH(where_kernel, &where_kernel_mps)
+REGISTER_DISPATCH(isneginf_stub, &isneginf_kernel_mps)
+REGISTER_DISPATCH(isposinf_stub, &isposinf_kernel_mps)
 
 } // namespace at::native

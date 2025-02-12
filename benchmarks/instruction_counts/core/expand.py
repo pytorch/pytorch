@@ -2,6 +2,9 @@
 
 This is mostly string manipulation, with just a bit of importlib magic.
 """
+
+# mypy: ignore-errors
+
 import importlib.abc
 import importlib.util
 import itertools as it
@@ -9,7 +12,7 @@ import os
 import re
 import textwrap
 import uuid
-from typing import List, Optional, Tuple, TYPE_CHECKING
+from typing import Optional, TYPE_CHECKING
 
 import torch
 
@@ -201,7 +204,7 @@ def materialize(benchmarks: FlatIntermediateDefinition) -> FlatDefinition:
     GroupedBenchmarks into multiple TimerArgs, and tagging the results with
     AutoLabels.
     """
-    results: List[Tuple[Label, AutoLabels, TimerArgs]] = []
+    results: list[tuple[Label, AutoLabels, TimerArgs]] = []
 
     for label, args in benchmarks.items():
         if isinstance(args, TimerArgs):

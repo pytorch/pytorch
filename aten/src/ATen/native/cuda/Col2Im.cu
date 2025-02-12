@@ -91,7 +91,7 @@ void col2im_out_cuda_template(
   if (input.dim() == 2) {
     // Force batch
     batched_input = false;
-    input = input.view({1, input.size(0), input.size(1)});
+    input = input.unsqueeze(0);
   }
 
   int64_t batch_size = input.size(0);
@@ -102,7 +102,7 @@ void col2im_out_cuda_template(
   output.resize_({batch_size, n_output_plane, output_height, output_width});
   int64_t output_batch_stride = output.stride(0);
 
-  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(kHalf, kBFloat16,
+  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND3(kHalf, kBFloat16, kBool,
       input.scalar_type(), "col2im_out_cuda", [&] {
     int64_t height_col = (output_height + 2 * pad_height -
                           (dilation_height * (kernel_height - 1) + 1)) /
@@ -134,10 +134,10 @@ void col2im_out_cuda_template(
         output.mutable_data_ptr<scalar_t>(),
         output_batch_stride);
 
-    if (!batched_input) {
-      output.resize_({n_output_plane, output_height, output_width});
-    }
   });
+  if (!batched_input) {
+    output = output.squeeze(0);
+  }
 }
 
 } // namespace

@@ -4,26 +4,25 @@
 #include <ATen/core/boxing/BoxedKernel.h>
 #include <ATen/core/stack.h>
 #include <c10/core/DispatchKeySet.h>
-#include <c10/util/intrusive_ptr.h>
 #include <c10/util/TypeList.h>
+#include <c10/util/intrusive_ptr.h>
 #include <type_traits>
 
 namespace c10 {
 
-using Stack = torch::jit::Stack; // TODO Instead of this, move torch::jit::Stack to the c10 namespace.
+using Stack = torch::jit::Stack; // TODO Instead of this, move torch::jit::Stack
+                                 // to the c10 namespace.
 
 class OperatorHandle;
 struct OperatorKernel;
 class KernelFunction;
 
 template <typename T>
-using has_symint =
-  std::disjunction<
+using has_symint = std::disjunction<
     std::is_same<c10::SymInt, T>,
     std::is_same<c10::SymIntArrayRef, T>,
     std::is_same<at::OptionalSymIntArrayRef, T>,
-    std::is_same<std::optional<c10::SymInt>, T>
-  >;
+    std::is_same<std::optional<c10::SymInt>, T>>;
 
 template <typename T>
 struct remove_symint {
@@ -50,21 +49,23 @@ struct remove_symint<std::optional<c10::SymInt>> {
   using type = std::optional<int64_t>;
 };
 
-
 template <bool symint, typename T>
 struct maybe_keep_symint final {};
 
 template <typename T>
-struct maybe_keep_symint<true, T> { using type = T; };
+struct maybe_keep_symint<true, T> {
+  using type = T;
+};
 
 template <typename T>
-struct maybe_keep_symint<false, T> { using type = typename remove_symint<T>::type; };
+struct maybe_keep_symint<false, T> {
+  using type = typename remove_symint<T>::type;
+};
 
 template <typename T>
 using fn_has_symint = typename guts::typelist::true_for_any_type<
-  has_symint,
-  typename guts::infer_function_traits<T>::type::parameter_types
->;
+    has_symint,
+    typename guts::infer_function_traits<T>::type::parameter_types>;
 
 template <typename T>
 struct fn_remove_symint;
@@ -76,15 +77,17 @@ struct fn_remove_symint<Ret(Args...)> {
 
 /**
  * KernelFunction is similar to std::function but stores a kernel function.
- * You can create a KernelFunction from a boxed or unboxed function/functor/lambda
- * and call it in a boxed or unboxed way. If the way it was created doesn't
- * match the way it was called, it will do boxing or unboxing as necessary.
+ * You can create a KernelFunction from a boxed or unboxed
+ * function/functor/lambda and call it in a boxed or unboxed way. If the way it
+ * was created doesn't match the way it was called, it will do boxing or
+ * unboxing as necessary.
  */
 class TORCH_API KernelFunction final {
-public:
+ public:
   using InternalBoxedKernelFunction = BoxedKernel::InternalBoxedKernelFunction;
   using BoxedKernelFunction = BoxedKernel::BoxedKernelFunction;
-  using BoxedKernelFunction_withDispatchKeys = BoxedKernel::BoxedKernelFunction_withDispatchKeys;
+  using BoxedKernelFunction_withDispatchKeys =
+      BoxedKernel::BoxedKernelFunction_withDispatchKeys;
 
   KernelFunction();
 
@@ -113,7 +116,10 @@ public:
    * >      [] (Tensor a, bool b) -> Tensor {...});
    * > Tensor result = func.callBoxed(stack);
    */
-  void callBoxed(const OperatorHandle& opHandle, DispatchKeySet dispatchKeySet, Stack* stack) const;
+  void callBoxed(
+      const OperatorHandle& opHandle,
+      DispatchKeySet dispatchKeySet,
+      Stack* stack) const;
 
   /**
    * Call the function in an unboxed way.
@@ -134,8 +140,11 @@ public:
    * > KernelFunction func = KernelFunction::makeFromBoxedFunction(&boxed_func);
    * > Tensor result = func.call<Tensor, Tensor, bool>(tensor1, true);
    */
-  template<class Return, class... Args>
-  Return call(const OperatorHandle& opHandle, DispatchKeySet dispatchKeySet, Args... args) const;
+  template <class Return, class... Args>
+  Return call(
+      const OperatorHandle& opHandle,
+      DispatchKeySet dispatchKeySet,
+      Args... args) const;
 
   /**
    * Create a KernelFunction from a BoxedKernel.
@@ -148,16 +157,18 @@ public:
    * Example:
    *
    * > void boxed_func(OperatorKernel*, Stack* stack) {...}
-   * > KernelFunction func = KernelFunction::makeFromBoxedFunction<&boxed_func>();
+   * > KernelFunction func =
+   * KernelFunction::makeFromBoxedFunction<&boxed_func>();
    */
-  template<BoxedKernelFunction* func>
+  template <BoxedKernelFunction* func>
   static KernelFunction makeFromBoxedFunction();
 
   /**
-   * TODO: This will only be useful if we write a backend fallback that plumbs dispatch keys (currently there are none)
-   * See Note [Plumbing Keys Through The Dispatcher] for details.
+   * TODO: This will only be useful if we write a backend fallback that plumbs
+   * dispatch keys (currently there are none) See Note [Plumbing Keys Through
+   * The Dispatcher] for details.
    */
-  template<BoxedKernelFunction_withDispatchKeys* func>
+  template <BoxedKernelFunction_withDispatchKeys* func>
   static KernelFunction makeFromBoxedFunction();
 
   /**
@@ -169,10 +180,12 @@ public:
    * >   public:
    * >     Tensor operator()(Tensor a, Tensor b) {...}
    * > };
-   * > KernelFunction func = KernelFunction::makeFromUnboxedFunctor<MyFunctor>(std::make_unique<MyFunctor>());
+   * > KernelFunction func =
+   * KernelFunction::makeFromUnboxedFunctor<MyFunctor>(std::make_unique<MyFunctor>());
    */
-  template<bool AllowLegacyTypes = false, class KernelFunctor>
-  static KernelFunction makeFromUnboxedFunctor(std::unique_ptr<OperatorKernel> kernelFunctor);
+  template <bool AllowLegacyTypes = false, class KernelFunctor>
+  static KernelFunction makeFromUnboxedFunctor(
+      std::unique_ptr<OperatorKernel> kernelFunctor);
 
   /**
    * Create a KernelFunction from a boxed functor.
@@ -183,10 +196,12 @@ public:
    * >   public:
    * >     void operator()(const OperatorHandle&, DispatchKeySet, Stack*) {...}
    * > };
-   * > KernelFunction func = KernelFunction::makeFromBoxedFunctor(std::make_unique<MyFunctor>());
+   * > KernelFunction func =
+   * KernelFunction::makeFromBoxedFunctor(std::make_unique<MyFunctor>());
    */
-  template<class KernelFunctor>
-  static KernelFunction makeFromBoxedFunctor(std::unique_ptr<KernelFunctor> kernelFunctor);
+  template <class KernelFunctor>
+  static KernelFunction makeFromBoxedFunctor(
+      std::unique_ptr<KernelFunctor> kernelFunctor);
 
   /**
    * Create a KernelFunction from an unboxed function.
@@ -198,9 +213,11 @@ public:
    * Example:
    *
    * > Tensor unboxed_func(Tensor a, Tensor b) {...}
-   * > KernelFunction func = KernelFunction::makeFromUnboxedFunction<decltype(unboxed_func), &unboxed_func>();
+   * > KernelFunction func =
+   * KernelFunction::makeFromUnboxedFunction<decltype(unboxed_func),
+   * &unboxed_func>();
    */
-  template<class FuncPtr, bool AllowLegacyTypes = false>
+  template <class FuncPtr, bool AllowLegacyTypes = false>
   static KernelFunction makeFromUnboxedFunction(FuncPtr);
 
   /**
@@ -212,9 +229,10 @@ public:
    * Example:
    *
    * > Tensor unboxed_func(Tensor a, Tensor b) {...}
-   * > KernelFunction func = KernelFunction::makeFromUnboxedRuntimeFunction(&unboxed_func);
+   * > KernelFunction func =
+   * KernelFunction::makeFromUnboxedRuntimeFunction(&unboxed_func);
    */
-  template<bool AllowLegacyTypes = false, class FuncType>
+  template <bool AllowLegacyTypes = false, class FuncType>
   static KernelFunction makeFromUnboxedRuntimeFunction(FuncType* func);
 
   static KernelFunction makeFallthrough();
@@ -229,17 +247,22 @@ public:
    * > KernelFunction func = KernelFunction::makeFromUnboxedLambda(
    * >      [] (Tensor a, bool b) -> Tensor {...});
    */
-  template<bool AllowLegacyTypes = false, class Lambda>
-  static std::enable_if_t<guts::is_stateless_lambda<std::decay_t<Lambda>>::value, KernelFunction> makeFromUnboxedLambda(Lambda&& lambda);
-  template<bool AllowLegacyTypes = false, class Lambda>
-  static std::enable_if_t<!guts::is_stateless_lambda<std::decay_t<Lambda>>::value, KernelFunction> makeFromUnboxedLambda(Lambda&& lambda);
+  template <bool AllowLegacyTypes = false, class Lambda>
+  static std::enable_if_t<
+      guts::is_stateless_lambda<std::decay_t<Lambda>>::value,
+      KernelFunction>
+  makeFromUnboxedLambda(Lambda&& lambda);
+  template <bool AllowLegacyTypes = false, class Lambda>
+  static std::enable_if_t<
+      !guts::is_stateless_lambda<std::decay_t<Lambda>>::value,
+      KernelFunction>
+  makeFromUnboxedLambda(Lambda&& lambda);
 
   std::string dumpState() const;
   // For testing internal invariants only
   bool _equalsBoxedAndUnboxed(const KernelFunction&) const;
 
-private:
-
+ private:
   explicit KernelFunction(
       std::unique_ptr<OperatorKernel> functor,
       InternalBoxedKernelFunction* boxed_kernel_func,
@@ -255,6 +278,6 @@ private:
   void* sym_unboxed_kernel_func_;
 };
 
-}
+} // namespace c10
 
 #include <ATen/core/boxing/KernelFunction_impl.h>

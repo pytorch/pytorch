@@ -20,12 +20,12 @@ import torch
 class VFModule(types.ModuleType):
     vf: types.ModuleType
 
-    def __init__(self, name):
+    def __init__(self, name: str):
         super().__init__(name)
         self.vf = torch._C._VariableFunctions
 
-    def __getattr__(self, attr):
-        return getattr(self.vf, attr)
+    def __getattr__(self, name: str) -> object:
+        return getattr(self.vf, name)
 
 
 sys.modules[__name__] = VFModule(__name__)

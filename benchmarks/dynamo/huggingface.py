@@ -37,6 +37,10 @@ log = logging.getLogger(__name__)
 if "TORCHINDUCTOR_FX_GRAPH_CACHE" not in os.environ:
     torch._inductor.config.fx_graph_cache = True
 
+# Enable Autograd caching
+if "TORCHINDUCTOR_AUTOGRAD_CACHE" not in os.environ:
+    torch._functorch.config.enable_autograd_cache = True
+
 
 def pip_install(package):
     subprocess.check_call([sys.executable, "-m", "pip", "install", package])
@@ -501,12 +505,12 @@ class HuggingfaceRunner(BenchmarkRunner):
             else:
                 return 1e-2, cosine
         else:
-            if name in self._config["tolerance"]["higher_inference"]:
-                return 4e-3, cosine
             if (
                 current_device == "cpu"
-                and name in self._config["tolerance"]["higher_inference"]
+                and name in self._config["tolerance"]["higher_inference_cpu"]
             ):
+                return 5e-3, cosine
+            if name in self._config["tolerance"]["higher_inference"]:
                 return 4e-3, cosine
         return 1e-3, cosine
 

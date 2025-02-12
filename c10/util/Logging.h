@@ -287,6 +287,29 @@ void enforceThatImpl(
   CAFFE_ENFORCE_BINARY_OP_WITH_CALLER(          \
       std::greater<void>(), >, x, y, ##__VA_ARGS__)
 
+struct IValue;
+class C10_API EventSampledHandler {
+ public:
+  virtual void log(
+      std::string_view model_id,
+      const std::vector<c10::IValue>& args) = 0;
+  virtual ~EventSampledHandler() = default;
+};
+
+#define C10_LOG_EVENT_SAMPLED(event, ...)                                    \
+  static const std::unique_ptr<::c10::EventSampledHandler>&                  \
+      _##event##EventSampledHandler = ::c10::GetEventSampledHandler(#event); \
+  if (_##event##EventSampledHandler) {                                       \
+    _##event##EventSampledHandler->log(__VA_ARGS__);                         \
+  }
+
+// Must be called in the main thread before any other threads are spawned.
+C10_API void InitEventSampledHandlers(
+    std::vector<
+        std::pair<std::string_view, std::unique_ptr<EventSampledHandler>>>);
+C10_API const std::unique_ptr<EventSampledHandler>& GetEventSampledHandler(
+    std::string_view);
+
 /**
  * Very lightweight logging for the first time API usage. It's beneficial for
  * tracking of individual functionality usage in larger applications.
@@ -299,8 +322,8 @@ void enforceThatImpl(
  *   // Logs caller info with an arbitrary text event, if there is a usage.
  *   C10_LOG_API_USAGE_ONCE("my_api");
  */
-#define C10_LOG_API_USAGE_ONCE(...)                        \
-  C10_UNUSED static bool C10_ANONYMOUS_VARIABLE(logFlag) = \
+#define C10_LOG_API_USAGE_ONCE(...)                              \
+  [[maybe_unused]] static bool C10_ANONYMOUS_VARIABLE(logFlag) = \
       ::c10::detail::LogAPIUsageFakeReturn(__VA_ARGS__);
 
 // API usage logging capabilities

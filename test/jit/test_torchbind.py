@@ -1,4 +1,5 @@
 # Owner(s): ["oncall: jit"]
+# ruff: noqa: F841
 
 import copy
 import io
@@ -376,7 +377,8 @@ class TestTorchbind(JitTestCase):
         b = io.BytesIO()
         torch.save(nt, b)
         b.seek(0)
-        nt_loaded = torch.load(b)
+        # weights_only=False as trying to load ScriptObject
+        nt_loaded = torch.load(b, weights_only=False)
         for exp in [7, 3, 3, 1]:
             self.assertEqual(nt_loaded.pop(), exp)
 
@@ -442,6 +444,10 @@ class TestTorchbind(JitTestCase):
             return torch.classes._TorchScriptTesting._StaticMethod.staticMethod(inp)
 
         self.checkScript(fn, (1,))
+
+    def test_hasattr(self):
+        ss = torch.classes._TorchScriptTesting._StackString(["foo", "bar"])
+        self.assertFalse(hasattr(ss, "baz"))
 
     def test_default_args(self):
         def fn() -> int:

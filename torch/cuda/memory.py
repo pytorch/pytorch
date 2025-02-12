@@ -8,7 +8,7 @@ import pickle
 import sys
 import warnings
 from inspect import signature
-from typing import Any, Dict, Optional, Tuple, Union
+from typing import Any, Literal, Optional, Union
 from typing_extensions import deprecated
 
 import torch
@@ -29,6 +29,8 @@ from ._memory_viz import memory as _memory, segments as _segments
 __all__ = [
     "caching_allocator_alloc",
     "caching_allocator_delete",
+    "caching_allocator_enable",
+    "get_per_process_memory_fraction",
     "set_per_process_memory_fraction",
     "empty_cache",
     "memory_stats",
@@ -52,6 +54,7 @@ __all__ = [
     "change_current_allocator",
     "MemPool",
     "MemPoolContext",
+    "use_mem_pool",
 ]
 
 
@@ -64,8 +67,22 @@ if not hasattr(torch._C, "_MemPool"):
     # Define dummy base classes
     torch._C.__dict__["_MemPool"] = _dummy_type("_MemPool")
     torch._C.__dict__["_MemPoolContext"] = _dummy_type("_MemPoolContext")
+    torch._C.__dict__["_cuda_beginAllocateToPool"] = _dummy_type(
+        "_cuda_beginAllocateToPool"
+    )
+    torch._C.__dict__["_cuda_endAllocateCurrentStreamToPool"] = _dummy_type(
+        "_cuda_endAllocateCurrentStreamToPool"
+    )
+    torch._C.__dict__["_cuda_releasePool"] = _dummy_type("_cuda_releasePool")
 
-from torch._C import _cuda_CUDAAllocator, _MemPool, _MemPoolContext  # noqa: F401
+from torch._C import (  # noqa: F401
+    _cuda_beginAllocateToPool,
+    _cuda_CUDAAllocator,
+    _cuda_endAllocateCurrentStreamToPool,
+    _cuda_releasePool,
+    _MemPool,
+    _MemPoolContext,
+)
 
 
 def _host_allocator():
@@ -135,6 +152,12 @@ def caching_allocator_delete(mem_ptr):
     torch._C._cuda_cudaCachingAllocator_raw_delete(mem_ptr)
 
 
+def caching_allocator_enable(value: bool = True) -> None:
+    r"""Enable or disable the CUDA memory allocator. On by default."""
+    if is_initialized():
+        torch._C._cuda_cudaCachingAllocator_enable(value)
+
+
 def set_per_process_memory_fraction(
     fraction, device: Union[Device, int] = None
 ) -> None:
@@ -164,6 +187,22 @@ def set_per_process_memory_fraction(
     torch._C._cuda_setMemoryFraction(fraction, device)
 
 
+def get_per_process_memory_fraction(device: Union[Device, int] = None) -> float:
+    r"""Get memory fraction for a process.
+
+    Args:
+        device (torch.device or int, optional): selected device. If it is
+            ``None`` the default CUDA device is used.
+    Returns:
+        memory fraction, in range 0~1. Allowed memory equals total_memory * fraction.
+    """
+    _lazy_init()
+    if device is None:
+        device = torch.cuda.current_device()
+    device = _get_device_index(device)
+    return torch._C._cuda_getMemoryFraction(device)
+
+
 def empty_cache() -> None:
     r"""Release all unoccupied cached memory currently held by the caching
     allocator so that those can be used in other GPU application and visible in
@@ -179,7 +218,7 @@ def empty_cache() -> None:
         torch._C._cuda_emptyCache()
 
 
-def memory_stats(device: Union[Device, int] = None) -> Dict[str, Any]:
+def memory_stats(device: Union[Device, int] = None) -> dict[str, Any]:
     r"""Return a dictionary of CUDA memory allocator statistics for a given device.
 
     The return value of this function is a dictionary of statistics, each of
@@ -284,7 +323,7 @@ def memory_stats(device: Union[Device, int] = None) -> Dict[str, Any]:
     return collections.OrderedDict(result)
 
 
-def memory_stats_as_nested_dict(device: Union[Device, int] = None) -> Dict[str, Any]:
+def memory_stats_as_nested_dict(device: Union[Device, int] = None) -> dict[str, Any]:
     r"""Return the result of :func:`~torch.cuda.memory_stats` as a nested dictionary."""
     if not is_initialized():
         return {}
@@ -680,7 +719,7 @@ def list_gpu_processes(device: Union[Device, int] = None) -> str:
     return "\n".join(lines)
 
 
-def mem_get_info(device: Union[Device, int] = None) -> Tuple[int, int]:
+def mem_get_info(device: Union[Device, int] = None) -> tuple[int, int]:
     r"""Return the global free and total GPU memory for a given device using cudaMemGetInfo.
 
     Args:
@@ -716,7 +755,9 @@ def _record_memory_history_legacy(
     )
 
 
-def _record_memory_history(enabled="all", *args, **kwargs):
+def _record_memory_history(
+    enabled: Literal[None, "state", "all"] = "all", *args, **kwargs
+) -> None:
     """Enable recording of stack traces associated with memory
     allocations, so you can tell what allocated any piece of memory in
     :func:`torch.cuda.memory._snapshot()`.
@@ -958,6 +999,25 @@ def _get_current_allocator() -> _CUDAAllocator:
     return _CUDAAllocator(torch._C._cuda_getAllocator())
 
 
+class MemPoolContext(_MemPoolContext):
+    r"""MemPoolContext holds the currently active pool and stashes the previous
+    pool. On deletion it makes the previous pool active.
+
+    Args:
+        pool(torch.cuda.MemPool): a MemPool object to be made active so that
+        allocations route to this pool.
+
+    """
+
+    def __init__(self, pool: _MemPool):
+        super().__init__(pool)
+
+    @staticmethod
+    def active_pool() -> Optional[_MemPool]:
+        r"""Returns the active MemPool"""
+        return _MemPoolContext.active_pool()
+
+
 class MemPool(_MemPool):
     r"""MemPool represents a pool of memory in a caching allocator. Currently,
     it's just the ID of the pool object maintained in the CUDACachingAllocator.
@@ -975,30 +1035,58 @@ class MemPool(_MemPool):
         super().__init__(allocator, True)
 
     @property
-    def id(self) -> Tuple[int, int]:
+    def id(self) -> tuple[int, int]:
         r"""Returns the ID of this pool as a tuple of two ints."""
         return super().id
 
     @property
     def allocator(self) -> Optional[_cuda_CUDAAllocator]:
-        r"""Returns the allocator this MemPool routes allocations to"""
+        r"""Returns the allocator this MemPool routes allocations to."""
         return super().allocator
 
+    def use_count(self) -> int:
+        r"""Returns the reference count of this pool."""
+        return super().use_count()
 
-class MemPoolContext(_MemPoolContext):
-    r"""MemPoolContext holds the currently active pool and stashes the previous
-    pool. On deletion it makes the previous pool active.
+    def snapshot(self):
+        r"""Return a snapshot of the CUDA memory allocator pool state across all
+        devices.
+
+        Interpreting the output of this function requires familiarity with the
+        memory allocator internals.
+
+        .. note::
+            See :ref:`cuda-memory-management` for more details about GPU memory
+            management.
+        """
+        try:
+            ctx = MemPoolContext(self)
+            snapshot = torch.cuda.memory_snapshot()
+        finally:
+            del ctx
+        return snapshot
+
+
+@contextlib.contextmanager
+def use_mem_pool(pool: MemPool, device: Union[Device, int] = None):
+    r"""A context manager that routes allocations to a given pool.
 
     Args:
         pool(torch.cuda.MemPool): a MemPool object to be made active so that
-        allocations route to this pool.
+            allocations route to this pool.
+        device (torch.device or int, optional): selected device. Uses MemPool on
+            the current device, given by :func:`~torch.cuda.current_device`,
+            if :attr:`device` is ``None`` (default).
 
     """
-
-    def __init__(self, pool: MemPool):
-        super().__init__(pool)
-
-    @staticmethod
-    def active_pool() -> Optional[_MemPool]:
-        r"""Returns the active MemPool"""
-        return _MemPoolContext.active_pool()
+    ctx = MemPoolContext(pool)
+    device_index = (
+        torch.cuda.current_device() if device is None else _get_device_index(device)
+    )
+    _cuda_beginAllocateToPool(device_index, pool.id)
+    try:
+        yield
+    finally:
+        _cuda_endAllocateCurrentStreamToPool(device_index, pool.id)
+        _cuda_releasePool(device_index, pool.id)
+        del ctx

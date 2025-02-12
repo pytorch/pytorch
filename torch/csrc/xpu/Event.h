@@ -1,10 +1,11 @@
 #pragma once
 
 #include <ATen/xpu/XPUEvent.h>
+#include <torch/csrc/Event.h>
 #include <torch/csrc/python_headers.h>
 
-struct THXPEvent {
-  PyObject_HEAD at::xpu::XPUEvent xpu_event;
+struct THXPEvent : THPEvent {
+  at::xpu::XPUEvent xpu_event;
 };
 extern PyObject* THXPEventClass;
 

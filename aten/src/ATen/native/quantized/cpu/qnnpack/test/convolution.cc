@@ -12,6 +12,8 @@
 
 #include "convolution-operator-tester.h"
 
+using namespace qnnpack::testing;
+
 _STATIC_AND_RUNTIME_TEST(CONVOLUTION_OP, zero_batch,
   ConvolutionOperatorTester()
       .batchSize(0)

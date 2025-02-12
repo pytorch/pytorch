@@ -155,7 +155,7 @@ C10_DEVICE scalar_t binomial_inversion(scalar_t count, scalar_t prob, BaseSample
 
   accscalar_t logprob = compat_log1p(-prob);
 
-  while (1) {
+  while (true) {
     U = standard_uniform.sample();
     accscalar_t geom = compat_ceil(compat_log(U) / logprob);
     geom_sum += geom;
@@ -185,7 +185,7 @@ C10_DEVICE scalar_t btrs(scalar_t count, scalar_t prob, BaseSampler<accscalar_t,
   const accscalar_t alpha = (2.83 + 5.1 / b) * stddev;
   const accscalar_t m = compat_floor((count + 1) * prob);
 
-  while (1) {
+  while (true) {
     U = standard_uniform.sample() - 0.5;
     V = standard_uniform.sample();
 

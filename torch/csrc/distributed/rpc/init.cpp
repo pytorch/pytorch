@@ -6,6 +6,7 @@
 #include <torch/csrc/distributed/rpc/python_functions.h>
 #include <torch/csrc/distributed/rpc/python_rpc_handler.h>
 #include <torch/csrc/distributed/rpc/request_callback_impl.h>
+#include <torch/csrc/distributed/rpc/rpc.h>
 #include <torch/csrc/distributed/rpc/rpc_agent.h>
 #include <torch/csrc/distributed/rpc/rref_context.h>
 #include <torch/csrc/distributed/rpc/tensorpipe_agent.h>
@@ -121,7 +122,7 @@ PyObject* rpc_init(PyObject* _unused, PyObject* noargs) {
                 return py::make_tuple(workerInfo.name_, workerInfo.id_);
               },
               /* __setstate__ */
-              [](py::tuple t) {
+              [](const py::tuple& t) {
                 TORCH_CHECK(t.size() == 2, "Invalid WorkerInfo state.");
 
                 WorkerInfo info(
@@ -764,7 +765,8 @@ PyObject* rpc_init(PyObject* _unused, PyObject* noargs) {
   module.def(
       "get_rpc_timeout",
       []() {
-        return RpcAgent::getCurrentRpcAgent()->getRpcTimeout().count() /
+        return static_cast<float>(
+                   RpcAgent::getCurrentRpcAgent()->getRpcTimeout().count()) /
             kSecToMsConversion;
       },
       R"(

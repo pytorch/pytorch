@@ -64,7 +64,7 @@ Tensor& max_unpooling2d_forward_out_cpu(
   }
 
   return output;
-};
+}
 
 Tensor max_unpooling2d_forward_cpu(
     const Tensor& self,
@@ -136,7 +136,7 @@ static void max_unpooling3d_shape_check(
   if (gradOutput.defined()) {
     if (oT != gradOutput.size(dimt) || oH != gradOutput.size(dimh) ||
         oW != gradOutput.size(dimw)) {
-      AT_ERROR(
+      TORCH_CHECK(false,
           "Inconsistent gradOutput size. oT= ",
           oT,
           ", oH= ",

@@ -12,8 +12,7 @@
 #include <cmath>
 #include <sstream>
 
-namespace torch {
-namespace lazy {
+namespace torch::lazy {
 namespace {
 
 const std::vector<double>* ReadEnvPercentiles() {
@@ -42,9 +41,9 @@ void EmitMetricInfo(
   double accumulator = 0.0;
   size_t total_samples = 0;
   std::vector<Sample> samples = data->Samples(&accumulator, &total_samples);
-  (*ss) << "Metric: " << name << std::endl;
-  (*ss) << "  TotalSamples: " << total_samples << std::endl;
-  (*ss) << "  Accumulator: " << data->Repr(accumulator) << std::endl;
+  (*ss) << "Metric: " << name << '\n';
+  (*ss) << "  TotalSamples: " << total_samples << '\n';
+  (*ss) << "  Accumulator: " << data->Repr(accumulator) << '\n';
   if (!samples.empty()) {
     double total = 0.0;
     for (auto& sample : samples) {
@@ -53,12 +52,13 @@ void EmitMetricInfo(
     int64_t delta_time =
         samples.back().timestamp_ns - samples.front().timestamp_ns;
     if (delta_time > 0) {
-      double value_sec = 1e6 * (total / (delta_time / 1000.0));
-      (*ss) << "  ValueRate: " << data->Repr(value_sec) << " / second"
-            << std::endl;
-      double count_sec =
-          1e6 * (static_cast<double>(samples.size()) / (delta_time / 1000.0));
-      (*ss) << "  Rate: " << count_sec << " / second" << std::endl;
+      double value_sec =
+          1e6 * (total / (static_cast<double>(delta_time) / 1000.0));
+      (*ss) << "  ValueRate: " << data->Repr(value_sec) << " / second" << '\n';
+      double count_sec = 1e6 *
+          (static_cast<double>(samples.size()) /
+           (static_cast<double>(delta_time) / 1000.0));
+      (*ss) << "  Rate: " << count_sec << " / second" << '\n';
     }
   }
 
@@ -69,22 +69,23 @@ void EmitMetricInfo(
       });
   (*ss) << "  Percentiles: ";
   for (const auto i : c10::irange(metrics_percentiles.size())) {
-    size_t index = metrics_percentiles[i] * samples.size();
+    size_t index = static_cast<size_t>(
+        metrics_percentiles[i] * static_cast<double>(samples.size()));
     if (i > 0) {
       (*ss) << "; ";
     }
     (*ss) << (metrics_percentiles[i] * 100.0)
           << "%=" << data->Repr(samples[index].value);
   }
-  (*ss) << std::endl;
+  (*ss) << '\n';
 }
 
 void EmitCounterInfo(
     const std::string& name,
     CounterData* data,
     std::stringstream* ss) {
-  (*ss) << "Counter: " << name << std::endl;
-  (*ss) << "  Value: " << data->Value() << std::endl;
+  (*ss) << "Counter: " << name << '\n';
+  (*ss) << "  Value: " << data->Value() << '\n';
 }
 
 template <typename T, typename G>
@@ -227,12 +228,20 @@ std::vector<Sample> MetricData::Samples(
   std::lock_guard<std::mutex> lock(lock_);
   std::vector<Sample> samples;
   if (count_ <= samples_.size()) {
-    samples.insert(samples.end(), samples_.begin(), samples_.begin() + count_);
+    samples.insert(
+        samples.end(),
+        samples_.begin(),
+        samples_.begin() + static_cast<std::ptrdiff_t>(count_));
   } else {
     size_t position = count_ % samples_.size();
-    samples.insert(samples.end(), samples_.begin() + position, samples_.end());
     samples.insert(
-        samples.end(), samples_.begin(), samples_.begin() + position);
+        samples.end(),
+        samples_.begin() + static_cast<std::ptrdiff_t>(position),
+        samples_.end());
+    samples.insert(
+        samples.end(),
+        samples_.begin(),
+        samples_.begin() + static_cast<std::ptrdiff_t>(position));
   }
   if (accumulator != nullptr) {
     *accumulator = accumulator_;
@@ -434,5 +443,4 @@ int64_t NowNs() {
       .count();
 }
 
-} // namespace lazy
-} // namespace torch
+} // namespace torch::lazy

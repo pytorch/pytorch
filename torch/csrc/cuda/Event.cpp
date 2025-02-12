@@ -123,10 +123,12 @@ static PyObject* THCPEvent_get_device(THCPEvent* self, void* unused) {
 }
 
 static PyObject* THCPEvent_record(PyObject* _self, PyObject* _stream) {
-  HANDLE_TH_ERRORS
-  auto self = (THCPEvent*)_self;
-  auto stream = (THCPStream*)_stream;
-  self->cuda_event.record(stream->cuda_stream);
+  HANDLE_TH_ERRORS {
+    auto self = (THCPEvent*)_self;
+    auto stream = (THCPStream*)_stream;
+    pybind11::gil_scoped_release no_gil{};
+    self->cuda_event.record(stream->cuda_stream);
+  }
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
 }
@@ -198,7 +200,8 @@ static PyMethodDef THCPEvent_methods[] = {
     {nullptr}};
 
 PyTypeObject THCPEventType = {
-    PyVarObject_HEAD_INIT(nullptr, 0) "torch._C._CudaEventBase", /* tp_name */
+    PyVarObject_HEAD_INIT(nullptr, 0)
+    "torch._C._CudaEventBase", /* tp_name */
     sizeof(THCPEvent), /* tp_basicsize */
     0, /* tp_itemsize */
     (destructor)THCPEvent_dealloc, /* tp_dealloc */
@@ -238,6 +241,9 @@ PyTypeObject THCPEventType = {
 };
 
 void THCPEvent_init(PyObject* module) {
+  TORCH_CHECK(THPEventClass, "THPEvent has not been initialized yet.");
+  Py_INCREF(THPEventClass);
+  THCPEventType.tp_base = THPEventClass;
   THCPEventClass = (PyObject*)&THCPEventType;
   if (PyType_Ready(&THCPEventType) < 0) {
     throw python_error();

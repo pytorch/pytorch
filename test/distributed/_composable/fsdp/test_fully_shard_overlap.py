@@ -7,8 +7,8 @@ from typing import Callable
 import torch
 import torch.distributed as dist
 import torch.nn as nn
-from torch.distributed._composable.fsdp import fully_shard
 from torch.distributed._tensor.experimental import implicit_replication
+from torch.distributed.fsdp import fully_shard
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_fsdp import (
     FSDPTest,
@@ -108,6 +108,14 @@ class TestFullyShardOverlap(FSDPTest):
                     ]
                     dist.all_gather_into_tensor(dummy_ag_output, dummy_ag_input)
                 loss = ref_model(inp).sum()
+                # Run dummy all-gathers per weight again since we are
+                # resharding after forward
+                for lin in ref_model:
+                    dummy_ag_output = torch.empty_like(lin.weight)
+                    dummy_ag_input = torch.chunk(dummy_ag_output, self.world_size)[
+                        self.rank
+                    ]
+                    dist.all_gather_into_tensor(dummy_ag_output, dummy_ag_input)
                 loss.backward()
                 # Run dummy reduce-scatters per weight
                 for lin in ref_model:

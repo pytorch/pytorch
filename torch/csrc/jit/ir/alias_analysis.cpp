@@ -1757,12 +1757,9 @@ bool AliasDb::tryMove(
   // dependencies
   WorkingSet workingSet(toMove, *this);
 
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  int direction;
+  auto direction = kNextDirection;
   if (toMove->isAfter(movePoint)) {
     direction = kPrevDirection;
-  } else {
-    direction = kNextDirection;
   }
 
   auto curNode = toMove->next_in_graph[direction];

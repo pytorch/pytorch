@@ -10,7 +10,7 @@ import os
 import sys
 import unittest
 from contextlib import nullcontext
-from typing import Any, cast, List
+from typing import Any, cast
 
 import numpy as np
 
@@ -207,7 +207,7 @@ class TestZeroRedundancyOptimizerSingleRank(TestZeroRedundancyOptimizer):
                 super().step()
                 kwarg.append(5)
 
-        kwarg: List[Any] = []
+        kwarg: list[Any] = []
         x = torch.tensor([1.0], device=self.device, requires_grad=True)
         o = ZeroRedundancyOptimizer(
             [x],
@@ -403,7 +403,7 @@ class TestZeroRedundancyOptimizerDistributed(TestZeroRedundancyOptimizer):
             )
 
     @common_distributed.skip_if_no_gpu
-    @common_distributed.skip_if_rocm
+    @common_distributed.skip_if_rocm_multiprocess
     def test_step(self):
         """Check that ZeroRedundancyOptimizer properly exposes the ``step()``
         interface."""
@@ -443,7 +443,7 @@ class TestZeroRedundancyOptimizerDistributed(TestZeroRedundancyOptimizer):
             self.assertEqual(m.bias, m_zero.bias)
 
     @common_distributed.skip_if_no_gpu
-    @common_distributed.skip_if_rocm
+    @common_distributed.skip_if_rocm_multiprocess
     def test_step_with_closure(self):
         """Check that ZeroRedundancyOptimizer properly exposes the
         ``step(closure)`` interface."""
@@ -663,7 +663,7 @@ class TestZeroRedundancyOptimizerDistributed(TestZeroRedundancyOptimizer):
                 torch.testing.assert_close(layer1.bias, layer3.bias)
 
     @common_distributed.skip_if_no_gpu
-    @common_distributed.skip_if_rocm
+    @common_distributed.skip_if_rocm_multiprocess
     def test_collect_shards(self):
         """Check the state consolidation mechanism and the state dict exposed
         by ZeroRedundancyOptimizer."""
@@ -1383,7 +1383,7 @@ class TestZeroRedundancyOptimizerDistributed(TestZeroRedundancyOptimizer):
     @common_distributed.skip_if_win32()
     @common_distributed.requires_nccl()
     @common_distributed.skip_if_no_gpu
-    @common_distributed.skip_if_rocm
+    @common_distributed.skip_if_rocm_multiprocess
     @parametrize(
         "use_gpu",
         [True],

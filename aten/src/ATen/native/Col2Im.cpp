@@ -144,7 +144,7 @@ static void col2im_out_cpu_template(
 
   output.resize_({batch_size, n_output_plane, output_height, output_width});
 
-  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(kBFloat16, kHalf,
+  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND3(kBFloat16, kHalf, kBool,
       input.scalar_type(), "col2im_out_cpu", [&] {
         Tensor input_n = Tensor();
         Tensor output_n = Tensor();

@@ -293,9 +293,7 @@ inline void convert_int8_uint8(
   }
 }
 
-namespace at {
-namespace native {
-namespace fbgemm_utils {
+namespace at::native::fbgemm_utils {
 
 template <int kSpatialDim = 2>
 fbgemm::conv_param_t<kSpatialDim> MakeFbgemmConvParam(
@@ -348,9 +346,7 @@ Tensor ConvertConvWeightsToChannelLastTensor(
     const at::Tensor& src,
     int groups,
     bool transpose);
-} // namespace fbgemm_utils
-} // namespace native
-} // namespace at
+} // at::native::namespace fbgemm_utils
 
 #endif // USE_FBGEMM
 
@@ -368,9 +364,8 @@ struct TORCH_API PackedEmbeddingBagWeight : public EmbeddingPackedParamsBase {
         bit_rate_(bit_rate),
         q_scheme(q_scheme),
         version_(version) {
-    // NOLINTNEXTLINE(clang-analyzer-cplusplus.Move)
-    if (!packed_w.is_contiguous()) {
-      packed_w = packed_w.contiguous();
+    if (!this->packed_w.is_contiguous()) {
+      this->packed_w = this->packed_w.contiguous();
     }
   }
 

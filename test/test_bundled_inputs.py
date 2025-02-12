@@ -4,7 +4,7 @@
 
 import io
 import textwrap
-from typing import Dict, List, Optional
+from typing import Optional
 
 import torch
 import torch.utils.bundled_inputs
@@ -32,7 +32,7 @@ class TestBundledInputs(TestCase):
 
         sm = torch.jit.script(SingleTensorModel())
         original_size = model_size(sm)
-        get_expr: List[str] = []
+        get_expr: list[str] = []
         samples = [
             # Tensor with small numel and small storage.
             (torch.tensor([1]),),
@@ -328,8 +328,8 @@ class TestBundledInputs(TestCase):
         class MyModel(torch.nn.Module):
             def forward(
                 self,
-                arg1: Optional[Dict[str, torch.Tensor]],
-                arg2: Optional[List[torch.Tensor]],
+                arg1: Optional[dict[str, torch.Tensor]],
+                arg2: Optional[list[torch.Tensor]],
                 arg3: torch.Tensor,
             ):
                 if arg1 is None:
@@ -393,7 +393,7 @@ class TestBundledInputs(TestCase):
                 """,
             )
 
-        out: List[str] = []
+        out: list[str] = []
         sm = torch.jit.script(MyModel())
         original_size = model_size(sm)
         small_inputs = (

@@ -27,4 +27,3 @@ class Sharder(abc.ABC):
             A :class:`torch.nn.Module` object that represents a module
             that's already been sharded.
         """
-        pass

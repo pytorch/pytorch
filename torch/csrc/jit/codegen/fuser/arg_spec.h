@@ -8,9 +8,7 @@
 #include <cstdint>
 #include <vector>
 
-namespace torch {
-namespace jit {
-namespace fuser {
+namespace torch::jit::fuser {
 
 // Describes the (runtime) arguments to a kernel.
 // ArgSpecs are also used as keys to lookup instantiated kernels, so
@@ -55,6 +53,4 @@ struct TORCH_API ArgSpec {
   int device_;
 };
 
-} // namespace fuser
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit::fuser

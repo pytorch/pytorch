@@ -1,9 +1,11 @@
 import argparse
 import csv
 import dataclasses
+import json
 import os
 
-from generate import run_llama2_7b_bf16, run_llama2_7b_int8, run_mixtral_8x7b_int8
+from common import all_experiments, Experiment, register_experiment
+from generate import get_arch_name
 
 import torch
 import torch.nn as nn
@@ -14,17 +16,6 @@ from torch.utils.flop_counter import FlopCounterMode
 WARMUP_ITER = 5
 
 A100_40G_BF16_TFLOPS = 312
-
-
-@dataclasses.dataclass
-class Experiment:
-    name: str
-    metric: str
-    target: float
-    actual: float
-    dtype: str
-    device: str
-    is_model: bool = False
 
 
 class SimpleMLP(nn.Module):
@@ -45,6 +36,7 @@ class SimpleMLP(nn.Module):
         return x
 
 
+@register_experiment(name="mlp_layer_norm_gelu")
 def run_mlp_layer_norm_gelu(device: str = "cuda"):
     dtype_flops_utilization_map = {
         torch.bfloat16: "0.8",
@@ -71,7 +63,7 @@ def run_mlp_layer_norm_gelu(device: str = "cuda"):
             for _ in range(WARMUP_ITER):
                 compiled_mod(x)
 
-            us_per_iter = benchmarker.benchmark_gpu(lambda: compiled_mod(x)) * 1000
+            us_per_iter = benchmarker.benchmark(compiled_mod, (x,), {}) * 1000
             flops_utilization += us_per_iter * flops / 1e9 / A100_40G_BF16_TFLOPS
 
         flops_utilization = flops_utilization / len(input_shapes)
@@ -84,11 +76,13 @@ def run_mlp_layer_norm_gelu(device: str = "cuda"):
                 f"{flops_utilization:.02f}",
                 dtype_str,
                 device,
+                get_arch_name(),
             )
         )
     return results
 
 
+@register_experiment(name="layer_norm")
 def run_layer_norm(device: str = "cuda"):
     dtype_memory_bandwidth_map = {
         torch.bfloat16: "950",
@@ -108,7 +102,7 @@ def run_layer_norm(device: str = "cuda"):
             for _ in range(WARMUP_ITER):
                 compiled_mod(x)
 
-            us_per_iter = benchmarker.benchmark_gpu(lambda: compiled_mod(x)) * 1000
+            us_per_iter = benchmarker.benchmark(compiled_mod, (x,), {}) * 1000
             memory_bandwidth += (1e6 / us_per_iter) * 2 * BS * D * dtype.itemsize / 1e9
 
         memory_bandwidth = memory_bandwidth / len(input_shapes)
@@ -121,11 +115,13 @@ def run_layer_norm(device: str = "cuda"):
                 f"{memory_bandwidth:.02f}",
                 dtype_str,
                 device,
+                get_arch_name(),
             )
         )
     return results
 
 
+@register_experiment(name="gather_gemv")
 @torch._inductor.config.patch(coordinate_descent_tuning=True)
 def run_gather_gemv(device: str = "cuda"):
     E = 8
@@ -152,7 +148,16 @@ def run_gather_gemv(device: str = "cuda"):
                 compiled_fn(W, score_idxs, x)
 
             us_per_iter = (
-                benchmarker.benchmark_gpu(lambda: compiled_fn(W, score_idxs, x)) * 1000
+                benchmarker.benchmark(
+                    compiled_fn,
+                    (
+                        W,
+                        score_idxs,
+                        x,
+                    ),
+                    {},
+                )
+                * 1000
             )
             memory_bandwidth += (1e6 / us_per_iter) * 2 * D * D * dtype.itemsize / 1e9
 
@@ -166,11 +171,13 @@ def run_gather_gemv(device: str = "cuda"):
                 f"{memory_bandwidth:.02f}",
                 dtype_str,
                 device,
+                get_arch_name(),
             )
         )
     return results
 
 
+@register_experiment(name="gemv")
 @torch._inductor.config.patch(coordinate_descent_tuning=True)
 def run_gemv(device: str = "cuda"):
     dtype_memory_bandwidth_map = {
@@ -186,15 +193,25 @@ def run_gemv(device: str = "cuda"):
             def gemv(W, x):
                 return W.to(x.dtype) @ x
 
-            W = torch.randn(D, D, device="cuda").to(dtype=dtype)
-            x = torch.randn(D, device="cuda", dtype=torch.bfloat16)
+            W = torch.randn(D, D, device=device).to(dtype=dtype)
+            x = torch.randn(D, device=device, dtype=torch.bfloat16)
 
             compiled_fn = torch.compile(gemv, dynamic=False)
 
             for _ in range(WARMUP_ITER):
                 compiled_fn(W, x)
 
-            us_per_iter = benchmarker.benchmark_gpu(lambda: compiled_fn(W, x)) * 1000
+            us_per_iter = (
+                benchmarker.benchmark(
+                    compiled_fn,
+                    (
+                        W,
+                        x,
+                    ),
+                    {},
+                )
+                * 1000
+            )
             memory_bandwidth += (1e6 / us_per_iter) * D * D * dtype.itemsize / 1e9
 
         memory_bandwidth = memory_bandwidth / len(input_shapes)
@@ -207,6 +224,7 @@ def run_gemv(device: str = "cuda"):
                 f"{memory_bandwidth:.02f}",
                 dtype_str,
                 device,
+                get_arch_name(),
             )
         )
     return results
@@ -233,26 +251,63 @@ def output_csv(output_file, headers, row):
             writer.writerow(list(line) + ["0"] * (len(headers) - len(line)))
 
 
+def output_json(output_file, headers, row):
+    """
+    Write the result into JSON format, so that it can be uploaded to the benchmark database
+    to be displayed on OSS dashboard. The JSON format is defined at
+    https://github.com/pytorch/pytorch/wiki/How-to-integrate-with-PyTorch-OSS-benchmark-database
+    """
+    mapping_headers = {headers[i]: v for i, v in enumerate(row)}
+    record = {
+        "benchmark": {
+            "name": "PyTorch gpt-fast benchmark",
+            "mode": "inference",
+            "dtype": mapping_headers["dtype"],
+            "extra_info": {
+                "device": mapping_headers["device"],
+                "arch": mapping_headers["arch"],
+            },
+        },
+        "model": {
+            "name": mapping_headers["name"],
+            "type": "OSS model" if mapping_headers["is_model"] else "micro-benchmark",
+            "origins": ["pytorch"],
+        },
+        "metric": {
+            "name": mapping_headers["metric"],
+            "benchmark_values": [mapping_headers["actual"]],
+            "target_value": mapping_headers["target"],
+        },
+    }
+
+    with open(f"{os.path.splitext(output_file)[0]}.json", "a") as f:
+        print(json.dumps(record), file=f)
+
+
 DEFAULT_OUTPUT_FILE = "gpt_fast_benchmark.csv"
 
-all_experiments = {
-    # A list of GPT models: LlaMa, Mixtral, etc.
-    run_llama2_7b_bf16,
-    run_llama2_7b_int8,
-    run_mixtral_8x7b_int8,
-    # A list of micro-benchmarks.
-    run_mlp_layer_norm_gelu,
-    run_layer_norm,
-    run_gather_gemv,
-    run_gemv,
-}
 
-
-def main(output_file=DEFAULT_OUTPUT_FILE):
+def main(output_file=DEFAULT_OUTPUT_FILE, only_model=None):
     results = []
 
-    for func in all_experiments:
-        lst = func()
+    if not only_model:
+        experiments = all_experiments.values()
+    else:
+        if only_model not in all_experiments:
+            print(
+                f"Unknown model: {only_model}, all available models: {all_experiments.keys()}"
+            )
+        # only run the specified model
+        experiments = [all_experiments[only_model]]
+    for func in experiments:
+        try:
+            device = "cuda" if torch.cuda.is_available() else "cpu"
+        except AssertionError:
+            # This happens when torch is compiled with CUDA turning off completely
+            device = "cpu"
+
+        torch.compiler.cudagraph_mark_step_begin()
+        lst = func(device)
         for x in lst:
             results.append(dataclasses.astuple(x))
 
@@ -260,6 +315,8 @@ def main(output_file=DEFAULT_OUTPUT_FILE):
 
     for row in results:
         output_csv(output_file, headers, row)
+        # Also write the output in JSON format so that it can be ingested into the OSS benchmark database
+        output_json(output_file, headers, row)
 
 
 if __name__ == "__main__":
@@ -269,6 +326,10 @@ if __name__ == "__main__":
         default=DEFAULT_OUTPUT_FILE,
         help="Set the output CSV file to save the benchmark results",
     )
+    parser.add_argument(
+        "--only",
+        help="Specify a model or micro-benchmark name to run exclusively",
+    )
     args = parser.parse_args()
 
-    main(output_file=args.output)
+    main(output_file=args.output, only_model=args.only)

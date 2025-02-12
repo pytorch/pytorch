@@ -1,8 +1,6 @@
 #include <torch/csrc/jit/mobile/prim_ops_registery.h>
 
-namespace torch {
-namespace jit {
-namespace mobile {
+namespace torch::jit::mobile {
 
 static std::unordered_map<std::string, std::function<void(Stack&)>>&
 primOpsFnTable() {
@@ -30,6 +28,4 @@ std::function<void(Stack&)>& getPrimOpsFn(const std::string& name) {
   return primOpsFnTable()[name];
 }
 
-} // namespace mobile
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit::mobile

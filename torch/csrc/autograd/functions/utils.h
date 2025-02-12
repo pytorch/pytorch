@@ -13,8 +13,7 @@
 #include <memory>
 #include <vector>
 
-namespace torch {
-namespace autograd {
+namespace torch::autograd {
 
 using function_constructor = std::function<std::shared_ptr<Node>(edge_list&&)>;
 
@@ -105,10 +104,9 @@ inline bool isFwGradDefinedTensorList(
   bool ret = false;
   for (auto i : c10::irange(li.size())) {
     auto t = li.get(i);
-    ret |= (t.has_value() && isFwGradDefined(t.value()));
+    ret |= isFwGradDefined(t);
   }
   return ret;
 }
 
-} // namespace autograd
-} // namespace torch
+} // namespace torch::autograd

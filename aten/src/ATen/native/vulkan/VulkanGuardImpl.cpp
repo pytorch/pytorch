@@ -1,8 +1,7 @@
 #include <c10/core/impl/DeviceGuardImplInterface.h>
 #include <c10/macros/Macros.h>
 
-namespace at {
-namespace detail {
+namespace at::detail {
 
 namespace {
 
@@ -77,7 +76,6 @@ struct VulkanGuardImpl final : public c10::impl::DeviceGuardImplInterface {
 
 } // namespace
 
-C10_REGISTER_GUARD_IMPL(Vulkan, VulkanGuardImpl);
+C10_REGISTER_GUARD_IMPL(Vulkan, VulkanGuardImpl)
 
-} // namespace detail
-} // namespace at
+} // namespace at::detail

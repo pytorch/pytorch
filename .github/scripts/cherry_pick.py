@@ -3,7 +3,7 @@
 import json
 import os
 import re
-from typing import Any, cast, Dict, List, Optional
+from typing import Any, cast, Optional
 from urllib.error import HTTPError
 
 from github_utils import gh_fetch_url, gh_post_pr_comment, gh_query_issues_by_labels
@@ -67,7 +67,7 @@ def get_release_version(onto_branch: str) -> Optional[str]:
 
 def get_tracker_issues(
     org: str, project: str, onto_branch: str
-) -> List[Dict[str, Any]]:
+) -> list[dict[str, Any]]:
     """
     Find the tracker issue from the repo. The tracker issue needs to have the title
     like [VERSION] Release Tracker following the convention on PyTorch
@@ -117,7 +117,7 @@ def cherry_pick(
                 continue
 
             res = cast(
-                Dict[str, Any],
+                dict[str, Any],
                 post_tracker_issue_comment(
                     org,
                     project,
@@ -169,7 +169,8 @@ def create_cherry_pick_branch(
     repo.create_branch_and_checkout(branch=cherry_pick_branch)
 
     # We might want to support ghstack later
-    repo._run_git("cherry-pick", "-x", "-X", "theirs", commit_sha)
+    # We don't want to resolve conflicts here.
+    repo._run_git("cherry-pick", "-x", commit_sha)
     repo.push(branch=cherry_pick_branch, dry_run=False)
 
     return cherry_pick_branch
@@ -219,7 +220,7 @@ def submit_pr(
 
 def post_pr_comment(
     org: str, project: str, pr_num: int, msg: str, dry_run: bool = False
-) -> List[Dict[str, Any]]:
+) -> list[dict[str, Any]]:
     """
     Post a comment on the PR itself to point to the cherry picking PR when success
     or print the error when failure
@@ -254,7 +255,7 @@ def post_tracker_issue_comment(
     classification: str,
     fixes: str,
     dry_run: bool = False,
-) -> List[Dict[str, Any]]:
+) -> list[dict[str, Any]]:
     """
     Post a comment on the tracker issue (if any) to record the cherry pick
     """

@@ -1,11 +1,7 @@
 from typing import Optional, runtime_checkable
 from typing_extensions import Protocol
 
-from torch.distributed._state_dict_utils import (
-    _copy_state_dict,
-    _create_cpu_state_dict,
-    _offload_state_dict_to_cpu,
-)
+from torch.distributed._state_dict_utils import _copy_state_dict, _create_cpu_state_dict
 from torch.distributed.checkpoint.metadata import STATE_DICT_TYPE
 
 
@@ -65,7 +61,6 @@ class AsyncStager(Protocol):
         In the case `stage` is async in some way, this method should be called to ensure staging
         is complete and it is safe to begin modifying the original `state_dict`
         """
-        pass
 
 
 class BlockingAsyncStager(AsyncStager):
@@ -106,7 +101,9 @@ class BlockingAsyncStager(AsyncStager):
         """
 
         if not self.cache_staged_state_dict:
-            return _offload_state_dict_to_cpu(state_dict, type_check=self.type_check)
+            staged_state_dict = _create_cpu_state_dict(state_dict)
+            _copy_state_dict(state_dict, staged_state_dict, type_check=self.type_check)
+            return staged_state_dict
 
         if self.state_dict_cache is None:
             self.state_dict_cache = _create_cpu_state_dict(state_dict, pin_memory=True)
@@ -116,4 +113,3 @@ class BlockingAsyncStager(AsyncStager):
         """
         No-op function, since staging is blocking.
         """
-        pass

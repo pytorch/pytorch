@@ -2,10 +2,9 @@
 import functools
 import itertools
 import logging
-from typing import List, Optional
+from collections.abc import Sequence
+from typing import Optional
 from unittest.mock import patch
-
-import sympy
 
 from ...autotune_process import TensorMeta
 from ...ir import Buffer, IRNode, Layout
@@ -26,9 +25,9 @@ class ROCmTemplate(KernelTemplate):
     def __init__(
         self,
         name: str,
-        input_nodes: List[Buffer],
+        input_nodes: list[Buffer],
         layout: Layout,
-        input_reorder: Optional[List[int]] = None,
+        input_reorder: Optional[list[int]] = None,
     ) -> None:
         """
 
@@ -43,7 +42,7 @@ class ROCmTemplate(KernelTemplate):
         """
         super().__init__(name)
         self.input_nodes = input_nodes
-        self.output_node: Buffer = Buffer("buf_out", layout)
+        self.output_node: Buffer = Buffer(name="buf_out", layout=layout)
         self.input_reorder = input_reorder
         self.layout = layout
 
@@ -90,21 +89,24 @@ class ROCmTemplate(KernelTemplate):
             call_args,
             expected_args,
         )
-        extra_args = V.graph.sizevars.size_hints(
-            map(sympy.expand, call_args[len(expected_args) :])
-        )
-        # create the BenchmarkRequest
+
+        size_args = (
+            self.size_args() if hasattr(self, "size_args") else ()
+        )  # subclass should define def size_args()
+        size_args_ints = [
+            V.graph.sizevars.size_hint(arg) for arg in size_args
+        ]  # resolve to ints for benchmarking
         bmreq = ROCmBenchmarkRequest(
             kernel_name=kernel_name,
             input_tensor_meta=TensorMeta.from_irnodes(self.input_nodes),
             output_tensor_meta=TensorMeta.from_irnodes(self.output_node),
-            extra_args=extra_args,
+            extra_args=size_args_ints,
             source_code=code,
         )
 
         def make_kernel_render(
             template_node: ROCmTemplateBuffer,
-            epilogue_nodes: Optional[List[IRNode]] = None,
+            epilogue_nodes: Optional[Sequence[IRNode]] = None,
         ):
             kernel = ROCmTemplateKernel(
                 kernel_name="KERNEL_NAME",
@@ -158,7 +160,11 @@ class ROCmTemplate(KernelTemplate):
                 #define PT_EXPORT
                 #endif
                 #endif
-                using bfloat16 = hip_bfloat16;
+
+                // as long as there is no custom arithmetic it's fine
+                using bfloat16 = uint16_t;
+                using float8_e4m3fnuz = uint8_t;
+                using float8_e5m2fnuz = uint8_t;
             """
         )
         return res

@@ -1,11 +1,14 @@
 """Run benchmarks while handling parallelism, isolation, and fault tolerance."""
+
+# mypy: ignore-errors
+
 import math
 import multiprocessing
 import subprocess
 import textwrap
 import threading
 import time
-from typing import Dict, List, Optional, Set, Tuple, Union
+from typing import Optional, Union
 
 from worker.main import WorkerFailure, WorkerOutput
 
@@ -48,11 +51,11 @@ class CorePool:
         self._num_cores = max_core_id - min_core_id + 1
         print(f"Core pool created: cores {self._min_core_id}-{self._max_core_id}")
 
-        self._available: List[bool] = [
+        self._available: list[bool] = [
             True for _ in range(min_core_id, min_core_id + self._num_cores)
         ]
 
-        self._reservations: Dict[str, Tuple[int, ...]] = {}
+        self._reservations: dict[str, tuple[int, ...]] = {}
         self._lock = threading.Lock()
 
     def reserve(self, n: int) -> Optional[str]:
@@ -84,28 +87,28 @@ class CorePool:
 class Runner:
     def __init__(
         self,
-        work_items: Tuple[WorkOrder, ...],
+        work_items: tuple[WorkOrder, ...],
         core_pool: Optional[CorePool] = None,
         cadence: float = 1.0,
     ) -> None:
-        self._work_items: Tuple[WorkOrder, ...] = work_items
+        self._work_items: tuple[WorkOrder, ...] = work_items
         self._core_pool: CorePool = core_pool or CorePool(0, CPU_COUNT - 4)
         self._cadence: float = cadence
 
         # Working state.
-        self._work_queue: List[WorkOrder] = list(work_items)
-        self._active_jobs: List[InProgress] = []
-        self._results: Dict[WorkOrder, WorkerOutput] = {}
+        self._work_queue: list[WorkOrder] = list(work_items)
+        self._active_jobs: list[InProgress] = []
+        self._results: dict[WorkOrder, WorkerOutput] = {}
 
         # Debug information for ETA and error messages.
         self._start_time: float = -1
-        self._durations: Dict[WorkOrder, float] = {}
+        self._durations: dict[WorkOrder, float] = {}
         self._currently_processed: Optional[WorkOrder] = None
 
         if len(work_items) != len(set(work_items)):
             raise ValueError("Duplicate work items.")
 
-    def run(self) -> Dict[WorkOrder, WorkerOutput]:
+    def run(self) -> dict[WorkOrder, WorkerOutput]:
         try:
             return self._run()
 
@@ -134,7 +137,7 @@ class Runner:
             self._force_shutdown(verbose=True)
             raise
 
-    def _run(self) -> Dict[WorkOrder, WorkerOutput]:
+    def _run(self) -> dict[WorkOrder, WorkerOutput]:
         self._start_time = time.time()
         self._canary_import()
         while self._work_queue or self._active_jobs:
@@ -147,7 +150,7 @@ class Runner:
         return self._results.copy()
 
     def _update_active_jobs(self) -> None:
-        active_jobs: List[InProgress] = []
+        active_jobs: list[InProgress] = []
         for job in self._active_jobs:
             self._currently_processed = job.work_order
             if not job.check_finished():
@@ -169,7 +172,7 @@ class Runner:
         self._active_jobs.extend(active_jobs)
 
     def _enqueue_new_jobs(self) -> None:
-        work_queue: List[WorkOrder] = []
+        work_queue: list[WorkOrder] = []
         for i, work_order in enumerate(self._work_queue):
             self._currently_processed = work_order
             cpu_list = self._core_pool.reserve(work_order.timer_args.num_threads)
@@ -246,7 +249,7 @@ class Runner:
 
     def _canary_import(self) -> None:
         """Make sure we can import torch before launching a slew of workers."""
-        source_cmds: Set[str] = set()
+        source_cmds: set[str] = set()
         for w in self._work_items:
             if w.source_cmd is not None:
                 source_cmds.add(f"{w.source_cmd} && ")

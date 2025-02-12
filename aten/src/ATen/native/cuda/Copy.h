@@ -5,6 +5,7 @@ struct TensorIteratorBase;
 
 namespace native {
 
-void direct_copy_kernel_cuda(TensorIteratorBase &iter);
+void direct_copy_kernel_cuda(TensorIteratorBase& iter);
 
-}}  // namespace at::native
+}
+} // namespace at

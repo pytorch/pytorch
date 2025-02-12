@@ -180,6 +180,10 @@ TORCH_API void prepareProfiler(
     const torch::profiler::impl::ProfilerConfig& config,
     const std::set<torch::profiler::impl::ActivityType>& activities);
 
+TORCH_API void toggleCollectionDynamic(
+    const bool enable,
+    const std::set<torch::profiler::impl::ActivityType>& activities);
+
 /**
  * When a C++ thread really has no control over how the profiler was enabled,
  * for example, by some unreachable Python code, it can call these functions

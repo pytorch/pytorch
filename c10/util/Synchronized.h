@@ -35,6 +35,7 @@ class Synchronized final {
   Synchronized(Synchronized&&) = delete;
   Synchronized operator=(Synchronized const&) = delete;
   Synchronized operator=(Synchronized&&) = delete;
+  ~Synchronized() = default;
 
   /**
    * To use, call withLock<T> with a callback that accepts T either

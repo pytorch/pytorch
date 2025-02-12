@@ -5,6 +5,7 @@
 #include <ATen/native/DistributionTemplates.h>
 #include <ATen/native/Distributions.h>
 #include <ATen/native/TensorFactories.h>
+#include <ATen/native/mps/MPSGraphSonomaOps.h>
 #include <ATen/native/mps/MPSGraphVenturaOps.h>
 #include <ATen/native/mps/OperationUtils.h>
 
@@ -68,13 +69,28 @@ Tensor& random_mps_impl(Tensor& self,
       newCachedGraph->stateTensor =
           mpsGraphRankedPlaceHolder(mpsGraph, MPSDataTypeInt32, @[ @(at::mps::detail::PHILOX_STATE_N) ]);
 
-      // FP16, FP32 and Int32 are the only data types supported for distributions on MPS backend.
+      // BF16, FP16, FP32 and Int32 are the only data types supported for distributions on MPS backend.
       const MPSDataType inputDataType = [&] {
         // only for random_mps, we pass interval range of type int64_t
         if constexpr (std::is_same_v<scalar_t, int64_t>) {
           return MPSDataTypeInt32;
         }
-        return (self.scalar_type() == ScalarType::Half) ? MPSDataTypeFloat16 : MPSDataTypeFloat32;
+        // for bernoully always use float32
+        if constexpr (std::is_same_v<scalar_t, bool>) {
+          return MPSDataTypeFloat32;
+        }
+        switch (self.scalar_type()) {
+          case kHalf:
+            return MPSDataTypeFloat16;
+          case kFloat:
+            return MPSDataTypeFloat32;
+          case kBFloat16: {
+            checkSupportsBFloat16();
+            return MPSDataTypeBFloat16;
+          }
+          default:
+            TORCH_CHECK_TYPE(false, "Unsupported type ", self.scalar_type(), " for operation ", op_name);
+        }
       }();
       const MPSDataType outputDataType = std::is_same_v<scalar_t, bool> ? MPSDataTypeBool : inputDataType;
 
@@ -406,17 +422,6 @@ Tensor& exponential_mps_(Tensor& self, double lambda, std::optional<Generator> g
 }
 
 Tensor& randperm_out_mps(int64_t n, std::optional<Generator> generator, Tensor& result) {
-  if (!is_macos_13_or_newer()) {
-    TORCH_WARN_ONCE("MPS: randperm op is supported natively starting from macOS 13.0. ",
-                    "Falling back on CPU. This may have performance implications.");
-
-    auto result_cpu = result.to("cpu");
-    at::randperm_out(result_cpu, n);
-    result.resize_as_(result_cpu);
-    result.copy_(result_cpu);
-    return result;
-  }
-
   TORCH_CHECK(n >= 0, "n must be non-negative, got", n);
   TORCH_CHECK(!generator.has_value() || (generator.has_value() && result.device() == generator->device()),
               "Expected a '",
@@ -615,8 +620,7 @@ Tensor& multinomial_out_mps(const Tensor& self,
     // Sanity checks on `self`.
     auto is_valid = ((self.max() < INFINITY) & (self.min() >= 0)).item();
     TORCH_CHECK(is_valid.to<bool>(), "probability tensor contains either `inf`, `nan` or element < 0");
-    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-    bool zero_prob_condition;
+    bool zero_prob_condition = false;
     if (self.dim() == 1) {
       zero_prob_condition = (self.sum() == 0).item().to<bool>();
     } else {
@@ -631,7 +635,10 @@ Tensor& multinomial_out_mps(const Tensor& self,
     // s = argmax( p / (-log(eps)) ) where eps ~ U(0, 1).
     // We can also simplify the formula above by
     // s = argmax( p / q ) where q ~ Exp(1)
-    Tensor q = at::empty_like(self).exponential_(1, gen);
+    // If needed, create `q` as contiguous tensor to ensure memory layout supports inplace operations
+    const auto has_strided_api = is_macos_13_or_newer(MacOSVersion::MACOS_VER_15_0_PLUS);
+    auto q = at::empty_like(self, {}, has_strided_api ? std::nullopt : std::optional(MemoryFormat::Contiguous));
+    q.exponential_(1, gen);
     // In theory the probability to generate 0 from exponential distribution is
     // 0. However, on CUDA side there is a protection to avoid 0s, but on CPU
     // side, there is a very low probability to generate 0 from

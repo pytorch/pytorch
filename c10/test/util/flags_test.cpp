@@ -15,8 +15,7 @@ TEST(FlagsTest, TestGflagsCorrectness) {
   FLAGS_c10_flags_test_only_flag = true;
   EXPECT_EQ(FLAGS_c10_flags_test_only_flag, true);
 #else // C10_USE_GFLAGS
-  std::cout << "Caffe2 is not built with gflags. Nothing to test here."
-            << std::endl;
+  std::cout << "Caffe2 is not built with gflags. Nothing to test here." << '\n';
 #endif
 }
 

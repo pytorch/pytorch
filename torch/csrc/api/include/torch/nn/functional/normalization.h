@@ -5,9 +5,7 @@
 #include <torch/nn/options/normalization.h>
 #include <torch/types.h>
 
-namespace torch {
-namespace nn {
-namespace functional {
+namespace torch::nn::functional {
 
 #ifndef DOXYGEN_SHOULD_SKIP_THIS
 namespace detail {
@@ -206,6 +204,4 @@ inline Tensor group_norm(
       options.eps());
 }
 
-} // namespace functional
-} // namespace nn
-} // namespace torch
+} // namespace torch::nn::functional

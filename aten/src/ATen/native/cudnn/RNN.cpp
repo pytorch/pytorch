@@ -10,6 +10,7 @@
 #include <c10/util/Exception.h>
 #include <c10/util/accumulate.h>
 #include <c10/util/irange.h>
+#include <torch/library.h>
 #include <ATen/cuda/CUDAGraphsUtils.cuh>
 
 #ifndef AT_PER_OPERATOR_HEADERS
@@ -44,7 +45,8 @@ Tensor _cudnn_rnn_flatten_weight(
     int64_t fn_num_layers,
     bool batch_first,
     bool fn_bidirectional) {
-  AT_ERROR("_cudnn_rnn_flatten_weight: ATen not compiled with cuDNN support");
+  TORCH_CHECK(
+      false, "_cudnn_rnn_flatten_weight: ATen not compiled with cuDNN support");
 }
 
 std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor> _cudnn_rnn(
@@ -64,7 +66,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor> _cudnn_rnn(
     bool fn_bidirectional,
     IntArrayRef fn_batch_sizes,
     const std::optional<Tensor>& fn_dropout_state_opt) {
-  AT_ERROR("_cudnn_rnn: ATen not compiled with cuDNN support");
+  TORCH_CHECK(false, "_cudnn_rnn: ATen not compiled with cuDNN support");
 }
 
 std::tuple<Tensor, Tensor, Tensor, std::vector<Tensor>> _cudnn_rnn_backward(
@@ -90,7 +92,8 @@ std::tuple<Tensor, Tensor, Tensor, std::vector<Tensor>> _cudnn_rnn_backward(
     const std::optional<Tensor>& dropout_state_opt,
     const Tensor& reserve,
     std::array<bool, 4> output_mask) {
-  AT_ERROR("_cudnn_rnn_backward: ATen not compiled with cuDNN support");
+  TORCH_CHECK(
+      false, "_cudnn_rnn_backward: ATen not compiled with cuDNN support");
 }
 
 Tensor _cudnn_init_dropout_state(
@@ -105,7 +108,8 @@ Tensor _cudnn_init_dropout_state(
   TensorOptions().dtype(dtype).layout(layout).device(device).pinned_memory(
       pin_memory);
 
-  AT_ERROR("_cudnn_init_dropout_state: ATen not compiled with cuDNN support");
+  TORCH_CHECK(
+      false, "_cudnn_init_dropout_state: ATen not compiled with cuDNN support");
 }
 
 } // namespace native
@@ -181,7 +185,7 @@ struct RNNDescriptorParams {
       default: {
         std::ostringstream oss;
         oss << "unrecognized cuDNN RNN mode " << fn_mode;
-        AT_ERROR(oss.str());
+        TORCH_CHECK(false, oss.str());
       }
     }
   }
@@ -583,7 +587,7 @@ int64_t _num_linear_layers(cudnnRNNMode_t mode) {
     case CUDNN_RNN_TANH:
       return 2;
     default:
-      AT_ERROR("unknown cuDNN RNN mode ", mode);
+      TORCH_CHECK(false, "unknown cuDNN RNN mode ", mode);
   }
 }
 
@@ -1230,6 +1234,61 @@ cudnnDataType_t promote_rnn_math_type(cudnnDataType_t dtype) {
   return dtype;
 }
 
+int64_t _cudnn_rnn_flatten_weight_prologue(
+    TensorList weight_arr,
+    int64_t weight_stride0,
+    int64_t input_size,
+    int64_t mode,
+    int64_t hidden_size,
+    int64_t proj_size,
+    int64_t num_layers,
+    bool batch_first,
+    bool bidirectional,
+    const cudnnDataType_t flat_buf_datatype,
+    const cudnnHandle_t& handle,
+    RNNDescriptorParams& rnn,
+    RNNDescriptor& rnn_desc,
+    const TensorGeometry& x_geom,
+    TensorDescriptor& x_desc) {
+  // flat_buf_datatype is accepted as a separate argument (rather than extracted
+  // from flat_buf_options) because to extract flat_buf_datatype from
+  // flat_buf_options, we'd need to say auto flat_buf_datatype =
+  // getCudnnDataTypeFromScalarType(typeMetaToScalarType(options.dtype()));
+  // typeMetaToScalarType is a surprisingly nontrivial function.  We should
+  // avoid it if we can.
+  TORCH_CHECK(
+      weight_arr.size() > 0,
+      "copy_weights_to_flat_buf_views: cannot flatten empty weight list");
+
+  rnn.set(
+      mode,
+#ifdef USE_CUDNN_RNN_V8_API
+      input_size,
+      false, // eqy: bogus as we do not know if the input is packed here
+             // but it should not affect the weights (what are are interested
+             // in)
+#endif
+      hidden_size,
+      proj_size,
+      num_layers,
+      bidirectional,
+      promote_rnn_math_type(flat_buf_datatype),
+      flat_buf_datatype);
+
+  rnn_desc = rnn.descriptor(handle);
+
+  // Why do we pad to 5 dims here (and elsewhere)?
+  // https://docs.nvidia.com/deeplearning/sdk/cudnn-api/index.html#cudnnRNNForwardTraining
+  // expects descriptors padded to 3 dimensions.
+  x_desc.set(flat_buf_datatype, x_geom.sizes(), x_geom.strides(), 5);
+
+#ifndef USE_CUDNN_RNN_V8_API
+  return get_num_weights(handle, rnn_desc, x_desc, flat_buf_datatype);
+#else
+  return get_num_weights(handle, rnn_desc, flat_buf_datatype);
+#endif
+};
+
 } // namespace native
 
 // Utilities exposed in RNNUtils.h
@@ -1251,48 +1310,28 @@ copy_weights_to_flat_buf_views(
     bool set_orig_weights_to_flat_buf,
     bool allow_type_change /*=false*/,
     bool include_bias /*=true*/) {
-  // flat_buf_datatype is accepted as a separate argument (rather than extracted
-  // from flat_buf_options) because to extract flat_buf_datatype from
-  // flat_buf_options, we'd need to say auto flat_buf_datatype =
-  // getCudnnDataTypeFromScalarType(typeMetaToScalarType(options.dtype()));
-  // typeMetaToScalarType is a surprisingly nontrivial function.  We should
-  // avoid it if we can.
-  TORCH_CHECK(
-      weight_arr.size() > 0,
-      "copy_weights_to_flat_buf_views: cannot flatten empty weight list");
-
+  TORCH_CHECK(weight_arr.size() > 0, "empty weight list");
+  auto handle = getCudnnHandle();
   RNNDescriptorParams rnn;
-  rnn.set(
-      mode,
-#ifdef USE_CUDNN_RNN_V8_API
+  RNNDescriptor rnn_desc;
+  TensorDescriptor x_desc;
+  TensorGeometry x_geom({1, input_size});
+  auto num_weights = _cudnn_rnn_flatten_weight_prologue(
+      weight_arr,
+      weight_stride0,
       input_size,
-      false, // eqy: bogus as we do not know if the input is packed here
-             // but it should not affect the weights (what are are interested
-             // in)
-#endif
+      mode,
       hidden_size,
       proj_size,
       num_layers,
+      batch_first,
       bidirectional,
-      promote_rnn_math_type(flat_buf_datatype),
-      flat_buf_datatype);
-
-  auto handle = getCudnnHandle();
-  RNNDescriptor rnn_desc = rnn.descriptor(handle);
-
-  TensorGeometry x_geom({1, input_size});
-  TensorDescriptor x_desc;
-  // Why do we pad to 5 dims here (and elsewhere)?
-  // https://docs.nvidia.com/deeplearning/sdk/cudnn-api/index.html#cudnnRNNForwardTraining
-  // expects descriptors padded to 3 dimensions.
-  x_desc.set(flat_buf_datatype, x_geom.sizes(), x_geom.strides(), 5);
-
-  auto num_weights =
-#ifndef USE_CUDNN_RNN_V8_API
-      get_num_weights(handle, rnn_desc, x_desc, flat_buf_datatype);
-#else
-      get_num_weights(handle, rnn_desc, flat_buf_datatype);
-#endif
+      flat_buf_datatype,
+      handle,
+      rnn,
+      rnn_desc,
+      x_geom,
+      x_desc);
   auto weight_buf = at::zeros(num_weights, flat_buf_options);
 
 #ifndef USE_CUDNN_RNN_V8_API
@@ -1355,6 +1394,7 @@ Tensor _cudnn_rnn_flatten_weight(
     int64_t fn_num_layers,
     bool batch_first,
     bool fn_bidirectional) {
+  TORCH_CHECK(weight_arr.size() > 0, "empty weight list");
   // returns flat weight_buf
   return std::get<0>(copy_weights_to_flat_buf_views(
       weight_arr,
@@ -1369,6 +1409,42 @@ Tensor _cudnn_rnn_flatten_weight(
       /*flat_buf_datatype=*/getCudnnDataType(weight_arr[0]),
       /*flat_buf_options=*/weight_arr[0].options(),
       /*set_orig_weights_to_flat_buf=*/true));
+}
+
+Tensor _cudnn_rnn_flatten_weight_meta(
+    TensorList weight_arr,
+    int64_t weight_stride0,
+    c10::SymInt input_size,
+    int64_t mode,
+    c10::SymInt hidden_size,
+    c10::SymInt proj_size,
+    int64_t num_layers,
+    bool batch_first,
+    bool bidirectional) {
+  TORCH_CHECK(weight_arr.size() > 0, "empty weight list");
+  auto handle = getCudnnHandle();
+  RNNDescriptorParams rnn;
+  RNNDescriptor rnn_desc;
+  TensorDescriptor x_desc;
+  TensorGeometry x_geom({1, input_size});
+  auto num_weights = _cudnn_rnn_flatten_weight_prologue(
+      weight_arr,
+      weight_stride0,
+      input_size.guard_int(__FILE__, __LINE__),
+      mode,
+      hidden_size.guard_int(__FILE__, __LINE__),
+      proj_size.guard_int(__FILE__, __LINE__),
+      num_layers,
+      batch_first,
+      bidirectional,
+      getCudnnDataType(weight_arr[0]),
+      handle,
+      rnn,
+      rnn_desc,
+      x_geom,
+      x_desc);
+
+  return at::zeros_symint({num_weights}, weight_arr[0].options());
 }
 
 const char* WEIGHT_FORMAT_WARN =
@@ -1399,9 +1475,8 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor> _cudnn_rnn(
   c10::MaybeOwned<Tensor> weight_buf_r_maybe_owned =
       at::borrow_from_optional_tensor(weight_buf_r_opt);
   const Tensor& weight_buf_r = *weight_buf_r_maybe_owned;
-  const Tensor& cx = c10::value_or_else(cx_opt, [] { return Tensor(); });
-  const Tensor& fn_dropout_state =
-      c10::value_or_else(fn_dropout_state_opt, [] { return Tensor(); });
+  const Tensor& cx = cx_opt.value_or(Tensor());
+  const Tensor& fn_dropout_state = fn_dropout_state_opt.value_or(Tensor());
 
   check_attributes(input_r, weight, {hx, cx}, /*check_dtype=*/true);
   auto input = input_r;
@@ -2112,14 +2187,10 @@ std::tuple<Tensor, Tensor, Tensor, std::vector<Tensor>> _cudnn_rnn_backward(
   c10::MaybeOwned<Tensor> cx_maybe_owned =
       at::borrow_from_optional_tensor(cx_opt);
   const Tensor& cx = *cx_maybe_owned;
-  const Tensor& grad_output_r =
-      c10::value_or_else(grad_output_r_opt, [] { return Tensor(); });
-  const Tensor& grad_hy_r =
-      c10::value_or_else(grad_hy_r_opt, [] { return Tensor(); });
-  const Tensor& grad_cy_r =
-      c10::value_or_else(grad_cy_r_opt, [] { return Tensor(); });
-  const Tensor& dropout_state =
-      c10::value_or_else(dropout_state_opt, [] { return Tensor(); });
+  const Tensor& grad_output_r = grad_output_r_opt.value_or(Tensor());
+  const Tensor& grad_hy_r = grad_hy_r_opt.value_or(Tensor());
+  const Tensor& grad_cy_r = grad_cy_r_opt.value_or(Tensor());
+  const Tensor& dropout_state = dropout_state_opt.value_or(Tensor());
 
   if (!grad_output_r.defined() && !grad_hy_r.defined() &&
       !grad_cy_r.defined()) {
@@ -2360,8 +2431,7 @@ DropoutState& get_dropout_state(
   std::unique_lock<std::mutex> lock{state_cache_mut};
   auto& state = dropout_state_cache.at(device);
   if (train && dropout_p > 0) {
-    const auto& gen =
-        at::detail::getCUDAHooks().getDefaultCUDAGenerator(device);
+    const auto& gen = at::detail::getCUDAHooks().getDefaultGenerator(device);
     auto gen_impl = gen.get<at::CUDAGeneratorImpl>();
     bool reset_rnn_state = gen_impl->reset_rnn_state();
     if (!state.buffer.defined() || reset_rnn_state) {
@@ -2563,9 +2633,10 @@ std::pair<Tensor, hidden_type> _cudnn_impl(
       dropout_state.buffer);
 
   return {
-      std::get<0>(cudnn_output),
+      std::move(std::get<0>(cudnn_output)),
       pack_hidden<hidden_type>(
-          std::get<1>(cudnn_output), std::get<2>(cudnn_output))};
+          std::move(std::get<1>(cudnn_output)),
+          std::move(std::get<2>(cudnn_output)))};
 }
 
 template <typename hidden_type>
@@ -2624,64 +2695,65 @@ std::pair<Tensor, hidden_type> _cudnn_impl(
       dropout_state.buffer);
 
   return {
-      std::get<0>(cudnn_output),
+      std::move(std::get<0>(cudnn_output)),
       pack_hidden<hidden_type>(
-          std::get<1>(cudnn_output), std::get<2>(cudnn_output))};
+          std::move(std::get<1>(cudnn_output)),
+          std::move(std::get<2>(cudnn_output)))};
 }
 
-#define ONE_HIDDEN_RNN(NAME, MODE)                          \
-  void NAME##_cudnn(                                        \
-      Tensor& output,                                       \
-      Tensor& hy,                                           \
-      const Tensor& input,                                  \
-      const Tensor& hx,                                     \
-      TensorList params,                                    \
-      bool has_biases,                                      \
-      int64_t num_layers,                                   \
-      double dropout_p,                                     \
-      bool train,                                           \
-      bool bidirectional,                                   \
-      bool batch_first) {                                   \
-    std::tie(output, hy) = _cudnn_impl(                     \
-        input,                                              \
-        hx,                                                 \
-        params,                                             \
-        has_biases,                                         \
-        MODE,                                               \
-        num_layers,                                         \
-        dropout_p,                                          \
-        train,                                              \
-        bidirectional,                                      \
-        batch_first);                                       \
-  }                                                         \
-                                                            \
-  void NAME##_packed_cudnn(                                 \
-      Tensor& output,                                       \
-      Tensor& hy,                                           \
-      const Tensor& data,                                   \
-      const Tensor& batch_sizes,                            \
-      const Tensor& hx,                                     \
-      TensorList params,                                    \
-      bool has_biases,                                      \
-      int64_t num_layers,                                   \
-      double dropout_p,                                     \
-      bool train,                                           \
-      bool bidirectional) {                                 \
-    std::tie(output, hy) = _cudnn_impl(                     \
-        data,                                               \
-        batch_sizes,                                        \
-        hx,                                                 \
-        params,                                             \
-        has_biases,                                         \
-        MODE,                                               \
-        num_layers,                                         \
-        dropout_p,                                          \
-        train,                                              \
-        bidirectional);                                     \
-  }                                                         \
-                                                            \
-  REGISTER_CUDA_DISPATCH(NAME##_cudnn_stub, &NAME##_cudnn); \
-  REGISTER_CUDA_DISPATCH(NAME##_packed_cudnn_stub, &NAME##_packed_cudnn);
+#define ONE_HIDDEN_RNN(NAME, MODE)                         \
+  void NAME##_cudnn(                                       \
+      Tensor& output,                                      \
+      Tensor& hy,                                          \
+      const Tensor& input,                                 \
+      const Tensor& hx,                                    \
+      TensorList params,                                   \
+      bool has_biases,                                     \
+      int64_t num_layers,                                  \
+      double dropout_p,                                    \
+      bool train,                                          \
+      bool bidirectional,                                  \
+      bool batch_first) {                                  \
+    std::tie(output, hy) = _cudnn_impl(                    \
+        input,                                             \
+        hx,                                                \
+        params,                                            \
+        has_biases,                                        \
+        MODE,                                              \
+        num_layers,                                        \
+        dropout_p,                                         \
+        train,                                             \
+        bidirectional,                                     \
+        batch_first);                                      \
+  }                                                        \
+                                                           \
+  void NAME##_packed_cudnn(                                \
+      Tensor& output,                                      \
+      Tensor& hy,                                          \
+      const Tensor& data,                                  \
+      const Tensor& batch_sizes,                           \
+      const Tensor& hx,                                    \
+      TensorList params,                                   \
+      bool has_biases,                                     \
+      int64_t num_layers,                                  \
+      double dropout_p,                                    \
+      bool train,                                          \
+      bool bidirectional) {                                \
+    std::tie(output, hy) = _cudnn_impl(                    \
+        data,                                              \
+        batch_sizes,                                       \
+        hx,                                                \
+        params,                                            \
+        has_biases,                                        \
+        MODE,                                              \
+        num_layers,                                        \
+        dropout_p,                                         \
+        train,                                             \
+        bidirectional);                                    \
+  }                                                        \
+                                                           \
+  REGISTER_CUDA_DISPATCH(NAME##_cudnn_stub, &NAME##_cudnn) \
+  REGISTER_CUDA_DISPATCH(NAME##_packed_cudnn_stub, &NAME##_packed_cudnn)
 
 ONE_HIDDEN_RNN(gru, CUDNN_GRU)
 ONE_HIDDEN_RNN(rnn_tanh, CUDNN_RNN_TANH)
@@ -2712,8 +2784,7 @@ void lstm_cudnn(
       bidirectional,
       batch_first);
   output = result.first;
-  hy = std::get<0>(result.second);
-  cy = std::get<1>(result.second);
+  std::tie(hy, cy) = result.second;
 }
 
 void lstm_packed_cudnn(
@@ -2741,12 +2812,15 @@ void lstm_packed_cudnn(
       train,
       bidirectional);
   output = result.first;
-  hy = std::get<0>(result.second);
-  cy = std::get<1>(result.second);
+  std::tie(hy, cy) = result.second;
 }
 
-REGISTER_CUDA_DISPATCH(lstm_cudnn_stub, &lstm_cudnn);
-REGISTER_CUDA_DISPATCH(lstm_packed_cudnn_stub, &lstm_packed_cudnn);
+REGISTER_CUDA_DISPATCH(lstm_cudnn_stub, &lstm_cudnn)
+REGISTER_CUDA_DISPATCH(lstm_packed_cudnn_stub, &lstm_packed_cudnn)
+
+TORCH_LIBRARY_IMPL(aten, Meta, m) {
+  m.impl("_cudnn_rnn_flatten_weight", TORCH_FN(_cudnn_rnn_flatten_weight_meta));
+}
 
 } // namespace
 

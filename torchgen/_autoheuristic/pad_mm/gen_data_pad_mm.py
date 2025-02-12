@@ -1,16 +1,16 @@
-import os
 import random
 import sys
+from pathlib import Path
+from typing import Any
 
 
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-
-from typing import Any, Tuple
+sys.path.append(str(Path(__file__).absolute().parents[1]))
 
 from benchmark_runner import BenchmarkRunner  # type: ignore[import-not-found]
 from benchmark_utils import (  # type: ignore[import-not-found]
     fits_in_memory,
     get_mm_tensors,
+    set_precision,
     transpose_tensors,
 )
 
@@ -29,9 +29,9 @@ class BenchmarkRunnerPadMM(BenchmarkRunner):  # type: ignore[misc, no-any-unimpo
     def __init__(self) -> None:
         super().__init__("pad_mm")
 
-    def create_input(self) -> Tuple[Any, ...]:
+    def create_input(self) -> tuple[Any, ...]:
         dtype = self.get_dtype()
-        self.set_precision(dtype)
+        set_precision(dtype)
         m, k, n = self.get_m_k_n(dtype)
 
         (transpose_left, transpose_right) = transpose_tensors()
@@ -112,7 +112,7 @@ class BenchmarkRunnerPadMM(BenchmarkRunner):  # type: ignore[misc, no-any-unimpo
     def is_aligned(self, dim: int, align_size: int) -> bool:
         return dim % align_size == 0
 
-    def get_m_k_n(self, dtype: Any) -> Tuple[int, int, int]:
+    def get_m_k_n(self, dtype: Any) -> tuple[int, int, int]:
         uniform = random.choices([True, False])[0]
         align_size = get_alignment_size_dtype(dtype)
 
@@ -141,15 +141,6 @@ class BenchmarkRunnerPadMM(BenchmarkRunner):  # type: ignore[misc, no-any-unimpo
     def get_dtype(self) -> Any:
         dtype_choices = [torch.float16, torch.bfloat16, torch.float32]
         return random.choices(dtype_choices)[0]
-
-    def set_precision(self, dtype: Any, p_float32_prec_highest: float = 0.8) -> None:
-        if dtype == torch.float32:
-            precisions = ["high", "highest"]
-            weights = [1 - p_float32_prec_highest, p_float32_prec_highest]
-            precision = random.choices(precisions, weights)[0]
-        else:
-            precision = "high"
-        torch.set_float32_matmul_precision(precision)
 
 
 if __name__ == "__main__":

@@ -1,6 +1,6 @@
 import copy
 import operator
-from typing import Any, Callable, Optional, Tuple
+from typing import Any, Callable, Optional
 
 import torch
 from torch.ao.quantization import (
@@ -18,13 +18,14 @@ from torch.ao.quantization.quantize_fx import convert_to_reference_fx, prepare_f
 # TODO: move all LSTM util functions from fx/utils.py to this file
 def _get_lstm_with_individually_observed_parts(
     float_lstm: torch.nn.LSTM,
-    example_inputs: Tuple[Any, ...],
+    example_inputs: tuple[Any, ...],
     backend_config: Optional[BackendConfig] = None,
     linear_output_obs_ctr: Optional[_PartialWrapper] = None,
     sigmoid_obs_ctr: Optional[_PartialWrapper] = None,
     tanh_obs_ctr: Optional[_PartialWrapper] = None,
     cell_state_obs_ctr: Optional[_PartialWrapper] = None,
     hidden_state_obs_ctr: Optional[_PartialWrapper] = None,
+    split_gates: bool = False,
 ) -> torch.ao.nn.quantizable.LSTM:
     """
     Return an observed `torch.ao.nn.quantizable.LSTM` created from a `torch.nn.LSTM`
@@ -75,6 +76,7 @@ def _get_lstm_with_individually_observed_parts(
         float_lstm.batch_first,
         float_lstm.dropout,
         float_lstm.bidirectional,
+        split_gates=split_gates,
     )
     quantizable_lstm.qconfig = float_lstm.qconfig
 
@@ -82,7 +84,11 @@ def _get_lstm_with_individually_observed_parts(
         quantizable_lstm.layers[
             idx
         ] = torch.ao.nn.quantizable.modules.rnn._LSTMLayer.from_float(
-            float_lstm, idx, float_lstm.qconfig, batch_first=False
+            float_lstm,
+            idx,
+            float_lstm.qconfig,
+            batch_first=False,
+            split_gates=split_gates,
         )
 
     # Build QConfigMapping for the LSTM cell
@@ -105,17 +111,29 @@ def _get_lstm_with_individually_observed_parts(
         # to configure these ops in FX graph mode quantization today. This is because
         # the FloatFunctional modules simply disappear from the graph after tracing.
         # In the future, we should rewrite quantizable LSTM without FloatFunctionals.
-        op_index_to_activation_post_process_ctr = {
-            (torch.add, 0): linear_output_obs_ctr,  # gates.add
-            (torch.mul, 0): cell_state_obs_ctr,  # fgate_cx.mul
-            (torch.mul, 1): cell_state_obs_ctr,  # igate_cgate.mul
-            (torch.add, 1): cell_state_obs_ctr,  # fgate_cx_igate_cgate.add
-            (torch.mul, 2): hidden_state_obs_ctr,  # ogate_cy.mul
-        }
+        if not split_gates:
+            op_index_to_activation_post_process_ctr = {
+                (torch.add, 0): linear_output_obs_ctr,  # gates.add
+                (torch.mul, 0): cell_state_obs_ctr,  # fgate_cx.mul
+                (torch.mul, 1): cell_state_obs_ctr,  # igate_cgate.mul
+                (torch.add, 1): cell_state_obs_ctr,  # fgate_cx_igate_cgate.add
+                (torch.mul, 2): hidden_state_obs_ctr,  # ogate_cy.mul
+            }
+        else:
+            op_index_to_activation_post_process_ctr = {
+                (torch.add, 0): linear_output_obs_ctr,  # gates.add (input)
+                (torch.add, 1): linear_output_obs_ctr,  # gates.add (forget)
+                (torch.add, 2): linear_output_obs_ctr,  # gates.add (cell)
+                (torch.add, 3): linear_output_obs_ctr,  # gates.add (output)
+                (torch.mul, 0): cell_state_obs_ctr,  # fgate_cx.mul
+                (torch.mul, 1): cell_state_obs_ctr,  # igate_cgate.mul
+                (torch.add, 4): cell_state_obs_ctr,  # fgate_cx_igate_cgate.add
+                (torch.mul, 2): hidden_state_obs_ctr,  # ogate_cy.mul
+            }
         add_count = 0
         mul_count = 0
         for node in cell.graph.nodes:
-            op_index: Optional[Tuple[Callable, int]] = None  # e.g. (torch.add, 1)
+            op_index: Optional[tuple[Callable, int]] = None  # e.g. (torch.add, 1)
             if node.target == torch.add:
                 op_index = (torch.add, add_count)
                 add_count += 1

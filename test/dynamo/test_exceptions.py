@@ -4,7 +4,10 @@ import torch
 import torch._dynamo.config
 import torch._dynamo.test_case
 import torch._functorch.config
+import torch.nn
 import torch.utils.checkpoint
+from torch._dynamo.bytecode_transformation import Instruction
+from torch._dynamo.symbolic_convert import SpeculationLog, SpeculationLogDivergence
 
 
 class ExceptionTests(torch._dynamo.test_case.TestCase):
@@ -31,7 +34,7 @@ class ExceptionTests(torch._dynamo.test_case.TestCase):
             try:
                 x = torch.sin(x)
                 raise NotImplementedError
-            except (NotImplementedError, AttributeError) as e:
+            except (NotImplementedError, AttributeError):
                 x = torch.sigmoid(x)
 
             return x
@@ -88,7 +91,7 @@ class ExceptionTests(torch._dynamo.test_case.TestCase):
             try:
                 x = torch.sin(x)
                 raise NotImplementedError("Not implemented")
-            except NotImplementedError as e:
+            except NotImplementedError:
                 x = torch.sigmoid(x)
                 try:
                     x = torch.cos(x)
@@ -130,7 +133,7 @@ class ExceptionTests(torch._dynamo.test_case.TestCase):
             try:
                 x = torch.cos(x)
                 raise NotImplementedError("Not implemented")
-            except NotImplementedError as e:
+            except NotImplementedError:
                 x = torch.sigmoid(x)
                 raise
 
@@ -143,10 +146,10 @@ class ExceptionTests(torch._dynamo.test_case.TestCase):
             return x
 
         x = torch.randn(4)
-        ref = fn(x)
+        fn(x)
         # Cant use fullgraph=True because RERAISE is not supported
         opt_fn = torch.compile(fn, backend="eager")
-        res = opt_fn(x)
+        opt_fn(x)
 
     # TODO(anijain2305) - does not work with fullgraph=True
     def test_exception_with_ctx_manager(self):
@@ -156,7 +159,7 @@ class ExceptionTests(torch._dynamo.test_case.TestCase):
                 with torch.no_grad():
                     x = torch.sin(x)
                     raise NotImplementedError("Not implemented")
-            except NotImplementedError as e:
+            except NotImplementedError:
                 x = torch.sigmoid(x)
             return x
 
@@ -267,6 +270,29 @@ class ExceptionTests(torch._dynamo.test_case.TestCase):
         x = torch.ones(4)
         self.assertEqual(mod(x), opt_mod(x))
 
+    def test_attribute_error_from_getattr(self):
+        class Mock:
+            def __init__(self):
+                self.a = 5
+
+            def __getattr__(self, name):
+                if name != "a":
+                    raise AttributeError("missing")
+                return self.__dict__["a"]
+
+        mock = Mock()
+
+        def fn(x):
+            if hasattr(mock, "b"):
+                return torch.cos(x)
+            return torch.sin(x)
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        x = torch.randn(4)
+        ref = fn(x)
+        res = opt_fn(x)
+        self.assertEqual(ref, res)
+
     def test_stop_iteration(self):
         def zip_longest(*iterables, fillvalue=None):
             # Get the iterators for each iterable
@@ -293,6 +319,21 @@ class ExceptionTests(torch._dynamo.test_case.TestCase):
         ref = fn(x, y)
         res = opt_fn(x, y)
         self.assertEqual(ref, res)
+
+    def test_nn_reraise(self):
+        class M(torch.nn.Module):
+            def forward(self, x):
+                raise ValueError("woof")
+                return x + 2
+
+        m = M()
+        m.register_forward_pre_hook(lambda m, go: None)
+
+        torch._dynamo.utils.clear_compilation_metrics()
+        opt_call = torch.compile(lambda x: m(x), backend="eager")
+        self.assertRaises(ValueError, lambda: opt_call(torch.randn(3)))
+        metrics = torch._dynamo.utils.get_compilation_metrics()
+        self.assertEqual(metrics[0].fail_reason, "Observed exception")
 
     def test_key_error(self):
         def fn(x, d):
@@ -329,6 +370,101 @@ class ExceptionTests(torch._dynamo.test_case.TestCase):
         ref = fn(x)
         res = opt_fn(x)
         self.assertEqual(ref, res)
+
+    def test_raise_from_None(self):
+        # Inspired from os.environ
+        class MyMapping:
+            def __init__(self, d):
+                self._d = d
+
+            def __getitem__(self, key):
+                try:
+                    value = self._d[key]
+                except KeyError:
+                    raise KeyError(key) from None
+                return value
+
+        d = MyMapping({"a": 10, "b": 20})
+
+        def mapping_get(obj, key, value=None):
+            try:
+                return obj.__getitem__(key)
+            except KeyError:
+                return value
+
+        def fn(x, d, key):
+            x = torch.sin(x + 1)
+            return x, mapping_get(d, key)
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+
+        x = torch.rand(2, 3)
+        ref = fn(x, d, "m")
+        res = opt_fn(x, d, "m")
+        self.assertEqual(ref[0], res[0])
+        self.assertEqual(ref[1], res[1])
+
+    def test_raise_GeneratorExit(self):
+        # GeneratorExit does not inherit from Exception
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(t):
+            try:
+                raise GeneratorExit
+            except Exception:
+                return t.sin()
+            except BaseException:
+                return t.cos()
+
+        t = torch.randn(2)
+        y = fn(t)
+        self.assertEqual(y, t.cos())
+
+    def test_speculation_exception(self):
+        log = SpeculationLog()
+        log.next("fake", 555, "fake", Instruction(1, "fake", 1, 1))
+        log.restart()
+        with self.assertRaises(SpeculationLogDivergence):
+            log.next("bad", 58, "bad", Instruction(2, "different", 2, 2))
+
+    def test_dict_pop(self):
+        # Pattern from inspect.bind
+        def fn(dt, x):
+            try:
+                dt.pop("b")
+            except KeyError:
+                return torch.sin(x)
+            else:
+                return torch.cos(x)
+
+        d = {"a": 1}
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+
+        x = torch.randn(4)
+        self.assertEqual(fn(d, x), opt_fn(d, x))
+        self.assertEqual(fn({"a": 1, "b": 2}, x), opt_fn({"a": 1, "b": 2}, x))
+
+    def test_block_stack_cleanup(self):
+        params = {
+            "a": 3,
+            "b": 4,
+            "c": 5,
+        }
+
+        dt = {
+            "c": 5,
+        }
+
+        def fn(x):
+            for name in params:
+                try:
+                    x = x * dt[name]
+                except KeyError:
+                    x = x * torch.sin(x)
+            return x
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        x = torch.randn(4)
+        self.assertEqual(fn(x), opt_fn(x))
 
 
 if __name__ == "__main__":

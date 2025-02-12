@@ -296,7 +296,7 @@ bool record_buffer_to_nchw_op(
       v_src.buffer_metadata());
 }
 
-vTensor channel_image_repacking(
+static vTensor channel_image_repacking(
     const vTensor& v_input,
     api::GPUMemoryLayout target_layout,
     const api::ShaderInfo& shader_descriptor) {

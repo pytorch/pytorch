@@ -185,8 +185,8 @@ class TestStaticQuantizedModule(QuantizationTestCase):
         b = io.BytesIO()
         torch.save(qlinear, b)
         b.seek(0)
-        # Don't test weights_only here as this is legacy code that saves the model
-        loaded = torch.load(b)
+        # weights_only=False as this is legacy code that saves the model
+        loaded = torch.load(b, weights_only=False)
         self.assertEqual(qlinear.weight(), loaded.weight())
         self.assertEqual(qlinear.scale, loaded.scale)
         self.assertEqual(qlinear.zero_point, loaded.zero_point)
@@ -203,7 +203,7 @@ class TestStaticQuantizedModule(QuantizationTestCase):
         self.assertEqual(qlinear.scale, loaded_from_package.scale)
         self.assertEqual(qlinear.zero_point, loaded_from_package.zero_point)
 
-        for name, module in loaded_from_package.named_modules():
+        for name, _ in loaded_from_package.named_modules():
             # noop, just make sure attribute "_modules" is restored correctly during torch.package import
             assert(name is not None)  # noqa: E275
 
@@ -368,8 +368,8 @@ class TestStaticQuantizedModule(QuantizationTestCase):
         b = io.BytesIO()
         torch.save(qconv_module, b)
         b.seek(0)
-        # Don't test weights_only here as this is legacy code that saves the model
-        loaded_conv = torch.load(b)
+        # weights_only=False as this is legacy code that saves the model
+        loaded_conv = torch.load(b, weights_only=False)
 
         self.assertEqual(loaded_conv.bias(), qconv_module.bias())
         self.assertEqual(loaded_conv.scale, qconv_module.scale)
@@ -1157,7 +1157,6 @@ class TestStaticQuantizedModule(QuantizationTestCase):
         x_zero_point = 0
         y_scale = 5.0 / 256
         y_zero_point = 127
-        alpha = 1.5
 
         dims = (1, 4, 8)
 
@@ -1482,8 +1481,8 @@ class TestDynamicQuantizedModule(QuantizationTestCase):
         b = io.BytesIO()
         torch.save(dynamic_module, b)
         b.seek(0)
-        # Don't test weights_only here as this is legacy code that saves the model
-        loaded_conv = torch.load(b)
+        # weights_only=False as this is legacy code that saves the model
+        loaded_conv = torch.load(b, weights_only=False)
 
         self.assertEqual(loaded_conv.bias(), dynamic_module.bias())
         self.assertEqual(loaded_conv.scale, dynamic_module.scale)
@@ -1662,8 +1661,8 @@ class TestDynamicQuantizedModule(QuantizationTestCase):
         b = io.BytesIO()
         torch.save(qlinear, b)
         b.seek(0)
-        # Don't test weights_only here as this is legacy code that saves the model
-        loaded = torch.load(b)
+        # weights_only=False as this is legacy code that saves the model
+        loaded = torch.load(b, weights_only=False)
         self.assertEqual(qlinear.weight(), loaded.weight())
         self.assertEqual(qlinear.zero_point, loaded.zero_point)
 

@@ -4,9 +4,7 @@
 #include <torch/nn/options/batchnorm.h>
 #include <torch/types.h>
 
-namespace torch {
-namespace nn {
-namespace functional {
+namespace torch::nn::functional {
 
 #ifndef DOXYGEN_SHOULD_SKIP_THIS
 namespace detail {
@@ -17,7 +15,7 @@ inline Tensor batch_norm(
     Tensor weight,
     Tensor bias,
     bool training,
-    std::optional<double> momentum,
+    double momentum,
     double eps) {
   TORCH_CHECK(
       input.dim() >= 2,
@@ -42,7 +40,7 @@ inline Tensor batch_norm(
       running_mean,
       running_var,
       training,
-      momentum.value(),
+      momentum,
       eps,
       at::globalContext().userEnabledCuDNN());
 }
@@ -78,6 +76,4 @@ inline Tensor batch_norm(
       options.eps());
 }
 
-} // namespace functional
-} // namespace nn
-} // namespace torch
+} // namespace torch::nn::functional

@@ -32,9 +32,7 @@
 
 namespace py = pybind11;
 
-namespace torch {
-namespace profiler {
-namespace impl {
+namespace torch::profiler::impl {
 namespace {
 enum CallType { PyCall = 0, PyModuleCall, PyCCall, PyOptimizerCall };
 static constexpr size_t CallTypeSize = 4;
@@ -79,7 +77,7 @@ PyCodeObject* getCode<CallType::PyModuleCall>() {
     return (PyCodeObject*)res;
   }();
   return module_call_code;
-};
+}
 
 template <>
 PyCodeObject* getCode<CallType::PyOptimizerCall>() {
@@ -94,12 +92,10 @@ PyCodeObject* getCode<CallType::PyOptimizerCall>() {
     return (PyCodeObject*)res;
   }();
   return optimizer_step_code;
-};
+}
 
 } // namespace
-} // namespace impl
-} // namespace profiler
-} // namespace torch
+} // namespace torch::profiler::impl
 
 template <>
 struct std::hash<torch::profiler::impl::CodeLocation> {
@@ -108,9 +104,7 @@ struct std::hash<torch::profiler::impl::CodeLocation> {
   }
 };
 
-namespace torch {
-namespace profiler {
-namespace impl {
+namespace torch::profiler::impl {
 namespace {
 // ============================================================================
 // == CallTypeHelper: Tools for generic programming on specializations. =======
@@ -257,7 +251,7 @@ class Callsite {
   using key_t = typename Config<C>::key_t;
 
   static_assert(
-      std::is_trivially_copyable<key_t>::value,
+      std::is_trivially_copyable_v<key_t>,
       "Key should be trivial, as it is passed by value.");
 
   template <typename U>
@@ -283,6 +277,10 @@ class ValueCache {
  public:
   ValueCache() = default;
   ValueCache(const ValueCache&) = delete;
+  ValueCache& operator==(const ValueCache&) = delete;
+  ValueCache(ValueCache&&) = default;
+  ValueCache& operator==(ValueCache&&) = delete;
+  ~ValueCache() = default;
 
   template <CallType C>
   void store(const typename Config<C>::key_t&, typename Config<C>::ephemeral_t);
@@ -463,8 +461,9 @@ ExtraFields<EventType::PyCall>::args_t ValueCache::load<
   OptimizerInfo info{
       key, cls, cache.cls_names_.at(cls), cls_and_parameters.parameters_};
   return {
-      // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
-      /*frame_state_=*/std::get<CallType::PyCall>(state_).at(*cache.location_),
+      /*frame_state_=*/std::get<CallType::PyCall>(state_).at(
+          // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
+          cache.location_.value()),
       /*module_info_=*/std::nullopt,
       /*optimizer_info_=*/std::move(info)};
 }
@@ -554,18 +553,19 @@ struct TraceKeyCacheState {
 // `PyEval_SetProfile`.
 struct ThreadLocalResults;
 struct TraceContext {
-  PyObject_HEAD;
+  PyObject_HEAD
   ThreadLocalResults* thread_local_results_;
 };
 
 // CPython boilerplate to define `TraceContext` as a proper python object.
 static PyTypeObject TraceContextType = {
-    PyVarObject_HEAD_INIT(nullptr, 0) "TraceContext", /* tp_name */
+    PyVarObject_HEAD_INIT(nullptr, 0)
+    "TraceContext", /* tp_name */
     sizeof(TraceContext), /* tp_basicsize */
     0, /* tp_itemsize */
     nullptr, /* tp_dealloc */
     0,
-    /* tp_vectorcall_offset */ // NOLINT: modernize-use-nullptr
+    /* tp_vectorcall_offset */
     nullptr, /* tp_getattr */
     nullptr, /* tp_setattr */
     nullptr, /* tp_reserved */
@@ -603,8 +603,7 @@ static PyTypeObject TraceContextType = {
 
 class gil_and_restore_thread {
  public:
-  gil_and_restore_thread()
-      : gil_(), initial_thread_state_{PyThreadState_Get()} {}
+  gil_and_restore_thread() : initial_thread_state_{PyThreadState_Get()} {}
   ~gil_and_restore_thread() {
     PyThreadState_Swap(initial_thread_state_);
 
@@ -686,6 +685,7 @@ class PythonTracer final : public python_tracer::PythonTracerBase {
       PyObject* arg);
 
   void stop() override;
+  void restart() override;
   std::vector<std::shared_ptr<Result>> getEvents(
       std::function<c10::time_t(c10::approx_time_t)> time_converter,
       std::vector<python_tracer::CompressedEvent>& enters,
@@ -713,7 +713,7 @@ class PythonTracer final : public python_tracer::PythonTracerBase {
   bool active_{false};
 
   torch::profiler::impl::RecordQueue* queue_;
-  PyInterpreterState* interpreter_;
+  PyInterpreterState* interpreter_{nullptr};
   PyCodeObject* module_call_code_;
   PyCodeObject* optimizer_hook_;
 
@@ -737,7 +737,7 @@ const std::vector<PyThreadState*> PythonTracer::interpreterThreads() const {
 
 PythonTracer::PythonTracer(torch::profiler::impl::RecordQueue* queue)
     : queue_(queue),
-      interpreter_(nullptr),
+
       module_call_code_(getCode<CallType::PyModuleCall>()),
       optimizer_hook_(getCode<CallType::PyOptimizerCall>()) {
   TORCH_CHECK(queue_ != nullptr);
@@ -799,7 +799,7 @@ PythonTracer::PythonTracer(torch::profiler::impl::RecordQueue* queue)
     //   cannot be round tripped via `sys.settrace(sys.gettrace())`
     PyEval_SetProfile(PythonTracer::pyProfileFn, (PyObject*)ctx);
   }
-};
+}
 
 void PythonTracer::stop() {
   gil_and_restore_thread gil;
@@ -814,6 +814,25 @@ void PythonTracer::stop() {
     auto lock_returned = active_lock_.compare_exchange_strong(active_, false);
     active_ = false;
     SOFT_ASSERT(lock_returned, "Failed to return python tracer lock.");
+  }
+}
+
+void PythonTracer::restart() {
+  gil_and_restore_thread gil;
+  active_ = active_lock_.compare_exchange_strong(active_, true);
+  if (!active_) {
+    TORCH_WARN(
+        "There is already an active Python tracer. "
+        "Refusing to register profile functions.");
+    return;
+  }
+  int cur_thread = 0;
+  for (const auto thread_state : interpreterThreads()) {
+    if (thread_state->c_profilefunc == nullptr) {
+      auto* ctx = thread_local_results_[cur_thread].ctx_;
+      PyThreadState_Swap(thread_state);
+      PyEval_SetProfile(PythonTracer::pyProfileFn, (PyObject*)ctx);
+    }
   }
 }
 
@@ -971,13 +990,17 @@ class PostProcess {
 
     ska::flat_hash_map<size_t, stack_t> stacks;
     auto& state = get_state<E>();
+    // We already own the GIL at this point
     for (const auto& enter : enters) {
       auto fields_it = state.fields_.find(enter.key_);
       if (fields_it != state.fields_.end()) {
         while (!state.exits_.empty() &&
                state.exits_.top().t_ < enter.enter_t_) {
           auto& exit = state.exits_.top();
-          pop(stacks[exit.python_tid_], exit.t_);
+          auto& tstack = stacks[exit.python_tid_];
+          if (!tstack.empty()) {
+            pop(tstack, exit.t_);
+          }
           state.exits_.pop();
         }
         out.push_back(Result::create(
@@ -1002,7 +1025,7 @@ class PostProcess {
     ska::flat_hash_map<size_t, std::pair<size_t, kineto::DeviceAndResource>>
         tid_map;
     auto it = out.rbegin();
-    for (C10_UNUSED auto _ : c10::irange(initial_size, out.size())) {
+    for ([[maybe_unused]] auto _ : c10::irange(initial_size, out.size())) {
       const auto python_tid =
           std::get<ExtraFields<E>>((*it)->extra_fields_).python_tid_;
       if ((*it)->start_tid_ == NoTID && SOFT_ASSERT(E == EventType::PyCall)) {
@@ -1117,14 +1140,9 @@ std::unique_ptr<python_tracer::PythonTracerBase> getTracer(
   return std::make_unique<PythonTracer>(queue);
 }
 } // namespace
-} // namespace impl
-} // namespace profiler
-} // namespace torch
+} // namespace torch::profiler::impl
 
-namespace torch {
-namespace autograd {
-namespace profiler {
-namespace python_tracer {
+namespace torch::autograd::profiler::python_tracer {
 
 void init() {
   pybind11::gil_scoped_acquire gil;
@@ -1132,7 +1150,4 @@ void init() {
   torch::profiler::impl::python_tracer::registerTracer(
       &torch::profiler::impl::getTracer);
 }
-} // namespace python_tracer
-} // namespace profiler
-} // namespace autograd
-} // namespace torch
+} // namespace torch::autograd::profiler::python_tracer

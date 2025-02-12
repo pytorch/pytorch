@@ -5,8 +5,16 @@ from mypy.types import NoneType, UnionType
 
 class SympyPlugin(Plugin):
     def get_base_class_hook(self, fullname: str):
+        # TODO: This apparently never worked
         if fullname == "sympy.core.basic.Basic":
             return add_assumptions
+        return None
+
+    def get_attribute_hook(self, fullname: str):
+        if fullname == "sympy.core.basic.Basic.free_symbols":
+            return lambda ctx: ctx.api.named_generic_type(
+                "builtins.set", [ctx.api.named_type("sympy.Symbol")]
+            )
         return None
 
 

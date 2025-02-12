@@ -31,8 +31,8 @@ void THCPGraph_init(PyObject* module) {
           "capture_begin",
           [](::at::cuda::CUDAGraph& self,
              std::optional<c10::cuda::MempoolId_t> pool_opt,
-             std::string capture_error_mode) {
-            cudaStreamCaptureMode capture_mode;
+             const std::string& capture_error_mode) {
+            cudaStreamCaptureMode capture_mode{};
             c10::cuda::MempoolId_t pool = pool_opt.has_value()
                 ? pool_opt.value()
                 : c10::cuda::MempoolId_t{0, 0};
@@ -87,5 +87,30 @@ void THCPGraph_init(PyObject* module) {
           "debug_dump",
           torch::wrap_pybind_function_no_gil(
               &::at::cuda::CUDAGraph::debug_dump),
-          py::arg("debug_path"));
+          py::arg("debug_path"))
+      .def_static(
+          "get_currently_capturing_graph",
+          torch::wrap_pybind_function_no_gil(
+              &::at::cuda::CUDAGraph::get_currently_capturing_graph),
+          py::return_value_policy::reference)
+      .def(
+          "begin_capture_to_if_node",
+          torch::wrap_pybind_function_no_gil(
+              &::at::cuda::CUDAGraph::begin_capture_to_if_node),
+          py::arg("scalar_cuda_pred_tensor"))
+      .def(
+          "begin_capture_to_while_loop_node",
+          torch::wrap_pybind_function_no_gil(
+              &::at::cuda::CUDAGraph::begin_capture_to_while_loop_node),
+          py::arg("scalar_cuda_pred_tensor"))
+      .def(
+          "end_capture_to_conditional_node",
+          torch::wrap_pybind_function_no_gil(
+              &::at::cuda::CUDAGraph::end_capture_to_conditional_node))
+      .def_static(
+          "set_conditional_handle",
+          torch::wrap_pybind_function_no_gil(
+              &::at::cuda::CUDAGraph::set_conditional_handle),
+          py::arg("handle"),
+          py::arg("scalar_cuda_pred_tensor"));
 }

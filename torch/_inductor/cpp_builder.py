@@ -14,14 +14,20 @@ import shutil
 import subprocess
 import sys
 import sysconfig
+import textwrap
 import warnings
+from collections.abc import Sequence
+from ctypes import cdll
+from ctypes.util import find_library
 from pathlib import Path
-from typing import Any, List, Optional, Sequence, Tuple, Union
+from typing import Any, Optional, Union
 
 import torch
+from torch._dynamo.utils import dynamo_timed
 from torch._inductor import config, exc
 from torch._inductor.cpu_vec_isa import invalid_vec_isa, VecISA
 from torch._inductor.runtime.runtime_utils import cache_dir
+from torch.torch_version import TorchVersion
 
 
 if config.is_fbcode():
@@ -56,7 +62,7 @@ _IS_LINUX = sys.platform.startswith("linux")
 _IS_MACOS = sys.platform.startswith("darwin")
 _IS_WINDOWS = sys.platform == "win32"
 
-SUBPROCESS_DECODE_ARGS = ("oem",) if _IS_WINDOWS else ()
+SUBPROCESS_DECODE_ARGS = ("utf-8",) if _IS_WINDOWS else ()
 
 log = logging.getLogger(__name__)
 
@@ -76,7 +82,7 @@ def cpp_compiler_search(search: str) -> str:
                 # Do not install GXX by default
                 if not os.getenv("TORCH_INDUCTOR_INSTALL_GXX"):
                     continue
-                from filelock import FileLock
+                from torch.utils._filelock import FileLock
 
                 lock_dir = get_lock_dir()
                 lock = FileLock(
@@ -123,13 +129,12 @@ def check_compiler_exist_windows(compiler: str) -> None:
     Check if compiler is ready, in case end user not activate MSVC environment.
     """
     try:
-        output_msg = (
-            subprocess.check_output([compiler, "/help"], stderr=subprocess.STDOUT)
-            .strip()
-            .decode(*SUBPROCESS_DECODE_ARGS)
-        )
+        subprocess.check_output([compiler, "/help"], stderr=subprocess.STDOUT)
     except FileNotFoundError as exc:
         raise RuntimeError(f"Compiler: {compiler} is not found.") from exc
+    except subprocess.SubprocessError:
+        # Expected that some compiler(clang, clang++) is exist, but they not support `/help` args.
+        pass
 
 
 def get_cpp_compiler() -> str:
@@ -138,7 +143,7 @@ def get_cpp_compiler() -> str:
         check_compiler_exist_windows(compiler)
     else:
         if config.is_fbcode():
-            return build_paths.cc()
+            return build_paths.cc
         if isinstance(config.cpp.cxx, (list, tuple)):
             search = tuple(config.cpp.cxx)
         else:
@@ -157,6 +162,13 @@ def _is_clang(cpp_compiler: str) -> bool:
     # Mac OS apple clang maybe named as gcc, need check compiler info.
     if sys.platform == "darwin":
         return _is_apple_clang(cpp_compiler)
+    elif _IS_WINDOWS:
+        # clang suite have many compilers, and only clang-cl is supported.
+        if re.search(r"((clang$)|(clang\+\+$))", cpp_compiler):
+            raise RuntimeError(
+                "Please use clang-cl, due to torch.compile only support MSVC-like CLI (compiler flags syntax)."
+            )
+        return bool(re.search(r"(clang-cl)", cpp_compiler))
     return bool(re.search(r"(clang|clang\+\+)", cpp_compiler))
 
 
@@ -178,7 +190,51 @@ def _is_msvc_cl(cpp_compiler: str) -> bool:
             .decode(*SUBPROCESS_DECODE_ARGS)
         )
         return "Microsoft" in output_msg.splitlines()[0]
-    except FileNotFoundError as exc:
+    except FileNotFoundError:
+        return False
+
+    return False
+
+
+@functools.lru_cache(None)
+def _is_intel_compiler(cpp_compiler: str) -> bool:
+    def _check_minimal_version(compiler_version: TorchVersion) -> None:
+        """
+        On Windows: early version icx has `-print-file-name` issue, and can't preload correctly for inductor.
+        """
+        min_version = "2024.2.1" if _IS_WINDOWS else "0.0.0"
+        if compiler_version < TorchVersion(min_version):
+            raise RuntimeError(
+                f"Intel Compiler error: less than minimal version {min_version}."
+            )
+
+    try:
+        output_msg = (
+            subprocess.check_output(
+                [cpp_compiler, "--version"], stderr=subprocess.DEVNULL
+            )
+            .strip()
+            .decode(*SUBPROCESS_DECODE_ARGS)
+        )
+        is_intel_compiler = "Intel" in output_msg.splitlines()[0]
+        if is_intel_compiler:
+            if _IS_WINDOWS:
+                if re.search(r"((icx$)|(icx-cc$))", cpp_compiler):
+                    raise RuntimeError(
+                        "Please use icx-cl, due to torch.compile only support MSVC-like CLI (compiler flags syntax)."
+                    )
+
+            # Version check
+            icx_ver_search = re.search(r"(\d+[.]\d+[.]\d+[.]\d+)", output_msg)
+            if icx_ver_search is not None:
+                icx_ver = icx_ver_search.group(1)
+                _check_minimal_version(TorchVersion(icx_ver))
+
+        return is_intel_compiler
+    except FileNotFoundError:
+        return False
+    except subprocess.SubprocessError:
+        # --version args not support.
         return False
 
     return False
@@ -192,6 +248,11 @@ def is_gcc() -> bool:
 @functools.lru_cache(None)
 def is_clang() -> bool:
     return _is_clang(get_cpp_compiler())
+
+
+@functools.lru_cache(None)
+def is_intel_compiler() -> bool:
+    return _is_intel_compiler(get_cpp_compiler())
 
 
 @functools.lru_cache(None)
@@ -211,12 +272,12 @@ def get_compiler_version_info(compiler: str) -> str:
         version_string = subprocess.check_output(
             [compiler, "-v"], stderr=subprocess.STDOUT, env=env
         ).decode(*SUBPROCESS_DECODE_ARGS)
-    except Exception as e:
+    except Exception:
         try:
             version_string = subprocess.check_output(
                 [compiler, "--version"], stderr=subprocess.STDOUT, env=env
             ).decode(*SUBPROCESS_DECODE_ARGS)
-        except Exception as e:
+        except Exception:
             return ""
     # Mutiple lines to one line string.
     version_string = version_string.replace("\r", "_")
@@ -225,13 +286,12 @@ def get_compiler_version_info(compiler: str) -> str:
 
 
 # =============================== cpp builder ===============================
-def _append_list(dest_list: List[str], src_list: List[str]) -> None:
-    for item in src_list:
-        dest_list.append(copy.deepcopy(item))
+def _append_list(dest_list: list[str], src_list: list[str]) -> None:
+    dest_list.extend(copy.deepcopy(item) for item in src_list)
 
 
-def _remove_duplication_in_list(orig_list: List[str]) -> List[str]:
-    new_list: List[str] = []
+def _remove_duplication_in_list(orig_list: list[str]) -> list[str]:
+    new_list: list[str] = []
     for item in orig_list:
         if item not in new_list:
             new_list.append(item)
@@ -261,10 +321,10 @@ def _remove_dir(path_dir: str) -> None:
         os.rmdir(path_dir)
 
 
-def run_command_line(cmd_line: str, cwd: str) -> bytes:
+def _run_compile_cmd(cmd_line: str, cwd: str) -> None:
     cmd = shlex.split(cmd_line)
     try:
-        status = subprocess.check_output(args=cmd, cwd=cwd, stderr=subprocess.STDOUT)
+        subprocess.check_output(args=cmd, cwd=cwd, stderr=subprocess.STDOUT)
     except subprocess.CalledProcessError as e:
         output = e.output.decode("utf-8")
         openmp_problem = "'omp.h' file not found" in output or "libomp" in output
@@ -280,7 +340,11 @@ def run_command_line(cmd_line: str, cwd: str) -> bytes:
             )
             output += instruction
         raise exc.CppCompileError(cmd, output) from e
-    return status
+
+
+def run_compile_cmd(cmd_line: str, cwd: str) -> None:
+    with dynamo_timed("compile_file"):
+        _run_compile_cmd(cmd_line, cwd)
 
 
 def normalize_path_separator(orig_path: str) -> str:
@@ -299,30 +363,35 @@ class BuildOptionsBase:
     def __init__(
         self,
         compiler: str = "",
-        definitions: Optional[List[str]] = None,
-        include_dirs: Optional[List[str]] = None,
-        cflags: Optional[List[str]] = None,
-        ldflags: Optional[List[str]] = None,
-        libraries_dirs: Optional[List[str]] = None,
-        libraries: Optional[List[str]] = None,
-        passthrough_args: Optional[List[str]] = None,
+        definitions: Optional[list[str]] = None,
+        include_dirs: Optional[list[str]] = None,
+        cflags: Optional[list[str]] = None,
+        ldflags: Optional[list[str]] = None,
+        libraries_dirs: Optional[list[str]] = None,
+        libraries: Optional[list[str]] = None,
+        passthrough_args: Optional[list[str]] = None,
         aot_mode: bool = False,
         use_absolute_path: bool = False,
         compile_only: bool = False,
     ) -> None:
         self._compiler = compiler
-        self._definations: List[str] = definitions or []
-        self._include_dirs: List[str] = include_dirs or []
-        self._cflags: List[str] = cflags or []
-        self._ldflags: List[str] = ldflags or []
-        self._libraries_dirs: List[str] = libraries_dirs or []
-        self._libraries: List[str] = libraries or []
-        # Some args is hard to abstract to OS compatable, passthough it directly.
-        self._passthough_args: List[str] = passthrough_args or []
+        self._definations: list[str] = definitions or []
+        self._include_dirs: list[str] = include_dirs or []
+        self._cflags: list[str] = cflags or []
+        self._ldflags: list[str] = ldflags or []
+        self._libraries_dirs: list[str] = libraries_dirs or []
+        self._libraries: list[str] = libraries or []
+        # Some args is hard to abstract to OS compatable, passthrough it directly.
+        self._passthrough_args: list[str] = passthrough_args or []
 
         self._aot_mode: bool = aot_mode
         self._use_absolute_path: bool = use_absolute_path
         self._compile_only: bool = compile_only
+
+    def _process_compile_only_options(self) -> None:
+        if self._compile_only:
+            self._libraries_dirs = []
+            self._libraries = []
 
     def _remove_duplicate_options(self) -> None:
         self._definations = _remove_duplication_in_list(self._definations)
@@ -331,31 +400,35 @@ class BuildOptionsBase:
         self._ldflags = _remove_duplication_in_list(self._ldflags)
         self._libraries_dirs = _remove_duplication_in_list(self._libraries_dirs)
         self._libraries = _remove_duplication_in_list(self._libraries)
-        self._passthough_args = _remove_duplication_in_list(self._passthough_args)
+        self._passthrough_args = _remove_duplication_in_list(self._passthrough_args)
+
+    def _finalize_options(self) -> None:
+        self._process_compile_only_options()
+        self._remove_duplicate_options()
 
     def get_compiler(self) -> str:
         return self._compiler
 
-    def get_definations(self) -> List[str]:
+    def get_definations(self) -> list[str]:
         return self._definations
 
-    def get_include_dirs(self) -> List[str]:
+    def get_include_dirs(self) -> list[str]:
         return self._include_dirs
 
-    def get_cflags(self) -> List[str]:
+    def get_cflags(self) -> list[str]:
         return self._cflags
 
-    def get_ldflags(self) -> List[str]:
+    def get_ldflags(self) -> list[str]:
         return self._ldflags
 
-    def get_libraries_dirs(self) -> List[str]:
+    def get_libraries_dirs(self) -> list[str]:
         return self._libraries_dirs
 
-    def get_libraries(self) -> List[str]:
+    def get_libraries(self) -> list[str]:
         return self._libraries
 
-    def get_passthough_args(self) -> List[str]:
-        return self._passthough_args
+    def get_passthrough_args(self) -> list[str]:
+        return self._passthrough_args
 
     def get_aot_mode(self) -> bool:
         return self._aot_mode
@@ -366,7 +439,7 @@ class BuildOptionsBase:
     def get_compile_only(self) -> bool:
         return self._compile_only
 
-    def save_flags_to_file(self, file: str) -> None:
+    def save_flags_to_json(self, file: str) -> None:
         attrs = {
             "compiler": self.get_compiler(),
             "definitions": self.get_definations(),
@@ -375,7 +448,7 @@ class BuildOptionsBase:
             "ldflags": self.get_ldflags(),
             "libraries_dirs": self.get_libraries_dirs(),
             "libraries": self.get_libraries(),
-            "passthrough_args": self.get_passthough_args(),
+            "passthrough_args": self.get_passthrough_args(),
             "aot_mode": self.get_aot_mode(),
             "use_absolute_path": self.get_use_absolute_path(),
             "compile_only": self.get_compile_only(),
@@ -385,19 +458,21 @@ class BuildOptionsBase:
             json.dump(attrs, f)
 
 
-def _get_warning_all_cflag(warning_all: bool = True) -> List[str]:
+def _get_warning_all_cflag(warning_all: bool = True) -> list[str]:
     if not _IS_WINDOWS:
         return ["Wall"] if warning_all else []
     else:
         return []
 
 
-def _get_cpp_std_cflag(std_num: str = "c++17") -> List[str]:
+def _get_cpp_std_cflag(std_num: str = "c++17") -> list[str]:
     if _IS_WINDOWS:
         """
         On Windows, only c++20 can support `std::enable_if_t`.
         Ref: https://learn.microsoft.com/en-us/cpp/overview/cpp-conformance-improvements-2019?view=msvc-170#checking-for-abstract-class-types # noqa: B950
-        TODO: discuss upgrade pytorch to c++20.
+        Note:
+            Only setup c++20 for Windows inductor. I tried to upgrade all project to c++20, but it is failed:
+            https://github.com/pytorch/pytorch/pull/131504
         """
         std_num = "c++20"
         return [f"std:{std_num}"]
@@ -405,7 +480,7 @@ def _get_cpp_std_cflag(std_num: str = "c++17") -> List[str]:
         return [f"std={std_num}"]
 
 
-def _get_os_related_cpp_cflags(cpp_compiler: str) -> List[str]:
+def _get_os_related_cpp_cflags(cpp_compiler: str) -> list[str]:
     if _IS_WINDOWS:
         cflags = [
             "wd4819",
@@ -423,24 +498,52 @@ def _get_os_related_cpp_cflags(cpp_compiler: str) -> List[str]:
     else:
         cflags = ["Wno-unused-variable", "Wno-unknown-pragmas"]
         if _is_clang(cpp_compiler):
-            cflags.append("Werror=ignored-optimization-argument")
+            ignored_optimization_argument = (
+                "Werror=ignored-optimization-argument"
+                if config.aot_inductor.raise_error_on_ignored_optimization
+                else "Wno-ignored-optimization-argument"
+            )
+            cflags.append(ignored_optimization_argument)
     return cflags
 
 
-def _get_optimization_cflags() -> List[str]:
+def _get_ffast_math_flags() -> list[str]:
+    # ffast-math is equivalent to these flags as in
+    # https://github.com/gcc-mirror/gcc/blob/4700ad1c78ccd7767f846802fca148b2ea9a1852/gcc/opts.cc#L3458-L3468
+    # however gcc<13 sets the FTZ/DAZ flags for runtime on x86 even if we have
+    # -ffast-math -fno-unsafe-math-optimizations because the flags for runtime
+    # are added by linking in crtfastmath.o. This is done by the spec file which
+    # only does globbing for -ffast-math.
+    flags = [
+        "fno-trapping-math",
+        "funsafe-math-optimizations",
+        "ffinite-math-only",
+        "fno-signed-zeros",
+        "fno-math-errno",
+    ]
+
+    if is_gcc():
+        flags.append("fexcess-precision=fast")
+
+    return flags
+
+
+def _get_optimization_cflags(cpp_compiler: str) -> list[str]:
     if _IS_WINDOWS:
         return ["O2"]
     else:
         cflags = ["O0", "g"] if config.aot_inductor.debug_compile else ["O3", "DNDEBUG"]
-        cflags.append("ffast-math")
+        cflags += _get_ffast_math_flags()
         cflags.append("fno-finite-math-only")
 
         if not config.cpp.enable_unsafe_math_opt_flag:
             cflags.append("fno-unsafe-math-optimizations")
-        if not config.cpp.enable_floating_point_contract_flag:
-            cflags.append("ffp-contract=off")
+        cflags.append(f"ffp-contract={config.cpp.enable_floating_point_contract_flag}")
 
         if sys.platform != "darwin":
+            # on macos, unknown argument: '-fno-tree-loop-vectorize'
+            if _is_gcc(cpp_compiler):
+                cflags.append("fno-tree-loop-vectorize")
             # https://stackoverflow.com/questions/65966969/why-does-march-native-not-work-on-apple-m1
             # `-march=native` is unrecognized option on M1
             if not config.is_fbcode():
@@ -452,7 +555,7 @@ def _get_optimization_cflags() -> List[str]:
         return cflags
 
 
-def _get_shared_cflag(compile_only: bool) -> List[str]:
+def _get_shared_cflag(compile_only: bool) -> list[str]:
     if _IS_WINDOWS:
         """
         MSVC `/MD` using python `ucrtbase.dll` lib as runtime.
@@ -476,24 +579,24 @@ def get_cpp_options(
     compile_only: bool,
     warning_all: bool = True,
     extra_flags: Sequence[str] = (),
-) -> Tuple[List[str], List[str], List[str], List[str], List[str], List[str], List[str]]:
-    definations: List[str] = []
-    include_dirs: List[str] = []
-    cflags: List[str] = []
-    ldflags: List[str] = []
-    libraries_dirs: List[str] = []
-    libraries: List[str] = []
-    passthough_args: List[str] = []
+) -> tuple[list[str], list[str], list[str], list[str], list[str], list[str], list[str]]:
+    definations: list[str] = []
+    include_dirs: list[str] = []
+    cflags: list[str] = []
+    ldflags: list[str] = []
+    libraries_dirs: list[str] = []
+    libraries: list[str] = []
+    passthrough_args: list[str] = []
 
     cflags = (
         _get_shared_cflag(compile_only)
-        + _get_optimization_cflags()
+        + _get_optimization_cflags(cpp_compiler)
         + _get_warning_all_cflag(warning_all)
         + _get_cpp_std_cflag()
         + _get_os_related_cpp_cflags(cpp_compiler)
     )
 
-    passthough_args.append(" ".join(extra_flags))
+    passthrough_args.append(" ".join(extra_flags))
 
     return (
         definations,
@@ -502,7 +605,7 @@ def get_cpp_options(
         ldflags,
         libraries_dirs,
         libraries,
-        passthough_args,
+        passthrough_args,
     )
 
 
@@ -523,9 +626,10 @@ class CppOptions(BuildOptionsBase):
         warning_all: bool = True,
         extra_flags: Sequence[str] = (),
         use_absolute_path: bool = False,
+        compiler: str = "",
     ) -> None:
         super().__init__()
-        self._compiler = get_cpp_compiler()
+        self._compiler = compiler if compiler else get_cpp_compiler()
         self._use_absolute_path = use_absolute_path
         self._compile_only = compile_only
 
@@ -536,7 +640,7 @@ class CppOptions(BuildOptionsBase):
             ldflags,
             libraries_dirs,
             libraries,
-            passthough_args,
+            passthrough_args,
         ) = get_cpp_options(
             cpp_compiler=self._compiler,
             compile_only=compile_only,
@@ -550,26 +654,26 @@ class CppOptions(BuildOptionsBase):
         _append_list(self._ldflags, ldflags)
         _append_list(self._libraries_dirs, libraries_dirs)
         _append_list(self._libraries, libraries)
-        _append_list(self._passthough_args, passthough_args)
-        self._remove_duplicate_options()
+        _append_list(self._passthrough_args, passthrough_args)
+        self._finalize_options()
 
 
-def _get_glibcxx_abi_build_flags() -> List[str]:
+def _get_glibcxx_abi_build_flags() -> list[str]:
     if not _IS_WINDOWS:
         return ["-D_GLIBCXX_USE_CXX11_ABI=" + str(int(torch._C._GLIBCXX_USE_CXX11_ABI))]
     else:
         return []
 
 
-def _get_torch_cpp_wrapper_defination() -> List[str]:
-    return ["TORCH_INDUCTOR_CPP_WRAPPER"]
+def _get_torch_cpp_wrapper_defination() -> list[str]:
+    return ["TORCH_INDUCTOR_CPP_WRAPPER", "STANDALONE_TORCH_HEADER"]
 
 
-def _use_custom_generated_macros() -> List[str]:
+def _use_custom_generated_macros() -> list[str]:
     return [" C10_USING_CUSTOM_GENERATED_MACROS"]
 
 
-def _use_fb_internal_macros() -> List[str]:
+def _use_fb_internal_macros() -> list[str]:
     if not _IS_WINDOWS:
         if config.is_fbcode():
             fb_internal_macros = [
@@ -577,17 +681,6 @@ def _use_fb_internal_macros() -> List[str]:
                 "C10_USE_MINIMAL_GLOG",
                 "C10_DISABLE_TENSORIMPL_EXTENSIBILITY",
             ]
-            # TODO: this is to avoid FC breakage for fbcode. When using newly
-            # generated model.so on an older verion of PyTorch, need to use
-            # the v1 version for aoti_torch_create_tensor_from_blob
-            create_tensor_from_blob_v1 = "AOTI_USE_CREATE_TENSOR_FROM_BLOB_V1"
-
-            fb_internal_macros.append(create_tensor_from_blob_v1)
-
-            # TODO: remove comments later:
-            # Moved to _get_openmp_args
-            # openmp_lib = build_paths.openmp_lib()
-            # return [f"-Wp,-fopenmp {openmp_lib} {preprocessor_flags}"]
             return fb_internal_macros
         else:
             return []
@@ -599,24 +692,29 @@ def _setup_standard_sys_libs(
     cpp_compiler: str,
     aot_mode: bool,
     use_absolute_path: bool,
-) -> Tuple[List[str], List[str], List[str]]:
+) -> tuple[list[str], list[str], list[str]]:
     from torch._inductor.codecache import _LINKER_SCRIPT
 
-    cflags: List[str] = []
-    include_dirs: List[str] = []
-    passthough_args: List[str] = []
+    cflags: list[str] = []
+    include_dirs: list[str] = []
+    passthrough_args: list[str] = []
     if _IS_WINDOWS:
-        return cflags, include_dirs, passthough_args
+        return cflags, include_dirs, passthrough_args
 
     if config.is_fbcode():
+        # TODO(T203137008) Can we unify these flags with triton_cc_command?
         cflags.append("nostdinc")
-        include_dirs.append(build_paths.sleef())
-        include_dirs.append(build_paths.cc_include())
-        include_dirs.append(build_paths.libgcc())
-        include_dirs.append(build_paths.libgcc_arch())
-        include_dirs.append(build_paths.libgcc_backward())
-        include_dirs.append(build_paths.glibc())
-        include_dirs.append(build_paths.linux_kernel())
+        # Note that the order of include paths do matter, as a result
+        # we need to have several branches interleaved here
+        include_dirs.append(build_paths.sleef_include)
+        include_dirs.append(build_paths.openmp_include)
+        include_dirs.append(build_paths.python_include)
+        include_dirs.append(build_paths.cc_include)
+        include_dirs.append(build_paths.libgcc_include)
+        include_dirs.append(build_paths.libgcc_arch_include)
+        include_dirs.append(build_paths.libgcc_backward_include)
+        include_dirs.append(build_paths.glibc_include)
+        include_dirs.append(build_paths.linux_kernel_include)
         include_dirs.append("include")
 
         if aot_mode and not use_absolute_path:
@@ -625,22 +723,21 @@ def _setup_standard_sys_libs(
             linker_script = os.path.basename(_LINKER_SCRIPT)
 
         if _is_clang(cpp_compiler):
-            passthough_args.append(" --rtlib=compiler-rt")
-            passthough_args.append(" -fuse-ld=lld")
-            passthough_args.append(f" -Wl,--script={linker_script}")
-            passthough_args.append(" -B" + build_paths.glibc_lib())
-            passthough_args.append(" -L" + build_paths.glibc_lib())
+            passthrough_args.append(" --rtlib=compiler-rt")
+            passthrough_args.append(" -fuse-ld=lld")
+            passthrough_args.append(f" -Wl,--script={linker_script}")
+            passthrough_args.append(" -B" + build_paths.glibc_lib)
+            passthrough_args.append(" -L" + build_paths.glibc_lib)
 
-    return cflags, include_dirs, passthough_args
+    return cflags, include_dirs, passthrough_args
 
 
-def _get_build_args_of_chosen_isa(vec_isa: VecISA) -> Tuple[List[str], List[str]]:
-    macros = []
-    build_flags = []
+def _get_build_args_of_chosen_isa(vec_isa: VecISA) -> tuple[list[str], list[str]]:
+    macros: list[str] = []
+    build_flags: list[str] = []
     if vec_isa != invalid_vec_isa:
         # Add Windows support later.
-        for x in vec_isa.build_macro():
-            macros.append(copy.deepcopy(x))
+        macros.extend(copy.deepcopy(x) for x in vec_isa.build_macro())
 
         build_flags = [vec_isa.build_arch_flags()]
 
@@ -657,17 +754,10 @@ def _get_build_args_of_chosen_isa(vec_isa: VecISA) -> Tuple[List[str], List[str]
 
 def _get_torch_related_args(
     include_pytorch: bool, aot_mode: bool
-) -> Tuple[List[str], List[str], List[str]]:
-    from torch.utils.cpp_extension import _TORCH_PATH, TORCH_LIB_PATH
+) -> tuple[list[str], list[str], list[str]]:
+    from torch.utils.cpp_extension import include_paths, TORCH_LIB_PATH
 
-    include_dirs = [
-        os.path.join(_TORCH_PATH, "include"),
-        os.path.join(_TORCH_PATH, "include", "torch", "csrc", "api", "include"),
-        # Some internal (old) Torch headers don't properly prefix their includes,
-        # so we need to pass -Itorch/lib/include/TH as well.
-        os.path.join(_TORCH_PATH, "include", "TH"),
-        os.path.join(_TORCH_PATH, "include", "THC"),
-    ]
+    include_dirs = include_paths()
     libraries_dirs = [TORCH_LIB_PATH]
     libraries = []
     if sys.platform != "darwin" and not config.is_fbcode():
@@ -678,15 +768,10 @@ def _get_torch_related_args(
     if _IS_WINDOWS:
         libraries.append("sleef")
 
-    # Unconditionally import c10 for non-abi-compatible mode to use TORCH_CHECK - See PyTorch #108690
-    if not config.abi_compatible:
-        libraries.append("c10")
-        libraries_dirs.append(TORCH_LIB_PATH)
-
     return include_dirs, libraries_dirs, libraries
 
 
-def _get_python_include_dirs() -> List[str]:
+def _get_python_include_dirs() -> list[str]:
     include_dir = Path(sysconfig.get_path("include"))
     # On Darwin Python executable from a framework can return
     # non-existing /Library/Python/... include path, in which case
@@ -699,7 +784,7 @@ def _get_python_include_dirs() -> List[str]:
     return [str(include_dir)]
 
 
-def _get_python_related_args() -> Tuple[List[str], List[str]]:
+def _get_python_related_args() -> tuple[list[str], list[str]]:
     python_include_dirs = _get_python_include_dirs()
     python_include_path = sysconfig.get_path(
         "include", scheme="nt" if _IS_WINDOWS else "posix_prefix"
@@ -714,7 +799,7 @@ def _get_python_related_args() -> Tuple[List[str], List[str]]:
         python_lib_path = [sysconfig.get_config_var("LIBDIR")]
 
     if config.is_fbcode():
-        python_include_dirs.append(build_paths.python())
+        python_include_dirs.append(build_paths.python_include)
 
     return python_include_dirs, python_lib_path
 
@@ -725,12 +810,12 @@ def is_conda_llvm_openmp_installed() -> bool:
         command = "conda list llvm-openmp --json"
         output = subprocess.check_output(command.split()).decode("utf8")
         return len(json.loads(output)) > 0
-    except subprocess.SubprocessError:
+    except (subprocess.SubprocessError, FileNotFoundError):
         return False
 
 
 @functools.lru_cache(None)
-def homebrew_libomp() -> Tuple[bool, str]:
+def homebrew_libomp() -> tuple[bool, str]:
     try:
         # check if `brew` is installed
         subprocess.check_output(["which", "brew"])
@@ -749,15 +834,60 @@ def homebrew_libomp() -> Tuple[bool, str]:
         return False, ""
 
 
+@functools.lru_cache(None)
+def perload_clang_libomp_win(cpp_compiler: str, omp_name: str) -> None:
+    try:
+        output = subprocess.check_output([cpp_compiler, "-print-file-name=bin"]).decode(
+            "utf8"
+        )
+        omp_path = os.path.join(output.rstrip(), omp_name)
+        if os.path.isfile(omp_path):
+            os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE"
+            cdll.LoadLibrary(omp_path)
+    except subprocess.SubprocessError:
+        pass
+
+
+@functools.lru_cache(None)
+def perload_icx_libomp_win(cpp_compiler: str) -> None:
+    def _load_icx_built_in_lib_by_name(cpp_compiler: str, lib_name: str) -> bool:
+        try:
+            output = subprocess.check_output(
+                [cpp_compiler, f"-print-file-name={lib_name}"],
+                stderr=subprocess.DEVNULL,
+            ).decode(*SUBPROCESS_DECODE_ARGS)
+            omp_path = output.rstrip()
+            if os.path.isfile(omp_path):
+                os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE"
+                cdll.LoadLibrary(omp_path)
+                return True
+        except subprocess.SubprocessError:
+            pass
+        return False
+
+    """
+    Intel Compiler implenmented more math libraries than clang, for performance proposal.
+    We need preload them like openmp library.
+    """
+    preload_list = [
+        "libiomp5md.dll",  # openmp
+        "svml_dispmd.dll",  # svml library
+        "libmmd.dll",  # libm
+    ]
+
+    for lib_name in preload_list:
+        _load_icx_built_in_lib_by_name(cpp_compiler, lib_name)
+
+
 def _get_openmp_args(
     cpp_compiler: str,
-) -> Tuple[List[str], List[str], List[str], List[str], List[str], List[str]]:
-    cflags: List[str] = []
-    ldflags: List[str] = []
-    include_dir_paths: List[str] = []
-    lib_dir_paths: List[str] = []
-    libs: List[str] = []
-    passthough_args: List[str] = []
+) -> tuple[list[str], list[str], list[str], list[str], list[str], list[str]]:
+    cflags: list[str] = []
+    ldflags: list[str] = []
+    include_dir_paths: list[str] = []
+    lib_dir_paths: list[str] = []
+    libs: list[str] = []
+    passthrough_args: list[str] = []
     if _IS_MACOS:
         # Per https://mac.r-project.org/openmp/ right way to pass `openmp` flags to MacOS is via `-Xclang`
         cflags.append("Xclang")
@@ -805,18 +935,41 @@ def _get_openmp_args(
         # if openmp is still not available, we let the compiler to have a try,
         # and raise error together with instructions at compilation error later
     elif _IS_WINDOWS:
-        # /openmp, /openmp:llvm
-        # llvm on Windows, new openmp: https://devblogs.microsoft.com/cppblog/msvc-openmp-update/
-        # msvc openmp: https://learn.microsoft.com/zh-cn/cpp/build/reference/openmp-enable-openmp-2-0-support?view=msvc-170
-        cflags.append("openmp")
-        cflags.append("openmp:experimental")  # MSVC CL
+        """
+        On Windows, `clang` and `icx` have their specific openmp implenmention.
+        And the openmp lib is in compiler's some sub-directory.
+        For dynamic library(DLL) load, the Windows native APIs are `LoadLibraryA` and `LoadLibraryExA`, and their search
+        dependencies have some rules:
+        https://learn.microsoft.com/en-us/windows/win32/api/libloaderapi/nf-libloaderapi-loadlibraryexa#searching-for-dlls-and-dependencies
+        In some case, the rules may not include compiler's sub-directories.
+        So, it can't search and load compiler's openmp library correctly.
+        And then, the whole application would be broken.
+
+        To avoid the openmp load failed, we can automatic locate the openmp binary and preload it.
+        1. For clang, the function is `perload_clang_libomp_win`.
+        2. For icx, the function is `perload_icx_libomp_win`.
+        """
+        if _is_clang(cpp_compiler):
+            cflags.append("openmp")
+            libs.append("libomp")
+            perload_clang_libomp_win(cpp_compiler, "libomp.dll")
+        elif _is_intel_compiler(cpp_compiler):
+            cflags.append("Qiopenmp")
+            libs.append("libiomp5md")
+            perload_icx_libomp_win(cpp_compiler)
+        else:
+            # /openmp, /openmp:llvm
+            # llvm on Windows, new openmp: https://devblogs.microsoft.com/cppblog/msvc-openmp-update/
+            # msvc openmp: https://learn.microsoft.com/zh-cn/cpp/build/reference/openmp-enable-openmp-2-0-support?view=msvc-170
+            cflags.append("openmp")
+            cflags.append("openmp:experimental")  # MSVC CL
     else:
         if config.is_fbcode():
-            include_dir_paths.append(build_paths.openmp())
+            include_dir_paths.append(build_paths.openmp_include)
 
-            openmp_lib = build_paths.openmp_lib()
+            openmp_lib = build_paths.openmp_lib_so
             fb_openmp_extra_flags = f"-Wp,-fopenmp {openmp_lib}"
-            passthough_args.append(fb_openmp_extra_flags)
+            passthrough_args.append(fb_openmp_extra_flags)
 
             libs.append("omp")
         else:
@@ -824,14 +977,16 @@ def _get_openmp_args(
                 # TODO: fix issue, can't find omp.h
                 cflags.append("fopenmp")
                 libs.append("gomp")
+            elif _is_intel_compiler(cpp_compiler):
+                cflags.append("fiopenmp")
             else:
                 cflags.append("fopenmp")
                 libs.append("gomp")
 
-    return cflags, ldflags, include_dir_paths, lib_dir_paths, libs, passthough_args
+    return cflags, ldflags, include_dir_paths, lib_dir_paths, libs, passthrough_args
 
 
-def get_mmap_self_macro(use_mmap_weights: bool) -> List[str]:
+def get_mmap_self_macro(use_mmap_weights: bool) -> list[str]:
     macros = []
     if use_mmap_weights:
         macros.append(" USE_MMAP_SELF")
@@ -846,14 +1001,14 @@ def get_cpp_torch_options(
     compile_only: bool,
     use_absolute_path: bool,
     use_mmap_weights: bool,
-) -> Tuple[List[str], List[str], List[str], List[str], List[str], List[str], List[str]]:
-    definations: List[str] = []
-    include_dirs: List[str] = []
-    cflags: List[str] = []
-    ldflags: List[str] = []
-    libraries_dirs: List[str] = []
-    libraries: List[str] = []
-    passthough_args: List[str] = []
+) -> tuple[list[str], list[str], list[str], list[str], list[str], list[str], list[str]]:
+    definations: list[str] = []
+    include_dirs: list[str] = []
+    cflags: list[str] = []
+    ldflags: list[str] = []
+    libraries_dirs: list[str] = []
+    libraries: list[str] = []
+    passthrough_args: list[str] = []
 
     torch_cpp_wrapper_definations = _get_torch_cpp_wrapper_defination()
     use_custom_generated_macros_definations = _use_custom_generated_macros()
@@ -861,7 +1016,7 @@ def get_cpp_torch_options(
     (
         sys_libs_cflags,
         sys_libs_include_dirs,
-        sys_libs_passthough_args,
+        sys_libs_passthrough_args,
     ) = _setup_standard_sys_libs(cpp_compiler, aot_mode, use_absolute_path)
 
     isa_macros, isa_ps_args_build_flags = _get_build_args_of_chosen_isa(vec_isa)
@@ -880,11 +1035,11 @@ def get_cpp_torch_options(
         omp_include_dir_paths,
         omp_lib_dir_paths,
         omp_lib,
-        omp_passthough_args,
+        omp_passthrough_args,
     ) = _get_openmp_args(cpp_compiler)
 
-    cxx_abi_passthough_args = _get_glibcxx_abi_build_flags()
-    fb_macro_passthough_args = _use_fb_internal_macros()
+    cxx_abi_passthrough_args = _get_glibcxx_abi_build_flags()
+    fb_macro_passthrough_args = _use_fb_internal_macros()
 
     mmap_self_macros = get_mmap_self_macro(use_mmap_weights)
 
@@ -892,7 +1047,7 @@ def get_cpp_torch_options(
         torch_cpp_wrapper_definations
         + use_custom_generated_macros_definations
         + isa_macros
-        + fb_macro_passthough_args
+        + fb_macro_passthrough_args
         + mmap_self_macros
     )
     include_dirs = (
@@ -905,11 +1060,11 @@ def get_cpp_torch_options(
     ldflags = omp_ldflags
     libraries_dirs = python_libraries_dirs + torch_libraries_dirs + omp_lib_dir_paths
     libraries = torch_libraries + omp_lib
-    passthough_args = (
-        sys_libs_passthough_args
+    passthrough_args = (
+        sys_libs_passthrough_args
         + isa_ps_args_build_flags
-        + cxx_abi_passthough_args
-        + omp_passthough_args
+        + cxx_abi_passthrough_args
+        + omp_passthrough_args
     )
 
     return (
@@ -919,7 +1074,7 @@ def get_cpp_torch_options(
         ldflags,
         libraries_dirs,
         libraries,
-        passthough_args,
+        passthrough_args,
     )
 
 
@@ -946,12 +1101,14 @@ class CppTorchOptions(CppOptions):
         use_mmap_weights: bool = False,
         shared: bool = True,
         extra_flags: Sequence[str] = (),
+        compiler: str = "",
     ) -> None:
         super().__init__(
             compile_only=compile_only,
             warning_all=warning_all,
             extra_flags=extra_flags,
             use_absolute_path=use_absolute_path,
+            compiler=compiler,
         )
 
         self._aot_mode = aot_mode
@@ -963,7 +1120,7 @@ class CppTorchOptions(CppOptions):
             torch_ldflags,
             torch_libraries_dirs,
             torch_libraries,
-            torch_passthough_args,
+            torch_passthrough_args,
         ) = get_cpp_torch_options(
             cpp_compiler=self._compiler,
             vec_isa=vec_isa,
@@ -974,18 +1131,14 @@ class CppTorchOptions(CppOptions):
             use_mmap_weights=use_mmap_weights,
         )
 
-        if compile_only:
-            torch_libraries_dirs = []
-            torch_libraries = []
-
         _append_list(self._definations, torch_definations)
         _append_list(self._include_dirs, torch_include_dirs)
         _append_list(self._cflags, torch_cflags)
         _append_list(self._ldflags, torch_ldflags)
         _append_list(self._libraries_dirs, torch_libraries_dirs)
         _append_list(self._libraries, torch_libraries)
-        _append_list(self._passthough_args, torch_passthough_args)
-        self._remove_duplicate_options()
+        _append_list(self._passthrough_args, torch_passthrough_args)
+        self._finalize_options()
 
 
 def _set_gpu_runtime_env() -> None:
@@ -995,52 +1148,59 @@ def _set_gpu_runtime_env() -> None:
         and "CUDA_HOME" not in os.environ
         and "CUDA_PATH" not in os.environ
     ):
-        os.environ["CUDA_HOME"] = build_paths.cuda()
+        os.environ["CUDA_HOME"] = build_paths.sdk_home
 
 
-def _transform_cuda_paths(lpaths: List[str]) -> None:
+@functools.lru_cache(8)
+def _find_libcudart_static(path: str) -> Optional[Path]:
+    lib_dirs = list(Path(path).rglob("libcudart_static.a"))
+    if lib_dirs:
+        return lib_dirs[0].resolve().parent
+    log_msg = f'"libcudart_static.a" not found under {path}'
+    log.info(log_msg)
+    return None
+
+
+def _transform_cuda_paths(lpaths: list[str]) -> None:
     # This handles two cases:
-    # 1. Meta internal cuda-12 where libs are in lib/cuda-12 and lib/cuda-12/stubs
+    # 1. Cases where libs are in (e.g.) lib/cuda-12 and lib/cuda-12/stubs
     # 2. Linux machines may have CUDA installed under either lib64/ or lib/
     for i, path in enumerate(lpaths):
-        if (
-            "CUDA_HOME" in os.environ
-            and path.startswith(os.environ["CUDA_HOME"])
-            and not os.path.exists(f"{path}/libcudart_static.a")
-        ):
-            for root, dirs, files in os.walk(path):
-                if "libcudart_static.a" in files:
-                    lpaths[i] = os.path.join(path, root)
-                    lpaths.append(os.path.join(lpaths[i], "stubs"))
-                    break
+        if "CUDA_HOME" in os.environ and path.startswith(os.environ["CUDA_HOME"]):
+            lib_dir: Optional[Path] = _find_libcudart_static(path)
+            if lib_dir is None:
+                continue
+            lpaths[i] = str(lib_dir)
+            stub_dir = lib_dir / "stubs"
+            if stub_dir.exists():
+                lpaths.append(str(stub_dir))
 
 
-def get_cpp_torch_cuda_options(
-    cuda: bool,
+def get_cpp_torch_device_options(
+    device_type: str,
     aot_mode: bool = False,
     compile_only: bool = False,
-) -> Tuple[List[str], List[str], List[str], List[str], List[str], List[str], List[str]]:
-    definations: List[str] = []
-    include_dirs: List[str] = []
-    cflags: List[str] = []
-    ldflags: List[str] = []
-    libraries_dirs: List[str] = []
-    libraries: List[str] = []
-    passthough_args: List[str] = []
+) -> tuple[list[str], list[str], list[str], list[str], list[str], list[str], list[str]]:
+    definations: list[str] = []
+    include_dirs: list[str] = []
+    cflags: list[str] = []
+    ldflags: list[str] = []
+    libraries_dirs: list[str] = []
+    libraries: list[str] = []
+    passthrough_args: list[str] = []
     if (
         config.is_fbcode()
         and "CUDA_HOME" not in os.environ
         and "CUDA_PATH" not in os.environ
     ):
-        os.environ["CUDA_HOME"] = build_paths.cuda()
+        os.environ["CUDA_HOME"] = build_paths.sdk_home
 
     _set_gpu_runtime_env()
     from torch.utils import cpp_extension
 
-    include_dirs = cpp_extension.include_paths(cuda)
-    libraries_dirs = cpp_extension.library_paths(cuda)
-
-    if cuda:
+    include_dirs = cpp_extension.include_paths(device_type)
+    libraries_dirs = cpp_extension.library_paths(device_type)
+    if device_type == "cuda":
         definations.append(" USE_ROCM" if torch.version.hip else " USE_CUDA")
 
         if torch.version.hip is not None:
@@ -1048,15 +1208,22 @@ def get_cpp_torch_cuda_options(
                 libraries += ["amdhip64"]
             else:
                 libraries += ["c10_hip", "torch_hip"]
-                definations.append(" __HIP_PLATFORM_AMD__")
+            definations.append(" __HIP_PLATFORM_AMD__")
         else:
             if config.is_fbcode():
                 libraries += ["cuda"]
             else:
-                if config.is_fbcode():
-                    libraries += ["cuda"]
-                else:
-                    libraries += ["c10_cuda", "cuda", "torch_cuda"]
+                libraries += ["c10_cuda", "cuda", "torch_cuda"]
+            _transform_cuda_paths(libraries_dirs)
+
+    if device_type == "xpu":
+        definations.append(" USE_XPU")
+        libraries += ["c10_xpu", "sycl", "ze_loader", "torch_xpu"]
+        if not find_library("ze_loader"):
+            raise OSError(
+                "Intel GPU driver is not properly installed, please follow the instruction "
+                "in https://github.com/pytorch/pytorch?tab=readme-ov-file#intel-gpu-support."
+            )
 
     if aot_mode:
         if config.is_fbcode():
@@ -1065,19 +1232,14 @@ def get_cpp_torch_cuda_options(
             cpp_prefix_include_dir = [f"{os.path.dirname(cpp_prefix_path())}"]
             include_dirs += cpp_prefix_include_dir
 
-        if cuda and torch.version.hip is None:
-            _transform_cuda_paths(libraries_dirs)
-
     if config.is_fbcode():
-        if torch.version.hip is not None:
-            include_dirs.append(os.path.join(build_paths.rocm(), "include"))
-        else:
-            include_dirs.append(os.path.join(build_paths.cuda(), "include"))
+        include_dirs.append(build_paths.sdk_include)
 
-    if aot_mode and cuda and config.is_fbcode() and not compile_only:
-        if torch.version.hip is None:
-            # TODO: make static link better on Linux.
-            passthough_args = ["-Wl,-Bstatic -lcudart_static -Wl,-Bdynamic"]
+        if aot_mode and device_type == "cuda":
+            if torch.version.hip is None:
+                if not compile_only:
+                    # Only add link args, when compile_only is false.
+                    passthrough_args = ["-Wl,-Bstatic -lcudart_static -Wl,-Bdynamic"]
 
     return (
         definations,
@@ -1086,22 +1248,22 @@ def get_cpp_torch_cuda_options(
         ldflags,
         libraries_dirs,
         libraries,
-        passthough_args,
+        passthrough_args,
     )
 
 
-class CppTorchCudaOptions(CppTorchOptions):
+class CppTorchDeviceOptions(CppTorchOptions):
     """
     This class is inherited from CppTorchOptions, which automatic contains
     base cxx build options and torch common build options. And then it will
-    maintains cuda device related build args.
+    maintains cuda/xpu device related build args.
     """
 
     def __init__(
         self,
         vec_isa: VecISA = invalid_vec_isa,
         include_pytorch: bool = False,
-        cuda: bool = True,
+        device_type: str = "cuda",
         aot_mode: bool = False,
         compile_only: bool = False,
         use_absolute_path: bool = False,
@@ -1119,43 +1281,49 @@ class CppTorchCudaOptions(CppTorchOptions):
             extra_flags=extra_flags,
         )
 
-        cuda_definations: List[str] = []
-        cuda_include_dirs: List[str] = []
-        cuda_cflags: List[str] = []
-        cuda_ldflags: List[str] = []
-        cuda_libraries_dirs: List[str] = []
-        cuda_libraries: List[str] = []
-        cuda_passthough_args: List[str] = []
+        device_definations: list[str] = []
+        device_include_dirs: list[str] = []
+        device_cflags: list[str] = []
+        device_ldflags: list[str] = []
+        device_libraries_dirs: list[str] = []
+        device_libraries: list[str] = []
+        device_passthrough_args: list[str] = []
 
         (
-            cuda_definations,
-            cuda_include_dirs,
-            cuda_cflags,
-            cuda_ldflags,
-            cuda_libraries_dirs,
-            cuda_libraries,
-            cuda_passthough_args,
-        ) = get_cpp_torch_cuda_options(
-            cuda=cuda, aot_mode=aot_mode, compile_only=compile_only
+            device_definations,
+            device_include_dirs,
+            device_cflags,
+            device_ldflags,
+            device_libraries_dirs,
+            device_libraries,
+            device_passthrough_args,
+        ) = get_cpp_torch_device_options(
+            device_type=device_type, aot_mode=aot_mode, compile_only=compile_only
         )
+        _append_list(self._definations, device_definations)
+        _append_list(self._include_dirs, device_include_dirs)
+        _append_list(self._cflags, device_cflags)
+        _append_list(self._ldflags, device_ldflags)
+        _append_list(self._libraries_dirs, device_libraries_dirs)
+        _append_list(self._libraries, device_libraries)
+        _append_list(self._passthrough_args, device_passthrough_args)
+        self._finalize_options()
 
-        if compile_only:
-            cuda_libraries_dirs = []
-            cuda_libraries = []
-
-        _append_list(self._definations, cuda_definations)
-        _append_list(self._include_dirs, cuda_include_dirs)
-        _append_list(self._cflags, cuda_cflags)
-        _append_list(self._ldflags, cuda_ldflags)
-        _append_list(self._libraries_dirs, cuda_libraries_dirs)
-        _append_list(self._libraries, cuda_libraries)
-        _append_list(self._passthough_args, cuda_passthough_args)
-        self._remove_duplicate_options()
+    def _finalize_options(self) -> None:
+        super()._finalize_options()
+        if config.is_fbcode():
+            # Re-order library search paths in case there are lib conflicts
+            # that also live in the FBCode python lib dir.
+            _, python_lib_dirs = _get_python_related_args()
+            assert len(python_lib_dirs) == 1, f"Python lib dirs: {python_lib_dirs}"
+            if python_lib_dirs[0] in self._libraries_dirs:
+                self._libraries_dirs.remove(python_lib_dirs[0])
+                self._libraries_dirs.append(python_lib_dirs[0])
 
 
 def get_name_and_dir_from_output_file_path(
     file_path: str,
-) -> Tuple[str, str]:
+) -> tuple[str, str]:
     """
     This function help prepare parameters to new cpp_builder.
     Example:
@@ -1171,7 +1339,7 @@ def get_name_and_dir_from_output_file_path(
     Windows: [Windows temp path]/tmppu87g3mm/zh/czhwiz4z7ca7ep3qkxenxerfjxy42kehw6h5cjk6ven4qu4hql4i.dll
     """
     name_and_ext = os.path.basename(file_path)
-    name, ext = os.path.splitext(name_and_ext)
+    name, _ext = os.path.splitext(name_and_ext)
     dir = os.path.dirname(file_path)
 
     return name, dir
@@ -1205,7 +1373,7 @@ class CppBuilder:
     def __init__(
         self,
         name: str,
-        sources: Union[str, List[str]],
+        sources: Union[str, list[str]],
         BuildOption: BuildOptionsBase,
         output_dir: str = "",
     ) -> None:
@@ -1216,7 +1384,7 @@ class CppBuilder:
         self._ldflags_args = ""
         self._libraries_dirs_args = ""
         self._libraries_args = ""
-        self._passthough_parameters_args = ""
+        self._passthrough_parameters_args = ""
 
         self._output_dir = ""
         self._target_file = ""
@@ -1227,17 +1395,11 @@ class CppBuilder:
         self._name = name
 
         # Code start here, initial self internal veriables firstly.
+        self._build_option = BuildOption
         self._compiler = BuildOption.get_compiler()
         self._use_absolute_path = BuildOption.get_use_absolute_path()
         self._aot_mode = BuildOption.get_aot_mode()
 
-        """
-        TODO: validate and remove:
-        if len(output_dir) == 0:
-            self._output_dir = os.path.dirname(os.path.abspath(__file__))
-        else:
-            self._output_dir = output_dir
-        """
         self._output_dir = output_dir
 
         self._compile_only = BuildOption.get_compile_only()
@@ -1300,8 +1462,8 @@ class CppBuilder:
             else:
                 self._libraries_args += f"-l{lib} "
 
-        for passthough_arg in BuildOption.get_passthough_args():
-            self._passthough_parameters_args += f"{passthough_arg} "
+        for passthrough_arg in BuildOption.get_passthrough_args():
+            self._passthrough_parameters_args += f"{passthrough_arg} "
 
     def get_command_line(self) -> str:
         def format_build_command(
@@ -1313,7 +1475,7 @@ class CppBuilder:
             ldflags_args: str,
             libraries_args: str,
             libraries_dirs_args: str,
-            passthougn_args: str,
+            passthrough_args: str,
             target_file: str,
         ) -> str:
             if _IS_WINDOWS:
@@ -1321,7 +1483,7 @@ class CppBuilder:
                 # https://stackoverflow.com/a/31566153
                 cmd = (
                     f"{compiler} {include_dirs_args} {definations_args} {cflags_args} {sources} "
-                    f"{passthougn_args} /LD /Fe{target_file} /link {libraries_dirs_args} {libraries_args} {ldflags_args} "
+                    f"{passthrough_args} /LD /Fe{target_file} /link {libraries_dirs_args} {libraries_args} {ldflags_args} "
                 )
                 cmd = normalize_path_separator(cmd)
             else:
@@ -1331,7 +1493,7 @@ class CppBuilder:
                     " ",
                     f"""
                     {compiler} {sources} {definations_args} {cflags_args} {include_dirs_args}
-                    {passthougn_args} {ldflags_args} {libraries_args} {libraries_dirs_args} {compile_only_arg} -o {target_file}
+                    {passthrough_args} {ldflags_args} {libraries_args} {libraries_dirs_args} {compile_only_arg} -o {target_file}
                     """,
                 ).strip()
             return cmd
@@ -1345,7 +1507,7 @@ class CppBuilder:
             ldflags_args=self._ldflags_args,
             libraries_args=self._libraries_args,
             libraries_dirs_args=self._libraries_dirs_args,
-            passthougn_args=self._passthough_parameters_args,
+            passthrough_args=self._passthrough_parameters_args,
             target_file=self._target_file,
         )
         return command_line
@@ -1353,7 +1515,7 @@ class CppBuilder:
     def get_target_file_path(self) -> str:
         return normalize_path_separator(self._target_file)
 
-    def build(self) -> Tuple[bytes, str]:
+    def build(self) -> None:
         """
         It is must need a temperary directory to store object files in Windows.
         After build completed, delete the temperary directory to save disk space.
@@ -1365,8 +1527,60 @@ class CppBuilder:
         _create_if_dir_not_exist(_build_tmp_dir)
 
         build_cmd = self.get_command_line()
-
-        status = run_command_line(build_cmd, cwd=_build_tmp_dir)
-
+        run_compile_cmd(build_cmd, cwd=_build_tmp_dir)
         _remove_dir(_build_tmp_dir)
-        return status, self._target_file
+
+    def save_compile_cmd_to_cmake(
+        self,
+        cmake_path: str,
+    ) -> None:
+        definitions = " ".join(self._build_option.get_definations())
+        contents = textwrap.dedent(
+            f"""
+            cmake_minimum_required(VERSION 3.18 FATAL_ERROR)
+            project(aoti_model LANGUAGES CXX)
+            set(CMAKE_CXX_STANDARD 17)
+
+            # May need to point CMAKE_PREFIX_PATH to the right torch location
+            find_package(Torch REQUIRED)
+
+            # Set a shared library target
+            add_library(aoti_model SHARED)
+
+            # Add macro definitions
+            target_compile_definitions(aoti_model PRIVATE {definitions})
+
+            # Add compile flags
+            target_compile_options(aoti_model PRIVATE {self._cflags_args})
+            # Backend specific flags
+            target_compile_options(aoti_model PRIVATE {self._passthrough_parameters_args} -c)
+
+            """
+        )
+        with open(cmake_path, "w") as f:
+            f.write(contents)
+
+    def save_src_to_cmake(self, cmake_path: str, src_path: str) -> None:
+        # Remove the directory part of file_path
+        src_path = "${CMAKE_CURRENT_SOURCE_DIR}/" + Path(src_path).name
+        with open(cmake_path, "a") as f:
+            f.write(f"target_sources(aoti_model PRIVATE {src_path})\n")
+
+    def save_link_cmd_to_cmake(self, cmake_path: str) -> None:
+        lflags = " ".join(self._build_option.get_ldflags())
+        libs = " ".join(self._build_option.get_libraries())
+        contents = textwrap.dedent(
+            f"""
+            # Add linker flags
+            target_link_options(aoti_model PRIVATE {lflags})
+
+            # Add libraries
+            target_link_libraries(aoti_model PRIVATE {libs})
+         """
+        )
+
+        assert os.path.exists(
+            cmake_path
+        ), f"save_link_cmd_to_cmakefile expects {cmake_path} to already exist"
+        with open(cmake_path, "a") as f:
+            f.write(contents)

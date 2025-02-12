@@ -129,7 +129,7 @@ static void upsample_bicubic2d_backward_out_frame(
   at::parallel_for(0, channels, at::internal::GRAIN_SIZE / output_slice_size / 4, [&](int64_t start, int64_t end) {
     opmath_t* acc_data_ptr = nullptr;
     std::unique_ptr<opmath_t[]> buffer_data;
-    if constexpr (!std::is_same<scalar_t, opmath_t>::value) {
+    if constexpr (!std::is_same_v<scalar_t, opmath_t>) {
       buffer_data = std::make_unique<opmath_t[]>(input_slice_size);
       acc_data_ptr = buffer_data.get();
       memset(acc_data_ptr, 0, sizeof(opmath_t) * input_slice_size);
@@ -150,13 +150,11 @@ static void upsample_bicubic2d_backward_out_frame(
           opmath_t t_y;
           guard_index_and_lambda(real_y, input_height, input_y, t_y);
 
-          // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
-          opmath_t x_coeffs[4];
-          // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
-          opmath_t y_coeffs[4];
+          std::array<opmath_t, 4> x_coeffs;
+          std::array<opmath_t, 4> y_coeffs;
 
-          get_cubic_upsample_coefficients<opmath_t>(x_coeffs, t_x);
-          get_cubic_upsample_coefficients<opmath_t>(y_coeffs, t_y);
+          get_cubic_upsample_coefficients<opmath_t>(x_coeffs.data(), t_x);
+          get_cubic_upsample_coefficients<opmath_t>(y_coeffs.data(), t_y);
 
           opmath_t out_value = out[output_y * output_width + output_x];
           for (const auto ii : c10::irange(4)) {

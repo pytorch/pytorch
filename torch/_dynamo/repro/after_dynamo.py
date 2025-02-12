@@ -12,6 +12,7 @@ from typing import Union
 
 import torch
 import torch.fx as fx
+from torch._dynamo.backends.registry import CompiledFn
 from torch._dynamo.debug_utils import (
     AccuracyError,
     backend_accuracy_fails,
@@ -19,6 +20,7 @@ from torch._dynamo.debug_utils import (
     BuckTargetWriter,
     extra_imports,
     generate_config_string,
+    generate_env_vars_string,
     helper_for_dump_minify,
     InputReader,
     InputWriter,
@@ -178,6 +180,7 @@ def generate_dynamo_fx_repro_string(
 
     return textwrap.dedent(
         f"""
+{generate_env_vars_string(stable_output=stable_output)}
 from math import inf
 import torch
 from torch import tensor, device
@@ -271,8 +274,10 @@ def dump_to_minify_after_dynamo(gm, args, compiler_name):
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ #
 
 
-@register_debug_backend
-def dynamo_minifier_backend(gm, example_inputs, compiler_name):
+@register_debug_backend  # type: ignore[arg-type]
+def dynamo_minifier_backend(
+    gm: fx.GraphModule, example_inputs, compiler_name: CompiledFn
+):
     from functorch.compile import minifier
 
     compiler_fn = lookup_backend(compiler_name)
@@ -311,7 +316,7 @@ def dynamo_minifier_backend(gm, example_inputs, compiler_name):
     return gm
 
 
-@register_debug_backend
+@register_debug_backend  # type: ignore[arg-type]
 def dynamo_accuracy_minifier_backend(gm, example_inputs, compiler_name):
     from functorch.compile import minifier
 
@@ -448,13 +453,11 @@ def repro_run(options, mod, load_args):
     else:
         with torch.amp.autocast("cuda", enabled=options.autocast):
             args = run_load_args(options, mod, load_args)
-            ref = run_fwd_maybe_bwd(
-                mod, args, only_fwd=options.only_fwd, disable_clone=True
-            )
+            run_fwd_maybe_bwd(mod, args, only_fwd=options.only_fwd, disable_clone=True)
             del args
 
             args = run_load_args(options, mod, load_args)
-            res = run_fwd_maybe_bwd(
+            run_fwd_maybe_bwd(
                 opt_mod, args, only_fwd=options.only_fwd, disable_clone=True
             )
 

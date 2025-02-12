@@ -9,7 +9,7 @@ Ordinarily, "automatic mixed precision training" means training with
 :class:`torch.autocast` and :class:`torch.amp.GradScaler` together.
 
 Instances of :class:`torch.autocast` enable autocasting for chosen regions.
-Autocasting automatically chooses the precision for GPU operations to improve performance
+Autocasting automatically chooses the precision for operations to improve performance
 while maintaining accuracy.
 
 Instances of :class:`torch.amp.GradScaler` help perform the steps of

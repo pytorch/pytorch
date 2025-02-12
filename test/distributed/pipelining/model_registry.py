@@ -114,7 +114,7 @@ class CustomLinearDx(Function):
 
     @staticmethod
     def backward(ctx, grad_output):
-        input_val, weight, bias = ctx.saved_tensors
+        input_val, weight, _ = ctx.saved_tensors
         grad_input = grad_output.mm(weight)
         ctx.module.cached_context[ctx.layer_idx].append(grad_output.clone())
         ctx.module.cached_context[str(ctx.layer_idx) + "_input"].append(
@@ -131,7 +131,7 @@ class CustomLinearDxDw(Function):
 
     @staticmethod
     def backward(ctx, grad_output):
-        input_val, weight, bias = ctx.saved_tensors
+        input_val, weight, _ = ctx.saved_tensors
         grad_input = grad_output.mm(weight)
         grad_weight = grad_output.t().mm(input_val)
         grad_bias = grad_output.sum(0)

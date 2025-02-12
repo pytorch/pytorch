@@ -54,7 +54,7 @@ static const Tensor apply_update(const FunctionalStorageImpl::Update& update, co
     // for those necessary view ops.
     tmp_values.push_back(std::move(next_view));
   }
-  for(int64_t i = update.view_metas.size()-1; i >= 0; --i) {
+  for(int64_t i = static_cast<int64_t>(update.view_metas.size()) - 1; i >= 0; --i) {
     int64_t out_idx = update.view_metas[i].out_index;
     // Each view inverse is implemented in ViewInverses.cpp.
     t = update.view_metas[i].reverse_fn(tmp_values[i], t, out_idx);
@@ -83,10 +83,10 @@ static c10::SymInt get_nbytes(const Tensor& value) {
     if (value.key_set().has(c10::DispatchKey::Python)) {
       return value.storage().sym_nbytes();
     }
-    return at::detail::computeStorageNbytes(value.sym_sizes(), value.sym_strides(), value.dtype().itemsize(), value.sym_storage_offset());
+    return at::detail::computeStorageNbytes(value.sym_sizes(), value.sym_strides(),static_cast<int64_t>(value.dtype().itemsize()), value.sym_storage_offset());
   }
   // XLA storage objects also do not properly track nbytes.
-  return at::detail::computeStorageNbytes(value.sizes(), value.strides(), value.dtype().itemsize(), value.storage_offset());
+  return static_cast<int64_t>(at::detail::computeStorageNbytes(value.sizes(), value.strides(), value.dtype().itemsize(), value.storage_offset()));
 }
 
 FunctionalStorageImpl::FunctionalStorageImpl(const Tensor& base)

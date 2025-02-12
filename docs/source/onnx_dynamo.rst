@@ -20,16 +20,9 @@ The resulting FX Graph is then polished before it is finally translated into an 
 The main advantage of this approach is that the `FX graph <https://pytorch.org/docs/stable/fx.html>`_ is captured using
 bytecode analysis that preserves the dynamic nature of the model instead of using traditional static tracing techniques.
 
-The exporter is designed to be modular and extensible. It is composed of the following components:
+In addition, during the export process, memory usage is significantly reduced compared to the TorchScript-enabled exporter.
+See the :doc:`memory usage documentation <onnx_dynamo_memory_usage>` for more information.
 
-  - **ONNX Exporter**: :class:`Exporter` main class that orchestrates the export process.
-  - **ONNX Export Options**: :class:`ExportOptions` has a set of options that control the export process.
-  - **ONNX Registry**: :class:`OnnxRegistry` is the registry of ONNX operators and functions.
-  - **FX Graph Extractor**: :class:`FXGraphExtractor` extracts the FX graph from the PyTorch model.
-  - **Fake Mode**: :class:`ONNXFakeContext` is a context manager that enables fake mode for large scale models.
-  - **ONNX Program**: :class:`ONNXProgram` is the output of the exporter that contains the exported ONNX graph and diagnostics.
-  - **ONNX Program Serializer**: :class:`ONNXProgramSerializer` serializes the exported model to a file.
-  - **ONNX Diagnostic Options**: :class:`DiagnosticOptions` has a set of options that control the diagnostics emitted by the exporter.
 
 Dependencies
 ------------
@@ -44,6 +37,9 @@ They can be installed through `pip <https://pypi.org/project/pip/>`_:
 .. code-block:: bash
 
   pip install --upgrade onnx onnxscript
+
+`onnxruntime <https://onnxruntime.ai>`_ can then be used to execute the model
+on a large variety of processors.
 
 A simple example
 ----------------
@@ -75,10 +71,16 @@ See below a demonstration of exporter API in action with a simple Multilayer Per
 
   model = MLPModel()
   tensor_x = torch.rand((97, 8), dtype=torch.float32)
-  onnx_program = torch.onnx.dynamo_export(model, tensor_x)
+  onnx_program = torch.onnx.export(model, (tensor_x,), dynamo=True)
 
-As the code above shows, all you need is to provide :func:`torch.onnx.dynamo_export` with an instance of the model and its input.
+As the code above shows, all you need is to provide :func:`torch.onnx.export` with an instance of the model and its input.
 The exporter will then return an instance of :class:`torch.onnx.ONNXProgram` that contains the exported ONNX graph along with extra information.
+
+``onnx_program.optimize()`` can be called to optimize the ONNX graph with constant folding and elimination of redundant operators. The optimization is done in-place.
+
+.. code-block:: python
+
+  onnx_program.optimize()
 
 The in-memory model available through ``onnx_program.model_proto`` is an ``onnx.ModelProto`` object in compliance with the `ONNX IR spec <https://github.com/onnx/onnx/blob/main/docs/IR.md>`_.
 The ONNX model may then be serialized into a `Protobuf file <https://protobuf.dev/>`_ using the :meth:`torch.onnx.ONNXProgram.save` API.
@@ -86,6 +88,20 @@ The ONNX model may then be serialized into a `Protobuf file <https://protobuf.de
 .. code-block:: python
 
   onnx_program.save("mlp.onnx")
+
+Two functions exist to export the model to ONNX based on TorchDynamo engine.
+They slightly differ in the way they produce the :class:`torch.export.ExportedProgram`.
+:func:`torch.onnx.dynamo_export` was introduced with PyTorch 2.1 and
+:func:`torch.onnx.export` was extended with PyTorch 2.5 to easily switch
+from TorchScript to TorchDynamo. To call the former function,
+the last line of the previous example can be replaced by the following one.
+
+.. note::
+    :func:`torch.onnx.dynamo_export` will be deprecated in the future. Please use :func:`torch.onnx.export` with the parameter ``dynamo=True`` instead.
+
+.. code-block:: python
+
+  onnx_program = torch.onnx.dynamo_export(model, tensor_x)
 
 Inspecting the ONNX model using GUI
 -----------------------------------
@@ -96,61 +112,32 @@ You can view the exported model using `Netron <https://netron.app/>`__.
     :width: 40%
     :alt: MLP model as viewed using Netron
 
-Note that each layer is represented in a rectangular box with a *f* icon in the top right corner.
+When the conversion fails
+-------------------------
 
-.. image:: _static/img/onnx/onnx_dynamo_mlp_model_function_highlight.png
-    :width: 40%
-    :alt: ONNX function highlighted on MLP model
-
-By expanding it, the function body is shown.
-
-.. image:: _static/img/onnx/onnx_dynamo_mlp_model_function_body.png
-    :width: 50%
-    :alt: ONNX function body
-
-The function body is a sequence of ONNX operators or other functions.
-
-Diagnosing issues with SARIF
-----------------------------
-
-ONNX diagnostics goes beyond regular logs through the adoption of
-`Static Analysis Results Interchange Format (aka SARIF) <https://docs.oasis-open.org/sarif/sarif/v2.1.0/sarif-v2.1.0.html>`__
-to help users debug and improve their model using a GUI, such as
-Visual Studio Code's `SARIF Viewer <https://marketplace.visualstudio.com/items?itemName=MS-SarifVSCode.sarif-viewer>`_.
-
-The main advantages are:
-
-  - The diagnostics are emitted in machine parseable `Static Analysis Results Interchange Format (SARIF) <https://docs.oasis-open.org/sarif/sarif/v2.1.0/sarif-v2.1.0.html>`__.
-  - A new clearer, structured way to add new and keep track of diagnostic rules.
-  - Serve as foundation for more future improvements consuming the diagnostics.
+Function :func:`torch.onnx.export` should called a second time with
+parameter ``report=True``. A markdown report is generated to help the user
+to resolve the issue.
 
 .. toctree::
-   :maxdepth: 1
-   :caption: ONNX Diagnostic SARIF Rules
-   :glob:
+    :hidden:
 
-   generated/onnx_dynamo_diagnostics_rules/*
+    onnx_dynamo_memory_usage
 
 API Reference
 -------------
 
 .. autofunction:: torch.onnx.dynamo_export
 
+.. autoclass:: torch.onnx.ONNXProgram
+    :members:
+
 .. autoclass:: torch.onnx.ExportOptions
     :members:
 
 .. autofunction:: torch.onnx.enable_fake_mode
 
-.. autoclass:: torch.onnx.ONNXProgram
-    :members:
-
-.. autoclass:: torch.onnx.ONNXProgramSerializer
-    :members:
-
 .. autoclass:: torch.onnx.ONNXRuntimeOptions
-    :members:
-
-.. autoclass:: torch.onnx.InvalidExportOptionsError
     :members:
 
 .. autoclass:: torch.onnx.OnnxExporterError

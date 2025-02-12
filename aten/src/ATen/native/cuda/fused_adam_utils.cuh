@@ -5,8 +5,7 @@
 #include <ATen/native/cuda/Pow.cuh>
 #include <utility>
 
-namespace at {
-namespace native {
+namespace at::native {
 
 enum class ADAM_MODE : uint8_t { ORIGINAL = 0, ADAMW = 1 };
 
@@ -198,5 +197,4 @@ struct FusedAdamMathFunctor {
 };
 } // namespace
 
-} // namespace native
-} // namespace at
+} // namespace at::native

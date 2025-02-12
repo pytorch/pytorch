@@ -23,7 +23,7 @@ inline void infer_size_impl(
     ResultVec& res) {
   NumelType newsize = 1;
   // N.B. this is an index, not a sym dim!
-  auto infer_dim = std::optional<int64_t>();
+  std::optional<int64_t> infer_dim;
   for (int64_t dim = 0, ndim = shape.size(); dim != ndim; dim++) {
     if (shape[dim] == -1) {
       if (infer_dim) {
@@ -33,7 +33,7 @@ inline void infer_size_impl(
     } else if (shape[dim] >= 0) {
       newsize *= shape[dim];
     } else {
-      AT_ERROR("invalid shape dimension ", shape[dim]);
+      TORCH_CHECK(false, "invalid shape dimension ", shape[dim]);
     }
   }
 

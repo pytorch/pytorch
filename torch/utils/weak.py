@@ -263,7 +263,7 @@ class WeakIdKeyDictionary(MutableMapping):
     def setdefault(self, key, default=None):
         return self.data.setdefault(self.ref_type(key, self._remove), default)  # CHANGED
 
-    def update(self, dict=None, **kwargs):
+    def update(self, dict=None, **kwargs):  # type: ignore[override]
         d = self.data
         if dict is not None:
             if not hasattr(dict, "items"):

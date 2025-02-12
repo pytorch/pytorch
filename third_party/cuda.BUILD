@@ -61,6 +61,12 @@ cc_library(
 )
 
 cc_library(
+    name = "cufile",
+    srcs = ["targets/x86_64-linux/lib/libcufile.so"],
+    visibility = ["//visibility:public"],
+)
+
+cc_library(
     name = "nvrtc",
     srcs = [
         "targets/x86_64-linux/lib/libnvrtc.so",

@@ -3,9 +3,7 @@
 #include <torch/csrc/distributed/rpc/message.h>
 #include <torch/csrc/distributed/rpc/rpc_command_base.h>
 
-namespace torch {
-namespace distributed {
-namespace autograd {
+namespace torch::distributed::autograd {
 
 // Response for the RRefBackwardReq.
 class TORCH_API RRefBackwardResp : public rpc::RpcCommandBase {
@@ -16,6 +14,4 @@ class TORCH_API RRefBackwardResp : public rpc::RpcCommandBase {
       const rpc::Message& message);
 };
 
-} // namespace autograd
-} // namespace distributed
-} // namespace torch
+} // namespace torch::distributed::autograd

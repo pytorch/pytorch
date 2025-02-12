@@ -15,7 +15,7 @@ import socket
 import time
 import uuid
 from string import Template
-from typing import Any, Dict, Optional, Tuple, TYPE_CHECKING
+from typing import Any, Optional, TYPE_CHECKING
 
 import torch.distributed.elastic.timer as timer
 from torch.distributed.elastic import events
@@ -163,7 +163,7 @@ class LocalElasticAgent(SimpleElasticAgent):
         self._logs_specs = logs_specs
         self._health_check_server: Optional[HealthCheckServer] = None
 
-    def _setup_local_watchdog(self, envs: Dict[int, Dict[str, str]]) -> None:
+    def _setup_local_watchdog(self, envs: dict[int, dict[str, str]]) -> None:
         enable_watchdog_env_name = TORCHELASTIC_ENABLE_FILE_TIMER
         watchdog_enabled = os.getenv(enable_watchdog_env_name)
         watchdog_file_env_name = TORCHELASTIC_TIMER_FILE
@@ -219,12 +219,19 @@ class LocalElasticAgent(SimpleElasticAgent):
             else:
                 alive_callback = self._worker_watchdog.get_last_progress_time
 
-            self._health_check_server = create_healthcheck_server(
-                alive_callback=alive_callback,
-                port=int(healthcheck_port),
-                timeout=60,
-            )
-            self._health_check_server.start()
+            try:
+                healthcheck_port_as_int = int(healthcheck_port)
+                self._health_check_server = create_healthcheck_server(
+                    alive_callback=alive_callback,
+                    port=healthcheck_port_as_int,
+                    timeout=60,
+                )
+                self._health_check_server.start()
+            except ValueError:
+                logger.info(
+                    "Invalid healthcheck port value: '%s', expecting integer. Not starting healthcheck server.",
+                    healthcheck_port,
+                )
         else:
             logger.info(
                 "Environment variable '%s' not found. Do not start health check.",
@@ -249,7 +256,7 @@ class LocalElasticAgent(SimpleElasticAgent):
             md["signal"] = str(request.signal)
         md_str = json.dumps(md)
         state = "RUNNING"
-        metadata: Dict[str, EventMetadataValue] = {
+        metadata: dict[str, EventMetadataValue] = {
             "run_id": spec.rdzv_handler.get_run_id(),
             "global_rank": None,
             "group_rank": wg.group_rank,
@@ -281,7 +288,7 @@ class LocalElasticAgent(SimpleElasticAgent):
     # pyre-fixme[56]: Pyre was not able to infer the type of the decorator
     #  `torch.distributed.elastic.metrics.prof`.
     @prof
-    def _start_workers(self, worker_group: WorkerGroup) -> Dict[int, Any]:
+    def _start_workers(self, worker_group: WorkerGroup) -> dict[int, Any]:
         spec = worker_group.spec
         store = worker_group.store
         assert store is not None
@@ -290,9 +297,9 @@ class LocalElasticAgent(SimpleElasticAgent):
         use_agent_store: bool = spec.rdzv_handler.use_agent_store
         logger.info("use_agent_store: %s", use_agent_store)
 
-        args: Dict[int, Tuple] = {}
-        envs: Dict[int, Dict[str, str]] = {}
-        log_line_prefixes: Optional[Dict[int, str]] = (
+        args: dict[int, tuple] = {}
+        envs: dict[int, dict[str, str]] = {}
+        log_line_prefixes: Optional[dict[int, str]] = (
             {} if self._log_line_prefix_template else None
         )
         for worker in worker_group.workers:

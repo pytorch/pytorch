@@ -5,9 +5,11 @@ expressive and robust components (e.g. better runner and result display
 components) in future iterations. However this allows us to excercise the
 underlying benchmark generation infrastructure in the mean time.
 """
+
+# mypy: ignore-errors
+
 import argparse
 import sys
-from typing import List
 
 from applications import ci
 from core.expand import materialize
@@ -16,7 +18,7 @@ from execution.runner import Runner
 from execution.work import WorkOrder
 
 
-def main(argv: List[str]) -> None:
+def main(argv: list[str]) -> None:
     work_orders = tuple(
         WorkOrder(label, autolabels, timer_args, timeout=600, retries=2)
         for label, autolabels, timer_args in materialize(BENCHMARKS)

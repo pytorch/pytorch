@@ -1,8 +1,10 @@
 # mypy: allow-untyped-defs
 import torch
 import torch.nn.functional as F
+from torch import Tensor
 from torch.distributions import constraints
 from torch.distributions.distribution import Distribution
+from torch.distributions.gamma import Gamma
 from torch.distributions.utils import (
     broadcast_all,
     lazy_property,
@@ -75,33 +77,33 @@ class NegativeBinomial(Distribution):
         return self._param.new(*args, **kwargs)
 
     @property
-    def mean(self):
+    def mean(self) -> Tensor:
         return self.total_count * torch.exp(self.logits)
 
     @property
-    def mode(self):
+    def mode(self) -> Tensor:
         return ((self.total_count - 1) * self.logits.exp()).floor().clamp(min=0.0)
 
     @property
-    def variance(self):
+    def variance(self) -> Tensor:
         return self.mean / torch.sigmoid(-self.logits)
 
     @lazy_property
-    def logits(self):
+    def logits(self) -> Tensor:
         return probs_to_logits(self.probs, is_binary=True)
 
     @lazy_property
-    def probs(self):
+    def probs(self) -> Tensor:
         return logits_to_probs(self.logits, is_binary=True)
 
     @property
-    def param_shape(self):
+    def param_shape(self) -> torch.Size:
         return self._param.size()
 
     @lazy_property
-    def _gamma(self):
+    def _gamma(self) -> Gamma:
         # Note we avoid validating because self.total_count can be zero.
-        return torch.distributions.Gamma(
+        return Gamma(
             concentration=self.total_count,
             rate=torch.exp(-self.logits),
             validate_args=False,

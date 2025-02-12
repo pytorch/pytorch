@@ -1,4 +1,5 @@
 # Owner(s): ["oncall: quantization"]
+# ruff: noqa: F841
 
 import numpy as np
 import math
@@ -140,7 +141,6 @@ def _compress_uniform_simplified(X, bit_rate, xmin, xmax, fp16_scale_bias=True):
 
 class TestQuantizedTensor(TestCase):
     def test_qtensor_equal(self):
-        # ASAN regression test reported in https://github.com/pytorch/pytorch/issues/116087
         x = torch.rand(5)
         x_q = torch.quantize_per_tensor(x, 0.1, 10, torch.quint4x2)
         y_q = torch.quantize_per_tensor(x, 0.1, 10, torch.quint4x2)
@@ -1348,8 +1348,8 @@ class TestQuantizedTensor(TestCase):
         torch.save(f, buf)
 
         buf.seek(0)
-        # Don't test weights_only here as this is loading a Module (legacy)
-        f2 = torch.load(buf)
+        # weights_only=False as this is legacy code that saves the model
+        f2 = torch.load(buf, weights_only=False)
 
         self.assertEqual(f2.qscheme, torch.per_tensor_symmetric)
 

@@ -6,12 +6,12 @@
 #include <ATen/mps/MPSEvent.h>
 #include <ATen/mps/MPSStream.h>
 
+#include <c10/util/flat_hash_map.h>
+#include <mach/vm_page_size.h>
 #include <cstdio>
 #include <mutex>
 #include <set>
 #include <unordered_set>
-#include <mach/vm_page_size.h>
-#include <c10/util/flat_hash_map.h>
 
 // this implementation is based on CUDACachingAllocator.
 // It utilizes Metal Heaps to improve the performance with buffer allocation.
@@ -19,32 +19,34 @@
 // TODO: Unify the logic with CUDACachingAllocator and remove redundant code.
 namespace at::mps::HeapAllocator {
 
-static const size_t kMaxSmallAlloc = MB(1);    // largest "small" allocation is 1 MiB
-static const size_t kMinLargeAlloc = MB(10);   // allocations between 1 and 10 MiB may use kLargeHeap
-static const size_t kRoundLarge    = MB(2);    // round up large allocations to 2 MiB
-static const size_t kSmallHeap     = MB(8);    // "small" allocations are packed in 8 MiB heaps
-static const size_t kLargeHeap     = MB(32);   // "large" allocations may be packed in 32 MiB heaps
-static const size_t kXLargeHeapD   = MB(128);  // "extra large" allocations on Discrete devices may be packed in 128 MiB heaps
-static const size_t kXLargeHeapU   = MB(1024); // "extra large" allocations on Unified devices may be packed in 1 GiB heaps
+static const size_t kMaxSmallAlloc = MB(1); // largest "small" allocation is 1 MiB
+static const size_t kMinLargeAlloc = MB(10); // allocations between 1 and 10 MiB may use kLargeHeap
+static const size_t kRoundLarge = MB(2); // round up large allocations to 2 MiB
+static const size_t kSmallHeap = MB(8); // "small" allocations are packed in 8 MiB heaps
+static const size_t kLargeHeap = MB(32); // "large" allocations may be packed in 32 MiB heaps
+static const size_t kXLargeHeapD =
+    MB(128); // "extra large" allocations on Discrete devices may be packed in 128 MiB heaps
+static const size_t kXLargeHeapU =
+    MB(1024); // "extra large" allocations on Unified devices may be packed in 1 GiB heaps
 static const size_t kMaxScalarAlloc = (sizeof(int64_t)); // largest "scalar" allocation
 
 // buffer pools could be customized with a combination of usage flags
 enum UsageFlags : uint32_t {
   PRIVATE = 0,
-  SMALL   = (1 << 0), // small heaps have sizes of kSmallHeap, and large ones kLargeHeap
-  SHARED  = (1 << 1), // shared pools allocated on devices with unified memory; otherwise, private between host/device
+  SMALL = (1 << 0), // small heaps have sizes of kSmallHeap, and large ones kLargeHeap
+  SHARED = (1 << 1), // shared pools allocated on devices with unified memory; otherwise, private between host/device
   MANAGED = (1 << 2), // managed storage mode
-  HAZARD  = (1 << 3), // enables Automatic Hazard Tracking for the resources allocated on the pool
-  SCALAR  = (1 << 4), // used to import CPU scalar values to GPU and use them in MPS Stream
+  HAZARD = (1 << 3), // enables Automatic Hazard Tracking for the resources allocated on the pool
+  SCALAR = (1 << 4), // used to import CPU scalar values to GPU and use them in MPS Stream
 };
 // debug verbosity flags
 enum DebugVerbosity : uint32_t {
-  SILENT      = 0,
-  PROFILING   = (1 << 0), // print generic profiling data for total system memory usage
+  SILENT = 0,
+  PROFILING = (1 << 0), // print generic profiling data for total system memory usage
   ALLOCATIONS = (1 << 1), // print buffer allocations
-  RECYCLES    = (1 << 2), // print buffer recycling
-  RELEASES    = (1 << 3), // print buffer releases
-  LARGE_ONLY  = (1 << 4), // only log large buffer pool transactions
+  RECYCLES = (1 << 2), // print buffer recycling
+  RELEASES = (1 << 3), // print buffer releases
+  LARGE_ONLY = (1 << 4), // only log large buffer pool transactions
 };
 
 struct HeapBlock;
@@ -67,10 +69,8 @@ struct BufferBlock {
   // Metal events used to sync GPU/CPU operations on the shared-storage buffers
   MPSEventPtr event;
 
-  BufferBlock(size_t Size, size_t RequestedSize = 0, const id<MTLBuffer> Buffer = nullptr,
-              HeapBlock* Heap = nullptr) :
-              buffer(Buffer), size(Size), requested_size(RequestedSize),
-              heap(Heap), buf_id(Buffer ? ++buffer_counter : 0) { }
+  BufferBlock(size_t Size, size_t RequestedSize = 0, const id<MTLBuffer> Buffer = nullptr, HeapBlock* Heap = nullptr)
+      : buffer(Buffer), size(Size), requested_size(RequestedSize), heap(Heap), buf_id(Buffer ? ++buffer_counter : 0) {}
 
   static bool Comparator(const BufferBlock* a, const BufferBlock* b) {
     return (a->size != b->size) ? a->size < b->size : (uintptr_t)a->buffer < (uintptr_t)b->buffer;
@@ -79,15 +79,19 @@ struct BufferBlock {
     assert(((Alignment - 1) & Alignment) == 0);
     return ((Size + Alignment - 1) & ~(Alignment - 1));
   }
-  uint32_t retainCount() const { return [buffer retainCount]; }
+  uint32_t retainCount() const {
+    return [buffer retainCount];
+  }
 };
 typedef bool (*BufferComparison)(const BufferBlock*, const BufferBlock*);
 
 struct BufferPool;
 struct AllocParams {
-  AllocParams(size_t Alloc_Size, size_t Requested_Size, BufferPool* Pool) :
-              search_key(Alloc_Size), pool(Pool), requested_size(Requested_Size) { }
-  size_t size() const { return search_key.size; }
+  AllocParams(size_t Alloc_Size, size_t Requested_Size, BufferPool* Pool)
+      : search_key(Alloc_Size), pool(Pool), requested_size(Requested_Size) {}
+  size_t size() const {
+    return search_key.size;
+  }
 
   BufferBlock search_key;
   BufferPool* pool;
@@ -102,7 +106,9 @@ struct AllocParams {
 
 struct HeapBlock {
   id<MTLHeap> heap;
-  struct { size_t total, available; } size;
+  struct {
+    size_t total, available;
+  } size;
   BufferPool* pool;
   unsigned int n_buffers = 0;
   id_t heap_id;
@@ -111,9 +117,12 @@ struct HeapBlock {
   // counter to assign unique ids to heap blocks
   static uint64_t heap_counter;
 
-  HeapBlock(size_t Size, const id<MTLHeap> Heap = nullptr, BufferPool *Pool = nullptr) :
-            heap(Heap), size({.total = Size, .available = Size}), pool(Pool),
-            heap_id(Heap ? ++heap_counter : 0), is_split(true) { }
+  HeapBlock(size_t Size, const id<MTLHeap> Heap = nullptr, BufferPool* Pool = nullptr)
+      : heap(Heap),
+        size({.total = Size, .available = Size}),
+        pool(Pool),
+        heap_id(Heap ? ++heap_counter : 0),
+        is_split(true) {}
 
   static MTLResourceOptions getOptions(uint32_t usage) {
     // TODO: check the caching performance of write-combined mode
@@ -126,16 +135,17 @@ struct HeapBlock {
     else
       options |= MTLResourceStorageModePrivate;
 
-    options |= (usage & UsageFlags::HAZARD) ? MTLResourceHazardTrackingModeTracked : MTLResourceHazardTrackingModeUntracked;
+    options |=
+        (usage & UsageFlags::HAZARD) ? MTLResourceHazardTrackingModeTracked : MTLResourceHazardTrackingModeUntracked;
 
     return options;
   }
 
   static HeapBlock* createHeapBlock(AllocParams& params, id<MTLDevice> device, uint32_t usage) {
-    HeapBlock *heapBlock = nullptr;
+    HeapBlock* heapBlock = nullptr;
     bool is_split = true;
     const size_t size = params.size();
-    MTLHeapDescriptor *d = [MTLHeapDescriptor new];
+    MTLHeapDescriptor* d = [MTLHeapDescriptor new];
     if (d) {
       const size_t kXLargeHeap = params.has_unified_memory ? kXLargeHeapU : kXLargeHeapD;
       if (size <= kMaxSmallAlloc) {
@@ -152,10 +162,11 @@ struct HeapBlock {
       d.cpuCacheMode = MTLCPUCacheModeDefaultCache;
       // this automatically handles Metal buffer access synchronizations at the
       // cost of slightly lower performance.
-      d.hazardTrackingMode = (usage & UsageFlags::HAZARD) ? MTLHazardTrackingModeTracked : MTLHazardTrackingModeUntracked;
+      d.hazardTrackingMode =
+          (usage & UsageFlags::HAZARD) ? MTLHazardTrackingModeTracked : MTLHazardTrackingModeUntracked;
       d.resourceOptions = getOptions(usage);
       d.type = MTLHeapTypeAutomatic;
-      id<MTLHeap> heap = [device newHeapWithDescriptor: d];
+      id<MTLHeap> heap = [device newHeapWithDescriptor:d];
       if (heap) {
         [heap setPurgeableState:MTLPurgeableStateNonVolatile];
         const size_t heap_size = heapAvailableSize(heap);
@@ -169,8 +180,8 @@ struct HeapBlock {
     return heapBlock;
   }
   static bool Comparator(const HeapBlock* a, const HeapBlock* b) {
-    return (a->size.available != b->size.available) ? a->size.available < b->size.available :
-                                                      (uintptr_t)a->heap < (uintptr_t)b->heap;
+    return (a->size.available != b->size.available) ? a->size.available < b->size.available
+                                                    : (uintptr_t)a->heap < (uintptr_t)b->heap;
   }
   static NSUInteger heapAvailableSize(id<MTLHeap> heap, size_t Alignment = vm_page_size) {
     return [heap maxAvailableSizeWithAlignment:Alignment];
@@ -205,8 +216,12 @@ struct HeapBlock {
     size.available = 0;
     return retainCount;
   }
-  uint32_t retainCount() const { return [heap retainCount]; }
-  void updateAvailableSize() { size.available = heapAvailableSize(heap); }
+  uint32_t retainCount() const {
+    return [heap retainCount];
+  }
+  void updateAvailableSize() {
+    size.available = heapAvailableSize(heap);
+  }
 };
 typedef bool (*HeapComparison)(const HeapBlock*, const HeapBlock*);
 
@@ -219,9 +234,8 @@ struct BufferPool {
     SCALAR,
   };
 
-  BufferPool(const id<MTLDevice> Device, uint32_t Usage) :
-             device(Device), usage(Usage),
-             heaps(HeapBlock::Comparator), available_buffers(BufferBlock::Comparator) { }
+  BufferPool(const id<MTLDevice> Device, uint32_t Usage)
+      : device(Device), usage(Usage), heaps(HeapBlock::Comparator), available_buffers(BufferBlock::Comparator) {}
 
   const id<MTLDevice> device;
   // usage flags to customize the pool for various purposes (see UsageFlags enum)
@@ -248,12 +262,12 @@ struct BufferPool {
 };
 
 class MPSHeapAllocatorImpl {
-public:
-  explicit MPSHeapAllocatorImpl() :
-    m_device(at::mps::MPSDevice::getInstance()->device()),
-    m_max_buffer_size([m_device maxBufferLength]),
-    m_stream(getDefaultMPSStream()),
-    m_event_pool(getMPSEventPool()) {
+ public:
+  explicit MPSHeapAllocatorImpl()
+      : m_device(at::mps::MPSDevice::getInstance()->device()),
+        m_max_buffer_size([m_device maxBufferLength]),
+        m_stream(getDefaultMPSStream()),
+        m_event_pool(getMPSEventPool()) {
     init_allocator();
   }
   ~MPSHeapAllocatorImpl() {
@@ -298,34 +312,50 @@ public:
   // (see m_high_watermark_ratio for description)
   void setHighWatermarkRatio(double ratio);
   // (see m_low_watermark_limit for description)
-  size_t getLowWatermarkLimit() const { return m_low_watermark_limit; }
+  size_t getLowWatermarkLimit() const {
+    return m_low_watermark_limit;
+  }
   // (see m_max_total_allowed_size for description)
-  size_t getHighWatermarkLimit() const { return m_max_total_allowed_size; }
+  size_t getHighWatermarkLimit() const {
+    return m_max_total_allowed_size;
+  }
   // (see m_total_allocated_memory for description)
-  size_t getTotalAllocatedMemory() const { return m_total_allocated_memory; }
+  size_t getTotalAllocatedMemory() const {
+    return m_total_allocated_memory;
+  }
   // (see m_current_allocated_memory for description)
-  size_t getCurrentAllocatedMemory() const { return m_current_allocated_memory; }
+  size_t getCurrentAllocatedMemory() const {
+    return m_current_allocated_memory;
+  }
   // total GPU memory allocated in the process by Metal driver; including
   // implicit allocations from MPS/MPSGraph frameworks and MPSHeapAllocatorImpl.
-  size_t getDriverAllocatedMemory() const { return current_allocated_size(); }
+  size_t getDriverAllocatedMemory() const {
+    return current_allocated_size();
+  }
   // recommended Max memory for Metal
-  size_t getRecommendedMaxMemory() const { return max_device_size(); }
+  size_t getRecommendedMaxMemory() const {
+    return max_device_size();
+  }
   // (see enum DebugVerbosity for description)
-  uint32_t getDebugVerbosity() const { return m_debug_verbosity; }
+  uint32_t getDebugVerbosity() const {
+    return m_debug_verbosity;
+  }
   // returns the device that we allocate from
-  inline id<MTLDevice> Device() const { return m_device; }
+  inline id<MTLDevice> Device() const {
+    return m_device;
+  }
 
   // TODO: make a common function to do size unit conversions in PyTorch.
   inline std::string format_size(uint64_t size) const;
 
-private:
+ private:
   // (see m_high_watermark_ratio for description)
   constexpr static double default_high_watermark_ratio = 1.7;
   // we set the allowed upper bound to twice the size of recommendedMaxWorkingSetSize.
   constexpr static double default_high_watermark_upper_bound = 2.0;
   // (see m_low_watermark_ratio for description)
   // on unified memory, we could allocate beyond the recommendedMaxWorkingSetSize
-  constexpr static double default_low_watermark_ratio_unified  = 1.4;
+  constexpr static double default_low_watermark_ratio_unified = 1.4;
   constexpr static double default_low_watermark_ratio_discrete = 1.0;
 
   const id<MTLDevice> m_device;
@@ -387,14 +417,19 @@ private:
   size_t get_allocation_size(size_t size, uint32_t usage) const;
   // maximum size of device memory available for allocation in current process
   // Note: the recommendedMaxWorkingSetSize is typically 75% of the total system memory.
-  size_t max_device_size() const { return [m_device recommendedMaxWorkingSetSize]; }
+  size_t max_device_size() const {
+    return [m_device recommendedMaxWorkingSetSize];
+  }
   // there are implicit allocations from MPS backend, so we need to query the 'device' for
   // total allocated size instead of manually tracking in MPSAllocator
-  size_t current_allocated_size() const { return [m_device currentAllocatedSize]; }
+  size_t current_allocated_size() const {
+    return [m_device currentAllocatedSize];
+  }
 
   bool trigger_memory_callbacks(BufferBlock* buffer_block, IMpsAllocatorCallback::EventType event) const {
     for (const auto& name : MPSAllocatorCallbacksRegistry()->Keys()) {
-      MPSAllocatorCallbacksRegistry()->Create(name)->executeMPSAllocatorCallback(buffer_block ? buffer_block->buffer : nullptr, event);
+      MPSAllocatorCallbacksRegistry()->Create(name)->executeMPSAllocatorCallback(
+          buffer_block ? buffer_block->buffer : nullptr, event);
     }
     return true;
   }

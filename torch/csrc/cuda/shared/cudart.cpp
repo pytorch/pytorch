@@ -73,6 +73,7 @@ void initCudartBindings(PyObject* module) {
       [](uintptr_t ptr, size_t size, unsigned int flags) -> cudaError_t {
         py::gil_scoped_release no_gil;
         return C10_CUDA_ERROR_HANDLED(
+            // NOLINTNEXTLINE(performance-no-int-to-ptr)
             cudaHostRegister((void*)ptr, size, flags));
       });
   cudart.def(
@@ -80,6 +81,7 @@ void initCudartBindings(PyObject* module) {
       "HostUnregister",
       [](uintptr_t ptr) -> cudaError_t {
         py::gil_scoped_release no_gil;
+        // NOLINTNEXTLINE(performance-no-int-to-ptr)
         return C10_CUDA_ERROR_HANDLED(cudaHostUnregister((void*)ptr));
       });
   cudart.def(
@@ -87,13 +89,29 @@ void initCudartBindings(PyObject* module) {
       "StreamCreate",
       [](uintptr_t ptr) -> cudaError_t {
         py::gil_scoped_release no_gil;
+        // NOLINTNEXTLINE(performance-no-int-to-ptr)
         return C10_CUDA_ERROR_HANDLED(cudaStreamCreate((cudaStream_t*)ptr));
+      });
+  cudart.attr(
+      "cuda"
+      "StreamDefault") = cudaStreamDefault;
+  cudart.attr(
+      "cuda"
+      "StreamNonBlocking") = cudaStreamNonBlocking;
+  cudart.def(
+      "cuda"
+      "StreamCreateWithFlags",
+      [](uintptr_t ptr, unsigned int flags) -> cudaError_t {
+        // NOLINTNEXTLINE(performance-no-int-to-ptr)
+        return C10_CUDA_ERROR_HANDLED(
+            cudaStreamCreateWithFlags((cudaStream_t*)ptr, flags));
       });
   cudart.def(
       "cuda"
       "StreamDestroy",
       [](uintptr_t ptr) -> cudaError_t {
         py::gil_scoped_release no_gil;
+        // NOLINTNEXTLINE(performance-no-int-to-ptr)
         return C10_CUDA_ERROR_HANDLED(cudaStreamDestroy((cudaStream_t)ptr));
       });
 #if !defined(USE_ROCM) && defined(CUDA_VERSION) && CUDA_VERSION < 12000
@@ -115,6 +133,22 @@ void initCudartBindings(PyObject* module) {
         py::gil_scoped_release no_gil;
         C10_CUDA_CHECK(cudaMemGetInfo(&device_free, &device_total));
         return {device_free, device_total};
+      });
+
+  py::enum_<cudaStreamCaptureMode>(
+      cudart,
+      "cuda"
+      "StreamCaptureMode")
+      .value("Global", cudaStreamCaptureModeGlobal)
+      .value("ThreadLocal", cudaStreamCaptureModeThreadLocal)
+      .value("Relaxed", cudaStreamCaptureModeRelaxed);
+
+  cudart.def(
+      "cuda"
+      "ThreadExchangeStreamCaptureMode",
+      [](cudaStreamCaptureMode mode) -> cudaStreamCaptureMode {
+        C10_CUDA_CHECK(cudaThreadExchangeStreamCaptureMode(&mode));
+        return mode;
       });
 }
 

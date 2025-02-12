@@ -1,16 +1,24 @@
 # mypy: allow-untyped-defs
-import contextlib
-import copy
-from typing import List
+from __future__ import annotations
+
+from typing import Optional, TYPE_CHECKING, Union
 
 import torch
 from torch._higher_order_ops.wrap import wrap_with_autocast
 
-from ..utils import node_inline_, nodes_filter, nodes_first, nodes_map, sequential_split
-from .replace_with_hop_pass_util import _replace_with_hop_helper
+from ..utils import node_inline_, nodes_filter, nodes_first, sequential_split
+from .replace_with_hop_pass_util import (
+    _replace_with_hop_helper,
+    _replace_with_hop_pass_helper,
+    _sequential_split_and_maybe_inline_subgraphs_helper,
+)
 
 
-def _is_autocast_node(node: torch.fx.Node):
+if TYPE_CHECKING:
+    from torch.export.graph_signature import ExportGraphSignature
+
+
+def _is_autocast_node(node: torch.fx.Node) -> Union[torch.fx.Node, bool]:
     return (
         node
         and node.op == "call_function"
@@ -22,7 +30,7 @@ def _is_autocast_node(node: torch.fx.Node):
     )
 
 
-def _is_enter_autocast_node(node: torch.fx.Node):
+def _is_enter_autocast_node(node: torch.fx.Node) -> Union[torch.fx.Node, bool]:
     return (
         node
         and node.op == "call_function"
@@ -30,7 +38,7 @@ def _is_enter_autocast_node(node: torch.fx.Node):
     )
 
 
-def _is_exit_autocast_node(node: torch.fx.Node):
+def _is_exit_autocast_node(node: torch.fx.Node) -> Union[torch.fx.Node, bool]:
     return (
         node
         and node.op == "call_function"
@@ -38,7 +46,7 @@ def _is_exit_autocast_node(node: torch.fx.Node):
     )
 
 
-def _is_autocast_sub_mod(node: torch.fx.Node):
+def _is_autocast_sub_mod(node: torch.fx.Node) -> bool:
     """
     Check if the first non-placeholder node is `torch.amp.autocast_mode._enter_autocast`.
     """
@@ -59,15 +67,18 @@ def _is_autocast_sub_mod(node: torch.fx.Node):
     return False
 
 
-def _check_valid_autocast_block(enter_autocast_node, exit_autocast_node):
+def _check_valid_autocast_block(
+    enter_autocast_node: torch.fx.Node, exit_autocast_node: torch.fx.Node
+) -> None:
     assert _is_enter_autocast_node(enter_autocast_node)
     assert _is_exit_autocast_node(exit_autocast_node)
     assert exit_autocast_node.args[0] == enter_autocast_node
 
 
-def _replace_with_hop(node: torch.fx.Node):
+def _replace_with_hop(node: torch.fx.Node) -> None:
     assert node.op == "call_module"
     graph: torch.fx.Graph = node.graph
+    assert graph.owning_module is not None
     gm: torch.fx.GraphModule = graph.owning_module
     assert isinstance(node.target, str)
     sub_gm = getattr(gm, node.target)
@@ -79,9 +90,7 @@ def _replace_with_hop(node: torch.fx.Node):
         exit_autocast_node = autocast_nodes[-1]
         _check_valid_autocast_block(enter_autocast_node, exit_autocast_node)
 
-        _replace_with_hop_helper(
-            node, enter_autocast_node, _is_autocast_node, wrap_with_autocast
-        )
+        _replace_with_hop_helper(node, enter_autocast_node, wrap_with_autocast)
         sub_graph.erase_node(exit_autocast_node)
         sub_graph.erase_node(enter_autocast_node)
 
@@ -107,20 +116,21 @@ def _split_autocast(gm: torch.fx.GraphModule) -> torch.fx.GraphModule:
     exit_autocast   # 3
     E               # 4
     """
-    enter_autocast_node_stack: List[torch.fx.Node] = []
+    enter_autocast_node_stack: list[torch.fx.Node] = []
     first_node_after_outer_most_exit: bool = False
 
-    def node_call_back(node: torch.fx.Node):
+    def node_call_back(node: torch.fx.Node) -> bool:
         nonlocal enter_autocast_node_stack, first_node_after_outer_most_exit
+        increment_id = False
         if first_node_after_outer_most_exit or (
             len(enter_autocast_node_stack) == 0 and _is_enter_autocast_node(node)
         ):
             assert len(enter_autocast_node_stack) == 0
             first_node_after_outer_most_exit = False
-            if _is_enter_autocast_node(node):
-                enter_autocast_node_stack.append(node)
-            return True
-        if _is_exit_autocast_node(node):
+            increment_id = True
+        if _is_enter_autocast_node(node):
+            enter_autocast_node_stack.append(node)
+        elif _is_exit_autocast_node(node):
             assert len(enter_autocast_node_stack) > 0
             last_enter_autocast_node = enter_autocast_node_stack.pop()
             assert node.args[0] == last_enter_autocast_node
@@ -128,14 +138,14 @@ def _split_autocast(gm: torch.fx.GraphModule) -> torch.fx.GraphModule:
                 # next node should be in the next submodule since
                 # autocast block ends
                 first_node_after_outer_most_exit = True
-        return False
+        return increment_id
 
     return sequential_split(gm, node_call_back)
 
 
 def _sequential_split_and_maybe_inline_subgraphs(
-    gm: torch.fx.GraphModule, graph_signature
-):
+    gm: torch.fx.GraphModule, graph_signature: Optional[ExportGraphSignature]
+) -> tuple[torch.fx.GraphModule, Optional[ExportGraphSignature]]:
     """
     Helper function for replace_autocast_with_hop_pass().
     Split the graph module into multiple subgraphs based on the autocast nodes.
@@ -149,64 +159,31 @@ def _sequential_split_and_maybe_inline_subgraphs(
         return gm, graph_signature
 
     # split_autocast returns a new graph module that could have different output
-    # args names. We need to fix the graph signature.
+    # args names. We need to fix the graph signature in `_sequential_split_and_maybe_inline_subgraphs_helper`.
     new_gm = _split_autocast(gm)
 
-    # TODO (shangdiy): can merge the block below with replace_set_grad_with_hop_pass.
-    replace_ctx = contextlib.nullcontext()
-    new_signature = None
-    if graph_signature is not None:
-        new_signature = copy.deepcopy(graph_signature)
-        new_gm_out_node = next(reversed(new_gm.graph.find_nodes(op="output")))
-        assert new_gm_out_node.op == "output" and len(new_gm_out_node.args[0]) == len(
-            new_signature.output_specs
-        )
-        for arg_node, out_spec in zip(
-            new_gm_out_node.args[0], new_signature.output_specs
-        ):
-            if arg_node is None:
-                assert out_spec.arg.value is None
-            elif out_spec.arg.name != arg_node.name:
-                out_spec.arg.name = arg_node.name
+    def _maybe_inline_or_replace_with_hop(node: torch.fx.Node) -> None:
+        if _is_autocast_sub_mod(node):
+            _replace_with_hop(node)
+        else:
+            assert node.op == "call_module"
+            assert isinstance(node.target, str)
+            node_inline_(node)
 
-        replace_ctx = new_gm._set_replace_hook(new_signature.get_replace_hook())  # type: ignore[assignment]
-
-    with replace_ctx:
-
-        def _maybe_inline_or_replace_with_hop(node: torch.fx.Node):
-            if _is_autocast_sub_mod(node):
-                _replace_with_hop(node)
-            else:
-                assert node.op == "call_module"
-                assert isinstance(node.target, str)
-                node_inline_(node)
-
-        nodes_map(
-            list(new_gm.graph.nodes),
-            lambda node: (
-                _maybe_inline_or_replace_with_hop(node)
-                if node.op == "call_module"
-                else node
-            ),
-        )
-    new_gm.recompile()
-    return new_gm, new_signature
-
-
-# TODO (shangdiy): can merge the block below with replace_set_grad_with_hop_pass.
-def replace_autocast_with_hop_pass(gm: torch.fx.GraphModule, graph_signature):
-    new_gm, new_signature = _sequential_split_and_maybe_inline_subgraphs(
-        gm, graph_signature
+    return _sequential_split_and_maybe_inline_subgraphs_helper(
+        new_gm, graph_signature, _maybe_inline_or_replace_with_hop
     )
-    # recursively call
-    for node in new_gm.graph.nodes:
-        if node.op == "get_attr":
-            subgm = getattr(new_gm, node.target)
-            if not isinstance(subgm, torch.fx.GraphModule):
-                continue
-            new_subgm, _ = replace_autocast_with_hop_pass(subgm, None)
-            setattr(new_gm, node.target, new_subgm)
 
-    new_gm.recompile()
-    new_gm.graph.lint()
-    return new_gm, new_signature
+
+def replace_autocast_with_hop_pass(
+    gm: torch.fx.GraphModule, graph_signature: Optional[ExportGraphSignature]
+) -> tuple[torch.fx.GraphModule, Optional[ExportGraphSignature]]:
+    """
+    Split gm into sub-graph-modules using `sequential_split_and_maybe_inline_subgraphs`, and
+    then recursively call itself on each of the submodules.
+    """
+    return _replace_with_hop_pass_helper(
+        gm,
+        graph_signature,
+        _sequential_split_and_maybe_inline_subgraphs,
+    )

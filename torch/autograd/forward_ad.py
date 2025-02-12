@@ -139,8 +139,6 @@ class UnpackedDualTensor(_UnpackedDualTensor):
 
     """
 
-    pass
-
 
 def unpack_dual(tensor, *, level=None):
     r"""Unpack a "dual tensor" to get both its Tensor value and its forward AD gradient.

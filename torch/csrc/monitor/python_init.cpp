@@ -15,8 +15,7 @@
 #include <torch/csrc/monitor/counters.h>
 #include <torch/csrc/monitor/events.h>
 
-namespace pybind11 {
-namespace detail {
+namespace pybind11::detail {
 template <>
 struct type_caster<torch::monitor::data_value_t> {
  public:
@@ -55,17 +54,15 @@ struct type_caster<torch::monitor::data_value_t> {
         Py_RETURN_FALSE;
       }
     } else if (std::holds_alternative<std::string>(src)) {
-      std::string str = std::get<std::string>(src);
+      std::string& str = std::get<std::string>(src);
       return THPUtils_packString(str);
     }
     throw std::runtime_error("unknown data_value_t type");
   }
 };
-} // namespace detail
-} // namespace pybind11
+} // namespace pybind11::detail
 
-namespace torch {
-namespace monitor {
+namespace torch::monitor {
 
 namespace {
 class PythonEventHandler : public EventHandler {
@@ -341,5 +338,4 @@ void initMonitorBindings(PyObject* module) {
           )DOC");
 }
 
-} // namespace monitor
-} // namespace torch
+} // namespace torch::monitor

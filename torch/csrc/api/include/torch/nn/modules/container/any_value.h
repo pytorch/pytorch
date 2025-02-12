@@ -1,20 +1,13 @@
 #pragma once
 
-#include <torch/detail/static.h>
-#include <torch/nn/module.h>
-#include <torch/nn/pimpl.h>
 #include <torch/types.h>
-
-#include <torch/csrc/autograd/variable.h>
-#include <torch/csrc/utils/variadic.h>
 
 #include <memory>
 #include <type_traits>
 #include <typeinfo>
 #include <utility>
 
-namespace torch {
-namespace nn {
+namespace torch::nn {
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ AnyValue ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
@@ -28,6 +21,7 @@ class AnyValue {
   /// behavior of move for `std::unique_ptr`.
   AnyValue(AnyValue&&) = default;
   AnyValue& operator=(AnyValue&&) = default;
+  ~AnyValue() = default;
 
   /// Copy construction and assignment is allowed.
   AnyValue(const AnyValue& other) : content_(other.content_->clone()) {}
@@ -37,8 +31,9 @@ class AnyValue {
   }
 
   /// Constructs the `AnyValue` from value type.
-  template <typename T>
-  // NOLINTNEXTLINE(bugprone-forwarding-reference-overload)
+  template <
+      typename T,
+      typename = std::enable_if_t<!std::is_same_v<T, AnyValue>>>
   explicit AnyValue(T&& value)
       : content_(
             std::make_unique<Holder<std::decay_t<T>>>(std::forward<T>(value))) {
@@ -50,10 +45,10 @@ class AnyValue {
   template <typename T>
   T* try_get() {
     static_assert(
-        !std::is_reference<T>::value,
+        !std::is_reference_v<T>,
         "AnyValue stores decayed types, you cannot cast it to a reference type");
     static_assert(
-        !std::is_array<T>::value,
+        !std::is_array_v<T>,
         "AnyValue stores decayed types, you must cast it to T* instead of T[]");
     if (typeid(T).hash_code() == type_info().hash_code()) {
       return &static_cast<Holder<T>&>(*content_).value;
@@ -69,7 +64,8 @@ class AnyValue {
     if (auto* maybe_value = try_get<T>()) {
       return *maybe_value;
     }
-    AT_ERROR(
+    TORCH_CHECK(
+        false,
         "Attempted to cast AnyValue to ",
         c10::demangle(typeid(T).name()),
         ", but its actual type is ",
@@ -94,10 +90,13 @@ class AnyValue {
         : type_info(type_info_) {}
     Placeholder(const Placeholder&) = default;
     Placeholder(Placeholder&&) = default;
+    Placeholder& operator=(const Placeholder&) = delete;
+    Placeholder& operator=(Placeholder&&) = delete;
     virtual ~Placeholder() = default;
     virtual std::unique_ptr<Placeholder> clone() const {
       TORCH_CHECK(false, "clone() should only be called on `AnyValue::Holder`");
     }
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-const-or-ref-data-members)
     const std::type_info& type_info;
   };
 
@@ -107,8 +106,9 @@ class AnyValue {
   template <typename T>
   struct Holder : public Placeholder {
     /// A template because T&& would not be universal reference here.
-    template <typename U>
-    // NOLINTNEXTLINE(bugprone-forwarding-reference-overload)
+    template <
+        typename U,
+        typename = std::enable_if_t<!std::is_same_v<U, Holder>>>
     explicit Holder(U&& value_) noexcept
         : Placeholder(typeid(T)), value(std::forward<U>(value_)) {}
     std::unique_ptr<Placeholder> clone() const override {
@@ -121,5 +121,4 @@ class AnyValue {
   std::unique_ptr<Placeholder> content_;
 };
 
-} // namespace nn
-} // namespace torch
+} // namespace torch::nn
