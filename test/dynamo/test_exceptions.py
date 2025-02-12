@@ -1,5 +1,8 @@
 # Owner(s): ["module: dynamo"]
 
+import sys
+import unittest
+
 import torch
 import torch._dynamo.config
 import torch._dynamo.test_case
@@ -161,6 +164,7 @@ class ExceptionTests(torch._dynamo.test_case.TestCase):
         opt_fn = torch.compile(fn, backend="eager")
         opt_fn(x)
 
+    @unittest.skipIf(sys.version_info < (3, 11), "Python 3.11+")
     def test_exception_with_ctx_manager(self):
         def fn(x):
             x = torch.cos(x)
