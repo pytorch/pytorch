@@ -1922,6 +1922,7 @@ class NodeUser:
 
 
 _post_grad_graph_counter = itertools.count()
+_graph_partition_counter = itertools.count()
 
 
 class Scheduler:
@@ -3895,31 +3896,32 @@ class Scheduler:
 
     def get_output_nodes(
         self, output_names: OrderedSet[str], name_to_node: Dict[str, ir.IRNode]
-    ) -> OrderedSet[ir.IRNode]:
-        output_nodes = OrderedSet()
+    ) -> List[ir.IRNode]:
+        output_nodes = []
 
         for name in output_names:
-            output_nodes.add(name_to_node[name])
+            output_nodes.append(name_to_node[name])
 
         return output_nodes
 
     def get_graph_partition_signature(
         self, partitions: List[List[BaseSchedulerNode]]
-    ) -> Tuple[List[OrderedSet[str]], List[OrderedSet[ir.IRNode]]]:
+    ) -> Tuple[List[OrderedSet[str]], List[List[ir.IRNode]]]:
         inputs: List[OrderedSet[str]] = []
-        outputs: List[OrderedSet[ir.IRNode]] = []
+        outputs: List[List[ir.IRNode]] = []
 
         unmet_outputs = OrderedSet(V.graph.get_output_names())
-        name_to_node = {}
-        for name, node in zip(V.graph.get_output_names(), V.graph.graph_outputs):
-            name_to_node[name] = node
+        name_to_node: Dict[str, ir.IRNode] = {}
+        for name, ir_node in zip(V.graph.get_output_names(), V.graph.graph_outputs):
+            name_to_node[name] = ir_node
 
         for partition in reversed(partitions):
             node_outputs: OrderedSet[str] = OrderedSet()
 
             for node in partition:
                 node_outputs.update(node.outputs_by_name.keys())
-                name_to_node.update(node.outputs_by_name)
+                for name, scheduler_buffer in node.outputs_by_name.items():
+                    name_to_node[name] = scheduler_buffer.node
 
             partition_outputs = node_outputs.intersection(unmet_outputs)
 
@@ -3947,7 +3949,7 @@ class Scheduler:
     ) -> Tuple[
         List[List[BaseSchedulerNode]],
         List[OrderedSet[str]],
-        List[OrderedSet[ir.IRNode]],
+        List[List[ir.IRNode]],
     ]:
         partitions: List[List[BaseSchedulerNode]] = []
         partition_rules = self.get_partition_rules()
@@ -3977,27 +3979,36 @@ class Scheduler:
             )
 
     def _codegen_partitions(self) -> None:
-        # TODO
-
         partitions, inputs, outputs = self.graph_partition()
-        breakpoint()
         for partition, input, output in zip(partitions, inputs, outputs):
-            assert len(partition) >= 1, f"Each partition must have at least one node but found {len(partition)}"
-            # if len(partition) == 1:
-
-
-
+            assert (
+                len(partition) >= 1
+            ), f"Each partition must have at least one node but found {len(partition)}"
+            parent_wrapper_code = (
+                V.graph.wrapper_code
+            )  # TODO: use V.set_graph_handler instead
+            graph_partition_id = next(_graph_partition_counter)
+            partition_name = f"partition_{graph_partition_id}"
+            V.graph.init_wrapper_code(
+                is_subgraph=True,
+                subgraph_name=partition_name,
+                parent_wrapper_code=parent_wrapper_code,
+                input_names=list(input),
+                output_nodes=list(output),
+            )  # TODO: Check side effect
             self._codegen(partition)
-            # TODO1: move V.graph.wrapper_code.lines to V.graph.wrapper_code.subgraph_lines
-            # Done2: a) codegen for signature like `def subgraph1(arg0):`, and b) codegen
+            partition_code, _ = V.graph.wrapper_code.generate(V.graph.is_inference)
+            V.graph.wrapper_code = parent_wrapper_code
+            V.graph.wrapper_code.define_subgraph_launcher_fn(partition_code)
+            V.graph.wrapper_code.codegen_partition_call(partition_name, input, output)
+
+            # Done1: a) codegen for signature like `def subgraph1(arg0):`, and b) codegen
             #           for input arguments  like `arg0, arg1 = args`.codegen for signature
             #           like `def subgraph1(arg0):`. This is done in write_prefix().
-            # Done3: codegen for output arguments like `return out0, out1`
-            # TODO4: codegen for subgraph launcher in V.graph.wrapper_code.subgraph_launchers,
+            # Done2: codegen for output arguments like `return out0, out1`
+            # Done3: codegen for subgraph launcher in V.graph.wrapper_code.subgraph_launchers,
             #           like `buf2 = subgraph1(arg0)` which will appear in `def call`.
-
-        # TODO6: in generate, we may need additionally convert V.graph.wrapper_code.subgraph_lines
-        #           into the actual code but under `def subgraph1(arg0)`.
+            #           This is done in codegen_partition_call().
 
     def _codegen(self, nodes: List[BaseSchedulerNode]) -> None:
         if config.check_stack_no_cycles_TESTING_ONLY:

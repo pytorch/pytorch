@@ -12,7 +12,7 @@ from collections import defaultdict
 from collections.abc import Iterable, Iterator, Sequence
 from contextlib import contextmanager
 from types import ModuleType
-from typing import Any, Callable, NoReturn, Optional, TYPE_CHECKING, Union
+from typing import Any, Callable, List, NoReturn, Optional, TYPE_CHECKING, Union
 
 import sympy
 from sympy import Expr
@@ -1753,6 +1753,8 @@ class GraphLowering(torch.fx.Interpreter):
         is_subgraph: bool = False,
         subgraph_name: Optional[str] = None,
         parent_wrapper_code: Optional[PythonWrapperCodegen] = None,
+        input_names: Optional[List[str]] = None,
+        output_nodes: Optional[List[ir.IRNode]] = None,
     ) -> None:
         device_types = self.device_types.copy()
         device_types.discard("cpu")
@@ -1775,7 +1777,7 @@ class GraphLowering(torch.fx.Interpreter):
             wrapper_code_gen_cls is not None
         ), f"Device {self.device_type} not supported"
         self.wrapper_code = wrapper_code_gen_cls.create(
-            is_subgraph, subgraph_name, parent_wrapper_code
+            is_subgraph, subgraph_name, parent_wrapper_code, input_names, output_nodes
         )
 
         if self.const_module:
@@ -2092,6 +2094,8 @@ class SubgraphLowering(GraphLowering):
         is_subgraph: bool = False,
         subgraph_name: Optional[str] = None,
         parent_wrapper_code: Optional[PythonWrapperCodegen] = None,
+        input_names: Optional[List[str]] = None,
+        output_nodes: Optional[List[ir.IRNode]] = None,
     ) -> None:
         super().init_wrapper_code(
             is_subgraph=True,

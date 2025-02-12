@@ -732,11 +732,15 @@ class PythonWrapperCodegen(CodeGen):
         is_subgraph: bool,
         subgraph_name: Optional[str],
         parent_wrapper: Optional[PythonWrapperCodegen],
+        input_names: Optional[List[str]] = None,
+        output_nodes: Optional[List[IRNode]] = None,
     ):
         if is_subgraph:
             assert subgraph_name is not None
             assert parent_wrapper is not None
-            return SubgraphPythonWrapperCodegen(subgraph_name, parent_wrapper)
+            return SubgraphPythonWrapperCodegen(
+                subgraph_name, parent_wrapper, input_names, output_nodes
+            )
         return PythonWrapperCodegen()
 
     def set_launcher_fn_name(self) -> None:
@@ -941,8 +945,9 @@ class PythonWrapperCodegen(CodeGen):
             )
             self.write_args(graph_input_names)
 
-            self.codegen_inputs()
-            self.codegen_input_size_and_nan_asserts()
+            if not hasattr(self, "subgraph_input_names"):
+                self.codegen_inputs()  # TODO: Check symbolic cases.
+                self.codegen_input_size_and_nan_asserts()
 
     def codegen_input_size_and_nan_asserts(self) -> None:
         if config.size_asserts:
@@ -2449,6 +2454,19 @@ class PythonWrapperCodegen(CodeGen):
         ):
             self.writeline(f"{self.declare}{inner_input} = {outer_input}{self.ending}")
 
+    def codegen_partition_call(self, partition_name, input_names, output_nodes):
+        inputs = ", ".join(input_names) + ("," if len(input_names) == 1 else "")
+
+        output_names = [node.get_name() for node in output_nodes]
+        outputs = ", ".join(output_names) + ("," if len(output_nodes) == 1 else "")
+
+        # Create a list of inputs for the subgraph call
+        self.writeline(f"{partition_name}_args = [{inputs}]")
+
+        # Call the subgraph launcher function
+        self.writeline(f"({outputs}) = {partition_name}({partition_name}_args)")
+        self.writeline(f"del {partition_name}_args")
+
     def codegen_subgraph_call(self, subgraph, outer_inputs, outer_outputs):
         # Get the input and output names of the subgraph
         input_names = subgraph.graph.graph_input_names
@@ -2618,11 +2636,23 @@ class SubgraphPythonWrapperCodegen(PythonWrapperCodegen):
     imports twice in the output code)
     """
 
-    def __init__(self, subgraph_name: str, parent_wrapper: PythonWrapperCodegen):
+    def __init__(
+        self,
+        subgraph_name: str,
+        parent_wrapper: PythonWrapperCodegen,
+        input_names: Optional[List[str]] = None,
+        output_nodes: Optional[List[IRNode]] = None,
+    ):
         # It is necessary to set the subgraph_name before calling super __init__
         # because __init__ calls set_launcher_fn_name
         self.subgraph_name = subgraph_name
         self.parent_wrapper = parent_wrapper
+
+        if input_names is not None:
+            assert output_nodes is not None
+            self.subgraph_input_names = input_names
+            self.subgraph_output_nodes = output_nodes
+
         super().__init__()
 
     def set_launcher_fn_name(self) -> None:
@@ -2664,18 +2694,3 @@ class SubgraphPythonWrapperCodegen(PythonWrapperCodegen):
         #         V.graph.device_ops.import_get_raw_stream_as("get_raw_stream")
         #     )
         self.parent_wrapper.write_get_raw_stream_header_once()
-
-
-class PartitionPythonWrapperCodegen(SubgraphPythonWrapperCodegen):
-    def __init__(
-        self,
-        subgraph_name: str,
-        parent_wrapper: PythonWrapperCodegen,
-        input_names: List[str],
-        output_nodes: List[IRNode],
-    ):
-        self.subgraph_name = subgraph_name
-        self.parent_wrapper = parent_wrapper
-        self.subgraph_input_names = input_names
-        self.subgraph_output_nodes = output_nodes
-        super().__init__(subgraph_name, parent_wrapper)
