@@ -684,9 +684,7 @@ def _functorch_wrapper_str_intern(tensor, *, tensor_contents=None):
         bdim = torch._C._functorch.maybe_get_bdim(tensor)
         assert bdim != -1
         return (
-            f"BatchedTensor(lvl={level}, bdim={bdim}, value=\n"
-            f"{indented_value_repr}\n"
-            f")"
+            f"BatchedTensor(lvl={level}, bdim={bdim}, value=\n{indented_value_repr}\n)"
         )
     if torch._C._functorch.is_gradtrackingtensor(tensor):
         return f"GradTrackingTensor(lvl={level}, value=\n{indented_value_repr}\n)"
