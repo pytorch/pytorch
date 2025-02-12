@@ -106,7 +106,7 @@ static void copysign_mps_kernel(TensorIteratorBase& iter) {
 
 static void nextafter_mps_kernel(TensorIteratorBase& iter) {
   TORCH_CHECK_TYPE(isFloatingType(iter.common_dtype()), "nextafter_mps not implemented for non-floating types");
-  mps::binary_mps_impl(iter, "nextafter_kernel");
+  mps::binary_mps_impl(iter, "nextafter");
 }
 
 static void zeta_mps_kernel(TensorIteratorBase& iter) {
