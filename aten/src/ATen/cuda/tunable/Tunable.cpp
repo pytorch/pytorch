@@ -133,7 +133,7 @@ void TuningResultsManager::RecordUntuned( std::ofstream& untuned_file, const std
         untuned_file << op_signature << "," << params_signature << std::endl;
       }
       else {
-        untuned_file << op_signature << "," << params_signature << ", BLAS PARAMS: " << blas_signature << std::endl;
+        untuned_file << op_signature << "," << params_signature << ",BLAS_PARAMS: " << blas_signature << std::endl;
       }
       TUNABLE_LOG3("Untuned,", op_signature, ",", params_signature);
     }
