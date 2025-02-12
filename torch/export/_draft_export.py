@@ -4,8 +4,9 @@ import logging
 import os
 import re
 import tempfile
+from dataclasses import dataclass
 from enum import IntEnum
-from typing import Any, Optional, Union
+from typing import Any, Callable, Optional, Union
 
 import torch
 import torch._logging._internal
@@ -145,9 +146,15 @@ class FailureReport:
 
 
 class DraftExportReport:
-    def __init__(self, failures: list[FailureReport], str_to_filename: dict[int, str]):
+    def __init__(
+        self,
+        failures: list[FailureReport],
+        str_to_filename: dict[int, str],
+        expressions_created: dict[int, dict[str, Any]],
+    ):
         self.failures: list[FailureReport] = failures
         self.str_to_filename = str_to_filename
+        self.expressions_created: dict[int, dict[str, Any]] = expressions_created
 
     def successful(self) -> bool:
         return len(self.failures) == 0 or all(
@@ -187,6 +194,14 @@ Please follow the instructions to fix the errors.
         raise NotImplementedError("Not implemented yet")
 
 
+@dataclass
+class ExpressionCreatedNode:
+    result_id: int
+    argument_ids: list[int]
+    record: dict[str, object]
+    visited: bool = False
+
+
 class LogRecord:
     def __init__(self) -> None:
         self.log_count: dict[int, int] = {}
@@ -200,9 +215,9 @@ class LogRecord:
         elif key == "mismatched_fake_kernel":
             return hash((key, data["op"], data["reason"]))
         elif key == "propagate_real_tensors_provenance":
-            return hash((key, json.dumps(data["stack"])))
+            return hash((key, json.dumps(data["user_stack"])))
         elif key == "create_unbacked_symbol":
-            return hash((key, json.dumps(data["stack"])))
+            return hash((key, json.dumps(data["user_stack"])))
 
         return hash((key, json.dumps(data)))
 
@@ -221,9 +236,20 @@ class LogRecord:
 
 
 class CaptureStructuredTrace(torch._logging._internal.LazyTraceHandler):
-    def __init__(self, specific_log_keys: list[str]):
-        self.specific_log_keys = specific_log_keys
+    def __init__(self) -> None:
+        self.specific_log_keys = [
+            "str",
+            "exported_program",
+            "propagate_real_tensors_provenance",
+            "guard_added",
+            "missing_fake_kernel",
+            "mismatched_fake_kernel",
+            "expression_created",
+            "create_unbacked_symbol",
+        ]
         self.log_record: LogRecord = LogRecord()
+        self.expression_created_logs: dict[int, ExpressionCreatedNode] = {}
+        self.symbol_to_expressions: dict[str, list[dict[str, Any]]] = {}
         self.logger = logging.getLogger("torch.__trace")
         self.prev_get_dtrace = False
 
@@ -241,6 +267,7 @@ class CaptureStructuredTrace(torch._logging._internal.LazyTraceHandler):
 
     def __enter__(self) -> "CaptureStructuredTrace":
         self.log_record = LogRecord()
+        self.expression_created_logs = {}
 
         # Remove the lazy trace handler if it exists
         possible_lazy_trace_handlers = [
@@ -258,6 +285,7 @@ class CaptureStructuredTrace(torch._logging._internal.LazyTraceHandler):
 
     def __exit__(self, exc_type, exc_value, traceback) -> None:  # type: ignore[no-untyped-def]
         self.log_record = LogRecord()
+        self.expression_created_logs = {}
         self.logger.removeHandler(self)
         torch._logging._internal.GET_DTRACE_STRUCTURED = self.prev_get_dtrace
         self.prev_get_dtrace = False
@@ -267,6 +295,43 @@ class CaptureStructuredTrace(torch._logging._internal.LazyTraceHandler):
         for key in self.specific_log_keys:
             if key in metadata:
                 if self.log_record.try_add((key, metadata[key])):
+                    if key == "expression_created":
+                        # We don't want to log all expression_created logs, only
+                        # the ones that are relevant to the
+                        # guards/propagate_real_tensor
+                        self.expression_created_logs[
+                            metadata[key]["result_id"]
+                        ] = ExpressionCreatedNode(
+                            metadata[key]["result_id"],
+                            metadata[key].get("argument_ids", []),
+                            record,
+                        )
+                        continue
+
+                    elif key == "propagate_real_tensors_provenance":
+
+                        def _log_expression_created(
+                            emit_func: Callable[[Any], None], sym_node_id: int
+                        ) -> None:
+                            # Log all the relevant expression_created logs
+                            if sym_node_id is None:
+                                return
+                            if res := self.expression_created_logs.get(
+                                sym_node_id, None
+                            ):
+                                # Don't log the expression if we have already
+                                # printed it beforehand
+                                if not res.visited:
+                                    for arg in res.argument_ids:
+                                        _log_expression_created(emit_func, arg)
+
+                                emit_func(res.record)
+                                res.visited = True
+
+                        _log_expression_created(
+                            super().emit, metadata[key].get("expr_node_id")
+                        )
+
                     super().emit(record)
 
 
@@ -283,18 +348,7 @@ def draft_export(
     kwargs = kwargs or {}
     dynamic_shapes = dynamic_shapes or {}
 
-    capture_structured_log = CaptureStructuredTrace(
-        [
-            "propagate_real_tensors_provenance",
-            "str",
-            "exported_program",
-            "guard_added",
-            "missing_fake_kernel",
-            "mismatched_fake_kernel",
-            "expression_created",
-            "create_unbacked_symbol",
-        ]
-    )
+    capture_structured_log = CaptureStructuredTrace()
 
     with torch._functorch.config.patch(
         fake_tensor_propagate_real_tensors=True,
@@ -332,6 +386,7 @@ def draft_export(
         custom_ops_logs: dict[
             Any, tuple[dict[str, Any], FailureType]
         ] = {}  # For adding in assertions before custom ops
+        expressions_created: dict[int, dict[str, Any]] = {}
 
         for log_name, log_contents in capture_structured_log.log_record.logs:
             failure_type = None
@@ -383,7 +438,11 @@ def draft_export(
                 )
             )
 
-        report = DraftExportReport(failures, str_to_filename)
+        for k, v in capture_structured_log.expression_created_logs.items():
+            if v.visited:
+                expressions_created[k] = v.record
+
+        report = DraftExportReport(failures, str_to_filename, expressions_created)
 
         # Add asserts around custom ops
         insert_custom_op_guards(ep.graph_module, list(custom_ops_logs.keys()))
