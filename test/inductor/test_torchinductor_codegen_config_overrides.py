@@ -78,10 +78,15 @@ class CodegenInductorTest(InductorTestCase):
             config_patches=config_patches,
         )
 
+        reinterpret_call = (
+            "= reinterpret_tensor_wrapper("
+            if config.cpp_wrapper
+            else "= reinterpret_tensor("
+        )
         if force_pointwise_cat:
-            self.count_code("= reinterpret_tensor(", code, 0)
+            self.count_code(reinterpret_call, code, 0)
         else:
-            self.count_code("= reinterpret_tensor(", code, 2)
+            self.count_code(reinterpret_call, code, 2)
 
     @requires_gpu()
     @skipIf(GPU_TYPE == "mps", "Triton is not available for MPS")
