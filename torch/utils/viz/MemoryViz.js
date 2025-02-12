@@ -100,18 +100,22 @@ function EventSelector(outer, events, stack_info, memory_view) {
   return es;
 }
 
-function formatSize(num) {
-  const orig = num;
-  // https://stackoverflow.com/questions/1094841/get-human-readable-version-of-file-size
+function scaleSize(num) {
   const units = ['', 'Ki', 'Mi', 'Gi', 'Ti', 'Pi', 'Ei', 'Zi'];
   for (const unit of units) {
     if (Math.abs(num) < 1024.0) {
-      return `${num.toFixed(1)}${unit}B (${orig} bytes)`;
+      return [num, `${unit}B`]
     }
     num /= 1024.0;
   }
-  return `${num.toFixed(1)}YiB`;
+  return [num, "YiB"];
 }
+
+function formatSize(num) {
+  const [snum, scale] = scaleSize(num)
+  return `${snum.toFixed(1)}${scale} (${num} bytes)`;
+}
+
 function formatAddr(event) {
   const prefix = event.action.startsWith('segment') ? 's' : 'b';
   return `${prefix}${event.addr.toString(16)}_${event.version}`;
@@ -1024,7 +1028,50 @@ function MemoryPlot(
   const plot_height = height;
 
   const yscale = scaleLinear().domain([0, max_size]).range([plot_height, 0]);
-  const yaxis = axisLeft(yscale).tickFormat(d3.format('.3s'));
+  const yaxis = axisLeft(yscale);
+  function customTicks(domain, count=10) {
+    const [min, max] = domain;
+    const rawStep = (max - min) / count;
+    // Possible step sizes
+    const baseSteps = [1, 2, 5];
+    const multipliers = [1, 10, 100];
+    const steps = [];
+    // Generate all possible steps
+    for (let power = 0; power < 8; power++) { // Up to YiB
+        const base = Math.pow(2, 10 * power);
+        baseSteps.forEach(baseStep => {
+            multipliers.forEach(multiplier => {
+                steps.push(base * baseStep * multiplier);
+            });
+        });
+    }
+    // Find the "nice" step
+    const niceStep = steps.find(step => step >= rawStep) || steps[steps.length - 1];
+    const niceMin = Math.floor(min / niceStep) * niceStep;
+    const niceMax = Math.ceil(max / niceStep) * niceStep;
+    const ticks = [];
+    for (let i = niceMin; i <= niceMax; i += niceStep) {
+        ticks.push(i);
+    }
+    // Calculate precision needed
+    const [a, _] = scaleSize(niceMin);
+    const [b, _2] = scaleSize(niceMin + niceStep);
+    const precision = Math.max(0, Math.ceil(Math.log10(1  / (b - a))));
+    return [ticks, precision];
+  }
+
+  function setYAxisTicks(domain) {
+    const [ticks, precision] = customTicks(domain); 
+    yaxis.tickValues(ticks);
+    yaxis.tickFormat(n => {
+      const [snum, scale] = scaleSize(n)
+      return `${snum.toFixed(precision)}${scale}`;
+    });  
+  }
+
+  setYAxisTicks(yscale.domain());
+
+  
   const xscale = scaleLinear().domain([0, max_timestep]).range([0, plot_width]);
   const plot_coordinate_space = svg
     .append('g')
@@ -1060,10 +1107,14 @@ function MemoryPlot(
 
   const axis = plot_coordinate_space.append('g').call(yaxis);
 
+  
   function handleZoom() {
     const t = d3.event.transform;
     zoom_group.attr('transform', t);
-    axis.call(yaxis.scale(d3.event.transform.rescaleY(yscale)));
+    const newScale = d3.event.transform.rescaleY(yscale)
+    yaxis.scale(newScale);
+    setYAxisTicks(newScale.domain());
+    axis.call(yaxis);
   }
 
   const thezoom = zoom().on('zoom', handleZoom);
