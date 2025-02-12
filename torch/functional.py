@@ -5,7 +5,7 @@ from collections.abc import Sequence
 from typing import Any, Optional, TYPE_CHECKING, Union
 
 import torch
-import torch.nn.functional as F  # noqa: F401
+import torch.nn.functional as F
 from torch import _VF, Tensor
 from torch._C import _add_docstr
 from torch._jit_internal import _overload as overload, boolean_dispatch
@@ -551,6 +551,7 @@ def stft(
     normalized: bool = False,
     onesided: Optional[bool] = None,
     return_complex: Optional[bool] = None,
+    align_to_window: Optional[bool] = None,
 ) -> Tensor:
     r"""Short-time Fourier transform (STFT).
 
@@ -698,18 +699,30 @@ def stft(
             normalized=normalized,
             onesided=onesided,
             return_complex=return_complex,
+            align_to_window=align_to_window,
         )
+    if center and align_to_window is not None:
+        raise RuntimeError(
+            "stft align_to_window should only be set when center = false"
+        )
+    # NOTE: Do not edit. This code will be removed once the forward-compatibility
+    #       period is over for PR #73432
+    if center:
+        signal_dim = input.dim()
+        extended_shape = [1] * (3 - signal_dim) + list(input.size())
+        pad = int(n_fft // 2)
+        input = F.pad(input.view(extended_shape), [pad, pad], pad_mode)
+        input = input.view(input.shape[-signal_dim:])
     return _VF.stft(  # type: ignore[attr-defined]
         input,
         n_fft,
         hop_length,
         win_length,
         window,
-        center,
-        pad_mode,
         normalized,
         onesided,
         return_complex,
+        align_to_window,
     )
 
 

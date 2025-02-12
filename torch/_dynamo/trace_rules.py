@@ -1,4 +1,5 @@
 # mypy: allow-untyped-defs
+import abc
 import builtins
 import collections
 import copy
@@ -6,6 +7,7 @@ import dataclasses
 import functools
 import importlib
 import inspect
+import linecache
 import operator
 import os
 import random
@@ -30,8 +32,9 @@ from .utils import getfile, hashable, NP_SUPPORTED_MODULES, unwrap_if_wrapper
 from .variables import (
     BuiltinVariable,
     FunctionalCallVariable,
-    FunctionDecoratedByContextlibContextManagerVariable,
     FunctorchHigherOrderVariable,
+    LocalGeneratorFunctionVariable,
+    LocalGeneratorObjectVariable,
     NestedUserFunctionVariable,
     PolyfilledFunctionVariable,
     SkipFunctionVariable,
@@ -423,7 +426,6 @@ torch_c_binding_in_graph_functions = dict.fromkeys(
         "torch._C._cpu._is_amx_tile_supported",
         "torch._C._cpu._is_amx_fp16_supported",
         "torch._C._cpu._init_amx",
-        "torch._C._cpu._is_arm_sve_supported",
         "torch._C._crash_if_aten_asan",
         "torch._C._crash_if_csrc_asan",
         "torch._C._crash_if_csrc_ubsan",
@@ -2438,7 +2440,6 @@ torch_non_c_binding_in_graph_functions = dict.fromkeys(
         "torch._C._cpu._is_amx_tile_supported",
         "torch._C._cpu._is_amx_fp16_supported",
         "torch.cpu._init_amx",
-        "torch._C._cpu._is_arm_sve_supported",
         "torch.cpu.current_device",
         "torch.cpu.current_stream",
         "torch.cpu.device_count",
@@ -3142,11 +3143,12 @@ def is_numpy_type_info(obj) -> bool:
 
 
 BUILTIN_SKIPLIST = (
+    abc,
     collections,
     copy,
-    inspect,
     random,
     traceback,
+    linecache,
     unittest,
 )
 
@@ -3208,6 +3210,7 @@ LEGACY_MOD_INLINELIST = {
     "torch._higher_order_ops.while_loop",
     "torch._higher_order_ops.associative_scan",
     "torch._higher_order_ops.scan",
+    "torch._higher_order_ops._invoke_quant",
     "torch._higher_order_ops.utils",
     "torch.nn.attention.flex_attention",
     "torch.ao.quantization.pt2e.export_utils",
@@ -3307,10 +3310,8 @@ if torch.distributed.is_available():
 # See "A note on skip/inline rules" for more details.
 MOD_SKIPLIST = [
     "torch._VF",
-    "torch.__config__",
     "torch.__future__",
     "torch.__init__",
-    "torch._appdirs",
     "torch._awaits",
     "torch._classes",
     "torch._compile",
@@ -3320,11 +3321,14 @@ MOD_SKIPLIST = [
     "torch._deploy",
     "torch._dispatch",
     "torch._dynamo",
-    "torch._environment",
     "torch._export",
     "torch._functorch",
     "torch._guards",
-    "torch._higher_order_op",
+    "torch._higher_order_ops._invoke_quant",
+    "torch._higher_order_ops.effects",
+    "torch._higher_order_ops.map",
+    "torch._higher_order_ops.torchbind",
+    "torch._higher_order_ops.wrap",
     "torch._inductor",
     "torch._jit_internal",
     "torch._lazy",
@@ -3341,20 +3345,13 @@ MOD_SKIPLIST = [
     "torch._prims_common",
     "torch._python_dispatcher",
     "torch._refs",
-    "torch._size_docs",
-    "torch._sources",
-    "torch._storage_docs",
-    "torch._streambase",
     "torch._strobelight",
     "torch._subclasses",
     "torch._tensor",
-    "torch._tensor_docs",
     "torch._tensor_str",
     "torch._thread_safe_fork",
-    "torch._torch_docs",
     "torch._utils",
     "torch._utils_internal",
-    "torch._vendor",
     "torch._vmap_internals",
     "torch._weights_only_unpickler",
     "torch.accelerator",
@@ -3371,14 +3368,11 @@ MOD_SKIPLIST = [
     "torch.export",
     "torch.fb",
     "torch.fft",
-    "torch.func",
     "torch.functional",
     "torch.futures",
     "torch.fx",
     "torch.hub",
-    "torch.include",
     "torch.jit",
-    "torch.legacy",
     "torch.library",
     "torch.linalg",
     "torch.masked",
@@ -3396,18 +3390,14 @@ MOD_SKIPLIST = [
     "torch.quantization",
     "torch.quasirandom",
     "torch.random",
-    "torch.return_types",
     "torch.serialization",
-    "torch.share",
     "torch.signal",
     "torch.sparse",
     "torch.special",
     "torch.storage",
     "torch.testing",
-    "torch.torch_version",
     "torch.types",
     "torch.utils",
-    "torch.version",
     "torch.xpu",
 ]
 
@@ -3618,7 +3608,8 @@ def check_verbose(obj, is_inlined_call=False):
             UserFunctionVariable,
             UserMethodVariable,
             NestedUserFunctionVariable,
-            FunctionDecoratedByContextlibContextManagerVariable,
+            LocalGeneratorFunctionVariable,
+            LocalGeneratorObjectVariable,
         ),
     ):
         try:
@@ -3638,7 +3629,14 @@ def check_verbose(obj, is_inlined_call=False):
     # Consulte the central trace rules defined in torch._dynamo.trace_rules.
     reasons: set[str] = set()
     rule = lookup_inner(fi.py_obj, fi.name, fi.filename, is_inlined_call, reasons)
-    if issubclass(rule, (UserFunctionVariable, PolyfilledFunctionVariable)):
+    if issubclass(
+        rule,
+        (
+            UserFunctionVariable,
+            LocalGeneratorFunctionVariable,
+            PolyfilledFunctionVariable,
+        ),
+    ):
         return SkipResult(
             False,
             f"inlined according trace_rules.lookup {reasons.pop()}",
