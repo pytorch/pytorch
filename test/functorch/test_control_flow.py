@@ -4223,8 +4223,6 @@ class AssociativeScanTests(TestCase):
             # Should be:
             RuntimeError,
             r"For combine_mode='pointwise', the combine_fn needs to be pointwise",
-            # torch._dynamo.exc.UncapturedHigherOrderOpError,
-            # ".*",
         ):
             associative_scan(
                 get_scan_combine_fn("non_pointwise", True),
