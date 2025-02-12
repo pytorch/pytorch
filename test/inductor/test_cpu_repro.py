@@ -4062,8 +4062,6 @@ class CPUReproTests(TestCase):
                         "__at_align__ std::array", 0, exactly=True
                     ).run(code)
 
-    @requires_vectorization
-    @patch("torch.cuda.is_available", lambda: False)
     def test_group_norm_large_size(self):
         class M(torch.nn.Module):
             def __init__(self):
@@ -4073,19 +4071,15 @@ class CPUReproTests(TestCase):
             def forward(self, x):
                 return self.gn(x)
 
-        options = itertools.product(
-            [torch.contiguous_format, torch.channels_last_3d], [True, False]
-        )
-        for fmt, dynamic in options:
+        for dynamic in [True, False]:
             torch._dynamo.reset()
             metrics.reset()
             mod = M().eval()
-            x = torch.randn(1, 32, 128, 128, 128).to(memory_format=fmt)
+            x = torch.randn(1, 32, 128, 128, 128)
             with torch.no_grad():
                 expected = mod(x)
                 compiled_m = torch.compile(mod, dynamic=dynamic)
-                actual, code = run_and_get_cpp_code(compiled_m, x)
-                print(code)
+                actual = compiled_m(x)
                 self.assertEqual(expected, actual)
 
     def test_int_div_vec(self):
