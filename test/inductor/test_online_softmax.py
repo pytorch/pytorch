@@ -3,10 +3,9 @@
 import math
 import os
 
-from triton.testing import do_bench
-
 import torch
 import torch._inductor.config as inductor_config
+import torch.nn.functional as F
 from torch._dynamo.utils import rmse, same
 from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import run_and_get_code
@@ -43,6 +42,8 @@ class TestOnlineSoftmax(TestCase):
         self.assertTrue(torch.allclose(expected, actual, atol=1e-2, rtol=1e-2))
 
         if DO_PERF_TEST:
+            from triton.testing import do_bench
+
             eager_ms = do_bench(lambda: f(x))
             opt_ms = do_bench(lambda: opt_f(x))
             print(f"{eager_ms=}")
@@ -216,6 +217,20 @@ class TestOnlineSoftmax(TestCase):
         self.assertTrue(
             res_error < ref_error + 0.1
         )  # Is this good enough to make CI stable
+
+    def test_softmin(self):
+        """
+        The rnumel==1 kind of reduction should be unrolled.
+        """
+
+        def f(x):
+            return F.softmin(x, dim=0)
+
+        x = torch.randn(1, device=GPU_TYPE)
+        ref = f(x)
+        act, (code,) = run_and_get_code(torch.compile(f), x)
+        self.assertTrue(torch.allclose(ref, act))
+        self.assertTrue("online_softmax_reduce" not in code)
 
 
 instantiate_parametrized_tests(TestOnlineSoftmax)
