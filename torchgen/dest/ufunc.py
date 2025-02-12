@@ -186,9 +186,9 @@ def compute_ufunc_cuda_functors(
                 ufunc_name = loops[lk].name
             else:
                 # See Note [ScalarOnly and Generic must match names for CUDA]
-                assert (
-                    ufunc_name == loops[lk].name
-                ), "ScalarOnly and Generic must have same ufunc name"
+                assert ufunc_name == loops[lk].name, (
+                    "ScalarOnly and Generic must have same ufunc name"
+                )
             supported_dtypes |= loops[lk].supported_dtypes
         assert ufunc_name is not None
 

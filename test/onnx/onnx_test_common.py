@@ -93,9 +93,9 @@ def assert_dynamic_shapes(onnx_program: torch.onnx.ONNXProgram, dynamic_shapes: 
             for dim in inp.type.tensor_type.shape.dim
             if dim.dim_value == 0 and dim.dim_param != ""
         ]
-    assert dynamic_shapes == (
-        len(dynamic_inputs) > 0
-    ), "Dynamic shape check failed for graph inputs"
+    assert dynamic_shapes == (len(dynamic_inputs) > 0), (
+        "Dynamic shape check failed for graph inputs"
+    )
 
 
 def parameterize_class_name(cls: type, idx: int, input_dicts: Mapping[Any, Any]):
@@ -249,9 +249,9 @@ class _TestONNXRuntime(pytorch_test_common.ExportTestCase):
             ref_input_args = input_args
             ref_input_kwargs = input_kwargs
 
-        assert isinstance(ref_model, torch.nn.Module) or callable(
-            ref_model
-        ), "Model must be a torch.nn.Module or callable"
+        assert isinstance(ref_model, torch.nn.Module) or callable(ref_model), (
+            "Model must be a torch.nn.Module or callable"
+        )
         if (
             self.model_type
             == pytorch_test_common.TorchModelType.TORCH_EXPORT_EXPORTEDPROGRAM
@@ -640,9 +640,9 @@ def add_decorate_info(
             # Skip does not apply to this opset
             continue
         opinfo = ops_mapping.get((decorate_meta.op_name, decorate_meta.variant_name))
-        assert (
-            opinfo is not None
-        ), f"Couldn't find OpInfo for {decorate_meta}. Did you need to specify variant_name?"
+        assert opinfo is not None, (
+            f"Couldn't find OpInfo for {decorate_meta}. Did you need to specify variant_name?"
+        )
         assert decorate_meta.model_type is None, (
             f"Tested op: {decorate_meta.op_name} in wrong position! "
             "If model_type needs to be specified, it should be "
