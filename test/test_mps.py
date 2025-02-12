@@ -6532,7 +6532,8 @@ class TestMPS(TestCaseMPS):
                 # expect failure for non-positive definite matrix
                 input_mps = torch.eye(size, dtype=torch.float32, device="mps")
                 input_mps[0, 0] = -1
-                with self.assertRaisesRegex(RuntimeError, r'Matrix is not positive-definite'):
+                error_msg = r'The factorization could not be completed because the input is not positive-definite'
+                with self.assertRaisesRegex(RuntimeError, error_msg):
                     torch.linalg.cholesky_ex(input_mps, upper=upper, check_errors=check_errors)
                 return
             # output checks for positive definite matrix
@@ -6557,6 +6558,16 @@ class TestMPS(TestCaseMPS):
         run_cholesky_test(128, 2, 2, 2, 2, 10, 10, upper=True)
         run_cholesky_test(32, 2, upper=False, check_errors=True)
         run_cholesky_test(32, 2, upper=True, check_errors=True)
+
+    def test_linalg_cholesky_info(self):
+        # non psd matrix with leading minor of order 2 being not positive definite
+        A = torch.tensor([
+            [4.0, 1.0, 0.0],
+            [1.0, -2.0, 1.0],
+            [0.0, 1.0, 3.0]
+        ], device="mps")
+        with self.assertRaisesRegex(RuntimeError, r'leading minor of order 2 is not positive-definite'):
+            torch.linalg.cholesky_ex(A, check_errors=True)
 
     def test_upsample_nearest2d(self):
         def helper(N, C, H, W, memory_format):

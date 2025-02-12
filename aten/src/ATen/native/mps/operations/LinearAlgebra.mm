@@ -1133,18 +1133,22 @@ static void linalg_cholesky_mps_impl(const Tensor& input,
       // batch case
       for (const auto i : c10::irange(B)) {
         status = info_[i].item<int>();
-        TORCH_CHECK(status == 0,
-                    "linalg.cholesky(): (Batch element ",
-                    i,
-                    "):  The factorization could not be completed because the input is not positive-definite");
+        TORCH_CHECK(
+            status == 0,
+            "linalg.cholesky(): (Batch element ",
+            i,
+            "):  The factorization could not be completed because the input is not positive-definite (the leading minor of order ",
+            status,
+            " is not positive-definite).");
       }
     } else {
       // single matrix case(no batch size)
       status = info.item<int>();
-      TORCH_CHECK(status == 0,
-                  "linalg.cholesky(): Cholesky decomposition failed with status ",
-                  status,
-                  ". Matrix is not positive-definite");
+      TORCH_CHECK(
+          status == 0,
+          "linalg.cholesky(): The factorization could not be completed because the input is not positive-definite (the leading minor of order ",
+          status,
+          " is not positive-definite).");
     }
   }
   out.tril_();
