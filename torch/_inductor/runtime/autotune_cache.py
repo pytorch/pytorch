@@ -17,6 +17,7 @@ from torch.compiler._cache import (
     CacheArtifactManager,
 )
 from torch.utils._triton import has_triton
+from torch._inductor.runtime.runtime_utils import triton_hash_to_path_key
 
 from ..remote_cache import (
     create_cache,
@@ -242,7 +243,11 @@ class AutotuneCache:
 
     # Save the config in the caches
     def save(
-        self, config: Config, time_taken_ns: int, found_by_coordesc: bool = False
+        self,
+        config: Config,
+        time_taken_ns: int,
+        found_by_coordesc: bool = False,
+        triton_binary_hash: Optional[str] = None, 
     ) -> None:
         data = {
             **config.kwargs,
@@ -251,6 +256,8 @@ class AutotuneCache:
             "configs_hash": self.configs_hash,
             "found_by_coordesc": found_by_coordesc,
             "time_taken_ms": time_taken_ns // 1000000,  # Convert from NS to MS
+            "triton_binary_hash": triton_hash_to_path_key(triton_binary_hash),
+
         }
         if HAS_WARP_SPEC:
             data.update(
