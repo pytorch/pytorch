@@ -2616,7 +2616,7 @@ if HAS_CUDA and not TEST_WITH_ASAN:
 
             torch.manual_seed(0)
             outs = []
-            for i in range(3):
+            for i in range(len(order)):
                 obs.curr_run = i
                 x = torch.randn(4, 4, device=device, requires_grad=True)
                 y = torch.randn(4, 4, device=device, requires_grad=True)
@@ -2626,12 +2626,17 @@ if HAS_CUDA and not TEST_WITH_ASAN:
                 obs.curr_run = idx
                 outs[idx].sum().backward()
 
-            for run in range(0, 3):
+            for run in range(len(order)):
                 self.assertEqual(len(obs.op_outputs[(run, aten.rand.default)]), 2)
                 self.assertEqual(
                     obs.op_outputs[(run, aten.rand.default)][0],
                     obs.op_outputs[(run, aten.rand.default)][1],
                 )
+                if run != 0:
+                    self.assertNotEqual(
+                        obs.op_outputs[(run - 1, aten.rand.default)][0],
+                        obs.op_outputs[(run, aten.rand.default)][0],
+                    )
 
         @config.patch(fallback_random=True)
         @config.patch("test_configs.graphsafe_rng_func_ignores_fallback_random", True)
