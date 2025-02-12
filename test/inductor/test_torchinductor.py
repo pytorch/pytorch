@@ -11868,7 +11868,7 @@ class CommonTemplate:
     def test_float16_to_int16(self):
         def fn(x):
             x_view = x.view(dtype=torch.int16)
-            return x_view.mul(2)
+            return x_view.mul(2) + x_view.bitwise_and(2)
 
         x = torch.ones(4, dtype=torch.float16, device=self.device)
         ref = fn(x)
@@ -11881,7 +11881,7 @@ class CommonTemplate:
         def fn(a, b):
             x = a + b
             x_view = x.view(dtype=torch.int16)
-            return x_view.mul(2)
+            return x_view.mul(2) + x_view.bitwise_and(2)
 
         a = torch.ones(4, dtype=torch.bfloat16, device=self.device)
         b = torch.ones(4, dtype=torch.bfloat16, device=self.device)
@@ -11893,7 +11893,7 @@ class CommonTemplate:
         def fn(a, b):
             x = a + b
             x_view = x.view(dtype=torch.int32)
-            return x_view.mul(2)
+            return x_view.mul(2) + x_view.bitwise_and(2)
 
         a = 0.5 * torch.ones(4, dtype=torch.float32, device=self.device)
         b = 0.5 * torch.ones(4, dtype=torch.float32, device=self.device)
