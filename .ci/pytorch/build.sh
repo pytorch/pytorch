@@ -28,7 +28,7 @@ echo "Environment variables:"
 env
 
 mkdir -p /var/lib/jenkins/.cache/sccache
-echo "" > "/var/lib/jenkins/.config/sccache/config"
+echo "" > /var/lib/jenkins/.config/sccache/config
 
 export SCCACHE_ERROR_LOG="${BASH_SOURCE[0]}/../../sccache_error.log"
 export SCCACHE_LOG=debug
