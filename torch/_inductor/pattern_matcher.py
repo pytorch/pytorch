@@ -1834,7 +1834,8 @@ class PatternMatcherPass:
         if has_call_module:
             nodes.append(graph.find_nodes(op="call_module", sort=False))
         pass_name = self.pass_name if self.pass_name is not None else "pattern_matcher"
-        with GraphTransformObserver(cast(torch.fx.GraphModule, gm), pass_name):
+        assert isinstance(gm, torch.fx.GraphModule)
+        with GraphTransformObserver(gm, pass_name):
             for node in sorted(itertools.chain.from_iterable(nodes), reverse=True):
                 target = extract_target(node)
                 if node.op == "call_module":
@@ -1959,7 +1960,8 @@ def fx_to_pattern(
         def run_node(self, n: torch.fx.Node) -> Any:
             rv = super().run_node(n)
             if n.op == "output" and isinstance(rv, tuple):
-                args = cast(Collection[Any], n.args[0])
+                args = n.args[0]
+                assert isinstance(args, Collection)
                 assert len(rv) == len(args)
                 for r, arg in zip(rv, args):
                     r.users = len(arg.users)
@@ -1967,7 +1969,8 @@ def fx_to_pattern(
                 rv.users = len(n.users)
             return rv
 
-    pattern = Converter(cast(torch.fx.GraphModule, gm)).run()
+    assert isinstance(gm, torch.fx.GraphModule)
+    pattern = Converter(gm).run()
     if not isinstance(pattern, PatternExpr):
         return MultiOutputPattern(pytree.tree_leaves(pattern))
     return pattern
