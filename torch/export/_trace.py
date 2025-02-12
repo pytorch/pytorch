@@ -1,13 +1,11 @@
 # mypy: allow-untyped-decorators
 # mypy: allow-untyped-defs
-import builtins
 import dataclasses
 import functools
 import inspect
 import logging
 import re
 import time
-import types
 import warnings
 from contextlib import contextmanager, nullcontext
 from typing import Any, Callable, Optional, Union
@@ -1514,8 +1512,7 @@ def _export_to_aten_ir_make_fx(
                 out = original_getattr(self, attr)
                 if attr in attrs_to_proxy:
                     if torch._C._is_torch_function_mode_enabled():
-                        # If it is a static function or method, we should always inline
-                        if not isinstance(out, (types.FunctionType, types.MethodType)):
+                        if isinstance(out, torch.Tensor):
                             # When we get here there is no guarantee that we will hit the
                             # PreDispatchTorchFunctionMode, so we manually peak into the torch
                             # function mode list and tweak the PreDispatchTorchFunctionMode.
@@ -1532,7 +1529,7 @@ def _export_to_aten_ir_make_fx(
                                     proxy = get_proxy_slot(self, tracer).proxy
                                     inner_proxy = tracer.create_proxy(
                                         "call_function",
-                                        builtins.getattr,
+                                        torch.ops.export.access_subclass_inner_tensor.default,
                                         (proxy, attr),
                                         {},
                                     )
@@ -1627,7 +1624,7 @@ def _export_to_aten_ir_make_fx(
                     # from subclass tensors if we carefully rewrite track_tensor_tree
                     # in a way that it doesn't do any tensor methods.
                     torch.ops.aten.detach.default,
-                    builtins.getattr,
+                    torch.ops.export.access_subclass_inner_tensor.default,
                 ):
                     return False
                 return True
