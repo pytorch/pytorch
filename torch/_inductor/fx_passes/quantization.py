@@ -1076,9 +1076,9 @@ def _is_valid_woq_optimization_pattern():
         return (
             # For now, we only support woq mm kernels
             # with x.type=bfloat16 and w.type=int8
-            x.dtype == torch.bfloat16
+            x.dtype in [torch.bfloat16, torch.float16]
             and weight.dtype == torch.int8
-            and scales.dtype == torch.bfloat16
+            and x.dtype == scales.dtype
             # _weight_int8pack_mm kernel only supports cpu now
             # TODO: add cuda kernel support instead of calling mul+sum
             and x.device.type == "cpu"
