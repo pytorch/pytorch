@@ -41,6 +41,7 @@ from torch.testing._internal.common_mkldnn import bf32_on_and_off
 from torch.distributions.binomial import Binomial
 import torch.backends.opt_einsum as opt_einsum
 import operator
+import contextlib
 
 # Protects against includes accidentally setting the default dtype
 assert torch.get_default_dtype() is torch.float32
@@ -97,6 +98,22 @@ def get_tunableop_validators():
     return validators
 
 class TestLinalg(TestCase):
+    @contextlib.contextmanager
+    def _hip_allow_tf32(self):
+        # for HIP/AMDGPU, tf32 is behind a flag because the TF32 support is new
+        # and only for MI300+. Environment variable will be removed in the future.
+        import os
+        hip_allow_tf32 = os.environ.get("HIPBLASLT_ALLOW_TF32", None)
+        os.environ["HIPBLASLT_ALLOW_TF32"] = "1"
+
+        try:
+            yield
+        finally:
+            if hip_allow_tf32 is not None:
+                os.environ["HIPBLASLT_ALLOW_TF32"] = hip_allow_tf32
+            else:
+                del os.environ["HIPBLASLT_ALLOW_TF32"]
+
     def setUp(self):
         super(self.__class__, self).setUp()
         torch.backends.cuda.matmul.allow_tf32 = False
@@ -5464,6 +5481,55 @@ class TestLinalg(TestCase):
             os.remove(filename)
         except FileNotFoundError:
             pass
+
+    @onlyCUDA
+    @skipCUDAIfNotRocm
+    @runOnRocmArch(MI300_ARCH)
+    @dtypes(torch.float)
+    def test_tf32_tunableop(self, device, dtype):
+        # Test TunableOp with TF32. Supported by hipblasLT on MI300+.
+        # for HIP/AMDGPU, tf32 is behind a flag because the TF32 support is new
+        # and only for MI300+. Eventually this flag will go away.
+        # This test is not 100% foolproof, a stricter test would be to enable
+        # HIPBLASLT logging and verify that the compute type is xf32_r.
+        # This test only checks that the solution found by TunableOp is
+        # not from ROCBLAS.
+        tf32_ctx = self._hip_allow_tf32 if torch.version.hip else contextlib.nullcontext
+
+        with tf32_ctx():
+            import os
+            torch.backends.cuda.matmul.allow_tf32 = True
+            set_tunableop_defaults()
+            torch.cuda.tunable.set_rotating_buffer_size(0)
+            torch.cuda.tunable.enable()
+
+            # Reference number of results
+            ref_num_results = len(torch.cuda.tunable.get_results())
+
+            N = M = K = 37
+            A = torch.randn(N, K, device=device, dtype=dtype)
+            B = torch.randn(K, M, device=device, dtype=dtype)
+            C = torch.matmul(A, B)
+
+            # This stores total number of cumulative results
+            total_num_results = len(torch.cuda.tunable.get_results())
+
+            # There must be a new tuning result
+            self.assertEqual((total_num_results - ref_num_results), 1)
+
+            # The results must NOT be from rocBLAS
+            # result can be either Default or Hipblaslt
+            last_result = torch.cuda.tunable.get_results()
+            self.assertTrue('Rocblas' not in last_result[-1][2])
+
+            # disable TunableOp
+            torch.cuda.tunable.enable(False)
+
+            try:
+                filename = torch.cuda.tunable.get_filename()
+                os.remove(filename)
+            except FileNotFoundError:
+                pass
 
     @dtypes(torch.float, torch.complex64)
     def test_matmul_out_kernel_errors_with_autograd(self, device, dtype):
