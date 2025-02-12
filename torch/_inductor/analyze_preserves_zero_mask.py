@@ -95,6 +95,7 @@ class RecordLowPrecisionOps:
         self.non_numeric_ops = (
             "to_dtype",
             "constant",
+            "where",
         )
 
     @staticmethod
