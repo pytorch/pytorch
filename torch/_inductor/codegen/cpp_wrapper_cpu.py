@@ -1032,7 +1032,8 @@ class CppWrapperCpu(PythonWrapperCodegen):
             """
         )
 
-    def get_c_shim_func_name(self, kernel: str, device: str) -> str:
+    @staticmethod
+    def get_c_shim_func_name(kernel: str, device: str) -> str:
         if kernel.startswith("aoti_torch_"):
             return kernel
 
