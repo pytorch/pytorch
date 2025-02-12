@@ -267,7 +267,7 @@ struct GemmAndBiasParams : OpParams {
     std::string alpha_str = to_string_opmath<T>(alpha);
     std::string activation_str = to_string_epilogue(activation);
     return fmt::sprintf("-m %ld -n %ld -k %ld --lda %ld --ldb %ld --ldc %ld --ldd %ld --stride_a 0 --stride_b 0 -- stride_c 0 --stride_d 0 "
-      "--alpha %s --transA %c --transB %c --batch_count 1 --a_type %s --b_type %s --c_type %s --d_type %s --compute_type float --activation %s --bias_type %s",
+      "--alpha %s --transA %c --transB %c --batch_count 1 --a_type %s --b_type %s --c_type %s --d_type %s --activation %s --bias_type %s --compute_type float",
       m, n, k, lda, ldb, ldc, ldc, alpha_str, transa, transb, TypeName<T>(T{}), TypeName<T>(T{}), TypeName<T>(T{}), TypeName<T>(T{}), activation_str, TypeName<T>(T{}));
   }
 
@@ -467,7 +467,7 @@ struct ScaledGemmParams : OpParams {
 
     // Excluding use_fast_accum and use_rowise booleans for now
     return fmt::sprintf("-m %ld -n %ld -k %ld --lda %ld --ldb %ld --ldc %ld --ldd %ld --stride_a 0 --stride_b 0 -- stride_c 0 --stride_d 0 "
-      "--transA %c --transB %c --batch_count 1 --a_type %s --b_type %s --c_type %s --d_type %s --compute_type float --bias_type %s",
+      "--transA %c --transB %c --batch_count 1 --scaleA s --scaleB s --a_type %s --b_type %s --c_type %s --d_type %s --bias_type %s --compute_type float",
       m, n, k, lda, ldb, ldc, ldc, transa, transb, a_dtype_str, b_dtype_str, c_dtype_str, c_dtype_str, bias_dtype_str);
   }
 
