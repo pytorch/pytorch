@@ -166,7 +166,7 @@ class DispatchKeySet final {
  public:
   enum Full { FULL };
   enum FullAfter { FULL_AFTER };
-  enum Raw { RAW };
+  enum Raw { RAWDATA };
 
   // NB: default constructor representation as zero is MANDATORY as
   // use of DispatchKeySet in TLS requires this.
@@ -718,7 +718,7 @@ constexpr DispatchKeySet autogradother_backends =
     // Including the backend bits because this keyset is used during op
     // registration, which requires looping over all runtime autogradother
     // backend keys.
-    | DispatchKeySet(DispatchKeySet::RAW, full_backend_mask);
+    | DispatchKeySet(DispatchKeySet::RAWDATA, full_backend_mask);
 
 // The set of dispatch keys that come after autograd
 // n.b. this relies on the fact that AutogradOther is currently the lowest
@@ -749,7 +749,7 @@ constexpr DispatchKeySet after_func_keyset =
             c10::DispatchKey::ADInplaceOrView);
 
 constexpr DispatchKeySet backend_bitset_mask =
-    DispatchKeySet(DispatchKeySet::RAW, (1ULL << num_backends) - 1);
+    DispatchKeySet(DispatchKeySet::RAWDATA, (1ULL << num_backends) - 1);
 
 constexpr auto inplace_or_view_ks =
     DispatchKeySet(DispatchKey::ADInplaceOrView);
@@ -794,7 +794,7 @@ constexpr DispatchKeySet backend_functionality_keys =
         DispatchKey::Sparse,
         DispatchKey::SparseCsr,
     }) |
-    DispatchKeySet(DispatchKeySet::RAW, full_backend_mask);
+    DispatchKeySet(DispatchKeySet::RAWDATA, full_backend_mask);
 
 struct OpTableOffsetAndMask {
   uint16_t offset;

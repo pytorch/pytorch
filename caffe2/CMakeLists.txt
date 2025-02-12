@@ -1641,7 +1641,7 @@ target_link_libraries(torch_cpu PRIVATE flatbuffers)
 # That usually leads to missing symbol errors at run-time, so to avoid a situation like
 # this we have to preload those libs in a global namespace.
 if(BUILD_SHARED_LIBS)
-  add_library(torch_global_deps SHARED ${TORCH_SRC_DIR}/csrc/empty.c)
+  add_library(torch_global_deps MODULE ${TORCH_SRC_DIR}/csrc/empty.c)
   if(HAVE_SOVERSION)
     set_target_properties(torch_global_deps PROPERTIES
         VERSION ${TORCH_VERSION} SOVERSION ${TORCH_SOVERSION})

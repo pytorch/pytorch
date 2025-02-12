@@ -311,6 +311,7 @@ endif()
 
 
 add_library(torch_python SHARED ${TORCH_PYTHON_SRCS})
+
 torch_compile_options(torch_python)  # see cmake/public/utils.cmake
 if(APPLE)
   target_compile_options(torch_python PRIVATE
