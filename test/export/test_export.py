@@ -6416,8 +6416,6 @@ def forward(self, b_a_buffer, x):
         ep = export(Foo(), (xs,), dynamic_shapes={"x": {1: dim1}})
         self.assertTrue(torch.allclose(ep.module()(xs), Foo()(xs)))
 
-    # This test is expected to fail because accociative_scan's backend is not set to "eager"
-    @unittest.expectedFailure
     @requires_gpu
     def test_export_associative_scan_lifted_buffers(self):
         class M(torch.nn.Module):

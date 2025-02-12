@@ -144,7 +144,7 @@ def associative_scan(
 
     if not torch.compiler.is_compiling():
         with _set_compilation_env(), torch._dynamo.utils.disable_cache_limit():
-            return torch.compile(associative_scan, fullgraph=True)(
+            return torch.compile(associative_scan, fullgraph=True, backend="aot_eager")(
                 combine_fn, xs, dim, reverse=reverse, combine_mode=combine_mode
             )
 
@@ -369,8 +369,9 @@ def trace_associative_scan(
             assert len(node.args) == 1
             outputs = node.args[0]
 
+        # Check that the combine_fn is pointwise, if combine_mode='pointwise'
         if not all(is_pointwise_use(use) or use.op == "output" for use in node.users):
-            raise ValueError(
+            raise RuntimeError(
                 "For combine_mode='pointwise', the combine_fn needs to be pointwise"
             )
 
@@ -438,6 +439,7 @@ def associative_scan_functionalize(ctx, combine_fn, xs, additional_inputs):
             itertools.chain(
                 [inp.clone() for inp in unwrapped_xs],
                 [inp.clone() for inp in unwrapped_xs],
+                unwrapped_additional_inputs,
             )
         )
 
@@ -445,7 +447,11 @@ def associative_scan_functionalize(ctx, combine_fn, xs, additional_inputs):
             combine_fn, sample_inputs, pre_dispatch=pre_dispatch
         )
 
-        ret = associative_scan_op(functional_combine_fn, unwrapped_xs)
+        ret = associative_scan_op(
+            functional_combine_fn,
+            unwrapped_xs,
+            unwrapped_additional_inputs,
+        )
     return ctx.wrap_tensors(ret)
 
 
