@@ -108,7 +108,7 @@ def foreach_map_adam(
     with torch.no_grad():
         grads = [param.grad for param in params]
         # update step
-        updated_steps = foreach_map(lambda x: x + 1, (steps,))
+        updated_steps = foreach_map(lambda x: x + 1, steps)
         torch._foreach_copy_(steps, updated_steps)
 
         if weight_decay != 0:
