@@ -594,6 +594,27 @@ class TORCH_API SiLUImpl : public torch::nn::Cloneable<SiLUImpl> {
 /// module storage semantics.
 TORCH_MODULE(SiLU);
 
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ SwiGLU ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+/// Applies swiglu over a given input.
+/// See https://pytorch.org/docs/main/nn.html#torch.nn.SwiGLU to learn
+/// about the exact behavior of this module.
+class TORCH_API SwiGLUImpl : public torch::nn::Cloneable<SwiGLUImpl> {
+ public:
+  Tensor forward(const Tensor& input);
+
+  void reset() override;
+
+  /// Pretty prints the `SwiGLU` module into the given `stream`.
+  void pretty_print(std::ostream& stream) const override;
+};
+
+/// A `ModuleHolder` subclass for `SwiGLUImpl`.
+/// See the documentation for `SwiGLUImpl` class to learn what methods it
+/// provides, or the documentation for `ModuleHolder` to learn about PyTorch's
+/// module storage semantics.
+TORCH_MODULE(SwiGLU);
+
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Mish ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 /// Applies mish over a given input.

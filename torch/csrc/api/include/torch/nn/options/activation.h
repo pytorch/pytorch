@@ -66,6 +66,35 @@ using SELUFuncOptions = SELUOptions;
 
 // ============================================================================
 
+/// Options for the `SwiGLU` module.
+///
+/// Example:
+/// ```
+/// SwiGLU model(SwiGLUOptions(1));
+/// ```
+struct TORCH_API SwiGLUOptions {
+  /* implicit */ SwiGLUOptions(int64_t dim = -1);
+
+  /// the dimension on which to split the input. Default: -1
+  TORCH_ARG(int64_t, dim);
+};
+
+namespace functional {
+/// Options for `torch::nn::functional::swiglu`.
+///
+/// See the documentation for `torch::nn::SwiGLUOptions` class to learn what
+/// arguments are supported.
+///
+/// Example:
+/// ```
+/// namespace F = torch::nn::functional;
+/// F::swiglu(input, SwiGLUFuncOptions(1));
+/// ```
+using SwiGLUFuncOptions = SwiGLUOptions;
+} // namespace functional
+
+// ============================================================================
+
 /// Options for the `GLU` module.
 ///
 /// Example:

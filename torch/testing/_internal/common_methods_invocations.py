@@ -11531,12 +11531,6 @@ def reference_group_norm(inp: npt.NDArray, num_groups: int, weight=None, bias=No
     return Y
 
 
-def reference_swiglu(inp: npt.NDArray, dim=-1):
-    chunks = np.split(inp, 2, dim)
-    result = chunks[0] * scipy.special.expit(chunks[1])
-    return result
-
-
 # using a custom reference function since numpy only has a string side arg (instead of right and side) and doesn't
 # have an out_int32 arg. Additionally, numpy doesn't support searchsorted with ND arrays, so this splits those into
 # stacked 1D cases
@@ -16140,6 +16134,15 @@ op_db: list[OpInfo] = [
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
            supports_out=False),
+    OpInfo('nn.functional.swiglu',
+           aten_name='swiglu',
+           # Runs very slowly on slow gradcheck - alternatively reduce input sizes
+           gradcheck_fast_mode=True,
+           sample_inputs_func=sample_inputs_glu,
+           dtypes=floating_types_and(torch.bfloat16, torch.float16),
+           supports_forward_ad=True,
+           supports_fwgrad_bwgrad=True,
+           supports_out=False),
     UnaryUfuncInfo(
         'nn.functional.elu',
         aten_backward_name='elu_backward',
@@ -16494,17 +16497,6 @@ op_db: list[OpInfo] = [
             DecorateInfo(unittest.skip("Skipped!"),
                          'TestUnaryUfuncs', 'test_reference_numerics_extremal',
                          dtypes=(torch.complex64,)))),
-    UnaryUfuncInfo(
-        'nn.functional.swiglu',
-        aten_name='swiglu',
-        ref=reference_swiglu,
-        dtypes=floating_types_and(torch.bfloat16, torch.float16),
-        supports_out=False,
-        supports_forward_ad=True,
-        supports_autograd=True,
-        supports_fwgrad_bwgrad=True,
-        assert_autodiffed=True,
-    ),
     UnaryUfuncInfo(
         'nn.functional.hardsigmoid',
         aten_backward_name='hardsigmoid_backward',

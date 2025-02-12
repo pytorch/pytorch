@@ -878,6 +878,7 @@ class ShapePropagator : public PropertyPropBase {
             "aten::softplus(Tensor self, Scalar beta, Scalar threshold) -> Tensor",
             "aten::softshrink(Tensor self, Scalar lambd) -> Tensor",
             "aten::sqrt(Tensor self) -> Tensor",
+            "aten::swiglu(Tensor self, int dim) -> Tensor",
             "aten::tan(Tensor self) -> Tensor",
             "aten::tanh(Tensor self) -> Tensor",
             "aten::threshold(Tensor self, Scalar threshold, Scalar value) -> Tensor",

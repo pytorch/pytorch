@@ -1751,17 +1751,24 @@ def glu(input: Tensor, dim: int = -1) -> Tensor:  # noqa: D400,D402
     return torch._C._nn.glu(input, dim)
 
 
-def swiglu(input: Tensor, dim: Optional[int] = -1):
-    r"""swiglu(input, dim=-1) -> Tensor
+def swiglu(input: Tensor, dim: int = -1) -> Tensor:  # noqa: D400,D402
+    r"""
+    swiglu(input, dim=-1) -> Tensor
 
     Applies swish gate linear unit operator.
+
+    .. math ::
+        \text{swiglu}(x, y) = x * \swish(y)
+
+    where :math:`\text{swish}(x) = x * \sigma(x)`, and :math:`x` and :math:`y` are
+    split from the input tensor along the given dimension.
 
     See :class:`~torch.nn.SwiGLU` for more details.
     """
     if has_torch_function_unary(input):
         return handle_torch_function(
-            swiglu, (input,), input, dim)
-    return torch.swiglu(input, dim)
+            swiglu, (input,), input, dim=dim)
+    return torch._C._nn.swiglu(input, dim)
 
 
 def hardtanh(

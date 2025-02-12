@@ -320,6 +320,18 @@ void SiLUImpl::pretty_print(std::ostream& stream) const {
 
 // ============================================================================
 
+Tensor SwiGLUImpl::forward(const Tensor& input) {
+  return F::swiglu(input);
+}
+
+void SwiGLUImpl::reset() {}
+
+void SwiGLUImpl::pretty_print(std::ostream& stream) const {
+  stream << "torch::nn::SwiGLU()";
+}
+
+// ============================================================================
+
 Tensor MishImpl::forward(const Tensor& input) {
   return F::mish(input);
 }

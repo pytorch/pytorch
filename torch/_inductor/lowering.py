@@ -1861,6 +1861,16 @@ def glu(x, dim=-1):
     return mul(a, sigmoid(b))
 
 
+@register_lowering(aten.swiglu)
+def swiglu(x, dim=-1):
+    dim = _validate_dim(x, dim, 0)
+    # TODO: don't guard on static shape here
+    new_len = V.graph.sizevars.evaluate_static_shape(x.get_size()[dim]) // 2
+    a = slice_(x, dim, 0, new_len)
+    b = slice_(x, dim, new_len, new_len * 2)
+    return mul(a, mul(b, sigmoid(b)))
+
+
 def fallback_handler(kernel, add_to_fallback_set=True):
     if add_to_fallback_set:
         fallbacks.add(kernel)

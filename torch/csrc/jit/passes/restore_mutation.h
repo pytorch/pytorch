@@ -26,7 +26,8 @@ const std::unordered_map<Symbol, bool> activation_type_promotion_mapping = {
     {aten::relu, false},
     {aten::rrelu, false},
     {aten::selu, false},
-    {aten::silu, false}};
+    {aten::silu, false},
+    {aten::swiglu, false}};
 
 class FunctionalToInplaceRewriter {
  public:

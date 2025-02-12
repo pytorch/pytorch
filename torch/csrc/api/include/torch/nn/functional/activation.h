@@ -388,6 +388,12 @@ inline Tensor silu(const Tensor& input) {
 
 // ============================================================================
 
+inline Tensor swiglu(const Tensor& input) {
+  return torch::swiglu(input);
+}
+
+// ============================================================================
+
 inline Tensor mish(const Tensor& input) {
   return torch::mish(input);
 }

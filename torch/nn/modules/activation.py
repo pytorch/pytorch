@@ -744,16 +744,21 @@ class GELU(Module):
 
 class SwiGLU(Module):
     r"""Applies the SwiGLU function element-wise.
+
     The SwiGLU function is also known as the swish_glu function.
 
     SwiGLU is defined as:
+
     .. math::
-        \text{SwiGLU}(x, y) = x * \sigma(y)
-    where :math:`\sigma` is the sigmoid function, and :math:`x` and :math:`y` are
+
+        \text{swiglu}(x, y) = x * \swish(y)
+
+    where :math:`\text{swish}(x) = x * \sigma(x)`, and :math:`x` and :math:`y` are
     split from the input tensor along the given dimension.
 
     .. note::
-      See  `GLU with Swish <https://arxiv.org/pdf/2002.05202v1>`
+
+    See  `GLU with Swish <https://arxiv.org/pdf/2002.05202v1>`
 
     Args:
         dim (int): the dimension on which to split the input. Default: -1
@@ -763,6 +768,7 @@ class SwiGLU(Module):
         - Output: :math:`(\ast_1, M, \ast_2)` where :math:`M=N/2`
 
     Examples::
+
         >>> m = nn.SwiGLU()
         >>> input = torch.randn(4, 2)
         >>> output = m(input)

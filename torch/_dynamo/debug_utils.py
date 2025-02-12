@@ -165,6 +165,7 @@ class NNModuleToString:
         torch.nn.Tanh,
         torch.nn.ConvTranspose1d,
         torch.nn.GLU,
+        torch.nn.SwiGLU,
         torch.nn.LSTM,
         torch.nn.Flatten,
         torch.nn.AdaptiveAvgPool2d,

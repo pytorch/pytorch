@@ -310,6 +310,7 @@ __all__ = [
     "Softplus",
     "Softshrink",
     "Softsign",
+    "SwiGLU",
     "SyncBatchNorm",
     "Tanh",
     "Tanhshrink",
