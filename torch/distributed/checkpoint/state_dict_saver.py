@@ -4,26 +4,40 @@ import inspect
 import os
 import warnings
 from concurrent.futures import Future, ThreadPoolExecutor
+from enum import Enum
 from typing import cast, Optional, Union
-from typing_extensions import deprecated
 
 import torch
 import torch.distributed as dist
 from torch.distributed._state_dict_utils import _copy_state_dict, _create_cpu_state_dict
+from torch.distributed.checkpoint._save_process import execute_save_in_process
 from torch.distributed.checkpoint._storage_utils import _storage_setup
 from torch.distributed.checkpoint.default_planner import DefaultSavePlanner
 from torch.distributed.checkpoint.logger import _dcp_method_logger
 from torch.distributed.checkpoint.metadata import Metadata, STATE_DICT_TYPE
 from torch.distributed.checkpoint.planner import SavePlan, SavePlanner
-from torch.distributed.checkpoint.staging import AsyncStager
+from torch.distributed.checkpoint.staging import (
+    AsyncProcessStager,
+    AsyncStager,
+    LocalSyncState,
+)
 from torch.distributed.checkpoint.stateful import Stateful
 from torch.distributed.checkpoint.storage import StorageWriter
 from torch.distributed.distributed_c10d import _get_default_group
+from typing_extensions import deprecated
 
 from .utils import _api_bc_check, _DistWrapper, _profile
 
 
-__all__ = ["save_state_dict", "save", "async_save"]
+__all__ = ["save_state_dict", "save", "async_save", "AsyncCheckpointerType"]
+
+class AsyncCheckpointerType(Enum):
+    """Enum for async checkpoint type."""
+
+    # Async checkpoint with staging on CPU.
+    THREAD = "thread"
+    # Async checkpoint with staging on GPU.
+    PROCESS = "process"
 
 
 @deprecated(
@@ -171,6 +185,7 @@ def async_save(
     storage_writer: Optional[StorageWriter] = None,
     planner: Optional[SavePlanner] = None,
     process_group: Optional[dist.ProcessGroup] = None,
+    async_checkpointer_type: AsyncCheckpointerType = AsyncCheckpointerType.PROCESS,
 ) -> Future:
     """Asynchronous version of ``save``. This code first de-stages the state_dict on to the
     staging storage (defaults to CPU memory), and then calls the `save` in a separate thread.
@@ -230,6 +245,35 @@ def async_save(
     )
 
     state_dict = _stateful_to_state_dict(state_dict)
+
+    if async_checkpointer_type == AsyncCheckpointerType.PROCESS:
+        return _async_save_process_based(
+            state_dict=state_dict,
+            checkpoint_id=checkpoint_id,
+            storage_writer=storage_writer,
+            planner=planner,
+        )
+    elif async_checkpointer_type == AsyncCheckpointerType.THREAD:
+        return _async_save_thread_based(
+            state_dict=state_dict,
+            checkpoint_id=checkpoint_id,
+            storage_writer=storage_writer,
+            planner=planner,
+            process_group=process_group,
+        )
+
+def _async_save_thread_based(
+    state_dict: STATE_DICT_TYPE,
+    checkpoint_id: Union[str, os.PathLike, None],
+    storage_writer: StorageWriter,
+    planner: Optional[SavePlanner] = None,
+    process_group: Optional[dist.ProcessGroup] = None,
+) -> Future:
+    """
+    Asynchronous version of ``save``. This code first de-stages the state_dict on to the
+    staging storage (defaults to CPU-MEMORY), and then calls the `save` in a separate THREAD.
+    """
+
     if isinstance(storage_writer, AsyncStager):
         staged_state_dict = storage_writer.stage(state_dict)
     else:  # provides bwc for storage_writers not implementing AsyncStager
@@ -255,6 +299,41 @@ def async_save(
 
     return f
 
+def _async_save_process_based(
+    state_dict: STATE_DICT_TYPE,
+    checkpoint_id: Union[str, os.PathLike, None],
+    storage_writer: StorageWriter,
+    planner: Optional[SavePlanner] = None,
+    process_group: Optional[dist.ProcessGroup] = None,
+) -> Future:
+    """
+    Asynchronous version of ``save``. This code first de-stages the state_dict on to the
+    staging storage (defaults to SHARED-MEMORY), and then calls the `save` in a separate PROCESS.
+    """
+
+    local_sync_state: Optional[LocalSyncState] = None
+    if isinstance(storage_writer, AsyncProcessStager):
+        staged_state_dict, local_sync_state = storage_writer.stage(state_dict)
+    else:  # provides bwc for storage_writers not implementing AsyncStager
+        staged_state_dict = _create_cpu_state_dict(state_dict, share_memory=True)
+        _copy_state_dict(state_dict, staged_state_dict, type_check=False)
+
+
+    f: Future = execute_save_in_process(
+        staged_state_dict,
+        checkpoint_id=checkpoint_id,
+        storage_writer=storage_writer,
+        planner=planner,
+        process_group=process_group,
+    )
+
+    if (
+        isinstance(storage_writer, AsyncProcessStager)
+        and storage_writer.should_synchronize_after_execute
+    ):
+        storage_writer.synchronize_staging(local_sync_state)
+    
+    return f
 
 def _stateful_to_state_dict(state_dict: STATE_DICT_TYPE) -> STATE_DICT_TYPE:
     """Creates a shallow copy of `state_dict` where `state_dict` is called for each Stateful object."""
