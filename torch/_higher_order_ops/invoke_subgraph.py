@@ -1,7 +1,7 @@
 # mypy: allow-untyped-defs
 
 
-from typing import List, Optional, Tuple, Union
+from typing import Optional, Union
 
 import torch
 import torch.utils._pytree as pytree
@@ -42,8 +42,8 @@ class InvokeSubgraphHOP(HigherOrderOperator):
         subgraph: GraphModule,
         identifier: Optional[str],
         operands: Union[
-            List[Union[torch.Tensor, int, torch.SymInt]],
-            Tuple[Union[torch.Tensor, int, torch.SymInt]],
+            list[Union[torch.Tensor, int, torch.SymInt]],
+            tuple[Union[torch.Tensor, int, torch.SymInt]],
         ],
     ):
         assert identifier is None or isinstance(
@@ -125,7 +125,7 @@ def trace_joint_graph(fn, fw_inputs, fw_outputs):
 
         # return signature is deliberately kept (*grads, *fw_outs). This
         # simplifies partitioning work later on.
-        return pytree.tree_map(maybe_clone, grads + list(fw_outs))
+        return pytree.tree_map(maybe_clone, tuple(grads + list(fw_outs)))
 
     primals = list(fw_inputs)
     # This assumes that the tangent strides match fw_outputs strides. Check the
