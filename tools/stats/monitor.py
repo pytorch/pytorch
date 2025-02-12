@@ -8,7 +8,7 @@ Usage:
     python3 monitor.py
 
 - To run the script in the local machine with debug mode and customized data collect time, use the following command:
-    python3 monitor.py --debug --log-interval 10 --data-collect-interval 0.5
+    python3 monitor.py --debug --log-interval 10 --data-collect-interval 2
 
 - To log the data to a file, use the following command:
     python3 monitor.py > usage_log.txt 2>&1
@@ -117,8 +117,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--data-collect-interval",
         type=float,
-        default=0.5,
-        help="set time interval to collect data, default is 0.5 second, this should not longer than log_interval",
+        default=1,
+        help="set time interval to collect data, default is 1 second, this should not longer than log_interval",
     )
     args = parser.parse_args()
     return args
@@ -163,14 +163,14 @@ class UsageLogger:
     """
     Collect and display usage data, including:
     CPU, memory, GPU memory utilization, and GPU utilization.
-    By default, data is collected every 0.5 seconds, and log
+    By default, data is collected every 1 seconds, and log
     the aggregated result every 5 seconds.
     """
 
     def __init__(
         self,
         log_interval: float = 5,
-        data_collect_interval: float = 0.5,
+        data_collect_interval: float = 1,
         is_debug_mode: bool = False,
         pynvml_enabled: bool = False,
         amdsmi_enabled: bool = False,
