@@ -266,7 +266,7 @@ class BaseDataSparsifier(base_sparsifier.BaseSparsifier):
             "_container": self._container.state_dict(),
         }
 
-    def __repr__(self):  # type:ignore[override]
+    def __repr__(self):
         format_string = self.__class__.__name__ + " ("
         for name, sparse_args in self.data_groups.items():
             format_string += "\n"

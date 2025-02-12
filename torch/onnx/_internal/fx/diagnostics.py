@@ -5,8 +5,8 @@ import dataclasses
 import functools
 from typing import Any, TYPE_CHECKING
 
-import onnxscript  # type: ignore[import]
-from onnxscript.function_libs.torch_lib import graph_building  # type: ignore[import]
+import onnxscript
+from onnxscript.function_libs.torch_lib import graph_building
 
 import torch
 import torch.fx
@@ -181,7 +181,7 @@ def _torch_nn_parameter(obj: torch.nn.Parameter) -> str:
 
 @_format_argument.register
 def _onnxscript_torch_script_tensor(obj: graph_building.TorchScriptTensor) -> str:
-    return f"`TorchScriptTensor({fx_type_utils.from_torch_dtype_to_abbr(obj.dtype)}{_stringify_shape(obj.shape)})`"  # type: ignore[arg-type]  # noqa: B950
+    return f"`TorchScriptTensor({fx_type_utils.from_torch_dtype_to_abbr(obj.dtype)}{_stringify_shape(obj.shape)})`"  # noqa: B950
 
 
 @_format_argument.register

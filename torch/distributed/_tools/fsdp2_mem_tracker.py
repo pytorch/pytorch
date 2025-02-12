@@ -387,10 +387,10 @@ class FSDPMemTracker(MemTracker):
                         fsdp_param_group.pre_backward,
                         fsdp_param_group.post_backward,
                     )
-                    fsdp_param_group.pre_backward = self._fsdp_param_group_pre_backward(  # type: ignore[assignment]
+                    fsdp_param_group.pre_backward = self._fsdp_param_group_pre_backward(
                         module, fsdp_param_group.pre_backward
                     )
-                    fsdp_param_group.post_backward = (  # type: ignore[assignment]
+                    fsdp_param_group.post_backward = (
                         self._fsdp_param_group_post_backward(
                             module, fsdp_param_group.post_backward
                         )

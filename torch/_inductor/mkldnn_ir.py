@@ -460,7 +460,7 @@ class ConvolutionBinaryInplace(ExternKernelAlloc):
             unary_algorithm,
         ]
         packed = ConvolutionBinaryInplace(
-            kernel_layout=NoneLayout(device=inputs[1].get_device()),  # type: ignore[arg-type]
+            kernel_layout=NoneLayout(device=inputs[1].get_device()),
             inputs=inputs,
             constant_args=constant_args,
         )

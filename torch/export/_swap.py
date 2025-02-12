@@ -429,8 +429,8 @@ def _swap_modules(
     _fix_input_output_signature(gm, ep.module_call_graph[0].signature)
 
     gm.module_call_graph = ep.module_call_graph
-    gm.train = types.MethodType(type(gm).train, gm)  # type: ignore[assignment]
-    gm.eval = types.MethodType(type(gm).eval, gm)  # type: ignore[assignment]
+    gm.train = types.MethodType(type(gm).train, gm)
+    gm.eval = types.MethodType(type(gm).eval, gm)
 
     assert isinstance(gm, torch.fx.GraphModule)
     gm = _swap_module_helper(gm, modules_to_swap, module_call_graph)

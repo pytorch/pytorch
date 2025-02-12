@@ -146,7 +146,7 @@ def get_first_attr(obj: Any, *attrs: str) -> Any:
     raise AssertionError(f"{obj} does not has any of the attributes: {attrs}")
 
 
-dynamo_timed = torch._dynamo.utils.dynamo_timed  # type: ignore[has-type]
+dynamo_timed = torch._dynamo.utils.dynamo_timed
 
 
 def triton_hash_to_path_key(key: str) -> str:

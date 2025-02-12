@@ -14,9 +14,7 @@ def _get_sharding_prop_cache_info():
     """
     from torch.distributed.tensor._api import DTensor
 
-    return (
-        DTensor._op_dispatcher.sharding_propagator.propagate_op_sharding.cache_info()  # type:ignore[attr-defined]
-    )
+    return DTensor._op_dispatcher.sharding_propagator.propagate_op_sharding.cache_info()
 
 
 # Set namespace for exposed private names

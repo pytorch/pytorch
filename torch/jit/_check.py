@@ -101,7 +101,7 @@ class AttributeTypeIsSupportedChecker(ast.NodeVisitor):
             # Node where value=Constant(value=None, kind=None)
             if not isinstance(node, ast.Constant):
                 return False
-            if node.value:  # type: ignore[attr-defined]
+            if node.value:
                 return False
 
         return True

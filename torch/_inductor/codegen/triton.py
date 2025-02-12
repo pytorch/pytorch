@@ -1550,7 +1550,7 @@ class TritonCSE(CSE[TritonCSEVariable, Union[str, tuple[str, str]]]):
 
 
 class TritonKernel(SIMDKernel[TritonCSEVariable]):
-    overrides = TritonKernelOverrides  # type: ignore[assignment]
+    overrides = TritonKernelOverrides
     helper_functions: HelperFunctions
     kexpr: Callable[[sympy.Expr], str] = texpr
     allow_block_ptr = True
@@ -2214,7 +2214,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         if result_var.use_count > 1:
             load_counts[name] -= 1  # don't double count cache hit
         assert isinstance(result_var, TritonCSEVariable)
-        result_var.mask_vars = indexing.mask_vars  # type: ignore[assignment]
+        result_var.mask_vars = indexing.mask_vars
 
         if append_broadcast:
             line = f"tl.broadcast_to({result_var}, {append_broadcast})"
@@ -2324,7 +2324,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             f"{sorter_indices}, "
             f"{block_size}, "
             ")",
-            dtype=indexing_dtype,  # type: ignore[attr-defined]
+            dtype=indexing_dtype,
         )
 
         return result
@@ -2959,7 +2959,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             )
             for result_var, cache_key in zip(result_vars, cache_keys):
                 if masks:
-                    result_var.mask_vars = masks  # type: ignore[attr-defined]
+                    result_var.mask_vars = masks
                 self.cse.put(cache_key, result_var)
             return tuple(result_vars)
 
@@ -3041,13 +3041,13 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             cache_keys = [f"{line}, {i}, {masks}" for i in range(n)]
             if all(self.cse.contains(cache_key) for cache_key in cache_keys):
                 return [self.cse.get(cache_key) for cache_key in cache_keys]
-            result_vars = [self.cse.newvar(dtype=dtypes[i]) for i in range(n)]  # type: ignore[attr-defined]
+            result_vars = [self.cse.newvar(dtype=dtypes[i]) for i in range(n)]
             self.compute.writeline(
                 f"{csv(result_vars)} = {line}",
             )
             for result_var, cache_key in zip(result_vars, cache_keys):
                 if masks:
-                    result_var.mask_vars = masks  # type: ignore[attr-defined]
+                    result_var.mask_vars = masks
                 self.cse.put(cache_key, result_var)
             return tuple(result_vars)
 
@@ -3064,7 +3064,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             raise AssertionError("Unhandled sort")
 
         for result_var, input_var in zip(result_vars, values):
-            result_var.mask_vars = masks  # type: ignore[attr-defined]
+            result_var.mask_vars = masks
             result_var.bounds = input_var.bounds
 
         return tuple(result_vars)
@@ -3185,7 +3185,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                     # note that random seed is put in V.graph.constants
                     const_tensor = V.graph.constants[arg_name]
                     result.writeline(
-                        f"{var_name} = rand_strided({V.graph.sizevars.size_hints(const_tensor.size())}, {V.graph.sizevars.size_hints(const_tensor.stride())}, device='{const_tensor.device}', dtype={const_tensor.dtype})"  # type: ignore[arg-type]  # noqa: B950 line too long
+                        f"{var_name} = rand_strided({V.graph.sizevars.size_hints(const_tensor.size())}, {V.graph.sizevars.size_hints(const_tensor.stride())}, device='{const_tensor.device}', dtype={const_tensor.dtype})"  # noqa: B950 line too long
                     )
                 elif isinstance(arg_sig, SizeArg):
                     symval_hint = V.graph.sizevars.size_hint(arg_sig.expr)
@@ -3490,7 +3490,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         # during launching the Inductor-compiled Triton kernel.
         # https://github.com/pytorch/pytorch/issues/120478#issuecomment-1962822307
         # https://github.com/openai/triton/blob/231efe9ed2d200be0f69a07c298e4342b08efe3d/python/triton/runtime/jit.py#L384
-        for arg_num in equal_1_arg_indices(signature):  # type: ignore[index]
+        for arg_num in equal_1_arg_indices(signature):
             triton_meta["constants"][signature[arg_num].name] = 1  # type: ignore[index,union-attr]
 
         self.triton_meta = triton_meta
@@ -4040,7 +4040,7 @@ class TritonScheduling(SIMDScheduling):
             def store_cache():
                 path = cache_file_path()
                 with open(path, "w") as fd:
-                    fd.write(str(ms))  # type: ignore[has-type]
+                    fd.write(str(ms))
 
             def load_cache():
                 path = cache_file_path()

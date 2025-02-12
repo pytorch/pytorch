@@ -71,7 +71,7 @@ class PythonDispatcher:
     supported_keys = runtime_keys + alias_keys
 
     def __init__(self) -> None:
-        C._dispatch_check_invariants(self.name)  # type: ignore[attr-defined]
+        C._dispatch_check_invariants(self.name)
         self.ref = C._dispatch_library("FRAGMENT", self.namespace, "")
         self.ref.def_("foo(Tensor x) -> Tensor")
 
@@ -137,7 +137,7 @@ class PythonDispatcher:
     """
 
     def rawRegistrations(self):
-        return C._dispatch_dump(f"{self.namespace}::{self.name}")  # type: ignore[attr-defined]
+        return C._dispatch_dump(f"{self.namespace}::{self.name}")
 
     """
     Returns raw output of computed dispatch table for debugging only.
@@ -145,7 +145,7 @@ class PythonDispatcher:
     """
 
     def rawDispatchTable(self):
-        return C._dispatch_dump_table(f"{self.namespace}::{self.name}")  # type: ignore[attr-defined]
+        return C._dispatch_dump_table(f"{self.namespace}::{self.name}")
 
     """
     Returns a table(str) including all the registrations from users.

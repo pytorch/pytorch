@@ -949,7 +949,7 @@ class InstructionTranslatorBase(
             inner_fn = fn.fn
         if inner_fn and callable(inner_fn) and is_forbidden(inner_fn):
             raise AssertionError(f"Attempt to trace forbidden callable {inner_fn}")
-        self.push(fn.call_function(self, args, kwargs))  # type: ignore[arg-type]
+        self.push(fn.call_function(self, args, kwargs))
 
     def inline_generator_function(self, fn, args, kwargs):
         """
@@ -1203,7 +1203,7 @@ class InstructionTranslatorBase(
     def DELETE_FAST(self, inst):
         del self.symbolic_locals[inst.argval]
 
-    def STORE_DEREF(self, inst):  # type: ignore[override]
+    def STORE_DEREF(self, inst):
         assert inst.argval in self.cell_and_freevars()
         cell = self.symbolic_locals[inst.argval]
         val = self.pop()
@@ -1211,7 +1211,7 @@ class InstructionTranslatorBase(
 
         assert isinstance(cell, CellVariable)  # tame mypy
         if cell.local_name is not None:
-            val.set_name_hint(cell.local_name)  # type: ignore[attr-defined]
+            val.set_name_hint(cell.local_name)
 
     LOAD_CLOSURE = LOAD_FAST
 
@@ -3442,7 +3442,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
         unimplemented("cant resume while inlining")
 
     def RETURN_VALUE(self, inst):
-        self.symbolic_result = self.pop()  # type: ignore[assignment]
+        self.symbolic_result = self.pop()
         self.instruction_pointer = None
         raise ReturnValueOp
 
@@ -3456,7 +3456,11 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
             module_name = self.f_globals["__name__"]
             module_source = self.import_source(module_name)
             if "torch_package" in module_name:
-                fglobals_value = torch.package.package_importer._package_imported_modules[module_name]  # type: ignore[assignment]
+                fglobals_value = (
+                    torch.package.package_importer._package_imported_modules[
+                        module_name
+                    ]
+                )
             else:
                 fglobals_value = _import_module(module_name)
             fglobals_vt = VariableTracker.build(self, fglobals_value, module_source)
@@ -3466,7 +3470,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
                 "___unnamed_scope", self.f_globals
             )
             globals_source = GlobalSource(globals_name)
-            fglobals_value = self.f_globals  # type: ignore[assignment]
+            fglobals_value = self.f_globals
             fglobals_vt = VariableTracker.build(self, fglobals_value, globals_source)
             global_source = DictGetItemSource(globals_source, name)  # type: ignore[assignment]
         return fglobals_value, fglobals_vt, global_source

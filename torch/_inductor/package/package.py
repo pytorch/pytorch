@@ -279,10 +279,10 @@ class AOTICompiledModel:
         log.warning(
             "AOTICompiledModel deepcopy warning: AOTICompiledModel.loader is not deepcopied."
         )
-        return AOTICompiledModel(self.loader)  # type: ignore[attr-defined]
+        return AOTICompiledModel(self.loader)
 
 
-def load_package(path: FileLike, model_name: str = "model") -> AOTICompiledModel:  # type: ignore[type-arg]
+def load_package(path: FileLike, model_name: str = "model") -> AOTICompiledModel:
     assert (
         isinstance(path, (io.IOBase, IO)) and path.readable() and path.seekable()
     ) or (

@@ -1,15 +1,11 @@
 # mypy: allow-untyped-defs
 import argparse
 
-import numpy as np  # type: ignore[import]
-import pandas as pd  # type: ignore[import]
-import sklearn  # type: ignore[import]
-from dlrm_s_pytorch import unpack_batch  # type: ignore[import]
-from dlrm_utils import (  # type: ignore[import]
-    dlrm_wrap,
-    fetch_model,
-    make_test_data_loader,
-)
+import numpy as np
+import pandas as pd
+import sklearn
+from dlrm_s_pytorch import unpack_batch
+from dlrm_utils import dlrm_wrap, fetch_model, make_test_data_loader
 
 import torch
 

@@ -15,7 +15,7 @@ from torch._subclasses import fake_tensor
 
 
 if TYPE_CHECKING:
-    import onnx.defs.OpSchema.AttrType  # type: ignore[import]  # noqa: TCH004
+    import onnx.defs.OpSchema.AttrType  # noqa: TCH004
 
 
 # Enable both TorchScriptTensor and torch.Tensor to be tested
@@ -50,7 +50,7 @@ def from_torch_dtype_to_onnx_dtype_str(dtype: torch.dtype | type) -> set[str]:
 def from_python_type_to_onnx_attribute_type(
     dtype: type, is_sequence: bool = False
 ) -> onnx.defs.OpSchema.AttrType | None:
-    import onnx.defs  # type: ignore[import]
+    import onnx.defs
 
     _PYTHON_TYPE_TO_ONNX_ATTRIBUTE_TYPE = {
         float: onnx.defs.OpSchema.AttrType.FLOAT,

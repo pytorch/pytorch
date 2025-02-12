@@ -202,7 +202,7 @@ def _get_first_tensor_in_node_list(
 
 def _get_named_fx_node_args(node: torch.fx.Node) -> dict[str, torch.fx.node.Argument]:
     assert hasattr(node.target, "_schema")
-    torch_schema: torch.FunctionSchema = node.target._schema  # type: ignore[union-attr]
+    torch_schema: torch.FunctionSchema = node.target._schema
     node_args = {}
     for arg, schema_arg in zip(node.args, torch_schema.arguments):
         node_args[schema_arg.name] = arg
@@ -234,8 +234,7 @@ def get_matching_overload(
     named_args = _get_named_fx_node_args(node)
     # FIXME: Handle when we don't know the names of the arguments
     schema_args: dict[str, torch.Argument] = {
-        arg.name: arg
-        for arg in node.target._schema.arguments  # type: ignore[union-attr]
+        arg.name: arg for arg in node.target._schema.arguments
     }
     failure_messages: list[str] = []
     for overload in overloads:
@@ -273,28 +272,28 @@ def get_matching_overload(
 
             if isinstance(param, _schemas.Parameter):
                 if isinstance(arg, torch.Tensor):
-                    arg = _get_type_from_tensor(arg)  # type: ignore[assignment]
+                    arg = _get_type_from_tensor(arg)
                 if isinstance(arg, (list, tuple)) and any(
                     isinstance(t, torch.fx.Node) for t in arg
                 ):
                     first_tensor = _get_first_tensor_in_node_list(arg)  # type: ignore[arg-type]
                     assert first_tensor is not None
                     # FIXME: Handle symfloat here
-                    arg = ir.SequenceType(_get_type_from_tensor(first_tensor))  # type: ignore[assignment]
+                    arg = ir.SequenceType(_get_type_from_tensor(first_tensor))
                 elif isinstance(arg, torch.fx.Node):
                     meta_val = arg.meta["val"]
-                    arg = _get_type_from_tensor(meta_val)  # type: ignore[assignment]
+                    arg = _get_type_from_tensor(meta_val)
                 # TODO: Handle None attributes
                 # FIXME: Handle symfloat etc.
                 # Handle tensors and Python values
-                if not _param_type_compatible_with_arg(param, arg, assigned_types):  # type: ignore[arg-type]
+                if not _param_type_compatible_with_arg(param, arg, assigned_types):
                     fail_reason = (
                         f"Parameter type not compatible with argument: param=`{param}`, "
                         f"assigned_types=`{assigned_types}`, arg=`{arg}`"
                     )
                     break
             elif isinstance(param, _schemas.AttributeParameter):
-                if not _attribute_type_compatible_with_arg(param, arg):  # type: ignore[arg-type]
+                if not _attribute_type_compatible_with_arg(param, arg):
                     fail_reason = f"Attribute type not compatible with argument: param=`{param}`, arg=`{arg}`"
                     break
         if not fail_reason:

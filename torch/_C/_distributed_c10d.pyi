@@ -598,7 +598,7 @@ class ProcessGroupNCCL(Backend):
     @property
     def uid(self) -> int: ...
     @property
-    def options(self) -> Options: ...  # type: ignore[override]
+    def options(self) -> Options: ...
 
 class ProcessGroupUCC(Backend):
     def __init__(

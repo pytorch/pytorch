@@ -39,7 +39,7 @@ class DummyModel(nn.Module):
 
 
 def _make_lightning_module(iC: int, oC: list[int]):
-    import pytorch_lightning as pl  # type: ignore[import]
+    import pytorch_lightning as pl
 
     class DummyLightningModule(pl.LightningModule):
         def __init__(self, ic: int, oC: list[int]):

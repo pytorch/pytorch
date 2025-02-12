@@ -78,7 +78,7 @@ class MapperIterDataPipe(IterDataPipe[_T_co]):
         self.datapipe = datapipe
 
         _check_unpickable_fn(fn)
-        self.fn = fn  # type: ignore[assignment]
+        self.fn = fn
 
         self.input_col = input_col
         if input_col is None and output_col is not None:
@@ -159,7 +159,7 @@ def _collate_helper(conversion, item):
         else:
             # TODO(VitalyFedyunin): Add default collation into df_wrapper
             try:
-                import torcharrow.pytorch as tap  # type: ignore[import]
+                import torcharrow.pytorch as tap
 
                 collation_fn = tap.rec.Default()
             except Exception as e:

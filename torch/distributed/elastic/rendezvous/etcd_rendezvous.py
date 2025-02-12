@@ -16,7 +16,7 @@ from typing import Optional
 
 
 try:
-    import etcd  # type: ignore[import]
+    import etcd
 except ModuleNotFoundError:
     from . import _etcd_stub as etcd
 

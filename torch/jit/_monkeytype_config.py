@@ -13,15 +13,11 @@ import torch
 
 _IS_MONKEYTYPE_INSTALLED = True
 try:
-    import monkeytype  # type: ignore[import]
+    import monkeytype
     from monkeytype import trace as monkeytype_trace
-    from monkeytype.config import _startswith, LIB_PATHS  # type: ignore[import]
-    from monkeytype.db.base import (  # type: ignore[import]
-        CallTraceStore,
-        CallTraceStoreLogger,
-        CallTraceThunk,
-    )
-    from monkeytype.tracing import CallTrace, CodeFilter  # type: ignore[import]
+    from monkeytype.config import _startswith, LIB_PATHS
+    from monkeytype.db.base import CallTraceStore, CallTraceStoreLogger, CallTraceThunk
+    from monkeytype.tracing import CallTrace, CodeFilter
 except ImportError:
     _IS_MONKEYTYPE_INSTALLED = False
 
@@ -171,7 +167,7 @@ else:
         def __init__(self) -> None:
             pass
 
-    monkeytype_trace = None  # type: ignore[assignment]  # noqa: F811
+    monkeytype_trace = None  # noqa: F811
 
 
 def jit_code_filter(code: CodeType) -> bool:

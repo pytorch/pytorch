@@ -221,8 +221,12 @@ else:
                 if cur_rank in mesh_nd:
                     res_flattened_mesh = flattened_mesh
             self.child_to_root_mapping[res_flattened_mesh] = root_mesh  # type: ignore[possibly-undefined]
-            self.root_to_flatten_mapping.setdefault(root_mesh, {})[mesh_dim_name] = res_flattened_mesh  # type: ignore[possibly-undefined]
-            self.flatten_name_to_root_dims[root_mesh][mesh_dim_name] = tuple(flatten_dims_in_root)  # type: ignore[possibly-undefined]
+            self.root_to_flatten_mapping.setdefault(root_mesh, {})[
+                mesh_dim_name
+            ] = res_flattened_mesh
+            self.flatten_name_to_root_dims[root_mesh][mesh_dim_name] = tuple(
+                flatten_dims_in_root
+            )
 
             return res_flattened_mesh
 
@@ -755,7 +759,7 @@ else:
             # Quick return if the current device_mesh is a 1D mesh.
             if self.mesh.ndim == 1 and mesh_dim is None:
                 return not_none(
-                    _find_pg_by_ranks_and_tag(*self._dim_group_infos[0][:2])  # type: ignore[index]
+                    _find_pg_by_ranks_and_tag(*self._dim_group_infos[0][:2])
                 )
 
             root_mesh = _mesh_resources.get_root_mesh(self)

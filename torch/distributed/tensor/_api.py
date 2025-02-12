@@ -72,7 +72,7 @@ aten = torch.ops.aten
 #
 class _ToTorchTensor(torch.autograd.Function):
     @staticmethod
-    def forward(  # type: ignore[override]
+    def forward(
         ctx,
         input: "DTensor",
         grad_placements: Optional[Sequence[Placement]],
@@ -120,7 +120,7 @@ class _ToTorchTensor(torch.autograd.Function):
 
 class _FromTorchTensor(torch.autograd.Function):
     @staticmethod
-    def forward(  # type: ignore[override]
+    def forward(
         ctx,  # pyre-ignore[2]: Parameter must be annotated.
         input: torch.Tensor,
         device_mesh: DeviceMesh,
@@ -601,7 +601,7 @@ class DTensor(torch.Tensor):
         )
 
         if hasattr(self._local_tensor, "__create_write_items__"):
-            return self._local_tensor.__create_write_items__(fqn, object)  # type: ignore[attr-defined]
+            return self._local_tensor.__create_write_items__(fqn, object)
         elif isinstance(self._local_tensor, torch.Tensor):
             return [_create_write_items_for_dtensor(fqn, object)]
         else:
@@ -623,7 +623,7 @@ class DTensor(torch.Tensor):
         )
 
         if hasattr(self._local_tensor, "__create_chunk_list__"):
-            return self._local_tensor.__create_chunk_list__()  # type: ignore[attr-defined]
+            return self._local_tensor.__create_chunk_list__()
         elif isinstance(self._local_tensor, torch.Tensor):
             return [_create_chunk_from_dtensor(self)]
         else:
@@ -631,7 +631,7 @@ class DTensor(torch.Tensor):
 
     def __get_tensor_shard__(self, index):
         if hasattr(self._local_tensor, "__get_tensor_shard__"):
-            return self._local_tensor.__get_tensor_shard__(index)  # type: ignore[attr-defined]
+            return self._local_tensor.__get_tensor_shard__(index)
         elif isinstance(self._local_tensor, torch.Tensor):
             return self.to_local()
         else:
@@ -694,13 +694,9 @@ def distribute_tensor(
         try:
             # call PyTorch/XLA SPMD for `xla` backend type device mesh.
             # This returns XLAShardedTensor
-            from torch_xla.distributed.spmd import (  # type:ignore[import]
-                xla_distribute_tensor,
-            )
+            from torch_xla.distributed.spmd import xla_distribute_tensor
 
-            return xla_distribute_tensor(
-                tensor, device_mesh, placements
-            )  # type:ignore[return-value]
+            return xla_distribute_tensor(tensor, device_mesh, placements)
         except ImportError as e:
             msg = "To use DTensor API with xla, you must install the torch_xla package!"
             raise ImportError(msg) from e
@@ -881,13 +877,11 @@ def distribute_module(
             # This function annotates all module parameters for auto-partitioning with
             # PyTorch/XLA SPMD or explicitly partition to :class:`XLAShardedTensor` parameters
             # according to the `partition_fn` specified.
-            from torch_xla.distributed.spmd import (  # type:ignore[import]
-                xla_distribute_module,
-            )
+            from torch_xla.distributed.spmd import xla_distribute_module
 
             return xla_distribute_module(
                 module, device_mesh, partition_fn, input_fn, output_fn
-            )  # type:ignore[return-value]
+            )
         except ImportError as e:
             msg = "To use DTensor API with xla, you must install the torch_xla package!"
             raise ImportError(msg) from e

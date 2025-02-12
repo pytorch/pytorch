@@ -285,7 +285,7 @@ def redistribute_local_tensor(
 
 class Redistribute(torch.autograd.Function):
     @staticmethod
-    def forward(  # type: ignore[override]
+    def forward(
         # pyre-fixme[2]: Parameter must be annotated.
         ctx,
         input: "dtensor.DTensor",

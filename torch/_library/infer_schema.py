@@ -88,7 +88,7 @@ def infer_schema(
         if changed:
             return tuple(res), True
         else:
-            return tys, False  # type: ignore[return-value]
+            return tys, False
 
     def unstringify_type(ty: Union[type[object], str]) -> tuple[typing.Any, bool]:
         # Dig through a generic type and if it contains a stringified type

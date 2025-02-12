@@ -278,7 +278,7 @@ def load_sharded_optimizer_state_dict(
                 dp_pg_device_type, i % device_module.device_count()
             )
             placements.append(f"rank:{i}/{device_info}")
-        sharding_spec = ChunkShardingSpec(dim=0, placements=placements)  # type: ignore[arg-type]
+        sharding_spec = ChunkShardingSpec(dim=0, placements=placements)
     else:
         sharding_spec = _create_colwise_spec(dp_pg)
 

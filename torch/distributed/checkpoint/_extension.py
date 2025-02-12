@@ -120,7 +120,7 @@ class ZStandard(StreamTransformExtension):
 
     def transform_to(self, output: IO[bytes]) -> IO[bytes]:
         if zstandard is not None:
-            compressor = zstandard.ZstdCompressor()  # type: ignore[union-attr]
+            compressor = zstandard.ZstdCompressor()
             return compressor.stream_writer(output)
 
         class Writer(io.RawIOBase):
@@ -147,7 +147,7 @@ class ZStandard(StreamTransformExtension):
 
     def transform_from(self, input: IO[bytes]) -> IO[bytes]:
         if zstandard is not None:
-            decompressor = zstandard.ZstdDecompressor()  # type: ignore[union-attr]
+            decompressor = zstandard.ZstdDecompressor()
             return decompressor.stream_reader(input)
 
         class Reader(io.RawIOBase):

@@ -3,7 +3,7 @@ from collections import defaultdict
 from copy import deepcopy
 from typing import Any, Optional, TYPE_CHECKING
 
-import pytorch_lightning as pl  # type: ignore[import]
+import pytorch_lightning as pl
 
 from ._data_sparstity_utils import (
     _attach_model_to_data_sparsifier,

@@ -11,7 +11,7 @@ try:
     from torch._dynamo.external_utils import is_compiling as is_torchdynamo_compiling
 except Exception:
 
-    def is_torchdynamo_compiling():  # type: ignore[misc]
+    def is_torchdynamo_compiling():
         return False
 
 

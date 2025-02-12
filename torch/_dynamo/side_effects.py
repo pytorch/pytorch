@@ -524,7 +524,7 @@ class SideEffects:
                     )
                     cg.extend_output(create_call_function(0, False))
                     cg.add_cache(var)
-                    var.source = LocalSource(cg.tempvars[var])  # type: ignore[attr-defined]
+                    var.source = LocalSource(cg.tempvars[var])
                 elif var.source is None:
                     var.source = LocalCellSource(var.local_name)
             elif isinstance(var.mutation_type, AttributeMutationNew):
@@ -538,7 +538,7 @@ class SideEffects:
 
                     def load_new_method():
                         assert var.base_cls_vt is not None
-                        cg(var.base_cls_vt)  # type: ignore[attr-defined]
+                        cg(var.base_cls_vt)
                         cg.extend_output([cg.create_load_attr("__new__")])
 
                     cg.add_push_null(load_new_method)
@@ -662,7 +662,7 @@ class SideEffects:
             if isinstance(var, variables.ListVariable):
                 # old[:] = new
                 cg(var, allow_cache=False)  # Don't codegen via source
-                cg(var.source)  # type: ignore[attr-defined]
+                cg(var.source)
                 cg.extend_output(
                     [
                         cg.create_load_const(None),
@@ -711,12 +711,12 @@ class SideEffects:
                 # (5) update the original dictionary with the dict created in (2)
 
                 if var.has_new_items():
-                    cg(var.source)  # type: ignore[attr-defined]
+                    cg(var.source)
                     cg.load_method("update")
                     cg(var, allow_cache=False)  # Don't codegen via source
 
                     if var.should_reconstruct_all:
-                        cg(var.source)  # type: ignore[attr-defined]
+                        cg(var.source)
                         cg.load_method("clear")
 
                     suffixes.append(
@@ -794,7 +794,7 @@ class SideEffects:
                         ]
                     )
 
-                    cg(var.source)  # type: ignore[attr-defined]
+                    cg(var.source)
                     cg.extend_output(
                         [
                             create_instruction(
@@ -845,7 +845,7 @@ class SideEffects:
                     if isinstance(var, variables.NewGlobalVariable):
                         cg.tx.output.update_co_names(name)
                         cg(value)
-                        assert isinstance(var.source, GlobalSource)  # type: ignore[attr-defined]
+                        assert isinstance(var.source, GlobalSource)
                         suffixes.append(
                             [create_instruction("STORE_GLOBAL", argval=name)]
                         )
@@ -865,7 +865,7 @@ class SideEffects:
                         # __setattr__ is defined on this object, so call object.__setattr__ directly
                         cg.load_import_from("builtins", "object")
                         cg.load_method("__setattr__")
-                        cg(var.source)  # type: ignore[attr-defined]
+                        cg(var.source)
                         cg(variables.ConstantVariable(name))
                         cg(value)
                         suffixes.append(
@@ -881,13 +881,13 @@ class SideEffects:
                     cg.add_push_null(
                         lambda: cg.load_import_from(utils.__name__, "iter_next")
                     )
-                    cg(var.source)  # type: ignore[attr-defined]
+                    cg(var.source)
                     cg.call_function(1, False)
                     cg.pop_top()
             elif isinstance(var, variables.RandomVariable):
                 # set correct random seed state
                 def gen_fn():
-                    cg(var.source)  # type: ignore[attr-defined]
+                    cg(var.source)
                     cg.load_attr("setstate")
 
                 cg.add_push_null(gen_fn)

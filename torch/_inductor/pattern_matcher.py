@@ -1201,7 +1201,7 @@ class ReplacementPatternEntry(PatternEntry):
                     idx = maybe_getitem(user)
                     if idx is None:
                         raise AssertionError("can't handle")
-                    replace(user, new[idx])  # type: ignore[index]
+                    replace(user, new[idx])
                 graph.erase_node(old)
 
             if len(output_nodes) == len(replacement):
@@ -1851,14 +1851,17 @@ class PatternMatcherPass:
                     # pattern match crosses mutation barrier - discard
                     if (
                         is_match(m)
-                        and len(OrderedSet(map(get_mutation_region_id_partial, m.nodes))) != 1  # type: ignore[possibly-undefined]
+                        and len(
+                            OrderedSet(map(get_mutation_region_id_partial, m.nodes))
+                        )
+                        != 1
                     ):
                         continue
                     if os.environ.get("TORCHINDUCTOR_PATTERN_MATCH_DEBUG") == node.name:
                         log.warning("%s%s %s %s", node, node.args, m, entry.pattern)
                     if is_match(m) and entry.extra_check(m):
                         count += 1
-                        entry.apply(m, graph, node)  # type: ignore[arg-type]
+                        entry.apply(m, graph, node)
                         counters["inductor"]["pattern_matcher_count"] += 1
                         counters["inductor"]["pattern_matcher_nodes"] += len(m.nodes)
         return count
@@ -2030,7 +2033,7 @@ def joint_fwd_bwd(fn: Callable[..., Any], args: Sequence[Any]) -> torch.fx.Graph
     GraphPatternEntry(
         pattern=pattern, handler=pointless_view, extra_check=_return_true
     ).register(matcher_pass.patterns)
-    matcher_pass.apply(gm.graph)  # type: ignore[arg-type]
+    matcher_pass.apply(gm.graph)
 
     # remove in/out specs
     gm.graph._codegen = torch.fx.graph.CodeGen()

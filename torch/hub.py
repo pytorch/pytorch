@@ -22,7 +22,7 @@ import torch
 from torch.serialization import MAP_LOCATION
 
 
-class _Faketqdm:  # type: ignore[no-redef]
+class _Faketqdm:
     def __init__(self, total=None, disable=False, unit=None, *args, **kwargs):
         self.total = total
         self.disable = disable

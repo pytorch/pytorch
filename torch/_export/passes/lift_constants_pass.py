@@ -327,7 +327,7 @@ def rewrite_script_object_meta(
             node.meta["val"] = new_meta
 
         elif isinstance(old_meta, FakeScriptObject):
-            class_fqn = old_meta.script_class_name  # type: ignore[attr-defined]
+            class_fqn = old_meta.script_class_name
             new_meta = CustomObjArgument(node.name, class_fqn, old_meta)
             constants[node.name] = old_meta
             node.meta["val"] = new_meta

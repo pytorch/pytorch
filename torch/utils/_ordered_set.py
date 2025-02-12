@@ -135,12 +135,12 @@ class OrderedSet(MutableSet[T]):
     def __eq__(self, other: AbstractSet[T]) -> bool:  # type: ignore[misc, override]
         if isinstance(other, OrderedSet):
             return self._dict == other._dict
-        return super().__eq__(other)  # type: ignore[arg-type]
+        return super().__eq__(other)
 
     def __ne__(self, other: AbstractSet[T]) -> bool:  # type: ignore[misc, override]
         if isinstance(other, OrderedSet):
             return self._dict != other._dict
-        return super().__ne__(other)  # type: ignore[arg-type]
+        return super().__ne__(other)
 
     def __or__(self, other: AbstractSet[T_co]) -> OrderedSet[T]:
         return cast(OrderedSet[T], super().__or__(other))

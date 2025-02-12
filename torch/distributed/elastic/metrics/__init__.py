@@ -159,6 +159,6 @@ def initialize_metrics(cfg: Optional[MetricsConfig] = None):
 
 
 try:
-    from torch.distributed.elastic.metrics.static_init import *  # type: ignore[import] # noqa: F401 F403
+    from torch.distributed.elastic.metrics.static_init import *  # noqa: F401 F403
 except ModuleNotFoundError:
     pass

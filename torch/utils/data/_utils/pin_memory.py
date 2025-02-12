@@ -25,7 +25,7 @@ def _pin_memory_loop(in_queue, out_queue, device_id, done_event, device):
     if device == "cuda":
         torch.cuda.set_device(device_id)
     elif device == "xpu":
-        torch.xpu.set_device(device_id)  # type: ignore[attr-defined]
+        torch.xpu.set_device(device_id)
     elif device == torch._C._get_privateuse1_backend_name():
         custom_device_mod = getattr(torch, torch._C._get_privateuse1_backend_name())
         custom_device_mod.set_device(device_id)

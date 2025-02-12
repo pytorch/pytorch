@@ -108,7 +108,7 @@ if is_available():
         # If Meta/Python keys are in the TLS, we want to make sure that we ignore them
         # and hit the (default) CPU/CUDA implementation of barrier.
         meta_in_tls = torch._C._meta_in_tls_dispatch_include()
-        guard = torch._C._DisableTorchDispatch()  # type: ignore[attr-defined]
+        guard = torch._C._DisableTorchDispatch()
         torch._C._set_meta_in_tls_dispatch_include(False)
         try:
             barrier()

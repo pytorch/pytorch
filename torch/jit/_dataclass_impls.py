@@ -67,7 +67,7 @@ def synthesize__init__(cls) -> ParsedDef:
         if isinstance(ann, dataclasses.InitVar):
             # The TorchScript interpreter can't handle InitVar annotations, so we unwrap the underlying type here
             init_vars.append(name)
-            params.append(param.replace(annotation=ann.type))  # type: ignore[attr-defined]
+            params.append(param.replace(annotation=ann.type))
         else:
             params.append(param)
 

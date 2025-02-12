@@ -158,8 +158,8 @@ def simple_floordiv_gcd(p: sympy.Basic, q: sympy.Basic) -> sympy.Basic:
     divisor_split: tuple[sympy.Basic, ...] = sympy.Mul.make_args(q)
     for x in divisor_split:
         if all(x in base_split for base_split in base_splits):
-            gcd = gcd * x  # type: ignore[operator]  # remove in py3.12
-    return gcd  # type: ignore[return-value]  # remove in py3.12
+            gcd = gcd * x  # remove in py3.12
+    return gcd  # remove in py3.12
 
 
 # It would be nice to have assertions on whether or not inputs is_integer
@@ -356,11 +356,11 @@ class ModularIndexing(sympy.Function):
 
     def _eval_is_nonnegative(self) -> Optional[bool]:
         p, q = self.args[:2]
-        return fuzzy_eq(p.is_nonnegative, q.is_nonnegative)  # type: ignore[attr-defined]
+        return fuzzy_eq(p.is_nonnegative, q.is_nonnegative)
 
     def _eval_is_positive(self) -> Optional[bool]:
         p, q = self.args[:2]
-        return fuzzy_eq(p.is_positive, q.is_positive)  # type: ignore[attr-defined]
+        return fuzzy_eq(p.is_positive, q.is_positive)
 
 
 class Where(sympy.Function):
@@ -372,17 +372,17 @@ class Where(sympy.Function):
     precedence: int = 35  # lower precedence than add
 
     def _eval_is_integer(self) -> Optional[bool]:
-        return True if self.args[1].is_integer and self.args[2].is_integer else None  # type: ignore[attr-defined]
+        return True if self.args[1].is_integer and self.args[2].is_integer else None
 
     def _eval_is_nonnegative(self) -> Optional[bool]:
         return (
             True
-            if self.args[1].is_nonnegative and self.args[2].is_nonnegative  # type: ignore[attr-defined]
+            if self.args[1].is_nonnegative and self.args[2].is_nonnegative
             else None
         )
 
     def _eval_is_positive(self) -> Optional[bool]:
-        return True if self.args[1].is_positive and self.args[2].is_positive else None  # type: ignore[attr-defined]
+        return True if self.args[1].is_positive and self.args[2].is_positive else None
 
     @classmethod
     def eval(
@@ -449,10 +449,10 @@ class PythonMod(sympy.Function):
 
     # NB: args[1] for PythonMod
     def _eval_is_nonnegative(self) -> Optional[bool]:
-        return True if self.args[1].is_positive else None  # type: ignore[attr-defined]
+        return True if self.args[1].is_positive else None
 
     def _eval_is_nonpositive(self) -> Optional[bool]:
-        return True if self.args[1].is_negative else None  # type: ignore[attr-defined]
+        return True if self.args[1].is_negative else None
 
 
 # Generic modulus: only defined on non-negative arguments
@@ -602,7 +602,7 @@ class MinMaxBase(Expr, LatticeOp):  # type: ignore[misc]
                 # also reshape Max(a, Max(b, c)) to Max(a, b, c)
                 args = frozenset(cls._new_args_filter(args))  # type: ignore[assignment]
             except ShortCircuit:
-                return cls.zero  # type: ignore[attr-defined]
+                return cls.zero
 
             # No need to run _collapse_arguments and _find_localzeros, see the comment
             # in _satisfy_unique_summations_symbols.
@@ -616,7 +616,7 @@ class MinMaxBase(Expr, LatticeOp):  # type: ignore[misc]
         args = frozenset(args)
 
         if not args:
-            return cls.identity  # type: ignore[attr-defined]
+            return cls.identity
 
         if len(args) == 1:
             return list(args).pop()
@@ -733,7 +733,7 @@ class MinMaxBase(Expr, LatticeOp):  # type: ignore[misc]
         if cls is Min:
             other = Max
         else:
-            other = Min  # type: ignore[assignment]
+            other = Min
 
         # find global comparable max of Max and min of Min if a new
         # value is being introduced in these args at position 0 of
@@ -776,7 +776,7 @@ class MinMaxBase(Expr, LatticeOp):  # type: ignore[misc]
                     other = Max
                     T = small
             elif big != Max.identity:
-                other = Min  # type: ignore[assignment]
+                other = Min
                 T = big
             if T is not None:
                 # remove numerical redundancy
@@ -787,7 +787,7 @@ class MinMaxBase(Expr, LatticeOp):  # type: ignore[misc]
                         if (  # noqa: E712
                             (a0 > T) if other == Max else (a0 < T)  # noqa: E712
                         ) == True:  # noqa: E712
-                            args[i] = cls.identity  # type: ignore[attr-defined]
+                            args[i] = cls.identity
 
         # remove redundant symbolic args
         def do(ai, a):
@@ -857,9 +857,9 @@ class MinMaxBase(Expr, LatticeOp):  # type: ignore[misc]
             ):
                 raise ValueError(f"The argument '{arg}' is not comparable.")
 
-            if arg == cls.zero:  # type: ignore[attr-defined]
+            if arg == cls.zero:
                 raise ShortCircuit(arg)
-            elif arg == cls.identity:  # type: ignore[attr-defined]
+            elif arg == cls.identity:
                 continue
             elif arg.func == cls:
                 yield from arg.args
@@ -962,10 +962,10 @@ class Max(MinMaxBase, Application):  # type: ignore[misc]
     identity = S.NegativeInfinity
 
     def _eval_is_positive(self):  # type:ignore[override]
-        return fuzzy_or(a.is_positive for a in self.args)  # type: ignore[attr-defined]
+        return fuzzy_or(a.is_positive for a in self.args)
 
     def _eval_is_nonnegative(self):  # type:ignore[override]
-        return fuzzy_or(a.is_nonnegative for a in self.args)  # type: ignore[attr-defined]
+        return fuzzy_or(a.is_nonnegative for a in self.args)
 
     def _eval_is_negative(self):  # type:ignore[override]
         return fuzzy_and(a.is_negative for a in self.args)
@@ -980,10 +980,10 @@ class Min(MinMaxBase, Application):  # type: ignore[misc]
     identity = S.Infinity
 
     def _eval_is_positive(self):  # type:ignore[override]
-        return fuzzy_and(a.is_positive for a in self.args)  # type: ignore[attr-defined]
+        return fuzzy_and(a.is_positive for a in self.args)
 
     def _eval_is_nonnegative(self):  # type:ignore[override]
-        return fuzzy_and(a.is_nonnegative for a in self.args)  # type: ignore[attr-defined]
+        return fuzzy_and(a.is_nonnegative for a in self.args)
 
     def _eval_is_negative(self):  # type:ignore[override]
         return fuzzy_or(a.is_negative for a in self.args)
@@ -1277,14 +1277,14 @@ class Identity(sympy.Function):
 
     precedence = 10
 
-    def __repr__(self):  # type: ignore[override]
+    def __repr__(self):
         return f"Identity({self.args[0]})"
 
     def _eval_is_real(self):
         return self.args[0].is_real
 
     def _eval_is_integer(self):
-        return self.args[0].is_integer  # type: ignore[attr-defined]
+        return self.args[0].is_integer
 
     def _eval_expand_identity(self, **hints):
         # Removes the identity op.

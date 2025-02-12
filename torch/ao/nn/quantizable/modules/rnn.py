@@ -338,11 +338,11 @@ class _LSTMLayer(torch.nn.Module):
             elif hidden_bw is None:
                 (h, c) = torch.jit._unwrap_optional(hidden_fw)
             else:
-                h = torch.stack([hidden_fw[0], hidden_bw[0]], 0)  # type: ignore[list-item]
-                c = torch.stack([hidden_fw[1], hidden_bw[1]], 0)  # type: ignore[list-item]
+                h = torch.stack([hidden_fw[0], hidden_bw[0]], 0)
+                c = torch.stack([hidden_fw[1], hidden_bw[1]], 0)
         else:
             result = result_fw
-            h, c = torch.jit._unwrap_optional(hidden_fw)  # type: ignore[assignment]
+            h, c = torch.jit._unwrap_optional(hidden_fw)
 
         if self.batch_first:
             result.transpose_(0, 1)

@@ -119,7 +119,7 @@ class set_stance(_DecoratorContextManager):
         _set_stance(self.prev)
         wrapper = super().__call__(fn)
         # forbid wrapper in graph
-        wrapper._dynamo_forbidden = True  # type: ignore[attr-defined]
+        wrapper._dynamo_forbidden = True
         return wrapper
 
     def __enter__(self):
@@ -404,7 +404,7 @@ def substitute_in_graph(
         wrapped.__torch_dynamo_polyfill__ = traceable_fn  # type: ignore[attr-defined]
         wrapped.__torch_dynamo_can_constant_fold_through__ = can_constant_fold_through  # type: ignore[attr-defined]
 
-        return wrapped  # type: ignore[return-value]
+        return wrapped
 
     return wrapper
 
@@ -625,7 +625,7 @@ def _allow_in_graph_einops():
 
             try:
                 # requires einops > 0.6.1, torch >= 2.0
-                from einops._torch_specific import (  # type: ignore[attr-defined]  # noqa: F401
+                from einops._torch_specific import (  # noqa: F401
                     _ops_were_registered_in_torchdynamo,
                 )
 

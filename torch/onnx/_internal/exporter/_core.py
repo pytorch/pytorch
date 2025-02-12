@@ -796,7 +796,7 @@ def _get_inputs_and_attributes(
             } or isinstance(kwarg, torch.device):
                 attr = str(kwarg)
             elif isinstance(kwarg, torch.dtype):
-                attr = _torch_dtype_to_onnx_dtype(kwarg)  # type: ignore[assignment]
+                attr = _torch_dtype_to_onnx_dtype(kwarg)
             else:
                 attr = kwarg  # type: ignore[assignment]
 
@@ -1133,7 +1133,7 @@ def _exported_program_to_onnx_program(
         exported_program.named_buffers(),
         exported_program.constants.items(),
     ):
-        initializer = model.graph.initializers.get(name)  # type: ignore[assignment]
+        initializer = model.graph.initializers.get(name)
         if initializer is None:
             logger.warning("Tensor '%s' is not one of the initializers", name)
             continue
@@ -1240,7 +1240,7 @@ def export(
         # When input is a JIT module, the last strategy will succeed so it is handled
         result: _capture_strategies.Result | None = None
         for strategy_class in _capture_strategies.CAPTURE_STRATEGIES:
-            strategy = strategy_class(  # type: ignore[abstract]
+            strategy = strategy_class(
                 verbose=verbose is not False,  # Treat None as verbose
                 dump=dump_exported_program,
                 artifacts_dir=artifacts_dir,

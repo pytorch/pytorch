@@ -1306,7 +1306,7 @@ def register_module_as_pytree_input_node(cls: type[torch.nn.Module]) -> None:
         return ret
 
     def default_flatten_fn_with_keys(obj: Any) -> tuple[list[Any], Context]:
-        flattened, [flat_names, *args] = flatten_fn(obj)  # type: ignore[misc]
+        flattened, [flat_names, *args] = flatten_fn(obj)
         return [(MappingKey(k), v) for k, v in zip(flat_names, flattened)], [
             flat_names,
             *args,

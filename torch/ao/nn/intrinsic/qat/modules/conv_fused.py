@@ -398,7 +398,7 @@ class _ConvBnNd(nn.modules.conv._ConvNd, nni._FusedModule):
 
     def to_float(self):
         cls = type(self)
-        conv = cls._FLOAT_CONV_MODULE(  # type: ignore[attr-defined]
+        conv = cls._FLOAT_CONV_MODULE(
             self.in_channels,
             self.out_channels,
             self.kernel_size,
@@ -413,7 +413,7 @@ class _ConvBnNd(nn.modules.conv._ConvNd, nni._FusedModule):
         if self.bias is not None:
             conv.bias = torch.nn.Parameter(self.bias.detach())
 
-        if cls._FLOAT_BN_MODULE:  # type: ignore[attr-defined]
+        if cls._FLOAT_BN_MODULE:
             # fuse bn into conv
             assert self.bn.running_var is not None and self.bn.running_mean is not None
             conv.weight, conv.bias = fuse_conv_bn_weights(
@@ -426,12 +426,12 @@ class _ConvBnNd(nn.modules.conv._ConvNd, nni._FusedModule):
                 self.bn.bias,
             )
 
-        if cls._FLOAT_RELU_MODULE:  # type: ignore[attr-defined]
+        if cls._FLOAT_RELU_MODULE:
             modules = []
             modules.append(conv)
-            relu = cls._FLOAT_RELU_MODULE()  # type: ignore[attr-defined]
+            relu = cls._FLOAT_RELU_MODULE()
             modules.append(relu)
-            conv_relu = cls._FUSED_FLOAT_MODULE(*modules)  # type: ignore[attr-defined]
+            conv_relu = cls._FUSED_FLOAT_MODULE(*modules)
             conv_relu.train(self.training)
             return conv_relu
         else:

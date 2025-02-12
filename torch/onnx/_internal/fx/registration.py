@@ -12,7 +12,7 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     import types
 
-    import onnxscript  # type: ignore[import]
+    import onnxscript
 
     import torch._ops
 

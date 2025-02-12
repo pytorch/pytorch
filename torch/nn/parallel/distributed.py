@@ -1077,7 +1077,7 @@ class DistributedDataParallel(Module, Joinable):
         # Clear out previous iteration submodule to event. This is because we
         # may have populated some events for modules that didn't end up being
         # used.
-        self._submodule_to_event = defaultdict(deque)  # type: ignore[var-annotated]
+        self._submodule_to_event = defaultdict(deque)
         with torch.cuda.stream(self._mp_stream):
             for submodule in self.module.modules():
                 for param in submodule.parameters(recurse=False):
@@ -1464,10 +1464,10 @@ class DistributedDataParallel(Module, Joinable):
 
     def _run_ddp_forward(self, *inputs, **kwargs):
         if self._use_python_reducer:
-            return self.module(*inputs, **kwargs)  # type: ignore[index]
+            return self.module(*inputs, **kwargs)
         else:
             with self._inside_ddp_forward():
-                return self.module(*inputs, **kwargs)  # type: ignore[index]
+                return self.module(*inputs, **kwargs)
 
     def _clear_grad_buffer(self):
         # Making param.grad points to the grad buffers before backward is based on the

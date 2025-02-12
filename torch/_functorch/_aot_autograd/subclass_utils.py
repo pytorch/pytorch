@@ -123,7 +123,7 @@ def create_subclass_metadata(
             attrs=attrs,
             meta=metadata,
             outer_size=a.size(),  # type: ignore[attr-defined, arg-type]
-            outer_stride=a.stride(),  # type: ignore[arg-type]
+            outer_stride=a.stride(),
             original_subclass=a,
             memory_format=maybe_suggest_memory_format(a, with_memory_format),
         ),

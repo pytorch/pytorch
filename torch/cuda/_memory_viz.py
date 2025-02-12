@@ -506,7 +506,7 @@ def _profile_to_snapshot(profile):
         device = to_device(tensor_key.device)
         addr = tensor_key.storage.ptr
 
-        seg = snapshot["segments"][device]  # type: ignore[index]
+        seg = snapshot["segments"][device]
         if seg["address"] is None or seg["address"] > addr:
             seg["address"] = addr
         seg["total_size"] = max(
@@ -566,7 +566,7 @@ def _profile_to_snapshot(profile):
         for (tensor_key, version), event in kv_to_elem.items()
     ]
     for device, blocks in groupby(sorted(blocks_at_end), key=operator.itemgetter(0)):
-        seg = snapshot["segments"][device]  # type: ignore[index]
+        seg = snapshot["segments"][device]
         last_addr = seg["address"]
         for _, addr, size, frames in blocks:
             if last_addr < addr:
@@ -585,7 +585,7 @@ def _profile_to_snapshot(profile):
                 {"size": seg["total_size"] - last_addr, "state": "inactive"}
             )
 
-    snapshot["segments"] = [seg for seg in snapshot["segments"] if seg["blocks"]]  # type: ignore[attr-defined]
+    snapshot["segments"] = [seg for seg in snapshot["segments"] if seg["blocks"]]
     for seg in snapshot["segments"]:  # type: ignore[attr-defined, name-defined, no-redef]
         seg["total_size"] -= seg["address"]
         if not seg["blocks"]:

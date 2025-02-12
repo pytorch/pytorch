@@ -18,7 +18,7 @@ import abc
 import contextlib
 from typing import Callable, TYPE_CHECKING
 
-from onnxscript.function_libs.torch_lib.ops import (  # type: ignore[import-not-found]
+from onnxscript.function_libs.torch_lib.ops import (
     core as torchlib_core,
     nn as torchlib_nn,
 )
@@ -90,7 +90,7 @@ class DecompSkip(abc.ABC):
 
 class UpsampleBilinear2DDecompSkip(DecompSkip):
     op_callable = torch._C._nn.upsample_bilinear2d  # type: ignore[attr-defined]
-    onnxscript_function = torchlib_nn.aten_upsample_bilinear2d_vec  # type: ignore[attr-defined]
+    onnxscript_function = torchlib_nn.aten_upsample_bilinear2d_vec
     new_op_name = "upsample_bilinear2d"
     new_op_schema = "(Tensor self, SymInt[]? output_size, bool align_corners, float[]? scale_factors) -> (Tensor)"
 
@@ -128,7 +128,7 @@ class UpsampleBilinear2DDecompSkip(DecompSkip):
 
 class UpsampleTrilinear3DDecompSkip(DecompSkip):
     op_callable = torch._C._nn.upsample_trilinear3d  # type: ignore[attr-defined]
-    onnxscript_function = torchlib_nn.aten_upsample_trilinear3d_vec  # type: ignore[attr-defined]
+    onnxscript_function = torchlib_nn.aten_upsample_trilinear3d_vec
     new_op_name = "upsample_trilinear3d"
     new_op_schema = "(Tensor self, SymInt[]? output_size, bool align_corners, float[]? scale_factors) -> (Tensor)"
 
@@ -165,8 +165,8 @@ class UpsampleTrilinear3DDecompSkip(DecompSkip):
 
 
 class InstanceNormDecompSkip(DecompSkip):
-    op_callable = torch.instance_norm  # type: ignore[attr-defined]
-    onnxscript_function = torchlib_core.aten_instance_norm  # type: ignore[attr-defined]
+    op_callable = torch.instance_norm
+    onnxscript_function = torchlib_core.aten_instance_norm
     new_op_name = "instance_norm"
     new_op_schema = (
         "(Tensor input, Tensor? weight, Tensor? bias, "
@@ -182,7 +182,7 @@ class InstanceNormDecompSkip(DecompSkip):
         ):
             cls.register_custom_op()
 
-        torch.instance_norm = torch.ops.onnx_export.instance_norm  # type: ignore[attr-defined]
+        torch.instance_norm = torch.ops.onnx_export.instance_norm
         if export_options.onnx_registry is None:
             export_options.onnx_registry = torch.onnx.OnnxRegistry()
         registry = export_options.onnx_registry
@@ -194,7 +194,7 @@ class InstanceNormDecompSkip(DecompSkip):
 
     @classmethod
     def unregister(cls):
-        torch.instance_norm = cls.op_callable  # type: ignore[attr-defined]
+        torch.instance_norm = cls.op_callable
 
     @classmethod
     def abstract(

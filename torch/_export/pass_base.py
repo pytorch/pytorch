@@ -203,7 +203,7 @@ class _ExportPassBaseDeprecatedDoNotUse(PassBase):
                 pred, true_fn, false_fn, inputs = args
                 return self.callback.call_cond(pred, true_fn, false_fn, inputs, meta)
             elif target == torch.ops.higher_order.map_impl:
-                f, mapped_args, operands = args  # type: ignore[assignment]
+                f, mapped_args, operands = args
                 return self.callback.call_map(f, mapped_args, operands, meta)
             # For other unregistered HigherOrderOps, just interpret them blindly
             elif isinstance(target, torch._ops.HigherOrderOperator):
@@ -428,7 +428,7 @@ class _ExportPassBaseDeprecatedDoNotUse(PassBase):
         if fake_tensor_mode is None:
             self.tracer.fake_tensor_mode = FakeTensorMode(allow_non_fake_inputs=True)
             fake_tensor_mode = nullcontext()  # type: ignore[assignment]
-            dispatcher_mode = nullcontext()  # type: ignore[assignment]
+            dispatcher_mode = nullcontext()
         else:
             fake_tensor_mode.allow_non_fake_inputs = True
             self.tracer.fake_tensor_mode = fake_tensor_mode

@@ -729,8 +729,8 @@ def sympy_subs(expr: sympy.Expr, replacements: dict[sympy.Expr, Any]) -> sympy.E
         if isinstance(replacement, str):
             return sympy.Symbol(
                 replacement,
-                integer=replaced.is_integer,  # type: ignore[attr-defined]
-                nonnegative=replaced.is_nonnegative,  # type: ignore[attr-defined]
+                integer=replaced.is_integer,
+                nonnegative=replaced.is_nonnegative,
             )
         else:
             return replacement
@@ -1298,14 +1298,12 @@ def _rocm_native_device_arch_name(device):
 @functools.lru_cache(None)
 def try_import_ck_lib():
     try:
-        import ck4inductor  # type: ignore[import]
-        from ck4inductor.universal_gemm.gen_instances import (  # type: ignore[import]
+        import ck4inductor
+        from ck4inductor.universal_gemm.gen_instances import (
             gen_ops_library,
             gen_ops_preselected,
         )
-        from ck4inductor.universal_gemm.op import (  # type: ignore[import]
-            CKGemmOperation,
-        )
+        from ck4inductor.universal_gemm.op import CKGemmOperation
 
         package_dirname = os.path.dirname(ck4inductor.__file__)
     except ImportError:
@@ -1678,7 +1676,7 @@ def get_sympy_Expr_dtype(val: sympy.Expr) -> torch.dtype:
     assert isinstance(
         val, sympy.Expr
     ), "only support sympy.Expr as input to get_sympy_Expr_dtype"
-    if val.is_integer:  # type: ignore[attr-defined]
+    if val.is_integer:
         return torch.int64
     else:
         return torch.float64

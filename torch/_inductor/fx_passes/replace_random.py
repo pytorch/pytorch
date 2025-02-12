@@ -118,7 +118,7 @@ def replace_random(
         aten.randn: "randn",
     }[
         match.output_node().target.overloadpacket  # type: ignore[union-attr]
-    ]  # type: ignore[union-attr]
+    ]
     device = get_device(device)
     match.replace_by_example(replacement, [size])
 

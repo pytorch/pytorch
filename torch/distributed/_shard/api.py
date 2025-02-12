@@ -61,12 +61,12 @@ def _shard_tensor(
         if src_rank != entry[0]:  # type: ignore[index]
             raise ValueError(
                 f"src_rank={src_rank} on rank: {current_rank} does not "  # type: ignore[index]
-                f"match with src_rank={entry[0]} on rank: {idx}"  # type: ignore[index]
+                f"match with src_rank={entry[0]} on rank: {idx}"
             )
         if sharding_spec != entry[1]:  # type: ignore[index]
             raise ValueError(
                 f"sharding_spec={sharding_spec} on rank: {current_rank} does not "  # type: ignore[index]
-                f"match with sharding_spec={entry[1]} on rank: {idx}"  # type: ignore[index]
+                f"match with sharding_spec={entry[1]} on rank: {idx}"
             )
 
     st = sharding_spec.shard(tensor, src_rank=src_rank, process_group=pg)
@@ -214,9 +214,7 @@ def _collect_local_shard(module: torch.nn.Module) -> torch.nn.Module:
                 isinstance(sharding_spec, ChunkShardingSpec)
                 and local_tensor.size(sharding_spec.dim) == 1  # type: ignore[attr-defined, arg-type]
             ):
-                local_tensor = local_tensor.squeeze(
-                    output._sharding_spec.dim  # type: ignore[attr-defined]
-                )
+                local_tensor = local_tensor.squeeze(output._sharding_spec.dim)
             return local_tensor
 
     module.register_forward_hook(hook_func)

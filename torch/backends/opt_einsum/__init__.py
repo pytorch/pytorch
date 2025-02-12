@@ -9,7 +9,7 @@ from torch.backends import __allow_nonbracketed_mutation, ContextProp, PropModul
 
 
 try:
-    import opt_einsum as _opt_einsum  # type: ignore[import]
+    import opt_einsum as _opt_einsum
 except ImportError:
     _opt_einsum = None
 

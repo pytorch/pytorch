@@ -5,7 +5,7 @@ from torch.ao.quantization.experimental.quantizer import dequantize_APoT, quanti
 
 class fake_quantize_function(torch.autograd.Function):
     @staticmethod
-    def forward(  # type: ignore[override]
+    def forward(
         ctx: torch.autograd.function.FunctionCtx,
         x: Tensor,
         alpha: Tensor,

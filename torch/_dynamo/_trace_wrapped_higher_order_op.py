@@ -52,7 +52,7 @@ __all__ = ["trace_wrapped"]
 if not torch._running_with_deploy():
     # torch.library.custom_op does not work with torch.deploy/multipy
 
-    @torch.library.custom_op("flex_lib::zeros_and_scatter", mutates_args=())  # type: ignore[misc]
+    @torch.library.custom_op("flex_lib::zeros_and_scatter", mutates_args=())
     def zeros_and_scatter(
         shape: list[int],
         indices: list[Tensor],
@@ -62,7 +62,7 @@ if not torch._running_with_deploy():
         grad = torch.zeros(shape, device=vals.device, dtype=vals.dtype)
         return torch.ops.aten.index_put(grad, indices, vals, accumulate=True)
 
-    @zeros_and_scatter.register_fake  # type: ignore[misc]
+    @zeros_and_scatter.register_fake
     def _(
         shape: list[int],
         indices: list[Tensor],
@@ -70,7 +70,7 @@ if not torch._running_with_deploy():
     ) -> Tensor:
         return vals.new_empty(shape)
 
-    @zeros_and_scatter.register_vmap  # type: ignore[misc]
+    @zeros_and_scatter.register_vmap
     def _(info, indims, shape, indices, value):  # type: ignore[no-untyped-def]
         """The batching rule is special in that it returns a tensor that is not batched"""
         indices_indims = indims[1]

@@ -59,7 +59,7 @@ from unittest.mock import MagicMock
 import expecttest
 import numpy as np
 
-import __main__  # type: ignore[import]
+import __main__
 import torch
 import torch.backends.cudnn
 import torch.backends.mkl
@@ -67,7 +67,7 @@ import torch.backends.mps
 import torch.backends.xnnpack
 import torch.cuda
 from torch import Tensor
-from torch._C import ScriptDict, ScriptList  # type: ignore[attr-defined]
+from torch._C import ScriptDict, ScriptList
 from torch._dynamo.trace_rules import _as_posix_path
 from torch._utils_internal import get_writable_path
 from torch._logging.scribe import open_source_signpost
@@ -1303,8 +1303,8 @@ def run_tests(argv=UNITTEST_ARGS):
             sys.exit(0)
     elif TEST_SAVE_XML is not None:
         # import here so that non-CI doesn't need xmlrunner installed
-        import xmlrunner  # type: ignore[import]
-        from xmlrunner.result import _XMLTestResult  # type: ignore[import]
+        import xmlrunner
+        from xmlrunner.result import _XMLTestResult
 
         class XMLTestResultVerbose(_XMLTestResult):
             """
@@ -2894,7 +2894,7 @@ class ObjectPair(UnittestPair):
 class AssertRaisesContextIgnoreNotImplementedError(unittest.case._AssertRaisesContext):
     def __exit__(self, exc_type, exc_value, tb):
         if exc_type is not None and issubclass(exc_type, NotImplementedError):
-            self.test_case.skipTest(f"not_implemented: {exc_value}")  # type: ignore[attr-defined]
+            self.test_case.skipTest(f"not_implemented: {exc_value}")
         return super().__exit__(exc_type, exc_value, tb)
 
 
@@ -3275,7 +3275,7 @@ class TestCase(expecttest.TestCase):
                 if TEST_SAVE_XML is not None:
                     # This is a big hacky, XMLRunner modifies expected type from TestCase to TestInfo
                     # Create dummy TestInfo to record results correctly
-                    from xmlrunner.result import _TestInfo  # type: ignore[import]
+                    from xmlrunner.result import _TestInfo
                     case = _TestInfo(result, case)
                     case.output = _TestInfo.ERROR  # type: ignore[attr-defined]
                     case.elapsed_time = 0.0  # type: ignore[attr-defined]
@@ -4093,7 +4093,7 @@ class TestCase(expecttest.TestCase):
     def assertRaises(self, expected_exception, *args, **kwargs):
         if self._ignore_not_implemented_error:
             context: Optional[AssertRaisesContextIgnoreNotImplementedError] = \
-                AssertRaisesContextIgnoreNotImplementedError(expected_exception, self)  # type: ignore[call-arg]
+                AssertRaisesContextIgnoreNotImplementedError(expected_exception, self)
             try:
                 return context.handle('assertRaises', args, kwargs)  # type: ignore[union-attr, arg-type]
             finally:
@@ -4113,12 +4113,12 @@ class TestCase(expecttest.TestCase):
         # Checks whether the test is instantiated for a device type by testing
         # if the test class has defined the device_type attribute and,
         # if so, tests whether the instantiated device type is native or not
-        if hasattr(self, 'device_type') and self.device_type not in NATIVE_DEVICES and self.device_type != "mps":  # type: ignore[attr-defined]
+        if hasattr(self, 'device_type') and self.device_type not in NATIVE_DEVICES and self.device_type != "mps":
             # empty string matches any string
             expected_regex = ''
 
         if self._ignore_not_implemented_error:
-            context = AssertRaisesContextIgnoreNotImplementedError(  # type: ignore[call-arg]
+            context = AssertRaisesContextIgnoreNotImplementedError(
                 expected_exception, self, expected_regex)
             return context.handle('assertRaisesRegex', args, kwargs)  # type: ignore[attr-defined, arg-type]
         else:

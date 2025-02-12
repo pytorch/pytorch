@@ -117,7 +117,7 @@ class PendingUnbackedSymbolNotFound(RuntimeError):
     pass
 
 
-aten = torch._ops.ops.aten  # type: ignore[has-type]
+aten = torch._ops.ops.aten
 
 __all__ = [
     "has_symbolic_sizes_strides",
@@ -327,7 +327,7 @@ Int: TypeAlias = Union[torch.SymInt, int]
 def create_contiguous(shape: Sequence[Int]) -> list[Int]:
     strides: list[Int] = [1]
     for dim in reversed(shape[:-1]):
-        strides.append(dim * strides[-1])  # type: ignore[operator]
+        strides.append(dim * strides[-1])
     return list(reversed(strides))
 
 
@@ -643,7 +643,7 @@ def _sympy_from_args(
     is_commutative: Optional[bool] = None,
 ) -> sympy.Expr:
     if not args:
-        return cls.identity  # type: ignore[union-attr]
+        return cls.identity
     # These args are already in canonical form, so we avoid calling
     # Add(*args) to avoid expensive Add.flatten operation
     if sort:
@@ -659,14 +659,14 @@ def _sympy_from_args(
         if args[0].is_Number:
             rest = args[1:]
             sort_fn(rest)
-            return cls._from_args([args[0]] + rest, is_commutative=is_commutative)  # type: ignore[attr-defined]
+            return cls._from_args([args[0]] + rest, is_commutative=is_commutative)
         else:
             args = args.copy()
             sort_fn(args)
-            return cls._from_args(args, is_commutative=is_commutative)  # type: ignore[attr-defined]
+            return cls._from_args(args, is_commutative=is_commutative)
     else:
         # if the args are already sorted, we create directly
-        return cls._from_args(args, is_commutative=is_commutative)  # type: ignore[attr-defined]
+        return cls._from_args(args, is_commutative=is_commutative)
 
 
 def _canonicalize_bool_expr_impl(expr: SympyBoolean) -> SympyBoolean:
@@ -680,8 +680,8 @@ def _canonicalize_bool_expr_impl(expr: SympyBoolean) -> SympyBoolean:
     opposite = {sympy.Gt: sympy.Lt, sympy.Ge: sympy.Le}
     t: Union[type[Any]]
     if isinstance(expr, tuple(opposite.keys())):
-        rhs = expr.lhs - expr.rhs  # type: ignore[attr-defined]
-        t = opposite[type(expr)]  # type: ignore[index]
+        rhs = expr.lhs - expr.rhs
+        t = opposite[type(expr)]
     else:
         assert isinstance(expr, (sympy.Lt, sympy.Le, sympy.Eq, sympy.Ne))
         rhs = expr.rhs - expr.lhs
@@ -728,7 +728,7 @@ def _reduce_to_lowest_terms(expr: sympy.Expr) -> sympy.Expr:
         elif x.is_Mul:
             # If one of the args of a Mul is an Integer, it is the
             # first arg. eg: args(2*x*3*y) == (6, x, y)
-            return abs(int(x.args[0])) if x.args[0].is_Integer else 1  # type: ignore[call-overload]
+            return abs(int(x.args[0])) if x.args[0].is_Integer else 1
         else:
             return 1
 
@@ -831,7 +831,7 @@ def free_symbols(val: IterateExprs) -> OrderedSet[sympy.Symbol]:
 
     # TODO: Apparently, returning an OrderedSet here breaks
     # python test/distributed/tensor/test_dtensor_compile.py TestDTensorCompile.test_dtensor_dynamic
-    return first_expr.free_symbols.union(*(e.free_symbols for e in itr))  # type: ignore[return-value]
+    return first_expr.free_symbols.union(*(e.free_symbols for e in itr))
 
 
 def has_free_symbols(val: IterateExprs) -> bool:
@@ -1890,14 +1890,14 @@ def _fast_expand(expr: _SympyT) -> _SympyT:
     # such features here to avoid expensive checks. We also make sure that we
     # only re-create the objects if any of the args changed to avoid expensive
     # checks when re-creating objects.
-    new_args = [_fast_expand(arg) for arg in expr.args]  # type: ignore[arg-type]
+    new_args = [_fast_expand(arg) for arg in expr.args]
     if any(arg is not new_arg for arg, new_arg in zip(expr.args, new_args)):
         return _fast_expand(expr.func(*new_args))
 
     if expr.is_Pow:
         base: sympy.Expr
         exp: sympy.Expr
-        base, exp = expr.args  # type: ignore[assignment]
+        base, exp = expr.args
         if exp.is_Integer and base.is_Add:
             if exp > 1:
                 return sympy.expand_multinomial(expr, deep=False)
@@ -1910,7 +1910,7 @@ def _fast_expand(expr: _SympyT) -> _SympyT:
             if arg.is_Pow and arg.args[1] == -1:
                 den.append(S.One / arg)  # type: ignore[operator, arg-type]
             else:
-                num.append(arg)  # type: ignore[arg-type]
+                num.append(arg)
 
         num, num_changed = _expandsums(num)
         den, den_changed = _expandsums(den)
@@ -2610,7 +2610,7 @@ class DimConstraints:
                 f"{self._dcp.symbol_to_source[s][0].name()} == {val}"
             )
             # add this as a substitution to simplify other constraints
-            self._substitutions[s] = val  # type: ignore[assignment]
+            self._substitutions[s] = val
 
             # simplify multivariate inequalities: some of them will now become univariate!
             multivariate_inequalities = self._multivariate_inequalities
@@ -2882,7 +2882,7 @@ class DimConstraints:
                             if not _check_same_range(
                                 result, name_to_dim[mroot]  # type: ignore[index, arg-type]
                             ):  # ignore if unchanged
-                                modified_root_values[mroot] = result  # type: ignore[index]
+                                modified_root_values[mroot] = result
                                 break
 
         # filter out results where the key is a derived dim (e.g. {"dx - 1" : 4})
@@ -4853,7 +4853,7 @@ class ShapeEnv:
                     return sympy.Integer(symint)
 
             for src1, src2 in equalities_inputs.source_pairs:
-                expr1, expr2 = get_expression(src1), get_expression(src2)  # type: ignore[]
+                expr1, expr2 = get_expression(src1), get_expression(src2)
                 # Check whether given input shape values satisfy a specified equation s = s'.
                 # - Raise when the equation was violated by the given input shape values.
                 # - Otherwise issue a guard to constrain them.
@@ -5036,8 +5036,8 @@ class ShapeEnv:
                         (
                             AttrSource(source, attr),
                             inner_t,
-                            inner_context.constraint_sizes,  # type: ignore[attr-defined]
-                            inner_context.constraint_strides,  # type: ignore[attr-defined]
+                            inner_context.constraint_sizes,
+                            inner_context.constraint_strides,
                         )
                     )
             else:
@@ -5643,7 +5643,7 @@ class ShapeEnv:
         elif isinstance(e, sympy.Lt):
             add_expr(sympy.Le(e.lhs, e.rhs, evaluate=False))
             add_expr(sympy.Ne(e.lhs, e.rhs, evaluate=False))
-            if e.lhs.is_integer and e.rhs.is_integer:  # type: ignore[attr-defined]
+            if e.lhs.is_integer and e.rhs.is_integer:
                 add_expr(sympy.Le(e.lhs, e.rhs - 1, evaluate=False))
         elif isinstance(e, sympy.Le):
             add_expr(sympy.Lt(e.lhs, e.rhs + 1, evaluate=False))
@@ -5920,7 +5920,7 @@ class ShapeEnv:
                 "Maybe you need to add guard_size_oblivious to framework code, see doc below for more guidance.\n\n"
             )
         sloc, maybe_extra_debug = self._get_stack_summary(True)
-        if expr.is_integer:  # type: ignore[attr-defined]
+        if expr.is_integer:
             desc = (
                 "Could not extract specialized integer from data-dependent expression"
             )
@@ -6226,7 +6226,7 @@ class ShapeEnv:
             # 1 puts ephemeral sourced symbols first when sorting in reverse
             return (1 if has_only_ephemeral_sources else 0, size, name)
 
-        free = sorted(free, key=_smart_symbol_sort, reverse=True)  # type: ignore[attr-defined]
+        free = sorted(free, key=_smart_symbol_sort, reverse=True)
         lhs = expr.lhs
         rhs = expr.rhs
 
@@ -6476,9 +6476,9 @@ class ShapeEnv:
                 )
             elif isinstance(x, (SymBool, SymInt, SymFloat)):
                 for s in x.node.expr.free_symbols:
-                    if str(s) in frame_symbols:  # type: ignore[operator]
+                    if str(s) in frame_symbols:
                         continue
-                    frame_symbols[str(s)] = (  # type: ignore[index]
+                    frame_symbols[str(s)] = (
                         self.var_to_sources[s][0].name()  # type: ignore[assignment]
                         if s in self.var_to_sources
                         else None  # unbacked
@@ -6493,13 +6493,13 @@ class ShapeEnv:
                 last_lineno = max(last_lineno, lineno)
             if isinstance(instr.argval, str) and instr.argval in frame.f_locals:
                 frame_locals[instr.argval] = pytree.tree_map(
-                    go, frame.f_locals[instr.argval]  # type: ignore[index]
+                    go, frame.f_locals[instr.argval]
                 )
 
         # store LOC
         locs = co_lines[frame.f_lineno - offset : last_lineno + 1 - offset]
         indent = len(locs[0]) - len(locs[0].lstrip())
-        frame_loc = "".join([loc[indent:] for loc in locs]).strip()  # type: ignore[assignment]
+        frame_loc = "".join([loc[indent:] for loc in locs]).strip()
         return _FrameLocalResult(
             loc=frame_loc, locals=frame_locals, symbols=frame_symbols
         )
@@ -6809,7 +6809,7 @@ class ShapeEnv:
             elif concrete_val is sympy.false:
                 g = sympy.Not(expr)
             else:
-                g = sympy.Eq(expr, concrete_val)  # type: ignore[arg-type]
+                g = sympy.Eq(expr, concrete_val)
 
             if transmute_into_runtime_assert:
                 self.defer_runtime_assert(

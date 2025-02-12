@@ -23,7 +23,7 @@ class APoTFakeQuantize(FakeQuantizeBase):
     def calculate_qparams(self, signed: bool = False) -> tuple[Tensor, Tensor, Tensor, Tensor]:  # type: ignore[override]
         return self.activation_post_process.calculate_qparams(signed=signed)
 
-    def forward(self, X: torch.Tensor) -> Tensor:  # type: ignore[override]
+    def forward(self, X: torch.Tensor) -> Tensor:
         if self.observer_enabled[0] == 1:
             self.activation_post_process.forward(X)
             result = self.activation_post_process.calculate_qparams(signed=False)

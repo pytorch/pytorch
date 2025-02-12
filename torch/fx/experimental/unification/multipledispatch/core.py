@@ -58,7 +58,7 @@ def dispatch(*types, **kwargs):
 
         if ismethod(func):
             dispatcher = inspect.currentframe().f_back.f_locals.get(  # type: ignore[union-attr]
-                name,  # type: ignore[union-attr]
+                name,
                 MethodDispatcher(name),
             )
         else:

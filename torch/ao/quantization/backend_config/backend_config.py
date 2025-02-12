@@ -379,7 +379,7 @@ class BackendConfig:
         # Avoid circular dependencies
         pattern_complex_format = torch.ao.quantization.backend_config.utils._get_pattern_in_reversed_nested_tuple_format(
             config
-        )  # type: ignore[attr-defined]
+        )
         self._pattern_complex_format_to_config[pattern_complex_format] = config
         return self
 

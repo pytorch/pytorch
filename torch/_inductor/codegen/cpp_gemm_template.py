@@ -868,7 +868,7 @@ class CppGemmTemplate(CppTemplate):
             W = new_inputs[1]
             B = new_inputs[2] if has_bias else None
             W = transpose_w(W, trans_w)
-            B = expand_bias(B, X)  # type:ignore[arg-type]
+            B = expand_bias(B, X)
             new_inputs[1] = W
             if B is not None:
                 new_inputs[2] = B

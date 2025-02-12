@@ -1404,7 +1404,7 @@ class _LazyConvXdMixin(LazyModuleMixin):
             super().reset_parameters()  # type: ignore[misc]
 
     # Signature of "initialize_parameters" is incompatible with the definition in supertype LazyModuleMixin
-    def initialize_parameters(self, input: Tensor, *args, **kwargs) -> None:  # type: ignore[override]
+    def initialize_parameters(self, input: Tensor, *args, **kwargs) -> None:
         # defined by parent class but using a protocol
         if self.has_uninitialized_params():  # type: ignore[misc]
             self.in_channels = self._get_in_channels(input)
@@ -1481,7 +1481,7 @@ class LazyConv1d(_LazyConvXdMixin, Conv1d):  # type: ignore[misc]
 
     # super class define this variable as None. "type: ignore[..] is required
     # since we are redefining the variable.
-    cls_to_become = Conv1d  # type: ignore[assignment]
+    cls_to_become = Conv1d
 
     def __init__(
         self,
@@ -1550,7 +1550,7 @@ class LazyConv2d(_LazyConvXdMixin, Conv2d):  # type: ignore[misc]
 
     # super class define this variable as None. "type: ignore[..] is required
     # since we are redefining the variable.
-    cls_to_become = Conv2d  # type: ignore[assignment]
+    cls_to_become = Conv2d
 
     def __init__(
         self,
@@ -1620,7 +1620,7 @@ class LazyConv3d(_LazyConvXdMixin, Conv3d):  # type: ignore[misc]
 
     # super class define this variable as None. "type: ignore[..] is required
     # since we are redefining the variable.
-    cls_to_become = Conv3d  # type: ignore[assignment]
+    cls_to_become = Conv3d
 
     def __init__(
         self,
@@ -1687,7 +1687,7 @@ class LazyConvTranspose1d(_LazyConvXdMixin, ConvTranspose1d):  # type: ignore[mi
 
     # super class define this variable as None. "type: ignore[..] is required
     # since we are redefining the variable.
-    cls_to_become = ConvTranspose1d  # type: ignore[assignment]
+    cls_to_become = ConvTranspose1d
 
     def __init__(
         self,
@@ -1756,7 +1756,7 @@ class LazyConvTranspose2d(_LazyConvXdMixin, ConvTranspose2d):  # type: ignore[mi
 
     # super class define this variable as None. "type: ignore[..] is required
     # since we are redefining the variable.
-    cls_to_become = ConvTranspose2d  # type: ignore[assignment]
+    cls_to_become = ConvTranspose2d
 
     def __init__(
         self,
@@ -1825,7 +1825,7 @@ class LazyConvTranspose3d(_LazyConvXdMixin, ConvTranspose3d):  # type: ignore[mi
 
     # super class define this variable as None. "type: ignore[..] is required
     # since we are redefining the variable.
-    cls_to_become = ConvTranspose3d  # type: ignore[assignment]
+    cls_to_become = ConvTranspose3d
 
     def __init__(
         self,

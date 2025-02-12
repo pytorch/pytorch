@@ -385,9 +385,9 @@ class _MinimizerBase:
         self.results[result_key] = numeric_result  # type: ignore[possibly-undefined]
         report.append(f"Numerical accuracy = {numeric_result}")
         if not bool_result:
-            report.append(f"Result mismatch for {result_key}")  # type: ignore[possibly-undefined]
+            report.append(f"Result mismatch for {result_key}")
             if self.module_exporter:
-                if isinstance(result_key, tuple):  # type: ignore[possibly-undefined]
+                if isinstance(result_key, tuple):
                     result_key = result_key[-1]
                 # pyre-ignore[29]: not a function
                 self.module_exporter(
@@ -401,7 +401,7 @@ class _MinimizerBase:
                     submodule,
                     str(result_key[0]) + "_acc",  # type: ignore[index]
                 )
-            raise FxNetMinimizerResultMismatchError(f"Result mismatch for {result_key}")  # type: ignore[possibly-undefined]
+            raise FxNetMinimizerResultMismatchError(f"Result mismatch for {result_key}")
 
     def _binary_search_impl(
         self, all_nodes: NodeList, start_idx: int, end_idx: int

@@ -545,7 +545,7 @@ def deduce_output_dtype_by_name(
         "store_reduction",
     ):
         buf_name = args[1]
-        return V.graph.get_dtype(buf_name)  # type: ignore[arg-type]
+        return V.graph.get_dtype(buf_name)
     elif op_name == "to_dtype_bitcast":
         return kwargs["dtype"] if "dtype" in kwargs else args[-2]
     return None
@@ -2098,7 +2098,7 @@ class Kernel(CodeGen, Generic[CSEVariableType]):
         # adds the necessary kernel args for index expressions
         # and renames variables in index expressions to kernel arg names
         if isinstance(index, (list, tuple)):
-            return [self.rename_indexing(x) for x in index]  # type: ignore[return-value]
+            return [self.rename_indexing(x) for x in index]
         index = V.graph.sizevars.simplify(index)
         sorted_symbols = sorted(index.free_symbols, key=lambda s: s.name)
         replacements = {
@@ -2270,7 +2270,7 @@ class CSEProxy(DefaultHandler):
     def _default(self, name: str, args: tuple[Any, ...], kwargs: dict[str, Any]) -> Any:
         bounds = self._bound_variable(name, *args, **kwargs)
 
-        value = getattr(self.parent_handler, name)(*args, **kwargs)  # type: ignore[has-type]
+        value = getattr(self.parent_handler, name)(*args, **kwargs)
         dtype_handler = DtypePropagationOpsHandler()
 
         output_idx = 0
@@ -2379,11 +2379,11 @@ class CSEProxy(DefaultHandler):
         assert isinstance(size, sympy.Expr), size
         # Skip CSE since this doesn't return an expression
 
-        if var.bounds.lower < 0:  # type: ignore[operator]
+        if var.bounds.lower < 0:
             if wrap_neg:
                 stm = ops.add(var, ops.index_expr(size, torch.long))
                 # Mixed negative and non-negative
-                if var.bounds.upper >= 0:  # type: ignore[operator]
+                if var.bounds.upper >= 0:
                     lt = ops.lt(var, 0)
                     stm = ops.where(lt, stm, var)
             else:
@@ -2400,7 +2400,7 @@ class CSEProxy(DefaultHandler):
                     neg_bounds.lower + size, neg_bounds.upper + size
                 )
                 # We don't have a good way of representing the empty range
-                if var.bounds.upper >= 0:  # type: ignore[operator]
+                if var.bounds.upper >= 0:
                     pos = var.bounds & ValueRanges(0, int_oo)
                     new_bounds = new_bounds | pos
 
@@ -2453,7 +2453,7 @@ class CSEProxy(DefaultHandler):
             self._update_store_cache(name, value)
         if name not in V.graph.removed_buffers:
             return self.kernel.store(name, index, value, mode=mode)
-        return None  # type: ignore[return-value]
+        return None
 
     def store_reduction(self, name: str, index: sympy.Expr, value: CSEVariable) -> None:
         self.kernel.store_buffer_names.add(name)

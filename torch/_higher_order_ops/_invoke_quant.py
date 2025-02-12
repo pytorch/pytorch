@@ -69,4 +69,4 @@ class InvokeQuant:
         if scheme is not None:
             kwargs["scheme"] = scheme
 
-        return invoke_quant_packed(*args, **kwargs, quant_options=self)  # type: ignore[call-arg]
+        return invoke_quant_packed(*args, **kwargs, quant_options=self)

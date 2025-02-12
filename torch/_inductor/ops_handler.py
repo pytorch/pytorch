@@ -1161,7 +1161,7 @@ class SimpleCSEHandler(WrapperHandler):
         self.mock = MockHandler()
 
     def indirect_indexing(self, *args, **kwargs) -> sympy.Expr:
-        return super().indirect_indexing(*args, **kwargs)  # type: ignore[misc]
+        return super().indirect_indexing(*args, **kwargs)
 
     def store(self, *args, **kwargs) -> None:
         raise NotImplementedError("store not implemented")

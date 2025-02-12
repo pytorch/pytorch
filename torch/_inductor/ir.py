@@ -396,7 +396,7 @@ def significant_strides_equal(
     """
     assert len(shape) == len(strides1) and len(strides1) == len(strides2)
     for dim, s1, s2 in zip(shape, strides1, strides2):
-        if V.graph.sizevars.statically_known_leq(dim, 1):  # type: ignore[arg-type]
+        if V.graph.sizevars.statically_known_leq(dim, 1):
             continue
 
         if not V.graph.sizevars.statically_known_equals(
@@ -426,7 +426,7 @@ def try_match_insignificant_strides(
         V.graph.sizevars.statically_known_equals(s1, s2)
         for s1, s2 in zip(strides, tensor.get_stride())
     ):
-        return tensor  # type: ignore[arg-type]
+        return tensor
 
     if not significant_strides_equal(strides, tensor.get_stride(), tensor.get_size()):
         return tensor
@@ -434,7 +434,7 @@ def try_match_insignificant_strides(
     storage, old_layout = as_storage_and_layout(tensor)
     new_stride = [*old_layout.stride]
     for i, s in enumerate(tensor.get_size()):
-        if V.graph.sizevars.statically_known_leq(s, 1):  # type: ignore[arg-type]
+        if V.graph.sizevars.statically_known_leq(s, 1):
             new_stride[i] = strides[i]
 
     new_layout = FixedLayout(
@@ -2491,7 +2491,7 @@ class BaseView(IRNode):
         return self.data.get_storage_numel()
 
     def is_extern(self) -> bool:
-        return self.data.is_extern()  # type: ignore[attr-defined]
+        return self.data.is_extern()
 
     def is_module_buffer(self) -> bool:
         return self.data.is_module_buffer()  # type: ignore[attr-defined]
@@ -2503,7 +2503,7 @@ class BaseView(IRNode):
         with patch.object(FlexibleLayout, "allow_indexing", True):
             return extract_read_writes(
                 self.make_loader(),
-                self.get_size(),  # type: ignore[arg-type]
+                self.get_size(),
             ).reads
 
     def unwrap_view(self):  # type: ignore[no-untyped-def]
@@ -3945,13 +3945,13 @@ class ComputedBuffer(OperationBuffer):
             if self.data.get_reduction_type():
                 return extract_read_writes(
                     self.get_store_function(),
-                    self.data.get_pointwise_size(),  # type: ignore[arg-type]
-                    self.data.get_reduction_size(),  # type: ignore[arg-type]
+                    self.data.get_pointwise_size(),
+                    self.data.get_reduction_size(),
                 )
             else:
                 return extract_read_writes(
                     self.get_store_function(),
-                    self.data.get_size(),  # type: ignore[arg-type]
+                    self.data.get_size(),
                 )
 
     def get_unbacked_symbol_uses(self) -> OrderedSet[sympy.Symbol]:
@@ -5069,7 +5069,7 @@ class ExternKernel(InputsKernel):
             x_unwrap_view.freeze_layout()
 
         index_args, var_ranges = dependencies.index_vars_squeeze(
-            x.get_size(), prefix="r"  # type: ignore[arg-type]
+            x.get_size(), prefix="r"
         )
         range_vars = index_args[0]
         index = x.make_indexer()(range_vars)
@@ -7201,7 +7201,7 @@ class InvokeSubgraph(ExternKernel):
                     FixedLayout(
                         device=output.get_device(),
                         dtype=output.get_dtype(),
-                        size=output.get_size(),  # type: ignore[arg-type]
+                        size=output.get_size(),
                         stride=output.get_stride(),
                         offset=output.get_layout().offset,
                     ),

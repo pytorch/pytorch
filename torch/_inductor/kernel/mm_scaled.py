@@ -500,7 +500,7 @@ def use_persistent_tma(k: sympy.core.numbers.Integer, has_bias: bool) -> bool:
     return available and min_k and not has_bias
 
 
-@register_lowering(aten._scaled_mm.default, type_promotion_kind=None)  # type: ignore[misc]
+@register_lowering(aten._scaled_mm.default, type_promotion_kind=None)
 def tuned_scaled_mm(
     mat_a: TensorBox,
     mat_b: TensorBox,

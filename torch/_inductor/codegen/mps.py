@@ -368,7 +368,7 @@ MetalOverrides._initialize_pointwise_overrides("mps")
 
 
 class MetalKernel(SIMDKernel):
-    overrides = MetalOverrides  # type: ignore[assignment]
+    overrides = MetalOverrides
     suffix = ";"
     newvar_prefix = "auto "
     pexpr = PythonPrinter().doprint
@@ -471,7 +471,7 @@ class MetalKernel(SIMDKernel):
 
     def codegen_iteration_ranges_entry(self, entry: IterationRangesEntry) -> None:
         index_expr = self.rename_indexing(entry.expr)
-        index_str = self.sexpr(index_expr)  # type: ignore[misc]
+        index_str = self.sexpr(index_expr)
         self.loads.writeline(f"{self.index_dtype} {entry.name} = {index_str};")
 
     def codegen_kernel(self, name: Optional[str] = None) -> str:
@@ -576,7 +576,7 @@ class MetalKernel(SIMDKernel):
 
 
 class MetalScheduling(SIMDScheduling):
-    kernel_type = MetalKernel  # type: ignore[assignment]
+    kernel_type = MetalKernel
 
     def __init__(self, scheduler: Optional[Scheduler]) -> None:
         super().__init__(scheduler)

@@ -945,7 +945,7 @@ def prepare_n_shadows_model(
             qconfig_multi_mapping.qconfig_mappings_list,
             list_of_node_name_to_qconfig,
             custom_prepare_fn,
-            custom_prepare_kwargs,  # type: ignore[arg-type]
+            custom_prepare_kwargs,
         )
 
     return mt

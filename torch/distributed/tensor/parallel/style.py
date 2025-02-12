@@ -549,7 +549,7 @@ class PrepareModuleInput(ParallelStyle):
                     inputs, kwargs, device_mesh
                 ),
                 with_kwargs=True,
-            )  # type: ignore[misc]
+            )
         else:
             module.register_forward_pre_hook(lambda _, inputs: self._prepare_input_fn(inputs, device_mesh))  # type: ignore[misc, call-arg]
         return module

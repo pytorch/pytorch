@@ -175,9 +175,9 @@ def _retrieve_or_adapt_input_to_graph_set(
         with onnxscript.evaluator.default_as(tracer):
             output = onnxscript_apis.torchlib_opset().Concat(
                 *sequence_mixed_elements, axis=0
-            )  # type: ignore[type-var]
-        output.dtype = torch.int64  # type: ignore[union-attr]
-        output.shape = [len(sequence_mixed_elements)]  # type: ignore[union-attr]
+            )
+        output.dtype = torch.int64
+        output.shape = [len(sequence_mixed_elements)]
         return output
     elif isinstance(onnx_tensor, (tuple, list)) and all(
         isinstance(node, torch.fx.Node) or node is None for node in onnx_tensor
@@ -314,9 +314,9 @@ def _fill_in_default_kwargs(
     # https://github.com/pytorch/pytorch/issues/97201
     # We manually assigned overload for aten::sym_size.
     if hasattr(node.target, "_schema"):
-        node_schema = node.target._schema  # type: ignore[union-attr]
+        node_schema = node.target._schema
     else:
-        node_schema = torch.ops.aten.sym_size.int._schema  # type: ignore[union-attr]
+        node_schema = torch.ops.aten.sym_size.int._schema
 
     # This function assumes the order of arguments in FX op is the
     # same as the order of arguments in TorchScript op.
@@ -554,7 +554,7 @@ class FxOnnxInterpreter:
                 )
 
         with diagnostic.log_section(logging.DEBUG, "ONNX Graph:"):
-            diagnostic.debug("```\n%s\n```", onnxscript_graph.torch_graph)  # type: ignore[attr-defined]
+            diagnostic.debug("```\n%s\n```", onnxscript_graph.torch_graph)
 
         return onnxscript_graph
 
@@ -655,7 +655,7 @@ class FxOnnxInterpreter:
         # function signature in OpSchema, and find the best matched overload.
         symbolic_fn = onnxfunction_dispatcher.dispatch(
             node=node,
-            onnx_args=onnx_args,  # type: ignore[arg-type]
+            onnx_args=onnx_args,
             onnx_kwargs=onnx_kwargs,
             diagnostic_context=self.diagnostic_context,
         )
@@ -764,7 +764,7 @@ class FxOnnxInterpreter:
         outputs: (
             onnxscript_graph_building.TorchScriptTensor
             | tuple[onnxscript_graph_building.TorchScriptTensor, ...]
-        ) = parent_onnxscript_graph.add_module_call(  # type: ignore[assignment]
+        ) = parent_onnxscript_graph.add_module_call(
             unique_module_name, sub_onnxscript_graph, onnx_args
         )
 

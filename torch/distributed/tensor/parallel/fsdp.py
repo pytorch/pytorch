@@ -270,7 +270,7 @@ def _chunk_dtensor(
         # HSDP the shard placements for tensor is (Replicate, Shard(0), tp_placement).
         replicate_placements = [Replicate() for _ in range(root_mesh.ndim)]
         replicate_placements[-1] = tp_placement  # type: ignore[call-overload]
-        shard_placements = [Replicate() for i in range(root_mesh.ndim)]  # type: ignore[misc]
+        shard_placements = [Replicate() for i in range(root_mesh.ndim)]
         shard_placements[-2] = DShard(0)  # type: ignore[call-overload]
         shard_placements[-1] = tp_placement  # type: ignore[call-overload]
 

@@ -7,17 +7,13 @@ from torch._inductor.virtualized import V
 
 
 try:
-    import ck4inductor  # type: ignore[import]
+    import ck4inductor
 except ImportError:
     ck4inductor = None
 
 if ck4inductor is not None:
-    from ck4inductor.grouped_conv_fwd.gen_instances import (  # type: ignore[import]
-        gen_conv_ops_library,
-    )
-    from ck4inductor.grouped_conv_fwd.op import (  # type: ignore[import]  # noqa: TCH002
-        CKGroupedConvFwdOp,
-    )
+    from ck4inductor.grouped_conv_fwd.gen_instances import gen_conv_ops_library
+    from ck4inductor.grouped_conv_fwd.op import CKGroupedConvFwdOp  # noqa: TCH002
 else:
 
     def gen_conv_ops_library():
@@ -434,7 +430,7 @@ class CKGroupedConvFwdTemplate(CKTemplate):
         self.groups = groups
         self.n_spatial_dimensions = n_spatial_dimensions
 
-    def filter_op(self, op: "CKGroupedConvFwdOp"):  # type: ignore[name-defined]
+    def filter_op(self, op: "CKGroupedConvFwdOp"):
         metas = [
             T.get_layout()
             for T in [*self.input_nodes, self.output_node]
@@ -489,7 +485,7 @@ class CKGroupedConvFwdTemplate(CKTemplate):
         )
         return chosen_instances
 
-    def emit_ck_instance(self, op: "CKGroupedConvFwdOp") -> tuple[str, str]:  # type: ignore[name-defined]
+    def emit_ck_instance(self, op: "CKGroupedConvFwdOp") -> tuple[str, str]:
         # The Jinja template for generating a C++ type alias *definition* for a Universal GEMM instance
         template_definition = r"""
     // Gemm operator {{operation_name}}

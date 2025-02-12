@@ -638,7 +638,7 @@ def reinplace_fsdp_all_gather(graph: torch.fx.Graph) -> None:
         )
 
     remove_unused_getitem(graph)
-    graph_pass.apply(graph)  # type: ignore[arg-type]
+    graph_pass.apply(graph)
 
 
 def get_op_idx(snode):
@@ -826,4 +826,4 @@ def enforce_comm_ordering_for_fsdp(
                 )
         prev_rs_wait = wait_group_node
 
-    return new_order  # type: ignore[return-value]
+    return new_order

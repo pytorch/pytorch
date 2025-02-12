@@ -1,9 +1,9 @@
 # mypy: allow-untyped-defs
-from collections.abc import Iterator  # type: ignore[import]
+from collections.abc import Iterator
 from functools import partial
 
 from .dispatch import dispatch
-from .unification_tools import assoc  # type: ignore[import]
+from .unification_tools import assoc
 from .utils import transitive_get as walk
 from .variable import isvar
 

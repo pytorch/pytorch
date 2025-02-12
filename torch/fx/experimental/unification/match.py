@@ -1,6 +1,6 @@
 # mypy: allow-untyped-defs
-from .core import reify, unify  # type: ignore[attr-defined]
-from .unification_tools import first, groupby  # type: ignore[import]
+from .core import reify, unify
+from .unification_tools import first, groupby
 from .utils import _toposort, freeze
 from .variable import isvar
 

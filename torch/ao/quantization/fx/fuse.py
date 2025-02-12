@@ -105,7 +105,7 @@ def fuse(
             root_node_getter = fusion_pattern_to_root_node_getter.get(
                 pattern, default_root_node_getter
             )
-            root_node = root_node_getter(matched_node_pattern)  # type: ignore[index]
+            root_node = root_node_getter(matched_node_pattern)
             extra_inputs_getter = fusion_pattern_to_extra_inputs_getter.get(
                 pattern, None
             )
@@ -120,7 +120,7 @@ def fuse(
                 fused_graph,
                 root_node,
                 extra_inputs,
-                matched_node_pattern,  # type: ignore[arg-type]
+                matched_node_pattern,
                 fuse_custom_config,
                 fuser_method_mapping,
                 is_qat,

@@ -1,5 +1,5 @@
 try:
-    import z3  # type: ignore[import]
+    import z3
 
     HAS_Z3 = True
     # dynamic type

@@ -187,7 +187,7 @@ class LayerNorm(Module):
         super().__init__()
         if isinstance(normalized_shape, numbers.Integral):
             # mypy error: incompatible types in assignment
-            normalized_shape = (normalized_shape,)  # type: ignore[assignment]
+            normalized_shape = (normalized_shape,)
         self.normalized_shape = tuple(normalized_shape)  # type: ignore[arg-type]
         self.eps = eps
         self.elementwise_affine = elementwise_affine
@@ -375,7 +375,7 @@ class RMSNorm(Module):
         super().__init__()
         if isinstance(normalized_shape, numbers.Integral):
             # mypy error: incompatible types in assignment
-            normalized_shape = (normalized_shape,)  # type: ignore[assignment]
+            normalized_shape = (normalized_shape,)
         self.normalized_shape = tuple(normalized_shape)  # type: ignore[arg-type]
         self.eps = eps
         self.elementwise_affine = elementwise_affine

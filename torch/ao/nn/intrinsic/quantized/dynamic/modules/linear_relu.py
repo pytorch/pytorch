@@ -27,7 +27,7 @@ class LinearReLU(nnqd.Linear):
         >>> print(output.size())
         torch.Size([128, 30])
     """
-    _FLOAT_MODULE = nni.LinearReLU  # type: ignore[assignment]
+    _FLOAT_MODULE = nni.LinearReLU
 
     def __init__(self, in_features, out_features, bias=True, dtype=torch.qint8):
         super().__init__(in_features, out_features, bias, dtype)

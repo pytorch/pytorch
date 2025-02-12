@@ -54,7 +54,7 @@ def save_state_dict(
         )
 
 
-@_dcp_method_logger(log_exceptions=True)  # type: ignore[arg-type]
+@_dcp_method_logger(log_exceptions=True)
 @_api_bc_check
 def save(
     state_dict: STATE_DICT_TYPE,
@@ -222,7 +222,7 @@ def async_save(
     if dist.is_available() and dist.is_initialized():
         pg = process_group or _get_default_group()
         assert (
-            torch.device("cpu") in pg._device_types  # type: ignore[attr-defined]
+            torch.device("cpu") in pg._device_types
         ), "A CPU backend must be enabled for async save; try initializing process group with 'cpu:gloo,cuda:nccl'"
 
     storage_writer = cast(

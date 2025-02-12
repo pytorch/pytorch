@@ -58,7 +58,7 @@ try:
 
     try:
         if not _version.hip:
-            import pynvml  # type: ignore[import]
+            import pynvml
         else:
             import ctypes
             from pathlib import Path
@@ -100,7 +100,7 @@ try:
                     ctypes.CDLL = self.original_CDLL  # type: ignore[misc]
 
             with amdsmi_cdll_hook():
-                import amdsmi  # type: ignore[import]
+                import amdsmi
 
         _HAS_PYNVML = True
     except ModuleNotFoundError:

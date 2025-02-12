@@ -80,9 +80,9 @@ def _construct_named_inputs_and_attrs(
                     named_inputs[param.name] = tuple(args)
                     reversed_args_stack.clear()
                 else:
-                    named_inputs[param.name] = reversed_args_stack.pop()  # type: ignore[assignment]
+                    named_inputs[param.name] = reversed_args_stack.pop()
             elif param.name in kwargs:
-                named_inputs[param.name] = kwargs[param.name]  # type: ignore[assignment]
+                named_inputs[param.name] = kwargs[param.name]
             elif param.required:
                 raise ValueError(
                     f"Required parameter '{param.name}' is not provided. "
@@ -94,7 +94,7 @@ def _construct_named_inputs_and_attrs(
                     param.name,
                     signature,
                 )
-                named_inputs[param.name] = None  # type: ignore[assignment]
+                named_inputs[param.name] = None
         else:
             # Handle attributes
             attribute: ValidAttributeType | ir.Attr
@@ -103,9 +103,9 @@ def _construct_named_inputs_and_attrs(
             ), f"Expected AttributeParameter, got {type(param)}"
             if reversed_args_stack:
                 # First exhaust the positional arguments
-                attribute = reversed_args_stack.pop()  # type: ignore[assignment]
+                attribute = reversed_args_stack.pop()
             elif param.name in kwargs:
-                attribute = kwargs[param.name]  # type: ignore[assignment]
+                attribute = kwargs[param.name]
             elif param.default is not None:
                 attribute = param.default
             else:
@@ -137,7 +137,7 @@ def _construct_named_inputs_and_attrs(
                 # where an attribute marked as float can be passed as an int.
                 attribute = float(attribute)
             named_attrs[param.name] = attribute
-    return named_inputs, named_attrs  # type: ignore[return-value]
+    return named_inputs, named_attrs
 
 
 def _resolve_parameter_dtypes(
@@ -275,7 +275,7 @@ def _get_or_create_constant(
 
     constant_value = constant_farm.get((arg, dtype))  # type: ignore[arg-type]
     if constant_value is None:
-        constant_tensor = ir.tensor(value=arg, dtype=dtype)  # type: ignore[arg-type]
+        constant_tensor = ir.tensor(value=arg, dtype=dtype)
         constant_value = opset.Constant(value=constant_tensor)
         constant_farm[(arg, dtype)] = constant_value  # type: ignore[arg-type,index]
     return constant_value
@@ -352,7 +352,7 @@ def _process_python_constants(
             constant_value = _get_or_create_constant(constant_farm, arg, dtype, opset)  # type: ignore[arg-type]
 
         named_inputs[param.name] = constant_value
-    return named_inputs  # type: ignore[return-value]
+    return named_inputs
 
 
 def _reshape_to_1d_tensor(opset: onnxscript.values.Opset, arg: ir.Value) -> ir.Value:
@@ -418,7 +418,7 @@ def _process_python_sequences(
                 if isinstance(val, ir.Value):
                     new_args.append(val)
                 else:
-                    constant_tensor = ir.tensor(value=val, dtype=dtype)  # type: ignore[arg-type]
+                    constant_tensor = ir.tensor(value=val, dtype=dtype)
                     constant_value = opset.Constant(value=constant_tensor)
                     new_args.append(constant_value)
             named_inputs[name] = new_args
@@ -451,7 +451,7 @@ def _process_python_sequences(
                         val, (bool, int, float)
                     ), f"Expected int or float, got {type(val)}"
                     new_args.append(
-                        _get_or_create_constant(constant_farm, [val], dtype, opset)  # type: ignore[arg-type]
+                        _get_or_create_constant(constant_farm, [val], dtype, opset)
                     )
             named_inputs[name] = opset.Concat(*new_args, axis=0)
             continue
@@ -541,7 +541,7 @@ class OpRecorder(evaluator.Evaluator):
             )
             converted_named_inputs = _process_python_sequences(
                 op_signature,
-                converted_named_inputs,  # type: ignore[arg-type]
+                converted_named_inputs,
                 type_binding,
                 self.constant_farm,
                 self.opset,
@@ -565,12 +565,12 @@ class OpRecorder(evaluator.Evaluator):
                 f"named_inputs={named_inputs}, converted_named_inputs={converted_named_inputs}, "
                 f"named_attrs={named_attrs}, opset={self.opset}, op_signature={op_signature}."
             ) from e
-        return node.outputs  # type: ignore[return-value]
+        return node.outputs
 
     def eval(
         self,
         schema: onnx.defs.OpSchema,
-        args: Sequence[AllowedArgType],  # type: ignore[override]
+        args: Sequence[AllowedArgType],
         kwargs: Mapping[str, AllowedArgType],
     ) -> _tensors.SymbolicTensor | Sequence[_tensors.SymbolicTensor]:
         try:
@@ -594,7 +594,7 @@ class OpRecorder(evaluator.Evaluator):
                     # dtypes are available
                     if src_input.dtype == target_type.dtype:
                         # Same type. No cast needed
-                        return src_input  # type: ignore[return-value]
+                        return src_input
                     else:
                         # Create a Cast node
                         return self.opset.Cast(src_input, to=target_type.dtype)  # type: ignore[union-attr,return-value]
@@ -608,7 +608,7 @@ class OpRecorder(evaluator.Evaluator):
                 f"Error calling operator '{schema.name}' with args {args} and kwargs {kwargs}."
             ) from e
 
-    def eval_function(  # type: ignore[override]
+    def eval_function(
         self,
         function: onnxscript.OnnxFunction,
         args: Sequence[AllowedArgType],

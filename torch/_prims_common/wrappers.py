@@ -308,14 +308,8 @@ def out_wrapper(
                 result = fn(*args, **kwargs)
             assert (
                 (isinstance(result, TensorLike) and is_tensor)
-                or (
-                    isinstance(result, tuple)  # type: ignore[arg-type]
-                    and len(result) == len(out_names)  # type: ignore[arg-type]
-                )
-                or (
-                    fn.__name__ == "unbind"
-                    and isinstance(result, (list, tuple))  # type: ignore[arg-type]
-                )
+                or (isinstance(result, tuple) and len(result) == len(out_names))
+                or (fn.__name__ == "unbind" and isinstance(result, (list, tuple)))
             )
             # unbind_copy is a special case: see https://github.com/pytorch/pytorch/issues/130829
             if out is not None:
@@ -344,17 +338,17 @@ def out_wrapper(
                     _safe_copy_out(copy_from=result, copy_to=out, exact_dtype=exact_dtype)  # type: ignore[arg-type]
                 else:
                     if fn.__name__ != "unbind":
-                        assert isinstance(out, tuple)  # type: ignore[arg-type]
+                        assert isinstance(out, tuple)
                     else:
-                        assert isinstance(out, (list, tuple))  # type: ignore[arg-type]
+                        assert isinstance(out, (list, tuple))
                     torch._check_type(
-                        len(out) == len(result),  # type: ignore[arg-type]
-                        lambda: f"expected tuple of {len(result)} elements but got {len(out)}",  # type: ignore[arg-type]
+                        len(out) == len(result),
+                        lambda: f"expected tuple of {len(result)} elements but got {len(out)}",
                     )
-                    for r, o in zip(result, out):  # type: ignore[arg-type]
+                    for r, o in zip(result, out):
                         # These two operations are done in-place
                         _maybe_resize_out(o, r.shape, maybe_compute_memory_format(r))
-                        _safe_copy_out(copy_from=r, copy_to=o, exact_dtype=exact_dtype)  # type: ignore[arg-type]
+                        _safe_copy_out(copy_from=r, copy_to=o, exact_dtype=exact_dtype)
             else:
                 out = result
             # mypy does not see through  the definition of out_type given that it's in a different scope
@@ -380,7 +374,7 @@ def out_wrapper(
         params = sorted(params, key=lambda p: p.kind)
 
         _fn.__signature__ = inspect.Signature(  # type: ignore[attr-defined]
-            parameters=params, return_annotation=return_type  # type: ignore[arg-type]
+            parameters=params, return_annotation=return_type
         )
 
         _fn.__annotations__ = dict(getattr(fn, "__annotations__", {}))
@@ -417,7 +411,7 @@ def backwards_not_supported(prim):
     class BackwardsNotSupported(torch.autograd.Function):
         @staticmethod
         def forward(ctx, args_spec, *flat_args):
-            args, kwargs = tree_unflatten(flat_args, args_spec)  # type: ignore[arg-type]
+            args, kwargs = tree_unflatten(flat_args, args_spec)
             return redispatch_prim(args, kwargs)
 
         @staticmethod

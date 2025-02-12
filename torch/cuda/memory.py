@@ -667,7 +667,7 @@ def list_gpu_processes(device: Union[Device, int] = None) -> str:
     """
     if not torch.version.hip:
         try:
-            import pynvml  # type: ignore[import]
+            import pynvml
         except ModuleNotFoundError:
             return "pynvml module not found, please install pynvml"
         from pynvml import NVMLError_DriverNotLoaded
@@ -682,20 +682,20 @@ def list_gpu_processes(device: Union[Device, int] = None) -> str:
         procs = pynvml.nvmlDeviceGetComputeRunningProcesses(handle)
     else:
         try:
-            import amdsmi  # type: ignore[import]
+            import amdsmi
         except ModuleNotFoundError:
             return "amdsmi module not found, please install amdsmi"
         try:
-            amdsmi.amdsmi_init()  # type: ignore[attr-defined]
-        except amdsmi.AmdSmiException:  # type: ignore[attr-defined]
+            amdsmi.amdsmi_init()
+        except amdsmi.AmdSmiException:
             return "amdsmi driver can't be loaded, is ROCm installed?"
 
         device = _get_amdsmi_device_index(device)
 
         try:
-            handle = amdsmi.amdsmi_get_processor_handles()[device]  # type: ignore[attr-defined]
-            procs = amdsmi.amdsmi_get_gpu_process_list(handle)  # type: ignore[attr-defined]
-        except amdsmi.AmdSmiException:  # type: ignore[attr-defined]
+            handle = amdsmi.amdsmi_get_processor_handles()[device]
+            procs = amdsmi.amdsmi_get_gpu_process_list(handle)
+        except amdsmi.AmdSmiException:
             return "amdsmi cannot list processes from other users"
 
     lines = []

@@ -6545,7 +6545,7 @@ def prim_if(g: jit_utils.GraphContext, *inputs, **attrs) -> list[_C.Value]:
                 raise errors.SymbolicValueError(
                     f"The sub block ATen output {current_b_list[idx]} is not in env.",
                     current_b_list[idx],
-                )  # type:ignore[operator]
+                )
             onnx_b = env[current_b_list[idx]]
             final_b_list.append(onnx_b)
         return final_b_list

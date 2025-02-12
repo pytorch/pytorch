@@ -136,12 +136,12 @@ def decompose_stack(graph: torch.fx.GraphModule, input_tensors: list[Any]) -> An
             aten.unsqueeze, args=(input_tensor,), kwargs={"dim": 0}
         )
         unsqueezed_inputs.append(unsqueezed_input)
-        unsqueezed_input.meta["val"] = aten.unsqueeze(input_tensor.meta["val"], dim=0)  # type: ignore[assignment]
+        unsqueezed_input.meta["val"] = aten.unsqueeze(input_tensor.meta["val"], dim=0)
         unsqueezed_inputs_meta.append(unsqueezed_input.meta["val"])
     stacked_inputs = graph.call_function(  # type: ignore[operator]
         aten.cat, args=(unsqueezed_inputs,), kwargs={"dim": 0}
     )
-    stacked_inputs.meta["val"] = aten.cat(unsqueezed_inputs_meta, dim=0)  # type: ignore[assignment]
+    stacked_inputs.meta["val"] = aten.cat(unsqueezed_inputs_meta, dim=0)
     return stacked_inputs
 
 
@@ -231,7 +231,7 @@ class PostGradBatchLinearFusion(BatchFusion):
             batch_biases.append(bias)  # type: ignore[possibly-undefined]
             batch_inputs_meta.append(input.meta)  # type: ignore[possibly-undefined, union-attr]
             batch_weights_meta.append(weight.meta)  # type: ignore[possibly-undefined, union-attr]
-            if bias is not None:  # type: ignore[possibly-undefined]
+            if bias is not None:
                 batch_biases_meta.append(bias.meta)  # type: ignore[possibly-undefined, union-attr]
             else:
                 batch_biases_meta.append(None)
@@ -271,7 +271,9 @@ class PostGradBatchLinearFusion(BatchFusion):
                             args=(batch_biases[i],),
                             kwargs={"size": broadcast_shape},
                         )
-                        broadcast_bias.meta["val"] = aten.broadcast_to(batch_biases_meta[i]["val"], broadcast_shape)  # type: ignore[assignment]
+                        broadcast_bias.meta["val"] = aten.broadcast_to(
+                            batch_biases_meta[i]["val"], broadcast_shape
+                        )
                         new_bias_add = graph.call_function(  # type: ignore[operator]
                             aten.add.Tensor, args=((broadcast_bias, new_mm))
                         )

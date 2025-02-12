@@ -959,7 +959,7 @@ class GraphLowering(torch.fx.Interpreter):
             f"{tuple(data.size())!r} {tuple(data.stride())!r} "
             f"{hash(data):x}"
         )
-        self.allocated_constant_name[name] = orig_name  # type: ignore[assignment]
+        self.allocated_constant_name[name] = orig_name
         return name
 
     def add_tensor_constant(
@@ -1122,7 +1122,7 @@ class GraphLowering(torch.fx.Interpreter):
                 raise MissingOperatorWithoutDecomp(target, args, kwargs)
 
         try:
-            log.debug("  via %s", lowerings[target])  # type: ignore[index]
+            log.debug("  via %s", lowerings[target])
 
             n = self.current_node
             layout_constraints = maybe_layout_constraints(target)
@@ -1130,7 +1130,7 @@ class GraphLowering(torch.fx.Interpreter):
                 old_args, old_kwargs = args, kwargs
                 args, kwargs = layout_constraints(n, *args, **kwargs)
 
-            out = lowerings[target](*args, **kwargs)  # type: ignore[index]
+            out = lowerings[target](*args, **kwargs)
 
             if layout_constraints:
                 # layout_constraints are allowed to make new copies of the inputs.
@@ -1224,7 +1224,7 @@ class GraphLowering(torch.fx.Interpreter):
             for x in result
         ), result
 
-        fx_node_args = V.graph.current_node.args[0]  # type: ignore[arg-type]
+        fx_node_args = V.graph.current_node.args[0]
         if not isinstance(fx_node_args, (tuple, list)):
             # nested subgraphs can have singleton outputs
             fx_node_args = (fx_node_args,)
@@ -1386,11 +1386,9 @@ class GraphLowering(torch.fx.Interpreter):
         if is_call_function:
             args, kwargs = self.fetch_args_kwargs_from_env(n)
             origins |= gather_origins(args, kwargs)
-        with ir.IRNode.current_origins(origins), self.set_current_node(  # type: ignore[arg-type]
+        with ir.IRNode.current_origins(origins), self.set_current_node(
             n
-        ), V.set_current_node(
-            n
-        ):
+        ), V.set_current_node(n):
             if (
                 n.op == "call_function"
                 and n.target is not operator.getitem
@@ -1417,9 +1415,9 @@ class GraphLowering(torch.fx.Interpreter):
                 ):
                     old_args = args  # type: ignore[possibly-undefined]
                     old_kwargs = kwargs  # type: ignore[possibly-undefined]
-                    args, kwargs = constrain_to_fx_strides(n, *args, **kwargs)  # type: ignore[index]
+                    args, kwargs = constrain_to_fx_strides(n, *args, **kwargs)
                     result = self.call_function(n.target, args, kwargs)  # type: ignore[arg-type]
-                    self.propagate_mutation(n, old_args, old_kwargs, args, kwargs)  # type: ignore[possibly-undefined]
+                    self.propagate_mutation(n, old_args, old_kwargs, args, kwargs)
                 else:
                     raise RuntimeError(
                         f"Unknown triton_kernel_default_layout_constraint: {config.triton_kernel_default_layout_constraint}"

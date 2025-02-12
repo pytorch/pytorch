@@ -21,7 +21,7 @@ from torch.monitor import _WaitCounter
 try:
     import redis
 except ImportError:
-    redis = None  # type: ignore[assignment]
+    redis = None
 
 
 log = logging.getLogger(__name__)
@@ -192,7 +192,7 @@ class RemoteCache(Generic[_T]):
             self._log_sample(sample)
 
     # Used to convert data from the cache into structured data.
-    def _decode(self, data: _U, sample: Optional[Sample]) -> _T:  # type: ignore[override]
+    def _decode(self, data: _U, sample: Optional[Sample]) -> _T:
         return self.serde.decode(data)  # type: ignore[arg-type]
 
     # Used to convert structured data into data for the cache.

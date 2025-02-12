@@ -442,7 +442,7 @@ class IndependentTransform(Transform):
         return self.base_transform.bijective
 
     @property
-    def sign(self) -> int:  # type: ignore[override]
+    def sign(self) -> int:
         return self.base_transform.sign
 
     def _call(self, x):
@@ -1007,7 +1007,7 @@ class PositiveDefiniteTransform(Transform):
     """
 
     domain = constraints.independent(constraints.real, 2)
-    codomain = constraints.positive_definite  # type: ignore[assignment]
+    codomain = constraints.positive_definite
 
     def __eq__(self, other):
         return isinstance(other, PositiveDefiniteTransform)

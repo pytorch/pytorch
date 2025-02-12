@@ -48,7 +48,7 @@ if torch._C._has_mkldnn:
         computation_op = mkldnn._linear_pointwise.default
         act = computation_nodes[0].args[0]
         wgt = computation_nodes[0].args[1]
-        wgt_size = wgt.meta.get("val").size()  # type: ignore[union-attr]
+        wgt_size = wgt.meta.get("val").size()
         return len(computation_nodes) >= 2 and all(
             (
                 node.target == computation_op

@@ -262,7 +262,7 @@ def audiohandler(extension, data):
         return None
 
     try:
-        import torchaudio  # type: ignore[import]
+        import torchaudio
     except ImportError as e:
         raise ModuleNotFoundError(
             "Package `torchaudio` is required to be installed for default audio file loader."

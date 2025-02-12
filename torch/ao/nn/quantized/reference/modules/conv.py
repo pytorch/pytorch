@@ -34,12 +34,12 @@ class _ConvNd(torch.nn.modules.conv._ConvNd, ReferenceQuantizedModule):
         qref_conv = cls(
             float_conv.in_channels,
             float_conv.out_channels,
-            float_conv.kernel_size,  # type: ignore[arg-type]
-            float_conv.stride,  # type: ignore[arg-type]
-            float_conv.padding,  # type: ignore[arg-type]
-            float_conv.dilation,  # type: ignore[arg-type]
+            float_conv.kernel_size,
+            float_conv.stride,
+            float_conv.padding,
+            float_conv.dilation,
             float_conv.groups,
-            float_conv.bias is not None,  # type: ignore[arg-type]
+            float_conv.bias is not None,
             float_conv.padding_mode,
             device=float_conv.weight.device,
             dtype=float_conv.weight.dtype,
@@ -252,13 +252,13 @@ class _ConvTransposeNd(_ConvNd, torch.nn.modules.conv._ConvTransposeNd):
         qref_conv = cls(
             float_conv.in_channels,
             float_conv.out_channels,
-            float_conv.kernel_size,  # type: ignore[arg-type]
-            float_conv.stride,  # type: ignore[arg-type]
-            float_conv.padding,  # type: ignore[arg-type]
-            float_conv.output_padding,  # type: ignore[arg-type]
+            float_conv.kernel_size,
+            float_conv.stride,
+            float_conv.padding,
+            float_conv.output_padding,
             float_conv.groups,
-            float_conv.bias is not None,  # type: ignore[arg-type]
-            float_conv.dilation,  # type: ignore[arg-type]
+            float_conv.bias is not None,
+            float_conv.dilation,
             float_conv.padding_mode,
             device=float_conv.weight.device,
             dtype=float_conv.weight.dtype,

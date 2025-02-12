@@ -149,14 +149,14 @@ def contract(
             for module in modules:
                 default_all_state: dict[Callable, _State] = OrderedDict()
                 default_registry: dict[str, RegistryItem] = OrderedDict()
-                all_state: dict[Callable, _State] = module.__dict__.setdefault(  # type: ignore[call-overload]
+                all_state: dict[Callable, _State] = module.__dict__.setdefault(
                     STATE_KEY, default_all_state
                 )
                 if not isinstance(all_state, dict):
                     raise AssertionError(
                         f"Distributed composable API states corrupted: {all_state}"
                     )
-                registry: dict[str, RegistryItem] = module.__dict__.setdefault(  # type: ignore[call-overload]
+                registry: dict[str, RegistryItem] = module.__dict__.setdefault(
                     REGISTRY_KEY, default_registry
                 )
                 if not isinstance(registry, dict):
@@ -255,12 +255,10 @@ def contract(
             return updated
 
         def get_state(module: nn.Module) -> _State:
-            return module.__dict__.setdefault(  # type: ignore[call-overload]
+            return module.__dict__.setdefault(
                 STATE_KEY,
                 {},  # TODO(@yhcharles): this is a temporary fix, need a better way
-            ).get(
-                func
-            )  # type: ignore[call-overload]
+            ).get(func)
 
         wrapper.state = get_state  # type: ignore[attr-defined]
 

@@ -251,7 +251,7 @@ if HAS_PYDOT:
                         [
                             f"{c}: {getattr(leaf_module, c)}"
                             for c in leaf_module.__constants__  # type: ignore[union-attr]
-                        ]  # type: ignore[union-attr]
+                        ]
                     )
                 label += extra + r"\n"
             else:

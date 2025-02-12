@@ -169,7 +169,7 @@ def _ort_session(
     model: str | io.BytesIO, ort_providers: Sequence[str] = _ORT_PROVIDERS
 ):
     try:
-        import onnxruntime  # type: ignore[import]
+        import onnxruntime
     except ImportError as e:
         raise ImportError("onnxruntime is required for export verification.") from e
 

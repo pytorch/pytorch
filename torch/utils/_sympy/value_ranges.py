@@ -148,7 +148,7 @@ class ValueRanges(Generic[_T]):
         ...
 
     @overload
-    def __init__(  # type: ignore[misc]
+    def __init__(
         self: ValueRanges[SympyBoolean],
         lower: BoolIn,
         upper: BoolIn,
@@ -244,7 +244,7 @@ class ValueRanges(Generic[_T]):
         ...
 
     @overload
-    def __and__(  # type: ignore[misc]
+    def __and__(
         self: ValueRanges[SympyBoolean],
         other: ValueRanges[SympyBoolean],
     ) -> ValueRanges[SympyBoolean]:
@@ -276,7 +276,7 @@ class ValueRanges(Generic[_T]):
         ...
 
     @overload
-    def __or__(  # type: ignore[misc]
+    def __or__(
         self: ValueRanges[SympyBoolean],
         other: ValueRanges[SympyBoolean],
     ) -> ValueRanges[SympyBoolean]:
@@ -318,12 +318,12 @@ class ValueRanges(Generic[_T]):
     @overload
     @staticmethod
     # work around the fact that bool and int overlap
-    def wrap(arg: Union[ExprIn, ExprVR]) -> ExprVR:  # type: ignore[overload-overlap]
+    def wrap(arg: Union[ExprIn, ExprVR]) -> ExprVR:
         ...
 
     @overload
     @staticmethod
-    def wrap(arg: Union[BoolIn, BoolVR]) -> BoolVR:  # type: ignore[misc]
+    def wrap(arg: Union[BoolIn, BoolVR]) -> BoolVR:
         ...
 
     @staticmethod
@@ -333,7 +333,7 @@ class ValueRanges(Generic[_T]):
         if isinstance(arg, float) and math.isnan(arg):
             return ValueRanges.unknown()
         # arg is either ExprIn or BoolIn, but we don't know it here
-        return ValueRanges(arg, arg)  # type: ignore[arg-type]
+        return ValueRanges(arg, arg)
 
     @staticmethod
     def increasing_map(x: Union[ExprIn, ExprVR], fn: ExprFn) -> ExprVR:
@@ -348,7 +348,7 @@ class ValueRanges(Generic[_T]):
 
     @overload
     @staticmethod
-    def decreasing_map(x: Union[BoolIn, BoolVR], fn: BoolFn) -> BoolVR:  # type: ignore[misc]
+    def decreasing_map(x: Union[BoolIn, BoolVR], fn: BoolFn) -> BoolVR:
         ...
 
     @staticmethod
@@ -356,7 +356,7 @@ class ValueRanges(Generic[_T]):
         """Decreasing: x <= y => f(x) >= f(y)."""
         x = ValueRanges.wrap(x)
         # consistently either Expr or Bool, but we don't know it here
-        return ValueRanges(fn(x.upper), fn(x.lower))  # type: ignore[arg-type]
+        return ValueRanges(fn(x.upper), fn(x.lower))
 
     @staticmethod
     def monotone_map(x: Union[ExprIn, ExprVR], fn: ExprFn) -> ExprVR:
@@ -389,7 +389,7 @@ class ValueRanges(Generic[_T]):
 
     @overload
     @staticmethod
-    def coordinatewise_increasing_map(  # type: ignore[misc]
+    def coordinatewise_increasing_map(
         x: Union[BoolIn, BoolVR],
         y: Union[BoolIn, BoolVR],
         fn: BoolFn2,
@@ -411,8 +411,8 @@ class ValueRanges(Generic[_T]):
         """
         x, y = ValueRanges.wrap(x), ValueRanges.wrap(y)
         return ValueRanges(
-            fn(x.lower, y.lower),  # type: ignore[arg-type]
-            fn(x.upper, y.upper),  # type: ignore[arg-type]
+            fn(x.lower, y.lower),
+            fn(x.upper, y.upper),
         )
 
     @classmethod
@@ -796,7 +796,7 @@ class SymPyValueRangeAnalysis:
         if 0 in x:
             return ValueRanges.unknown()
         else:
-            return ValueRanges.decreasing_map(x, lambda y: FloatTrueDiv(1.0, y))  # type: ignore[operator]
+            return ValueRanges.decreasing_map(x, lambda y: FloatTrueDiv(1.0, y))
 
     @staticmethod
     def abs(x):
@@ -1035,10 +1035,10 @@ def bound_sympy(
             ranges = context.fake_mode.shape_env.var_to_range
 
     def missing_handler(s):
-        if s.is_integer:  # type: ignore[attr-defined]
-            if s.is_positive:  # type: ignore[attr-defined]
+        if s.is_integer:
+            if s.is_positive:
                 vr = ValueRanges(1, int_oo)
-            elif s.is_nonnegative:  # type: ignore[attr-defined]
+            elif s.is_nonnegative:
                 vr = ValueRanges(0, int_oo)
             else:
                 vr = ValueRanges.unknown_int()

@@ -24,14 +24,14 @@ method to provide more details in the signature about the format arguments.
 class _NodeMissingOnnxShapeInference(infra.Rule):
     """Node is missing ONNX shape inference."""
 
-    def format_message(self, op_name) -> str:  # type: ignore[override]
+    def format_message(self, op_name) -> str:
         """Returns the formatted default message of this Rule.
 
         Message template: 'The shape inference of {op_name} type is missing, so it may result in wrong shape inference for the exported graph. Please consider adding it in symbolic function.'
         """
         return self.message_default_template.format(op_name=op_name)
 
-    def format(  # type: ignore[override]
+    def format(
         self, level: infra.Level, op_name
     ) -> Tuple[infra.Rule, infra.Level, str]:
         """Returns a tuple of (Rule, Level, message) for this Rule.
@@ -44,14 +44,14 @@ class _NodeMissingOnnxShapeInference(infra.Rule):
 class _MissingCustomSymbolicFunction(infra.Rule):
     """Missing symbolic function for custom PyTorch operator, cannot translate node to ONNX."""
 
-    def format_message(self, op_name) -> str:  # type: ignore[override]
+    def format_message(self, op_name) -> str:
         """Returns the formatted default message of this Rule.
 
         Message template: 'ONNX export failed on an operator with unrecognized namespace {op_name}. If you are trying to export a custom operator, make sure you registered it with the right domain and version.'
         """
         return self.message_default_template.format(op_name=op_name)
 
-    def format(  # type: ignore[override]
+    def format(
         self, level: infra.Level, op_name
     ) -> Tuple[infra.Rule, infra.Level, str]:
         """Returns a tuple of (Rule, Level, message) for this Rule.
@@ -64,9 +64,7 @@ class _MissingCustomSymbolicFunction(infra.Rule):
 class _MissingStandardSymbolicFunction(infra.Rule):
     """Missing symbolic function for standard PyTorch operator, cannot translate node to ONNX."""
 
-    def format_message(  # type: ignore[override]
-        self, op_name, opset_version, issue_url
-    ) -> str:
+    def format_message(self, op_name, opset_version, issue_url) -> str:
         """Returns the formatted default message of this Rule.
 
         Message template: "Exporting the operator '{op_name}' to ONNX opset version {opset_version} is not supported. Please feel free to request support or submit a pull request on PyTorch GitHub: {issue_url}."
@@ -75,7 +73,7 @@ class _MissingStandardSymbolicFunction(infra.Rule):
             op_name=op_name, opset_version=opset_version, issue_url=issue_url
         )
 
-    def format(  # type: ignore[override]
+    def format(
         self, level: infra.Level, op_name, opset_version, issue_url
     ) -> Tuple[infra.Rule, infra.Level, str]:
         """Returns a tuple of (Rule, Level, message) for this Rule.
@@ -94,9 +92,7 @@ class _MissingStandardSymbolicFunction(infra.Rule):
 class _OperatorSupportedInNewerOpsetVersion(infra.Rule):
     """Operator is supported in newer opset version."""
 
-    def format_message(  # type: ignore[override]
-        self, op_name, opset_version, supported_opset_version
-    ) -> str:
+    def format_message(self, op_name, opset_version, supported_opset_version) -> str:
         """Returns the formatted default message of this Rule.
 
         Message template: "Exporting the operator '{op_name}' to ONNX opset version {opset_version} is not supported. Support for this operator was added in version {supported_opset_version}, try exporting with this version."
@@ -107,7 +103,7 @@ class _OperatorSupportedInNewerOpsetVersion(infra.Rule):
             supported_opset_version=supported_opset_version,
         )
 
-    def format(  # type: ignore[override]
+    def format(
         self, level: infra.Level, op_name, opset_version, supported_opset_version
     ) -> Tuple[infra.Rule, infra.Level, str]:
         """Returns a tuple of (Rule, Level, message) for this Rule.
@@ -128,14 +124,14 @@ class _OperatorSupportedInNewerOpsetVersion(infra.Rule):
 class _FxGraphToOnnx(infra.Rule):
     """Transforms graph from FX IR to ONNX IR."""
 
-    def format_message(self, graph_name) -> str:  # type: ignore[override]
+    def format_message(self, graph_name) -> str:
         """Returns the formatted default message of this Rule.
 
         Message template: 'Transforming FX graph {graph_name} to ONNX graph.'
         """
         return self.message_default_template.format(graph_name=graph_name)
 
-    def format(  # type: ignore[override]
+    def format(
         self, level: infra.Level, graph_name
     ) -> Tuple[infra.Rule, infra.Level, str]:
         """Returns a tuple of (Rule, Level, message) for this Rule.
@@ -148,14 +144,14 @@ class _FxGraphToOnnx(infra.Rule):
 class _FxNodeToOnnx(infra.Rule):
     """Transforms an FX node to an ONNX node."""
 
-    def format_message(self, node_repr) -> str:  # type: ignore[override]
+    def format_message(self, node_repr) -> str:
         """Returns the formatted default message of this Rule.
 
         Message template: 'Transforming FX node {node_repr} to ONNX node.'
         """
         return self.message_default_template.format(node_repr=node_repr)
 
-    def format(  # type: ignore[override]
+    def format(
         self, level: infra.Level, node_repr
     ) -> Tuple[infra.Rule, infra.Level, str]:
         """Returns a tuple of (Rule, Level, message) for this Rule.
@@ -168,14 +164,14 @@ class _FxNodeToOnnx(infra.Rule):
 class _FxPass(infra.Rule):
     """FX graph transformation during ONNX export before converting from FX IR to ONNX IR."""
 
-    def format_message(self, pass_name) -> str:  # type: ignore[override]
+    def format_message(self, pass_name) -> str:
         """Returns the formatted default message of this Rule.
 
         Message template: 'Running {pass_name} pass.'
         """
         return self.message_default_template.format(pass_name=pass_name)
 
-    def format(  # type: ignore[override]
+    def format(
         self, level: infra.Level, pass_name
     ) -> Tuple[infra.Rule, infra.Level, str]:
         """Returns a tuple of (Rule, Level, message) for this Rule.
@@ -188,16 +184,14 @@ class _FxPass(infra.Rule):
 class _NoSymbolicFunctionForCallFunction(infra.Rule):
     """Cannot find symbolic function to convert the "call_function" FX node to ONNX."""
 
-    def format_message(self, target) -> str:  # type: ignore[override]
+    def format_message(self, target) -> str:
         """Returns the formatted default message of this Rule.
 
         Message template: 'No symbolic function to convert the "call_function" node {target} to ONNX. '
         """
         return self.message_default_template.format(target=target)
 
-    def format(  # type: ignore[override]
-        self, level: infra.Level, target
-    ) -> Tuple[infra.Rule, infra.Level, str]:
+    def format(self, level: infra.Level, target) -> Tuple[infra.Rule, infra.Level, str]:
         """Returns a tuple of (Rule, Level, message) for this Rule.
 
         Message template: 'No symbolic function to convert the "call_function" node {target} to ONNX. '
@@ -208,9 +202,7 @@ class _NoSymbolicFunctionForCallFunction(infra.Rule):
 class _UnsupportedFxNodeAnalysis(infra.Rule):
     """Result from FX graph analysis to reveal unsupported FX nodes."""
 
-    def format_message(  # type: ignore[override]
-        self, node_op_to_target_mapping
-    ) -> str:
+    def format_message(self, node_op_to_target_mapping) -> str:
         """Returns the formatted default message of this Rule.
 
         Message template: 'Unsupported FX nodes: {node_op_to_target_mapping}. '
@@ -219,7 +211,7 @@ class _UnsupportedFxNodeAnalysis(infra.Rule):
             node_op_to_target_mapping=node_op_to_target_mapping
         )
 
-    def format(  # type: ignore[override]
+    def format(
         self, level: infra.Level, node_op_to_target_mapping
     ) -> Tuple[infra.Rule, infra.Level, str]:
         """Returns a tuple of (Rule, Level, message) for this Rule.
@@ -236,14 +228,14 @@ class _UnsupportedFxNodeAnalysis(infra.Rule):
 class _OpLevelDebugging(infra.Rule):
     """Report any op level validation failure in warnings."""
 
-    def format_message(self, node, symbolic_fn) -> str:  # type: ignore[override]
+    def format_message(self, node, symbolic_fn) -> str:
         """Returns the formatted default message of this Rule.
 
         Message template: 'FX node: {node} and its onnx function: {symbolic_fn} fails on op level validation.'
         """
         return self.message_default_template.format(node=node, symbolic_fn=symbolic_fn)
 
-    def format(  # type: ignore[override]
+    def format(
         self, level: infra.Level, node, symbolic_fn
     ) -> Tuple[infra.Rule, infra.Level, str]:
         """Returns a tuple of (Rule, Level, message) for this Rule.
@@ -256,14 +248,14 @@ class _OpLevelDebugging(infra.Rule):
 class _FindOpschemaMatchedSymbolicFunction(infra.Rule):
     """Find the OnnxFunction that matches the input/attribute dtypes by comparing them with their opschemas."""
 
-    def format_message(self, symbolic_fn, node) -> str:  # type: ignore[override]
+    def format_message(self, symbolic_fn, node) -> str:
         """Returns the formatted default message of this Rule.
 
         Message template: 'The OnnxFunction: {symbolic_fn} is the nearest match of the node {node}.'
         """
         return self.message_default_template.format(symbolic_fn=symbolic_fn, node=node)
 
-    def format(  # type: ignore[override]
+    def format(
         self, level: infra.Level, symbolic_fn, node
     ) -> Tuple[infra.Rule, infra.Level, str]:
         """Returns a tuple of (Rule, Level, message) for this Rule.
@@ -276,16 +268,14 @@ class _FindOpschemaMatchedSymbolicFunction(infra.Rule):
 class _FxNodeInsertTypePromotion(infra.Rule):
     """Determine if type promotion is required for the FX node. Insert cast nodes if needed."""
 
-    def format_message(self, target) -> str:  # type: ignore[override]
+    def format_message(self, target) -> str:
         """Returns the formatted default message of this Rule.
 
         Message template: 'Performing explicit type promotion for node {target}. '
         """
         return self.message_default_template.format(target=target)
 
-    def format(  # type: ignore[override]
-        self, level: infra.Level, target
-    ) -> Tuple[infra.Rule, infra.Level, str]:
+    def format(self, level: infra.Level, target) -> Tuple[infra.Rule, infra.Level, str]:
         """Returns a tuple of (Rule, Level, message) for this Rule.
 
         Message template: 'Performing explicit type promotion for node {target}. '
@@ -296,16 +286,14 @@ class _FxNodeInsertTypePromotion(infra.Rule):
 class _FindOperatorOverloadsInOnnxRegistry(infra.Rule):
     """Find the list of OnnxFunction of the PyTorch operator in onnx registry."""
 
-    def format_message(self, node) -> str:  # type: ignore[override]
+    def format_message(self, node) -> str:
         """Returns the formatted default message of this Rule.
 
         Message template: 'Checking if the FX node: {node} is supported in onnx registry.'
         """
         return self.message_default_template.format(node=node)
 
-    def format(  # type: ignore[override]
-        self, level: infra.Level, node
-    ) -> Tuple[infra.Rule, infra.Level, str]:
+    def format(self, level: infra.Level, node) -> Tuple[infra.Rule, infra.Level, str]:
         """Returns a tuple of (Rule, Level, message) for this Rule.
 
         Message template: 'Checking if the FX node: {node} is supported in onnx registry.'

@@ -45,7 +45,7 @@ def try_import_cutlass() -> bool:
 
     try:
         import cutlass  # type: ignore[import-not-found]
-        import cutlass_library  # type: ignore[import-not-found]
+        import cutlass_library
 
         cutlass_minor_vesion = int(cutlass.__version__.split(".")[1])
         if cutlass_minor_vesion < 7:
@@ -199,7 +199,7 @@ def _gen_ops_cached(arch, version) -> list[Any]:
 
     if arch == "100":
         try:
-            from cutlass_generator import GenerateSM100  # type: ignore[import]
+            from cutlass_generator import GenerateSM100
 
             GenerateSM100(manifest, args.cuda_version)
         except ImportError:
@@ -233,7 +233,7 @@ def torch_dtype_to_cutlass_type(
 ) -> "cutlass_library.library.DataType":  # type: ignore[name-defined] # noqa: F821
     # Import cutlass python scripts.
     assert try_import_cutlass()
-    import cutlass_library  # type: ignore[import]
+    import cutlass_library
 
     if torch_dtype == torch.float:
         return cutlass_library.library.DataType.f32
@@ -383,7 +383,7 @@ class CUDACompileSourceCapturingContext:
         self._compile_patch = mock.patch(
             "torch._inductor.codecache.CUDACodeCache.compile", my_compile
         )
-        self._compile_patch.__enter__(*args, **kwargs)  # type: ignore[union-attr]
+        self._compile_patch.__enter__(*args, **kwargs)
         return self
 
     def __exit__(self, *args, **kwargs):

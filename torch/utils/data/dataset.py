@@ -256,7 +256,7 @@ class StackDataset(Dataset[_T_stack]):
             dict_batch: list[_T_dict] = [{} for _ in indices]
             for k, dataset in self.datasets.items():
                 if callable(getattr(dataset, "__getitems__", None)):
-                    items = dataset.__getitems__(indices)  # type: ignore[attr-defined]
+                    items = dataset.__getitems__(indices)
                     if len(items) != len(indices):
                         raise ValueError(
                             "Nested dataset's output size mismatch."
@@ -273,7 +273,7 @@ class StackDataset(Dataset[_T_stack]):
         list_batch: list[list] = [[] for _ in indices]
         for dataset in self.datasets:
             if callable(getattr(dataset, "__getitems__", None)):
-                items = dataset.__getitems__(indices)  # type: ignore[attr-defined]
+                items = dataset.__getitems__(indices)
                 if len(items) != len(indices):
                     raise ValueError(
                         "Nested dataset's output size mismatch."
@@ -315,7 +315,7 @@ class ConcatDataset(Dataset[_T_co]):
     def __init__(self, datasets: Iterable[Dataset]) -> None:
         super().__init__()
         self.datasets = list(datasets)
-        assert len(self.datasets) > 0, "datasets should not be an empty iterable"  # type: ignore[arg-type]
+        assert len(self.datasets) > 0, "datasets should not be an empty iterable"
         for d in self.datasets:
             assert not isinstance(
                 d, IterableDataset

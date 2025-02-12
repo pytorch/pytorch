@@ -19,7 +19,7 @@ from typing import Optional, TextIO, Union
 
 
 try:
-    import etcd  # type: ignore[import]
+    import etcd
 except ModuleNotFoundError:
     pass
 

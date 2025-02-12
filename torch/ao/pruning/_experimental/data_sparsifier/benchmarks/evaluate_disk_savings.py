@@ -6,8 +6,8 @@ import time
 import zipfile
 from zipfile import ZipFile
 
-import pandas as pd  # type: ignore[import]
-from dlrm_utils import get_dlrm_model, get_valid_name  # type: ignore[import]
+import pandas as pd
+from dlrm_utils import get_dlrm_model, get_valid_name
 
 import torch
 from torch.ao.pruning._experimental.data_sparsifier import DataNormSparsifier

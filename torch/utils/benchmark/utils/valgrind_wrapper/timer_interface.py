@@ -505,7 +505,7 @@ class _ValgrindWrapper:
                 ).returncode
 
         self._build_type: Optional[str] = None
-        build_search = re.search("BUILD_TYPE=(.+),", torch.__config__.show())  # type: ignore[no-untyped-call]
+        build_search = re.search("BUILD_TYPE=(.+),", torch.__config__.show())
         if build_search is not None:
             self._build_type = build_search.groups()[0].split(",")[0]
 

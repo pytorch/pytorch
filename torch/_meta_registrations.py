@@ -149,7 +149,7 @@ def meta_linspace_logspace(
     torch._check(steps >= 0, lambda: "number of steps must be non-negative")
 
     return torch.empty(
-        (steps,),  # type: ignore[arg-type]
+        (steps,),
         dtype=dtype,
         layout=layout,
         device="meta",
@@ -2119,11 +2119,11 @@ def meta__pdist_forward(self: Tensor, p: float = 2) -> Tensor:
     )
     n = self.size(0)
     if n <= 1:
-        return self.new_empty([0]).to(memory_format=torch.legacy_contiguous_format)  # type: ignore[call-overload]
+        return self.new_empty([0]).to(memory_format=torch.legacy_contiguous_format)
     else:
         return self.new_empty((n * (n - 1) // 2,)).to(
             memory_format=torch.legacy_contiguous_format
-        )  # type: ignore[call-overload]
+        )
 
 
 @register_meta(aten._pdist_backward)
@@ -2441,7 +2441,7 @@ def meta_conv(
         shape_out[output_channels_dim] = 0
 
     out = input_tensor.new_empty(shape_out)
-    out = out.to(memory_format=pick_memory_format())  # type: ignore[call-overload]
+    out = out.to(memory_format=pick_memory_format())
     return out
 
 
@@ -2470,7 +2470,7 @@ if torch._C._has_mkldnn:
         out_memory_format = torch.channels_last
         if input_tensor.dim() == 5:
             out_memory_format = torch.channels_last_3d
-        out = out.to(memory_format=out_memory_format)  # type: ignore[call-overload]
+        out = out.to(memory_format=out_memory_format)
         return out
 
     @register_meta(torch.ops.mkldnn._linear_pointwise.default)
@@ -6261,7 +6261,7 @@ def upsample_nearest2d_backward(
 
     return grad_output.new_empty(input_size).to(
         memory_format=utils.suggest_memory_format(grad_output)
-    )  # type: ignore[call-overload]
+    )
 
 
 @register_meta(
@@ -6301,8 +6301,8 @@ def meta_sort(self, stable=None, dim=-1, descending=False, values=None, indices=
         indices = _maybe_resize_out(indices, out_shape)
         values.as_strided_(out_shape, out_stride)
         indices.as_strided_(out_shape, out_stride)
-        _safe_copy_out(copy_from=v, copy_to=values)  # type: ignore[arg-type]
-        _safe_copy_out(copy_from=i, copy_to=indices)  # type: ignore[arg-type]
+        _safe_copy_out(copy_from=v, copy_to=values)
+        _safe_copy_out(copy_from=i, copy_to=indices)
         return values, indices
     return v, i
 
@@ -6621,7 +6621,7 @@ def meta_pixel_shuffle(self, upscale_factor):
     out_shape = (*self.shape[:-3], C, Hr, Wr)
 
     out = self.new_empty(out_shape)
-    out = out.to(memory_format=pick_memory_format())  # type: ignore[call-overload]
+    out = out.to(memory_format=pick_memory_format())
     return out
 
 

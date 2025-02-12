@@ -798,7 +798,7 @@ def sym_not(a):
     if hasattr(a, "__sym_not__"):
         return a.__sym_not__()
     if isinstance(a, sympy.Basic):
-        return ~a  # type: ignore[operator]
+        return ~a
     return not a
 
 
@@ -814,7 +814,7 @@ def sym_float(a):
         return a
     elif hasattr(a, "__sym_float__"):
         return a.__sym_float__()
-    return builtins.float(a)  # type: ignore[operator]
+    return builtins.float(a)
 
 
 def sym_int(a):
@@ -829,7 +829,7 @@ def sym_int(a):
         return a
     elif isinstance(a, SymFloat):
         return math.trunc(a)
-    return builtins.int(a)  # type: ignore[operator]
+    return builtins.int(a)
 
 
 def sym_max(a, b):
@@ -2263,13 +2263,7 @@ quantized_gru = ops.aten.quantized_gru
 from torch import masked as masked
 
 # Import removed ops with error message about removal
-from torch._linalg_utils import (  # type: ignore[misc]
-    _symeig as symeig,
-    eig,
-    lstsq,
-    matrix_rank,
-    solve,
-)
+from torch._linalg_utils import _symeig as symeig, eig, lstsq, matrix_rank, solve
 from torch.utils.dlpack import from_dlpack, to_dlpack
 
 
@@ -2566,7 +2560,7 @@ def compile(
         nopython=fullgraph,
         dynamic=dynamic,
         disable=disable,
-    )(model)  # type: ignore[return-value]
+    )(model)
 
 
 def _register_device_module(device_type, module):

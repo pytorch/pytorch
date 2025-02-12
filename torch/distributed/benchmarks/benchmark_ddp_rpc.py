@@ -106,7 +106,7 @@ def _print_cont(msg):
 
 
 def _run_printable(cmd):
-    proc = subprocess.run(shlex.split(cmd), capture_output=True, check=False)  # type: ignore[call-overload]
+    proc = subprocess.run(shlex.split(cmd), capture_output=True, check=False)
     assert proc.returncode == 0
 
     buffer = io.BytesIO()

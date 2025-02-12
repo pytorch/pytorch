@@ -73,7 +73,7 @@ _P = ParamSpec("_P")
 
 Tensor = torch.Tensor
 aten = torch._ops.ops.aten
-DispatchKey = torch._C.DispatchKey  # type: ignore[attr-defined]
+DispatchKey = torch._C.DispatchKey
 
 
 def _dropout_helper(
@@ -1045,7 +1045,7 @@ def hardtanh(
     if min_val > max_val:  # type: ignore[operator]
         raise ValueError("min_val cannot be greater than max_val")
 
-    return torch.clamp(a, min_val, max_val)  # type: ignore[arg-type]
+    return torch.clamp(a, min_val, max_val)
 
 
 @register_decomposition(aten.gelu)

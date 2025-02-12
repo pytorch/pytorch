@@ -45,7 +45,7 @@ def call_op(
     attributes = [
         attr
         for attr in ir_convenience.convert_attributes(kwargs)
-        if attr.value is not None  # type: ignore[union-attr]
+        if attr.value is not None
     ]
     tracer.nodes.append(
         node := ir.Node(

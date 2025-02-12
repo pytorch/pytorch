@@ -109,16 +109,16 @@ if config.is_fbcode():
     )
 else:
 
-    def log_global_cache_errors(*args: Any, **kwargs: Any) -> None:  # type: ignore[misc]
+    def log_global_cache_errors(*args: Any, **kwargs: Any) -> None:
         pass
 
-    def log_global_cache_stats(*args: Any, **kwargs: Any) -> None:  # type: ignore[misc]
+    def log_global_cache_stats(*args: Any, **kwargs: Any) -> None:
         pass
 
-    def log_global_cache_vals(*args: Any, **kwargs: Any) -> None:  # type: ignore[misc]
+    def log_global_cache_vals(*args: Any, **kwargs: Any) -> None:
         pass
 
-    def use_global_cache() -> bool:  # type: ignore[misc]
+    def use_global_cache() -> bool:
         return False
 
 
@@ -1933,7 +1933,7 @@ def custom_op_wrapper(op: str, *args: Any) -> Union[list[c_void_p], c_void_p]:
         result = [torch.tensor([]) if r is None else r for r in result]
         for i, r in enumerate(result):
             assert isinstance(r, torch.Tensor), op + " returns a list of non-tensors"
-        return torch._C._aoti.unsafe_alloc_void_ptrs_from_tensors(result)  # type: ignore[arg-type]
+        return torch._C._aoti.unsafe_alloc_void_ptrs_from_tensors(result)
     else:
         assert isinstance(result, torch.Tensor), op + " returns a non-tensor"
         return torch._C._aoti.unsafe_alloc_void_ptr_from_tensor(result)
@@ -3233,5 +3233,5 @@ class LambdaFuture(CodeCacheFuture):
         self.result_fn = result_fn
         self.future = future
 
-    def result(self) -> Callable[..., Any]:  # type: ignore[override]
+    def result(self) -> Callable[..., Any]:
         return self.result_fn()

@@ -309,7 +309,7 @@ def get_default_x86_inductor_quantization_config(
 
     if is_qat:
         # Only support per channel quant for now
-        extra_args["observer"] = MovingAveragePerChannelMinMaxObserver  # type: ignore[dict-item]
+        extra_args["observer"] = MovingAveragePerChannelMinMaxObserver
     weight_quantization_spec = QuantizationSpec(
         dtype=torch.int8,
         quant_min=-128,
@@ -815,7 +815,7 @@ class X86InductorQuantizer(Quantizer):
                     QUANT_ANNOTATION_KEY
                 ] = _X86InductorQuantizationAnnotation(
                     # TODO<leslie> Remove the annotate of output in QAT when qat util support pattern matcher.
-                    output_qspec=get_output_act_qspec(quantization_config),  # type: ignore[arg-type]
+                    output_qspec=get_output_act_qspec(quantization_config),
                     _annotated=True,
                     _is_output_of_quantized_pattern=True,
                 )
@@ -880,7 +880,7 @@ class X86InductorQuantizer(Quantizer):
                 ] = _X86InductorQuantizationAnnotation(
                     input_qspec_map=binary_node_input_qspec_map,
                     # TODO<leslie> Remove the annotate of output in QAT when qat util support pattern matcher.
-                    output_qspec=get_output_act_qspec(quantization_config),  # type: ignore[arg-type]
+                    output_qspec=get_output_act_qspec(quantization_config),
                     _annotated=True,
                     _is_output_of_quantized_pattern=True,
                 )
@@ -936,7 +936,7 @@ class X86InductorQuantizer(Quantizer):
                     QUANT_ANNOTATION_KEY
                 ] = _X86InductorQuantizationAnnotation(
                     # TODO<leslie> Remove the annotate of output in QAT when qat util support pattern matcher.
-                    output_qspec=get_output_act_qspec(quantization_config),  # type: ignore[arg-type]
+                    output_qspec=get_output_act_qspec(quantization_config),
                     _annotated=True,
                     _is_output_of_quantized_pattern=True,
                 )
@@ -977,7 +977,7 @@ class X86InductorQuantizer(Quantizer):
                     QUANT_ANNOTATION_KEY
                 ] = _X86InductorQuantizationAnnotation(
                     # TODO<leslie> Remove the annotate of output in QAT when qat util support pattern matcher.
-                    output_qspec=get_output_act_qspec(quantization_config),  # type: ignore[arg-type]
+                    output_qspec=get_output_act_qspec(quantization_config),
                     _annotated=True,
                     _is_output_of_quantized_pattern=True,
                 )

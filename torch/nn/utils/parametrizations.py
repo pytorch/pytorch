@@ -495,7 +495,7 @@ class _SpectralNorm(Module):
                 out=self._u,  # type: ignore[has-type]
             )
             self._v = F.normalize(
-                torch.mv(weight_mat.H, self._u),  # type: ignore[has-type]
+                torch.mv(weight_mat.H, self._u),
                 dim=0,
                 eps=self.eps,
                 out=self._v,  # type: ignore[has-type]

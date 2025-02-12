@@ -2,12 +2,9 @@
 import os
 import zipfile
 
-import numpy as np  # type: ignore[import]
-from dlrm_data_pytorch import (  # type: ignore[import]
-    collate_wrapper_criteo_offset,
-    CriteoDataset,
-)
-from dlrm_s_pytorch import DLRM_Net  # type: ignore[import]
+import numpy as np
+from dlrm_data_pytorch import collate_wrapper_criteo_offset, CriteoDataset
+from dlrm_s_pytorch import DLRM_Net
 
 import torch
 

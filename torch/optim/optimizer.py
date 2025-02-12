@@ -826,7 +826,9 @@ class Optimizer:
         handle = hooks.RemovableHandle(self._optimizer_load_state_dict_post_hooks)
         self._optimizer_load_state_dict_post_hooks[handle.id] = hook
         if prepend:
-            self._optimizer_load_state_dict_post_hooks.move_to_end(handle.id, last=False)  # type: ignore[attr-defined]
+            self._optimizer_load_state_dict_post_hooks.move_to_end(
+                handle.id, last=False
+            )
         return handle
 
     @torch._disable_dynamo

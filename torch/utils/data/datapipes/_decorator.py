@@ -26,7 +26,7 @@ class functional_datapipe:
 
     def __call__(self, cls):
         if issubclass(cls, IterDataPipe):
-            if isinstance(cls, type):  # type: ignore[arg-type]
+            if isinstance(cls, type):
                 if not isinstance(cls, _DataPipeMeta):
                     raise TypeError(
                         "`functional_datapipe` can only decorate IterDataPipe"
@@ -78,13 +78,13 @@ class non_deterministic:
 
     def __init__(self, arg: Union[type[IterDataPipe], Callable[[], bool]]) -> None:
         # 1. Decorator doesn't have any argument
-        if isinstance(arg, type):  # type: ignore[arg-type]
-            if not issubclass(arg, IterDataPipe):  # type: ignore[arg-type]
+        if isinstance(arg, type):
+            if not issubclass(arg, IterDataPipe):
                 raise TypeError(
                     "Only `IterDataPipe` can be decorated with `non_deterministic`"
                     f", but {arg.__name__} is found"
                 )
-            self.cls = arg  # type: ignore[assignment]
+            self.cls = arg
         # 2. Decorator has an argument of a function
         #    This class should behave differently given different inputs. Use this
         #    function to verify the determinism for each instance.
@@ -105,13 +105,10 @@ class non_deterministic:
                     "You can turn off determinism for this DataPipe if that is acceptable "
                     "for your application"
                 )
-            return self.cls(*args, **kwargs)  # type: ignore[call-arg]
+            return self.cls(*args, **kwargs)
 
         # Decorate with a functional argument
-        if not (
-            isinstance(args[0], type)
-            and issubclass(args[0], IterDataPipe)  # type: ignore[arg-type]
-        ):
+        if not (isinstance(args[0], type) and issubclass(args[0], IterDataPipe)):
             raise TypeError(
                 f"Only `IterDataPipe` can be decorated, but {args[0].__name__} is found"
             )

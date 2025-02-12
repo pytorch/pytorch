@@ -312,7 +312,7 @@ def tree_flatten(
         A pair ``(leaves, treespec)`` where the first element is a list of leaf values and the
         second element is a treespec representing the structure of the pytree.
     """
-    return optree.tree_flatten(  # type: ignore[return-value]
+    return optree.tree_flatten(
         tree,
         is_leaf=is_leaf,
         none_is_leaf=True,
@@ -344,7 +344,7 @@ def tree_unflatten(leaves: Iterable[Any], treespec: TreeSpec) -> PyTree:
             f"tree_unflatten(leaves, treespec): Expected `treespec` to be instance of "
             f"PyTreeSpec but got item of type {type(treespec)}."
         )
-    return optree.tree_unflatten(treespec, leaves)  # type: ignore[arg-type]
+    return optree.tree_unflatten(treespec, leaves)
 
 
 def tree_iter(
@@ -444,7 +444,7 @@ def tree_structure(
     Returns:
         A treespec object representing the structure of the pytree.
     """
-    return optree.tree_structure(  # type: ignore[return-value]
+    return optree.tree_structure(
         tree,
         is_leaf=is_leaf,
         none_is_leaf=True,
@@ -609,7 +609,7 @@ def map_only(
     ):
 
         def pred(x: Any) -> bool:
-            return isinstance(x, type_or_types_or_pred)  # type: ignore[arg-type]
+            return isinstance(x, type_or_types_or_pred)
 
     elif callable(type_or_types_or_pred):
         pred = type_or_types_or_pred  # type: ignore[assignment]

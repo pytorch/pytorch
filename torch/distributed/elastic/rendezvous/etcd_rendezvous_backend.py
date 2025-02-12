@@ -9,11 +9,11 @@ import binascii
 from base64 import b64decode, b64encode
 from typing import cast, Optional
 
-import urllib3.exceptions  # type: ignore[import]
+import urllib3.exceptions
 
 
 try:
-    import etcd  # type: ignore[import]
+    import etcd
 except ModuleNotFoundError:
     from . import _etcd_stub as etcd
 

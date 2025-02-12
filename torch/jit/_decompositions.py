@@ -20,7 +20,7 @@ _P = ParamSpec("_P")
 
 
 def check_decomposition_has_type_annotations(f):
-    inspect_empty = inspect._empty  # type: ignore[attr-defined]
+    inspect_empty = inspect._empty
     sig = inspect.signature(f)
     for param in sig.parameters.values():
         assert (
@@ -44,7 +44,7 @@ def signatures_match(decomposition_sig, torch_op_sig):
         # in the torch_op_sig - like default value
         # can't check 'kind' bc
         # kwarg-only values with defaults not yet supported in TS
-        inspect_empty = inspect._empty  # type: ignore[attr-defined]
+        inspect_empty = inspect._empty
         for field in ["name", "annotation"]:
             if field == "name" and decomp_param.name == "self":
                 warnings.warn("PyTorch uses 'input' instead of 'self' on public api")

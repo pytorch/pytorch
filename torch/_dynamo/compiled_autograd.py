@@ -295,7 +295,7 @@ class AutogradCompilerInstance:
         maybe_subclass_metadata = CompiledFunction.maybe_subclass_metadata
         del CompiledFunction
 
-        @torch._dynamo.allow_in_graph  # type: ignore[misc]
+        @torch._dynamo.allow_in_graph
         def call_aot_bwd_prologue(ctx_saved_tensors, ctx_symints, *flat_args):
             out = torch._functorch._aot_autograd.runtime_wrappers._backward_prologue_functional(
                 ctx_saved_tensors,

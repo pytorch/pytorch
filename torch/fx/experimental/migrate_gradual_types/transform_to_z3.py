@@ -36,7 +36,7 @@ from torch.fx.tensor_type import Dyn, TensorType
 
 
 try:
-    import z3  # type: ignore[import]
+    import z3
 
     from torch.fx.experimental.migrate_gradual_types.z3_types import (
         D,

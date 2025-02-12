@@ -33,8 +33,8 @@ def get_idx_from_placements(placements, current_rank) -> int:
     Returns:
         A int which contains the position of current device in the placement list.
     """
-    for idx, placement in enumerate(placements):  # type: ignore[attr-defined]
-        if current_rank == placement.rank():  # type: ignore[union-attr]
+    for idx, placement in enumerate(placements):
+        if current_rank == placement.rank():
             return idx
     raise RuntimeError("current_rank not in the placement.")
 
@@ -60,12 +60,12 @@ def build_reshard_metadata(
                 offsets, lengths and device placement.
             A List[int] which contains the ranks in the order of placement.
     """
-    shard_dim = int(sharding_spec.dim)  # type: ignore[attr-defined]
+    shard_dim = int(sharding_spec.dim)
     shards_metadata = [None] * world_size
     ranks = []
     offsets = [0] * len(st_size)
     split_size = get_split_size(st_size[shard_dim], world_size)
-    for idx, placement in enumerate(sharding_spec.placements):  # type: ignore[attr-defined]
+    for idx, placement in enumerate(sharding_spec.placements):
         ranks.append(placement.rank())
         sharded_dim_size = get_chunked_dim_size(st_size[shard_dim], split_size, idx)
         local_tensor_size = list(st_size)
@@ -117,10 +117,10 @@ def reshuffle_local_shard(
         st_size, resharding_spec, world_size
     )
     # Get input split size for all2all.
-    reshard_dim = int(resharding_spec.dim)  # type: ignore[attr-defined]
+    reshard_dim = int(resharding_spec.dim)
     split_size = get_split_size(st_size[reshard_dim], world_size)
     input_split_sizes = [0] * world_size
-    idx = get_idx_from_placements(sharding_spec.placements, current_rank)  # type: ignore[attr-defined]
+    idx = get_idx_from_placements(sharding_spec.placements, current_rank)
     new_rank = resharding_spec.placements[idx].rank()  # type: ignore[union-attr, attr-defined]
     input_split_sizes[new_rank] = local_shard.size(reshard_dim)
     # Get output split size for all2all.
@@ -181,8 +181,8 @@ def reshard_local_shard(
     """
     current_rank = dist.get_rank(pg)
     world_size = dist.get_world_size(pg)
-    current_sharding_dim = int(sharding_spec.dim)  # type: ignore[attr-defined]
-    reshard_dim = int(resharding_spec.dim)  # type: ignore[attr-defined]
+    current_sharding_dim = int(sharding_spec.dim)
+    reshard_dim = int(resharding_spec.dim)
 
     # Build shards_metadata first.
     shards_metadata, ranks = build_reshard_metadata(
@@ -212,7 +212,7 @@ def reshard_local_shard(
     split_size = get_split_size(st_size[current_sharding_dim], world_size)
     rearrange_output_list = False
     indices = []
-    for idx, placement in enumerate(sharding_spec.placements):  # type: ignore[attr-defined]
+    for idx, placement in enumerate(sharding_spec.placements):
         sharded_dim_size = get_chunked_dim_size(
             st_size[current_sharding_dim], split_size, idx
         )
@@ -225,7 +225,7 @@ def reshard_local_shard(
             output_tensor_size, device=local_tensor.device, dtype=local_tensor.dtype
         )
         indices.append(placement.rank())  # type: ignore[union-attr, index, arg-type]
-        if idx != placement.rank():  # type: ignore[union-attr]
+        if idx != placement.rank():
             rearrange_output_list = True
 
     # Perform autograd enabled all2all.
@@ -239,7 +239,7 @@ def reshard_local_shard(
 
     if rearrange_output_list:
         # Need to re-arrange original shard_dim of output_tensor_list.
-        output_tensor_list = [output_tensor_list[idx] for idx in indices]  # type: ignore[call-overload]
+        output_tensor_list = [output_tensor_list[idx] for idx in indices]
     local_tensor = torch.cat(output_tensor_list, dim=current_sharding_dim)
     local_shards = [Shard(local_tensor, shards_metadata[current_rank])]
     return local_shards, shards_metadata
