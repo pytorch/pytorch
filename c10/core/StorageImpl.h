@@ -93,6 +93,12 @@ struct C10_API StorageImpl : public c10::intrusive_ptr_target {
   StorageImpl(const StorageImpl&) = delete;
   ~StorageImpl() override = default;
 
+  static std::atomic<size_t> g_id;
+
+  size_t get_id() const {
+    return id_;
+  }
+
   void reset() {
     data_ptr_.clear();
     size_bytes_ = 0;
@@ -343,6 +349,7 @@ struct C10_API StorageImpl : public c10::intrusive_ptr_target {
   Allocator* allocator_;
   impl::PyObjectSlot pyobj_slot_;
   std::unique_ptr<StorageExtraMeta> extra_meta_ = nullptr;
+  size_t id_ = g_id++;
 };
 
 // Declare StorageImpl create function pointer types.
