@@ -119,6 +119,13 @@ polyfill_fn_mapping = {
     operator.gt: polyfills.cmp_gt,
     operator.ge: polyfills.cmp_ge,
 }
+# A mapping from polyfilled class and original class to both classes for `isinstance` check
+# Insert two key-value pairs for each polyfilled class and original class
+# {
+#     polyfilled_class: (polyfilled_class, original_class),
+#     original_class: (polyfilled_class, original_class),
+# }
+polyfill_class_mapping: dict[type, tuple[type, ...]] = {}
 
 
 class BuiltinVariable(VariableTracker):
@@ -1689,6 +1696,16 @@ class BuiltinVariable(VariableTracker):
                 args=[
                     "isinstance() arg 2 must be a type, a tuple of types, or a union"
                 ],
+            )
+
+        if any(tp in polyfill_class_mapping for tp in isinstance_type_tuple):
+            isinstance_type_tuple = tuple(
+                dict.fromkeys(
+                    itertools.chain.from_iterable(
+                        polyfill_class_mapping.get(tp, (tp,))
+                        for tp in isinstance_type_tuple
+                    )
+                )
             )
 
         try:
