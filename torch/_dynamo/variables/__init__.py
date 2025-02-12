@@ -39,6 +39,8 @@ from .functions import (
     FunctionDecoratedByContextlibContextManagerVariable,
     FunctoolsPartialVariable,
     FunctoolsWrapsVariable,
+    LocalGeneratorFunctionVariable,
+    LocalGeneratorObjectVariable,
     NestedUserFunctionVariable,
     PolyfilledFunctionVariable,
     SkipFunctionVariable,
@@ -64,12 +66,10 @@ from .iter import (
 from .lazy import LazyVariableTracker
 from .lists import (
     BaseListVariable,
-    FxImmutableListVariable,
     ListIteratorVariable,
     ListVariable,
     NamedTupleVariable,
     RangeVariable,
-    RestrictedListSubclassVariable,
     SliceVariable,
     TupleIteratorVariable,
     TupleVariable,
@@ -119,6 +119,7 @@ from .user_defined import (
     RemovableHandleVariable,
     UserDefinedClassVariable,
     UserDefinedDictVariable,
+    UserDefinedListVariable,
     UserDefinedObjectVariable,
     UserDefinedTupleVariable,
 )
@@ -168,7 +169,6 @@ __all__ = [
     "RegexPatternVariable",
     "RemovableHandleVariable",
     "RepeatIteratorVariable",
-    "RestrictedListSubclassVariable",
     "SDPAParamsVariable",
     "SkipFunctionVariable",
     "SliceVariable",

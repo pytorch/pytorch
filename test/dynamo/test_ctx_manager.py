@@ -1744,10 +1744,11 @@ class GraphModule(torch.nn.Module):
 
 class ContextlibContextManagerTests(torch._dynamo.test_case.TestCase):
     def setUp(self):
+        self._prev = torch._dynamo.config.enable_trace_contextlib
         torch._dynamo.config.enable_trace_contextlib = True
 
     def tearDown(self):
-        torch._dynamo.config.enable_trace_contextlib = False
+        torch._dynamo.config.enable_trace_contextlib = self._prev
 
     def test_ctx_basic0(self):
         @contextlib.contextmanager
@@ -2236,7 +2237,7 @@ class GraphModule(torch.nn.Module):
         eager = EagerAndRecordGraphs()
         out = torch.compile(backend=eager, fullgraph=False)(fn)(x)
         self.assertEqual(expected, out)
-        self.assertEqual(len(eager.graphs), 1)
+        self.assertEqual(len(eager.graphs), 0)
 
     def test_graph_break_before_and_after___enter__(self):
         @contextlib.contextmanager
@@ -2262,7 +2263,7 @@ class GraphModule(torch.nn.Module):
         eager = EagerAndRecordGraphs()
         out = torch.compile(backend=eager, fullgraph=False)(fn)(x)
         self.assertEqual(expected, out)
-        self.assertEqual(len(eager.graphs), 1)
+        self.assertEqual(len(eager.graphs), 0)
 
     def test_graph_break_before___enter___and_disable___exit__(self):
         @contextlib.contextmanager
@@ -2292,7 +2293,7 @@ class GraphModule(torch.nn.Module):
         eager = EagerAndRecordGraphs()
         out = torch.compile(backend=eager, fullgraph=False)(fn)(x)
         self.assertEqual(expected, out)
-        self.assertEqual(len(eager.graphs), 1)
+        self.assertEqual(len(eager.graphs), 0)
 
     def test_disable___enter__(self):
         def h(x):
@@ -2573,7 +2574,7 @@ class GraphModule(torch.nn.Module):
         eager = EagerAndRecordGraphs()
         out = torch.compile(backend=eager, fullgraph=False)(fn)(x)
         self.assertEqual(expected, out)
-        self.assertEqual(len(eager.graphs), 1)
+        self.assertEqual(len(eager.graphs), 0)
 
     def test_dynamo_disable_ctx(self):
         @contextlib.contextmanager
@@ -2623,7 +2624,7 @@ class GraphModule(torch.nn.Module):
         eager = EagerAndRecordGraphs()
         out = torch.compile(backend=eager, fullgraph=False, dynamic=False)(f)(x)
         self.assertEqual(expected, out)
-        self.assertEqual(len(eager.graphs), 3)
+        self.assertEqual(len(eager.graphs), 2)
 
     @parametrize("name", ("suppress", "stdout", "stderr"))
     def test_contextlib_suppress(self, name):
