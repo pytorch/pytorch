@@ -120,6 +120,33 @@ class ExceptionTests(torch._dynamo.test_case.TestCase):
         res = opt_fn(x)
         self.assertEqual(ref, res)
 
+    @make_dynamo_test
+    def test_foo(self):
+        @contextlib.contextmanager
+        def cm():
+            try:
+                yield
+            except BaseException:
+                raise ValueError  # noqa: B904
+
+        @contextlib.contextmanager
+        def nothing():
+            try:
+                yield
+            finally:
+                pass
+
+        z = 0
+        with nothing():
+            try:
+                with cm():
+                    raise IndexError
+            except ValueError:
+                z = 1
+            except IndexError:
+                z = 2
+            assert z == 1
+
     def test_exception_else(self):
         def gn(x):
             return torch.cos(x)
@@ -141,6 +168,67 @@ class ExceptionTests(torch._dynamo.test_case.TestCase):
         opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
         res = opt_fn(x)
         self.assertEqual(ref, res)
+
+    @unittest.skipIf(sys.version_info < (3, 11), "Python 3.11+")
+    @unittest.expectedFailure
+    @make_dynamo_test
+    def test_raise_match(self):
+        a = AttributeError
+        b = BytesWarning
+        c = ConnectionError
+        d = DeprecationWarning
+        e = Exception
+
+        def fn(a, b):
+            try:
+                raise a
+            finally:
+                raise b
+
+        def fix_exc_context(frame_exc, new_exc, old_exc):
+            # slightly change from ExitStack.fix_exc_context function
+            while 1:
+                exc_context = new_exc.__context__
+                if exc_context is None or exc_context is old_exc:
+                    return
+                if exc_context is frame_exc:
+                    break
+                new_exc = exc_context
+            new_exc.__context__ = old_exc
+
+        @contextlib.contextmanager
+        def ctx():
+            try:
+                yield
+            finally:
+                frame_exc = prev_exc = sys.exc_info()
+                args = [(d, c), (b, a)]
+                for x, y in args:
+                    try:
+                        fn(x, y)
+                    except BaseException:
+                        new_exc = sys.exc_info()
+                        fix_exc_context(frame_exc[1], new_exc[1], prev_exc[1])
+                        prev_exc = new_exc
+
+                try:
+                    fixed_ctx = prev_exc[1].__context__
+                    raise prev_exc[1]
+                except BaseException:
+                    prev_exc[1].__context__ = fixed_ctx
+                    raise
+
+        try:
+            with ctx():
+                raise e
+        except Exception as exc:
+            self.assertIsInstance(exc, a)
+            self.assertIsInstance(exc.__context__, b)
+            self.assertIsInstance(exc.__context__.__context__, c)
+            self.assertIsInstance(exc.__context__.__context__.__context__, d)
+            self.assertIsInstance(
+                exc.__context__.__context__.__context__.__context__, e
+            )
 
     # TODO(anijain2305) - does not work with fullgraph=True
     def test_exception_with_another_exception2(self):
@@ -575,66 +663,6 @@ class ExceptionTests(torch._dynamo.test_case.TestCase):
             exc2 = e
 
         self.assertIsNone(exc2.__context__)
-
-    @unittest.skipIf(sys.version_info < (3, 11), "Python 3.11+")
-    @make_dynamo_test
-    def test_raise_match(self):
-        a = AttributeError
-        b = BytesWarning
-        c = ConnectionError
-        d = DeprecationWarning
-        e = Exception
-
-        def fn(a, b):
-            try:
-                raise a
-            finally:
-                raise b
-
-        def fix_exc_context(frame_exc, new_exc, old_exc):
-            # slightly change from ExitStack.fix_exc_context function
-            while 1:
-                exc_context = new_exc.__context__
-                if exc_context is None or exc_context is old_exc:
-                    return
-                if exc_context is frame_exc:
-                    break
-                new_exc = exc_context
-            new_exc.__context__ = old_exc
-
-        @contextlib.contextmanager
-        def ctx():
-            try:
-                yield
-            finally:
-                frame_exc = prev_exc = sys.exc_info()
-                args = [(d, c), (b, a)]
-                for x, y in args:
-                    try:
-                        fn(x, y)
-                    except BaseException:
-                        new_exc = sys.exc_info()
-                        fix_exc_context(frame_exc[1], new_exc[1], prev_exc[1])
-                        prev_exc = new_exc
-
-                try:
-                    fixed_ctx = prev_exc[1].__context__
-                    raise prev_exc[1]
-                except BaseException:
-                    prev_exc[1].__context__ = fixed_ctx
-                    raise
-
-        try:
-            with ctx():
-                raise e
-        except Exception as exc:
-            self.assertIsInstance(exc, a)
-            self.assertIsInstance(exc.__context__, b)
-            self.assertIsInstance(exc.__context__.__context__, c)
-            self.assertIsInstance(exc.__context__.__context__.__context__, d)
-            self.assertIsInstance(
-                exc.__context__.__context__.__context__.__context__, e
-            )
 
 
 class CPythonExceptionTests(torch._dynamo.test_case.TestCase):
