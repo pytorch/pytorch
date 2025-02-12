@@ -3509,6 +3509,10 @@ html_theme_options = {
     "analytics_id": "GTM-T8XT4PS",
 }
 
+html_context = {
+    "display_github": False,
+}
+
 html_logo = "_static/img/pytorch-logo-dark-unstable.png"
 if RELEASE:
     html_logo = "_static/img/pytorch-logo-dark.svg"
