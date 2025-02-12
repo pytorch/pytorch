@@ -28,4 +28,3 @@ while IFS= read -r file; do
 done < "$file_list"
 
 echo "Replacement completed."
-
