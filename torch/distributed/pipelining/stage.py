@@ -111,6 +111,10 @@ def _make_tensor_from_meta(
     )
 
 
+def _rank_to_global_rank(peer_rank: int, group: Optional[dist.ProcessGroup]):
+    return peer_rank if group is None else dist.get_global_rank(group, peer_rank)
+
+
 class _PipelineStageBase(ABC):
     """
     Base class for pipeline stages.
@@ -1371,7 +1375,12 @@ class PipelineStage(_PipelineStageBase):
                 self.stage_index - 1,
             )
             dist.recv_object_list(
-                objects, src=self.prev_rank, group=self.group, device=self.device
+                objects,
+                src=_rank_to_global_rank(
+                    self.stage_index_to_group_rank[self.stage_index - 1], self.group
+                ),
+                group=self.group,
+                device=self.device,
             )
             recv_args = objects[0]
             assert isinstance(recv_args, tuple), type(recv_args)
@@ -1431,7 +1440,9 @@ class PipelineStage(_PipelineStageBase):
             )
             dist.send_object_list(
                 [outputs_meta],
-                dst=self.next_rank,
+                dst=_rank_to_global_rank(
+                    self.stage_index_to_group_rank[self.stage_index + 1], self.group
+                ),
                 group=self.group,
                 device=self.device,
             )
