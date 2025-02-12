@@ -265,6 +265,14 @@ jobs:
         run: |
           kill "$MONITOR_SCRIPT_PID"
 
+      - name: Get directory perms
+        if: always()
+        run: |
+          ls -la /home/runner/_work
+          ls -la /home/runner/_work/pytorch
+          ls -la /home/runner/_work/pytorch/pytorch
+          ls -la /home/runner/_work/pytorch/pytorch/test/test-reports/
+
       - name: Upload test artifacts
         uses: ./.github/actions/upload-test-artifacts
         if: always() && steps.test.conclusion && steps.test.conclusion != 'skipped'
