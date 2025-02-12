@@ -49,7 +49,7 @@ def prologue_fusion_enabled() -> bool:
         version = torch._utils_internal.justknobs_getval_int(jk_name)
         return version <= ENABLE_PROLOGUE_FUSION_VERSION
     else:
-        return os.environ.get("TORCHINDUCTOR_PROLOGUE_FUSION", "1") == "1"
+        return True
 
 
 # Enable auto_functionalized_v2 (enabled by default)
