@@ -5419,16 +5419,26 @@ static void _ncclMemFree(void* ptr, size_t size, int device, void* stream) {
 
 // Create a `CUDAPluggableAllocator` that uses the above functions.
 std::shared_ptr<c10::Allocator> ProcessGroupNCCL::getMemAllocator() {
-#ifndef NCCL_HAS_MEM_ALLOC
-  TORCH_CHECK(
-      false, "NCCL mem allocator is not supported in this NCCL version");
-#endif // NCCL_HAS_MEM_ALLOC
   C10_LOG_API_USAGE_ONCE("ProcessGroupNCCL.getMemAllocator");
+  if (!supportsTensorAlloc()) {
+    TORCH_CHECK(
+        false, "NCCL mem allocator is not supported in this NCCL version");
+  }
   static std::shared_ptr<c10::cuda::CUDACachingAllocator::CUDAAllocator>
       ncclMemAllocator =
           torch::cuda::CUDAPluggableAllocator::createCustomAllocator(
               _ncclMemAlloc, _ncclMemFree);
   return ncclMemAllocator;
+}
+
+bool ProcessGroupNCCL::supportsTensorAlloc() {
+  int version = 0;
+  // Rely on link-time versioning
+  ncclGetVersion(&version);
+  if (version >= NCCL_VERSION(2, 19, 0)) {
+    return true;
+  }
+  return false;
 }
 
 at::Tensor ProcessGroupNCCL::allocateTensor(
