@@ -18,7 +18,12 @@ from torch.utils._sympy.symbol import SymT
 from . import config, dependencies
 from .codegen.common import index_prevent_reordering
 from .ops_handler import DefaultHandler, OpsHandler, WrapperHandler
-from .utils import cache_on_self, sympy_index_symbol_with_prefix, sympy_subs
+from .utils import (
+    cache_on_self,
+    reduction_num_outputs,
+    sympy_index_symbol_with_prefix,
+    sympy_subs,
+)
 from .virtualized import ops, V
 
 
@@ -440,6 +445,7 @@ class LoopBodyBlock:
 
     def __init__(self, body: LoopBody, fn: Callable[..., Any], args: list[Any]):
         self.body = body
+
         tracer = LightTracer()
         proxy_ops = tracer.create_proxy("placeholder", "ops", (), {})
 
@@ -550,8 +556,9 @@ class CaptureIndexing(WrapperHandler):
 
     def reduction(self, dtype, src_dtype, reduction_type, value):
         result = self._inner.reduction(dtype, src_dtype, reduction_type, value)
-        if "welford" in reduction_type:
-            return tuple(result[i] for i in range(3))
+        num_outputs = reduction_num_outputs(reduction_type)
+        if num_outputs > 1:
+            return tuple(result[i] for i in range(num_outputs))
         return result
 
     def index_expr(self, index, dtype):

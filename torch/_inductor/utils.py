@@ -1754,7 +1754,12 @@ def is_welford_reduction(reduction_type: str) -> bool:
 
 
 def reduction_num_outputs(reduction_type: str) -> int:
-    return 3 if is_welford_reduction(reduction_type) else 1
+    if is_welford_reduction(reduction_type):
+        return 3
+    elif reduction_type == "online_softmax_reduce":
+        return 2
+    else:
+        return 1
 
 
 def is_linux() -> bool:
