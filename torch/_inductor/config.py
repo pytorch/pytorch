@@ -6,6 +6,7 @@ import torch
 import torch._inductor.custom_graph_pass
 from torch._environment import is_fbcode
 from torch.utils._config_module import Config, get_tristate_env, install_config_module
+from torch.utils._ordered_set import OrderedSet
 
 
 inplace_padding = os.environ.get("TORCHINDUCTOR_INPLACE_PADDING", "1") == "1"
@@ -298,15 +299,23 @@ reorder_for_compute_comm_overlap_passes: list[
     Union[
         str,
         Callable[
-            [list["torch._inductor.scheduler.BaseSchedulerNode"]],
+            [
+                # Input schedule nodes
+                list["torch._inductor.scheduler.BaseSchedulerNode"],
+                # Graph Inputs
+                OrderedSet[str],
+                # Graph Outputs
+                OrderedSet[str],
+            ],
             list["torch._inductor.scheduler.BaseSchedulerNode"],
         ],
     ]
 ] = [
     "sink_comms_and_waits",
     "reorder_comms_preserving_peak_memory",
-    # "reorder_compute_for_overlap",
     # "raise_comms",
+    # "sink_waits",
+    # "reorder_compute_for_overlap",
 ]
 
 # enable operator reordering for peak memory optimization
