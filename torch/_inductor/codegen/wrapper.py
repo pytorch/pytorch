@@ -1241,7 +1241,7 @@ class PythonWrapperCodegen(CodeGen):
 
         return result.getvaluewithlinemap()
 
-    def _cleanup_autotune_example_tensors(self):
+    def _finalize_autotune_calls(self):
         """Delete all autotune-generated tensors after the last use."""
         to_delete: dict[str, list[str]] = {n: [] for n in self.kernel_autotune_names}
         for tensor_arg, kernel_name in self.kernel_autotune_example_args.values():
@@ -1273,7 +1273,7 @@ class PythonWrapperCodegen(CodeGen):
         """
         )
         scope = {}  # type: ignore[var-annotated]
-        self._cleanup_autotune_example_tensors()
+        self._finalize_autotune_calls()
         tuning_code = (
             self.kernel_autotune_defs.getvalue()
             + "\n"
