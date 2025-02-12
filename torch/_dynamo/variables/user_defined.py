@@ -201,12 +201,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
         try:
             obj = inspect.getattr_static(self.value, name)
         except AttributeError:
-            if type(self.value) is type:
-                raise_observed_exception(AttributeError, tx)
-            else:
-                # Cannot reason about classes with a custom metaclass
-                # See: test_functions::test_getattr_metaclass
-                obj = None
+            obj = None
 
         if name == "__new__" and UserDefinedClassVariable.is_supported_new_method(obj):
             return super().var_getattr(tx, name)
