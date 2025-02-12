@@ -177,7 +177,7 @@ class Attr {
       float sum_q_scale = 1.f,
       int64_t zp = 0) {
     ops_params_.push_back(
-        PostOpParam(/*scale_sum*/ sum_scale * sum_q_scale, kind_t::sum));
+        PostOpParam(/*scale_sum*/ sum_scale * sum_q_scale, zp, kind_t::sum));
     return *this;
   }
 
@@ -261,10 +261,7 @@ class Attr {
     return *this;
   }
 
-  dnnl::post_ops extract_post_ops(
-      const at::Tensor& dst,
-      bool is_quantized = false,
-      bool int8_output = false) {
+  dnnl::post_ops extract_post_ops(const at::Tensor& dst) {
     // this function is used to extract post ops params from the ops_params_
     // and put them into onednn post ops
     for (size_t i = 0; i < ops_params_.size(); ++i) {
@@ -303,11 +300,6 @@ class Attr {
       }
     }
 
-    // if output is quantized, then append the eltwise linear to adjust the
-    // output scale/zero_point
-    if (is_quantized && int8_output) {
-      dnnl_post_ops_.append_eltwise(kind_with_linear, q_scale_, q_zero_point_);
-    }
     return dnnl_post_ops_;
   }
 
@@ -410,6 +402,7 @@ static inline void construct_attr_by_post_op(
     double binary_alpha,
     double input1_scale,
     int64_t input1_zero_point,
+    std::optional<at::Tensor> accum,
     const std::string_view& unary_post_op,
     const torch::List<std::optional<at::Scalar>>& unary_post_op_args,
     const std::string_view& unary_post_op_algorithm,
@@ -418,11 +411,46 @@ static inline void construct_attr_by_post_op(
       (binary_post_op == "none" && unary_post_op == "none"); // not post-ops
   bool is_unary_post_op_only =
       (binary_post_op == "none" && unary_post_op != "none"); // ex., conv + relu
+  bool is_valid_binary_combination =
+      (binary_post_op == "add" || binary_post_op == "sum") &&
+      (unary_post_op == "none" || unary_post_op == "relu");
   TORCH_INTERNAL_ASSERT(
-      is_unary_post_op_only || is_none_post_op,
-      "Currently, quantization backend for Intel GPU only supports convolution or convolution with unary post operation like ReLU");
-  construct_attr_for_unary(
-      unary_post_op, unary_post_op_args, unary_post_op_algorithm, attr);
+      is_unary_post_op_only || is_none_post_op || is_valid_binary_combination,
+      "Please provide valid combination of unary post operators and binary post operators");
+
+  if (binary_post_op == "none") {
+    construct_attr_for_unary(
+        unary_post_op, unary_post_op_args, unary_post_op_algorithm, attr);
+  } else if (binary_post_op == "sum") {
+    if (unary_post_op == "none") {
+      if (input1_zero_point != 0)
+        attr = attr.append_post_eltwise(
+            /*scale*/ 1.f,
+            /*alpha*/ 1.f,
+            -input1_zero_point * input1_scale,
+            attr.kind_with_linear);
+      attr = attr.append_post_sum(1, input1_scale, /*input1_zero_point*/ 0);
+    } else if (unary_post_op == "relu") {
+      if (input1_zero_point != 0)
+        attr = attr.append_post_eltwise(
+            /*scale*/ 1.f,
+            /*alpha*/ 1.f,
+            -input1_zero_point * input1_scale,
+            attr.kind_with_linear);
+      attr = attr.append_post_sum(1, input1_scale, /*input1_zero_point*/ 0);
+      attr = attr.append_post_eltwise(
+          /* scale */ 1.f,
+          /* alpha */ 0.f,
+          /* beta */ 0.f,
+          attr.kind_with_relu);
+    }
+  } else if (binary_post_op == "add") {
+    TORCH_CHECK(accum.has_value());
+    attr = attr.append_post_binary(attr.kind_with_binary_add, accum.value());
+    if (unary_post_op == "relu") {
+      attr = attr.append_post_eltwise(1.f, 0.f, 0.f, attr.kind_with_relu);
+    }
+  }
 }
 
 } // namespace at::native::onednn
