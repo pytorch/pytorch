@@ -2461,6 +2461,7 @@ class TestPatternMatcher(TestPatternMatcherBase):
             (torch.randn((2, 4)).to(device="xpu"),), device="xpu"
         )
 
+    @skipIfNoDynamoSupport
     @skipIfNoONEDNNBF16
     @skipIfNoONEDNN
     def test_qlinear_relu_int8_mixed_bf16(self):
@@ -2782,7 +2783,7 @@ class TestPatternMatcher(TestPatternMatcherBase):
             is_dynamic=is_dynamic,
         )
 
-    def _qlinear_dequant_promotion_cpu_test_helper(
+    def _qlinear_dequant_promotion_test_helper(
         self,
         inputs,
         device="cpu",
@@ -2848,7 +2849,7 @@ class TestPatternMatcher(TestPatternMatcherBase):
                   |
                   Y
         """
-        self._qlinear_dequant_promotion_cpu_test_helper((torch.randn((2, 4)),))
+        self._qlinear_dequant_promotion_test_helper((torch.randn((2, 4)),))
 
     @skipIfNoDynamoSupport
     @skipIfNoONEDNN
@@ -2866,7 +2867,7 @@ class TestPatternMatcher(TestPatternMatcherBase):
                   |
                   Y
         """
-        self._qlinear_dequant_promotion_cpu_test_helper(
+        self._qlinear_dequant_promotion_test_helper(
             (torch.randn((2, 4)).to(device="xpu"),), device="xpu"
         )
 
@@ -2887,7 +2888,7 @@ class TestPatternMatcher(TestPatternMatcherBase):
                   |
                   Y
         """
-        self._qlinear_dequant_promotion_cpu_test_helper(
+        self._qlinear_dequant_promotion_test_helper(
             (torch.randn((2, 4)),), int8_mixed_bf16=True
         )
 
@@ -2909,7 +2910,7 @@ class TestPatternMatcher(TestPatternMatcherBase):
                   |
                   Y
         """
-        self._qlinear_dequant_promotion_cpu_test_helper(
+        self._qlinear_dequant_promotion_test_helper(
             (torch.randn((2, 4)).to(device="xpu"),), device="xpu", int8_mixed_bf16=True
         )
 
@@ -2928,7 +2929,7 @@ class TestPatternMatcher(TestPatternMatcherBase):
                   |
                   Y
         """
-        self._qlinear_dequant_promotion_cpu_test_helper((torch.randn((2, 3, 4)),))
+        self._qlinear_dequant_promotion_test_helper((torch.randn((2, 3, 4)),))
 
     @skipIfNoDynamoSupport
     @skipIfNoONEDNN
@@ -2946,7 +2947,7 @@ class TestPatternMatcher(TestPatternMatcherBase):
                   |
                   Y
         """
-        self._qlinear_dequant_promotion_cpu_test_helper(
+        self._qlinear_dequant_promotion_test_helper(
             (torch.randn((2, 3, 4)).to(device="xpu"),), device="xpu"
         )
 
@@ -2967,7 +2968,7 @@ class TestPatternMatcher(TestPatternMatcherBase):
                   |
                   Y
         """
-        self._qlinear_dequant_promotion_cpu_test_helper(
+        self._qlinear_dequant_promotion_test_helper(
             (torch.randn((2, 3, 4)),), int8_mixed_bf16=True
         )
 
@@ -2989,7 +2990,7 @@ class TestPatternMatcher(TestPatternMatcherBase):
                   |
                   Y
         """
-        self._qlinear_dequant_promotion_cpu_test_helper(
+        self._qlinear_dequant_promotion_test_helper(
             (torch.randn((2, 3, 4)).to(device="xpu"),),
             device="xpu",
             int8_mixed_bf16=True,
@@ -3019,7 +3020,7 @@ class TestPatternMatcher(TestPatternMatcherBase):
                 counters["inductor"]["qlinear_weight_prepack_matcher_count"], 3
             )
 
-        self._qlinear_dequant_promotion_cpu_test_helper(
+        self._qlinear_dequant_promotion_test_helper(
             (torch.randn((2, 4)),),
             matcher_check_fn=matcher_check_fn,
             is_dynamic=True,
