@@ -37,12 +37,11 @@ class ExcTests(LoggingTestCase):
                 torch.randn(1)
             ),
             """\
-Attempted to call function marked as skipped
-  Explanation: Dynamo developers have manually marked that the function `graph_break`\
- in file _dynamo/decorators.py should not be traced.
-  Hint: Avoid calling the function `graph_break`.
+Call to `torch._dynamo.graph_break()`
+  Explanation: User-inserted graph break. Message: None
+  Hint: Remove the `torch._dynamo.graph_break()` call.
 
-  Developer debug context: module: torch._dynamo.decorators, qualname: graph_break, skip reason: <missing reason>
+  Developer debug context: Called `torch._dynamo.graph_break()` with args `[]`, kwargs `{}`
 
 
 from user code:
@@ -177,11 +176,11 @@ from user code:
             munge_exc(record.getMessage()),
             """\
 Graph break in user code at test_exc.py:N
-Graph Break Reason: Attempted to call function marked as skipped
-  Explanation: Dynamo developers have manually marked that the function `graph_break` in file _dynamo/decorators.py should not be traced.
-  Hint: Avoid calling the function `graph_break`.
+Graph Break Reason: Call to `torch._dynamo.graph_break()`
+  Explanation: User-inserted graph break. Message: None
+  Hint: Remove the `torch._dynamo.graph_break()` call.
 
-  Developer debug context: module: torch._dynamo.decorators, qualname: graph_break, skip reason: <missing reason>
+  Developer debug context: Called `torch._dynamo.graph_break()` with args `[]`, kwargs `{}`
 
 User code traceback:
   File "test_exc.py", line N, in fn001

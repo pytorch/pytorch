@@ -3252,7 +3252,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
             unimplemented_v2(
                 gb_type="Attempted to inline function marked as skipped",
                 context=f"qualname: {fn_qualname}, name: {func.get_name()}, "
-                f"filename: {func.get_filename()}, skip reason: {result.reason}",
+                f"filename: `{func.get_filename()}`, skip reason: {result.reason}",
                 explanation=f"Dynamo developers have manually marked that the function `{fn_qualname}` "
                 "should not be traced.",
                 hints=hints,

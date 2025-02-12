@@ -1482,7 +1482,7 @@ class OutputGraph:
                 context=f"Backend: {name}\nException:{str(e)}\nTraceback:\n{self.root_tx.format_frame_summary()}",
                 explanation=f"Backend compiler `{name}` failed with {str(e)}. Adding a graph break.",
                 hints=[
-                    "Report an issue to PyTorch",
+                    "Report an issue to the backend compiler repo.",
                 ],
             )
         except SkipFrame as e:

@@ -1123,6 +1123,18 @@ class SkipFunctionVariable(VariableTracker):
                     "Remove the `torch.compiler.disable` call",
                 ],
             )
+        elif self.value is torch._dynamo.graph_break:
+            graph_break_msg = kwargs.get("msg", None)
+            if graph_break_msg:
+                graph_break_msg = graph_break_msg.as_python_constant()
+            unimplemented_v2(
+                gb_type="Call to `torch._dynamo.graph_break()`",
+                context=f"Called `torch._dynamo.graph_break()` with args `{args}`, kwargs `{kwargs}`",
+                explanation=f"User-inserted graph break. Message: {graph_break_msg}",
+                hints=[
+                    "Remove the `torch._dynamo.graph_break()` call.",
+                ],
+            )
         elif isinstance(self.value, types.WrapperDescriptorType):
             msg = (
                 f"Graph break due to unsupported wrapper descriptor {self.value}. "

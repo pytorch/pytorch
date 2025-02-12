@@ -14,10 +14,6 @@ from torch._dynamo.utils import counters
 from torch.testing._internal.common_utils import IS_FBCODE, scoped_load_inline
 
 
-def _helper(fn, args, backend="eager"):
-    return lambda: torch.compile(fn, backend=backend, fullgraph=True)(*args)
-
-
 """
 NOTE Adding tests to this file:
 
@@ -119,7 +115,7 @@ from user code:
 
     def test_super_call_method(self):
         def fn(it):
-            return [x for x in it]
+            return [x + 1 for x in it]
 
         self.assertExpectedInlineMunged(
             Unsupported,
@@ -142,7 +138,7 @@ from user code:
 
     def test_super_call_function(self):
         def fn(it):
-            return [x for x in it()]
+            return [x + 1 for x in it()]
 
         self.assertExpectedInlineMunged(
             Unsupported,
@@ -166,7 +162,7 @@ from user code:
     def test_unsupported_context(self):
         def fn(obj):
             with obj:
-                return x
+                return 1
 
         self.assertExpectedInlineMunged(
             Unsupported,
@@ -236,7 +232,7 @@ from user code:
             return unittest.skip("test")
 
         def post_munge(s):
-            return re.sub(r"file `.*case.py`", "file `case.py`", s)
+            return re.sub(r"file `.*case\.py`", "file `case.py`", s)
 
         self.assertExpectedInlineMunged(
             Unsupported,
@@ -277,6 +273,35 @@ from user code:
     torch._dynamo.disable()""",
         )
 
+    def test_skipfile_inline(self):
+        class Foo:
+            fn = unittest.skip
+
+        def fn():
+            Foo().fn()
+
+        def post_munge(s):
+            return re.sub(r"`.*case\.py`", "`case.py`", s)
+
+        self.assertExpectedInlineMunged(
+            Unsupported,
+            lambda: torch.compile(fn, backend="eager", fullgraph=True)(),
+            """\
+Attempted to inline function marked as skipped
+  Explanation: Dynamo developers have manually marked that the function `skip` should not be traced.
+  Hint: Avoid calling the function `skip`.
+  Hint: Remove the function `case.py` from torch/_dynamo/trace_rules.py. More graph breaks may occur as a result of attempting to trace into the function.
+  Hint: Please file an issue to PyTorch.
+
+  Developer debug context: qualname: skip, name: skip, filename: `case.py`, skip reason: skipped according trace_rules.lookup SKIP_DIRS
+
+
+from user code:
+   File "test_graph_break_messages.py", line N, in fn
+    Foo().fn()""",
+            post_munge=post_munge,
+        )
+
     def test_disable(self):
         @torch.compiler.disable
         def inner():
@@ -287,7 +312,7 @@ from user code:
 
         def post_munge(s):
             return re.sub(
-                r"<function GraphBreakMessagesTest.test_disable.<locals>.inner at 0x[0-9A-Fa-f]+>",
+                r"<function GraphBreakMessagesTest\.test_disable\.<locals>\.inner at 0x[0-9A-Fa-f]+>",
                 "<function inner>",
                 s,
             )
@@ -309,7 +334,7 @@ from user code:
             post_munge=post_munge,
         )
 
-    def test_graph_break(self):
+    def test_dynamo_graph_break_fn(self):
         def fn():
             torch._dynamo.graph_break()
 
@@ -317,16 +342,36 @@ from user code:
             Unsupported,
             lambda: torch.compile(fn, backend="eager", fullgraph=True)(),
             """\
-Attempted to call function marked as skipped
-  Explanation: Dynamo developers have manually marked that the function `graph_break` in file `_dynamo/decorators.py` should not be traced.
-  Hint: Avoid calling the function `graph_break`.
+Call to `torch._dynamo.graph_break()`
+  Explanation: User-inserted graph break. Message: None
+  Hint: Remove the `torch._dynamo.graph_break()` call.
 
-  Developer debug context: module: torch._dynamo.decorators, qualname: graph_break, skip reason: <missing reason>
+  Developer debug context: Called `torch._dynamo.graph_break()` with args `[]`, kwargs `{}`
 
 
 from user code:
    File "test_graph_break_messages.py", line N, in fn
     torch._dynamo.graph_break()""",
+        )
+
+    def test_dynamo_graph_break_fn_with_msg(self):
+        def fn():
+            torch._dynamo.graph_break(msg="test graph break")
+
+        self.assertExpectedInlineMunged(
+            Unsupported,
+            lambda: torch.compile(fn, backend="eager", fullgraph=True)(),
+            """\
+Call to `torch._dynamo.graph_break()`
+  Explanation: User-inserted graph break. Message: test graph break
+  Hint: Remove the `torch._dynamo.graph_break()` call.
+
+  Developer debug context: Called `torch._dynamo.graph_break()` with args `[]`, kwargs `{'msg': ConstantVariable(str: 'test graph break')}`
+
+
+from user code:
+   File "test_graph_break_messages.py", line N, in fn
+    torch._dynamo.graph_break(msg="test graph break")""",
         )
 
     def test_warnings(self):
@@ -362,7 +407,7 @@ from user code:
 
         fn(torch.randn(4))
         self.assertEqual(len(counters["graph_break"]), 1)
-        first_graph_break = list(counters["graph_break"].keys())[0]
+        first_graph_break = next(iter(counters["graph_break"].keys()))
         self.assertExpectedInline(
             first_graph_break,
             """\
@@ -404,7 +449,7 @@ Attempted to call function marked as skipped
         ):
             f(x)
         self.assertEqual(len(counters["graph_break"]), 1)
-        first_graph_break = list(counters["graph_break"].keys())[0]
+        first_graph_break = next(iter(counters["graph_break"].keys()))
         self.assertExpectedInline(
             first_graph_break,
             """\
