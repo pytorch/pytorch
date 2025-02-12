@@ -76,12 +76,14 @@ from .ops_handler import (  # noqa: F401
 
 if TYPE_CHECKING:
     import torch
+    from torch import Tensor
     from torch._inductor.choices import InductorChoices
     from torch._inductor.codegen.cpp_utils import LocalBufferContext
     from torch._inductor.debug import DebugContext
     from torch._inductor.graph import GraphLowering
     from torch._inductor.loop_body import InterpreterShim
     from torch._subclasses import FakeTensorMode
+    from torch.fx import Node
 
 threadlocal = local()
 
@@ -359,12 +361,12 @@ class _V:
         return _graph._get_handler()
 
     @property
-    def real_inputs(self):
+    def real_inputs(self) -> list[Tensor]:
         """non-fake example inputs"""
         return _real_inputs._get_handler()
 
     @property
-    def fake_mode(self):
+    def fake_mode(self) -> FakeTensorMode:
         """The graph currently being generated"""
         return _fake_mode._get_handler()
 
@@ -374,23 +376,23 @@ class _V:
         return _kernel._get_handler()
 
     @property
-    def debug(self):
+    def debug(self) -> DebugContext:
         return _debug._get_handler()
 
     @property
-    def interpreter(self):
+    def interpreter(self) -> InterpreterShim:
         return _interpreter._get_handler()
 
     @property
-    def aot_compilation(self):
+    def aot_compilation(self) -> bool:
         return _aot_compilation._get_handler() is True
 
     @property
-    def current_node(self):
+    def current_node(self) -> Node:
         return _current_node._get_handler()
 
     @property
-    def local_buffer_context(self):
+    def local_buffer_context(self) -> LocalBufferContext:
         return _local_buffer_context._get_handler()
 
     @property
