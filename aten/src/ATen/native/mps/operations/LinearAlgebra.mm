@@ -1147,7 +1147,6 @@ static void linalg_cholesky_mps_impl(const Tensor& input,
                   ". Matrix is not positive-definite");
     }
   }
-  info.copy_(info_.view(info_sizes));
   out.tril_();
   upper ? out.transpose_(ndim - 2, ndim - 1) : out;
 }
