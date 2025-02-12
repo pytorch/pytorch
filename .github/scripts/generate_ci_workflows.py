@@ -438,7 +438,7 @@ def main() -> None:
         (
             jinja_env.get_template("windows_arm64_binary_build_workflow.yml.j2"),
             WINDOWS_ARM64_BINARY_BUILD_WORKFLOWS,
-        ),        
+        ),
         (
             jinja_env.get_template("windows_arm64_binary_build_workflow.yml.j2"),
             WINDOWS_ARM64_BINARY_SMOKE_WORKFLOWS,
