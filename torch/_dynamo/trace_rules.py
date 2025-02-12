@@ -174,6 +174,7 @@ manual_torch_name_rule_map = {
     # torch.fx map utils
     "torch.fx.node.map_aggregate": UserFunctionVariable,
     "torch.fx.node.map_arg": UserFunctionVariable,
+    "torch.fx.immutable_collections._no_mutation": UserFunctionVariable,
     # symbol operators implemented in Python
     "torch.sym_not": TorchInGraphFunctionVariable,
     "torch.sym_float": TorchInGraphFunctionVariable,
