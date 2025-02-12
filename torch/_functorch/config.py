@@ -11,6 +11,8 @@ import os
 import sys
 from typing import Optional, TYPE_CHECKING
 
+from torch.utils._config_module import Config, install_config_module
+
 
 # Converts torch rng ops to their functional philox rng equivalents. Note that
 # we functionalize only CUDA rng ops today.
@@ -219,8 +221,6 @@ disable_guess_zero_tangent_for_mutated_input_subclass = False
 
 if TYPE_CHECKING:
     from torch.utils._config_typing import *  # noqa: F401, F403
-
-from torch.utils._config_module import install_config_module
 
 
 # adds patch, save_config, invalid config checks, etc
