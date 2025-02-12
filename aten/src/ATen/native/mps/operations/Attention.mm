@@ -21,11 +21,11 @@ namespace native {
 
 // expand potential 3d to 4d tensor
 static inline std::tuple<Tensor, bool> ensure_4d(const Tensor& x) {
-    if (x.dim() == 3) {
-     return {x.unsqueeze(0), true};
-   } else {
-     return {x, false};
-   }
+  if (x.dim() == 3) {
+    return {x.unsqueeze(0), true};
+  } else {
+    return {x, false};
+  }
 }
 
 std::tuple<Tensor, Tensor> _scaled_dot_product_attention_math_mps(const Tensor& query,
@@ -74,53 +74,56 @@ std::tuple<Tensor, Tensor> _scaled_dot_product_attention_math_mps(const Tensor& 
   @autoreleasepool {
     auto mkey = __func__ + getTensorsStringKey({q_, k_, v_}) + ":" + std::to_string(is_causal) + ":" +
         std::to_string(attn_mask.has_value());
-    auto cachedGraph = LookUpOrCreateCachedGraph<CachedGraph>(mkey, [&, q_=q_, k_=k_, v_=v_](auto mpsGraph, auto graph) {
-      auto qTensor = mpsGraphRankedPlaceHolder(mpsGraph, q_);
-      auto kTensor = mpsGraphRankedPlaceHolder(mpsGraph, k_);
-      auto vTensor = mpsGraphRankedPlaceHolder(mpsGraph, v_);
-      auto kT = [mpsGraph transposeTensor:kTensor dimension:2 withDimension:3 name:nil];
-      auto scaleTensor = [mpsGraph constantWithScalar:scale_factor shape:getMPSShape({1}) dataType:MPSDataTypeFloat32];
+    auto cachedGraph =
+        LookUpOrCreateCachedGraph<CachedGraph>(mkey, [&, q_ = q_, k_ = k_, v_ = v_](auto mpsGraph, auto graph) {
+          auto qTensor = mpsGraphRankedPlaceHolder(mpsGraph, q_);
+          auto kTensor = mpsGraphRankedPlaceHolder(mpsGraph, k_);
+          auto vTensor = mpsGraphRankedPlaceHolder(mpsGraph, v_);
+          auto kT = [mpsGraph transposeTensor:kTensor dimension:2 withDimension:3 name:nil];
+          auto scaleTensor = [mpsGraph constantWithScalar:scale_factor
+                                                    shape:getMPSShape({1})
+                                                 dataType:MPSDataTypeFloat32];
 
-      auto maskedMM = [mpsGraph matrixMultiplicationWithPrimaryTensor:qTensor secondaryTensor:kT name:nil];
+          auto maskedMM = [mpsGraph matrixMultiplicationWithPrimaryTensor:qTensor secondaryTensor:kT name:nil];
 
-      if (macOS15_0_plus && [maskedMM dataType] == MPSDataTypeFloat32) {
-        // TODO: In MacOS15 beta, there is a MPSGraph issue when the SDPA sequence gets remapped to use
-        // an improved kernel for the computation, causing NaNs in the result. This identity prevents the remapping.
-        // Limit the availability check once a fix lands.
-        maskedMM = [mpsGraph identityWithTensor:maskedMM name:nil];
-      }
+          if (macOS15_0_plus && [maskedMM dataType] == MPSDataTypeFloat32) {
+            // TODO: In MacOS15 beta, there is a MPSGraph issue when the SDPA sequence gets remapped to use
+            // an improved kernel for the computation, causing NaNs in the result. This identity prevents the remapping.
+            // Limit the availability check once a fix lands.
+            maskedMM = [mpsGraph identityWithTensor:maskedMM name:nil];
+          }
 
-      // upcasting to float32 if needed to improve precision when multiplying by the scale factor
-      if ([maskedMM dataType] != MPSDataTypeFloat32) {
-        maskedMM = [mpsGraph castTensor:maskedMM toType:MPSDataTypeFloat32 name:nil];
-      }
-      maskedMM = [mpsGraph multiplicationWithPrimaryTensor:maskedMM secondaryTensor:scaleTensor name:nil];
-      if ([maskedMM dataType] != qTensor.dataType) {
-        maskedMM = [mpsGraph castTensor:maskedMM toType:qTensor.dataType name:nil];
-      }
+          // upcasting to float32 if needed to improve precision when multiplying by the scale factor
+          if ([maskedMM dataType] != MPSDataTypeFloat32) {
+            maskedMM = [mpsGraph castTensor:maskedMM toType:MPSDataTypeFloat32 name:nil];
+          }
+          maskedMM = [mpsGraph multiplicationWithPrimaryTensor:maskedMM secondaryTensor:scaleTensor name:nil];
+          if ([maskedMM dataType] != qTensor.dataType) {
+            maskedMM = [mpsGraph castTensor:maskedMM toType:qTensor.dataType name:nil];
+          }
 
-      if (is_causal) {
-        auto causalMask = [mpsGraph constantWithScalar:1.0f
-                                                 shape:getMPSShape({qSize, maxSeqLength})
-                                              dataType:MPSDataTypeBool];
-        causalMask = [mpsGraph bandPartWithTensor:causalMask numLower:-1 numUpper:0 name:nil];
-        auto minusInf = [mpsGraph constantWithScalar:-1e20 shape:maskedMM.shape dataType:maskedMM.dataType];
-        maskedMM = [mpsGraph selectWithPredicateTensor:causalMask
-                                   truePredicateTensor:maskedMM
-                                  falsePredicateTensor:minusInf
-                                                  name:nil];
-      } else if (attn_mask) {
-        graph->maskTensor = mpsGraphRankedPlaceHolder(mpsGraph, *attn_mask);
-        maskedMM = [mpsGraph additionWithPrimaryTensor:maskedMM secondaryTensor:graph->maskTensor name:nil];
-      }
-      auto sm = [mpsGraph softMaxWithTensor:maskedMM axis:3 name:nil];
-      auto output = [mpsGraph matrixMultiplicationWithPrimaryTensor:sm secondaryTensor:vTensor name:nil];
-      graph->qTensor = qTensor;
-      graph->kTensor = kTensor;
-      graph->vTensor = vTensor;
-      graph->outputTensor = output;
-      graph->attnTensor = sm;
-    });
+          if (is_causal) {
+            auto causalMask = [mpsGraph constantWithScalar:1.0f
+                                                     shape:getMPSShape({qSize, maxSeqLength})
+                                                  dataType:MPSDataTypeBool];
+            causalMask = [mpsGraph bandPartWithTensor:causalMask numLower:-1 numUpper:0 name:nil];
+            auto minusInf = [mpsGraph constantWithScalar:-1e20 shape:maskedMM.shape dataType:maskedMM.dataType];
+            maskedMM = [mpsGraph selectWithPredicateTensor:causalMask
+                                       truePredicateTensor:maskedMM
+                                      falsePredicateTensor:minusInf
+                                                      name:nil];
+          } else if (attn_mask) {
+            graph->maskTensor = mpsGraphRankedPlaceHolder(mpsGraph, *attn_mask);
+            maskedMM = [mpsGraph additionWithPrimaryTensor:maskedMM secondaryTensor:graph->maskTensor name:nil];
+          }
+          auto sm = [mpsGraph softMaxWithTensor:maskedMM axis:3 name:nil];
+          auto output = [mpsGraph matrixMultiplicationWithPrimaryTensor:sm secondaryTensor:vTensor name:nil];
+          graph->qTensor = qTensor;
+          graph->kTensor = kTensor;
+          graph->vTensor = vTensor;
+          graph->outputTensor = output;
+          graph->attnTensor = sm;
+        });
     auto qPlaceholder = Placeholder(cachedGraph->qTensor, q_);
     auto kPlaceholder = Placeholder(cachedGraph->kTensor, k_);
     auto vPlaceholder = Placeholder(cachedGraph->vTensor, v_);
