@@ -13,7 +13,7 @@ jobs:
       conclusion: ${{ fromJson(steps.get-conclusion.outputs.data).conclusion }}
     steps:
       - name: Get workflow run conclusion
-        uses: octokit/request-action@v2.4.0
+        uses: octokit/request-action@v2.1.0
         id: get-conclusion
         with:
           route: GET /repos/${{ github.repository }}/actions/runs/${{ github.event.workflow_run.id }}/attempts/${{ github.event.workflow_run.run_attempt }}
