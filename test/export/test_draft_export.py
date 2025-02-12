@@ -233,7 +233,7 @@ class TestDraftExport(TestCase):
                 return x.view(-1, 2, 2345)
 
         _, report = draft_export(M(), (torch.tensor([938]),))
-        self.assertEqual(len(report.failures), 2)
+        self.assertEqual(len(report.failures), 1)
         self.assertEqual(
             report.failures[0].failure_type, FailureType.DATA_DEPENDENT_ERROR
         )
