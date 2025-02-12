@@ -374,6 +374,7 @@ def similarity(x: Failure, y: Failure) -> int:  # [0, 100]
     r = fuzz.ratio(x.msg, y.msg)
     return r
 
+SIMILARITY_THRESHOLD: int = 75
 
 def categorize(categories, f: Failure):
     if not categories:
@@ -388,7 +389,7 @@ def categorize(categories, f: Failure):
             max_similarity = s
             max_similarity_cat = c
 
-    if max_similarity > 75:
+    if max_similarity > SIMILARITY_THRESHOLD:
         f.sim = max_similarity
         max_similarity_cat.items.append(f)
         return
@@ -406,9 +407,10 @@ def report_control_pass_test_notpass(control_tcs, test_tcs, dirname):
 
     i = 0
     num_tcs = len(test_tcs.items())
+    print_step = int(num_tcs / 1000 / 10) * 1000
     with open(f"{dirname}/report", "w") as file:
         for _i, (k, tv) in enumerate(test_tcs.items()):
-            if _i % 20000 == 0:
+            if _i % print_step == 0:
                 print(f"...processing... {_i}/{num_tcs}")
 
             if tv.is_skipped():
@@ -453,7 +455,7 @@ def report_control_pass_test_notpass(control_tcs, test_tcs, dirname):
                 file.write(f"text: {f.text}\n")
 
 
-def compute_pass_rate_aot_eager_subclasses(e_dir, dw_dir, ae_dir, sc_dir):
+def compute_pass_rate_aot_eager_subclasses(e_dir, dw_dir, ae_dir, sc_dir, name=""):
     print("parsing xmls")
     print(f"-- PARSE EAGER XMLS {e_dir}")
     e_xmls = open_test_results(e_dir)
@@ -481,13 +483,13 @@ def compute_pass_rate_aot_eager_subclasses(e_dir, dw_dir, ae_dir, sc_dir):
     print("*** Find passed in dynamo, missing in SC")
     find_control_passed_missing_in_test(tcs_dw, tcs_sc)
 
-    # report_control_pass_test_notpass(
-    #    tcs_dw,
-    #    tcs_ae,
-    #    "test_pass_dw_notpass_aw_75"
-    # )
-    # report_control_pass_test_notpass(
-    #    tcs_ae,
-    #    tcs_sc,
-    #    "test_pass_ae_notpass_sc_70"
-    # )
+    #report_control_pass_test_notpass(
+    #   tcs_ae,
+    #   tcs_sc,
+    #   f"test_pass_ae_notpass_sc_{name}"
+    #)
+    #report_control_pass_test_notpass(
+    #   tcs_dw,
+    #   tcs_ae,
+    #   f"test_pass_dw_notpass_aw_{name}"
+    #)

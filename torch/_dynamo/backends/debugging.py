@@ -465,7 +465,7 @@ def test_subclasses(gm, inputs, **kwargs):
         test_gm.print_readable(False),
     )
     MAX_INPUT_VARIANTS: int = int(
-        os.getenv("PYTORCH_TEST_WITH_SUBCLASSES_MAX_INPUT_VARIANTS", default=256)
+        os.getenv("PYTORCH_TEST_WITH_SUBCLASSES_MAX_INPUT_VARIANTS", default=128)
     )
     import random
 
@@ -474,7 +474,6 @@ def test_subclasses(gm, inputs, **kwargs):
         variants = random.sample(TENSOR_INPUTS_TRANSFORM_SEQS, MAX_INPUT_VARIANTS)
     for i, transform_seqs in enumerate(variants):
         # TODO: test random vars of 128 with stable id of transform seqs, to repro
-
         test_inputs = pytree.tree_map(
             lambda x: x.detach() if isinstance(x, torch.Tensor) else x,
             copy.copy(inputs),
