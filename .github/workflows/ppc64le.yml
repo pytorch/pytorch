@@ -29,7 +29,6 @@ jobs:
           docker build -f .github/workflows/Dockerfile.ppc64le -t pytorch-ppc64le:ubi9.3 .
 
   linux-ubi-9-3-cpu-ppc64le-build:
-
     name: linux-ubi9-3-cpu-ppc64le
     uses: ./.github/workflows/_linux-build.yml
     needs: linux-ppc64le-docker-image-build
