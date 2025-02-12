@@ -124,15 +124,6 @@ kernel void complex_mul(
   out[1] = input[0] * other[1] + input[1] * other[0];
 }
 
-#define REGISTER_COMPLEX_MUL_OP(DTYPE)                      \
-  template [[host_name("complex_mul_" #DTYPE)]] kernel void \
-  complex_mul<DTYPE>(                                       \
-      constant void* input,                                 \
-      constant void* other,                                 \
-      device void* out,                                     \
-      constant uint3* offsets,                              \
-      uint tid)
-
 REGISTER_BINARY_OP(complex_mul, float);
 REGISTER_BINARY_OP(complex_mul, half);
 
