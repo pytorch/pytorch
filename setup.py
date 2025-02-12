@@ -402,24 +402,24 @@ def get_submodule_folders():
 
 
 def read_nccl_pin() -> str:
-    nccl_file = "nccl.txt"
+    nccl_file = "nccl-cu12.txt"
     cuda_version = os.getenv("DESIRED_CUDA", "")
     if cuda_version.startswith("11.8"):
-        nccl_file = "nccl-legacy.txt"
+        nccl_file = "nccl-cu11.txt"
     nccl_pin_path = os.path.join(cwd, ".ci", "docker", "ci_commit_pins", nccl_file)
     with open(nccl_pin_path) as f:
         return f.read().strip()
 
 
 def checkout_nccl():
-    commit_hash = read_nccl_pin()
-    report(f"-- Calling nccl checkout: {commit_hash}")
+    release_tag = read_nccl_pin()
+    report(f"-- Checkout nccl release tag: {release_tag}")
     nccl_basedir = os.path.join(third_party_path, "nccl")
     subprocess.check_call(
         ["git", "clone", "https://github.com/NVIDIA/nccl.git", "nccl"],
         cwd=third_party_path,
     )
-    subprocess.check_call(["git", "checkout", commit_hash], cwd=nccl_basedir)
+    subprocess.check_call(["git", "checkout", release_tag], cwd=nccl_basedir)
 
 
 def check_submodules():
