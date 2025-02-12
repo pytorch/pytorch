@@ -463,7 +463,6 @@ def check_submodules():
                 "LICENSE.txt",
             ],
         )
-
     check_for_files(
         os.path.join(third_party_path, "fbgemm", "third_party", "asmjit"),
         ["CMakeLists.txt"],

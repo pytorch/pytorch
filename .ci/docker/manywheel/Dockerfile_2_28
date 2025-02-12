@@ -25,6 +25,7 @@ FROM base as openssl
 ADD ./common/install_openssl.sh install_openssl.sh
 RUN bash ./install_openssl.sh && rm install_openssl.sh
 
+
 # remove unncessary python versions
 RUN rm -rf /opt/python/cp26-cp26m /opt/_internal/cpython-2.6.9-ucs2
 RUN rm -rf /opt/python/cp26-cp26mu /opt/_internal/cpython-2.6.9-ucs4
@@ -43,7 +44,7 @@ ADD ./common/install_mkl.sh install_mkl.sh
 RUN bash ./install_mkl.sh && rm install_mkl.sh
 
 FROM base as magma
-ARG BASE_CUDA_VERSION=11.8
+ARG BASE_CUDA_VERSION=10.2
 # Install magma
 ADD ./common/install_magma.sh install_magma.sh
 RUN bash ./install_magma.sh ${BASE_CUDA_VERSION} && rm install_magma.sh
@@ -122,7 +123,7 @@ ENV PATH /opt/conda/bin:$PATH
 # Ensure the expected devtoolset is used
 ENV PATH=/opt/rh/gcc-toolset-${DEVTOOLSET_VERSION}/root/usr/bin:$PATH
 ENV LD_LIBRARY_PATH=/opt/rh/gcc-toolset-${DEVTOOLSET_VERSION}/root/usr/lib64:/opt/rh/gcc-toolset-${DEVTOOLSET_VERSION}/root/usr/lib:$LD_LIBRARY_PATH
-# Install setuptools and wheel for python 3.12/3.13/3.13t
+# Install setuptools and wheel for python 3.12/3.13
 RUN for cpython_version in "cp312-cp312" "cp313-cp313" "cp313-cp313t"; do \
     /opt/python/${cpython_version}/bin/python -m pip install setuptools wheel; \
     done;
