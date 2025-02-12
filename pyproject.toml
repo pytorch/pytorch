@@ -40,6 +40,7 @@ standard_library = ["typing_extensions"]
 
 
 [tool.ruff]
+# TODO: remove manual set `target-version` in tools/linter/adapters/pyfmt_linter.py when we move to py39
 target-version = "py38"
 line-length = 88
 src = ["caffe2", "torch", "torchgen", "functorch", "test"]
