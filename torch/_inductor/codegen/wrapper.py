@@ -13,7 +13,7 @@ import random
 import re
 import tempfile
 from itertools import count
-from typing import Any, Callable, Optional, TYPE_CHECKING, Union
+from typing import Any, Callable, List, Optional, TYPE_CHECKING, Union
 
 import sympy
 from sympy import Expr
@@ -874,7 +874,8 @@ class PythonWrapperCodegen(CodeGen):
 
     @cache_on_self
     def get_output_refs(self) -> list[str]:
-        return [x.codegen_reference(self.wrapper_call) for x in V.graph.graph_outputs]
+        outputs = getattr(self, "subgraph_output_nodes", V.graph.graph_outputs)
+        return [x.codegen_reference(self.wrapper_call) for x in outputs]
 
     def mark_output_type(self) -> None:
         return
@@ -911,6 +912,13 @@ class PythonWrapperCodegen(CodeGen):
             """
         )
 
+    def write_args(self, input_names: List[str]):
+        lhs = ", ".join(input_names)
+        if len(input_names) == 1:
+            lhs += ","
+        self.prefix.writeline(f"{lhs} = args")
+        self.prefix.writeline("args.clear()")
+
     def write_prefix(self) -> None:
         assert self.launcher_fn_name is not None
         self.write_async_compile_wait()
@@ -927,12 +935,11 @@ class PythonWrapperCodegen(CodeGen):
                 self.prefix.writeline(
                     f"training_annotation = nvtx._device_range_start('{phase}')"
                 )
-            if V.graph.graph_inputs:
-                lhs = ", ".join(V.graph.graph_input_names)
-                if len(V.graph.graph_input_names) == 1:
-                    lhs += ","
-                self.prefix.writeline(f"{lhs} = args")
-                self.prefix.writeline("args.clear()")
+
+            graph_input_names = getattr(
+                self, "subgraph_input_names", V.graph.graph_input_names
+            )
+            self.write_args(graph_input_names)
 
             self.codegen_inputs()
             self.codegen_input_size_and_nan_asserts()
@@ -2657,3 +2664,18 @@ class SubgraphPythonWrapperCodegen(PythonWrapperCodegen):
         #         V.graph.device_ops.import_get_raw_stream_as("get_raw_stream")
         #     )
         self.parent_wrapper.write_get_raw_stream_header_once()
+
+
+class PartitionPythonWrapperCodegen(SubgraphPythonWrapperCodegen):
+    def __init__(
+        self,
+        subgraph_name: str,
+        parent_wrapper: PythonWrapperCodegen,
+        input_names: List[str],
+        output_nodes: List[IRNode],
+    ):
+        self.subgraph_name = subgraph_name
+        self.parent_wrapper = parent_wrapper
+        self.subgraph_input_names = input_names
+        self.subgraph_output_nodes = output_nodes
+        super().__init__(subgraph_name, parent_wrapper)

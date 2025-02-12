@@ -3893,19 +3893,33 @@ class Scheduler:
     def get_partition_rules(self) -> List[Callable[[BaseSchedulerNode], bool]]:
         return [self.only_gpu_inputs_and_outputs]
 
+    def get_output_nodes(
+        self, output_names: OrderedSet[str], name_to_node: Dict[str, ir.IRNode]
+    ) -> OrderedSet[ir.IRNode]:
+        output_nodes = OrderedSet()
+
+        for name in output_names:
+            output_nodes.add(name_to_node[name])
+
+        return output_nodes
+
     def get_graph_partition_signature(
         self, partitions: List[List[BaseSchedulerNode]]
-    ) -> Tuple[List[OrderedSet[str]], List[OrderedSet[str]]]:
+    ) -> Tuple[List[OrderedSet[str]], List[OrderedSet[ir.IRNode]]]:
         inputs: List[OrderedSet[str]] = []
-        outputs: List[OrderedSet[str]] = []
+        outputs: List[OrderedSet[ir.IRNode]] = []
 
         unmet_outputs = OrderedSet(V.graph.get_output_names())
+        name_to_node = {}
+        for name, node in zip(V.graph.get_output_names(), V.graph.graph_outputs):
+            name_to_node[name] = node
 
         for partition in reversed(partitions):
             node_outputs: OrderedSet[str] = OrderedSet()
 
             for node in partition:
                 node_outputs.update(node.outputs_by_name.keys())
+                name_to_node.update(node.outputs_by_name)
 
             partition_outputs = node_outputs.intersection(unmet_outputs)
 
@@ -3920,8 +3934,8 @@ class Scheduler:
             unmet_outputs = partition_inputs.union(unmet_outputs - partition_outputs)
 
             inputs.append(partition_inputs)
-            outputs.append(partition_outputs)
-        breakpoint()
+            outputs.append(self.get_output_nodes(partition_outputs, name_to_node))
+
         assert unmet_outputs.issubset(
             OrderedSet(V.graph.graph_inputs.keys())
         ), f"{unmet_outputs=} should be subset of {V.graph.graph_inputs.keys()=}"
@@ -3931,7 +3945,9 @@ class Scheduler:
     def graph_partition(
         self,
     ) -> Tuple[
-        List[List[BaseSchedulerNode]], List[OrderedSet[str]], List[OrderedSet[str]]
+        List[List[BaseSchedulerNode]],
+        List[OrderedSet[str]],
+        List[OrderedSet[ir.IRNode]],
     ]:
         partitions: List[List[BaseSchedulerNode]] = []
         partition_rules = self.get_partition_rules()
@@ -3965,14 +3981,19 @@ class Scheduler:
 
         partitions, inputs, outputs = self.graph_partition()
         breakpoint()
-        for nodes, read, write in zip(partitions, inputs, outputs):
-            self._codegen(nodes)
+        for partition, input, output in zip(partitions, inputs, outputs):
+            assert len(partition) >= 1, f"Each partition must have at least one node but found {len(partition)}"
+            # if len(partition) == 1:
+
+
+
+            self._codegen(partition)
             # TODO1: move V.graph.wrapper_code.lines to V.graph.wrapper_code.subgraph_lines
-            # TODO2: codegen for signature like `def subgraph1(arg0):`
-            # TODO3: codegen for input arguments  like `arg0, arg1 = args`
-            #                   used/defs instead of read/writes.
-            # TODO4: codegen for output arguments like `return out0, out1`
-            # TODO5: codegen for subgraph launcher in V.graph.wrapper_code.subgraph_launchers,
+            # Done2: a) codegen for signature like `def subgraph1(arg0):`, and b) codegen
+            #           for input arguments  like `arg0, arg1 = args`.codegen for signature
+            #           like `def subgraph1(arg0):`. This is done in write_prefix().
+            # Done3: codegen for output arguments like `return out0, out1`
+            # TODO4: codegen for subgraph launcher in V.graph.wrapper_code.subgraph_launchers,
             #           like `buf2 = subgraph1(arg0)` which will appear in `def call`.
 
         # TODO6: in generate, we may need additionally convert V.graph.wrapper_code.subgraph_lines
