@@ -4,6 +4,7 @@ import math
 import os
 import unittest
 import unittest.mock as mock
+from pathlib import Path
 from typing import Callable, Optional
 
 from torch._inductor.utils import clear_inductor_caches
@@ -42,8 +43,6 @@ if HAS_CUDA:
 
 
 log = logging.getLogger(__name__)
-
-SM80 = SM80OrLater and torch.cuda.get_device_capability() == (8, 0)
 
 
 def _get_path_without_sccache() -> str:
@@ -701,15 +700,10 @@ class TestCutlassBackend(TestCase):
             torch.testing.assert_close(expected, actual, atol=0.01, rtol=0.01)
 
     # TODO: Enable dynamic test cases when dynamic support is added.
-    @unittest.skipIf(True, "disabled due to broken on A100")
-    # error: TypeError: can't multiply sequence by non-int of type 'str'
-    @unittest.skipIf(not SM80, "need sm_80 exactly")
+    @unittest.skipIf(not SM80OrLater or SM90OrLater, "need sm_8x exactly")
     @parametrize("dynamic", (False,))
-    @parametrize("max_autotune_gemm_backends", ("CUTLASS", "CUTLASS,Triton,ATen"))
     @mock.patch.dict(os.environ, {"PATH": _get_path_without_sccache()})
-    def test_max_autotune_cutlass_backend_mixed_mm(
-        self, dynamic: bool, max_autotune_gemm_backends: str
-    ):
+    def test_max_autotune_cutlass_backend_mixed_mm(self, dynamic: bool):
         """
         Make sure autotuning mm in sub processes work without crashes.
         """
@@ -729,11 +723,12 @@ class TestCutlassBackend(TestCase):
             {
                 "max_autotune": True,
                 "autotune_in_subproc": True,
-                "max_autotune_gemm_backends": max_autotune_gemm_backends,
+                "max_autotune_gemm_backends": "CUTLASS",
                 "cuda.cutlass_max_profiling_configs": 2,
-                "use_mixed_mm": True,
                 "autotune_local_cache": True,
                 "autotune_fallback_to_aten": False,
+                "use_mixed_mm": True,
+                "mixed_mm_choice": "aten",  # to disable Triton
             }
         ):
             Y_compiled = torch.compile(mm, dynamic=dynamic)(a, b)
@@ -753,14 +748,11 @@ class TestCutlassBackend(TestCase):
         assert cutlass_kernels_count > 0
 
     # TODO: Enable dynamic test cases when dynamic support is added.
-    @unittest.skipIf(True, "disabled due to broken on A100")
-    # error: TypeError: can't multiply sequence by non-int of type 'str'
-    @unittest.skipIf(not SM80, "need sm_80 exactly")
+    @unittest.skipIf(not SM80OrLater or SM90OrLater, "need sm_8x exactly")
     @parametrize("dynamic", (False,))
-    @parametrize("max_autotune_gemm_backends", ("CUTLASS", "CUTLASS,Triton,ATen"))
     @mock.patch.dict(os.environ, {"PATH": _get_path_without_sccache()})
     def test_max_autotune_cutlass_backend_sparse_semi_structured_mm(
-        self, dynamic: bool, max_autotune_gemm_backends: str
+        self, dynamic: bool
     ):
         """
         Make sure autotuning mm in sub processes work without crashes.
@@ -781,7 +773,7 @@ class TestCutlassBackend(TestCase):
             {
                 "max_autotune": True,
                 "autotune_in_subproc": True,
-                "max_autotune_gemm_backends": max_autotune_gemm_backends,
+                "max_autotune_gemm_backends": "CUTLASS",
                 "cuda.cutlass_max_profiling_configs": 2,
                 "autotune_local_cache": True,
                 "autotune_fallback_to_aten": False,
@@ -962,6 +954,79 @@ class TestCutlassBackend(TestCase):
         self.assertEqual(
             m4, 4, "Wrong max alignment. Should have been 4 (due to float32 dtype )."
         )
+
+    @unittest.skipIf(not SM80OrLater, "need sm_80")
+    @mock.patch.dict(os.environ, {"PATH": _get_path_without_sccache()})
+    def test_standalone_runner(self):
+        max_autotune_gemm_backends = "CUTLASS"
+        torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction = False
+
+        def mm(a, b):
+            return torch.mm(a, b.to(torch.half))
+
+        m, n, k = 128, 16, 128
+        a = torch.randn(m, k).cuda().half()
+        b = torch.randint(0, 5, (n, k), dtype=torch.int8).cuda().T
+
+        with config.patch(
+            {
+                "max_autotune": True,
+                "autotune_in_subproc": True,
+                "max_autotune_gemm_backends": max_autotune_gemm_backends,
+                "cuda.cutlass_max_profiling_configs": 1,
+                "autotune_local_cache": True,
+                "autotune_fallback_to_aten": False,
+                "cuda.generate_test_runner": True,  # put standalone runner in the generated code
+                "use_mixed_mm": True,
+                "mixed_mm_choice": "aten",
+            }
+        ):
+            from tempfile import NamedTemporaryFile
+
+            from torch._inductor.codegen.cuda.cutlass_utils import (
+                cuda_standalone_runner_compile_command,
+                CUDACompileSourceCapturingContext,
+            )
+
+            # Run compilation, check results just in case, and save
+            # CUTLASS-based generated code.
+            with CUDACompileSourceCapturingContext() as ctx:
+                compiled = torch.compile(mm, dynamic=False)
+
+                expected = mm(a, b)
+                actual = compiled(a, b)
+
+                torch.testing.assert_close(actual, expected)
+
+                sources = ctx.sources
+
+            assert len(sources) >= 1
+
+            # Get names for temporary source and executable files.
+            cu_file = NamedTemporaryFile("w", suffix=".cu", delete=False)
+            cu_file.close()
+            exe_file = NamedTemporaryFile("w", suffix="", delete=False)
+            exe_file.close()
+
+            # Save the generated code into the .cu file.
+            with open(cu_file.name, "w") as file:
+                file.write(sources[0])
+
+            # Get command to compile .cu file, and run the
+            # compilation.
+            command = cuda_standalone_runner_compile_command(
+                Path(cu_file.name), Path(exe_file.name)
+            )
+            retcode = os.system(command)
+            assert retcode == 0
+
+            # Run the executable generated.
+            retcode = os.system(exe_file.name)
+            assert retcode == 0
+
+            # Remove temporary files.
+            os.remove(cu_file.name)
+            os.remove(exe_file.name)
 
 
 if __name__ == "__main__":
