@@ -53,6 +53,7 @@ from ..utils import (
     is_utils_checkpoint,
     is_wrapper_or_member_descriptor,
     istype,
+    list_methods,
     namedtuple_fields,
     object_has_getattribute,
     proxy_args_kwargs,
@@ -156,6 +157,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
             object.__new__,
             dict.__new__,
             tuple.__new__,
+            list.__new__,
         }
 
     @staticmethod
@@ -456,18 +458,6 @@ class UserDefinedClassVariable(UserDefinedVariable):
             assert args[0].is_python_constant()
             return variables.CUDADeviceVariable.create(tx, args[0].as_python_constant())
         elif (
-            self.value is torch.fx.immutable_collections.immutable_list
-            and len(args) == 1
-            and isinstance(args[0], variables.ListVariable)
-        ):
-            arg = args[0]
-            if arg.source:
-                install_guard(arg.source.make_guard(GuardBuilder.SEQUENCE_LENGTH))
-            return variables.FxImmutableListVariable(
-                list(arg.unpack_var_sequence(tx)),
-                mutation_type=ValueMutationNew(),
-            )
-        elif (
             issubclass(type(self.value), type)
             and hasattr(
                 self.value, "__enter__"
@@ -593,16 +583,6 @@ class UserDefinedClassVariable(UserDefinedVariable):
             )
             var.call_method(tx, "__init__", args, kwargs)
             return var
-        elif (
-            variables.RestrictedListSubclassVariable.is_matching_cls(self.value)
-            and self.source
-        ):
-            return variables.RestrictedListSubclassVariable(
-                variables.BuiltinVariable(list).call_function(tx, args, kwargs).items,
-                user_cls=self.value,
-                user_cls_source=self.source,
-                mutation_type=ValueMutationNew(),
-            )
         elif (
             self.value in self._in_graph_classes()
             or is_traceable_wrapper_subclass_type(self.value)
@@ -751,6 +731,9 @@ class UserDefinedObjectVariable(UserDefinedVariable):
 
     def __repr__(self) -> str:
         return f"{self.__class__.__name__}({self.value_type.__name__})"
+
+    def is_underlying_vt_modified(self, side_effects):
+        return False
 
     def python_type(self):
         return self.value_type
@@ -1494,6 +1477,52 @@ class UserDefinedDictVariable(UserDefinedObjectVariable):
         ):
             return self._dict_vt.unpack_var_sequence(tx)
         raise NotImplementedError
+
+    def is_underlying_vt_modified(self, side_effects):
+        return side_effects.is_modified(self._dict_vt)
+
+
+class UserDefinedListVariable(UserDefinedObjectVariable):
+    """
+    Represents user defined objects that are subclasses of lists.
+
+    Internally, it uses a ListVariable to represent the list part of the
+    variable tracker. For everything else, it falls back to
+    UserDefinedObjectVariable.
+    """
+
+    _nonvar_fields = UserDefinedObjectVariable._nonvar_fields
+
+    def __init__(self, value, list_vt=None, **kwargs):
+        super().__init__(value, **kwargs)
+        self._list_vt = list_vt
+        if self._list_vt is None:
+            assert (
+                self.source is None
+            ), "list_vt must be constructed by builder.py when source is present"
+            self._list_vt = variables.ListVariable([], mutation_type=ValueMutationNew())
+
+    def call_method(
+        self,
+        tx,
+        name,
+        args: "list[VariableTracker]",
+        kwargs: "dict[str, VariableTracker]",
+    ) -> "VariableTracker":
+        assert self._list_vt is not None
+        method = self._maybe_get_baseclass_method(name)
+        if method in list_methods:
+            return self._list_vt.call_method(tx, name, args, kwargs)
+        return super().call_method(tx, name, args, kwargs)
+
+    def unpack_var_sequence(self, tx):
+        assert self._list_vt is not None
+        if type(self.value).__iter__ is list.__iter__:
+            return self._list_vt.unpack_var_sequence(tx)
+        raise NotImplementedError
+
+    def is_underlying_vt_modified(self, side_effects):
+        return side_effects.is_modified(self._list_vt)
 
 
 class UserDefinedTupleVariable(UserDefinedObjectVariable):
