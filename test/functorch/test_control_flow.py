@@ -1,13 +1,16 @@
 # Owner(s): ["module: functorch"]
 import contextlib
+import copy
 import functools
 import unittest
+import warnings
 
 import torch
 import torch.utils._pytree as pytree
 from functorch.experimental import control_flow
 from functorch.experimental.control_flow import cond, UnsupportedAliasMutationException
 from torch._dynamo.testing import normalize_gm
+from torch._dynamo.utils import counters
 from torch._higher_order_ops.associative_scan import (
     _fake_associative_scan,
     associative_scan,
@@ -33,11 +36,49 @@ from torch.testing._internal.common_utils import (
     skipIfCrossRef,
     skipIfRocm,
     skipIfTorchDynamo,
+    TEST_CUDA_GRAPH_CONDITIONAL_NODES,
     TEST_WITH_CROSSREF,
     TEST_WITH_TORCHDYNAMO,
     TestCase,
     xfailIfTorchDynamo,
 )
+
+
+@contextlib.contextmanager
+def check_cudagraphs_not_skipped(test_case):
+    old_cudagraph_skips = counters["inductor"]["cudagraph_skips"]
+    try:
+        yield
+    finally:
+        # reset before the assert, because otherwise the reset is skipped
+        new_cudagraph_skips = counters["inductor"]["cudagraph_skips"]
+        counters["inductor"]["cudagraph_skips"] = old_cudagraph_skips
+        test_case.assertEqual(
+            counters["inductor"]["cudagraph_skips"], new_cudagraph_skips
+        )
+
+
+def _check_compile_cudagraph(test_case, fn, args):
+    # test cudagraphs backend
+    cudagraphs_compiled_fn = torch.compile(fn, backend="cudagraphs")
+    # We run 3 times.
+    # This is what cuda graph trees does for the first 3 runs:
+    # 1) run in eager mode, for warmup.
+    # 2) do stream capture followed by graph replay.
+    # 3 and beyond) do graph replay
+    # So we need to get to iteration 3 to test all ways of running.
+    outputs = []
+    for i in range(3):
+        with check_cudagraphs_not_skipped(test_case):
+            outputs.append(
+                pytree.tree_map(
+                    lambda x: x.clone() if isinstance(x, torch.Tensor) else x,
+                    cudagraphs_compiled_fn(*args),
+                )
+            )
+    eager_res = fn(*args)
+    for output in outputs:
+        test_case.assertEqual(eager_res, output)
 
 
 # TODO: pull these helpers from AOTAutograd later
@@ -233,7 +274,9 @@ def _while_loop_tests():
                     return i2.clone(), j2 - 1, x2 + 3.14, y2 - 2.71
 
                 i1, j1, x1, y1 = while_loop(
-                    cond_fn_nested, body_fn_nested, [i1, j1, x1, y1]
+                    cond_fn_nested,
+                    body_fn_nested,
+                    (i1, j1, x1, y1),
                 )
                 return i1 - 1, j1.clone(), x1 * 2, y1 / 2
 
@@ -397,6 +440,7 @@ def _while_loop_tests():
             const_and_symint_output,
             (torch.randn(2, 3, requires_grad=True),),
         ),
+        # I need to add a test here that uses just a dictionary and see what happens.
     }
 
 
@@ -1295,6 +1339,7 @@ def forward(self, pred_1, x_1):
 
         return cond_outputs, cond_inputs
 
+    @skipIfTorchDynamo("don't test compile on compile")
     @unittest.skipIf(not SM70OrLater, "triton")
     @unittest.skipIf(not torch.cuda.is_available(), "Test requires CUDA.")
     @parametrize("compile_mode", ["none", "eager", "compile", "compile_dynamic_shape"])
@@ -1396,6 +1441,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1):
     # TODO: The compile_mode = `compile_dynamic_shape` raises the Error
     # torch._inductor.exc.LoweringException: NotImplementedError: get_size() is not
     # implemented by <class 'torch._inductor.ir.NoneAsConstantBuffer'>!
+    @skipIfTorchDynamo("don't test compile on compile")
     @unittest.skipIf(not SM70OrLater, "triton")
     @unittest.skipIf(not torch.cuda.is_available(), "Test requires CUDA.")
     @parametrize("compile_mode", ["none", "eager", "compile"])
@@ -1544,6 +1590,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1, arg5_1):
     # TODO: The compile_mode = `compile_dynamic_shape` raises the Error
     # torch._inductor.exc.LoweringException: NotImplementedError: get_size() is not
     # implemented by <class 'torch._inductor.ir.NoneAsConstantBuffer'>!
+    @skipIfTorchDynamo("don't test compile on compile")
     @unittest.skipIf(not SM70OrLater, "triton")
     @unittest.skipIf(not torch.cuda.is_available(), "Test requires CUDA.")
     @parametrize("compile_mode", ["compile_dynamic_shape"])
@@ -1781,6 +1828,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1, arg5_1):
         self.assertEqual(out, exp_out)
 
     # TODO: provide an implementation for all compile modes and re-enable all test
+    @skipIfTorchDynamo("don't test compile on compile")
     @requires_cuda
     @parametrize("reverse", [False, True])
     @parametrize("compile_mode", ["none", "eager"])
@@ -1882,6 +1930,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1, arg5_1):
         self.assertEqual(result, result_exp)
 
     # TODO: provide an implementation for all compile modes and re-enable all test
+    @skipIfTorchDynamo("don't test compile on compile")
     @requires_cuda
     @parametrize("reverse", [False, True])
     @parametrize("compile_mode", ["none", "eager"])
@@ -2180,6 +2229,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1, arg5_1):
         self.assertEqual(result, expected_result)
 
     # TODO: provide an implementation for all compile modes and re-enable all test
+    @skipIfTorchDynamo("don't test compile on compile")
     @requires_cuda
     @parametrize("compile_mode", ["none", "eager"])
     @parametrize("reverse", [False, True])
@@ -2214,6 +2264,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1, arg5_1):
             self.assertEqual(result, expected_result)
 
     # TODO: provide an implementation for all compile modes and re-enable all test
+    @skipIfTorchDynamo("don't test compile on compile")
     @requires_cuda
     @parametrize("compile_mode", ["none", "eager"])
     @parametrize("reverse", [False, True])
@@ -2417,6 +2468,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1, arg5_1):
             )
             self.assertEqual(cnt.frame_count, 6)
 
+    @skipIfTorchDynamo("don't test compile on compile")
     @requires_cuda
     @parametrize("compile_mode", ["none", "eager"])
     def test_scan_init_scanned_0(self, compile_mode):
@@ -2454,6 +2506,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1, arg5_1):
                     dim=dim,
                 )
 
+    @skipIfTorchDynamo("don't test compile on compile")
     @requires_cuda
     @parametrize("compile_mode", ["none", "eager"])
     def test_scan_init_non_tensor(self, compile_mode):
@@ -2478,6 +2531,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1, arg5_1):
             ):
                 scan_fct(get_scan_combine_fn("add", False), init, x, dim=dim)
 
+    @skipIfTorchDynamo("don't test compile on compile")
     @requires_cuda
     @parametrize("compile_mode", ["none", "eager"])
     def test_scan_init_wrong_shape(self, compile_mode):
@@ -2510,6 +2564,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1, arg5_1):
                     dim=dim,
                 )
 
+    @skipIfTorchDynamo("don't test compile on compile")
     @requires_cuda
     @parametrize("compile_mode", ["none", "eager"])
     def test_scan_init_wrong_pytree(self, compile_mode):
@@ -2544,6 +2599,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1, arg5_1):
             ):
                 scan_fct(add_one_carry, init, x, dim=dim)
 
+    @skipIfTorchDynamo("don't test compile on compile")
     @requires_cuda
     @parametrize("reverse", [False, True])
     @parametrize("compile_mode", ["none", "eager"])
@@ -3800,6 +3856,302 @@ class AssociativeScanTests(TestCase):
             )
 
     @unittest.skipIf(not SM70OrLater, "triton")
+    @unittest.skipIf(not torch.cuda.is_available(), "Test requires CUDA.")
+    @parametrize("compile_mode", ["none", "eager", "compile", "compile_dynamic_shape"])
+    @parametrize("combine_mode", ["pointwise", "generic"])
+    @parametrize("reverse", [False, True])
+    @parametrize("device", [torch.device("cpu"), torch.device("cuda")])
+    # Skipping the combine_mode=pointwise
+    # as the current implementation of associative_scan lowering
+    # does not support lifted arguments
+    @decorateIf(
+        unittest.skip,
+        lambda params: (params["combine_mode"] == "pointwise"),
+    )
+    def test_associative_scan_freevars_simple(
+        self, compile_mode, combine_mode, reverse, device
+    ):
+        H = torch.rand(2, device=device)
+
+        def fct_freevars1(x: torch.Tensor, y: torch.Tensor):
+            return x * H + y * 2
+
+        def fct_freevars2(x: torch.Tensor, y: torch.Tensor):
+            return x * H + y * H
+
+        H1 = torch.rand(1, device=device)
+        H2 = torch.rand(1, device=device)
+
+        def fct_freevars3(x: torch.Tensor, y: torch.Tensor):
+            return x * H1 + y * H2
+
+        inp = torch.randn(3, 2, 2, device=device)
+
+        for fct, param in [
+            (fct_freevars1, (H,)),
+            (fct_freevars2, (H,)),
+            (fct_freevars3, (H1, H2)),
+        ]:
+            kwargs = {
+                "dim": 0,
+                "reverse": reverse,
+                "compile_mode": compile_mode,
+                "combine_fn": fct,
+                "combine_mode": combine_mode,
+            }
+            kwargs_fake = self._prepare_fake_kwargs(kwargs)
+            self._run_test(
+                model=AssociativeScanModels.CombineFn(**kwargs),
+                model_fake=AssociativeScanModels.CombineFn(**kwargs_fake),
+                inputs=inp,
+            )
+
+    @unittest.skipIf(not SM70OrLater, "triton")
+    @unittest.skipIf(not torch.cuda.is_available(), "Test requires CUDA.")
+    @parametrize("compile_mode", ["none", "eager", "compile", "compile_dynamic_shape"])
+    @parametrize("combine_mode", ["pointwise", "generic"])
+    @parametrize("reverse", [False, True])
+    @parametrize("device", [torch.device("cpu"), torch.device("cuda")])
+    # Skipping the combine_mode=pointwise
+    # as the current implementation of associative_scan lowering
+    # does not support lifted arguments
+    @decorateIf(
+        unittest.skip,
+        lambda params: (params["combine_mode"] == "pointwise"),
+    )
+    def test_associative_scan_freevars_nested(
+        self, compile_mode, combine_mode, reverse, device
+    ):
+        H1 = torch.rand(4, 5, device=device)
+        H2 = torch.rand(4, 1, device=device)
+
+        def fct_nested_outside(x: torch.Tensor, y: torch.Tensor):
+            def inner(xi):
+                return xi * H2
+
+            ret = inner(y)
+            return x + ret * H1
+
+        def fct_nested_outside_fake(x: torch.Tensor, y: torch.Tensor):
+            def inner(xi):
+                return xi * H2
+
+            ret = inner(y)
+            return x + ret * H1
+
+        H1_i = torch.rand(4, 5, device=device)
+
+        # TODO: Using random tensors in the `combine_fn` triggers the vmap randomness error:
+        # RuntimeError: vmap: called random operation while in randomness error mode.
+        # Please either use the 'same' or 'different' randomness flags on vmap or perform the randomness operation out of vmap
+        def fct_nested_inside(x: torch.Tensor, y: torch.Tensor):
+            # H2_i = torch.rand(4, 1, device=device)
+            H2_i = torch.ones(4, 1, device=device) * 42
+
+            def inner(xi):
+                return xi * H2_i
+
+            ret = inner(y)
+            return x + ret * H1
+
+        def fct_nested_inside_fake(x: torch.Tensor, y: torch.Tensor):
+            # H2_i = torch.rand(4, 1, device=device)
+            H2_i = torch.ones(4, 1, device=device) * 42
+
+            def inner(xi):
+                return xi * H2_i
+
+            ret = inner(y)
+            return x + ret * H1
+
+        inp = torch.randn(3, 4, 5, device=device)
+
+        for fct, fct_fake, param in [
+            (fct_nested_outside, fct_nested_outside_fake, (H1, H2)),
+            (fct_nested_inside, fct_nested_inside_fake, (H1_i,)),
+        ]:
+            kwargs = {
+                "dim": 0,
+                "reverse": reverse,
+                "compile_mode": compile_mode,
+                "combine_fn": fct,
+                "combine_mode": combine_mode,
+            }
+            kwargs_fake = self._prepare_fake_kwargs(kwargs)
+            kwargs_fake["combine_fn"] = fct_fake
+            self._run_test(
+                model=AssociativeScanModels.CombineFn(**kwargs),
+                model_fake=AssociativeScanModels.CombineFn(**kwargs_fake),
+                inputs=inp,
+            )
+
+    @unittest.skipIf(not SM70OrLater, "triton")
+    @unittest.skipIf(not torch.cuda.is_available(), "Test requires CUDA.")
+    @parametrize("compile_mode", ["none", "eager", "compile", "compile_dynamic_shape"])
+    @parametrize("combine_mode", ["pointwise", "generic"])
+    @parametrize("reverse", [False, True])
+    @parametrize("device", [torch.device("cpu"), torch.device("cuda")])
+    # Skipping the combine_mode=pointwise
+    # as the current implementation of associative_scan lowering
+    # does not support lifted arguments
+    @decorateIf(
+        unittest.skip,
+        lambda params: (params["combine_mode"] == "pointwise"),
+    )
+    def test_associative_scan_freevars_fct(
+        self, compile_mode, combine_mode, reverse, device
+    ):
+        def additional_fct_no_add_inp(x, y):
+            return x * y
+
+        def fct_nested_outside(x: torch.Tensor, y: torch.Tensor):
+            ret = additional_fct_no_add_inp(y, y)
+            return x + ret
+
+        inp = torch.randn(3, 4, 5, device=device)
+
+        kwargs = {
+            "dim": 0,
+            "reverse": reverse,
+            "compile_mode": compile_mode,
+            "combine_fn": fct_nested_outside,
+            "combine_mode": combine_mode,
+        }
+        kwargs_fake = self._prepare_fake_kwargs(kwargs)
+        self._run_test(
+            model=AssociativeScanModels.CombineFn(**kwargs),
+            model_fake=AssociativeScanModels.CombineFn(**kwargs_fake),
+            inputs=inp,
+        )
+
+    @unittest.skipIf(not SM70OrLater, "triton")
+    @unittest.skipIf(not torch.cuda.is_available(), "Test requires CUDA.")
+    @parametrize("compile_mode", ["none", "eager", "compile", "compile_dynamic_shape"])
+    @parametrize("reverse", [False, True])
+    @parametrize("device", [torch.device("cpu"), torch.device("cuda")])
+    def test_associative_scan_freevars_fct_generic(self, compile_mode, reverse, device):
+        def additional_fct_no_add_inp(x, y):
+            return x * y
+
+        def fct_nested_outside(x: torch.Tensor, y: torch.Tensor):
+            ret = associative_scan(
+                additional_fct_no_add_inp, y, 1, combine_mode="generic"
+            )
+            return x + ret
+
+        def fct_nested_outside_fake(x: torch.Tensor, y: torch.Tensor):
+            ret = _fake_associative_scan(additional_fct_no_add_inp, y, 1)
+            return x + ret
+
+        inp = torch.randn(3, 4, 5, device=device)
+
+        kwargs = {
+            "dim": 0,
+            "reverse": reverse,
+            "compile_mode": compile_mode,
+            "combine_fn": fct_nested_outside,
+            "combine_mode": "generic",
+        }
+        kwargs_fake = self._prepare_fake_kwargs(kwargs)
+        kwargs_fake["combine_fn"] = fct_nested_outside_fake
+        self._run_test(
+            model=AssociativeScanModels.CombineFn(**kwargs),
+            model_fake=AssociativeScanModels.CombineFn(**kwargs_fake),
+            inputs=inp,
+        )
+
+    @unittest.skipIf(not SM70OrLater, "triton")
+    @unittest.skipIf(not torch.cuda.is_available(), "Test requires CUDA.")
+    @parametrize("compile_mode", ["none", "eager", "compile", "compile_dynamic_shape"])
+    @parametrize("combine_mode", ["pointwise", "generic"])
+    @parametrize("reverse", [False, True])
+    @parametrize("device", [torch.device("cpu"), torch.device("cuda")])
+    # Skipping the combine_mode=pointwise
+    # as the current implementation of associative_scan lowering
+    # does not support lifted arguments
+    @decorateIf(
+        unittest.skip,
+        lambda params: (params["combine_mode"] == "pointwise"),
+    )
+    def test_associative_scan_freevars_shape_check(
+        self, compile_mode, combine_mode, reverse, device
+    ):
+        H = torch.eye(2, device=device, requires_grad=True)
+
+        def fct_freevars(x: torch.Tensor, y: torch.Tensor):
+            return x @ H + y
+
+        inp = torch.randn(2, 2, 3, device=device, requires_grad=True)
+
+        kwargs = {
+            "dim": 2,
+            "reverse": reverse,
+            "compile_mode": compile_mode,
+            "combine_fn": fct_freevars,
+            "combine_mode": combine_mode,
+        }
+        kwargs_fake = self._prepare_fake_kwargs(kwargs)
+        self._run_test(
+            model=AssociativeScanModels.CombineFn(**kwargs),
+            model_fake=AssociativeScanModels.CombineFn(**kwargs_fake),
+            inputs=inp,
+        )
+
+    @unittest.skipIf(not SM70OrLater, "triton")
+    @unittest.skipIf(not torch.cuda.is_available(), "Test requires CUDA.")
+    @parametrize("compile_mode", ["none", "eager", "compile", "compile_dynamic_shape"])
+    @parametrize("reverse", [False, True])
+    @parametrize("device", [torch.device("cpu"), torch.device("cuda")])
+    @parametrize("combine_mode", ["pointwise", "generic"])
+    # Skipping the combine_mode=pointwise
+    # as the current implementation of associative_scan lowering
+    # does not support lifted arguments
+    @decorateIf(
+        unittest.skip,
+        lambda params: (params["combine_mode"] == "pointwise"),
+    )
+    def test_associative_scan_freevars_pytree(
+        self, compile_mode, combine_mode, reverse, device
+    ):
+        xf = torch.randn(2, 2, device=device, requires_grad=True)
+        yf = torch.randn(2, 2, device=device, requires_grad=True)
+        zf = torch.randn(2, 2, device=device, requires_grad=True)
+        inpf = {"i": xf, "j": ([yf], [{"o": zf}])}
+
+        def fct_pointwise(x, y):
+            return {
+                "i": (x["i"] * y["i"]) + inpf["i"],
+                "j": (
+                    [(x["j"][0][0] * y["j"][0][0]) + inpf["j"][0][0]],
+                    [
+                        {
+                            "o": (x["j"][1][0]["o"] + y["j"][1][0]["o"])
+                            + inpf["j"][1][0]["o"]
+                        }
+                    ],
+                ),
+            }
+
+        x = torch.randn(3, 2, 2, device=device, requires_grad=True)
+        y = torch.randn(3, 2, 2, device=device, requires_grad=True)
+        z = torch.randn(3, 2, 2, device=device, requires_grad=True)
+        inp = {"i": x, "j": ([y], [{"o": z}])}
+
+        kwargs = {
+            "dim": 0,
+            "reverse": reverse,
+            "compile_mode": compile_mode,
+            "combine_fn": fct_pointwise,
+            "combine_mode": combine_mode,
+        }
+        kwargs_fake = self._prepare_fake_kwargs(kwargs)
+        self._run_test(
+            model=AssociativeScanModels.CombineFn(**kwargs),
+            model_fake=AssociativeScanModels.CombineFn(**kwargs_fake),
+            inputs=inp,
+        )
+
+    @unittest.skipIf(not SM70OrLater, "triton")
     @requires_cuda
     def test_associative_scan_sparse_tensor(self):
         x = torch.tensor(
@@ -4033,6 +4385,24 @@ def forward(self, L_ctx_saved_tensors_0_ : torch.Tensor, L_ctx_pred : torch.Tens
                 torch.randn(2, 3),
                 torch.randn(2, 3),
             )
+
+    @unittest.skipIf(
+        not TEST_CUDA_GRAPH_CONDITIONAL_NODES,
+        "CUDA 12.4 or greater is required for CUDA Graphs with conditional nodes",
+    )
+    def test_cond_traced_not_nested_cudagraphs(self):
+        def true_fn(x):
+            return x.sin()
+
+        def false_fn(x):
+            return x.cos()
+
+        def f(x, y):
+            return cond(y, true_fn, false_fn, [x])
+
+        x = torch.randn(4)
+        _check_compile_cudagraph(self, f, [x.cuda(), torch.tensor(True).cuda()])
+        _check_compile_cudagraph(self, f, [x.cuda(), torch.tensor(False).cuda()])
 
     def test_while_loop_nested_traced(self):
         fn, inp = WHILE_LOOP_TESTS["nested"]
@@ -4280,6 +4650,43 @@ def forward(self, arg0_1):
         fn, inp = WHILE_LOOP_TESTS[while_loop_test]
         self._check_compile(fn, inp, backend=backend)
 
+    @parametrize(
+        "while_loop_test",
+        set(WHILE_LOOP_TESTS.keys())
+        - {"const_and_symint_output", "int_carry", "pytree_int_carry"},
+    )
+    @unittest.skipIf(
+        not TEST_CUDA_GRAPH_CONDITIONAL_NODES,
+        "CUDA 12.4 or greater is required for CUDA Graphs with conditional nodes",
+    )
+    def test_while_loop_cuda_stream_capture(self, while_loop_test):
+        fn, inp = WHILE_LOOP_TESTS[while_loop_test]
+
+        if isinstance(fn, torch.nn.Module):
+            fn = copy.deepcopy(fn)
+            fn.cuda()
+        inp = pytree.tree_map(lambda x: x.cuda(), inp)
+
+        _check_compile_cudagraph(self, fn, inp)
+
+    @unittest.expectedFailure
+    @parametrize(
+        "while_loop_test", {"const_and_symint_output", "int_carry", "pytree_int_carry"}
+    )
+    @unittest.skipIf(
+        not TEST_CUDA_GRAPH_CONDITIONAL_NODES,
+        "CUDA 12.4 or greater is required for CUDA Graphs with conditional nodes",
+    )
+    def test_while_loop_cuda_stream_capture_fails(self, while_loop_test):
+        fn, inp = WHILE_LOOP_TESTS[while_loop_test]
+
+        if isinstance(fn, torch.nn.Module):
+            fn = copy.deepcopy(fn)
+            fn.cuda()
+        inp = pytree.tree_map(lambda x: x.cuda(), inp)
+
+        _check_compile_cudagraph(self, fn, inp)
+
     @skipIfTorchDynamo("Graph is not captured by backend if test with dynamo")
     @skipIfCrossRef  # Arg order changes with cross ref
     def test_while_loop_simple_with_linear_compile_check_graph(self):
@@ -4489,6 +4896,13 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1, arg5_1, arg6_1, arg7_1
             f(x, torch.tensor(True), torch.tensor(True)),
         )
 
+        if TEST_CUDA_GRAPH_CONDITIONAL_NODES:
+            _check_compile_cudagraph(
+                self,
+                f,
+                [x.cuda(), torch.tensor(True).cuda(), torch.tensor(True).cuda()],
+            )
+
     def test_cond_functionalized(self):
         def true_fn(x):
             y = x.sin()
@@ -4501,6 +4915,9 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1, arg5_1, arg6_1, arg7_1
         def f(x):
             pred = x.shape[0] == 1
             return cond(pred, true_fn, false_fn, [x])
+
+        def f_(x, y):
+            return cond(y, true_fn, false_fn, [x])
 
         example_inputs = (torch.ones(4, 5),)
         functional_f = torch.func.functionalize(f)
@@ -4519,6 +4936,10 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1, arg5_1, arg6_1, arg7_1
         self.assertFalse(any(op._schema.is_mutable for op in all_ops_in_true_branch))
 
         self.assertEqual(graph_module(*example_inputs), f(*example_inputs))
+
+        if TEST_CUDA_GRAPH_CONDITIONAL_NODES:
+            pred = torch.tensor(example_inputs[0].shape[0] == 1, device="cuda")
+            _check_compile_cudagraph(self, f_, [torch.ones(4, 5).cuda(), pred])
 
     def test_cond_accepts_torch_function_as_inputs(self):
         a = torch.randn(3, 4)
@@ -5038,6 +5459,13 @@ def forward(self, arg0_1):
     mul = torch.ops.aten.mul.Tensor(arg0_1, arg0_1);  arg0_1 = None
     return (mul,)""",
         )
+
+        if TEST_CUDA_GRAPH_CONDITIONAL_NODES:
+            _check_compile_cudagraph(
+                self,
+                f,
+                [x.cuda(), torch.tensor(False).cuda(), torch.tensor(False).cuda()],
+            )
 
     def test_raise_error_on_mismatch_type_size(self):
         def true_fn(x):
@@ -7352,11 +7780,99 @@ class GraphModule(torch.nn.Module):
         _ = self._check_export(model, args, dynamic_shapes)
 
 
+class DynamicCondModel(torch.nn.Module):
+    def __init__(self, input_size=16, hidden_size=64, output_size=10):
+        super().__init__()
+        self.fc1_0 = torch.nn.Linear(input_size, hidden_size)
+        self.fc1_1 = torch.nn.Linear(input_size, 32)
+        self.fc1_2 = torch.nn.Linear(32, hidden_size)
+        self.relu = torch.nn.ReLU()
+        self.fc2 = torch.nn.Linear(hidden_size, output_size)
+
+    def forward(self, x):
+        def true_fn(x):
+            return self.fc1_0(x)
+
+        def false_fn(x):
+            x = self.fc1_1(x)
+            return self.fc1_2(x)
+
+        # use PyTorch control flow API
+        pred = torch.tensor(x.sum() > 0, device="cuda")
+        x = cond(pred, true_fn, false_fn, [x])
+
+        x = self.relu(x)
+        x = self.fc2(x)
+
+        return x
+
+
+@unittest.skipIf(
+    not TEST_CUDA_GRAPH_CONDITIONAL_NODES,
+    "CUDA 12.4 or greater is required for CUDA Graphs with conditional nodes",
+)
+class TestControlFlowNN(TestCase):
+    def test_cond_in_NN(self):
+        model = DynamicCondModel().cuda()
+
+        x = torch.randn(16, device="cuda")
+        _check_compile_cudagraph(self, model, [x])
+
+
+@unittest.skipIf(
+    not TEST_CUDA_GRAPH_CONDITIONAL_NODES,
+    "CUDA 12.4 or greater is required for CUDA Graphs with conditional nodes",
+)
+class TestControlFlowAndRNG(TestCase):
+    @parametrize("rng_func", ["custom_generator", "default_generator"])
+    def test_rng_with_conditional_nodes_warns(self, rng_func):
+        pred = torch.tensor(True, device="cuda")
+        x = torch.ones(10, dtype=torch.float32, device="cuda")
+
+        if rng_func == "custom_generator":
+            self.skipTest(
+                "randn() currently does not work with a generator argument in dynamo."
+            )
+            generator = torch.Generator("cuda")
+
+            def custom_generator(x):
+                return x + torch.randn(
+                    *x.shape, generator=generator, dtype=x.dtype, device=x.device
+                )
+
+            rng_func = custom_generator
+        elif rng_func == "default_generator":
+
+            def default_generator(x):
+                return x + torch.randn(*x.shape, dtype=x.dtype, device=x.device)
+
+            rng_func = default_generator
+
+        def func(pred, x):
+            return torch.cond(pred, rng_func, lambda x: 2 * x, [x])
+
+        compiled_func = torch.compile(func, backend="cudagraphs")
+
+        with warnings.catch_warnings(record=True) as warning_objs:
+            for i in range(3):
+                compiled_func(pred, x)
+
+        # Warn first for conditional node warmup, warn second for the
+        # graph capture that we will actually use.
+        self.assertEqual(len(warning_objs), 2)
+
+        warning_message = "You used random numbers in a cuda graph that uses conditional nodes. The previous design assumed that all RNG operations would execute only once, unconditionally, but this is no longer guaranteed with data-dependent control flow. Running with the cuda graph repeatedly may not match running without the cuda graph."  # noqa: B950
+        for warning in warning_objs:
+            self.assertTrue(warning_message in str(warning.message))
+
+
 instantiate_parametrized_tests(TestHopSchema)
 instantiate_parametrized_tests(TestControlFlowTraced)
 
 instantiate_parametrized_tests(TestControlFlow)
 instantiate_parametrized_tests(AssociativeScanTests)
+
+instantiate_parametrized_tests(TestControlFlowAndRNG)
 
 if __name__ == "__main__":
     run_tests()
