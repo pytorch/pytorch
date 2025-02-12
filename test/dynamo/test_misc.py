@@ -10557,7 +10557,7 @@ ShapeEnv not equal: field values don't match:
         # Should only be one restart per event
         (restart_reason,) = metrics[0].restart_reasons
         self.assertTrue(
-            "function marked as skipped" in restart_reason,
+            "User-inserted graph break" in restart_reason,
             "Should have logged graph break reason",
         )
         self.assertTrue(
@@ -10567,7 +10567,7 @@ ShapeEnv not equal: field values don't match:
 
         (restart_reason,) = metrics[1].restart_reasons
         self.assertTrue(
-            "function marked as skipped" in restart_reason,
+            "User-inserted graph break" in restart_reason,
             "Should have logged graph break reason",
         )
         self.assertTrue(

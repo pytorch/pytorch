@@ -453,6 +453,15 @@ def unimplemented_v2(
     from_exc: Any = _NOTHING,
     log_warning: bool = False,
 ) -> NoReturn:
+    """
+    Called within dynamo to cause a graph break.
+    Args:
+        gb_type: Context-free graph break type. It should be a short string without any
+                 information specific to the tracing context (i.e. no dynamically-generated strings)
+        context: Developer context for the graph break. It can contain tracing context/dynamic strings.
+        explanation: User-facing context-dependent explanation for the graph break. Can be dynamic.
+        hints: List of user-facing hints for the graph break.
+    """
     hints_str = "\n".join(hints)
     hints_str = textwrap.indent(hints_str, "  Hint: ")
     msg = f"""\

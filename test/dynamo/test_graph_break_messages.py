@@ -127,13 +127,14 @@ Unsupported method call
   Explanation: Dynamo does not know how to trace method `__iter__` of class `zip`
   Hint: Avoid calling `zip.__iter__` in your code.
   Hint: Please report an issue to PyTorch.
+  Hint: Dynamo does not fully support tracing builtin iterators (e.g. `map`, `zip`, `enumerate`) passed in from uncompiled to compiled regions (e.g. `torch.compile(fn)(enumerate(...))`). This can happen unintentionally if a previous graph break happens with a builtin iterator in the local scope.
 
   Developer debug context: call_method UserDefinedObjectVariable(zip) __iter__ () {}
 
 
 from user code:
    File "test_graph_break_messages.py", line N, in fn
-    return [x for x in it]""",
+    return [x + 1 for x in it]""",
         )
 
     def test_super_call_function(self):
@@ -156,7 +157,7 @@ Unsupported function call
 
 from user code:
    File "test_graph_break_messages.py", line N, in fn
-    return [x for x in it()]""",
+    return [x + 1 for x in it()]""",
         )
 
     def test_unsupported_context(self):
@@ -178,7 +179,7 @@ Unsupported context manager
 
 from user code:
    File "test_graph_break_messages.py", line N, in fn
-    with obj:""",
+    def fn(obj):""",
         )
 
     def test_backend_fake_tensor_exc(self):
@@ -196,7 +197,7 @@ from user code:
             """\
 Backend compiler exception
   Explanation: Backend compiler `bad_backend` failed with test. Adding a graph break.
-  Hint: Report an issue to PyTorch
+  Hint: Report an issue to the backend compiler repo.
 
   Developer debug context: Backend: bad_backend
 Exception:test
@@ -224,7 +225,7 @@ Failed to trace builtin operator
 
 from user code:
    File "test_graph_break_messages.py", line N, in fn
-    print("abc")""",
+    def fn():""",
         )
 
     def test_skipfile_call(self):
@@ -392,7 +393,7 @@ Attempted to call function marked as skipped
 
 from user code:
    File "test_graph_break_messages.py", line N, in fn
-    warnings.warn("test")""",
+    def fn():""",
         )
 
     @unittest.skipIf(not python_pytree._cxx_pytree_exists, "missing optree package")

@@ -449,14 +449,26 @@ class VariableTracker(metaclass=VariableTrackerMeta):
                     self.as_python_constant(), other.as_python_constant()
                 )
             )
+        hints = [
+            f"Avoid calling `{self.python_type_name()}.{name}` in your code.",
+            "Please report an issue to PyTorch.",
+        ]
+        # additional hint for method calls on improperly constructed iterators
+        if isinstance(self, variables.UserDefinedObjectVariable) and name in (
+            "__iter__",
+            "__next__",
+        ):
+            hints.append(
+                "Dynamo does not fully support tracing builtin iterators (e.g. `map`, `zip`, `enumerate`) "
+                "passed in from uncompiled to compiled regions (e.g. `torch.compile(fn)(enumerate(...))`). "
+                "This can happen unintentionally if a previous graph break happens with a builtin iterator "
+                "in the local scope."
+            )
         unimplemented_v2(
             gb_type="Unsupported method call",
             context=f"call_method {self} {name} {args} {kwargs}",
             explanation=f"Dynamo does not know how to trace method `{name}` of class `{self.python_type_name()}`",
-            hints=[
-                f"Avoid calling `{self.python_type_name()}.{name}` in your code.",
-                "Please report an issue to PyTorch.",
-            ],
+            hints=hints,
         )
 
     def set_name_hint(self, name):
