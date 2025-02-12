@@ -463,7 +463,6 @@ def aot_dispatch_autograd(
                     rng_states[0].meta["val"].device.index
                 )
 
-            # assert fw_metadata.graphsafe_rng_state_index == 1
             # See Note [Side-Effectful Tokens in AOTAutograd]
             if config.unlift_effect_tokens and (
                 num_tokens > 0 or fw_metadata.num_backward_tokens > 0

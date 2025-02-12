@@ -2775,7 +2775,7 @@ if HAS_CUDA and not TEST_WITH_ASAN:
 
             out = fn(x, y).sum()
             out.backward(retain_graph=True)
-            out.backward(retain_graph=True)
+            out.backward()
             self.assertEqual(len(obs.op_outputs[aten.rand.default]), 3)
             self.assertEqual(
                 obs.op_outputs[aten.rand.default][0],

@@ -1816,7 +1816,6 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
         fw_metadata: ViewAndMutationMeta,  # runtime metadata
         try_save_cache_entry: Optional[Callable],  # Save cache entry after compilation
     ):
-        # needs to handle retain graph
         num_rng = fw_metadata.num_graphsafe_rng_states
         graphsafe_idx = fw_metadata.graphsafe_rng_state_index
         if num_rng:
