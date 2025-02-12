@@ -1,5 +1,6 @@
 # mypy: ignore-errors
 
+import builtins
 import collections
 import contextlib
 import dataclasses
@@ -80,7 +81,7 @@ if TYPE_CHECKING:
 
 
 def is_standard_setattr(val):
-    return val in (object.__setattr__,)
+    return val in (object.__setattr__, BaseException.__setattr__)
 
 
 def is_forbidden_context_manager(ctx):
@@ -152,12 +153,17 @@ class UserDefinedClassVariable(UserDefinedVariable):
     @staticmethod
     @functools.lru_cache(None)
     def supported_c_new_functions():
+        exceptions = [
+            getattr(builtins, name).__new__
+            for name in dir(builtins)
+            if isinstance(getattr(builtins, name), type)
+            and issubclass(getattr(builtins, name), BaseException)
+        ]
         return {
             object.__new__,
             dict.__new__,
             tuple.__new__,
-            Exception.__new__,
-        }
+        }.union(exceptions)
 
     @staticmethod
     def is_supported_new_method(value):
@@ -864,6 +870,9 @@ class UserDefinedObjectVariable(UserDefinedVariable):
     ) -> "VariableTracker":
         from . import ConstantVariable, UserMethodVariable
 
+        # if name == "__init__":
+        #     breakpoint()
+
         method = self._maybe_get_baseclass_method(name)
         if method is not None:
             if method is object.__init__:
@@ -1447,16 +1456,11 @@ class UserDefinedExceptionObjectVariable(UserDefinedObjectVariable):
             name == "__init__"
             and (method := self._maybe_get_baseclass_method(name))
             and inspect.ismethoddescriptor(method)
-            and method == Exception.__init__
             and len(kwargs) == 0
         ):
             self.exc_vt.args = args
             self.value.args = args
             return variables.ConstantVariable(None)
-            # from . import UserMethodVariable
-            # method = self._maybe_get_baseclass_method(name)
-            # source = None if self.source is None else AttrSource(AttrSource(self.source, "__class__"), name)
-            # return UserMethodVariable(method, self, source=source).call_function(tx, args, kwargs)
         return super().call_method(tx, name, args, kwargs)
 
     def __getattr__(self, name):

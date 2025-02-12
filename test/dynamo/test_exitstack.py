@@ -20,6 +20,43 @@ def set_default_dtype(dtype):
         torch.set_default_dtype(old_dtype)
 
 
+class ExitCM:
+    def __init__(self, check_exc):
+        self.check_exc = check_exc
+
+    def __enter__(self):
+        self.fail("Should not be called!")
+
+    def __exit__(self, *exc_details):
+        self.check_exc(*exc_details)
+
+
+class LacksEnterAndExit:
+    pass
+
+
+class LacksEnter:
+    def __exit__(self, *exc_info):
+        pass
+
+
+class LacksExit:
+    def __enter__(self):
+        pass
+
+
+class MyException(Exception):
+    pass
+
+
+class UniqueException(Exception):
+    pass
+
+
+class UniqueRuntimeError(RuntimeError):
+    pass
+
+
 class TestExitStack(torch._dynamo.test_case.TestCase):
     def setUp(self):
         if sys.version_info < (3, 11):
@@ -98,7 +135,6 @@ class CPythonTestBaseExitStack:
                 stack.callback(callback=_exit, arg=3)
         self.assertEqual(result, [])
 
-    @unittest.expectedFailure
     @make_dynamo_test
     def test_push(self):
         exc_raised = ZeroDivisionError
@@ -113,16 +149,6 @@ class CPythonTestBaseExitStack:
             self.assertIsNone(exc_type)
             self.assertIsNone(exc)
             self.assertIsNone(exc_tb)
-
-        class ExitCM:
-            def __init__(self, check_exc):
-                self.check_exc = check_exc
-
-            def __enter__(self):
-                self.fail("Should not be called!")
-
-            def __exit__(self, *exc_details):
-                self.check_exc(*exc_details)
 
         with self.exit_stack() as stack:
             stack.push(_expect_ok)
@@ -166,21 +192,9 @@ class CPythonTestBaseExitStack:
             result.append(2)
         self.assertEqual(result, [1, 2, 3, 4])
 
-    @unittest.expectedFailure
     @unittest.skipIf(sys.version_info < (3, 11), "Python 3.11+")
     @make_dynamo_test
     def test_enter_context_errors(self):
-        class LacksEnterAndExit:
-            pass
-
-        class LacksEnter:
-            def __exit__(self, *exc_info):
-                pass
-
-        class LacksExit:
-            def __enter__(self):
-                pass
-
         with self.exit_stack() as stack:
             with self.assertRaisesRegex(TypeError, "the context manager"):
                 stack.enter_context(LacksEnterAndExit())
@@ -220,7 +234,6 @@ class CPythonTestBaseExitStack:
         new_stack.close()
         self.assertEqual(result, [1, 2, 3])
 
-    @unittest.expectedFailure
     @make_dynamo_test
     def test_exit_raise(self):
         with self.assertRaises(ZeroDivisionError):
@@ -228,7 +241,6 @@ class CPythonTestBaseExitStack:
                 stack.push(lambda *exc: False)
                 1 / 0
 
-    @unittest.expectedFailure
     @make_dynamo_test
     def test_exit_suppress(self):
         with self.exit_stack() as stack:
@@ -326,7 +338,6 @@ class CPythonTestBaseExitStack:
         self.assertIsInstance(inner_exc, ValueError)
         self.assertIsInstance(inner_exc.__context__, ZeroDivisionError)
 
-    @unittest.expectedFailure
     @make_dynamo_test
     def test_exit_exception_chaining(self):
         # Ensure exception chaining matches the reference behaviour
@@ -360,14 +371,10 @@ class CPythonTestBaseExitStack:
         self.assertIsInstance(inner_exc, ValueError)
         self.assertIsInstance(inner_exc.__context__, ZeroDivisionError)
 
-    @unittest.expectedFailure
     @make_dynamo_test
     def test_exit_exception_explicit_none_context(self):
         # Ensure ExitStack chaining matches actual nested `with` statements
         # regarding explicit __context__ = None.
-
-        class MyException(Exception):
-            pass
 
         @contextmanager
         def my_cm():
@@ -455,6 +462,7 @@ class CPythonTestBaseExitStack:
             self.assertIs(exc.__context__.__context__.__context__, exc1)
             self.assertIsNone(exc.__context__.__context__.__context__.__context__)
 
+    @unittest.expectedFailure
     @make_dynamo_test
     def test_exit_exception_with_existing_context(self):
         # Addresses a lack of test coverage discovered after checking in a
@@ -485,7 +493,6 @@ class CPythonTestBaseExitStack:
                 exc.__context__.__context__.__context__.__context__.__context__
             )
 
-    @unittest.expectedFailure
     @make_dynamo_test
     def test_body_exception_suppress(self):
         def suppress_exc(*exc_details):
@@ -498,7 +505,6 @@ class CPythonTestBaseExitStack:
         except IndexError:
             self.fail("Expected no exception, got IndexError")
 
-    @unittest.expectedFailure
     @make_dynamo_test
     def test_exit_exception_chaining_suppress(self):
         with self.exit_stack() as stack:
@@ -534,11 +540,6 @@ class CPythonTestBaseExitStack:
     @make_dynamo_test
     def test_dont_reraise_RuntimeError(self):
         # https://bugs.python.org/issue27122
-        class UniqueException(Exception):
-            pass
-
-        class UniqueRuntimeError(RuntimeError):
-            pass
 
         @contextmanager
         def second():

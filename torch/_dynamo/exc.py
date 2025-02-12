@@ -340,6 +340,8 @@ def raise_observed_exception(
     # stack and raise the exception.
     exception_vt = BuiltinVariable(exc_type).call_function(tx, args or [], kwargs or {})  # type: ignore[arg-type]
     tx.exn_vt_stack.append(exception_vt)
+    if exc_type not in observed_exception_map:
+        observed_exception_map[exc_type] = get_dynamo_observed_exception(exc_type)
     raise observed_exception_map[exc_type]
 
 
