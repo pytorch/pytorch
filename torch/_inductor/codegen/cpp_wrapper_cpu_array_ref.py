@@ -9,6 +9,7 @@ import torch._inductor.async_compile  # noqa: F401 required to warm up AsyncComp
 import torch._ops
 
 from .. import config, ir
+from ..cpp_builder import is_gcc
 from ..utils import sympy_product
 from ..virtualized import V
 from .cpp_utils import DTYPE_TO_CPP
@@ -280,6 +281,15 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
                     self.prefix.splice(run_impl_proto)
         else:
             # cpp entry function for JIT with cpp wrapper
+            if not config.aot_inductor.debug_compile and is_gcc():
+                self.prefix.splice(
+                    """
+                    void inductor_entry_impl(
+                        AtenTensorHandle* input_handles,
+                        AtenTensorHandle* output_handles
+                    ) __attribute__((optimize (1)));
+                    """
+                )
             self.prefix.splice(
                 """
                 void inductor_entry_impl(

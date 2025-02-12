@@ -18,6 +18,7 @@ from torch.utils._ordered_set import OrderedSet
 from torch.utils._sympy.symbol import symbol_is_type, SymT
 
 from .. import config, ir
+from ..cpp_builder import is_gcc
 from ..utils import _align, cache_on_self, normalize_name
 from ..virtualized import V
 from .aoti_hipify_utils import maybe_hipify_code_wrapper
@@ -449,6 +450,15 @@ class CppWrapperCpu(PythonWrapperCodegen):
                 self.prefix.splice(run_impl_proto)
         else:
             # cpp entry function for JIT with cpp wrapper
+            if not config.aot_inductor.debug_compile and is_gcc():
+                self.prefix.splice(
+                    """
+                    void inductor_entry_impl(
+                        AtenTensorHandle* input_handles,
+                        AtenTensorHandle* output_handles
+                    ) __attribute__((optimize (1)));
+                    """
+                )
             self.prefix.splice(
                 """
                 void inductor_entry_impl(
