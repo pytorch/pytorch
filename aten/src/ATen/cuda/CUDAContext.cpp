@@ -11,14 +11,16 @@ namespace at::cuda {
 namespace {
 
 DeviceIndex num_gpus = -1;
-c10::once_flag init_flag;
 std::deque<c10::once_flag> device_flags;
 std::vector<cudaDeviceProp> device_properties;
 
 void initCUDAContextVectors() {
-  num_gpus = c10::cuda::device_count();
-  device_flags.resize(num_gpus);
-  device_properties.resize(num_gpus);
+  static bool init_flag [[maybe_unused]] = []() {
+    num_gpus = c10::cuda::device_count();
+    device_flags.resize(num_gpus);
+    device_properties.resize(num_gpus);
+    return true;
+  }();
 }
 
 void initDeviceProperty(DeviceIndex device_index) {
@@ -29,11 +31,10 @@ void initDeviceProperty(DeviceIndex device_index) {
 
 } // anonymous namespace
 
-// We need this function to force the linking against torch_cuda(_cpp) on
-// Windows. If you need to modify this function, please specify a new function
-// and apply the changes according to
-// https://github.com/pytorch/pytorch/pull/34288. Related issue:
-// https://github.com/pytorch/pytorch/issues/31611.
+// We need this function to force the linking against torch_cuda(_cpp) on Windows.
+// If you need to modify this function, please specify a new function and apply
+// the changes according to https://github.com/pytorch/pytorch/pull/34288.
+// Related issue: https://github.com/pytorch/pytorch/issues/31611.
 /* Device info */
 int warp_size() {
   return getCurrentDeviceProperties()->warpSize;
@@ -45,7 +46,7 @@ cudaDeviceProp* getCurrentDeviceProperties() {
 }
 
 cudaDeviceProp* getDeviceProperties(c10::DeviceIndex device) {
-  c10::call_once(init_flag, initCUDAContextVectors);
+  initCUDAContextVectors();
   if (device == -1)
     device = c10::cuda::current_device();
   AT_ASSERT(
@@ -61,7 +62,7 @@ cudaDeviceProp* getDeviceProperties(c10::DeviceIndex device) {
 bool canDeviceAccessPeer(
     c10::DeviceIndex device,
     c10::DeviceIndex peer_device) {
-  c10::call_once(init_flag, initCUDAContextVectors);
+  initCUDAContextVectors();
   if (device == -1)
     device = c10::cuda::current_device();
   AT_ASSERT(
