@@ -1,5 +1,6 @@
 # mypy: allow-untyped-defs
 from contextlib import contextmanager
+from typing import Set
 
 import torch
 import torch._custom_ops
@@ -10,6 +11,14 @@ from torch._ops import HigherOrderOperator
 from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.fx.experimental.proxy_tensor import ProxyTorchDispatchMode, track_tensor_tree
 from torch.utils import _pytree as pytree
+
+from torch.fx.experimental.proxy_tensor import (
+    get_proxy_slot,
+    PreDispatchTorchFunctionMode,
+    track_tensor_tree,
+)
+
+from torch.utils._python_dispatch import is_traceable_wrapper_subclass_type
 
 
 class ExportTracepoint(HigherOrderOperator):
@@ -115,3 +124,42 @@ def _mark_strict_experimental(cls):
 
     cls.__call__ = call
     return cls
+
+
+def _mark_constructor_exportable_experimental(constructor_subclass):
+    def wrapper(*args, **kwargs):
+        # TODO container type input is not supported, will need to apply flat_apply
+        assert is_traceable_wrapper_subclass_type(type(args[0]))
+        constructor_subclass(*args, **kwargs)
+        if torch._C._is_torch_function_mode_enabled():
+            torch_function_mode_stack = torch.overrides._get_current_function_mode_stack()
+            for mode in torch_function_mode_stack:
+                if isinstance(mode, PreDispatchTorchFunctionMode):
+                    tracer = mode.tracer
+                    proxy_args = []
+                    for arg in args[1:]:
+                        if isinstance(arg, torch.Tensor):
+                            proxy = get_proxy_slot(arg, tracer).proxy
+                            proxy_args.append(proxy) 
+                        else:
+                            proxy_args.append(arg)
+
+                    proxy_kwargs = {}
+                    for k, v in kwargs.items():
+                        if isinstance(v, torch.Tensor):
+                            proxy = get_proxy_slot(v, tracer).proxy
+                            proxy_kwargs[k] = proxy
+                        else:
+                            proxy_kwargs[k] = v
+                           
+                    inner_proxy = tracer.create_proxy(
+                        "call_function",
+                        type(args[0]),  # input tensor
+                        tuple(proxy_args),
+                        proxy_kwargs,
+                    )
+                    track_tensor_tree(
+                        args[0], inner_proxy, constant=None, tracer=tracer
+                    )
+        #return out
+    return wrapper
