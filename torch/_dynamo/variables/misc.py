@@ -26,6 +26,7 @@ from ..utils import (
     cmp_name_to_op_mapping,
     identity,
     is_tensor_base_attr_getter,
+    list_methods,
     proxy_args_kwargs,
     set_example_value,
     tuple_methods,
@@ -219,6 +220,11 @@ class SuperVariable(VariableTracker):
             and inner_fn in tuple_methods
         ):
             return self.objvar._tuple_vt.call_method(tx, name, args, kwargs)
+        elif (
+            isinstance(self.objvar, variables.UserDefinedListVariable)
+            and inner_fn in list_methods
+        ):
+            return self.objvar._list_vt.call_method(tx, name, args, kwargs)
         elif inner_fn is object.__getattribute__:
             # object.__getattribute__ has no side-effects. We can directly call
             # __getattribute__ to access the attribute.
