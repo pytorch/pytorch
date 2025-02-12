@@ -21,8 +21,10 @@ def test_device_to_backend_mapping(device, backend):
 
 
 def test_invalid_device():
-    with pytest.raises(ValueError):
-        dist.get_default_backend_for_device("invalid_device")
+    invalid_device = "invalid_device"
+    msg = rf"Expected one of .* device type at start of device string: {invalid_device}"
+    with pytest.raises(RuntimeError, match=msg):
+        dist.get_default_backend_for_device(invalid_device)
 
 
 @pytest.mark.parametrize("device", target_devices)
