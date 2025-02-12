@@ -240,6 +240,18 @@ class WrapperBackend:
 
 Scope = dict[str, object]
 
+OUTPUT_GRAPH = None
+
+@contextlib.contextmanager
+def make_output_graph_visible_for_compiler(output_graph):
+    global OUTPUT_GRAPH
+    try:
+        OUTPUT_GRAPH = output_graph
+        yield
+    finally:
+        OUTPUT_GRAPH = None
+    
+
 
 class OutputGraph:
     """
@@ -1381,7 +1393,8 @@ class OutputGraph:
                 self.tracing_context.fake_mode = backend_fake_mode
 
             with self.restore_global_state():
-                compiled_fn = self.call_user_compiler(gm)
+                with make_output_graph_visible_for_compiler(self):
+                    compiled_fn = self.call_user_compiler(gm)
 
             from torch.fx._lazy_graph_module import _LazyGraphModule
 
