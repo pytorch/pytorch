@@ -65,6 +65,70 @@ class TestSelectCat(torch.nn.Module):
         return cat
 
 
+class TestFullSliceCat(torch.nn.Module):
+    def __init__(self) -> None:
+        super().__init__()
+
+    def forward(self, x: torch.Tensor):
+        full = torch.ops.aten.full.default(
+            [4096, 128],
+            0,
+            dtype=torch.float32,
+            layout=torch.strided,
+            device=x.device,
+            pin_memory=False,
+        )
+        slice_12 = torch.ops.aten.slice.Tensor(x, 1, 12800, 15872)
+        slice_14 = torch.ops.aten.slice.Tensor(slice_12, 1, 1792, 1920)
+        slice_15 = torch.ops.aten.slice.Tensor(slice_12, 1, 1920, 2048)
+        slice_16 = torch.ops.aten.slice.Tensor(slice_12, 1, 2048, 2176)
+        slice_17 = torch.ops.aten.slice.Tensor(slice_12, 1, 2176, 2304)
+        slice_18 = torch.ops.aten.slice.Tensor(slice_12, 1, 2304, 2432)
+        slice_19 = torch.ops.aten.slice.Tensor(slice_12, 1, 2432, 2560)
+        slice_20 = torch.ops.aten.slice.Tensor(slice_12, 1, 2560, 2688)
+        slice_21 = torch.ops.aten.slice.Tensor(slice_12, 1, 2688, 2816)
+        slice_22 = torch.ops.aten.slice.Tensor(slice_12, 1, 2816, 2944)
+        slice_23 = torch.ops.aten.slice.Tensor(slice_12, 1, 2944, 3072)
+        cat = torch.ops.aten.cat.default(
+            [
+                full,
+                full,
+                full,
+                full,
+                full,
+                slice_14,
+                full,
+                slice_15,
+                slice_16,
+                full,
+                full,
+                full,
+                full,
+                full,
+                slice_17,
+                full,
+                full,
+                full,
+                full,
+                full,
+                full,
+                slice_18,
+                slice_19,
+                slice_20,
+                slice_21,
+                slice_22,
+                slice_23,
+                full,
+                full,
+                full,
+                full,
+                full,
+            ],
+            dim=1,
+        )
+        return cat
+
+
 class TestSplitCatAten(TestCase):
     def compare_dict_tensors(self, ref_dict, res_dict, rtol=1e-3, atol=1e-3):
         if len(set(ref_dict.keys())) != len(set(res_dict.keys())):
@@ -138,6 +202,30 @@ class TestSplitCatAten(TestCase):
         self.compare_pred(module, traced, inputs)
         self.assertEqual(counters["inductor"]["normalization_aten_pass"], 1)
         self.assertEqual(counters["inductor"]["select_cat_aten_pass"], 1)
+        self.assertEqual(ref, res, rtol=1e-8, atol=1e-8)
+        self.compare_parameters(module, traced, rtol=1e-8, atol=1e-8)
+        counters.clear()
+
+    @requires_cuda
+    @torch._inductor.config.patch(
+        pre_grad_fusion_options={},
+        post_grad_fusion_options={
+            "normalization_aten_pass": {},
+            "full_slice_cat_aten_pass": {},
+        },
+    )
+    def test_full_slice_cat_post_grad(self):
+        counters.clear()
+        inputs = [
+            torch.randn(4096, 15872, device=torch.device(device=GPU_TYPE)),
+        ]
+        module = TestFullSliceCat()
+        traced = torch.compile(module)
+        ref = module(*inputs)
+        res = traced(*inputs)
+        self.compare_pred(module, traced, inputs)
+        self.assertEqual(counters["inductor"]["normalization_aten_pass"], 2)
+        self.assertEqual(counters["inductor"]["full_slice_cat_aten_pass"], 1)
         self.assertEqual(ref, res, rtol=1e-8, atol=1e-8)
         self.compare_parameters(module, traced, rtol=1e-8, atol=1e-8)
         counters.clear()

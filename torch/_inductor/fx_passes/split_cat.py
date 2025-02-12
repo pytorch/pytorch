@@ -71,6 +71,7 @@ post_grad_pass_names = [
     "pad_aten_mm_pass",
     "split_cat_aten_pass",
     "select_cat_aten_pass",
+    "full_slice_cat_aten_pass",
 ]
 
 for pass_name in pre_grad_pass_names:
@@ -1692,6 +1693,45 @@ def normalize_split_default_aten(match: Match, *args, **kwargs):
 
 
 @register_graph_pattern(
+    CallFunctionVarArgs(torch.ops.aten.full.default, users=MULTIPLE),
+    pass_dict=construct_pattern_matcher_pass("normalization_aten_pass"),
+)
+def normalize_full_default_aten(match: Match, *args, **kwargs):
+    full_node = match.nodes[0]
+    graph = match.graph
+    tensors = get_arg_value(full_node, 0, "tensors")
+    fill_value = get_arg_value(full_node, 1, "fill_value")
+    dtype = get_arg_value(full_node, 2, "dtype")
+    layout = get_arg_value(full_node, 3, "layout")
+    device = get_arg_value(full_node, 4, "device")
+    pin_memory = get_arg_value(full_node, 5, "pin_memory")
+    if tensors is None:
+        log.debug("couldn't find full args")
+        return
+    if not is_node_meta_valid(full_node):
+        log.debug("val absent for node: %s", full_node)
+        return
+    assert isinstance(tensors, (list, tuple))
+
+    with graph.inserting_after(full_node):
+        new_full_node = graph.call_function(
+            torch.ops.aten.full.default,
+            args=(tensors,),
+            kwargs={
+                "fill_value": fill_value,
+                "dtype": dtype,
+                "layout": layout,
+                "device": device,
+                "pin_memory": pin_memory,
+            },
+        )
+    full_node.replace_all_uses_with(new_full_node)
+    new_full_node.meta.update(full_node.meta)
+    graph.erase_node(full_node)
+    counters["inductor"]["normalization_aten_pass"] += 1
+
+
+@register_graph_pattern(
     CallFunction(
         torch.ops.aten.cat.default,
         getitem_split_aten,
@@ -1779,6 +1819,110 @@ def merge_select_cat_aten(match: Match, *args, **kwargs):
         if len(select_node.users) == 0:
             graph.erase_node(select_node)
     counters["inductor"]["select_cat_aten_pass"] += 1
+
+
+@register_graph_pattern(
+    CallFunction(
+        torch.ops.aten.cat.default,
+        ListOf(
+            CallFunctionVarArgs(torch.ops.aten.full.default, users=MULTIPLE),
+            partial=True,
+        ),
+        dim=Ignored(),
+        _users=MULTIPLE,
+    ),
+    pass_dict=construct_pattern_matcher_pass("full_slice_cat_aten_pass"),
+)
+def decompose_full_slice_cat_aten(match: Match, *args, **kwargs):
+    graph = match.graph
+    full_node = next(
+        node for node in match.nodes if node.target == torch.ops.aten.full.default
+    )
+    # get cat node
+    cat_node = next(
+        node
+        for node in full_node.users.keys()
+        if node.target == torch.ops.aten.cat.default
+    )
+    # check the inputs of the cat node should either be full or slice node
+    if not all(
+        node.target in [torch.ops.aten.full.default, torch.ops.aten.slice.Tensor]  # type: ignore[union-attr]
+        for node in cat_node.args[0]  # type: ignore[union-attr]
+    ):
+        return
+    cat_dim = get_arg_value(cat_node, 1, "dim")
+    # iterate over the cat node's inputs and find consecutive full nodes
+    decomposed_cat_inputs, sub_inputs = [], []  # type: ignore[var-annotated]
+
+    def process_sub_inputs(sub_inputs):
+        # case 0: only has one node in the sub_inputs
+        if len(sub_inputs) == 1:
+            return sub_inputs[-1]
+        # case 1: all full nodes in the sub_inputs
+        elif sub_inputs[-1].target == torch.ops.aten.full.default:
+            # Create a bigger new full node
+            args = list(full_node.meta["val"].shape)
+            args[cat_dim] = args[cat_dim] * len(sub_inputs)
+            with graph.inserting_after(full_node):
+                new_full_node = graph.call_function(
+                    torch.ops.aten.full.default,
+                    args=(args,),
+                    kwargs=full_node.kwargs,
+                )
+            return new_full_node
+        else:
+            # case 2: all slice nodes in the sub_inputs
+            slice_input = sub_inputs[-1].args[0]
+            slice_begin, slice_end = sub_inputs[0].args[2], sub_inputs[-1].args[3]
+            with graph.inserting_after(full_node):
+                new_slice_node = graph.call_function(
+                    torch.ops.aten.slice.Tensor,
+                    args=(slice_input, sub_inputs[-1].args[1], slice_begin, slice_end),
+                )
+            return new_slice_node
+
+    for input in cat_node.args[0]:  # type: ignore[union-attr]
+        # whenever we have a different node, we will try to clean up the current sub inputs
+        if sub_inputs and input.target != sub_inputs[-1].target:  # type: ignore[union-attr]
+            # case 1: all full nodes in the sub_inputs, need to make sure all of them are identical
+            if sub_inputs[-1].target == torch.ops.aten.full.default:
+                if not all(node == sub_inputs[-1] for node in sub_inputs):
+                    return
+            # case 2: all slice nodes in the sub_inputs should have consecutive indexes
+            else:
+                slice_inputs = [node.args[0] for node in sub_inputs]
+                # check all slice nodes from the same input node
+                if not all(slice == slice_inputs[-1] for slice in slice_inputs):
+                    return
+                # check slice nodes are consecutive sliced from the slice input
+                for i in range(len(sub_inputs) - 1):
+                    first_slice, next_slice = sub_inputs[i], sub_inputs[i + 1]
+                    if first_slice.args[3] != next_slice.args[2]:
+                        return
+            # Process the current sub_inputs and reset the list
+            result = process_sub_inputs(sub_inputs)
+            decomposed_cat_inputs.append(result)
+            sub_inputs = [input]
+        else:
+            sub_inputs.append(input)
+
+    # Process any remaining sub_inputs
+    if sub_inputs:
+        result = process_sub_inputs(sub_inputs)
+        decomposed_cat_inputs.append(result)
+    # construct the final node with the cat nodes from decomposed_cat_inputs
+    with graph.inserting_after(full_node):
+        big_cat_node = graph.call_function(
+            torch.ops.aten.cat.default,
+            args=(decomposed_cat_inputs,),
+            kwargs={"dim": cat_dim},
+        )
+    # replace the node input with the new node
+    cat_node.replace_all_uses_with(big_cat_node)
+    big_cat_node.meta.update(cat_node.meta)
+    # remove the cat node
+    graph.erase_node(cat_node)
+    counters["inductor"]["full_slice_cat_aten_pass"] += 1
 
 
 @register_graph_pattern(
