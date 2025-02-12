@@ -30,9 +30,6 @@ env
 mkdir -p /var/lib/jenkins/.config/sccache
 echo "" > /var/lib/jenkins/.config/sccache/config
 
-export SCCACHE_ERROR_LOG="${BASH_SOURCE[0]}/../../sccache_error.log"
-export SCCACHE_LOG=debug
-
 if [[ "$BUILD_ENVIRONMENT" == *cuda* ]]; then
   # Use jemalloc during compilation to mitigate https://github.com/pytorch/pytorch/issues/116289
   export LD_PRELOAD=/usr/lib/x86_64-linux-gnu/libjemalloc.so.2

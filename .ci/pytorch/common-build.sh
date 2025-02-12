@@ -45,7 +45,7 @@ if [[ "$BUILD_ENVIRONMENT" != *win-* ]]; then
         else
             # increasing SCCACHE_IDLE_TIMEOUT so that extension_backend_test.cpp can build after this PR:
             # https://github.com/pytorch/pytorch/pull/16645
-            SCCACHE_ERROR_LOG=~/sccache_error.log SCCACHE_IDLE_TIMEOUT=0 RUST_LOG=sccache::server=error sccache --start-server
+            SCCACHE_ERROR_LOG=/var/lib/jenkins/workspace/sccache_error.log SCCACHE_IDLE_TIMEOUT=0 RUST_LOG=sccache::server=debug SCCACHE_LOG=debug sccache --start-server
         fi
 
         # Report sccache stats for easier debugging. It's ok if this commands
