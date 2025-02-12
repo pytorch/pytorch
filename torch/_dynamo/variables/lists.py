@@ -977,6 +977,8 @@ class SliceVariable(BaseListVariable):
         codegen.append_output(create_instruction("BUILD_SLICE", arg=len(self.items)))
 
     def var_getattr(self, tx: "InstructionTranslator", name):
+        if name in cmp_name_to_op_mapping:
+            return variables.GetAttrVariable(self, name)
         fields = ["start", "stop", "step"]
         if name not in fields:
             unimplemented(f"slice.{name}")
