@@ -38,8 +38,8 @@ constexpr bool is_zarch_implemented_quant() {
 
 template <typename T>
 constexpr bool is_zarch_implemented_complex() {
-  return std::is_same_v<T, c10::complex<float>> ||
-      std::is_same_v<T, c10::complex<double>>;
+  return std::is_same<T, c10::complex<float>>::value ||
+      std::is_same<T, c10::complex<double>>::value;
 }
 
 constexpr int offset0 = 0;
