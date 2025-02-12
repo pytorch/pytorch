@@ -10250,6 +10250,38 @@ def ___make_guard_fn():
 
                 self.assertEqual(actual, expected)
 
+    @unittest.skipIf(cxx_pytree is None, "Test for C++ pytree polyfill infra")
+    def test_pytreespec_isinstance_check(self):
+        from torch._dynamo.polyfills import pytree as polyfilled_cxx_pytree
+
+        @torch.compile(fullgraph=True)
+        def fn(x, y):
+            leaves, treespec = cxx_pytree.tree_flatten(x)
+            return leaves, treespec, y.sin()
+
+        y = torch.randn(3)
+        x = [1, [2, [3, 4]]]
+        leaves, treespec, _ = fn(x, y)
+        # Compiled function returns an instance of the polyfilled class instead of the original class
+        self.assertIsInstance(treespec, polyfilled_cxx_pytree.PyTreeSpec)
+        # Must not raise exceptions that allow partially compiled programs to mix polyfilled classes
+        # with original classes in different parts of the program
+        reconstructed = cxx_pytree.tree_unflatten(leaves, treespec)
+        self.assertEqual(x, reconstructed)
+
+        def fn(x, y):
+            treespec = cxx_pytree.tree_structure(x)
+            if isinstance(treespec, cxx_pytree.PyTreeSpec):
+                return y.sin()
+            else:
+                return y.cos()
+
+        expected = fn(x, y)
+        fn_opt = torch.compile(fullgraph=True)(fn)
+        actual = fn_opt(x, y)
+
+        self.assertEqual(actual, expected)
+
     def test_shape_env_no_recording(self):
         main = ShapeEnv(should_record_events=False)
 

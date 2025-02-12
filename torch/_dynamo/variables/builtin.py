@@ -7,6 +7,7 @@ import itertools
 import logging
 import math
 import operator
+import sys
 import types
 import typing
 from collections import defaultdict, OrderedDict
@@ -21,6 +22,7 @@ from .. import config, polyfills, variables
 from ..exc import (
     AttributeMutationError,
     ObservedAttributeError,
+    raise_observed_exception,
     unimplemented,
     Unsupported,
     UserError,
@@ -1665,10 +1667,34 @@ class BuiltinVariable(VariableTracker):
                 isinstance_type.__class__.__instancecheck__(isinstance_type, arg.value)
             )
 
+        isinstance_type_tuple: tuple[type, ...]
+        if isinstance(isinstance_type, (type,)) or callable(
+            # E.g. isinstance([], typing.Sequence)
+            getattr(isinstance_type, "__instancecheck__", None)
+        ):
+            isinstance_type_tuple = (isinstance_type,)
+        elif sys.version_info >= (3, 10) and isinstance(
+            isinstance_type, types.UnionType
+        ):
+            isinstance_type_tuple = isinstance_type.__args__
+        elif isinstance(isinstance_type, tuple) and all(
+            isinstance(tp, (type,)) or callable(getattr(tp, "__instancecheck__", None))
+            for tp in isinstance_type
+        ):
+            isinstance_type_tuple = isinstance_type
+        else:
+            raise_observed_exception(
+                TypeError,
+                tx,
+                args=[
+                    "isinstance() arg 2 must be a type, a tuple of types, or a union"
+                ],
+            )
+
         try:
-            val = issubclass(arg_type, isinstance_type)
+            val = issubclass(arg_type, isinstance_type_tuple)
         except TypeError:
-            val = arg_type is isinstance_type
+            val = arg_type in isinstance_type_tuple
         return variables.ConstantVariable.create(val)
 
     def call_issubclass(self, tx: "InstructionTranslator", left_ty, right_ty):
