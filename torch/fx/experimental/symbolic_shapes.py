@@ -6770,7 +6770,6 @@ class ShapeEnv:
                                 "stack": structured.from_traceback(
                                     CapturedTraceback.extract(skip=1).summary()
                                 ),
-                                "expr_node_id": id(expr_sym_node),
                             },
                         )
                         dtrace_structured(
