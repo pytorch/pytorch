@@ -1342,11 +1342,12 @@ class FrozenDataClassVariable(UserDefinedObjectVariable):
         args = []
         kwargs = {}
         for field in fields(self.value):
-            proxy = self.fields[field.name].as_proxy()
-            if getattr(field, "kw_only", False):
-                kwargs[field.name] = proxy
-            elif field.init:
-                args.append(proxy)
+            if field.init:
+                proxy = self.fields[field.name].as_proxy()
+                if getattr(field, "kw_only", False):
+                    kwargs[field.name] = proxy
+                else:
+                    args.append(proxy)
 
         return self.python_type()(*args, **kwargs)
 
