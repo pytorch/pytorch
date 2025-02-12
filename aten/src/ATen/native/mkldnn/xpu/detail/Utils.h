@@ -48,6 +48,8 @@ bool is_broadcast_from_other_to_self(
 
 at::MemoryFormat get_cl_tag_by_ndim(const int64_t ndim);
 
+void apply_tf32_if_allowed(dnnl::primitive_attr& primitive_attr);
+
 bool binary_valid(
     const at::Tensor& self,
     const at::Tensor& other,
