@@ -9,9 +9,10 @@ import pickle
 import sys
 import sympy
 import tempfile
+import typing
 import unittest
 from types import BuiltinFunctionType
-from typing import Callable, Dict, List, NamedTuple, Optional, Tuple, Union
+from typing import Callable, List, NamedTuple, Optional, Union
 
 import torch
 import torch.fx.experimental.meta_tracer
@@ -321,7 +322,7 @@ class TestFXExperimental(JitTestCase):
             """Given a fx module, generate node latency for each node
             based on the size of each node
             """
-            node_to_latency_mapping: Dict[Node, NodeLatency] = {}
+            node_to_latency_mapping: dict[Node, NodeLatency] = {}
             for node in fx_module.graph.nodes:
                 if node.op not in {"output", "placeholder", "get_attr"}:
                     if node.size_bytes.total_size == node.size_bytes.output_size:
@@ -376,7 +377,7 @@ class TestFXExperimental(JitTestCase):
                 return add_5
 
         def get_node_to_latency_mapping(fx_module: GraphModule):
-            node_to_latency_mapping: Dict[Node, NodeLatency] = {}
+            node_to_latency_mapping: dict[Node, NodeLatency] = {}
             for node in fx_module.graph.nodes:
                 if node.op not in {"output", "placeholder", "get_attr"}:
                     if node.size_bytes.total_size == node.size_bytes.output_size:
@@ -1119,7 +1120,7 @@ class {test_classname}(torch.nn.Module):
 
     def test_normalize_args_perserve_type(self):
         class MyModule(torch.nn.Module):
-            def forward(self, a: List[torch.Tensor]):
+            def forward(self, a: list[torch.Tensor]):
                 return torch.add(a[0], a[1])
 
         m = MyModule()
@@ -1128,7 +1129,7 @@ class {test_classname}(torch.nn.Module):
 
         for node in traced.graph.nodes:
             if node.op == "placeholder":
-                self.assertEqual(node.type, List[torch.Tensor])
+                self.assertEqual(node.type, list[torch.Tensor])
 
     @skipIfNoTorchVision
     def test_annotate_returns_with_schema(self):
@@ -1192,7 +1193,7 @@ class {test_classname}(torch.nn.Module):
             y: float
 
         class MyModule(torch.nn.Module):
-            def forward(self, inp: Tuple[CustomType, torch.Tensor], inp2: List[CustomType], inp3: CustomNamedTuple):
+            def forward(self, inp: tuple[CustomType, torch.Tensor], inp2: list[CustomType], inp3: CustomNamedTuple):
                 inp_0 = inp[0]
                 inp_1 = inp[1]
                 inp2_0 = inp2[0]
@@ -1297,7 +1298,7 @@ class {test_classname}(torch.nn.Module):
             return part_idx
 
         # split module in module with submodules
-        qualname_map : Dict[str, str] = {}
+        qualname_map : dict[str, str] = {}
         module_with_submodules = split_module(
             my_module_traced, my_module, split_callback, qualname_map
         )
@@ -1348,7 +1349,7 @@ class {test_classname}(torch.nn.Module):
             self.assertEqual(module.Foo()(t), mod(t))
 
     def test_fetch(self):
-        attrs_for_lowering: Dict[str, List[str]] = {
+        attrs_for_lowering: dict[str, list[str]] = {
             "torch.nn.modules.conv.Conv2d": [
                 "weight",
                 "bias",
@@ -1547,25 +1548,25 @@ class {test_classname}(torch.nn.Module):
             (Optional[list[int]], list[int]),
         ] + [
             # pre-PEP585 signatures
-            (List[int], int),
-            (List[int], create_type_hint([int, int])),
-            (List[int], create_type_hint((int, int))),
-            (List[torch.Tensor], create_type_hint([torch.Tensor, torch.Tensor])),
+            (typing.List[int], int),
+            (typing.List[int], create_type_hint([int, int])),
+            (typing.List[int], create_type_hint((int, int))),
+            (typing.List[torch.Tensor], create_type_hint([torch.Tensor, torch.Tensor])),
             (
-                List[torch.Tensor],
+                typing.List[torch.Tensor],
                 create_type_hint([torch.nn.Parameter, torch.nn.Parameter]),
             ),
-            (List[torch.Tensor], create_type_hint([torch.nn.Parameter, torch.Tensor])),
-            (List[torch.Tensor], create_type_hint([torch.Tensor, torch.nn.Parameter])),
-            (List[torch.Tensor], create_type_hint((torch.Tensor, torch.Tensor))),
+            (typing.List[torch.Tensor], create_type_hint([torch.nn.Parameter, torch.Tensor])),
+            (typing.List[torch.Tensor], create_type_hint([torch.Tensor, torch.nn.Parameter])),
+            (typing.List[torch.Tensor], create_type_hint((torch.Tensor, torch.Tensor))),
             (
-                List[torch.Tensor],
+                typing.List[torch.Tensor],
                 create_type_hint((torch.nn.Parameter, torch.nn.Parameter)),
             ),
-            (List[torch.Tensor], create_type_hint((torch.nn.Parameter, torch.Tensor))),
-            (List[torch.Tensor], create_type_hint((torch.Tensor, torch.nn.Parameter))),
-            (Optional[List[torch.Tensor]], List[torch.Tensor]),
-            (Optional[List[int]], List[int]),
+            (typing.List[torch.Tensor], create_type_hint((torch.nn.Parameter, torch.Tensor))),
+            (typing.List[torch.Tensor], create_type_hint((torch.Tensor, torch.nn.Parameter))),
+            (Optional[typing.List[torch.Tensor]], typing.List[torch.Tensor]),
+            (Optional[typing.List[int]], typing.List[int]),
         ]
 
         for sig_type, arg_type in should_be_equal:
@@ -1577,7 +1578,7 @@ class {test_classname}(torch.nn.Module):
             (list[torch.Tensor], List[int]),
         ] + [
             # pre-PEP585 signatures
-            (List[torch.Tensor], List[int]),
+            (list[torch.Tensor], list[int]),
         ]
 
         for sig_type, arg_type in should_fail:

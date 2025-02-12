@@ -1,35 +1,22 @@
 # mypy: allow-untyped-defs
-import _collections_abc
-import _weakrefset
 import abc
 import builtins
 import collections
 import copy
-import copyreg
 import dataclasses
-import enum
 import functools
 import importlib
 import inspect
 import linecache
-import logging
-import multiprocessing
 import operator
 import os
-import posixpath
 import random
 import re
-import selectors
-import signal
 import sys
-import tempfile
-import threading
-import tokenize
 import traceback
 import types
 import typing
 import unittest
-import weakref
 from collections import defaultdict
 from pathlib import Path
 from typing import Any, Callable, cast, Optional, Union
@@ -45,8 +32,9 @@ from .utils import getfile, hashable, NP_SUPPORTED_MODULES, unwrap_if_wrapper
 from .variables import (
     BuiltinVariable,
     FunctionalCallVariable,
-    FunctionDecoratedByContextlibContextManagerVariable,
     FunctorchHigherOrderVariable,
+    LocalGeneratorFunctionVariable,
+    LocalGeneratorObjectVariable,
     NestedUserFunctionVariable,
     PolyfilledFunctionVariable,
     SkipFunctionVariable,
@@ -104,6 +92,7 @@ To figure out what the behavior is, check the following list in order:
 * `manual_torch_name_rule_map` (Inline if YES)
 * MOD_INLINELIST (Inline if YES)
 * BUILTIN_SKIPLIST & THIRDPARTY_SKIPLIST (Skip if YES)
+* MOD_SKIPLIST (Skip if YES)
 * Inline by default
 
 In general, if you want to force inline a function or module, please consider adding
@@ -182,6 +171,9 @@ manual_torch_name_rule_map = {
     "torch.nested._internal.nested_tensor.nested_from_padded": TorchInGraphFunctionVariable,
     "torch.nested.nested_tensor_from_jagged": UserFunctionVariable,
     "torch.nested.nested_tensor_from_padded": UserFunctionVariable,
+    # torch.fx map utils
+    "torch.fx.node.map_aggregate": UserFunctionVariable,
+    "torch.fx.node.map_arg": UserFunctionVariable,
     # symbol operators implemented in Python
     "torch.sym_not": TorchInGraphFunctionVariable,
     "torch.sym_float": TorchInGraphFunctionVariable,
@@ -434,7 +426,6 @@ torch_c_binding_in_graph_functions = dict.fromkeys(
         "torch._C._cpu._is_amx_tile_supported",
         "torch._C._cpu._is_amx_fp16_supported",
         "torch._C._cpu._init_amx",
-        "torch._C._cpu._is_arm_sve_supported",
         "torch._C._crash_if_aten_asan",
         "torch._C._crash_if_csrc_asan",
         "torch._C._crash_if_csrc_ubsan",
@@ -2449,7 +2440,6 @@ torch_non_c_binding_in_graph_functions = dict.fromkeys(
         "torch._C._cpu._is_amx_tile_supported",
         "torch._C._cpu._is_amx_fp16_supported",
         "torch.cpu._init_amx",
-        "torch._C._cpu._is_arm_sve_supported",
         "torch.cpu.current_device",
         "torch.cpu.current_stream",
         "torch.cpu.device_count",
@@ -3156,31 +3146,10 @@ BUILTIN_SKIPLIST = (
     abc,
     collections,
     copy,
-    copyreg,
-    enum,
-    functools,
-    importlib,
-    inspect,
-    linecache,
-    logging,
-    multiprocessing,
-    operator,
-    posixpath,
     random,
-    re,
-    selectors,
-    signal,
-    tempfile,
-    threading,
-    tokenize,
-    torch,  # torch/* is skipped by default unless specified in FUNC_INLINELIST or MOD_INLINELIST
     traceback,
-    types,
-    typing,
+    linecache,
     unittest,
-    weakref,
-    _collections_abc,
-    _weakrefset,
 )
 
 # third party libraries skiplist is defined by str, because users may not use these libraries.
@@ -3241,6 +3210,7 @@ LEGACY_MOD_INLINELIST = {
     "torch._higher_order_ops.while_loop",
     "torch._higher_order_ops.associative_scan",
     "torch._higher_order_ops.scan",
+    "torch._higher_order_ops._invoke_quant",
     "torch._higher_order_ops.utils",
     "torch.nn.attention.flex_attention",
     "torch.ao.quantization.pt2e.export_utils",
@@ -3268,13 +3238,13 @@ if torch.distributed.is_available():
     if not torch._dynamo.config.skip_fsdp_hooks:
         LEGACY_MOD_INLINELIST.add("torch.distributed.fsdp._fully_shard")
 
-
 # Force inline functions under these modules, even they are in *_SKIPLIST.
 # We are using python module name instead of file or directory object to avoid circular dependency.
 # Please keep this sorted alphabetically.
 MOD_INLINELIST = [
     "torch._decomp",
     "torch._dynamo._trace_wrapped_higher_order_op",
+    "torch._dynamo.compiled_autograd",
     "torch._dynamo.comptime",
     "torch._dynamo.polyfills",
     "torch._functorch._aot_autograd.subclass_parametrization",
@@ -3332,6 +3302,109 @@ if torch.distributed.is_available():
         MOD_INLINELIST.add("torch.distributed.fsdp._fully_shard")
 
 
+# By default, all functions under these modules are skipped.
+# All the other knobs
+# (torch_name_rule_map, MOD_INLINELIST, LEGACY_MOD_INLINELIST)
+# take precedence over this list; e.g. if a function is in
+# MOD_INLINELIST and MOD_SKIPLIST, then it will be inlined.
+# See "A note on skip/inline rules" for more details.
+MOD_SKIPLIST = [
+    "torch._VF",
+    "torch.__future__",
+    "torch.__init__",
+    "torch._awaits",
+    "torch._classes",
+    "torch._compile",
+    "torch._custom_op",
+    "torch._custom_ops",
+    "torch._decomp",
+    "torch._deploy",
+    "torch._dispatch",
+    "torch._dynamo",
+    "torch._export",
+    "torch._functorch",
+    "torch._guards",
+    "torch._higher_order_ops._invoke_quant",
+    "torch._higher_order_ops.effects",
+    "torch._higher_order_ops.map",
+    "torch._higher_order_ops.torchbind",
+    "torch._higher_order_ops.wrap",
+    "torch._inductor",
+    "torch._jit_internal",
+    "torch._lazy",
+    "torch._library",
+    "torch._linalg_utils",
+    "torch._lobpcg",
+    "torch._logging",
+    "torch._lowrank",
+    "torch._meta_registrations",
+    "torch._namedtensor_internals",
+    "torch._numpy",
+    "torch._ops",
+    "torch._prims",
+    "torch._prims_common",
+    "torch._python_dispatcher",
+    "torch._refs",
+    "torch._strobelight",
+    "torch._subclasses",
+    "torch._tensor",
+    "torch._tensor_str",
+    "torch._thread_safe_fork",
+    "torch._utils",
+    "torch._utils_internal",
+    "torch._vmap_internals",
+    "torch._weights_only_unpickler",
+    "torch.accelerator",
+    "torch.amp",
+    "torch.ao",
+    "torch.autograd",
+    "torch.backends",
+    "torch.compiler",
+    "torch.contrib",
+    "torch.cpu",
+    "torch.cuda",
+    "torch.distributed",
+    "torch.distributions",
+    "torch.export",
+    "torch.fb",
+    "torch.fft",
+    "torch.functional",
+    "torch.futures",
+    "torch.fx",
+    "torch.hub",
+    "torch.jit",
+    "torch.library",
+    "torch.linalg",
+    "torch.masked",
+    "torch.monitor",
+    "torch.mps",
+    "torch.mtia",
+    "torch.multiprocessing",
+    "torch.nested",
+    "torch.nn",
+    "torch.onnx",
+    "torch.optim",
+    "torch.overrides",
+    "torch.package",
+    "torch.profiler",
+    "torch.quantization",
+    "torch.quasirandom",
+    "torch.random",
+    "torch.serialization",
+    "torch.signal",
+    "torch.sparse",
+    "torch.special",
+    "torch.storage",
+    "torch.testing",
+    "torch.types",
+    "torch.utils",
+    "torch.xpu",
+]
+
+assert sorted(set(MOD_SKIPLIST)) == MOD_SKIPLIST
+MOD_SKIPLIST = set(MOD_SKIPLIST)
+
+
 @functools.lru_cache(None)
 def get_legacy_mod_inlinelist():
     inlinelist = {
@@ -3348,6 +3421,15 @@ def get_mod_inlinelist():
         for m in MOD_INLINELIST
     }
     return inlinelist
+
+
+@functools.lru_cache(None)
+def get_mod_skiplist():
+    skiplist = {
+        _as_posix_path(_module_dir(torch) + m[len("torch.") :].replace(".", "/"))
+        for m in MOD_SKIPLIST
+    }
+    return skiplist
 
 
 # skip some standard python builtin libs
@@ -3438,6 +3520,7 @@ def check_file(filename, is_inlined_call=False):
     filename = _as_posix_path(filename)
     if filename in FORCE_SKIP_FILES:
         return SkipResult(True, "FORCE_SKIP_FILES")
+
     if any(filename.startswith(d) for d in get_legacy_mod_inlinelist()):
         return SkipResult(
             False,
@@ -3470,8 +3553,10 @@ def check_file(filename, is_inlined_call=False):
 
     if bool(SKIP_DIRS_RE.match(filename)):
         return SkipResult(True, "SKIP_DIRS")
-    else:
-        return SkipResult(False, "inlined by default")
+
+    if any(filename.startswith(d) for d in get_mod_skiplist()):
+        return SkipResult(True, "MOD_SKIPLIST")
+    return SkipResult(False, "inlined by default")
 
 
 @dataclasses.dataclass
@@ -3523,7 +3608,8 @@ def check_verbose(obj, is_inlined_call=False):
             UserFunctionVariable,
             UserMethodVariable,
             NestedUserFunctionVariable,
-            FunctionDecoratedByContextlibContextManagerVariable,
+            LocalGeneratorFunctionVariable,
+            LocalGeneratorObjectVariable,
         ),
     ):
         try:
@@ -3543,7 +3629,14 @@ def check_verbose(obj, is_inlined_call=False):
     # Consulte the central trace rules defined in torch._dynamo.trace_rules.
     reasons: set[str] = set()
     rule = lookup_inner(fi.py_obj, fi.name, fi.filename, is_inlined_call, reasons)
-    if issubclass(rule, (UserFunctionVariable, PolyfilledFunctionVariable)):
+    if issubclass(
+        rule,
+        (
+            UserFunctionVariable,
+            LocalGeneratorFunctionVariable,
+            PolyfilledFunctionVariable,
+        ),
+    ):
         return SkipResult(
             False,
             f"inlined according trace_rules.lookup {reasons.pop()}",
@@ -3652,6 +3745,10 @@ def lookup_inner(
             if reasons is not None:
                 reasons.add("get_torch_obj_rule_map")
             return rule
+    elif name == "<listcomp>":
+        if reasons is not None:
+            reasons.add("inlining frame from list comprehension")
+        return UserFunctionVariable
 
     # Step 2: lookup obj's tracing rule by function name.
     if is_direct_call:

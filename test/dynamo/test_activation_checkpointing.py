@@ -5,7 +5,6 @@ import functools
 import math
 import unittest  # noqa: F811
 from importlib import import_module
-from typing import Set
 
 import torch
 import torch._dynamo.config
@@ -86,7 +85,7 @@ def count_ops(
     return gm
 
 
-def collect_fwd_graph_outputs(graph: torch.fx.Graph, *, fwd_outputs: Set[str]):
+def collect_fwd_graph_outputs(graph: torch.fx.Graph, *, fwd_outputs: set[str]):
     if not torch._dynamo.compiled_autograd.in_compiled_autograd_region:  # fwd graph
         return_node = list(graph.nodes)[-1]
         assert return_node.target == "output"

@@ -231,7 +231,8 @@ def supports_complex(reduceOp: ReduceOp) -> bool:
     return reduceOp not in denyList
 
 
-class Backend(str):
+# TODO refactor into enum/strenum
+class Backend(str):  # noqa: SLOT000
     """
     An enum-like class for backends.
 
@@ -1381,7 +1382,7 @@ def get_default_backend_for_device(device: Union[str, torch.device]) -> str:
     if isinstance(device, torch.device):
         device_str = device.type
     else:
-        device_str = device.split(":")[0]
+        device_str = torch.device(device).type
 
     backend = Backend.default_device_backend_map.get(device_str)
     if backend is None:
@@ -1811,7 +1812,7 @@ def _shutdown_backend(pg):
     except RuntimeError:
         pass
     if is_nccl_available() and isinstance(backend, ProcessGroupNCCL):
-        # explictly call shutdown to ensure that NCCL resources are released
+        # explicitly call shutdown to ensure that NCCL resources are released
         backend._shutdown()
 
 

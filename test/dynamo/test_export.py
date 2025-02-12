@@ -12,7 +12,6 @@ import operator
 import unittest
 from collections.abc import Sequence
 from enum import Enum
-from typing import Dict, List
 from unittest.mock import patch
 
 import torch
@@ -1999,7 +1998,7 @@ def forward(self, l_x_):
                 self.assertIn("val", node.meta)
 
     def test_input_container_type(self):
-        def f(x: torch.Tensor, y: List[torch.Tensor]) -> Dict[str, torch.Tensor]:
+        def f(x: torch.Tensor, y: list[torch.Tensor]) -> dict[str, torch.Tensor]:
             return {"a": x.sum() + sum(y).sum()}
 
         inp = (torch.randn(6, 5), [torch.randn(6, 5), torch.randn(6, 5)])
@@ -4592,7 +4591,7 @@ class ExportTestsDevice(torch._dynamo.test_case.TestCase):
         random_inputs = (torch.rand([32, 3, 32, 32]).to(device),)
         dim_x = torch.export.Dim("dim_x", min=1, max=32)
         exp_program = torch.export.export(
-            model, random_inputs, dynamic_shapes={"x": {0: dim_x}}
+            model, random_inputs, dynamic_shapes={"x": {0: dim_x}}, strict=True
         )
         output_buffer = io.BytesIO()
         # Tests if we can restore saved nn.Parameters when we load them again
@@ -4622,7 +4621,9 @@ class ExportTestsDevice(torch._dynamo.test_case.TestCase):
         batchsize = torch.export.Dim("dim0", min=3, max=1024)
         dynamic_shape_spec = {"a": [batchsize, None, None], "b": [None, None]}
 
-        torch.export.export(model, (a, b), dynamic_shapes=dynamic_shape_spec)
+        torch.export.export(
+            model, (a, b), dynamic_shapes=dynamic_shape_spec, strict=True
+        )
 
     def test_export_fast_binary_broadcast_check_unbacked(self, device):
         class MyModel(torch.nn.Module):
@@ -4635,7 +4636,7 @@ class ExportTestsDevice(torch._dynamo.test_case.TestCase):
         model = MyModel().eval().to(device)
         numel = torch.tensor(10)
         scalar = torch.randn(1)
-        torch.export.export(model, (numel, scalar))
+        torch.export.export(model, (numel, scalar), strict=True)
 
 
 common_utils.instantiate_parametrized_tests(ExportTests)
