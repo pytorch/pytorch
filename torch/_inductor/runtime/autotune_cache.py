@@ -257,7 +257,6 @@ class AutotuneCache:
             "found_by_coordesc": found_by_coordesc,
             "time_taken_ms": time_taken_ns // 1000000,  # Convert from NS to MS
             "triton_binary_hash": triton_binary_hash,
-
         }
         if HAS_WARP_SPEC:
             data.update(
