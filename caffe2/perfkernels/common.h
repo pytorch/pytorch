@@ -1,3 +1,5 @@
+#pragma once
+
 // !!!! PLEASE READ !!!!
 // Minimize (transitively) included headers from _avx*.cc because some of the
 // functions defined in the headers compiled with platform dependent compiler
@@ -60,10 +62,42 @@ In foo.cc, do:
 // During run time:
 //    we use cpuinfo to identify cpu support and run the proper functions.
 
-#pragma once
 #if defined(CAFFE2_PERF_WITH_SVE) || defined(CAFFE2_PERF_WITH_AVX512) || \
     defined(CAFFE2_PERF_WITH_AVX2) || defined(CAFFE2_PERF_WITH_AVX)
 #include <cpuinfo.h>
+#endif
+
+#if defined(CAFFE2_PERF_WITH_AVX512) || \
+    defined(CAFFE2_PERF_WITH_AVX2) || defined(CAFFE2_PERF_WITH_AVX)
+#include <optional>
+
+namespace caffe2::perfkernels {
+// Define the ISA that explicity can be selected by the user
+// Required for the fine grain control of Intel Xeon Scalable Processors
+// If an ISA level selected we will executed kernels which this or lower ISA
+enum SelectedIsa {
+  undefined = 0,   // Undefined ISA, should not be used.
+  avx2 = 1,        // AVX2 ISA
+  avx2_fma = 2,    // AVX2 ISA with FMA3 instructions
+  avx512 = 3,      // AVX512 ISA
+};
+
+
+// Returns the selected ISA if it is defined, otherwise returns an empty optional
+// The selection is done by the environment variable CAFFE2_PERFKERNELS_SELECT_ISA
+// - If selected ISA is more advanced than the current CPU ISA, the CPU ISA will
+//   be used.
+// - If the selected ISA is less advanced than the current CPU ISA, the selected
+//   ISA will be used.
+std::optional<SelectedIsa> getSelectedIsa();
+
+// Override the selected ISA through API, this will override the environment
+// variable CAFFE2_PERFKERNELS_SELECT_ISA if set
+SelectedIsa setIsa(SelectedIsa isa);
+}
+
+using caffe2::perfkernels::getSelectedIsa;
+using caffe2::perfkernels::SelectedIsa;
 #endif
 
 // DO macros: these should be used in your entry function, similar to foo()
@@ -84,34 +118,37 @@ In foo.cc, do:
 #endif // CAFFE2_PERF_WITH_SVE
 
 #ifdef CAFFE2_PERF_WITH_AVX512
-#define AVX512_DO(funcname, ...)                                   \
-  {                                                                \
-    static const bool isDo = cpuinfo_initialize() &&               \
-        cpuinfo_has_x86_avx512f() && cpuinfo_has_x86_avx512dq() && \
-        cpuinfo_has_x86_avx512vl();                                \
-    if (isDo) {                                                    \
-      return funcname##__avx512(__VA_ARGS__);                      \
-    }                                                              \
+#define AVX512_DO(funcname, ...)                                               \
+  {                                                                            \
+    static const bool isDo = cpuinfo_initialize() &&                           \
+        cpuinfo_has_x86_avx512f() && cpuinfo_has_x86_avx512dq() &&             \
+        cpuinfo_has_x86_avx512vl() &&                                          \
+        getSelectedIsa().value_or(SelectedIsa::avx512) >= SelectedIsa::avx512; \
+    if (isDo) {                                                                \
+      return funcname##__avx512(__VA_ARGS__);                                  \
+    }                                                                          \
   }
 #else // CAFFE2_PERF_WITH_AVX512
 #define AVX512_DO(funcname, ...)
 #endif // CAFFE2_PERF_WITH_AVX512
 
 #ifdef CAFFE2_PERF_WITH_AVX2
-#define AVX2_DO(funcname, ...)                                               \
-  {                                                                          \
-    static const bool isDo = cpuinfo_initialize() && cpuinfo_has_x86_avx2(); \
-    if (isDo) {                                                              \
-      return funcname##__avx2(__VA_ARGS__);                                  \
-    }                                                                        \
-  }
-#define AVX2_FMA_DO(funcname, ...)                                             \
+#define AVX2_DO(funcname, ...)                                                 \
   {                                                                            \
     static const bool isDo = cpuinfo_initialize() && cpuinfo_has_x86_avx2() && \
-        cpuinfo_has_x86_fma3();                                                \
+        getSelectedIsa().value_or(SelectedIsa::avx2) >= SelectedIsa::avx2;     \
     if (isDo) {                                                                \
-      return funcname##__avx2_fma(__VA_ARGS__);                                \
+      return funcname##__avx2(__VA_ARGS__);                                    \
     }                                                                          \
+  }
+#define AVX2_FMA_DO(funcname, ...)                                                 \
+  {                                                                                \
+    static const bool isDo = cpuinfo_initialize() && cpuinfo_has_x86_avx2() &&     \
+        cpuinfo_has_x86_fma3() &&                                                  \
+        getSelectedIsa().value_or(SelectedIsa::avx2_fma) >= SelectedIsa::avx2_fma; \
+    if (isDo) {                                                                    \
+      return funcname##__avx2_fma(__VA_ARGS__);                                    \
+    }                                                                              \
   }
 #else // CAFFE2_PERF_WITH_AVX2
 #define AVX2_DO(funcname, ...)
