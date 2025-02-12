@@ -25,8 +25,6 @@ from __future__ import annotations
 import dataclasses
 import logging
 import os
-import re
-from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, TYPE_CHECKING, Union
 from typing_extensions import TypeAlias
 
@@ -519,12 +517,7 @@ class CompiledFxGraph(OutputCode):
 
     def after_deserialization(self, constants: CompiledFxGraphConstants) -> str:
         from torch._dynamo.utils import counters, dynamo_timed
-        from torch._inductor.codecache import (
-            cpp_prefix_path,
-            get_path,
-            PyCodeCache,
-            write_atomic,
-        )
+        from torch._inductor.codecache import get_path, PyCodeCache, write_atomic
 
         # See _save_graph(); we don't store the callable in the cache entry so
         # recreate it here from the PyCodeCache disk cache.
@@ -532,18 +525,6 @@ class CompiledFxGraph(OutputCode):
         code = self.source_code
         if not os.path.exists(artifact_path):
             counters["inductor"]["fxgraph_lookup_write_file"] += 1
-            Path(os.path.dirname(artifact_path)).mkdir(parents=True, exist_ok=True)
-            cpp_pp = cpp_prefix_path()
-            if os.path.basename(cpp_pp) in code:
-                if cpp_pp in code:
-                    # Great the name is correct
-                    pass
-                else:
-                    # Old dir name is included, replace it
-                    pattern = rf'#include\s*"[^"]+{os.path.basename(cpp_pp)}"'
-                    code = re.sub(pattern, f'#include "{cpp_pp}"', code)
-                    self.source_code = code
-
             write_atomic(artifact_path, code, make_dirs=True)
 
         try:

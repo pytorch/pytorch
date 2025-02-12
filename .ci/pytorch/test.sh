@@ -407,10 +407,11 @@ test_inductor_cpp_wrapper_shard() {
 
   if [[ "$1" -eq "2" ]]; then
     # For now, manually put the opinfo tests in shard 2, and all other tests in
-    # shard 1.  Test specific things triggering past bugs, for now.
+    # shard 1.  Run all CPU tests, as well as specific GPU tests triggering past
+    # bugs, for now.
     python test/run_test.py \
       --include inductor/test_torchinductor_opinfo \
-      -k 'linalg or to_sparse' \
+      -k 'linalg or to_sparse or TestInductorOpInfoCPU' \
       --verbose
     exit
   fi
