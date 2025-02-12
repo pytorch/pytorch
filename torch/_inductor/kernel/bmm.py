@@ -13,7 +13,7 @@ from ..select_algorithm import (
 from ..utils import (
     ceildiv as cdiv,
     use_aten_gemm_kernels,
-    use_ck_template,
+    use_ck_gemm_template,
     use_cpp_bmm_template,
     use_cutlass_template,
     use_triton_template,
@@ -191,7 +191,8 @@ def tuned_bmm(mat1, mat2, *, layout=None):
             layout,
             [mat1, mat2],
         )
-    if use_ck_template(layout):
+
+    if use_ck_gemm_template(layout, m, n, k):
         CKGemmTemplate.add_ck_gemm_choices(choices, layout, [mat1, mat2])
 
     if len(choices) == 0:

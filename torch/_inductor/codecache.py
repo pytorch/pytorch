@@ -38,10 +38,12 @@ from typing import (
     cast,
     NoReturn,
     Optional,
+    Tuple,
     TYPE_CHECKING,
     TypeVar,
     Union,
 )
+from typing_extensions import Self
 
 import torch
 import torch.distributed as dist
@@ -65,9 +67,8 @@ from torch._inductor.cpp_builder import (
 )
 from torch._inductor.cpu_vec_isa import pick_vec_isa
 from torch._inductor.custom_graph_pass import CustomGraphPass, CustomGraphPassType
-from torch._inductor.output_code import has_frozen_params
+from torch._inductor.freezing_utils import has_frozen_params, is_frozen_param
 from torch._inductor.runtime.compile_tasks import (
-    _module_to_triton_kernel,
     _reload_python_module,
     _reload_python_module_in_subproc,
 )
@@ -357,10 +358,11 @@ def sha256_hash(data: bytes) -> str:
     return base64.b32encode(hashlib.sha256(data).digest())[:51].decode("utf-8").lower()
 
 
-def code_hash(code: Union[str, bytes], extra: str = "") -> str:
+def code_hash(code: Union[str, bytes], extra: Union[str, bytes] = "") -> str:
     hashing_str = code if isinstance(code, bytes) else code.encode("utf-8")
-    if extra != "":
-        hashing_str = hashing_str + b"||" + extra.encode("utf-8")
+    if extra:
+        extra_b = extra if isinstance(extra, bytes) else extra.encode("utf-8")
+        hashing_str = hashing_str + b"||" + extra_b
     return "c" + sha256_hash(hashing_str)
 
 
@@ -481,7 +483,6 @@ class FxGraphCachePickler(pickle.Pickler):
     def __init__(
         self,
         gm: torch.fx.GraphModule,
-        include_non_inlined: bool = True,
         has_user_defined_triton_kernels: bool = False,
     ) -> None:
         """
@@ -493,13 +494,12 @@ class FxGraphCachePickler(pickle.Pickler):
         self._stream = io.BytesIO()
         super().__init__(self._stream)
 
-        self.include_non_inlined = include_non_inlined
-
         self.dispatch_table = copyreg.dispatch_table.copy()
         self.dispatch_table.update(
             {
                 FakeTensor: functools.partial(self._reduce_fake_tensor),
                 torch.Tensor: functools.partial(self._reduce_tensor),
+                torch.nn.parameter.Parameter: functools.partial(self._reduce_tensor),
                 torch.SymInt: functools.partial(self._reduce_symint),
                 torch.fx.experimental._backward_state.BackwardState: functools.partial(
                     self._reduce_unsupported
@@ -526,9 +526,8 @@ class FxGraphCachePickler(pickle.Pickler):
         return (_ident, (metadata,))
 
     def _reduce_tensor(
-        self,
-        t: Tensor,
-    ) -> tuple[Callable[[T], T], tuple[Union[TensorMetadata, TensorMetadataAndValues]]]:
+        self, t: Tensor
+    ) -> Tuple[Callable[[T], T], Tuple[Union[TensorMetadata, TensorMetadataAndValues]]]:
         """
         Custom reducer to pickle Tensors.  If we see tensors, we know they're constants
         stored as attributes on the GraphModule.
@@ -541,25 +540,24 @@ class FxGraphCachePickler(pickle.Pickler):
             # support, we can remove this.
             raise BypassFxGraphCache("mkldnn tensors unpickleable")
 
-        # If this is an inlined constant or include_non_inlined=True, then we include
-        # the metadata and the values.
         metadata = extract_tensor_metadata_for_cache_key(t)
-        if GraphLowering.can_inline_constant(t) or self.include_non_inlined:
-            # Very large tensors will be expensive to copy to cpu and hash. Let's at
-            # least report any slowness.
-            start = time()
-            values = t.tolist()
-            elapsed = time() - start
-            if elapsed > 1.0:
-                warnings.warn(
-                    f"FX graph cache copying of a large constant took {elapsed:.1}s. "
-                    "Please file an issue."
-                )
 
-            return (_ident, (TensorMetadataAndValues(metadata, values),))
+        # If this is a non-inlined frozen parameter, we consider the metadata only.
+        if is_frozen_param(t) and not GraphLowering.can_inline_constant(t):
+            return (_ident, (metadata,))
 
-        # Otherwise, we just include the metadata.
-        return (_ident, (metadata,))
+        # Very large tensors will be expensive to copy to cpu and hash. Let's at least
+        # report any slowness.
+        start = time()
+        values = t.tolist()
+        elapsed = time() - start
+        if elapsed > 1.0:
+            warnings.warn(
+                f"FX graph cache copying of a large constant took {elapsed:.1}s. "
+                "Please file an issue."
+            )
+
+        return (_ident, (TensorMetadataAndValues(metadata, values),))
 
     def _reduce_symint(self, s: SymInt) -> tuple[Callable[[T], T], tuple[str]]:
         """
@@ -683,7 +681,6 @@ def torch_key() -> bytes:
                 # a hash representing the state of the source code.
                 extra_files = (
                     "codegen/aoti_runtime/interface.cpp",
-                    "codegen/aoti_runtime/implementation.cpp",
                     "codegen/cpp_prefix.h",
                     "script.ld",
                 )
@@ -855,16 +852,10 @@ def compiled_fx_graph_hash(
     """
     Generate a unique hash of the FX graph for caching.
     """
-    # To support caching when the graph has frozen params, we ignore the tensor values
-    # of non-inlined constants since they won't be included in the cache entry. Without
-    # freezing, we want to include the values of any constant attribute.
-    include_non_inlined = not has_frozen_params(gm)
-
     details = FxGraphHashDetails(gm, example_inputs, fx_kwargs, inputs_to_check)
     has_user_defined_triton_kernels = len(details.user_defined_triton_source) != 0
-    pickler = FxGraphCachePickler(
-        gm, include_non_inlined, has_user_defined_triton_kernels
-    )
+    pickler = FxGraphCachePickler(gm, has_user_defined_triton_kernels)
+
     # The prefix distinguishes among the other kinds of objects we
     # cache in this module.
     key = "f" + pickler.get_hash(details)
@@ -1063,6 +1054,13 @@ class FxGraphCache:
 
         try:
             artifact_path = graph.after_deserialization(constants)
+
+            from .graph import GraphLowering
+
+            # This is used by tests to check the output for specific details.
+            if GraphLowering.save_output_code is not None:
+                GraphLowering.save_output_code(graph.source_code)
+
         except OSError:
             # Not expected, but in case the PyCodeCache entry is removed from
             # underneath us, treat it as a cache miss and recompile.
@@ -2818,10 +2816,10 @@ class PyCodeCache:
         return parse_stack_trace(entry)
 
 
-class TritonCodeCache:
-    @classmethod
-    def load(cls, kernel_name: str, source_code: str) -> ModuleType:
-        return _module_to_triton_kernel(PyCodeCache.load(source_code), kernel_name)
+def _load_triton_kernel_from_source(
+    kernel_name: str, source_code: str
+) -> CachingAutotuner:
+    return getattr(PyCodeCache.load(source_code), kernel_name)
 
 
 def _cuda_compiler() -> Optional[str]:
@@ -3030,7 +3028,7 @@ class DLLWrapper:
 
         return _wrapped_func
 
-    def __enter__(self) -> DLLWrapper:  # noqa: PYI034
+    def __enter__(self) -> Self:
         return self
 
     def __exit__(self, *args: Any) -> None:
@@ -3086,6 +3084,9 @@ class CUDACodeCache:
                     cmd = cuda_compile_command(
                         [input_path], output_path, dst_file_ext, extra_args
                     )
+                    with open(input_path, "a") as f:
+                        f.write("\n")
+                        f.write(f"// CUDA Compile cmd\n// {cmd}\n")
                     start_time = time()
                     log.debug("CUDA Compilation: %s", cmd)
                     cmd_parts = cmd.split(" ")
@@ -3225,30 +3226,12 @@ class CodeCacheFuture:
         raise NotImplementedError
 
 
-class TritonFuture(CodeCacheFuture):
-    kernel: CachingAutotuner
-
-    def __init__(
-        self,
-        kernel: Any,
-        future: Optional[Future[Any]],
-    ) -> None:
-        self.kernel = kernel
-        self.future = future
-
-    def result(self) -> Callable[..., Any]:
-        if self.future is not None:
-            # If the worker failed this will throw an exception.
-            result = self.future.result()
-            assert result is None
-            self.future = None
-            self.kernel.precompile()
-        return self.kernel
-
-
 class LambdaFuture(CodeCacheFuture):
-    def __init__(self, result_fn: Callable[..., Any]) -> None:
+    def __init__(
+        self, result_fn: Callable[..., Any], future: Optional[Future[Any]] = None
+    ) -> None:
         self.result_fn = result_fn
+        self.future = future
 
     def result(self) -> Callable[..., Any]:  # type: ignore[override]
         return self.result_fn()

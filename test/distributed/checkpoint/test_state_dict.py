@@ -4,7 +4,7 @@ import copy
 import functools
 import sys
 from itertools import chain
-from typing import Callable, Tuple, Type, Union
+from typing import Callable, Union
 
 import torch
 import torch.distributed as dist
@@ -154,9 +154,9 @@ class TestStateDict(DTensorTestBase, VerifyStateDictMixin):
         *,
         use_orig_params: bool,
         use_dtensor: bool,
-        wrapping: Tuple[nn.Module] = (),
+        wrapping: tuple[nn.Module] = (),
         compile_model: bool = False,
-        optimizer_class: Type[Optimizer],
+        optimizer_class: type[Optimizer],
     ) -> None:
         if not use_orig_params:
             return
@@ -232,7 +232,7 @@ class TestStateDict(DTensorTestBase, VerifyStateDictMixin):
         self,
         *,
         reshard_after_forward: Union[bool, int],
-        optimizer_class: Type[Optimizer],
+        optimizer_class: type[Optimizer],
         compile_model: bool,
         foreach: bool = True,
     ):
@@ -272,7 +272,7 @@ class TestStateDict(DTensorTestBase, VerifyStateDictMixin):
             self._test_fsdp2,
         )
 
-    def _test_ddp(self, use_composable: bool, optimizer_class: Type[Optimizer]) -> None:
+    def _test_ddp(self, use_composable: bool, optimizer_class: type[Optimizer]) -> None:
         def init_model_optim():
             orig_model = CompositeParamModel(device=torch.device("cuda"))
             orig_optim = optimizer_class(orig_model.parameters(), lr=1e-4)
@@ -303,7 +303,7 @@ class TestStateDict(DTensorTestBase, VerifyStateDictMixin):
 
     def _test_fsdp_ddp(
         self,
-        optimizer_class: Type[Optimizer],
+        optimizer_class: type[Optimizer],
         optim_in_backward: bool = False,
         test_frozen: bool = False,
     ) -> None:
@@ -347,7 +347,7 @@ class TestStateDict(DTensorTestBase, VerifyStateDictMixin):
             self._test_fsdp_ddp,
         )
 
-    def _test_single_gpu(self, optimizer_class: Type[Optimizer]) -> None:
+    def _test_single_gpu(self, optimizer_class: type[Optimizer]) -> None:
         def init_model_optim():
             orig_model = CompositeParamModel(device=torch.device("cuda"))
             orig_optim = optimizer_class(orig_model.parameters(), lr=1e-4)
@@ -399,7 +399,7 @@ class TestStateDict(DTensorTestBase, VerifyStateDictMixin):
         )
 
     def _test_cpu_offload_full_state_dict(
-        self, optimizer_class: Type[Optimizer]
+        self, optimizer_class: type[Optimizer]
     ) -> None:
         orig_model = CompositeParamModel(device=torch.device("cuda"))
         device_mesh = init_device_mesh("cuda", (self.world_size,))
