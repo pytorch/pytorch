@@ -735,13 +735,14 @@ class OpInfo:
 
     def __getattribute__(self, name: str) -> Any:
         if name.startswith("dtypesIf") and name != "dtypesIf":
-            dev_name = name[len("dtypesIf") :].lower()
+            dev_name = name.removeprefix("dtypesIf").lower()
             return self.dtypesIf.get(dev_name)
         return super().__getattribute__(name)
 
     def __setattr__(self, name: str, value: Any) -> None:
         if name.startswith("dtypesIf") and name != "dtypesIf":
-            dev_name = name[len("dtypesIf") :].lower()
+            assert isinstance(value, (_dispatch_dtypes, type(None)))
+            dev_name = name.removeprefix("dtypesIf").lower()
             self.dtypesIf[dev_name] = value
             return
         super().__setattr__(name, value)
