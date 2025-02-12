@@ -58,7 +58,6 @@
 #include <ATen/native/transformers/hip/flash_attn/flash_api.h>
 
 #include <c10/util/Exception.h>
-#include <c10/util/CallOnce.h>
 
 // AOTriton headers
 #include <aotriton/flash.h>
