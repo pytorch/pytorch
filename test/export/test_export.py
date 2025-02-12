@@ -11009,6 +11009,59 @@ graph():
             r"Runtime assertion failed for expression u[\d+] \>\= 3",
         ):
             ep.module()(torch.randn(10), torch.tensor(2))
+    
+    @testing.expectedFailureLegacyExportNonStrict  # Old export doesn't work with subclasses
+    @testing.expectedFailureLegacyExportStrict  # Old export doesn't work with subclasses
+    @testing.expectedFailureSerDerNonStrict  # construtor is not serialized today
+    @testing.expectedFailureSerDer  # constructor is not serialized today
+    def test_capture_subclass_constructor(self):
+        class Foo(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.buffer = torch.nn.Buffer(TwoTensor(torch.randn(4, 4), torch.randn(4, 4)))
+            def forward(self, x):
+                two_tensor = TwoTensor(x, TwoTensor(x, x)) + self.buffer
+                val = x + two_tensor
+                return val.b.a
+        
+        mod = Foo()
+        ep = export_for_training(mod, (torch.randn(4, 4),), strict=False)
+        self.assertExpectedInline(
+            str(ep.graph).strip(),
+            """\
+graph():
+    %b_buffer : [num_users=1] = placeholder[target=b_buffer]
+    %x : [num_users=1] = placeholder[target=x]
+    %two_tensor : [num_users=2] = call_function[target=torch.testing._internal.two_tensor.TwoTensor](args = (%x, %x), kwargs = {})
+    %getattr_8 : [num_users=1] = call_function[target=builtins.getattr](args = (%two_tensor, b), kwargs = {})
+    %two_tensor_1 : [num_users=2] = call_function[target=torch.testing._internal.two_tensor.TwoTensor](args = (%getattr_8, %two_tensor), kwargs = {})
+    %getattr_18 : [num_users=1] = call_function[target=builtins.getattr](args = (%two_tensor_1, b), kwargs = {})
+    %getattr_24 : [num_users=1] = call_function[target=builtins.getattr](args = (%getattr_18, b), kwargs = {})
+    %add : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%two_tensor_1, %b_buffer), kwargs = {})
+    %add_1 : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%getattr_24, %add), kwargs = {})
+    %getattr_25 : [num_users=1] = call_function[target=builtins.getattr](args = (%add_1, b), kwargs = {})
+    %getattr_30 : [num_users=1] = call_function[target=builtins.getattr](args = (%getattr_25, a), kwargs = {})
+    return (getattr_30,)"""
+        )
+
+        inp = torch.randn(4, 4)
+        self.assertEqual(ep.module()(inp), mod(inp))
+
+        mod = Foo()
+        ep = export(mod, (torch.randn(4, 4),)).run_decompositions({})
+
+        self.assertEqual(ep.module()(inp), mod(inp))
+        self.assertExpectedInline(
+            str(ep.graph).strip(),
+            """\
+graph():
+    %b_parametrizations_buffer_original0 : [num_users=0] = placeholder[target=b_parametrizations_buffer_original0]
+    %b_parametrizations_buffer_original1 : [num_users=1] = placeholder[target=b_parametrizations_buffer_original1]
+    %x : [num_users=2] = placeholder[target=x]
+    %add_1 : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%x, %b_parametrizations_buffer_original1), kwargs = {})
+    %add_4 : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%x, %add_1), kwargs = {})
+    return (add_4,)"""
+        )
 
     def test_cse_for_symint(self):
         class Foo(torch.nn.Module):
