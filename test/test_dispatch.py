@@ -151,7 +151,7 @@ class TestDispatch(TestCase):
             active_ops.add(op_ix)
             try:
                 ops[op_ix](refs[op_ix])
-                check_invariants(f"running ctors {ctor_order[:i + 1]}")
+                check_invariants(f"running ctors {ctor_order[: i + 1]}")
             except RuntimeError as e:
                 if not expect_raises:
                     raise
@@ -160,7 +160,7 @@ class TestDispatch(TestCase):
                 expected, _, expected_provenance = results.setdefault(
                     frozenset(active_ops),
                     Result(
-                        actual, "", f"error after running ctors {ctor_order[:i + 1]}"
+                        actual, "", f"error after running ctors {ctor_order[: i + 1]}"
                     ),
                 )
                 self.assertMultiLineEqual(expected, actual, expected_provenance)
@@ -195,7 +195,7 @@ class TestDispatch(TestCase):
             else:
                 active_ops.remove(op_ix)
             check_invariants(
-                f"running ctors {ctor_order[:last_ctor + 1]}, then running dtors {dtor_order[:i + 1]}"
+                f"running ctors {ctor_order[: last_ctor + 1]}, then running dtors {dtor_order[: i + 1]}"
             )
         return results[set_to_report][0]
 
