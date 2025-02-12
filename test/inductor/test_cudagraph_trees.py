@@ -14,6 +14,7 @@ from typing import Mapping, Sequence
 import torch
 import torch._dynamo.config as dynamo_config
 import torch.nn as nn
+from torch._dynamo.backends.debugging import aot_eager_decomp_partition_with_mode
 from torch._dynamo.utils import counters
 from torch._functorch._aot_autograd.autograd_cache import AOTAutogradCache
 from torch._inductor import config
@@ -37,6 +38,7 @@ from torch.testing._internal.common_utils import (
     TEST_CUDA_GRAPH,
     TEST_WITH_ASAN,
 )
+from torch.utils._mode_utils import no_dispatch
 from torch.utils._python_dispatch import TorchDispatchMode
 
 
@@ -2511,12 +2513,6 @@ if HAS_CUDA and not TEST_WITH_ASAN:
 
     class TestSAC(TestCase):
         def test_simple(self):
-            from torch._dynamo.backends.debugging import (
-                aot_eager_decomp_partition_with_mode,
-            )
-            from torch.utils._mode_utils import no_dispatch
-            from torch.utils._python_dispatch import TorchDispatchMode
-
             device = "cuda"
 
             class ObserverMode(TorchDispatchMode):
@@ -2532,8 +2528,7 @@ if HAS_CUDA and not TEST_WITH_ASAN:
                     args: Sequence[object] = (),
                     kwargs: Mapping[str, object] = immutable_dict(),
                 ) -> object:
-                    out = func(*args, **kwargs)
-                    return out
+                    return func(*args, **kwargs)
 
             from torch._prims.rng_prims import graphsafe_run_with_rng_state
 
@@ -2559,11 +2554,11 @@ if HAS_CUDA and not TEST_WITH_ASAN:
             x = torch.randn(4, 4, device=device, requires_grad=True)
             y = torch.randn(4, 4, device=device, requires_grad=True)
 
-            aot_eager_decomp_partition_with_mode = functools.partial(
+            aot_eager_decomp_partition = functools.partial(
                 aot_eager_decomp_partition_with_mode, mode=obs
             )
 
-            fn = torch.compile(fn, backend=aot_eager_decomp_partition_with_mode)
+            fn = torch.compile(fn, backend=aot_eager_decomp_partition)
 
             fn(x, y).sum().backward()
             self.assertEqual(len(obs.op_outputs[aten.rand.default]), 2)
@@ -2574,12 +2569,6 @@ if HAS_CUDA and not TEST_WITH_ASAN:
 
         @parametrize("order", (list(itertools.permutations([0, 1, 2]))))
         def test_uneven_forward_backward(self, order):
-            from torch._dynamo.backends.debugging import (
-                aot_eager_decomp_partition_with_mode,
-            )
-            from torch.utils._mode_utils import no_dispatch
-            from torch.utils._python_dispatch import TorchDispatchMode
-
             device = "cuda"
 
             class ObserverMode(TorchDispatchMode):
@@ -2619,11 +2608,11 @@ if HAS_CUDA and not TEST_WITH_ASAN:
                 x = torch.sin(x)
                 return x
 
-            aot_eager_decomp_partition_with_mode = functools.partial(
+            aot_eager_decomp_partition = functools.partial(
                 aot_eager_decomp_partition_with_mode, mode=obs
             )
 
-            fn_c = torch.compile(fn, backend=aot_eager_decomp_partition_with_mode)
+            fn_c = torch.compile(fn, backend=aot_eager_decomp_partition)
 
             torch.manual_seed(0)
             outs = []
@@ -2645,6 +2634,7 @@ if HAS_CUDA and not TEST_WITH_ASAN:
                 )
 
         @config.patch(fallback_random=True)
+        @config.patch("test_configs.graphsafe_rng_func_ignores_fallback_random", True)
         def _test_cudagraphs_aot_eager_compat_equal(self, device):
             def gn(x, y):
                 return torch.sigmoid(torch.rand_like(x) * y) * x
@@ -2719,12 +2709,6 @@ if HAS_CUDA and not TEST_WITH_ASAN:
             out[0].sum().backward()
 
         def test_retain_graph(self):
-            from torch._dynamo.backends.debugging import (
-                aot_eager_decomp_partition_with_mode,
-            )
-            from torch.utils._mode_utils import no_dispatch
-            from torch.utils._python_dispatch import TorchDispatchMode
-
             device = "cuda"
 
             class ObserverMode(TorchDispatchMode):
@@ -2767,11 +2751,11 @@ if HAS_CUDA and not TEST_WITH_ASAN:
             x = torch.randn(4, 4, device=device, requires_grad=True)
             y = torch.randn(4, 4, device=device, requires_grad=True)
 
-            aot_eager_decomp_partition_with_mode = functools.partial(
+            aot_eager_decomp_partition = functools.partial(
                 aot_eager_decomp_partition_with_mode, mode=obs
             )
 
-            fn = torch.compile(fn, backend=aot_eager_decomp_partition_with_mode)
+            fn = torch.compile(fn, backend=aot_eager_decomp_partition)
 
             out = fn(x, y).sum()
             out.backward(retain_graph=True)

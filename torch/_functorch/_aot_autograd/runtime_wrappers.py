@@ -1863,7 +1863,9 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
                     _curr_iter = next(curr_fwd_iter)
                     ctx._curr_iter = _curr_iter
 
-                    # Save forward states if we have pending forwards
+                    # if there are multiple, pending forwards, then we don't know
+                    # in what order the backwards will be invoked and we need to
+                    # stash the current state.
                     if pending_forwards:
                         saved_backward_states[_curr_iter] = [
                             rng_state.clone_state() for rng_state in fwd_rng_states
@@ -2000,15 +2002,14 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
                 )
 
                 if num_rng:
+                    nonlocal backward_state_position, bwd_rng_states
                     curr_backward_iter = ctx._curr_iter
-
                     retain_graph = (
                         torch._C._autograd._get_current_graph_task_keep_graph()
                     )
 
-                    nonlocal backward_state_position, bwd_rng_states
-
                     # Save current state if we have a pending forward that needs this state
+                    # or this state may be needed again because of retain graph
                     if (
                         backward_state_position in pending_forwards
                         and backward_state_position not in saved_backward_states
@@ -2023,7 +2024,6 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
 
                     # Restore saved states if needed
                     if curr_backward_iter in saved_backward_states:
-                        # Skip copying if backward state is already at the previous position
                         if backward_state_position != curr_backward_iter:
                             for bwd_state, saved_state in zip(
                                 bwd_rng_states,
@@ -2032,6 +2032,8 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
                                 bwd_state.graphsafe_set_state(saved_state)
                         if not retain_graph:
                             del saved_backward_states[curr_backward_iter]
+                    else:
+                        assert backward_state_position == curr_backward_iter
 
                     backward_state_position = curr_backward_iter + 1
                     if not retain_graph:
