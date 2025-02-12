@@ -4000,7 +4000,9 @@ class Scheduler:
             partition_code, _ = V.graph.wrapper_code.generate(V.graph.is_inference)
             V.graph.wrapper_code = parent_wrapper_code
             V.graph.wrapper_code.define_subgraph_launcher_fn(partition_code)
-            V.graph.wrapper_code.codegen_partition_call(partition_name, input, output)
+            V.graph.wrapper_code.codegen_partition_call(
+                graph_partition_id, input, output
+            )
 
             # Done1: a) codegen for signature like `def subgraph1(arg0):`, and b) codegen
             #           for input arguments  like `arg0, arg1 = args`.codegen for signature
@@ -4009,6 +4011,10 @@ class Scheduler:
             # Done3: codegen for subgraph launcher in V.graph.wrapper_code.subgraph_launchers,
             #           like `buf2 = subgraph1(arg0)` which will appear in `def call`.
             #           This is done in codegen_partition_call().
+
+        # counts recursively
+        num_partitions = next(_graph_partition_counter)
+        V.graph.wrapper_code.codegen_subgraph_lists(num_partitions)
 
     def _codegen(self, nodes: List[BaseSchedulerNode]) -> None:
         if config.check_stack_no_cycles_TESTING_ONLY:

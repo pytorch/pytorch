@@ -933,13 +933,13 @@ class PythonWrapperCodegen(CodeGen):
                 """
                 class Runner:
                     def __init__(self):
-                        pass
+                        self.partitions = []
 
                     def recursively_apply_fns(self, fns):
                         new_callables = []
-                        for fn, c in zip(fns, self.callables):
+                        for fn, c in zip(fns, self.partitions):
                             new_callables.append(fn(c))
-                        self.callables = new_callables
+                        self.partitions = new_callables
 
                     def call(self, args):
                 """
@@ -1276,6 +1276,14 @@ class PythonWrapperCodegen(CodeGen):
             result.splice(
                 """
                 runner = Runner()
+                """
+            )
+            all_partition_name_list = ", ".join(self.all_partition_names) + (
+                "," if len(self.all_partition_names) == 1 else ""
+            )
+            result.splice(f"runner.partitions=[{all_partition_name_list}]")
+            result.splice(
+                """
                 call = runner.call
                 recursively_apply_fns = runner.recursively_apply_fns
                 """
@@ -2494,18 +2502,23 @@ class PythonWrapperCodegen(CodeGen):
         ):
             self.writeline(f"{self.declare}{inner_input} = {outer_input}{self.ending}")
 
-    def codegen_partition_call(self, partition_name, input_names, output_nodes):
+    def codegen_partition_call(self, partition_id, input_names, output_nodes):
         inputs = ", ".join(input_names) + ("," if len(input_names) == 1 else "")
 
         output_names = [node.get_name() for node in output_nodes]
         outputs = ", ".join(output_names) + ("," if len(output_nodes) == 1 else "")
 
         # Create a list of inputs for the subgraph call
-        self.writeline(f"{partition_name}_args = [{inputs}]")
+        self.writeline(f"partition{partition_id}_args = [{inputs}]")
 
         # Call the subgraph launcher function
-        self.writeline(f"({outputs}) = {partition_name}({partition_name}_args)")
-        self.writeline(f"del {partition_name}_args")
+        self.writeline(
+            f"({outputs}) = self.partitions[{partition_id}](partition{partition_id}_args)"
+        )
+        self.writeline(f"del partition{partition_id}_args")
+
+    def codegen_subgraph_lists(self, num_partitions: int):
+        self.all_partition_names = [f"partition_{idx}" for idx in range(num_partitions)]
 
     def codegen_subgraph_call(self, subgraph, outer_inputs, outer_outputs):
         # Get the input and output names of the subgraph
