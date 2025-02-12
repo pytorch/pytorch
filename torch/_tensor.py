@@ -1108,39 +1108,36 @@ class Tensor(torch._C.TensorBase):
     __rtruediv__ = __rdiv__
     __itruediv__ = _C.TensorBase.__idiv__
 
-    __pow__ = cast(
-        Callable[
-            ["torch._C.TensorBase", Union["Tensor", int, float, bool, complex]],
-            "Tensor",
-        ],
-        _handle_torch_function_and_wrap_type_error_to_not_implemented(
-            _C.TensorBase.pow
-        ),
-    )
+    def __pow__(self, other: Union["Tensor", int, float, bool, complex]) -> "Tensor":
+        return torch.pow(self, other)
+
     __ipow__ = _handle_torch_function_and_wrap_type_error_to_not_implemented(
         _C.TensorBase.pow_
     )
 
+    @_handle_torch_function_and_wrap_type_error_to_not_implemented
     def __and__(self, other: Union["Tensor", int, bool]) -> "Tensor":  # type: ignore[override]
         return super().__and__(other)
 
+    @_handle_torch_function_and_wrap_type_error_to_not_implemented
     def __or__(self, other: Union["Tensor", int, bool]) -> "Tensor":  # type: ignore[override]
         return super().__or__(other)
 
+    @_handle_torch_function_and_wrap_type_error_to_not_implemented
     def __xor__(self, other: Union["Tensor", int, bool]) -> "Tensor":  # type: ignore[override]
         return super().__xor__(other)
 
     @_handle_torch_function_and_wrap_type_error_to_not_implemented
     def __rand__(self, other: Union["Tensor", int, bool]) -> "Tensor":
-        return self & other
+        return super().__and__(other)
 
     @_handle_torch_function_and_wrap_type_error_to_not_implemented
     def __ror__(self, other: Union["Tensor", int, bool]) -> "Tensor":
-        return self | other
+        return super().__or__(other)
 
     @_handle_torch_function_and_wrap_type_error_to_not_implemented
     def __rxor__(self, other: Union["Tensor", int, bool]) -> "Tensor":
-        return self ^ other
+        return super().__xor__(other)
 
     @_handle_torch_function_and_wrap_type_error_to_not_implemented
     def __rmod__(self, other: Union["Tensor", int, float, bool, complex]) -> "Tensor":
