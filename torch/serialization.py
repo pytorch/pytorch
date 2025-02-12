@@ -1616,9 +1616,12 @@ def _legacy_load(f, map_location, pickle_module, **pickle_load_args):
                 return saved_id[0]
             return deserialized_objects[int(saved_id)]
 
-        with closing(
-            tarfile.open(fileobj=f, mode="r:", format=tarfile.PAX_FORMAT)
-        ) as tar, mkdtemp() as tmpdir:
+        with (
+            closing(
+                tarfile.open(fileobj=f, mode="r:", format=tarfile.PAX_FORMAT)
+            ) as tar,
+            mkdtemp() as tmpdir,
+        ):
             if pickle_module is _weights_only_unpickler:
                 raise RuntimeError(
                     "Cannot use ``weights_only=True`` with files saved in the "
