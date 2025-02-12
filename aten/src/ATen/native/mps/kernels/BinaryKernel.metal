@@ -2,7 +2,6 @@
 #include <metal_stdlib>
 using namespace metal;
 
-namespace {
 struct fmax_functor {
   template <typename T>
   inline T operator()(const T a, const T b) {
@@ -23,8 +22,6 @@ struct copysign_functor {
     return static_cast<T>(::metal::copysign(a, b));
   }
 };
-
-} // anonymous namespace
 
 template <typename T, typename F>
 kernel void binary_indexing(
