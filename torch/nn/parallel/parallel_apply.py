@@ -4,7 +4,7 @@ from typing import Any, cast, Optional, Union
 
 import torch
 from torch._utils import ExceptionWrapper
-from torch.cuda._utils import _get_device_index
+from torch.accelerator._utils import _get_device_index
 from torch.nn.modules import Module
 
 
@@ -58,7 +58,7 @@ def parallel_apply(
     else:
         devices = [None] * len(modules)
     devices = [_get_device_index(x, True) for x in devices]
-    streams = [torch.cuda.current_stream(x) for x in devices]
+    streams = [torch.accelerator.current_stream(x) for x in devices]
     lock = threading.Lock()
     results = {}
     grad_enabled, autocast_enabled = (
@@ -72,7 +72,7 @@ def parallel_apply(
         input: Any,
         kwargs: dict[str, Any],
         device: Optional[Union[int, torch.device]] = None,
-        stream: Optional[torch.cuda.Stream] = None,
+        stream: Optional[torch.Stream] = None,
     ) -> None:
         torch.set_grad_enabled(grad_enabled)
         if device is None:
@@ -86,11 +86,12 @@ def parallel_apply(
                 return
             device = t.get_device()
         if stream is None:
-            stream = torch.cuda.current_stream(device)
+            stream = torch.accelerator.current_stream(device)
         try:
-            with torch.cuda.device(device), torch.cuda.stream(
+            accelerator_device_type = torch.accelerator.current_accelerator().type
+            with torch.device(accelerator_device_type, device), torch.accelerator.stream(
                 stream
-            ), torch.amp.autocast("cuda", enabled=autocast_enabled):
+            ), torch.amp.autocast(accelerator_device_type, enabled=autocast_enabled):
                 # this also avoids accidental slicing of `input` if it is a Tensor
                 if not isinstance(input, (list, tuple)):
                     input = (input,)
