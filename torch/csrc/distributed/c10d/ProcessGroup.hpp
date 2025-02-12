@@ -215,6 +215,7 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
   virtual c10::intrusive_ptr<Work> allreduce(
       std::vector<at::Tensor>& tensors,
       const AllreduceOptions& opts = AllreduceOptions()) {
+    std::cout << "calling allreduce" << std::endl;
     static auto op =
         c10::Dispatcher::singleton()
             .findSchemaOrThrow("c10d::allreduce_", "")

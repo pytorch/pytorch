@@ -82,6 +82,7 @@ struct NodeCall {
   std::vector<std::pair<int, int>> tensor_pre_hooks;
   std::vector<int> pre_hooks;
   std::vector<int> post_hooks;
+  std::vector<int> cpp_post_hooks;
   std::vector<int> post_acc_grad_hooks;
   std::vector<std::pair<int, int>> graph_output;
   bool needed = true;
@@ -245,6 +246,11 @@ struct AutogradCompilerCall {
     return hooks.size() - 1;
   }
 
+  size_t emplace_cpp_hook(std::function<void()>&& fn) {
+    cpp_hooks.emplace_back(std::move(fn));
+    return cpp_hooks.size() - 1;
+  }
+
   void set_active_node_call_idx(size_t node_call_idx) {
     active_node_call_idx = node_call_idx;
   }
@@ -255,6 +261,7 @@ struct AutogradCompilerCall {
   LiftedIValueArgs lifted_ivalue_args;
   std::vector<int64_t> dyn_size_inputs;
   std::vector<c10::SafePyObject> hooks;
+  std::vector<std::function<void()>> cpp_hooks;
   NodeCalls node_calls;
   SizeInput::DynType default_dyn_type;
   // NodeCall id of each size, only when verbose logging is enabled
@@ -501,6 +508,10 @@ class CompiledNodeArgs {
     for (auto& i : fn->pre_hooks()) {
       i->compiled_args(*this);
     }
+
+    if (fn->post_hooks().size() > 0) {
+      std::cout << "collecting post hooks from " << fn->name() << std::endl;
+    }
     for (auto& i : fn->post_hooks()) {
       i->compiled_args(*this);
     }
@@ -542,6 +553,13 @@ class CompiledNodeArgs {
     auto fn_id = _compiler.emplace_hook(std::move(obj));
     collect_size(fn_id);
     _node_call.post_hooks.emplace_back(fn_id);
+  }
+
+  void add_cpp_post_hook(std::function<void()>&& obj) {
+    auto fn_id = _compiler.emplace_cpp_hook(std::move(obj));
+    std::cout << "collecting cpp post hook: " << fn_id << std::endl;
+    collect_size(fn_id);
+    _node_call.cpp_post_hooks.emplace_back(fn_id);
   }
 
   void add_post_acc_grad_hook(c10::SafePyObject&& obj) {

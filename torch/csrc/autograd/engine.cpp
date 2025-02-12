@@ -1334,8 +1334,14 @@ auto Engine::execute(
         !AnomalyMode::is_enabled(),
         "compiled_autograd does not support AnomalyMode")
     GraphTaskGuard guard(graph_task);
-    return (*compiled_autograd)(
+    auto res = (*compiled_autograd)(
         graph_root, *graph_task, accumulate_grad, outputs);
+    // NOLINTNEXTLINE(modernize-loop-convert)
+    std::cout << "running " << current_graph_task->final_callbacks_.size() << " callbacks after CA" << std::endl;
+    for (const auto& cb : current_graph_task->final_callbacks_) {
+      cb();
+    }
+    return res;
   }
 
   // Queue the root
@@ -1487,6 +1493,12 @@ void Engine::queue_callback(std::function<void()> callback) {
   TORCH_CHECK(
       current_graph_task,
       "Final callbacks can only be installed during backward pass.");
+
+  if (the_compiled_autograd.load() != nullptr) {
+    std::cout << "queuing callback, CA" << std::endl;
+  } else {
+    std::cout << "queuing callback, no CA" << std::endl;
+  }
 
   std::lock_guard<std::mutex> lock(current_graph_task->final_callbacks_lock_);
   current_graph_task->final_callbacks_.emplace_back(std::move(callback));

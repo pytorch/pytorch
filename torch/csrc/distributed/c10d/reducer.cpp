@@ -196,6 +196,8 @@ Reducer::Reducer(
                     return outputs;
                   },
                   [=](torch::autograd::CompiledNodeArgs& args) {
+                    auto lambda = [this, variable_index] { autograd_hook(variable_index); };
+                    args.add_cpp_post_hook(std::move(lambda));
                     // Make post_hook an noop if compiled_autograds is enabled.
                   })),
           grad_accumulator);
@@ -640,12 +642,14 @@ void Reducer::set_logger(std::weak_ptr<c10d::Logger> logger) {
 // model parameter has been accumulated into its gradient tensor.
 // This function is only to be called from the autograd thread.
 void Reducer::autograd_hook(size_t index) {
+  std::cout << "running autograd_hook with index=" << index << std::endl;
   std::lock_guard<std::mutex> lock(this->mutex_);
   if (!first_autograd_hook_called_) {
     first_autograd_hook_called_ = true;
     num_bwd_calls_++;
   }
 
+  // std::cout << "1" << std::endl;
   // See Note [Skip allreducing local_used_map_dev]
   if (dynamic_graph_find_unused() || static_graph_first_iteration()) {
     // Since it gets here, this param has been used for this iteration. We want
@@ -665,6 +669,7 @@ void Reducer::autograd_hook(size_t index) {
       return false;
     });
   }
+  // std::cout << "2" << std::endl;
 
   if (static_graph_first_iteration()) {
     numGradHooksTriggeredMap_[index] += 1;
@@ -674,6 +679,7 @@ void Reducer::autograd_hook(size_t index) {
   // Ignore if we don't expect to be called.
   // This may be the case if the user wants to accumulate gradients
   // for number of iterations before reducing them.
+  // std::cout << "3" << std::endl;
   if (!expect_autograd_hooks_) {
     return;
   }
@@ -685,6 +691,7 @@ void Reducer::autograd_hook(size_t index) {
   // autograd graph, and won't receive gradients. These parameters are
   // discovered in the `prepare_for_backward` function and their indexes stored
   // in the `unused_parameters_` vector.
+  // std::cout << "4" << std::endl;
   if (!has_marked_unused_parameters_) {
     has_marked_unused_parameters_ = true;
     for (const auto& unused_index : unused_parameters_) {
@@ -702,7 +709,9 @@ void Reducer::autograd_hook(size_t index) {
   // will be broadcasted and initialized.
   // If it is static graph, after 1st iteration, check if a variable
   // is ready for communication based on numGradHooksTriggeredMap_.
+  // std::cout << "5" << std::endl;
   if (static_graph_after_first_iteration()) {
+    // std::cout << "6" << std::endl;
     REDUCER_CHECK(
         numGradHooksTriggeredMapPerIteration_[index] > 0,
         logger_,
@@ -718,12 +727,17 @@ void Reducer::autograd_hook(size_t index) {
       mark_variable_ready(index);
     }
   } else {
+    // std::cout << "7" << std::endl;
     if (should_rebuild_buckets()) {
+      // std::cout << "8" << std::endl;
       push_rebuilt_params(index);
     }
+    // std::cout << "8.5" << std::endl;
     // Finally mark variable for which this function was originally called.
     mark_variable_ready(index);
+    // std::cout << "9" << std::endl;
   }
+  // std::cout << "10" << std::endl;
 }
 
 void Reducer::all_reduce_local_used_map() {
@@ -907,12 +921,17 @@ void Reducer::mark_variable_ready(size_t variable_index) {
 
   // Run finalizer function and kick off reduction for local_used_map once the
   // final bucket was marked ready.
+  std::cout << "next_bucket_=" << next_bucket_ << ", buckets_.size()=" << buckets_.size() << std::endl;
   if (next_bucket_ == buckets_.size()) {
+    std::cout << "final bucket marked ready!" << std::endl;
     if (dynamic_graph_find_unused()) {
+      std::cout << "dynamic_graph_find_unused" << std::endl;
       all_reduce_local_used_map();
     }
 
+    std::cout << "queueing callback" << std::endl;
     torch::autograd::Engine::get_default_engine().queue_callback([this] {
+      std::cout << "running final callback" << std::endl;
       std::lock_guard<std::mutex> lock(this->mutex_);
       if (should_collect_runtime_stats()) {
         record_backward_compute_end_time();
@@ -983,7 +1002,14 @@ void Reducer::all_reduce_bucket(Bucket& bucket) {
       bucket.sizes_vec,
       variables_for_bucket,
       bucket.sparse_tensor_indices);
+  std::cout << "issue grad bucket for params: ";
+  for (const auto& tensor : grad_bucket.getParameters()) {
+    std::cout << tensor.unsafeGetTensorImpl() << ", ";
+  }
+  std::cout << std::endl;
   bucket.future_work = run_comm_hook(grad_bucket);
+  // remove wait
+  bucket.future_work->wait();
 }
 
 std::vector<at::Tensor> Reducer::get_variables_for_bucket(
@@ -1044,6 +1070,7 @@ void Reducer::mark_bucket_ready(size_t bucket_index) {
 
 void Reducer::install_futures(
     const c10::List<c10::intrusive_ptr<c10::ivalue::Future>>& futs) {
+  std::cout << "installing futures" << std::endl;
   // Append instead of overwrite so that this method can be called multiple
   // times in one iteration.
   if (!installed_futures_) {
@@ -1598,6 +1625,7 @@ void Reducer::finalize_bucket_dense(Bucket& bucket) {
 }
 
 void Reducer::finalize_backward() {
+  std::cout << "finalize_backward()" << std::endl;
   // No longer expect autograd hooks to fire after this function returns.
   TORCH_INTERNAL_ASSERT(expect_autograd_hooks_);
   expect_autograd_hooks_ = false;
@@ -1610,6 +1638,7 @@ void Reducer::finalize_backward() {
 
   // Wait for asynchronous reduction to complete, and unflatten the bucket's
   // flattened `gradients` tensor.
+  std::cout << "found " << buckets_.size() << " buckets" << std::endl;
   for (auto& bucket : buckets_) {
     // See Note [DDP Communication Hook]
     TORCH_INTERNAL_ASSERT(
@@ -1656,12 +1685,14 @@ void Reducer::finalize_backward() {
   }
 
   if (installed_futures_ != std::nullopt) {
+    std::cout << "collecting installed futures" << std::endl;
     c10::collectAll(*installed_futures_)->wait();
     installed_futures_ = std::nullopt;
   }
 
   // See Note [Skip allreducing local_used_maps_dev]
   if (dynamic_graph_find_unused() || static_graph_first_iteration()) {
+    std::cout << "dynamic_graph_find_unused() || static_graph_first_iteration()" << std::endl;
     // Due to the lazy wait, it is possible that reduction of the current
     // iteration is still going when the one for next iteration gets kicked off.
     // For such case, we want to wait explicitly to make sure the reduction does
@@ -1674,6 +1705,7 @@ void Reducer::finalize_backward() {
   }
 
   if (dynamic_graph_find_unused()) {
+    std::cout << "find unused" << std::endl;
     // Reset unused parameter accounting.
     // See Note [local_used_map_ -> local_used_map_dev copying]
     local_used_map_.fill_(0);
@@ -1681,6 +1713,7 @@ void Reducer::finalize_backward() {
   }
 
   if (should_collect_runtime_stats()) {
+    std::cout << "collect runtime stats" << std::endl;
     record_backward_comm_end_time();
   }
 

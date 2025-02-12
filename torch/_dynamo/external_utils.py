@@ -56,6 +56,10 @@ def call_hook(
     """
     Used by compiled autograd to handle hook returning None.
     """
+    if kwargs.get("hook_type") == "cpp_post_hook":
+        hook()
+        return args[0]
+
     result = hook(*args)
     if result is None:
         return args[0]

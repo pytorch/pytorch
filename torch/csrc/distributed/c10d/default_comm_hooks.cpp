@@ -10,6 +10,7 @@ namespace c10d {
 
 c10::intrusive_ptr<c10::ivalue::Future> AllReduceCommHook::runHook(
     GradBucket& bucket) {
+  std::cout << "running AllReduceCommHook" << std::endl;
   std::vector<at::Tensor> tensors = {bucket.getBufferRef()};
   // Apply the division first to avoid overflow, especially for FP16.
   tensors[0] /= state_->getSize();
@@ -45,6 +46,7 @@ c10::intrusive_ptr<c10::ivalue::Future> FP16CompressCommHook::runHook(
 
 c10::intrusive_ptr<c10::ivalue::Future> _AllReduceBySumCommHook::runHook(
     GradBucket& bucket) {
+  std::cout << "running AllReduceBySumCommHook" << std::endl;
   std::vector<at::Tensor> tensors = {bucket.getBufferRef()};
 #ifdef IS_NCCLX
   // case with sparse_metadata_ set and using indices from there

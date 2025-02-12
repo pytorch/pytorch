@@ -282,7 +282,6 @@ class _DDPJoinHook(JoinHook):
         ddp.logger._set_uneven_input_join()
         self.ddp = ddp
         self.ddp._divide_by_initial_world_size = divide_by_initial_world_size
-        super().__init__()
 
     def main_hook(self):
         """Shadow the DDP collective communication operations in the forward and backward passes."""
@@ -926,7 +925,10 @@ class DistributedDataParallel(Module, Joinable):
             optimize_ddp == "python_reducer_without_compiled_forward"
         )
         if self._use_python_reducer:
+            print("using python reducer")
             self._register_accum_grad_hook()
+        else:
+            print("not using python reducer")
 
         # Whether or not DDPSink performs a clone.
         self._ddp_sink_clone = True
@@ -1740,6 +1742,8 @@ class DistributedDataParallel(Module, Joinable):
             # divide_by_initial_world_size=True, we divide grads by the static
             # world size, if not, the dividing factor is reduced by the number
             # of joined processes.
+            print("_match_all_reduce_for_bwd_pass")
+            torch.distributed.breakpoint()
             work = self.reducer._run_comm_hook(grad_bucket)
             comm_work.append(work)
         for work in comm_work:

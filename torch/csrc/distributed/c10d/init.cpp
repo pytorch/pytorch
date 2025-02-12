@@ -667,6 +667,7 @@ An enum-like class for built-in communication hooks: ``ALLREDUCE`` and ``FP16_CO
           "_run_comm_hook",
           [](::c10d::Reducer& reducer, ::c10d::GradBucket& bucket)
               -> std::shared_ptr<jit::PythonFutureWrapper> {
+            std::cout << "_run_comm_hook called from python" << std::endl;
             c10::intrusive_ptr<c10::ivalue::Future> fut =
                 reducer.run_comm_hook(bucket);
             return std::make_shared<jit::PythonFutureWrapper>(fut);

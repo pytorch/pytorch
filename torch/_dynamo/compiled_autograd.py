@@ -117,7 +117,7 @@ class Op:
 ops = OpNamespace()
 
 
-_graph_placeholders = ["inputs", "sizes", "scalars", "hooks"]
+_graph_placeholders = ["inputs", "sizes", "scalars", "hooks", "cpp_hooks"]
 _impure_targets = OrderedSet(
     [
         call_hook,
@@ -189,7 +189,7 @@ class AutogradCompilerInstance:
         self.fx_tracer.graph = torch.fx.Graph(tracer_cls=PythonKeyTracer)
         self.fx_tracer.tensor_attrs = {}
         self.symnode_proxy_lookup = {}
-        args_proxy, self.sizes_proxy, self.scalars_proxy, self.hooks_proxy = (
+        args_proxy, self.sizes_proxy, self.scalars_proxy, self.hooks_proxy, self.cpp_hooks_proxy = (
             self.fx_tracer.create_proxy("placeholder", name, (), {})
             for name in _graph_placeholders
         )
@@ -590,6 +590,22 @@ class AutogradCompilerInstance:
             self.bind_objects_to_proxies(outputs, proxies)
         return outputs
 
+    def cpp_post_hook(self, outputs, inputs, hook_id):
+        assert self.cpp_hooks_proxy is not None
+        hook = self.cpp_hooks_proxy[hook_id]  # type: ignore[index]
+        print(f"registering call to cpp_hook {hook_id}")
+
+        proxies = self.proxy_call_hook(
+            hook,
+            outputs,
+            inputs,
+            hook_type="cpp_post_hook",
+        )
+        with disable_proxy_modes_tracing():
+            outputs = [maybe_clone(x) for x in outputs]
+            self.bind_objects_to_proxies(outputs, proxies)
+        return outputs
+
     def post_acc_grad_hook(self, input, hook_id):
         assert isinstance(input, torch.Tensor)
         assert self.hooks_proxy is not None
@@ -728,12 +744,12 @@ class AutogradCompilerInstance:
             ).print_readable(print_output=False),
         )
         self.rename_aot_dispatcher_nodes()
-        self.reorder_tensor_pre_hook_nodes()
-        self.reorder_pre_hook_nodes_to_schedule_asap()
-        self.reorder_accumulate_grad_nodes()
-        self.reorder_pre_hook_nodes_to_mimic_eager()
-        self.reorder_post_acc_grad_hook_nodes()
-        self.reorder_post_hook_nodes()
+        # self.reorder_tensor_pre_hook_nodes()
+        # self.reorder_pre_hook_nodes_to_schedule_asap()
+        # self.reorder_accumulate_grad_nodes()
+        # self.reorder_pre_hook_nodes_to_mimic_eager()
+        # self.reorder_post_acc_grad_hook_nodes()
+        # self.reorder_post_hook_nodes()
         # TODO(yf225): work around: remove dead codes like `sym_size` and `sym_numel` which are not used downstream. e.g.
         # ```
         # sym_numel_default = torch.ops.aten.sym_numel.default(sum_109);  sum_109 = None
@@ -764,7 +780,8 @@ class AutogradCompilerInstance:
             payload_fn=lambda: graph.print_readable(print_output=False),
         )
 
-        def runtime_wrapper(compiled_fn, inputs, sizes, scalars, hooks):
+        def runtime_wrapper(compiled_fn, inputs, sizes, scalars, hooks, cpp_hooks):
+            print(cpp_hooks)
             global in_compiled_autograd_region
             try:
                 in_compiled_autograd_region = True
@@ -772,7 +789,7 @@ class AutogradCompilerInstance:
                     inputs[i] = inputs[i].pin_memory().cuda(non_blocking=True)
 
                 with _disable(), make_compile_context(self.id):
-                    return compiled_fn(inputs, sizes, scalars, hooks)
+                    return compiled_fn(inputs, sizes, scalars, hooks, cpp_hooks)
             finally:
                 in_compiled_autograd_region = False
 
@@ -784,7 +801,7 @@ class AutogradCompilerInstance:
             log_pt2_compile_event=True,
         )
         self.compile_context.__exit__(None, None, None)
-        return runtime_wrapper, self.compiler_fn(graph)
+        return runtime_wrapper, graph # self.compiler_fn(graph)
 
     def rename_aot_dispatcher_nodes(self):
         """
