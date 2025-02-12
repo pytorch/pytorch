@@ -5,7 +5,6 @@ import logging
 import math
 
 import torch
-from torch.nn.attention import sdpa_kernel, SDPBackend
 
 from ..._dynamo.utils import counters
 from ..pattern_matcher import (
