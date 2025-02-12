@@ -233,7 +233,7 @@ class TestDraftExport(TestCase):
                 return x.view(-1, 2, 2345)
 
         _, report = draft_export(M(), (torch.tensor([938]),))
-        self.assertEqual(len(report.failures), 4)  # TODO(angelayi): this should be 1
+        self.assertEqual(len(report.failures), 2)
         self.assertEqual(
             report.failures[0].failure_type, FailureType.DATA_DEPENDENT_ERROR
         )
@@ -255,9 +255,7 @@ class TestDraftExport(TestCase):
         inp = (torch.tensor(5), torch.tensor(3), torch.tensor(2))
 
         ep, report = draft_export(M(), inp)
-        # TODO: this should be 1, but we need to deduped the stacktraces between
-        # the two passes of AOTAutograd
-        self.assertEqual(len(report.failures), 2)
+        self.assertEqual(len(report.failures), 1)
         self.assertEqual(
             report.failures[0].failure_type, FailureType.DATA_DEPENDENT_ERROR
         )
