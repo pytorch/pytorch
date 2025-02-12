@@ -145,7 +145,7 @@ class FailureReport:
 
 
 class DraftExportReport:
-    def __init__(self, failures: list[FailureReport], str_to_filename: dict[str, str]):
+    def __init__(self, failures: list[FailureReport], str_to_filename: dict[int, str]):
         self.failures: list[FailureReport] = failures
         self.str_to_filename = str_to_filename
 
