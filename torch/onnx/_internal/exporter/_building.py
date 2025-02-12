@@ -458,11 +458,32 @@ def _process_python_sequences(
     return named_inputs
 
 
+def _determine_output_number(
+    signature: _schemas.OpSignature, named_attrs: Mapping[str, ValidAttributeType]
+) -> int:
+    """Determine the number of outputs for the node with heuristics."""
+    if signature.domain == "":
+        if signature.name == "BatchNormalization":
+            if not named_attrs.get("training_mode", 0):
+                return 1
+        if signature.name == "Split":
+            num_outputs = named_attrs.get("num_outputs")
+            if num_outputs is not None and isinstance(num_outputs, int):
+                return num_outputs
+            else:
+                raise ValueError(
+                    "Could not determine the number of outputs for Split. "
+                    "num_outputs must be provided"
+                )
+    return len(signature.outputs)
+
+
 def _construct_node(
     signature: _schemas.OpSignature,
     named_inputs: Mapping[str, ir.Value | None],
     named_attrs: Mapping[str, ValidAttributeType],
     opset: onnxscript.values.Opset,
+    num_outputs: int,
 ) -> ir.Node:
     """Construct the node with the inputs and attributes.
 
@@ -476,6 +497,7 @@ def _construct_node(
             are not used in this function. The data structure is passed in for
             consistency with the other functions.
         named_attrs: The mapping of attribute names to their values.
+        num_outputs: The number of outputs for the node.
     """
     inputs: list[ir.Value | None] = []
     # Flatten variadic inputs
@@ -497,7 +519,7 @@ def _construct_node(
         for attr in ir_convenience.convert_attributes(named_attrs)
         if attr.value is not None
     ]
-    outputs = [_tensors.SymbolicTensor(opset) for _ in signature.outputs]
+    outputs = [_tensors.SymbolicTensor(opset) for _ in range(num_outputs)]
     return ir.Node(
         signature.domain,
         signature.name,
@@ -526,6 +548,7 @@ class OpRecorder(evaluator.Evaluator):
         op_signature: _schemas.OpSignature,
         named_inputs: dict[str, AllowedArgType],
         named_attrs: dict[str, ValidAttributeType],
+        num_outputs: int,
     ) -> Sequence[_tensors.SymbolicTensor]:
         """Record nodes for the given opschema and arguments.
 
@@ -556,7 +579,11 @@ class OpRecorder(evaluator.Evaluator):
         try:
             self.nodes.append(
                 node := _construct_node(
-                    op_signature, converted_named_inputs, named_attrs, self.opset
+                    op_signature,
+                    converted_named_inputs,
+                    named_attrs,
+                    self.opset,
+                    num_outputs,
                 )
             )
         except Exception as e:
@@ -599,7 +626,10 @@ class OpRecorder(evaluator.Evaluator):
                         # Create a Cast node
                         return self.opset.Cast(src_input, to=target_type.dtype)  # type: ignore[union-attr,return-value]
 
-            outputs = self._call_op(op_signature, named_inputs, named_attrs)
+            num_outputs = _determine_output_number(op_signature, named_attrs)
+            outputs = self._call_op(
+                op_signature, named_inputs, named_attrs, num_outputs
+            )
             if len(outputs) == 1:
                 return outputs[0]
             return outputs
@@ -615,23 +645,7 @@ class OpRecorder(evaluator.Evaluator):
         kwargs: Mapping[str, AllowedArgType],
     ) -> _tensors.SymbolicTensor | Sequence[_tensors.SymbolicTensor] | bool | int:
         try:
-            # Special cases for handling IsScalar and Rank
-            if function.name == "IsScalar":
-                if len(args) != 1:
-                    raise TypeError(
-                        f"Expected 1 positional argument for function '{function}', got {len(args)}."
-                    )
-                if isinstance(args[0], _tensors.SymbolicTensor):
-                    if args[0].rank is not None:
-                        return args[0].rank == 0
-                    else:
-                        # Fall to call add_function_call
-                        pass
-                elif isinstance(args[0], Sequence):
-                    return False
-                else:
-                    # Python constants are scalars
-                    return True
+            # Special cases for handling Rank
             if function.name == "Rank":
                 if len(args) != 1:
                     raise TypeError(
@@ -653,10 +667,9 @@ class OpRecorder(evaluator.Evaluator):
                     # Python constants are scalars
                     return 0
 
-            # NOTE: signature is written to function in the registration process
-            # TODO: Upstream signature to ONNX Function
-            if hasattr(function, "signature"):
-                op_signature = function.signature
+            # NOTE: signature should be written to function in the registration process
+            if hasattr(function, "_pt_onnx_signature"):
+                op_signature = function._pt_onnx_signature  # type: ignore[attr-defined]
             else:
                 op_signature = _schemas.OpSignature.from_function(
                     function,
@@ -664,47 +677,17 @@ class OpRecorder(evaluator.Evaluator):
                     function.name,
                     opset_version=function.opset.version,
                 )
+                function._pt_onnx_signature = op_signature  # type: ignore[attr-defined]
 
             named_inputs, named_attrs = _construct_named_inputs_and_attrs(
                 op_signature, args, kwargs
             )
 
-            # NOTE: We need to call traceable functions after the _construct_named_inputs_and_attrs
-            # call because it will filter out the unexpected kwargs for us.
-            if function.traceable:
-                # Trace the function call instead of adding the function as a node
-                # Turn the ir.Attr objects into Python constants first
-                named_attrs = {
-                    name: attr.value if isinstance(attr, ir.Attr) else attr
-                    for name, attr in named_attrs.items()
-                }
-
-                # Use the type binding to resolve the dtypes of the inputs, and
-                # convert Python constants to Constant nodes
-                type_binding = _resolve_parameter_dtypes(op_signature, named_inputs)
-                try:
-                    # _process_python_sequences is not here because we want to preserve python list
-                    # properties for the function call
-                    converted_named_inputs = _process_python_constants(
-                        op_signature,
-                        named_inputs,
-                        type_binding,
-                        self.constant_farm,
-                        self.opset,
-                    )
-
-                except Exception as e:
-                    raise _errors.GraphConstructionError(
-                        f"Error processing Python constants for operator '{op_signature.domain}::{op_signature.name}'. "
-                        f"named_inputs={named_inputs}, named_attrs={named_attrs}, opset={self.opset}, op_signature={op_signature}."
-                    ) from e
-
-                return function.function(**converted_named_inputs, **named_attrs)
-
             outputs = self._call_op(
                 op_signature,
                 named_inputs,
                 named_attrs,
+                len(op_signature.outputs),
             )
 
             self.functions[(function.function_ir.domain, function.name, "")] = function

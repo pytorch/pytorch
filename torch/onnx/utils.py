@@ -1370,7 +1370,7 @@ def _export(
         # We do not want to fail because we should still allow users to create
         # custom symbolic functions for opset>17
         warnings.warn(
-            f"Exporting to ONNX opset version {opset_version} is not supported. "
+            f"Exporting to ONNX opset version {opset_version} is not officially supported. "
             f"by 'torch.onnx.export()'. "
             f"The highest opset version supported is {_constants.ONNX_TORCHSCRIPT_EXPORTER_MAX_OPSET}. "
             f"To use a newer opset version, consider 'torch.onnx.export(..., dynamo=True)'. ",
