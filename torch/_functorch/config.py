@@ -38,8 +38,10 @@ cse = True
 from torch._inductor.config import is_fbcode
 
 
-enable_autograd_cache = (
-    os.environ.get("TORCHINDUCTOR_AUTOGRAD_CACHE", "0" if is_fbcode() else "1") == "1"
+enable_autograd_cache: bool = Config(
+    justknob="pytorch/remote_cache:enable_local_autograd_cache",
+    env_name_force="TORCHINDUCTOR_AUTOGRAD_CACHE",
+    default=True,
 )
 
 
