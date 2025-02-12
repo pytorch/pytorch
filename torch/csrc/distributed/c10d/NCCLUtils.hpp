@@ -352,7 +352,7 @@ struct ncclRedOpRAII {
 };
 
 void printNcclCommProxyTrace(
-    std::string dumpReason,
+    const std::string& dumpReason,
     const std::unordered_map<std::string, std::string>& dumpMap);
 } // namespace c10d
 
