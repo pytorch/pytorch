@@ -4,13 +4,17 @@ import contextlib
 import functools
 import gc
 import importlib
+import itertools
 import sys
 import unittest
 import warnings
+from collections import defaultdict
+from typing import Mapping, Sequence
 
 import torch
 import torch._dynamo.config as dynamo_config
 import torch.nn as nn
+from torch._dynamo.backends.debugging import aot_eager_decomp_partition_with_mode
 from torch._dynamo.utils import counters
 from torch._functorch._aot_autograd.autograd_cache import AOTAutogradCache
 from torch._inductor import config
@@ -19,7 +23,9 @@ from torch._inductor.compile_fx import compile_fx_inner
 from torch._inductor.cudagraph_trees import cudagraphify_impl as tree_cudagraphify_impl
 from torch._inductor.cudagraph_utils import FunctionID
 from torch._inductor.test_case import TestCase as InductorTestCase
+from torch._ops import OpOverload
 from torch.fx.experimental.proxy_tensor import make_fx
+from torch.fx.immutable_collections import immutable_dict
 from torch.testing import FileCheck
 from torch.testing._internal.common_cuda import TEST_MULTIGPU
 from torch.testing._internal.common_utils import (
@@ -32,6 +38,7 @@ from torch.testing._internal.common_utils import (
     TEST_CUDA_GRAPH,
     TEST_WITH_ASAN,
 )
+from torch.utils._mode_utils import no_dispatch
 from torch.utils._python_dispatch import TorchDispatchMode
 
 
@@ -2504,7 +2511,273 @@ if HAS_CUDA and not TEST_WITH_ASAN:
             eager_result = f(example_input)
             self.assertEqual(compiled_result, eager_result)
 
+    class TestSAC(TestCase):
+        def test_simple(self):
+            device = "cuda"
+
+            class ObserverMode(TorchDispatchMode):
+                def __init__(self):
+                    super().__init__()
+
+                    self.op_outputs = defaultdict(list)
+
+                def __torch_dispatch__(
+                    self,
+                    func: OpOverload,
+                    types: Sequence[type],
+                    args: Sequence[object] = (),
+                    kwargs: Mapping[str, object] = immutable_dict(),
+                ) -> object:
+                    return func(*args, **kwargs)
+
+            from torch._prims.rng_prims import graphsafe_run_with_rng_state
+
+            @graphsafe_run_with_rng_state.py_impl(ObserverMode)
+            def _(mode, op, *args, **kwargs):
+                with no_dispatch():
+                    out = graphsafe_run_with_rng_state(op, *args, **kwargs)
+
+                mode.op_outputs[op].append(out)
+                return out
+
+            obs = ObserverMode()
+
+            def gn(x, y):
+                return torch.sigmoid(torch.rand_like(x) * y) * x
+
+            def fn(x, y):
+                x = torch.sin(x)
+                x = torch.utils.checkpoint.checkpoint(gn, x, y, use_reentrant=True)
+                x = torch.sin(x)
+                return x
+
+            x = torch.randn(4, 4, device=device, requires_grad=True)
+            y = torch.randn(4, 4, device=device, requires_grad=True)
+
+            aot_eager_decomp_partition = functools.partial(
+                aot_eager_decomp_partition_with_mode, mode=obs
+            )
+
+            fn = torch.compile(fn, backend=aot_eager_decomp_partition)
+
+            fn(x, y).sum().backward()
+            self.assertEqual(len(obs.op_outputs[aten.rand.default]), 2)
+            self.assertEqual(
+                obs.op_outputs[aten.rand.default][0],
+                obs.op_outputs[aten.rand.default][1],
+            )
+
+        @parametrize("order", (list(itertools.permutations([0, 1, 2]))))
+        def test_uneven_forward_backward(self, order):
+            device = "cuda"
+
+            class ObserverMode(TorchDispatchMode):
+                def __init__(self):
+                    super().__init__()
+                    self.curr_run = 0
+                    self.op_outputs = defaultdict(list)
+
+                def __torch_dispatch__(
+                    self,
+                    func: OpOverload,
+                    types: Sequence[type],
+                    args: Sequence[object] = (),
+                    kwargs: Mapping[str, object] = immutable_dict(),
+                ) -> object:
+                    out = func(*args, **kwargs)
+                    return out
+
+            from torch._prims.rng_prims import graphsafe_run_with_rng_state
+
+            @graphsafe_run_with_rng_state.py_impl(ObserverMode)
+            def _(mode, op, *args, **kwargs):
+                with no_dispatch():
+                    out = graphsafe_run_with_rng_state(op, *args, **kwargs)
+
+                mode.op_outputs[(mode.curr_run, op)].append(out)
+                return out
+
+            obs = ObserverMode()
+
+            def gn(x, y):
+                return torch.sigmoid(torch.rand_like(x) * y) * x
+
+            def fn(x, y):
+                x = torch.sin(x)
+                x = torch.utils.checkpoint.checkpoint(gn, x, y, use_reentrant=True)
+                x = torch.sin(x)
+                return x
+
+            aot_eager_decomp_partition = functools.partial(
+                aot_eager_decomp_partition_with_mode, mode=obs
+            )
+
+            fn_c = torch.compile(fn, backend=aot_eager_decomp_partition)
+
+            torch.manual_seed(0)
+            outs = []
+            for i in range(len(order)):
+                obs.curr_run = i
+                x = torch.randn(4, 4, device=device, requires_grad=True)
+                y = torch.randn(4, 4, device=device, requires_grad=True)
+                outs.append(fn_c(x, y))
+
+            for idx in order:
+                obs.curr_run = idx
+                outs[idx].sum().backward()
+
+            for run in range(len(order)):
+                self.assertEqual(len(obs.op_outputs[(run, aten.rand.default)]), 2)
+                self.assertEqual(
+                    obs.op_outputs[(run, aten.rand.default)][0],
+                    obs.op_outputs[(run, aten.rand.default)][1],
+                )
+                if run != 0:
+                    self.assertNotEqual(
+                        obs.op_outputs[(run - 1, aten.rand.default)][0],
+                        obs.op_outputs[(run, aten.rand.default)][0],
+                    )
+
+        @config.patch(fallback_random=True)
+        @config.patch("test_configs.graphsafe_rng_func_ignores_fallback_random", True)
+        def _test_cudagraphs_aot_eager_compat_equal(self, device):
+            def gn(x, y):
+                return torch.sigmoid(torch.rand_like(x) * y) * x
+
+            def fn(x, y):
+                x = torch.sin(x)
+                x = torch.utils.checkpoint.checkpoint(gn, x, y, use_reentrant=True)
+                x = torch.sin(x)
+                return x
+
+            outs = []
+            grads = []
+
+            outs2 = []
+            grads2 = []
+
+            compile_fns = [
+                lambda fn: torch.compile(fn, backend="aot_eager_decomp_partition"),
+                lambda fn: torch.compile(fn, mode="reduce-overhead"),
+            ]
+            for i, compile_fn in enumerate(compile_fns):
+                torch.manual_seed(0)
+                for index in range(3):
+                    x = torch.randn(4, 4, device=device, requires_grad=True)
+                    y = torch.randn(4, 4, device=device, requires_grad=True)
+
+                    out = compile_fn(fn)(x, y)
+                    torch.cuda.synchronize()
+                    out.sum().backward()
+                    if i == 0:
+                        outs.append(out.clone())
+                        grads.append((x.grad.clone(), y.grad.clone()))
+                    else:
+                        outs2.append(out.clone())
+                        grads2.append((x.grad.clone(), y.grad.clone()))
+
+            self.assertEqual(outs, outs2)
+            self.assertEqual(grads, grads2)
+            self.assertEqual(counters["inductor"]["cudagraph_skips"], 0)
+
+        def test_cudagraphs_aot_eager_compat_equal(self):
+            self._test_cudagraphs_aot_eager_compat_equal(torch.device("cuda:0"))
+
+        @requires_multigpu()
+        def test_cudagraphs_aot_eager_compat_equal_device_one(self):
+            self._test_cudagraphs_aot_eager_compat_equal(torch.device("cuda:1"))
+
+        @requires_multigpu()
+        def test_multi_device(self):
+            def gn(x, y):
+                return torch.sigmoid(torch.rand_like(x) * y) * x
+
+            def fn(x, y):
+                x = torch.sin(x)
+                x = torch.utils.checkpoint.checkpoint(gn, x, y, use_reentrant=True)
+                x = torch.sin(x)
+                return x
+
+            def multi_fn(x, y, a, b):
+                return fn(x, y), fn(a, b)
+
+            x = torch.randn(4, 4, device="cuda:0", requires_grad=True)
+            y = torch.randn(4, 4, device="cuda:0", requires_grad=True)
+
+            a = torch.randn(4, 4, device="cuda:1", requires_grad=True)
+            b = torch.randn(4, 4, device="cuda:1", requires_grad=True)
+
+            # No errors. TODO - get graphs from logging, couldnt figure out how
+            multi_fn_c = torch.compile(multi_fn, backend="aot_eager_decomp_partition")
+
+            out = multi_fn_c(x, y, a, b)
+            out[0].sum().backward()
+
+        def test_retain_graph(self):
+            device = "cuda"
+
+            class ObserverMode(TorchDispatchMode):
+                def __init__(self):
+                    super().__init__()
+
+                    self.op_outputs = defaultdict(list)
+
+                def __torch_dispatch__(
+                    self,
+                    func: OpOverload,
+                    types: Sequence[type],
+                    args: Sequence[object] = (),
+                    kwargs: Mapping[str, object] = immutable_dict(),
+                ) -> object:
+                    out = func(*args, **kwargs)
+                    return out
+
+            from torch._prims.rng_prims import graphsafe_run_with_rng_state
+
+            @graphsafe_run_with_rng_state.py_impl(ObserverMode)
+            def _(mode, op, *args, **kwargs):
+                with no_dispatch():
+                    out = graphsafe_run_with_rng_state(op, *args, **kwargs)
+
+                mode.op_outputs[op].append(out)
+                return out
+
+            obs = ObserverMode()
+
+            def gn(x, y):
+                return torch.sigmoid(torch.rand_like(x) * y) * x
+
+            def fn(x, y):
+                x = torch.sin(x)
+                x = torch.utils.checkpoint.checkpoint(gn, x, y, use_reentrant=True)
+                x = torch.sin(x)
+                return x
+
+            x = torch.randn(4, 4, device=device, requires_grad=True)
+            y = torch.randn(4, 4, device=device, requires_grad=True)
+
+            aot_eager_decomp_partition = functools.partial(
+                aot_eager_decomp_partition_with_mode, mode=obs
+            )
+
+            fn = torch.compile(fn, backend=aot_eager_decomp_partition)
+
+            out = fn(x, y).sum()
+            out.backward(retain_graph=True)
+            out.backward()
+            self.assertEqual(len(obs.op_outputs[aten.rand.default]), 3)
+            self.assertEqual(
+                obs.op_outputs[aten.rand.default][0],
+                obs.op_outputs[aten.rand.default][1],
+            )
+            self.assertEqual(
+                obs.op_outputs[aten.rand.default][1],
+                obs.op_outputs[aten.rand.default][2],
+            )
+
     instantiate_parametrized_tests(CudaGraphTreeTests)
+    instantiate_parametrized_tests(TestSAC)
+
 
 if __name__ == "__main__":
     from torch._inductor.test_case import run_tests

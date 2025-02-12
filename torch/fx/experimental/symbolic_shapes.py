@@ -814,6 +814,8 @@ def _iterate_exprs(val: IterateExprs) -> Iterator[sympy.Basic]:
         yield from _iterate_exprs(val.storage_offset())
     elif val is None:
         pass
+    elif isinstance(val, torch._C.Generator):
+        pass
     else:
         raise AssertionError(f"cannot extract sympy expressions from {val} {type(val)}")
 
