@@ -366,7 +366,9 @@ def _single_tensor_nadam(
                 grad, denom, value=(-lr * (1.0 - mu) / (1.0 - _get_value(mu_product)))
             )
             param.addcdiv_(
-                exp_avg, denom, value=(-lr * mu_next) / (1.0 - mu_product_next),  # type: ignore[arg-type]
+                exp_avg,
+                denom,
+                value=(-lr * mu_next) / (1.0 - mu_product_next),  # type: ignore[arg-type]
             )
 
 
