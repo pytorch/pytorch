@@ -165,7 +165,7 @@ DEFAULT_TAG = os.getenv("RELEASE_VERSION_TAG", "main")
 
 WHEEL_CONTAINER_IMAGES = {
     **{
-        gpu_arch: f"308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/manylinux2_28-builder-cuda{gpu_arch}:d5060598229ee1cf649af7f40d9a7e1435cec172"
+        gpu_arch: f"308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/manylinux2_28-builder-cuda{gpu_arch}:6b70660514c75c7ea9d0da1bb5925c7513dce353"
         for gpu_arch in CUDA_ARCHES
     },
     **{

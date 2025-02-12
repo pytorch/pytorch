@@ -51,7 +51,7 @@ jobs:
       DESIRED_CUDA: cu118
       GPU_ARCH_VERSION: 11.8
       GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: 308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/manylinux2_28-builder-cuda11.8:d5060598229ee1cf649af7f40d9a7e1435cec172
+      DOCKER_IMAGE: 308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/manylinux2_28-builder-cuda11.8:6b70660514c75c7ea9d0da1bb5925c7513dce353
       DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.9"
@@ -75,7 +75,7 @@ jobs:
       DESIRED_CUDA: cu118
       GPU_ARCH_VERSION: 11.8
       GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: 308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/manylinux2_28-builder-cuda11.8:d5060598229ee1cf649af7f40d9a7e1435cec172
+      DOCKER_IMAGE: 308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/manylinux2_28-builder-cuda11.8:6b70660514c75c7ea9d0da1bb5925c7513dce353
       DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.9"
@@ -98,7 +98,7 @@ jobs:
       DESIRED_CUDA: cu124
       GPU_ARCH_VERSION: 12.4
       GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: 308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/manylinux2_28-builder-cuda12.4:d5060598229ee1cf649af7f40d9a7e1435cec172
+      DOCKER_IMAGE: 308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/manylinux2_28-builder-cuda12.4:6b70660514c75c7ea9d0da1bb5925c7513dce353
       DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.9"
@@ -122,7 +122,7 @@ jobs:
       DESIRED_CUDA: cu124
       GPU_ARCH_VERSION: 12.4
       GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: 308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/manylinux2_28-builder-cuda12.4:d5060598229ee1cf649af7f40d9a7e1435cec172
+      DOCKER_IMAGE: 308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/manylinux2_28-builder-cuda12.4:6b70660514c75c7ea9d0da1bb5925c7513dce353
       DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.9"
@@ -145,7 +145,7 @@ jobs:
       DESIRED_CUDA: cu126
       GPU_ARCH_VERSION: 12.6
       GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: 308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/manylinux2_28-builder-cuda12.6:d5060598229ee1cf649af7f40d9a7e1435cec172
+      DOCKER_IMAGE: 308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/manylinux2_28-builder-cuda12.6:6b70660514c75c7ea9d0da1bb5925c7513dce353
       DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.9"
@@ -169,7 +169,7 @@ jobs:
       DESIRED_CUDA: cu126
       GPU_ARCH_VERSION: 12.6
       GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: 308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/manylinux2_28-builder-cuda12.6:d5060598229ee1cf649af7f40d9a7e1435cec172
+      DOCKER_IMAGE: 308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/manylinux2_28-builder-cuda12.6:6b70660514c75c7ea9d0da1bb5925c7513dce353
       DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.9"
@@ -192,7 +192,7 @@ jobs:
       DESIRED_CUDA: cu128
       GPU_ARCH_VERSION: 12.8
       GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: 308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/manylinux2_28-builder-cuda12.8:d5060598229ee1cf649af7f40d9a7e1435cec172
+      DOCKER_IMAGE: 308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/manylinux2_28-builder-cuda12.8:6b70660514c75c7ea9d0da1bb5925c7513dce353
       DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.9"
@@ -216,7 +216,7 @@ jobs:
       DESIRED_CUDA: cu128
       GPU_ARCH_VERSION: 12.8
       GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: 308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/manylinux2_28-builder-cuda12.8:d5060598229ee1cf649af7f40d9a7e1435cec172
+      DOCKER_IMAGE: 308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/manylinux2_28-builder-cuda12.8:6b70660514c75c7ea9d0da1bb5925c7513dce353
       DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.9"
