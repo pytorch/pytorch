@@ -1863,10 +1863,9 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
                     _curr_iter = next(curr_fwd_iter)
                     ctx._curr_iter = _curr_iter
 
-                    # if there are multiple, pending forwards, then we don't know
-                    # in what order the backwards will be invoked and we need to
-                    # stash the current state.
-                    if pending_forwards:
+                    # if this state is not contained in the backward,
+                    # we need to save it for when its backward pass happens
+                    if _curr_iter != backward_state_position:
                         saved_backward_states[_curr_iter] = [
                             rng_state.clone_state() for rng_state in fwd_rng_states
                         ]

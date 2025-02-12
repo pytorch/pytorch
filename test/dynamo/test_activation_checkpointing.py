@@ -54,6 +54,8 @@ def count_ops(
                 return node.args[0] == op
             elif node.name == "run_with_rng_state":
                 return node.args[1] == op
+            elif node.name == "graphsafe_run_with_rng_state":
+                return node.args[0] == op
         return False
 
     # assert ((freq or freq_ge) and op) or ((freqs or freqs_ge) and ops)
