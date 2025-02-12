@@ -6,7 +6,7 @@ from __future__ import annotations
 import os
 
 import numpy as np
-from onnxscript import BOOL, FLOAT, ir, opset18 as op
+from onnxscript import BOOL, FLOAT, ir, opset21 as op
 
 import torch
 import torch.onnx._flags
@@ -294,7 +294,7 @@ class TestExportAPIDynamo(common_utils.TestCase):
 
 class TestCustomTranslationTable(common_utils.TestCase):
     def test_custom_translation_table_overrides_ops(self):
-        from onnxscript import opset18 as op
+        from onnxscript import opset21 as op
 
         class Model(torch.nn.Module):
             def forward(self, x, y):

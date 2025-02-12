@@ -12,21 +12,28 @@ from torch.onnx._internal.exporter import _testing as onnx_testing
 from torch.testing._internal import common_utils
 
 
-class DynamoExporterTest(common_utils.TestCase):
+class DynamoExporterHfModelsTest(common_utils.TestCase):
+    def export(self, model, args=(), kwargs=None, **options) -> torch.onnx.ONNXProgram:
+        onnx_program = torch.onnx.export(
+            model, args, kwargs=kwargs, dynamo=True, fallback=False, **options
+        )
+        assert onnx_program is not None
+        return onnx_program
+
     def test_onnx_export_huggingface_llm_models_with_kv_cache(self):
         model, kwargs, dynamic_axes, input_names, output_names = (
             _prepare_llm_model_gptj_to_test()
         )
-        onnx_program = torch.onnx.export(
+        onnx_program = self.export(
             model,
             kwargs=kwargs,
             input_names=input_names,
             output_names=output_names,
             dynamic_axes=dynamic_axes,
-            dynamo=True,
+            # TODO(titaiwang): Investigate why ORT fails without optimization
+            optimize=True,
         )
-        # TODO(titaiwang): Investigate why ORT fails without optimization
-        onnx_program.optimize()
+
         onnx_testing.assert_onnx_program(onnx_program)
 
 

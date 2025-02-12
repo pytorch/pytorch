@@ -5,37 +5,86 @@
 from __future__ import annotations
 
 
-__all__ = ["registry", "onnx_impl"]
+__all__ = ["onnx_impl", "get_torchlib_ops"]
 
-import collections
-from typing import Callable, TypeVar
+import logging
+from typing import Any, Callable, Sequence, TypeVar
+
+import onnxscript
+
+import torch
+from torch.onnx._internal.exporter import _constants, _registration
 
 
 _T = TypeVar("_T", bound=Callable)
 
-
-class Registry(collections.UserDict[Callable, list[Callable]]):
-    """Registry for aten functions."""
-
-    def register(self, target: Callable, impl: Callable) -> None:
-        """Register a function."""
-
-        self.data.setdefault(target, []).append(impl)
+logger = logging.getLogger("__name__")
 
 
-# Default registry
-registry = Registry()
+_registry: list[_registration.OnnxDecompMeta] = []
 
 
 def onnx_impl(
-    target: Callable,
+    target: _registration.TorchOp | tuple[_registration.TorchOp, ...],
+    *,
+    trace_only: bool = False,
+    complex: bool = False,
+    no_compile: bool = False,
+    private: bool = False,
 ) -> Callable[[_T], _T]:
     """Register an ONNX implementation of a torch op."""
+
+    if isinstance(target, torch._ops.OpOverloadPacket):
+        raise TypeError(
+            f"Target '{target}' should be provided as an OpOverload instead of an "
+            "OpOverloadPacket. You can get the default overload with "
+            "<op>.default"
+        )
 
     def wrapper(
         func: _T,
     ) -> _T:
-        registry.register(target, func)
-        return func
+        processed_func: Any
+        if no_compile:
+            processed_func = func
+        else:
+            torchlib_opset = onnxscript.values.Opset(
+                domain=_constants.TORCHLIB_DOMAIN, version=1
+            )
+
+            if not trace_only:
+                # Compile the function
+                processed_func = onnxscript.script(opset=torchlib_opset)(func)
+            else:
+                processed_func = onnxscript.TracedOnnxFunction(torchlib_opset, func)
+
+        if not private:
+            # TODO(justinchuby): Simplify the logic and remove the private attribute
+            # Skip registration if private
+            if not isinstance(target, Sequence):
+                targets = (target,)
+            else:
+                targets = target  # type: ignore[assignment]
+
+            for t in targets:
+                _registry.append(
+                    _registration.OnnxDecompMeta(
+                        onnx_function=processed_func,
+                        fx_target=t,
+                        signature=None,
+                        is_complex=complex,
+                        skip_signature_inference=no_compile,
+                    )
+                )
+        return processed_func  # type: ignore[return-value]
 
     return wrapper
+
+
+def get_torchlib_ops() -> tuple[_registration.OnnxDecompMeta, ...]:
+    # Trigger op registration
+    from torch.onnx._internal.exporter._torchlib import ops
+
+    del ops
+    assert len(_registry) != 0
+    return tuple(_registry)
