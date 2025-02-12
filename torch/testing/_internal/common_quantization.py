@@ -399,6 +399,22 @@ def skipIfNoX86(fn):
             fn(*args, **kwargs)
     return wrapper
 
+def skipIfNoArm(fn):
+    reason = 'Quantized operations require Arm.'
+    if isinstance(fn, type):
+        if 'arm' not in torch.backends.quantized.supported_engines:
+            fn.__unittest_skip__ = True
+            fn.__unittest_skip_why__ = reason
+        return fn
+
+    @functools.wraps(fn)
+    def wrapper(*args, **kwargs):
+        if 'arm' not in torch.backends.quantized.supported_engines:
+            raise unittest.SkipTest(reason)
+        else:
+            fn(*args, **kwargs)
+    return wrapper
+
 def skipIfNoDynamoSupport(fn):
     reason = "dynamo doesn't support."
     if isinstance(fn, type):
