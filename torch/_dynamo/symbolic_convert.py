@@ -1561,14 +1561,7 @@ class InstructionTranslatorBase(
         self.exn_vt_stack.append(val)
 
         # 2) when user raises exception instance
-        if isinstance(
-            val,
-            (
-                variables.ExceptionVariable,
-                UserDefinedExceptionClassVariable,
-                UserDefinedExceptionObjectVariable,
-            ),
-        ):
+        if self._isinstance_exception(val):
             observed_exception_type = exc.get_dynamo_observed_exception(val.exc_type)
             raise observed_exception_type(f"raised exception {val}")
             # if observed_exception_type := exc.observed_exception_map.get(val.exc_type):
@@ -1581,7 +1574,7 @@ class InstructionTranslatorBase(
             # duplicate the top of the stack and re-raise it
             if sys.version_info < (3, 11):
                 unimplemented("re-raise")
-            assert isinstance(self.stack[-1], ExceptionVariable)
+            assert self._isinstance_exception(self.stack[-1])
             self.stack.append(self.stack[-1])
             self._raise_exception_variable(inst)
         elif inst.arg == 1:
@@ -1609,6 +1602,16 @@ class InstructionTranslatorBase(
             self._raise_exception_variable(inst)
         unimplemented("RERAISE")
 
+    def _isinstance_exception(self, val):
+        return isinstance(
+            val,
+            (
+                variables.ExceptionVariable,
+                UserDefinedExceptionClassVariable,
+                UserDefinedExceptionObjectVariable,
+            ),
+        )
+
     def WITH_EXCEPT_START(self, inst):
         if sys.version_info >= (3, 11):
             # At the top of the stack are 4 values:
@@ -1621,15 +1624,15 @@ class InstructionTranslatorBase(
             assert len(self.stack) >= 4
             fn = self.stack[-4]
             val = self.stack[-1]
-            assert isinstance(val, variables.ExceptionVariable)
-            typ = BuiltinVariable(val.exc_type)
+            assert self._isinstance_exception(val)
+            typ = BuiltinVariable(val.exc_type)  # type: ignore[attr-defined]
             tb = ConstantVariable(None)
         else:
             assert len(self.stack) >= 7
             fn = self.stack[-7]
             val = self.stack[-4]
-            assert isinstance(val, variables.ExceptionVariable)
-            typ = BuiltinVariable(val.exc_type)
+            assert self._isinstance_exception(val)
+            typ = BuiltinVariable(val.exc_type)  # type: ignore[attr-defined]
             tb = ConstantVariable(None)
 
         self.call_function(fn, [typ, val, tb], {})
@@ -1808,14 +1811,7 @@ class InstructionTranslatorBase(
             )
 
         if sys.version_info >= (3, 11):
-            if not isinstance(
-                exc_instance,
-                (
-                    variables.ExceptionVariable,
-                    UserDefinedExceptionClassVariable,
-                    UserDefinedExceptionObjectVariable,
-                ),
-            ):
+            if not self._isinstance_exception(exc_instance):
                 unimplemented(
                     f"except expects to recieve an object of exception type but received {exc_instance}"
                 )
@@ -1839,18 +1835,9 @@ class InstructionTranslatorBase(
                 unimplemented(
                     f"except has an unsupported types of object {expected_type}"
                 )
-            # if isinstance(exc_instance, variables.ExceptionVariable) and issubclass(
-            #     exc_instance.exc_type, expected_type.fn
-            # ):
-            #     return True
-            if isinstance(
-                exc_instance,
-                (
-                    variables.ExceptionVariable,
-                    UserDefinedExceptionClassVariable,
-                    UserDefinedExceptionObjectVariable,
-                ),
-            ) and issubclass(exc_instance.exc_type, expected_type.fn):
+            if self._isinstance_exception(exc_instance) and issubclass(
+                exc_instance.exc_type, expected_type.fn  # type: ignore[attr-defined]
+            ):
                 return True
             elif isinstance(exc_instance, variables.BuiltinVariable) and issubclass(
                 exc_instance.fn, expected_type.fn
@@ -2405,8 +2392,8 @@ class InstructionTranslatorBase(
         # https://github.com/python/cpython/pull/99006
         # https://github.com/python/cpython/commit/28187141cc34063ef857976ddbca87ba09a882c2
         val = self.stack[-1]
-        assert isinstance(val, ExceptionVariable)
-        if val.exc_type is StopIteration:
+        assert self._isinstance_exception(val)
+        if val.exc_type is StopIteration:  # type: ignore[attr-defined]
             new_val = variables.BuiltinVariable(RuntimeError).call_function(self, [], {})  # type: ignore[arg-type]
             self.stack[-1] = new_val
 
