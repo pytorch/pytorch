@@ -545,84 +545,6 @@ class CppMicroGemmAMX(CppMicroGemm):
     """
 
     TEMPLATE_ENTRY = r"""
-{%- if pack_vnni_B_locally %}
-{% if block_n == 16 or block_n == 48 %}
-// Interleave 2 rows of 16 16-bit elements into 2 rows
-inline void {{kernel_name}}_interleave2_256(
-    const {{input2_t}}* input0,
-    const {{input2_t}}* input1,
-    {{input2_t}}* output0,
-    {{input2_t}}* output1
-) {
-    // Inputs rows:
-    // a0, a1, ..., a15
-    // b0, b1, ..., b15
-    // Output rows:
-    // a0, b0, a1, b1, ..., a7, b7
-    // a8, b8, a9, b9, ..., a15, b15
-    auto row0 = _mm256_loadu_epi16(input0);
-    auto row1 = _mm256_loadu_epi16(input1);
-    auto tmp0 = _mm256_unpacklo_epi16(row0, row1);
-    auto tmp1 = _mm256_unpackhi_epi16(row0, row1);
-    auto res0 = _mm256_permute2x128_si256(tmp0, tmp1, 0x20);
-    auto res1 = _mm256_permute2x128_si256(tmp0, tmp1, 0x31);
-    _mm256_storeu_epi16(output0, res0);
-    _mm256_storeu_epi16(output1, res1);
-}
-{% elif block_n == 32 %}
-// Interleave 2 rows of 32 16-bit elements into 2 rows
-inline void {{kernel_name}}_interleave2_512(
-    const {{input2_t}}* input0,
-    const {{input2_t}}* input1,
-    {{input2_t}}* output0,
-    {{input2_t}}* output1
-) {
-    // Inputs rows:
-    // a0, a1, ..., a31
-    // b0, b1, ..., b31
-    // Output rows:
-    // a0, b0, a1, b1, ..., a15, b15
-    // a16, b16, a16, b16, ..., a31, b31
-    auto row0 = _mm512_loadu_epi16(input0);
-    auto row1 = _mm512_loadu_epi16(input1);
-    auto idx1 = _mm512_set_epi16( 47, 15, 46, 14, 45, 13, 44, 12, 43, 11, 42,
-        10, 41, 9, 40, 8, 39, 7, 38, 6, 37, 5, 36, 4, 35, 3, 34, 2, 33, 1, 32, 0 );
-    auto idx2 = _mm512_set_epi16(
-        47 + 16, 15 + 16, 46 + 16, 14 + 16, 45 + 16, 13 + 16, 44 + 16, 12 + 16,
-        43 + 16, 11 + 16, 42 + 16, 10 + 16, 41 + 16, 9 + 16, 40 + 16, 8 + 16,
-        39 + 16, 7 + 16, 38 + 16, 6 + 16, 37 + 16, 5 + 16, 36 + 16, 4 + 16,
-        35 + 16, 3 + 16, 34 + 16, 2 + 16, 33 + 16, 1 + 16, 32 + 16, 0 + 16 );
-    auto res0 = _mm512_mask_permutex2var_epi16(row0, 0xFFFFFFFF, idx1, row1 );
-    auto res1 = _mm512_mask_permutex2var_epi16(row0, 0xFFFFFFFF, idx2, row1 );
-    _mm512_storeu_epi16(output0, res0);
-    _mm512_storeu_epi16(output1, res1);
-}
-{%- endif %}
-{% if block_n == 48 %}
-// Interleave 2 rows of 48 16-bit elements into 2 rows
-inline void {{kernel_name}}_interleave2_48with256(
-    const {{input2_t}}* input0,
-    const {{input2_t}}* input1,
-    {{input2_t}}* output0,
-    {{input2_t}}* output1
-) {
-    // Use 256-bit interleave kernels, rather than 512+256, since 256-bit chunks of inputs
-    // and outputs need to be moved to different rows.
-    // For example, the first 16 elements of rows input0 and input1 end up on the same row output0
-    // The next 16 elements are placed on different rows in output0 and output1.
-    // Inputs rows:
-    // a0, a1, ..., a15 | b0, b1, ..., b15 | c0, c1, ..., c15
-    // d0, d1, ..., d15 | e0, e1, ..., e15 | f0, f1, ..., f15
-    // Output rows:
-    // a0, d0, a1, d1, ..., a15, d15 | b0, e0, b1, e1, ..., b7, e7
-    // b8, e8, b9, e9, ..., b15, e15 | c0, f0, c1, f1, ..., c15, f15
-    {{kernel_name}}_interleave2_256(input0, input1, output0, output0 + 16);
-    {{kernel_name}}_interleave2_256(input0 + 16, input1 + 16, output0 + 32, output1);
-    {{kernel_name}}_interleave2_256(input0 + 32, input1 + 32, output1 + 16, output1 + 32);
-}
-{%- endif %}
-{%- endif %}
-
 {{declare_kernel}} {
     {{kernel.assert_function}}(N % {{block_n}} == 0, "N dimension must be multiple of {{block_n}}");
     {{kernel.assert_function}}(K % 2 == 0, "K dimension must be multiple of 2");
@@ -639,24 +561,16 @@ inline void {{kernel_name}}_interleave2_48with256(
         for (int i = 0; i < K; i += {{vnni_size}}) {
         {%- if vnni_size == 2 %}
             {%- if block_n == 16 %}
-            {{kernel_name}}_interleave2_256(
-                B + base_n_idx + i * ldb,
-                B + base_n_idx + (i + 1) * ldb,
-                packed_B_buf + i * {{block_n}},
-                packed_B_buf + (i + 1) * {{block_n}});
+            at::vec::interleave2x16_256_bf16(
             {%- elif block_n == 32 %}
-            {{kernel_name}}_interleave2_512(
-                B + base_n_idx + i * ldb,
-                B + base_n_idx + (i + 1) * ldb,
-                packed_B_buf + i * {{block_n}},
-                packed_B_buf + (i + 1) * {{block_n}});
+            at::vec::interleave2x16_512_bf16(
             {%- elif block_n == 48 %}
-            {{kernel_name}}_interleave2_48with256(
+            at::vec::interleave2x48_256_bf16(
+            {%- endif %}
                 B + base_n_idx + i * ldb,
                 B + base_n_idx + (i + 1) * ldb,
                 packed_B_buf + i * {{block_n}},
                 packed_B_buf + (i + 1) * {{block_n}});
-            {%- endif %}
         {%- elif vnni_size == 4 %}
         // TODO: Support vnni_size == 4 to support non-constant GEMM inputs
         // BMM never uses 8-bit inputs since no quantized kernels are supported
@@ -967,12 +881,45 @@ class CppMicroBrgemm(CppMicroGemm):
     TEMPLATE_ENTRY = r"""
 #include <ATen/native/CPUBlas.h>
 {{declare_kernel}} {
+{%- if pack_vnni_B_locally %}
+    const auto packed_buf_size = K * N;
+    {%- if is_msvc_compiler %}
+    // MSVC doesn't support stack-allocated dynamic-sized arrays, so using heap memory here.
+    std::unique_ptr<{{input2_t}}[]> heap_packed_b_buf_ptr(new {{input2_t}}[packed_buf_size]);
+    {{input2_t}}* packed_B_buf = heap_packed_b_buf_ptr.get();
+    {%- else %}
+    alignas(4096) {{input2_t}} packed_B_buf[packed_buf_size];
+    {%- endif %}
+    for (int i = 0; i < K; i += {{vnni_size}}) {
+    {%- if vnni_size == 2 %}
+        {%- if block_n == 16 %}
+        at::vec::interleave2x16_256_f16(
+        {%- elif block_n == 32 %}
+        at::vec::interleave2x16_512_f16(
+        {%- elif block_n == 48 %}
+        at::vec::interleave2x48_256_f16(
+        {%- endif %}
+            B + i * ldb,
+            B + (i + 1) * ldb,
+            packed_B_buf + i * N,
+            packed_B_buf + (i + 1) * N);
+    {%- endif %}
+    }
+{%- endif %}
     at::native::cpublas::brgemm(
       M, N, K,
+    {%- if pack_vnni_B_locally %}
+      lda, N, ldc,
+    {%- else %}
       lda, ldb, ldc,
+    {%- endif %}
       accum,
       A,
+    {%- if pack_vnni_B_locally %}
+      packed_B_buf,
+    {%- else %}
       B,
+    {%- endif %}
       C);
 }
 """
@@ -980,6 +927,7 @@ class CppMicroBrgemm(CppMicroGemm):
     def codegen_define(self, kernel: CppTemplateKernel) -> str:
         options = {
             "declare_kernel": self.get_kernel_declaration(),
+            "pack_vnni_B_locally": self.pack_vnni_B_locally,
             "kernel": kernel,
             "block_m": self.register_blocking.block_m,
             "block_n": self.register_blocking.block_n,

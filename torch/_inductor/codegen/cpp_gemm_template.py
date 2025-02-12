@@ -1004,11 +1004,10 @@ class CppGemmTemplate(CppTemplate):
 
         if should_block_weight:
             blocked_w = cls.block_weight(W, new_size, padding)
+            new_inputs[1] = cls.pack_vnni_weight(blocked_w, micro_gemm, new_size)
         else:
             blocked_w = W
-        new_inputs[1] = cls.pack_vnni_weight(
-            blocked_w, micro_gemm, new_size, should_block_weight=should_block_weight
-        )
+
 
         def _is_int8_gemm(inputs):
             return (
@@ -1078,7 +1077,7 @@ class CppGemmTemplate(CppTemplate):
         return blocked_w
 
     @classmethod
-    def pack_vnni_weight(cls, W, micro_gemm, new_size, should_block_weight=True):
+    def pack_vnni_weight(cls, W, micro_gemm, new_size):
         # These are separated into two methods to allow subclasses to override them separately
         if isinstance(W, ir.IRNode):
             if isinstance(W, ir.Buffer) and W.get_name() in V.graph.constants:
@@ -1086,7 +1085,7 @@ class CppGemmTemplate(CppTemplate):
             k = new_size[-2]
             if not isinstance(W, ir.TensorBox):
                 W = ir.TensorBox(W)
-            if micro_gemm.get_b_layout() != LayoutType.NORMAL and should_block_weight:
+            if micro_gemm.get_b_layout() != LayoutType.NORMAL:
                 permute_dims = list(range(len(new_size) + 1))
                 permute_dims[-1], permute_dims[-2] = permute_dims[-2], permute_dims[-1]
                 vnni_size = 4 if micro_gemm.get_b_layout() == LayoutType.VNNI4 else 2
@@ -1103,7 +1102,7 @@ class CppGemmTemplate(CppTemplate):
         else:
             k = new_size[-2]
             # Apply VNNI packing to the weight tensor
-            if micro_gemm.get_b_layout() != LayoutType.NORMAL and should_block_weight:
+            if micro_gemm.get_b_layout() != LayoutType.NORMAL:
                 # TODO: Move VNNI weight packing for non-constant tensors into the template,
                 # to improve cache locality and avoid full-tensor copy.
                 layout_str = (
