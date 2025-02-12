@@ -100,18 +100,19 @@ class _RNGStateTracker:
     a set of convenient utility methods to help access/modify the state tensors. The most
     important interface is _distribute_region which will be used when DTensor executes
     a random op (an operator that calls RNG).
+
+    note: _RNGStateTracker only supports cuda/cuda-like device
     """
 
-    def __init__(self, device_type: str = "cuda"):
-        self._device_type = device_type
-        self._device_handle = _get_device_handle(device_type)
+    def __init__(self, device: torch.device):
+        self._device = device
+        self._device_handle = _get_device_handle(self._device.type)
         if not (self._device_handle and self._device_handle.is_available()):
             raise RuntimeError(
                 f"{self.__class__.__name__} instantiation requires the presence of CUDA/CUDA-like device"
             )
 
         self._states: dict[str, Tensor] = {}
-        self._devices = [self._device_handle.current_device()]
         self._use_distribute_region = True
 
     @property
@@ -161,9 +162,15 @@ class OffsetBasedRNGTracker(_RNGStateTracker):
     random operators.
     """
 
-    def __init__(self, device_type: str = "cuda", run_state_sync: bool = True):
-        super().__init__(device_type)
-        rng_state = self._device_handle.get_rng_state().to(device_type)
+    def __init__(
+        self,
+        device: Union[int, str, torch.device] = "cuda",
+        device_mesh: Optional[DeviceMesh] = None,
+        run_state_sync: bool = True,
+    ):
+        super().__init__(_resolve_device(device=device, device_mesh=device_mesh))
+        assert self._device_handle is not None
+        rng_state = self._device_handle.get_rng_state().to(device)
         if run_state_sync:
             # synchronize RNG state using rank 0's current one
             dist.broadcast(rng_state, 0)
@@ -185,7 +192,10 @@ class OffsetBasedRNGTracker(_RNGStateTracker):
         if self.distribute_region_enabled:
             old_offset = self.get_offset("parallel-rng")
             self._set_pre_op_offset(spec)
-            with torch.random.fork_rng(self._devices, device_type=self._device_type):
+            with torch.random.fork_rng(
+                devices=[self._device], device_type=self._device.type
+            ):
+                assert self._device_handle is not None
                 self._device_handle.set_rng_state(self.rng_states["parallel-rng"])
                 try:
                     yield  # execute the region code
@@ -366,3 +376,24 @@ class OffsetBasedRNGTracker(_RNGStateTracker):
             shard_coord_stride *= size
 
         return shard_linear_idx
+
+
+def _resolve_device(
+    device: Union[int, str, torch.device] = "cuda",
+    device_mesh: Optional[DeviceMesh] = None,
+) -> torch.device:
+    if isinstance(device, torch.device):
+        return device
+    elif isinstance(device, int):
+        return torch.device(f"cuda:{device}")
+    elif isinstance(device, str):
+        if device_mesh is not None:
+            assert device == device_mesh.device_type
+            device_handle = _get_device_handle(device)
+            assert device_handle is not None
+            device_idx = device_mesh.get_rank() % device_handle.device_count()
+            return torch.device(f"{device}:{device_idx:d}")
+        else:
+            return torch.device(device)
+    else:
+        raise ValueError(f"Unsupported device type: {type(device)}")
