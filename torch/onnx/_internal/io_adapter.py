@@ -639,9 +639,9 @@ class PrependParamsAndBuffersAotAutogradOutputStep(OutputAdaptStep):
             flattened_outputs: The flattened model outputs.
         """
 
-        assert isinstance(
-            model, torch_export.ExportedProgram
-        ), "'model' must be torch_export.ExportedProgram"
+        assert isinstance(model, torch_export.ExportedProgram), (
+            "'model' must be torch_export.ExportedProgram"
+        )
         ordered_buffers = tuple(
             model.state_dict[name]
             if name in model.state_dict

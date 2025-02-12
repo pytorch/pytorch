@@ -665,12 +665,12 @@ class ErrorTrackingProcess(mp.Process):
             raise
 
     def print_traces_of_all_threads(self):
-        assert (
-            self.is_alive()
-        ), "can only use print_traces_of_all_threads if the process is alive"
-        assert (
-            not self.disable_stderr
-        ), "do not disable stderr if you use print_traces_of_all_threads"
+        assert self.is_alive(), (
+            "can only use print_traces_of_all_threads if the process is alive"
+        )
+        assert not self.disable_stderr, (
+            "do not disable stderr if you use print_traces_of_all_threads"
+        )
         # On platforms without `SIGUSR1`, `set_faulthander_if_available` sets
         # `faulthandler.enable()`, and `print_traces_of_all_threads` may kill
         # the process. So let's poll the exception first
@@ -1030,19 +1030,19 @@ class TestWorkerInfoDataset(SynchronizedDataset):
 # See _test_get_worker_info below for usage.
 def _test_worker_info_init_fn(worker_id):
     worker_info = torch.utils.data.get_worker_info()
-    assert (
-        worker_id == worker_info.id
-    ), "worker_init_fn and worker_info should have consistent id"
-    assert (
-        worker_id < worker_info.num_workers
-    ), "worker_init_fn and worker_info should have valid id"
-    assert (
-        worker_info.seed == torch.initial_seed()
-    ), "worker_init_fn and worker_info should have consistent seed"
+    assert worker_id == worker_info.id, (
+        "worker_init_fn and worker_info should have consistent id"
+    )
+    assert worker_id < worker_info.num_workers, (
+        "worker_init_fn and worker_info should have valid id"
+    )
+    assert worker_info.seed == torch.initial_seed(), (
+        "worker_init_fn and worker_info should have consistent seed"
+    )
     dataset = worker_info.dataset
-    assert isinstance(
-        dataset, TestWorkerInfoDataset
-    ), "worker_info should have correct dataset copy"
+    assert isinstance(dataset, TestWorkerInfoDataset), (
+        "worker_info should have correct dataset copy"
+    )
     assert not hasattr(dataset, "value"), "worker_info should have correct dataset copy"
     # test that WorkerInfo attributes are read-only
     try:

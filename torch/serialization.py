@@ -2023,9 +2023,9 @@ def _load(
         typename = _maybe_decode_ascii(saved_id[0])
         data = saved_id[1:]
 
-        assert (
-            typename == "storage"
-        ), f"Unknown typename for persistent_load, expected 'storage' but got '{typename}'"
+        assert typename == "storage", (
+            f"Unknown typename for persistent_load, expected 'storage' but got '{typename}'"
+        )
         storage_type, key, location, numel = data
         if storage_type is torch.UntypedStorage:
             dtype = torch.uint8

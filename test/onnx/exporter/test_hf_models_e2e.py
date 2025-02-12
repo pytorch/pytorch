@@ -30,15 +30,13 @@ class DynamoExporterTest(common_utils.TestCase):
         onnx_testing.assert_onnx_program(onnx_program)
 
 
-def _prepare_llm_model_gptj_to_test() -> (
-    tuple[
-        torch.nn.Module,
-        dict[str, Any],
-        dict[str, dict[int, str]],
-        list[str],
-        list[str],
-    ]
-):
+def _prepare_llm_model_gptj_to_test() -> tuple[
+    torch.nn.Module,
+    dict[str, Any],
+    dict[str, dict[int, str]],
+    list[str],
+    list[str],
+]:
     model = transformers.GPTJForCausalLM.from_pretrained(
         "hf-internal-testing/tiny-random-gptj"
     )

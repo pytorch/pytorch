@@ -81,9 +81,9 @@ def _to(self, device, non_blocking=False):
         return untyped_storage
 
     device_module = getattr(torch, device.type, None)
-    assert (
-        device_module is not None
-    ), f"{device.type.upper()} device module is not loaded"
+    assert device_module is not None, (
+        f"{device.type.upper()} device module is not loaded"
+    )
     with device_module.device(device):
         if self.is_sparse and hasattr(device_module, "sparse"):
             new_type = getattr(device_module.sparse, self.__class__.__name__)
@@ -95,9 +95,9 @@ def _to(self, device, non_blocking=False):
             )
             return new_type(indices, values, self.size())
         else:
-            assert (
-                not self.is_sparse
-            ), f"sparse storage is not supported for {device.type.upper()} tensors"
+            assert not self.is_sparse, (
+                f"sparse storage is not supported for {device.type.upper()} tensors"
+            )
             untyped_storage = torch.UntypedStorage(self.size(), device=device)
             untyped_storage.copy_(self, non_blocking)
             return untyped_storage

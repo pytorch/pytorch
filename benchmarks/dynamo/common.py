@@ -1006,9 +1006,9 @@ def latency_experiment_summary(suite_name, args, model, timings, **kwargs):
         row,
     )
     c_headers, c_data = torch._dynamo.utils.compile_times(repr="csv", aggregate=True)
-    assert (
-        output_filename.find(".csv") > 0
-    ), f"expected output_filename to be a .csv, but got {output_filename}"
+    assert output_filename.find(".csv") > 0, (
+        f"expected output_filename to be a .csv, but got {output_filename}"
+    )
     write_outputs(
         output_filename[:-4] + "_compilation_metrics.csv",
         first_headers + c_headers,
@@ -1182,9 +1182,9 @@ def speedup_experiment(args, model_iter_fn, model, example_inputs, **kwargs):
         row,
     )
     c_headers, c_data = torch._dynamo.utils.compile_times(repr="csv", aggregate=True)
-    assert (
-        output_filename.find(".csv") > 0
-    ), f"expected output_filename to be a .csv, but got {output_filename}"
+    assert output_filename.find(".csv") > 0, (
+        f"expected output_filename to be a .csv, but got {output_filename}"
+    )
     write_outputs(
         output_filename[:-4] + "_compilation_metrics.csv",
         first_headers + c_headers,
@@ -1997,16 +1997,16 @@ class BenchmarkRunner:
     def deepcopy_and_maybe_parallelize(self, model):
         model = self.deepcopy_model(model)
         if self.args.ddp:
-            assert (
-                torch.distributed.is_available()
-            ), "Can't use DDP without a distributed enabled build"
+            assert torch.distributed.is_available(), (
+                "Can't use DDP without a distributed enabled build"
+            )
             from torch.nn.parallel import DistributedDataParallel as DDP
 
             model = DDP(model, find_unused_parameters=True)
         elif self.args.fsdp:
-            assert (
-                torch.distributed.is_available()
-            ), "Can't use FSDP without a distributed enabled build"
+            assert torch.distributed.is_available(), (
+                "Can't use FSDP without a distributed enabled build"
+            )
             from torch.distributed.fsdp import (
                 FullyShardedDataParallel as FSDP,
                 MixedPrecision,
@@ -2375,9 +2375,9 @@ class BenchmarkRunner:
         self, name, model, example_inputs, optimize_ctx, experiment, tag=None
     ):
         "Run performance test in non-alternately."
-        assert (
-            experiment.func is latency_experiment
-        ), "Must run with latency_experiment."
+        assert experiment.func is latency_experiment, (
+            "Must run with latency_experiment."
+        )
 
         def warmup(fn, model, example_inputs, mode, niters=10):
             peak_mem = 0

@@ -255,9 +255,9 @@ def createResolutionCallbackFromEnv(lookup_base):
     def parseExpr(expr, module):
         try:
             value, len_parsed = parseNestedExpr(expr, module)
-            assert len_parsed == len(
-                expr
-            ), "whole expression was not parsed, falling back to c++ parser"
+            assert len_parsed == len(expr), (
+                "whole expression was not parsed, falling back to c++ parser"
+            )
             return value
         except Exception:
             """
