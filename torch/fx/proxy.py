@@ -344,10 +344,12 @@ class TracerBase:
             args = []
             kwargs = {}
             for field in fields(a):
-                if getattr(field, "kw_only", False):
-                    kwargs[field.name] = self.create_arg(getattr(a, field.name))
-                elif field.init:
-                    args.append(self.create_arg(getattr(a, field.name)))
+                if field.init:
+                    field_arg = self.create_arg(getattr(a, field.name))
+                    if getattr(field, "kw_only", False):
+                        kwargs[field.name] = field_arg
+                    else:
+                        args.append(field_arg)
             args = tuple(args)
             return self.create_node("call_function", a.__class__, args, kwargs)
 
