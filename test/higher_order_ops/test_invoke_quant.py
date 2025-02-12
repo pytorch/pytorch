@@ -39,7 +39,7 @@ class TestInvokeQuant(TestCase):
 
         def fn(x, y):
             return invoke_quant_tracer(
-                gn, x, y, scheme="nf4", quant_options=invoke_quant_tracer
+                gn, (x, y), scheme="nf4", quant_options=invoke_quant_tracer
             )[0]
 
         x = torch.randn(8, requires_grad=False)
@@ -56,7 +56,7 @@ class TestInvokeQuant(TestCase):
             return (torch.mul(x, y) + y,)
 
         def fn(x, y):
-            return InvokeQuant(codegen_low_precision=False)(gn, x, y, scheme="nf4")[0]
+            return InvokeQuant(codegen_low_precision=False)(gn, (x, y), scheme="nf4")[0]
 
         x = torch.randn(8, requires_grad=False)
         y = torch.randn(8, requires_grad=False)
@@ -72,7 +72,7 @@ class TestInvokeQuant(TestCase):
             return (torch.mul(x, y) + y,)
 
         def fn(x, y):
-            return InvokeQuant()(gn, x, y, scheme="nf4")[0]
+            return InvokeQuant()(gn, (x, y), scheme="nf4")[0]
 
         x = torch.randn(8, requires_grad=False)
         y = torch.randn(8, requires_grad=False)
@@ -90,8 +90,8 @@ class TestInvokeQuant(TestCase):
             return torch.mul(x, y) + y
 
         def fn(x, y, z):
-            o1 = invoke_quant_tracer(gn, x, y, scheme="nf4")
-            o2 = invoke_quant_tracer(gn, y, z, scheme="nf4")
+            o1 = invoke_quant_tracer(gn, (x, y), scheme="nf4")
+            o2 = invoke_quant_tracer(gn, (y, z), scheme="nf4")
             return o1 + o2
 
         x = torch.randn(8, requires_grad=False)
@@ -143,10 +143,10 @@ class TestInvokeQuantInductor(TestInvokeQuant):
             return torch.mul(x, y) + y
 
         def fn(x, y, z):
-            return invoke_quant_tracer(gn, x, y, scheme="nf4") @ z
+            return invoke_quant_tracer(gn, (x, y), scheme="nf4") @ z
 
         def fn_no_match(x, y, z):
-            return invoke_quant_tracer(gn, x, y) @ z
+            return invoke_quant_tracer(gn, (x, y)) @ z
 
         x = torch.randn(64, 64, requires_grad=False)
         y = torch.randn(64, 64, requires_grad=False)
@@ -191,7 +191,7 @@ class TestInvokeQuantInductor(TestInvokeQuant):
         def fn(x, y, z):
             return (
                 invoke_quant_tracer(
-                    gn, x, y, scheme="nf4", quant_options=invoke_quant_tracer
+                    gn, (x, y), scheme="nf4", quant_options=invoke_quant_tracer
                 )
                 @ z
             )
