@@ -205,6 +205,7 @@ class TunableOp {
       TuningContext* ctx = getTuningContext();
       auto op_sig = Signature();
       auto params_sig = params->Signature();
+      auto blas_sig = params->BLASSignature();
       TUNABLE_LOG2("finding fastest for ", op_sig, '(', params_sig, ')', " out of ", op_names_.size(), " candidates");
       auto min_duration_ms = std::numeric_limits<double>::infinity();
       std::string id_name = "Default";
@@ -368,7 +369,7 @@ class TunableOp {
       }
 
       TUNABLE_LOG2("└──found fastest for ", op_sig, '(', params_sig, ") ", id_name);
-      return ResultEntry(id_name, min_duration_ms);
+      return ResultEntry(id_name, min_duration_ms, blas_sig);
     }
 
   private:

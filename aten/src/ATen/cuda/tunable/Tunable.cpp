@@ -46,7 +46,13 @@ TuningContext* getTuningContext() {
 }
 
 std::ostream& operator<<(std::ostream& stream, const ResultEntry& entry) {
-  return stream << entry.key_ << "," << entry.time_;
+  static const bool blaslog = c10::utils::get_env("PYTORCH_TUNABLEOP_BLAS_LOG") == "1";
+  if (!blaslog) {
+    return stream << entry.key_ << "," << entry.time_;
+  }
+  else {
+    return stream << entry.key_ << "," << entry.time_ << ",BLAS_PARAMS: " << entry.blas_sig_;
+  }
 }
 
 // TuningResultsManager
