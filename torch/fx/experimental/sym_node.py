@@ -22,11 +22,11 @@ import logging
 import math
 import operator
 import sys
-import traceback
 from functools import lru_cache, update_wrapper
 from typing import Optional, Set, TYPE_CHECKING, Union
 
 import torch
+import torch._logging.structured as structured
 
 # NB: The sym_* functions are used via getattr() and must be imported here.
 from torch import (  # noqa: F401
@@ -39,9 +39,7 @@ from torch import (  # noqa: F401
     SymFloat,
     SymInt,
 )
-from torch._guards import TracingContext
 from torch._logging import dtrace_structured
-from torch.utils._traceback import format_frame
 
 
 if TYPE_CHECKING:
@@ -1229,8 +1227,6 @@ def _make_node_magic(method, func):
         method_attr = method
 
     def uninteresting_files() -> Set[str]:
-        import inspect
-
         import torch
 
         mods = [
@@ -1255,45 +1251,6 @@ def _make_node_magic(method, func):
             else:
                 result = fn(self, other)
             if torch._logging._internal.GET_DTRACE_STRUCTURED:
-                floc = None
-                user_stack = None
-                user_top_stack = None
-                user_bottom_stack = None
-
-                if len(TracingContext.extract_stack()) > 0:
-                    user_stack = TracingContext.extract_stack()
-                    user_top_stack = format_frame(user_stack[0], line=True)
-                    user_bottom_stack = format_frame(user_stack[-1], line=True)
-
-                frame = inspect.currentframe()
-                try:
-                    while frame is not None:
-                        if (
-                            floc is None
-                            and frame.f_code.co_filename not in uninteresting_files()
-                        ):
-                            floc = format_frame(
-                                traceback.FrameSummary(
-                                    frame.f_code.co_filename,
-                                    frame.f_lineno,
-                                    frame.f_code.co_name,
-                                ),
-                                line=True,
-                            )
-                        if frame.f_back is None and user_top_stack is None:
-                            user_top_stack = format_frame(
-                                traceback.FrameSummary(
-                                    frame.f_code.co_filename,
-                                    frame.f_lineno,
-                                    frame.f_code.co_name,
-                                ),
-                                line=True,
-                            )
-                            break
-                        frame = frame.f_back
-                finally:
-                    del frame
-
                 if other is not None:
                     arguments = [self, other]
                 else:
@@ -1313,9 +1270,8 @@ def _make_node_magic(method, func):
                         "argument_ids": [
                             get_id(i) for i in arguments if get_id(i) is not None
                         ],
-                        "user_bottom_stack": str(user_bottom_stack),
-                        "user_top_stack": str(user_top_stack),
-                        "floc": str(floc),
+                        "user_stack": structured.get_user_stack(3),
+                        "stack": structured.get_framework_stack(3),
                     },
                 )
 
