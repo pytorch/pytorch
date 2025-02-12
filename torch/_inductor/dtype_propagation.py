@@ -368,7 +368,7 @@ class DtypePropagationOpsHandler:
     ) -> None:
         return None
 
-    def output(self, x: DTypeArg) -> None:
+    def output(self, *args: DTypeArg) -> None:
         raise AssertionError(
             f"{type(self).__name__}: ops.output should not appear here"
         )
