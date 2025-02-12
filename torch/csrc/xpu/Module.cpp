@@ -384,7 +384,7 @@ static void initXpuMethodBindings(PyObject* module) {
     TORCH_CHECK(
         device.has(sycl::aspect::ext_intel_free_memory),
         "The device (",
-        c10::xpu::getDeviceProperties(device_index)->name,
+        at::xpu::getDeviceProperties(device_index)->name,
         ") doesn't support querying the available free memory. ",
         "You can file an issue at https://github.com/pytorch/pytorch/issues ",
         "to help us prioritize its implementation.");
