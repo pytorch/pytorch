@@ -60,7 +60,7 @@ namespace c10 {
 using std::string;
 
 // Functions that we use for initialization.
-C10_API bool InitCaffeLogging(int* argc, char** argv);
+C10_API bool InitCaffeLogging(const int* argc, char** argv);
 C10_API void UpdateLoggingLevelsFromFlags();
 
 [[noreturn]] C10_API void ThrowEnforceNotMet(
