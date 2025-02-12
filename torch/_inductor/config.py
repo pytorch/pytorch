@@ -516,7 +516,7 @@ benchmark_epilogue_fusion = (
 )
 
 # Take how many of the top triton kernels to benchmark epilogue
-max_epilogue_benchmarked_choices = 1
+max_epilogue_benchmarked_choices = 3
 
 # how many nodes to allow into a single fusion
 max_fusion_size = 64
