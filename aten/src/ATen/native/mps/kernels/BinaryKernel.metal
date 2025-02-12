@@ -2,8 +2,36 @@
 #include <metal_stdlib>
 using namespace metal;
 
-template <typename T>
-kernel void fmax(
+struct fmax_functor {
+  template <typename T>
+  inline T operator()(const T a, const T b) {
+    return static_cast<T>(::metal::fmax(a, b));
+  }
+};
+
+struct fmin_functor {
+  template <typename T>
+  inline T operator()(const T a, const T b) {
+    return static_cast<T>(::metal::fmin(a, b));
+  }
+};
+
+struct copysign_functor {
+  template <typename T>
+  inline T operator()(const T a, const T b) {
+    return static_cast<T>(::metal::copysign(a, b));
+  }
+};
+
+struct zeta_functor {
+  template <typename T>
+  inline T operator()(const T a, const T b) {
+    return static_cast<T>(c10::metal::zeta(a, b));
+  }
+};
+
+template <typename T, typename F>
+kernel void binary_indexing(
     constant void* input_ [[buffer(0)]],
     constant void* other_ [[buffer(1)]],
     device void* out_ [[buffer(2)]],
@@ -12,37 +40,18 @@ kernel void fmax(
   device T* out = (device T*)((device uint8_t*)out_ + offsets[tid].x);
   constant T* input = (constant T*)((constant uint8_t*)input_ + offsets[tid].y);
   constant T* other = (constant T*)((constant uint8_t*)other_ + offsets[tid].z);
-
-  *out = static_cast<T>(fmax(*input, *other));
+  F f;
+  *out = f(*input, *other);
 }
 
-template <typename T>
-kernel void fmin(
-    constant void* input_ [[buffer(0)]],
-    constant void* other_ [[buffer(1)]],
-    device void* out_ [[buffer(2)]],
-    constant uint3* offsets [[buffer(3)]],
-    uint tid [[thread_position_in_grid]]) {
-  device T* out = (device T*)((device uint8_t*)out_ + offsets[tid].x);
-  constant T* input = (constant T*)((constant uint8_t*)input_ + offsets[tid].y);
-  constant T* other = (constant T*)((constant uint8_t*)other_ + offsets[tid].z);
-
-  *out = static_cast<T>(fmin(*input, *other));
-}
-
-template <typename T>
-kernel void copysign(
-    constant void* input_ [[buffer(0)]],
-    constant void* other_ [[buffer(1)]],
-    device void* out_ [[buffer(2)]],
-    constant uint3* offsets [[buffer(3)]],
-    uint tid [[thread_position_in_grid]]) {
-  device T* out = (device T*)((device uint8_t*)out_ + offsets[tid].x);
-  constant T* input = (constant T*)((constant uint8_t*)input_ + offsets[tid].y);
-  constant T* other = (constant T*)((constant uint8_t*)other_ + offsets[tid].z);
-
-  *out = static_cast<T>(copysign(*input, *other));
-}
+#define REGISTER_BINARY_INDEXING_OP(NAME, DTYPE)       \
+  template [[host_name(#NAME "_" #DTYPE)]] kernel void \
+  binary_indexing<DTYPE, NAME##_functor>(              \
+      constant void* input_,                           \
+      constant void* other_,                           \
+      device void* out_,                               \
+      constant uint3* offsets,                         \
+      uint tid)
 
 template <typename T>
 kernel void copysign_integral(
@@ -75,16 +84,19 @@ kernel void copysign_integral(
       constant uint3* offsets [[buffer(3)]],             \
       uint tid [[thread_position_in_grid]]);
 
-REGISTER_BINARY_OP(fmax, float);
-REGISTER_BINARY_OP(fmax, half);
-REGISTER_BINARY_OP(fmin, float);
-REGISTER_BINARY_OP(fmin, half);
-REGISTER_BINARY_OP(copysign, float);
-REGISTER_BINARY_OP(copysign, half);
+REGISTER_BINARY_INDEXING_OP(fmax, float);
+REGISTER_BINARY_INDEXING_OP(fmax, half);
+REGISTER_BINARY_INDEXING_OP(fmin, float);
+REGISTER_BINARY_INDEXING_OP(fmin, half);
+REGISTER_BINARY_INDEXING_OP(copysign, float);
+REGISTER_BINARY_INDEXING_OP(copysign, half);
+REGISTER_BINARY_INDEXING_OP(zeta, float);
+REGISTER_BINARY_INDEXING_OP(zeta, half);
 #if __METAL_VERSION__ >= 310
-REGISTER_BINARY_OP(fmax, bfloat);
-REGISTER_BINARY_OP(fmin, bfloat);
-REGISTER_BINARY_OP(copysign, bfloat);
+REGISTER_BINARY_INDEXING_OP(fmax, bfloat);
+REGISTER_BINARY_INDEXING_OP(fmin, bfloat);
+REGISTER_BINARY_INDEXING_OP(copysign, bfloat);
+REGISTER_BINARY_INDEXING_OP(zeta, bfloat);
 #endif
 REGISTER_COPYSIGN_INTEGRAL_OP(int);
 REGISTER_COPYSIGN_INTEGRAL_OP(long);
@@ -186,23 +198,3 @@ kernel void complex_kernel(
 
 REGISTER_BINARY_OP(complex_kernel, float);
 REGISTER_BINARY_OP(complex_kernel, half);
-
-template <typename T>
-kernel void zeta(
-    constant void* input_ [[buffer(0)]],
-    constant void* other_ [[buffer(1)]],
-    device void* out_ [[buffer(2)]],
-    constant uint3* offsets [[buffer(3)]],
-    uint tid [[thread_position_in_grid]]) {
-  device T* out = (device T*)((device uint8_t*)out_ + offsets[tid].x);
-  constant T* input = (constant T*)((constant uint8_t*)input_ + offsets[tid].y);
-  constant T* other = (constant T*)((constant uint8_t*)other_ + offsets[tid].z);
-
-  *out = static_cast<T>(c10::metal::zeta(*input, *other));
-}
-
-REGISTER_BINARY_OP(zeta, float);
-REGISTER_BINARY_OP(zeta, half);
-#if __METAL_VERSION__ >= 310
-REGISTER_BINARY_OP(zeta, bfloat);
-#endif
