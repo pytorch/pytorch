@@ -380,7 +380,7 @@ class CompileEventLogger:
             chromium_log.add_event_data(event_name, **metadata)
         else:
             assert log_level == CompileEventLogLevel.COMPILATION_METRIC
-            top_event = chromium_log.get_top()
+            top_event = chromium_log.get_outermost_event()
 
             if event_name != top_event:
                 raise RuntimeError(
@@ -402,7 +402,7 @@ class CompileEventLogger:
         """
         Syntactic sugar for logging to the toplevel event
         """
-        top_event = get_chromium_event_logger().get_top()
+        top_event = get_chromium_event_logger().get_outermost_event()
         if top_event is None:
             raise RuntimeError(
                 "No toplevel event active. Please only call this function within a dynamo_timed context."
@@ -424,7 +424,7 @@ class CompileEventLogger:
             chromium_log.increment(event_name, key, value)
         else:
             assert log_level == CompileEventLogLevel.COMPILATION_METRIC
-            top_event = chromium_log.get_top()
+            top_event = chromium_log.get_outermost_event()
             if event_name != top_event:
                 raise RuntimeError(
                     "Log level is COMPILATION_METRIC, but event_name isn't the toplevel event. "
@@ -450,7 +450,7 @@ class CompileEventLogger:
         Increments a value on the toplevel metric. By default, logs to metric.
         """
         chromium_log = get_chromium_event_logger()
-        top_event = chromium_log.get_top()
+        top_event = chromium_log.get_outermost_event()
         if top_event is None:
             raise RuntimeError(
                 "No toplevel event active. Please only call this function within a metrics context/dynamo_timed."
@@ -472,7 +472,7 @@ class CompileEventLogger:
             chromium_log.add_to_set(event_name, key, value)
         else:
             assert log_level == CompileEventLogLevel.COMPILATION_METRIC
-            top_event = chromium_log.get_top()
+            top_event = chromium_log.get_outermost_event()
             if event_name != top_event:
                 raise RuntimeError(
                     "Log level is COMPILATION_METRIC, but event_name isn't the toplevel event. "
@@ -499,7 +499,7 @@ class CompileEventLogger:
         Defaults to COMPILATION_METRIC log level.
         """
         chromium_log = get_chromium_event_logger()
-        top_event = chromium_log.get_top()
+        top_event = chromium_log.get_outermost_event()
         if top_event is None:
             raise RuntimeError(
                 "No toplevel event active. Please only call this function within a metrics context/dynamo_timed."
@@ -1294,7 +1294,7 @@ def add_compilation_metrics_to_chromium(c: CompilationMetrics) -> None:
     TODO: Get rid of this function and replace it with CompileEventLogger directly instead.
     """
     event_logger = get_chromium_event_logger()
-    event_name = event_logger.get_top()
+    event_name = event_logger.get_outermost_event()
     if not event_name:
         return
     event_logger.add_event_data(
@@ -1525,12 +1525,13 @@ class ChromiumEventLogger:
             self.tls.stack = []
             return self.tls.stack
 
-    def get_top(self) -> Optional[str]:
+    def get_outermost_event(self) -> Optional[str]:
         """
-        Get the top event name or None if the stack is empty.
+        Get the outermost event name (i.e. the longest running event)
+        or None if the stack is empty.
         """
         stack = self.get_stack()
-        return stack[-1] if stack else None
+        return stack[0] if stack else None
 
     def get_pt2_compile_substack(self):
         """
