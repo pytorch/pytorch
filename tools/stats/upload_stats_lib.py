@@ -165,7 +165,7 @@ def upload_to_s3(
         ContentEncoding="gzip",
         ContentType="application/json",
     )
-    print("Done! Writing document to S3 {bucket_name}/{key} ")
+    print(f"Done! Writing document to S3 {bucket_name}/{key} ")
 
 
 def read_from_s3(
