@@ -257,7 +257,6 @@ class ExceptionVariable(VariableTracker):
         self.__traceback__ = ConstantVariable(None)
 
     def set_context(self, context: "ExceptionVariable"):
-        assert isinstance(context, (ExceptionVariable, ConstantVariable))
         self.__context__ = context
 
     def reconstruct(self, codegen):
