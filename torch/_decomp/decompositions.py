@@ -1640,6 +1640,7 @@ def native_layer_norm_backward(
         for x in (grad_out, input, weight, bias)
     )
     assert grad_out_cast is not None
+    assert input_cast is not None
 
     axis = input_ndim - len(normalized_shape)
     inner_dims = input_shape[axis:]
