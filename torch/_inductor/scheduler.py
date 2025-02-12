@@ -36,7 +36,7 @@ import sympy
 import torch
 import torch._inductor.async_compile  # noqa: F401 required to warm up AsyncCompile pools
 from torch._dynamo.utils import counters, dynamo_timed
-from torch._inductor.codecache import PyCodeCache, TritonFuture
+from torch._inductor.codecache import LambdaFuture, PyCodeCache
 from torch._inductor.metrics import get_metric_table, is_metric_table_enabled
 from torch.fx.experimental.symbolic_shapes import free_unbacked_symbols
 from torch.utils._ordered_set import OrderedSet
@@ -2734,7 +2734,7 @@ class Scheduler:
 
         def compile_kernel(
             nodes: Sequence[BaseSchedulerNode],
-        ) -> tuple[Optional[TritonFuture], ModuleType]:
+        ) -> tuple[Optional[LambdaFuture], ModuleType]:
             src_code = self.generate_kernel_code_from_nodes(
                 nodes, benchmark_kernel=True
             )
@@ -2743,7 +2743,7 @@ class Scheduler:
                 fut = None
             else:
                 fut = async_compile.triton(kernel_name="triton_", source_code=src_code)
-                assert isinstance(fut, TritonFuture)
+                assert isinstance(fut, LambdaFuture)
 
             return (fut, mod)
 
@@ -2772,7 +2772,7 @@ class Scheduler:
             )
 
             # Start compiling choices in parallel
-            future_choices: List[tuple[Any, Optional[TritonFuture], ModuleType]] = []
+            future_choices: List[tuple[Any, Optional[LambdaFuture], ModuleType]] = []
             triton_choices = 0
             for choice, unfused_time in sorted(
                 choice_timings.items(), key=lambda x: x[1]
@@ -3387,6 +3387,50 @@ class Scheduler:
             and not is_output_of_multi_outputs_template(node.node)
         )
 
+    def check_prologue_fusion_heuristics_fusable(
+        self, prologue_node: BaseSchedulerNode, why: WhyNoFuse
+    ) -> bool:
+        """
+        Heuristics to avoid benchmarking predictably slow prologue fusions
+        """
+        # user opt into more aggressive prologue fusion, dont use heuristics
+        if prologue_node.get_operation_names() <= V.graph.invoke_quant_ops:
+            return True
+
+        read_bytes = prologue_node.get_read_buffer_sizes()
+        write_bytes = prologue_node.get_write_buffer_sizes()
+
+        # Initially, only do fusions which will result in fewer memory accesses inside of the template to avoid
+        # potential bad cache behavior and shared memory use.
+        # we also want to avoid benchmarking reliably unprofitable fusions like downcasts from fp32 -> fp16 inside kernel.
+        # allowing gathers by allowing increasing write_bytes by small factor
+        # TODO - make configurable per input, for insance, bias can fuse fp32 -> fp16 profitably
+
+        BYTES_THRESHOLD_MULTIPLIER = 1.1
+        if read_bytes > (write_bytes * BYTES_THRESHOLD_MULTIPLIER):
+            why("prologue fusion will not increase amount of bytes read in kernel")
+            return False
+
+        # we want to avoid attempting to fuse predictably unprofitable prologues
+        # such as increasing the unaligned reads or writes.
+        # TODO - would be nice to generalize this, however, we would need more explicit
+        # knowledge of memory access patterns in the TritonTemplate in order to know
+        # the stride order to check alignment.
+        origins = tuple(
+            e.target
+            for n in prologue_node.get_nodes()
+            if n.node is not None
+            for e in n.node.get_origins()
+            if e.op == "call_function"
+        )
+        if origins == (torch.ops.aten.constant_pad_nd.default,):
+            why(
+                "prologue fusion will not increase attempt to fuse in padding bc it increases unaligned reads"
+            )
+            return False
+
+        return True
+
     def can_fuse(self, node1: BaseSchedulerNode, node2: BaseSchedulerNode) -> bool:
         """
         Determine if it is possible to combine node1 and node2 into a
@@ -3480,36 +3524,7 @@ class Scheduler:
                 )
                 return False
 
-            read_bytes = node1.get_read_buffer_sizes()
-            write_bytes = node1.get_write_buffer_sizes()
-
-            # Initially, only do fusions which will result in fewer memory accesses inside of the template to avoid
-            # potential bad cache behavior and shared memory use.
-            # we also want to avoid benchmarking reliably unprofitable fusions like downcasts from fp32 -> fp16 inside kernel.
-            # allowing gathers by allowing increasing write_bytes by small factor
-            # TODO - make configurable per input, for insance, bias can fuse fp32 -> fp16 profitably
-
-            BYTES_THRESHOLD_MULTIPLIER = 1.1
-            if read_bytes > (write_bytes * BYTES_THRESHOLD_MULTIPLIER):
-                why("prologue fusion will not increase amount of bytes read in kernel")
-                return False
-
-            # we want to avoid attempting to fuse predictably unprofitable prologues
-            # such as increasing the unaligned reads or writes.
-            # TODO - would be nice to generalize this, however, we would need more explicit
-            # knowledge of memory access patterns in the TritonTemplate in order to know
-            # the stride order to check alignment.
-            origins = tuple(
-                e.target
-                for n in node1.get_nodes()
-                if n.node is not None
-                for e in n.node.get_origins()
-                if e.op == "call_function"
-            )
-            if origins == (torch.ops.aten.constant_pad_nd.default,):
-                why(
-                    "prologue fusion will not increase attempt to fuse in padding bc it increases unaligned reads"
-                )
+            if not self.check_prologue_fusion_heuristics_fusable(node1, why):
                 return False
 
         if node1.is_template() and (
