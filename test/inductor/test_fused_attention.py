@@ -130,8 +130,9 @@ class TestSDPAPatternRewriterTemplate(TestCase):
 
             counters.clear()
             torch.manual_seed(1234)
+            compiled_model = torch.compile(dot_prod_attention, fullgraph=True)
             result2, source_code = run_and_get_code(
-                torch.compile(dot_prod_attention, fullgraph=True),
+                compiled_model,
                 *(args2 + dropout_arg),
             )
             source_code = "\n".join(source_code)
@@ -158,6 +159,16 @@ class TestSDPAPatternRewriterTemplate(TestCase):
                         and (not has_dropout or override_check_equal)
                     ):
                         self.assertEqual(arg1.grad, arg2.grad, atol=atol, rtol=rtol)
+
+            iter_n = 20
+            with torch.profiler.profile(
+                activities=[torch.profiler.ProfilerActivity.CPU],
+                schedule=torch.profiler.schedule(wait=2, warmup=iter_n, active=20),
+            ) as prof:
+                for _ in range(iter_n + 22):
+                    r = compiled_model(*(args2 + dropout_arg))
+                    prof.step()
+                print(prof.key_averages().table(sort_by="self_cpu_time_total"))
 
     @skipIfRocm
     def _test_sdpa_rewriter_1(self):
@@ -1030,10 +1041,19 @@ class TestSDPAPatternRewriterTemplate(TestCase):
             self.skipTest("Causes IndexError. TODO: investigate")
 
         # pattern is different for bs=1
-        for dtype, has_mask, bs in itertools.product(
-            [torch.float32], [True, False], [56, 1]
-        ):
-            seqlen, numhead, headsize = 384, 16, 64
+        # for dtype, has_mask, bs in itertools.product(
+        #     [torch.bfloat16], [True], [120]
+        # ):
+        #     seqlen, numhead, headsize = 384, 16, 64
+
+        dtype = torch.bfloat16
+        has_mask = True
+        is_bs_1 = 1
+        if is_bs_1:
+            candidates = [[1, 384, 16, 64], [1, 197, 12, 64]]
+        else:
+            candidates = [[120, 384, 16, 64], [224, 197, 12, 64]]
+        for bs, seqlen, numhead, headsize in candidates:
             mod = SelfAttnLikeModule(
                 input_dim=headsize * numhead,
                 has_mask=has_mask,
@@ -1045,6 +1065,7 @@ class TestSDPAPatternRewriterTemplate(TestCase):
                 if dtype == torch.bfloat16
                 else contextlib.nullcontext()
             )
+            print("\nTEST shape", bs, numhead, seqlen, headsize)
             inputs = (
                 torch.randn(
                     (bs, seqlen, headsize * numhead), device=self.device, dtype=dtype

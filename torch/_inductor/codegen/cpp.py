@@ -4532,6 +4532,12 @@ class CppScheduling(BaseScheduling):
             # TODO(jgong5): support pre-op fusion with template
             return False
         if node1.is_template():
+            if isinstance(
+                node1.node.template,
+                torch._inductor.codegen.cpp_int8_sdpa_template.CppInt8SdpaTemplate,
+            ):
+                # Int8 SDPA template cannot accept epilogues for now
+                return False
             template_fusion_supported, _ = template_fusion_with_epilogues_supported(
                 node1, [node2]
             )

@@ -182,13 +182,12 @@ def int8_sdpa_lowering(
         key,
         value,
     ]
-    res = autotune_select_algorithm(
+    return autotune_select_algorithm(
         "int8_sdpa",
         _choices,
         inputs_for_autotuning,
         layout,
     )
-    return res
 
 
 int8_sdpa_lowering._inductor_lowering_function = True  # type: ignore[attr-defined]
