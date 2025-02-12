@@ -929,8 +929,10 @@ class OpInfo:
         assert self.dtypes is not None, f"OpInfo for {self.name} has no dtypes!"
 
         # Validates the dtypes are generated from the dispatch-related functions
-        for dtype_list in self.dtypesIf.values():
-            assert isinstance(dtype_list, (_dispatch_dtypes, type(None)))
+        for name, val in self.dtypesIf.items():
+            if val is not None:
+                assert isinstance(val, _dispatch_dtypes)
+                self.dtypesIf[name] = set(val)
 
         if self.aten_name is None:
             self.aten_name = self.name
