@@ -268,6 +268,7 @@ struct {name} {{
 
   void set_{name}({ty} def) {{
     variant_.emplace<{idx + 1}>(std::move(def));
+    tag_ = Tag::{name.upper()};
   }}
 """
 
