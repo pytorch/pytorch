@@ -400,18 +400,27 @@ def get_submodule_folders():
             if line.strip().startswith("path")
         ]
 
-def checkout_nccl():
-    report(f'-- Checkout nccl: {get_cmake_cache_vars()["USE_CUDA"]}')
-    #if get_cmake_cache_vars()["USE_CUDA"]:
+
+def read_nccl_pin() -> str:
+    nccl_file = "nccl.txt"
     cuda_version = os.getenv("DESIRED_CUDA", "")
-    cuda_version_2 = os.getenv("CUDA_VERSION", "")
-    commit_hash = "80f6bda4378b99d99e82b4d76a633791cc45fef0"
-    if cuda_version.startswith("11.8") or cuda_version_2.startswith("11.8"):
-        commit_hash = "ab2b89c4c339bd7f816fbc114a4b05d386b66290"
-    nccl_basedir = os.path.join(cwd, "nccl")
+    if cuda_version.startswith("11.8"):
+        nccl_file = "nccl-legacy.txt"
+    nccl_pin_path = os.path.join(cwd, ".ci", "docker", "ci_commit_pins", nccl_file)
+    with open(nccl_pin_path) as f:
+        return f.read().strip()
+
+
+def checkout_nccl():
+    commit_hash = read_nccl_pin()
     report(f"-- Calling nccl checkout: {commit_hash}")
-    subprocess.check_call(["git", "clone", "https://github.com/NVIDIA/nccl.git", "nccl"], cwd=cwd)
+    nccl_basedir = os.path.join(third_party_path, "nccl")
+    subprocess.check_call(
+        ["git", "clone", "https://github.com/NVIDIA/nccl.git", "nccl"],
+        cwd=third_party_path,
+    )
     subprocess.check_call(["git", "checkout", commit_hash], cwd=nccl_basedir)
+
 
 def check_submodules():
     def check_for_files(folder, files):
@@ -454,7 +463,7 @@ def check_submodules():
                 "LICENSE.txt",
             ],
         )
-    
+
     check_for_files(
         os.path.join(third_party_path, "fbgemm", "third_party", "asmjit"),
         ["CMakeLists.txt"],
@@ -492,6 +501,7 @@ def mirror_files_into_torchgen():
             shutil.copytree(orig_path, new_path)
             continue
         raise RuntimeError("Check the file paths in `mirror_files_into_torchgen()`")
+
 
 # all the work we need to do _before_ setup runs
 def build_deps():
