@@ -1,9 +1,13 @@
-# mypy: allow-untyped-defs
+from typing import Any, Optional
+from typing_extensions import Self
+
 import torch
 from torch import nan, Tensor
 from torch.distributions import constraints
+from torch.distributions.constraints import Constraint
 from torch.distributions.distribution import Distribution
 from torch.distributions.utils import lazy_property, logits_to_probs, probs_to_logits
+from torch.types import _size
 
 
 __all__ = ["Categorical"]
@@ -47,10 +51,18 @@ class Categorical(Distribution):
         probs (Tensor): event probabilities
         logits (Tensor): event log probabilities (unnormalized)
     """
-    arg_constraints = {"probs": constraints.simplex, "logits": constraints.real_vector}
-    has_enumerate_support = True
+    arg_constraints: dict[str, Constraint] = {
+        "probs": constraints.simplex,
+        "logits": constraints.real_vector,
+    }
+    has_enumerate_support: bool = True
 
-    def __init__(self, probs=None, logits=None, validate_args=None):
+    def __init__(
+        self,
+        probs: Optional[Tensor] = None,
+        logits: Optional[Tensor] = None,
+        validate_args: Optional[bool] = None,
+    ) -> None:
         if (probs is None) == (logits is None):
             raise ValueError(
                 "Either `probs` or `logits` must be specified, but not both."
@@ -60,6 +72,7 @@ class Categorical(Distribution):
                 raise ValueError("`probs` parameter must be at least one-dimensional.")
             self.probs = probs / probs.sum(-1, keepdim=True)
         else:
+            assert logits is not None  # helps mypy
             if logits.dim() < 1:
                 raise ValueError("`logits` parameter must be at least one-dimensional.")
             # Normalize
@@ -71,7 +84,7 @@ class Categorical(Distribution):
         )
         super().__init__(batch_shape, validate_args=validate_args)
 
-    def expand(self, batch_shape, _instance=None):
+    def expand(self, batch_shape: _size, _instance: Optional[Self] = None) -> Self:
         new = self._get_checked_instance(Categorical, _instance)
         batch_shape = torch.Size(batch_shape)
         param_shape = batch_shape + torch.Size((self._num_events,))
@@ -86,11 +99,11 @@ class Categorical(Distribution):
         new._validate_args = self._validate_args
         return new
 
-    def _new(self, *args, **kwargs):
+    def _new(self, *args: Any, **kwargs: Any) -> Tensor:
         return self._param.new(*args, **kwargs)
 
     @constraints.dependent_property(is_discrete=True, event_dim=0)
-    def support(self):
+    def support(self) -> Constraint:
         return constraints.integer_interval(0, self._num_events - 1)
 
     @lazy_property
@@ -127,14 +140,14 @@ class Categorical(Distribution):
             device=self.probs.device,
         )
 
-    def sample(self, sample_shape=torch.Size()):
+    def sample(self, sample_shape: _size = torch.Size()) -> Tensor:
         if not isinstance(sample_shape, torch.Size):
             sample_shape = torch.Size(sample_shape)
         probs_2d = self.probs.reshape(-1, self._num_events)
         samples_2d = torch.multinomial(probs_2d, sample_shape.numel(), True).T
         return samples_2d.reshape(self._extended_shape(sample_shape))
 
-    def log_prob(self, value):
+    def log_prob(self, value: Tensor) -> Tensor:
         if self._validate_args:
             self._validate_sample(value)
         value = value.long().unsqueeze(-1)
@@ -142,13 +155,13 @@ class Categorical(Distribution):
         value = value[..., :1]
         return log_pmf.gather(-1, value).squeeze(-1)
 
-    def entropy(self):
+    def entropy(self) -> Tensor:
         min_real = torch.finfo(self.logits.dtype).min
         logits = torch.clamp(self.logits, min=min_real)
         p_log_p = logits * self.probs
         return -p_log_p.sum(-1)
 
-    def enumerate_support(self, expand=True):
+    def enumerate_support(self, expand: bool = True) -> Tensor:
         num_events = self._num_events
         values = torch.arange(num_events, dtype=torch.long, device=self._param.device)
         values = values.view((-1,) + (1,) * len(self._batch_shape))

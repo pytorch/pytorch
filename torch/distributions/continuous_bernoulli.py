@@ -1,9 +1,11 @@
-# mypy: allow-untyped-defs
 import math
+from typing import Any, Optional, Union
+from typing_extensions import Self
 
 import torch
 from torch import Tensor
 from torch.distributions import constraints
+from torch.distributions.constraints import Constraint
 from torch.distributions.exp_family import ExponentialFamily
 from torch.distributions.utils import (
     broadcast_all,
@@ -13,7 +15,7 @@ from torch.distributions.utils import (
     probs_to_logits,
 )
 from torch.nn.functional import binary_cross_entropy_with_logits
-from torch.types import _Number, _size
+from torch.types import _Number, _size, Number
 
 
 __all__ = ["ContinuousBernoulli"]
@@ -45,13 +47,20 @@ class ContinuousBernoulli(ExponentialFamily):
     autoencoders, Loaiza-Ganem G and Cunningham JP, NeurIPS 2019.
     https://arxiv.org/abs/1907.06845
     """
-    arg_constraints = {"probs": constraints.unit_interval, "logits": constraints.real}
+    arg_constraints: dict[str, Constraint] = {
+        "probs": constraints.unit_interval,
+        "logits": constraints.real,
+    }
     support = constraints.unit_interval
-    _mean_carrier_measure = 0
-    has_rsample = True
+    _mean_carrier_measure: float = 0
+    has_rsample: bool = True
 
     def __init__(
-        self, probs=None, logits=None, lims=(0.499, 0.501), validate_args=None
+        self,
+        probs: Optional[Union[Tensor, Number]] = None,
+        logits: Optional[Union[Tensor, Number]] = None,
+        lims: tuple[float, float] = (0.499, 0.501),
+        validate_args: Optional[bool] = None,
     ) -> None:
         if (probs is None) == (logits is None):
             raise ValueError(
@@ -67,6 +76,7 @@ class ContinuousBernoulli(ExponentialFamily):
                     raise ValueError("The parameter probs has invalid values")
             self.probs = clamp_probs(self.probs)
         else:
+            assert logits is not None  # helps mypy
             is_scalar = isinstance(logits, _Number)
             (self.logits,) = broadcast_all(logits)
         self._param = self.probs if probs is not None else self.logits
@@ -77,7 +87,7 @@ class ContinuousBernoulli(ExponentialFamily):
         self._lims = lims
         super().__init__(batch_shape, validate_args=validate_args)
 
-    def expand(self, batch_shape, _instance=None):
+    def expand(self, batch_shape: _size, _instance: Optional[Self] = None) -> Self:
         new = self._get_checked_instance(ContinuousBernoulli, _instance)
         new._lims = self._lims
         batch_shape = torch.Size(batch_shape)
@@ -91,22 +101,22 @@ class ContinuousBernoulli(ExponentialFamily):
         new._validate_args = self._validate_args
         return new
 
-    def _new(self, *args, **kwargs):
+    def _new(self, *args: Any, **kwargs: Any) -> Tensor:
         return self._param.new(*args, **kwargs)
 
-    def _outside_unstable_region(self):
+    def _outside_unstable_region(self) -> Tensor:
         return torch.max(
             torch.le(self.probs, self._lims[0]), torch.gt(self.probs, self._lims[1])
         )
 
-    def _cut_probs(self):
+    def _cut_probs(self) -> Tensor:
         return torch.where(
             self._outside_unstable_region(),
             self.probs,
             self._lims[0] * torch.ones_like(self.probs),
         )
 
-    def _cont_bern_log_norm(self):
+    def _cont_bern_log_norm(self) -> Tensor:
         """computes the log normalizing constant as a function of the 'probs' parameter"""
         cut_probs = self._cut_probs()
         cut_probs_below_half = torch.where(
@@ -162,7 +172,7 @@ class ContinuousBernoulli(ExponentialFamily):
     def param_shape(self) -> torch.Size:
         return self._param.size()
 
-    def sample(self, sample_shape=torch.Size()):
+    def sample(self, sample_shape: _size = torch.Size()) -> Tensor:
         shape = self._extended_shape(sample_shape)
         u = torch.rand(shape, dtype=self.probs.dtype, device=self.probs.device)
         with torch.no_grad():
@@ -173,7 +183,7 @@ class ContinuousBernoulli(ExponentialFamily):
         u = torch.rand(shape, dtype=self.probs.dtype, device=self.probs.device)
         return self.icdf(u)
 
-    def log_prob(self, value):
+    def log_prob(self, value: Tensor) -> Tensor:
         if self._validate_args:
             self._validate_sample(value)
         logits, value = broadcast_all(self.logits, value)
@@ -182,7 +192,7 @@ class ContinuousBernoulli(ExponentialFamily):
             + self._cont_bern_log_norm()
         )
 
-    def cdf(self, value):
+    def cdf(self, value: Tensor) -> Tensor:
         if self._validate_args:
             self._validate_sample(value)
         cut_probs = self._cut_probs()
@@ -198,7 +208,7 @@ class ContinuousBernoulli(ExponentialFamily):
             torch.where(torch.ge(value, 1.0), torch.ones_like(value), unbounded_cdfs),
         )
 
-    def icdf(self, value):
+    def icdf(self, value: Tensor) -> Tensor:
         cut_probs = self._cut_probs()
         return torch.where(
             self._outside_unstable_region(),
@@ -210,7 +220,7 @@ class ContinuousBernoulli(ExponentialFamily):
             value,
         )
 
-    def entropy(self):
+    def entropy(self) -> Tensor:
         log_probs0 = torch.log1p(-self.probs)
         log_probs1 = torch.log(self.probs)
         return (
@@ -223,7 +233,7 @@ class ContinuousBernoulli(ExponentialFamily):
     def _natural_params(self) -> tuple[Tensor]:
         return (self.logits,)
 
-    def _log_normalizer(self, x):
+    def _log_normalizer(self, x: Tensor) -> Tensor:
         """computes the log normalizing constant as a function of the natural parameter"""
         out_unst_reg = torch.max(
             torch.le(x, self._lims[0] - 0.5), torch.gt(x, self._lims[1] - 0.5)

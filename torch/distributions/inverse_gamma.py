@@ -1,10 +1,14 @@
-# mypy: allow-untyped-defs
+from typing import Optional, Union
+from typing_extensions import Self
+
 import torch
 from torch import Tensor
 from torch.distributions import constraints
+from torch.distributions.constraints import Constraint
 from torch.distributions.gamma import Gamma
 from torch.distributions.transformed_distribution import TransformedDistribution
 from torch.distributions.transforms import PowerTransform
+from torch.types import _size
 
 
 __all__ = ["InverseGamma"]
@@ -31,21 +35,27 @@ class InverseGamma(TransformedDistribution):
         rate (float or Tensor): rate = 1 / scale of the distribution
             (often referred to as beta)
     """
-    arg_constraints = {
+    arg_constraints: dict[str, Constraint] = {
         "concentration": constraints.positive,
         "rate": constraints.positive,
     }
-    support = constraints.positive
-    has_rsample = True
+    support = constraints.positive  # type: ignore[assignment]
+    has_rsample: bool = True
+    base_dist: Gamma
 
-    def __init__(self, concentration, rate, validate_args=None):
+    def __init__(
+        self,
+        concentration: Union[Tensor, float],
+        rate: Union[Tensor, float],
+        validate_args: Optional[bool] = None,
+    ) -> None:
         base_dist = Gamma(concentration, rate, validate_args=validate_args)
         neg_one = -base_dist.rate.new_ones(())
         super().__init__(
             base_dist, PowerTransform(neg_one), validate_args=validate_args
         )
 
-    def expand(self, batch_shape, _instance=None):
+    def expand(self, batch_shape: _size, _instance: Optional[Self] = None) -> Self:
         new = self._get_checked_instance(InverseGamma, _instance)
         return super().expand(batch_shape, _instance=new)
 
@@ -73,7 +83,7 @@ class InverseGamma(TransformedDistribution):
         )
         return torch.where(self.concentration > 2, result, torch.inf)
 
-    def entropy(self):
+    def entropy(self) -> Tensor:
         return (
             self.concentration
             + self.rate.log()

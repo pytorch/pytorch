@@ -1,26 +1,29 @@
-# mypy: allow-untyped-defs
 import math
+from typing import Final, Optional
+from typing_extensions import Self
 
 import torch
 import torch.jit
 from torch import Tensor
 from torch.distributions import constraints
+from torch.distributions.constraints import Constraint
 from torch.distributions.distribution import Distribution
 from torch.distributions.utils import broadcast_all, lazy_property
+from torch.types import _size
 
 
 __all__ = ["VonMises"]
 
 
-def _eval_poly(y, coef):
+def _eval_poly(y: Tensor, coef: list[float]) -> Tensor:
     coef = list(coef)
-    result = coef.pop()
+    result = torch.full_like(y, fill_value=coef.pop())
     while coef:
         result = coef.pop() + y * result
     return result
 
 
-_I0_COEF_SMALL = [
+_I0_COEF_SMALL: Final[list[float]] = [
     1.0,
     3.5156229,
     3.0899424,
@@ -29,7 +32,7 @@ _I0_COEF_SMALL = [
     0.360768e-1,
     0.45813e-2,
 ]
-_I0_COEF_LARGE = [
+_I0_COEF_LARGE: Final[list[float]] = [
     0.39894228,
     0.1328592e-1,
     0.225319e-2,
@@ -40,7 +43,7 @@ _I0_COEF_LARGE = [
     -0.1647633e-1,
     0.392377e-2,
 ]
-_I1_COEF_SMALL = [
+_I1_COEF_SMALL: Final[list[float]] = [
     0.5,
     0.87890594,
     0.51498869,
@@ -49,7 +52,7 @@ _I1_COEF_SMALL = [
     0.301532e-2,
     0.32411e-3,
 ]
-_I1_COEF_LARGE = [
+_I1_COEF_LARGE: Final[list[float]] = [
     0.39894228,
     -0.3988024e-1,
     -0.362018e-2,
@@ -61,11 +64,11 @@ _I1_COEF_LARGE = [
     -0.420059e-2,
 ]
 
-_COEF_SMALL = [_I0_COEF_SMALL, _I1_COEF_SMALL]
-_COEF_LARGE = [_I0_COEF_LARGE, _I1_COEF_LARGE]
+_COEF_SMALL: Final[list[list[float]]] = [_I0_COEF_SMALL, _I1_COEF_SMALL]
+_COEF_LARGE: Final[list[list[float]]] = [_I0_COEF_LARGE, _I1_COEF_LARGE]
 
 
-def _log_modified_bessel_fn(x, order=0):
+def _log_modified_bessel_fn(x: Tensor, order: int = 0) -> Tensor:
     """
     Returns ``log(I_order(x))`` for ``x > 0``,
     where `order` is either 0 or 1.
@@ -88,8 +91,10 @@ def _log_modified_bessel_fn(x, order=0):
     return result
 
 
-@torch.jit.script_if_tracing
-def _rejection_sample(loc, concentration, proposal_r, x):
+@torch.jit.script_if_tracing  # type: ignore[misc]
+def _rejection_sample(
+    loc: Tensor, concentration: Tensor, proposal_r: Tensor, x: Tensor
+) -> Tensor:
     done = torch.zeros(x.shape, dtype=torch.bool, device=loc.device)
     while not done.all():
         u = torch.rand((3,) + x.shape, dtype=loc.dtype, device=loc.device)
@@ -122,17 +127,25 @@ class VonMises(Distribution):
     :param torch.Tensor concentration: concentration parameter
     """
 
-    arg_constraints = {"loc": constraints.real, "concentration": constraints.positive}
+    arg_constraints: dict[str, Constraint] = {
+        "loc": constraints.real,
+        "concentration": constraints.positive,
+    }
     support = constraints.real
-    has_rsample = False
+    has_rsample: bool = False
 
-    def __init__(self, loc, concentration, validate_args=None):
+    def __init__(
+        self,
+        loc: Tensor,
+        concentration: Tensor,
+        validate_args: Optional[bool] = None,
+    ) -> None:
         self.loc, self.concentration = broadcast_all(loc, concentration)
         batch_shape = self.loc.shape
         event_shape = torch.Size()
         super().__init__(batch_shape, event_shape, validate_args)
 
-    def log_prob(self, value):
+    def log_prob(self, value: Tensor) -> Tensor:
         if self._validate_args:
             self._validate_sample(value)
         log_prob = self.concentration * torch.cos(value - self.loc)
@@ -162,7 +175,7 @@ class VonMises(Distribution):
         return torch.where(kappa < 1e-5, _proposal_r_taylor, _proposal_r)
 
     @torch.no_grad()
-    def sample(self, sample_shape=torch.Size()):
+    def sample(self, sample_shape: _size = torch.Size()) -> Tensor:
         """
         The sampling algorithm for the von Mises distribution is based on the
         following paper: D.J. Best and N.I. Fisher, "Efficient simulation of the
@@ -178,7 +191,7 @@ class VonMises(Distribution):
             self._loc, self._concentration, self._proposal_r, x
         ).to(self.loc.dtype)
 
-    def expand(self, batch_shape, _instance=None):
+    def expand(self, batch_shape: _size, _instance: Optional[Self] = None) -> Self:
         try:
             return super().expand(batch_shape)
         except NotImplementedError:
