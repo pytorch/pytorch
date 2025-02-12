@@ -78,8 +78,12 @@ class AssociativeScanOp(HigherOrderOperator):
         super().__init__("associative_scan")
 
     def __call__(self, combine_fn, xs, additional_inputs):
+        # There is currently an issue that the ScanOp is sometimes called with
+        # the additional_inputs being a list. See https://github.com/pytorch/pytorch/issues/145785
+        # Once this issue is resolved, the assertion should only allow tuples
+        # and the tuple cast should be removed
         assert isinstance(
-            additional_inputs, tuple
+            additional_inputs, (tuple, list)
         ), "additional_inputs must be a tuple."
         validate_subgraph_args_types(additional_inputs)
         return super().__call__(combine_fn, xs, additional_inputs)
@@ -396,7 +400,7 @@ def trace_associative_scan(
     )
 
     with disable_proxy_modes_tracing():
-        out = [aten.clone(x) for x in xs]
+        out = tuple(aten.clone(x) for x in xs)
 
     return track_tensor_tree(out, out_proxy, constant=None, tracer=proxy_mode.tracer)
 
@@ -421,7 +425,7 @@ def associative_scan_proxy_mode(mode, combine_fn, xs, additional_inputs):
 @associative_scan_op.py_impl(FakeTensorMode)
 def assoiciative_scan_fake_tensor_mode(mode, combine_fn, xs, additional_inputs):
     with mode:
-        return [x.clone() for x in xs]
+        return tuple(x.clone() for x in xs)
 
 
 @associative_scan_op.py_functionalize_impl
