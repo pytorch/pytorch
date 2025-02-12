@@ -10121,25 +10121,50 @@ def ___make_guard_fn():
         @dataclasses.dataclass(frozen=True)
         class TestDataClass:
             x: torch.Tensor
-            n: int = dataclasses.field(init=False)
+            a: int = dataclasses.field(init=False)
+            b: int = dataclasses.field(default=42, init=False)
 
             def __post_init__(self):
                 object.__setattr__(self, "n", self.x.shape[0])
 
         @allow_in_graph
         def inner_fn(dc):
-            return dc.x + dc.n
+            return (dc.x + dc.n) * dc.b
 
         def fn(x):
             dc = TestDataClass(x)
             return inner_fn(dc)
 
-        fn_opt = torch.compile(fullgraph=True)(fn)
+        fn_opt = torch.compile(fullgraph=True, backend="eager")(fn)
         inps = (torch.ones(2, 3),)
         actual = fn_opt(*inps)
         expected = fn(*inps)
 
         self.assertEqual(actual, expected)
+
+    @requiresPy310
+    def test_frozen_dataclass_field_init_false_kwonly_true(self):
+        # Ensure Dynamo won't crash in this case.
+        @dataclasses.dataclass(frozen=True, repr=False)
+        class TestDataClass:
+            x: torch.Tensor
+            a: int = dataclasses.field(init=False, kw_only=True)
+
+        @allow_in_graph
+        def inner_fn(dc):
+            return dc.x + len(dataclasses.fields(dc))
+
+        def fn(x):
+            dc = TestDataClass(x)
+            return inner_fn(dc)
+
+        fn_opt = torch.compile(fullgraph=True, backend="eager")(fn)
+        inps = (torch.ones(2, 3),)
+        actual = fn_opt(*inps)
+        expected = fn(*inps)
+
+        self.assertEqual(actual, expected)
+        pass
 
     def test_pytree_tree_leaves(self):
         implemtations = [("python", python_pytree)]
