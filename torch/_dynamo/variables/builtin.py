@@ -1668,7 +1668,7 @@ class BuiltinVariable(VariableTracker):
             )
 
         isinstance_type_tuple: tuple[type, ...]
-        if isinstance(isinstance_type, (type,)) or callable(
+        if isinstance(isinstance_type, type) or callable(
             # E.g. isinstance([], typing.Sequence)
             getattr(isinstance_type, "__instancecheck__", None)
         ):
@@ -1678,7 +1678,7 @@ class BuiltinVariable(VariableTracker):
         ):
             isinstance_type_tuple = isinstance_type.__args__
         elif isinstance(isinstance_type, tuple) and all(
-            isinstance(tp, (type,)) or callable(getattr(tp, "__instancecheck__", None))
+            isinstance(tp, type) or callable(getattr(tp, "__instancecheck__", None))
             for tp in isinstance_type
         ):
             isinstance_type_tuple = isinstance_type
