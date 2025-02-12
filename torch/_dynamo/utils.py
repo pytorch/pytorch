@@ -1199,6 +1199,7 @@ class CompilationMetrics:
     tensorify_float_failure: Optional[set[str]] = None
     guard_latency_us: Optional[float] = None
     recompile_reason: Optional[str] = None
+    triton_kernel_compile_times_us: Optional[str] = None
 
     @classmethod
     def create(cls, metrics: dict[str, Any]):
@@ -1327,6 +1328,7 @@ def add_compilation_metrics_to_chromium(c: CompilationMetrics) -> None:
         dynamo_time_before_restart_s=c.dynamo_time_before_restart_s,
         has_guarded_code=c.has_guarded_code,
         dynamo_config=c.dynamo_config,
+        triton_kernel_compile_times_us=c.triton_kernel_compile_times_us,
     )
 
 
