@@ -10940,6 +10940,14 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         )
         self.run_test(model_export, (x,), training=torch.onnx.TrainingMode.EVAL)
 
+    def test_grid_sampler_2d_vs2022_illegal_instruction(self):
+        torch.manual_seed(0)
+        b = torch.rand(2, 13, 10, 2, dtype=torch.float64)
+        a = torch.rand(2, 3, 5, 20, dtype=torch.float64)
+        torch.grid_sampler_2d(
+            a, b, interpolation_mode=0, padding_mode=0, align_corners=False
+        )
+
     @skipIfUnsupportedMinOpsetVersion(11)
     def test_nms(self):
         num_boxes = 100
