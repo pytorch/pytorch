@@ -3216,12 +3216,6 @@ LEGACY_MOD_INLINELIST = {
     "torch._export.wrappers",
     "torch._functorch.apis",
     "torch._functorch.deprecated",
-    "torch._higher_order_ops.cond",
-    "torch._higher_order_ops.while_loop",
-    "torch._higher_order_ops.associative_scan",
-    "torch._higher_order_ops.scan",
-    "torch._higher_order_ops._invoke_quant",
-    "torch._higher_order_ops.utils",
     "torch.nn.attention.flex_attention",
     "torch.ao.quantization.pt2e.export_utils",
     "torch.ao.quantization.pt2e.qat_utils",
@@ -3229,7 +3223,6 @@ LEGACY_MOD_INLINELIST = {
     "torch.ao.quantization.pt2e.utils",
     "torch.ao.quantization.quantizer.xnnpack_quantizer",
     "torch.export.unflatten",
-    "torch.optim",
 }
 
 if torch.distributed.is_available():
@@ -3347,7 +3340,6 @@ MOD_SKIPLIST = [
     "torch._export",
     "torch._functorch",
     "torch._guards",
-    "torch._higher_order_ops._invoke_quant",
     "torch._higher_order_ops.effects",
     "torch._higher_order_ops.map",
     "torch._higher_order_ops.torchbind",
@@ -3406,7 +3398,6 @@ MOD_SKIPLIST = [
     "torch.nested",
     "torch.nn",
     "torch.onnx",
-    "torch.optim",
     "torch.overrides",
     "torch.package",
     "torch.profiler",
