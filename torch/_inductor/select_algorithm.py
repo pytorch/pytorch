@@ -648,7 +648,7 @@ class TritonTemplateKernel(TritonKernel):
                     self.body.writeline(str(scatter))
 
             body_val = self.body.getvalue()
-            self.cse.invalidate(OrderedSet[str]())
+            self.cse.invalidate(OrderedSet())
             return body_val
 
     def load_input(
@@ -742,7 +742,7 @@ class TritonTemplateKernel(TritonKernel):
             template_mask = self.template_mask
 
             class StoreOutputSubstitution(V.WrapperHandler):  # type: ignore[name-defined]
-                self.name = name
+                name = "StoreOutputSubstitution"
 
                 def store(
                     self,
@@ -2112,11 +2112,8 @@ class AlgorithmSelectorCache(PersistentCache):
         )
         if config.autotune_num_choices_displayed == 0:
             return
-        elif config.autotune_num_choices_displayed is None:
-            n = -1
-        else:
-            n = config.autotune_num_choices_displayed
-
+        # when autotune_num_choices_displayed is None, [:None] means all
+        n = config.autotune_num_choices_displayed
         top_k = sorted(timings, key=timings.__getitem__)[:n]
 
         best = top_k[0]
