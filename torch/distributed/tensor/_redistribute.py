@@ -2,7 +2,7 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
 import logging
 from functools import cache
-from typing import cast, NamedTuple, Optional
+from typing import cast, NamedTuple
 
 import torch
 import torch.distributed._functional_collectives as funcol
@@ -292,39 +292,23 @@ class Redistribute(torch.autograd.Function):
         device_mesh: DeviceMesh,
         placements: tuple[Placement, ...],
         async_op: bool = False,
-        forward_dtype: Optional[torch.dtype] = None,
-        backward_dtype: Optional[torch.dtype] = None,
     ):
-        ctx.async_op = async_op
-        ctx.backward_dtype = backward_dtype
-
-        if forward_dtype is not None:
-            local_tensor = input._local_tensor.to(dtype=forward_dtype)
-            current_spec = DTensorSpec(
-                mesh=device_mesh,
-                placements=input._spec.placements,
-                tensor_meta=TensorMeta(
-                    shape=input.shape,
-                    stride=input.stride(),
-                    dtype=forward_dtype,
-                ),
-            )
-        else:
-            local_tensor = input._local_tensor
-            current_spec = input._spec
-
+        current_spec = input._spec
         ctx.current_spec = current_spec
+        ctx.async_op = async_op
 
         if current_spec.placements != placements:
             target_spec = DTensorSpec(
-                device_mesh, placements, tensor_meta=current_spec.tensor_meta
+                device_mesh, placements, tensor_meta=input._spec.tensor_meta
             )
+
+            local_tensor = input._local_tensor
             output = redistribute_local_tensor(
                 local_tensor, current_spec, target_spec, async_op=async_op
             )
         else:
             # use the same local tensor if placements are the same.
-            output = local_tensor
+            output = input._local_tensor
             target_spec = current_spec
 
         return dtensor.DTensor(
@@ -336,29 +320,10 @@ class Redistribute(torch.autograd.Function):
     @staticmethod
     def backward(ctx, grad_output: "dtensor.DTensor"):  # type: ignore[override]
         previous_spec = ctx.current_spec
+        current_spec = grad_output._spec
         async_op = ctx.async_op
-        backward_dtype = ctx.backward_dtype
 
-        if backward_dtype is not None:
-            local_tensor = grad_output._local_tensor.to(dtype=backward_dtype)
-            current_spec = DTensorSpec(
-                mesh=grad_output._spec.device_mesh,
-                placements=grad_output._spec.placements,
-                tensor_meta=TensorMeta(
-                    shape=grad_output.shape,
-                    stride=grad_output.stride(),
-                    dtype=backward_dtype,
-                ),
-            )
-            previous_spec = DTensorSpec(
-                mesh=previous_spec.device_mesh,
-                placements=previous_spec.placements,
-                tensor_meta=current_spec.tensor_meta,
-            )
-        else:
-            local_tensor = grad_output._local_tensor
-            current_spec = grad_output._spec
-
+        local_tensor = grad_output._local_tensor
         output = redistribute_local_tensor(
             local_tensor,
             current_spec,
@@ -378,7 +343,11 @@ class Redistribute(torch.autograd.Function):
         spec = DTensorSpec(
             previous_spec.device_mesh,
             tuple(normalized_placements),
-            previous_spec.tensor_meta,
+            tensor_meta=TensorMeta(
+                shape=grad_output.shape,
+                stride=grad_output.stride(),
+                dtype=grad_output.dtype,
+            ),
         )
         output_dtensor = dtensor.DTensor(
             output,
@@ -388,8 +357,6 @@ class Redistribute(torch.autograd.Function):
 
         return (
             output_dtensor,
-            None,
-            None,
             None,
             None,
             None,
