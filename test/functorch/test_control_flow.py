@@ -4980,8 +4980,6 @@ def forward(self, x_1):
         ):
             make_fx(f_wrapper(f), tracing_mode="symbolic")(example_input_func)
 
-    # https://github.com/pytorch/pytorch/issues/126988
-    @xfailIfTorchDynamo
     def test_cond_functionalized_input_aliasing_with_aot_func(self):
         def true_fn(x):
             return x
