@@ -1424,6 +1424,12 @@ def create_handler(
             _get_timeout(params, "close"),
             _get_timeout(params, "heartbeat"),
         )
+        keep_alive_interval = params.get_as_int("keep_alive_interval", 5)
+        if keep_alive_interval is None:
+            raise TypeError("You passed 'keep_alive_interval=None' as a rendezvous configuration option")
+        keep_alive_max_attempt = params.get_as_int("keep_alive_max_attempt", 3)
+        if keep_alive_max_attempt is None:
+            raise TypeError("You passed 'keep_alive_max_attempt=None' as a rendezvous configuration option")
 
         return DynamicRendezvousHandler.from_backend(
             params.run_id,
@@ -1433,8 +1439,8 @@ def create_handler(
             params.max_nodes,
             params.local_addr,
             timeout,
-            keep_alive_interval=params.get_as_int("keep_alive_interval", 5),
-            keep_alive_max_attempt=params.get_as_int("keep_alive_max_attempt", 3),
+            keep_alive_interval=keep_alive_interval,
+            keep_alive_max_attempt=keep_alive_max_attempt,
         )
     except Exception as e:
         construct_and_record_rdzv_event(
