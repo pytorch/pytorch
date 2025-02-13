@@ -210,9 +210,9 @@ bool is_broadcast(const at::Tensor& t) {
 void undo_broadcast_on_batch(at::Tensor& m1, at::Tensor& m2) {
   // oneDNN support one of src and wei broadcasted on batch dim
   // tensor shape = [b, m, n]
-  int dim_b = 0;
-  int dim_m = 1;
-  int dim_n = 2;
+  constexpr int dim_b = 0;
+  constexpr int dim_m = 1;
+  constexpr int dim_n = 2;
   auto only_broadcasted_on_batch =
       [dim_b, dim_m, dim_n](const at::Tensor& tensor) {
         auto tensor_dim = tensor.dim();
@@ -234,17 +234,17 @@ void undo_broadcast_on_batch(at::Tensor& m1, at::Tensor& m2) {
   bool m2_only_batch_broadcasted = only_broadcasted_on_batch(m2);
   bool has_broadcast = m1_only_batch_broadcasted || m2_only_batch_broadcasted;
   bool both_broadcast = m1_only_batch_broadcasted && m2_only_batch_broadcasted;
-  if (has_broadcast) {
-    if (both_broadcast) {
-      // oneDNN does not support both src and wei broadcasted on batch dim. We
-      // copy the smaller one.
-      if (m1.size(dim_m) < m2.size(dim_n)) {
-        m1 = m1.contiguous();
-        m1_only_batch_broadcasted = false;
-      } else {
-        m2 = m2.contiguous();
-      }
+  if (both_broadcast) {
+    // oneDNN does not support both src and wei broadcasted on batch dim. We
+    // copy the smaller one.
+    if (m1.size(dim_m) < m2.size(dim_n)) {
+      m1 = m1.contiguous();
+      m1_only_batch_broadcasted = false;
+    } else {
+      m2 = m2.contiguous();
     }
+  }
+  if (has_broadcast) {
     at::Tensor& tensor = m1_only_batch_broadcasted ? m1 : m2;
     tensor = tensor
                  .as_strided(
