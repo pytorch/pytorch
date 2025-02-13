@@ -5,6 +5,10 @@
 #include <cuda.h>
 #include <library_types.h>
 
+#if defined(USE_ROCM)
+#include <hip/hip_runtime.h>
+#endif
+
 namespace at::cuda {
 
 template <typename scalar_t>
@@ -52,8 +56,82 @@ template<> inline cudaDataType getCudaDataType<at::BFloat16>() {
   return CUDA_R_16BF;
 }
 
+#if defined(USE_ROCM)
+inline std::string getCurrentGPUArch() {
+  static std::string cached_arch;
+  static bool initialized = false;
+
+  if (!initialized) {
+    int device;
+    hipGetDevice(&device);
+    hipDeviceProp_t props;
+    hipGetDeviceProperties(&props, device);
+    cached_arch = std::string(props.gcnArchName);
+    initialized = true;
+  }
+
+  return cached_arch;
+}
+
+namespace {
+// Define architecture-specific F8 type mappings
+struct F8TypeMapping {
+  c10::ScalarType from_type;
+  c10::ScalarType to_type;
+  const char* message;
+};
+
+using F8MapType = std::unordered_map<std::string, std::vector<F8TypeMapping>>;
+
+const F8MapType& getF8TypeMappings() {
+  static const F8MapType mappings = {
+    {"gfx942", {  // MI300
+      {c10::ScalarType::Float8_e4m3fn, c10::ScalarType::Float8_e4m3fnuz, "only supports fnuz variants"},
+      {c10::ScalarType::Float8_e5m2, c10::ScalarType::Float8_e5m2fnuz, "only supports fnuz variants"}
+    }},
+    {"gfx950", {  // MI350
+      {c10::ScalarType::Float8_e4m3fnuz, c10::ScalarType::Float8_e4m3fn, "only supports OCP F8 variants"},
+      {c10::ScalarType::Float8_e5m2fnuz, c10::ScalarType::Float8_e5m2, "only supports OCP F8 variants"}
+    }},
+    {"gfx1200", {  // Navi4
+      {c10::ScalarType::Float8_e4m3fnuz, c10::ScalarType::Float8_e4m3fn, "only supports OCP F8 variants"},
+      {c10::ScalarType::Float8_e5m2fnuz, c10::ScalarType::Float8_e5m2, "only supports OCP F8 variants"}
+    }},
+    {"gfx1201", {  // Navi4
+      {c10::ScalarType::Float8_e4m3fnuz, c10::ScalarType::Float8_e4m3fn, "only supports OCP F8 variants"},
+      {c10::ScalarType::Float8_e5m2fnuz, c10::ScalarType::Float8_e5m2, "only supports OCP F8 variants"}
+    }}
+  };
+  return mappings;
+}
+}  // anonymous namespace
+
+inline c10::ScalarType maybeOverrideFloat8Type(c10::ScalarType scalar_type) {
+  std::string arch = getCurrentGPUArch();
+  
+  const auto& mappings = getF8TypeMappings();
+  auto arch_it = mappings.find(arch);
+  if (arch_it != mappings.end()) {
+    for (const auto& mapping : arch_it->second) {
+      if (scalar_type == mapping.from_type) {
+        TORCH_WARN("Overriding ", mapping.from_type, " to ", mapping.to_type, 
+                  " for ", arch, " - ", mapping.message);
+        return mapping.to_type;
+      }
+    }
+  }
+  return scalar_type;
+}
+#endif
+
 inline cudaDataType ScalarTypeToCudaDataType(const c10::ScalarType& scalar_type) {
-  switch (scalar_type) {
+#if defined(USE_ROCM)
+  auto adjusted_type = maybeOverrideFloat8Type(scalar_type);
+#else
+  auto adjusted_type = scalar_type;
+#endif
+
+  switch (adjusted_type) {
     case c10::ScalarType::Byte:
       return CUDA_R_8U;
     case c10::ScalarType::Char:
