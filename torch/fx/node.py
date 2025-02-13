@@ -1,6 +1,7 @@
 # Nodes represent a definition of a value in our graph of operators.
 import builtins
 import inspect
+import operator
 import types
 import warnings
 from collections.abc import Mapping, Sequence
@@ -68,11 +69,14 @@ _legal_ops = dict.fromkeys(
     ]
 )
 
-_side_effectful_need_to_be_preserved_pre_dispatch: set[Callable] = {
+# Dynamo is unable to trace global set[Callable].__contains__.
+# See https://github.com/pytorch/pytorch/issues/145761. Since we only have
+# a handful of ops so switch to list of callables.
+_side_effectful_need_to_be_preserved_pre_dispatch: list[Callable] = [
     torch._C._set_grad_enabled,
     torch.amp._enter_autocast,
     torch.amp._exit_autocast,
-}
+]
 
 # TODO: Either refactor this into 2 functions 1 dce for functional graphs and 1 dce for all graphs,
 # or add logic to correctly mark all inplace ops as side effectful.
@@ -88,7 +92,9 @@ _side_effectful_functions: set[Callable] = {
     _ops.profiler._record_function_enter_new,
     _ops.profiler._record_function_exit,
     _ops.inductor.accumulate_grad_.default,
-} | _side_effectful_need_to_be_preserved_pre_dispatch
+    operator.setitem,
+} | set(_side_effectful_need_to_be_preserved_pre_dispatch)
+
 if hasattr(_ops.inductor, "resize_storage_bytes_"):
     _side_effectful_functions.add(_ops.inductor.resize_storage_bytes_.default)
 
@@ -596,7 +602,8 @@ class Node(_NodeBase):
             return self._repr_fn(self)
         return self.name
 
-    def _pretty_print_target(self, target: object) -> str:
+    @staticmethod
+    def _pretty_print_target(target: object) -> str:
         """
         Make target printouts more user-friendly.
         1) builtins will be printed as `builtins.xyz`
