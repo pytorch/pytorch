@@ -50,6 +50,7 @@ from ..utils import (
     istype,
     numpy_operator_wrapper,
     proxy_args_kwargs,
+    str_methods,
     tensortype_to_dtype,
 )
 from .base import ValueMutationNew, VariableTracker
@@ -121,8 +122,13 @@ polyfill_fn_mapping = {
 
 class BuiltinVariable(VariableTracker):
     """
-    A VariableTracker that represents a built-in value. A lot of the code
-    here assumes it will be a function object.
+    A VariableTracker that represents a built-in value (functions and operators).
+    A lot of the code here assumes it will be a function object.
+
+    The BuiltinVariable class wraps Python built-in functions (like len, isinstance, etc.)
+    and operators (like +, -, *, etc.) to enable symbolic execution during tracing. This allows
+    Dynamo to properly handle these operations when converting Python code to FX graphs while
+    maintaining correct semantics and enabling optimizations.
     """
 
     _SENTINEL = object()
@@ -653,6 +659,10 @@ class BuiltinVariable(VariableTracker):
                             (VariableTracker, SymNodeVariable),
                             op_var._comparison_with_symnode,
                         ),
+                        (
+                            (variables.ExceptionVariable, variables.ExceptionVariable),
+                            lambda tx, l, r: ConstantVariable(op(l, r))
+                        ),
                     ]
                 )
 
@@ -661,14 +671,8 @@ class BuiltinVariable(VariableTracker):
                     # and True for `is` and `is not`, respectively
                     if type(left) is not type(right):
                         return ConstantVariable.create(op.__name__ != "is_")
-                    # is => left is right -> True
-                    # is => left is not right -> False
-                    # is not => left is right -> False
-                    # is not => left is not right -> True
-                    if left is right or all(
-                        type(e) is variables.ExceptionVariable for e in (left, right)
-                    ):
-                        return ConstantVariable(op(left, right))
+                    if left is right:
+                        return ConstantVariable.create(op(left, right))
 
                 result.append(((VariableTracker, VariableTracker), handle_is))
 
@@ -1145,6 +1149,16 @@ class BuiltinVariable(VariableTracker):
                 result.set_underlying_tuple_vt(tuple_vt)
                 return result
 
+            if self.fn is list:
+                list_vt = ListVariable([], mutation_type=ValueMutationNew())
+                if isinstance(args[0], BuiltinVariable) and args[0].fn is list:
+                    return list_vt
+                return tx.output.side_effects.track_new_user_defined_object(
+                    self,
+                    args[0],
+                    args[1:],
+                )
+
         if self.fn is object and name == "__init__":
             # object.__init__ is a no-op
             return variables.ConstantVariable(None)
@@ -1158,6 +1172,12 @@ class BuiltinVariable(VariableTracker):
                 if isinstance(args[0], variables.UserDefinedDictVariable):
                     return args[0]._dict_vt.call_method(tx, name, args[1:], kwargs)
                 elif isinstance(args[0], variables.ConstDictVariable):
+                    return args[0].call_method(tx, name, args[1:], kwargs)
+
+        if self.fn is str and len(args) >= 1:
+            resolved_fn = getattr(self.fn, name)
+            if resolved_fn in str_methods:
+                if isinstance(args[0], ConstantVariable):
                     return args[0].call_method(tx, name, args[1:], kwargs)
 
         return super().call_method(tx, name, args, kwargs)
