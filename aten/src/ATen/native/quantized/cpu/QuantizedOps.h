@@ -1,8 +1,8 @@
 #pragma once
-#include <ATen/core/Tensor.h>
-#include <ATen/core/IListRef.h>
 #include <ATen/Dispatch.h>
 #include <ATen/TensorIterator.h>
+#include <ATen/core/IListRef.h>
+#include <ATen/core/Tensor.h>
 #include <ATen/native/Activation.h>
 #include <ATen/native/DispatchStub.h>
 
@@ -216,6 +216,18 @@ using qnormalize_nhwc_fn = void (*)(
 using qprelu_fn = void (*)(Tensor& /*out*/, const Tensor& /*qx*/,
                            const Tensor& /*qw*/);
 
+using qembedding_lookup_byte_fn =
+    at::Tensor& (*)(at::Tensor& /* output */,
+                    const at::Tensor& /* indices */,
+                    const at::Tensor& /* offsets */,
+                    const at::Tensor& /* weight */,
+                    const std::optional<
+                        at::Tensor>& /* compressed_indices_mapping */,
+                    const std::optional<at::Tensor>& /* per_sample_weights_ */,
+                    bool /* include_last_offset */,
+                    bool /* is_embedding_op */,
+                    bool /* pruned */);
+
 DECLARE_DISPATCH(qadaptive_avg_pool2d_fn, qadaptive_avg_pool2d_nhwc_stub)
 DECLARE_DISPATCH(qadaptive_avg_pool3d_fn, qadaptive_avg_pool3d_ndhwc_stub)
 DECLARE_DISPATCH(qadd_scalar_fn, qadd_scalar_relu_stub)
@@ -234,6 +246,7 @@ DECLARE_DISPATCH(qclamp_fn, qclamp_stub)
 DECLARE_DISPATCH(qclamp_minmax_fn, qclamp_min_stub)
 DECLARE_DISPATCH(qclamp_minmax_fn, qclamp_max_stub)
 DECLARE_DISPATCH(qelu_fn, qelu_stub)
+DECLARE_DISPATCH(qembedding_lookup_byte_fn, qembedding_lookup_byte_stub)
 DECLARE_DISPATCH(qhardsigmoid_fn, qhardsigmoid_stub)
 DECLARE_DISPATCH(qhardswish_fn, qhardswish_stub)
 DECLARE_DISPATCH(qdropout_fn, qdropout_stub)
