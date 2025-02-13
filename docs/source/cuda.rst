@@ -196,7 +196,7 @@ See the :doc:`documentation <cuda._sanitizer>` for information on how to use it.
 
 
 GPUDirect Storage (prototype)
-----------------------------
+-----------------------------
 
 The APIs in `torch.cuda.gds` provide thin wrappers around certain cuFile APIs which allow
 direct memory access transfers between GPU memory and storage, avoiding a bounce buffer in the CPU. See the
@@ -208,10 +208,9 @@ ensure that their system is appropriately configured to use GPUDirect Storage pe
 `GPUDirect Storage documentation <https://docs.nvidia.com/gpudirect-storage/troubleshooting-guide/contents.html>`_.
 
 .. currentmodule:: torch.cuda.gds
-
-    .. autosummary::
-        :toctree: generated
-        :nosignatures:
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
 
     gds_register_buffer
     gds_deregister_buffer
