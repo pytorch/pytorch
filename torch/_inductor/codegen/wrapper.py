@@ -13,7 +13,7 @@ import random
 import re
 import tempfile
 from itertools import count
-from typing import Any, Callable, List, Optional, TYPE_CHECKING, Union
+from typing import Any, Callable, Dict, List, Optional, TYPE_CHECKING, Union
 
 import sympy
 from sympy import Expr
@@ -732,14 +732,14 @@ class PythonWrapperCodegen(CodeGen):
         is_subgraph: bool,
         subgraph_name: Optional[str],
         parent_wrapper: Optional[PythonWrapperCodegen],
-        input_names: Optional[List[str]] = None,
+        input_nodes: Optional[Dict[str, Union[ir.IRNode, sympy.Expr]]] = None,
         output_nodes: Optional[List[IRNode]] = None,
     ):
         if is_subgraph:
             assert subgraph_name is not None
             assert parent_wrapper is not None
             return SubgraphPythonWrapperCodegen(
-                subgraph_name, parent_wrapper, input_names, output_nodes
+                subgraph_name, parent_wrapper, input_nodes, output_nodes
             )
         return PythonWrapperCodegen()
 
@@ -885,7 +885,8 @@ class PythonWrapperCodegen(CodeGen):
         return
 
     def codegen_input_size_asserts(self) -> None:
-        for name, buf in V.graph.graph_inputs.items():
+        graph_inputs = getattr(self, "subgraph_input_nodes", V.graph.graph_inputs)
+        for name, buf in graph_inputs.items():
             if isinstance(buf, sympy.Expr):
                 continue
 
@@ -897,8 +898,9 @@ class PythonWrapperCodegen(CodeGen):
             self.prefix.writeline(f"assert_size_stride({name}, {size}, {stride})")
 
     def codegen_input_nan_asserts(self) -> None:
+        graph_inputs = getattr(self, "subgraph_input_nodes", V.graph.graph_inputs)
         self.prefix.writeline("# make sure graph inputs are not nan/inf")
-        for name, buf in V.graph.graph_inputs.items():
+        for name, buf in graph_inputs:
             if isinstance(buf, sympy.Expr):
                 continue
 
@@ -964,14 +966,15 @@ class PythonWrapperCodegen(CodeGen):
                     f"training_annotation = nvtx._device_range_start('{phase}')"
                 )
 
-            graph_input_names = getattr(
-                self, "subgraph_input_names", V.graph.graph_input_names
-            )
+            if hasattr(self, "subgraph_input_nodes"):
+                graph_input_names = list(self.subgraph_input_nodes.keys())
+            else:
+                graph_input_names = V.graph.graph_input_names
+
             self.write_args(graph_input_names)
 
-            if not hasattr(self, "subgraph_input_names"):
-                self.codegen_inputs()  # TODO: Check symbolic cases.
-                self.codegen_input_size_and_nan_asserts()
+            self.codegen_inputs()  # TODO: Check symbolic cases.
+            self.codegen_input_size_and_nan_asserts()
 
     def codegen_input_size_and_nan_asserts(self) -> None:
         if config.size_asserts:
@@ -1417,15 +1420,10 @@ class PythonWrapperCodegen(CodeGen):
         # we need to solve that expression to proper define a symbol in cpp. Thus we
         # are enforcing this iterating order here to make sure all plain size symbols
         # are defined first.
+        graph_inputs = getattr(self, "subgraph_input_nodes", V.graph.graph_inputs)
         inputs = [
-            (k, v)
-            for k, v in V.graph.graph_inputs.items()
-            if isinstance(v, sympy.Symbol)
-        ] + [
-            (k, v)
-            for k, v in V.graph.graph_inputs.items()
-            if not isinstance(v, sympy.Symbol)
-        ]
+            (k, v) for k, v in graph_inputs.items() if isinstance(v, sympy.Symbol)
+        ] + [(k, v) for k, v in graph_inputs.items() if not isinstance(v, sympy.Symbol)]
         for name, value in inputs:
             self.codegen_input_symbol_assignment(name, value, bound_vars)
 
@@ -2697,7 +2695,7 @@ class SubgraphPythonWrapperCodegen(PythonWrapperCodegen):
         self,
         subgraph_name: str,
         parent_wrapper: PythonWrapperCodegen,
-        input_names: Optional[List[str]] = None,
+        input_nodes: Optional[Dict[str, Union[ir.IRNode, sympy.Expr]]] = None,
         output_nodes: Optional[List[IRNode]] = None,
     ):
         # It is necessary to set the subgraph_name before calling super __init__
@@ -2705,9 +2703,9 @@ class SubgraphPythonWrapperCodegen(PythonWrapperCodegen):
         self.subgraph_name = subgraph_name
         self.parent_wrapper = parent_wrapper
 
-        if input_names is not None:
+        if input_nodes is not None:
             assert output_nodes is not None
-            self.subgraph_input_names = input_names
+            self.subgraph_input_nodes = input_nodes
             self.subgraph_output_nodes = output_nodes
 
         super().__init__()

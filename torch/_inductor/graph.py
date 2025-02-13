@@ -12,7 +12,7 @@ from collections import defaultdict
 from collections.abc import Iterable, Iterator, Sequence
 from contextlib import contextmanager
 from types import ModuleType
-from typing import Any, Callable, List, NoReturn, Optional, TYPE_CHECKING, Union
+from typing import Any, Callable, Dict, List, NoReturn, Optional, TYPE_CHECKING, Union
 
 import sympy
 from sympy import Expr
@@ -1763,7 +1763,7 @@ class GraphLowering(torch.fx.Interpreter):
         is_subgraph: bool = False,
         subgraph_name: Optional[str] = None,
         parent_wrapper_code: Optional[PythonWrapperCodegen] = None,
-        input_names: Optional[List[str]] = None,
+        input_nodes: Optional[Dict[str, Union[ir.IRNode, sympy.Expr]]] = None,
         output_nodes: Optional[List[ir.IRNode]] = None,
     ) -> None:
         device_types = self.device_types.copy()
@@ -1792,7 +1792,7 @@ class GraphLowering(torch.fx.Interpreter):
                 is_subgraph,
                 subgraph_name,
                 parent_wrapper_code,
-                input_names,
+                input_nodes,
                 output_nodes,
             )
         else:
@@ -2114,7 +2114,7 @@ class SubgraphLowering(GraphLowering):
         is_subgraph: bool = False,
         subgraph_name: Optional[str] = None,
         parent_wrapper_code: Optional[PythonWrapperCodegen] = None,
-        input_names: Optional[List[str]] = None,
+        input_nodes: Optional[Dict[str, Union[ir.IRNode, sympy.Expr]]] = None,
         output_nodes: Optional[List[ir.IRNode]] = None,
     ) -> None:
         super().init_wrapper_code(

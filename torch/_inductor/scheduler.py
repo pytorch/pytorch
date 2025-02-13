@@ -3912,53 +3912,50 @@ class Scheduler:
     def get_partition_rules(self) -> List[Callable[[BaseSchedulerNode], bool]]:
         return [self.only_gpu_inputs_and_outputs]
 
-    def get_output_nodes(
-        self, output_names: OrderedSet[str], name_to_node: Dict[str, ir.IRNode]
-    ) -> List[ir.IRNode]:
-        output_nodes = []
+    def get_name_to_nodes(self) -> Dict[str, Union[ir.IRNode, sympy.Expr]]:
+        name_to_node: Dict[str, Union[ir.IRNode, sympy.Expr]] = {}
+        name_to_node.update(V.graph.graph_inputs)
 
-        for name in output_names:
-            output_nodes.append(name_to_node[name])
+        for node in self.nodes:
+            for name, scheduler_buffer in node.outputs_by_name.items():
+                name_to_node[name] = scheduler_buffer.node
 
-        return output_nodes
+        return name_to_node
 
     def get_graph_partition_signature(
         self, partitions: List[List[BaseSchedulerNode]]
-    ) -> Tuple[List[OrderedSet[str]], List[List[ir.IRNode]]]:
-        inputs: List[OrderedSet[str]] = []
+    ) -> Tuple[List[Dict[str, Union[ir.IRNode, sympy.Expr]]], List[List[ir.IRNode]]]:
+        inputs: List[Dict[str, Union[ir.IRNode, sympy.Expr]]] = []
         outputs: List[List[ir.IRNode]] = []
 
-        unmet_outputs = OrderedSet(V.graph.get_output_names())
-        name_to_node: Dict[str, ir.IRNode] = {}
-        for name, ir_node in zip(V.graph.get_output_names(), V.graph.graph_outputs):
-            name_to_node[name] = ir_node
+        unmet_output_names = OrderedSet(V.graph.get_output_names())
+        name_to_node = self.get_name_to_nodes()
 
         for partition in reversed(partitions):
-            node_outputs: OrderedSet[str] = OrderedSet()
+            output_names: OrderedSet[str] = OrderedSet()
 
             for node in partition:
-                node_outputs.update(node.outputs_by_name.keys())
-                for name, scheduler_buffer in node.outputs_by_name.items():
-                    name_to_node[name] = scheduler_buffer.node
+                output_names.update(node.outputs_by_name.keys())
 
-            partition_outputs = node_outputs.intersection(unmet_outputs)
+            returned_output_names = output_names.intersection(unmet_output_names)
 
             read_writes = dependencies.ReadWrites.merge_list(
                 [x.read_writes for x in partition]
             )
-            partition_inputs = (
+            partition_input_names = (
                 OrderedSet([x.name for x in read_writes.reads | read_writes.writes])
-                - node_outputs
+                - output_names
             )
 
-            unmet_outputs = partition_inputs.union(unmet_outputs - partition_outputs)
+            inputs.append({name: name_to_node[name] for name in partition_input_names})
+            outputs.append([name_to_node[name] for name in returned_output_names])
+            unmet_output_names = partition_input_names.union(
+                unmet_output_names - returned_output_names
+            )
 
-            inputs.append(partition_inputs)
-            outputs.append(self.get_output_nodes(partition_outputs, name_to_node))
-
-        assert unmet_outputs.issubset(
+        assert unmet_output_names.issubset(
             OrderedSet(V.graph.graph_inputs.keys())
-        ), f"{unmet_outputs=} should be subset of {V.graph.graph_inputs.keys()=}"
+        ), f"{unmet_output_names=} should be subset of {V.graph.graph_inputs.keys()=}"
 
         return inputs[::-1], outputs[::-1]
 
@@ -3966,7 +3963,7 @@ class Scheduler:
         self,
     ) -> Tuple[
         List[List[BaseSchedulerNode]],
-        List[OrderedSet[str]],
+        List[Dict[str, Union[ir.IRNode, sympy.Expr]]],
         List[List[ir.IRNode]],
     ]:
         partitions: List[List[BaseSchedulerNode]] = []
@@ -3998,10 +3995,13 @@ class Scheduler:
                 else self._codegen(self.nodes)
             )
 
-    def _codegen_partition_wrapper(self, partition: List[BaseSchedulerNode], input_names: List[str], output_nodes: List[ir.IRNode]) -> None:
-        parent_wrapper_code = (
-            V.graph.wrapper_code
-        )
+    def _codegen_partition_wrapper(
+        self,
+        partition: List[BaseSchedulerNode],
+        input_nodes: Dict[str, Union[ir.IRNode, sympy.Expr]],
+        output_nodes: List[ir.IRNode],
+    ) -> None:
+        parent_wrapper_code = V.graph.wrapper_code
         graph_partition_id = next(self._graph_partition_counter)
 
         with V.graph.set_current_wrapper_code():
@@ -4009,7 +4009,7 @@ class Scheduler:
                 is_subgraph=True,
                 subgraph_name=f"partition_{graph_partition_id}",
                 parent_wrapper_code=parent_wrapper_code,
-                input_names=input_names,
+                input_nodes=input_nodes,
                 output_nodes=output_nodes,
             )
             self._codegen(partition)
@@ -4017,19 +4017,21 @@ class Scheduler:
 
         V.graph.wrapper_code.define_subgraph_launcher_fn(partition_code)
         V.graph.wrapper_code.codegen_partition_call(
-            graph_partition_id, input_names, output_nodes
+            graph_partition_id, input_nodes, output_nodes
         )
 
     def _codegen_partitions(self) -> None:
-        partitions, input_names, output_nodes = self.graph_partition()
+        partitions, input_nodes, output_nodes = self.graph_partition()
 
-        for partition, input_name, output_node in zip(partitions, input_names, output_nodes):
+        for partition, input_node, output_node in zip(
+            partitions, input_nodes, output_nodes
+        ):
             assert (
                 len(partition) >= 1
             ), f"Each partition must have at least one node but found {len(partition)}"
 
             if len(partition) > 1:
-                self._codegen_partition_wrapper(partition, list(input_name), output_node)
+                self._codegen_partition_wrapper(partition, input_node, output_node)
             else:
                 self._codegen(partition)
 
