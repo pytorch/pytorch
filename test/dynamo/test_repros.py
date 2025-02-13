@@ -57,6 +57,9 @@ from torch.testing._internal.common_utils import (
     skipIfWindows,
     TEST_WITH_ROCM,
 )
+from torch.testing._internal.common_distributed import (
+    requires_nccl_version_less_or_equal,
+)
 from torch.testing._internal.two_tensor import TwoTensor
 
 
@@ -6369,7 +6372,7 @@ def forward(self, s0 : torch.SymInt, s1 : torch.SymInt, L_x_ : torch.Tensor):
     @unittest.skipIf(not TEST_CUDA, "test requires CUDA")
     @unittest.skipIf(not dist.is_available(), "test requires distributed")
     # Failing with ncc update 2.25.1 : https://github.com/pytorch/pytorch/issues/147141
-    @dist.requires_nccl_version_less_or_equal((2, 21), "Failing with nccl 2.25.1")
+    @requires_nccl_version_less_or_equal((2, 21), "Failing with nccl 2.25.1")
     def test_ddp_checkpoint(self):
         # https://github.com/pytorch/pytorch/issues/144035
         DIM = 256
