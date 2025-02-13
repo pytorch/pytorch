@@ -1,13 +1,13 @@
 # mypy: allow-untyped-defs
 import functools
 import itertools
-import logging
 from typing import Optional
 from unittest.mock import patch
 
 import sympy
 
 import torch
+from torch._logging import getArtifactLogger
 
 from ...autotune_process import CUDABenchmarkRequest, TensorMeta
 from ...ir import Buffer, CUDATemplateBuffer, IRNode, Layout
@@ -17,7 +17,7 @@ from ..common import KernelTemplate
 from .cuda_kernel import CUDATemplateCaller, CUDATemplateKernel
 
 
-log = logging.getLogger(__name__)
+log = getArtifactLogger(__name__, "autotuning")
 
 
 class CUDATemplate(KernelTemplate):
