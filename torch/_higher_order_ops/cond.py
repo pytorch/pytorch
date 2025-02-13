@@ -39,7 +39,6 @@ from torch.fx.experimental.proxy_tensor import (
     ProxyTorchDispatchMode,
     track_tensor_tree,
 )
-from torch.fx.passes.shape_prop import _extract_tensor_metadata
 from torch.utils._python_dispatch import _get_current_dispatch_mode
 
 from .utils import _from_fun, _maybe_fake_prop_ignore_unbacked, create_fw_bw_graph
@@ -269,55 +268,6 @@ def trace_cond(proxy_mode, func_overload, pred, true_fn, false_fn, operands):
             f"\n  false branch returns {len(flat_false_outs)} item(s)"
         )
 
-    for i in range(0, len(flat_true_outs)):
-        true_out = flat_true_outs[i]
-        false_out = flat_false_outs[i]
-
-        # Note that we need skip the check for requires_grad because we're after
-        # after autograd key during tracing, so the rquires_grad attribute of the tensors
-        # are no longer. See Note [invariants for node meta 'val']
-        def _same_meta_except_requires_grad(true_out, false_out):
-            if true_out is None and false_out is None:
-                return True
-            elif true_out is None or false_out is None:
-                # Consider the following case:
-                # def true_fn(x, y):
-                #   return x * y
-                #
-                # def false_fn(x, y):
-                #   return x.sin()
-                #
-                # We'll get the following graphs for backward:
-                # def backward_true_fn(x, y, grad_out):
-                #  return grad_out * y, grad_out * x
-                #
-                # def backward_false_fn(x, y, grad_out):
-                #  retrun grad_out, None
-                #
-                # This suggests that when we make_fx into the backward graph,
-                # the output graph would produce outputs with metadata, this is undesirable.
-                #
-                # Ideally, we should provide an optional type to indicate that one of the branches might
-                # return None. But we'll just let it pass for now and let downstream/runtime handle.
-                #
-                # Note that this corner case should **only** happen when user want to trace backward graph because
-                # if it's foward, dynamo will error.
-                return True
-            true_meta = true_out.meta.get("tensor_meta", None)
-            false_meta = false_out.meta.get("tensor_meta", None)
-            return (
-                true_meta.shape == false_meta.shape
-                and true_meta.dtype == false_meta.dtype
-                and true_meta.stride == false_meta.stride
-            )
-
-        if not _same_meta_except_requires_grad(true_out, false_out):
-            raise torch._dynamo.exc.CondOpArgsMismatchError(
-                f"Expected each tensor to have same metadata but got:"
-                f"\n  {true_fn.__name__} returns {true_out.meta['tensor_meta']}"
-                f"\n  {false_fn.__name__} returns {false_out.meta['tensor_meta']}"
-            )
-
     i, true_name = unique_graph_id(proxy_mode, prefix="true_graph")
 
     false_name = f"false_graph_{i}"
@@ -429,30 +379,66 @@ def cond_fake_tensor_mode(mode, pred, true_fn, false_fn, operands):
         ignore_fresh_unbacked = mode.shape_env.ignore_fresh_unbacked_symbols()
 
     with mode, ignore_fresh_unbacked:
-        true_outs = true_fn(*operands)
-        flat_true_outs = pytree.tree_leaves(true_outs)
-        flat_false_outs = pytree.tree_leaves(false_fn(*operands))
-    if len(flat_true_outs) != len(flat_false_outs):
-        raise RuntimeError("Unmatched number of outputs from cond() branches.")
+        flat_true_outs, true_out_spec = pytree.tree_flatten(true_fn(*operands))
+        flat_false_outs, false_out_spec = pytree.tree_flatten(false_fn(*operands))
+        if true_out_spec != false_out_spec:
+            raise RuntimeError(
+                "Unmatched output spec from cond() branches: "
+                "true branch tree_spec {true_out_spec} vs false branch tree_spec {false_out_spec}."
+            )
 
+    merged_outs = []
     for true_out, false_out in zip(flat_true_outs, flat_false_outs):
-        if true_out is None or false_out is None:
-            if true_out is None and false_out is None:
-                continue
-            raise torch._dynamo.exc.CondOpArgsMismatchError(
-                f"Expected both branches to return None:"
-                f"\n  {true_fn.__name__} returns {true_out}"
-                f"\n  {false_fn.__name__} returns {false_out}"
+        merged_outs.append(_merge_tensors(true_out, false_out, mode))
+    return pytree.tree_unflatten(merged_outs, true_out_spec)
+
+
+def _merge_tensors(a: torch.Tensor, b: torch.Tensor, mode: FakeTensorMode):
+    torch._check(a.dtype == b.dtype)
+    torch._check(a.device == b.device)
+    torch._check(a.dim() == b.dim())
+
+    merged_size = []
+    for s0, s1 in zip(a.size(), b.size()):
+        # TODO: use the symint eq by expr class after rebase
+        if type(s0) is int and type(s1) is int and s0 == s1:
+            merged_size.append(s0)
+        elif (
+            isinstance(s0, torch.SymInt)
+            and isinstance(s1, torch.SymInt)
+            and s0.node.expr == s1.node.expr
+        ):
+            merged_size.append(s0)
+        else:
+
+            def min_max(s0, s1):
+                def _bound(s: Union[int, torch.SymInt], lower_bound: bool):
+                    assert isinstance(s, (int, torch.SymInt))
+                    if isinstance(s, int):
+                        return s
+                    assert mode.shape_env is not None
+                    vrange = bound_sympy(s.node.expr, mode.shape_env.var_to_range)
+                    return vrange.lower if lower_bound else vrange.upper
+
+                return _bound(min(s0, s1), False), _bound(max(s0, s1), True)
+
+            from torch.utils._sympy.value_ranges import bound_sympy, ValueRanges
+
+            assert mode.shape_env is not None
+            new_size = mode.shape_env.create_unbacked_symint()
+            mode.shape_env._update_var_to_range(
+                new_size.node.expr, ValueRanges(*min_max(s0, s1))
             )
-        true_meta = _extract_tensor_metadata(true_out)
-        false_meta = _extract_tensor_metadata(false_out)
-        if true_meta != false_meta:
-            raise torch._dynamo.exc.CondOpArgsMismatchError(
-                f"Expected each tensor to have same metadata but got:"
-                f"\n  {true_fn.__name__} returns {true_meta}"
-                f"\n  {false_fn.__name__} returns {false_meta}"
-            )
-    return true_outs
+            merged_size.append(new_size)
+
+    torch._check(a.stride() == b.stride())  # TODO: relax this
+
+    # NYI
+    assert not a.is_quantized
+    assert not b.is_quantized
+
+    with mode:
+        return torch.empty(merged_size, dtype=a.dtype, device=a.device)
 
 
 @cond_op.py_functionalize_impl
