@@ -2041,7 +2041,6 @@ class CppCodeCache:
     def _get_uncompiled_header(cls, device: str) -> str | None:
         """
         Given a device type, returns the path to a CPP header file to be precompiled.
-        Currently, this is only utilized by the cpp_wrapper classes.
         """
         return None
 
@@ -2284,6 +2283,12 @@ class CppPythonBindingsCodeCache(CppCodeCache):
         return module
 
     @classmethod
+    def _get_uncompiled_header(cls, device: str) -> str | None:
+        if device.startswith("cpu"):
+            return "torch/csrc/inductor/cpp_prefix.h"
+        return None
+
+    @classmethod
     def load_pybinding_async(
         cls,
         argtypes: list[str],
@@ -2408,10 +2413,6 @@ class CppWrapperCodeCache(CppPythonBindingsCodeCache):
 
     @classmethod
     def _get_uncompiled_header(cls, device: str) -> str | None:
-        """
-        Given a device type, returns the path to a CPP header file to be precompiled.
-        Currently, this is only utilized by the cpp_wrapper classes.
-        """
         return _get_cpp_wrapper_header(device)
 
 
@@ -2765,6 +2766,11 @@ class HalideCodeCache(CppPythonBindingsCodeCache):
         assert os.path.exists(sofile)
         cls._standalone_runtime_path = sofile
         return sofile
+
+    @classmethod
+    def _get_uncompiled_header(cls, device: str) -> str | None:
+        """Header precompiling is currently disabled for halide."""
+        return None
 
 
 def _worker_task_halide(lockfile: str, jobs: list[partial[Any]]) -> None:
