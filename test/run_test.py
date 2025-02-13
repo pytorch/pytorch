@@ -222,6 +222,7 @@ S390X_TESTLIST = [
     "dynamo/test_backward_higher_order_ops",
     "dynamo/test_base_output",
     "dynamo/test_bytecode_utils",
+    "dynamo/test_callback",
     "dynamo/test_compile",
     "dynamo/test_comptime",
     "dynamo/test_config",
@@ -435,7 +436,6 @@ S390X_TESTLIST = [
     "test_mkldnn_verbose",
     "test_mkl_verbose",
     "test_mobile_optimizer",
-    "test_model_exports_to_core_aten",
     "test_module_tracker",
     "test_monitor",
     "test_namedtuple_return_api",
@@ -551,6 +551,7 @@ RUN_PARALLEL_BLOCKLIST = [
     # temporarily sets a global config
     "test_autograd_fallback",
     "inductor/test_compiler_bisector",
+    "functorch/test_control_flow_cuda_initialization",
 ] + FSDP_TEST
 
 # Test files that should always be run serially with other test files,
@@ -1478,6 +1479,7 @@ CUSTOM_HANDLERS = {
     "distributed/rpc/test_tensorpipe_agent": run_test_with_subprocess,
     "distributed/rpc/test_share_memory": run_test_with_subprocess,
     "distributed/rpc/cuda/test_tensorpipe_agent": run_test_with_subprocess,
+    "functorch/test_control_flow_cuda_initialization": run_test_with_subprocess,
     "doctests": run_doctests,
     "test_ci_sanity_check_fail": run_ci_sanity_check,
     "test_autoload_enable": test_autoload_enable,

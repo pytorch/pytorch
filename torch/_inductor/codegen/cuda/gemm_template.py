@@ -46,7 +46,7 @@ PT_EXPORT {{kernel_call_signature}} {
     CUTLASS_TRACE_HOST("Query result for SM count per device: " << hw_info.sm_count);
   }
   {{instance_type}}::Arguments arguments;
-  {{template.render_gemm_arguments(argument_template, epilogue_template, should_swap_xw,
+  {{template.render_gemm_arguments(argument_template, epilogue_template, should_swap_xw, swizzle,
                                     X, W, Bias, Y, alpha, beta, kernel, epilogue_args)}}
   {{instance_type}} gemm_op;
   if (workspace_size) {
@@ -88,6 +88,8 @@ PT_EXPORT {{kernel_call_signature}} {
   return 0;
 }
 }
+
+// configuration name: {{op_conf_name}}
 """
 
 # Jinja template for Cutlass 3.x GEMM Kernel arguments, used by the CUTLASSGemmTemplate class below.
@@ -118,6 +120,7 @@ GEMM_ARGS_CUTLASS_3X = r"""
     {{epilogue_arguments}},
     hw_info
   };
+  arguments.scheduler.max_swizzle_size = {{swizzle}};
 """
 
 # Jinja template for Cutlass 3.x GEMM Kernel arguments if epilogue fusion is applied,
@@ -501,11 +504,11 @@ class CUTLASSGemmTemplate(CUTLASSTemplate, ABC):
 
         ops = self.gen_ops()
         for name, op in ops:
-            self.maybe_append_choice(
-                choices,
-                description=name,
-                op=op,
-            )
+            for swizzle in inductor_cuda_config.cutlass_max_profiling_swizzle_options:
+                description = f"{name} swizzle={swizzle}"
+                self.maybe_append_choice(
+                    choices, description=description, op=op, swizzle=swizzle
+                )
         if len(ops) == 0:
             input_layouts = [node.get_layout() for node in input_nodes]
             input_strides = [node.get_stride() for node in input_nodes]
@@ -952,6 +955,7 @@ class CUTLASSGemmTemplate(CUTLASSTemplate, ABC):
             Bias=Bias,
             epilogue_template=epilogue_template,
             argument_template=argument_template,
+            swizzle=kwargs["swizzle"],
             should_swap_xw=should_swap_xw,
             template=self,
             kernel=kernel,
@@ -960,6 +964,7 @@ class CUTLASSGemmTemplate(CUTLASSTemplate, ABC):
             input_reorder=self.input_reorder,
             epilogue_args=epilogue_args,
             test_call_statement=test_call_statement,
+            op_conf_name=op.configuration_name(),
         )
         options.update(dict(zip(extra_names, extra_inputs)))
         res = self._template_from_string(self._get_template()).render(**options)
@@ -1216,6 +1221,7 @@ class CUTLASS3xGemmTemplate(CUTLASSGemmTemplate):
         argument_template: str,
         epilogue_template: str,
         should_swap_xw: bool,
+        swizzle: int,
         X: IRNode,
         W: IRNode,
         Bias: IRNode,
@@ -1261,6 +1267,7 @@ class CUTLASS3xGemmTemplate(CUTLASSGemmTemplate):
             M="M",
             N="N",
             epilogue_args=epilogue_args,
+            swizzle=swizzle,
         )
         assert epilogue_template is not None
 
