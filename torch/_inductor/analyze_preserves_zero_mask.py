@@ -87,6 +87,7 @@ class RecordLowPrecisionOps(DefaultHandler):
         self.non_numeric_ops = (
             "to_dtype",
             "constant",
+            "where",
         )
 
     def load(self, name: str, index: sympy.Expr) -> DTypeContainer:

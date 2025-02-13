@@ -27,6 +27,8 @@ from typing import (
     Union,
 )
 
+from .analyze_preserves_zero_mask import can_codegen_without_upcasts
+
 
 if TYPE_CHECKING:
     from types import ModuleType
@@ -378,6 +380,15 @@ class BaseSchedulerNode:
     @cache_on_self
     def get_buffer_names(self) -> OrderedSet[str]:
         return OrderedSet(out.get_name() for out in self.outputs)
+
+    @cache_on_self
+    def can_codegen_without_upcasts(self) -> bool:
+        for n in self.get_nodes():
+            if not isinstance(n, SchedulerNode):
+                return False
+            if not can_codegen_without_upcasts(n):
+                return False
+        return True
 
     def get_nodes(self) -> Sequence[BaseSchedulerNode]:
         return [self]
@@ -2806,14 +2817,21 @@ class Scheduler:
                 return False
 
             def benchmark_when_ready() -> bool:
+                from torch._inductor.runtime.triton_heuristics import (
+                    NoTritonConfigsError,
+                )
+
                 min_ms_fused = float("inf")
                 ms_fused_choice = None
 
                 new_timings = {}
                 # Benchmark each choice after compilation completes
                 for choice, future, mod_fused in future_choices:
-                    if future is not None:
-                        future.result()
+                    try:
+                        if future is not None:
+                            future.result()
+                    except (NoTritonConfigsError, CompilationError):
+                        continue
                     with multi_node.swap_as_triton_caller(choice):
                         ms_fused, path = self.benchmark_codegened_module(
                             mod_fused, device
@@ -2841,6 +2859,10 @@ class Scheduler:
             future_and_mod_l1_fused = compile_kernel(node_list_fused)
 
             def benchmark_when_ready() -> bool:
+                from torch._inductor.runtime.triton_heuristics import (
+                    NoTritonConfigsError,
+                )
+
                 try:
                     # Wait for all compilations to complete
                     for fut in (
@@ -2893,6 +2915,9 @@ class Scheduler:
                         )
 
                     return ms_fused < ms1 + ms2
+
+                except NoTritonConfigsError:
+                    return False
 
                 except CompilationError as e:
                     if "Loop-carried variable" in str(e):
@@ -3396,6 +3421,20 @@ class Scheduler:
         # user opt into more aggressive prologue fusion, dont use heuristics
         if prologue_node.get_operation_names() <= V.graph.invoke_quant_ops:
             return True
+
+        def low_prec_fp(buf_name: str) -> bool:
+            buf = V.graph.get_buffer(buf_name)
+            dtype = buf.dtype
+            return dtype.is_floating_point and dtype.itemsize <= 2
+
+        if (
+            all(low_prec_fp(buf_name) for buf_name in prologue_node.get_buffer_names())
+            and not prologue_node.can_codegen_without_upcasts()
+        ):
+            why(
+                "prologue fusion for low prec mms that need to be codegen'd in fp32 is not profitable"
+            )
+            return False
 
         read_bytes = prologue_node.get_read_buffer_sizes()
         write_bytes = prologue_node.get_write_buffer_sizes()
