@@ -428,17 +428,8 @@ class CppWrapperCpu(PythonWrapperCodegen):
                         """
                     )
 
-                run_impl_proto = ""
-                if config.aot_inductor.compile_wrapper_with_O0:
-                    run_impl_proto += """
-                    #ifdef __clang__
-                    __attribute__((optnone))
-                    #else
-                    __attribute__((optimize("O0")))
-                    #endif
-                    """
-
-                run_impl_proto += """
+                run_impl_proto = f"""
+                    {"DISABLE_FUNCTION_OPTIMIZATION" if config.aot_inductor.compile_wrapper_with_O0 else ""}
                     void AOTInductorModel::run_impl(
                         AtenTensorHandle*
                             input_handles, // array of input AtenTensorHandle; handles
@@ -449,7 +440,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
                                             // borrowed
                         DeviceStreamType stream,
                         AOTIProxyExecutorHandle proxy_executor
-                    ) {
+                    ) {{
                     """
 
                 if config.aot_inductor.debug_compile:
@@ -462,7 +453,8 @@ class CppWrapperCpu(PythonWrapperCodegen):
         else:
             # cpp entry function for JIT with cpp wrapper
             self.prefix.splice(
-                """
+                f"""
+                {"DISABLE_FUNCTION_OPTIMIZATION" if config.aot_inductor.compile_wrapper_with_O0 else ""}
                 void inductor_entry_impl(
                     AtenTensorHandle*
                         input_handles, // array of input AtenTensorHandle; handles
@@ -471,7 +463,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
                         output_handles  // array for writing output AtenTensorHandle; handles
                                         // will be stolen by the caller; the array itself is
                                         // borrowed)
-                ) {
+                ) {{
                 """
             )
         with self.prefix.indent():

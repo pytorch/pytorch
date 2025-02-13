@@ -20,7 +20,7 @@ from torch._dynamo.utils import counters
 from torch._inductor import config
 from torch._inductor.runtime.runtime_utils import cache_dir
 from torch._inductor.test_case import TestCase
-from torch._inductor.utils import is_big_gpu, run_and_get_cpp_code
+from torch._inductor.utils import fresh_inductor_cache, is_big_gpu, run_and_get_cpp_code
 from torch.ao.quantization.quantize_pt2e import convert_pt2e, prepare_pt2e
 from torch.ao.quantization.quantizer.x86_inductor_quantizer import X86InductorQuantizer
 from torch.export import Dim, export, export_for_training
@@ -151,9 +151,22 @@ class AOTInductorTestsTemplate:
             torch.randn(10, 10, device=self.device),
         )
         model = Model()
-        with config.patch("aot_inductor.compile_wrapper_with_O0", True):
+
+        with fresh_inductor_cache(), config.patch(
+            "aot_inductor.compile_wrapper_with_O0", True
+        ):
             self.check_model(model, example_inputs)
-            self.code_check_count(model, example_inputs, "__attribute__((", 2)
+            self.code_check_count(
+                model, example_inputs, "DISABLE_FUNCTION_OPTIMIZATION", 1
+            )
+
+        with fresh_inductor_cache(), config.patch(
+            "aot_inductor.compile_wrapper_with_O0", False
+        ):
+            self.check_model(model, example_inputs)
+            self.code_check_count(
+                model, example_inputs, "DISABLE_FUNCTION_OPTIMIZATION", 0
+            )
 
     def test_small_constant(self):
         class Model(torch.nn.Module):

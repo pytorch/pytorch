@@ -47,3 +47,11 @@ using bfloat16 = at::BFloat16;
 [[maybe_unused]] inline int64_t align(int64_t nbytes) {
   return (nbytes + 64 - 1) & -64;
 }
+
+#if defined(_MSC_VER)
+#define DISABLE_FUNCTION_OPTIMIZATION _Pragma("optimize( \"\", off )")
+#elif defined(__clang__)
+#define DISABLE_FUNCTION_OPTIMIZATION [[clang::optnone]]
+#elif defined(__GNUC__)
+#define DISABLE_FUNCTION_OPTIMIZATION [[gnu::optimize(0)]]
+#endif
