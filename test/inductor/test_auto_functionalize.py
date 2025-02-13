@@ -847,8 +847,8 @@ def forward(self, arg0_1: "f32[2][1]cpu"):
                     ignore_empty_lines=True,
                 )
 
-    # foo takes x, y both being graph inputs view of the same shared base but do not overlap.
-    # in this special case functionlization will have non as base for x and y. so they will assumed
+    # foo takes x, y both being graph inputs and views of the same shared base but do not overlap.
+    # In this special case functionlization will have none as base for x and y. so they will be assumed
     # to have unique bases during functionalizations. During inplace, we notice that they both share storage
     # but because their memory does not overlap we can inplace both. see github issue #139628
     @torch._inductor.config.patch(enable_auto_functionalized_v2=True)
