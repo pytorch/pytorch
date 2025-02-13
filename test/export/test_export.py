@@ -11937,6 +11937,30 @@ class GraphModule(torch.nn.Module):
             ]
             self.assertEqual(len(shift_op), 1)
 
+    def test_wrapper_module(self):
+        def f(x):
+            return torch.abs(x)
+
+        from torch.export import _trace
+
+        model = _trace._WrapperModule(f)
+        ep = export(
+            model,
+            (
+                torch.randn(
+                    8,
+                ),
+            ),
+        )
+
+        self.assertExpectedInline(
+            str(ep.graph_module.code).strip(),
+            """\
+def forward(self, args_0):
+    abs_1 = torch.ops.aten.abs.default(args_0);  args_0 = None
+    return (abs_1,)""",
+        )
+
 
 @unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo isn't support")
 class TestOneOffModelExportResult(TestCase):

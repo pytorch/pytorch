@@ -3274,6 +3274,7 @@ MOD_INLINELIST = [
     "torch.backends.cuda",
     "torch.cuda.amp.autocast_mode",
     "torch.distributions",
+    "torch.export._trace",
     "torch.export._tree_utils",
     "torch.fx._pytree",
     "torch.fx._symbolic_trace",
