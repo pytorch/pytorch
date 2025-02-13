@@ -39,9 +39,6 @@ class AOTIRunnerUtil:
     ):
         if not isinstance(model, torch.nn.Module):
             model = WrapperModule(model)
-
-        if not isinstance(model, torch.nn.Module):
-            model = WrapperModule(model)
         # The exact API is subject to change
         if torch._inductor.config.is_predispatch:
             ep = torch.export._trace._export(
