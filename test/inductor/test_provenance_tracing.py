@@ -120,9 +120,6 @@ class TestProvenanceTracingArtifact(TestCase):
         example_inputs = (a, b, c)
 
         model = Model()
-        ep = torch.export._trace._export(model, example_inputs)
-        gm = ep.module()
-
         for backend in ["aot_inductor", "inductor"]:
             try:
                 with config.patch(
@@ -136,11 +133,10 @@ class TestProvenanceTracingArtifact(TestCase):
                         level=logging.WARNING,
                     ) as cm:
                         if backend == "aot_inductor":
-                            so_path = torch._inductor.aot_compile(gm, example_inputs)
-                            optimized = AOTIRunnerUtil.load("cuda", so_path)
-                            optimized(*example_inputs)
+                            AOTIRunnerUtil.run(model, example_inputs)
                         else:
-                            compiled = torch.compile(gm, backend=backend)
+                            ep = torch.export._trace._export(model, example_inputs)
+                            compiled = torch.compile(ep.module(), backend=backend)
                             compiled(*example_inputs)
                     self.assertEqual(len(cm.output), 1)
                     m = re.match(r"WARNING.* debug trace: (.*)", cm.output[0])
