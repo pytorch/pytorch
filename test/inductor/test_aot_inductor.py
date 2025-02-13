@@ -756,7 +756,7 @@ class AOTInductorTestsTemplate:
                 weight = weight.to(torch.float8_e4m3fn)
                 output = torch._scaled_mm(
                     x,
-                    weight,
+                    weight.t(),
                     bias=input_bias,
                     out_dtype=self.out_dtype,
                     scale_a=scale_a,
@@ -770,7 +770,7 @@ class AOTInductorTestsTemplate:
         b_scale = torch.Tensor([1.0]).to(device=GPU_TYPE)
         input_bias = torch.rand(32, device=GPU_TYPE, dtype=dtype)
         weight_shape = (32, 16)
-        weight = torch.rand(*weight_shape, device=GPU_TYPE, dtype=dtype).T
+        weight = torch.rand(*weight_shape, device=GPU_TYPE, dtype=dtype)
         a_inverse_scale = 1 / a_scale
         b_inverse_scale = 1 / b_scale
 
