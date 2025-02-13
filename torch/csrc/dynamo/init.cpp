@@ -246,6 +246,21 @@ void initDynamoBindings(PyObject* torch) {
   py::class_<ExtraState>(m, "_ExtraState")
       .def("invalidate", &ExtraState::invalidate);
 
+  py::enum_<FrameAction>(m, "_FrameAction")
+      .value("DEFAULT", FrameAction::DEFAULT)
+      .value("SKIP", FrameAction::SKIP)
+      .value("RUN_ONLY", FrameAction::RUN_ONLY);
+
+  py::class_<FrameExecStrategy>(m, "_FrameExecStrategy")
+      .def(py::init([]() {
+        return FrameExecStrategy{FrameAction::SKIP, FrameAction::DEFAULT};
+      }))
+      .def(py::init([](FrameAction cur_action, FrameAction recursive_action) {
+        return FrameExecStrategy{cur_action, recursive_action};
+      }))
+      .def_readwrite("cur_action", &FrameExecStrategy::cur_action)
+      .def_readwrite("recursive_action", &FrameExecStrategy::recursive_action);
+
   m.def("_debug_get_cache_entry_list", &_debug_get_cache_entry_list);
   py::bind_vector<std::vector<uint8_t>>(m, "VectorUInt8");
   m.attr("py_opcode_caches") = _PyOpcode_Caches_vec;
