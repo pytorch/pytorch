@@ -13,7 +13,7 @@ from torch.export.unflatten import _assign_attr, _AttrKind
 from torch.fx import GraphModule, Node
 from torch.nn.utils.fusion import fuse_conv_bn_weights
 from torch.utils._pytree import LeafSpec
-
+import torch.ao.quantization.pt2e._affine_quantization  # noqa: F401
 
 __all__ = [
     "fold_bn_weights_into_conv_node",
