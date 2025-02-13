@@ -2,7 +2,7 @@
 import functools
 import os
 from itertools import chain, count, zip_longest
-from typing import Any, Callable, Optional, TYPE_CHECKING, Union
+from typing import Any, Callable, Dict, List, Optional, TYPE_CHECKING, Union
 
 import sympy
 
@@ -194,6 +194,8 @@ class CppWrapperGpu(CppWrapperCpu):
         is_subgraph: bool,
         subgraph_name: Optional[str],
         parent_wrapper: Optional[PythonWrapperCodegen],
+        input_nodes: Optional[Dict[str, Union[IRNode, sympy.Expr]]] = None,
+        output_nodes: Optional[List[IRNode]] = None,
     ):
         # TODO - support subgraph codegen by lifting functions. Check the
         # comment at CppWrapperCpu `codegen_subgraph` function.

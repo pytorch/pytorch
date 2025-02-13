@@ -733,7 +733,7 @@ class PythonWrapperCodegen(CodeGen):
         subgraph_name: Optional[str],
         parent_wrapper: Optional[PythonWrapperCodegen],
         input_nodes: Optional[Dict[str, Union[ir.IRNode, sympy.Expr]]] = None,
-        output_nodes: Optional[List[IRNode]] = None,
+        output_nodes: Optional[List[ir.IRNode]] = None,
     ):
         if is_subgraph:
             assert subgraph_name is not None
@@ -973,7 +973,7 @@ class PythonWrapperCodegen(CodeGen):
 
             self.write_args(graph_input_names)
 
-            self.codegen_inputs()  # TODO: Check symbolic cases.
+            self.codegen_inputs()
             self.codegen_input_size_and_nan_asserts()
 
     def codegen_input_size_and_nan_asserts(self) -> None:
