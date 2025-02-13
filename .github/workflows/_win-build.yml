@@ -23,7 +23,7 @@ on:
       vc-year:
         required: false
         type: string
-        default: "2019"
+        default: "2022"
         description: The Visual Studio year to use for building.
       build-with-debug:
         required: false
