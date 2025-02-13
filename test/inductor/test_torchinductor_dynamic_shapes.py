@@ -570,7 +570,7 @@ class TestInductorDynamic(TestCase):
 
         @torch.compile(fullgraph=True)
         def f(x):
-            r = torch.ops.test.foo(x)
+            r = torch.ops.test_dynamic_stride_nobreak.foo(x)
             y = r.stride(0)
             return torch.empty(y, device=x.device)
 
