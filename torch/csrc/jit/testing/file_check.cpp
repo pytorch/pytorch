@@ -100,8 +100,8 @@ size_t assertFind(
     std::stringstream ss;
     ss << "Expected to find ";
     c10::printQuotedString(ss, sub);
-    ss << " but did not find it" << std::endl;
-    ss << "Searched string:" << std::endl;
+    ss << " but did not find it" << '\n';
+    ss << "Searched string:" << '\n';
     found_range.highlight(ss);
     if (extra_msg) {
       extra_msg(ss);
@@ -139,8 +139,8 @@ size_t assertFindRegex(
     std::stringstream ss;
     ss << "Expected to find regex ";
     c10::printQuotedString(ss, sub);
-    ss << " but did not find it" << std::endl;
-    ss << "Searched string:" << std::endl;
+    ss << " but did not find it" << '\n';
+    ss << "Searched string:" << '\n';
     if (extra_msg) {
       extra_msg(ss);
     }
@@ -363,7 +363,7 @@ struct FileCheckImpl {
       std::stringstream ss;
       ss << "Expected to find ";
       c10::printQuotedString(ss, check.search_str_);
-      ss << "highlighted but it is not." << std::endl;
+      ss << "highlighted but it is not." << '\n';
       error_range.highlight(ss);
       throw std::runtime_error(ss.str());
     };
