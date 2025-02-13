@@ -4,11 +4,15 @@ set -ex
 
 if [ -n "$KATEX" ]; then
   apt-get update
-  # Ignore error if gpg-agent doesn't exist (for Ubuntu 16.04)
-  apt-get install -y gpg-agent || :
+  apt-get install -y ca-certificates curl gnupg gpg-agent || :
+  mkdir -p /etc/apt/keyrings
+  curl -fsSL https://deb.nodesource.com/gpgkey/nodesource.gpg.key | sudo gpg --dearmor -o /etc/apt/keyrings/nodesource.gpg
 
-  curl --retry 3 -sL https://deb.nodesource.com/setup_16.x | sudo -E bash -
-  sudo apt-get install -y nodejs
+  NODE_MAJOR=16 # Or your desired Node.js version
+  echo "deb [signed-by=/etc/apt/keyrings/nodesource.gpg] https://deb.nodesource.com/node_$NODE_MAJOR.x nodistro main" | sudo tee /etc/apt/sources.list.d/nodesource.list
+
+  apt-get update
+  apt-get install -y nodejs
 
   curl --retry 3 -sS https://dl.yarnpkg.com/debian/pubkey.gpg | sudo apt-key add -
   echo "deb https://dl.yarnpkg.com/debian/ stable main" | sudo tee /etc/apt/sources.list.d/yarn.list
