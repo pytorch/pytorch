@@ -23,7 +23,7 @@ def _check(x, msg):
 _CPP_TYPE_MAP = {
     str: "std::string",
     int: "int64_t",
-    float: "double",
+    float: "F64",
     bool: "bool",
 }
 
@@ -203,10 +203,18 @@ enum {name} {{
   {type_name} get_{name}() const {{
     return static_cast<{type_name}>({name});
   }}
+
+  void set_{name}({type_name} def) {{
+    {name} = static_cast<int64_t>(def);
+  }}
 """
             return f"""
   const {ty}& get_{name}() const {{
     return {name};
+  }}
+
+  void set_{name}({ty} def) {{
+    {name} = std::move(def);
   }}
 """
 
@@ -256,6 +264,11 @@ struct {name} {{
             return f"""
   const {ty}& get_{name}() const {{
     return std::get<{idx + 1}>(variant_);
+  }}
+
+  void set_{name}({ty} def) {{
+    variant_.emplace<{idx + 1}>(std::move(def));
+    tag_ = Tag::{name.upper()};
   }}
 """
 
@@ -410,6 +423,7 @@ class ForwardRef {{
   ForwardRef<T>& operator=(ForwardRef<T>&&) = default;
   ForwardRef<T>& operator=(const ForwardRef<T>& other) {{
     ptr_ = std::make_unique<T>(*other.ptr_);
+    return *this;
   }}
   const T& operator*() const {{
     return *ptr_;
@@ -435,6 +449,44 @@ void to_json(nlohmann::json& j, const ForwardRef<T>& p) {{
 template <typename T>
 void from_json(const nlohmann::json& j, ForwardRef<T>& p) {{
   p.emplace(j.template get<T>());
+}}
+
+class F64 {{
+ public:
+  double get() const {{
+    return value_;
+  }}
+
+  void set(double value) {{
+    value_ = value;
+  }}
+
+ private:
+  double value_;
+}};
+
+inline void to_json(nlohmann::json& j, const F64& f) {{
+  if (std::isinf(f.get())) {{
+    j = "Infinity";
+  }} else if (std::isinf(-f.get())) {{
+    j = "-Infinity";
+  }} else if (std::isnan(f.get())) {{
+    j = "NaN";
+  }} else {{
+    j = f.get();
+  }}
+}}
+
+inline void from_json(const nlohmann::json& j, F64& f) {{
+  if (j == "Infinity") {{
+    f.set(std::numeric_limits<double>::infinity());
+  }} else if (j == "-Infinity") {{
+    f.set(-std::numeric_limits<double>::infinity());
+  }} else if (j == "NaN") {{
+    f.set(std::numeric_limits<double>::quiet_NaN());
+  }} else {{
+    f.set(j.get<double>());
+  }}
 }}
 
 {chr(10).join(cpp_type_decls)}
