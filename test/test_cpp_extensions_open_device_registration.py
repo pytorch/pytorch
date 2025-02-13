@@ -349,7 +349,7 @@ class TestCppExtensionOpenRgistration(common.TestCase):
     def test_open_device_serialization(self):
         self.module.set_custom_device_index(-1)
         storage = torch.UntypedStorage(4, device=torch.device("openreg"))
-        self.assertEqual(torch.serialization.location_tag(storage), "openreg")
+        self.assertEqual(torch.serialization.location_tag(storage), "openreg:0")
 
         self.module.set_custom_device_index(0)
         storage = torch.UntypedStorage(4, device=torch.device("openreg"))
