@@ -228,6 +228,9 @@ template <> inline std::string typeName<at::Float8_e5m2fnuz>() {
 template <> inline std::string typeName<at::Float8_e4m3fnuz>() {
     return "at::Float8_e4m3fnuz";
 }
+template <> inline std::string typeName<at::Float8_e8m0fnu>() {
+    return "at::Float8_e8m0fnu";
+}
 
 #define TYPE_NAME_CASE(ctype, scalartype)                    \
   case ScalarType::scalartype:  return typeName<ctype>();
