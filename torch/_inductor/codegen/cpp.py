@@ -4886,9 +4886,20 @@ class CppScheduling(BaseScheduling):
                     cpp_kernel_proxy_list.append(cpp_kernel_proxy)
                     nodes_list.append(_node.get_nodes())  # type: ignore[arg-type]
 
-                    outer_size = functools.reduce(lambda x, y: x * y, cpp_kernel_proxy.ranges[:node.outer_loop_fusion_depth])
-                    inner_size = cpp_kernel_proxy.ranges[node.outer_loop_fusion_depth]
-                    if isinstance(outer_size, sympy.Integer) and isinstance(inner_size, sympy.Integer) and outer_size * 300 < inner_size:
+                    outer_size = functools.reduce(
+                        lambda x, y: x * y,
+                        cpp_kernel_proxy.ranges[: node.outer_loop_fusion_depth],
+                    )
+                    if (
+                        len(cpp_kernel_proxy.ranges) > node.outer_loop_fusion_depth
+                        and isinstance(outer_size, sympy.Integer)
+                        and isinstance(
+                            cpp_kernel_proxy.ranges[node.outer_loop_fusion_depth],
+                            sympy.Integer,
+                        )
+                        and outer_size * 300
+                        < cpp_kernel_proxy.ranges[node.outer_loop_fusion_depth]
+                    ):
                         for removed_buffer in scope.removed_buffers:
                             # Restore the removed buffers by this context before
                             # fallback to codegen without using Local Buffer
