@@ -155,7 +155,6 @@ class MemoryDep(Dep):
             self.mode,
         )
 
-
     def normalize_with_stride_order(self, prefix: str = "t") -> "MemoryDep":
         r"""
         Used to decide if two MemoryDep does not equal due to different loop orders.
