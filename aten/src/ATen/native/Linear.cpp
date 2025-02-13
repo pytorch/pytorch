@@ -1,6 +1,9 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/core/Tensor.h>
 #include <ATen/native/Resize.h>
+#include <ATen/ExpandUtils.h>
+#include <ATen/native/mkldnn/Matmul.h>
+#include <ATen/native/mkldnn/MKLDNNCommon.h>
 #include <ATen/native/xnnpack/Engine.h>
 #include <ATen/WrapDimUtilsMulti.h>
 #include <ATen/TensorOperators.h>
@@ -69,6 +72,19 @@ static inline Tensor _flatten_nd_linear(const Tensor& input, const Tensor& weigh
     return result.view_symint(sizes_vec);
 }
 
+Tensor call_packed_linear(const Tensor& input, const Tensor& weight, const c10::MaybeOwned<Tensor>& bias, Tensor& result) {
+  if (bias->defined()) {
+    auto bias_ = *expand_size(*bias, {input.sizes()[0], weight.sizes()[1]});
+    at::native::resize_output(result, bias_.sizes());
+    (result).copy_(bias_);
+    mkldnn_matmul_prepacked(input, weight, result);
+    return result;
+  }
+
+  mkldnn_matmul_prepacked(input, weight, result, 0);
+  return result;
+}
+
 
 Tensor linear(const Tensor& input, const Tensor& weight, const std::optional<Tensor>& bias_opt) {
   // _matmul_impl checks this again later, but _flatten_nd_linear does not work on scalars inputs,
@@ -91,7 +107,39 @@ Tensor linear(const Tensor& input, const Tensor& weight, const std::optional<Ten
     return xnnpack::linear(input, weight, *bias);
   }
 #endif
-  if (input_dim == 2 && bias->defined()) {
+
+  // Weight has been prepacked
+  if (weight.is_mkldnn()) {
+    Tensor bias_ = *bias;
+    Tensor input_ = input;
+    Tensor result;
+
+    if (input_dim == 2) {
+      result = at::empty({input.sizes()[0], weight.sizes()[1]}, input.options());
+      call_packed_linear(input_, weight, bias, result);
+      return result;
+    } else {
+      int64_t flattened_dim = 1;
+      for (int64_t i = 0, ndim = input.sizes().size(); i < ndim - 1; ++i) {
+        flattened_dim *= input.sizes()[i];
+      }
+      input_ = input.reshape({flattened_dim, input.sizes().at(input.sizes().size() - 1)});
+      if (!input_.is_contiguous()) {
+        // If user forces flattening via env var
+        input_ = input_.contiguous();
+      }
+
+      result = at::empty({flattened_dim, weight.sizes()[1]}, input.options());
+      call_packed_linear(input_, weight, bias, result);
+
+      auto new_size = input.sizes().slice(0, input.sizes().size() - 1);
+      c10::SymDimVector sizes_vec(new_size.begin(), new_size.end());
+      sizes_vec.push_back(result.sym_size(1));
+      return result.view_symint(sizes_vec);
+    }
+  }
+
+  if ((input_dim == 2 && bias->defined())) {
     // Fused op is marginally faster.
     return at::addmm(*bias, input, weight.t());
   }
