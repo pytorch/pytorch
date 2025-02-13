@@ -776,7 +776,6 @@ class TestTensorCreation(TestCase):
     # Note: This test failed on XLA since its test cases are created by empty_strided which
     #       doesn't support overlapping sizes/strides in XLA impl
     @skipIfTorchDynamo("TorchDynamo fails on this test for unknown reasons")
-
     def test_like_fn_stride_proparation_vs_tensoriterator_unary_op(self, device):
         # Test like functions against tensoriterator based unary operator (exp) to
         # make sure the returned tensor from like function follows the same stride propergation
@@ -1879,7 +1878,6 @@ class TestTensorCreation(TestCase):
 
     # TODO: this test should be updated
     @suppress_warnings
-
     @deviceCountAtLeast(1)
     def test_tensor_device(self, devices):
         device_type = torch.device(devices[0]).type
@@ -2724,7 +2722,6 @@ class TestTensorCreation(TestCase):
         del t
 
     @expectedFailureMeta  # RuntimeError: The tensor has a non-zero number of elements
-
     def test_tensor_ctor_device_inference(self, device):
         torch_device = torch.device(device)
         values = torch.tensor((1, 2, 3), device=device)
