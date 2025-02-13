@@ -44,13 +44,29 @@ kernel void binary_indexing(
   *out = f(*input, *other);
 }
 
-#define REGISTER_BINARY_INDEXING_OP(NAME, DTYPE)       \
-  template [[host_name(#NAME "_" #DTYPE)]] kernel void \
-  binary_indexing<DTYPE, NAME##_functor>(              \
-      constant void* input_,                           \
-      constant void* other_,                           \
-      device void* out_,                               \
-      constant uint3* offsets,                         \
+template <typename T, typename F>
+kernel void binary_dense(
+    constant T* input [[buffer(0)]],
+    constant T* other [[buffer(1)]],
+    device T* out [[buffer(2)]],
+    uint tid [[thread_position_in_grid]]) {
+  F f;
+  out[tid] = f(input[tid], other[tid]);
+}
+
+#define REGISTER_BINARY_INDEXING_OP(NAME, DTYPE)             \
+  template [[host_name(#NAME "_" #DTYPE)]] kernel void       \
+  binary_indexing<DTYPE, NAME##_functor>(                    \
+      constant void* input_,                                 \
+      constant void* other_,                                 \
+      device void* out_,                                     \
+      constant uint3* offsets,                               \
+      uint tid);                                             \
+  template [[host_name(#NAME "_dense_" #DTYPE)]] kernel void \
+  binary_dense<DTYPE, NAME##_functor>(                       \
+      constant DTYPE * input_,                               \
+      constant DTYPE * other_,                               \
+      device DTYPE * out_,                                   \
       uint tid)
 
 template <typename T>
