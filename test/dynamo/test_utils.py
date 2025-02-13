@@ -289,6 +289,7 @@ class TestDynamoTimed(TestCase):
  'tensorify_float_failure': None,
  'tensorify_float_success': None,
  'triton_compile_time_us': 0,
+ 'triton_kernel_compile_times_us': None,
  'triton_version': None}""",  # noqa: B950
         )
 
@@ -371,6 +372,7 @@ class TestDynamoTimed(TestCase):
  'tensorify_float_failure': None,
  'tensorify_float_success': None,
  'triton_compile_time_us': 0,
+ 'triton_kernel_compile_times_us': None,
  'triton_version': None}""",  # noqa: B950
         )
 
