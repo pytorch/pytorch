@@ -1,5 +1,25 @@
 # mypy: ignore-errors
 
+"""
+Dictionary-related variable tracking classes for PyTorch Dynamo.
+
+This module implements variable tracking for different types of dictionary-like objects:
+- Regular Python dictionaries (dict)
+- Ordered dictionaries (collections.OrderedDict)
+- Default dictionaries (collections.defaultdict)
+- Dictionary views (keys and values)
+- Sets and frozensets (implemented internally using dictionaries)
+
+These classes are responsible for tracking dictionary operations during graph compilation,
+maintaining proper guards for dictionary mutations and key existence checks. They handle
+dictionary creation, modification, key/value access, and view operations while ensuring
+correct behavior in the compiled code through appropriate guard installation.
+
+The implementation uses a special _HashableTracker wrapper to handle dictionary keys
+while preserving proper aliasing semantics. Sets are implemented as dictionaries with
+None values for efficiency and code reuse.
+"""
+
 import collections
 import functools
 import types

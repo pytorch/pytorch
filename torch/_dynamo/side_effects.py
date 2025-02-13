@@ -1,4 +1,5 @@
 # mypy: allow-untyped-defs
+
 import collections
 import contextlib
 import inspect
@@ -55,8 +56,22 @@ def _manual_list_update(list_from, list_to):
 
 class SideEffects:
     """
-    Track side effects (list mutation, setattr, etc) that need to be
+    Maintain records of mutations and provide methods to apply them during code generation.
+
+    Handles tracking and applying side effects during PyTorch Dynamo compilation,
+    maintaining Python semantics by managing mutations, attribute modifications,
+    and other side effects that occur during program execution.
+
+    Key responsibilities:
+    - Tracks mutations to Python objects, lists, and dictionaries that need to be
     applied after an FX graph is run.
+    - Manages attribute modifications and deletions
+    - Handles tensor hooks and backward pass state
+    - Tracks cell variable mutations and global variable changes
+    - Ensures correct ordering and application of side effects after graph execution
+
+    This ensures that optimized code behaves identically to the original Python code with
+    respect to object mutations and other side effects.
     """
 
     id_to_variable: dict[int, VariableTracker]

@@ -1,4 +1,29 @@
 # mypy: allow-untyped-defs
+
+"""
+Core module responsible for converting Python bytecode into TorchDynamo's symbolic execution format.
+
+This module implements the bytecode-level tracing system that allows TorchDynamo to analyze
+and transform Python code. It converts Python bytecode instructions into a symbolic format
+that tracks the flow of tensors and other values through the program.
+
+Key components:
+- InstructionTranslatorBase: Base class for converting bytecode to symbolic execution
+- InstructionTranslator: Main translator for function bytecode
+- InliningInstructionTranslator: Handles inlining of called functions
+- SpeculationLog: Manages state for speculative execution and rollback
+
+The symbolic conversion process handles:
+- Control flow (loops, conditionals, etc.)
+- Function inlining and call stack management
+- Tracking of program values and side effects
+- Graph breaks and resumption points
+- Exception handling and stack frame management
+
+This is a core part of TorchDynamo's tracing system that enables ahead-of-time
+optimization of PyTorch programs.
+"""
+
 import collections
 import collections.abc
 import contextlib

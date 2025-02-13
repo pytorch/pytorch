@@ -1,4 +1,26 @@
 # mypy: allow-untyped-defs
+
+"""
+Core graph building functionality for PyTorch's Dynamo system. This module contains
+the essential components for constructing and managing FX graphs during compilation:
+
+- OutputGraph: Manages the overall graph construction and compilation process. It owns
+  a SubgraphTracer and handles graph compilation, execution, and state management.
+  OutputGraph also manages features like graph deduplication, symbolic shape handling,
+  and tracking of side effects.
+
+- SubgraphTracer: Handles the actual FX graph construction by tracing Python code.
+  It supports advanced features like higher-order operators through nested tracers,
+  lifting of free variables, and handling of symbolic shapes.
+
+The module supports key Dynamo features including:
+- Higher-order operators through nested SubgraphTracers
+- Graph deduplication for optimization
+- Symbolic shape handling and propagation
+- Side effect tracking and management
+- Guard insertion and management
+"""
+
 import collections
 import contextlib
 import copy
