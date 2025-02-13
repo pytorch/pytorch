@@ -71,9 +71,9 @@ class TestCutlassBackend(TestCase):
             os.environ["INDUCTOR_TEST_DISABLE_FRESH_CACHE"] = "1"
             super().setUp()
         finally:
-            os.environ[
-                "INDUCTOR_TEST_DISABLE_FRESH_CACHE"
-            ] = old_disable_fresh_cache_envvar
+            os.environ["INDUCTOR_TEST_DISABLE_FRESH_CACHE"] = (
+                old_disable_fresh_cache_envvar
+            )
         torch.random.manual_seed(1234)
 
     def tearDown(self):
@@ -168,6 +168,8 @@ class TestCutlassBackend(TestCase):
         max_autotune_gemm_backends = "CUTLASS"
 
         test
+
+        test2
 
         class MyModel(torch.nn.Module):
             def forward(self, a, b):
