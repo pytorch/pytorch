@@ -1,3 +1,4 @@
+#include <ATen/Context.h>
 #include <OpenReg.h>
 
 // Make this a proper CPython module
@@ -20,5 +21,6 @@ PyMODINIT_FUNC PyInit__C(void) {
     // Only borrowed from the python side!
     openreg::set_impl_factory(openreg_mod.attr("impl_factory").ptr());
 
+    at::globalContext().lazyInitDevice(at::kPrivateUse1);
     return mod;
 }
