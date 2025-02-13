@@ -37,7 +37,6 @@ class CPythonActiveExceptionTests(torch._dynamo.test_case.TestCase):
     def test_sys_exception_no_exception(self):
         self.assertEqual(sys.exception(), None)
 
-    @unittest.expectedFailure
     @make_dynamo_test
     def test_exc_info_with_exception_instance(self):
         def f():
@@ -54,7 +53,6 @@ class CPythonActiveExceptionTests(torch._dynamo.test_case.TestCase):
         self.assertIs(exc_info[1], e)
         self.assertIs(exc_info[2], e.__traceback__)
 
-    @unittest.expectedFailure
     @make_dynamo_test
     def test_exc_info_with_exception_type(self):
         def f():
@@ -71,7 +69,6 @@ class CPythonActiveExceptionTests(torch._dynamo.test_case.TestCase):
         self.assertIs(exc_info[1], e)
         self.assertIs(exc_info[2], e.__traceback__)
 
-    @unittest.expectedFailure
     @unittest.skipIf(sys.version_info < (3, 11), "Python 3.11+")
     @make_dynamo_test
     def test_sys_exception_with_exception_instance(self):
@@ -87,7 +84,6 @@ class CPythonActiveExceptionTests(torch._dynamo.test_case.TestCase):
         self.assertIsInstance(e, ValueError)
         self.assertIs(exc, e)
 
-    @unittest.expectedFailure
     @unittest.skipIf(sys.version_info < (3, 11), "Python 3.11+")
     @make_dynamo_test
     def test_sys_exception_with_exception_type(self):
