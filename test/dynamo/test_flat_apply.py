@@ -110,9 +110,9 @@ class GraphModule(torch.nn.Module):
 
         t0: "f32[10]" = l_x_ + 1
 
-        func_0 = self.func_0
-        func_in_spec_0 = self.func_in_spec_0
-        t1: "f32[10]" = torch.ops.higher_order.flat_apply(func_0, func_in_spec_0, l_x_, l_y_, t0);  func_0 = func_in_spec_0 = l_x_ = t0 = None
+        func = self.func
+        func_in_spec = self.func_in_spec
+        t1: "f32[10]" = torch.ops.higher_order.flat_apply(func, func_in_spec, l_x_, l_y_, t0);  func = func_in_spec = l_x_ = t0 = None
 
         t2: "f32[10]" = t1 + l_y_;  t1 = l_y_ = None
         return (t2,)
