@@ -400,7 +400,6 @@ if __name__ == '__main__':
         self.assertIn('errors=2', stderr)
 
     @expectedFailureMeta  # This is only supported for CPU and CUDA
-
     def test_get_supported_dtypes(self, device):
         # Test the `get_supported_dtypes` helper function.
         # We acquire the dtypes for few Ops dynamically and verify them against
