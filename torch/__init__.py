@@ -31,8 +31,9 @@ from typing import (
     TypeVar as _TypeVar,
     Union as _Union,
 )
-from typing_extensions import ParamSpec as _ParamSpec
 
+import sympy
+from typing_extensions import ParamSpec as _ParamSpec
 
 if TYPE_CHECKING:
     from .types import IntLikeType
@@ -56,7 +57,6 @@ from torch._utils_internal import (
     USE_GLOBAL_DEPS,
     USE_RTLD_GLOBAL_WITH_LIBTORCH,
 )
-
 
 # TODO(torch_deploy) figure out how to freeze version.py in fbcode build
 if _running_with_deploy():
@@ -183,7 +183,7 @@ if sys.platform == "win32":
         ]
 
         if not builtins.any(
-            os.path.exists(os.path.join(p, "nvToolsExt64_1.dll")) for p in dll_paths
+                os.path.exists(os.path.join(p, "nvToolsExt64_1.dll")) for p in dll_paths
         ):
             nvtoolsext_dll_path = os.path.join(
                 os.getenv(
@@ -197,7 +197,7 @@ if sys.platform == "win32":
             nvtoolsext_dll_path = ""
 
         if cuda_version and builtins.all(
-            not glob.glob(os.path.join(p, "cudart64*.dll")) for p in dll_paths
+                not glob.glob(os.path.join(p, "cudart64*.dll")) for p in dll_paths
         ):
             cuda_version_1 = cuda_version.replace(".", "_")
             cuda_path_var = "CUDA_PATH_V" + cuda_version_1
@@ -266,6 +266,7 @@ if sys.platform == "win32":
                     raise err
 
         kernel32.SetErrorMode(prev_error_mode)
+
 
     _load_dll_libraries()
     del _load_dll_libraries
@@ -360,7 +361,7 @@ def _load_global_deps() -> None:
 
 
 if (USE_RTLD_GLOBAL_WITH_LIBTORCH or os.getenv("TORCH_USE_RTLD_GLOBAL")) and (
-    _running_with_deploy() or platform.system() != "Windows"
+        _running_with_deploy() or platform.system() != "Windows"
 ):
     # Do it the hard way.  You might want to load libtorch with RTLD_GLOBAL in a
     # few circumstances:
@@ -934,23 +935,22 @@ def _get_sym_math_fn(name):
 
 __fn, __name, __sym_name = None, "", ""
 for __name in (
-    "sqrt",
-    "cos",
-    "cosh",
-    "sin",
-    "sinh",
-    "tan",
-    "tanh",
-    "asin",
-    "acos",
-    "atan",
-    "log2",
+        "sqrt",
+        "cos",
+        "cosh",
+        "sin",
+        "sinh",
+        "tan",
+        "tanh",
+        "asin",
+        "acos",
+        "atan",
+        "log2",
 ):
     __sym_name = f"_sym_{__name}"
     __fn = _get_sym_math_fn(__name)
     __fn.__qualname__ = __fn.__name__ = __sym_name
     globals()[__sym_name] = __fn
-
 
 del __fn, __name, __sym_name, _get_sym_math_fn
 
@@ -1005,7 +1005,6 @@ except ImportError:
 # Make an explicit reference to the _C submodule to appease linters
 from torch import _C as _C
 
-
 __name, __obj = "", None
 for __name in dir(_C):
     if __name[0] != "_" and not __name.endswith("Base"):
@@ -1046,8 +1045,10 @@ if not TYPE_CHECKING:
                 # Recurse for submodules (e.g., `_C._dynamo.eval_frame`)
                 _import_extension_to_sys_modules(member, memo)
 
+
     _import_extension_to_sys_modules(_C)
     del _import_extension_to_sys_modules
+
 
 ################################################################################
 # Define basic utilities
@@ -1138,7 +1139,7 @@ def get_default_device() -> "torch.device":
 
 
 def set_default_device(
-    device: _Optional[_Union["torch.device", str, builtins.int]],
+        device: _Optional[_Union["torch.device", str, builtins.int]],
 ) -> None:
     """Sets the default ``torch.Tensor`` to be allocated on ``device``.  This
     does not affect factory function calls which are called with an explicit
@@ -1286,9 +1287,9 @@ def set_default_dtype(d: "torch.dtype", /) -> None:
 
 
 def use_deterministic_algorithms(
-    mode: builtins.bool,
-    *,
-    warn_only: builtins.bool = False,
+        mode: builtins.bool,
+        *,
+        warn_only: builtins.bool = False,
 ) -> None:
     r"""Sets whether PyTorch operations must use "deterministic"
     algorithms. That is, algorithms which, given the same input, and when
@@ -1603,9 +1604,9 @@ def is_warn_always_enabled() -> builtins.bool:
 
 
 def _check_with(
-    error_type,
-    cond: _Union[builtins.bool, SymBool],
-    message: _Callable[[], str],
+        error_type,
+        cond: _Union[builtins.bool, SymBool],
+        message: _Callable[[], str],
 ):  # noqa: F811
     if not isinstance(cond, (builtins.bool, SymBool)):
         raise TypeError(f"cond must be a bool, but got {type(cond)}")
@@ -1792,7 +1793,6 @@ def _check_tensor_all(cond, message=None):  # noqa: F811
 # For Python Array API (https://data-apis.org/array-api/latest/API_specification/constants.html) and
 # NumPy consistency (https://numpy.org/devdocs/reference/constants.html)
 from math import e, inf, nan, pi
-
 
 newaxis: None = None
 
@@ -2098,7 +2098,6 @@ del __name, __obj
 
 import torch
 
-
 __all__.extend(
     name for name in dir(torch) if isinstance(getattr(torch, name), torch.dtype)
 )
@@ -2125,6 +2124,7 @@ from torch.functional import *  # usort: skip # noqa: F403
 del _StorageBase
 del _LegacyStorage
 
+
 ################################################################################
 # Define _assert
 ################################################################################
@@ -2134,7 +2134,7 @@ del _LegacyStorage
 def _assert(condition, message):
     r"""A wrapper around Python's assert which is symbolically traceable."""
     if type(condition) is not torch.Tensor and overrides.has_torch_function(
-        (condition,)
+            (condition,)
     ):
         return overrides.handle_torch_function(
             _assert, (condition,), condition, message
@@ -2191,7 +2191,6 @@ from torch import (
 )
 from torch.signal import windows as windows
 
-
 # Quantized, sparse, AO, etc. should be last to get imported, as nothing
 # is expected to depend on them.
 from torch import ao as ao  # usort: skip
@@ -2202,12 +2201,10 @@ import torch.nn.qat
 import torch.nn.quantizable
 import torch.nn.quantized
 
-
 _C._init_names(list(_storage_classes))
 
 # attach docstrings to torch and tensor functions
 from torch import _size_docs, _storage_docs, _tensor_docs, _torch_docs
-
 
 del _torch_docs, _tensor_docs, _storage_docs, _size_docs
 
@@ -2218,7 +2215,6 @@ def compiled_with_cxx11_abi() -> builtins.bool:
 
 
 from torch import _library as _library, _ops as _ops
-
 
 # Import the ops and classes "namespace"
 from torch._ops import ops as ops  # usort: skip
@@ -2242,14 +2238,12 @@ legacy_contiguous_format = contiguous_format  # defined by _C._initExtension()
 # Register fork handler to initialize OpenMP in child processes (see gh-28389)
 from torch.multiprocessing._atfork import register_after_fork
 
-
 register_after_fork(torch.get_num_threads)
 del register_after_fork
 
 # Import tools that require fully imported torch (for applying
 # torch.jit.script as a decorator, for instance):
 from torch._lobpcg import lobpcg as lobpcg
-
 
 # These were previously defined in native_functions.yaml and appeared on the
 # `torch` namespace, but we moved them to c10 dispatch to facilitate custom
@@ -2295,9 +2289,9 @@ class _TorchCompileInductorWrapper:
 
     def __eq__(self, other):
         return (
-            isinstance(other, _TorchCompileInductorWrapper)
-            and self.config == other.config
-            and self.dynamic == other.dynamic
+                isinstance(other, _TorchCompileInductorWrapper)
+                and self.config == other.config
+                and self.dynamic == other.dynamic
         )
 
     def apply_mode(self, mode: _Optional[str]):
@@ -2374,10 +2368,10 @@ class _TorchCompileWrapper:
 
     def __eq__(self, other):
         return (
-            isinstance(other, _TorchCompileWrapper)
-            and self.compiler_fn == other.compiler_fn
-            and self.kwargs == other.kwargs
-            and self.dynamic == other.dynamic
+                isinstance(other, _TorchCompileWrapper)
+                and self.compiler_fn == other.compiler_fn
+                and self.kwargs == other.kwargs
+                and self.dynamic == other.dynamic
         )
 
     def __call__(self, model_, inputs_):
@@ -2394,39 +2388,39 @@ _RetT = _TypeVar("_RetT")
 
 @_overload
 def compile(
-    model: _Callable[_InputT, _RetT],
-    *,
-    fullgraph: builtins.bool = False,
-    dynamic: _Optional[builtins.bool] = None,
-    backend: _Union[str, _Callable] = "inductor",
-    mode: _Union[str, None] = None,
-    options: _Optional[dict[str, _Union[str, builtins.int, builtins.bool]]] = None,
-    disable: builtins.bool = False,
+        model: _Callable[_InputT, _RetT],
+        *,
+        fullgraph: builtins.bool = False,
+        dynamic: _Optional[builtins.bool] = None,
+        backend: _Union[str, _Callable] = "inductor",
+        mode: _Union[str, None] = None,
+        options: _Optional[dict[str, _Union[str, builtins.int, builtins.bool]]] = None,
+        disable: builtins.bool = False,
 ) -> _Callable[_InputT, _RetT]: ...
 
 
 @_overload
 def compile(
-    model: None = None,
-    *,
-    fullgraph: builtins.bool = False,
-    dynamic: _Optional[builtins.bool] = None,
-    backend: _Union[str, _Callable] = "inductor",
-    mode: _Union[str, None] = None,
-    options: _Optional[dict[str, _Union[str, builtins.int, builtins.bool]]] = None,
-    disable: builtins.bool = False,
+        model: None = None,
+        *,
+        fullgraph: builtins.bool = False,
+        dynamic: _Optional[builtins.bool] = None,
+        backend: _Union[str, _Callable] = "inductor",
+        mode: _Union[str, None] = None,
+        options: _Optional[dict[str, _Union[str, builtins.int, builtins.bool]]] = None,
+        disable: builtins.bool = False,
 ) -> _Callable[[_Callable[_InputT, _RetT]], _Callable[_InputT, _RetT]]: ...
 
 
 def compile(
-    model: _Optional[_Callable] = None,
-    *,
-    fullgraph: builtins.bool = False,
-    dynamic: _Optional[builtins.bool] = None,
-    backend: _Union[str, _Callable] = "inductor",
-    mode: _Union[str, None] = None,
-    options: _Optional[dict[str, _Union[str, builtins.int, builtins.bool]]] = None,
-    disable: builtins.bool = False,
+        model: _Optional[_Callable] = None,
+        *,
+        fullgraph: builtins.bool = False,
+        dynamic: _Optional[builtins.bool] = None,
+        backend: _Union[str, _Callable] = "inductor",
+        mode: _Union[str, None] = None,
+        options: _Optional[dict[str, _Union[str, builtins.int, builtins.bool]]] = None,
+        disable: builtins.bool = False,
 ) -> _Union[
     _Callable[[_Callable[_InputT, _RetT]], _Callable[_InputT, _RetT]],
     _Callable[_InputT, _RetT],
@@ -2598,7 +2592,6 @@ from torch import (
 from torch._higher_order_ops import cond as cond, while_loop as while_loop
 from torch.func import vmap as vmap
 
-
 if not TYPE_CHECKING:
     from torch import _meta_registrations
 
@@ -2612,12 +2605,12 @@ if "TORCH_CUDA_SANITIZER" in os.environ:
 import torch.fx.experimental.sym_node
 from torch import fx as fx
 
-
 # Register MPS specific decomps
 torch.backends.mps._init()
 
 if not _running_with_deploy():
     from torch import compiler as compiler
+
 
     class _TritonLibrary:
         lib = torch.library.Library("triton", "DEF")
@@ -2631,7 +2624,6 @@ if not _running_with_deploy():
                 cls.ops_table[(op_key, dispatch_key)] = op_impl
 
             return cls.ops_table[(op_key, dispatch_key)]
-
 
 # Deprecated attributes
 _deprecated_attrs = {
@@ -2660,6 +2652,7 @@ else:
         # ONNX must be imported after _dynamo, _ops, _subclasses, fx, func and jit
         "onnx",
     }
+
 
     def __getattr__(name):
         # Deprecated attrs
@@ -2705,9 +2698,9 @@ def get_device_module(device: _Optional[_Union[torch.device, str]] = None):
 
 
 def _constrain_as_size(
-    symbol,
-    min: _Optional[builtins.int] = None,
-    max: _Optional[builtins.int] = None,
+        symbol,
+        min: _Optional[builtins.int] = None,
+        max: _Optional[builtins.int] = None,
 ):
     """
     This indicates that a given int is size-like, and can be used in any context where a size is expected.
@@ -2731,7 +2724,6 @@ def _constrain_as_size(
 
 
 from torch import _logging
-
 
 _logging._init_logs()
 
