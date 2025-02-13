@@ -2732,6 +2732,32 @@ class TestFX(JitTestCase):
         x = torch.rand(1)
         self.assertEqual(module(x), gm(x))
 
+    def test_symbolic_trace_proxy_dataclass(self):
+        # N.B. this is a backward-compatibility test to ensure we still emit
+        # `call_function` nodes to construct dataclass objects.
+        from dataclasses import dataclass
+
+        @dataclass
+        class Pair:
+            foo: torch.Tensor
+            bar: torch.Tensor
+
+        class MyMod(torch.nn.Module):
+            def forward(self, d: torch.Tensor):
+                return Pair(foo=d + 1, bar=d * 2)
+
+        module = MyMod()
+        traced_graph = symbolic_trace(module).graph
+
+        out_arg = traced_graph.output_node().args[0]
+        self.assertTrue(isinstance(out_arg, Node))
+        self.assertEqual(out_arg.op, "call_function")
+        self.assertEqual(out_arg.target, Pair)
+
+        gm = GraphModule(module, traced_graph)
+        x = torch.rand(1)
+        self.assertEqual(module(x), gm(x))
+
     def test_trace_dict_proxy_keys(self):
         class ModWithDictArg(torch.nn.Module):
             def forward(self, d: dict[torch.Tensor, torch.Tensor]):
