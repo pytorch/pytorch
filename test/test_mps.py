@@ -9915,6 +9915,39 @@ class TestSDPA(TestCaseMPS):
     def test_sdpa_mask_fp16_L6_S17_NH23_HS121(self):
         self._test_sdpa_mask(torch.float16, 7, 17, 23, 121)
 
+    def _test_sdpa_3d_input(self, dtype):
+        head_num, seq_len, embed_dim = 16, 16, 80
+
+        q = torch.randn(head_num, seq_len, embed_dim, dtype=dtype)
+        k = torch.randn(head_num, seq_len, embed_dim, dtype=dtype)
+        v = torch.randn(head_num, seq_len, embed_dim, dtype=dtype)
+        attention_mask = torch.ones(1, seq_len, seq_len, dtype=dtype)
+
+        with torch.nn.attention.sdpa_kernel([torch.nn.attention.SDPBackend.MATH]):
+            y = F.scaled_dot_product_attention(
+                q.to("mps"),
+                k.to("mps"),
+                v.to("mps"),
+                attention_mask.to("mps"),
+                dropout_p=0.0
+            )
+
+            y_ref = F.scaled_dot_product_attention(
+                q.to("cpu"),
+                k.to("cpu"),
+                v.to("cpu"),
+                attention_mask.to("cpu"),
+                dropout_p=0.0
+            )
+
+            self._compare_tensors(y.cpu(), y_ref)
+
+    def test_sdpa_3d_input_fp32(self):
+        self._test_sdpa_3d_input(torch.float32)
+
+    def test_sdpa_3d_input_fp16(self):
+        self._test_sdpa_3d_input(torch.float16)
+
 
 class TestGatherScatter(TestCaseMPS):
     def test_slicing_with_step(self):
