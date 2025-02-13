@@ -338,7 +338,7 @@ void cpu_padding_backward(
   int64_t offset_d = ndim == 3 ? p.offsets[ndim - 3] : 0;
   int64_t offset_h = ndim >= 2 ? p.offsets[ndim - 2] : 0;
   int64_t offset_w = p.offsets[ndim - 1];
-      
+  
   if (ndim == 1) {
     // parallel on N,C, sequential on W
     at::parallel_for(0, channels, 1, [&](int64_t begin, int64_t end) {
