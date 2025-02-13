@@ -22,6 +22,7 @@ from typing import (
     List,
     Optional,
     Sequence,
+    Tuple,
     TYPE_CHECKING,
     TypeVar,
     Union,
@@ -1936,6 +1937,7 @@ class Scheduler:
         V.graph.scheduler = self
         self.backends: dict[torch.device, BaseScheduling] = {}
         self.post_grad_graph_id = next(_post_grad_graph_counter)
+        self._graph_partition_counter = itertools.count()
 
         self.completed_operations = OrderedSet[str]()
         self.available_buffer_names = OrderedSet(
@@ -3895,11 +3897,148 @@ class Scheduler:
             and name not in self.mutation_real_name
         )
 
+    def only_gpu_inputs_and_outputs(self, node: BaseSchedulerNode) -> bool:
+        if not node.is_gpu():
+            return True
+
+        if isinstance(node.node, ir.DeviceCopy):
+            return True
+
+        if isinstance(node.node, ir.Conditional):
+            return True
+
+        return False
+
+    def get_partition_rules(self) -> List[Callable[[BaseSchedulerNode], bool]]:
+        return [self.only_gpu_inputs_and_outputs]
+
+    def get_name_to_nodes(self) -> Dict[str, Union[ir.IRNode, sympy.Expr]]:
+        name_to_node: Dict[str, Union[ir.IRNode, sympy.Expr]] = {}
+        name_to_node.update(V.graph.graph_inputs)
+
+        for node in self.nodes:
+            for name, scheduler_buffer in node.outputs_by_name.items():
+                name_to_node[name] = scheduler_buffer.node
+
+        return name_to_node
+
+    def get_graph_partition_signature(
+        self, partitions: List[List[BaseSchedulerNode]]
+    ) -> Tuple[List[Dict[str, Union[ir.IRNode, sympy.Expr]]], List[List[ir.IRNode]]]:
+        inputs: List[Dict[str, Union[ir.IRNode, sympy.Expr]]] = []
+        outputs: List[List[ir.IRNode]] = []
+
+        unmet_output_names = OrderedSet(V.graph.get_output_names())
+        name_to_node = self.get_name_to_nodes()
+
+        for partition in reversed(partitions):
+            output_names: OrderedSet[str] = OrderedSet()
+
+            for node in partition:
+                output_names.update(node.outputs_by_name.keys())
+
+            returned_output_names = output_names.intersection(unmet_output_names)
+
+            read_writes = dependencies.ReadWrites.merge_list(
+                [x.read_writes for x in partition]
+            )
+            partition_input_names = (
+                OrderedSet([x.name for x in read_writes.reads | read_writes.writes])
+                - output_names
+            )
+
+            inputs.append({name: name_to_node[name] for name in partition_input_names})
+            outputs.append([name_to_node[name] for name in returned_output_names])
+            unmet_output_names = partition_input_names.union(
+                unmet_output_names - returned_output_names
+            )
+
+        assert unmet_output_names.issubset(
+            OrderedSet(V.graph.graph_inputs.keys())
+        ), f"{unmet_output_names=} should be subset of {V.graph.graph_inputs.keys()=}"
+
+        return inputs[::-1], outputs[::-1]
+
+    def graph_partition(
+        self,
+    ) -> Tuple[
+        List[List[BaseSchedulerNode]],
+        List[Dict[str, Union[ir.IRNode, sympy.Expr]]],
+        List[List[ir.IRNode]],
+    ]:
+        partitions: List[List[BaseSchedulerNode]] = []
+        partition_rules = self.get_partition_rules()
+
+        cur_partition: List[BaseSchedulerNode] = []
+        for node in self.nodes:
+            for should_partition in partition_rules:
+                if should_partition(node):
+                    if cur_partition:
+                        partitions.append(cur_partition)
+                        cur_partition = []
+                    partitions.append([node])
+                else:
+                    cur_partition.append(node)
+
+        if cur_partition:
+            partitions.append(cur_partition)
+
+        inputs, outputs = self.get_graph_partition_signature(partitions)
+
+        return partitions, inputs, outputs
+
     def codegen(self) -> None:
         with dynamo_timed("Scheduler.codegen"):
-            return self._codegen()
+            return (
+                self._codegen_partitions()
+                if torch._inductor.config.graph_partition and not V.graph.aot_mode
+                else self._codegen(self.nodes)
+            )
 
-    def _codegen(self) -> None:
+    def _codegen_partition_wrapper(
+        self,
+        partition: List[BaseSchedulerNode],
+        input_nodes: Dict[str, Union[ir.IRNode, sympy.Expr]],
+        output_nodes: List[ir.IRNode],
+    ) -> None:
+        parent_wrapper_code = V.graph.wrapper_code
+        graph_partition_id = next(self._graph_partition_counter)
+
+        with V.graph.set_current_wrapper_code():
+            V.graph.init_wrapper_code(
+                is_subgraph=True,
+                subgraph_name=f"partition_{graph_partition_id}",
+                parent_wrapper_code=parent_wrapper_code,
+                input_nodes=input_nodes,
+                output_nodes=output_nodes,
+            )
+            self._codegen(partition)
+            partition_code, _ = V.graph.wrapper_code.generate(V.graph.is_inference)
+
+        V.graph.wrapper_code.define_subgraph_launcher_fn(partition_code)
+        V.graph.wrapper_code.codegen_partition_call(
+            graph_partition_id, input_nodes, output_nodes
+        )
+
+    def _codegen_partitions(self) -> None:
+        partitions, input_nodes, output_nodes = self.graph_partition()
+
+        for partition, input_node, output_node in zip(
+            partitions, input_nodes, output_nodes
+        ):
+            assert (
+                len(partition) >= 1
+            ), f"Each partition must have at least one node but found {len(partition)}"
+
+            if len(partition) > 1:
+                self._codegen_partition_wrapper(partition, input_node, output_node)
+            else:
+                self._codegen(partition)
+
+        num_partitions = next(self._graph_partition_counter)
+        V.graph.wrapper_code.codegen_subgraph_lists(num_partitions)
+
+    def _codegen(self, nodes: List[BaseSchedulerNode]) -> None:
         if config.check_stack_no_cycles_TESTING_ONLY:
             import torch._dynamo.convert_frame
 
@@ -3921,7 +4060,7 @@ class Scheduler:
                 seen.add(key)
 
         self.current_device = None
-        for node in self.nodes:
+        for node in nodes:
             if log.isEnabledFor(logging.DEBUG):
                 try:
                     log.debug(
@@ -3934,7 +4073,6 @@ class Scheduler:
                         "Generating code for node %s with estimated runtime 0.0",
                         node.get_name(),
                     )
-
             self.enter_context(node)
 
             if device := node.get_device():
