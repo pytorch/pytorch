@@ -1268,9 +1268,7 @@ def device_memory_used(device: Optional[Union[Device, int]] = None) -> int:
 
     """
     if not torch.version.hip:
-        handle = _get_pynvml_handler()
-        device = _get_nvml_device_index(device)
-        handle = pynvml.nvmlDeviceGetHandleByIndex(device)
+        handle = _get_pynvml_handler(device)
         return pynvml.nvmlDeviceGetMemoryInfo(handle).used
     else:
         return _get_amdsmi_device_memory_used(device)
@@ -1289,9 +1287,7 @@ def memory_usage(device: Optional[Union[Device, int]] = None) -> int:
     depending on the product being queried.
     """
     if not torch.version.hip:
-        handle = _get_pynvml_handler()
-        device = _get_nvml_device_index(device)
-        handle = pynvml.nvmlDeviceGetHandleByIndex(device)
+        handle = _get_pynvml_handler(device)
         return pynvml.nvmlDeviceGetUtilizationRates(handle).memory
     else:
         return _get_amdsmi_memory_usage(device)
@@ -1311,8 +1307,6 @@ def utilization(device: Optional[Union[Device, int]] = None) -> int:
     """
     if not torch.version.hip:
         handle = _get_pynvml_handler(device)
-        device = _get_nvml_device_index(device)
-        handle = pynvml.nvmlDeviceGetHandleByIndex(device)
         return pynvml.nvmlDeviceGetUtilizationRates(handle).gpu
     else:
         return _get_amdsmi_utilization(device)
