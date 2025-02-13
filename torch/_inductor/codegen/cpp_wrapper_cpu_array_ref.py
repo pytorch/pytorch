@@ -9,7 +9,6 @@ import torch._inductor.async_compile  # noqa: F401 required to warm up AsyncComp
 import torch._ops
 
 from .. import config, ir
-from ..cpp_builder import is_gcc
 from ..utils import sympy_product
 from ..virtualized import V
 from .cpp_utils import DTYPE_TO_CPP
@@ -205,10 +204,8 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
                         """
                     )
 
-                run_impl_proto = ""
-                if config.aot_inductor.compile_wrapper_with_O0:
-                    run_impl_proto += "DISABLE_OPTIMIZATION\n"
-                run_impl_proto += """
+                run_impl_proto = f"""
+                    {"DISABLE_FUNCTION_OPTIMIZATION" if config.aot_inductor.compile_wrapper_with_O0 else ""}
                     void AOTInductorModel::run_impl(
                         AtenTensorHandle*
                             input_handles, // array of input AtenTensorHandle; handles
@@ -219,7 +216,7 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
                                             // borrowed
                         DeviceStreamType stream,
                         AOTIProxyExecutorHandle proxy_executor
-                    ) {
+                    ) {{
                     """
 
                 if config.aot_inductor.debug_compile:
@@ -275,10 +272,9 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
                     self.prefix.splice(run_impl_proto)
         else:
             # cpp entry function for JIT with cpp wrapper
-            if config.aot_inductor.compile_wrapper_with_O0:
-                self.prefix.splice("DISABLE_OPTIMIZATION")
             self.prefix.splice(
-                """
+                f"""
+                {"DISABLE_FUNCTION_OPTIMIZATION" if config.aot_inductor.compile_wrapper_with_O0 else ""}
                 void inductor_entry_impl(
                     AtenTensorHandle*
                         input_handles, // array of input AtenTensorHandle; handles
@@ -287,7 +283,7 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
                         output_handles  // array for writing output AtenTensorHandle; handles
                                         // will be stolen by the caller; the array itself is
                                         // borrowed)
-                ) {
+                ) {{
                 """
             )
         with self.prefix.indent():

@@ -16,10 +16,10 @@ using bfloat16 = at::BFloat16;
   return (nbytes + 64 - 1) & -64;
 }
 
-#if defined (_MSC_VER)
-#define DISABLE_OPTIMIZATION _Pragma("optimize( \"\", off )")
-#elif defined (__clang__)
-#define DISABLE_OPTIMIZATION [[clang::optnone]]
-#elif defined (__GNUC__)
-#define DISABLE_OPTIMIZATION [[gnu::optimize(0)]]
+#if defined(_MSC_VER)
+#define DISABLE_FUNCTION_OPTIMIZATION _Pragma("optimize( \"\", off )")
+#elif defined(__clang__)
+#define DISABLE_FUNCTION_OPTIMIZATION [[clang::optnone]]
+#elif defined(__GNUC__)
+#define DISABLE_FUNCTION_OPTIMIZATION [[gnu::optimize(0)]]
 #endif
