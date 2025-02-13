@@ -167,6 +167,8 @@ class TestCutlassBackend(TestCase):
         """
         max_autotune_gemm_backends = "CUTLASS"
 
+        test
+
         class MyModel(torch.nn.Module):
             def forward(self, a, b):
                 return a @ b
