@@ -1113,7 +1113,11 @@ class CppFlexAttentionTemplate(CppTemplate):
 
         # TODO add tuning support for block_m and block_n
         GemmBlocking = namedtuple("GemmBlocking", ["block_m", "block_n", "block_k"])
-        GemmBlocking.block_m = 1
+
+        # TODO jianan Choose block_m/block_n for the best performance
+        # TODO jianan Choose sub_block_m/sub_block_n in cpp_micro_gemm.py
+        # for the best performance
+        GemmBlocking.block_m = 4
         GemmBlocking.block_n = 16
         GemmBlocking.block_k = 1
 
@@ -1132,12 +1136,14 @@ class CppFlexAttentionTemplate(CppTemplate):
             def forward(self, x):
                 return x * 2
 
+        # TODO jianan Remove fake graph
         gm = torch.fx.symbolic_trace(DummyModule())
         fake_graph = GraphLowering(gm)
 
         with V.set_graph_handler(fake_graph):
             kernel = CppTemplateKernel("cpp_micro_gemm", parallel_num_threads())
             code = micro_gemm.codegen_define(kernel)
+        # TODO jianan Remove unnecessary header files
         res = IndentedBuffer()
         res.writeline(torch._inductor.codecache.cpp_prefix())
         res.splice("""#include <c10/util/Unroll.h>""")
