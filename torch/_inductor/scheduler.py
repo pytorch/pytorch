@@ -4006,17 +4006,18 @@ class Scheduler:
                 V.graph.wrapper_code
             )  # TODO: use V.set_graph_handler instead
             graph_partition_id = next(self._graph_partition_counter)
-            partition_name = f"partition_{graph_partition_id}"
-            V.graph.init_wrapper_code(
-                is_subgraph=True,
-                subgraph_name=partition_name,
-                parent_wrapper_code=parent_wrapper_code,
-                input_names=list(input),
-                output_nodes=list(output),
-            )  # TODO: Check side effect
-            self._codegen(partition)
-            partition_code, _ = V.graph.wrapper_code.generate(V.graph.is_inference)
-            V.graph.wrapper_code = parent_wrapper_code
+
+            with V.graph.set_current_wrapper_code():
+                V.graph.init_wrapper_code(
+                    is_subgraph=True,
+                    subgraph_name=f"partition_{graph_partition_id}",
+                    parent_wrapper_code=parent_wrapper_code,
+                    input_names=list(input),
+                    output_nodes=list(output),
+                )
+                self._codegen(partition)
+                partition_code, _ = V.graph.wrapper_code.generate(V.graph.is_inference)
+
             V.graph.wrapper_code.define_subgraph_launcher_fn(partition_code)
             V.graph.wrapper_code.codegen_partition_call(
                 graph_partition_id, input, output

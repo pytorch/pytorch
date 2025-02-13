@@ -1299,6 +1299,14 @@ class GraphLowering(torch.fx.Interpreter):
         finally:
             self.current_node = old
 
+    @contextmanager
+    def set_current_wrapper_code(self) -> Iterator[None]:
+        old = self.wrapper_code
+        try:
+            yield
+        finally:
+            self.wrapper_code = old
+
     def propagate_mutation(
         self,
         fx_node: torch.fx.Node,
