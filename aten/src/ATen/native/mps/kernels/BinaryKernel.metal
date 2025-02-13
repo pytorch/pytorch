@@ -33,6 +33,8 @@ struct copysign_functor {
   }
 };
 
+struct add
+
 struct zeta_functor {
   template <typename T>
   inline T operator()(const T a, const T b) {
