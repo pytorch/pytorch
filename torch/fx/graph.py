@@ -2,6 +2,7 @@
 import builtins
 import contextlib
 import copy
+import dataclasses
 import enum
 import functools
 import inspect
@@ -519,6 +520,14 @@ class CodeGen:
                 qualified_name = _get_qualified_name(type(arg))
                 global_name = add_global(qualified_name, type(arg))
                 return f"{global_name}{_get_repr(tuple(arg))}"
+            elif dataclasses.is_dataclass(arg):
+                qualified_name = _get_qualified_name(type(arg))
+                global_name = add_global(qualified_name, type(arg))
+                kwargs = ", ".join(
+                    f"{field.name}={_get_repr(getattr(arg, field.name))}"
+                    for field in dataclasses.fields(arg)
+                )
+                return f"{global_name}({kwargs})"
             elif isinstance(
                 arg, (torch._ops.OpOverload, torch._ops.HigherOrderOperator)
             ):

@@ -1920,6 +1920,7 @@ class _MakefxTracer:
             else:
                 self.fx_tracer = PythonKeyTracer()
             self.fx_tracer._proxy_named_tuple = False
+            self.fx_tracer._proxy_dataclass = False
 
             if self.tracing_mode == "fake":
                 import torch._dynamo
@@ -2008,6 +2009,7 @@ class _MakefxTracer:
             assert parent_tracer.fx_tracer is not None
             self.fx_tracer = _create_sub_fx_tracer(parent_tracer.fx_tracer)
             self.fx_tracer._proxy_named_tuple = False
+            self.fx_tracer._proxy_dataclass = False
             self._construct_modes_with_fx_tracer(self.fx_tracer)
             yield
         finally:

@@ -1,4 +1,5 @@
 # Owner(s): ["module: dynamo"]
+import dataclasses
 import functools
 import operator
 import os
@@ -231,6 +232,38 @@ class DecoratorTests(torch._dynamo.test_case.TestCase):
                 self.assertNotEqual(node.target, Pair)
 
         # Make sure named tuple instances are used directly as inputs.
+        out_arg = graph.output_node().args[0]
+        trace_me_arg = out_arg[0].args[0]
+        self.assertTrue(type(trace_me_arg), Pair)
+        self.assertTrue(type(trace_me_arg.foo), Pair)
+
+    def test_allow_in_graph_dataclass(self):
+        @dataclasses.dataclass(frozen=True)
+        class Pair:
+            foo: Any
+            bar: Any
+
+        @torch.compiler.allow_in_graph
+        def trace_me(dc):
+            return dc.bar + 1
+
+        backend = torch._dynamo.testing.EagerAndRecordGraphs()
+
+        @torch.compile(fullgraph=True, backend=backend)
+        def func(d):
+            inner = Pair(foo=d, bar=d + 1)
+            outer = Pair(foo=inner, bar=d + 2)
+            return trace_me(outer)
+
+        func(torch.randn(10))
+        graph = backend.graphs[0].graph
+
+        # Make sure we don't call the named tuple constructor.
+        for node in graph.nodes:
+            if node.op == "call_function":
+                self.assertNotEqual(node.target, Pair)
+
+        # Make sure dataclass instances are used directly as inputs.
         out_arg = graph.output_node().args[0]
         trace_me_arg = out_arg[0].args[0]
         self.assertTrue(type(trace_me_arg), Pair)

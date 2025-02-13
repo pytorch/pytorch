@@ -1914,6 +1914,7 @@ class SubgraphTracer(fx.Tracer):
     def __init__(self, output_graph, parent=None, is_export=False, source_target=None):
         super().__init__()
         self._proxy_named_tuple = False
+        self._proxy_dataclass = False
         self.output_graph = weakref.proxy(output_graph)
         self.graph = torch.fx.Graph()
 

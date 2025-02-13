@@ -146,8 +146,13 @@ class TracerBase:
     # nodes, or inline them directly as instance arguments to the user nodes.
     _proxy_named_tuple: bool
 
+    # Decides whether we represent `NamedTuple` instances as `call_function`
+    # nodes, or inline them directly as instance arguments to the user nodes.
+    _proxy_dataclass: bool
+
     def __init__(self):
         self._proxy_named_tuple = True
+        self._proxy_dataclass = True
 
     @compatibility(is_backward_compatible=True)
     def create_node(
@@ -356,7 +361,10 @@ class TracerBase:
                 field.name: self.create_arg(getattr(a, field.name))
                 for field in fields(a)
             }
-            return self.create_node("call_function", a.__class__, (), kwargs)
+            if self._proxy_dataclass:
+                return self.create_node("call_function", a.__class__, (), kwargs)
+            else:
+                return a.__class__(**kwargs)
 
         elif isinstance(a, (*base_types, enum.Enum)) or a is None or a is ...:
             return a
