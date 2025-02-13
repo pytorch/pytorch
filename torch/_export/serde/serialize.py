@@ -183,6 +183,7 @@ _SYM_OPS = {
     operator.gt,
     operator.neg,
     operator.pos,
+    math.trunc,
     torch.sym_not,
     operator.mul,
     operator.add,
@@ -2709,8 +2710,21 @@ def _dataclass_to_dict(obj):
         return tuple(_dataclass_to_dict(x) for x in obj)
     elif isinstance(obj, dict):
         return {k: _dataclass_to_dict(v) for k, v in obj.items()}
+    elif isinstance(obj, float):
+        if obj == math.inf:
+            return "Infinity"
+        elif obj == -math.inf:
+            return "-Infinity"
+        elif obj == math.nan:
+            return "NaN"
+        else:
+            return obj
     else:
         return obj
+
+
+def _to_json_bytes(obj: Any) -> bytes:
+    return json.dumps(_dataclass_to_dict(obj), cls=EnumEncoder, allow_nan=False).encode("utf-8")
 
 
 def serialize(
@@ -2724,10 +2738,7 @@ def serialize(
         )
     assert isinstance(serialized_program.exported_program, ExportedProgram)
 
-    json_program = json.dumps(
-        _dataclass_to_dict(serialized_program.exported_program), cls=EnumEncoder
-    )
-    json_bytes = json_program.encode("utf-8")
+    json_bytes = _to_json_bytes(serialized_program.exported_program)
     artifact = SerializedArtifact(
         json_bytes,
         serialized_program.state_dict,
@@ -2771,6 +2782,8 @@ def _dict_to_dataclass(cls, data):
     elif isinstance(data, dict):
         v_type = typing.get_args(cls)[1]
         return {k: _dict_to_dataclass(v_type, v) for k, v in data.items()}
+    elif cls == float:
+        return float(data)
     return data
 
 

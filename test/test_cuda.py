@@ -672,6 +672,13 @@ class TestCuda(TestCase):
         )
         torch.backends.cuda.matmul.allow_bf16_reduced_precision_reduction = orig
 
+    def test_cublas_allow_fp16_accumulation_get_set(self):
+        orig = torch.backends.cuda.matmul.allow_fp16_accumulation
+        self.assertEqual(torch._C._get_cublas_allow_fp16_accumulation(), orig)
+        torch.backends.cuda.matmul.allow_fp16_accumulation = not orig
+        self.assertEqual(torch._C._get_cublas_allow_fp16_accumulation(), not orig)
+        torch.backends.cuda.matmul.allow_fp16_accumulation = orig
+
     def test_cudnn_allow_tf32_get_set(self):
         with torch.backends.cudnn.flags(
             enabled=None, benchmark=None, deterministic=None, allow_tf32=False
@@ -3511,7 +3518,6 @@ print(f"{{r1}}, {{r2}}")
         x = torch.cuda.device_count()
         self.assertEqual(f"{x}, 1", r)
 
-    @unittest.skip("Disabling as USE_CUFILE=0 by default in builds")
     def test_gds_fails_in_ci(self):
         if IS_WINDOWS or TEST_WITH_ROCM:
             error_msg = "is not supported on this platform"
@@ -3534,9 +3540,8 @@ def fork_and_check_is_pinned():
     def worker(conn):
         try:
             x = torch.randn(10)
-            x.is_pinned()
-            dev = torch.accelerator.current_accelerator()
-            x = torch.ones(10, device=dev)[0].item()
+            x.is_pinned(device="cuda")
+            x = torch.ones(10, device="cuda")[0].item()
             conn.send(x)
         except Exception as e:
             conn.send(str(e))
@@ -3556,7 +3561,7 @@ def fork_and_check_is_pinned():
 
 x = torch.randn(10)
 # check that is_pinned won't poison future fork
-x.is_pinned()
+x.is_pinned(device="cuda")
 ret = fork_and_check_is_pinned()
 print(ret)
 
