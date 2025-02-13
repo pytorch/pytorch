@@ -10720,6 +10720,14 @@ class CommonTemplate:
         x = torch.rand(48, 3, 512, 512)
         self.common(fn, (x,))
 
+    def test_pad_single(self):
+        def fn(a):
+            y = torch.nn.functional.pad(a, (10, 10))
+            return y
+
+        x = torch.rand(1, 1, 1)
+        self.common(fn, (x,))
+
     def test_pad_cast(self):
         def fn(x):
             return torch.nn.functional.pad(x.to(torch.float32), (0, 3, 0, 0))
