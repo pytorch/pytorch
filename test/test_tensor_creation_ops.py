@@ -2802,7 +2802,6 @@ class TestTensorCreation(TestCase):
         self.assertTrue(torch_method(3, requires_grad=True).requires_grad)
         self.assertFalse(torch_method(3).requires_grad)
 
-
     @precisionOverride({torch.bfloat16: 5e-2, torch.half: 1e-3})
     @unittest.skipIf(not TEST_SCIPY, "Scipy not found")
     @dtypesIfCUDA(torch.float, torch.double, torch.bfloat16, torch.half, torch.long)

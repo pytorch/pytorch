@@ -1058,7 +1058,6 @@ class TestReductions(TestCase):
 
 
     @expectedFailureMeta  # mode only supports CPU and CUDA device type
-
     def test_mode_wrong_dtype(self, device):
         def test_for_dtypes(x_ty, v_ty, i_ty, message):
             x = torch.ones(10, device=device, dtype=x_ty)
@@ -2617,7 +2616,6 @@ class TestReductions(TestCase):
         self.assertEqual(a[:, ::2, :].nanmedian(-1)[0], torch.tensor([[0, 4], [6, 10]], device=device))
 
     @skipIfTorchDynamo("https://github.com/pytorch/pytorch/pull/138657 discovers a latent bug")
-
     @dtypes(torch.float, torch.double)
     def test_quantile(self, device, dtype):
         # Generate some random test cases

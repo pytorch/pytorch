@@ -249,7 +249,6 @@ class TestTorchDeviceType(TestCase):
         self.assertEqual(s, storage_type(l))
 
     @xfailIfTorchDynamo
-
     @dtypes(*all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16))
     def test_tensor_storage_type(self, device, dtype):
         a = make_tensor((10,), dtype=dtype, device=device, low=-9, high=9)
@@ -1464,7 +1463,6 @@ else:
             torch.device(device).type == 'cuda')
 
     @dtypes(*floating_types_and(torch.half))
-
     def test_nondeterministic_alert_MaxUnpool1d(self, device, dtype):
         if dtype == torch.half and torch.device(device).type == 'cpu':
             self.skipTest('float16 not implemented on CPU')
@@ -1478,7 +1476,6 @@ else:
             'max_unpooling2d_forward_out')
 
     @dtypes(*floating_types_and(torch.half))
-
     def test_nondeterministic_alert_MaxUnpool2d(self, device, dtype):
         if dtype == torch.half and torch.device(device).type == 'cpu':
             self.skipTest('float16 not implemented on CPU')
@@ -1492,7 +1489,6 @@ else:
             'max_unpooling2d_forward_out')
 
     @dtypes(*floating_types_and(torch.half))
-
     def test_nondeterministic_alert_MaxUnpool3d(self, device, dtype):
         if dtype == torch.half and torch.device(device).type == 'cpu':
             self.skipTest('float16 not implemented on CPU')
@@ -1791,7 +1787,6 @@ else:
         self.assertEqual(b[-1, :], d[-1, :], atol=3e-5, rtol=3e-5)
 
     @expectedFailureMeta  # expected a non-determinitic error, but it was not raised
-
     def test_nondeterministic_alert_put(self, device):
         a = torch.randn(10, device=device)
         indices = torch.tensor([0, 0], device=device)
@@ -4450,7 +4445,6 @@ else:
 
     @expectedFailureMeta  # RuntimeError not raised
     @dtypes(torch.double)
-
     def test_copy_mem_overlap(self, device, dtype):
         self.check_internal_mem_overlap(
             torch.Tensor.copy_, num_inputs=2, dtype=dtype, device=device)
@@ -4461,7 +4455,6 @@ else:
 
     # FIXME: convert to ErrorInputs
     # (but have to extend ErrorInputs to handle inplace-only errors!)
-
     def test_index_add_mem_overlap(self, device):
         x = torch.rand((1,), device=device).expand((6,))
         y = torch.rand((6,), device=device)
@@ -4516,7 +4509,6 @@ else:
     # FIXME: convert to ErrorInputs
     # (but have to extend ErrorInputs to handle inplace-only errors!)
     @expectedFailureMeta  # Warning not triggered
-
     def test_index_fill_mem_overlap(self, device):
         x = torch.rand((1,), device=device).expand((6,))
         ind = torch.tensor([2, 1, 0], device=device)
@@ -4528,7 +4520,6 @@ else:
 
     # FIXME: convert to ErrorInputs
     @expectedFailureMeta  # RuntimeError not raised
-
     def test_shift_mem_overlap(self, device):
         x = torch.rand(3, device=device)
         with self.assertRaisesRegex(RuntimeError, 'unsupported operation'):
@@ -4539,7 +4530,6 @@ else:
     # FIXME: convert to ErrorInputs
     # (but have to extend ErrorInputs to handle inplace-only errors)
     @expectedFailureMeta  # RuntimeError not raised
-
     def test_bernoulli_mem_overlap(self, device):
         x = torch.rand((1,), device=device).expand((6,))
 
@@ -4554,7 +4544,6 @@ else:
     # FIXME: convert to ErrorInputs
     # (but have to extend ErrorInputs to handle inplace-only errors!)
     @expectedFailureMeta  # RuntimeError not raised
-
     def test_put_mem_overlap(self, device):
         x = torch.rand((1,), device=device).expand((6,))
         y = torch.rand((6,), device=device)
@@ -4576,7 +4565,6 @@ else:
     # FIXME: convert to ErrorInputs
     # (but have to extend ErrorInputs to handle inplace-only errors!)
     @expectedFailureMeta  # UserWarning not triggered
-
     def test_index_put_mem_overlap(self, device):
         x = torch.rand((1,), device=device).expand((6,))
         y = torch.rand((6,), device=device)
@@ -4598,7 +4586,6 @@ else:
     # FIXME: convert to ErrorInputs
     # (but have to extend ErrorInputs to handle inplace-only errors!)
     @expectedFailureMeta  # UserWarning not triggered
-
     def test_masked_fill_mem_overlap(self, device):
         x = torch.rand((1,), device=device).expand((6,))
         mask = torch.tensor([True, False, True, True, False, False], device=device)
@@ -4615,7 +4602,6 @@ else:
     # FIXME: convert to ErrorInputs
     # (but have to extend ErrorInputs to handle inplace-only errors!)
     @expectedFailureMeta  # RuntimeError not raised
-
     def test_masked_scatter_mem_overlap(self, device):
         x = torch.rand((1,), device=device).expand((6,))
         src = torch.rand((3,), device=device)
@@ -5831,7 +5817,6 @@ else:
         self.assertEqual(scale, 2.0)
 
     @skipIfTorchDynamo("Failed running call_function for sparse_coo_tensor. See https://github.com/pytorch/pytorch/issues/118856")
-
     @dtypes(torch.float)
     def test_grad_scaling_unscale_sparse(self, device, dtype):
         device = torch.device(device)

@@ -171,7 +171,6 @@ class TestFFT(TestCase):
             self.assertEqual(actual, expected, exact_dtype=exact_dtype)
 
     @skipCPUIfNoFFT
-
     @toleranceOverride({
         torch.half : tol(1e-2, 1e-2),
         torch.chalf : tol(1e-2, 1e-2),
@@ -265,7 +264,6 @@ class TestFFT(TestCase):
             torch.fft.ihfft(t)
 
     @skipCPUIfNoFFT
-
     @dtypes(torch.int8, torch.half, torch.float, torch.double,
             torch.complex32, torch.complex64, torch.complex128)
     def test_fft_type_promotion(self, device, dtype):
@@ -384,7 +382,6 @@ class TestFFT(TestCase):
                 self.assertEqual(actual, expected, exact_dtype=exact_dtype)
 
     @skipCPUIfNoFFT
-
     @toleranceOverride({
         torch.half : tol(1e-2, 1e-2),
         torch.chalf : tol(1e-2, 1e-2),
@@ -462,7 +459,6 @@ class TestFFT(TestCase):
             op(a, s=(10, 10, 10, 10))
 
     @skipCPUIfNoFFT
-
     @dtypes(torch.half, torch.float, torch.double, torch.cfloat, torch.cdouble)
     def test_fftn_noop_transform(self, device, dtype):
         skip_helper_for_fft(device, dtype)
@@ -487,7 +483,6 @@ class TestFFT(TestCase):
 
 
     @skipCPUIfNoFFT
-
     @toleranceOverride({
         torch.half : tol(1e-2, 1e-2),
     })
@@ -526,7 +521,6 @@ class TestFFT(TestCase):
             self.assertEqual(expect, actual)
 
     @skipCPUIfNoFFT
-
     @toleranceOverride({
         torch.half : tol(1e-2, 1e-2),
     })
@@ -571,7 +565,6 @@ class TestFFT(TestCase):
 
 
     @skipCPUIfNoFFT
-
     @dtypes(torch.double, torch.complex128)
     def test_fft2_numpy(self, device, dtype):
         norm_modes = REFERENCE_NORM_MODES
@@ -617,7 +610,6 @@ class TestFFT(TestCase):
                     self.assertEqual(actual, expected)
 
     @skipCPUIfNoFFT
-
     @dtypes(torch.float, torch.complex64)
     def test_fft2_fftn_equivalence(self, device, dtype):
         norm_modes = (None, "forward", "backward", "ortho")
@@ -654,7 +646,6 @@ class TestFFT(TestCase):
                 self.assertEqual(actual, expect)
 
     @skipCPUIfNoFFT
-
     def test_fft2_invalid(self, device):
         a = torch.rand(10, 10, 10, device=device)
         fft_funcs = (torch.fft.fft2, torch.fft.ifft2,
@@ -680,7 +671,6 @@ class TestFFT(TestCase):
     # Helper functions
 
     @skipCPUIfNoFFT
-
     @unittest.skipIf(not TEST_NUMPY, 'NumPy not found')
     @dtypes(torch.float, torch.double)
     def test_fftfreq_numpy(self, device, dtype):
@@ -706,7 +696,6 @@ class TestFFT(TestCase):
                 self.assertEqual(actual, expected, exact_dtype=False)
 
     @skipCPUIfNoFFT
-
     @dtypes(torch.float, torch.double)
     def test_fftfreq_out(self, device, dtype):
         for func in (torch.fft.fftfreq, torch.fft.rfftfreq):
@@ -718,7 +707,6 @@ class TestFFT(TestCase):
 
 
     @skipCPUIfNoFFT
-
     @unittest.skipIf(not TEST_NUMPY, 'NumPy not found')
     @dtypes(torch.float, torch.double, torch.complex64, torch.complex128)
     def test_fftshift_numpy(self, device, dtype):
@@ -744,7 +732,6 @@ class TestFFT(TestCase):
                 self.assertEqual(actual, expected)
 
     @skipCPUIfNoFFT
-
     @unittest.skipIf(not TEST_NUMPY, 'NumPy not found')
     @dtypes(torch.float, torch.double)
     def test_fftshift_frequencies(self, device, dtype):
@@ -819,7 +806,6 @@ class TestFFT(TestCase):
         _test_complex((30, 55, 50, 22), 3, lambda x: x[:, 3:53, 15:40, 1:21])
 
     @skipCPUIfNoFFT
-
     @dtypes(torch.double)
     def test_fft_ifft_rfft_irfft(self, device, dtype):
         self._test_fft_ifft_rfft_irfft(device, dtype)
@@ -917,7 +903,6 @@ class TestFFT(TestCase):
     # passes on ROCm w/ python 2.7, fails w/ python 3.6
     @skipIfTorchDynamo("cannot set WRITEABLE flag to True of this array")
     @skipCPUIfNoFFT
-
     @dtypes(torch.double)
     def test_stft(self, device, dtype):
         if not TEST_LIBROSA:
@@ -991,7 +976,6 @@ class TestFFT(TestCase):
 
     @skipIfTorchDynamo("double")
     @skipCPUIfNoFFT
-
     @dtypes(torch.double)
     def test_istft_against_librosa(self, device, dtype):
         if not TEST_LIBROSA:
@@ -1452,7 +1436,6 @@ class TestFFT(TestCase):
         self.assertRaises(RuntimeError, torch.istft, torch.zeros((0, 3, 2)), 2)
 
     @skipIfTorchDynamo("Failed running call_function")
-
     @skipCPUIfNoFFT
     @dtypes(torch.double)
     def test_istft_of_sine(self, device, dtype):
