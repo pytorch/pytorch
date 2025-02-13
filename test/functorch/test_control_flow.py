@@ -3208,9 +3208,6 @@ class AssociativeScanTests(TestCase):
 
     @unittest.skipIf(not SM70OrLater, "triton")
     @requires_cuda
-    # This test is expected to fail, as there may be an issue with the underlying triton implementation
-    # See https://github.com/pytorch/pytorch/issues/137943
-    @unittest.expectedFailure
     def test_associative_scan_dim_shape_failure(self):
         num_dims = [2]
         for num_dim in num_dims:
@@ -4197,7 +4194,6 @@ class AssociativeScanTests(TestCase):
                 associative_scan(fct, x, 0)
 
     @unittest.skipIf(not SM70OrLater, "triton")
-    @requires_cuda
     def test_associative_scan_wrong_pytree(self):
         def fct_wrong_pytree(x, y):
             return {
@@ -4235,6 +4231,66 @@ class AssociativeScanTests(TestCase):
                 0,
                 combine_mode="pointwise",
             )
+
+    @unittest.skipIf(not SM70OrLater, "triton")
+    @requires_cuda
+    def test_associative_scan_input_mutation(self):
+        device = torch.device("cuda")
+
+        def fct_input_mutation(x, y):
+            x.add_(1)
+            return x + y
+
+        x = torch.randn(3, 2, 2, device=device)
+
+        with self.assertRaisesRegex(
+            # Should be:
+            # UnsupportedAliasMutationException,
+            torch._dynamo.exc.BackendCompilerFailed,
+            "A branch or combine_fn might be modifying the input!.*",
+        ):
+            associative_scan(fct_input_mutation, x, 0)
+
+    @unittest.skipIf(not SM70OrLater, "triton")
+    @requires_cuda
+    def test_associative_scan_input_output_alias(self):
+        device = torch.device("cuda")
+
+        def fct_input_output_alias(x, y):
+            return x[0], x[1] + y[1]
+
+        x = torch.randn(3, 2, 2, device=device)
+        y = torch.randn(3, 2, 2, device=device)
+        inp = (x, y)
+
+        with self.assertRaisesRegex(
+            # Should be:
+            # UnsupportedAliasMutationException,
+            torch._dynamo.exc.BackendCompilerFailed,
+            "Aliasing within branch or combine_fn might be occuring!.*",
+        ):
+            associative_scan(fct_input_output_alias, inp, 0)
+
+    @unittest.skipIf(not SM70OrLater, "triton")
+    @requires_cuda
+    def test_associative_scan_output_output_alias(self):
+        device = torch.device("cuda")
+
+        def fct_output_output_alias(x, y):
+            c = x[0] + y[1]
+            return c, c
+
+        x = torch.randn(3, 2, 2, device=device)
+        y = torch.randn(3, 2, 2, device=device)
+        inp = (x, y)
+
+        with self.assertRaisesRegex(
+            # Should be:
+            # UnsupportedAliasMutationException,
+            torch._dynamo.exc.BackendCompilerFailed,
+            "Aliasing within branch or combine_fn might be occuring!.*",
+        ):
+            associative_scan(fct_output_output_alias, inp, 0)
 
 
 @unittest.skipIf(IS_WINDOWS, "Windows not supported for this test")
