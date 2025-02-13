@@ -346,9 +346,6 @@ class TestCppExtensionOpenRgistration(common.TestCase):
         cpu_untyped_storage_pinned = cpu_untyped_storage.pin_memory("openreg")
         self.assertTrue(cpu_untyped_storage_pinned.is_pinned("openreg"))
 
-    @unittest.skip(
-        "Temporarily disable due to the tiny differences between clang++ and g++ in defining static variable in inline function"
-    )
     def test_open_device_serialization(self):
         self.module.set_custom_device_index(-1)
         storage = torch.UntypedStorage(4, device=torch.device("openreg"))

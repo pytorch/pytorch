@@ -299,27 +299,14 @@ using BackendMetaPtr = std::function<
     void(const at::Tensor&, std::unordered_map<std::string, bool>&)>;
 
 // A allowlist of device type, currently available is PrivateUse1
-inline std::unordered_set<c10::DeviceType>& GetBackendMetaAllowlist() {
-  static std::unordered_set<c10::DeviceType> DeviceTypeAllowlist{
-      c10::DeviceType::PrivateUse1};
-  return DeviceTypeAllowlist;
-}
+TORCH_API std::unordered_set<c10::DeviceType>& GetBackendMetaAllowlist();
 
 // Dynamically obtain serialization function pairs
 // that require the corresponding backend.
-inline std::array<
+TORCH_API std::array<
     std::optional<std::pair<BackendMetaPtr, BackendMetaPtr>>,
     at::COMPILE_TIME_MAX_DEVICE_TYPES>&
-GetBackendMetaSerialization() {
-  // The array to save function pointer for BackendMeta serialization.
-  // key is the DeviceType, value is std::pair obj.
-  // value.first represent get function and value.seconde represent set function
-  static std::array<
-      std::optional<std::pair<BackendMetaPtr, BackendMetaPtr>>,
-      at::COMPILE_TIME_MAX_DEVICE_TYPES>
-      BackendMetaSerialization;
-  return BackendMetaSerialization;
-}
+GetBackendMetaSerialization();
 
 // Register function pointer of Tensor BackendMetadata for serialization.
 TORCH_API inline void TensorBackendMetaRegistry(
