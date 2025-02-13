@@ -176,7 +176,7 @@ def _is_clang(cpp_compiler: str) -> bool:
 def _is_gcc(cpp_compiler: str) -> bool:
     if sys.platform == "darwin" and _is_apple_clang(cpp_compiler):
         return False
-    return bool(re.search(r"(gcc|g\+\+)", cpp_compiler))
+    return bool(re.search(r"(gcc|g\+\+|gnu-c\+\+)", cpp_compiler))
 
 
 @functools.lru_cache(None)
@@ -1401,11 +1401,12 @@ class CppBuilder:
     @staticmethod
     def __get_object_flags() -> tuple[str, str]:
         extension = ".obj" if _IS_WINDOWS else ".o"
-        output_flags = "/Fe" if _IS_WINDOWS else "-c -o"
+        output_flags = "/c /Fo" if _IS_WINDOWS else "-c -o"
         return extension, output_flags
 
-    def __get_precompiled_header_flags(self) -> tuple[str, str]:
-        extension = ".pch" if _IS_WINDOWS or _is_clang(self._compiler) else ".gch"
+    @staticmethod
+    def __get_precompiled_header_flags() -> tuple[str, str]:
+        extension = ".pch" if _IS_WINDOWS or not is_gcc() else ".gch"
         output_flags = "/Fp" if _IS_WINDOWS else "-o"
         return extension, output_flags
 
@@ -1568,11 +1569,10 @@ class CppBuilder:
             else:
                 cmd = (
                     f"{compiler} {sources} {definations_args} {cflags_args} "
-                    f"{include_dirs_args} {passthrough_args} "
+                    f"{include_dirs_args} {passthrough_args} {output}"
                 )
                 if self._do_link:
-                    cmd += f"{ldflags_args} {libraries_args} {libraries_dirs_args} "
-                cmd += output
+                    cmd += f" {ldflags_args} {libraries_args} {libraries_dirs_args}"
                 cmd = re.sub(r"[ \n]+", " ", cmd).strip()
             return cmd
 
