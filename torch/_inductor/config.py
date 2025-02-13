@@ -4,6 +4,7 @@ from typing import Any, Callable, Literal, Optional, TYPE_CHECKING, Union
 
 import torch
 import torch._inductor.custom_graph_pass
+import torch.utils._ordered_set
 from torch._environment import is_fbcode
 from torch.utils._config_module import Config, get_tristate_env, install_config_module
 
@@ -288,7 +289,7 @@ mixed_mm_choice: Literal["default", "triton", "aten", "heuristic"] = "heuristic"
 
 # enable reordering pass for increasing overlap between compute and communication
 # only use with fsdp
-reorder_for_compute_comm_overlap = False
+reorder_for_compute_comm_overlap = True
 
 # passes (in execution order) for increasing overlap between compute and communication
 # for built-in passes, use string name; for user-defined passes, pass in the function handle
@@ -298,14 +299,23 @@ reorder_for_compute_comm_overlap_passes: list[
     Union[
         str,
         Callable[
-            [list["torch._inductor.scheduler.BaseSchedulerNode"]],
+            [
+                # Input schedule nodes
+                list["torch._inductor.scheduler.BaseSchedulerNode"],
+                # Graph Inputs
+                torch.utils._ordered_set.OrderedSet[str],
+                # Graph Outputs
+                torch.utils._ordered_set.OrderedSet[str],
+            ],
             list["torch._inductor.scheduler.BaseSchedulerNode"],
         ],
     ]
 ] = [
-    "reorder_compute_for_overlap",
-    "sink_waits",
-    "raise_comms",
+    "sink_comms_and_waits",
+    "reorder_comms_preserving_peak_memory",
+    # "raise_comms",
+    # "sink_waits",
+    # "reorder_compute_for_overlap",
 ]
 
 # enable operator reordering for peak memory optimization
