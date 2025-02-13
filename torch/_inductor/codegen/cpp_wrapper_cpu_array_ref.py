@@ -207,14 +207,7 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
 
                 run_impl_proto = ""
                 if config.aot_inductor.compile_wrapper_with_O0:
-                    run_impl_proto += """
-                    #ifdef __clang__
-                    __attribute__((optnone))
-                    #else
-                    __attribute__((optimize("O0")))
-                    #endif
-                    """
-
+                    run_impl_proto += "DISABLE_OPTIMIZATION\n"
                 run_impl_proto += """
                     void AOTInductorModel::run_impl(
                         AtenTensorHandle*
@@ -282,15 +275,8 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
                     self.prefix.splice(run_impl_proto)
         else:
             # cpp entry function for JIT with cpp wrapper
-            if not config.aot_inductor.debug_compile and is_gcc():
-                self.prefix.splice(
-                    """
-                    void inductor_entry_impl(
-                        AtenTensorHandle* input_handles,
-                        AtenTensorHandle* output_handles
-                    ) __attribute__((optimize (1)));
-                    """
-                )
+            if config.aot_inductor.compile_wrapper_with_O0:
+                self.prefix.splice("DISABLE_OPTIMIZATION")
             self.prefix.splice(
                 """
                 void inductor_entry_impl(

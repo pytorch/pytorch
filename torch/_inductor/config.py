@@ -1136,7 +1136,7 @@ class aot_inductor:
 
     # Annotate generated main wrapper function, i.e. AOTInductorModel::run_impl,
     # to skip cpp compiler optimizations for faster compilation.
-    compile_wrapper_with_O0 = (
+    compile_wrapper_with_O0 = True or (
         os.environ.get("AOT_INDUCTOR_COMPILE_WRAPPER_WITH_O0", "0") == "1"
     )
 
