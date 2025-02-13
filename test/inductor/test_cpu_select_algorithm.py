@@ -24,13 +24,13 @@ from torch.testing._internal.common_quantized import (
     _calculate_dynamic_per_channel_qparams,
 )
 from torch.testing._internal.common_utils import (
+    IS_ARM64,
     IS_MACOS,
     parametrize,
     skipIfWindows,
     TEST_MKL,
-    xfailIfAarch64,
-    IS_ARM64,
     TEST_MKLDNN_BF16,
+    xfailIfAarch64,
 )
 
 
@@ -925,7 +925,9 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
         self.assertEqual(counters["inductor"]["cpp_epilogue_fusion_counter"], 2)
 
     # Issue for Aarch64 non-bf16 failure https://github.com/pytorch/pytorch/issues/147104
-    @unittest.skipIf(IS_ARM64 and not TEST_MKLDNN_BF16, "Test fails on non-bf16 hw supported Aarch64")
+    @unittest.skipIf(
+        IS_ARM64 and not TEST_MKLDNN_BF16, "Test fails on non-bf16 hw supported Aarch64"
+    )
     @inductor_config.patch({"freezing": True})
     @patches
     @torch.no_grad
