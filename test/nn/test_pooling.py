@@ -1678,8 +1678,8 @@ torch.cuda.synchronize()
 
     @dtypesIfCUDA(torch.half, torch.float, torch.double)
     @dtypes(torch.float)
-    # TODO: Fails on XLA
     @gcIfJetson
+    # TODO: Fails on XLA
     def test_max_pool_nan_inf(self, device, dtype):
         for adaptive in ["", "adaptive_"]:
             for num_dim in [1, 2, 3]:
