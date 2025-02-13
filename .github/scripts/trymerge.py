@@ -1512,6 +1512,7 @@ def post_starting_merge_comment(
     pr: GitHubPR,
     explainer: TryMergeExplainer,
     dry_run: bool,
+    ignore_current_checks: Optional[list[str]] = None,
 ) -> None:
     """Post the initial merge starting message on the PR. Also post a short
     message on all PRs in the stack."""
@@ -1519,7 +1520,7 @@ def post_starting_merge_comment(
         pr.org,
         pr.project,
         pr.pr_num,
-        explainer.get_merge_message(),
+        explainer.get_merge_message(ignore_current_checks=ignore_current_checks),
         dry_run=dry_run,
     )
     for additional_prs, _ in get_ghstack_prs(repo, pr):
@@ -2178,7 +2179,7 @@ def merge(
         )
         ignore_current_checks_info = failing
 
-    post_starting_merge_comment(repo, pr, explainer, dry_run)
+    post_starting_merge_comment(repo, pr, explainer, dry_run, ignore_current_checks_info)
 
     start_time = time.time()
     last_exception = ""
