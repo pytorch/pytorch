@@ -165,6 +165,7 @@ def export(
     custom_opsets: Mapping[str, int] | None = None,
     export_modules_as_functions: bool | Collection[type[torch.nn.Module]] = False,
     autograd_inlining: bool = True,
+    **_: Any,  # ignored options
 ) -> ONNXProgram | None:
     r"""Exports a model into ONNX format.
 
@@ -476,7 +477,7 @@ def dynamo_export(
                 "You are using an experimental ONNX export logic, which currently only supports dynamic shapes. "
                 "For a more comprehensive set of export options, including advanced features, please consider using "
                 "`torch.onnx.export(..., dynamo=True)`. ",
-                category=DeprecationWarning,
+                category=FutureWarning,
             )
 
         if export_options is not None and export_options.dynamic_shapes:

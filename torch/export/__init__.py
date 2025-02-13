@@ -64,6 +64,8 @@ __all__ = [
     "UnflattenedModule",
 ]
 
+# To make sure export specific custom ops are loaded
+import torch.export.custom_ops
 
 from .decomp_utils import CustomDecompTable
 from .dynamic_shapes import Constraint, Dim, dims, ShapesCollection

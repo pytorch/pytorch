@@ -3526,6 +3526,15 @@ class GraphModule(torch.nn.Module):
             fn(arr, np.s_[..., 1], np.array([3, 3])), np.array([[1, 3], [2, 3]])
         )
 
+    def test_round(self):
+        def fn(t):
+            return t + round(1.00002000011, 7)
+
+        t = torch.randn(2)
+        e = fn(t)
+        g = torch.compile(fn, backend="eager", fullgraph=True)(t)
+        self.assertEqual(e, g)
+
     def test_map_return(self):
         def fn(a, b):
             return map(lambda x: x + 1, [a, b])

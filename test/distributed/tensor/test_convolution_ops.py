@@ -5,13 +5,15 @@ import copy
 
 import torch
 import torch.nn as nn
-from torch.distributed._tensor import (
-    DeviceMesh,
+from torch.distributed import DeviceMesh, init_device_mesh
+from torch.distributed.tensor import (
     distribute_module,
     distribute_tensor,
+    DTensor,
     Replicate,
     Shard,
 )
+from torch.nn import functional as F
 from torch.testing._internal.common_utils import run_tests
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorTestBase,
@@ -180,6 +182,28 @@ class DistConvolutionOpsTest(DTensorTestBase):
             bias_mse_rel <= 1e-6,
             f"Too large relative mse for bias tensor, expected less equal 1e-6, got {bias_mse_rel}",
         )
+
+    @with_comms
+    @skip_if_lt_x_gpu(2)
+    def test_conv_backward_none_grad_inp(self):
+        device_mesh = init_device_mesh(
+            device_type="cuda", mesh_shape=(self.world_size,)
+        )
+        conv = nn.Conv2d(64, 64, 3, padding=1).train()
+        x = torch.randn(1, 64, 32, 32)
+        x_dt = DTensor.from_local(x, device_mesh, [Replicate()])
+        w = conv.weight
+        w_dt = torch.nn.Parameter(DTensor.from_local(w, device_mesh, [Replicate()]))
+
+        b = conv.bias
+        b_dt = torch.nn.Parameter(DTensor.from_local(b, device_mesh, [Replicate()]))
+
+        res = F.conv2d(x_dt, w_dt, b_dt, padding=1)
+        dres = torch.rand_like(res)
+        res.backward(dres)
+        self.assertTrue(w_dt.grad is not None)
+        self.assertTrue(b_dt.grad is not None)
+        self.assertTrue(x_dt.grad is None)
 
 
 if __name__ == "__main__":

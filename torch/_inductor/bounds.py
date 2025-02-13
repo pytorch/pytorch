@@ -1,14 +1,22 @@
 import logging
 import operator
 from functools import partial
-from typing import Any, Callable, Union
+from typing import Any, Callable, Optional, Union
 
+import sympy
 from sympy import Expr
 
 import torch
-from torch.utils._sympy.value_ranges import bound_sympy, ValueRangeAnalysis, ValueRanges
+from torch.utils._sympy.value_ranges import (
+    bound_sympy,
+    SymPyValueRangeAnalysis,
+    ValueRanges,
+)
 
+from ..utils._sympy.functions import PowByNatural
+from ..utils._sympy.numbers import int_oo
 from .loop_body import InterpreterShim, LoopBody, LoopBodyBlock
+from .ops_handler import DefaultHandler, ReductionType, StoreMode
 from .utils import cache_on_self, dominated_nodes
 from .virtualized import V
 
@@ -139,3 +147,113 @@ class BoundVars:
         # assert bound is None or bound == bound_sympy(expr, self.replacement_vals)
         self.replacement_vals[name] = bound
         return bound
+
+
+class ValueRangeAnalysis(SymPyValueRangeAnalysis, DefaultHandler):
+    def __init__(self) -> None:
+        self.name = "ValueRangeAnalysis"
+        boolean_operators = (
+            "xor",
+            "logical_and",
+            "logical_or",
+            "logical_not",
+        )
+        for op in boolean_operators:
+            setattr(self, op, self.bool_handler)
+
+    @staticmethod
+    def bool_handler(*args: Any, **kwargs: Any) -> ValueRanges[Any]:
+        # just assuming bools can have both values
+        return ValueRanges(sympy.false, sympy.true)  # type: ignore[arg-type]
+
+    def _default(self, name: str, args: tuple[Any, ...], kwargs: dict[str, Any]) -> Any:
+        # many ops are unlikely to show up in optimizable indexing compute,
+        # so we dont have full coverage
+        return ValueRanges.unknown()
+
+    def load(self, name: str, index: sympy.Expr) -> ValueRanges[Any]:
+        return ValueRanges.unknown()
+
+    def store(
+        self, name: str, index: sympy.Expr, value: Any, mode: StoreMode = None
+    ) -> None:
+        return
+
+    def reduction(
+        self,
+        dtype: torch.dtype,
+        src_dtype: torch.dtype,
+        reduction_type: ReductionType,
+        value: Any,
+    ) -> ValueRanges[Any]:
+        return ValueRanges.unknown()
+
+    @classmethod
+    def index_expr(cls, index: Any, dtype: torch.dtype) -> ValueRanges[Any]:
+        assert isinstance(index, ValueRanges)
+        return cls.to_dtype(index, dtype)
+
+    @staticmethod
+    def to_dtype(
+        x: Any,
+        dtype: torch.dtype,
+        src_dtype: Optional[torch.dtype] = None,
+        use_compute_types: bool = True,
+    ) -> ValueRanges[Any]:
+        x = ValueRanges.wrap(x)
+
+        if dtype == torch.bool:
+            if x.is_singleton():
+                return ValueRanges.wrap(x.lower != 0)
+            elif x.is_bool:
+                return x
+            elif 0 not in x:
+                return ValueRanges.wrap(sympy.true)
+            else:
+                return ValueRanges(sympy.false, sympy.true)
+
+        def cast(x: Any, dtype: torch.dtype) -> sympy.Expr:
+            # dtype is int or float
+            if dtype.is_floating_point:
+                return sympy.Float(x)
+            else:
+                if x in (int_oo, -int_oo):
+                    return x
+                try:
+                    return sympy.Integer(x)
+                except TypeError:
+                    # inf cannot be cast to Integer
+                    return x
+
+        if x.is_bool:
+            if x.is_singleton():
+                val = 1 if x.lower else 0
+                return ValueRanges.wrap(cast(val, dtype))
+            else:
+                return ValueRanges(cast(0, dtype), cast(1, dtype))
+        else:
+            # int to float or float to int
+            return ValueRanges(cast(x.lower, dtype), cast(x.upper, dtype))
+
+    @staticmethod
+    def square(x: Any) -> ValueRanges[Any]:
+        return ValueRanges.convex_min_zero_map(x, lambda y: PowByNatural(y, 2))
+
+    @staticmethod
+    def neg(x: Any) -> ValueRanges[Any]:
+        return ValueRanges.decreasing_map(x, operator.neg)
+
+    # TODO: this is slightly inaccurate because truncdiv operates at integer
+    # precision, but we're going through float truediv which means we can
+    # potentially lose precision on the bounds
+    @classmethod
+    def truncdiv(cls, a: Any, b: Any) -> ValueRanges[Any]:
+        x = cls.truediv(a, b)
+        if x == ValueRanges.unknown():
+            return x
+
+        return cls.trunc(x)
+
+    @classmethod
+    def sub(cls, a: Any, b: Any) -> ValueRanges[Any]:
+        return cls.add(a, cls.neg(b))

@@ -290,7 +290,15 @@ def foreach_all_gather_copy_out(
         out = [t.view(world_size, -1).view(torch.uint8) for t in split_with_sizes_out]
     else:
         out = [t.view(world_size, -1) for t in split_with_sizes_out]
-    with torch.autograd._unsafe_preserve_version_counter(tuple(out)):
+
+    # only avoid VC bump if we are not in inference mode
+    non_inference_outs = [o for o in out if not o.is_inference()]
+    if len(non_inference_outs) > 0:
+        with torch.autograd._unsafe_preserve_version_counter(tuple(non_inference_outs)):
+            torch.ops.fsdp.split_with_sizes_copy(
+                all_gather_output, all_gather_input_split_sizes, dim=1, out=out
+            )
+    else:
         torch.ops.fsdp.split_with_sizes_copy(
             all_gather_output, all_gather_input_split_sizes, dim=1, out=out
         )

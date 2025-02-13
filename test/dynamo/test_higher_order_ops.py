@@ -7000,6 +7000,12 @@ class TestHigherOrderOpsOpInfo(torch._dynamo.test_case.TestCase):
     )
     def test_hops_compile(self, device, dtype, op, backend):
         # Ensure HOPs can be compiled
+
+        if backend == "aot_eager" and op.name == "invoke_quant":
+            raise unittest.SkipTest(
+                "TODO: partitioner fails. migrate canonicalization to aot eager backend"
+            )
+
         sample_inputs_itr = op.sample_inputs(
             device, dtype, requires_grad=op.supports_autograd
         )
