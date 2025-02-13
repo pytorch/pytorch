@@ -7,7 +7,7 @@ import math
 import sys
 import typing
 import warnings
-from typing import Any, Callable, Literal, NoReturn, Sequence, TypeVar as _TypeVar
+from typing import Any, Callable, Literal, NoReturn, TypeVar as _TypeVar
 from typing_extensions import Concatenate as _Concatenate, ParamSpec as _ParamSpec
 
 import torch
@@ -21,6 +21,8 @@ from torch.onnx._internal import jit_utils
 
 
 if typing.TYPE_CHECKING:
+    from collections.abc import Sequence
+
     from torch.types import Number
 
 _T = _TypeVar("_T")
@@ -356,7 +358,7 @@ def quantized_args(
                 return descriptor and _is_value(arg) and _is_tuple_construct(arg)
 
             # Run regular symbolic function if none of the argument is QTensor.
-            is_quantized: typing.List[bool] = []
+            is_quantized: list[bool] = []
             for descriptor, arg in descriptor_args:
                 # ListConstruct
                 if _is_packed_list(arg):

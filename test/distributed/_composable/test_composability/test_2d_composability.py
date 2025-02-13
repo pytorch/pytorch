@@ -4,7 +4,7 @@ import copy
 import functools
 import io
 from copy import deepcopy
-from typing import List, Optional, Type
+from typing import Optional
 
 import torch
 import torch.distributed as dist
@@ -166,7 +166,7 @@ class TestFullyShard2DTraining(FSDPTest):
         device = torch.device("cuda")
         for iter_idx in range(10):
             inp = torch.randn((8, mlp_dim), device=device)
-            losses: List[torch.Tensor] = []
+            losses: list[torch.Tensor] = []
             for _model, _optim in ((ref_model, ref_optim), (model, optim)):
                 _optim.zero_grad(set_to_none=(iter_idx % 2 == 0))
                 losses.append(_model(inp).sum())
@@ -244,7 +244,6 @@ class TestFullyShard2DTraining(FSDPTest):
                 ref_model.parameters(), model.named_parameters()
             ):
                 full_grad = param.grad.full_tensor()
-                ref_grad = ref_param.grad
                 self.assertEqual(ref_param.grad, full_grad)
 
             ref_optim.step()
@@ -285,7 +284,7 @@ class TestFullyShard2DTraining(FSDPTest):
         # called, but they will just be no-ops without issuing any kernels.
         # We prefer to keep the no-op check at the c10d level, not in FSDP.
         inp = torch.randn((4, mlp_dim), device="cuda")  # same on all ranks
-        for iter_idx in range(10):
+        for _ in range(10):
             ref_optim.zero_grad()
             optim.zero_grad()
 
@@ -336,7 +335,7 @@ class TestFullyShard2DTraining(FSDPTest):
         self,
         use_seq_parallel: bool,
         reuse_model_optim: bool,
-        optimizer_class: Type[torch.optim.Optimizer],
+        optimizer_class: type[torch.optim.Optimizer],
         foreach: bool,
     ):
         def train_step(
@@ -583,9 +582,7 @@ class TestNew2dParallelTraining(DTensorTestBase):
                 "net1": ColwiseParallel(),
                 "net2": RowwiseParallel(),
             }
-            model_2d = parallelize_module(
-                SimpleModel().cuda(), mesh_2d["tp"], parallelize_plan
-            )
+            parallelize_module(SimpleModel().cuda(), mesh_2d["tp"], parallelize_plan)
 
     @with_comms
     @skip_if_lt_x_gpu(4)
@@ -833,7 +830,6 @@ class TestNew2dParallelStateDict(DTensorTestBase):
         # Create a model without wrapper
         torch.manual_seed(0)
         no_wrap_model = simple_model().cuda(self.rank)
-        no_wrap_state_dict = no_wrap_model.state_dict()
         no_wrap_optim = torch.optim.Adam(no_wrap_model.parameters(), lr=0.01)
         no_wrap_model(no_wrap_model.get_input().cuda(self.rank)).sum().backward()
         no_wrap_optim.step()
@@ -890,8 +886,6 @@ class TestNew2dParallelStateDict(DTensorTestBase):
         set_optimizer_state_dict(
             model_2d, optimizers=optim_2d, optim_state_dict=ref_optim_2d_osd
         )
-        new_optim_2d_osd = get_optimizer_state_dict(model_2d, optimizers=optim_2d)
-
         ref_optim_2d_osd_states = ref_optim_2d_osd["state"]
         new_optim_2d_osd_states = optim_2d_osd["state"]
 

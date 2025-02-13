@@ -15,6 +15,7 @@ import pytest
 from hypothesis.extra.numpy import arrays
 from pytest import raises as assert_raises
 
+import torch
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
@@ -1012,6 +1013,7 @@ class TestGradient(TestCase):
         assert_raises(TypeError, gradient, f_2d, x, x, axis=1)
         assert_raises(TypeError, gradient, f_2d, 1, 1, axis=1)
 
+    @torch._dynamo.config.patch(use_numpy_random_stream=True)
     def test_second_order_accurate(self):
         # Testing that the relative numerical error is less that 3% for
         # this example problem. This corresponds to second order
@@ -2253,7 +2255,7 @@ class Test_I0(TestCase):
             (TypeError, RuntimeError),
             # match="i0 not supported for complex values"
         ):
-            res = i0(a)
+            i0(a)
 
 
 class TestKaiser(TestCase):
@@ -3594,8 +3596,6 @@ class TestQuantile(TestCase):
     def test_quantile_scalar_nan(self):
         a = np.array([[10.0, 7.0, 4.0], [3.0, 2.0, 1.0]])
         a[0][1] = np.nan
-        actual = np.quantile(a, 0.5)
-        # assert np.isscalar(actual)    # XXX: our isscalar follows pytorch
         assert_equal(np.quantile(a, 0.5), np.nan)
 
 

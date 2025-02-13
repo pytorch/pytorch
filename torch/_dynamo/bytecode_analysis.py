@@ -1,9 +1,24 @@
 # mypy: allow-untyped-defs
+
+"""
+This module provides utilities for analyzing and optimizing Python bytecode.
+Key functionality includes:
+- Dead code elimination
+- Jump instruction optimization
+- Stack size analysis and verification
+- Live variable analysis
+- Line number propagation and cleanup
+- Exception table handling for Python 3.11+
+
+The utilities in this module are used to analyze and transform bytecode
+for better performance while maintaining correct semantics.
+"""
+
 import bisect
 import dataclasses
 import dis
 import sys
-from typing import Any, Set, Union
+from typing import Any, Union
 
 
 TERMINAL_OPCODES = {
@@ -12,8 +27,7 @@ TERMINAL_OPCODES = {
     dis.opmap["RAISE_VARARGS"],
     # TODO(jansel): double check exception handling
 }
-if sys.version_info >= (3, 9):
-    TERMINAL_OPCODES.add(dis.opmap["RERAISE"])
+TERMINAL_OPCODES.add(dis.opmap["RERAISE"])
 if sys.version_info >= (3, 11):
     TERMINAL_OPCODES.add(dis.opmap["JUMP_BACKWARD"])
     TERMINAL_OPCODES.add(dis.opmap["JUMP_FORWARD"])
@@ -133,9 +147,9 @@ def remove_extra_line_nums(instructions):
 
 @dataclasses.dataclass
 class ReadsWrites:
-    reads: Set[Any]
-    writes: Set[Any]
-    visited: Set[Any]
+    reads: set[Any]
+    writes: set[Any]
+    visited: set[Any]
 
 
 def livevars_analysis(instructions, instruction):

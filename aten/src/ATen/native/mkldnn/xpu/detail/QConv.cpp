@@ -100,8 +100,6 @@ at::Tensor quantized_convolution(
       {c10::kXPU, c10::xpu::current_device()});
   auto stream = GpuStreamManager::Instance().get_stream();
 
-  // create usr_md for tensors, and md for conv primitive
-  dnnl::memory::desc src_md, weight_md, output_md;
   // input tensors config
   dnnl::memory::dims src_dims = act.sizes().vec();
   dnnl::memory::dims weight_dims = weight.sizes().vec();
@@ -130,7 +128,8 @@ at::Tensor quantized_convolution(
 
   bool src_need_zp = (act_scale != 0);
 
-  std::tie(src_md, weight_md, output_md) =
+  // create usr_md for tensors, and md for conv primitive
+  auto [src_md, weight_md, output_md] =
       qconv_get_md(act, weight, output, groups);
 
   // get tensor md
@@ -194,7 +193,7 @@ at::Tensor quantized_convolution(
   Tensor scratchpad_tensor = at::empty(
       {static_cast<int64_t>(scratchpad_size)},
       act.options().dtype(at::kByte),
-      c10::nullopt);
+      std::nullopt);
   auto scratchpad_m = make_onednn_memory(
       conv_fwd_pd.scratchpad_desc(), engine, scratchpad_tensor.data_ptr());
   args.insert({DNNL_ARG_SCRATCHPAD, scratchpad_m});

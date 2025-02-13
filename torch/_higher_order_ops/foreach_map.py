@@ -1,11 +1,11 @@
 # mypy: allow-untyped-decorators
 # mypy: allow-untyped-defs
-from typing import Any, Callable, Dict, Tuple
+from typing import Any, Callable
 
-from torch._higher_order_ops.prim_hop_base import FunctionWithNoFreeVars, PrimHOPBase
+from torch._higher_order_ops.base_hop import BaseHOP, FunctionWithNoFreeVars
 
 
-class ForeachMap(PrimHOPBase):
+class ForeachMap(BaseHOP):
     def __init__(self):
         super().__init__("foreach_map")
 
@@ -18,7 +18,7 @@ _foreach_map = ForeachMap()
 
 
 def foreach_map(
-    op: Callable, operands: Any, *unused: Tuple[Any], **kwargs: Dict[str, Any]
+    op: Callable, operands: Any, *unused: tuple[Any], **kwargs: dict[str, Any]
 ):
     from torch._dynamo.polyfills import foreach_map_fn
 

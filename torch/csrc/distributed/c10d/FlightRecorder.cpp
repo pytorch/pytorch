@@ -3,6 +3,11 @@
 
 #include <cuda_runtime.h>
 #include <nlohmann/json.hpp>
+#ifndef _WIN32
+#include <sys/stat.h>
+#else
+#include <direct.h>
+#endif
 #include <fstream>
 #include <mutex>
 #include <vector>
@@ -108,6 +113,45 @@ control_plane::RegisterHandler jsonDumpHandler{
           "application/json");
     }};
 
+bool recursive_mkdir(const std::string& dir) {
+  // Check if current dir exists
+  const char* p_dir = dir.c_str();
+  const bool dir_exists = (access(p_dir, F_OK) == 0);
+  if (dir_exists) {
+    return true;
+  }
+
+  // Find folder separator and check if we are at the top
+  auto pos = dir.find_last_of("/\\");
+  if (pos == std::string::npos) {
+    return false;
+  }
+
+  // Try to create parent directory
+  if (!(recursive_mkdir(dir.substr(0, pos)))) {
+    return false;
+  }
+
+  // Try to create current directory
+#ifdef _WIN32
+  int ret = _mkdir(dir.c_str());
+#else
+  int ret = mkdir(dir.c_str(), S_IRWXU | S_IRWXG);
+#endif
+  // Success
+  if (ret == 0) {
+    return true;
+  }
+
+  // Try to create complete path again
+#ifdef _WIN32
+  ret = _mkdir(dir.c_str());
+#else
+  ret = mkdir(dir.c_str(), S_IRWXU | S_IRWXG);
+#endif
+  return ret == 0;
+}
+
 void DebugInfoWriter::write(const std::string& trace) {
   // Open a file for writing. The ios::binary flag is used to write data as
   // binary.
@@ -115,24 +159,40 @@ void DebugInfoWriter::write(const std::string& trace) {
 
   // Check if the file was opened successfully.
   if (!file.is_open()) {
-    LOG(ERROR) << "Error opening file for writing NCCLPG debug info: "
+    LOG(ERROR) << "Error opening file for writing Flight Recorder debug info: "
                << filename_;
     return;
   }
 
-  file.write(trace.data(), static_cast<std::streamsize>(trace.size()));
-  if (!file) {
-    LOG(ERROR) << "Error opening file for writing NCCLPG debug info: "
-               << filename_;
+  if (!file.write(trace.data(), static_cast<std::streamsize>(trace.size()))) {
+    const auto bad = file.bad();
+    LOG(ERROR) << "Error writing Flight Recorder debug info to file: "
+               << filename_ << " bad bit: " << bad;
     return;
   }
-  LOG(INFO) << "Finished writing NCCLPG debug info to " << filename_;
+
+  // Flush the buffer to ensure data is written to the file
+  file.flush();
+  if (file.bad()) {
+    LOG(ERROR) << "Error flushing Flight Recorder debug info: " << filename_;
+    return;
+  }
+
+  LOG(INFO) << "Finished writing Flight Recorder debug info to " << filename_;
 }
 
 DebugInfoWriter& DebugInfoWriter::getWriter(int rank) {
   if (writer_ == nullptr) {
+    // Attempt to write to running user's HOME directory cache folder - if it
+    // exists.
+    auto homeDir = getCvarString({"HOME"}, "/tmp");
+    std::string cacheDirPath = homeDir + "/.cache/torch";
+    // Create the .cache directory if it doesn't exist
+    recursive_mkdir(cacheDirPath);
+    std::string defaultLocation = cacheDirPath + "/" + "nccl_trace_rank_";
+
     std::string fileNamePrefix = getCvarString(
-        {"TORCH_NCCL_DEBUG_INFO_TEMP_FILE"}, "/tmp/nccl_trace_rank_");
+        {"TORCH_NCCL_DEBUG_INFO_TEMP_FILE"}, defaultLocation.c_str());
     // Using std::unique_ptr here to auto-delete the writer object
     // when the pointer itself is destroyed.
     std::unique_ptr<DebugInfoWriter> writerPtr(
