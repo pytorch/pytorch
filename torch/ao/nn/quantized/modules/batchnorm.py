@@ -3,7 +3,7 @@ import torch
 import torch.ao.nn.intrinsic as nni
 
 
-__all__ = ["BatchNorm2d", "BatchNorm3d"]
+__all__ = ["BatchNorm1d", "BatchNorm2d", "BatchNorm3d"]
 
 
 class _BatchNorm(torch.nn.modules.batchnorm._BatchNorm):
@@ -46,6 +46,47 @@ class _BatchNorm(torch.nn.modules.batchnorm._BatchNorm):
         qbn.scale = output_scale
         qbn.zero_point = output_zero_point
         return qbn
+
+
+class BatchNorm1d(_BatchNorm):
+    r"""This is the quantized version of :class:`~torch.nn.BatchNorm1d`."""
+
+    _NNI_BN_RELU_MODULE = nni.BNReLU2d
+
+    def __init__(
+        self, num_features, eps=1e-5, momentum=0.1, device=None, dtype=None
+    ) -> None:
+        factory_kwargs = {"device": device, "dtype": dtype}
+        super().__init__(num_features, eps, momentum, **factory_kwargs)
+
+    def _get_name(self):
+        return "QuantizedBatchNorm1d"
+
+    def _check_input_dim(self, input):
+        # Temporarily using len(shape) instead of ndim due to JIT issue
+        # https://github.com/pytorch/pytorch/issues/23890
+        if len(input.shape) not in {2, 3}:
+            raise ValueError("Input shape must be `(N, C)` or `(N, C, L)`!")
+
+    def forward(self, input: torch.Tensor) -> torch.Tensor:
+        # disabling this since this is not symbolically traceable
+        # self._check_input_dim(input)
+        return torch.ops.quantized.batch_norm1d(
+            input,
+            self.weight,
+            self.bias,
+            self.running_mean,
+            self.running_var,
+            self.eps,
+            self.scale,
+            self.zero_point,
+        )
+
+    @classmethod
+    def from_float(cls, mod, use_precomputed_fake_quant=False):
+        return _BatchNorm.from_float(
+            cls, mod, use_precomputed_fake_quant=use_precomputed_fake_quant
+        )
 
 
 class BatchNorm2d(_BatchNorm):
@@ -105,7 +146,7 @@ class BatchNorm3d(_BatchNorm):
         # Temporarily using len(shape) instead of ndim due to JIT issue
         # https://github.com/pytorch/pytorch/issues/23890
         if len(input.shape) != 5:
-            raise ValueError("Input shape must be `(N, C, H, W)`!")
+            raise ValueError("Input shape must be `(N, C, D, H, W)`!")
 
     def forward(self, input: torch.Tensor) -> torch.Tensor:
         # disabling this since this is not symbolically traceable
