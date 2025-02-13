@@ -4,7 +4,7 @@ import operator
 from dataclasses import dataclass
 from enum import auto, Enum
 from functools import reduce
-from typing import Any, Optional, Union
+from typing import Any, Dict, Optional, Union
 
 import torch
 from torch.distributed.checkpoint.metadata import (
@@ -202,6 +202,11 @@ class SavePlanner(abc.ABC):
     >>>         metadata = replace(metadata, planner_data=merged_data)
     >>>         return global_plan, metadata
     """
+
+    _cached_save_plan: Dict[str, SavePlan] = {}
+    _cached_final_save_plan: Dict[str, SavePlan] = {}
+    _cached_all_plans: Dict[str, list[SavePlan]] = {}
+    _cached_global_plan: Dict[str, list[SavePlan]] = {}
 
     @abc.abstractmethod
     def set_up_planner(
