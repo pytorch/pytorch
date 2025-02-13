@@ -97,11 +97,7 @@ class ReplicateTest(MultiProcessInductorTestCase):
         device: Union[str, torch.device],
     ):
         self.create_pg(device)
-        torch._dynamo.config.optimize_ddp = (
-            "python_reducer_without_compiled_forward"
-            if no_compile_forward
-            else "python_reducer"
-        )
+        torch._dynamo.config.optimize_ddp = "python_reducer"
         torch.manual_seed(123)
         model = Net(checkpoint=checkpoint).to(device)
         input = torch.randn([1, DIM], device=device)

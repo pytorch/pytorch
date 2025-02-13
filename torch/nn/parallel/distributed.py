@@ -908,7 +908,7 @@ class DistributedDataParallel(Module, Joinable):
         # True. The hooks will be deregistered if compiled_autograd is not
         # enabled.
         self._accum_grad_hooks: list[RemovableHandle] = []
-        optimize_ddp = torch._dynamo.config._get_optimize_ddp_mode()
+        optimize_ddp = torch._dynamo.utils.get_optimize_ddp_mode()
         self._use_python_reducer = optimize_ddp == "python_reducer"
         if self._use_python_reducer:
             torch._inductor.config._fuse_ddp_communication = True

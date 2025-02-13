@@ -299,29 +299,6 @@ allow_unspec_int_on_nn_module = False
 # no optimization.
 optimize_ddp: Union[bool, str] = True
 
-_ddp_optimization_mode = [
-    "ddp_optimizer",
-    "python_reducer",  # experimental mode
-    "no_optimization",
-]
-
-
-def _get_optimize_ddp_mode():
-    m = sys.modules[__name__]
-    if isinstance(m.optimize_ddp, bool):
-        if m.optimize_ddp:
-            mode = "ddp_optimizer"
-        else:
-            mode = "no_optimization"
-    elif isinstance(m.optimize_ddp, str):
-        mode = m.optimize_ddp
-    else:
-        raise ValueError(f"Invalid type, {type(optimize_ddp)=}")
-
-    assert mode in m._ddp_optimization_mode, f"Invalid mode {mode=}"
-    return mode
-
-
 # By default, Dynamo emits runtime asserts (e.g. torch._check, torch._check_is_size) in the graph.
 # In some cases those asserts could be performance costly
 # E.g. torch._check(tensor[0].item() > 2) for tensor on cuda will require cuda sync.
