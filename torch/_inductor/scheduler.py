@@ -2836,6 +2836,8 @@ class Scheduler:
                         ms_fused, path = self.benchmark_codegened_module(
                             mod_fused, device
                         )
+                        if not epilogue_fusion:
+                            breakpoint()
                         new_timings[choice] = ms_fused
                         if ms_fused < min_ms_fused:
                             min_ms_fused = ms_fused
