@@ -22,6 +22,8 @@ class SimpleCNN(nn.Module):
 
 
 try:
+    print("Start to run CNN smoke test")
+
     # Mock one infer
     net = SimpleCNN()
     net_inputs = torch.rand((1, 1, 5, 5))
@@ -36,6 +38,8 @@ try:
     loss = criterion(outputs, label)
     loss.backward()
     optimizer.step()
+
+    print("CNN smoke test is passed")
 
 except Exception as e:
     print(f"An error occurred: {e}")
