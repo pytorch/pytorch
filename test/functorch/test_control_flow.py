@@ -7515,6 +7515,88 @@ class GraphModule(torch.nn.Module):
         dynamic_shapes = {"x": {0: Dim("d")}, "y": {0: Dim("d1")}, "z": {0: Dim("d")}}
         _ = self._check_export_ret_graph_str(model, args, dynamic_shapes)
 
+    @parametrize("dynamic", [True, False])
+    @parametrize("backend", ["eager"])
+    def test_cond_mismatched_branch_output(self, dynamic, backend):
+        from torch._dynamo.testing import EagerAndRecordGraphs
+
+        class M(torch.nn.Module):
+            def forward(self, x, y, z):
+                a = y.shape[0]
+                b = z.shape[0]
+
+                def true_fn(x):
+                    return (x + a)[2:]
+
+                def false_fn(x):
+                    return (x + b * z)[:2]
+
+                ret = torch.cond(x.sum() > 0, true_fn, false_fn, (x,))
+                return y.sum() + ret
+
+        m = M()
+        x, y, z = torch.randn(5, 5), torch.randn(5, 5), torch.randn(5, 5)
+        out = m(x, y, z)
+        if backend == "eager" and dynamic and not TEST_WITH_CROSSREF:
+            bk = EagerAndRecordGraphs()
+            compiled_out = torch.compile(
+                m, backend=bk, dynamic=dynamic, fullgraph=True
+            )(x, y, z)
+            self.assertEqual(compiled_out, out)
+            self.assertExpectedInline(
+                normalize_gm(bk.graphs[0].print_readable(print_output=False)),
+                """\
+class GraphModule(torch.nn.Module):
+    def forward(self, s0: "Sym(s0)", L_y_: "f32[s0, s0]", L_z_: "f32[s0, s0]", L_x_: "f32[s0, s0]"):
+        l_y_ = L_y_
+        l_z_ = L_z_
+        l_x_ = L_x_
+
+        sum_1: "f32[]" = l_x_.sum()
+        gt: "b8[]" = sum_1 > 0;  sum_1 = None
+
+        cond_true_0 = self.cond_true_0
+        cond_false_0 = self.cond_false_0
+        cond = torch.ops.higher_order.cond(gt, cond_true_0, cond_false_0, [l_x_, s0, s0, l_z_]);  gt = cond_true_0 = cond_false_0 = l_x_ = s0 = l_z_ = None
+
+        getitem_5: "f32[u0, s0]" = cond[0]
+        sym_size_int: "Sym(u0)" = torch.ops.aten.sym_size.int(getitem_5, 0);  getitem_5 = None
+        _check_is_size = torch._check_is_size(sym_size_int);  _check_is_size = None
+
+        ge: "Sym(u0 >= 2)" = sym_size_int >= 2
+        _assert_scalar_default = torch.ops.aten._assert_scalar.default(ge, "Runtime assertion failed for expression u0 >= 2 on node 'ge'");  ge = _assert_scalar_default = None
+        le: "Sym(u0 <= 3)" = sym_size_int <= 3;  sym_size_int = None
+        _assert_scalar_default_1 = torch.ops.aten._assert_scalar.default(le, "Runtime assertion failed for expression u0 <= 3 on node 'le'");  le = _assert_scalar_default_1 = None
+        ret: "f32[u0, s0]" = cond[0];  cond = None
+
+        sum_2: "f32[]" = l_y_.sum();  l_y_ = None
+        add: "f32[u0, s0]" = sum_2 + ret;  sum_2 = ret = None
+        return (add,)
+
+    class cond_true_0(torch.nn.Module):
+        def forward(self, l_x_, s0_true_branch, getitem_2_false_branch, l_z__false_branch):
+            l_x__1 = l_x_
+
+            add: "f32[s0, s0]" = l_x__1 + s0_true_branch;  l_x__1 = s0_true_branch = None
+            getitem: "f32[s0 - 2, s0]" = add[slice(2, None, None)];  add = None
+            return (getitem,)
+
+    class cond_false_0(torch.nn.Module):
+        def forward(self, l_x_, s0_true_branch, getitem_2_false_branch, l_z__false_branch):
+            l_x__1 = l_x_
+
+            mul: "f32[s0, s0]" = getitem_2_false_branch * l_z__false_branch;  getitem_2_false_branch = l_z__false_branch = None
+            add: "f32[s0, s0]" = l_x__1 + mul;  l_x__1 = mul = None
+            getitem: "f32[2, s0]" = add[slice(None, 2, None)];  add = None
+            return (getitem,)
+""",  # noqa: B950
+            )
+        else:
+            compiled_out = torch.compile(
+                m, backend=backend, dynamic=dynamic, fullgraph=True
+            )(x, y, z)
+            self.assertEqual(compiled_out, out)
+
 
 _hop_schema_test_schema_types = [
     "bool",

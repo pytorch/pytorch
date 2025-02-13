@@ -379,16 +379,18 @@ def cond_fake_tensor_mode(mode, pred, true_fn, false_fn, operands):
         ignore_fresh_unbacked = mode.shape_env.ignore_fresh_unbacked_symbols()
 
     with mode, ignore_fresh_unbacked:
-        true_outs = true_fn(*operands)
-        flat_true_outs = pytree.tree_leaves(true_outs)
-        flat_false_outs = pytree.tree_leaves(false_fn(*operands))
-    if len(flat_true_outs) != len(flat_false_outs):
-        raise RuntimeError("Unmatched number of outputs from cond() branches.")
+        flat_true_outs, true_out_spec = pytree.tree_flatten(true_fn(*operands))
+        flat_false_outs, false_out_spec = pytree.tree_flatten(false_fn(*operands))
+        if true_out_spec != false_out_spec:
+            raise RuntimeError(
+                "Unmatched output spec from cond() branches: "
+                "true branch tree_spec {true_out_spec} vs false branch tree_spec {false_out_spec}."
+            )
 
     merged_outs = []
     for true_out, false_out in zip(flat_true_outs, flat_false_outs):
         merged_outs.append(_merge_tensors(true_out, false_out, mode))
-    return merged_outs
+    return pytree.tree_unflatten(merged_outs, true_out_spec)
 
 
 def _merge_tensors(a: torch.Tensor, b: torch.Tensor, mode: FakeTensorMode):
@@ -408,9 +410,26 @@ def _merge_tensors(a: torch.Tensor, b: torch.Tensor, mode: FakeTensorMode):
         ):
             merged_size.append(s0)
         else:
+
+            def min_max(s0, s1):
+                def _bound(s: Union[int, torch.SymInt], lower_bound: bool):
+                    assert isinstance(s, (int, torch.SymInt))
+                    if isinstance(s, int):
+                        return s
+                    assert mode.shape_env is not None
+                    vrange = bound_sympy(s.node.expr, mode.shape_env.var_to_range)
+                    return vrange.lower if lower_bound else vrange.upper
+
+                return _bound(min(s0, s1), False), _bound(max(s0, s1), True)
+
+            from torch.utils._sympy.value_ranges import bound_sympy, ValueRanges
+
             assert mode.shape_env is not None
-            merged_size.append(mode.shape_env.create_unbacked_symint())
-            # TODO: setup value range
+            new_size = mode.shape_env.create_unbacked_symint()
+            mode.shape_env._update_var_to_range(
+                new_size.node.expr, ValueRanges(*min_max(s0, s1))
+            )
+            merged_size.append(new_size)
 
     torch._check(a.stride() == b.stride())  # TODO: relax this
 
