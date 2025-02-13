@@ -6,13 +6,14 @@ import unittest
 import torch
 import torch.utils._pytree as pytree
 from functorch.experimental import control_flow
-from functorch.experimental.control_flow import cond, UnsupportedAliasMutationException
+from functorch.experimental.control_flow import cond
 from torch._dynamo.testing import normalize_gm
 from torch._higher_order_ops.associative_scan import (
     _fake_associative_scan,
     associative_scan,
 )
 from torch._higher_order_ops.scan import _fake_scan, scan
+from torch._higher_order_ops.utils import UnsupportedAliasMutationException
 from torch._higher_order_ops.while_loop import while_loop
 from torch._subclasses.functional_tensor import (
     CppFunctionalizeAPI,
@@ -5015,7 +5016,8 @@ def forward(self, x_1):
         # torch.cond triggers the check of the branches because the predicate
         # is a SymBool.
         with self.assertRaisesRegex(
-            UnsupportedAliasMutationException, "One of torch.cond branch"
+            UnsupportedAliasMutationException,
+            "A branch or combine_fn might be modifying the input!.*",
         ):
             make_fx(torch.func.functionalize(f), tracing_mode="symbolic")(
                 *example_inputs
@@ -5056,7 +5058,8 @@ def forward(self, x_1):
         # torch.cond triggers the check of the branches because the predicate
         # is a SymBool.
         with self.assertRaisesRegex(
-            UnsupportedAliasMutationException, "One of torch.cond branch"
+            UnsupportedAliasMutationException,
+            "A branch or combine_fn might be modifying the input!.*",
         ):
             make_fx(torch.func.functionalize(f), tracing_mode="symbolic")(
                 *example_inputs
@@ -5090,7 +5093,8 @@ def forward(self, x_1):
         # torch.cond triggers the check of the branches because the predicate
         # is a SymBool.
         with self.assertRaisesRegex(
-            UnsupportedAliasMutationException, "One of torch.cond branch"
+            UnsupportedAliasMutationException,
+            "Aliasing within branch or combine_fn might be occuring!.*",
         ):
             make_fx(torch.func.functionalize(f), tracing_mode="symbolic")(
                 *example_inputs
@@ -5118,7 +5122,8 @@ def forward(self, x_1):
 
         example_inputs = (torch.ones(4, 5),)
         with self.assertRaisesRegex(
-            UnsupportedAliasMutationException, "One of torch.cond branch"
+            UnsupportedAliasMutationException,
+            "A branch or combine_fn might be modifying the input!.*",
         ):
             make_fx(torch.func.functionalize(f), tracing_mode="symbolic")(
                 *example_inputs
@@ -5151,7 +5156,8 @@ def forward(self, x_1):
             f(example_input_func)
 
             with self.assertRaisesRegex(
-                UnsupportedAliasMutationException, "One of torch.cond branch"
+                UnsupportedAliasMutationException,
+                "A branch or combine_fn might be modifying the input!.*",
             ):
                 make_fx(f, tracing_mode="symbolic")(example_input_func)
         finally:
@@ -5169,7 +5175,8 @@ def forward(self, x_1):
             return wrapper
 
         with self.assertRaisesRegex(
-            UnsupportedAliasMutationException, "One of torch.cond branch"
+            UnsupportedAliasMutationException,
+            "A branch or combine_fn might be modifying the input!.*",
         ):
             make_fx(f_wrapper(f), tracing_mode="symbolic")(example_input_func)
 
@@ -5193,7 +5200,7 @@ def forward(self, x_1):
             torch._enable_functionalization(reapply_views=False)
             with self.assertRaisesRegex(
                 UnsupportedAliasMutationException,
-                "One of torch.cond branch might be aliasing",
+                "Aliasing within branch or combine_fn might be occuring!.*",
             ):
                 f(example_input_func)
         finally:
@@ -5224,7 +5231,7 @@ def forward(self, x_1):
 
         with self.assertRaisesRegex(
             UnsupportedAliasMutationException,
-            "One of torch.cond branch might be aliasing",
+            "Aliasing within branch or combine_fn might be occuring!.*",
         ):
             make_fx(f_wrapper(f), tracing_mode="symbolic")(example_input)
 
@@ -5818,7 +5825,8 @@ def forward(self, arg0_1):
         example_inputs = (torch.ones(3, 2, 4), torch.ones(4))
         functional_f = torch.func.functionalize(f)
         with self.assertRaisesRegex(
-            UnsupportedAliasMutationException, "torch.map is mutating the input!"
+            UnsupportedAliasMutationException,
+            "A branch or combine_fn might be modifying the input!.*",
         ):
             functional_f(*example_inputs)
 
@@ -5835,7 +5843,8 @@ def forward(self, arg0_1):
         example_inputs = (torch.ones(3, 2, 4), torch.ones(4))
         functional_f = torch.func.functionalize(f)
         with self.assertRaisesRegex(
-            UnsupportedAliasMutationException, "torch.map is mutating the input!"
+            UnsupportedAliasMutationException,
+            "A branch or combine_fn might be modifying the input!.*",
         ):
             functional_f(*example_inputs)
 
@@ -5875,7 +5884,8 @@ def forward(self, arg0_1):
         example_inputs = (torch.ones(3, 2, 4),)
         functional_f = torch.func.functionalize(f)
         with self.assertRaisesRegex(
-            UnsupportedAliasMutationException, "torch.map is aliasing the input!"
+            UnsupportedAliasMutationException,
+            "Aliasing within branch or combine_fn might be occuring!.*",
         ):
             functional_f(*example_inputs)
 
@@ -6767,7 +6777,7 @@ def forward(self, s0 : torch.SymInt, L_a_ : torch.Tensor, L_b_ : torch.Tensor, L
         functional_f = torch.func.functionalize(f)
         with self.assertRaisesRegex(
             UnsupportedAliasMutationException,
-            "Combine_fn might be modifying the input!",
+            "A branch or combine_fn might be modifying the input!.*",
         ):
             functional_f(example_init, example_inputs)
 
@@ -6781,7 +6791,7 @@ def forward(self, s0 : torch.SymInt, L_a_ : torch.Tensor, L_b_ : torch.Tensor, L
         functional_f = torch.func.functionalize(f)
         with self.assertRaisesRegex(
             UnsupportedAliasMutationException,
-            "Combine_fn might be modifying the input!",
+            "A branch or combine_fn might be modifying the input!.*",
         ):
             functional_f(example_init, example_inputs)
 
@@ -6798,7 +6808,8 @@ def forward(self, s0 : torch.SymInt, L_a_ : torch.Tensor, L_b_ : torch.Tensor, L
         example_init = torch.ones(5, 4)
         functional_f = torch.func.functionalize(f)
         with self.assertRaisesRegex(
-            UnsupportedAliasMutationException, "Combine_fn might be aliasing the input!"
+            UnsupportedAliasMutationException,
+            "Aliasing within branch or combine_fn might be occuring!.*",
         ):
             functional_f(example_init, example_inputs)
 
@@ -7315,7 +7326,8 @@ class GraphModule(torch.nn.Module):
         x = torch.randn(2, 2)
         for f in ALIAS_FN:
             with self.assertRaisesRegex(
-                torch._dynamo.exc.BackendCompilerFailed, "might be aliasing the input"
+                torch._dynamo.exc.BackendCompilerFailed,
+                ".*Aliasing within branch or combine_fn might be occuring!.*",
             ):
                 torch.compile(fn)(f, x)
 
@@ -7331,7 +7343,8 @@ class GraphModule(torch.nn.Module):
         # as a result of auto lifting.
         for view_f in ALIAS_FN[1:]:
             with self.assertRaisesRegex(
-                torch._dynamo.exc.BackendCompilerFailed, "might be aliasing the input"
+                torch._dynamo.exc.BackendCompilerFailed,
+                ".*Aliasing within branch or combine_fn might be occuring!.*",
             ):
                 torch.compile(fn)(view_f, x)
 

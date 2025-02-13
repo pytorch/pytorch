@@ -9,13 +9,11 @@ import torch._subclasses.functional_tensor
 import torch.utils._pytree as pytree
 from torch._C import DispatchKey
 from torch._higher_order_ops.utils import (
-    _has_potential_branch_input_alias,
-    _has_potential_branch_input_mutation,
     _set_compilation_env,
     autograd_not_implemented,
+    check_input_mutation_and_alias,
     reenter_make_fx,
     unique_graph_id,
-    UnsupportedAliasMutationException,
     validate_subgraph_args_types,
 )
 from torch._ops import HigherOrderOperator
@@ -454,18 +452,11 @@ def scan_functionalize(ctx, combine_fn, init, xs, reverse, additional_inputs):
                 unwrapped_additional_inputs,
             )
         )
-        if _has_potential_branch_input_mutation(
+
+        check_input_mutation_and_alias(
             combine_fn, sample_inputs, pre_dispatch=pre_dispatch
-        ):
-            raise UnsupportedAliasMutationException(
-                "Combine_fn might be modifying the input!"
-            )
-        if _has_potential_branch_input_alias(
-            combine_fn, sample_inputs, pre_dispatch=pre_dispatch
-        ):
-            raise UnsupportedAliasMutationException(
-                "Combine_fn might be aliasing the input!"
-            )
+        )
+
         ret = scan_op(
             functional_combine_fn,
             unwrapped_init,

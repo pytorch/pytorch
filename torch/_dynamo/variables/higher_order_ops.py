@@ -2976,6 +2976,7 @@ class BaseHOPVariable(WrapHigherOrderVariable):
             for node in body_gmod.graph.nodes
             if node.op == "placeholder"
         ]
+        # TODO: We don't care here about any output-output aliasing?
         if has_potential_input_alias_or_mutation(body_gmod, fake_inputs):
             raise RuntimeError(
                 f"{self.value._name} where the inputs are mutated or the "
