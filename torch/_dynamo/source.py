@@ -1,4 +1,24 @@
 # mypy: allow-untyped-defs
+
+"""
+This module provides Source classes that track the origins of values in PyTorch Dynamo.
+Sources represent where values come from (e.g. local variables, globals, attributes) and
+are used for guard generation and code reconstruction during compilation.
+
+The module includes specialized sources for:
+- Local variables and synthetic locals
+- Global variables and constants
+- Object attributes and method calls
+- NN module specialization (specialized vs unspecialized)
+- Random values and tensor properties
+- Default argument handling
+- FSDP (Fully Sharded Data Parallel) modules
+
+Sources play a key role in Dynamo's guard system by tracking value origins for
+guard generation, and in code reconstruction by providing methods to rebuild
+the code needed to recreate values.
+"""
+
 import dataclasses
 import enum
 from typing import Any, Optional, Union

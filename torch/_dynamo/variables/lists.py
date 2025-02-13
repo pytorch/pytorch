@@ -1,5 +1,21 @@
 # mypy: ignore-errors
 
+"""
+Variable tracking implementations for list-like data structures in Dynamo.
+
+This module provides specialized variable tracking for various collection types:
+- Lists and list subclasses (including torch.nn.ModuleList, ParameterList)
+- Tuples and named tuples
+- Ranges and slices
+- Collections.deque
+- torch.Size with special proxy handling
+
+The implementations support both mutable and immutable collections, iteration,
+and common sequence operations. Each collection type has a dedicated Variable
+class that handles its unique behaviors while integrating with Dynamo's
+variable tracking system.
+"""
+
 import collections
 import inspect
 import operator
@@ -977,6 +993,8 @@ class SliceVariable(BaseListVariable):
         codegen.append_output(create_instruction("BUILD_SLICE", arg=len(self.items)))
 
     def var_getattr(self, tx: "InstructionTranslator", name):
+        if name in cmp_name_to_op_mapping:
+            return variables.GetAttrVariable(self, name)
         fields = ["start", "stop", "step"]
         if name not in fields:
             unimplemented(f"slice.{name}")

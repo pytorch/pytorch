@@ -1,4 +1,19 @@
 # mypy: allow-untyped-defs
+
+"""
+Utility functions and classes used throughout the TorchDynamo system.
+
+This module contains a collection of helper utilities used by various parts of Dynamo for:
+- Performance metrics collection and reporting
+- Compilation timing and debugging
+- Graph manipulation and tensor operations
+- Runtime guards and checks
+- Common data structure operations
+- Testing and development tools
+
+This is an internal module that provides shared functionality used across the Dynamo codebase.
+"""
+
 from __future__ import annotations
 
 import atexit

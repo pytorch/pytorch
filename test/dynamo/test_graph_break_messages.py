@@ -179,7 +179,7 @@ Unsupported context manager
 
 from user code:
    File "test_graph_break_messages.py", line N, in fn
-    def fn(obj):""",
+    with obj:""",
         )
 
     def test_backend_fake_tensor_exc(self):
@@ -225,7 +225,7 @@ Failed to trace builtin operator
 
 from user code:
    File "test_graph_break_messages.py", line N, in fn
-    def fn():""",
+    print("abc")""",
         )
 
     def test_skipfile_call(self):
@@ -393,7 +393,7 @@ Attempted to call function marked as skipped
 
 from user code:
    File "test_graph_break_messages.py", line N, in fn
-    def fn():""",
+    warnings.warn("test")""",
         )
 
     @unittest.skipIf(not python_pytree._cxx_pytree_exists, "missing optree package")
