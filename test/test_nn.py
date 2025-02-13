@@ -8798,7 +8798,6 @@ class TestNNDeviceType(NNTestCase):
         self.assertEqual(inp2.grad, torch.zeros_like(inp2))
 
     @expectedFailureMeta  # RuntimeError: cannot reshape tensor of 0 elements into shape [1, 0, -1]
-
     def test_TransformerEncoderLayer_empty(self, device):
         for training in (True, False):
             for batch_first, input_shape in [(True, (0, 10, 512)),
@@ -8826,7 +8825,6 @@ class TestNNDeviceType(NNTestCase):
                     _test_module_empty_input(self, encoder_layer, input, check_size=False)
 
     @expectedFailureMeta  # RuntimeError: cannot reshape tensor of 0 elements into shape [1, 0, -1]
-
     def test_TransformerEncoder_empty(self, device):
         for batch_first, input_shape in [(True, (0, 10, 512)),
                                          (False, (10, 0, 512))]:
@@ -8836,7 +8834,6 @@ class TestNNDeviceType(NNTestCase):
             _test_module_empty_input(self, transformer_encoder, input, check_size=False)
 
     @expectedFailureMeta  # RuntimeError: cannot reshape tensor of 0 elements into shape [1, 0, -1]
-
     def test_TransformerDecoderLayer_empty(self, device):
         for batch_first, memory_shape, tgt_shape in [(True, (0, 10, 512), (0, 20, 512)),
                                                      (False, (10, 0, 512), (20, 0, 512))]:
@@ -8846,7 +8843,6 @@ class TestNNDeviceType(NNTestCase):
             self._test_module_empty_inputs(decoder_layer, [tgt, memory])
 
     @expectedFailureMeta  # RuntimeError: cannot reshape tensor of 0 elements into shape [1, 0, -1]
-
     def test_TransformerDecoder_empty(self, device):
         for batch_first, memory_shape, tgt_shape in [(True, (0, 10, 512), (0, 20, 512)),
                                                      (False, (10, 0, 512), (20, 0, 512))]:
@@ -8857,7 +8853,6 @@ class TestNNDeviceType(NNTestCase):
             self._test_module_empty_inputs(transformer_decoder, [tgt, memory])
 
     @expectedFailureMeta  # RuntimeError: cannot reshape tensor of 0 elements into shape [1, 0, -1]
-
     def test_Transformer_empty(self, device):
         for batch_first, src_shape, tgt_shape in [(True, (10, 0, 512), (20, 0, 512))]:
             transformer_model = nn.Transformer(nhead=16, num_encoder_layers=12, dtype=torch.double).to(device)
@@ -9742,7 +9737,6 @@ class TestNNDeviceType(NNTestCase):
     @parametrize_test("align_corners", [True, False])
     @parametrize_test("mode", ["bilinear", "bicubic"])
     @parametrize_test("memory_format", [torch.contiguous_format, torch.channels_last])
-
     def test_upsamplingBiMode2d(self, device, antialias, align_corners, mode, memory_format):
         # Forward AD does not support XLA because XLA tensors don't have storage
         check_forward_ad = torch.device(device).type != 'xla'
@@ -9811,7 +9805,6 @@ class TestNNDeviceType(NNTestCase):
     @parametrize_test("num_channels", [3, 5])
     @parametrize_test("mode", ["nearest", "nearest-exact", "bilinear", "bicubic"])
     @parametrize_test("dtype", integral_types() + floating_types())
-
     def test_upsamplingBiMode2d_nonsupported_dtypes(self, device, antialias, num_channels, mode, dtype):
         x = torch.ones(1, num_channels, 32, 32, dtype=dtype, device=device)
 
