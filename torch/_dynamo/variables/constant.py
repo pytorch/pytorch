@@ -1,5 +1,13 @@
 # mypy: ignore-errors
 
+"""
+Constant and enum variable tracking in Dynamo.
+
+This module is fundamental to Dynamo's ability to track and propagate constant
+values during compilation, ensuring proper handling of Python literals and
+maintaining type safety through the compilation process.
+"""
+
 import operator
 from typing import TYPE_CHECKING
 
@@ -17,6 +25,14 @@ if TYPE_CHECKING:
 
 
 class ConstantVariable(VariableTracker):
+    """
+    Variable tracker for Python literals and basic immutable types, with automatic
+    routing support for collection types (lists, tuples, sets, etc.).
+
+    The create() method intelligently constructs appropriate variable types for
+    nested collections.
+    """
+
     @staticmethod
     def create(value, **kwargs) -> VariableTracker:
         """
@@ -202,6 +218,12 @@ its type to `common_constant_types`.
 
 
 class EnumVariable(VariableTracker):
+    """VariableTracker for enum.Enum and enum.IntEnum instances
+
+    Provides specialized handling for Python enum types, supporting
+    both standard Enum and IntEnum with proper value tracking and comparison.
+    """
+
     def __init__(self, value, **kwargs) -> None:
         super().__init__(**kwargs)
         self.value = value
