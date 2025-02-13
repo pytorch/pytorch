@@ -77,6 +77,50 @@ class TestSelectCat(torch.nn.Module):
         return cat, cat1, cat2, cat3
 
 
+class TestSelectViewCat(torch.nn.Module):
+    def __init__(self) -> None:
+        super().__init__()
+
+    def forward(self, x: torch.Tensor):
+        slice_node = torch.ops.aten.slice.Tensor(x, 1, 1034, 1044)
+        select_64 = torch.ops.aten.select.int(slice_node, 1, 0)
+        select_65 = torch.ops.aten.select.int(slice_node, 1, 1)
+        select_66 = torch.ops.aten.select.int(slice_node, 1, 2)
+        select_67 = torch.ops.aten.select.int(slice_node, 1, 3)
+        select_68 = torch.ops.aten.select.int(slice_node, 1, 4)
+        select_69 = torch.ops.aten.select.int(slice_node, 1, 5)
+        select_70 = torch.ops.aten.select.int(slice_node, 1, 6)
+        select_71 = torch.ops.aten.select.int(slice_node, 1, 7)
+        select_72 = torch.ops.aten.select.int(slice_node, 1, 8)
+        select_73 = torch.ops.aten.select.int(slice_node, 1, 9)
+        view_522 = torch.ops.aten.reshape.default(select_64, [1, 4096, 128])
+        view_521 = torch.ops.aten.reshape.default(select_65, [1, 4096, 128])
+        view_520 = torch.ops.aten.reshape.default(select_66, [1, 4096, 128])
+        view_519 = torch.ops.aten.reshape.default(select_67, [1, 4096, 128])
+        view_518 = torch.ops.aten.reshape.default(select_68, [1, 4096, 128])
+        view_517 = torch.ops.aten.reshape.default(select_69, [1, 4096, 128])
+        view_516 = torch.ops.aten.reshape.default(select_70, [1, 4096, 128])
+        view_515 = torch.ops.aten.reshape.default(select_71, [1, 4096, 128])
+        view_514 = torch.ops.aten.reshape.default(select_72, [1, 4096, 128])
+        view_513 = torch.ops.aten.reshape.default(select_73, [1, 4096, 128])
+        cat = torch.ops.aten.cat.default(
+            [
+                view_522,
+                view_521,
+                view_520,
+                view_519,
+                view_518,
+                view_517,
+                view_516,
+                view_515,
+                view_514,
+                view_513,
+            ],
+            dim=0,
+        )
+        return cat
+
+
 class TestSplitCatAten(TestCase):
     def compare_dict_tensors(self, ref_dict, res_dict, rtol=1e-3, atol=1e-3):
         if len(set(ref_dict.keys())) != len(set(res_dict.keys())):
@@ -151,6 +195,30 @@ class TestSplitCatAten(TestCase):
         self.compare_pred(module, traced, inputs)
         self.assertEqual(counters["inductor"]["normalization_aten_pass"], 4)
         self.assertEqual(counters["inductor"]["select_cat_aten_pass"], 1)
+        self.assertEqual(ref, res, rtol=1e-8, atol=1e-8)
+        self.compare_parameters(module, traced, rtol=1e-8, atol=1e-8)
+        counters.clear()
+
+    @requires_cuda
+    @torch._inductor.config.patch(
+        pre_grad_fusion_options={},
+        post_grad_fusion_options={
+            "normalization_aten_pass": {},
+            "select_view_cat_aten_pass": {},
+        },
+    )
+    def test_select_view_cat_post_grad(self):
+        counters.clear()
+        inputs = [
+            torch.randn(4096, 1154, 128, device=torch.device(device=GPU_TYPE)),
+        ]
+        module = TestSelectViewCat()
+        traced = torch.compile(module)
+        ref = module(*inputs)
+        res = traced(*inputs)
+        self.compare_pred(module, traced, inputs)
+        self.assertEqual(counters["inductor"]["normalization_aten_pass"], 1)
+        self.assertEqual(counters["inductor"]["select_view_cat_aten_pass"], 1)
         self.assertEqual(ref, res, rtol=1e-8, atol=1e-8)
         self.compare_parameters(module, traced, rtol=1e-8, atol=1e-8)
         counters.clear()
