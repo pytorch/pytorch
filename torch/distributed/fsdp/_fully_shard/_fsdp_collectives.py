@@ -8,6 +8,7 @@ from torch.distributed.tensor import DTensor
 
 from ._fsdp_common import (
     _get_dim0_padded_size,
+    _get_fsdp_comm_allocator,
     _raise_assert_with_print,
     _to_dtype_if_needed,
     compiled_autograd_enabled,
@@ -77,7 +78,8 @@ def all_gather_copy_in_cuda(
     dtype: torch.dtype,
     device: torch.device,
 ) -> tuple[torch.Tensor, torch.Tensor]:
-    all_gather_output = torch.empty(
+    allocator = _get_fsdp_comm_allocator()
+    all_gather_output = allocator(
         (all_gather_input_numel * world_size,), dtype=dtype, device=device
     )
     all_gather_input = all_gather_output.narrow(
@@ -375,7 +377,8 @@ def foreach_reduce(
     )
     reduce_scatter_input_numel = sum(s.numel() for s in padded_unsharded_sizes)
     reduce_scatter_output_numel = reduce_scatter_input_numel // world_size
-    reduce_scatter_input = torch.empty(
+    allocator = _get_fsdp_comm_allocator()
+    reduce_scatter_input = allocator(
         (reduce_scatter_input_numel,), dtype=reduce_dtype, device=device
     )
     device_handle = _get_device_handle(device.type)
@@ -387,7 +390,11 @@ def foreach_reduce(
     all_reduce_input = None
     all_reduce_event = None
     with device_handle.stream(reduce_scatter_stream):
-        reduce_output = reduce_scatter_input.new_empty((reduce_scatter_output_numel,))
+        reduce_output = allocator(
+            (reduce_scatter_output_numel,),
+            dtype=reduce_scatter_input.dtype,
+            device=reduce_scatter_input.device,
+        )
         _div_if_needed(reduce_scatter_input, predivide_factor)
         if reduce_scatter_reduce_op is None:
             if predivide_factor is None:
