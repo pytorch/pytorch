@@ -2709,6 +2709,29 @@ class TestFX(JitTestCase):
 
         traced_graph = MyTracer().trace(CallsModWithDict())
 
+    def test_symbolic_trace_proxy_named_tuple(self):
+        # N.B. this is a backward-compatibility test to ensure we still emit
+        # `call_function` nodes to construct `NamedTuple` objects.
+        class Pair(NamedTuple):
+            foo: torch.Tensor
+            bar: torch.Tensor
+
+        class MyMod(torch.nn.Module):
+            def forward(self, d: torch.Tensor):
+                return Pair(foo=d + 1, bar=d * 2)
+
+        module = MyMod()
+        traced_graph = symbolic_trace(module).graph
+
+        out_arg = traced_graph.output_node().args[0]
+        self.assertTrue(isinstance(out_arg, Node))
+        self.assertEqual(out_arg.op, "call_function")
+        self.assertEqual(out_arg.target, Pair)
+
+        gm = GraphModule(module, traced_graph)
+        x = torch.rand(1)
+        self.assertEqual(module(x), gm(x))
+
     def test_trace_dict_proxy_keys(self):
         class ModWithDictArg(torch.nn.Module):
             def forward(self, d: dict[torch.Tensor, torch.Tensor]):
@@ -4055,8 +4078,8 @@ def forward(self, args_list: List[torch.Tensor]){maybe_return_annotation}:
                 assert len(inputs) == 1
                 return inputs[0]
 
-            def generate_output(self, output_args):
-                return f"return list({repr(output_args)})"
+            def generate_output(self, output_args, arg_repr):
+                return f"return list({arg_repr(output_args)})"
 
             def process_outputs(self, outputs):
                 return list(outputs)
