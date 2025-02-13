@@ -10,6 +10,7 @@ import torch
 import torch._dynamo.test_case
 import torch._dynamo.testing
 import torch.distributed as dist
+from torch._dynamo.exc import TorchDynamoException
 from torch._dynamo.testing import (
     empty_line_normalizer,
     extract_graph_and_tracker,
@@ -72,6 +73,7 @@ def example_fn(a):
 
 
 def dynamo_error_fn(a):
+    torch._check_with(TorchDynamoException, False, "Test Failure")
     output = a.mul(torch.ones(1000, 1000))
     output = output.add(torch.ones(10, 10))
     return output
@@ -179,12 +181,11 @@ class LoggingTests(LoggingTestCase):
 WON'T CONVERT dynamo_error_fn test_logging.py line N
 due to:
 Traceback (most recent call last):
-torch._dynamo.exc.TorchRuntimeError: Failed running call_method add(*(FakeTensor(..., size=(1000, 1000), grad_fn=<MulBackward0>), FakeTensor(..., size=(10, 10))), **{}):
-Attempting to broadcast a dimension of length 10 at -1! Mismatching argument at index 1 had torch.Size([10, 10]); but expected shape should be broadcastable to [1000, 1000]
+torch._dynamo.exc.InternalTorchDynamoError: NotImplementedError: argument of type: <class 'type'>
 
 from user code:
    File "test_logging.py", line N, in dynamo_error_fn
-    output = output.add(torch.ones(10, 10))""",  # noqa: B950
+    torch._check_with(TorchDynamoException, False, "Test Failure")""",  # noqa: B950
         )
 
     test_aot = within_range_record_test(2, 6, aot=logging.INFO)

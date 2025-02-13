@@ -16,6 +16,7 @@ import numpy as np
 import torch
 import torch.autograd.forward_ad as fwAD
 from torch import inf, nan
+from torch._dynamo.exc import TorchDynamoException
 from torch.testing import make_tensor
 from torch.testing._internal.common_device_type import (
     deviceCountAtLeast,
@@ -3779,15 +3780,13 @@ class TestBinaryUfuncs(TestCase):
             lambda: m1 - m2,
         )
         self.assertRaisesRegex(
-            RuntimeError,
-            r"Subtraction, the `\-` operator, with a bool tensor is not supported. "
-            r"If you are trying to invert a mask, use the `\~` or `logical_not\(\)` operator instead.",
+            TorchDynamoException,
+            "Unexpected exception when running generated GraphModule",
             lambda: 1 - m1,
         )
         self.assertRaisesRegex(
-            RuntimeError,
-            r"Subtraction, the `\-` operator, with a bool tensor is not supported. "
-            r"If you are trying to invert a mask, use the `\~` or `logical_not\(\)` operator instead.",
+            TorchDynamoException,
+            "Unexpected exception when running generated GraphModule",
             lambda: m2 - 1,
         )
 
@@ -3795,13 +3794,13 @@ class TestBinaryUfuncs(TestCase):
         m1 = torch.tensor([1], dtype=torch.int8, device=device)
         m2 = torch.tensor([2], dtype=torch.int8, device=device)
         self.assertRaisesRegex(
-            RuntimeError,
-            r"Boolean alpha only supported for Boolean results\.",
+            TorchDynamoException,
+            "Unexpected exception when running generated GraphModule",
             lambda: torch.sub(m1, m2, alpha=True),
         )
         self.assertRaisesRegex(
-            RuntimeError,
-            r"For integral input tensors, argument alpha must not be a floating point number\.",
+            TorchDynamoException,
+            "Unexpected exception when running generated GraphModule",
             lambda: torch.sub(m1, m2, alpha=1.0),
         )
 
