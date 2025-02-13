@@ -38,8 +38,9 @@ if [[ "$BUILD_ENVIRONMENT" != *win-* ]]; then
             # explicitly
             echo "Skipping sccache server initialization, setting environment variables"
             export SCCACHE_IDLE_TIMEOUT=0
-            export SCCACHE_ERROR_LOG=~/sccache_error.log
-            export RUST_LOG=sccache::server=error
+            export SCCACHE_ERROR_LOG=/var/lib/jenkins/workspace/sccache_error.log
+            export RUST_LOG=sccache::server=debug
+            export SCCACHE_LOG=debug
         elif [[ "${BUILD_ENVIRONMENT}" == *rocm* ]]; then
             SCCACHE_ERROR_LOG=~/sccache_error.log SCCACHE_IDLE_TIMEOUT=0 sccache --start-server
         else
