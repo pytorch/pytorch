@@ -1348,6 +1348,9 @@ class TestPrologueFusion(TestCase):
             "max_epilogue_benchmarked_choices": 3,
         }
     )
+    @skipIfXpu(
+        msg="The fusion not happend because it do not speedup on XPU, see issue #146568"
+    )
     def test_pending_fusions_multiple(self):
         def multi_use(x, y):
             return (x @ x.T) * (y @ y.T)
@@ -1380,6 +1383,9 @@ class TestPrologueFusion(TestCase):
             "mixed_mm_choice": "default",
             "max_epilogue_benchmarked_choices": 3,
         }
+    )
+    @skipIfXpu(
+        msg="The fusion not happend because it do not speedup on XPU, see issue #146568"
     )
     def test_pending_fusion_pro_and_epi(self):
         def test_multiple_fusions(x):
