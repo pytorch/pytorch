@@ -1,4 +1,4 @@
-name: ppc64le-build
+name: ppc64le
 
 on:
   push:
@@ -26,10 +26,10 @@ jobs:
         uses: docker/setup-buildx-action@v2
       - name: Build Docker image for ppc64le
         run: |
-          docker build -f .github/workflows/Dockerfile.ppc64le -t pytorch-ppc64le:ubi9.3 .
+          docker build -f .ci\docker\manywheel\Dockerfile_ppc64le -t pytorch-ppc64le:ubi9.3 .
 
-  linux-ubi-9-3-cpu-ppc64le-build:
-    name: linux-ubi9-3-cpu-ppc64le
+  ppc64le-UBI-9-3-Build-and-Test:
+    name: ppc64le-UBI-9-3-Build-and-Test
     uses: ./.github/workflows/_linux-build.yml
     needs: linux-ppc64le-docker-image-build
     with:

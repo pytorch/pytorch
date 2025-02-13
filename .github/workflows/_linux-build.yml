@@ -119,6 +119,7 @@ jobs:
       # checkout. In other cases you should prefer a local checkout.
       - name: Checkout PyTorch
         uses: pytorch/pytorch/.github/actions/checkout-pytorch@main
+        if: inputs.build-environment != 'linux-ppc64le-binary-manywheel-ubi9'
         with:
           no-sudo: true
 
@@ -159,7 +160,6 @@ jobs:
 
       - name: Parse ref
         id: parse-ref
-        if: inputs.build-environment != 'linux-ppc64le-binary-manywheel-ubi9'
         run: .github/scripts/parse_ref.py
 
       - name: Get workflow job id
@@ -276,7 +276,7 @@ jobs:
           END_TIME=$(date +%s)
           echo "build_time=$((END_TIME - START_TIME))" >> "$GITHUB_OUTPUT"
 
-      - name: Run Docker container and execute build script
+      - name: Execute Build and Tests inside ppc64le Docker Container
         if: inputs.build-environment == 'linux-ppc64le-binary-manywheel-ubi9'
         run: |
             CONTAINER_NAME="temp_builder_${RUN_ID}"

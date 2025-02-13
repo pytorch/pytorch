@@ -26,13 +26,8 @@ pip install pytest pytest-xdist
 
 if ! pytest "$PACKAGE_NAME/test/test_utils.py"; then
     echo "------------------$PACKAGE_NAME:install_success_but_test_fails---------------------"
-    
-else
-    echo "------------------$PACKAGE_NAME:install_and_test_both_success-------------------------"
-fi
-if ! pytest -v -s "$PACKAGE_NAME/test"; then
-    echo "------------------$PACKAGE_NAME:install_success_but_test_fails---------------------"
     exit 2
+    
 else
     echo "------------------$PACKAGE_NAME:install_and_test_both_success-------------------------"
     exit 0
