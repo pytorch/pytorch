@@ -1230,6 +1230,14 @@ class CompilationMetrics:
 
             return ",".join(safe_str(item) for item in sorted(metric))
 
+        def collection_to_json_str(metric: Optional[Any]) -> Optional[str]:
+            if metric is None:
+                return None
+            try:
+                return json.dumps(list(metric))
+            except Exception:
+                return "<unknown>"
+
         # TODO: The following are legacy fields, populated from the fields that replace
         # them. Remove these when we decide we can really deprecate them.
         legacy_metrics = {
@@ -1268,6 +1276,9 @@ class CompilationMetrics:
         )
         all_metrics["inductor_fx_remote_cache_miss_keys"] = collection_to_str(
             all_metrics.get("inductor_fx_remote_cache_miss_keys")
+        )
+        all_metrics["triton_kernel_compile_times_us"] = collection_to_json_str(
+            all_metrics.get("triton_kernel_compile_times_us")
         )
         compile_id = all_metrics.get("compile_id")
         all_metrics["compile_id"] = str(compile_id) if compile_id else None
@@ -1328,7 +1339,6 @@ def add_compilation_metrics_to_chromium(c: CompilationMetrics) -> None:
         dynamo_time_before_restart_s=c.dynamo_time_before_restart_s,
         has_guarded_code=c.has_guarded_code,
         dynamo_config=c.dynamo_config,
-        triton_kernel_compile_times_us=c.triton_kernel_compile_times_us,
     )
 
 

@@ -3,8 +3,6 @@ from __future__ import annotations
 
 import atexit
 import functools
-import heapq
-import json
 import logging
 import multiprocessing
 import os
@@ -12,15 +10,15 @@ import sys
 from concurrent.futures import Future, ProcessPoolExecutor, ThreadPoolExecutor
 from concurrent.futures.process import BrokenProcessPool
 from functools import partial
-from time import time
+from time import time, time_ns
 from typing import Any, Callable, Optional, TYPE_CHECKING
 
 import torch
 from torch._dynamo.device_interface import get_registered_device_interfaces
 from torch._dynamo.utils import (
-    CompileEventLogger,
     counters,
     dynamo_timed,
+    get_metrics_context,
     set_feature_use,
 )
 from torch._inductor import config
@@ -184,30 +182,6 @@ class CompiledTritonKernels:
         CompiledTritonKernels._cache = {}
 
 
-class TopTimes:
-    """
-    Helper to record and log the top N most expensive async compilation times. (For large
-    models, logging timing for all kernels may be prohibitive).
-    """
-
-    def __init__(self, at_most=25):
-        self.at_most = at_most
-        self.heap = []
-
-    def add(self, name: str, elapsed: int) -> None:
-        # Push if we haven't reached the max size, else push and pop the smallest:
-        fn = heapq.heappush if len(self.heap) < self.at_most else heapq.heappushpop
-        fn(self.heap, (elapsed, name))
-
-    def __len__(self) -> int:
-        return len(self.heap)
-
-    def __str__(self) -> str:
-        return json.dumps(
-            [(name, elapsed) for elapsed, name in sorted(self.heap, reverse=True)]
-        )
-
-
 class AsyncCompile:
     def __init__(self) -> None:
         pass
@@ -354,11 +328,16 @@ class AsyncCompile:
                 log_pt2_compile_event=True,
                 dynamo_compile_column_us="triton_compile_time_us",
                 log_waitcounter=True,
-                metadata={"kernel_name": kernel_name},
             ):
+                start_ns = time_ns()
                 _set_triton_ptxas_path()
                 kernel = load_kernel()
                 kernel.precompile(warm_cache_only=False)
+                get_metrics_context().add_top_n(
+                    "triton_kernel_compile_times_us",
+                    kernel_name,
+                    (time_ns() - start_ns) // 1000,
+                )
                 return kernel
 
     def multi_kernel(self, *args, **kwargs) -> Any:
@@ -449,14 +428,19 @@ class AsyncCompile:
             delay=0,
         )
 
-        top_times = TopTimes()
+        metrics_context = get_metrics_context()
         for key, result in kernels.items():
             if config.verbose_progress and not isinstance(pbar, _Faketqdm):
                 pbar.set_postfix_str(key)
             try:
                 scope[key] = result.result()
                 if isinstance(result, LambdaFuture) and result.elapsed_us:
-                    top_times.add(key, result.elapsed_us)
+                    # Log the top Triton compilation times
+                    metrics_context.add_top_n(
+                        "triton_kernel_compile_times_us",
+                        key,
+                        result.elapsed_us,
+                    )
             except BrokenProcessPool as e:
                 raise RuntimeError(
                     "A compilation subprocess exited unexpectedly. This "
@@ -465,11 +449,6 @@ class AsyncCompile:
                     "to cause compilation to occur in the main process."
                 ) from e
             pbar.update(1)
-
-        if len(top_times) > 0:
-            CompileEventLogger.compilation_metric(
-                triton_kernel_compile_times_us=str(top_times)
-            )
 
 
 if (
