@@ -2639,6 +2639,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
             out.sum().backward()
 
     @supported_platform
+    @unittest.skipIf(SKIP_UT_ON_CPU, "Skip on CPU as not supported")
     def test_strided_backwards(self):
         shape = (1, 2, 4096, 64)
         Q = torch.randn(shape, requires_grad=True, device="cuda")
@@ -2718,6 +2719,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         )
 
     @supported_platform
+    @unittest.skipIf(SKIP_UT_ON_CPU, "Skip on CPU as not supported")
     @common_utils.parametrize("mode", ["eager", "inductor"])
     @common_utils.parametrize(
         "permute_order",
