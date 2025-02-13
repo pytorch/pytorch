@@ -1342,11 +1342,12 @@ class FrozenDataClassVariable(UserDefinedObjectVariable):
         args = []
         kwargs = {}
         for field in fields(self.value):
-            data = self.fields[field.name].as_python_constant()
-            if getattr(field, "kw_only", False):
-                kwargs[field.name] = data
-            elif field.init:
-                args.append(data)
+            if field.init:
+                data = self.fields[field.name].as_python_constant()
+                if getattr(field, "kw_only", False):
+                    kwargs[field.name] = data
+                else:
+                    args.append(data)
 
         return self.python_type()(*args, **kwargs)
 
