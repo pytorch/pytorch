@@ -85,19 +85,52 @@ class FlatApplyTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(result, f(*args, **kwargs))
 
     def test_mark_traceable_dynamo_graph(self):
-        @torch._dynamo.mark_traceable
-        def func(x, y, z):
+        class Point:
+            x: torch.Tensor
+            y: torch.Tensor
+
+            def __init__(self, x, y):
+                self.x = x
+                self.y = y
+
+        class PointTensor:
+            p: Point
+            t: torch.Tensor
+
+            def __init__(self, p, t):
+                self.p = p
+                self.t = t
+
+        torch.utils._pytree.register_pytree_node(
+            PointTensor,
+            lambda pt: ((pt.p, pt.t), ()),
+            lambda pt, _: PointTensor(pt[0], pt[1]),
+        )
+
+        torch.utils._pytree.register_pytree_node(
+            Point,
+            lambda p: ((p.x, p.y), ()),
+            lambda xy, _: Point(xy[0], xy[1]),
+        )
+
+        def trace_point(p):
             torch._dynamo.graph_break()
-            return x * y + z
+            return p.x * p.y
+
+        @torch._dynamo.mark_traceable
+        def trace_point_tensor(pt):
+            torch._dynamo.graph_break()
+            return pt.t + trace_point(pt.p)
 
         backend = EagerAndRecordGraphs()
 
         @torch.compile(fullgraph=True, backend=backend)
         def fn(x, y):
-            t0 = x + 1
-            t1 = func(x, y, t0)
-            t2 = t1 + y
-            return t2
+            p = Point(x, y)
+            t = x + y
+            pt = PointTensor(p, t)
+            res = trace_point_tensor(pt)
+            return res
 
         fn(torch.randn(10), torch.randn(10))
         self.assertExpectedInline(
@@ -108,14 +141,12 @@ class GraphModule(torch.nn.Module):
         l_x_ = L_x_
         l_y_ = L_y_
 
-        t0: "f32[10]" = l_x_ + 1
+        t: "f32[10]" = l_x_ + l_y_
 
-        func = self.func
-        func_in_spec = self.func_in_spec
-        t1: "f32[10]" = torch.ops.higher_order.flat_apply(func, func_in_spec, l_x_, l_y_, t0);  func = func_in_spec = l_x_ = t0 = None
-
-        t2: "f32[10]" = t1 + l_y_;  t1 = l_y_ = None
-        return (t2,)
+        trace_point_tensor = self.trace_point_tensor
+        trace_point_tensor_input_spec = self.trace_point_tensor_input_spec
+        res: "f32[10]" = torch.ops.higher_order.flat_apply(trace_point_tensor, trace_point_tensor_input_spec, l_x_, l_y_, t);  trace_point_tensor = trace_point_tensor_input_spec = l_x_ = l_y_ = t = None
+        return (res,)
 """,  # NOQA: B950
         )
 
