@@ -8,10 +8,6 @@ RUN dnf install -y \
     python3 python3-devel && \
     dnf clean all
 
-# Set up GCC toolset and compilers
-#ENV CC=/opt/rh/gcc-toolset-13/root/usr/bin/gcc
-#ENV CXX=/opt/rh/gcc-toolset-13/root/usr/bin/g++
-
 ENV PATH="/opt/rh/gcc-toolset-13/root/usr/bin:$PATH"
 ENV MANPATH="/opt/rh/gcc-toolset-13/root/usr/share/man"
 ENV INFOPATH="/opt/rh/gcc-toolset-13/root/usr/share/info"

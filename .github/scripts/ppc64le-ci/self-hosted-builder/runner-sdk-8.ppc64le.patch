@@ -1,0 +1,378 @@
+diff --git a/src/Directory.Build.props b/src/Directory.Build.props
+index 9c069b12..d26b0dc2 100644
+--- a/src/Directory.Build.props
++++ b/src/Directory.Build.props
+@@ -44,6 +44,12 @@
+   <PropertyGroup Condition="'$(BUILD_OS)' == 'Linux' AND '$(PackageRuntime)' == 'linux-arm64'">
+     <DefineConstants>$(DefineConstants);ARM64</DefineConstants>
+   </PropertyGroup>
++  <PropertyGroup Condition="'$(BUILD_OS)' == 'Linux' AND '$(PackageRuntime)' == 'linux-ppc64le'">
++    <DefineConstants>$(DefineConstants);PPC64LE</DefineConstants>
++  </PropertyGroup>
++  <PropertyGroup Condition="'$(BUILD_OS)' == 'Linux' AND '$(PackageRuntime)' == 'linux-s390x'">
++    <DefineConstants>$(DefineConstants);S390X</DefineConstants>
++  </PropertyGroup>
+ 
+   <!-- Set TRACE/DEBUG vars -->
+   <PropertyGroup>
+diff --git a/src/Misc/externals.sh b/src/Misc/externals.sh
+index 2a0db24a..7908b2f5 100755
+--- a/src/Misc/externals.sh
++++ b/src/Misc/externals.sh
+@@ -177,3 +177,11 @@ fi
+ if [[ "$PACKAGERUNTIME" == "linux-arm" ]]; then
+     acquireExternalTool "$NODE_URL/v${NODE20_VERSION}/node-v${NODE20_VERSION}-linux-armv7l.tar.gz" node20 fix_nested_dir
+ fi
++
++if [[ "$PACKAGERUNTIME" == "linux-ppc64le" ]]; then
++    acquireExternalTool "$NODE_URL/v${NODE20_VERSION}/node-v${NODE20_VERSION}-linux-ppc64le.tar.gz" node20 fix_nested_dir
++fi
++
++if [[ "$PACKAGERUNTIME" == "linux-s390x" ]]; then
++    acquireExternalTool "$NODE_URL/v${NODE20_VERSION}/node-v${NODE20_VERSION}-linux-s390x.tar.gz" node20 fix_nested_dir
++fi
+\ No newline at end of file
+diff --git a/src/Misc/layoutroot/config.sh b/src/Misc/layoutroot/config.sh
+index 14cc6bab..9b5b8e6f 100755
+--- a/src/Misc/layoutroot/config.sh
++++ b/src/Misc/layoutroot/config.sh
+@@ -20,25 +20,29 @@ then
+ 
+     message="Execute sudo ./bin/installdependencies.sh to install any missing Dotnet Core 6.0 dependencies."
+ 
+-    ldd ./bin/libcoreclr.so | grep 'not found'
+-    if [ $? -eq 0 ]; then
+-        echo "Dependencies is missing for Dotnet Core 6.0"
+-        echo $message
+-        exit 1
+-    fi
++    ARCH=`uname -m`
++    if [ "${ARCH}" != "s390x" -a "${ARCH}" != "ppc64le" ]
++    then
++        ldd ./bin/libcoreclr.so | grep 'not found'
++        if [ $? -eq 0 ]; then
++            echo "Dependencies is missing for Dotnet Core 6.0"
++            echo $message
++            exit 1
++        fi
+ 
+-    ldd ./bin/libSystem.Security.Cryptography.Native.OpenSsl.so | grep 'not found'
+-    if [ $? -eq 0 ]; then
+-        echo "Dependencies is missing for Dotnet Core 6.0"
+-        echo $message
+-        exit 1
+-    fi
++        ldd ./bin/libSystem.Security.Cryptography.Native.OpenSsl.so | grep 'not found'
++        if [ $? -eq 0 ]; then
++            echo "Dependencies is missing for Dotnet Core 6.0"
++            echo $message
++            exit 1
++        fi
+ 
+-    ldd ./bin/libSystem.IO.Compression.Native.so | grep 'not found'
+-    if [ $? -eq 0 ]; then
+-        echo "Dependencies is missing for Dotnet Core 6.0"
+-        echo $message
+-        exit 1
++        ldd ./bin/libSystem.IO.Compression.Native.so | grep 'not found'
++        if [ $? -eq 0 ]; then
++            echo "Dependencies is missing for Dotnet Core 6.0"
++            echo $message
++            exit 1
++        fi
+     fi
+ 
+     if ! [ -x "$(command -v ldconfig)" ]; then
+diff --git a/src/Runner.Common/Constants.cs b/src/Runner.Common/Constants.cs
+index 2c20d1b1..63957a5d 100644
+--- a/src/Runner.Common/Constants.cs
++++ b/src/Runner.Common/Constants.cs
+@@ -58,7 +58,9 @@ namespace GitHub.Runner.Common
+             X86,
+             X64,
+             Arm,
+-            Arm64
++            Arm64,
++            Ppc64le,
++            S390x
+         }
+ 
+         public static class Runner
+@@ -81,6 +83,10 @@ namespace GitHub.Runner.Common
+             public static readonly Architecture PlatformArchitecture = Architecture.Arm;
+ #elif ARM64
+             public static readonly Architecture PlatformArchitecture = Architecture.Arm64;
++#elif PPC64LE
++            public static readonly Architecture PlatformArchitecture = Architecture.Ppc64le;
++#elif S390X
++            public static readonly Architecture PlatformArchitecture = Architecture.S390x;
+ #else
+             public static readonly Architecture PlatformArchitecture = Architecture.X64;
+ #endif
+diff --git a/src/Runner.Common/Runner.Common.csproj b/src/Runner.Common/Runner.Common.csproj
+index 6c463562..25fea7c5 100644
+--- a/src/Runner.Common/Runner.Common.csproj
++++ b/src/Runner.Common/Runner.Common.csproj
+@@ -4,6 +4,9 @@
+     <TargetFramework>net8.0</TargetFramework>
+     <OutputType>Library</OutputType>
+     <RuntimeIdentifiers>win-x64;win-x86;linux-x64;linux-arm64;linux-arm;osx-x64;osx-arm64;win-arm64</RuntimeIdentifiers>
++    <SelfContained>true</SelfContained>
++    <SelfContained Condition="'$(PackageRuntime)' == 'linux-s390x'">false</SelfContained>
++    <SelfContained Condition="'$(PackageRuntime)' == 'linux-ppc64le'">false</SelfContained>
+     <TargetLatestRuntimePatch>true</TargetLatestRuntimePatch>
+     <NoWarn>NU1701;NU1603;SYSLIB0050;SYSLIB0051</NoWarn>
+     <Version>$(Version)</Version>
+diff --git a/src/Runner.Common/Util/VarUtil.cs b/src/Runner.Common/Util/VarUtil.cs
+index 97273a1a..78f78701 100644
+--- a/src/Runner.Common/Util/VarUtil.cs
++++ b/src/Runner.Common/Util/VarUtil.cs
+@@ -53,6 +53,10 @@ namespace GitHub.Runner.Common.Util
+                         return "ARM";
+                     case Constants.Architecture.Arm64:
+                         return "ARM64";
++                    case Constants.Architecture.Ppc64le:
++                        return "PPC64LE";
++                    case Constants.Architecture.S390x:
++                        return "S390X";
+                     default:
+                         throw new NotSupportedException(); // Should never reach here.
+                 }
+diff --git a/src/Runner.Listener/Runner.Listener.csproj b/src/Runner.Listener/Runner.Listener.csproj
+index afd52812..bce46ad9 100644
+--- a/src/Runner.Listener/Runner.Listener.csproj
++++ b/src/Runner.Listener/Runner.Listener.csproj
+@@ -5,6 +5,8 @@
+     <OutputType>Exe</OutputType>
+     <RuntimeIdentifiers>win-x64;win-x86;linux-x64;linux-arm64;linux-arm;osx-x64;osx-arm64;win-arm64</RuntimeIdentifiers>
+     <SelfContained>true</SelfContained>
++    <SelfContained Condition="'$(PackageRuntime)' == 'linux-s390x'">false</SelfContained>
++    <SelfContained Condition="'$(PackageRuntime)' == 'linux-ppc64le'">false</SelfContained>
+     <TargetLatestRuntimePatch>true</TargetLatestRuntimePatch>
+     <NoWarn>NU1701;NU1603;SYSLIB0050;SYSLIB0051</NoWarn>
+     <Version>$(Version)</Version>
+diff --git a/src/Runner.PluginHost/Runner.PluginHost.csproj b/src/Runner.PluginHost/Runner.PluginHost.csproj
+index 81a8d2e4..8e54320f 100644
+--- a/src/Runner.PluginHost/Runner.PluginHost.csproj
++++ b/src/Runner.PluginHost/Runner.PluginHost.csproj
+@@ -5,6 +5,8 @@
+     <OutputType>Exe</OutputType>
+     <RuntimeIdentifiers>win-x64;win-x86;linux-x64;linux-arm64;linux-arm;osx-x64;osx-arm64;win-arm64</RuntimeIdentifiers>
+     <SelfContained>true</SelfContained>
++    <SelfContained Condition="'$(PackageRuntime)' == 'linux-s390x'">false</SelfContained>
++    <SelfContained Condition="'$(PackageRuntime)' == 'linux-ppc64le'">false</SelfContained>
+     <TargetLatestRuntimePatch>true</TargetLatestRuntimePatch>
+     <NoWarn>NU1701;NU1603;SYSLIB0050;SYSLIB0051</NoWarn>
+     <Version>$(Version)</Version>
+diff --git a/src/Runner.Plugins/Runner.Plugins.csproj b/src/Runner.Plugins/Runner.Plugins.csproj
+index a786cf1c..a5a839c5 100644
+--- a/src/Runner.Plugins/Runner.Plugins.csproj
++++ b/src/Runner.Plugins/Runner.Plugins.csproj
+@@ -5,6 +5,8 @@
+     <OutputType>Library</OutputType>
+     <RuntimeIdentifiers>win-x64;win-x86;linux-x64;linux-arm64;linux-arm;osx-x64;osx-arm64;win-arm64</RuntimeIdentifiers>
+     <SelfContained>true</SelfContained>
++    <SelfContained Condition="'$(PackageRuntime)' == 'linux-s390x'">false</SelfContained>
++    <SelfContained Condition="'$(PackageRuntime)' == 'linux-ppc64le'">false</SelfContained>
+     <TargetLatestRuntimePatch>true</TargetLatestRuntimePatch>
+     <NoWarn>NU1701;NU1603;SYSLIB0050;SYSLIB0051</NoWarn>
+     <Version>$(Version)</Version>
+diff --git a/src/Runner.Sdk/Runner.Sdk.csproj b/src/Runner.Sdk/Runner.Sdk.csproj
+index 55dbf126..190b306f 100644
+--- a/src/Runner.Sdk/Runner.Sdk.csproj
++++ b/src/Runner.Sdk/Runner.Sdk.csproj
+@@ -5,6 +5,8 @@
+     <OutputType>Library</OutputType>
+     <RuntimeIdentifiers>win-x64;win-x86;linux-x64;linux-arm64;linux-arm;osx-x64;osx-arm64;win-arm64</RuntimeIdentifiers>
+     <SelfContained>true</SelfContained>
++    <SelfContained Condition="'$(PackageRuntime)' == 'linux-s390x'">false</SelfContained>
++    <SelfContained Condition="'$(PackageRuntime)' == 'linux-ppc64le'">false</SelfContained>
+     <TargetLatestRuntimePatch>true</TargetLatestRuntimePatch>
+     <NoWarn>NU1701;NU1603;SYSLIB0050;SYSLIB0051</NoWarn>
+     <Version>$(Version)</Version>
+diff --git a/src/Runner.Worker/Runner.Worker.csproj b/src/Runner.Worker/Runner.Worker.csproj
+index 53c1610d..9e98b961 100644
+--- a/src/Runner.Worker/Runner.Worker.csproj
++++ b/src/Runner.Worker/Runner.Worker.csproj
+@@ -5,6 +5,8 @@
+     <OutputType>Exe</OutputType>
+     <RuntimeIdentifiers>win-x64;win-x86;linux-x64;linux-arm64;linux-arm;osx-x64;osx-arm64;win-arm64</RuntimeIdentifiers>
+     <SelfContained>true</SelfContained>
++    <SelfContained Condition="'$(PackageRuntime)' == 'linux-s390x'">false</SelfContained>
++    <SelfContained Condition="'$(PackageRuntime)' == 'linux-ppc64le'">false</SelfContained>
+     <TargetLatestRuntimePatch>true</TargetLatestRuntimePatch>
+     <NoWarn>NU1701;NU1603;SYSLIB0050;SYSLIB0051</NoWarn>
+     <Version>$(Version)</Version>
+diff --git a/src/Sdk/Sdk.csproj b/src/Sdk/Sdk.csproj
+index 5f2c3fd5..bd0f7754 100644
+--- a/src/Sdk/Sdk.csproj
++++ b/src/Sdk/Sdk.csproj
+@@ -4,7 +4,9 @@
+         <TargetFramework>net8.0</TargetFramework>
+         <OutputType>Library</OutputType>
+         <RuntimeIdentifiers>win-x64;win-x86;linux-x64;linux-arm64;linux-arm;osx-x64;osx-arm64;win-arm64</RuntimeIdentifiers>
+-        <!-- <SelfContained>true</SelfContained> -->
++        <SelfContained>true</SelfContained>
++        <SelfContained Condition="'$(PackageRuntime)' == 'linux-s390x'">false</SelfContained>
++        <SelfContained Condition="'$(PackageRuntime)' == 'linux-ppc64le'">false</SelfContained>
+         <TargetLatestRuntimePatch>true</TargetLatestRuntimePatch>
+         <NoWarn>NU1701;NU1603;SYSLIB0050;SYSLIB0051</NoWarn>
+         <Version>$(Version)</Version>
+diff --git a/src/Test/L0/ConstantGenerationL0.cs b/src/Test/L0/ConstantGenerationL0.cs
+index f3c1b8f9..9a1c5aa0 100644
+--- a/src/Test/L0/ConstantGenerationL0.cs
++++ b/src/Test/L0/ConstantGenerationL0.cs
+@@ -20,6 +20,8 @@ namespace GitHub.Runner.Common.Tests
+                 "linux-x64",
+                 "linux-arm",
+                 "linux-arm64",
++                "linux-ppc64le",
++                "linux-s390x",
+                 "osx-x64",
+                 "osx-arm64"
+             };
+diff --git a/src/Test/L0/Listener/SelfUpdaterL0.cs b/src/Test/L0/Listener/SelfUpdaterL0.cs
+index 26ba65e7..f4ed8429 100644
+--- a/src/Test/L0/Listener/SelfUpdaterL0.cs
++++ b/src/Test/L0/Listener/SelfUpdaterL0.cs
+@@ -1,4 +1,4 @@
+-﻿#if !(OS_WINDOWS && ARM64)
++﻿#if !(OS_WINDOWS && ARM64) && !PPC64LE && !S390X
+ using System;
+ using System.Collections.Generic;
+ using System.IO;
+@@ -16,6 +16,7 @@ using Xunit;
+ 
+ namespace GitHub.Runner.Common.Tests.Listener
+ {
++    #if !S390X // Self-update is not currently supported on PPC64LE
+     public sealed class SelfUpdaterL0
+     {
+         private Mock<IRunnerServer> _runnerServer;
+@@ -291,5 +292,6 @@ namespace GitHub.Runner.Common.Tests.Listener
+             }
+         }
+     }
++    #endif
+ }
+ #endif
+diff --git a/src/Test/L0/Listener/SelfUpdaterV2L0.cs b/src/Test/L0/Listener/SelfUpdaterV2L0.cs
+index 5115a6bb..30af481b 100644
+--- a/src/Test/L0/Listener/SelfUpdaterV2L0.cs
++++ b/src/Test/L0/Listener/SelfUpdaterV2L0.cs
+@@ -1,4 +1,4 @@
+-﻿#if !(OS_WINDOWS && ARM64)
++﻿#if !(OS_WINDOWS && ARM64) && !PPC64LE && !S390X
+ using System;
+ using System.Collections.Generic;
+ using System.IO;
+diff --git a/src/Test/L0/Worker/StepHostL0.cs b/src/Test/L0/Worker/StepHostL0.cs
+index 47a5d334..6dbdfbb8 100644
+--- a/src/Test/L0/Worker/StepHostL0.cs
++++ b/src/Test/L0/Worker/StepHostL0.cs
+@@ -31,7 +31,7 @@ namespace GitHub.Runner.Common.Tests.Worker
+             return hc;
+         }
+ 
+-#if OS_LINUX
++#if OS_LINUX && !PPC64LE && !S390X
+         [Fact]
+         [Trait("Level", "L0")]
+         [Trait("Category", "Worker")]
+diff --git a/src/Test/Test.csproj b/src/Test/Test.csproj
+index aebe2420..90e52e00 100644
+--- a/src/Test/Test.csproj
++++ b/src/Test/Test.csproj
+@@ -2,6 +2,9 @@
+     <PropertyGroup>
+         <TargetFramework>net8.0</TargetFramework>
+         <RuntimeIdentifiers>win-x64;win-x86;linux-x64;linux-arm64;linux-arm;osx-x64;osx-arm64;win-arm64</RuntimeIdentifiers>
++        <SelfContained>true</SelfContained>
++        <SelfContained Condition="'$(PackageRuntime)' == 'linux-s390x'">false</SelfContained>
++        <SelfContained Condition="'$(PackageRuntime)' == 'linux-ppc64le'">false</SelfContained>
+         <TargetLatestRuntimePatch>true</TargetLatestRuntimePatch>
+         <NoWarn>NU1701;NU1603;NU1603;xUnit2013;SYSLIB0050;SYSLIB0051</NoWarn>
+     </PropertyGroup>
+diff --git a/src/dev.sh b/src/dev.sh
+index 8e233665..76bf0e00 100755
+--- a/src/dev.sh
++++ b/src/dev.sh
+@@ -54,6 +54,8 @@ elif [[ "$CURRENT_PLATFORM" == 'linux' ]]; then
+         case $CPU_NAME in
+             armv7l) RUNTIME_ID="linux-arm";;
+             aarch64) RUNTIME_ID="linux-arm64";;
++            ppc64le) RUNTIME_ID="linux-ppc64le";;
++            s390x) RUNTIME_ID="linux-s390x";;
+         esac
+     fi
+ elif [[ "$CURRENT_PLATFORM" == 'darwin' ]]; then
+@@ -80,7 +82,7 @@ if [[ "$CURRENT_PLATFORM" == 'windows' ]]; then
+         exit 1
+     fi
+ elif [[ "$CURRENT_PLATFORM" == 'linux' ]]; then
+-    if [[ ("$RUNTIME_ID" != 'linux-x64') && ("$RUNTIME_ID" != 'linux-x86') && ("$RUNTIME_ID" != 'linux-arm64') && ("$RUNTIME_ID" != 'linux-arm') ]]; then
++    if [[ ("$RUNTIME_ID" != 'linux-x64') && ("$RUNTIME_ID" != 'linux-x86') && ("$RUNTIME_ID" != 'linux-arm64') && ("$RUNTIME_ID" != 'linux-arm')  && ("$RUNTIME_ID" != 'linux-ppc64le') && ("$RUNTIME_ID" != 'linux-s390x') ]]; then
+        echo "Failed: Can't build $RUNTIME_ID package $CURRENT_PLATFORM" >&2
+        exit 1
+     fi
+@@ -143,6 +145,7 @@ function layout ()
+ 
+     heading "Setup externals folder for $RUNTIME_ID runner's layout"
+     bash ./Misc/externals.sh $RUNTIME_ID || checkRC externals.sh
++
+ }
+ 
+ function runtest ()
+@@ -199,8 +202,7 @@ function package ()
+     popd > /dev/null
+ }
+ 
+-# Install .NET SDK
+-if [[ (! -d "${DOTNETSDK_INSTALLDIR}") || (! -e "${DOTNETSDK_INSTALLDIR}/.${DOTNETSDK_VERSION}") || (! -e "${DOTNETSDK_INSTALLDIR}/dotnet") ]]; then
++if [[ "${RUNTIME_ID}" != "linux-ppc64le" && "${RUNTIME_ID}" != "linux-s390x" && ((! -d "${DOTNETSDK_INSTALLDIR}") || (! -e "${DOTNETSDK_INSTALLDIR}/.${DOTNETSDK_VERSION}") || (! -e "${DOTNETSDK_INSTALLDIR}/dotnet")) ]]; then
+ 
+     # Download dotnet SDK to ../_dotnetsdk directory
+     heading "Ensure Dotnet SDK"
+@@ -225,8 +227,10 @@ if [[ (! -d "${DOTNETSDK_INSTALLDIR}") || (! -e "${DOTNETSDK_INSTALLDIR}/.${DOTN
+     echo "${DOTNETSDK_VERSION}" > "${DOTNETSDK_INSTALLDIR}/.${DOTNETSDK_VERSION}"
+ fi
+ 
+-echo "Prepend ${DOTNETSDK_INSTALLDIR} to %PATH%"
+-export PATH=${DOTNETSDK_INSTALLDIR}:$PATH
++if [[ -d "${DOTNETSDK_INSTALLDIR}" ]]; then
++    echo "Prepend ${DOTNETSDK_INSTALLDIR} to %PATH%"
++    export PATH=${DOTNETSDK_INSTALLDIR}:$PATH
++fi
+ 
+ heading "Dotnet SDK Version"
+ dotnet --version
+diff --git a/src/dir.proj b/src/dir.proj
+index 056a312e..1f6bdb07 100644
+--- a/src/dir.proj
++++ b/src/dir.proj
+@@ -41,13 +41,22 @@
+     </ItemGroup>
+ 
+     <Target Name="Build" DependsOnTargets="GenerateConstant">
+-        <MSBuild Targets="Restore" Projects="@(ProjectFiles)" StopOnFirstFailure="true" />
+-        <MSBuild Targets="Publish" Projects="@(ProjectFiles)" BuildInParallel="false" StopOnFirstFailure="true" Properties="Configuration=$(BUILDCONFIG);PackageRuntime=$(PackageRuntime);Version=$(RunnerVersion);RuntimeIdentifier=$(PackageRuntime);PublishDir=$(MSBuildProjectDirectory)/../_layout/bin" />
++        <PropertyGroup>
++            <!-- Normally we want to publish a self-contained app for $(PackageRuntime) -->
++            <PublishRuntimeIdentifier>RuntimeIdentifier=$(PackageRuntime)</PublishRuntimeIdentifier>
++            <!-- However, on ppc64le/s390x there are no apphost or runtime packages on nuget.org, so self-contained publishing is not supported.
++                 Perform a non-self-contained publish using the current runtime identifier instead.
++                 In addition, when not using an explicit runtime identifier, the SDK will copy runtime assets from dependent packages;
++                 as this would confuse the expected layout, disable that behavior as well.  -->
++            <PublishRuntimeIdentifier Condition="'$(PackageRuntime)' == 'linux-ppc64le' Or '$(PackageRuntime)' == 'linux-s390x'">SelfContained=false;CopyLocalRuntimeTargetAssets=false</PublishRuntimeIdentifier>
++        </PropertyGroup>
++        <MSBuild Targets="Restore" Projects="@(ProjectFiles)" StopOnFirstFailure="true" Properties="$(PublishRuntimeIdentifier)" />
++        <MSBuild Targets="Publish" Projects="@(ProjectFiles)" BuildInParallel="false" StopOnFirstFailure="true" Properties="Configuration=$(BUILDCONFIG);PackageRuntime=$(PackageRuntime);Version=$(RunnerVersion);$(PublishRuntimeIdentifier);PublishDir=$(MSBuildProjectDirectory)/../_layout/bin" />
+         <Exec Command="%22$(DesktopMSBuild)%22 Runner.Service/Windows/RunnerService.csproj /p:Configuration=$(BUILDCONFIG) /p:PackageRuntime=$(PackageRuntime) /p:OutputPath=%22$(MSBuildProjectDirectory)/../_layout/bin%22" ConsoleToMSBuild="true" Condition="'$(PackageRuntime)' == 'win-x64' Or '$(PackageRuntime)' == 'win-x86' Or '$(PackageRuntime)' == 'win-arm64'" />
+     </Target>
+ 
+     <Target Name="Test" DependsOnTargets="GenerateConstant">
+-        <Exec Command="dotnet build Test/Test.csproj -c $(BUILDCONFIG) /p:PackageRuntime=$(PackageRuntime)" ConsoleToMSBuild="true" />
++        <Exec Command="dotnet build Test/Test.csproj -c $(BUILDCONFIG) /p:PackageRuntime=$(PackageRuntime) /p:SelfContained=false /p:CopyLocalRuntimeTargetAssets=false" ConsoleToMSBuild="true" />
+         <Exec Command="dotnet test Test/Test.csproj -c $(BUILDCONFIG) --no-build --logger:trx" ConsoleToMSBuild="true" />
+     </Target>
+ 
