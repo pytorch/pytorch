@@ -2817,6 +2817,10 @@ class Scheduler:
                 return False
 
             def benchmark_when_ready() -> bool:
+                from torch._inductor.runtime.triton_heuristics import (
+                    NoTritonConfigsError,
+                )
+
                 min_ms_fused = float("inf")
                 ms_fused_choice = None
 
@@ -2826,7 +2830,7 @@ class Scheduler:
                     try:
                         if future is not None:
                             future.result()
-                    except CompilationError:
+                    except (NoTritonConfigsError, CompilationError):
                         continue
                     with multi_node.swap_as_triton_caller(choice):
                         ms_fused, path = self.benchmark_codegened_module(
@@ -2855,6 +2859,10 @@ class Scheduler:
             future_and_mod_l1_fused = compile_kernel(node_list_fused)
 
             def benchmark_when_ready() -> bool:
+                from torch._inductor.runtime.triton_heuristics import (
+                    NoTritonConfigsError,
+                )
+
                 try:
                     # Wait for all compilations to complete
                     for fut in (
@@ -2907,6 +2915,9 @@ class Scheduler:
                         )
 
                     return ms_fused < ms1 + ms2
+
+                except NoTritonConfigsError:
+                    return False
 
                 except CompilationError as e:
                     if "Loop-carried variable" in str(e):
@@ -3420,7 +3431,9 @@ class Scheduler:
             all(low_prec_fp(buf_name) for buf_name in prologue_node.get_buffer_names())
             and not prologue_node.can_codegen_without_upcasts()
         ):
-            why("prologue fusion with upcasts is not profitable")
+            why(
+                "prologue fusion for low prec mms that need to be codegen'd in fp32 is not profitable"
+            )
             return False
 
         read_bytes = prologue_node.get_read_buffer_sizes()
