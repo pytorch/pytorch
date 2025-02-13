@@ -159,7 +159,6 @@ class TestSDPAPatternRewriterTemplate(TestCase):
                     check_train=False,
                 )
 
-    @skipIfRocm  # https://github.com/pytorch/pytorch/issues/146848
     def _test_insignificant_strides(self):
         f32 = torch.float32
 
