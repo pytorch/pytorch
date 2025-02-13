@@ -51,7 +51,7 @@ from abc import ABC, abstractmethod
 from collections import defaultdict
 from collections.abc import Collection, Generator, Iterable, Mapping, Sequence
 from pathlib import Path
-from typing import Any, Callable, cast, NoReturn, Optional, Protocol, TypeVar, Union
+from typing import Any, Callable, NoReturn, Optional, Protocol, TypeVar, Union
 from typing_extensions import Self, TypeIs
 
 import torch
@@ -1124,8 +1124,8 @@ class ReplacementPatternEntry(PatternEntry):
                     queue.extend(arg.all_input_nodes)
 
         with graph.inserting_before(last_node):
-            replacement_module = cast(torch.fx.GraphModule, replacement_graph)
-            replacement = Replacer(replacement_module).run(*args)
+            assert isinstance(replacement_graph, torch.fx.GraphModule)
+            replacement = Replacer(replacement_graph).run(*args)
             if isinstance(replacement, torch.fx.Node):
                 replacement = [replacement]
 
@@ -1750,7 +1750,8 @@ def is_mutation_op(node: torch.fx.Node) -> bool:
         if _mutation_op_re.search(node.target.__name__):
             return True
     elif node.op == "call_method":
-        if _mutation_op_re.search(cast(str, node.target)):
+        assert isinstance(node.target, str)
+        if _mutation_op_re.search(node.target):
             return True
     return node.kwargs.get("out") is not None
 
@@ -2162,5 +2163,6 @@ def extract_target(node: torch.fx.Node) -> torch.fx.node.Target:
      as a function.
     """
     if node.op == "call_module":
-        return _get_attr(node.graph.owning_module, cast(str, node.target)).__class__
+        assert isinstance(node.target, str)
+        return _get_attr(node.graph.owning_module, node.target).__class__
     return node.target
