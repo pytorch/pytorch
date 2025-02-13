@@ -1922,7 +1922,6 @@ class NodeUser:
 
 
 _post_grad_graph_counter = itertools.count()
-_graph_partition_counter = itertools.count()
 
 
 class Scheduler:
@@ -1938,6 +1937,7 @@ class Scheduler:
         V.graph.scheduler = self
         self.backends: dict[torch.device, BaseScheduling] = {}
         self.post_grad_graph_id = next(_post_grad_graph_counter)
+        self._graph_partition_counter = itertools.count()
 
         self.completed_operations = OrderedSet[str]()
         self.available_buffer_names = OrderedSet(
@@ -3997,6 +3997,7 @@ class Scheduler:
 
     def _codegen_partitions(self) -> None:
         partitions, inputs, outputs = self.graph_partition()
+
         for partition, input, output in zip(partitions, inputs, outputs):
             assert (
                 len(partition) >= 1
@@ -4004,7 +4005,7 @@ class Scheduler:
             parent_wrapper_code = (
                 V.graph.wrapper_code
             )  # TODO: use V.set_graph_handler instead
-            graph_partition_id = next(_graph_partition_counter)
+            graph_partition_id = next(self._graph_partition_counter)
             partition_name = f"partition_{graph_partition_id}"
             V.graph.init_wrapper_code(
                 is_subgraph=True,
@@ -4029,8 +4030,7 @@ class Scheduler:
             #           like `buf2 = subgraph1(arg0)` which will appear in `def call`.
             #           This is done in codegen_partition_call().
 
-        # counts recursively
-        num_partitions = next(_graph_partition_counter)
+        num_partitions = next(self._graph_partition_counter)
         V.graph.wrapper_code.codegen_subgraph_lists(num_partitions)
 
     def _codegen(self, nodes: List[BaseSchedulerNode]) -> None:
