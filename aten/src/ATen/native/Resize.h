@@ -6,6 +6,7 @@
 #include <ATen/TensorUtils.h>
 
 #include <c10/core/CPUAllocator.h>
+#include <c10/util/safe_numerics.h>
 
 #include <utility>
 
@@ -87,14 +88,26 @@ inline void checkInBoundsForStorage(
     const Storage& new_storage) {
   T storage_size_bytes =
       at::detail::computeStorageNbytes(size, stride, data_type.itemsize());
-  T storage_offset_bytes = storage_offset * data_type.itemsize();
+  T storage_offset_bytes;
+  T storage_offset_bytes = c10::mul_overflows(storage_offset, data_type.itemsize(), &storage_offset_bytes);
+
+  TORCH_CHECK(!storage_offset_bytes,
+              "Storage offset byte calculation overflowed with offset=", storage_offset);
+
   if (storage_size_bytes == 0) {
     // NB: (a tensor with arbitrary 0 dims)'s storage can have any numel.
     return;
   }
   T new_storage_size_bytes = maybe_convert_symint<T>(new_storage.sym_nbytes());
+
+  T sum_size;
+  bool overflowed = c10::add_overflows(storage_size_bytes, storage_offset_bytes, &sum_size);
+
+  TORCH_CHECK(!overflowed,
+              "Total storage size calculation overflowed with offset=", storage_offset);
+
   TORCH_CHECK(
-      storage_size_bytes + storage_offset_bytes <= new_storage_size_bytes,
+      sum_size <= new_storage_size_bytes,
       "setStorage: sizes ",
       size,
       ", strides ",
@@ -160,6 +173,8 @@ inline void setStrided(
                 "as_strided: Negative strides are not supported at the moment, "
                 "got strides: ", stride);
   }
+
+  
 
   auto* self_ = self.unsafeGetTensorImpl();
   checkInBoundsForStorage(
