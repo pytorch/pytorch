@@ -420,8 +420,9 @@ Attempted to call function marked as skipped
 """,
         )
 
-    @unittest.skipIf(IS_FBCODE, "inline cpp_extension doesn't work in fbcode")
     @scoped_load_inline
+    @torch._dynamo.config.patch(inline_inbuilt_nn_modules=False)
+    @unittest.skipIf(IS_FBCODE, "inline cpp_extension doesn't work in fbcode")
     def test_cpp_extension_recommends_custom_ops(self, load_inline):
         cpp_source = """
         #include <torch/extension.h>
