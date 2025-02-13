@@ -1003,6 +1003,9 @@ class NestedUserFunctionVariable(BaseUserFunctionVariable):
     def get_code(self):
         return self.code.as_python_constant()
 
+    def python_type(self):
+        return types.FunctionType
+
     def get_function(self):
         if self.closure:
             raise NotImplementedError
