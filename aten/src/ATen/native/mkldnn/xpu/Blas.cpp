@@ -180,6 +180,7 @@ Tensor mv(const Tensor& self, const Tensor& vec) {
 }
 
 // result = beta * input + alpha * (batch1 @ batch2)
+//                  binary  eltwise
 Tensor& baddbmm_out(
     const Tensor& input,
     const Tensor& batch1,
@@ -521,4 +522,50 @@ TORCH_IMPL_FUNC(addmv_out_xpu)
   xpu::addmv_out(self, mat, vec, beta, alpha, const_cast<Tensor&>(result));
 }
 
+Tensor _weight_int4pack_mm_xpu(
+    const Tensor& A,
+    const Tensor& B,
+    int64_t qGroupSize,
+    const Tensor& qScale,
+    const Tensor& qZeros) {
+  auto M = A.size(0); // M
+  auto N = B.size(0); // N1=LCM(N, K)
+  TORCH_CHECK(
+      A.dtype() == kBFloat16 || A.dtype() == kHalf || A.dtype() == kFloat,
+      __func__,
+      " : expect A to be either 32-bit or 16-bit float tensor.");
+  TORCH_CHECK(A.is_contiguous(), __func__, " : expect A to be contiguous.");
+  TORCH_CHECK(A.dim() == 2, __func__, " : expect A to be 2D tensor.");
+
+  TORCH_CHECK(B.dtype() == kInt, __func__, " : expect B to be int32 tensor.");
+  TORCH_CHECK(B.dim() == 2, __func__, " : expect B to 2d tensor.");
+
+  TORCH_CHECK(
+      qGroupSize == 32 || qGroupSize == 64 || qGroupSize == 128 ||
+          qGroupSize == 256,
+      __func__,
+      ": expect qGroupSize to be 32, 64, 128 or 256, got ",
+      qGroupSize);
+
+  TORCH_CHECK(
+      qScale.dim() == 2 && qScale.size(1) == N,
+      __func__,
+      ": expect qScale to be 2d tensor with sizes [:, ",
+      N,
+      "]");
+  TORCH_CHECK(
+      qZeros.dim() == 2 && qZeros.size(1) == N,
+      __func__,
+      ": expect qZeros to be 2d tensor with sizes [:, ",
+      N,
+      "]");
+
+  auto C = at::empty({M, N}, A.options());
+
+  // qscale:[K/qGroupSize, N]
+  // qzp:[K/qGroupSize, N]
+  woq_matmul_int4(C, A, B, qScale, qZeros, qGroupSize, onednn::Attr());
+
+  return C;
+}
 } // namespace at::native
