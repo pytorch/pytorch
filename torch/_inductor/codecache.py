@@ -3228,10 +3228,19 @@ class CodeCacheFuture:
 
 class LambdaFuture(CodeCacheFuture):
     def __init__(
-        self, result_fn: Callable[..., Any], future: Optional[Future[Any]] = None
+        self,
+        result_fn: Callable[..., Any],
+        future: Optional[Future[Any]] = None,
+        timed: bool = False,
     ) -> None:
         self.result_fn = result_fn
         self.future = future
+        self.timed = timed
+        self.elapsed_us: Optional[int] = None
 
     def result(self) -> Callable[..., Any]:  # type: ignore[override]
-        return self.result_fn()
+        res = self.result_fn()
+        if self.timed:
+            assert isinstance(res, tuple)
+            res, self.elapsed_us = res
+        return res
